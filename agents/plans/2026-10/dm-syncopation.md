@@ -510,6 +510,127 @@ synco disabled and compare its primary publication population with the
 controller's combined-publication population over overlapping windows, using a
 rebuilt app and reader.
 
+### 2026-10-21 combiner trace measurements
+
+The user authorized building measurements of dmcomb behavior, with possible
+operator configuration changes. The 21:54 UTC comparison found approximately
+3.4–4.2 us primary-publication jitter versus 5.6–6.8 us combined-publication
+jitter over heavily overlapping windows. This motivates measuring the
+intervening execution path rather than changing timing bounds from marginal
+statistics.
+
+Use the existing MILK/ImageStreamIO process trace through an independent combined
+monitor in dmSyncopation. No cacao/milk source or instrument configuration is
+changed. Source inspection used the local `milk-xwcl` checkout:
+
+- `plugins/cacao-src/AOloopControl_DM/AOloopControl_DM_comb.c` checks channel
+  counters on each iteration, optionally updates astrogrid, sums channels and
+  publishes through `processinfo_update_output_stream`.
+- `src/CommandLineInterface/CLIcore/CLIcore_utils.h` performs wait then execution
+  start before the body; `processinfo_exec_start.c` refreshes the start timestamp
+  only with processinfo timing enabled.
+- `processinfo_update_output_stream.c` copies an optional named trigger's trace,
+  records iteration start/update, then calls ImageStreamIO publication. Its
+  trigger counter is sampled at output update, not captured at consumption.
+  The inspected implementation does not correctly populate trace `triggermode`.
+- `processtools_trigger.c` retains an independently named trigger stream in
+  DELAY mode 4; the wait itself remains a `nanosleep(triggerdelay)`. Naming the
+  primary for trace linkage therefore preserves the all-channel polling policy.
+
+New shared `dmCombTiming` records reuse `dmTiming::Stats` and a dedicated bounded
+single-producer/single-consumer collector. Capture reads metadata and two trace
+entries only; fixed handoffs, clock reads and identity checks stay on the observer
+thread. Allocation, trailing-window sample statistics, INDI and FlatBuffers
+serialization remain in ordinary app logic. The second `shmimMonitor` uses its
+existing interface macros, a separate handle/automatic semaphore, target READY,
+ordinary priority by default and configurable `combinerMonitor` CPU placement.
+It does not take the cycle mutex or depend on auxiliary attachments/enable state.
+
+Six independent populations use seconds: combined publication/receipt intervals,
+execution start to trace update, trace update to combined writetime, linked
+primary trace update to execution start, and linked primary trace update to
+combined writetime. Local receipt/observation times define window membership;
+external differences stay in the producer clock. Process start and linked-primary
+identities must advance, with first observations used for freshness baselines.
+Missing, stale, malformed, unlinked or unordered traces have explicit quality
+counts and do not erase otherwise usable cadence observations. Queue losses,
+attachment epochs and counter discontinuities break continuity.
+
+The two linked durations are best-effort trace associations, not proven matched
+pixel/frame latencies. The inspected output writer does not bracket the complete
+trace/pixel write with `write=1`, and the copied upstream timestamp precedes the
+primary's own writetime. No clock conversion, latency inferred from unmatched
+readbacks, or subtraction of marginal variances is introduced. Exact summation
+cost and wait-return timestamps would require additional producer instrumentation;
+the existing execution span includes counter checks, optional work and summation.
+
+Reuse `diagnostics.windowSec`/`maxEvents` as each collector's window/cap; either
+zero disables both, and `diagnostics.combiner=false` disables only the new
+observer. Add `combiner_timing` (36 numeric elements) and
+`combiner_timing_quality` (25 elements) with independently unavailable durations.
+Append an optional combiner table to `telem_dmsynco`, preserving existing field
+indices and thirteen-argument construction. Combined measurements still record
+when the cycle mutex is busy; `schedule_valid` retains its original meaning.
+
+The user guide documents timestamp endpoints, availability/quality, trace-clock
+and identity limitations, actual FPS control names and a controlled comparison.
+Changing `.procinfo.triggersname` requires dmcomb restart. Switching to one
+primary semaphore would lose independent auxiliary-only wakeups and needs a
+compatible trigger design; it is not prescribed as an immediate optimization.
+No live settings, priorities, affinity, polling delay or safety bounds are changed.
+
+Workstation verification passes **3,112 assertions / 49 cases**:
+
+- Collector: **100 / 7**, including integer precision at large external epochs,
+  independent populations/local coverage, missing/malformed/unlinked/stale
+  traces, repeated starts/upstream timestamps, changed writers, output gaps,
+  full queues, rejected receipts, attachment epochs, staleness/disable and a
+  100,000-observation concurrent queue-wrap/loss-accounting run.
+- App: **2,690 / 35**, retaining all thirty existing cases and adding five for
+  exact trace durations, disabled/resource/lock independence, INDI registration
+  and unavailable values, routing/disable configuration, and a finite actual
+  combined semaphore-monitor/hook/callback path on isolated workstation streams.
+  The real-monitor test uses a generous test-only retention window rather than
+  assuming hard host scheduling. No numeric INDI XML transport is claimed.
+- Logger: **322 / 7**, including legacy eleven/thirteen-argument constructors,
+  physically absent/independently optional tables, binary/JSON roundtrip,
+  disabled defaults, malformed populations and complete combiner provenance.
+- Library/schema generation, normal app and logdump builds pass; all focused
+  compiler logs are warning-free. Schema generation retains pre-existing field
+  naming warnings outside the changed schema. An initial concurrent app/reader
+  build raced cleanup of the shared generated git header; sequential builds
+  passed without a source change. Later builds were coordinated sequentially.
+- All seven touched C++ files pass clang-format and whitespace checks. Independent
+  review verified monitor ownership, bounded capture, lifecycle and clock gates.
+
+Review tightened freshness after output-counter gaps and required both an
+advancing upstream timestamp and counter from the same writer. Without that
+second check, stale copied trace metadata could have appeared as growing delay.
+Both fixes have dedicated collector regressions; new attachments/writers use a
+baseline before contributing trace durations. Instrument overhead, sustained
+observer coverage and actual producer clock/trace settings remain operator
+qualification items; no new performance benchmark or ThreadSanitizer result is
+claimed.
+
+Affected files:
+
+- `libMagAOX/common/dmCombTiming.hpp`, `app/dev/dmCombTiming.hpp`,
+  `app/dev/tests/dmCombTiming_test.cpp` (new shared records, collector and tests).
+- `apps/dmSyncopation/dmSyncopation.hpp`, `Makefile`,
+  `tests/dmSyncopation_test.cpp`, `doc/dmSyncopation.md`.
+- `libMagAOX/logger/types/telem_dmsynco.hpp`,
+  `types/schemas/telem_dmsynco.fbs`, `tests/dmSyncoTelemetry_test.cpp`.
+- `tests/tests.list`, this plan, the debugging record and DM timing engineering
+  note. Generated logger/schema outputs remain uncommitted build products.
+
+On 2026-10-23 the user authorized committing and pushing this update to
+`origin/jrmales/dm-syncopation`. The branch was current at preflight, and all
+three focused suites passed again with **3,112 assertions / 49 cases**. Package
+the implementation and this engineering record first, followed by documentation
+and separate formatting cleanup. Operator installation/measurement remains
+pending; no deployment, live configuration change or agent instrument action is
+included.
+
 ## Follow-up and Edge Cases
 
 - **Hard guarantee limit:** an unbounded early main event can race a multi-channel copy or overlap an already submitted command. Polling counters before writes cannot undo that race. Bounds and operational coordination are required; hard gating would be a separate cooperating-system change.

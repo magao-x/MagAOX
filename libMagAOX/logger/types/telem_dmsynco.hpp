@@ -9,6 +9,7 @@
 
 #include <mx/math/floatUtils.hpp>
 
+#include "../../common/dmCombTiming.hpp"
 #include "../../common/dmTiming.hpp"
 #include "generated/telem_dmsynco_generated.h"
 #include "flatbuffer_log.hpp"
@@ -41,10 +42,11 @@ struct telem_dmsynco : public flatbuffer_log
                   const std::vector<int64_t> &residuals /**< [in] latest per-step residuals, ns */,
                   const std::vector<int64_t> &advances /**< [in] per-step wait advances, ns */,
                   const dmTiming::Summary    &primary = {} /**< [in] observed primary cadence; disabled by default */,
-                  bool scheduleValid = true /**< [in] false when scheduler fields are unavailable placeholders */ );
+                  bool scheduleValid = true /**< [in] false when scheduler fields are unavailable placeholders */,
+                  const dmCombTiming::Summary &combiner = {} /**< [in] independently observed combiner timing */ );
     };
 
-    /// Validate the FlatBuffer and optional primary statistics while accepting legacy records.
+    /// Validate optional primary and combiner statistics while accepting legacy records.
     static bool verify( flatlogs::bufferPtrT &buffer /**< [in] complete log entry */,
                         flatlogs::msgLenT     len /**< [in] message length */ );
 
@@ -56,10 +58,15 @@ struct telem_dmsynco : public flatbuffer_log
     static logMetaDetail getAccessor( const std::string &member /**< [in] requested scalar member, unused */ );
 
   private:
-    /// Serialize one independently counted cadence population without changing its units or clock.
+    /// Serialize one independently counted timing population without changing its units or clock.
     static flatbuffers::Offset<DmSyncoTimingStats>
     timingStats( flatbuffers::FlatBufferBuilder &builder /**< [in/out] destination builder */,
-                 const dmTiming::Stats          &stats /**< [in] cadence population in seconds */ );
+                 const dmTiming::Stats          &stats /**< [in] interval or duration population in seconds */ );
+
+    /// Serialize independently qualified combiner populations, provenance and quality counters.
+    static flatbuffers::Offset<DmSyncoCombinerTiming>
+    combinerTiming( flatbuffers::FlatBufferBuilder &builder /**< [in/out] destination builder */,
+                    const dmCombTiming::Summary    &summary /**< [in] coherent combiner observation summary */ );
 
     /// Check finite populated statistics and sample-variance validity.
     static bool validStats( const DmSyncoTimingStats *stats /**< [in] required nested cadence population */ );
@@ -77,19 +84,72 @@ inline flatbuffers::Offset<DmSyncoTimingStats> telem_dmsynco::timingStats( flatb
         builder, stats.count, stats.mean, stats.stddev, stats.min, stats.max, stats.span, stats.valid );
 }
 
-inline telem_dmsynco::messageT::messageT( int                         state,
-                                          int                         steps,
-                                          int64_t                     period,
-                                          uint64_t                    delivered,
-                                          uint64_t                    missed,
-                                          uint64_t                    faults,
-                                          uint64_t                    cached,
-                                          int64_t                     snapshot,
-                                          int64_t                     copy,
-                                          const std::vector<int64_t> &residuals,
-                                          const std::vector<int64_t> &advances,
-                                          const dmTiming::Summary    &primary,
-                                          bool                        scheduleValid )
+inline flatbuffers::Offset<DmSyncoCombinerTiming>
+telem_dmsynco::combinerTiming( flatbuffers::FlatBufferBuilder &builder, const dmCombTiming::Summary &summary )
+{
+    const auto publicationInterval =
+        timingStats( builder, summary.metrics[dmCombTiming::index( dmCombTiming::Metric::publicationInterval )] );
+    const auto receiptInterval =
+        timingStats( builder, summary.metrics[dmCombTiming::index( dmCombTiming::Metric::receiptInterval )] );
+    const auto execution =
+        timingStats( builder, summary.metrics[dmCombTiming::index( dmCombTiming::Metric::execution )] );
+    const auto publication =
+        timingStats( builder, summary.metrics[dmCombTiming::index( dmCombTiming::Metric::publication )] );
+    const auto primaryStart =
+        timingStats( builder, summary.metrics[dmCombTiming::index( dmCombTiming::Metric::primaryStart )] );
+    const auto primaryPublication =
+        timingStats( builder, summary.metrics[dmCombTiming::index( dmCombTiming::Metric::primaryPublication )] );
+    const auto &quality = summary.total;
+
+    return CreateDmSyncoCombinerTiming( builder,
+                                        summary.session,
+                                        summary.sequence,
+                                        summary.nowNs,
+                                        summary.windowSec,
+                                        summary.span,
+                                        summary.age,
+                                        summary.capacity,
+                                        summary.queued,
+                                        summary.enabled,
+                                        summary.writerPid,
+                                        summary.triggerInode,
+                                        summary.primaryCounter,
+                                        publicationInterval,
+                                        receiptInterval,
+                                        execution,
+                                        publication,
+                                        primaryStart,
+                                        primaryPublication,
+                                        quality.events,
+                                        quality.receipts,
+                                        quality.synthetic,
+                                        quality.rejected,
+                                        quality.duplicates,
+                                        quality.counterGaps,
+                                        quality.invalidMetadata,
+                                        quality.missingTrace,
+                                        quality.invalidTrace,
+                                        quality.repeatedStart,
+                                        quality.unlinkedPrimary,
+                                        quality.invalidPrimary,
+                                        quality.repeatedPrimary,
+                                        quality.dropped );
+}
+
+inline telem_dmsynco::messageT::messageT( int                          state,
+                                          int                          steps,
+                                          int64_t                      period,
+                                          uint64_t                     delivered,
+                                          uint64_t                     missed,
+                                          uint64_t                     faults,
+                                          uint64_t                     cached,
+                                          int64_t                      snapshot,
+                                          int64_t                      copy,
+                                          const std::vector<int64_t>  &residuals,
+                                          const std::vector<int64_t>  &advances,
+                                          const dmTiming::Summary     &primary,
+                                          bool                         scheduleValid,
+                                          const dmCombTiming::Summary &combiner )
 {
     builder.ForceDefaults( true ); // Keep nonfinite input available to verification under fast-math comparisons.
 
@@ -123,6 +183,7 @@ inline telem_dmsynco::messageT::messageT( int                         state,
                                                            quality.counterGaps,
                                                            quality.invalid,
                                                            quality.dropped );
+    const auto  combinedTiming = combinerTiming( builder, combiner );
 
     builder.Finish( CreateTelem_dmsynco_fb( builder,
                                             state,
@@ -137,7 +198,8 @@ inline telem_dmsynco::messageT::messageT( int                         state,
                                             residualVector,
                                             advanceVector,
                                             primaryTiming,
-                                            scheduleValid ) );
+                                            scheduleValid,
+                                            combinedTiming ) );
 }
 
 inline bool telem_dmsynco::validStats( const DmSyncoTimingStats *stats )
@@ -173,18 +235,27 @@ inline bool telem_dmsynco::verify( flatlogs::bufferPtrT &buffer, flatlogs::msgLe
         return false;
     }
 
-    const auto *primary = GetTelem_dmsynco_fb( flatlogs::logHeader::messageBuffer( buffer ) )->primary_timing();
+    const auto *record  = GetTelem_dmsynco_fb( flatlogs::logHeader::messageBuffer( buffer ) );
+    const auto *primary = record->primary_timing();
 
-    if( !primary )
+    if( primary && !( validStats( primary->publication() ) && validStats( primary->receipt() ) &&
+                      primary->valid() == ( primary->publication()->valid() && primary->receipt()->valid() ) &&
+                      mx::math::isFinite( primary->window_sec() ) && primary->window_sec() >= 0 &&
+                      mx::math::isFinite( primary->span_sec() ) && primary->span_sec() >= 0 &&
+                      mx::math::isFinite( primary->age_sec() ) && primary->age_sec() >= -1 ) )
     {
-        return true;
+        return false;
     }
 
-    return validStats( primary->publication() ) && validStats( primary->receipt() ) &&
-           primary->valid() == ( primary->publication()->valid() && primary->receipt()->valid() ) &&
-           mx::math::isFinite( primary->window_sec() ) && primary->window_sec() >= 0 &&
-           mx::math::isFinite( primary->span_sec() ) && primary->span_sec() >= 0 &&
-           mx::math::isFinite( primary->age_sec() ) && primary->age_sec() >= -1;
+    const auto *combiner = record->combiner_timing();
+
+    return !combiner ||
+           ( validStats( combiner->publication_interval() ) && validStats( combiner->receipt_interval() ) &&
+             validStats( combiner->execution() ) && validStats( combiner->publication() ) &&
+             validStats( combiner->primary_start() ) && validStats( combiner->primary_publication() ) &&
+             mx::math::isFinite( combiner->window_sec() ) && combiner->window_sec() >= 0 &&
+             mx::math::isFinite( combiner->span_sec() ) && combiner->span_sec() >= 0 &&
+             mx::math::isFinite( combiner->age_sec() ) && combiner->age_sec() >= -1 );
 }
 
 inline void telem_dmsynco::formatStats( std::ostream &output, const char *name, const DmSyncoTimingStats *stats )
@@ -222,25 +293,58 @@ inline std::string telem_dmsynco::msgString( void *buffer, flatlogs::msgLenT len
         " missed=" + std::to_string( record->missed() ) + " faults=" + std::to_string( record->faults() );
     const auto *primary = record->primary_timing();
 
-    if( !primary )
+    std::ostringstream output;
+    output << prefix << " schedule_valid=" << record->schedule_valid() << std::setprecision( 10 );
+
+    if( primary )
     {
-        return prefix + " schedule_valid=" + std::to_string( record->schedule_valid() ) + " primary_timing=unavailable";
+        output << " primary_enabled=" << primary->enabled() << " primary_valid=" << primary->valid()
+               << " primary_session=" << primary->session() << " primary_sequence=" << primary->sequence()
+               << " primary_now_ns=" << primary->now_ns() << " primary_window_s=" << primary->window_sec()
+               << " primary_span_s=" << primary->span_sec() << " primary_age_s=" << primary->age_sec()
+               << " primary_capacity=" << primary->capacity() << " primary_queued=" << primary->queued()
+               << " primary_quality={events:" << primary->events() << ",receipts:" << primary->receipts()
+               << ",synthetic:" << primary->synthetic() << ",rejected:" << primary->rejected()
+               << ",duplicates:" << primary->duplicates() << ",counterGaps:" << primary->counter_gaps()
+               << ",invalid:" << primary->invalid() << ",dropped:" << primary->dropped() << '}';
+
+        formatStats( output, "primaryPublicationInterval", primary->publication() );
+        formatStats( output, "primaryReceiptInterval", primary->receipt() );
+    }
+    else
+    {
+        output << " primary_timing=unavailable";
     }
 
-    std::ostringstream output;
-    output << prefix << " schedule_valid=" << record->schedule_valid() << std::setprecision( 10 )
-           << " primary_enabled=" << primary->enabled() << " primary_valid=" << primary->valid()
-           << " primary_session=" << primary->session() << " primary_sequence=" << primary->sequence()
-           << " primary_now_ns=" << primary->now_ns() << " primary_window_s=" << primary->window_sec()
-           << " primary_span_s=" << primary->span_sec() << " primary_age_s=" << primary->age_sec()
-           << " primary_capacity=" << primary->capacity() << " primary_queued=" << primary->queued()
-           << " primary_quality={events:" << primary->events() << ",receipts:" << primary->receipts()
-           << ",synthetic:" << primary->synthetic() << ",rejected:" << primary->rejected()
-           << ",duplicates:" << primary->duplicates() << ",counterGaps:" << primary->counter_gaps()
-           << ",invalid:" << primary->invalid() << ",dropped:" << primary->dropped() << '}';
+    const auto *combiner = record->combiner_timing();
 
-    formatStats( output, "primaryPublicationInterval", primary->publication() );
-    formatStats( output, "primaryReceiptInterval", primary->receipt() );
+    if( !combiner )
+    {
+        output << " combiner_timing=unavailable";
+        return output.str();
+    }
+
+    output << " combiner_enabled=" << combiner->enabled() << " combiner_session=" << combiner->session()
+           << " combiner_sequence=" << combiner->sequence() << " combiner_now_ns=" << combiner->now_ns()
+           << " combiner_window_s=" << combiner->window_sec() << " combiner_span_s=" << combiner->span_sec()
+           << " combiner_age_s=" << combiner->age_sec() << " combiner_capacity=" << combiner->capacity()
+           << " combiner_queued=" << combiner->queued() << " combiner_writer_pid=" << combiner->writer_pid()
+           << " combiner_trigger_inode=" << combiner->trigger_inode()
+           << " combiner_primary_counter=" << combiner->primary_counter()
+           << " combiner_quality={events:" << combiner->events() << ",receipts:" << combiner->receipts()
+           << ",synthetic:" << combiner->synthetic() << ",rejected:" << combiner->rejected()
+           << ",duplicates:" << combiner->duplicates() << ",counterGaps:" << combiner->counter_gaps()
+           << ",invalidMetadata:" << combiner->invalid_metadata() << ",missingTrace:" << combiner->missing_trace()
+           << ",invalidTrace:" << combiner->invalid_trace() << ",repeatedStart:" << combiner->repeated_start()
+           << ",unlinkedPrimary:" << combiner->unlinked_primary() << ",invalidPrimary:" << combiner->invalid_primary()
+           << ",repeatedPrimary:" << combiner->repeated_primary() << ",dropped:" << combiner->dropped() << '}';
+
+    formatStats( output, "combinerPublicationInterval", combiner->publication_interval() );
+    formatStats( output, "combinerReceiptInterval", combiner->receipt_interval() );
+    formatStats( output, "combinerExecution", combiner->execution() );
+    formatStats( output, "combinerPublication", combiner->publication() );
+    formatStats( output, "combinerPrimaryStart", combiner->primary_start() );
+    formatStats( output, "combinerPrimaryPublication", combiner->primary_publication() );
 
     return output.str();
 }

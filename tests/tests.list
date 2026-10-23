@@ -8,6 +8,7 @@
 ../libMagAOX/app/dev/tests/telemeter_test
 ../libMagAOX/app/dev/tests/dm_test
 ../libMagAOX/app/dev/tests/dmTiming_test
+../libMagAOX/app/dev/tests/dmCombTiming_test
 ../libMagAOX/app/dev/tests/dmTiming_integration_test
 ../libMagAOX/app/dev/tests/shmimMonitor_timing_test
 ../libMagAOX/app/dev/tests/dev_test

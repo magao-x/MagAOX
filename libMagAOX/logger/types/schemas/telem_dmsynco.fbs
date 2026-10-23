@@ -1,5 +1,5 @@
 /// \file telem_dmsynco.fbs
-/// \brief Scheduler telemetry with optional observed primary publication and receipt cadence.
+/// \brief Scheduler telemetry with optional primary cadence and combiner trace measurements.
 namespace MagAOX.logger;
 
 // Values and coverage are seconds; publication values retain their external clock.
@@ -38,6 +38,42 @@ table DmSyncoPrimaryTiming
     dropped:ulong;
 }
 
+table DmSyncoCombinerTiming
+{
+    session:ulong;
+    sequence:ulong;
+    now_ns:long;
+    window_sec:double;
+    span_sec:double;
+    age_sec:double;
+    capacity:ulong;
+    queued:ulong;
+    enabled:bool;
+    writer_pid:long;
+    trigger_inode:ulong;
+    primary_counter:ulong;
+    publication_interval:DmSyncoTimingStats (required);
+    receipt_interval:DmSyncoTimingStats (required);
+    execution:DmSyncoTimingStats (required);
+    publication:DmSyncoTimingStats (required);
+    primary_start:DmSyncoTimingStats (required);
+    primary_publication:DmSyncoTimingStats (required);
+    events:ulong;
+    receipts:ulong;
+    synthetic:ulong;
+    rejected:ulong;
+    duplicates:ulong;
+    counter_gaps:ulong;
+    invalid_metadata:ulong;
+    missing_trace:ulong;
+    invalid_trace:ulong;
+    repeated_start:ulong;
+    unlinked_primary:ulong;
+    invalid_primary:ulong;
+    repeated_primary:ulong;
+    dropped:ulong;
+}
+
 table Telem_dmsynco_fb
 {
     state:int;
@@ -53,6 +89,7 @@ table Telem_dmsynco_fb
     advances_ns:[long];
     primary_timing:DmSyncoPrimaryTiming;
     schedule_valid:bool = true;
+    combiner_timing:DmSyncoCombinerTiming;
 }
 
 root_type Telem_dmsynco_fb;

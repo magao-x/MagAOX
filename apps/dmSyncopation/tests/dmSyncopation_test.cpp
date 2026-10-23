@@ -22,6 +22,8 @@ using namespace MagAOX::app;
 class Harness : public dmSyncopation
 {
   public:
+    using CombinedMonitor = dev::shmimMonitor<dmSyncopation, syncoCombinerT>;
+
     using dmSyncopation::allocate;
     using dmSyncopation::consume;
     using dmSyncopation::copyBatch;
@@ -40,6 +42,8 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_cameraTime;
     using dmSyncopation::m_clean;
     using dmSyncopation::m_combined;
+    using dmSyncopation::m_combinerCadence;
+    using dmSyncopation::m_combinerDiagnostics;
     using dmSyncopation::m_consumed;
     using dmSyncopation::m_copiedLate;
     using dmSyncopation::m_copyMax;
@@ -55,6 +59,8 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_faults;
     using dmSyncopation::m_faultTiming;
     using dmSyncopation::m_indiP_camera;
+    using dmSyncopation::m_indiP_combinerQuality;
+    using dmSyncopation::m_indiP_combinerTiming;
     using dmSyncopation::m_indiP_enable;
     using dmSyncopation::m_indiP_primaryTiming;
     using dmSyncopation::m_indiP_primaryTimingQuality;
@@ -80,6 +86,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_primaryCadenceWindow;
     using dmSyncopation::m_primaryCounter;
     using dmSyncopation::m_primaryTiming;
+    using dmSyncopation::m_primaryTraceInode;
     using dmSyncopation::m_primed;
     using dmSyncopation::m_rateFrames;
     using dmSyncopation::m_reason;
@@ -93,13 +100,25 @@ class Harness : public dmSyncopation
     using dmSyncopation::missedStep;
     using dmSyncopation::readCamera;
     using dmSyncopation::readPrimaryTiming;
+    using dmSyncopation::setupCombinerCadenceINDI;
     using dmSyncopation::setupPrimaryCadenceINDI;
     using dmSyncopation::snapshot;
+    using dmSyncopation::updateCombinerCadenceINDI;
     using dmSyncopation::updatePeriod;
     using dmSyncopation::updatePrimaryCadenceINDI;
     using dmSyncopation::waitUntil;
     using MagAOXApp<true>::config;
     using dev::shmimMonitor<dmSyncopation>::m_imageStream;
+    using dev::shmimMonitor<dmSyncopation>::m_shmimName;
+    using dev::shmimMonitor<dmSyncopation>::m_width;
+    using dev::shmimMonitor<dmSyncopation>::m_height;
+    using dev::shmimMonitor<dmSyncopation>::m_depth;
+    using dev::shmimMonitor<dmSyncopation>::m_dataType;
+    using dev::shmimMonitor<dmSyncopation>::m_inode;
+    using dev::shmimMonitor<dmSyncopation>::m_semaphoreNumber;
+    using dev::shmimMonitor<dmSyncopation>::m_getExistingFirst;
+    using dev::shmimMonitor<dmSyncopation>::m_smThreadInit;
+    using dev::shmimMonitor<dmSyncopation>::m_smThread;
 
     /// Set a stable test identity and an unopened primary handle.
     Harness();
@@ -119,6 +138,27 @@ class Harness : public dmSyncopation
     /// Stop and join the real monitor, clearing its already-closed imported descriptor.
     void stopMonitor();
 
+    /// Import only the combined stream without opening scheduler resources or starting workers.
+    void attachCombinedOnly();
+
+    /// Access the combined observer's imported descriptor without involving the scheduler's handle.
+    IMAGE &combinedImage();
+
+    /// Start the independent combined monitor against the fixture stream.
+    void startCombinedMonitor();
+
+    /// Join the combined worker before clearing its closed import.
+    void stopCombinedMonitor();
+
+    /// Return the independent monitor's final configured input name.
+    const std::string &combinedMonitorName() const;
+
+    /// Return the independent monitor's requested semaphore index.
+    int combinedMonitorSemaphore() const;
+
+    /// Return the independent monitor's configured thread priority.
+    int combinedMonitorPriority() const;
+
     /// Initialize callback properties without starting any threads or INDI connections.
     void properties();
 };
@@ -131,11 +171,17 @@ Harness::Harness()
 
 Harness::~Harness() noexcept
 {
+    stopCombinedMonitor();
     stopMonitor();
     closeResources();
     if( m_imageStream.md )
     {
         ImageStreamIO_closeIm( &m_imageStream );
+    }
+
+    if( combinedImage().md )
+    {
+        ImageStreamIO_closeIm( &combinedImage() );
     }
 }
 
@@ -188,6 +234,57 @@ void Harness::stopMonitor()
         m_smThread.join();  // The real monitor's timed wait is bounded to one second.
         m_imageStream = {}; // smThreadExec closed this import without clearing IMAGE.
     }
+}
+
+void Harness::attachCombinedOnly()
+{
+    CombinedMonitor::m_shmimName = "dm97disp";
+    REQUIRE( ImageStreamIO_openIm( &combinedImage(), "dm97disp" ) == 0 );
+    REQUIRE( allocate( syncoCombinerT{} ) == 0 );
+}
+
+IMAGE &Harness::combinedImage()
+{
+    return CombinedMonitor::m_imageStream;
+}
+
+void Harness::startCombinedMonitor()
+{
+    CombinedMonitor::m_shmimName        = "dm97disp";
+    CombinedMonitor::m_getExistingFirst = true;
+    CombinedMonitor::m_smThreadInit     = false;
+    CombinedMonitor::m_semaphoreNumber  = -1;
+    state( stateCodes::READY );
+    CombinedMonitor::m_smThread = std::thread(
+        [this]()
+        {
+            CombinedMonitor::smThreadExec();
+        } );
+}
+
+void Harness::stopCombinedMonitor()
+{
+    if( CombinedMonitor::m_smThread.joinable() )
+    {
+        m_shutdown = true;
+        CombinedMonitor::m_smThread.join();
+        combinedImage() = {}; // The real monitor closes its import without clearing IMAGE.
+    }
+}
+
+const std::string &Harness::combinedMonitorName() const
+{
+    return CombinedMonitor::m_shmimName;
+}
+
+int Harness::combinedMonitorSemaphore() const
+{
+    return CombinedMonitor::m_semaphoreNumber;
+}
+
+int Harness::combinedMonitorPriority() const
+{
+    return CombinedMonitor::m_smThreadPrio;
 }
 
 void Harness::properties()
@@ -508,6 +605,60 @@ void cadenceObservation( Harness &app /**< [in,out] Isolated primary fixture. */
     app.shmimMonitorTiming( dev::shmimT{},
                             initial ? dev::shmimMonitorEvent::initial : dev::shmimMonitorEvent::receipt );
     REQUIRE( app.processImage( nullptr, dev::shmimT{} ) == 0 );
+}
+
+/// Seed ordered producer-clock endpoints without modifying any command pixels.
+void combinedTrace( IMAGE   &image /**< [in,out] Test-owned combined stream metadata. */,
+                    int64_t  primary /**< [in] Upstream publication timestamp, in its producer clock. */,
+                    uint64_t counter /**< [in] Combined publication and linked primary counter. */,
+                    ino_t    primaryInode /**< [in] Expected primary stream identity. */ )
+{
+    REQUIRE( image.md->NBproctrace >= 2 );
+    REQUIRE( image.streamproctrace != nullptr );
+    image.md->write        = 1;
+    image.md->cnt0         = counter;
+    image.md->writetime    = synco::toTimespec( primary + 18000 );
+    auto &trace            = image.streamproctrace[0];
+    trace                  = {};
+    trace.procwrite_PID    = 4242;
+    trace.trigger_inode    = primaryInode;
+    trace.cnt0             = counter;
+    trace.ts_procstart     = synco::toTimespec( primary + 12000 );
+    trace.ts_streamupdate  = synco::toTimespec( primary + 16000 );
+    auto &upstream         = image.streamproctrace[1];
+    upstream               = {};
+    upstream.procwrite_PID = 31337;
+    upstream.cnt0          = counter * 3; // This is the primary writer's upstream counter, not its own output counter.
+    upstream.ts_procstart  = synco::toTimespec( primary - 1000 );
+    upstream.ts_streamupdate = synco::toTimespec( primary );
+    image.md->write          = 0;
+}
+
+/// Configure a combined observer independently of the primary monitor and all scheduler resources.
+void prepareCombined( Harness &app /**< [in,out] Isolated observer fixture. */,
+                      Streams &streams /**< [in] Owner of the primary identity and combined stream. */ )
+{
+    app.attachCombinedOnly();
+    app.m_now = CadenceClock::now;
+    app.m_combinerCadence.configure( 2, 32 );
+    app.m_primaryTraceInode.store( streams.images[0].md->inode );
+    REQUIRE( app.m_primaryTraceInode.load() != 0 );
+    app.shmimMonitorTiming( syncoCombinerT{}, dev::shmimMonitorEvent::connected );
+}
+
+/// Observe one stable combined publication through the real app overloads.
+void combinedObservation( Harness &app /**< [in,out] Isolated observer fixture. */,
+                          IMAGE   &image /**< [in,out] Test-owned combined producer metadata. */,
+                          int64_t  receipt /**< [in] Local monotonic receipt timestamp. */,
+                          int64_t  primary /**< [in] Independent producer-clock upstream timestamp. */,
+                          uint64_t counter /**< [in] Publication counter. */,
+                          bool     initial = false /**< [in] Use an initial read without a semaphore receipt. */ )
+{
+    combinedTrace( image, primary, counter, app.m_primaryTraceInode.load() );
+    CadenceClock::time = receipt;
+    app.shmimMonitorTiming( syncoCombinerT{},
+                            initial ? dev::shmimMonitorEvent::initial : dev::shmimMonitorEvent::receipt );
+    REQUIRE( app.processImage( nullptr, syncoCombinerT{} ) == 0 );
 }
 
 /// \endcond
@@ -2237,6 +2388,287 @@ TEST_CASE( "syncopation real monitor forwards finite primary cadence events",
     MagAOX::app::dev::shmimMonitor::smThreadExec;
     dmSyncopation::shmimMonitorTiming;
     dmSyncopation::processImage;
+#endif
+    // clang-format on
+}
+
+/// Keep producer-clock trace durations separate from local receipt cadence without writing any DM command.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation observes combined trace timing without scheduler resources", "[dmSyncopation][combinerTiming]" )
+{
+    Streams streams;
+    Harness app;
+    prepareCombined( app, streams );
+    constexpr int64_t epoch = 1792000000000000000LL;
+
+    combinedObservation( app, streams.images[1], 1000000000, epoch, 10, true );
+    combinedObservation( app, streams.images[1], 1000500000, epoch + 500000, 11 );
+    combinedObservation( app, streams.images[1], 1000900000, epoch + 1000000, 12 );
+    combinedObservation( app, streams.images[1], 1001500000, epoch + 1500000, 13 );
+    app.m_combinerCadence.update( CadenceClock::time );
+
+    using namespace MagAOX::dmCombTiming;
+    const auto &summary     = app.m_combinerCadence.summary();
+    const auto &publication = summary.metrics[index( Metric::publicationInterval )];
+    const auto &receipt     = summary.metrics[index( Metric::receiptInterval )];
+    CHECK( publication.count == 3 );
+    CHECK( publication.mean == Approx( 0.0005 ) );
+    CHECK( publication.stddev == 0 );
+    CHECK( receipt.count == 2 );
+    CHECK( receipt.mean == Approx( 0.0005 ) );
+    CHECK( receipt.stddev == Approx( std::sqrt( 2.0 ) * 0.0001 ) );
+
+    for( const auto &expected : { std::make_pair( Metric::execution, 4e-6 ),
+                                  std::make_pair( Metric::publication, 2e-6 ),
+                                  std::make_pair( Metric::primaryStart, 12e-6 ),
+                                  std::make_pair( Metric::primaryPublication, 18e-6 ) } )
+    {
+        const auto &metric = summary.metrics[index( expected.first )];
+        CHECK( metric.count == 3 ); // The first same-writer trace establishes a freshness baseline.
+        CHECK( metric.valid );
+        CHECK( metric.mean == Approx( expected.second ) );
+        CHECK( metric.stddev == 0 );
+    }
+
+    CHECK( summary.total.events == 4 );
+    CHECK( summary.total.receipts == 3 );
+    CHECK( summary.total.synthetic == 1 );
+    CHECK( summary.total.invalidMetadata == 0 );
+    CHECK( summary.total.invalidTrace == 0 );
+    CHECK( summary.total.unlinkedPrimary == 0 );
+    CHECK( summary.total.invalidPrimary == 0 );
+    CHECK( summary.writerPid == 4242 );
+    CHECK( summary.triggerInode == uint64_t( app.m_primaryTraceInode.load() ) );
+    CHECK( summary.primaryCounter == 13 );
+    CHECK_FALSE( app.m_enabled );
+    CHECK_FALSE( app.m_resources );
+    CHECK_FALSE( app.m_combined );
+    CHECK( app.m_faults == 0 );
+
+    for( size_t image = 0; image < streams.images.size(); ++image )
+    {
+        for( size_t pixel = 0; pixel < 9; ++pixel )
+        {
+            CHECK( streams.images[image].array.F[pixel] == float( image ) );
+        }
+    }
+
+    CHECK( streams.images[0].md->cnt0 == 0 );
+    CHECK( streams.images[2].md->cnt0 == 0 );
+    CHECK( streams.images[3].md->cnt0 == 0 );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::allocate( syncoCombinerT{} );
+    dmSyncopation::processImage( nullptr, syncoCombinerT{} );
+    dmSyncopation::shmimMonitorTiming( syncoCombinerT{}, dev::shmimMonitorEvent::receipt );
+#endif
+    // clang-format on
+}
+
+/// Keep combined observation and property registration independent of the scheduler's cycle mutex.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation combined diagnostics do not wait for the timed cycle", "[dmSyncopation][combinerTiming]" )
+{
+    Streams streams;
+    Harness app;
+    prepareCombined( app, streams );
+    constexpr int64_t epoch = 1792000000000000000LL;
+    combinedTrace( streams.images[1], epoch, 10, app.m_primaryTraceInode.load() );
+    CadenceClock::time = 1000000000;
+    app.shmimMonitorTiming( syncoCombinerT{}, dev::shmimMonitorEvent::receipt );
+    std::unique_lock<std::mutex> cycle( app.m_cycleMutex );
+    auto                         observation = std::async( std::launch::async,
+                                   [&]()
+                                   {
+                                       return app.processImage( nullptr, syncoCombinerT{} );
+                                   } );
+    const auto                   readiness   = observation.wait_for( std::chrono::milliseconds( 500 ) );
+    cycle.unlock(); // A blocking regression must finish before assertions or worker destruction.
+    const int result = observation.get();
+    CHECK( readiness == std::future_status::ready );
+    CHECK( result == 0 );
+    app.m_combinerCadence.update( CadenceClock::time );
+    CHECK( app.m_combinerCadence.summary().total.events == 1 );
+    CHECK( app.m_combinerCadence.summary().total.receipts == 1 );
+
+    REQUIRE( app.setupCombinerCadenceINDI() == 0 );
+    CHECK( app.m_indiP_combinerTiming.getElements().size() == 36 );
+    CHECK( app.m_indiP_combinerQuality.getElements().size() == 25 );
+    CHECK( app.m_indiP_combinerTiming.getPerm() == pcf::IndiProperty::ReadOnly );
+    CHECK( app.m_indiP_combinerQuality.getPerm() == pcf::IndiProperty::ReadOnly );
+    CHECK( app.m_indiP_combinerTiming["execution_mean"].get<double>() == -1 );
+    CHECK( app.m_indiP_combinerTiming["execution_count"].get<double>() == 0 );
+    app.updateCombinerCadenceINDI(); // Exercise the no-driver guard; this does not test XML serialization.
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::processImage( nullptr, syncoCombinerT{} );
+    dmSyncopation::setupCombinerCadenceINDI;
+    dmSyncopation::updateCombinerCadenceINDI;
+#endif
+    // clang-format on
+}
+
+/// Preserve cadence when trace linkage is unavailable and break history only on combined attachment changes.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation combined trace availability does not change scheduling", "[dmSyncopation][combinerTiming]" )
+{
+    Streams streams;
+    Harness app;
+    prepareCombined( app, streams );
+    constexpr int64_t epoch = 1792000000000000000LL;
+    combinedObservation( app, streams.images[1], 1000000000, epoch, 10 );
+
+    combinedTrace( streams.images[1], epoch + 500000, 11, app.m_primaryTraceInode.load() );
+    const auto traceCount             = streams.images[1].md->NBproctrace;
+    streams.images[1].md->NBproctrace = 0;
+    CadenceClock::time                = 1000500000;
+    app.shmimMonitorTiming( syncoCombinerT{}, dev::shmimMonitorEvent::receipt );
+    const int missingResult           = app.processImage( nullptr, syncoCombinerT{} );
+    streams.images[1].md->NBproctrace = traceCount;
+    REQUIRE( missingResult == 0 );
+
+    combinedTrace( streams.images[1], epoch + 1000000, 12, app.m_primaryTraceInode.load() + 1 );
+    CadenceClock::time = 1001000000;
+    app.shmimMonitorTiming( syncoCombinerT{}, dev::shmimMonitorEvent::receipt );
+    REQUIRE( app.processImage( nullptr, syncoCombinerT{} ) == 0 );
+    combinedObservation( app, streams.images[1], 1001500000, epoch + 1500000, 13 );
+    combinedObservation( app, streams.images[1], 1002000000, epoch + 2000000, 14 );
+    app.m_combinerCadence.update( CadenceClock::time );
+
+    using namespace MagAOX::dmCombTiming;
+    const auto &summary = app.m_combinerCadence.summary();
+    CHECK( summary.metrics[index( Metric::publicationInterval )].count == 4 );
+    CHECK( summary.metrics[index( Metric::receiptInterval )].count == 4 );
+    CHECK( summary.metrics[index( Metric::execution )].count == 2 );
+    CHECK( summary.metrics[index( Metric::primaryStart )].count == 1 );
+    CHECK( summary.total.missingTrace == 1 );
+    CHECK( summary.total.unlinkedPrimary == 1 );
+    CHECK( app.m_faults == 0 );
+    CHECK_FALSE( app.m_resources );
+
+    CadenceClock::time = 1002500000;
+    app.shmimMonitorTiming( syncoCombinerT{}, dev::shmimMonitorEvent::receipt );
+    app.shmimMonitorTiming( syncoCombinerT{}, dev::shmimMonitorEvent::discarded );
+    app.m_combinerCadence.update( CadenceClock::time );
+    CHECK( app.m_combinerCadence.summary().total.rejected == 1 );
+    CHECK( app.m_combinerCadence.summary().metrics[index( Metric::receiptInterval )].count == 5 );
+    const uint64_t session = app.m_combinerCadence.summary().session;
+    app.shmimMonitorTiming( syncoCombinerT{}, dev::shmimMonitorEvent::connected );
+    combinedObservation( app, streams.images[1], 1003000000, epoch + 2500000, 15 );
+    app.m_combinerCadence.update( CadenceClock::time );
+    CHECK( app.m_combinerCadence.summary().session == session + 1 );
+    CHECK( app.m_combinerCadence.summary().metrics[index( Metric::publicationInterval )].count == 0 );
+    CHECK( app.m_combinerCadence.summary().metrics[index( Metric::receiptInterval )].count == 0 );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::shmimMonitorTiming( syncoCombinerT{}, dev::shmimMonitorEvent::connected );
+    dmSyncopation::processImage( nullptr, syncoCombinerT{} );
+#endif
+    // clang-format on
+}
+
+/// Route the second monitor to streams.combined and allow the observer to be disabled without changing the scheduler.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation combined observer configuration preserves stream routing", "[dmSyncopation][combinerTiming]" )
+{
+    Harness app;
+    app.setupConfig();
+    REQUIRE( app.loadConfigImpl( app.config ) == 0 );
+    CHECK( app.m_combinerDiagnostics );
+    CHECK( app.combinedMonitorName() == "dm01disp" );
+    CHECK( app.combinedMonitorSemaphore() == -1 );
+    CHECK( app.combinedMonitorPriority() == 0 );
+    CHECK( syncoCombinerT::configSection() == "combinerMonitor" );
+    CHECK( syncoCombinerT::indiPrefix() == "comb" );
+    char      path[] = "/tmp/dm-synco-combiner-XXXXXX";
+    const int fd     = mkstemp( path );
+    REQUIRE( fd >= 0 );
+    close( fd );
+
+    {
+        std::ofstream settings( path );
+        settings << "[diagnostics]\ncombiner=false\n[combinerMonitor]\nshmimName=unrelated_stream\n";
+    }
+
+    app.config.readConfig( path );
+    std::remove( path );
+    REQUIRE( app.loadConfigImpl( app.config ) == 0 );
+    CHECK_FALSE( app.m_combinerDiagnostics );
+    CHECK( app.combinedMonitorName() == "dm01disp" );
+    CHECK_FALSE( app.m_enabled );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::setupConfig;
+    dmSyncopation::loadConfigImpl;
+#endif
+    // clang-format on
+}
+
+/// Exercise the second real semaphore loop without scheduling or writing any source/destination pixels.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation real combined monitor forwards process traces", "[dmSyncopation][combinerTiming][regression]" )
+{
+    Streams           streams;
+    Harness           app;
+    constexpr int64_t epoch = 1792000000000000000LL;
+    app.m_primaryTraceInode.store( streams.images[0].md->inode );
+    combinedTrace( streams.images[1], epoch, 10, app.m_primaryTraceInode.load() );
+    app.m_combinerCadence.configure( 30, 32 );
+    app.startCombinedMonitor();
+    auto waitEvents = [&]( uint64_t expected )
+    {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds( 3 );
+
+        do
+        {
+            app.m_combinerCadence.update();
+
+            if( app.m_combinerCadence.summary().total.events >= expected )
+            {
+                return true;
+            }
+
+            std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+        } while( std::chrono::steady_clock::now() < deadline );
+
+        return false;
+    };
+
+    REQUIRE( waitEvents( 1 ) );
+
+    for( uint64_t i = 1; i <= 5; ++i )
+    {
+        combinedTrace( streams.images[1], epoch + int64_t( i ) * 500000, 10 + i, app.m_primaryTraceInode.load() );
+        REQUIRE( ImageStreamIO_sempost( &streams.images[1], -1 ) == 0 );
+        REQUIRE( waitEvents( i + 1 ) );
+    }
+
+    app.stopCombinedMonitor();
+    app.m_combinerCadence.update();
+    using namespace MagAOX::dmCombTiming;
+    const auto &summary = app.m_combinerCadence.summary();
+    CHECK( summary.total.events == 6 );
+    CHECK( summary.total.receipts == 5 );
+    CHECK( summary.total.synthetic == 1 );
+    CHECK( summary.total.dropped == 0 );
+    CHECK( summary.total.rejected == 0 );
+    CHECK( summary.metrics[index( Metric::publicationInterval )].count == 5 );
+    CHECK( summary.metrics[index( Metric::publicationInterval )].mean == Approx( 0.0005 ) );
+    CHECK( summary.metrics[index( Metric::receiptInterval )].count == 4 );
+    CHECK( summary.metrics[index( Metric::execution )].count == 5 );
+    CHECK( summary.metrics[index( Metric::execution )].mean == Approx( 4e-6 ) );
+    CHECK_FALSE( app.m_resources );
+    CHECK_FALSE( app.m_enabled );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dev::shmimMonitor<dmSyncopation, syncoCombinerT>::smThreadExec;
+    dmSyncopation::processImage( nullptr, syncoCombinerT{} );
+    dmSyncopation::shmimMonitorTiming( syncoCombinerT{}, dev::shmimMonitorEvent::receipt );
 #endif
     // clang-format on
 }
