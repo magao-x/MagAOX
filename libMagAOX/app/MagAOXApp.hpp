@@ -83,9 +83,10 @@ namespace XWCTEST_NAMESPACE
  * Through various optional CRTP base classes, many different standard functionalities can be included.
  * The following figure illustrates the facilities provided by a typical app.
  *
- * \image html xwcapp.png "Block diagram of a typical XWCApp. Note that ImageStreamIO (ISIO) is not included by default,
- * but there are several ways to interface with 'image streams' provided in XWCTk.  Many different hardware device
- * interfaces are similarly provided."
+ * \image html xwcapp.png "Block diagram of a typical XWCApp."
+ *
+ * Note that ImageStreamIO (ISIO) is not included by default, but there are several ways to interface with 'image
+ * streams' provided in XWCTk.  Many different hardware device interfaces are similarly provided.
  *
  * The following figure illustrates the logic of the XWCApp finite state machine (FSM).
  *
@@ -95,8 +96,7 @@ namespace XWCTEST_NAMESPACE
  * Many XWCApps can be connected across many computers.  Inter-process communication can be conducted with
  * INDI or ISIO.
  *
- * \image html xwcapps_connections.png "Connecting XWCApps across several machines, controlling various hardware"
- * width=1200
+ * \image html xwcapps_connections.png "XWCApp network connections." width=1200
  *
  * XWCApps are designed to be part of control loops. In the following diagram a camera at the focal plane of a
  * coronagraph is used as the wavefront sensor.  An XWCApp reads out the images and publishes them to shared memory with
@@ -104,6 +104,13 @@ namespace XWCTEST_NAMESPACE
  * the deformable mirror controller sends the resultant command to the hardware device.
  *
  * \image html xwcapp_loops.png "XWCApps controlling hardware in a control loop." width=1200
+ */
+
+ /** \page page_app_docs Adding an Application
+ *
+ * \subpage page_module_appadd
+ *
+ *
  */
 
 /// The base-class for XWCTk applications.

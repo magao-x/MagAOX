@@ -879,7 +879,16 @@ RECURSIVE              = YES
 # run.
 
 EXCLUDE                = apps/template \
-                         tests/catch2
+                         tests/catch2 \
+                         apps/visxCtrl/README.md \
+                         apps/xInstGraph/DO_NOT_EDIT_README_FIRST.md \
+                         apps/xInstGraph/xigNodes/tests/making_tests.md \
+                         apps/xInstGraph/README.md \
+                         apps/xInstGraph/drawio_howto.md \
+                         libMagAOX/logger/tests/flatlogs.md \
+                         tests/valgrind/valgrind.md
+
+
 
 # The EXCLUDE_SYMLINKS tag can be used to select whether or not files or
 # directories that are symbolic links (a Unix file system feature) are excluded
@@ -2154,7 +2163,7 @@ INCLUDE_FILE_PATTERNS  =
 # recursively expanded use the := operator instead of the = operator.
 # This tag requires that the tag ENABLE_PREPROCESSING is set to YES.
 
-PREDEFINED             = __attribute__(x)= XINSTGRAPH_TEST_DOXYGEN_REF ZABERCTRL_TEST_DOXYGEN_REF PVCAMCTRL_TEST_DOXYGEN_REF PUPILGUIDE_GUI_TEST_DOXYGEN_REF CORONALIGN_GUI_TEST_DOXYGEN_REF MULTIINDI_TEST_DOXYGEN_REF
+PREDEFINED             = __attribute__(x)= XINSTGRAPH_TEST_DOXYGEN_REF ZABERCTRL_TEST_DOXYGEN_REF PVCAMCTRL_TEST_DOXYGEN_REF PUPILGUIDE_GUI_TEST_DOXYGEN_REF CORONALIGN_GUI_TEST_DOXYGEN_REF MULTIINDI_TEST_DOXYGEN_REF LOGGER_TEST_DOXYGEN_REF
 
 # If the MACRO_EXPANSION and EXPAND_ONLY_PREDEF tags are set to YES then this
 # tag can be used to specify a list of macro names that should be expanded. The
