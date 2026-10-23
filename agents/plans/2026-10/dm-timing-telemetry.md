@@ -577,3 +577,57 @@ schedule-snapshot validity. Scoped checks pass **2,625 assertions / 34 cases**
 and normal library/app/logdump builds. The DM controller collector/schema and
 its existing statistics are unchanged. An operator comparison over overlapping
 primary/combined windows remains pending.
+
+### 2026-10-21 21:43 UTC combined-command follow-up
+
+Eleven new controller windows retain a 500 us mean with publication jitter
+7.302–8.135 us and receipt jitter 7.337–8.177 us. Receipt-to-SDK latency is
+108.651–108.667 us with 0.394–0.418 us jitter; SDK duration is approximately
+101.34 us with 0.076–0.095 us jitter. Matching publication/receipt counts and
+coverage, plus zero reported failure/loss counters, again support variation
+already present at combined publication. The attachment contains no synco
+primary or camera records, so upstream localization and total loop latency remain
+unresolved. The [debugging record](dm-syncopation-debugging.md) preserves exact
+sources, ranges and qualifications. This is an evidence-only update; no
+implementation, test/build checkpoint or settings change accompanies it.
+
+### 2026-10-21 21:54 UTC primary/combined comparison after synco restart
+
+The operator confirmed the stale synco process and restarted it. New synco
+telemetry has valid primary publication/receipt statistics. Over heavily
+overlapping two-second windows, primary publication jitter is 3.411–4.165 us and
+combined publication jitter is 5.589–6.808 us; both means remain approximately
+500 us. Combined jitter is higher in all nine nearby same-second report pairs.
+Controller receipt-to-SDK and SDK-duration jitter remain approximately 0.42 us
+and 0.08–0.10 us respectively. No observer loss/counter-gap or send-failure
+evidence appears in the supplied records.
+
+This supports investigating additional variation between primary and combined
+publication, alongside the variation already reaching the primary. The reporting
+offset is approximately 0.13 seconds, and commands are not paired between
+streams, so the aggregates do not determine combiner latency or independent added
+jitter. Synco is unarmed in the records; diagnostics-enabled does not mean
+scheduling-enabled, and its roughly 4 us primary RMS still includes roughly
+80 us excursions. The [debugging record](dm-syncopation-debugging.md) preserves
+the exact ranges and limitations. Per-command association and qualified clocks
+are needed before measuring primary-to-combined delay; no implementation or
+timing-control change accompanies this evidence.
+
+### 2026-10-21 combiner trace observer
+
+At the operator's request, dmSyncopation now independently captures existing
+combined-stream process trace to separate execution-start-to-trace-update and
+trace-update-to-writetime durations, with linked primary trace-to-start/output
+populations when association/freshness checks permit. New shared records and a
+bounded collector reuse `dmTiming::Stats`; the controller collector and its
+schema/behavior are unchanged. All durations retain their producer clock, with
+local monotonic receipt/observation coverage. Trace association remains
+best-effort, not verified atomic per-command identity or camera-to-DM latency.
+
+The [synco plan](dm-syncopation.md) records implementation and **3,112 assertions
+/ 49 cases** of scoped verification, normal library/app/reader builds and review
+fixes. The [guide](../../../apps/dmSyncopation/doc/dmSyncopation.md) documents the
+new INDI/telemetry, availability counters and exact configuration controls.
+`.procinfo.triggersname` can supply upstream linkage while retaining DELAY
+polling, with an operator-controlled restart. No live mode, polling delay, CPU
+placement, timing bound or instrument setting is changed.

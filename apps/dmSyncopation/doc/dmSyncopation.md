@@ -216,8 +216,12 @@ The complete [dmtweeter_synco.conf example](../dmtweeter_synco.conf) contains th
 | `recovery.consecutiveMisses` | 3 | Consecutive original unsafe/missed events before reacquisition. |
 | `feedback.gain` | 0.1 | Independent per-event wait-integrator gain, 0–1. |
 | `feedback.maxAdvanceUs` | 20 | Maximum wait correction; step-0 advance is nonnegative and starts at this value after a feedback reset. |
-| `diagnostics.windowSec` | 2 | Elapsed-time window for independent primary publication/receipt statistics; zero disables collection. |
-| `diagnostics.maxEvents` | 20000 | Maximum queued and retained primary timing events; zero disables collection. Storage is allocated before the monitor starts. |
+| `diagnostics.windowSec` | 2 | Elapsed-time window for independent primary and combined-stream statistics; zero disables both collectors. |
+| `diagnostics.maxEvents` | 20000 | Queue and retained-event cap for each observer; zero disables both. Storage is allocated before the monitors start. |
+| `diagnostics.combiner` | true | Start an independent combined-output observer for cadence and process-trace timing. Scheduling can remain disabled. |
+| `combinerMonitor.threadPrio` | 0 | Combined observer scheduling priority; zero uses ordinary scheduling. |
+| `combinerMonitor.cpuset` | empty | Optional observer cpuset. Choose an available CPU placement on the instrument. |
+| `combinerMonitor.shmimName` | `streams.combined` | Forced to the scheduler's configured combined output; a separate value is ignored. Semaphore selection is automatic. |
 | `telemeter.maxInterval` | 10 seconds | Existing helper's aggregate telemetry interval. |
 
 The example starts disabled. Its conservative full timing bundle is **infeasible for three steps at 2 kHz**: the shortest 166.667 us interval cannot cover the reader hold, copy and effective early-main cutoff. The app reports this without silently lowering the requested count. Qualified bounds must support the requested schedule before instrument enablement.
@@ -240,6 +244,8 @@ Application properties belong to the configured INDI device: `dmtweeter_synco` i
 | `timing` | Number, read-only | Main/camera/planned rate, requested/active/feasible counts, delivery/miss/fault/cache counters and maximum snapshot/copy durations, detailed below. |
 | `primary_timing` | Number, read-only | Independent publication and receipt interval statistics, detailed below. Durations are seconds, not the microseconds used by the existing `timing` diagnostic elements. |
 | `primary_timing_quality` | Number, read-only | Collection/window/queue validity and cumulative observation-quality counts, detailed below. |
+| `combiner_timing` | Number, read-only | Independent combined cadence and producer-trace duration populations, in seconds. |
+| `combiner_timing_quality` | Number, read-only | Combined-observer coverage, writer/trigger identity and trace rejection/loss counters. |
 | `health` | Text, read-only | `reason`, `lastFault`, `periodSource`, `primary`, `combined`, `timingStream`, `mapping`. Current phase/reason, latched fault, selected period reference and resolved stream identities. |
 
 `settings` uses its named elements directly; there are no numeric `current`/`target` pairs. Updates while enabled, unknown elements, nonfinite values and invalid counts/ranges are rejected without changing the active configuration. Changing `steps` never changes source-image count. After an accepted disabled update, enable again to acquire a new schedule.
@@ -377,6 +383,123 @@ already at the primary input suggests investigating upstream; variation appearin
 between primary and combined publication suggests that intervening path. Extra
 triggers change the combined population, so enabled comparisons also need their
 schedule context.
+
+## Independent combiner trace timing
+
+A second `shmimMonitor` attaches to `streams.combined` and reads only metadata
+and the first two `STREAM_PROC_TRACE` entries. It runs independently of the
+primary scheduling thread, cycle mutex and auxiliary resources. It performs no
+pixel copies, DM writes, producer reconfiguration, statistics or logging in its
+callback. Both collectors hand fixed observations to ordinary app logic through
+separate bounded queues. The combined observer starts at ordinary scheduling
+priority; its `combinerMonitor` controls allow operator-selected CPU placement.
+Its ordinary monitor properties use the `comb_` prefix.
+
+The inspected MILK producer already supplies these external-clock endpoints:
+
+```text
+U  primary's trace-update timestamp, copied into combined trace entry 1
+             |
+             | primaryStart
+             v
+S  dmcomb iteration execution start (after its wait)
+             |
+             | execution: counter checks, optional work, summation, trace setup
+             v
+T  dmcomb trace-update timestamp in trace entry 0
+             |
+             | publication: remaining trace setup through ImageStreamIO timestamp
+             v
+W  combined stream writetime (before counter/notification publication)
+
+primaryPublication spans U -> W. All external durations stay in that clock.
+The observer's own monotonic wait return supplies coverage and receipt intervals.
+```
+
+These endpoints measure the existing producer trace; `execution` is not an
+isolated summation benchmark, `publication` excludes subsequent semaphore posts,
+and `primaryStart` is not the requested poll sleep. `U` is the primary producer's
+trace-update timestamp, rather than its later `writetime`. Comparisons require the
+producer trace and ImageStreamIO timestamps to use the same clock contract. A
+TAI/REALTIME mismatch, clock step or broken ordering cannot be converted into
+latency by combining it with local monotonic timestamps.
+
+`combiner_timing` has six prefixes, each with `mean`, `jitter`, `min`, `max`,
+`count`, `span` suffixes separated by an underscore:
+
+| Prefix | Population |
+| --- | --- |
+| `publicationInterval` | Consecutive observed combined `writetime` differences. |
+| `receiptInterval` | Actual combined observer semaphore-receipt intervals. |
+| `execution` | `S` to `T` for a distinct output with an advancing process-start timestamp. |
+| `publication` | `T` to `W` for that qualified trace observation. |
+| `primaryStart` | Linked primary trace update `U` to `S`. |
+| `primaryPublication` | Linked primary trace update `U` to `W`. |
+
+Durations/coverage are **seconds**, empty counts are zero and unavailable durations
+are `-1`. Each population has independent count/variance availability. Whole
+property state Ok means at least one population has sample variance; it does not
+assert that every trace population is available. `[dmsynco]` appends the optional
+`combiner_timing` table with these populations, named `combinerPublicationInterval`,
+`combinerReceiptInterval`, `combinerExecution`, `combinerPublication`,
+`combinerPrimaryStart`, `combinerPrimaryPublication`, and each population's `valid`
+flag. Rebuild the app and reader; legacy records without this table report it
+unavailable. Combined statistics also record when the scheduler snapshot is busy.
+
+`combiner_timing_quality` reports `enabled`, `window`, `span`, `age`, `capacity`,
+`queued`, `session`, `sequence`, `writerPid`, `triggerInode`, `primaryCounter`,
+and cumulative `events`, `receipts`, `synthetic`, `rejected`, `duplicates`,
+`counterGaps`, `invalidMetadata`, `missingTrace`, `invalidTrace`, `repeatedStart`,
+`unlinkedPrimary`, `invalidPrimary`, `repeatedPrimary`, `dropped`. Missing or
+unusable traces do not suppress otherwise valid cadence observations. Epochs,
+losses and discontinuities break interval/trace freshness. Repeated process-start
+timestamps can indicate disabled MILK timing or multiple outputs from one
+iteration; they are excluded rather than treated as new execution measurements.
+Freshness requires a baseline for each writer/attachment and linked primary.
+Both the linked counter and its upstream trace-update timestamp must advance;
+a changed upstream writer starts a new baseline. `primaryCounter` displays the
+trace's named input counter and identifies a primary only when `triggerInode`
+matches that stream.
+
+Metadata and trace checks remain best-effort. The inspected dmcomb writes output
+and trace without bracketing the entire operation with `write=1`. Stable repeated
+reads reduce detectable mixing but cannot establish atomic frame/pixel identity.
+The producer samples `trace[0].cnt0` at output update; it does not record the exact
+primary counter consumed at iteration start. In a linked trace this counter is
+also different from `trace[1].cnt0`, which identifies the primary writer's own
+upstream trigger. The linked duration populations are conditioned on timestamp
+ordering and advancing identities, not a proven per-command latency series.
+Do not subtract their marginal variances from other populations.
+
+### Configuration experiments
+
+The inspected dmcomb supports these FPS controls; the operator changes them on
+the instrument and records their actual values with each comparison:
+
+| Control | Effect and measurement consequence |
+| --- | --- |
+| `.procinfo.triggersname` | Names the stream used for trace linkage. Pointing it to the real primary (`dm01disp03` / `aol1_dmC`) supplies its inode/trace even while retaining DELAY mode. This is a startup/configuration setting and requires a dmcomb restart. |
+| `.procinfo.triggermode` | Mode 4 retains sleep plus all-channel counter scanning; mode 3 waits on one stream's semaphore. A switch to one primary semaphore would not wake for every auxiliary-only counter update and needs a compatible trigger design. |
+| `.procinfo.triggerdelay` | Requested DELAY-mode sleep, in timespec units. Actual wake behavior includes scheduler effects; the configured value is not a measured delay or jitter floor. |
+| `.procinfo.RTprio`, `.procinfo.cset`, `.procinfo.taskset` | Producer scheduling and CPU placement. Record actual thread policy/affinity as well as requested configuration. |
+| `.procinfo.semindexrequested`, `.procinfo.triggertimeout` | Semaphore-mode reader allocation and timeout controls; they do not replace DELAY-mode all-channel scans. |
+
+MILK's processinfo timing measurement must be enabled for `ts_procstart` to
+advance. `MeasureTiming` is a processinfo/CLI control in the inspected checkout,
+not an FPS key named `timing.Measure`. Also, that checkout does not populate the
+trace `triggermode` field correctly; the observer does not infer current trigger
+mode from it. Obtain actual mode/delay from FPS configuration.
+
+Start with scheduling disabled and the current dmcomb settings. Verify combined
+cadence plus `execution`/`publication` counts; `unlinkedPrimary` is expected when
+the trigger stream is unnamed or different. If upstream trace linkage is needed,
+configure the primary trigger-stream name while retaining DELAY mode, restart
+dmcomb, then verify inode linkage, freshness and linked-population counts. Compare
+one configuration change at a time over the same workload, inspecting counts,
+tails, rejections and minimum spacing alongside RMS. No configuration changes are
+made automatically, and these measurements do not relax synco's timing bounds.
+Naming the trigger also adds the producer's upstream trace-copy work; include that
+configuration change in the comparison record.
 
 ## 200 Hz tip/tilt test provider
 

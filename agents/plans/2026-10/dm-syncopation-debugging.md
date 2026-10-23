@@ -678,3 +678,195 @@ first, followed by the guide/debugging notes and separate formatting cleanup.
 The remote branch was current at preflight. Operator installation and a comparison
 over overlapping primary/combined windows remain pending; no agent instrument
 action is included.
+
+## 2026-10-21 21:43 UTC combined-command validation sample
+
+After the primary-observer push (`291c280e` implementation, `831d8d3d`
+documentation, `e1c55ec9` formatting), the operator supplied eleven detailed
+`dmtweeter` records at 21:43:08.434361143–21:43:18.446212508 UTC, session 2,
+sequences 41–51. Reported source:
+`/opt/MagAOX/telem/dmtweeter/2026_10_21/dmtweeter_20261021214223392496904.bintel`.
+These are overlapping two-second windows updated approximately once per second,
+not eleven independent trials. The attachment includes compatible DM `[fgtimes]`
+records but no camera or synco `[dmsynco]` primary measurements. Its `enabled=1`
+and `fg_valid=1` describe controller timing collection, not synco enablement or
+installation of the new primary observer.
+
+| Measurement | Window mean range (us) | Window sample-jitter range (us) | Reported event extrema (us) |
+| --- | --- | --- | --- |
+| Combined publication interval | 499.998526–500.002244 | 7.301539–8.134835 | 422.788–577.070 |
+| Controller receipt interval | 499.998514–500.002209 | 7.336856–8.176615 | 422.578–577.280 |
+| Successful SDK-return interval | 499.998694–500.002352 | 7.325843–8.162254 | 423.460–576.749 |
+| Receipt-to-SDK latency | 108.650605–108.667451 | 0.393606–0.417901 | 107.693–112.122 |
+| SDK duration | 101.338286–101.342114 | 0.076175–0.095135 | 101.131–103.565 |
+| Receipt through callback completion | 124.718938–124.759601 | 0.488494–0.526673 | 123.243–130.577 |
+
+Publication/receipt interval populations have matching counts (3,998 or 3,999)
+and local coverage in every record. Their jitter differs by only
+0.028453–0.042349 us, while publication excursions reach approximately
+-77.2/+77.1 us around the 500 us mean. The data again supports interval variation
+already present at combined-stream publication. SDK-call variability is much
+smaller and is not the dominant explanation in these windows. Compared with the
+earlier supplied sample, publication jitter is higher, but workload/settings and
+simultaneous upstream measurements are absent, so no cause is assigned.
+
+All displayed failure, partial-send, no-send, rejected, duplicate, counter-gap,
+invalid-clock and dropped-event totals/deltas are zero. A single initial
+synthetic event explains the one-event excess of submissions over receipts.
+Since-summary deltas contain 2,002–2,003 real receipts/submissions each; the total
+receipt increase from the first to last record is 20,023 over approximately
+10.012 seconds. This supports the expected 2 kHz cadence. Queue occupancy is zero
+or one out of 20,000; occupancy is not loss. Sample counts can differ among
+endpoint populations at elapsed-window boundaries without indicating loss.
+
+The publication metadata association and clock qualifications from earlier
+entries still apply. Matching marginal statistics do not measure
+publication-to-receipt delay jitter or establish same-event correlations; do not
+subtract their variances. The approximately 108.66 us receipt-to-SDK duration is
+local controller latency, not camera-to-DM loop time or physical settling.
+The approximately 0.176 us dispatch duration is monitor-to-callback bookkeeping,
+not publication-to-wakeup latency.
+
+The requested next comparison remains primary (`dm01disp03` / `aol1_dmC`) versus
+combined (`dm01disp`) publication over overlapping windows. The operator was
+asked for matching synco `[dmsynco]` records without changing current settings.
+This update changes only this debugging record and the DM timing engineering
+note. No code, build/test rerun, commit, push or agent instrument action is
+included.
+
+## 2026-10-21 synco reader sees records without the primary payload
+
+The operator then supplied `[dmsynco]` records at 21:45:53.431636738,
+21:46:04.434309866, 21:46:14.436789612 and 21:46:24.439273115 UTC, each ending
+`schedule_valid=1 primary_timing=unavailable`. These identify the correct telemetry
+type, but do not yet provide the new primary measurement. The updated reader emits
+that exact message only when the optional primary table is physically absent.
+The current producer always serializes the table, even when diagnostics are
+disabled or samples are not yet valid. Disabled collection would instead show
+`primary_enabled=0` and empty populations. The default-true `schedule_valid` also
+applies to legacy records and does not establish that the emitter is updated.
+
+The likely explanation is an older running/installed dmSyncopation binary, or
+reading an older telemetry file. The roughly ten-second record cadence also fits
+the earlier recording path, but does not by itself identify the process version.
+The next operator check is the presence of
+`dmtweeter-synco.primary_timing_quality` on INDI and confirmation that the followed
+log is current. Rebuild/install/restart the synco app if the running version is
+old; scheduling can remain disabled while collecting the new diagnostics.
+No collection-setting or timing-bound change is indicated by these records.
+
+## 2026-10-21 21:54 UTC primary and combined publication comparison
+
+The operator confirmed that dmSyncopation had not been restarted. After restart,
+eleven supplied synco records at 21:54:02.450023755–21:54:12.456341470 UTC now
+contain `primary_enabled=1 primary_valid=1`, session 2, sequences 36–46. This
+resolves the missing-payload observation. Ten controller records cover
+21:54:01.579341360–21:54:10.591327192 UTC, session 3, sequences 689–698. The two
+collectors' session numbers are independent and do not identify matching frames.
+No source telemetry filename was included in these excerpts.
+
+| Measurement | Window mean range (us) | Window sample-jitter range (us) | Reported event extrema (us) |
+| --- | --- | --- | --- |
+| Primary publication interval | 499.999199–500.001076 | 3.411070–4.165429 | 435.984–580.386 |
+| Synco primary receipt interval | 499.999317–500.001104 | 3.420770–4.167280 | 435.843–580.426 |
+| Combined publication interval | 499.998458–500.002772 | 5.588990–6.808115 | 431.094–584.484 |
+| Controller receipt interval | 499.998468–500.002812 | 5.596426–6.839504 | 430.914–584.715 |
+| Successful SDK-return interval | 499.998788–500.002827 | 5.640614–6.879813 | 432.036–585.957 |
+| Controller receipt-to-SDK latency | 108.637231–108.662032 | 0.417072–0.429258 | 107.683–112.874 |
+| SDK duration | 101.336551–101.339361 | 0.084473–0.103309 | 101.121–104.577 |
+
+Nine same-second synco/controller report pairs have reporting offsets of
+0.130570–0.136236 seconds. Their nominal two-second windows therefore overlap
+heavily (approximately 93% by report time), although they do not contain identical
+commands or have identical endpoints. Combined publication jitter exceeds primary
+publication jitter in all nine pairs. For example, the 21:54:03 pair reports
+4.165429 us primary and 6.759755 us combined; the 21:54:10 pair reports 3.702233 us
+and 5.588990 us respectively. Consecutive windows within each series also overlap;
+these are not independent trials or a paired per-command latency measurement.
+
+The contemporaneous population comparison supports variation already reaching
+the primary and additional variation in the primary-to-combined publication
+path. It narrows the next investigation to combiner notification/polling,
+scheduling, summation, other-channel work and output publication. It does not
+identify which component dominates. Controller receipt timing closely tracks
+combined publication, and its local work remains much steadier. No independent
+added-jitter value is calculated by subtracting standard deviations or variances;
+the necessary per-command covariance/provenance is absent. External timestamp
+clock and metadata-association qualifications from earlier entries still apply.
+
+Each synco window has 3,999 publication and receipt intervals with matching
+coverage. The collector has no queued events and zero rejected, duplicate,
+counter-gap, invalid or dropped totals throughout; receipts increase by 20,012
+over approximately 10.006 seconds. Controller publication/receipt counts likewise
+match at 3,998–3,999, with zero reported failure/loss totals/deltas and queue
+occupancy zero or one. Both mean cadences are consistent with 2 kHz.
+
+Synco reports `state=0 steps=2 delivered=0 missed=0 faults=0` throughout.
+`primary_enabled` describes diagnostics; `steps` is the configured request and
+`schedule_valid=1` only means that scheduler fields were sampled. No active
+schedule or extra delivery is demonstrated, and these fields do not independently
+report the enable toggle. The primary population still has approximately
+-64/+80 us excursions around 500 us; its roughly 4 us RMS does not qualify hard
+timing bounds or show that every interval is safe.
+
+The next useful measurement is a short sequence associating each primary command
+with its combined publication, with a verified clock relationship and trigger
+provenance, to measure the distribution and changes of primary-to-combined delay.
+Combiner wake/start and publish endpoints could then locate its variable portion.
+The current aggregates do not establish camera-to-DM latency or justify a timing
+bound, polling or scheduling configuration change. This is a documentation-only
+evidence update; no code, test/build rerun, commit, push or agent instrument action
+is included.
+
+## 2026-10-21 combiner trace observer implemented
+
+The operator authorized building dmcomb-behavior measurements and considering
+configuration changes. The app now independently monitors combined-output
+metadata/process trace while retaining its existing primary collector and
+scheduler. The observer uses a separate automatic semaphore/handle and ordinary
+priority by default. It captures fixed observations without pixel copying,
+allocation, logging, cycle locking or any producer/configuration mutation.
+Ordinary app logic computes the same two-second default window and publishes
+`combiner_timing`, `combiner_timing_quality` and an append-only optional combiner
+table in `[dmsynco]` telemetry. Each of six populations has independent
+count/coverage/variance availability; all durations are seconds.
+
+The endpoints are consecutive combined publication/receipt intervals, iteration
+execution start to trace update, trace update to ImageStreamIO writetime, and
+linked primary trace update to execution start/output writetime. These use
+existing producer trace endpoints: execution includes checks/optional work/sum,
+publication excludes later notification posts, and upstream trace update precedes
+primary writetime. They are not an isolated summation benchmark or proven atomic
+per-frame latency. Positive normalized/ordered timestamps, stable repeated
+metadata/trace reads and advancing writer/start/primary timestamp/counter
+baselines qualify each duration. Missing, unlinked or stale trace data remains
+unavailable with explicit quality counters; output cadence can remain usable.
+
+Local source tracing confirms that naming the real primary in
+`.procinfo.triggersname` while keeping DELAY mode 4 supplies upstream trace
+linkage without switching away from all-channel polling. That startup setting
+requires a dmcomb restart and adds trace-copy work. Actual mode/delay, processinfo
+timing enablement, CPU placement and trace clock contract remain operator checks.
+The inspected trace does not reliably report trigger mode, and its sampled input
+counter does not prove which pixels were consumed. The
+[guide](../../../apps/dmSyncopation/doc/dmSyncopation.md) describes these limits,
+the FPS controls and a controlled comparison. No live configuration is changed.
+
+Scoped workstation checks pass **3,112 assertions / 49 cases** (collector 100/7,
+app 2,690/35, logger 322/7), plus normal library/schema, app and logdump builds.
+Tests include a finite real combined monitor and concurrent queue wraps. Review
+corrected gap freshness and repeated upstream timestamps, both with regressions.
+The [main plan](dm-syncopation.md) records file scope and detailed verification
+qualifications. No new instrument-performance, total-loop-latency or physical
+settling result is claimed. No commit, push or agent instrument action is
+included; operator installation/measurement is next.
+
+## 2026-10-23 combiner measurements commit and push checkpoint
+
+The user authorized committing and pushing the verified combiner observer to
+`origin/jrmales/dm-syncopation`. Fetch confirmed the branch was current, and the
+three focused suites passed again: **3,112 assertions / 49 cases**. Formatting
+and whitespace checks pass. Package the implementation and main plan first,
+then the user guide/debugging notes and separate formatting cleanup. Operator
+installation, clock/trace configuration checks and measurements remain pending;
+no live configuration change or agent instrument action is included.
