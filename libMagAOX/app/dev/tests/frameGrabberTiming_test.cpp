@@ -29,7 +29,8 @@ void frame( Collector &collector /**< [in,out] Collector under test. */,
             uint64_t   counter /**< [in] Camera and output counter. */,
             int64_t    extra   = 0 /**< [in] Additional conversion duration, ns. */,
             int64_t    bracket = 100 /**< [in] Realtime clock-call bracket, ns. */,
-            int64_t    post    = 100 /**< [in] Main post duration, ns. */ )
+            int64_t    post    = 100 /**< [in] Main post duration, ns. */,
+            uint64_t   inode   = 77 /**< [in] Output metadata identity. */ )
 {
     constexpr int64_t epoch = 1700000000000000000LL;
     collector.beginAt( returned - 490000 );
@@ -40,7 +41,7 @@ void frame( Collector &collector /**< [in,out] Collector under test. */,
     collector.markAt( Marker::loadDone, returned + 300 + extra );
     collector.markAt( Marker::writeStampDone, returned + 300 + extra + bracket );
     collector.frame( counter );
-    collector.published( stamp( epoch + returned ), stamp( epoch + returned + 300 + extra + bracket ), counter, 77 );
+    collector.published( stamp( epoch + returned ), stamp( epoch + returned + 300 + extra + bracket ), counter, inode );
     collector.markAt( Marker::mainPostDone, returned + 300 + extra + bracket + post );
     collector.markAt( Marker::syncPostDone, returned + 500 + extra + bracket + post );
     collector.markAt( Marker::loopTailDone, returned + 700 + extra + bracket + post );
@@ -318,7 +319,7 @@ TEST_CASE( "Concurrent frame and control handoffs preserve bounded history and l
     constexpr size_t   capacity = 32;
     constexpr int64_t  epoch    = 1700000000000000000LL;
     Collector          collector;
-    collector.configure( 0.005, capacity, true, 20e-6, 1e-6 );
+    collector.configure( 0.005, capacity, true, 20e-6, 1e-6, 4 );
     std::atomic<int64_t>  latest{ 1000000000 };
     std::atomic<bool>     run{ false }, framesDone{ false }, controlsDone{ false }, invalidSummary{ false };
     std::atomic<uint64_t> publishedBatch{ 0 }, observedBatch{ 0 };
@@ -397,7 +398,8 @@ TEST_CASE( "Concurrent frame and control handoffs preserve bounded history and l
         bool        bounded = summary.queued <= capacity && summary.controlQueued <= capacity &&
                        summary.intervals < capacity && summary.qualified <= summary.intervals &&
                        summary.ambiguous == summary.intervals - summary.qualified &&
-                       summary.late <= summary.qualified && summary.early <= summary.qualified - summary.late;
+                       summary.late <= summary.qualified && summary.early <= summary.qualified - summary.late &&
+                       collector.traceStatus().ready + collector.traceStatus().pending <= 4;
 
         for( size_t index = 0; index < summary.metrics.size(); ++index )
         {
@@ -412,6 +414,7 @@ TEST_CASE( "Concurrent frame and control handoffs preserve bounded history and l
         }
 
         ++snapshots;
+        collector.clearTraceRecords();
         observedBatch.store( batch, std::memory_order_release );
     }
 
@@ -440,6 +443,265 @@ TEST_CASE( "Concurrent frame and control handoffs preserve bounded history and l
     collector.finish();
     collector.update( final, epoch + final );
     REQUIRE( collector.summary().total.events == 0 );
+}
+
+/// Preserve ordered raw late/early triggers and their exact neighbors independently of trailing summaries.
+/** \ingroup frameGrabberTiming_unit_test
+ * \see MagAOX::app::dev::frameGrabberTiming::traceRecords
+ * \see MagAOX::app::dev::frameGrabberTiming::traceStatus
+ */
+TEST_CASE( "Chronological traces preserve late then early neighborhoods before summary expiry", "[frameGrabberTiming]" )
+{
+    Collector collector;
+    collector.configure( 0.002, 16, true, 20e-6, 1e-6, 4 );
+
+    for( uint64_t index = 1; index <= 8; ++index )
+    {
+        frame( collector, 1000000000 + ( index - 1 ) * 500000, index, index == 5 ? 60000 : 0 );
+    }
+
+    collector.update( 2000000000 );
+    REQUIRE( collector.summary().intervals == 0 );
+    REQUIRE( collector.traceStatus().detected == 2 );
+    REQUIRE( collector.traceStatus().recorded == 2 );
+    REQUIRE( collector.traceStatus().unclassified == 3 );
+    REQUIRE( collector.traceStatus().pending == 0 );
+    REQUIRE( collector.traceRecords().size() == 2 );
+    const auto &late  = collector.traceRecords()[0];
+    const auto &early = collector.traceRecords()[1];
+    REQUIRE( late.direction == TraceDirection::late );
+    REQUIRE( early.direction == TraceDirection::early );
+    REQUIRE( late.medianNs == 500000 );
+    REQUIRE( late.baselineIntervals == 3 );
+    REQUIRE( late.intervalNs == 560000 );
+    REQUIRE( early.intervalNs == 440000 );
+    REQUIRE( late.present == 0x1f );
+    REQUIRE( early.present == 0x1f );
+    REQUIRE( late.qualified );
+    REQUIRE( late.end == TraceEnd::complete );
+
+    for( size_t index = 0; index < late.events.size(); ++index )
+    {
+        REQUIRE( late.events[index].sequence == index + 3 );
+        REQUIRE( early.events[index].sequence == index + 4 );
+    }
+
+    collector.update( 3000000000 );
+    REQUIRE( collector.traceRecords().size() == 2 );
+    REQUIRE( collector.traceStatus().detected == 2 );
+    collector.clearTraceRecords();
+    REQUIRE( collector.traceRecords().empty() );
+    REQUIRE( collector.traceStatus().ready == 0 );
+    REQUIRE( collector.traceStatus().recorded == 2 );
+}
+
+/// Carry following-neighbor state between updates while labeling completed-only serial overlap.
+/** \ingroup frameGrabberTiming_unit_test
+ * \see MagAOX::app::dev::frameGrabberTiming::clearTraceRecords
+ * \see MagAOX::app::dev::frameGrabberTiming::control
+ */
+TEST_CASE( "Trace pending neighbors span updates and completed controls remain qualified context",
+           "[frameGrabberTiming]" )
+{
+    Collector collector;
+    collector.configure( 2, 16, true, 20e-6, 1e-6, 4 );
+
+    for( uint64_t index = 1; index <= 5; ++index )
+    {
+        frame( collector, 1000000000 + ( index - 1 ) * 500000, index, index == 5 ? 60000 : 0 );
+    }
+
+    collector.update( 1002100000 );
+    REQUIRE( collector.traceRecords().empty() );
+    REQUIRE( collector.traceStatus().pending == 1 );
+    collector.clearTraceRecords();
+    collector.control( 1001900000, 1002100000, true );
+    frame( collector, 1002500000, 6 );
+    collector.update( 1002600000 );
+    REQUIRE( collector.traceStatus().pending == 2 );
+    frame( collector, 1003000000, 7 );
+    collector.update( 1003100000 );
+    REQUIRE( collector.traceRecords().size() == 1 );
+    REQUIRE( collector.traceStatus().pending == 1 );
+    const auto late = collector.traceRecords().front();
+    REQUIRE( late.events[2].sequence == 5 );
+    REQUIRE( late.serialOverlapNs[2] == 160400 );
+    REQUIRE( late.serialOverlapNs[3] == 89999 );
+    REQUIRE( late.controlCoverageNs == 1003100000 );
+    collector.clearTraceRecords();
+    frame( collector, 1003500000, 8 );
+    collector.update( 1003600000 );
+    REQUIRE( collector.traceRecords().size() == 1 );
+    REQUIRE( collector.traceRecords()[0].direction == TraceDirection::early );
+    REQUIRE( collector.traceRecords()[0].events[2].sequence == 6 );
+}
+
+/// Preserve raw wide-bracket triggers and deterministic newest-record losses without stealing pending storage.
+/** \ingroup frameGrabberTiming_unit_test
+ * \see MagAOX::app::dev::frameGrabberTiming::configure
+ * \see MagAOX::app::dev::frameGrabberTiming::traceStatus
+ */
+TEST_CASE( "Trace saturation drops newest raw excursions while brackets only affect qualification",
+           "[frameGrabberTiming]" )
+{
+    Collector collector;
+    collector.configure( 2, 16, true, 20e-6, 1e-6, 1 );
+
+    for( uint64_t index = 1; index <= 8; ++index )
+    {
+        frame( collector, 1000000000 + ( index - 1 ) * 500000, index, 0, index == 5 ? 60100 : 100 );
+    }
+
+    collector.update( 1004000000 );
+    REQUIRE( collector.traceStatus().detected == 2 );
+    REQUIRE( collector.traceStatus().recorded == 1 );
+    REQUIRE( collector.traceStatus().dropped == 1 );
+    REQUIRE( collector.traceRecords().size() == 1 );
+    REQUIRE_FALSE( collector.traceRecords()[0].qualified );
+    REQUIRE( collector.traceRecords()[0].direction == TraceDirection::late );
+    REQUIRE( collector.traceRecords()[0].events[4].sequence == 7 );
+    collector.configure( 2, 16, true, 20e-6, 0, 1 );
+
+    for( uint64_t index = 1; index <= 7; ++index )
+    {
+        frame( collector, 1000000000 + ( index - 1 ) * 500000, index, index == 5 ? 60000 : 0 );
+    }
+
+    collector.update( 1004000000 );
+    REQUIRE( collector.traceRecords().size() == 1 );
+    REQUIRE_FALSE( collector.traceRecords()[0].qualified );
+}
+
+/// Stop neighborhoods at actual continuity boundaries and retain partial masks instead of inventing neighbors.
+/** \ingroup frameGrabberTiming_unit_test
+ * \see MagAOX::app::dev::frameGrabberTiming::newSession
+ * \see MagAOX::app::dev::frameGrabberTiming::update
+ */
+TEST_CASE( "Trace counter gaps epochs and inactivity flush incomplete chronological neighborhoods",
+           "[frameGrabberTiming]" )
+{
+    Collector collector;
+
+    for( unsigned boundary = 0; boundary < 4; ++boundary )
+    {
+        collector.configure( 0.002, 16, true, 20e-6, 1e-6, 4 );
+
+        for( uint64_t index = 1; index <= 5; ++index )
+        {
+            frame( collector, 1000000000 + ( index - 1 ) * 500000, index, index == 5 ? 60000 : 0 );
+        }
+
+        collector.update( 1002100000 );
+        REQUIRE( collector.traceStatus().pending == 1 );
+
+        if( boundary == 0 )
+        {
+            frame( collector, 1002500000, 7 );
+        }
+        else if( boundary == 1 )
+        {
+            collector.newSession();
+        }
+        else if( boundary == 3 )
+        {
+            frame( collector, 1002500000, 6, 0, 100, 100, 88 );
+        }
+
+        collector.update( boundary == 2 ? 1005000000 : 1002600000 );
+        REQUIRE( collector.traceStatus().pending == 0 );
+        REQUIRE( collector.traceStatus().incomplete == 1 );
+        REQUIRE( collector.traceRecords().size() == 1 );
+        REQUIRE( collector.traceRecords()[0].present == 0x07 );
+        REQUIRE( collector.traceRecords()[0].end == ( boundary == 2 ? TraceEnd::expired : TraceEnd::boundary ) );
+        REQUIRE( collector.traceStatus().discontinuities == ( boundary == 2 ? 0 : 1 ) );
+    }
+}
+
+/// Keep optional trace selection disabled and defer frames later than a captured consumer evaluation clock.
+/** \ingroup frameGrabberTiming_unit_test
+ * \see MagAOX::app::dev::frameGrabberTiming::traceRecords
+ * \see MagAOX::app::dev::frameGrabberTiming::configure
+ */
+TEST_CASE( "Trace disablement and future-frame boundaries preserve acquisition events", "[frameGrabberTiming]" )
+{
+    Collector collector;
+    collector.configure( 2, 16, true, 20e-6, 1e-6, 0 );
+
+    for( uint64_t index = 1; index <= 8; ++index )
+    {
+        frame( collector, 1000000000 + ( index - 1 ) * 500000, index, index == 5 ? 60000 : 0 );
+    }
+
+    collector.update( 1004000000 );
+    REQUIRE_FALSE( collector.traceStatus().enabled );
+    REQUIRE( collector.traceStatus().detected == 0 );
+    REQUIRE( collector.traceRecords().empty() );
+    collector.configure( 2, 16, false, 20e-6, 1e-6, 4 );
+    REQUIRE_FALSE( collector.traceStatus().enabled );
+    collector.configure( 2, 16, true, 0.5e-9, 1e-6, 4 );
+    REQUIRE( collector.stagesEnabled() );
+    REQUIRE_FALSE( collector.traceStatus().enabled );
+    REQUIRE( collector.traceStatus().capacity == 0 );
+
+    for( uint64_t index = 1; index <= 8; ++index )
+    {
+        frame( collector, 1000000000 + ( index - 1 ) * 500000, index, index == 5 ? 60000 : 0 );
+    }
+
+    collector.update( 1004000000 );
+    REQUIRE( collector.traceRecords().empty() );
+    REQUIRE( collector.traceStatus().detected == 0 );
+    collector.configure( 2, 16, true, 20e-6, 1e-6, 4 );
+
+    for( uint64_t index = 1; index <= 8; ++index )
+    {
+        frame( collector, 1000000000 + ( index - 1 ) * 500000, index, index == 5 ? 60000 : 0 );
+    }
+
+    collector.update( 1002050000 );
+    REQUIRE( collector.traceStatus().detected == 0 );
+    collector.update( 1002100000 );
+    REQUIRE( collector.traceStatus().detected == 1 );
+    REQUIRE( collector.traceStatus().pending == 1 );
+    collector.update( 1004000000 );
+    REQUIRE( collector.traceStatus().detected == 2 );
+    REQUIRE( collector.traceRecords().size() == 2 );
+    REQUIRE( collector.traceStatus().recorded == 2 );
+}
+
+/// Report handoff losses beside accepted records and refuse neighbors spanning the missing attempts.
+/** \ingroup frameGrabberTiming_unit_test
+ * \see MagAOX::app::dev::frameGrabberTiming::finish
+ * \see MagAOX::app::dev::frameGrabberTiming::control
+ * \see MagAOX::app::dev::frameGrabberTiming::traceStatus
+ */
+TEST_CASE( "Trace quality retains acquisition and completed-control handoff losses", "[frameGrabberTiming]" )
+{
+    Collector collector;
+    collector.configure( 2, 4, true, 20e-6, 1e-6, 2 );
+
+    for( uint64_t index = 1; index <= 4; ++index )
+    {
+        frame( collector, 1000000000 + ( index - 1 ) * 500000, index );
+    }
+
+    collector.update( 1001600000 );
+
+    for( uint64_t index = 5; index <= 9; ++index )
+    {
+        frame( collector, 1000000000 + ( index - 1 ) * 500000, index, index == 5 ? 60000 : 0 );
+        collector.control( 1001900000, 1002100000, true );
+    }
+
+    collector.update( 1004100000 );
+    REQUIRE( collector.traceRecords().size() == 2 );
+    REQUIRE( collector.traceStatus().eventDropped == 1 );
+    REQUIRE( collector.traceStatus().controlDropped == 1 );
+    REQUIRE( collector.traceStatus().dropped == 0 );
+    frame( collector, 1004500000, 10 );
+    collector.update( 1004600000 );
+    REQUIRE( collector.traceStatus().discontinuities == 1 );
+    REQUIRE( collector.traceStatus().detected == 2 );
 }
 
 } // namespace frameGrabberTimingTest

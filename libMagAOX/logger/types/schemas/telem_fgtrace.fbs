@@ -1,0 +1,79 @@
+/// \file telem_fgtrace.fbs
+/// \brief Chronological camera excursion neighbors with absolute monotonic endpoints and collection losses.
+namespace MagAOX.logger;
+
+enum FgTraceDirection : ubyte { late = 0, early = 1 }
+enum FgTraceEnd : ubyte { complete = 0, boundary = 1, expired = 2 }
+enum FgTraceOutcome : ubyte { published = 0, rejected = 1, failed = 2 }
+
+// Slot identity is explicit: -2,-1,trigger,+1,+2 correspond to slots 0 through 4.
+// markers_ns follows waitEnter,waitReturn,rearmReturn,validated,loadDone,writeStampDone,
+// mainPostDone,syncPostDone,loopTailDone. valid marks available endpoints; invalid_markers counts failures.
+// Original SDK acquisition and CLOCK_REALTIME write stamps retain their clocks and raw components.
+table FgTraceEvent
+{
+    slot:ubyte;
+    sequence:ulong;
+    session:ulong;
+    frame_number:ulong;
+    output_counter:ulong;
+    stream_inode:ulong;
+    mode:uint;
+    bin_x:uint;
+    bin_y:uint;
+    frame_valid:bool;
+    output_valid:bool;
+    atime_sec:long;
+    atime_nsec:long;
+    writetime_sec:long;
+    writetime_nsec:long;
+    markers_ns:[long] (required);
+    valid:uint;
+    invalid_markers:uint;
+    outcome:FgTraceOutcome;
+    anchor_ns:long = -1;
+}
+
+// Counts are cumulative since configuration; absence and bounded diagnostic loss stay explicit.
+table FgTraceStatus
+{
+    enabled:bool;
+    capacity:ulong;
+    ready:ulong;
+    pending:ulong;
+    detected:ulong;
+    recorded:ulong;
+    dropped:ulong;
+    incomplete:ulong;
+    unclassified:ulong;
+    discontinuities:ulong;
+    event_dropped:ulong;
+    control_dropped:ulong;
+}
+
+// Every selected interval retains five fixed slots, including missing neighbors indicated by present.
+// Thresholds and markers are integer ns. Serial overlap observes completed control operations only;
+// a zero overlap does not rule out an in-flight or lost control operation and does not establish causation.
+table Telem_fgtrace_fb
+{
+    id:ulong;
+    present:ubyte;
+    qualified:bool;
+    direction:FgTraceDirection;
+    end:FgTraceEnd;
+    median_ns:long;
+    interval_ns:long;
+    threshold_ns:long;
+    bracket_limit_ns:long;
+    evaluated_ns:long;
+    control_coverage_ns:long;
+    events:[FgTraceEvent] (required);
+    serial_overlap_ns:[long] (required);
+    status:FgTraceStatus (required);
+    process_pid:ulong;
+    acquisition_tid:ulong;
+    emitted_ns:long;
+    baseline_intervals:ulong;
+}
+
+root_type Telem_fgtrace_fb;

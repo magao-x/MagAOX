@@ -17,6 +17,7 @@
 
 #include "../../common/paths.hpp"
 #include "../../logger/types/telem_fgstage.hpp"
+#include "../../logger/types/telem_fgtrace.hpp"
 #include "frameGrabberTiming.hpp"
 
 namespace MagAOX
@@ -136,6 +137,8 @@ class frameGrabber
 
     double m_stageBracketUs{
         0 }; ///< Positive clock-bracket limit for conditional attribution; zero leaves it ambiguous.
+
+    unsigned m_stageTraceMax{ 0 }; ///< Maximum ready/pending excursion records; zero disables individual capture.
 
     int m_defaultFlip{ fgFlipNone }; ///< Configured orientation of copied images.
 
@@ -318,6 +321,8 @@ class frameGrabber
 
     pcf::IndiProperty m_indiP_timingQuality; ///< Timing coverage, generation, losses and validity.
 
+    uint64_t m_traceLogFailed{ 0 }; ///< Individual records discarded after an emission-clock or telemetry error.
+
   public:
     /// Update the INDI properties for this device controller
     /** You should call this once per main loop.
@@ -339,6 +344,9 @@ class frameGrabber
 
     /// Record optional stage timing and qualification from the consumer cache.
     int recordFGStageTimings( bool force = false /**< [in] Emit a forced disabled/stale snapshot as well. */ );
+
+    /// Emit each completed excursion context once, outside the acquisition thread.
+    int recordFGTraceTimings();
 
     /// @}
 
@@ -490,6 +498,16 @@ int frameGrabber<derivedT>::setupConfig( mx::app::appConfigurator &config )
         "double",
         "Positive maximum write-clock bracket for conditional attribution, us; zero leaves attribution ambiguous." );
 
+    config.add( "framegrabber.stageTraceMax",
+                "",
+                "framegrabber.stageTraceMax",
+                argType::Required,
+                "framegrabber",
+                "stageTraceMax",
+                false,
+                "unsigned",
+                "Maximum pending/ready excursion contexts, 0 disables, maximum 256; requires stage timing." );
+
     if( derivedT::c_frameGrabber_flippable )
     {
         config.add( "framegrabber.defaultFlip",
@@ -543,11 +561,14 @@ int frameGrabber<derivedT>::loadConfig( mx::app::appConfigurator &config )
     config( m_stageTiming, "framegrabber.stageTiming" );
     config( m_stageBracketUs, "framegrabber.stageBracketUs" );
     config( m_stageExcursionUs, "framegrabber.stageExcursionUs" );
+    config( m_stageTraceMax, "framegrabber.stageTraceMax" );
 
     if( !mx::math::isFinite( m_latencyCircBuffMaxTime ) || m_latencyCircBuffMaxTime >= 9e9 ||
         m_latencyCircBuffMaxLength < 0 || !mx::math::isFinite( m_stageBracketUs ) || m_stageBracketUs < 0 ||
         m_stageBracketUs >= 1e9 || !mx::math::isFinite( m_stageExcursionUs ) || m_stageExcursionUs < 0 ||
-        m_stageExcursionUs >= 1e9 )
+        m_stageExcursionUs >= 1e9 || m_stageTraceMax > 256 ||
+        ( m_stageTraceMax > 0 && ( !m_stageTiming || m_latencyCircBuffMaxTime <= 0 || m_latencyCircBuffMaxLength < 4 ||
+                                   m_stageExcursionUs < 0.001 ) ) )
     {
         return derivedT::template log<software_critical, -1>( { "Invalid framegrabber timing configuration" } );
     }
@@ -597,7 +618,8 @@ int frameGrabber<derivedT>::appStartup()
                               static_cast<size_t>( m_latencyCircBuffMaxLength ),
                               m_stageTiming,
                               m_stageExcursionUs * 1e-6,
-                              m_stageBracketUs * 1e-6 );
+                              m_stageBracketUs * 1e-6,
+                              m_stageTraceMax );
     }
     catch( const std::exception &error )
     {
@@ -713,6 +735,23 @@ int frameGrabber<derivedT>::appStartup()
         m_indiP_timingQuality.add( pcf::IndiElement( std::string( "delta_" ) + name ) );
     }
 
+    for( const auto &name : { "traceEnabled",
+                              "traceCapacity",
+                              "traceReady",
+                              "tracePending",
+                              "traceDetected",
+                              "traceRecorded",
+                              "traceDropped",
+                              "traceIncomplete",
+                              "traceUnclassified",
+                              "traceDiscontinuities",
+                              "traceEventDropped",
+                              "traceControlDropped",
+                              "traceLogFailed" } )
+    {
+        m_indiP_timingQuality.add( pcf::IndiElement( name ) );
+    }
+
     if( derived().registerIndiPropertyReadOnly( m_indiP_stageTiming ) < 0 ||
         derived().registerIndiPropertyReadOnly( m_indiP_timingQuality ) < 0 )
     {
@@ -777,6 +816,7 @@ int frameGrabber<derivedT>::updateTiming()
     }
 
     recordFGStageTimings();
+    recordFGTraceTimings();
 
     return 0;
 }
@@ -1402,6 +1442,36 @@ int frameGrabber<derivedT>::updateINDI()
         values.push_back( static_cast<double>( summary.delta.*fields[i] ) );
     }
 
+    const auto &trace = m_fgTiming.traceStatus();
+    names.insert( names.end(),
+                  { "traceEnabled",
+                    "traceCapacity",
+                    "traceReady",
+                    "tracePending",
+                    "traceDetected",
+                    "traceRecorded",
+                    "traceDropped",
+                    "traceIncomplete",
+                    "traceUnclassified",
+                    "traceDiscontinuities",
+                    "traceEventDropped",
+                    "traceControlDropped",
+                    "traceLogFailed" } );
+    values.insert( values.end(),
+                   { static_cast<double>( trace.enabled ),
+                     static_cast<double>( trace.capacity ),
+                     static_cast<double>( trace.ready ),
+                     static_cast<double>( trace.pending ),
+                     static_cast<double>( trace.detected ),
+                     static_cast<double>( trace.recorded ),
+                     static_cast<double>( trace.dropped ),
+                     static_cast<double>( trace.incomplete ),
+                     static_cast<double>( trace.unclassified ),
+                     static_cast<double>( trace.discontinuities ),
+                     static_cast<double>( trace.eventDropped ),
+                     static_cast<double>( trace.controlDropped ),
+                     static_cast<double>( m_traceLogFailed ) } );
+
     indi::updateIfChanged<double>( m_indiP_timingQuality, names, values, derived().m_indiDriver );
 
     return 0;
@@ -1434,6 +1504,43 @@ int frameGrabber<derivedT>::recordFGStageTimings( bool force )
     }
 
     return 0;
+}
+
+template <class derivedT>
+int frameGrabber<derivedT>::recordFGTraceTimings()
+{
+    const auto &records = m_fgTiming.traceRecords();
+
+    if( records.empty() )
+    {
+        return 0;
+    }
+
+    const int64_t emitted = frameGrabberTiming::monotonicNowNs();
+    int           result  = 0;
+
+    if( emitted < 0 )
+    {
+        m_traceLogFailed += records.size();
+        m_fgTiming.clearTraceRecords();
+        return -1;
+    }
+
+    for( const auto &record : records )
+    {
+        if( derived().template telem<telem_fgtrace>( { record,
+                                                       m_fgTiming.traceStatus(),
+                                                       static_cast<uint64_t>( getpid() ),
+                                                       static_cast<uint64_t>( m_fgThreadID ),
+                                                       emitted } ) < 0 )
+        {
+            ++m_traceLogFailed;
+            result = -1;
+        }
+    }
+
+    m_fgTiming.clearTraceRecords();
+    return result;
 }
 
 template <class derivedT>

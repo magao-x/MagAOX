@@ -1944,3 +1944,99 @@ continuation. Its offline regression passes 56 assertions in one case,
 including EPERM/EINVAL and success with independent errno values. This does
 not change scheduling policy or establish the instrument's actual policy.
 The operator approved committing and pushing this fix with the camera work.
+
+## 2026-10-23 first OCAM stage telemetry
+
+After rebuilding, the operator supplied three valid `[fgstage]` windows with
+stage collection enabled and no reported acquisition/frame/diagnostic losses.
+SDK acquisition-interval deviation is 0.319–0.346 us, versus publication's
+1.088–2.018 us; output extrema reach 424.882–572.732 us. SDK return intervals,
+conversion/load and main-notification durations contain candidate tails, but
+their independent extrema do not locate a particular output excursion.
+
+`stageBracketUs=0` leaves every interval ambiguous, so zero late/early counts
+are expected rather than evidence of no excursions. A provisional diagnostic
+bracket of 1 us is proposed for the next unchanged-workload operator capture,
+given observed brackets of 0.040–0.100 us. The scheduler reserve remains
+undecided. Completed serial operations overlap about half the observed frames;
+this is not proof of blocking or causation. Full populations, provenance and
+limitations are in the [OCAM plan](ocam2k-acquisition-publication-timing.md).
+No code, configuration, commit, push or agent instrument action accompanies
+this documentation analysis.
+
+## 2026-10-23 qualified OCAM excursion attribution
+
+The next operator capture sets the provisional clock bracket to 1 us. All
+3999 intervals qualify in each of three nonoverlapping two-second windows,
+with four late and six early intervals in total and no new failures, frame
+gaps or diagnostic losses. The matched cohort identity holds in all six
+cohorts. Conversion/load changes contribute approximately +36.8 us to both
+single-event late cohorts and -36–38 us to the early cohort means.
+
+The largest late interval decomposes as **577.591 = 540.140 + 37.451 us**:
+40.140 us above nominal is already present at SDK return, and conversion/load
+accounts for 36.780 us of the additional return-to-write change. Its preceding
+post-write tail is also long, at 43.743 us. Thus the evidence identifies more
+than one elapsed-time region; it does not establish extra algorithmic work
+inside the descrambler rather than interruption while it runs. Ordering of
+classified late/early events and serial correlation remain unavailable in
+this excerpt. Detailed populations and limitations are in the
+[OCAM plan](ocam2k-acquisition-publication-timing.md).
+
+Only engineering documentation changed. No code/configuration, test/build
+rerun, commit, push or agent instrument action accompanies this analysis.
+
+## 2026-10-23 longer OCAM stage capture
+
+The operator's `camwfs_fgstage.txt` has 35 disjoint two-second windows with
+140000 retained frame observations and 139965 qualified intervals: 69 late,
+84 early and zero ambiguous. Record endpoints span 69.889 seconds; approximately
+50–57 ms gaps between retained windows limit continuous event coverage. All
+failure/frame-gap/invalid/drop counters remain zero. Two new wide brackets are
+accounted cumulatively outside the retained windows.
+
+Pooled SDK acquisition, return and publication deviations are respectively
+0.359, 0.869 and 1.604 us; acquisition extrema still reach 480–525 us. The
+longer sample changes the emphasis from conversion to a recurring disturbance
+in multiple regions: rearm, validation, conversion, main notification and sync
+notification all have tails with roughly 36–39 us added elapsed time. One
+single late event has a 536.773 us output interval with +36.749 us rearm change
+while conversion decreases 1.321 us. Another is already late at SDK return.
+Conversion remains the largest pooled post-return contributor, but is not the
+unique delay location.
+
+Interruption/preemption or shared-resource delay is a working hypothesis,
+not an identified cause. Ordered excursion/neighbor records and a controlled
+scheduler/IRQ comparison are the next useful causal measurements. Serial
+association and universal late-then-early ordering remain unresolved. The
+[OCAM plan](ocam2k-acquisition-publication-timing.md) records numerical pooling,
+matched examples, input provenance and qualifications. No C++ changes,
+configuration changes, commit, push or agent instrument actions accompany
+this analysis.
+
+## 2026-10-23 causal measurement setup implemented
+
+At the operator's request, the camera collector now optionally emits bounded
+`[fgtrace]` excursion records with two preceding and two following frames,
+using the existing producer event timestamps. Selection, median maintenance and
+serialization run on the ordinary consumer. The causal preceding-interval median,
+raw bracket qualification, exact monotonic clocks, PID/TID, identities, missing
+neighbors and diagnostic losses are recorded. `stageTraceMax=16` is the initial
+operator setting; zero remains the default. No additional acquisition-thread
+clock reads or locks are introduced.
+
+An operator-only helper captures a short private tracefs `mono` instance with
+scheduler/IRQ activity on the camera CPUs and saves placement, event definitions
+and trace-loss evidence. The
+[procedure](../../../apps/ocam2KCtrl/doc/camera-timing-trace.md) gives the rebuild,
+configuration, baseline/on comparison and capture commands. The
+[OCAM plan](ocam2k-acquisition-publication-timing.md) records implementation,
+scope and qualification limits.
+
+Workstation checks pass 4013 assertions in 72 C++ cases, seven fake tracefs
+tests, sanitizer stress checks, normal library/reader builds and the camera
+build against copied PDV 5.6.8.0. Hardware overhead and causal correlation remain
+operator measurements. No configuration change or agent instrument action was
+performed. On 2026-10-24 the operator approved committing and pushing the
+verified follow-up: measurements/helper/tests and engineering records first,
+then the user guide and capture procedure in a documentation-only commit.

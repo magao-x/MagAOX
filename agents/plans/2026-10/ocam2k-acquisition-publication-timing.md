@@ -7,6 +7,22 @@ loaded-driver and DMA-owner-thread qualification remain pending. No instrument
 changes have been performed. The operator approved committing and pushing the
 verified implementation.
 
+Operator `[fgstage]` captures confirm active, clean stage collection and much
+steadier acquisition than publication intervals. The first capture left the
+bracket undecided; a subsequent capture with a provisional 1 us bracket has
+fully qualified intervals and matched excursion cohorts. Conversion/load
+duration changes explain much of their added publication variation, while the
+largest late event also follows a long post-write tail and delayed SDK return.
+The captures are recorded below; they establish no performance bound or
+scheduler margin.
+
+A subsequent 35-window capture confirms the recurring disturbance in multiple
+regions, including rearm and validation as well as conversion and notification.
+The authorized causal-capture follow-up is now implemented and verified locally:
+optional chronological excursion records and an operator-run private kernel
+trace helper. Causal instrument measurements and overhead qualification remain
+pending; the descrambler alone is not established as the source.
+
 ## Request and purpose
 
 > ok, well let's take a hard look at ocam2KCtrl.  I think this calls for a new plan document to record findings on this.
@@ -873,6 +889,414 @@ remain separate review and operator-qualification tasks. No scheduling margin,
 write-bracket limit or acceptable instrumentation overhead has been selected
 by inspecting the SDK.
 
+## 2026-10-23 first operator camera-stage capture
+
+The operator supplied
+`/home/jrmales/.codex/attachments/7332fbdb-2b8b-4413-9bf2-67a0c97ee839/Pasted text.txt`.
+It contains three `[fgstage]` records at October 24 05:27:54.969–05:27:59.081
+UTC (October 23 22:27:54.969–22:27:59.081 Phoenix time), session 5, sequences
+34–36. All show `state=valid`, `enabled=1`, `stages_enabled=1`,
+`fg_valid=1`, a two-second window and approximately 4000 published frames /
+3999 adjacent intervals. Mode is SDK mode 3, with digital factors 1x1; the
+ordinary camera telemetry identifies bin2, sync On and 2000 FPS.
+
+Ranges below are across the three independently reported windows. Extrema
+from different rows or metrics are not matched frame observations.
+
+| Metric | Mean, us | Window standard deviation, us | Overall observed minimum–maximum, us |
+| --- | ---: | ---: | ---: |
+| SDK acquisition interval | 500.000250–500.000500 | 0.318670–0.346496 | 488.000–512.000 |
+| Realtime publication interval | 500.000256–500.000582 | 1.088327–2.017938 | 424.882–572.732 |
+| SDK wait-return interval | 500.000464–500.000635 | 0.870343–0.916738 | 463.284–537.705 |
+| SDK acquisition to realtime write | 52.055944–52.078971 | 1.077642–1.478071 | 50.056–127.623 |
+| Rearm | 4.751741–4.752506 | 0.036111–0.044226 | 4.699–6.572 |
+| Validation | 0.363483–0.365375 | 0.074861–0.079971 | 0.310–0.922 |
+| Conversion/load | 26.368864–26.392050 | 0.800376–0.991539 | 24.646–64.261 |
+| Write-clock bracket | 0.049020–0.049169 | 0.004565–0.004807 | 0.040–0.100 |
+| Metadata/main notification | 3.755463–3.759527 | 0.604713–0.608384 | 3.186–41.088 |
+| SDK return to write endpoint | 31.533744–31.558336 | 0.809346–1.012921 | 29.777–69.872 |
+| Previous write endpoint to current wait entry | 4.856048–4.864455 | 0.617117–0.619596 | 4.118–42.230 |
+
+The compatible `[fgtimes]` statistics agree with the new paired populations.
+Monotonic write-endpoint intervals agree closely with realtime publication
+intervals. At the last snapshot, all 153981 reported attempts are published,
+with cumulative rejected, failed, duplicate, counter-gap, raw-frame-gap,
+invalid and dropped counts zero. Completed-control failure, invalid and loss
+counts are also zero. One queued frame is a small reader backlog, not a
+reported loss. These counters establish the coverage reported by this collector,
+not an independent proof of physical camera completeness or negligible overhead.
+
+The SDK timestamp intervals are much steadier than the output timestamps in
+these windows. Return intervals already have excursions of about +/-37 us;
+conversion/load and the post-write main-notification segment also have large
+individual duration tails. This narrows candidates but does not assign any
+particular output excursion to a segment. Do not subtract the independent
+RMS values or pair independent maxima. The main-notification segment follows
+the current write timestamp, so its effect must be evaluated against the next
+frame, not attributed to delaying that already sampled timestamp.
+
+All records have `bracket_limit_s=0`, `qualified=0`, `ambiguous=3999`, and
+zero late/early cohort counts. This is the intended undecided-bracket behavior,
+not evidence that the visible approximately -75/+73 us publication excursions
+are absent. Raw populations are retained; the matched conditional tables are
+unavailable until a positive bracket criterion is configured.
+
+For the next operator comparison, a **provisional diagnostic**
+`stageBracketUs=1` is proposed: the observed brackets are only 0.040–0.100 us.
+Retain `stageTiming=true`, `stageExcursionUs=20`, and the same camera mode,
+workload and placement, then restart the camera app for this restart-only
+setting. Check qualified/ambiguous counts and all losses with the new late/early
+cohorts before assigning a segment. This proposed one-microsecond bracket is
+an accuracy filter around the existing write-clock sample; it is neither an
+early-arrival reserve nor an approved instrumentation-overhead limit. No local
+configuration or instrument setting was changed for this analysis.
+
+Two completed serial transactions are present per window, each lasting about
+0.520–0.534 seconds; 1998 of 4000 frame observations overlap completed serial
+transactions. This measures concurrency, not half-second acquisition stalls.
+No causal relation to the outliers is established. Completed transactions alone
+provide retrospective overlap coverage; retain that limitation when inspecting
+the future conditional serial-change populations.
+
+Only engineering documentation changed for this analysis. Numerical fields
+were parsed from the attachment and compared with collector/guide semantics;
+whitespace validation passed. No C++ changes, test/build reruns, commit, push or
+agent instrument actions were performed.
+
+## 2026-10-23 qualified operator camera-stage capture
+
+The next attachment is
+`/home/jrmales/.codex/attachments/61217b8a-d747-43cb-97f0-765ab06ab792/Pasted text.txt`.
+Its three records are at October 24 05:34:55.320–05:34:59.433 UTC (October 23
+22:34:55.320–22:34:59.433 Phoenix time), session 5, sequences 40–42, stream
+inode 3322. Each has approximately 4000 outputs, 3999 intervals, and
+`bracket_limit_s=1e-06` with `qualified=3999`, `ambiguous=0`. The 20 us
+excursion threshold and bin2/mode-3/digital-1x1/2000-FPS settings remain visible
+in the records. The stream identity differs from the preceding raw capture,
+consistent with a restart/recreation; these are separate runs.
+
+The windows span approximately 1.9995 seconds and their capture endpoints are
+over 2.056 seconds apart. Their retained populations therefore do not overlap.
+Together they contain 11997 qualified intervals, four late and six early
+intervals. Cumulative attempts/published reach 200723 with rejected, failed,
+duplicates, counter gaps, frame gaps, invalid and dropped counts zero. Control
+failure/invalid/drop counts are zero. `bracketWide=4` is unchanged cumulatively,
+with zero new wide brackets in each reported delta and none excluding the
+current windows; retain those earlier observations rather than interpreting
+this sample as a lifetime bound on bracket width.
+
+The matched populations now support the identity, in microseconds:
+
+```text
+write endpoint interval = SDK return interval + change in return-to-write duration
+```
+
+| Sequence/cohort | Count | Write interval | Return interval | Change in return-to-write | Change in conversion/load | Previous post-write tail |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 40 late | 1 | 545.249 | 508.139 | +37.110 | +36.790 | 4.609 |
+| 40 early | 2 | 465.2485 | 502.369 | -37.1205 | -37.806 | 5.0895 |
+| 41 late | 2 | 534.639 | 514.036 | +20.603 | +20.384 | 23.3485 |
+| 41 early | 2 | 466.952 | 504.4675 | -37.5155 | -38.047 | 4.824 |
+| 42 late | 1 | 577.591 | 540.140 | +37.451 | +36.780 | 43.743 |
+| 42 early | 2 | 458.9415 | 495.1545 | -36.213 | -36.2485 | 4.7395 |
+
+All entries are cohort means with matching counts, not independently paired
+extrema. All six identities agree to the printed precision; rearm, validation
+and write-bracket signed changes also sum with conversion to the reported
+return-to-write change. For a one-event population, `valid=0` means that sample
+variance is unavailable, not that the event's duration or mean is unusable.
+
+The largest late event is particularly informative because its cohort has one
+event. Relative to 500 us, the publication interval is +77.591 us: +40.140 us
+is already present between SDK returns, and +37.451 us is added through a
+longer current return-to-write duration. Conversion/load contributes +36.780 us,
+rearm +0.661 us and validation +0.010 us, with unchanged write bracket.
+The same event has a 43.743 us previous post-write tail, versus this window's
+ordinary mean of 4.865 us. Its current main-notification duration is 39.074 us
+shorter than its preceding frame's, consistent with a preceding notification
+tail. These facts support contributions in both the preceding post-write path
+and current conversion region; they do not prove which operating-system or
+device activity caused either elapsed-time increase.
+
+The early cohorts have conversion/load contractions of approximately 36–38 us
+and SDK-return intervals near 500 us on average. They strongly associate the
+short output intervals with a shorter current conversion/load duration than
+the preceding frame. This is not evidence that every early interval directly
+follows a classified late interval: the summary does not retain that ordering,
+and the previous interval could lie below the 20 us classification threshold.
+Four late versus six early intervals must not be read as universal pairing.
+
+The current active path has no extra digital binning: the conversion/load
+bracket surrounds the write-flag setup and `ocam2_descramble()` path in
+`loadImageIntoStream()`. It measures wall time, including preemption, interrupts,
+memory/cache effects and instrumentation between its endpoints. It does not
+show that the descrambler itself performs approximately 37 us of extra
+instructions. Distinguishing additional on-CPU work from interruption during
+that bracket is the next causal question. Retain this configuration for a
+longer sample before changing pixel code, polling, DMA policy or scheduling.
+
+Serial durations and approximately half-window overlap persist. Excursion-
+conditioned serial-overlap populations are unavailable in these records, so no
+serial/outlier correlation or causal conclusion follows from the overlap
+count. Existing stage measurements locate elapsed-time changes, not a root
+cause or overhead qualification. No scheduler reserve is selected.
+
+The attachment was parsed offline and all six matched-mean identities and
+segment sums were checked numerically. Only engineering documentation changed;
+whitespace checks passed. No functional change, new test/build run, commit,
+push or agent instrument action was performed for this analysis.
+
+## 2026-10-23 longer qualified camera-stage capture
+
+The operator supplied `/home/jrmales/camwfs_fgstage.txt`, SHA-256
+`59a29b768f137f4a7585aa2efc72ec171467bd7ee0e06ca1beedfcf314081241`.
+ANSI terminal escapes were removed for offline parsing. The file contains 35
+stage records, sequences 199–233, at October 24 05:40:22.096–05:41:31.985 UTC
+(October 23 22:40:22.096–22:41:31.985 Phoenix time). Session 5, stream inode
+3322, SDK mode 3, digital factors 1x1, two-second windows, 20 us excursion
+threshold and provisional 1 us clock bracket remain consistent.
+
+The record endpoints span 69.889 seconds. Each retained window contains 4000
+published frames and 3999 adjacent intervals. Endpoint spacing of
+2.049–2.057 seconds makes these populations disjoint, with approximately
+50–57 ms gaps between windows; the summaries do not provide continuous
+per-event coverage. The sample comprises 140000 retained frame observations
+and 139965 intervals, all qualified with zero ambiguous intervals. There are
+69 late and 84 early intervals, respectively 0.0493% and 0.0600% of the retained
+interval population at the configured median +/-20 us classifier. The median
+ranges from 499.984 to 500.024 us.
+
+All cumulative reject, failure, duplicate, output-counter gap, raw-frame gap,
+invalid and diagnostic-drop counters remain zero. Control failure/invalid/drop
+counters also remain zero. First-to-last output and raw frame counters advance
+139778 over 69.889 seconds, consistent with the nominal 2 kHz stream. Cumulative
+wide brackets increase from 71 to 73, and the reported deltas also sum to two
+new wide brackets. However, all retained brackets are at most 0.241 us and
+every retained interval qualifies: the two new wide observations are outside
+the retained windows. They remain visible in lifetime accounting and must not
+be silently treated as never occurring.
+
+The following pooled standard deviations combine each disjoint population's
+count, mean and within-window sample variance; they are not averages of the
+printed RMS values. All durations below are microseconds.
+
+| Interval | Pooled mean | Pooled standard deviation | Observed minimum–maximum |
+| --- | ---: | ---: | ---: |
+| SDK acquisition | 500.000429 | 0.359410 | 480.000–525.000 |
+| SDK return | 500.000440 | 0.868726 | 462.604–538.066 |
+| Realtime publication | 500.000428 | 1.603656 | 424.031–575.917 |
+
+Acquisition is much steadier statistically, but is not excursion-free: the
+525 us acquisition interval occurs in sequence 232. Monotonic write-endpoint
+statistics agree closely with the realtime publication statistics. SDK
+acquisition-to-write context averages 52.815 us, spanning 37.344–129.017 us;
+its external-clock interpretation remains subject to the earlier provenance
+qualifications.
+
+Matched late means, weighted by the 69 cohort observations, decompose as:
+
+```text
+543.265362 = 517.381391 + 25.883971 us
+write interval = return interval + change in return-to-write duration
+```
+
+Conversion contributes +22.537377 us of the mean +25.883971 us post-return
+change; rearm contributes +2.837391 us, validation +0.508217 us and the clock
+bracket +0.000986 us. Across the 84 early observations, the identity is:
+
+```text
+464.690226 = 490.576964 - 25.886738 us
+```
+
+Conversion contributes -25.265119 us of that mean contraction. Thus conversion
+remains a frequent contributor, but these pooled means cannot establish that
+each outlier has the same cause or location.
+
+The longer capture supplies decisive counterexamples to conversion-only
+attribution. Each example below has exactly one late event in its window:
+
+| Sequence | Write interval | Return interval | Change after return | Relevant same-cohort evidence |
+| --- | ---: | ---: | ---: | --- |
+| 200 | 536.773 | 500.876 | +35.897 | Rearm increases 36.749 us; conversion decreases 1.321 us. |
+| 208 | 537.755 | 537.905 | -0.150 | Almost all interval extension is already present at SDK return. |
+| 209 | 575.477 | 537.344 | +38.133 | Conversion increases 36.349 us; previous post-write tail is 41.499 us. |
+| 214 | 575.917 | 537.385 | +38.532 | Conversion increases 37.440 us; previous post-write tail is normal at 4.719 us. |
+
+Large individual elapsed durations also occur in several different regions:
+
+| Region | Pooled mean, us | Observed maximum, us |
+| --- | ---: | ---: |
+| Rearm | 4.754 | 41.759 |
+| Validation | 0.362 | 37.090 |
+| Conversion/load | 27.091 | 66.536 |
+| Metadata/main notification | 3.767 | 41.508 |
+| Sync notification | 0.790 | 37.992 |
+| Loop tail | 0.153 | 29.205 |
+
+The recurring approximately 36–39 us additions in multiple regions support
+an intermittent interruption or shared-resource delay as a working hypothesis,
+rather than a unique conversion algorithm path. They do not identify a
+specific interrupt, scheduling event, firmware activity, SDK operation or
+memory-system cause. Regional maxima are not matched to each other; the
+single-event examples above are the stronger per-event evidence. Wall-time
+markers include interruption as well as actual execution, and post-write
+notification work must still be related to the following frame.
+
+Seventy completed serial transactions average 526.561 ms (518.938–534.682 ms
+extrema), with 1998 overlapping frame observations per retained window, or
+49.95% of those observations. These are successful completed control envelopes,
+not camera stalls. The capture still lacks excursion-conditioned serial
+overlap and ordered neighboring event records, so it cannot establish control
+causation or that every early interval follows a late one.
+
+This sample is sufficient to establish the recurring multi-region pattern.
+The next useful diagnostic is a bounded chronological record of excursions
+and their neighboring frames, with marker timestamps, identities and clock
+references suitable for an operator-controlled camera-CPU scheduler/IRQ
+comparison. That would preserve event order and help distinguish interruption
+from extra execution. The causal experiment and its overhead require their
+own review; no new instrumentation, pixel change, polling change, scheduling
+change or DMA-policy change is implemented here. The early-arrival reserve
+remains undecided.
+
+Both an independent offline parse and the coordinator's parse agree on counts,
+pooled means, variances, extrema and matched examples. All 70 matched cohort
+identities and corresponding segment sums were checked to the printed
+precision. Offline analysis files are `/tmp/analyze_ocam_fgstage.py`,
+`/tmp/ocam-long-fgstage.json` and `/tmp/ocam-long-summary.json`. Only engineering
+documentation changed; whitespace checks passed. No functional changes,
+test/build reruns, commit, push or agent instrument actions were performed.
+
+## 2026-10-23 chronological excursion and scheduler/IRQ setup
+
+The operator approved setting up the causal measurements. The implementation
+adds optional `[fgtrace]` records and the
+[operator capture procedure](../../../apps/ocam2KCtrl/doc/camera-timing-trace.md),
+without changing pixel processing, SDK/DMA policy, cadence, affinity or
+scheduling policy. No instrument or tunneled INDI command was run by an agent.
+
+### Consumer-only chronological capture
+
+`framegrabber.stageTraceMax` defaults to zero. A positive value, at most 256,
+bounds ready plus pending excursion contexts; 16 is the proposed initial
+operator setting. It requires stage timing, a positive timing window, at least
+four timing slots and `stageExcursionUs >= 0.001` (one nanosecond). Existing
+`stageTiming=true`, `stageExcursionUs=20` and the provisional
+`stageBracketUs=1` remain the comparison settings. All are restart-only.
+
+The existing producer event layout and acquisition methods are unchanged.
+Selection, context retention and logging run on the ordinary consumer.
+Each selected trigger keeps two preceding and two following continuous frames
+in five fixed positions, including original SDK/realtime stamps, every available
+integer monotonic endpoint, identities, mode/outcomes and marker validity.
+The presence mask and `complete`, `boundary` or `expired` reason expose missing
+neighbors. Pending following frames survive ordinary updates; ready records are
+emitted once and cleared, without a periodic forced replay. At full capacity,
+the newest trigger is dropped and counted.
+
+The causal baseline is the median of at least three strictly preceding
+continuous intervals within the configured time/capacity history. Its exact
+integer value and population are stored per trigger. It need not equal the
+whole-window median in `[fgstage]`. A preallocated sorted workspace and fixed
+interval ring maintain that baseline on the consumer; insertion/removal is
+linear in retained history size. Warmup and continuity breaks remain counted.
+Selection examines consumed events before summary expiry, preserving events
+that fall between the approximately 2.055-second summary updates. Wide or
+undecided write brackets still produce raw excursion records with independent
+qualification rather than censoring those outliers.
+
+New typed telemetry `telem_fgtrace` is event **20907**. Binary, JSON, text and
+metadata preserve the five contexts, exact monotonic ns, PID/acquisition TID,
+selection baseline, consumer evaluation and ordinary batch-emission times, and
+bounded/source loss status. Available completed-control overlap is attached at
+finalization; it is not an assertion of in-flight control coverage. Queue losses,
+trace saturation and incomplete contexts are reported, with additional trace
+readbacks in `fg_timing_quality`. The ordinary wrapper also counts discarded
+records if its emission clock fails or telemetry reports an error; it does not
+claim durable logging acknowledgement. Source frames repeated in overlapping
+contexts must be deduplicated by session/stream/attempt identity when counting.
+
+### Operator-controlled kernel trace
+
+`apps/ocam2KCtrl/scripts/capture-camera-timing.py` creates only its own uniquely
+named tracefs instance. It requires the camera TID, captures all tasks on one
+to four selected CPUs including every CPU allowed for that TID, selects the
+matching `mono`/`CLOCK_MONOTONIC` clock, and takes a bounded 1–30 second capture
+(10 seconds initially). It enables scheduler and IRQ/softirq events, plus
+available x86 IRQ-vector events; timer/workqueue events are an optional separate
+comparison. It changes no worker/IRQ affinity or scheduler policy, leaves global
+and unrelated tracing untouched, and does not modify potentially shared trace
+options. CPU tracing can miss a wakeup emitted on an unselected remote CPU;
+that coverage limit remains explicit.
+
+The helper saves the stopped trace, per-CPU loss counters, event formats,
+clock/options/filters, boot/kernel identity, thread and IRQ placement, CPU
+topology, before/after interrupt counts and clock anchors. Initial metadata
+records the private instance path. Ordinary interruption stops/saves/cleans up;
+save or stop/disable errors preserve that instance and report its exact path.
+The procedure specifies baseline tracing-off/on telemetry, checks loss and CPU
+coverage, and describes recovery of only the owned instance. Missing kernel
+events, trace losses, capture boundaries and invisible NMI/SMI/shared-resource
+stalls limit causal and negative conclusions. Hardware overhead remains to be
+measured by the operator.
+
+### Workstation verification
+
+Seven C++ suites pass **4013 assertions in 72 cases**:
+
+| Suite | Assertions | Cases |
+| --- | ---: | ---: |
+| `frameGrabberTiming_test` | 193 | 15 |
+| `frameGrabberTraceTelemetry_test` | 461 | 4 |
+| `frameGrabber_integration_test` | 98 | 6 |
+| `ocam2KCtrl_test` | 613 | 30 |
+| `ocam2KCtrl_lifecycle_test` | 7 | 1 |
+| `cred2Ctrl_test` | 405 | 11 |
+| Existing `frameGrabberTelemetry_test` | 2236 | 5 |
+
+Tests cover ordered late/early neighborhoods, causal baseline warmup, events
+outside retained summary windows, pending following frames, all continuity
+boundaries, expiry, raw wide-bracket retention, source and capacity losses,
+concurrent handoff, and complete/partial production records through the actual
+logger verifier. Camera integration compares producer clock counts with
+individual capture off/on and confirms no additional acquisition clock reads.
+Each emitted context is delivered only once, including wrapper-error injection.
+The initial integration expectation of a compensating early interval was
+corrected: that fixture advances its SDK return relative to loop execution,
+so a single conversion delay produces one late interval. Separate fixed-grid
+collector tests exercise late-then-early order. A review found sub-nanosecond
+threshold truncation; configuration rejects it and the standalone collector
+defensively disables tracing for that unusable range, with regression coverage.
+
+The capture helper passes **seven fake-filesystem tests**, including setup,
+save and stop/disable failures and preservation of unrelated traces. No test
+accesses a live tracefs instance. The normal library/schema and `logdump` builds
+pass; the normal camera app compiles and links against the copied PDV **5.6.8.0**
+headers/library. No camera binary was launched. Build and suite logs are under
+`/tmp/fgtrace-`.
+
+ASan+UBSan and TSan stress runs pass with chronological capture enabled:
+300000 coherent queue payloads, 200000 mixed acquisition attempts and 40000
+completed controls across concurrent updates/epochs. They check ready+pending
+bounds and exact trigger-to-neighbor interval identities alongside existing
+loss and summary invariants. ASan uses `detect_leaks=0` because of the previously
+recorded environment restriction. Stress artifacts are `/tmp/fgtrace-sanitizer.cpp`
+and `/tmp/fgtrace-asan*` / `/tmp/fgtrace-tsan*`.
+
+Full-file clang-format, whitespace and relative documentation-link checks pass.
+The normal SDK build reports existing git-status pragmas; no new focused-test
+compiler warnings were found. No deployment or agent instrument action was
+performed.
+
+### 2026-10-24 commit/push checkpoint
+
+The operator approved committing and pushing this verified follow-up to the
+existing `jrmales/dm-syncopation` feature branch at `origin` (`magao-x/MagAOX`).
+Commit the measurements, helper, tests and engineering records first, followed
+by the user guide and operator procedure as documentation-only changes. No
+standalone formatting cleanup is needed. Hardware correlation and overhead
+qualification remain operator work.
+
 ## Affected files
 
 - `.clang-format`
@@ -881,7 +1305,10 @@ by inspecting the SDK.
 - `agents/plans/2026-10/ocam2k-acquisition-publication-timing.md`
 - `apps/cred2Ctrl/tests/cred2Ctrl_test.cpp`
 - `apps/dmSyncopation/doc/camera-acquWFS-test.md`
+- `apps/ocam2KCtrl/doc/camera-timing-trace.md`
 - `apps/ocam2KCtrl/ocam2KCtrl.hpp`
+- `apps/ocam2KCtrl/scripts/capture-camera-timing.py`
+- `apps/ocam2KCtrl/scripts/tests/capture_camera_timing_test.py`
 - `apps/ocam2KCtrl/tests/ocam2KCtrl_test.cpp`
 - `libMagAOX/Makefile`
 - `libMagAOX/app/MagAOXApp.hpp`
@@ -901,8 +1328,11 @@ by inspecting the SDK.
 - `libMagAOX/logger/logCodes.dat`
 - `libMagAOX/logger/logMeta.cpp`
 - `libMagAOX/logger/tests/frameGrabberTelemetry_test.cpp`
+- `libMagAOX/logger/tests/frameGrabberTraceTelemetry_test.cpp`
 - `libMagAOX/logger/types/schemas/telem_fgstage.fbs`
+- `libMagAOX/logger/types/schemas/telem_fgtrace.fbs`
 - `libMagAOX/logger/types/telem_fgstage.hpp`
+- `libMagAOX/logger/types/telem_fgtrace.hpp`
 - `tests/Makefile.one`
 - `tests/edtinc.h`
 - `tests/groups.dox`

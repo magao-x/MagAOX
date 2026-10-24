@@ -10,6 +10,7 @@
 #include <ctime>
 #include <deque>
 #include <memory>
+#include <type_traits>
 #include <vector>
 
 #include <mx/improc/imageUtils.hpp>
@@ -72,6 +73,7 @@ struct Camera : MagAOX::app::MagAOXApp<false>, MagAOX::app::dev::frameGrabber<Ca
     friend class MagAOX::app::dev::frameGrabber<Camera>;
     using Grabber = MagAOX::app::dev::frameGrabber<Camera>;
     using Grabber::m_fgTiming;
+    using Grabber::m_traceLogFailed;
 
     size_t                attempts{ 0 };            ///< Scripted acquisition attempts.
     size_t                loads{ 0 };               ///< Pixel conversion calls.
@@ -87,8 +89,19 @@ struct Camera : MagAOX::app::MagAOXApp<false>, MagAOX::app::dev::frameGrabber<Ca
     std::vector<timespec> publication;              ///< Actual existing realtime writetime samples.
     std::vector<uint64_t> counters;                 ///< Shared-memory publication counters observed by the sync hook.
 
+    int64_t conversionDelayNs{ 0 }; ///< Extra elapsed time during the eighth conversion, after baseline warmup.
+
+    size_t traceCalls{ 0 }; ///< Individual records handed to the ordinary-thread telemetry stub.
+
+    bool failTraceLog{ false }; ///< Inject an ordinary telemetry wrapper failure.
+
+    bool traceVerified{ true }; ///< Production collector records satisfy the typed logger validator.
+
+    std::vector<uint64_t> traceIds; ///< Serialized record IDs used to check one-time emission.
+
     /// Configure one isolated producer and preallocated timing storage.
-    explicit Camera( bool stages /**< [in] Enable optional local clocks. */ );
+    explicit Camera( bool   stages /**< [in] Enable optional local clocks. */,
+                     size_t traceMax = 0 /**< [in] Optional bounded individual capture capacity. */ );
 
     /// Remove a partially configured fixture stream if a test exits before the real loop's cleanup.
     ~Camera() noexcept;
@@ -131,15 +144,19 @@ struct Camera : MagAOX::app::MagAOXApp<false>, MagAOX::app::dev::frameGrabber<Ca
 
     /// Run the production loop synchronously and drain the resulting timing events afterward.
     void run();
+
+    /// Capture diagnostic serialization without creating a telemetry file or logger thread.
+    template <typename telT>
+    int telem( const typename telT::messageT &message /**< [in] Consumer-built telemetry message. */ );
 };
 
-Camera::Camera( bool stages ) : MagAOXApp( "test", false )
+Camera::Camera( bool stages, size_t traceMax ) : MagAOXApp( "test", false )
 {
     static size_t identity = 0;
     m_configName           = "fg-integration-test";
     m_shmimName            = "fg_timing_" + std::to_string( getpid() ) + "_" + std::to_string( ++identity );
     m_fgThreadInit         = false;
-    m_fgTiming.configure( 2, 32, stages, 20e-6, 1e-6 );
+    m_fgTiming.configure( 2, 32, stages, 20e-6, 1e-6, traceMax );
 }
 
 Camera::~Camera() noexcept
@@ -233,6 +250,12 @@ int Camera::loadImageIntoStream( void *destination )
 
     std::fill_n( static_cast<uint16_t *>( destination ), 4, uint16_t( attempts ) );
     frameGrabberIntegration::monoNs += 10000;
+
+    if( attempts == 8 )
+    {
+        frameGrabberIntegration::monoNs += conversionDelayNs;
+    }
+
     return 0;
 }
 
@@ -268,6 +291,24 @@ void Camera::run()
     fgThreadExec();
     m_fgTiming.update( frameGrabberIntegration::monoNs,
                        frameGrabberIntegration::realBase + frameGrabberIntegration::monoNs );
+}
+
+template <typename telT>
+int Camera::telem( const typename telT::messageT &message )
+{
+    if constexpr( std::is_same_v<telT, MagAOX::logger::telem_fgtrace> )
+    {
+        ++traceCalls;
+        const auto *record = MagAOX::logger::GetTelem_fgtrace_fb( message.builder.GetBufferPointer() );
+        traceIds.push_back( record->id() );
+        flatlogs::bufferPtrT buffer;
+        const int            created =
+            flatlogs::logHeader::createLog<telT>( buffer, { 1, 2 }, message, flatlogs::logPrio::LOG_TELEM );
+        traceVerified = traceVerified && created == 0 && telT::verify( buffer, telT::length( message ) );
+        return failTraceLog ? -1 : 0;
+    }
+
+    return 0;
 }
 
 /// Reset the deterministic clocks before each isolated execution.
@@ -420,6 +461,106 @@ TEST_CASE( "Framegrabber failed attempts do not publish output", "[dev::frameGra
     // clang-format off
 #ifdef FRAMEGRABBER_TEST_DOXYGEN_REF
     MagAOX::app::dev::frameGrabber<Camera>::fgThreadExec;
+#endif
+    // clang-format on
+}
+
+/** \brief Individual capture reuses producer clocks and emits bounded contexts once on the caller thread.
+ * \ingroup frameGrabber_unit_test
+ */
+TEST_CASE( "Framegrabber excursion telemetry stays outside the acquisition loop",
+           "[dev::frameGrabber][integration][trace]" )
+{
+    resetClock();
+    size_t producerReads = 0;
+
+    {
+        Camera baseline( true );
+        baseline.frames            = 12;
+        baseline.conversionDelayNs = 30000;
+        baseline.run();
+        producerReads = frameGrabberIntegration::monoReads;
+    }
+
+    resetClock();
+    Camera camera( true, 8 );
+    camera.frames            = 12;
+    camera.conversionDelayNs = 30000;
+    camera.run();
+    CHECK( frameGrabberIntegration::monoReads == producerReads );
+    CHECK( frameGrabberIntegration::realReads == 12 );
+    CHECK( camera.traceCalls == 0 );
+    // This fixture advances its next SDK return relative to the preceding loop,
+    // so one delayed conversion makes one late interval without a catch-up early interval.
+    REQUIRE( camera.m_fgTiming.traceRecords().size() == 1 );
+
+    SECTION( "each context is emitted only once" )
+    {
+        CHECK( camera.recordFGTraceTimings() == 0 );
+    }
+
+    SECTION( "reported telemetry wrapper failures are counted without retry duplication" )
+    {
+        camera.failTraceLog = true;
+        CHECK( camera.recordFGTraceTimings() == -1 );
+    }
+
+    CHECK( camera.traceCalls == 1 );
+    CHECK( camera.traceVerified );
+    CHECK( camera.m_traceLogFailed == ( camera.failTraceLog ? 1 : 0 ) );
+    REQUIRE( camera.traceIds.size() == 1 );
+    CHECK( camera.traceIds[0] > 0 );
+    CHECK( camera.m_fgTiming.traceRecords().empty() );
+    CHECK( camera.recordFGTraceTimings() == 0 );
+    CHECK( camera.traceCalls == 1 );
+
+    // clang-format off
+#ifdef FRAMEGRABBER_TEST_DOXYGEN_REF
+    MagAOX::app::dev::frameGrabber<Camera>::recordFGTraceTimings;
+    MagAOX::app::dev::frameGrabber<Camera>::fgThreadExec;
+#endif
+    // clang-format on
+}
+
+/** \brief A stopped producer's incomplete neighborhood remains a valid typed record across reset or expiry.
+ * \ingroup frameGrabber_unit_test
+ */
+TEST_CASE( "Framegrabber partial excursion contexts pass the production telemetry validator",
+           "[dev::frameGrabber][integration][trace]" )
+{
+    resetClock();
+    Camera camera( true, 8 );
+    camera.frames            = 9;
+    camera.conversionDelayNs = 30000;
+    camera.run();
+    REQUIRE( camera.m_fgTiming.traceRecords().empty() );
+    REQUIRE( camera.m_fgTiming.traceStatus().pending == 1 );
+    auto expected = TraceEnd::boundary;
+
+    SECTION( "configuration boundary" )
+    {
+        camera.m_fgTiming.newSession();
+    }
+
+    SECTION( "stopped acquisition expiry" )
+    {
+        frameGrabberIntegration::monoNs += 3000000000LL;
+        expected = TraceEnd::expired;
+    }
+
+    camera.m_fgTiming.update( frameGrabberIntegration::monoNs,
+                              frameGrabberIntegration::realBase + frameGrabberIntegration::monoNs );
+    REQUIRE( camera.m_fgTiming.traceRecords().size() == 1 );
+    CHECK( camera.m_fgTiming.traceRecords()[0].present == 0x0f );
+    CHECK( camera.m_fgTiming.traceRecords()[0].end == expected );
+    CHECK( camera.recordFGTraceTimings() == 0 );
+    CHECK( camera.traceCalls == 1 );
+    CHECK( camera.traceVerified );
+    CHECK( camera.m_fgTiming.traceRecords().empty() );
+
+    // clang-format off
+#ifdef FRAMEGRABBER_TEST_DOXYGEN_REF
+    MagAOX::app::dev::frameGrabber<Camera>::recordFGTraceTimings;
 #endif
     // clang-format on
 }

@@ -985,6 +985,60 @@ TEST_CASE( "ocam2KCtrl configuration loading handles defaults and supported gain
         REQUIRE( app.m_maxEMGain == Approx( 1.0f ) );
     }
 
+    SECTION( "bounded stage traces require stage timing and a usable classification history" )
+    {
+        ocam2KCtrl_test app;
+        app.setupConfig();
+        mx::app::writeConfigFile( uniqueConfigPath( "trace" ),
+                                  { "framegrabber", "framegrabber", "framegrabber", "framegrabber" },
+                                  { "stageTiming", "stageTraceMax", "latencyTime", "latencySize" },
+                                  { "true", "16", "2", "20000" } );
+        app.config.readConfig( uniqueConfigPath( "trace" ) );
+        auto &grabber = static_cast<dev::frameGrabber<ocam2KCtrl> &>( app );
+        REQUIRE( grabber.loadConfig( app.config ) == 0 );
+        CHECK( app.m_stageTraceMax == 16 );
+        CHECK( app.m_stageTiming );
+    }
+
+    SECTION( "individual capture rejects capacity above the diagnostic bound" )
+    {
+        ocam2KCtrl_test app;
+        app.setupConfig();
+        mx::app::writeConfigFile( uniqueConfigPath( "trace_bound" ),
+                                  { "framegrabber", "framegrabber" },
+                                  { "stageTiming", "stageTraceMax" },
+                                  { "true", "257" } );
+        app.config.readConfig( uniqueConfigPath( "trace_bound" ) );
+        auto &grabber = static_cast<dev::frameGrabber<ocam2KCtrl> &>( app );
+        CHECK( grabber.loadConfig( app.config ) < 0 );
+    }
+
+    SECTION( "individual capture cannot silently enable disabled stage clocks" )
+    {
+        ocam2KCtrl_test app;
+        app.setupConfig();
+        mx::app::writeConfigFile( uniqueConfigPath( "trace_stages" ),
+                                  { "framegrabber", "framegrabber" },
+                                  { "stageTiming", "stageTraceMax" },
+                                  { "false", "16" } );
+        app.config.readConfig( uniqueConfigPath( "trace_stages" ) );
+        auto &grabber = static_cast<dev::frameGrabber<ocam2KCtrl> &>( app );
+        CHECK( grabber.loadConfig( app.config ) < 0 );
+    }
+
+    SECTION( "individual capture cannot serialize a sub-nanosecond classifier as zero" )
+    {
+        ocam2KCtrl_test app;
+        app.setupConfig();
+        mx::app::writeConfigFile( uniqueConfigPath( "trace_threshold" ),
+                                  { "framegrabber", "framegrabber", "framegrabber" },
+                                  { "stageTiming", "stageTraceMax", "stageExcursionUs" },
+                                  { "true", "16", "0.0005" } );
+        app.config.readConfig( uniqueConfigPath( "trace_threshold" ) );
+        auto &grabber = static_cast<dev::frameGrabber<ocam2KCtrl> &>( app );
+        CHECK( grabber.loadConfig( app.config ) < 0 );
+    }
+
     SECTION( "loadConfig clamps maxEMGain above the supported maximum" )
     {
         ocam2KCtrl_test app;

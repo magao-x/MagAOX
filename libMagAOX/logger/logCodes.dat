@@ -85,6 +85,7 @@ telem_dmtimings          20892    telem_dmtimings
 
 telem_fgtimings          20905    telem_fgtimings
 telem_fgstage            20906    telem_fgstage
+telem_fgtrace            20907    telem_fgtrace
 
 telem_dmmodes            20910    telem_dmmodes
 

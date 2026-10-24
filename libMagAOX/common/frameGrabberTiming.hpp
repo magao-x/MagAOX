@@ -122,6 +122,63 @@ struct ControlEvent
     bool    success{ false }; ///< Caller-qualified transaction result.
 };
 
+/// Raw direction of a monotonic publication excursion against the preceding rolling median.
+enum class TraceDirection : uint8_t
+{
+    late,
+    early
+};
+
+/// Why a fixed chronological neighborhood stopped accepting following frames.
+enum class TraceEnd : uint8_t
+{
+    complete,
+    boundary,
+    expired
+};
+
+/// Consumer-selected excursion with two preceding and two following acquisition attempts.
+/** Index two is the trigger. Selection uses at least three strictly preceding
+ * consecutive intervals within the configured bounded trailing history. Wide or
+ * absent write brackets do not censor raw selection; qualified reports their
+ * independent attribution status. Completed-control overlap is only what the
+ * consumer knows when finalizing this record, never full in-flight coverage.
+ */
+struct TraceRecord
+{
+    uint64_t               id{ 0 };            ///< Monotonically increasing detected-excursion identity.
+    uint8_t                present{ 0 };       ///< Available neighborhood positions, bits zero through four.
+    bool                   qualified{ false }; ///< Trigger and preceding write brackets pass attribution checks.
+    TraceDirection         direction{ TraceDirection::late }; ///< Signed raw interval direction.
+    TraceEnd               end{ TraceEnd::complete };         ///< Completion or interruption of following neighbors.
+    int64_t                medianNs{ 0 };          ///< Prior-interval median, midpoint rounded down to integer ns.
+    uint64_t               baselineIntervals{ 0 }; ///< Number of strictly preceding intervals in this baseline.
+    int64_t                intervalNs{ 0 };        ///< Trigger's monotonic write-endpoint interval, ns.
+    int64_t                thresholdNs{ 0 };       ///< Strict distance used for raw selection, ns.
+    int64_t                bracketLimitNs{ 0 };    ///< Independent attribution limit; zero means undecided.
+    int64_t                evaluatedNs{ 0 };       ///< Consumer monotonic finalization time, ns.
+    int64_t                controlCoverageNs{ 0 }; ///< Evaluation cutoff for observed completed controls only.
+    std::array<Event, 5>   events{};               ///< Raw ordered attempts with all available clocks and provenance.
+    std::array<int64_t, 5> serialOverlapNs{ -1, -1, -1, -1, -1 }; ///< Known completed-control overlap per frame, ns.
+};
+
+/// Bounded consumer trace retention and cumulative diagnostic-loss accounting.
+struct TraceStatus
+{
+    bool     enabled{ false };     ///< Stages, positive capacity and an excursion threshold of at least one ns exist.
+    size_t   capacity{ 0 };        ///< Maximum ready plus pending neighborhoods.
+    size_t   ready{ 0 };           ///< Finalized neighborhoods awaiting ordinary-thread delivery.
+    size_t   pending{ 0 };         ///< Neighborhoods still awaiting following frames.
+    uint64_t detected{ 0 };        ///< Raw excursions identified, including capacity losses.
+    uint64_t recorded{ 0 };        ///< Complete or partial neighborhoods finalized since configure.
+    uint64_t dropped{ 0 };         ///< Newest neighborhoods rejected because retention was full.
+    uint64_t incomplete{ 0 };      ///< Finalized neighborhoods missing one or more requested neighbors.
+    uint64_t unclassified{ 0 };    ///< Valid intervals observed before three preceding baseline intervals exist.
+    uint64_t discontinuities{ 0 }; ///< Observed epoch, stream, attempt, counter or marker continuity breaks.
+    uint64_t eventDropped{ 0 };    ///< Acquisition handoff losses since configure.
+    uint64_t controlDropped{ 0 };  ///< Completed-control handoff losses since configure.
+};
+
 /// Coherent ordinary-thread cache; raw metrics are independent of conditional attribution.
 struct Summary
 {

@@ -10,6 +10,7 @@
 #include <ctime>
 #include <deque>
 #include <limits>
+#include <utility>
 #include <vector>
 
 #include <mx/math/floatUtils.hpp>
@@ -52,6 +53,16 @@ class frameGrabberTiming
     fgTiming::Event                    m_previousEvent;  ///< Last consumed event, for continuous quality accounting.
     bool                               m_havePrevious{ false }; ///< Previous event exists for continuity checks.
     bool                               m_everEvent{ false };    ///< Current session previously delivered events.
+    fgTiming::TraceStatus              m_traceStatus;           ///< Consumer-only bounded excursion accounting.
+    std::vector<fgTiming::TraceRecord> m_traceReady;   ///< Finalized records awaiting ordinary-thread serialization.
+    std::vector<fgTiming::TraceRecord> m_tracePending; ///< Accepted triggers awaiting two following neighbors.
+    std::array<fgTiming::Event, 2>     m_traceNeighbors{};        ///< Most recent continuous attempts, oldest first.
+    size_t                             m_traceNeighborCount{ 0 }; ///< Available preceding attempts.
+    uint64_t m_traceSequence{ 0 }; ///< Last classified sequence; repeated summaries never select twice.
+    std::vector<std::pair<int64_t, int64_t>> m_traceIntervals; ///< Fixed ring of preceding interval and endpoint ns.
+    std::vector<int64_t>                     m_traceSorted;    ///< Reserved sorted median workspace, consumer only.
+    size_t                                   m_traceIntervalHead{ 0 };  ///< Oldest valid ring position.
+    size_t                                   m_traceIntervalCount{ 0 }; ///< Number of preceding retained intervals.
 
     /// Convert a normalized nonnegative external timestamp to integer nanoseconds.
     static int64_t timestamp( const timespec &stamp /**< [in] External timestamp. */ );
@@ -79,6 +90,22 @@ class frameGrabberTiming
     int64_t serialOverlap( int64_t entered /**< [in] Frame's local interval start. */,
                            int64_t completed /**< [in] Frame's local interval end. */ ) const;
 
+    /// Finish one accepted neighborhood using only completed control observations available now.
+    void traceFinish( fgTiming::TraceRecord record /**< [in] Owned neighborhood to finalize. */,
+                      fgTiming::TraceEnd    end /**< [in] Completion or interruption reason. */,
+                      int64_t               nowNs /**< [in] Consumer monotonic evaluation time. */ );
+
+    /// Flush pending neighborhoods and discard the preceding-interval baseline at a continuity boundary.
+    void traceBoundary( fgTiming::TraceEnd end /**< [in] Interruption reason. */,
+                        int64_t            nowNs /**< [in] Consumer monotonic evaluation time. */ );
+
+    /// Classify one never-before-processed event before trailing-summary expiry.
+    void traceEvent( const fgTiming::Event &event /**< [in] Consumer-owned acquisition attempt. */,
+                     int64_t                nowNs /**< [in] Consumer monotonic evaluation time. */ );
+
+    /// Remove the oldest preceding baseline interval from both fixed ring and sorted workspace.
+    void tracePopInterval();
+
   public:
     /// Read CLOCK_MONOTONIC without changing errno; return -1 on failure.
     static int64_t monotonicNowNs();
@@ -87,12 +114,13 @@ class frameGrabberTiming
     static int64_t realtimeNowNs();
 
     /// Allocate initialized handoff storage while producer and consumer are stopped.
-    void
-    configure( double windowSec /**< [in] Positive trailing duration; zero disables collection. */,
-               size_t capacity /**< [in] Maximum queued/retained events per channel. */,
-               bool   stageEnabled    = false /**< [in] Enable optional local stage clocks. */,
-               double excursionSec    = 20e-6 /**< [in] Positive excursion distance; zero disables classification. */,
-               double bracketLimitSec = 0 /**< [in] Positive maximum accepted clock bracket; zero is undecided. */ );
+    void configure( double windowSec /**< [in] Positive trailing duration; zero disables collection. */,
+                    size_t capacity /**< [in] Maximum queued/retained events per channel. */,
+                    bool   stageEnabled = false /**< [in] Enable optional local stage clocks. */,
+                    double excursionSec = 20e-6 /**< [in] Positive excursion distance; zero disables classification. */,
+                    double bracketLimitSec = 0 /**< [in] Positive maximum accepted clock bracket; zero is undecided. */,
+                    size_t traceMax =
+                        0 /**< [in] Maximum ready plus pending records; zero or sub-ns threshold disables tracing. */ );
 
     /// Return whether paired timing collection is configured.
     bool enabled() const;
@@ -147,6 +175,15 @@ class frameGrabberTiming
 
     /// Return the cached coherent summary; never inspect producer-owned payload storage.
     const fgTiming::Summary &summary() const;
+
+    /// Return ready chronological neighborhoods; only the ordinary consumer may access this vector.
+    const std::vector<fgTiming::TraceRecord> &traceRecords() const;
+
+    /// Return consumer-only cumulative trace selection, retention and handoff-loss counts.
+    const fgTiming::TraceStatus &traceStatus() const;
+
+    /// Acknowledge all ready neighborhoods after ordinary-thread delivery without clearing pending neighbors.
+    void clearTraceRecords();
 };
 
 inline int64_t frameGrabberTiming::timestamp( const timespec &stamp )
@@ -179,7 +216,7 @@ inline int64_t frameGrabberTiming::realtimeNowNs()
 }
 
 inline void frameGrabberTiming::configure(
-    double windowSec, size_t capacity, bool stageEnabled, double excursionSec, double bracketLimitSec )
+    double windowSec, size_t capacity, bool stageEnabled, double excursionSec, double bracketLimitSec, size_t traceMax )
 {
     m_enabled   = mx::math::isFinite( windowSec ) && windowSec > 0 && windowSec < 9e9 && capacity > 0;
     m_windowNs  = m_enabled ? static_cast<int64_t>( windowSec * 1e9 ) : 0;
@@ -213,6 +250,21 @@ inline void frameGrabberTiming::configure(
     m_previousEvent          = {};
     m_havePrevious           = false;
     m_everEvent              = false;
+    m_traceStatus            = {};
+    m_traceStatus.enabled    = m_stages && traceMax > 0 && m_summary.threshold * 1e9L >= 1;
+    m_traceStatus.capacity   = m_traceStatus.enabled ? traceMax : 0;
+    m_traceReady.clear();
+    m_traceReady.reserve( m_traceStatus.capacity );
+    m_tracePending.clear();
+    m_tracePending.reserve( m_traceStatus.capacity );
+    m_traceNeighbors     = {};
+    m_traceNeighborCount = 0;
+    m_traceSequence      = 0;
+    m_traceIntervalHead  = 0;
+    m_traceIntervalCount = 0;
+    m_traceIntervals.assign( m_traceStatus.enabled ? capacity : 0, {} );
+    m_traceSorted.clear();
+    m_traceSorted.reserve( m_traceIntervals.size() );
 }
 
 inline bool frameGrabberTiming::enabled() const
@@ -474,6 +526,175 @@ inline void frameGrabberTiming::count( const fgTiming::Event &event )
     m_havePrevious  = true;
 }
 
+inline void frameGrabberTiming::traceFinish( fgTiming::TraceRecord record, fgTiming::TraceEnd end, int64_t nowNs )
+{
+    record.end               = end;
+    record.evaluatedNs       = nowNs;
+    record.controlCoverageNs = nowNs;
+
+    for( size_t index = 0; index < record.events.size(); ++index )
+    {
+        if( record.present & ( 1u << index ) )
+        {
+            record.serialOverlapNs[index] =
+                serialOverlap( endpoint( record.events[index], fgTiming::Marker::waitEnter ),
+                               endpoint( record.events[index], fgTiming::Marker::writeStampDone ) );
+        }
+    }
+
+    m_traceStatus.incomplete += record.present != 0x1f;
+    ++m_traceStatus.recorded;
+    m_traceReady.push_back( record );
+    m_traceStatus.ready = m_traceReady.size();
+}
+
+inline void frameGrabberTiming::traceBoundary( fgTiming::TraceEnd end, int64_t nowNs )
+{
+    for( const auto &record : m_tracePending )
+    {
+        traceFinish( record, end, nowNs );
+    }
+
+    m_tracePending.clear();
+    m_traceStatus.pending = 0;
+    m_traceNeighborCount  = 0;
+    m_traceIntervalHead   = 0;
+    m_traceIntervalCount  = 0;
+    m_traceSorted.clear();
+}
+
+inline void frameGrabberTiming::tracePopInterval()
+{
+    const auto found =
+        std::lower_bound( m_traceSorted.begin(), m_traceSorted.end(), m_traceIntervals[m_traceIntervalHead].first );
+    m_traceSorted.erase( found );
+    m_traceIntervalHead = ( m_traceIntervalHead + 1 ) % m_traceIntervals.size();
+    --m_traceIntervalCount;
+}
+
+inline void frameGrabberTiming::traceEvent( const fgTiming::Event &event, int64_t nowNs )
+{
+    using namespace fgTiming;
+
+    if( !m_traceStatus.enabled || event.sequence <= m_traceSequence || event.anchorNs > nowNs )
+    {
+        return;
+    }
+
+    m_traceSequence            = event.sequence;
+    const Event  *previous     = m_traceNeighborCount ? &m_traceNeighbors[m_traceNeighborCount - 1] : nullptr;
+    const int64_t written      = endpoint( event, Marker::writeStampDone );
+    const int64_t priorWritten = previous ? endpoint( *previous, Marker::writeStampDone ) : -1;
+    const bool continuous = previous && consecutive( *previous, event ) && priorWritten >= 0 && written > priorWritten;
+
+    if( previous && !continuous )
+    {
+        ++m_traceStatus.discontinuities;
+        traceBoundary( TraceEnd::boundary, nowNs );
+        previous = nullptr;
+    }
+
+    if( continuous )
+    {
+        for( auto &record : m_tracePending )
+        {
+            const size_t next   = record.present & ( 1u << 3 ) ? 4 : 3;
+            record.events[next] = event;
+            record.present |= 1u << next;
+        }
+
+        while( !m_tracePending.empty() && ( m_tracePending.front().present & ( 1u << 4 ) ) )
+        {
+            traceFinish( m_tracePending.front(), TraceEnd::complete, nowNs );
+            m_tracePending.erase( m_tracePending.begin() );
+        }
+
+        const int64_t cutoff = written >= m_windowNs ? written - m_windowNs : 0;
+
+        while( m_traceIntervalCount && m_traceIntervals[m_traceIntervalHead].second < cutoff )
+        {
+            tracePopInterval();
+        }
+
+        const int64_t interval = written - priorWritten;
+
+        if( m_traceSorted.size() >= 3 )
+        {
+            const size_t      middle    = m_traceSorted.size() / 2;
+            const int64_t     upper     = m_traceSorted[middle];
+            const int64_t     lower     = m_traceSorted.size() % 2 ? upper : m_traceSorted[middle - 1];
+            const int64_t     median    = lower + ( upper - lower ) / 2;
+            const long double threshold = m_summary.threshold * 1e9L;
+            const long double residual  = static_cast<long double>( interval ) - median;
+
+            if( threshold > 0 && ( residual > threshold || residual < -threshold ) )
+            {
+                const uint64_t id = ++m_traceStatus.detected;
+
+                if( m_traceReady.size() + m_tracePending.size() >= m_traceStatus.capacity )
+                {
+                    ++m_traceStatus.dropped;
+                }
+                else
+                {
+                    TraceRecord record;
+                    record.id                = id;
+                    record.direction         = residual > 0 ? TraceDirection::late : TraceDirection::early;
+                    record.medianNs          = median;
+                    record.baselineIntervals = m_traceSorted.size();
+                    record.intervalNs        = interval;
+                    record.thresholdNs =
+                        static_cast<int64_t>( std::min( threshold, static_cast<long double>( INT64_MAX ) ) );
+                    record.bracketLimitNs = m_bracketNs;
+                    record.events[2]      = event;
+                    record.present        = 1u << 2;
+
+                    for( size_t index = 0; index < m_traceNeighborCount; ++index )
+                    {
+                        const size_t destination   = 2 - m_traceNeighborCount + index;
+                        record.events[destination] = m_traceNeighbors[index];
+                        record.present |= 1u << destination;
+                    }
+
+                    int64_t firstBracket = 0, nextBracket = 0;
+                    record.qualified = !previous->invalidMarkers && !event.invalidMarkers &&
+                                       timestamp( previous->writetime ) > 0 && timestamp( event.writetime ) > 0 &&
+                                       m_bracketNs > 0 && duration( *previous, Metric::writeBracket, firstBracket ) &&
+                                       duration( event, Metric::writeBracket, nextBracket ) &&
+                                       firstBracket <= m_bracketNs && nextBracket <= m_bracketNs;
+                    m_tracePending.push_back( record );
+                }
+            }
+        }
+        else
+        {
+            ++m_traceStatus.unclassified;
+        }
+
+        if( m_traceIntervalCount == m_traceIntervals.size() )
+        {
+            tracePopInterval();
+        }
+
+        const size_t destination      = ( m_traceIntervalHead + m_traceIntervalCount ) % m_traceIntervals.size();
+        m_traceIntervals[destination] = { interval, written };
+        ++m_traceIntervalCount;
+        m_traceSorted.insert( std::lower_bound( m_traceSorted.begin(), m_traceSorted.end(), interval ), interval );
+    }
+
+    if( m_traceNeighborCount == m_traceNeighbors.size() )
+    {
+        m_traceNeighbors[0] = m_traceNeighbors[1];
+        m_traceNeighbors[1] = event;
+    }
+    else
+    {
+        m_traceNeighbors[m_traceNeighborCount++] = event;
+    }
+
+    m_traceStatus.pending = m_tracePending.size();
+}
+
 inline void frameGrabberTiming::update( int64_t nowMono, int64_t nowReal )
 {
     using namespace fgTiming;
@@ -487,13 +708,6 @@ inline void frameGrabberTiming::update( int64_t nowMono, int64_t nowReal )
 
     const int64_t cutoff  = nowMono >= m_windowNs ? nowMono - m_windowNs : 0;
     uint64_t      session = m_session.load( std::memory_order_acquire );
-
-    if( session != m_summary.session )
-    {
-        m_window.clear();
-        m_summary.session = session;
-        m_everEvent       = false;
-    }
 
     const size_t controls = m_controls.queued();
 
@@ -523,6 +737,19 @@ inline void frameGrabberTiming::update( int64_t nowMono, int64_t nowReal )
         }
     }
 
+    // A frame captured after the preceding evaluation time was retained for this update.
+    for( const auto &event : m_window )
+    {
+        traceEvent( event, nowMono );
+    }
+
+    if( session != m_summary.session )
+    {
+        m_window.clear();
+        m_summary.session = session;
+        m_everEvent       = false;
+    }
+
     const size_t frames = m_queue.queued();
 
     for( size_t index = 0; index < frames; ++index )
@@ -536,6 +763,19 @@ inline void frameGrabberTiming::update( int64_t nowMono, int64_t nowReal )
 
         count( event );
 
+        event.anchorNs = -1;
+
+        for( size_t marker = 0; marker < markerIndex( Marker::count ); ++marker )
+        {
+            if( event.valid & ( 1u << marker ) )
+            {
+                event.anchorNs = event.markers[marker];
+            }
+        }
+
+        // Selection precedes summary retention and expiry, including older queued epochs.
+        traceEvent( event, nowMono );
+
         if( event.session > m_summary.session )
         {
             m_window.clear();
@@ -546,16 +786,6 @@ inline void frameGrabberTiming::update( int64_t nowMono, int64_t nowReal )
         if( event.session != m_summary.session )
         {
             continue;
-        }
-
-        event.anchorNs = -1;
-
-        for( size_t marker = 0; marker < markerIndex( Marker::count ); ++marker )
-        {
-            if( event.valid & ( 1u << marker ) )
-            {
-                event.anchorNs = event.markers[marker];
-            }
         }
 
         if( event.anchorNs < 0 )
@@ -598,6 +828,19 @@ inline void frameGrabberTiming::update( int64_t nowMono, int64_t nowReal )
         m_summary.session = session;
         m_everEvent       = false;
     }
+
+    if( m_traceNeighborCount && m_traceNeighbors[m_traceNeighborCount - 1].session < session )
+    {
+        ++m_traceStatus.discontinuities;
+        traceBoundary( TraceEnd::boundary, nowMono );
+    }
+    else if( m_traceNeighborCount && m_traceNeighbors[m_traceNeighborCount - 1].anchorNs < cutoff )
+    {
+        traceBoundary( TraceEnd::expired, nowMono );
+    }
+
+    m_traceStatus.eventDropped   = m_queue.dropped();
+    m_traceStatus.controlDropped = m_controls.dropped();
 
     m_window.erase( std::remove_if( m_window.begin(),
                                     m_window.end(),
@@ -931,6 +1174,22 @@ inline void frameGrabberTiming::calculate( int64_t nowNs )
 inline const fgTiming::Summary &frameGrabberTiming::summary() const
 {
     return m_summary;
+}
+
+inline const std::vector<fgTiming::TraceRecord> &frameGrabberTiming::traceRecords() const
+{
+    return m_traceReady;
+}
+
+inline const fgTiming::TraceStatus &frameGrabberTiming::traceStatus() const
+{
+    return m_traceStatus;
+}
+
+inline void frameGrabberTiming::clearTraceRecords()
+{
+    m_traceReady.clear();
+    m_traceStatus.ready = 0;
 }
 } // namespace dev
 } // namespace app

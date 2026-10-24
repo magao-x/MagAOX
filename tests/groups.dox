@@ -218,3 +218,8 @@ report from their counters and then returns nonzero. An HTML report therefore do
  * \brief Binary, text, metadata and validity of optional stage records.
  * \ingroup logger_unit_test
  */
+
+/** \defgroup frameGrabberTraceTelemetry_unit_test Framegrabber Excursion Trace Telemetry Unit Tests
+ * \brief Chronological neighbor records, exact endpoint clocks, metadata and malformed-record rejection.
+ * \ingroup logger_unit_test
+ */
