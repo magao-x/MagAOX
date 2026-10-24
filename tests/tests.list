@@ -1,6 +1,7 @@
 
 ../libMagAOX/app/tests/indiUtils_test
 ../libMagAOX/app/tests/MagAOXApp_test
+../libMagAOX/app/tests/MagAOXApp_threadStart_test
 ../libMagAOX/app/tests/MagAOXAppExecute_test
 ../libMagAOX/app/tests/stateCodes_test
 ../libMagAOX/app/tests/semUtils_test

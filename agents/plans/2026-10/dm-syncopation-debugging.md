@@ -1709,3 +1709,13 @@ the complete suite passes. Workstation-local test log artifacts were moved to
 `/tmp/synco-isolated-` prefix. No hardware actions were performed by an agent.
 Scheduler revisions remain unimplemented and the early-arrival reserve remains
 undecided.
+
+## 2026-10-23 scheduling error-reporting prerequisite
+
+The OCAM review found that `MagAOXApp::threadStart()` interpreted positive
+`pthread_setschedparam()` error codes as success. The isolated prerequisite
+checks `rv != 0` and logs that returned code, preserving inherited-policy
+continuation. Its offline regression passes 56 assertions in one case,
+including EPERM/EINVAL and success with independent errno values. This does
+not change scheduling policy or establish the instrument's actual policy.
+The operator approved committing and pushing this fix with the camera work.
