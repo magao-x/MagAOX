@@ -55,16 +55,20 @@ restart. This procedure does not require a calibration reload or CONF restart.
 
 ## Start and record the observer
 
-From the root of the MagAOX source checkout on the instrument, start a separate
-instance in its own terminal or tmux pane:
+From the root of the MagAOX source checkout on the instrument, install the
+profile under the otherwise unused instance name, then start it in its own
+terminal or tmux pane:
 
 ```bash
-/opt/MagAOX/bin/dmSyncopation -n wfs-acqu-timing -c "$PWD/apps/dmSyncopation/camera-acquWFS.conf"
+sudo install -m 0644 apps/dmSyncopation/camera-acquWFS.conf /opt/MagAOX/config/wfs-acqu-timing.conf
+/opt/MagAOX/bin/dmSyncopation -n wfs-acqu-timing
 ```
 
-The instance name selects separate logs and telemetry. The `-c` option loads the
-explicit profile after any instance configuration. Use an otherwise unused
-instance name, and check the startup configuration log for
+The instance name selects its required configuration file, separate logs and
+telemetry. The framework reads `/opt/MagAOX/config/wfs-acqu-timing.conf` before
+processing any additional `-c` override; `-c` cannot bypass a missing instance
+file. No override is needed after installing this profile. Check the startup
+configuration log for
 `diagnostics.only=true`, primary stream `aol1_imWFS2`, and
 `diagnostics.combiner=false`. Do not run a second observer with the same name.
 The normal enable switch remains Off and enable requests are rejected in this
@@ -94,6 +98,11 @@ Use separated windows when totaling excursion counts.
 
 Check these parts of the `[dmsynco]` records:
 
+- `schedule_valid=0` and `combiner_enabled=0` confirm diagnostic-only operation.
+  `schedule_valid=1` or `combiner_enabled=1` means this record is not from the
+  intended profile. Check the launched instance, explicit configuration path and
+  selected telemetry name before continuing. Primary receipt/event counts must
+  progress; all-zero primary/pipeline counts do not measure acquWFS wake timing.
 - Camera acquisition and publication collectors are enabled and have populated
   statistics. `cameraWriteInterval` must appear after collection fills. If the
   publication table remains unavailable, check the application/reader versions
@@ -163,3 +172,13 @@ scheduling and cannot substitute for camera publication timestamps.
 See the [main user guide](dmSyncopation.md) for diagnostic populations,
 qualification rules and ordinary scheduler configuration. Median-grid
 scheduler revisions remain separate from this measurement test.
+
+## Optional camera-stage follow-up
+
+The [framegrabber timing guide](../../../libMagAOX/app/dev/doc/frameGrabberTiming.md)
+describes the new `camwfs` stage diagnostics and `[fgstage]` records. Retain the
+same isolated producer chain for comparisons. Camera-stage collection is a
+separate camera configuration/restart step; the `wfs-acqu-timing` observer alone
+does not enable it. Matching EDT SDK validation, clock-bracket selection and
+instrument overhead/recovery qualification remain necessary before interpreting
+conditional stage attribution.
