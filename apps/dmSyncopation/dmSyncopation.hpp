@@ -137,6 +137,13 @@ class dmSyncopation : public MagAOXApp<true>,
         double  m_maxUs{ -1 };    ///< Maximum reported acquisition interval, us.
     };
 
+    /// Per-clock camera progression baseline, owned only by the camera monitor.
+    struct CameraHistory
+    {
+        uint64_t counter{ 0 }; ///< Last coherently sampled camera counter.
+        int64_t  stamp{ -1 };  ///< Last valid external stamp; a negative value starts a new epoch.
+    };
+
     /// Diagnostic context for one distinct primary observation; unavailable durations are -1 ns.
     struct PrimaryTiming
     {
@@ -172,8 +179,9 @@ class dmSyncopation : public MagAOXApp<true>,
     size_t        m_primaryCadenceMaxEvents{ 20000 }; ///< Queue and retained-event cap; zero disables diagnostics.
     double        m_primaryExcursionUs{ 20 };    ///< Diagnostic interval excursion threshold around the window median.
     bool          m_combinerDiagnostics{ true }; ///< Observe combined-output traces independently of scheduling.
-    bool          m_cameraDiagnostics{ true };   ///< Observe acquisition timestamps independently of camera INDI FPS.
+    bool          m_cameraDiagnostics{ true };   ///< Observe camera acquisition/publication independently of INDI FPS.
     bool          m_pipelineDiagnostics{ true }; ///< Retain the primary's bounded upstream process trace.
+    bool          m_diagnosticsOnly{ false };    ///< Observe arbitrary primary metadata without attaching DM resources.
     synco::Bounds m_bounds;                      ///< Explicit copy, observation and reader bounds, ns.
     ///@}
 
@@ -200,18 +208,20 @@ class dmSyncopation : public MagAOXApp<true>,
     int               m_scheduleState{ synco::invalid }; ///< Provider-facing acquisition/armed state.
     const char       *m_reason{ "disabled" };            ///< Static health reason, formatted only by appLogic.
     const char       *m_lastFaultReason{ "none" }; ///< Latched fault cause, retained while the current phase changes.
-    int64_t           m_lastFaultNs{ 0 };    ///< Monotonic timestamp of the latched synchronization/resource fault.
-    int64_t           m_faultInterval{ 0 };  ///< Latched interval at the latest interval fault; zero for other faults.
-    int64_t           m_faultPeriod{ 0 };    ///< Prediction used at the latest interval fault; zero for other faults.
-    PrimaryTiming     m_primaryTiming;       ///< Diagnostic context for the latest distinct primary observation.
-    dev::dmTiming     m_primaryCadence;      ///< Monitor-producer cadence events and ordinary-thread cached statistics.
-    dev::dmCombTiming m_combinerCadence;     ///< Combined-monitor handoff and ordinary-thread trace statistics.
-    dev::dmTiming     m_cameraCadence;       ///< Independent camera acquisition intervals; never paired to DM events.
-    dev::dmPipelineTiming m_pipelineCadence; ///< Best-effort upstream trace handoff and processing measurements.
-    int64_t  m_primaryReceiptNs{ -1 };       ///< Existing primary receipt timestamp reused by the pipeline handoff.
-    uint64_t m_cameraLastCounter{ 0 }; ///< Last coherently sampled camera counter for timestamp progression checks.
-    int64_t  m_cameraLastAcquisition{ -1 };       ///< Last acquisition stamp in its external clock, or unavailable.
-    std::atomic<ino_t> m_primaryTraceInode{ 0 };  ///< Primary stream metadata identity, published by its monitor.
+    int64_t           m_lastFaultNs{ 0 };   ///< Monotonic timestamp of the latched synchronization/resource fault.
+    int64_t           m_faultInterval{ 0 }; ///< Latched interval at the latest interval fault; zero for other faults.
+    int64_t           m_faultPeriod{ 0 };   ///< Prediction used at the latest interval fault; zero for other faults.
+    PrimaryTiming     m_primaryTiming;      ///< Diagnostic context for the latest distinct primary observation.
+    dev::dmTiming     m_primaryCadence;     ///< Monitor-producer cadence events and ordinary-thread cached statistics.
+    dev::dmCombTiming m_combinerCadence;    ///< Combined-monitor handoff and ordinary-thread trace statistics.
+    dev::dmTiming     m_cameraCadence;      ///< Independent camera acquisition intervals; never paired to DM events.
+    dev::dmTiming
+        m_cameraPublicationCadence; ///< Independent camera writetime intervals from the same metadata snapshot.
+    dev::dmPipelineTiming m_pipelineCadence;     ///< Best-effort upstream trace handoff and processing measurements.
+    int64_t       m_primaryReceiptNs{ -1 };      ///< Existing primary receipt timestamp reused by the pipeline handoff.
+    CameraHistory m_cameraAcquisitionHistory;    ///< Acquisition-clock progression checks.
+    CameraHistory m_cameraPublicationHistory;    ///< Publication-clock progression checks, independent of acquisition.
+    std::atomic<ino_t> m_primaryTraceInode{ 0 }; ///< Primary stream metadata identity, published by its monitor.
     int64_t            m_combinerReceiptNs{ -1 }; ///< Combined-monitor-only receipt anchor; -1 for an initial callback.
     PrimaryTiming      m_faultTiming;          ///< Same-event context latched with the latest primary interval fault.
     int64_t m_previousPrimaryPublication{ 0 }; ///< Last consistency-checked positive primary publication timestamp, ns.
@@ -273,13 +283,16 @@ class dmSyncopation : public MagAOXApp<true>,
     pcf::IndiProperty
         m_indiP_primaryTimingQuality;       ///< Independent diagnostic coverage, validity and collection quality.
     pcf::IndiProperty m_indiP_primaryPairs; ///< Ordered primary interval pairs and conditional compensation statistics.
-    pcf::IndiProperty m_indiP_combinerTiming;   ///< Combined cadence and best-effort trace durations, in seconds.
-    pcf::IndiProperty m_indiP_combinerQuality;  ///< Combined trace availability, identities and observation quality.
-    pcf::IndiProperty m_indiP_cameraTiming;     ///< Camera acquisition/receipt interval populations in seconds.
-    pcf::IndiProperty m_indiP_cameraQuality;    ///< Camera observation coverage, losses and discontinuities.
-    pcf::IndiProperty m_indiP_cameraPairs;      ///< Independent acquisition excursion ordering.
-    pcf::IndiProperty m_indiP_pipelineQuality;  ///< Upstream chain population and qualification counters.
-    pcf::IndiProperty m_indiP_pipelineBoundary; ///< Oldest-stage interval and primary publication-tail changes.
+    pcf::IndiProperty m_indiP_combinerTiming;     ///< Combined cadence and best-effort trace durations, in seconds.
+    pcf::IndiProperty m_indiP_combinerQuality;    ///< Combined trace availability, identities and observation quality.
+    pcf::IndiProperty m_indiP_cameraTiming;       ///< Camera acquisition/receipt interval populations in seconds.
+    pcf::IndiProperty m_indiP_cameraQuality;      ///< Camera observation coverage, losses and discontinuities.
+    pcf::IndiProperty m_indiP_cameraPairs;        ///< Independent acquisition excursion ordering.
+    pcf::IndiProperty m_indiP_cameraWriteTiming;  ///< Independent camera publication and observer receipt intervals.
+    pcf::IndiProperty m_indiP_cameraWriteQuality; ///< Camera publication coverage and metadata rejections.
+    pcf::IndiProperty m_indiP_cameraWritePairs;   ///< Camera publication excursion ordering around its own median.
+    pcf::IndiProperty m_indiP_pipelineQuality;    ///< Upstream chain population and qualification counters.
+    pcf::IndiProperty m_indiP_pipelineBoundary;   ///< Oldest-stage interval and primary publication-tail changes.
     std::array<pcf::IndiProperty, MagAOX::dmPipelineTiming::maxStages> m_indiP_pipelineStages;
     ///< Per-row process identity, ordinary timings and excursion-conditioned latency changes.
 
@@ -377,6 +390,14 @@ class dmSyncopation : public MagAOXApp<true>,
 
     /// Publish consumer-owned combined statistics without acquiring the cycle mutex.
     void updateCombinerCadenceINDI();
+
+    /// Finish one camera timestamp observation without mixing acquisition and publication clock domains.
+    static void cameraStamp( dev::dmTiming  &collector /**< [in,out] Independent timestamp collector. */,
+                             const timespec &stamp /**< [in] External timestamp captured with the counter. */,
+                             uint64_t        counter /**< [in] Captured camera counter. */,
+                             int64_t         observed /**< [in] Existing local callback timestamp. */,
+                             bool            coherent /**< [in] Metadata passed the repeated-read bracket. */,
+                             CameraHistory  &history /**< [in,out] This timestamp's progression baseline. */ );
 
     /// Register reusable independent cadence, quality and ordered-pair properties.
     int setupCadenceINDI( const dev::dmTiming &collector /**< [in] Configured collector. */,
@@ -528,10 +549,12 @@ inline void dmSyncopation::setupConfig()
         { "diagnostics.windowSec", "Independent timing window, seconds; zero disables collection." },
         { "diagnostics.maxEvents", "Each timing observer's queue/window cap; zero disables collection." },
         { "diagnostics.excursionUs",
-          "Acquisition/primary excursion threshold around each diagnostic median, us; zero disables classification." },
+          "Camera/primary excursion threshold around each diagnostic median, us; zero disables classification." },
         { "diagnostics.combiner", "Observe combined-stream cadence and producer trace independently of scheduling." },
-        { "diagnostics.camera", "Observe camera acquisition intervals independently of camera INDI FPS." },
-        { "diagnostics.pipeline", "Observe the primary producer's bounded upstream processing trace." } };
+        { "diagnostics.camera", "Observe camera acquisition/publication intervals independently of camera INDI FPS." },
+        { "diagnostics.pipeline", "Observe the primary producer's bounded upstream processing trace." },
+        { "diagnostics.only",
+          "Observe arbitrary primary metadata without attaching DM resources or enabling writes." } };
     for( const auto &key : keys )
     {
         const auto dot = key.first.find( '.' );
@@ -578,6 +601,13 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
     config( m_combinerDiagnostics, "diagnostics.combiner" );
     config( m_cameraDiagnostics, "diagnostics.camera" );
     config( m_pipelineDiagnostics, "diagnostics.pipeline" );
+    config( m_diagnosticsOnly, "diagnostics.only" );
+
+    if( m_diagnosticsOnly )
+    {
+        m_combinerDiagnostics = false;
+    }
+
     int64_t cadenceEvents = m_primaryCadenceMaxEvents;
     config( cadenceEvents, "diagnostics.maxEvents" );
 
@@ -660,10 +690,11 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
         return -1;
     }
     m_period                             = int64_t( 1e9 / m_nominalRate );
-    shmimMonitorT::m_semaphoreNumber     = m_primarySemaphore;
+    shmimMonitorT::m_semaphoreNumber     = m_diagnosticsOnly ? -1 : m_primarySemaphore;
     combinerMonitorT::m_shmimName        = m_combinedName;
     combinerMonitorT::m_getExistingFirst = false;
     cameraMonitorT::m_getExistingFirst   = false;
+    m_reason                             = m_diagnosticsOnly ? "diagnostics only" : "disabled";
     return 0;
 }
 
@@ -1317,6 +1348,12 @@ inline int dmSyncopation::allocate( const dev::shmimT &tag )
 {
     m_primaryTraceInode.store( shmimMonitorT::m_imageStream.md->inode, std::memory_order_release );
     static_cast<void>( tag );
+
+    if( m_diagnosticsOnly )
+    {
+        return 0;
+    }
+
     std::lock_guard<std::mutex> lock( m_cycleMutex );
     if( shmimMonitorT::m_semaphoreNumber != m_primarySemaphore || m_primarySemaphore == 9 )
     {
@@ -1355,6 +1392,15 @@ inline int dmSyncopation::processImage( void *source, const dev::shmimT &tag )
     }
 
     m_primaryReceiptNs = -1;
+
+    if( m_diagnosticsOnly )
+    {
+        m_primaryCadence.markAt( MagAOX::dmTiming::Marker::finish, observed );
+        m_primaryCadence.outcome( MagAOX::dmTiming::Outcome::noSend );
+        m_primaryCadence.finishEvent();
+        return 0;
+    }
+
     std::lock_guard<std::mutex> lock( m_cycleMutex );
     const int                   result    = processPrimary( observed );
     const int64_t               completed = m_now();
@@ -1473,60 +1519,80 @@ inline int dmSyncopation::allocate( const syncoCameraT &tag )
     return 0;
 }
 
+inline void dmSyncopation::cameraStamp( dev::dmTiming  &collector,
+                                        const timespec &stamp,
+                                        uint64_t        counter,
+                                        int64_t         observed,
+                                        bool            coherent,
+                                        CameraHistory  &history )
+{
+    if( !collector.enabled() )
+    {
+        return;
+    }
+
+    if( !collector.active() )
+    {
+        collector.beginEventAt( false, -1 );
+    }
+
+    collector.markAt( MagAOX::dmTiming::Marker::entry, observed );
+    bool valid = false;
+
+    if( coherent && stamp.tv_sec >= 0 && stamp.tv_nsec >= 0 && stamp.tv_nsec < 1000000000 &&
+        stamp.tv_sec <= ( std::numeric_limits<int64_t>::max() - stamp.tv_nsec ) / 1000000000 )
+    {
+        const int64_t timestamp = static_cast<int64_t>( stamp.tv_sec ) * 1000000000 + stamp.tv_nsec;
+
+        if( timestamp > 0 )
+        {
+            valid = history.stamp < 0 || counter != history.counter + 1 || timestamp > history.stamp;
+
+            if( valid )
+            {
+                collector.inputCounter( counter );
+                collector.inputPublication( timestamp );
+            }
+
+            history.counter = counter;
+            history.stamp   = timestamp;
+        }
+    }
+
+    collector.markAt( MagAOX::dmTiming::Marker::finish, observed );
+    collector.outcome( valid ? MagAOX::dmTiming::Outcome::noSend : MagAOX::dmTiming::Outcome::rejected );
+    collector.finishEvent();
+}
+
 inline int dmSyncopation::processImage( void *source, const syncoCameraT &tag )
 {
     static_cast<void>( source );
     static_cast<void>( tag );
 
-    if( !m_cameraCadence.enabled() )
+    if( !m_cameraCadence.enabled() && !m_cameraPublicationCadence.enabled() )
     {
         return 0;
     }
 
-    const int64_t observed = m_now();
-
-    if( !m_cameraCadence.active() )
-    {
-        m_cameraCadence.beginEventAt( false, -1 );
-    }
-
-    m_cameraCadence.markAt( MagAOX::dmTiming::Marker::entry, observed );
-    const auto *metadata = cameraMonitorT::m_imageStream.md;
-    bool        valid    = false;
+    const int64_t        observed = m_now();
+    const volatile auto *metadata = cameraMonitorT::m_imageStream.md;
+    uint64_t             counter  = 0;
+    timespec             acquisition{}, publication{};
+    bool                 coherent = false;
 
     if( metadata && metadata->write == 0 )
     {
-        const uint64_t counter = metadata->cnt0;
-        const timespec stamp   = metadata->atime;
+        counter     = metadata->cnt0;
+        acquisition = { metadata->atime.tv_sec, metadata->atime.tv_nsec };
+        publication = { metadata->writetime.tv_sec, metadata->writetime.tv_nsec };
         std::atomic_thread_fence( std::memory_order_acquire );
-
-        if( metadata->write == 0 && counter == metadata->cnt0 && stamp.tv_sec == metadata->atime.tv_sec &&
-            stamp.tv_nsec == metadata->atime.tv_nsec && stamp.tv_sec >= 0 && stamp.tv_nsec >= 0 &&
-            stamp.tv_nsec < 1000000000 &&
-            stamp.tv_sec <= ( std::numeric_limits<int64_t>::max() - stamp.tv_nsec ) / 1000000000 )
-        {
-            const int64_t acquisition = static_cast<int64_t>( stamp.tv_sec ) * 1000000000 + stamp.tv_nsec;
-
-            if( acquisition > 0 )
-            {
-                valid = m_cameraLastAcquisition < 0 || counter != m_cameraLastCounter + 1 ||
-                        acquisition > m_cameraLastAcquisition;
-
-                if( valid )
-                {
-                    m_cameraCadence.inputCounter( counter );
-                    m_cameraCadence.inputPublication( acquisition );
-                }
-
-                m_cameraLastCounter     = counter;
-                m_cameraLastAcquisition = acquisition;
-            }
-        }
+        coherent = metadata->write == 0 && counter == metadata->cnt0 && acquisition.tv_sec == metadata->atime.tv_sec &&
+                   acquisition.tv_nsec == metadata->atime.tv_nsec && publication.tv_sec == metadata->writetime.tv_sec &&
+                   publication.tv_nsec == metadata->writetime.tv_nsec;
     }
 
-    m_cameraCadence.markAt( MagAOX::dmTiming::Marker::finish, observed );
-    m_cameraCadence.outcome( valid ? MagAOX::dmTiming::Outcome::noSend : MagAOX::dmTiming::Outcome::rejected );
-    m_cameraCadence.finishEvent();
+    cameraStamp( m_cameraCadence, acquisition, counter, observed, coherent, m_cameraAcquisitionHistory );
+    cameraStamp( m_cameraPublicationCadence, publication, counter, observed, coherent, m_cameraPublicationHistory );
     return 0;
 }
 
@@ -1534,7 +1600,7 @@ inline void dmSyncopation::shmimMonitorTiming( const syncoCameraT &tag, dev::shm
 {
     static_cast<void>( tag );
 
-    if( !m_cameraCadence.enabled() )
+    if( !m_cameraCadence.enabled() && !m_cameraPublicationCadence.enabled() )
     {
         return;
     }
@@ -1542,17 +1608,24 @@ inline void dmSyncopation::shmimMonitorTiming( const syncoCameraT &tag, dev::shm
     if( event == dev::shmimMonitorEvent::connected )
     {
         m_cameraCadence.newSession();
-        m_cameraLastAcquisition = -1;
+        m_cameraPublicationCadence.newSession();
+        m_cameraAcquisitionHistory = {};
+        m_cameraPublicationHistory = {};
     }
     else if( event == dev::shmimMonitorEvent::receipt || event == dev::shmimMonitorEvent::initial )
     {
-        const bool receipt = event == dev::shmimMonitorEvent::receipt;
-        m_cameraCadence.beginEventAt( receipt, receipt ? m_now() : -1 );
+        const bool    receipt  = event == dev::shmimMonitorEvent::receipt;
+        const int64_t received = receipt ? m_now() : -1;
+        m_cameraCadence.beginEventAt( receipt, received );
+        m_cameraPublicationCadence.beginEventAt( receipt, received );
     }
     else if( event == dev::shmimMonitorEvent::discarded )
     {
-        m_cameraCadence.outcome( MagAOX::dmTiming::Outcome::rejected );
-        m_cameraCadence.finishEvent();
+        for( auto *collector : { &m_cameraCadence, &m_cameraPublicationCadence } )
+        {
+            collector->outcome( MagAOX::dmTiming::Outcome::rejected );
+            collector->finishEvent();
+        }
     }
 }
 
@@ -2247,6 +2320,8 @@ inline int dmSyncopation::appStartup()
         m_combinerCadence.configure( m_combinerDiagnostics ? m_primaryCadenceWindow : 0, m_primaryCadenceMaxEvents );
         m_cameraCadence.configure(
             m_cameraDiagnostics ? m_primaryCadenceWindow : 0, m_primaryCadenceMaxEvents, m_primaryExcursionUs * 1e-6 );
+        m_cameraPublicationCadence.configure(
+            m_cameraDiagnostics ? m_primaryCadenceWindow : 0, m_primaryCadenceMaxEvents, m_primaryExcursionUs * 1e-6 );
         m_pipelineCadence.configure( m_pipelineDiagnostics ? m_primaryCadenceWindow : 0,
                                      m_primaryCadenceMaxEvents,
                                      m_primaryExcursionUs * 1e-6 );
@@ -2262,7 +2337,13 @@ inline int dmSyncopation::appStartup()
                           m_indiP_cameraQuality,
                           m_indiP_cameraPairs,
                           "camera",
-                          "acquisition_" ) < 0 )
+                          "acquisition_" ) < 0 ||
+        setupCadenceINDI( m_cameraPublicationCadence,
+                          m_indiP_cameraWriteTiming,
+                          m_indiP_cameraWriteQuality,
+                          m_indiP_cameraWritePairs,
+                          "camera_write",
+                          "publication_" ) < 0 )
     {
         return -1;
     }
@@ -2344,7 +2425,7 @@ inline int dmSyncopation::appStartup()
     REG_INDI_NEWPROP_NOCB( m_indiP_health, "health", pcf::IndiProperty::Text );
     m_indiP_health.setPerm( pcf::IndiProperty::ReadOnly );
     for( const auto &name :
-         { "reason", "lastFault", "periodSource", "primary", "combined", "timingStream", "mapping" } )
+         { "reason", "lastFault", "periodSource", "primary", "combined", "timingStream", "mapping", "mode" } )
     {
         m_indiP_health.add( pcf::IndiElement( name ) );
     }
@@ -2361,7 +2442,7 @@ inline int dmSyncopation::appStartup()
         SHMIMMONITORT_APP_STARTUP( combinerMonitorT );
     }
 
-    if( m_cameraCadence.enabled() )
+    if( m_cameraCadence.enabled() || m_cameraPublicationCadence.enabled() )
     {
         SHMIMMONITORT_APP_STARTUP( cameraMonitorT );
     }
@@ -2379,6 +2460,10 @@ inline int dmSyncopation::appLogic()
     m_cameraCadence.update( m_now() );
     updateCadenceINDI( m_cameraCadence, m_indiP_cameraTiming, m_indiP_cameraQuality, "acquisition_" );
     updatePairsINDI( m_cameraCadence, m_indiP_cameraPairs );
+    m_cameraPublicationCadence.update( m_now() );
+    updateCadenceINDI(
+        m_cameraPublicationCadence, m_indiP_cameraWriteTiming, m_indiP_cameraWriteQuality, "publication_" );
+    updatePairsINDI( m_cameraPublicationCadence, m_indiP_cameraWritePairs );
     m_pipelineCadence.update( m_now() );
     updatePipelineINDI();
 
@@ -2388,7 +2473,7 @@ inline int dmSyncopation::appLogic()
         SHMIMMONITORT_UPDATE_INDI( combinerMonitorT );
     }
 
-    if( m_cameraCadence.enabled() )
+    if( m_cameraCadence.enabled() || m_cameraPublicationCadence.enabled() )
     {
         SHMIMMONITORT_APP_LOGIC( cameraMonitorT );
         SHMIMMONITORT_UPDATE_INDI( cameraMonitorT );
@@ -2527,12 +2612,14 @@ inline int dmSyncopation::appLogic()
             updateIfChanged( m_indiP_health, "combined", m_combinedName );
             updateIfChanged( m_indiP_health, "timingStream", m_timingName );
             updateIfChanged( m_indiP_health, "mapping", mappings );
+            const std::string mode = m_diagnosticsOnly ? "diagnostics only" : "scheduler";
+            updateIfChanged( m_indiP_health, "mode", mode );
         }
     }
     SHMIMMONITOR_UPDATE_INDI;
 
     if( m_primaryCadence.enabled() || m_combinerCadence.enabled() || m_cameraCadence.enabled() ||
-        m_pipelineCadence.enabled() )
+        m_cameraPublicationCadence.enabled() || m_pipelineCadence.enabled() )
     {
         recordTelem( nullptr );
     }
@@ -2551,7 +2638,7 @@ inline int dmSyncopation::appShutdown()
         SHMIMMONITORT_APP_SHUTDOWN( combinerMonitorT );
     }
 
-    if( m_cameraCadence.enabled() )
+    if( m_cameraCadence.enabled() || m_cameraPublicationCadence.enabled() )
     {
         SHMIMMONITORT_APP_SHUTDOWN( cameraMonitorT );
     }
@@ -2583,7 +2670,7 @@ inline int dmSyncopation::recordTelem( const telem_dmsynco *record )
     { // mutex scope
         std::unique_lock<std::mutex> lock( m_cycleMutex, std::try_to_lock );
 
-        if( lock.owns_lock() )
+        if( lock.owns_lock() && !m_diagnosticsOnly )
         {
             scheduleValid    = true;
             state            = m_scheduleState;
@@ -2601,7 +2688,7 @@ inline int dmSyncopation::recordTelem( const telem_dmsynco *record )
     }
 
     if( !scheduleValid && !m_primaryCadence.enabled() && !m_combinerCadence.enabled() && !m_cameraCadence.enabled() &&
-        !m_pipelineCadence.enabled() )
+        !m_cameraPublicationCadence.enabled() && !m_pipelineCadence.enabled() )
     {
         return 0;
     }
@@ -2623,7 +2710,8 @@ inline int dmSyncopation::recordTelem( const telem_dmsynco *record )
                                      scheduleValid,
                                      m_combinerCadence.summary(),
                                      m_cameraCadence.summary(),
-                                     m_pipelineCadence.summary() );
+                                     m_pipelineCadence.summary(),
+                                     m_cameraPublicationCadence.summary() );
     telem<telem_dmsynco>( message );
     return 0;
 }
@@ -2636,6 +2724,12 @@ INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_enable )( const pcf::IndiProperty 
         return -1;
     }
     const bool enable = ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On;
+
+    if( enable && m_diagnosticsOnly )
+    {
+        return -1;
+    }
+
     if( !enable )
     {
         m_enabled = false;

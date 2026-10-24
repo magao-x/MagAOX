@@ -93,7 +93,8 @@ Current work, following the 2026-10-23 measurements and operator direction:
 | Primary, combiner and DM-controller timing measurements | Implemented; operator evidence recorded. |
 | Semaphore-triggered dmcomb baseline | Operator reports mode 3; substantially lower combiner delay jitter measured. |
 | Ordered primary interval-pair measurements | Implemented and verified. Operator sample favors late-then-early (49/65) over early-then-late (6/69), without a universal ordering or exact compensation. |
-| Independent camera acquisition excursions and upstream AO trace stages | Implemented and locally verified; operator comparison pending. |
+| Independent camera acquisition excursions and upstream AO trace stages | Implemented and verified; first operator sample places the large tails at or before the oldest represented AO stage start. Camera acquisition has much smaller, rarer excursions. |
+| Isolated camera publication and acquWFS timing | Camera `writetime` collector and `diagnostics.only` mode implemented and verified locally (4883 assertions, 69 cases; library/app/reader builds). Standalone profile/procedure prepared; operator comparison pending. |
 | Median-based target cadence and per-step skips for ordinary excursions | Revised design below; active targets stay on the predicted grid despite early/late main arrivals. Not implemented. |
 | Targeted dmcomb-reader wake for active extra steps | Proposed design below; not implemented. |
 | Enabled multi-step qualification | Pending the scheduler changes and full timing-window qualification. |
@@ -358,6 +359,74 @@ records and the user guide accompany the code. Local verification results are
 recorded in the debugging record. These checks do not implement the median-grid
 scheduler, per-step skip recovery or targeted wake; the early reserve is still
 undecided.
+
+### 2026-10-23 first upstream-stage operator result
+
+Twelve new operator records show clean camera/pipeline observation quality and
+four stable upstream rows. Camera acquisition intervals span **480–525 us**,
+with **0.325–0.819 us** deviation; a 525 us interval exceeds the 20 us diagnostic
+threshold, so acquisition is not excursion-free. The oldest represented AO
+stage start spans **422.198–580.737 us**, close to the primary publication tails
+of **421.687–582.079 us**. Across six disjoint windows, late-primary observations
+have a **538.737 us** mean oldest-stage start interval and only **-1.191 us**
+total subsequent stage/publication-tail change. Early observations show the
+opposite pattern (**461.926 us**, **+1.457 us**). These conditional sums are
+derived from the same qualified pipeline cohorts, not differences of marginal
+variances or unmatched camera/primary windows.
+
+The large tails are predominantly visible at or before the oldest represented
+`acquWFS` start, rather than introduced by random later measured processing
+stages. The remaining unrepresented region includes camera publication and
+publication-to-first-stage wake/scheduling. Independent camera publication
+intervals would help distinguish those possibilities. Camera receipt intervals
+include its observer scheduling and cannot substitute for publication timing.
+See the [debugging record](dm-syncopation-debugging.md) for the source, populations
+and limitations. No new code or instrument setting changes accompany this result.
+
+### 2026-10-23 isolated camera publication and acquWFS measurement setup
+
+At the operator's request, prepare an isolated comparison with only `camwfs` and
+`acquWFS-1` producing AO data. A standalone metadata observer selects
+`aol1_imWFS2` as its primary, so the one-row pipeline source interval represents
+`acquWFS-1` processing starts after its input-trigger wait. This is a wake-cadence
+proxy, not an exact timestamp at semaphore return.
+
+Add an independent camera `writetime` interval collector using the same coherent
+counter/acquisition/publication metadata snapshot as the existing `atime`
+collector. It has separate timestamp-progression history, median, ordered pairs,
+statistics and quality counters. Reuse the existing callback clocks and shared
+consumer implementation; do not add another producer clock read or pixel copy.
+New read-only `camera_write_timing`, `camera_write_timing_quality` and
+`camera_write_interval_pairs` properties accompany the appended optional camera
+publication telemetry table. Text populations include `cameraWriteInterval`,
+`cameraWriteReceiptInterval` and `cameraWrite_pairs`. Rebuild the app and reader.
+
+New default-false `diagnostics.only` bypasses scheduler resource attachment and
+cycle processing, creates no auxiliary or provider-timing streams, forces
+combined monitoring off, automatically selects an available primary reader
+semaphore, and rejects scheduler enable requests. Primary, camera and pipeline
+statistics continue without DM-controller/combiner resources. Records mark the
+schedule snapshot unavailable; ordinary scheduler mode retains its behavior.
+
+The [isolated profile](../../../apps/dmSyncopation/camera-acquWFS.conf) selects
+that mode, `aol1_imWFS2`, ordinary observer scheduling, no primary cpuset and no
+camera INDI FPS subscription. The
+[operator procedure](../../../apps/dmSyncopation/doc/camera-acquWFS-test.md)
+stops downstream RUN stages through the existing FPS controls while retaining
+CONF/settings, captures at least two minutes, checks identities and observation
+quality, and restores only previously running stages with the loop open.
+Compare acquisition/publication/source-start interval distributions without
+claiming absolute cross-clock latency or frame-matched extrema.
+
+Local verification passed 4883 assertions across 69 cases: the full app suite,
+one-stage pipeline attribution, extended telemetry serialization/validation,
+legacy telemetry and ordered-pair telemetry. Checks include the shipped profile's
+empty-value overrides, independent timestamp rejection/session resets, and
+diagnostics-only rejection of enable and bypass of DM-resource/cycle work.
+The library/schema, application and matching `logdump` builds passed, as did
+clang-format and whitespace checks. No agent hardware actions were performed.
+This diagnostic setup implements no median-grid, skip-recovery or targeted-wake
+scheduler revision and selects no new early-arrival reserve.
 
 ### 2026-10-23 proposed targeted primary-semaphore wake
 

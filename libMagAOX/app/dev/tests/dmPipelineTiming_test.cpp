@@ -32,6 +32,12 @@ struct Stream
                 int64_t  handoffExtra     = 0 /**< [in] Additional row-zero handoff time in ns. */,
                 int64_t  publicationExtra = 0 /**< [in] Additional primary writetime tail in ns. */ );
 
+    /// Set one camera-triggered stage with independent wake, execution and publication-tail changes.
+    void singleStageFrame( uint64_t number /**< [in] Consecutive frame and camera-trigger index. */,
+                           int64_t  wakeExtra /**< [in] Start displacement from the regular cadence in ns. */,
+                           int64_t  executionExtra /**< [in] Additional execution duration in ns. */,
+                           int64_t  publicationExtra /**< [in] Additional output-publication tail in ns. */ );
+
     /// Capture the current fixture metadata at a regular independent local receipt timestamp.
     void capture( Collector &collector /**< [in,out] Collector receiving the event. */,
                   uint64_t   number /**< [in] Local observation index. */,
@@ -86,10 +92,102 @@ void Stream::capture( Collector &collector, uint64_t number, bool synthetic )
     collector.observe( image, local + 100, synthetic ? -1 : local );
 }
 
+void Stream::singleStageFrame( uint64_t number, int64_t wakeExtra, int64_t executionExtra, int64_t publicationExtra )
+{
+    constexpr int64_t externalBase = 1790000000000000000LL;
+    int64_t           start        = externalBase + number * 500000 + wakeExtra;
+    frame( number );
+    rows                    = {};
+    rows[0].procwrite_PID   = 100;
+    rows[0].trigger_inode   = 700;
+    rows[0].triggerstatus   = 2;
+    rows[0].cnt0            = 1000 + number;
+    rows[0].ts_procstart    = stamp( start );
+    rows[0].ts_streamupdate = stamp( start + 10000 + executionExtra );
+    metadata.writetime      = stamp( start + 12000 + executionExtra + publicationExtra );
+}
+
 } // namespace
 /// \endcond
 
 /** \ingroup dmPipelineTiming_unit_test */
+
+/** \brief An isolated camera-triggered stage exposes wake cadence without downstream AO processes.
+ * \ingroup dmPipelineTiming_unit_test
+ */
+TEST_CASE( "Pipeline timing isolates one camera-triggered stage", "[dev::dmPipelineTiming]" )
+{
+    Collector collector;
+    collector.configure( 2, 20, 20e-6 );
+    Stream  stream;
+    int64_t wakeExtra = 0, executionExtra = 0, publicationExtra = 0;
+
+    SECTION( "A wake excursion changes the source cadence" )
+    {
+        wakeExtra = 40000;
+    }
+
+    SECTION( "A processing excursion leaves wake cadence unchanged" )
+    {
+        executionExtra = 40000;
+    }
+
+    SECTION( "A publication-tail excursion leaves wake and processing cadence unchanged" )
+    {
+        publicationExtra = 40000;
+    }
+
+    for( uint64_t i = 0; i < 7; ++i )
+    {
+        bool excursion = i == 2;
+        stream.singleStageFrame(
+            i, excursion ? wakeExtra : 0, excursion ? executionExtra : 0, excursion ? publicationExtra : 0 );
+        stream.capture( collector, i );
+    }
+
+    collector.update( 4000100 );
+    const auto &summary = collector.summary();
+    REQUIRE( summary.stageCount == 1 );
+    CHECK( summary.stages[0].pid == 100 );
+    CHECK( summary.stages[0].inputInode == 700 );
+    CHECK( summary.intervals == 6 );
+    CHECK( summary.median == Approx( 500e-6 ) );
+    CHECK( summary.late == 1 );
+    CHECK( summary.early == 1 );
+    CHECK( summary.sourceInterval.count == 6 );
+    CHECK( summary.sourceInterval.valid );
+    CHECK( summary.sourceInterval.mean == Approx( 500e-6 ) );
+    CHECK( summary.sourceInterval.stddev == Approx( std::sqrt( 0.4 ) * wakeExtra * 1e-9 ) );
+    CHECK( summary.sourceInterval.min == Approx( ( 500000 - wakeExtra ) * 1e-9 ) );
+    CHECK( summary.sourceInterval.max == Approx( ( 500000 + wakeExtra ) * 1e-9 ) );
+    CHECK( summary.sourceInterval.span == Approx( 0.003 ) );
+    CHECK( summary.lateSourceInterval.mean == Approx( ( 500000 + wakeExtra ) * 1e-9 ) );
+    CHECK( summary.earlySourceInterval.mean == Approx( ( 500000 - wakeExtra ) * 1e-9 ) );
+    CHECK( summary.stages[0].execution.count == 6 );
+    CHECK( summary.stages[0].lateExecution.mean == Approx( ( 10000 + executionExtra ) * 1e-9 ) );
+    CHECK( summary.stages[0].earlyExecution.mean == Approx( 10e-6 ) );
+    CHECK( summary.stages[0].lateExecutionChange.mean == Approx( executionExtra * 1e-9 ) );
+    CHECK( summary.stages[0].earlyExecutionChange.mean == Approx( -executionExtra * 1e-9 ) );
+    CHECK( summary.stages[0].handoff.count == 0 );
+    CHECK( summary.latePublicationChange.mean == Approx( publicationExtra * 1e-9 ) );
+    CHECK( summary.earlyPublicationChange.mean == Approx( -publicationExtra * 1e-9 ) );
+    CHECK( summary.lateSourceInterval.mean + summary.stages[0].lateExecutionChange.mean +
+               summary.latePublicationChange.mean ==
+           Approx( 540e-6 ) );
+    CHECK( summary.earlySourceInterval.mean + summary.stages[0].earlyExecutionChange.mean +
+               summary.earlyPublicationChange.mean ==
+           Approx( 460e-6 ) );
+    CHECK( summary.total.invalidTrace == 0 );
+    CHECK( summary.total.missingTrace == 0 );
+    CHECK( summary.total.counterGaps == 0 );
+
+    // clang-format off
+#ifdef XWCTEST_DOX_REF
+    MagAOX::app::dev::dmPipelineTiming::observe;
+    MagAOX::app::dev::dmPipelineTiming::calculate;
+#endif
+    // clang-format on
+}
 
 /** \brief Distinguish added execution from handoff delay and preserve signed catch-up changes.
  * \ingroup dmPipelineTiming_unit_test

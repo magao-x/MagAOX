@@ -46,7 +46,8 @@ struct telem_dmsynco : public flatbuffer_log
                   bool scheduleValid = true /**< [in] false when scheduler fields are unavailable placeholders */,
                   const dmCombTiming::Summary &combiner = {} /**< [in] independently observed combiner timing */,
                   const dmTiming::Summary     &camera = {} /**< [in] independent camera acquisition-stamp intervals */,
-                  const dmPipelineTiming::Summary &pipeline = {} /**< [in] upstream trace-stage populations */ );
+                  const dmPipelineTiming::Summary &pipeline  = {} /**< [in] upstream trace-stage populations */,
+                  const dmTiming::Summary &cameraPublication = {} /**< [in] independent camera writetime intervals */ );
     };
 
     /// Validate optional cadence and stage populations while accepting legacy records.
@@ -76,7 +77,7 @@ struct telem_dmsynco : public flatbuffer_log
     combinerTiming( flatbuffers::FlatBufferBuilder &builder /**< [in/out] destination builder */,
                     const dmCombTiming::Summary    &summary /**< [in] coherent combiner observation summary */ );
 
-    /// Serialize either primary publication or independent camera acquisition intervals.
+    /// Serialize primary publication, camera acquisition or camera publication intervals.
     static flatbuffers::Offset<DmSyncoPrimaryTiming>
     observationTiming( flatbuffers::FlatBufferBuilder &builder /**< [in/out] destination builder */,
                        const dmTiming::Summary        &summary /**< [in] retained external-stamp cadence */ );
@@ -97,10 +98,11 @@ struct telem_dmsynco : public flatbuffer_log
     static bool validPipeline( const DmSyncoPipelineTiming *summary /**< [in] optional trace-stage summary */ );
 
     /// Format independent primary/camera cadence and ordered excursions with distinct names.
-    static void formatObservation( std::ostream &output /**< [in/out] formatted aggregate */,
-                                   const char   *prefix /**< [in] primary or camera identifier */,
-                                   const char   *intervalName /**< [in] publication/acquisition interval label */,
-                                   const DmSyncoPrimaryTiming *summary /**< [in] optional cadence summary */ );
+    static void
+    formatObservation( std::ostream &output /**< [in/out] formatted aggregate */,
+                       const char   *prefix /**< [in] primary, camera acquisition or camera publication identifier */,
+                       const char   *intervalName /**< [in] external-stamp interval label */,
+                       const DmSyncoPrimaryTiming *summary /**< [in] optional cadence summary */ );
 
     /// Format retained pipeline stages and their independently counted conditional populations.
     static void formatPipeline( std::ostream                &output /**< [in/out] formatted aggregate */,
@@ -329,16 +331,18 @@ inline telem_dmsynco::messageT::messageT( int                              state
                                           bool                             scheduleValid,
                                           const dmCombTiming::Summary     &combiner,
                                           const dmTiming::Summary         &camera,
-                                          const dmPipelineTiming::Summary &pipeline )
+                                          const dmPipelineTiming::Summary &pipeline,
+                                          const dmTiming::Summary         &cameraPublication )
 {
     builder.ForceDefaults( true ); // Keep nonfinite input available to verification under fast-math comparisons.
 
-    const auto residualVector = builder.CreateVector( residuals );
-    const auto advanceVector  = builder.CreateVector( advances );
-    const auto primaryTiming  = observationTiming( builder, primary );
-    const auto cameraTiming   = observationTiming( builder, camera );
-    const auto upstreamTiming = pipelineTiming( builder, pipeline );
-    const auto combinedTiming = combinerTiming( builder, combiner );
+    const auto residualVector          = builder.CreateVector( residuals );
+    const auto advanceVector           = builder.CreateVector( advances );
+    const auto primaryTiming           = observationTiming( builder, primary );
+    const auto cameraTiming            = observationTiming( builder, camera );
+    const auto cameraPublicationTiming = observationTiming( builder, cameraPublication );
+    const auto upstreamTiming          = pipelineTiming( builder, pipeline );
+    const auto combinedTiming          = combinerTiming( builder, combiner );
 
     builder.Finish( CreateTelem_dmsynco_fb( builder,
                                             state,
@@ -356,7 +360,8 @@ inline telem_dmsynco::messageT::messageT( int                              state
                                             scheduleValid,
                                             combinedTiming,
                                             cameraTiming,
-                                            upstreamTiming ) );
+                                            upstreamTiming,
+                                            cameraPublicationTiming ) );
 }
 
 inline bool telem_dmsynco::validStats( const DmSyncoTimingStats *stats, bool signedValues )
@@ -530,7 +535,7 @@ inline bool telem_dmsynco::verify( flatlogs::bufferPtrT &buffer, flatlogs::msgLe
     const auto *record = GetTelem_dmsynco_fb( flatlogs::logHeader::messageBuffer( buffer ) );
 
     if( !validObservation( record->primary_timing() ) || !validObservation( record->camera_timing() ) ||
-        !validPipeline( record->pipeline_timing() ) )
+        !validPipeline( record->pipeline_timing() ) || !validObservation( record->camera_publication_timing() ) )
     {
         return false;
     }
@@ -712,6 +717,7 @@ inline std::string telem_dmsynco::msgString( void *buffer, flatlogs::msgLenT len
 
     formatObservation( output, "camera", "cameraAcquisitionInterval", record->camera_timing() );
     formatPipeline( output, record->pipeline_timing() );
+    formatObservation( output, "cameraWrite", "cameraWriteInterval", record->camera_publication_timing() );
 
     return output.str();
 }

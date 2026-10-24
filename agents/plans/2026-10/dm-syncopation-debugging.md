@@ -2,7 +2,7 @@
 
 This record tracks operator observations, diagnosis, changes and verification during debugging and optimization. The [main engineering plan](dm-syncopation.md) retains the settled design and review answers; the [user guide](../../../apps/dmSyncopation/doc/dmSyncopation.md) documents current operation and interfaces.
 
-Current status: ordered primary telemetry strongly favors late-then-early intervals, but does not support an always-late-then-early rule. Eight nonoverlapping two-second windows from the latest operator run show 49/65 late intervals immediately followed by early intervals, versus 6/69 early intervals immediately followed by late intervals, using a 20 us classification threshold. The median stays 499.944–500.145 us across all reports. Primary publication tails remain approximately -81/+81 us, while the mode-3 combiner contributes about 9.31 us mean delay with 0.17–0.18 us deviation. No auxiliary deliveries or collection-quality errors are reported in this run. The median/skip scheduler and targeted extra-step wake remain unimplemented, and the early-arrival reserve remains undecided. Earlier trials, including the EDT-confounded observations, are retained below; the origin of primary publication variation and sustained multi-step qualification remain open.
+Current status: the first independent camera/upstream trace run places the large primary interval tails at or before the oldest represented AO stage start (`acquWFS`, input `camwfs`), rather than in the later measured processing stages. Acquisition intervals are much steadier (480–525 us, 0.325–0.819 us deviation), but a rare +25 us excursion is present. The oldest-stage starts already span 422.198–580.737 us, close to primary publication's 421.687–582.079 us. All reported collection-quality error counts are zero. An independent camera publication collector and isolated `camwfs`/`acquWFS-1` observer profile are now implemented and verified locally (4883 assertions, 69 cases; matching builds); the operator comparison remains pending. Median-grid scheduling, per-step skips and targeted extra-step wakes remain unimplemented; the early-arrival reserve remains undecided. Earlier trials and their qualifications are preserved below.
 
 Append subsequent investigations as dated entries, keeping operator evidence, local verification and outstanding instrument checks explicit. All agent work runs on the workstation; the operator performs instrument actions and supplies results.
 
@@ -1548,3 +1548,164 @@ conditional changes while scheduling remains disabled. That instrument result,
 not the workstation checks, will determine whether acquisition or a particular
 handoff/processing stage carries the observed excursions. Scheduler revisions
 and selection of the early-arrival reserve remain separate pending work.
+
+## 2026-10-23 first independent camera and upstream-stage operator run
+
+The operator supplied twelve `[dmsynco]` records, sequences **12–23**, from
+**22:12:01.890510637** through **22:12:12.930420077 UTC**, in
+`dmtweeter-synco_20261023221150854513305.bintel` (attachment
+`3f4455e3-6f2f-440f-89fe-ec7dfcd3aaf2/Pasted text.txt`). The new camera and
+pipeline tables are present/enabled, session **2**, two-second windows with
+**3,999** qualified intervals each. Every schedule snapshot is valid with
+`state=0`, `steps=2`, and zero delivered/missed/fault counters; this measures the
+ordinary AO path without demonstrating active extra-step delivery.
+
+| Observed interval | Overall extrema, us | Window deviation range, us |
+| --- | ---: | ---: |
+| Camera acquisition (`atime`) | 480–525 | 0.325–0.819 |
+| Camera observer receipts | 422.718–579.725 | 1.927–3.453 |
+| Oldest represented AO stage starts | 422.198–580.737 | 1.465–3.206 |
+| Primary command publication | 421.687–582.079 | 5.036–5.705 |
+
+Camera acquisition is much steadier than primary publication, but is not
+excursion-free: sequences **14/15** report a **525 us** maximum and one eligible
+late follow-up at the strict **20 us** threshold around the 500 us camera
+median. Those windows overlap, so their counts must not be added. A 480 us
+interval is exactly on the early boundary and is ordinary under the strict
+classification. Camera observer receipts have much larger tails than the
+acquisition timestamps, but include the observer's own scheduling; they do not
+measure the camera publication interval.
+
+The four stable trace rows are:
+
+| Row | Writer PID | Trigger-input inode | Previously identified path role |
+| --- | ---: | ---: | --- |
+| 0 | 2035667 | 1614 | DM-command conversion, input `aol1_modevalDM` |
+| 1 | 2035467 | 1600 | Filtering, input `aol1_modevalWFS` |
+| 2 | 2035310 | 1589 | Reconstruction, input `aol1_imWFS2` |
+| 3 | 2035165 | 2411 | `acquWFS` preparation, input `camwfs` |
+
+Names/roles reuse the earlier operator trace mapping; this record directly
+reports PID and input inode, not process names or output-stream identity. The
+oldest row starts after camera publication/wait; it does not timestamp camera
+acquisition itself.
+
+Select sequences **12, 14, 16, 18, 20, 22** for six disjoint two-second pipeline
+windows. These contain **46 late / 49 early** primary intervals at the 20 us
+threshold. The same every-other selection also has disjoint camera windows,
+with **23,994** acquisition intervals and **one eligible late follow-up / zero
+early follow-ups**. Counts are from sampled windows with small gaps, not an exact
+cumulative event count over the entire continuous capture. No late-to-early
+camera pair is counted in that selection.
+
+| Same pipeline cohort | Late primary intervals | Early primary intervals |
+| --- | ---: | ---: |
+| Qualified observations | 46 | 49 |
+| Oldest-stage start interval, weighted mean, us | 538.737 | 461.926 |
+| Sum of processing/handoff changes and publication-tail change, us | -1.191 | +1.457 |
+| Primary interval reconstructed from those components, us | 537.546 | 463.383 |
+
+The last two rows are derived from like-count conditional populations, including
+signed changes across all four stages, the three represented handoffs and the
+primary publication tail. They are not subtraction/addition of marginal jitter
+or camera/primary clocks. The decomposition shows the dominant late/early
+variation already at the oldest represented start. Subsequent measured work
+partly compensates it on average. Later-stage execution/handoff changes do not
+add tens of microseconds to these large excursions. Ordinary processing still
+contributes smaller cadence variation; the first-stage execution itself ranges
+62.508–79.230 us across all observations, so this does not claim that downstream
+processing has zero jitter.
+
+Combiner primary-to-publication mean remains **9.302–9.337 us**, with deviation
+**0.163–0.186 us**. Camera, primary, combined and pipeline quality-error counters
+all remain zero throughout: no rejections, duplicates, gaps, invalid metadata,
+missing/frozen trace, topology changes, truncation or queue drops are reported.
+Each row's stage population has 4,000 qualified observations per window. This
+supports the internal comparison while retaining the documented best-effort
+trace/frame-association limits.
+
+The result narrows the large-tail investigation to **camera publication and the
+camera-to-first-AO-stage wake/scheduling region**. It does not identify a single
+cause inside that region. The independent acquisition series has a smaller
+rare excursion, and cannot associate that particular event with a DM event.
+The next useful distinction is independent camera `writetime` intervals versus
+oldest-stage start intervals; the existing camera observer receipt population
+cannot replace that measurement. No new implementation or producer setting
+change is made in response to this attachment. Only the main plan and this
+record were updated; no test/build rerun, commit, push or agent instrument action
+was performed.
+
+### Verified OCAM acquisition timestamp source
+
+At the operator's request, source inspection verifies that `camwfs.atime` uses
+the EDT PDV SDK-provided timestamp in the OCAM controller path:
+
+1. `ocam2KCtrl::acquireAndCheckValid()` passes `m_currImageTimestamp` by reference
+   to `edtCamera<ocam2KCtrl>::pdvAcquire()`.
+2. That helper calls `pdv_wait_last_image_timed(m_pdv, dmaTimeStamp)` and copies
+   the returned two values directly to `tv_sec` and `tv_nsec`, respectively.
+3. `frameGrabber` assigns that timestamp to the primary stream's `md->atime`,
+   its circular timestamp array when enabled, and its acquisition statistics.
+
+OCAM pixel descrambling/binning does not replace this timestamp. The post-publish
+hook copies it unchanged to the synchronization stream without modifying the
+primary. Publication `writetime` is separately sampled with `CLOCK_REALTIME`.
+This verifies the source assignment path, not the exact SDK/driver timestamp
+event or its clock implementation. No code or instrument action was required.
+
+## 2026-10-23 isolated camera publication and acquWFS setup implemented
+
+The operator requests measuring camera publication and `acquWFS-1` starts with
+only those two AO data-producing stages running. Add a separate camera
+`writetime` collector beside the acquisition collector, using the same coherent
+metadata snapshot and existing callback clock readings. Timestamp histories and
+statistics remain independent; malformed/nonprogressing acquisition metadata
+does not discard valid publication metadata, or vice versa. Reuse `dev::dmTiming`
+for interval extrema, ordered excursions, coverage and quality. New INDI
+properties use the `camera_write` prefix; the appended optional telemetry table
+prints `cameraWriteInterval`, `cameraWriteReceiptInterval`, `cameraWrite_pairs`
+and the conditional successor/sum populations. The matching app and reader must
+both be installed.
+
+New `diagnostics.only=true` permits an arbitrary observational primary, skips
+all scheduler DM-resource attachments and cycle work, creates no auxiliary or
+schedule streams, forces combined monitoring off, selects an available primary
+reader automatically, and rejects scheduler enable requests. Its schedule
+snapshot is unavailable while independent measurements remain active.
+
+The new [profile](../../../apps/dmSyncopation/camera-acquWFS.conf) selects
+`aol1_imWFS2` and ordinary observer scheduling, clears the primary observer
+cpuset, and disables the camera INDI FPS subscription. The new
+[procedure](../../../apps/dmSyncopation/doc/camera-acquWFS-test.md) uses the
+verified FPS RUN controls to stop downstream conversion/filter/reconstruction,
+retains acquisition and CONF/settings, starts a uniquely named observer,
+captures at least two minutes, and restores previously running stages with the
+loop open. A one-row trace identifies `acquWFS-1` and its camera input inode.
+The source interval measures processing starts after the trigger wait, serving
+as a wake-cadence proxy. It does not timestamp exact semaphore return. Independent
+acquisition, publication and source-start interval populations locate where
+excursions first appear statistically; matching extrema or absolute cross-clock
+latency are not inferred. Normally overlapping two-second windows require
+checking actual record times and avoiding double-counted excursion totals.
+
+Local verification passed **4883 assertions in 69 test cases**:
+
+- Full `dmSyncopation` suite: 2972 assertions, 44 cases, including the actual
+  isolated profile, independent acquisition/publication validity and session
+  resets, and diagnostic-only resource/cycle bypass with rejected enable.
+- `dmPipelineTiming`: 186 assertions, six cases, including a single camera-triggered
+  row with separate wake, execution and publication-tail excursions.
+- `dmPipelineTelemetry`: 403 assertions, five cases, including distinct acquisition
+  and publication populations, JSON/text, old records and malformed new tables.
+- Existing `dmSyncoTelemetry` and `dmTimingTelemetry`: 322 and 1000 assertions,
+  respectively, seven cases each.
+
+Normal library/schema, app and `logdump` builds passed. Clang-format validation
+of all touched C++ files and the whitespace check passed. The first full-suite
+attempt exposed an assertion that incorrectly assumed no earlier test had left
+scheduler files; the new resource-bypass case now uses its own unused names and
+the complete suite passes. Workstation-local test log artifacts were moved to
+`/tmp/synco-isolated-test-logs-nt6im2d8`; build/test transcripts use the
+`/tmp/synco-isolated-` prefix. No hardware actions were performed by an agent.
+Scheduler revisions remain unimplemented and the early-arrival reserve remains
+undecided.

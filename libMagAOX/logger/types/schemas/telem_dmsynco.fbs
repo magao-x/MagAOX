@@ -1,5 +1,5 @@
 /// \file telem_dmsynco.fbs
-/// \brief Scheduler telemetry with optional primary/camera cadence, pipeline stages and combiner traces.
+/// \brief Scheduler telemetry with independent camera acquisition/publication cadence, pipeline stages and combiner traces.
 namespace MagAOX.logger;
 
 // Values and coverage are seconds; publication values retain their external clock.
@@ -29,7 +29,7 @@ table DmSyncoIntervalPairs
     early_late_sum:DmSyncoTimingStats (required);
 }
 
-// External-stamp population is primary writetime or, only in camera_timing, independent camera atime.
+// External-stamp population is primary writetime, camera_timing atime or camera_publication_timing writetime.
 table DmSyncoPrimaryTiming
 {
     session:ulong;
@@ -170,6 +170,7 @@ table Telem_dmsynco_fb
     combiner_timing:DmSyncoCombinerTiming;
     camera_timing:DmSyncoPrimaryTiming;
     pipeline_timing:DmSyncoPipelineTiming;
+    camera_publication_timing:DmSyncoPrimaryTiming;
 }
 
 root_type Telem_dmsynco_fb;

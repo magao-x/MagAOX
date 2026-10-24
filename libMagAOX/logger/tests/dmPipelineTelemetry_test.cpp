@@ -1,5 +1,5 @@
 /** \file dmPipelineTelemetry_test.cpp
- * \brief Independent camera cadence and upstream-stage telemetry round trips, validation and compatibility.
+ * \brief Independent camera acquisition/publication cadence and upstream-stage telemetry validation and compatibility.
  * \ingroup logger_files
  */
 #include <limits>
@@ -12,7 +12,7 @@ namespace libXWCTest
 {
 namespace loggerTest
 {
-/// Tests of independent camera and upstream-stage telemetry.
+/// Tests of independent camera acquisition, publication and upstream-stage telemetry.
 /** \ingroup dmPipelineTelemetry_unit_test */
 namespace dmPipelineTelemetryTest
 {
@@ -102,10 +102,12 @@ dmTiming::Summary sampleCamera()
 }
 
 /// Construct a scheduler-independent diagnostic record through the public message API.
-telem_dmsynco::messageT message( const dmTiming::Summary         &camera /**< [in] independent acquisition cadence */,
-                                 const dmPipelineTiming::Summary &pipeline /**< [in] trace-stage populations */ )
+telem_dmsynco::messageT
+message( const dmTiming::Summary         &camera /**< [in] independent acquisition cadence */,
+         const dmPipelineTiming::Summary &pipeline /**< [in] trace-stage populations */,
+         const dmTiming::Summary         &cameraPublication = {} /**< [in] independent camera publication cadence */ )
 {
-    return { 0, 2, 500000, 0, 0, 0, 0, 0, 0, {}, {}, {}, false, {}, camera, pipeline };
+    return { 0, 2, 500000, 0, 0, 0, 0, 0, 0, {}, {}, {}, false, {}, camera, pipeline, cameraPublication };
 }
 
 /// Build a real log envelope for the standard verification dispatch.
@@ -132,7 +134,7 @@ void sameStats( const DmSyncoTimingStats *actual /**< [in] serialized population
 }
 /// \endcond
 
-/// Preserve independent camera acquisition intervals, pipeline identities, conditional populations and signed changes.
+/// Preserve distinct camera acquisition/publication intervals, trace identities and conditional populations.
 /** \ingroup dmPipelineTelemetry_unit_test
  * \see MagAOX::logger::telem_dmsynco::messageT
  * \see MagAOX::logger::telem_dmsynco::verify
@@ -140,10 +142,16 @@ void sameStats( const DmSyncoTimingStats *actual /**< [in] serialized population
  */
 TEST_CASE( "Synco telemetry preserves camera and trace-stage timing", "[dmPipelineTelemetry]" )
 {
-    const auto camera   = sampleCamera();
-    const auto pipeline = samplePipeline();
-    auto       input    = message( camera, pipeline );
-    auto       buffer   = envelope( input );
+    const auto camera            = sampleCamera();
+    const auto pipeline          = samplePipeline();
+    auto       cameraPublication = sampleCamera();
+    cameraPublication.session    = 19;
+    cameraPublication.metrics[dmTiming::metricIndex( dmTiming::Metric::publicationInterval )] =
+        sampleStats( 12, 503e-6 );
+    cameraPublication.metrics[dmTiming::metricIndex( dmTiming::Metric::receiptInterval )] = sampleStats( 12, 504e-6 );
+    cameraPublication.intervalPairs.median                                                = 502e-6;
+    auto input  = message( camera, pipeline, cameraPublication );
+    auto buffer = envelope( input );
     REQUIRE( telem_dmsynco::verify( buffer, flatlogs::logHeader::msgLen( buffer ) ) );
     REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
     auto       *payload  = input.builder.GetBufferPointer();
@@ -158,6 +166,16 @@ TEST_CASE( "Synco telemetry preserves camera and trace-stage timing", "[dmPipeli
     sameStats( observed->receipt(), camera.metrics[dmTiming::metricIndex( dmTiming::Metric::receiptInterval )] );
     REQUIRE( observed->interval_pairs()->late_early_sum()->count() == 2 );
     REQUIRE( observed->interval_pairs()->early_late_sum()->count() == 1 );
+    const auto *write = record->camera_publication_timing();
+    REQUIRE( write != nullptr );
+    REQUIRE( write->enabled() );
+    REQUIRE( write->valid() );
+    REQUIRE( write->session() == cameraPublication.session );
+    sameStats( write->publication(),
+               cameraPublication.metrics[dmTiming::metricIndex( dmTiming::Metric::publicationInterval )] );
+    sameStats( write->receipt(),
+               cameraPublication.metrics[dmTiming::metricIndex( dmTiming::Metric::receiptInterval )] );
+    REQUIRE( write->interval_pairs()->median() == Approx( 502e-6 ) );
     const auto *trace = record->pipeline_timing();
     REQUIRE( trace->enabled() );
     REQUIRE( trace->session() == pipeline.session );
@@ -218,6 +236,9 @@ TEST_CASE( "Synco telemetry preserves camera and trace-stage timing", "[dmPipeli
     REQUIRE( text.find( "cameraAcquisitionInterval[n=12 valid=1] mean_s=0.0005" ) != std::string::npos );
     REQUIRE( text.find( "cameraReceiptInterval[n=12 valid=1] mean_s=0.000501" ) != std::string::npos );
     REQUIRE( text.find( "camera_pairs={enabled:1,intervals:12,pairs:11" ) != std::string::npos );
+    REQUIRE( text.find( "cameraWriteInterval[n=12 valid=1] mean_s=0.000503" ) != std::string::npos );
+    REQUIRE( text.find( "cameraWriteReceiptInterval[n=12 valid=1] mean_s=0.000504" ) != std::string::npos );
+    REQUIRE( text.find( "cameraWrite_pairs={enabled:1,intervals:12,pairs:11,median_s:0.000502" ) != std::string::npos );
     REQUIRE( text.find( "pipeline_stage={row:0,pid:12345,inputInode:18014398509482004}" ) != std::string::npos );
     REQUIRE( text.find( "stageLateHandoffChange[n=3 valid=1] mean_s=-8e-06" ) != std::string::npos );
     REQUIRE( text.find( "pipelineLatePublicationChange[n=3 valid=1] mean_s=-5e-06" ) != std::string::npos );
@@ -229,7 +250,11 @@ TEST_CASE( "Synco telemetry preserves camera and trace-stage timing", "[dmPipeli
     flatbuffers::Parser parser;
     REQUIRE( parser.Deserialize( reinterpret_cast<const uint8_t *>( telem_dmsynco_bfbs ), telem_dmsynco_bfbs_len ) );
     REQUIRE( parser.Parse( json.c_str() ) );
-    const auto *decoded = GetTelem_dmsynco_fb( parser.builder_.GetBufferPointer() )->pipeline_timing();
+    const auto *decodedRecord = GetTelem_dmsynco_fb( parser.builder_.GetBufferPointer() );
+    REQUIRE( decodedRecord->camera_publication_timing()->session() == cameraPublication.session );
+    sameStats( decodedRecord->camera_publication_timing()->publication(),
+               cameraPublication.metrics[dmTiming::metricIndex( dmTiming::Metric::publicationInterval )] );
+    const auto *decoded = decodedRecord->pipeline_timing();
     REQUIRE( decoded->session() == pipeline.session );
     REQUIRE( decoded->total()->events() == pipeline.total.events );
     sameStats( decoded->stages()->Get( 1 )->early_execution_change(), pipeline.stages[1].earlyExecutionChange );
@@ -251,6 +276,9 @@ TEST_CASE( "Synco diagnostic telemetry preserves absent and disabled availabilit
     REQUIRE( text.find( "cameraAcquisitionInterval[n=0 valid=0]=unavailable" ) != std::string::npos );
     REQUIRE( text.find( "pipeline_enabled=0" ) != std::string::npos );
     REQUIRE( text.find( "pipeline_timing=unavailable" ) == std::string::npos );
+    REQUIRE( text.find( "cameraWrite_enabled=0 cameraWrite_valid=0" ) != std::string::npos );
+    REQUIRE( text.find( "cameraWriteInterval[n=0 valid=0]=unavailable" ) != std::string::npos );
+    REQUIRE( text.find( "cameraWrite_timing=unavailable" ) == std::string::npos );
     auto pipeline      = samplePipeline();
     pipeline.intervals = pipeline.late = pipeline.early = 0;
     pipeline.median                                     = 0;
@@ -282,8 +310,24 @@ TEST_CASE( "Synco diagnostic telemetry preserves absent and disabled availabilit
     auto legacy = envelope( input );
     REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, legacy.get() ) );
     text = telem_dmsynco::msgString( input.builder.GetBufferPointer(), input.builder.GetSize() );
-    REQUIRE( text.find( "camera_timing=unavailable camera_pairs=unavailable pipeline_timing=unavailable" ) !=
-             std::string::npos );
+    REQUIRE( text.find( "camera_timing=unavailable camera_pairs=unavailable pipeline_timing=unavailable "
+                        "cameraWrite_timing=unavailable cameraWrite_pairs=unavailable" ) != std::string::npos );
+
+    input.builder.Clear();
+    const auto                  empty = CreateDmSyncoTimingStats( input.builder );
+    DmSyncoPrimaryTimingBuilder acquisitionBuilder( input.builder );
+    acquisitionBuilder.add_enabled( true );
+    acquisitionBuilder.add_publication( empty );
+    acquisitionBuilder.add_receipt( empty );
+    const auto              acquisition = acquisitionBuilder.Finish();
+    Telem_dmsynco_fbBuilder legacyBuilder( input.builder );
+    legacyBuilder.add_camera_timing( acquisition );
+    input.builder.Finish( legacyBuilder.Finish() );
+    legacy = envelope( input );
+    REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, legacy.get() ) );
+    text = telem_dmsynco::msgString( input.builder.GetBufferPointer(), input.builder.GetSize() );
+    REQUIRE( text.find( "camera_enabled=1 camera_valid=0" ) != std::string::npos );
+    REQUIRE( text.find( "cameraWrite_timing=unavailable cameraWrite_pairs=unavailable" ) != std::string::npos );
 }
 
 /// Reject shape, topology, conditional-count, unit and finite-value corruption while accepting signed changes.
@@ -426,6 +470,39 @@ TEST_CASE( "Synco diagnostic telemetry rejects invalid camera cadence", "[dmPipe
     REQUIRE_FALSE( telem_dmsynco::verify( buffer, 1 ) );
     std::memset( flatlogs::logHeader::messageBuffer( buffer ), 0xff, 4 );
     REQUIRE_FALSE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+}
+
+/// Validate independent camera publication populations without changing acquisition statistics.
+/** \ingroup dmPipelineTelemetry_unit_test
+ * \see MagAOX::logger::telem_dmsynco::messageT
+ * \see MagAOX::logger::telem_dmsynco::verify
+ */
+TEST_CASE( "Synco diagnostic telemetry rejects invalid camera publication cadence", "[dmPipelineTelemetry]" )
+{
+    for( int variant = 0; variant < 4; ++variant )
+    {
+        auto cameraPublication = sampleCamera();
+
+        switch( variant )
+        {
+        case 0:
+            cameraPublication.metrics[dmTiming::metricIndex( dmTiming::Metric::publicationInterval )].mean = -1;
+            break;
+        case 1:
+            cameraPublication.intervalPairs.afterLate.count = cameraPublication.intervalPairs.pairs + 1;
+            break;
+        case 2:
+            cameraPublication.intervalPairs.threshold = std::numeric_limits<double>::infinity();
+            break;
+        case 3:
+            cameraPublication.span = std::numeric_limits<double>::quiet_NaN();
+            break;
+        }
+
+        auto input  = message( sampleCamera(), {}, cameraPublication );
+        auto buffer = envelope( input );
+        REQUIRE_FALSE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+    }
 }
 
 } // namespace dmPipelineTelemetryTest

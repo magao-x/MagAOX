@@ -33,6 +33,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_advances;
     using dmSyncopation::m_bounds;
     using dmSyncopation::m_cameraCadence;
+    using dmSyncopation::m_cameraDevice;
     using dmSyncopation::m_cameraDiagnostics;
     using dmSyncopation::m_cameraElement;
     using dmSyncopation::m_cameraFps;
@@ -41,6 +42,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_cameraMinUs;
     using dmSyncopation::m_cameraMutex;
     using dmSyncopation::m_cameraProperty;
+    using dmSyncopation::m_cameraPublicationCadence;
     using dmSyncopation::m_cameraReport;
     using dmSyncopation::m_cameraTime;
     using dmSyncopation::m_clean;
@@ -54,6 +56,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_cycleMutex;
     using dmSyncopation::m_delivered;
     using dmSyncopation::m_destinations;
+    using dmSyncopation::m_diagnosticsOnly;
     using dmSyncopation::m_enabled;
     using dmSyncopation::m_epoch;
     using dmSyncopation::m_faultCounts;
@@ -65,6 +68,9 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_indiP_cameraPairs;
     using dmSyncopation::m_indiP_cameraQuality;
     using dmSyncopation::m_indiP_cameraTiming;
+    using dmSyncopation::m_indiP_cameraWritePairs;
+    using dmSyncopation::m_indiP_cameraWriteQuality;
+    using dmSyncopation::m_indiP_cameraWriteTiming;
     using dmSyncopation::m_indiP_combinerQuality;
     using dmSyncopation::m_indiP_combinerTiming;
     using dmSyncopation::m_indiP_enable;
@@ -109,6 +115,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_scheduleState;
     using dmSyncopation::m_submission;
     using dmSyncopation::m_timing;
+    using dmSyncopation::m_timingName;
     using dmSyncopation::m_wait;
     using dmSyncopation::missedStep;
     using dmSyncopation::readCamera;
@@ -138,6 +145,8 @@ class Harness : public dmSyncopation
     using dev::shmimMonitor<dmSyncopation>::m_getExistingFirst;
     using dev::shmimMonitor<dmSyncopation>::m_smThreadInit;
     using dev::shmimMonitor<dmSyncopation>::m_smThread;
+    using dev::shmimMonitor<dmSyncopation>::m_smThreadPrio;
+    using dev::shmimMonitor<dmSyncopation>::m_smCpuset;
 
     /// Set a stable test identity and an unopened primary handle.
     Harness();
@@ -2852,6 +2861,7 @@ TEST_CASE( "syncopation camera checks acquisition intervals independently", "[dm
     app.attachCameraOnly();
     app.m_now = CadenceClock::now;
     app.m_cameraCadence.configure( 2, 32, 20e-6 );
+    app.m_cameraPublicationCadence.configure( 2, 32, 20e-6 );
     constexpr int64_t epoch = 1792000000000000000LL;
     const int64_t     offsets[]{ 0, 500000, 1000000, 1580000, 2000000, 2500000, 3000000 };
 
@@ -2876,6 +2886,7 @@ TEST_CASE( "syncopation camera checks acquisition intervals independently", "[dm
     }
 
     app.m_cameraCadence.update( CadenceClock::time );
+    app.m_cameraPublicationCadence.update( CadenceClock::time );
     using namespace MagAOX::dmTiming;
     const auto &summary     = app.m_cameraCadence.summary();
     const auto &acquisition = summary.metrics[metricIndex( Metric::publicationInterval )];
@@ -2889,6 +2900,12 @@ TEST_CASE( "syncopation camera checks acquisition intervals independently", "[dm
     CHECK( summary.intervalPairs.afterLate.count == 1 );
     CHECK( summary.total.receipts == 7 );
     CHECK( summary.total.rejected == 0 );
+    const auto &write = app.m_cameraPublicationCadence.summary();
+    CHECK( write.metrics[metricIndex( Metric::publicationInterval )].count == 6 );
+    CHECK( write.metrics[metricIndex( Metric::publicationInterval )].mean == Approx( 0.0007 ) );
+    CHECK( write.metrics[metricIndex( Metric::receiptInterval )].mean == Approx( 0.0006 ) );
+    CHECK( write.intervalPairs.median == Approx( 0.0007 ) );
+    CHECK( write.total.rejected == 0 );
     CHECK_FALSE( app.m_resources );
     CHECK_FALSE( app.m_enabled );
     CHECK( app.m_faults == 0 );
@@ -2973,6 +2990,7 @@ TEST_CASE( "syncopation upstream diagnostic configuration and properties", "[dmS
     app.setupConfig();
     REQUIRE( app.loadConfigImpl( app.config ) == 0 );
     CHECK( app.m_cameraDiagnostics );
+    CHECK_FALSE( app.m_diagnosticsOnly );
     CHECK( app.m_pipelineDiagnostics );
     CHECK( app.cameraMonitorName() == "camwfs" );
     CHECK( app.cameraMonitorPriority() == 0 );
@@ -3005,7 +3023,8 @@ TEST_CASE( "syncopation upstream diagnostic configuration and properties", "[dmS
 
     {
         std::ofstream settings( path );
-        settings << "[diagnostics]\ncamera=false\npipeline=false\n[cameraMonitor]\nshmimName=other_camera\n";
+        settings << "[diagnostics]\ncamera=false\npipeline=false\nonly=true\n"
+                    "[cameraMonitor]\nshmimName=other_camera\n";
     }
 
     app.config.readConfig( path );
@@ -3013,6 +3032,9 @@ TEST_CASE( "syncopation upstream diagnostic configuration and properties", "[dmS
     REQUIRE( app.loadConfigImpl( app.config ) == 0 );
     CHECK_FALSE( app.m_cameraDiagnostics );
     CHECK_FALSE( app.m_pipelineDiagnostics );
+    CHECK( app.m_diagnosticsOnly );
+    CHECK_FALSE( app.m_combinerDiagnostics );
+    CHECK( app.m_semaphoreNumber == -1 );
     CHECK( app.cameraMonitorName() == "other_camera" );
     CHECK_FALSE( app.m_enabled );
 
@@ -3072,9 +3094,11 @@ TEST_CASE( "syncopation real camera monitor retains acquisition timing", "[dmSyn
 {
     Streams           streams;
     Harness           app;
-    constexpr int64_t epoch     = 1792000000000000000LL;
-    streams.images[0].md->atime = synco::toTimespec( epoch );
+    constexpr int64_t epoch         = 1792000000000000000LL;
+    streams.images[0].md->atime     = synco::toTimespec( epoch );
+    streams.images[0].md->writetime = synco::toTimespec( epoch + 1000000 );
     app.m_cameraCadence.configure( 30, 32, 20e-6 );
+    app.m_cameraPublicationCadence.configure( 30, 32, 20e-6 );
     app.startCameraMonitor();
     auto waitEvents = [&]( uint64_t expected )
     {
@@ -3098,16 +3122,18 @@ TEST_CASE( "syncopation real camera monitor retains acquisition timing", "[dmSyn
 
     for( uint64_t i = 1; i <= 5; ++i )
     {
-        streams.images[0].md->write = 1;
-        streams.images[0].md->atime = synco::toTimespec( epoch + int64_t( i ) * 500000 );
-        streams.images[0].md->cnt0  = i;
-        streams.images[0].md->write = 0;
+        streams.images[0].md->write     = 1;
+        streams.images[0].md->atime     = synco::toTimespec( epoch + int64_t( i ) * 500000 );
+        streams.images[0].md->writetime = synco::toTimespec( epoch + 1000000 + int64_t( i ) * 500000 );
+        streams.images[0].md->cnt0      = i;
+        streams.images[0].md->write     = 0;
         REQUIRE( ImageStreamIO_sempost( &streams.images[0], -1 ) == 0 );
         REQUIRE( waitEvents( i + 1 ) );
     }
 
     app.stopCameraMonitor();
     app.m_cameraCadence.update();
+    app.m_cameraPublicationCadence.update();
     const auto &summary = app.m_cameraCadence.summary();
     CHECK( summary.total.events == 6 );
     CHECK( summary.total.receipts == 5 );
@@ -3120,10 +3146,184 @@ TEST_CASE( "syncopation real camera monitor retains acquisition timing", "[dmSyn
     CHECK_FALSE( app.m_resources );
     CHECK_FALSE( app.m_enabled );
 
+    const auto &write = app.m_cameraPublicationCadence.summary();
+    CHECK( write.total.events == 6 );
+    CHECK( write.total.receipts == 5 );
+    CHECK( write.total.rejected == 0 );
+    CHECK( write.metrics[MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::publicationInterval )].count == 5 );
+    CHECK( write.metrics[MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::publicationInterval )].mean ==
+           Approx( 0.0005 ) );
+
     // clang-format off
 #ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
     MagAOX::app::dev::shmimMonitor<dmSyncopation, syncoCameraT>::smThreadExec;
     dmSyncopation::processImage( nullptr, syncoCameraT{} );
+#endif
+    // clang-format on
+}
+
+/// Keep acquisition and write validity independent while sharing one coherent camera metadata capture.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation camera publication checks retain independent validity", "[dmSyncopation][cameraTiming]" )
+{
+    Streams streams;
+    Harness app;
+    app.attachCameraOnly();
+    app.m_now = CadenceClock::now;
+    app.m_cameraCadence.configure( 2, 32, 20e-6 );
+    app.m_cameraPublicationCadence.configure( 2, 32, 20e-6 );
+    constexpr int64_t epoch = 1792000000000000000LL;
+
+    for( uint64_t i = 0; i < 6; ++i )
+    {
+        auto *metadata      = streams.images[0].md;
+        metadata->cnt0      = 10 + i;
+        metadata->atime     = synco::toTimespec( epoch + int64_t( i ) * 500000 );
+        metadata->writetime = synco::toTimespec( epoch + 1000000000 + int64_t( i ) * 500000 );
+        CadenceClock::time  = 1000000000 + int64_t( i ) * 600000;
+
+        if( i == 2 )
+        {
+            metadata->writetime = synco::toTimespec( epoch + 1000500000 );
+        }
+        else if( i == 5 )
+        {
+            metadata->atime.tv_nsec = 1000000000;
+        }
+
+        app.shmimMonitorTiming( syncoCameraT{}, dev::shmimMonitorEvent::receipt );
+        REQUIRE( app.processImage( nullptr, syncoCameraT{} ) == 0 );
+    }
+
+    app.m_cameraCadence.update( CadenceClock::time );
+    app.m_cameraPublicationCadence.update( CadenceClock::time );
+    using namespace MagAOX::dmTiming;
+    const auto &acquisition = app.m_cameraCadence.summary();
+    const auto &publication = app.m_cameraPublicationCadence.summary();
+    CHECK( acquisition.total.rejected == 1 );
+    CHECK( publication.total.rejected == 1 );
+    CHECK( acquisition.metrics[metricIndex( Metric::publicationInterval )].count == 4 );
+    CHECK( publication.metrics[metricIndex( Metric::publicationInterval )].count == 3 );
+    CHECK( publication.metrics[metricIndex( Metric::publicationInterval )].mean == Approx( 0.0005 ) );
+    CHECK( publication.metrics[metricIndex( Metric::receiptInterval )].mean == Approx( 0.0006 ) );
+    const auto session = publication.session;
+    app.shmimMonitorTiming( syncoCameraT{}, dev::shmimMonitorEvent::connected );
+    app.m_cameraCadence.update( CadenceClock::time );
+    app.m_cameraPublicationCadence.update( CadenceClock::time );
+    CHECK( app.m_cameraCadence.summary().session == session + 1 );
+    CHECK( app.m_cameraPublicationCadence.summary().session == session + 1 );
+    CHECK( app.m_cameraPublicationCadence.summary().intervalPairs.intervals == 0 );
+    REQUIRE( app.setupCadenceINDI( app.m_cameraPublicationCadence,
+                                   app.m_indiP_cameraWriteTiming,
+                                   app.m_indiP_cameraWriteQuality,
+                                   app.m_indiP_cameraWritePairs,
+                                   "camera_write",
+                                   "publication_" ) == 0 );
+    CHECK( app.m_indiP_cameraWriteTiming.find( "publication_min" ) );
+    CHECK( app.m_indiP_cameraWriteTiming.getPerm() == pcf::IndiProperty::ReadOnly );
+    CHECK( app.m_indiP_cameraWritePairs.getElements().size() == 29 );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::cameraStamp;
+    dmSyncopation::processImage( nullptr, syncoCameraT{} );
+    dmSyncopation::shmimMonitorTiming( syncoCameraT{}, dev::shmimMonitorEvent::connected );
+#endif
+    // clang-format on
+}
+
+/// Verify the shipped isolated profile clears normal scheduler placement and camera INDI defaults.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation isolated profile configures independent ordinary priority observers",
+           "[dmSyncopation][isolatedTiming]" )
+{
+    Harness app;
+    app.setupConfig();
+    const auto profile =
+        std::filesystem::canonical( "/proc/self/exe" ).parent_path().parent_path() / "camera-acquWFS.conf";
+    REQUIRE( std::filesystem::exists( profile ) );
+    app.config.readConfig( profile.string() );
+    REQUIRE( app.loadConfigImpl( app.config ) == 0 );
+    CHECK( app.m_shmimName == "aol1_imWFS2" );
+    CHECK( app.m_smThreadPrio == 0 );
+    CHECK( app.m_smCpuset.empty() );
+    CHECK( app.m_cameraDevice.empty() );
+    CHECK( app.m_diagnosticsOnly );
+    CHECK( app.m_semaphoreNumber == -1 );
+    CHECK_FALSE( app.m_combinerDiagnostics );
+    CHECK( app.m_cameraDiagnostics );
+    CHECK( app.m_pipelineDiagnostics );
+    CHECK( app.cameraMonitorName() == "camwfs" );
+    CHECK( app.cameraMonitorPriority() == 0 );
+    CHECK_FALSE( app.m_enabled );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::setupConfig;
+    dmSyncopation::loadConfigImpl;
+#endif
+    // clang-format on
+}
+
+/// Observe an arbitrary primary without constructing DM mappings, timing streams or a scheduler cycle.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation diagnostic only mode cannot enter the DM scheduler", "[dmSyncopation][isolatedTiming]" )
+{
+    Streams streams;
+    Harness app;
+    app.attachPrimaryOnly();
+    app.properties();
+    app.m_diagnosticsOnly = true;
+    app.m_destinations    = { "dm97disp09", "dm97disp10" };
+    app.m_timingName      = "synco_isolated_timing";
+    app.m_now             = CadenceClock::now;
+    app.m_primaryCadence.configure( 2, 32, 20e-6 );
+    app.m_pipelineCadence.configure( 2, 32, 20e-6 );
+    app.m_semaphoreNumber = 3; // Automatic allocation does not need the normal fixed scheduler reader.
+    REQUIRE( app.allocate( dev::shmimT{} ) == 0 );
+    CHECK_FALSE( app.m_resources );
+    CHECK( app.m_mappings.empty() );
+    CHECK( app.m_timing.md == nullptr );
+    auto enable      = app.m_indiP_enable;
+    enable["toggle"] = pcf::IndiElement::On;
+    CHECK( app.newCallBack_m_indiP_enable( enable ) < 0 );
+    CHECK_FALSE( app.m_enabled );
+    constexpr int64_t epoch         = 1792000000000000000LL;
+    CadenceClock::time              = 1000000000;
+    streams.images[0].md->writetime = synco::toTimespec( epoch );
+    streams.images[0].md->cnt0      = 10;
+    app.shmimMonitorTiming( dev::shmimT{}, dev::shmimMonitorEvent::receipt );
+    std::unique_lock<std::mutex> cycle( app.m_cycleMutex );
+    auto                         observation = std::async( std::launch::async,
+                                   [&]()
+                                   {
+                                       return app.processImage( nullptr, dev::shmimT{} );
+                                   } );
+    const auto                   ready       = observation.wait_for( std::chrono::milliseconds( 500 ) );
+    cycle.unlock();
+    CHECK( observation.get() == 0 );
+    CHECK( ready == std::future_status::ready );
+    app.m_primaryCadence.update( CadenceClock::time );
+    app.m_pipelineCadence.update( CadenceClock::time );
+    CHECK( app.m_primaryCadence.summary().total.receipts == 1 );
+    CHECK( app.m_pipelineCadence.summary().total.receipts == 1 );
+    CHECK_FALSE( app.m_resources );
+    CHECK( app.m_faults == 0 );
+    CHECK( app.m_mappings.empty() );
+    CHECK( app.m_timing.md == nullptr );
+
+    for( const auto *name : { "dm97disp09_aux", "dm97disp10_aux", "synco_isolated_timing" } )
+    {
+        char filename[PATH_MAX];
+        ImageStreamIO_filename( filename, sizeof( filename ), name );
+        CHECK_FALSE( std::filesystem::exists( filename ) );
+    }
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::allocate( dev::shmimT{} );
+    dmSyncopation::processImage( nullptr, dev::shmimT{} );
+    dmSyncopation::newCallBack_m_indiP_enable;
 #endif
     // clang-format on
 }
