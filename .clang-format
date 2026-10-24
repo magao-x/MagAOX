@@ -22,3 +22,6 @@ SortIncludes: false
 
 IndentPPDirectives: BeforeHash
 ContinuationIndentWidth: 4
+
+# Preserve the required "{ //mutex scope" lifetime annotations.
+SpacesInLineCommentPrefix: {Minimum: 0, Maximum: -1}
