@@ -218,13 +218,14 @@ The complete [dmtweeter_synco.conf example](../dmtweeter_synco.conf) contains th
 | `feedback.maxAdvanceUs` | 20 | Maximum wait correction; step-0 advance is nonnegative and starts at this value after a feedback reset. |
 | `diagnostics.windowSec` | 2 | Elapsed-time window for all independent observers; zero disables collection. |
 | `diagnostics.maxEvents` | 20000 | Queue and retained-event cap for each observer; zero disables collection. Storage is allocated before the monitors start. |
-| `diagnostics.excursionUs` | 20 | Acquisition/primary excursion threshold around each diagnostic window median, in microseconds; zero disables pair/conditional classification. Ordinary trace timing remains enabled. Independent of scheduler timing bounds. |
+| `diagnostics.excursionUs` | 20 | Camera acquisition/publication and primary excursion threshold around each diagnostic window median, in microseconds; zero disables pair/conditional classification. Ordinary trace timing remains enabled. Independent of scheduler timing bounds. |
 | `diagnostics.combiner` | true | Start an independent combined-output observer for cadence and process-trace timing. Scheduling can remain disabled. |
-| `diagnostics.camera` | true | Start an independent metadata-only camera observer for acquisition timestamp intervals. |
+| `diagnostics.camera` | true | Start an independent metadata-only camera observer for separate acquisition and publication timestamp intervals. |
 | `diagnostics.pipeline` | true | Capture up to ten existing upstream process-trace rows at primary observation. |
-| `cameraMonitor.shmimName` | `camwfs` | Camera image whose `atime` is analyzed. Independent of the `tracking.cameraDevice` INDI subscription. Semaphore selection is automatic by default. |
-| `cameraMonitor.threadPrio` | 0 | Acquisition observer scheduling priority; zero uses ordinary scheduling. |
-| `cameraMonitor.cpuset` | empty | Optional acquisition observer CPU placement. |
+| `diagnostics.only` | false | Observe the configured primary without attaching scheduler DM resources or creating a timing stream. Forces combined monitoring off, selects an available primary semaphore automatically, and rejects scheduler enable requests. |
+| `cameraMonitor.shmimName` | `camwfs` | Camera image whose `atime` and `writetime` intervals are analyzed separately. Independent of the `tracking.cameraDevice` INDI subscription. Semaphore selection is automatic by default. |
+| `cameraMonitor.threadPrio` | 0 | Camera metadata observer scheduling priority; zero uses ordinary scheduling. |
+| `cameraMonitor.cpuset` | empty | Optional camera metadata observer CPU placement. |
 | `combinerMonitor.threadPrio` | 0 | Combined observer scheduling priority; zero uses ordinary scheduling. |
 | `combinerMonitor.cpuset` | empty | Optional observer cpuset. Choose an available CPU placement on the instrument. |
 | `combinerMonitor.shmimName` | `streams.combined` | Forced to the scheduler's configured combined output; a separate value is ignored. Semaphore selection is automatic. |
@@ -256,10 +257,13 @@ Application properties belong to the configured INDI device: `dmtweeter_synco` i
 | `camera_timing` | Number, read-only | Independent `acquisition_` and `receipt_` interval populations, in seconds. |
 | `camera_timing_quality` | Number, read-only | Camera coverage, queue state, gaps, rejections and losses. |
 | `camera_interval_pairs` | Number, read-only | Independent acquisition excursion ordering around its own window median. |
+| `camera_write_timing` | Number, read-only | Independent camera `publication_` and observer `receipt_` interval statistics, in seconds. |
+| `camera_write_timing_quality` | Number, read-only | Camera publication coverage, gaps, rejected metadata and collection losses. |
+| `camera_write_interval_pairs` | Number, read-only | Camera publication excursion ordering around its own retained-window median. |
 | `pipeline_timing_quality` | Number, read-only | Primary excursion classification, trace stage count, coverage and qualification counters. |
 | `pipeline_stage0` ... `pipeline_stage9` | Number, read-only | Trace-row identity, ordinary processing/handoff durations and excursion-conditioned changes. Trace rows are unrelated to synco substep numbers. |
 | `pipeline_boundary_timing` | Number, read-only | Oldest represented stage-start intervals and signed changes in the primary publication tail. |
-| `health` | Text, read-only | `reason`, `lastFault`, `periodSource`, `primary`, `combined`, `timingStream`, `mapping`. Current phase/reason, latched fault, selected period reference and resolved stream identities. |
+| `health` | Text, read-only | `reason`, `lastFault`, `periodSource`, `primary`, `combined`, `timingStream`, `mapping`, `mode`. Current phase/reason, latched fault, selected period reference and resolved stream identities. Mode is `scheduler` or `diagnostics only`. |
 
 `settings` uses its named elements directly; there are no numeric `current`/`target` pairs. Updates while enabled, unknown elements, nonfinite values and invalid counts/ranges are rejected without changing the active configuration. Changing `steps` never changes source-image count. After an accepted disabled update, enable again to acquire a new schedule.
 
@@ -577,7 +581,7 @@ made automatically, and these measurements do not relax synco's timing bounds.
 Naming the trigger also adds the producer's upstream trace-copy work; include that
 configuration change in the comparison record.
 
-## Independent camera acquisition excursions
+## Independent camera acquisition and publication excursions
 
 A third metadata-only monitor reads `cameraMonitor.shmimName`, normally `camwfs`.
 Its default scheduling priority is ordinary. It never copies image pixels,
@@ -585,13 +589,16 @@ changes camera settings or writes/posts to the stream. It runs while synco
 scheduling is disabled and while auxiliary resources are unavailable. Its helper
 properties use the `cam_` prefix.
 
-The external interval is **`atime[i] - atime[i-1]`**, not camera `writetime` or
-the observer's wake interval. `camera_timing` uses the same suffixes as
+The acquisition interval is **`atime[i] - atime[i-1]`**. A separate collector
+measures **`writetime[i] - writetime[i-1]`** from the same coherent metadata
+snapshot. Each has its own median, qualification history and population;
+neither is the observer's wake interval. `camera_timing` uses the same suffixes as
 `primary_timing`, replacing `publication_` with `acquisition_`; `receipt_` remains
-the observer's independent monotonic wake population. The quality and pair
-properties use the same elements as their primary counterparts. Each collector
-has its own median and population; no camera timestamp is paired or subtracted
-from a DM timestamp.
+the observer's independent monotonic wake population. `camera_write_timing`
+uses `publication_` and `receipt_`; its quality and pair properties use the same
+elements as their primary counterparts. The two receipt populations describe the
+same observer notifications and must not be counted as independent measurements.
+No acquisition timestamp is subtracted from a publication or DM timestamp.
 
 Inspect `acquisition_min` and `acquisition_max` to detect occasional long/short
 intervals even when RMS is small. The appended `[dmsynco]` camera table records
@@ -600,6 +607,15 @@ these extrema, count, coverage and quality, unlike the existing camera
 `cameraAcquisitionInterval`, `cameraReceiptInterval`, `cameraAfterLateInterval`,
 `cameraAfterEarlyInterval`, `cameraLateEarlySum` and `cameraEarlyLateSum`, with
 `camera_pairs` reporting the directed fractions.
+
+The appended optional publication table reports `cameraWriteInterval`,
+`cameraWriteReceiptInterval` and `cameraWrite_pairs`, with conditional successor
+and sum populations prefixed `cameraWrite`. It records publication extrema,
+counts, coverage and quality separately from acquisition. A malformed or
+nonprogressing publication stamp rejects that collector's sample without
+discarding an otherwise valid acquisition stamp, and vice versa. Both histories
+reset on camera reattachment. Rebuild the app and reader to see this table;
+older data reports `cameraWrite_timing=unavailable`.
 
 The ordinary-priority observer can miss notifications. Counter gaps, duplicates,
 queue drops, rejected/unstable metadata and missing interval coverage prevent a
@@ -706,6 +722,26 @@ Ordinary app-logic passes emit these diagnostics even if the schedule snapshot
 is busy; an absent trace does not suppress camera or primary interval statistics.
 No median-grid scheduler, skip-recovery or targeted extra-step wake behavior is
 implemented by these diagnostic additions.
+
+### Isolate camera publication and the first AO stage
+
+Use the [isolated test procedure](camera-acquWFS-test.md) and
+[camera-acquWFS.conf](../camera-acquWFS.conf) to compare `camwfs` and
+`acquWFS-1` without the downstream reconstruction/filter/DM-command RUN stages.
+The separate observer instance selects `aol1_imWFS2` as its primary. Its one-row
+`pipelineSourceInterval` measures `acquWFS-1` iteration starts after the trigger
+wait; this is a processing-start proxy for wake cadence, not an exact semaphore
+return timestamp. Compare those intervals with independent `cameraWriteInterval`
+and `cameraAcquisitionInterval` populations. No absolute cross-clock latency is
+claimed by comparing their interval distributions.
+
+`diagnostics.only=true` bypasses scheduler resource attachment and processing,
+creates no auxiliary/timing streams, disables combined monitoring and rejects
+enable requests. `health.mode` identifies the mode. Its records have
+`schedule_valid=0`; scheduler fields are placeholders. Primary/camera/pipeline
+statistics remain usable without a DM combiner or DM-controller stream. The
+profile explicitly selects ordinary primary monitor scheduling and clears its
+usual cpuset. Normal scheduler mode retains its existing defaults and behavior.
 
 ## 200 Hz tip/tilt test provider
 
