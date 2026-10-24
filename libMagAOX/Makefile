@@ -19,6 +19,7 @@ INCLUDEDEPS= \
 	app/dev/ioDevice.hpp \
 	app/dev/stdMotionStage.hpp \
 	app/dev/frameGrabber.hpp \
+	app/dev/frameGrabberTiming.hpp \
 	app/dev/stdCamera.hpp \
 	app/dev/edtCamera.hpp \
 	app/dev/dssShutter.hpp \
@@ -32,6 +33,9 @@ INCLUDEDEPS= \
 	common/defaults.hpp \
 	common/environment.hpp \
 	common/dmTiming.hpp \
+	common/frameGrabberTiming.hpp \
+	common/spscQueue.hpp \
+	common/timingStats.hpp \
 	common/dmPipelineTiming.hpp \
 	file/fileTimes.hpp \
 	file/stdFileName.hpp \
@@ -78,6 +82,7 @@ INCLUDEDEPS= \
 	logger/types/telem_dmtimings.hpp \
 	logger/types/telem_drivetemps.hpp \
 	logger/types/telem_fgtimings.hpp \
+	logger/types/telem_fgstage.hpp \
 	logger/types/telem_flowrpm.hpp \
 	logger/types/telem_fxngen.hpp \
 	logger/types/telem_loopgain.hpp \

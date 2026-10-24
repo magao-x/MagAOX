@@ -2,9 +2,14 @@
 
 This record tracks operator observations, diagnosis, changes and verification during debugging and optimization. The [main engineering plan](dm-syncopation.md) retains the settled design and review answers; the [user guide](../../../apps/dmSyncopation/doc/dmSyncopation.md) documents current operation and interfaces.
 
-Current status: the first independent camera/upstream trace run places the large primary interval tails at or before the oldest represented AO stage start (`acquWFS`, input `camwfs`), rather than in the later measured processing stages. Acquisition intervals are much steadier (480–525 us, 0.325–0.819 us deviation), but a rare +25 us excursion is present. The oldest-stage starts already span 422.198–580.737 us, close to primary publication's 421.687–582.079 us. All reported collection-quality error counts are zero. An independent camera publication collector and isolated `camwfs`/`acquWFS-1` observer profile are now implemented and verified locally (4883 assertions, 69 cases; matching builds); the operator comparison remains pending. Median-grid scheduling, per-step skips and targeted extra-step wakes remain unimplemented; the early-arrival reserve remains undecided. Earlier trials and their qualifications are preserved below.
+Current status: the isolated observer is now running with one stable acquWFS trace row. Camera publication already spans 437.045–579.825 us, versus acquisition's 480–520 us; acquWFS starts span 430.132–577.219 us and its output 430.012–577.320 us. Qualified conditional decomposition places almost all of the large output excursions at/before processing start, with much smaller execution/publication-tail changes. Two primary-observer counter gaps and ten duplicate observations limit coverage; camera observation quality remains clean. Matched camera-publication-to-wake latency remains unmeasured. The profile and observer remain locally verified (4883 assertions, 69 cases; matching builds). Median-grid scheduling, per-step skips and targeted extra-step wakes remain unimplemented; the early-arrival reserve remains undecided. Earlier trials and their qualifications are preserved below.
 
 Append subsequent investigations as dated entries, keeping operator evidence, local verification and outstanding instrument checks explicit. All agent work runs on the workstation; the operator performs instrument actions and supplies results.
+
+The camera-source review continues in the separate
+[OCAM acquisition/publication timing plan](ocam2k-acquisition-publication-timing.md).
+It contains findings and proposed work; camera timing implementation has not
+started.
 
 ## 2026-10-20 first operator-run instrument trial
 
@@ -1709,6 +1714,226 @@ the complete suite passes. Workstation-local test log artifacts were moved to
 `/tmp/synco-isolated-` prefix. No hardware actions were performed by an agent.
 Scheduler revisions remain unimplemented and the early-arrival reserve remains
 undecided.
+
+## 2026-10-23 first camera publication capture: acquWFS comparison missing
+
+Source: operator attachment
+`ac20761e-b338-4348-b0b9-5857fe10cafc/Pasted text.txt`, beginning with
+`teldump -f dmtweeter-synco`. It contains 17 records, sequences 40–56, at
+2026-10-24 03:42:56.707644279–03:43:12.743490974 UTC (2026-10-23 evening
+locally). Binary source name:
+`dmtweeter-synco_20261024034217622125816.bintel`. The new publication table is
+present, establishing that this app/reader pair supports it; the exact deployed
+Git hash is not included in this capture.
+
+| Population | Window mean interval, us | Window deviation, us | Observed extrema, us |
+| --- | --- | --- | --- |
+| SDK acquisition timestamps | 500.000250–500.000500 | 0.304–0.967 | 477–525 |
+| Camera publication timestamps | 499.981280–500.000712 | 2.314–3.739 | 424.031–578.262 |
+
+Every camera population contains 3999 valid intervals in the retained two-second
+window, with near-full spans and sub-millisecond ages. Both acquisition and
+publication collectors report zero rejected, duplicate, counter-gap, invalid and
+dropped observations in every record. Counts progress from 76369 to 108441 for
+acquisition and from 76371 to 108442 for publication. The slight count offset is
+consistent with independent consumer updates and does not represent extra
+camera frames. Acquisition has rare -23/+25 us interval excursions; publication
+has approximately -76/+78 us excursions around the 500 us cadence.
+
+The large interval tails are already visible at camera publication, rather than
+requiring a later reconstruction/filter/DM stage to introduce them. The
+independent timestamp populations do not supply matched frame delays or an
+absolute acquisition-to-publication duration, and do not identify which camera
+processing, timestamp or scheduling component causes the variation.
+
+Nine separated windows (sequences 40, 42, ..., 56) have publication directed-pair
+totals of **47/77 late-then-early** and **48/117 early-then-late**, using each
+window's own median and 20 us threshold. These are qualified intervals with an
+eligible successor, not all late/early events. Normal adjacent records overlap
+and must not be added again. The ordering is not universal and the two
+denominators differ; these totals do not prove causality or exact compensation.
+
+The intended acquWFS series is absent. Primary events/receipts remain zero with
+`primary_valid=0` and age -1; pipeline events/receipts/intervals and stage count
+also remain zero. This is lack of observations, not a quiet wakeup population.
+`schedule_valid=1` and `combiner_enabled=1` are inconsistent with an active
+`diagnostics.only` profile. The normal instance is being read, but its primary
+stream configuration and actual running producer set cannot be determined from
+these records. No claim is made that `acquWFS-1` was stopped or that its wake
+timing was steady. Camera receipt intervals describe the independent diagnostic
+monitor's scheduling, not acquWFS wakeup.
+
+Next, use the standalone `wfs-acqu-timing` observer with the shipped profile
+while the operator retains only camera/acquWFS AO producers. Confirm
+`schedule_valid=0`, `combiner_enabled=0`, advancing primary receipts and
+`pipeline_stages=1` with the expected PID/camera input inode before a two-minute
+capture. The procedure now explicitly lists these mode checks. No functional
+code, scheduler policy or timing bounds were changed. Only engineering records
+and the operator procedure were updated; whitespace checks passed. No build/test
+rerun, commit, push or agent instrument action was performed for this analysis.
+
+## 2026-10-23 standalone observer startup: required named configuration
+
+The operator attempted the documented standalone command with
+`-n wfs-acqu-timing -c "$PWD/camera-acquWFS.conf"`. Startup failed because
+`/opt/MagAOX/config/wfs-acqu-timing.conf` did not exist; the observer did not
+start and this failure supplies no additional timing data.
+
+The launch procedure omitted a mandatory configuration prerequisite. Source
+inspection of mxlib `application::setup()` confirms that it reads the required
+local/instance file and returns on failure before parsing the `-c` option.
+`MagAOXApp::setDefaults()` constructs that required path from the instance name.
+The earlier review correctly identified the override order but did not account
+for the missing-file failure before the override; the profile parsing unit test
+also did not exercise this full framework startup path.
+
+Corrected operator commands, from `apps/dmSyncopation`:
+
+```bash
+sudo install -m 0644 camera-acquWFS.conf /opt/MagAOX/config/wfs-acqu-timing.conf
+/opt/MagAOX/bin/dmSyncopation -n wfs-acqu-timing
+```
+
+The procedure and main plan now include the prerequisite. This installs the
+isolated profile under its separate instance name, without changing the normal
+synco configuration or the framework's global configuration directory. No C++
+change or rebuild is needed for this correction. Source/command review and
+whitespace checks are the applicable verification; no tests were rerun. No
+agent instrument action, commit or push was performed.
+
+## 2026-10-23 isolated camera/acquWFS capture: excursions already at processing start
+
+Source: `/home/jrmales/wfs-acqu-timing.txt`, 85497 bytes, SHA-256
+`5c78ecdf97e4e73974a8593bfee751748f9e59140e49904dd71d3b81a5e79d4a`.
+It contains 13 records, sequences 50–62, at 2026-10-24
+03:55:55.479943403–03:56:07.514082595 UTC, or October 23
+20:55:55–20:56:07 in Phoenix. This is a roughly 12-second excerpt, rather than
+the full two-minute comparison requested in the procedure. Parsed populations
+are retained locally at `/tmp/synco-isolated-20261024T0355.json`.
+
+The profile is active: all records show `schedule_valid=0`,
+`combiner_enabled=0`, valid primary/camera populations and one stable trace row
+(`row=0`, PID 2263601, trigger input inode 2411). There are no topology changes,
+missing/invalid traces, rejected metadata or collector queue drops. Trace
+identity is consistent with the intended camera-triggered acquWFS observation;
+the capture does not independently enumerate all RUN processes.
+
+| Interval population | Window deviation, us | Overall observed extrema, us |
+| --- | --- | --- |
+| Camera SDK acquisition | 0.646–0.906 | 480–520 |
+| Camera publication | 2.810–3.510 | 437.045–579.825 |
+| acquWFS processing start | 2.164–3.288 | 430.132–577.219 |
+| acquWFS output publication | 2.585–3.585 | 430.012–577.320 |
+
+All means remain approximately 500 us. Camera populations each contain 3999
+intervals per two-second window, with zero duplicate, counter-gap, rejected,
+invalid or dropped observations. Camera publication has substantially larger
+tails than SDK acquisition. Those large tails therefore exist before later AO
+reconstruction/filter/DM processing is needed to produce them. These are
+independent interval populations, so their extrema cannot be matched by frame
+or their variances subtracted to estimate added wake jitter.
+
+acquWFS execution averages 62.6546–62.6945 us, with 0.966–1.092 us window
+deviation and extrema 61.676–76.154 us. Seven separated windows (sequences 50,
+52, ..., 62) supply internally matched conditional decomposition:
+
+| Output cohort | Count | Source-start interval, us | Execution change, us | Publication-tail change, us | Reconstructed output interval, us |
+| --- | --- | --- | --- | --- | --- |
+| Late | 53 | 544.1725 | +0.0683 | +0.00157 | 544.2424 |
+| Early | 68 | 461.7888 | -0.1095 | +0.00153 | 461.6808 |
+
+The values are weighted by each qualified cohort's count. Most output interval
+variation is already present at processing start; changes in execution and
+output-publication tail contribute much less. The trace has no represented
+upstream camera stage, so `stageHandoff` is unavailable and matched camera
+`writetime` to acquWFS-start latency is not collected. The remaining region
+includes camera acquisition-return/processing/publication and acquWFS wake or
+trigger handling. The new data does not uniquely assign each excursion within
+that region.
+
+Primary/pipeline observation quality is not entirely clean. At sequence 54
+(20:55:59 Phoenix), cumulative duplicates rise from zero to five and counter-gap
+occurrences from zero to one. At sequence 60 (20:56:05), they reach ten and two.
+The associated primary observer receipt intervals reach 3055.118 and 3041.483 us,
+followed by receipts as short as 0.280 and 0.271 us. This is consistent with an
+observer pause and queued-notification catch-up, but does not prove a matching
+pause in acquWFS or instrument frame loss. `counterGaps` counts nonunit changes,
+not the number of missing frames; zero `dropped` rules out collector queue
+overflow, not every form of missed observation. Gap/duplicate qualification
+reduces publication interval counts to 3993 and source interval counts to 3992
+in affected windows; no qualified pair bridges those discontinuities. The
+omitted intervals remain unmeasured, including any simultaneous trigger gaps.
+
+For the same seven separated windows, primary interval directed fractions are
+36/53 late-then-early and 14/68 early-then-late; camera publication fractions
+are 37/57 and 36/89. These do not imply a universal ordering or exact
+compensation, and the populations are not matched between camera and acquWFS.
+
+Only this record and the main plan were updated for the analysis, preserving
+the preceding capture and startup correction. Whitespace checks passed; no
+functional changes, test/build rerun, commit, push or agent instrument action
+were performed. No early-arrival reserve or scheduler timing policy is chosen.
+
+## 2026-10-23 OCAM source review moved to its own plan
+
+At the operator's request, the hard review of `ocam2KCtrl`, `edtCamera` and
+`frameGrabber` is recorded in
+[ocam2k-acquisition-publication-timing.md](ocam2k-acquisition-publication-timing.md).
+The operator confirmed current `bin2` operation, 64 DMA buffers, requested
+priority 90/cpuset `camwfs`, depth-one output and the two-second/20000-entry
+timing settings. The new plan distinguishes those configuration facts from
+unverified actual OS scheduling and installed SDK details. It records the exact
+acquisition/publication order, current SDK timestamp/version caveats, timing
+buffer ownership/FPS-reset concerns, failed-result and SDK-zero-ID issues,
+other focused correctness findings, and proposed bounded stage measurements
+with tests and operator comparisons. No camera or shared C++ implementation
+was changed, and no agent instrument action, build/test rerun, commit or push
+was performed for this planning task.
+
+Subsequent operator confirmation: the installed EDT PDV version is **5.6.2.0**.
+The OCAM plan now records that as confirmed and targets matching 5.6.2.0
+headers/source/documentation for the timestamp, acquisition and threading
+contract review. Separately loaded driver/build details and version-specific
+API semantics remain to inspect; the installed PDV version itself is no longer
+an open question. No implementation or instrument action accompanies this
+documentation update.
+
+## 2026-10-23 OCAM timing implementation
+
+The operator approved the OCAM plan for implementation. The workstation change
+now repairs framegrabber timing ownership, adds optional camera-stage and serial
+observations, and implements the focused acquisition, SDK-lifecycle,
+configuration-request and scheduling-reporting fixes. Detailed design, test
+results and outstanding qualification are maintained in the
+[OCAM plan](ocam2k-acquisition-publication-timing.md); the interface is described
+in the [framegrabber timing guide](../../../libMagAOX/app/dev/doc/frameGrabberTiming.md).
+
+Existing camera `atime`, realtime `writetime` and notification ordering are
+preserved. Stage collection defaults off, and the write-clock bracket criterion
+remains undecided by default. The always-active timeout-result guard introduces
+an SDK query whose cost needs a pre-change-binary baseline comparison in addition
+to stage-off/stage-on trials. This work does not choose a synco margin, change
+DMA buffering/polling or software-binning pixels, or perform instrument actions.
+
+The operator then made the current local config available and began copying
+`EDTpdv` to the workstation. Bin2 is confirmed as serial mode 3 with no extra
+software binning, raw 1056x62/8-bit/eight-tap input, `fv_once: 1` and
+`method_framesync: EMULATE_TIMEOUT`. The copied install log records PDV 5.6.8.0
+on November 12, 2025; the operator clarified that a manual install overwrote the
+default. The earlier 5.6.2.0 report is retained as historical evidence, with the
+manual SDK tree now the contract/build target. Loaded driver details still
+require operator evidence.
+
+The prioritized SDK files are now available. Source inspection confirms the
+default seconds/nanoseconds timestamp format, latest-buffer selection and
+timeout/frame-sync behavior. The camera app compiles and links against the
+copied 5.6.8.0 headers/library. All 16 focused suites pass (5,737 assertions in
+109 cases), as do ASan/UBSan and TSan stress checks; the full verification record
+is in the OCAM plan. The matching SDK also documents same-thread DMA resource
+ownership, so the existing cross-thread lifecycle remains a separately scoped
+follow-up. Runtime provenance, instrumentation overhead and write-bracket
+qualification remain operator work. No deployment was performed. The operator
+approved committing and pushing the verified changes.
 
 ## 2026-10-23 scheduling error-reporting prerequisite
 

@@ -8,6 +8,8 @@
 ../libMagAOX/app/dev/tests/outletController_test
 ../libMagAOX/app/dev/tests/telemeter_test
 ../libMagAOX/app/dev/tests/dm_test
+../libMagAOX/app/dev/tests/frameGrabberTiming_test
+../libMagAOX/app/dev/tests/frameGrabber_integration_test
 ../libMagAOX/app/dev/tests/dmTiming_test
 ../libMagAOX/app/dev/tests/dmCombTiming_test
 ../libMagAOX/app/dev/tests/dmTiming_integration_test
@@ -24,6 +26,7 @@
 ../libMagAOX/logger/tests/logFileRaw_fileTime_error_test
 ../libMagAOX/logger/tests/logMap_test
 ../libMagAOX/logger/tests/pduTelemetry_test
+../libMagAOX/logger/tests/frameGrabberTelemetry_test
 ../libMagAOX/logger/tests/dmTimingTelemetry_test
 ../libMagAOX/logger/tests/dmSyncoTelemetry_test
 ../libMagAOX/logger/tests/logMeta_test
@@ -138,6 +141,7 @@
 ../INDI/tests/INDI_test
 
 
+../libMagAOX/common/tests/spscQueue_test
 ../libMagAOX/common/tests/common_test
 ../libMagAOX/ImageStreamIO/tests/ImageStreamIO_test
 ../libMagAOX/modbus/tests/modbus_test

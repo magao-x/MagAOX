@@ -16,6 +16,7 @@
 #include <mx/math/floatUtils.hpp>
 
 #include "../../common/dmTiming.hpp"
+#include "../../common/spscQueue.hpp"
 
 namespace MagAOX
 {
@@ -33,13 +34,7 @@ namespace dev
 class dmTiming
 {
   protected:
-    std::vector<MagAOX::dmTiming::Event> m_queue; ///< Slots owned through release/acquire queue positions.
-
-    std::atomic<uint64_t> m_head{ 0 }; ///< Next producer position, published after writing its slot.
-
-    std::atomic<uint64_t> m_tail{ 0 }; ///< Next consumer position, released after copying its slot.
-
-    std::atomic<uint64_t> m_dropped{ 0 }; ///< Producer drop count, observed without producer payload access.
+    MagAOX::spscQueue<MagAOX::dmTiming::Event> m_queue; ///< Ownership-safe fixed-event handoff.
 
     std::atomic<uint64_t> m_session{ 1 }; ///< Producer epoch, also visible when a reset produces no event.
 
@@ -169,8 +164,7 @@ inline void dmTiming::configure( double windowSec, size_t capacity, double excur
     m_enabled      = m_enabled && m_windowNs > 0;
     m_excursionSec = m_enabled && mx::math::isFinite( excursionSec ) && excursionSec > 0 ? excursionSec : 0;
 
-    m_queue.clear();
-    m_queue.resize( m_enabled ? capacity : 0 );
+    m_queue.configure( m_enabled ? capacity : 0 );
     m_intervalScratch.clear();
 
     if( m_excursionSec > 0 )
@@ -178,9 +172,6 @@ inline void dmTiming::configure( double windowSec, size_t capacity, double excur
         m_intervalScratch.reserve( capacity );
     }
 
-    m_head.store( 0, std::memory_order_relaxed );
-    m_tail.store( 0, std::memory_order_relaxed );
-    m_dropped.store( 0, std::memory_order_relaxed );
     m_session.store( 1, std::memory_order_relaxed );
 
     m_eventSequence = 0;
@@ -190,7 +181,7 @@ inline void dmTiming::configure( double windowSec, size_t capacity, double excur
     m_window.clear();
     m_summary           = {};
     m_summary.windowSec = m_enabled ? windowSec : 0;
-    m_summary.capacity  = m_queue.size();
+    m_summary.capacity  = m_queue.capacity();
     m_summary.enabled   = m_enabled;
     m_summary.session   = 1;
     m_summary.state = m_enabled ? MagAOX::dmTiming::Availability::warmingUp : MagAOX::dmTiming::Availability::disabled;
@@ -344,19 +335,8 @@ inline void dmTiming::finishEvent()
         return;
     }
 
-    m_active      = false;
-    uint64_t head = m_head.load( std::memory_order_relaxed );
-    uint64_t tail = m_tail.load( std::memory_order_acquire );
-
-    if( head - tail == m_queue.size() )
-    {
-        m_dropped.fetch_add( 1, std::memory_order_relaxed );
-
-        return;
-    }
-
-    m_queue[head % m_queue.size()] = m_event;
-    m_head.store( head + 1, std::memory_order_release );
+    m_active = false;
+    m_queue.push( m_event );
 }
 
 inline void dmTiming::newSession()
@@ -423,14 +403,17 @@ inline void dmTiming::update( int64_t nowNs )
         m_everEvent       = false;
     }
 
-    uint64_t       tail = m_tail.load( std::memory_order_relaxed );
-    const uint64_t head = m_head.load( std::memory_order_acquire );
+    const size_t population = m_queue.queued();
 
-    while( tail != head )
+    for( size_t index = 0; index < population; ++index )
     {
-        Event event = m_queue[tail % m_queue.size()];
-        ++tail;
-        m_tail.store( tail, std::memory_order_release );
+        Event event;
+
+        if( !m_queue.pop( event ) )
+        {
+            break;
+        }
+
         countEvent( event );
 
         if( event.session > m_summary.session )
@@ -444,7 +427,7 @@ inline void dmTiming::update( int64_t nowNs )
         {
             m_window.push_back( event );
 
-            if( m_window.size() > m_queue.size() )
+            if( m_window.size() > m_queue.capacity() )
             {
                 m_window.pop_front();
             }
@@ -463,8 +446,8 @@ inline void dmTiming::update( int64_t nowNs )
         m_everEvent       = false;
     }
 
-    m_summary.queued = static_cast<size_t>( m_head.load( std::memory_order_acquire ) - tail );
-    m_total.dropped  = m_dropped.load( std::memory_order_relaxed );
+    m_summary.queued = m_queue.queued();
+    m_total.dropped  = m_queue.dropped();
     m_summary.total  = m_total;
 
     constexpr uint64_t Counters::*fields[] = { &Counters::events,

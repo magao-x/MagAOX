@@ -1,6 +1,5 @@
 /** \file cred2Ctrl_test.cpp
  * \brief Catch2 tests for the cred2Ctrl app.
- * \author OpenAI Codex
  *
  * \ingroup cred2Ctrl_files
  */
@@ -20,6 +19,7 @@
 #include <cstdlib>
 #include <deque>
 #include <fstream>
+#include <future>
 #include <string>
 #include <thread>
 #include <unistd.h>
@@ -71,20 +71,26 @@ struct edtStubState
         baudSetCalls            = 0;
         baudGetCalls            = 0;
         lastRequestedBaud       = -1;
+        waitReturnsNull         = false;
+        timeoutDuringWait       = false;
+        timeoutCount            = 0;
     }
 
-    int                        startImagesCalls{ 0 };   ///< Number of `pdv_start_images` calls observed.
-    int                        lastStartNumBuffs{ -1 }; ///< Most recent requested EDT buffer count.
-    int                        startImageCalls{ 0 };    ///< Number of `pdv_start_image` calls observed.
-    uint                       waitTimeSec{ 0 };        ///< Seconds returned by `pdv_wait_last_image_timed`.
-    uint                       waitTimeNsec{ 0 };       ///< Nanoseconds returned by `pdv_wait_last_image_timed`.
-    std::array<u_char, 64>     waitImage{};             ///< Raw EDT frame buffer returned to the app.
-    int                        readcfgReturn{ 0 };      ///< Return code forced from `pdv_readcfg`.
-    int                        readcfgCalls{ 0 };       ///< Number of `pdv_readcfg` calls observed.
-    int                        multibufCalls{ 0 };      ///< Number of `pdv_multibuf` calls observed.
-    std::deque<serialResponse> serialResponses;         ///< Scripted serial responses queued for future commands.
-    std::vector<std::string>   serialCommands;          ///< Serial commands issued by the app under test.
-    std::string                activeSerialResponse;    ///< Active serial response returned by the current command.
+    int                        startImagesCalls{ 0 };      ///< Number of `pdv_start_images` calls observed.
+    int                        lastStartNumBuffs{ -1 };    ///< Most recent requested EDT buffer count.
+    int                        startImageCalls{ 0 };       ///< Number of `pdv_start_image` calls observed.
+    uint                       waitTimeSec{ 0 };           ///< Seconds returned by `pdv_wait_last_image_timed`.
+    uint                       waitTimeNsec{ 0 };          ///< Nanoseconds returned by `pdv_wait_last_image_timed`.
+    bool                       waitReturnsNull{ false };   ///< SDK acquisition fails without yielding a buffer.
+    bool                       timeoutDuringWait{ false }; ///< SDK returns a non-null partial transfer.
+    int                        timeoutCount{ 0 };          ///< Cumulative SDK acquisition timeout count.
+    std::array<u_char, 64>     waitImage{};                ///< Raw EDT frame buffer returned to the app.
+    int                        readcfgReturn{ 0 };         ///< Return code forced from `pdv_readcfg`.
+    int                        readcfgCalls{ 0 };          ///< Number of `pdv_readcfg` calls observed.
+    int                        multibufCalls{ 0 };         ///< Number of `pdv_multibuf` calls observed.
+    std::deque<serialResponse> serialResponses;            ///< Scripted serial responses queued for future commands.
+    std::vector<std::string>   serialCommands;             ///< Serial commands issued by the app under test.
+    std::string                activeSerialResponse;       ///< Active serial response returned by the current command.
     bool activeSerialReadPending{ false }; ///< Indicates that the next `pdv_serial_read` should return data.
     bool activeSerialTransaction{ false }; ///< Indicates that a serial command is mid-transaction.
     int  activeSerialWaitResult{ 0 };      ///< Return code for the first wait after a command.
@@ -237,8 +243,15 @@ extern "C"
     u_char *pdv_wait_last_image_timed( PdvDev *pdv_p, uint dmaTimeStamp[2] )
     {
         static_cast<void>( pdv_p );
+
+        if( g_edtStubState.waitReturnsNull )
+        {
+            return nullptr;
+        }
+
         dmaTimeStamp[0] = g_edtStubState.waitTimeSec;
         dmaTimeStamp[1] = g_edtStubState.waitTimeNsec;
+        g_edtStubState.timeoutCount += g_edtStubState.timeoutDuringWait;
         return g_edtStubState.waitImage.data();
     }
 
@@ -246,6 +259,13 @@ extern "C"
     {
         static_cast<void>( pdv_p );
         ++g_edtStubState.startImageCalls;
+    }
+
+    /// Report the cumulative SDK timeout count, including scripted partial transfers.
+    int pdv_timeouts( PdvDev *pdv_p /**< [in] Unused simulated device. */ )
+    {
+        static_cast<void>( pdv_p );
+        return g_edtStubState.timeoutCount;
     }
 
     int pdv_serial_read( PdvDev *pdv_p, char *buf, int size )
@@ -450,8 +470,11 @@ class cred2Ctrl_test : public MagAOX::app::cred2Ctrl
 /// Start a short-lived framegrabber thread so `frameGrabber::appLogic()` sees a running worker.
 [[maybe_unused]] void startFgThread( cred2Ctrl_test &app, int sleepMs = 200 )
 {
-    app.m_fgThread =
-        std::thread( [sleepMs]() { std::this_thread::sleep_for( std::chrono::milliseconds( sleepMs ) ); } );
+    app.m_fgThread = std::thread(
+        [sleepMs]()
+        {
+            std::this_thread::sleep_for( std::chrono::milliseconds( sleepMs ) );
+        } );
 }
 
 /// Join the temporary framegrabber thread if a test started one.
@@ -480,6 +503,42 @@ struct fgThreadScope
         joinFgThread( m_app );
     }
 };
+
+#ifndef CRED2CTRL_TEST_SUPPORT_ONLY
+/** \cond CRED2_TEST_HELPERS */
+/// Keep the fake framegrabber alive until a potentially blocking app-logic call completes.
+class runningFgThreadScope
+{
+    cred2Ctrl_test   &m_app;           ///< App whose temporary framegrabber thread is owned by this scope.
+    std::atomic<bool> m_stop{ false }; ///< Worker termination request, independent of app-logic duration.
+
+  public:
+    /// Start a fake framegrabber worker that remains alive until scope exit.
+    explicit runningFgThreadScope( cred2Ctrl_test &app /**< [in] App requiring a live framegrabber worker. */ );
+
+    /// Stop and join the fake worker before its app is destroyed.
+    ~runningFgThreadScope();
+};
+
+runningFgThreadScope::runningFgThreadScope( cred2Ctrl_test &app ) : m_app( app )
+{
+    m_app.m_fgThread = std::thread(
+        [this]()
+        {
+            while( !m_stop.load() )
+            {
+                std::this_thread::yield();
+            }
+        } );
+}
+
+runningFgThreadScope::~runningFgThreadScope()
+{
+    m_stop.store( true );
+    joinFgThread( m_app );
+}
+/** \endcond */
+#endif
 
 /// Ensure startup-driven telemetry resources are shut down when a test exits early.
 struct startupScope
@@ -2294,34 +2353,48 @@ TEST_CASE( "cred2Ctrl appLogic handles connection and housekeeping flow", "[cred
         REQUIRE( app.state() == stateCodes::READY );
     }
 
-    SECTION( "ready-state returns immediately when the INDI mutex is already held elsewhere" )
+    SECTION( "ready-state ROI updates wait for the INDI mutex before skipping settling housekeeping" )
     {
-        cred2Ctrl_test    app;
-        std::atomic<bool> mutexHeld{ false };
+        cred2Ctrl_test app;
 
         setPoweredOn( app );
         app.state( stateCodes::READY );
-        app.m_roiSettleCounter = 0;
-        fgThreadScope fgThread( app );
+        app.m_roiSettleCounter = 1;
 
-        std::thread mutexHolder(
-            [&app, &mutexHeld]()
-            {
-                std::lock_guard<std::mutex> lock( app.m_indiMutex );
-                mutexHeld.store( true );
-                std::this_thread::sleep_for( std::chrono::milliseconds( 100 ) );
-            } );
+        bool pending = false;
+        int  result  = -1;
 
-        while( !mutexHeld.load() )
         {
-            std::this_thread::yield();
+            runningFgThreadScope fgThread( app );
+            std::promise<void>   entered;
+            auto                 enteredFuture = entered.get_future();
+            std::future<int>     logicResult;
+
+            { //mutex scope
+                std::unique_lock<std::mutex> lock( app.m_indiMutex );
+                logicResult = std::async( std::launch::async,
+                                          [&app, &entered]()
+                                          {
+                                              entered.set_value();
+                                              return app.appLogic();
+                                          } );
+
+                enteredFuture.wait();
+                pending = logicResult.wait_for( std::chrono::milliseconds( 10 ) ) == std::future_status::timeout;
+            }
+
+            result = logicResult.get();
         }
 
-        REQUIRE( app.appLogic() == 0 );
-        REQUIRE( app.state() == stateCodes::READY );
+        REQUIRE( pending );
+        REQUIRE( result == 0 );
+        REQUIRE( app.m_roiSettleCounter == 0 );
         REQUIRE( g_edtStubState.serialCommands.empty() );
 
-        mutexHolder.join();
+        // This offline fixture has no telemetry logger. After the ROI handoff and settling skip,
+        // the existing telemeter health check therefore requests shutdown.
+        REQUIRE( app.state() == stateCodes::FAILURE );
+        REQUIRE( app.m_shutdown == 1 );
     }
 
     SECTION( "ready-state update-limit failures are ignored once power has already been lost" )
@@ -2499,6 +2572,56 @@ TEST_CASE( "cred2Ctrl appLogic handles connection and housekeeping flow", "[cred
         REQUIRE( app.m_roiSettleCounter == 1 );
         REQUIRE( g_edtStubState.serialCommands.empty() );
     }
+}
+
+/** \brief The shared EDT result contract propagates failures without exposing a usable image or timestamp.
+ * \ingroup cred2Ctrl_unit_test
+ */
+TEST_CASE( "cred2Ctrl propagates failed and partial acquisition results", "[cred2Ctrl][acquisition]" )
+{
+    resetStubState();
+    cred2Ctrl_test app;
+    setPoweredOn( app );
+    g_edtStubState.timeoutCount = 4;
+    REQUIRE( app.startAcquisition() == 0 );
+    g_edtStubState.waitTimeSec  = 12;
+    g_edtStubState.waitTimeNsec = 345;
+    app.m_currImageTimestamp    = { 9, 123 };
+    int expectedRearm           = 1;
+
+    SECTION( "null SDK image" )
+    {
+        g_edtStubState.waitReturnsNull = true;
+        expectedRearm                  = 0;
+    }
+
+    SECTION( "non-null partial transfer" )
+    {
+        g_edtStubState.timeoutDuringWait = true;
+    }
+
+    SECTION( "malformed SDK nanoseconds" )
+    {
+        g_edtStubState.waitTimeNsec = 1000000000;
+    }
+
+    SECTION( "missing SDK timestamp" )
+    {
+        g_edtStubState.waitTimeSec = g_edtStubState.waitTimeNsec = 0;
+    }
+
+    REQUIRE( app.acquireAndCheckValid() == -1 );
+    CHECK( app.m_image_p == nullptr );
+    CHECK( app.m_currImageTimestamp.tv_sec == 0 );
+    CHECK( app.m_currImageTimestamp.tv_nsec == 0 );
+    CHECK( g_edtStubState.startImageCalls == expectedRearm );
+
+    // clang-format off
+#ifdef CRED2CTRL_TEST_DOXYGEN_REF
+    cred2Ctrl::acquireAndCheckValid;
+    dev::edtCamera<cred2Ctrl>::pdvAcquire;
+#endif
+    // clang-format on
 }
 
 #endif // CRED2CTRL_TEST_SUPPORT_ONLY

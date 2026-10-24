@@ -193,3 +193,28 @@ report from their counters and then returns nonzero. An HTML report therefore do
  * \brief Offline numerical, configuration, restart, and publication ownership regressions.
  * \ingroup application_unit_test
  */
+
+/** \defgroup common_unit_test Common Library Unit Tests
+ * \brief Unit tests for shared low-level library helpers.
+ * \ingroup unit_test
+ */
+
+/** \defgroup spscQueue_unit_test Bounded SPSC Queue Unit Tests
+ * \brief Ownership, wrap and full-queue behavior of the shared diagnostic queue.
+ * \ingroup common_unit_test
+ */
+
+/** \defgroup frameGrabberTiming_unit_test Framegrabber Timing Unit Tests
+ * \brief Paired timestamp collection and qualified stage decomposition.
+ * \ingroup app_dev_unit_tests
+ */
+
+/** \defgroup frameGrabber_unit_test Framegrabber Publication Integration Tests
+ * \brief Acquisition failure, timestamp and main/sync notification ordering.
+ * \ingroup app_dev_unit_tests
+ */
+
+/** \defgroup frameGrabberTelemetry_unit_test Framegrabber Stage Telemetry Unit Tests
+ * \brief Binary, text, metadata and validity of optional stage records.
+ * \ingroup logger_unit_test
+ */

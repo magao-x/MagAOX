@@ -8,6 +8,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "timingStats.hpp"
+
 namespace MagAOX
 {
 namespace dmTiming
@@ -72,17 +74,8 @@ enum class Availability : uint8_t
     unavailable
 };
 
-/// Aggregate of one independently valid metric population.
-struct Stats
-{
-    uint64_t count{ 0 };     ///< Number of retained observations.
-    double   mean{ 0 };      ///< Mean duration, in seconds; unavailable when count is zero.
-    double   stddev{ 0 };    ///< Sample standard deviation, in seconds; unavailable below two observations.
-    double   min{ 0 };       ///< Minimum duration in seconds.
-    double   max{ 0 };       ///< Maximum duration in seconds.
-    double   span{ 0 };      ///< Local endpoint/observation coverage in seconds, also for publication intervals.
-    bool     valid{ false }; ///< True when sample variance is defined.
-};
+/// Compatible name for the common clock-neutral timing population.
+using Stats = MagAOX::timing::Stats;
 
 /// Ordered publication-interval populations; every duration and threshold is in seconds.
 /** Excursions are strictly above/below the retained interval median plus/minus

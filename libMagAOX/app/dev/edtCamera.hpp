@@ -1,8 +1,6 @@
 /** \file edtCamera.hpp
  * \brief EDT framegrabber interface
  *
- * \author Jared R. Males (jaredmales@gmail.com)
- *
  * \ingroup app_files
  */
 
@@ -13,6 +11,10 @@
 
     #include <edtinc.h>
 
+    #include <cerrno>
+    #include <ctime>
+
+    #include "../../common/frameGrabberTiming.hpp"
     #include "../../common/paths.hpp"
 
     #include "ioDevice.hpp"
@@ -73,6 +75,8 @@ class edtCamera : public ioDevice
     PdvDev *m_pdv{ nullptr }; ///< The EDT PDV device handle
 
     u_char *m_image_p{ nullptr }; ///< The image data grabbed
+
+    int m_pdvTimeouts{ 0 }; ///< Last cumulative SDK timeout count, reset when acquisition starts.
 
     // std::string m_modeName; ///< The current mode name
 
@@ -185,10 +189,17 @@ class edtCamera : public ioDevice
       */
     int appShutdown();
 
+    /// Start the configured ring and establish the cumulative timeout baseline.
     int pdvStartAcquisition();
 
-    int pdvAcquire( timespec &currImageTimestamp );
+    /// Return a complete image and SDK timestamp, or clear both outputs and fail.
+    /** A changed SDK timeout count rejects even a non-null partial-image buffer.
+     * The current latest-image selection and one-image requeue policy are preserved.
+     * \returns zero on success, or -1 for a failed/partial acquisition or invalid timestamp.
+     */
+    int pdvAcquire( timespec &currImageTimestamp /**< [out] SDK timestamp, zeroed on failure. */ );
 
+    /// Reopen the requested mode using the existing recovery path.
     int pdvReconfig();
 
   protected:
@@ -230,11 +241,106 @@ class edtCamera : public ioDevice
     ///@}
 
   private:
-    derivedT &derived()
-    {
-        return *static_cast<derivedT *>( this );
-    }
+    /// Access the CRTP owner.
+    derivedT &derived();
+
+    /// Forward a segment marker when the owner supports optional frame timing.
+    template <class hookT>
+    static auto timingMark( hookT                   &owner /**< [in,out] Derived camera. */,
+                            MagAOX::fgTiming::Marker marker /**< [in] Segment endpoint. */,
+                            int /**< [in] Optional-hook overload priority. */ )
+        -> decltype( owner.frameGrabberTimingMark( marker ), void() );
+
+    /// Keep EDT-only owners source compatible when segment timing is absent.
+    static void timingMark( derivedT                &owner /**< [in,out] Derived camera. */,
+                            MagAOX::fgTiming::Marker marker /**< [in] Unused endpoint. */,
+                            long /**< [in] Fallback overload priority. */ );
+
+    /// Ask whether optional serial segment timing is enabled.
+    template <class hookT>
+    static auto timingEnabled( const hookT &owner /**< [in] Derived camera. */,
+                               int /**< [in] Optional-hook overload priority. */ )
+        -> decltype( owner.frameGrabberTimingEnabled() );
+
+    /// Avoid diagnostic clocks when the owner has no stage timing interface.
+    static bool timingEnabled( const derivedT &owner /**< [in] Derived camera. */,
+                               long /**< [in] Fallback overload priority. */ );
+
+    /// Forward one ordinary-thread serial transaction to the optional control channel.
+    template <class hookT>
+    static auto serialTiming( hookT  &owner /**< [in,out] Derived camera. */,
+                              int64_t entered /**< [in] Monotonic transaction start, ns. */,
+                              int64_t completed /**< [in] Monotonic transaction completion, ns. */,
+                              bool    success /**< [in] Transaction completed successfully. */,
+                              int /**< [in] Optional-hook overload priority. */ )
+        -> decltype( owner.frameGrabberSerialTiming( entered, completed, success ), void() );
+
+    /// Keep EDT-only owners compatible when the serial timing hook is absent.
+    static void serialTiming( derivedT &owner /**< [in,out] Derived camera. */,
+                              int64_t   entered /**< [in] Unused transaction start. */,
+                              int64_t   completed /**< [in] Unused transaction completion. */,
+                              bool      success /**< [in] Unused result. */,
+                              long /**< [in] Fallback overload priority. */ );
+
+    /// Read a diagnostic monotonic timestamp without changing the caller's errno.
+    static int64_t timingNow();
 };
+
+template <class derivedT>
+derivedT &edtCamera<derivedT>::derived()
+{
+    return *static_cast<derivedT *>( this );
+}
+
+template <class derivedT>
+template <class hookT>
+auto edtCamera<derivedT>::timingMark( hookT &owner, MagAOX::fgTiming::Marker marker, int )
+    -> decltype( owner.frameGrabberTimingMark( marker ), void() )
+{
+    owner.frameGrabberTimingMark( marker );
+}
+
+template <class derivedT>
+void edtCamera<derivedT>::timingMark( derivedT &, MagAOX::fgTiming::Marker, long )
+{
+}
+
+template <class derivedT>
+template <class hookT>
+auto edtCamera<derivedT>::timingEnabled( const hookT &owner, int ) -> decltype( owner.frameGrabberTimingEnabled() )
+{
+    return owner.frameGrabberTimingEnabled();
+}
+
+template <class derivedT>
+bool edtCamera<derivedT>::timingEnabled( const derivedT &, long )
+{
+    return false;
+}
+
+template <class derivedT>
+template <class hookT>
+auto edtCamera<derivedT>::serialTiming( hookT &owner, int64_t entered, int64_t completed, bool success, int )
+    -> decltype( owner.frameGrabberSerialTiming( entered, completed, success ), void() )
+{
+    owner.frameGrabberSerialTiming( entered, completed, success );
+}
+
+template <class derivedT>
+void edtCamera<derivedT>::serialTiming( derivedT &, int64_t, int64_t, bool, long )
+{
+}
+
+template <class derivedT>
+int64_t edtCamera<derivedT>::timingNow()
+{
+    const int saved = errno;
+    timespec  stamp{};
+    const int result = clock_gettime( CLOCK_MONOTONIC, &stamp );
+    errno            = saved;
+
+    return result == 0 ? int64_t( stamp.tv_sec ) * 1000000000 + stamp.tv_nsec : -1;
+}
 
 template <class derivedT>
 edtCamera<derivedT>::edtCamera()
@@ -245,7 +351,9 @@ template <class derivedT>
 edtCamera<derivedT>::~edtCamera() noexcept
 {
     if( m_pdv )
+    {
         pdv_close( m_pdv );
+    }
 
     return;
 }
@@ -255,6 +363,19 @@ edtCamera<derivedT>::~edtCamera() noexcept
 template <class derivedT>
 int edtCamera<derivedT>::pdvSerialWriteRead( std::string &response, const std::string &command, bool logErrors )
 {
+    const bool    capture = timingEnabled( derived(), 0 );
+    const int64_t entered = capture ? timingNow() : -1;
+    auto          finish  = [&]( int result )
+    {
+        if( capture )
+        {
+            const int saved = errno;
+            serialTiming( derived(), entered, timingNow(), result == 0, 0 );
+            errno = saved;
+        }
+
+        return result;
+    };
     char buf[MAGAOX_PDV_SERBUFSIZE + 1];
 
     // Flush the channel first.
@@ -267,7 +388,7 @@ int edtCamera<derivedT>::pdvSerialWriteRead( std::string &response, const std::s
         {
             derivedT::template log<software_error>( { __FILE__, __LINE__, "PDV: error sending serial command" } );
         }
-        return -1;
+        return finish( -1 );
     }
 
     int ret;
@@ -277,13 +398,15 @@ int edtCamera<derivedT>::pdvSerialWriteRead( std::string &response, const std::s
     if( ret == 0 )
     {
         if( derived().powerState() != 1 || derived().powerStateTarget() != 1 )
-            return -1;
+        {
+            return finish( -1 );
+        }
 
         if( logErrors )
         {
             derivedT::template log<software_error>( { __FILE__, __LINE__, "PDV: timeout, no serial response" } );
         }
-        return -1;
+        return finish( -1 );
     }
 
     u_char lastbyte = 0;
@@ -321,7 +444,7 @@ int edtCamera<derivedT>::pdvSerialWriteRead( std::string &response, const std::s
         {
             derivedT::template log<software_error>( { __FILE__, __LINE__, "PDV: timeout in serial response" } );
         }
-        return -1;
+        return finish( -1 );
     }
 
     // Drain any immediate trailing bytes so CR/LF endings or prompt suffixes
@@ -337,7 +460,7 @@ int edtCamera<derivedT>::pdvSerialWriteRead( std::string &response, const std::s
         }
     }
 
-    return 0;
+    return finish( 0 );
 }
 
 template <class derivedT>
@@ -407,7 +530,9 @@ int edtCamera<derivedT>::pdvConfig( std::string &modeName )
     int pdv_debug = 0;
 
     if( derived().m_log.logLevel() > logPrio::LOG_INFO )
+    {
         pdv_debug = 2;
+    }
 
     if( pdv_initcam( edt_p, dd_p, m_unit, &edtinfo, configFile.c_str(), bitdir, pdv_debug ) != 0 )
     {
@@ -540,6 +665,13 @@ int edtCamera<derivedT>::appShutdown()
 template <class derivedT>
 int edtCamera<derivedT>::pdvStartAcquisition()
 {
+    m_pdvTimeouts = pdv_timeouts( m_pdv );
+
+    if( m_pdvTimeouts < 0 )
+    {
+        return -1;
+    }
+
     pdv_start_images( m_pdv, m_numBuffs );
 
     return 0;
@@ -548,11 +680,28 @@ int edtCamera<derivedT>::pdvStartAcquisition()
 template <class derivedT>
 int edtCamera<derivedT>::pdvAcquire( timespec &currImageTimestamp )
 {
-
-    uint dmaTimeStamp[2];
+    currImageTimestamp = {};
+    uint dmaTimeStamp[2]{};
+    timingMark( derived(), MagAOX::fgTiming::Marker::waitEnter, 0 );
     m_image_p = pdv_wait_last_image_timed( m_pdv, dmaTimeStamp );
-    // m_image_p = pdv_wait_image_timed(m_pdv, dmaTimeStamp);
+    timingMark( derived(), MagAOX::fgTiming::Marker::waitReturn, 0 );
+
+    if( !m_image_p )
+    {
+        return -1;
+    }
+
     pdv_start_image( m_pdv );
+    timingMark( derived(), MagAOX::fgTiming::Marker::rearmReturn, 0 );
+    const int  timeouts = pdv_timeouts( m_pdv );
+    const bool complete = timeouts >= 0 && timeouts == m_pdvTimeouts;
+    m_pdvTimeouts       = timeouts;
+
+    if( !complete || dmaTimeStamp[1] >= 1000000000 || ( dmaTimeStamp[0] == 0 && dmaTimeStamp[1] == 0 ) )
+    {
+        m_image_p = nullptr;
+        return -1;
+    }
 
     currImageTimestamp.tv_sec  = dmaTimeStamp[0];
     currImageTimestamp.tv_nsec = dmaTimeStamp[1];
@@ -568,7 +717,7 @@ int edtCamera<derivedT>::pdvReconfig()
     {
         derivedT::template log<text_log>( "error trying to re-configure with " + derived().m_nextMode,
                                           logPrio::LOG_ERROR );
-        sleep( 1 );
+        return -1;
     }
     else
     {

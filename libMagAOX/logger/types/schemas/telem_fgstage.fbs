@@ -1,0 +1,119 @@
+/// \file telem_fgstage.fbs
+/// \brief Optional frame-grabber stage timing, matched excursions and observation quality.
+namespace MagAOX.logger;
+
+// Stable identifiers; original external timestamps retain their clocks and marker differences are monotonic.
+enum FgStageMetric : ubyte
+{
+    acquisitionInterval = 0,
+    publicationInterval = 1,
+    acquisitionToWrite = 2,
+    waitReturnInterval = 3,
+    writeEndpointInterval = 4,
+    wait = 5,
+    rearm = 6,
+    validation = 7,
+    conversion = 8,
+    writeBracket = 9,
+    mainPost = 10,
+    syncPost = 11,
+    loopTail = 12,
+    waitToWrite = 13,
+    previousTail = 14,
+    serialOverlap = 15
+}
+
+enum FgStageAvailability : ubyte
+{
+    disabled = 0,
+    warmingUp = 1,
+    valid = 2,
+    stale = 3,
+    unavailable = 4
+}
+
+// All values and coverage are seconds. Changes and external-clock acquisitionToWrite may be signed.
+table FgStageStats
+{
+    count:ulong;
+    mean:double;
+    stddev:double;
+    min:double;
+    max:double;
+    span:double;
+    valid:bool;
+}
+
+table FgStageMetricStats
+{
+    metric:FgStageMetric;
+    value:FgStageStats (required);
+}
+
+table FgStageCounters
+{
+    events:ulong;
+    published:ulong;
+    rejected:ulong;
+    failed:ulong;
+    duplicates:ulong;
+    counter_gaps:ulong;
+    frame_gaps:ulong;
+    invalid:ulong;
+    bracket_wide:ulong;
+    dropped:ulong;
+    controls:ulong;
+    control_failed:ulong;
+    control_invalid:ulong;
+    control_dropped:ulong;
+}
+
+// Raw intervals include wide brackets. Qualified conditional changes require both adjacent brackets to fit.
+// Serial overlap records temporal association, without claiming a causal driver/device wait.
+table Telem_fgstage_fb
+{
+    session:ulong;
+    sequence:ulong;
+    now_ns:long;
+    newest_ns:long;
+    window_sec:double;
+    span_sec:double;
+    age_sec:double;
+    capacity:ulong;
+    queued:ulong;
+    control_queued:ulong;
+    enabled:bool;
+    stages_enabled:bool;
+    fg_valid:bool;
+    state:FgStageAvailability;
+    metrics:[FgStageMetricStats] (required);
+    late_change:[FgStageMetricStats] (required);
+    early_change:[FgStageMetricStats] (required);
+    serial_duration:FgStageStats (required);
+    median:double;
+    threshold:double;
+    bracket_limit:double;
+    intervals:ulong;
+    qualified:ulong;
+    ambiguous:ulong;
+    late:ulong;
+    early:ulong;
+    serial_overlaps:ulong;
+    stream_inode:ulong;
+    last_frame:ulong;
+    last_counter:ulong;
+    mode:uint;
+    bin_x:uint;
+    bin_y:uint;
+    total:FgStageCounters (required);
+    delta:FgStageCounters (required);
+    late_wait_return_interval:FgStageStats (required);
+    early_wait_return_interval:FgStageStats (required);
+    late_write_endpoint_interval:FgStageStats (required);
+    early_write_endpoint_interval:FgStageStats (required);
+    late_previous_tail:FgStageStats (required);
+    early_previous_tail:FgStageStats (required);
+
+}
+
+root_type Telem_fgstage_fb;

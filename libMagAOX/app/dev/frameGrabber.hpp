@@ -1,8 +1,6 @@
 /** \file frameGrabber.hpp
  * \brief The MagAO-X generic frame grabber.
  *
- * \author Jared R. Males (jaredmales@gmail.com)
- *
  * \ingroup app_files
  */
 
@@ -10,15 +8,16 @@
 #define frameGrabber_hpp
 
 #include <sys/syscall.h>
+#include <atomic>
 
-#include <mx/sigproc/circularBuffer.hpp>
-#include <mx/math/vectorUtils.hpp>
 #include <mx/improc/imageUtils.hpp>
 
 #include "../../ImageStreamIO/ImageStruct.hpp"
 #include <ImageStreamIO/ImageStreamIO.h>
 
 #include "../../common/paths.hpp"
+#include "../../logger/types/telem_fgstage.hpp"
+#include "frameGrabberTiming.hpp"
 
 namespace MagAOX
 {
@@ -131,7 +130,14 @@ class frameGrabber
 
     float m_latencyCircBuffMaxTime{ 5 }; ///< Maximum time of the latency meaurement circular buffers
 
-    int m_defaultFlip{ fgFlipNone };
+    bool m_stageTiming{ false }; ///< Capture additional acquisition-stage markers when explicitly enabled.
+
+    double m_stageExcursionUs{ 20 }; ///< Classification distance from the median; not a scheduler safety margin.
+
+    double m_stageBracketUs{
+        0 }; ///< Positive clock-bracket limit for conditional attribution; zero leaves it ambiguous.
+
+    int m_defaultFlip{ fgFlipNone }; ///< Configured orientation of copied images.
 
     ///@}
 
@@ -146,7 +152,8 @@ class frameGrabber
 
     timespec m_currImageTimestamp{ 0, 0 }; ///< The timestamp of the current image.
 
-    bool m_reconfig{ false }; ///< Flag to set if a camera reconfiguration requires a framegrabber reset.
+    std::atomic<bool> m_reconfig{
+        false }; ///< Restart request; derived apps must also protect associated configuration.
 
     IMAGE *m_imageStream{ nullptr }; ///< The ImageStreamIO shared memory buffer.
 
@@ -154,31 +161,26 @@ class frameGrabber
 
     ino_t m_inode{ 0 }; ///< The inode of the image stream file
 
-    float m_cbFPS{ 0 }; ///< The FPS used to configure the circular buffers
+    float m_cbFPS{ 0 }; ///< Worker-owned reported rate at the last timing epoch boundary.
 
-    mx::sigproc::circularBufferIndex<timespec, cbIndexT> m_atimes;
-    mx::sigproc::circularBufferIndex<timespec, cbIndexT> m_wtimes;
+    dev::frameGrabberTiming m_fgTiming; ///< Ownership-safe paired timestamps and optional stage diagnostics.
 
-    std::vector<double> m_atimesD;
-    std::vector<double> m_wtimesD;
-    std::vector<double> m_watimesD;
+    timespec m_dummy_ts{ 0, 0 }; ///< Worker-only next-slot timestamp touch.
+    uint64_t m_dummy_cnt{ 0 };   ///< Worker-only next-slot counter touch.
+    char     m_dummy_c{ 0 };     ///< Worker-only next-slot pixel touch.
 
-    timespec m_dummy_ts{ 0, 0 };
-    uint64_t m_dummy_cnt{ 0 };
-    char     m_dummy_c{ 0 };
+    double m_mna{ 0 };  ///< Consumer-owned acquisition interval mean, seconds.
+    double m_vara{ 0 }; ///< Consumer-owned acquisition interval variance, seconds squared.
+    double m_mina{ 0 }; ///< Consumer-owned acquisition interval minimum, seconds.
+    double m_maxa{ 0 }; ///< Consumer-owned acquisition interval maximum, seconds.
 
-    double m_mna;
-    double m_vara;
-    double m_mina;
-    double m_maxa;
+    double m_mnw{ 0 };  ///< Consumer-owned publication interval mean, seconds.
+    double m_varw{ 0 }; ///< Consumer-owned publication interval variance, seconds squared.
+    double m_minw{ 0 }; ///< Consumer-owned publication interval minimum, seconds.
+    double m_maxw{ 0 }; ///< Consumer-owned publication interval maximum, seconds.
 
-    double m_mnw;
-    double m_varw;
-    double m_minw;
-    double m_maxw;
-
-    double m_mnwa;
-    double m_varwa;
+    double m_mnwa{ 0 };  ///< Consumer-owned paired external write-minus-acquisition mean, seconds.
+    double m_varwa{ 0 }; ///< Consumer-owned paired external write-minus-acquisition variance, seconds squared.
 
   public:
     /// Setup the configuration system
@@ -226,6 +228,9 @@ class frameGrabber
       */
     int appLogic();
 
+    /// Refresh consumer-owned timing and cached telemetry on ordinary application paths.
+    int updateTiming();
+
     /// On power off, sets m_reconfig to true.
     /** This should be called in `derivedT::onPowerOff` as
       * \code
@@ -250,7 +255,19 @@ class frameGrabber
       */
     int appShutdown();
 
+    /// Start a new producer timing epoch without reallocating shared live storage.
     int configCircBuffs();
+
+    /// Record one optional local endpoint, without a clock read when stage timing is disabled.
+    void frameGrabberTimingMark( MagAOX::fgTiming::Marker marker /**< [in] Stage endpoint. */ );
+
+    /// Return whether additional stage clocks and serial correlation are enabled.
+    bool frameGrabberTimingEnabled() const;
+
+    /// Publish a serialized control transaction from a caller-owned ordinary control path.
+    void frameGrabberSerialTiming( int64_t enteredNs /**< [in] Monotonic transaction start. */,
+                                   int64_t completedNs /**< [in] Monotonic transaction finish. */,
+                                   bool    success /**< [in] Whether the serial transaction succeeded. */ );
 
   protected:
     /** \name Framegrabber Thread
@@ -274,8 +291,14 @@ class frameGrabber
 
     ///@}
 
-    void *loadImageIntoStreamCopy( void *dest, void *src, size_t width, size_t height, size_t szof );
+    /// Copy or flip one complete image into its output slot.
+    void *loadImageIntoStreamCopy( void  *dest /**< [out] Destination pixels. */,
+                                   void  *src /**< [in] Source pixels. */,
+                                   size_t width /**< [in] Pixel width. */,
+                                   size_t height /**< [in] Pixel height. */,
+                                   size_t szof /**< [in] Bytes per pixel. */ );
 
+    /// Attach a pre-existing output image and validate its semaphore/layout readiness.
     int openShmim();
 
     /** \name INDI
@@ -289,7 +312,11 @@ class frameGrabber
 
     pcf::IndiProperty m_indiP_frameSize; ///< Property used to report the current frame size
 
-    pcf::IndiProperty m_indiP_timing;
+    pcf::IndiProperty m_indiP_timing; ///< Compatible acquisition/publication timing statistics.
+
+    pcf::IndiProperty m_indiP_stageTiming; ///< Optional per-stage timing statistics, in seconds.
+
+    pcf::IndiProperty m_indiP_timingQuality; ///< Timing coverage, generation, losses and validity.
 
   public:
     /// Update the INDI properties for this device controller
@@ -307,11 +334,25 @@ class frameGrabber
      * @{
      */
 
-    int recordFGTimings( bool force = false );
+    /// Record the compatible cached acquisition/publication summary outside the producer.
+    int recordFGTimings( bool force = false /**< [in] Emit even when cached values are unchanged. */ );
+
+    /// Record optional stage timing and qualification from the consumer cache.
+    int recordFGStageTimings( bool force = false /**< [in] Emit a forced disabled/stale snapshot as well. */ );
 
     /// @}
 
   private:
+    /// Let a controller acknowledge configuration requests under its own control lock.
+    template <class hookT>
+    static auto reconfigureCompleteHook( hookT &owner /**< [in] Controller with request ownership. */,
+                                         int    tag /**< [in] Preferred overload. */ )
+        -> decltype( owner.frameGrabberReconfigureComplete(), void() );
+
+    /// Preserve the legacy acknowledgement for controllers without a request hook.
+    static void reconfigureCompleteHook( derivedT &owner /**< [in] Controller using the legacy flag. */,
+                                         long      tag /**< [in] Fallback overload. */ );
+
     /// Call an optional derived-class hook after the main stream publication completes.
     template <class hookT>
     static auto postPublishHook( hookT &hookOwner,      /**< [in] derived object that may expose the hook */
@@ -325,11 +366,15 @@ class frameGrabber
                                 long      callPriorityTag /**< [in] fallback overload selector */
     );
 
-    derivedT &derived()
-    {
-        return *static_cast<derivedT *>( this );
-    }
+    /// Access the derived application interface.
+    derivedT &derived();
 };
+
+template <class derivedT>
+derivedT &frameGrabber<derivedT>::derived()
+{
+    return *static_cast<derivedT *>( this );
+}
 
 template <class derivedT>
 template <class hookT>
@@ -414,7 +459,36 @@ int frameGrabber<derivedT>::setupConfig( mx::app::appConfigurator &config )
                 false,
                 "float",
                 "The maximum length of the buffer used to measure latency timings. Sets  m_latencyCircBuffMaxLength, "
-                "default is 3600." );
+                "default is 100000." );
+
+    config.add( "framegrabber.stageTiming",
+                "",
+                "framegrabber.stageTiming",
+                argType::Required,
+                "framegrabber",
+                "stageTiming",
+                false,
+                "bool",
+                "Enable bounded local acquisition-stage timing; default false." );
+    config.add( "framegrabber.stageExcursionUs",
+                "",
+                "framegrabber.stageExcursionUs",
+                argType::Required,
+                "framegrabber",
+                "stageExcursionUs",
+                false,
+                "double",
+                "Excursion distance from the local publication median, us; default 20, zero disables classification." );
+    config.add(
+        "framegrabber.stageBracketUs",
+        "",
+        "framegrabber.stageBracketUs",
+        argType::Required,
+        "framegrabber",
+        "stageBracketUs",
+        false,
+        "double",
+        "Positive maximum write-clock bracket for conditional attribution, us; zero leaves attribution ambiguous." );
 
     if( derivedT::c_frameGrabber_flippable )
     {
@@ -466,6 +540,17 @@ int frameGrabber<derivedT>::loadConfig( mx::app::appConfigurator &config )
     }
 
     config( m_latencyCircBuffMaxLength, "framegrabber.latencySize" );
+    config( m_stageTiming, "framegrabber.stageTiming" );
+    config( m_stageBracketUs, "framegrabber.stageBracketUs" );
+    config( m_stageExcursionUs, "framegrabber.stageExcursionUs" );
+
+    if( !mx::math::isFinite( m_latencyCircBuffMaxTime ) || m_latencyCircBuffMaxTime >= 9e9 ||
+        m_latencyCircBuffMaxLength < 0 || !mx::math::isFinite( m_stageBracketUs ) || m_stageBracketUs < 0 ||
+        m_stageBracketUs >= 1e9 || !mx::math::isFinite( m_stageExcursionUs ) || m_stageExcursionUs < 0 ||
+        m_stageExcursionUs >= 1e9 )
+    {
+        return derivedT::template log<software_critical, -1>( { "Invalid framegrabber timing configuration" } );
+    }
 
     if( derivedT::c_frameGrabber_flippable )
     {
@@ -506,6 +591,20 @@ int frameGrabber<derivedT>::loadConfig( mx::app::appConfigurator &config )
 template <class derivedT>
 int frameGrabber<derivedT>::appStartup()
 {
+    try
+    {
+        m_fgTiming.configure( m_latencyCircBuffMaxTime,
+                              static_cast<size_t>( m_latencyCircBuffMaxLength ),
+                              m_stageTiming,
+                              m_stageExcursionUs * 1e-6,
+                              m_stageBracketUs * 1e-6 );
+    }
+    catch( const std::exception &error )
+    {
+        return derivedT::template log<software_error, -1>(
+            { std::string( "Frame timing allocation: " ) + error.what() } );
+    }
+
     // Register the shmimName INDI property
     m_indiP_shmimName = pcf::IndiProperty( pcf::IndiProperty::Text );
     m_indiP_shmimName.setDevice( derived().configName() );
@@ -568,6 +667,58 @@ int frameGrabber<derivedT>::appStartup()
         return -1;
     }
 
+    derived().createROIndiNumber( m_indiP_stageTiming, "fg_stage_timing" );
+    for( size_t i = 0; i < static_cast<size_t>( MagAOX::fgTiming::Metric::count ); ++i )
+    {
+        const std::string name = MagAOX::fgTiming::metricName( static_cast<MagAOX::fgTiming::Metric>( i ) );
+
+        for( const auto &prefix : { "", "lateChange_", "earlyChange_" } )
+        {
+            for( const auto &suffix : { "_count", "_valid", "_mean", "_stddev", "_min", "_max" } )
+            {
+                m_indiP_stageTiming.add( pcf::IndiElement( std::string( prefix ) + name + suffix ) );
+            }
+        }
+    }
+
+    for( const auto &name : { "serial",
+                              "lateWaitReturnInterval",
+                              "earlyWaitReturnInterval",
+                              "lateWriteEndpointInterval",
+                              "earlyWriteEndpointInterval",
+                              "latePreviousTail",
+                              "earlyPreviousTail" } )
+    {
+        for( const auto &suffix : { "count", "valid", "mean", "stddev", "min", "max" } )
+        {
+            m_indiP_stageTiming.add( pcf::IndiElement( std::string( name ) + "_" + suffix ) );
+        }
+    }
+
+    derived().createROIndiNumber( m_indiP_timingQuality, "fg_timing_quality" );
+    for( const auto &name : { "enabled",        "stagesEnabled", "valid",       "state",
+                              "session",        "sequence",      "windowSec",   "spanSec",
+                              "ageSec",         "capacity",      "queued",      "controlQueued",
+                              "qualified",      "ambiguous",     "medianSec",   "bracketLimitSec",
+                              "serialOverlaps", "streamInode",   "lastFrame",   "lastCounter",
+                              "mode",           "binX",          "binY",        "intervals",
+                              "late",           "early",         "thresholdSec" } )
+    {
+        m_indiP_timingQuality.add( pcf::IndiElement( name ) );
+    }
+
+    for( const auto &name : MagAOX::fgTiming::counterNames() )
+    {
+        m_indiP_timingQuality.add( pcf::IndiElement( std::string( "total_" ) + name ) );
+        m_indiP_timingQuality.add( pcf::IndiElement( std::string( "delta_" ) + name ) );
+    }
+
+    if( derived().registerIndiPropertyReadOnly( m_indiP_stageTiming ) < 0 ||
+        derived().registerIndiPropertyReadOnly( m_indiP_timingQuality ) < 0 )
+    {
+        return -1;
+    }
+
     // Start the f.g. thread
     if( derived().threadStart( m_fgThread,
                                m_fgThreadInit,
@@ -597,139 +748,35 @@ int frameGrabber<derivedT>::appLogic()
         return -1;
     }
 
-    try
+    return updateTiming();
+}
+
+template <class derivedT>
+int frameGrabber<derivedT>::updateTiming()
+{
+    m_fgTiming.update();
+    const auto &summary = m_fgTiming.summary();
+    using MagAOX::fgTiming::Metric;
+    const auto &acquisition = summary.metrics[static_cast<size_t>( Metric::acquisitionInterval )];
+    const auto &publication = summary.metrics[static_cast<size_t>( Metric::publicationInterval )];
+    const auto &delay       = summary.metrics[static_cast<size_t>( Metric::acquisitionToWrite )];
+    const bool  operating   = derived().state() == stateCodes::OPERATING;
+    m_mna                   = operating && acquisition.valid ? acquisition.mean : 0;
+    m_vara                  = operating && acquisition.valid ? acquisition.stddev * acquisition.stddev : 0;
+    m_mina                  = operating && acquisition.count ? acquisition.min : 0;
+    m_maxa                  = operating && acquisition.count ? acquisition.max : 0;
+    m_mnw                   = operating && publication.valid ? publication.mean : 0;
+    m_varw                  = operating && publication.valid ? publication.stddev * publication.stddev : 0;
+    m_minw                  = operating && publication.count ? publication.min : 0;
+    m_maxw                  = operating && publication.count ? publication.max : 0;
+    m_mnwa                  = operating && delay.valid ? delay.mean : 0;
+    m_varwa                 = operating && delay.valid ? delay.stddev * delay.stddev : 0;
+    if( operating )
     {
-        if( derived().state() == stateCodes::OPERATING && m_atimes.size() > 1 && derived().fps() > 0 )
-        {
-            cbIndexT latTime = m_latencyCircBuffMaxTime * m_cbFPS;
-            if( latTime >= m_atimes.maxEntries() )
-            {
-                latTime = m_atimes.maxEntries() - 1;
-            }
-
-            cbIndexT usedEntries = std::min<cbIndexT>( latTime, m_atimes.size() );
-
-            if( usedEntries >= 2 )
-            {
-                m_atimesD.resize( usedEntries - 1 );
-                m_wtimesD.resize( usedEntries - 1 );
-                m_watimesD.resize( usedEntries - 1 );
-
-                cbIndexT refEntry = m_atimes.latest();
-
-                if( refEntry >= usedEntries )
-                {
-                    refEntry -= usedEntries;
-                }
-                else
-                {
-                    refEntry = m_atimes.maxEntries() + refEntry - usedEntries;
-                }
-
-                timespec ts = m_atimes.at( refEntry, 0 );
-                double   a0 = ts.tv_sec + ( (double)ts.tv_nsec ) / 1e9;
-
-                ts        = m_wtimes.at( refEntry, 0 );
-                double w0 = ts.tv_sec + ( (double)ts.tv_nsec ) / 1e9;
-
-                double mina = 1e9;
-                double maxa = -1e9;
-                double minw = 1e9;
-                double maxw = -1e9;
-
-                for( size_t n = 1; n <= m_atimesD.size(); ++n )
-                {
-                    ts = m_atimes.at( refEntry, n );
-
-                    double a = ts.tv_sec + ( (double)ts.tv_nsec ) / 1e9;
-
-                    ts = m_wtimes.at( refEntry, n );
-
-                    double w = ts.tv_sec + ( (double)ts.tv_nsec ) / 1e9;
-
-                    m_atimesD[n - 1]  = a - a0;
-                    m_wtimesD[n - 1]  = w - w0;
-                    m_watimesD[n - 1] = w - a;
-                    a0                = a;
-                    w0                = w;
-
-                    if( m_atimesD[n - 1] < mina )
-                    {
-                        mina = m_atimesD[n - 1];
-                    }
-
-                    if( m_atimesD[n - 1] > maxa )
-                    {
-                        maxa = m_atimesD[n - 1];
-                    }
-
-                    if( m_wtimesD[n - 1] < minw )
-                    {
-                        minw = m_wtimesD[n - 1];
-                    }
-
-                    if( m_wtimesD[n - 1] > maxw )
-                    {
-                        maxw = m_wtimesD[n - 1];
-                    }
-
-                    if( m_wtimesD[n - 1] < 0 )
-                    {
-                        std::cerr << "negative wtime: " << m_wtimesD[n - 1] << ' ' << n << ' ' << m_atimesD.size()
-                                  << ' ' << refEntry << ' ' << m_atimes.maxEntries() << ' ' << latTime << '\n';
-
-                        return derivedT::template log<software_error, 0>( { "negative write time. latency "
-                                                                            "circ buff is not long enought" } );
-                    }
-                }
-
-                m_mna  = mx::math::vectorMean( m_atimesD );
-                m_vara = mx::math::vectorVariance( m_atimesD, m_mna );
-                m_mina = mina;
-                m_maxa = maxa;
-
-                m_mnw  = mx::math::vectorMean( m_wtimesD );
-                m_varw = mx::math::vectorVariance( m_wtimesD, m_mnw );
-                m_minw = minw;
-                m_maxw = maxw;
-
-                m_mnwa  = mx::math::vectorMean( m_watimesD );
-                m_varwa = mx::math::vectorVariance( m_watimesD, m_mnwa );
-
-                recordFGTimings();
-            }
-            else
-            {
-                m_mna   = 0;
-                m_vara  = 0;
-                m_mina  = 0;
-                m_maxa  = 0;
-                m_mnw   = 0;
-                m_varw  = 0;
-                m_minw  = 0;
-                m_maxw  = 0;
-                m_mnwa  = 0;
-                m_varwa = 0;
-            }
-        }
-        else
-        {
-            m_mna   = 0;
-            m_vara  = 0;
-            m_mina  = 0;
-            m_maxa  = 0;
-            m_mnw   = 0;
-            m_varw  = 0;
-            m_minw  = 0;
-            m_maxw  = 0;
-            m_mnwa  = 0;
-            m_varwa = 0;
-        }
+        recordFGTimings();
     }
-    catch( const std::exception &e )
-    {
-        std::cerr << e.what() << '\n';
-    }
+
+    recordFGStageTimings();
 
     return 0;
 }
@@ -780,32 +827,11 @@ template <class derivedT>
 int frameGrabber<derivedT>::configCircBuffs()
 {
     m_cbFPS = derived().fps();
+    m_fgTiming.newSession();
 
-    if( m_latencyCircBuffMaxLength == 0 || m_latencyCircBuffMaxTime == 0 || m_cbFPS <= 0 )
+    if( !mx::math::isFinite( m_cbFPS ) || m_cbFPS < 0 )
     {
-        m_atimes.maxEntries( 0 );
-        m_wtimes.maxEntries( 0 );
-
-        if( m_cbFPS < 0 )
-        {
-            return -1;
-        }
-    }
-    else
-    {
-        // Set up the latency circ. buffs
-        cbIndexT cbSz = 2 * m_latencyCircBuffMaxTime * m_cbFPS;
-        if( cbSz > m_latencyCircBuffMaxLength )
-        {
-            cbSz = m_latencyCircBuffMaxLength;
-        }
-        if( cbSz < 3 )
-        {
-            cbSz = 3; // Make variance meaningful
-        }
-
-        m_atimes.maxEntries( cbSz );
-        m_wtimes.maxEntries( cbSz );
+        return -1;
     }
 
     return 0;
@@ -939,8 +965,8 @@ void frameGrabber<derivedT>::fgThreadExec()
             cbuff = true; // because we created it!
         }
 
-        // This completes the reconfiguration.
-        m_reconfig = false;
+        // The controller acknowledges only requests consumed by this configuration.
+        reconfigureCompleteHook( derived(), 0 );
 
         if( derived().startAcquisition() < 0 )
         {
@@ -967,17 +993,22 @@ void frameGrabber<derivedT>::fgThreadExec()
             //==================
             // Get next image, process validity.
             //====================
+            m_fgTiming.begin();
             int isValid = derived().acquireAndCheckValid();
+            m_fgTiming.mark( MagAOX::fgTiming::Marker::validated );
+
             if( isValid != 0 )
             {
+                m_fgTiming.mark( MagAOX::fgTiming::Marker::loopTailDone );
+                m_fgTiming.finish( isValid < 0 ? MagAOX::fgTiming::Outcome::failed
+                                               : MagAOX::fgTiming::Outcome::rejected );
+
                 if( isValid < 0 )
                 {
                     break;
                 }
-                else
-                {
-                    continue;
-                }
+
+                continue;
             }
 
             // Ok, no timeout, so we process the image and publish it.
@@ -985,12 +1016,18 @@ void frameGrabber<derivedT>::fgThreadExec()
 
             if( derived().loadImageIntoStream( next_dest ) < 0 )
             {
+                m_fgTiming.mark( MagAOX::fgTiming::Marker::loopTailDone );
+                m_fgTiming.finish( MagAOX::fgTiming::Outcome::failed );
                 break;
             }
 
-            // Set the time of last write
-            // clock_gettime(CLOCK_REALTIME, &m_imageStream->md->writetime);
-            if( clock_gettime( CLOCK_REALTIME, &m_imageStream->md->writetime ) < 0 )
+            m_fgTiming.mark( MagAOX::fgTiming::Marker::loadDone );
+
+            // Preserve the existing realtime timestamp position, bracketed by local monotonic markers.
+            int writeClockResult = clock_gettime( CLOCK_REALTIME, &m_imageStream->md->writetime );
+            m_fgTiming.mark( MagAOX::fgTiming::Marker::writeStampDone );
+
+            if( writeClockResult < 0 )
             {
                 derivedT::template log<software_critical>( { errno, "clock_gettime" } );
             }
@@ -1011,20 +1048,24 @@ void frameGrabber<derivedT>::fgThreadExec()
                 *next_cntarr   = m_imageStream->md->cnt0;
             }
 
+            m_fgTiming.published( m_currImageTimestamp,
+                                  writeClockResult == 0 ? m_imageStream->md->writetime : timespec{},
+                                  m_imageStream->md->cnt0,
+                                  m_imageStream->md->inode );
+
             // And post
             m_imageStream->md->write = 0;
             ImageStreamIO_sempost( m_imageStream, -1 );
+            m_fgTiming.mark( MagAOX::fgTiming::Marker::mainPostDone );
 
-            if( postPublishHook( derived(), m_imageStream, 0 ) < 0 )
+            int postResult = postPublishHook( derived(), m_imageStream, 0 );
+            m_fgTiming.mark( MagAOX::fgTiming::Marker::syncPostDone );
+
+            if( postResult < 0 )
             {
+                m_fgTiming.mark( MagAOX::fgTiming::Marker::loopTailDone );
+                m_fgTiming.finish( MagAOX::fgTiming::Outcome::failed );
                 break;
-            }
-
-            // Update the latency circ. buffs
-            if( m_atimes.maxEntries() > 0 )
-            {
-                m_atimes.nextEntry( m_imageStream->md->atime );
-                m_wtimes.nextEntry( m_imageStream->md->writetime );
             }
 
             // Now we increment pointers outside the time-critical part of the loop.
@@ -1053,19 +1094,25 @@ void frameGrabber<derivedT>::fgThreadExec()
                 m_dummy_cnt       = next_cntarr[0];
             }
 
-            if( m_cbFPS != derived().fps() )
+            const double nextFPS = derived().fps();
+            m_fgTiming.mark( MagAOX::fgTiming::Marker::loopTailDone );
+            m_fgTiming.finish();
+
+            if( m_cbFPS != nextFPS )
             {
-                std::cerr << "configuring due to mismatch m_cbFPS\n";
-                if( configCircBuffs() < 0 )
-                {
-                    derivedT::template log<software_error>( { "error configuring latency circ. buffs" } );
-                }
+                m_cbFPS = nextFPS;
+                m_fgTiming.newSession();
             }
         }
 
-        if( m_reconfig && !derived().shutdown() )
+        while( m_reconfig && !derived().shutdown() && derived().powerState() > 0 )
         {
-            derived().reconfig();
+            if( derived().reconfig() >= 0 )
+            {
+                break;
+            }
+
+            sleep( 1 );
         }
 
     } // outer loop, will exit if m_shutdown==true
@@ -1084,6 +1131,22 @@ void frameGrabber<derivedT>::fgThreadExec()
         free( m_imageStream );
         m_imageStream = nullptr;
     }
+}
+
+template <class derivedT>
+template <class hookT>
+auto frameGrabber<derivedT>::reconfigureCompleteHook( hookT &owner, int tag )
+    -> decltype( owner.frameGrabberReconfigureComplete(), void() )
+{
+    static_cast<void>( tag );
+    owner.frameGrabberReconfigureComplete();
+}
+
+template <class derivedT>
+void frameGrabber<derivedT>::reconfigureCompleteHook( derivedT &owner, long tag )
+{
+    static_cast<void>( tag );
+    static_cast<frameGrabber &>( owner ).m_reconfig = false;
 }
 
 template <class derivedT>
@@ -1223,7 +1286,9 @@ template <class derivedT>
 int frameGrabber<derivedT>::updateINDI()
 {
     if( !derived().m_indiDriver )
+    {
         return 0;
+    }
 
     indi::updateIfChanged( m_indiP_shmimName, "name", m_shmimName, derived().m_indiDriver );
     indi::updateIfChanged( m_indiP_frameSize, "width", m_width, derived().m_indiDriver );
@@ -1233,9 +1298,14 @@ int frameGrabber<derivedT>::updateINDI()
     double fpsa = 0;
     double fpsw = 0;
     if( m_mna != 0 )
+    {
         fpsa = 1.0 / m_mna;
+    }
+
     if( m_mnw != 0 )
+    {
         fpsw = 1.0 / m_mnw;
+    }
 
     indi::updateIfChanged<double>(
         m_indiP_timing,
@@ -1251,6 +1321,117 @@ int frameGrabber<derivedT>::updateINDI()
           "delta_aw_jitter" },
         { fpsa, m_mina, m_maxa, sqrt( m_vara ), fpsw, m_minw, m_maxw, sqrt( m_varw ), m_mnwa, sqrt( m_varwa ) },
         derived().m_indiDriver );
+
+    const auto              &summary = m_fgTiming.summary();
+    std::vector<std::string> names;
+    std::vector<double>      values;
+
+    const auto append = [&]( const std::string &name, const MagAOX::fgTiming::Stats &stats )
+    {
+        names.insert(
+            names.end(),
+            { name + "_count", name + "_valid", name + "_mean", name + "_stddev", name + "_min", name + "_max" } );
+        values.insert( values.end(),
+                       { static_cast<double>( stats.count ),
+                         static_cast<double>( stats.valid ),
+                         stats.mean,
+                         stats.stddev,
+                         stats.min,
+                         stats.max } );
+    };
+
+    for( size_t i = 0; i < static_cast<size_t>( MagAOX::fgTiming::Metric::count ); ++i )
+    {
+        const std::string name = MagAOX::fgTiming::metricName( static_cast<MagAOX::fgTiming::Metric>( i ) );
+        append( name, summary.metrics[i] );
+        append( "lateChange_" + name, summary.lateChange[i] );
+        append( "earlyChange_" + name, summary.earlyChange[i] );
+    }
+
+    append( "serial", summary.serialDuration );
+    append( "lateWaitReturnInterval", summary.lateWaitReturnInterval );
+    append( "earlyWaitReturnInterval", summary.earlyWaitReturnInterval );
+    append( "lateWriteEndpointInterval", summary.lateWriteEndpointInterval );
+    append( "earlyWriteEndpointInterval", summary.earlyWriteEndpointInterval );
+    append( "latePreviousTail", summary.latePreviousTail );
+    append( "earlyPreviousTail", summary.earlyPreviousTail );
+    indi::updateIfChanged<double>( m_indiP_stageTiming, names, values, derived().m_indiDriver );
+
+    names                   = { "enabled",        "stagesEnabled", "valid",       "state",
+                                "session",        "sequence",      "windowSec",   "spanSec",
+                                "ageSec",         "capacity",      "queued",      "controlQueued",
+                                "qualified",      "ambiguous",     "medianSec",   "bracketLimitSec",
+                                "serialOverlaps", "streamInode",   "lastFrame",   "lastCounter",
+                                "mode",           "binX",          "binY",        "intervals",
+                                "late",           "early",         "thresholdSec" };
+    values                  = { static_cast<double>( summary.enabled ),
+                                static_cast<double>( summary.stagesEnabled ),
+                                static_cast<double>( summary.fgValid ),
+                                static_cast<double>( summary.state ),
+                                static_cast<double>( summary.session ),
+                                static_cast<double>( summary.sequence ),
+                                summary.windowSec,
+                                summary.span,
+                                summary.age,
+                                static_cast<double>( summary.capacity ),
+                                static_cast<double>( summary.queued ),
+                                static_cast<double>( summary.controlQueued ),
+                                static_cast<double>( summary.qualified ),
+                                static_cast<double>( summary.ambiguous ),
+                                summary.median,
+                                summary.bracketLimit,
+                                static_cast<double>( summary.serialOverlaps ),
+                                static_cast<double>( summary.streamInode ),
+                                static_cast<double>( summary.lastFrame ),
+                                static_cast<double>( summary.lastCounter ),
+                                static_cast<double>( summary.mode ),
+                                static_cast<double>( summary.binX ),
+                                static_cast<double>( summary.binY ),
+                                static_cast<double>( summary.intervals ),
+                                static_cast<double>( summary.late ),
+                                static_cast<double>( summary.early ),
+                                summary.threshold };
+    const auto fields       = MagAOX::fgTiming::counterFields();
+    const auto counterNames = MagAOX::fgTiming::counterNames();
+
+    for( size_t i = 0; i < fields.size(); ++i )
+    {
+        names.push_back( std::string( "total_" ) + counterNames[i] );
+        values.push_back( static_cast<double>( summary.total.*fields[i] ) );
+        names.push_back( std::string( "delta_" ) + counterNames[i] );
+        values.push_back( static_cast<double>( summary.delta.*fields[i] ) );
+    }
+
+    indi::updateIfChanged<double>( m_indiP_timingQuality, names, values, derived().m_indiDriver );
+
+    return 0;
+}
+
+template <class derivedT>
+void frameGrabber<derivedT>::frameGrabberTimingMark( MagAOX::fgTiming::Marker marker )
+{
+    m_fgTiming.mark( marker );
+}
+
+template <class derivedT>
+bool frameGrabber<derivedT>::frameGrabberTimingEnabled() const
+{
+    return m_fgTiming.stagesEnabled();
+}
+
+template <class derivedT>
+void frameGrabber<derivedT>::frameGrabberSerialTiming( int64_t enteredNs, int64_t completedNs, bool success )
+{
+    m_fgTiming.control( enteredNs, completedNs, success );
+}
+
+template <class derivedT>
+int frameGrabber<derivedT>::recordFGStageTimings( bool force )
+{
+    if( m_fgTiming.stagesEnabled() || force )
+    {
+        derived().template telem<telem_fgstage>( { m_fgTiming.summary() } );
+    }
 
     return 0;
 }
