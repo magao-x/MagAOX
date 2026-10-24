@@ -22,6 +22,7 @@ All settings belong to `[framegrabber]` and take effect after an app restart.
 | `stageTiming` | `false` | Enable additional local stage markers and completed serial-operation observations. |
 | `stageExcursionUs` | `20` | Distance from the retained monotonic publication-interval median used to classify excursions, microseconds; zero disables classification. |
 | `stageBracketUs` | `0` | Maximum accepted write-clock bracket for conditional attribution, microseconds. Zero leaves that bound undecided and all stage intervals ambiguous. |
+| `stageTraceMax` | `0` | Maximum ready plus pending individual excursion contexts, 0–256. Zero disables individual records; requires stage timing, an excursion threshold of at least 0.001 microseconds and at least four timing slots. |
 
 For the existing two-second, 20000-event configuration, the only added setting
 needed to collect raw stages is:
@@ -190,6 +191,75 @@ control path. They introduce no acquisition-worker mutex. Only completed
 observed transactions contribute; missing or dropped control events limit
 coverage. Temporal overlap identifies an association to investigate, not proof
 that a serial transaction blocked acquisition or caused an excursion.
+
+## Individual excursion records
+
+To retain chronological examples for the current two-second/20000-slot setup:
+
+```ini
+[framegrabber]
+stageTiming=true
+stageBracketUs=1
+stageTraceMax=16
+```
+
+These settings require an application restart. The one-microsecond bracket is
+a provisional diagnostic accuracy filter, not a scheduler reserve or an
+instrument overhead limit. Leave the camera mode, cadence, affinity and polling
+unchanged for the comparison.
+
+The collector uses the existing fixed producer events. Individual selection,
+history, median calculation, formatting and logging run on the ordinary
+application thread. Enabling individual records adds no acquisition-thread
+clock reads, locks, allocations or extra event handoff. It adds ordinary-thread
+work and telemetry traffic whose instrument effect still needs comparison.
+
+Each `[fgtrace]` record has five fixed chronological positions: two preceding
+attempts, the trigger, and two following attempts. A presence mask and completion
+reason distinguish complete neighborhoods from missing neighbors at a stream,
+session, queue-gap or stopped-acquisition boundary. Overlapping neighborhoods
+can repeat the same frame; deduplicate by session, stream identity and attempt
+sequence before counting events. A unique excursion ID identifies each trigger.
+
+Selection uses a rolling median of at least three strictly preceding continuous
+intervals, with its exact integer-nanosecond median and population stored in
+the record. This causal baseline differs from a `[fgstage]` summary median that
+includes its whole retained window. Warmup and continuity resets are counted.
+Raw early/late excursions are retained even with a wide or undecided clock
+bracket, with their attribution qualification reported separately. Selection
+examines newly consumed events before summary-window expiry, including events
+between the periodically emitted summary windows. Handoff drops, trace-capacity
+losses and incomplete contexts remain explicit limits on coverage.
+
+`telem_fgtrace` is event **20907**. Its binary/JSON payload and text retain exact
+integer `CLOCK_MONOTONIC` nanoseconds for all available stage markers, marker
+validity, attempt/output/raw-frame identities, mode, outcomes and the original
+SDK/realtime timestamp components. They also include the process PID,
+acquisition TID, consumer evaluation and batch-emission times, and completed-control
+overlap known at finalization. Completed-control coverage does not include
+in-flight transactions and cannot prove that zero overlap means no concurrent
+serial activity.
+
+Ready plus pending records are bounded by `stageTraceMax`. On saturation, the
+newest trigger is dropped and counted; acquisition continues. Following frames
+can arrive during the next ordinary update. Complete or partial records are
+emitted once when ready, without a periodic forced replay. Ordinary telemetry
+emission clears the ready queue. The `fg_timing_quality` property adds:
+
+- `traceEnabled`, `traceCapacity`, `traceReady`, `tracePending`.
+- Cumulative `traceDetected`, `traceRecorded`, `traceDropped`, `traceIncomplete`,
+  `traceUnclassified` and `traceDiscontinuities`.
+- Cumulative source losses `traceEventDropped`, `traceControlDropped`, and
+  `traceLogFailed` for an unavailable emission clock or errors reported by the
+  telemetry wrapper. These counters
+  are not a durable logger-write acknowledgement.
+
+Rebuild/install the camera app and `logdump`. For the operator-run monotonic
+scheduler/IRQ capture and the files to retain, follow
+[camera-timing-trace.md](../../../../apps/ocam2KCtrl/doc/camera-timing-trace.md).
+The capture runs in a separate tracefs instance and does not change camera
+configuration, worker affinity or scheduling policy. Only the operator runs
+it on the instrument.
 
 ## Qualification
 
