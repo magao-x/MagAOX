@@ -506,7 +506,8 @@ class AdcCtrlConfig(BaseConfig):
     pad : int = xconf.field(default=50, help="Zero padding added around each frame [pixels]")
     radial_bin : float = xconf.field(default=5 * 6.0 / 21.0, help="Radial profile bin size [lambda/D]")
     gain : float = xconf.field(default=0.1, help="Initial loop gain")
-    ctrl_mtx : list[float] = xconf.field(default_factory=lambda: [0.21178766, 0.19275196], help="Initial control matrix [m00, m01]")
+    ctrl_mtx : list[float] = xconf.field(default_factory=lambda: [-0.4156, -0.24515], help="Initial control matrix [m00, m01]; default calibrated on the instrument with DM spots (2026-10-25)")
+    loop_sign : str = xconf.field(default="negative", help="Initial feedback polarity, 'positive' or 'negative'; negative converges with the default ctrl_mtx")
     step_limit_deg : float = xconf.field(default=0.7, help="Steps with |step| at or above this [deg] are rejected")
     send_timeout_sec : float = xconf.field(default=30.0, help="Time to wait for the ADC stages to reach a commanded offset")
     send_tolerance_deg : float = xconf.field(default=0.05, help="Tolerance for a commanded offset to count as reached [deg]")
@@ -579,7 +580,9 @@ class adcCtrl(XDevice):
         self._no_measurements = 1
         # Loop gain and feedback polarity (+1/-1, from `loop_sign`)
         self._gain = float(self.config.gain)
-        self._loop_sign = 1.0
+        if self.config.loop_sign not in LOOP_SIGNS:
+            raise ValueError(f"loop_sign must be one of {list(LOOP_SIGNS)}, got {self.config.loop_sign!r}")
+        self._loop_sign = LOOP_SIGNS[self.config.loop_sign]
         # Common offset added to both ADCs [deg]
         self._offset = 0.0
         # 1x2 control matrix mapping pair offsets to the dispersion error
@@ -674,11 +677,11 @@ class adcCtrl(XDevice):
 
         nv = properties.NumberVector(name="ctrl_mtx")
         nv.add_element(DefNumber(
-            name="m00", label="m00", format="%.4f",
+            name="m00", label="m00", format="%.5f",
             min=-10.00, max=10.00, step=0.0001, _value=float(self._control_mtx[0])
         ))
         nv.add_element(DefNumber(
-            name="m01", label="m01", format="%.4f",
+            name="m01", label="m01", format="%.5f",
             min=-10.00, max=10.00, step=0.0001, _value=float(self._control_mtx[1])
         ))
         self.add_property(nv, callback=self.handle_ctrl_mtx)
@@ -688,8 +691,11 @@ class adcCtrl(XDevice):
             rule=constants.SwitchRule.ONE_OF_MANY,
             perm=constants.PropertyPerm.READ_WRITE,
         )
-        sv.add_element(DefSwitch(name="positive", _value=constants.SwitchState.ON))
-        sv.add_element(DefSwitch(name="negative", _value=constants.SwitchState.OFF))
+        for name in LOOP_SIGNS:
+            sv.add_element(DefSwitch(
+                name=name,
+                _value=constants.SwitchState.ON if name == self.config.loop_sign else constants.SwitchState.OFF,
+            ))
         self.add_property(sv, callback=self.handle_loop_sign)
 
         sv = properties.SwitchVector(

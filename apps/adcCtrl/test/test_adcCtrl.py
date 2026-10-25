@@ -578,6 +578,21 @@ def test_default_gain():
     assert dev.properties["gain"]["target"] == 0.1
 
 
+def test_default_ctrl_mtx_and_loop_sign():
+    """Defaults match the on-instrument DM-spot calibration: this matrix with negative feedback."""
+    dev = make_device()
+    np.testing.assert_allclose(dev._control_mtx, [-0.4156, -0.24515])
+    assert dev.properties["ctrl_mtx"]["m00"] == -0.4156
+    assert dev.properties["ctrl_mtx"]["m01"] == -0.24515
+    assert dev._loop_sign == -1.0
+    assert dev.properties["loop_sign"]["negative"] == ON
+    assert dev.properties["loop_sign"]["positive"] == OFF
+
+    dev = make_device(loop_sign="positive")
+    assert dev._loop_sign == 1.0
+    assert dev.properties["loop_sign"]["positive"] == ON
+
+
 def test_ctrl_mtx_handler():
     """ctrl_mtx updates set the matching element as a float."""
     dev = make_device()

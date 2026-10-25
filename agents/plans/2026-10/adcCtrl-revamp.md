@@ -305,6 +305,11 @@ All with explicit `hp.`/`ndimage` imports.
 - **DM spot separation** (47) is interpreted as λ/D at the observing wavelength and scaled by `normalized_wavelength`, as for sparkles (this was the old `utils.py` `find_speckle` behavior). *Confirmed by the user, 2026-10-07.*
 - **Expected spot axes** for the wrap fix: spots 0 and 2 at `90° − angle`, spots 1 and 3 at `−angle`. This matches the notebook's on-sky result of 54–74° for the DM spots at 28°. The synthetic tests show the old `abs()` failure directly: with sparkles at angle 0, spots 0 and 2 read +89.5° and −89.5°, so |θ0| − |θ2| = 0, while the new signed deviations correctly give −0.5° and +0.5°.
 - **Gain default** is 0.1 (config `gain`), per the user (2026-10-07). The old INDI `gain` property displayed 0.10 while the code actually used `_gain = 0.5`. Now the property and the gain in use agree at 0.1. This was briefly 0.5 in commit c188bbe9 and corrected in a follow-up commit.
+- **Default `ctrl_mtx` and `loop_sign` (user, 2026-10-25).** These come from the user's hand calibration on the instrument with **DM spots**: `ctrl_mtx = [-0.4156, -0.24515]`, which converges with `loop_sign = negative`.
+  - New config field `loop_sign` (default `"negative"`, validated at startup) sets both the initial polarity and the INDI switch state.
+  - The `ctrl_mtx` display format is widened to `%.5f`, so m01 shows in full.
+  - Test: `test_default_ctrl_mtx_and_loop_sign`.
+  - The matrix applies to DM spots. Sparkles have different slopes, so a separate matrix would be needed; see the draft calibration's per-configuration discussion.
 - **Startup zeroing** of `deltaADC1/2` is queued and applied by `loop()` once `adctrack` is visible. It now always writes 0, where before it only wrote if `deltaADC1.current != 0`. Writing 0 when it is already 0 is harmless.
 - **No δ1 resync from `adctrack`.** `current` only updates after the stages move, so resyncing from it would discard commands while tracking is off. The app keeps its own integrator, as before.
 - **Repeated failures:** after `max_consecutive_failures` failed closed-loop cycles the app goes idle, and `fsm` returns to READY. The reason is shown in `status.last_error` and the log.
@@ -335,13 +340,14 @@ All with explicit `hp.`/`ndimage` imports.
   - **Startup log noise:** restarting adcCtrl restarts isICC, whose INDI server takes about 15–20 s to come up. Until then, each camera-open attempt logged an ERROR (at startup and on every 10 s retry), and each missing external key logged a WARNING. A key missed during startup was also never warned about again. Fix: see "Startup grace period" in the Implementation Log.
   - **After the startup-grace change:** pytest gave 30 passed. The startup log is quiet.
   - **Mid-batch abort (R16):** changing `state` to idle during a measurement batch stops the batch immediately. This confirms that purepyindi2 delivers INDI callbacks on a different thread from `loop()`.
-  - **Still to do:** the closed-loop checks (`oneshot`, `adcLoop`, `loop_sign`) and recalibrating `ctrl_mtx` by hand.
+  - **Closed loop with DM spots (2026-10-25):** the hand calibration gave `ctrl_mtx = [-0.4156, -0.24515]`, which converges with `loop_sign = negative`. With a known offset applied, the loop converges to the correct point. These values are now the defaults.
+  - **Still to do:** run pytest on the machine with the new defaults (expect 31 passed), and calibrate and check closed loop with sparkles.
 
 ## Follow-up and Edge Cases
 <!-- The agent should list any planned follow up and any edge cases that are not addressed -->
 
 - **In-app calibration (deferred per Q7):** a `calibrate` request switch that steps δ1 over configured offsets, fits the pair-offset slopes, and proposes `ctrl_mtx` for the operator to accept. Revisit at hardware testing.
-- **`ctrl_mtx` recalibration:** the user will calibrate a new matrix by hand (measure-only mode) after deployment, because the wrap fix changes the pair-offset sign convention (N2).
+- **`ctrl_mtx` recalibration:** done for DM spots (2026-10-25; now the default, with `loop_sign = negative`). Sparkles still need their own hand calibration.
 - **Co-rotation / 2-DOF control** (using δ2) is not addressed.
 - **Saturated spot cores** bias the second moments. There is no saturation detection.
 - **Spots off-frame** (small ROI, or DM spots in z-band at 47 × 1.38 λ/D): handled as failed measurements via the padded `window_field`, with no ROI adaptation.
