@@ -395,53 +395,174 @@ dynamic definitions first can remove their formatter. The generic recovery
 steps in step 4 must therefore be completed before selectively removing any
 retained EDT definitions. Share the errors and retained names with the capture.
 
-## 7. Compare normal polling with a temporary housekeeping pause
+## 7. Configure confirmation-driven housekeeping
 
-The diagnostic housekeeping pause suppresses automatic serial `temp` and `gain`
-queries, and `fps` queries when synchronization is off. It leaves acquisition,
-FSM processing, timing telemetry and INDI servicing running. With synchronization
-on, FPS follows the external timing updates without a serial query.
+`ocam2KCtrl` confirms gain and FPS after startup or an applicable setting change,
+then retains their confirmed values without periodic serial queries. Temperature
+polling continues, with a faster interval while a setting or thermal transition
+is in progress. Acquisition, timing telemetry and INDI servicing continue on
+ordinary app-loop passes even when no serial query is due. This policy reduces
+serial traffic; it does not schedule serial replies between camera frames.
 
-Rebuild/install `ocam2KCtrl` for this mode and restart `camwfs` using the normal
-operator procedure. It requires no new configuration setting or `logdump`
-rebuild. A restart begins with normal housekeeping enabled. Let the camera reach
-its temperature setpoint before collecting the comparison, and retain the same
-camera/loop settings, CPU/IRQ placement and workload throughout.
+Rebuild/install `ocam2KCtrl` and restart `camwfs` using the normal operator
+procedure. No `logdump` rebuild or new telemetry schema is needed for this policy.
+The defaults need no configuration entries. To override them, use:
 
-The runtime interface is:
+```ini
+[housekeeping]
+tempIntervalSec=10
+tempChangingIntervalSec=1
+confirmationIntervalSec=1
+confirmationTimeoutSec=10
+tempSettleSamples=2
+```
+
+| Setting | Meaning |
+| --- | --- |
+| `tempIntervalSec` | Idle temperature interval in seconds: default 10 s, or 0.1 Hz. |
+| `tempChangingIntervalSec` | Temperature interval during a change or physical convergence: default 1 s. |
+| `confirmationIntervalSec` | Interval between pending setting readbacks: default 1 s. |
+| `confirmationTimeoutSec` | Fixed deadline for confirming a setting or establishing an initial observation: default 10 s. This is not a physical cooling deadline. |
+| `tempSettleSamples` | Consecutive fresh, valid settled readings required before returning to the idle interval: default two. |
+
+Intervals must be finite, positive and representable as monotonic nanoseconds.
+The changing interval cannot exceed the idle interval, the confirmation timeout
+must be at least the confirmation interval, and the settling count must be
+positive. The ordinary app loop and serial response waits determine when due
+work is serviced: a one-second setting
+does not promise an exact one-Hz readback rate. At most one automatically
+scheduled serial query runs per app-loop pass. The oldest due operation wins;
+confirmation takes precedence on an initial tie. Queries reschedule from actual
+service, with no catch-up bursts. Explicit setters and startup/configuration
+sequences can still issue their required ordered commands.
+
+```text
+new valid request -> send setting once -> bounded readback confirmation
+                                               |
+                          +--------------------+--------------------+
+                          |                                         |
+                     confirmed                                deadline expires
+                          |                                         |
+            gain/FPS: retain cached value                 unconfirmed/error;
+            temp: monitor physical settling               stop request retries
+                          |
+                 settled fresh samples
+                          |
+              idle temperature interval
+```
+
+Transport success alone does not confirm a setting. A setter reply confirms
+only when it contains a valid matching report in the supported numeric
+query-reply format; otherwise the application uses bounded getter readbacks.
+Setter-specific acknowledgement syntax is not yet hardware qualified. A mismatch
+or invalid reply cannot extend a request's monotonic deadline, and readback
+retries never resend its setting command.
+After expiry, a new explicit request or lifecycle recovery can start a new
+confirmation. Current values and requested targets remain distinct; a reported
+temperature setpoint cannot overwrite a newer pending target.
+
+For EM gain, confirmation compares the validated integer actually sent to the
+camera; existing bounds and protection-reset interlocks still apply. For
+internal FPS, `fps=0` remains the automatic/maximum-rate request and confirms
+against a positive actual rate. Mode and synchronization setup confirm their
+final effective setting, rather than an intermediate `fps 0` command. With
+synchronization on, FPS follows the existing external frequency subscription
+without serial FPS queries. Numeric FPS comparison allows only floating-point
+representation tolerance; it does not assume a firmware rounding rule. A rounded
+report outside that tolerance remains unconfirmed and needs hardware/protocol
+qualification. External reports confirm the timing-source setting; the camera
+acquisition telemetry remains the measurement of delivered rate.
+
+Confirmed gain/FPS values are intentionally cached. Their readback ages can grow
+indefinitely without making the confirmation stale. There is **no background
+EM-protection-trip polling**: `protectionPolling=confirmation only` describes
+this policy. An `HV` response that is actually received still follows the
+existing protection handling, and the protection-reset controls are unchanged.
+
+Temperature uses the existing `abs(CCD - SET) < 1 C` settling criterion. A new
+setpoint/cooling command or an enabled off-target idle reading enters faster
+monitoring. Confirmation of the reported setting is separate from the CCD
+reaching its target; confirmed cooling can legitimately remain in the changing
+phase for minutes. Invalid/off-target readings reset the consecutive settling
+count. Confirmed disabled cooling returns to the idle interval even when the CCD
+differs from an inactive stored setpoint. A malformed or unknown report after a
+previously confirmed observation begins bounded fast observation checks. A
+failed or expired setting request retains slow temperature monitoring; a later
+valid observation does not silently acknowledge that expired request.
+
+The existing reply exposes cooling power rather than an explicit control-state
+field. The application treats reported cooling power >= 5 as On, and power < 5
+with `CCD - SET > 2.99 C` as Off. Other combinations are Unknown; low power near
+the setpoint alone does not prove that cooling is enabled or disabled. Unknown
+state receives bounded confirmation attempts, then returns to idle polling with
+`tempConfirmation=unconfirmed/error` if the deadline expires. These inference
+thresholds and the actual firmware responses still require operator
+qualification.
+
+Cooling Off always obtains a fresh valid temperature before applying the
+existing CCD > 19 C interlock, even if the diagnostic pause was never used.
+The query, decision and command remain serialized under the camera mutex.
+An invalid refresh cannot authorize cooling Off. Power loss, recovery and
+mode/synchronization changes invalidate affected observations; gain is never
+reapplied automatically after a reset or trip.
+
+The runtime diagnostics are:
 
 | Property | Elements and meaning |
 | --- | --- |
-| `camwfs.housekeeping_pause` | Writable `toggle`: On requests a pause; Off resumes normal polling. Repeating On does not extend an existing request. |
-| `camwfs.housekeeping` | Read-only `remainingSec` and fixed `timeoutSec=120`; `pauseStartMonoSec` and `pauseEndMonoSec` retain the latest actual pause boundaries in monotonic seconds. `tempAgeSec`, `gainAgeSec`, `fpsAgeSec` give readback ages (`-1` before a valid reply, after power-off, or after an invalid reply/failed serial attempt). `skippedTemp`, `skippedGain`, `skippedFps` count suppressed polls; `serialTransactions` counts attempted serial transactions. All counters accumulate for the app process lifetime. |
-| `camwfs.housekeeping_status` | Read-only `state` and `protectionPolling` are `paused`, `polling`, or `inactive`; the latter applies outside stable powered READY/OPERATING states. `reason` identifies activation or why polling resumed. `temperature`, `gain`, `fps` report `stale`, `current` or `unavailable`; FPS reports `external sync` when synchronization is on. |
+| `camwfs.housekeeping_pause` | Writable `toggle`: On requests the bounded diagnostic pause; Off resumes scheduled housekeeping. Repeating On does not extend an existing pause. |
+| `camwfs.housekeeping` | Read-only numeric diagnostics described below. Counts accumulate for the app process lifetime. |
+| `camwfs.housekeeping_status` | `state` is `idle`, `changing`, `paused` or `inactive`. `temperature` is `current`, `stale` or `unavailable`; `gain`, `fps` and `tempConfirmation` are `unavailable`, `confirming`, `confirmed` or `unconfirmed/error`. `reason` records the last pause transition/refusal. `protectionPolling` is `confirmation only`, `paused` or `inactive`. |
 
-The quiet interval starts only after the current serial transaction and its
-trailing-byte drain finish. Check `housekeeping_status` for actual activation;
-the switch request alone is not the quiet boundary. The callback activates the
-pause synchronously once that transaction has finished. The active pause expires
-after 120 seconds and resumes polling without replaying skipped queries.
-Temperature/gain values remain cached and are explicitly marked stale during
-the pause. Resuming does not make cached values current: they remain stale
-until successful post-pause queries refresh them. Gain queries can recognize
-the camera's `HV` response, so that
-software protection-trip polling is paused too. An explicit serial command,
-reconfiguration, or power/error transition ends the pause before further serial
-I/O; include such an interruption in the capture notes.
+`housekeeping` contains:
 
-First inspect the normal-polling status with no kernel helper running:
+| Elements | Meaning |
+| --- | --- |
+| `tempAgeSec`, `gainAgeSec`, `fpsAgeSec` | Seconds since the last valid corresponding report; −1 means none since startup/invalidation or the latest failed/invalid attempt. External frequency reports refresh FPS age while synchronized. |
+| `tempIntervalSec`, `tempNextSec` | Current nominal temperature interval and seconds until its next scheduled read. Zero next-due means due now, rather than a hard sampling promise. |
+| `gainDeadlineSec`, `fpsDeadlineSec`, `tempDeadlineSec` | Remaining confirmation time; zero when no confirmation is pending. |
+| `tempQueries`, `gainQueries`, `fpsQueries` | Getter attempts; FPS counts only serial queries. The fresh cooling-Off interlock also increments `tempQueries`. |
+| `serialTransactions` | All attempted serial transactions, including explicit setting commands. |
+| `remainingSec`, `timeoutSec` | Pause time remaining and its fixed 120-second limit. |
+| `pauseStartMonoSec`, `pauseEndMonoSec` | Latest actual pause boundaries in monotonic seconds. |
+| `skippedTemp`, `skippedGain`, `skippedFps` | Pause suppression counters retained for compatibility; confirmed gain/FPS have no periodic work to suppress. |
+
+Use the housekeeping confirmation/result fields to distinguish pending or failed
+settings from cached values in the standard camera properties. Temperature stays
+the latest valid sample between scheduled reads. An overdue reading becomes
+stale after its expected interval plus a grace of one ordinary loop opportunity
+and the existing serial timeout. Emitting camera telemetry from cached values
+does not refresh any readback age.
+
+## 8. Compare scheduled housekeeping with a temporary pause
+
+The diagnostic pause suppresses automatically scheduled serial queries for up
+to 120 seconds. It leaves acquisition, FSM processing, timing telemetry and INDI
+servicing running. External synchronization reports continue without serial
+queries. A new pause is refused while a setting is unavailable/confirming or a
+thermal change is pending. Terminal unconfirmed/error states do not themselves
+prevent an idle diagnostic pause; retain them in the capture record. Keep
+camera/loop settings, CPU/IRQ placement and workload unchanged throughout.
+
+First inspect normal operation with no kernel helper running:
 
 ```bash
 getINDI camwfs.housekeeping
 getINDI camwfs.housekeeping_status
 ```
 
-Require `state=polling`, current temperature/gain readbacks and refreshing ages;
-FPS should be current or report `external sync`. Then collect the baseline:
+Require confirmed gain/FPS and idle, valid temperature monitoring. At steady
+state, gain/FPS query counts should stop increasing; temperature query counts
+should increase at the configured idle cadence, subject to app-loop service.
+Collect the first baseline:
 
 ```bash
 timeout 60s logdump --dir=/opt/MagAOX/telem --ext=.bintel -f camwfs > "$HOME/camwfs-housekeeping-normal-before.txt"
 ```
+
+On the instrument, `teldump` is an alias for
+`logdump --dir=/opt/MagAOX/telem --ext=.bintel`. The timed commands spell out
+`logdump` because a shell alias is not expanded as an argument to `timeout`.
 
 Request the pause and inspect its state:
 
@@ -452,9 +573,11 @@ getINDI camwfs.housekeeping
 getINDI camwfs.housekeeping_status
 ```
 
-Once `housekeeping_status.state=paused`, allow about five seconds for effects near
-the activation edge to pass. Confirm that at least 65 seconds remain, then take
-the 60-second telemetry set:
+The quiet interval starts only after any current serial transaction and its
+trailing-byte drain finish. Check `housekeeping_status.state=paused`; the switch
+request alone is not the quiet boundary. Allow about five seconds for effects
+near activation to pass. Confirm that at least 65 seconds remain, then take the
+60-second telemetry set:
 
 ```bash
 getINDI camwfs.housekeeping
@@ -464,14 +587,15 @@ getINDI camwfs.housekeeping
 getINDI camwfs.housekeeping_status
 ```
 
-Retain these property outputs with the telemetry. During the interior quiet
-interval, `serialTransactions` must remain unchanged while skipped-poll counts
-increase. A serial transaction or pause interruption makes that interval a
-different comparison; keep its state/reason and timing rather than treating it
-as uninterrupted quiet operation. If the remaining time is insufficient, resume
-with Off and make a fresh On request before starting another capture.
+Retain these property outputs with the telemetry. `serialTransactions` must stay
+unchanged within the interior quiet interval. No due operations are queued for
+later replay. A serial transaction or pause interruption makes that interval a
+different comparison; keep its state/reason and timing. An explicit setting
+command, reconfiguration, or power/error transition ends the pause before
+further serial I/O. If too little time remains, resume with Off and make a fresh
+On request before starting another capture.
 
-Resume explicitly after the paused capture and inspect the status:
+Resume explicitly after the paused capture:
 
 ```bash
 setINDI -s camwfs.housekeeping_pause.toggle=Off
@@ -479,9 +603,8 @@ getINDI camwfs.housekeeping_status
 getINDI camwfs.housekeeping
 ```
 
-Wait for `state=polling`, successful post-pause temperature/gain queries to mark
-their readbacks current, and serial transactions/ages to resume updating. FPS
-should be current or report `external sync`. Once refreshed, collect the final
+Resume/expiry schedules one temperature refresh; confirmed gain/FPS remain
+quiet. Wait for a valid post-pause temperature read, then collect the final
 baseline:
 
 ```bash
@@ -490,17 +613,25 @@ getINDI camwfs.housekeeping
 getINDI camwfs.housekeeping_status
 ```
 
-Verify serial transactions resume and readback ages refresh. Keep all three
-telemetry files, the property outputs and any lifecycle messages. The mode also
-resumes automatically on its deadline if an explicit Off is omitted.
+Verify temperature polling resumes and gain/FPS query counts remain unchanged.
+Keep all three telemetry files, property outputs and lifecycle messages. The
+pause also ends automatically at its deadline if Off is omitted.
 
-Start with this helper-free comparison. If kernel attribution is needed, repeat
-the comparison with the one-second native or wrapper capture from section 6
-wholly inside the confirmed active pause, preserving setup/settling time and a
-matching normal-polling capture. The probes add timing cost, so keep that
-comparison distinct from the helper-free telemetry. A quiet interval does not
-establish a safe production polling schedule: serial replies and their EDT
-interrupts need not occur in the frame in which a command was issued.
+Operator qualification should additionally exercise gain and FPS changes,
+automatic FPS, synchronization changes, temperature/cooling transitions and
+power/recovery. Verify confirmations finish, retries stop after a deadline,
+temperature speeds up during transitions and slows once settled, and pending
+work refuses a pause. Validate the firmware's actual reported FPS precision and
+cooling-state evidence. Compare timing tails and RMS separately: occasional
+serial-associated tails can remain with ten-second temperature polling, and the
+separate conversion variation is not resolved by this policy.
+
+Start with these helper-free comparisons. If kernel attribution is needed,
+repeat with the one-second native or wrapper capture from section 6 wholly
+inside a confirmed pause, preserving setup/settling time and a matching normal
+capture. The probes add timing cost, so keep that comparison separate. Serial
+replies and their EDT interrupts need not occur in the frame in which a command
+was issued; reduced traffic alone does not guarantee deconfliction.
 
 ## Implementation checks and references
 
