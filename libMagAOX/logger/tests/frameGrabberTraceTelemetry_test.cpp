@@ -54,13 +54,39 @@ fgTiming::TraceRecord sampleRecord()
         event.valid         = 511;
         event.outcome       = fgTiming::Outcome::published;
 
-        for( size_t marker = 0; marker < event.markers.size(); ++marker )
+        for( size_t marker = 0; marker <= size_t( fgTiming::Marker::loopTailDone ); ++marker )
         {
             event.markers[marker] = base + index * 500000 + marker * 1000 + ( index >= 2 ? 40000 : 0 );
         }
 
-        event.anchorNs                = event.markers.back();
+        event.anchorNs                = event.markers[size_t( fgTiming::Marker::loopTailDone )];
         record.serialOverlapNs[index] = index * 100;
+    }
+
+    return record;
+}
+
+/// Add explicit endpoint pairs in immediate or deferred rearm order without renumbering existing marker IDs.
+fgTiming::TraceRecord extendedRecord( bool deferred /**< [in] rearm inside the post-publication hook */ )
+{
+    auto record = sampleRecord();
+
+    for( auto &event : record.events )
+    {
+        event.valid   = ( 1u << size_t( fgTiming::Marker::count ) ) - 1;
+        auto &markers = event.markers;
+        markers[size_t( fgTiming::Marker::rearmEnter )] =
+            markers[size_t( deferred ? fgTiming::Marker::mainPostDone : fgTiming::Marker::waitReturn )] + 100;
+        markers[size_t( fgTiming::Marker::timeoutEnter )] =
+            markers[size_t( deferred ? fgTiming::Marker::waitReturn : fgTiming::Marker::rearmReturn )] + 100;
+        markers[size_t( fgTiming::Marker::timeoutReturn )] = markers[size_t( fgTiming::Marker::timeoutEnter )] + 100;
+
+        if( deferred )
+        {
+            markers[size_t( fgTiming::Marker::rearmReturn )] = markers[size_t( fgTiming::Marker::rearmEnter )] + 500;
+        }
+
+        event.anchorNs = markers[size_t( fgTiming::Marker::loopTailDone )];
     }
 
     return record;
@@ -400,12 +426,12 @@ TEST_CASE( "Camera excursion telemetry validates classification and shape", "[fr
 /** \ingroup frameGrabberTraceTelemetry_unit_test
  * \see MagAOX::logger::telem_fgtrace::verify
  */
-TEST_CASE( "Camera excursion telemetry requires five identified neighbors and nine markers",
+TEST_CASE( "Camera excursion telemetry requires five identified neighbors and known marker shapes",
            "[frameGrabberTraceTelemetry]" )
 {
     const auto source = sampleRecord();
 
-    for( unsigned variant = 0; variant < 4; ++variant )
+    for( unsigned variant = 0; variant < 6; ++variant )
     {
         telem_fgtrace::messageT message( source, sampleStatus(), 123, 456, source.evaluatedNs );
         auto                   *record = GetTelem_fgtrace_fb( message.builder.GetBufferPointer() );
@@ -420,10 +446,11 @@ TEST_CASE( "Camera excursion telemetry requires five identified neighbors and ni
             flatbuffers::WriteScalar<flatbuffers::uoffset_t>(
                 const_cast<void *>( static_cast<const void *>( record->serial_overlap_ns() ) ), 4 );
         }
-        else if( variant == 2 )
+        else if( variant == 2 || variant == 4 || variant == 5 )
         {
+            const auto count = variant == 2 ? 8 : variant == 4 ? 10 : 11;
             flatbuffers::WriteScalar<flatbuffers::uoffset_t>(
-                const_cast<void *>( static_cast<const void *>( record->events()->Get( 2 )->markers_ns() ) ), 8 );
+                const_cast<void *>( static_cast<const void *>( record->events()->Get( 2 )->markers_ns() ) ), count );
         }
         else
         {
@@ -436,6 +463,219 @@ TEST_CASE( "Camera excursion telemetry requires five identified neighbors and ni
         auto buffer = envelope( message );
         REQUIRE_FALSE( verifyLogEntry( telem_fgtrace::eventCode, buffer.get() ) );
     }
+}
+
+/// Preserve legacy nine-marker payloads through binary verification, text, metadata and JSON readers.
+/** \ingroup frameGrabberTraceTelemetry_unit_test
+ * \see MagAOX::logger::telem_fgtrace::verify
+ * \see MagAOX::logger::telem_fgtrace::msgString
+ * \see MagAOX::logger::telem_fgtrace::getAccessor
+ */
+TEST_CASE( "Camera excursion telemetry reads legacy marker vectors", "[frameGrabberTraceTelemetry]" )
+{
+    const auto              source = sampleRecord();
+    telem_fgtrace::messageT message( source, sampleStatus(), 123, 456, source.evaluatedNs );
+    auto                   *record = GetTelem_fgtrace_fb( message.builder.GetBufferPointer() );
+
+    for( const auto *event : *record->events() )
+    {
+        flatbuffers::WriteScalar<flatbuffers::uoffset_t>(
+            const_cast<void *>( static_cast<const void *>( event->markers_ns() ) ), 9 );
+    }
+
+    auto buffer = envelope( message );
+    REQUIRE( verifyLogEntry( telem_fgtrace::eventCode, buffer.get() ) );
+    auto *payload = message.builder.GetBufferPointer();
+    REQUIRE( project<int64_t>( "frame2_loopTailDoneNs", payload ) == source.events[2].markers[8] );
+
+    for( const std::string marker : { "rearmEnterNs", "timeoutEnterNs", "timeoutReturnNs" } )
+    {
+        REQUIRE( project<int64_t>( "frame2_" + marker, payload ) == -1 );
+    }
+
+    const auto text = telem_fgtrace::msgString( payload, message.builder.GetSize() );
+    REQUIRE( text.find( "rearmEnterNs:unavailable" ) != std::string::npos );
+    REQUIRE( text.find( "timeoutReturnNs:unavailable" ) != std::string::npos );
+    const auto          json = telem_fgtrace::msgJSON( payload,
+                                              message.builder.GetSize(),
+                                              reinterpret_cast<const uint8_t *>( telem_fgtrace_bfbs ),
+                                              telem_fgtrace_bfbs_len );
+    flatbuffers::Parser parser;
+    REQUIRE( parser.Deserialize( reinterpret_cast<const uint8_t *>( telem_fgtrace_bfbs ), telem_fgtrace_bfbs_len ) );
+    REQUIRE( parser.Parse( json.c_str() ) );
+    REQUIRE( GetTelem_fgtrace_fb( parser.builder_.GetBufferPointer() )->events()->Get( 2 )->markers_ns()->size() == 9 );
+
+    auto *event = reinterpret_cast<flatbuffers::Table *>( const_cast<FgTraceEvent *>( record->events()->Get( 2 ) ) );
+    flatbuffers::WriteScalar<uint32_t>( event->GetAddressOf( FgTraceEvent::VT_VALID ), 511 | ( 1u << 9 ) );
+    auto invalidBuffer = envelope( message );
+    REQUIRE_FALSE( verifyLogEntry( telem_fgtrace::eventCode, invalidBuffer.get() ) );
+    REQUIRE( project<int64_t>( "frame2_rearmEnterNs", payload ) == -1 );
+}
+
+/// Accept semantic immediate/deferred ordering and reject reversed rearm or timeout endpoint pairs.
+/** \ingroup frameGrabberTraceTelemetry_unit_test
+ * \see MagAOX::logger::telem_fgtrace::messageT
+ * \see MagAOX::logger::telem_fgtrace::verify
+ */
+TEST_CASE( "Camera excursion telemetry preserves explicit rearm and timeout stages", "[frameGrabberTraceTelemetry]" )
+{
+    for( const bool deferred : { false, true } )
+    {
+        auto                    source = extendedRecord( deferred );
+        telem_fgtrace::messageT message( source, sampleStatus(), 123, 456, source.evaluatedNs );
+        auto                    buffer = envelope( message );
+        REQUIRE( verifyLogEntry( telem_fgtrace::eventCode, buffer.get() ) );
+        auto *payload = message.builder.GetBufferPointer();
+        REQUIRE( GetTelem_fgtrace_fb( payload )->events()->Get( 2 )->markers_ns()->size() == 12 );
+
+        for( const auto marker :
+             { fgTiming::Marker::rearmEnter, fgTiming::Marker::timeoutEnter, fgTiming::Marker::timeoutReturn } )
+        {
+            const std::string name = marker == fgTiming::Marker::rearmEnter     ? "rearmEnterNs"
+                                     : marker == fgTiming::Marker::timeoutEnter ? "timeoutEnterNs"
+                                                                                : "timeoutReturnNs";
+            REQUIRE( project<int64_t>( "frame2_" + name, payload ) == source.events[2].markers[size_t( marker )] );
+            REQUIRE( telem_fgtrace::msgString( payload, message.builder.GetSize() ).find( name + ":unavailable" ) ==
+                     std::string::npos );
+        }
+
+        const auto          json = telem_fgtrace::msgJSON( payload,
+                                                  message.builder.GetSize(),
+                                                  reinterpret_cast<const uint8_t *>( telem_fgtrace_bfbs ),
+                                                  telem_fgtrace_bfbs_len );
+        flatbuffers::Parser parser;
+        REQUIRE(
+            parser.Deserialize( reinterpret_cast<const uint8_t *>( telem_fgtrace_bfbs ), telem_fgtrace_bfbs_len ) );
+        REQUIRE( parser.Parse( json.c_str() ) );
+        const auto *decoded = GetTelem_fgtrace_fb( parser.builder_.GetBufferPointer() )->events()->Get( 2 );
+        REQUIRE( decoded->markers_ns()->Get( 9 ) == source.events[2].markers[9] );
+        REQUIRE( decoded->markers_ns()->Get( 10 ) == source.events[2].markers[10] );
+        REQUIRE( decoded->markers_ns()->Get( 11 ) == source.events[2].markers[11] );
+
+        if( deferred )
+        {
+            auto missingEntry = source;
+            missingEntry.events[2].valid &= ~( 1u << 9 );
+            telem_fgtrace::messageT missingMessage( missingEntry, sampleStatus(), 123, 456, missingEntry.evaluatedNs );
+            auto                    missingBuffer = envelope( missingMessage );
+            REQUIRE_FALSE( verifyLogEntry( telem_fgtrace::eventCode, missingBuffer.get() ) );
+        }
+
+        for( unsigned variant = 0; variant < 7; ++variant )
+        {
+            INFO( "explicit marker order: deferred=" << deferred << " variant=" << variant );
+            auto  invalid = source;
+            auto &event   = invalid.events[2];
+            auto &markers = event.markers;
+
+            switch( variant )
+            {
+            case 0:
+                markers[9] = markers[2] + 1;
+                break;
+            case 1:
+                markers[10] = markers[11] + 1;
+                break;
+            case 2:
+                markers[10] = markers[1] - 1;
+                break;
+            case 3:
+                markers[3] = markers[11] - 1;
+                break;
+            case 4:
+                markers[9] = markers[4] + 1;
+                markers[2] = markers[9] + 1;
+                break;
+            case 5:
+                event.valid |= 1u << 12;
+                break;
+            case 6:
+                markers[11] = invalid.evaluatedNs + 1;
+                break;
+            }
+
+            telem_fgtrace::messageT invalidMessage( invalid, sampleStatus(), 123, 456, invalid.evaluatedNs );
+            auto                    invalidBuffer = envelope( invalidMessage );
+            REQUIRE_FALSE( verifyLogEntry( telem_fgtrace::eventCode, invalidBuffer.get() ) );
+        }
+    }
+}
+
+/// Preserve reported clock-capture failures without treating original nine-marker records as deferred layouts.
+/** \ingroup frameGrabberTraceTelemetry_unit_test
+ * \see MagAOX::logger::telem_fgtrace::verify
+ * \see MagAOX::logger::telem_fgtrace::msgString
+ * \see MagAOX::logger::telem_fgtrace::getAccessor
+ */
+TEST_CASE( "Camera excursion telemetry preserves incomplete deferred stage clocks", "[frameGrabberTraceTelemetry]" )
+{
+    for( const bool allAppended : { false, true } )
+    {
+        auto source      = extendedRecord( true );
+        source.qualified = false;
+        auto &event      = source.events[2];
+        event.valid &= ~( 1u << 9 );
+        event.invalidMarkers = 1;
+
+        if( allAppended )
+        {
+            event.valid &= ~( ( 1u << 10 ) | ( 1u << 11 ) );
+            event.invalidMarkers = 3;
+        }
+
+        telem_fgtrace::messageT message( source, sampleStatus(), 123, 456, source.evaluatedNs );
+        auto                    buffer = envelope( message );
+        REQUIRE( verifyLogEntry( telem_fgtrace::eventCode, buffer.get() ) );
+        auto *payload = message.builder.GetBufferPointer();
+        REQUIRE_FALSE( project<bool>( "qualified", payload ) );
+        REQUIRE( project<int64_t>( "frame2_rearmEnterNs", payload ) == -1 );
+        REQUIRE( project<int64_t>( "frame2_rearmReturnNs", payload ) == event.markers[2] );
+        REQUIRE( project<uint32_t>( "frame2_invalidMarkers", payload ) == event.invalidMarkers );
+        const auto text = telem_fgtrace::msgString( payload, message.builder.GetSize() );
+        REQUIRE( text.find( "rearmEnterNs:unavailable" ) != std::string::npos );
+
+        if( allAppended )
+        {
+            REQUIRE( project<int64_t>( "frame2_timeoutEnterNs", payload ) == -1 );
+            REQUIRE( project<int64_t>( "frame2_timeoutReturnNs", payload ) == -1 );
+            REQUIRE( text.find( "timeoutReturnNs:unavailable" ) != std::string::npos );
+        }
+
+        const auto          json = telem_fgtrace::msgJSON( payload,
+                                                  message.builder.GetSize(),
+                                                  reinterpret_cast<const uint8_t *>( telem_fgtrace_bfbs ),
+                                                  telem_fgtrace_bfbs_len );
+        flatbuffers::Parser parser;
+        REQUIRE(
+            parser.Deserialize( reinterpret_cast<const uint8_t *>( telem_fgtrace_bfbs ), telem_fgtrace_bfbs_len ) );
+        REQUIRE( parser.Parse( json.c_str() ) );
+        const auto *decoded = GetTelem_fgtrace_fb( parser.builder_.GetBufferPointer() )->events()->Get( 2 );
+        REQUIRE( decoded->invalid_markers() == event.invalidMarkers );
+        REQUIRE( decoded->valid() == event.valid );
+        REQUIRE( decoded->markers_ns()->size() == 12 );
+
+        event.invalidMarkers = 0;
+        telem_fgtrace::messageT unreported( source, sampleStatus(), 123, 456, source.evaluatedNs );
+        auto                    unreportedBuffer = envelope( unreported );
+        REQUIRE_FALSE( verifyLogEntry( telem_fgtrace::eventCode, unreportedBuffer.get() ) );
+    }
+
+    auto legacy                     = sampleRecord();
+    legacy.qualified                = false;
+    legacy.events[2]                = extendedRecord( true ).events[2];
+    legacy.events[2].valid          = 511;
+    legacy.events[2].invalidMarkers = 3;
+    telem_fgtrace::messageT legacyMessage( legacy, sampleStatus(), 123, 456, legacy.evaluatedNs );
+    auto                   *legacyRecord = GetTelem_fgtrace_fb( legacyMessage.builder.GetBufferPointer() );
+
+    for( const auto *event : *legacyRecord->events() )
+    {
+        flatbuffers::WriteScalar<flatbuffers::uoffset_t>(
+            const_cast<void *>( static_cast<const void *>( event->markers_ns() ) ), 9 );
+    }
+
+    auto legacyBuffer = envelope( legacyMessage );
+    REQUIRE_FALSE( verifyLogEntry( telem_fgtrace::eventCode, legacyBuffer.get() ) );
 }
 
 } // namespace frameGrabberTraceTelemetryTest

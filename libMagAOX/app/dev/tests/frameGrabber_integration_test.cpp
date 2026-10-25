@@ -91,6 +91,12 @@ struct Camera : MagAOX::app::MagAOXApp<false>, MagAOX::app::dev::frameGrabber<Ca
 
     int64_t conversionDelayNs{ 0 }; ///< Extra elapsed time during the eighth conversion, after baseline warmup.
 
+    bool deferredRearm{ false }; ///< Simulate an EDT queue replenished at the end of the existing publication hook.
+
+    int64_t rearmDelayNs{ 0 }; ///< Additional first-frame deferred rearm time, after both notifications.
+
+    int64_t timeoutDelayNs{ 0 }; ///< Additional first-frame timeout-query time, before frame validation.
+
     size_t traceCalls{ 0 }; ///< Individual records handed to the ordinary-thread telemetry stub.
 
     bool failTraceLog{ false }; ///< Inject an ordinary telemetry wrapper failure.
@@ -226,8 +232,19 @@ int Camera::acquireAndCheckValid()
     frameGrabberTimingMark( Marker::waitEnter );
     frameGrabberIntegration::monoNs += 100000;
     frameGrabberTimingMark( Marker::waitReturn );
-    frameGrabberIntegration::monoNs += 1000;
-    frameGrabberTimingMark( Marker::rearmReturn );
+
+    if( deferredRearm )
+    {
+        frameGrabberTimingMark( Marker::timeoutEnter );
+        frameGrabberIntegration::monoNs += 1000 + ( attempts == 1 ? timeoutDelayNs : 0 );
+        frameGrabberTimingMark( Marker::timeoutReturn );
+    }
+    else
+    {
+        frameGrabberIntegration::monoNs += 1000;
+        frameGrabberTimingMark( Marker::rearmReturn );
+    }
+
     m_currImageTimestamp = { 1234, static_cast<long>( attempts * 500000 ) };
 
     if( acquisitionResult )
@@ -271,6 +288,13 @@ int Camera::frameGrabberPostPublish( IMAGE *image )
     if( posts == 1 )
     {
         frameGrabberIntegration::monoNs += postDelayNs;
+    }
+
+    if( deferredRearm )
+    {
+        frameGrabberTimingMark( Marker::rearmEnter );
+        frameGrabberIntegration::monoNs += 1000 + ( posts == 1 ? rearmDelayNs : 0 );
+        frameGrabberTimingMark( Marker::rearmReturn );
     }
 
     if( posts == frames )
@@ -420,6 +444,76 @@ TEST_CASE( "Framegrabber stage disablement leaves only existing write clocks", "
     // clang-format off
 #ifdef FRAMEGRABBER_TEST_DOXYGEN_REF
     MagAOX::app::dev::frameGrabber<Camera>::frameGrabberTimingMark;
+#endif
+    // clang-format on
+}
+
+/** \brief Deferred rearm leaves current publication unchanged while timeout-query delay remains visible before it.
+ * \ingroup frameGrabber_unit_test
+ */
+TEST_CASE( "Framegrabber post-publication rearm and timeout query have distinct timing",
+           "[dev::frameGrabber][integration]" )
+{
+    resetClock();
+    std::vector<timespec>     baselinePublication;
+    MagAOX::fgTiming::Summary baselineSummary;
+
+    {
+        Camera baseline( true );
+        baseline.deferredRearm = true;
+        baseline.run();
+        baselinePublication = baseline.publication;
+        baselineSummary     = baseline.m_fgTiming.summary();
+        REQUIRE( baselineSummary.total.invalid == 0 );
+    }
+
+    resetClock();
+    Camera delayed( true );
+    delayed.deferredRearm = true;
+
+    SECTION( "SDK rearm runs after publication and is excluded from sync notification" )
+    {
+        delayed.rearmDelayNs = 35000;
+        delayed.run();
+        REQUIRE( delayed.publication.size() == 3 );
+        CHECK( difference( baselinePublication[0], delayed.publication[0] ) == 0 );
+        CHECK( difference( delayed.publication[0], delayed.publication[1] ) ==
+               difference( baselinePublication[0], baselinePublication[1] ) + delayed.rearmDelayNs );
+
+        const auto &summary = delayed.m_fgTiming.summary();
+        CHECK( summary.metrics[metricIndex( Metric::rearm )].count == 3 );
+        CHECK( summary.metrics[metricIndex( Metric::rearm )].max ==
+               Approx( baselineSummary.metrics[metricIndex( Metric::rearm )].max + 35e-6 ) );
+        CHECK( summary.metrics[metricIndex( Metric::syncPost )].mean ==
+               Approx( baselineSummary.metrics[metricIndex( Metric::syncPost )].mean ) );
+        CHECK( summary.metrics[metricIndex( Metric::loopTail )].mean ==
+               Approx( baselineSummary.metrics[metricIndex( Metric::loopTail )].mean ) );
+    }
+
+    SECTION( "Timeout-query contention remains before the current publication" )
+    {
+        delayed.timeoutDelayNs = 35000;
+        delayed.run();
+        REQUIRE( delayed.publication.size() == 3 );
+        CHECK( difference( baselinePublication[0], delayed.publication[0] ) == delayed.timeoutDelayNs );
+
+        const auto &summary = delayed.m_fgTiming.summary();
+        CHECK( summary.metrics[metricIndex( Metric::timeoutQuery )].count == 3 );
+        CHECK( summary.metrics[metricIndex( Metric::timeoutQuery )].max ==
+               Approx( baselineSummary.metrics[metricIndex( Metric::timeoutQuery )].max + 35e-6 ) );
+        CHECK( summary.metrics[metricIndex( Metric::validation )].mean ==
+               Approx( baselineSummary.metrics[metricIndex( Metric::validation )].mean ) );
+    }
+
+    CHECK( delayed.mainBeforeSync );
+    CHECK( delayed.metadataComplete );
+    CHECK( delayed.m_fgTiming.summary().total.invalid == 0 );
+
+    // clang-format off
+#ifdef FRAMEGRABBER_TEST_DOXYGEN_REF
+    MagAOX::app::dev::frameGrabber<Camera>::fgThreadExec;
+    MagAOX::app::dev::frameGrabber<Camera>::postPublishHook;
+    MagAOX::app::dev::frameGrabberTiming::markAt;
 #endif
     // clang-format on
 }

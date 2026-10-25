@@ -1,27 +1,27 @@
 # ocam2KCtrl acquisition and publication timing review
 
-Date: 2026-10-23 (America/Phoenix).
-Status: approved implementation and workstation verification complete, including
-compilation/linkage against copied PDV 5.6.8.0. Operator overhead/bracket,
-loaded-driver and DMA-owner-thread qualification remain pending. No instrument
-changes have been performed. The operator approved committing and pushing the
-verified implementation.
+Created: 2026-10-23; updated 2026-10-24 (America/Phoenix).
+Status: the approved deferred OCAM rearm and independent timeout-query
+measurements are implemented locally. Workstation verification includes
+compilation/linkage against the copied PDV 5.6.8.0 SDK. Operator qualification
+of the new ordering, instrumentation overhead, loaded driver and existing
+DMA-owner-thread topology remains pending. Agents perform no instrument actions.
 
-Operator `[fgstage]` captures confirm active, clean stage collection and much
-steadier acquisition than publication intervals. The first capture left the
-bracket undecided; a subsequent capture with a provisional 1 us bracket has
-fully qualified intervals and matched excursion cohorts. Conversion/load
-duration changes explain much of their added publication variation, while the
-largest late event also follows a long post-write tail and delayed SDK return.
-The captures are recorded below; they establish no performance bound or
-scheduler margin.
+Paired chronological and kernel captures identify EDT interrupts as the source
+of recurring stage extensions. The operator moved IRQ 405 from acquisition
+CPU 33 to CPU 61 as the only experimental change. Retained publication-interval
+deviation decreased from 1.864 to 0.995 us, and large conversion/notification
+extensions disappeared from the selected neighborhoods. Remaining long rearm
+calls track the remote handler, strongly supporting driver/device serialization
+without identifying a specific lock. These captures establish no scheduler
+safety margin or continuous full-population timing bound.
 
-A subsequent 35-window capture confirms the recurring disturbance in multiple
-regions, including rearm and validation as well as conversion and notification.
-The authorized causal-capture follow-up is now implemented and verified locally:
-optional chronological excursion records and an operator-run private kernel
-trace helper. Causal instrument measurements and overhead qualification remain
-pending; the descrambler alone is not established as the source.
+The latest implementation replenishes eligible OCAM DMA queues at the end of
+the existing post-publication hook, after both stream notifications. Timeout
+and frame validation stay before publication; the independent `timeoutQuery`
+measurement will show whether contention also affects that guard. The source
+review, earlier implementations and each operator capture remain below as the
+engineering history.
 
 ## Request and purpose
 
@@ -849,9 +849,10 @@ contention must be included in the operator overhead comparison.
 
 The existing timed-image path already queries the count in
 `pdv_wait_images()` (`libpdv.c:5687`) and its nested raw implementation (5580).
-The new application result guard adds one more query. In the current wrapper
-it occurs after `rearmReturn`, so its time falls in the rearm-to-validation
-segment.
+The initial application result guard added one more query after `rearmReturn`,
+placing its time in the rearm-to-validation segment of those captures. The
+2026-10-24 deferred-rearm implementation below measures it independently as
+`timeoutQuery` before publication and validation.
 
 The active mode's `fv_once=1` and `method_framesync: EMULATE_TIMEOUT` make this
 check relevant. `libpdv.c:1054–1064` explains that continuous/fv-once operation
@@ -1296,6 +1297,479 @@ Commit the measurements, helper, tests and engineering records first, followed
 by the user guide and operator procedure as documentation-only changes. No
 standalone formatting cleanup is needed. Hardware correlation and overhead
 qualification remain operator work.
+
+## 2026-10-24 first paired camera/kernel capture
+
+The operator supplied the local directory
+`/home/jrmales/tmp/camwfs-trace-20261024T215606Z`. Analysis was performed on
+those copied files only. The two telemetry files each contain 29 disjoint
+two-second `[fgstage]` windows and 464 chronological `[fgtrace]` records.
+The off/on labels refer to kernel tracing; stage and neighborhood telemetry
+remain enabled in both files.
+Both retain session 5, stream inode 3333, mode 3/bin 1x1, PID 2874366 and
+acquisition TID 2874370. Camera telemetry reports synchronized 2000 FPS in bin2;
+the 1x1 values describe additional software binning. No new rejected/failed
+publications, frame/counter gaps or frame/control queue losses are reported.
+
+Input SHA-256 values:
+
+| File, relative to the supplied directory | SHA-256 |
+| --- | --- |
+| `camwfs-trace-off.txt` | `6f83e87de88ccc4412c9505ccab001f2421bebae1c09f64ad4129058abb86db3` |
+| `camwfs-trace-on.txt` | `5733f2a854c0b17999a10c921fdfda95b6626c58d896ad32a5a0b43f7b611fcf` |
+| `camwfs-kernel-20261024T215606Z/trace.txt` | `140946ffaf119b77be88dd30b4aab5a6c53512119b896eb531fdb79bc185cfbb` |
+| `camwfs-kernel-20261024T215606Z/metadata.json` | `c092bcf491b3f813fe72d617f4747f45ea1ea0c27746e469468a4d0b7d88c3c0` |
+
+### Coverage and diagnostic selection
+
+The requested kernel capture covers monotonic 1746805.693291 through
+1746815.693429, approximately **21:56:07.103166–21:56:17.103304 UTC**.
+The CPU 33 ring overwrote **103364 of 313487 events**. Its retained tail has
+210123 events from **1746809.003536 to 1746815.693541**, or **6.690005 seconds**.
+`dropped events=0` and `commit overrun=0` do not cancel the reported overwrite.
+The retained suffix supports positive event correlations; the missing first
+3.31 seconds cannot support negative conclusions. Kernel text timestamps have
+one-microsecond precision, despite the camera's integer-nanosecond endpoints.
+
+The actual acquisition thread is **SCHED_FIFO 90 on CPU 33**, and the EDT
+device's **IRQ 405 is also on CPU 33**. Placement is unchanged before/after;
+CPU 33 has no SMT sibling. Only CPU 33 is traced, so execution of the main
+control thread on CPUs 78/79 is outside coverage. Absolute monotonic endpoints,
+not telemetry emission times, select 80 excursion centers in the requested
+interval, of which 64 centers and 120 unique neighboring frames have their
+complete camera contexts inside the retained kernel suffix.
+
+Every telemetry batch reaches `stageTraceMax=16`. Between first/last batch
+counters, the off file detects 624 new excursions and drops 176 contexts;
+the on file detects 628 and drops 180. These are bounded diagnostic selection
+losses, not camera frame losses. Repeated neighbors deduplicate without
+conflicting values; all 928 records have five present neighbors and complete
+termination. One off-file record has an unqualified bracket; all on-file
+records qualify.
+
+Ordinary updates occur about every **2.056 seconds**, while summary retention
+is two seconds. The resulting approximately **56 ms gaps are systematic**:
+excluding each file's first batch, 447/448 off-file and 440/448 on-file centers
+occur within 20 ms after the preceding emission. Consequently the summary
+windows omit most of these short disturbance bursts, and the chronological
+records preferentially retain their first 16 excursions. Neither population
+provides an unbiased, continuous count of all excursions.
+
+### EDT interrupts explain the recurring stage extensions
+
+All 13381 recorded acquisition-thread switch-outs are voluntary sleeps; no
+other task displaces a runnable camera thread in the retained trace. From
+13380 matched wakes, wake-to-schedule-in latency has median 1 us, p99 2 us
+and maximum 3 us at the text trace's resolution. Local timer/RCU events are
+short (maxima 4/2 us).
+
+In contrast, **127 EDT IRQ handlers interrupt acquisition execution**, lasting
+32–37 us, mean **35.874 us**. Of these, **122 wake only main/control TID
+2874366**, five wake no task, and none wake acquisition TID 2874370. The
+remaining ordinary acquisition completions mostly occur in idle context.
+Across all retained EDT handlers, 13348 wake acquisition only (mean 30.203 us),
+528 wake main only (36.460 us), 32 wake both (50.937 us), and 35 wake neither.
+
+Among the 120 selected neighboring frames with full kernel coverage, every
+large stage extension in the following cohorts contains an EDT IRQ:
+
+| Camera stage | Long-stage criterion | Long stages | Containing EDT IRQ |
+| --- | --- | ---: | ---: |
+| Conversion/load | At least 50 us | 39 | 39 |
+| Main notification | At least 20 us | 31 | 31 |
+| SDK rearm | At least 20 us | 5 | 5 |
+| Validation | At least 20 us | 1 | 1 |
+| Sync notification | At least 20 us | 1 | 1 |
+
+One additional EDT interruption overlaps a wide write-timestamp bracket,
+bringing the matched post-return stage interruptions to 78. Of these, 76
+wake the main/control thread. This directly identifies an interruption during
+the stage as a source of its elapsed-time extension. It does not establish
+that every excursion outside the selected, covered frames has the same cause.
+
+For example, sequence **2293237** has a **539.208 us** publication interval
+and **65.093 us** conversion. IRQ 405 runs inside that conversion at monotonic
+**1746811.550014–1746811.550050**, waking the main/control thread. The following
+sequence **2293238** has a **471.320 us** publication interval and normal
+**26.821 us** conversion. A separate 37 us EDT interrupt then extends its
+post-write main notification to **42.530 us**. This separates the cause of the
+late write from work after the following write's timestamp.
+
+### Serial housekeeping is the strongly supported source of these IRQ bursts
+
+The main-thread wakes form 125-interrupt bursts over approximately 10.95 ms,
+repeating every 2.054–2.056 seconds. Shorter 20-interrupt bursts lasting
+1.708 ms follow approximately 0.529 seconds later. Inter-interrupt spacing is
+consistent with serial byte reception at the configured 115200 baud. All
+retained excursion centers overlap a completed serial transaction, though
+the saturated selection prevents using that association alone as proof.
+
+Local source independently connects the paths:
+
+- `ocam2KCtrl::appLogic()` calls `getTemps()` and `getEMGain()` on its ordinary
+  thread. Synchronized `getFPS()` does not issue a serial query.
+- `edtCamera::pdvConfig()` enables serial reception on the same `m_pdv` device
+  used by acquisition. `pdvSerialWriteRead()` waits for serial data using
+  `pdv_serial_wait(..., 1)`.
+- Copied PDV 5.6.8.0 `libpdv.c`, at `SERIAL_ENABLED_FLAGS` and
+  `pdv_serial_read_enable()`, enables receive/device interrupts and the remote
+  interrupt path. `pdv_serial_wait()` uses the `EDTS_SERIALWAIT` ioctl;
+  `libedt.c::edt_set_remote_intr()` enables remote-interface/PCI interrupts.
+
+Together with the captured control-only wakes, this strongly identifies
+serial-response handling on the shared EDT interrupt as the source of the
+bursts. The current SDK copy does not contain the running kernel ISR source,
+and the trace does not record a serial-specific hardware status bit. The
+exact driver operations consuming those approximately 36 us remain unverified.
+
+Serial transaction envelopes average approximately **525.7 ms**, mostly
+blocking wall time. The local active mode file has no `serial_waitchar`, and
+the SDK disables wait-character completion when it is unspecified. The
+controller's 1000 ms read timeout gives the response loop a 500 ms trailing
+wait, followed by its 10 ms drain. Two transactions plus the ordinary
+one-second application sleep explain the 2.056-second update cadence.
+Shortening completion waits alone would not establish fewer serial RX
+interrupts or shorter handlers. A response-terminator change would require
+separate validation of full OCAM response and prompt framing.
+
+### Statistics, ordering and next comparison
+
+The two telemetry files each retain 115971 qualified intervals. Their pooled
+SDK acquisition deviations are 0.431 us off and 0.398 us on, versus publication
+deviations 1.864/1.967 us. These summary values omit the systematic gaps above.
+Only ten seconds of the on file have kernel tracing enabled, so whole-file
+off/on differences do not isolate tracing overhead. Four two-second summaries
+are wholly inside the requested trace interval; comparison with 24 wholly
+outside windows in the same file finds mean main-notification duration
+4.484 versus 3.679 us, and sync notification 0.884 versus 0.806 us. This is
+consistent with measurable tracepoint cost in the notification path; it is
+far smaller than the approximately 36 us interrupt extensions and does not
+quantify the untraced ISR duration.
+
+Late-then-early ordering is not universal under the +/-20 us classification.
+Among 560 qualified retained early centers, 217 follow late intervals, 233
+follow normal intervals and 110 follow early intervals. Of 367 late centers,
+235 are followed by early intervals, 131 by normal intervals and one by late.
+These are selected-sample counts. For example, sequence 2285022 has successive
+publication intervals 511.356, **471.971**, 517.497 and 506.417 us: its early
+interval follows a normal classified interval. Do not turn the earlier
+late-then-early hypothesis into a scheduler invariant.
+
+The next useful operator-controlled A/B comparison is to separate EDT IRQ
+execution from the acquisition CPU while preserving the camera worker's
+CPU 33/FIFO 90 and the serial polling workload. Select an actually spare CPU
+after checking instrument placement, and capture both CPUs. This tests the
+specific identified interference while exposing any new cross-CPU completion
+latency. It is a proposal, not a configuration change performed here.
+
+For a subsequent capture, five seconds fits CPU 33's observed event rate
+in the helper's 8 MiB per-CPU ring; check overwrite counters again, including
+any newly selected CPU with different traffic. Increasing
+`stageTraceMax` provisionally to 64 and checking that its drop counter stays
+unchanged would reduce the first-16 selection loss. This requires the normal
+operator restart. Separately, continuous interval statistics or summary
+retention covering the actual consumer cadence should be considered so that
+routine serial bursts cannot repeatedly fall between summary windows.
+Reducing housekeeping frequency would need to preserve temperature and EM
+protection monitoring; no polling or serial-framing changes are made here.
+
+Independent local parsers checked clock matching, exact trigger/neighbor
+interval identities, deduplication, IRQ entry/exit and wake associations,
+stage containment, counter deltas and pooled statistics. Working artifacts
+are `/tmp/analyze_fg_capture.py`, `/tmp/review_ocam_kernel.py`,
+`/tmp/parsed_fg_capture.json` and `/tmp/ocam-all-kernel-correlations.csv`.
+Only this engineering record and the syncopation debugging record change.
+No C++ changes, build/test reruns, commit, push or instrument actions accompany
+the analysis.
+
+## 2026-10-24 second capture with EDT IRQ on CPU 61
+
+The operator supplied
+`/home/jrmales/tmp/camwfs-trace-20261024T222140Z`. Before/after metadata
+confirms **IRQ 405 on CPU 61**, with acquisition TID 2874370 still **FIFO 90
+on CPU 33**. Neither CPU has an SMT sibling. PID 2874366, session 5, inode
+3333, mode 3 and software bin 1x1 are unchanged. The diagnostics still use
+two-second windows, a 20 us excursion threshold, a 1 us bracket limit and
+`stageTraceMax=16`; the helper captures ten seconds on both CPUs. These are
+observed settings, rather than an assumption that all earlier proposed capture
+changes were applied. The operator subsequently confirmed that moving IRQ 405
+from CPU 33 to CPU 61 was the only change; camera settings, other CPU placement,
+loop settings and workload were unchanged. This establishes the intended IRQ
+placement A/B comparison, subject to the sampling limits below.
+
+Input SHA-256 values, relative to the supplied directory:
+
+| File | SHA-256 |
+| --- | --- |
+| `camwfs-trace-off.txt` | `8b44b57e4b715f5586bd0f4947481da03095b1533211b5c8e9554d94ff5ef1e7` |
+| `camwfs-trace-on.txt` | `04febab448f86314c20e0c59bf4bcdf2bbd3e9111525cc786e4c55215b9f08d0` |
+| `camwfs-kernel-20261024T222140Z/trace.txt` | `a00e239395dca12a4242553732c65360d43b589133ff08472f92e72eb3e38867` |
+| `camwfs-kernel-20261024T222140Z/metadata.json` | `644faaae00e91ead23c5a9d0fb4d2f54a455dc46ff487d45ef48d9880beded5a` |
+
+### Coverage and quality
+
+The requested kernel interval is approximately
+**22:21:40.802146–22:21:50.802284 UTC**. CPU 61 retains 111140 events over
+9.999537 seconds without overwrite. CPU 33 overwrites 50936 events and retains
+200058 events over **7.969006 seconds**, monotonic
+**1748341.423232–1748349.392238**. Joint camera/IRQ coverage ends at CPU 61's
+last event, 1748349.392196, with one-microsecond text resolution.
+All 20611 EDT IRQ handlers run
+on CPU 61 in idle context; none run on the acquisition CPU. The camera's
+nonvoluntary context-switch count is unchanged across the metadata snapshots.
+
+Both telemetry files contain 29 disjoint two-second stage windows and
+115971 qualified intervals, with no ambiguous intervals, new bracket-wide
+observations, publication failures, rejected frames, frame/counter gaps or
+source queue losses. There are 416 off-file and 403 on-file excursion records,
+all qualified, complete and consistent with their neighbor interval identities.
+The on file begins with only one record from an older 14-record batch; that
+file boundary is not a newly reported diagnostic drop.
+
+Between first/last counters, diagnostic selection drops are **4 of 407** new
+detections off and **4 of 406** on, approximately 1% versus approximately 28%
+in the first capture. Selection remains bounded, and the approximately 56 ms
+gaps between stage-summary windows persist. The requested kernel interval
+contains 61 centers and 136 unique neighboring frames; full joint retained
+coverage contains **44 centers and 98 unique neighboring frames**. Counts and
+stage ranges below use the stated population, rather than mixing these sets.
+
+### Publication jitter improves and recorded stage interruptions disappear
+
+The off files provide a comparison with kernel tracing absent in both runs;
+stage/neighborhood telemetry remains enabled in both. Pooled statistics use
+the 29 disjoint retained windows per file:
+
+| Metric | IRQ on CPU 33, first off file | IRQ on CPU 61, second off file |
+| --- | ---: | ---: |
+| SDK acquisition-interval deviation | 0.431 us | 0.431 us |
+| SDK-return-interval deviation | 1.039 us | 0.467 us |
+| Publication-interval deviation | 1.864 us | **0.995 us** |
+| Mean acquisition-to-write latency | 52.744 us | 53.600 us |
+| Acquisition-to-write deviation | 1.440 us | 0.824 us |
+| Conversion maximum in retained summaries | 84.760 us | 30.036 us |
+| Main-notification maximum in retained summaries | 41.308 us | 8.255 us |
+| Mean rearm duration | 4.765 us | 5.192 us |
+
+Thus publication RMS decreases about **47%**, while mean acquisition-to-write
+latency increases approximately **0.86 us**. This is an improvement in timing
+spread with a small mean-latency tradeoff. Summary gaps still prevent claiming
+continuous full-population jitter. The direct chronological evidence agrees:
+the retained neighborhoods no longer have the approximately 37 us additions
+in conversion, validation or main/sync notification. In the 98 frames with
+full joint kernel coverage, conversion is 24.927–27.332 us and main
+notification is 4.188–5.300 us.
+
+Cross-CPU wake latency remains small. Using `sched_waking` to camera
+schedule-in consistently in both traces, the first capture has mean 1.474 us,
+median 1 us, p99 2 us and maximum 3 us; the new capture has mean 1.661 us,
+median 2 us, p99 2 us and maximum 3 us. Do not mix these with shorter
+`sched_wakeup`-to-run intervals. These observations do not show a large new
+scheduler delay after moving the IRQ.
+
+Only ten seconds of the on file have kernel tracing enabled. Its whole-file
+publication deviation is 1.010 us, versus 1.967 us in the first on file.
+Three new two-second summaries fit wholly inside the requested kernel
+interval, 24 wholly outside, and two cross its boundaries. Inside/outside mean
+main-notification duration is 4.481/3.673 us, repeating the approximately
+0.8 us tracing cost observed in the first capture. Whole-file off/on values
+therefore remain unsuitable for isolating kernel instrumentation overhead.
+
+### Remaining rearm delays track the remote EDT handler
+
+Rearm is now the recurring long post-return segment. Among the 98 frames
+with full joint coverage, 72 ordinary rearm calls have median **5.300 us**
+(5.159–6.031 us); **26 calls** take **31.219–39.645 us**, mean 38.803 us.
+Every long call overlaps IRQ 405 on CPU 61: 25 handlers wake only the ordinary
+control thread, and one wakes no task. None of these 26 rearm intervals
+contains a CPU 33 schedule switch or local IRQ/vector entry.
+
+The remote handler begins 1.931–3.767 us before the SDK wait-return marker.
+Rearm finishes 4.987–5.977 us after handler exit, mean **5.462 us**. The extra
+rearm time above the 5.300 us ordinary median averages **33.503 us**, while
+overlap with the remaining remote IRQ averages **33.341 us**. The close
+agreement strongly supports serialization with driver/device work on CPU 61.
+
+For sequence **5356674**, the monotonic endpoints are:
+
+| Event | Monotonic seconds |
+| --- | ---: |
+| EDT IRQ entry on CPU 61 | 1748343.269693000 |
+| SDK wait returns on CPU 33 | 1748343.269694989 |
+| EDT IRQ exit on CPU 61 | 1748343.269729000 |
+| SDK rearm returns on CPU 33 | 1748343.269734283 |
+
+The rearm interval is **39.294 us**: **34.011 us** overlap with the remote
+handler, followed by **5.283 us**, essentially the ordinary rearm duration.
+The same call remains running on CPU 33 throughout the measured interval.
+This establishes the timing relation; it does not identify a particular
+driver lock or distinguish spinning from slow shared-device access.
+
+Local SDK source narrows the call path:
+
+```text
+edtCamera::pdvAcquire()
+  pdv_start_image(m_pdv)
+    pdv_start_images(m_pdv, 1)
+      edt_start_buffers(m_pdv, 1)
+        edt_ioctl(m_pdv, EDTS_STARTBUF, &count)
+          ioctl(fd, EDT_NT_IOCTL, &request)
+```
+
+The ordinary initialized path has no visible application or user-library
+mutex. `EDTS_STARTBUF` is action 39 in the copied SDK. Historical EDT wrappers
+use `spin_lock_irqsave()` for driver critical sections, but the running
+kernel core is unavailable locally. The copied 5.6.8 SDK does not by itself
+establish the running kernel module's version. A current shared driver lock is
+therefore a well-supported hypothesis, not a source-verified mechanism.
+
+### Ordering and next measurement
+
+The new retained sample is more often a simple late/early pair: 325 of 348
+late centers are followed by early, while 23 are followed by normal. Of 471
+early centers, 323 follow late and 148 follow normal. Universal classified
+late-then-early ordering is still not established at the 20 us threshold.
+
+The next focused measurement is to bracket acquisition-thread ioctl entry
+and exit, correlated with existing rearm markers and EDT interrupts on both
+CPUs. This would establish whether the approximately 34 us excess is inside
+the kernel call. If so, inspect the running driver's available symbols/source
+and selectively measure its ioctl and critical-section acquisition; remote
+IRQ overlap alone cannot prove a specific lock. Preserve rearm/DMA semantics
+until that mechanism is understood. A five-second kernel capture and a
+larger bounded neighborhood capacity remain useful coverage improvements,
+with loss counters checked rather than assumed zero.
+
+Independent local parsers checked per-CPU coverage, IRQ entry/exit and wake
+associations, exact neighborhood identities, event/diagnostic counter deltas,
+stage pooling and all 26 long rearm correlations. Artifacts include
+`/tmp/parsed_fg_capture_222140.json`, `/tmp/review_ocam_kernel_222140.py` and
+`/tmp/ocam-rearm-irq-correlations-222140.csv`. Only the OCAM engineering plan
+and syncopation debugging record are updated. No C++ changes, build/test
+reruns, commit, push or agent instrument actions accompany this analysis.
+
+## 2026-10-24 defer OCAM rearm until after publication
+
+The operator approved moving queue replenishment out of the completed frame's
+publication path and separately measuring the timeout-counter query. The
+implementation uses the existing `ocam2KCtrl::frameGrabberPostPublish()` hook,
+as the operator suggested: it posts the sync stream after the main stream,
+then replenishes the consumed EDT request on the same acquisition worker.
+No new framegrabber completion hook is introduced.
+
+### Acquisition and recovery contract
+
+Startup still queues `m_numBuffs` acquisitions. The SDK documents that this
+count releases requests to the driver; it is more than allocating ring memory.
+With the current 64-buffer pipeline, further captures remain queued while one
+completed image is validated, descrambled and published. Deferral is eligible
+only when both the requested and actual allocated buffer counts exceed one,
+`force_single` is clear, and no serial acquisition trigger is configured.
+Eligibility is cached at acquisition startup. Other EDT controllers opt out
+by default, and ineligible OCAM modes preserve immediate rearm.
+
+`edtCamera::pdvAcquire(timestamp, deferRearm)` retains latest-image selection,
+the original SDK acquisition timestamp, timeout/partial-transfer checks and
+timestamp validation. Eligible OCAM acquisition records one pending queue
+obligation instead of starting another request before those checks.
+`pdvFinishAcquisition(continuing)` clears that obligation once and either
+replenishes it or discards it before recovery/exit. A second acquire cannot
+silently consume another frame while an earlier obligation is unfinished.
+Configuration/start reset this state. Acquisition errors, invalid frame
+numbers and recovery requests discard it; post-hook failures, shutdown,
+reconfiguration or power-off do not queue a later unrelated request.
+
+The normal ordering is now:
+
+```text
+SDK wait -> timeout/partial check -> OCAM frame validation -> descramble
+  -> main image publication -> sync publication -> EDT rearm -> next wait
+```
+
+The timeout query remains before publication so an SDK partial transfer is
+never published as valid. It is another driver ioctl and may still encounter
+the same contention. Moving rearm is not a claim that all publication jitter
+has been eliminated. Hardware comparison should examine both query duration
+and output timing with the IRQ on CPU 61 and other settings unchanged.
+
+### Timing and compatibility
+
+Existing marker IDs 0–8 remain stable. Appended endpoints are
+`rearmEnter` (9), `timeoutEnter` (10) and `timeoutReturn` (11).
+`timeoutQuery` is appended as metric 16. The producer checks actual capture
+chronology independently of numeric marker IDs, and the reader validates
+both immediate and deferred semantic orders. Retention uses the greatest
+valid endpoint rather than the last numeric marker slot.
+
+`rearm` measures its explicit entry-to-return span. `timeoutQuery` measures
+the query independently, and `validation` starts after query return. Existing
+controllers/events without the explicit endpoints retain legacy definitions.
+`syncPostDone` remains the full publication-hook return, after deferred rearm;
+the `syncPost` duration ends at deferred `rearmEnter` so notification and rearm
+populations remain separate. `loopTail` starts at hook return. `waitToWrite`
+retains its SDK-return-to-publication meaning, excluding deferred rearm.
+The existing per-metric INDI and matched-change loops expose `timeoutQuery`
+without adding another property or configuration setting.
+
+New stage/trace writers emit 17 metric populations and 12 endpoint slots.
+Updated binary, text, JSON and metadata readers also accept existing 16-metric
+and nine-marker records, with appended observations unavailable. This preserves
+the captures used in both IRQ comparisons. Rebuild/install the camera app and
+`logdump` for the extended records. The operator capture procedure uses five
+seconds to reduce ring overwrite at the observed event rate; loss counters
+and two-CPU coverage must still be checked.
+
+Independent review found two failure-path details before completion: a failed
+new entry clock must not widen an SDK duration through the legacy fallback,
+and a reported missing deferred entry must not censor the otherwise usable
+raw trace. Affected durations remain unavailable, while explicitly unqualified
+new records retain their raw endpoints and invalid counts. Legacy nine-marker
+records keep their original ordering checks.
+
+### Workstation verification
+
+Eight suites pass **4642 assertions in 86 cases**, relinked against the final
+library build:
+
+| Suite | Assertions | Cases |
+| --- | ---: | ---: |
+| `frameGrabberTiming_test` | 323 | 20 |
+| `ocam2KCtrl_test` | 713 | 33 |
+| `frameGrabberTelemetry_test` | 2415 | 6 |
+| `frameGrabberTraceTelemetry_test` | 648 | 7 |
+| `frameGrabber_integration_test` | 118 | 7 |
+| `ocam2KCtrl_lifecycle_test` | 7 | 1 |
+| `cred2Ctrl_test` | 405 | 11 |
+| `cred2Ctrl_lifecycle_test` | 13 | 1 |
+
+Coverage includes deferred ordering, separate timeout/rearm durations,
+ordinary/rejected/error attempts, requested/allocated ring eligibility,
+single-frame and serial-trigger fallbacks, exact-once replenishment,
+current-versus-next publication effects, failed optional clocks and old/new
+binary, text, JSON and metadata compatibility. Actual-loop tests establish
+that deferred rearm does not enter the current publication timestamp or
+notification duration, while timeout-query delay remains before publication.
+Existing CRED2 behavior and both controller lifecycles remain covered.
+
+The library/schema build, normal `logdump` build and OCAM compile/link against
+the copied PDV **5.6.8.0** headers/library pass. No compiler warnings or errors
+are reported beyond existing git-state pragma messages. Full changed-C++
+clang-format checks, whitespace checks and relative documentation-link checks
+pass. Build/test logs are `/tmp/ocam-deferred-*` and
+`/tmp/ocam-rearm-frameGrabber*`; test-created binary logs are retained under
+`/tmp/ocam-deferred-test-binlogs` rather than in the working tree. No camera
+binary is launched or instrument setting changed by the agent. The next step
+is an operator rebuild and timing comparison with IRQ 405 kept on CPU 61;
+existing configuration requires no new setting.
+
+### 2026-10-24 commit/push checkpoint
+
+The operator approved committing and pushing the verified changes to the
+existing `jrmales/dm-syncopation` feature branch at `origin` (`magao-x/MagAOX`).
+The functional commit includes the associated IRQ findings and engineering
+records, followed by a documentation-only commit for the timing guide and
+operator procedure. No standalone formatting commit is needed. Hardware
+qualification remains operator work.
 
 ## Affected files
 

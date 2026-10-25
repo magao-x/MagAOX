@@ -8,7 +8,9 @@ enum FgTraceOutcome : ubyte { published = 0, rejected = 1, failed = 2 }
 
 // Slot identity is explicit: -2,-1,trigger,+1,+2 correspond to slots 0 through 4.
 // markers_ns follows waitEnter,waitReturn,rearmReturn,validated,loadDone,writeStampDone,
-// mainPostDone,syncPostDone,loopTailDone. valid marks available endpoints; invalid_markers counts failures.
+// mainPostDone,syncPostDone,loopTailDone, followed by appended rearmEnter,timeoutEnter,timeoutReturn.
+// The first nine IDs remain stable. Appended IDs are not chronological: rearm may follow publication.
+// valid marks available endpoints; invalid_markers counts failures. Older records retain nine entries.
 // Original SDK acquisition and CLOCK_REALTIME write stamps retain their clocks and raw components.
 table FgTraceEvent
 {

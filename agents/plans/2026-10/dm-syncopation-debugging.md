@@ -2040,3 +2040,93 @@ operator measurements. No configuration change or agent instrument action was
 performed. On 2026-10-24 the operator approved committing and pushing the
 verified follow-up: measurements/helper/tests and engineering records first,
 then the user guide and capture procedure in a documentation-only commit.
+
+## 2026-10-24 camera IRQ correlation identifies a delay source
+
+The operator supplied `camwfs-trace-20261024T215606Z`. Its retained kernel
+suffix directly correlates the recurring approximately 36 us camera stage
+extensions with EDT IRQ 405 executing on acquisition CPU 33. The camera is
+FIFO 90 and experiences no runnable-task displacement in that suffix.
+Of 127 EDT handlers interrupting acquisition, 122 wake only the ordinary
+camera control thread. Every long conversion, rearm, validation and
+main/sync-notification stage in the 120 selected neighboring frames covered
+by the trace contains an EDT interrupt. Source inspection confirms that
+serial reception uses this same device interrupt; serial housekeeping is
+the strongly supported origin of the bursts, although the running ISR's
+internal implementation is unavailable.
+
+The 8 MiB kernel ring overwrote 103364 events, retaining the final 6.69 of
+ten requested seconds. Every 16-context frame-trace batch also saturates.
+Approximately 56 ms gaps between two-second summary windows systematically
+omit most of the short serial disturbance bursts. These selection and
+coverage limits prevent extrapolating to every excursion or using the
+summary RMS as continuous full-population jitter. There are no new camera
+frame/counter gaps, publication failures or source queue losses.
+
+The retained chronological sample also disproves universal classified
+late-then-early ordering: 233 of 560 qualified early centers follow normal
+intervals. A scheduler must not assume every early event follows a late one.
+The proposed next controlled comparison separates the EDT IRQ from the
+camera worker CPU, preserving serial polling and measuring both CPUs; it
+has not been performed. The [OCAM plan](ocam2k-acquisition-publication-timing.md)
+records exact counts, clock coverage, source evidence, matched examples and
+follow-ups. Only engineering documentation changed; no implementation,
+configuration, commit, push or agent instrument action accompanies this analysis.
+
+## 2026-10-24 EDT IRQ moved to CPU 61
+
+The next operator capture, `camwfs-trace-20261024T222140Z`, confirms IRQ 405
+on CPU 61 while acquisition remains FIFO 90 on CPU 33, with the same camera
+process, session and stream. The operator confirmed that only the IRQ moved;
+camera settings, other CPU placement, loop settings and workload were unchanged.
+In retained summaries with kernel tracing absent,
+publication-interval deviation decreases **1.864 to 0.995 us**, approximately
+47%; SDK acquisition deviation remains 0.431 us. Mean acquisition-to-write
+latency increases slightly, **52.744 to 53.600 us**. Large conversion and
+notification extensions disappear from the recorded neighborhoods.
+
+The remaining long segment is SDK rearm. Among 98 unique neighboring frames
+with joint kernel coverage, **all 26 long rearm calls overlap a remote EDT
+handler**. The call finishes about 5.46 us after that handler ends, close to
+the ordinary 5.30 us rearm duration. Extra rearm time averages 33.50 us versus
+33.34 us of remote-handler overlap, with no local IRQ or thread switch during
+the delay. This strongly suggests driver/device serialization across CPUs;
+the current driver's precise locking mechanism remains unverified. The SDK
+path leads from `pdv_start_image()` to the `EDTS_STARTBUF` ioctl.
+
+CPU 61 retains its full ten seconds, but CPU 33 overwrites 50936 events and
+retains 7.97 seconds. Diagnostic context drops fall to about 1%, with no new
+camera frame/counter gaps, publication failures or source queue losses.
+The approximately 56 ms summary-window gaps persist. The next focused
+measurement is acquisition ioctl entry/exit alongside both CPUs' IRQ events,
+followed by selective driver investigation if the excess is inside the call.
+The [OCAM plan](ocam2k-acquisition-publication-timing.md) records exact coverage,
+comparisons, a matched timing example and qualifications. Only engineering
+documentation changed; no implementation, configuration, commit, push or
+agent instrument action accompanies this analysis.
+
+## 2026-10-24 OCAM rearm moved after both publications
+
+At the operator's request, eligible multi-buffer OCAM acquisition now queues
+its replacement request at the end of the existing `frameGrabberPostPublish`
+hook, after both main-image and sync notifications. Timeout and frame checks
+remain before publication. Other EDT controllers and ineligible single-buffer,
+single-frame or serial-triggered modes retain immediate rearm. Pending requests
+are handled once or discarded on recovery/exit.
+
+Independent `rearmEnter` and timeout-query endpoints separate SDK rearm from
+`timeoutQuery`, validation and notification durations. The updated readers
+retain the older stage/trace formats. The timeout query is still a driver
+ioctl before publication; the next operator comparison must determine whether
+the remaining contention appears there. The [OCAM plan](ocam2k-acquisition-publication-timing.md)
+records the implementation and verification. Hardware qualification remains
+operator work; no agent instrument commands are performed.
+
+Final workstation checks pass **4642 assertions in 86 cases** across collector,
+OCAM, generic framegrabber integration, telemetry compatibility, CRED2 and
+lifecycle suites. Library/schema, SDK-linked camera and `logdump` builds pass;
+formatting, whitespace and documentation-link checks pass. Rebuild the camera
+and reader for the next operator capture; no new configuration setting is
+needed. The operator approved committing and pushing the verified changes on
+`jrmales/dm-syncopation`, with implementation and engineering records first,
+followed by user documentation.

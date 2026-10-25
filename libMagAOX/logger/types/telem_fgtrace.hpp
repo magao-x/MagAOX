@@ -49,7 +49,8 @@ struct telem_fgtrace : public flatbuffer_log
 
   private:
     static constexpr size_t neighborCount = 5; ///< Fixed chronological slots, with the trigger at slot two.
-    static constexpr size_t markerCount   = size_t( fgTiming::Marker::count ); ///< Stable local endpoint count.
+    static constexpr size_t markerCount   = size_t( fgTiming::Marker::count ); ///< Current append-only endpoint count.
+    static constexpr size_t legacyMarkerCount = 9; ///< Original traces omit explicit rearm/timeout endpoints.
 
     /// Serialize one neighbor, preserving slot identity even when its presence bit is clear.
     static flatbuffers::Offset<FgTraceEvent>
@@ -138,7 +139,11 @@ inline telem_fgtrace::messageT::messageT( const fgTiming::TraceRecord &record,
     static_assert( size_t( fgTiming::Outcome::published ) == size_t( FgTraceOutcome_published ) );
     static_assert( size_t( fgTiming::Outcome::rejected ) == size_t( FgTraceOutcome_rejected ) );
     static_assert( size_t( fgTiming::Outcome::failed ) == size_t( FgTraceOutcome_failed ) );
-    static_assert( markerCount == 9 );
+    static_assert( size_t( fgTiming::Marker::loopTailDone ) == 8 );
+    static_assert( size_t( fgTiming::Marker::rearmEnter ) == 9 );
+    static_assert( size_t( fgTiming::Marker::timeoutEnter ) == 10 );
+    static_assert( size_t( fgTiming::Marker::timeoutReturn ) == 11 );
+    static_assert( markerCount == 12 );
     static_assert( record.events.size() == neighborCount );
     builder.ForceDefaults( true );
     std::array<flatbuffers::Offset<FgTraceEvent>, neighborCount> neighbors;
@@ -199,9 +204,8 @@ inline bool telem_fgtrace::verify( flatlogs::bufferPtrT &buffer, flatlogs::msgLe
         return false;
     }
 
-    const auto        *record     = GetTelem_fgtrace_fb( payload );
-    const auto        *status     = record->status();
-    constexpr uint32_t allMarkers = ( uint32_t( 1 ) << markerCount ) - 1;
+    const auto *record = GetTelem_fgtrace_fb( payload );
+    const auto *status = record->status();
 
     if( record->events()->size() != neighborCount || record->serial_overlap_ns()->size() != neighborCount ||
         record->present() > 31 || ( record->present() & 6 ) != 6 || record->median_ns() <= 0 ||
@@ -233,7 +237,8 @@ inline bool telem_fgtrace::verify( flatlogs::bufferPtrT &buffer, flatlogs::msgLe
     for( const auto *value : *record->events() )
     {
         if( !value || value->slot() >= neighborCount || seen[value->slot()] ||
-            value->markers_ns()->size() != markerCount || value->valid() > allMarkers ||
+            ( value->markers_ns()->size() != legacyMarkerCount && value->markers_ns()->size() != markerCount ) ||
+            value->valid() >= ( uint32_t( 1 ) << value->markers_ns()->size() ) ||
             value->outcome() < FgTraceOutcome_MIN || value->outcome() > FgTraceOutcome_MAX )
         {
             return false;
@@ -253,21 +258,23 @@ inline bool telem_fgtrace::verify( flatlogs::bufferPtrT &buffer, flatlogs::msgLe
             continue;
         }
 
-        int64_t previous = -1;
+        std::array<int64_t, markerCount> markers{};
 
-        for( size_t index = 0; index < markerCount; ++index )
+        for( size_t index = 0; index < value->markers_ns()->size(); ++index )
         {
-            if( value->valid() & ( 1u << index ) )
+            markers[index] = value->markers_ns()->Get( index );
+
+            if( ( value->valid() & ( 1u << index ) ) && markers[index] > record->evaluated_ns() )
             {
-                const int64_t marker = value->markers_ns()->Get( index );
-
-                if( marker < 0 || marker < previous || marker > record->evaluated_ns() )
-                {
-                    return false;
-                }
-
-                previous = marker;
+                return false;
             }
+        }
+
+        const bool incompleteDeferred = value->markers_ns()->size() == markerCount && value->invalid_markers();
+
+        if( !fgTiming::validMarkerOrder( markers, value->valid(), incompleteDeferred ) )
+        {
+            return false;
         }
     }
 
@@ -320,7 +327,10 @@ inline const char *telem_fgtrace::markerName( size_t index )
                                       "writeStampDoneNs",
                                       "mainPostDoneNs",
                                       "syncPostDoneNs",
-                                      "loopTailDoneNs" };
+                                      "loopTailDoneNs",
+                                      "rearmEnterNs",
+                                      "timeoutEnterNs",
+                                      "timeoutReturnNs" };
     return index < markerCount ? names[index] : "unknown";
 }
 
@@ -360,7 +370,7 @@ inline std::string telem_fgtrace::msgString( void *buffer, flatlogs::msgLenT len
             {
                 output << ',' << markerName( marker ) << ':';
 
-                if( value->valid() & ( 1u << marker ) )
+                if( marker < value->markers_ns()->size() && ( value->valid() & ( 1u << marker ) ) )
                 {
                     output << value->markers_ns()->Get( marker );
                 }
@@ -420,7 +430,8 @@ inline int64_t telem_fgtrace::endpoint( void *buffer )
 
     for( const auto *value : *record->events() )
     {
-        if( value->slot() == slot && ( record->present() & ( 1u << slot ) ) && ( value->valid() & ( 1u << marker ) ) )
+        if( value->slot() == slot && ( record->present() & ( 1u << slot ) ) && marker < value->markers_ns()->size() &&
+            ( value->valid() & ( 1u << marker ) ) )
         {
             return value->markers_ns()->Get( marker );
         }

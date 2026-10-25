@@ -36,21 +36,24 @@ class frameGrabberTiming
     std::atomic<uint64_t>                     m_session{ 1 };  ///< Acquisition epoch, visible even without a new frame.
     uint64_t                                  m_sequence{ 0 }; ///< Producer attempt sequence, including losses.
     fgTiming::Event                           m_event;         ///< Producer-owned current attempt.
-    bool                                      m_active{ false }; ///< Producer currently owns an attempt.
-    bool                               m_enabled{ false }; ///< Paired timing enabled; immutable during acquisition.
-    bool                               m_stages{ false };  ///< Optional markers enabled; immutable during acquisition.
-    int64_t                            m_windowNs{ 0 };    ///< Immutable local retention duration.
-    int64_t                            m_bracketNs{ 0 }; ///< Positive attribution uncertainty bound; zero is undecided.
-    uint32_t                           m_mode{ 0 };      ///< Producer's current mode tag.
-    uint32_t                           m_binX{ 0 };      ///< Producer's current digital binning factor.
-    uint32_t                           m_binY{ 0 };      ///< Producer's current digital binning factor.
-    std::deque<fgTiming::Event>        m_window;         ///< Consumer-owned acquisition history.
-    std::deque<fgTiming::ControlEvent> m_controlWindow;  ///< Consumer-owned completed controls.
-    std::vector<int64_t>               m_intervals;      ///< Consumer median workspace, reserved before acquisition.
-    fgTiming::Summary                  m_summary;        ///< Cached ordinary-thread snapshot.
-    fgTiming::Counters                 m_total;          ///< Consumer cumulative quality counts.
-    fgTiming::Counters                 m_previous;       ///< Counts at preceding summary.
-    fgTiming::Event                    m_previousEvent;  ///< Last consumed event, for continuous quality accounting.
+    std::array<uint8_t, fgTiming::markerIndex( fgTiming::Marker::count )>
+            m_captureOrder{}; ///< First-capture positions, preserving overwrite validation independently of marker IDs.
+    uint8_t m_captureCount{ 0 }; ///< Number of distinct successfully captured endpoints in this attempt.
+    bool    m_active{ false };   ///< Producer currently owns an attempt.
+    bool    m_enabled{ false };  ///< Paired timing enabled; immutable during acquisition.
+    bool    m_stages{ false };   ///< Optional markers enabled; immutable during acquisition.
+    int64_t m_windowNs{ 0 };     ///< Immutable local retention duration.
+    int64_t m_bracketNs{ 0 };    ///< Positive attribution uncertainty bound; zero is undecided.
+    uint32_t                           m_mode{ 0 };     ///< Producer's current mode tag.
+    uint32_t                           m_binX{ 0 };     ///< Producer's current digital binning factor.
+    uint32_t                           m_binY{ 0 };     ///< Producer's current digital binning factor.
+    std::deque<fgTiming::Event>        m_window;        ///< Consumer-owned acquisition history.
+    std::deque<fgTiming::ControlEvent> m_controlWindow; ///< Consumer-owned completed controls.
+    std::vector<int64_t>               m_intervals;     ///< Consumer median workspace, reserved before acquisition.
+    fgTiming::Summary                  m_summary;       ///< Cached ordinary-thread snapshot.
+    fgTiming::Counters                 m_total;         ///< Consumer cumulative quality counts.
+    fgTiming::Counters                 m_previous;      ///< Counts at preceding summary.
+    fgTiming::Event                    m_previousEvent; ///< Last consumed event, for continuous quality accounting.
     bool                               m_havePrevious{ false }; ///< Previous event exists for continuity checks.
     bool                               m_everEvent{ false };    ///< Current session previously delivered events.
     fgTiming::TraceStatus              m_traceStatus;           ///< Consumer-only bounded excursion accounting.
@@ -308,6 +311,8 @@ inline void frameGrabberTiming::beginAt( int64_t waitEnterNs )
     }
 
     m_event          = {};
+    m_captureOrder   = {};
+    m_captureCount   = 0;
     m_event.sequence = ++m_sequence;
     m_event.session  = m_session.load( std::memory_order_relaxed );
     m_event.mode     = m_mode;
@@ -332,13 +337,14 @@ inline void frameGrabberTiming::markAt( fgTiming::Marker marker, int64_t nowNs )
         return;
     }
 
-    const size_t index   = fgTiming::markerIndex( marker );
-    bool         ordered = nowNs >= 0;
+    const size_t  index    = fgTiming::markerIndex( marker );
+    bool          ordered  = nowNs >= 0;
+    const uint8_t position = m_captureOrder[index] ? m_captureOrder[index] : m_captureCount + 1;
 
     for( size_t prior = 0; ordered && prior < m_event.markers.size(); ++prior )
     {
         if( prior != index && ( m_event.valid & ( 1u << prior ) ) &&
-            ( prior < index ? m_event.markers[prior] > nowNs : m_event.markers[prior] < nowNs ) )
+            ( m_captureOrder[prior] < position ? m_event.markers[prior] > nowNs : m_event.markers[prior] < nowNs ) )
         {
             ordered = false;
         }
@@ -353,6 +359,11 @@ inline void frameGrabberTiming::markAt( fgTiming::Marker marker, int64_t nowNs )
 
     m_event.markers[index] = nowNs;
     m_event.valid |= 1u << index;
+
+    if( !m_captureOrder[index] )
+    {
+        m_captureOrder[index] = ++m_captureCount;
+    }
 }
 
 inline void frameGrabberTiming::frame( uint64_t number )
@@ -429,7 +440,11 @@ inline bool frameGrabberTiming::consecutive( const fgTiming::Event &previous, co
 inline bool frameGrabberTiming::duration( const fgTiming::Event &event, fgTiming::Metric metric, int64_t &value )
 {
     using namespace fgTiming;
-    Marker first, last;
+    Marker             first, last;
+    constexpr uint32_t modern = ( 1u << markerIndex( Marker::rearmEnter ) ) |
+                                ( 1u << markerIndex( Marker::timeoutEnter ) ) |
+                                ( 1u << markerIndex( Marker::timeoutReturn ) );
+    const bool legacy = !( event.valid & modern ) && event.invalidMarkers == 0;
 
     switch( metric )
     {
@@ -438,11 +453,21 @@ inline bool frameGrabberTiming::duration( const fgTiming::Event &event, fgTiming
         last  = Marker::waitReturn;
         break;
     case Metric::rearm:
-        first = Marker::waitReturn;
+        if( endpoint( event, Marker::rearmEnter ) < 0 && !legacy )
+        {
+            return false;
+        }
+
+        first = endpoint( event, Marker::rearmEnter ) >= 0 ? Marker::rearmEnter : Marker::waitReturn;
         last  = Marker::rearmReturn;
         break;
     case Metric::validation:
-        first = Marker::rearmReturn;
+        if( endpoint( event, Marker::timeoutReturn ) < 0 && !legacy )
+        {
+            return false;
+        }
+
+        first = endpoint( event, Marker::timeoutReturn ) >= 0 ? Marker::timeoutReturn : Marker::rearmReturn;
         last  = Marker::validated;
         break;
     case Metric::conversion:
@@ -458,8 +483,18 @@ inline bool frameGrabberTiming::duration( const fgTiming::Event &event, fgTiming
         last  = Marker::mainPostDone;
         break;
     case Metric::syncPost:
+        if( endpoint( event, Marker::rearmEnter ) < 0 &&
+            ( endpoint( event, Marker::rearmReturn ) >= endpoint( event, Marker::mainPostDone ) ||
+              ( event.invalidMarkers && endpoint( event, Marker::rearmReturn ) < 0 ) ) )
+        {
+            return false;
+        }
+
         first = Marker::mainPostDone;
-        last  = Marker::syncPostDone;
+        last  = endpoint( event, Marker::rearmEnter ) >= endpoint( event, Marker::mainPostDone ) &&
+                       endpoint( event, Marker::mainPostDone ) >= 0
+                    ? Marker::rearmEnter
+                    : Marker::syncPostDone;
         break;
     case Metric::loopTail:
         first = Marker::syncPostDone;
@@ -468,6 +503,10 @@ inline bool frameGrabberTiming::duration( const fgTiming::Event &event, fgTiming
     case Metric::waitToWrite:
         first = Marker::waitReturn;
         last  = Marker::writeStampDone;
+        break;
+    case Metric::timeoutQuery:
+        first = Marker::timeoutEnter;
+        last  = Marker::timeoutReturn;
         break;
     default:
         return false;
@@ -769,7 +808,7 @@ inline void frameGrabberTiming::update( int64_t nowMono, int64_t nowReal )
         {
             if( event.valid & ( 1u << marker ) )
             {
-                event.anchorNs = event.markers[marker];
+                event.anchorNs = std::max( event.anchorNs, event.markers[marker] );
             }
         }
 
@@ -969,7 +1008,7 @@ inline void frameGrabberTiming::calculate( int64_t nowNs )
                 ( publication - acquisition ) * 1e-9, event.anchorNs, event.anchorNs );
         }
 
-        for( size_t index = metricIndex( Metric::wait ); index <= metricIndex( Metric::waitToWrite ); ++index )
+        for( size_t index = metricIndex( Metric::wait ); index < metricIndex( Metric::count ); ++index )
         {
             int64_t value = 0;
 
@@ -1123,8 +1162,7 @@ inline void frameGrabberTiming::calculate( int64_t nowNs )
                         }
                     }
 
-                    for( size_t index = metricIndex( Metric::wait ); index <= metricIndex( Metric::waitToWrite );
-                         ++index )
+                    for( size_t index = metricIndex( Metric::wait ); index < metricIndex( Metric::count ); ++index )
                     {
                         int64_t first = 0, second = 0;
 

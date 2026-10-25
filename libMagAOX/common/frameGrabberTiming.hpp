@@ -18,7 +18,7 @@ namespace fgTiming
 /// Shared seconds-based population, preserving existing framegrabber timing units.
 using Stats = MagAOX::timing::Stats;
 
-/// Ordered local monotonic endpoints; external SDK and realtime stamps stay separate.
+/// Stable local endpoint identifiers; capture order may defer rearm into the post-publication hook.
 enum class Marker : uint8_t
 {
     waitEnter,
@@ -28,8 +28,11 @@ enum class Marker : uint8_t
     loadDone,
     writeStampDone,
     mainPostDone,
-    syncPostDone,
+    syncPostDone, ///< Post-publication hook return; optional rearm can follow its notification before this endpoint.
     loopTailDone,
+    rearmEnter,
+    timeoutEnter,
+    timeoutReturn,
     count
 };
 
@@ -52,6 +55,7 @@ enum class Metric : uint8_t
     waitToWrite,
     previousTail,
     serialOverlap,
+    timeoutQuery,
     count
 };
 
@@ -236,6 +240,12 @@ inline constexpr size_t markerIndex( Marker marker /**< [in] Endpoint identifier
 /// Return one stable human-readable metric name.
 inline const char *metricName( Metric metric /**< [in] Population identifier. */ );
 
+/// Validate available nonnegative endpoints in an immediate or explicitly deferred rearm sequence.
+inline bool validMarkerOrder(
+    const std::array<int64_t, static_cast<size_t>( Marker::count )> &markers /**< [in] Local endpoint values. */,
+    uint32_t valid /**< [in] Available endpoint bits; unknown bits are rejected. */,
+    bool     allowIncompleteDeferred = false /**< [in] Permit missing entry after a reported capture failure. */ );
+
 /// Return the stable quality-member sequence used by readbacks and deltas.
 inline const std::array<uint64_t Counters::*, 14> &counterFields();
 
@@ -267,8 +277,81 @@ inline const char *metricName( Metric metric )
                                       "loopTail",
                                       "waitToWrite",
                                       "previousTail",
-                                      "serialOverlap" };
+                                      "serialOverlap",
+                                      "timeoutQuery" };
     return metricIndex( metric ) < metricIndex( Metric::count ) ? names[metricIndex( metric )] : "unknown";
+}
+inline bool validMarkerOrder( const std::array<int64_t, static_cast<size_t>( Marker::count )> &markers,
+                              uint32_t                                                         valid,
+                              bool                                                             allowIncompleteDeferred )
+{
+    constexpr uint32_t known = ( 1u << markerIndex( Marker::count ) ) - 1;
+
+    if( valid & ~known )
+    {
+        return false;
+    }
+
+    constexpr std::array<Marker, markerIndex( Marker::count )> immediate{ Marker::waitEnter,
+                                                                          Marker::waitReturn,
+                                                                          Marker::rearmEnter,
+                                                                          Marker::rearmReturn,
+                                                                          Marker::timeoutEnter,
+                                                                          Marker::timeoutReturn,
+                                                                          Marker::validated,
+                                                                          Marker::loadDone,
+                                                                          Marker::writeStampDone,
+                                                                          Marker::mainPostDone,
+                                                                          Marker::syncPostDone,
+                                                                          Marker::loopTailDone };
+    constexpr std::array<Marker, markerIndex( Marker::count )> deferred{ Marker::waitEnter,
+                                                                         Marker::waitReturn,
+                                                                         Marker::timeoutEnter,
+                                                                         Marker::timeoutReturn,
+                                                                         Marker::validated,
+                                                                         Marker::loadDone,
+                                                                         Marker::writeStampDone,
+                                                                         Marker::mainPostDone,
+                                                                         Marker::rearmEnter,
+                                                                         Marker::rearmReturn,
+                                                                         Marker::syncPostDone,
+                                                                         Marker::loopTailDone };
+
+    constexpr std::array orders{ immediate, deferred };
+
+    for( size_t path = 0; path < orders.size(); ++path )
+    {
+        if( path && !allowIncompleteDeferred && !( valid & ( 1u << markerIndex( Marker::rearmEnter ) ) ) )
+        {
+            continue;
+        }
+
+        int64_t previous = -1;
+        bool    ordered  = true;
+
+        for( Marker marker : orders[path] )
+        {
+            const size_t index = markerIndex( marker );
+
+            if( valid & ( 1u << index ) )
+            {
+                if( markers[index] < 0 || markers[index] < previous )
+                {
+                    ordered = false;
+                    break;
+                }
+
+                previous = markers[index];
+            }
+        }
+
+        if( ordered )
+        {
+            return true;
+        }
+    }
+
+    return false;
 }
 inline const std::array<uint64_t Counters::*, 14> &counterFields()
 {

@@ -33,7 +33,7 @@ namespace dev
  *
  * The derived class `derivedT` must be a MagAOXApp\<true\>, and must declare this class a friend like so:
  * \code
- * friend class dev::dssShutter<derivedT>;
+ * friend class dev::edtCamera<derivedT>;
  * \endcode
  *
  * A static configuration variable must be defined in derivedT as
@@ -58,7 +58,7 @@ class edtCamera : public ioDevice
 
   public:
   protected:
-    /** \name Configurable Parameters
+    /** \name Configurable Parameters - Data
      * @{
      */
     // Framegrabber:
@@ -78,6 +78,10 @@ class edtCamera : public ioDevice
 
     int m_pdvTimeouts{ 0 }; ///< Last cumulative SDK timeout count, reset when acquisition starts.
 
+    bool m_deferredRearmAllowed{ false }; ///< Configured ring can replenish a request after publication.
+
+    bool m_rearmPending{ false }; ///< Frame-worker obligation to replenish one consumed request or discard on exit.
+
     // std::string m_modeName; ///< The current mode name
 
     // std::string derived().m_nextMode; ///< The mode to be set by the next reconfiguration
@@ -95,8 +99,8 @@ class edtCamera : public ioDevice
     ~edtCamera() noexcept;
 
     /// Send a serial command over cameralink and retrieve the response
-    int pdvSerialWriteRead( std::string       &response,        ///< [out] the response to the command from the device
-                            const std::string &command,         /**< [in] the command to send to the device */
+    int pdvSerialWriteRead( std::string       &response, /**< [out] the response to the command from the device */
+                            const std::string &command,  /**< [in] the command to send to the device */
                             bool               logErrors = true /**< [in] log serial transport failures when true */
     );
 
@@ -176,7 +180,7 @@ class edtCamera : public ioDevice
       */
     int whilePowerOff();
 
-    /// Application the shutdown
+    /// Application shutdown.
     /** Shuts down the edtCamera thread
       *
       * \code
@@ -194,10 +198,16 @@ class edtCamera : public ioDevice
 
     /// Return a complete image and SDK timestamp, or clear both outputs and fail.
     /** A changed SDK timeout count rejects even a non-null partial-image buffer.
-     * The current latest-image selection and one-image requeue policy are preserved.
+     * Deferred rearm requires an eligible multibuffer ring and an eventual pdvFinishAcquisition() call
+     * from the same frame worker. Other callers retain immediate rearm.
      * \returns zero on success, or -1 for a failed/partial acquisition or invalid timestamp.
      */
-    int pdvAcquire( timespec &currImageTimestamp /**< [out] SDK timestamp, zeroed on failure. */ );
+    int
+    pdvAcquire( timespec &currImageTimestamp /**< [out] SDK timestamp, zeroed on failure. */,
+                bool deferRearm = false /**< [in] Defer eligible ring replenishment until the attempt finishes. */ );
+
+    /// Replenish one deferred request when continuing, or discard its obligation before recovery or exit.
+    void pdvFinishAcquisition( bool continuing /**< [in] The same worker will continue with the current ring. */ );
 
     /// Reopen the requested mode using the existing recovery path.
     int pdvReconfig();
@@ -284,6 +294,9 @@ class edtCamera : public ioDevice
 
     /// Read a diagnostic monotonic timestamp without changing the caller's errno.
     static int64_t timingNow();
+
+    /// Queue one image on the frame worker and record its independent timing endpoints.
+    void rearmImage();
 };
 
 template <class derivedT>
@@ -469,6 +482,9 @@ int edtCamera<derivedT>::pdvConfig( std::string &modeName )
     Dependent *dd_p;
     EdtDev    *edt_p = NULL;
     Edtinfo    edtinfo;
+
+    m_rearmPending         = false;
+    m_deferredRearmAllowed = false;
 
     // Preliminaries
     if( m_pdv )
@@ -665,12 +681,18 @@ int edtCamera<derivedT>::appShutdown()
 template <class derivedT>
 int edtCamera<derivedT>::pdvStartAcquisition()
 {
-    m_pdvTimeouts = pdv_timeouts( m_pdv );
+    m_rearmPending         = false;
+    m_deferredRearmAllowed = false;
+    m_pdvTimeouts          = pdv_timeouts( m_pdv );
 
     if( m_pdvTimeouts < 0 )
     {
         return -1;
     }
+
+    m_deferredRearmAllowed = m_pdv != nullptr && m_pdv->dd_p != nullptr && m_numBuffs > 1 &&
+                             m_pdv->ring_buffer_numbufs > 1 && m_pdv->dd_p->force_single == 0 &&
+                             m_pdv->dd_p->serial_trigger[0] == '\0';
 
     pdv_start_images( m_pdv, m_numBuffs );
 
@@ -678,9 +700,16 @@ int edtCamera<derivedT>::pdvStartAcquisition()
 }
 
 template <class derivedT>
-int edtCamera<derivedT>::pdvAcquire( timespec &currImageTimestamp )
+int edtCamera<derivedT>::pdvAcquire( timespec &currImageTimestamp, bool deferRearm )
 {
     currImageTimestamp = {};
+
+    if( m_rearmPending )
+    {
+        m_image_p = nullptr;
+        return -1;
+    }
+
     uint dmaTimeStamp[2]{};
     timingMark( derived(), MagAOX::fgTiming::Marker::waitEnter, 0 );
     m_image_p = pdv_wait_last_image_timed( m_pdv, dmaTimeStamp );
@@ -691,9 +720,18 @@ int edtCamera<derivedT>::pdvAcquire( timespec &currImageTimestamp )
         return -1;
     }
 
-    pdv_start_image( m_pdv );
-    timingMark( derived(), MagAOX::fgTiming::Marker::rearmReturn, 0 );
-    const int  timeouts = pdv_timeouts( m_pdv );
+    if( deferRearm && m_deferredRearmAllowed )
+    {
+        m_rearmPending = true;
+    }
+    else
+    {
+        rearmImage();
+    }
+
+    timingMark( derived(), MagAOX::fgTiming::Marker::timeoutEnter, 0 );
+    const int timeouts = pdv_timeouts( m_pdv );
+    timingMark( derived(), MagAOX::fgTiming::Marker::timeoutReturn, 0 );
     const bool complete = timeouts >= 0 && timeouts == m_pdvTimeouts;
     m_pdvTimeouts       = timeouts;
 
@@ -707,6 +745,30 @@ int edtCamera<derivedT>::pdvAcquire( timespec &currImageTimestamp )
     currImageTimestamp.tv_nsec = dmaTimeStamp[1];
 
     return 0;
+}
+
+template <class derivedT>
+void edtCamera<derivedT>::pdvFinishAcquisition( bool continuing )
+{
+    if( !m_rearmPending )
+    {
+        return;
+    }
+
+    m_rearmPending = false;
+
+    if( continuing && m_pdv != nullptr )
+    {
+        rearmImage();
+    }
+}
+
+template <class derivedT>
+void edtCamera<derivedT>::rearmImage()
+{
+    timingMark( derived(), MagAOX::fgTiming::Marker::rearmEnter, 0 );
+    pdv_start_image( m_pdv );
+    timingMark( derived(), MagAOX::fgTiming::Marker::rearmReturn, 0 );
 }
 
 template <class derivedT>

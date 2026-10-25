@@ -19,6 +19,7 @@
 #include <cstdlib>
 #include <deque>
 #include <future>
+#include <functional>
 #include <semaphore.h>
 #include <stdexcept>
 #include <string>
@@ -32,6 +33,7 @@
 
 using namespace MagAOX::app;
 
+/// \cond OCAM2KCTRL_TEST_SUPPORT
 namespace
 {
 
@@ -68,6 +70,10 @@ struct edtStubState
         timeoutCount            = 0;
         timeoutReadFails        = false;
         acquisitionCalls.clear();
+        configuration = {};
+        device        = {};
+        device.dd_p   = &configuration;
+        beforeRearm   = {};
     }
 
     int                        startImagesCalls{ 0 };   ///< Number of `pdv_start_images` calls observed.
@@ -89,6 +95,9 @@ struct edtStubState
     int  timeoutCount{ 0 };                    ///< Cumulative timeout count reported by the SDK.
     bool timeoutReadFails{ false };            ///< Timeout counter query fails.
     std::vector<std::string> acquisitionCalls; ///< Ordered SDK acquisition and timeout-counter calls.
+    Dependent                configuration{};  ///< Active camera configuration used by the simulated handle.
+    PdvDev                   device{};         ///< Configured SDK handle whose ring properties can be tested.
+    std::function<void()>    beforeRearm;      ///< Optional observer of stream state when a request is replenished.
 };
 
 /// Shared OCAM SDK stub state used to drive descramble output in tests.
@@ -143,15 +152,16 @@ void resetStubState()
 }
 
 /// Store a frame number into the raw EDT image buffer at the OCAM metadata offset.
-[[maybe_unused]] void setStubFrameNumber( unsigned int frameNumber )
+[[maybe_unused]] void setStubFrameNumber( unsigned int frameNumber /**< [in] OCAM counter stored in the raw frame. */ )
 {
     reinterpret_cast<int *>( g_edtStubState.waitImage.data() )[OCAM2_IMAGE_NB_OFFSET / 4] =
         static_cast<int>( frameNumber );
 }
 
 /// Queue one scripted serial response for the next `pdvSerialWriteRead` invocation.
-[[maybe_unused]] void
-queueSerialResponse( const std::string &response, int commandResult = 0, int initialWaitResult = 1 )
+[[maybe_unused]] void queueSerialResponse( const std::string &response /**< [in] Simulated response bytes. */,
+                                           int                commandResult = 0 /**< [in] Serial write result. */,
+                                           int initialWaitResult = 1 /**< [in] Initial response wait result. */ )
 {
     g_edtStubState.serialResponses.push_back( { response, commandResult, initialWaitResult } );
 }
@@ -216,11 +226,10 @@ extern "C"
 
     PdvDev *pdv_open_channel( const char *deviceName, int unit, int channel )
     {
-        static PdvDev device;
         static_cast<void>( deviceName );
         static_cast<void>( unit );
         static_cast<void>( channel );
-        return &device;
+        return &g_edtStubState.device;
     }
 
     void pdv_close( PdvDev *pdv_p )
@@ -265,8 +274,10 @@ extern "C"
 
     void pdv_multibuf( PdvDev *pdv_p, int numBuffs )
     {
-        static_cast<void>( pdv_p );
-        static_cast<void>( numBuffs );
+        if( pdv_p != nullptr )
+        {
+            pdv_p->ring_buffer_numbufs = numBuffs;
+        }
     }
 
     void pdv_start_images( PdvDev *pdv_p, int numBuffs )
@@ -295,6 +306,12 @@ extern "C"
     void pdv_start_image( PdvDev *pdv_p )
     {
         static_cast<void>( pdv_p );
+
+        if( g_edtStubState.beforeRearm )
+        {
+            g_edtStubState.beforeRearm();
+        }
+
         ++g_edtStubState.startImageCalls;
         g_edtStubState.acquisitionCalls.emplace_back( "rearm" );
     }
@@ -456,6 +473,7 @@ extern "C"
     }
 
 } // extern "C"
+/// \endcond
 
 namespace libXWCTest
 {
@@ -466,11 +484,12 @@ namespace libXWCTest
 namespace ocam2KCtrlTest
 {
 
+/// \cond OCAM2KCTRL_TEST_SUPPORT
 namespace
 {
 
 /// Build a unique shmim name for one temporary test stream.
-std::string uniqueShmimName( const std::string &suffix )
+std::string uniqueShmimName( const std::string &suffix /**< [in] Human-readable stream-name suffix. */ )
 {
     static unsigned counter = 0;
 
@@ -480,7 +499,7 @@ std::string uniqueShmimName( const std::string &suffix )
 }
 
 /// Build a unique temporary config-file path for one test.
-[[maybe_unused]] std::string uniqueConfigPath( const std::string &suffix )
+[[maybe_unused]] std::string uniqueConfigPath( const std::string &suffix /**< [in] Config filename suffix. */ )
 {
     return "/tmp/ocam2KCtrl_test_" + suffix + "_" + std::to_string( ::getpid() ) + ".conf";
 }
@@ -490,11 +509,11 @@ class tempStream
 {
   public:
     /// Create the temporary stream or throw if ImageStreamIO setup fails.
-    explicit tempStream( const std::string &name,
-                         uint32_t           width    = 1,
-                         uint32_t           height   = 1,
-                         uint32_t           depth    = 1,
-                         uint8_t            dataType = _DATATYPE_UINT8 )
+    explicit tempStream( const std::string &name /**< [in] Unique stream name. */,
+                         uint32_t           width    = 1 /**< [in] Image width. */,
+                         uint32_t           height   = 1 /**< [in] Image height. */,
+                         uint32_t           depth    = 1 /**< [in] Circular-buffer depth. */,
+                         uint8_t            dataType = _DATATYPE_UINT8 /**< [in] ImageStreamIO pixel type. */ )
         : m_name( name )
     {
         uint32_t imsize[3] = { width, height, depth };
@@ -564,17 +583,18 @@ class ocam2KCtrl_test : public MagAOX::app::ocam2KCtrl
 };
 
 /// Put the app into the nominal powered-on state used by the serial helpers.
-[[maybe_unused]] void setPoweredOn( ocam2KCtrl_test &app )
+[[maybe_unused]] void setPoweredOn( ocam2KCtrl_test &app /**< [in,out] Controller whose power state is initialized. */ )
 {
     static_cast<MagAOXAppT &>( app ).m_powerState = 1;
     app.m_powerTargetState                        = 1;
 }
 
 /// Seed one minimal but internally consistent camera-mode setup for startup and acquisition tests.
-[[maybe_unused]] void configureStartupMode( ocam2KCtrl_test   &app,
-                                            const std::string &modeName       = "science",
-                                            const std::string &serialCommand  = "mode science",
-                                            const std::string &configFileName = "stub.cfg" )
+[[maybe_unused]] void
+configureStartupMode( ocam2KCtrl_test   &app /**< [in,out] Controller configured for startup. */,
+                      const std::string &modeName       = "science" /**< [in] Startup mode name. */,
+                      const std::string &serialCommand  = "mode science" /**< [in] Mode-selection command. */,
+                      const std::string &configFileName = "stub.cfg" /**< [in] EDT configuration filename. */ )
 {
     dev::cameraConfig config;
 
@@ -601,7 +621,8 @@ class ocam2KCtrl_test : public MagAOX::app::ocam2KCtrl
 }
 
 /// Start a short-lived framegrabber thread so `frameGrabber::appLogic()` sees a running worker.
-void startFgThread( ocam2KCtrl_test &app, int sleepMs = 200 )
+void startFgThread( ocam2KCtrl_test &app /**< [in,out] Controller receiving a temporary frame worker. */,
+                    int              sleepMs = 200 /**< [in] Temporary worker lifetime, milliseconds. */ )
 {
     app.m_fgThread = std::thread(
         [sleepMs]()
@@ -611,7 +632,7 @@ void startFgThread( ocam2KCtrl_test &app, int sleepMs = 200 )
 }
 
 /// Join the temporary framegrabber thread if a test started one.
-void joinFgThread( ocam2KCtrl_test &app )
+void joinFgThread( ocam2KCtrl_test &app /**< [in,out] Controller whose temporary worker is joined. */ )
 {
     if( app.m_fgThread.joinable() )
     {
@@ -625,7 +646,9 @@ struct fgThreadScope
     ocam2KCtrl_test &m_app; ///< App whose temporary framegrabber thread is managed by this scope.
 
     /// Start a temporary framegrabber thread for the lifetime of this scope.
-    explicit fgThreadScope( ocam2KCtrl_test &app, int sleepMs = 200 ) : m_app( app )
+    explicit fgThreadScope( ocam2KCtrl_test &app /**< [in,out] Controller owning the temporary worker. */,
+                            int              sleepMs = 200 /**< [in] Temporary worker lifetime, milliseconds. */ )
+        : m_app( app )
     {
         startFgThread( m_app, sleepMs );
     }
@@ -644,12 +667,13 @@ struct startupScope
     bool             m_started; ///< Tracks whether `appStartup()` completed successfully in the test.
 
     /// Construct a startup guard for one test app instance.
-    explicit startupScope( ocam2KCtrl_test &app ) : m_app( app ), m_started( false )
+    explicit startupScope( ocam2KCtrl_test &app /**< [in,out] Controller whose startup resources are guarded. */ )
+        : m_app( app ), m_started( false )
     {
     }
 
     /// Record whether startup completed so shutdown only runs when needed.
-    void markStarted( bool started )
+    void markStarted( bool started /**< [in] Whether startup completed and now requires cleanup. */ )
     {
         m_started = started;
     }
@@ -667,12 +691,13 @@ struct startupScope
 };
 
 /// Report whether a telemetry timestamp has been written at least once.
-[[maybe_unused]] bool hasRecordedTime( const timespec &ts )
+[[maybe_unused]] bool hasRecordedTime( const timespec &ts /**< [in] Last telemetry timestamp. */ )
 {
     return ts.tv_sec != 0 || ts.tv_nsec != 0;
 }
 
 } // namespace
+/// \endcond
 
 #ifndef OCAM2KCTRL_TEST_SUPPORT_ONLY
 
@@ -1695,6 +1720,233 @@ TEST_CASE( "ocam2KCtrl acquisition recovery establishes a new timeout baseline",
     ocam2KCtrl::acquireAndCheckValid;
     ocam2KCtrl::startAcquisition;
 #endif
+    // clang-format on
+}
+
+/// Verify eligible rings replenish their request after the sync publication and preserve immediate callers.
+/** \ingroup ocam2KCtrl_unit_test */
+TEST_CASE( "ocam2KCtrl defers eligible ring replenishment until both publications", "[ocam2KCtrl][acquisition]" )
+{
+    resetStubState();
+    ocam2KCtrl_test app;
+    setPoweredOn( app );
+    app.m_pdv                                 = &g_edtStubState.device;
+    app.m_numBuffs                            = 64;
+    app.m_reconfig                            = false;
+    g_edtStubState.device.ring_buffer_numbufs = 64;
+    setStubFrameNumber( 100 );
+    REQUIRE( app.startAcquisition() == 0 );
+    g_edtStubState.acquisitionCalls.clear();
+
+    SECTION( "OCAM publishes the sync notification before rearming exactly once" )
+    {
+        tempStream main( uniqueShmimName( "deferred" ) );
+        REQUIRE( app.ensureSyncStream() == 0 );
+        REQUIRE( app.acquireAndCheckValid() == 0 );
+        CHECK( g_edtStubState.acquisitionCalls == std::vector<std::string>{ "wait", "timeouts" } );
+        CHECK( g_edtStubState.startImageCalls == 0 );
+        REQUIRE( app.m_rearmPending );
+
+        main.image()->md[0].cnt0 = 41;
+        ImageStreamIO_sempost( main.image(), -1 );
+        uint64_t syncCounterAtRearm = 0;
+        int      syncPostsAtRearm   = 0;
+        g_edtStubState.beforeRearm  = [&]()
+        {
+            syncCounterAtRearm = app.m_syncImageStream->md[0].cnt0;
+            sem_getvalue( app.m_syncImageStream->semptr[0], &syncPostsAtRearm );
+        };
+
+        REQUIRE( app.frameGrabberPostPublish( main.image() ) == 0 );
+        CHECK( syncCounterAtRearm == 41 );
+        CHECK( syncPostsAtRearm == 1 );
+        CHECK( g_edtStubState.startImageCalls == 1 );
+        CHECK_FALSE( app.m_rearmPending );
+        CHECK( g_edtStubState.acquisitionCalls == std::vector<std::string>{ "wait", "timeouts", "rearm" } );
+        app.pdvFinishAcquisition( true );
+        CHECK( g_edtStubState.startImageCalls == 1 );
+    }
+
+    SECTION( "generic EDT callers retain immediate rearm despite an eligible ring" )
+    {
+        timespec stamp{};
+        REQUIRE( app.pdvAcquire( stamp ) == 0 );
+        CHECK( g_edtStubState.acquisitionCalls == std::vector<std::string>{ "wait", "rearm", "timeouts" } );
+        CHECK_FALSE( app.m_rearmPending );
+    }
+
+    SECTION( "a missing finish cannot silently consume another request" )
+    {
+        timespec stamp{};
+        REQUIRE( app.pdvAcquire( stamp, true ) == 0 );
+        REQUIRE( app.pdvAcquire( stamp, true ) == -1 );
+        CHECK( stamp.tv_sec == 0 );
+        CHECK( stamp.tv_nsec == 0 );
+        CHECK( app.m_image_p == nullptr );
+        CHECK( g_edtStubState.acquisitionCalls == std::vector<std::string>{ "wait", "timeouts" } );
+        app.pdvFinishAcquisition( false );
+        CHECK_FALSE( app.m_rearmPending );
+        CHECK( g_edtStubState.startImageCalls == 0 );
+    }
+
+    // clang-format off
+    #ifdef OCAM2KCTRL_TEST_DOXYGEN_REF
+    XWCTEST_DOXYGEN_REF( ocam2KCtrl::acquireAndCheckValid() );
+    XWCTEST_DOXYGEN_REF( ocam2KCtrl::frameGrabberPostPublish( nullptr ) );
+    dev::edtCamera<ocam2KCtrl>::pdvAcquire;
+    dev::edtCamera<ocam2KCtrl>::pdvFinishAcquisition;
+    #endif
+    // clang-format on
+}
+
+/// Verify SDK configurations that require immediate requests cannot opt into deferred replenishment.
+/** \ingroup ocam2KCtrl_unit_test */
+TEST_CASE( "ocam2KCtrl keeps immediate rearm for unqualified ring configurations", "[ocam2KCtrl][acquisition]" )
+{
+    resetStubState();
+    ocam2KCtrl_test app;
+    setPoweredOn( app );
+    app.m_pdv                                 = &g_edtStubState.device;
+    app.m_numBuffs                            = 64;
+    g_edtStubState.device.ring_buffer_numbufs = 64;
+    setStubFrameNumber( 100 );
+
+    SECTION( "one requested buffer" )
+    {
+        app.m_numBuffs = 1;
+    }
+
+    SECTION( "only one allocated buffer" )
+    {
+        g_edtStubState.device.ring_buffer_numbufs = 1;
+    }
+
+    SECTION( "SDK force_single" )
+    {
+        g_edtStubState.configuration.force_single = 1;
+    }
+
+    SECTION( "serial-triggered acquisition" )
+    {
+        g_edtStubState.configuration.serial_trigger[0] = 'x';
+    }
+
+    SECTION( "missing active SDK configuration" )
+    {
+        g_edtStubState.device.dd_p = nullptr;
+    }
+
+    REQUIRE( app.startAcquisition() == 0 );
+    g_edtStubState.acquisitionCalls.clear();
+    REQUIRE( app.acquireAndCheckValid() == 0 );
+    CHECK( g_edtStubState.acquisitionCalls == std::vector<std::string>{ "wait", "rearm", "timeouts" } );
+    CHECK_FALSE( app.m_rearmPending );
+    app.pdvFinishAcquisition( true );
+    CHECK( g_edtStubState.startImageCalls == 1 );
+
+    // clang-format off
+    #ifdef OCAM2KCTRL_TEST_DOXYGEN_REF
+    XWCTEST_DOXYGEN_REF( ocam2KCtrl::startAcquisition() );
+    dev::edtCamera<ocam2KCtrl>::pdvStartAcquisition;
+    dev::edtCamera<ocam2KCtrl>::pdvAcquire;
+    #endif
+    // clang-format on
+}
+
+/// Verify failed and interrupted attempts discard their deferred request before recovery or shutdown.
+/** \ingroup ocam2KCtrl_unit_test */
+TEST_CASE( "ocam2KCtrl discards deferred requests on recovery and publication exit", "[ocam2KCtrl][acquisition]" )
+{
+    resetStubState();
+    ocam2KCtrl_test app;
+    setPoweredOn( app );
+    app.m_pdv                                 = &g_edtStubState.device;
+    app.m_numBuffs                            = 64;
+    app.m_modeName                            = "science";
+    app.m_reconfig                            = false;
+    g_edtStubState.device.ring_buffer_numbufs = 64;
+    setStubFrameNumber( 100 );
+    REQUIRE( app.startAcquisition() == 0 );
+
+    SECTION( "partial SDK frame" )
+    {
+        g_edtStubState.timeoutDuringWait = true;
+        REQUIRE( app.acquireAndCheckValid() == -1 );
+        CHECK( app.m_reconfig );
+    }
+
+    SECTION( "invalid SDK timestamp" )
+    {
+        g_edtStubState.waitTimeNsec = 1000000000;
+        REQUIRE( app.acquireAndCheckValid() == -1 );
+        CHECK( app.m_reconfig );
+    }
+
+    SECTION( "rejected OCAM frame number" )
+    {
+        app.m_lastImageNumber = 90;
+        REQUIRE( app.acquireAndCheckValid() == 1 );
+        CHECK( app.m_reconfig );
+    }
+
+    SECTION( "no publication destination" )
+    {
+        REQUIRE( app.acquireAndCheckValid() == 0 );
+        REQUIRE( app.frameGrabberPostPublish( nullptr ) == 0 );
+    }
+
+    SECTION( "sync publication unavailable" )
+    {
+        tempStream main( uniqueShmimName( "missing_sync" ) );
+        REQUIRE( app.acquireAndCheckValid() == 0 );
+        REQUIRE( app.frameGrabberPostPublish( main.image() ) == -1 );
+    }
+
+    SECTION( "shutdown requested while processing" )
+    {
+        tempStream main( uniqueShmimName( "shutdown" ) );
+        REQUIRE( app.ensureSyncStream() == 0 );
+        REQUIRE( app.acquireAndCheckValid() == 0 );
+        app.m_shutdown = 1;
+        REQUIRE( app.frameGrabberPostPublish( main.image() ) == 0 );
+    }
+
+    SECTION( "reconfiguration requested while processing" )
+    {
+        tempStream main( uniqueShmimName( "reconfig" ) );
+        REQUIRE( app.ensureSyncStream() == 0 );
+        REQUIRE( app.acquireAndCheckValid() == 0 );
+        app.m_reconfig = true;
+        REQUIRE( app.frameGrabberPostPublish( main.image() ) == 0 );
+    }
+
+    SECTION( "power lost while processing" )
+    {
+        tempStream main( uniqueShmimName( "poweroff" ) );
+        REQUIRE( app.ensureSyncStream() == 0 );
+        REQUIRE( app.acquireAndCheckValid() == 0 );
+        static_cast<MagAOXAppT &>( app ).m_powerState = 0;
+        REQUIRE( app.frameGrabberPostPublish( main.image() ) == 0 );
+    }
+
+    SECTION( "acquisition restarted before the previous attempt finishes" )
+    {
+        REQUIRE( app.acquireAndCheckValid() == 0 );
+        REQUIRE( app.m_rearmPending );
+        REQUIRE( app.startAcquisition() == 0 );
+    }
+
+    CHECK_FALSE( app.m_rearmPending );
+    app.pdvFinishAcquisition( true );
+    CHECK( g_edtStubState.startImageCalls == 0 );
+
+    // clang-format off
+    #ifdef OCAM2KCTRL_TEST_DOXYGEN_REF
+    XWCTEST_DOXYGEN_REF( ocam2KCtrl::acquireAndCheckValid() );
+    XWCTEST_DOXYGEN_REF( ocam2KCtrl::frameGrabberPostPublish( nullptr ) );
+    XWCTEST_DOXYGEN_REF( ocam2KCtrl::requestAcquisitionRecovery() );
+    dev::edtCamera<ocam2KCtrl>::pdvFinishAcquisition;
+    #endif
     // clang-format on
 }
 

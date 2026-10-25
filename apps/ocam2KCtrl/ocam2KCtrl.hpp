@@ -359,10 +359,10 @@ class ocam2KCtrl : public MagAOXApp<>,
      */
     int reconfig();
 
-    /// Publish the sync-only stream immediately after the main framegrabber publication.
+    /// Publish the sync-only stream after the main image, then replenish an eligible EDT ring.
     /** This hot path relies on framegrabber sequencing: configureAcquisition() and this hook both run on the
      * framegrabber thread, while appShutdown() destroys the sync stream only after frameGrabber::appShutdown()
-     * joins that thread.
+     * joins that thread. Deferred replenishment remains on this same worker and runs after both notifications.
      */
     int frameGrabberPostPublish( IMAGE *imageStream /**< [in] main framegrabber stream that was just posted */ );
 
@@ -1668,8 +1668,10 @@ inline int ocam2KCtrl::startAcquisition()
 
 inline int ocam2KCtrl::acquireAndCheckValid()
 {
-    if( edtCamera<ocam2KCtrl>::pdvAcquire( m_currImageTimestamp ) < 0 )
+    if( edtCamera<ocam2KCtrl>::pdvAcquire( m_currImageTimestamp, true ) < 0 )
     {
+        edtCamera<ocam2KCtrl>::pdvFinishAcquisition( false );
+
         if( powerState() != 1 || powerStateTarget() != 1 )
         {
             return -1;
@@ -1696,6 +1698,8 @@ inline int ocam2KCtrl::acquireAndCheckValid()
 
     if( delta != 1 )
     {
+        edtCamera<ocam2KCtrl>::pdvFinishAcquisition( false );
+
         // Unsigned subtraction permits exactly UINT_MAX -> zero and rejects gaps across wrap.
         if( delta > 1 && delta < 100 )
         {
@@ -1801,6 +1805,8 @@ inline void ocam2KCtrl::frameGrabberReconfigureComplete()
 
 inline void ocam2KCtrl::requestAcquisitionRecovery()
 {
+    edtCamera<ocam2KCtrl>::pdvFinishAcquisition( false );
+
     std::lock_guard<std::mutex> lock( m_indiMutex );
 
     if( m_nextMode.empty() )
@@ -1815,11 +1821,13 @@ inline int ocam2KCtrl::frameGrabberPostPublish( IMAGE *imageStream )
 {
     if( imageStream == nullptr )
     {
+        edtCamera<ocam2KCtrl>::pdvFinishAcquisition( false );
         return 0;
     }
 
     if( m_syncImageStream == nullptr )
     {
+        edtCamera<ocam2KCtrl>::pdvFinishAcquisition( false );
         return log<software_error, -1>( { "Sync ImageStreamIO stream unavailable during publication" } );
     }
 
@@ -1835,6 +1843,8 @@ inline int ocam2KCtrl::frameGrabberPostPublish( IMAGE *imageStream )
     m_syncImageStream->md[0].write       = 0;
 
     ImageStreamIO_sempost( m_syncImageStream, -1 );
+
+    edtCamera<ocam2KCtrl>::pdvFinishAcquisition( !m_reconfig && !shutdown() && powerState() > 0 );
 
     return 0;
 }

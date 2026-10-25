@@ -14,16 +14,23 @@ struct EdtDev
     int unused; ///< Unused storage distinguishing the simulated SDK structures.
 };
 
+/// Forward declaration of the active stub camera configuration.
+struct Dependent;
+
 /// Stub EDT camera handle type used by unit tests.
 struct PdvDev
 {
-    int unused; ///< Unused storage distinguishing the simulated SDK structures.
+    int        unused;                   ///< Unused storage distinguishing the simulated SDK structures.
+    Dependent *dd_p{ nullptr };          ///< Simulated active camera configuration.
+    int        ring_buffer_numbufs{ 0 }; ///< Number of allocated DMA ring buffers.
 };
 
 /// Stub EDT dependent-configuration type used by unit tests.
 struct Dependent
 {
-    int unused; ///< Unused storage distinguishing the simulated SDK structures.
+    int  unused;               ///< Unused storage distinguishing the simulated SDK structures.
+    int  force_single{ 0 };    ///< Configuration requires immediate single-image acquisition.
+    char serial_trigger[32]{}; ///< Optional serial acquisition-trigger command.
 };
 
 /// Stub EDT configuration info structure used by unit tests.

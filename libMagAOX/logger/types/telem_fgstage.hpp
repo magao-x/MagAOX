@@ -49,7 +49,9 @@ struct telem_fgstage : public flatbuffer_log
     static logMetaDetail getAccessor( const std::string &member /**< [in] scalar or population_field name */ );
 
   private:
-    static constexpr size_t metricCount = size_t( fgTiming::Metric::count ); ///< Complete stable metric identifier set.
+    static constexpr size_t metricCount =
+        size_t( fgTiming::Metric::count );          ///< Complete current metric identifier set.
+    static constexpr size_t legacyMetricCount = 16; ///< Original schema has no timeout-query metric.
 
     /// Serialize one raw, signed-change or serial-duration population in seconds.
     static flatbuffers::Offset<FgStageStats>
@@ -70,16 +72,17 @@ struct telem_fgstage : public flatbuffer_log
     static bool validStats( const FgStageStats *value /**< [in] required population */,
                             bool                signedValues /**< [in] permit signed mean and extrema */ );
 
-    /// Validate a full unique metric-ID set and its maximum independent population count.
+    /// Validate a unique complete legacy or current metric-ID set and its population bound.
     static bool validMetrics( const flatbuffers::Vector<flatbuffers::Offset<FgStageMetricStats>> *rows
                               /**< [in] required metric population */,
                               uint64_t maximum /**< [in] retained frame or qualified cohort bound */,
                               bool     changes /**< [in] every metric is a signed frame-to-frame change */ );
 
-    /// Format a population while distinguishing a missing sample from unavailable sample variance.
-    static void formatStats( std::ostream       &output /**< [in/out] formatted record */,
-                             const std::string  &name /**< [in] stable population label */,
-                             const FgStageStats *value /**< [in] verified population */ );
+    /// Format a population, preserving unavailable legacy metrics and missing sample variance.
+    static void
+    formatStats( std::ostream       &output /**< [in/out] formatted record */,
+                 const std::string  &name /**< [in] stable population label */,
+                 const FgStageStats *value /**< [in] verified population or null for a missing legacy metric */ );
 
     /// Extract a typed summary scalar for logMeta.
     template <typename valueT, auto member>
@@ -166,7 +169,8 @@ inline telem_fgstage::messageT::messageT( const fgTiming::Summary &summary )
     static_assert( size_t( fgTiming::Metric::waitToWrite ) == size_t( FgStageMetric_waitToWrite ) );
     static_assert( size_t( fgTiming::Metric::previousTail ) == size_t( FgStageMetric_previousTail ) );
     static_assert( size_t( fgTiming::Metric::serialOverlap ) == size_t( FgStageMetric_serialOverlap ) );
-    static_assert( size_t( fgTiming::Metric::count ) == 16 );
+    static_assert( size_t( fgTiming::Metric::timeoutQuery ) == size_t( FgStageMetric_timeoutQuery ) );
+    static_assert( size_t( fgTiming::Metric::count ) == 17 );
     static_assert( size_t( fgTiming::Availability::disabled ) == size_t( FgStageAvailability_disabled ) );
     static_assert( size_t( fgTiming::Availability::warmingUp ) == size_t( FgStageAvailability_warmingUp ) );
     static_assert( size_t( fgTiming::Availability::valid ) == size_t( FgStageAvailability_valid ) );
@@ -249,7 +253,7 @@ inline bool telem_fgstage::validMetrics( const flatbuffers::Vector<flatbuffers::
                                          uint64_t                                                            maximum,
                                          bool                                                                changes )
 {
-    if( !rows || rows->size() != metricCount )
+    if( !rows || ( rows->size() != legacyMetricCount && rows->size() != metricCount ) )
     {
         return false;
     }
@@ -258,7 +262,7 @@ inline bool telem_fgstage::validMetrics( const flatbuffers::Vector<flatbuffers::
 
     for( const auto *row : *rows )
     {
-        if( !row || size_t( row->metric() ) >= seen.size() || seen[size_t( row->metric() )] )
+        if( !row || size_t( row->metric() ) >= rows->size() || seen[size_t( row->metric() )] )
         {
             return false;
         }
@@ -327,7 +331,9 @@ inline bool telem_fgstage::verify( flatlogs::bufferPtrT &buffer, flatlogs::msgLe
         }
     }
 
-    return validMetrics( record->metrics(), record->capacity(), false ) &&
+    return record->metrics()->size() == record->late_change()->size() &&
+           record->metrics()->size() == record->early_change()->size() &&
+           validMetrics( record->metrics(), record->capacity(), false ) &&
            validMetrics( record->late_change(), record->late(), true ) &&
            validMetrics( record->early_change(), record->early(), true ) &&
            validStats( record->serial_duration(), false ) &&
@@ -336,9 +342,10 @@ inline bool telem_fgstage::verify( flatlogs::bufferPtrT &buffer, flatlogs::msgLe
 
 inline void telem_fgstage::formatStats( std::ostream &output, const std::string &name, const FgStageStats *value )
 {
-    output << ' ' << name << "[n=" << value->count() << " valid=" << value->valid() << "]=";
+    output << ' ' << name << "[n=" << ( value ? value->count() : 0 ) << " valid=" << ( value && value->valid() )
+           << "]=";
 
-    if( !value->count() )
+    if( !value || !value->count() )
     {
         output << "unavailable";
         return;
@@ -388,6 +395,11 @@ inline std::string telem_fgstage::msgString( void *buffer, flatlogs::msgLenT len
             formatStats( output,
                          std::string( population.first ) + fgTiming::metricName( fgTiming::Metric( row->metric() ) ),
                          row->value() );
+        }
+
+        if( population.second->size() == legacyMetricCount )
+        {
+            formatStats( output, std::string( population.first ) + "timeoutQuery", nullptr );
         }
     }
 

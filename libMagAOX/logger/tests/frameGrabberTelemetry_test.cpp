@@ -316,6 +316,7 @@ TEST_CASE( "Frame grabber stage telemetry preserves independent populations", "[
     REQUIRE( text.find( "acquisitionToWrite[n=12 valid=1]=-5e-06+/-1e-06" ) != std::string::npos );
     REQUIRE( text.find( "earlyChange_rearm[n=2 valid=1]=-7e-05" ) != std::string::npos );
     REQUIRE( text.find( "serialDuration[n=3 valid=1]=0.01+/-0.001" ) != std::string::npos );
+    REQUIRE( text.find( "timeoutQuery[n=12 valid=1]=0.00017" ) != std::string::npos );
     REQUIRE( text.find( "controlDropped:18014398509482098" ) != std::string::npos );
     const auto          json = telem_fgstage::msgJSON( payload,
                                               input.builder.GetSize(),
@@ -328,6 +329,8 @@ TEST_CASE( "Frame grabber stage telemetry preserves independent populations", "[
     REQUIRE( decoded->session() == summary.session );
     REQUIRE( decoded->total()->control_dropped() == summary.total.controlDropped );
     REQUIRE( decoded->stream_inode() == summary.streamInode );
+    sameStats( decoded->metrics()->Get( size_t( fgTiming::Metric::timeoutQuery ) )->value(),
+               summary.metrics[size_t( fgTiming::Metric::timeoutQuery )] );
     sameStats( decoded->early_change()->Get( size_t( fgTiming::Metric::loopTail ) )->value(),
                summary.earlyChange[size_t( fgTiming::Metric::loopTail )] );
 }
@@ -608,6 +611,57 @@ TEST_CASE( "Frame grabber telemetry validates stable metric identities", "[frame
                      summary.metrics[size_t( fgTiming::Metric::rearm )].mean );
         }
     }
+}
+
+/// Read original sixteen-metric records without inventing timeout-query observations.
+/** \ingroup frameGrabberTelemetry_unit_test
+ * \see MagAOX::logger::telem_fgstage::verify
+ * \see MagAOX::logger::telem_fgstage::msgString
+ * \see MagAOX::logger::telem_fgstage::getAccessor
+ */
+TEST_CASE( "Frame grabber telemetry reads legacy metric sets", "[frameGrabberTelemetry]" )
+{
+    const auto            summary = sampleSummary();
+    std::vector<unsigned> identifiers;
+
+    for( unsigned index = 0; index < 16; ++index )
+    {
+        identifiers.push_back( 15 - index );
+    }
+
+    telem_fgstage::messageT message( summary );
+    replaceRows( message, summary, identifiers );
+    auto buffer = envelope( message );
+    REQUIRE( verifyLogEntry( telem_fgstage::eventCode, buffer.get() ) );
+    auto *payload = message.builder.GetBufferPointer();
+    REQUIRE( GetTelem_fgstage_fb( payload )->metrics()->size() == 16 );
+    REQUIRE( project<double>( "rearm_mean", payload ) == summary.metrics[6].mean );
+
+    for( const std::string prefix : { "", "lateChange_", "earlyChange_" } )
+    {
+        REQUIRE( project<uint64_t>( prefix + "timeoutQuery_count", payload ) == 0 );
+        REQUIRE_FALSE( project<bool>( prefix + "timeoutQuery_valid", payload ) );
+        REQUIRE( mx::math::isNan( project<double>( prefix + "timeoutQuery_mean", payload ) ) );
+        REQUIRE( mx::math::isNan( project<double>( prefix + "timeoutQuery_stddev", payload ) ) );
+    }
+
+    const auto text = telem_fgstage::msgString( payload, message.builder.GetSize() );
+    REQUIRE( text.find( "timeoutQuery[n=0 valid=0]=unavailable" ) != std::string::npos );
+    const auto          json = telem_fgstage::msgJSON( payload,
+                                              message.builder.GetSize(),
+                                              reinterpret_cast<const uint8_t *>( telem_fgstage_bfbs ),
+                                              telem_fgstage_bfbs_len );
+    flatbuffers::Parser parser;
+    REQUIRE( parser.Deserialize( reinterpret_cast<const uint8_t *>( telem_fgstage_bfbs ), telem_fgstage_bfbs_len ) );
+    REQUIRE( parser.Parse( json.c_str() ) );
+    REQUIRE( GetTelem_fgstage_fb( parser.builder_.GetBufferPointer() )->metrics()->size() == 16 );
+
+    telem_fgstage::messageT inconsistent( summary );
+    auto                   *record = GetTelem_fgstage_fb( inconsistent.builder.GetBufferPointer() );
+    flatbuffers::WriteScalar<flatbuffers::uoffset_t>(
+        const_cast<void *>( static_cast<const void *>( record->late_change() ) ), 16 );
+    auto inconsistentBuffer = envelope( inconsistent );
+    REQUIRE_FALSE( verifyLogEntry( telem_fgstage::eventCode, inconsistentBuffer.get() ) );
 }
 
 } // namespace frameGrabberTelemetryTest

@@ -20,7 +20,8 @@ enum FgStageMetric : ubyte
     loopTail = 12,
     waitToWrite = 13,
     previousTail = 14,
-    serialOverlap = 15
+    serialOverlap = 15,
+    timeoutQuery = 16
 }
 
 enum FgStageAvailability : ubyte

@@ -2,6 +2,7 @@
  * \brief Paired timestamp, stage attribution, control overlap and concurrent handoff qualification tests.
  */
 #include <atomic>
+#include <string>
 #include <thread>
 
 #include "../../../../tests/testXWC.hpp"
@@ -47,8 +48,256 @@ void frame( Collector &collector /**< [in,out] Collector under test. */,
     collector.markAt( Marker::loopTailDone, returned + 700 + extra + bracket + post );
     collector.finish();
 }
+
+/// Publish a frame whose timeout query precedes conversion and whose rearm follows both notifications.
+void deferredFrame( Collector &collector /**< [in,out] Collector under test. */,
+                    int64_t    returned /**< [in] SDK-return endpoint, ns. */,
+                    uint64_t   counter /**< [in] Camera and output counter. */,
+                    int64_t    queryExtra    = 0 /**< [in] Additional timeout-query duration, ns. */,
+                    int64_t    rearmExtra    = 0 /**< [in] Additional post-publication rearm duration, ns. */,
+                    uint32_t   failedMarkers = 0 /**< [in] Failed timeout-return or rearm endpoint capture bits. */ )
+{
+    constexpr int64_t epoch = 1700000000000000000LL;
+    collector.beginAt( returned - 450000 );
+    collector.markAt( Marker::waitReturn, returned );
+    collector.markAt( Marker::timeoutEnter, returned + 10 );
+    collector.markAt( Marker::timeoutReturn,
+                      failedMarkers & ( 1u << markerIndex( Marker::timeoutReturn ) ) ? -1
+                                                                                     : returned + 110 + queryExtra );
+    collector.markAt( Marker::validated, returned + 210 + queryExtra );
+    collector.markAt( Marker::loadDone, returned + 1210 + queryExtra );
+    collector.markAt( Marker::writeStampDone, returned + 1260 + queryExtra );
+    collector.frame( counter );
+    collector.published( stamp( epoch + returned ), stamp( epoch + returned + 1260 + queryExtra ), counter, 77 );
+    collector.markAt( Marker::mainPostDone, returned + 1360 + queryExtra );
+    collector.markAt( Marker::rearmEnter,
+                      failedMarkers & ( 1u << markerIndex( Marker::rearmEnter ) ) ? -1 : returned + 1460 + queryExtra );
+    collector.markAt(
+        Marker::rearmReturn,
+        failedMarkers & ( 1u << markerIndex( Marker::rearmReturn ) ) ? -1 : returned + 1960 + queryExtra + rearmExtra );
+    collector.markAt( Marker::syncPostDone, returned + 2010 + queryExtra + rearmExtra );
+    collector.markAt( Marker::loopTailDone, returned + 2110 + queryExtra + rearmExtra );
+    collector.finish();
+}
 } // namespace
 /// \endcond
+
+/// Preserve marker identifiers while accepting only the two supported partial chronological paths.
+/** \ingroup frameGrabberTiming_unit_test
+ * \see MagAOX::fgTiming::validMarkerOrder
+ */
+TEST_CASE( "Frame markers preserve legacy identity and validate deferred rearm order", "[frameGrabberTiming]" )
+{
+    REQUIRE( markerIndex( Marker::loopTailDone ) == 8 );
+    REQUIRE( markerIndex( Marker::rearmEnter ) == 9 );
+    REQUIRE( markerIndex( Marker::timeoutEnter ) == 10 );
+    REQUIRE( markerIndex( Marker::timeoutReturn ) == 11 );
+    REQUIRE( metricIndex( Metric::timeoutQuery ) == 16 );
+    REQUIRE( std::string( metricName( Metric::timeoutQuery ) ) == "timeoutQuery" );
+    std::array<int64_t, markerIndex( Marker::count )> markers{};
+
+    for( size_t index = 0; index < 9; ++index )
+    {
+        markers[index] = index * 100;
+    }
+
+    REQUIRE( validMarkerOrder( markers, 0x1ff ) );
+    markers[markerIndex( Marker::rearmReturn )] = 750;
+    REQUIRE_FALSE( validMarkerOrder( markers, 0x1ff ) );
+    markers = { 0, 100, 700, 400, 500, 550, 600, 750, 800, 650, 200, 300 };
+    REQUIRE( validMarkerOrder( markers, 0xfff ) );
+    REQUIRE_FALSE( validMarkerOrder( markers, 0xfff & ~( 1u << markerIndex( Marker::rearmEnter ) ) ) );
+    REQUIRE( validMarkerOrder( markers, 0xfff & ~( 1u << markerIndex( Marker::rearmEnter ) ), true ) );
+    markers[markerIndex( Marker::rearmReturn )] = 775;
+    REQUIRE_FALSE( validMarkerOrder( markers, 0xfff ) );
+    markers = { 0, 100, 200, 400, 500, 550, 600, 750, 800, 150, 250, 300 };
+    REQUIRE( validMarkerOrder( markers, 0xfff ) );
+    REQUIRE( validMarkerOrder( markers, 0 ) );
+    REQUIRE_FALSE( validMarkerOrder( markers, 1u << markerIndex( Marker::count ) ) );
+    markers[markerIndex( Marker::timeoutReturn )] = -1;
+    REQUIRE_FALSE( validMarkerOrder( markers, 0xfff ) );
+}
+
+/// Separate timeout-query changes from deferred rearm without changing publication decomposition or retention.
+/** \ingroup frameGrabberTiming_unit_test
+ * \see MagAOX::app::dev::frameGrabberTiming::markAt
+ * \see MagAOX::app::dev::frameGrabberTiming::summary
+ * \see MagAOX::app::dev::frameGrabberTiming::traceRecords
+ */
+TEST_CASE( "Deferred rearm and timeout timing retain distinct matched populations", "[frameGrabberTiming]" )
+{
+    Collector collector;
+    collector.configure( 2, 16, true, 20e-6, 1e-6, 8 );
+
+    for( uint64_t index = 1; index <= 8; ++index )
+    {
+        deferredFrame(
+            collector, 1000000000 + ( index - 1 ) * 500000, index, index == 5 ? 30000 : 0, index == 5 ? 80000 : 0 );
+    }
+
+    collector.update( 1003600000 );
+    const auto &summary = collector.summary();
+    REQUIRE( summary.total.invalid == 0 );
+    REQUIRE( summary.metrics[metricIndex( Metric::timeoutQuery )].count == 8 );
+    REQUIRE( summary.metrics[metricIndex( Metric::timeoutQuery )].max == Approx( 30100e-9 ) );
+    REQUIRE( summary.metrics[metricIndex( Metric::rearm )].max == Approx( 80500e-9 ) );
+    REQUIRE( summary.metrics[metricIndex( Metric::validation )].mean == Approx( 100e-9 ) );
+    REQUIRE( summary.metrics[metricIndex( Metric::syncPost )].mean == Approx( 100e-9 ) );
+    REQUIRE( summary.metrics[metricIndex( Metric::loopTail )].mean == Approx( 100e-9 ) );
+    REQUIRE( summary.late == 1 );
+    REQUIRE( summary.early == 1 );
+    REQUIRE( summary.lateChange[metricIndex( Metric::timeoutQuery )].mean == Approx( 30e-6 ) );
+    REQUIRE( summary.earlyChange[metricIndex( Metric::timeoutQuery )].mean == Approx( -30e-6 ) );
+    REQUIRE( summary.lateChange[metricIndex( Metric::rearm )].mean == Approx( 80e-6 ) );
+    REQUIRE( summary.lateChange[metricIndex( Metric::syncPost )].mean == Approx( 0 ) );
+    REQUIRE( summary.lateChange[metricIndex( Metric::loopTail )].mean == Approx( 0 ) );
+    REQUIRE( summary.lateChange[metricIndex( Metric::timeoutQuery )].mean +
+                 summary.lateChange[metricIndex( Metric::validation )].mean +
+                 summary.lateChange[metricIndex( Metric::conversion )].mean +
+                 summary.lateChange[metricIndex( Metric::writeBracket )].mean ==
+             Approx( summary.lateChange[metricIndex( Metric::waitToWrite )].mean ) );
+    REQUIRE( summary.lateWaitReturnInterval.mean + summary.lateChange[metricIndex( Metric::waitToWrite )].mean ==
+             Approx( summary.lateWriteEndpointInterval.mean ) );
+    REQUIRE( collector.traceRecords().size() == 2 );
+
+    for( const auto &record : collector.traceRecords() )
+    {
+        for( const auto &event : record.events )
+        {
+            REQUIRE( validMarkerOrder( event.markers, event.valid ) );
+            REQUIRE( event.anchorNs == event.markers[markerIndex( Marker::loopTailDone )] );
+        }
+    }
+}
+
+/// Preserve bounded overwrites and reject backward captures independently of stable endpoint identifiers.
+/** \ingroup frameGrabberTiming_unit_test
+ * \see MagAOX::app::dev::frameGrabberTiming::markAt
+ */
+TEST_CASE( "Frame capture ordering supports overwrites and rejects backward appended endpoints",
+           "[frameGrabberTiming]" )
+{
+    Collector collector;
+    collector.configure( 2, 8, true );
+    collector.beginAt( 100 );
+    collector.markAt( Marker::waitReturn, 200 );
+    collector.markAt( Marker::timeoutEnter, 210 );
+    collector.markAt( Marker::timeoutReturn, 230 );
+    collector.markAt( Marker::validated, 240 );
+    collector.markAt( Marker::timeoutReturn, 235 );
+    collector.finish( Outcome::rejected );
+    collector.update( 300 );
+    REQUIRE( collector.summary().total.invalid == 0 );
+    REQUIRE( collector.summary().metrics[metricIndex( Metric::timeoutQuery )].mean == Approx( 25e-9 ) );
+    REQUIRE( collector.summary().metrics[metricIndex( Metric::validation )].mean == Approx( 5e-9 ) );
+
+    collector.beginAt( 400 );
+    collector.markAt( Marker::waitReturn, 500 );
+    collector.markAt( Marker::timeoutEnter, 510 );
+    collector.markAt( Marker::timeoutReturn, 505 );
+    collector.markAt( Marker::timeoutReturn, 530 );
+    collector.markAt( Marker::validated, 540 );
+    collector.markAt( Marker::timeoutReturn, 550 );
+    collector.finish( Outcome::failed );
+    collector.update( 600 );
+    REQUIRE( collector.summary().total.invalid == 2 );
+    REQUIRE( collector.summary().metrics[metricIndex( Metric::timeoutQuery )].count == 1 );
+}
+
+/// Keep incomplete modern neighborhoods raw and refuse durations whose new endpoint capture failed.
+/** \ingroup frameGrabberTiming_unit_test
+ * \see MagAOX::fgTiming::validMarkerOrder
+ * \see MagAOX::app::dev::frameGrabberTiming::traceRecords
+ * \see MagAOX::app::dev::frameGrabberTiming::summary
+ */
+TEST_CASE( "Failed modern clocks retain unqualified raw traces without legacy duration fallback",
+           "[frameGrabberTiming]" )
+{
+    uint32_t failed = 0;
+
+    SECTION( "missing deferred rearm entry" )
+    {
+        failed = 1u << markerIndex( Marker::rearmEnter );
+    }
+
+    SECTION( "missing timeout query return" )
+    {
+        failed = 1u << markerIndex( Marker::timeoutReturn );
+    }
+
+    SECTION( "both deferred rearm endpoints are unavailable" )
+    {
+        failed = ( 1u << markerIndex( Marker::rearmEnter ) ) | ( 1u << markerIndex( Marker::rearmReturn ) );
+    }
+
+    Collector collector;
+    collector.configure( 2, 16, true, 20e-6, 1e-6, 8 );
+
+    for( uint64_t index = 1; index <= 8; ++index )
+    {
+        deferredFrame( collector,
+                       1000000000 + ( index - 1 ) * 500000,
+                       index,
+                       index == 5 ? 30000 : 0,
+                       index == 5 ? 80000 : 0,
+                       index == 5 ? failed : 0 );
+    }
+
+    collector.update( 1003600000 );
+    const auto &summary     = collector.summary();
+    const bool  queryFailed = failed & ( 1u << markerIndex( Marker::timeoutReturn ) );
+    REQUIRE( summary.total.invalid > 0 );
+    REQUIRE( summary.metrics[metricIndex( Metric::conversion )].count == 8 );
+    REQUIRE( summary.metrics[metricIndex( Metric::loopTail )].count == 8 );
+    REQUIRE( summary.metrics[metricIndex( Metric::timeoutQuery )].count == ( queryFailed ? 7 : 8 ) );
+    REQUIRE( summary.metrics[metricIndex( Metric::validation )].count == ( queryFailed ? 7 : 8 ) );
+    REQUIRE( summary.metrics[metricIndex( Metric::rearm )].count == ( queryFailed ? 8 : 7 ) );
+    REQUIRE( summary.metrics[metricIndex( Metric::syncPost )].count == ( queryFailed ? 8 : 7 ) );
+    REQUIRE( collector.traceRecords().size() == 2 );
+
+    for( const auto &record : collector.traceRecords() )
+    {
+        REQUIRE_FALSE( record.qualified );
+        REQUIRE( record.present == 0x1f );
+
+        for( const auto &event : record.events )
+        {
+            REQUIRE( validMarkerOrder( event.markers, event.valid, event.invalidMarkers > 0 ) );
+        }
+    }
+}
+
+/// Never absorb a failed new timeout measurement into the legacy immediate-rearm validation duration.
+/** \ingroup frameGrabberTiming_unit_test
+ * \see MagAOX::app::dev::frameGrabberTiming::markAt
+ * \see MagAOX::app::dev::frameGrabberTiming::summary
+ */
+TEST_CASE( "Immediate rearm preserves independent stages after a timeout clock failure", "[frameGrabberTiming]" )
+{
+    Collector collector;
+    collector.configure( 2, 8, true );
+    collector.beginAt( 1000 );
+    collector.markAt( Marker::waitReturn, 1100 );
+    collector.markAt( Marker::rearmEnter, 1110 );
+    collector.markAt( Marker::rearmReturn, 1120 );
+    collector.markAt( Marker::timeoutEnter, 1130 );
+    collector.markAt( Marker::timeoutReturn, -1 );
+    collector.markAt( Marker::validated, 1200 );
+    collector.markAt( Marker::loadDone, 1300 );
+    collector.markAt( Marker::writeStampDone, 1350 );
+    collector.markAt( Marker::mainPostDone, 1400 );
+    collector.markAt( Marker::syncPostDone, 1500 );
+    collector.markAt( Marker::loopTailDone, 1600 );
+    collector.finish( Outcome::rejected );
+    collector.update( 2000 );
+    const auto &summary = collector.summary();
+    REQUIRE( summary.total.invalid == 1 );
+    REQUIRE( summary.metrics[metricIndex( Metric::timeoutQuery )].count == 0 );
+    REQUIRE( summary.metrics[metricIndex( Metric::validation )].count == 0 );
+    REQUIRE( summary.metrics[metricIndex( Metric::rearm )].mean == Approx( 10e-9 ) );
+    REQUIRE( summary.metrics[metricIndex( Metric::conversion )].mean == Approx( 100e-9 ) );
+    REQUIRE( summary.metrics[metricIndex( Metric::syncPost )].mean == Approx( 100e-9 ) );
+}
 
 /// Keep legacy paired meanings while optional stages generate no endpoints or control records.
 /** \ingroup frameGrabberTiming_unit_test
