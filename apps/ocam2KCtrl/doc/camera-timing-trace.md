@@ -263,6 +263,36 @@ Do not clear the global trace or remove another session's instance. After the
 measurement, restore `stageTraceMax=0` and restart `camwfs` when convenient;
 `stageTiming` can remain enabled for the existing aggregate measurements.
 
+## 5. Check EDT driver probe registration
+
+For the next driver investigation, use the separate registration-only helper
+after matching the loaded EDT module to the copied build. The current check is
+specific to kernel `5.14.0-362.8.1.el9_3.x86_64`, EDT `5.6.8.0`, source version
+`A26E0B4FD875E93168B83BC`, and build ID
+`97857cff4fc9d75717d3b58e9c5bc3359a7204f0`. It verifies that identity before
+making changes and again after the registration attempts.
+
+From the MagAOX repository root, the operator runs:
+
+```bash
+sudo python3 apps/ocam2KCtrl/scripts/check-edt-probes.py
+```
+
+Share the complete output. The helper tests entry and return definitions for
+the ten selected EDT functions, using module-qualified names without instruction
+offsets or argument reads. Each event is created under a unique group and
+checked to be disabled. Definitions are appended to `kprobe_events` and only
+the helper's definitions are selectively removed; the existing tracing controls
+and buffers are left alone.
+
+This is a registration check, with no timed collection or active event enabling.
+Run it separately from a measurement capture. Success establishes registration
+eligibility; actual probe hits, return misses, argument layout and active probe
+overhead still need qualification in the subsequent capture. Rejections and
+cleanup failures are reported separately. Ctrl-C/TERM requests normal cleanup;
+SIGKILL or machine failure can prevent cleanup. If definitions remain, retain
+the printed names and errors; do not clear the global `kprobe_events` file.
+
 ## Implementation checks and references
 
 The helper's local checks use an ordinary temporary fake tracefs tree, including
@@ -276,6 +306,22 @@ Run local checks with:
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 apps/ocam2KCtrl/scripts/tests/capture_camera_timing_test.py
 ```
+
+The EDT registration helper is checked separately with fake controls and
+injected registration/cleanup failures, without accessing a live tracefs:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 apps/ocam2KCtrl/scripts/tests/check_edt_probes_test.py
+```
+
+Its 16 offline checks cover ownership, append-only writes, short/failed writes,
+interruption, output failure, changed definitions, external enablement and
+module/mount identity rejection. These do not exercise the actual kernel's
+registration path; that result comes from the operator check above.
+
+The Linux 5.14 [Kprobe event documentation](https://www.kernel.org/doc/html/v5.14/trace/kprobetrace.html)
+defines module-qualified registration, selective deletion and the default
+disabled state of newly defined events.
 
 The Linux kernel's [ftrace documentation](https://docs.kernel.org/trace/ftrace.html)
 defines `mono` as `CLOCK_MONOTONIC`, per-CPU masks/buffers and loss statistics, and
