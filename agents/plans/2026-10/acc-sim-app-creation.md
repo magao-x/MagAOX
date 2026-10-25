@@ -13,9 +13,13 @@
 ## Problem Statement
 Develop a new MagAO-X application, accelSim, that generates realistic simulated accelerometer data for testing accelerometer-based DDSPC control without requiring the physical accelerometer system.
 
-The simulator should generate continuous X/Y structural vibration signals, convert the simulated physical acceleration into raw ADC counts, and publish those counts through an ImageStreamIO stream named accsim000. The stream should mimic the interface of the real acc000 accelerometer stream so that DDSPC can consume simulated and real accelerometer data through the same basic interface.
+The simulator should generate continuous X/Y structural vibration signals, convert the simulated physical acceleration into raw ADC counts, and publish those counts through the same ImageStreamIO interface used by the real accelerometer system.
 
-The initial implementation is limited to generating and verifying accsim000. A later stage will use the same underlying simulated pointing disturbances to inject correlated tip/tilt disturbances onto a MagAO-X DM so that the real WFS measures a disturbance correlated with accsim000.
+The simulator is intended to act as a drop-in replacement for the existing accelerometer acquisition system during simulation and DDSPC testing. By default, it should publish the stream `acc000`, not a simulation-specific stream name. Downstream applications, including DDSPC, should not need to distinguish between simulated and real accelerometer data based on the stream interface.
+
+In addition to matching the ImageStreamIO data format, `accelSim` should reproduce the relevant INDI interface of the existing accelerometer application so that it looks and behaves like the existing accelerometer system from the perspective of MagAO-X control software.
+
+The initial implementation is limited to generating and verifying this simulated accelerometer interface. A later stage will use the same underlying simulated pointing disturbances to inject correlated tip/tilt disturbances onto a MagAO-X DM so that the real WFS measures a disturbance correlated with the simulated `acc000` data.
 
 ## Discussion
 A Python prototype of the vibration simulator currently exists at:
@@ -102,15 +106,16 @@ DM injection is explicitly outside the initial implementation.
 17. Convert final acceleration to raw ADC counts using configurable ADC_zero, sensitivity, and V_PER_BIT.
 18. Round ADC values before conversion to integer representation and clamp values to [0,4095] before casting to uint16_t.
 19. Track ADC clipping events.
-20. Publish an ImageStreamIO stream named accsim000 by default.
-21. The initial accsim000 stream contract should match the real MCP3208 accelerometer stream: width = 2, height = 1, datatype = _DATATYPE_UINT16, element 0 = X raw ADC count, element 1 = Y raw ADC count.
-22. Each published sample must have a meaningful acquisition timestamp.
-23. Use frameGrabber infrastructure for stream creation, timestamps, counters, circular-buffer handling, and semaphore publication where supported by the existing framework.
-24. Use deterministic random seeding where practical for reproducible testing. Exact sample-by-sample equality with NumPy random-number generation is not required.
-25. Do not implement transient/ring-down disturbances in the initial version.
-26. Do not open, modify, or publish to a DM stream in the initial version.
-27. Do not add instrument startup configuration in the initial version.
-28. Avoid unrelated changes to the repository.
+20. Publish the simulated accelerometer ImageStreamIO stream as `acc000` by default so that it can act as a drop-in replacement for the real accelerometer stream. The stream name may remain configurable if this follows existing MagAO-X conventions, but the normal simulator configuration should use `acc000`.
+21. Match the real accelerometer stream contract, including width = 2, height = 1, datatype = `_DATATYPE_UINT16`, element 0 = X raw ADC count, and element 1 = Y raw ADC count.
+22. Match the relevant INDI interface of the existing accelerometer application. Before implementation, inspect `mcp3208Ctrl` and its configuration to identify the INDI properties exposed by the real accelerometer system and determine which properties `accelSim` must reproduce for drop-in compatibility. Reuse existing MagAO-X interfaces and naming conventions rather than creating simulation-specific equivalents where possible.
+23. Each published sample must have a meaningful acquisition timestamp. Stream counters, timestamps, circular-buffer behavior, and semaphore publication should match the existing accelerometer interface as closely as practical.
+24. Use existing `frameGrabber` infrastructure for stream creation, timestamps, counters, circular-buffer handling, semaphore publication, and the applicable INDI controls rather than duplicating that functionality.
+25. Use deterministic random seeding where practical for reproducible testing. Exact sample-by-sample equality with NumPy random-number generation is not required.
+26. Do not implement transient/ring-down disturbances in the initial version.
+27. Do not open, modify, or publish to a DM stream in the initial version.
+28. Do not add instrument startup configuration in the initial version.
+29. Avoid unrelated changes to the repository.
 
 ## Tests and Metrics
 The implementation should include focused tests for the numerical model and ADC conversion.
@@ -131,9 +136,9 @@ a = -(2\pi f)^2L\theta_{\rm rad}.
 10. Values above the ADC range clamp to 4095.
 11. Output values are stored as uint16_t.
 12. Fixed seeds provide deterministic behavior within the C++ implementation where appropriate.
-13. accsim000 has the expected dimensions and datatype.
-14. X and Y appear in the intended stream elements.
-15. Stream counters, timestamps, and semaphore publication behave consistently with the existing frameGrabber infrastructure.
+13. Verify that the simulator publishes `acc000` with the same datatype, dimensions, channel ordering, circular-buffer behavior, counters, timestamps, and semaphore behavior expected from the real accelerometer application.
+14. Compare the INDI properties exposed by `accelSim` against the relevant INDI properties exposed by the existing accelerometer application. Properties required by downstream MagAO-X software should have compatible names, types, meanings, and behavior.
+15. Verify that software which normally connects to the real accelerometer interface can connect to `accelSim` without requiring a simulation-specific stream name or interface change.
 16. Sustained operation should be tested at the target 6 kHz rate and achieved rate / missed deadlines should be measured.
 17. PSD and RMS validation should be performed offline using Python rather than adding PSD calculations to the real-time C++ loop.
 
