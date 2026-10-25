@@ -100,15 +100,15 @@ In both modes the largest absolute command must not exceed `poke.maxCommand` (de
 | `poke.patternFile` | string | | FITS pattern path (pattern mode) |
 | `poke.amp` | float | 0 | poke amplitude; must be non-zero |
 | `poke.maxCommand` | float | 1 | largest absolute command allowed |
-| `poke.nDelays` | int | 10 | K |
-| `poke.delaySpan` | float | 0 | span of the delay grid [us]; `<= 0` means one camWFS frame period |
+| `poke.nDelays` | int | 20 | K; with the default span, the delay step is one super-sampling bin |
+| `poke.delaySpan` | float | 0 | span of the delay grid [us]; `<= 0` means two camWFS frame periods, which fills every super-sampling bin |
 | `poke.nFrames` | int | 20 | N, frames per trial |
 | `poke.nTrials` | int | 20 | M, trials per delay, must be even |
 | `poke.settle` | float | 0.05 | seconds between zeroing the DM and the next trial |
 | `poke.trialTimeout` | float | 2 | seconds to wait for one trial |
 | `poke.maxRetries` | int | 5 | invalid-trial retries per delay |
 | `analysis.nRef` | int | 10 | reference-pass +/- pairs |
-| `analysis.nSettle` | int | 5 | trailing frames for `P` and `settleErr`; must be >= 2 (used to estimate the noise of `P`) |
+| `analysis.nSettle` | int | 10 | trailing frames for `P` and `settleErr`; must be >= 2 (used to estimate the noise of `P`) |
 | `analysis.maskThresh` | float | 0.1 | pixel mask threshold, fraction of `max|P|` |
 | `analysis.resampleFactor` | int | 10 | super-sampling factor |
 | `analysis.bestMetric` | string | `jitter` | `jitter`, `rise`, or `t50` |
