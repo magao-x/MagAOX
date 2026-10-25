@@ -177,6 +177,30 @@ class ocam2KCtrl : public MagAOXApp<>,
     std::recursive_mutex
         m_cameraMutex; ///< Serializes control/reconfigure access; normal grabs use frame-worker ownership.
 
+    static constexpr int64_t c_housekeepingPauseNs{ 120000000000 }; ///< Maximum diagnostic pause, monotonic ns.
+
+    int64_t m_housekeepingPauseUntil{ 0 }; ///< Pause deadline; zero means polling, protected by m_cameraMutex.
+
+    int64_t m_housekeepingPauseStarted{ 0 }; ///< Last actual pause start, monotonic ns; camera-mutex protected.
+
+    int64_t m_housekeepingPauseEnded{ 0 }; ///< Last actual pause end, monotonic ns; camera-mutex protected.
+
+    int64_t m_housekeepingTempTime{ 0 }; ///< Last successfully parsed temperature reply, monotonic ns.
+
+    int64_t m_housekeepingGainTime{ 0 }; ///< Last successfully parsed gain reply, monotonic ns.
+
+    int64_t m_housekeepingFpsTime{ 0 }; ///< Last successfully parsed serial FPS reply, monotonic ns.
+
+    uint64_t m_housekeepingSkippedTemp{ 0 }; ///< Routine temperature polls suppressed by the diagnostic pause.
+
+    uint64_t m_housekeepingSkippedGain{ 0 }; ///< Routine gain polls suppressed by the diagnostic pause.
+
+    uint64_t m_housekeepingSkippedFps{ 0 }; ///< Routine serial FPS polls suppressed while synchronization is off.
+
+    uint64_t m_housekeepingSerialTransactions{ 0 }; ///< Serial attempts through the app, camera-mutex protected.
+
+    std::string m_housekeepingReason{ "normal polling" }; ///< Last pause transition, camera-mutex protected.
+
   public:
     /// Default c'tor
     ocam2KCtrl();
@@ -210,6 +234,11 @@ class ocam2KCtrl : public MagAOXApp<>,
 
     /// Do any needed shutdown tasks.
     virtual int appShutdown();
+
+    /// End a quiet interval before issuing an explicit serial transaction on the ordinary control path.
+    int pdvSerialWriteRead( std::string       &response /**< [out] Camera response. */,
+                            const std::string &command /**< [in] Serial command to send. */,
+                            bool               logErrors = true /**< [in] Log transport errors when true. */ );
 
     /// Get the current device temperatures
     /**
@@ -367,6 +396,28 @@ class ocam2KCtrl : public MagAOXApp<>,
     int frameGrabberPostPublish( IMAGE *imageStream /**< [in] main framegrabber stream that was just posted */ );
 
   protected:
+    /// Read the monotonic clock in nanoseconds for ordinary-thread housekeeping decisions.
+    static int64_t housekeepingNow();
+
+    /// Register the runtime pause control and read-only housekeeping diagnostics.
+    int initHousekeeping();
+
+    /// Start or stop the bounded pause after acquiring the serial transaction mutex.
+    int setHousekeepingPause( bool    pause /**< [in] Request a pause when true, otherwise resume. */,
+                              int64_t now /**< [in] Monotonic request evaluation time, ns. */ );
+
+    /// End an active quiet interval without changing camera settings.
+    void endHousekeepingPause( const std::string &reason /**< [in] Reason recorded for resuming polling. */ );
+
+    /// Expire or cancel the pause and return whether automatic serial polls remain suppressed.
+    bool housekeepingPaused( int64_t now /**< [in] Monotonic evaluation time, ns. */ );
+
+    /// Poll routine status or count suppressed polls; the caller holds m_indiMutex.
+    int pollHousekeeping();
+
+    /// Publish pause state, stale readback ages and counters; the caller holds m_indiMutex.
+    void updateHousekeeping();
+
     /// Ensure the sync-only ImageStreamIO stream exists with the expected 1x1 uint8 layout.
     int ensureSyncStream();
 
@@ -389,9 +440,18 @@ class ocam2KCtrl : public MagAOXApp<>,
     pcf::IndiProperty m_indiP_emProt;      ///< INDI property publishing the EM protection state.
     pcf::IndiProperty m_indiP_emProtReset; ///< INDI property handling operator requests to reset EM protection.
 
+    pcf::IndiProperty m_indiP_housekeepingPause; ///< Runtime toggle for a finite pause of routine serial queries.
+
+    pcf::IndiProperty m_indiP_housekeeping; ///< Read-only monotonic ages, timeout and serial/poll counters.
+
+    pcf::IndiProperty m_indiP_housekeepingStatus; ///< Cached readback validity and protection-polling state.
+
     pcf::IndiProperty m_indiP_syncFreq; ///< INDI subscription to the external sync-frequency source.
 
   public:
+    /// Start a 120-second quiet interval or explicitly resume routine serial polling.
+    INDI_NEWCALLBACK_DECL( ocam2KCtrl, m_indiP_housekeepingPause );
+
     /// Receive an EM-protection reset request.
     INDI_NEWCALLBACK_DECL( ocam2KCtrl, m_indiP_emProtReset );
 
@@ -638,6 +698,257 @@ inline int ocam2KCtrl::destroySyncStream()
     return rv;
 }
 
+inline int64_t ocam2KCtrl::housekeepingNow()
+{
+    timespec stamp{};
+    static_cast<void>( mx::sys::get_curr_time<double, CLOCK_MONOTONIC>( stamp ) );
+
+    return int64_t( stamp.tv_sec ) * 1000000000 + stamp.tv_nsec;
+}
+
+inline int ocam2KCtrl::initHousekeeping()
+{
+    if( createStandardIndiToggleSw( m_indiP_housekeepingPause, "housekeeping_pause" ) < 0 ||
+        registerIndiPropertyNew( m_indiP_housekeepingPause, INDI_NEWCALLBACK( m_indiP_housekeepingPause ) ) < 0 )
+    {
+        return -1;
+    }
+
+    REG_INDI_NEWPROP_NOCB( m_indiP_housekeeping, "housekeeping", pcf::IndiProperty::Number );
+
+    for( const auto &name : { "timeoutSec",
+                              "remainingSec",
+                              "tempAgeSec",
+                              "gainAgeSec",
+                              "fpsAgeSec",
+                              "skippedTemp",
+                              "skippedGain",
+                              "skippedFps",
+                              "serialTransactions",
+                              "pauseStartMonoSec",
+                              "pauseEndMonoSec" } )
+    {
+        m_indiP_housekeeping.add( pcf::IndiElement( name ) );
+        m_indiP_housekeeping[name].set( 0 );
+    }
+
+    m_indiP_housekeeping["timeoutSec"].set( c_housekeepingPauseNs * 1e-9 );
+    m_indiP_housekeeping["tempAgeSec"].set( -1 );
+    m_indiP_housekeeping["gainAgeSec"].set( -1 );
+    m_indiP_housekeeping["fpsAgeSec"].set( -1 );
+
+    REG_INDI_NEWPROP_NOCB( m_indiP_housekeepingStatus, "housekeeping_status", pcf::IndiProperty::Text );
+
+    for( const auto &name : { "state", "reason", "temperature", "gain", "fps", "protectionPolling" } )
+    {
+        m_indiP_housekeepingStatus.add( pcf::IndiElement( name ) );
+    }
+
+    m_indiP_housekeepingStatus["state"].set( "polling" );
+    m_indiP_housekeepingStatus["reason"].set( m_housekeepingReason );
+    m_indiP_housekeepingStatus["temperature"].set( "unavailable" );
+    m_indiP_housekeepingStatus["gain"].set( "unavailable" );
+    m_indiP_housekeepingStatus["fps"].set( "unavailable" );
+    m_indiP_housekeepingStatus["protectionPolling"].set( "polling" );
+
+    return 0;
+}
+
+inline void ocam2KCtrl::endHousekeepingPause( const std::string &reason )
+{
+    std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
+
+    if( m_housekeepingPauseUntil == 0 )
+    {
+        return;
+    }
+
+    m_housekeepingPauseUntil = 0;
+    m_housekeepingPauseEnded = housekeepingNow();
+    m_housekeepingReason     = reason;
+    log<text_log>( "housekeeping pause ended at monotonic ns " + std::to_string( m_housekeepingPauseEnded ) + ": " +
+                   reason );
+}
+
+inline bool ocam2KCtrl::housekeepingPaused( int64_t now )
+{
+    std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
+
+    if( m_housekeepingPauseUntil == 0 )
+    {
+        return false;
+    }
+
+    if( shutdown() || powerState() != 1 || powerStateTarget() != 1 || m_reconfig || !m_nextMode.empty() ||
+        ( state() != stateCodes::READY && state() != stateCodes::OPERATING ) )
+    {
+        endHousekeepingPause( "camera state changed" );
+    }
+    else if( now <= 0 || now >= m_housekeepingPauseUntil )
+    {
+        endHousekeepingPause( "120 second timeout" );
+    }
+
+    return m_housekeepingPauseUntil != 0;
+}
+
+inline int ocam2KCtrl::setHousekeepingPause( bool pause, int64_t now )
+{
+    std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
+
+    if( !pause )
+    {
+        endHousekeepingPause( "operator resume" );
+        return 0;
+    }
+
+    if( shutdown() || powerState() != 1 || powerStateTarget() != 1 || m_reconfig || !m_nextMode.empty() ||
+        ( state() != stateCodes::READY && state() != stateCodes::OPERATING ) || now <= 0 )
+    {
+        endHousekeepingPause( "camera state changed" );
+        return -1;
+    }
+
+    if( housekeepingPaused( now ) )
+    {
+        return 0;
+    }
+
+    m_housekeepingPauseStarted = now;
+    m_housekeepingPauseUntil   = now + c_housekeepingPauseNs;
+    m_housekeepingReason       = "operator diagnostic pause";
+    log<text_log>( "housekeeping pause started at monotonic ns " + std::to_string( now ) +
+                   " for 120 seconds; temperature and software protection polling paused" );
+
+    return 0;
+}
+
+inline int ocam2KCtrl::pdvSerialWriteRead( std::string &response, const std::string &command, bool logErrors )
+{
+    std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
+    endHousekeepingPause( "serial command: " + command );
+    ++m_housekeepingSerialTransactions;
+
+    return dev::edtCamera<ocam2KCtrl>::pdvSerialWriteRead( response, command, logErrors );
+}
+
+inline int ocam2KCtrl::pollHousekeeping()
+{
+    std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
+    const bool                            paused = housekeepingPaused( housekeepingNow() );
+
+    if( paused )
+    {
+        ++m_housekeepingSkippedTemp;
+        ++m_housekeepingSkippedGain;
+
+        if( !m_synchro )
+        {
+            ++m_housekeepingSkippedFps;
+        }
+    }
+    else if( getTemps() < 0 )
+    {
+        if( powerState() == 1 && powerStateTarget() == 1 )
+        {
+            m_temps.setInvalid();
+            state( stateCodes::ERROR );
+        }
+
+        return -1;
+    }
+
+    if( ( !paused || m_synchro ) && getFPS() < 0 )
+    {
+        if( powerState() == 1 && powerStateTarget() == 1 )
+        {
+            state( stateCodes::ERROR );
+        }
+
+        return -1;
+    }
+
+    if( m_protectionResetConfirmed > 0 && mx::sys::get_curr_time() - m_protectionResetReqTime > 10.0 )
+    {
+        m_protectionResetConfirmed = 0;
+        updateIfChanged( m_indiP_emProt, "status", std::string( "UNCONFIRMED" ) );
+        log<text_log>( "protection reset request not confirmed", logPrio::LOG_NOTICE );
+    }
+
+    if( !paused && getEMGain() < 0 )
+    {
+        if( MagAOXAppT::m_powerState != 0 )
+        {
+            state( stateCodes::ERROR );
+        }
+
+        return -1;
+    }
+
+    return 0;
+}
+
+inline void ocam2KCtrl::updateHousekeeping()
+{
+    std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
+    const int64_t                         now    = housekeepingNow();
+    const bool                            paused = housekeepingPaused( now );
+
+    if( !m_indiP_housekeepingPause.find( "toggle" ) )
+    {
+        return;
+    }
+
+    const auto age = [now]( int64_t stamp /**< [in] Last successful readback, ns. */ )
+    {
+        return stamp > 0 ? std::max( int64_t( 0 ), now - stamp ) * 1e-9 : -1.0;
+    };
+    const bool polling = !shutdown() && powerState() == 1 && powerStateTarget() == 1 && !m_reconfig &&
+                         m_nextMode.empty() && ( state() == stateCodes::READY || state() == stateCodes::OPERATING );
+    const auto validity = [this, paused, polling]( int64_t stamp /**< [in] Last successful readback, ns. */ )
+    {
+        return std::string( stamp == 0
+                                ? "unavailable"
+                                : ( paused || !polling || stamp < m_housekeepingPauseEnded ? "stale" : "current" ) );
+    };
+    const std::string state = paused ? "paused" : ( polling ? "polling" : "inactive" );
+
+    updateSwitchIfChanged( m_indiP_housekeepingPause,
+                           "toggle",
+                           paused ? pcf::IndiElement::On : pcf::IndiElement::Off,
+                           paused ? INDI_BUSY : INDI_IDLE );
+    updateIfChanged<double>( m_indiP_housekeeping,
+                             { "remainingSec",
+                               "tempAgeSec",
+                               "gainAgeSec",
+                               "fpsAgeSec",
+                               "skippedTemp",
+                               "skippedGain",
+                               "skippedFps",
+                               "serialTransactions",
+                               "pauseStartMonoSec",
+                               "pauseEndMonoSec" },
+                             { paused ? ( m_housekeepingPauseUntil - now ) * 1e-9 : 0.0,
+                               age( m_housekeepingTempTime ),
+                               age( m_housekeepingGainTime ),
+                               age( m_housekeepingFpsTime ),
+                               double( m_housekeepingSkippedTemp ),
+                               double( m_housekeepingSkippedGain ),
+                               double( m_housekeepingSkippedFps ),
+                               double( m_housekeepingSerialTransactions ),
+                               m_housekeepingPauseStarted * 1e-9,
+                               m_housekeepingPauseEnded * 1e-9 } );
+    updateIfChanged<std::string>(
+        m_indiP_housekeepingStatus,
+        { "state", "reason", "temperature", "gain", "fps", "protectionPolling" },
+        { state,
+          m_housekeepingReason,
+          validity( m_housekeepingTempTime ),
+          validity( m_housekeepingGainTime ),
+          m_synchro && polling ? std::string( "external sync" ) : validity( m_housekeepingFpsTime ),
+          state } );
+}
+
 inline int ocam2KCtrl::appStartup()
 {
     REG_INDI_NEWPROP_NOCB( m_indiP_temps, "temps", pcf::IndiProperty::Number );
@@ -663,6 +974,11 @@ inline int ocam2KCtrl::appStartup()
 
     createStandardIndiRequestSw( m_indiP_emProtReset, "emProtectionReset", "Reset", "EM Protection" );
     registerIndiPropertyNew( m_indiP_emProtReset, INDI_NEWCALLBACK( m_indiP_emProtReset ) );
+
+    if( initHousekeeping() < 0 )
+    {
+        return -1;
+    }
 
     REG_INDI_SETPROP( m_indiP_syncFreq, m_syncDevice, m_syncFreqProp );
 
@@ -697,28 +1013,40 @@ inline int ocam2KCtrl::appStartup()
 
 inline int ocam2KCtrl::appLogic()
 {
+    { //mutex scope
+        std::unique_lock<std::mutex> lock( m_indiMutex, std::try_to_lock );
+
+        if( lock.owns_lock() && ( state() != stateCodes::READY && state() != stateCodes::OPERATING ) )
+        {
+            updateHousekeeping();
+        }
+    }
 
     // and run stdCamera's appLogic
     if( dev::stdCamera<ocam2KCtrl>::appLogic() < 0 )
     {
+        endHousekeepingPause( "stdCamera logic failed" );
         return log<software_error, -1>( { "" } );
     }
 
     // and run edtCamera's appLogic
     if( dev::edtCamera<ocam2KCtrl>::appLogic() < 0 )
     {
+        endHousekeepingPause( "edtCamera logic failed" );
         return log<software_error, -1>( { "" } );
     }
 
     // first run frameGrabber's appLogic to see if the f.g. thread has exited.
     if( dev::frameGrabber<ocam2KCtrl>::appLogic() < 0 )
     {
+        endHousekeepingPause( "frameGrabber logic failed" );
         return log<software_error, -1>( { "" } );
     }
 
     // and run dssShutter's appLogic
     if( dev::dssShutter<ocam2KCtrl>::appLogic() < 0 )
     {
+        endHousekeepingPause( "dssShutter logic failed" );
         return log<software_error, -1>( { "" } );
     }
 
@@ -813,48 +1141,13 @@ inline int ocam2KCtrl::appLogic()
             return 0;
         }
 
-        if( getTemps() < 0 )
+        if( pollHousekeeping() < 0 )
         {
-            if( powerState() != 1 || powerStateTarget() != 1 )
-            {
-                return 0;
-            }
-            m_temps.setInvalid();
-            state( stateCodes::ERROR );
+            updateHousekeeping();
             return 0;
         }
 
-        if( getFPS() < 0 )
-        {
-            if( powerState() != 1 || powerStateTarget() != 1 )
-            {
-                return 0;
-            }
-
-            state( stateCodes::ERROR );
-            return 0;
-        }
-
-        if( m_protectionResetConfirmed > 0 )
-        {
-            if( mx::sys::get_curr_time() - m_protectionResetReqTime > 10.0 )
-            {
-                m_protectionResetConfirmed = 0;
-                updateIfChanged( m_indiP_emProt, "status", std::string( "UNCONFIRMED" ) );
-                log<text_log>( "protection reset request not confirmed", logPrio::LOG_NOTICE );
-            }
-        }
-
-        if( getEMGain() < 0 )
-        {
-            if( MagAOXAppT::m_powerState == 0 )
-            {
-                return 0;
-            }
-
-            state( stateCodes::ERROR );
-            return 0;
-        }
+        updateHousekeeping();
 
         if( frameGrabber<ocam2KCtrl>::updateINDI() < 0 )
         {
@@ -894,6 +1187,15 @@ inline int ocam2KCtrl::onPowerOff()
     m_powerOnCounter = 0;
 
     std::lock_guard<std::mutex> lock( m_indiMutex );
+
+    { //mutex scope
+        std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
+        endHousekeepingPause( "camera powered off" );
+        m_housekeepingTempTime = 0;
+        m_housekeepingGainTime = 0;
+        m_housekeepingFpsTime  = 0;
+        updateHousekeeping();
+    }
 
     updateIfChanged( m_indiP_emProt, "status", std::string( "UNKNOWN" ), INDI_IDLE );
 
@@ -962,6 +1264,12 @@ inline int ocam2KCtrl::whilePowerOff()
 
 inline int ocam2KCtrl::appShutdown()
 {
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_indiMutex );
+        endHousekeepingPause( "application shutdown" );
+        updateHousekeeping();
+    }
+
     ///\todo error check these base class fxns.
 
     dev::stdCamera<ocam2KCtrl>::appShutdown();
@@ -987,6 +1295,8 @@ inline int ocam2KCtrl::getTemps()
 
     { //mutex scope
         std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
+        m_housekeepingTempTime = 0;
+
         if( pdvSerialWriteRead( response, "temp" ) != 0 )
         {
             if( powerState() != 1 || powerStateTarget() != 1 )
@@ -997,8 +1307,9 @@ inline int ocam2KCtrl::getTemps()
         }
     }
 
-    {
-        ocamTemps temps;
+    { //mutex scope
+        std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
+        ocamTemps                             temps;
 
         if( parseTemps( temps, response ) < 0 )
         {
@@ -1022,7 +1333,8 @@ inline int ocam2KCtrl::getTemps()
             return log<software_error, 0>( { "Temp. parse error" } );
         }
 
-        m_temps = temps;
+        m_temps                = temps;
+        m_housekeepingTempTime = housekeepingNow();
 
         // stdCamera temp control:
         m_ccdTemp      = m_temps.CCD;
@@ -1086,6 +1398,20 @@ inline int ocam2KCtrl::powerOnDefaults()
 
 inline int ocam2KCtrl::setTempControl()
 {
+    std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
+
+    if( !m_tempControlStatusSet && m_housekeepingPauseStarted > m_housekeepingTempTime )
+    {
+        const bool requested = m_tempControlStatusSet;
+
+        if( getTemps() < 0 || m_housekeepingTempTime == 0 )
+        {
+            return log<text_log, -1>( "Fresh temperature required before turning cooling off", logPrio::LOG_ERROR );
+        }
+
+        m_tempControlStatusSet = requested;
+    }
+
     std::string response;
 
     std::string command;
@@ -1184,14 +1510,17 @@ inline int ocam2KCtrl::getFPS()
 
         { //mutex scope
             std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
+            m_housekeepingFpsTime = 0;
+
             if( pdvSerialWriteRead( response, "fps" ) != 0 )
             {
                 return log<software_error, -1>( { "" } ); // m_pdv, "fps", m_readTimeout) == 0)
             }
         }
 
-        {
-            float fps;
+        { //mutex scope
+            std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
+            float                                 fps;
             if( parseFPS( fps, response ) < 0 )
             {
                 if( powerState() != 1 || powerStateTarget() != 1 )
@@ -1203,7 +1532,8 @@ inline int ocam2KCtrl::getFPS()
 
                 return log<software_error, 0>( { "fps parse error" } );
             }
-            m_fps = fps;
+            m_fps                 = fps;
+            m_housekeepingFpsTime = housekeepingNow();
             m_workerFPS.store( fps, std::memory_order_relaxed );
 
             recordCamera();
@@ -1421,6 +1751,8 @@ inline int ocam2KCtrl::getEMGain()
 
     { //mutex scope
         std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
+        m_housekeepingGainTime = 0;
+
         if( pdvSerialWriteRead( response, "gain" ) != 0 )
         {
             if( powerState() != 1 || powerStateTarget() != 1 )
@@ -1431,8 +1763,9 @@ inline int ocam2KCtrl::getEMGain()
         }
     }
 
-    {
-        unsigned emGain;
+    { //mutex scope
+        std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
+        unsigned                              emGain;
         if( parseEMGain( emGain, response ) < 0 )
         {
             if( powerState() != 1 || powerStateTarget() != 1 )
@@ -1452,7 +1785,8 @@ inline int ocam2KCtrl::getEMGain()
             return log<software_error, -1>( { "EM Gain parse error" } );
         }
 
-        m_emGain = emGain;
+        m_emGain               = emGain;
+        m_housekeepingGainTime = housekeepingNow();
 
         return 0;
     }
@@ -1778,6 +2112,7 @@ inline int ocam2KCtrl::reconfig()
 {
     std::lock_guard<std::mutex>           lock( m_indiMutex );
     std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
+    endHousekeepingPause( "camera reconfiguration" );
     m_reconfig = false;
 
     int rv = edtCamera<ocam2KCtrl>::pdvReconfig();
@@ -1808,6 +2143,8 @@ inline void ocam2KCtrl::requestAcquisitionRecovery()
     edtCamera<ocam2KCtrl>::pdvFinishAcquisition( false );
 
     std::lock_guard<std::mutex> lock( m_indiMutex );
+
+    endHousekeepingPause( "acquisition recovery" );
 
     if( m_nextMode.empty() )
     {
@@ -1847,6 +2184,24 @@ inline int ocam2KCtrl::frameGrabberPostPublish( IMAGE *imageStream )
     edtCamera<ocam2KCtrl>::pdvFinishAcquisition( !m_reconfig && !shutdown() && powerState() > 0 );
 
     return 0;
+}
+
+INDI_NEWCALLBACK_DEFN( ocam2KCtrl, m_indiP_housekeepingPause )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_housekeepingPause, ipRecv );
+
+    if( !ipRecv.find( "toggle" ) )
+    {
+        return 0;
+    }
+
+    std::lock_guard<std::mutex>           lock( m_indiMutex );
+    std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
+    const bool                            pause  = ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On;
+    const int                             result = setHousekeepingPause( pause, housekeepingNow() );
+    updateHousekeeping();
+
+    return result;
 }
 
 INDI_NEWCALLBACK_DEFN( ocam2KCtrl, m_indiP_emProtReset )( const pcf::IndiProperty &ipRecv )
@@ -1905,6 +2260,8 @@ INDI_SETCALLBACK_DEFN( ocam2KCtrl, m_indiP_syncFreq )( const pcf::IndiProperty &
 
     if( m_synchro && m_syncFreq != m_fps )
     {
+        endHousekeepingPause( "synchronization frequency changed" );
+
         recordCamera( true );
         m_fps = m_syncFreq;
         m_workerFPS.store( m_fps, std::memory_order_relaxed );

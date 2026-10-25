@@ -1,25 +1,29 @@
 # ocam2KCtrl acquisition and publication timing review
 
-Created: 2026-10-23; updated 2026-10-24 (America/Phoenix).
-Status: the latest capture uses five seconds of settling and five seconds of
-tracing, retaining both CPUs without overwritten or dropped events. Whole-file publication deviation is
-0.791 us off and 0.800 us on. The earlier millisecond setup burst does not
-recur; its particular setup operation remains unidentified. Three covered
-23–24 us rearm stalls are again after publication and track remote EDT control
-interrupts; prepublication queries remain short. Residual selected 525/480 us
-deviations are mostly present at SDK return. Frame age, loaded user-library provenance,
-instrumentation overhead and DMA-owner-thread topology remain qualification
-items. Agents perform no instrument actions.
-The complete copied EDT driver now identifies the ordinary completion-stamp
-placement, shared lock path and candidate probe functions. Its `atime` is a
-host clock sample during completion processing with 1 us quantization. Operator
-readback now matches the copied module's version, source version and build ID.
-Disabled registration accepts entry/return probes for four Linux wrappers and
-rejects the six proprietary-core targets. Operator configuration and kernel
-warnings confirm the tracefs restriction on functions without ftrace sites.
-The operator helper now offers `--edt-wrappers` for the accepted lock/wakeup
-boundaries. Offline checks pass; active hardware capture, live pairing and
-overhead qualification remain pending.
+Created: 2026-10-23; updated 2026-10-25 (America/Phoenix).
+Status: the first one-second native/wrapper comparison retains both CPUs
+without loss or cleanup errors. Complete wrapper pairs directly identify the
+same EDT lock in the acquisition thread and IRQ 405. All 25 acquisition-side
+lock-acquisition brackets above 2 us overlap a remote hold of that lock;
+the maximum is 34 us. A selected 40.957 us rearm remains after publication.
+Combined device/control and acquisition interrupts take about 53 us versus
+32 us for ordinary acquisition interrupts. The 21 us reduction on the next
+frame explains its 479 us software-stamp interval despite 500 us between IRQ
+entries. Shared IRQ entry does not identify physical frame completion.
+
+The camera had been powered off overnight and was cooling after a normal
+power-cycle FSM startup, with no software reconfiguration. Conversion spread
+also changes before the wrapper hooks activate. Native/wrapper differences
+show measurable tracing cost, but the sequential runs do not isolate its exact
+magnitude. A separate untraced 613/387 us publication pair has steady 500/501 us
+`atime` intervals and remains unexplained after the driver stamp. Routine serial
+status polling is the next focused experimental target. A runtime diagnostic
+pause with a fixed 120-second timeout is now implemented; production polling
+cadence and syncopation scheduling remain unchanged. Frame age, physical arrival timing, loaded
+user-library provenance and DMA-owner-thread topology remain qualification
+items. Agents perform no instrument actions. The normal / paused / normal
+operator comparison is documented in section 7 of the camera timing guide.
+Earlier captures, implementation and qualification history follow below.
 
 The first two paired chronological and kernel captures identify EDT interrupts
 as the source of recurring stage extensions. The operator moved IRQ 405 from
@@ -2830,6 +2834,395 @@ The operator guide gives the paired native/one-second wrapper procedure. Use
 both updated Python scripts; no camera, reader or kernel rebuild/restart is
 needed for this helper change. Hardware qualification remains pending.
 
+## 2026-10-25 first accepted-wrapper capture: direct shared-lock evidence
+
+### Inputs, operating conditions and retention
+
+The operator supplied `/home/jrmales/tmp/camwfs-step5-20261025T155627Z`.
+The chronological order is **native trace, wrapper trace, then helper-free
+telemetry**. Each trace requests one second after five seconds of settling.
+The camera was off overnight, then powered on before these measurements. The
+operator confirms that the software was not reconfigured: it followed its
+normal power-cycle FSM states. CCD temperature falls from approximately
+−30.5 to −36.8 C during the native file, −38.9 to −45.0 C during the wrapper
+file, and remains near −45 C during the final helper-free file. This is a
+changing condition, not evidence that cooling causes the timing variation.
+
+Both traces retain the same camera PID **3077681**, acquisition TID
+**3077683**, FIFO priority **90** on CPU **33**, and EDT IRQ **405** on CPU
+**61**. The boot ID, stream inode **3335**, timing session **12**, bin2 mode,
+2000 Hz setting, closed shutter and enabled synchronization agree. PID/boot
+continuity with the previous capture does not imply uninterrupted camera
+operation across the intervening power cycle.
+
+| Input relative to supplied directory | SHA-256 |
+| --- | --- |
+| `camwfs-edt-native.txt` | `8b7e48e8a1ee1ce18da9ed489bb86f439300a54da942eacadb69d9ba83c03330` |
+| `camwfs-edt-wrappers.txt` | `af8c1825029b3b33b69e0ed94808e0619c2d746f2dcd66eb318915f006df172a` |
+| `camwfs-trace-off.txt` | `94cc314696459af91f870cacaf10c7091ce448c1436aba90a3dfd771df8de6e2` |
+| `camwfs-native-20261025T155627Z/metadata.json` | `d13aa67907bc35c8e3205c2a248a792b35a0fba9c15544ef7e56abc23bb94ffb` |
+| `camwfs-native-20261025T155627Z/trace.txt` | `6be550515f1201cb4f2c0a23f857660a46daaa697a51e2fe53fc1402f00d2526` |
+| `camwfs-edt-20261025T155751Z/metadata.json` | `9a734ca82d9a891a68c59224d48da812745276fcdd828560bc92c2362c080117` |
+| `camwfs-edt-20261025T155751Z/trace.txt` | `1110412f67bdef1794233bc5b3bff000684b1a2ac2e6aa7b9681a7c5e7913999` |
+
+The joint retained native interval is approximately **15:56:33.382952–
+15:56:34.382950 UTC**, and the wrapper interval is **15:57:57.483481–
+15:57:58.483017 UTC**, both on October 25. Metadata separately brackets trace
+enable/disable. Native CPU event counts are **24,072 / 11,442** on CPUs 33/61;
+wrapper counts are **40,878 / 23,878**. Both CPUs report zero overruns,
+commit overruns and dropped events in both runs. Capture and cleanup complete
+without errors; no owned wrapper definitions remain, and post-stop module
+identity still matches the verified EDT build.
+
+Wrapper hooks are active from approximately **15:57:52.430–52.439** until
+**15:57:58.483–58.592 UTC**, including settling with the ring disabled. Their
+profile counters cover this broader lifetime and calls on unrecorded CPUs.
+Reported misses are zero, but return-pool miss semantics remain unverified.
+Actual retained call pairing, rather than whole-lifetime profile count equality,
+is the completeness check used below.
+
+### The same lock serializes acquisition and interrupt handling
+
+The wrapper file contains **28,878 probe events**, yielding **14,439 complete
+entry/return pairs** and **6,147 complete acquire/release cycles**. Pairing uses
+CPU, TID, function, full IRQ context and lock identity. There are no unmatched
+entries/returns, nested entries, orphan releases, open holds or unmatched IRQ
+boundaries. Pointer formats are eight-byte unsigned values and actual arguments
+are nonzero and consistent.
+
+All **4,002** acquisition-thread lock cycles and **2,145** IRQ-side cycles use
+**`0xffff94a582288ab0`**. This turns the earlier serialization inference into
+direct evidence of a shared lock:
+
+- **25** camera-side acquisition brackets exceed 2 us, with a maximum of
+  **34 us**. Every one overlaps a held interval on the same lock on CPU 61.
+  Twenty-four overlap an IRQ that wakes the main/control thread; one overlaps
+  an IRQ with no observed wake.
+- **7** IRQ-side acquisitions exceed 2 us, with a maximum of **5 us**. Every
+  one overlaps a camera-thread hold of that same lock on CPU 33.
+
+These are elapsed instrumented wrapper brackets on a 1 us printed trace grid,
+including probe cost; they are not exact uninstrumented spin-wait durations.
+Zero-duration printed calls are below the trace's displayed resolution.
+
+The acquisition wake queue is `0xffff94a61b4f0640`: all **2,000** calls return
+to `do_intr+0x175` and wake the acquisition thread. The other queue is
+`0xffff94a61b4f0a00`: all **145** ordinary wake calls return to
+`pdv_DeviceIntPdv+0x5f8` and wake the camera main thread. This directly associates
+the latter events with the PDV device/control callback. It does not identify
+the particular serial command responsible for each call.
+
+| IRQ class in wrapper capture | Count | Mean IRQ duration, us | Mean held interior, us |
+| --- | ---: | ---: | ---: |
+| Acquisition wake only | 1,991 | 32.183 | 29.120 |
+| Acquisition and main/control wakes | 9 | 53.000 | 49.444 |
+| Main/control wake only | 136 | 37.963 | 34.846 |
+| No observed wake | 9 | 29.889 | 26.889 |
+
+The combined handlers' extra time lies inside the critical section, rather than
+in a long attempt to acquire it. This is consistent with the inspected device
+callback preceding ordinary DMA completion processing. The probes do not split
+every internal core operation or prove that all of the additional time is
+exclusively serial processing.
+
+### A captured short interval follows a change in handler work
+
+Qualified raw contexts **6203/6204**, frames **1349872/1349873**, overlap the
+wrapper ring. The following values are intervals between successive endpoints,
+except for the final current-frame rearm column:
+
+| Frame | IRQ-entry interval, us | `atime` interval, us | SDK-return interval, us | Write interval, us | Rearm, us |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 1349872, late | 526 | 526 | 524.701 | 524.841 | 7.525 |
+| 1349873, early | 500 | 479 | 478.974 | 477.862 | 10.510 |
+
+For the early interval, the handler changes from **53 to 32 us**, and its
+software-stamp offset from IRQ entry changes from approximately **33 to 12 us**.
+That 21 us reduction explains a 479 us `atime` interval even though the IRQ
+entries are 500 us apart. Each stamp is projected into MONOTONIC using that
+frame's tightly bracketed publication clock offset, with the additional
+**1 us truncation** of the driver's CLOCK_REALTIME stamp retained as uncertainty.
+
+The preceding late interval has **526 us between IRQ entries** and almost no
+change in handler duration: its preceding handler was also combined, at 54 us.
+Consequently, the late interval itself is not explained solely by extra work in
+its current handler. The four-frame neighborhood illustrates the distinction
+(times are MONOTONIC seconds relative to `1811716`):
+
+| IRQ entry | Handler, us | Acquisition wake | Interval between acquisition wakes, us |
+| ---: | ---: | ---: | ---: |
+| .512106 | 32 | .512137 | — |
+| .512580 | 54 | .512632 | 495 |
+| .513106 | 53 | .513158 | 526 |
+| .513606 | 32 | .513637 | 479 |
+
+The shared IRQ can enter for device/control work before frame completion is
+processed. Its entry is therefore not a dedicated physical frame-arrival
+marker. This capture identifies software contributions to stamp/SDK timing;
+it does not locate exposure, card completion or interrupt assertion in hardware,
+nor establish that every excursion must be late then early.
+
+In the same six-frame raw neighborhood, frame **1349871** has a **40.957 us**
+rearm, including a **34 us** acquisition bracket overlapping the remote
+main/control IRQ's same-lock hold. Frame **1349874** has **24.275 us** rearm
+with an **18 us** acquisition bracket. All six current-frame rearms begin
+after publication, so they cannot delay that frame's already completed write.
+The six prepublication timeout queries take only **0.230–0.521 us**.
+
+### Native comparison, probe cost and telemetry coverage
+
+Native tracing also sees longer combined interrupts: seven average **50.714 us**,
+versus **30.494 us** for acquisition-only handlers. Thus the association between
+device/control work and longer completion handling exists without wrapper
+probes. All retained camera switch-outs in both runs are sleeping (`S`), with
+no scheduled preemption explaining the long camera runs.
+
+| Retained kernel measurement | Native | Wrappers |
+| --- | ---: | ---: |
+| Acquisition-only IRQ mean, us | 30.494 | 32.183 |
+| Main/control-only IRQ mean, us | 36.399 | 37.963 |
+| Combined IRQ mean, us | 50.714 | 53.000 |
+| Acquisition `sched_waking` to on-CPU mean / max, us | 1.618 / 3 | 2.522 / 7 |
+| Camera scheduled-run mean / max, us | 42.574 / 80 | 44.115 / 81 |
+| Acquisition-wake interval deviation, us | 0.901 | 1.268 |
+
+The differences are consistent with measurable probe overhead. Runs are
+sequential, roughly 84 seconds apart, with different buffer allocation and
+changing camera/conversion conditions; these numbers do not isolate an exact
+causal overhead budget. Selected same-event lock overlap remains direct evidence
+despite those comparison limits.
+
+Each camera telemetry file contains **29 disjoint two-second summary windows**,
+with **115,971** interval samples. Pooling their counts/means/variances gives:
+
+| Retained summary population | Native file | Wrapper file | Helper-free file, last |
+| --- | ---: | ---: | ---: |
+| `atime` interval deviation, us | 0.384 | 0.435 | 0.529 |
+| SDK-return interval deviation, us | 0.616 | 1.035 | 0.543 |
+| Publication interval deviation, us | 0.914 | 1.821 | 0.829 |
+| Acquisition-to-write mean, us | 48.980 | 49.549 | 48.974 |
+| Conversion mean / deviation, us | 26.672 / 0.523 | 26.977 / 1.024 | 26.666 / 0.524 |
+
+These are pooled retained populations, not continuous full-file statistics or
+one-second trace-only statistics. The approximately 2.05-second update cadence
+leaves gaps between summary windows, and no two-second window fits wholly inside
+a one-second ring capture. In particular, **both raw contexts 6203/6204 are in
+summary gaps**. This explains why the raw 526 us `atime` interval and 40.957 us
+rearm can exceed the wrapper summary maxima of 520 us and 25.909 us.
+
+The wrapper file already has **2.758 us** publication deviation across seven
+complete windows **before helper/probe activation**, alongside **1.413 us**
+conversion deviation. Eighteen complete post-helper windows fall to
+**0.936 us** publication and **0.509 us** conversion deviation. It is incorrect
+to attribute the whole wrapper-file increase to probes or to cooling from these
+data alone. The power-cycle/cooling history is relevant context for a repeat at
+settled temperature.
+
+There are no new event/control drops, failures, duplicate frames, frame/counter
+gaps or invalid records between first and last snapshots of any file. The raw
+context selection-drop counter remains at its historical **4,752**; this is not
+new trace loss. Native telemetry adds 21 wide clock brackets, producing 42
+ambiguous adjacent intervals. Wrapper/helper-free files add none; an additional
+53 wide brackets arise in the unrecorded gap before the wrapper file, so they
+cannot be assigned to its active probe interval.
+
+### Remaining unexplained case and next focused experiment
+
+Before the native helper starts, raw contexts **6180/6181** at approximately
+**15:56:19.555 UTC** show **612.756 / 386.941 us** publication intervals and
+**612.747 / 387.351 us** SDK-return intervals, while `atime` intervals remain
+**500 / 501 us**. This approximately 113 us excursion occurs after the driver
+stamp and before SDK return. There is no kernel trace for it, so this capture
+cannot assign it to lock contention, IRQ tail work, thread scheduling or a
+particular SDK request. The captured 21 us mechanism does not explain every
+remaining excursion.
+
+The next proposed comparison is routine serial status polling, after temperature
+has settled. The current [application logic](../../../apps/ocam2KCtrl/ocam2KCtrl.hpp)
+calls `getTemps()`, `getFPS()` and `getEMGain()` during READY/OPERATING passes;
+`getTemps()` and `getEMGain()` issue `temp` and `gain` serial transactions.
+`getFPS()` queries `fps` only with synchronization off; these captures have
+synchronization on, so it uses the synchronization rate without a serial query.
+A controlled change in status-query cadence, with query identities/times retained, can test
+whether main/control wake bursts, combined handlers and rearm waits change
+together. Existing observations do not identify which of these commands causes
+each burst or establish a safe replacement polling policy. Cooling/protection
+requirements must inform any such implementation. No serial polling, camera
+settings, kernel, or syncopation scheduling behavior is changed by this analysis.
+
+Analysis artifacts remain in `/tmp`: `camwfs-step5-155627-audit.json`,
+`analyze_step5_camera.py`, `step5-camera-parsed.json`,
+`step5-camera-summary.json`, `analyze_step5_kernel_compare.py`,
+`step5-kernel-compare-summary.json`, `analyze_step5_edt_pairs.py`,
+`correlate_step5_frames.py`, and `step5-edt-pairing/` with paired cycles,
+IRQ classes, correlated raw frames and selected timelines. The source hashes
+above identify the durable input evidence. All analysis is local; no instrument
+commands or probes are executed by agents.
+
+Independent review of input identity, pairing, source paths and interpretation
+passes. Local Markdown link targets and `git diff --check` also pass. This
+checkpoint changes only the two engineering records.
+
+## 2026-10-25 proposed housekeeping pause experiment
+
+The operator asks whether to add a testing mode that pauses all housekeeping
+serial commands, and whether housekeeping ultimately needs scheduling to avoid
+acquisition. A finite pause of automatic status polling is the recommended
+first experiment. This section is a proposal, not an implemented or qualified
+operating mode.
+
+### Proposed diagnostic behavior
+
+- Provide an ordinary-thread, runtime INDI request with a bounded duration,
+  defaulting to normal polling after startup. Accept it only in a stable
+  READY/OPERATING state. Do not persist a paused state across restart.
+- Suppress automatic `temp` and `gain` transactions, plus `fps` polling when
+  synchronization is off. Preserve synchronization-rate updates that require
+  no serial I/O. Acquisition, frame timing, telemetry, property servicing and
+  FSM checks continue normally.
+- Separate requested/pending from active. Begin the quiet window only after
+  any in-flight serial transaction and its trailing-byte drain finish. Expose
+  actual activation, monotonic deadline/remaining duration, skipped-poll
+  counters and ages of the last successful temperature/gain measurements.
+- Keep the last readbacks but explicitly mark them stale. In particular,
+  `getEMGain()` recognizes an `HV` response and reports an EM protection trip
+  before entering ERROR. Suppressing it delays that software recognition;
+  the mode must report that protection polling is paused. This source does
+  not establish the independent hardware protection behavior.
+- Automatically resume on expiry or explicit resume, without accumulating
+  missed polls into a catch-up burst. Power/reconnect/reconfiguration/error
+  transitions clear the diagnostic pause. Explicit operator commands remain
+  available and end the recorded quiet window before issuing serial I/O.
+  Keep protection-reset confirmation expiry and other nonserial logic active.
+
+Use normal / paused / normal captures at settled temperature with the same
+camera, IRQ/CPU placement and workload. Retain actual pause boundaries and the
+existing camera/IRQ/lock measurements. A command already in flight can produce
+late effects, so distinguish the activation edge from the interior quiet
+interval. Verify that automatic serial transaction counts stop there and
+resume afterward. If suppressing all polling helps, separate temperature and
+gain queries in a subsequent experiment to locate the responsible traffic.
+
+The existing control timing channel records transaction start/end and success,
+but no command identity. Add a compact query category on the ordinary control
+path if individual attribution is needed; reuse existing timing collection
+rather than introducing another frame-thread polling mechanism.
+
+### Why command phase alone is insufficient
+
+Issuing a command just after publication can control when the request begins.
+It does not control the camera's response-byte timing or the resulting shared
+EDT interrupts. `pdvSerialWriteRead()` performs command, response waits/reads
+and a trailing-byte drain; the whole exchange can span many 500 us frame
+periods. Its elapsed wall time is not a continuous driver-lock hold. Moving
+that blocking exchange into `frameGrabberPostPublish()` would put waits back
+on the acquisition worker and is not the proposed approach.
+
+First establish the effect of removing routine serial traffic. Then measure
+per-query reply/interrupt timing to evaluate lower polling frequency, staggered
+queries, or phase-aware request dispatch on an ordinary control thread. A
+guaranteed quiet acquisition interval requires a measured bound or control over
+the interrupt-producing reply path; merely choosing a request phase does not
+supply that guarantee. Any production policy must retain timely temperature
+and protection status. No code or instrument configuration changes are made
+for this proposal.
+
+## 2026-10-25 bounded housekeeping pause implemented
+
+The operator approved implementation with a **120-second timeout** to allow
+collection of a 60-second telemetry set. The operator also reports that EM
+protection trips are usually silent and rarely recognized by current polling;
+this is an operational observation, not a newly verified hardware guarantee.
+The diagnostic explicitly reports software protection polling as paused.
+
+The implementation remains local to `ocam2KCtrl`; the generic EDT helper,
+logger schemas, normal housekeeping cadence and acquisition/publication hot
+paths are unchanged. No configuration setting enables the pause at startup.
+
+| INDI property | Implemented behavior |
+| --- | --- |
+| `housekeeping_pause.toggle` | On activates a finite pause in powered READY/OPERATING with no pending reconfiguration; Off resumes. Repeating On while active retains the original deadline. |
+| `housekeeping` | Read-only `timeoutSec=120`, `remainingSec`, `tempAgeSec`, `gainAgeSec`, `fpsAgeSec`, cumulative `skippedTemp`, `skippedGain`, `skippedFps`, `serialTransactions`, and last `pauseStartMonoSec`/`pauseEndMonoSec`. |
+| `housekeeping_status` | Read-only state/reason, temperature/gain/FPS validity, and `protectionPolling`; state is `paused`, `polling` or `inactive`. Readbacks are `current`, `stale` or `unavailable`; synchronized FPS is `external sync`. |
+
+The callback follows existing **INDI mutex then recursive camera mutex** order.
+It acquires serial ownership before sampling the monotonic start time, so an
+in-flight command and trailing-byte drain finish before the 120-second window
+begins. Its synchronous acknowledgment represents activation rather than a
+queued request. Start/end logs include monotonic nanosecond boundaries; INDI
+retains those boundaries in seconds for comparison with existing timing records.
+Expiry is serviced by the ordinary app loop, and each poll decision checks it.
+No dedicated thread or timer is added to the frame path.
+
+Routine polls are grouped under the existing control locks. During a pause,
+`temp` and `gain` are skipped, and serial `fps` is skipped when synchronization
+is off. With synchronization on, the existing nonserial FPS update still runs.
+Protection-reset confirmation expiry, INDI servicing, frame timing and camera
+telemetry continue. Counters count suppressed app-loop poll opportunities;
+resuming does not replay them as a burst. All existing OCAM serial call sites
+now route through an app wrapper that ends an active quiet interval before
+sending explicit commands, and counts serial attempts including failures.
+Power-off, reconfiguration, acquisition recovery, sync-frequency reconfiguration,
+shutdown and invalid FSM states cancel the mode. READY still returns promptly
+when another thread owns the INDI mutex.
+
+Successful parse times determine readback ages. No prior valid reply, a failed
+or malformed reply, and power-off report age **−1**. Cached pre-pause readings
+remain stale after resume until fresh replies arrive; a synchronous FPS source
+is identified separately. Read-only updates are batched per property to avoid
+sending one message for every field. The original temperature/gain values are
+retained during quiet operation, with the dedicated validity fields exposing
+that they are cached.
+
+The existing cooling-Off guard depends on measured temperature. If its cached
+temperature predates the pause, the control now queries a fresh temperature
+before applying that guard. A failed/invalid refresh rejects the request;
+a newly cold reply cannot be overridden by a cached warm value. The refresh
+itself is an explicit command and ends the diagnostic quiet interval.
+
+The [operator guide](../../../apps/ocam2KCtrl/doc/camera-timing-trace.md)
+section **7** gives a helper-free normal / paused / normal comparison after
+cooling settles, each with 60 seconds of telemetry. It includes readback/counter
+checks, a settling interval after activation, explicit resume and optional
+matched short kernel captures. Rebuild/install the camera app and restart it
+using the operator's normal procedure; no `logdump` rebuild or new camera
+configuration is needed. Hardware qualification is still outstanding.
+
+Local verification passes, totaling **1,026 assertions in 49 test cases**:
+
+| Suite | Assertions | Test cases |
+| --- | ---: | ---: |
+| `ocam2KCtrl_housekeeping_test` | 237 | 12 |
+| `ocam2KCtrl_test` | 713 | 33 |
+| `ocam2KCtrl_lifecycle_test` | 7 | 1 |
+| `ocam2KCtrl_temperature_test` | 69 | 3 |
+
+The focused suite covers synchronized/unsynchronized suppression, original
+query order on resume, exact deadline/nonextension, callback serialization
+behind serial ownership, real app-loop telemetry during a quiet interval,
+invalid states, explicit command cancellation, readback freshness, cooling-Off
+validation after active/resumed/expired pauses, and ordinary protection errors.
+Tests use existing SDK stubs; no actual camera is opened. Independent source
+review verifies lock order, routing of all existing OCAM serial calls and the
+unchanged frame hot paths. `clang-format --dry-run --Werror`, local Markdown
+link checks and `git diff --check` pass.
+
+The normal application also builds and links against the complete copied
+**EDT 5.6.8.0 SDK**, with no test includes/stubs:
+
+```bash
+make -C apps/ocam2KCtrl EDT=true \
+    EDT_INCLUDES=-I/home/jrmales/Source/opt/EDTpdv \
+    'EDT_LIBS=-L/home/jrmales/Source/opt/EDTpdv -lpdv -lpthread -lm -ldl' -j2
+```
+
+The SDK-linked binary is never launched by an agent. Build diagnostics contain
+only the existing modified/untracked git-header notices. Logs are retained in
+`/tmp/ocam-housekeeping-{base-build,base-test,sdk-build}.log` and
+`/tmp/ocam-{housekeeping,lifecycle,temperature}-{build,tests}.txt`. Instrument
+pause/expiry and normal / paused / normal timing qualification remain operator
+follow-ups.
+
 ## Affected files
 
 - `.clang-format`
@@ -2845,6 +3238,7 @@ needed for this helper change. Hardware qualification remains pending.
 - `apps/ocam2KCtrl/scripts/tests/capture_camera_timing_test.py`
 - `apps/ocam2KCtrl/scripts/tests/check_edt_probes_test.py`
 - `apps/ocam2KCtrl/tests/ocam2KCtrl_test.cpp`
+- `apps/ocam2KCtrl/tests/ocam2KCtrl_housekeeping_test.cpp`
 - `libMagAOX/Makefile`
 - `libMagAOX/app/MagAOXApp.hpp`
 - `libMagAOX/app/dev/dmTiming.hpp`

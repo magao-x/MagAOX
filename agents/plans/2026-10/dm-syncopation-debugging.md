@@ -2,29 +2,32 @@
 
 This record tracks operator observations, diagnosis, changes and verification during debugging and optimization. The [main engineering plan](dm-syncopation.md) retains the settled design and review answers; the [user guide](../../../apps/dmSyncopation/doc/dmSyncopation.md) documents current operation and interfaces.
 
-Current status: camera timing instrumentation and deferred OCAM rearm are
-implemented. Operator captures first located recurring EDT interrupt delays,
-then confirmed that rearm stalls occur after publication with IRQ 405 on CPU 61
-and acquisition on CPU 33. Mean acquisition-to-write latency improves from
-53.600 to 50.167 us in the first retained kernel-off comparison. The latest
-five-second trace retains both CPUs without loss; publication deviation is
-0.791 us off / 0.800 us on. Three covered rearm stalls remain after publication.
-The earlier setup-associated millisecond burst does not recur in this run;
-frame age and its individual responsible setup operation remain unresolved.
-The complete EDT copy now identifies ordinary `atime` as a host completion
-processing stamp with 1 us quantization. It can follow PDV device/serial
-handling in the normal IRQ path; current shared lock and probe targets are available.
-Operator readback matches the copied EDT module's build ID. Disabled probes
-register for the four lock/wakeup wrappers; the kernel explicitly rejects
-the six uninstrumented core functions under its notrace policy. The optional
-wrapper capture is now implemented and checked offline; its first hardware
-measurement remains pending.
+Current status (2026-10-25 America/Phoenix): camera timing instrumentation,
+deferred OCAM rearm and accepted EDT wrapper capture are implemented. The first
+native/wrapper operator comparison retains both CPUs without trace loss or
+cleanup errors. It directly identifies the same EDT lock in acquisition on
+CPU 33 and IRQ 405 on CPU 61; all 25 camera acquisition brackets above 2 us
+overlap the remote lock holder, with a maximum of 34 us. Covered long rearms
+remain after publication. Combined device/control and acquisition handlers
+take about 53 us versus 32 us ordinarily. Their changing software-stamp offset
+explains a captured 479 us interval following a late frame; shared IRQ entry
+does not establish physical frame-arrival timing.
+
+The camera was cooling after an overnight power-off and normal power-cycle
+FSM startup, without software reconfiguration. Conversion spread changes
+before wrapper activation, and probes add timing cost. The sequential captures
+therefore do not isolate a causal whole-file overhead difference. A separate
+untraced approximately 113 us post-stamp excursion remains unexplained.
+Routine serial status polling is the next controlled comparison once temperature
+is settled. The approved runtime diagnostic pause now has a fixed 120-second
+timeout; production polling cadence is unchanged. Frame age,
+physical arrival timing and earlier setup-associated bursts remain open.
 Earlier isolated camera/acquWFS measurements and
 their limitations are preserved below; matched camera-publication-to-wake
 latency remains unmeasured. Median-grid scheduling, per-step skips and targeted
 extra-step wakes remain unimplemented; the early-arrival reserve remains undecided.
-Five seconds of settling followed by five seconds of capture now provides
-complete kernel retention for the observed event rate.
+Five-second native and one-second wrapper captures have now demonstrated
+complete kernel retention at their respective observed event rates.
 
 Append subsequent investigations as dated entries, keeping operator evidence, local verification and outstanding instrument checks explicit. All agent work runs on the workstation; the operator performs instrument actions and supplies results.
 
@@ -2430,3 +2433,96 @@ partial setup, unrelated-state preservation and failed save/cleanup. Independent
 review passes. The [OCAM record](ocam2k-acquisition-publication-timing.md) records
 the exact fields, ownership choices and limitations. Copy both updated Python
 scripts for the operator test; no camera/reader/kernel rebuild is required.
+
+## 2026-10-25 first wrapper capture confirms the shared EDT lock
+
+The operator supplied `camwfs-step5-20261025T155627Z`: one-second native and
+wrapper traces after five-second settles, followed by helper-free camera
+telemetry. Both retain CPUs 33/61 without loss or cleanup errors. The operator
+confirms an overnight camera power-off followed by normal power-cycle FSM
+startup, with no software reconfiguration. The camera cools toward −45 C
+during the first two files and is near its setpoint in the last.
+
+**14,439 complete wrapper call pairs** and **6,147 lock cycles** identify one
+lock pointer shared by acquisition and IRQ 405. All **25** camera-side
+acquisition brackets above 2 us overlap a remote hold; the maximum is **34 us**.
+Seven IRQ-side brackets above 2 us likewise overlap the camera's hold, up to
+5 us. A selected **40.957 us rearm** includes that 34 us wait and remains
+after publication. These are instrumented elapsed brackets on a 1 us trace
+grid, not exact uninstrumented spin times.
+
+The ordinary main/control wake returns into `pdv_DeviceIntPdv`; completion
+IRQs containing it average **53 us**, versus **32.183 us** for acquisition-only
+IRQs. For captured raw frames 1349872/1349873, `atime` intervals are
+**526 / 479 us**. The late interval has 526 us between shared IRQ entries;
+the early interval has **500 us** between entries while handler duration falls
+**53 to 32 us**. This accounts for the early software-stamp interval without
+establishing an early physical frame. It does not explain every late interval.
+
+Native tracing sees the same longer combined-handler class, approximately
+50.714 versus 30.494 us. Wrapper timing is measurably higher, but file-wide
+comparison is confounded by pre-existing conversion variation and the cooling
+startup. Both raw excursion centers fall between summary windows. The final
+helper-free retained summaries have **0.829 us publication deviation**;
+that value is not a continuous bound or a summary of the wrapper ring.
+
+A separate untraced **613 / 387 us** SDK/publication pair has steady
+**500 / 501 us `atime`**, leaving a roughly 113 us post-stamp delay unassigned.
+The next proposed experiment is to change routine `temp`/`gain` status
+polling cadence with the camera settled and compare control IRQs, lock waits
+and timing. With synchronization on in these captures, `getFPS()` uses the
+synchronization rate and does not query `fps` over serial. The responsible
+individual commands and a suitable polling policy
+are not yet established. No runtime or scheduler change accompanies this
+analysis. The [OCAM record](ocam2k-acquisition-publication-timing.md) contains
+input hashes, exact timelines, phase/coverage limits and reproducible analysis
+artifact locations.
+
+## 2026-10-25 proposed bounded pause of housekeeping serial traffic
+
+The operator proposes a testing mode to pause housekeeping and raises
+phase-aware housekeeping scheduling. The recommended first test is a finite
+runtime pause of routine `temp`/`gain` polls (`fps` as well when synchronization
+is off), with normal / paused / normal comparisons at settled temperature.
+The pause begins after an outstanding transaction drains, exposes actual
+boundaries and stale readback ages, automatically expires and clears on
+power/reconfiguration/error transitions. Explicit serial commands end the
+quiet interval; acquisition, FSM and telemetry continue.
+
+Gain polling also detects the software-visible `HV` protection-trip response,
+so its suppression must be explicitly reported. Request timing alone cannot
+guarantee deconfliction: response bytes and device/control interrupts arrive
+later, potentially across many camera periods. Keep serial waits off the
+acquisition worker. The [OCAM plan](ocam2k-acquisition-publication-timing.md)
+records the proposed mode and later per-query scheduling measurements. This
+is planning only; no testing mode or housekeeping scheduler is implemented yet.
+
+## 2026-10-25 120-second housekeeping diagnostic implemented
+
+The operator approved the pause with a 120-second timeout for 60-second
+telemetry sets. `camwfs.housekeeping_pause.toggle=On` suppresses automatic
+`temp`/`gain` and unsynchronized `fps` serial queries after any in-flight command
+finishes. Off resumes, repeated On does not extend the current deadline, and
+the ordinary loop automatically expires it. Acquisition, frame timing,
+telemetry and nonserial FPS updates continue. Explicit serial commands and
+camera lifecycle/reconfiguration changes end the quiet interval.
+
+Read-only `housekeeping` and `housekeeping_status` expose the deadline, actual
+monotonic boundaries, serial/suppressed-poll counters, readback ages/validity
+and software protection-polling status. Cached readings remain stale until
+successfully refreshed. Cooling-Off validation refreshes pre-pause temperature
+before applying its existing guard. No generic EDT code, frame hot path or
+production polling schedule changes.
+
+The [operator guide](../../../apps/ocam2KCtrl/doc/camera-timing-trace.md)
+section **7** provides the normal / paused / normal capture. This requires an
+`ocam2KCtrl` rebuild/restart, with no configuration or `logdump` change. The
+[OCAM plan](ocam2k-acquisition-publication-timing.md) records lock ownership,
+transition semantics and local verification; instrument qualification remains
+an operator follow-up.
+
+Local checks pass: **1,026 assertions in 49 test cases** across the new
+housekeeping suite and existing OCAM, lifecycle and temperature suites. The
+normal app builds/links against the copied EDT 5.6.8.0 SDK without test stubs;
+that binary is not launched. Formatting, whitespace and local documentation
+links pass. The operator comparison has not yet been run.

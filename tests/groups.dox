@@ -159,6 +159,11 @@ report from their counters and then returns nonzero. An HTML report therefore do
  * \ingroup application_unit_test
  */
 
+/** \defgroup ocam2KCtrl_housekeeping_unit_test OCAM Housekeeping Unit Tests
+ * \brief Bounded serial-housekeeping suppression, recovery, and operator-status tests.
+ * \ingroup application_unit_test
+ */
+
 /** \defgroup stdCamera_unit_test stdCamera Unit Tests
  * \brief Shared camera temperature, ROI geometry, configuration, and callback tests.
  * \ingroup app_unit_test
