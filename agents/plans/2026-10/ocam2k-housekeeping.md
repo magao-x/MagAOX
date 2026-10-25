@@ -484,3 +484,36 @@ build, clang-format verification and whitespace checks pass. Logs are under
 `/tmp/ocam-instrument-fps-app-*` and `/tmp/ocam-fps-reply-*`. The SDK-linked binary
 was not launched by an agent. The operator needs to rebuild/install
 `ocam2KCtrl` and restart `camwfs`; this correction needs no `logdump` rebuild.
+
+
+## Deployment correction — adjacent gain prompt, 2026-10-25
+
+The next startup showed `EM Gain parse error: Gain set to 1Ok :`. This is
+**gain 1 followed immediately by the `Ok :` prompt**, not a gain of 10k. These
+messages originate in `getEMGain()` after sending the read-only `gain` query;
+the camera's response wording does not indicate that the app issued a setting
+write. The repeated messages are bounded readback-confirmation retries.
+
+The prior prompt helper already removed `Ok :`, but the remaining `Gain set to 1`
+body failed the inherited test assumption that a trailing space delimiter must
+follow the number. Preserving that delimiter requirement was incorrect for the
+observed camera response. `parseEMGain()` now validates the exact report prefix
+and a complete unsigned integer token after trimming optional surrounding
+whitespace. No trailing delimiter or prompt is required. Range 1..600, complete
+numeric-token validation and rejection of malformed/error/junk/duplicate-prompt
+responses remain intact, including rejection of `10k` and `10000`.
+
+The exact reply is covered by parser, initial getter-confirmation, numeric
+setter-acknowledgement and initial-housekeeping regressions. The housekeeping
+case confirms the observation after one query and then stays quiet without any
+automatic gain-setting write. The new app regressions first reproduced the
+failure against the previous parser and pass with this change.
+
+Local verification passes: controller **891 assertions / 35 cases**, parsers
+**600 / 5**, housekeeping **640 / 26**, totaling **2,131 / 66**, plus the EDT SDK
+build, clang-format and whitespace checks. Logs are under
+`/tmp/ocam-instrument-gain-app-*` and `/tmp/ocam-gain-reply-*`. Build invocations
+sharing the generated `magaox_git_version.h` were serialized after simultaneous
+makes raced while generating that temporary header during the first attempt.
+No build-system or acquisition-path change is included. The operator needs to
+rebuild/install `ocam2KCtrl` and restart `camwfs`; `logdump` is unchanged.

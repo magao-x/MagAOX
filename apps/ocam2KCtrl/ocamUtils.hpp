@@ -242,11 +242,11 @@ inline int parseFPS( float             &fps, /**< [out] Camera rate on success, 
     return 0;
 }
 
-/// Parse the integer gain in an OCAM "Gain set to N " response.
-/** A trailing space before the final response whitespace is required by the legacy response contract.
- * One optional terminal camera prompt is ignored. The supported range is 1 through 600.
+/// Parse the integer gain in an OCAM "Gain set to N" response, with an optional terminal prompt.
+/** Whitespace after the numeric value is optional, including before an adjacent "Ok :" prompt.
+ * The supported range is 1 through 600.
  *
- * \returns 0 on success, and emGain set to a value >= 1
+ * \returns 0 on success, and emGain set to a value >= 1.
  * \returns -1 on error, and emGain will be set to 0.
  *
  * \ingroup ocam2KCtrl
@@ -254,21 +254,26 @@ inline int parseFPS( float             &fps, /**< [out] Camera rate on success, 
 inline int parseEMGain( unsigned          &emGain, /**< [out] Valid gain, or 0 on error. */
                         const std::string &fstr /**< [in] Device response to parse. */ )
 {
-    std::vector<std::string> v;
-    mx::ioutils::parseStringVector( v, std::string( ocamUtilsDetail::withoutPrompt( fstr ) ), " " );
-
+    const auto                 response = ocamUtilsDetail::trim( ocamUtilsDetail::withoutPrompt( fstr ) );
+    constexpr std::string_view prefix{ "Gain set to " };
     emGain = 0;
 
-    if( v.size() != 5 || v[0] != "Gain" || v[1] != "set" || v[2] != "to" || !ocamUtilsDetail::trim( v[4] ).empty() ||
-        v[3].empty() )
+    if( !response.starts_with( prefix ) )
+    {
+        return -1;
+    }
+
+    const auto value = ocamUtilsDetail::trim( response.substr( prefix.size() ) );
+
+    if( value.empty() )
     {
         return -1;
     }
 
     unsigned parsed;
-    auto     result = std::from_chars( v[3].data(), v[3].data() + v[3].size(), parsed );
+    auto     result = std::from_chars( value.data(), value.data() + value.size(), parsed );
 
-    if( result.ec != std::errc{} || result.ptr != v[3].data() + v[3].size() || parsed < 1 || parsed > 600 )
+    if( result.ec != std::errc{} || result.ptr != value.data() + value.size() || parsed < 1 || parsed > 600 )
     {
         return -1;
     }

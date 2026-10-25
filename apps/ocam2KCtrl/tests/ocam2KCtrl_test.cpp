@@ -2303,6 +2303,61 @@ TEST_CASE( "ocam2KCtrl serial gain helpers handle valid and invalid responses", 
     }
 }
 
+/// Gain 1 followed immediately by the terminal prompt is a valid readback and ends automatic confirmation queries.
+/** \ingroup ocam2KCtrl_unit_test */
+TEST_CASE( "ocam2KCtrl accepts instrument gain replies adjacent to the prompt", "[ocam2KCtrl][housekeeping]" )
+{
+    // clang-format off
+    #ifdef OCAM2KCTRL_TEST_DOXYGEN_REF
+    ocam2KCtrl::getEMGain(); ocam2KCtrl::setEMGain(); ocam2KCtrl::pollHousekeeping();
+    #endif
+    // clang-format on
+    resetStubState();
+    ocam2KCtrl_test app;
+    setPoweredOn( app );
+    deferHousekeeping( app );
+    app.m_emGain                 = 77;
+    app.m_gainConfirmation.phase = ocam2KCtrl::ConfirmationPhase::unavailable;
+    const std::string response   = "Gain set to 1Ok :";
+
+    SECTION( "getter establishes the initial gain observation" )
+    {
+        queueSerialResponse( response );
+        REQUIRE( app.getEMGain() == 0 );
+        REQUIRE( g_edtStubState.serialCommands == std::vector<std::string>{ "gain" } );
+    }
+
+    SECTION( "setter acknowledgement confirms gain 1 without an additional query" )
+    {
+        app.m_emGainSet       = 1;
+        app.m_protectionReset = false;
+        queueSerialResponse( response );
+        REQUIRE( app.setEMGain() == 0 );
+        REQUIRE( app.m_gainConfirmation.expected == 1 );
+        REQUIRE( app.pollHousekeeping() == 0 );
+        REQUIRE( g_edtStubState.serialCommands == std::vector<std::string>{ "gain 1" } );
+    }
+
+    SECTION( "initial housekeeping observation confirms once and then remains quiet" )
+    {
+        queueSerialResponse( response );
+        REQUIRE( app.pollHousekeeping() == 0 );
+
+        for( unsigned pass = 0; pass < 3; ++pass )
+        {
+            REQUIRE( app.pollHousekeeping() == 0 );
+        }
+
+        REQUIRE( g_edtStubState.serialCommands == std::vector<std::string>{ "gain" } );
+        REQUIRE( app.m_housekeepingGainQueries == 1 );
+    }
+
+    REQUIRE( app.m_emGain == 1 );
+    REQUIRE( app.m_housekeepingGainTime > 0 );
+    REQUIRE( app.m_gainConfirmation.phase == ocam2KCtrl::ConfirmationPhase::confirmed );
+    REQUIRE( g_edtStubState.serialResponses.empty() );
+}
+
 /// Verify the serial setter commands send the expected OCAM command sequence.
 /**
  * \ingroup ocam2KCtrl_unit_test

@@ -310,13 +310,66 @@ TEST_CASE( "ocam2KCtrl utility helpers parse gain responses", "[ocamUtils]" )
         REQUIRE( emgain == 512 );
     }
 
-    SECTION( "gain responses without the trailing delimiter are rejected" )
+    SECTION( "gain responses do not require whitespace after the numeric value" )
     {
-        unsigned emgain = 1;
-        int      rv     = parseEMGain( emgain, "Gain set to 512\n\n" );
+        for( const std::string response : { "Gain set to 512",
+                                            "Gain set to 512\n\n",
+                                            "Gain set to 512Ok :",
+                                            "\r\nGain set to 512Ok :\r\n",
+                                            "Gain set to 512 \r\nOk :" } )
+        {
+            CAPTURE( response );
+            unsigned emgain = 0;
 
-        REQUIRE( rv == -1 );
-        REQUIRE( emgain == 0 );
+            REQUIRE( parseEMGain( emgain, response ) == 0 );
+            REQUIRE( emgain == 512 );
+        }
+    }
+
+    SECTION( "the exact startup reply is gain one followed by the prompt" )
+    {
+        unsigned emgain = 42;
+
+        REQUIRE( parseEMGain( emgain, "Gain set to 1Ok :" ) == 0 );
+        REQUIRE( emgain == 1 );
+    }
+
+    SECTION( "an adjacent prompt does not permit invalid numbers or trailing text" )
+    {
+        for( const std::string value : { "0",
+                                         "601",
+                                         "10000",
+                                         "10k",
+                                         "1x",
+                                         "1.5",
+                                         "1e1",
+                                         "-1",
+                                         "+1",
+                                         "nan",
+                                         "inf",
+                                         "99999999999999999999999",
+                                         "" } )
+        {
+            CAPTURE( value );
+            unsigned emgain = 42;
+
+            REQUIRE( parseEMGain( emgain, "Gain set to " + value + "Ok :" ) == -1 );
+            REQUIRE( emgain == 0 );
+        }
+
+        for( const std::string response : { "Gain set to 1Ok :junk",
+                                            "Gain set to 1Ok :Ok :",
+                                            "Gain set to 1 rubbish Ok :",
+                                            "Gain set to 1Error :",
+                                            "Gain was to 1Ok :",
+                                            "HV tripOk :" } )
+        {
+            CAPTURE( response );
+            unsigned emgain = 42;
+
+            REQUIRE( parseEMGain( emgain, response ) == -1 );
+            REQUIRE( emgain == 0 );
+        }
     }
 
     SECTION( "gain responses without a numeric value are rejected" )
