@@ -6,14 +6,22 @@ Current status: camera timing instrumentation and deferred OCAM rearm are
 implemented. Operator captures first located recurring EDT interrupt delays,
 then confirmed that rearm stalls occur after publication with IRQ 405 on CPU 61
 and acquisition on CPU 33. Mean acquisition-to-write latency improves from
-53.600 to 50.167 us in retained kernel-off summaries. Jitter is not uniformly
-improved: unexplained changes in spread and larger SDK-return excursions remain,
-some outside kernel coverage. Earlier isolated camera/acquWFS measurements and
+53.600 to 50.167 us in the first retained kernel-off comparison. The latest
+five-second trace retains both CPUs without loss; publication deviation is
+0.791 us off / 0.800 us on. Three covered rearm stalls remain after publication.
+The earlier setup-associated millisecond burst does not recur in this run;
+frame age and its individual responsible setup operation remain unresolved.
+The complete EDT copy now identifies ordinary `atime` as a host completion
+processing stamp with 1 us quantization. It can follow PDV device/serial
+handling in the normal IRQ path; current shared lock and probe targets are available.
+Operator readback matches the copied EDT module's build ID and confirms kernel
+probe support plus all ten target symbols; disabled registration remains untested.
+Earlier isolated camera/acquWFS measurements and
 their limitations are preserved below; matched camera-publication-to-wake
 latency remains unmeasured. Median-grid scheduling, per-step skips and targeted
 extra-step wakes remain unimplemented; the early-arrival reserve remains undecided.
-The next camera capture is prepared with separate setup/settling phases and a
-five-second kernel interval; its operator run remains pending.
+Five seconds of settling followed by five seconds of capture now provides
+complete kernel retention for the observed event rate.
 
 Append subsequent investigations as dated entries, keeping operator evidence, local verification and outstanding instrument checks explicit. All agent work runs on the workstation; the operator performs instrument actions and supplies results.
 
@@ -2216,3 +2224,159 @@ documentation commit. Verification remains **17 passing offline tests** and
 the checks above; no functional changes followed verification. The next
 instrument capture remains operator work and needs no camera/reader rebuild
 or restart for this helper-only update.
+
+## 2026-10-24 setup burst isolated by the new phase anchors
+
+The operator supplied `camwfs-trace-20261025T040828Z` and confirmed no other
+settings or workload changes. Camera PID/TID, inode/session, FIFO 90 on CPU 33
+and EDT IRQ 405 on CPU 61 are unchanged. The helper completed five-second
+settling but still requested **ten seconds of capture**, overwriting **50203**
+CPU 33 events. Joint retained coverage is **7.991974 s**. The operator agreed
+to repeat with `--settle-seconds 5 --seconds 5`.
+
+The large **1138.810/359.769 us** publication pair occurs inside the explicit
+private trace setup phase, before settling or trace enable. The SDK acquisition
+and return intervals already contain the excursion; query, conversion and
+deferred rearm remain ordinary. This narrows the previous metadata/setup-envelope
+association to setup, without identifying its individual responsible operation.
+The early interval only partly compensates: the two SDK acquisition intervals
+sum **1500 us** rather than nominal **1000 us**. Consecutive counters and later
+normal cadence do not establish unchanged frame age or prove absence of backlog.
+
+The kernel-off file has **0.782 us** pooled publication deviation and mean
+acquisition-to-write **49.289 us**. The entire on file has **2.084 us** deviation;
+excluding its one explicitly identified setup-containing summary gives
+**0.804 us**. Four summaries wholly inside the requested enabled interval also
+give **0.804 us**, and settling summaries give **0.757 us**. The old first-file
+broad spread does not repeat, but this baseline improvement precedes the helper
+and cannot be credited to settling. No new quality failures, frame/counter gaps
+or diagnostic drops occur.
+
+The two selected contexts during tracing form a **524.841/479.184 us** pair,
+already **525.152/479.355 us** at SDK return, with short query and publication
+stages. Their six neighboring frames have full retained kernel coverage. The
+pair lies in a summary-window gap, so requested-inside aggregate summaries
+classify zero excursions. Full CPU 61 acquisition-waking spacing stays within
+**480–525 us** during tracing. These are host delivery observations, not physical
+exposure or absolute frame-age measurements.
+
+The [OCAM timing record](ocam2k-acquisition-publication-timing.md) contains
+checksums, exact phase/coverage boundaries, population qualifications and
+matched IRQ evidence. Only engineering documentation changes; no implementation,
+configuration, commit, push or agent instrument action accompanies this analysis.
+
+## 2026-10-24 five-second repeat retains both CPUs without loss
+
+`camwfs-trace-20261025T041847Z` confirms the intended **five-second settling /
+five-second capture** sequence. Camera PID/TID, stream/session and CPU/IRQ
+placement match the preceding run. Both CPUs report **zero overwrite, commit
+overrun and dropped events**; joint retained event coverage is **5.000001 s**.
+
+The earlier millisecond setup burst does not recur. Whole-file publication
+deviation is **0.791 us off / 0.800 us on**, and mean acquisition-to-write
+**49.256/49.393 us**. Only one complete two-second summary lies inside the
+five-second trace; its deviation is **0.764 us**, not a full-five-second RMS.
+The on-file raw summary population retains two ambiguous intervals from one
+**1.102 us** write bracket; there are no other new quality failures, camera
+frame/counter gaps or diagnostic drops.
+
+Two selected capture contexts are **2.057 seconds apart**, with publication
+intervals **524.781/479.806 us**, already **524.811/480.016 us** at SDK return.
+They are not an adjacent pair. The early center follows a **509.823 us normal**
+publication interval, again ruling out universal classified late-then-early
+ordering. Both contexts fall in summary-window gaps and have ten distinct
+neighboring frames with complete kernel coverage.
+
+Three covered rearms take **23.264/24.396/23.525 us**, each overlapping a remote
+EDT control handler. They begin after both notifications and finish on average
+**5.288 us after IRQ exit**, with no local interrupt or thread switch. Covered
+timeout queries remain **0.230–0.370 us**, including short queries concurrent
+with remote control IRQs. This confirms continued rearm serialization after
+publication. Full-trace acquisition-wake intervals span **481–524 us**, with
+waking-to-run maximum **4 us** and no runnable-camera displacement.
+
+The [OCAM timing record](ocam2k-acquisition-publication-timing.md) records
+input checksums, exact boundaries, qualification counts, full/subset comparisons
+and matched rearm/IRQ examples. The capture procedure now retains the intended
+history; the earlier setup transients and physical frame age remain open.
+Only engineering documentation changes; no implementation, configuration,
+commit, push or agent instrument action accompanies this analysis.
+
+## 2026-10-24 proposed finer EDT request attribution
+
+Existing matched IRQ/SDK endpoints already split the two covered examples:
+the late event's IRQ entries are 525 us apart, while the early event has 500 us
+entry spacing and a handler-duration change of -20 us. The next proposed
+drill-down prioritizes selective driver completion/timestamp/serial observations,
+after confirming loaded build identity and available tracing support.
+Individual EDT request timings can resolve SDK/driver gaps in other cases.
+The copied SDK's wait-return bracket
+includes buffer/timeout queries, blocking WAITBUF, wait-status handling and
+timestamp retrieval. All actions share one outer Linux ioctl command, so the
+capture must also identify the nested EDT action. This can separate pre-wait
+contention, acquisition waiting, post-wake driver requests and user-space SDK
+work, accounting for the existing scheduler/IRQ history.
+
+Verified driver probes or the vendor's existing trace ring could provide the
+following split inside the driver, but runtime support, clock semantics and
+overhead need verification. Camera/card versus delayed host interrupt delivery
+still needs an independent hardware reference if the delay precedes IRQ entry.
+The [OCAM record](ocam2k-acquisition-publication-timing.md) records exact request
+actions, source findings and the proposed sequence. This is not implemented;
+there are no new instrument actions or configuration changes.
+
+## 2026-10-24 complete EDT driver copy inspected
+
+The complete extraction is at `/home/jrmales/Source/opt/EDTpdv`. It contains
+Linux wrapper source, a symbol-bearing proprietary core object and `edt.ko`
+version **5.6.8.0**, built for the captured **5.14.0-362.8.1.el9_3.x86_64**
+kernel. The linked module retains symbols/debug information, giving concrete
+completion, serial, wakeup and shared-lock probe targets despite the core C
+source remaining absent.
+
+Static inspection places ordinary `atime` creation in `edt_increment_done`
+through `EdtTraceTimeStamp`, using CLOCK_REALTIME quantized to **1 us**. When
+the PDV device/serial callback executes, it precedes this completion stamp in
+the normal IRQ path. Variable driver work can therefore move `atime` without proving variable
+physical camera delivery. Rearm and IRQ critical sections use the same channel
+zero lock path; this supplies a concrete target for measuring the observed
+serialization, rather than proving its runtime wait/hold durations.
+
+The [OCAM record](ocam2k-acquisition-publication-timing.md) records module
+identity/hashes, static call paths and qualified tracing targets. Loaded-module
+identity is verified in the next checkpoint; probe eligibility remains an
+operator check. No vendor binary,
+module or probe was run; only engineering records change.
+
+## 2026-10-24 loaded EDT module match confirmed
+
+The operator's exao2 readbacks match the complete copied module: kernel
+**5.14.0-362.8.1.el9_3.x86_64**, EDT **5.6.8.0**, source version
+`A26E0B4FD875E93168B83BC`, and build ID
+`97857cff4fc9d75717d3b58e9c5bc3359a7204f0`. The build ID is the final
+20 bytes of the supplied sysfs GNU note, after its header/name.
+
+The [OCAM timing record](ocam2k-acquisition-publication-timing.md) records the
+comparison and next read-only capability checks. This resolves the module
+identity prerequisite for targeted driver tracing; actual symbol exposure,
+probe registration support and measurement overhead remain unverified.
+No implementation or instrument configuration changes accompany this checkpoint.
+
+## 2026-10-24 EDT probe prerequisites available
+
+The operator confirms all four requested kernel configuration flags are `y`,
+the root-owned `kprobe_events` interface exists, and all ten selected EDT
+functions appear in `/proc/kallsyms`. Kernel lockdown reports **none**.
+
+The next operator step is the new
+[`check-edt-probes.py`](../../../apps/ocam2KCtrl/scripts/check-edt-probes.py)
+registration-only helper: test entry/return definitions with events disabled,
+then remove its own definitions. No active driver timing capture is enabled
+by this change. The [OCAM record](ocam2k-acquisition-publication-timing.md)
+records exact prerequisites and the separation between registration eligibility
+and later active measurement qualification.
+
+The helper's **16 offline checks pass**, including failed/short writes,
+interruption, output failure and selective cleanup. Independent review also
+passes; actual operator registration and active measurement results remain
+pending. The existing scheduler/IRQ capture helper is unchanged.
