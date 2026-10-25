@@ -395,6 +395,113 @@ dynamic definitions first can remove their formatter. The generic recovery
 steps in step 4 must therefore be completed before selectively removing any
 retained EDT definitions. Share the errors and retained names with the capture.
 
+## 7. Compare normal polling with a temporary housekeeping pause
+
+The diagnostic housekeeping pause suppresses automatic serial `temp` and `gain`
+queries, and `fps` queries when synchronization is off. It leaves acquisition,
+FSM processing, timing telemetry and INDI servicing running. With synchronization
+on, FPS follows the external timing updates without a serial query.
+
+Rebuild/install `ocam2KCtrl` for this mode and restart `camwfs` using the normal
+operator procedure. It requires no new configuration setting or `logdump`
+rebuild. A restart begins with normal housekeeping enabled. Let the camera reach
+its temperature setpoint before collecting the comparison, and retain the same
+camera/loop settings, CPU/IRQ placement and workload throughout.
+
+The runtime interface is:
+
+| Property | Elements and meaning |
+| --- | --- |
+| `camwfs.housekeeping_pause` | Writable `toggle`: On requests a pause; Off resumes normal polling. Repeating On does not extend an existing request. |
+| `camwfs.housekeeping` | Read-only `remainingSec` and fixed `timeoutSec=120`; `pauseStartMonoSec` and `pauseEndMonoSec` retain the latest actual pause boundaries in monotonic seconds. `tempAgeSec`, `gainAgeSec`, `fpsAgeSec` give readback ages (`-1` before a valid reply, after power-off, or after an invalid reply/failed serial attempt). `skippedTemp`, `skippedGain`, `skippedFps` count suppressed polls; `serialTransactions` counts attempted serial transactions. All counters accumulate for the app process lifetime. |
+| `camwfs.housekeeping_status` | Read-only `state` and `protectionPolling` are `paused`, `polling`, or `inactive`; the latter applies outside stable powered READY/OPERATING states. `reason` identifies activation or why polling resumed. `temperature`, `gain`, `fps` report `stale`, `current` or `unavailable`; FPS reports `external sync` when synchronization is on. |
+
+The quiet interval starts only after the current serial transaction and its
+trailing-byte drain finish. Check `housekeeping_status` for actual activation;
+the switch request alone is not the quiet boundary. The callback activates the
+pause synchronously once that transaction has finished. The active pause expires
+after 120 seconds and resumes polling without replaying skipped queries.
+Temperature/gain values remain cached and are explicitly marked stale during
+the pause. Resuming does not make cached values current: they remain stale
+until successful post-pause queries refresh them. Gain queries can recognize
+the camera's `HV` response, so that
+software protection-trip polling is paused too. An explicit serial command,
+reconfiguration, or power/error transition ends the pause before further serial
+I/O; include such an interruption in the capture notes.
+
+First inspect the normal-polling status with no kernel helper running:
+
+```bash
+getINDI camwfs.housekeeping
+getINDI camwfs.housekeeping_status
+```
+
+Require `state=polling`, current temperature/gain readbacks and refreshing ages;
+FPS should be current or report `external sync`. Then collect the baseline:
+
+```bash
+timeout 60s logdump --dir=/opt/MagAOX/telem --ext=.bintel -f camwfs > "$HOME/camwfs-housekeeping-normal-before.txt"
+```
+
+Request the pause and inspect its state:
+
+```bash
+setINDI -s camwfs.housekeeping_pause.toggle=On
+getINDI camwfs.housekeeping_pause
+getINDI camwfs.housekeeping
+getINDI camwfs.housekeeping_status
+```
+
+Once `housekeeping_status.state=paused`, allow about five seconds for effects near
+the activation edge to pass. Confirm that at least 65 seconds remain, then take
+the 60-second telemetry set:
+
+```bash
+getINDI camwfs.housekeeping
+getINDI camwfs.housekeeping_status
+timeout 60s logdump --dir=/opt/MagAOX/telem --ext=.bintel -f camwfs > "$HOME/camwfs-housekeeping-paused.txt"
+getINDI camwfs.housekeeping
+getINDI camwfs.housekeeping_status
+```
+
+Retain these property outputs with the telemetry. During the interior quiet
+interval, `serialTransactions` must remain unchanged while skipped-poll counts
+increase. A serial transaction or pause interruption makes that interval a
+different comparison; keep its state/reason and timing rather than treating it
+as uninterrupted quiet operation. If the remaining time is insufficient, resume
+with Off and make a fresh On request before starting another capture.
+
+Resume explicitly after the paused capture and inspect the status:
+
+```bash
+setINDI -s camwfs.housekeeping_pause.toggle=Off
+getINDI camwfs.housekeeping_status
+getINDI camwfs.housekeeping
+```
+
+Wait for `state=polling`, successful post-pause temperature/gain queries to mark
+their readbacks current, and serial transactions/ages to resume updating. FPS
+should be current or report `external sync`. Once refreshed, collect the final
+baseline:
+
+```bash
+timeout 60s logdump --dir=/opt/MagAOX/telem --ext=.bintel -f camwfs > "$HOME/camwfs-housekeeping-normal-after.txt"
+getINDI camwfs.housekeeping
+getINDI camwfs.housekeeping_status
+```
+
+Verify serial transactions resume and readback ages refresh. Keep all three
+telemetry files, the property outputs and any lifecycle messages. The mode also
+resumes automatically on its deadline if an explicit Off is omitted.
+
+Start with this helper-free comparison. If kernel attribution is needed, repeat
+the comparison with the one-second native or wrapper capture from section 6
+wholly inside the confirmed active pause, preserving setup/settling time and a
+matching normal-polling capture. The probes add timing cost, so keep that
+comparison distinct from the helper-free telemetry. A quiet interval does not
+establish a safe production polling schedule: serial replies and their EDT
+interrupts need not occur in the frame in which a command was issued.
+
 ## Implementation checks and references
 
 The helper's local checks use an ordinary temporary fake tracefs tree, including
