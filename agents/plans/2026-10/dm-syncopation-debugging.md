@@ -2573,3 +2573,14 @@ Local checks pass (2,037 assertions / 67 cases and the EDT SDK build); the
 operator's hardware timing comparison remains pending. This implements the
 production schedule identified above, without changing the evidence or the
 remaining post-SDK conversion investigation.
+
+
+### OCAM housekeeping control verification — 2026-10-25
+
+Following the FPS/gain reply-parser corrections, the operator verified that EM
+gain changes, internal FPS changes with synchronization off, and temperature
+changes work on hardware. Temperature queries appear near **1 Hz while
+changing** and **0.1 Hz on target**, matching the intended default schedule.
+The [housekeeping record](ocam2k-housekeeping.md) records this initial hardware
+qualification and the remaining checks: gain/FPS query silence, synchronized
+FPS, failure/lifecycle/cooling-Off cases, and matched timing comparisons.

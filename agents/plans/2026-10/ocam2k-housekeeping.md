@@ -1,8 +1,11 @@
 # ocam2KCtrl housekeeping policy
 
 Created: 2026-10-25 (America/Phoenix).
-Status: implemented locally; hardware qualification pending. The operator approved
-this plan on 2026-10-25. No instrument configuration has been changed by an agent.
+Status: implemented; the operator has verified basic EM gain, internal-FPS and
+temperature controls and the observed adaptive temperature cadence on hardware.
+Remaining qualification is listed in the latest operator-verification entry.
+The operator approved this plan on 2026-10-25. No instrument configuration has
+been changed by an agent.
 
 ## Request and intended behavior
 
@@ -517,3 +520,25 @@ sharing the generated `magaox_git_version.h` were serialized after simultaneous
 makes raced while generating that temporary header during the first attempt.
 No build-system or acquisition-path change is included. The operator needs to
 rebuild/install `ocam2KCtrl` and restart `camwfs`; `logdump` is unchanged.
+
+
+## Operator verification — controls and temperature cadence, 2026-10-25
+
+After the reply-parser corrections, the operator reports that changing EM gain,
+FPS with synchronization off, and temperature all work on the instrument.
+Temperature queries appear to run at approximately **1 Hz while changing** and
+**0.1 Hz when on target**, matching the default one-second changing interval
+and ten-second idle interval. These are operator-observed rates.
+
+This establishes basic hardware control operation for the tested settings and
+the intended adaptive temperature cadence. Remaining qualification includes:
+
+- Gain/internal-FPS queries stop after confirmation, verified with counters or
+  serial records; synchronized FPS confirmation and updates.
+- Exact consecutive-settling-sample behavior, confirmation failures/deadlines,
+  fresh cooling-Off validation, and lifecycle/pause edge cases on hardware.
+- A matched before/after timing capture to assess serial-associated tails and
+  RMS separately, including the outstanding post-SDK conversion variation.
+
+This update records operator feedback only; application code and instrument
+configuration are unchanged.
