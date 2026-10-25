@@ -1,29 +1,33 @@
 # ocam2KCtrl acquisition and publication timing review
 
 Created: 2026-10-23; updated 2026-10-25 (America/Phoenix).
-Status: the first one-second native/wrapper comparison retains both CPUs
-without loss or cleanup errors. Complete wrapper pairs directly identify the
-same EDT lock in the acquisition thread and IRQ 405. All 25 acquisition-side
-lock-acquisition brackets above 2 us overlap a remote hold of that lock;
-the maximum is 34 us. A selected 40.957 us rearm remains after publication.
-Combined device/control and acquisition interrupts take about 53 us versus
-32 us for ordinary acquisition interrupts. The 21 us reduction on the next
-frame explains its 479 us software-stamp interval despite 500 us between IRQ
-entries. Shared IRQ entry does not identify physical frame completion.
+Status: the first normal / paused / normal housekeeping comparison is complete
+with the AO loop closed and all settings/workload unchanged, as confirmed by
+the operator. Serial attempts remain at 981 through the paused capture, then
+resume. Retained driver `atime` intervals narrow from 481–525 us before and
+480–515 us afterward to **499–501 us** while paused. The normal files' qualified
+raw >20 us excursions disappear from the paused file. Together with the prior
+shared-lock/handler traces, this strongly supports serial/device handling as a
+source of the recurring large completion-stamp excursions.
 
-The camera had been powered off overnight and was cooling after a normal
-power-cycle FSM startup, with no software reconfiguration. Conversion spread
-also changes before the wrapper hooks activate. Native/wrapper differences
-show measurable tracing cost, but the sequential runs do not isolate its exact
-magnitude. A separate untraced 613/387 us publication pair has steady 500/501 us
-`atime` intervals and remains unexplained after the driver stamp. Routine serial
-status polling is the next focused experimental target. A runtime diagnostic
-pause with a fixed 120-second timeout is now implemented; production polling
-cadence and syncopation scheduling remain unchanged. Frame age, physical arrival timing, loaded
-user-library provenance and DMA-owner-thread topology remain qualification
-items. Agents perform no instrument actions. The normal / paused / normal
-operator comparison is documented in section 7 of the camera timing guide.
-Earlier captures, implementation and qualification history follow below.
+Publication timing has another source of variation. A late change during the
+paused capture raises conversion spread while SDK-return timing stays steady;
+pooled publication deviation is **0.761 / 1.428 / 0.747 us** before/paused/after.
+Thus the pause removes the large stamp tails without improving overall RMS in
+this particular run. The late paused conversion change remains unexplained.
+The paused telemetry updates twice as often, so comparisons use disjoint
+summary windows rather than pooling overlapping samples.
+
+The accepted wrapper capture previously established the same lock in the frame
+thread and IRQ 405, 34 us acquisition brackets overlapping remote holds, and
+roughly 20 us of extra handling when device/control and frame completion share
+an invocation. This identifies delayed software completion processing and
+wakeup; physical interrupt assertion and exposure timing remain unmeasured.
+The 120-second diagnostic pause is implemented and operator-qualified in this
+capture, with automatic expiry serviced about 0.426 s after its deadline.
+Production housekeeping scheduling and syncopation scheduling are unchanged.
+Agents perform no instrument actions. Capture evidence, limits and implementation
+history follow below.
 
 The first two paired chronological and kernel captures identify EDT interrupts
 as the source of recurring stage extensions. The operator moved IRQ 405 from
@@ -3222,6 +3226,189 @@ only the existing modified/untracked git-header notices. Logs are retained in
 `/tmp/ocam-{housekeeping,lifecycle,temperature}-{build,tests}.txt`. Instrument
 pause/expiry and normal / paused / normal timing qualification remain operator
 follow-ups.
+
+## 2026-10-25 closed-loop normal / paused / normal operator comparison
+
+### Conditions and pause qualification
+
+The operator supplied `/home/jrmales/tmp/camwfs-housekeeping` and confirms
+that the loop was **closed throughout all three captures**, with the same
+loop gain, camera settings, CPU/IRQ placement and workload. Treat this as its
+own comparison, rather than pooling it with earlier open-loop captures.
+
+All files report timing session **5**, stream inode **3383**, bin2 / SDK mode
+**3**, software binning **1x1**, **2000 Hz**, synchronization **ON**, EM gain
+**595**, and shutter **OPEN**. Normal raw records identify PID **3316955** and
+framegrabber TID **3316957**. The paused file has no raw excursion records from
+which to read PID/TID, but there is no session/counter reset. Normal temperature
+readbacks are near −45.1/−45.2 C and on target. The paused −45.4 C value is
+explicitly stale; it is not a fresh temperature measurement throughout the pause.
+
+| Input | SHA-256 |
+| --- | --- |
+| `camwfs-housekeeping-normal-before.txt` | `de05326db3e4237468e1bfefdfba9dc1143e5f358d974f44151673d0c1eefd35` |
+| `camwfs-housekeeping-paused.txt` | `f8dee9cefbf08af30e261003f434fdc876c52ccff461f82a041d6898555a3919` |
+| `camwfs-housekeeping-normal-after.txt` | `48855bd5962c96edb433da4b4f5d6f62efb49bdcaafdd4705cccc34b41436475` |
+| `camwfs-housekeeping-paused-indi.txt` | `9b85060dfb098ccff9a22472ef7f40d54b8cf366598a19b5512fa9d6975e0f0f` |
+| `camwfs-housekeeping-normal-after-indi.txt` | `f0cc76d466242be0da49c72ca92960292bfeb1a4e0bc9353d86b5bd6d8adf9dd` |
+
+The two paused INDI snapshots retain **serialTransactions=981**, with remaining
+time **102.939 / 25.666 s**. Both report `paused`, stale temperature/gain,
+paused protection polling and external-sync FPS. Skipped temperature/gain
+counts advance **256 to 333**; those totals already include earlier suppressed
+polls, rather than measuring this pause from zero. All paused timing summaries
+also retain **controls=981**, zero serial overlap and no serial-duration samples.
+
+The actual monotonic pause start is **1817966.45489468 s**, and automatic resume
+is **1818086.88048839 s**, with reason `120 second timeout`. It lasts
+**120.42559371 s**: the ordinary loop services expiry approximately **0.426 s**
+after the deadline. Previous `pauseEndMonoSec=1817946.90099174` is historical,
+not the active deadline. Subsequent INDI snapshots show normal polling, fresh
+readbacks, serial attempts **1053 to 1123**, and unchanged skipped-poll totals.
+
+A common CLOCK_REALTIME-minus-MONOTONIC offset interval from all **77**
+deduplicated normal raw frames maps activation to approximately
+**17:42:07.864770 UTC** and resume to **17:44:08.290363 UTC**, October 25
+(**10:42:07.864770 / 10:44:08.290363 America/Phoenix**). All 60 paused summary
+windows lie safely inside that quiet interval: the first window begins roughly
+30.1 s after activation and the last ends roughly 29.1 s before resume. These
+windows therefore do not contain the transition edges or timeout recovery.
+
+### Populations and measured changes
+
+Normal telemetry updates approximately every **2.056 s**, while paused updates
+arrive approximately every **1.004 s**, because serial waits are absent from
+the ordinary loop. Each record still summarizes a **two-second** population.
+The 60 paused records overlap; pooling them all would count frames repeatedly.
+Use all **29 disjoint windows** from each normal file and alternating paused
+records (**30 disjoint windows**). Their sample counts are **115,971 / 119,970 /
+115,971 intervals**, or **116,000 / 120,000 / 116,000 per-frame durations**.
+The complementary alternating paused selection gives essentially the same result.
+
+| Metric, us unless stated | Normal before | Paused | Normal after |
+| --- | ---: | ---: | ---: |
+| `atime` interval deviation | 0.424 | 0.262 | 0.409 |
+| `atime` interval range, all retained summaries | 481–525 | **499–501** | 480–515 |
+| SDK-return interval deviation | 0.464 | 0.291 | 0.434 |
+| SDK-return interval range, all retained summaries | 480.467–525.092 | 495.806–504.263 | 480.177–514.812 |
+| Publication interval deviation | 0.761 | **1.428** | 0.747 |
+| Publication interval range, all retained summaries | 480.157–525.112 | 487.621–512.087 | 479.306–515.634 |
+| Acquisition-to-write mean / deviation | 48.625 / 0.579 | 48.835 / 1.004 | 48.615 / 0.588 |
+| Conversion mean / deviation | 26.267 / 0.456 | 26.507 / 0.941 | 26.255 / 0.477 |
+| Rearm maximum, all retained summaries | 27.151 | **9.809** | 31.019 |
+| Serial-duration samples in selected windows, count | 58 | **0** | 58 |
+
+Deviations are pooled with sample counts and between-window mean changes.
+These remain retained-summary statistics, not a continuous full-run bound.
+In particular, the normal files have small gaps between two-second windows.
+The raw acquisition/publication/SDK distributions are accumulated independently
+of clock-bracket qualification, so the table does not remove the paused file's
+wide-bracket frames from its aggregate timing distributions.
+
+The normal-before file emits **12 qualified complete raw contexts** (6 late,
+6 early); normal-after emits **5** (2 late, 3 early). Every center overlaps a
+completed serial transaction. Driver `atime` and SDK-return intervals track
+within approximately 1 us; changes in conversion duration are too small to
+explain these >20 us excursions. Each retained raw late event is followed by
+a publication interval approximately **479.275–480.858 us**.
+
+No raw contexts are emitted while paused, and all 60 paused summaries report
+zero late/early threshold crossings and serial overlap. Normal summary windows
+contain only **2 of the 12** before-context centers and **1 of the 5**
+after-context centers; the remaining **10 / 4** lie in summary gaps. Do not
+substitute summary crossing counts for raw/full-stream excursion counts.
+The historical raw-selection drop count remains **2881** in both normal files,
+with no new incomplete contexts, unclassified records or discontinuities.
+
+### Separate changes within the paused capture
+
+The first **21 disjoint paused windows**, sequences **758–798**, have
+publication deviation **0.656 us**, conversion **26.221 +/- 0.446 us**, and
+SDK-return interval deviation **0.299 us**. Later the capture changes despite
+unchanged operator settings and zero serial traffic:
+
+- Rearm spread first increases in summary rows around **17:43:10–20 UTC**,
+  reaching 9.809 us maximum, then recovers.
+- Main-notification spread rises around **17:43:18–26 UTC**, reaching 9.177 us
+  maximum. There are **61 new wide write-clock brackets** around
+  **17:43:22–26 UTC**, with bracket maximum **3.897 us**.
+- Conversion spread then increases and stays elevated through the end of the
+  paused file. The final **six disjoint windows**, sequences **806–816**, have
+  conversion **27.474 +/- 1.385 us** and publication interval deviation
+  **2.700 us**, while `atime` and SDK-return interval deviations remain
+  **0.246 / 0.270 us**. Main-post and rearm spread have already recovered.
+
+These are post hoc segments describing nonstationarity, not separate controlled
+experiments. Two-second rolling summaries blur exact change boundaries. The
+extra late publication spread is localized after SDK return, predominantly to
+conversion; this telemetry does not identify whether scheduling, memory/cache
+behavior or another implementation detail causes it. It is present without
+routine serial traffic and must be investigated separately. Consequently, this
+run supports removal of the large serial-associated tails, **not an overall
+publication-RMS improvement** from pausing.
+
+The 61 wide brackets yield **122 ambiguous adjacent intervals** across the
+selected disjoint windows. Qualification affects direction attribution/raw
+selection, not the raw distributions above. There are no new failed/rejected
+frames, duplicates, frame/counter gaps, invalid events, event/control drops or
+control failures between first and last summaries in any file. Control totals
+increase by **56** in each normal file and **zero** in the paused file.
+
+### Interpretation of the shared interrupt
+
+The operator asks whether serial IRQs delay the frame-ready IRQ. The precise
+conclusion combines the preceding accepted-wrapper trace with this comparison:
+serial/device events and frame completion share **EDT IRQ 405**. Within a
+combined invocation, the device/serial callback precedes ordinary DMA completion
+processing, including the software completion stamp and frame-thread wakeup:
+
+```text
+EDT IRQ 405
+    acquire shared driver lock
+    process device/serial work, when present
+    process DMA completion and sample atime
+    wake the acquisition thread
+    release driver lock and return
+```
+
+The preceding trace measures approximately **20–21 us** extra work in combined
+handlers, and the short following interval reflects returning to the ordinary
+stamp offset. Thus serial activity can delay **servicing/reporting frame
+completion**, as well as contend with later rearm. These measurements do not
+locate physical frame arrival or hardware interrupt assertion. They should not
+be described as proof that the camera itself exposes late or that two separate
+hardware IRQ lines were timed against one another.
+
+The unchanged closed-loop normal / paused / normal comparison strongly supports
+routine housekeeping traffic as a source of the recurring large driver-stamp
+excursions. It does not identify `temp` versus `gain` individually or establish
+a phase that keeps asynchronous reply interrupts clear of completion. Preserve
+that distinction when designing a production housekeeping schedule. The
+remaining post-SDK conversion spread can be investigated with a short matched
+kernel trace during paused operation, retaining the same closed-loop workload.
+No new implementation or instrument configuration changes accompany this analysis.
+
+Reproducible local artifacts are `/tmp/housekeeping-capture-audit.json`,
+`/tmp/housekeeping_capture_audit.py`, `/tmp/analyze_housekeeping_root.py`,
+`/tmp/housekeeping-root-{data,summary}.json`, and
+`/tmp/camwfs-housekeeping-metrics/` with the independent summary and paused
+segments. `/tmp/plot_housekeeping_compare.py` generates
+`/tmp/camwfs-housekeeping-comparison.png` and `.svg` from the parsed records.
+The plot shows every rolling summary without treating its points as independent
+samples. All analysis is local; agents run no instrument commands.
+
+## Production housekeeping policy implementation — 2026-10-25
+
+The operator approved and the local implementation now follows the separate
+[housekeeping policy](ocam2k-housekeeping.md): confirm gain/FPS once per request,
+use adaptive configurable temperature polling (10 s idle / 1 s changing), and
+service at most one automatically scheduled serial query per ordinary loop.
+Fresh cooling-Off checks and the bounded diagnostic pause remain available.
+The policy record documents response/inference limitations, exact configuration
+and INDI behavior, and passing local verification (2,037 assertions / 67 cases
+plus an EDT SDK build). Hardware comparison is pending; this does not add a
+new measured claim to the captures above or resolve the separate conversion
+variation.
 
 ## Affected files
 

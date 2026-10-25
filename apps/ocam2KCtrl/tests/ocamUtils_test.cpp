@@ -1,6 +1,5 @@
 /** \file ocamUtils_test.cpp
  * \brief Catch2 tests for the ocamUtils in the ocam2KCtrl app.
- * \author Jared R. Males (jaredmales@gmail.com)
  *
  * \ingroup ocam2KCtrl_files
  */
@@ -65,6 +64,140 @@ TEST_CASE( "ocam2KCtrl utility helpers parse temperature responses", "[ocamUtils
         int         rv = parseTemps( temps, tstr );
 
         REQUIRE( rv == -1 );
+    }
+}
+
+/// Reject invalid temperature fields and framing without partially updating the output.
+/** \ingroup ocam2KCtrl_unit_test
+ */
+TEST_CASE( "ocam2KCtrl utility helpers validate every temperature field", "[ocamUtils]" )
+{
+    // clang-format off
+    #ifdef OCAM2KCTRL_TEST_DOXYGEN_REF
+    parseTemps( *(ocamTemps *)nullptr, "" );
+    #endif
+    // clang-format on
+
+    const std::string valid = "Temperatures : CCD[-45] CPU[41] POWER[34] BIAS[47] WATER[24.2] LEFT[33] RIGHT[38] "
+                              "SET[-450]\nCooling Power [102]mW.\n\n";
+
+    SECTION( "each numeric field requires a complete finite value" )
+    {
+        for( const std::string field :
+             { "CCD[", "CPU[", "POWER[", "BIAS[", "WATER[", "LEFT[", "RIGHT[", "SET[", "Cooling Power [" } )
+        {
+            for( const std::string invalid :
+                 { "", "rubbish", "3.0junk", "nan", "inf", "-inf", "1e100", "1e-100", "0x1p2", "+-1" } )
+            {
+                DYNAMIC_SECTION( field << invalid )
+                {
+                    std::string response = valid;
+                    size_t      first    = response.find( field ) + field.size();
+                    response.replace( first, response.find( ']', first ) - first, invalid );
+
+                    ocamTemps temps;
+                    temps.setInvalid();
+
+                    REQUIRE( parseTemps( temps, response ) == -1 );
+                    REQUIRE( temps.CCD == -999 );
+                    REQUIRE( temps.CPU == -999 );
+                    REQUIRE( temps.COOLING_POWER == -999 );
+                }
+            }
+        }
+    }
+
+    SECTION( "malformed labels delimiters and physical values are rejected" )
+    {
+        for( const std::string response :
+             { "Temperatures : CCD[-999] CPU[41] POWER[34] BIAS[47] WATER[24.2] LEFT[33] RIGHT[38] "
+               "SET[-450]\nCooling Power [102]mW.\n\n",
+               "Temperatures : CCD[-45] CPU[41] POWER[34] BIAS[47] WATER[24.2] LEFT[33] RIGHT[38] "
+               "SET[-9999]\nCooling Power [102]mW.\n\n",
+               "Temperatures : CCD[-45] CPU[41] POWER[34] BIAS[47] WATER[24.2] LEFT[33] RIGHT[38] "
+               "SET[-450]\nCooling Power [-1]mW.\n\n",
+               "Temperatures : CCD[-45] CPU[41] POWER[34] BIAS[47] WATER[24.2] LEFT[33] RIGHT[38] "
+               "SET[-450]\nCooling Power [102mW.\n\n",
+               "Temperatures : CCD[-45] CPU[41] POWER[34] BIAS[47] WATER[24.2] LEFT[33] RIGHT[38] "
+               "SET[-450]\nCooling Power [102]mW.[1]\n\n",
+               "Temperatures : CCD[-45] CPU[41] POWER[34] BIAS[47] WATER[24.2] LEFT[33] WRONG[38] "
+               "SET[-450]\nCooling Power [102]mW.\n\n",
+               "Temperatures : CCD[-45] CPU[41] POWER[34] BIAS[47] WATER[24.2] LEFT[33] RIGHT[38] "
+               "SET[-450]\nCooling Power [102]mW. rubbish\n\n" } )
+        {
+            CAPTURE( response );
+            ocamTemps temps;
+            temps.setInvalid();
+
+            REQUIRE( parseTemps( temps, response ) == -1 );
+            REQUIRE( temps.SET == -999 );
+            REQUIRE( temps.CPU == -999 );
+        }
+    }
+
+    SECTION( "surrounding whitespace and decimal exponent values are accepted" )
+    {
+        std::string response = valid;
+        response.replace( response.find( "CCD[-45]" ), 8, "CCD[ -4.5e1 ]" );
+        response.replace( response.find( "CPU[41]" ), 7, "CPU[ +4.1e1 ]" );
+        ocamTemps temps;
+
+        REQUIRE( parseTemps( temps, "\r\n" + response ) == 0 );
+        REQUIRE( temps.CCD == -45 );
+        REQUIRE( temps.CPU == 41 );
+        REQUIRE( temps.SET == -45 );
+    }
+}
+
+/// Accept complete positive FPS replies and reject invalid numbers or framing.
+/** \ingroup ocam2KCtrl_unit_test
+ */
+TEST_CASE( "ocam2KCtrl utility helpers parse FPS responses", "[ocamUtils]" )
+{
+    // clang-format off
+    #ifdef OCAM2KCTRL_TEST_DOXYGEN_REF
+    parseFPS( *(float *)nullptr, "" );
+    #endif
+    // clang-format on
+
+    SECTION( "valid rates retain fractional precision" )
+    {
+        for( const std::string response : { "fps [150.5] Hz\n", "\r\nfps [ +1.505e2 ] Hz\r\n" } )
+        {
+            float fps = 0;
+
+            REQUIRE( parseFPS( fps, response ) == 0 );
+            REQUIRE( fps == 150.5F );
+        }
+    }
+
+    SECTION( "malformed nonpositive nonfinite and out of range rates are rejected" )
+    {
+        for( const std::string response : { "",
+                                            "fps [0] Hz\n",
+                                            "fps [-0] Hz\n",
+                                            "fps [-1] Hz\n",
+                                            "fps [] Hz\n",
+                                            "fps [x] Hz\n",
+                                            "fps [150.5x] Hz\n",
+                                            "fps [nan] Hz\n",
+                                            "fps [inf] Hz\n",
+                                            "fps [-inf] Hz\n",
+                                            "fps [1e100] Hz\n",
+                                            "fps [1e-100] Hz\n",
+                                            "fps [0x1p2] Hz\n",
+                                            "fps [+-1] Hz\n",
+                                            "fps [150.5 Hz\n",
+                                            "wrong [150.5] Hz\n",
+                                            "fps [150.5] wrong\n",
+                                            "fps [150.5] Hz[2]\n" } )
+        {
+            CAPTURE( response );
+            float fps = 12.5;
+
+            REQUIRE( parseFPS( fps, response ) == -1 );
+            REQUIRE( fps == 12.5F );
+        }
     }
 }
 
@@ -150,6 +283,39 @@ TEST_CASE( "ocam2KCtrl utility helpers parse gain responses", "[ocamUtils]" )
 
         REQUIRE( rv == -1 );
         REQUIRE( emgain == 0 );
+    }
+
+    SECTION( "gain responses require matching labels and a complete integer" )
+    {
+        for( const std::string response : { "Other set to 42 \n\n",
+                                            "Gain was to 42 \n\n",
+                                            "Gain set xx 42 \n\n",
+                                            "Gain set to 42 rubbish",
+                                            "Gain set to 42x \n\n",
+                                            "Gain set to 42.5 \n\n",
+                                            "Gain set to 4e1 \n\n",
+                                            "Gain set to -1 \n\n",
+                                            "Gain set to +1 \n\n",
+                                            "Gain set to nan \n\n",
+                                            "Gain set to inf \n\n",
+                                            "Gain set to 99999999999999999999999 \n\n" } )
+        {
+            CAPTURE( response );
+            unsigned emgain = 42;
+
+            REQUIRE( parseEMGain( emgain, response ) == -1 );
+            REQUIRE( emgain == 0 );
+        }
+    }
+
+    SECTION( "the gain range includes both endpoints" )
+    {
+        unsigned emgain = 0;
+
+        REQUIRE( parseEMGain( emgain, "Gain set to 1 \r\n" ) == 0 );
+        REQUIRE( emgain == 1 );
+        REQUIRE( parseEMGain( emgain, "Gain set to 600 \r\n" ) == 0 );
+        REQUIRE( emgain == 600 );
     }
 }
 

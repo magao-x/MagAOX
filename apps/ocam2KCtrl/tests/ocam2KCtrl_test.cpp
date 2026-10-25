@@ -31,6 +31,12 @@
 #include "../ocam2KCtrl.hpp"
 #undef protected
 
+#ifndef OCAM2KCTRL_TEST_SUPPORT_ONLY
+    /// \cond OCAM2KCTRL_TEST_SUPPORT
+    #include "../../../tests/outletAppTest.hpp"
+/// \endcond
+#endif
+
 using namespace MagAOX::app;
 
 /// \cond OCAM2KCTRL_TEST_SUPPORT
@@ -589,6 +595,37 @@ class ocam2KCtrl_test : public MagAOX::app::ocam2KCtrl
     app.m_powerTargetState                        = 1;
 }
 
+/// Retain confirmed cached settings and postpone automatic temperature monitoring for a focused app-loop test.
+[[maybe_unused]] void
+deferHousekeeping( ocam2KCtrl_test &app /**< [in,out] Controller whose unrelated queries are deferred. */ )
+{
+    app.m_gainConfirmation.phase = ocam2KCtrl::ConfirmationPhase::confirmed;
+    app.m_fpsConfirmation.phase  = ocam2KCtrl::ConfirmationPhase::confirmed;
+    app.m_tempConfirmation.phase = ocam2KCtrl::ConfirmationPhase::confirmed;
+    app.m_tempDue                = app.housekeepingNow() + 10000000000;
+    app.m_tempChanging           = false;
+}
+
+/// Start a local telemetry sink so app-loop serial failures can be tested without a telemetry-thread failure.
+[[maybe_unused]] void
+startOfflineTelemetry( ocam2KCtrl_test &app /**< [in,out] Controller whose telemetry remains available. */ )
+{
+    app.m_tel.logPath( "/tmp" );
+    app.m_tel.logName( app.m_configName + "_housekeeping" );
+    app.m_tel.logExt( "bintel" );
+    app.m_tel.m_writePause = 1000000;
+    app.m_tel.m_logLevel   = logPrio::LOG_TELEM;
+    REQUIRE( app.m_tel.logThreadStart() == 0 );
+
+    for( unsigned attempt = 0; attempt < 1000 && !app.m_tel.logThreadRunning(); ++attempt )
+    {
+        std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+    }
+
+    REQUIRE( app.m_tel.logThreadRunning() );
+    ocam_temps::lastRecord = {};
+}
+
 /// Seed one minimal but internally consistent camera-mode setup for startup and acquisition tests.
 [[maybe_unused]] void
 configureStartupMode( ocam2KCtrl_test   &app /**< [in,out] Controller configured for startup. */,
@@ -1131,10 +1168,12 @@ TEST_CASE( "ocam2KCtrl getTemps handles valid and malformed serial responses", "
         REQUIRE( app.m_temps.CCD == Approx( -999.0f ) );
         REQUIRE( app.m_temps.SET == Approx( -999.0f ) );
         REQUIRE( app.m_ccdTemp == Approx( -999.0f ) );
-        REQUIRE( app.m_ccdTempSetpt == Approx( -999.0f ) );
-        REQUIRE( app.m_tempControlStatus == false );
+        REQUIRE( app.m_ccdTempSetpt == Approx( 6.0f ) );
+        REQUIRE( app.m_tempControlStatus == true );
         REQUIRE( app.m_tempControlStatusStr == "UNKNOWN" );
         REQUIRE( app.m_tempControlOnTarget == false );
+        REQUIRE( app.m_housekeepingTempTime == 0 );
+        REQUIRE( app.m_coolingKnown == false );
     }
 
     SECTION( "low cooling power with a warm detector reports temperature control off" )
@@ -1171,16 +1210,18 @@ TEST_CASE( "ocam2KCtrl getTemps handles valid and malformed serial responses", "
         REQUIRE( g_edtStubState.serialCommands[0] == "temp" );
     }
 
-    SECTION( "malformed temperature responses while powered off return -1" )
+    SECTION( "malformed temperature responses remain invalid while powered off" )
     {
         static_cast<MagAOXAppT &>( app ).m_powerState = 0;
         app.m_powerTargetState                        = 0;
 
         queueSerialResponse( "Temperatures : CCD[20.4]\n" );
 
-        REQUIRE( app.getTemps() == -1 );
+        REQUIRE( app.getTemps() == 0 );
         REQUIRE( g_edtStubState.serialCommands.size() == 1 );
         REQUIRE( g_edtStubState.serialCommands[0] == "temp" );
+        REQUIRE( app.m_housekeepingTempTime == 0 );
+        REQUIRE( app.m_temps.CCD == Approx( -999.0f ) );
     }
 }
 
@@ -1228,7 +1269,7 @@ TEST_CASE( "ocam2KCtrl getFPS handles valid and malformed serial responses", "[o
         REQUIRE( app.m_fps == Approx( 75.0f ) );
     }
 
-    SECTION( "malformed fps responses while powered off return -1" )
+    SECTION( "malformed fps responses leave the observation invalid while powered off" )
     {
         static_cast<MagAOXAppT &>( app ).m_powerState = 0;
         app.m_powerTargetState                        = 0;
@@ -1237,10 +1278,11 @@ TEST_CASE( "ocam2KCtrl getFPS handles valid and malformed serial responses", "[o
 
         queueSerialResponse( "fps 150.5\n" );
 
-        REQUIRE( app.getFPS() == -1 );
+        REQUIRE( app.getFPS() == 0 );
         REQUIRE( g_edtStubState.serialCommands.size() == 1 );
         REQUIRE( g_edtStubState.serialCommands[0] == "fps" );
         REQUIRE( app.m_fps == Approx( 75.0f ) );
+        REQUIRE( app.m_housekeepingFpsTime == 0 );
     }
 
     SECTION( "serial failures while powered on return a software error" )
@@ -1294,8 +1336,11 @@ TEST_CASE( "ocam2KCtrl temperature control helpers handle valid and invalid requ
         app.m_tempControlStatus    = true;
         app.m_ccdTemp              = 18.5f;
 
+        queueSerialResponse( "Temperatures : CCD[18.5] CPU[41] POWER[34] BIAS[47] WATER[24.2] LEFT[33] RIGHT[38] "
+                             "SET[185]\nCooling Power [102]mW.\n\n" );
+
         REQUIRE( app.setTempControl() == -1 );
-        REQUIRE( g_edtStubState.serialCommands.empty() );
+        REQUIRE( g_edtStubState.serialCommands == std::vector<std::string>{ "temp" } );
         REQUIRE( app.m_tempControlStatus == true );
     }
 
@@ -1303,15 +1348,18 @@ TEST_CASE( "ocam2KCtrl temperature control helpers handle valid and invalid requ
     {
         app.m_tempControlStatusSet = false;
         app.m_tempControlStatus    = true;
-        app.m_ccdTemp              = 20.0f;
+        app.m_ccdTemp              = 18.5f;
 
+        queueSerialResponse( "Temperatures : CCD[20] CPU[41] POWER[34] BIAS[47] WATER[24.2] LEFT[33] RIGHT[38] "
+                             "SET[185]\nCooling Power [102]mW.\n\n" );
         queueSerialResponse( "temperature control off\n" );
 
         REQUIRE( app.setTempControl() == 0 );
-        REQUIRE( g_edtStubState.serialCommands.size() == 1 );
-        REQUIRE( g_edtStubState.serialCommands[0] == "temp off" );
+        REQUIRE( g_edtStubState.serialCommands == std::vector<std::string>{ "temp", "temp off" } );
         REQUIRE( app.m_tempControlStatusSet == false );
-        REQUIRE( app.m_tempControlStatus == false );
+        REQUIRE( app.m_tempControlStatus == true );
+        REQUIRE( app.m_tempConfirmation.phase == ocam2KCtrl::ConfirmationPhase::confirming );
+        REQUIRE( app.m_tempExpectedControl == 0 );
     }
 
     SECTION( "setTempControl turns cooling on and reapplies the configured setpoint" )
@@ -1328,7 +1376,10 @@ TEST_CASE( "ocam2KCtrl temperature control helpers handle valid and invalid requ
         REQUIRE( g_edtStubState.serialCommands[0] == "temp on" );
         REQUIRE( g_edtStubState.serialCommands[1] == "temp 15.500000" );
         REQUIRE( app.m_tempControlStatusSet == true );
-        REQUIRE( app.m_tempControlStatus == true );
+        REQUIRE( app.m_tempControlStatus == false );
+        REQUIRE( app.m_tempConfirmation.phase == ocam2KCtrl::ConfirmationPhase::confirming );
+        REQUIRE( app.m_tempExpectedControl == 1 );
+        REQUIRE( app.m_tempExpectedSet == true );
     }
 
     SECTION( "setTempControl returns -1 on serial failure once power is already off" )
@@ -2045,19 +2096,20 @@ TEST_CASE( "ocam2KCtrl serial gain helpers handle valid and invalid responses", 
         REQUIRE( app.m_emGain == 42 );
     }
 
-    SECTION( "malformed EM gain response returns an error and keeps the previous value" )
+    SECTION( "malformed EM gain response keeps the previous value without confirming an observation" )
     {
         app.m_emGain = 77;
 
         queueSerialResponse( "Gain set to \n\n" );
 
-        REQUIRE( app.getEMGain() == -1 );
+        REQUIRE( app.getEMGain() == 0 );
         REQUIRE( g_edtStubState.serialCommands.size() == 1 );
         REQUIRE( g_edtStubState.serialCommands[0] == "gain" );
         REQUIRE( app.m_emGain == 77 );
+        REQUIRE( app.m_housekeepingGainTime == 0 );
     }
 
-    SECTION( "malformed EM gain responses while powered off return -1 immediately" )
+    SECTION( "malformed EM gain responses remain invalid while powered off" )
     {
         static_cast<MagAOXAppT &>( app ).m_powerState = 0;
         app.m_powerTargetState                        = 0;
@@ -2065,10 +2117,11 @@ TEST_CASE( "ocam2KCtrl serial gain helpers handle valid and invalid responses", 
 
         queueSerialResponse( "Gain set to \n\n" );
 
-        REQUIRE( app.getEMGain() == -1 );
+        REQUIRE( app.getEMGain() == 0 );
         REQUIRE( g_edtStubState.serialCommands.size() == 1 );
         REQUIRE( g_edtStubState.serialCommands[0] == "gain" );
         REQUIRE( app.m_emGain == 77 );
+        REQUIRE( app.m_housekeepingGainTime == 0 );
     }
 
     SECTION( "HV trip response forces the cached EM gain back to the safe minimum" )
@@ -2189,9 +2242,13 @@ TEST_CASE( "ocam2KCtrl serial gain helpers handle valid and invalid responses", 
  */
 TEST_CASE( "ocam2KCtrl serial setter commands send the expected sequence", "[ocam2KCtrl]" )
 {
-    ocam2KCtrl_test app;
+    outletHarness::Controller<ocam2KCtrl_test> app;
 
     resetStubState();
+    outletHarness::g_faults = {};
+    app.driver();
+    app.m_indiP_syncFreq.setDevice( app.m_syncDevice );
+    app.m_indiP_syncFreq.setName( app.m_syncFreqProp );
 
     // clang-format off
     #ifdef OCAM2KCTRL_TEST_DOXYGEN_REF
@@ -2238,6 +2295,20 @@ TEST_CASE( "ocam2KCtrl serial setter commands send the expected sequence", "[oca
 
         REQUIRE( app.setFPS() == 0 );
         REQUIRE( g_edtStubState.serialCommands.empty() );
+        REQUIRE( outletHarness::g_faults.m_sends == 1 );
+        REQUIRE( app.m_fpsConfirmation.phase == ocam2KCtrl::ConfirmationPhase::confirming );
+    }
+
+    SECTION( "setFPS reports a rejected sync-device dispatch instead of awaiting confirmation" )
+    {
+        app.m_synchro                      = true;
+        app.m_fpsSet                       = 88.5f;
+        outletHarness::g_faults.m_failSend = 1;
+
+        REQUIRE( app.setFPS() == -1 );
+        REQUIRE( g_edtStubState.serialCommands.empty() );
+        REQUIRE( outletHarness::g_faults.m_sends == 1 );
+        REQUIRE( app.m_fpsConfirmation.phase == ocam2KCtrl::ConfirmationPhase::failed );
     }
 
     SECTION( "setFPS returns -1 on serial failure once power is already off" )
@@ -2260,6 +2331,8 @@ TEST_CASE( "ocam2KCtrl serial setter commands send the expected sequence", "[oca
         app.m_synchroSet    = false;
         app.m_fpsSet        = 175.0f;
         app.m_indiP_synchro = pcf::IndiProperty( pcf::IndiProperty::Switch );
+        app.m_indiP_synchro.setDevice( app.m_configName );
+        app.m_indiP_synchro.setName( "synchro" );
         app.m_indiP_synchro.add( pcf::IndiElement( "toggle", pcf::IndiElement::On ) );
 
         queueSerialResponse( "fps max\n" );
@@ -2281,6 +2354,8 @@ TEST_CASE( "ocam2KCtrl serial setter commands send the expected sequence", "[oca
         app.m_synchroSet    = true;
         app.m_fpsSet        = 175.0f;
         app.m_indiP_synchro = pcf::IndiProperty( pcf::IndiProperty::Switch );
+        app.m_indiP_synchro.setDevice( app.m_configName );
+        app.m_indiP_synchro.setName( "synchro" );
         app.m_indiP_synchro.add( pcf::IndiElement( "toggle", pcf::IndiElement::Off ) );
 
         queueSerialResponse( "fps max\n" );
@@ -3024,7 +3099,7 @@ TEST_CASE( "ocam2KCtrl appLogic handles connection and housekeeping flow", "[oca
         REQUIRE( g_edtStubState.serialCommands.empty() );
     }
 
-    SECTION( "NOTCONNECTED success falls through the READY housekeeping path in the same loop" )
+    SECTION( "NOTCONNECTED success defers housekeeping until initial reconfiguration completes" )
     {
         ocam2KCtrl_test app;
 
@@ -3049,10 +3124,6 @@ TEST_CASE( "ocam2KCtrl appLogic handles connection and housekeeping flow", "[oca
         queueSerialResponse( "fps max\n" );
         queueSerialResponse( "synchro off\n" );
         queueSerialResponse( "fps restored\n" );
-        queueSerialResponse( "Temperatures : CCD[20.4] CPU[41] POWER[34] BIAS[47] WATER[24.2] LEFT[33] RIGHT[38] "
-                             "SET[185]\nCooling Power [102]mW.\n\n" );
-        queueSerialResponse( "fps [150.5] Hz\n" );
-        queueSerialResponse( "Gain set to 42 \n\n" );
 
         fgThreadScope fgThread( app );
 
@@ -3063,9 +3134,10 @@ TEST_CASE( "ocam2KCtrl appLogic handles connection and housekeeping flow", "[oca
         REQUIRE( app.m_synchroSet == false );
         REQUIRE( app.m_protectionResetConfirmed == 0 );
         REQUIRE( app.m_shutdown == 1 );
+        REQUIRE( app.m_reconfig == true );
         REQUIRE( g_edtStubState.serialCommands ==
-                 std::vector<std::string>{
-                     "fps", "fps", "temp 18.500000", "fps 0", "synchro off", "fps 0.000000", "temp", "fps", "gain" } );
+                 std::vector<std::string>{ "fps", "fps", "temp 18.500000", "fps 0", "synchro off", "fps 0.000000" } );
+        REQUIRE( g_edtStubState.serialResponses.empty() );
     }
 
     SECTION( "NOTCONNECTED returns after a failed connectivity probe while power remains on" )
@@ -3084,7 +3156,7 @@ TEST_CASE( "ocam2KCtrl appLogic handles connection and housekeeping flow", "[oca
         REQUIRE( g_edtStubState.serialCommands == std::vector<std::string>{ "fps" } );
     }
 
-    SECTION( "CONNECTED with a requested FPS transitions through OPERATING before housekeeping" )
+    SECTION( "CONNECTED with a requested FPS defers queries during acquisition reconfiguration" )
     {
         ocam2KCtrl_test app;
 
@@ -3099,18 +3171,16 @@ TEST_CASE( "ocam2KCtrl appLogic handles connection and housekeeping flow", "[oca
         queueSerialResponse( "fps max\n" );
         queueSerialResponse( "synchro off\n" );
         queueSerialResponse( "fps 10.000000 restored\n" );
-        queueSerialResponse( "Temperatures : CCD[20.4] CPU[41] POWER[34] BIAS[47] WATER[24.2] LEFT[33] RIGHT[38] "
-                             "SET[205]\nCooling Power [102]mW.\n\n" );
-        queueSerialResponse( "fps [150.5] Hz\n" );
-        queueSerialResponse( "Gain set to 42 \n\n" );
 
         fgThreadScope fgThread( app );
 
         REQUIRE( app.appLogic() == 0 );
         REQUIRE( app.state() == stateCodes::FAILURE );
         REQUIRE( app.m_shutdown == 1 );
+        REQUIRE( app.m_reconfig == true );
         REQUIRE( g_edtStubState.serialCommands ==
-                 std::vector<std::string>{ "fps", "fps 0", "synchro off", "fps 10.000000", "temp", "fps", "gain" } );
+                 std::vector<std::string>{ "fps", "fps 0", "synchro off", "fps 10.000000" } );
+        REQUIRE( g_edtStubState.serialResponses.empty() );
     }
 
     SECTION( "CONNECTED enters ERROR when getFPS fails on powered hardware" )
@@ -3201,9 +3271,6 @@ TEST_CASE( "ocam2KCtrl appLogic handles connection and housekeeping flow", "[oca
         queueSerialResponse( "fps [150.5] Hz\n" );
         queueSerialResponse( "fps max\n" );
         queueSerialResponse( "", -1 );
-        queueSerialResponse( "Temperatures : CCD[20.4] CPU[41] POWER[34] BIAS[47] WATER[24.2] LEFT[33] RIGHT[38] "
-                             "SET[205]\nCooling Power [102]mW.\n\n" );
-        queueSerialResponse( "fps [150.5] Hz\n" );
         queueSerialResponse( "Gain set to 42 \n\n" );
 
         fgThreadScope fgThread( app );
@@ -3211,11 +3278,11 @@ TEST_CASE( "ocam2KCtrl appLogic handles connection and housekeeping flow", "[oca
         REQUIRE( app.appLogic() == 0 );
         REQUIRE( app.state() == stateCodes::FAILURE );
         REQUIRE( app.m_shutdown == 1 );
-        REQUIRE( g_edtStubState.serialCommands ==
-                 std::vector<std::string>{ "fps", "fps 0", "synchro off", "temp", "fps", "gain" } );
+        REQUIRE( g_edtStubState.serialCommands == std::vector<std::string>{ "fps", "fps 0", "synchro off", "gain" } );
+        REQUIRE( g_edtStubState.serialResponses.empty() );
     }
 
-    SECTION( "READY expires stale protection resets and completes housekeeping before telemetry shutdown" )
+    SECTION( "READY expires stale protection resets and services one confirmation before telemetry shutdown" )
     {
         ocam2KCtrl_test app;
 
@@ -3228,9 +3295,8 @@ TEST_CASE( "ocam2KCtrl appLogic handles connection and housekeeping flow", "[oca
         app.m_indiP_emProt.add( pcf::IndiElement( "status" ) );
         app.m_indiP_emProt["status"].set( "CONFIRM" );
 
-        queueSerialResponse( "Temperatures : CCD[20.4] CPU[41] POWER[34] BIAS[47] WATER[24.2] LEFT[33] RIGHT[38] "
-                             "SET[205]\nCooling Power [102]mW.\n\n" );
-        queueSerialResponse( "fps [150.5] Hz\n" );
+        deferHousekeeping( app );
+        app.beginConfirmation( app.m_gainConfirmation, 0, false );
         queueSerialResponse( "Gain set to 42 \n\n" );
 
         fgThreadScope fgThread( app );
@@ -3239,9 +3305,9 @@ TEST_CASE( "ocam2KCtrl appLogic handles connection and housekeeping flow", "[oca
         REQUIRE( app.m_protectionResetConfirmed == 0 );
         REQUIRE( app.m_shutdown == 1 );
         REQUIRE( app.state() == stateCodes::FAILURE );
-        REQUIRE( app.m_temps.CCD == Approx( 20.4f ) );
-        REQUIRE( app.m_fps == Approx( 150.5f ) );
         REQUIRE( app.m_emGain == 42 );
+        REQUIRE( app.m_gainConfirmation.phase == ocam2KCtrl::ConfirmationPhase::confirmed );
+        REQUIRE( g_edtStubState.serialCommands == std::vector<std::string>{ "gain" } );
     }
 
     SECTION( "READY returns immediately if the INDI mutex is already locked elsewhere" )
@@ -3264,6 +3330,9 @@ TEST_CASE( "ocam2KCtrl appLogic handles connection and housekeeping flow", "[oca
 
         setPoweredOn( app );
         app.state( stateCodes::READY );
+        deferHousekeeping( app );
+        startOfflineTelemetry( app );
+        app.m_tempDue = 0;
 
         queueSerialResponse( "", -1 );
 
@@ -3271,8 +3340,9 @@ TEST_CASE( "ocam2KCtrl appLogic handles connection and housekeeping flow", "[oca
 
         REQUIRE( app.appLogic() == 0 );
         REQUIRE( app.state() == stateCodes::ERROR );
-        REQUIRE( app.m_temps.CCD == Approx( -999.0f ) );
+        REQUIRE( app.m_housekeepingTempTime == 0 );
         REQUIRE( g_edtStubState.serialCommands == std::vector<std::string>{ "temp" } );
+        REQUIRE( hasRecordedTime( ocam_temps::lastRecord ) );
     }
 
     SECTION( "READY returns quietly when temperature polling fails after power is lost" )
@@ -3282,6 +3352,9 @@ TEST_CASE( "ocam2KCtrl appLogic handles connection and housekeeping flow", "[oca
         static_cast<MagAOXAppT &>( app ).m_powerState = 0;
         app.m_powerTargetState                        = 0;
         app.state( stateCodes::READY );
+        deferHousekeeping( app );
+        startOfflineTelemetry( app );
+        app.m_tempDue = 0;
 
         queueSerialResponse( "", -1 );
 
@@ -3290,24 +3363,27 @@ TEST_CASE( "ocam2KCtrl appLogic handles connection and housekeeping flow", "[oca
         REQUIRE( app.appLogic() == 0 );
         REQUIRE( app.state() == stateCodes::READY );
         REQUIRE( g_edtStubState.serialCommands == std::vector<std::string>{ "temp" } );
+        REQUIRE( hasRecordedTime( ocam_temps::lastRecord ) );
     }
 
-    SECTION( "READY moves to ERROR when FPS polling fails after temperatures succeed" )
+    SECTION( "READY moves to ERROR when a due FPS confirmation read fails" )
     {
         ocam2KCtrl_test app;
 
         setPoweredOn( app );
         app.state( stateCodes::READY );
+        deferHousekeeping( app );
+        startOfflineTelemetry( app );
+        app.beginConfirmation( app.m_fpsConfirmation, 0, false );
 
-        queueSerialResponse( "Temperatures : CCD[20.4] CPU[41] POWER[34] BIAS[47] WATER[24.2] LEFT[33] RIGHT[38] "
-                             "SET[205]\nCooling Power [102]mW.\n\n" );
         queueSerialResponse( "", -1 );
 
         fgThreadScope fgThread( app );
 
         REQUIRE( app.appLogic() == 0 );
         REQUIRE( app.state() == stateCodes::ERROR );
-        REQUIRE( g_edtStubState.serialCommands == std::vector<std::string>{ "temp", "fps" } );
+        REQUIRE( g_edtStubState.serialCommands == std::vector<std::string>{ "fps" } );
+        REQUIRE( hasRecordedTime( ocam_temps::lastRecord ) );
     }
 
     SECTION( "READY returns quietly when FPS polling fails after power is lost" )
@@ -3317,16 +3393,18 @@ TEST_CASE( "ocam2KCtrl appLogic handles connection and housekeeping flow", "[oca
         static_cast<MagAOXAppT &>( app ).m_powerState = 0;
         app.m_powerTargetState                        = 0;
         app.state( stateCodes::READY );
+        deferHousekeeping( app );
+        startOfflineTelemetry( app );
+        app.beginConfirmation( app.m_fpsConfirmation, 0, false );
 
-        queueSerialResponse( "Temperatures : CCD[20.4] CPU[41] POWER[34] BIAS[47] WATER[24.2] LEFT[33] RIGHT[38] "
-                             "SET[205]\nCooling Power [102]mW.\n\n" );
         queueSerialResponse( "", -1 );
 
         fgThreadScope fgThread( app );
 
         REQUIRE( app.appLogic() == 0 );
         REQUIRE( app.state() == stateCodes::READY );
-        REQUIRE( g_edtStubState.serialCommands == std::vector<std::string>{ "temp", "fps" } );
+        REQUIRE( g_edtStubState.serialCommands == std::vector<std::string>{ "fps" } );
+        REQUIRE( hasRecordedTime( ocam_temps::lastRecord ) );
     }
 
     SECTION( "READY returns quietly when EM gain polling fails after power is lost" )
@@ -3336,17 +3414,18 @@ TEST_CASE( "ocam2KCtrl appLogic handles connection and housekeeping flow", "[oca
         static_cast<MagAOXAppT &>( app ).m_powerState = 0;
         app.m_powerTargetState                        = 0;
         app.state( stateCodes::READY );
+        deferHousekeeping( app );
+        startOfflineTelemetry( app );
+        app.beginConfirmation( app.m_gainConfirmation, 0, false );
 
-        queueSerialResponse( "Temperatures : CCD[20.4] CPU[41] POWER[34] BIAS[47] WATER[24.2] LEFT[33] RIGHT[38] "
-                             "SET[205]\nCooling Power [102]mW.\n\n" );
-        queueSerialResponse( "fps [150.5] Hz\n" );
         queueSerialResponse( "", -1 );
 
         fgThreadScope fgThread( app );
 
         REQUIRE( app.appLogic() == 0 );
         REQUIRE( app.state() == stateCodes::READY );
-        REQUIRE( g_edtStubState.serialCommands == std::vector<std::string>{ "temp", "fps", "gain" } );
+        REQUIRE( g_edtStubState.serialCommands == std::vector<std::string>{ "gain" } );
+        REQUIRE( hasRecordedTime( ocam_temps::lastRecord ) );
     }
 
     SECTION( "READY moves to ERROR when EM gain polling fails on powered hardware" )
@@ -3355,17 +3434,18 @@ TEST_CASE( "ocam2KCtrl appLogic handles connection and housekeeping flow", "[oca
 
         setPoweredOn( app );
         app.state( stateCodes::READY );
+        deferHousekeeping( app );
+        startOfflineTelemetry( app );
+        app.beginConfirmation( app.m_gainConfirmation, 0, false );
 
-        queueSerialResponse( "Temperatures : CCD[20.4] CPU[41] POWER[34] BIAS[47] WATER[24.2] LEFT[33] RIGHT[38] "
-                             "SET[205]\nCooling Power [102]mW.\n\n" );
-        queueSerialResponse( "fps [150.5] Hz\n" );
         queueSerialResponse( "", -1 );
 
         fgThreadScope fgThread( app );
 
         REQUIRE( app.appLogic() == 0 );
         REQUIRE( app.state() == stateCodes::ERROR );
-        REQUIRE( g_edtStubState.serialCommands == std::vector<std::string>{ "temp", "fps", "gain" } );
+        REQUIRE( g_edtStubState.serialCommands == std::vector<std::string>{ "gain" } );
+        REQUIRE( hasRecordedTime( ocam_temps::lastRecord ) );
     }
 }
 

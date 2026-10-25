@@ -177,6 +177,62 @@ class ocam2KCtrl : public MagAOXApp<>,
     std::recursive_mutex
         m_cameraMutex; ///< Serializes control/reconfigure access; normal grabs use frame-worker ownership.
 
+    /// Confirmation result for one current request or initial observation.
+    enum class ConfirmationPhase
+    {
+        unavailable,
+        confirming,
+        confirmed,
+        failed
+    };
+
+    /// Ordinary-thread request state, protected by m_cameraMutex.
+    struct Confirmation
+    {
+        ConfirmationPhase phase{ ConfirmationPhase::unavailable }; ///< Current confirmation result.
+        double            expected{ 0 };      ///< Dispatched value, distinct from the latest observation.
+        bool              requested{ false }; ///< Match a target rather than accepting an initial observation.
+        uint64_t          generation{ 0 };    ///< Superseding requests invalidate older observations.
+        int64_t           due{ 0 };           ///< Next readback opportunity, monotonic ns.
+        int64_t           deadline{ 0 };      ///< Fixed acknowledgement deadline, monotonic ns.
+    };
+
+    double m_tempIntervalSec{ 10 }; ///< Idle temperature sampling interval.
+
+    double m_tempChangingIntervalSec{ 1 }; ///< Sampling interval during thermal convergence.
+
+    double m_confirmationIntervalSec{ 1 }; ///< Pending readback retry interval.
+
+    double m_confirmationTimeoutSec{ 10 }; ///< Fixed deadline for setting confirmation.
+
+    unsigned m_tempSettleSamples{ 2 }; ///< Consecutive settled observations needed for idle polling.
+
+    Confirmation m_gainConfirmation; ///< Latest gain request or startup observation.
+
+    Confirmation m_fpsConfirmation; ///< Final mode/synchronization rate confirmation.
+
+    Confirmation m_tempConfirmation; ///< Setpoint and cooling-state acknowledgement, separate from settling.
+
+    int64_t m_tempDue{ 0 }; ///< Next temperature query opportunity, monotonic ns.
+
+    bool m_tempChanging{ true }; ///< Thermal convergence requires faster observations.
+
+    unsigned m_tempSettledSamples{ 0 }; ///< Consecutive fresh settled samples.
+
+    int m_tempExpectedControl{ -1 }; ///< Pending cooling state: -1 unspecified, 0 off, 1 on.
+
+    bool m_tempExpectedSet{ false }; ///< A pending temperature request must match its stored setpoint.
+
+    bool m_coolingKnown{ false }; ///< The latest report contains sufficient evidence of cooling state.
+
+    int64_t m_syncFreqTime{ 0 }; ///< Most recent valid external frequency report, monotonic ns.
+
+    uint64_t m_housekeepingTempQueries{ 0 }; ///< Temperature getter attempts, including explicit interlocks.
+
+    uint64_t m_housekeepingGainQueries{ 0 }; ///< Gain getter attempts.
+
+    uint64_t m_housekeepingFpsQueries{ 0 }; ///< Serial FPS getter attempts; external reports are excluded.
+
     static constexpr int64_t c_housekeepingPauseNs{ 120000000000 }; ///< Maximum diagnostic pause, monotonic ns.
 
     int64_t m_housekeepingPauseUntil{ 0 }; ///< Pause deadline; zero means polling, protected by m_cameraMutex.
@@ -193,13 +249,13 @@ class ocam2KCtrl : public MagAOXApp<>,
 
     uint64_t m_housekeepingSkippedTemp{ 0 }; ///< Routine temperature polls suppressed by the diagnostic pause.
 
-    uint64_t m_housekeepingSkippedGain{ 0 }; ///< Routine gain polls suppressed by the diagnostic pause.
+    uint64_t m_housekeepingSkippedGain{ 0 }; ///< Legacy pause counter; confirmed gain has no routine polls.
 
-    uint64_t m_housekeepingSkippedFps{ 0 }; ///< Routine serial FPS polls suppressed while synchronization is off.
+    uint64_t m_housekeepingSkippedFps{ 0 }; ///< Legacy pause counter; confirmed FPS has no routine polls.
 
     uint64_t m_housekeepingSerialTransactions{ 0 }; ///< Serial attempts through the app, camera-mutex protected.
 
-    std::string m_housekeepingReason{ "normal polling" }; ///< Last pause transition, camera-mutex protected.
+    std::string m_housekeepingReason{ "scheduled polling" }; ///< Last pause transition, camera-mutex protected.
 
   public:
     /// Default c'tor
@@ -241,16 +297,16 @@ class ocam2KCtrl : public MagAOXApp<>,
                             bool               logErrors = true /**< [in] Log transport errors when true. */ );
 
     /// Get the current device temperatures
-    /**
-     * \returns 0 on success
-     * \returns -1 on error
+    /** A malformed reply leaves the readback unavailable for bounded confirmation retries.
+     * \returns 0 after a completed exchange, including a malformed numeric reply.
+     * \returns -1 on transport failure.
      */
     int getTemps();
 
     /// Get the current frame rate.
-    /**
-     * \returns 0 on success
-     * \returns -1 on error
+    /** A malformed reply leaves the readback unavailable for bounded confirmation retries.
+     * \returns 0 after a completed exchange, including a malformed numeric reply.
+     * \returns -1 on transport failure.
      */
     int getFPS();
 
@@ -267,7 +323,7 @@ class ocam2KCtrl : public MagAOXApp<>,
     int powerOnDefaults();
 
     /// Turn temperature control on or off.
-    /** Sets temperature control on or off based on the current value of m_tempControlStatus
+    /** Sets temperature control from m_tempControlStatusSet and starts bounded state confirmation.
      * \returns 0 on success
      * \returns -1 on error
      */
@@ -330,16 +386,16 @@ class ocam2KCtrl : public MagAOXApp<>,
     int resetEMProtection();
 
     /// Get the current EM Gain.
-    /**
-     * \returns 0 on success
-     * \returns -1 on error
+    /** A malformed reply leaves the readback unavailable for bounded confirmation retries.
+     * \returns 0 after a completed exchange, including a malformed numeric reply.
+     * \returns -1 on transport failure or a received HV trip.
      */
     int getEMGain();
 
     /// Set the EM gain.
-    /** Sets it to the value of stdCamera::m_emGainSet
+    /** Dispatches the validated integer value of stdCamera::m_emGainSet once, then confirms the readback.
      *
-     * \returns 0 on success
+     * \returns 0 after dispatch or an interlock/range refusal
      * \returns -1 on error
      */
     int setEMGain();
@@ -397,7 +453,26 @@ class ocam2KCtrl : public MagAOXApp<>,
 
   protected:
     /// Read the monotonic clock in nanoseconds for ordinary-thread housekeeping decisions.
-    static int64_t housekeepingNow();
+    virtual int64_t housekeepingNow() const;
+
+    /// Start a superseding request with one fixed monotonic deadline.
+    void beginConfirmation( Confirmation &confirmation /**< [in,out] Request state. */,
+                            double        expected /**< [in] Dispatched target or unused initial value. */,
+                            bool          requested /**< [in] Whether a matching target is required. */ );
+
+    /// Accept a current numeric observation without reviving an expired request.
+    void confirmValue( Confirmation &confirmation /**< [in,out] Current request. */,
+                       double        value /**< [in] Valid observed value. */,
+                       double        tolerance /**< [in] Numeric representation tolerance. */ );
+
+    /// Invalidate cached confirmations after a camera lifecycle transition.
+    void resetHousekeeping();
+
+    /// Validate app-local polling intervals and sample count.
+    int validateHousekeepingConfig();
+
+    /// Apply one strictly parsed temperature report and reevaluate confirmation and convergence.
+    void acceptTemps( const ocamTemps &temps /**< [in] Valid temperature report. */ );
 
     /// Register the runtime pause control and read-only housekeeping diagnostics.
     int initHousekeeping();
@@ -412,10 +487,10 @@ class ocam2KCtrl : public MagAOXApp<>,
     /// Expire or cancel the pause and return whether automatic serial polls remain suppressed.
     bool housekeepingPaused( int64_t now /**< [in] Monotonic evaluation time, ns. */ );
 
-    /// Poll routine status or count suppressed polls; the caller holds m_indiMutex.
+    /// Service at most one due serial query and confirmation deadlines; the caller holds m_indiMutex.
     int pollHousekeeping();
 
-    /// Publish pause state, stale readback ages and counters; the caller holds m_indiMutex.
+    /// Publish confirmation, temperature phase, readback ages and counters; the caller holds m_indiMutex.
     void updateHousekeeping();
 
     /// Ensure the sync-only ImageStreamIO stream exists with the expected 1x1 uint8 layout.
@@ -547,6 +622,23 @@ inline void ocam2KCtrl::setupConfig()
                 "The name of the 1x1 uint8 ImageStreamIO sync stream used only for frame metadata and semaphores. "
                 "Defaults to framegrabber.shmimName + \"_sync\"." );
 
+    for( const auto &name : { "tempIntervalSec",
+                              "tempChangingIntervalSec",
+                              "confirmationIntervalSec",
+                              "confirmationTimeoutSec",
+                              "tempSettleSamples" } )
+    {
+        config.add( std::string( "housekeeping." ) + name,
+                    "",
+                    std::string( "housekeeping." ) + name,
+                    argType::Required,
+                    "housekeeping",
+                    name,
+                    false,
+                    std::string( name ) == "tempSettleSamples" ? "unsigned" : "double",
+                    "Housekeeping polling interval/deadline in seconds, or consecutive settling sample count." );
+    }
+
     dev::dssShutter<ocam2KCtrl>::setupConfig( config );
 
     dev::telemeter<ocam2KCtrl>::setupConfig( config );
@@ -586,6 +678,26 @@ inline int ocam2KCtrl::loadConfigImpl()
     {
         m_syncShmimName = m_shmimName + "_sync";
     }
+    config( m_tempIntervalSec, "housekeeping.tempIntervalSec" );
+    config( m_tempChangingIntervalSec, "housekeeping.tempChangingIntervalSec" );
+    config( m_confirmationIntervalSec, "housekeeping.confirmationIntervalSec" );
+    config( m_confirmationTimeoutSec, "housekeeping.confirmationTimeoutSec" );
+    double settleSamples = m_tempSettleSamples;
+    config( settleSamples, "housekeeping.tempSettleSamples" );
+
+    if( !mx::math::isFinite( settleSamples ) || settleSamples < 1 ||
+        settleSamples > std::numeric_limits<unsigned>::max() || std::floor( settleSamples ) != settleSamples )
+    {
+        return log<software_error, -1>( { "housekeeping.tempSettleSamples must be a positive integer" } );
+    }
+
+    m_tempSettleSamples = settleSamples;
+
+    if( validateHousekeepingConfig() < 0 )
+    {
+        return -1;
+    }
+
     dev::dssShutter<ocam2KCtrl>::loadConfig( config );
     dev::telemeter<ocam2KCtrl>::loadConfig( config );
     return 0;
@@ -698,12 +810,89 @@ inline int ocam2KCtrl::destroySyncStream()
     return rv;
 }
 
-inline int64_t ocam2KCtrl::housekeepingNow()
+inline int64_t ocam2KCtrl::housekeepingNow() const
 {
     timespec stamp{};
     static_cast<void>( mx::sys::get_curr_time<double, CLOCK_MONOTONIC>( stamp ) );
 
     return int64_t( stamp.tv_sec ) * 1000000000 + stamp.tv_nsec;
+}
+
+inline void ocam2KCtrl::beginConfirmation( Confirmation &confirmation, double expected, bool requested )
+{
+    ++confirmation.generation;
+    confirmation.phase     = ConfirmationPhase::confirming;
+    confirmation.expected  = expected;
+    confirmation.requested = requested;
+    confirmation.due       = housekeepingNow();
+    confirmation.deadline  = confirmation.due + int64_t( m_confirmationTimeoutSec * 1e9 );
+}
+
+inline void ocam2KCtrl::confirmValue( Confirmation &confirmation, double value, double tolerance )
+{
+    const int64_t now = housekeepingNow();
+
+    if( confirmation.phase == ConfirmationPhase::failed )
+    {
+        return;
+    }
+
+    if( confirmation.phase == ConfirmationPhase::confirming && now >= confirmation.deadline )
+    {
+        confirmation.phase = ConfirmationPhase::failed;
+        return;
+    }
+
+    if( !confirmation.requested || std::abs( value - confirmation.expected ) <= tolerance )
+    {
+        confirmation.phase    = ConfirmationPhase::confirmed;
+        confirmation.deadline = 0;
+    }
+}
+
+inline void ocam2KCtrl::resetHousekeeping()
+{
+    std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
+
+    for( auto *confirmation : { &m_gainConfirmation, &m_fpsConfirmation, &m_tempConfirmation } )
+    {
+        ++confirmation->generation;
+        confirmation->phase     = ConfirmationPhase::unavailable;
+        confirmation->requested = false;
+        confirmation->deadline  = 0;
+    }
+
+    m_housekeepingTempTime = 0;
+    m_housekeepingGainTime = 0;
+    m_housekeepingFpsTime  = 0;
+    m_syncFreqTime         = 0;
+    m_tempDue              = 0;
+    m_tempChanging         = true;
+    m_tempSettledSamples   = 0;
+    m_tempExpectedControl  = -1;
+    m_tempExpectedSet      = false;
+    m_coolingKnown         = false;
+}
+
+inline int ocam2KCtrl::validateHousekeepingConfig()
+{
+    for( double interval :
+         { m_tempIntervalSec, m_tempChangingIntervalSec, m_confirmationIntervalSec, m_confirmationTimeoutSec } )
+    {
+        if( !mx::math::isFinite( interval ) || interval <= 0 || interval > std::numeric_limits<int64_t>::max() / 4e9 )
+        {
+            return log<software_error, -1>(
+                { "Housekeeping intervals must be finite, positive and representable as monotonic nanoseconds" } );
+        }
+    }
+
+    if( m_tempChangingIntervalSec > m_tempIntervalSec || m_confirmationTimeoutSec < m_confirmationIntervalSec ||
+        m_tempSettleSamples == 0 )
+    {
+        return log<software_error, -1>( { "Invalid housekeeping interval ordering or settling sample count" } );
+    }
+
+    return 0;
 }
 
 inline int ocam2KCtrl::initHousekeeping()
@@ -726,7 +915,15 @@ inline int ocam2KCtrl::initHousekeeping()
                               "skippedFps",
                               "serialTransactions",
                               "pauseStartMonoSec",
-                              "pauseEndMonoSec" } )
+                              "pauseEndMonoSec",
+                              "tempIntervalSec",
+                              "tempNextSec",
+                              "gainDeadlineSec",
+                              "fpsDeadlineSec",
+                              "tempDeadlineSec",
+                              "tempQueries",
+                              "gainQueries",
+                              "fpsQueries" } )
     {
         m_indiP_housekeeping.add( pcf::IndiElement( name ) );
         m_indiP_housekeeping[name].set( 0 );
@@ -739,17 +936,19 @@ inline int ocam2KCtrl::initHousekeeping()
 
     REG_INDI_NEWPROP_NOCB( m_indiP_housekeepingStatus, "housekeeping_status", pcf::IndiProperty::Text );
 
-    for( const auto &name : { "state", "reason", "temperature", "gain", "fps", "protectionPolling" } )
+    for( const auto &name :
+         { "state", "reason", "temperature", "gain", "fps", "protectionPolling", "tempConfirmation" } )
     {
         m_indiP_housekeepingStatus.add( pcf::IndiElement( name ) );
     }
 
-    m_indiP_housekeepingStatus["state"].set( "polling" );
+    m_indiP_housekeepingStatus["state"].set( "inactive" );
     m_indiP_housekeepingStatus["reason"].set( m_housekeepingReason );
     m_indiP_housekeepingStatus["temperature"].set( "unavailable" );
     m_indiP_housekeepingStatus["gain"].set( "unavailable" );
     m_indiP_housekeepingStatus["fps"].set( "unavailable" );
-    m_indiP_housekeepingStatus["protectionPolling"].set( "polling" );
+    m_indiP_housekeepingStatus["protectionPolling"].set( "confirmation only" );
+    m_indiP_housekeepingStatus["tempConfirmation"].set( "unavailable" );
 
     return 0;
 }
@@ -763,6 +962,7 @@ inline void ocam2KCtrl::endHousekeepingPause( const std::string &reason )
         return;
     }
 
+    m_tempDue                = 0;
     m_housekeepingPauseUntil = 0;
     m_housekeepingPauseEnded = housekeepingNow();
     m_housekeepingReason     = reason;
@@ -814,6 +1014,19 @@ inline int ocam2KCtrl::setHousekeepingPause( bool pause, int64_t now )
         return 0;
     }
 
+    const auto pending = []( const Confirmation &confirmation /**< [in] Latest confirmation state. */ )
+    {
+        return confirmation.phase == ConfirmationPhase::unavailable ||
+               confirmation.phase == ConfirmationPhase::confirming;
+    };
+
+    if( pending( m_gainConfirmation ) || pending( m_fpsConfirmation ) || pending( m_tempConfirmation ) ||
+        m_tempChanging )
+    {
+        m_housekeepingReason = "confirmation or thermal transition pending";
+        return -1;
+    }
+
     m_housekeepingPauseStarted = now;
     m_housekeepingPauseUntil   = now + c_housekeepingPauseNs;
     m_housekeepingReason       = "operator diagnostic pause";
@@ -835,38 +1048,8 @@ inline int ocam2KCtrl::pdvSerialWriteRead( std::string &response, const std::str
 inline int ocam2KCtrl::pollHousekeeping()
 {
     std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
-    const bool                            paused = housekeepingPaused( housekeepingNow() );
-
-    if( paused )
-    {
-        ++m_housekeepingSkippedTemp;
-        ++m_housekeepingSkippedGain;
-
-        if( !m_synchro )
-        {
-            ++m_housekeepingSkippedFps;
-        }
-    }
-    else if( getTemps() < 0 )
-    {
-        if( powerState() == 1 && powerStateTarget() == 1 )
-        {
-            m_temps.setInvalid();
-            state( stateCodes::ERROR );
-        }
-
-        return -1;
-    }
-
-    if( ( !paused || m_synchro ) && getFPS() < 0 )
-    {
-        if( powerState() == 1 && powerStateTarget() == 1 )
-        {
-            state( stateCodes::ERROR );
-        }
-
-        return -1;
-    }
+    const int64_t                         now    = housekeepingNow();
+    const bool                            paused = housekeepingPaused( now );
 
     if( m_protectionResetConfirmed > 0 && mx::sys::get_curr_time() - m_protectionResetReqTime > 10.0 )
     {
@@ -875,17 +1058,108 @@ inline int ocam2KCtrl::pollHousekeeping()
         log<text_log>( "protection reset request not confirmed", logPrio::LOG_NOTICE );
     }
 
-    if( !paused && getEMGain() < 0 )
+    if( m_synchro )
     {
-        if( MagAOXAppT::m_powerState != 0 )
-        {
-            state( stateCodes::ERROR );
-        }
-
-        return -1;
+        getFPS(); // External source bookkeeping requires no serial query.
     }
 
-    return 0;
+    if( paused )
+    {
+        ++m_housekeepingSkippedTemp;
+        return 0;
+    }
+
+    // Initial observations never imply writing default targets to the camera.
+    if( m_tempConfirmation.phase == ConfirmationPhase::unavailable && m_tempDue == 0 )
+    {
+        m_tempDue = now;
+    }
+
+    for( auto *confirmation : { &m_gainConfirmation, &m_fpsConfirmation, &m_tempConfirmation } )
+    {
+        if( confirmation->phase == ConfirmationPhase::unavailable && !m_reconfig && m_nextMode.empty() )
+        {
+            beginConfirmation( *confirmation, 0, false );
+            confirmation->due = now;
+        }
+
+        if( confirmation->phase == ConfirmationPhase::confirming && now >= confirmation->deadline )
+        {
+            confirmation->phase = ConfirmationPhase::failed;
+
+            if( confirmation == &m_tempConfirmation )
+            {
+                m_tempChanging = false;
+                m_tempDue      = now + int64_t( m_tempIntervalSec * 1e9 );
+            }
+        }
+    }
+
+    if( m_reconfig || !m_nextMode.empty() )
+    {
+        return 0;
+    }
+
+    // Oldest due wins. Iteration order breaks an initial tie in favor of confirmation.
+    int           operation = -1;
+    int64_t       oldest    = now + 1;
+    const int64_t dues[]    = {
+        m_gainConfirmation.phase == ConfirmationPhase::confirming ? m_gainConfirmation.due : now + 1,
+        !m_synchro && m_fpsConfirmation.phase == ConfirmationPhase::confirming ? m_fpsConfirmation.due : now + 1,
+        m_tempDue };
+
+    for( int index = 0; index < 3; ++index )
+    {
+        if( dues[index] <= now && ( operation == -1 || dues[index] < oldest ) )
+        {
+            operation = index;
+            oldest    = dues[index];
+        }
+    }
+
+    int result = 0;
+
+    if( operation == 0 )
+    {
+        result                 = getEMGain();
+        m_gainConfirmation.due = housekeepingNow() + int64_t( m_confirmationIntervalSec * 1e9 );
+    }
+    else if( operation == 1 )
+    {
+        result                = getFPS();
+        m_fpsConfirmation.due = housekeepingNow() + int64_t( m_confirmationIntervalSec * 1e9 );
+    }
+    else if( operation == 2 )
+    {
+        result                = getTemps();
+        const double interval = m_tempConfirmation.phase == ConfirmationPhase::confirming
+                                    ? m_confirmationIntervalSec
+                                    : ( m_tempChanging ? m_tempChangingIntervalSec : m_tempIntervalSec );
+        m_tempDue             = housekeepingNow() + int64_t( interval * 1e9 );
+    }
+
+    const int64_t completed = housekeepingNow();
+
+    for( auto *confirmation : { &m_gainConfirmation, &m_fpsConfirmation, &m_tempConfirmation } )
+    {
+        if( confirmation->phase == ConfirmationPhase::confirming && completed >= confirmation->deadline )
+        {
+            confirmation->phase = ConfirmationPhase::failed;
+
+            if( confirmation == &m_tempConfirmation )
+            {
+                m_tempChanging = false;
+                m_tempDue      = completed + int64_t( m_tempIntervalSec * 1e9 );
+            }
+        }
+    }
+
+    if( result < 0 && powerState() == 1 && powerStateTarget() == 1 )
+    {
+        state( stateCodes::ERROR );
+    }
+
+    return result;
 }
 
 inline void ocam2KCtrl::updateHousekeeping()
@@ -899,54 +1173,94 @@ inline void ocam2KCtrl::updateHousekeeping()
         return;
     }
 
-    const auto age = [now]( int64_t stamp /**< [in] Last successful readback, ns. */ )
+    const auto age = [now]( int64_t stamp /**< [in] Last valid observation, ns. */ )
     {
         return stamp > 0 ? std::max( int64_t( 0 ), now - stamp ) * 1e-9 : -1.0;
     };
-    const bool polling = !shutdown() && powerState() == 1 && powerStateTarget() == 1 && !m_reconfig &&
-                         m_nextMode.empty() && ( state() == stateCodes::READY || state() == stateCodes::OPERATING );
-    const auto validity = [this, paused, polling]( int64_t stamp /**< [in] Last successful readback, ns. */ )
+    const auto remaining = [now]( int64_t deadline /**< [in] Monotonic due time, ns. */ )
     {
-        return std::string( stamp == 0
-                                ? "unavailable"
-                                : ( paused || !polling || stamp < m_housekeepingPauseEnded ? "stale" : "current" ) );
+        return deadline > 0 ? std::max( int64_t( 0 ), deadline - now ) * 1e-9 : 0.0;
     };
-    const std::string state = paused ? "paused" : ( polling ? "polling" : "inactive" );
+    const auto phase = []( const Confirmation &confirmation /**< [in] Latest request result. */ )
+    {
+        switch( confirmation.phase )
+        {
+        case ConfirmationPhase::confirming:
+            return std::string( "confirming" );
+        case ConfirmationPhase::confirmed:
+            return std::string( "confirmed" );
+        case ConfirmationPhase::failed:
+            return std::string( "unconfirmed/error" );
+        default:
+            return std::string( "unavailable" );
+        }
+    };
+    const bool active = !shutdown() && powerState() == 1 && powerStateTarget() == 1 && !m_reconfig &&
+                        m_nextMode.empty() && ( state() == stateCodes::READY || state() == stateCodes::OPERATING );
+    const double      interval = m_tempConfirmation.phase == ConfirmationPhase::confirming
+                                     ? m_confirmationIntervalSec
+                                     : ( m_tempChanging ? m_tempChangingIntervalSec : m_tempIntervalSec );
+    const int64_t     grace    = int64_t( m_loopPause ) + int64_t( m_readTimeout ) * 1000000;
+    const std::string validity =
+        m_housekeepingTempTime == 0
+            ? "unavailable"
+            : ( paused || !active || m_housekeepingTempTime < m_housekeepingPauseEnded || now > m_tempDue + grace
+                    ? "stale"
+                    : "current" );
+    const std::string state = paused ? "paused" : ( active ? ( m_tempChanging ? "changing" : "idle" ) : "inactive" );
 
     updateSwitchIfChanged( m_indiP_housekeepingPause,
                            "toggle",
                            paused ? pcf::IndiElement::On : pcf::IndiElement::Off,
                            paused ? INDI_BUSY : INDI_IDLE );
-    updateIfChanged<double>( m_indiP_housekeeping,
-                             { "remainingSec",
-                               "tempAgeSec",
-                               "gainAgeSec",
-                               "fpsAgeSec",
-                               "skippedTemp",
-                               "skippedGain",
-                               "skippedFps",
-                               "serialTransactions",
-                               "pauseStartMonoSec",
-                               "pauseEndMonoSec" },
-                             { paused ? ( m_housekeepingPauseUntil - now ) * 1e-9 : 0.0,
-                               age( m_housekeepingTempTime ),
-                               age( m_housekeepingGainTime ),
-                               age( m_housekeepingFpsTime ),
-                               double( m_housekeepingSkippedTemp ),
-                               double( m_housekeepingSkippedGain ),
-                               double( m_housekeepingSkippedFps ),
-                               double( m_housekeepingSerialTransactions ),
-                               m_housekeepingPauseStarted * 1e-9,
-                               m_housekeepingPauseEnded * 1e-9 } );
+    updateIfChanged<double>(
+        m_indiP_housekeeping,
+        { "remainingSec",
+          "tempAgeSec",
+          "gainAgeSec",
+          "fpsAgeSec",
+          "skippedTemp",
+          "skippedGain",
+          "skippedFps",
+          "serialTransactions",
+          "pauseStartMonoSec",
+          "pauseEndMonoSec",
+          "tempIntervalSec",
+          "tempNextSec",
+          "gainDeadlineSec",
+          "fpsDeadlineSec",
+          "tempDeadlineSec",
+          "tempQueries",
+          "gainQueries",
+          "fpsQueries" },
+        { paused ? remaining( m_housekeepingPauseUntil ) : 0.0,
+          age( m_housekeepingTempTime ),
+          age( m_housekeepingGainTime ),
+          age( m_housekeepingFpsTime ),
+          double( m_housekeepingSkippedTemp ),
+          double( m_housekeepingSkippedGain ),
+          double( m_housekeepingSkippedFps ),
+          double( m_housekeepingSerialTransactions ),
+          m_housekeepingPauseStarted * 1e-9,
+          m_housekeepingPauseEnded * 1e-9,
+          interval,
+          remaining( m_tempDue ),
+          m_gainConfirmation.phase == ConfirmationPhase::confirming ? remaining( m_gainConfirmation.deadline ) : 0.0,
+          m_fpsConfirmation.phase == ConfirmationPhase::confirming ? remaining( m_fpsConfirmation.deadline ) : 0.0,
+          m_tempConfirmation.phase == ConfirmationPhase::confirming ? remaining( m_tempConfirmation.deadline ) : 0.0,
+          double( m_housekeepingTempQueries ),
+          double( m_housekeepingGainQueries ),
+          double( m_housekeepingFpsQueries ) } );
     updateIfChanged<std::string>(
         m_indiP_housekeepingStatus,
-        { "state", "reason", "temperature", "gain", "fps", "protectionPolling" },
+        { "state", "reason", "temperature", "gain", "fps", "protectionPolling", "tempConfirmation" },
         { state,
           m_housekeepingReason,
-          validity( m_housekeepingTempTime ),
-          validity( m_housekeepingGainTime ),
-          m_synchro && polling ? std::string( "external sync" ) : validity( m_housekeepingFpsTime ),
-          state } );
+          validity,
+          phase( m_gainConfirmation ),
+          phase( m_fpsConfirmation ),
+          paused ? "paused" : ( active ? "confirmation only" : "inactive" ),
+          phase( m_tempConfirmation ) } );
 }
 
 inline int ocam2KCtrl::appStartup()
@@ -1074,6 +1388,7 @@ inline int ocam2KCtrl::appLogic()
         }
         if( ret == 0 )
         {
+            resetHousekeeping();
             state( stateCodes::CONNECTED );
         }
         else
@@ -1088,7 +1403,7 @@ inline int ocam2KCtrl::appLogic()
         // Get a lock
         std::unique_lock<std::mutex> lock( m_indiMutex );
 
-        if( getFPS() == 0 )
+        if( getFPS() == 0 && m_housekeepingFpsTime > 0 )
         {
             if( m_fpsSet == 0 )
             {
@@ -1141,13 +1456,7 @@ inline int ocam2KCtrl::appLogic()
             return 0;
         }
 
-        if( pollHousekeeping() < 0 )
-        {
-            updateHousekeeping();
-            return 0;
-        }
-
-        updateHousekeeping();
+        static_cast<void>( pollHousekeeping() );
 
         if( frameGrabber<ocam2KCtrl>::updateINDI() < 0 )
         {
@@ -1170,6 +1479,8 @@ inline int ocam2KCtrl::appLogic()
             return 0;
         }
 
+        updateHousekeeping();
+
         if( telemeter<ocam2KCtrl>::appLogic() < 0 )
         {
             log<software_error>( { "" } );
@@ -1191,9 +1502,7 @@ inline int ocam2KCtrl::onPowerOff()
     { //mutex scope
         std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
         endHousekeepingPause( "camera powered off" );
-        m_housekeepingTempTime = 0;
-        m_housekeepingGainTime = 0;
-        m_housekeepingFpsTime  = 0;
+        resetHousekeeping();
         updateHousekeeping();
     }
 
@@ -1289,102 +1598,131 @@ inline int ocam2KCtrl::appShutdown()
     return 0;
 }
 
-inline int ocam2KCtrl::getTemps()
+inline void ocam2KCtrl::acceptTemps( const ocamTemps &temps )
 {
-    std::string response;
+    m_temps                = temps;
+    m_ccdTemp              = temps.CCD;
+    m_housekeepingTempTime = housekeepingNow();
+    m_coolingKnown         = temps.COOLING_POWER >= 5 || ( temps.COOLING_POWER < 5 && temps.CCD - temps.SET > 2.99 );
 
-    { //mutex scope
-        std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
-        m_housekeepingTempTime = 0;
-
-        if( pdvSerialWriteRead( response, "temp" ) != 0 )
-        {
-            if( powerState() != 1 || powerStateTarget() != 1 )
-            {
-                return -1;
-            }
-            return log<software_error, -1>( { "" } );
-        }
+    if( m_coolingKnown )
+    {
+        m_tempControlStatus = temps.COOLING_POWER >= 5;
     }
 
-    { //mutex scope
-        std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
-        ocamTemps                             temps;
+    else if( m_tempConfirmation.phase == ConfirmationPhase::confirmed )
+    {
+        beginConfirmation( m_tempConfirmation, 0, false );
+    }
 
-        if( parseTemps( temps, response ) < 0 )
+    // A reported SET is an observation, not a replacement for an outstanding user target.
+    if( !m_tempExpectedSet && m_tempConfirmation.phase != ConfirmationPhase::failed )
+    {
+        m_ccdTempSetpt = temps.SET;
+    }
+
+    if( m_tempConfirmation.phase == ConfirmationPhase::confirming && housekeepingNow() >= m_tempConfirmation.deadline )
+    {
+        m_tempConfirmation.phase = ConfirmationPhase::failed;
+    }
+
+    if( m_tempConfirmation.phase != ConfirmationPhase::failed &&
+        ( !m_tempExpectedSet || std::abs( temps.SET - m_tempConfirmation.expected ) < 0.05 ) && m_coolingKnown &&
+        ( m_tempExpectedControl < 0 || m_tempControlStatus == bool( m_tempExpectedControl ) ) )
+    {
+        m_tempConfirmation.phase    = ConfirmationPhase::confirmed;
+        m_tempConfirmation.deadline = 0;
+        m_tempExpectedSet           = false;
+        m_tempExpectedControl       = -1;
+    }
+
+    m_tempControlOnTarget = m_coolingKnown && m_tempControlStatus && std::abs( temps.CCD - temps.SET ) < 1.0;
+    m_tempControlStatusStr =
+        !m_coolingKnown
+            ? "UNKNOWN"
+            : ( !m_tempControlStatus ? "TEMP OFF" : ( m_tempControlOnTarget ? "ON TARGET" : "OFF TARGET" ) );
+
+    if( m_tempConfirmation.phase == ConfirmationPhase::failed )
+    {
+        m_tempChanging       = false;
+        m_tempSettledSamples = 0;
+    }
+    else if( m_tempConfirmation.phase != ConfirmationPhase::confirmed || !m_coolingKnown ||
+             ( m_tempControlStatus && !m_tempControlOnTarget ) )
+    {
+        m_tempChanging       = true;
+        m_tempSettledSamples = 0;
+    }
+    else if( !m_tempControlStatus )
+    {
+        m_tempChanging       = false;
+        m_tempSettledSamples = 0;
+    }
+    else
+    {
+        if( m_tempSettledSamples < m_tempSettleSamples )
         {
-            if( powerState() != 1 || powerStateTarget() != 1 )
-            {
-                return -1;
-            }
-
-            m_temps.setInvalid();
-            m_ccdTemp              = m_temps.CCD;
-            m_ccdTempSetpt         = m_temps.SET;
-            m_tempControlStatus    = false;
-            m_tempControlStatusStr = "UNKNOWN";
-
-            recordTemps();
-            recordCamera();
-
-            std::cerr << "Temp. parse error. Response:\n" << response << std::endl;
-
-            // We don't trust the temps, but don't reconfig just for this.
-            return log<software_error, 0>( { "Temp. parse error" } );
+            ++m_tempSettledSamples;
         }
 
-        m_temps                = temps;
-        m_housekeepingTempTime = housekeepingNow();
+        m_tempChanging = m_tempSettledSamples < m_tempSettleSamples;
+    }
 
-        // stdCamera temp control:
-        m_ccdTemp      = m_temps.CCD;
-        m_ccdTempSetpt = m_temps.SET;
+    const double interval = m_tempConfirmation.phase == ConfirmationPhase::confirming
+                                ? m_confirmationIntervalSec
+                                : ( m_tempChanging ? m_tempChangingIntervalSec : m_tempIntervalSec );
+    m_tempDue             = housekeepingNow() + int64_t( interval * 1e9 );
 
-        // Detect that temperature control is off
-        if( m_temps.COOLING_POWER < 5 )
+    recordTemps();
+    recordCamera();
+    updateIfChanged( m_indiP_temps, "cpu", temps.CPU );
+    updateIfChanged( m_indiP_temps, "power", temps.POWER );
+    updateIfChanged( m_indiP_temps, "bias", temps.BIAS );
+    updateIfChanged( m_indiP_temps, "water", temps.WATER );
+    updateIfChanged( m_indiP_temps, "left", temps.LEFT );
+    updateIfChanged( m_indiP_temps, "right", temps.RIGHT );
+    updateIfChanged( m_indiP_temps, "cooling", temps.COOLING_POWER );
+}
+
+inline int ocam2KCtrl::getTemps()
+{
+    std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
+    std::string                           response;
+    m_housekeepingTempTime = 0;
+    ++m_housekeepingTempQueries;
+
+    if( pdvSerialWriteRead( response, "temp" ) != 0 )
+    {
+        return -1;
+    }
+
+    ocamTemps temps;
+
+    if( parseTemps( temps, response ) < 0 )
+    {
+        m_temps.setInvalid();
+        m_ccdTemp              = m_temps.CCD;
+        m_coolingKnown         = false;
+        m_tempControlOnTarget  = false;
+        m_tempControlStatusStr = "UNKNOWN";
+        m_tempSettledSamples   = 0;
+
+        if( m_tempConfirmation.phase == ConfirmationPhase::confirmed ||
+            m_tempConfirmation.phase == ConfirmationPhase::unavailable )
         {
-            if( m_temps.CCD - m_temps.SET > 2.99 )
-            {
-                m_tempControlStatus = false;
-            }
-        }
-        else
-        {
-            m_tempControlStatus = true;
+            beginConfirmation( m_tempConfirmation, 0, false );
         }
 
-        if( m_tempControlStatus == true )
-        {
-            if( fabs( m_temps.CCD - m_temps.SET ) < 1.0 )
-            {
-                m_tempControlStatusStr = "ON TARGET";
-                m_tempControlOnTarget  = true;
-            }
-            else
-            {
-                m_tempControlStatusStr = "OFF TARGET";
-                m_tempControlOnTarget  = false;
-            }
-        }
-        else
-        {
-            m_tempControlStatusStr = "TEMP OFF";
-            m_tempControlOnTarget  = false;
-        }
-
-        // Telemeter:
+        m_tempChanging = m_tempConfirmation.phase != ConfirmationPhase::failed;
         recordTemps();
         recordCamera();
 
-        updateIfChanged( m_indiP_temps, "cpu", m_temps.CPU );
-        updateIfChanged( m_indiP_temps, "power", m_temps.POWER );
-        updateIfChanged( m_indiP_temps, "bias", m_temps.BIAS );
-        updateIfChanged( m_indiP_temps, "water", m_temps.WATER );
-        updateIfChanged( m_indiP_temps, "left", m_temps.LEFT );
-        updateIfChanged( m_indiP_temps, "right", m_temps.RIGHT );
-        updateIfChanged( m_indiP_temps, "cooling", m_temps.COOLING_POWER );
-        return 0;
+        // Keep the target and confirmation deadline; malformed reports cannot confirm a request.
+        return log<software_error, 0>( { "Temperature parse error: " + response } );
     }
+
+    acceptTemps( temps );
+    return 0;
 }
 
 inline int ocam2KCtrl::powerOnDefaults()
@@ -1399,208 +1737,207 @@ inline int ocam2KCtrl::powerOnDefaults()
 inline int ocam2KCtrl::setTempControl()
 {
     std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
+    const bool                            requested = m_tempControlStatusSet;
+    const float                           target    = m_ccdTempSetpt;
+    endHousekeepingPause( "cooling command" );
 
-    if( !m_tempControlStatusSet && m_housekeepingPauseStarted > m_housekeepingTempTime )
+    if( !requested )
     {
-        const bool requested = m_tempControlStatusSet;
+        const int result       = getTemps();
+        m_tempControlStatusSet = requested;
+        m_ccdTempSetpt         = target;
 
-        if( getTemps() < 0 || m_housekeepingTempTime == 0 )
+        if( result < 0 || m_housekeepingTempTime == 0 )
         {
             return log<text_log, -1>( "Fresh temperature required before turning cooling off", logPrio::LOG_ERROR );
         }
 
-        m_tempControlStatusSet = requested;
-    }
-
-    std::string response;
-
-    std::string command;
-
-    std::string comStr = "temp ";
-    if( m_tempControlStatusSet )
-    {
-        command                = "on";
-        m_tempControlStatusSet = true;
-        m_tempControlStatus    = true;
-    }
-    else
-    {
-        if( m_ccdTemp > 19 ) // 19 is 20 with a 1 C slop
-        {
-            command                = "off";
-            m_tempControlStatusSet = false;
-            m_tempControlStatus    = false;
-        }
-        else
+        if( m_ccdTemp <= 19 )
         {
             return log<text_log, -1>( "Can not turn temp control off when not at 20 C or higher", logPrio::LOG_ERROR );
         }
     }
 
-    comStr += command;
+    std::string       response;
+    const std::string command = requested ? "temp on" : "temp off";
+    beginConfirmation( m_tempConfirmation, target, true );
+    m_tempExpectedControl = requested ? 1 : 0;
+    m_tempExpectedSet     = false;
+    m_tempChanging        = true;
+    m_tempSettledSamples  = 0;
+    m_tempDue             = housekeepingNow();
 
-    { //mutex scope
-        std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
-        if( pdvSerialWriteRead( response, comStr ) != 0 )
-        {
-            if( powerState() != 1 || powerStateTarget() != 1 )
-            {
-                return -1;
-            }
-            return log<software_error, -1>( { "" } );
-        }
+    if( pdvSerialWriteRead( response, command ) != 0 )
+    {
+        m_tempConfirmation.phase = ConfirmationPhase::failed;
+        m_tempChanging           = false;
+        return -1;
     }
 
+    ocamTemps temps;
+
+    if( parseTemps( temps, response ) == 0 )
     {
-        std::cerr << "response: " << response << "\n";
-        ///\todo check response
-        log<text_log, 0>( { "Set temperature control to " + command } );
+        acceptTemps( temps );
     }
 
-    if( m_tempControlStatusSet && m_ccdTempSetpt > -999 )
+    if( requested && target > -999 )
     {
+        m_ccdTempSetpt = target;
+
+        // The setpoint is the final command; retain the cooling-state requirement in that generation.
         return setTempSetPt();
     }
 
     recordCamera();
-
     return 0;
 }
 
 inline int ocam2KCtrl::setTempSetPt()
 {
-    std::string response;
-
-    std::string tempStr = std::to_string( m_ccdTempSetpt );
+    std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
 
     if( stdCameraT::validateTempSetPt( m_ccdTempSetpt ) < 0 )
     {
         return -1;
     }
 
-    { //mutex scope
-        std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
-        if( pdvSerialWriteRead( response, "temp " + tempStr ) != 0 )
-        {
-            if( powerState() != 1 || powerStateTarget() != 1 )
-            {
-                return -1;
-            }
-            return log<software_error, -1>( { "" } );
-        }
-    }
+    const int expectedControl = m_tempConfirmation.phase == ConfirmationPhase::confirming ? m_tempExpectedControl : -1;
+    const std::string tempStr = std::to_string( m_ccdTempSetpt );
+    std::string       response;
+    beginConfirmation( m_tempConfirmation, m_ccdTempSetpt, true );
+    m_tempExpectedSet     = true;
+    m_tempExpectedControl = expectedControl;
+    m_tempChanging        = true;
+    m_tempSettledSamples  = 0;
+    m_tempDue             = housekeepingNow();
 
+    if( pdvSerialWriteRead( response, "temp " + tempStr ) != 0 )
     {
-        std::cerr << "response: " << response << "\n";
-
-        recordCamera();
-
-        ///\todo check response
-        std::cerr << "temp " << tempStr << " response: " << response << "\n";
-
-        return log<text_log, 0>( { "set temperature: " + tempStr } );
+        m_tempConfirmation.phase = ConfirmationPhase::failed;
+        m_tempChanging           = false;
+        return -1;
     }
+
+    ocamTemps temps;
+
+    if( parseTemps( temps, response ) == 0 )
+    {
+        acceptTemps( temps );
+    }
+
+    recordCamera();
+    return log<text_log, 0>( { "set temperature: " + tempStr } );
 }
 
 inline int ocam2KCtrl::getFPS()
 {
-    if( !m_synchro )
-    {
-        std::string response;
+    std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
 
-        { //mutex scope
-            std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
-            m_housekeepingFpsTime = 0;
-
-            if( pdvSerialWriteRead( response, "fps" ) != 0 )
-            {
-                return log<software_error, -1>( { "" } ); // m_pdv, "fps", m_readTimeout) == 0)
-            }
-        }
-
-        { //mutex scope
-            std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
-            float                                 fps;
-            if( parseFPS( fps, response ) < 0 )
-            {
-                if( powerState() != 1 || powerStateTarget() != 1 )
-                {
-                    return -1;
-                }
-
-                std::cerr << "fps parse error. Response:\n" << response << "\n";
-
-                return log<software_error, 0>( { "fps parse error" } );
-            }
-            m_fps                 = fps;
-            m_housekeepingFpsTime = housekeepingNow();
-            m_workerFPS.store( fps, std::memory_order_relaxed );
-
-            recordCamera();
-
-            return 0;
-        }
-    }
-    else
+    if( m_synchro )
     {
         m_fps = m_syncFreq;
         m_workerFPS.store( m_fps, std::memory_order_relaxed );
         recordCamera();
-
         return 0;
     }
+
+    std::string response;
+    m_housekeepingFpsTime = 0;
+    ++m_housekeepingFpsQueries;
+
+    if( pdvSerialWriteRead( response, "fps" ) != 0 )
+    {
+        return -1;
+    }
+
+    float fps;
+
+    if( parseFPS( fps, response ) < 0 )
+    {
+        return log<software_error, 0>( { "FPS parse error: " + response } );
+    }
+
+    m_fps = fps;
+    m_workerFPS.store( fps, std::memory_order_relaxed );
+    m_housekeepingFpsTime = housekeepingNow();
+    // Zero requests automatic/max rate; any valid positive reported rate establishes its result.
+    const bool automatic = m_fpsConfirmation.requested && m_fpsConfirmation.expected == 0;
+    confirmValue(
+        m_fpsConfirmation, automatic ? 0 : fps, 4 * std::numeric_limits<float>::epsilon() * std::max( 1.0f, fps ) );
+    recordCamera();
+    return 0;
 }
 
 inline int ocam2KCtrl::setFPS( bool requestReconfiguration )
 {
-    std::string fpsStr = std::to_string( m_fpsSet );
+    std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
+
+    if( !mx::math::isFinite( m_fpsSet ) || m_fpsSet < 0 )
+    {
+        return log<software_error, -1>( { "FPS target must be finite and nonnegative" } );
+    }
+
+    endHousekeepingPause( "FPS command" );
+    const std::string fpsStr = std::to_string( m_fpsSet );
+    const bool        reuse  = m_synchro && m_fpsConfirmation.phase == ConfirmationPhase::confirmed &&
+                       m_fpsConfirmation.requested && m_fpsConfirmation.expected == m_fpsSet && m_syncFreqTime > 0 &&
+                       m_syncFreq == m_fpsSet;
+    beginConfirmation( m_fpsConfirmation, m_fpsSet, true );
 
     if( !m_synchro )
     {
         std::string response;
 
-        { //mutex scope
-            std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
-            if( pdvSerialWriteRead( response, "fps " + fpsStr ) != 0 )
-            {
-                if( powerState() != 1 || powerStateTarget() != 1 )
-                {
-                    return -1;
-                }
-                return log<software_error, -1>( { "" } );
-            }
+        if( pdvSerialWriteRead( response, "fps " + fpsStr ) != 0 )
+        {
+            m_fpsConfirmation.phase = ConfirmationPhase::failed;
+            return -1;
         }
 
+        float fps;
+
+        if( parseFPS( fps, response ) == 0 )
         {
-            ///\todo check response
-            std::cerr << "fps " << fpsStr << " response: " << response << "\n";
-            log<text_log>( { "set fps: " + fpsStr } );
+            m_fps = fps;
+            m_workerFPS.store( fps, std::memory_order_relaxed );
+            m_housekeepingFpsTime = housekeepingNow();
+            confirmValue( m_fpsConfirmation,
+                          m_fpsSet == 0 ? 0 : fps,
+                          4 * std::numeric_limits<float>::epsilon() * std::max( 1.0f, fps ) );
+        }
 
-            // Control callers already own m_indiMutex; configuration itself needs no second request.
-            if( requestReconfiguration )
+        if( requestReconfiguration )
+        {
+            if( m_nextMode.empty() )
             {
-                if( m_nextMode.empty() )
-                {
-                    m_nextMode = m_modeName;
-                }
-
-                m_reconfig = true;
+                m_nextMode = m_modeName;
             }
+
+            m_reconfig = true;
         }
     }
     else
     {
-        std::cerr << "setting: " << fpsStr << "\n";
-
         pcf::IndiProperty ipFreq( pcf::IndiProperty::Number );
-
         ipFreq.setDevice( m_syncDevice );
         ipFreq.setName( m_syncFreqProp );
-        ipFreq.add( pcf::IndiElement( "target" ) );
+        ipFreq.add( pcf::IndiElement( "target", fpsStr ) );
+        if( sendNewProperty( ipFreq ) < 0 )
+        {
+            m_fpsConfirmation.phase = ConfirmationPhase::failed;
+            return -1;
+        }
 
-        ipFreq["target"] = fpsStr;
-
-        sendNewProperty( ipFreq );
+        if( reuse )
+        {
+            confirmValue( m_fpsConfirmation, m_syncFreq, 0 );
+        }
+        else if( m_indiDriver )
+        {
+            // One fresh report request for this generation, including unchanged source targets.
+            m_indiDriver->sendGetProperties( m_indiP_syncFreq );
+        }
     }
 
     return 0;
@@ -1613,6 +1950,13 @@ inline int ocam2KCtrl::setSynchro( bool requestReconfiguration )
     { //mutex scope
         std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
 
+        // Invalidate a superseded camera rate before the intermediate maximum-rate command.
+        if( !m_synchroSet || !m_synchro )
+        {
+            ++m_fpsConfirmation.generation;
+            m_fpsConfirmation.phase = ConfirmationPhase::unavailable;
+        }
+
         // First set the actual FPS to 0 to get to max
         std::string fpsStr = std::to_string( 0 );
         if( pdvSerialWriteRead( response, "fps " + fpsStr ) == 0 )
@@ -1623,6 +1967,8 @@ inline int ocam2KCtrl::setSynchro( bool requestReconfiguration )
         }
         else
         {
+            m_fpsConfirmation.phase = ConfirmationPhase::failed;
+
             if( powerState() != 1 || powerStateTarget() != 1 )
             {
                 return -1;
@@ -1659,6 +2005,8 @@ inline int ocam2KCtrl::setSynchro( bool requestReconfiguration )
         }
         else
         {
+            m_fpsConfirmation.phase = ConfirmationPhase::failed;
+
             if( powerState() != 1 || powerStateTarget() != 1 )
             {
                 return -1;
@@ -1712,130 +2060,109 @@ inline bool ocam2KCtrl::stateStringValid()
 
 inline int ocam2KCtrl::resetEMProtection()
 {
-    std::string response;
+    std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
+    std::string                           response;
 
-    { //mutex scope
-        std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
-        if( pdvSerialWriteRead( response, "protection reset" ) != 0 )
-        {
-            if( powerState() != 1 || powerStateTarget() != 1 )
-            {
-                return -1;
-            }
-            return log<software_error, -1>( { "" } );
-        }
-    }
-
+    if( pdvSerialWriteRead( response, "protection reset" ) != 0 )
     {
-        std::cerr << "\n******************************************\n";
-        std::cerr << "protection reset:\n";
-        std::cerr << response << "\n";
-        std::cerr << "\n******************************************\n";
-        ///\todo check response.
+        if( powerState() != 1 || powerStateTarget() != 1 )
+        {
+            return -1;
+        }
 
-        updateIfChanged( m_indiP_emProt, "status", std::string( "RESET" ), INDI_OK );
-
-        log<text_log>( "overillumination protection has been reset", logPrio::LOG_NOTICE );
-
-        m_protectionResetConfirmed = 0;
-
-        m_protectionReset = true;
-
-        return 0;
+        return log<software_error, -1>( { "" } );
     }
+
+    std::cerr << "\n******************************************\n";
+    std::cerr << "protection reset:\n";
+    std::cerr << response << "\n";
+    std::cerr << "\n******************************************\n";
+    ///\todo check response.
+
+    updateIfChanged( m_indiP_emProt, "status", std::string( "RESET" ), INDI_OK );
+    log<text_log>( "overillumination protection has been reset", logPrio::LOG_NOTICE );
+    m_protectionResetConfirmed = 0;
+    m_protectionReset          = true;
+    beginConfirmation( m_gainConfirmation, 0, false );
+    return 0;
 }
 
 inline int ocam2KCtrl::getEMGain()
 {
-    std::string response;
+    std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
+    std::string                           response;
+    m_housekeepingGainTime = 0;
+    ++m_housekeepingGainQueries;
 
-    { //mutex scope
-        std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
-        m_housekeepingGainTime = 0;
-
-        if( pdvSerialWriteRead( response, "gain" ) != 0 )
-        {
-            if( powerState() != 1 || powerStateTarget() != 1 )
-            {
-                return -1;
-            }
-            return log<software_error, -1>( { "" } );
-        }
+    if( pdvSerialWriteRead( response, "gain" ) != 0 )
+    {
+        return -1;
     }
 
-    { //mutex scope
-        std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
-        unsigned                              emGain;
-        if( parseEMGain( emGain, response ) < 0 )
+    unsigned gain;
+
+    if( parseEMGain( gain, response ) < 0 )
+    {
+        if( response.find( "HV" ) != std::string::npos )
         {
-            if( powerState() != 1 || powerStateTarget() != 1 )
-            {
-                return -1;
-            }
-
-            if( response.find( "HV" ) != std::string::npos )
-            {
-                m_emGain = 1;
-                updateIfChanged( m_indiP_emProt, "status", std::string( "TRIPPED" ), INDI_ALERT );
-                return log<software_warning, -1>( { "EM Gain tripped!" } );
-            }
-
-            std::cerr << "EM Gain parse error, response:\n" << response << "\n";
-
-            return log<software_error, -1>( { "EM Gain parse error" } );
+            m_emGain                 = 1;
+            m_gainConfirmation.phase = ConfirmationPhase::failed;
+            updateIfChanged( m_indiP_emProt, "status", std::string( "TRIPPED" ), INDI_ALERT );
+            return log<software_warning, -1>( { "EM Gain tripped!" } );
         }
 
-        m_emGain               = emGain;
-        m_housekeepingGainTime = housekeepingNow();
-
-        return 0;
+        // A bad numeric reply is retryable within the original fixed deadline.
+        return log<software_error, 0>( { "EM Gain parse error: " + response } );
     }
+
+    m_emGain               = gain;
+    m_housekeepingGainTime = housekeepingNow();
+    confirmValue( m_gainConfirmation, gain, 0 );
+    return 0;
 }
 
 inline int ocam2KCtrl::setEMGain()
 {
+    std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
+
+    if( !mx::math::isFinite( m_emGainSet ) || m_emGainSet < 1 || m_emGainSet >= double( m_maxEMGain ) + 1 )
+    {
+        return log<text_log, 0>( "EM gain outside limits refused", logPrio::LOG_WARNING );
+    }
+
+    const unsigned gain = m_emGainSet; // Preserve the existing integer command for fractional targets.
+
+    if( !m_protectionReset && m_emGainSet > 1 )
+    {
+        return log<text_log, 0>( "Attempt to set EM gain before protection reset", logPrio::LOG_NOTICE );
+    }
+
     std::string response;
+    beginConfirmation( m_gainConfirmation, gain, true );
 
-    if( m_protectionReset == false )
+    if( pdvSerialWriteRead( response, "gain " + std::to_string( gain ) ) != 0 )
     {
-        log<text_log>( "Attempt to set EM gain before protection reset", logPrio::LOG_NOTICE );
-
-        if( m_emGainSet > 1 ) // we allow setting to 1 for safety
-        {
-            return 0;
-        }
+        m_gainConfirmation.phase = ConfirmationPhase::failed;
+        return -1;
     }
 
-    unsigned emg = m_emGainSet; // a float
+    unsigned actual;
 
-    if( emg < 1 || emg > m_maxEMGain )
+    if( parseEMGain( actual, response ) == 0 )
     {
-        log<text_log>( "Attempt to set EM gain to " + std::to_string( emg ) + " outside limits refused",
-                       logPrio::LOG_WARNING );
-        return 0;
+        m_emGain               = actual;
+        m_housekeepingGainTime = housekeepingNow();
+        confirmValue( m_gainConfirmation, actual, 0 );
     }
-
-    std::string emgStr = std::to_string( emg );
-    { //mutex scope
-        std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
-        if( pdvSerialWriteRead( response, "gain " + emgStr ) != 0 ) // m_pdv, "gain " + emgStr, m_readTimeout) == 0)
-        {
-            if( powerState() != 1 || powerStateTarget() != 1 )
-            {
-                return -1;
-            }
-            return log<software_error, -1>( { "" } );
-        }
-    }
-
+    else if( response.find( "HV" ) != std::string::npos )
     {
-        ///\todo check response
-        std::cerr << "gain " << emgStr << " response: " << emgStr << "\n";
-
-        log<text_log>( { "set EM Gain: " + emgStr } );
-
-        return 0;
+        m_emGain                 = 1;
+        m_gainConfirmation.phase = ConfirmationPhase::failed;
+        updateIfChanged( m_indiP_emProt, "status", std::string( "TRIPPED" ), INDI_ALERT );
+        return log<software_warning, -1>( { "EM Gain tripped!" } );
     }
+
+    return log<text_log, 0>( { "set EM Gain: " + std::to_string( gain ) } );
 }
 
 inline int ocam2KCtrl::configureAcquisition()
@@ -1843,6 +2170,9 @@ inline int ocam2KCtrl::configureAcquisition()
     // lock mutex
     std::unique_lock<std::mutex>          lock( m_indiMutex );
     std::lock_guard<std::recursive_mutex> cameraGuard( m_cameraMutex );
+
+    ++m_fpsConfirmation.generation;
+    m_fpsConfirmation.phase = ConfirmationPhase::unavailable;
 
     // Send command to camera to place it in the correct mode
     std::string response;
@@ -2113,7 +2443,9 @@ inline int ocam2KCtrl::reconfig()
     std::lock_guard<std::mutex>           lock( m_indiMutex );
     std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
     endHousekeepingPause( "camera reconfiguration" );
-    m_reconfig = false;
+    ++m_fpsConfirmation.generation;
+    m_fpsConfirmation.phase = ConfirmationPhase::unavailable;
+    m_reconfig              = false;
 
     int rv = edtCamera<ocam2KCtrl>::pdvReconfig();
 
@@ -2145,6 +2477,7 @@ inline void ocam2KCtrl::requestAcquisitionRecovery()
     std::lock_guard<std::mutex> lock( m_indiMutex );
 
     endHousekeepingPause( "acquisition recovery" );
+    resetHousekeeping();
 
     if( m_nextMode.empty() )
     {
@@ -2255,8 +2588,33 @@ INDI_SETCALLBACK_DEFN( ocam2KCtrl, m_indiP_syncFreq )( const pcf::IndiProperty &
         return -1;
     }
 
-    std::lock_guard<std::mutex> lock( m_indiMutex );
-    m_syncFreq = ipRecv["current"].get<double>();
+    std::lock_guard<std::mutex>           lock( m_indiMutex );
+    std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
+    const double                          frequency = ipRecv["current"].get<double>();
+
+    if( !mx::math::isFinite( frequency ) || frequency <= 0 || frequency > std::numeric_limits<float>::max() )
+    {
+        return -1;
+    }
+
+    m_syncFreq     = frequency;
+    m_syncFreqTime = housekeepingNow();
+
+    if( m_synchro )
+    {
+        m_housekeepingFpsTime  = m_syncFreqTime;
+        const double tolerance = 4 * std::numeric_limits<float>::epsilon() * std::max( 1.0f, m_syncFreq );
+
+        if( m_fpsConfirmation.phase == ConfirmationPhase::confirmed && m_fpsConfirmation.requested &&
+            std::abs( m_syncFreq - m_fpsConfirmation.expected ) > tolerance )
+        {
+            // An observed source change invalidates the old target before its required mode reload.
+            ++m_fpsConfirmation.generation;
+            m_fpsConfirmation.phase = ConfirmationPhase::unavailable;
+        }
+
+        confirmValue( m_fpsConfirmation, m_syncFreq, tolerance );
+    }
 
     if( m_synchro && m_syncFreq != m_fps )
     {

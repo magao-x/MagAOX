@@ -2,26 +2,21 @@
 
 This record tracks operator observations, diagnosis, changes and verification during debugging and optimization. The [main engineering plan](dm-syncopation.md) retains the settled design and review answers; the [user guide](../../../apps/dmSyncopation/doc/dmSyncopation.md) documents current operation and interfaces.
 
-Current status (2026-10-25 America/Phoenix): camera timing instrumentation,
-deferred OCAM rearm and accepted EDT wrapper capture are implemented. The first
-native/wrapper operator comparison retains both CPUs without trace loss or
-cleanup errors. It directly identifies the same EDT lock in acquisition on
-CPU 33 and IRQ 405 on CPU 61; all 25 camera acquisition brackets above 2 us
-overlap the remote lock holder, with a maximum of 34 us. Covered long rearms
-remain after publication. Combined device/control and acquisition handlers
-take about 53 us versus 32 us ordinarily. Their changing software-stamp offset
-explains a captured 479 us interval following a late frame; shared IRQ entry
-does not establish physical frame-arrival timing.
+Current status (2026-10-25 America/Phoenix): the operator normal / paused /
+normal comparison confirms a working serial-housekeeping pause with the AO loop
+closed and all settings/workload unchanged. Serial attempts remain at 981
+through the captured quiet interval and resume afterward. Driver `atime`
+intervals narrow to **499–501 us**, while the normal files retain roughly
+480–525 us tails. This supports the prior IRQ 405 shared-lock/combined-handler
+attribution of large completion-stamp excursions to serial/device handling.
 
-The camera was cooling after an overnight power-off and normal power-cycle
-FSM startup, without software reconfiguration. Conversion spread changes
-before wrapper activation, and probes add timing cost. The sequential captures
-therefore do not isolate a causal whole-file overhead difference. A separate
-untraced approximately 113 us post-stamp excursion remains unexplained.
-Routine serial status polling is the next controlled comparison once temperature
-is settled. The approved runtime diagnostic pause now has a fixed 120-second
-timeout; production polling cadence is unchanged. Frame age,
-physical arrival timing and earlier setup-associated bursts remain open.
+A separate change late in the paused capture increases conversion spread while
+SDK-return timing remains steady. Publication deviation is **0.761 / 1.428 /
+0.747 us** before/paused/after, so this run does not show overall RMS improvement.
+The paused conversion variation remains unexplained. Comparisons use disjoint
+summary populations because paused updates overlap. Production housekeeping
+scheduling remains unchanged; physical frame-arrival timing remains unmeasured.
+
 Earlier isolated camera/acquWFS measurements and
 their limitations are preserved below; matched camera-publication-to-wake
 latency remains unmeasured. Median-grid scheduling, per-step skips and targeted
@@ -2526,3 +2521,55 @@ housekeeping suite and existing OCAM, lifecycle and temperature suites. The
 normal app builds/links against the copied EDT 5.6.8.0 SDK without test stubs;
 that binary is not launched. Formatting, whitespace and local documentation
 links pass. The operator comparison has not yet been run.
+
+## 2026-10-25 closed-loop housekeeping pause comparison
+
+The operator supplied `/home/jrmales/tmp/camwfs-housekeeping` and confirms the
+loop was closed with unchanged gain, camera settings, CPU/IRQ placement and
+workload throughout normal / paused / normal captures. All three retain
+session 5, inode 3383, bin2, sync ON, 2 kHz, EM gain 595 and shutter OPEN.
+
+Serial attempts remain **981** through the paused capture; timing records show
+zero control traffic/overlap. Automatic expiry resumes polling approximately
+**120.426 s** after activation. Every paused two-second summary lies safely
+inside the quiet interval, away from either edge. Temperature/gain are correctly
+marked stale; the paused temperature is not a fresh thermal measurement.
+
+Retained `atime` ranges are **481–525 / 499–501 / 480–515 us**. Normal files
+emit **12 / 5** qualified raw >20 us contexts, all overlapping serial work;
+none are emitted while paused. The prior shared EDT handler trace places
+serial/device work before DMA completion stamping and wakeup. Together these
+support delayed software reporting of frame readiness; physical IRQ assertion
+and exposure timing are not measured.
+
+Overall publication deviation is **0.761 / 1.428 / 0.747 us**, using 29 / 30 /
+29 disjoint two-second windows. The 60 paused summaries overlap at about one
+second spacing, so they are not all pooled. The pause removes large stamp
+tails but a separate late conversion change raises publication RMS: first
+selected paused windows have **0.656 us** publication deviation, final selected
+windows **2.700 us**, with conversion **27.474 +/- 1.385 us** while SDK-return
+interval deviation stays **0.270 us**. Rearm maxima fall from **27.151 / 31.019 us**
+in normal files to **9.809 us** while paused. No new frame failures, gaps or
+queue drops appear. Sixty-one wide clock brackets during the paused change
+affect attribution qualification but do not filter the aggregate distributions.
+
+The [OCAM record](ocam2k-acquisition-publication-timing.md) contains hashes,
+actual pause boundaries, raw/context coverage limits and per-stage detail.
+The next diagnostic can target post-SDK variation with a short matched kernel
+trace during paused operation. Per-query attribution and a production
+housekeeping schedule remain future work. This checkpoint changes only the
+two engineering records; all analysis runs locally.
+
+
+### Production OCAM housekeeping policy — 2026-10-25
+
+Implemented the approved [separate housekeeping policy](ocam2k-housekeeping.md)
+in `ocam2KCtrl`: no steady gain/FPS queries after confirmation, configurable
+10-second idle temperature reads and faster change/convergence monitoring,
+with one automatically scheduled serial query per loop. The policy record and
+operator guide describe bounded confirmation, conservative cooling-state
+inference, fresh cooling-Off validation and the retained diagnostic pause.
+Local checks pass (2,037 assertions / 67 cases and the EDT SDK build); the
+operator's hardware timing comparison remains pending. This implements the
+production schedule identified above, without changing the evidence or the
+remaining post-SDK conversion investigation.
