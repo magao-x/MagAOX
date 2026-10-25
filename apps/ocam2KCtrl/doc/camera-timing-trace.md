@@ -293,6 +293,108 @@ cleanup failures are reported separately. Ctrl-C/TERM requests normal cleanup;
 SIGKILL or machine failure can prevent cleanup. If definitions remain, retain
 the printed names and errors; do not clear the global `kprobe_events` file.
 
+On the verified exao2 kernel, the observed result is **20 attempted, 12 errors**:
+entry/return definitions for the four lock/wakeup wrappers succeed and are
+removed; the six proprietary-core functions reject both definitions. Follow-up
+kernel warnings identify the `notrace` restriction. The active configuration
+has `CONFIG_DYNAMIC_FTRACE=y` and unset `CONFIG_KPROBE_EVENTS_ON_NOTRACE`,
+which prevents these uninstrumented functions from being used as tracefs
+probe events. Treat this as partial capability discovery; inspect each
+registration and cleanup result separately from the aggregate error count.
+The [engineering record](../../../agents/plans/2026-10/ocam2k-acquisition-publication-timing.md)
+records the accepted targets and the revised measurement scope.
+
+## 6. Capture the accepted EDT lock and wakeup wrappers
+
+Use the updated `capture-camera-timing.py` **and** `check-edt-probes.py` from
+the same checkout. This adds Python helper functionality; it needs no camera,
+reader or kernel rebuild/restart. Preserve the camera's chronological telemetry
+configuration from step 1 and use its current framegrabber TID. The examples
+retain acquisition CPU 33 and EDT IRQ CPU 61; adjust them if placement changed.
+
+First collect a native scheduler/IRQ comparison. In one terminal:
+
+```bash
+timeout 60s logdump --dir=/opt/MagAOX/telem --ext=.bintel -f camwfs > "$HOME/camwfs-edt-native.txt"
+```
+
+After about ten seconds, run this in another terminal at the repository root,
+with `CAMERA_TID` set as in step 1:
+
+```bash
+sudo python3 apps/ocam2KCtrl/scripts/capture-camera-timing.py --tid "$CAMERA_TID" --cpus 33,61 --settle-seconds 5 --seconds 1 --output "$HOME/camwfs-native-$(date -u +%Y%m%dT%H%M%SZ)"
+```
+
+Let that telemetry collection finish. Then collect a second telemetry file:
+
+```bash
+timeout 60s logdump --dir=/opt/MagAOX/telem --ext=.bintel -f camwfs > "$HOME/camwfs-edt-wrappers.txt"
+```
+
+Again wait about ten seconds, then request the wrapper capture:
+
+```bash
+sudo python3 apps/ocam2KCtrl/scripts/capture-camera-timing.py --tid "$CAMERA_TID" --cpus 33,61 --edt-wrappers --settle-seconds 5 --seconds 1 --output "$HOME/camwfs-edt-$(date -u +%Y%m%dT%H%M%SZ)"
+```
+
+Keep both telemetry files and both complete output directories. Include a
+helper-free telemetry baseline from step 2 too. Start with one second of active
+capture; inspect timing spread and loss before lengthening it. Wrapper mode
+accepts 1–5 seconds and allocates 32 MiB per selected CPU, with at most four
+CPUs. Native mode retains its 8 MiB buffers and 1–30 second range. The comparison
+therefore includes the mode's buffer allocation as well as probe overhead;
+phase anchors separate setup from the retained interval.
+
+The mode uses only the four functions whose disabled entry/return registration
+already succeeded:
+
+| Wrapper | Entry field | Measurement boundary |
+| --- | --- | --- |
+| `edt_start_intr_critical` | `lock` pointer | Entry/return bracket lock acquisition |
+| `edt_end_intr_critical` | `lock` pointer | Unlock entry/return; compare with the matching acquisition |
+| `edt_wake_up` | `queue` pointer | Wakeup call alongside scheduler wake/dispatch events |
+| `edt_wake_up_interruptible` | `queue` pointer | Interruptible wakeup call alongside scheduler events |
+
+Entry arguments use the verified x86-64 first-argument register (`%di:x64`),
+without dereferencing the pointer. Return probes reserve 64 concurrent instances
+each (`r64`). A unique group and unique event names identify each invocation.
+Definitions are checked while disabled, then enabled only in the private
+instance. Setup rejects missing `context-info` or `irq-info`; trace options are
+preserved. Rejected proprietary-core targets are not requested by this mode.
+
+The wrappers become active during setup and remain active through settling,
+even though the ring is off until capture begins. They execute for calls on
+CPUs outside the recording mask too. `metadata.json`'s `edt_wrappers` object
+records definitions, event formats, activation/deactivation anchors, raw and
+owned-row profile snapshots, expected build identity, and any retained names
+or cleanup errors. Profile snapshots bracket activation through deactivation,
+including settling; they do not describe only the one-second ring interval.
+No diagnostic or output-file I/O runs between trace enable and stop.
+
+Inspect the ordinary completion/affinity/error fields and per-CPU loss counters
+from step 4. Also require confirmed probe deactivation, no safety errors and
+no remaining definitions for normal cleanup. Preserve `trace_options.txt` and
+event formats: later pairing needs CPU, task, interrupt context, function and
+pointer identity. PID alone cannot distinguish calls made from idle/IRQ
+context. Match complete call sequences and exclude capture-boundary fragments.
+
+Treat the lock acquisition bracket as instrumented wrapper elapsed time. The
+time from acquisition return to unlock entry covers the interior held region,
+not its complete duration. Nested calls, missing returns or an owner outside
+the selected CPUs limit attribution. Profile miss counters are saved, but
+`return_pool_misses_verified` remains false: older kernel implementations omit
+return-slot exhaustion from that column, and distro backports differ. Zero
+misses alone cannot establish complete entry/return pairing.
+
+On a successful save, the helper disables its events, removes its definitions
+and removes its private instance. If saving fails, it retains the stopped
+instance and disabled definitions so the dynamic records can still be decoded.
+If stopping or disabling is unconfirmed, it retains both and reports the exact
+paths/names. Keep these until the trace and formats have been recovered; deleting
+dynamic definitions first can remove their formatter. The generic recovery
+steps in step 4 must therefore be completed before selectively removing any
+retained EDT definitions. Share the errors and retained names with the capture.
+
 ## Implementation checks and references
 
 The helper's local checks use an ordinary temporary fake tracefs tree, including
@@ -314,7 +416,7 @@ injected registration/cleanup failures, without accessing a live tracefs:
 PYTHONDONTWRITEBYTECODE=1 python3 apps/ocam2KCtrl/scripts/tests/check_edt_probes_test.py
 ```
 
-Its 16 offline checks cover ownership, append-only writes, short/failed writes,
+Its offline checks cover ownership, append-only writes, short/failed writes,
 interruption, output failure, changed definitions, external enablement and
 module/mount identity rejection. These do not exercise the actual kernel's
 registration path; that result comes from the operator check above.
