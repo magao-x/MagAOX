@@ -1311,6 +1311,73 @@ TEST_CASE( "ocam2KCtrl getFPS handles valid and malformed serial responses", "[o
     }
 }
 
+/// The instrument's FPS response and trailing prompt establish readbacks, acknowledgements and connection progress.
+/** \ingroup ocam2KCtrl_unit_test */
+TEST_CASE( "ocam2KCtrl accepts instrument FPS replies on the control path", "[ocam2KCtrl][housekeeping]" )
+{
+    // clang-format off
+    #ifdef OCAM2KCTRL_TEST_DOXYGEN_REF
+    ocam2KCtrl::getFPS(); ocam2KCtrl::setFPS(); ocam2KCtrl::appLogic();
+    #endif
+    // clang-format on
+    resetStubState();
+    ocam2KCtrl_test app;
+    setPoweredOn( app );
+    deferHousekeeping( app );
+    app.m_synchro              = false;
+    app.m_fpsSet               = 2000;
+    app.m_modeName             = "science";
+    const std::string response = "Camera rate is [2000] fps.Ok :\n";
+
+    SECTION( "getFPS accepts the actual camera response" )
+    {
+        queueSerialResponse( response );
+        REQUIRE( app.getFPS() == 0 );
+        REQUIRE( app.m_fps == 2000 );
+        REQUIRE( app.m_workerFPS.load() == 2000 );
+        REQUIRE( app.m_housekeepingFpsTime > 0 );
+        REQUIRE( g_edtStubState.serialCommands == std::vector<std::string>{ "fps" } );
+    }
+
+    SECTION( "setFPS accepts a matching numeric response without scheduling another query" )
+    {
+        queueSerialResponse( response );
+        REQUIRE( app.setFPS( false ) == 0 );
+        REQUIRE( app.m_fpsConfirmation.phase == ocam2KCtrl::ConfirmationPhase::confirmed );
+        REQUIRE( app.m_fps == 2000 );
+        REQUIRE( app.m_workerFPS.load() == 2000 );
+        REQUIRE( app.m_housekeepingFpsTime > 0 );
+        REQUIRE( app.pollHousekeeping() == 0 );
+        REQUIRE( g_edtStubState.serialCommands == std::vector<std::string>{ "fps 2000.000000" } );
+    }
+
+    SECTION( "CONNECTED progresses instead of returning to the reconnect loop" )
+    {
+        startOfflineTelemetry( app );
+        app.state( stateCodes::CONNECTED );
+        app.m_poweredOn = false;
+        queueSerialResponse( response );
+        queueSerialResponse( "Ok :\n" );
+        queueSerialResponse( "Ok :\n" );
+        queueSerialResponse( response );
+        fgThreadScope fgThread( app );
+
+        REQUIRE( app.appLogic() == 0 );
+        REQUIRE( app.state() == stateCodes::OPERATING );
+        REQUIRE_FALSE( app.m_shutdown );
+        REQUIRE( app.m_fps == 2000 );
+        REQUIRE( app.m_housekeepingFpsTime > 0 );
+        REQUIRE( app.m_fpsConfirmation.phase == ocam2KCtrl::ConfirmationPhase::confirmed );
+        REQUIRE( app.m_reconfig );
+        REQUIRE( g_edtStubState.serialCommands ==
+                 std::vector<std::string>{ "fps", "fps 0", "synchro off", "fps 2000.000000" } );
+        REQUIRE( g_edtStubState.serialResponses.empty() );
+        REQUIRE( app.appLogic() == 0 );
+        REQUIRE( app.state() == stateCodes::OPERATING );
+        REQUIRE( g_edtStubState.serialCommands.size() == 4 );
+    }
+}
+
 /// Verify the temperature-control helpers handle safe, unsafe, and valid setpoint requests.
 /**
  * \ingroup ocam2KCtrl_unit_test

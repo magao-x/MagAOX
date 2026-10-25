@@ -149,6 +149,43 @@ TEST_CASE( "ocam2KCtrl utility helpers validate every temperature field", "[ocam
     }
 }
 
+/// A terminal firmware prompt can share a temperature or gain report without relaxing field validation.
+/** \ingroup ocam2KCtrl_unit_test */
+TEST_CASE( "ocam2KCtrl utility helpers accept terminal camera prompts", "[ocamUtils]" )
+{
+    // clang-format off
+    #ifdef OCAM2KCTRL_TEST_DOXYGEN_REF
+    parseTemps( *(ocamTemps *)nullptr, "" ); parseEMGain( *(unsigned *)nullptr, "" );
+    #endif
+    // clang-format on
+    const std::string temperature = "Temperatures : CCD[-45] CPU[41] POWER[34] BIAS[47] WATER[24.2] LEFT[33] RIGHT[38] "
+                                    "SET[-450]\nCooling Power [102]mW.\n\n";
+
+    for( const std::string prompt : { "Ok :", "Ok :\r\n" } )
+    {
+        ocamTemps temps;
+        unsigned  gain = 0;
+
+        REQUIRE( parseTemps( temps, temperature + prompt ) == 0 );
+        REQUIRE( temps.CCD == -45 );
+        REQUIRE( temps.SET == -45 );
+        REQUIRE( parseEMGain( gain, "Gain set to 42 \r\n" + prompt ) == 0 );
+        REQUIRE( gain == 42 );
+    }
+
+    for( const std::string suffix : { "rubbish Ok :", "Error :", "Ok :junk", "Ok :Ok :" } )
+    {
+        ocamTemps temps;
+        temps.setInvalid();
+        unsigned gain = 0;
+
+        REQUIRE( parseTemps( temps, temperature + suffix ) == -1 );
+        REQUIRE( temps.CCD == -999 );
+        REQUIRE( parseEMGain( gain, "Gain set to 42 \r\n" + suffix ) == -1 );
+        REQUIRE( gain == 0 );
+    }
+}
+
 /// Accept complete positive FPS replies and reject invalid numbers or framing.
 /** \ingroup ocam2KCtrl_unit_test
  */
@@ -162,12 +199,54 @@ TEST_CASE( "ocam2KCtrl utility helpers parse FPS responses", "[ocamUtils]" )
 
     SECTION( "valid rates retain fractional precision" )
     {
-        for( const std::string response : { "fps [150.5] Hz\n", "\r\nfps [ +1.505e2 ] Hz\r\n" } )
+        for( const std::string response : { "fps [150.5] Hz\n",
+                                            "\r\nfps [ +1.505e2 ] Hz\r\n",
+                                            "Camera rate is [150.5] fps.Ok :",
+                                            "\r\nCamera rate is [ +1.505e2 ] fps.\r\nOk :\r\n",
+                                            "Camera rate is [150.5] fps.",
+                                            "fps [150.5] Hz\nOk :\r\n" } )
         {
             float fps = 0;
 
             REQUIRE( parseFPS( fps, response ) == 0 );
             REQUIRE( fps == 150.5F );
+        }
+    }
+
+    SECTION( "the observed hardware reply retains its actual rate" )
+    {
+        float fps = 0;
+
+        REQUIRE( parseFPS( fps, "Camera rate is [2000] fps.Ok :" ) == 0 );
+        REQUIRE( fps == 2000 );
+    }
+
+    SECTION( "hardware framing does not weaken numeric or response validation" )
+    {
+        for( const std::string value : { "0", "-1", "nan", "inf", "2000junk", "", "1e100", "1e-100" } )
+        {
+            float fps = 12.5;
+
+            REQUIRE( parseFPS( fps, "Camera rate is [" + value + "] fps.Ok :" ) == -1 );
+            REQUIRE( fps == 12.5 );
+        }
+
+        for( const std::string response : { "Camera rate is [2000] fps.Error :",
+                                            "Camera rate is [2000] fps.Ok :junk",
+                                            "Camera rate is [2000] fps.Ok :Ok :",
+                                            "Camera rate is [2000] fps. rubbish Ok :",
+                                            "Camera rate is [2000] fps.[1]Ok :",
+                                            "Camera rate is ]2000[ fps.Ok :",
+                                            "Camera rate is [2000] HzOk :",
+                                            "fps [2000] fps.Ok :",
+                                            "Error [2000] fps.Ok :",
+                                            "Ok :" } )
+        {
+            CAPTURE( response );
+            float fps = 12.5;
+
+            REQUIRE( parseFPS( fps, response ) == -1 );
+            REQUIRE( fps == 12.5 );
         }
     }
 

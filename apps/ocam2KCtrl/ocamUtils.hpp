@@ -88,6 +88,20 @@ inline std::string_view trim( std::string_view token /**< [in] Response token. *
     return token.substr( first, token.find_last_not_of( whitespace ) - first + 1 );
 }
 
+/// Remove one optional terminal camera prompt, preserving whitespace belonging to the report.
+inline std::string_view withoutPrompt( std::string_view response /**< [in] Complete serial response. */ )
+{
+    const auto                 trimmed = trim( response );
+    constexpr std::string_view prompt{ "Ok :" };
+
+    if( trimmed.ends_with( prompt ) )
+    {
+        return response.substr( 0, size_t( trimmed.data() - response.data() ) + trimmed.size() - prompt.size() );
+    }
+
+    return response;
+}
+
 /// Parse a complete finite decimal token, preserving the output on failure.
 inline bool parseFloat( float           &value, /**< [out] Parsed value on success. */
                         std::string_view token /**< [in] Numeric response token. */ )
@@ -125,7 +139,7 @@ inline bool parseFloat( float           &value, /**< [out] Parsed value on succe
 /** \endcond
  */
 
-/// Parse a complete, labeled OCAM temperature query response.
+/// Parse a complete, labeled OCAM temperature query response with an optional terminal prompt.
 /** All fields must be finite; temperatures below absolute zero and negative cooling power are rejected.
  * The returned SET field is converted from tenths of a degree to degrees Celsius.
  *
@@ -138,7 +152,7 @@ inline int parseTemps( ocamTemps         &temps, /**< [out] Temperature readings
                        const std::string &tstr /**< [in] Device response to parse. */ )
 {
     std::vector<std::string> v;
-    mx::ioutils::parseStringVector( v, tstr, "[]" );
+    mx::ioutils::parseStringVector( v, std::string( ocamUtilsDetail::withoutPrompt( tstr ) ), "[]" );
 
     constexpr std::array<std::string_view, 10> labels{
         "Temperatures : CCD", "CPU", "POWER", "BIAS", "WATER", "LEFT", "RIGHT", "SET", "Cooling Power", "mW." };
@@ -191,8 +205,9 @@ inline int parseTemps( ocamTemps         &temps, /**< [out] Temperature readings
     return 0;
 }
 
-/// Parse the finite positive rate in an OCAM "fps [value] Hz" query response.
-/** \returns 0 on success.
+/// Parse a finite positive rate from the camera or legacy FPS report, with an optional terminal prompt.
+/** Accepts "Camera rate is [value] fps." and the legacy "fps [value] Hz" report.
+ * \returns 0 on success.
  * \returns -1 on error, leaving the output unchanged.
  *
  * \ingroup ocam2KCtrl
@@ -200,25 +215,36 @@ inline int parseTemps( ocamTemps         &temps, /**< [out] Temperature readings
 inline int parseFPS( float             &fps, /**< [out] Camera rate on success, in Hz. */
                      const std::string &fstr /**< [in] Device response to parse. */ )
 {
-    std::vector<std::string> v;
-    mx::ioutils::parseStringVector( v, fstr, "[]" );
+    const auto response = ocamUtilsDetail::withoutPrompt( fstr );
+    const auto first    = response.find( '[' );
+    const auto last     = response.find( ']' );
 
-    float parsed;
+    if( first == std::string_view::npos || last == std::string_view::npos || last <= first ||
+        response.find( '[', first + 1 ) != std::string_view::npos ||
+        response.find( ']', last + 1 ) != std::string_view::npos )
+    {
+        return -1;
+    }
 
-    if( v.size() != 3 || ocamUtilsDetail::trim( v[0] ) != "fps" || ocamUtilsDetail::trim( v[2] ) != "Hz" ||
-        !ocamUtilsDetail::parseFloat( parsed, v[1] ) || parsed <= 0 )
+    const auto prefix = ocamUtilsDetail::trim( response.substr( 0, first ) );
+    const auto suffix = ocamUtilsDetail::trim( response.substr( last + 1 ) );
+    const bool camera = prefix == "Camera rate is" && suffix == "fps.";
+    const bool legacy = prefix == "fps" && suffix == "Hz";
+    float      parsed;
+
+    if( ( !camera && !legacy ) ||
+        !ocamUtilsDetail::parseFloat( parsed, response.substr( first + 1, last - first - 1 ) ) || parsed <= 0 )
     {
         return -1;
     }
 
     fps = parsed;
-
     return 0;
 }
 
 /// Parse the integer gain in an OCAM "Gain set to N " response.
 /** A trailing space before the final response whitespace is required by the legacy response contract.
- * The supported range is 1 through 600.
+ * One optional terminal camera prompt is ignored. The supported range is 1 through 600.
  *
  * \returns 0 on success, and emGain set to a value >= 1
  * \returns -1 on error, and emGain will be set to 0.
@@ -229,7 +255,7 @@ inline int parseEMGain( unsigned          &emGain, /**< [out] Valid gain, or 0 o
                         const std::string &fstr /**< [in] Device response to parse. */ )
 {
     std::vector<std::string> v;
-    mx::ioutils::parseStringVector( v, fstr, " " );
+    mx::ioutils::parseStringVector( v, std::string( ocamUtilsDetail::withoutPrompt( fstr ) ), " " );
 
     emGain = 0;
 

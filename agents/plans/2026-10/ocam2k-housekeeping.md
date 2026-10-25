@@ -448,3 +448,39 @@ touched C++ files, and `git diff --check` passes. Build/test logs are under
 All hardware actions and comparative captures remain operator tasks. Rebuild
 and install `ocam2KCtrl`; this policy introduces no telemetry schema and needs
 no `logdump` rebuild.
+
+
+## Deployment correction — actual FPS reply, 2026-10-25
+
+The first hardware restart exposed an incorrect framing assumption in the
+strict parser. The camera returns `Camera rate is [2000] fps.Ok :`, while the
+parser accepted only the existing test fixture's `fps [value] Hz` form. The
+CONNECTED path correctly refused an invalid readback, but that refusal made the
+application cycle ERROR -> CONNECTED -> ERROR. The fixture did not establish
+the complete camera protocol.
+
+`parseFPS()` now accepts the observed `Camera rate is [value] fps.` body, while
+retaining the older fixture form. A shared helper removes only one optional
+exact terminal `Ok :` prompt, preserving whitespace belonging to the report.
+The EDT serial transport may include prompt bytes in the main response or drain
+them separately, depending on chunking; the prompt therefore cannot be required.
+Temperature and gain parsers reuse this helper to avoid the same suffix issue.
+Their actual body formats have not been captured in this report, so prompt
+handling there follows the shared transport evidence and remains distinct from
+hardware verification of those responses.
+
+Complete numeric-token, finite/positive/range and field-label validation remain
+in force. Wrong units/labels, extra or reversed brackets, arbitrary trailing
+junk, error responses and duplicate prompts are rejected. The gain parser's
+existing body delimiter contract is preserved.
+
+Regression tests include the exact operator reply, a matching numeric report
+used as a setter acknowledgement, and two app-loop passes proving CONNECTED
+progresses to OPERATING without another connectivity probe. They also cover
+optional prompts on the other reports and invalid values inside the actual FPS
+framing. Local results: controller **867 assertions / 34 cases**, housekeeping
+**640 / 26**, parsers **552 / 5**, totaling **2,059 / 65**; all pass. The EDT SDK
+build, clang-format verification and whitespace checks pass. Logs are under
+`/tmp/ocam-instrument-fps-app-*` and `/tmp/ocam-fps-reply-*`. The SDK-linked binary
+was not launched by an agent. The operator needs to rebuild/install
+`ocam2KCtrl` and restart `camwfs`; this correction needs no `logdump` rebuild.
