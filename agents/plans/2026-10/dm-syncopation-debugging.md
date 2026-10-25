@@ -14,8 +14,11 @@ frame age and its individual responsible setup operation remain unresolved.
 The complete EDT copy now identifies ordinary `atime` as a host completion
 processing stamp with 1 us quantization. It can follow PDV device/serial
 handling in the normal IRQ path; current shared lock and probe targets are available.
-Operator readback matches the copied EDT module's build ID and confirms kernel
-probe support plus all ten target symbols; disabled registration remains untested.
+Operator readback matches the copied EDT module's build ID. Disabled probes
+register for the four lock/wakeup wrappers; the kernel explicitly rejects
+the six uninstrumented core functions under its notrace policy. The optional
+wrapper capture is now implemented and checked offline; its first hardware
+measurement remains pending.
 Earlier isolated camera/acquWFS measurements and
 their limitations are preserved below; matched camera-publication-to-wake
 latency remains unmeasured. Median-grid scheduling, per-step skips and targeted
@@ -2380,3 +2383,50 @@ The helper's **16 offline checks pass**, including failed/short writes,
 interruption, output failure and selective cleanup. Independent review also
 passes; actual operator registration and active measurement results remain
 pending. The existing scheduler/IRQ capture helper is unchanged.
+
+## 2026-10-24 kernel policy explains partial probe registration
+
+The operator check finishes with **20 attempted, 12 errors**. Both entry and
+return definitions register disabled for `edt_wake_up`,
+`edt_wake_up_interruptible`, `edt_start_intr_critical` and
+`edt_end_intr_critical`; all eight are successfully removed. The six other
+functions reject both definitions with `EINVAL`; no cleanup error is reported.
+
+Follow-up configuration confirms `CONFIG_DYNAMIC_FTRACE=y`,
+`CONFIG_KPROBES_ON_FTRACE=y`, and unset `CONFIG_KPROBE_EVENTS_ON_NOTRACE`.
+The kernel log names every rejected function with the explicit reason
+`Could not probe notrace function`. This resolves the rejection cause: the
+unmodified proprietary object lacks the ftrace instrumentation present in
+the accepted Linux wrappers. It is a tracefs event-registration restriction,
+not a missing symbol or helper command-format failure.
+
+The [OCAM timing record](ocam2k-acquisition-publication-timing.md) records the
+accepted/rejected table, kernel source reference and revised first capture:
+use the accepted lock/wakeup wrappers with native IRQ/scheduler events, qualify
+probe overhead and pairing, and preserve uncertainty about uncovered lock
+owners and the physical completion boundary. The ordinary clock wrapper
+`edt_do_gettimeofday` is another possible observation point but remains
+untested. Active probe collection is not yet implemented; this checkpoint
+updates documentation only.
+
+## 2026-10-24 accepted EDT wrapper capture ready for operator test
+
+`capture-camera-timing.py --edt-wrappers` now adds the four accepted lock/wakeup
+functions, with pointer-valued entry fields and `r64` return probes. The helper
+reuses registration ownership, enables only its private instance, records
+formats/profile snapshots/activation anchors and preserves unsaved buffers with
+their disabled decoder definitions. Native capture keeps its existing behavior.
+
+Wrapper mode uses 32 MiB per selected CPU and limits capture to 1–5 seconds.
+The [operator guide](../../../apps/ocam2KCtrl/doc/camera-timing-trace.md) starts
+with a one-second native comparison and one-second wrapper capture, each with
+five seconds of settling and overlapping camera telemetry. Hooks are active
+during settling and on unrecorded CPUs; profile counts cover activation through
+deactivation. Return-pool miss semantics remain unverified, so complete pairing
+and loss/overhead checks remain required.
+
+All **53 offline tests pass** (31 capture, 22 owner), including interruption,
+partial setup, unrelated-state preservation and failed save/cleanup. Independent
+review passes. The [OCAM record](ocam2k-acquisition-publication-timing.md) records
+the exact fields, ownership choices and limitations. Copy both updated Python
+scripts for the operator test; no camera/reader/kernel rebuild is required.

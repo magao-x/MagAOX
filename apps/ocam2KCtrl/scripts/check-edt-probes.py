@@ -73,10 +73,13 @@ def preflight(tracefs):
 class ProbeCheck:
     """Own attempted definitions in a unique event group, with exact reconciliation."""
 
-    def __init__(self, tracefs, group=None):
-        """Keep the tracefs root and a fresh invocation-specific event group."""
+    def __init__(self, tracefs, group=None, event_prefix=""):
+        """Keep tracefs, an optional unique group, and an optional event-name prefix."""
+        if event_prefix and not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", event_prefix):
+            raise ValueError("Event prefix must contain only identifier characters")
         self.tracefs = tracefs
         self.group = group or f"ocam_edt_check_{os.getpid()}_{uuid.uuid4().hex}"
+        self.event_prefix = event_prefix
         self.attempted = []
         self.stopped = 0
         self.errors = []
@@ -96,7 +99,7 @@ class ProbeCheck:
             if fields and ":" in fields[0]:
                 name = fields[0].split(":", 1)[1]
                 # The kernel may render an entry's implicit zero offset explicitly.
-                if len(fields) == 2:
+                if len(fields) >= 2:
                     fields[1] = re.sub(r"\+(?:0|0x0)$", "", fields[1])
                 result.setdefault(name, []).append(" ".join(fields))
         return result
@@ -121,12 +124,24 @@ class ProbeCheck:
         """Request shutdown between operations without interrupting ownership bookkeeping."""
         self.stopped = signum
 
-    def register(self, function, kind):
-        """Attempt one disabled entry or return probe and verify its exact definition."""
-        name = f"{self.group}/{kind}_{function}"
-        # Pin the unused return-instance reservation for deterministic readback.
-        probe = "p" if kind == "p" else "r1"
+    def register(self, function, kind, fetchargs="", maxactive=1):
+        """Register function for p/r kind with literal entry fetchargs or return maxactive.
+
+        Fetch expressions are internal caller constants, not user-supplied commands.
+        Return the full group/event name after disabled registration is verified.
+        """
+        if kind not in ("p", "r"):
+            raise ValueError("Probe kind must be p or r")
+        if type(maxactive) is not int or not 1 <= maxactive <= 4096:
+            raise ValueError("Return maxactive must be an integer in 1..4096")
+        if kind == "r" and fetchargs:
+            raise ValueError("Return probes do not accept entry fetch arguments")
+        name = f"{self.group}/{self.event_prefix}{kind}_{function}"
+        # Pin return-instance reservations for deterministic readback.
+        probe = "p" if kind == "p" else f"r{maxactive}"
         definition = f"{probe}:{name} edt:{function}"
+        if fetchargs:
+            definition += " " + fetchargs
         if name in self.definitions():
             raise RuntimeError(f"Refusing existing event: {name}")
         # Record before writing so a failed/short write is reconciled during cleanup.
@@ -139,6 +154,7 @@ class ProbeCheck:
             if (root / "events" / name / "enable").read_text().strip() != "0":
                 raise RuntimeError(f"Event is enabled in {root}: {name}; no enable state was changed")
         self.report(f"Registered disabled: {name} -> edt:{function}")
+        return name
 
     def cleanup(self):
         """Remove only exact attempted definitions, continuing after cleanup failures."""

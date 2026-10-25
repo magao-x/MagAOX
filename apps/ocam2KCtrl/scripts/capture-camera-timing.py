@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 ## \file capture-camera-timing.py
-# \brief Operator-run private scheduler/IRQ capture for camera excursion correlation.
+# \brief Operator-run private scheduler/IRQ and EDT-wrapper capture for camera correlation.
 
 """Capture a bounded camera-CPU scheduler/IRQ trace in a private tracefs instance.
 
 Run manually by the instrument operator. This script never changes scheduling,
 CPU affinity, IRQ affinity, camera settings, or any pre-existing trace buffer.
+Optional EDT probes use invocation-specific global definitions, enabled only
+in the private instance; their activation includes setup and settling.
 """
 
 import argparse
+import importlib.util
 import json
 import math
 import os
@@ -71,11 +74,20 @@ def command_output(arguments):
         return f"Unavailable: {error}\n"
 
 
+def edt_probe_helper():
+    """Load the shared ownership and exact-build checks only for requested EDT probes."""
+    path = Path(__file__).resolve().with_name("check-edt-probes.py")
+    spec = importlib.util.spec_from_file_location("ocam_edt_probes", path)
+    helper = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(helper)
+    return helper
+
+
 class TraceCapture:
     """Own exactly one new tracefs instance and its output directory."""
 
-    def __init__(self, tracefs, output, cpus, extra_events=False):
-        """Own the new instance below tracefs, its output path, CPU set and optional event groups."""
+    def __init__(self, tracefs, output, cpus, extra_events=False, edt_helper=None):
+        """Own one private instance, its native events, and any requested EDT definitions."""
         self.tracefs = tracefs
         self.output = output
         self.cpus = cpus
@@ -86,11 +98,32 @@ class TraceCapture:
         self.event_groups = {}
         # Clock anchors bracket the stop write, including interrupt/error cleanup.
         self.stop_anchors = {}
+        self.edt_helper = edt_helper
+        self.probes = None
+        self.edt = {"requested": edt_helper is not None}
+        if edt_helper is not None:
+            nonce = uuid.uuid4().hex
+            self.probes = edt_helper.ProbeCheck(
+                tracefs, group=f"ocam_edt_capture_{os.getpid()}_{nonce}",
+                event_prefix=f"capture_{nonce[:16]}_")
+            self.edt.update({"group": self.probes.group, "definitions": {}, "formats": {},
+                             "activation": {}, "deactivation": {}, "safety_errors": [],
+                             "remaining_definitions": [], "window_includes_settle": True,
+                             "return_maxactive": 64, "return_pool_misses_verified": False,
+                             "verified_identity": {"kernel": edt_helper.KERNEL,
+                                                   "version": edt_helper.VERSION,
+                                                   "srcversion": edt_helper.SRCVERSION,
+                                                   "build_id": edt_helper.BUILD_ID}})
 
     def create_instance(self):
         """Create a unique kernel-owned instance; an existing name is an error."""
-        self.instance.mkdir()
-        self.created = True
+        # Defer ordinary termination until the successful mkdir is owned.
+        previous = signal.pthread_sigmask(signal.SIG_BLOCK, (signal.SIGINT, signal.SIGTERM))
+        try:
+            self.instance.mkdir()
+            self.created = True
+        finally:
+            signal.pthread_sigmask(signal.SIG_SETMASK, previous)
 
     def remove_instance(self):
         """Remove only this instance, without recursively deleting any files."""
@@ -118,7 +151,7 @@ class TraceCapture:
         self.write("tracing_cpumask", cpu_mask(self.cpus))
         self.write("buffer_size_kb", 64)
         for cpu in self.cpus:
-            self.write(f"per_cpu/cpu{cpu}/buffer_size_kb", 8192)
+            self.write(f"per_cpu/cpu{cpu}/buffer_size_kb", 32768 if self.probes else 8192)
 
         # Enable all scheduler events on the selected CPUs, including competitors.
         # IRQ events must not be filtered by the camera PID: they may interrupt idle
@@ -139,7 +172,102 @@ class TraceCapture:
                 for event in available:
                     self.write(str(event.relative_to(self.instance)), 1)
                     self.events.append(str(event.parent.relative_to(self.instance / "events")))
+        if self.probes is not None:
+            self.setup_edt()
         self.write("trace", "")
+
+    def profile(self):
+        """Retain the global profile and only this invocation's uniquely named rows."""
+        raw = (self.tracefs / "kprobe_profile").read_text()
+        events = {name.split("/", 1)[1] for name, _ in self.probes.attempted}
+        rows = [line for line in raw.splitlines()
+                if line.split() and line.split()[0].split("/")[-1] in events]
+        return {"raw": raw, "owned_rows": rows, "anchor": anchor()}
+
+    def setup_edt(self):
+        """Register eight disabled wrapper probes, then enable only their private-instance controls."""
+        options = (self.instance / "trace_options").read_text().split()
+        if not {"context-info", "irq-info"}.issubset(options):
+            raise RuntimeError("EDT pairing requires existing context-info and irq-info trace options")
+        self.probes.guard_group()
+        for function, argument in (("edt_start_intr_critical", "lock"),
+                                   ("edt_end_intr_critical", "lock"),
+                                   ("edt_wake_up", "queue"),
+                                   ("edt_wake_up_interruptible", "queue")):
+            self.probes.register(function, "p", fetchargs=f"{argument}=%di:x64")
+            self.probes.register(function, "r", maxactive=64)
+        self.edt["definitions"] = dict(self.probes.attempted)
+        for name, _ in self.probes.attempted:
+            self.edt["formats"][name] = (self.instance / "events" / name / "format").read_text()
+        self.edt["profile_before"] = self.profile()
+        self.edt["activation"]["begin"] = anchor()
+        for name, _ in self.probes.attempted:
+            self.write(f"events/{name}/enable", 1)
+            if (self.instance / "events" / name / "enable").read_text().strip() != "1":
+                raise RuntimeError(f"Could not confirm private EDT event enable: {name}")
+            self.events.append(name)
+        self.edt["activation"]["end"] = anchor()
+
+    def close_edt(self):
+        """Disable and verify every owned event before removing any global definition."""
+        errors = []
+        self.edt["definitions"] = dict(self.probes.attempted)
+        self.edt["deactivation"]["begin"] = anchor()
+        try:
+            definitions = self.probes.definitions()
+        except (OSError, RuntimeError) as error:
+            errors.append(f"Could not reconcile EDT definitions: {error}")
+            definitions = None
+        for name, definition in self.probes.attempted:
+            if definitions is None:
+                continue
+            if name not in definitions:
+                continue
+            try:
+                if definitions[name] != [definition]:
+                    raise RuntimeError("Definition changed; refusing to change its enable state")
+                self.write(f"events/{name}/enable", 0)
+                if (self.instance / "events" / name / "enable").read_text().strip() != "0":
+                    raise RuntimeError("Private disable readback is not zero")
+            except (OSError, RuntimeError) as error:
+                errors.append(f"Could not confirm EDT event disabled {name}: {error}")
+            if name not in self.edt["formats"]:
+                try:
+                    self.edt["formats"][name] = (self.instance / "events" / name / "format").read_text()
+                except OSError as error:
+                    errors.append(f"Could not retain EDT event format {name}: {error}")
+        if not errors:
+            self.edt["deactivation"]["end"] = anchor()
+            try:
+                self.edt["profile_after"] = self.profile()
+            except OSError as error:
+                errors.append(f"Could not read final EDT profile: {error}")
+        try:
+            self.edt_helper.check_identity()
+            self.edt["identity_after_stop_verified"] = True
+        except (OSError, RuntimeError, ValueError) as error:
+            self.edt["identity_after_stop_verified"] = False
+            errors.append(f"EDT identity after stop failed: {error}")
+        self.edt["safety_errors"].extend(errors)
+        return errors
+
+    def remove_edt(self, disabled):
+        """Remove reconciled definitions only after their private disable has been confirmed."""
+        errors = []
+        if disabled:
+            self.probes.cleanup()
+            errors.extend(self.probes.errors)
+        try:
+            definitions = self.probes.definitions()
+            self.edt["remaining_definitions"] = [name for name, _ in self.probes.attempted
+                                                 if name in definitions]
+        except (OSError, RuntimeError) as error:
+            errors.append(f"Could not list remaining EDT definitions: {error}")
+            self.edt["remaining_definitions"] = [name for name, _ in self.probes.attempted]
+        if self.edt["remaining_definitions"]:
+            errors.append("Retained EDT definitions: " + ", ".join(self.edt["remaining_definitions"]))
+        self.edt["safety_errors"].extend(errors)
+        return errors
 
     def save(self):
         """Save stopped buffers, loss counters, and exact event/control definitions."""
@@ -160,33 +288,53 @@ class TraceCapture:
         (self.output / "trace.txt").write_text((self.instance / "trace").read_text())
 
     def close(self):
-        """Stop and disable this instance, preserving its buffer if saving fails."""
+        """Stop private tracing and always reconcile probes, even when saving fails."""
         errors = []
-        if not self.created:
+        if not self.created and self.probes is None:
             return errors
-        try:
-            self.stop_anchors = {"begin": anchor()}
-            self.write("tracing_on", 0)
-            self.stop_anchors["end"] = anchor()
-        except OSError as error:
-            errors.append(f"Could not stop {self.instance}: {error}")
-        try:
-            self.write("events/enable", 0)
-        except OSError as error:
-            errors.append(f"Could not disable events in {self.instance}: {error}")
+        disabled = False
+        saved = False
+        if self.created:
+            try:
+                self.stop_anchors = {"begin": anchor()}
+                self.write("tracing_on", 0)
+                self.stop_anchors["end"] = anchor()
+            except OSError as error:
+                errors.append(f"Could not stop {self.instance}: {error}")
+        if self.probes is not None:
+            probe_errors = self.close_edt()
+            errors.extend(probe_errors)
+            disabled = "end" in self.edt["deactivation"]
+        if self.created:
+            if self.probes is None:
+                native_controls = ["events/enable"]
+            else:
+                native_controls = [f"events/{event}/enable" for event in self.events
+                                   if not event.startswith(self.probes.group + "/")]
+            for control in native_controls:
+                try:
+                    self.write(control, 0)
+                except OSError as error:
+                    errors.append(f"Could not disable {control} in {self.instance}: {error}")
+            try:
+                self.save()
+                saved = True
+            except OSError as error:
+                errors.append(f"Could not save trace; preserving {self.instance}: {error}")
+        if self.probes is not None:
+            # Definitions provide the decoder for retained dynamic-event records.
+            # Keep them with any buffer whose stopped contents were not saved.
+            removable = disabled and (not self.created or (saved and "end" in self.stop_anchors))
+            errors.extend(self.remove_edt(removable))
         if errors:
-            errors.append(f"Preserving {self.instance}: stop/event disable was not confirmed")
-        try:
-            self.save()
-        except OSError as error:
-            errors.append(f"Could not save trace; preserving {self.instance}: {error}")
+            if self.created:
+                errors.append(f"Preserving {self.instance}: cleanup/save was not confirmed")
             return errors
-        if errors:
-            return errors
-        try:
-            self.remove_instance()
-        except OSError as error:
-            errors.append(f"Could not remove stopped instance {self.instance}: {error}")
+        if self.created:
+            try:
+                self.remove_instance()
+            except OSError as error:
+                errors.append(f"Could not remove stopped instance {self.instance}: {error}")
         return errors
 
 
@@ -233,11 +381,15 @@ def main():
                         help="Wait after metadata/setup with tracing off, 0–60 seconds (default 5)")
     parser.add_argument("--output", type=Path, required=True, help="New output directory; must not exist")
     parser.add_argument("--extra-events", action="store_true", help="Also enable available timer/workqueue events")
+    parser.add_argument("--edt-wrappers", action="store_true",
+                        help="Capture the verified EDT wrapper probes (maximum 5 seconds)")
     args = parser.parse_args()
     if os.geteuid() != 0:
         parser.error("Run manually with sudo; tracefs instance creation requires root")
     if not math.isfinite(args.seconds) or not 1 <= args.seconds <= 30:
         parser.error("--seconds must be finite and between 1 and 30")
+    if args.edt_wrappers and args.seconds > 5:
+        parser.error("--edt-wrappers limits --seconds to 1 through 5")
     if not math.isfinite(args.settle_seconds) or not 0 <= args.settle_seconds <= 60:
         parser.error("--settle-seconds must be finite and between 0 and 60")
     status = read_if_present(Path(f"/proc/{args.tid}/status"))
@@ -260,11 +412,19 @@ def main():
     if any(not Path(f"/sys/devices/system/cpu/cpu{cpu}").is_dir() for cpu in cpus):
         parser.error("One or more selected CPUs do not exist")
 
+    helper = None
+    if args.edt_wrappers:
+        helper = edt_probe_helper()
+        try:
+            helper.preflight(tracefs)
+        except (OSError, RuntimeError, ValueError) as error:
+            parser.error(str(error))
     args.output.mkdir(mode=0o755)
-    capture = TraceCapture(tracefs, args.output, cpus, args.extra_events)
+    capture = TraceCapture(tracefs, args.output, cpus, args.extra_events, helper)
     details = {"duration_requested_s": args.seconds, "settle_requested_s": args.settle_seconds,
                "tracefs": str(tracefs), "instance": str(capture.instance),
-               "capture_started": False, "capture_completed": False, "phase_anchors": {}}
+               "edt_wrappers": capture.edt, "capture_started": False,
+               "capture_completed": False, "phase_anchors": {}}
     phases = details["phase_anchors"]
     exit_status = 0
     measurement_complete = False

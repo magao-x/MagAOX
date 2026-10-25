@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 import shutil
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 
@@ -18,6 +19,7 @@ script = Path(__file__).resolve().parents[1] / "capture-camera-timing.py"
 spec = importlib.util.spec_from_file_location("camera_trace", script)
 camera_trace = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(camera_trace)
+edt_probes = camera_trace.edt_probe_helper()
 
 
 class FakeCapture(camera_trace.TraceCapture):
@@ -179,7 +181,91 @@ class TraceCaptureTest(unittest.TestCase):
         stamps = camera_trace.anchor()
         self.assertLessEqual(stamps["monotonic_before_ns"], stamps["monotonic_after_ns"])
 
-    def run_main(self, options=(), sleep=None, metadata=None, fail_stop=False, fail_enable=False):
+    def probe_fixture(self):
+        """Add unrelated global probe state and active-profile-required private options."""
+        (self.tracefs / "kprobe_events").write_text("p:unrelated/other edt:other\n")
+        (self.tracefs / "kprobe_profile").write_text("other 9 0\n")
+        for root in (self.tracefs, self.tracefs / "instances" / "existing"):
+            event = root / "events" / "unrelated" / "other"
+            event.mkdir(parents=True)
+            (event / "enable").write_text("1\n")
+            (event / "format").write_text("unrelated format\n")
+        (self.tracefs / "template" / "trace_options").write_text("context-info\nirq-info\n")
+
+    def probe_helper(self, faults, owners, activity):
+        """Exercise the real probe owner against a fake dynamic-event kernel interface."""
+        tracefs = self.tracefs
+
+        class FakeProbeCheck(edt_probes.ProbeCheck):
+            """Model dynamic event registration without opening tracefs."""
+
+            def __init__(owner, *arguments, **keywords):
+                """Keep the exact production owner state and record its test instance."""
+                super().__init__(*arguments, **keywords)
+                owner.registrations = 0
+                owner.removals = 0
+                owners.append(owner)
+
+            def report(owner, message):
+                """Retain reporting order without writing the terminal."""
+                activity.append(("probe_report", message))
+
+            def write_command(owner, command):
+                """Materialize per-instance controls and reconcile exact definition removals."""
+                activity.append(("probe_command", command))
+                fields = command.split()
+                name = fields[0].split(":", 1)[1]
+                if any(len(part) >= 64 for part in name.split("/")):
+                    raise OSError("Event/group name exceeds Linux trace probe limit")
+                lines = (tracefs / "kprobe_events").read_text().splitlines()
+                roots = [tracefs] + list((tracefs / "instances").glob("*"))
+                if fields[0].startswith("-:"):
+                    owner.removals += 1
+                    if owner.removals == faults.get("remove"):
+                        raise PermissionError("Injected probe removal failure")
+                    lines = [line for line in lines if line.split()[0].split(":", 1)[1] != name]
+                    for root in roots:
+                        directory = root / "events" / name
+                        if directory.exists():
+                            shutil.rmtree(directory)
+                            if not any(directory.parent.iterdir()):
+                                directory.parent.rmdir()
+                else:
+                    owner.registrations += 1
+                    lines.append(command)
+                    for root in roots:
+                        directory = root / "events" / name
+                        directory.mkdir(parents=True)
+                        (directory / "enable").write_text("0\n")
+                        (directory / "format").write_text(f"format for {name}\n")
+                (tracefs / "kprobe_events").write_text("\n".join(lines) + "\n")
+                own_events = [line.split()[0].split(":", 1)[1].split("/", 1)[1]
+                              for line in lines if owner.group + "/" in line]
+                (tracefs / "kprobe_profile").write_text("other 9 0\n" +
+                    "".join(f"{event} 0 0\n" for event in own_events))
+                if owner.registrations == faults.get("register") and not fields[0].startswith("-:"):
+                    raise OSError("Injected registration failure after kernel accepted definition")
+
+        def preflight(root):
+            """Require preflight before any output or private-instance mutation."""
+            activity.append(("preflight",))
+            self.assertFalse((self.root / "main-output").exists())
+            self.assertEqual(list((root / "instances").iterdir()), [root / "instances" / "existing"])
+            if faults.get("preflight"):
+                raise RuntimeError("Injected EDT identity mismatch")
+
+        def identity():
+            """Record the loaded identity recheck after tracing has stopped."""
+            activity.append(("identity_after",))
+            if faults.get("identity_after"):
+                raise RuntimeError("Injected final EDT identity mismatch")
+
+        return SimpleNamespace(ProbeCheck=FakeProbeCheck, preflight=preflight, check_identity=identity,
+                               KERNEL=edt_probes.KERNEL, VERSION=edt_probes.VERSION,
+                               SRCVERSION=edt_probes.SRCVERSION, BUILD_ID=edt_probes.BUILD_ID)
+
+    def run_main(self, options=(), sleep=None, metadata=None, fail_stop=False, fail_enable=False,
+                 edt_faults=None):
         """Run the CLI with fake proc/sys paths, tracefs controls and bounded mocked waits."""
         output = self.root / "main-output"
         status = "Tgid:\t123\nCpus_allowed_list:\t45\n"
@@ -190,6 +276,12 @@ class TraceCaptureTest(unittest.TestCase):
         captured = []
         activity = []
         original_path = Path
+        edt_faults = edt_faults or {}
+        owners = []
+        probe_controls = {"enable": 0, "disable": 0}
+        if "--edt-wrappers" in options:
+            self.probe_fixture()
+        helper = self.probe_helper(edt_faults, owners, activity)
 
         def fake_path(value):
             """Redirect every absolute proc/sys path used by main to its fixture counterpart."""
@@ -218,8 +310,21 @@ class TraceCaptureTest(unittest.TestCase):
                 if relative == "tracing_on" and ((value == 1 and fail_enable) or
                                                  (value == 0 and started and fail_stop)):
                     raise PermissionError("Injected capture control failure")
+                if relative.startswith("events/ocam_edt_capture_") and relative.endswith("/enable"):
+                    action = "enable" if value == 1 else "disable"
+                    probe_controls[action] += 1
+                    if edt_faults.get(action) == probe_controls[action]:
+                        # Apply first to test cleanup after an uncertain control write.
+                        original_write(relative, value)
+                        raise PermissionError(f"Injected EDT {action} failure")
                 original_write(relative, value)
 
+            if edt_faults.get("save"):
+                def fail_save():
+                    """Fail output extraction without bypassing probe cleanup."""
+                    raise OSError("Injected trace save failure")
+                capture.save = fail_save
+            capture.probe_owners = owners
             capture.control_calls = []
             capture.write = write
             captured.append(capture)
@@ -246,6 +351,7 @@ class TraceCaptureTest(unittest.TestCase):
         with mock.patch("sys.argv", arguments), mock.patch.object(camera_trace, "Path", fake_path), \
                 mock.patch.object(camera_trace.os, "geteuid", return_value=0), \
                 mock.patch.object(camera_trace, "TraceCapture", side_effect=fake_capture), \
+                mock.patch.object(camera_trace, "edt_probe_helper", return_value=helper), \
                 mock.patch.object(camera_trace, "metadata", side_effect=fake_metadata), \
                 mock.patch.object(camera_trace.time, "sleep", side_effect=fake_sleep), \
                 mock.patch.object(camera_trace.signal, "signal"), \
@@ -431,6 +537,229 @@ class TraceCaptureTest(unittest.TestCase):
         self.assertGreater(error_print, start + 2)
         self.assertFalse(captures[0].instance.exists())
         self.assert_other_traces_unchanged()
+
+    def assert_unrelated_probes_unchanged(self):
+        """Retain another user's global definitions and enable state in every instance."""
+        self.assertIn("p:unrelated/other edt:other\n", (self.tracefs / "kprobe_events").read_text())
+        for root in (self.tracefs, self.tracefs / "instances" / "existing"):
+            self.assertEqual((root / "events/unrelated/other/enable").read_text(), "1\n")
+        self.assert_other_traces_unchanged()
+
+    def test_active_edt_capture_saves_typed_definitions_and_cleans_only_owners(self):
+        """Use eight accepted wrapper probes with larger buffers and exact saved metadata."""
+        result, captures, details = self.run_main(("--edt-wrappers", "--seconds", "1"))
+        self.assertEqual(result, 0)
+        capture = captures[0]
+        probe = details["edt_wrappers"]
+        self.assertEqual(len(probe["definitions"]), 8)
+        self.assertEqual(len(probe["formats"]), 8)
+        self.assertTrue(probe["identity_after_stop_verified"])
+        self.assertFalse(probe["return_pool_misses_verified"])
+        self.assertTrue(probe["window_includes_settle"])
+        self.assertEqual(probe["remaining_definitions"], [])
+        self.assertTrue(all("r64:" in definition or "=%di:x64" in definition
+                            for definition in probe["definitions"].values()))
+        self.assertTrue(probe["profile_before"]["raw"].startswith("other 9 0\n"))
+        self.assertEqual(len(probe["profile_before"]["owned_rows"]), 8)
+        self.assertEqual(len(probe["profile_after"]["owned_rows"]), 8)
+        self.assertEqual(probe["verified_identity"]["build_id"], edt_probes.BUILD_ID)
+        for phase in ("activation", "deactivation"):
+            self.assertLessEqual(probe[phase]["begin"]["monotonic_after_ns"],
+                                 probe[phase]["end"]["monotonic_before_ns"])
+        self.assertIn(("per_cpu/cpu45/buffer_size_kb", 32768), capture.control_calls)
+        for name in probe["definitions"]:
+            self.assertIn((f"events/{name}/enable", 1), capture.control_calls)
+            self.assertIn((f"events/{name}/enable", 0), capture.control_calls)
+            self.assertTrue((self.root / "main-output/event-formats" /
+                             f"{name.replace('/', '-')}.txt").exists())
+        self.assertEqual(capture.probe_owners[0].removals, 8)
+        self.assertFalse(capture.instance.exists())
+        self.assertEqual((self.tracefs / "kprobe_events").read_text(), "p:unrelated/other edt:other\n")
+        self.assert_unrelated_probes_unchanged()
+
+    def test_active_partial_registration_is_reconciled_after_write_failure(self):
+        """Remove even the failed registration whose definition was accepted before an error."""
+        result, captures, details = self.run_main(("--edt-wrappers",), edt_faults={"register": 3})
+        self.assertEqual(result, 1)
+        self.assertIn("registration failure", details["error"])
+        self.assertEqual(len(details["edt_wrappers"]["definitions"]), 3)
+        self.assertEqual(len(details["edt_wrappers"]["formats"]), 3)
+        self.assertEqual(details["edt_wrappers"]["remaining_definitions"], [])
+        self.assertFalse(captures[0].instance.exists())
+        self.assertFalse(details["capture_started"])
+        self.assert_unrelated_probes_unchanged()
+
+    def test_active_partial_enable_is_disabled_and_reconciled(self):
+        """Disable all definitions when a private enable write succeeds but reports failure."""
+        result, captures, details = self.run_main(("--edt-wrappers",), edt_faults={"enable": 3})
+        self.assertEqual(result, 1)
+        self.assertNotIn("end", details["edt_wrappers"]["activation"])
+        self.assertIn("end", details["edt_wrappers"]["deactivation"])
+        self.assertEqual(details["edt_wrappers"]["remaining_definitions"], [])
+        self.assertEqual(captures[0].probe_owners[0].removals, 8)
+        self.assertFalse(captures[0].instance.exists())
+        self.assert_unrelated_probes_unchanged()
+
+    def test_active_failed_save_preserves_buffer_and_disabled_definitions(self):
+        """Keep the stopped trace and its dynamic-event decoders after output failure."""
+        result, captures, details = self.run_main(("--edt-wrappers",), edt_faults={"save": True})
+        self.assertEqual(result, 1)
+        self.assertTrue(captures[0].instance.exists())
+        self.assertEqual((captures[0].instance / "tracing_on").read_text(), "0\n")
+        self.assertEqual(len(details["edt_wrappers"]["remaining_definitions"]), 8)
+        self.assertEqual(len(details["edt_wrappers"]["formats"]), 8)
+        self.assertEqual(captures[0].probe_owners[0].removals, 0)
+        for name in details["edt_wrappers"]["remaining_definitions"]:
+            self.assertEqual((captures[0].instance / "events" / name / "enable").read_text(), "0\n")
+        self.assert_unrelated_probes_unchanged()
+
+    def test_active_unconfirmed_disable_retains_definitions_and_instance(self):
+        """Never remove global probes after one private disable cannot be confirmed."""
+        result, captures, details = self.run_main(("--edt-wrappers",), edt_faults={"disable": 2})
+        self.assertEqual(result, 1)
+        self.assertTrue(captures[0].instance.exists())
+        self.assertEqual(len(details["edt_wrappers"]["remaining_definitions"]), 8)
+        self.assertNotIn("end", details["edt_wrappers"]["deactivation"])
+        self.assertEqual(captures[0].probe_owners[0].removals, 0)
+        self.assertTrue(any("Retained EDT definitions" in error for error in details["cleanup_errors"]))
+        self.assert_unrelated_probes_unchanged()
+
+    def test_active_removal_failure_retains_exact_remaining_name(self):
+        """Continue independent cleanup and expose the one unresolved definition."""
+        result, captures, details = self.run_main(("--edt-wrappers",), edt_faults={"remove": 2})
+        self.assertEqual(result, 1)
+        self.assertTrue(captures[0].instance.exists())
+        self.assertEqual(len(details["edt_wrappers"]["remaining_definitions"]), 1)
+        self.assertEqual(captures[0].probe_owners[0].removals, 8)
+        self.assert_unrelated_probes_unchanged()
+
+    def test_active_final_identity_failure_is_reported_after_safe_cleanup(self):
+        """Report module changes after stopping and still reconcile disabled definitions."""
+        result, captures, details = self.run_main(("--edt-wrappers",),
+                                                 edt_faults={"identity_after": True})
+        self.assertEqual(result, 1)
+        self.assertFalse(details["edt_wrappers"]["identity_after_stop_verified"])
+        self.assertEqual(details["edt_wrappers"]["remaining_definitions"], [])
+        self.assertTrue(captures[0].instance.exists())
+        self.assert_unrelated_probes_unchanged()
+
+    def test_active_preflight_failure_precedes_all_output_and_trace_mutations(self):
+        """Refuse an unmatched module without creating output or a private instance."""
+        with mock.patch("sys.stderr"), self.assertRaises(SystemExit) as raised:
+            self.run_main(("--edt-wrappers",), edt_faults={"preflight": True})
+        self.assertEqual(raised.exception.code, 2)
+        self.assertFalse((self.root / "main-output").exists())
+        self.assertEqual(list((self.tracefs / "instances").iterdir()),
+                         [self.tracefs / "instances/existing"])
+        self.assert_unrelated_probes_unchanged()
+
+    def test_active_capture_interval_has_no_diagnostic_or_output_io(self):
+        """Keep EDT profiles, formats, identity checks and cleanup outside active recording."""
+        running = False
+        read_text = Path.read_text
+        write_text = Path.write_text
+
+        def checked_read(path, *arguments, **keywords):
+            """Reject all helper metadata reads while the private buffer records."""
+            self.assertFalse(running, f"Read during active capture: {path}")
+            return read_text(path, *arguments, **keywords)
+
+        def checked_write(path, data, *arguments, **keywords):
+            """Allow only the private trace stop after recording starts."""
+            nonlocal running
+            if running:
+                self.assertEqual(path.name, "tracing_on")
+                self.assertEqual(data, "0\n")
+            result = write_text(path, data, *arguments, **keywords)
+            if path.name == "tracing_on" and path.parent.name.startswith("ocam-timing-"):
+                running = data == "1\n"
+            return result
+
+        with mock.patch.object(Path, "read_text", checked_read), \
+                mock.patch.object(Path, "write_text", checked_write):
+            result, captures, details = self.run_main(("--edt-wrappers", "--seconds", "1"))
+        self.assertEqual(result, 0)
+        self.assertTrue(details["capture_completed"])
+        activity = captures[0].activity
+        start = activity.index(("control", "tracing_on", 1))
+        self.assertEqual(activity[start + 1:start + 3], [("sleep", 1), ("control", "tracing_on", 0)])
+        self.assert_unrelated_probes_unchanged()
+
+    def test_active_unconfirmed_stop_keeps_decoder_definitions(self):
+        """Preserve dynamic types and the private instance when stopping cannot be confirmed."""
+        result, captures, details = self.run_main(("--edt-wrappers",), fail_stop=True)
+        self.assertEqual(result, 1)
+        self.assertTrue(captures[0].instance.exists())
+        self.assertEqual(len(details["edt_wrappers"]["remaining_definitions"]), 8)
+        self.assertEqual(captures[0].probe_owners[0].removals, 0)
+        self.assertFalse(details["capture_completed"])
+        self.assert_unrelated_probes_unchanged()
+
+    def test_active_interruption_cleans_partial_probe_registration(self):
+        """Reconcile an interrupted entry registration even before activation begins."""
+        helper = self.probe_helper({}, [], [])
+        capture = FakeCapture(self.tracefs, self.output, [45], edt_helper=helper)
+        self.probe_fixture()
+        original_register = capture.probes.register
+
+        def interrupt_registration(*arguments, **keywords):
+            """Deliver the signal after the kernel has accepted an owned definition."""
+            original_register(*arguments, **keywords)
+            raise KeyboardInterrupt
+
+        with mock.patch.object(capture.probes, "register", side_effect=interrupt_registration):
+            with self.assertRaises(KeyboardInterrupt):
+                capture.setup()
+        self.assertEqual(capture.close(), [])
+        self.assertEqual(len(capture.edt["formats"]), 1)
+        self.assertFalse(capture.instance.exists())
+        self.assertEqual(capture.edt["remaining_definitions"], [])
+        self.assert_unrelated_probes_unchanged()
+
+    def test_active_missing_context_flags_refuses_registration(self):
+        """Require existing context/IRQ flags without changing any trace options."""
+        self.probe_fixture()
+        (self.tracefs / "template/trace_options").write_text("context-info\nnoirq-info\n")
+        helper = self.probe_helper({}, [], [])
+        capture = FakeCapture(self.tracefs, self.output, [45], edt_helper=helper)
+        with self.assertRaisesRegex(RuntimeError, "requires existing"):
+            capture.setup()
+        self.assertEqual(capture.probes.attempted, [])
+        self.assertEqual((capture.instance / "trace_options").read_text(), "context-info\nnoirq-info\n")
+        self.assertEqual(capture.close(), [])
+        self.assert_unrelated_probes_unchanged()
+
+    def test_active_changed_definition_is_preserved_without_enable_write(self):
+        """Refuse controls and removal when another actor changes an attempted definition."""
+        self.probe_fixture()
+        helper = self.probe_helper({}, [], [])
+        capture = FakeCapture(self.tracefs, self.output, [45], edt_helper=helper)
+        capture.setup()
+        name, definition = capture.probes.attempted[0]
+        control = capture.instance / "events" / name / "enable"
+        contents = (self.tracefs / "kprobe_events").read_text().replace(definition, definition + " other=%si:x64")
+        (self.tracefs / "kprobe_events").write_text(contents)
+        errors = capture.close()
+        self.assertTrue(any("Definition changed" in error for error in errors))
+        self.assertEqual(control.read_text(), "1\n")
+        self.assertEqual(len(capture.edt["remaining_definitions"]), 8)
+        self.assertEqual(capture.probes.removals, 0)
+        self.assertTrue(capture.instance.exists())
+        self.assert_unrelated_probes_unchanged()
+
+    def test_active_duration_is_rejected_before_diagnostics(self):
+        """Reject EDT traces longer than five seconds before loading helpers or reading proc."""
+        arguments = [str(script), "--tid", "123", "--output", str(self.output),
+                     "--edt-wrappers", "--seconds", "5.001"]
+        with mock.patch("sys.argv", arguments), \
+                mock.patch.object(camera_trace.os, "geteuid", return_value=0), \
+                mock.patch.object(camera_trace, "read_if_present") as read, \
+                mock.patch.object(camera_trace, "edt_probe_helper") as helper, \
+                mock.patch("sys.stderr"), self.assertRaises(SystemExit) as raised:
+            camera_trace.main()
+        self.assertEqual(raised.exception.code, 2)
+        read.assert_not_called()
+        helper.assert_not_called()
 
     def test_nonfinite_or_out_of_range_waits_are_rejected_before_io(self):
         """Reject unbounded waits before diagnostics, output creation or tracefs access."""

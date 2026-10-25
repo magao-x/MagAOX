@@ -14,8 +14,12 @@ The complete copied EDT driver now identifies the ordinary completion-stamp
 placement, shared lock path and candidate probe functions. Its `atime` is a
 host clock sample during completion processing with 1 us quantization. Operator
 readback now matches the copied module's version, source version and build ID.
-Kernel probe support and all ten target symbols are exposed; actual entry/return
-registration remains to be checked with disabled events.
+Disabled registration accepts entry/return probes for four Linux wrappers and
+rejects the six proprietary-core targets. Operator configuration and kernel
+warnings confirm the tracefs restriction on functions without ftrace sites.
+The operator helper now offers `--edt-wrappers` for the accepted lock/wakeup
+boundaries. Offline checks pass; active hardware capture, live pairing and
+overhead qualification remain pending.
 
 The first two paired chronological and kernel captures identify EDT interrupts
 as the source of recurring stage extensions. The operator moved IRQ 405 from
@@ -2661,6 +2665,170 @@ post-registration module changes. CLI help, `git diff --check` and all **54**
 local Markdown links across the two records and operator guide also pass.
 Independent review found no remaining blockers for the registration-only
 operator check. No instrument registration result is claimed yet.
+
+## 2026-10-24 disabled registration isolates the kernel notrace restriction
+
+The operator ran `check-edt-probes.py` on exao2. Loaded EDT identity matched
+before and after registration. The invocation used group
+`ocam_edt_check_3111568_ad0e407e18cb4dc581e933a4be53ec21` and finished with
+**20 attempted, 12 errors**:
+
+| Entry and return result | Functions | Definitions |
+| --- | --- | --- |
+| Registered disabled, then removed | `edt_wake_up`, `edt_wake_up_interruptible`, `edt_start_intr_critical`, `edt_end_intr_critical` | 8 |
+| Rejected with `EINVAL` | `edt_DpcForIsr`, `edt_increment_done`, `edt_test_intr`, `EdtTraceTimeStamp`, `pdv_DeviceIntPdv`, `edt_start_buffers` | 12 |
+
+All eight reported registrations have corresponding successful removal lines;
+there are no reported cleanup errors. The twelve errors are registration
+rejections. No event was enabled and no timing capture was performed.
+
+Local inspection finds the same split in the copied module. Accepted functions
+are Linux wrappers with `__fentry__` sites. Rejected functions come from
+`edtdrvx86_64_11.o` without those sites. All ten are global `STT_FUNC` symbols
+in ordinary `.text`; the rejected functions begin with ordinary x86 function
+prologues, and the module has no `__kprobe_blacklist` section. These facts alone
+do not make generic kprobes unavailable, but they explain the following
+confirmed tracefs policy.
+
+The operator's follow-up configuration reads:
+
+```text
+CONFIG_KPROBES_ON_FTRACE=y
+CONFIG_DYNAMIC_FTRACE=y
+# CONFIG_KPROBE_EVENTS_ON_NOTRACE is not set
+```
+
+Kernel messages at monotonic **1774038.748405–1774039.304395 s** explicitly
+report `Could not probe notrace function edt:...` for each rejected function,
+twice each for entry and return attempts. This confirms the cause. Linux 5.14's
+[`within_notrace_func` check](https://github.com/torvalds/linux/blob/v5.14/kernel/trace/trace_kprobe.c#L410-L484)
+rejects functions without an ftrace site when dynamic ftrace is enabled and
+`CONFIG_KPROBE_EVENTS_ON_NOTRACE` is unset. It returns `EINVAL` before either
+kind of probe is registered. The restriction tests the whole function range;
+instruction offsets or numeric address spelling do not resolve it.
+
+### Revised first active measurement
+
+Use the accepted lock and wakeup wrappers with the existing native IRQ and
+scheduler events. A bounded capture can then distinguish the lock-acquisition
+wrapper's elapsed duration, the interior held-lock interval before unlock,
+and acquisition wakeup/dispatch relative to EDT IRQ entry/exit. Record the
+lock/wait-queue pointer and retain CPU, task and interrupt context so unrelated
+locks or nested calls are not paired. The acquisition bracket includes wrapper
+and probe overhead; return-to-unlock-entry covers only the interior of the
+held interval. Neither should be labeled an exact unperturbed spin-wait/hold
+duration.
+
+Qualify active overhead, complete entry/return pairing, return-probe misses,
+and per-CPU ring loss against the existing camera telemetry before assigning
+causality. A lock owner outside the selected CPUs can remain unseen, even when
+the observed acquisition bracket is long. Keep setup, settling and active
+capture phases separate as in the existing helper.
+
+Direct serial/completion/timestamp-core probes are unavailable through this
+tracefs configuration. The instrumented `edt_do_gettimeofday` wrapper at
+`module/edt_lnx_kernel.c:1110` is a candidate substitute along the ordinary
+completion-clock path, but its registration and call attribution remain
+untested. It can also serve other driver callers, so a clock call alone does
+not identify a particular frame's completion. This remains a software clock
+observation; the physical camera/card/IRQ-assertion boundary is unchanged.
+
+The next capture uses the available wrappers; no kernel configuration change
+is needed for that approach. Active probe capture is **not yet implemented**.
+This checkpoint changes only the operator guide and two engineering records;
+the registration helper and camera implementation remain unchanged.
+
+## 2026-10-24 accepted-wrapper capture implemented
+
+The operator requested implementation of the revised capture. The existing
+`capture-camera-timing.py` now accepts **`--edt-wrappers`**. Native mode retains
+its previous scheduler/IRQ events and limits. The optional mode requests only
+the four accepted wrappers, with entry and return definitions:
+
+| Function | Entry fetch | Return reservation |
+| --- | --- | --- |
+| `edt_start_intr_critical` | `lock=%di:x64` | `r64` |
+| `edt_end_intr_critical` | `lock=%di:x64` | `r64` |
+| `edt_wake_up` | `queue=%di:x64` | `r64` |
+| `edt_wake_up_interruptible` | `queue=%di:x64` | `r64` |
+
+The x86-64 ABI/source and copied module disassembly agree on the first argument
+in `%di`; no pointed-to kernel memory is dereferenced. Typed registration and
+actual argument values still need operator qualification. No rejected core
+function or untested clock wrapper is included.
+
+### Ownership and timing window
+
+The capture lazily loads the existing registration helper and reuses its
+exact-build/mount preflight and `ProbeCheck` ownership. Reusable extensions add
+literal entry fetch arguments, explicit return reservations, returned full
+event names and per-invocation event prefixes; the registration-only CLI keeps
+its existing ten-target/default-`r1` behavior. Names fit the kernel event-name
+limit. Unique event names also disambiguate `kprobe_profile` implementations
+whose first column omits the group.
+
+Preflight runs before output/private-trace mutations. Definitions are first
+verified disabled everywhere visible, then enabled only in the new private
+instance. Existing `context-info` and `irq-info` options are required, with no
+trace-option writes. Neither native nor probe events use a camera-PID filter.
+Probes execute on calls from unrecorded CPUs too, so the recorded CPU mask does
+not bound active hook cost or identify every possible lock owner.
+
+Wrapper mode accepts **1–5 seconds**, allocating **32 MiB per selected CPU**
+for at most four CPUs. Native mode retains 1–30 seconds and 8 MiB per selected
+CPU. The first operator procedure uses one second, five seconds of settling,
+and separate native/probe captures with overlapping full camera telemetry.
+The changed allocation is part of this mode comparison, so it is not a pure
+measurement of hook cost alone.
+
+Probe hooks activate during setup and remain active during settling even while
+`tracing_on=0`. Metadata brackets activation and deactivation separately from
+the ring capture. Before/after raw and invocation-row `kprobe_profile` snapshots
+cover the broader activation lifetime, including settling. `edt_wrappers` in
+`metadata.json` also retains definitions, formats, verified build identity,
+return capacity, safety errors and remaining definitions. All file/diagnostic
+I/O stays outside the successful trace-enable/stop interval.
+
+### Cleanup and interpretation
+
+After stop, cleanup attempts every exact owned private disable before optional
+diagnostic format reads, including partially registered/enabled setups. A
+successful save permits selective definition removal and instance removal.
+A save failure retains both the stopped buffer and disabled definitions;
+unconfirmed stop/disable also retains them and reports exact paths/names.
+Removing dynamic definitions before recovery could discard their formatter or
+allow event-ID reuse, so the earlier idea of deleting definitions after a failed
+save was rejected. No global trace is cleared and no unrelated enable is changed.
+
+The capture saves raw observations for later context-aware pairing. Do not pair
+by PID alone: idle IRQ contexts share PID zero. Check CPU, function nesting,
+native IRQ/scheduler context and entry pointer identity; exclude incomplete
+boundary calls. Acquisition-wrapper elapsed time includes probe overhead, and
+return-to-unlock-entry covers only the interior held interval.
+
+Profile miss semantics are deliberately left uncertified
+(`return_pool_misses_verified=false`). The
+[initial Linux 5.14 profile implementation](https://github.com/torvalds/linux/blob/v5.14/kernel/trace/trace_kprobe.c#L1116-L1130)
+prints the underlying kprobe miss counter; a
+[later kernel correction](https://github.com/torvalds/linux/commit/dfea08a2116fe327f79d8f4d4b2cf6e0c88be11f)
+adds return-instance exhaustion. A release number does not establish which
+backport this installed kernel contains. Retain counters and complete call
+records; zero reported misses cannot alone prove return-pool completeness.
+
+### Validation and operator follow-up
+
+**53 offline tests pass**: 31 capture-lifecycle tests and 22 registration-owner
+tests. Coverage includes default native behavior, typed accepted probes,
+partial registration/enable, ordinary interruption, preflight/build changes,
+missing context flags, modified definitions, save/stop/disable/removal failure,
+decoder preservation, unrelated trace state and absence of diagnostic I/O
+during recording. Independent source/lifecycle review passes. Python CLI help
+and whitespace/link checks are run locally; no live tracing or instrument
+commands are performed by agents.
+
+The operator guide gives the paired native/one-second wrapper procedure. Use
+both updated Python scripts; no camera, reader or kernel rebuild/restart is
+needed for this helper change. Hardware qualification remains pending.
 
 ## Affected files
 

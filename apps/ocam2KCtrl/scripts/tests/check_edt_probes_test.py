@@ -133,6 +133,56 @@ class ProbeCheckTest(unittest.TestCase):
         self.assertEqual(self.kernel.definitions, {"other/keep": "p:other/keep unrelated_function"})
         self.assertEqual(self.check.errors, [])
 
+    def test_entry_fetch_arguments_and_explicit_return_reservation(self):
+        """Retain typed entry arguments and reserve active return instances explicitly."""
+        entry = self.check.register("edt_start_intr_critical", "p", "lock=%di:x64")
+        returned = self.check.register("edt_start_intr_critical", "r", maxactive=64)
+        self.assertEqual(entry, f"{self.check.group}/p_edt_start_intr_critical")
+        self.assertEqual(returned, f"{self.check.group}/r_edt_start_intr_critical")
+        self.assertEqual(self.kernel.commands, [
+            f"p:{entry} edt:edt_start_intr_critical lock=%di:x64",
+            f"r64:{returned} edt:edt_start_intr_critical"])
+        self.check.cleanup()
+        self.assertEqual(self.kernel.commands[-2:], [
+            f"-:{returned} edt:edt_start_intr_critical",
+            f"-:{entry} edt:edt_start_intr_critical"])
+        self.assertEqual(self.check.errors, [])
+
+    def test_event_prefixes_keep_profile_names_and_ownership_distinct(self):
+        """Allow separate profiles to register the same target under distinct names."""
+        lock = edt_probes.ProbeCheck(self.root, self.check.group, "lock_")
+        wake = edt_probes.ProbeCheck(self.root, self.check.group, "wake_")
+        locked = lock.register("edt_wake_up", "p", "queue=%di:x64")
+        awakened = wake.register("edt_wake_up", "p", "queue=%di:x64")
+        self.assertEqual(locked, f"{self.check.group}/lock_p_edt_wake_up")
+        self.assertEqual(awakened, f"{self.check.group}/wake_p_edt_wake_up")
+        lock.cleanup()
+        self.assertNotIn(locked, self.kernel.definitions)
+        self.assertIn(awakened, self.kernel.definitions)
+        wake.cleanup()
+        self.assertEqual(lock.errors + wake.errors, [])
+        self.assertEqual(list(self.kernel.definitions), ["other/keep"])
+
+    def test_invalid_registration_parameters_make_no_mutations(self):
+        """Reject unsupported probe kinds, reservations, and return fetch arguments."""
+        for arguments in ({"kind": "other"}, {"kind": "p", "maxactive": 0},
+                          {"kind": "r", "maxactive": 4097},
+                          {"kind": "r", "maxactive": True},
+                          {"kind": "r", "maxactive": 1.5},
+                          {"kind": "r", "maxactive": "64"},
+                          {"kind": "r", "fetchargs": "queue=%di:x64"}):
+            with self.subTest(arguments=arguments), self.assertRaises(ValueError):
+                self.check.register("edt_wake_up", **arguments)
+        self.assertEqual(self.check.attempted, [])
+        self.assertEqual(self.kernel.commands, [])
+
+    def test_invalid_event_prefix_is_rejected_before_registration(self):
+        """Prevent prefixes from changing tracefs paths or command structure."""
+        for prefix in ("1prefix", "other/name", "prefix\n", "prefix-"):
+            with self.subTest(prefix=prefix), self.assertRaises(ValueError):
+                edt_probes.ProbeCheck(self.root, self.check.group, prefix)
+        self.assertEqual(self.kernel.commands, [])
+
     def test_existing_group_or_event_is_never_adopted(self):
         """Refuse definitions and empty event directories belonging to another actor."""
         name, definition = self.definition()
@@ -188,6 +238,23 @@ class ProbeCheckTest(unittest.TestCase):
         self.assertIn(name, self.check.errors[0])
         self.assertFalse(any(command.startswith(f"-:{name} ")
                              for command in self.kernel.commands))
+
+    def test_changed_offset_or_fetch_arguments_are_preserved(self):
+        """Retain replacements that differ in nonzero target offset or entry fetches."""
+        replacements = ("edt:edt_wake_up+0x10 queue=%di:x64",
+                        "edt:edt_wake_up queue=%si:x64",
+                        "other:edt_wake_up queue=%di:x64")
+        for index, target in enumerate(replacements):
+            with self.subTest(target=target):
+                check = edt_probes.ProbeCheck(self.root, f"{self.check.group}_{index}")
+                name = check.register("edt_wake_up", "p", "queue=%di:x64")
+                self.kernel.definitions[name] = f"p:{name} {target}"
+                self.kernel.save()
+                check.cleanup()
+                self.assertIn(name, self.kernel.definitions)
+                self.assertIn(name, check.errors[0])
+                self.assertFalse(any(command.startswith(f"-:{name} ")
+                                     for command in self.kernel.commands))
 
     def test_cleanup_failure_does_not_stop_other_removals(self):
         """Report the exact retained event while removing every other owned event."""
@@ -299,6 +366,25 @@ class ProbeCheckTest(unittest.TestCase):
                 self.kernel.save()
         self.kernel.after_write = render_offset
         self.check.register("edt_test_intr", "p")
+        self.check.cleanup()
+        self.assertEqual(self.check.errors, [])
+        self.assertEqual(list(self.kernel.definitions), ["other/keep"])
+
+    def test_explicit_zero_offset_preserves_fetch_arguments(self):
+        """Normalize only the target zero offset when typed fetch fields follow it."""
+        def render_offset(command):
+            """Render a target's explicit zero offset without changing its fetches."""
+            if command.startswith("p:"):
+                fields = command.split()
+                name = fields[0].split(":", 1)[1]
+                fields[1] += "+0x0"
+                self.kernel.definitions[name] = " ".join(fields)
+                self.kernel.save()
+
+        self.kernel.after_write = render_offset
+        name = self.check.register("edt_start_intr_critical", "p", "lock=%di:x64")
+        self.assertEqual(self.check.definitions()[name], [
+            f"p:{name} edt:edt_start_intr_critical lock=%di:x64"])
         self.check.cleanup()
         self.assertEqual(self.check.errors, [])
         self.assertEqual(list(self.kernel.definitions), ["other/keep"])
