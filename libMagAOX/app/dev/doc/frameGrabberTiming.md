@@ -50,15 +50,24 @@ stage-marker clock reads and the control-event handoff are disabled.
 
 ## Endpoints and clocks
 
-The OCAM/EDT path records these boundaries without moving the existing realtime
-write timestamp or stream notifications:
+For OCAM with multiple queued DMA buffers, rearm runs at the end of the
+existing post-publication hook. The image and sync stream are both posted
+before that SDK call. Startup queues the configured number of acquisitions;
+rearm replenishes one request after each consumed frame. The current
+64-buffer configuration therefore has further captures queued while the
+completed frame is processed. This changes the placement of queue replenishment,
+with timeout and frame validation still required before publication.
+
+The optional stage markers describe that order:
 
 ```text
 waitEnter       enter acquisition attempt / SDK wait
     |
 waitReturn      SDK wait returns
     |
-rearmReturn     next EDT acquisition has been queued
+timeoutEnter    enter SDK timeout-counter query
+    |
+timeoutReturn   timeout-counter query returns
     |
 validated       camera result/frame validation completes
     |
@@ -67,13 +76,37 @@ loadDone        descramble and optional binning complete
 writeStampDone  immediately after that call
     |           metadata completion and main-stream semaphore broadcast
 mainPostDone
-    |           post-publication hook, including the OCAM sync stream
-syncPostDone
+    |           OCAM hook posts the sync stream
+rearmEnter      enter SDK queue replenishment
+    |
+rearmReturn     next EDT acquisition has been queued
+    |
+syncPostDone    post-publication hook returns
     |           bookkeeping, pointer preparation and FPS observation
 loopTailDone
     |           event handoff and next iteration
 next waitEnter
 ```
+
+Other EDT controllers retain their existing ordering. OCAM also retains
+immediate rearm for a single DMA buffer or a mode that forces single-frame or
+serial-triggered acquisition:
+
+```text
+waitReturn -> rearmEnter -> rearmReturn -> timeoutEnter -> timeoutReturn -> validated
+```
+
+Deferred rearm remains on the acquisition thread. Failed/rejected frames
+request recovery without leaving a queue-replenishment obligation for a later
+unrelated frame. The finite acquisition queue must still be replenished during
+normal operation. No additional configuration setting is required.
+
+For controller implementations, `pdvAcquire(timestamp)` retains immediate
+rearm. Passing `true` as its second argument opts into eligible deferral and
+requires `pdvFinishAcquisition(true)` after publication or
+`pdvFinishAcquisition(false)` when abandoning the attempt. The finish call is
+harmless when no replenishment is pending. OCAM currently supplies this
+completion handling; existing EDT controllers need no change.
 
 Local markers use monotonic integer timestamps. The SDK `atime` and existing
 realtime `writetime` are retained separately and unchanged. Their interval
@@ -94,10 +127,13 @@ proxy endpoint. Both neighboring brackets must fit a configured positive limit
 for conditional attribution. Wide or incomplete brackets remain in raw timing
 populations and increment the ambiguous interval population.
 
-The current frame's main/sync posts and later bookkeeping occur after its write
-timestamp. They can delay the next SDK wait, but cannot delay that already
-sampled timestamp. `previousTail` measures the preceding write endpoint to the
-current wait entry, including work between iterations.
+The current frame's main/sync posts, deferred rearm and later bookkeeping occur
+after its write timestamp. They can delay the next SDK wait, but cannot delay
+that already sampled timestamp. `previousTail` measures the preceding write
+endpoint to the current wait entry, including work between iterations.
+The timeout-counter query remains before publication because partial transfers
+must be rejected. Its independent duration shows whether driver contention
+also affects that call after rearm has moved.
 
 ## Readbacks and telemetry
 
@@ -126,9 +162,14 @@ Raw metric names are:
 | `acquisitionToWrite` | Same-frame realtime write stamp minus SDK acquisition stamp; external-clock context. |
 | `waitReturnInterval`, `writeEndpointInterval` | Successive continuous SDK-return or monotonic write-endpoint markers. |
 | `wait` | Wait entry to SDK return; a normal frame-period wait is expected. |
-| `rearm`, `validation`, `conversion` | SDK return to rearm, rearm to validated result, and validation to loaded image. |
+| `rearm` | Explicit rearm entry to return, at either supported location. Older events without an entry marker use SDK wait return to rearm return. |
+| `timeoutQuery` | Explicit timeout-counter query entry to return; unavailable in older events. |
+| `validation` | Timeout query return to validated result, or rearm return to validated result in older events. |
+| `conversion` | Validated result to loaded image. |
 | `writeBracket` | Loaded image to completion of the realtime write-clock call. |
-| `mainPost`, `syncPost`, `loopTail` | Write endpoint to main post, main post to sync-hook completion, and sync completion to loop-tail marker. |
+| `mainPost` | Write endpoint to main-stream post completion. |
+| `syncPost` | Main post to rearm entry when rearm is deferred inside the publication hook; otherwise main post to hook completion. This excludes deferred rearm. |
+| `loopTail` | Publication-hook completion to loop-tail marker. |
 | `waitToWrite` | SDK return to monotonic write endpoint. |
 | `previousTail` | Previous frame's write endpoint to this frame's wait entry. |
 | `serialOverlap` | Duration of completed observed serial transactions intersecting this frame's wait-entry to write-endpoint span. |
@@ -138,6 +179,17 @@ ordinary app logic while stage collection is enabled; the telemeter can also
 force a record, including a disabled or unavailable snapshot. Rebuild/install
 both the camera application and `logdump` to collect and read the new type.
 The old `[fgtimes]` schema is unchanged.
+
+The updated reader accepts existing 16-metric stage records and nine-marker
+chronological records. New records contain 17 metrics and 12 endpoint slots,
+appending `timeoutQuery` and the three explicit rearm/timeout endpoints while
+preserving existing numeric identifiers. Raw
+`syncPostDone` is the publication-hook return, so it follows deferred rearm;
+the `syncPost` duration ends at `rearmEnter` in that case. Rebuild the camera
+and `logdump` to produce and interpret the extended records.
+If a new endpoint capture fails, its affected duration remains unavailable;
+the reader retains the unqualified raw neighborhood and its invalid-marker
+count. It does not reinterpret missing modern endpoints as a legacy segment.
 
 Binary/JSON records retain each population's count, validity and local coverage
 span. Metadata projections use the same raw metric names and
@@ -270,10 +322,11 @@ paired-only and stage-enabled runs with the same camera mode, workload,
 affinity and IRQ placement, checking coverage and losses alongside timing.
 
 The failed-result guard is active in both modes and adds one EDT timeout-counter
-query per non-null wait (plus a start baseline). Its cost is included after
-`rearmReturn`, in `validation`. Off/on comparison isolates the optional clocks
-and stage collection; comparison with the previous binary is also needed to
-measure the result-guard and repaired paired-handoff baseline cost.
+query per non-null wait (plus a start baseline). With stage timing enabled,
+`timeoutQuery` measures its cost independently before validation and before
+deferred rearm. Earlier records included this query in `validation` after
+immediate rearm. Compare optional-clock overhead at fixed rearm placement;
+compare binaries separately to measure the effect of changed SDK-call ordering.
 
 The copied 5.6.8.0 SDK also documents keeping DMA/open/close operations in one
 thread. The existing initial setup, acquisition and final close cross threads.

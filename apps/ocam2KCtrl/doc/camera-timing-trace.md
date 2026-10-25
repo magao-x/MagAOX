@@ -14,6 +14,15 @@ avoid associating a restarted process with an old trace. The telemetry log's
 realtime timestamp is when the ordinary app thread emits the record, not when
 the camera excursion happened.
 
+For eligible multi-buffer OCAM acquisition, rearm now runs at the end of
+`frameGrabberPostPublish`, after both the main image and sync notifications.
+The added `timeoutEnterNs`/`timeoutReturnNs` endpoints bracket the timeout query
+that still runs before publication. `rearmEnterNs`/`rearmReturnNs` bracket
+queue replenishment independently. `syncPostDoneNs` is the hook-return marker
+after deferred rearm; the `syncPost` population excludes that rearm time.
+Single-buffer or single-frame/serial-triggered modes retain immediate rearm.
+Existing nine-marker captures remain readable with the updated `logdump`.
+
 ## 1. Install and enable chronological records
 
 Rebuild/install `ocam2KCtrl` and `logdump`, including their usual library/schema
@@ -90,10 +99,13 @@ timeout 60s logdump --dir=/opt/MagAOX/telem --ext=.bintel -f camwfs > "$HOME/cam
 
 In a second terminal at the MagAOX repository root, run the helper. Replace `45`
 with the actual CPU list from step 1; retain the current `CAMERA_TID` assignment
-in this terminal too. The following invocation captures ten seconds:
+in this terminal too. The following invocation captures five seconds. This
+shorter interval fits the observed camera-CPU event rate in the current ring;
+always inspect the loss counters afterward. Include the EDT IRQ CPU as well
+when it differs from the camera CPU, for example `--cpus 33,61`.
 
 ```bash
-sudo python3 apps/ocam2KCtrl/scripts/capture-camera-timing.py --tid "$CAMERA_TID" --cpus 45 --seconds 10 --output "$HOME/camwfs-kernel-$(date -u +%Y%m%dT%H%M%SZ)"
+sudo python3 apps/ocam2KCtrl/scripts/capture-camera-timing.py --tid "$CAMERA_TID" --cpus 45 --seconds 5 --output "$HOME/camwfs-kernel-$(date -u +%Y%m%dT%H%M%SZ)"
 ```
 
 The helper creates a uniquely named tracefs **instance**, uses an 8 MiB buffer
