@@ -446,6 +446,29 @@ All delays from L upward become reachable, with no gap. Runs with `delaySpan` �
 - **Invalid trials:** `NINVALID` was 2 in total, at d = 120 and 260 µs. Neither is in the new window, so the longer busy-wait did not cause them.
 - **New finding, not caused by this change:** the settled response differs between delays by up to ±4% (0.93–1.01 here; 0.98–1.035 in the 5 kHz run `2026-10-14T223100`). The delays are measured in sequence, so slow drift of the unmodulated camWFS gain during the run turns into per-delay level differences. Each super-sampling bin is filled by specific delays, so the curve picks up a pattern with a period of one frame (+4% spikes every 333 µs that do not decay), which can be mistaken for ringing. Possible fixes: normalize each delay by its own settled level before super-sampling, and/or interleave or randomize the delay order so that drift averages out.
 
+## 17. Defaults Match the Measurement Settings (2026-10-25)
+
+**Why:** every run since the 5 kHz tests has re-entered the same INDI values by hand. Most of them are already the app defaults (`bestMetric` jitter, `dm_channel` 7, `maskThresh` 0.1, `nFrames` 20, `nTrials` 20, `settle` 0.05). Only three differ: `delaySpan` (400 vs default 0), `nDelays` (20 vs 10) and `nSettle` (10 vs 5).
+
+**Decision (user):** change the code defaults, and make the default span depend on the frame rate instead of hard-coding 400 µs:
+- `poke.nDelays` default **20** (was 10).
+- `analysis.nSettle` default **10** (was 5).
+- `poke.delaySpan` <= 0 (still the default) now means **two** camWFS frame periods (was one). `resolveSpan()` returns `2e6 / fps`.
+
+**Why two frame periods:** with the receipt-based deferral (§16), delays from one frame period upward cover the poke phases that delays below the receipt latency cannot reach. With `nDelays` = 2 × `resampleFactor` (20 × 10) the delay step equals the super-sampling bin, so every bin gets data at any frame rate: 400 µs and 20 µs steps at 5 kHz (the hand-entered values), 1000 µs and 50 µs steps at 2 kHz. A run using the defaults is about twice as long as with the old ones, since K doubles.
+
+**Tests:**
+- `resolveSpan()`: the default gives 2000 µs at 1000 fps, 1000 µs at 2000 fps and 400 µs at 5000 fps; explicit spans are unchanged.
+- Config defaults: `nDelays` 20, `nSettle` 10.
+- The run-test fixture now sets `m_delaySpan = m_T` (one frame period), so the run tests' four-delay grid (0, 250, 500, 750 µs) and their `DELAYUS` checks do not depend on the default.
+- The "fps unknown with default span" start test sets `m_delaySpan = 0` explicitly.
+
+**Docs** (separate commit): CONFIGURATION table on the doc page.
+
+**Not changed:** `analysis.nRef` stays 10 in code. exao2's `dmTemporalResponse.conf` sets it to 20.
+
+**Status (2026-10-25):** implemented; build, unit tests and one default-settings run on exao2 pending.
+
 ## Debugging
 
 First build and test on the MagAO-X computer (exao2), 2026-10-01.

@@ -400,12 +400,15 @@ inline int buildPokeCommand( mx::improc::eigenImage<float>       &cmd,     /**< 
 }
 
 /// Resolve the span of the delay grid.
-/**
+/** The default span is two frame periods: with a delay step of one super-sampling bin (nDelays = 2 x resampleFactor),
+ * the delays from one frame period upward reach the poke phases that the delays below the frame-receipt latency cannot,
+ * so every bin of the super-sampled curve gets data at any frame rate.
+ *
  * \returns 0 on success
  * \returns -1 if the default span is requested but the frame rate is unknown
  */
 inline int resolveSpan( double &span,      /**< [out] the resolved span [us] */
-                        double  delaySpan, /**< [in] the configured span [us], <= 0 means one frame period */
+                        double  delaySpan, /**< [in] the configured span [us], <= 0 means two frame periods */
                         double  fps        /**< [in] the camWFS frame rate [Hz], <= 0 if unknown */
 )
 {
@@ -420,7 +423,7 @@ inline int resolveSpan( double &span,      /**< [out] the resolved span [us] */
         return -1;
     }
 
-    span = 1e6 / fps;
+    span = 2e6 / fps;
 
     return 0;
 }
@@ -1150,9 +1153,9 @@ class dmTemporalResponse : public MagAOXApp<true>,
 
         float m_maxCommand{ 1 }; ///< Command safety limit.
 
-        int m_nDelays{ 10 }; ///< K.
+        int m_nDelays{ 20 }; ///< K.
 
-        double m_delaySpan{ 0 }; ///< Configured span [us], <= 0 means one frame period.
+        double m_delaySpan{ 0 }; ///< Configured span [us], <= 0 means two frame periods.
 
         int m_nFrames{ 20 }; ///< N.
 
@@ -1166,7 +1169,7 @@ class dmTemporalResponse : public MagAOXApp<true>,
 
         int m_nRef{ 10 }; ///< Reference-pass trial pairs.
 
-        int m_nSettle{ 5 }; ///< Trailing frames used for the reference and settleErr.
+        int m_nSettle{ 10 }; ///< Trailing frames used for the reference and settleErr.
 
         float m_maskThresh{ 0.1 }; ///< Mask threshold.
 
@@ -1223,10 +1226,11 @@ class dmTemporalResponse : public MagAOXApp<true>,
     /// Maximum absolute DM command allowed in either mode.
     float m_maxCommand{ 1 };
 
-    /// K, the number of evenly spaced delays.
-    int m_nDelays{ 10 };
+    /// K, the number of evenly spaced delays.  The default 20 with the default span gives a delay step of one
+    /// super-sampling bin (frame period / resampleFactor).
+    int m_nDelays{ 20 };
 
-    /// Span of the delay grid in microseconds.  <= 0 means one camWFS frame period.
+    /// Span of the delay grid in microseconds.  <= 0 means two camWFS frame periods.
     double m_delaySpan{ 0 };
 
     /// N, the number of frames captured after each poke.
@@ -1248,7 +1252,7 @@ class dmTemporalResponse : public MagAOXApp<true>,
     int m_nRef{ 10 };
 
     /// The number of trailing frames used for the steady-state reference and settleErr.
-    int m_nSettle{ 5 };
+    int m_nSettle{ 10 };
 
     /// Mask threshold as a fraction of max|P|.
     float m_maskThresh{ 0.1 };
@@ -2089,7 +2093,7 @@ inline void dmTemporalResponse::setupConfig()
                 "nDelays",
                 false,
                 "int",
-                "K, the number of evenly spaced delays.  Default 10." );
+                "K, the number of evenly spaced delays.  Default 20." );
 
     config.add( "poke.delaySpan",
                 "",
@@ -2099,7 +2103,7 @@ inline void dmTemporalResponse::setupConfig()
                 "delaySpan",
                 false,
                 "float",
-                "Span of the delay grid in us.  <= 0 means one camWFS frame period.  Default 0." );
+                "Span of the delay grid in us.  <= 0 means two camWFS frame periods.  Default 0." );
 
     config.add( "poke.nFrames",
                 "",
@@ -2169,7 +2173,7 @@ inline void dmTemporalResponse::setupConfig()
                 "nSettle",
                 false,
                 "int",
-                "Trailing frames used for the reference and settleErr.  Default 5." );
+                "Trailing frames used for the reference and settleErr.  Default 10." );
 
     config.add( "analysis.maskThresh",
                 "",

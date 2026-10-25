@@ -217,6 +217,7 @@ class dmTemporalResponse_test : public dmTemporalResponse
         m_pokeY        = { 4 };
         m_pokeAmp      = 0.5;
         m_nDelays      = 4;
+        m_delaySpan    = m_T; // one frame period, so the run tests' delay grid does not depend on the default span
         m_nFrames      = 20;
         m_nTrials      = 4;
         m_nRef         = 2;
@@ -727,10 +728,13 @@ TEST_CASE( "dmTemporalResponse delay grid and trial count", "[dmTemporalResponse
     double span = 0;
     REQUIRE( resolveSpan( span, 1500, -1 ) == 0 );
     REQUIRE( span == Approx( 1500 ) );
+    // The default span is two frame periods
     REQUIRE( resolveSpan( span, 0, 1000 ) == 0 );
-    REQUIRE( span == Approx( 1000 ) );
+    REQUIRE( span == Approx( 2000 ) );
     REQUIRE( resolveSpan( span, -5, 2000 ) == 0 );
-    REQUIRE( span == Approx( 500 ) );
+    REQUIRE( span == Approx( 1000 ) );
+    REQUIRE( resolveSpan( span, 0, 5000 ) == 0 );
+    REQUIRE( span == Approx( 400 ) );
     REQUIRE( resolveSpan( span, 0, 0 ) == -1 );
     REQUIRE( resolveSpan( span, 0, -1 ) == -1 );
 
@@ -1241,7 +1245,7 @@ TEST_CASE( "dmTemporalResponse configuration defaults", "[dmTemporalResponse][co
     REQUIRE( app.patternFile() == "" );
     REQUIRE( app.pokeAmp() == 0 );
     REQUIRE( app.maxCommand() == Approx( 1 ) );
-    REQUIRE( app.nDelays() == 10 );
+    REQUIRE( app.nDelays() == 20 );
     REQUIRE( app.delaySpan() == 0 );
     REQUIRE( app.nFrames() == 20 );
     REQUIRE( app.nTrials() == 20 );
@@ -1249,7 +1253,7 @@ TEST_CASE( "dmTemporalResponse configuration defaults", "[dmTemporalResponse][co
     REQUIRE( app.trialTimeout() == Approx( 2 ) );
     REQUIRE( app.maxRetries() == 5 );
     REQUIRE( app.nRef() == 10 );
-    REQUIRE( app.nSettle() == 5 );
+    REQUIRE( app.nSettle() == 10 );
     REQUIRE( app.maskThresh() == Approx( 0.1 ) );
     REQUIRE( app.resampleFactor() == 10 );
     REQUIRE( app.bestMetric() == "jitter" );
@@ -1927,7 +1931,8 @@ TEST_CASE( "dmTemporalResponse start validation", "[dmTemporalResponse][run]" )
 
     SECTION( "fps unknown with default span" )
     {
-        app.m_wfsFps = -1;
+        app.m_delaySpan = 0;
+        app.m_wfsFps    = -1;
         REQUIRE( app.prepareRun( now ) == -1 );
     }
 
