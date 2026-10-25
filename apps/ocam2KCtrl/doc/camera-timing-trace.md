@@ -23,6 +23,13 @@ after deferred rearm; the `syncPost` population excludes that rearm time.
 Single-buffer or single-frame/serial-triggered modes retain immediate rearm.
 Existing nine-marker captures remain readable with the updated `logdump`.
 
+For the capture-helper update alone, use the updated Python script and this
+procedure; no camera or reader rebuild/restart is needed if the above endpoints
+are already present. The helper now defaults to five seconds of settling with
+tracing off, followed by five seconds of kernel capture. Metadata and trace setup
+finish before settling. This separates setup from the timed interval while the
+overlapping telemetry retains events in all phases.
+
 ## 1. Install and enable chronological records
 
 Rebuild/install `ocam2KCtrl` and `logdump`, including their usual library/schema
@@ -39,9 +46,10 @@ Preserve the other framegrabber settings, including `stageExcursionUs` (20 µs
 unless already changed). These settings take effect after restarting `camwfs`.
 `stageTraceMax` bounds shared ready-plus-pending record retention; it is zero by
 default. At most that many records can be emitted in one ordinary update, but
-pending neighbor records survive updates rather than receiving a reset quota. A nonzero value requires stage timing and positive timing-window,
-capacity, and excursion-threshold settings. The bracket criterion qualifies the
-diagnostic attribution; it does not set a scheduler margin or change frame delivery.
+pending neighbor records survive updates rather than receiving a reset quota.
+A nonzero value requires stage timing and positive timing-window, capacity, and
+excursion-threshold settings. The bracket criterion qualifies the diagnostic
+attribution; it does not set a scheduler margin or change frame delivery.
 
 Restart `camwfs` using the normal operator procedure. Confirm the current camera
 thread and its CPU placement:
@@ -97,16 +105,40 @@ Start the same telemetry command in one terminal, using a new output file:
 timeout 60s logdump --dir=/opt/MagAOX/telem --ext=.bintel -f camwfs > "$HOME/camwfs-trace-on.txt"
 ```
 
-In a second terminal at the MagAOX repository root, run the helper. Replace `45`
-with the actual CPU list from step 1; retain the current `CAMERA_TID` assignment
-in this terminal too. The following invocation captures five seconds. This
-shorter interval fits the observed camera-CPU event rate in the current ring;
-always inspect the loss counters afterward. Include the EDT IRQ CPU as well
-when it differs from the camera CPU, for example `--cpus 33,61`.
+Let telemetry run for about ten seconds, then use a second terminal at the
+MagAOX repository root to run the helper. Keep the telemetry reader running to
+its sixty-second timeout, preserving records before setup and after capture.
+Set `CAMERA_TID` in this terminal to the current value from step 1 too.
+The example below uses the observed acquisition CPU 33 and IRQ CPU 61; replace
+the list if their placement has changed. Include every allowed acquisition CPU
+and the EDT IRQ CPU.
 
 ```bash
-sudo python3 apps/ocam2KCtrl/scripts/capture-camera-timing.py --tid "$CAMERA_TID" --cpus 45 --seconds 5 --output "$HOME/camwfs-kernel-$(date -u +%Y%m%dT%H%M%SZ)"
+sudo python3 apps/ocam2KCtrl/scripts/capture-camera-timing.py --tid "$CAMERA_TID" --cpus 33,61 --settle-seconds 5 --seconds 5 --output "$HOME/camwfs-kernel-$(date -u +%Y%m%dT%H%M%SZ)"
 ```
+
+Both durations are explicit here and are also the defaults. `--settle-seconds`
+accepts 0–60 seconds; `--seconds` accepts 1–30 seconds. Five seconds of capture
+fits the previously observed camera-CPU event rate in the current ring, but
+always inspect the loss counters afterward. Shorten the capture if necessary.
+The settling interval does not consume kernel ring storage because tracing
+remains off.
+
+The sequence is:
+
+```text
+before metadata -> private trace setup -> settle 5 s -> trace ON for 5 s
+                                                       |
+after metadata <- save stopped trace <- trace OFF <-----+
+```
+
+Clock anchors distinguish metadata collection, setup, settling, trace enable,
+trace disable and after-metadata collection in the saved `metadata.json`.
+No metadata queries, progress output or trace-file saving occur between the
+completed enable and the start of disable. Setup/settling and trace-on/off
+boundaries can still perturb timing; compare telemetry around those boundaries
+with the interior of the capture. A five-second wait is an experimental control,
+not proof that every possible setup effect has disappeared.
 
 The helper creates a uniquely named tracefs **instance**, uses an 8 MiB buffer
 for each selected CPU (small buffers elsewhere), and enables the available
@@ -148,15 +180,18 @@ another clock or enable a broad function tracer.
 Keep the entire new output directory plus both telemetry files. Check:
 
 - `metadata.json`: no capture/cleanup errors, expected TID/boot ID, same CPU
-  coverage and settings before/after, and the enabled event list.
+  coverage and settings before/after, the enabled event list, and completed
+  setup/settling/capture phases. `capture_started` and `capture_completed` must
+  both be true for an ordinary full capture. Keep setup and boundary events
+  separate from the steady capture when comparing timing.
 - `cpu*-stats.txt`: `overrun`, `commit overrun`, and `dropped events` must all be
   zero. Nonzero values mean the trace is incomplete; shorten the next capture or
   increase buffers deliberately before drawing a negative conclusion.
 - `trace.txt`: timestamps cover the excursion endpoints, and both IRQ entry/exit
   and camera schedule-in/out records are present. Check `event-groups.json` for
   APIC vector coverage; device IRQ events alone do not cover every CPU interrupt.
-  Events straddling the capture
-  boundaries cannot have their full duration reconstructed.
+  Events straddling the capture boundaries cannot have their full duration
+  reconstructed.
 - `[fgstage]`/`[fgtrace]`: examine qualification and all record/drop/omission
   counters. A bounded record list can omit additional candidates; absence from
   that list does not prove that no excursion occurred.
@@ -167,6 +202,30 @@ kernel/boot identity, and allow a coarse association with the telemetry log time
 Trace text may use microsecond display precision; do not infer nanosecond causal
 ordering from rounded text timestamps. Keep the recorded trace options and
 original endpoint nanoseconds.
+
+`phase_anchors` contains `metadata_before`, `setup`, `settle`, `capture_enable`,
+`capture_disable` and `metadata_after` entries as each phase is reached. Each
+entry brackets that phase with `begin`/`end` clock anchors; a missing end marks
+an incomplete phase. Each anchor includes `monotonic_before_ns`, `realtime_ns`
+and `monotonic_after_ns`. Use monotonic bounds directly for `[fgtrace]`
+association. `capture_enable` and `capture_disable` bracket the control writes,
+rather than treating a progress message as the instant tracing changes.
+An excursion wholly between enable's end and disable's begin is inside the
+enabled interval, subject to the retained kernel coverage. An excursion within
+either switch bracket has uncertain boundary ordering.
+
+The legacy `capture_begin` and `capture_end` anchors remain for existing analysis
+tools: they correspond to enable's begin and disable's begin, respectively.
+Neither is present if setup/settling stopped before enable was attempted.
+`capture_started` requires a successful enable write; `capture_completed`
+requires the requested capture wait to finish and a successful stop write.
+They do not qualify later save/cleanup errors. `interrupted_phase` identifies
+where Ctrl-C/TERM occurred. Prefer the explicit phase brackets for new analysis,
+and inspect interruption/error status before assuming a complete capture. Telemetry events
+before enable have no kernel coverage in this capture; sharing those events
+still helps identify whether the disturbance coincides with metadata, setup or
+settling. Keep all chronological records, including events outside the kernel
+window and stage-summary windows.
 
 The trigger baseline is the causal rolling median of at least three strictly
 preceding intervals, rather than the aggregate window median; each record stores
@@ -206,10 +265,13 @@ measurement, restore `stageTraceMax=0` and restart `camwfs` when convenient;
 
 ## Implementation checks and references
 
-The helper has only been exercised on an ordinary temporary fake tracefs tree,
-including partial setup failure, unavailable `mono`, preservation of unrelated
-traces, and preserving a stopped instance when trace saving fails. No instrument
-or live kernel trace was accessed by an agent. Run its local checks with:
+The helper's local checks use an ordinary temporary fake tracefs tree, including
+partial setup failure, unavailable `mono`, phase ordering and interruption,
+preservation of unrelated traces, and preserving a stopped instance when trace
+saving fails. Agents have accessed no instrument or live kernel trace. Operator
+captures and their qualifications are recorded in the
+[OCAM engineering record](../../../agents/plans/2026-10/ocam2k-acquisition-publication-timing.md).
+Run local checks with:
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 apps/ocam2KCtrl/scripts/tests/capture_camera_timing_test.py
