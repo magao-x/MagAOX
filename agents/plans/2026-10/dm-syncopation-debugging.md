@@ -2,14 +2,25 @@
 
 This record tracks operator observations, diagnosis, changes and verification during debugging and optimization. The [main engineering plan](dm-syncopation.md) retains the settled design and review answers; the [user guide](../../../apps/dmSyncopation/doc/dmSyncopation.md) documents current operation and interfaces.
 
-Current status: the isolated observer is now running with one stable acquWFS trace row. Camera publication already spans 437.045–579.825 us, versus acquisition's 480–520 us; acquWFS starts span 430.132–577.219 us and its output 430.012–577.320 us. Qualified conditional decomposition places almost all of the large output excursions at/before processing start, with much smaller execution/publication-tail changes. Two primary-observer counter gaps and ten duplicate observations limit coverage; camera observation quality remains clean. Matched camera-publication-to-wake latency remains unmeasured. The profile and observer remain locally verified (4883 assertions, 69 cases; matching builds). Median-grid scheduling, per-step skips and targeted extra-step wakes remain unimplemented; the early-arrival reserve remains undecided. Earlier trials and their qualifications are preserved below.
+Current status: camera timing instrumentation and deferred OCAM rearm are
+implemented. Operator captures first located recurring EDT interrupt delays,
+then confirmed that rearm stalls occur after publication with IRQ 405 on CPU 61
+and acquisition on CPU 33. Mean acquisition-to-write latency improves from
+53.600 to 50.167 us in retained kernel-off summaries. Jitter is not uniformly
+improved: unexplained changes in spread and larger SDK-return excursions remain,
+some outside kernel coverage. Earlier isolated camera/acquWFS measurements and
+their limitations are preserved below; matched camera-publication-to-wake
+latency remains unmeasured. Median-grid scheduling, per-step skips and targeted
+extra-step wakes remain unimplemented; the early-arrival reserve remains undecided.
+The next camera capture is prepared with separate setup/settling phases and a
+five-second kernel interval; its operator run remains pending.
 
 Append subsequent investigations as dated entries, keeping operator evidence, local verification and outstanding instrument checks explicit. All agent work runs on the workstation; the operator performs instrument actions and supplies results.
 
 The camera-source review continues in the separate
 [OCAM acquisition/publication timing plan](ocam2k-acquisition-publication-timing.md).
-It contains findings and proposed work; camera timing implementation has not
-started.
+It contains source findings, implementation/verification records and the
+latest operator capture analysis.
 
 ## 2026-10-20 first operator-run instrument trial
 
@@ -2130,3 +2141,78 @@ and reader for the next operator capture; no new configuration setting is
 needed. The operator approved committing and pushing the verified changes on
 `jrmales/dm-syncopation`, with implementation and engineering records first,
 followed by user documentation.
+
+## 2026-10-24 first operator comparison after deferred OCAM rearm
+
+The local copied capture `camwfs-trace-20261025T034126Z` is October 25 UTC,
+the evening of October 24 in Phoenix. Camera acquisition remains FIFO 90 on
+CPU 33, with EDT IRQ 405 on CPU 61. Apart from the camera/reader rebuild and
+restart, the operator confirmed no other settings or workload changes,
+including during the first file's changing timing spread.
+
+The intended ordering is observed. Six kernel-covered rearms take
+**23.113–24.306 us** while overlapping remote EDT control handlers, but begin
+after the current write and both notifications. Timeout queries in the twenty
+covered neighboring frames take **0.230–0.481 us**, including five queries
+that remain short while a remote control handler is active. Contention has not
+simply moved into the prepublication guard in these samples.
+
+Mean SDK-acquisition-to-write time improves **53.600 to 50.167 us** in retained
+kernel-off summaries; selected excursion contexts decrease **416 to 19 off**
+and **403 to 9 on**, with no new diagnostic selection drops or camera
+frame/counter gaps. This does not establish uniform jitter improvement:
+first-file pooled publication deviation is **2.224 us**, versus **0.995 us**
+previously, during an unexplained rise and fall in conversion/publication
+spread. Most second-file windows are **0.757–0.879 us**, but a large burst
+makes that whole-file deviation **1.864 us**.
+
+Uncovered publication intervals of **614.931 us** in the first file and
+**799.700/924.626 us** in the second are already delayed at SDK return.
+The first pair falls in a summary-window gap. The second burst is about
+100 ms before tracing starts, within the helper's metadata/setup envelope;
+that association does not identify its cause. CPU 33 still overwrites
+50350 kernel events, retaining 7.98 s of the requested ten seconds, although
+all four selected contexts inside the requested interval survive.
+
+The [OCAM timing record](ocam2k-acquisition-publication-timing.md) contains
+input checksums, qualification counts, pooled comparisons, matched rearm/IRQ
+examples and the uncovered events. Deferred rearm achieves the current-frame
+publication objective; the residual SDK-return excursions and varying first-file
+spread remain open. A future comparison can separate trace setup from capture
+and shorten the kernel window to avoid overwrite. No scheduler margin is
+selected. Only engineering documentation changes; no implementation,
+configuration, commit, push or agent instrument action accompanies this analysis.
+
+## 2026-10-24 settled five-second capture setup
+
+At the operator's request, the camera kernel helper now completes metadata and
+private trace setup, waits **five seconds with tracing off**, then captures
+**five seconds**. Both waits are configurable, with finite bounded arguments.
+Explicit phase anchors bracket metadata, setup, settling and trace enable/disable;
+interrupted phases remain identifiable. Saving and metadata queries stay outside
+the measured interval. The shorter duration targets the observed ring overwrite,
+while settling separates setup from measurement without assuming that setup
+caused the earlier uncovered burst.
+
+The [operator procedure](../../../apps/ocam2KCtrl/doc/camera-timing-trace.md)
+retains a full telemetry baseline and overlapping telemetry covering setup,
+settling, capture and the following tail. Use the current camera TID and both
+the acquisition/EDT IRQ CPUs, currently **33,61**. Updating this helper requires
+no camera/reader rebuild or camera restart. The
+[OCAM timing record](ocam2k-acquisition-publication-timing.md) records the
+interface and local verification. Hardware comparison remains operator work;
+no agent instrument action, commit or push accompanies this change.
+
+Local verification passes **17 offline fake-tracefs tests**, Python syntax/compile,
+CLI help, whitespace and **46 relative documentation links**. Tests qualify
+normal phase ordering, interrupted preparation/capture, failed start/stop and
+absence of diagnostic I/O during the timed interval. Independent review passes.
+
+### 2026-10-24 commit/push checkpoint
+
+The operator approved committing and pushing the helper/tests and engineering
+records on `jrmales/dm-syncopation`, followed by the procedure in a separate
+documentation commit. Verification remains **17 passing offline tests** and
+the checks above; no functional changes followed verification. The next
+instrument capture remains operator work and needs no camera/reader rebuild
+or restart for this helper-only update.

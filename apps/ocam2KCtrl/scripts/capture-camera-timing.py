@@ -10,6 +10,7 @@ CPU affinity, IRQ affinity, camera settings, or any pre-existing trace buffer.
 
 import argparse
 import json
+import math
 import os
 from pathlib import Path
 import platform
@@ -83,6 +84,8 @@ class TraceCapture:
         self.created = False
         self.events = []
         self.event_groups = {}
+        # Clock anchors bracket the stop write, including interrupt/error cleanup.
+        self.stop_anchors = {}
 
     def create_instance(self):
         """Create a unique kernel-owned instance; an existing name is an error."""
@@ -162,7 +165,9 @@ class TraceCapture:
         if not self.created:
             return errors
         try:
+            self.stop_anchors = {"begin": anchor()}
             self.write("tracing_on", 0)
+            self.stop_anchors["end"] = anchor()
         except OSError as error:
             errors.append(f"Could not stop {self.instance}: {error}")
         try:
@@ -223,14 +228,18 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tid", type=int, required=True, help="Current camwfs frameGrabber TID")
     parser.add_argument("--cpus", help="CPU list; default is the thread's allowed CPU list (maximum four)")
-    parser.add_argument("--seconds", type=float, default=10, help="Capture duration, 1–30 seconds (default 10)")
+    parser.add_argument("--seconds", type=float, default=5, help="Capture duration, 1–30 seconds (default 5)")
+    parser.add_argument("--settle-seconds", type=float, default=5,
+                        help="Wait after metadata/setup with tracing off, 0–60 seconds (default 5)")
     parser.add_argument("--output", type=Path, required=True, help="New output directory; must not exist")
     parser.add_argument("--extra-events", action="store_true", help="Also enable available timer/workqueue events")
     args = parser.parse_args()
     if os.geteuid() != 0:
         parser.error("Run manually with sudo; tracefs instance creation requires root")
-    if not 1 <= args.seconds <= 30:
-        parser.error("--seconds must be between 1 and 30")
+    if not math.isfinite(args.seconds) or not 1 <= args.seconds <= 30:
+        parser.error("--seconds must be finite and between 1 and 30")
+    if not math.isfinite(args.settle_seconds) or not 0 <= args.settle_seconds <= 60:
+        parser.error("--settle-seconds must be finite and between 0 and 60")
     status = read_if_present(Path(f"/proc/{args.tid}/status"))
     match = re.search(r"^Cpus_allowed_list:\s+(\S+)", status, re.MULTILINE)
     if not match:
@@ -253,35 +262,71 @@ def main():
 
     args.output.mkdir(mode=0o755)
     capture = TraceCapture(tracefs, args.output, cpus, args.extra_events)
-    details = {"duration_requested_s": args.seconds, "tracefs": str(tracefs),
-               "instance": str(capture.instance), "before": metadata(args.tid, cpus)}
-    (args.output / "metadata.json").write_text(json.dumps(details, indent=2) + "\n")
-    print(f"Private instance: {capture.instance}", flush=True)
+    details = {"duration_requested_s": args.seconds, "settle_requested_s": args.settle_seconds,
+               "tracefs": str(tracefs), "instance": str(capture.instance),
+               "capture_started": False, "capture_completed": False, "phase_anchors": {}}
+    phases = details["phase_anchors"]
     exit_status = 0
+    measurement_complete = False
+    phase = "metadata_before"
     signal.signal(signal.SIGINT, interrupted)
     signal.signal(signal.SIGTERM, interrupted)
     try:
+        phases[phase] = {"begin": anchor()}
+        details["before"] = metadata(args.tid, cpus)
+        phases[phase]["end"] = anchor()
+        (args.output / "metadata.json").write_text(json.dumps(details, indent=2) + "\n")
+        print(f"Private instance: {capture.instance}", flush=True)
+
+        phase = "setup"
+        phases[phase] = {"begin": anchor()}
         capture.setup()
+        phases[phase]["end"] = anchor()
         details["enabled_events"] = capture.events
         details["event_groups"] = capture.event_groups
-        details["capture_begin"] = anchor()
-        print(f"Capturing CPUs {cpus} for {args.seconds:g} s; output: {args.output}", flush=True)
+        print(f"Settling {args.settle_seconds:g} s with tracing off, then capturing CPUs {cpus} "
+              f"for {args.seconds:g} s; output: {args.output}", flush=True)
+        (args.output / "metadata.json").write_text(json.dumps(details, indent=2) + "\n")
+
+        phase = "settle"
+        phases[phase] = {"begin": anchor()}
+        time.sleep(args.settle_seconds)
+        phases[phase]["end"] = anchor()
+
+        # Defer console, metadata and output-file I/O until capture has stopped.
+        # Missing phase ends mean incomplete operations; enable/disable anchors
+        # bracket the actual control writes.
+        phase = "capture_enable"
+        phases[phase] = {"begin": anchor()}
+        details["capture_begin"] = phases[phase]["begin"]
         capture.write("tracing_on", 1)
+        phases[phase]["end"] = anchor()
+        details["capture_started"] = True
+        phase = "capture"
         time.sleep(args.seconds)
+        measurement_complete = True
     except KeyboardInterrupt:
         details["interrupted"] = True
+        details["interrupted_phase"] = phase
         exit_status = 130
     except (OSError, RuntimeError) as error:
         details["error"] = str(error)
-        print(f"Capture failed: {error}", flush=True)
         exit_status = 1
     finally:
         # Further ordinary signals must not interrupt stop/save/remove cleanup.
         signal.signal(signal.SIGINT, signal.SIG_IGN)
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
-        details["capture_end"] = anchor()
         details["cleanup_errors"] = capture.close()
+        if capture.stop_anchors:
+            phases["capture_disable"] = capture.stop_anchors
+            if "capture_begin" in details:
+                details["capture_end"] = capture.stop_anchors["begin"]
+        details["capture_completed"] = measurement_complete and "end" in capture.stop_anchors
+        if "error" in details:
+            print(f"Capture failed: {details['error']}", flush=True)
+        phases["metadata_after"] = {"begin": anchor()}
         details["after"] = metadata(args.tid, cpus)
+        phases["metadata_after"]["end"] = anchor()
         final_affinity = re.search(r"^Cpus_allowed_list:\s+(\S+)",
                                    details["after"]["thread_status"], re.MULTILINE)
         details["camera_affinity_still_covered"] = bool(
