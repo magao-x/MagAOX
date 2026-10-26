@@ -273,7 +273,7 @@ The complete [dmtweeter_synco.conf example](../dmtweeter_synco.conf) contains th
 | --- | --- | --- |
 | `shmimMonitor.shmimName` | `dmC` | Code default; configure the actual primary filesystem image (`dm01disp03`/`aol1_dmC` in the first deployment). Existing/unchanged-counter notifications are not new main events. |
 | `shmimMonitor.threadPrio` | 30 | Primary monitor/cycle thread priority. |
-| `shmimMonitor.cpuset` | `spare61` | Primary monitor/cycle thread cpuset. |
+| `shmimMonitor.cpuset` | `dmtweeter-synco` | Primary monitor/cycle thread cpuset; CPU41 in the RTC layout. |
 | `streams.destinations` | `dm01disp07,dm01disp08` | Ordered numbered main-channel mapping. Sources append `_aux`; the first destination supplies every later-step trigger. |
 | `streams.combined` | `dm01disp` | Existing combined-output stream. |
 | `streams.timing` | `<instance>_timing` | Signed-int64 provider schedule; `dmtweeter_synco_timing` for this instance. |
@@ -938,7 +938,7 @@ Programmatic dmMode integration is deferred. Disable dmSyncopation before indepe
 
 ## Operator qualification
 
-1. Verify exclusive destination/source ownership, `spare61` availability, the deployed dmcomb DELAY/counter route and primary monitor semaphore assignment. Confirm the trigger channel is not excluded by astrogrid mode and auxiliary inputs do not unintentionally drive ZPO work.
+1. Verify exclusive destination/source ownership, `dmtweeter-synco` availability, the deployed dmcomb DELAY/counter route and primary monitor semaphore assignment. Confirm the trigger channel is not excluded by astrogrid mode and auxiliary inputs do not unintentionally drive ZPO work.
 2. Use the runtime [DM controller timing telemetry](../../../libMagAOX/app/dev/doc/dmTiming.md): `dm_timing`, `dm_timing_stages` and `[dmtimes]` records. Compare the documented processing/reader endpoints and receipt spacing with app residuals and dmcomb output. Use synco's independent primary statistics for the input-to-combined cadence comparison; the legacy `XWC_DMTIMINGS` buffers are no longer needed.
 3. Qualify delivery tails, observation lag, early-main uncertainty, snapshot/copy budgets and every adjacent/wraparound/copy window under the relevant load. Keep host-timing qualification separate from deterministic CI tests.
 4. Start disabled, verify configuration/status and the selected period source/camera reply age, start the local 200 Hz provider, then enable and wait for lock. Check requested/active/feasible counts, selected/measured rates and delivered cadence.

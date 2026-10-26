@@ -16,9 +16,9 @@ The combined-output observer and camera INDI FPS subscription are disabled.
 The profile retains the two-second diagnostic window, 20000-event capacity,
 20 us excursion threshold, and enabled camera/pipeline diagnostics. Its primary
 observer runs at ordinary scheduling priority without the scheduler's default
-`spare61` CPU placement. Camera observer scheduling also retains its ordinary
-priority default. Keep the camera and `acquWFS-1` configuration, CPU placement,
-priorities and acquisition rate unchanged during the comparison.
+`dmtweeter-synco` CPU placement. Camera observer scheduling also retains its
+ordinary priority default. Keep the camera and `acquWFS-1` configuration, CPU
+placement, priorities and acquisition rate unchanged during the comparison.
 
 ## Prepare the isolated producer chain
 
