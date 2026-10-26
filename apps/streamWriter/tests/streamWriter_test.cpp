@@ -391,11 +391,14 @@ struct streamWriter_data_test
     /// Fill synthetic pixels and timestamps for archive round-trip comparisons.
     int fill_circbuf_uint16();
 
+    /// Fill arbitrary pixel bytes, including floating-point special values, and valid timestamps.
+    int fill_circbuf_bytes();
+
     /// Encode the requested frame window into an archive.
     int write_frames( int start /**< [in] first frame index */, int stop /**< [in] exclusive end index */ );
 
-    /// Decode image and timing archives and compare the requested frame window.
-    int comp_frames_uint16( size_t start /**< [in] first frame index */, size_t stop /**< [in] exclusive end index */ );
+    /// Verify stored encoding methods and compare decoded image and timing frames byte for byte.
+    int comp_frames( size_t start /**< [in] first frame index */, size_t stop /**< [in] exclusive end index */ );
 };
 
 streamWriter_test::streamWriter_test( const std::string &device )
@@ -449,7 +452,7 @@ int streamWriter_data_test::setup_xrif()
 
 int streamWriter_data_test::fill_circbuf_uint16()
 {
-    // fill in image data with increasing 256 bit vals.
+    // Fill image data with increasing 16-bit values.
     for( size_t pp = 0; pp < m_sw->m_circBuffLength; ++pp )
     {
         uint16_t v = pp;
@@ -477,6 +480,42 @@ int streamWriter_data_test::fill_circbuf_uint16()
     return 0;
 }
 
+int streamWriter_data_test::fill_circbuf_bytes()
+{
+    const uint32_t floatBits[] = {
+        0x00000000U, 0x80000000U, 0x7fc01234U, 0x7f801234U, 0x7f800000U, 0xff800000U, 0x00000001U, 0x3f800000U };
+    const uint64_t doubleBits[] = { 0x0000000000000000ULL,
+                                    0x8000000000000000ULL,
+                                    0x7ff8000000001234ULL,
+                                    0x7ff0000000001234ULL,
+                                    0x7ff0000000000000ULL,
+                                    0xfff0000000000000ULL,
+                                    0x0000000000000001ULL,
+                                    0x3ff0000000000000ULL };
+    const size_t   pixels       = m_sw->m_width * m_sw->m_height * m_sw->m_circBuffLength;
+    for( size_t index = 0; index < pixels * m_sw->m_typeSize; ++index )
+        m_sw->m_rawImageCircBuff[index] = static_cast<char>( index * 37 + index / 13 );
+
+    for( size_t index = 0; index < pixels; ++index )
+    {
+        char *pixel = m_sw->m_rawImageCircBuff + index * m_sw->m_typeSize;
+        if( m_sw->m_dataType == XRIF_TYPECODE_FLOAT )
+            std::memcpy( pixel, &floatBits[index % 8], sizeof( floatBits[0] ) );
+        else if( m_sw->m_dataType == XRIF_TYPECODE_DOUBLE )
+            std::memcpy( pixel, &doubleBits[index % 8], sizeof( doubleBits[0] ) );
+    }
+    for( size_t frame = 0; frame < m_sw->m_circBuffLength; ++frame )
+    {
+        uint64_t *timing = m_sw->m_timingCircBuff + 5 * frame;
+        timing[0]        = frame;
+        timing[1]        = frame + 1000;
+        timing[2]        = frame + 2000;
+        timing[3]        = frame + 3000;
+        timing[4]        = frame + 4000;
+    }
+    return 0;
+}
+
 int streamWriter_data_test::write_frames( int start, int stop )
 {
     m_sw->m_rawimageDir = "/tmp";
@@ -489,7 +528,7 @@ int streamWriter_data_test::write_frames( int start, int stop )
     return m_sw->doEncode();
 }
 
-int streamWriter_data_test::comp_frames_uint16( size_t start, size_t stop )
+int streamWriter_data_test::comp_frames( size_t start, size_t stop )
 {
     std::cout << "Reading: " << m_sw->m_outFilePath << "\n";
 
@@ -555,6 +594,22 @@ int streamWriter_data_test::comp_frames_uint16( size_t start, size_t stop )
     if( xrif_frames( xrif ) != stop - start )
     {
         std::cerr << "frames mismatch\n";
+        rv = -1;
+    }
+
+    if( xrif->type_code != m_sw->m_dataType )
+    {
+        std::cerr << "pixel type mismatch\n";
+        rv = -1;
+    }
+
+    const bool integer16 = m_sw->m_dataType == XRIF_TYPECODE_INT16 || m_sw->m_dataType == XRIF_TYPECODE_UINT16;
+    if( xrif->difference_method !=
+            ( m_sw->m_compress && integer16 ? XRIF_DIFFERENCE_PREVIOUS : XRIF_DIFFERENCE_NONE ) ||
+        xrif->reorder_method != ( m_sw->m_compress && integer16 ? XRIF_REORDER_BYTEPACK : XRIF_REORDER_NONE ) ||
+        xrif->compress_method != ( m_sw->m_compress ? XRIF_COMPRESS_LZ4 : XRIF_COMPRESS_NONE ) )
+    {
+        std::cerr << "image encoding methods mismatch\n";
         rv = -1;
     }
 
@@ -786,7 +841,7 @@ TEST_CASE( "streamWriter writing toggle transitions and stopped writes", "[strea
 
         REQUIRE( sw.doEncode() == 0 );
         REQUIRE( sw.m_writing == NOT_WRITING );
-        REQUIRE( sw_test.comp_frames_uint16( 5, 8 ) == 0 );
+        REQUIRE( sw_test.comp_frames( 5, 8 ) == 0 );
     }
 }
 
@@ -830,7 +885,7 @@ TEST_CASE( "streamWriter allocation and encode edge cases", "[streamWriter]" )
         REQUIRE( sw_test.setup_xrif() == 0 );
         REQUIRE( sw_test.fill_circbuf_uint16() == 0 );
         REQUIRE( sw_test.write_frames( 0, 5 ) == 0 );
-        REQUIRE( sw_test.comp_frames_uint16( 0, 5 ) == 0 );
+        REQUIRE( sw_test.comp_frames( 0, 5 ) == 0 );
     }
 
     SECTION( "doEncode returns immediately when not writing" )
@@ -993,7 +1048,7 @@ TEST_CASE( "streamWriter fault injection covers XRIF setup and write warnings", 
         streamWriterFaultInject::faults().setLz4.error       = XRIF_ERROR_BADARG;
 
         REQUIRE( sw_test.write_frames( 5, 10 ) == 0 );
-        REQUIRE( sw_test.comp_frames_uint16( 5, 10 ) == 0 );
+        REQUIRE( sw_test.comp_frames( 5, 10 ) == 0 );
     }
 
     SECTION( "doEncode still recovers frames when timing encode reports an alert after encoding" )
@@ -1011,7 +1066,7 @@ TEST_CASE( "streamWriter fault injection covers XRIF setup and write warnings", 
         streamWriterFaultInject::faults().encode.error       = XRIF_ERROR_NOTIMPL;
 
         REQUIRE( sw_test.write_frames( 2, 5 ) == 0 );
-        REQUIRE( sw_test.comp_frames_uint16( 2, 5 ) == 0 );
+        REQUIRE( sw_test.comp_frames( 2, 5 ) == 0 );
     }
 
     SECTION( "doEncode still recovers frames when timing header generation reports an alert" )
@@ -1029,7 +1084,7 @@ TEST_CASE( "streamWriter fault injection covers XRIF setup and write warnings", 
         streamWriterFaultInject::faults().writeHeader.error       = XRIF_ERROR_NULLPTR;
 
         REQUIRE( sw_test.write_frames( 5, 8 ) == 0 );
-        REQUIRE( sw_test.comp_frames_uint16( 5, 8 ) == 0 );
+        REQUIRE( sw_test.comp_frames( 5, 8 ) == 0 );
     }
 
     SECTION( "doEncode returns success but leaves a truncated archive after a short image-data write" )
@@ -1047,7 +1102,7 @@ TEST_CASE( "streamWriter fault injection covers XRIF setup and write warnings", 
         streamWriterFaultInject::faults().write.resultNmemb = sw.m_xrif->compressed_size / 2;
 
         REQUIRE( sw_test.write_frames( 0, 5 ) == 0 );
-        REQUIRE( sw_test.comp_frames_uint16( 0, 5 ) < 0 );
+        REQUIRE( sw_test.comp_frames( 0, 5 ) < 0 );
     }
 
     SECTION( "doEncode returns success but leaves a truncated archive after a short timing-data write" )
@@ -1066,7 +1121,101 @@ TEST_CASE( "streamWriter fault injection covers XRIF setup and write warnings", 
             std::max<size_t>( 1, sw.m_xrif_timing->compressed_size / 2 );
 
         REQUIRE( sw_test.write_frames( 7, 8 ) == 0 );
-        REQUIRE( sw_test.comp_frames_uint16( 7, 8 ) < 0 );
+        REQUIRE( sw_test.comp_frames( 7, 8 ) < 0 );
+    }
+}
+
+/// Verify compressed and raw archives preserve every byte across supported scalar pixel types.
+/**
+ * \ingroup streamWriter_unit_test
+ */
+TEST_CASE( "streamWriter pixel type round trips", "[streamWriter][pixelTypes]" )
+{
+    // clang-format off
+    #ifdef STREAMWRITER_TEST_DOXYGEN_REF
+    XWCTEST_DOXYGEN_REF( streamWriter::allocate_xrif() );
+    XWCTEST_DOXYGEN_REF( streamWriter::doEncode() );
+    #endif
+    // clang-format on
+
+    const int types[] = { XRIF_TYPECODE_FLOAT,
+                          XRIF_TYPECODE_DOUBLE,
+                          XRIF_TYPECODE_UINT16,
+                          XRIF_TYPECODE_INT16,
+                          XRIF_TYPECODE_UINT8,
+                          XRIF_TYPECODE_INT8,
+                          XRIF_TYPECODE_UINT32,
+                          XRIF_TYPECODE_INT32,
+                          XRIF_TYPECODE_UINT64,
+                          XRIF_TYPECODE_INT64 };
+    for( const auto type : types )
+        for( const bool compress : { false, true } )
+            for( const int frames : { 1, 3 } )
+            {
+                DYNAMIC_SECTION( "type=" << type << " compress=" << compress << " frames=" << frames )
+                {
+                    streamWriterFaultInject::resetScope faultScope;
+                    streamWriter_test                   sw( "pixelTypeTest" );
+                    streamWriter_data_test              sw_test( &sw );
+                    sw.m_compress = compress;
+
+                    REQUIRE( sw_test.setup_circbufs( 8, 2, type, 6, 3 ) == 0 );
+                    REQUIRE( sw_test.setup_xrif() == 0 );
+                    REQUIRE( sw_test.fill_circbuf_bytes() == 0 );
+                    REQUIRE( sw_test.write_frames( 3, 3 + frames ) == 0 );
+                    REQUIRE( sw_test.comp_frames( 3, 3 + frames ) == 0 );
+                    std::filesystem::remove( sw.m_outFilePath );
+                }
+            }
+}
+
+/// Verify reconnect allocation preserves floating-point bits and reselects methods after type changes.
+/**
+ * \ingroup streamWriter_unit_test
+ */
+TEST_CASE( "streamWriter pixel type reconnect round trips", "[streamWriter][pixelTypes]" )
+{
+    // clang-format off
+    #ifdef STREAMWRITER_TEST_DOXYGEN_REF
+    XWCTEST_DOXYGEN_REF( streamWriter::allocate_circbufs() );
+    XWCTEST_DOXYGEN_REF( streamWriter::allocate_xrif() );
+    XWCTEST_DOXYGEN_REF( streamWriter::doEncode() );
+    #endif
+    // clang-format on
+
+    for( const bool compress : { false, true } )
+    {
+        DYNAMIC_SECTION( "compression=" << compress )
+        {
+            streamWriterFaultInject::resetScope faultScope;
+            streamWriter_test                   sw( "pixelReconnectTest" );
+            streamWriter_data_test              sw_test( &sw );
+            sw.m_compress = compress;
+            REQUIRE( sw.initialize_xrif() == 0 );
+            const int types[] = { XRIF_TYPECODE_FLOAT,
+                                  XRIF_TYPECODE_FLOAT,
+                                  XRIF_TYPECODE_UINT16,
+                                  XRIF_TYPECODE_FLOAT,
+                                  XRIF_TYPECODE_DOUBLE,
+                                  XRIF_TYPECODE_INT16,
+                                  XRIF_TYPECODE_UINT8,
+                                  XRIF_TYPECODE_UINT32,
+                                  XRIF_TYPECODE_FLOAT };
+            for( const auto type : types )
+            {
+                INFO( "Reconnected pixel type: " << type );
+                REQUIRE( sw_test.setup_circbufs( 1563, 1, type, 30, 15 ) == 0 );
+                REQUIRE( sw.allocate_xrif() == 0 );
+                REQUIRE( sw_test.fill_circbuf_bytes() == 0 );
+                for( const int frames : { 15, 1 } )
+                {
+                    INFO( "Saved frame count: " << frames );
+                    REQUIRE( sw_test.write_frames( 15, 15 + frames ) == 0 );
+                    REQUIRE( sw_test.comp_frames( 15, 15 + frames ) == 0 );
+                    std::filesystem::remove( sw.m_outFilePath );
+                }
+            }
+        }
     }
 }
 
@@ -1094,6 +1243,15 @@ SCENARIO( "streamWriter Configuration", "[streamWriter]" )
  */
 SCENARIO( "streamWriter encoding data", "[streamWriter]" )
 {
+    // clang-format off
+    #ifdef STREAMWRITER_TEST_DOXYGEN_REF
+    XWCTEST_DOXYGEN_REF( streamWriter::allocate_circbufs() );
+    XWCTEST_DOXYGEN_REF( streamWriter::initialize_xrif() );
+    XWCTEST_DOXYGEN_REF( streamWriter::allocate_xrif() );
+    XWCTEST_DOXYGEN_REF( streamWriter::doEncode() );
+    #endif
+    // clang-format on
+
     GIVEN( "A default constructed streamWriter and a 120x120 uint16 stream" )
     {
         streamWriter_test      sw( "testdev" );
@@ -1110,7 +1268,7 @@ SCENARIO( "streamWriter encoding data", "[streamWriter]" )
 
             REQUIRE( sw_test.write_frames( 0, 5 ) == 0 );
 
-            REQUIRE( sw_test.comp_frames_uint16( 0, 5 ) == 0 );
+            REQUIRE( sw_test.comp_frames( 0, 5 ) == 0 );
         }
 
         WHEN( "writing full 2nd chunk" )
@@ -1125,7 +1283,7 @@ SCENARIO( "streamWriter encoding data", "[streamWriter]" )
 
             REQUIRE( sw_test.write_frames( 5, 10 ) == 0 );
 
-            REQUIRE( sw_test.comp_frames_uint16( 5, 10 ) == 0 );
+            REQUIRE( sw_test.comp_frames( 5, 10 ) == 0 );
         }
 
         WHEN( "writing partial 1st chunk" )
@@ -1140,7 +1298,7 @@ SCENARIO( "streamWriter encoding data", "[streamWriter]" )
 
             REQUIRE( sw_test.write_frames( 2, 5 ) == 0 );
 
-            REQUIRE( sw_test.comp_frames_uint16( 2, 5 ) == 0 );
+            REQUIRE( sw_test.comp_frames( 2, 5 ) == 0 );
         }
 
         WHEN( "writing partial 2nd chunk" )
@@ -1155,7 +1313,7 @@ SCENARIO( "streamWriter encoding data", "[streamWriter]" )
 
             REQUIRE( sw_test.write_frames( 5, 8 ) == 0 );
 
-            REQUIRE( sw_test.comp_frames_uint16( 5, 8 ) == 0 );
+            REQUIRE( sw_test.comp_frames( 5, 8 ) == 0 );
         }
 
         WHEN( "writing a single middle frame" )
@@ -1169,7 +1327,7 @@ SCENARIO( "streamWriter encoding data", "[streamWriter]" )
 
             REQUIRE( sw_test.write_frames( 4, 5 ) == 0 );
 
-            REQUIRE( sw_test.comp_frames_uint16( 4, 5 ) == 0 );
+            REQUIRE( sw_test.comp_frames( 4, 5 ) == 0 );
         }
 
         WHEN( "writing a shorter follow-up save after a longer save" )
@@ -1182,10 +1340,10 @@ SCENARIO( "streamWriter encoding data", "[streamWriter]" )
             REQUIRE( sw_test.fill_circbuf_uint16() == 0 );
 
             REQUIRE( sw_test.write_frames( 0, 5 ) == 0 );
-            REQUIRE( sw_test.comp_frames_uint16( 0, 5 ) == 0 );
+            REQUIRE( sw_test.comp_frames( 0, 5 ) == 0 );
 
             REQUIRE( sw_test.write_frames( 7, 8 ) == 0 );
-            REQUIRE( sw_test.comp_frames_uint16( 7, 8 ) == 0 );
+            REQUIRE( sw_test.comp_frames( 7, 8 ) == 0 );
         }
     }
 }

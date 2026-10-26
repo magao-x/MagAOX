@@ -12,6 +12,11 @@ implemented and validated on `jrmales/streamWriter-idle-cpu`.
 All inspection, builds, and tests ran on the local workstation. No instrument
 access or INDI traffic was used.
 
+Follow-up, 2026-10-26: the user confirmed idle CPU usage stayed down, then
+reported XRIF `-100` alerts around producer restarts. The separate
+[datatype compatibility investigation](streamWriter-xrif-datatypes.md) records
+that reproduction and correction.
+
 ## Implementation record (2026-10-22)
 
 The original investigation and regression assessment below describe the reviewed

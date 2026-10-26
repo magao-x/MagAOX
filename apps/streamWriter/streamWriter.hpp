@@ -282,7 +282,8 @@ class streamWriter : public MagAOXApp<>, public dev::telemeter<streamWriter>
     int allocate_circbufs();
 
     /// Worker function to configure and allocate the xrif handles.
-    /** This takes place in the fg thread after connecting to the stream.
+    /** This takes place in the fg thread after connecting to the stream. When compression is enabled, legacy XRIF
+     * preprocessing is selected only for 16-bit integers; other types use LZ4 without those transforms.
      *
      * \returns 0 on success.
      * \returns -1 on error.
@@ -1147,7 +1148,11 @@ int streamWriter::allocate_xrif()
 
     if( m_compress )
     {
-        rv = xrif_configure( m_xrif, XRIF_DIFFERENCE_PREVIOUS, XRIF_REORDER_BYTEPACK, XRIF_COMPRESS_LZ4 );
+        const bool integer16 = m_dataType == XRIF_TYPECODE_INT16 || m_dataType == XRIF_TYPECODE_UINT16;
+        rv                   = xrif_configure( m_xrif,
+                             integer16 ? XRIF_DIFFERENCE_PREVIOUS : XRIF_DIFFERENCE_NONE,
+                             integer16 ? XRIF_REORDER_BYTEPACK : XRIF_REORDER_NONE,
+                             XRIF_COMPRESS_LZ4 );
         if( rv != XRIF_NOERROR )
         {
             return log<software_critical, -1>( { __FILE__, __LINE__, 0, rv, "xrif handle configuration error." } );

@@ -99,7 +99,7 @@ struct streamWriterConfig
     double                     m_telemeterMaxInterval{ 60.0 };            ///< Telemetry cadence in seconds.
 };
 
-/// RAII wrapper for a temporary uint16 ImageStreamIO stream used by `fgThreadExec()` tests.
+/// RAII wrapper for a temporary ImageStreamIO stream used by `fgThreadExec()` tests.
 class tempStream
 {
   public:
@@ -123,7 +123,20 @@ class tempStream
                        const timespec &atime /**< [in] acquisition timestamp */,
                        const timespec &writetime /**< [in] write timestamp */ );
 
+    /// Copy one float frame and publish its metadata and semaphore notification.
+    void publishFloatFrame( size_t                    frameIndex /**< [in] source circular-buffer index */,
+                            uint64_t                  cnt0 /**< [in] source frame counter */,
+                            const std::vector<float> &pixels /**< [in] complete frame pixels */,
+                            const timespec           &atime /**< [in] acquisition timestamp */,
+                            const timespec           &writetime /**< [in] write timestamp */ );
+
   private:
+    /// Publish metadata and notify readers after filling a source frame.
+    void publishMetadata( size_t          frameIndex /**< [in] source circular-buffer index */,
+                          uint64_t        cnt0 /**< [in] source frame counter */,
+                          const timespec &atime /**< [in] acquisition timestamp */,
+                          const timespec &writetime /**< [in] write timestamp */ );
+
     std::string m_name;          ///< Unique shmim name for the temporary stream.
     IMAGE       m_image{};       ///< ImageStreamIO handle for the temporary stream.
     bool        m_owner{ true }; ///< Whether this wrapper should destroy the underlying shmim on teardown.
@@ -178,6 +191,24 @@ void tempStream::publishFrame(
         frame[n] = baseValue + n;
     }
 
+    publishMetadata( frameIndex, cnt0, atime, writetime );
+}
+
+void tempStream::publishFloatFrame( size_t                    frameIndex,
+                                    uint64_t                  cnt0,
+                                    const std::vector<float> &pixels,
+                                    const timespec           &atime,
+                                    const timespec           &writetime )
+{
+    REQUIRE( m_image.md[0].datatype == _DATATYPE_FLOAT );
+    REQUIRE( pixels.size() == pixelsPerFrame() );
+    float *frame = m_image.array.F + frameIndex * pixelsPerFrame();
+    memcpy( frame, pixels.data(), pixels.size() * sizeof( float ) );
+    publishMetadata( frameIndex, cnt0, atime, writetime );
+}
+
+void tempStream::publishMetadata( size_t frameIndex, uint64_t cnt0, const timespec &atime, const timespec &writetime )
+{
     m_image.md[0].write     = 1;
     m_image.md[0].cnt0      = cnt0;
     m_image.md[0].cnt1      = frameIndex;
@@ -779,6 +810,49 @@ archivedCounters( const std::vector<std::filesystem::path> &paths /**< [in] comp
             counters.push_back( timing[frame * 5] );
     }
     return counters;
+}
+
+/// Decode both archive payloads and compare float pixels and all timing words byte for byte.
+void requireFloatArchive( const std::filesystem::path &path /**< [in] completed archive */,
+                          const std::vector<float>    &pixels /**< [in] expected pixels from 2x2 source frames */,
+                          const std::vector<uint64_t> &timing /**< [in] expected five-word records */ )
+{
+    std::ifstream     file( path, std::ios::binary );
+    std::vector<char> bytes{ std::istreambuf_iterator<char>( file ), std::istreambuf_iterator<char>() };
+    REQUIRE( bytes.size() >= XRIF_HEADER_SIZE * 2 );
+    xrif_t decoder = nullptr;
+    REQUIRE( xrif_new( &decoder ) == XRIF_NOERROR );
+    std::unique_ptr<std::remove_pointer_t<xrif_t>, decltype( &xrif_delete )> owner( decoder, xrif_delete );
+    uint32_t                                                                 header = 0;
+    REQUIRE( xrif_read_header( decoder, &header, bytes.data() ) == XRIF_NOERROR );
+    REQUIRE( decoder->type_code == XRIF_TYPECODE_FLOAT );
+    REQUIRE( decoder->width == 2 );
+    REQUIRE( decoder->height == 2 );
+    REQUIRE( decoder->depth == 1 );
+    REQUIRE( decoder->frames * 4 == pixels.size() );
+    const size_t timingOffset = header + decoder->compressed_size;
+    REQUIRE( bytes.size() >= timingOffset + XRIF_HEADER_SIZE );
+    REQUIRE( xrif_allocate( decoder ) == XRIF_NOERROR );
+    REQUIRE( decoder->compressed_size <= decoder->raw_buffer_size );
+    memcpy( decoder->raw_buffer, bytes.data() + header, decoder->compressed_size );
+    REQUIRE( xrif_decode( decoder ) == XRIF_NOERROR );
+    REQUIRE( memcmp( decoder->raw_buffer, pixels.data(), pixels.size() * sizeof( float ) ) == 0 );
+    REQUIRE( decoder->difference_method == XRIF_DIFFERENCE_NONE );
+    REQUIRE( decoder->reorder_method == XRIF_REORDER_NONE );
+    REQUIRE( decoder->compress_method == XRIF_COMPRESS_LZ4 );
+
+    REQUIRE( xrif_read_header( decoder, &header, bytes.data() + timingOffset ) == XRIF_NOERROR );
+    REQUIRE( decoder->type_code == XRIF_TYPECODE_UINT64 );
+    REQUIRE( decoder->width == 5 );
+    REQUIRE( decoder->height == 1 );
+    REQUIRE( decoder->depth == 1 );
+    REQUIRE( decoder->frames * 5 == timing.size() );
+    REQUIRE( bytes.size() == timingOffset + header + decoder->compressed_size );
+    REQUIRE( xrif_allocate( decoder ) == XRIF_NOERROR );
+    REQUIRE( decoder->compressed_size <= decoder->raw_buffer_size );
+    memcpy( decoder->raw_buffer, bytes.data() + timingOffset + header, decoder->compressed_size );
+    REQUIRE( xrif_decode( decoder ) == XRIF_NOERROR );
+    REQUIRE( memcmp( decoder->raw_buffer, timing.data(), timing.size() * sizeof( uint64_t ) ) == 0 );
 }
 
 /// Send a local in-process writing callback without starting an INDI connection.
@@ -1639,6 +1713,155 @@ TEST_CASE( "streamWriter real workers preserve data across source replacement", 
             startup.disarm();
             REQUIRE( archivedCounters( archivePaths( app.m_rawimageDir ) ) ==
                      ( active ? std::vector<uint64_t>{ 1, 2, 101 } : std::vector<uint64_t>{} ) );
+        } );
+    const int status = child.wait();
+    REQUIRE( WIFEXITED( status ) );
+    REQUIRE( WEXITSTATUS( status ) == 0 );
+}
+
+/** \brief Verify a timed partial chunk preserves a compressed FLOAT32 frame and its complete timing record.
+ * \ingroup streamWriter_unit_test
+ */
+TEST_CASE( "streamWriter real workers preserve FLOAT32 partial time flushes", "[streamWriter][regression][float]" )
+{
+    // clang-format off
+#ifdef STREAMWRITER_TEST_DOXYGEN_REF
+    XWCTEST_DOXYGEN_REF(streamWriter::allocate_xrif());
+    XWCTEST_DOXYGEN_REF(streamWriter::fgThreadExec());
+    XWCTEST_DOXYGEN_REF(streamWriter::doEncode());
+#endif
+    // clang-format on
+    childProcess child(
+        []()
+        {
+            streamWriterLifecycleTest app;
+            startupScope              startup( app );
+            streamWriterConfig        cfg;
+            cfg.m_shmimName    = uniqueShmimName( "float_partial" );
+            cfg.m_startWriting = true;
+            cfg.m_maxChunkTime = 0.1;
+            cfg.m_semWaitNSec  = 10000000;
+            tempStream source( cfg.m_shmimName, 2, 2, 8, _DATATYPE_FLOAT );
+            const auto root         = loadConfig( app, cfg.m_shmimName, cfg );
+            app.m_rawimageDir       = ( root / "raw" ).string();
+            const int startupResult = app.appStartup();
+            startup.markStarted( startupResult == 0 );
+            REQUIRE( startupResult == 0 );
+            REQUIRE( app.appLogic() == 0 );
+            REQUIRE( waitFor( [&app]() { return app.m_fgReady.load(); }, 3000 ) );
+            REQUIRE( app.m_compress );
+            REQUIRE( app.m_writing == START_WRITING );
+
+            const std::vector<float> pixels{ 1.25f, -0.0f, -2.5f, 0.125f };
+            const auto               atime     = currentRealtime();
+            const auto               writetime = offsetTimespec( atime, 100 );
+            source.publishFloatFrame( 0, 1, pixels, atime, writetime );
+            REQUIRE( waitFor( [&app]() { return app.capturedFrames() == 1; } ) );
+            REQUIRE( waitFor( [&app]() { return app.m_writing == START_WRITING && !app.m_writePending; } ) );
+            const auto archives = archivePaths( app.m_rawimageDir );
+            REQUIRE( archives.size() == 1 );
+            requireFloatArchive( archives[0],
+                                 pixels,
+                                 { 1,
+                                   uint64_t( atime.tv_sec ),
+                                   uint64_t( atime.tv_nsec ),
+                                   uint64_t( writetime.tv_sec ),
+                                   uint64_t( writetime.tv_nsec ) } );
+            writingToggle( app, pcf::IndiElement::Off );
+            REQUIRE( app.shutdownStartedApp() == 0 );
+            startup.disarm();
+        } );
+    const int status = child.wait();
+    REQUIRE( WIFEXITED( status ) );
+    REQUIRE( WEXITSTATUS( status ) == 0 );
+}
+
+/** \brief Verify FLOAT32 source replacement while idle, armed, or holding one unsaved frame.
+ * \ingroup streamWriter_unit_test
+ */
+TEST_CASE( "streamWriter real workers preserve FLOAT32 source replacement", "[streamWriter][regression][float]" )
+{
+    // clang-format off
+#ifdef STREAMWRITER_TEST_DOXYGEN_REF
+    XWCTEST_DOXYGEN_REF(streamWriter::allocate_xrif());
+    XWCTEST_DOXYGEN_REF(streamWriter::fgThreadExec());
+    XWCTEST_DOXYGEN_REF(streamWriter::doEncode());
+#endif
+    // clang-format on
+    const unsigned mode = GENERATE( 0u, 1u, 2u );
+    CAPTURE( mode );
+    childProcess child(
+        [mode]()
+        {
+            streamWriterLifecycleTest app;
+            startupScope              startup( app );
+            streamWriterConfig        cfg;
+            cfg.m_shmimName         = uniqueShmimName( "float_restart" );
+            cfg.m_startWriting      = mode != 0;
+            cfg.m_maxChunkTime      = 1;
+            cfg.m_semWaitNSec       = 10000000;
+            auto       source       = std::make_unique<tempStream>( cfg.m_shmimName, 2, 2, 8, _DATATYPE_FLOAT );
+            const auto root         = loadConfig( app, cfg.m_shmimName, cfg );
+            app.m_rawimageDir       = ( root / "raw" ).string();
+            const int startupResult = app.appStartup();
+            startup.markStarted( startupResult == 0 );
+            REQUIRE( startupResult == 0 );
+            REQUIRE( app.appLogic() == 0 );
+            REQUIRE( waitFor( [&app]() { return app.m_fgReady.load(); }, 3000 ) );
+
+            const std::vector<float> beforePixels{ -0.0f, 0.5f, 1.25f, -3.5f };
+            const auto               beforeAtime     = currentRealtime();
+            const auto               beforeWritetime = offsetTimespec( beforeAtime, 100 );
+            if( mode != 1 )
+            {
+                source->publishFloatFrame( 0, 1, beforePixels, beforeAtime, beforeWritetime );
+                REQUIRE( waitFor( [&app]() { return app.capturedFrames() == 1; } ) );
+            }
+            { //mutex scope
+                std::lock_guard<std::mutex> lock( app.m_writeMutex );
+                REQUIRE( app.m_writing == ( mode == 0 ? NOT_WRITING : mode == 1 ? START_WRITING : WRITING ) );
+                REQUIRE( app.m_chunkFrames == ( mode == 2 ? 1 : 0 ) );
+                REQUIRE_FALSE( app.m_writePending );
+            }
+            REQUIRE( archivePaths( app.m_rawimageDir ).empty() );
+            source.reset();
+            REQUIRE( waitFor( [&app]() { return !app.m_fgReady.load(); } ) );
+            source = std::make_unique<tempStream>( cfg.m_shmimName, 2, 2, 8, _DATATYPE_FLOAT );
+            REQUIRE( waitFor( [&app]() { return app.m_fgReady.load(); }, 3000 ) );
+            REQUIRE( app.m_writing == ( mode == 0 ? NOT_WRITING : START_WRITING ) );
+            REQUIRE( app.capturedFrames() == 0 );
+            REQUIRE_FALSE( app.m_writePending );
+            auto archives = archivePaths( app.m_rawimageDir );
+            REQUIRE( archives.size() == ( mode == 2 ? 1 : 0 ) );
+            if( mode == 2 )
+                requireFloatArchive( archives[0],
+                                     beforePixels,
+                                     { 1,
+                                       uint64_t( beforeAtime.tv_sec ),
+                                       uint64_t( beforeAtime.tv_nsec ),
+                                       uint64_t( beforeWritetime.tv_sec ),
+                                       uint64_t( beforeWritetime.tv_nsec ) } );
+            if( mode == 0 )
+                writingToggle( app, pcf::IndiElement::On );
+
+            const std::vector<float> afterPixels{ 7.75f, -0.0f, -8.5f, 0.0625f };
+            const auto               afterAtime     = currentRealtime();
+            const auto               afterWritetime = offsetTimespec( afterAtime, 100 );
+            source->publishFloatFrame( 0, 101, afterPixels, afterAtime, afterWritetime );
+            REQUIRE( waitFor( [&app]() { return app.capturedFrames() == 1; } ) );
+            REQUIRE( waitFor( [&app]() { return app.m_writing == START_WRITING && !app.m_writePending; }, 3000 ) );
+            archives = archivePaths( app.m_rawimageDir );
+            REQUIRE( archives.size() == ( mode == 2 ? 2 : 1 ) );
+            requireFloatArchive( archives.back(),
+                                 afterPixels,
+                                 { 101,
+                                   uint64_t( afterAtime.tv_sec ),
+                                   uint64_t( afterAtime.tv_nsec ),
+                                   uint64_t( afterWritetime.tv_sec ),
+                                   uint64_t( afterWritetime.tv_nsec ) } );
+            writingToggle( app, pcf::IndiElement::Off );
+            REQUIRE( app.shutdownStartedApp() == 0 );
+            startup.disarm();
         } );
     const int status = child.wait();
     REQUIRE( WIFEXITED( status ) );
