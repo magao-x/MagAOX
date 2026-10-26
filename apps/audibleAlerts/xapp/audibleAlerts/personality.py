@@ -20,6 +20,8 @@ def action_dict_to_playback_request(action_dict):
         return Recording(action_dict['file'])
     elif action_dict['type'] == 'speak':
         return DynamicSpeech(action_dict['text'], custom_voice_name=action_dict.get('voice'))
+    else:
+        raise ValueError(f"Expected a key 'type' with either 'play' or 'speak', got {action_dict=}")
 
 class Operation(Enum):
     EQ = 'eq'
