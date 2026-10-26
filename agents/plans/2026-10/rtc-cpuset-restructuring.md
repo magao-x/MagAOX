@@ -6,8 +6,10 @@ listed `dlDataCollection`. Remaining deployed/runtime differences await operator
 confirmation. Operator topology readback confirms the core/cache groups below.
 The annotated table and subsequent corrections authorize the first rename
 migration, EDT IRQ placement on CPU34 and synco on CPU41. Workstation
-scripts/configs are updated and locally validated; deployment and runtime
-verification remain operator steps. Two additional spare cores on CPU30/31
+scripts/configs are updated and locally validated. The operator reports that
+the migration worked on the first attempt and the system is running closed
+loop. Detailed runtime placement readback and timing comparison remain open.
+Two additional spare cores on CPU30/31
 expand the RT pool to 34 physical cores; further growth is deferred.
 
 ## Objective and scope
@@ -534,9 +536,10 @@ RTC config cpuset references, preserved ICC/CACAO files, camacq's zero
 priorities, synco's matching source/example/local-config name, shell syntax,
 consistent system/offline/IRQ masks, companion header clang-format, Markdown
 links and whitespace. All ten cleanup tests pass using temporary trees and
-mocked removals. No actual cgroup, IRQ or instrument operation was executed.
-Deployment, runtime thread/IRQ readback
-and the post-migration timing comparison remain operator follow-up steps.
+mocked removals. No actual cgroup, IRQ or instrument operation was executed
+by an agent. The operator reports successful deployment and a closed-loop
+restart; detailed thread/IRQ readback and the post-migration timing comparison
+remain follow-up steps.
 
 ## Implementation dependencies and sequence
 
@@ -640,8 +643,13 @@ independent of the RTC rollout.
   `14401b2`, and its temporary feature branch was removed. Synco app source
   and current documentation remain on the app's feature branch because the
   app is absent from `dev`. No instrument deployment or push performed.
+- 2026-10-26: Operator reports that the cpuset migration worked on the first
+  attempt and the system is up with a closed AO loop. This records deployment
+  and restart success; no new per-thread/IRQ affinity output, loop gain or
+  post-migration timing capture was supplied with the report.
 - Operator additions: Remaining missing/legacy configs are outside this migration.
 - Target allocation review: First migration approved through operator annotations
   and CPU41/54/55 corrections, plus the CPU30/31 expansion; further growth deferred.
 - Implementation and local verification: Complete for this migration; see checks above.
-- Operator deployment, runtime verification and timing results: TBD.
+- Operator deployment: Successful on first attempt; closed-loop operation reported.
+- Runtime placement readback and post-migration timing results: Pending.
