@@ -4,6 +4,92 @@
 
 The [engineering plan](../../../agents/plans/2026-10/dm-syncopation.md) records settled design decisions; the [debugging record](../../../agents/plans/2026-10/dm-syncopation-debugging.md) records operator trials and local fixes. The trials have not yet established sustained requested cadence, and the measured-acquisition reference changes described here need operator retesting. Initial timing values are starting budgets for qualification, not measured instrument bounds. All live instrument setup, INDI actions and timing measurements are performed by the operator.
 
+## Read-only schedule simulation
+
+`simulation.enabled=true` selects a startup-only observer of the proposed
+median-period, counter-labelled scheduler. It runs automatically while
+`enable.toggle` is Off and rejects requests to turn scheduling On. It opens
+the existing primary and combined streams for observation and records
+conditional **would-run/skip** decisions. It creates no auxiliary source or
+provider timing stream, copies no destination pixels, changes no command
+counters, and sends no DM triggers. Normal monitor semaphore registration and
+notification consumption still occur.
+
+```text
+existing primary metadata ----> median period + frozen future grid
+                                           |
+existing combined trace ---> actual main/output association
+                                           |
+configured timing bounds ---> evaluate each fixed step independently
+                                           |
+                              simulation INDI + [dmsynco] telemetry
+
+                    No path from this model to DM command streams
+```
+
+This is distinct from `diagnostics.only`, which observes an arbitrary primary
+without a combined DM stream. Simulation needs the real primary/combined
+pair, and its combined observer remains enabled. The ordinary scheduler
+behavior described in the following sections is unchanged; the simulation
+does not enable the proposed grid policy for real commands.
+
+The non-default starting configuration is available in
+[dmtweeter_synco_sim.conf](../dmtweeter_synco_sim.conf):
+
+```ini
+[shmimMonitor]
+shmimName=dm01disp03
+
+[scheduler]
+maxSubframes=2
+
+[simulation]
+enabled=true
+```
+
+Configure the actual primary filesystem image; `aol1_dmC` may be its alias.
+The INDI device can retain the historical name `dmtweeter-synco`; any shared
+memory names continue to use underscores. Simulation creates no
+`dmtweeter_synco_timing` stream for a provider. An existing provider timing
+stream from an earlier run is not refreshed by this mode.
+
+The model estimates period from qualified consecutive primary publication
+intervals and phase from coherent counter/monotonic-observation pairs. A
+main keeps its genuine counter-labelled cycle even when it crosses a grid
+boundary. Each phase residual uses a prediction frozen before that main was
+observed. Median-window warmup, missing or ambiguous combined traces, gaps,
+and reader holds can leave steps unavailable. A skipped passive preparation
+does not itself suppress a later active slot; that slot still requires its
+actual main/output association and reader-safe preparation window. A late
+main does not slide an active target.
+
+Nominal model feasibility also respects `scheduler.maxCadenceHz` with the
+existing `tracking.rateTolerance`, as well as the complete reader/copy timing
+window. Simulation does not bypass the requested total-cadence cap.
+
+The retained period also needs fresh qualified intervals. Its freshness
+timeout is twice the period at `tracking.minMainRateHz` (4 ms with the default
+500 Hz minimum). Continuing primary counters with unusable publication
+intervals do not keep an old period/grid valid indefinitely.
+
+Would-run counts assume complete source data, the configured snapshot/copy
+budgets, and synthetic auxiliary submissions consumed under the configured
+delivery and reader-hold allowances. No actual auxiliary transaction tests
+those assumptions. Combined traces must be coherent and linked to the
+configured primary; an unlinked/stale trace cannot establish a reader-safe
+main-output association. Conservative holds may therefore produce skips even
+when a physical delivery could have succeeded.
+
+The physical early-main reserve remains undecided. Simulation uses the
+configured `tracking.earlyMainUs` value, **20 us by default**, as an explicit
+assumption; would-run counts do not qualify it. Observation phase includes
+monitor wake lag, cadence/pipeline callback bookkeeping before the metadata
+sample, and any cycle-mutex wait. It is not an exact primary publication phase. Compare the
+independent publication/receipt timing diagnostics and qualify clock/lag
+uncertainty before interpreting negative phase tails as physical earliness.
+An early main can cancel future modeled work but cannot protect an auxiliary
+command already issued by a future operational implementation.
+
 ## Streams and command flow
 
 ```text
@@ -216,6 +302,10 @@ The complete [dmtweeter_synco.conf example](../dmtweeter_synco.conf) contains th
 | `recovery.consecutiveMisses` | 3 | Consecutive original unsafe/missed events before reacquisition. |
 | `feedback.gain` | 0.1 | Independent per-event wait-integrator gain, 0–1. |
 | `feedback.maxAdvanceUs` | 20 | Maximum wait correction; step-0 advance is nonnegative and starts at this value after a feedback reset. |
+| `simulation.enabled` | false | Startup-only read-only grid simulation. Automatically observes with scheduler enable Off and rejects enable On; creates no auxiliary/provider streams or command writes. |
+| `simulation.window` | 32 | Number of qualified period samples and counter/observation pairs retained by the simulation estimator, 4–256. |
+| `simulation.phaseGain` | 0.1 | Positive simulation phase correction gain, at most 1; affects only a future uncommitted cycle. |
+| `simulation.phaseSlewUs` | 1 | Maximum simulation phase correction per future cycle. Nonnegative and at most one quarter of the shortest accepted primary interval (62.5 us with the default maximum primary rate). Does not change any physical timing reserve. |
 | `diagnostics.windowSec` | 2 | Elapsed-time window for all independent observers; zero disables collection. |
 | `diagnostics.maxEvents` | 20000 | Queue and retained-event cap for each observer; zero disables collection. Storage is allocated before the monitors start. |
 | `diagnostics.excursionUs` | 20 | Camera acquisition/publication and primary excursion threshold around each diagnostic window median, in microseconds; zero disables pair/conditional classification. Ordinary trace timing remains enabled. Independent of scheduler timing bounds. |
@@ -263,9 +353,38 @@ Application properties belong to the configured INDI device: `dmtweeter_synco` i
 | `pipeline_timing_quality` | Number, read-only | Primary excursion classification, trace stage count, coverage and qualification counters. |
 | `pipeline_stage0` ... `pipeline_stage9` | Number, read-only | Trace-row identity, ordinary processing/handoff durations and excursion-conditioned changes. Trace rows are unrelated to synco substep numbers. |
 | `pipeline_boundary_timing` | Number, read-only | Oldest represented stage-start intervals and signed changes in the primary publication tail. |
-| `health` | Text, read-only | `reason`, `lastFault`, `periodSource`, `primary`, `combined`, `timingStream`, `mapping`, `mode`. Current phase/reason, latched fault, selected period reference and resolved stream identities. Mode is `scheduler` or `diagnostics only`. |
+| `simulation` | Number, read-only | Simulation estimator validity, period, frozen grid/phase residuals, configured early reserve and observation-quality counts. Durations use the units in their element names. |
+| `simulation_steps` | Number, read-only | Per-step conditional considered/would-run/skip/overlap counts. These are modeled outcomes, not DM deliveries. |
+| `simulation_status` | Text, read-only | Current simulation state and explicit assumptions/limitations. |
+| `health` | Text, read-only | `reason`, `lastFault`, `periodSource`, `primary`, `combined`, `timingStream`, `mapping`, `mode`. Current phase/reason, latched fault, selected period reference and resolved stream identities. Mode also identifies simulation when selected. |
 
 `settings` uses its named elements directly; there are no numeric `current`/`target` pairs. Updates while enabled, unknown elements, nonfinite values and invalid counts/ranges are rejected without changing the active configuration. Changing `steps` never changes source-image count. After an accepted disabled update, enable again to acquire a new schedule.
+
+Simulation is selected in the startup configuration, not through an INDI toggle.
+Accepted disabled `settings` changes restart its model; observations then resume
+automatically with operational enable Off. Its numeric `simulation` property
+contains:
+
+| Elements | Meaning |
+| --- | --- |
+| `enabled`, `valid`, `feasible` | Simulation selected, fresh predicted grid available, and nominal complete-cycle feasibility. A valid grid can still have unavailable individual steps. |
+| `session`, `sequence` | Simulation reset/identity epoch and distinct accepted primary-observation count. |
+| `periodUs`, `periodSamples`, `phaseSamples` | Robust period in microseconds and retained estimator sample counts. |
+| `gridNs`, `nextGridNs`, `nextActiveNs` | Frozen/current and next predicted targets in same-host monotonic nanoseconds; zero means unavailable. These are diagnostic targets, not provider deadlines. |
+| `phaseUs`, `phaseMinUs`, `phaseMaxUs`, `phaseCount` | Latest, session minimum/maximum and count of observation residuals against predictions committed before those observations. Negative means observed earlier than predicted. |
+| `earlyReserveUs` | Configured early-main assumption, explicitly unqualified by simulation. |
+| `duplicates`, `gaps`, `resets`, `invalid`, `excluded` | Unchanged-counter notifications, forward gaps, resets, rejected observations, and period samples excluded from estimation. An excluded interval does not itself become a synchronization fault. |
+| `outputGaps`, `associations` | Missing/ambiguous combined progression and accepted coherent actual main/output associations. |
+
+For each configured index `j`, `simulation_steps` exposes
+`step{j}Considered`, `step{j}WouldRun`, `step{j}Skipped`, and `step{j}Overlap`.
+Detailed skip-reason counts are retained in the appended `[dmsynco]`
+simulation table. The text `simulation_status.state` describes warmup or the
+current conditional state, and `policy` identifies the modeling assumptions.
+Use simulation fields for modeled outcomes; operational `timing.delivered`
+does not count hypothetical submissions. The requested count remains in
+`settings.steps`; the full assumed timing bounds and estimator settings are
+recorded in the appended telemetry table.
 
 The `timing` summary includes:
 
@@ -720,8 +839,9 @@ first comparison, leave scheduling disabled and compare `cameraAcquisitionInterv
 extrema with `pipeline_stage` conditioned changes and `pipelineSourceInterval`.
 Ordinary app-logic passes emit these diagnostics even if the schedule snapshot
 is busy; an absent trace does not suppress camera or primary interval statistics.
-No median-grid scheduler, skip-recovery or targeted extra-step wake behavior is
-implemented by these diagnostic additions.
+These diagnostics do not change operational median-grid scheduling,
+skip-recovery or targeted extra-step wake behavior. The separate read-only
+simulation evaluates the proposed grid policy without issuing commands.
 
 ### Isolate camera publication and the first AO stage
 
@@ -742,6 +862,41 @@ enable requests. `health.mode` identifies the mode. Its records have
 statistics remain usable without a DM combiner or DM-controller stream. The
 profile explicitly selects ordinary primary monitor scheduling and clears its
 usual cpuset. Normal scheduler mode retains its existing defaults and behavior.
+
+### Capture a simulation run
+
+The operator performs these steps on the instrument. Rebuild/install both
+`dmSyncopation` and `logdump` so the writer and reader understand the appended
+simulation table. The instrument's `teldump` alias is
+`logdump --dir=/opt/MagAOX/telem --ext=.bintel`; no separate `teldump` build is
+needed.
+
+1. Disable scheduling, then stop the existing `dmtweeter-synco` instance. Add
+   the simulation settings above to its active configuration and retain the
+   desired observer CPU placement. For a separately named test instance,
+   install its required `/opt/MagAOX/config/<instance>.conf` before launch;
+   `-c` alone does not replace that required instance file.
+2. Restart the instance with `simulation.enabled=true`. Keep any auxiliary
+   providers stopped. Verify `enable.toggle=Off`, simulation mode in
+   `health.mode`, and the existing primary/combined stream names. An On
+   request is rejected in this mode; no enable operation is needed to collect.
+3. Allow the estimator to warm up. Inspect `simulation`, `simulation_steps`,
+   `simulation_status`, `primary_timing_quality`, and
+   `combiner_timing_quality`. A grid and a coherent output association are
+   separate requirements. Record absent associations, gaps and rejected
+   observations along with would-run counts.
+4. Keep camera/loop settings, dmcomb trigger mode, CPU/IRQ placement and
+   workload fixed. Record those settings and capture at least 60 seconds of
+   synco telemetry, ideally alongside `dmtweeter` and `camwfs` telemetry over
+   the same period. For example, run `teldump -f dmtweeter-synco` and save its
+   output, then stop it with Ctrl-C after the requested interval. Save the
+   initial INDI snapshot as well as the final snapshot so cumulative outcome
+   differences can be interpreted.
+5. Review frozen phase residual tails, collection/association quality, nominal
+   feasibility, and each step's skip reasons. Do not infer physical delivered
+   cadence or an acceptable early reserve from would-run totals. Restart
+   with `simulation.enabled=false` to return to normal scheduling mode; keep
+   real scheduling disabled until timing bounds and wake routing are qualified.
 
 ## 200 Hz tip/tilt test provider
 

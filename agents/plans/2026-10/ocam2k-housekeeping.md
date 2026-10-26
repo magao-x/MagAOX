@@ -542,3 +542,23 @@ the intended adaptive temperature cadence. Remaining qualification includes:
 
 This update records operator feedback only; application code and instrument
 configuration are unchanged.
+
+
+## Full-loop timing baseline — 2026-10-25
+
+The [full-loop analysis](full-loop-timing-20261025.md) covers the operator's
+two-minute capture after the policy/parser updates. Conditions are bin2, 2 kHz,
+EM gain 10, shutter SHUT, synchronization ON, on-target cooling, AO loop closed
+at gain zero and no changes during capture. All four represented AO stages
+advance. This is a computational baseline; older EM gain 595/open-shutter
+captures are not matched comparisons.
+
+Eleven successful serial exchanges occur **10.567–10.570 s** apart and accompany
+temperature updates, consistent with idle polling. Command identities are not
+recorded, so this supports the reduced aggregate serial cadence without proving
+gain/FPS silence individually. Quiet camera windows have acquisition interval
+SD **0.279 us**, range **499–501 us**; serial-containing windows retain
+**480–520 us** tails. No new direct-camera failures, frame/counter gaps or event
+drops occur. A separate conversion regime raises publication interval deviation
+to about **2.7 us** between exchanges. Continue that investigation separately
+from sparse serial-associated tails; production housekeeping remains unchanged.

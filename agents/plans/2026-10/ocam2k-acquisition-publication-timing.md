@@ -3453,3 +3453,50 @@ variation.
 - `tests/edtinc.h`
 - `tests/groups.dox`
 - `tests/tests.list`
+
+
+## 2026-10-25 full-loop return: a long current SDK wait
+
+The [full-loop trigger comparison](full-loop-trigger-modes-20261025.md) records
+the operator's mode-4 / mode-3 / mode-4 sequence with otherwise unchanged
+gain-zero closed-loop conditions. In the second mode-4 return, camera driver
+intervals remain **500 / 500 us**, while SDK-return intervals are
+**825.058 / 174.550 us**. The late frame's current wait-entry to SDK-return
+bracket lasts **784.822 us** after normal entry; previous rearm is 5.360 us and
+the previous publication-to-entry tail is 12.594 us. Conversion stays ordinary.
+Qualified clock brackets place driver stamp to return near **347 us** instead
+of the neighboring **22 us**. This is a distinct diagnostic target from earlier
+post-return conversion variation and long previous-rearm tails. Serial overlap
+is recorded, but separating driver/library waiting, kernel wakeup and userspace
+scheduling requires a simultaneous trace. Direct camera delivery counters show
+no frame/counter gaps, failed/rejected frames or dropped events; clock-bracket
+qualification limitations are recorded in the linked comparison. This entry
+records evidence only; no acquisition code or instrument configuration is
+changed.
+
+
+## 2026-10-25 frame-age concern after the full-loop return
+
+The operator reports persistent one-frame-or-greater camera lag with consecutive
+frame numbers and no other indication. The [full-loop comparison](full-loop-trigger-modes-20261025.md)
+now distinguishes freshness from counter continuity. The reviewed SDK selects
+the latest completed buffer at wait-call entry, then returns that requested
+buffer without selecting again at return. OCAM has timeout/result and frame-gap
+checks, but no frame-age fault/recovery threshold for a contiguous stale frame.
+
+The captured large event has publication-minus-driver-stamp ages
+**49.527 -> 374.685 -> 49.996 us**: this event recovers host-side age on the
+next frame. No retained interior camera population across the five captures has
+a sustained extra 500 us of post-stamp age. Existing `acquisitionToWrite` and
+camera `fgtimes.wma` can reveal post-stamp buffering; they do not establish
+exposure age or exclude a delay before DMA stamping. The reported persistent
+case remains an investigation target requiring an independent camera/sync
+reference as well as timestamp age. No recovery or acquisition policy changes
+are made here.
+
+The operator now elects to resume dmSyncopation, accepting the remaining
+excursions after reducing production serial traffic, rather than undertaking
+major additional EDT optimization. The [scheduler plan](dm-syncopation.md)
+records fixed-grid prediction and per-step skips as the next active work.
+The camera freshness and long-wait investigations above remain follow-ups;
+this scope decision does not claim those mechanisms are resolved.
