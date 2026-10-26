@@ -336,12 +336,12 @@ class AudibleAlerts(XDevice):
                     if not orig_fp.exists():
                         log.error(f"{orig_fp} doesn't exist, skipping")
                         continue
-                    dest_fp = self._static_cache_path / req.path
-                    if not dest_fp.exists():
-                        shutil.copy(orig_fp, dest_fp)
+                    fp = self._static_cache_path / req.path
+                    if not fp.exists():
+                        shutil.copy(orig_fp, fp)
                     self.playback_text['speech'] = ''
                     self.playback_text['voice'] = ''
-                    self.playback_text['file'] = f"{dest_fp.relative_to(self.config.cache)}"
+                    self.playback_text['file'] = f"{fp.relative_to(self.config.cache)}"
                     self.telem("play", {"file": self.playback_text['file'], "speech": "", "voice": ""})
                 elif isinstance(req, DynamicSpeech):
                     # apply substitutions
