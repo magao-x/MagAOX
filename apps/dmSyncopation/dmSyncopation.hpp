@@ -525,7 +525,7 @@ class dmSyncopation : public MagAOXApp<true>,
 inline dmSyncopation::dmSyncopation() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
 {
     shmimMonitorT::m_smThreadPrio       = 30;
-    shmimMonitorT::m_smCpuset           = "spare61";
+    shmimMonitorT::m_smCpuset           = "dmtweeter-synco";
     shmimMonitorT::m_targetState        = stateCodes::READY;
     combinerMonitorT::m_smThreadPrio    = 0;
     combinerMonitorT::m_targetState     = stateCodes::READY;
