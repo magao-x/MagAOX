@@ -28,15 +28,16 @@ operator. Agents work from workstation copies of files and operator reports.
 
 The RTC scripts, cleanup tests and this engineering record belong to
 `jrmales/rtc-cpuset-restructure`, based directly on `dev` at `cd37915d`.
-That base does not contain dmSyncopation. Its source/example cpuset change
+This includes the `dmtweeter-synco` cpuset itself on CPU41. That base does
+not contain the dmSyncopation app. Its source/example cpuset change
 is preserved separately on `jrmales/dm-syncopation` in `6e3d454e`, followed
 by the corresponding current documentation in `c4ac2272`. The explicit local
 synco config selects CPU41 independently of that source-default change.
 
 The separate config repository contains the 17 matching config changes in
-`14401b2` on `jrmales/rtc-cpuset-restructure`, based on its `onsky` branch;
-that repository has no `dev` branch. The migration requires the matching
-scripts and configs together.
+`14401b2` on `onsky`, as requested by the operator. The config repository
+does not need a feature branch. The migration requires the matching scripts
+and configs together.
 
 ## Sources and meaning of the baseline
 
@@ -633,6 +634,12 @@ independent of the RTC rollout.
   tests and this record. Synco-specific integration remains on its original
   feature branch in `6e3d454e`/`c4ac2272`; matching config changes are committed
   separately in `14401b2`. No instrument deployment or push performed.
+- 2026-10-26: Operator confirmed that synco's cpuset setup belongs in this
+  standalone migration; CPU41 is already included in `e1d0d085`. At the
+  operator's request, the config repository's `onsky` branch now contains
+  `14401b2`, and its temporary feature branch was removed. Synco app source
+  and current documentation remain on the app's feature branch because the
+  app is absent from `dev`. No instrument deployment or push performed.
 - Operator additions: Remaining missing/legacy configs are outside this migration.
 - Target allocation review: First migration approved through operator annotations
   and CPU41/54/55 corrections, plus the CPU30/31 expansion; further growth deferred.
