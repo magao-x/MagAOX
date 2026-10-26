@@ -21,6 +21,7 @@
 #include "../../libMagAOX/app/dev/dmTiming.hpp"
 #include "../../magaox_git_version.h"
 #include "syncoSchedule.hpp"
+#include "syncoSimulation.hpp"
 
 namespace MagAOX
 {
@@ -182,11 +183,23 @@ class dmSyncopation : public MagAOXApp<true>,
     bool          m_cameraDiagnostics{ true };   ///< Observe camera acquisition/publication independently of INDI FPS.
     bool          m_pipelineDiagnostics{ true }; ///< Retain the primary's bounded upstream process trace.
     bool          m_diagnosticsOnly{ false };    ///< Observe arbitrary primary metadata without attaching DM resources.
+    bool          m_simulationEnabled{ false };  ///< Startup-only shadow policy; live scheduling is prohibited.
+    unsigned      m_simulationWindow{ 32 };      ///< Bounded median period and counter-normalized phase window.
+    double        m_simulationPhaseGain{ 0.1 };  ///< Future-grid phase smoothing gain.
+    double        m_simulationPhaseSlewUs{ 1 };  ///< Maximum phase correction per newly planned cycle, us.
     synco::Bounds m_bounds;                      ///< Explicit copy, observation and reader bounds, ns.
     ///@}
 
-    std::mutex           m_cycleMutex;       ///< Serializes lifecycle/configuration with a complete callback.
-    std::atomic<bool>    m_enabled{ false }; ///< Cancellation request, checked at bounded waits and publications.
+    std::mutex                         m_cycleMutex; ///< Serializes lifecycle/configuration with a complete callback.
+    synco::Simulation                  m_simulation; ///< Fixed-storage shadow engine, serialized by the cycle mutex.
+    MagAOX::dmSyncoSimulation::Summary m_simulationSnapshot; ///< Ordinary-thread cached telemetry/INDI snapshot.
+    int64_t  m_simulationPublication{ 0 };         ///< Prior coherent primary writetime, in its own external clock.
+    uint64_t m_simulationCounter{ 0 };             ///< Primary counter paired with the publication baseline.
+    int64_t  m_simulationCombinedPublication{ 0 }; ///< Last accepted combined producer timestamp in its own clock.
+    int64_t  m_simulationCombinedStart{ 0 };       ///< Last accepted combiner trace start; rejects stale replay.
+    int64_t  m_simulationCombinedUpdate{ 0 };      ///< Last accepted combiner trace update; rejects stale replay.
+    uint64_t m_simulationCombinedCounter{ 0 };     ///< Counter paired with the accepted combined trace.
+    std::atomic<bool>    m_enabled{ false };       ///< Cancellation request, checked at bounded waits and publications.
     std::mutex           m_cameraMutex; ///< Protects only the pending camera report, never a timed cycle or INDI I/O.
     std::atomic<double>  m_cameraFps{ 0 };       ///< Latest validated pending acquisition frequency, Hz.
     std::atomic<int64_t> m_cameraTime{ 0 };      ///< Original receipt time of the pending camera report.
@@ -273,12 +286,15 @@ class dmSyncopation : public MagAOXApp<true>,
     int64_t m_step0Wake{ 0 };       ///< Latest passive-copy start lateness relative to the requested wake, ns.
     int64_t m_step0WakeMax{ 0 };    ///< Maximum observed passive-copy wake/check lateness, ns.
 
-    pcf::IndiProperty m_indiP_enable;        ///< Enable request and acknowledged quiescence.
-    pcf::IndiProperty m_indiP_reacquire;     ///< Request fresh synchronization.
-    pcf::IndiProperty m_indiP_settings;      ///< Disabled-only essential numeric controls.
-    pcf::IndiProperty m_indiP_status;        ///< Compact rates/counts/outcome summary.
-    pcf::IndiProperty m_indiP_health;        ///< Schedule reason and stream identities.
-    pcf::IndiProperty m_indiP_camera;        ///< External camera FPS subscription.
+    pcf::IndiProperty m_indiP_enable;           ///< Enable request and acknowledged quiescence.
+    pcf::IndiProperty m_indiP_reacquire;        ///< Request fresh synchronization.
+    pcf::IndiProperty m_indiP_settings;         ///< Disabled-only essential numeric controls.
+    pcf::IndiProperty m_indiP_status;           ///< Compact rates/counts/outcome summary.
+    pcf::IndiProperty m_indiP_health;           ///< Schedule reason and stream identities.
+    pcf::IndiProperty m_indiP_camera;           ///< External camera FPS subscription.
+    pcf::IndiProperty m_indiP_simulation;       ///< Conditional grid, phase and collection-quality diagnostics.
+    pcf::IndiProperty m_indiP_simulationSteps;  ///< Per-step hypothetical outcomes; never actual deliveries.
+    pcf::IndiProperty m_indiP_simulationStatus; ///< Shadow state and conditional-policy identification.
     pcf::IndiProperty m_indiP_primaryTiming; ///< Continuous observed primary publication/receipt statistics in seconds.
     pcf::IndiProperty
         m_indiP_primaryTimingQuality;       ///< Independent diagnostic coverage, validity and collection quality.
@@ -373,6 +389,27 @@ class dmSyncopation : public MagAOXApp<true>,
     INDI_SETCALLBACK_DECL( dmSyncopation, m_indiP_camera );
 
   protected:
+    /// Configure/reset the shadow engine without opening or modifying any image.
+    bool configureSimulation();
+
+    /// Begin a new shadow attachment epoch and clear external-clock metadata baselines.
+    void resetSimulation();
+
+    /// Normalize an external metadata timestamp without mixing it with the monotonic clock.
+    static int64_t simulationTimestamp( const timespec &stamp /**< [in] External timestamp; zero means invalid. */ );
+
+    /// Sample primary metadata and advance the shadow policy; never execute a scheduled copy.
+    void readSimulationPrimary();
+
+    /// Sample a linked combined-output trace for the shadow reader-hold model.
+    void readSimulationCombined();
+
+    /// Register read-only conditional simulation diagnostics.
+    int setupSimulationINDI();
+
+    /// Publish the ordinary-thread cached shadow snapshot outside the cycle mutex.
+    void updateSimulationINDI();
+
     /// Capture local entry and best-effort primary metadata before acquiring the cycle mutex.
     void readPrimaryCadence( int64_t observed /**< [in] Existing monotonic callback-entry timestamp. */ );
 
@@ -553,6 +590,10 @@ inline void dmSyncopation::setupConfig()
         { "diagnostics.combiner", "Observe combined-stream cadence and producer trace independently of scheduling." },
         { "diagnostics.camera", "Observe camera acquisition/publication intervals independently of camera INDI FPS." },
         { "diagnostics.pipeline", "Observe the primary producer's bounded upstream processing trace." },
+        { "simulation.enabled", "Observe a conditional fixed-grid policy without copying or triggering DM commands." },
+        { "simulation.window", "Median period and counter-normalized phase sample count (4-256)." },
+        { "simulation.phaseGain", "Future unadvertised grid phase smoothing gain (0-1, excluding zero)." },
+        { "simulation.phaseSlewUs", "Maximum phase correction per newly planned cycle, us." },
         { "diagnostics.only",
           "Observe arbitrary primary metadata without attaching DM resources or enabling writes." } };
     for( const auto &key : keys )
@@ -602,6 +643,18 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
     config( m_cameraDiagnostics, "diagnostics.camera" );
     config( m_pipelineDiagnostics, "diagnostics.pipeline" );
     config( m_diagnosticsOnly, "diagnostics.only" );
+    config( m_simulationEnabled, "simulation.enabled" );
+    config( m_simulationWindow, "simulation.window" );
+    config( m_simulationPhaseGain, "simulation.phaseGain" );
+    config( m_simulationPhaseSlewUs, "simulation.phaseSlewUs" );
+
+    if( ( m_simulationEnabled && ( m_diagnosticsOnly || !m_combinerDiagnostics || m_primaryCadenceWindow <= 0 ) ) ||
+        m_simulationWindow < 4 || m_simulationWindow > 256 || !finite( m_simulationPhaseGain ) ||
+        m_simulationPhaseGain <= 0 || m_simulationPhaseGain > 1 || !finite( m_simulationPhaseSlewUs ) ||
+        m_simulationPhaseSlewUs < 0 || m_simulationPhaseSlewUs > 1000000 )
+    {
+        return -1;
+    }
 
     if( m_diagnosticsOnly )
     {
@@ -618,7 +671,13 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
         return -1;
     }
 
-    m_primaryCadenceMaxEvents                                        = size_t( cadenceEvents );
+    m_primaryCadenceMaxEvents = size_t( cadenceEvents );
+
+    if( m_simulationEnabled && m_primaryCadenceMaxEvents == 0 )
+    {
+        return -1;
+    }
+
     const std::pair<const char *, int64_t synco::Bounds::*> bounds[] = {
         { "scheduler.keepoutUs", &synco::Bounds::keepout },
         { "scheduler.guardUs", &synco::Bounds::guard },
@@ -690,11 +749,17 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
         return -1;
     }
     m_period                             = int64_t( 1e9 / m_nominalRate );
-    shmimMonitorT::m_semaphoreNumber     = m_diagnosticsOnly ? -1 : m_primarySemaphore;
+    shmimMonitorT::m_semaphoreNumber     = ( m_diagnosticsOnly || m_simulationEnabled ) ? -1 : m_primarySemaphore;
     combinerMonitorT::m_shmimName        = m_combinedName;
     combinerMonitorT::m_getExistingFirst = false;
     cameraMonitorT::m_getExistingFirst   = false;
-    m_reason                             = m_diagnosticsOnly ? "diagnostics only" : "disabled";
+    m_reason = m_simulationEnabled ? "simulation warming" : ( m_diagnosticsOnly ? "diagnostics only" : "disabled" );
+
+    if( m_simulationEnabled && !configureSimulation() )
+    {
+        return -1;
+    }
+
     return 0;
 }
 
@@ -713,6 +778,255 @@ inline ino_t dmSyncopation::inode( const std::string &name )
     ImageStreamIO_filename( filename, sizeof( filename ), name.c_str() );
     struct stat info{};
     return stat( filename, &info ) == 0 ? info.st_ino : 0;
+}
+
+inline bool dmSyncopation::configureSimulation()
+{
+    synco::Simulation::Config settings;
+    settings.bounds             = m_bounds;
+    settings.steps              = m_requested;
+    settings.window             = m_simulationWindow;
+    settings.nominalPeriod      = int64_t( 1e9 / m_nominalRate );
+    settings.minInterval        = int64_t( 1e9 / m_maxRate );
+    settings.maxInterval        = int64_t( 1e9 / m_minRate );
+    settings.phaseGain          = m_simulationPhaseGain;
+    settings.phaseSlew          = int64_t( std::ceil( m_simulationPhaseSlewUs * 1000 ) );
+    settings.timeout            = int64_t( 2e9 / m_minRate );
+    const double cadenceMinimum = std::ceil( m_requested * 1e9 / ( m_maxCadence * ( 1 + m_rateTolerance ) ) );
+
+    if( !finite( cadenceMinimum ) || cadenceMinimum > 1e12 )
+    {
+        return false;
+    }
+
+    settings.cadenceMinPeriod = int64_t( cadenceMinimum );
+
+    if( !m_simulation.configure( settings ) )
+    {
+        return false;
+    }
+
+    m_simulationPublication         = 0;
+    m_simulationCounter             = 0;
+    m_simulationCombinedPublication = m_simulationCombinedStart = m_simulationCombinedUpdate = 0;
+    m_simulationCombinedCounter                                                              = 0;
+    return true;
+}
+
+inline void dmSyncopation::readSimulationPrimary()
+{
+    std::lock_guard<std::mutex> lock( m_cycleMutex );
+    const volatile auto        *metadata = shmimMonitorT::m_imageStream.md;
+
+    if( !metadata || metadata->write != 0 )
+    {
+        m_simulation.primary( 0, -1 );
+        return;
+    }
+
+    const uint64_t counter = metadata->cnt0;
+    const timespec stamp{ metadata->writetime.tv_sec, metadata->writetime.tv_nsec };
+    const int64_t  observed = m_now();
+    std::atomic_thread_fence( std::memory_order_acquire );
+
+    if( metadata->write != 0 || metadata->cnt0 != counter || metadata->writetime.tv_sec != stamp.tv_sec ||
+        metadata->writetime.tv_nsec != stamp.tv_nsec )
+    {
+        m_simulation.primary( counter, -1 );
+        return;
+    }
+
+    const int64_t published  = simulationTimestamp( stamp );
+    const bool    sequential = m_simulationCounter != UINT64_MAX && counter == m_simulationCounter + 1;
+    const int64_t interval   = sequential && published > m_simulationPublication && m_simulationPublication > 0
+                                   ? published - m_simulationPublication
+                                   : 0;
+    m_simulation.primary( counter, observed, interval );
+
+    if( m_simulationPublication == 0 || counter != m_simulationCounter )
+    {
+        m_simulationPublication = published;
+        m_simulationCounter     = counter;
+    }
+}
+
+inline void dmSyncopation::resetSimulation()
+{
+    m_simulation.reset();
+    m_simulationPublication         = 0;
+    m_simulationCounter             = 0;
+    m_simulationCombinedPublication = m_simulationCombinedStart = m_simulationCombinedUpdate = 0;
+    m_simulationCombinedCounter                                                              = 0;
+}
+
+inline void dmSyncopation::readSimulationCombined()
+{
+    std::lock_guard<std::mutex> lock( m_cycleMutex );
+    const auto                 &image    = combinerMonitorT::m_imageStream;
+    const volatile auto        *metadata = image.md;
+
+    if( !metadata || metadata->write != 0 )
+    {
+        m_simulation.combined( 0, 0, m_now(), false );
+        return;
+    }
+
+    const uint64_t       counter = metadata->cnt0;
+    const auto           rows    = metadata->NBproctrace;
+    const timespec       published{ metadata->writetime.tv_sec, metadata->writetime.tv_nsec };
+    const volatile auto *trace    = image.streamproctrace;
+    const bool           present  = trace && rows > 0;
+    const ino_t          expected = m_primaryTraceInode.load( std::memory_order_acquire );
+    const auto           input    = present ? trace[0].trigger_inode : 0;
+    const uint64_t       primary  = present ? trace[0].cnt0 : 0;
+    const auto           pid      = present ? trace[0].procwrite_PID : 0;
+    const timespec start{ present ? trace[0].ts_procstart.tv_sec : 0, present ? trace[0].ts_procstart.tv_nsec : 0 };
+    const timespec update{ present ? trace[0].ts_streamupdate.tv_sec : 0,
+                           present ? trace[0].ts_streamupdate.tv_nsec : 0 };
+    const int64_t observed = m_now();
+    std::atomic_thread_fence( std::memory_order_acquire );
+    bool coherent =
+        metadata->write == 0 && metadata->cnt0 == counter && metadata->NBproctrace == rows &&
+        metadata->writetime.tv_sec == published.tv_sec && metadata->writetime.tv_nsec == published.tv_nsec && present &&
+        expected != 0 && input == expected && pid > 0 && trace[0].trigger_inode == input && trace[0].cnt0 == primary &&
+        trace[0].procwrite_PID == pid && trace[0].ts_procstart.tv_sec == start.tv_sec &&
+        trace[0].ts_procstart.tv_nsec == start.tv_nsec && trace[0].ts_streamupdate.tv_sec == update.tv_sec &&
+        trace[0].ts_streamupdate.tv_nsec == update.tv_nsec;
+
+    const int64_t publicationNs = simulationTimestamp( published );
+    const int64_t startNs       = simulationTimestamp( start );
+    const int64_t updateNs      = simulationTimestamp( update );
+    const bool    repeated      = m_simulationCombinedPublication > 0 && counter == m_simulationCombinedCounter;
+    coherent                    = coherent && startNs > 0 && updateNs >= startNs && publicationNs >= updateNs &&
+               publicationNs - startNs <= int64_t( 2e9 / m_minRate ) &&
+               ( m_simulationCombinedPublication == 0 || repeated ||
+                 ( publicationNs > m_simulationCombinedPublication && startNs > m_simulationCombinedStart &&
+                   updateNs > m_simulationCombinedUpdate ) ) &&
+               ( primary != m_simulationCounter || m_simulationPublication == 0 || startNs >= m_simulationPublication );
+    m_simulation.combined( counter, primary, observed, coherent );
+
+    if( coherent && !repeated )
+    {
+        m_simulationCombinedPublication = publicationNs;
+        m_simulationCombinedStart       = startNs;
+        m_simulationCombinedUpdate      = updateNs;
+        m_simulationCombinedCounter     = counter;
+    }
+}
+
+inline int64_t dmSyncopation::simulationTimestamp( const timespec &stamp )
+{
+    if( stamp.tv_sec < 0 || stamp.tv_nsec < 0 || stamp.tv_nsec >= 1000000000 ||
+        stamp.tv_sec > ( INT64_MAX - stamp.tv_nsec ) / 1000000000 )
+    {
+        return 0;
+    }
+
+    return int64_t( stamp.tv_sec ) * 1000000000 + stamp.tv_nsec;
+}
+
+inline int dmSyncopation::setupSimulationINDI()
+{
+    if( !m_simulationEnabled )
+    {
+        return 0;
+    }
+
+    REG_INDI_NEWPROP_NOCB( m_indiP_simulation, "simulation", pcf::IndiProperty::Number );
+    m_indiP_simulation.setPerm( pcf::IndiProperty::ReadOnly );
+
+    for( const auto *name :
+         { "enabled",      "valid",      "feasible",     "session",        "sequence",    "periodUs",
+           "gridNs",       "phaseUs",    "phaseMinUs",   "phaseMaxUs",     "phaseCount",  "periodSamples",
+           "phaseSamples", "nextGridNs", "nextActiveNs", "earlyReserveUs", "duplicates",  "gaps",
+           "resets",       "invalid",    "excluded",     "outputGaps",     "associations" } )
+    {
+        m_indiP_simulation.add( pcf::IndiElement( name ) );
+    }
+
+    REG_INDI_NEWPROP_NOCB( m_indiP_simulationSteps, "simulation_steps", pcf::IndiProperty::Number );
+    m_indiP_simulationSteps.setPerm( pcf::IndiProperty::ReadOnly );
+
+    for( int step = 0; step < synco::maxSteps; ++step )
+    {
+        for( const auto *suffix : { "Considered", "WouldRun", "Skipped", "Overlap" } )
+        {
+            m_indiP_simulationSteps.add( pcf::IndiElement( "step" + std::to_string( step ) + suffix ) );
+        }
+    }
+
+    REG_INDI_NEWPROP_NOCB( m_indiP_simulationStatus, "simulation_status", pcf::IndiProperty::Text );
+    m_indiP_simulationStatus.setPerm( pcf::IndiProperty::ReadOnly );
+    m_indiP_simulationStatus.add( pcf::IndiElement( "state" ) );
+    m_indiP_simulationStatus.add( pcf::IndiElement( "policy" ) );
+    return 0;
+}
+
+inline void dmSyncopation::updateSimulationINDI()
+{
+    if( !m_simulationEnabled )
+    {
+        return;
+    }
+
+    const auto &s     = m_simulationSnapshot;
+    const auto  state = s.valid && s.feasible ? INDI_OK : INDI_IDLE;
+    updateIfChanged( m_indiP_simulation,
+                     std::vector<std::string>{
+                         "enabled",      "valid",      "feasible",     "session",        "sequence",    "periodUs",
+                         "gridNs",       "phaseUs",    "phaseMinUs",   "phaseMaxUs",     "phaseCount",  "periodSamples",
+                         "phaseSamples", "nextGridNs", "nextActiveNs", "earlyReserveUs", "duplicates",  "gaps",
+                         "resets",       "invalid",    "excluded",     "outputGaps",     "associations" },
+                     std::vector<double>{ 1,
+                                          s.valid ? 1.0 : 0.0,
+                                          s.feasible ? 1.0 : 0.0,
+                                          double( s.session ),
+                                          double( s.sequence ),
+                                          s.periodNs / 1000.0,
+                                          double( s.gridNs ),
+                                          s.phaseNs / 1000.0,
+                                          s.phaseMinNs / 1000.0,
+                                          s.phaseMaxNs / 1000.0,
+                                          double( s.phaseCount ),
+                                          double( s.periodSamples ),
+                                          double( s.phaseSamples ),
+                                          double( s.nextGridNs ),
+                                          double( s.nextActiveNs ),
+                                          s.earlyReserveNs / 1000.0,
+                                          double( s.duplicates ),
+                                          double( s.gaps ),
+                                          double( s.resets ),
+                                          double( s.invalid ),
+                                          double( s.excluded ),
+                                          double( s.outputGaps ),
+                                          double( s.associations ) },
+                     state );
+    std::vector<std::string> names;
+    std::vector<double>      values;
+
+    for( size_t step = 0; step < s.outcomes.size(); ++step )
+    {
+        const auto &outcome = s.outcomes[step];
+
+        for( const auto *suffix : { "Considered", "WouldRun", "Skipped", "Overlap" } )
+        {
+            names.push_back( "step" + std::to_string( step ) + suffix );
+        }
+
+        values.insert( values.end(),
+                       { double( outcome.considered ),
+                         double( outcome.wouldRun ),
+                         double( outcome.skipped ),
+                         double( outcome.overlap ) } );
+    }
+
+    updateIfChanged( m_indiP_simulationSteps, names, values, state );
+    updateIfChanged(
+        m_indiP_simulationStatus,
+        "state",
+        std::string( !s.valid ? "warming or stale" : ( s.feasible ? "conditional grid ready" : "infeasible" ) ) );
+    updateIfChanged(
+        m_indiP_simulationStatus, "policy", std::string( "shadow only; timing bounds assumed; reserve undecided" ) );
 }
 
 inline bool dmSyncopation::openResources()
@@ -1355,6 +1669,23 @@ inline int dmSyncopation::allocate( const dev::shmimT &tag )
     }
 
     std::lock_guard<std::mutex> lock( m_cycleMutex );
+
+    if( m_simulationEnabled )
+    {
+        if( shmimMonitorT::m_semaphoreNumber == 9 )
+        {
+            if( shmimMonitorT::m_imageStream.semReadPID[9] == getpid() )
+            {
+                shmimMonitorT::m_imageStream.semReadPID[9] = 0;
+            }
+
+            return -1;
+        }
+
+        resetSimulation();
+        return 0;
+    }
+
     if( shmimMonitorT::m_semaphoreNumber != m_primarySemaphore || m_primarySemaphore == 9 )
     {
         const int assigned = shmimMonitorT::m_semaphoreNumber;
@@ -1393,9 +1724,14 @@ inline int dmSyncopation::processImage( void *source, const dev::shmimT &tag )
 
     m_primaryReceiptNs = -1;
 
-    if( m_diagnosticsOnly )
+    if( m_simulationEnabled )
     {
-        m_primaryCadence.markAt( MagAOX::dmTiming::Marker::finish, observed );
+        readSimulationPrimary();
+    }
+
+    if( m_diagnosticsOnly || m_simulationEnabled )
+    {
+        m_primaryCadence.markAt( MagAOX::dmTiming::Marker::finish, m_now() );
         m_primaryCadence.outcome( MagAOX::dmTiming::Outcome::noSend );
         m_primaryCadence.finishEvent();
         return 0;
@@ -1464,6 +1800,13 @@ inline void dmSyncopation::shmimMonitorTiming( const dev::shmimT &tag, dev::shmi
 inline int dmSyncopation::allocate( const syncoCombinerT &tag )
 {
     static_cast<void>( tag );
+
+    if( m_simulationEnabled )
+    {
+        std::lock_guard<std::mutex> lock( m_cycleMutex );
+        resetSimulation();
+    }
+
     return 0;
 }
 
@@ -1478,6 +1821,11 @@ inline int dmSyncopation::processImage( void *source, const syncoCombinerT &tag 
                                    m_primaryTraceInode.load( std::memory_order_acquire ),
                                    m_now(),
                                    m_combinerReceiptNs );
+    }
+
+    if( m_simulationEnabled )
+    {
+        readSimulationCombined();
     }
 
     m_combinerReceiptNs = -1;
@@ -2331,7 +2679,8 @@ inline int dmSyncopation::appStartup()
         return log<software_error, -1>( { std::string( "Timing allocation: " ) + error.what() } );
     }
 
-    if( setupPrimaryCadenceINDI() < 0 || setupCombinerCadenceINDI() < 0 || setupPipelineINDI() < 0 ||
+    if( setupSimulationINDI() < 0 || setupPrimaryCadenceINDI() < 0 || setupCombinerCadenceINDI() < 0 ||
+        setupPipelineINDI() < 0 ||
         setupCadenceINDI( m_cameraCadence,
                           m_indiP_cameraTiming,
                           m_indiP_cameraQuality,
@@ -2478,10 +2827,17 @@ inline int dmSyncopation::appLogic()
         SHMIMMONITORT_APP_LOGIC( cameraMonitorT );
         SHMIMMONITORT_UPDATE_INDI( cameraMonitorT );
     }
-    { // mutex scope
+    { //mutex scope
         std::unique_lock<std::mutex> lock( m_cycleMutex, std::try_to_lock );
         if( lock.owns_lock() )
         {
+            if( m_simulationEnabled )
+            {
+                m_simulation.advance( m_now() );
+                m_simulationSnapshot = m_simulation.summary();
+                m_reason = m_simulationSnapshot.valid ? "simulation observing" : "simulation warming or stale";
+            }
+
             readCamera();
             if( m_enabled && m_lastMain && m_now() - m_lastMain > int64_t( 2e9 / m_minRate ) )
             {
@@ -2612,8 +2968,10 @@ inline int dmSyncopation::appLogic()
             updateIfChanged( m_indiP_health, "combined", m_combinedName );
             updateIfChanged( m_indiP_health, "timingStream", m_timingName );
             updateIfChanged( m_indiP_health, "mapping", mappings );
-            const std::string mode = m_diagnosticsOnly ? "diagnostics only" : "scheduler";
+            const std::string mode =
+                m_simulationEnabled ? "shadow simulation" : ( m_diagnosticsOnly ? "diagnostics only" : "scheduler" );
             updateIfChanged( m_indiP_health, "mode", mode );
+            updateSimulationINDI();
         }
     }
     SHMIMMONITOR_UPDATE_INDI;
@@ -2667,10 +3025,15 @@ inline int dmSyncopation::recordTelem( const telem_dmsynco *record )
     std::array<int64_t, synco::maxSteps> residualSnapshot{}, advanceSnapshot{};
     bool                                 scheduleValid = false;
 
-    { // mutex scope
+    { //mutex scope
         std::unique_lock<std::mutex> lock( m_cycleMutex, std::try_to_lock );
 
-        if( lock.owns_lock() && !m_diagnosticsOnly )
+        if( lock.owns_lock() && m_simulationEnabled )
+        {
+            m_simulationSnapshot = m_simulation.summary();
+        }
+
+        if( lock.owns_lock() && !m_diagnosticsOnly && !m_simulationEnabled )
         {
             scheduleValid    = true;
             state            = m_scheduleState;
@@ -2687,8 +3050,8 @@ inline int dmSyncopation::recordTelem( const telem_dmsynco *record )
         }
     }
 
-    if( !scheduleValid && !m_primaryCadence.enabled() && !m_combinerCadence.enabled() && !m_cameraCadence.enabled() &&
-        !m_cameraPublicationCadence.enabled() && !m_pipelineCadence.enabled() )
+    if( !m_simulationEnabled && !scheduleValid && !m_primaryCadence.enabled() && !m_combinerCadence.enabled() &&
+        !m_cameraCadence.enabled() && !m_cameraPublicationCadence.enabled() && !m_pipelineCadence.enabled() )
     {
         return 0;
     }
@@ -2711,7 +3074,8 @@ inline int dmSyncopation::recordTelem( const telem_dmsynco *record )
                                      m_combinerCadence.summary(),
                                      m_cameraCadence.summary(),
                                      m_pipelineCadence.summary(),
-                                     m_cameraPublicationCadence.summary() );
+                                     m_cameraPublicationCadence.summary(),
+                                     m_simulationSnapshot );
     telem<telem_dmsynco>( message );
     return 0;
 }
@@ -2725,7 +3089,7 @@ INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_enable )( const pcf::IndiProperty 
     }
     const bool enable = ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On;
 
-    if( enable && m_diagnosticsOnly )
+    if( enable && ( m_diagnosticsOnly || m_simulationEnabled ) )
     {
         return -1;
     }
@@ -2734,9 +3098,12 @@ INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_enable )( const pcf::IndiProperty 
     {
         m_enabled = false;
     }
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_cycleMutex );
-        invalidate( enable ? "acquiring" : "disabled" );
+        if( !m_simulationEnabled )
+        {
+            invalidate( enable ? "acquiring" : "disabled" );
+        }
         m_lastMain       = 0;
         m_trackingOutput = false;
         m_enabled        = enable;
@@ -2758,7 +3125,15 @@ INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_reacquire )( const pcf::IndiProper
     if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On )
     {
         std::lock_guard<std::mutex> lock( m_cycleMutex );
-        invalidate( "reacquire requested" );
+
+        if( m_simulationEnabled )
+        {
+            resetSimulation();
+        }
+        else
+        {
+            invalidate( "reacquire requested" );
+        }
         m_lastMain       = 0;
         m_trackingOutput = false;
     }
@@ -2822,10 +3197,26 @@ INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_settings )( const pcf::IndiPropert
             return -1;
         }
     }
-    m_requested  = requested;
-    m_maxCadence = cadence;
-    m_bounds     = bounds;
-    invalidate( "disabled settings changed" );
+    const int    previousRequested = m_requested;
+    const double previousCadence   = m_maxCadence;
+    const auto   previousBounds    = m_bounds;
+    m_requested                    = requested;
+    m_maxCadence                   = cadence;
+    m_bounds                       = bounds;
+    if( m_simulationEnabled )
+    {
+        if( !configureSimulation() )
+        {
+            m_requested  = previousRequested;
+            m_maxCadence = previousCadence;
+            m_bounds     = previousBounds;
+            return -1;
+        }
+    }
+    else
+    {
+        invalidate( "disabled settings changed" );
+    }
     return 0;
 }
 

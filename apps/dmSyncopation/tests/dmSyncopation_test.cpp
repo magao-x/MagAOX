@@ -26,6 +26,7 @@ class Harness : public dmSyncopation
     using CameraMonitor   = dev::shmimMonitor<dmSyncopation, syncoCameraT>;
 
     using dmSyncopation::allocate;
+    using dmSyncopation::configureSimulation;
     using dmSyncopation::consume;
     using dmSyncopation::copyBatch;
     using dmSyncopation::executeStep;
@@ -82,11 +83,15 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_indiP_primaryTimingQuality;
     using dmSyncopation::m_indiP_reacquire;
     using dmSyncopation::m_indiP_settings;
+    using dmSyncopation::m_indiP_simulation;
+    using dmSyncopation::m_indiP_simulationStatus;
+    using dmSyncopation::m_indiP_simulationSteps;
     using dmSyncopation::m_lastFaultNs;
     using dmSyncopation::m_lastFaultReason;
     using dmSyncopation::m_lastMain;
     using dmSyncopation::m_lockFrames;
     using dmSyncopation::m_mappings;
+    using dmSyncopation::m_maxCadence;
     using dmSyncopation::m_measuredPeriod;
     using dmSyncopation::m_missed;
     using dmSyncopation::m_nextAttach;
@@ -113,6 +118,11 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_requested;
     using dmSyncopation::m_resources;
     using dmSyncopation::m_scheduleState;
+    using dmSyncopation::m_simulation;
+    using dmSyncopation::m_simulationEnabled;
+    using dmSyncopation::m_simulationPhaseGain;
+    using dmSyncopation::m_simulationPhaseSlewUs;
+    using dmSyncopation::m_simulationWindow;
     using dmSyncopation::m_submission;
     using dmSyncopation::m_timing;
     using dmSyncopation::m_timingName;
@@ -124,6 +134,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::setupCombinerCadenceINDI;
     using dmSyncopation::setupPipelineINDI;
     using dmSyncopation::setupPrimaryCadenceINDI;
+    using dmSyncopation::setupSimulationINDI;
     using dmSyncopation::snapshot;
     using dmSyncopation::updateCadenceINDI;
     using dmSyncopation::updateCombinerCadenceINDI;
@@ -132,6 +143,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::updatePipelineINDI;
     using dmSyncopation::updatePrimaryCadenceINDI;
     using dmSyncopation::updatePrimaryPairsINDI;
+    using dmSyncopation::updateSimulationINDI;
     using dmSyncopation::waitUntil;
     using MagAOXApp<true>::config;
     using dev::shmimMonitor<dmSyncopation>::m_imageStream;
@@ -665,15 +677,26 @@ cameraTiming( double fps /**< [in] Measured acquisition frequency in Hz. */,
 /// Deterministic local capture clock, independent of external publication epochs.
 struct CadenceClock
 {
-    static inline int64_t time{ 1000000000 }; ///< Next local timestamp in nanoseconds.
+    static inline int64_t  time{ 1000000000 }; ///< Next local timestamp in nanoseconds.
+    static inline unsigned waits{ 0 };         ///< Unexpected scheduler waits during read-only observation.
 
     /// Supply monotonically increasing capture/entry/completion timestamps.
     static int64_t now();
+
+    /// Count an unexpected operational wait without sleeping or reaching any hardware.
+    static int wait( const timespec *target /**< [in] unused operational deadline */ );
 };
 
 int64_t CadenceClock::now()
 {
     return time++;
+}
+
+int CadenceClock::wait( const timespec *target )
+{
+    static_cast<void>( target );
+    ++waits;
+    return -1;
 }
 
 /// Prepare diagnostics without starting a scheduler, monitor, SDK or INDI connection.
@@ -3324,6 +3347,392 @@ TEST_CASE( "syncopation diagnostic only mode cannot enter the DM scheduler", "[d
     dmSyncopation::allocate( dev::shmimT{} );
     dmSyncopation::processImage( nullptr, dev::shmimT{} );
     dmSyncopation::newCallBack_m_indiP_enable;
+#endif
+    // clang-format on
+}
+
+/// Validate startup-only simulation settings and the shipped primary/count profile before observation.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation simulation configuration validates estimator controls", "[dmSyncopation][simulation]" )
+{
+    Harness app;
+    app.setupConfig();
+    REQUIRE( app.loadConfigImpl( app.config ) == 0 );
+    CHECK_FALSE( app.m_simulationEnabled );
+    CHECK( app.m_simulationWindow == 32 );
+    CHECK( app.m_simulationPhaseGain == Approx( 0.1 ) );
+    CHECK( app.m_simulationPhaseSlewUs == Approx( 1 ) );
+
+    SECTION( "Shipped non-default profile selects the real primary and two simulated steps" )
+    {
+        const auto profile =
+            std::filesystem::canonical( "/proc/self/exe" ).parent_path().parent_path() / "dmtweeter_synco_sim.conf";
+        REQUIRE( std::filesystem::exists( profile ) );
+        app.config.readConfig( profile.string() );
+        REQUIRE( app.loadConfigImpl( app.config ) == 0 );
+        CHECK( app.m_simulationEnabled );
+        CHECK( app.m_shmimName == "dm01disp03" );
+        CHECK( app.m_requested == 2 );
+        CHECK( app.m_combinerDiagnostics );
+        CHECK_FALSE( app.m_diagnosticsOnly );
+        CHECK_FALSE( app.m_enabled );
+    }
+
+    SECTION( "Estimator window is bounded before allocating model storage" )
+    {
+        for( const unsigned invalid : { 0U, 3U, 257U, std::numeric_limits<unsigned>::max() } )
+        {
+            app.m_simulationWindow = invalid;
+            CHECK( app.loadConfigImpl( app.config ) < 0 );
+        }
+
+        for( const unsigned valid : { 4U, 256U } )
+        {
+            app.m_simulationWindow = valid;
+            CHECK( app.loadConfigImpl( app.config ) == 0 );
+        }
+    }
+
+    SECTION( "Phase gain must be finite and positive without exceeding one" )
+    {
+        for( const double invalid :
+             { -1.0, 0.0, 1.01, std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity() } )
+        {
+            app.m_simulationPhaseGain = invalid;
+            CHECK( app.loadConfigImpl( app.config ) < 0 );
+        }
+
+        app.m_simulationPhaseGain = 1;
+        CHECK( app.loadConfigImpl( app.config ) == 0 );
+    }
+
+    SECTION( "Phase slew must be finite and nonnegative" )
+    {
+        for( const double invalid :
+             { -1.0, 1000001.0, std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity() } )
+        {
+            app.m_simulationPhaseSlewUs = invalid;
+            CHECK( app.loadConfigImpl( app.config ) < 0 );
+        }
+
+        app.m_simulationPhaseSlewUs = 0;
+        CHECK( app.loadConfigImpl( app.config ) == 0 );
+    }
+
+    SECTION( "Simulation needs combined observation and cannot use the isolated arbitrary-primary mode" )
+    {
+        app.m_simulationEnabled = true;
+        app.m_diagnosticsOnly   = true;
+        CHECK( app.loadConfigImpl( app.config ) < 0 );
+    }
+
+    SECTION( "Required observation paths cannot be disabled in simulation" )
+    {
+        app.m_simulationEnabled   = true;
+        app.m_combinerDiagnostics = false;
+        CHECK( app.loadConfigImpl( app.config ) < 0 );
+        app.m_combinerDiagnostics  = true;
+        app.m_primaryCadenceWindow = 0;
+        CHECK( app.loadConfigImpl( app.config ) < 0 );
+        app.m_primaryCadenceWindow    = 2;
+        app.m_primaryCadenceMaxEvents = 0;
+        CHECK( app.loadConfigImpl( app.config ) < 0 );
+    }
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::setupConfig;
+    dmSyncopation::loadConfigImpl;
+#endif
+    // clang-format on
+}
+
+/// Reject operational enable requests even though startup-only simulation observes automatically while disabled.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation simulation cannot enable the operational scheduler", "[dmSyncopation][simulation]" )
+{
+    Harness app;
+    app.properties();
+    app.m_simulationEnabled = true;
+    auto enable             = app.m_indiP_enable;
+    enable["toggle"]        = pcf::IndiElement::On;
+    CHECK( app.newCallBack_m_indiP_enable( enable ) < 0 );
+    CHECK_FALSE( app.m_enabled );
+    CHECK( app.m_indiP_enable["toggle"].getSwitchState() == pcf::IndiElement::Off );
+    enable["toggle"] = pcf::IndiElement::Off;
+    CHECK( app.newCallBack_m_indiP_enable( enable ) == 0 );
+    CHECK_FALSE( app.m_enabled );
+    CHECK_FALSE( app.m_resources );
+    CHECK( app.m_mappings.empty() );
+    CHECK( app.m_timing.md == nullptr );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::newCallBack_m_indiP_enable;
+#endif
+    // clang-format on
+}
+
+/// Exercise real monitor allocation/callbacks without destination writes, stream creation, semaphore posts or waits.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation simulation callbacks leave all command channels untouched", "[dmSyncopation][simulation]" )
+{
+    Streams streams;
+    Harness app;
+    app.attachPrimaryOnly();
+    app.m_destinations      = { "dm97disp15", "dm97disp16" };
+    app.m_timingName        = "synco_simulation_test_timing";
+    app.m_simulationEnabled = true;
+    app.m_simulationWindow  = 4;
+    app.m_requested         = 2;
+    app.m_now               = CadenceClock::now;
+    app.m_wait              = CadenceClock::wait;
+    CadenceClock::waits     = 0;
+
+    const std::array<const char *, 3> absentStreams{
+        "dm97disp15_aux", "dm97disp16_aux", "synco_simulation_test_timing" };
+
+    for( const auto *name : absentStreams )
+    {
+        char filename[PATH_MAX];
+        ImageStreamIO_filename( filename, sizeof( filename ), name );
+        REQUIRE_FALSE( std::filesystem::exists( filename ) );
+    }
+
+    REQUIRE( app.configureSimulation() );
+    REQUIRE( app.allocate( dev::shmimT{} ) == 0 );
+    app.attachCombinedOnly();
+    CHECK_FALSE( app.m_simulation.summary().valid );
+
+    std::array<std::vector<int>, 4> semaphoreValues;
+
+    for( size_t image = 0; image < streams.images.size(); ++image )
+    {
+        REQUIRE( streams.images[image].semptr != nullptr );
+        semaphoreValues[image].resize( streams.images[image].md->sem );
+
+        for( size_t semaphore = 0; semaphore < semaphoreValues[image].size(); ++semaphore )
+        {
+            REQUIRE( sem_getvalue( streams.images[image].semptr[semaphore], &semaphoreValues[image][semaphore] ) == 0 );
+        }
+    }
+
+    constexpr int64_t epoch = 1792000000000000000LL;
+
+    for( uint64_t sample = 0; sample < 40; ++sample )
+    {
+        const auto observed = 1000000000LL + int64_t( sample ) * 500000;
+        cadenceObservation( app, observed, epoch + int64_t( sample ) * 500000, sample + 10 );
+        combinedObservation(
+            app, streams.images[1], observed + 20000, epoch + int64_t( sample ) * 500000, sample + 10 );
+    }
+
+    const auto &summary = app.m_simulation.summary();
+    CHECK( summary.enabled );
+    CHECK( summary.valid );
+    CHECK( summary.feasible );
+    CHECK( summary.steps == 2 );
+    CHECK( summary.sequence == 40 );
+    CHECK( summary.periodNs == 500000 );
+    CHECK( summary.periodSamples == 4 );
+    CHECK( summary.phaseSamples == 4 );
+    CHECK( summary.phaseCount > 0 );
+    CHECK( summary.associations == 40 );
+    CHECK( summary.outcomes[0].considered > 0 );
+    CHECK( summary.outcomes[1].wouldRun > 0 );
+    CHECK_FALSE( app.m_enabled );
+    CHECK_FALSE( app.m_resources );
+    CHECK_FALSE( app.m_combined );
+    CHECK( app.m_mappings.empty() );
+    CHECK( app.m_timing.md == nullptr );
+    CHECK( app.m_faults == 0 );
+    CHECK( app.m_delivered == 0 );
+    CHECK( CadenceClock::waits == 0 );
+    CHECK( streams.images[0].md->cnt0 == 49 ); // Only the fixture's primary writes advanced this counter.
+    CHECK( streams.images[1].md->cnt0 == 49 ); // Only the fixture's synthetic combined producer advanced it.
+
+    for( size_t image = 0; image < streams.images.size(); ++image )
+    {
+        for( size_t pixel = 0; pixel < 9; ++pixel )
+        {
+            CHECK( streams.images[image].array.F[pixel] == float( image ) );
+        }
+
+        if( image >= 2 )
+        {
+            CHECK( streams.images[image].md->cnt0 == 0 );
+            CHECK( streams.images[image].md->write == 0 );
+        }
+
+        for( size_t semaphore = 0; semaphore < semaphoreValues[image].size(); ++semaphore )
+        {
+            int value = -1;
+            REQUIRE( sem_getvalue( streams.images[image].semptr[semaphore], &value ) == 0 );
+            CHECK( value == semaphoreValues[image][semaphore] );
+        }
+    }
+
+    for( const auto *name : absentStreams )
+    {
+        char filename[PATH_MAX];
+        ImageStreamIO_filename( filename, sizeof( filename ), name );
+        CHECK_FALSE( std::filesystem::exists( filename ) );
+    }
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::allocate( dev::shmimT{} );
+    dmSyncopation::allocate( syncoCombinerT{} );
+    dmSyncopation::processImage( nullptr, dev::shmimT{} );
+    dmSyncopation::processImage( nullptr, syncoCombinerT{} );
+#endif
+    // clang-format on
+}
+
+/// Preserve estimator warmup and expose rejected primary/output metadata without claiming physical delivery.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation simulation qualifies observations and exposes conditional status",
+           "[dmSyncopation][simulation][regression]" )
+{
+    Streams streams;
+    Harness app;
+    app.attachPrimaryOnly();
+    app.properties();
+    app.m_simulationEnabled = true;
+    app.m_simulationWindow  = 4;
+    app.m_requested         = 2;
+    app.m_now               = CadenceClock::now;
+    REQUIRE( app.configureSimulation() );
+    REQUIRE( app.allocate( dev::shmimT{} ) == 0 );
+    app.attachCombinedOnly();
+    REQUIRE( app.setupSimulationINDI() == 0 );
+    CHECK( app.m_indiP_simulation.getPerm() == pcf::IndiProperty::ReadOnly );
+    CHECK( app.m_indiP_simulationSteps.getPerm() == pcf::IndiProperty::ReadOnly );
+    CHECK( app.m_indiP_simulationStatus.getPerm() == pcf::IndiProperty::ReadOnly );
+    CHECK( app.m_indiP_simulation.getElements().size() == 23 );
+    CHECK( app.m_indiP_simulationSteps.getElements().size() == 4 * synco::maxSteps );
+    CHECK( app.m_indiP_simulationStatus.find( "state" ) );
+    CHECK( app.m_indiP_simulationStatus.find( "policy" ) );
+    CHECK( app.m_indiP_simulation.find( "phaseMinUs" ) );
+    CHECK( app.m_indiP_simulation.find( "earlyReserveUs" ) );
+    CHECK( app.m_indiP_simulationSteps.find( "step0WouldRun" ) );
+    CHECK( app.m_indiP_simulationSteps.find( "step1Skipped" ) );
+    app.updateSimulationINDI(); // The fixture has no INDI driver or network connection.
+
+    constexpr int64_t epoch = 1792000000000000000LL;
+
+    for( uint64_t sample = 0; sample < 8; ++sample )
+    {
+        const auto observed = 1000000000LL + int64_t( sample ) * 500000;
+        cadenceObservation( app, observed, epoch + int64_t( sample ) * 500000, sample + 10 );
+        combinedObservation(
+            app, streams.images[1], observed + 20000, epoch + int64_t( sample ) * 500000, sample + 10 );
+
+        if( sample < 4 )
+        {
+            CHECK_FALSE( app.m_simulation.summary().valid );
+        }
+    }
+
+    REQUIRE( app.m_simulation.summary().valid );
+    const auto before = app.m_simulation.summary();
+
+    SECTION( "Duplicate main notifications do not add cycles or period samples" )
+    {
+        cadenceObservation( app, 1003600000, epoch + 3500000, 17 );
+        CHECK( app.m_simulation.summary().duplicates == before.duplicates + 1 );
+        CHECK( app.m_simulation.summary().sequence == before.sequence );
+        CHECK( app.m_simulation.summary().periodSamples == before.periodSamples );
+    }
+
+    SECTION( "A primary being written cannot add a phase observation" )
+    {
+        cadenceObservation( app, 1004000000, epoch + 4000000, 18, false, true );
+        CHECK( app.m_simulation.summary().invalid == before.invalid + 1 );
+        CHECK( app.m_simulation.summary().sequence == before.sequence );
+        streams.images[0].md->write = 0;
+    }
+
+    SECTION( "An output with another trigger inode cannot establish the current main association" )
+    {
+        cadenceObservation( app, 1004000000, epoch + 4000000, 18 );
+        combinedTrace( streams.images[1], epoch + 4000000, 18, app.m_primaryTraceInode.load() + 1 );
+        CadenceClock::time = 1004020000;
+        REQUIRE( app.processImage( nullptr, syncoCombinerT{} ) == 0 );
+        CHECK( app.m_simulation.summary().associations == before.associations );
+        CHECK( app.m_simulation.summary().outputGaps == before.outputGaps + 1 );
+    }
+
+    SECTION( "Malformed combined trace endpoints cannot acknowledge a real main" )
+    {
+        cadenceObservation( app, 1004000000, epoch + 4000000, 18 );
+        combinedTrace( streams.images[1], epoch + 4000000, 18, app.m_primaryTraceInode.load() );
+        streams.images[1].streamproctrace[0].ts_streamupdate.tv_nsec = 1000000000;
+        CadenceClock::time                                           = 1004020000;
+        REQUIRE( app.processImage( nullptr, syncoCombinerT{} ) == 0 );
+        CHECK( app.m_simulation.summary().associations == before.associations );
+        CHECK( app.m_simulation.summary().outputGaps == before.outputGaps + 1 );
+    }
+
+    SECTION( "The reserved primary semaphore is rejected without attaching scheduler resources" )
+    {
+        app.m_semaphoreNumber = 9;
+        CHECK( app.allocate( dev::shmimT{} ) < 0 );
+        CHECK_FALSE( app.m_resources );
+        CHECK_FALSE( app.m_combined );
+        CHECK( app.m_mappings.empty() );
+        CHECK( app.m_timing.md == nullptr );
+    }
+
+    SECTION( "An unrepresentable positive cadence update restores all settings atomically" )
+    {
+        const int    previousRequested = app.m_requested;
+        const double previousCadence   = app.m_maxCadence;
+        const auto   previousBounds    = app.m_bounds;
+        auto         settings          = app.m_indiP_settings;
+
+        for( const auto *name : { "steps", "maxCadenceHz", "keepoutUs", "guardUs", "step0LeadUs" } )
+        {
+            settings.add( pcf::IndiElement( name ) );
+        }
+
+        settings["steps"]        = 3.0;
+        settings["maxCadenceHz"] = 1e-100; // Finite/positive, but its minimum modeled period cannot fit int64.
+        settings["keepoutUs"]    = previousBounds.keepout / 1000.0 + 1;
+        settings["guardUs"]      = previousBounds.guard / 1000.0 + 1;
+        settings["step0LeadUs"]  = previousBounds.lead / 1000.0 + 1;
+        CHECK( app.newCallBack_m_indiP_settings( settings ) < 0 );
+        CHECK( app.m_requested == previousRequested );
+        CHECK( app.m_maxCadence == previousCadence );
+
+        for( const auto bound : { &synco::Bounds::keepout,
+                                  &synco::Bounds::guard,
+                                  &synco::Bounds::delivery,
+                                  &synco::Bounds::observation,
+                                  &synco::Bounds::early,
+                                  &synco::Bounds::lead,
+                                  &synco::Bounds::visibility,
+                                  &synco::Bounds::reserve,
+                                  &synco::Bounds::snapshot,
+                                  &synco::Bounds::copy } )
+        {
+            CHECK( app.m_bounds.*bound == previousBounds.*bound );
+        }
+    }
+
+    CHECK_FALSE( app.m_enabled );
+    CHECK_FALSE( app.m_resources );
+    CHECK( app.m_delivered == 0 );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::configureSimulation;
+    dmSyncopation::allocate( dev::shmimT{} );
+    dmSyncopation::newCallBack_m_indiP_settings;
+    dmSyncopation::processImage( nullptr, dev::shmimT{} );
+    dmSyncopation::processImage( nullptr, syncoCombinerT{} );
+    dmSyncopation::setupSimulationINDI;
+    dmSyncopation::updateSimulationINDI;
 #endif
     // clang-format on
 }

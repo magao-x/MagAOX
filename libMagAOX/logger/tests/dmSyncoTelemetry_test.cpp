@@ -1,5 +1,5 @@
 /** \file dmSyncoTelemetry_test.cpp
- * \brief Syncopation primary/combiner telemetry compatibility, statistics and availability.
+ * \brief Syncopation observation and conditional simulation telemetry compatibility and validation.
  * \ingroup logger_files
  */
 #include "../../../tests/testXWC.hpp"
@@ -83,12 +83,79 @@ dmCombTiming::Summary sampleCombiner()
     return combiner;
 }
 
-/// Populate unchanged scheduler fields with independently sampled primary and combiner timing.
-telem_dmsynco::messageT message( const dmTiming::Summary     &primary /**< [in] coherent primary summary */,
-                                 const dmCombTiming::Summary &combiner = {} /**< [in] independent combiner summary */ )
+/// Construct a hypothetical ready grid with independently counted skips and retrospective overlaps.
+dmSyncoSimulation::Summary sampleSimulation()
 {
-    return telem_dmsynco::messageT(
-        3, 2, 500000, 11, 2, 3, 4, 150, 250, { -100, 200 }, { 300, 400 }, primary, true, combiner );
+    dmSyncoSimulation::Summary summary;
+    summary.enabled            = true;
+    summary.valid              = true;
+    summary.feasible           = true;
+    summary.session            = ( uint64_t( 1 ) << 54 ) + 19;
+    summary.sequence           = 100;
+    summary.nowNs              = 1234567890123;
+    summary.lastMainNs         = summary.nowNs - 1000;
+    summary.counter            = ( uint64_t( 1 ) << 55 ) + 23;
+    summary.steps              = 2;
+    summary.periodNs           = 500000;
+    summary.gridNs             = summary.lastMainNs - 3500;
+    summary.phaseNs            = 3500;
+    summary.phaseMinNs         = -2000;
+    summary.phaseMaxNs         = 4000;
+    summary.phaseCount         = 90;
+    summary.periodSamples      = 32;
+    summary.phaseSamples       = 32;
+    summary.nextGridNs         = summary.gridNs + summary.periodNs;
+    summary.nextActiveNs       = summary.gridNs + summary.periodNs / 2;
+    summary.earlyReserveNs     = 20000;
+    summary.deliveryNs         = 21000;
+    summary.keepoutNs          = 115000;
+    summary.guardNs            = 22000;
+    summary.snapshotNs         = 10000;
+    summary.copyNs             = 11000;
+    summary.leadNs             = 23000;
+    summary.observationNs      = 5000;
+    summary.visibilityNs       = 1000;
+    summary.reserveNs          = 2000;
+    summary.window             = 32;
+    summary.phaseGain          = 0.1;
+    summary.phaseSlewNs        = 1500;
+    summary.cadenceMinPeriodNs = 333334;
+    summary.duplicates         = 4;
+    summary.gaps               = 1;
+    summary.resets             = 2;
+    summary.invalid            = 3;
+    summary.excluded           = 5;
+    summary.outputGaps         = 6;
+    summary.associations       = 70;
+    summary.outcomes[0]        = { 12, 7, 5, 2, 0, 1, 0, 2, 17 };
+    summary.outcomes[1]        = { 10, 6, 4, 0, 1, 1, 2, 0, 3 };
+    return summary;
+}
+
+/// Populate unchanged scheduler fields with independently sampled primary and combiner timing.
+telem_dmsynco::messageT
+message( const dmTiming::Summary          &primary /**< [in] coherent primary summary */,
+         const dmCombTiming::Summary      &combiner   = {} /**< [in] independent combiner summary */,
+         const dmSyncoSimulation::Summary &simulation = {} /**< [in] hypothetical shadow prediction */ )
+{
+    return telem_dmsynco::messageT( 3,
+                                    2,
+                                    500000,
+                                    11,
+                                    2,
+                                    3,
+                                    4,
+                                    150,
+                                    250,
+                                    { -100, 200 },
+                                    { 300, 400 },
+                                    primary,
+                                    true,
+                                    combiner,
+                                    {},
+                                    {},
+                                    {},
+                                    simulation );
 }
 
 /// Build a real log envelope for shared verification dispatch.
@@ -124,6 +191,69 @@ combinerStats( const DmSyncoCombinerTiming *timing /**< [in] deserialized combin
              timing->publication(),
              timing->primary_start(),
              timing->primary_publication() };
+}
+
+/// Check every shadow model, phase, quality and conditional outcome field after serialization.
+void checkSimulation( const DmSyncoSimulation          *actual /**< [in] deserialized conditional prediction */,
+                      const dmSyncoSimulation::Summary &expected /**< [in] source snapshot */ )
+{
+    REQUIRE( actual != nullptr );
+    REQUIRE( actual->enabled() == expected.enabled );
+    REQUIRE( actual->valid() == expected.valid );
+    REQUIRE( actual->feasible() == expected.feasible );
+    REQUIRE( actual->session() == expected.session );
+    REQUIRE( actual->sequence() == expected.sequence );
+    REQUIRE( actual->now_ns() == expected.nowNs );
+    REQUIRE( actual->last_main_ns() == expected.lastMainNs );
+    REQUIRE( actual->counter() == expected.counter );
+    REQUIRE( actual->steps() == expected.steps );
+    REQUIRE( actual->period_ns() == expected.periodNs );
+    REQUIRE( actual->grid_ns() == expected.gridNs );
+    REQUIRE( actual->phase_ns() == expected.phaseNs );
+    REQUIRE( actual->phase_min_ns() == expected.phaseMinNs );
+    REQUIRE( actual->phase_max_ns() == expected.phaseMaxNs );
+    REQUIRE( actual->phase_count() == expected.phaseCount );
+    REQUIRE( actual->period_samples() == expected.periodSamples );
+    REQUIRE( actual->phase_samples() == expected.phaseSamples );
+    REQUIRE( actual->next_grid_ns() == expected.nextGridNs );
+    REQUIRE( actual->next_active_ns() == expected.nextActiveNs );
+    REQUIRE( actual->early_reserve_ns() == expected.earlyReserveNs );
+    REQUIRE( actual->delivery_ns() == expected.deliveryNs );
+    REQUIRE( actual->keepout_ns() == expected.keepoutNs );
+    REQUIRE( actual->guard_ns() == expected.guardNs );
+    REQUIRE( actual->snapshot_ns() == expected.snapshotNs );
+    REQUIRE( actual->copy_ns() == expected.copyNs );
+    REQUIRE( actual->lead_ns() == expected.leadNs );
+    REQUIRE( actual->observation_ns() == expected.observationNs );
+    REQUIRE( actual->visibility_ns() == expected.visibilityNs );
+    REQUIRE( actual->reserve_ns() == expected.reserveNs );
+    REQUIRE( actual->window() == expected.window );
+    REQUIRE( actual->phase_gain() == expected.phaseGain );
+    REQUIRE( actual->phase_slew_ns() == expected.phaseSlewNs );
+    REQUIRE( actual->cadence_min_period_ns() == expected.cadenceMinPeriodNs );
+    REQUIRE( actual->duplicates() == expected.duplicates );
+    REQUIRE( actual->gaps() == expected.gaps );
+    REQUIRE( actual->resets() == expected.resets );
+    REQUIRE( actual->invalid() == expected.invalid );
+    REQUIRE( actual->excluded() == expected.excluded );
+    REQUIRE( actual->output_gaps() == expected.outputGaps );
+    REQUIRE( actual->associations() == expected.associations );
+    REQUIRE( actual->outcomes()->size() == size_t( expected.steps ) );
+
+    for( int index = 0; index < expected.steps; ++index )
+    {
+        const auto *step   = actual->outcomes()->Get( index );
+        const auto &source = expected.outcomes[index];
+        REQUIRE( step->considered() == source.considered );
+        REQUIRE( step->would_run() == source.wouldRun );
+        REQUIRE( step->skipped() == source.skipped );
+        REQUIRE( step->early_main() == source.earlyMain );
+        REQUIRE( step->missing_main() == source.missingMain );
+        REQUIRE( step->missing_output() == source.missingOutput );
+        REQUIRE( step->reader_hold() == source.readerHold );
+        REQUIRE( step->expired() == source.expired );
+        REQUIRE( step->overlap() == source.overlap );
+    }
 }
 /// \endcond
 
@@ -225,6 +355,7 @@ TEST_CASE( "Synco telemetry accepts legacy records and defaults primary timing d
     REQUIRE( record->combiner_timing() != nullptr );
     REQUIRE_FALSE( record->combiner_timing()->enabled() );
     REQUIRE( record->combiner_timing()->execution()->count() == 0 );
+    REQUIRE( record->simulation() == nullptr );
     REQUIRE( telem_dmsynco::msgString( input.builder.GetBufferPointer(), input.builder.GetSize() )
                  .find( "primaryPublicationInterval[n=0 valid=0]=unavailable" ) != std::string::npos );
 
@@ -241,7 +372,9 @@ TEST_CASE( "Synco telemetry accepts legacy records and defaults primary timing d
     REQUIRE_FALSE( flatbuffers::IsFieldPresent( record, Telem_dmsynco_fb::VT_PRIMARY_TIMING ) );
     REQUIRE_FALSE( flatbuffers::IsFieldPresent( record, Telem_dmsynco_fb::VT_SCHEDULE_VALID ) );
     REQUIRE_FALSE( flatbuffers::IsFieldPresent( record, Telem_dmsynco_fb::VT_COMBINER_TIMING ) );
+    REQUIRE_FALSE( flatbuffers::IsFieldPresent( record, Telem_dmsynco_fb::VT_SIMULATION ) );
     REQUIRE( record->combiner_timing() == nullptr );
+    REQUIRE( record->simulation() == nullptr );
     REQUIRE( record->schedule_valid() );
     REQUIRE( record->residuals_ns()->Get( 0 ) == -100 );
     REQUIRE( record->advances_ns()->Get( 1 ) == 400 );
@@ -559,6 +692,204 @@ TEST_CASE( "Synco telemetry validates every combiner population", "[dmSyncoTelem
     REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
     REQUIRE( telem_dmsynco::msgString( input.builder.GetBufferPointer(), input.builder.GetSize() )
                  .find( "combinerExecution[n=1 valid=0] mean_s=3e-05 stddev_s=unavailable" ) != std::string::npos );
+}
+
+/// Preserve every optional shadow field and keep hypothetical readiness separate from delivered hardware commands.
+/** \ingroup dmSyncoTelemetry_unit_test */
+TEST_CASE( "Synco telemetry preserves conditional shadow predictions", "[dmSyncoTelemetry]" )
+{
+    const auto simulation = sampleSimulation();
+    auto       input      = message( samplePrimary(), sampleCombiner(), simulation );
+    auto       buffer     = envelope( input );
+    REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+    const auto *record = GetTelem_dmsynco_fb( input.builder.GetBufferPointer() );
+    checkSimulation( record->simulation(), simulation );
+    REQUIRE( record->state() == 3 );
+    REQUIRE( record->delivered() == 11 );
+    REQUIRE( record->schedule_valid() );
+
+    const auto text = telem_dmsynco::msgString( input.builder.GetBufferPointer(), input.builder.GetSize() );
+    REQUIRE( text.find( "simulation_enabled=1 simulation_valid=1 simulation_feasible=1" ) != std::string::npos );
+    REQUIRE( text.find( "simulation_mode=shadow_conditional" ) != std::string::npos );
+    REQUIRE( text.find( "simulation_model={delivery_ns:21000,keepout_ns:115000" ) != std::string::npos );
+    REQUIRE( text.find( "window:32,phaseGain:0.1,phaseSlew_ns:1500,cadenceMinPeriod_ns:333334}" ) !=
+             std::string::npos );
+    REQUIRE( text.find( "simulation_phase_ns=3500 simulation_phase_min_ns=-2000" ) != std::string::npos );
+    REQUIRE( text.find( "sim_step={index:0,considered:12,wouldRun:7,skipped:5" ) != std::string::npos );
+    REQUIRE( text.find( "overlap:17}" ) != std::string::npos );
+    REQUIRE( text.find( "simulation_armed" ) == std::string::npos );
+    REQUIRE( text.find( "simulation_delivered" ) == std::string::npos );
+
+    const auto          json = telem_dmsynco::msgJSON( input.builder.GetBufferPointer(),
+                                              input.builder.GetSize(),
+                                              reinterpret_cast<const uint8_t *>( telem_dmsynco_bfbs ),
+                                              telem_dmsynco_bfbs_len );
+    flatbuffers::Parser parser;
+    REQUIRE( parser.Deserialize( reinterpret_cast<const uint8_t *>( telem_dmsynco_bfbs ), telem_dmsynco_bfbs_len ) );
+    REQUIRE( parser.Parse( json.c_str() ) );
+    checkSimulation( GetTelem_dmsynco_fb( parser.builder_.GetBufferPointer() )->simulation(), simulation );
+}
+
+/// Allow disabled and warming snapshots without imposing ready-grid requirements or extending legacy output.
+/** \ingroup dmSyncoTelemetry_unit_test */
+TEST_CASE( "Synco telemetry keeps optional shadow warmup independent", "[dmSyncoTelemetry]" )
+{
+    const auto primary          = samplePrimary();
+    auto       disabled         = message( primary );
+    auto       explicitDisabled = message( primary, {}, dmSyncoSimulation::Summary{} );
+    REQUIRE( GetTelem_dmsynco_fb( disabled.builder.GetBufferPointer() )->simulation() == nullptr );
+    REQUIRE(
+        telem_dmsynco::msgString( disabled.builder.GetBufferPointer(), disabled.builder.GetSize() ) ==
+        telem_dmsynco::msgString( explicitDisabled.builder.GetBufferPointer(), explicitDisabled.builder.GetSize() ) );
+    REQUIRE( telem_dmsynco::msgString( disabled.builder.GetBufferPointer(), disabled.builder.GetSize() )
+                 .find( "simulation" ) == std::string::npos );
+
+    dmSyncoSimulation::Summary warming;
+    warming.enabled = true;
+    warming.steps   = GENERATE( 1, 16 );
+    auto input      = message( primary, {}, warming );
+    auto buffer     = envelope( input );
+    REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+    checkSimulation( GetTelem_dmsynco_fb( input.builder.GetBufferPointer() )->simulation(), warming );
+    REQUIRE( telem_dmsynco::msgString( input.builder.GetBufferPointer(), input.builder.GetSize() )
+                 .find( "simulation_enabled=1 simulation_valid=0 simulation_feasible=0" ) != std::string::npos );
+}
+
+/// Reject inconsistent phase, dimensions, timing and count partitions without adding retrospective overlap to skips.
+/** \ingroup dmSyncoTelemetry_unit_test */
+TEST_CASE( "Synco telemetry rejects inconsistent shadow summaries", "[dmSyncoTelemetry]" )
+{
+    for( unsigned invalid = 0; invalid < 32; ++invalid )
+    {
+        INFO( "invalid simulation case " << invalid );
+        auto simulation = sampleSimulation();
+
+        switch( invalid )
+        {
+        case 0:
+            simulation.steps = 0;
+            break;
+        case 1:
+            simulation.steps = 17;
+            break;
+        case 2:
+            simulation.session = 0;
+            break;
+        case 3:
+            simulation.periodNs = 0;
+            break;
+        case 4:
+            simulation.gridNs = 0;
+            break;
+        case 5:
+            simulation.lastMainNs = simulation.nowNs + 1;
+            break;
+        case 6:
+            simulation.earlyReserveNs = -1;
+            break;
+        case 7:
+            simulation.phaseMinNs = simulation.phaseNs + 1;
+            break;
+        case 8:
+            simulation.phaseMaxNs = simulation.phaseNs - 1;
+            break;
+        case 9:
+            simulation.phaseCount = 0;
+            break;
+        case 10:
+            simulation.phaseCount = simulation.sequence + 1;
+            break;
+        case 11:
+            simulation.periodSamples = simulation.sequence + 1;
+            break;
+        case 12:
+            simulation.phaseSamples = simulation.sequence + 1;
+            break;
+        case 13:
+            simulation.outcomes[0].wouldRun = simulation.outcomes[0].considered + 1;
+            break;
+        case 14:
+            ++simulation.outcomes[0].skipped;
+            break;
+        case 15:
+            simulation.outcomes[0].earlyMain = simulation.outcomes[0].skipped + 1;
+            break;
+        case 16:
+            simulation.outcomes[1].missingMain = simulation.outcomes[1].skipped + 1;
+            break;
+        case 17:
+            simulation.outcomes[1].readerHold = simulation.outcomes[1].skipped + 1;
+            break;
+        case 18:
+            simulation.outcomes[0].expired = simulation.outcomes[0].skipped + 1;
+            break;
+        case 19:
+            simulation.phaseGain = std::numeric_limits<double>::quiet_NaN();
+            break;
+        case 20:
+            simulation.phaseGain = std::numeric_limits<double>::infinity();
+            break;
+        case 21:
+            simulation.phaseGain = 1.1;
+            break;
+        case 22:
+            simulation.deliveryNs = -1;
+            break;
+        case 23:
+            simulation.phaseSlewNs = -1;
+            break;
+        case 24:
+            simulation.window = 1;
+            break;
+        case 25:
+            simulation.phaseCount = 1;
+            break;
+        case 26:
+            simulation.outcomes[1].missingOutput = simulation.outcomes[1].skipped + 1;
+            break;
+        case 27:
+            simulation.nowNs = -1;
+            break;
+        case 28:
+            ++simulation.outcomes[0].earlyMain; // Each reason is bounded, but their sum exceeds skipped.
+            break;
+        case 29:
+            --simulation.outcomes[0].earlyMain; // A skipped occurrence must have exactly one reason.
+            break;
+        case 30:
+            simulation.outcomes[0] = { UINT64_MAX, 0, UINT64_MAX, UINT64_MAX, UINT64_MAX, 0, 0, 0, 0 };
+            break;
+        case 31:
+            simulation.cadenceMinPeriodNs = -1;
+            break;
+        }
+
+        auto input  = message( samplePrimary(), {}, simulation );
+        auto buffer = envelope( input );
+        REQUIRE_FALSE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+    }
+
+    auto input = message( samplePrimary() );
+    input.builder.Clear();
+    const auto outcomes = input.builder.CreateVector( std::vector<flatbuffers::Offset<DmSyncoSimulationStep>>{} );
+    DmSyncoSimulationBuilder simulation( input.builder );
+    simulation.add_enabled( true );
+    simulation.add_session( 1 );
+    simulation.add_steps( 2 );
+    simulation.add_outcomes( outcomes );
+    const auto              shadow = simulation.Finish();
+    Telem_dmsynco_fbBuilder record( input.builder );
+    record.add_simulation( shadow );
+    input.builder.Finish( record.Finish() );
+    auto buffer = envelope( input );
+    REQUIRE_FALSE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+
+    auto        serialized  = message( samplePrimary(), {}, sampleSimulation() );
+    auto        corrupt     = envelope( serialized );
+    const auto *decoded     = GetTelem_dmsynco_fb( flatlogs::logHeader::messageBuffer( corrupt ) );
+    auto       *stepOffsets = const_cast<uint8_t *>( decoded->simulation()->outcomes()->Data() );
+    std::memset( stepOffsets, 0xff, sizeof( flatbuffers::uoffset_t ) );
+    REQUIRE_FALSE( verifyLogEntry( telem_dmsynco::eventCode, corrupt.get() ) );
 }
 
 } // namespace dmSyncoTelemetryTest

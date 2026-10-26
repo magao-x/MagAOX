@@ -86,18 +86,25 @@ Review AGENTS.md.  Do not alter any text above the "Agent Findings and Plan" bel
 
 Implementation status: implemented and verified locally; operator-run instrument timing qualification remains pending. The [debugging and optimization record](dm-syncopation-debugging.md) tracks instrument trials, subsequent fixes and verification. This section records the settled design and implementation notes. The [user guide](../../../apps/dmSyncopation/doc/dmSyncopation.md) describes the implemented configuration, timing record and INDI interface.
 
-Current work, following the 2026-10-23 measurements and operator direction:
+Current work, following the 2026-10-25 measurements and operator direction:
 
 | Item | Status |
 | --- | --- |
 | Primary, combiner and DM-controller timing measurements | Implemented; operator evidence recorded. |
-| Semaphore-triggered dmcomb baseline | Operator reports mode 3; substantially lower combiner delay jitter measured. |
+| Semaphore-triggered dmcomb baseline | Five otherwise unchanged mode-4 / mode-3 / mode-4 captures reproduce linked delay deviation of about 3.4 / 0.16 / 3.4 us. Mode 3 remains the measured lower-jitter route. |
 | Ordered primary interval-pair measurements | Implemented and verified. Operator sample favors late-then-early (49/65) over early-then-late (6/69), without a universal ordering or exact compensation. |
-| Independent camera acquisition excursions and upstream AO trace stages | Implemented and verified; first operator sample places the large tails at or before the oldest represented AO stage start. Camera acquisition has much smaller, rarer excursions. |
+| Independent camera acquisition excursions and upstream AO trace stages | Implemented and verified. Later captures distinguish serial-associated driver-stamp tails, a rare long post-stamp camera SDK wait, and changing AO/conversion durations. Counter continuity alone does not establish frame freshness. |
 | Isolated camera publication and acquWFS timing | Implemented and locally verified (4883 assertions, 69 cases; matching builds). New isolated capture has one stable acquWFS row: publication already spans 437.045–579.825 us upstream, while large acquWFS output excursions are predominantly present at its processing start. Two primary-observer counter gaps limit coverage; matched camera-to-wake latency remains unmeasured. |
 | Median-based target cadence and per-step skips for ordinary excursions | Revised design below; active targets stay on the predicted grid despite early/late main arrivals. Not implemented. |
 | Targeted dmcomb-reader wake for active extra steps | Proposed design below; not implemented. |
 | Enabled multi-step qualification | Pending the scheduler changes and full timing-window qualification. |
+
+The operator now directs returning to dmSyncopation rather than undertaking
+major additional EDT work. Reduced production serial traffic is in place;
+residual excursions are accepted as conditions the scheduler must handle.
+The [full-loop comparison](full-loop-trigger-modes-20261025.md) records both
+the trigger-mode reversal and an isolated downstream interval departure near
+391 us. Short-capture maxima are not adopted as hard scheduling bounds.
 
 ## Task Summary
 
@@ -189,11 +196,15 @@ next main arrives. Check the next-main envelope against the predicted phase and
 qualified reserve, not simply late actual arrival plus `T`: a short catch-up
 interval may follow. Retain all delivery, controller-reader,
 copy, visibility and post-action checks and recompute full feasibility with the
-chosen early reserve. The observed approximately 80 us early intervals exceed
-the current 20 us reserve. The operator explicitly chose to leave the new reserve
-undecided; the proposed 100 us value is not selected. The existing 20 us setting
-is unchanged, not newly qualified by this decision. Any revised value would
-require hardware qualification. With
+chosen early reserve. The observed approximately 80 us short intervals exceeded
+the old previous-arrival-plus-period predictor's 20 us allowance. They do not
+directly measure early arrival relative to the new fixed grid: a catch-up
+interval can still end on or after its predicted phase. Measure that absolute
+phase residual separately, including observation uncertainty, before qualifying
+a physical earliest-main reserve. The operator explicitly chose to leave the
+new reserve undecided; the proposed 100 us value is not selected. The existing
+20 us setting is unchanged, not newly qualified by this decision. Any revised
+value would require hardware qualification. With
 the current other defaults, 100 us makes the existing two-step feasibility test
 require 273 us in a 250 us half-cycle, so accepting that reserve requires fewer
 steps or separately qualified smaller timing budgets. Do not silently relax a
@@ -227,6 +238,215 @@ but counted in telemetry; a main overlapping a copy already in progress remains
 a genuine reader/partial-batch fault. These distinctions leave the early-arrival
 reserve undecided and require a specified grid phase-tracking policy before
 implementing this revision.
+
+### 2026-10-25 resumption: normal step-0 phase and independent skips
+
+The operator describes the next change as an average step-0 time with frame
+skipping. Here **normal predicted step-0 phase** is the smoothed time reference;
+the previously selected **median interval** remains the proposed period
+estimator. Averaging the phase does not mean restarting the schedule at each
+actual arrival. The operational grid/skip revision and the mode-3 auxiliary
+wake route remain unimplemented; the intervening work added measurements and
+improved camera housekeeping. The shadow implementation below is the first
+qualification step.
+
+#### Counter-labelled grid and proposed phase tracking
+
+Keep period `T`, predicted grid phase `G[k]` and actual main observation `O[k]`
+as separate state. Genuine primary-counter progression labels the cycles.
+Never assign a main to the nearest grid time: a sequential command more than
+half a period late still belongs to its original counter-labelled cycle.
+
+The proposed bounded estimator is:
+
+1. Retain 32 qualified consecutive primary publication intervals and compute
+   their median for `T`. Exclude gap-spanning, invalid and broadly implausible
+   samples, without turning exclusion alone into a fault or erasing a fresh
+   estimate. In particular, the measured 202.112 us catch-up interval lies below
+   the current broad 250 us sample limit but is still a genuine next command.
+   Camera/nominal timing only seeds acquisition until a usable primary estimate
+   exists. Keep all interval differences in their original clock.
+2. Retain 32 coherent `(primary counter, monotonic observation)` pairs. For a
+   future cycle `F`, estimate its normal observation phase as
+   `candidateG[F] = median_i(O[i] + (F-counter[i])*T)`. Subtracting the expected
+   counter progression before combining samples prevents a single delayed
+   command from moving the entire schedule. Use a bounded relative counter
+   origin and checked integer arithmetic.
+3. Smooth the candidate with a bounded correction for the first **unadvertised**
+   cycle: `delta = clamp(phaseGain*(candidateG[F]-predictedG[F]), +/-phaseSlew)`.
+   Proposed initial engineering values for review are gain **0.1** and at most
+   **1 us correction per future cycle**, with a 32-observation phase window.
+   These are estimator settings, not hardware timing margins. Recheck actual
+   inter-cycle spacing and feasibility across every period/phase transition.
+4. Preserve an immutable plan for every already advertised cycle: identity,
+   phase, period, targets and cutoffs. Period/phase updates apply only beyond
+   the furthest published target. If a persistent rate/phase change cannot be
+   tracked within those commitments and bounds, explicitly invalidate and
+   reacquire; never silently relabel cycles or rewrite provider deadlines.
+   A single late event, including one crossing a grid boundary, is not by itself
+   a persistent phase change.
+
+Monotonic observation phase includes monitor lag. Keep the observation-lag
+allowance explicit, report observation phase residual `O[k]-G[k]`, and qualify
+publication phase separately using a clock-consistent bracket or reported
+uncertainty. Do not subtract an absolute realtime publication timestamp directly
+from a monotonic grid. Capture the counter and its observation coherently:
+callback entry must not be paired with a newer counter sampled after waiting
+for the cycle mutex. Use preallocated estimator storage outside final copy/wake
+operations; existing bounded timing helpers and median code provide reusable
+patterns.
+
+The provider record's `reference` remains an actual monotonic observation or
+publication reference satisfying its existing `reference <= now` contract.
+An early main can have `G[k] > now`, so substituting grid phase into that field
+would invalidate an otherwise useful record. Keep phase distinct; use explicit
+absolute targets and a deliberate versioned extension if extra cycle/phase
+identity is required. Repeated notifications reuse the committed target values.
+
+#### Per-step decisions
+
+For a 500 us main cadence and two steps, predicted mains at 500, 1000, ... us
+give active targets at 750, 1250, ... us:
+
+| Actual main behavior | Passive preparation | Active work |
+| --- | --- | --- |
+| Main arrives early at 420 us | Cancel an unstarted preparation that can no longer precede that main; retain the last complete contribution. | Keep 750 us as the target and evaluate it independently. |
+| Main arrives late at 580 us | An already completed preparation stays ready; the real main applies it late. | Keep 750 us as the target; require the actual main/output association and reader hold to permit preparation and submission. |
+| Main arrives after an active target has expired | Count obsolete or unavailable preparation as skipped. | Skip the expired slot; retain later advertised targets and evaluate their own actual-main/reader conditions. |
+| Forward counter gap | Advance cycle labels by the actual counter delta and cancel stale work. | Retain a fresh period estimate, but require a new unambiguous output baseline before resuming. |
+
+“Skipping frames” here means skipping **auxiliary preparation or triggers**;
+dmSyncopation neither suppresses nor replays the real AO commands. Separate
+`grid valid`, `main/output associated`, `reader hold complete` and `passive
+preparation succeeded`. Removing the present `m_primed` prerequisite must not
+remove the other eligibility checks. A routine passive skip does not require
+another successful step 0 before an otherwise safe active slot.
+
+Keep the requested count fixed. Retain a nominal complete-cycle feasibility
+check against configured bounds: a structurally infeasible request remains
+unarmed. Distinguish that from a transiently unavailable preparation window
+caused by an actual excursion; that cycle's failure does not automatically
+make an independent active slot infeasible. This revision does not add an
+operating mode that permanently omits a nominally impossible passive step.
+
+Actual-main association and reader holds also apply before later passive
+copies. A late older main must not remain unresolved while a later grid epoch
+overwrites its contributions. If the actual hold prevents preparation for the
+fixed active target, skip rather than moving the target to the hold's end.
+Normal scheduler wake lateness remains measurable under the existing full-window
+checks; deliberate hold-driven target sliding and catch-up triggers are excluded.
+Primary change before mutation can cancel work normally; change during mutation
+remains a genuine overlap fault. Verify current primary identity on the fast
+output-acknowledgement path as well as inside wait loops.
+
+#### Implementation and qualification order
+
+1. Implement/test the bounded estimator and immutable cycle plans, initially
+   exposing phase residuals and proposed skip decisions without auxiliary
+   destination copies/counter publications or extra DM triggers. Passive
+   destination copies also affect real AO combinations, so shadow collection
+   leaves those destinations untouched and publishes only non-operational
+   prediction/skip diagnostics. This supplies the missing fixed-grid
+   earliest-main evidence.
+2. Revise per-step eligibility, cancellation and output association; preserve
+   learned wait feedback across ordinary excursions. Keep scheduler deadline
+   failures, routine excursion skips and genuine faults distinct in telemetry.
+3. Integrate the already proposed targeted mode-3 dmcomb-reader wake for active
+   extra steps, with final primary/output/resource validation. The current
+   destination-only post does not wake a primary-semaphore-driven combiner.
+4. Update provider documentation/records and test early/late/catch-up sequences,
+   including **885.783/202.112 us**, targets crossed by a late command, skipped
+   passive preparation followed by safe active work, output races, gaps versus
+   resets, and frozen targets across phase/period updates.
+
+The physical early-main reserve remains **undecided**. Shadow prediction,
+parameterized tests and the mechanics can proceed without selecting a new
+reserve; active qualification still requires a defensible earliest-main
+envelope and reader/delivery budgets. Observing an early main can cancel future
+work but cannot retroactively protect an already issued command. The proposed
+phase settings above require review with the phase-tracking behavior; this
+resumption initially changed the plan only, not C++ or live configuration.
+
+### 2026-10-26 shadow policy simulation
+
+The operator authorizes simulation of the fixed-grid policy before operational
+copy/trigger changes. Select it with startup-only `simulation.enabled=true`.
+The app then observes automatically with operational `enable.toggle=Off`, and
+rejects attempts to enable the live scheduler. Primary allocation and callbacks
+bypass scheduler resource attachment and timed execution. No destination pixels
+or counters are written, no auxiliary/provider images are created, and no
+trigger semaphore is posted. Existing primary/combined monitor reader ownership
+is still allocated normally; primary reader index 9 remains prohibited.
+
+`synco::Simulation` is a pure event-driven engine using fixed storage: at most
+256 interval/phase samples, four immutable cycle plans and four pending exact
+primary-counter output links. The app defaults to a 32-sample window, phase gain
+0.1 and 1 us maximum correction for the next uncommitted cycle. Configured
+nominal timing seeds acquisition; primary publication intervals determine the
+qualified median. Ineligible short catch-up intervals remain real primary
+events and are excluded only from the period population. Already committed
+targets and their period remain fixed through estimator changes.
+
+The primary and combined callbacks take coherent metadata snapshots under a
+short cycle mutex and timestamp adjacent to those samples. These are
+**observation-phase** measurements: monitor wake lag, preceding cadence/trace
+collection and lock wait contribute. They are not direct publication-phase
+measurements. Publication intervals remain differences in their producer clock;
+absolute producer timestamps are never subtracted from the monotonic grid.
+Combined traces require stable identity/counter/timestamps, ordered normalized
+endpoints and progressing producer timestamps. An exact future output link can
+be retained until its delayed primary callback arrives; it never invents a main.
+Such evidence already vetoes a passive copy for that counter and obsolete
+active work for older counters. Ambiguous output progression poisons pending
+acknowledgements; stale expiry clears them.
+
+The virtual timeline evaluates copy starts once at their committed times.
+Passive preparation can skip on an already observed early main; active slots
+independently require their genuine main and coherent combined association.
+Main reader holds start conservatively at the later primary/combined
+observation plus delivery, keepout and guard. Hypothetical active commands use
+the same configured hold allowances. A blocked slot skips without sliding or
+catch-up. Real arrivals during a previously modeled copy or active reader hold
+increment a separate overlap counter: a prior would-run decision is not
+retroactively presented as a safe skip. Source completeness, source-snapshot
+work and copy/delivery execution are modeled assumptions, not measurements.
+Nominal feasibility also enforces the configured total-cadence rating and
+tolerance; each immutable plan uses its own frozen period for this check.
+
+Forward counter gaps cancel stale work and require fresh output association;
+counter rollback/attachment replacement starts a new session. Primary silence
+or lack of fresh eligible publication intervals expires the grid using the
+existing main-silence timeout (`2 / tracking.minMainRateHz`, 4 ms by default).
+New observations warm the estimator again. Reset outcomes are per session.
+
+Read-only `simulation`, `simulation_steps` and `simulation_status` INDI properties
+expose readiness, period, frozen observation-phase residuals and conditional
+outcomes. The optional appended `telem_dmsynco` simulation table records these,
+all configured model bounds, per-step skip reasons and overlap counts. Existing
+records remain readable; old/non-simulation output is unchanged. Shadow records
+set `schedule_valid=false`, keeping hypothetical work distinct from actual
+scheduler deliveries. Rebuild both `dmSyncopation` and `logdump`.
+
+The [operator guide](../../../apps/dmSyncopation/doc/dmSyncopation.md) and
+[non-default profile](../../../apps/dmSyncopation/dmtweeter_synco_sim.conf)
+describe the first capture. Leave other loop and dmcomb settings unchanged for
+that comparison. The physical earliest-main reserve remains **undecided**:
+the configured 20 us default is recorded only as an explicit simulation
+assumption. Hardware wake/copy/delivery performance and the mode-3 auxiliary
+wake route remain separate operational qualification work.
+
+Workstation verification passes **4,772 assertions / 78 cases**: pure model
+190/20, application integration 3,804/48 and logger compatibility/validation
+778/10. Normal library/schema, `dmSyncopation` and `logdump` builds pass.
+Tests cover 420/580 us early/late pairs, the measured 885.783/202.112 us
+sequence, independent passive/active eligibility, immutable plans, reader
+holds, gaps/resets, stale period samples, malformed/ambiguous/future output
+links, overlaps, cadence limits, atomic settings rejection and distinct
+reconfiguration sessions. Integration checks retain destination pixels,
+counters and semaphore values, create no auxiliary/provider images, and
+perform no scheduler sleeps. Optional telemetry accepts legacy records and
+rejects malformed conditional populations. C++ formatting and whitespace
+checks pass. These tests do not qualify instrument overhead or delivery bounds.
 
 ### 2026-10-23 ordered excursion check implemented
 

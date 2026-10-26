@@ -2584,3 +2584,150 @@ changing** and **0.1 Hz on target**, matching the intended default schedule.
 The [housekeeping record](ocam2k-housekeeping.md) records this initial hardware
 qualification and the remaining checks: gain/FPS query silence, synchronized
 FPS, failure/lifecycle/cooling-Off cases, and matched timing comparisons.
+
+
+### Full-loop computational baseline — 2026-10-25
+
+The operator supplied `/home/jrmales/tmp/full-loop-20261026T023744Z` and confirms
+closed AO loop at gain zero, dark/unaligned optics and no changes during the
+two-minute capture. The [separate analysis](full-loop-timing-20261025.md) records
+coverage, hashes, statistical method and a plot. Primary publication has
+**5.273 us** interval deviation; combined publication **7.099 us**; DM SDK return
+**7.137 us**. DM receipt-to-SDK-return is **108.840 +/- 0.531 us**, with no new
+controller errors or gaps.
+
+Of 53 late primary intervals in disjoint qualified populations, 48 are followed
+immediately by early intervals. The main associated duration changes occur in
+WFS preparation and its handoff to reconstruction. These are the next AO-path
+investigation targets. Camera stamp tails remain associated with sparse serial
+exchanges; an independent conversion variation persists between exchanges.
+Synco's camera observer has coverage gaps while the direct camera collector is
+clean, so its receipt stalls must not be labeled camera frame loss. Scheduling
+remains disabled and the early-arrival reserve remains undecided.
+
+The operator subsequently confirms dmcomb was restored to **trigger mode 4**
+for regular operations before this capture. Its sleep-and-counter-scan behavior
+is consistent with the variable primary-to-combiner start interval
+(**6.399 +/- 3.469 us**) and larger combined-publication deviation; the capture
+does not isolate polling as the sole cause. Earlier mode-3 results are separate
+conditions. This clarification does not change attribution of the upstream
+primary excursions; the current requested polling delay remains unverified.
+
+
+### Full-loop mode-3 repeats — 2026-10-25
+
+The operator supplied `full-loop-20261026T033656Z` and
+`full-loop-20261026T035040Z` under `/home/jrmales/tmp` and confirms **only dmcomb
+trigger mode changed** from mode 4. Both retain closed AO loop at gain zero,
+the same camera settings, CPU/IRQ placement and GPU workload, with no changes
+during either capture. The [separate comparison](full-loop-trigger-modes-20261025.md)
+records hashes, quality, sample selections and a plot.
+
+Primary publication deviation is **2.168 / 2.496 us**, combined publication
+**2.180 / 2.509 us**, and DM SDK-return interval deviation **2.359 / 2.531 us**,
+versus **5.273 / 7.099 / 7.137 us** respectively in the mode-4 baseline.
+The largest absolute SDK-return interval departures from 500 us are
+**26.725 / 28.340 us**, compared with **37.646 us** in mode 4. Linked
+primary-to-combined delay is **9.233 +/- 0.164 / 9.236 +/- 0.164 us**, versus
+**11.589 +/- 3.404 us**: delay variation is about twentyfold lower.
+
+Upstream preparation and source cadence also improve; the earlier broad camera
+conversion regime is absent in both repeats. Sparse serial-associated camera
+tails remain. Direct camera/controller collectors are clean; the separate
+combiner observer has one coverage gap in each capture. Controller component
+durations still change regimes despite better output cadence. Scheduling stays
+disabled, so these observations qualify the measured baseline, not active
+extra-step delivery or an early-arrival bound. The auxiliary-trigger route and
+reserve remain separate work.
+
+
+### Mode-4 return confirms regular jitter and captures a long wait — 2026-10-25
+
+The operator supplied `full-loop-20261026T040946Z` and
+`full-loop-20261026T041221Z` and confirms closed loop at gain zero with **only
+the trigger mode changed** back to 4. The [comparison and plot](full-loop-trigger-modes-20261025.md)
+now cover the full mode-4 / mode-3 / mode-4 sequence. Linked primary-trace to
+combined-publication deviation reverses from **3.404 -> 0.164 -> 3.392/3.404 us**.
+DM SDK-return interval deviation returns to **6.398 / 7.051 us**, versus
+**2.359 / 2.531 us** in mode 3. The reversal supports polling as the source of
+the regular additional combiner-path timing spread.
+
+The second return contains a separate large camera event: at about
+**04:13:56.043 UTC**, driver acquisition intervals remain **500 / 500 us**, but
+camera SDK-return intervals are **825.058 / 174.550 us**. The current camera SDK
+wait lasts **784.822 us** after normal wait entry; previous rearm/tail and
+current conversion remain ordinary. Driver stamp to SDK return rises from
+about 22 to 347 us during serial overlap. A trace is needed to distinguish
+driver/library waiting and OS scheduling in this bracket.
+
+The publication excursion propagates through the AO path, with additional
+processing variation, reaching combined intervals **197.242–890.382 us** and
+DM SDK-return intervals **196.491–890.813 us**. Controller service remains
+ordinary, and direct camera/DM counters show no frame/counter gaps or failures.
+This observed **+390.813 us** departure supersedes any interpretation of the
+earlier 28 us maximum as a general bound. The regular mode-4 spread persists
+when the outlier's whole selected window is excluded. A separate camera
+conversion regime also returns late in this file. All auxiliary scheduling
+remains disabled; no implementation or reserve change is made here.
+
+
+### Resume fixed-grid scheduling and independent skips — 2026-10-25
+
+The operator elects to stop short of major additional EDT work and return to
+dmSyncopation, describing the pending policy as an average step-0 time with
+frame skipping. The [main plan](dm-syncopation.md) now spells out the proposed
+counter-labelled normal-phase grid, retaining the previously selected median
+period, and independent passive/active eligibility. Published targets stay
+fixed; actual main arrivals establish output associations and reader holds.
+Excursions cancel or skip affected auxiliary work without moving later targets
+or automatically requiring another successful passive preparation.
+
+The plan corrects an important interpretation: the historical approximately
+80 us short intervals violated the old previous-actual-arrival predictor but
+do not directly measure early phase relative to a fixed grid. Add separate
+phase-residual evidence before qualifying the still-undecided physical
+early-main reserve. Proposed phase-estimator settings and immutable provider
+plans are recorded for review. The next increment starts with shadow grid/skip
+diagnostics and deterministic tests, followed by runtime integration and the
+previously proposed targeted mode-3 auxiliary wake. No C++ or live configuration
+is changed at this planning checkpoint.
+
+
+### Shadow simulation implemented — 2026-10-26
+
+The operator authorizes simulation of the normal-phase grid and independent
+skips. Startup-only `simulation.enabled=true` now observes genuine primary and
+combined metadata while operational enable remains Off; On requests are
+rejected. The shadow callbacks do not attach the scheduler's DM resources,
+copy destinations, publish command counters, create auxiliary/provider images,
+sleep for scheduled slots or send trigger posts. Existing diagnostic collectors
+continue independently. The [guide and capture procedure](../../../apps/dmSyncopation/doc/dmSyncopation.md#capture-a-simulation-run)
+and [two-step profile](../../../apps/dmSyncopation/dmtweeter_synco_sim.conf)
+describe the operator retest. Rebuild both `dmSyncopation` and `logdump`.
+
+The fixed-storage model uses the median of 32 eligible primary publication
+intervals and counter-normalized observation phase, with gain 0.1 and at most
+1 us correction per newly committed cycle. Already committed plans remain
+fixed. Outputs can arrive at the observer before their matching primary
+callback; bounded exact-counter links retain that evidence without inventing
+a primary event. Ambiguity poisons acknowledgements, and known newer main
+evidence cancels obsolete work. Grid/period freshness, conservative actual and
+virtual reader holds, the configured cadence cap and per-step eligibility
+produce conditional would-run/skip counts. Arrivals inside modeled copy or
+reader windows are reported separately as possible overlaps.
+
+The measured 885.783/202.112 us test sequence produces fixed-grid residuals
+**+385.783 / +87.895 us**: both main observations remain late even though the
+second interval is short. The period stays 500 us, and the next active target
+does not slide. This is a deterministic replay of those intervals, not a new
+instrument result. Observation phase includes monitor/callback/lock delay;
+source readiness and copy/delivery execution remain explicit model assumptions.
+The physical early-main reserve stays **undecided**, with the configured 20 us
+default recorded as an unqualified simulation assumption.
+
+Workstation checks pass **4,772 assertions / 78 cases**, plus library/schema,
+app and reader builds, C++ formatting and whitespace checks. The application
+integration tests verify untouched command data/counters/semaphores, absent
+new auxiliary/provider streams and zero timed waits. Existing live scheduler
+and trigger routing remain unchanged; physical overhead and prospective active
+delivery require the operator capture before further operational changes.

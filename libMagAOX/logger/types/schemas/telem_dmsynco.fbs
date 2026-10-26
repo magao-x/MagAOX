@@ -152,6 +152,66 @@ table DmSyncoPipelineTiming
     early_publication_change:DmSyncoTimingStats (required);
 }
 
+// Conditional shadow outcomes. None of these counts represents an actual auxiliary delivery.
+table DmSyncoSimulationStep
+{
+    considered:ulong;
+    would_run:ulong;
+    skipped:ulong;
+    early_main:ulong;
+    missing_main:ulong;
+    missing_output:ulong;
+    reader_hold:ulong;
+    expired:ulong;
+    overlap:ulong;
+}
+
+// Predictions and model readiness on the same-host monotonic clock; this is not hardware arming.
+table DmSyncoSimulation
+{
+    enabled:bool;
+    valid:bool;
+    feasible:bool;
+    session:ulong;
+    sequence:ulong;
+    now_ns:long;
+    last_main_ns:long;
+    counter:ulong;
+    steps:int;
+    period_ns:long;
+    grid_ns:long;
+    phase_ns:long;
+    phase_min_ns:long;
+    phase_max_ns:long;
+    phase_count:ulong;
+    period_samples:ulong;
+    phase_samples:ulong;
+    next_grid_ns:long;
+    next_active_ns:long;
+    early_reserve_ns:long;
+    delivery_ns:long;
+    keepout_ns:long;
+    guard_ns:long;
+    snapshot_ns:long;
+    copy_ns:long;
+    lead_ns:long;
+    observation_ns:long;
+    visibility_ns:long;
+    reserve_ns:long;
+    window:ulong;
+    phase_gain:double;
+    phase_slew_ns:long;
+    duplicates:ulong;
+    gaps:ulong;
+    resets:ulong;
+    invalid:ulong;
+    excluded:ulong;
+    output_gaps:ulong;
+    associations:ulong;
+    outcomes:[DmSyncoSimulationStep] (required);
+    cadence_min_period_ns:long;
+}
+
 table Telem_dmsynco_fb
 {
     state:int;
@@ -171,6 +231,7 @@ table Telem_dmsynco_fb
     camera_timing:DmSyncoPrimaryTiming;
     pipeline_timing:DmSyncoPipelineTiming;
     camera_publication_timing:DmSyncoPrimaryTiming;
+    simulation:DmSyncoSimulation;
 }
 
 root_type Telem_dmsynco_fb;

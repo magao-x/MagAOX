@@ -6,11 +6,13 @@
 
 #include <iomanip>
 #include <sstream>
+#include <vector>
 
 #include <mx/math/floatUtils.hpp>
 
 #include "../../common/dmCombTiming.hpp"
 #include "../../common/dmPipelineTiming.hpp"
+#include "../../common/dmSyncoSimulation.hpp"
 #include "../../common/dmTiming.hpp"
 #include "generated/telem_dmsynco_generated.h"
 #include "flatbuffer_log.hpp"
@@ -46,8 +48,9 @@ struct telem_dmsynco : public flatbuffer_log
                   bool scheduleValid = true /**< [in] false when scheduler fields are unavailable placeholders */,
                   const dmCombTiming::Summary &combiner = {} /**< [in] independently observed combiner timing */,
                   const dmTiming::Summary     &camera = {} /**< [in] independent camera acquisition-stamp intervals */,
-                  const dmPipelineTiming::Summary &pipeline  = {} /**< [in] upstream trace-stage populations */,
-                  const dmTiming::Summary &cameraPublication = {} /**< [in] independent camera writetime intervals */ );
+                  const dmPipelineTiming::Summary &pipeline    = {} /**< [in] upstream trace-stage populations */,
+                  const dmTiming::Summary &cameraPublication   = {} /**< [in] independent camera writetime intervals */,
+                  const dmSyncoSimulation::Summary &simulation = {} /**< [in] conditional shadow predictions */ );
     };
 
     /// Validate optional cadence and stage populations while accepting legacy records.
@@ -87,6 +90,11 @@ struct telem_dmsynco : public flatbuffer_log
     pipelineTiming( flatbuffers::FlatBufferBuilder  &builder /**< [in/out] destination builder */,
                     const dmPipelineTiming::Summary &summary /**< [in] coherent pipeline observation */ );
 
+    /// Serialize conditional shadow outcomes without claiming auxiliary delivery.
+    static flatbuffers::Offset<DmSyncoSimulation>
+    simulationTiming( flatbuffers::FlatBufferBuilder   &builder /**< [in/out] destination builder */,
+                      const dmSyncoSimulation::Summary &summary /**< [in] coherent shadow prediction snapshot */ );
+
     /// Check finite populated statistics and sample-variance validity.
     static bool validStats( const DmSyncoTimingStats *stats /**< [in] required nested cadence population */,
                             bool signedValues = false /**< [in] allow negative latency changes */ );
@@ -96,6 +104,9 @@ struct telem_dmsynco : public flatbuffer_log
 
     /// Check retained pipeline topology and conditional-population count bounds.
     static bool validPipeline( const DmSyncoPipelineTiming *summary /**< [in] optional trace-stage summary */ );
+
+    /// Check optional shadow model readiness and independently counted step outcomes.
+    static bool validSimulation( const DmSyncoSimulation *summary /**< [in] optional conditional simulation */ );
 
     /// Format independent primary/camera cadence and ordered excursions with distinct names.
     static void
@@ -107,6 +118,10 @@ struct telem_dmsynco : public flatbuffer_log
     /// Format retained pipeline stages and their independently counted conditional populations.
     static void formatPipeline( std::ostream                &output /**< [in/out] formatted aggregate */,
                                 const DmSyncoPipelineTiming *summary /**< [in] optional pipeline summary */ );
+
+    /// Append explicitly hypothetical prediction and per-step outcome diagnostics when enabled.
+    static void formatSimulation( std::ostream            &output /**< [in/out] formatted aggregate */,
+                                  const DmSyncoSimulation *summary /**< [in] optional conditional simulation */ );
 
     /// Validate optional ordered-pair populations and their conditional count relationships.
     static bool
@@ -316,23 +331,95 @@ telem_dmsynco::pipelineTiming( flatbuffers::FlatBufferBuilder &builder, const dm
                                         earlyPublicationChange );
 }
 
-inline telem_dmsynco::messageT::messageT( int                              state,
-                                          int                              steps,
-                                          int64_t                          period,
-                                          uint64_t                         delivered,
-                                          uint64_t                         missed,
-                                          uint64_t                         faults,
-                                          uint64_t                         cached,
-                                          int64_t                          snapshot,
-                                          int64_t                          copy,
-                                          const std::vector<int64_t>      &residuals,
-                                          const std::vector<int64_t>      &advances,
-                                          const dmTiming::Summary         &primary,
-                                          bool                             scheduleValid,
-                                          const dmCombTiming::Summary     &combiner,
-                                          const dmTiming::Summary         &camera,
-                                          const dmPipelineTiming::Summary &pipeline,
-                                          const dmTiming::Summary         &cameraPublication )
+inline flatbuffers::Offset<DmSyncoSimulation>
+telem_dmsynco::simulationTiming( flatbuffers::FlatBufferBuilder &builder, const dmSyncoSimulation::Summary &summary )
+{
+    if( !summary.enabled )
+    {
+        return {};
+    }
+
+    std::vector<flatbuffers::Offset<DmSyncoSimulationStep>> steps;
+
+    for( int index = 0; index < summary.steps && index < int( dmSyncoSimulation::maxSteps ); ++index )
+    {
+        const auto &step = summary.outcomes[index];
+        steps.push_back( CreateDmSyncoSimulationStep( builder,
+                                                      step.considered,
+                                                      step.wouldRun,
+                                                      step.skipped,
+                                                      step.earlyMain,
+                                                      step.missingMain,
+                                                      step.missingOutput,
+                                                      step.readerHold,
+                                                      step.expired,
+                                                      step.overlap ) );
+    }
+
+    const auto outcomes = builder.CreateVector( steps );
+
+    return CreateDmSyncoSimulation( builder,
+                                    summary.enabled,
+                                    summary.valid,
+                                    summary.feasible,
+                                    summary.session,
+                                    summary.sequence,
+                                    summary.nowNs,
+                                    summary.lastMainNs,
+                                    summary.counter,
+                                    summary.steps,
+                                    summary.periodNs,
+                                    summary.gridNs,
+                                    summary.phaseNs,
+                                    summary.phaseMinNs,
+                                    summary.phaseMaxNs,
+                                    summary.phaseCount,
+                                    summary.periodSamples,
+                                    summary.phaseSamples,
+                                    summary.nextGridNs,
+                                    summary.nextActiveNs,
+                                    summary.earlyReserveNs,
+                                    summary.deliveryNs,
+                                    summary.keepoutNs,
+                                    summary.guardNs,
+                                    summary.snapshotNs,
+                                    summary.copyNs,
+                                    summary.leadNs,
+                                    summary.observationNs,
+                                    summary.visibilityNs,
+                                    summary.reserveNs,
+                                    summary.window,
+                                    summary.phaseGain,
+                                    summary.phaseSlewNs,
+                                    summary.duplicates,
+                                    summary.gaps,
+                                    summary.resets,
+                                    summary.invalid,
+                                    summary.excluded,
+                                    summary.outputGaps,
+                                    summary.associations,
+                                    outcomes,
+                                    summary.cadenceMinPeriodNs );
+}
+
+inline telem_dmsynco::messageT::messageT( int                               state,
+                                          int                               steps,
+                                          int64_t                           period,
+                                          uint64_t                          delivered,
+                                          uint64_t                          missed,
+                                          uint64_t                          faults,
+                                          uint64_t                          cached,
+                                          int64_t                           snapshot,
+                                          int64_t                           copy,
+                                          const std::vector<int64_t>       &residuals,
+                                          const std::vector<int64_t>       &advances,
+                                          const dmTiming::Summary          &primary,
+                                          bool                              scheduleValid,
+                                          const dmCombTiming::Summary      &combiner,
+                                          const dmTiming::Summary          &camera,
+                                          const dmPipelineTiming::Summary  &pipeline,
+                                          const dmTiming::Summary          &cameraPublication,
+                                          const dmSyncoSimulation::Summary &simulation )
 {
     builder.ForceDefaults( true ); // Keep nonfinite input available to verification under fast-math comparisons.
 
@@ -343,6 +430,7 @@ inline telem_dmsynco::messageT::messageT( int                              state
     const auto cameraPublicationTiming = observationTiming( builder, cameraPublication );
     const auto upstreamTiming          = pipelineTiming( builder, pipeline );
     const auto combinedTiming          = combinerTiming( builder, combiner );
+    const auto simulatedTiming         = simulationTiming( builder, simulation );
 
     builder.Finish( CreateTelem_dmsynco_fb( builder,
                                             state,
@@ -361,7 +449,8 @@ inline telem_dmsynco::messageT::messageT( int                              state
                                             combinedTiming,
                                             cameraTiming,
                                             upstreamTiming,
-                                            cameraPublicationTiming ) );
+                                            cameraPublicationTiming,
+                                            simulatedTiming ) );
 }
 
 inline bool telem_dmsynco::validStats( const DmSyncoTimingStats *stats, bool signedValues )
@@ -518,6 +607,80 @@ inline bool telem_dmsynco::validPipeline( const DmSyncoPipelineTiming *summary )
     return true;
 }
 
+inline bool telem_dmsynco::validSimulation( const DmSyncoSimulation *summary )
+{
+    if( !summary )
+    {
+        return true;
+    }
+
+    if( !summary->outcomes() || summary->steps() < 0 || summary->steps() > int( dmSyncoSimulation::maxSteps ) ||
+        summary->outcomes()->size() != size_t( summary->steps() ) ||
+        ( summary->enabled() && ( summary->steps() == 0 || summary->session() == 0 ) ) ||
+        ( !summary->enabled() && ( summary->valid() || summary->feasible() ) ) || summary->now_ns() < 0 ||
+        summary->last_main_ns() < 0 || summary->last_main_ns() > summary->now_ns() || summary->period_ns() < 0 ||
+        summary->grid_ns() < 0 || summary->next_grid_ns() < 0 || summary->next_active_ns() < 0 ||
+        summary->early_reserve_ns() < 0 || summary->delivery_ns() < 0 || summary->keepout_ns() < 0 ||
+        summary->guard_ns() < 0 || summary->snapshot_ns() < 0 || summary->copy_ns() < 0 || summary->lead_ns() < 0 ||
+        summary->observation_ns() < 0 || summary->visibility_ns() < 0 || summary->reserve_ns() < 0 ||
+        !mx::math::isFinite( summary->phase_gain() ) || summary->phase_gain() < 0 || summary->phase_gain() > 1 ||
+        summary->phase_slew_ns() < 0 || summary->cadence_min_period_ns() < 0 ||
+        summary->phase_count() > summary->sequence() || summary->period_samples() > summary->sequence() ||
+        summary->phase_samples() > summary->sequence() || summary->period_samples() > summary->window() ||
+        summary->phase_samples() > summary->window() ||
+        ( summary->valid() && ( !summary->enabled() || summary->period_ns() == 0 || summary->grid_ns() == 0 ||
+                                summary->last_main_ns() == 0 || summary->window() == 0 ) ) )
+    {
+        return false;
+    }
+
+    if( summary->phase_count() == 0 )
+    {
+        if( summary->phase_ns() != 0 || summary->phase_min_ns() != 0 || summary->phase_max_ns() != 0 )
+        {
+            return false;
+        }
+    }
+    else if( summary->phase_min_ns() > summary->phase_ns() || summary->phase_ns() > summary->phase_max_ns() ||
+             ( summary->phase_count() == 1 &&
+               ( summary->phase_min_ns() != summary->phase_ns() || summary->phase_max_ns() != summary->phase_ns() ) ) )
+    {
+        return false;
+    }
+
+    for( const auto *step : *summary->outcomes() )
+    {
+        if( !step || step->would_run() > step->considered() ||
+            step->skipped() != step->considered() - step->would_run() )
+        {
+            return false;
+        }
+
+        uint64_t unclassified = step->skipped();
+
+        for( uint64_t count : { step->early_main(),
+                                step->missing_main(),
+                                step->missing_output(),
+                                step->reader_hold(),
+                                step->expired() } )
+        {
+            if( count > unclassified )
+            {
+                return false;
+            }
+
+            unclassified -= count;
+        }
+
+        if( unclassified != 0 )
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 inline bool telem_dmsynco::verify( flatlogs::bufferPtrT &buffer, flatlogs::msgLenT len )
 {
     if( !buffer )
@@ -535,7 +698,8 @@ inline bool telem_dmsynco::verify( flatlogs::bufferPtrT &buffer, flatlogs::msgLe
     const auto *record = GetTelem_dmsynco_fb( flatlogs::logHeader::messageBuffer( buffer ) );
 
     if( !validObservation( record->primary_timing() ) || !validObservation( record->camera_timing() ) ||
-        !validPipeline( record->pipeline_timing() ) || !validObservation( record->camera_publication_timing() ) )
+        !validPipeline( record->pipeline_timing() ) || !validObservation( record->camera_publication_timing() ) ||
+        !validSimulation( record->simulation() ) )
     {
         return false;
     }
@@ -670,6 +834,50 @@ inline void telem_dmsynco::formatPipeline( std::ostream &output, const DmSyncoPi
     }
 }
 
+inline void telem_dmsynco::formatSimulation( std::ostream &output, const DmSyncoSimulation *summary )
+{
+    if( !summary || !summary->enabled() )
+    {
+        return;
+    }
+
+    output << " simulation_enabled=1 simulation_valid=" << summary->valid()
+           << " simulation_feasible=" << summary->feasible() << " simulation_mode=shadow_conditional"
+           << " simulation_session=" << summary->session() << " simulation_sequence=" << summary->sequence()
+           << " simulation_now_ns=" << summary->now_ns() << " simulation_last_main_ns=" << summary->last_main_ns()
+           << " simulation_counter=" << summary->counter() << " simulation_steps=" << summary->steps()
+           << " simulation_period_ns=" << summary->period_ns() << " simulation_grid_ns=" << summary->grid_ns()
+           << " simulation_phase_ns=" << summary->phase_ns() << " simulation_phase_min_ns=" << summary->phase_min_ns()
+           << " simulation_phase_max_ns=" << summary->phase_max_ns()
+           << " simulation_phase_count=" << summary->phase_count()
+           << " simulation_period_samples=" << summary->period_samples()
+           << " simulation_phase_samples=" << summary->phase_samples()
+           << " simulation_next_grid_ns=" << summary->next_grid_ns()
+           << " simulation_next_active_ns=" << summary->next_active_ns()
+           << " simulation_early_reserve_ns=" << summary->early_reserve_ns()
+           << " simulation_model={delivery_ns:" << summary->delivery_ns() << ",keepout_ns:" << summary->keepout_ns()
+           << ",guard_ns:" << summary->guard_ns() << ",snapshot_ns:" << summary->snapshot_ns()
+           << ",copy_ns:" << summary->copy_ns() << ",lead_ns:" << summary->lead_ns()
+           << ",observation_ns:" << summary->observation_ns() << ",visibility_ns:" << summary->visibility_ns()
+           << ",reserve_ns:" << summary->reserve_ns() << ",window:" << summary->window()
+           << ",phaseGain:" << summary->phase_gain() << ",phaseSlew_ns:" << summary->phase_slew_ns()
+           << ",cadenceMinPeriod_ns:" << summary->cadence_min_period_ns() << '}'
+           << " simulation_quality={duplicates:" << summary->duplicates() << ",gaps:" << summary->gaps()
+           << ",resets:" << summary->resets() << ",invalid:" << summary->invalid()
+           << ",excluded:" << summary->excluded() << ",outputGaps:" << summary->output_gaps()
+           << ",associations:" << summary->associations() << '}';
+
+    for( size_t index = 0; index < summary->outcomes()->size(); ++index )
+    {
+        const auto *step = summary->outcomes()->Get( index );
+        output << " sim_step={index:" << index << ",considered:" << step->considered()
+               << ",wouldRun:" << step->would_run() << ",skipped:" << step->skipped()
+               << ",earlyMain:" << step->early_main() << ",missingMain:" << step->missing_main()
+               << ",missingOutput:" << step->missing_output() << ",readerHold:" << step->reader_hold()
+               << ",expired:" << step->expired() << ",overlap:" << step->overlap() << '}';
+    }
+}
+
 inline std::string telem_dmsynco::msgString( void *buffer, flatlogs::msgLenT len )
 {
     static_cast<void>( len );
@@ -718,6 +926,7 @@ inline std::string telem_dmsynco::msgString( void *buffer, flatlogs::msgLenT len
     formatObservation( output, "camera", "cameraAcquisitionInterval", record->camera_timing() );
     formatPipeline( output, record->pipeline_timing() );
     formatObservation( output, "cameraWrite", "cameraWriteInterval", record->camera_publication_timing() );
+    formatSimulation( output, record->simulation() );
 
     return output.str();
 }
