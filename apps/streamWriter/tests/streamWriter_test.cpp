@@ -604,12 +604,20 @@ int streamWriter_data_test::comp_frames( size_t start, size_t stop )
     }
 
     const bool integer16 = m_sw->m_dataType == XRIF_TYPECODE_INT16 || m_sw->m_dataType == XRIF_TYPECODE_UINT16;
-    if( xrif->difference_method !=
-            ( m_sw->m_compress && integer16 ? XRIF_DIFFERENCE_PREVIOUS : XRIF_DIFFERENCE_NONE ) ||
-        xrif->reorder_method != ( m_sw->m_compress && integer16 ? XRIF_REORDER_BYTEPACK : XRIF_REORDER_NONE ) ||
-        xrif->compress_method != ( m_sw->m_compress ? XRIF_COMPRESS_LZ4 : XRIF_COMPRESS_NONE ) )
+    const bool compress  = m_sw->m_compress && integer16;
+    if( xrif->difference_method != ( compress ? XRIF_DIFFERENCE_PREVIOUS : XRIF_DIFFERENCE_NONE ) ||
+        xrif->reorder_method != ( compress ? XRIF_REORDER_BYTEPACK : XRIF_REORDER_NONE ) ||
+        xrif->compress_method != ( compress ? XRIF_COMPRESS_LZ4 : XRIF_COMPRESS_NONE ) )
     {
         std::cerr << "image encoding methods mismatch\n";
+        rv = -1;
+    }
+
+    // Legacy xrif_read_header does not populate raw_size; derive it from the decoded dimensions.
+    const size_t rawSize = size_t( xrif->width ) * xrif->height * xrif->depth * xrif->frames * xrif->data_size;
+    if( !compress && xrif->compressed_size != rawSize )
+    {
+        std::cerr << "uncompressed image payload size mismatch\n";
         rv = -1;
     }
 
@@ -1125,7 +1133,7 @@ TEST_CASE( "streamWriter fault injection covers XRIF setup and write warnings", 
     }
 }
 
-/// Verify compressed and raw archives preserve every byte across supported scalar pixel types.
+/// Verify only 16-bit integers use requested compression while all scalar types retain their exact bytes.
 /**
  * \ingroup streamWriter_unit_test
  */
@@ -1169,7 +1177,7 @@ TEST_CASE( "streamWriter pixel type round trips", "[streamWriter][pixelTypes]" )
             }
 }
 
-/// Verify reconnect allocation preserves floating-point bits and reselects methods after type changes.
+/// Verify reconnects retain the compression request and restore integer compression after uncompressed types.
 /**
  * \ingroup streamWriter_unit_test
  */
@@ -1206,6 +1214,7 @@ TEST_CASE( "streamWriter pixel type reconnect round trips", "[streamWriter][pixe
                 INFO( "Reconnected pixel type: " << type );
                 REQUIRE( sw_test.setup_circbufs( 1563, 1, type, 30, 15 ) == 0 );
                 REQUIRE( sw.allocate_xrif() == 0 );
+                REQUIRE( sw.m_compress == compress );
                 REQUIRE( sw_test.fill_circbuf_bytes() == 0 );
                 for( const int frames : { 15, 1 } )
                 {

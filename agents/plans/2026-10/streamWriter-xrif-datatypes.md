@@ -6,9 +6,10 @@ the first save. The example is `aol1_mmultfact` on 2026-10-26.
 
 Reviewed: 2026-10-26, `jrmales/streamWriter-idle-cpu` at `a6d4d762`.
 
-Status: Root cause reproduced locally; correction and permanent regressions are
-implemented and validated. No instrument access, INDI traffic, dependency installation, or
-configuration changes are involved.
+Status: Root cause reproduced locally; automatic uncompressed output for
+non-16-bit data and permanent regressions are implemented and validated. No
+instrument access, INDI traffic, dependency installation, or configuration-file
+changes are involved.
 
 ## Finding
 
@@ -30,6 +31,9 @@ reconnect-state failure:
   30-frame circular buffer and 10-frame write chunk, and leaves compression and
   the 10-second chunk timeout at their defaults. This is local configuration,
   not an inspection of the deployed process.
+- The user subsequently confirmed that the deployed writer uses the default
+  `writer.compress=true` setting and requested automatic uncompressed saving for
+  non-16-bit data.
 - The supplied log starts saving at `09:04:16.381659928` and reports its first
   encode failure at `09:04:26.392004651`, approximately 10.010 seconds later.
   That fits the partial-chunk timeout. It does not establish a restart as the
@@ -74,21 +78,27 @@ record.
 
 ## Correction
 
-Select the final preprocessing methods in `allocate_xrif()`, where the connected
-source datatype is known, before allocating encoder buffers:
+Select the effective compression policy in `allocate_xrif()`, where the connected
+source datatype is known, before allocating encoder buffers. Following the
+user's clarification, all types other than INT16/UINT16 automatically use the
+same uncompressed encoding as `writer.compress=false`:
 
 | Requested policy / source type | Difference | Reorder | Compress |
 | --- | --- | --- | --- |
 | Compression enabled, INT16 or UINT16 | PREVIOUS | BYTEPACK | LZ4 |
-| Compression enabled, other supported types | NONE | NONE | LZ4 |
+| Compression enabled, other supported types | NONE | NONE | NONE |
 | Compression disabled | NONE | NONE | NONE |
 
-This preserves the optimized 16-bit camera path and lossless compression for
-other streams. It preserves floating-point representations, including NaN
-payloads and signed zero, rather than doing floating-point arithmetic. It does
-not change `m_compress`, so reconnection reselects appropriate methods even when
-the stream datatype changes. The ordinary XRIF header stores the selected
-methods; no archive-version or reader-format change is needed.
+This preserves the optimized 16-bit camera path and saves other streams as raw
+image bytes inside the usual XRIF archive. Floating-point representations,
+including NaN payloads and signed zero, are preserved exactly. `m_compress`
+retains the user's configured preference, while the effective policy is
+reselected on every connection: FLOAT32 is uncompressed, and switching back to
+INT16/UINT16 restores compression if it was requested. Explicit
+`writer.compress=false` remains uncompressed for every type. Configuration help
+and member/method documentation describe this behavior. The ordinary XRIF header
+stores the selected methods; no archive-version or reader-format change is
+needed.
 
 Do not retry unsupported preprocessing only after a failed encode: integer
 differencing may already have modified the raw buffer before reordering fails.
@@ -106,16 +116,18 @@ detect that invalid image payload.
 
 The corrected regressions cover:
 
-- Forty scalar-type/compression/frame-count combinations (ten types, compressed
-  or raw, and one-frame or full three-frame chunks), with byte-exact image and
+- Forty scalar-type/compression/frame-count combinations (ten types, compression
+  requested or disabled, and one-frame or full three-frame chunks), with byte-exact image and
   timing round trips. Float/double inputs include positive/negative zero, NaN
   payloads, infinities, and subnormal representations.
 - Repeated allocation on the same handles through
   FLOAT32 → FLOAT32 → UINT16 → FLOAT32 → FLOAT64 → INT16 → UINT8 → UINT32 → FLOAT32,
   with compression enabled and disabled, full and partial writes, and decoded
-  header method checks. This verifies both fallback selection and restoration
-  of the 16-bit transforms.
-- Both real workers saving a single FLOAT32 frame through a timed partial flush.
+  header method and raw-payload-size checks. The configured preference must stay
+  unchanged across allocation. This verifies both automatic uncompressed saving
+  and restoration of the 16-bit transforms.
+- Both real workers saving a single FLOAT32 frame through a timed partial flush,
+  automatically uncompressed despite the default compression request.
 - Real FLOAT32 source deletion/recreation while idle, armed before the first
   frame, or active with one unsaved frame. Each scenario decodes image and timing
   payloads, checks every timing word, and compares image bytes exactly. Tests
@@ -126,7 +138,7 @@ Fresh builds with `COVERAGE=1` passed:
 
 | Executable | Test cases | Assertions |
 | --- | ---: | ---: |
-| `streamWriter_test` | 8 | 452 |
+| `streamWriter_test` | 8 | 470 |
 | `streamWriter_fault_test` | 18 | 1102 |
 | `streamWriter_lifecycle_test` | 10 | 207 |
 | `streamWriterSizing_test` | 1 | 34 |
@@ -138,15 +150,17 @@ help/configuration interface. Build/invocation pattern, from `tests/`:
 
 ```sh
 make -f Makefile.one t=../apps/streamWriter/tests/streamWriter_test.cpp -W ../apps/streamWriter/tests/streamWriter_test.cpp COVERAGE=1
-GCOV_PREFIX=/tmp/streamWriter-xrif-final-gcov timeout 90s ../apps/streamWriter/tests/streamWriter_test
+GCOV_PREFIX=/tmp/streamWriter-raw-policy-gcov timeout 90s ../apps/streamWriter/tests/streamWriter_test
 ```
 
 The app header and both modified test files were clang-formatted and checked
-with `git diff --check`. Final logs are temporary artifacts:
-`/tmp/streamWriter-xrif-notimpl-20261026/unit-{prefixed,final}.log`,
-`/tmp/streamWriter-float-{before,after}-fix.log`,
-`/tmp/streamWriter-lifecycle-float-full.log`, and
-`/tmp/streamWriter-xrif-{fault,sizing,entrypoint}.log`.
+with `git diff --check`. Pre-fix logs remain at
+`/tmp/streamWriter-xrif-notimpl-20261026/unit-prefixed.log` and
+`/tmp/streamWriter-float-before-fix.log`. Final uncompressed-policy logs are
+temporary artifacts at
+`/tmp/streamWriter-xrif-notimpl-20261026/unit-non16-raw-final.log`,
+`/tmp/streamWriter-float-uncompressed-lifecycle.log`, and
+`/tmp/streamWriter-raw-policy-{fault,sizing,entrypoint}.log`.
 
 ## Limits and follow-up
 
@@ -161,8 +175,9 @@ with `git diff --check`. Final logs are temporary artifacts:
   reconnect can retain the previous successful compressed size (237 bytes in
   the probe). This correction prevents the unsupported method selection; it
   does not repair old archives or change general encode-error handling.
-- Compression ratios for non-16-bit streams depend on LZ4 alone. Adding more
-  preprocessing methods requires separate compatibility and performance work.
+- Non-16-bit image payloads are uncompressed, so their archive size reflects the
+  raw image data plus headers/timing. This is the requested policy; enabling
+  compression for those types would be a separate change.
 
 Related engineering record:
 [streamWriter idle CPU investigation](streamWriter-idle-cpu.md).

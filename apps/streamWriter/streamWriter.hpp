@@ -103,7 +103,7 @@ class streamWriter : public MagAOXApp<>, public dev::telemeter<streamWriter>
 
     int m_lz4accel{ 1 }; ///< LZ4 acceleration used for each image archive.
 
-    bool m_compress{ true }; ///< Whether image archives use XRIF compression.
+    bool m_compress{ true }; ///< Requested compression for 16-bit integers; other image types are saved uncompressed.
 
     ///@}
 
@@ -282,8 +282,8 @@ class streamWriter : public MagAOXApp<>, public dev::telemeter<streamWriter>
     int allocate_circbufs();
 
     /// Worker function to configure and allocate the xrif handles.
-    /** This takes place in the fg thread after connecting to the stream. When compression is enabled, legacy XRIF
-     * preprocessing is selected only for 16-bit integers; other types use LZ4 without those transforms.
+    /** This takes place in the fg thread after connecting to the stream. Compression is enabled only when requested
+     * for 16-bit integer images; other types are saved without differencing, reordering, or compression.
      *
      * \returns 0 on success.
      * \returns -1 on error.
@@ -512,7 +512,7 @@ void streamWriter::setupConfig()
                 "compress",
                 false,
                 "bool",
-                "Flag to set whether compression is used.  Default true." );
+                "Enable compression for 16-bit integer images. Other types are saved uncompressed. Default true." );
 
     config.add( "writer.lz4accel",
                 "",
@@ -1146,13 +1146,9 @@ int streamWriter::allocate_xrif()
     // Set up the image data xrif handle
     xrif_error_t rv;
 
-    if( m_compress )
+    if( m_compress && ( m_dataType == XRIF_TYPECODE_INT16 || m_dataType == XRIF_TYPECODE_UINT16 ) )
     {
-        const bool integer16 = m_dataType == XRIF_TYPECODE_INT16 || m_dataType == XRIF_TYPECODE_UINT16;
-        rv                   = xrif_configure( m_xrif,
-                             integer16 ? XRIF_DIFFERENCE_PREVIOUS : XRIF_DIFFERENCE_NONE,
-                             integer16 ? XRIF_REORDER_BYTEPACK : XRIF_REORDER_NONE,
-                             XRIF_COMPRESS_LZ4 );
+        rv = xrif_configure( m_xrif, XRIF_DIFFERENCE_PREVIOUS, XRIF_REORDER_BYTEPACK, XRIF_COMPRESS_LZ4 );
         if( rv != XRIF_NOERROR )
         {
             return log<software_critical, -1>( { __FILE__, __LINE__, 0, rv, "xrif handle configuration error." } );

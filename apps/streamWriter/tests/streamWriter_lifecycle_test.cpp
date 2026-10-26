@@ -830,6 +830,7 @@ void requireFloatArchive( const std::filesystem::path &path /**< [in] completed 
     REQUIRE( decoder->height == 2 );
     REQUIRE( decoder->depth == 1 );
     REQUIRE( decoder->frames * 4 == pixels.size() );
+    REQUIRE( decoder->compressed_size == pixels.size() * sizeof( float ) );
     const size_t timingOffset = header + decoder->compressed_size;
     REQUIRE( bytes.size() >= timingOffset + XRIF_HEADER_SIZE );
     REQUIRE( xrif_allocate( decoder ) == XRIF_NOERROR );
@@ -839,7 +840,7 @@ void requireFloatArchive( const std::filesystem::path &path /**< [in] completed 
     REQUIRE( memcmp( decoder->raw_buffer, pixels.data(), pixels.size() * sizeof( float ) ) == 0 );
     REQUIRE( decoder->difference_method == XRIF_DIFFERENCE_NONE );
     REQUIRE( decoder->reorder_method == XRIF_REORDER_NONE );
-    REQUIRE( decoder->compress_method == XRIF_COMPRESS_LZ4 );
+    REQUIRE( decoder->compress_method == XRIF_COMPRESS_NONE );
 
     REQUIRE( xrif_read_header( decoder, &header, bytes.data() + timingOffset ) == XRIF_NOERROR );
     REQUIRE( decoder->type_code == XRIF_TYPECODE_UINT64 );
@@ -1719,7 +1720,7 @@ TEST_CASE( "streamWriter real workers preserve data across source replacement", 
     REQUIRE( WEXITSTATUS( status ) == 0 );
 }
 
-/** \brief Verify a timed partial chunk preserves a compressed FLOAT32 frame and its complete timing record.
+/** \brief Verify a timed partial chunk automatically stores FLOAT32 pixels without compression and preserves timing.
  * \ingroup streamWriter_unit_test
  */
 TEST_CASE( "streamWriter real workers preserve FLOAT32 partial time flushes", "[streamWriter][regression][float]" )
