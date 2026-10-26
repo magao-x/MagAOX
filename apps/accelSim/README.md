@@ -197,23 +197,91 @@ wait "$accel_sim_pid"
 cat "$accel_sim_root/app.log"
 ```
 
-## Offline PSD validation
+## Offline visual validation on macOS
 
-The hidden export test uses the production model, without OS pacing, to write a
-60-second numerical sample CSV and its resolved mode table. It does not add a
-playback dependency to the app. With NumPy/SciPy installed:
+This workflow calls the same C++ `model::step()` as the application, with no
+MagAO-X runtime dependencies, shared-memory streams, INDI, or wall-clock pacing.
+The finite record is a diagnostic export only; production remains continuous.
+The export uses the normal model defaults: **6000 Hz, 60 seconds, seed 42,
+modeSeed 123**, producing 360000 X/Y pairs from 214 resolved modes.
+
+From the repository root, build and export:
 
 ```sh
-mkdir -p /tmp/accelSim-validation
-ACCELSIM_EXPORT_DIR=/tmp/accelSim-validation \
+c++ -std=c++20 -O3 -fno-fast-math -Wall -Wextra \
+  -DCATCH_CONFIG_MAIN -DACCELSIM_MODEL_ONLY \
+  apps/accelSim/tests/accelSim_test.cpp -o /tmp/accelSim_model_test
+mkdir -p /tmp/accelSim-visual-validation
+ACCELSIM_EXPORT_DIR=/tmp/accelSim-visual-validation \
   /tmp/accelSim_model_test '[accelSim-export]'
-python3 apps/accelSim/tests/validate_psd.py /tmp/accelSim-validation
 ```
 
-The normal test binary also supports `[accelSim-export]`. Outputs include
-`validation.json` and `psd.csv`. Welch settings match the notebook. Physical and
-inverse-calibrated raw-ADC spectra are reported separately to expose quantization;
-the inverse calibration here is only for analysis, not a DDSPC requirement.
+The normal full test binary also supports `[accelSim-export]`. Exported files:
+
+- `samples.csv`: nominal time [s]; physical and WFS pointing X/Y [arcsec];
+  acceleration X/Y including sensor noise [m/s²]; raw ADC X/Y [counts].
+- `modes.csv`: resolved frequencies, per-axis acceleration RMS, pole radii,
+  and X/Y WFS couplings used by this C++ realization.
+- `metadata.json`: sample rate, duration, both seeds, lever arm, ADC calibration,
+  noise PSD, and the model's actual lower/upper clipping counts for each axis.
+
+Prepare an offline Python environment once, then generate the figures:
+
+```sh
+python3 -m venv /tmp/accelsim-validation-env
+/tmp/accelsim-validation-env/bin/python -m pip install numpy scipy matplotlib
+/tmp/accelsim-validation-env/bin/python apps/accelSim/tests/validate_psd.py \
+  /tmp/accelSim-visual-validation
+```
+
+Add `--show` to also open interactive Matplotlib windows (the plot files are
+saved first). `--time-start 5 --time-seconds 0.5` selects a different short time
+trace; PSDs and RMS always use the entire exported record. Defaults show the
+first second. Without `--show`, plotting uses the headless Agg backend.
+
+Results are printed and saved in `validation.json`; all measured and predicted
+spectra are saved in `psd.csv`. Figures are saved under the export directory:
+
+| File in `plots/` | Meaning |
+| --- | --- |
+| `pointing_timeseries.png` | Physical pointing X/Y in mas, first second by default. |
+| `pointing_psd.png` | Physical pointing PSD in mas²/Hz; narrow low-frequency modes tend to dominate the pointing variance. |
+| `wfs_psd.png` | WFS-coupled pointing PSD in mas²/Hz; each mode's power is multiplied by its axis coupling squared, without accelerometer sensor noise. |
+| `accel_psd.png` | Acceleration PSD in (m/s²)²/Hz, including the 100–900 Hz population and sensor noise. |
+| `adc_psd.png` | Inverse-calibrated ADC acceleration PSD, overlaid with the same pre-ADC realization to expose quantization/clipping effects. |
+
+All PSD figures mark the 14 prominent frequencies. Welch uses SciPy with
+`window="hann"`, `nperseg=10*fs` (limited to record length for shorter inputs),
+50% overlap, `detrend="constant"`, and `scaling="density"`.
+
+Dashed curves are stationary ensemble AR(2) predictions, including the **same
+finite Hann window and constant detrending** as the estimator. They are computed
+from the analytic lag covariance, not fitted to the record. This avoids comparing
+an unresolved high-r resonance's infinite-record peak height directly with a
+10-second-window estimate. Physical/WFS theory uses the lever-arm conversion and
+squared axis couplings; acceleration theory adds the configured white sensor noise.
+The ADC plot's theory is explicitly **pre-ADC**: it does not model quantization
+or clipping. The noise-dominated tail should approach 1e-8 (m/s²)²/Hz before
+quantization; default ADC quantization adds roughly 1.87e-9 (m/s²)²/Hz under the
+usual white quantization-error approximation.
+
+Reported RMS is `sqrt(mean(x²))`, without subtracting the record mean. X/Y
+realizations are independent. Very high-r modes can have different realized
+amplitudes across axes/seeds and differ from the ensemble RMS in a 60-second
+record; this is expected, not a failed normalization check. Clipping totals count
+actual model clamps, separately from valid samples that happen to equal 0 or 4095.
+Older exports without metadata use documented default calibration and reconstruct
+clamp counts from their acceleration values; regenerate data to obtain exact C++
+counters. Analysis flags such as `--fps`, `--lever-arm`, and `--volts-per-bit`
+override metadata for analysis only; they do not regenerate or alter the simulation.
+
+Optional offline checks:
+
+```sh
+/tmp/accelSim_model_test '[model]'
+/tmp/accelsim-validation-env/bin/python -m unittest discover \
+  -s apps/accelSim/tests -p 'test_validate_psd.py' -v
+```
 
 ## Current verification limits
 

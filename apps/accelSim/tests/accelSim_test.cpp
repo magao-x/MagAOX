@@ -527,15 +527,17 @@ TEST_CASE( "accelSim export offline validation samples", "[.][accelSim-export]" 
     REQUIRE( modes.good() );
     REQUIRE( samples.good() );
     modes << std::setprecision( 17 ) << "frequency,accel_rms,r,coupling_x,coupling_y\n";
-    parameters config;
-    const auto specs = referenceModes( config.m_modeSeed );
+    parameters       config;
+    constexpr double duration = 60;
+    const auto       count    = static_cast<size_t>( std::llround( duration * config.m_fps ) );
+    const auto       specs    = referenceModes( config.m_modeSeed );
     for( const auto &s : specs )
         modes << s.m_frequency << ',' << s.m_accelRms << ',' << s.m_r << ',' << s.m_couplingX << ',' << s.m_couplingY
               << '\n';
     model value;
     value.configure( config, specs );
     samples << std::setprecision( 17 ) << "time,pointing_x,pointing_y,wfs_x,wfs_y,accel_x,accel_y,adc_x,adc_y\n";
-    for( size_t n = 0; n < 360000; ++n )
+    for( size_t n = 0; n < count; ++n )
     {
         const auto &s = value.step();
         samples << n / config.m_fps;
@@ -544,7 +546,20 @@ TEST_CASE( "accelSim export offline validation samples", "[.][accelSim-export]" 
                 samples << ',' << x;
         samples << ',' << s.m_adc[0] << ',' << s.m_adc[1] << '\n';
     }
+    samples.flush();
+    modes.flush();
     REQUIRE( samples.good() );
+    REQUIRE( modes.good() );
+    std::ofstream metadata( prefix + "metadata.json" );
+    metadata << std::setprecision( 17 ) << "{\n  \"fps\": " << config.m_fps << ",\n  \"duration\": " << duration
+             << ",\n  \"seed\": " << config.m_seed << ",\n  \"mode_seed\": " << config.m_modeSeed
+             << ",\n  \"lever_arm\": " << config.m_leverArm << ",\n  \"zero\": " << config.m_zero
+             << ",\n  \"sensitivity\": " << config.m_sensitivity << ",\n  \"volts_per_bit\": " << config.m_voltsPerBit
+             << ",\n  \"noise_psd\": " << config.m_noisePSD << ",\n  \"clip_low_xy\": [" << value.m_clipLow[0] << ", "
+             << value.m_clipLow[1] << "],\n  \"clip_high_xy\": [" << value.m_clipHigh[0] << ", " << value.m_clipHigh[1]
+             << "]\n}\n";
+    metadata.flush();
+    REQUIRE( metadata.good() );
 }
 
 #ifndef ACCELSIM_MODEL_ONLY

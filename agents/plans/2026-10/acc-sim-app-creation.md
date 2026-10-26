@@ -686,3 +686,32 @@ c++ -std=c++20 -O1 -g -fno-fast-math -fsanitize=address,undefined \
 ```
 
 **Remaining status:** no known implementation defect from the post-implementation review remains open, and no additional defect was found in this fix pass. This is not a claim of full runtime acceptance: the app and framework-dependent regressions remain uncompiled here, and Linux stream/INDI/lifecycle/concurrency checks, unchanged-consumer substitution, and the ten-minute performance test are still required. Both existing environment/dependency blockers remain documented above and unchanged. There was no scope expansion beyond the requested fixes and their tests/documentation.
+
+### Offline Visual Validation — 2026-10-26
+
+After committing the initial implementation (`eb3c2c91`), the user requested an offline visual inspection workflow using the same C++ numerical model, without changing production physics. This addition touches only `apps/accelSim/tests/accelSim_test.cpp`, `tests/validate_psd.py`, the new `tests/test_validate_psd.py`, the app README, and this planning record. Production `accelSim.hpp`, `accelSimModel.hpp`, Makefiles, shared infrastructure, and the reference notebook are unchanged. No commit, push, instrument access, or real-time plotting was performed.
+
+**Export and analysis:**
+
+- The existing `[accelSim-export]` test still calls production `model::step()` for a finite diagnostic record: fs=6000 Hz, duration=60 s, seed=42, modeSeed=123. It writes 360000 simultaneous X/Y pairs containing time, physical and WFS-coupled pointing in arcsec, acceleration in m/s², and raw ADC counts, plus the 214-mode parameter table. The duration is explicit in the export test; no runtime playback dependency or production model setting changed.
+- Added `metadata.json` with sample rate, duration, both seeds, lever arm, empirical ADC calibration, sensor noise PSD, and actual lower/upper model clipping counters for X/Y. Files are flushed and checked. Rail sample counts remain distinct from clamp events.
+- The Python analyzer reads the export metadata, preserving analysis-only override flags and legacy-default support. It prints and writes full-record physical pointing/WFS pointing RMS in mas, physical/ADC-derived acceleration RMS in m/s², exact C++ clamp counts, and separate rail counts. RMS is `sqrt(mean(x²))`, not mean-subtracted standard deviation. The inverse ADC calibration is analysis-only.
+- Five saved figures: `pointing_timeseries.png`, `pointing_psd.png`, `wfs_psd.png`, `accel_psd.png`, and `adc_psd.png`. Each has separate X/Y panels; every PSD marks all 14 prominent frequencies. The ADC figure includes the same pre-ADC realization for direct comparison. Defaults show the first second in the time trace; `--time-start` and `--time-seconds` change only that view. `--show` displays the figures after saving and printing results; default plotting uses Agg without a GUI.
+- Welch matches the notebook: SciPy `welch`, Hann window, 10*fs samples per segment (capped by record length), 50% overlap, constant detrending, and density scaling. PSDs use mas²/Hz or (m/s²)²/Hz as labeled, and are also exported to `psd.csv`.
+
+**Theory overlay:** the analytic stationary AR(2) lag covariance is evaluated from each resolved mode's frequency, radius, and RMS. The lag covariance uses `r^k * [cos(k*omega) + (1-r²)/(1+r²) * cot(omega) * sin(k*omega)]` times the relevant variance. Pointing conversion, squared WFS couplings, and independent acceleration-noise covariance are applied separately. Window autocorrelation and the exact segment-mean projection produce the ensemble expectation of the same finite Hann/detrended estimator. This avoids showing an infinite-record narrow peak against a finite-resolution Welch estimate. The high-r realization amplitudes still need not match the ensemble expectation in a short record. ADC overlays are explicitly pre-ADC expectations, without pretending that linear AR theory predicts nonlinear clipping/quantization.
+
+**Validation performed locally on macOS:**
+
+| Check | Result |
+| --- | --- |
+| Fresh model-only C++20/O3/`-fno-fast-math` build | Passed, independently of the known MagAO-X framework build blockers. |
+| Existing numerical/timing suite | **11 cases, 20721 assertions passed.** |
+| Updated diagnostic export | **1 case, 6 assertions passed**; default record and metadata generated in `/tmp/accelSim-visual-validation`. |
+| New Python analysis tests | **4 tests passed**, also with warnings treated as errors: known white-noise density/DC/Nyquist/mean-removal limits; independent dense covariance quadratic-form comparison for odd/even windows and r=0.9/0.9999999; physical units, lag-one covariance, distinct X/Y couplings and sensor noise; RMS retaining the record mean. |
+| Full analyzer | Passed finite/time-grid/raw-count checks and produced all five PNGs, `psd.csv`, and `validation.json`; all five figures were visually inspected. Interactive `show()` dispatch was verified with a mocked GUI under Agg; actual interactive desktop windows were not opened. |
+| Formatting / syntax / scope | clang-format applied and checked on the touched C++ test file; Python syntax and `git diff --check` passed. Production app/model files have no diff. |
+
+Recorded full-record RMS X/Y: physical pointing **2.168665 / 2.428181 mas**; WFS-coupled pointing **1.372940 / 2.049623 mas**; acceleration **0.039983882 / 0.039641765 m/s²**; ADC-derived acceleration **0.040061091 / 0.039713301 m/s²**. Both lower and upper clipping counts are **[0,0]**, and there are no rail samples. Acceleration band-power ratios remain within about 2% of ensemble theory in the recorded broad bands; no high-r finite-record amplitude acceptance threshold was imposed.
+
+Matplotlib 3.9.4 and its dependencies were installed with network approval only into the temporary `/tmp/accelsim-validation-env`, alongside NumPy 2.0.2 and SciPy 1.13.1. No repository dependency or instrument software was changed. The README contains complete macOS build/export/environment/plot commands and plot interpretation. All generated data and figures stay outside the repository. Full MagAO-X integration and sustained real-time validation remain separate pending tasks, unaffected by this offline workflow.
