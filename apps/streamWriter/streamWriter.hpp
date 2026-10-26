@@ -1498,7 +1498,8 @@ void streamWriter::fgThreadRun()
         uint64_t maxChunkTimeNs = static_cast<uint64_t>( m_maxChunkTime * 1e9 );
 
         uint64_t curr_image; // The current cnt1 index
-        {                    // mutex scope
+
+        { //mutex scope
             std::lock_guard<std::mutex> lock( m_writeMutex );
             m_currImage      = 0;
             m_currChunkStart = 0;
