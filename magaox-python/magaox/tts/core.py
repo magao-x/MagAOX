@@ -1,14 +1,13 @@
-import re
-from dataclasses import dataclass
 import hashlib
 import logging
 import os
-from pathlib import Path
+import re
 import subprocess
-import tempfile
 import typing
 import warnings
 import wave
+from dataclasses import dataclass
+from pathlib import Path
 
 import purepyindi2
 import purepyindi2.client
@@ -19,16 +18,29 @@ try:
         _current_uid = os.getuid()
         os.environ["XDG_RUNTIME_DIR"] = f"/run/user/{_current_uid}"
         os.environ["PULSE_SERVER"] = f"unix:/run/user/{_current_uid}/pulse/native"
+    import librosa
     from piper import PiperVoice
     from piper.download_voices import download_voice
-    import librosa
 except ImportError:
     warnings.warn("Use 'pip install piper-tts librosa' to get speech synthesis")
+    class librosa:
+        @staticmethod
+        def get_duration(*args, **kwargs):
+            raise RuntimeError("librosa not installed")
+    def download_voice():
+        raise RuntimeError("piper not installed")
+    class PiperVoice:
+        @staticmethod
+        def load(*args, **kwargs):
+            raise RuntimeError("piper not installed")
+        @staticmethod
+        def synthesize_wav(*args, **kwargs):
+            raise RuntimeError("piper not installed")
+
 
 log = logging.getLogger(__name__)
 
 VOICES_DIR = Path("~/.local/share/piper-tts/voices").expanduser()
-CACHE_DIR = Path("~/.cache/magao-x-tts").expanduser()
 
 DEFAULT_VOICE_NAME = "en_GB-cori-high"
 
@@ -53,7 +65,7 @@ class Speech:
 
     @property
     def fingerprint(self) -> str:
-        return hashlib.shake_128(f"{self.voice.name} {self.text}".encode("utf8")).hexdigest(10)
+        return hashlib.shake_128(f"{self.voice.name} {self.text}".encode()).hexdigest(10)
 
     def __eq__(self, other):
         return getattr(other, 'fingerprint', None) == self.fingerprint
@@ -61,10 +73,10 @@ class Speech:
 @dataclass(eq=True, frozen=True)
 class DynamicSpeech:
     text : str
-    custom_voice_name : typing.Optional[str] = None
+    custom_voice_name : str | None = None
 
     def __repr__(self):
-        return f"{self.__class__.__name__}({repr(self.text)})"
+        return f"{self.__class__.__name__}({self.text!r})"
 
     def __eq__(self, other):
         return (
@@ -89,11 +101,11 @@ class DynamicSpeech:
                 value = indi_client[indi_id]
                 if hasattr(value, 'value'):
                     value = value.value
-                log.debug(f"Replacing {repr(sub)} with {value=}")
+                log.debug(f"Replacing {sub!r} with {value=}")
                 if value is not None:
                     try:
                         value = float(value)
-                        value = "{:.1f}".format(value)
+                        value = f"{value:.1f}"
                     except (TypeError, ValueError):
                         value = str(value)
                     speech_text = speech_text.replace(sub, value)
@@ -109,7 +121,7 @@ class Recording:
     def __eq__(self, other):
         return getattr(other, 'path', None) == self.path
 
-PlaybackRequest = typing.Union[Speech, DynamicSpeech, Recording]
+PlaybackRequest = Speech | DynamicSpeech | Recording
 
 def load_voice(name=DEFAULT_VOICE_NAME, reload=False) -> Voice:
     if name in _LOADED_VOICES:
@@ -126,27 +138,21 @@ def load_voice(name=DEFAULT_VOICE_NAME, reload=False) -> Voice:
     return _LOADED_VOICES[name]
 
 
-def get_or_create_speech_file(speech: Speech, cache):
+def get_or_create_speech_file(speech: Speech, cache_path: Path):
     filename = f"{speech.fingerprint}.wav"
-    if cache:
-        if not CACHE_DIR.exists():
-            CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        fpath = CACHE_DIR / filename
-        if (CACHE_DIR / filename).exists():
-            return fpath
-    else:
-        fd, fpath = tempfile.mkstemp(".wav", "magao-x-tts")
-        fpath = Path(fpath)
+    fpath = cache_path / filename
+    if fpath.exists():
+        return fpath
     with wave.open(fpath.as_posix(), "wb") as wav_file:
         speech.voice.model.synthesize_wav(speech.text, wav_file)
     return fpath
 
-def play_text(text, voice=None):
+def play_text(text: str, cache_path: Path, voice=None):
     voice = voice or load_voice()
-    play_speech(Speech(voice, text), cache=False)
+    play_speech(Speech(voice, text), cache_path=cache_path)
 
-def play_speech(speech, cache=True):
-    speech_wav_path = get_or_create_speech_file(speech, cache=cache)
+def play_speech(speech: Speech, cache_path: Path):
+    speech_wav_path = get_or_create_speech_file(speech, cache_path=cache_path)
     play_audio_file(speech_wav_path)
 
 def play_audio_file(audio_file: Path) -> None:

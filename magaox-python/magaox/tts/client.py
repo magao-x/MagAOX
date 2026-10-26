@@ -32,6 +32,7 @@ class XAudioClient(Command):
         default=DEFAULT_PREFIX / "config" / "personalities" / "data",
         help="Subdirectory of the default config path with audio recordings"
     )
+    cache : pathlib.Path = xconf.field(default=pathlib.Path("/tmp/audibleAlerts_cache"), help="Storage for audio clips generated or used by audibleAlertsClient")
 
     def __post_init__(self):
         self._last_utterance_ts : datetime.datetime = datetime.datetime(1970, 1, 1, tzinfo=datetime.UTC)
@@ -45,6 +46,7 @@ class XAudioClient(Command):
         return DEFAULT_PREFIX / "config"
 
     def main(self):
+        self.cache.mkdir(exist_ok=True)
         playback_thread = threading.Thread(target=self.do_audio_playback, name='XAudioClient-playback', daemon=True)
         playback_thread.start()
 
@@ -78,7 +80,7 @@ class XAudioClient(Command):
                 log.debug(f"Skipping because {self._muted=}")
                 continue
             if isinstance(req, core.Speech):
-                core.play_speech(req)
+                core.play_speech(req, self.cache)
             elif isinstance(req, core.Recording):
                 audio_file = self.recordings_path / req.path
                 if audio_file.exists():

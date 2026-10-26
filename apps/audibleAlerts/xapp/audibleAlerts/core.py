@@ -9,6 +9,7 @@ import os
 import os.path
 import pathlib
 import re
+import shutil
 import xconf
 from purepyindi2 import properties, constants, messages
 from purepyindi2.messages import DefSwitch, DefText
@@ -26,7 +27,7 @@ def drop_xml_tags(raw_xml):
 
 @xconf.config
 class AudibleAlertsConfig(BaseConfig):
-    random_utterance_interval_sec : Union[float, int] = xconf.field(default=15 * 60, help="Seconds since last (real or random) utterance before a random utterance should play")
+    random_utterance_interval_sec : float | int = xconf.field(default=15 * 60, help="Seconds since last (real or random) utterance before a random utterance should play")
     cache : pathlib.Path = xconf.field(default=pathlib.Path("/tmp/audibleAlerts_cache"))
     observers_device : str = xconf.field(default='observers', help="Observer controls device name")
 
@@ -45,8 +46,8 @@ class AudibleAlerts(XDevice):
     latch_transitions : dict[Transition, constants.AnyIndiValue]  # store last value when triggering a transition so subsequent messages don't trigger too
     per_transition_cooldown_ts : dict[Transition, float]
     last_utterance_ts : float = 0
-    last_utterance_chosen : Optional[str] = None
-    last_walkup : Optional[dict[str,str]] = None
+    last_utterance_chosen : str | None = None
+    last_walkup : dict[str,str] | None = None
     last_walkup_ts : float = 0
     walkup_double_trigger_timeout_sec : float = 30
 
@@ -138,7 +139,6 @@ class AudibleAlerts(XDevice):
         else:
             self.log.debug(f"Got {new_message.device}.{new_message.name} but {transition=} did not match")
 
-
     def handle_personality_switch(self, prop : properties.IndiProperty, new_message):
         if not isinstance(new_message, messages.IndiNewMessage):
             return
@@ -169,6 +169,8 @@ class AudibleAlerts(XDevice):
 
     def load_personality(self, personality_name):
         personality_file = self.config.common_path_prefix / "config" / "personalities" / f"{personality_name}.toml"
+
+        # First, unload / remove listeners for old personality
         for cb, device_name, property_name, _ in self._cb_handles:
             try:
                 self.client.unregister_callback(cb, device_name=device_name, property_name=property_name)
@@ -178,6 +180,8 @@ class AudibleAlerts(XDevice):
         if self.soundboard_sw_prop is not None:
             self.delete_property(self.soundboard_sw_prop)
 
+
+        # Now load the new one
         self.log.info(f"Loading personality from {personality_file}")
         self.personality = Personality.from_path(personality_file)
 
@@ -251,9 +255,14 @@ class AudibleAlerts(XDevice):
             self.log.info("Waiting for connection...")
             time.sleep(1)
         self.log.info("Connected.")
-        self.log.debug(f"Caching synthesis output to {self.config.cache}")
-        self.config.cache.mkdir(exist_ok=True)
-        
+        self.log.debug(f"Synthesis output saving to {self.config.cache}")
+        self._static_cache_path = self.config.cache
+        self._static_cache_path.mkdir(exist_ok=True)
+        self._temp_cache_path = self.config.cache / "temp"
+        if self._temp_cache_path.is_dir():
+            shutil.rmtree(self._temp_cache_path)
+        self._temp_cache_path.mkdir()
+
 
         sv = properties.SwitchVector(
             name="mute",
@@ -322,29 +331,39 @@ class AudibleAlerts(XDevice):
             if self.mute:
                 self.log.debug(f"Would have played: {repr(req)}, but muted")
             else:
-
                 if isinstance(req, Recording):
-                    self.playback_text['file'] = req.path
-                    self.playback_text['speech'] = ''
-                    self.playback_text['voice'] = ''
-                    self.telem("play", {"file": req.path, "speech": "", "voice": ""})
-                    fp = self.config.common_path_prefix / "config" / "personalities" / "data" / req.path
+                    fp : pathlib.Path = self.config.common_path_prefix / "config" / "personalities" / "data" / req.path
                     if not fp.exists():
                         log.error(f"{fp} doesn't exist, skipping")
                         continue
+                    shutil.copy(fp, self._static_cache_path / req.path)
+                    self.playback_text['speech'] = ''
+                    self.playback_text['voice'] = ''
+                    self.playback_text['file'] = f"{fp.relative_to(self.config.cache)}"
+                    self.telem("play", {"file": self.playback_text['file'], "speech": "", "voice": ""})
                 elif isinstance(req, DynamicSpeech):
                     # apply substitutions
                     new_req = req.to_speech(self._current_voice, self.client)
-                    self.playback_text['file'] = ''
+                    # can only cache if there's no substitutions
+                    can_cache = new_req.text == req.text
+
+                    fp : pathlib.Path = get_or_create_speech_file(new_req, self._static_cache_path if can_cache else self._temp_cache_path)
+
+                    self.playback_text['file'] = f'{fp.relative_to(self.config.cache)}'
                     self.playback_text['speech'] = new_req.text
                     self.playback_text['voice'] = new_req.voice.name
-                    self.telem("play", {"file": "", "speech": new_req.text, "voice": new_req.voice.name})
-                    can_cache = new_req.text == req.text
-                    fp = get_or_create_speech_file(new_req, can_cache)
+                    self.telem(
+                        "play",
+                        {
+                            "file": self.playback_text['file'],
+                            "speech": self.playback_text['speech'],
+                            "voice": self.playback_text['voice']
+                        }
+                    )
                 else:
-                    raise RuntimeError(f"What is a {repr(req)}?")
+                    raise RuntimeError(f"What is a {req!r}?")
                 playback_duration_sec = duration_from_audio_file(fp)
-                self.log.info(f"Playing: {repr(req)} ({playback_duration_sec:1.1f} sec)")
+                self.log.info(f"Playing: {req!r} ({playback_duration_sec:1.1f} sec)")
                 self.playback_text.timestamp = datetime.datetime.now()
                 self.update_property(self.playback_text)
                 self.last_utterance_ts = time.time()  # update timestamp to prevent random utterances
@@ -359,9 +378,9 @@ class AudibleAlerts(XDevice):
             self.last_utterance_chosen = next_utterance
             self.last_utterance_ts = time.time()
             if self.mute:
-                self.log.debug(f"Would have said: {repr(next_utterance)}, but muted")
+                self.log.debug(f"Would have said: {next_utterance!r}, but muted")
             else:
-                self.log.info(f"Randomly spouting off: {repr(next_utterance)}")
+                self.log.info(f"Randomly spouting off: {next_utterance!r}")
                 self.enqueue_speech_request(next_utterance)
 
 # Used to make the pyproject.toml just a little simpler,

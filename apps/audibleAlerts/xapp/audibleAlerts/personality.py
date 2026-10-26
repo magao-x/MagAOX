@@ -102,8 +102,6 @@ class Personality:
             for walkup_clip in root['walkups'][wup_email]:
                 walkups[email].append(Recording(walkup_clip))
 
-        
-
         for react in root['react']:
             indi_id = react['indi_id']
             transitions = {}

@@ -37,7 +37,6 @@ apps_aoc = \
 	xInstGraph
 
 pythonapps_aoc = \
-	virtualPDU \
 	audibleAlerts
 
 # Apps common to RTC and ICC on MagAO-X
@@ -308,7 +307,7 @@ scripts_to_install = \
 	inventory_files \
 	list_xfiles_by_semester \
 	loop_instrument_backup_sync \
-	cyverse_replicate 
+	cyverse_replicate
 
 ifeq ($(MAGAOX_ROLE),RTC)
   scripts_to_install += cacao/RTC/cacao-startup
@@ -416,7 +415,7 @@ PY_SOURCES := magaox-python/pyproject.toml \
 	$(shell find magaox-python/magaox -name '*.py')
 
 installed_python_interface_timestamp.txt: $(PY_SOURCES)
-	sudo $(PYTHON) -m pip install ./magaox-python
+	$(PYTHON) -m pip install ./magaox-python
 	date -u -Iseconds > ./installed_python_interface_timestamp.txt
 
 .PHONY: apps_all
