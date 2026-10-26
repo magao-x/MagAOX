@@ -40,7 +40,11 @@ EDT_TESTS = ocam2KCtrl_test ocam2KCtrl_lifecycle_test ocam2KCtrl_temperature_tes
 
 # add extra libraries for special cases
 
-ifeq ($(notdir $(TESTNAME)),acronameUsbHub_test)
+ifeq ($(notdir $(TESTNAME)),accelSim_test)
+    # Preserve nonfinite validation and near-unit-root arithmetic in the numerical model.
+    CXXFLAGS += -fno-fast-math
+    $(OBJNAME): $(PATHNAME)../accelSim.hpp $(PATHNAME)../accelSimModel.hpp
+else ifeq ($(notdir $(TESTNAME)),acronameUsbHub_test)
 	CPPFLAGS += -I$(TESTS_DIR)/../libs/BrainStem2
 else ifeq ($(notdir $(TESTNAME)),kcubeCtrl_test)
     TMC_CONTROLLER_PATH ?= /opt/MagAOX/source/tmcController

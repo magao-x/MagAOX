@@ -1,0 +1,1116 @@
+/** \file accelSim_test.cpp
+ * \brief Numerical, control, pacing, and publication tests for accelSim.
+ * \ingroup accelSim_unit_test
+ */
+#include "../../../tests/testXWC.hpp"
+#include "../accelSimModel.hpp"
+#include <cstdlib>
+#include <fstream>
+#include <iomanip>
+#include <type_traits>
+
+#ifndef ACCELSIM_MODEL_ONLY
+    #include "../accelSim.hpp"
+    #include <filesystem>
+    #include <thread>
+    #include <unistd.h>
+#endif
+
+namespace libXWCTest
+{
+namespace accelSimTest
+{
+using namespace MagAOX::app::accelSimDetail;
+
+/** \brief Known AR coefficients, stable innovation scaling, and stationary covariance invariance.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim AR coefficients and innovation variance", "[accelSim][model]" )
+{
+    oscillator state;
+    state.configure( 1500, .9, 6000, 2 );
+    REQUIRE( state.m_phi1 == Approx( 0 ).margin( 1e-14 ) );
+    REQUIRE( state.m_phi2 == Approx( -.81 ) );
+    REQUIRE( state.m_sigma * state.m_sigma == Approx( 4 * ( 1 - std::pow( .9, 4 ) ) ) );
+    state.configure( 11, 0, 6000, 2 );
+    REQUIRE( state.m_sigma == 2 );
+    REQUIRE( state.m_rho == 0 );
+    REQUIRE( state.m_eta == 1 );
+    for( double r : { .9, .99999, .9999999 } )
+    {
+        state.configure( 11, r, 6000, .3 );
+        const long double a = state.m_phi1, b = state.m_phi2, variance = .3L * .3L;
+        const long double covariance = a * variance / ( 1 - b );
+        const long double innovation = variance * ( 1 + b ) * ( ( 1 - b ) * ( 1 - b ) - a * a ) / ( 1 - b );
+        REQUIRE( state.m_sigma * state.m_sigma == Approx( double( innovation ) ).epsilon( 1e-8 ) );
+        const long double propagated = ( a * a + b * b ) * variance + 2 * a * b * covariance + innovation;
+        REQUIRE( double( propagated ) == Approx( double( variance ) ).epsilon( 1e-12 ) );
+        REQUIRE( state.m_rho * state.m_rho + state.m_eta * state.m_eta == Approx( 1 ).epsilon( 1e-12 ) );
+    }
+}
+
+/** \brief Ensemble stationary histories remain stationary after stepping, with independent axes.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim stationary initialization covariance and independence", "[accelSim][model]" )
+{
+    constexpr size_t                 count = 100000;
+    std::mt19937_64                  rng( 42 );
+    std::normal_distribution<double> normal;
+    for( double r : { .9, .9999999 } )
+    {
+        oscillator x, y;
+        x.configure( 11, r, 6000, 1 );
+        y         = x;
+        double xx = 0, yy = 0, lag = 0, cross = 0, after = 0, residual = 0, mean = 0;
+        for( size_t n = 0; n < count; ++n )
+        {
+            const double z1 = normal( rng ), z2 = normal( rng ), z3 = normal( rng ), z4 = normal( rng );
+            x.initialize( z1, z2 );
+            y.initialize( z3, z4 );
+            xx += x.m_previous1 * x.m_previous1;
+            yy += x.m_previous2 * x.m_previous2;
+            lag += x.m_previous1 * x.m_previous2;
+            cross += x.m_previous1 * y.m_previous1;
+            const double conditional = ( x.m_previous2 - x.m_rho * x.m_previous1 ) / x.m_eta;
+            residual += conditional * conditional;
+            mean += x.m_previous1;
+            for( int k = 0; k < 4; ++k )
+                x.step( normal( rng ) );
+            after += x.m_previous1 * x.m_previous1;
+        }
+        const double varianceTolerance = 6 * std::sqrt( 2.0 / count );
+        REQUIRE( xx / count == Approx( 1 ).margin( varianceTolerance ) );
+        REQUIRE( yy / count == Approx( 1 ).margin( varianceTolerance ) );
+        REQUIRE( after / count == Approx( 1 ).margin( varianceTolerance ) );
+        REQUIRE( residual / count == Approx( 1 ).margin( varianceTolerance ) );
+        REQUIRE( lag / count == Approx( x.m_rho ).margin( varianceTolerance ) );
+        REQUIRE( std::abs( cross / count ) < 6 / std::sqrt( double( count ) ) );
+        REQUIRE( std::abs( mean / count ) < 6 / std::sqrt( double( count ) ) );
+    }
+}
+
+/** \brief Preserve every prominent row and the high-frequency population's envelope and damping.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim reference population and deterministic sequences", "[accelSim][model]" )
+{
+    const auto specs = referenceModes( 123 );
+    REQUIRE( specs.size() == 214 );
+    const std::array<double, 14> frequencies{ 11, 14, 17, 20, 25, 28, 54, 56, 58, 75, 85, 120, 220, 300 };
+    const std::array<double, 14> amplitudes{
+        .00025, .00025, .00025, .00025, .00025, .002, .002, .001, .002, .0008, .0008, .008, .015, .018 };
+    const std::array<double, 14> radii{ .9999999,
+                                        .9999999,
+                                        .9999999,
+                                        .9999999,
+                                        .9999999,
+                                        .99999,
+                                        .99995,
+                                        .99995,
+                                        .99995,
+                                        .9998,
+                                        .9998,
+                                        .998,
+                                        .996,
+                                        .995 };
+    size_t                       weak     = 0;
+    double                       previous = 0;
+    for( const auto &spec : specs )
+    {
+        REQUIRE( spec.m_frequency >= previous );
+        previous = spec.m_frequency;
+        if( spec.m_couplingX == .01 )
+        {
+            ++weak;
+            REQUIRE( spec.m_frequency >= 100 );
+            REQUIRE( spec.m_frequency < 900 );
+            REQUIRE( spec.m_r == Approx( .998 - ( spec.m_frequency - 100 ) / 800 * .006 ) );
+            const double envelope = .5 + 2 * std::exp( -.5 * std::pow( ( spec.m_frequency - 250 ) / 250, 2 ) );
+            REQUIRE( spec.m_accelRms / envelope >= .0005 );
+            REQUIRE( spec.m_accelRms / envelope <= .002 );
+        }
+        else
+        {
+            const auto found = std::find( frequencies.begin(), frequencies.end(), spec.m_frequency );
+            REQUIRE( found != frequencies.end() );
+            const size_t i = found - frequencies.begin();
+            REQUIRE( spec.m_accelRms == amplitudes[i] );
+            REQUIRE( spec.m_r == radii[i] );
+            REQUIRE( spec.m_couplingX == ( i < 5 ? .05 : 1 ) );
+        }
+        REQUIRE( spec.m_couplingX == spec.m_couplingY );
+    }
+    REQUIRE( weak == 200 );
+    parameters config;
+    model      a, b;
+    a.configure( config, specs );
+    b.configure( config, referenceModes( config.m_modeSeed ) );
+    for( size_t n = 0; n < 1000; ++n )
+        REQUIRE( a.step().m_acceleration == b.step().m_acceleration );
+    a.configure( config, specs );
+    b.configure( config, specs );
+    REQUIRE( a.step().m_adc == b.step().m_adc );
+    config.m_seed = 43;
+    b.configure( config, specs );
+    REQUIRE( a.step().m_acceleration != b.step().m_acceleration );
+}
+
+/** \brief Modewise frequency-squared conversion, lever-arm scaling, and noise-free WFS sums.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim physical units and separate WFS coupling", "[accelSim][model]" )
+{
+    REQUIRE( accelerationFactor( 100, 10 ) == Approx( -4 * pi * pi * 10000 * 10 * pi / ( 180 * 3600 ) ) );
+    parameters config;
+    config.m_noisePSD = 0;
+    model value;
+    value.configure( config, { { 11, .002, .9999999, .1, .2 }, { 300, .018, .995, .7, .8 } } );
+    const auto output = value.step();
+    for( size_t axis = 0; axis < 2; ++axis )
+    {
+        const auto  &low = value.m_modes[0], &high = value.m_modes[1];
+        const double x = low.m_axes[axis].m_previous1, y = high.m_axes[axis].m_previous1;
+        REQUIRE( output.m_pointing[axis] == Approx( x + y ) );
+        REQUIRE( output.m_acceleration[axis] == Approx( x * low.m_accelPerArcsec + y * high.m_accelPerArcsec ) );
+        REQUIRE( output.m_wfsPointing[axis] == Approx( x * ( axis ? .2 : .1 ) + y * ( axis ? .8 : .7 ) ) );
+        REQUIRE( low.m_axes[axis].m_rms * -low.m_accelPerArcsec == Approx( .002 ) );
+    }
+    model longer;
+    config.m_leverArm = 20;
+    longer.configure( config, { { 11, .002, .9999999, .1, .2 }, { 300, .018, .995, .7, .8 } } );
+    REQUIRE( longer.step().m_acceleration[0] == Approx( output.m_acceleration[0] ) );
+    REQUIRE( longer.m_sample.m_pointing[0] == Approx( output.m_pointing[0] / 2 ) );
+}
+
+/** \brief White-noise variance and independent axes match the configured one-sided PSD.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim noise PSD and sample-rate reinitialization", "[accelSim][model]" )
+{
+    parameters config;
+    model      value;
+    value.configure( config, {} );
+    double           xx = 0, yy = 0, xy = 0;
+    constexpr size_t count = 100000;
+    for( size_t n = 0; n < count; ++n )
+    {
+        const auto &s = value.step();
+        xx += s.m_acceleration[0] * s.m_acceleration[0];
+        yy += s.m_acceleration[1] * s.m_acceleration[1];
+        xy += s.m_acceleration[0] * s.m_acceleration[1];
+    }
+    const double variance = config.m_noisePSD * config.m_fps / 2;
+    REQUIRE( xx / count / variance == Approx( 1 ).margin( 6 * std::sqrt( 2.0 / count ) ) );
+    REQUIRE( yy / count / variance == Approx( 1 ).margin( 6 * std::sqrt( 2.0 / count ) ) );
+    REQUIRE( std::abs( xy / count / variance ) < 6 / std::sqrt( double( count ) ) );
+    value.setRate( 3000 );
+    REQUIRE( value.m_noiseSigma * value.m_noiseSigma == Approx( config.m_noisePSD * 1500 ) );
+    config.m_noisePSD = 0;
+    value.configure( config, {} );
+    REQUIRE( value.step().m_adc == std::array<uint16_t, 2>{ 2048, 2048 } );
+    value.configure( config, { { 11, .002, .9999999, 1, 1 } } );
+    const double old = value.m_modes[0].m_axes[0].m_previous1;
+    value.setRate( 4000 );
+    REQUIRE( value.m_modes[0].m_axes[0].m_previous1 != old );
+    REQUIRE( value.m_modes[0].m_axes[0].m_phi1 == Approx( 2 * .9999999 * std::cos( 2 * pi * 11 / 4000 ) ) );
+}
+
+/** \brief Calibration, midpoint, sign, rounding, rail clipping, and integer storage.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim ADC conversion and clipping", "[accelSim][model]" )
+{
+    parameters config;
+    uint64_t   low = 0, high = 0;
+    static_assert( std::is_same_v<decltype( adcCounts( 0, config, low, high ) ), uint16_t> );
+    REQUIRE( adcCounts( 0, config, low, high ) == 2048 );
+    REQUIRE( adcCounts( config.m_voltsPerBit / config.m_sensitivity * 10, config, low, high ) == 2058 );
+    REQUIRE( adcCounts( -config.m_voltsPerBit / config.m_sensitivity * 10, config, low, high ) == 2038 );
+    config.m_voltsPerBit = config.m_sensitivity = 1;
+    REQUIRE( adcCounts( .4999, config, low, high ) == 2048 );
+    REQUIRE( adcCounts( .5, config, low, high ) == 2049 );
+    REQUIRE( adcCounts( -.5, config, low, high ) == 2048 ); // Round the ADC value, not the acceleration.
+    REQUIRE( adcCounts( -.5001, config, low, high ) == 2047 );
+    REQUIRE( adcCounts( -2048, config, low, high ) == 0 );
+    REQUIRE( adcCounts( 2047, config, low, high ) == 4095 );
+    REQUIRE( low == 0 );
+    REQUIRE( high == 0 );
+    REQUIRE( adcCounts( -2048.5, config, low, high ) == 0 );
+    REQUIRE( adcCounts( 2047.5, config, low, high ) == 4095 );
+    REQUIRE( low == 1 );
+    REQUIRE( high == 1 );
+    REQUIRE( adcCounts( 1e200, config, low, high ) == 4095 );
+    REQUIRE( adcCounts( -1e200, config, low, high ) == 0 );
+    REQUIRE_THROWS( adcCounts( std::numeric_limits<double>::infinity(), config, low, high ) );
+    REQUIRE_THROWS( adcCounts( std::numeric_limits<double>::quiet_NaN(), config, low, high ) );
+    config.m_zero = 100;
+    REQUIRE( adcCounts( 0, config, low, high ) == 100 );
+    model value;
+    config.m_zero     = 5000;
+    config.m_noisePSD = 0;
+    value.configure( config, {} );
+    value.step();
+    REQUIRE( value.m_clipHigh == std::array<uint64_t, 2>{ 1, 1 } );
+}
+
+/** \brief Invalid physical inputs and aliased rates fail before numerical sampling.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim rejects invalid configuration", "[accelSim][model]" )
+{
+    oscillator state;
+    REQUIRE_THROWS( state.configure( 11, 1, 6000, 1 ) );
+    REQUIRE_THROWS( state.configure( 11, -.1, 6000, 1 ) );
+    REQUIRE_THROWS( state.configure( 3000, .9, 6000, 1 ) );
+    REQUIRE_THROWS( state.configure( 0, .9, 6000, 1 ) );
+    REQUIRE_THROWS( state.configure( 11, .9, 6000, -1 ) );
+    parameters config;
+    model      value;
+    const auto specs = referenceModes( 123 );
+    for( double invalid : { 0.0,
+                            -1.0,
+                            10001.0,
+                            100.0,
+                            std::numeric_limits<double>::infinity(),
+                            std::numeric_limits<double>::quiet_NaN() } )
+    {
+        config.m_fps = invalid;
+        REQUIRE_THROWS( value.configure( config, specs ) );
+    }
+    config               = {};
+    config.m_voltsPerBit = 0;
+    REQUIRE_THROWS( value.configure( config, specs ) );
+    config            = {};
+    config.m_noisePSD = -1;
+    REQUIRE_THROWS( value.configure( config, specs ) );
+    config            = {};
+    config.m_leverArm = 0;
+    REQUIRE_THROWS( value.configure( config, specs ) );
+    config = {};
+    value.configure( config, specs );
+    REQUIRE_THROWS( value.setRate( 100 ) );
+    REQUIRE( value.m_config.m_fps == 6000 );
+}
+
+/** \brief Fractional deadlines do not drift, catch-up is bounded, and ordinary gaps preserve model history.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim pacing and bounded catch-up", "[accelSim][model]" )
+{
+    schedule clock;
+    clock.reset( 123456789, 6000 );
+    REQUIRE( clock.deadline() == 123623456 );
+    REQUIRE_THROWS( clock.consume( clock.deadline() - 1 ) );
+    for( size_t n = 0; n < 6000; ++n )
+        REQUIRE( clock.consume( clock.deadline() ) == 0 );
+    REQUIRE( clock.deadline() == 1123623456 );
+    clock.reset( 0, 6000 );
+    REQUIRE( clock.consume( 1000000 ) == 5 );
+    REQUIRE( clock.deadline() == 1166667 );
+    parameters config;
+    model      a, b;
+    const auto modes = referenceModes( 123 );
+    a.configure( config, modes );
+    b.configure( config, modes );
+    REQUIRE_FALSE( a.advance( maxCatchUp ) );
+    for( uint64_t n = 0; n <= maxCatchUp; ++n )
+        b.step();
+    REQUIRE( a.m_sample.m_acceleration == b.m_sample.m_acceleration );
+    const auto ticks = a.m_ticks;
+    REQUIRE( a.advance( maxCatchUp + 1 ) );
+    REQUIRE( a.m_ticks == ticks + 1 );
+    REQUIRE( a.m_sample.m_acceleration != b.m_sample.m_acceleration );
+    clock.reset( 5000000, 4000 );
+    REQUIRE( clock.deadline() == 5250000 );
+}
+
+/** \brief Short pauses, jitter, and source gaps share one nominal timeline without duplicate catch-up.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim synchronization accounts elapsed nominal ticks", "[accelSim][model][sync-regression]" )
+{
+    constexpr int64_t epoch = 1000000000;
+    syncClock         clock;
+    diagnostics       diag;
+    model             actual, reference;
+    actual.configure( {}, referenceModes( 123 ) );
+    reference.configure( {}, referenceModes( 123 ) );
+    auto tick = clock.prepare( 10, epoch, 6000 );
+    REQUIRE( tick.m_due );
+    REQUIRE_FALSE( actual.advance( tick.m_advance ) );
+    reference.step();
+    diag.finishSync( clock, tick, true );
+
+    SECTION( "Consecutive counters after four periods advance all four samples" )
+    {
+        tick = clock.prepare( 11, epoch + 666667, 6000 );
+        REQUIRE( tick.m_advance == 3 );
+        REQUIRE( tick.m_skipped == 3 );
+        REQUIRE_FALSE( actual.advance( tick.m_advance ) );
+        for( int n = 0; n < 4; ++n )
+            reference.step();
+        REQUIRE( actual.m_sample.m_acceleration == reference.m_sample.m_acceleration );
+        diag.finishSync( clock, tick, true );
+        REQUIRE( diag.m_skipped == 3 );
+        REQUIRE( diag.m_timing[dropped] == 0 );
+        tick = clock.prepare( 12, epoch + 833333, 6000 );
+        REQUIRE( tick.m_due );
+        REQUIRE( tick.m_advance == 0 );
+        REQUIRE( tick.m_skipped == 0 );
+    }
+    SECTION( "Counter gap and elapsed time describe the same missed opportunities" )
+    {
+        tick = clock.prepare( 14, epoch + 666667, 6000 );
+        REQUIRE( tick.m_advance == 3 );
+        diag.finishSync( clock, tick, true );
+        REQUIRE( diag.m_skipped == 3 );
+        REQUIRE( diag.m_timing[dropped] == 3 );
+        REQUIRE( diag.m_timing[gapCount] == 1 );
+        REQUIRE_FALSE( clock.prepare( 14, epoch + 700000, 6000 ).m_newFrame );
+    }
+    SECTION( "Queued progress already covered by the wall clock does not run the model ahead" )
+    {
+        tick = clock.prepare( 11, epoch + 666667, 6000 );
+        diag.finishSync( clock, tick, true );
+        tick = clock.prepare( 14, epoch + 700000, 6000 );
+        REQUIRE( tick.m_newFrame );
+        REQUIRE_FALSE( tick.m_due );
+        diag.finishSync( clock, tick, false );
+        REQUIRE( diag.m_skipped == 3 );
+        REQUIRE( diag.m_timing[dropped] == 2 );
+        tick = clock.prepare( 15, epoch + 833333, 6000 );
+        REQUIRE( tick.m_due );
+        REQUIRE( tick.m_advance == 0 );
+        REQUIRE( tick.m_skipped == 0 );
+    }
+    SECTION( "Fractional periods and alternating arrival jitter do not accumulate extra misses" )
+    {
+        for( uint64_t n = 1; n <= 6000; ++n )
+        {
+            const auto arrival = epoch + int64_t( std::llround( n * ( 1e9 / 6000 ) ) ) + ( n % 2 ? 40000 : -40000 );
+            tick               = clock.prepare( 10 + n, arrival, 6000 );
+            REQUIRE( tick.m_due );
+            REQUIRE( tick.m_advance == 0 );
+            diag.finishSync( clock, tick, true );
+        }
+        REQUIRE( diag.m_skipped == 0 );
+        REQUIRE( clock.m_nextModel == 6001 );
+    }
+    SECTION( "Long pauses still take the bounded stationary-restart path" )
+    {
+        tick = clock.prepare( 11, epoch + 2000000, 6000 );
+        REQUIRE( tick.m_advance == 11 );
+        REQUIRE( actual.advance( tick.m_advance ) );
+        REQUIRE( actual.m_ticks == 2 );
+        diag.finishSync( clock, tick, true );
+        REQUIRE( diag.m_skipped == 11 );
+    }
+}
+
+/** \brief Cancellation commits consumed source progress and counts the current omission exactly once.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim synchronization cancellation retains accounting", "[accelSim][model][sync-regression]" )
+{
+    constexpr int64_t epoch = 1000000000;
+    syncClock         clock;
+    diagnostics       diag;
+    auto              tick = clock.prepare( 10, epoch, 6000 );
+    diag.finishSync( clock, tick, true );
+    tick = clock.prepare( 14, epoch + 666667, 6000 );
+    REQUIRE( clock.m_producer == 10 ); // Merely preparing a phase wait commits nothing.
+    REQUIRE( clock.m_nextAccounted == 1 );
+    REQUIRE( diag.m_skipped == 0 );
+    REQUIRE( tick.m_skipped == 3 );
+    diag.finishSync( clock, tick, false );
+    REQUIRE( clock.m_producer == 14 );
+    REQUIRE( clock.m_nextAccounted == 5 );
+    REQUIRE( clock.m_nextModel == 1 ); // Cancellation did not generate a sample.
+    REQUIRE( diag.m_skipped == 4 );
+    REQUIRE( diag.m_timing[dropped] == 3 );
+    REQUIRE( diag.m_timing[gapCount] == 1 );
+    tick = clock.prepare( 14, epoch + 700000, 6000 );
+    REQUIRE_FALSE( tick.m_newFrame );
+    diag.finishSync( clock, tick, false );
+    REQUIRE( diag.m_skipped == 4 );
+    REQUIRE( diag.m_timing[dropped] == 3 );
+
+    SECTION( "Recovery without a rate change advances canceled ticks but does not recount them" )
+    {
+        tick = clock.prepare( 15, epoch + 833333, 6000 );
+        REQUIRE( tick.m_advance == 4 );
+        REQUIRE( tick.m_skipped == 0 );
+        diag.finishSync( clock, tick, true );
+        REQUIRE( diag.m_skipped == 4 );
+        REQUIRE( clock.m_nextModel == 6 );
+    }
+    SECTION( "Rate change rebases model time while retaining consumed source counters and totals" )
+    {
+        clock.resetTime();
+        REQUIRE_FALSE( clock.prepare( 14, epoch + 750000, 4000 ).m_newFrame );
+        tick = clock.prepare( 15, epoch + 833333, 4000 );
+        REQUIRE( tick.m_delta == 1 );
+        REQUIRE( tick.m_advance == 0 );
+        diag.finishSync( clock, tick, true );
+        REQUIRE( diag.m_skipped == 4 );
+        REQUIRE( diag.m_timing[dropped] == 3 );
+        tick = clock.prepare( 16, epoch + 1083333, 4000 );
+        REQUIRE( tick.m_advance == 0 );
+    }
+    SECTION( "Repeated cancellations count each omitted opportunity once" )
+    {
+        tick = clock.prepare( 15, epoch + 833333, 6000 );
+        diag.finishSync( clock, tick, false );
+        REQUIRE( diag.m_skipped == 5 );
+        tick = clock.prepare( 16, epoch + 1000000, 6000 );
+        REQUIRE( tick.m_advance == 5 );
+        REQUIRE( tick.m_skipped == 0 );
+        diag.finishSync( clock, tick, true );
+        REQUIRE( diag.m_skipped == 5 );
+    }
+    SECTION( "Producer reset starts a new epoch without erasing skipped totals" )
+    {
+        tick = clock.prepare( 1, epoch + 1000000, 6000 );
+        REQUIRE( tick.m_reset );
+        REQUIRE( tick.m_advance == 0 );
+        diag.finishSync( clock, tick, false );
+        REQUIRE( diag.m_skipped == 5 );
+        tick = clock.prepare( 2, epoch + 1166667, 6000 );
+        REQUIRE( tick.m_advance == 1 );
+        REQUIRE( tick.m_skipped == 0 );
+    }
+}
+
+/** \brief Outage invalidation removes all lock/cadence measurements while retaining historical accounting.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim synchronization diagnostics invalidate stale lock", "[accelSim][model][sync-regression]" )
+{
+    diagnostics diag;
+    diag.m_timing.fill( 10 );
+    diag.m_timing[lock]     = 1;
+    diag.m_timing[modeCode] = 1;
+    diag.m_cadenceRatio     = 1;
+    diag.m_skipped          = 7;
+    diag.m_discontinuities  = 3;
+    diag.m_low              = { 2, 4 };
+    diag.m_high             = { 5, 6 };
+    const auto before       = diag;
+    diag.invalidateSync( -5 );
+    for( size_t index = 0; index < frameSequence; ++index )
+        REQUIRE( diag.m_timing[index] == ( index == delayTarget ? -5 : 0 ) );
+    REQUIRE( diag.m_timing[producerDelta] == 0 );
+    REQUIRE( diag.m_cadenceRatio == 0 );
+    for( size_t index = frameSequence; index < timingCount; ++index )
+        if( index != producerDelta )
+            REQUIRE( diag.m_timing[index] == before.m_timing[index] );
+    REQUIRE( diag.m_skipped == before.m_skipped );
+    REQUIRE( diag.m_discontinuities == before.m_discontinuities );
+    REQUIRE( diag.m_low == before.m_low );
+    REQUIRE( diag.m_high == before.m_high );
+    const auto invalid = diag;
+    diag.invalidateSync( -5 );
+    REQUIRE( diag.m_timing == invalid.m_timing );
+    REQUIRE( diag.m_skipped == invalid.m_skipped );
+}
+
+/** \brief Optional offline export from the production numerical core, never from the RT app loop.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim export offline validation samples", "[.][accelSim-export]" )
+{
+    const char *directory = std::getenv( "ACCELSIM_EXPORT_DIR" );
+    REQUIRE( directory != nullptr );
+    const std::string prefix = std::string( directory ) + "/";
+    std::ofstream     modes( prefix + "modes.csv" ), samples( prefix + "samples.csv" );
+    REQUIRE( modes.good() );
+    REQUIRE( samples.good() );
+    modes << std::setprecision( 17 ) << "frequency,accel_rms,r,coupling_x,coupling_y\n";
+    parameters config;
+    const auto specs = referenceModes( config.m_modeSeed );
+    for( const auto &s : specs )
+        modes << s.m_frequency << ',' << s.m_accelRms << ',' << s.m_r << ',' << s.m_couplingX << ',' << s.m_couplingY
+              << '\n';
+    model value;
+    value.configure( config, specs );
+    samples << std::setprecision( 17 ) << "time,pointing_x,pointing_y,wfs_x,wfs_y,accel_x,accel_y,adc_x,adc_y\n";
+    for( size_t n = 0; n < 360000; ++n )
+    {
+        const auto &s = value.step();
+        samples << n / config.m_fps;
+        for( const auto &pair : { s.m_pointing, s.m_wfsPointing, s.m_acceleration } )
+            for( double x : pair )
+                samples << ',' << x;
+        samples << ',' << s.m_adc[0] << ',' << s.m_adc[1] << '\n';
+    }
+    REQUIRE( samples.good() );
+}
+
+#ifndef ACCELSIM_MODEL_ONLY
+/// \cond TEST_HARNESS
+/// Expose only the protected surfaces exercised by application tests.
+class appTest : public MagAOX::app::accelSim
+{
+  public:
+    using accelSim::config;
+    using accelSim::finishSync;
+    using accelSim::invalidateSync;
+    using accelSim::m_activeFps;
+    using accelSim::m_alpha;
+    using accelSim::m_channelsDevice;
+    using accelSim::m_circBuffLength;
+    using accelSim::m_configName;
+    using accelSim::m_currImageTimestamp;
+    using accelSim::m_dataType;
+    using accelSim::m_diagnostics;
+    using accelSim::m_fpsDevice;
+    using accelSim::m_height;
+    using accelSim::m_indiP_alpha;
+    using accelSim::m_indiP_fps;
+    using accelSim::m_indiP_fpsSource;
+    using accelSim::m_indiP_numChannels;
+    using accelSim::m_indiP_numChannelsSource;
+    using accelSim::m_indiP_synchroDelay;
+    using accelSim::m_indiP_timingDiag;
+    using accelSim::m_maxFrequency;
+    using accelSim::m_model;
+    using accelSim::m_parameters;
+    using accelSim::m_postDelay;
+    using accelSim::m_reconfig;
+    using accelSim::m_requestedFps;
+    using accelSim::m_shmimName;
+    using accelSim::m_shutdown;
+    using accelSim::m_snapshot;
+    using accelSim::m_syncClock;
+    using accelSim::m_syncImage;
+    using accelSim::m_syncIndex;
+    using accelSim::m_syncName;
+    using accelSim::m_syncPending;
+    using accelSim::m_syncTick;
+    using accelSim::m_width;
+    using accelSim::setupProperties;
+    using accelSim::syncTiming;
+    using accelSim::waitSync;
+
+    /// Run the actual frameGrabber worker without an INDI server in stream unit tests.
+    void startWorker();
+    /// Join the worker and release its source on test exit.
+    ~appTest();
+};
+
+void appTest::startWorker()
+{
+    state( MagAOX::app::stateCodes::OPERATING );
+    m_fgThreadInit = false;
+    m_fgThread     = std::thread( [this] { fgThreadExec(); } );
+}
+
+appTest::~appTest()
+{
+    m_shutdown = true;
+    if( m_fgThread.joinable() )
+        m_fgThread.join();
+    reconfig();
+}
+
+/// Own a real local ImageStreamIO mapping for integration checks.
+struct streamFixture
+{
+    IMAGE    m_image{};                                         ///< Mapping owned by the fixture.
+    bool     m_open{ false }, m_owner{ false };                 ///< Mapping lifetime and destruction responsibility.
+    int      m_index{ -1 };                                     ///< Reader semaphore to release on close.
+    uint64_t m_counter{ 0 }, m_plane{ 0 }, m_planeCounter{ 0 }; ///< Coherent metadata from the last read.
+    timespec m_acquired{}, m_written{}, m_planeAcquired{}, m_planeWritten{}; ///< Coherent image/plane timestamps.
+
+    /// Close or destroy the mapping, without throwing during test unwinding.
+    ~streamFixture();
+    /// Open the named producer, retrying briefly for worker startup.
+    void open( const char *name /**< [in] stream name */ );
+    /// Create a one-pixel trigger source.
+    void create( const char *name /**< [in] source name */ );
+    /// Wait for a complete frame and return a coherent latest-plane ADC pair.
+    std::array<uint16_t, 2> read();
+};
+
+streamFixture::~streamFixture()
+{
+    if( !m_open )
+        return;
+    if( m_index >= 0 )
+        m_image.semReadPID[m_index] = 0;
+    if( m_owner )
+        ImageStreamIO_destroyIm( &m_image );
+    else
+        ImageStreamIO_closeIm( &m_image );
+}
+
+void streamFixture::open( const char *name )
+{
+    for( int retry = 0; retry < 200 && !m_open; ++retry )
+    {
+        m_open = ImageStreamIO_openIm( &m_image, name ) == 0;
+        if( !m_open )
+            std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+    }
+    REQUIRE( m_open );
+    m_index = ImageStreamIO_getsemwaitindex( &m_image, 9 );
+    REQUIRE( m_index >= 0 );
+    ImageStreamIO_semflush( &m_image, m_index );
+}
+
+void streamFixture::create( const char *name )
+{
+    uint32_t sizes[]{ 1, 1, 1 };
+    REQUIRE( ImageStreamIO_createIm_gpu( &m_image,
+                                         name,
+                                         3,
+                                         sizes,
+                                         _DATATYPE_UINT16,
+                                         -1,
+                                         1,
+                                         IMAGE_NB_SEMAPHORE,
+                                         0,
+                                         CIRCULAR_BUFFER | ZAXIS_TEMPORAL,
+                                         0 ) == 0 );
+    m_open = m_owner = true;
+}
+
+std::array<uint16_t, 2> streamFixture::read()
+{
+    for( int attempt = 0; attempt < 100; ++attempt )
+    {
+        timespec timeout;
+        clock_gettime( CLOCK_REALTIME, &timeout );
+        ++timeout.tv_sec;
+        REQUIRE( sem_timedwait( m_image.semptr[m_index], &timeout ) == 0 );
+        const auto counter = m_image.md->cnt0;
+        const auto plane   = m_image.md->cnt1;
+        if( m_image.md->write || plane >= m_image.md->size[2] )
+            continue;
+        std::array<uint16_t, 2> pair{ m_image.array.UI16[2 * plane], m_image.array.UI16[2 * plane + 1] };
+        m_counter       = counter;
+        m_plane         = plane;
+        m_planeCounter  = m_image.cntarray[plane];
+        m_acquired      = m_image.md->atime;
+        m_written       = m_image.md->writetime;
+        m_planeAcquired = m_image.atimearray[plane];
+        m_planeWritten  = m_image.writetimearray[plane];
+        std::atomic_thread_fence( std::memory_order_acquire );
+        if( !m_image.md->write && counter == m_image.md->cnt0 )
+            return pair;
+    }
+    FAIL( "could not obtain a coherent frame" );
+    return {};
+}
+
+/// Construct a compatible local property request.
+pcf::IndiProperty update( const char *name /**< [in] property name */, double target /**< [in] requested value */ )
+{
+    pcf::IndiProperty result( pcf::IndiProperty::Number );
+    result.setName( name );
+    result.add( pcf::IndiElement( "target" ) );
+    result["target"] = target;
+    return result;
+}
+/// \endcond
+
+/** \brief Defaults and INDI callbacks retain the approved accelerometer control contract.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim configuration and INDI controls", "[accelSim][app]" )
+{
+    appTest app;
+    app.m_configName = "accelSim-test";
+    app.setupConfig();
+    REQUIRE( app.loadConfigImpl( app.config ) == 0 );
+    REQUIRE( app.m_shmimName == "acc000" );
+    REQUIRE( app.fps() == 6000 );
+    REQUIRE( app.m_model.m_modes.size() == 214 );
+    REQUIRE( app.setupProperties() == 0 );
+    REQUIRE( app.m_indiP_fps.getPerm() == pcf::IndiProperty::ReadWrite );
+    REQUIRE( app.m_indiP_fps["current"].get<double>() == 6000 );
+    REQUIRE( app.m_indiP_timingDiag.find( "mode_code" ) );
+    REQUIRE( app.m_indiP_timingDiag.find( "sync_producer_frame_delta" ) );
+    REQUIRE( app.m_indiP_timingDiag.getNumElements() == 23 );
+    REQUIRE( app.m_indiP_fps.getType() == pcf::IndiProperty::Number );
+    REQUIRE( std::stod( app.m_indiP_fps["target"].getMin() ) == 0 );
+    REQUIRE( std::stod( app.m_indiP_fps["target"].getMax() ) == 10000 );
+    REQUIRE( app.newCallBack_m_indiP_fps( update( "fps", 0 ) ) < 0 );
+    REQUIRE( app.m_requestedFps == 6000 );
+    REQUIRE( app.m_indiP_fps.getState() == pcf::IndiProperty::Alert );
+    REQUIRE( app.newCallBack_m_indiP_fps( update( "fps", 4000 ) ) == 0 );
+    REQUIRE( app.m_requestedFps == 4000 );
+    REQUIRE( app.m_activeFps == 6000 );
+    REQUIRE( app.newCallBack_m_indiP_numChannels( update( "numChannels", 3 ) ) < 0 );
+    REQUIRE( app.m_indiP_numChannels["current"].get<int>() == 2 );
+    REQUIRE( app.newCallBack_m_indiP_numChannels( update( "numChannels", 2 ) ) == 0 );
+    REQUIRE( app.newCallBack_m_indiP_alpha( update( "alpha", 2 ) ) == 0 );
+    REQUIRE( app.m_alpha == 1 );
+    REQUIRE( app.newCallBack_m_indiP_synchroDelay( update( "synchroDelay", -5 ) ) == 0 );
+    REQUIRE( app.m_postDelay == -5 );
+    app.m_fpsDevice = "source";
+    app.m_indiP_fpsSource.setName( "fps" );
+    app.m_indiP_fpsSource.setDevice( "source" );
+    auto external = update( "fps", 5000 );
+    external.setDevice( "source" );
+    external.add( pcf::IndiElement( "current" ) );
+    external["current"] = 5000;
+    REQUIRE( app.setCallBack_m_indiP_fpsSource( external ) == 0 );
+    REQUIRE( app.m_requestedFps == 5000 );
+    app.m_indiP_numChannelsSource.setName( "numChannels" );
+    app.m_indiP_numChannelsSource.setDevice( "source" );
+    external.setName( "numChannels" );
+    external["current"] = 3;
+    REQUIRE( app.setCallBack_m_indiP_numChannelsSource( external ) < 0 );
+    external["current"] = 2;
+    REQUIRE( app.setCallBack_m_indiP_numChannelsSource( external ) == 0 );
+    // clang-format off
+#ifdef ACCELSIM_TEST_DOXYGEN_REF
+    MagAOX::app::accelSim::loadConfigImpl;
+    MagAOX::app::accelSim::setupProperties;
+    MagAOX::app::accelSim::newCallBack_m_indiP_fps;
+    MagAOX::app::accelSim::newCallBack_m_indiP_numChannels;
+    MagAOX::app::accelSim::newCallBack_m_indiP_alpha;
+    MagAOX::app::accelSim::newCallBack_m_indiP_synchroDelay;
+    MagAOX::app::accelSim::setCallBack_m_indiP_fpsSource;
+    MagAOX::app::accelSim::setCallBack_m_indiP_numChannelsSource;
+#endif
+    // clang-format on
+}
+
+/** \brief Parse the shipped example and reject an incompatible configured channel count.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim example configuration", "[accelSim][app]" )
+{
+    appTest app;
+    app.setupConfig();
+    const std::string filename = std::filesystem::exists( "apps/accelSim/config/example.conf" )
+                                     ? "apps/accelSim/config/example.conf"
+                                     : "../apps/accelSim/config/example.conf";
+    REQUIRE( std::filesystem::exists( filename ) );
+    app.config.readConfig( filename );
+    REQUIRE( app.loadConfigImpl( app.config ) == 0 );
+    REQUIRE( app.m_parameters.m_zero == 2048 );
+    REQUIRE( app.m_parameters.m_sensitivity == 1.02 );
+    REQUIRE( app.m_parameters.m_voltsPerBit == .0083799 );
+    REQUIRE( app.m_parameters.m_leverArm == 10 );
+    REQUIRE( app.m_parameters.m_noisePSD == 1e-8 );
+    REQUIRE( app.m_parameters.m_seed == 42 );
+    REQUIRE( app.m_parameters.m_modeSeed == 123 );
+    char      overrideFile[] = "/tmp/accelSim-config-XXXXXX";
+    const int fd             = mkstemp( overrideFile );
+    REQUIRE( fd >= 0 );
+    close( fd );
+    {
+        std::ofstream file( overrideFile );
+        file << "[sim]\nfps=4000\nseed=8\nleverArm=20\n[adc]\nzero=2000\n"
+                "voltsPerBit=0.01\nsensitivity=2\n[sensor]\nnoisePSD=0\n";
+    }
+    app.config.readConfig( overrideFile );
+    REQUIRE( app.loadConfigImpl( app.config ) == 0 );
+    REQUIRE( app.fps() == 4000 );
+    REQUIRE( app.m_parameters.m_seed == 8 );
+    REQUIRE( app.m_parameters.m_leverArm == 20 );
+    REQUIRE( app.m_parameters.m_zero == 2000 );
+    REQUIRE( app.m_model.m_noiseSigma == 0 );
+    {
+        std::ofstream file( overrideFile );
+        file << "[accel]\nnumChannels=3\n";
+    }
+    app.config.readConfig( overrideFile );
+    REQUIRE( app.loadConfigImpl( app.config ) < 0 );
+    std::filesystem::remove( overrideFile );
+    // clang-format off
+#ifdef ACCELSIM_TEST_DOXYGEN_REF
+    MagAOX::app::accelSim::loadConfigImpl;
+#endif
+    // clang-format on
+}
+
+/** \brief Actual acquisition stamps and two-value copies exclude shutdown replay.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim acquisition produces fresh timestamped ADC pairs", "[accelSim][app]" )
+{
+    appTest app;
+    app.setupConfig();
+    REQUIRE( app.loadConfigImpl( app.config ) == 0 );
+    REQUIRE( app.configureAcquisition() == 0 );
+    REQUIRE( app.m_width == 2 );
+    REQUIRE( app.m_height == 1 );
+    REQUIRE( app.m_dataType == _DATATYPE_UINT16 );
+    REQUIRE( app.startAcquisition() == 0 );
+    REQUIRE( app.acquireAndCheckValid() == 0 );
+    REQUIRE( app.m_currImageTimestamp.tv_sec > 0 );
+    app.m_model.m_sample.m_adc = { 123, 3456 }; // Deliberately asymmetric copy-order fixture.
+    std::array<uint16_t, 2> values{};
+    REQUIRE( app.loadImageIntoStream( values.data() ) == 0 );
+    REQUIRE( values == app.m_model.m_sample.m_adc );
+    REQUIRE( app.loadImageIntoStream( values.data() ) < 0 );
+    app.m_shutdown = true;
+    REQUIRE( app.acquireAndCheckValid() > 0 );
+    // clang-format off
+#ifdef ACCELSIM_TEST_DOXYGEN_REF
+    MagAOX::app::accelSim::configureAcquisition;
+    MagAOX::app::accelSim::startAcquisition;
+    MagAOX::app::accelSim::acquireAndCheckValid;
+    MagAOX::app::accelSim::loadImageIntoStream;
+#endif
+    // clang-format on
+}
+
+/** \brief Synchronization phase wraps, cadence cap, and lock follow the hardware equations.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim synchronized delay model", "[accelSim][app]" )
+{
+    appTest app;
+    app.m_alpha     = 1;
+    app.m_postDelay = -5;
+    app.syncTiming( 1000000000 );
+    app.syncTiming( 1000500000 );
+    const auto &t = app.m_diagnostics.m_timing;
+    REQUIRE( t[11] == Approx( 500 ) );  // semaphorePeriod
+    REQUIRE( t[4] == Approx( 409.4 ) ); // wrap(250 - 340.6, 500)
+    REQUIRE( t[2] == Approx( 404.4 ) );
+    REQUIRE( t[3] == Approx( 404.4 ) );
+    REQUIRE( t[7] == Approx( 480 ) );
+    REQUIRE( t[6] == 1 );
+    REQUIRE( app.m_diagnostics.m_cadenceRatio == Approx( 3 ) );
+    // clang-format off
+#ifdef ACCELSIM_TEST_DOXYGEN_REF
+    MagAOX::app::accelSim::syncTiming;
+#endif
+    // clang-format on
+}
+
+/** \brief An outage updates the app-loop snapshot without requiring another published frame.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim outage and reconfiguration deliver unlocked diagnostics", "[accelSim][app][sync-regression]" )
+{
+    appTest app;
+    app.m_syncName  = "accelSim-test-source";
+    app.m_alpha     = 1;
+    app.m_postDelay = -5;
+    app.syncTiming( 1000000000 );
+    app.syncTiming( 1000500000 );
+    REQUIRE( app.m_diagnostics.m_timing[lock] == 1 );
+    REQUIRE( app.frameGrabberPostPublish( nullptr ) == 0 );
+    REQUIRE( app.m_snapshot.m_timing[lock] == 1 );
+    app.m_syncTick    = app.m_syncClock.prepare( 10, 1000500000, 6000 );
+    app.m_syncPending = true;
+    app.invalidateSync();
+    REQUIRE_FALSE( app.m_syncPending );
+    REQUIRE( app.m_snapshot.m_skipped == 1 );
+    REQUIRE( app.m_snapshot.m_timing[lock] == 0 );
+    REQUIRE( app.m_snapshot.m_timing[semaphorePeriod] == 0 );
+    REQUIRE( app.m_snapshot.m_timing[delayApplied] == 0 );
+    REQUIRE( app.m_snapshot.m_cadenceRatio == 0 );
+    REQUIRE( app.m_snapshot.m_timing[delayTarget] == -5 );
+    app.finishSync( false );
+    REQUIRE( app.m_diagnostics.m_skipped == 1 ); // Finalization cannot count a cancellation twice.
+    REQUIRE( app.reconfig() == 0 );
+    REQUIRE( app.m_snapshot.m_discontinuities == 1 );
+    REQUIRE( app.m_snapshot.m_skipped == 1 );
+    REQUIRE( app.m_snapshot.m_timing[lock] == 0 );
+    app.syncTiming( 2000000000 );
+    REQUIRE( app.m_diagnostics.m_timing[lock] == 0 ); // Reconnection needs a fresh period measurement.
+    app.syncTiming( 2000500000 );
+    REQUIRE( app.frameGrabberPostPublish( nullptr ) == 0 );
+    REQUIRE( app.m_snapshot.m_timing[lock] == 1 );
+    // clang-format off
+#ifdef ACCELSIM_TEST_DOXYGEN_REF
+    MagAOX::app::accelSim::invalidateSync;
+    MagAOX::app::accelSim::finishSync;
+    MagAOX::app::accelSim::frameGrabberPostPublish;
+    MagAOX::app::accelSim::reconfig;
+    MagAOX::app::accelSim::syncTiming;
+#endif
+    // clang-format on
+}
+
+/** \brief Real framework publication and trigger consumption in a private namespace.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim real local streams", "[.][accelSim-streams]" )
+{
+    char path[] = "/tmp/accelSim-streams-XXXXXX";
+    REQUIRE( mkdtemp( path ) != nullptr );
+    REQUIRE( setenv( "MILK_SHM_DIR", path, 1 ) == 0 );
+    for( uint32_t depth : { 1u, 4u } )
+    {
+        appTest app;
+        app.setupConfig();
+        REQUIRE( app.loadConfigImpl( app.config ) == 0 );
+        app.m_circBuffLength = depth;
+        app.startWorker();
+        streamFixture reader;
+        reader.open( "acc000" );
+        REQUIRE( reader.m_image.md->naxis == 3 );
+        REQUIRE( reader.m_image.md->size[0] == 2 );
+        REQUIRE( reader.m_image.md->size[1] == 1 );
+        REQUIRE( reader.m_image.md->size[2] == depth );
+        REQUIRE( reader.m_image.md->datatype == _DATATYPE_UINT16 );
+        REQUIRE( reader.m_image.md->sem == IMAGE_NB_SEMAPHORE );
+        uint64_t previous = 0;
+        for( size_t n = 0; n < 100; ++n )
+        {
+            const auto pair = reader.read();
+            REQUIRE( pair[0] <= 4095 );
+            REQUIRE( pair[1] <= 4095 );
+            REQUIRE( reader.m_counter >= previous );
+            previous = reader.m_counter;
+            REQUIRE( reader.m_acquired.tv_sec > 0 );
+            REQUIRE( reader.m_plane < depth );
+            REQUIRE( reader.m_plane == ( reader.m_counter - 1 ) % depth );
+            REQUIRE( reader.m_planeCounter == reader.m_counter );
+            REQUIRE( reader.m_acquired.tv_sec == reader.m_planeAcquired.tv_sec );
+            REQUIRE( reader.m_acquired.tv_nsec == reader.m_planeAcquired.tv_nsec );
+            REQUIRE( reader.m_written.tv_sec == reader.m_planeWritten.tv_sec );
+            REQUIRE( reader.m_written.tv_nsec == reader.m_planeWritten.tv_nsec );
+            REQUIRE( reader.m_written.tv_sec > reader.m_acquired.tv_sec ||
+                     ( reader.m_written.tv_sec == reader.m_acquired.tv_sec &&
+                       reader.m_written.tv_nsec >= reader.m_acquired.tv_nsec ) );
+        }
+    }
+    {
+        streamFixture source;
+        source.create( "accelSim-trigger" );
+        appTest app;
+        app.setupConfig();
+        REQUIRE( app.loadConfigImpl( app.config ) == 0 );
+        app.m_syncName = "accelSim-trigger";
+        REQUIRE( app.configureAcquisition() == 0 );
+        REQUIRE( app.startAcquisition() == 0 );
+        std::array<uint16_t, 2> pair{};
+        for( uint64_t counter : { 1u, 4u } )
+        {
+            source.m_image.md->cnt0 = counter;
+            clock_gettime( CLOCK_REALTIME, &source.m_image.md->atime );
+            REQUIRE( ImageStreamIO_sempost( &source.m_image, -1 ) == 0 );
+            REQUIRE( app.acquireAndCheckValid() == 0 );
+            REQUIRE( app.loadImageIntoStream( pair.data() ) == 0 );
+        }
+        REQUIRE( app.m_diagnostics.m_timing[18] == 2 ); // Source counter gaps.
+        REQUIRE( app.m_diagnostics.m_skipped >= 2 );
+        REQUIRE( ImageStreamIO_sempost( &source.m_image, -1 ) == 0 );
+        REQUIRE( app.acquireAndCheckValid() > 0 ); // Duplicate notification never replays a frame.
+        const auto skippedBeforeCancel = app.m_diagnostics.m_skipped;
+        app.m_syncClock.resetTime(); // Isolate cancellation from scheduling delays earlier in this fixture.
+        source.m_image.md->cnt0 = 8;
+        REQUIRE( ImageStreamIO_sempost( &source.m_image, -1 ) == 0 );
+        app.m_requestedFps = 6001; // Force cancellation at the phase wait, after consuming the semaphore.
+        REQUIRE( app.waitSync() > 0 );
+        REQUIRE_FALSE( app.m_syncPending );
+        REQUIRE( app.m_syncClock.m_producer == 8 );
+        REQUIRE( app.m_diagnostics.m_timing[dropped] == 5 ); // Earlier gap of two plus this gap of three.
+        REQUIRE( app.m_diagnostics.m_skipped == skippedBeforeCancel + 4 );
+        REQUIRE( app.m_snapshot.m_skipped == app.m_diagnostics.m_skipped );
+        REQUIRE( app.m_snapshot.m_timing[lock] == 0 );
+        REQUIRE( app.loadImageIntoStream( pair.data() ) < 0 );
+        REQUIRE( ImageStreamIO_sempost( &source.m_image, -1 ) == 0 );
+        REQUIRE( app.waitSync() > 0 ); // Duplicate of canceled counter cannot be counted twice.
+        REQUIRE( app.m_diagnostics.m_skipped == app.m_snapshot.m_skipped );
+        app.m_requestedFps = 6000;
+        const int slot     = app.m_syncIndex;
+        REQUIRE( app.reconfig() == 0 );
+        REQUIRE( source.m_image.semReadPID[slot] == 0 );
+        REQUIRE( app.configureAcquisition() == 0 );
+        REQUIRE( app.startAcquisition() == 0 );
+        app.m_diagnostics.m_timing[lock]            = 1;
+        app.m_diagnostics.m_timing[semaphorePeriod] = 500;
+        app.m_diagnostics.m_cadenceRatio            = 3;
+        REQUIRE( app.frameGrabberPostPublish( nullptr ) == 0 );
+        REQUIRE( app.m_snapshot.m_timing[lock] == 1 );
+        REQUIRE( ImageStreamIO_destroyIm( &source.m_image ) == 0 );
+        source.m_open = false;
+        REQUIRE( app.acquireAndCheckValid() > 0 ); // Timed wait discovers the vanished backing file.
+        REQUIRE( app.m_reconfig );
+        REQUIRE( app.m_snapshot.m_timing[lock] == 0 );
+        REQUIRE( app.m_snapshot.m_timing[semaphorePeriod] == 0 );
+        REQUIRE( app.m_snapshot.m_cadenceRatio == 0 );
+        REQUIRE( app.reconfig() == 0 );
+        REQUIRE( app.m_snapshot.m_timing[lock] == 0 );
+        source.create( "accelSim-trigger" );
+        REQUIRE( app.configureAcquisition() == 0 );
+        app.m_reconfig = false; // The real frameGrabber clears this after successful configuration.
+        REQUIRE( app.startAcquisition() == 0 );
+        source.m_image.md->cnt0 = 1;
+        REQUIRE( ImageStreamIO_sempost( &source.m_image, -1 ) == 0 );
+        REQUIRE( app.acquireAndCheckValid() == 0 );
+    }
+    // clang-format off
+#ifdef ACCELSIM_TEST_DOXYGEN_REF
+    MagAOX::app::accelSim::configureAcquisition;
+    MagAOX::app::accelSim::startAcquisition;
+    MagAOX::app::accelSim::acquireAndCheckValid;
+    MagAOX::app::accelSim::loadImageIntoStream;
+    MagAOX::app::accelSim::frameGrabberPostPublish;
+    MagAOX::app::accelSim::waitSync;
+    MagAOX::app::accelSim::reconfig;
+#endif
+    // clang-format on
+}
+
+/** \brief Ten-minute read-only timing observation of a separately launched local producer.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim sustained local publication benchmark", "[.][accelSim-live]" )
+{
+    REQUIRE( std::getenv( "ACCELSIM_LOCAL_BENCHMARK" ) != nullptr );
+    REQUIRE( std::getenv( "MILK_SHM_DIR" ) != nullptr );
+    streamFixture reader;
+    reader.open( "acc000" );
+    REQUIRE( reader.m_image.md->datatype == _DATATYPE_UINT16 );
+    REQUIRE( reader.m_image.md->size[0] == 2 );
+    REQUIRE( reader.m_image.md->size[1] == 1 );
+    const auto                  begin    = std::chrono::steady_clock::now();
+    const uint64_t              first    = reader.m_image.md->cnt0;
+    uint64_t                    previous = first, gaps = 0, observed = 0;
+    double                      previousWrite = 0, intervalSum = 0, intervalSquared = 0, maximum = 0;
+    std::array<uint64_t, 8>     histogram{};
+    const std::array<double, 7> limits{ 100, 150, 175, 200, 250, 500, 1000 };
+    while( std::chrono::steady_clock::now() - begin < std::chrono::minutes( 10 ) )
+    {
+        const auto pair = reader.read();
+        REQUIRE( pair[0] <= 4095 );
+        REQUIRE( pair[1] <= 4095 );
+        const auto counter = reader.m_counter;
+        if( counter == previous )
+            continue;
+        REQUIRE( counter > previous );
+        gaps += counter - previous - 1;
+        const auto   stamp   = reader.m_written;
+        const double written = double( stamp.tv_sec ) * 1e6 + stamp.tv_nsec / 1000.0;
+        if( previousWrite && counter == previous + 1 )
+        {
+            const double interval = written - previousWrite;
+            intervalSum += interval;
+            intervalSquared += interval * interval;
+            maximum = std::max( maximum, interval );
+            ++observed;
+            ++histogram[std::upper_bound( limits.begin(), limits.end(), interval ) - limits.begin()];
+        }
+        previousWrite = written;
+        previous      = counter;
+    }
+    const double seconds = std::chrono::duration<double>( std::chrono::steady_clock::now() - begin ).count();
+    const double rate    = ( previous - first ) / seconds;
+    REQUIRE( observed > 0 );
+    const double mean = intervalSum / observed;
+    std::cout << "publication_hz=" << rate << " reader_counter_gaps=" << gaps << " interval_mean_us=" << mean
+              << " interval_std_us=" << std::sqrt( std::max( 0.0, intervalSquared / observed - mean * mean ) )
+              << " max_observed_interval_us=" << maximum << " interval_histogram=";
+    for( auto bin : histogram )
+        std::cout << bin << ',';
+    std::cout
+        << "\nCompare producer sim_diag/skipped_publications, late_samples, max_lateness_us and RSS separately.\n";
+    REQUIRE( rate == Approx( 6000 ).epsilon( .01 ) );
+}
+#endif
+
+} // namespace accelSimTest
+} // namespace libXWCTest
