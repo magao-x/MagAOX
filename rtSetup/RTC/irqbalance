@@ -1,7 +1,8 @@
 ############################################
-# MagAO-X irqbalance configuration for RTC
+# \file
+# \brief Keep ordinary IRQ balancing off the RTC dedicated cores and their SMT siblings.
 #
-# Edit the IRQBALANCE_BANNED_CPUS bitmask to match the r/t cpusets created in make_cpusets
+# Match IRQBALANCE_BANNED_CPULIST to the dedicated CPUs and offline siblings in make_cpusets.
 #
 # Edit the irqbalance_policyscript to include IRQs to ban
 #
@@ -29,14 +30,12 @@
 #IRQBALANCE_ONESHOT=
 
 #
-# IRQBALANCE_BANNED_CPUS
-# bitmask which allows you to indicate which cpu's should
-# be skipped when reblancing irqs. Cpu numbers which have their
-# corresponding bits set to one in this mask will not have any
-# irq's assigned to them on rebalance
+# IRQBALANCE_BANNED_CPULIST
+# CPU list excluded from ordinary IRQ balancing. Device-specific routing
+# remains in move_irqs, with selected IRQs protected by irqbalance_policyscript.
 #
-# For RTC this is 128 bits.  Currently bans 32-63 and 96-127 (which are the h/t pairs)
-IRQBALANCE_BANNED_CPULIST=32-63,96-127
+# Dedicated physical cores 30-63 and their offline SMT siblings 94-127.
+IRQBALANCE_BANNED_CPULIST=30-63,94-127
 
 #
 # IRQBALANCE_ARGS
