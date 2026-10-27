@@ -108,6 +108,9 @@ class xInstGraph : public MagAOXApp<true>
     /// True after this run successfully publishes its output.
     bool m_outputPublished{ false };
 
+    /// Bytes of the currently published snapshot, used to suppress no-op rewrites.
+    std::string m_publishedXML;
+
     /// Serialize graph callbacks and shutdown against publication.
     std::mutex m_updateMutex;
 
@@ -153,8 +156,16 @@ class xInstGraph : public MagAOXApp<true>
     virtual int renameStage( const std::filesystem::path &from, /**< [in] owned staging path */
                              const std::filesystem::path &to /**< [in] destination path */ );
 
+    /// Serialize the current graph state into a complete XML document.
+    /** \returns 0 on success with the document in xml.
+      * \returns -1 on a serialization failure, with the reason in error.
+      */
+    int renderGraph( std::string &xml,  /**< [out] complete XML document */
+                     std::string &error /**< [out] serialization failure */ );
+
     /// Write and verify a complete graph snapshot through the staging descriptor.
-    int writeSnapshot( std::string &error /**< [out] write failure */ );
+    int writeSnapshot( const std::string &xml, /**< [in] complete XML document to stage */
+                       std::string       &error /**< [out] write failure */ );
 
     /// Confirm the published output is still owned and distinct from the input.
     int checkOwnedOutput( std::string &error /**< [out] path validation failure */ ) const;
@@ -344,7 +355,21 @@ inline int xInstGraph::renameStage( const std::filesystem::path &from, const std
     return ::rename( from.c_str(), to.c_str() );
 }
 
-inline int xInstGraph::writeSnapshot( std::string &error )
+inline int xInstGraph::renderGraph( std::string &xml, std::string &error )
+{
+    if( serializeGraph( xml, error ) < 0 || xml.empty() )
+    {
+        if( error.empty() )
+        {
+            error = "graph serialization produced no XML";
+        }
+        return -1;
+    }
+
+    return 0;
+}
+
+inline int xInstGraph::writeSnapshot( const std::string &xml, std::string &error )
 {
     if( m_stageFd < 0 || m_stagePath.empty() )
     {
@@ -352,13 +377,9 @@ inline int xInstGraph::writeSnapshot( std::string &error )
         return -1;
     }
 
-    std::string xml;
-    if( serializeGraph( xml, error ) < 0 || xml.empty() )
+    if( xml.empty() )
     {
-        if( error.empty() )
-        {
-            error = "graph serialization produced no XML";
-        }
+        error = "graph serialization produced no XML";
         return -1;
     }
 
@@ -581,6 +602,7 @@ inline void xInstGraph::cleanupOwnedFiles() noexcept
             ::unlink( m_outputPath.c_str() );
         }
         m_outputPublished = false;
+        m_publishedXML.clear();
     }
 
     if( m_outputFd >= 0 )
@@ -928,11 +950,14 @@ inline int xInstGraph::appStartup()
     try
     {
         std::string emsg;
-        if( writeSnapshot( emsg ) < 0 || publishOutput( emsg ) < 0 )
+        std::string xml;
+        if( renderGraph( xml, emsg ) < 0 || writeSnapshot( xml, emsg ) < 0 || publishOutput( emsg ) < 0 )
         {
             cleanupOwnedFiles();
             return log<software_error, -1>( { __FILE__, __LINE__, emsg } );
         }
+
+        m_publishedXML = std::move( xml );
     }
     catch( const std::exception &e )
     {
@@ -1000,12 +1025,27 @@ inline int xInstGraph::igHandleSetProperty( const pcf::IndiProperty &ipRecv )
         }
 
         std::string error;
-        if( createStage( error ) < 0 || writeSnapshot( error ) < 0 || publishUpdate( error ) < 0 )
+        std::string xml;
+        if( renderGraph( xml, error ) < 0 )
+        {
+            m_updateFailed.store( true );
+            return log<software_error, -1>( { __FILE__, __LINE__, error } );
+        }
+
+        // Nothing in the published display changed, so do not disturb watchers of the output.
+        if( xml == m_publishedXML )
+        {
+            return 0;
+        }
+
+        if( createStage( error ) < 0 || writeSnapshot( xml, error ) < 0 || publishUpdate( error ) < 0 )
         {
             cleanupStage();
             m_updateFailed.store( true );
             return log<software_error, -1>( { __FILE__, __LINE__, error } );
         }
+
+        m_publishedXML = std::move( xml );
 
         return 0;
     }

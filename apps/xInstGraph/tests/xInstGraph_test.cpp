@@ -998,6 +998,74 @@ TEST_CASE( "xInstGraph publishes one complete callback snapshot", "[xInstGraph]"
     REQUIRE_FALSE( std::filesystem::exists( output ) );
 }
 
+/// Updates that leave the published display unchanged do not replace the output file.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "xInstGraph skips publication of unchanged state", "[xInstGraph]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    MagAOX::app::xInstGraph::igHandleSetProperty( pcf::IndiProperty() );
+    MagAOX::app::xInstGraph::appLogic();
+    #endif
+    // clang-format on
+
+    temporaryDirectory temp;
+    auto               input  = temp.root / "config" / "instgraph_test.drawio";
+    auto               output = temp.root / "output.drawio";
+    writePowerXML( input );
+    writePowerConfig( temp.root / "config" / "instgraph_test.conf", output );
+
+    xInstGraph app;
+    loadFixture( app, temp.root );
+    REQUIRE( app.shutdown() == 0 );
+    REQUIRE( app.appStartup() == 0 );
+
+    REQUIRE( app.igHandleSetProperty( powerProperty( "On" ) ) == 0 );
+    const std::string published = readFile( output );
+    REQUIRE( published.find( "value=\"ON\"" ) != std::string::npos );
+
+    struct stat beforeInfo;
+    REQUIRE( ::stat( output.c_str(), &beforeInfo ) == 0 );
+
+    // Repeating the same state changes nothing observable, so nothing is staged or renamed.
+    app.observeRename = true;
+    app.previousAtRename.clear();
+    for( int repeat = 0; repeat < 3; ++repeat )
+    {
+        REQUIRE( app.igHandleSetProperty( powerProperty( "On" ) ) == 0 );
+    }
+
+    struct stat afterInfo;
+    REQUIRE( ::stat( output.c_str(), &afterInfo ) == 0 );
+    REQUIRE( afterInfo.st_ino == beforeInfo.st_ino );
+    REQUIRE( afterInfo.st_mtime == beforeInfo.st_mtime );
+    REQUIRE( app.previousAtRename.empty() );
+    REQUIRE_FALSE( app.hasStage() );
+    REQUIRE( readFile( output ) == published );
+    for( const auto &entry : std::filesystem::directory_iterator( temp.root ) )
+    {
+        REQUIRE( entry.path().filename().string().find( ".xInstGraph-" ) == std::string::npos );
+    }
+
+    // A state the display does show is still published.
+    REQUIRE( app.igHandleSetProperty( powerProperty( "Off" ) ) == 0 );
+    REQUIRE( app.previousAtRename == published );
+    const std::string republished = readFile( output );
+    REQUIRE( republished.find( "value=\"OFF\"" ) != std::string::npos );
+
+    struct stat republishedInfo;
+    REQUIRE( ::stat( output.c_str(), &republishedInfo ) == 0 );
+    REQUIRE( republishedInfo.st_ino != beforeInfo.st_ino );
+
+    app.previousAtRename.clear();
+    REQUIRE( app.igHandleSetProperty( powerProperty( "Off" ) ) == 0 );
+    REQUIRE( app.previousAtRename.empty() );
+    REQUIRE( readFile( output ) == republished );
+    REQUIRE( app.appLogic() == 0 );
+    REQUIRE( app.appShutdown() == 0 );
+}
+
 /// One INDI property update reaches every node subscribed to its key.
 /** \ingroup xInstGraph_unit_test
  */
