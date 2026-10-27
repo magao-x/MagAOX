@@ -356,6 +356,7 @@ Application properties belong to the configured INDI device: `dmtweeter_synco` i
 | `simulation` | Number, read-only | Simulation estimator validity, period, frozen grid/phase residuals, configured early reserve and observation-quality counts. Durations use the units in their element names. |
 | `simulation_steps` | Number, read-only | Per-step conditional considered/would-run/skip/overlap counts. These are modeled outcomes, not DM deliveries. |
 | `simulation_status` | Text, read-only | Current simulation state and explicit assumptions/limitations. |
+| `simulation_trace` | Number, read-only | Bounded overlap-event FIFO coverage and losses, detailed below. |
 | `health` | Text, read-only | `reason`, `lastFault`, `periodSource`, `primary`, `combined`, `timingStream`, `mapping`, `mode`. Current phase/reason, latched fault, selected period reference and resolved stream identities. Mode also identifies simulation when selected. |
 
 `settings` uses its named elements directly; there are no numeric `current`/`target` pairs. Updates while enabled, unknown elements, nonfinite values and invalid counts/ranges are rejected without changing the active configuration. Changing `steps` never changes source-image count. After an accepted disabled update, enable again to acquire a new schedule.
@@ -385,6 +386,53 @@ Use simulation fields for modeled outcomes; operational `timing.delivered`
 does not count hypothetical submissions. The requested count remains in
 `settings.steps`; the full assumed timing bounds and estimator settings are
 recorded in the appended telemetry table.
+
+An overlap count is retrospective main-observation evidence inside a
+previously modeled copy or active reader-hold interval. It does not undo the
+would-run count. The combined observer can supply evidence before the primary
+callback, and that later callback can count the same main again. These counts
+are therefore not deduplicated physical collision rates. Retain their
+before/after differences even when most increments precede the first saved
+telemetry row; observation lag and the assumed timing bounds still need
+qualification.
+
+Simulation automatically retains timestamped overlap evidence in a fixed
+256-event FIFO. The ordinary application thread drains at most 64 events per
+`[dmsynco]` record, after releasing the model lock; callbacks only copy fixed
+records. Each `sim_overlap={...}` entry identifies:
+
+| Fields | Meaning |
+| --- | --- |
+| `id`, `session` | Process-lifetime evidence sequence and model session owning the event. Pending events survive model resets and can belong to an earlier session than the current summary. |
+| `origin`, `window` | Observer (`primary` or `combined`) and containing modeled interval (`copy` or active `readerHold`). Boundaries include the start and exclude the end. Passive step 0 has no reader hold. |
+| `mainCounter`, `combinedCounter`, `planCounter`, `step` | Actual main supplying evidence, observed combined counter, and cycle/step of the last modeled copy. On the primary path, the combined counter is the most recently observed one, possibly zero. |
+| `mainGrid_ns`, `planGrid_ns`, `period_ns` | Committed grid or extrapolation from the last frozen cycle for the evidence main, frozen main target for the modeled copy's cycle, and that cycle's period. Zero main-grid means unavailable. |
+| `observed_ns`, `copyBegin_ns`, `copyEnd_ns`, `readerEnd_ns` | Evidence time and modeled copy/reader boundaries on the same-host monotonic clock. Passive `readerEnd_ns` is zero. |
+| `lastMainCounter`, `lastMain_ns`, `lastOutput_ns` | Previously accepted primary identity/time and latest associated combined observation. |
+| `streamInode`, `triggerInode` | Observed stream identity and combined trace's named primary identity when available. |
+| `receipt_ns`, `callback_ns`, `lockRequest_ns`, `lockAcquired_ns` | Monotonic receipt, callback entry and model-lock endpoints. Zero means unavailable. Their differences separate callback bookkeeping and lock wait from model observation. |
+| `publication_ns`, `primaryPublication_ns`, `start_ns`, `update_ns` | Raw producer-clock stream/primary publication and combined trace endpoints. Primary publication is supplied only when its counter matches the coherent primary metadata already observed. |
+
+Within one app process, group events by `(session, planCounter, step, mainCounter)`
+to identify repeated evidence for the same modeled step and actual main,
+while retaining origin and event IDs. Keep process restarts separate. The
+primary and combined observers can both report one main.
+The log labels model/observer times `model_clock:monotonic` and producer times
+`producer_clock:unconverted`. Do not subtract absolute producer timestamps
+from the monotonic grid. The telemetry record's wall-clock timestamp is its
+emission time, not the individual evidence time.
+
+The read-only `simulation_trace` elements and telemetry `trace_quality` expose
+`enabled`, `detected`, `drained`, `dropped`, `queued`, `capacity`, and
+`logFailed`. Counts persist for the app process, across model resets:
+`detected = drained + dropped + queued`. A full FIFO drops new evidence
+without changing model decisions or aggregate overlap counts. `drained`
+means removed for a telemetry attempt; `logFailed` counts those records lost
+to a detected encoding/submission failure. It does not attest to disk
+durability or detect filtering by the general logger. A busy model lock
+defers draining until a later record. `trace_quality` is absent from an older
+record or from a record where no queue snapshot could be taken. Inspect
+losses and pending events before interpreting a capture as complete.
 
 The `timing` summary includes:
 
@@ -881,22 +929,123 @@ needed.
    `health.mode`, and the existing primary/combined stream names. An On
    request is rejected in this mode; no enable operation is needed to collect.
 3. Allow the estimator to warm up. Inspect `simulation`, `simulation_steps`,
-   `simulation_status`, `primary_timing_quality`, and
+   `simulation_status`, `simulation_trace`, `primary_timing_quality`, and
    `combiner_timing_quality`. A grid and a coherent output association are
-   separate requirements. Record absent associations, gaps and rejected
-   observations along with would-run counts.
-4. Keep camera/loop settings, dmcomb trigger mode, CPU/IRQ placement and
-   workload fixed. Record those settings and capture at least 60 seconds of
-   synco telemetry, ideally alongside `dmtweeter` and `camwfs` telemetry over
-   the same period. For example, run `teldump -f dmtweeter-synco` and save its
+   separate requirements. Before a long policy capture, confirm that
+   `simulation.associations` increases and the combiner quality report has a
+   nonzero matching `triggerInode` and an advancing `primaryCounter`. A valid
+   grid with zero associations cannot evaluate successful auxiliary copies.
+   If the trace reports zero inode/counter, inspect dmcomb's
+   `.procinfo.triggersname`, including whether it resolved at initialization,
+   and retain the actual trigger mode/delay in the record. A named primary
+   can provide linkage in mode 4; changing to mode 3 is not required for this
+   diagnostic. If FPS values are already correct, use `milk-procCTRL` F4
+   (Triggering), match the combiner writer PID, and inspect the live trigger
+   name/inode/mode. The inspected MILK implementation resolves the name at
+   RUN initialization; live mode/delay updates do not re-resolve that name.
+   Correct FPS readback alone therefore does not establish active linkage.
+   Record absent associations, gaps and rejected observations along with
+   would-run counts.
+4. Verify `sysMonRTC.set_latency.toggle=On`, which is required for the RTC
+   performance baseline, and retain it throughout the capture. Save its
+   before/after readback. Keep camera/loop settings, dmcomb trigger mode,
+   CPU/IRQ placement and workload fixed. Record those settings and capture
+   at least 60 seconds of synco telemetry, ideally alongside `dmtweeter` and
+   `camwfs` telemetry over the same period. For example, run
+   `teldump -f dmtweeter-synco` and save its
    output, then stop it with Ctrl-C after the requested interval. Save the
    initial INDI snapshot as well as the final snapshot so cumulative outcome
    differences can be interpreted.
-5. Review frozen phase residual tails, collection/association quality, nominal
-   feasibility, and each step's skip reasons. Do not infer physical delivered
-   cadence or an acceptable early reserve from would-run totals. Restart
+5. Confirm new `[dmsynco]` records contain `trace_quality`, even if no overlap
+   events have occurred. Review frozen phase residual tails,
+   collection/association quality, nominal feasibility, per-step skip reasons
+   and every `sim_overlap` entry. Group repeated main evidence using the key
+   above, distinguish copy from reader hold, and inspect callback/lock lag.
+   Retain FIFO losses and the initial snapshot interval. Do not infer physical
+   delivered cadence or an acceptable early reserve from would-run totals. Restart
    with `simulation.enabled=false` to return to normal scheduling mode; keep
    real scheduling disabled until timing bounds and wake routing are qualified.
+
+For a 120-second simultaneous capture, run the following Bash block from the
+instrument's MagAOX checkout after the checks above. It starts the collectors
+before taking snapshots and waits only for those collectors. Snapshot queries
+have an external eight-second limit: wildcard `getINDI` queries normally wait
+for two seconds without matching property definitions, and repeated definitions
+can keep that wait open. Ordinary property updates do not reset it. A snapshot
+status of 124 means the external timeout expired; retain its partial output
+and investigate the repeated definitions separately. Bounding the query does
+not correct their cause.
+
+The block takes about two minutes plus the final bounded snapshots and any
+collector termination grace. The first snapshots overlap the start of the
+telemetry capture. Record the dmcomb trigger mode and AO gain with the result.
+
+```bash
+(
+    synco_capture_dir="$HOME/tmp/synco-sim-$(date -u +%Y%m%dT%H%M%SZ)"
+    mkdir -p "$synco_capture_dir" || exit 1
+    git rev-parse HEAD > "$synco_capture_dir/git.txt"
+    synco_capture_pids=()
+
+    for synco_device in dmtweeter-synco dmtweeter camwfs
+    do
+        timeout -k 5s -s INT 120s logdump \
+            --dir=/opt/MagAOX/telem --ext=.bintel -f "$synco_device" \
+            > "$synco_capture_dir/$synco_device.txt" 2>&1 &
+        synco_capture_pids+=( "$!" )
+    done
+
+    for synco_device in dmtweeter-synco holoop camwfs sysMonRTC.set_latency.toggle
+    do
+        if timeout -k 2s 8s getINDI "$synco_device" \
+            > "$synco_capture_dir/$synco_device-indi-before.txt" \
+            2> "$synco_capture_dir/$synco_device-indi-before.err"
+        then
+            synco_status=0
+        else
+            synco_status=$?
+        fi
+
+        printf '%s before status=%s\n' "$synco_device" "$synco_status" \
+            >> "$synco_capture_dir/status.txt"
+    done
+
+    for synco_pid in "${synco_capture_pids[@]}"
+    do
+        if wait "$synco_pid"
+        then
+            synco_status=0
+        else
+            synco_status=$?
+        fi
+
+        printf 'collector pid=%s status=%s\n' "$synco_pid" "$synco_status" \
+            >> "$synco_capture_dir/status.txt"
+    done
+
+    for synco_device in dmtweeter-synco sysMonRTC.set_latency.toggle
+    do
+        if timeout -k 2s 8s getINDI "$synco_device" \
+            > "$synco_capture_dir/$synco_device-indi-after.txt" \
+            2> "$synco_capture_dir/$synco_device-indi-after.err"
+        then
+            synco_status=0
+        else
+            synco_status=$?
+        fi
+
+        printf '%s after status=%s\n' "$synco_device" "$synco_status" \
+            >> "$synco_capture_dir/status.txt"
+    done
+
+    printf '%s\n' "$synco_capture_dir"
+)
+```
+
+Collector status 124 is expected when `timeout` ends follow mode after 120
+seconds; status 137 indicates that its five-second kill grace was needed.
+Other nonzero statuses and short/empty telemetry files need review before
+interpreting the capture.
 
 ## 200 Hz tip/tilt test provider
 
@@ -938,7 +1087,7 @@ Programmatic dmMode integration is deferred. Disable dmSyncopation before indepe
 
 ## Operator qualification
 
-1. Verify exclusive destination/source ownership, `dmtweeter-synco` availability, the deployed dmcomb DELAY/counter route and primary monitor semaphore assignment. Confirm the trigger channel is not excluded by astrogrid mode and auxiliary inputs do not unintentionally drive ZPO work.
+1. Verify exclusive destination/source ownership, `dmtweeter-synco` availability, the deployed dmcomb DELAY/counter route and primary monitor semaphore assignment. Confirm the trigger channel is not excluded by astrogrid mode and auxiliary inputs do not unintentionally drive ZPO work. Verify `sysMonRTC.set_latency.toggle=On` for the required RTC performance baseline, and save its readback before and after qualification captures.
 2. Use the runtime [DM controller timing telemetry](../../../libMagAOX/app/dev/doc/dmTiming.md): `dm_timing`, `dm_timing_stages` and `[dmtimes]` records. Compare the documented processing/reader endpoints and receipt spacing with app residuals and dmcomb output. Use synco's independent primary statistics for the input-to-combined cadence comparison; the legacy `XWC_DMTIMINGS` buffers are no longer needed.
 3. Qualify delivery tails, observation lag, early-main uncertainty, snapshot/copy budgets and every adjacent/wraparound/copy window under the relevant load. Keep host-timing qualification separate from deterministic CI tests.
 4. Start disabled, verify configuration/status and the selected period source/camera reply age, start the local 200 Hz provider, then enable and wait for lock. Check requested/active/feasible counts, selected/measured rates and delivered cadence.
