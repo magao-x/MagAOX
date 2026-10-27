@@ -503,7 +503,7 @@ TEST_CASE( "pvcamCtrl connects to its camera by serial number", "[pvcamCtrl]" )
     f.state( stateCodes::NOTCONNECTED );
     REQUIRE( f.connect() == 0 );
     REQUIRE( f.state() == stateCodes::NODEVICE );
-    REQUIRE( Fixture::count( "could not open pvcamPCIE_2, probably in use by another application: "
+    REQUIRE( Fixture::count( "could not open pvcamPCIE_2, in use by another application or not responding: "
                              "pl_cam_open failed: fake error 1" ) == 1 );
     REQUIRE( Fixture::count( "camera not found" ) == 1 );
     REQUIRE( Fixture::errors() == 0 );

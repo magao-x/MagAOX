@@ -1,10 +1,12 @@
-
 /** \file stage.hpp
  * \brief Stage control widget used by stage and camera GUIs.
  */
 
 #ifndef stage_hpp
 #define stage_hpp
+
+#include <cmath>
+#include <sstream>
 
 #include "ui_stage.h"
 
@@ -14,10 +16,16 @@ namespace xqt
 {
 
 /// Stage control widget with parked-poweroff display support.
+/** Readiness, numeric movement inputs, slider range, and preset choices are
+ * independent observations. Named property loss clears only its dependents;
+ * whole-device/FSM loss resets all cached state and unsent edits. Numeric
+ * commands require fresh position and target elements, including direct slots.
+ */
 class stage : public xWidget
 {
     Q_OBJECT
 
+    /// Editing state used to preserve staged selections until submission or cancellation.
     enum editchanges
     {
         NOTEDITING,
@@ -31,13 +39,16 @@ class stage : public xWidget
 
     /// INDI device name of the stage controller.
     std::string m_stageName;
+
     /// Base window title shown while connected.
     std::string m_winTitle;
 
     /// Known preset names exposed by the controller.
     std::vector<std::string> m_presets;
+
     /// Placeholder for the current preset selection.
     std::string m_presetCurrent;
+
     /// Placeholder for the target preset selection.
     std::string m_presetTarget;
 
@@ -52,8 +63,19 @@ class stage : public xWidget
 
     /// Maximum allowed position in user units.
     double m_maxPos{ 100 };
+
+    /// Whether a finite positive maximum was observed for slider scaling.
+    bool m_maxPosValid{ false };
+
+    /// Whether the numeric motion property's current position has been observed.
+    bool m_positionValid{ false };
+
+    /// Whether the numeric motion property's target element has been observed.
+    bool m_targetAvailable{ false };
+
     /// Current position in user units.
     double m_position{ -1e30 };
+
     /// Tracks when the displayed position should be highlighted as changed.
     bool m_position_changed{ false };
 
@@ -62,10 +84,13 @@ class stage : public xWidget
 
     /// Tracks edit state for the preset combo box.
     int m_setPointEditing{ STOPPED };
+
     /// Whether a requested preset/filter change is still awaiting live confirmation.
     bool m_setPointCommandPending{ false };
+
     /// Last preset/filter name sent from the combo box.
     std::string m_setPointRequested;
+
     /// Timer that clears staged preset edits after inactivity.
     QTimer *m_setPointEditTimer{ nullptr };
 
@@ -83,17 +108,19 @@ class stage : public xWidget
 
     /// Reset the widget for an active INDI connection.
     virtual void onConnect();
+
     /// Reset the widget for a disconnected INDI connection.
     virtual void onDisconnect();
 
-    /// Handle a newly defined property using the same path as updates.
-    void handleDefProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has changed*/ );
+    /// Replace observed capabilities or state before applying a property definition.
+    void handleDefProperty( const pcf::IndiProperty &ipRecv /**< [in] Received property definition or update.*/ );
 
-    /// Handle a deleted stage property.
-    void handleDelProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has been deleted*/ );
+    /// Invalidate only the deleted stage property; whole-device/FSM loss resets all state.
+    void handleDelProperty(
+        const pcf::IndiProperty &ipRecv /**< [in] Deleted property; an empty name means the whole device.*/ );
 
     /// Handle a stage property update.
-    void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has changed*/ );
+    void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] Received property definition or update.*/ );
 
     /// Clear focus from the widget.
     void clear_focus();
@@ -101,6 +128,14 @@ class stage : public xWidget
   protected:
     /// Replace the combo-box entries with the currently exposed preset/filter elements.
     void syncSetPointOptions( const pcf::IndiProperty &ipRecv /**< [in] live preset/filter property to mirror */ );
+
+    /// Parse a finite numeric element without using a failed stream extraction.
+    static bool readNumber( const pcf::IndiProperty &property, /**< [in] Numeric property. */
+                            const std::string       &element,  /**< [in] Element to parse. */
+                            double                  &value /**< [out] Parsed numeric value. */ );
+
+    /// Check the current readiness and observed numeric movement inputs.
+    bool motionReady() const;
 
   public slots:
     /// Refresh the widget state from cached INDI values.
@@ -126,16 +161,19 @@ class stage : public xWidget
 
     /// Send a negative relative move.
     void on_posMinus_pressed();
+
     /// Send a positive relative move.
     void on_posPlus_pressed();
 
     /// Increase the step size by one decade.
     void on_posStepMulTen_pressed();
+
     /// Decrease the step size by one decade.
     void on_posStepDivTen_pressed();
 
     /// Request a home operation.
     void on_home_pressed();
+
     /// Request an immediate stop.
     void on_stop_pressed();
 
@@ -154,7 +192,7 @@ class stage : public xWidget
     virtual void paintEvent( QPaintEvent *e /**< [in] Qt paint event being processed */ );
 
   private:
-    Ui::stage ui;
+    Ui::stage ui; ///< Generated UI facade for the stage dialog.
 };
 
 stage::stage( const std::string &stageName, QWidget *Parent, Qt::WindowFlags f )
@@ -228,6 +266,9 @@ void stage::onDisconnect()
     m_maxPos                 = 100;
     m_position               = -1e30;
     m_position_changed       = false;
+    m_positionValid          = false;
+    m_targetAvailable        = false;
+    m_maxPosValid            = false;
     m_setPointEditing        = STOPPED;
     m_setPointCommandPending = false;
     m_setPointRequested.clear();
@@ -245,6 +286,8 @@ void stage::onDisconnect()
     ui.setPoint->setEnabled( false );
     ui.setPointGo->setEnabled( false );
     ui.positionSlider->setEnabled( false );
+    ui.position->setEditText( "" );
+    ui.position->stopEditing();
     ui.position->setText( "---" );
     ui.position->setEnabled( false );
     ui.stepSize->setEnabled( false );
@@ -262,7 +305,18 @@ void stage::onDisconnect()
 
 void stage::handleDefProperty( const pcf::IndiProperty &ipRecv )
 {
-    return handleSetProperty( ipRecv );
+    if( ipRecv.getDevice() != m_stageName )
+        return;
+    if( ipRecv.getName() == "position" || ipRecv.getName() == "filter" )
+    {
+        m_positionValid   = false;
+        m_targetAvailable = false;
+    }
+    if( ipRecv.getName() == "maxpos" )
+        m_maxPosValid = false;
+    if( ipRecv.getName() == "fsm" )
+        m_appState.clear();
+    handleSetProperty( ipRecv );
 }
 
 void stage::handleDelProperty( const pcf::IndiProperty &ipRecv )
@@ -277,11 +331,53 @@ void stage::handleDelProperty( const pcf::IndiProperty &ipRecv )
         return;
     }
 
-    if( ipRecv.getName() == "fsm" || ipRecv.getName() == "maxpos" || ipRecv.getName() == "position" ||
-        ipRecv.getName() == "filter" || ipRecv.getName() == "presetName" || ipRecv.getName() == "filterName" )
+    const auto name = ipRecv.getName();
+    if( name.empty() || name == "fsm" )
     {
         onDisconnect();
+        return;
     }
+    if( name == "maxpos" )
+        m_maxPosValid = false;
+    else if( ( name == "position" && !m_filterWheel ) || ( name == "filter" && m_filterWheel ) )
+    {
+        m_positionValid    = false;
+        m_targetAvailable  = false;
+        m_position_changed = false;
+        ui.position->setEditText( "" );
+        ui.position->stopEditing();
+    }
+    else if( ( name == "presetName" && !m_filterWheel ) || ( name == "filterName" && m_filterWheel ) )
+    {
+        m_presets.clear();
+        m_setPoint.clear();
+        m_setPointEditing        = STOPPED;
+        m_setPointCommandPending = false;
+        m_setPointRequested.clear();
+        m_setPointEditTimer->stop();
+        ui.setPoint->clear();
+        if( name == "filterName" )
+            m_maxPosValid = false;
+    }
+    else
+        return;
+    emit doUpdateGUI();
+}
+
+bool stage::readNumber( const pcf::IndiProperty &property, const std::string &element, double &value )
+{
+    if( property.getType() != pcf::IndiProperty::Number || !property.find( element ) )
+        return false;
+    std::istringstream input( property[element].get() );
+    if( !( input >> value ) )
+        return false;
+    input >> std::ws;
+    return input.eof() && std::isfinite( value );
+}
+
+bool stage::motionReady() const
+{
+    return isEnabled() && m_appState == "READY" && m_positionValid && m_targetAvailable;
 }
 
 void stage::handleSetProperty( const pcf::IndiProperty &ipRecv )
@@ -291,47 +387,49 @@ void stage::handleSetProperty( const pcf::IndiProperty &ipRecv )
 
     if( ipRecv.getName() == "fsm" )
     {
-        if( ipRecv.find( "state" ) )
+        if( ipRecv.getType() == pcf::IndiProperty::Text && ipRecv.find( "state" ) )
         {
             m_appState = ipRecv["state"].get<std::string>();
+            if( !m_appState.empty() )
+                setWindowTitle( m_winTitle.c_str() );
         }
+        else
+            m_appState.clear();
     }
-
-    if( ipRecv.getName() == "maxpos" )
+    else if( ipRecv.getName() == "maxpos" )
     {
-        if( ipRecv.find( "value" ) )
+        if( ipRecv.find( "value" ) || ipRecv.getType() != pcf::IndiProperty::Number )
+            m_maxPosValid = readNumber( ipRecv, "value", m_maxPos ) && m_maxPos > 0;
+    }
+    else if( ipRecv.getName() == "position" || ipRecv.getName() == "filter" )
+    {
+        if( ipRecv.getName() == "filter" )
+            m_filterWheel = true;
+        if( ipRecv.getType() != pcf::IndiProperty::Number )
         {
-            m_maxPos = ipRecv["value"].get<double>();
+            m_positionValid   = false;
+            m_targetAvailable = false;
         }
-    }
-
-    if( ipRecv.getName() == "position" )
-    {
-        if( ipRecv.find( "current" ) )
+        else
         {
-            double val = ipRecv["current"].get<double>();
-            if( val != m_position )
-                m_position_changed = true;
-            m_position = val;
+            if( ipRecv.find( "target" ) )
+                m_targetAvailable = true;
+            if( ipRecv.find( "current" ) )
+            {
+                double value    = 0;
+                m_positionValid = readNumber( ipRecv, "current", value );
+                if( m_positionValid )
+                {
+                    m_position_changed = m_position_changed || value != m_position;
+                    m_position         = value;
+                }
+            }
         }
     }
     else if( ipRecv.getName() == "parked" )
     {
         if( ipRecv.find( "current" ) )
-        {
-            m_parked = ( ipRecv["current"].get<int>() != 0 );
-        }
-    }
-    else if( ipRecv.getName() == "filter" )
-    {
-        m_filterWheel = true;
-        if( ipRecv.find( "current" ) )
-        {
-            double val = ipRecv["current"].get<double>();
-            if( val != m_position )
-                m_position_changed = true;
-            m_position = val;
-        }
+            m_parked = ipRecv["current"].get<int>() != 0;
     }
 
     if( ipRecv.getName() == "presetName" || ipRecv.getName() == "filterName" )
@@ -378,7 +476,10 @@ void stage::handleSetProperty( const pcf::IndiProperty &ipRecv )
         }
 
         if( m_filterWheel )
-            m_maxPos = n + 0.5;
+        {
+            m_maxPos      = n + 0.5;
+            m_maxPosValid = n > 0;
+        }
     }
 
     emit doUpdateGUI();
@@ -514,7 +615,19 @@ void stage::updateGUI()
         ui.home->setEnabled( true );
     }
 
-    if( m_position_changed )
+    const bool numeric = motionReady();
+    ui.positionSlider->setEnabled( numeric && m_maxPosValid );
+    ui.position->setEnabled( ui.position->isEnabled() && m_positionValid && ( m_targetAvailable || parkedPowerOff ) );
+    ui.posMinus->setEnabled( numeric );
+    ui.posPlus->setEnabled( numeric );
+    ui.setPointGo->setEnabled( ui.setPointGo->isEnabled() && !m_presets.empty() );
+    ui.setPoint->setEnabled( ui.setPoint->isEnabled() && !m_presets.empty() );
+
+    if( !m_positionValid )
+    {
+        ui.position->setText( "---" );
+    }
+    else if( m_position_changed )
     {
         ui.position->setTextChanged( QString::number( m_position ) );
         m_position_changed = false;
@@ -524,7 +637,8 @@ void stage::updateGUI()
         ui.position->setText( QString::number( m_position ) );
     }
 
-    ui.positionSlider->setValue( m_position / m_maxPos * 100. );
+    if( m_positionValid && m_maxPosValid )
+        ui.positionSlider->setValue( m_position / m_maxPos * 100. );
     // ui.position->updateGUI();
 
 } // updateGUI()
@@ -546,6 +660,8 @@ void stage::on_setPoint_activated( int index )
 
 void stage::on_setPointGo_pressed()
 {
+    if( !isEnabled() || m_appState != "READY" )
+        return;
     std::string selection = ui.setPoint->currentText().toStdString();
 
     if( selection == "" )
@@ -622,6 +738,8 @@ void stage::on_setPointGo_pressed()
 
 void stage::on_positionSlider_sliderMoved( double s )
 {
+    if( !motionReady() || !m_maxPosValid )
+        return;
     double epos = s / 100.0 * m_maxPos;
 
     ui.position->setEditText( QString::number( epos ) );
@@ -629,6 +747,8 @@ void stage::on_positionSlider_sliderMoved( double s )
 
 void stage::on_positionSlider_sliderReleased()
 {
+    if( !motionReady() || !m_maxPosValid )
+        return;
     ui.position->stopEditing();
 
     double s      = ui.positionSlider->value();
@@ -655,6 +775,8 @@ void stage::on_positionSlider_sliderReleased()
 
 void stage::on_position_returnPressed()
 {
+    if( !motionReady() )
+        return;
     double newPos = ui.position->editText().toDouble();
 
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
@@ -684,6 +806,8 @@ void stage::on_stepSize_editingFinished()
 
 void stage::on_posMinus_pressed()
 {
+    if( !motionReady() )
+        return;
     double newPos = m_position - m_step;
 
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
@@ -705,6 +829,8 @@ void stage::on_posMinus_pressed()
 
 void stage::on_posPlus_pressed()
 {
+    if( !motionReady() )
+        return;
     double newPos = m_position + m_step;
 
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
