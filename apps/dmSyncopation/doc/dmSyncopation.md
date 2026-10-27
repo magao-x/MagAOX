@@ -7,7 +7,7 @@ The [engineering plan](../../../agents/plans/2026-10/dm-syncopation.md) records 
 ## Read-only schedule simulation
 
 `simulation.enabled=true` selects a startup-only observer of the proposed
-median-period, counter-labelled scheduler. It runs automatically while
+long-baseline cadence, counter-labelled scheduler. It runs automatically while
 `enable.toggle` is Off and rejects requests to turn scheduling On. It opens
 the existing primary and combined streams for observation and records
 conditional **would-run/skip** decisions. It creates no auxiliary source or
@@ -16,13 +16,15 @@ counters, and sends no DM triggers. Normal monitor semaphore registration and
 notification consumption still occur.
 
 ```text
-existing primary metadata ----> median period + frozen future grid
-                                           |
-existing combined trace ---> actual main/output association
-                                           |
-configured timing bounds ---> evaluate each fixed step independently
-                                           |
-                              simulation INDI + [dmsynco] telemetry
+primary counter + monotonic time ---> 10-second cadence (refresh 1 Hz)
+                                                     |
+primary observation history -------> median phase + frozen future grid
+                                                     |
+existing combined trace -----------> actual main/output association
+                                                     |
+configured timing bounds ----------> evaluate each fixed step independently
+                                                     |
+                                     simulation INDI + [dmsynco] telemetry
 
                     No path from this model to DM command streams
 ```
@@ -53,11 +55,18 @@ memory names continue to use underscores. Simulation creates no
 `dmtweeter_synco_timing` stream for a provider. An existing provider timing
 stream from an earlier run is not refreshed by this mode.
 
-The model estimates period from qualified consecutive primary publication
-intervals and phase from coherent counter/monotonic-observation pairs. A
+The model estimates period from primary counter/monotonic-observation
+endpoints approximately ten seconds apart, refreshing at most once per second.
+It divides elapsed time by the actual counter advance, including forward
+gaps. A fixed 64-anchor ring holds approximately one-second samples. At each
+refresh it selects the newest retained anchor at least the requested window
+old; while growing, it uses the oldest available anchor. Individual producer
+publication intervals remain independent diagnostics and do not steer cadence.
+Phase uses the existing 32 coherent counter/observation pairs, gain 0.1 and
+one-microsecond correction limit. A
 main keeps its genuine counter-labelled cycle even when it crosses a grid
 boundary. Each phase residual uses a prediction frozen before that main was
-observed. Median-window warmup, missing or ambiguous combined traces, gaps,
+observed. Phase-window warmup, missing or ambiguous combined traces, gaps,
 and reader holds can leave steps unavailable. A skipped passive preparation
 does not itself suppress a later active slot; that slot still requires its
 actual main/output association and reader-safe preparation window. A late
@@ -67,10 +76,26 @@ Nominal model feasibility also respects `scheduler.maxCadenceHz` with the
 existing `tracking.rateTolerance`, as well as the complete reader/copy timing
 window. Simulation does not bypass the requested total-cadence cap.
 
-The retained period also needs fresh qualified intervals. Its freshness
-timeout is twice the period at `tracking.minMainRateHz` (4 ms with the default
-500 Hz minimum). Continuing primary counters with unusable publication
-intervals do not keep an old period/grid valid indefinitely.
+The cadence starts with `tracking.nominalMainRateHz`, obtains its first
+measured rate after one second, and grows toward the full ten-second baseline.
+A grid can become valid after phase warmup while cadence is still nominal.
+The read-only `simulation_cadence.state` distinguishes nominal (0), growing
+(1), and full (2). Primary silence beyond twice the period at
+`tracking.minMainRateHz` (4 ms with the default minimum) clears cadence and
+phase anchors once. A one-second cadence refresh is not mistaken for stale
+primary data. Duplicate notifications refresh neither the anchors nor primary
+freshness. Backward primary counters, regressing primary observation time,
+attachment replacement, and configuration changes start new epochs. A fresh
+camera FPS report differing from the accepted rate by more than
+`tracking.rateTolerance` (1% by default) also starts a new epoch and supplies
+its nominal seed; ordinary measurement noise does not reset the estimate.
+
+Cadence and frozen plans retain fractional nanoseconds as integer Q32 values
+(`period_q32 / 4294967296` ns). Each plan preserves the fractional remainder
+when extrapolating to the next counter and rounds only the final target to
+nanoseconds. Integer `period_ns` remains a rounded diagnostic; feasibility
+uses the conservative floor of the exact period. Previously committed targets
+remain frozen across cadence refreshes and phase corrections.
 
 Would-run counts assume complete source data, the configured snapshot/copy
 budgets, and synthetic auxiliary submissions consumed under the configured
@@ -303,7 +328,9 @@ The complete [dmtweeter_synco.conf example](../dmtweeter_synco.conf) contains th
 | `feedback.gain` | 0.1 | Independent per-event wait-integrator gain, 0–1. |
 | `feedback.maxAdvanceUs` | 20 | Maximum wait correction; step-0 advance is nonnegative and starts at this value after a feedback reset. |
 | `simulation.enabled` | false | Startup-only read-only grid simulation. Automatically observes with scheduler enable Off and rejects enable On; creates no auxiliary/provider streams or command writes. |
-| `simulation.window` | 32 | Number of qualified period samples and counter/observation pairs retained by the simulation estimator, 4–256. |
+| `simulation.window` | 32 | Counter/observation pairs in the median phase filter, 4–256. Also bounds the independent qualified producer-interval diagnostic count. |
+| `simulation.cadenceWindowSec` | 10 | Requested counter/time cadence baseline. At least the refresh interval, at most 1,000 seconds and at most 63 refresh intervals. Actual selected endpoint span is reported. |
+| `simulation.cadenceUpdateSec` | 1 | Minimum time between cadence refreshes, 0.01–60 seconds. The first measured estimate requires this much primary history. |
 | `simulation.phaseGain` | 0.1 | Positive simulation phase correction gain, at most 1; affects only a future uncommitted cycle. |
 | `simulation.phaseSlewUs` | 1 | Maximum simulation phase correction per future cycle. Nonnegative and at most one quarter of the shortest accepted primary interval (62.5 us with the default maximum primary rate). Does not change any physical timing reserve. |
 | `diagnostics.windowSec` | 2 | Elapsed-time window for all independent observers; zero disables collection. |
@@ -358,6 +385,7 @@ Application properties belong to the configured INDI device: `dmtweeter_synco` i
 | `simulation_status` | Text, read-only | Current simulation state and explicit assumptions/limitations. |
 | `simulation_trace` | Number, read-only | Bounded overlap-event FIFO coverage and losses, detailed below. |
 | `simulation_estimator` | Number, read-only | Triggered estimator pre/post history, export coverage and losses. |
+| `simulation_cadence` | Number, read-only | Long-baseline cadence qualification, exact-period display, endpoint coverage and independent primary/refresh ages. |
 | `health` | Text, read-only | `reason`, `lastFault`, `periodSource`, `primary`, `combined`, `timingStream`, `mapping`, `mode`. Current phase/reason, latched fault, selected period reference and resolved stream identities. Mode also identifies simulation when selected. |
 
 `settings` uses its named elements directly; there are no numeric `current`/`target` pairs. Updates while enabled, unknown elements, nonfinite values and invalid counts/ranges are rejected without changing the active configuration. Changing `steps` never changes source-image count. After an accepted disabled update, enable again to acquire a new schedule.
@@ -371,11 +399,11 @@ contains:
 | --- | --- |
 | `enabled`, `valid`, `feasible` | Simulation selected, fresh predicted grid available, and nominal complete-cycle feasibility. A valid grid can still have unavailable individual steps. |
 | `session`, `sequence` | Simulation reset/identity epoch and distinct accepted primary-observation count. |
-| `periodUs`, `periodSamples`, `phaseSamples` | Robust period in microseconds and retained estimator sample counts. |
+| `periodUs`, `periodSamples`, `phaseSamples` | Fractional cadence period in microseconds, broadly qualified producer-interval diagnostic count, and retained phase observation count. Producer intervals no longer set the period. |
 | `gridNs`, `nextGridNs`, `nextActiveNs` | Frozen/current and next predicted targets in same-host monotonic nanoseconds; zero means unavailable. These are diagnostic targets, not provider deadlines. |
 | `phaseUs`, `phaseMinUs`, `phaseMaxUs`, `phaseCount` | Latest, session minimum/maximum and count of observation residuals against predictions committed before those observations. Negative means observed earlier than predicted. |
 | `earlyReserveUs` | Configured early-main assumption, explicitly unqualified by simulation. |
-| `duplicates`, `gaps`, `resets`, `invalid`, `excluded` | Unchanged-counter notifications, forward gaps, resets, rejected observations, and period samples excluded from estimation. An excluded interval does not itself become a synchronization fault. |
+| `duplicates`, `gaps`, `resets`, `invalid`, `excluded` | Unchanged-counter notifications, forward gaps, resets, rejected observations, and producer intervals excluded from diagnostics. An excluded interval does not itself become a synchronization fault or exclude genuine counter advances from cadence. |
 | `outputGaps`, `associations` | Missing/ambiguous combined progression and accepted coherent actual main/output associations. |
 
 For each configured index `j`, `simulation_steps` exposes
@@ -387,6 +415,21 @@ Use simulation fields for modeled outcomes; operational `timing.delivered`
 does not count hypothetical submissions. The requested count remains in
 `settings.steps`; the full assumed timing bounds and estimator settings are
 recorded in the appended telemetry table.
+
+The `simulation_cadence` property exposes:
+
+| Elements | Meaning |
+| --- | --- |
+| `state`, `epoch` | Nominal (0), measured growing baseline (1), or full baseline (2), and process-lifetime cadence epoch. Primary silence can change this epoch within one model session. |
+| `periodNs` | Fractional nanoseconds per cycle, displayed from Q32. |
+| `spanSec`, `cycles`, `anchors` | Actual measured endpoint span, genuine counter advances in that span, and currently retained slow anchors (at most 64). Span/cycles are zero before the first accepted measurement. |
+| `updates`, `rejected` | Accepted/rejected endpoint measurements in this cadence epoch. Rejected measurements leave the prior estimate unchanged. |
+| `windowSec`, `updateSec` | Configured baseline and minimum refresh interval. |
+| `observationAgeSec`, `refreshAgeSec` | Ages of the latest coherent distinct primary and accepted cadence update. A value of −1 means unavailable. A healthy refresh age approaching one second does not imply stale primary data. |
+
+Each new `[dmsynco]` simulation summary includes `simulation_cadence={...}` with
+the same state/coverage, exact `period_q32` and `period_scale`, plus monotonic
+`observation_ns` and `updated_ns`. Older records omit this optional table.
 
 An overlap count is retrospective main-observation evidence inside a
 previously modeled copy or active reader-hold interval. It does not undo the
@@ -409,6 +452,7 @@ records. Each `sim_overlap={...}` entry identifies:
 | `origin`, `window` | Observer (`primary` or `combined`) and containing modeled interval (`copy` or active `readerHold`). Boundaries include the start and exclude the end. Passive step 0 has no reader hold. |
 | `mainCounter`, `combinedCounter`, `planCounter`, `step` | Actual main supplying evidence, observed combined counter, and cycle/step of the last modeled copy. On the primary path, the combined counter is the most recently observed one, possibly zero. |
 | `mainGrid_ns`, `planGrid_ns`, `period_ns` | Committed grid or extrapolation from the last frozen cycle for the evidence main, frozen main target for the modeled copy's cycle, and that cycle's period. Zero main-grid means unavailable. |
+| `period_q32`, `planFraction_q32` | Exact frozen period and signed subnanosecond remainder of `planGrid_ns`, scaled by 2^32. New records retain these alongside rounded period diagnostics. |
 | `observed_ns`, `copyBegin_ns`, `copyEnd_ns`, `readerEnd_ns` | Evidence time and modeled copy/reader boundaries on the same-host monotonic clock. Passive `readerEnd_ns` is zero. |
 | `lastMainCounter`, `lastMain_ns`, `lastOutput_ns` | Previously accepted primary identity/time and latest associated combined observation. |
 | `streamInode`, `triggerInode` | Observed stream identity and combined trace's named primary identity when available. |
@@ -451,11 +495,19 @@ Each `sim_estimator={...}` record contains:
 | --- | --- |
 | `id`, `session`, `sequence`, `counter` | Process sample ID, owning model session, accepted-primary sequence and genuine main counter. |
 | `observed_ns`, `publicationInterval_ns`, `sequential`, `intervalAccepted` | Monotonic observation, raw producer-clock elapsed interval, consecutive-counter qualification and whether the interval entered the period ring. Zero interval means unavailable; an excluded raw interval can be signed. |
-| `periodSamples`, `phaseSamples`, `periodBefore_ns`, `period_ns` | Retained sample counts and selected period before/after this update. |
+| `periodSamples`, `phaseSamples`, `periodBefore_ns`, `period_ns` | Producer diagnostic/phase sample counts and rounded period before/after this update. |
 | `predicted_ns` | Current main's frozen prediction, made before observing that main; zero while unavailable. |
 | `nextCounter`, `sourcePlanCounter`, `sourceEstimatorId`, `sourceGrid_ns` | Attempted future commitment and the frozen plan from which its base was extrapolated. No attempt is represented by zero future fields. |
 | `baseGrid_ns`, `candidate_ns`, `phaseGain`, `phaseSlew_ns` | Uncorrected future target, median phase candidate, gain and correction limit used in the existing calculation. |
 | `rawCorrection_ns`, `appliedCorrection_ns`, `committedGrid_ns`, `committed` | Requested correction truncated toward zero to integer nanoseconds, applied bounded correction and successful new future commitment. A zero correction is valid. |
+| `periodBefore_q32`, `sourceFraction_q32`, `baseFraction_q32`, `committedFraction_q32` | Exact previous period and signed source/base/committed grid remainders. Each remainder is in [−2^31, 2^31) scaled nanoseconds. |
+
+Each new sample is followed by `estimator_cadence={...}`, carrying its own
+cadence epoch, endpoint span/count and exact selected period. The logger checks
+the source-to-base extrapolation with signed 128-bit Q32 arithmetic. Replaying
+only rounded `period_ns` would discard fractional carry and can falsely suggest
+an arithmetic mismatch. Older samples retain their original integer arithmetic
+contract. Queued samples can belong to earlier epochs than the current summary.
 
 Join an overlap's `planEstimatorId` to the estimator sample's `id`, within
 the same app process. That sample's committed future counter/grid identifies
@@ -481,10 +533,10 @@ the overlap trace's counter. An omitted optional quality snapshot is not a
 zero-event report.
 
 The bounded history can begin after the disturbance that originally shifted
-the phase. Repeated interval exclusions can also leave older eligible period
-samples outside this accepted-primary history. Retain the exact computed
-period/candidate/correction fields when diagnosing such cases; do not assume
-the selected records always reconstruct every underlying estimator input.
+the phase. It is shorter than the ten-second cadence baseline; retained sample
+history alone cannot reconstruct all slow endpoints. Retain the recorded exact
+period, cadence span/count, candidate and correction fields when diagnosing
+such cases.
 
 The `timing` summary includes:
 
@@ -939,7 +991,7 @@ first comparison, leave scheduling disabled and compare `cameraAcquisitionInterv
 extrema with `pipeline_stage` conditioned changes and `pipelineSourceInterval`.
 Ordinary app-logic passes emit these diagnostics even if the schedule snapshot
 is busy; an absent trace does not suppress camera or primary interval statistics.
-These diagnostics do not change operational median-grid scheduling,
+These diagnostics do not change operational scheduling,
 skip-recovery or targeted extra-step wake behavior. The separate read-only
 simulation evaluates the proposed grid policy without issuing commands.
 
@@ -984,7 +1036,11 @@ needed.
    providers stopped. Verify `enable.toggle=Off`, simulation mode in
    `health.mode`, and the existing primary/combined stream names. An On
    request is rejected in this mode; no enable operation is needed to collect.
-3. Allow the estimator to warm up. Inspect `simulation`, `simulation_steps`,
+3. Wait at least ten seconds after restart or a rate/attachment change, then
+   confirm `simulation_cadence.state=2`, `spanSec` approximately 10–11 seconds,
+   `updates` increasing about once per second, and fresh `observationAgeSec`.
+   A valid grid alone does not indicate a full cadence window. Inspect
+   `simulation`, `simulation_cadence`, `simulation_steps`,
    `simulation_status`, `simulation_trace`, `simulation_estimator`, `primary_timing_quality`, and
    `combiner_timing_quality`. A grid and a coherent output association are
    separate requirements. Before a long policy capture, confirm that
@@ -1012,7 +1068,8 @@ needed.
    output, then stop it with Ctrl-C after the requested interval. Save the
    initial INDI snapshot as well as the final snapshot so cumulative outcome
    differences can be interpreted.
-5. Confirm new `[dmsynco]` records contain `trace_quality` and
+5. Confirm new `[dmsynco]` records contain `simulation_cadence` with `state:full`,
+   a baseline near ten seconds, and exact fractional period fields, as well as `trace_quality` and
    `estimator_quality`, even if no overlap events have occurred. Review frozen phase residual tails,
    collection/association quality, nominal feasibility, per-step skip reasons
    and every `sim_overlap` entry. Group repeated main evidence using the key
