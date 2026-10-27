@@ -562,8 +562,132 @@ TEST_CASE( "accelSim export offline validation samples", "[.][accelSim-export]" 
     REQUIRE( metadata.good() );
 }
 
+/** \brief Signed phase error uses the hardware positive half-period boundary.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim phase error positive boundary", "[accelSim][model][sync-regression]" )
+{
+    diagnostics value;
+    auto       &t      = value.m_timing;
+    t[semaphorePeriod] = 500;
+    t[delayModel]      = 409.4;
+    t[delayApplied]    = t[delayModel] - 250;
+    value.updatePhaseError();
+    REQUIRE( t[phaseError] == Approx( 250 ) );
+    for( double delta : { -750., -250., 250., 750., -250.001, -249.999, 249.999, 250.001, 0. } )
+    {
+        t[delayModel]   = 0;
+        t[delayApplied] = delta;
+        value.updatePhaseError();
+        REQUIRE( t[phaseError] > -250 );
+        REQUIRE( t[phaseError] <= 250 );
+        if( std::abs( delta ) == 250 || std::abs( delta ) == 750 )
+            REQUIRE( t[phaseError] == 250 );
+        else if( delta < -250 )
+            REQUIRE( t[phaseError] == Approx( delta + 500 ) );
+        else if( delta > 250 )
+            REQUIRE( t[phaseError] == Approx( delta - 500 ) );
+        else
+            REQUIRE( t[phaseError] == Approx( delta ) );
+    }
+    t[semaphorePeriod] = 0;
+    value.updatePhaseError();
+    REQUIRE( t[phaseError] == 0 );
+}
+
+/** \brief Startup and reconnection need a measured period and then a second valid prediction for an interval.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim trigger history requires measured timing", "[accelSim][model][sync-regression]" )
+{
+    diagnostics value;
+    int64_t     previous = 0;
+    auto       &t        = value.m_timing;
+    t[delayTarget]       = 25;
+    for( int64_t now : { 1000000000LL, 1000500000LL } )
+    {
+        value.updateTrigger( now, previous );
+        REQUIRE( previous == 0 );
+        REQUIRE( t[triggerTime] == 0 );
+        REQUIRE( t[triggerInterval] == 0 );
+    }
+    t[semaphorePeriod] = 500;
+    t[delayTarget]     = 409.4;
+    value.updateTrigger( 1001000000, previous );
+    REQUIRE( previous == 1001409400 );
+    REQUIRE( t[triggerTime] == Approx( 409.4 ) );
+    REQUIRE( t[triggerInterval] == 0 );
+    value.updateTrigger( 1001500000, previous );
+    REQUIRE( t[triggerInterval] == 500 );
+    value.invalidateSync( 25 );
+    previous = 0; // Acquisition lifecycle also resets the app-owned prediction history.
+    value.updateTrigger( 2000000000, previous );
+    REQUIRE( previous == 0 );
+    REQUIRE( t[triggerTime] == 0 );
+    REQUIRE( t[triggerInterval] == 0 );
+    t[semaphorePeriod] = 500;
+    value.updateTrigger( 2000500000, previous );
+    REQUIRE( t[triggerInterval] == 0 );
+}
+
 #ifndef ACCELSIM_MODEL_ONLY
 /// \cond TEST_HARNESS
+/// Record real INDI serialization without a server or an activated input thread.
+class recordingDriver : public MagAOX::app::indiDriver<MagAOX::app::MagAOXApp<true>>
+{
+  public:
+    mutable std::vector<pcf::IndiProperty> m_messages; ///< Serialized property snapshots sent by the app.
+    /// Attach only to test-owned local descriptors.
+    recordingDriver( MagAOX::app::MagAOXApp<true> *parent /**< [in] local test app */ );
+    /// Release the unactivated input; the shared destructor releases output.
+    ~recordingDriver();
+    /// Parse each complete outgoing XML message into a retained snapshot.
+    void sendXml( const std::string &xml /**< [in] serialized property */ ) const override;
+
+  private:
+    int m_inputFd{ -1 }; ///< Input descriptor identified by the private file inode.
+};
+
+recordingDriver::recordingDriver( MagAOX::app::MagAOXApp<true> *parent )
+    : indiDriver( parent, "accelSim-test", "0", "1.7" )
+{
+    REQUIRE( good() );
+    enableResponseMode( true );
+    struct stat input{};
+    REQUIRE( stat( parent->driverInName().c_str(), &input ) == 0 );
+    for( const auto &entry : std::filesystem::directory_iterator( "/proc/self/fd" ) )
+    {
+        const int   descriptor = std::stoi( entry.path().filename() );
+        struct stat candidate{};
+        if( fstat( descriptor, &candidate ) == 0 && candidate.st_dev == input.st_dev &&
+            candidate.st_ino == input.st_ino )
+        {
+            REQUIRE( m_inputFd == -1 );
+            m_inputFd = descriptor;
+        }
+    }
+    REQUIRE( m_inputFd >= 0 );
+}
+
+recordingDriver::~recordingDriver()
+{
+    if( m_inputFd >= 0 )
+        close( m_inputFd );
+    setInputFd( -1 );
+}
+
+void recordingDriver::sendXml( const std::string &xml ) const
+{
+    pcf::IndiXmlParser parser( "1.7" );
+    std::string        error;
+    parser.parseXml( xml.c_str(), xml.size(), error );
+    REQUIRE( error.empty() );
+    REQUIRE( parser.getState() == pcf::IndiXmlParser::CompleteState );
+    const auto message = parser.createIndiMessage();
+    REQUIRE( message.getType() == pcf::IndiMessage::SetProperty );
+    m_messages.push_back( message.getProperty() );
+}
+
 /// Expose only the protected surfaces exercised by application tests.
 class appTest : public MagAOX::app::accelSim
 {
@@ -592,6 +716,8 @@ class appTest : public MagAOX::app::accelSim
     using accelSim::m_model;
     using accelSim::m_parameters;
     using accelSim::m_postDelay;
+    using accelSim::m_rateApplied;
+    using accelSim::m_rateRequest;
     using accelSim::m_reconfig;
     using accelSim::m_requestedFps;
     using accelSim::m_shmimName;
@@ -606,13 +732,31 @@ class appTest : public MagAOX::app::accelSim
     using accelSim::m_width;
     using accelSim::setupProperties;
     using accelSim::syncTiming;
+    using accelSim::updateINDI;
     using accelSim::waitSync;
+
+    /// Install a recording driver using a private input file and /dev/null for unused endpoints.
+    recordingDriver &captureINDI();
+    std::string      m_testInput; ///< Temporary input file removed after driver destruction.
 
     /// Run the actual frameGrabber worker without an INDI server in stream unit tests.
     void startWorker();
     /// Join the worker and release its source on test exit.
     ~appTest();
 };
+
+recordingDriver &appTest::captureINDI()
+{
+    char      path[] = "/tmp/accelSim-indi-XXXXXX";
+    const int fd     = mkstemp( path );
+    REQUIRE( fd >= 0 );
+    close( fd );
+    m_testInput = m_driverInName = path;
+    m_driverOutName = m_driverCtrlName = "/dev/null";
+    auto *driver                       = new recordingDriver( this );
+    m_indiDriver                       = driver;
+    return *driver;
+}
 
 void appTest::startWorker()
 {
@@ -627,6 +771,10 @@ appTest::~appTest()
     if( m_fgThread.joinable() )
         m_fgThread.join();
     reconfig();
+    delete m_indiDriver;
+    m_indiDriver = nullptr;
+    if( !m_testInput.empty() )
+        std::filesystem::remove( m_testInput );
 }
 
 /// Own a real local ImageStreamIO mapping for integration checks.
@@ -794,6 +942,102 @@ TEST_CASE( "accelSim configuration and INDI controls", "[accelSim][app]" )
     // clang-format on
 }
 
+/** \brief Source loss sends one coherent timingDiag message, never a cleared latency with an old lock.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim timing diagnostics serialize one snapshot", "[accelSim][app][indi-regression]" )
+{
+    appTest app;
+    app.m_configName = "accelSim-test";
+    REQUIRE( app.setupProperties() == 0 );
+    auto &driver = app.captureINDI();
+    app.m_diagnostics.m_timing.fill( 100 );
+    app.m_diagnostics.m_timing[lock] = 1;
+    app.updateINDI( app.m_diagnostics );
+    driver.m_messages.clear();
+    app.invalidateSync();
+    app.updateINDI( app.m_snapshot );
+    size_t timingMessages = 0;
+    for( const auto &message : driver.m_messages )
+    {
+        if( message.getName() != "timingDiag" )
+            continue;
+        ++timingMessages;
+        REQUIRE( message.getNumElements() == 23 );
+        REQUIRE( message["avg_read_latency_us"].get<double>() == 0 );
+        REQUIRE( message["delay_lock"].get<double>() == 0 );
+        REQUIRE( message["avg_semaphore_period_us"].get<double>() == 0 );
+        REQUIRE( message["local_frame_seq"].get<double>() == 100 );
+    }
+    REQUIRE( timingMessages == 1 );
+    driver.m_messages.clear();
+    app.updateINDI( app.m_snapshot );
+    REQUIRE( driver.m_messages.empty() );
+    // clang-format off
+#ifdef ACCELSIM_TEST_DOXYGEN_REF
+    MagAOX::app::accelSim::updateINDI;
+    MagAOX::app::accelSim::invalidateSync;
+#endif
+    // clang-format on
+}
+
+/** \brief Local/external requests stay Busy until the worker acknowledges their revision, including supersession.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim FPS acknowledgment follows worker application", "[accelSim][app][indi-regression]" )
+{
+    appTest app;
+    app.m_configName = "accelSim-test";
+    app.setupConfig();
+    REQUIRE( app.loadConfigImpl( app.config ) == 0 );
+    REQUIRE( app.setupProperties() == 0 );
+    auto &driver = app.captureINDI();
+    REQUIRE( app.startAcquisition() == 0 );
+    REQUIRE( app.newCallBack_m_indiP_fps( update( "fps", 4000 ) ) == 0 );
+    REQUIRE( driver.m_messages.back().getState() == pcf::IndiProperty::Busy );
+    REQUIRE( driver.m_messages.back()["current"].get<double>() == 6000 );
+    app.updateINDI( app.m_snapshot );
+    REQUIRE( app.m_indiP_fps.getState() == pcf::IndiProperty::Busy );
+    REQUIRE( app.acquireAndCheckValid() == 0 );
+    app.updateINDI( app.m_snapshot );
+    REQUIRE( app.m_indiP_fps.getState() == pcf::IndiProperty::Ok );
+    REQUIRE( app.m_indiP_fps["current"].get<double>() == 4000 );
+    const auto discontinuities = app.m_diagnostics.m_discontinuities;
+    REQUIRE( app.newCallBack_m_indiP_fps( update( "fps", 5000 ) ) == 0 );
+    const auto olderRevision = app.m_rateRequest.load();
+    REQUIRE( app.newCallBack_m_indiP_fps( update( "fps", 4000 ) ) == 0 );
+    app.m_rateApplied = olderRevision; // Older in-flight completion cannot acknowledge the newer request.
+    app.updateINDI( app.m_snapshot );
+    REQUIRE( app.m_indiP_fps.getState() == pcf::IndiProperty::Busy );
+    REQUIRE( app.acquireAndCheckValid() == 0 );
+    app.updateINDI( app.m_snapshot );
+    REQUIRE( app.m_indiP_fps.getState() == pcf::IndiProperty::Ok );
+    REQUIRE( app.m_diagnostics.m_discontinuities == discontinuities ); // No-op request does not restart physics.
+    REQUIRE( app.newCallBack_m_indiP_fps( update( "fps", 0 ) ) < 0 );
+    app.updateINDI( app.m_snapshot );
+    REQUIRE( app.m_indiP_fps.getState() == pcf::IndiProperty::Alert );
+    REQUIRE( app.m_requestedFps == 4000 );
+    app.m_indiP_fpsSource.setName( "fps" );
+    app.m_indiP_fpsSource.setDevice( "source" );
+    auto external = update( "fps", 5000 );
+    external.setDevice( "source" );
+    external.add( pcf::IndiElement( "current", "5000" ) );
+    REQUIRE( app.setCallBack_m_indiP_fpsSource( external ) == 0 );
+    REQUIRE( driver.m_messages.back().getState() == pcf::IndiProperty::Busy );
+    REQUIRE( app.acquireAndCheckValid() == 0 );
+    app.updateINDI( app.m_snapshot );
+    REQUIRE( app.m_indiP_fps.getState() == pcf::IndiProperty::Ok );
+    REQUIRE( app.m_indiP_fps["current"].get<double>() == 5000 );
+    // clang-format off
+#ifdef ACCELSIM_TEST_DOXYGEN_REF
+    MagAOX::app::accelSim::newCallBack_m_indiP_fps;
+    MagAOX::app::accelSim::setCallBack_m_indiP_fpsSource;
+    MagAOX::app::accelSim::acquireAndCheckValid;
+    MagAOX::app::accelSim::updateINDI;
+#endif
+    // clang-format on
+}
+
 /** \brief Parse the shipped example and reject an incompatible configured channel count.
  * \ingroup accelSim_unit_test
  */
@@ -883,9 +1127,15 @@ TEST_CASE( "accelSim synchronized delay model", "[accelSim][app]" )
 {
     appTest app;
     app.m_alpha     = 1;
-    app.m_postDelay = -5;
+    app.m_postDelay = 25;
     app.syncTiming( 1000000000 );
+    REQUIRE( app.m_diagnostics.m_timing[triggerTime] == 0 );
+    REQUIRE( app.m_diagnostics.m_timing[triggerInterval] == 0 );
+    app.m_postDelay = -5;
     app.syncTiming( 1000500000 );
+    REQUIRE( app.m_diagnostics.m_timing[triggerInterval] == 0 );
+    app.syncTiming( 1001000000 );
+    REQUIRE( app.m_diagnostics.m_timing[triggerInterval] == 500 );
     const auto &t = app.m_diagnostics.m_timing;
     REQUIRE( t[11] == Approx( 500 ) );  // semaphorePeriod
     REQUIRE( t[4] == Approx( 409.4 ) ); // wrap(250 - 340.6, 500)
@@ -894,6 +1144,9 @@ TEST_CASE( "accelSim synchronized delay model", "[accelSim][app]" )
     REQUIRE( t[7] == Approx( 480 ) );
     REQUIRE( t[6] == 1 );
     REQUIRE( app.m_diagnostics.m_cadenceRatio == Approx( 3 ) );
+    app.m_postDelay = -250;
+    app.syncTiming( 1001500000 );
+    REQUIRE( t[phaseError] == Approx( 250 ) );
     // clang-format off
 #ifdef ACCELSIM_TEST_DOXYGEN_REF
     MagAOX::app::accelSim::syncTiming;

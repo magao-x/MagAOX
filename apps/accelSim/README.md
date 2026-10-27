@@ -72,7 +72,10 @@ The app uses `MagAOXApp<true>`, `frameGrabber`, and the required `telemeter` mix
 It exposes the normal `fg_*`, thread, FSM, logging, and telemetry properties, plus
 the hardware application's `fps`, `numChannels`, `alpha`, `synchroDelay`, and all
 23 `timingDiag` elements. `fps.current` is the active nominal rate; `target` may
-briefly reflect a pending update. Measured publication rate is in `fg_timing`.
+briefly reflect a pending update. FPS requests report Busy until the acquisition
+worker acknowledges that request, then Ok; invalid requests retain Alert until a
+valid request. Superseding requests cannot inherit an earlier acknowledgment.
+Measured publication rate is in `fg_timing`.
 `numChannels` accepts only 2, including on its external subscription; rejected
 updates leave the shape and accepted values intact and set Alert. There is no
 additional camera-style start/stop control.
@@ -80,6 +83,11 @@ additional camera-style start/stop control.
 `channel_readout_us` measures simulation acquisition computation, not fictitious
 SPI hardware timing. In timer mode synchronization-only measurements are zero.
 `alpha` controls timing smoothing, never AR damping.
+
+Each `timingDiag` update sends one coherent property, including source-loss
+invalidation. Phase error uses the hardware interval `(-T/2,T/2]`. Trigger
+predictions require a measured positive source period; the first valid prediction
+still has a zero interval. Reconnection resets this history.
 
 The additional read-only `sim_diag` contains `skipped_publications`,
 `discontinuities`, `late_samples`, `max_lateness_us`, `source_period_ratio`, and
@@ -106,6 +114,7 @@ From the repository root, on a configured MagAO-X development host:
 make -C apps/accelSim
 make -C tests -f Makefile.one t=../apps/accelSim/tests/accelSim_test.cpp
 ./apps/accelSim/tests/accelSim_test '[accelSim]'
+./apps/accelSim/tests/accelSim_test '[indi-regression]'
 ./apps/accelSim/tests/accelSim_test '[accelSim-streams]'
 ```
 
@@ -125,7 +134,11 @@ c++ -std=c++20 -O3 -fno-fast-math -Wall -Wextra \
 ```
 
 The standalone tests include the production synchronization accounting and
-status-invalidation logic. Full app tests additionally check snapshot delivery,
+status-invalidation logic, half-period phase boundaries, and trigger startup.
+The INDI regressions capture real XML serialization without a server, checking
+coherent timing snapshots and FPS Busy/Ok/Alert transitions. Their local driver
+fixture uses Linux `/proc/self/fd` to release its unactivated input descriptor.
+Full app tests additionally check snapshot delivery,
 phase-wait cancellation through a synthetic semaphore, stale-frame rejection,
 and source disappearance/reconnection; those require the normal dependencies.
 

@@ -229,6 +229,13 @@ struct diagnostics
     double                  m_cadenceRatio{ 0 };    ///< Measured source period divided by the nominal model period.
     std::array<uint64_t, 2> m_low{}, m_high{};      ///< ADC rail clamps in generated numerical samples.
 
+    /// Wrap the signed applied/model phase difference to the hardware interval (-T/2,T/2].
+    void updatePhaseError();
+
+    /// Update trigger predictions only after a positive source period has been measured.
+    void updateTrigger( int64_t  arrival /**< [in] monotonic arrival nanoseconds */,
+                        int64_t &previous /**< [in,out] last valid prediction, zero until initialized */ );
+
     /// Clear synchronization measurements on outage without erasing lifetime accounting.
     void invalidateSync( double postDelay /**< [in] configured phase offset in microseconds */ );
 
@@ -294,6 +301,41 @@ inline uint64_t syncClock::finish( const syncTick &tick, bool acquired )
 inline void syncClock::resetTime()
 {
     m_haveTime = false;
+}
+
+inline void diagnostics::updatePhaseError()
+{
+    const double period = m_timing[semaphorePeriod];
+    double       error  = 0;
+    if( period > 0 )
+    {
+        double applied = std::fmod( m_timing[delayApplied], period );
+        double model   = std::fmod( m_timing[delayModel], period );
+        if( applied < 0 )
+            applied += period;
+        if( model < 0 )
+            model += period;
+        error = applied - model;
+        if( error <= -.5 * period )
+            error += period;
+        else if( error > .5 * period )
+            error -= period;
+    }
+    m_timing[phaseError] = error;
+}
+
+inline void diagnostics::updateTrigger( int64_t arrival, int64_t &previous )
+{
+    if( m_timing[semaphorePeriod] <= 0 )
+    {
+        m_timing[triggerInterval] = 0;
+        m_timing[triggerTime]     = 0;
+        return;
+    }
+    const int64_t prediction  = arrival + int64_t( std::llround( m_timing[delayTarget] * 1000 ) );
+    m_timing[triggerInterval] = previous ? std::max( 0.0, ( prediction - previous ) / 1000.0 ) : 0;
+    m_timing[triggerTime]     = std::max( 0.0, m_timing[delayTarget] );
+    previous                  = prediction;
 }
 
 inline void diagnostics::invalidateSync( double postDelay )

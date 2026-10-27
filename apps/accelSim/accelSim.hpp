@@ -38,16 +38,17 @@ class accelSim : public MagAOXApp<true>, public dev::frameGrabber<accelSim>, pub
     static constexpr bool               c_frameGrabber_flippable = false; ///< Preserve fixed X/Y ordering.
 
   protected:
-    accelSimDetail::parameters m_parameters;           ///< Startup-only physics/calibration configuration.
-    accelSimDetail::model      m_model;                ///< Acquisition-thread-owned physical state and RNG.
-    accelSimDetail::schedule   m_schedule;             ///< Absolute monotonic timer schedule.
-    std::atomic<double>        m_requestedFps{ 6000 }; ///< Validated callback-to-worker rate request.
-    std::atomic<double>        m_activeFps{ 6000 };    ///< Rate currently used by the acquisition worker.
-    std::atomic<double>        m_alpha{ .01 };         ///< Timing EMA coefficient, independently updated by INDI.
-    std::atomic<int>           m_postDelay{ 0 };       ///< Signed synchronized phase offset in microseconds.
-    double                     m_maxFrequency{ 0 };    ///< Immutable maximum mode frequency for callback validation.
-    std::string                m_fpsDevice, m_fpsProperty{ "fps" }, m_fpsElement{ "current" }; ///< External FPS source.
-    std::string                m_channelsDevice, m_channelsProperty{ "numChannels" },
+    accelSimDetail::parameters m_parameters;                      ///< Startup-only physics/calibration configuration.
+    accelSimDetail::model      m_model;                           ///< Acquisition-thread-owned physical state and RNG.
+    accelSimDetail::schedule   m_schedule;                        ///< Absolute monotonic timer schedule.
+    std::atomic<double>        m_requestedFps{ 6000 };            ///< Validated callback-to-worker rate request.
+    std::atomic<double>        m_activeFps{ 6000 };               ///< Rate currently used by the acquisition worker.
+    std::atomic<uint64_t> m_rateRequest{ 0 }, m_rateApplied{ 0 }; ///< Requested and worker-acknowledged FPS revisions.
+    std::atomic<double>   m_alpha{ .01 };      ///< Timing EMA coefficient, independently updated by INDI.
+    std::atomic<int>      m_postDelay{ 0 };    ///< Signed synchronized phase offset in microseconds.
+    double                m_maxFrequency{ 0 }; ///< Immutable maximum mode frequency for callback validation.
+    std::string           m_fpsDevice, m_fpsProperty{ "fps" }, m_fpsElement{ "current" }; ///< External FPS source.
+    std::string           m_channelsDevice, m_channelsProperty{ "numChannels" },
         m_channelsElement{ "current" };            ///< Channel source.
     double      m_fpsTol{ 0 }, m_channelsTol{ 0 }; ///< Compatibility keys, unused by the hardware callbacks as well.
     std::string m_syncName;                        ///< Optional semaphore trigger stream; empty selects timer mode.
@@ -103,6 +104,8 @@ class accelSim : public MagAOXApp<true>, public dev::frameGrabber<accelSim>, pub
 
     /// Define the accelerometer-owned properties, separated from thread startup for testing.
     int setupProperties();
+    /// Send coherent app-owned controls and diagnostics at ordinary app-loop cadence.
+    void updateINDI( const diagnostics &snapshot /**< [in] coherent worker snapshot */ );
     /// Open and claim the synchronization source, returning positive to retry.
     int openSync();
     /// Release the claimed source semaphore and mapping.
@@ -352,20 +355,29 @@ inline int accelSim::appLogic()
         std::lock_guard<std::mutex> guard( m_snapshotMutex );
         snapshot = m_snapshot;
     }
+    updateINDI( snapshot );
+    return 0;
+}
+
+inline void accelSim::updateINDI( const diagnostics &snapshot )
+{
     { //mutex scope
         std::lock_guard<std::mutex> guard( m_controlMutex );
-        updatesIfChanged<double>( m_indiP_fps,
-                                  { "current", "target" },
-                                  { m_activeFps.load(), m_requestedFps.load() },
-                                  m_indiP_fps.getState() );
+        const auto                  fpsState = m_indiP_fps.getState() == INDI_ALERT           ? INDI_ALERT
+                                               : m_rateApplied.load() == m_rateRequest.load() ? INDI_OK
+                                                                                              : INDI_BUSY;
+        updatesIfChanged<double>(
+            m_indiP_fps, { "current", "target" }, { m_activeFps.load(), m_requestedFps.load() }, fpsState );
         updatesIfChanged<double>(
             m_indiP_alpha, { "current", "target" }, { m_alpha.load(), m_alpha.load() }, m_indiP_alpha.getState() );
         updatesIfChanged<int>( m_indiP_synchroDelay,
                                { "current", "target" },
                                { m_postDelay.load(), m_postDelay.load() },
                                m_indiP_synchroDelay.getState() );
-        for( size_t index = 0; index < timingCount; ++index )
-            indi::updateIfChanged( m_indiP_timingDiag, c_timingNames[index], snapshot.m_timing[index], m_indiDriver );
+        indi::updatesIfChanged<double>( m_indiP_timingDiag,
+                                        c_timingNames,
+                                        std::vector<double>( snapshot.m_timing.begin(), snapshot.m_timing.end() ),
+                                        m_indiDriver );
         updatesIfChanged<double>( m_indiP_simDiag,
                                   { "skipped_publications",
                                     "discontinuities",
@@ -386,7 +398,6 @@ inline int accelSim::appLogic()
                                     double( snapshot.m_low[1] ),
                                     double( snapshot.m_high[1] ) } );
     }
-    return 0;
 }
 
 inline int accelSim::appShutdown()
@@ -529,20 +540,17 @@ inline void accelSim::syncTiming( int64_t arrival )
         t[delayModel]  = wrap( .5 * period - ( m_dtTransfer + m_wfsProcess + m_dtF + m_wfsRead ) / 1000 );
         t[delayTarget] = wrap( t[delayModel] + m_postDelay.load() );
     }
-    t[delayBudget]           = std::max( 0.0, period - t[service] - m_guard / 1000 );
-    const double desired     = std::max( 0.0, t[delayTarget] );
-    t[delayApplied]          = std::min( desired, t[delayBudget] );
-    t[capped]                = desired > t[delayBudget] ? 1 : 0;
-    t[delay]                 = t[delayTarget];
-    t[phaseError]            = period > 0 ? std::remainder( t[delayApplied] - t[delayModel], period ) : 0;
-    t[lock]                  = period > 0 && std::abs( t[phaseError] ) <= m_lockAbsolute / 1000 &&
-                                       std::abs( t[phaseError] ) <= m_lockFraction * period
-                                   ? 1
-                                   : 0;
-    const int64_t prediction = arrival + int64_t( std::llround( t[delayTarget] * 1000 ) );
-    t[triggerInterval]       = m_triggerPrediction ? std::max( 0.0, ( prediction - m_triggerPrediction ) / 1000.0 ) : 0;
-    t[triggerTime]           = std::max( 0.0, t[delayTarget] );
-    m_triggerPrediction      = prediction;
+    t[delayBudget]       = std::max( 0.0, period - t[service] - m_guard / 1000 );
+    const double desired = std::max( 0.0, t[delayTarget] );
+    t[delayApplied]      = std::min( desired, t[delayBudget] );
+    t[capped]            = desired > t[delayBudget] ? 1 : 0;
+    t[delay]             = t[delayTarget];
+    m_diagnostics.updatePhaseError();
+    t[lock] = period > 0 && std::abs( t[phaseError] ) <= m_lockAbsolute / 1000 &&
+                      std::abs( t[phaseError] ) <= m_lockFraction * period
+                  ? 1
+                  : 0;
+    m_diagnostics.updateTrigger( arrival, m_triggerPrediction );
     m_diagnostics.m_cadenceRatio = period * m_activeFps.load() / 1e6;
 }
 
@@ -625,17 +633,27 @@ inline int accelSim::acquireAndCheckValid()
         return 1;
     try
     {
-        const double requested = m_requestedFps.load();
-        if( requested != m_activeFps.load() )
+        if( m_rateRequest.load() != m_rateApplied.load() )
         {
-            m_model.setRate( requested );
-            m_activeFps = requested;
-            ++m_diagnostics.m_discontinuities;
-            m_schedule.reset( monotonicNow(), requested );
-            m_lastArrival = m_lastAcquisition = m_triggerPrediction = 0;
-            m_syncClock.resetTime();
-            if( !m_syncName.empty() )
-                invalidateSync();
+            double   requested;
+            uint64_t revision;
+            { //mutex scope
+                std::lock_guard<std::mutex> guard( m_controlMutex );
+                requested = m_requestedFps.load();
+                revision  = m_rateRequest.load();
+            }
+            if( requested != m_activeFps.load() )
+            {
+                m_model.setRate( requested );
+                m_activeFps = requested;
+                ++m_diagnostics.m_discontinuities;
+                m_schedule.reset( monotonicNow(), requested );
+                m_lastArrival = m_lastAcquisition = m_triggerPrediction = 0;
+                m_syncClock.resetTime();
+                if( !m_syncName.empty() )
+                    invalidateSync();
+            }
+            m_rateApplied = revision; // A newer callback remains Busy until its own boundary.
         }
         uint64_t skipped = 0;
         int64_t  deadline;
@@ -795,12 +813,14 @@ inline double accelSim::target( const pcf::IndiProperty &property )
 inline int accelSim::requestRate( double value )
 {
     const bool valid = std::isfinite( value ) && value > 2 * m_maxFrequency && value <= 10000;
-    if( valid )
-    {
-        m_requestedFps        = value;
-        m_indiP_fps["target"] = value;
-    }
-    return propertyState( m_indiP_fps, valid );
+    if( !valid )
+        return propertyState( m_indiP_fps, false );
+    m_requestedFps = value;
+    ++m_rateRequest;
+    updateIfChanged( m_indiP_fps, "target", value, INDI_BUSY );
+    m_indiP_fps["target"] = value;
+    m_indiP_fps.setState( INDI_BUSY );
+    return 0;
 }
 
 inline int accelSim::requestChannels( double value )

@@ -715,3 +715,188 @@ After committing the initial implementation (`eb3c2c91`), the user requested an 
 Recorded full-record RMS X/Y: physical pointing **2.168665 / 2.428181 mas**; WFS-coupled pointing **1.372940 / 2.049623 mas**; acceleration **0.039983882 / 0.039641765 m/s²**; ADC-derived acceleration **0.040061091 / 0.039713301 m/s²**. Both lower and upper clipping counts are **[0,0]**, and there are no rail samples. Acceleration band-power ratios remain within about 2% of ensemble theory in the recorded broad bands; no high-r finite-record amplitude acceptance threshold was imposed.
 
 Matplotlib 3.9.4 and its dependencies were installed with network approval only into the temporary `/tmp/accelsim-validation-env`, alongside NumPy 2.0.2 and SciPy 1.13.1. No repository dependency or instrument software was changed. The README contains complete macOS build/export/environment/plot commands and plot interpretation. All generated data and figures stay outside the repository. Full MagAO-X integration and sustained real-time validation remain separate pending tasks, unaffected by this offline workflow.
+
+### ImageStreamIO / INDI Compatibility Review — 2026-10-26
+
+Reviewed committed implementation `1df0135f` on local macOS, after reading AGENTS.md and the approved specification/answers. This is a source/interface review with local dependency-free checks, **not runtime integration acceptance**. The working tree was clean at the start. Only this planning record is changed; no application, numerical model, test, dependency, shared build file, deployment configuration, or instrument was changed. No commit or push was performed. The findings below supersede the earlier statement of no known defects: four additional INDI diagnostic/control compatibility findings remain open.
+
+**Stream comparison:**
+
+| Item | mcp3208Ctrl | accelSim / assessment |
+| --- | --- | --- |
+| Output name | Inherits frameGrabber's empty default, resolved to the instance/config name unless `framegrabber.shmimName` is supplied. The deployed configuration is absent here. | Constructor and example config explicitly default to `acc000`; intentional requirement. Hardware source code alone does not establish that its default executable invocation publishes `acc000`. Match the deployed instance/config separately. |
+| Datatype / sample | `_DATATYPE_UINT16`; two channels by default; ADC channels read in ascending order. | `_DATATYPE_UINT16`, exactly two contiguous raw counts, X then Y, each in [0,4095]. Software establishes hardware channel order; physical X/Y wiring is the user-provided contract. |
+| Dimensions / depth | Width `m_numChannels`, height 1; frameGrabber creates `[width,1,D]`, three axes even at D=1. | `[2,1,D]`; `framegrabber.circBuffLength` default 1, same minimum-depth handling. Fixed two-channel validation is explicitly approved in Q2. Match deployed D when available. |
+| Allocation / semaphores | Shared frameGrabber implementation, CPU location -1, shared memory, zero keywords, `IMAGE_NB_SEMAPHORE`, `CIRCULAR_BUFFER | ZAXIS_TEMPORAL`. | Identical implementation and flags; no app-specific output creation or semaphore posting. |
+| Publication transaction | `write=1`; copy sample; real-time `writetime`; acquisition `atime`; `cnt1=plane`; increment `cnt0`; write per-plane metadata; `write=0`; `ImageStreamIO_sempost(image,-1)`. | Same frameGrabber code, including ordering. Post-publication hook only transfers diagnostics. Failed/invalid acquisition does not enter this transaction. |
+| Ring / counters | New stream starts `cnt1=D-1`; first write uses plane 0, then wraps. `cnt0` counts publications. Per-plane `cntarray`, `atimearray`, and `writetimearray` follow each write. | Identical. Missed simulated ticks do not artificially increment stream counters; they appear in `sim_diag`. Counters can reset on stream recreation/producer replacement. |
+| Acquisition timestamp | Sync mode stamps immediately before ADC reads; timer mode omits assignment to `m_currImageTimestamp`. | Both modes stamp immediately before model acquisition, including catch-up computation, using `CLOCK_REALTIME`. This deliberate, approved difference fixes the simulator contract rather than reproducing zero timer acquisition timestamps. |
+| Write timestamp / lifecycle | Framework captures publication time and owns stream destruction/recreation. | Identical. Pacing uses monotonic time; epoch timestamps can change with wall-clock corrections. |
+
+The shared write path is `libMagAOX/app/dev/frameGrabber.hpp:945–1050`; creation precedes it in the same acquisition thread. No incompatible app-specific counter, plane, layout, timestamp-copy, or semaphore transaction was found. This conclusion is source-based: real stream attachment and metadata checks could not run here.
+
+**INDI inventory and differences:**
+
+Both applications use `MagAOXApp<true>`, frameGrabber, and telemeter, so FSM/logging/thread properties, `fg_shmimName.name`, `fg_frameSize.width/height/depth`, all ten `fg_timing` elements, `telem_rotate.request`, `telem_maxtime.current/target`, and `telem_fgtimings` come from the same implementations. Neither adds a camera acquisition switch. Stream acquisition starts through the normal OPERATING/frameGrabber lifecycle. The INDI identity remains the launch instance (`-n`); the executable names alone are not interchangeable identities.
+
+| Property / interface | Comparison | Classification |
+| --- | --- | --- |
+| `fps.current/target` | Same RW Number metadata: 0–10000, step 1, `%d`. Hardware initial nominal rate is 2000 Hz; simulator initial nominal rate is 6000 Hz. Simulator rejects invalid/aliased rates and applies accepted changes at an acquisition boundary with stationary restart. | Defaults and validation/boundary application are approved. Premature `Ok` acknowledgment is an open finding below. |
+| `numChannels.current/target` | Same RW Number metadata: 0–8, step 1, `%d`. Simulator accepts only 2, sets Alert otherwise, retains shape and accepted values. | Approved Q2 difference; do not copy hardware's unresized channel-count mutation. |
+| `alpha.current/target` | Same RW Number metadata: 0–1, step 0.00001, `%.5f`; default 0.01; both clamp finite requests. Simulator additionally rejects nonfinite requests. | Compatible timing-EMA meaning; stricter validation intentional. Different numeric-literal spelling in source has no schema effect. |
+| `synchroDelay.current/target` | Same signed integer-microsecond RW Number metadata: ±1000000, step 1, `%d`, label `us`. Simulator validates finite/range and updates at worker consumption; hardware mutates timing state in the callback. | Same requested phase-offset meaning; safe handoff/validation intentional. Diagnostic boundary differences remain below. |
+| Valid local control acknowledgments | Hardware uses `indiTargetUpdate(...,true)`, sends Busy, then appLogic settles current/target to Ok. Simulator's callbacks send Ok directly for accepted values. | Immediate synchronous alpha/channel/offset acknowledgments differ in transition sequence. For pending FPS this also falsely implies completion; see finding 2. |
+| `timingDiag` | All 23 names, order, RO Number access, units, mode codes, label/group match by source comparison. | Schema matches; atomic delivery, half-period sign, and startup prediction differences below are not approved differences. |
+| Diagnostic measurements | Simulation computation replaces SPI duration. Monotonic arrival timing replaces hardware's real-time arrival arithmetic; simulator timer-mode synchronization-only measurements are zero. Hardware timer `read_latency_error_us` can equal minus a configured nonzero offset; simulator keeps it zero. | Honest simulated measurements and timer-mode clearing follow the approved plan. Do not fabricate hardware timing. |
+| External subscriptions | Same `fps.device/property/element/tol` and `numChannels.device/property/element/tol`, empty device disables, default elements `current`. Both load but do not use tolerance. Simulator validates incoming values with the same local restrictions. | Subscription names/config are compatible; invalid/missing element now produces Alert/error instead of hardware's log/ignore or unchecked assignment. No separate published `fpsSource` property is expected. |
+| Additional diagnostics | Simulator adds nine RO `sim_diag` elements for timing, skips, cadence, discontinuities, clipping. | Approved additive interface. No extra physical-units stream or DM control. |
+
+`synchro.*` configuration names, timing constants, semaphore preference (5), one-second wait timeout, EMA, cadence guard, and absolute/fractional lock criteria match the hardware reference. Hardware-only SPI setup has no public SPI/voltage/calibration INDI property to reproduce. Float-to-double internal control precision is not an outward type change. Simulator-specific configuration and the fixed channel guard do not make an arbitrary unreviewed deployment configuration automatically compatible.
+
+**Open findings, ordered by severity:**
+
+1. **P2 — `timingDiag` is transmitted as intermediate mixed snapshots.** `accelSim::appLogic` (`accelSim.hpp:368`) calls `indi::updateIfChanged` once per field. Each changed field sends the entire property immediately. `mcp3208Ctrl::updateTimingDiagnosticsIndi` uses one `updatesIfChanged` for all fields. On source loss, accelSim can therefore send cleared latency with the preceding `delay_lock=1`, before a later message clears the lock; up to 23 messages can be sent per changed snapshot. The acquisition snapshot itself is coherent and the final message is unlocked, so this is not a persistent failure to invalidate worker state. It is an observable wire-level inconsistency and avoidable INDI traffic. Recommended app-local correction: update/send all 23 values together and assert one coherent message with a recording driver.
+2. **P2 — accepted FPS requests report completion before application.** `requestRate` (`accelSim.hpp:795`) updates requested/target and calls `propertyState(...,true)`, which sends Ok. The worker applies that target later; during a source wait, `fps.current` can still contain the prior rate while the property is Ok. Hardware signals Busy on local requests before settling. Q3 permits pending current/target values, not a premature completion indication. Recommended app-local correction: Busy while a validated rate is pending, Ok when active equals requested, Alert on rejection; test the complete message/state sequence including external updates and cancellation. Other immediate controls also skip the hardware Busy transition; preserve or explicitly resolve that transition convention when correcting the control protocol.
+3. **P3 — phase-error sign differs at exactly half a source period.** `syncTiming` (`accelSim.hpp:540`) uses `std::remainder`, while hardware maps phase error to `(-T/2,T/2]`. With T=500 us, default timing terms summing to 340.6 us, and postDelay=-250 us, the model delay is 409.4 us and the uncapped applied delay is 159.4 us. Hardware reports +250 us; simulator reports -250 us. Lock uses magnitude, so this does not change the lock verdict or ADC data, but the signed diagnostic convention differs. Recommended app-local correction: identical wrap rule and a boundary test.
+4. **P3 — startup trigger predictions become valid one event too early.** Hardware's `updateTriggerTiming` returns before establishing a prediction when no period has been measured, and reports zero interval for the first valid prediction. Simulator `syncTiming` stores a prediction on the first event regardless of period and can report a nonzero interval on the second. With a positive offset it also reports a nonzero `trigger_time_us` on the first event, where hardware reports zero. Recommended app-local correction: establish trigger history only after a positive measured period, and test first/second/third events plus reconnection. This is a diagnostic compatibility difference, not a change to the physical model.
+
+These findings are documented, not patched during this focused review. No production behavior was changed. They do not require a shared-code workaround or a numerical-physics decision. Exact interface acceptance is withheld pending their resolution and runtime tests.
+
+**Synchronization / recovery review:**
+
+- Timer mode uses a monotonic epoch and fractional-period deadlines. `schedule::consume` selects the latest due nominal tick. `model::advance` advances all skipped ticks up to the eight-skipped-tick bound and returns one newest sample; larger gaps restart stationarity and increment discontinuities. There is no loop publishing historical frames. Counter gaps observed by a slow reader are distinct from these producer skips.
+- Semaphore mode reconciles elapsed nominal time and cumulative source-counter progress using their maximum, preventing double-counted overlapping gaps. Unique notifications already covered by recovery and repeated counters do not replay samples. This intentionally differs from hardware, which can perform a new ADC read for every queued semaphore notification.
+- `finishSync` commits source-counter/drop accounting and canceled-publication accounting exactly once; canceled but ungenerated numerical ticks remain available for recovery. Existing regressions cover short pauses, overlapping gaps, duplicates, cancellation, FPS changes, and producer-counter resets. Nominal physics coefficients are not retuned from arrival jitter.
+- Timeout/stale source/reconfiguration invalidates delay lock, cadence, timing history, pending/fresh acquisition state, and forces delivery of a snapshot while preserving totals. The one-second timeout means failure detection is not instantaneous. The earlier persistent stale-lock defect is fixed; finding 1 concerns intermediate INDI messages after detection.
+- Source inode replacement is checked on timeout and reconnects through frameGrabber. Hardware additionally estimates a producer period from source metadata, but that estimate is not used by its phase model or published diagnostics in this checkout. Both actual phase estimates use arrival cadence. Actual semaphore wakeups, reconnects, rate changes, and concurrent shutdown remain runtime tests, not validated by source review alone.
+
+**Build blockers reverified without changing shared code or the installed environment:**
+
+1. Normal `make -C apps/accelSim` fails in shared `app/MagAOXApp.o` before compiling accelSim. Error: `libMagAOX/file/stdFileName.hpp:366:18: use of undeclared identifier 'timegm'`. Include chain: `app/MagAOXApp.cpp -> MagAOXApp.hpp -> logger/logManager.hpp -> logger/generated/logTypes.hpp:4 -> types/git_state.hpp -> flatbuffer_log.hpp -> logMeta.hpp -> logMap.hpp -> file/stdFileName.hpp`. `Make/common.mk` imports `pkg-config --cflags mxlib`, which includes `-D_XOPEN_SOURCE=700`. The macOS SDK's `sys/cdefs.h:853–855` consequently selects `_POSIX_C_SOURCE=200809L`; `_time.h:133–142` hides `timegm` unless Darwin extensions are enabled. A fresh standalone `<time.h>` probe passes without that flag, fails with it, and passes with both `_XOPEN_SOURCE=700` and `_DARWIN_C_SOURCE`. Those flags were used only on the temporary probe, not on an application build. This is an existing shared macOS feature-policy/environment conflict, not an accelSim error.
+2. Same build also fails at `libMagAOX/logger/types/telem_pupilfit.hpp:8:10: fatal error: 'mx/math/floatUtils.hpp' file not found`. Chain: `MagAOXApp.cpp -> MagAOXApp.hpp -> logger/logManager.hpp -> logger/generated/logTypes.hpp:47 -> types/telem_pupilfit.hpp`. Existing telemetry uses `mx::math::isFinite`; that dependency entered in `bee71c67`, not accelSim. Installed mxlib is version 0.2.0, SHA `3cd28b6e53765079859407b0d47ef5a3d7a41430`, matching the sibling checkout. Neither installed math headers nor that checkout provide the header/API. This is a MagAO-X/mxlib revision/API mismatch, not a simulator problem or necessarily macOS-specific. Linux with the same missing header also fails. A known-compatible dependency revision must be identified by the maintainers; the evidence does not justify prescribing an arbitrary upgrade.
+3. The normal full test build reaches the same two errors through `accelSim_test.cpp -> accelSim.hpp -> libMagAOX.hpp -> MagAOXApp.hpp`. An additional isolated INDI-helper probe compiling existing `INDI/libcommon/IndiProperty.cpp` directly in C++20 exposed existing libc++ errors for removed `std::not1`/`std::ptr_fun` at line 194. Compiling only this temporary probe in C++14 succeeded, with existing warnings, and demonstrated finding 1. This is an additional portability issue for rebuilding that shared library with this toolchain, not an observed third error in the normal app build (which stops earlier). No shared standard flags, library sources, or dependencies were changed.
+
+Recommendation: resolve the matching mxlib API/build prerequisites separately with the project lead, and perform integration on a configured **non-instrument Linux development host**. If macOS full-app support is desired, the shared feature-test-macro/PCH policy and old INDI/libc++ compatibility need a separately scoped review. Do not add a simulator shim, fake header, remove telemetry, or suppress shared log types. The full app may encounter additional prerequisites after these first blockers are resolved; this review does not claim a complete macOS repair recipe.
+
+**Checks performed in this review:**
+
+| Check | Result |
+| --- | --- |
+| Normal app build | Failed, exit 2, the two shared errors above. `/tmp/accelSim-compatibility-app.log`. |
+| Normal full test build | Failed, exit 2, same errors. `/tmp/accelSim-compatibility-tests.log`. |
+| Fresh optimized standalone C++20 build, warnings, `-fno-fast-math` | Passed; `/tmp/accelSim_compat_model_test '[model]'`: **11 cases / 20721 assertions passed**. |
+| Explicit synchronization regressions | **3 cases / 12138 assertions passed**. |
+| Fresh ASan/UBSan standalone build/run | **11 cases / 20721 assertions passed**, no sanitizer reports. This covers numerical/timing helpers, not full-app concurrency or RSS. |
+| Current-model diagnostic export | **1 case / 6 assertions passed**, 360000 pairs / 214 modes under `/tmp/accelSim-compatibility-validation`. |
+| Python PSD-analysis unit tests, warnings as errors | **4 tests passed**. |
+| Full offline PSD analyzer | Passed finite/time-grid/count validation and generated all five plots, `psd.csv`, and `validation.json` under `/tmp/accelSim-compatibility-validation`. Zero ADC clipping; numerical results reproduce the preceding offline record. Matplotlib used a temporary cache because the default user cache was not writable. |
+| Local recording-driver probe | Existing INDI helper/library code with a fake driver, no socket/server: per-element updates send `(latency=0,lock=1)` then `(0,0)`; batch helper sends only `(0,0)`. Temporary source/binary `/tmp/accelSim-compatibility-indi.cpp` and `/tmp/accelSim-compatibility-indi`. This is helper-level evidence, not a full app test. |
+| Schema / edge-case comparison | All 23 timing names/order match; four control schemas have equivalent metadata. Half-period sign difference reproduced numerically; acknowledgment/startup findings confirmed in source. |
+
+No running accelSim executable or `acc000` was produced by the failed builds. No live metadata, frame-counter/plane/semaphore read, achieved 6000-Hz rate, jitter distribution, skipped-publication total, long-stall count, maximum delay, or app memory-stability result is available from this Mac. `shmimLat`/milk command-line tools are not on the local PATH. Offline samples and sanitizer results are not substitutes for those measurements.
+
+**Commands and remaining integration checks:**
+
+From the repository root on the configured non-instrument development host, after resolving shared build prerequisites:
+
+```sh
+make -C apps/accelSim
+make -C tests -f Makefile.one t=../apps/accelSim/tests/accelSim_test.cpp
+./apps/accelSim/tests/accelSim_test '[accelSim]'
+./apps/accelSim/tests/accelSim_test '[accelSim-streams]'
+```
+
+The stream test creates its own private namespace and checks real frameGrabber metadata/publication, circular planes, timestamps, counters, semaphore notifications, source cancellation/loss/reconnection. It must run in a separate process from the live benchmark. For a separately launched producer, use the private local environment from the README:
+
+```sh
+accel_sim_root=$(mktemp -d /tmp/accelSim-local.XXXXXX)
+export MAGAOX_PATH="$accel_sim_root"
+export MILK_SHM_DIR="$accel_sim_root/shm"
+mkdir -p "$MILK_SHM_DIR" "$MAGAOX_PATH/config" "$MAGAOX_PATH/logs" \
+  "$MAGAOX_PATH/telem" "$MAGAOX_PATH/sys" "$MAGAOX_PATH/calib" \
+  "$MAGAOX_PATH/drivers/fifos"
+./apps/accelSim/accelSim -n accelSim-local \
+  -c apps/accelSim/config/example.conf --framegrabber.threadPrio=0 \
+  >"$accel_sim_root/app.log" 2>&1 &
+accel_sim_pid=$!
+ACCELSIM_LOCAL_BENCHMARK=1 ./apps/accelSim/tests/accelSim_test '[accelSim-live]'
+ps -p "$accel_sim_pid" -o pid,etime,rss,pcpu
+```
+
+The benchmark opens `acc000`, checks count range/counter progression, and reports observed intervals and mean publication rate for ten minutes. Type/shape/plane/semaphore assertions are in `[accelSim-streams]`; the live benchmark assumes the running stream has that contract and does not independently reassert its datatype/dimensions. Use the development host's appropriate thread priority/cpuset for performance acceptance; priority 0 is the unprivileged smoke-test setting. Sample RSS repeatedly during the test, not only once afterward. With the existing `shmimLat` utility installed, this additional reader records stream write/arrival times to `times` in the temporary directory:
+
+```sh
+(cd "$accel_sim_root" && shmimLat -n acc000)
+kill -TERM "$accel_sim_pid"
+wait "$accel_sim_pid"
+cat "$accel_sim_root/app.log"
+```
+
+Remaining acceptance work: compare actual INDI property definitions and valid/invalid request transitions through a private local server; test external subscriptions; verify one producer and operator-supplied deployment identity/depth/config; repeat timer and synthetic semaphore tests including short/long pauses, cancellation, duplicates, replacement, reconnect, FPS change, and shutdown; measure 6000-Hz performance for ten minutes with producer `fg_timing`/`sim_diag`, reader gaps, max lateness/delay, discontinuities, and repeated RSS. The shutdown log supplies producer skip/lateness/discontinuity/clipping totals; live lock/delay/cadence requires the isolated INDI session. Final unchanged raw-ADC consumer substitution remains pending the absent deployment/consumer configuration. No instrument-side or tunneled INDI command was run or requested for agent execution.
+
+Final scope verification: `git diff --check` passes; only this plan is modified. No C++ formatting pass is needed because no code was touched. The protected specification-prefix SHA256 remains `b9b164ac19afe92e1dc7236b0c5529e8c5e86763a3b0f791875fad2f08db7a8c`; all ANSWER entries are unchanged.
+
+### INDI Compatibility Fixes — 2026-10-27
+
+The user authorized correction of the four app-local findings from the preceding review. **All four are now corrected in source.** This supersedes the preceding review's open-finding status, but does not claim full application/runtime acceptance. The prior review's uncommitted planning notes were present at the start of this turn and are retained. The specification above the agent heading and all ANSWER entries remain unchanged. No shared MagAO-X/mxlib files, build settings, dependencies, instrument configuration, simulation physics, stream contract, or DM functionality were changed; no commit or push was performed.
+
+**Production changes (exact files):** `apps/accelSim/accelSim.hpp` and `apps/accelSim/accelSimModel.hpp`. The latter changes only app-local timing diagnostic methods; oscillator coefficients/initialization, mode generation, RNG/noise, physical conversions, ADC conversion, and simulation stepping are unchanged. Other edits are limited to `apps/accelSim/tests/accelSim_test.cpp`, `apps/accelSim/README.md`, and this plan.
+
+1. **One coherent timingDiag update.** `appLogic` still copies the worker snapshot under the snapshot mutex, then calls the extracted app-local `updateINDI` method. That method keeps the existing control mutex around app-owned property updates and calls the existing `indi::updatesIfChanged<double>` once with all 23 timing names/values. There is no per-element send loop. An outage therefore sends the cleared latency/cadence and unlocked state in the same property. Unchanged snapshots send nothing. Extraction permits tests of actual app property publication without starting frameGrabber or telemeter threads.
+2. **FPS Busy until worker acknowledgment.** Valid local and subscribed FPS requests increment a request revision and set the target/Busy using the existing INDI helper. The worker captures a consistent requested value/revision under the control mutex only when a request is pending, releases that mutex, applies the already-approved rate change/reinitialization and timing reset, then acknowledges the captured revision. `updateINDI` reports Ok only when the applied and requested revisions match; rejected requests retain Alert until a valid request. Revisions prevent an older in-flight request from acknowledging a newer request, including a request back to the previously active rate. Same-rate requests still pass through worker acknowledgment but do not redraw states or increment discontinuities. The worker performs no INDI calls; numerical work remains outside locks. This adds a short control-state copy at FPS-update boundaries, not a mutex on every normal simulation tick. At those boundaries it can wait for an existing control/INDI critical section; no new real-time guarantee is asserted for reconfiguration.
+3. **Positive half-period phase boundary.** `diagnostics::updatePhaseError` applies the hardware's separate positive wraps of applied/model delay, then maps their difference into `(-T/2,T/2]` using `<= -T/2` and `> T/2`. `syncTiming` uses this value for the unchanged absolute/fractional lock criteria. Zero/unmeasured periods produce zero phase error. The 500-us / -250-us-offset case now reports +250 us, matching mcp3208Ctrl.
+4. **Trigger history requires measured timing.** `diagnostics::updateTrigger` leaves prediction history uninitialized and trigger time/interval zero while the source period is unmeasured/nonpositive. The first positive-period prediction reports its offset but a zero interval; the next valid prediction can establish an interval. `syncTiming` delegates to this helper. Existing startup, outage, counter-reset, rate-change, and reconfiguration paths continue to clear prediction history, so reconnection cannot use an old prediction. Neither the model phase target nor acquisition pacing was changed to implement this diagnostic correction.
+
+**Focused regression tests added:**
+
+| Test | Specific coverage | Execution status |
+| --- | --- | --- |
+| `accelSim timing diagnostics serialize one snapshot` (`[indi-regression]`) | Captures actual outgoing INDI XML. An invalidated locked snapshot sends exactly one 23-element timingDiag message with latency/cadence/lock cleared together and retained lifetime frame count. An identical snapshot emits no message. | Added; requires the blocked full application dependencies. |
+| `accelSim FPS acknowledgment follows worker application` (`[indi-regression]`) | Actual local callback sends Busy with old current; app-loop update remains Busy; real acquisition boundary applies rate and permits Ok/current update. Covers superseding revisions, a request back to the active rate without a physical restart, persistent Alert after rejection, and a valid external subscription recovering through Busy to Ok. | Added; requires the blocked full application dependencies. |
+| `accelSim phase error positive boundary` (`[model][sync-regression]`) | Both exact half-period signs, multiple-period equivalents, values immediately on both sides, zero difference, unmeasured period, and the review's concrete 409.4/159.4-us case. | Executed successfully. |
+| `accelSim trigger history requires measured timing` (`[model][sync-regression]`) | Repeated no-period arrivals with positive configured offset; first/second valid predictions; invalidation/reconnection with cleared history. | Executed successfully. |
+
+The existing full-app `accelSim synchronized delay model` test was also extended to check the first, second, and third actual `syncTiming` calls and the positive half-period case. The existing outage/reconfiguration tests continue to cover application lifecycle invalidation. New full-app tests use a recording subclass of the existing INDI driver, overriding only XML transport and parsing the real serialized messages. It has a private temporary input file, unused `/dev/null` endpoints, no activated input thread/server/socket, and explicit input cleanup following the repository's Linux `/proc/self/fd` fixture pattern. This fixture is for the Linux full test suite, not a macOS build workaround. Doxygen references identify the real app APIs under test.
+
+**Validation after the changes:**
+
+| Check | Result |
+| --- | --- |
+| Fresh standalone C++20/O3/`-fno-fast-math`/`-Wall -Wextra` build | Passed. |
+| Complete standalone numerical/timing suite | **13 cases / 20764 assertions passed** in `/tmp/accelSim_indi_fix_model_test '[model]'`. |
+| Synchronization regression selection | **5 cases / 12181 assertions passed**, including the two newly executable timing-diagnostic regressions. |
+| Fresh ASan/UBSan O1/debug build and complete standalone run | **13 cases / 20764 assertions passed**, no sanitizer findings. Covers model/timing helpers, not full app/INDI concurrency. |
+| Python PSD tests, warnings treated as errors | **4 tests passed**. |
+| Fresh diagnostic export | **1 case / 6 assertions passed**; 360000 paired samples, 214 modes, 6000 Hz / 60 s / seeds 42 and 123. |
+| Full offline PSD validation | Passed finite/time-grid/count checks and regenerated all five plots, `psd.csv`, and `validation.json` in `/tmp/accelSim-indi-fix-validation`; log `/tmp/accelSim-indi-fix-psd.log`. No ADC clipping. |
+| Physics preservation check | `samples.csv`, `modes.csv`, and `metadata.json` are byte-for-byte identical to the preceding `/tmp/accelSim-compatibility-validation` export. |
+| Formatting / diff / documentation | clang-format applied and `--dry-run --Werror` passed on all three touched C++ files, preserving exact `//mutex scope` spelling via the previously documented style override. `git diff --check` passed. No authors added; declarations, members, parameters, test groups, and explicit wrapper-test Doxygen references checked. |
+| Normal application / full INDI and stream tests | Not rerun or bypassed: the user explicitly retained the existing shared build blockers. The new/extended full-app regressions are not claimed to have compiled or passed. |
+
+Commands used for the available C++ checks, from the repository root:
+
+```sh
+c++ -std=c++20 -O3 -fno-fast-math -Wall -Wextra \
+  -DCATCH_CONFIG_MAIN -DACCELSIM_MODEL_ONLY \
+  apps/accelSim/tests/accelSim_test.cpp -o /tmp/accelSim_indi_fix_model_test
+/tmp/accelSim_indi_fix_model_test '[model]'
+/tmp/accelSim_indi_fix_model_test '[sync-regression]'
+c++ -std=c++20 -O1 -g -fno-fast-math -fsanitize=address,undefined \
+  -fno-omit-frame-pointer -DCATCH_CONFIG_MAIN -DACCELSIM_MODEL_ONLY \
+  apps/accelSim/tests/accelSim_test.cpp -o /tmp/accelSim_indi_fix_sanitize
+/tmp/accelSim_indi_fix_sanitize '[model]'
+/tmp/accelsim-validation-env/bin/python -W error -m unittest discover \
+  -s apps/accelSim/tests -p 'test_validate_psd.py' -v
+mkdir -p /tmp/accelSim-indi-fix-validation
+ACCELSIM_EXPORT_DIR=/tmp/accelSim-indi-fix-validation \
+  /tmp/accelSim_indi_fix_model_test '[accelSim-export]'
+MPLCONFIGDIR=/tmp/accelSim-indi-fix-matplotlib \
+  /tmp/accelsim-validation-env/bin/python apps/accelSim/tests/validate_psd.py \
+  /tmp/accelSim-indi-fix-validation
+```
+
+The Python environment already existed; no dependencies were installed or changed. The per-process Matplotlib cache is confined to `/tmp`.
+
+**Remaining compatibility differences and limits:** no known defect among the four requested fixes remains in source. Approved differences remain (6000-Hz default, fixed two channels/stricter validation, meaningful timer acquisition timestamps, bounded simulated catch-up, honest computation timing, additive sim_diag). Valid immediate `alpha`, `numChannels`, and `synchroDelay` controls still acknowledge Ok without the hardware's brief Busy transition; this previously recorded non-FPS transition difference was not one of the four requested corrections and was not silently changed. Exact live protocol equivalence and downstream substitution remain unverified. The user-supplied deployment identity/depth/config and downstream consumer are still unavailable here.
+
+Both retained build blockers are unchanged: macOS `timegm` visibility under mxlib's `_XOPEN_SOURCE=700`, and the missing installed `mx/math/floatUtils.hpp` API required by shared pupil-fit telemetry. No shared/dependency workaround was attempted. On a configured non-instrument Linux development host, build the normal app/tests and run `[accelSim]`, `[indi-regression]`, and `[accelSim-streams]` in their appropriate separate processes, followed by the approved ten-minute live test and actual INDI/subscription checks. Instrument-side or tunneled INDI execution remains excluded.
