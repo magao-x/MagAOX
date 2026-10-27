@@ -1,13 +1,13 @@
 Follow these code style and documentation rules exactly.
 
-0) Agents/LLMs should never be installed or execute on the actual instrument hardware.
-  - users should run such tools on their local workstations/laptops
-  - This prohibition includes exao1(AOC), exao2(RTC), exao3(ICC) and exao5 (ROC) on MagAO-X.  It includes similar-function machines in other projects.
-  - This includes running commands such as getINDI and setINDI when an INDI tunnel is open to any instrument computer
-  - Agents/LLMs should instead ask the user to run any such commands / hardware steps and report the results.
+0) Agents should never control the actual instrument hardware.
+  - Users should run such tools on their local workstations/laptops. If the environment suggests this isn't a personal workstation, stop and ask for clarification.
+  - Do not use commands like `getINDI` and `setINDI` when an INDI tunnel is open to any instrument computer
+  - Before beginning work, use `hostname` to verify you are **not** running on any machine beginning with `exao` (i.e. `exao1`).
+  - When a task requires interrogating the real instrument, ask the user to run any such commands / hardware steps and report the results.
 
 1) Style, Reuse of Code, and Brevity 
-  - Follow the coding style of this repo.  Specific style points are listed below but are not exhaustive.
+  - Follow the coding style of this repo. Specific style points are listed below but are not exhaustive.
   - Favor brevity in code
   - Reuse code and existing solutions whenever possible.  
   - Check for similar problems in this repo that have already been solved.  Use existing base classes when possible.  
@@ -125,7 +125,7 @@ Follow these code style and documentation rules exactly.
 23) Commit Messages 
   - Keep commit messages brief, normally a single line to describe the commit purpose 
   - Additional detail should go in the assocated planning document (if it exists) and be committed.
-  - Also include an attribution "Co-authored by  <model-name>" substituting the model name.  This should be on an additional line
+  - To display coauthorship in the history and on GitHub, use the `Co-Authored-By:` annotation in a separate line at the end of your commit (e.g. `Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>` or `Co-authored-by: codex <codex@openai.com>` depending on the model in use)
 
 24) PR Prompt Attribution
   - At the top of PR descriptions, include an explicit attribution line when work was performed with an AI agent.
