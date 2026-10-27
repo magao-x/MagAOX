@@ -522,5 +522,227 @@ TEST_CASE( "synco simulation validates bounded arithmetic", "[dmSyncopation][sim
     REQUIRE( simulation.summary().invalid > 0 );
 }
 
+/** \brief Trace events preserve frozen copy/reader boundaries, identity and unconverted caller-clock context. */
+TEST_CASE( "synco simulation overlap trace windows", "[dmSyncopation][simulation]" )
+{
+    using namespace MagAOX::dmSyncoSimulation;
+    Simulation simulation;
+    REQUIRE( simulation.configure( {} ) );
+    const auto  last = warm( simulation );
+    Observation context;
+    context.streamInode          = 71;
+    context.triggerInode         = 72;
+    context.receiptNs            = last + 460000;
+    context.callbackNs           = last + 461000;
+    context.lockRequestNs        = last + 462000;
+    context.lockAcquiredNs       = last + 463000;
+    context.publicationNs        = 1800000000000000000LL;
+    context.primaryPublicationNs = 1800000000000000100LL;
+    context.startNs              = 1800000000000000200LL;
+    context.updateNs             = 1800000000000000300LL;
+    OverlapEvent event;
+
+    SECTION( "passive copy evidence preserves both cycle identities and producer clocks" )
+    {
+        simulation.primary( 41, last + 465000, 465000, context );
+        REQUIRE( simulation.popOverlap( event ) );
+        CHECK( event.id == 1 );
+        CHECK( event.session == simulation.summary().session );
+        CHECK( event.mainCounter == 41 );
+        CHECK( event.combinedCounter == 40 );
+        CHECK( event.planCounter == 41 );
+        CHECK( event.lastMainCounter == 40 );
+        CHECK( event.step == 0 );
+        CHECK( event.origin == OverlapOrigin::primary );
+        CHECK( event.window == OverlapWindow::copy );
+        CHECK( event.observedNs == last + 465000 );
+        CHECK( event.mainGridNs == last + 500000 );
+        CHECK( event.planGridNs == event.mainGridNs );
+        CHECK( event.periodNs == 500000 );
+        CHECK( event.copyBeginNs == last + 462000 );
+        CHECK( event.copyEndNs == last + 472000 );
+        CHECK( event.readerEndNs == 0 );
+        CHECK( event.lastMainNs == last );
+        CHECK( event.lastOutputNs == last + 10000 );
+        CHECK( event.observation.streamInode == context.streamInode );
+        CHECK( event.observation.triggerInode == context.triggerInode );
+        CHECK( event.observation.receiptNs == context.receiptNs );
+        CHECK( event.observation.callbackNs == context.callbackNs );
+        CHECK( event.observation.lockRequestNs == context.lockRequestNs );
+        CHECK( event.observation.lockAcquiredNs == context.lockAcquiredNs );
+        CHECK( event.observation.publicationNs == context.publicationNs );
+        CHECK( event.observation.primaryPublicationNs == context.primaryPublicationNs );
+        CHECK( event.observation.startNs == context.startNs );
+        CHECK( event.observation.updateNs == context.updateNs );
+        CHECK_FALSE( simulation.popOverlap( event ) );
+    }
+
+    SECTION( "active copy end begins the reader-hold classification" )
+    {
+        simulation.advance( last + 240000 );
+        simulation.primary( 41, last + 250000, 250000 );
+        REQUIRE( simulation.popOverlap( event ) );
+        CHECK( event.step == 1 );
+        CHECK( event.planCounter == 40 );
+        CHECK( event.planGridNs == last );
+        CHECK( event.mainGridNs == last + 500000 );
+        CHECK( event.window == OverlapWindow::readerHold );
+        CHECK( event.copyBeginNs == last + 240000 );
+        CHECK( event.copyEndNs == last + 250000 );
+        CHECK( event.readerEndNs == last + 405000 );
+        CHECK( event.observation.publicationNs == 0 );
+    }
+
+    SECTION( "active copy start is included once that modeled copy has started" )
+    {
+        simulation.advance( last + 240000 );
+        simulation.primary( 41, last + 240000, 240000 );
+        REQUIRE( simulation.popOverlap( event ) );
+        CHECK( event.window == OverlapWindow::copy );
+        CHECK( event.step == 1 );
+    }
+
+    SECTION( "passive copy end is excluded" )
+    {
+        simulation.primary( 41, last + 472000, 472000 );
+        CHECK_FALSE( simulation.popOverlap( event ) );
+    }
+
+    SECTION( "active reader end is excluded" )
+    {
+        simulation.advance( last + 240000 );
+        simulation.primary( 41, last + 405000, 405000 );
+        CHECK_FALSE( simulation.popOverlap( event ) );
+    }
+}
+
+/** \brief Both monitor origins remain available for offline deduplication, with distinct counters and steps retained.
+ */
+TEST_CASE( "synco simulation overlap trace identities", "[dmSyncopation][simulation]" )
+{
+    using namespace MagAOX::dmSyncoSimulation;
+    Simulation simulation;
+    REQUIRE( simulation.configure( {} ) );
+    const auto last = warm( simulation );
+    simulation.combined( 41, 41, last + 463000 );
+    simulation.primary( 41, last + 464000, 464000 );
+    OverlapEvent combined, primary;
+    REQUIRE( simulation.popOverlap( combined ) );
+    REQUIRE( simulation.popOverlap( primary ) );
+    CHECK( combined.origin == OverlapOrigin::combined );
+    CHECK( primary.origin == OverlapOrigin::primary );
+    CHECK( combined.id + 1 == primary.id );
+    CHECK( combined.session == primary.session );
+    CHECK( combined.planCounter == primary.planCounter );
+    CHECK( combined.step == primary.step );
+    CHECK( combined.mainCounter == primary.mainCounter );
+    CHECK( combined.mainGridNs == primary.mainGridNs );
+    CHECK( combined.combinedCounter == primary.combinedCounter );
+    CHECK( combined.lastMainCounter == 40 );
+    CHECK( primary.lastMainCounter == 40 );
+
+    simulation.advance( last + 745000 );
+    const auto nextGrid = simulation.summary().nextGridNs;
+    simulation.primary( 42, last + 746000, 500000 );
+    simulation.primary( 43, last + 748000, 500000 );
+    OverlapEvent second, third;
+    REQUIRE( simulation.popOverlap( second ) );
+    REQUIRE( simulation.popOverlap( third ) );
+    CHECK( second.planCounter == 41 );
+    CHECK( second.step == 1 );
+    CHECK( second.mainCounter == 42 );
+    CHECK( second.mainGridNs == nextGrid );
+    CHECK( third.planCounter == second.planCounter );
+    CHECK( third.step == second.step );
+    CHECK( third.mainCounter == 43 );
+    CHECK( third.id == second.id + 1 );
+    CHECK_FALSE( simulation.popOverlap( third ) );
+}
+
+/** \brief Saturation drops new records, draining recovers capacity, and session changes preserve FIFO accounting. */
+TEST_CASE( "synco simulation overlap trace lifetime", "[dmSyncopation][simulation]" )
+{
+    using namespace MagAOX::dmSyncoSimulation;
+    Simulation   retained, drained;
+    OverlapEvent event;
+
+    for( uint64_t id = 1; id <= traceCapacity + 5; ++id )
+    {
+        REQUIRE( retained.configure( {} ) );
+        REQUIRE( drained.configure( {} ) );
+        const auto last = warm( retained );
+        REQUIRE( warm( drained ) == last );
+        retained.primary( 41, last + 465000, 465000 );
+        drained.primary( 41, last + 465000, 465000 );
+        REQUIRE( drained.popOverlap( event ) );
+        CHECK( event.id == id );
+        CHECK( event.session == id );
+        const auto status = retained.traceStatus();
+        CHECK( status.enabled );
+        CHECK( status.capacity == traceCapacity );
+        CHECK( status.detected == id );
+        CHECK( status.detected == status.drained + status.dropped + status.queued );
+        CHECK( status.logFailed == 0 );
+
+        const auto &a = retained.summary();
+        const auto &b = drained.summary();
+        CHECK( a.valid == b.valid );
+        CHECK( a.feasible == b.feasible );
+        CHECK( a.periodNs == b.periodNs );
+        CHECK( a.gridNs == b.gridNs );
+        CHECK( a.nextGridNs == b.nextGridNs );
+        CHECK( a.nextActiveNs == b.nextActiveNs );
+        CHECK( a.phaseNs == b.phaseNs );
+        CHECK( a.sequence == b.sequence );
+        CHECK( a.associations == b.associations );
+
+        for( size_t step = 0; step < maxSteps; ++step )
+        {
+            CHECK( a.outcomes[step].considered == b.outcomes[step].considered );
+            CHECK( a.outcomes[step].wouldRun == b.outcomes[step].wouldRun );
+            CHECK( a.outcomes[step].skipped == b.outcomes[step].skipped );
+            CHECK( a.outcomes[step].overlap == b.outcomes[step].overlap );
+        }
+    }
+
+    auto status = retained.traceStatus();
+    REQUIRE( status.queued == traceCapacity );
+    REQUIRE( status.dropped == 5 );
+    REQUIRE( status.drained == 0 );
+
+    for( uint64_t id = 1; id <= 3; ++id )
+    {
+        REQUIRE( retained.popOverlap( event ) );
+        CHECK( event.id == id );
+        CHECK( event.session == id );
+    }
+
+    retained.reset();
+    status = retained.traceStatus();
+    CHECK( status.queued == traceCapacity - 3 );
+    CHECK( status.drained == 3 );
+    CHECK( status.dropped == 5 );
+    const auto last = warm( retained );
+    retained.primary( 41, last + 465000, 465000 );
+
+    for( uint64_t id = 4; id <= traceCapacity; ++id )
+    {
+        REQUIRE( retained.popOverlap( event ) );
+        CHECK( event.id == id );
+        CHECK( event.session == id );
+    }
+
+    REQUIRE( retained.popOverlap( event ) );
+    CHECK( event.id == traceCapacity + 6 );
+    CHECK( event.session == traceCapacity + 6 );
+    CHECK_FALSE( retained.popOverlap( event ) );
+    status = retained.traceStatus();
+    CHECK( status.queued == 0 );
+    CHECK( status.drained == traceCapacity + 1 );
+    CHECK( status.detected == status.drained + status.dropped + status.queued );
+    CHECK( drained.traceStatus().dropped == 0 );
+    CHECK( drained.traceStatus().queued == 0 );
+}
+
 } // namespace dmSyncopationTest
 } // namespace libXWCTest

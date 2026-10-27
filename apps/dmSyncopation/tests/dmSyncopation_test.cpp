@@ -86,6 +86,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_indiP_simulation;
     using dmSyncopation::m_indiP_simulationStatus;
     using dmSyncopation::m_indiP_simulationSteps;
+    using dmSyncopation::m_indiP_simulationTrace;
     using dmSyncopation::m_lastFaultNs;
     using dmSyncopation::m_lastFaultReason;
     using dmSyncopation::m_lastMain;
@@ -122,6 +123,8 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_simulationEnabled;
     using dmSyncopation::m_simulationPhaseGain;
     using dmSyncopation::m_simulationPhaseSlewUs;
+    using dmSyncopation::m_simulationTraceLogFailed;
+    using dmSyncopation::m_simulationTraceStatus;
     using dmSyncopation::m_simulationWindow;
     using dmSyncopation::m_submission;
     using dmSyncopation::m_timing;
@@ -780,6 +783,37 @@ void combinedObservation( Harness &app /**< [in,out] Isolated observer fixture. 
     app.shmimMonitorTiming( syncoCombinerT{},
                             initial ? dev::shmimMonitorEvent::initial : dev::shmimMonitorEvent::receipt );
     REQUIRE( app.processImage( nullptr, syncoCombinerT{} ) == 0 );
+}
+
+/// Acquire a stable simulation through real monitor hooks and coherent producer metadata.
+int64_t prepareSimulationTrace( Harness &app /**< [in,out] Isolated simulation fixture. */,
+                                Streams &streams /**< [in,out] Owned primary and combined metadata. */ )
+{
+    app.attachPrimaryOnly();
+    app.m_simulationEnabled = true;
+    app.m_simulationWindow  = 4;
+    app.m_requested         = 2;
+    app.m_now               = CadenceClock::now;
+    app.m_primaryCadence.configure( 2, 64 );
+    app.m_combinerCadence.configure( 2, 64 );
+    REQUIRE( app.configureSimulation() );
+    REQUIRE( app.allocate( dev::shmimT{} ) == 0 );
+    app.attachCombinedOnly();
+    app.shmimMonitorTiming( dev::shmimT{}, dev::shmimMonitorEvent::connected );
+    app.shmimMonitorTiming( syncoCombinerT{}, dev::shmimMonitorEvent::connected );
+    constexpr int64_t epoch = 1792000000000000000LL;
+
+    for( uint64_t sample = 0; sample < 40; ++sample )
+    {
+        const auto observed = 1000000000LL + int64_t( sample ) * 500000;
+        cadenceObservation( app, observed, epoch + int64_t( sample ) * 500000, sample + 10 );
+        combinedObservation(
+            app, streams.images[1], observed + 20000, epoch + int64_t( sample ) * 500000, sample + 10 );
+    }
+
+    REQUIRE( app.m_simulation.summary().valid );
+    REQUIRE( app.m_simulation.traceStatus().detected == 0 );
+    return app.m_simulation.summary().lastMainNs;
 }
 
 /// \endcond
@@ -3540,6 +3574,11 @@ TEST_CASE( "syncopation simulation callbacks leave all command channels untouche
     CHECK( summary.associations == 40 );
     CHECK( summary.outcomes[0].considered > 0 );
     CHECK( summary.outcomes[1].wouldRun > 0 );
+    const int64_t lastMain = summary.lastMainNs;
+    cadenceObservation( app, lastMain + 270000, epoch + 19770000, 50 );
+    combinedObservation( app, streams.images[1], lastMain + 290000, epoch + 19770000, 50 );
+    CHECK( app.m_simulation.traceStatus().detected == 1 );
+    CHECK( app.m_simulation.traceStatus().queued == 1 );
     CHECK_FALSE( app.m_enabled );
     CHECK_FALSE( app.m_resources );
     CHECK_FALSE( app.m_combined );
@@ -3548,8 +3587,8 @@ TEST_CASE( "syncopation simulation callbacks leave all command channels untouche
     CHECK( app.m_faults == 0 );
     CHECK( app.m_delivered == 0 );
     CHECK( CadenceClock::waits == 0 );
-    CHECK( streams.images[0].md->cnt0 == 49 ); // Only the fixture's primary writes advanced this counter.
-    CHECK( streams.images[1].md->cnt0 == 49 ); // Only the fixture's synthetic combined producer advanced it.
+    CHECK( streams.images[0].md->cnt0 == 50 ); // Only the fixture's primary writes advanced this counter.
+    CHECK( streams.images[1].md->cnt0 == 50 ); // Only the fixture's synthetic combined producer advanced it.
 
     for( size_t image = 0; image < streams.images.size(); ++image )
     {
@@ -3609,8 +3648,17 @@ TEST_CASE( "syncopation simulation qualifies observations and exposes conditiona
     CHECK( app.m_indiP_simulation.getPerm() == pcf::IndiProperty::ReadOnly );
     CHECK( app.m_indiP_simulationSteps.getPerm() == pcf::IndiProperty::ReadOnly );
     CHECK( app.m_indiP_simulationStatus.getPerm() == pcf::IndiProperty::ReadOnly );
+    CHECK( app.m_indiP_simulationTrace.getPerm() == pcf::IndiProperty::ReadOnly );
     CHECK( app.m_indiP_simulation.getElements().size() == 23 );
     CHECK( app.m_indiP_simulationSteps.getElements().size() == 4 * synco::maxSteps );
+    CHECK( app.m_indiP_simulationTrace.getName() == "simulation_trace" );
+    CHECK( app.m_indiP_simulationTrace.getElements().size() == 7 );
+
+    for( const auto *name : { "enabled", "detected", "drained", "dropped", "queued", "capacity", "logFailed" } )
+    {
+        CHECK( app.m_indiP_simulationTrace.find( name ) );
+    }
+
     CHECK( app.m_indiP_simulationStatus.find( "state" ) );
     CHECK( app.m_indiP_simulationStatus.find( "policy" ) );
     CHECK( app.m_indiP_simulation.find( "phaseMinUs" ) );
@@ -3733,6 +3781,209 @@ TEST_CASE( "syncopation simulation qualifies observations and exposes conditiona
     dmSyncopation::processImage( nullptr, syncoCombinerT{} );
     dmSyncopation::setupSimulationINDI;
     dmSyncopation::updateSimulationINDI;
+#endif
+    // clang-format on
+}
+
+/// Preserve real monitor/producer context and correlate the two paths without suppressing overlap evidence.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation overlap evidence preserves monitor and producer clocks",
+           "[dmSyncopation][simulation][overlapTrace]" )
+{
+    using namespace MagAOX::dmSyncoSimulation;
+    Streams           streams;
+    Harness           app;
+    const int64_t     last  = prepareSimulationTrace( app, streams );
+    constexpr int64_t epoch = 1792000000000000000LL;
+    OverlapEvent      event;
+
+    SECTION( "Primary callback identifies the actual active-reader overlap" )
+    {
+        const int64_t receipt                     = last + 270000;
+        const int64_t publication                 = epoch + 19770000;
+        MagAOX::logger::telem_dmsynco::lastRecord = {};
+        cadenceObservation( app, receipt, publication, 50 );
+        REQUIRE( app.m_simulation.popOverlap( event ) );
+        CHECK( event.origin == OverlapOrigin::primary );
+        CHECK( event.window == OverlapWindow::readerHold );
+        CHECK( event.mainCounter == 50 );
+        CHECK( event.combinedCounter == 49 );
+        CHECK( event.planCounter == 49 );
+        CHECK( event.lastMainCounter == 49 );
+        CHECK( event.step == 1 );
+        CHECK( event.lastMainNs == last );
+        CHECK( event.observedNs >= event.copyEndNs );
+        CHECK( event.observedNs < event.readerEndNs );
+        CHECK( event.observation.streamInode == streams.images[0].md->inode );
+        CHECK( event.observation.triggerInode == 0 );
+        CHECK( event.observation.receiptNs == receipt );
+        CHECK( event.observation.callbackNs == receipt + 1 );
+        CHECK( event.observation.publicationNs == publication );
+        CHECK( event.observation.primaryPublicationNs == publication );
+        CHECK( event.observation.startNs == 0 );
+        CHECK( event.observation.updateNs == 0 );
+        CHECK( event.observation.publicationNs > event.observedNs );    // Producer epoch never becomes monotonic time.
+        CHECK( MagAOX::logger::telem_dmsynco::lastRecord.tv_sec == 0 ); // Callback only queues fixed-size evidence.
+    }
+
+    SECTION( "Combined-first and primary-later evidence retain one offline correlation key" )
+    {
+        const int64_t publication = epoch + 19940000;
+        const int64_t receipt     = last + 462000;
+        combinedObservation( app, streams.images[1], receipt, publication, 50 );
+        REQUIRE( app.m_simulation.popOverlap( event ) );
+        CHECK( event.origin == OverlapOrigin::combined );
+        CHECK( event.window == OverlapWindow::copy );
+        CHECK( event.step == 0 );
+        CHECK( event.mainCounter == 50 );
+        CHECK( event.combinedCounter == 50 );
+        CHECK( event.planCounter == 50 );
+        CHECK( event.lastMainCounter == 49 );
+        CHECK( event.readerEndNs == 0 );
+        CHECK( event.observedNs >= event.copyBeginNs );
+        CHECK( event.observedNs < event.copyEndNs );
+        CHECK( event.observation.streamInode == streams.images[1].md->inode );
+        CHECK( event.observation.triggerInode == streams.images[0].md->inode );
+        CHECK( event.observation.receiptNs == receipt );
+        CHECK( event.observation.callbackNs == receipt + 1 );
+        CHECK( event.observation.publicationNs == publication + 18000 );
+        CHECK( event.observation.primaryPublicationNs == 0 ); // Its primary callback has not run yet.
+        CHECK( event.observation.startNs == publication + 12000 );
+        CHECK( event.observation.updateNs == publication + 16000 );
+        const auto combined = event;
+        cadenceObservation( app, last + 465000, publication, 50 );
+        REQUIRE( app.m_simulation.popOverlap( event ) );
+        CHECK( event.origin == OverlapOrigin::primary );
+        CHECK( event.id == combined.id + 1 );
+        CHECK( event.session == combined.session );
+        CHECK( event.mainCounter == combined.mainCounter );
+        CHECK( event.planCounter == combined.planCounter );
+        CHECK( event.step == combined.step );
+        CHECK( event.mainGridNs == combined.mainGridNs );
+        CHECK( event.planGridNs == combined.planGridNs );
+        CHECK( event.observation.primaryPublicationNs == publication );
+        CHECK( app.m_simulation.traceStatus().detected == 2 );
+
+        combinedObservation( app, streams.images[1], last + 466000, publication, 50 );
+        cadenceObservation( app, last + 467000, publication, 50 );
+        CHECK( app.m_simulation.traceStatus().detected == 2 ); // Repeated notifications add no evidence.
+    }
+
+    CHECK( event.id > 0 );
+    CHECK( event.session == app.m_simulation.summary().session );
+    CHECK( event.periodNs == 500000 );
+    CHECK( event.observation.receiptNs <= event.observation.callbackNs );
+    CHECK( event.observation.callbackNs <= event.observation.lockRequestNs );
+    CHECK( event.observation.lockRequestNs <= event.observation.lockAcquiredNs );
+    CHECK( event.observation.lockAcquiredNs <= event.observedNs );
+    CHECK_FALSE( app.m_simulation.popOverlap( event ) );
+    CHECK_FALSE( app.m_enabled );
+    CHECK_FALSE( app.m_resources );
+    CHECK( app.m_delivered == 0 );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::processImage( nullptr, dev::shmimT{} );
+    dmSyncopation::processImage( nullptr, syncoCombinerT{} );
+    dmSyncopation::readSimulationPrimary;
+    dmSyncopation::readSimulationCombined;
+#endif
+    // clang-format on
+}
+
+/// Keep unlogged evidence queued during cycle-lock contention and drain at most one fixed telemetry batch.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation overlap telemetry drains only outside producer callbacks",
+           "[dmSyncopation][simulation][overlapTrace]" )
+{
+    using namespace MagAOX::dmSyncoSimulation;
+    Streams       streams;
+    Harness       app;
+    const int64_t last = prepareSimulationTrace( app, streams );
+
+    SECTION( "A busy cycle lock neither blocks telemetry nor drains evidence" )
+    {
+        cadenceObservation( app, last + 270000, 1792000000019770000LL, 50 );
+        REQUIRE( app.m_simulation.traceStatus().queued == 1 );
+        std::unique_lock<std::mutex> cycle( app.m_cycleMutex );
+        auto                         recording = std::async( std::launch::async,
+                                     [&]()
+                                     {
+                                         return app.recordTelem( nullptr );
+                                     } );
+        const auto                   ready     = recording.wait_for( std::chrono::milliseconds( 500 ) );
+        cycle.unlock();
+        CHECK( recording.get() == 0 );
+        CHECK( ready == std::future_status::ready );
+        CHECK( app.m_simulation.traceStatus().detected == 1 );
+        CHECK( app.m_simulation.traceStatus().drained == 0 );
+        CHECK( app.m_simulation.traceStatus().queued == 1 );
+        REQUIRE( app.recordTelem( nullptr ) == 0 );
+        CHECK( app.m_simulation.traceStatus().drained == 1 );
+        CHECK( app.m_simulation.traceStatus().queued == 0 );
+    }
+
+    SECTION( "One record cannot drain more than the shared batch capacity" )
+    {
+        constexpr size_t count = traceBatchCapacity + 6;
+
+        for( size_t sample = 0; sample < count; ++sample )
+        {
+            app.m_simulation.combined( 50 + sample, 50, last + 465000 + int64_t( sample ) );
+        }
+
+        REQUIRE( app.m_simulation.traceStatus().queued == count );
+        REQUIRE( app.recordTelem( nullptr ) == 0 );
+        CHECK( app.m_simulation.traceStatus().drained == traceBatchCapacity );
+        CHECK( app.m_simulation.traceStatus().queued == 6 );
+        CHECK( app.m_simulationTraceStatus.detected == count );
+        CHECK( app.m_simulationTraceStatus.drained == traceBatchCapacity );
+        CHECK( app.m_simulationTraceStatus.queued == 6 );
+        CHECK( app.m_simulationTraceStatus.capacity == traceCapacity );
+        REQUIRE( app.recordTelem( nullptr ) == 0 );
+        CHECK( app.m_simulationTraceStatus.drained == count );
+        CHECK( app.m_simulationTraceStatus.queued == 0 );
+    }
+
+    CHECK( app.m_simulationTraceStatus.enabled );
+    CHECK( app.m_simulationTraceStatus.dropped == 0 );
+    CHECK( app.m_simulationTraceLogFailed == 0 );
+    CHECK( app.m_simulationTraceStatus.detected == app.m_simulationTraceStatus.drained +
+                                                       app.m_simulationTraceStatus.dropped +
+                                                       app.m_simulationTraceStatus.queued );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::recordTelem;
+#endif
+    // clang-format on
+}
+
+/// Leave overlap collection and its INDI interface absent from ordinary non-simulation operation.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation default observers do not collect overlap evidence",
+           "[dmSyncopation][simulation][overlapTrace]" )
+{
+    Streams streams;
+    Harness app;
+    prepareCadence( app );
+    prepareCombined( app, streams );
+    REQUIRE( app.setupSimulationINDI() == 0 );
+    cadenceObservation( app, 1000000000, 1792000000000000000LL, 10 );
+    combinedObservation( app, streams.images[1], 1000020000, 1792000000000000000LL, 10 );
+    const auto                              status = app.m_simulation.traceStatus();
+    MagAOX::dmSyncoSimulation::OverlapEvent event;
+    CHECK_FALSE( status.enabled );
+    CHECK( status.detected == 0 );
+    CHECK( status.queued == 0 );
+    CHECK_FALSE( app.m_simulation.popOverlap( event ) );
+    CHECK( app.m_indiP_simulationTrace.getElements().empty() );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::processImage( nullptr, dev::shmimT{} );
+    dmSyncopation::processImage( nullptr, syncoCombinerT{} );
+    dmSyncopation::setupSimulationINDI;
 #endif
     // clang-format on
 }

@@ -45,21 +45,31 @@ class Simulation
     void reset();
 
     /// Observe one coherent main; zero publication interval means unavailable, with no clock fallback.
-    void primary( uint64_t counter /**< [in] genuine primary counter */,
-                  int64_t  observed /**< [in] coherent same-host monotonic observation */,
-                  int64_t  publicationInterval = 0 /**< [in] qualified producer-clock interval, ns */ );
+    void
+    primary( uint64_t counter /**< [in] genuine primary counter */,
+             int64_t  observed /**< [in] coherent same-host monotonic observation */,
+             int64_t  publicationInterval = 0 /**< [in] qualified producer-clock interval, ns */,
+             const MagAOX::dmSyncoSimulation::Observation &context = {} /**< [in] optional raw monitor context */ );
 
     /// Observe coherent combined-output linkage; false coherence never supplies an acknowledgement.
-    void combined( uint64_t counter /**< [in] actual combined counter */,
-                   uint64_t primaryCounter /**< [in] primary counter named by its trace */,
-                   int64_t  observed /**< [in] same-host monotonic observation */,
-                   bool     coherent = true /**< [in] metadata and trace association are usable */ );
+    void
+    combined( uint64_t counter /**< [in] actual combined counter */,
+              uint64_t primaryCounter /**< [in] primary counter named by its trace */,
+              int64_t  observed /**< [in] same-host monotonic observation */,
+              bool     coherent = true /**< [in] metadata and trace association are usable */,
+              const MagAOX::dmSyncoSimulation::Observation &context = {} /**< [in] optional raw monitor context */ );
 
     /// Evaluate committed slots through a monotonic time without synthesizing main events.
     void advance( int64_t now /**< [in] same-host monotonic evaluation time */ );
 
     /// Return the bounded snapshot; callers copy it under their own serialization.
     const MagAOX::dmSyncoSimulation::Summary &summary() const;
+
+    /// Remove the oldest retained overlap; caller serialization must match primary/combined updates.
+    bool popOverlap( MagAOX::dmSyncoSimulation::OverlapEvent &event /**< [out] oldest event on success */ );
+
+    /// Return process-lifetime FIFO accounting without consuming events; logFailed is app-owned.
+    MagAOX::dmSyncoSimulation::TraceStatus traceStatus() const;
 
   private:
     /// One primary phase observation; counters label cycles independently of time proximity.
@@ -109,10 +119,20 @@ class Simulation
     bool                               m_mainOutput{ false };   ///< Latest actual main has a coherent combination.
     int64_t                            m_outputTime{ 0 };       ///< Latest main's combined observation.
     int64_t                            m_virtualHold{ 0 };      ///< Last modeled active command's reader lifetime.
-    int64_t m_periodTime{ 0 }; ///< Most recent eligible period sample, on the observation clock.
-    int64_t m_copyBegin{ 0 };  ///< Last modeled copy's start, retained for retrospective overlap detection.
-    int64_t m_copyEnd{ 0 };    ///< Last modeled copy's completion/trigger time.
-    int     m_copyStep{ 0 };   ///< Step associated with the last modeled copy/reader hold.
+    int64_t  m_periodTime{ 0 };  ///< Most recent eligible period sample, on the observation clock.
+    int64_t  m_copyBegin{ 0 };   ///< Last modeled copy's start, retained for retrospective overlap detection.
+    int64_t  m_copyEnd{ 0 };     ///< Last modeled copy's completion/trigger time.
+    int      m_copyStep{ 0 };    ///< Step associated with the last modeled copy/reader hold.
+    uint64_t m_copyCounter{ 0 }; ///< Genuine counter labelling the last modeled copy's cycle.
+    int64_t  m_copyGrid{ 0 };    ///< Frozen prediction for the last modeled copy's cycle.
+    int64_t  m_copyPeriod{ 0 };  ///< Period frozen with the last modeled copy's cycle.
+    /// Fixed process-lifetime FIFO; reset/configure preserve undrained evidence.
+    std::array<MagAOX::dmSyncoSimulation::OverlapEvent, MagAOX::dmSyncoSimulation::traceCapacity> m_traceEvents{};
+    size_t   m_traceHead{ 0 };     ///< Oldest retained event's ring index.
+    size_t   m_traceCount{ 0 };    ///< Occupied FIFO entries.
+    uint64_t m_traceDetected{ 0 }; ///< Lifetime overlap evidence sequence, including dropped events.
+    uint64_t m_traceDrained{ 0 };  ///< Lifetime events removed for telemetry attempts.
+    uint64_t m_traceDropped{ 0 };  ///< Lifetime events discarded on FIFO saturation.
 
     /// Checked prediction using relative counter arithmetic; zero signals unrepresentable time.
     static int64_t shifted( int64_t  base /**< [in] time origin */,
@@ -125,6 +145,9 @@ class Simulation
 
     /// Return the committed plan for a counter, or null.
     Plan *plan( uint64_t counter /**< [in] primary counter */ );
+
+    /// Select an existing frozen prediction or extrapolate from the last committed cycle.
+    int64_t prediction( uint64_t counter /**< [in] actual primary counter */ );
 
     /// Return the candidate monotonic phase for a future counter, or zero.
     int64_t phase( uint64_t counter /**< [in] future primary counter */ );
@@ -144,7 +167,12 @@ class Simulation
     void evaluate( Plan &entry /**< [in,out] committed cycle */, int step /**< [in] step index */ );
 
     /// Count a main observation that could overlap the last modeled copy or active reader interval.
-    void overlap( int64_t observed /**< [in] monotonic main evidence */ );
+    void overlap( uint64_t mainCounter /**< [in] genuine primary counter supplying evidence */,
+                  uint64_t combinedCounter /**< [in] current or last observed actual combined counter */,
+                  int64_t  observed /**< [in] monotonic main evidence */,
+                  int64_t  mainGrid /**< [in] frozen prediction for the evidence's primary counter */,
+                  MagAOX::dmSyncoSimulation::OverlapOrigin      origin /**< [in] monitor supplying the evidence */,
+                  const MagAOX::dmSyncoSimulation::Observation &context /**< [in] raw caller context */ );
 
     /// Reject current/future acknowledgements after a known output gap or incoherent observation.
     void badOutput();
@@ -259,6 +287,8 @@ inline void Simulation::reset()
     m_haveMain = m_haveCombined = m_mainOutput = false;
     m_outputTime = m_virtualHold = m_copyBegin = m_copyEnd = m_periodTime = 0;
     m_copyStep                                                            = 0;
+    m_copyCounter                                                         = 0;
+    m_copyGrid = m_copyPeriod = 0;
 }
 
 inline int64_t Simulation::median( size_t count )
@@ -287,6 +317,22 @@ inline Simulation::Plan *Simulation::plan( uint64_t counter )
     }
 
     return nullptr;
+}
+
+inline int64_t Simulation::prediction( uint64_t counter )
+{
+    if( const auto *entry = plan( counter ) )
+    {
+        return entry->grid;
+    }
+
+    if( m_planCount )
+    {
+        const auto &last = m_plans[m_planCount - 1];
+        return shifted( last.grid, last.counter, counter, last.period );
+    }
+
+    return 0;
 }
 
 inline int64_t Simulation::phase( uint64_t counter )
@@ -440,9 +486,12 @@ inline void Simulation::evaluate( Plan &entry, int step )
     entry.done[step] = true;
     ++m_summary.outcomes[step].considered;
     ++m_summary.outcomes[step].wouldRun;
-    m_copyBegin = start;
-    m_copyEnd   = target;
-    m_copyStep  = step;
+    m_copyBegin   = start;
+    m_copyEnd     = target;
+    m_copyStep    = step;
+    m_copyCounter = entry.counter;
+    m_copyGrid    = entry.grid;
+    m_copyPeriod  = entry.period;
 
     if( step )
     {
@@ -474,12 +523,48 @@ inline void Simulation::next()
     }
 }
 
-inline void Simulation::overlap( int64_t observed )
+inline void Simulation::overlap( uint64_t                                      mainCounter,
+                                 uint64_t                                      combinedCounter,
+                                 int64_t                                       observed,
+                                 int64_t                                       mainGrid,
+                                 MagAOX::dmSyncoSimulation::OverlapOrigin      origin,
+                                 const MagAOX::dmSyncoSimulation::Observation &context )
 {
     if( m_copyBegin && ( ( observed >= m_copyBegin && observed < m_copyEnd ) ||
                          ( m_copyStep > 0 && observed >= m_copyEnd && observed < m_virtualHold ) ) )
     {
         ++m_summary.outcomes[m_copyStep].overlap;
+        ++m_traceDetected;
+
+        if( m_traceCount == m_traceEvents.size() )
+        {
+            ++m_traceDropped;
+            return;
+        }
+
+        auto &event           = m_traceEvents[( m_traceHead + m_traceCount ) % m_traceEvents.size()];
+        event                 = {};
+        event.id              = m_traceDetected;
+        event.session         = m_summary.session;
+        event.mainCounter     = mainCounter;
+        event.combinedCounter = combinedCounter;
+        event.planCounter     = m_copyCounter;
+        event.lastMainCounter = m_summary.counter;
+        event.step            = m_copyStep;
+        event.origin          = origin;
+        event.window          = observed < m_copyEnd ? MagAOX::dmSyncoSimulation::OverlapWindow::copy
+                                                     : MagAOX::dmSyncoSimulation::OverlapWindow::readerHold;
+        event.observedNs      = observed;
+        event.mainGridNs      = mainGrid;
+        event.planGridNs      = m_copyGrid;
+        event.periodNs        = m_copyPeriod;
+        event.copyBeginNs     = m_copyBegin;
+        event.copyEndNs       = m_copyEnd;
+        event.readerEndNs     = m_copyStep > 0 ? m_virtualHold : 0;
+        event.lastMainNs      = m_summary.lastMainNs;
+        event.lastOutputNs    = m_outputTime;
+        event.observation     = context;
+        ++m_traceCount;
     }
 }
 
@@ -574,7 +659,10 @@ inline void Simulation::advance( int64_t now )
     through( now, true );
 }
 
-inline void Simulation::primary( uint64_t counter, int64_t observed, int64_t publicationInterval )
+inline void Simulation::primary( uint64_t                                      counter,
+                                 int64_t                                       observed,
+                                 int64_t                                       publicationInterval,
+                                 const MagAOX::dmSyncoSimulation::Observation &context )
 {
     if( !m_summary.enabled || observed <= 0 || observed < m_summary.nowNs )
     {
@@ -604,26 +692,21 @@ inline void Simulation::primary( uint64_t counter, int64_t observed, int64_t pub
         }
     }
 
-    const bool sequential = m_haveMain && counter == m_summary.counter + 1;
-    const bool gap        = m_haveMain && !sequential;
-    int64_t    predicted  = 0;
-
-    if( auto *entry = plan( counter ) )
-    {
-        predicted = entry->grid;
-    }
-    else if( m_planCount )
-    {
-        const auto &last = m_plans[m_planCount - 1];
-        predicted        = shifted( last.grid, last.counter, counter, last.period );
-    }
+    const bool    sequential = m_haveMain && counter == m_summary.counter + 1;
+    const bool    gap        = m_haveMain && !sequential;
+    const int64_t predicted  = prediction( counter );
 
     if( gap )
     {
         ++m_summary.gaps;
     }
 
-    overlap( observed );
+    overlap( counter,
+             m_haveCombined ? m_combinedCounter : 0,
+             observed,
+             predicted,
+             MagAOX::dmSyncoSimulation::OverlapOrigin::primary,
+             context );
 
     retire( counter );
     m_haveMain           = true;
@@ -768,7 +851,11 @@ inline void Simulation::primary( uint64_t counter, int64_t observed, int64_t pub
     through( observed, true );
 }
 
-inline void Simulation::combined( uint64_t counter, uint64_t primaryCounter, int64_t observed, bool coherent )
+inline void Simulation::combined( uint64_t                                      counter,
+                                  uint64_t                                      primaryCounter,
+                                  int64_t                                       observed,
+                                  bool                                          coherent,
+                                  const MagAOX::dmSyncoSimulation::Observation &context )
 {
     if( !m_summary.enabled || observed <= 0 || observed < m_summary.nowNs )
     {
@@ -787,7 +874,12 @@ inline void Simulation::combined( uint64_t counter, uint64_t primaryCounter, int
 
     if( coherent && m_haveMain && primaryCounter > m_summary.counter )
     {
-        overlap( observed );
+        overlap( primaryCounter,
+                 counter,
+                 observed,
+                 prediction( primaryCounter ),
+                 MagAOX::dmSyncoSimulation::OverlapOrigin::combined,
+                 context );
     }
 
     m_haveCombined    = true;
@@ -837,6 +929,31 @@ inline void Simulation::combined( uint64_t counter, uint64_t primaryCounter, int
 inline const MagAOX::dmSyncoSimulation::Summary &Simulation::summary() const
 {
     return m_summary;
+}
+
+inline bool Simulation::popOverlap( MagAOX::dmSyncoSimulation::OverlapEvent &event )
+{
+    if( !m_traceCount )
+    {
+        return false;
+    }
+
+    event       = m_traceEvents[m_traceHead];
+    m_traceHead = ( m_traceHead + 1 ) % m_traceEvents.size();
+    --m_traceCount;
+    ++m_traceDrained;
+    return true;
+}
+
+inline MagAOX::dmSyncoSimulation::TraceStatus Simulation::traceStatus() const
+{
+    MagAOX::dmSyncoSimulation::TraceStatus status;
+    status.enabled  = m_summary.enabled;
+    status.detected = m_traceDetected;
+    status.drained  = m_traceDrained;
+    status.dropped  = m_traceDropped;
+    status.queued   = m_traceCount;
+    return status;
 }
 
 } // namespace synco

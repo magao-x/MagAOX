@@ -1,9 +1,10 @@
 /** \file telem_dmsynco.hpp
- * \brief Aggregate syncopation timing, ordered excursions, outcomes and per-step feedback telemetry.
+ * \brief Aggregate syncopation timing, conditional outcomes and bounded raw overlap telemetry.
  */
 #ifndef logger_types_telem_dmsynco_hpp
 #define logger_types_telem_dmsynco_hpp
 
+#include <algorithm>
 #include <iomanip>
 #include <sstream>
 #include <vector>
@@ -33,24 +34,26 @@ struct telem_dmsynco : public flatbuffer_log
     struct messageT : public fbMessage
     {
         /// Serialize a coherent snapshot of scheduler diagnostics.
-        messageT( int                         state /**< [in] schedule state */,
-                  int                         steps /**< [in] requested count */,
-                  int64_t                     period /**< [in] measured period, ns */,
-                  uint64_t                    delivered /**< [in] confirmed extra combinations */,
-                  uint64_t                    missed /**< [in] failed timing events */,
-                  uint64_t                    faults /**< [in] synchronization/resource faults */,
-                  uint64_t                    cached /**< [in] source-cache fallback count */,
-                  int64_t                     snapshot /**< [in] maximum whole-snapshot time, ns */,
-                  int64_t                     copy /**< [in] maximum whole-copy time, ns */,
-                  const std::vector<int64_t> &residuals /**< [in] latest per-step residuals, ns */,
-                  const std::vector<int64_t> &advances /**< [in] per-step wait advances, ns */,
-                  const dmTiming::Summary    &primary = {} /**< [in] observed primary cadence; disabled by default */,
-                  bool scheduleValid = true /**< [in] false when scheduler fields are unavailable placeholders */,
-                  const dmCombTiming::Summary &combiner = {} /**< [in] independently observed combiner timing */,
-                  const dmTiming::Summary     &camera = {} /**< [in] independent camera acquisition-stamp intervals */,
-                  const dmPipelineTiming::Summary &pipeline    = {} /**< [in] upstream trace-stage populations */,
-                  const dmTiming::Summary &cameraPublication   = {} /**< [in] independent camera writetime intervals */,
-                  const dmSyncoSimulation::Summary &simulation = {} /**< [in] conditional shadow predictions */ );
+        messageT(
+            int                         state /**< [in] schedule state */,
+            int                         steps /**< [in] requested count */,
+            int64_t                     period /**< [in] measured period, ns */,
+            uint64_t                    delivered /**< [in] confirmed extra combinations */,
+            uint64_t                    missed /**< [in] failed timing events */,
+            uint64_t                    faults /**< [in] synchronization/resource faults */,
+            uint64_t                    cached /**< [in] source-cache fallback count */,
+            int64_t                     snapshot /**< [in] maximum whole-snapshot time, ns */,
+            int64_t                     copy /**< [in] maximum whole-copy time, ns */,
+            const std::vector<int64_t> &residuals /**< [in] latest per-step residuals, ns */,
+            const std::vector<int64_t> &advances /**< [in] per-step wait advances, ns */,
+            const dmTiming::Summary    &primary = {} /**< [in] observed primary cadence; disabled by default */,
+            bool scheduleValid = true /**< [in] false when scheduler fields are unavailable placeholders */,
+            const dmCombTiming::Summary     &combiner = {} /**< [in] independently observed combiner timing */,
+            const dmTiming::Summary         &camera   = {} /**< [in] independent camera acquisition-stamp intervals */,
+            const dmPipelineTiming::Summary &pipeline = {} /**< [in] upstream trace-stage populations */,
+            const dmTiming::Summary         &cameraPublication = {} /**< [in] independent camera writetime intervals */,
+            const dmSyncoSimulation::Summary    &simulation    = {} /**< [in] conditional shadow predictions */,
+            const dmSyncoSimulation::TraceBatch &trace = {} /**< [in] drained overlap evidence and queue quality */ );
     };
 
     /// Validate optional cadence and stage populations while accepting legacy records.
@@ -92,8 +95,14 @@ struct telem_dmsynco : public flatbuffer_log
 
     /// Serialize conditional shadow outcomes without claiming auxiliary delivery.
     static flatbuffers::Offset<DmSyncoSimulation>
-    simulationTiming( flatbuffers::FlatBufferBuilder   &builder /**< [in/out] destination builder */,
-                      const dmSyncoSimulation::Summary &summary /**< [in] coherent shadow prediction snapshot */ );
+    simulationTiming( flatbuffers::FlatBufferBuilder      &builder /**< [in/out] destination builder */,
+                      const dmSyncoSimulation::Summary    &summary /**< [in] coherent shadow prediction snapshot */,
+                      const dmSyncoSimulation::TraceBatch &trace /**< [in] drained overlap evidence */ );
+
+    /// Serialize a bounded overlap batch without converting producer timestamps.
+    static flatbuffers::Offset<DmSyncoOverlapTrace>
+    overlapTrace( flatbuffers::FlatBufferBuilder      &builder /**< [in/out] destination builder */,
+                  const dmSyncoSimulation::TraceBatch &trace /**< [in] lifetime queue quality and drained records */ );
 
     /// Check finite populated statistics and sample-variance validity.
     static bool validStats( const DmSyncoTimingStats *stats /**< [in] required nested cadence population */,
@@ -107,6 +116,9 @@ struct telem_dmsynco : public flatbuffer_log
 
     /// Check optional shadow model readiness and independently counted step outcomes.
     static bool validSimulation( const DmSyncoSimulation *summary /**< [in] optional conditional simulation */ );
+
+    /// Check bounded lifetime accounting, event provenance and classified overlap intervals.
+    static bool validOverlapTrace( const DmSyncoOverlapTrace *trace /**< [in] optional raw overlap evidence */ );
 
     /// Format independent primary/camera cadence and ordered excursions with distinct names.
     static void
@@ -122,6 +134,10 @@ struct telem_dmsynco : public flatbuffer_log
     /// Append explicitly hypothetical prediction and per-step outcome diagnostics when enabled.
     static void formatSimulation( std::ostream            &output /**< [in/out] formatted aggregate */,
                                   const DmSyncoSimulation *summary /**< [in] optional conditional simulation */ );
+
+    /// Append exact nanosecond evidence with explicit monotonic and unconverted producer clock labels.
+    static void formatOverlapTrace( std::ostream              &output /**< [in/out] formatted aggregate */,
+                                    const DmSyncoOverlapTrace *trace /**< [in] optional raw overlap evidence */ );
 
     /// Validate optional ordered-pair populations and their conditional count relationships.
     static bool
@@ -331,8 +347,74 @@ telem_dmsynco::pipelineTiming( flatbuffers::FlatBufferBuilder &builder, const dm
                                         earlyPublicationChange );
 }
 
+inline flatbuffers::Offset<DmSyncoOverlapTrace>
+telem_dmsynco::overlapTrace( flatbuffers::FlatBufferBuilder &builder, const dmSyncoSimulation::TraceBatch &trace )
+{
+    if( !trace.status.enabled )
+    {
+        return {};
+    }
+
+    std::vector<flatbuffers::Offset<DmSyncoOverlapEvent>> events;
+    const size_t                                          count = std::min<size_t>( trace.count, trace.events.size() );
+    events.reserve( count );
+
+    for( size_t index = 0; index < count; ++index )
+    {
+        const auto &event       = trace.events[index];
+        const auto &source      = event.observation;
+        const auto  observation = CreateDmSyncoOverlapObservation( builder,
+                                                                  source.streamInode,
+                                                                  source.triggerInode,
+                                                                  source.receiptNs,
+                                                                  source.callbackNs,
+                                                                  source.lockRequestNs,
+                                                                  source.lockAcquiredNs,
+                                                                  source.publicationNs,
+                                                                  source.primaryPublicationNs,
+                                                                  source.startNs,
+                                                                  source.updateNs );
+        events.push_back( CreateDmSyncoOverlapEvent( builder,
+                                                     event.id,
+                                                     event.session,
+                                                     event.mainCounter,
+                                                     event.combinedCounter,
+                                                     event.planCounter,
+                                                     event.lastMainCounter,
+                                                     event.step,
+                                                     DmSyncoOverlapOrigin( event.origin ),
+                                                     DmSyncoOverlapWindow( event.window ),
+                                                     event.observedNs,
+                                                     event.mainGridNs,
+                                                     event.planGridNs,
+                                                     event.periodNs,
+                                                     event.copyBeginNs,
+                                                     event.copyEndNs,
+                                                     event.readerEndNs,
+                                                     event.lastMainNs,
+                                                     event.lastOutputNs,
+                                                     observation ) );
+    }
+
+    const auto  records = builder.CreateVector( events );
+    const auto &quality = trace.status;
+
+    return CreateDmSyncoOverlapTrace( builder,
+                                      quality.enabled,
+                                      quality.detected,
+                                      quality.drained,
+                                      quality.dropped,
+                                      quality.queued,
+                                      quality.capacity,
+                                      quality.logFailed,
+                                      trace.count,
+                                      records );
+}
+
 inline flatbuffers::Offset<DmSyncoSimulation>
-telem_dmsynco::simulationTiming( flatbuffers::FlatBufferBuilder &builder, const dmSyncoSimulation::Summary &summary )
+telem_dmsynco::simulationTiming( flatbuffers::FlatBufferBuilder      &builder,
+                                 const dmSyncoSimulation::Summary    &summary,
+                                 const dmSyncoSimulation::TraceBatch &trace )
 {
     if( !summary.enabled )
     {
@@ -357,6 +439,7 @@ telem_dmsynco::simulationTiming( flatbuffers::FlatBufferBuilder &builder, const 
     }
 
     const auto outcomes = builder.CreateVector( steps );
+    const auto evidence = overlapTrace( builder, trace );
 
     return CreateDmSyncoSimulation( builder,
                                     summary.enabled,
@@ -399,27 +482,29 @@ telem_dmsynco::simulationTiming( flatbuffers::FlatBufferBuilder &builder, const 
                                     summary.outputGaps,
                                     summary.associations,
                                     outcomes,
-                                    summary.cadenceMinPeriodNs );
+                                    summary.cadenceMinPeriodNs,
+                                    evidence );
 }
 
-inline telem_dmsynco::messageT::messageT( int                               state,
-                                          int                               steps,
-                                          int64_t                           period,
-                                          uint64_t                          delivered,
-                                          uint64_t                          missed,
-                                          uint64_t                          faults,
-                                          uint64_t                          cached,
-                                          int64_t                           snapshot,
-                                          int64_t                           copy,
-                                          const std::vector<int64_t>       &residuals,
-                                          const std::vector<int64_t>       &advances,
-                                          const dmTiming::Summary          &primary,
-                                          bool                              scheduleValid,
-                                          const dmCombTiming::Summary      &combiner,
-                                          const dmTiming::Summary          &camera,
-                                          const dmPipelineTiming::Summary  &pipeline,
-                                          const dmTiming::Summary          &cameraPublication,
-                                          const dmSyncoSimulation::Summary &simulation )
+inline telem_dmsynco::messageT::messageT( int                                  state,
+                                          int                                  steps,
+                                          int64_t                              period,
+                                          uint64_t                             delivered,
+                                          uint64_t                             missed,
+                                          uint64_t                             faults,
+                                          uint64_t                             cached,
+                                          int64_t                              snapshot,
+                                          int64_t                              copy,
+                                          const std::vector<int64_t>          &residuals,
+                                          const std::vector<int64_t>          &advances,
+                                          const dmTiming::Summary             &primary,
+                                          bool                                 scheduleValid,
+                                          const dmCombTiming::Summary         &combiner,
+                                          const dmTiming::Summary             &camera,
+                                          const dmPipelineTiming::Summary     &pipeline,
+                                          const dmTiming::Summary             &cameraPublication,
+                                          const dmSyncoSimulation::Summary    &simulation,
+                                          const dmSyncoSimulation::TraceBatch &trace )
 {
     builder.ForceDefaults( true ); // Keep nonfinite input available to verification under fast-math comparisons.
 
@@ -430,7 +515,7 @@ inline telem_dmsynco::messageT::messageT( int                               stat
     const auto cameraPublicationTiming = observationTiming( builder, cameraPublication );
     const auto upstreamTiming          = pipelineTiming( builder, pipeline );
     const auto combinedTiming          = combinerTiming( builder, combiner );
-    const auto simulatedTiming         = simulationTiming( builder, simulation );
+    const auto simulatedTiming         = simulationTiming( builder, simulation, trace );
 
     builder.Finish( CreateTelem_dmsynco_fb( builder,
                                             state,
@@ -607,6 +692,86 @@ inline bool telem_dmsynco::validPipeline( const DmSyncoPipelineTiming *summary )
     return true;
 }
 
+inline bool telem_dmsynco::validOverlapTrace( const DmSyncoOverlapTrace *trace )
+{
+    if( !trace )
+    {
+        return true;
+    }
+
+    if( !trace->enabled() || !trace->events() || trace->capacity() == 0 ||
+        trace->capacity() > dmSyncoSimulation::traceCapacity || trace->queued() > trace->capacity() ||
+        trace->drained() > trace->detected() || trace->dropped() > trace->detected() - trace->drained() ||
+        trace->queued() != trace->detected() - trace->drained() - trace->dropped() ||
+        trace->log_failed() > trace->drained() || trace->batch_count() != trace->events()->size() ||
+        trace->batch_count() > dmSyncoSimulation::traceBatchCapacity || trace->batch_count() > trace->drained() )
+    {
+        return false;
+    }
+
+    uint64_t previousId = 0;
+
+    for( const auto *event : *trace->events() )
+    {
+        if( !event || event->id() <= previousId || event->id() > trace->detected() || !event->session() ||
+            event->step() < 0 || event->step() >= int( dmSyncoSimulation::maxSteps ) ||
+            ( event->origin() != DmSyncoOverlapOrigin_primary && event->origin() != DmSyncoOverlapOrigin_combined ) ||
+            ( event->window() != DmSyncoOverlapWindow_copy && event->window() != DmSyncoOverlapWindow_readerHold ) ||
+            event->observed_ns() <= 0 || event->main_grid_ns() < 0 || event->plan_grid_ns() <= 0 ||
+            event->period_ns() <= 0 || event->copy_begin_ns() <= 0 || event->copy_end_ns() <= event->copy_begin_ns() ||
+            event->last_main_ns() < 0 || event->last_main_ns() > event->observed_ns() || event->last_output_ns() < 0 ||
+            event->last_output_ns() > event->observed_ns() ||
+            ( event->step() == 0 ? event->reader_end_ns() != 0 : event->reader_end_ns() < event->copy_end_ns() ) )
+        {
+            return false;
+        }
+
+        previousId = event->id();
+
+        if( event->window() == DmSyncoOverlapWindow_copy )
+        {
+            if( event->observed_ns() < event->copy_begin_ns() || event->observed_ns() >= event->copy_end_ns() )
+            {
+                return false;
+            }
+        }
+        else if( event->step() == 0 || event->reader_end_ns() <= event->copy_end_ns() ||
+                 event->observed_ns() < event->copy_end_ns() || event->observed_ns() >= event->reader_end_ns() )
+        {
+            return false;
+        }
+
+        const auto *observation = event->observation();
+
+        if( !observation || observation->publication_ns() < 0 || observation->primary_publication_ns() < 0 ||
+            observation->start_ns() < 0 || observation->update_ns() < 0 )
+        {
+            return false;
+        }
+
+        int64_t previousTime = 0;
+
+        for( int64_t stamp : { observation->receipt_ns(),
+                               observation->callback_ns(),
+                               observation->lock_request_ns(),
+                               observation->lock_acquired_ns(),
+                               event->observed_ns() } )
+        {
+            if( stamp < 0 || ( stamp && stamp < previousTime ) )
+            {
+                return false;
+            }
+
+            if( stamp )
+            {
+                previousTime = stamp;
+            }
+        }
+    }
+
+    return true;
+}
+
 inline bool telem_dmsynco::validSimulation( const DmSyncoSimulation *summary )
 {
     if( !summary )
@@ -623,11 +788,11 @@ inline bool telem_dmsynco::validSimulation( const DmSyncoSimulation *summary )
         summary->early_reserve_ns() < 0 || summary->delivery_ns() < 0 || summary->keepout_ns() < 0 ||
         summary->guard_ns() < 0 || summary->snapshot_ns() < 0 || summary->copy_ns() < 0 || summary->lead_ns() < 0 ||
         summary->observation_ns() < 0 || summary->visibility_ns() < 0 || summary->reserve_ns() < 0 ||
-        !mx::math::isFinite( summary->phase_gain() ) || summary->phase_gain() < 0 || summary->phase_gain() > 1 ||
-        summary->phase_slew_ns() < 0 || summary->cadence_min_period_ns() < 0 ||
-        summary->phase_count() > summary->sequence() || summary->period_samples() > summary->sequence() ||
-        summary->phase_samples() > summary->sequence() || summary->period_samples() > summary->window() ||
-        summary->phase_samples() > summary->window() ||
+        !validOverlapTrace( summary->overlap_trace() ) || !mx::math::isFinite( summary->phase_gain() ) ||
+        summary->phase_gain() < 0 || summary->phase_gain() > 1 || summary->phase_slew_ns() < 0 ||
+        summary->cadence_min_period_ns() < 0 || summary->phase_count() > summary->sequence() ||
+        summary->period_samples() > summary->sequence() || summary->phase_samples() > summary->sequence() ||
+        summary->period_samples() > summary->window() || summary->phase_samples() > summary->window() ||
         ( summary->valid() && ( !summary->enabled() || summary->period_ns() == 0 || summary->grid_ns() == 0 ||
                                 summary->last_main_ns() == 0 || summary->window() == 0 ) ) )
     {
@@ -875,6 +1040,41 @@ inline void telem_dmsynco::formatSimulation( std::ostream &output, const DmSynco
                << ",earlyMain:" << step->early_main() << ",missingMain:" << step->missing_main()
                << ",missingOutput:" << step->missing_output() << ",readerHold:" << step->reader_hold()
                << ",expired:" << step->expired() << ",overlap:" << step->overlap() << '}';
+    }
+
+    formatOverlapTrace( output, summary->overlap_trace() );
+}
+
+inline void telem_dmsynco::formatOverlapTrace( std::ostream &output, const DmSyncoOverlapTrace *trace )
+{
+    if( !trace || !trace->enabled() )
+    {
+        return;
+    }
+
+    output << " trace_quality={enabled:1,detected:" << trace->detected() << ",drained:" << trace->drained()
+           << ",dropped:" << trace->dropped() << ",queued:" << trace->queued() << ",capacity:" << trace->capacity()
+           << ",logFailed:" << trace->log_failed() << ",batch:" << trace->batch_count() << '}';
+
+    for( const auto *event : *trace->events() )
+    {
+        const auto *source = event->observation();
+        output << " sim_overlap={id:" << event->id() << ",session:" << event->session()
+               << ",origin:" << ( event->origin() == DmSyncoOverlapOrigin_primary ? "primary" : "combined" )
+               << ",window:" << ( event->window() == DmSyncoOverlapWindow_copy ? "copy" : "readerHold" )
+               << ",mainCounter:" << event->main_counter() << ",combinedCounter:" << event->combined_counter()
+               << ",planCounter:" << event->plan_counter() << ",lastMainCounter:" << event->last_main_counter()
+               << ",step:" << event->step() << ",model_clock:monotonic,observed_ns:" << event->observed_ns()
+               << ",mainGrid_ns:" << event->main_grid_ns() << ",planGrid_ns:" << event->plan_grid_ns()
+               << ",period_ns:" << event->period_ns() << ",copyBegin_ns:" << event->copy_begin_ns()
+               << ",copyEnd_ns:" << event->copy_end_ns() << ",readerEnd_ns:" << event->reader_end_ns()
+               << ",lastMain_ns:" << event->last_main_ns() << ",lastOutput_ns:" << event->last_output_ns()
+               << ",streamInode:" << source->stream_inode() << ",triggerInode:" << source->trigger_inode()
+               << ",receipt_ns:" << source->receipt_ns() << ",callback_ns:" << source->callback_ns()
+               << ",lockRequest_ns:" << source->lock_request_ns() << ",lockAcquired_ns:" << source->lock_acquired_ns()
+               << ",producer_clock:unconverted,publication_ns:" << source->publication_ns()
+               << ",primaryPublication_ns:" << source->primary_publication_ns() << ",start_ns:" << source->start_ns()
+               << ",update_ns:" << source->update_ns() << '}';
     }
 }
 

@@ -1,5 +1,5 @@
 /// \file telem_dmsynco.fbs
-/// \brief Scheduler telemetry with independent camera acquisition/publication cadence, pipeline stages and combiner traces.
+/// \brief Scheduler telemetry with independent stream cadence, pipeline stages and bounded raw overlap evidence.
 namespace MagAOX.logger;
 
 // Values and coverage are seconds; publication values retain their external clock.
@@ -166,6 +166,64 @@ table DmSyncoSimulationStep
     overlap:ulong;
 }
 
+// Trigger provenance and overlap classification; all interval boundaries below are half-open.
+enum DmSyncoOverlapOrigin:ubyte { primary = 0, combined = 1 }
+enum DmSyncoOverlapWindow:ubyte { copy = 0, readerHold = 1 }
+
+// Receipt through lock-acquired times use the model's monotonic clock.
+// Publication/start/update times retain the producer clock and are never compared to model times.
+table DmSyncoOverlapObservation
+{
+    stream_inode:ulong;
+    trigger_inode:ulong;
+    receipt_ns:long;
+    callback_ns:long;
+    lock_request_ns:long;
+    lock_acquired_ns:long;
+    publication_ns:long;
+    primary_publication_ns:long;
+    start_ns:long;
+    update_ns:long;
+}
+
+// One retrospective overlap with the actual main's prediction and the modeled copy's own plan.
+table DmSyncoOverlapEvent
+{
+    id:ulong;
+    session:ulong;
+    main_counter:ulong;
+    combined_counter:ulong;
+    plan_counter:ulong;
+    last_main_counter:ulong;
+    step:int;
+    origin:DmSyncoOverlapOrigin;
+    window:DmSyncoOverlapWindow;
+    observed_ns:long;
+    main_grid_ns:long;
+    plan_grid_ns:long;
+    period_ns:long;
+    copy_begin_ns:long;
+    copy_end_ns:long;
+    reader_end_ns:long;
+    last_main_ns:long;
+    last_output_ns:long;
+    observation:DmSyncoOverlapObservation (required);
+}
+
+// Lifetime queue accounting survives model resets; a drained batch can contain earlier sessions.
+table DmSyncoOverlapTrace
+{
+    enabled:bool;
+    detected:ulong;
+    drained:ulong;
+    dropped:ulong;
+    queued:ulong;
+    capacity:ulong;
+    log_failed:ulong;
+    batch_count:ulong;
+    events:[DmSyncoOverlapEvent] (required);
+}
+
 // Predictions and model readiness on the same-host monotonic clock; this is not hardware arming.
 table DmSyncoSimulation
 {
@@ -210,6 +268,7 @@ table DmSyncoSimulation
     associations:ulong;
     outcomes:[DmSyncoSimulationStep] (required);
     cadence_min_period_ns:long;
+    overlap_trace:DmSyncoOverlapTrace;
 }
 
 table Telem_dmsynco_fb

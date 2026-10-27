@@ -96,8 +96,14 @@ Current work, following the 2026-10-25 measurements and operator direction:
 | Independent camera acquisition excursions and upstream AO trace stages | Implemented and verified. Later captures distinguish serial-associated driver-stamp tails, a rare long post-stamp camera SDK wait, and changing AO/conversion durations. Counter continuity alone does not establish frame freshness. |
 | Isolated camera publication and acquWFS timing | Implemented and locally verified (4883 assertions, 69 cases; matching builds). New isolated capture has one stable acquWFS row: publication already spans 437.045–579.825 us upstream, while large acquWFS output excursions are predominantly present at its processing start. Two primary-observer counter gaps limit coverage; matched camera-to-wake latency remains unmeasured. |
 | Median-based target cadence and per-step skips for ordinary excursions | Revised design below; active targets stay on the predicted grid despite early/late main arrivals. Not implemented. |
+| Read-only fixed-grid simulation | Implemented and locally verified. First linked capture has 99.893% passive / 99.996% active conditional would-run availability; 40 passive / 125 active overlap-evidence increments remain unexplained. See the debugging record. |
 | Targeted dmcomb-reader wake for active extra steps | Proposed design below; not implemented. |
 | Enabled multi-step qualification | Pending the scheduler changes and full timing-window qualification. |
+
+Required RTC performance setup: `sysMonRTC.set_latency.toggle=On`. The
+operator confirms on 2026-10-26 that it has been On for all tests so far.
+Retain this state for qualification and record its readback before and after
+future captures alongside CPU/IRQ placement, workload and loop settings.
 
 The operator now directs returning to dmSyncopation rather than undertaking
 major additional EDT work. Reduced production serial traffic is in place;
@@ -408,7 +414,9 @@ observation plus delivery, keepout and guard. Hypothetical active commands use
 the same configured hold allowances. A blocked slot skips without sliding or
 catch-up. Real arrivals during a previously modeled copy or active reader hold
 increment a separate overlap counter: a prior would-run decision is not
-retroactively presented as a safe skip. Source completeness, source-snapshot
+retroactively presented as a safe skip. Combined-first and primary-later
+observations can count the same main twice; these are evidence counts, not
+deduplicated physical collision rates. Source completeness, source-snapshot
 work and copy/delivery execution are modeled assumptions, not measurements.
 Nominal feasibility also enforces the configured total-cadence rating and
 tolerance; each immutable plan uses its own frozen period for this check.
@@ -435,9 +443,35 @@ the configured 20 us default is recorded only as an explicit simulation
 assumption. Hardware wake/copy/delivery performance and the mode-3 auxiliary
 wake route remain separate operational qualification work.
 
-Workstation verification passes **4,772 assertions / 78 cases**: pure model
-190/20, application integration 3,804/48 and logger compatibility/validation
-778/10. Normal library/schema, `dmSyncopation` and `logdump` builds pass.
+The linked `synco-sim-20261027T003510Z` capture demonstrates high conditional
+availability but includes modeled overlap evidence. Most overlap increments
+fall between the initial INDI snapshot and the first saved telemetry row;
+the remaining logged interval adds one passive overlap. The next diagnostic
+is implemented as a bounded per-event overlap trace retaining observer origin,
+actual primary/output identity, modeled plan counter/step, frozen grid and
+copy/reader-hold endpoints. Distinguish copy from reader-hold evidence and
+duplicate observations of the same main, retaining the existing counters.
+Record observer timing separately from producer timestamps. Reuse the
+existing bounded diagnostic-record/ordinary-thread telemetry pattern, with
+no formatting or allocation in the callback. A 256-event FIFO drops new
+evidence when full; the ordinary thread drains at most 64 events per existing
+`[dmsynco]` record after releasing the cycle lock. Process-lifetime quality
+counters and pending events survive model resets; event sessions preserve
+their original identity. `simulation_trace` exposes coverage/loss counters.
+The optional appended schema preserves legacy records. Producer-clock
+timestamps remain separate from monotonic observer/grid endpoints. Existing
+model gates, outcomes and aggregate overlap counts are unchanged.
+
+The next matched capture should use the rebuilt app and reader, retain the
+mode-4/10-us baseline and latency-On state, and start collectors before the
+initial snapshots, as in the updated guide. Correlate events by model
+session/plan counter/step/main counter, then inspect origins, copy versus
+reader windows, observer delays and raw producer timing. Do not select a
+physical reserve or change the policy from aggregate availability alone.
+
+Workstation verification passes **28,829 assertions / 87 cases**: pure model
+22,972/23, application integration 4,684/51 and logger compatibility/validation
+1,173/13. Normal library/schema, `dmSyncopation` and `logdump` builds pass.
 Tests cover 420/580 us early/late pairs, the measured 885.783/202.112 us
 sequence, independent passive/active eligibility, immutable plans, reader
 holds, gaps/resets, stale period samples, malformed/ambiguous/future output

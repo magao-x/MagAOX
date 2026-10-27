@@ -15,6 +15,83 @@ namespace dmSyncoSimulation
 
 constexpr size_t maxSteps = 16; ///< Fixed capacity shared with the provider schedule layout.
 
+constexpr size_t traceCapacity = 256; ///< Fixed event FIFO; full queues drop new evidence without changing the model.
+
+constexpr size_t traceBatchCapacity = 64; ///< Maximum events in one telemetry record.
+
+/// Monitor path supplying retrospective evidence; both paths can observe the same main.
+enum class OverlapOrigin
+{
+    primary  = 0,
+    combined = 1
+};
+
+/// Last modeled interval containing the observation, with half-open boundaries.
+enum class OverlapWindow
+{
+    copy       = 0,
+    readerHold = 1
+};
+
+/// Optional caller context; zero means unavailable and producer clocks are never treated as monotonic.
+struct Observation
+{
+    uint64_t streamInode{ 0 };          ///< Observed stream metadata identity.
+    uint64_t triggerInode{ 0 };         ///< Combined trace's named primary identity, when available.
+    int64_t  receiptNs{ 0 };            ///< Same-host monotonic semaphore-receipt observation.
+    int64_t  callbackNs{ 0 };           ///< Same-host monotonic monitor callback entry.
+    int64_t  lockRequestNs{ 0 };        ///< Same-host monotonic cycle-lock request.
+    int64_t  lockAcquiredNs{ 0 };       ///< Same-host monotonic cycle-lock acquisition.
+    int64_t  publicationNs{ 0 };        ///< Observed stream publication on its producer clock; not monotonic.
+    int64_t  primaryPublicationNs{ 0 }; ///< Associated primary publication on its producer clock; not monotonic.
+    int64_t  startNs{ 0 };              ///< Combined trace start on its producer clock; not monotonic.
+    int64_t  updateNs{ 0 };             ///< Combined trace update on its producer clock; not monotonic.
+};
+
+/// One overlap observation; the session/planCounter/step/mainCounter tuple supports offline deduplication.
+struct OverlapEvent
+{
+    uint64_t      id{ 0 };              ///< Process-lifetime evidence sequence, including dropped records.
+    uint64_t      session{ 0 };         ///< Model session owning this event, retained across queue resets.
+    uint64_t      mainCounter{ 0 };     ///< Actual primary counter supplying the evidence.
+    uint64_t      combinedCounter{ 0 }; ///< Current combined counter, or last observed counter on the primary path.
+    uint64_t      planCounter{ 0 };     ///< Counter labelling the last modeled copy's cycle.
+    uint64_t      lastMainCounter{ 0 }; ///< Most recent accepted primary counter before this evidence.
+    int           step{ 0 };            ///< Index of the last modeled copy.
+    OverlapOrigin origin{ OverlapOrigin::primary }; ///< Monitor path; repeated origins are deliberately retained.
+    OverlapWindow window{ OverlapWindow::copy };    ///< Copy or active-reader interval containing the evidence.
+    int64_t       observedNs{ 0 };                  ///< Same-host monotonic evidence time.
+    int64_t       mainGridNs{ 0 };   ///< Committed grid or extrapolation from the last frozen cycle; zero unavailable.
+    int64_t       planGridNs{ 0 };   ///< Frozen main prediction for the last modeled copy's cycle.
+    int64_t       periodNs{ 0 };     ///< Period frozen with that modeled copy's cycle.
+    int64_t       copyBeginNs{ 0 };  ///< Same-host monotonic modeled copy start.
+    int64_t       copyEndNs{ 0 };    ///< Same-host monotonic modeled copy completion.
+    int64_t       readerEndNs{ 0 };  ///< Modeled active-reader end; zero for passive preparation.
+    int64_t       lastMainNs{ 0 };   ///< Previous accepted primary observation on the monotonic clock.
+    int64_t       lastOutputNs{ 0 }; ///< Latest associated combined observation on the monotonic clock.
+    Observation   observation;       ///< Raw monitor/producer context supplied by the caller.
+};
+
+/// Process-lifetime FIFO accounting; detected equals drained plus dropped plus queued.
+struct TraceStatus
+{
+    bool     enabled{ false };          ///< Model selection; queued older-session events remain drainable after reset.
+    uint64_t detected{ 0 };             ///< All overlap evidence, including records rejected by the full FIFO.
+    uint64_t drained{ 0 };              ///< Records removed from the FIFO for a telemetry attempt.
+    uint64_t dropped{ 0 };              ///< New records discarded because the fixed FIFO was full.
+    uint64_t queued{ 0 };               ///< Events awaiting a telemetry attempt.
+    uint64_t capacity{ traceCapacity }; ///< Fixed FIFO capacity.
+    uint64_t logFailed{ 0 };            ///< App-owned count of drained events whose telemetry submission failed.
+};
+
+/// Bounded drained telemetry batch; status describes the FIFO after this drain.
+struct TraceBatch
+{
+    std::array<OverlapEvent, traceBatchCapacity> events{};   ///< Initialized prefix contains drained event records.
+    size_t                                       count{ 0 }; ///< Initialized events; never exceeds traceBatchCapacity.
+    TraceStatus status; ///< Process-lifetime collection and telemetry-failure accounting.
+};
+
 /// Counts for one step index; modeled copies and triggers never address a DM stream.
 struct Step
 {

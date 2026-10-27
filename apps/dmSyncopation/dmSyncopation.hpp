@@ -192,7 +192,9 @@ class dmSyncopation : public MagAOXApp<true>,
 
     std::mutex                         m_cycleMutex; ///< Serializes lifecycle/configuration with a complete callback.
     synco::Simulation                  m_simulation; ///< Fixed-storage shadow engine, serialized by the cycle mutex.
-    MagAOX::dmSyncoSimulation::Summary m_simulationSnapshot; ///< Ordinary-thread cached telemetry/INDI snapshot.
+    MagAOX::dmSyncoSimulation::Summary m_simulationSnapshot;        ///< Ordinary-thread cached telemetry/INDI snapshot.
+    MagAOX::dmSyncoSimulation::TraceStatus m_simulationTraceStatus; ///< Ordinary-thread cached overlap queue quality.
+    uint64_t m_simulationTraceLogFailed{ 0 };      ///< Drained overlap events lost after a telemetry emission failure.
     int64_t  m_simulationPublication{ 0 };         ///< Prior coherent primary writetime, in its own external clock.
     uint64_t m_simulationCounter{ 0 };             ///< Primary counter paired with the publication baseline.
     int64_t  m_simulationCombinedPublication{ 0 }; ///< Last accepted combined producer timestamp in its own clock.
@@ -295,6 +297,7 @@ class dmSyncopation : public MagAOXApp<true>,
     pcf::IndiProperty m_indiP_simulation;       ///< Conditional grid, phase and collection-quality diagnostics.
     pcf::IndiProperty m_indiP_simulationSteps;  ///< Per-step hypothetical outcomes; never actual deliveries.
     pcf::IndiProperty m_indiP_simulationStatus; ///< Shadow state and conditional-policy identification.
+    pcf::IndiProperty m_indiP_simulationTrace;  ///< Read-only overlap capture, drain and loss counters.
     pcf::IndiProperty m_indiP_primaryTiming; ///< Continuous observed primary publication/receipt statistics in seconds.
     pcf::IndiProperty
         m_indiP_primaryTimingQuality;       ///< Independent diagnostic coverage, validity and collection quality.
@@ -399,10 +402,14 @@ class dmSyncopation : public MagAOXApp<true>,
     static int64_t simulationTimestamp( const timespec &stamp /**< [in] External timestamp; zero means invalid. */ );
 
     /// Sample primary metadata and advance the shadow policy; never execute a scheduled copy.
-    void readSimulationPrimary();
+    void
+    readSimulationPrimary( int64_t callbackNs = 0 /**< [in] Monotonic callback entry; zero when unavailable. */,
+                           int64_t receiptNs  = 0 /**< [in] Monotonic semaphore receipt; zero when unavailable. */ );
 
     /// Sample a linked combined-output trace for the shadow reader-hold model.
-    void readSimulationCombined();
+    void
+    readSimulationCombined( int64_t callbackNs = 0 /**< [in] Monotonic callback entry; zero when unavailable. */,
+                            int64_t receiptNs  = 0 /**< [in] Monotonic semaphore receipt; zero when unavailable. */ );
 
     /// Register read-only conditional simulation diagnostics.
     int setupSimulationINDI();
@@ -813,10 +820,15 @@ inline bool dmSyncopation::configureSimulation()
     return true;
 }
 
-inline void dmSyncopation::readSimulationPrimary()
+inline void dmSyncopation::readSimulationPrimary( int64_t callbackNs, int64_t receiptNs )
 {
+    MagAOX::dmSyncoSimulation::Observation context;
+    context.callbackNs    = callbackNs;
+    context.receiptNs     = receiptNs > 0 ? receiptNs : 0;
+    context.lockRequestNs = m_now();
     std::lock_guard<std::mutex> lock( m_cycleMutex );
-    const volatile auto        *metadata = shmimMonitorT::m_imageStream.md;
+    context.lockAcquiredNs        = m_now();
+    const volatile auto *metadata = shmimMonitorT::m_imageStream.md;
 
     if( !metadata || metadata->write != 0 )
     {
@@ -826,7 +838,8 @@ inline void dmSyncopation::readSimulationPrimary()
 
     const uint64_t counter = metadata->cnt0;
     const timespec stamp{ metadata->writetime.tv_sec, metadata->writetime.tv_nsec };
-    const int64_t  observed = m_now();
+    context.streamInode    = metadata->inode;
+    const int64_t observed = m_now();
     std::atomic_thread_fence( std::memory_order_acquire );
 
     if( metadata->write != 0 || metadata->cnt0 != counter || metadata->writetime.tv_sec != stamp.tv_sec ||
@@ -836,12 +849,14 @@ inline void dmSyncopation::readSimulationPrimary()
         return;
     }
 
-    const int64_t published  = simulationTimestamp( stamp );
-    const bool    sequential = m_simulationCounter != UINT64_MAX && counter == m_simulationCounter + 1;
-    const int64_t interval   = sequential && published > m_simulationPublication && m_simulationPublication > 0
-                                   ? published - m_simulationPublication
-                                   : 0;
-    m_simulation.primary( counter, observed, interval );
+    const int64_t published      = simulationTimestamp( stamp );
+    const bool    sequential     = m_simulationCounter != UINT64_MAX && counter == m_simulationCounter + 1;
+    const int64_t interval       = sequential && published > m_simulationPublication && m_simulationPublication > 0
+                                       ? published - m_simulationPublication
+                                       : 0;
+    context.publicationNs        = published;
+    context.primaryPublicationNs = published;
+    m_simulation.primary( counter, observed, interval, context );
 
     if( m_simulationPublication == 0 || counter != m_simulationCounter )
     {
@@ -859,11 +874,16 @@ inline void dmSyncopation::resetSimulation()
     m_simulationCombinedCounter                                                              = 0;
 }
 
-inline void dmSyncopation::readSimulationCombined()
+inline void dmSyncopation::readSimulationCombined( int64_t callbackNs, int64_t receiptNs )
 {
+    MagAOX::dmSyncoSimulation::Observation context;
+    context.callbackNs    = callbackNs;
+    context.receiptNs     = receiptNs > 0 ? receiptNs : 0;
+    context.lockRequestNs = m_now();
     std::lock_guard<std::mutex> lock( m_cycleMutex );
-    const auto                 &image    = combinerMonitorT::m_imageStream;
-    const volatile auto        *metadata = image.md;
+    context.lockAcquiredNs        = m_now();
+    const auto          &image    = combinerMonitorT::m_imageStream;
+    const volatile auto *metadata = image.md;
 
     if( !metadata || metadata->write != 0 )
     {
@@ -871,8 +891,9 @@ inline void dmSyncopation::readSimulationCombined()
         return;
     }
 
-    const uint64_t       counter = metadata->cnt0;
-    const auto           rows    = metadata->NBproctrace;
+    const uint64_t counter    = metadata->cnt0;
+    context.streamInode       = metadata->inode;
+    const auto           rows = metadata->NBproctrace;
     const timespec       published{ metadata->writetime.tv_sec, metadata->writetime.tv_nsec };
     const volatile auto *trace    = image.streamproctrace;
     const bool           present  = trace && rows > 0;
@@ -903,7 +924,12 @@ inline void dmSyncopation::readSimulationCombined()
                  ( publicationNs > m_simulationCombinedPublication && startNs > m_simulationCombinedStart &&
                    updateNs > m_simulationCombinedUpdate ) ) &&
                ( primary != m_simulationCounter || m_simulationPublication == 0 || startNs >= m_simulationPublication );
-    m_simulation.combined( counter, primary, observed, coherent );
+    context.triggerInode         = input;
+    context.publicationNs        = publicationNs;
+    context.primaryPublicationNs = primary == m_simulationCounter ? m_simulationPublication : 0;
+    context.startNs              = startNs;
+    context.updateNs             = updateNs;
+    m_simulation.combined( counter, primary, observed, coherent, context );
 
     if( coherent && !repeated )
     {
@@ -959,6 +985,15 @@ inline int dmSyncopation::setupSimulationINDI()
     m_indiP_simulationStatus.setPerm( pcf::IndiProperty::ReadOnly );
     m_indiP_simulationStatus.add( pcf::IndiElement( "state" ) );
     m_indiP_simulationStatus.add( pcf::IndiElement( "policy" ) );
+
+    REG_INDI_NEWPROP_NOCB( m_indiP_simulationTrace, "simulation_trace", pcf::IndiProperty::Number );
+    m_indiP_simulationTrace.setPerm( pcf::IndiProperty::ReadOnly );
+
+    for( const auto *name : { "enabled", "detected", "drained", "dropped", "queued", "capacity", "logFailed" } )
+    {
+        m_indiP_simulationTrace.add( pcf::IndiElement( name ) );
+    }
+
     return 0;
 }
 
@@ -1027,6 +1062,17 @@ inline void dmSyncopation::updateSimulationINDI()
         std::string( !s.valid ? "warming or stale" : ( s.feasible ? "conditional grid ready" : "infeasible" ) ) );
     updateIfChanged(
         m_indiP_simulationStatus, "policy", std::string( "shadow only; timing bounds assumed; reserve undecided" ) );
+    const auto &trace = m_simulationTraceStatus;
+    updateIfChanged(
+        m_indiP_simulationTrace,
+        std::vector<std::string>{ "enabled", "detected", "drained", "dropped", "queued", "capacity", "logFailed" },
+        std::vector<double>{ trace.enabled ? 1.0 : 0.0,
+                             double( trace.detected ),
+                             double( trace.drained ),
+                             double( trace.dropped ),
+                             double( trace.queued ),
+                             double( trace.capacity ),
+                             double( m_simulationTraceLogFailed ) } );
 }
 
 inline bool dmSyncopation::openResources()
@@ -1715,6 +1761,7 @@ inline int dmSyncopation::processImage( void *source, const dev::shmimT &tag )
     static_cast<void>( source );
     static_cast<void>( tag );
     const int64_t observed = m_now();
+    const int64_t receipt  = m_primaryReceiptNs;
     readPrimaryCadence( observed );
 
     if( m_pipelineCadence.enabled() )
@@ -1726,7 +1773,7 @@ inline int dmSyncopation::processImage( void *source, const dev::shmimT &tag )
 
     if( m_simulationEnabled )
     {
-        readSimulationPrimary();
+        readSimulationPrimary( observed, receipt );
     }
 
     if( m_diagnosticsOnly || m_simulationEnabled )
@@ -1814,6 +1861,7 @@ inline int dmSyncopation::processImage( void *source, const syncoCombinerT &tag 
 {
     static_cast<void>( source );
     static_cast<void>( tag );
+    const int64_t callback = m_simulationEnabled ? m_now() : 0;
 
     if( m_combinerCadence.enabled() )
     {
@@ -1825,7 +1873,7 @@ inline int dmSyncopation::processImage( void *source, const syncoCombinerT &tag 
 
     if( m_simulationEnabled )
     {
-        readSimulationCombined();
+        readSimulationCombined( callback, m_combinerReceiptNs );
     }
 
     m_combinerReceiptNs = -1;
@@ -2834,7 +2882,8 @@ inline int dmSyncopation::appLogic()
             if( m_simulationEnabled )
             {
                 m_simulation.advance( m_now() );
-                m_simulationSnapshot = m_simulation.summary();
+                m_simulationSnapshot    = m_simulation.summary();
+                m_simulationTraceStatus = m_simulation.traceStatus();
                 m_reason = m_simulationSnapshot.valid ? "simulation observing" : "simulation warming or stale";
             }
 
@@ -3017,13 +3066,14 @@ inline int dmSyncopation::checkRecordTimes()
 inline int dmSyncopation::recordTelem( const telem_dmsynco *record )
 {
     static_cast<void>( record );
-    int                                  state     = synco::invalid;
-    int                                  count     = 0;
-    int64_t                              period    = 0;
-    uint64_t                             delivered = 0, missed = 0, faults = 0, cached = 0;
-    int64_t                              snapshot = 0, copy = 0;
-    std::array<int64_t, synco::maxSteps> residualSnapshot{}, advanceSnapshot{};
-    bool                                 scheduleValid = false;
+    int                                   state     = synco::invalid;
+    int                                   count     = 0;
+    int64_t                               period    = 0;
+    uint64_t                              delivered = 0, missed = 0, faults = 0, cached = 0;
+    int64_t                               snapshot = 0, copy = 0;
+    std::array<int64_t, synco::maxSteps>  residualSnapshot{}, advanceSnapshot{};
+    bool                                  scheduleValid = false;
+    MagAOX::dmSyncoSimulation::TraceBatch trace;
 
     { //mutex scope
         std::unique_lock<std::mutex> lock( m_cycleMutex, std::try_to_lock );
@@ -3031,6 +3081,15 @@ inline int dmSyncopation::recordTelem( const telem_dmsynco *record )
         if( lock.owns_lock() && m_simulationEnabled )
         {
             m_simulationSnapshot = m_simulation.summary();
+
+            while( trace.count < trace.events.size() && m_simulation.popOverlap( trace.events[trace.count] ) )
+            {
+                ++trace.count;
+            }
+
+            trace.status            = m_simulation.traceStatus();
+            trace.status.logFailed  = m_simulationTraceLogFailed;
+            m_simulationTraceStatus = trace.status;
         }
 
         if( lock.owns_lock() && !m_diagnosticsOnly && !m_simulationEnabled )
@@ -3056,27 +3115,42 @@ inline int dmSyncopation::recordTelem( const telem_dmsynco *record )
         return 0;
     }
 
-    const std::vector<int64_t> residuals( residualSnapshot.begin(), residualSnapshot.begin() + count );
-    const std::vector<int64_t> advances( advanceSnapshot.begin(), advanceSnapshot.begin() + count );
-    telem_dmsynco::messageT    message( state,
-                                     count,
-                                     period,
-                                     delivered,
-                                     missed,
-                                     faults,
-                                     cached,
-                                     snapshot,
-                                     copy,
-                                     residuals,
-                                     advances,
-                                     m_primaryCadence.summary(),
-                                     scheduleValid,
-                                     m_combinerCadence.summary(),
-                                     m_cameraCadence.summary(),
-                                     m_pipelineCadence.summary(),
-                                     m_cameraPublicationCadence.summary(),
-                                     m_simulationSnapshot );
-    telem<telem_dmsynco>( message );
+    try
+    {
+        const std::vector<int64_t> residuals( residualSnapshot.begin(), residualSnapshot.begin() + count );
+        const std::vector<int64_t> advances( advanceSnapshot.begin(), advanceSnapshot.begin() + count );
+        telem_dmsynco::messageT    message( state,
+                                         count,
+                                         period,
+                                         delivered,
+                                         missed,
+                                         faults,
+                                         cached,
+                                         snapshot,
+                                         copy,
+                                         residuals,
+                                         advances,
+                                         m_primaryCadence.summary(),
+                                         scheduleValid,
+                                         m_combinerCadence.summary(),
+                                         m_cameraCadence.summary(),
+                                         m_pipelineCadence.summary(),
+                                         m_cameraPublicationCadence.summary(),
+                                         m_simulationSnapshot,
+                                         trace );
+
+        if( telem<telem_dmsynco>( message ) < 0 )
+        {
+            m_simulationTraceLogFailed += trace.count;
+            return -1;
+        }
+    }
+    catch( ... )
+    {
+        m_simulationTraceLogFailed += trace.count;
+        throw;
+    }
+
     return 0;
 }
 

@@ -1,5 +1,5 @@
 /** \file dmSyncoTelemetry_test.cpp
- * \brief Syncopation observation and conditional simulation telemetry compatibility and validation.
+ * \brief Syncopation cadence, conditional simulation and raw overlap telemetry compatibility and validation.
  * \ingroup logger_files
  */
 #include "../../../tests/testXWC.hpp"
@@ -132,11 +132,55 @@ dmSyncoSimulation::Summary sampleSimulation()
     return summary;
 }
 
+/// Construct both overlap classes with older sessions, full-width identities and separate producer clocks.
+dmSyncoSimulation::TraceBatch sampleOverlapTrace()
+{
+    dmSyncoSimulation::TraceBatch trace;
+    trace.count  = 2;
+    trace.status = { true, 12, 8, 1, 3, dmSyncoSimulation::traceCapacity, 2 };
+
+    for( size_t index = 0; index < trace.count; ++index )
+    {
+        auto &event           = trace.events[index];
+        event.id              = index + 7;
+        event.session         = ( uint64_t( 1 ) << 54 ) + 18 - index;
+        event.mainCounter     = ( uint64_t( 1 ) << 55 ) + 23 + index;
+        event.combinedCounter = ( uint64_t( 1 ) << 56 ) + 29 + index;
+        event.planCounter     = event.mainCounter - 1;
+        event.lastMainCounter = event.mainCounter - 1;
+        event.step            = int( index );
+        event.origin = index ? dmSyncoSimulation::OverlapOrigin::combined : dmSyncoSimulation::OverlapOrigin::primary;
+        event.window = index ? dmSyncoSimulation::OverlapWindow::readerHold : dmSyncoSimulation::OverlapWindow::copy;
+        event.observedNs                       = ( int64_t( 1 ) << 56 ) + 1000001 + int64_t( index ) * 500000;
+        event.mainGridNs                       = event.observedNs - 3500;
+        event.planGridNs                       = event.mainGridNs - 500000;
+        event.periodNs                         = 500000;
+        event.copyBeginNs                      = event.observedNs - ( index ? 10000 : 500 );
+        event.copyEndNs                        = event.copyBeginNs + 1000;
+        event.readerEndNs                      = index ? event.copyEndNs + 150000 : 0;
+        event.lastMainNs                       = event.observedNs - 500000;
+        event.lastOutputNs                     = event.lastMainNs + 10000;
+        event.observation.streamInode          = ( uint64_t( 1 ) << 57 ) + 31 + index;
+        event.observation.triggerInode         = index ? trace.events[0].observation.streamInode : 0;
+        event.observation.receiptNs            = event.observedNs - 400;
+        event.observation.callbackNs           = event.observedNs - 300;
+        event.observation.lockRequestNs        = event.observedNs - 200;
+        event.observation.lockAcquiredNs       = event.observedNs - 100;
+        event.observation.publicationNs        = 1800000000000000001 + int64_t( index ) * 500000;
+        event.observation.primaryPublicationNs = index ? event.observation.publicationNs - 10000 : 0;
+        event.observation.startNs              = index ? event.observation.publicationNs - 5000 : 0;
+        event.observation.updateNs             = index ? event.observation.publicationNs - 200 : 0;
+    }
+
+    return trace;
+}
+
 /// Populate unchanged scheduler fields with independently sampled primary and combiner timing.
 telem_dmsynco::messageT
-message( const dmTiming::Summary          &primary /**< [in] coherent primary summary */,
-         const dmCombTiming::Summary      &combiner   = {} /**< [in] independent combiner summary */,
-         const dmSyncoSimulation::Summary &simulation = {} /**< [in] hypothetical shadow prediction */ )
+message( const dmTiming::Summary             &primary /**< [in] coherent primary summary */,
+         const dmCombTiming::Summary         &combiner   = {} /**< [in] independent combiner summary */,
+         const dmSyncoSimulation::Summary    &simulation = {} /**< [in] hypothetical shadow prediction */,
+         const dmSyncoSimulation::TraceBatch &trace      = {} /**< [in] drained overlap evidence */ )
 {
     return telem_dmsynco::messageT( 3,
                                     2,
@@ -155,7 +199,8 @@ message( const dmTiming::Summary          &primary /**< [in] coherent primary su
                                     {},
                                     {},
                                     {},
-                                    simulation );
+                                    simulation,
+                                    trace );
 }
 
 /// Build a real log envelope for shared verification dispatch.
@@ -253,6 +298,58 @@ void checkSimulation( const DmSyncoSimulation          *actual /**< [in] deseria
         REQUIRE( step->reader_hold() == source.readerHold );
         REQUIRE( step->expired() == source.expired );
         REQUIRE( step->overlap() == source.overlap );
+    }
+}
+
+/// Preserve every raw overlap endpoint, clock domain, classification and lifetime quality count.
+void checkOverlapTrace( const DmSyncoOverlapTrace           *actual /**< [in] serialized overlap batch */,
+                        const dmSyncoSimulation::TraceBatch &expected /**< [in] unconverted evidence */ )
+{
+    REQUIRE( actual != nullptr );
+    CHECK( actual->enabled() == expected.status.enabled );
+    CHECK( actual->detected() == expected.status.detected );
+    CHECK( actual->drained() == expected.status.drained );
+    CHECK( actual->dropped() == expected.status.dropped );
+    CHECK( actual->queued() == expected.status.queued );
+    CHECK( actual->capacity() == expected.status.capacity );
+    CHECK( actual->log_failed() == expected.status.logFailed );
+    REQUIRE( actual->batch_count() == expected.count );
+    REQUIRE( actual->events()->size() == expected.count );
+
+    for( size_t index = 0; index < expected.count; ++index )
+    {
+        const auto *event  = actual->events()->Get( index );
+        const auto &source = expected.events[index];
+        CHECK( event->id() == source.id );
+        CHECK( event->session() == source.session );
+        CHECK( event->main_counter() == source.mainCounter );
+        CHECK( event->combined_counter() == source.combinedCounter );
+        CHECK( event->plan_counter() == source.planCounter );
+        CHECK( event->last_main_counter() == source.lastMainCounter );
+        CHECK( event->step() == source.step );
+        CHECK( int( event->origin() ) == int( source.origin ) );
+        CHECK( int( event->window() ) == int( source.window ) );
+        CHECK( event->observed_ns() == source.observedNs );
+        CHECK( event->main_grid_ns() == source.mainGridNs );
+        CHECK( event->plan_grid_ns() == source.planGridNs );
+        CHECK( event->period_ns() == source.periodNs );
+        CHECK( event->copy_begin_ns() == source.copyBeginNs );
+        CHECK( event->copy_end_ns() == source.copyEndNs );
+        CHECK( event->reader_end_ns() == source.readerEndNs );
+        CHECK( event->last_main_ns() == source.lastMainNs );
+        CHECK( event->last_output_ns() == source.lastOutputNs );
+        const auto *observation = event->observation();
+        REQUIRE( observation != nullptr );
+        CHECK( observation->stream_inode() == source.observation.streamInode );
+        CHECK( observation->trigger_inode() == source.observation.triggerInode );
+        CHECK( observation->receipt_ns() == source.observation.receiptNs );
+        CHECK( observation->callback_ns() == source.observation.callbackNs );
+        CHECK( observation->lock_request_ns() == source.observation.lockRequestNs );
+        CHECK( observation->lock_acquired_ns() == source.observation.lockAcquiredNs );
+        CHECK( observation->publication_ns() == source.observation.publicationNs );
+        CHECK( observation->primary_publication_ns() == source.observation.primaryPublicationNs );
+        CHECK( observation->start_ns() == source.observation.startNs );
+        CHECK( observation->update_ns() == source.observation.updateNs );
     }
 }
 /// \endcond
@@ -889,6 +986,256 @@ TEST_CASE( "Synco telemetry rejects inconsistent shadow summaries", "[dmSyncoTel
     const auto *decoded     = GetTelem_dmsynco_fb( flatlogs::logHeader::messageBuffer( corrupt ) );
     auto       *stepOffsets = const_cast<uint8_t *>( decoded->simulation()->outcomes()->Data() );
     std::memset( stepOffsets, 0xff, sizeof( flatbuffers::uoffset_t ) );
+    REQUIRE_FALSE( verifyLogEntry( telem_dmsynco::eventCode, corrupt.get() ) );
+}
+
+/// Preserve full-width overlap evidence and older-session batches through binary, JSON and text readers.
+/** \ingroup dmSyncoTelemetry_unit_test */
+TEST_CASE( "Synco telemetry preserves raw overlap evidence across sessions", "[dmSyncoTelemetry]" )
+{
+    // clang-format off
+#ifdef DMSYNCO_TELEMETRY_TEST_DOXYGEN_REF
+    MagAOX::logger::telem_dmsynco::messageT;
+    MagAOX::logger::telem_dmsynco::verify;
+    MagAOX::logger::telem_dmsynco::msgString;
+#endif
+    // clang-format on
+    const auto trace  = sampleOverlapTrace();
+    auto       input  = message( samplePrimary(), {}, sampleSimulation(), trace );
+    auto       buffer = envelope( input );
+    REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+    const auto *simulation = GetTelem_dmsynco_fb( input.builder.GetBufferPointer() )->simulation();
+    checkOverlapTrace( simulation->overlap_trace(), trace );
+    REQUIRE( simulation->overlap_trace()->events()->Get( 0 )->session() < simulation->session() );
+    REQUIRE( simulation->overlap_trace()->events()->Get( 0 )->main_grid_ns() !=
+             simulation->overlap_trace()->events()->Get( 0 )->plan_grid_ns() );
+
+    const auto text = telem_dmsynco::msgString( input.builder.GetBufferPointer(), input.builder.GetSize() );
+    CHECK(
+        text.find(
+            "trace_quality={enabled:1,detected:12,drained:8,dropped:1,queued:3,capacity:256,logFailed:2,batch:2}" ) !=
+        std::string::npos );
+    CHECK( text.find( "origin:primary,window:copy" ) != std::string::npos );
+    CHECK( text.find( "origin:combined,window:readerHold" ) != std::string::npos );
+    CHECK( text.find( "mainCounter:" + std::to_string( trace.events[0].mainCounter ) ) != std::string::npos );
+    CHECK( text.find( "model_clock:monotonic,observed_ns:" + std::to_string( trace.events[0].observedNs ) ) !=
+           std::string::npos );
+    CHECK( text.find( "producer_clock:unconverted,publication_ns:1800000000000000001" ) != std::string::npos );
+    CHECK( text.find( "lockAcquired_ns:" + std::to_string( trace.events[1].observation.lockAcquiredNs ) ) !=
+           std::string::npos );
+
+    const auto          json = telem_dmsynco::msgJSON( input.builder.GetBufferPointer(),
+                                              input.builder.GetSize(),
+                                              reinterpret_cast<const uint8_t *>( telem_dmsynco_bfbs ),
+                                              telem_dmsynco_bfbs_len );
+    flatbuffers::Parser parser;
+    REQUIRE( parser.Deserialize( reinterpret_cast<const uint8_t *>( telem_dmsynco_bfbs ), telem_dmsynco_bfbs_len ) );
+    REQUIRE( parser.Parse( json.c_str() ) );
+    checkOverlapTrace( GetTelem_dmsynco_fb( parser.builder_.GetBufferPointer() )->simulation()->overlap_trace(),
+                       trace );
+}
+
+/// Accept older simulations without the optional trace, empty drains and unavailable raw endpoints.
+/** \ingroup dmSyncoTelemetry_unit_test */
+TEST_CASE( "Synco telemetry keeps optional overlap evidence independent", "[dmSyncoTelemetry]" )
+{
+    auto legacy = message( samplePrimary(), {}, sampleSimulation() );
+    auto buffer = envelope( legacy );
+    REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+    const auto *simulation = GetTelem_dmsynco_fb( legacy.builder.GetBufferPointer() )->simulation();
+    REQUIRE( simulation->overlap_trace() == nullptr );
+    REQUIRE_FALSE( flatbuffers::IsFieldPresent( simulation, DmSyncoSimulation::VT_OVERLAP_TRACE ) );
+    REQUIRE( telem_dmsynco::msgString( legacy.builder.GetBufferPointer(), legacy.builder.GetSize() )
+                 .find( "trace_quality=" ) == std::string::npos );
+
+    auto disabledTrace           = sampleOverlapTrace();
+    disabledTrace.status.enabled = false;
+    auto disabled                = message( samplePrimary(), {}, sampleSimulation(), disabledTrace );
+    REQUIRE( GetTelem_dmsynco_fb( disabled.builder.GetBufferPointer() )->simulation()->overlap_trace() == nullptr );
+
+    dmSyncoSimulation::TraceBatch empty;
+    empty.status.enabled = true;
+    auto input           = message( samplePrimary(), {}, sampleSimulation(), empty );
+    buffer               = envelope( input );
+    REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+    checkOverlapTrace( GetTelem_dmsynco_fb( input.builder.GetBufferPointer() )->simulation()->overlap_trace(), empty );
+
+    auto trace                  = sampleOverlapTrace();
+    trace.events[0].observation = {};
+    trace.events[0].mainGridNs  = 0; // A copy can overlap a main without a retained prediction for that main.
+    input                       = message( samplePrimary(), {}, sampleSimulation(), trace );
+    buffer                      = envelope( input );
+    REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+    checkOverlapTrace( GetTelem_dmsynco_fb( input.builder.GetBufferPointer() )->simulation()->overlap_trace(), trace );
+
+    auto &active       = trace.events[1];
+    active.window      = dmSyncoSimulation::OverlapWindow::copy;
+    active.readerEndNs = active.copyEndNs; // Zero delivery/keepout/guard still permits an active copy interval.
+    active.observedNs  = active.copyBeginNs;
+    active.observation = {};
+    input              = message( samplePrimary(), {}, sampleSimulation(), trace );
+    buffer             = envelope( input );
+    REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+    checkOverlapTrace( GetTelem_dmsynco_fb( input.builder.GetBufferPointer() )->simulation()->overlap_trace(), trace );
+}
+
+/// Reject impossible queue accounting, unbounded batches and incorrectly classified or ordered evidence.
+/** \ingroup dmSyncoTelemetry_unit_test */
+TEST_CASE( "Synco telemetry rejects malformed overlap evidence", "[dmSyncoTelemetry]" )
+{
+    for( unsigned invalid = 0; invalid < 43; ++invalid )
+    {
+        INFO( "invalid overlap case " << invalid );
+        auto  trace   = sampleOverlapTrace();
+        auto &quality = trace.status;
+        auto &event   = trace.events[0];
+        auto &active  = trace.events[1];
+
+        switch( invalid )
+        {
+        case 0:
+            quality.capacity = 0;
+            break;
+        case 1:
+            quality.capacity = dmSyncoSimulation::traceCapacity + 1;
+            break;
+        case 2:
+            quality.queued   = quality.capacity + 1;
+            quality.detected = quality.drained + quality.dropped + quality.queued;
+            break;
+        case 3:
+            quality.drained = quality.detected + 1;
+            break;
+        case 4:
+            quality.dropped = UINT64_MAX;
+            break;
+        case 5:
+            ++quality.queued;
+            break;
+        case 6:
+            quality.logFailed = quality.drained + 1;
+            break;
+        case 7:
+            quality.drained  = 1;
+            quality.detected = quality.drained + quality.dropped + quality.queued;
+            break;
+        case 8:
+            trace.count = dmSyncoSimulation::traceBatchCapacity + 1;
+            break;
+        case 9:
+            event.id = 0;
+            break;
+        case 10:
+            event.id = quality.detected + 1;
+            break;
+        case 11:
+            active.id = event.id;
+            break;
+        case 12:
+            event.session = 0;
+            break;
+        case 13:
+            event.step = -1;
+            break;
+        case 14:
+            event.step = dmSyncoSimulation::maxSteps;
+            break;
+        case 15:
+            event.origin = dmSyncoSimulation::OverlapOrigin( 2 );
+            break;
+        case 16:
+            event.window = dmSyncoSimulation::OverlapWindow( 2 );
+            break;
+        case 17:
+            event.observedNs = 0;
+            break;
+        case 18:
+            event.mainGridNs = -1;
+            break;
+        case 19:
+            event.planGridNs = 0;
+            break;
+        case 20:
+            event.periodNs = 0;
+            break;
+        case 21:
+            event.copyBeginNs = 0;
+            break;
+        case 22:
+            event.copyEndNs = event.copyBeginNs;
+            break;
+        case 23:
+            event.lastMainNs = event.observedNs + 1;
+            break;
+        case 24:
+            event.lastOutputNs = event.observedNs + 1;
+            break;
+        case 25:
+            event.readerEndNs = event.copyEndNs + 1;
+            break;
+        case 26:
+            active.readerEndNs = active.copyEndNs;
+            break;
+        case 27:
+            event.observedNs = event.copyEndNs;
+            break;
+        case 28:
+            event.observedNs = event.copyBeginNs - 1;
+            break;
+        case 29:
+            event.window = dmSyncoSimulation::OverlapWindow::readerHold;
+            break;
+        case 30:
+            active.observedNs = active.readerEndNs;
+            break;
+        case 31:
+            active.observedNs = active.copyEndNs - 1;
+            break;
+        case 32:
+            event.observation.publicationNs = -1;
+            break;
+        case 33:
+            event.observation.primaryPublicationNs = -1;
+            break;
+        case 34:
+            event.observation.startNs = -1;
+            break;
+        case 35:
+            event.observation.updateNs = -1;
+            break;
+        case 36:
+            event.observation.receiptNs = event.observation.callbackNs + 1;
+            break;
+        case 37:
+            event.observation.callbackNs = event.observation.lockRequestNs + 1;
+            break;
+        case 38:
+            event.observation.lockRequestNs = event.observation.lockAcquiredNs + 1;
+            break;
+        case 39:
+            event.observation.lockAcquiredNs = event.observedNs + 1;
+            break;
+        case 40:
+            event.observation.receiptNs = -1;
+            break;
+        case 41:
+            event.lastMainNs = -1;
+            break;
+        case 42:
+            event.lastOutputNs = -1;
+            break;
+        }
+
+        auto input  = message( samplePrimary(), {}, sampleSimulation(), trace );
+        auto buffer = envelope( input );
+        REQUIRE_FALSE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+    }
+
+    auto        input   = message( samplePrimary(), {}, sampleSimulation(), sampleOverlapTrace() );
+    auto        corrupt = envelope( input );
+    const auto *decoded = GetTelem_dmsynco_fb( flatlogs::logHeader::messageBuffer( corrupt ) );
+    auto       *events  = const_cast<uint8_t *>( decoded->simulation()->overlap_trace()->events()->Data() );
+    std::memset( events, 0xff, sizeof( flatbuffers::uoffset_t ) );
     REQUIRE_FALSE( verifyLogEntry( telem_dmsynco::eventCode, corrupt.get() ) );
 }
 

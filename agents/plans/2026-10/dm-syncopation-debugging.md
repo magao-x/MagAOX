@@ -2731,3 +2731,502 @@ integration tests verify untouched command data/counters/semaphores, absent
 new auxiliary/provider streams and zero timed waits. Existing live scheduler
 and trigger routing remain unchanged; physical overhead and prospective active
 delivery require the operator capture before further operational changes.
+
+
+### Resume shadow capture after RTC cpuset migration — 2026-10-26
+
+The operator merged the cpuset PR into `dev`, merged `dev` back into
+`jrmales/dm-syncopation`, and reports the RTC migration succeeded with closed
+AO-loop operation. The pending test remains the two-step read-only shadow
+simulation; no live auxiliary delivery or targeted-wake test is selected yet.
+
+Prepared the workstation copy of
+`/opt/MagAOX/config/dmtweeter-synco.conf` with `[simulation] enabled=true`,
+retaining `dm01disp03`, `maxSubframes=2`, the underscored timing-stream name
+and `shmimMonitor.cpuset=dmtweeter-synco` (target CPU41). The operator must
+sync this config, rebuild/install `dmSyncopation` and `logdump`, then restart
+the instance. Simulation observes automatically with operational enable Off;
+auxiliary providers remain stopped.
+
+Keep the current dmcomb trigger mode and its resolved named primary, AO gain,
+camera settings, CPU/IRQ placement and workload fixed for the first capture.
+The mode-3 wake-route experiment is separate. After warmup, record initial
+and final INDI snapshots plus 120 seconds of simultaneous `dmtweeter-synco`,
+`dmtweeter` and `camwfs` telemetry. Record the actual trigger mode and AO gain
+with the supplied result. Check estimator validity/period, actual output
+associations and observation quality before interpreting modeled per-step
+would-run, skip and overlap counts. The early-main reserve remains an
+unqualified assumption. No new instrument measurement is recorded here.
+
+#### INDI snapshot stalls during capture setup
+
+The operator reports that the capture exceeds two minutes and suspects the
+preceding `getINDI camwfs` query never returns, possibly a regression in recent
+OCAM changes. The supplied shell recipe took unbounded INDI snapshots before
+starting its timed collectors and used a bare `wait`. A stalled snapshot could
+therefore prevent telemetry collection from starting; a bare `wait` could also
+wait for unrelated background jobs in the operator's shell. The
+[capture procedure](../../../apps/dmSyncopation/doc/dmSyncopation.md#capture-a-simulation-run)
+now starts collectors first, bounds every snapshot externally and waits only
+for the three saved collector PIDs. Partial snapshot output and exit statuses
+are retained. This contains the capture delay; it does not resolve a possible
+definition/request loop.
+
+Workstation source review confirms that the previous fix, `2bab1b28`, remains
+present: dmSyncopation does not force camera subscriptions once per second.
+OCAM housekeeping ages/countdowns use ordinary Set messages. The repository's
+`getINDI` ignores those messages by default; only matching readable property
+definitions reset its wildcard-query timeout. OCAM's new explicit request is
+for the external synchronization-frequency property once per FPS confirmation
+generation, not for camera properties. The base class still forces subscribed
+requests when answering a broad property query as server-restart recovery;
+that behavior predates these OCAM changes. No repeated camera-definition path
+has been established from this review.
+
+Requested an operator-only, eight-second `getINDI -vvv camwfs` capture, saving
+values and XML separately, plus `type -a getINDI` and the exit status. This will
+distinguish repeated definitions from ordinary updates or differing installed
+client options. Instrument evidence and a causal regression finding remain
+pending. No runtime code, scheduling policy or camera polling was changed.
+
+#### Bounded XML capture confirms repeated FPS and gain definitions
+
+The operator supplied `~/tmp/camwfs-getindi-values.txt` and
+`~/tmp/camwfs-getindi-xml.txt` on the workstation and confirms that `getINDI`
+resolves directly to `/usr/local/bin/getINDI`, with no alias. The terminal
+exit status was not included. Parsing the XML yields 79 complete property
+vectors: 31 initial definitions, 16 additional definitions and 32 ordinary
+updates. Only `camwfs.fps` and `camwfs.emgain` repeat, each with eight additional
+definitions over approximately eight seconds. Each of `fg_timing`,
+`fg_stage_timing`, `fg_timing_quality` and `housekeeping` sends eight ordinary
+Set updates. Every other property has only its initial definition.
+
+The repeated FPS/gain pair explains why the device-wide `getINDI camwfs`
+query cannot reach its two-second quiet interval. FPS remains 2000 and gain
+remains 1, with the same old property timestamps on every definition. Those
+timestamps describe unchanged property contents, not response arrival times;
+the nearby ordinary-update timestamps establish the approximate repetition
+cadence. The replies do not demonstrate renewed camera serial polling.
+The narrower `getINDI camwfs.fg_timing` query is expected to finish because
+its definition does not repeat in this capture; that expectation has not yet
+been checked on the instrument.
+
+Audited OCAM, `stdCamera`, the INDI message serializer, base subscription
+handling, the camera GUI, numeric status widgets and GUI discovery retries.
+The current camera code replies to targeted GetProperties requests with these
+definitions; no periodic FPS/gain definition sender was found. Ordinary Set
+messages retain their type through serialization. GUI discovery and base
+subscriptions stop retrying resolved properties. `strehlEstimator` subscribes
+to both FPS and gain, and `modalGainOpt` subscribes to gain, but neither current
+source establishes a periodic request for this pair. A requesting client,
+different installed code or another request path remains to be identified.
+
+Requested the connected GUI/script/notebook inventory and whether
+`strehlEstimator` was running. The client XML does not include requester
+identity. Do not restore serial polling or change the AO/camera settings to
+mask the definition traffic. No runtime fix is justified yet; the bounded
+capture procedure remains available for the pending shadow test.
+
+The operator confirms `strehlEstimator` is running, together with cameraGUI
+and rtimvClient camera overlays on possibly three or four control stations.
+Review of current and historical client code found no matching periodic
+FPS/gain query path; multiple connected clients alone do not establish the
+cause. The operator proposes isolating the remote machines by shutting down
+`isAOC` and `isICC`, leaving `isRTC` running. The local configurations support
+this test: AOC imports RTC devices through its remote-server configuration,
+and ICC imports `camwfs` explicitly from RTC.
+
+For the first isolation capture, the operator stops those two remote INDI
+servers, leaves RTC applications including `strehlEstimator` running, allows
+the disconnect activity to settle, and repeats the bounded camera XML query
+on RTC. If the repeated pair disappears, restore one remote server at a time
+and repeat after connection/discovery settles to identify the implicated
+route. If it persists, restore both remote servers and investigate RTC-local
+requesters or clients connected directly to RTC. A direct workstation-to-RTC
+tunnel bypasses this isolation, and reconnect bursts must not be mistaken for
+the persistent repetition. No isolation result has been supplied yet.
+
+#### Repetition persists with AOC and ICC servers stopped
+
+The operator supplied `~/tmp/camwfs-rtc-only-values.txt` and
+`~/tmp/camwfs-rtc-only-xml.txt` and confirms that the problem persisted during
+the remote-server isolation. The capture contains 82 complete vectors: the
+same 31 initial definitions and 16 repeated definitions, plus 35 ordinary
+updates. FPS and EM gain are again each defined nine times with unchanged
+payloads and the same timestamps as the first capture. All other definitions
+occur once. Disconnecting the AOC and ICC INDI-server routes therefore did
+not remove the repeating source; those routes are not necessary for the hang.
+RTC-local subscribers and any direct RTC connections remain candidates.
+
+The next operator test restores the remote servers and temporarily stops only
+the `strehl` instance, retains the existing camera/AO/GUI state, and repeats
+the bounded XML capture on RTC before restarting `strehl`. This tests whether
+the local app mediates the FPS/gain requests; a positive result would still
+require distinguishing an app-internal request from requests induced by
+another client's queries to that app. No runtime code change is made.
+
+The operator subsequently reports that the repetition continues with both
+remote INDI servers still down and `strehl` stopped. This rules out requiring
+that app or either remote-server path; no new XML capture or exit status was
+provided for this condition. Further transport review found no automatic
+FPS/gain query in the INDI connection timers or byte-copying FIFO bridge.
+The next diagnostic is a bounded passive capture of incoming TCP port 7624
+traffic with before/after `ss` connection/process snapshots, retaining the
+current isolation during capture. This can identify directly connected
+requesters without further app shutdowns. Requests from local apps through
+driver FIFOs will not appear in that TCP capture; an SSH-forwarded connection
+may require tracing its forwarding endpoint afterward. Requester identity
+remains unresolved and runtime code remains unchanged.
+
+#### Operator identifies the unmerged data-collection app
+
+The operator identifies `dlDataCollection`, whose deployed changes are not
+yet merged, as the source of the repeating FPS/gain requests. This resolves
+the requester investigation for the reported INDI hang; the passive TCP
+capture is no longer needed. Neither the checked-in app nor the identical
+copy in `MagAOX-working` contains the deployed camera-subscription code, so
+no speculative change is made to either copy. No new post-fix XML capture
+has been supplied.
+
+Correct the repeated requests in that app's development work. A normal
+subscription should retain Def/Set updates and use the base class's
+unresolved-property discovery/restart handling rather than repeatedly force
+definitions of resolved camera properties. The bounded snapshots remain
+useful protection for the capture recipe. Restore the temporarily stopped
+INDI servers and `strehl` for the normal test configuration, then resume
+the two-step read-only shadow capture once the request loop is stopped.
+No OCAM polling, timing policy or runtime source change is required by this
+finding. The definition flood and its containment are separate from the
+pending dmSyncopation scheduling-policy measurement.
+
+### First RTC shadow capture — 2026-10-26
+
+The operator supplied `~/tmp/synco-sim-20261026T215557Z`, recording checkout
+`aaeef915915b6ed8159b29e3c50c089f954af52f`. The 119 `[dmsynco]` records span
+21:56:03.506–21:58:02.134 UTC (118.628 seconds). Matched files contain 120
+DM-controller timing records and 114 camera stage-timing records, each
+covering about 119–120 seconds. They contain live capture records, not the
+older history suggested by their binary telemetry filenames.
+
+The app reports shadow mode, operational enable Off and zero delivered
+auxiliary commands. All 119 simulation records have a valid grid, nominal
+feasibility and session 3, with two modeled steps and 32 period/phase samples.
+Reported median periods range from 499.088 to 500.936 us. Top-level live
+scheduler fields remain inactive (`schedule_valid=0`), as expected in this
+mode. The configured 20 us early-main reserve remains an unqualified model
+assumption.
+
+**The capture does not yet qualify the skip/copy policy:** no actual
+main/combined-output association was accepted. Every combiner report has
+trigger inode zero and primary counter zero despite a readable trace from
+writer PID 3850720. Across the INDI snapshots, combined events and
+`unlinkedPrimary` both increase by 253,337; simulation `outputGaps` also
+increases by 253,337 while `associations` stays zero. Trace metadata errors,
+missing traces, collector drops and the existing combiner duplicate/gap
+counters do not increase. Here, `outputGaps` describes unusable model
+associations, not lost physical DM commands.
+
+First-to-last telemetry counter differences cover 237,255 additional primary
+observations and give the following modeled outcomes:
+
+| Step | Considered / skipped | Early-main reason | Missing-output reason | Would run / overlap |
+| --- | ---: | ---: | ---: | ---: |
+| Passive 0 | 237,255 / 237,255 | 64 | 237,191 | 0 / 0 |
+| Active 1 | 237,255 / 237,255 | 0 | 237,255 | 0 / 0 |
+
+The reason counters follow the model's gate order. These are not qualified
+physical skip rates or evidence that overlap would be absent with working
+output associations. The INDI before/after interval is longer than the
+first/last telemetry interval and instead brackets 253,337 new primary
+observations; do not mix those populations. Existing session phase extrema
+−228.309/+122.455 us are already present before the capture and remain
+unchanged. The 1 Hz sampled residuals range from −23.723 to +18.240 us, but
+cannot establish per-frame residual tails.
+
+Independent timing measurements remain usable. The following RMS values are
+medians of reported overlapping two-second-window standard deviations, not
+whole-capture RMS; ranges are the union of those windows' extrema.
+
+| Measurement | Median window RMS, us | Observed range, us |
+| --- | ---: | ---: |
+| Camera acquisition interval | 0.324 | 480–525 |
+| Camera publication interval | 0.841 | 478.273–525.151 |
+| Primary DM publication interval | — | 473.474–526.955 |
+| Combined DM publication interval | 5.825 | 468.143–531.614 |
+| DM receipt to SDK return | 0.433 | 107.853–114.135 |
+
+The primary publication RMS ranges from 2.355 to 3.897 us across its windows;
+do not subtract independently sampled RMS values to infer combiner latency.
+DM cumulative events, receipts and successful submissions each increase by
+238,342 between its first and last records, without new failures, partial
+commands, duplicates, counter gaps, invalid events or collector drops.
+Camera events/publications increase by 239,598 without new failure/gap/drop
+counts. Twelve additional serial controls and six unique qualified camera
+excursion traces occur; each trace's five-frame context reports serial
+overlap. The trace intervals include one 525.151 us late interval and five
+approximately 479 us early intervals. Existing trace-drop counts do not grow.
+
+Saved settings show loop state On and gain 1, unlike the earlier gain-zero
+comparisons. Camera records retain bin2, 2 kHz, EM gain 1, shutter SHUT,
+synchronization On and CCD target −45 C throughout. The actual dmcomb trigger
+mode/name/delay are not established by the capture. Requested those FPS
+readbacks and confirmation of any setting/placement/workload changes during
+the run. Zero trigger inode alone does not identify the trigger mode.
+
+Next, establish a resolved named primary in dmcomb's trace. A blank,
+unresolved or stale-at-initialization `.procinfo.triggersname` can produce
+this symptom; verify the running values before changing anything. A resolved
+`dm01disp03` (or its `aol1_dmC` alias) can supply linkage while retaining mode
+4. After normal reinitialization if needed, require a matching nonzero inode,
+advancing primary counter and growing `simulation.associations` before
+another long policy capture. The guide now makes this preflight explicit.
+No runtime source or instrument setting was changed during this analysis.
+
+#### Correct FPS readback; live trigger identity still to be checked
+
+The operator reports dmcomb trigger mode 4, trigger-stream name `dm01disp03`
+and delay `0.00001` seconds (10 us). These values are compatible with the
+required linkage; the configuration name is not blank. Confirmation of other
+setting/workload changes during the capture has not yet been supplied.
+
+The APP-side audit confirms that the zero inode/counter comes directly from
+combined trace row zero. `dmCombTiming` exports those identity fields before
+its expected-primary test, and the simulation independently reads the same
+row. A failed expected-inode comparison does not manufacture these zeros.
+
+Local MILK source distinguishes configured FPS values from initialized RUN
+state. `fps_connect.c` reads the name on RUN connection;
+`CLIcore_utils.h` resolves `image_ID(triggerstreamname)` once at initialization.
+`processinfo_waitoninputstream_init()` saves the resolved metadata inode, or
+stores inode zero and replaces the live name with a space if resolution
+fails. Its mode-4 branch does not clear a valid inode. Runtime updates refresh
+mode/delay/timeouts but do not re-resolve name/ID/inode. Output publication
+copies that saved live identity into trace row zero. The inspected dmcomb
+loads numbered channel streams before initialization, so a correct existing
+primary name should normally resolve at startup. Stale or failed
+initialization is a supported hypothesis, not an established diagnosis.
+
+Requested the actual dmcomb processinfo row through `milk-procCTRL` F4
+(Triggering), matching captured writer PID 3850720 or its current replacement.
+If live identity is blank/zero, distinguish startup resolution from current
+FPS values before normal reinitialization. If it is nonzero/matching while
+output trace telemetry remains zero, inspect producer/observer trace handling
+instead; do not treat restart as a proved remedy. A different identity calls
+for checking the FPS-instance/PID association. The guide now includes this
+read-only check. No mode, CPU, timing reserve or runtime source was changed.
+
+The operator confirms live processinfo has inode zero, a blank stream name
+and mode `4:DELA`, after restarting since the earlier online mode-3 tests.
+The active RUN therefore has no resolved primary lineage, matching the
+captured trace zeros. This establishes the missing linkage, but not why the
+current FPS name differs from the initialized state. Mode 4 itself does not
+clear a valid inode in the inspected implementation.
+
+The operator elects to set the primary name manually and restart. Retain
+mode 4 and the 10 us delay, set/save `dm01disp03` before RUN initialization,
+then verify the live F4 name/inode and increasing simulation associations
+before repeating the shadow capture with operational enable Off. Naming the
+primary supplies provenance while DELAY mode retains all-channel polling.
+Do not weaken the simulation association gate or infer associations from
+nearby timestamps. No restart result has been supplied yet.
+
+The operator subsequently reports that all post-restart preflight checks are
+good: the live named-primary linkage is present, simulation associations
+increase and operational enable remains Off. The next step is another
+120-second matched shadow capture with mode 4, the 10 us delay and other
+camera/loop/placement/workload settings held fixed. Its new before/after
+snapshots will separate the linked run from the earlier unlinked counters.
+No post-restart timing results have been supplied yet.
+
+### RTC latency setting added to the recorded baseline — 2026-10-26
+
+The operator specifies `sysMonRTC.set_latency.toggle=On` as required for best
+RTC performance and confirms that it has been On for **all tests so far**.
+This applies to the earlier camera/EDT, full-loop, trigger-mode and shadow
+comparisons; it is an operator-confirmed historical condition, not a new
+setting change between those runs.
+
+The main plan and user-guide preflight now require this state and holding it
+fixed. The bounded capture recipe saves the exact property before and after
+the telemetry interval, including query statuses, so future captures carry
+the readback explicitly. This documentation change neither operates the
+instrument nor adds a runtime enforcement mechanism.
+
+### Linked shadow capture — 2026-10-26 Phoenix
+
+The operator supplied `~/tmp/synco-sim-20261027T003510Z.tgz`. Its workstation
+extraction is nested under
+`~/tmp/home/jrmales/tmp/synco-sim-20261027T003510Z`; no source files or archive
+contents were changed for analysis. The recorded checkout is still
+`aaeef915915b6ed8159b29e3c50c089f954af52f`. All 118 `[dmsynco]` records have a
+valid, nominally feasible two-step grid, session 3, enable Off and zero actual
+auxiliary deliveries. They span 2026-10-27 00:35:17.697–00:37:15.299 UTC
+(2026-10-26 17:35:17.697–17:37:15.299 Phoenix), or 117.601 seconds.
+
+**Primary/combined linkage is now working.** Every record identifies writer
+PID 3948918, trigger inode 4676 and an advancing named primary counter. The
+INDI before/after interval has 251,287 new primary observations and combined
+events, 251,285 accepted simulation associations and two new model output
+gaps. The large old unlinked/output-gap totals are inherited: `unlinkedPrimary`
+does not increase. Combiner duplicate/gap, invalid/missing metadata/trace,
+rejected and dropped counters do not grow. The two new lost model
+associations are not evidence of missing physical DM commands.
+
+| INDI before/after outcome | Passive step 0 | Active step 1 |
+| --- | ---: | ---: |
+| Considered | 251,286 | 251,287 |
+| Would run | 251,018 (99.893%) | 251,278 (99.996%) |
+| Skipped | 268 | 9 |
+| Overlap evidence increments | 40 | 125 |
+
+This shows high conditional availability, **not clean timing qualification**.
+Overlap counts are retrospective observations inside an already modeled copy
+or active reader-hold window; would-run decisions are not retroactively
+converted to safe skips. A combined-first and primary-later observation can
+both count the same main. These are evidence increments, not unique unsafe
+frame counts or measured physical collision probabilities.
+
+The population boundaries matter. Between the initial INDI snapshot and the
+first saved telemetry record, about seven seconds pass and step 0 adds 266
+skips/39 overlap increments; step 1 adds one skip/125 overlap increments.
+Those events cannot be localized individually from the retained 1 Hz rows.
+They must not be discarded from full-snapshot reporting or attributed to
+warmup or to the snapshot queries without evidence.
+
+The narrower first/last telemetry interval has 235,202 considered slots per
+step. Step 0 would run 235,200, skips twice for missing output, and adds one
+overlap increment. Step 1 would run 235,194 and skips eight times: two missing
+output and six reader hold, with no new active overlap increments. The
+missing-output increments first appear at 00:35:44.839 and 00:35:57.907 UTC;
+the passive overlap increment first appears at 00:36:11.978 UTC. These are
+aggregate-report times, not per-event timestamps. Independent combiner quality
+counters do not change at the two lost model associations, so their exact
+`badOutput()` cause remains unresolved.
+
+Median estimated periods range from 498.811 to 500.846 us. The 1 Hz sampled
+phase residuals range from −17.297 to +16.010 us and cannot establish the
+per-frame tails. Session extrema −504.964/+214.716 us are already present in
+the initial snapshot and remain unchanged. Keep the 20 us early reserve and
+5 us observation allowance explicitly unqualified. The model also assumes
+10 us copy/snapshot budgets, 20 us delivery, 115 us keepout, 20 us guard,
+1 us visibility and 2 us preparation reserve. No physical auxiliary copy,
+wake or delivery is performed by this run.
+
+Camera and controller timing remain similar to the earlier unlinked capture.
+Values below are medians of reported overlapping two-second-window standard
+deviations, not pooled whole-capture RMS; extrema are the union of those
+windows' extrema.
+
+| Interval | Prior median RMS, us | Linked-run median RMS, us | Linked-run extrema, us |
+| --- | ---: | ---: | ---: |
+| Camera acquisition | 0.324 | 0.281 | 480–525 |
+| Camera publication | 0.841 | 0.789 | 478.623–524.290 |
+| DM combined publication | 5.825 | 5.802 | 468.555–529.520 |
+| DM receipt | 5.879 | 5.859 | 468.315–530.051 |
+| DM SDK return | 5.916 | 5.869 | 469.096–530.292 |
+
+The 120 valid controller records span 119.170 seconds in session 4; its change
+from the prior session 3 occurs between captures, not during this run. Its
+cumulative events, receipts and successful submissions each increase by
+238,339 without new failures, partial commands, duplicates, counter gaps,
+invalid events or collector drops. Camera session 8 continues across 112
+valid windows and a file rotation; events/publications increase by 234,588
+with no new failures, frame/counter gaps, invalid events or collector drops.
+Eleven serial controls and five unique qualified camera excursion traces are
+recorded, each with serial overlap in its five-frame context. One trace has
+a 524.300 us interval and four have approximately 479 us intervals. Trace
+records and rolling aggregates are separate populations.
+
+DM processing duration becomes more variable over approximately
+00:36:14–00:37:12 UTC, with receipt-to-callback window RMS reaching 1.966 us
+and SDK mean reaching 102.045 us. No contemporaneous command failure/gap is
+reported. Aggregate timing populations alone do not establish a cause for
+the modeled overlap or for this processing variation. Linked primary-to-
+combined-publication means are 11.654–12.098 us, with window RMS
+3.250–3.430 us and extrema 5.590–19.005 us.
+
+Saved camera/loop settings match the prior capture: loop state On, gain 1,
+bin2, 2 kHz, EM gain 1, shutter SHUT, synchronization On and CCD target −45 C.
+Mode 4 / 10 us and the latency-On requirement are operator-reported setup;
+the original eight-file recipe does not include a `sysMonRTC` readback. The
+updated guide captures it explicitly. The operator confirms that settings,
+placement and workload remained unchanged throughout the run, including the
+initial snapshot interval. The same-line simulation and combiner counters have summary times
+several milliseconds apart; their numerical difference does not demonstrate
+frames of physical backlog.
+
+Recommended next diagnostic: bounded event records for overlap evidence,
+including observer origin, primary/output/plan counters, step, frozen target,
+copy endpoints and reader-hold endpoint, plus the observation timing needed
+to distinguish lag from producer phase. Identify repeated evidence for one
+main without concealing the existing aggregate counters. Capture the initial
+snapshot interval as well by starting collectors first. The main plan records
+this proposed diagnostic increment; the guide clarifies overlap-count
+semantics. Physical margins remain undecided, live scheduling remains
+disabled, and no runtime code or instrument setting was changed.
+
+### Next shadow test: timestamped overlap evidence
+
+Implemented the proposed trace in response to the operator's request to do
+the next test. The existing fixed-grid model, gates, would-run/skip outcomes
+and aggregate overlap counts are unchanged. Each overlap observation now
+copies a fixed record into a 256-event FIFO under the existing cycle mutex.
+The ordinary application thread removes at most 64 records per existing
+`telem_dmsynco` emission, releases the mutex, then encodes/submits telemetry.
+There is no formatting, allocation or telemetry submission in the monitor
+callbacks. This adds bounded evidence copying and shadow-only clock reads;
+its hardware timing impact still needs the matched capture.
+
+Records retain process-lifetime event ID, original model session, observer
+origin, actual primary/combined counters, modeled plan counter and step,
+copy versus active-reader classification, frozen plan timing, and previous
+main/output observations. The evidence main's grid can be extrapolated from
+the last frozen cycle if it has no explicitly committed plan. Receipt,
+callback entry, lock request/acquisition and metadata-observation endpoints
+use the same-host monotonic clock. Stream publication and producer trace
+start/update timestamps remain raw and explicitly labeled as a separate
+clock domain; the app does not infer absolute clock conversion.
+
+Both combined-first and primary-later evidence remain visible. Within one
+app process, `(session, planCounter, step, mainCounter)` correlates repeated
+evidence for one modeled step and genuine main. This preserves the existing
+counters while allowing the analysis to identify repeated observations.
+The last-main fields describe the previously accepted primary, not the
+highest main counter seen through either monitor.
+
+Queue quality is exposed by read-only `simulation_trace` and by the optional
+appended `trace_quality`/`sim_overlap` telemetry.
+`detected = drained + dropped + queued` holds across resets; a full FIFO drops new records without
+changing model behavior. Pending records keep their original session across
+resets/configuration changes. A failed cycle try-lock leaves them queued.
+`logFailed` counts drained records lost to a detected encoding/submission
+failure; it does not detect logger filtering or prove disk durability.
+Legacy payloads without the appended trace remain valid. An emission that
+cannot acquire a fresh queue snapshot omits trace quality rather than
+claiming a zero-event batch.
+
+The next operator capture uses the rebuilt app **and logdump** with the
+current simulation configuration, operational enable Off, named-primary
+association advancing, dmcomb mode 4 / 10 us, and
+`sysMonRTC.set_latency.toggle=On`. Keep camera/loop settings, placement and
+workload fixed. The guide's bounded 120-second recipe starts all three
+collectors before initial snapshots and saves latency readbacks before and
+after. Confirm `trace_quality` appears even before the first overlap; retain
+every event, queue-loss counter and the initial interval. Compare copy/reader
+classification, repeated identities and observer delay before drawing any
+conclusion about physical timing margins. The earliest-main reserve remains
+undecided and no physical auxiliary command is produced by this test.
+
+Workstation tests pass **28,829 assertions / 87 cases**: pure model
+22,972/23, application integration 4,684/51 and telemetry compatibility /
+validation 1,173/13. Coverage includes interval boundaries, both observer
+origins with the same correlation key, distinct main/step identities,
+producer-clock preservation, FIFO overflow/drain recovery and reset
+persistence, unchanged scheduling under saturation, lock contention,
+64-record draining, command-image/counter/semaphore immutability, exact
+integer binary/text/JSON telemetry and malformed/legacy payload handling.
+All changed C++ files were clang-formatted and whitespace checks pass.
+Normal library/schema, application and `logdump` builds pass. The application
+and reader builds were completed sequentially after their parallel runs
+raced the existing shared generated-version-header removal target; no build
+system change was made.
