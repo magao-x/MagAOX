@@ -1,5 +1,5 @@
 /// \file telem_dmsynco.fbs
-/// \brief Scheduler telemetry with independent stream cadence, pipeline stages and bounded raw overlap evidence.
+/// \brief Scheduler telemetry with independent timing, fractional shadow cadence and bounded overlap evidence.
 namespace MagAOX.logger;
 
 // Values and coverage are seconds; publication values retain their external clock.
@@ -170,6 +170,25 @@ table DmSyncoSimulationStep
 enum DmSyncoOverlapOrigin:ubyte { primary = 0, combined = 1 }
 enum DmSyncoOverlapWindow:ubyte { copy = 0, readerHold = 1 }
 
+// Slow counter/time cadence uses the monotonic observation clock, independently of phase filtering.
+enum DmSyncoCadenceState:ubyte { nominal = 0, growing = 1, full = 2 }
+
+table DmSyncoCadence
+{
+    period_q32:ulong;
+    state:DmSyncoCadenceState;
+    epoch:ulong;
+    anchors:ulong;
+    cycles:ulong;
+    updates:ulong;
+    rejected:ulong;
+    span_ns:long;
+    window_ns:long;
+    update_ns:long;
+    observation_ns:long;
+    updated_ns:long;
+}
+
 // Receipt through lock-acquired times use the model's monotonic clock.
 // Publication/start/update times retain the producer clock and are never compared to model times.
 table DmSyncoOverlapObservation
@@ -210,6 +229,8 @@ table DmSyncoOverlapEvent
     observation:DmSyncoOverlapObservation (required);
     plan_estimator_id:ulong;
     last_estimator_id:ulong;
+    period_q32:ulong;
+    plan_fraction_q32:long;
 }
 
 // Lifetime queue accounting survives model resets; a drained batch can contain earlier sessions.
@@ -226,7 +247,7 @@ table DmSyncoOverlapTrace
     events:[DmSyncoOverlapEvent] (required);
 }
 
-// Accepted-primary estimator values use integer monotonic nanoseconds.
+// Accepted-primary estimator targets use rounded monotonic nanoseconds and optional signed Q32 remainders.
 // publication_interval_ns is elapsed producer-clock time, not an absolute model timestamp.
 table DmSyncoEstimatorSample
 {
@@ -255,6 +276,11 @@ table DmSyncoEstimatorSample
     applied_correction_ns:long;
     committed_grid_ns:long;
     committed:bool;
+    period_before_q32:ulong;
+    source_fraction_q32:long;
+    base_fraction_q32:long;
+    committed_fraction_q32:long;
+    cadence:DmSyncoCadence;
 }
 
 // Triggered pre/post estimator coverage has separate lifetime selection/loss accounting.
@@ -322,6 +348,7 @@ table DmSyncoSimulation
     cadence_min_period_ns:long;
     overlap_trace:DmSyncoOverlapTrace;
     estimator_trace:DmSyncoEstimatorTrace;
+    cadence:DmSyncoCadence;
 }
 
 table Telem_dmsynco_fb

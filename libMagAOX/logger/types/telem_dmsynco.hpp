@@ -1,5 +1,5 @@
 /** \file telem_dmsynco.hpp
- * \brief Aggregate syncopation timing, conditional outcomes and bounded overlap/estimator history telemetry.
+ * \brief Aggregate syncopation timing, fractional shadow cadence and bounded overlap/estimator history telemetry.
  */
 #ifndef logger_types_telem_dmsynco_hpp
 #define logger_types_telem_dmsynco_hpp
@@ -110,6 +110,21 @@ struct telem_dmsynco : public flatbuffer_log
         flatbuffers::FlatBufferBuilder      &builder /**< [in/out] destination builder */,
         const dmSyncoSimulation::TraceBatch &trace /**< [in] selected samples and independent queue quality */ );
 
+    /// Serialize optional slow cadence measurement and its qualification on the monotonic clock.
+    static flatbuffers::Offset<DmSyncoCadence>
+    cadenceTiming( flatbuffers::FlatBufferBuilder   &builder /**< [in/out] destination builder */,
+                   const dmSyncoSimulation::Cadence &cadence /**< [in] coherent long-baseline measurement */ );
+
+    /// Check a fractional period and its rounded legacy nanosecond projection.
+    static bool validPeriod( uint64_t periodQ32 /**< [in] binary-scaled period; zero denotes legacy absence */,
+                             int64_t  periodNs /**< [in] rounded integer period */ );
+
+    /// Check the signed remainder of a target rounded to the nearest nanosecond.
+    static bool validFraction( int64_t fractionQ32 /**< [in] binary-scaled signed fractional nanoseconds */ );
+
+    /// Validate optional long-baseline cadence qualification without assuming current-session ownership.
+    static bool validCadence( const DmSyncoCadence *cadence /**< [in] optional slow cadence measurement */ );
+
     /// Check finite populated statistics and sample-variance validity.
     static bool validStats( const DmSyncoTimingStats *stats /**< [in] required nested cadence population */,
                             bool signedValues = false /**< [in] allow negative latency changes */ );
@@ -151,6 +166,11 @@ struct telem_dmsynco : public flatbuffer_log
     /// Append selected pre/post samples and independent coverage/loss accounting with explicit clock labels.
     static void formatEstimatorTrace( std::ostream                &output /**< [in/out] formatted aggregate */,
                                       const DmSyncoEstimatorTrace *trace /**< [in] optional estimator history */ );
+
+    /// Format cadence qualification and retain the exact binary rational period alongside nanoseconds.
+    static void formatCadence( std::ostream         &output /**< [in/out] formatted aggregate */,
+                               const char           *prefix /**< [in] stable record label */,
+                               const DmSyncoCadence *cadence /**< [in] optional slow cadence measurement */ );
 
     /// Validate optional ordered-pair populations and their conditional count relationships.
     static bool
@@ -408,7 +428,9 @@ telem_dmsynco::overlapTrace( flatbuffers::FlatBufferBuilder &builder, const dmSy
                                                      event.lastOutputNs,
                                                      observation,
                                                      event.planEstimatorId,
-                                                     event.lastEstimatorId ) );
+                                                     event.lastEstimatorId,
+                                                     event.periodQ32,
+                                                     event.planFractionQ32 ) );
     }
 
     const auto  records = builder.CreateVector( events );
@@ -426,6 +448,29 @@ telem_dmsynco::overlapTrace( flatbuffers::FlatBufferBuilder &builder, const dmSy
                                       records );
 }
 
+inline flatbuffers::Offset<DmSyncoCadence> telem_dmsynco::cadenceTiming( flatbuffers::FlatBufferBuilder   &builder,
+                                                                         const dmSyncoSimulation::Cadence &cadence )
+{
+    if( !cadence.periodQ32 )
+    {
+        return {};
+    }
+
+    return CreateDmSyncoCadence( builder,
+                                 cadence.periodQ32,
+                                 DmSyncoCadenceState( cadence.state ),
+                                 cadence.epoch,
+                                 cadence.anchors,
+                                 cadence.cycles,
+                                 cadence.updates,
+                                 cadence.rejected,
+                                 cadence.spanNs,
+                                 cadence.windowNs,
+                                 cadence.updateNs,
+                                 cadence.observationNs,
+                                 cadence.updatedNs );
+}
+
 inline flatbuffers::Offset<DmSyncoEstimatorTrace>
 telem_dmsynco::estimatorTrace( flatbuffers::FlatBufferBuilder &builder, const dmSyncoSimulation::TraceBatch &trace )
 {
@@ -440,7 +485,9 @@ telem_dmsynco::estimatorTrace( flatbuffers::FlatBufferBuilder &builder, const dm
 
     for( size_t index = 0; index < count; ++index )
     {
-        const auto &sample = trace.estimator[index];
+        const auto &sample  = trace.estimator[index];
+        const auto  cadence = cadenceTiming( builder, sample.cadence );
+
         samples.push_back( CreateDmSyncoEstimatorSample( builder,
                                                          sample.id,
                                                          sample.session,
@@ -466,7 +513,12 @@ telem_dmsynco::estimatorTrace( flatbuffers::FlatBufferBuilder &builder, const dm
                                                          sample.rawCorrectionNs,
                                                          sample.appliedCorrectionNs,
                                                          sample.committedGridNs,
-                                                         sample.committed ) );
+                                                         sample.committed,
+                                                         sample.periodBeforeQ32,
+                                                         sample.sourceFractionQ32,
+                                                         sample.baseFractionQ32,
+                                                         sample.committedFractionQ32,
+                                                         cadence ) );
     }
 
     const auto  records = builder.CreateVector( samples );
@@ -519,6 +571,7 @@ telem_dmsynco::simulationTiming( flatbuffers::FlatBufferBuilder      &builder,
     const auto outcomes  = builder.CreateVector( steps );
     const auto evidence  = overlapTrace( builder, trace );
     const auto estimator = estimatorTrace( builder, trace );
+    const auto cadence   = cadenceTiming( builder, summary.cadence );
 
     return CreateDmSyncoSimulation( builder,
                                     summary.enabled,
@@ -563,7 +616,8 @@ telem_dmsynco::simulationTiming( flatbuffers::FlatBufferBuilder      &builder,
                                     outcomes,
                                     summary.cadenceMinPeriodNs,
                                     evidence,
-                                    estimator );
+                                    estimator,
+                                    cadence );
 }
 
 inline telem_dmsynco::messageT::messageT( int                                  state,
@@ -772,6 +826,55 @@ inline bool telem_dmsynco::validPipeline( const DmSyncoPipelineTiming *summary )
     return true;
 }
 
+inline bool telem_dmsynco::validPeriod( uint64_t periodQ32, int64_t periodNs )
+{
+    return !periodQ32 || ( periodQ32 <= uint64_t( 1000000000 ) * dmSyncoSimulation::periodScale &&
+                           periodNs == int64_t( ( periodQ32 + dmSyncoSimulation::periodScale / 2 ) /
+                                                dmSyncoSimulation::periodScale ) &&
+                           periodNs > 0 );
+}
+
+inline bool telem_dmsynco::validFraction( int64_t fractionQ32 )
+{
+    const int64_t half = int64_t( dmSyncoSimulation::periodScale / 2 );
+
+    return fractionQ32 >= -half && fractionQ32 < half;
+}
+
+inline bool telem_dmsynco::validCadence( const DmSyncoCadence *cadence )
+{
+    if( !cadence )
+    {
+        return true;
+    }
+
+    if( !cadence->period_q32() ||
+        !validPeriod( cadence->period_q32(),
+                      int64_t( ( cadence->period_q32() + dmSyncoSimulation::periodScale / 2 ) /
+                               dmSyncoSimulation::periodScale ) ) ||
+        !cadence->epoch() || cadence->anchors() > dmSyncoSimulation::cadenceAnchorCapacity ||
+        cadence->window_ns() <= 0 || cadence->update_ns() <= 0 || cadence->update_ns() > cadence->window_ns() ||
+        cadence->observation_ns() < 0 || cadence->updated_ns() < 0 ||
+        cadence->updated_ns() > cadence->observation_ns() || cadence->span_ns() < 0 )
+    {
+        return false;
+    }
+
+    if( cadence->state() == DmSyncoCadenceState_nominal )
+    {
+        return !cadence->span_ns() && !cadence->cycles() && !cadence->updates() && !cadence->updated_ns();
+    }
+
+    return ( cadence->state() == DmSyncoCadenceState_growing || cadence->state() == DmSyncoCadenceState_full ) &&
+           cadence->anchors() >= 2 && cadence->cycles() && cadence->updates() && cadence->updated_ns() > 0 &&
+           cadence->span_ns() >= cadence->update_ns() && cadence->span_ns() <= cadence->updated_ns() &&
+           ( __int128( cadence->span_ns() ) * dmSyncoSimulation::periodScale + cadence->cycles() / 2 ) /
+                   cadence->cycles() ==
+               cadence->period_q32() &&
+           ( cadence->state() == DmSyncoCadenceState_full ? cadence->span_ns() >= cadence->window_ns()
+                                                          : cadence->span_ns() < cadence->window_ns() );
+}
+
 inline bool telem_dmsynco::validOverlapTrace( const DmSyncoOverlapTrace *trace )
 {
     if( !trace )
@@ -801,7 +904,8 @@ inline bool telem_dmsynco::validOverlapTrace( const DmSyncoOverlapTrace *trace )
             event->observed_ns() <= 0 || event->main_grid_ns() < 0 || event->plan_grid_ns() <= 0 ||
             event->period_ns() <= 0 || event->copy_begin_ns() <= 0 || event->copy_end_ns() <= event->copy_begin_ns() ||
             event->last_main_ns() < 0 || event->last_main_ns() > event->observed_ns() || event->last_output_ns() < 0 ||
-            event->last_output_ns() > event->observed_ns() ||
+            event->last_output_ns() > event->observed_ns() || !validPeriod( event->period_q32(), event->period_ns() ) ||
+            !validFraction( event->plan_fraction_q32() ) || ( !event->period_q32() && event->plan_fraction_q32() ) ||
             ( event->step() == 0 ? event->reader_end_ns() != 0 : event->reader_end_ns() < event->copy_end_ns() ) )
         {
             return false;
@@ -890,7 +994,15 @@ inline bool telem_dmsynco::validEstimatorTrace( const DmSyncoEstimatorTrace *tra
             sample->phase_gain() < 0 || sample->phase_gain() > 1 || sample->phase_slew_ns() < 0 ||
             ( sample->sequential() && sample->sequence() < 2 ) ||
             ( sample->interval_accepted() &&
-              ( !sample->sequential() || sample->publication_interval_ns() <= 0 || !sample->period_samples() ) ) )
+              ( !sample->sequential() || sample->publication_interval_ns() <= 0 || !sample->period_samples() ) ) ||
+            !validPeriod( sample->period_before_q32(), sample->period_before_ns() ) ||
+            !validCadence( sample->cadence() ) || !validFraction( sample->source_fraction_q32() ) ||
+            !validFraction( sample->base_fraction_q32() ) || !validFraction( sample->committed_fraction_q32() ) ||
+            ( sample->cadence() ? !sample->period_before_q32() ||
+                                      !validPeriod( sample->cadence()->period_q32(), sample->period_ns() ) ||
+                                      sample->cadence()->observation_ns() != sample->observed_ns()
+                                : sample->period_before_q32() || sample->source_fraction_q32() ||
+                                      sample->base_fraction_q32() || sample->committed_fraction_q32() ) )
         {
             return false;
         }
@@ -901,7 +1013,8 @@ inline bool telem_dmsynco::validEstimatorTrace( const DmSyncoEstimatorTrace *tra
         {
             if( sample->source_plan_counter() || sample->source_estimator_id() || sample->source_grid_ns() ||
                 sample->base_grid_ns() || sample->candidate_ns() || sample->raw_correction_ns() ||
-                sample->applied_correction_ns() || sample->committed_grid_ns() || sample->committed() )
+                sample->applied_correction_ns() || sample->committed_grid_ns() || sample->committed() ||
+                sample->source_fraction_q32() || sample->base_fraction_q32() || sample->committed_fraction_q32() )
             {
                 return false;
             }
@@ -917,23 +1030,28 @@ inline bool telem_dmsynco::validEstimatorTrace( const DmSyncoEstimatorTrace *tra
             return false;
         }
 
-        const __int128 base =
-            __int128( sample->source_grid_ns() ) +
-            ( __int128( sample->next_counter() ) - sample->source_plan_counter() ) * sample->period_ns();
-        const int64_t  expectedBase = base > 0 && base <= std::numeric_limits<int64_t>::max() ? int64_t( base ) : 0;
-        const int64_t  raw          = sample->base_grid_ns() && sample->candidate_ns()
-                                          ? int64_t( sample->phase_gain() * ( static_cast<long double>( sample->candidate_ns() ) -
+        const __int128 scale   = dmSyncoSimulation::periodScale;
+        const __int128 baseQ32 = __int128( sample->source_grid_ns() ) * scale + sample->source_fraction_q32() +
+                                 ( __int128( sample->next_counter() ) - sample->source_plan_counter() ) *
+                                     ( sample->cadence() ? __int128( sample->cadence()->period_q32() )
+                                                         : __int128( sample->period_ns() ) * scale );
+        const __int128 base             = ( baseQ32 + scale / 2 ) / scale;
+        const int64_t  expectedBase     = base > 0 && base <= std::numeric_limits<int64_t>::max() ? int64_t( base ) : 0;
+        const int64_t  expectedFraction = expectedBase && sample->cadence() ? int64_t( baseQ32 - base * scale ) : 0;
+        const int64_t  raw              = sample->base_grid_ns() && sample->candidate_ns()
+                                              ? int64_t( sample->phase_gain() * ( static_cast<long double>( sample->candidate_ns() ) -
                                                                     sample->base_grid_ns() ) )
-                                          : 0;
-        const int64_t  applied      = std::clamp( raw, -sample->phase_slew_ns(), sample->phase_slew_ns() );
-        const __int128 committed    = __int128( sample->base_grid_ns() ) + applied;
+                                              : 0;
+        const int64_t  applied          = std::clamp( raw, -sample->phase_slew_ns(), sample->phase_slew_ns() );
+        const __int128 committed        = __int128( sample->base_grid_ns() ) + applied;
 
-        if( sample->base_grid_ns() != expectedBase || sample->raw_correction_ns() != raw ||
-            sample->applied_correction_ns() != applied ||
+        if( sample->base_grid_ns() != expectedBase || sample->base_fraction_q32() != expectedFraction ||
+            sample->raw_correction_ns() != raw || sample->applied_correction_ns() != applied ||
             ( sample->committed()
                   ? !sample->base_grid_ns() || committed <= 0 || committed > std::numeric_limits<int64_t>::max() ||
-                        sample->committed_grid_ns() != int64_t( committed )
-                  : sample->committed_grid_ns() != 0 ) )
+                        sample->committed_grid_ns() != int64_t( committed ) ||
+                        sample->committed_fraction_q32() != sample->base_fraction_q32()
+                  : sample->committed_grid_ns() != 0 || sample->committed_fraction_q32() != 0 ) )
         {
             return false;
         }
@@ -959,6 +1077,9 @@ inline bool telem_dmsynco::validSimulation( const DmSyncoSimulation *summary )
         summary->guard_ns() < 0 || summary->snapshot_ns() < 0 || summary->copy_ns() < 0 || summary->lead_ns() < 0 ||
         summary->observation_ns() < 0 || summary->visibility_ns() < 0 || summary->reserve_ns() < 0 ||
         !validOverlapTrace( summary->overlap_trace() ) || !validEstimatorTrace( summary->estimator_trace() ) ||
+        !validCadence( summary->cadence() ) ||
+        ( summary->cadence() && ( !validPeriod( summary->cadence()->period_q32(), summary->period_ns() ) ||
+                                  summary->cadence()->observation_ns() > summary->now_ns() ) ) ||
         !mx::math::isFinite( summary->phase_gain() ) || summary->phase_gain() < 0 || summary->phase_gain() > 1 ||
         summary->phase_slew_ns() < 0 || summary->cadence_min_period_ns() < 0 ||
         summary->phase_count() > summary->sequence() || summary->period_samples() > summary->sequence() ||
@@ -1214,6 +1335,8 @@ inline void telem_dmsynco::formatSimulation( std::ostream &output, const DmSynco
            << ",excluded:" << summary->excluded() << ",outputGaps:" << summary->output_gaps()
            << ",associations:" << summary->associations() << '}';
 
+    formatCadence( output, "simulation_cadence", summary->cadence() );
+
     for( size_t index = 0; index < summary->outcomes()->size(); ++index )
     {
         const auto *step = summary->outcomes()->Get( index );
@@ -1258,7 +1381,17 @@ inline void telem_dmsynco::formatOverlapTrace( std::ostream &output, const DmSyn
                << ",lockRequest_ns:" << source->lock_request_ns() << ",lockAcquired_ns:" << source->lock_acquired_ns()
                << ",producer_clock:unconverted,publication_ns:" << source->publication_ns()
                << ",primaryPublication_ns:" << source->primary_publication_ns() << ",start_ns:" << source->start_ns()
-               << ",update_ns:" << source->update_ns() << '}';
+               << ",update_ns:" << source->update_ns();
+
+        if( event->period_q32() )
+        {
+            output << ",period_q32:" << event->period_q32() << ",planFraction_q32:" << event->plan_fraction_q32()
+                   << ",period_exact_ns:" << std::setprecision( std::numeric_limits<long double>::max_digits10 )
+                   << static_cast<long double>( event->period_q32() ) / dmSyncoSimulation::periodScale
+                   << std::setprecision( 10 );
+        }
+
+        output << '}';
     }
 }
 
@@ -1293,8 +1426,40 @@ inline void telem_dmsynco::formatEstimatorTrace( std::ostream &output, const DmS
                << sample->phase_gain() << std::setprecision( 10 ) << ",phaseSlew_ns:" << sample->phase_slew_ns()
                << ",rawCorrection_ns:" << sample->raw_correction_ns()
                << ",appliedCorrection_ns:" << sample->applied_correction_ns()
-               << ",committedGrid_ns:" << sample->committed_grid_ns() << ",committed:" << sample->committed() << '}';
+               << ",committedGrid_ns:" << sample->committed_grid_ns() << ",committed:" << sample->committed();
+
+        if( sample->cadence() )
+        {
+            output << ",periodBefore_q32:" << sample->period_before_q32()
+                   << ",sourceFraction_q32:" << sample->source_fraction_q32()
+                   << ",baseFraction_q32:" << sample->base_fraction_q32()
+                   << ",committedFraction_q32:" << sample->committed_fraction_q32();
+        }
+
+        output << '}';
+        formatCadence( output, "estimator_cadence", sample->cadence() );
     }
+}
+
+inline void telem_dmsynco::formatCadence( std::ostream &output, const char *prefix, const DmSyncoCadence *cadence )
+{
+    if( !cadence )
+    {
+        return;
+    }
+
+    const char *state = cadence->state() == DmSyncoCadenceState_nominal   ? "nominal"
+                        : cadence->state() == DmSyncoCadenceState_growing ? "growing"
+                                                                          : "full";
+    output << ' ' << prefix << "={state:" << state << ",clock:monotonic,period_q32:" << cadence->period_q32()
+           << ",period_scale:" << dmSyncoSimulation::periodScale
+           << ",period_exact_ns:" << std::setprecision( std::numeric_limits<long double>::max_digits10 )
+           << static_cast<long double>( cadence->period_q32() ) / dmSyncoSimulation::periodScale
+           << std::setprecision( 10 ) << ",epoch:" << cadence->epoch() << ",anchors:" << cadence->anchors()
+           << ",cycles:" << cadence->cycles() << ",updates:" << cadence->updates()
+           << ",rejected:" << cadence->rejected() << ",span_ns:" << cadence->span_ns()
+           << ",window_ns:" << cadence->window_ns() << ",update_ns:" << cadence->update_ns()
+           << ",observation_ns:" << cadence->observation_ns() << ",updated_ns:" << cadence->updated_ns() << '}';
 }
 
 inline std::string telem_dmsynco::msgString( void *buffer, flatlogs::msgLenT len )

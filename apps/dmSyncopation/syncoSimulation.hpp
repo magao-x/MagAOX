@@ -10,6 +10,7 @@
 #include <mx/math/floatUtils.hpp>
 
 #include "syncoSchedule.hpp"
+#include "syncoCadence.hpp"
 #include "../../libMagAOX/common/dmSyncoSimulation.hpp"
 
 namespace MagAOX
@@ -28,14 +29,16 @@ class Simulation
     {
         Bounds   bounds;                  ///< Assumed copy, reader and next-main bounds.
         int      steps{ 2 };              ///< Fixed requested total steps, including passive zero.
-        unsigned window{ 32 };            ///< Retained publication intervals and phase observations.
+        unsigned window{ 32 };            ///< Retained diagnostic intervals and robust phase observations.
         int64_t  nominalPeriod{ 500000 }; ///< Initial period in monotonic nanoseconds.
-        int64_t  minInterval{ 250000 };   ///< Smallest eligible publication interval.
-        int64_t  maxInterval{ 2000000 };  ///< Largest eligible publication interval.
+        int64_t  minInterval{ 250000 };   ///< Smallest eligible diagnostic interval or long-span cycle period.
+        int64_t  maxInterval{ 2000000 };  ///< Largest eligible diagnostic interval or long-span cycle period.
         double   phaseGain{ 0.1 };        ///< Bounded correction toward the robust phase candidate.
         int64_t  phaseSlew{ 1000 };       ///< Maximum correction per newly committed cycle.
         int64_t  cadenceMinPeriod{ 0 };   ///< Minimum whole-cycle period admitted by the nominal cadence rating.
-        int64_t  timeout{ 4000000 };      ///< Maximum primary silence or eligible-period-sample age before expiry.
+        int64_t  timeout{ 4000000 };      ///< Maximum primary silence before clearing cadence and phase anchors.
+        int64_t  cadenceWindowNs{ 10000000000LL }; ///< Requested monotonic counter/time baseline.
+        int64_t  cadenceUpdateNs{ 1000000000LL };  ///< Minimum interval between cadence refreshes.
     };
 
     /// Validate configuration and begin a fresh simulation with empty estimators.
@@ -44,11 +47,12 @@ class Simulation
     /// Begin a new session with empty model history, commitments and conditional counters.
     void reset();
 
-    /// Observe one coherent main; zero publication interval means unavailable, with no clock fallback.
+    /// Observe one coherent main; positive clock regression starts a new session, unlike rejected late
+    /// output/evaluation calls.
     void
     primary( uint64_t counter /**< [in] genuine primary counter */,
              int64_t  observed /**< [in] coherent same-host monotonic observation */,
-             int64_t  publicationInterval = 0 /**< [in] qualified producer-clock interval, ns */,
+             int64_t  publicationInterval = 0 /**< [in] producer-clock diagnostic interval, ns; zero unavailable */,
              const MagAOX::dmSyncoSimulation::Observation &context = {} /**< [in] optional raw monitor context */ );
 
     /// Observe coherent combined-output linkage; false coherence never supplies an acknowledgement.
@@ -91,7 +95,9 @@ class Simulation
         uint64_t                      counter{ 0 };     ///< Genuine primary counter expected for this cycle.
         uint64_t                      estimatorId{ 0 }; ///< Accepted-primary update that committed this plan.
         int64_t                       grid{ 0 };        ///< Immutable main prediction, ns.
-        int64_t                       period{ 0 };      ///< Period used when committing this cycle.
+        int64_t                       period{ 0 };      ///< Conservative whole-nanosecond period for feasibility.
+        uint64_t                      periodQ32{ 0 };   ///< Exact fractional period frozen with this cycle.
+        int64_t                       fractionQ32{ 0 }; ///< Signed fractional remainder of the frozen main prediction.
         int64_t                       main{ 0 };        ///< Actual associated primary observation, or zero.
         int64_t                       output{ 0 };      ///< Coherent combined observation, or zero.
         std::array<int64_t, maxSteps> starts{};         ///< Fixed modeled copy starts.
@@ -126,13 +132,19 @@ class Simulation
     bool                               m_mainOutput{ false };   ///< Latest actual main has a coherent combination.
     int64_t                            m_outputTime{ 0 };       ///< Latest main's combined observation.
     int64_t                            m_virtualHold{ 0 };      ///< Last modeled active command's reader lifetime.
-    int64_t  m_periodTime{ 0 };      ///< Most recent eligible period sample, on the observation clock.
+    std::array<Point, MagAOX::dmSyncoSimulation::cadenceAnchorCapacity>
+             m_cadenceAnchors{};     ///< Slow counter/time anchors.
+    size_t   m_cadenceCount{ 0 };    ///< Retained cadence anchors.
+    size_t   m_cadenceNext{ 0 };     ///< Next anchor replacement.
+    uint64_t m_cadenceEpoch{ 0 };    ///< Process-lifetime reset/silence epoch identity.
     int64_t  m_copyBegin{ 0 };       ///< Last modeled copy's start, retained for retrospective overlap detection.
     int64_t  m_copyEnd{ 0 };         ///< Last modeled copy's completion/trigger time.
     int      m_copyStep{ 0 };        ///< Step associated with the last modeled copy/reader hold.
     uint64_t m_copyCounter{ 0 };     ///< Genuine counter labelling the last modeled copy's cycle.
     int64_t  m_copyGrid{ 0 };        ///< Frozen prediction for the last modeled copy's cycle.
-    int64_t  m_copyPeriod{ 0 };      ///< Period frozen with the last modeled copy's cycle.
+    int64_t  m_copyPeriod{ 0 };      ///< Rounded diagnostic period frozen with the last modeled copy's cycle.
+    uint64_t m_copyPeriodQ32{ 0 };   ///< Exact period associated with the last modeled copy.
+    int64_t  m_copyFractionQ32{ 0 }; ///< Frozen main target fractional remainder for the last copy.
     uint64_t m_copyEstimatorId{ 0 }; ///< Estimator update that committed the last modeled copy's plan.
     /// Fixed process-lifetime FIFO; reset/configure preserve undrained evidence.
     std::array<MagAOX::dmSyncoSimulation::OverlapEvent, MagAOX::dmSyncoSimulation::traceCapacity> m_traceEvents{};
@@ -159,11 +171,12 @@ class Simulation
     uint64_t m_estimatorLastSelectedId{ 0 }; ///< Last selected process ID; dropped records are never retried.
     size_t   m_estimatorPostRemaining{ 0 };  ///< Completed updates still to select after the most recent trigger.
 
-    /// Checked prediction using relative counter arithmetic; zero signals unrepresentable time.
-    static int64_t shifted( int64_t  base /**< [in] time origin */,
-                            uint64_t from /**< [in] origin cycle */,
-                            uint64_t to /**< [in] requested cycle */,
-                            int64_t  period /**< [in] period */ );
+    /// Clear slow counter/time anchors and restore the nominal fractional period.
+    void clearCadence();
+
+    /// Incorporate one distinct coherent primary; endpoint refreshes occur only at the configured slow interval.
+    void updateCadence( uint64_t counter /**< [in] genuine primary counter */,
+                        int64_t  observed /**< [in] monotonic accepted-primary observation */ );
 
     /// Calculate an overflow-safe even/odd median in the fixed scratch array.
     int64_t median( size_t count /**< [in] initialized scratch entries */ );
@@ -180,7 +193,8 @@ class Simulation
     /// Append one immutable plan; false means invalid/overflowing horizon.
     bool commit( uint64_t counter /**< [in] cycle identity */,
                  int64_t  grid /**< [in] frozen predicted main time */,
-                 uint64_t estimatorId /**< [in] accepted-primary update committing this plan */ );
+                 uint64_t estimatorId /**< [in] accepted-primary update committing this plan */,
+                 int64_t  fractionQ32 = 0 /**< [in] signed fractional main-target remainder */ );
 
     /// Select a unique completed estimator update for export, dropping new records if the FIFO is full.
     void selectEstimator( const MagAOX::dmSyncoSimulation::EstimatorSample &sample /**< [in] completed update */ );
@@ -221,16 +235,80 @@ class Simulation
     void next();
 };
 
-inline int64_t Simulation::shifted( int64_t base, uint64_t from, uint64_t to, int64_t period )
+inline void Simulation::clearCadence()
 {
-    const __int128 value = __int128( base ) + ( __int128( to ) - __int128( from ) ) * period;
+    m_cadenceCount = m_cadenceNext = 0;
+    m_summary.cadence              = {};
+    m_summary.cadence.periodQ32    = uint64_t( m_config.nominalPeriod ) * MagAOX::dmSyncoSimulation::periodScale;
+    m_summary.cadence.epoch        = ++m_cadenceEpoch;
+    m_summary.cadence.windowNs     = m_config.cadenceWindowNs;
+    m_summary.cadence.updateNs     = m_config.cadenceUpdateNs;
+    m_summary.periodNs             = m_config.nominalPeriod;
+    m_summary.feasible             = feasible( m_config.nominalPeriod, m_config.steps, m_config.bounds ) &&
+                         m_config.nominalPeriod >= m_config.cadenceMinPeriod;
+}
 
-    if( value <= 0 || value > std::numeric_limits<int64_t>::max() )
+inline void Simulation::updateCadence( uint64_t counter, int64_t observed )
+{
+    auto &cadence         = m_summary.cadence;
+    cadence.observationNs = observed;
+
+    if( m_cadenceCount )
     {
-        return 0;
+        const size_t latest = ( m_cadenceNext + m_cadenceAnchors.size() - 1 ) % m_cadenceAnchors.size();
+
+        if( observed - m_cadenceAnchors[latest].observed < m_config.cadenceUpdateNs )
+        {
+            return;
+        }
+
+        const size_t  oldest = ( m_cadenceNext + m_cadenceAnchors.size() - m_cadenceCount ) % m_cadenceAnchors.size();
+        const Point  *anchor = &m_cadenceAnchors[oldest];
+        const int64_t cutoff = observed - m_config.cadenceWindowNs;
+
+        for( size_t offset = 1; offset < m_cadenceCount; ++offset )
+        {
+            const auto &candidate = m_cadenceAnchors[( oldest + offset ) % m_cadenceAnchors.size()];
+
+            if( candidate.observed <= cutoff )
+            {
+                anchor = &candidate;
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        const int64_t  elapsed = observed - anchor->observed;
+        const uint64_t cycles  = counter > anchor->counter ? counter - anchor->counter : 0;
+        const __int128 scaled =
+            cycles ? ( __int128( elapsed ) * MagAOX::dmSyncoSimulation::periodScale + cycles / 2 ) / cycles : 0;
+        const __int128 minimum = __int128( m_config.minInterval ) * MagAOX::dmSyncoSimulation::periodScale;
+        const __int128 maximum = __int128( m_config.maxInterval ) * MagAOX::dmSyncoSimulation::periodScale;
+
+        if( elapsed >= m_config.cadenceUpdateNs && cycles && scaled >= minimum && scaled <= maximum )
+        {
+            cadence.periodQ32 = uint64_t( scaled );
+            cadence.spanNs    = elapsed;
+            cadence.cycles    = cycles;
+            cadence.updatedNs = observed;
+            cadence.state     = elapsed >= m_config.cadenceWindowNs ? MagAOX::dmSyncoSimulation::CadenceState::full
+                                                                    : MagAOX::dmSyncoSimulation::CadenceState::growing;
+            ++cadence.updates;
+            m_summary.periodNs = int64_t( ( cadence.periodQ32 + MagAOX::dmSyncoSimulation::periodScale / 2 ) /
+                                          MagAOX::dmSyncoSimulation::periodScale );
+        }
+        else
+        {
+            ++cadence.rejected;
+        }
     }
 
-    return int64_t( value );
+    m_cadenceAnchors[m_cadenceNext] = { counter, observed };
+    m_cadenceNext                   = ( m_cadenceNext + 1 ) % m_cadenceAnchors.size();
+    m_cadenceCount                  = std::min( m_cadenceCount + 1, m_cadenceAnchors.size() );
+    cadence.anchors                 = m_cadenceCount;
 }
 
 inline bool Simulation::configure( const Config &config )
@@ -241,7 +319,10 @@ inline bool Simulation::configure( const Config &config )
         !mx::math::isFinite( config.phaseGain ) || config.phaseGain < 0 || config.phaseGain > 1 ||
         config.phaseSlew < 0 || config.phaseSlew > config.minInterval / 4 ||
         config.timeout < 2 * config.nominalPeriod || config.timeout > 1000000000000LL || config.cadenceMinPeriod < 0 ||
-        config.cadenceMinPeriod > 1000000000000LL )
+        config.cadenceMinPeriod > 1000000000000LL || config.cadenceUpdateNs <= 0 ||
+        config.cadenceWindowNs < config.cadenceUpdateNs || config.cadenceWindowNs > 1000000000000LL ||
+        __int128( config.cadenceWindowNs ) >
+            __int128( MagAOX::dmSyncoSimulation::cadenceAnchorCapacity - 1 ) * config.cadenceUpdateNs )
     {
         return false;
     }
@@ -281,14 +362,12 @@ inline bool Simulation::configure( const Config &config )
 
 inline void Simulation::reset()
 {
-    const uint64_t session = m_summary.session + 1;
-    m_summary              = {};
-    m_summary.session      = session;
-    m_summary.resets       = 1;
-    m_summary.enabled      = true;
-    m_summary.valid        = false;
-    m_summary.feasible     = feasible( m_config.nominalPeriod, m_config.steps, m_config.bounds ) &&
-                         m_config.nominalPeriod >= m_config.cadenceMinPeriod;
+    const uint64_t session       = m_summary.session + 1;
+    m_summary                    = {};
+    m_summary.session            = session;
+    m_summary.resets             = 1;
+    m_summary.enabled            = true;
+    m_summary.valid              = false;
     m_summary.sequence           = 0;
     m_summary.nowNs              = 0;
     m_summary.lastMainNs         = 0;
@@ -321,11 +400,13 @@ inline void Simulation::reset()
     m_intervalCount = m_intervalNext = m_pointCount = m_pointNext = m_planCount = 0;
     m_linkCount                                                                 = 0;
     m_haveMain = m_haveCombined = m_mainOutput = false;
-    m_outputTime = m_virtualHold = m_copyBegin = m_copyEnd = m_periodTime = 0;
-    m_copyStep                                                            = 0;
-    m_copyCounter                                                         = 0;
-    m_copyGrid = m_copyPeriod = 0;
-    m_copyEstimatorId         = 0;
+    m_outputTime = m_virtualHold = m_copyBegin = m_copyEnd = 0;
+    clearCadence();
+    m_copyStep    = 0;
+    m_copyCounter = 0;
+    m_copyGrid = m_copyPeriod = m_copyFractionQ32 = 0;
+    m_copyPeriodQ32                               = 0;
+    m_copyEstimatorId                             = 0;
     m_estimatorHistoryNext = m_estimatorHistoryCount = m_estimatorPostRemaining = 0;
 }
 
@@ -367,7 +448,7 @@ inline int64_t Simulation::prediction( uint64_t counter )
     if( m_planCount )
     {
         const auto &last = m_plans[m_planCount - 1];
-        return shifted( last.grid, last.counter, counter, last.period );
+        return shiftGrid( { last.grid, last.fractionQ32 }, last.counter, counter, last.periodQ32 ).ns;
     }
 
     return 0;
@@ -377,7 +458,8 @@ inline int64_t Simulation::phase( uint64_t counter )
 {
     for( size_t i = 0; i < m_pointCount; ++i )
     {
-        m_scratch[i] = shifted( m_points[i].observed, m_points[i].counter, counter, m_summary.periodNs );
+        m_scratch[i] =
+            shiftGrid( { m_points[i].observed, 0 }, m_points[i].counter, counter, m_summary.cadence.periodQ32 ).ns;
 
         if( !m_scratch[i] )
         {
@@ -388,9 +470,10 @@ inline int64_t Simulation::phase( uint64_t counter )
     return m_pointCount ? median( m_pointCount ) : 0;
 }
 
-inline bool Simulation::commit( uint64_t counter, int64_t grid, uint64_t estimatorId )
+inline bool Simulation::commit( uint64_t counter, int64_t grid, uint64_t estimatorId, int64_t fractionQ32 )
 {
-    if( m_planCount == m_plans.size() || !grid || !shifted( grid, 0, 2, m_summary.periodNs ) )
+    if( m_planCount == m_plans.size() || !grid ||
+        !shiftGrid( { grid, fractionQ32 }, 0, 2, m_summary.cadence.periodQ32 ).ns )
     {
         ++m_summary.invalid;
         m_summary.valid = false;
@@ -402,13 +485,15 @@ inline bool Simulation::commit( uint64_t counter, int64_t grid, uint64_t estimat
     entry.counter     = counter;
     entry.estimatorId = estimatorId;
     entry.grid        = grid;
-    entry.period      = m_summary.periodNs;
+    entry.periodQ32   = m_summary.cadence.periodQ32;
+    entry.period      = int64_t( entry.periodQ32 / MagAOX::dmSyncoSimulation::periodScale );
+    entry.fractionQ32 = fractionQ32;
     entry.targets[0]  = copyCutoff( grid, m_config.bounds ) - m_config.bounds.reserve;
     entry.starts[0]   = entry.targets[0] - m_config.bounds.copy;
 
     for( int j = 1; j < m_config.steps; ++j )
     {
-        entry.targets[j] = grid + j * entry.period / m_config.steps;
+        entry.targets[j] = stepGrid( { grid, fractionQ32 }, entry.periodQ32, j, m_config.steps ).ns;
         entry.starts[j]  = entry.targets[j] - m_config.bounds.copy;
     }
 
@@ -456,6 +541,7 @@ inline void Simulation::finishEstimator( MagAOX::dmSyncoSimulation::EstimatorSam
     sample.periodSamples                       = m_summary.periodSamples;
     sample.phaseSamples                        = m_summary.phaseSamples;
     sample.periodNs                            = m_summary.periodNs;
+    sample.cadence                             = m_summary.cadence;
     m_estimatorObserved                        = sample.id;
     m_estimatorHistory[m_estimatorHistoryNext] = sample;
     m_estimatorHistoryNext                     = ( m_estimatorHistoryNext + 1 ) % m_estimatorHistory.size();
@@ -564,8 +650,9 @@ inline void Simulation::evaluate( Plan &entry, int step )
         return;
     }
 
-    const auto    *following = plan( entry.counter + 1 );
-    const int64_t  nextGrid  = following ? following->grid : shifted( entry.grid, 0, 1, entry.period );
+    const auto   *following = plan( entry.counter + 1 );
+    const int64_t nextGrid =
+        following ? following->grid : shiftGrid( { entry.grid, entry.fractionQ32 }, 0, 1, entry.periodQ32 ).ns;
     const __int128 readerEnd = __int128( target ) + b.delivery + b.keepout + b.guard;
 
     if( step && ( !nextGrid || readerEnd > __int128( nextGrid ) - b.early - b.observation ) )
@@ -582,7 +669,10 @@ inline void Simulation::evaluate( Plan &entry, int step )
     m_copyStep        = step;
     m_copyCounter     = entry.counter;
     m_copyGrid        = entry.grid;
-    m_copyPeriod      = entry.period;
+    m_copyPeriod      = int64_t( ( entry.periodQ32 + MagAOX::dmSyncoSimulation::periodScale / 2 ) /
+                            MagAOX::dmSyncoSimulation::periodScale );
+    m_copyPeriodQ32   = entry.periodQ32;
+    m_copyFractionQ32 = entry.fractionQ32;
     m_copyEstimatorId = entry.estimatorId;
 
     if( step )
@@ -653,6 +743,8 @@ inline void Simulation::overlap( uint64_t                                      m
         event.mainGridNs      = mainGrid;
         event.planGridNs      = m_copyGrid;
         event.periodNs        = m_copyPeriod;
+        event.periodQ32       = m_copyPeriodQ32;
+        event.planFractionQ32 = m_copyFractionQ32;
         event.copyBeginNs     = m_copyBegin;
         event.copyEndNs       = m_copyEnd;
         event.readerEndNs     = m_copyStep > 0 ? m_virtualHold : 0;
@@ -687,10 +779,9 @@ inline void Simulation::through( int64_t now, bool inclusive )
         return;
     }
 
-    const bool staleMain   = m_haveMain && now - m_summary.lastMainNs > m_config.timeout;
-    const bool stalePeriod = m_periodTime > 0 && now - m_periodTime > m_config.timeout;
+    const bool staleMain = m_haveMain && now - m_summary.lastMainNs > m_config.timeout;
 
-    if( staleMain || stalePeriod )
+    if( staleMain )
     {
         for( size_t i = 0; i < m_planCount; ++i )
         {
@@ -703,17 +794,15 @@ inline void Simulation::through( int64_t now, bool inclusive )
         m_summary.valid  = false;
         m_summary.gridNs = 0;
         m_intervalCount = m_intervalNext = m_planCount = 0;
-        m_periodTime                                   = 0;
-        m_summary.periodSamples                        = 0;
-        m_linkCount                                    = 0;
+        clearCadence();
+        m_haveMain              = false;
+        m_summary.periodSamples = 0;
+        m_linkCount             = 0;
         m_haveCombined = m_mainOutput = false;
         m_outputTime                  = 0;
-
-        if( staleMain )
-        {
-            m_pointCount = m_pointNext = 0;
-            m_summary.phaseSamples     = 0;
-        }
+        m_virtualHold = m_copyBegin = m_copyEnd = 0;
+        m_pointCount = m_pointNext = 0;
+        m_summary.phaseSamples     = 0;
     }
 
     for( size_t attempts = 0; attempts < m_plans.size() * maxSteps; ++attempts )
@@ -759,10 +848,16 @@ inline void Simulation::primary( uint64_t                                      c
                                  int64_t                                       publicationInterval,
                                  const MagAOX::dmSyncoSimulation::Observation &context )
 {
-    if( !m_summary.enabled || observed <= 0 || observed < m_summary.nowNs )
+    if( !m_summary.enabled || observed <= 0 )
     {
         ++m_summary.invalid;
         return;
+    }
+
+    if( observed < m_summary.nowNs )
+    {
+        reset();
+        ++m_summary.invalid;
     }
 
     through( observed, false );
@@ -798,6 +893,7 @@ inline void Simulation::primary( uint64_t                                      c
     estimator.publicationIntervalNs = publicationInterval;
     estimator.sequential            = sequential;
     estimator.periodBeforeNs        = m_summary.periodNs;
+    estimator.periodBeforeQ32       = m_summary.cadence.periodQ32;
     estimator.predictedNs           = predicted;
     estimator.phaseGain             = m_config.phaseGain;
     estimator.phaseSlewNs           = m_config.phaseSlew;
@@ -851,7 +947,6 @@ inline void Simulation::primary( uint64_t                                      c
 
     if( sequential && publicationInterval >= m_config.minInterval && publicationInterval <= m_config.maxInterval )
     {
-        m_periodTime                = observed;
         m_intervals[m_intervalNext] = publicationInterval;
         m_intervalNext              = ( m_intervalNext + 1 ) % m_config.window;
         m_intervalCount             = std::min<size_t>( m_intervalCount + 1, m_config.window );
@@ -868,14 +963,10 @@ inline void Simulation::primary( uint64_t                                      c
     m_summary.periodSamples = m_intervalCount;
     m_summary.phaseSamples  = m_pointCount;
 
-    if( m_intervalCount == m_config.window )
-    {
-        std::copy_n( m_intervals.begin(), m_intervalCount, m_scratch.begin() );
-        m_summary.periodNs = median( m_intervalCount );
-    }
-
-    m_summary.feasible = feasible( m_summary.periodNs, m_config.steps, m_config.bounds ) &&
-                         m_summary.periodNs >= m_config.cadenceMinPeriod;
+    updateCadence( counter, observed );
+    const int64_t conservativePeriod = int64_t( m_summary.cadence.periodQ32 / MagAOX::dmSyncoSimulation::periodScale );
+    m_summary.feasible               = feasible( conservativePeriod, m_config.steps, m_config.bounds ) &&
+                         conservativePeriod >= m_config.cadenceMinPeriod;
 
     if( predicted )
     {
@@ -898,7 +989,7 @@ inline void Simulation::primary( uint64_t                                      c
         return;
     }
 
-    if( m_intervalCount == m_config.window && m_pointCount == m_config.window )
+    if( m_pointCount == m_config.window )
     {
         if( !m_planCount )
         {
@@ -934,13 +1025,17 @@ inline void Simulation::primary( uint64_t                                      c
 
         if( !plan( future ) )
         {
-            const auto   &last          = m_plans[m_planCount - 1];
-            int64_t       grid          = shifted( last.grid, last.counter, future, m_summary.periodNs );
+            const auto &last = m_plans[m_planCount - 1];
+            const auto  shifted =
+                shiftGrid( { last.grid, last.fractionQ32 }, last.counter, future, m_summary.cadence.periodQ32 );
+            int64_t       grid          = shifted.ns;
             const int64_t candidate     = phase( future );
             estimator.nextCounter       = future;
             estimator.sourcePlanCounter = last.counter;
             estimator.sourceEstimatorId = last.estimatorId;
             estimator.sourceGridNs      = last.grid;
+            estimator.sourceFractionQ32 = last.fractionQ32;
+            estimator.baseFractionQ32   = shifted.fractionQ32;
             estimator.baseGridNs        = grid;
             estimator.candidateNs       = candidate;
 
@@ -952,18 +1047,20 @@ inline void Simulation::primary( uint64_t                                      c
                                                            static_cast<long double>( m_config.phaseSlew ) ) );
                 estimator.rawCorrectionNs     = int64_t( raw );
                 estimator.appliedCorrectionNs = delta;
-                grid                          = shifted( grid, 0, 1, delta );
+                grid = delta >= 0 ? ( grid <= std::numeric_limits<int64_t>::max() - delta ? grid + delta : 0 )
+                                  : ( grid > -delta ? grid + delta : 0 );
             }
 
-            if( !commit( future, grid, estimator.id ) )
+            if( !commit( future, grid, estimator.id, shifted.fractionQ32 ) )
             {
                 next();
                 finishEstimator( estimator );
                 return;
             }
 
-            estimator.committed       = true;
-            estimator.committedGridNs = grid;
+            estimator.committed            = true;
+            estimator.committedGridNs      = grid;
+            estimator.committedFractionQ32 = shifted.fractionQ32;
         }
 
         m_summary.valid = true;

@@ -27,6 +27,35 @@ constexpr size_t estimatorTraceCapacity = 4096; ///< Export FIFO; diagnostic sat
 
 constexpr size_t estimatorBatchCapacity = 512; ///< Maximum estimator samples in one ordinary-thread emission.
 
+constexpr uint64_t periodScale = uint64_t( 1 ) << 32; ///< Exact binary scale for fractional nanoseconds per cycle.
+
+constexpr size_t cadenceAnchorCapacity = 64; ///< Bounded approximately one-second counter/time anchors.
+
+/// Qualification of the slow, monotonic counter/time cadence measurement.
+enum class CadenceState : uint8_t
+{
+    nominal = 0,
+    growing = 1,
+    full    = 2
+};
+
+/// Coherent long-baseline cadence snapshot; zero periodQ32 denotes an absent legacy diagnostic.
+struct Cadence
+{
+    uint64_t     periodQ32{ 0 };                 ///< Nanoseconds per genuine counter advance, scaled by periodScale.
+    CadenceState state{ CadenceState::nominal }; ///< Nominal seed, growing baseline or full requested span.
+    uint64_t     epoch{ 0 };    ///< Changes when cadence anchors are cleared after reset, silence or a rate change.
+    uint64_t     anchors{ 0 };  ///< Currently retained counter/time anchors.
+    uint64_t     cycles{ 0 };   ///< Counter advances represented by the latest measured span.
+    uint64_t     updates{ 0 };  ///< Successful endpoint measurements in this epoch.
+    uint64_t     rejected{ 0 }; ///< Implausible endpoint measurements rejected in this epoch.
+    int64_t      spanNs{ 0 };   ///< Actual latest measurement span; zero before the first measurement.
+    int64_t      windowNs{ 0 }; ///< Requested long measurement baseline.
+    int64_t      updateNs{ 0 }; ///< Minimum interval between anchor/measurement updates.
+    int64_t      observationNs{ 0 }; ///< Last coherent accepted primary, independent of slow refresh age.
+    int64_t      updatedNs{ 0 };     ///< Last successful cadence refresh; zero while nominal.
+};
+
 /// Monitor path supplying retrospective evidence; both paths can observe the same main.
 enum class OverlapOrigin
 {
@@ -67,6 +96,8 @@ struct OverlapEvent
     uint64_t      lastMainCounter{ 0 }; ///< Most recent accepted primary counter before this evidence.
     uint64_t      planEstimatorId{ 0 }; ///< Estimator record that created the modeled copy's frozen plan.
     uint64_t      lastEstimatorId{ 0 }; ///< Latest completed estimator record before this evidence.
+    uint64_t      periodQ32{ 0 };       ///< Frozen fractional period; zero in legacy records.
+    int64_t       planFractionQ32{ 0 }; ///< Frozen target's signed fractional remainder after nanosecond rounding.
     int           step{ 0 };            ///< Index of the last modeled copy.
     OverlapOrigin origin{ OverlapOrigin::primary }; ///< Monitor path; repeated origins are deliberately retained.
     OverlapWindow window{ OverlapWindow::copy };    ///< Copy or active-reader interval containing the evidence.
@@ -122,6 +153,11 @@ struct EstimatorSample
     int64_t  appliedCorrectionNs{ 0 };   ///< Original bounded correction applied to the base grid.
     int64_t  committedGridNs{ 0 };       ///< Newly committed future target; zero if no commitment succeeded.
     bool     committed{ false };         ///< A new future plan was actually committed by this update.
+    uint64_t periodBeforeQ32{ 0 };       ///< Fractional selected period before this update; zero in legacy records.
+    int64_t  sourceFractionQ32{ 0 };     ///< Source plan's signed fractional remainder.
+    int64_t  baseFractionQ32{ 0 };       ///< Uncorrected future grid's signed fractional remainder.
+    int64_t  committedFractionQ32{ 0 };  ///< Committed future grid's signed fractional remainder.
+    Cadence  cadence; ///< Slow cadence state after this primary; independent of producer interval qualification.
 };
 
 /// Process-lifetime triggered estimator coverage; selected equals drained plus dropped plus queued.
@@ -214,6 +250,7 @@ struct Summary
     uint64_t outputGaps{ 0 };              ///< Missing/ambiguous combined-counter progression.
     uint64_t associations{ 0 };            ///< Coherent actual primary-to-combined observations accepted.
     std::array<Step, maxSteps> outcomes{}; ///< Current-session conditional outcomes indexed by step.
+    Cadence                    cadence;    ///< Slow cadence qualification and separate observation/refresh timestamps.
 };
 
 } // namespace dmSyncoSimulation

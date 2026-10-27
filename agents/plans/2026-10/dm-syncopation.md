@@ -96,7 +96,7 @@ Current work, following the 2026-10-25 measurements and operator direction:
 | Independent camera acquisition excursions and upstream AO trace stages | Implemented and verified. Later captures distinguish serial-associated driver-stamp tails, a rare long post-stamp camera SDK wait, and changing AO/conversion durations. Counter continuity alone does not establish frame freshness. |
 | Isolated camera publication and acquWFS timing | Implemented and locally verified (4883 assertions, 69 cases; matching builds). New isolated capture has one stable acquWFS row: publication already spans 437.045–579.825 us upstream, while large acquWFS output excursions are predominantly present at its processing start. Two primary-observer counter gaps limit coverage; matched camera-to-wake latency remains unmeasured. |
 | Median-based target cadence and per-step skips for ordinary excursions | Revised design below; active targets stay on the predicted grid despite early/late main arrivals. Not implemented. |
-| Read-only fixed-grid simulation | Implemented and locally verified, including bounded overlap tracing. Latest traced capture has 99.949832% passive / 100% active conditional would-run availability, with 69 distinct passive-copy overlaps and no active overlaps. Phase tracking/passive preparation bounds remain under review; see the debugging record. |
+| Read-only fixed-grid simulation | Implemented and locally verified, including overlap and estimator history. Latest capture identifies adjacent-interval median bias driving tens of microseconds of grid drift during near-500-us average cadence. Revisit cadence estimation before passive-margin qualification; see the debugging record. |
 | Targeted dmcomb-reader wake for active extra steps | Proposed design below; not implemented. |
 | Enabled multi-step qualification | Pending the scheduler changes and full timing-window qualification. |
 
@@ -502,7 +502,159 @@ cause. The next matched hardware capture should retain the new estimator
 history so stale phase, biased period and slew saturation can be separated
 before changing the estimator or the passive preparation margin.
 
-Workstation verification passes **61,111 assertions / 99 cases**: pure model
+The `synco-sim-20261027T035855Z` capture now identifies the actual grid-drift
+mechanism. All 288 saved overlaps have complete 256-pre/64-post histories
+and exact frozen-plan provenance; all 9,407 estimator updates agree with
+their arithmetic and 8,663 independently reconstructed medians/candidates
+match exactly. In a measured 32-interval example, observations average
+499.837688 us while the grid advances 501.597750 us, changing phase by
+−56.322 us in approximately 16 ms. At one update the same 32 producer
+intervals average 500.107281 us but have median 501.648 us; the resulting
+phase candidate initially reinforces the later grid. Eighteen consecutive
+overlaps also persist while every phase correction is already clipped at
+−1 us. This is a measured cadence/phase-estimator interaction, rather than
+an arithmetic implementation error or evidence of changed hardware cadence.
+
+The next design review should compare robust longer-baseline estimates of
+counter-labelled elapsed time and separate nominal-cadence estimation from
+phase correction. The current direct median of adjacent primary intervals
+remains implemented for replay; no replacement or new parameter set is
+approved or deployed by this finding. Preserve immutable advertised targets,
+per-step skip behavior and explicitly undecided physical reserve while
+testing alternatives offline against the retained histories. Do not qualify
+a larger passive margin as a remedy for the observed estimator bias.
+
+### 2026-10-26 direction: long-baseline cadence and independent phase
+
+The operator directs measuring over a much longer interval and relying on
+the steady long-term cadence, rather than letting interval noise steer the
+grid. This supersedes the adjacent-primary-interval median as the proposed
+nominal-period estimator in the earlier dated sections. The existing C++
+shadow implementation was subsequently revised as recorded below; ordinary
+operational scheduling remains unchanged.
+
+The approved engineering starting point for the shadow revision is:
+
+1. Estimate cadence from coherent primary counter/monotonic observation
+   endpoints: `T = (O[end] - O[start]) / (counter[end] - counter[start])`.
+   Use approximately **10 seconds** of elapsed time and refresh at most
+   **once per second**. A small fixed ring of approximately one-second
+   anchors provides this span without retaining every frame. These measure
+   all intervening genuine counter advances; do not select only adjacent
+   intervals that individually pass a short-interval cut. Keep optional
+   producer-clock cadence as an independent cross-check in its own clock.
+2. Retain nominal timing while warming. Permit a first measured estimate
+   after approximately **one second**, grow its baseline toward ten seconds,
+   and report nominal/growing/full-baseline state plus actual span and count.
+   These are initial engineering values, not physical margins.
+3. Preserve fractional nanoseconds per cycle internally. Round only final
+   committed nanosecond targets using bounded relative counter arithmetic;
+   do not discard a fractional frequency offset on every cycle. The existing
+   rounded period field alone must not be treated as the exact long-term
+   frequency or silently reinterpreted without documenting its semantics.
+4. Keep phase estimation separate. Initially retain the current robust
+   32-observation phase filter, gain 0.1 and 1 us correction limit to isolate
+   the cadence-estimator change. A long cadence baseline does not mean
+   freezing phase for ten seconds or reanchoring to every noisy arrival.
+   Continue to modify only unadvertised targets and independently skip
+   unavailable passive/active slots.
+5. Separate primary-observation freshness from cadence-estimate refresh
+   time. Actual new primaries still update freshness every cycle; a valid
+   once-per-second rate update must not trigger the existing 4 ms
+   eligible-period-sample timeout. Expose both ages. Explicit rate changes,
+   stream identity replacement, backward counters or clock reversal start
+   a new epoch; do not blend two operating rates or retime committed plans.
+
+The latest capture supports this scale. Causal endpoint/counter estimates
+from its coherent one-second summaries have period standard deviations
+1.717 ns at approximately one second, 0.368 ns at five seconds, 0.188 ns at
+ten seconds and 0.067 ns at thirty seconds. The existing short-window median
+in the same summaries has 372 ns spread. These are endpoint-estimate
+stability comparisons, not complete scheduler replays.
+
+As a separate diagnostic, a fixed known 500 us period with the original
+phase filter reduces RMS residual from 15.416 to 3.593 us across 6,335
+matched, overlap-selected observations after local warmup. Real excursions
+remain. This experiment assumes the rate and restarts at selected history
+boundaries; it does not implement the causal long-baseline estimator or
+predict actual overlap/skip totals. The implementation and matched
+shadow capture must validate the actual measurement path, rate transitions,
+fractional target arithmetic and all frozen-plan/skip invariants. Physical
+early-main and delivery bounds remain independently undecided.
+
+### 2026-10-27 long-baseline shadow implementation
+
+The operator approved the ten-second window and requested a test. The model
+now retains at most 64 monotonic counter/time anchors, adding one only after
+the configured refresh interval has elapsed. At each update it selects the
+newest anchor at least the requested baseline old, or the oldest available
+anchor during growth. Defaults are `simulation.cadenceWindowSec=10` and
+`simulation.cadenceUpdateSec=1`. The first measured rate needs one second;
+full qualification normally needs approximately ten seconds. Nominal phase
+warmup can produce a grid sooner, without claiming full cadence coverage.
+
+The denominator includes genuine forward counter advances, including missed
+observations; no missing command or phase point is synthesized. Individual
+producer intervals and their accepted/excluded counts remain diagnostics.
+They no longer select the period or expire a healthy grid. Actual distinct
+primary freshness remains bounded by the existing main-silence timeout.
+Silence clears cadence/phase anchors once and restores nominal feasibility;
+the subsequent real primary begins warmup again. Backward counters and
+positive regressing primary observation times reset the model session.
+Out-of-order combined/evaluation calls remain rejected. Diagnostic queues
+and process-lifetime sample/event IDs survive these resets.
+
+Exact cadence is a nearest-rounded unsigned Q32 nanosecond period calculated
+with signed 128-bit endpoint arithmetic. Each frozen grid retains its signed
+subnanosecond remainder, so fractional frequency is not discarded on every
+cycle. Extrapolation and subdivision operate on Q32 and round the final
+target. Phase remains the 32-point counter-normalized median, gain 0.1 and
+1,000 ns maximum integer correction; it changes only unadvertised targets.
+Feasibility uses the conservative floor of the exact period, while existing
+integer period telemetry is nearest-rounded diagnostic output.
+
+The ordinary app thread recognizes fresh camera acquisition-rate changes
+larger than `tracking.rateTolerance` relative to the accepted rate (1% by
+default), reconfigures a new shadow epoch, and seeds it from that report.
+Small report-to-report jitter does not reset or replace the measured cadence.
+This is detection through measured FPS reports, not instantaneous knowledge
+of a camera command; report latency or changes below the threshold are
+handled by normal observation/phase tracking. Attachment and accepted
+configuration changes retain their existing reset paths.
+
+Read-only `simulation_cadence` reports nominal/growing/full state, exact-period
+display, epoch, anchors, measured span/cycles, accepted/rejected updates and
+separate primary/refresh ages. Optional trailing telemetry tables preserve
+the same state and exact Q32 values in summaries and triggered estimator
+records. Frozen overlap plans also retain Q32 period/remainder. New logger
+validation checks exact source/base/committed arithmetic; legacy records
+keep their original integer contract. Queued old-session/epoch records
+remain valid independently of current summary settings.
+
+The next operator comparison keeps camera/loop, dmcomb mode/delay, CPU/IRQ
+placement and workload unchanged, including RTC latency On. Rebuild/install
+`dmSyncopation` and `logdump`, restart synco with simulation selected and
+operational enable Off, wait for `simulation_cadence.state=2` with approximately
+10–11 seconds of span, then repeat the two-minute simultaneous capture in the
+[user guide](../../../apps/dmSyncopation/doc/dmSyncopation.md#capture-a-simulation-run).
+Compare measured cadence spread, frozen residuals, per-step skips/overlaps,
+associations and queue quality. A better shadow result still does not qualify
+physical early-main or delivery bounds.
+
+Local implementation verification passes **63,239 assertions / 112 cases**:
+pure model 53,563/37, application integration 7,361/56 and logger
+compatibility/validation 2,315/19. Normal library/schema, app and reader
+builds pass. New checks cover causal one-/ten-second qualification, once-per-
+second refresh with fresh primaries, asymmetric/paired jitter, gaps,
+epoch/clock/silence transitions, restored nominal feasibility, two-minute
+fractional carry, rate-report noise versus material changes, a fractional
+configured rate boundary, actual INDI state/age updates through an isolated
+local driver, fractional model-to-binary/text/JSON validation, and malformed
+records. Existing destination/counter/semaphore non-mutation and queue-loss
+checks pass. Changed C++ files are formatted and whitespace checks pass.
+These local checks do not measure instrument overhead or physical delivery.
+
+Before this implementation, workstation verification passed **61,111 assertions / 99 cases**: pure model
 53,212/29, application integration 6,095/54 and logger compatibility/validation
 1,804/16. Normal library/schema, `dmSyncopation` and `logdump` builds pass.
 Tests cover 420/580 us early/late pairs, the measured 885.783/202.112 us

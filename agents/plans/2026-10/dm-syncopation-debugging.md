@@ -3484,3 +3484,315 @@ Legacy payloads remain readable and malformed optional histories are rejected.
 All changed C++ files were clang-formatted and whitespace checks pass.
 Normal library/schema, `dmSyncopation` and `logdump` builds pass for this
 estimator-history increment.
+
+### `synco-sim-20261027T035855Z`: measured median-period bias drives grid drift
+
+Read the workstation capture under
+`/home/jrmales/tmp/home/jrmales/tmp/synco-sim-20261027T035855Z`.
+Saved checkout hash is `4ef0a1966059e259490eda830944121f89dab189`.
+There are 119 synco telemetry rows spanning
+2026-10-27 03:58:55.131840263–04:00:53.736082639 UTC, 118.604 seconds
+(October 26, 20:58:55–21:00:53 Phoenix). All six INDI snapshots succeed;
+all three collectors return the expected timeout status 124 and error files
+are empty. Simulation stays in session 3, valid/feasible, with operational
+enable Off and two modeled steps. Observer sessions remain unchanged.
+
+| INDI before/after delta | Passive step 0 | Active step 1 |
+| --- | ---: | ---: |
+| Considered | 239,219 | 239,220 |
+| Conditional would run | 239,108 | 239,216 |
+| Skipped | 111 | 4 |
+| Overlap evidence | 275 | 0 |
+
+Passive skips are 110 early-main and one reader hold; active skips are one
+missing output and three reader hold. The first/last telemetry rows cover
+237,209 opportunities per step with the same skip and overlap increments;
+the difference from INDI is the snapshot boundary. Existing model quality
+faults do not increase. Named combined lineage remains writer PID 3948918
+and primary inode 4676, with accepted associations advancing throughout.
+
+The saved output contains 288 distinct primary-origin passive-copy events,
+IDs 1959–2246. Thirteen were already accumulated in the first saved row;
+all 275 events newly counted between the snapshots are present. There are
+no combined-origin duplicates or active overlap records. Every event has
+all 256 preceding and 64 following estimator samples. All plan-producing
+references resolve: each event's planEstimatorId equals lastEstimatorId,
+and the referenced update's committed target/counter matches the event's
+frozen plan. Thus the antecedent history is available in this capture.
+
+There are 9,407 unique selected estimator updates in 24 contiguous regions.
+Each region's first update references its immediately preceding unselected
+source ID; these are selection boundaries, not holes inside event context.
+All 9,407 base-grid recurrences, gain calculations, integer corrections,
+clipping and committed targets agree with the implementation. For 8,663
+updates with a complete retained 32-sample window, independently recomputed
+publication-interval medians and extrapolated median phase candidates agree
+exactly with the recorded values. The observed behavior is therefore an
+estimator/design issue, not evidence of corrupted telemetry or incorrect
+execution of the specified arithmetic.
+
+**A measured example shows the grid creating the phase error.** Across
+counter 50657847 to 50657879 (32 actual intervals):
+
+| Quantity | Value |
+| --- | ---: |
+| Mean monotonic observation interval | 499.837688 us |
+| Mean producer publication interval | 499.847719 us |
+| Mean frozen-grid interval | 501.597750 us |
+| Initial observation minus grid | +13.334 us |
+| Final observation minus grid | −42.988 us |
+| Change in observation-minus-grid residual | −56.322 us |
+
+The grid advances 16,050.687 us from its period estimates plus a net
+0.441 us of phase correction, totaling 16,051.128 us. Relative to a 500 us
+reference, the grid accumulates 51.128 us of excess advance while real
+observations move 5.194 us earlier. Together these change the residual by
+−56.322 us in about 16 ms, dominated by the biased grid advance. This explanation uses
+monotonic observations/grids and producer elapsed intervals separately;
+there is no subtraction of absolute timestamps across clock domains.
+
+At the beginning of that example, estimator update 152034 selects a period
+of 501.648 us even though its same 32 producer intervals average
+500.107281 us. Its middle order statistics are 501.157 and 502.139 us,
+so the reported median is arithmetically correct. The extrapolated median
+phase candidate is 37.198 us later than the uncorrected future grid. The
+resulting +3.719 us requested correction clips to +1 us, initially moving
+the grid farther in the same direction as the period error. At counter
+50657848 the 32-interval average is 499.996438 us while its median remains
+501.642 us.
+
+The selected histories exhibit strongly alternating publication intervals:
+even-counter median 503.521 us, odd-counter median 496.518 us. These are
+overlap-selected samples, not an unbiased whole-run distribution or a
+diagnosis of why the upstream producer alternates. A window's middle order
+statistics can move substantially while its total elapsed time remains
+near 32 × 500 us. Using that adjacent-interval median both as the grid's
+period and to extrapolate the phase history amplifies the resulting error.
+
+![Measured estimator grid drift and correction](figures/synco-estimator-20261027T035855Z.png)
+
+The figure uses only retained estimator samples. The 500 us reference is
+anchored to the monotonic observation at counter 50657847. The highlighted
+32 intervals are the measured example above. The middle panel compares the
+selected median with the arithmetic mean of exactly the same 32 producer
+intervals; that mean is a diagnostic comparison, not an implemented policy.
+The lower panel shows the recorded requested and applied corrections.
+
+The longest uninterrupted overlap run has 18 commands, counters
+50662008–50662025. Their 17 observed intervals average 499.921765 us;
+producer intervals average 499.957118 us. Every intervening correction is
+−1 us, but period estimates sum to 8,518.712 us. After subtracting those
+17 us of correction, the frozen grid still advances 8,501.712 us,
+500.100706 us per interval. The residual becomes more negative,
+−31.587 to −34.629 us. Slew saturation cannot cancel this period bias fast
+enough. This directly identifies how consecutive overlaps persist during
+ordinary command cadence; an unobserved original phase jump is no longer
+needed to explain the traced examples.
+
+All saved overlap residuals lie within −37.939…−28.004 us, selected by the
+modeled `[grid−38 us, grid−28 us)` copy interval. Receipt-to-model delay is
+only 0.330–0.932 us at those events. Grouping events separated by at most
+256 counters gives 22 groups, with phase 256 observations before each first
+event ranging from −19.704 to +9.450 us. Their larger offsets develop within
+the retained history. The sampled 1 Hz phase range still misses these tails.
+
+Overlap queue drops and detected logging failures remain zero. Estimator
+FIFO drops are 4,094 already before the initial snapshot and do not increase
+during this run. The initial estimator backlog is 2,464 samples before the
+first snapshot; older selected data therefore appear in the captured output.
+Neither historical loss nor that backlog compromises the complete context
+of the 288 saved overlap events. Both export FIFOs are empty at the end,
+postRemaining is zero and logFailed is zero. One row at
+04:00:01.467312828 UTC omits both optional quality snapshots, consistent
+with a busy cycle try-lock; subsequent accounting shows no new loss.
+
+Independent camera/DM timing remains broadly comparable to the preceding
+capture. These are medians of reported overlapping two-second-window
+standard deviations, not pooled RMS:
+
+| Interval | Previous `023336Z`, us | New capture, us |
+| --- | ---: | ---: |
+| Camera acquisition | 0.292 | 0.322 |
+| Camera publication | 0.862 | 0.841 |
+| DM combined publication | 5.932 | 5.875 |
+| DM receipt | 5.918 | 5.878 |
+| DM SDK return | 5.929 | 5.920 |
+
+Camera publication extrema are 478.283–525.342 us; DM publication extrema
+are 458.135–542.284 us. The 114 valid camera stage records add 238,519
+publications and 11 serial controls; the 120 valid controller records add
+238,352 events/receipts/submissions. There are no new frame/counter gaps,
+failed/partial commands, invalid events or collector drops in these
+populations. Five complete qualified camera excursion traces overlap serial
+activity and are already disturbed by SDK return. Their historical trace
+drop count does not increase.
+
+An initial camera publication-spread transient (window standard deviation
+up to 2.770 us) coincides with large estimator batches, but the saved stream
+starts with an existing estimator backlog and does not retain its onset.
+This is not a controlled overhead comparison and does not establish that
+instrumentation caused the transient. Controller callback/SDK timing is
+otherwise steady and comparable to the preceding run.
+
+The operator confirms unchanged camera/loop settings, dmcomb mode/delay,
+CPU/IRQ placement and workload apart from rebuilding/restarting synco and
+logdump. Saved settings remain loop On/gain 1, camera bin2/2 kHz/EM gain 1,
+shutter On, synchronization On and target −45 C. RTC latency is On before
+and after; mode 4 / 10 us is retained by operator attestation and named
+linkage is directly measured.
+
+**Next engineering action:** revise and compare the nominal-cadence
+estimator offline using these same recorded histories. A median of adjacent
+intervals should not be treated as a demonstrated frequency estimate in
+this alternating/correlated timing population. Compare longer-baseline,
+counter-labelled elapsed-time estimates and keep phase estimation separate
+from cadence integration. Preserve immutable advertised targets and
+independent per-step skips while comparing the alternatives. Changing only
+the early-main margin or the correction limit would obscure the observed
+period-bias mechanism. A replacement design and parameters remain to be
+selected; no estimator, runtime setting or physical timing bound was changed
+for this analysis, and the physical early-main reserve remains undecided.
+
+### Longer-baseline cadence comparison and operator direction
+
+The operator agrees that cadence can be measured over a much longer period:
+the current estimator is allowing timing noise to drive the prediction.
+Compared causal endpoint slopes using all 119 coherent simulation summaries
+in `synco-sim-20261027T035855Z`. Each endpoint pairs an actual main counter
+with its monotonic last-main observation, within session 3. For each newest
+summary, select the latest available past summary at least the requested
+baseline old; no future endpoint is used. The overall span is approximately
+118.605 seconds and 237,209 genuine counter advances, giving
+500.000363287 us per cycle.
+
+| Requested baseline | Actual retained span, s | Period-estimate range, us | Standard deviation, ns/cycle |
+| --- | --- | --- | ---: |
+| 1 s | 1.004–1.007 | 499.995342–500.005392 | 1.717 |
+| 5 s | 5.024–5.029 | 499.999310–500.001479 | 0.368 |
+| 10 s | 10.048–10.056 | 499.999776–500.001009 | 0.188 |
+| 30 s | 30.149–30.160 | 500.000151–500.000554 | 0.067 |
+
+The existing adjacent-interval median sampled in those same summaries spans
+498.922–501.392 us with standard deviation 372 ns/cycle. The much smaller
+long-baseline spread supports a slow rate measurement. This comparison uses
+monotonic differences only and measures estimate stability; it does not
+reconstruct all intervening events or predict complete scheduler outcomes.
+Using the newest single arrival as a phase anchor still leaves approximately
+3.5–3.9 us forecast-residual standard deviation over the next one-second
+endpoint even with the longer slopes. Keep robust phase tracking separate.
+
+A diagnostic fixed-period replay isolates this distinction. Split the 9,407
+selected estimator samples into 24 contiguous ID/counter/session regions.
+Seed each region from its first recorded frozen prediction, use a known
+500,000 ns period, and retain the same 32-observation median phase filter,
+gain 0.1 and 1,000 ns correction limit. After discarding 128 warmup samples
+per region, compare the same 6,335 observations:
+
+| Phase residual statistic | Recorded estimator, us | Fixed known cadence, us |
+| --- | ---: | ---: |
+| RMS | 15.416 | 3.593 |
+| Median | −3.488 | −0.118 |
+| Absolute 95th percentile | 31.257 | 6.031 |
+| Absolute 99th percentile | 43.498 | 14.138 |
+| Minimum | −78.020 | −21.481 |
+| Maximum | +38.320 | +39.051 |
+
+The selected observations whose diagnostic residual falls in
+`[−38 us, −28 us)` decrease from 370 to zero. These are residual-band
+counts, **not modeled overlap decisions**, because this experiment does not
+replay output associations, committed copy state or all intervening frames.
+It assumes a known constant period and is not a causal implementation of
+the longer-baseline measurement. Later warmup checks and perturbed initial
+predictions give consistent results. Actual excursions remain: the fixed
+cadence residual still reaches +39.051 us and two observations are at least
+20 us early. Longer measurement does not qualify a physical margin or make
+frame skipping unnecessary.
+
+Proposed next shadow settings are a ten-second endpoint/counter span,
+refreshed no faster than once per second, with an initial measured rate
+after one second and an explicitly reported growing baseline. Keep the
+existing short robust phase filter initially to isolate the cadence change.
+Use coherent monotonic observations for both the rate and grid; producer
+timestamps can supply a separate-clock diagnostic. Retain fractional period
+internally: the full-span estimate is 500,000.363 ns/frame, and permanently
+rounding it to 500,000 ns accumulates about 0.726 us/s of grid drift.
+
+The implementation must separate actual primary freshness from cadence
+refresh age; the current 4 ms eligible-sample timeout cannot be applied to
+a once-per-second update. Explicit camera/rate changes, stream replacement,
+counter rollback or clock reversal start a fresh epoch. Long-baseline
+counter differences should preserve genuine frame counts rather than
+dropping individually excluded short intervals. Already advertised plans
+remain immutable. Test asymmetric zero-mean jitter, paired excursions,
+missed observations, endpoint outliers, reset/rate transitions and sustained
+fractional cadence before the next matched hardware comparison. The main
+plan records this replacement direction; no runtime code, configuration or
+physical timing bound changed during this offline comparison.
+
+
+### 2026-10-27: approved ten-second cadence implemented for shadow testing
+
+The operator accepted the proposed window and requested the next test. The
+shadow model now estimates cadence from monotonic counter/time endpoints
+approximately ten seconds apart, refreshing at most once per second. The
+first measurement qualifies after one second and reports a growing baseline
+until the selected span reaches ten seconds. A fixed 64-anchor ring bounds
+storage and refresh work. Genuine forward counter differences include missed
+observations rather than selecting only quiet adjacent producer intervals.
+Producer-interval acceptance/exclusion counts remain separate diagnostics.
+
+Nominal phase warmup can finish before the first measured cadence. The
+32-observation median phase filter, gain 0.1 and 1 us correction limit are
+retained to isolate the cadence change. New future plans use exact Q32
+nanoseconds per cycle with a carried signed fractional grid remainder;
+rounding the period on every cycle would recreate frequency drift. Existing
+integer period fields remain nearest-rounded diagnostics, while feasibility
+uses the conservative floor. Targets already committed remain immutable.
+
+Cadence refresh age is distinct from actual primary freshness. Continued
+coherent distinct primary observations keep the grid fresh between one-second
+updates even when producer intervals are absent. Duplicate posts do not
+refresh either the anchor or primary freshness. Main silence clears cadence
+and phase once, restoring nominal period/feasibility. Counter rollback and
+positive primary-observation clock regression start a new session. Stream
+replacement and configuration changes retain their existing reset paths.
+Fresh camera FPS changes larger than the accepted rate tolerance (default 1%)
+also create a new epoch seeded from the new rate; small measurement jitter
+does not drive cadence or reset its anchors. This measured-report detection
+is delayed by camera telemetry publication, not an instantaneous rate-command
+notification. Out-of-order combined/evaluation calls remain rejected.
+
+Read-only `simulation_cadence` reports numeric states 0 nominal / 1 growing / 2 full,
+precise displayed period, epoch, retained anchors, actual span/cycles, accepted
+and rejected updates, requested window/refresh interval and separate primary
+observation/cadence refresh ages. New optional `simulation_cadence` and
+`estimator_cadence` telemetry retain exact Q32 fields and monotonic endpoints.
+Overlap records preserve their frozen fractional period/grid. Logger
+validation reproduces exact source/base/committed arithmetic with signed
+128-bit operations, while legacy records retain integer validation. Pending
+old-epoch records and process-lifetime queue IDs survive resets.
+
+The next operator test rebuilds/installs synco and logdump, restarts synco
+with simulation enabled and operational enable Off, confirms full baseline
+(`simulation_cadence.state=2`, approximately 10–11 s span), and repeats the
+120-second simultaneous synco/camera/DM capture in the updated user guide.
+Keep camera/AO settings, dmcomb mode/delay, CPU/IRQ placement and workload
+unchanged and RTC latency On. Compare real measured cadence stability and
+frozen residual/skip/overlap distributions, retaining association and queue
+quality. Physical timing reserves remain unqualified and unchanged.
+
+
+Local verification passes **63,239 assertions / 112 cases**: pure model
+53,563/37, application integration 7,361/56 and logger compatibility/validation
+2,315/19. Normal library/schema, app and logdump builds pass. Checks include
+one-/ten-second cadence qualification, independent freshness, asymmetric and
+paired jitter, genuine gaps, reset/rate/clock/silence epochs, restored nominal
+feasibility, two-minute fractional carry, actual INDI state/age publication
+through an isolated local driver, fractional model-to-binary/text/JSON
+roundtrips and malformed records. Existing no-copy/no-counter/no-semaphore-
+mutation and queue/contention tests pass. A fractional minimum-rate camera
+seed exposed a one-nanosecond rounding boundary; the shadow interval upper
+bound and timeout now round upward, accepting valid nearest-rounded seeds.
+An independent code review found no remaining actionable correctness issue.
+Changed C++ files are clang-formatted and whitespace checks pass. This local
+verification does not measure instrument overhead or qualify delivery bounds.

@@ -184,10 +184,12 @@ class dmSyncopation : public MagAOXApp<true>,
     bool          m_pipelineDiagnostics{ true }; ///< Retain the primary's bounded upstream process trace.
     bool          m_diagnosticsOnly{ false };    ///< Observe arbitrary primary metadata without attaching DM resources.
     bool          m_simulationEnabled{ false };  ///< Startup-only shadow policy; live scheduling is prohibited.
-    unsigned      m_simulationWindow{ 32 };      ///< Bounded median period and counter-normalized phase window.
-    double        m_simulationPhaseGain{ 0.1 };  ///< Future-grid phase smoothing gain.
-    double        m_simulationPhaseSlewUs{ 1 };  ///< Maximum phase correction per newly planned cycle, us.
-    synco::Bounds m_bounds;                      ///< Explicit copy, observation and reader bounds, ns.
+    unsigned      m_simulationWindow{ 32 };      ///< Bounded counter-normalized median phase window.
+    double        m_simulationCadenceWindowSec{ 10 }; ///< Requested counter/time cadence baseline, seconds.
+    double        m_simulationCadenceUpdateSec{ 1 };  ///< Minimum cadence refresh interval, seconds.
+    double        m_simulationPhaseGain{ 0.1 };       ///< Future-grid phase smoothing gain.
+    double        m_simulationPhaseSlewUs{ 1 };       ///< Maximum phase correction per newly planned cycle, us.
+    synco::Bounds m_bounds;                           ///< Explicit copy, observation and reader bounds, ns.
     ///@}
 
     std::mutex                         m_cycleMutex; ///< Serializes lifecycle/configuration with a complete callback.
@@ -197,6 +199,8 @@ class dmSyncopation : public MagAOXApp<true>,
     uint64_t m_simulationTraceLogFailed{ 0 }; ///< Drained overlap events lost after a telemetry emission failure.
     MagAOX::dmSyncoSimulation::EstimatorStatus m_simulationEstimatorStatus; ///< Cached triggered estimator coverage.
     uint64_t m_simulationEstimatorLogFailed{ 0 };  ///< Drained estimator samples lost to detected telemetry failures.
+    double   m_simulationReferenceFps{ 0 };        ///< Accepted camera rate identifying material rate-change epochs.
+    int64_t  m_simulationCameraTime{ 0 };          ///< Last camera report considered for a shadow rate change.
     int64_t  m_simulationPublication{ 0 };         ///< Prior coherent primary writetime, in its own external clock.
     uint64_t m_simulationCounter{ 0 };             ///< Primary counter paired with the publication baseline.
     int64_t  m_simulationCombinedPublication{ 0 }; ///< Last accepted combined producer timestamp in its own clock.
@@ -297,6 +301,7 @@ class dmSyncopation : public MagAOXApp<true>,
     pcf::IndiProperty m_indiP_health;              ///< Schedule reason and stream identities.
     pcf::IndiProperty m_indiP_camera;              ///< External camera FPS subscription.
     pcf::IndiProperty m_indiP_simulation;          ///< Conditional grid, phase and collection-quality diagnostics.
+    pcf::IndiProperty m_indiP_simulationCadence;   ///< Long-baseline cadence state, coverage and independent freshness.
     pcf::IndiProperty m_indiP_simulationSteps;     ///< Per-step hypothetical outcomes; never actual deliveries.
     pcf::IndiProperty m_indiP_simulationStatus;    ///< Shadow state and conditional-policy identification.
     pcf::IndiProperty m_indiP_simulationTrace;     ///< Read-only overlap capture, drain and loss counters.
@@ -396,7 +401,10 @@ class dmSyncopation : public MagAOXApp<true>,
 
   protected:
     /// Configure/reset the shadow engine without opening or modifying any image.
-    bool configureSimulation();
+    bool configureSimulation( double seedRate = 0 /**< [in] New acquisition seed, Hz; zero retains the reference. */ );
+
+    /// Start a new shadow epoch on a material fresh camera-rate change, ignoring ordinary FPS measurement noise.
+    void updateSimulationCadence();
 
     /// Begin a new shadow attachment epoch and clear external-clock metadata baselines.
     void resetSimulation();
@@ -601,7 +609,9 @@ inline void dmSyncopation::setupConfig()
         { "diagnostics.camera", "Observe camera acquisition/publication intervals independently of camera INDI FPS." },
         { "diagnostics.pipeline", "Observe the primary producer's bounded upstream processing trace." },
         { "simulation.enabled", "Observe a conditional fixed-grid policy without copying or triggering DM commands." },
-        { "simulation.window", "Median period and counter-normalized phase sample count (4-256)." },
+        { "simulation.window", "Counter-normalized median phase sample count (4-256)." },
+        { "simulation.cadenceWindowSec", "Requested counter/time cadence baseline, seconds (default 10)." },
+        { "simulation.cadenceUpdateSec", "Minimum cadence refresh interval, seconds (default 1)." },
         { "simulation.phaseGain", "Future unadvertised grid phase smoothing gain (0-1, excluding zero)." },
         { "simulation.phaseSlewUs", "Maximum phase correction per newly planned cycle, us." },
         { "diagnostics.only",
@@ -655,13 +665,20 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
     config( m_diagnosticsOnly, "diagnostics.only" );
     config( m_simulationEnabled, "simulation.enabled" );
     config( m_simulationWindow, "simulation.window" );
+    config( m_simulationCadenceWindowSec, "simulation.cadenceWindowSec" );
+    config( m_simulationCadenceUpdateSec, "simulation.cadenceUpdateSec" );
     config( m_simulationPhaseGain, "simulation.phaseGain" );
     config( m_simulationPhaseSlewUs, "simulation.phaseSlewUs" );
 
     if( ( m_simulationEnabled && ( m_diagnosticsOnly || !m_combinerDiagnostics || m_primaryCadenceWindow <= 0 ) ) ||
         m_simulationWindow < 4 || m_simulationWindow > 256 || !finite( m_simulationPhaseGain ) ||
         m_simulationPhaseGain <= 0 || m_simulationPhaseGain > 1 || !finite( m_simulationPhaseSlewUs ) ||
-        m_simulationPhaseSlewUs < 0 || m_simulationPhaseSlewUs > 1000000 )
+        m_simulationPhaseSlewUs < 0 || m_simulationPhaseSlewUs > 1000000 || !finite( m_simulationCadenceWindowSec ) ||
+        !finite( m_simulationCadenceUpdateSec ) || m_simulationCadenceUpdateSec < 0.01 ||
+        m_simulationCadenceUpdateSec > 60 || m_simulationCadenceWindowSec < m_simulationCadenceUpdateSec ||
+        m_simulationCadenceWindowSec > 1000 ||
+        m_simulationCadenceWindowSec >
+            ( MagAOX::dmSyncoSimulation::cadenceAnchorCapacity - 1 ) * m_simulationCadenceUpdateSec )
     {
         return -1;
     }
@@ -790,18 +807,22 @@ inline ino_t dmSyncopation::inode( const std::string &name )
     return stat( filename, &info ) == 0 ? info.st_ino : 0;
 }
 
-inline bool dmSyncopation::configureSimulation()
+inline bool dmSyncopation::configureSimulation( double seedRate )
 {
+    const double rate =
+        seedRate > 0 ? seedRate : ( m_simulationReferenceFps > 0 ? m_simulationReferenceFps : m_nominalRate );
     synco::Simulation::Config settings;
     settings.bounds             = m_bounds;
     settings.steps              = m_requested;
     settings.window             = m_simulationWindow;
-    settings.nominalPeriod      = int64_t( 1e9 / m_nominalRate );
+    settings.nominalPeriod      = int64_t( std::llround( 1e9 / rate ) );
+    settings.cadenceWindowNs    = int64_t( std::llround( m_simulationCadenceWindowSec * 1e9 ) );
+    settings.cadenceUpdateNs    = int64_t( std::llround( m_simulationCadenceUpdateSec * 1e9 ) );
     settings.minInterval        = int64_t( 1e9 / m_maxRate );
-    settings.maxInterval        = int64_t( 1e9 / m_minRate );
+    settings.maxInterval        = int64_t( std::ceil( 1e9 / m_minRate ) );
     settings.phaseGain          = m_simulationPhaseGain;
     settings.phaseSlew          = int64_t( std::ceil( m_simulationPhaseSlewUs * 1000 ) );
-    settings.timeout            = int64_t( 2e9 / m_minRate );
+    settings.timeout            = int64_t( std::ceil( 2e9 / m_minRate ) );
     const double cadenceMinimum = std::ceil( m_requested * 1e9 / ( m_maxCadence * ( 1 + m_rateTolerance ) ) );
 
     if( !finite( cadenceMinimum ) || cadenceMinimum > 1e12 )
@@ -821,6 +842,37 @@ inline bool dmSyncopation::configureSimulation()
     m_simulationCombinedPublication = m_simulationCombinedStart = m_simulationCombinedUpdate = 0;
     m_simulationCombinedCounter                                                              = 0;
     return true;
+}
+
+inline void dmSyncopation::updateSimulationCadence()
+{
+    const auto &report = m_cameraReport;
+    const auto  now    = m_now();
+
+    if( !m_simulationEnabled || report.m_received <= m_simulationCameraTime || report.m_received > now ||
+        now - report.m_received >= 5000000000LL || !finite( report.m_fps ) || report.m_fps < m_minRate ||
+        report.m_fps > m_maxRate )
+    {
+        return;
+    }
+
+    const double reference = m_simulationReferenceFps > 0 ? m_simulationReferenceFps : m_nominalRate;
+
+    if( std::abs( report.m_fps - reference ) > reference * m_rateTolerance )
+    {
+        if( !configureSimulation( report.m_fps ) )
+        {
+            return;
+        }
+
+        m_simulationReferenceFps = report.m_fps;
+    }
+    else if( m_simulationReferenceFps == 0 )
+    {
+        m_simulationReferenceFps = report.m_fps;
+    }
+
+    m_simulationCameraTime = report.m_received;
 }
 
 inline void dmSyncopation::readSimulationPrimary( int64_t callbackNs, int64_t receiptNs )
@@ -973,6 +1025,25 @@ inline int dmSyncopation::setupSimulationINDI()
         m_indiP_simulation.add( pcf::IndiElement( name ) );
     }
 
+    REG_INDI_NEWPROP_NOCB( m_indiP_simulationCadence, "simulation_cadence", pcf::IndiProperty::Number );
+    m_indiP_simulationCadence.setPerm( pcf::IndiProperty::ReadOnly );
+
+    for( const auto *name : { "state",
+                              "epoch",
+                              "periodNs",
+                              "spanSec",
+                              "cycles",
+                              "anchors",
+                              "updates",
+                              "rejected",
+                              "windowSec",
+                              "updateSec",
+                              "observationAgeSec",
+                              "refreshAgeSec" } )
+    {
+        m_indiP_simulationCadence.add( pcf::IndiElement( name ) );
+    }
+
     REG_INDI_NEWPROP_NOCB( m_indiP_simulationSteps, "simulation_steps", pcf::IndiProperty::Number );
     m_indiP_simulationSteps.setPerm( pcf::IndiProperty::ReadOnly );
 
@@ -1039,7 +1110,10 @@ inline void dmSyncopation::updateSimulationINDI()
                                           s.feasible ? 1.0 : 0.0,
                                           double( s.session ),
                                           double( s.sequence ),
-                                          s.periodNs / 1000.0,
+                                          ( s.cadence.periodQ32
+                                                ? double( s.cadence.periodQ32 ) / MagAOX::dmSyncoSimulation::periodScale
+                                                : double( s.periodNs ) ) /
+                                              1000.0,
                                           double( s.gridNs ),
                                           s.phaseNs / 1000.0,
                                           s.phaseMinNs / 1000.0,
@@ -1057,6 +1131,33 @@ inline void dmSyncopation::updateSimulationINDI()
                                           double( s.excluded ),
                                           double( s.outputGaps ),
                                           double( s.associations ) },
+                     state );
+    const auto &cadence = s.cadence;
+    updateIfChanged( m_indiP_simulationCadence,
+                     std::vector<std::string>{ "state",
+                                               "epoch",
+                                               "periodNs",
+                                               "spanSec",
+                                               "cycles",
+                                               "anchors",
+                                               "updates",
+                                               "rejected",
+                                               "windowSec",
+                                               "updateSec",
+                                               "observationAgeSec",
+                                               "refreshAgeSec" },
+                     std::vector<double>{ double( cadence.state ),
+                                          double( cadence.epoch ),
+                                          double( cadence.periodQ32 ) / MagAOX::dmSyncoSimulation::periodScale,
+                                          cadence.spanNs / 1e9,
+                                          double( cadence.cycles ),
+                                          double( cadence.anchors ),
+                                          double( cadence.updates ),
+                                          double( cadence.rejected ),
+                                          cadence.windowNs / 1e9,
+                                          cadence.updateNs / 1e9,
+                                          cadence.observationNs > 0 ? ( s.nowNs - cadence.observationNs ) / 1e9 : -1,
+                                          cadence.updatedNs > 0 ? ( s.nowNs - cadence.updatedNs ) / 1e9 : -1 },
                      state );
     std::vector<std::string> names;
     std::vector<double>      values;
@@ -2927,8 +3028,11 @@ inline int dmSyncopation::appLogic()
         std::unique_lock<std::mutex> lock( m_cycleMutex, std::try_to_lock );
         if( lock.owns_lock() )
         {
+            readCamera();
+
             if( m_simulationEnabled )
             {
+                updateSimulationCadence();
                 m_simulation.advance( m_now() );
                 m_simulationSnapshot        = m_simulation.summary();
                 m_simulationTraceStatus     = m_simulation.traceStatus();
@@ -2936,7 +3040,6 @@ inline int dmSyncopation::appLogic()
                 m_reason = m_simulationSnapshot.valid ? "simulation observing" : "simulation warming or stale";
             }
 
-            readCamera();
             if( m_enabled && m_lastMain && m_now() - m_lastMain > int64_t( 2e9 / m_minRate ) )
             {
                 invalidate( "main timeout", Fault::primary );

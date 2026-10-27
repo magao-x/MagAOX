@@ -108,7 +108,7 @@ TEST_CASE( "synco simulation late main hold", "[dmSyncopation][simulation]" )
     REQUIRE( simulation.summary().outcomes[1].readerHold == held + 1 );
 }
 
-/** \brief Large measured late/catch-up intervals retain counter labels and the median rather than nearest-slot
+/** \brief Large measured late/catch-up intervals retain counter labels and the nominal seed rather than nearest-slot
  * assignment. */
 TEST_CASE( "synco simulation large catchup", "[dmSyncopation][simulation]" )
 {
@@ -339,21 +339,19 @@ TEST_CASE( "synco simulation rejects ambiguous future links", "[dmSyncopation][s
     REQUIRE( simulation.summary().outcomes[1].missingOutput == missing + 1 );
 }
 
-/** \brief An already committed cycle uses its frozen period when classifying a newly infeasible estimator value. */
-TEST_CASE( "synco simulation feasibility belongs to frozen cycle", "[dmSyncopation][simulation]" )
+/** \brief Producer-interval noise remains diagnostic and cannot retime an advertised monotonic cycle. */
+TEST_CASE( "synco simulation diagnostic intervals leave frozen cadence", "[dmSyncopation][simulation]" )
 {
-    Simulation         simulation;
-    Simulation::Config config;
-    config.window = 2;
-    REQUIRE( simulation.configure( config ) );
+    Simulation simulation;
+    REQUIRE( simulation.configure( {} ) );
     const auto last = warm( simulation );
     feed( simulation, 41, last + 500000, 300000 );
     feed( simulation, 42, last + 1000000, 300000 );
-    REQUIRE( simulation.summary().periodNs == 300000 );
-    REQUIRE_FALSE( simulation.summary().feasible );
-    const auto held = simulation.summary().outcomes[1].readerHold;
-    simulation.advance( last + 1110000 );
-    REQUIRE( simulation.summary().outcomes[1].readerHold == held + 1 );
+    REQUIRE( simulation.summary().periodNs == 500000 );
+    REQUIRE( simulation.summary().feasible );
+    const auto active = simulation.summary().outcomes[1].wouldRun;
+    simulation.advance( last + 1260000 );
+    REQUIRE( simulation.summary().outcomes[1].wouldRun == active + 1 );
 }
 
 /** \brief A cadence-rating limit can reject an otherwise structurally feasible nominal request. */
@@ -386,16 +384,18 @@ TEST_CASE( "synco simulation frozen cadence qualification", "[dmSyncopation][sim
     config.phaseGain        = 0;
     config.bounds.keepout   = 50000;
     config.cadenceMinPeriod = 450000;
+    config.cadenceWindowNs  = 200000;
+    config.cadenceUpdateNs  = 200000;
     REQUIRE( simulation.configure( config ) );
     const auto last = warm( simulation );
     simulation.advance( last + 300000 );
     const auto active = simulation.summary().outcomes[1].wouldRun;
-    feed( simulation, 41, last + 500000, 300000 );
+    feed( simulation, 41, last + 400000, 400000 );
     REQUIRE( simulation.summary().periodNs == 400000 );
     REQUIRE_FALSE( simulation.summary().feasible );
     simulation.advance( last + 760000 );
     REQUIRE( simulation.summary().outcomes[1].wouldRun == active + 1 );
-    feed( simulation, 42, last + 900000, 400000 );
+    feed( simulation, 42, last + 800000, 400000 );
     simulation.advance( last + 1110000 );
     REQUIRE( simulation.summary().outcomes[1].wouldRun == active + 1 );
     REQUIRE( simulation.summary().outcomes[1].expired > 0 );
@@ -438,37 +438,42 @@ TEST_CASE( "synco simulation overlap and expiry", "[dmSyncopation][simulation]" 
         REQUIRE( simulation.summary().outcomes[0].overlap == overlap + 1 );
     }
 
-    SECTION( "silence and out-of-order inputs" )
+    SECTION( "silence and primary clock regression start fresh estimation" )
     {
         simulation.advance( last + 4000001 );
         REQUIRE_FALSE( simulation.summary().valid );
         REQUIRE( simulation.summary().nextActiveNs == 0 );
         REQUIRE( simulation.summary().periodSamples == 0 );
-        const auto invalid = simulation.summary().invalid;
+        const auto session = simulation.summary().session;
         simulation.primary( 41, last + 1000000, 500000 );
-        REQUIRE( simulation.summary().invalid == invalid + 1 );
-        REQUIRE( simulation.summary().counter == 40 );
+        REQUIRE( simulation.summary().invalid == 1 );
+        REQUIRE( simulation.summary().session == session + 1 );
+        REQUIRE( simulation.summary().counter == 41 );
+        REQUIRE( simulation.summary().cadence.anchors == 1 );
+        REQUIRE_FALSE( simulation.summary().valid );
     }
 }
 
-/** \brief Continuing main notifications cannot keep an unavailable publication-period estimate fresh. */
-TEST_CASE( "synco simulation period sample expiry", "[dmSyncopation][simulation]" )
+/** \brief Slow cadence refresh and unavailable producer intervals do not expire fresh primary observations. */
+TEST_CASE( "synco simulation observation freshness independent of cadence refresh", "[dmSyncopation][simulation]" )
 {
     Simulation simulation;
     REQUIRE( simulation.configure( {} ) );
     auto observed = warm( simulation );
 
-    for( uint64_t counter = 41; counter <= 50; ++counter )
+    for( uint64_t counter = 41; counter <= 2050; ++counter )
     {
         observed += 500000;
         feed( simulation, counter, observed, 0 );
     }
 
-    REQUIRE_FALSE( simulation.summary().valid );
-    REQUIRE( simulation.summary().periodSamples == 0 );
+    REQUIRE( simulation.summary().valid );
+    REQUIRE( simulation.summary().periodSamples == 32 );
     REQUIRE( simulation.summary().phaseSamples == 32 );
-    REQUIRE( simulation.summary().nextActiveNs == 0 );
-    REQUIRE( simulation.summary().counter == 50 );
+    REQUIRE( simulation.summary().nextActiveNs > observed );
+    REQUIRE( simulation.summary().cadence.updatedNs < observed - 4000000 );
+    REQUIRE( simulation.summary().cadence.observationNs == observed );
+    REQUIRE( simulation.summary().cadence.updates == 1 );
 }
 
 /** \brief Accepted configuration changes start a distinct session; rejected changes preserve the current one. */
@@ -563,6 +568,8 @@ TEST_CASE( "synco simulation overlap trace windows", "[dmSyncopation][simulation
         CHECK( event.mainGridNs == last + 500000 );
         CHECK( event.planGridNs == event.mainGridNs );
         CHECK( event.periodNs == 500000 );
+        CHECK( event.periodQ32 == uint64_t( 500000 ) * periodScale );
+        CHECK( event.planFractionQ32 == 0 );
         CHECK( event.copyBeginNs == last + 462000 );
         CHECK( event.copyEndNs == last + 472000 );
         CHECK( event.readerEndNs == 0 );
@@ -798,7 +805,7 @@ TEST_CASE( "synco simulation estimator pre and post history", "[dmSyncopation][s
         CHECK( sample.phaseSamples == std::min<uint64_t>( id, 32 ) );
         CHECK( sample.periodSamples == std::min<uint64_t>( id - 1, 32 ) );
 
-        if( id <= 32 )
+        if( id < 32 )
         {
             CHECK_FALSE( sample.committed );
             CHECK( sample.nextCounter == 0 );
@@ -816,7 +823,7 @@ TEST_CASE( "synco simulation estimator pre and post history", "[dmSyncopation][s
             CHECK( sample.committed );
             CHECK( sample.nextCounter == id + 1 );
             CHECK( sample.sourcePlanCounter == id );
-            CHECK( sample.sourceEstimatorId == ( id == 33 ? id : id - 1 ) );
+            CHECK( sample.sourceEstimatorId == ( id == 32 ? id : id - 1 ) );
             CHECK( sample.sourceGridNs == 1000000000 + int64_t( id ) * 500000 );
             CHECK( sample.baseGridNs == sample.sourceGridNs + sample.periodNs );
             CHECK( sample.candidateNs == sample.baseGridNs );
@@ -1109,6 +1116,283 @@ TEST_CASE( "synco simulation estimator accepted terminal update", "[dmSyncopatio
     CHECK( sample.baseGridNs == 0 );
     CHECK_FALSE( sample.committed );
     CHECK( sample.committedGridNs == 0 );
+}
+
+/** \brief Monotonic counter/time endpoints qualify after one second, grow to ten seconds, and refresh only once per
+ * second. */
+TEST_CASE( "synco simulation long cadence qualification", "[dmSyncopation][simulation]" )
+{
+    using namespace MagAOX::dmSyncoSimulation;
+    Simulation simulation;
+    REQUIRE( simulation.configure( {} ) );
+
+    for( uint64_t counter = 1; counter <= 24001; ++counter )
+    {
+        const int64_t observed = 1000000000 + int64_t( counter ) * 500000;
+        feed( simulation, counter, observed, counter % 3 == 0 ? 506000 : 497000 );
+
+        if( counter == 32 )
+        {
+            CHECK( simulation.summary().valid );
+            CHECK( simulation.summary().cadence.state == CadenceState::nominal );
+            CHECK( simulation.summary().cadence.updates == 0 );
+        }
+
+        if( counter == 2000 )
+        {
+            CHECK( simulation.summary().cadence.updatedNs == 0 );
+            CHECK( simulation.summary().cadence.anchors == 1 );
+        }
+
+        if( counter == 2001 )
+        {
+            const auto &cadence = simulation.summary().cadence;
+            CHECK( cadence.state == CadenceState::growing );
+            CHECK( cadence.spanNs == 1000000000 );
+            CHECK( cadence.cycles == 2000 );
+            CHECK( cadence.updates == 1 );
+            CHECK( cadence.updatedNs == observed );
+        }
+
+        if( counter == 20001 || counter == 24001 )
+        {
+            const auto &cadence = simulation.summary().cadence;
+            CHECK( cadence.state == CadenceState::full );
+            CHECK( cadence.spanNs == 10000000000LL );
+            CHECK( cadence.cycles == 20000 );
+            CHECK( cadence.periodQ32 == uint64_t( 500000 ) * periodScale );
+            CHECK( cadence.observationNs == observed );
+            CHECK( cadence.updatedNs == observed );
+            CHECK( simulation.summary().phaseNs == 0 );
+            CHECK( simulation.summary().nextGridNs == observed + 500000 );
+        }
+    }
+
+    CHECK( simulation.summary().cadence.updates == 12 );
+    CHECK( simulation.summary().cadence.rejected == 0 );
+}
+
+/** \brief Asymmetric adjacent jitter, paired excursions and forward counter gaps cannot bias the true long-span
+ * denominator. */
+TEST_CASE( "synco simulation long cadence noisy endpoints", "[dmSyncopation][simulation]" )
+{
+    using namespace MagAOX::dmSyncoSimulation;
+    Simulation simulation;
+    REQUIRE( simulation.configure( {} ) );
+    int64_t previous = 0;
+
+    for( uint64_t counter = 1; counter <= 24001; ++counter )
+    {
+        if( counter == 1001 )
+        {
+            continue;
+        }
+
+        const int64_t jitter   = counter % 3 == 1 ? 0 : ( counter % 3 == 2 ? 6000 : -3000 );
+        const int64_t observed = 1000000000 + int64_t( counter ) * 500000 + jitter + ( counter == 5000 ? 80000 : 0 );
+        feed( simulation, counter, observed, previous ? observed - previous : 0 );
+        previous = observed;
+    }
+
+    const auto &summary = simulation.summary();
+    const auto &cadence = summary.cadence;
+    CHECK( summary.gaps == 1 );
+    CHECK( cadence.state == CadenceState::full );
+    CHECK( cadence.rejected == 0 );
+    CHECK( cadence.cycles >= 20000 );
+    CHECK( cadence.spanNs >= cadence.windowNs );
+    CHECK( cadence.periodQ32 > uint64_t( 499999 ) * periodScale );
+    CHECK( cadence.periodQ32 < uint64_t( 500001 ) * periodScale );
+    CHECK( summary.periodNs == 500000 );
+}
+
+/** \brief Duplicates and incoherent timestamps leave cadence unchanged; silence and positive clock reversal reset
+ * epochs. */
+TEST_CASE( "synco simulation cadence epoch and freshness", "[dmSyncopation][simulation]" )
+{
+    using namespace MagAOX::dmSyncoSimulation;
+    Simulation simulation;
+    REQUIRE( simulation.configure( {} ) );
+
+    for( uint64_t counter = 1; counter <= 2001; ++counter )
+    {
+        feed( simulation, counter, 1000000000 + int64_t( counter ) * 500000 );
+    }
+
+    const auto cadence = simulation.summary().cadence;
+    simulation.primary( 2001, cadence.observationNs + 20000 );
+    CHECK( simulation.summary().cadence.observationNs == cadence.observationNs );
+    CHECK( simulation.summary().cadence.anchors == cadence.anchors );
+    CHECK( simulation.summary().cadence.updates == cadence.updates );
+    simulation.primary( 2002, 0 );
+    CHECK( simulation.summary().cadence.epoch == cadence.epoch );
+    CHECK( simulation.summary().cadence.periodQ32 == cadence.periodQ32 );
+    simulation.advance( cadence.observationNs + 4000001 );
+    const auto expired = simulation.summary().cadence;
+    CHECK( expired.epoch == cadence.epoch + 1 );
+    CHECK( expired.state == CadenceState::nominal );
+    CHECK( expired.anchors == 0 );
+    CHECK( expired.observationNs == 0 );
+    CHECK_FALSE( simulation.summary().valid );
+    simulation.advance( cadence.observationNs + 8000001 );
+    CHECK( simulation.summary().cadence.epoch == expired.epoch );
+    feed( simulation, 2010, cadence.observationNs + 8500000 );
+    CHECK( simulation.summary().cadence.epoch == expired.epoch );
+    CHECK( simulation.summary().cadence.anchors == 1 );
+    CHECK( simulation.summary().cadence.updates == 0 );
+    simulation.reset();
+    CHECK( simulation.summary().cadence.epoch == expired.epoch + 1 );
+    Simulation::Config config;
+    config.nominalPeriod = 600000;
+    REQUIRE( simulation.configure( config ) );
+    CHECK( simulation.summary().cadence.epoch == expired.epoch + 2 );
+    CHECK( simulation.summary().cadence.periodQ32 == uint64_t( 600000 ) * periodScale );
+    simulation.primary( 1, 1000000000 );
+    simulation.primary( 2, 999999999 );
+    CHECK( simulation.summary().cadence.epoch == expired.epoch + 3 );
+    CHECK( simulation.summary().cadence.anchors == 1 );
+    CHECK( simulation.summary().cadence.observationNs == 999999999 );
+    CHECK( simulation.summary().cadence.updatedNs == 0 );
+    CHECK( simulation.summary().counter == 2 );
+    CHECK( simulation.summary().sequence == 1 );
+    CHECK( simulation.summary().invalid == 1 );
+}
+
+/** \brief Implausible long-span rates are rejected without replacing the selected nominal period. */
+TEST_CASE( "synco simulation cadence rejects implausible endpoint rate", "[dmSyncopation][simulation]" )
+{
+    using namespace MagAOX::dmSyncoSimulation;
+    Simulation         simulation;
+    Simulation::Config config;
+    config.cadenceWindowNs = 1000000;
+    config.cadenceUpdateNs = 1000000;
+    REQUIRE( simulation.configure( config ) );
+    simulation.primary( 1, 1000000000 );
+    simulation.primary( 1001, 1001000000 );
+    CHECK( simulation.summary().cadence.rejected == 1 );
+    CHECK( simulation.summary().cadence.updates == 0 );
+    CHECK( simulation.summary().cadence.periodQ32 == uint64_t( 500000 ) * periodScale );
+    CHECK( simulation.summary().cadence.state == CadenceState::nominal );
+    CHECK( simulation.summary().cadence.observationNs == 1001000000 );
+    CHECK( simulation.summary().cadence.anchors == 2 );
+}
+
+/** \brief Fractional nanoseconds survive repeated two-minute grid extrapolation and direct subframe placement. */
+TEST_CASE( "synco simulation fractional cadence arithmetic", "[dmSyncopation][simulation]" )
+{
+    using namespace MagAOX::dmSyncoSimulation;
+    using namespace MagAOX::app::synco;
+    const uint64_t period = uint64_t( 500000 ) * periodScale + periodScale / 4;
+    GridTime       time{ 1000000000, 0 };
+
+    for( uint64_t counter = 1; counter <= 240000; ++counter )
+    {
+        time = shiftGrid( time, counter - 1, counter, period );
+
+        if( counter % 4000 == 0 )
+        {
+            CHECK( time.ns == 1000000000 + int64_t( counter ) * 500000 + int64_t( counter / 4 ) );
+            CHECK( time.fractionQ32 == 0 );
+        }
+    }
+
+    CHECK( shiftGrid( time, 240000, 0, period ).ns == 1000000000 );
+    CHECK( stepGrid( { 1000000000, 0 }, period, 1, 2 ).ns == 1000250000 );
+    CHECK( stepGrid( { 1000000000, 0 }, period, 1, 2 ).fractionQ32 == int64_t( periodScale / 8 ) );
+    CHECK( shiftGrid( { std::numeric_limits<int64_t>::max(), 0 }, 0, 1, period ).ns == 0 );
+    CHECK( shiftGrid( { 1, 0 }, 1, 0, period ).ns == 0 );
+    CHECK( shiftGrid( { 1000000000, int64_t( periodScale / 2 ) }, 0, 1, period ).ns == 0 );
+    CHECK( stepGrid( time, period, 1, 0 ).ns == 0 );
+    CHECK( shiftGrid( time, 0, std::numeric_limits<uint64_t>::max(), std::numeric_limits<uint64_t>::max() ).ns == 0 );
+    CHECK( stepGrid( time, std::numeric_limits<uint64_t>::max(), 1, 1 ).ns == 0 );
+    CHECK( roundGrid( std::numeric_limits<__int128>::max() ).ns == 0 );
+    CHECK( roundGrid( std::numeric_limits<__int128>::min() ).ns == 0 );
+    const auto half = roundGrid( __int128( 1000 ) * periodScale + periodScale / 2 );
+    CHECK( half.ns == 1001 );
+    CHECK( half.fractionQ32 == -int64_t( periodScale / 2 ) );
+}
+
+/** \brief The complete scheduler carries a quarter-nanosecond period for two minutes without per-cycle rounding drift.
+ */
+TEST_CASE( "synco simulation fractional cadence long run", "[dmSyncopation][simulation]" )
+{
+    using namespace MagAOX::dmSyncoSimulation;
+    Simulation         simulation;
+    Simulation::Config config;
+    config.phaseGain = 0;
+    REQUIRE( simulation.configure( config ) );
+    int64_t measuredOrigin = 0;
+
+    for( uint64_t counter = 1; counter <= 240001; ++counter )
+    {
+        const int64_t observed = 1000000000 + int64_t( counter - 1 ) * 500000 + int64_t( ( counter - 1 + 2 ) / 4 );
+        const int64_t frozen   = simulation.summary().nextGridNs;
+        feed( simulation, counter, observed );
+
+        if( counter == 2001 )
+        {
+            measuredOrigin = simulation.summary().nextGridNs;
+            CHECK( simulation.summary().gridNs == frozen );
+            CHECK( simulation.summary().cadence.periodQ32 == uint64_t( 500000 ) * periodScale + periodScale / 4 );
+            CHECK( simulation.summary().nextActiveNs == frozen + 250000 );
+        }
+
+        if( counter >= 4001 && counter % 4000 == 1 )
+        {
+            const int64_t cycles   = int64_t( counter - 2001 );
+            const int64_t expected = measuredOrigin + cycles * 500000 + cycles / 4;
+            CHECK( simulation.summary().nextGridNs == expected );
+            CHECK( simulation.summary().cadence.periodQ32 == uint64_t( 500000 ) * periodScale + periodScale / 4 );
+        }
+    }
+
+    CHECK( simulation.summary().valid );
+    CHECK( simulation.summary().outcomes[0].overlap == 0 );
+    CHECK( simulation.summary().outcomes[1].overlap == 0 );
+}
+
+/** \brief Silence restores nominal feasibility together with the nominal cadence seed. */
+TEST_CASE( "synco simulation stale cadence restores nominal feasibility", "[dmSyncopation][simulation]" )
+{
+    Simulation         simulation;
+    Simulation::Config config;
+    config.cadenceMinPeriod = 500001;
+    REQUIRE( simulation.configure( config ) );
+    REQUIRE_FALSE( simulation.summary().feasible );
+    int64_t last = 0;
+
+    for( uint64_t counter = 1; counter <= 2001; ++counter )
+    {
+        last = 1000000000 + int64_t( counter ) * 500002;
+        feed( simulation, counter, last, 500002 );
+    }
+
+    REQUIRE( simulation.summary().cadence.updates == 1 );
+    REQUIRE( simulation.summary().periodNs == 500002 );
+    REQUIRE( simulation.summary().feasible );
+    simulation.advance( last + config.timeout + 1 );
+    CHECK( simulation.summary().periodNs == config.nominalPeriod );
+    CHECK_FALSE( simulation.summary().valid );
+    CHECK_FALSE( simulation.summary().feasible );
+}
+
+/** \brief Requested cadence spans must fit the fixed anchor ring and avoid invalid or overflowing durations. */
+TEST_CASE( "synco simulation cadence configuration bounds", "[dmSyncopation][simulation]" )
+{
+    Simulation         simulation;
+    Simulation::Config config;
+    config.cadenceUpdateNs = 0;
+    CHECK_FALSE( simulation.configure( config ) );
+    config                 = {};
+    config.cadenceWindowNs = config.cadenceUpdateNs - 1;
+    CHECK_FALSE( simulation.configure( config ) );
+    config                 = {};
+    config.cadenceWindowNs = config.cadenceUpdateNs * 64;
+    CHECK_FALSE( simulation.configure( config ) );
+    config.cadenceWindowNs = config.cadenceUpdateNs * 63;
+    CHECK( simulation.configure( config ) );
+    config.cadenceWindowNs = std::numeric_limits<int64_t>::max();
+    CHECK_FALSE( simulation.configure( config ) );
 }
 
 } // namespace dmSyncopationTest

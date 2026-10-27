@@ -18,6 +18,61 @@ namespace dmSyncopationTest
 using namespace MagAOX::app;
 
 /// \cond TEST_HARNESS
+/// Unactivated production driver whose property XML remains entirely workstation-local.
+class SimulationDriver : public indiDriver<MagAOXApp<true>>
+{
+  public:
+    /// Open only the fixture's private FIFOs and enable property serialization.
+    SimulationDriver( MagAOXApp<true> *parent /**< [in] App owning private test FIFOs. */ );
+
+    /// Close the unactivated input descriptor; the shared driver closes its output descriptor.
+    ~SimulationDriver();
+
+    /// Discard serialized publications without writing a pipe or opening a client connection.
+    void sendXml( const std::string &xml /**< [in] Production-formatted local property publication. */ ) const override;
+
+  private:
+    int m_input{ -1 }; ///< Private input descriptor not released by an unactivated production driver.
+};
+
+SimulationDriver::SimulationDriver( MagAOXApp<true> *parent )
+    : indiDriver<MagAOXApp<true>>( parent, "synco-local-test", "0", "1.7" )
+{
+    enableResponseMode( true );
+    struct stat input{};
+    REQUIRE( ::stat( parent->driverInName().c_str(), &input ) == 0 );
+
+    for( const auto &entry : std::filesystem::directory_iterator( "/proc/self/fd" ) )
+    {
+        int         descriptor = std::stoi( entry.path().filename() );
+        struct stat candidate{};
+
+        if( ::fstat( descriptor, &candidate ) == 0 && candidate.st_ino == input.st_ino &&
+            candidate.st_dev == input.st_dev )
+        {
+            REQUIRE( m_input == -1 );
+            m_input = descriptor;
+        }
+    }
+
+    REQUIRE( m_input >= 0 );
+}
+
+SimulationDriver::~SimulationDriver()
+{
+    if( m_input >= 0 )
+    {
+        ::close( m_input );
+    }
+
+    setInputFd( -1 );
+}
+
+void SimulationDriver::sendXml( const std::string &xml ) const
+{
+    static_cast<void>( xml );
+}
+
 /// Scheduler access and cleanup without starting app, hardware, INDI or monitor threads.
 class Harness : public dmSyncopation
 {
@@ -84,6 +139,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_indiP_reacquire;
     using dmSyncopation::m_indiP_settings;
     using dmSyncopation::m_indiP_simulation;
+    using dmSyncopation::m_indiP_simulationCadence;
     using dmSyncopation::m_indiP_simulationEstimator;
     using dmSyncopation::m_indiP_simulationStatus;
     using dmSyncopation::m_indiP_simulationSteps;
@@ -95,6 +151,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_mappings;
     using dmSyncopation::m_maxCadence;
     using dmSyncopation::m_measuredPeriod;
+    using dmSyncopation::m_minRate;
     using dmSyncopation::m_missed;
     using dmSyncopation::m_nextAttach;
     using dmSyncopation::m_notStarted;
@@ -121,11 +178,16 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_resources;
     using dmSyncopation::m_scheduleState;
     using dmSyncopation::m_simulation;
+    using dmSyncopation::m_simulationCadenceUpdateSec;
+    using dmSyncopation::m_simulationCadenceWindowSec;
+    using dmSyncopation::m_simulationCameraTime;
     using dmSyncopation::m_simulationEnabled;
     using dmSyncopation::m_simulationEstimatorLogFailed;
     using dmSyncopation::m_simulationEstimatorStatus;
     using dmSyncopation::m_simulationPhaseGain;
     using dmSyncopation::m_simulationPhaseSlewUs;
+    using dmSyncopation::m_simulationReferenceFps;
+    using dmSyncopation::m_simulationSnapshot;
     using dmSyncopation::m_simulationTraceLogFailed;
     using dmSyncopation::m_simulationTraceStatus;
     using dmSyncopation::m_simulationWindow;
@@ -149,6 +211,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::updatePipelineINDI;
     using dmSyncopation::updatePrimaryCadenceINDI;
     using dmSyncopation::updatePrimaryPairsINDI;
+    using dmSyncopation::updateSimulationCadence;
     using dmSyncopation::updateSimulationINDI;
     using dmSyncopation::waitUntil;
     using MagAOXApp<true>::config;
@@ -225,6 +288,9 @@ class Harness : public dmSyncopation
 
     /// Initialize callback properties without starting any threads or INDI connections.
     void properties();
+
+    /// Install a threadless INDI driver using private local FIFOs to exercise property publication.
+    void localDriver( const std::string &directory /**< [in] Fixture-owned temporary directory. */ );
 };
 
 Harness::Harness()
@@ -235,6 +301,17 @@ Harness::Harness()
 
 Harness::~Harness() noexcept
 {
+    if( m_indiDriver )
+    {
+        delete m_indiDriver;
+        m_indiDriver = nullptr;
+
+        for( const auto &path : { m_driverInName, m_driverOutName, m_driverCtrlName } )
+        {
+            ::unlink( path.c_str() );
+        }
+    }
+
     stopCameraMonitor();
     stopCombinedMonitor();
     stopMonitor();
@@ -410,6 +487,21 @@ void Harness::properties()
     m_indiP_settings = pcf::IndiProperty( pcf::IndiProperty::Number );
     m_indiP_settings.setDevice( configName() );
     m_indiP_settings.setName( "settings" );
+}
+
+void Harness::localDriver( const std::string &directory )
+{
+    m_driverInName   = directory + "/synco-input";
+    m_driverOutName  = directory + "/synco-output";
+    m_driverCtrlName = directory + "/synco-control";
+
+    for( const auto &path : { m_driverInName, m_driverOutName, m_driverCtrlName } )
+    {
+        REQUIRE( ::mkfifo( path.c_str(), 0600 ) == 0 );
+    }
+
+    m_indiDriver = new SimulationDriver( this );
+    REQUIRE( m_indiDriver->good() );
 }
 
 /// Owned files and images under a unique MILK_SHM_DIR; never attaches an instrument stream.
@@ -3397,6 +3489,8 @@ TEST_CASE( "syncopation simulation configuration validates estimator controls", 
     REQUIRE( app.loadConfigImpl( app.config ) == 0 );
     CHECK_FALSE( app.m_simulationEnabled );
     CHECK( app.m_simulationWindow == 32 );
+    CHECK( app.m_simulationCadenceWindowSec == Approx( 10 ) );
+    CHECK( app.m_simulationCadenceUpdateSec == Approx( 1 ) );
     CHECK( app.m_simulationPhaseGain == Approx( 0.1 ) );
     CHECK( app.m_simulationPhaseSlewUs == Approx( 1 ) );
 
@@ -3413,6 +3507,29 @@ TEST_CASE( "syncopation simulation configuration validates estimator controls", 
         CHECK( app.m_combinerDiagnostics );
         CHECK_FALSE( app.m_diagnosticsOnly );
         CHECK_FALSE( app.m_enabled );
+    }
+
+    SECTION( "Startup configuration forwards cadence units independently of phase-window size" )
+    {
+        char path[] = "/tmp/dm-synco-slow-cadence-XXXXXX";
+        int  fd     = mkstemp( path );
+        REQUIRE( fd >= 0 );
+        close( fd );
+
+        {
+            std::ofstream settings( path );
+            settings << "[simulation]\ncadenceWindowSec=0.1\ncadenceUpdateSec=0.01\nwindow=4\n";
+        }
+
+        app.config.readConfig( path );
+        std::remove( path );
+        REQUIRE( app.loadConfigImpl( app.config ) == 0 );
+        CHECK( app.m_simulationCadenceWindowSec == Approx( 0.1 ) );
+        CHECK( app.m_simulationCadenceUpdateSec == Approx( 0.01 ) );
+        CHECK( app.m_simulationWindow == 4 );
+        REQUIRE( app.configureSimulation() );
+        CHECK( app.m_simulation.summary().cadence.windowNs == 100000000 );
+        CHECK( app.m_simulation.summary().cadence.updateNs == 10000000 );
     }
 
     SECTION( "Estimator window is bounded before allocating model storage" )
@@ -3456,6 +3573,41 @@ TEST_CASE( "syncopation simulation configuration validates estimator controls", 
         CHECK( app.loadConfigImpl( app.config ) == 0 );
     }
 
+    SECTION( "Slow cadence settings must fit fixed storage and a useful refresh interval" )
+    {
+        for( const double invalid : { -1.0,
+                                      0.0,
+                                      0.009,
+                                      60.001,
+                                      std::numeric_limits<double>::quiet_NaN(),
+                                      std::numeric_limits<double>::infinity() } )
+        {
+            app.m_simulationCadenceUpdateSec = invalid;
+            CHECK( app.loadConfigImpl( app.config ) < 0 );
+        }
+
+        app.m_simulationCadenceUpdateSec = 1;
+
+        for( const double invalid : { -1.0,
+                                      0.0,
+                                      0.999,
+                                      63.001,
+                                      1001.0,
+                                      std::numeric_limits<double>::quiet_NaN(),
+                                      std::numeric_limits<double>::infinity() } )
+        {
+            app.m_simulationCadenceWindowSec = invalid;
+            CHECK( app.loadConfigImpl( app.config ) < 0 );
+        }
+
+        app.m_simulationCadenceUpdateSec = 0.01;
+        app.m_simulationCadenceWindowSec = 0.63;
+        CHECK( app.loadConfigImpl( app.config ) == 0 );
+        app.m_simulationCadenceUpdateSec = 60;
+        app.m_simulationCadenceWindowSec = 1000;
+        CHECK( app.loadConfigImpl( app.config ) == 0 );
+    }
+
     SECTION( "Simulation needs combined observation and cannot use the isolated arbitrary-primary mode" )
     {
         app.m_simulationEnabled = true;
@@ -3480,6 +3632,263 @@ TEST_CASE( "syncopation simulation configuration validates estimator controls", 
 #ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
     dmSyncopation::setupConfig;
     dmSyncopation::loadConfigImpl;
+#endif
+    // clang-format on
+}
+
+/// Keep measured cadence refresh separate from primary freshness and publish its qualification without rounding drift.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation cadence INDI exposes independent qualification and observation ages",
+           "[dmSyncopation][simulation][cadence]" )
+{
+    using namespace MagAOX::dmSyncoSimulation;
+    Streams streams;
+    Harness app;
+    app.attachPrimaryOnly();
+    app.m_simulationEnabled          = true;
+    app.m_simulationWindow           = 4;
+    app.m_simulationCadenceWindowSec = 0.1;
+    app.m_simulationCadenceUpdateSec = 0.01;
+    app.m_requested                  = 2;
+    app.m_now                        = CadenceClock::now;
+    REQUIRE( app.configureSimulation() );
+    REQUIRE( app.allocate( dev::shmimT{} ) == 0 );
+    app.attachCombinedOnly();
+    app.localDriver( streams.directory );
+    REQUIRE( app.setupSimulationINDI() == 0 );
+    app.m_simulationSnapshot = app.m_simulation.summary();
+    app.updateSimulationINDI();
+    CHECK( app.m_indiP_simulationCadence["state"].get<double>() == 0 );
+    CHECK( app.m_indiP_simulationCadence["observationAgeSec"].get<double>() == -1 );
+    CHECK( app.m_indiP_simulationCadence["refreshAgeSec"].get<double>() == -1 );
+
+    constexpr int64_t epoch = 1792000000000000000LL;
+
+    for( uint64_t index = 0; index <= 240; ++index )
+    {
+        const int64_t elapsed  = int64_t( index ) * 500000 + int64_t( ( 3 * index + 2 ) / 4 );
+        const int64_t observed = 1000000000 + elapsed;
+        cadenceObservation( app, observed, epoch + elapsed, index + 10 );
+        combinedObservation( app, streams.images[1], observed + 20000, epoch + elapsed, index + 10 );
+
+        if( index == 4 || index == 50 || index == 240 )
+        {
+            app.m_simulationSnapshot = app.m_simulation.summary();
+            app.updateSimulationINDI();
+            const auto &summary = app.m_simulationSnapshot;
+            CHECK( summary.valid );
+            CHECK( app.m_indiP_simulationCadence["observationAgeSec"].get<double>() ==
+                   Approx( ( summary.nowNs - summary.cadence.observationNs ) / 1e9 ) );
+            CHECK( app.m_indiP_simulationCadence["windowSec"].get<double>() == Approx( 0.1 ) );
+            CHECK( app.m_indiP_simulationCadence["updateSec"].get<double>() == Approx( 0.01 ) );
+
+            if( index == 4 )
+            {
+                CHECK( summary.cadence.state == CadenceState::nominal );
+                CHECK( app.m_indiP_simulationCadence["state"].get<double>() == 0 );
+                CHECK( app.m_indiP_simulationCadence["refreshAgeSec"].get<double>() == -1 );
+            }
+            else
+            {
+                CHECK( summary.cadence.periodQ32 == uint64_t( 500000 ) * periodScale + 3 * periodScale / 4 );
+                CHECK( app.m_indiP_simulationCadence["periodNs"].get<double>() == Approx( 500000.75 ) );
+                CHECK( app.m_indiP_simulation["periodUs"].get<double>() == Approx( 500.00075 ) );
+                CHECK( app.m_indiP_simulationCadence["spanSec"].get<double>() ==
+                       Approx( summary.cadence.spanNs / 1e9 ) );
+                CHECK( app.m_indiP_simulationCadence["refreshAgeSec"].get<double>() ==
+                       Approx( ( summary.nowNs - summary.cadence.updatedNs ) / 1e9 ) );
+
+                if( index == 50 )
+                {
+                    CHECK( summary.cadence.state == CadenceState::growing );
+                    CHECK( app.m_indiP_simulationCadence["state"].get<double>() == 1 );
+                    CHECK( app.m_indiP_simulationCadence["refreshAgeSec"].get<double>() > 0.004 );
+                    CHECK( app.m_indiP_simulationCadence["observationAgeSec"].get<double>() < 0.0001 );
+                }
+                else
+                {
+                    CHECK( summary.cadence.state == CadenceState::full );
+                    CHECK( app.m_indiP_simulationCadence["state"].get<double>() == 2 );
+                    CHECK( app.m_indiP_simulationCadence["spanSec"].get<double>() >= 0.1 );
+                }
+            }
+        }
+    }
+
+    const auto frozen = app.m_simulation.summary();
+    REQUIRE( frozen.cadence.state == CadenceState::full );
+    const int64_t early     = frozen.nextGridNs - 33000;
+    const int64_t published = epoch + early - 1000000000;
+    combinedObservation( app, streams.images[1], early, published, 251 );
+    cadenceObservation( app, early + 1000, published, 251 );
+    TraceBatch trace;
+
+    while( trace.count < trace.events.size() && app.m_simulation.popOverlap( trace.events[trace.count] ) )
+    {
+        ++trace.count;
+    }
+
+    while( trace.estimatorCount < trace.estimator.size() &&
+           app.m_simulation.popEstimator( trace.estimator[trace.estimatorCount] ) )
+    {
+        ++trace.estimatorCount;
+    }
+
+    trace.status          = app.m_simulation.traceStatus();
+    trace.estimatorStatus = app.m_simulation.estimatorStatus();
+    REQUIRE( trace.count > 0 );
+    REQUIRE( trace.estimatorCount > 0 );
+    CHECK( trace.events[0].periodQ32 == frozen.cadence.periodQ32 );
+    CHECK( trace.events[0].periodNs == 500001 ); // Display rounds; feasibility uses the conservative floor.
+    using MagAOX::logger::telem_dmsynco;
+    telem_dmsynco::messageT message(
+        0, 0, 0, 0, 0, 0, 0, 0, 0, {}, {}, {}, false, {}, {}, {}, {}, app.m_simulation.summary(), trace );
+    flatlogs::bufferPtrT buffer;
+    REQUIRE( flatlogs::logHeader::createLog<telem_dmsynco>( buffer, { 1, 2 }, message, flatlogs::logPrio::LOG_TELEM ) ==
+             0 );
+    REQUIRE( telem_dmsynco::verify( buffer, flatlogs::logHeader::msgLen( buffer ) ) );
+    const auto *decoded = MagAOX::logger::GetTelem_dmsynco_fb( flatlogs::logHeader::messageBuffer( buffer ) );
+    REQUIRE( decoded->simulation() != nullptr );
+    REQUIRE( decoded->simulation()->cadence() != nullptr );
+    CHECK( decoded->simulation()->cadence()->period_q32() == frozen.cadence.periodQ32 );
+    const auto *samples = decoded->simulation()->estimator_trace()->samples();
+    REQUIRE( samples != nullptr );
+    REQUIRE( samples->size() == trace.estimatorCount );
+    const auto *last = samples->Get( samples->size() - 1 );
+    REQUIRE( last->cadence() != nullptr );
+    CHECK( last->cadence()->period_q32() == trace.estimator[trace.estimatorCount - 1].cadence.periodQ32 );
+    CHECK( last->base_fraction_q32() == trace.estimator[trace.estimatorCount - 1].baseFractionQ32 );
+    CHECK( last->committed_fraction_q32() == trace.estimator[trace.estimatorCount - 1].committedFractionQ32 );
+
+    CHECK_FALSE( app.m_enabled );
+    CHECK_FALSE( app.m_resources );
+    CHECK( app.m_delivered == 0 );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::configureSimulation;
+    dmSyncopation::processImage( nullptr, dev::shmimT{} );
+    dmSyncopation::setupSimulationINDI;
+    dmSyncopation::updateSimulationINDI;
+    MagAOX::logger::telem_dmsynco::messageT;
+    MagAOX::logger::telem_dmsynco::verify;
+#endif
+    // clang-format on
+}
+
+/// Reset only on fresh material camera-rate changes, retaining measured cadence through normal FPS report noise.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation camera reports identify cadence epochs without steering the measured rate",
+           "[dmSyncopation][simulation][cadence][camera]" )
+{
+    Harness app;
+    app.m_simulationEnabled          = true;
+    app.m_simulationWindow           = 4;
+    app.m_simulationCadenceWindowSec = 0.1;
+    app.m_simulationCadenceUpdateSec = 0.01;
+    app.m_now                        = CadenceClock::now;
+    CadenceClock::time               = 2000000000;
+    REQUIRE( app.configureSimulation() );
+
+    for( uint64_t index = 0; index <= 240; ++index )
+    {
+        const int64_t elapsed = int64_t( index ) * 500000 + int64_t( ( 3 * index + 2 ) / 4 );
+        app.m_simulation.primary( index + 10, 1000000000 + elapsed, index ? 500000 : 0 );
+    }
+
+    REQUIRE( app.m_simulation.summary().valid );
+    const auto before = app.m_simulation.summary();
+    REQUIRE( before.cadence.state == MagAOX::dmSyncoSimulation::CadenceState::full );
+
+    SECTION( "Normal acquisition measurement noise does not replace or reset a healthy estimator" )
+    {
+        for( const double rate : { 2000.002, 2001.0, 2005.0, 2010.0, 2019.0 } )
+        {
+            CadenceClock::time += 1000000;
+            app.m_cameraReport = { rate, CadenceClock::time - 1 };
+            app.updateSimulationCadence();
+            CHECK( app.m_simulationCameraTime == app.m_cameraReport.m_received );
+            CHECK( app.m_simulation.summary().cadence.epoch == before.cadence.epoch );
+            CHECK( app.m_simulation.summary().sequence == before.sequence );
+            CHECK( app.m_simulation.summary().periodNs == before.periodNs );
+            CHECK( app.m_simulation.summary().cadence.periodQ32 == before.cadence.periodQ32 );
+        }
+
+        CHECK( app.m_simulationReferenceFps == Approx( 2000.002 ) );
+        CadenceClock::time += 1000000;
+        app.m_cameraReport = { 2021.0, CadenceClock::time - 1 };
+        app.updateSimulationCadence();
+        CHECK( app.m_simulation.summary().cadence.epoch > before.cadence.epoch );
+        CHECK( app.m_simulationReferenceFps == 2021.0 );
+    }
+
+    SECTION( "The first materially different report resets phase and seeds the new acquisition rate" )
+    {
+        app.m_cameraReport = { 1500.0, CadenceClock::time - 1 };
+        app.updateSimulationCadence();
+        const auto changed = app.m_simulation.summary();
+        CHECK( changed.cadence.epoch > before.cadence.epoch );
+        CHECK_FALSE( changed.valid );
+        CHECK( changed.cadence.state == MagAOX::dmSyncoSimulation::CadenceState::nominal );
+        CHECK( changed.cadence.updates == 0 );
+        CHECK( changed.phaseSamples == 0 );
+        CHECK( changed.periodNs == 666667 );
+        CHECK( app.m_simulationReferenceFps == 1500 );
+        const auto accepted = app.m_simulationCameraTime;
+        app.m_cameraReport  = { 3000.0, accepted }; // A replay cannot establish another camera-rate epoch.
+        app.updateSimulationCadence();
+        CHECK( app.m_simulation.summary().cadence.epoch == changed.cadence.epoch );
+        CHECK( app.m_simulationReferenceFps == 1500 );
+        REQUIRE( app.configureSimulation() );
+        CHECK( app.m_simulation.summary().periodNs == 666667 );
+    }
+
+    SECTION( "A fractional configured minimum accepts a camera seed rounded to the nearest nanosecond" )
+    {
+        app.m_minRate      = 500.3;
+        app.m_cameraReport = { 500.3, CadenceClock::time - 1 };
+        app.updateSimulationCadence();
+        CHECK( app.m_simulation.summary().cadence.epoch > before.cadence.epoch );
+        CHECK( app.m_simulation.summary().periodNs == 1998801 );
+        CHECK( app.m_simulationReferenceFps == Approx( 500.3 ) );
+        CHECK( app.m_simulationCameraTime == app.m_cameraReport.m_received );
+    }
+
+    SECTION( "Stale, future, invalid and out-of-range reports cannot change a cadence epoch" )
+    {
+        CadenceClock::time = 10000000000;
+
+        for( const auto report : { std::pair<double, int64_t>{ 1500, 0 },
+                                   { 1500, 4000000000 },
+                                   { 1500, 11000000000 },
+                                   { 0, 9990000000 },
+                                   { 450, 9990000000 },
+                                   { 4500, 9990000000 },
+                                   { std::numeric_limits<double>::quiet_NaN(), 9990000000 },
+                                   { std::numeric_limits<double>::infinity(), 9990000000 } } )
+        {
+            app.m_cameraReport = { report.first, report.second };
+            app.updateSimulationCadence();
+            CHECK( app.m_simulation.summary().cadence.epoch == before.cadence.epoch );
+            CHECK( app.m_simulationCameraTime == 0 );
+            CHECK( app.m_simulationReferenceFps == 0 );
+        }
+
+        app.m_simulationEnabled = false;
+        app.m_cameraReport      = { 1500, CadenceClock::time - 1 };
+        app.updateSimulationCadence();
+        CHECK( app.m_simulation.summary().cadence.epoch == before.cadence.epoch );
+        CHECK( app.m_simulationCameraTime == 0 );
+    }
+
+    CHECK_FALSE( app.m_enabled );
+    CHECK_FALSE( app.m_resources );
+    CHECK( app.m_delivered == 0 );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::configureSimulation;
+    dmSyncopation::updateSimulationCadence;
 #endif
     // clang-format on
 }
@@ -3652,11 +4061,14 @@ TEST_CASE( "syncopation simulation qualifies observations and exposes conditiona
     app.attachCombinedOnly();
     REQUIRE( app.setupSimulationINDI() == 0 );
     CHECK( app.m_indiP_simulation.getPerm() == pcf::IndiProperty::ReadOnly );
+    CHECK( app.m_indiP_simulationCadence.getPerm() == pcf::IndiProperty::ReadOnly );
     CHECK( app.m_indiP_simulationSteps.getPerm() == pcf::IndiProperty::ReadOnly );
     CHECK( app.m_indiP_simulationStatus.getPerm() == pcf::IndiProperty::ReadOnly );
     CHECK( app.m_indiP_simulationTrace.getPerm() == pcf::IndiProperty::ReadOnly );
     CHECK( app.m_indiP_simulationEstimator.getPerm() == pcf::IndiProperty::ReadOnly );
     CHECK( app.m_indiP_simulation.getElements().size() == 23 );
+    CHECK( app.m_indiP_simulationCadence.getName() == "simulation_cadence" );
+    CHECK( app.m_indiP_simulationCadence.getElements().size() == 12 );
     CHECK( app.m_indiP_simulationSteps.getElements().size() == 4 * synco::maxSteps );
     CHECK( app.m_indiP_simulationTrace.getName() == "simulation_trace" );
     CHECK( app.m_indiP_simulationTrace.getElements().size() == 7 );
@@ -3666,6 +4078,22 @@ TEST_CASE( "syncopation simulation qualifies observations and exposes conditiona
     for( const auto *name : { "enabled", "detected", "drained", "dropped", "queued", "capacity", "logFailed" } )
     {
         CHECK( app.m_indiP_simulationTrace.find( name ) );
+    }
+
+    for( const auto *name : { "state",
+                              "epoch",
+                              "periodNs",
+                              "spanSec",
+                              "cycles",
+                              "anchors",
+                              "updates",
+                              "rejected",
+                              "windowSec",
+                              "updateSec",
+                              "observationAgeSec",
+                              "refreshAgeSec" } )
+    {
+        CHECK( app.m_indiP_simulationCadence.find( name ) );
     }
 
     for( const auto *name : { "enabled",
@@ -3701,7 +4129,7 @@ TEST_CASE( "syncopation simulation qualifies observations and exposes conditiona
         combinedObservation(
             app, streams.images[1], observed + 20000, epoch + int64_t( sample ) * 500000, sample + 10 );
 
-        if( sample < 4 )
+        if( sample < 3 )
         {
             CHECK_FALSE( app.m_simulation.summary().valid );
         }
@@ -4256,6 +4684,7 @@ TEST_CASE( "syncopation default observers do not collect overlap evidence",
     CHECK( estimator.history == 0 );
     CHECK_FALSE( app.m_simulation.popEstimator( sample ) );
     CHECK( app.m_indiP_simulationEstimator.getElements().empty() );
+    CHECK( app.m_indiP_simulationCadence.getElements().empty() );
 
     // clang-format off
 #ifdef DMSYNCOPATION_TEST_DOXYGEN_REF

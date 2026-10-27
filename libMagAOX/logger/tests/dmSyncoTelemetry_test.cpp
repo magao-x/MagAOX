@@ -1,5 +1,5 @@
 /** \file dmSyncoTelemetry_test.cpp
- * \brief Syncopation timing, conditional outcomes and overlap/estimator telemetry compatibility and validation.
+ * \brief Syncopation timing, fractional cadence and overlap/estimator telemetry compatibility and validation.
  * \ingroup logger_files
  */
 #include "../../../tests/testXWC.hpp"
@@ -380,6 +380,8 @@ void checkOverlapTrace( const DmSyncoOverlapTrace           *actual /**< [in] se
         CHECK( event->last_main_counter() == source.lastMainCounter );
         CHECK( event->plan_estimator_id() == source.planEstimatorId );
         CHECK( event->last_estimator_id() == source.lastEstimatorId );
+        CHECK( event->period_q32() == source.periodQ32 );
+        CHECK( event->plan_fraction_q32() == source.planFractionQ32 );
         CHECK( event->step() == source.step );
         CHECK( int( event->origin() ) == int( source.origin ) );
         CHECK( int( event->window() ) == int( source.window ) );
@@ -457,7 +459,88 @@ void checkEstimatorTrace( const DmSyncoEstimatorTrace         *actual /**< [in] 
         CHECK( sample->applied_correction_ns() == source.appliedCorrectionNs );
         CHECK( sample->committed_grid_ns() == source.committedGridNs );
         CHECK( sample->committed() == source.committed );
+        CHECK( sample->period_before_q32() == source.periodBeforeQ32 );
+        CHECK( sample->source_fraction_q32() == source.sourceFractionQ32 );
+        CHECK( sample->base_fraction_q32() == source.baseFractionQ32 );
+        CHECK( sample->committed_fraction_q32() == source.committedFractionQ32 );
     }
+}
+
+/// Construct a measured slow cadence whose exact fractional period follows its counter/time endpoints.
+dmSyncoSimulation::Cadence
+sampleCadence( int64_t observed /**< [in] coherent monotonic primary observation */,
+               bool    full = true /**< [in] a full ten-second span rather than a growing one-second span */ )
+{
+    dmSyncoSimulation::Cadence cadence;
+    cadence.periodQ32     = uint64_t( 500000 ) * dmSyncoSimulation::periodScale + dmSyncoSimulation::periodScale / 4;
+    cadence.state         = full ? dmSyncoSimulation::CadenceState::full : dmSyncoSimulation::CadenceState::growing;
+    cadence.epoch         = 7;
+    cadence.anchors       = full ? 11 : 2;
+    cadence.cycles        = full ? 20000 : 2000;
+    cadence.updates       = full ? 10 : 1;
+    cadence.rejected      = 2;
+    cadence.spanNs        = full ? 10000005000 : 1000000500;
+    cadence.windowNs      = 10000000000;
+    cadence.updateNs      = 1000000000;
+    cadence.observationNs = observed;
+    cadence.updatedNs     = observed - 500000;
+    return cadence;
+}
+
+/// Construct exact target carry across full-width timestamps, queued old epochs and a changed cadence projection.
+dmSyncoSimulation::TraceBatch sampleFractionalTrace()
+{
+    auto          trace = sampleEstimatorTrace();
+    const int64_t scale = dmSyncoSimulation::periodScale;
+
+    for( size_t index = 0; index < trace.estimatorCount; ++index )
+    {
+        auto &sample   = trace.estimator[index];
+        sample.cadence = sampleCadence( sample.observedNs, index != 0 );
+        sample.cadence.epoch -= index + 1;
+        sample.periodBeforeQ32   = uint64_t( sample.periodBeforeNs ) * scale + scale / 4;
+        sample.sourceFractionQ32 = index ? -scale / 4 : scale / 4;
+
+        if( index )
+        {
+            sample.cadence.periodQ32 += scale / 2;
+            sample.cadence.spanNs += sample.cadence.cycles / 2;
+            sample.periodNs = 500001;
+            sample.sourcePlanCounter -= 2;
+        }
+
+        const __int128 exact = __int128( sample.sourceGridNs ) * scale + sample.sourceFractionQ32 +
+                               ( __int128( sample.nextCounter ) - sample.sourcePlanCounter ) * sample.cadence.periodQ32;
+        sample.baseGridNs                   = int64_t( ( exact + scale / 2 ) / scale );
+        sample.baseFractionQ32              = int64_t( exact - __int128( sample.baseGridNs ) * scale );
+        sample.candidateNs                  = sample.baseGridNs + ( index ? 4500 : -20000 );
+        sample.committedGridNs              = sample.baseGridNs + sample.appliedCorrectionNs;
+        sample.committedFractionQ32         = sample.baseFractionQ32;
+        trace.events[index].periodQ32       = sample.cadence.periodQ32;
+        trace.events[index].periodNs        = sample.periodNs;
+        trace.events[index].planFractionQ32 = sample.sourceFractionQ32;
+    }
+
+    return trace;
+}
+
+/// Check every cadence field after binary or JSON serialization without a floating-point period conversion.
+void checkCadence( const DmSyncoCadence             *actual /**< [in] serialized slow measurement */,
+                   const dmSyncoSimulation::Cadence &expected /**< [in] exact source cadence */ )
+{
+    REQUIRE( actual != nullptr );
+    CHECK( actual->period_q32() == expected.periodQ32 );
+    CHECK( int( actual->state() ) == int( expected.state ) );
+    CHECK( actual->epoch() == expected.epoch );
+    CHECK( actual->anchors() == expected.anchors );
+    CHECK( actual->cycles() == expected.cycles );
+    CHECK( actual->updates() == expected.updates );
+    CHECK( actual->rejected() == expected.rejected );
+    CHECK( actual->span_ns() == expected.spanNs );
+    CHECK( actual->window_ns() == expected.windowNs );
+    CHECK( actual->update_ns() == expected.updateNs );
+    CHECK( actual->observation_ns() == expected.observationNs );
+    CHECK( actual->updated_ns() == expected.updatedNs );
 }
 /// \endcond
 
@@ -1647,6 +1730,237 @@ TEST_CASE( "Synco telemetry rejects malformed estimator history", "[dmSyncoTelem
     auto       *samples = const_cast<uint8_t *>( decoded->simulation()->estimator_trace()->samples()->Data() );
     std::memset( samples, 0xff, sizeof( flatbuffers::uoffset_t ) );
     REQUIRE_FALSE( verifyLogEntry( telem_dmsynco::eventCode, corrupt.get() ) );
+}
+
+/// Preserve long-baseline qualification and fractional frozen-grid carry in binary, text and JSON readers.
+/** \ingroup dmSyncoTelemetry_unit_test */
+TEST_CASE( "Synco telemetry preserves fractional cadence across queued epochs", "[dmSyncoTelemetry]" )
+{
+    // clang-format off
+#ifdef DMSYNCO_TELEMETRY_TEST_DOXYGEN_REF
+    MagAOX::logger::telem_dmsynco::messageT;
+    MagAOX::logger::telem_dmsynco::verify;
+    MagAOX::logger::telem_dmsynco::msgString;
+#endif
+    // clang-format on
+    auto summary      = sampleSimulation();
+    summary.cadence   = sampleCadence( summary.lastMainNs );
+    const auto trace  = sampleFractionalTrace();
+    auto       input  = message( samplePrimary(), {}, summary, trace );
+    auto       buffer = envelope( input );
+    REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+    const auto *decoded = GetTelem_dmsynco_fb( input.builder.GetBufferPointer() )->simulation();
+    checkCadence( decoded->cadence(), summary.cadence );
+    checkEstimatorTrace( decoded->estimator_trace(), trace );
+    checkOverlapTrace( decoded->overlap_trace(), trace );
+    REQUIRE( trace.estimator[0].baseFractionQ32 == -int64_t( dmSyncoSimulation::periodScale / 2 ) );
+    REQUIRE( trace.estimator[1].baseGridNs != trace.estimator[1].sourceGridNs + 3 * trace.estimator[1].periodNs );
+
+    const auto text = telem_dmsynco::msgString( input.builder.GetBufferPointer(), input.builder.GetSize() );
+    CHECK( text.find( "simulation_cadence={state:full,clock:monotonic,period_q32:" +
+                      std::to_string( summary.cadence.periodQ32 ) ) != std::string::npos );
+    CHECK( text.find( "period_exact_ns:500000.25" ) != std::string::npos );
+    CHECK( text.find( "estimator_cadence={state:growing" ) != std::string::npos );
+    CHECK( text.find( "sourceFraction_q32:1073741824,baseFraction_q32:-2147483648" ) != std::string::npos );
+    CHECK( text.find( "period_q32:" + std::to_string( trace.events[1].periodQ32 ) ) != std::string::npos );
+
+    const auto          json = telem_dmsynco::msgJSON( input.builder.GetBufferPointer(),
+                                              input.builder.GetSize(),
+                                              reinterpret_cast<const uint8_t *>( telem_dmsynco_bfbs ),
+                                              telem_dmsynco_bfbs_len );
+    flatbuffers::Parser parser;
+    REQUIRE( parser.Deserialize( reinterpret_cast<const uint8_t *>( telem_dmsynco_bfbs ), telem_dmsynco_bfbs_len ) );
+    REQUIRE( parser.Parse( json.c_str() ) );
+    decoded = GetTelem_dmsynco_fb( parser.builder_.GetBufferPointer() )->simulation();
+    checkCadence( decoded->cadence(), summary.cadence );
+    checkEstimatorTrace( decoded->estimator_trace(), trace );
+    checkOverlapTrace( decoded->overlap_trace(), trace );
+
+    for( size_t index = 0; index < trace.estimatorCount; ++index )
+    {
+        checkCadence( decoded->estimator_trace()->samples()->Get( index )->cadence(), trace.estimator[index].cadence );
+        CHECK( decoded->estimator_trace()->samples()->Get( index )->cadence()->epoch() < decoded->cadence()->epoch() );
+    }
+}
+
+/// Keep legacy absence, nominal warmup and unavailable future commitments independent of cadence diagnostics.
+/** \ingroup dmSyncoTelemetry_unit_test */
+TEST_CASE( "Synco telemetry keeps cadence qualification optional during warmup", "[dmSyncoTelemetry]" )
+{
+    // clang-format off
+#ifdef DMSYNCO_TELEMETRY_TEST_DOXYGEN_REF
+    MagAOX::logger::telem_dmsynco::messageT;
+    MagAOX::logger::telem_dmsynco::verify;
+#endif
+    // clang-format on
+    auto legacy = message( samplePrimary(), {}, sampleSimulation(), sampleEstimatorTrace() );
+    auto buffer = envelope( legacy );
+    REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+    const auto *old = GetTelem_dmsynco_fb( legacy.builder.GetBufferPointer() )->simulation();
+    CHECK( old->cadence() == nullptr );
+    CHECK( old->estimator_trace()->samples()->Get( 0 )->cadence() == nullptr );
+    CHECK( old->overlap_trace()->events()->Get( 0 )->period_q32() == 0 );
+
+    auto summary              = sampleSimulation();
+    summary.cadence           = sampleCadence( summary.lastMainNs );
+    summary.cadence.state     = dmSyncoSimulation::CadenceState::nominal;
+    summary.cadence.anchors   = 1;
+    summary.cadence.cycles    = 0;
+    summary.cadence.updates   = 0;
+    summary.cadence.spanNs    = 0;
+    summary.cadence.updatedNs = 0;
+    auto input                = message( samplePrimary(), {}, summary );
+    buffer                    = envelope( input );
+    REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+    checkCadence( GetTelem_dmsynco_fb( input.builder.GetBufferPointer() )->simulation()->cadence(), summary.cadence );
+
+    auto  trace                 = sampleFractionalTrace();
+    auto &sample                = trace.estimator[0];
+    sample.nextCounter          = 0;
+    sample.sourcePlanCounter    = 0;
+    sample.sourceEstimatorId    = 0;
+    sample.sourceGridNs         = 0;
+    sample.baseGridNs           = 0;
+    sample.candidateNs          = 0;
+    sample.rawCorrectionNs      = 0;
+    sample.appliedCorrectionNs  = 0;
+    sample.committedGridNs      = 0;
+    sample.committed            = false;
+    sample.sourceFractionQ32    = 0;
+    sample.baseFractionQ32      = 0;
+    sample.committedFractionQ32 = 0;
+    input                       = message( samplePrimary(), {}, summary, trace );
+    buffer                      = envelope( input );
+    REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+}
+
+/// Reject invalid cadence qualification, nanosecond projections and fractional target arithmetic.
+/** \ingroup dmSyncoTelemetry_unit_test */
+TEST_CASE( "Synco telemetry rejects malformed fractional cadence", "[dmSyncoTelemetry]" )
+{
+    // clang-format off
+#ifdef DMSYNCO_TELEMETRY_TEST_DOXYGEN_REF
+    MagAOX::logger::telem_dmsynco::messageT;
+    MagAOX::logger::telem_dmsynco::verify;
+#endif
+    // clang-format on
+    for( int invalid = 0; invalid < 33; ++invalid )
+    {
+        INFO( "malformed fractional cadence case " << invalid );
+        auto summary    = sampleSimulation();
+        summary.cadence = sampleCadence( summary.lastMainNs );
+        auto  trace     = sampleFractionalTrace();
+        auto &cadence   = summary.cadence;
+        auto &sample    = trace.estimator[0];
+
+        switch( invalid )
+        {
+        case 0:
+            cadence.periodQ32 = std::numeric_limits<uint64_t>::max();
+            break;
+        case 1:
+            cadence.state = dmSyncoSimulation::CadenceState( 3 );
+            break;
+        case 2:
+            cadence.epoch = 0;
+            break;
+        case 3:
+            cadence.anchors = dmSyncoSimulation::cadenceAnchorCapacity + 1;
+            break;
+        case 4:
+            cadence.anchors = 1;
+            break;
+        case 5:
+            cadence.cycles = 0;
+            break;
+        case 6:
+            cadence.updates = 0;
+            break;
+        case 7:
+            cadence.spanNs = cadence.windowNs - 1;
+            break;
+        case 8:
+            cadence.state = dmSyncoSimulation::CadenceState::growing;
+            break;
+        case 9:
+            cadence.windowNs = 0;
+            break;
+        case 10:
+            cadence.updateNs = cadence.windowNs + 1;
+            break;
+        case 11:
+            cadence.updateNs = 0;
+            break;
+        case 12:
+            cadence.updatedNs = cadence.observationNs + 1;
+            break;
+        case 13:
+            cadence.observationNs = summary.nowNs + 1;
+            break;
+        case 14:
+            cadence.updatedNs = 0;
+            break;
+        case 15:
+            cadence.state = dmSyncoSimulation::CadenceState::nominal;
+            break;
+        case 16:
+            ++summary.periodNs;
+            break;
+        case 17:
+            ++sample.periodBeforeNs;
+            break;
+        case 18:
+            sample.periodBeforeQ32 = 0;
+            break;
+        case 19:
+            ++sample.periodNs;
+            break;
+        case 20:
+            ++sample.cadence.observationNs;
+            break;
+        case 21:
+            sample.cadence.periodQ32 = 0;
+            break;
+        case 22:
+            sample.sourceFractionQ32 = int64_t( dmSyncoSimulation::periodScale / 2 );
+            break;
+        case 23:
+            sample.baseFractionQ32 = -int64_t( dmSyncoSimulation::periodScale / 2 ) - 1;
+            break;
+        case 24:
+            ++sample.baseFractionQ32;
+            break;
+        case 25:
+            ++sample.committedFractionQ32;
+            break;
+        case 26:
+            sample.committed       = false;
+            sample.committedGridNs = 0;
+            break;
+        case 27:
+            trace.events[0].planFractionQ32 = int64_t( dmSyncoSimulation::periodScale / 2 );
+            break;
+        case 28:
+            trace.events[0].periodQ32 = 0;
+            break;
+        case 29:
+            ++trace.events[0].periodNs;
+            break;
+        case 30:
+            ++sample.baseGridNs;
+            break;
+        case 31:
+            ++sample.sourceFractionQ32;
+            break;
+        case 32:
+            ++cadence.spanNs;
+            break;
+        }
+
+        auto input  = message( samplePrimary(), {}, summary, trace );
+        auto buffer = envelope( input );
+        REQUIRE_FALSE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+    }
 }
 
 } // namespace dmSyncoTelemetryTest
