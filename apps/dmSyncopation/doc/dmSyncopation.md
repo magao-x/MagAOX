@@ -357,6 +357,7 @@ Application properties belong to the configured INDI device: `dmtweeter_synco` i
 | `simulation_steps` | Number, read-only | Per-step conditional considered/would-run/skip/overlap counts. These are modeled outcomes, not DM deliveries. |
 | `simulation_status` | Text, read-only | Current simulation state and explicit assumptions/limitations. |
 | `simulation_trace` | Number, read-only | Bounded overlap-event FIFO coverage and losses, detailed below. |
+| `simulation_estimator` | Number, read-only | Triggered estimator pre/post history, export coverage and losses. |
 | `health` | Text, read-only | `reason`, `lastFault`, `periodSource`, `primary`, `combined`, `timingStream`, `mapping`, `mode`. Current phase/reason, latched fault, selected period reference and resolved stream identities. Mode also identifies simulation when selected. |
 
 `settings` uses its named elements directly; there are no numeric `current`/`target` pairs. Updates while enabled, unknown elements, nonfinite values and invalid counts/ranges are rejected without changing the active configuration. Changing `steps` never changes source-image count. After an accepted disabled update, enable again to acquire a new schedule.
@@ -404,6 +405,7 @@ records. Each `sim_overlap={...}` entry identifies:
 | Fields | Meaning |
 | --- | --- |
 | `id`, `session` | Process-lifetime evidence sequence and model session owning the event. Pending events survive model resets and can belong to an earlier session than the current summary. |
+| `planEstimatorId`, `lastEstimatorId` | Estimator update that created the modeled copy's frozen plan, and latest completed estimator update before the overlap evidence. Zero means unavailable in an older record. |
 | `origin`, `window` | Observer (`primary` or `combined`) and containing modeled interval (`copy` or active `readerHold`). Boundaries include the start and exclude the end. Passive step 0 has no reader hold. |
 | `mainCounter`, `combinedCounter`, `planCounter`, `step` | Actual main supplying evidence, observed combined counter, and cycle/step of the last modeled copy. On the primary path, the combined counter is the most recently observed one, possibly zero. |
 | `mainGrid_ns`, `planGrid_ns`, `period_ns` | Committed grid or extrapolation from the last frozen cycle for the evidence main, frozen main target for the modeled copy's cycle, and that cycle's period. Zero main-grid means unavailable. |
@@ -433,6 +435,56 @@ durability or detect filtering by the general logger. A busy model lock
 defers draining until a later record. `trace_quality` is absent from an older
 record or from a record where no queue snapshot could be taken. Inspect
 losses and pending events before interpreting a capture as complete.
+
+An overlap also selects estimator history for the same `[dmsynco]` telemetry:
+up to 256 preceding completed primary updates, followed by 64 updates after
+the latest overlap. At 2 kHz these cover up to 128 ms before and 32 ms after
+an isolated trigger. Primary-origin evidence is detected before its own
+estimator update completes, so that update is the first post-trigger sample.
+Nearby triggers extend the post window, with each selected sample exported
+once by process-lifetime ID. Model resets clear the rolling history/post
+window but preserve queued samples and their original sessions.
+
+Each `sim_estimator={...}` record contains:
+
+| Fields | Meaning |
+| --- | --- |
+| `id`, `session`, `sequence`, `counter` | Process sample ID, owning model session, accepted-primary sequence and genuine main counter. |
+| `observed_ns`, `publicationInterval_ns`, `sequential`, `intervalAccepted` | Monotonic observation, raw producer-clock elapsed interval, consecutive-counter qualification and whether the interval entered the period ring. Zero interval means unavailable; an excluded raw interval can be signed. |
+| `periodSamples`, `phaseSamples`, `periodBefore_ns`, `period_ns` | Retained sample counts and selected period before/after this update. |
+| `predicted_ns` | Current main's frozen prediction, made before observing that main; zero while unavailable. |
+| `nextCounter`, `sourcePlanCounter`, `sourceEstimatorId`, `sourceGrid_ns` | Attempted future commitment and the frozen plan from which its base was extrapolated. No attempt is represented by zero future fields. |
+| `baseGrid_ns`, `candidate_ns`, `phaseGain`, `phaseSlew_ns` | Uncorrected future target, median phase candidate, gain and correction limit used in the existing calculation. |
+| `rawCorrection_ns`, `appliedCorrection_ns`, `committedGrid_ns`, `committed` | Requested correction truncated toward zero to integer nanoseconds, applied bounded correction and successful new future commitment. A zero correction is valid. |
+
+Join an overlap's `planEstimatorId` to the estimator sample's `id`, within
+the same app process. That sample's committed future counter/grid identifies
+the frozen copy plan. `lastEstimatorId` identifies the last completed update
+at evidence time; it can differ from the update that created the plan.
+Independent drain limits mean related records can appear in different
+telemetry emissions. Preserve all records and their IDs across the capture.
+These diagnostics record values from the original calculations; they do not
+recalculate medians or change targets. All absolute grid/observation times
+are monotonic. The producer interval is an elapsed duration, labeled
+`interval_clock:producer_elapsed`, rather than a converted absolute timestamp.
+
+Read-only `simulation_estimator` and telemetry `estimator_quality` expose
+`enabled`, `observed`, `triggers`, `selected`, `drained`, `dropped`, `queued`,
+`capacity`, `logFailed`, `history`, `historyCapacity`, and `postRemaining`.
+`observed` counts every completed accepted-primary update; `selected` counts
+unique samples chosen by triggered windows, including export losses.
+`selected = drained + dropped + queued` holds for the app process. The fixed
+export FIFO holds 4,096 samples and ordinary telemetry drains at most 512
+per record. A full FIFO drops new diagnostic samples, leaving model
+decisions unchanged. `logFailed` has the same submission-only meaning as
+the overlap trace's counter. An omitted optional quality snapshot is not a
+zero-event report.
+
+The bounded history can begin after the disturbance that originally shifted
+the phase. Repeated interval exclusions can also leave older eligible period
+samples outside this accepted-primary history. Retain the exact computed
+period/candidate/correction fields when diagnosing such cases; do not assume
+the selected records always reconstruct every underlying estimator input.
 
 The `timing` summary includes:
 
@@ -919,17 +971,21 @@ simulation table. The instrument's `teldump` alias is
 `logdump --dir=/opt/MagAOX/telem --ext=.bintel`; no separate `teldump` build is
 needed.
 
-1. Disable scheduling, then stop the existing `dmtweeter-synco` instance. Add
-   the simulation settings above to its active configuration and retain the
-   desired observer CPU placement. For a separately named test instance,
-   install its required `/opt/MagAOX/config/<instance>.conf` before launch;
-   `-c` alone does not replace that required instance file.
-2. Restart the instance with `simulation.enabled=true`. Keep any auxiliary
+1. For a repeat capture with `simulation.enabled=true` already configured,
+   keep the configuration and CPU placement unchanged. For the first
+   simulation setup, ensure synco's `enable.toggle=Off`, stop that instance,
+   then add the simulation settings above to its active configuration.
+   A separately named test instance needs its own
+   `/opt/MagAOX/config/<instance>.conf` installed before launch; `-c` alone
+   does not replace that required instance file.
+2. After installing the rebuilt app, restart the existing instance with
+   `xctrl restart dmtweeter-synco`. Keep the camera and main AO loop running
+   for this full-loop comparison. Keep any auxiliary
    providers stopped. Verify `enable.toggle=Off`, simulation mode in
    `health.mode`, and the existing primary/combined stream names. An On
    request is rejected in this mode; no enable operation is needed to collect.
 3. Allow the estimator to warm up. Inspect `simulation`, `simulation_steps`,
-   `simulation_status`, `simulation_trace`, `primary_timing_quality`, and
+   `simulation_status`, `simulation_trace`, `simulation_estimator`, `primary_timing_quality`, and
    `combiner_timing_quality`. A grid and a coherent output association are
    separate requirements. Before a long policy capture, confirm that
    `simulation.associations` increases and the combiner quality report has a
@@ -956,11 +1012,17 @@ needed.
    output, then stop it with Ctrl-C after the requested interval. Save the
    initial INDI snapshot as well as the final snapshot so cumulative outcome
    differences can be interpreted.
-5. Confirm new `[dmsynco]` records contain `trace_quality`, even if no overlap
-   events have occurred. Review frozen phase residual tails,
+5. Confirm new `[dmsynco]` records contain `trace_quality` and
+   `estimator_quality`, even if no overlap events have occurred. Review frozen phase residual tails,
    collection/association quality, nominal feasibility, per-step skip reasons
    and every `sim_overlap` entry. Group repeated main evidence using the key
    above, distinguish copy from reader hold, and inspect callback/lock lag.
+   Use `sim_estimator` history to inspect the preceding period/phase inputs,
+   frozen-plan provenance and correction/recovery. Check losses and whether
+   selected sample IDs cover each interval under review. For complete
+   post-trigger history, the final captured `estimator_quality` should have
+   `queued=0` and `postRemaining=0`; if either is nonzero, extend the telemetry
+   capture until the history drains or retain the incomplete boundary explicitly.
    Retain FIFO losses and the initial snapshot interval. Do not infer physical
    delivered cadence or an acceptable early reserve from would-run totals. Restart
    with `simulation.enabled=false` to return to normal scheduling mode; keep
