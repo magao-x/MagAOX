@@ -520,6 +520,8 @@ TEST_CASE( "synco simulation validates bounded arithmetic", "[dmSyncopation][sim
     feed( simulation, 3, end - 200000 );
     REQUIRE_FALSE( simulation.summary().valid );
     REQUIRE( simulation.summary().invalid > 0 );
+    CHECK( simulation.estimatorStatus().observed == 3 );
+    CHECK( simulation.estimatorStatus().history == 3 );
 }
 
 /** \brief Trace events preserve frozen copy/reader boundaries, identity and unconverted caller-clock context. */
@@ -552,6 +554,8 @@ TEST_CASE( "synco simulation overlap trace windows", "[dmSyncopation][simulation
         CHECK( event.combinedCounter == 40 );
         CHECK( event.planCounter == 41 );
         CHECK( event.lastMainCounter == 40 );
+        CHECK( event.planEstimatorId == 40 );
+        CHECK( event.lastEstimatorId == 40 );
         CHECK( event.step == 0 );
         CHECK( event.origin == OverlapOrigin::primary );
         CHECK( event.window == OverlapWindow::copy );
@@ -640,6 +644,10 @@ TEST_CASE( "synco simulation overlap trace identities", "[dmSyncopation][simulat
     CHECK( combined.combinedCounter == primary.combinedCounter );
     CHECK( combined.lastMainCounter == 40 );
     CHECK( primary.lastMainCounter == 40 );
+    CHECK( combined.planEstimatorId == 40 );
+    CHECK( primary.planEstimatorId == combined.planEstimatorId );
+    CHECK( combined.lastEstimatorId == 40 );
+    CHECK( primary.lastEstimatorId == combined.lastEstimatorId );
 
     simulation.advance( last + 745000 );
     const auto nextGrid = simulation.summary().nextGridNs;
@@ -656,6 +664,10 @@ TEST_CASE( "synco simulation overlap trace identities", "[dmSyncopation][simulat
     CHECK( third.step == second.step );
     CHECK( third.mainCounter == 43 );
     CHECK( third.id == second.id + 1 );
+    CHECK( second.planEstimatorId == 40 );
+    CHECK( second.lastEstimatorId == 41 );
+    CHECK( third.planEstimatorId == second.planEstimatorId );
+    CHECK( third.lastEstimatorId == 42 );
     CHECK_FALSE( simulation.popOverlap( third ) );
 }
 
@@ -742,6 +754,361 @@ TEST_CASE( "synco simulation overlap trace lifetime", "[dmSyncopation][simulatio
     CHECK( status.detected == status.drained + status.dropped + status.queued );
     CHECK( drained.traceStatus().dropped == 0 );
     CHECK( drained.traceStatus().queued == 0 );
+}
+
+/** \brief Overlap-triggered estimator collection retains warming history, the committing source and exactly 64 updates.
+ */
+TEST_CASE( "synco simulation estimator pre and post history", "[dmSyncopation][simulation]" )
+{
+    using namespace MagAOX::dmSyncoSimulation;
+    Simulation simulation;
+    REQUIRE( simulation.configure( {} ) );
+    const auto last   = warm( simulation );
+    auto       status = simulation.estimatorStatus();
+    CHECK( status.observed == 40 );
+    CHECK( status.history == 40 );
+    CHECK( status.triggers == 0 );
+    CHECK( status.queued == 0 );
+    EstimatorSample sample;
+    CHECK_FALSE( simulation.popEstimator( sample ) );
+
+    simulation.primary( 40, last + 20000, 500000 );
+    simulation.primary( 41, 0, 500000 );
+    CHECK( simulation.estimatorStatus().observed == 40 );
+    feed( simulation, 41, last + 465000, 465000 );
+    status = simulation.estimatorStatus();
+    CHECK( status.observed == 41 );
+    CHECK( status.triggers == 1 );
+    CHECK( status.selected == 41 );
+    CHECK( status.postRemaining == estimatorPostSamples - 1 );
+
+    for( uint64_t id = 1; id <= 41; ++id )
+    {
+        REQUIRE( simulation.popEstimator( sample ) );
+        CHECK( sample.id == id );
+        CHECK( sample.counter == id );
+        CHECK( sample.sequence == id );
+        CHECK( sample.session == simulation.summary().session );
+        CHECK( sample.phaseGain == 0.1 );
+        CHECK( sample.phaseSlewNs == 1000 );
+        CHECK( sample.periodBeforeNs == 500000 );
+        CHECK( sample.periodNs == 500000 );
+        CHECK( sample.sequential == ( id > 1 ) );
+        CHECK( sample.intervalAccepted == ( id > 1 ) );
+        CHECK( sample.phaseSamples == std::min<uint64_t>( id, 32 ) );
+        CHECK( sample.periodSamples == std::min<uint64_t>( id - 1, 32 ) );
+
+        if( id <= 32 )
+        {
+            CHECK_FALSE( sample.committed );
+            CHECK( sample.nextCounter == 0 );
+            CHECK( sample.sourcePlanCounter == 0 );
+            CHECK( sample.sourceEstimatorId == 0 );
+            CHECK( sample.sourceGridNs == 0 );
+            CHECK( sample.baseGridNs == 0 );
+            CHECK( sample.candidateNs == 0 );
+            CHECK( sample.rawCorrectionNs == 0 );
+            CHECK( sample.appliedCorrectionNs == 0 );
+            CHECK( sample.committedGridNs == 0 );
+        }
+        else
+        {
+            CHECK( sample.committed );
+            CHECK( sample.nextCounter == id + 1 );
+            CHECK( sample.sourcePlanCounter == id );
+            CHECK( sample.sourceEstimatorId == ( id == 33 ? id : id - 1 ) );
+            CHECK( sample.sourceGridNs == 1000000000 + int64_t( id ) * 500000 );
+            CHECK( sample.baseGridNs == sample.sourceGridNs + sample.periodNs );
+            CHECK( sample.candidateNs == sample.baseGridNs );
+            CHECK( sample.rawCorrectionNs == 0 );
+            CHECK( sample.appliedCorrectionNs == 0 );
+            CHECK( sample.committedGridNs == sample.baseGridNs );
+        }
+    }
+
+    for( uint64_t counter = 42; counter <= 105; ++counter )
+    {
+        feed( simulation, counter, last + int64_t( counter - 40 ) * 500000, counter == 42 ? 535000 : 500000 );
+    }
+
+    status = simulation.estimatorStatus();
+    CHECK( status.observed == 105 );
+    CHECK( status.selected == 104 );
+    CHECK( status.drained == 41 );
+    CHECK( status.queued == 63 );
+    CHECK( status.postRemaining == 0 );
+    CHECK( status.selected == status.drained + status.dropped + status.queued );
+
+    for( uint64_t id = 42; id <= 104; ++id )
+    {
+        REQUIRE( simulation.popEstimator( sample ) );
+        CHECK( sample.id == id );
+    }
+
+    CHECK_FALSE( simulation.popEstimator( sample ) );
+}
+
+/** \brief Both observer origins merge overlapping history windows without duplicating selected estimator updates. */
+TEST_CASE( "synco simulation estimator trigger merging", "[dmSyncopation][simulation]" )
+{
+    using namespace MagAOX::dmSyncoSimulation;
+    Simulation simulation;
+    REQUIRE( simulation.configure( {} ) );
+    const auto last = warm( simulation );
+    simulation.combined( 41, 41, last + 463000 );
+    CHECK( simulation.estimatorStatus().postRemaining == estimatorPostSamples );
+    simulation.primary( 41, last + 464000, 464000 );
+    auto status = simulation.estimatorStatus();
+    CHECK( status.triggers == 2 );
+    CHECK( status.selected == 41 );
+    CHECK( status.postRemaining == estimatorPostSamples - 1 );
+
+    OverlapEvent combined, primary;
+    REQUIRE( simulation.popOverlap( combined ) );
+    REQUIRE( simulation.popOverlap( primary ) );
+    CHECK( combined.planEstimatorId == 40 );
+    CHECK( primary.planEstimatorId == 40 );
+    CHECK( combined.lastEstimatorId == 40 );
+    CHECK( primary.lastEstimatorId == 40 );
+    EstimatorSample sample;
+
+    for( uint64_t id = 1; id <= 41; ++id )
+    {
+        REQUIRE( simulation.popEstimator( sample ) );
+        CHECK( sample.id == id );
+    }
+
+    CHECK_FALSE( simulation.popEstimator( sample ) );
+    simulation.advance( last + 740000 );
+    simulation.primary( 42, last + 745000, 500000 );
+    status = simulation.estimatorStatus();
+    CHECK( status.triggers == 3 );
+    CHECK( status.selected == 42 );
+    CHECK( status.postRemaining == estimatorPostSamples - 1 );
+    REQUIRE( simulation.popEstimator( sample ) );
+    CHECK( sample.id == 42 );
+    CHECK_FALSE( simulation.popEstimator( sample ) );
+}
+
+/** \brief Export saturation and reset preserve process IDs and losses while changing no frozen-grid outcomes. */
+TEST_CASE( "synco simulation estimator export lifetime", "[dmSyncopation][simulation]" )
+{
+    using namespace MagAOX::dmSyncoSimulation;
+    Simulation      retained, drained;
+    EstimatorSample sample;
+    const uint64_t  sessions = estimatorTraceCapacity / 41 + 2;
+
+    for( uint64_t session = 1; session <= sessions; ++session )
+    {
+        REQUIRE( retained.configure( {} ) );
+        REQUIRE( drained.configure( {} ) );
+        const auto last = warm( retained );
+        REQUIRE( warm( drained ) == last );
+        feed( retained, 41, last + 465000, 465000 );
+        feed( drained, 41, last + 465000, 465000 );
+
+        for( uint64_t offset = 1; offset <= 41; ++offset )
+        {
+            REQUIRE( drained.popEstimator( sample ) );
+            CHECK( sample.id == ( session - 1 ) * 41 + offset );
+            CHECK( sample.session == session );
+        }
+
+        CHECK_FALSE( drained.popEstimator( sample ) );
+        const auto &a = retained.summary();
+        const auto &b = drained.summary();
+        CHECK( a.periodNs == b.periodNs );
+        CHECK( a.gridNs == b.gridNs );
+        CHECK( a.nextGridNs == b.nextGridNs );
+        CHECK( a.nextActiveNs == b.nextActiveNs );
+        CHECK( a.phaseNs == b.phaseNs );
+
+        for( size_t step = 0; step < maxSteps; ++step )
+        {
+            CHECK( a.outcomes[step].considered == b.outcomes[step].considered );
+            CHECK( a.outcomes[step].wouldRun == b.outcomes[step].wouldRun );
+            CHECK( a.outcomes[step].skipped == b.outcomes[step].skipped );
+            CHECK( a.outcomes[step].overlap == b.outcomes[step].overlap );
+        }
+    }
+
+    auto status = retained.estimatorStatus();
+    CHECK( status.observed == sessions * 41 );
+    CHECK( status.selected == sessions * 41 );
+    CHECK( status.queued == estimatorTraceCapacity );
+    CHECK( status.dropped == sessions * 41 - estimatorTraceCapacity );
+    CHECK( status.drained == 0 );
+    CHECK( status.selected == status.drained + status.dropped + status.queued );
+    CHECK( drained.estimatorStatus().dropped == 0 );
+    CHECK( drained.estimatorStatus().queued == 0 );
+
+    for( uint64_t id = 1; id <= estimatorTraceCapacity; ++id )
+    {
+        REQUIRE( retained.popEstimator( sample ) );
+        CHECK( sample.id == id );
+    }
+
+    const auto last = retained.summary().lastMainNs;
+    feed( retained, 42, last + 535000, 535000 );
+    CHECK( retained.estimatorStatus().queued == 1 );
+    const auto dropped = retained.estimatorStatus().dropped;
+    retained.reset();
+    status = retained.estimatorStatus();
+    CHECK( status.observed == sessions * 41 + 1 );
+    CHECK( status.history == 0 );
+    CHECK( status.postRemaining == 0 );
+    CHECK( status.dropped == dropped );
+    CHECK( status.queued == 1 );
+    REQUIRE( retained.configure( {} ) );
+    REQUIRE( retained.popEstimator( sample ) );
+    CHECK( sample.id == sessions * 41 + 1 );
+    CHECK( sample.session == sessions );
+    CHECK_FALSE( retained.popEstimator( sample ) );
+    const auto restarted = warm( retained );
+    feed( retained, 41, restarted + 465000, 465000 );
+
+    for( uint64_t offset = 1; offset <= 41; ++offset )
+    {
+        REQUIRE( retained.popEstimator( sample ) );
+        CHECK( sample.id == sessions * 41 + 1 + offset );
+        CHECK( sample.session == sessions + 2 );
+    }
+
+    CHECK_FALSE( retained.popEstimator( sample ) );
+    status = retained.estimatorStatus();
+    CHECK( status.selected == status.drained + status.dropped + status.queued );
+}
+
+/** \brief The rolling pre-trigger history retains the latest 256 updates even at the largest estimator window. */
+TEST_CASE( "synco simulation estimator history capacity", "[dmSyncopation][simulation]" )
+{
+    using namespace MagAOX::dmSyncoSimulation;
+    Simulation         simulation;
+    Simulation::Config config;
+    config.window = estimatorHistoryCapacity;
+    REQUIRE( simulation.configure( config ) );
+
+    for( uint64_t counter = 1; counter <= 300; ++counter )
+    {
+        feed( simulation, counter, 1000000000 + int64_t( counter ) * 500000, counter == 1 ? 0 : 500000 );
+    }
+
+    CHECK( simulation.summary().valid );
+    CHECK( simulation.estimatorStatus().history == estimatorHistoryCapacity );
+    CHECK( simulation.estimatorStatus().selected == 0 );
+    feed( simulation, 301, 1150000000 + 465000, 465000 );
+    const auto status = simulation.estimatorStatus();
+    CHECK( status.observed == 301 );
+    CHECK( status.history == estimatorHistoryCapacity );
+    CHECK( status.selected == estimatorHistoryCapacity + 1 );
+    CHECK( status.triggers == 1 );
+    EstimatorSample sample;
+
+    for( uint64_t id = 45; id <= 301; ++id )
+    {
+        REQUIRE( simulation.popEstimator( sample ) );
+        CHECK( sample.id == id );
+        CHECK( sample.counter == id );
+    }
+
+    CHECK( sample.periodSamples == estimatorHistoryCapacity );
+    CHECK( sample.phaseSamples == estimatorHistoryCapacity );
+    CHECK_FALSE( simulation.popEstimator( sample ) );
+}
+
+/** \brief A historical phase kick can cause later overlaps during constant cadence, and the trace preserves its cause.
+ */
+TEST_CASE( "synco simulation estimator retained phase kick", "[dmSyncopation][simulation]" )
+{
+    using namespace MagAOX::dmSyncoSimulation;
+    Simulation simulation;
+    REQUIRE( simulation.configure( {} ) );
+    auto     time     = warm( simulation );
+    uint64_t overlaps = 0;
+
+    for( uint64_t counter = 41; counter <= 140; ++counter )
+    {
+        const int64_t interval = counter == 41 ? 460000 : 500000;
+        time += interval;
+        feed( simulation, counter, time, interval );
+        OverlapEvent event;
+
+        while( simulation.popOverlap( event ) )
+        {
+            CHECK( event.step == 0 );
+            CHECK( event.mainCounter == 59 + overlaps );
+            CHECK( event.observedNs - event.mainGridNs == -37000 + int64_t( overlaps ) * 1000 );
+            CHECK( interval == 500000 );
+            CHECK( event.planEstimatorId == event.mainCounter - 1 );
+            CHECK( event.lastEstimatorId == event.mainCounter - 1 );
+            ++overlaps;
+        }
+    }
+
+    CHECK( overlaps == 9 );
+    CHECK( simulation.summary().outcomes[1].overlap == 0 );
+    CHECK( simulation.summary().periodNs == 500000 );
+    CHECK( simulation.estimatorStatus().triggers == 9 );
+    CHECK( simulation.estimatorStatus().postRemaining == 0 );
+    CHECK( simulation.estimatorStatus().selected == 130 );
+    EstimatorSample sample;
+    bool            kick = false, clipped = false;
+
+    while( simulation.popEstimator( sample ) )
+    {
+        if( sample.counter == 41 )
+        {
+            kick = true;
+            CHECK( sample.publicationIntervalNs == 460000 );
+            CHECK( sample.observedNs - sample.predictedNs == -40000 );
+            CHECK( sample.periodBeforeNs == 500000 );
+            CHECK( sample.periodNs == 500000 );
+            CHECK( sample.rawCorrectionNs == 0 );
+            CHECK( sample.appliedCorrectionNs == 0 );
+        }
+
+        if( sample.counter == 59 )
+        {
+            clipped = true;
+            CHECK( sample.publicationIntervalNs == 500000 );
+            CHECK( sample.periodNs == 500000 );
+            CHECK( sample.rawCorrectionNs < -sample.phaseSlewNs );
+            CHECK( sample.appliedCorrectionNs == -1000 );
+            CHECK( sample.committedGridNs == sample.baseGridNs + sample.appliedCorrectionNs );
+        }
+    }
+
+    CHECK( kick );
+    CHECK( clipped );
+}
+
+/** \brief Accepted updates still complete diagnostics when the largest counter prevents a future commitment. */
+TEST_CASE( "synco simulation estimator accepted terminal update", "[dmSyncopation][simulation]" )
+{
+    using namespace MagAOX::dmSyncoSimulation;
+    Simulation simulation;
+    REQUIRE( simulation.configure( {} ) );
+    const auto last = warm( simulation );
+    simulation.advance( last + 240000 );
+    simulation.primary( std::numeric_limits<uint64_t>::max(), last + 245000, 245000 );
+    CHECK( simulation.estimatorStatus().observed == 41 );
+    CHECK_FALSE( simulation.summary().valid );
+    EstimatorSample sample;
+
+    for( uint64_t id = 1; id <= 41; ++id )
+    {
+        REQUIRE( simulation.popEstimator( sample ) );
+    }
+
+    CHECK( sample.id == 41 );
+    CHECK( sample.counter == std::numeric_limits<uint64_t>::max() );
+    CHECK_FALSE( sample.sequential );
+    CHECK_FALSE( sample.intervalAccepted );
+    CHECK( sample.nextCounter == 0 );
+    CHECK( sample.sourcePlanCounter == 0 );
+    CHECK( sample.baseGridNs == 0 );
+    CHECK_FALSE( sample.committed );
+    CHECK( sample.committedGridNs == 0 );
 }
 
 } // namespace dmSyncopationTest

@@ -3230,3 +3230,257 @@ Normal library/schema, application and `logdump` builds pass. The application
 and reader builds were completed sequentially after their parallel runs
 raced the existing shared generated-version-header removal target; no build
 system change was made.
+
+### `synco-sim-20261027T023336Z`: overlap trace localizes the passive window
+
+Read the workstation copy under
+`/home/jrmales/tmp/home/jrmales/tmp/synco-sim-20261027T023336Z`.
+Its saved checkout hash is `283938a4bea397a70bc86d76ff8f424a33ff1c0b`;
+the capture does not contain an independent binary startup/hash record.
+The new trace fields are present. All snapshot commands return status 0;
+all three collectors return the expected timeout status 124. The 120 synco
+rows span 2026-10-27 02:33:36.418231566–02:35:36.017262294 UTC,
+119.599 seconds (October 26, 19:33:36–19:35:36 Phoenix).
+
+Simulation remains session 3, valid and feasible, with two modeled steps and
+operational enable Off. Named primary association is working: combiner
+writer PID 3948918, trigger inode 4676, and both accepted primary progression
+and associations increase by 239,198. No observer or model session resets
+occur during the capture. There are no new primary/combiner/camera/pipeline
+rejections, gaps, invalid metadata/trace records, synthetic events or queue
+drops. Model outputGaps remains at its historical value 7.
+
+| First-to-last synco telemetry delta | Passive step 0 | Active step 1 |
+| --- | ---: | ---: |
+| Considered | 239,198 | 239,198 |
+| Conditional would run | 239,078 | 239,198 |
+| Conditional availability | 99.949832% | 100% |
+| Skipped | 120 | 0 |
+| Skip reason | early main, all 120 | none |
+| Overlap evidence | 69 | 0 |
+
+The before/after INDI snapshots give one fewer passive considered/would-run
+opportunity (239,197/239,077), with the same 120 skips and 69 overlaps;
+active deltas match the telemetry rows. This is a snapshot-boundary
+difference. Overlap evidence does not undo a previous conditional would-run
+decision, so passive availability is not a demonstrated safe-copy fraction.
+All new anomalies occur after the collectors start, unlike the previous
+capture's unrecorded initial cluster.
+
+**The overlap trace is complete for the retained interval:** 69 strictly
+contiguous events, IDs 6288–6356, all session 3 and all primary-origin
+passive-copy evidence. There are 69 unique
+`(session, planCounter, step, mainCounter)` tuples, with no double-observed
+main, combined-origin event or active reader-hold event. Detected/drained
+increase from 6,287 to 6,356; dropped, logFailed and queued remain zero.
+The four nonempty batches contain 40, 22, 2 and 5 events. The optional
+trace-quality snapshot is absent in one row at 02:34:27.676931038 UTC,
+consistent with the cycle try-lock miss path; the retained counters and
+contiguous event IDs show no trace loss. The initial 6,287 events and the
+historical active overlap count 164 predate this capture.
+
+All modeled passive copy windows are `[grid−38 us, grid−28 us)`. The actual
+primary observations fall 28.195–37.986 us before their corresponding
+predictions, with median 31.511 us early. This residual range is selected by
+the copy-window event definition, not the full distribution of primary
+phase. Reader-end is zero for these passive preparations.
+
+| Observer interval at an overlap | Minimum, us | Median, us | Maximum, us |
+| --- | ---: | ---: | ---: |
+| Semaphore receipt to model observation | 0.451 | 0.481 | 0.711 |
+| Cycle-lock wait | 0.030 | 0.160 | 0.181 |
+
+Internal callback bookkeeping/lock delay cannot account for the tens of
+microseconds of phase offset in these events. This does not measure absolute
+producer-publication-to-receipt latency: producer and monotonic clock
+timestamps remain separate. In 67 events the receipt itself is already
+inside the copy window. In two boundary cases it precedes copy start:
+ID 6291 by 0.577 us, and ID 6343 by 0.223 us. Their exact skip-versus-overlap
+classification is sensitive to submicrosecond dispatch at the boundary.
+ID 6291 is observed only 14 ns after copy start, despite its previous
+observed interval being 538.968 us.
+
+Events cluster at primary producer-clock publication times:
+
+| UTC cluster | Events | Notes |
+| --- | ---: | --- |
+| 02:33:54.148905136–02:33:54.593881000 | 62 | A 0.445-second burst; all 120 early-main skips are also reported in the two telemetry rows covering this burst. |
+| 02:34:38.604913–02:34:38.605412 | 2 | Consecutive mains; no new skip. |
+| 02:35:32.543455–02:35:32.545950 | 5 | No new skip. |
+
+These are not 69 independent short interarrival intervals. Previous observed
+intervals have median 499.644 us: 58/69 lie within 480–520 us, and 43/69
+within 5 us of 500 us. Three runs each contain eight consecutive overlapping
+mains across approximately 3.5 ms, while their producer publication
+interval means are 499.749, 500.193 and 499.412 us. Across 32 genuinely
+adjacent retained event pairs, publication intervals span 494.795–505.044 us;
+observation-interval minus publication-interval differences are
+−0.521…+0.822 us. This comparison uses elapsed durations within each clock,
+not an absolute cross-clock subtraction.
+
+The main arrival can therefore remain approximately 30 us earlier than its
+predicted grid across otherwise ordinary cadence. This localizes the next
+review to phase tracking and passive preparation bounds, rather than active
+reader hold or duplicated evidence. Grid tracking is a plausible contributor,
+not a proved estimator defect. The model uses a median of 32 publication
+intervals, median phase extrapolation from 32 observations, correction gain
+0.1 and at most 1 us correction per newly committed cycle. The pre-burst
+sample history and candidate phase are not retained, so the capture cannot
+identify what initiated the offset. Review/replay that history before
+changing the estimator or choosing a physical early-main reserve.
+
+The sampled 1 Hz model period ranges from 499.012 to 500.645 us; the periods
+frozen with the individual overlap events span 498.191–503.401 us. Sampled
+phase spans −13.048…+20.420 us, missing the event-level negative tail.
+Historical phase extrema −506.505/+114.145 us do not change and must not be
+presented as excursions newly seen here.
+
+Independent timing remains broadly similar in typical spread. The following
+are medians of reported, overlapping two-second-window standard deviations,
+not pooled whole-capture RMS:
+
+| Interval | Previous `003510Z`, us | New capture, us |
+| --- | ---: | ---: |
+| Camera acquisition | 0.281 | 0.292 |
+| Camera publication | 0.789 | 0.862 |
+| DM combined publication | 5.802 | 5.932 |
+| DM receipt | 5.859 | 5.918 |
+| DM SDK return | 5.869 | 5.929 |
+
+DM publication extrema widen from 468.555–529.520 us previously to
+457.854–540.060 us. Both new extrema first appear in the window logged at
+02:33:54.482091409 UTC, and the maximum window standard deviation 8.550 us
+is logged one second later. Those windows cover the large overlap cluster,
+but cannot identify its individual frames or establish a common cause.
+Camera publication spans 478.524–525.673 us.
+
+The 120 controller rows remain valid in session 5, adding 238,339 successful
+receipts/submissions with no new failures, partial commands, duplicates,
+gaps or drops. The 114 camera stage rows remain valid in session 8, adding
+238,587 events/publications with no new failures, gaps, invalid events,
+wide brackets or event/control drops. Eleven serial transactions and seven
+qualified complete camera excursion traces are recorded (two late, five
+early); each trace's five-frame context overlaps serial activity. Their
+historical trace-drop count remains unchanged. These sparse trace contexts
+and rolling populations do not establish the cause of the synco burst.
+
+RTC latency is explicitly On in both snapshots. Saved settings show the
+loop On at gain 1, camera bin2/2 kHz/EM gain 1/shutter SHUT/synchronization
+On, and target −45 C, matching the preceding baseline. Camera/loop after
+snapshots and live dmcomb mode/delay are not included. Operator confirmation
+establishes that camera/loop settings, dmcomb mode/delay, CPU/IRQ placement
+and workload were unchanged during this run and from the preceding run,
+apart from rebuilding/restarting synco and the reader. The mode-4/10-us
+baseline is therefore retained by operator attestation. No
+runtime code or instrument settings were changed for this analysis. The
+physical earliest-main reserve remains undecided, and this shadow capture
+does not execute auxiliary copies or triggers.
+
+### Estimator replay and triggered pre/post history
+
+The operator directs continuing the phase/grid investigation. Offline
+synthetic replay against the actual `syncoSimulation.hpp` reproduces the
+observed class of behavior without changing the estimator:
+
+1. Warm up with exactly 500 us publication/observation intervals.
+2. Supply one 460 us interval, moving subsequent arrival phase 40 us earlier.
+3. Continue with exactly 500 us intervals.
+
+With the default 32-sample history, gain 0.1 and 1 us/cycle slew, the existing
+model produces nine consecutive passive-copy overlaps at residuals
+−37 through −29 us. Every overlapping frame has a current 500 us interval.
+The median history initially retains the old phase, then bounded correction
+moves the predicted copy window across the actual main arrivals. By
+comparison, one 580/420 us late/early pair after steady timing produces no
+persistent offset or overlap. These are synthetic controlled inputs, not a
+reconstruction of the instrument burst. The phase-step case is now covered
+by a pure model regression test and its earlier 460 us sample is retained
+in the selected estimator history.
+
+A separate synthetic profile illustrates why the median interval is not
+necessarily the long-term cadence: repeating
+501.2/501.2/501.2/496.4 us has mean 500 us and median 501.2 us. The 1.2 us
+period bias exceeds the configured 1 us/cycle correction limit. Another
+profile, 32 intervals repeating 503/503/503/491 us followed by exactly
+500 us, produces ten consecutive overlaps 38–47 cycles after that burst
+ends. Median phase extrapolation and bounded correction can retain a
+historical disturbance beyond the currently observed intervals. These
+examples demonstrate mechanisms, not the instrument's actual cause or a
+validated replacement estimator. No gain, slew, window or timing bound was
+tuned for hardware.
+
+Implemented an independent triggered estimator export alongside the
+existing overlap trace. Every accepted unique primary update retains one
+fixed-size record in a 256-entry rolling history. An overlap selects that
+completed prehistory and 64 subsequent updates; primary-origin detection
+precedes the current update, so its current primary becomes the first
+post-trigger sample. Nearby triggers extend the post window without
+re-exporting sample IDs already selected, including IDs dropped by a full
+FIFO. At 2 kHz, an isolated event has up to 128 ms preceding and 32 ms
+subsequent coverage. The fixed export FIFO holds 4,096 records and ordinary
+telemetry drains at most 512 per emission after releasing the cycle mutex.
+The existing 256-overlap FIFO and 64-event drain limit remain independent.
+
+Each accepted-primary record contains actual values from the original
+calculation: counter/monotonic observation, raw producer elapsed interval
+and qualification, retained sample counts, period before/after the update,
+pre-observation prediction, future source plan and its creating estimator
+ID, uncorrected base grid, median phase candidate, gain, slew limit,
+requested integer correction, bounded correction and successful committed
+target. No median is recomputed for diagnostics. The requested correction
+is the existing long-double raw value truncated toward zero for recording;
+the scheduler continues using its original clamped calculation.
+
+Frozen plans preserve their creating estimator ID. Each overlap exports
+both that ID and the latest completed estimator ID before its evidence,
+avoiding confusion between a plan-producing update and the later state at
+observation. New optional `estimator_trace` FlatBuffers data is formatted
+as `estimator_quality` and `sim_estimator`; existing payloads lacking the
+optional fields remain valid. Read-only `simulation_estimator` exposes
+process-lifetime observed/triggers/selected/drained/dropped/queued and
+detected logging-failure counts, plus current history/post-window coverage.
+`selected = drained + dropped + queued`; saturation changes diagnostics
+only. Exported records and IDs survive model resets/configuration, while
+the rolling history and post window reset. The app counts detected encoding
+or submission failures separately from FIFO losses.
+
+All callback storage is fixed; there is no event-path allocation, formatting
+or log submission. The model object is 906,424 bytes and the ordinary-thread
+batch 113,320 bytes in this workstation build (each estimator record is
+192 bytes). Continuous work adds a bounded record copy per accepted primary;
+the first trigger also selects bounded prehistory. No new clock reads are
+needed for this increment. Hardware overhead still needs comparison in the
+next matched capture, especially around the first trigger. Pure tests
+compare saturated and drained diagnostic paths and verify identical grids
+and scheduler outcomes.
+
+The 256 accepted-primary history can omit an older initiating disturbance.
+Repeated interval exclusions can also leave older eligible period inputs
+outside that history. Thus the trace is not a promise of complete replay
+of every estimator input; exact computed period/candidate/correction fields
+remain available. Different FIFO drain rates can place related overlap and
+estimator records in different telemetry emissions. Join by process ID and
+sample ID, preserving the event's original session and frozen plan counter.
+
+The next operator run rebuilds/installs the app and logdump, restarts the
+existing synco instance, and repeats the same bounded full-loop shadow
+capture with unchanged settings, RTC latency On and operational enable Off.
+No configuration edit or new INDI enable is needed for an already configured
+simulation instance. Verify `estimator_quality` appears even with no overlap
+and retain `sim_estimator` records when a trigger occurs. Review queue losses,
+selected-ID gaps and whether final queued/postRemaining are zero before
+claiming complete post-trigger coverage. Keep the physical reserve undecided
+and the scheduler policy unchanged until the real estimator history is known.
+
+Workstation verification passes **61,111 assertions / 99 cases**: pure model
+53,212/29, application integration 6,095/54 and logger validation/compatibility
+1,804/16. Coverage includes the retained synthetic phase kick, exact plan
+provenance and corrections, maximum estimator-window/history wrap,
+pre/post-window merging, saturation/drop-new/recovery, preserved pending
+records across epochs, independent bounded drains and lock contention.
+Actual callback-produced model records also pass binary serialization and
+the telemetry verifier, including warming records and signed corrections.
+Legacy payloads remain readable and malformed optional histories are rejected.
+All changed C++ files were clang-formatted and whitespace checks pass.
+Normal library/schema, `dmSyncopation` and `logdump` builds pass for this
+estimator-history increment.

@@ -71,6 +71,12 @@ class Simulation
     /// Return process-lifetime FIFO accounting without consuming events; logFailed is app-owned.
     MagAOX::dmSyncoSimulation::TraceStatus traceStatus() const;
 
+    /// Remove the oldest selected estimator update without changing model history or decisions.
+    bool popEstimator( MagAOX::dmSyncoSimulation::EstimatorSample &sample /**< [out] oldest update on success */ );
+
+    /// Return process-lifetime triggered estimator coverage without consuming records.
+    MagAOX::dmSyncoSimulation::EstimatorStatus estimatorStatus() const;
+
   private:
     /// One primary phase observation; counters label cycles independently of time proximity.
     struct Point
@@ -82,14 +88,15 @@ class Simulation
     /// An advertised cycle whose targets are never recalculated.
     struct Plan
     {
-        uint64_t                      counter{ 0 }; ///< Genuine primary counter expected for this cycle.
-        int64_t                       grid{ 0 };    ///< Immutable main prediction, ns.
-        int64_t                       period{ 0 };  ///< Period used when committing this cycle.
-        int64_t                       main{ 0 };    ///< Actual associated primary observation, or zero.
-        int64_t                       output{ 0 };  ///< Coherent combined observation, or zero.
-        std::array<int64_t, maxSteps> starts{};     ///< Fixed modeled copy starts.
-        std::array<int64_t, maxSteps> targets{};    ///< Fixed modeled copy completion/trigger targets.
-        std::array<bool, maxSteps>    done{};       ///< Each occurrence contributes to outcomes at most once.
+        uint64_t                      counter{ 0 };     ///< Genuine primary counter expected for this cycle.
+        uint64_t                      estimatorId{ 0 }; ///< Accepted-primary update that committed this plan.
+        int64_t                       grid{ 0 };        ///< Immutable main prediction, ns.
+        int64_t                       period{ 0 };      ///< Period used when committing this cycle.
+        int64_t                       main{ 0 };        ///< Actual associated primary observation, or zero.
+        int64_t                       output{ 0 };      ///< Coherent combined observation, or zero.
+        std::array<int64_t, maxSteps> starts{};         ///< Fixed modeled copy starts.
+        std::array<int64_t, maxSteps> targets{};        ///< Fixed modeled copy completion/trigger targets.
+        std::array<bool, maxSteps>    done{};           ///< Each occurrence contributes to outcomes at most once.
     };
 
     /// Coherent output retained until its primary monitor catches up.
@@ -119,13 +126,14 @@ class Simulation
     bool                               m_mainOutput{ false };   ///< Latest actual main has a coherent combination.
     int64_t                            m_outputTime{ 0 };       ///< Latest main's combined observation.
     int64_t                            m_virtualHold{ 0 };      ///< Last modeled active command's reader lifetime.
-    int64_t  m_periodTime{ 0 };  ///< Most recent eligible period sample, on the observation clock.
-    int64_t  m_copyBegin{ 0 };   ///< Last modeled copy's start, retained for retrospective overlap detection.
-    int64_t  m_copyEnd{ 0 };     ///< Last modeled copy's completion/trigger time.
-    int      m_copyStep{ 0 };    ///< Step associated with the last modeled copy/reader hold.
-    uint64_t m_copyCounter{ 0 }; ///< Genuine counter labelling the last modeled copy's cycle.
-    int64_t  m_copyGrid{ 0 };    ///< Frozen prediction for the last modeled copy's cycle.
-    int64_t  m_copyPeriod{ 0 };  ///< Period frozen with the last modeled copy's cycle.
+    int64_t  m_periodTime{ 0 };      ///< Most recent eligible period sample, on the observation clock.
+    int64_t  m_copyBegin{ 0 };       ///< Last modeled copy's start, retained for retrospective overlap detection.
+    int64_t  m_copyEnd{ 0 };         ///< Last modeled copy's completion/trigger time.
+    int      m_copyStep{ 0 };        ///< Step associated with the last modeled copy/reader hold.
+    uint64_t m_copyCounter{ 0 };     ///< Genuine counter labelling the last modeled copy's cycle.
+    int64_t  m_copyGrid{ 0 };        ///< Frozen prediction for the last modeled copy's cycle.
+    int64_t  m_copyPeriod{ 0 };      ///< Period frozen with the last modeled copy's cycle.
+    uint64_t m_copyEstimatorId{ 0 }; ///< Estimator update that committed the last modeled copy's plan.
     /// Fixed process-lifetime FIFO; reset/configure preserve undrained evidence.
     std::array<MagAOX::dmSyncoSimulation::OverlapEvent, MagAOX::dmSyncoSimulation::traceCapacity> m_traceEvents{};
     size_t   m_traceHead{ 0 };     ///< Oldest retained event's ring index.
@@ -133,6 +141,23 @@ class Simulation
     uint64_t m_traceDetected{ 0 }; ///< Lifetime overlap evidence sequence, including dropped events.
     uint64_t m_traceDrained{ 0 };  ///< Lifetime events removed for telemetry attempts.
     uint64_t m_traceDropped{ 0 };  ///< Lifetime events discarded on FIFO saturation.
+    /// Completed accepted-primary history; resets clear the history while preserving process IDs and export state.
+    std::array<MagAOX::dmSyncoSimulation::EstimatorSample, MagAOX::dmSyncoSimulation::estimatorHistoryCapacity>
+           m_estimatorHistory{};
+    size_t m_estimatorHistoryNext{ 0 };  ///< Next pre-trigger history replacement.
+    size_t m_estimatorHistoryCount{ 0 }; ///< Initialized pre-trigger history entries.
+    /// Fixed export FIFO; saturation drops diagnostic records without changing the scheduler.
+    std::array<MagAOX::dmSyncoSimulation::EstimatorSample, MagAOX::dmSyncoSimulation::estimatorTraceCapacity>
+             m_estimatorEvents{};
+    size_t   m_estimatorHead{ 0 };           ///< Oldest selected estimator record.
+    size_t   m_estimatorCount{ 0 };          ///< Selected updates waiting for telemetry.
+    uint64_t m_estimatorObserved{ 0 };       ///< Process-lifetime completed accepted-primary sequence.
+    uint64_t m_estimatorTriggers{ 0 };       ///< Overlap observations selecting pre/post history windows.
+    uint64_t m_estimatorSelected{ 0 };       ///< Unique selected updates, including export FIFO losses.
+    uint64_t m_estimatorDrained{ 0 };        ///< Updates removed for ordinary-thread telemetry attempts.
+    uint64_t m_estimatorDropped{ 0 };        ///< New selected updates discarded by the full FIFO.
+    uint64_t m_estimatorLastSelectedId{ 0 }; ///< Last selected process ID; dropped records are never retried.
+    size_t   m_estimatorPostRemaining{ 0 };  ///< Completed updates still to select after the most recent trigger.
 
     /// Checked prediction using relative counter arithmetic; zero signals unrepresentable time.
     static int64_t shifted( int64_t  base /**< [in] time origin */,
@@ -153,7 +178,18 @@ class Simulation
     int64_t phase( uint64_t counter /**< [in] future primary counter */ );
 
     /// Append one immutable plan; false means invalid/overflowing horizon.
-    bool commit( uint64_t counter /**< [in] cycle identity */, int64_t grid /**< [in] frozen predicted main time */ );
+    bool commit( uint64_t counter /**< [in] cycle identity */,
+                 int64_t  grid /**< [in] frozen predicted main time */,
+                 uint64_t estimatorId /**< [in] accepted-primary update committing this plan */ );
+
+    /// Select a unique completed estimator update for export, dropping new records if the FIFO is full.
+    void selectEstimator( const MagAOX::dmSyncoSimulation::EstimatorSample &sample /**< [in] completed update */ );
+
+    /// Select retained pre-trigger history and restart the bounded subsequent-update window.
+    void triggerEstimator();
+
+    /// Finish one accepted-primary record, retain its history and select it when post-trigger coverage is active.
+    void finishEstimator( MagAOX::dmSyncoSimulation::EstimatorSample &sample /**< [in,out] original update values */ );
 
     /// Cancel and retire plans superseded by a genuine main.
     void retire( uint64_t counter /**< [in] newest genuine primary counter */ );
@@ -289,6 +325,8 @@ inline void Simulation::reset()
     m_copyStep                                                            = 0;
     m_copyCounter                                                         = 0;
     m_copyGrid = m_copyPeriod = 0;
+    m_copyEstimatorId         = 0;
+    m_estimatorHistoryNext = m_estimatorHistoryCount = m_estimatorPostRemaining = 0;
 }
 
 inline int64_t Simulation::median( size_t count )
@@ -350,7 +388,7 @@ inline int64_t Simulation::phase( uint64_t counter )
     return m_pointCount ? median( m_pointCount ) : 0;
 }
 
-inline bool Simulation::commit( uint64_t counter, int64_t grid )
+inline bool Simulation::commit( uint64_t counter, int64_t grid, uint64_t estimatorId )
 {
     if( m_planCount == m_plans.size() || !grid || !shifted( grid, 0, 2, m_summary.periodNs ) )
     {
@@ -361,11 +399,12 @@ inline bool Simulation::commit( uint64_t counter, int64_t grid )
     }
 
     Plan entry;
-    entry.counter    = counter;
-    entry.grid       = grid;
-    entry.period     = m_summary.periodNs;
-    entry.targets[0] = copyCutoff( grid, m_config.bounds ) - m_config.bounds.reserve;
-    entry.starts[0]  = entry.targets[0] - m_config.bounds.copy;
+    entry.counter     = counter;
+    entry.estimatorId = estimatorId;
+    entry.grid        = grid;
+    entry.period      = m_summary.periodNs;
+    entry.targets[0]  = copyCutoff( grid, m_config.bounds ) - m_config.bounds.reserve;
+    entry.starts[0]   = entry.targets[0] - m_config.bounds.copy;
 
     for( int j = 1; j < m_config.steps; ++j )
     {
@@ -375,6 +414,58 @@ inline bool Simulation::commit( uint64_t counter, int64_t grid )
 
     m_plans[m_planCount++] = entry;
     return true;
+}
+
+inline void Simulation::selectEstimator( const MagAOX::dmSyncoSimulation::EstimatorSample &sample )
+{
+    if( sample.id <= m_estimatorLastSelectedId )
+    {
+        return;
+    }
+
+    m_estimatorLastSelectedId = sample.id;
+    ++m_estimatorSelected;
+
+    if( m_estimatorCount == m_estimatorEvents.size() )
+    {
+        ++m_estimatorDropped;
+        return;
+    }
+
+    m_estimatorEvents[( m_estimatorHead + m_estimatorCount ) % m_estimatorEvents.size()] = sample;
+    ++m_estimatorCount;
+}
+
+inline void Simulation::triggerEstimator()
+{
+    ++m_estimatorTriggers;
+    const size_t first =
+        ( m_estimatorHistoryNext + m_estimatorHistory.size() - m_estimatorHistoryCount ) % m_estimatorHistory.size();
+
+    for( size_t i = 0; i < m_estimatorHistoryCount; ++i )
+    {
+        selectEstimator( m_estimatorHistory[( first + i ) % m_estimatorHistory.size()] );
+    }
+
+    m_estimatorPostRemaining = MagAOX::dmSyncoSimulation::estimatorPostSamples;
+}
+
+inline void Simulation::finishEstimator( MagAOX::dmSyncoSimulation::EstimatorSample &sample )
+{
+    sample.sequence                            = m_summary.sequence;
+    sample.periodSamples                       = m_summary.periodSamples;
+    sample.phaseSamples                        = m_summary.phaseSamples;
+    sample.periodNs                            = m_summary.periodNs;
+    m_estimatorObserved                        = sample.id;
+    m_estimatorHistory[m_estimatorHistoryNext] = sample;
+    m_estimatorHistoryNext                     = ( m_estimatorHistoryNext + 1 ) % m_estimatorHistory.size();
+    m_estimatorHistoryCount                    = std::min( m_estimatorHistoryCount + 1, m_estimatorHistory.size() );
+
+    if( m_estimatorPostRemaining )
+    {
+        selectEstimator( sample );
+        --m_estimatorPostRemaining;
+    }
 }
 
 inline void Simulation::skip( Plan &entry, int step, uint64_t MagAOX::dmSyncoSimulation::Step::*reason )
@@ -486,12 +577,13 @@ inline void Simulation::evaluate( Plan &entry, int step )
     entry.done[step] = true;
     ++m_summary.outcomes[step].considered;
     ++m_summary.outcomes[step].wouldRun;
-    m_copyBegin   = start;
-    m_copyEnd     = target;
-    m_copyStep    = step;
-    m_copyCounter = entry.counter;
-    m_copyGrid    = entry.grid;
-    m_copyPeriod  = entry.period;
+    m_copyBegin       = start;
+    m_copyEnd         = target;
+    m_copyStep        = step;
+    m_copyCounter     = entry.counter;
+    m_copyGrid        = entry.grid;
+    m_copyPeriod      = entry.period;
+    m_copyEstimatorId = entry.estimatorId;
 
     if( step )
     {
@@ -535,6 +627,7 @@ inline void Simulation::overlap( uint64_t                                      m
     {
         ++m_summary.outcomes[m_copyStep].overlap;
         ++m_traceDetected;
+        triggerEstimator();
 
         if( m_traceCount == m_traceEvents.size() )
         {
@@ -550,6 +643,8 @@ inline void Simulation::overlap( uint64_t                                      m
         event.combinedCounter = combinedCounter;
         event.planCounter     = m_copyCounter;
         event.lastMainCounter = m_summary.counter;
+        event.planEstimatorId = m_copyEstimatorId;
+        event.lastEstimatorId = m_estimatorObserved;
         event.step            = m_copyStep;
         event.origin          = origin;
         event.window          = observed < m_copyEnd ? MagAOX::dmSyncoSimulation::OverlapWindow::copy
@@ -692,9 +787,20 @@ inline void Simulation::primary( uint64_t                                      c
         }
     }
 
-    const bool    sequential = m_haveMain && counter == m_summary.counter + 1;
-    const bool    gap        = m_haveMain && !sequential;
-    const int64_t predicted  = prediction( counter );
+    const bool                                 sequential = m_haveMain && counter == m_summary.counter + 1;
+    const bool                                 gap        = m_haveMain && !sequential;
+    const int64_t                              predicted  = prediction( counter );
+    MagAOX::dmSyncoSimulation::EstimatorSample estimator;
+    estimator.id                    = m_estimatorObserved + 1;
+    estimator.session               = m_summary.session;
+    estimator.counter               = counter;
+    estimator.observedNs            = observed;
+    estimator.publicationIntervalNs = publicationInterval;
+    estimator.sequential            = sequential;
+    estimator.periodBeforeNs        = m_summary.periodNs;
+    estimator.predictedNs           = predicted;
+    estimator.phaseGain             = m_config.phaseGain;
+    estimator.phaseSlewNs           = m_config.phaseSlew;
 
     if( gap )
     {
@@ -749,6 +855,7 @@ inline void Simulation::primary( uint64_t                                      c
         m_intervals[m_intervalNext] = publicationInterval;
         m_intervalNext              = ( m_intervalNext + 1 ) % m_config.window;
         m_intervalCount             = std::min<size_t>( m_intervalCount + 1, m_config.window );
+        estimator.intervalAccepted  = true;
     }
     else if( m_summary.sequence > 1 )
     {
@@ -787,6 +894,7 @@ inline void Simulation::primary( uint64_t                                      c
         m_summary.valid = false;
         m_planCount     = 0;
         next();
+        finishEstimator( estimator );
         return;
     }
 
@@ -796,9 +904,10 @@ inline void Simulation::primary( uint64_t                                      c
         {
             const int64_t grid = predicted ? predicted : phase( counter );
 
-            if( !commit( counter, grid ) )
+            if( !commit( counter, grid, estimator.id ) )
             {
                 next();
+                finishEstimator( estimator );
                 return;
             }
         }
@@ -825,30 +934,43 @@ inline void Simulation::primary( uint64_t                                      c
 
         if( !plan( future ) )
         {
-            const auto   &last      = m_plans[m_planCount - 1];
-            int64_t       grid      = shifted( last.grid, last.counter, future, m_summary.periodNs );
-            const int64_t candidate = phase( future );
+            const auto   &last          = m_plans[m_planCount - 1];
+            int64_t       grid          = shifted( last.grid, last.counter, future, m_summary.periodNs );
+            const int64_t candidate     = phase( future );
+            estimator.nextCounter       = future;
+            estimator.sourcePlanCounter = last.counter;
+            estimator.sourceEstimatorId = last.estimatorId;
+            estimator.sourceGridNs      = last.grid;
+            estimator.baseGridNs        = grid;
+            estimator.candidateNs       = candidate;
 
             if( grid && candidate )
             {
-                const long double raw   = m_config.phaseGain * ( static_cast<long double>( candidate ) - grid );
-                const int64_t     delta = int64_t( std::clamp( raw,
+                const long double raw         = m_config.phaseGain * ( static_cast<long double>( candidate ) - grid );
+                const int64_t     delta       = int64_t( std::clamp( raw,
                                                            -static_cast<long double>( m_config.phaseSlew ),
                                                            static_cast<long double>( m_config.phaseSlew ) ) );
-                grid                    = shifted( grid, 0, 1, delta );
+                estimator.rawCorrectionNs     = int64_t( raw );
+                estimator.appliedCorrectionNs = delta;
+                grid                          = shifted( grid, 0, 1, delta );
             }
 
-            if( !commit( future, grid ) )
+            if( !commit( future, grid, estimator.id ) )
             {
                 next();
+                finishEstimator( estimator );
                 return;
             }
+
+            estimator.committed       = true;
+            estimator.committedGridNs = grid;
         }
 
         m_summary.valid = true;
     }
 
     through( observed, true );
+    finishEstimator( estimator );
 }
 
 inline void Simulation::combined( uint64_t                                      counter,
@@ -953,6 +1075,35 @@ inline MagAOX::dmSyncoSimulation::TraceStatus Simulation::traceStatus() const
     status.drained  = m_traceDrained;
     status.dropped  = m_traceDropped;
     status.queued   = m_traceCount;
+    return status;
+}
+
+inline bool Simulation::popEstimator( MagAOX::dmSyncoSimulation::EstimatorSample &sample )
+{
+    if( !m_estimatorCount )
+    {
+        return false;
+    }
+
+    sample          = m_estimatorEvents[m_estimatorHead];
+    m_estimatorHead = ( m_estimatorHead + 1 ) % m_estimatorEvents.size();
+    --m_estimatorCount;
+    ++m_estimatorDrained;
+    return true;
+}
+
+inline MagAOX::dmSyncoSimulation::EstimatorStatus Simulation::estimatorStatus() const
+{
+    MagAOX::dmSyncoSimulation::EstimatorStatus status;
+    status.enabled       = m_summary.enabled;
+    status.observed      = m_estimatorObserved;
+    status.triggers      = m_estimatorTriggers;
+    status.selected      = m_estimatorSelected;
+    status.drained       = m_estimatorDrained;
+    status.dropped       = m_estimatorDropped;
+    status.queued        = m_estimatorCount;
+    status.history       = m_estimatorHistoryCount;
+    status.postRemaining = m_estimatorPostRemaining;
     return status;
 }
 

@@ -208,6 +208,8 @@ table DmSyncoOverlapEvent
     last_main_ns:long;
     last_output_ns:long;
     observation:DmSyncoOverlapObservation (required);
+    plan_estimator_id:ulong;
+    last_estimator_id:ulong;
 }
 
 // Lifetime queue accounting survives model resets; a drained batch can contain earlier sessions.
@@ -222,6 +224,56 @@ table DmSyncoOverlapTrace
     log_failed:ulong;
     batch_count:ulong;
     events:[DmSyncoOverlapEvent] (required);
+}
+
+// Accepted-primary estimator values use integer monotonic nanoseconds.
+// publication_interval_ns is elapsed producer-clock time, not an absolute model timestamp.
+table DmSyncoEstimatorSample
+{
+    id:ulong;
+    session:ulong;
+    sequence:ulong;
+    counter:ulong;
+    observed_ns:long;
+    publication_interval_ns:long;
+    sequential:bool;
+    interval_accepted:bool;
+    period_samples:ulong;
+    phase_samples:ulong;
+    period_before_ns:long;
+    period_ns:long;
+    predicted_ns:long;
+    next_counter:ulong;
+    source_plan_counter:ulong;
+    source_estimator_id:ulong;
+    source_grid_ns:long;
+    base_grid_ns:long;
+    candidate_ns:long;
+    phase_gain:double;
+    phase_slew_ns:long;
+    raw_correction_ns:long;
+    applied_correction_ns:long;
+    committed_grid_ns:long;
+    committed:bool;
+}
+
+// Triggered pre/post estimator coverage has separate lifetime selection/loss accounting.
+table DmSyncoEstimatorTrace
+{
+    enabled:bool;
+    observed:ulong;
+    triggers:ulong;
+    selected:ulong;
+    drained:ulong;
+    dropped:ulong;
+    queued:ulong;
+    capacity:ulong;
+    log_failed:ulong;
+    history:ulong;
+    history_capacity:ulong;
+    post_remaining:ulong;
+    batch_count:ulong;
+    samples:[DmSyncoEstimatorSample] (required);
 }
 
 // Predictions and model readiness on the same-host monotonic clock; this is not hardware arming.
@@ -269,6 +321,7 @@ table DmSyncoSimulation
     outcomes:[DmSyncoSimulationStep] (required);
     cadence_min_period_ns:long;
     overlap_trace:DmSyncoOverlapTrace;
+    estimator_trace:DmSyncoEstimatorTrace;
 }
 
 table Telem_dmsynco_fb

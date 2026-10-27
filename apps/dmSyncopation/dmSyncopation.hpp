@@ -194,7 +194,9 @@ class dmSyncopation : public MagAOXApp<true>,
     synco::Simulation                  m_simulation; ///< Fixed-storage shadow engine, serialized by the cycle mutex.
     MagAOX::dmSyncoSimulation::Summary m_simulationSnapshot;        ///< Ordinary-thread cached telemetry/INDI snapshot.
     MagAOX::dmSyncoSimulation::TraceStatus m_simulationTraceStatus; ///< Ordinary-thread cached overlap queue quality.
-    uint64_t m_simulationTraceLogFailed{ 0 };      ///< Drained overlap events lost after a telemetry emission failure.
+    uint64_t m_simulationTraceLogFailed{ 0 }; ///< Drained overlap events lost after a telemetry emission failure.
+    MagAOX::dmSyncoSimulation::EstimatorStatus m_simulationEstimatorStatus; ///< Cached triggered estimator coverage.
+    uint64_t m_simulationEstimatorLogFailed{ 0 };  ///< Drained estimator samples lost to detected telemetry failures.
     int64_t  m_simulationPublication{ 0 };         ///< Prior coherent primary writetime, in its own external clock.
     uint64_t m_simulationCounter{ 0 };             ///< Primary counter paired with the publication baseline.
     int64_t  m_simulationCombinedPublication{ 0 }; ///< Last accepted combined producer timestamp in its own clock.
@@ -288,16 +290,17 @@ class dmSyncopation : public MagAOXApp<true>,
     int64_t m_step0Wake{ 0 };       ///< Latest passive-copy start lateness relative to the requested wake, ns.
     int64_t m_step0WakeMax{ 0 };    ///< Maximum observed passive-copy wake/check lateness, ns.
 
-    pcf::IndiProperty m_indiP_enable;           ///< Enable request and acknowledged quiescence.
-    pcf::IndiProperty m_indiP_reacquire;        ///< Request fresh synchronization.
-    pcf::IndiProperty m_indiP_settings;         ///< Disabled-only essential numeric controls.
-    pcf::IndiProperty m_indiP_status;           ///< Compact rates/counts/outcome summary.
-    pcf::IndiProperty m_indiP_health;           ///< Schedule reason and stream identities.
-    pcf::IndiProperty m_indiP_camera;           ///< External camera FPS subscription.
-    pcf::IndiProperty m_indiP_simulation;       ///< Conditional grid, phase and collection-quality diagnostics.
-    pcf::IndiProperty m_indiP_simulationSteps;  ///< Per-step hypothetical outcomes; never actual deliveries.
-    pcf::IndiProperty m_indiP_simulationStatus; ///< Shadow state and conditional-policy identification.
-    pcf::IndiProperty m_indiP_simulationTrace;  ///< Read-only overlap capture, drain and loss counters.
+    pcf::IndiProperty m_indiP_enable;              ///< Enable request and acknowledged quiescence.
+    pcf::IndiProperty m_indiP_reacquire;           ///< Request fresh synchronization.
+    pcf::IndiProperty m_indiP_settings;            ///< Disabled-only essential numeric controls.
+    pcf::IndiProperty m_indiP_status;              ///< Compact rates/counts/outcome summary.
+    pcf::IndiProperty m_indiP_health;              ///< Schedule reason and stream identities.
+    pcf::IndiProperty m_indiP_camera;              ///< External camera FPS subscription.
+    pcf::IndiProperty m_indiP_simulation;          ///< Conditional grid, phase and collection-quality diagnostics.
+    pcf::IndiProperty m_indiP_simulationSteps;     ///< Per-step hypothetical outcomes; never actual deliveries.
+    pcf::IndiProperty m_indiP_simulationStatus;    ///< Shadow state and conditional-policy identification.
+    pcf::IndiProperty m_indiP_simulationTrace;     ///< Read-only overlap capture, drain and loss counters.
+    pcf::IndiProperty m_indiP_simulationEstimator; ///< Read-only estimator pre/post history coverage and losses.
     pcf::IndiProperty m_indiP_primaryTiming; ///< Continuous observed primary publication/receipt statistics in seconds.
     pcf::IndiProperty
         m_indiP_primaryTimingQuality;       ///< Independent diagnostic coverage, validity and collection quality.
@@ -994,6 +997,25 @@ inline int dmSyncopation::setupSimulationINDI()
         m_indiP_simulationTrace.add( pcf::IndiElement( name ) );
     }
 
+    REG_INDI_NEWPROP_NOCB( m_indiP_simulationEstimator, "simulation_estimator", pcf::IndiProperty::Number );
+    m_indiP_simulationEstimator.setPerm( pcf::IndiProperty::ReadOnly );
+
+    for( const auto *name : { "enabled",
+                              "observed",
+                              "triggers",
+                              "selected",
+                              "drained",
+                              "dropped",
+                              "queued",
+                              "capacity",
+                              "logFailed",
+                              "history",
+                              "historyCapacity",
+                              "postRemaining" } )
+    {
+        m_indiP_simulationEstimator.add( pcf::IndiElement( name ) );
+    }
+
     return 0;
 }
 
@@ -1073,6 +1095,32 @@ inline void dmSyncopation::updateSimulationINDI()
                              double( trace.queued ),
                              double( trace.capacity ),
                              double( m_simulationTraceLogFailed ) } );
+    const auto &estimator = m_simulationEstimatorStatus;
+    updateIfChanged( m_indiP_simulationEstimator,
+                     std::vector<std::string>{ "enabled",
+                                               "observed",
+                                               "triggers",
+                                               "selected",
+                                               "drained",
+                                               "dropped",
+                                               "queued",
+                                               "capacity",
+                                               "logFailed",
+                                               "history",
+                                               "historyCapacity",
+                                               "postRemaining" },
+                     std::vector<double>{ estimator.enabled ? 1.0 : 0.0,
+                                          double( estimator.observed ),
+                                          double( estimator.triggers ),
+                                          double( estimator.selected ),
+                                          double( estimator.drained ),
+                                          double( estimator.dropped ),
+                                          double( estimator.queued ),
+                                          double( estimator.capacity ),
+                                          double( m_simulationEstimatorLogFailed ),
+                                          double( estimator.history ),
+                                          double( estimator.historyCapacity ),
+                                          double( estimator.postRemaining ) } );
 }
 
 inline bool dmSyncopation::openResources()
@@ -2882,8 +2930,9 @@ inline int dmSyncopation::appLogic()
             if( m_simulationEnabled )
             {
                 m_simulation.advance( m_now() );
-                m_simulationSnapshot    = m_simulation.summary();
-                m_simulationTraceStatus = m_simulation.traceStatus();
+                m_simulationSnapshot        = m_simulation.summary();
+                m_simulationTraceStatus     = m_simulation.traceStatus();
+                m_simulationEstimatorStatus = m_simulation.estimatorStatus();
                 m_reason = m_simulationSnapshot.valid ? "simulation observing" : "simulation warming or stale";
             }
 
@@ -3090,6 +3139,16 @@ inline int dmSyncopation::recordTelem( const telem_dmsynco *record )
             trace.status            = m_simulation.traceStatus();
             trace.status.logFailed  = m_simulationTraceLogFailed;
             m_simulationTraceStatus = trace.status;
+
+            while( trace.estimatorCount < trace.estimator.size() &&
+                   m_simulation.popEstimator( trace.estimator[trace.estimatorCount] ) )
+            {
+                ++trace.estimatorCount;
+            }
+
+            trace.estimatorStatus           = m_simulation.estimatorStatus();
+            trace.estimatorStatus.logFailed = m_simulationEstimatorLogFailed;
+            m_simulationEstimatorStatus     = trace.estimatorStatus;
         }
 
         if( lock.owns_lock() && !m_diagnosticsOnly && !m_simulationEnabled )
@@ -3142,12 +3201,14 @@ inline int dmSyncopation::recordTelem( const telem_dmsynco *record )
         if( telem<telem_dmsynco>( message ) < 0 )
         {
             m_simulationTraceLogFailed += trace.count;
+            m_simulationEstimatorLogFailed += trace.estimatorCount;
             return -1;
         }
     }
     catch( ... )
     {
         m_simulationTraceLogFailed += trace.count;
+        m_simulationEstimatorLogFailed += trace.estimatorCount;
         throw;
     }
 

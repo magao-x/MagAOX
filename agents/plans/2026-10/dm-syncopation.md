@@ -96,7 +96,7 @@ Current work, following the 2026-10-25 measurements and operator direction:
 | Independent camera acquisition excursions and upstream AO trace stages | Implemented and verified. Later captures distinguish serial-associated driver-stamp tails, a rare long post-stamp camera SDK wait, and changing AO/conversion durations. Counter continuity alone does not establish frame freshness. |
 | Isolated camera publication and acquWFS timing | Implemented and locally verified (4883 assertions, 69 cases; matching builds). New isolated capture has one stable acquWFS row: publication already spans 437.045–579.825 us upstream, while large acquWFS output excursions are predominantly present at its processing start. Two primary-observer counter gaps limit coverage; matched camera-to-wake latency remains unmeasured. |
 | Median-based target cadence and per-step skips for ordinary excursions | Revised design below; active targets stay on the predicted grid despite early/late main arrivals. Not implemented. |
-| Read-only fixed-grid simulation | Implemented and locally verified. First linked capture has 99.893% passive / 99.996% active conditional would-run availability; 40 passive / 125 active overlap-evidence increments remain unexplained. See the debugging record. |
+| Read-only fixed-grid simulation | Implemented and locally verified, including bounded overlap tracing. Latest traced capture has 99.949832% passive / 100% active conditional would-run availability, with 69 distinct passive-copy overlaps and no active overlaps. Phase tracking/passive preparation bounds remain under review; see the debugging record. |
 | Targeted dmcomb-reader wake for active extra steps | Proposed design below; not implemented. |
 | Enabled multi-step qualification | Pending the scheduler changes and full timing-window qualification. |
 
@@ -469,9 +469,42 @@ session/plan counter/step/main counter, then inspect origins, copy versus
 reader windows, observer delays and raw producer timing. Do not select a
 physical reserve or change the policy from aggregate availability alone.
 
-Workstation verification passes **28,829 assertions / 87 cases**: pure model
-22,972/23, application integration 4,684/51 and logger compatibility/validation
-1,173/13. Normal library/schema, `dmSyncopation` and `logdump` builds pass.
+The traced `synco-sim-20261027T023336Z` capture retains all 69 new overlap
+events without queue losses. Each is a distinct primary-origin step-0 copy
+observation; there are no active-copy or reader-hold overlap events. In
+239,198 opportunities per step, passive preparation skips 120 early mains
+and would run 239,078 times; active step 1 would run every time. Observer
+receipt-to-model delay is only 0.451–0.711 us at these events, while mains
+precede their predicted grid by approximately 28–38 us. Several consecutive
+overlapping mains have ordinary approximately 500 us publication intervals.
+This distinguishes a sustained phase offset from independent short
+interarrival excursions. Review grid tracking and passive bounds next; the
+pre-burst estimator history is not retained, so an estimator defect or the
+initiating disturbance is not established. Keep the physical reserve
+undecided and operational scheduling disabled during this review.
+
+The implemented estimator diagnostic retains 256 completed accepted-primary
+estimator updates and 64 subsequent updates around overlaps, merging nearby
+triggers by process sample ID. An independent bounded export FIFO is drained
+through optional `telem_dmsynco` data; `simulation_estimator` exposes coverage
+and losses. Overlaps identify the update creating their frozen plan as well
+as the latest completed update at evidence time. Recorded original values
+include input qualification, period median, phase candidate, uncorrected
+grid, requested/applied correction and committed target. Model arithmetic,
+settings and physical margins remain unchanged. Bounded history can omit an
+older initiating disturbance or older eligible intervals after exclusions.
+
+An actual-header synthetic replay proves that one 460 us interval followed
+by steady 500 us cadence can produce nine consecutive passive-copy overlaps
+as the current median/slew estimator catches up to a 40 us phase advance.
+This is regression-tested behavior, not identification of the real capture's
+cause. The next matched hardware capture should retain the new estimator
+history so stale phase, biased period and slew saturation can be separated
+before changing the estimator or the passive preparation margin.
+
+Workstation verification passes **61,111 assertions / 99 cases**: pure model
+53,212/29, application integration 6,095/54 and logger compatibility/validation
+1,804/16. Normal library/schema, `dmSyncopation` and `logdump` builds pass.
 Tests cover 420/580 us early/late pairs, the measured 885.783/202.112 us
 sequence, independent passive/active eligibility, immutable plans, reader
 holds, gaps/resets, stale period samples, malformed/ambiguous/future output

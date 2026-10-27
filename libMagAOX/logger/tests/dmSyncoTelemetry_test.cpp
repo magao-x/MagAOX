@@ -1,5 +1,5 @@
 /** \file dmSyncoTelemetry_test.cpp
- * \brief Syncopation cadence, conditional simulation and raw overlap telemetry compatibility and validation.
+ * \brief Syncopation timing, conditional outcomes and overlap/estimator telemetry compatibility and validation.
  * \ingroup logger_files
  */
 #include "../../../tests/testXWC.hpp"
@@ -175,12 +175,64 @@ dmSyncoSimulation::TraceBatch sampleOverlapTrace()
     return trace;
 }
 
+/// Construct independently queued older-session estimator updates with exact large timestamps and signed corrections.
+dmSyncoSimulation::TraceBatch sampleEstimatorTrace()
+{
+    auto trace            = sampleOverlapTrace();
+    trace.estimatorCount  = 2;
+    auto &quality         = trace.estimatorStatus;
+    quality.enabled       = true;
+    quality.observed      = ( uint64_t( 1 ) << 54 ) + 1000;
+    quality.triggers      = 10;
+    quality.selected      = 8;
+    quality.drained       = 5;
+    quality.dropped       = 1;
+    quality.queued        = 2;
+    quality.logFailed     = 2;
+    quality.history       = dmSyncoSimulation::estimatorHistoryCapacity;
+    quality.postRemaining = dmSyncoSimulation::estimatorPostSamples - 1;
+
+    for( size_t index = 0; index < trace.estimatorCount; ++index )
+    {
+        auto &sample                        = trace.estimator[index];
+        sample.id                           = ( uint64_t( 1 ) << 54 ) + 7 + index;
+        sample.session                      = ( uint64_t( 1 ) << 54 ) + 17 + index;
+        sample.sequence                     = 100 + index;
+        sample.counter                      = ( uint64_t( 1 ) << 55 ) + 23 + index;
+        sample.observedNs                   = ( int64_t( 1 ) << 56 ) + 1000001 + int64_t( index ) * 500000;
+        sample.publicationIntervalNs        = 499500 + int64_t( index ) * 1000;
+        sample.sequential                   = true;
+        sample.intervalAccepted             = true;
+        sample.periodSamples                = 32;
+        sample.phaseSamples                 = 32;
+        sample.periodBeforeNs               = 500100;
+        sample.periodNs                     = 500000;
+        sample.predictedNs                  = sample.observedNs + 3500;
+        sample.nextCounter                  = sample.counter + 1;
+        sample.sourcePlanCounter            = sample.counter;
+        sample.sourceEstimatorId            = index ? sample.id : sample.id - 1;
+        sample.sourceGridNs                 = sample.predictedNs;
+        sample.baseGridNs                   = sample.sourceGridNs + sample.periodNs;
+        sample.candidateNs                  = sample.baseGridNs + ( index ? 4500 : -20000 );
+        sample.phaseGain                    = 0.1;
+        sample.phaseSlewNs                  = 1000;
+        sample.rawCorrectionNs              = index ? 450 : -2000;
+        sample.appliedCorrectionNs          = index ? 450 : -1000;
+        sample.committedGridNs              = sample.baseGridNs + sample.appliedCorrectionNs;
+        sample.committed                    = true;
+        trace.events[index].planEstimatorId = sample.id - 1;
+        trace.events[index].lastEstimatorId = sample.id;
+    }
+
+    return trace;
+}
+
 /// Populate unchanged scheduler fields with independently sampled primary and combiner timing.
 telem_dmsynco::messageT
 message( const dmTiming::Summary             &primary /**< [in] coherent primary summary */,
          const dmCombTiming::Summary         &combiner   = {} /**< [in] independent combiner summary */,
          const dmSyncoSimulation::Summary    &simulation = {} /**< [in] hypothetical shadow prediction */,
-         const dmSyncoSimulation::TraceBatch &trace      = {} /**< [in] drained overlap evidence */ )
+         const dmSyncoSimulation::TraceBatch &trace      = {} /**< [in] drained overlap and estimator evidence */ )
 {
     return telem_dmsynco::messageT( 3,
                                     2,
@@ -326,6 +378,8 @@ void checkOverlapTrace( const DmSyncoOverlapTrace           *actual /**< [in] se
         CHECK( event->combined_counter() == source.combinedCounter );
         CHECK( event->plan_counter() == source.planCounter );
         CHECK( event->last_main_counter() == source.lastMainCounter );
+        CHECK( event->plan_estimator_id() == source.planEstimatorId );
+        CHECK( event->last_estimator_id() == source.lastEstimatorId );
         CHECK( event->step() == source.step );
         CHECK( int( event->origin() ) == int( source.origin ) );
         CHECK( int( event->window() ) == int( source.window ) );
@@ -350,6 +404,59 @@ void checkOverlapTrace( const DmSyncoOverlapTrace           *actual /**< [in] se
         CHECK( observation->primary_publication_ns() == source.observation.primaryPublicationNs );
         CHECK( observation->start_ns() == source.observation.startNs );
         CHECK( observation->update_ns() == source.observation.updateNs );
+    }
+}
+
+/// Preserve all selected estimator values and independent lifetime/history coverage through serialization.
+void checkEstimatorTrace( const DmSyncoEstimatorTrace         *actual /**< [in] serialized triggered history */,
+                          const dmSyncoSimulation::TraceBatch &expected /**< [in] original selected values */ )
+{
+    REQUIRE( actual != nullptr );
+    const auto &quality = expected.estimatorStatus;
+    CHECK( actual->enabled() == quality.enabled );
+    CHECK( actual->observed() == quality.observed );
+    CHECK( actual->triggers() == quality.triggers );
+    CHECK( actual->selected() == quality.selected );
+    CHECK( actual->drained() == quality.drained );
+    CHECK( actual->dropped() == quality.dropped );
+    CHECK( actual->queued() == quality.queued );
+    CHECK( actual->capacity() == quality.capacity );
+    CHECK( actual->log_failed() == quality.logFailed );
+    CHECK( actual->history() == quality.history );
+    CHECK( actual->history_capacity() == quality.historyCapacity );
+    CHECK( actual->post_remaining() == quality.postRemaining );
+    REQUIRE( actual->batch_count() == expected.estimatorCount );
+    REQUIRE( actual->samples()->size() == expected.estimatorCount );
+
+    for( size_t index = 0; index < expected.estimatorCount; ++index )
+    {
+        const auto *sample = actual->samples()->Get( index );
+        const auto &source = expected.estimator[index];
+        CHECK( sample->id() == source.id );
+        CHECK( sample->session() == source.session );
+        CHECK( sample->sequence() == source.sequence );
+        CHECK( sample->counter() == source.counter );
+        CHECK( sample->observed_ns() == source.observedNs );
+        CHECK( sample->publication_interval_ns() == source.publicationIntervalNs );
+        CHECK( sample->sequential() == source.sequential );
+        CHECK( sample->interval_accepted() == source.intervalAccepted );
+        CHECK( sample->period_samples() == source.periodSamples );
+        CHECK( sample->phase_samples() == source.phaseSamples );
+        CHECK( sample->period_before_ns() == source.periodBeforeNs );
+        CHECK( sample->period_ns() == source.periodNs );
+        CHECK( sample->predicted_ns() == source.predictedNs );
+        CHECK( sample->next_counter() == source.nextCounter );
+        CHECK( sample->source_plan_counter() == source.sourcePlanCounter );
+        CHECK( sample->source_estimator_id() == source.sourceEstimatorId );
+        CHECK( sample->source_grid_ns() == source.sourceGridNs );
+        CHECK( sample->base_grid_ns() == source.baseGridNs );
+        CHECK( sample->candidate_ns() == source.candidateNs );
+        CHECK( sample->phase_gain() == source.phaseGain );
+        CHECK( sample->phase_slew_ns() == source.phaseSlewNs );
+        CHECK( sample->raw_correction_ns() == source.rawCorrectionNs );
+        CHECK( sample->applied_correction_ns() == source.appliedCorrectionNs );
+        CHECK( sample->committed_grid_ns() == source.committedGridNs );
+        CHECK( sample->committed() == source.committed );
     }
 }
 /// \endcond
@@ -1236,6 +1343,309 @@ TEST_CASE( "Synco telemetry rejects malformed overlap evidence", "[dmSyncoTeleme
     const auto *decoded = GetTelem_dmsynco_fb( flatlogs::logHeader::messageBuffer( corrupt ) );
     auto       *events  = const_cast<uint8_t *>( decoded->simulation()->overlap_trace()->events()->Data() );
     std::memset( events, 0xff, sizeof( flatbuffers::uoffset_t ) );
+    REQUIRE_FALSE( verifyLogEntry( telem_dmsynco::eventCode, corrupt.get() ) );
+}
+
+/// Preserve exact pre/post history, frozen-plan provenance and signed corrections through every reader path.
+/** \ingroup dmSyncoTelemetry_unit_test */
+TEST_CASE( "Synco telemetry preserves triggered estimator history across sessions", "[dmSyncoTelemetry]" )
+{
+    // clang-format off
+#ifdef DMSYNCO_TELEMETRY_TEST_DOXYGEN_REF
+    MagAOX::logger::telem_dmsynco::messageT;
+    MagAOX::logger::telem_dmsynco::verify;
+    MagAOX::logger::telem_dmsynco::msgString;
+#endif
+    // clang-format on
+    const auto trace  = sampleEstimatorTrace();
+    auto       input  = message( samplePrimary(), {}, sampleSimulation(), trace );
+    auto       buffer = envelope( input );
+    REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+    const auto *simulation = GetTelem_dmsynco_fb( input.builder.GetBufferPointer() )->simulation();
+    checkOverlapTrace( simulation->overlap_trace(), trace );
+    checkEstimatorTrace( simulation->estimator_trace(), trace );
+    REQUIRE( simulation->estimator_trace()->samples()->Get( 0 )->session() < simulation->session() );
+    REQUIRE( simulation->estimator_trace()->samples()->Get( 0 )->phase_slew_ns() != simulation->phase_slew_ns() );
+
+    const auto text = telem_dmsynco::msgString( input.builder.GetBufferPointer(), input.builder.GetSize() );
+    CHECK( text.find( "estimator_quality={enabled:1,observed:" + std::to_string( trace.estimatorStatus.observed ) ) !=
+           std::string::npos );
+    CHECK( text.find( ",triggers:10,selected:8,drained:5,dropped:1,queued:2,capacity:4096,logFailed:2,history:256," ) !=
+           std::string::npos );
+    CHECK( text.find( "historyCapacity:256,postRemaining:63,batch:2}" ) != std::string::npos );
+    CHECK( text.find( "planEstimatorId:" + std::to_string( trace.events[0].planEstimatorId ) ) != std::string::npos );
+    CHECK( text.find( "lastEstimatorId:" + std::to_string( trace.events[0].lastEstimatorId ) ) != std::string::npos );
+    CHECK( text.find( "sim_estimator={id:" + std::to_string( trace.estimator[0].id ) ) != std::string::npos );
+    CHECK( text.find( "model_clock:monotonic,observed_ns:" + std::to_string( trace.estimator[0].observedNs ) ) !=
+           std::string::npos );
+    CHECK( text.find( "interval_clock:producer_elapsed,publicationInterval_ns:499500" ) != std::string::npos );
+    CHECK( text.find( "phaseGain:0.10000000000000001,phaseSlew_ns:1000,rawCorrection_ns:-2000," ) !=
+           std::string::npos );
+    CHECK( text.find( "appliedCorrection_ns:-1000,committedGrid_ns:" +
+                      std::to_string( trace.estimator[0].committedGridNs ) ) != std::string::npos );
+
+    const auto          json = telem_dmsynco::msgJSON( input.builder.GetBufferPointer(),
+                                              input.builder.GetSize(),
+                                              reinterpret_cast<const uint8_t *>( telem_dmsynco_bfbs ),
+                                              telem_dmsynco_bfbs_len );
+    flatbuffers::Parser parser;
+    REQUIRE( parser.Deserialize( reinterpret_cast<const uint8_t *>( telem_dmsynco_bfbs ), telem_dmsynco_bfbs_len ) );
+    REQUIRE( parser.Parse( json.c_str() ) );
+    const auto *decoded = GetTelem_dmsynco_fb( parser.builder_.GetBufferPointer() )->simulation();
+    checkOverlapTrace( decoded->overlap_trace(), trace );
+    checkEstimatorTrace( decoded->estimator_trace(), trace );
+    REQUIRE( logMemberAccessor( telem_dmsynco::eventCode, "estimator_trace" ).accessor == nullptr );
+}
+
+/// Keep older overlap payloads and unavailable/warming/failed estimator computations readable.
+/** \ingroup dmSyncoTelemetry_unit_test */
+TEST_CASE( "Synco telemetry keeps optional estimator history independent", "[dmSyncoTelemetry]" )
+{
+    // clang-format off
+#ifdef DMSYNCO_TELEMETRY_TEST_DOXYGEN_REF
+    MagAOX::logger::telem_dmsynco::messageT;
+    MagAOX::logger::telem_dmsynco::verify;
+#endif
+    // clang-format on
+    auto legacy = message( samplePrimary(), {}, sampleSimulation(), sampleOverlapTrace() );
+    auto buffer = envelope( legacy );
+    REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+    const auto *old = GetTelem_dmsynco_fb( legacy.builder.GetBufferPointer() )->simulation();
+    REQUIRE( old->estimator_trace() == nullptr );
+    REQUIRE( old->overlap_trace()->events()->Get( 0 )->plan_estimator_id() == 0 );
+    REQUIRE( old->overlap_trace()->events()->Get( 0 )->last_estimator_id() == 0 );
+    CHECK( telem_dmsynco::msgString( legacy.builder.GetBufferPointer(), legacy.builder.GetSize() )
+               .find( "estimator_quality=" ) == std::string::npos );
+
+    dmSyncoSimulation::TraceBatch empty;
+    empty.estimatorStatus.enabled = true;
+    auto noEvents                 = message( samplePrimary(), {}, sampleSimulation(), empty );
+    buffer                        = envelope( noEvents );
+    REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+    checkEstimatorTrace( GetTelem_dmsynco_fb( noEvents.builder.GetBufferPointer() )->simulation()->estimator_trace(),
+                         empty );
+
+    auto disabled = message( samplePrimary(), {}, {}, sampleEstimatorTrace() );
+    buffer        = envelope( disabled );
+    REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+    REQUIRE( GetTelem_dmsynco_fb( disabled.builder.GetBufferPointer() )->simulation() == nullptr );
+
+    for( unsigned state = 0; state < 5; ++state )
+    {
+        INFO( "valid partial estimator state " << state );
+        auto trace           = sampleEstimatorTrace();
+        trace.count          = 0;
+        trace.status.enabled = false;
+        trace.estimatorCount = 1;
+        auto &sample         = trace.estimator[0];
+
+        if( state == 0 )
+        {
+            sample                = {};
+            sample.id             = 1;
+            sample.session        = 1;
+            sample.sequence       = 1;
+            sample.counter        = 0;
+            sample.observedNs     = 1;
+            sample.periodBeforeNs = sample.periodNs = 500000;
+            sample.phaseSamples                     = 1;
+            sample.publicationIntervalNs            = -5;
+        }
+        else if( state == 1 )
+        {
+            sample.sourceGridNs = INT64_MAX - 100000;
+            sample.baseGridNs = sample.candidateNs = 0;
+            sample.rawCorrectionNs = sample.appliedCorrectionNs = sample.committedGridNs = 0;
+            sample.committed                                                             = false;
+        }
+        else if( state == 2 )
+        {
+            sample.committed       = false;
+            sample.committedGridNs = 0;
+        }
+        else if( state == 3 )
+        {
+            sample.candidateNs     = 0;
+            sample.rawCorrectionNs = sample.appliedCorrectionNs = 0;
+            sample.committedGridNs                              = sample.baseGridNs;
+        }
+        else
+        {
+            sample.phaseGain       = 0;
+            sample.phaseSlewNs     = 0;
+            sample.rawCorrectionNs = sample.appliedCorrectionNs = 0;
+            sample.committedGridNs                              = sample.baseGridNs;
+        }
+
+        auto input = message( samplePrimary(), {}, sampleSimulation(), trace );
+        buffer     = envelope( input );
+        REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+        checkEstimatorTrace( GetTelem_dmsynco_fb( input.builder.GetBufferPointer() )->simulation()->estimator_trace(),
+                             trace );
+    }
+}
+
+/// Reject impossible coverage, lost provenance, invalid estimator arithmetic and malformed nested payloads.
+/** \ingroup dmSyncoTelemetry_unit_test */
+TEST_CASE( "Synco telemetry rejects malformed estimator history", "[dmSyncoTelemetry]" )
+{
+    // clang-format off
+#ifdef DMSYNCO_TELEMETRY_TEST_DOXYGEN_REF
+    MagAOX::logger::telem_dmsynco::verify;
+#endif
+    // clang-format on
+    for( unsigned invalid = 0; invalid < 43; ++invalid )
+    {
+        INFO( "invalid estimator case " << invalid );
+        auto  trace   = sampleEstimatorTrace();
+        auto &quality = trace.estimatorStatus;
+        auto &sample  = trace.estimator[0];
+
+        switch( invalid )
+        {
+        case 0:
+            quality.capacity = 0;
+            break;
+        case 1:
+            quality.capacity = dmSyncoSimulation::estimatorTraceCapacity + 1;
+            break;
+        case 2:
+            quality.queued   = quality.capacity + 1;
+            quality.selected = quality.drained + quality.dropped + quality.queued;
+            break;
+        case 3:
+            quality.observed = quality.selected - 1;
+            break;
+        case 4:
+            quality.drained = quality.selected + 1;
+            break;
+        case 5:
+            quality.dropped = UINT64_MAX;
+            break;
+        case 6:
+            ++quality.queued;
+            break;
+        case 7:
+            quality.logFailed = quality.drained + 1;
+            break;
+        case 8:
+            quality.historyCapacity = 0;
+            break;
+        case 9:
+            quality.historyCapacity = dmSyncoSimulation::estimatorHistoryCapacity + 1;
+            break;
+        case 10:
+            quality.history = quality.historyCapacity + 1;
+            break;
+        case 11:
+            quality.postRemaining = dmSyncoSimulation::estimatorPostSamples + 1;
+            break;
+        case 12:
+            trace.estimatorCount = dmSyncoSimulation::estimatorBatchCapacity + 1;
+            break;
+        case 13:
+            sample.id = 0;
+            break;
+        case 14:
+            sample.id = quality.observed + 1;
+            break;
+        case 15:
+            trace.estimator[1].id = sample.id;
+            break;
+        case 16:
+            sample.session = 0;
+            break;
+        case 17:
+            sample.sequence = 0;
+            break;
+        case 18:
+            sample.phaseSamples = dmSyncoSimulation::estimatorHistoryCapacity + 1;
+            break;
+        case 19:
+            sample.periodSamples = sample.sequence + 1;
+            break;
+        case 20:
+            sample.observedNs = 0;
+            break;
+        case 21:
+            sample.periodBeforeNs = 0;
+            break;
+        case 22:
+            sample.periodNs = 0;
+            break;
+        case 23:
+            sample.predictedNs = -1;
+            break;
+        case 24:
+            sample.phaseGain = std::numeric_limits<double>::quiet_NaN();
+            break;
+        case 25:
+            sample.phaseGain = 1.1;
+            break;
+        case 26:
+            sample.phaseSlewNs = -1;
+            break;
+        case 27:
+            sample.sequential = false;
+            break;
+        case 28:
+            sample.publicationIntervalNs = -1;
+            break;
+        case 29:
+            sample.nextCounter = 0;
+            break;
+        case 30:
+            ++sample.nextCounter;
+            break;
+        case 31:
+            sample.sourceEstimatorId = sample.id + 1;
+            break;
+        case 32:
+            sample.sourcePlanCounter = sample.nextCounter;
+            break;
+        case 33:
+            sample.sourceGridNs = 0;
+            break;
+        case 34:
+            ++sample.baseGridNs;
+            break;
+        case 35:
+            sample.candidateNs = -1;
+            break;
+        case 36:
+            ++sample.rawCorrectionNs;
+            break;
+        case 37:
+            sample.appliedCorrectionNs = -1001;
+            break;
+        case 38:
+            ++sample.committedGridNs;
+            break;
+        case 39:
+            sample.committed = false;
+            break;
+        case 40:
+            trace.events[0].planEstimatorId = trace.events[0].lastEstimatorId + 1;
+            break;
+        case 41:
+            trace.events[0].lastEstimatorId = quality.observed + 1;
+            break;
+        case 42:
+            quality.drained  = 1;
+            quality.selected = quality.drained + quality.dropped + quality.queued;
+            break;
+        }
+
+        auto input  = message( samplePrimary(), {}, sampleSimulation(), trace );
+        auto buffer = envelope( input );
+        REQUIRE_FALSE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+    }
+
+    auto        input   = message( samplePrimary(), {}, sampleSimulation(), sampleEstimatorTrace() );
+    auto        corrupt = envelope( input );
+    const auto *decoded = GetTelem_dmsynco_fb( flatlogs::logHeader::messageBuffer( corrupt ) );
+    auto       *samples = const_cast<uint8_t *>( decoded->simulation()->estimator_trace()->samples()->Data() );
+    std::memset( samples, 0xff, sizeof( flatbuffers::uoffset_t ) );
     REQUIRE_FALSE( verifyLogEntry( telem_dmsynco::eventCode, corrupt.get() ) );
 }
 

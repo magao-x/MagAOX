@@ -84,6 +84,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_indiP_reacquire;
     using dmSyncopation::m_indiP_settings;
     using dmSyncopation::m_indiP_simulation;
+    using dmSyncopation::m_indiP_simulationEstimator;
     using dmSyncopation::m_indiP_simulationStatus;
     using dmSyncopation::m_indiP_simulationSteps;
     using dmSyncopation::m_indiP_simulationTrace;
@@ -121,6 +122,8 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_scheduleState;
     using dmSyncopation::m_simulation;
     using dmSyncopation::m_simulationEnabled;
+    using dmSyncopation::m_simulationEstimatorLogFailed;
+    using dmSyncopation::m_simulationEstimatorStatus;
     using dmSyncopation::m_simulationPhaseGain;
     using dmSyncopation::m_simulationPhaseSlewUs;
     using dmSyncopation::m_simulationTraceLogFailed;
@@ -3579,6 +3582,9 @@ TEST_CASE( "syncopation simulation callbacks leave all command channels untouche
     combinedObservation( app, streams.images[1], lastMain + 290000, epoch + 19770000, 50 );
     CHECK( app.m_simulation.traceStatus().detected == 1 );
     CHECK( app.m_simulation.traceStatus().queued == 1 );
+    CHECK( app.m_simulation.estimatorStatus().observed == 41 );
+    CHECK( app.m_simulation.estimatorStatus().triggers == 1 );
+    CHECK( app.m_simulation.estimatorStatus().queued == 41 );
     CHECK_FALSE( app.m_enabled );
     CHECK_FALSE( app.m_resources );
     CHECK_FALSE( app.m_combined );
@@ -3649,14 +3655,33 @@ TEST_CASE( "syncopation simulation qualifies observations and exposes conditiona
     CHECK( app.m_indiP_simulationSteps.getPerm() == pcf::IndiProperty::ReadOnly );
     CHECK( app.m_indiP_simulationStatus.getPerm() == pcf::IndiProperty::ReadOnly );
     CHECK( app.m_indiP_simulationTrace.getPerm() == pcf::IndiProperty::ReadOnly );
+    CHECK( app.m_indiP_simulationEstimator.getPerm() == pcf::IndiProperty::ReadOnly );
     CHECK( app.m_indiP_simulation.getElements().size() == 23 );
     CHECK( app.m_indiP_simulationSteps.getElements().size() == 4 * synco::maxSteps );
     CHECK( app.m_indiP_simulationTrace.getName() == "simulation_trace" );
     CHECK( app.m_indiP_simulationTrace.getElements().size() == 7 );
+    CHECK( app.m_indiP_simulationEstimator.getName() == "simulation_estimator" );
+    CHECK( app.m_indiP_simulationEstimator.getElements().size() == 12 );
 
     for( const auto *name : { "enabled", "detected", "drained", "dropped", "queued", "capacity", "logFailed" } )
     {
         CHECK( app.m_indiP_simulationTrace.find( name ) );
+    }
+
+    for( const auto *name : { "enabled",
+                              "observed",
+                              "triggers",
+                              "selected",
+                              "drained",
+                              "dropped",
+                              "queued",
+                              "capacity",
+                              "logFailed",
+                              "history",
+                              "historyCapacity",
+                              "postRemaining" } )
+    {
+        CHECK( app.m_indiP_simulationEstimator.find( name ) );
     }
 
     CHECK( app.m_indiP_simulationStatus.find( "state" ) );
@@ -3891,7 +3916,175 @@ TEST_CASE( "syncopation overlap evidence preserves monitor and producer clocks",
     // clang-format on
 }
 
-/// Keep unlogged evidence queued during cycle-lock contention and drain at most one fixed telemetry batch.
+/// Retain the original producer interval and monotonic prediction from real primary callbacks around an overlap.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation estimator history preserves callback clocks and frozen plan provenance",
+           "[dmSyncopation][simulation][estimatorTrace]" )
+{
+    using namespace MagAOX::dmSyncoSimulation;
+    Streams           streams;
+    Harness           app;
+    const int64_t     last   = prepareSimulationTrace( app, streams );
+    constexpr int64_t epoch  = 1792000000000000000LL;
+    const auto        before = app.m_simulation.estimatorStatus();
+    REQUIRE( before.observed == 40 );
+    CHECK( before.history == 40 );
+    CHECK( before.selected == 0 );
+    const auto predicted                      = app.m_simulation.summary().nextGridNs;
+    MagAOX::logger::telem_dmsynco::lastRecord = {};
+    cadenceObservation( app, last + 270000, epoch + 19770000, 50 );
+    const auto after = app.m_simulation.estimatorStatus();
+    REQUIRE( after.observed == before.observed + 1 );
+    CHECK( after.triggers == 1 );
+    REQUIRE( after.selected == 41 );
+    CHECK( after.queued == after.selected );
+    CHECK( after.drained == 0 );
+    CHECK( after.dropped == 0 );
+    CHECK( after.history == 41 );
+    CHECK( after.postRemaining == estimatorPostSamples - 1 );
+    CHECK( MagAOX::logger::telem_dmsynco::lastRecord.tv_sec == 0 );
+
+    EstimatorSample sample;
+    EstimatorSample previous;
+    size_t          retained = 0;
+
+    while( app.m_simulation.popEstimator( sample ) )
+    {
+        CHECK( sample.id == ++retained );
+        CHECK( sample.counter == retained + 9 );
+        CHECK( sample.sequence == retained );
+        CHECK( sample.session == app.m_simulation.summary().session );
+        CHECK( sample.observedNs < epoch ); // Producer timestamps never become monotonic observations.
+
+        if( retained > 1 )
+        {
+            CHECK( sample.sequential );
+            CHECK( sample.intervalAccepted );
+            CHECK( sample.publicationIntervalNs == ( retained == 41 ? 270000 : 500000 ) );
+            CHECK( sample.observedNs > previous.observedNs );
+        }
+
+        if( retained > 5 )
+        {
+            CHECK( sample.committed );
+            CHECK( sample.nextCounter == sample.counter + 1 );
+            CHECK( sample.sourcePlanCounter == sample.counter );
+            CHECK( sample.sourceEstimatorId == previous.id );
+            CHECK( sample.sourceGridNs == previous.committedGridNs );
+            CHECK( sample.baseGridNs == sample.sourceGridNs + sample.periodNs );
+            CHECK( sample.committedGridNs == sample.baseGridNs + sample.appliedCorrectionNs );
+            CHECK( sample.phaseGain == Approx( 0.1 ) );
+            CHECK( sample.phaseSlewNs == 1000 );
+        }
+
+        previous = sample;
+    }
+
+    REQUIRE( retained == 41 );
+    CHECK( sample.counter == 50 );
+    CHECK( sample.predictedNs == predicted );
+    CHECK( sample.observedNs == app.m_simulation.summary().lastMainNs );
+    CHECK( sample.periodBeforeNs == 500000 );
+    CHECK( sample.periodNs == 500000 );
+    OverlapEvent overlap;
+    REQUIRE( app.m_simulation.popOverlap( overlap ) );
+    CHECK( overlap.lastEstimatorId == sample.id - 1 );
+    CHECK( overlap.planEstimatorId > 0 );
+    CHECK( overlap.planEstimatorId < sample.id );
+    CHECK( overlap.observation.publicationNs == epoch + 19770000 );
+
+    cadenceObservation( app, last + 280000, epoch + 19770000, 50 );
+    CHECK( app.m_simulation.estimatorStatus().observed == after.observed );
+    cadenceObservation( app, last + 300000, epoch + 19800000, 51, false, true );
+    CHECK( app.m_simulation.estimatorStatus().observed == after.observed );
+    streams.images[0].md->write = 0;
+    CHECK_FALSE( app.m_simulation.popEstimator( sample ) );
+    CHECK_FALSE( app.m_enabled );
+    CHECK_FALSE( app.m_resources );
+    CHECK( app.m_delivered == 0 );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::processImage( nullptr, dev::shmimT{} );
+    dmSyncopation::readSimulationPrimary;
+#endif
+    // clang-format on
+}
+
+/// Validate real callback-produced warmup, provenance and bounded corrections through the binary telemetry reader.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation callback estimator history roundtrips through telemetry validation",
+           "[dmSyncopation][simulation][estimatorTrace]" )
+{
+    using namespace MagAOX::dmSyncoSimulation;
+    using MagAOX::logger::telem_dmsynco;
+    Streams           streams;
+    Harness           app;
+    const int64_t     last  = prepareSimulationTrace( app, streams );
+    constexpr int64_t epoch = 1792000000000000000LL;
+
+    for( uint64_t index = 0; index < 5; ++index )
+    {
+        const int64_t observed  = last + 270000 + int64_t( index ) * 500000;
+        const int64_t published = epoch + 19770000 + int64_t( index ) * 500000;
+        cadenceObservation( app, observed, published, index + 50 );
+        combinedObservation( app, streams.images[1], observed + 20000, published, index + 50 );
+    }
+
+    TraceBatch trace;
+
+    while( trace.count < trace.events.size() && app.m_simulation.popOverlap( trace.events[trace.count] ) )
+    {
+        ++trace.count;
+    }
+
+    while( trace.estimatorCount < trace.estimator.size() &&
+           app.m_simulation.popEstimator( trace.estimator[trace.estimatorCount] ) )
+    {
+        ++trace.estimatorCount;
+    }
+
+    trace.status          = app.m_simulation.traceStatus();
+    trace.estimatorStatus = app.m_simulation.estimatorStatus();
+    REQUIRE( trace.count > 0 );
+    REQUIRE( trace.estimatorCount == 45 );
+    REQUIRE_FALSE( trace.estimator[0].committed ); // Real estimator warmup is retained with the triggering window.
+    REQUIRE( trace.estimator[44].committed );
+    REQUIRE( trace.estimator[44].appliedCorrectionNs < 0 );
+    const auto              summary = app.m_simulation.summary();
+    telem_dmsynco::messageT message( 0, 0, 0, 0, 0, 0, 0, 0, 0, {}, {}, {}, false, {}, {}, {}, {}, summary, trace );
+    flatlogs::bufferPtrT    buffer;
+    REQUIRE( flatlogs::logHeader::createLog<telem_dmsynco>( buffer, { 1, 2 }, message, flatlogs::logPrio::LOG_TELEM ) ==
+             0 );
+    REQUIRE( telem_dmsynco::verify( buffer, flatlogs::logHeader::msgLen( buffer ) ) );
+    const auto *decoded = MagAOX::logger::GetTelem_dmsynco_fb( flatlogs::logHeader::messageBuffer( buffer ) );
+    REQUIRE( decoded->simulation() != nullptr );
+    REQUIRE( decoded->simulation()->estimator_trace() != nullptr );
+    const auto *samples = decoded->simulation()->estimator_trace()->samples();
+    REQUIRE( samples != nullptr );
+    REQUIRE( samples->size() == trace.estimatorCount );
+    CHECK( samples->Get( 0 )->counter() == 10 );
+    CHECK( samples->Get( 0 )->predicted_ns() == 0 );
+    CHECK( samples->Get( 40 )->publication_interval_ns() == 270000 );
+    CHECK( samples->Get( 44 )->observed_ns() == trace.estimator[44].observedNs );
+    CHECK( samples->Get( 44 )->source_estimator_id() == trace.estimator[43].id );
+    CHECK( samples->Get( 44 )->committed_grid_ns() == trace.estimator[44].committedGridNs );
+    CHECK( samples->Get( 44 )->applied_correction_ns() == trace.estimator[44].appliedCorrectionNs );
+    CHECK_FALSE( app.m_enabled );
+    CHECK( app.m_delivered == 0 );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::processImage( nullptr, dev::shmimT{} );
+    dmSyncopation::readSimulationPrimary;
+    synco::Simulation::popEstimator;
+    MagAOX::logger::telem_dmsynco::messageT;
+    MagAOX::logger::telem_dmsynco::verify;
+#endif
+    // clang-format on
+}
+
+/// Keep both unlogged histories queued during cycle-lock contention and drain at most fixed telemetry batches.
 /** \ingroup dmSyncopation_unit_test */
 TEST_CASE( "syncopation overlap telemetry drains only outside producer callbacks",
            "[dmSyncopation][simulation][overlapTrace]" )
@@ -3905,6 +4098,8 @@ TEST_CASE( "syncopation overlap telemetry drains only outside producer callbacks
     {
         cadenceObservation( app, last + 270000, 1792000000019770000LL, 50 );
         REQUIRE( app.m_simulation.traceStatus().queued == 1 );
+        const auto estimator = app.m_simulation.estimatorStatus();
+        REQUIRE( estimator.queued == 41 );
         std::unique_lock<std::mutex> cycle( app.m_cycleMutex );
         auto                         recording = std::async( std::launch::async,
                                      [&]()
@@ -3918,9 +4113,16 @@ TEST_CASE( "syncopation overlap telemetry drains only outside producer callbacks
         CHECK( app.m_simulation.traceStatus().detected == 1 );
         CHECK( app.m_simulation.traceStatus().drained == 0 );
         CHECK( app.m_simulation.traceStatus().queued == 1 );
+        CHECK( app.m_simulation.estimatorStatus().drained == 0 );
+        CHECK( app.m_simulation.estimatorStatus().queued == estimator.queued );
         REQUIRE( app.recordTelem( nullptr ) == 0 );
         CHECK( app.m_simulation.traceStatus().drained == 1 );
         CHECK( app.m_simulation.traceStatus().queued == 0 );
+        CHECK( app.m_simulation.estimatorStatus().drained == estimator.queued );
+        CHECK( app.m_simulation.estimatorStatus().queued == 0 );
+        CHECK( app.m_simulationEstimatorStatus.selected == estimator.selected );
+        CHECK( app.m_simulationEstimatorStatus.drained == estimator.queued );
+        CHECK( app.m_simulationEstimatorStatus.queued == 0 );
     }
 
     SECTION( "One record cannot drain more than the shared batch capacity" )
@@ -3948,6 +4150,7 @@ TEST_CASE( "syncopation overlap telemetry drains only outside producer callbacks
     CHECK( app.m_simulationTraceStatus.enabled );
     CHECK( app.m_simulationTraceStatus.dropped == 0 );
     CHECK( app.m_simulationTraceLogFailed == 0 );
+    CHECK( app.m_simulationEstimatorLogFailed == 0 );
     CHECK( app.m_simulationTraceStatus.detected == app.m_simulationTraceStatus.drained +
                                                        app.m_simulationTraceStatus.dropped +
                                                        app.m_simulationTraceStatus.queued );
@@ -3959,7 +4162,72 @@ TEST_CASE( "syncopation overlap telemetry drains only outside producer callbacks
     // clang-format on
 }
 
-/// Leave overlap collection and its INDI interface absent from ordinary non-simulation operation.
+/// Preserve queued estimator records across model sessions and bound each ordinary-thread telemetry drain.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation estimator telemetry drains a bounded independent batch",
+           "[dmSyncopation][simulation][estimatorTrace]" )
+{
+    using namespace MagAOX::dmSyncoSimulation;
+    Streams          streams;
+    Harness          app;
+    const int64_t    start         = prepareSimulationTrace( app, streams );
+    constexpr size_t samplesPerRun = 41;
+    constexpr size_t runs          = estimatorBatchCapacity / samplesPerRun + 1;
+    constexpr size_t selected      = runs * samplesPerRun;
+
+    for( size_t run = 0; run < runs; ++run )
+    {
+        app.m_simulation.reset();
+        const int64_t first = start + 1000000 + int64_t( run ) * 21000000;
+
+        for( uint64_t index = 0; index < 40; ++index )
+        {
+            const int64_t now = first + int64_t( index ) * 500000;
+            app.m_simulation.primary( index + 10, now, index ? 500000 : 0 );
+            app.m_simulation.combined( index + 10, index + 10, now + 20000 );
+        }
+
+        app.m_simulation.primary( 50, first + 19770000, 270000 );
+    }
+
+    const auto pending = app.m_simulation.estimatorStatus();
+    REQUIRE( pending.selected == selected );
+    REQUIRE( pending.queued == selected );
+    REQUIRE( pending.queued > estimatorBatchCapacity );
+    CHECK( pending.triggers == runs );
+    CHECK( pending.dropped == 0 );
+    REQUIRE( app.recordTelem( nullptr ) == 0 );
+    const auto first = app.m_simulationEstimatorStatus;
+    CHECK( first.enabled );
+    CHECK( first.selected == selected );
+    CHECK( first.drained == estimatorBatchCapacity );
+    CHECK( first.queued == selected - estimatorBatchCapacity );
+    CHECK( first.capacity == estimatorTraceCapacity );
+    CHECK( first.historyCapacity == estimatorHistoryCapacity );
+    CHECK( first.history == samplesPerRun );
+    CHECK( first.postRemaining == estimatorPostSamples - 1 );
+    REQUIRE( app.recordTelem( nullptr ) == 0 );
+    const auto second = app.m_simulationEstimatorStatus;
+    CHECK( second.selected == selected );
+    CHECK( second.drained == selected );
+    CHECK( second.queued == 0 );
+    CHECK( second.dropped == 0 );
+    CHECK( second.logFailed == 0 );
+    CHECK( second.selected == second.drained + second.dropped + second.queued );
+    CHECK( app.m_simulationEstimatorLogFailed == 0 );
+    CHECK( app.m_simulationTraceLogFailed == 0 );
+    CHECK_FALSE( app.m_enabled );
+    CHECK_FALSE( app.m_resources );
+    CHECK( app.m_delivered == 0 );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::recordTelem;
+#endif
+    // clang-format on
+}
+
+/// Leave overlap and estimator collection and their INDI interfaces absent from ordinary non-simulation operation.
 /** \ingroup dmSyncopation_unit_test */
 TEST_CASE( "syncopation default observers do not collect overlap evidence",
            "[dmSyncopation][simulation][overlapTrace]" )
@@ -3978,6 +4246,16 @@ TEST_CASE( "syncopation default observers do not collect overlap evidence",
     CHECK( status.queued == 0 );
     CHECK_FALSE( app.m_simulation.popOverlap( event ) );
     CHECK( app.m_indiP_simulationTrace.getElements().empty() );
+    const auto                                 estimator = app.m_simulation.estimatorStatus();
+    MagAOX::dmSyncoSimulation::EstimatorSample sample;
+    CHECK_FALSE( estimator.enabled );
+    CHECK( estimator.observed == 0 );
+    CHECK( estimator.triggers == 0 );
+    CHECK( estimator.selected == 0 );
+    CHECK( estimator.queued == 0 );
+    CHECK( estimator.history == 0 );
+    CHECK_FALSE( app.m_simulation.popEstimator( sample ) );
+    CHECK( app.m_indiP_simulationEstimator.getElements().empty() );
 
     // clang-format off
 #ifdef DMSYNCOPATION_TEST_DOXYGEN_REF

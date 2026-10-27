@@ -1,11 +1,12 @@
 /** \file telem_dmsynco.hpp
- * \brief Aggregate syncopation timing, conditional outcomes and bounded raw overlap telemetry.
+ * \brief Aggregate syncopation timing, conditional outcomes and bounded overlap/estimator history telemetry.
  */
 #ifndef logger_types_telem_dmsynco_hpp
 #define logger_types_telem_dmsynco_hpp
 
 #include <algorithm>
 #include <iomanip>
+#include <limits>
 #include <sstream>
 #include <vector>
 
@@ -34,26 +35,26 @@ struct telem_dmsynco : public flatbuffer_log
     struct messageT : public fbMessage
     {
         /// Serialize a coherent snapshot of scheduler diagnostics.
-        messageT(
-            int                         state /**< [in] schedule state */,
-            int                         steps /**< [in] requested count */,
-            int64_t                     period /**< [in] measured period, ns */,
-            uint64_t                    delivered /**< [in] confirmed extra combinations */,
-            uint64_t                    missed /**< [in] failed timing events */,
-            uint64_t                    faults /**< [in] synchronization/resource faults */,
-            uint64_t                    cached /**< [in] source-cache fallback count */,
-            int64_t                     snapshot /**< [in] maximum whole-snapshot time, ns */,
-            int64_t                     copy /**< [in] maximum whole-copy time, ns */,
-            const std::vector<int64_t> &residuals /**< [in] latest per-step residuals, ns */,
-            const std::vector<int64_t> &advances /**< [in] per-step wait advances, ns */,
-            const dmTiming::Summary    &primary = {} /**< [in] observed primary cadence; disabled by default */,
-            bool scheduleValid = true /**< [in] false when scheduler fields are unavailable placeholders */,
-            const dmCombTiming::Summary     &combiner = {} /**< [in] independently observed combiner timing */,
-            const dmTiming::Summary         &camera   = {} /**< [in] independent camera acquisition-stamp intervals */,
-            const dmPipelineTiming::Summary &pipeline = {} /**< [in] upstream trace-stage populations */,
-            const dmTiming::Summary         &cameraPublication = {} /**< [in] independent camera writetime intervals */,
-            const dmSyncoSimulation::Summary    &simulation    = {} /**< [in] conditional shadow predictions */,
-            const dmSyncoSimulation::TraceBatch &trace = {} /**< [in] drained overlap evidence and queue quality */ );
+        messageT( int                         state /**< [in] schedule state */,
+                  int                         steps /**< [in] requested count */,
+                  int64_t                     period /**< [in] measured period, ns */,
+                  uint64_t                    delivered /**< [in] confirmed extra combinations */,
+                  uint64_t                    missed /**< [in] failed timing events */,
+                  uint64_t                    faults /**< [in] synchronization/resource faults */,
+                  uint64_t                    cached /**< [in] source-cache fallback count */,
+                  int64_t                     snapshot /**< [in] maximum whole-snapshot time, ns */,
+                  int64_t                     copy /**< [in] maximum whole-copy time, ns */,
+                  const std::vector<int64_t> &residuals /**< [in] latest per-step residuals, ns */,
+                  const std::vector<int64_t> &advances /**< [in] per-step wait advances, ns */,
+                  const dmTiming::Summary    &primary = {} /**< [in] observed primary cadence; disabled by default */,
+                  bool scheduleValid = true /**< [in] false when scheduler fields are unavailable placeholders */,
+                  const dmCombTiming::Summary &combiner = {} /**< [in] independently observed combiner timing */,
+                  const dmTiming::Summary     &camera = {} /**< [in] independent camera acquisition-stamp intervals */,
+                  const dmPipelineTiming::Summary &pipeline  = {} /**< [in] upstream trace-stage populations */,
+                  const dmTiming::Summary &cameraPublication = {} /**< [in] independent camera writetime intervals */,
+                  const dmSyncoSimulation::Summary    &simulation = {} /**< [in] conditional shadow predictions */,
+                  const dmSyncoSimulation::TraceBatch &trace =
+                      {} /**< [in] drained overlap/estimator evidence and quality */ );
     };
 
     /// Validate optional cadence and stage populations while accepting legacy records.
@@ -104,6 +105,11 @@ struct telem_dmsynco : public flatbuffer_log
     overlapTrace( flatbuffers::FlatBufferBuilder      &builder /**< [in/out] destination builder */,
                   const dmSyncoSimulation::TraceBatch &trace /**< [in] lifetime queue quality and drained records */ );
 
+    /// Serialize triggered estimator history without recalculating its medians or corrections.
+    static flatbuffers::Offset<DmSyncoEstimatorTrace> estimatorTrace(
+        flatbuffers::FlatBufferBuilder      &builder /**< [in/out] destination builder */,
+        const dmSyncoSimulation::TraceBatch &trace /**< [in] selected samples and independent queue quality */ );
+
     /// Check finite populated statistics and sample-variance validity.
     static bool validStats( const DmSyncoTimingStats *stats /**< [in] required nested cadence population */,
                             bool signedValues = false /**< [in] allow negative latency changes */ );
@@ -119,6 +125,9 @@ struct telem_dmsynco : public flatbuffer_log
 
     /// Check bounded lifetime accounting, event provenance and classified overlap intervals.
     static bool validOverlapTrace( const DmSyncoOverlapTrace *trace /**< [in] optional raw overlap evidence */ );
+
+    /// Check independent triggered coverage and actual estimator arithmetic across configuration epochs.
+    static bool validEstimatorTrace( const DmSyncoEstimatorTrace *trace /**< [in] optional estimator history */ );
 
     /// Format independent primary/camera cadence and ordered excursions with distinct names.
     static void
@@ -138,6 +147,10 @@ struct telem_dmsynco : public flatbuffer_log
     /// Append exact nanosecond evidence with explicit monotonic and unconverted producer clock labels.
     static void formatOverlapTrace( std::ostream              &output /**< [in/out] formatted aggregate */,
                                     const DmSyncoOverlapTrace *trace /**< [in] optional raw overlap evidence */ );
+
+    /// Append selected pre/post samples and independent coverage/loss accounting with explicit clock labels.
+    static void formatEstimatorTrace( std::ostream                &output /**< [in/out] formatted aggregate */,
+                                      const DmSyncoEstimatorTrace *trace /**< [in] optional estimator history */ );
 
     /// Validate optional ordered-pair populations and their conditional count relationships.
     static bool
@@ -393,7 +406,9 @@ telem_dmsynco::overlapTrace( flatbuffers::FlatBufferBuilder &builder, const dmSy
                                                      event.readerEndNs,
                                                      event.lastMainNs,
                                                      event.lastOutputNs,
-                                                     observation ) );
+                                                     observation,
+                                                     event.planEstimatorId,
+                                                     event.lastEstimatorId ) );
     }
 
     const auto  records = builder.CreateVector( events );
@@ -409,6 +424,69 @@ telem_dmsynco::overlapTrace( flatbuffers::FlatBufferBuilder &builder, const dmSy
                                       quality.logFailed,
                                       trace.count,
                                       records );
+}
+
+inline flatbuffers::Offset<DmSyncoEstimatorTrace>
+telem_dmsynco::estimatorTrace( flatbuffers::FlatBufferBuilder &builder, const dmSyncoSimulation::TraceBatch &trace )
+{
+    if( !trace.estimatorStatus.enabled )
+    {
+        return {};
+    }
+
+    std::vector<flatbuffers::Offset<DmSyncoEstimatorSample>> samples;
+    const size_t count = std::min<size_t>( trace.estimatorCount, trace.estimator.size() );
+    samples.reserve( count );
+
+    for( size_t index = 0; index < count; ++index )
+    {
+        const auto &sample = trace.estimator[index];
+        samples.push_back( CreateDmSyncoEstimatorSample( builder,
+                                                         sample.id,
+                                                         sample.session,
+                                                         sample.sequence,
+                                                         sample.counter,
+                                                         sample.observedNs,
+                                                         sample.publicationIntervalNs,
+                                                         sample.sequential,
+                                                         sample.intervalAccepted,
+                                                         sample.periodSamples,
+                                                         sample.phaseSamples,
+                                                         sample.periodBeforeNs,
+                                                         sample.periodNs,
+                                                         sample.predictedNs,
+                                                         sample.nextCounter,
+                                                         sample.sourcePlanCounter,
+                                                         sample.sourceEstimatorId,
+                                                         sample.sourceGridNs,
+                                                         sample.baseGridNs,
+                                                         sample.candidateNs,
+                                                         sample.phaseGain,
+                                                         sample.phaseSlewNs,
+                                                         sample.rawCorrectionNs,
+                                                         sample.appliedCorrectionNs,
+                                                         sample.committedGridNs,
+                                                         sample.committed ) );
+    }
+
+    const auto  records = builder.CreateVector( samples );
+    const auto &quality = trace.estimatorStatus;
+
+    return CreateDmSyncoEstimatorTrace( builder,
+                                        quality.enabled,
+                                        quality.observed,
+                                        quality.triggers,
+                                        quality.selected,
+                                        quality.drained,
+                                        quality.dropped,
+                                        quality.queued,
+                                        quality.capacity,
+                                        quality.logFailed,
+                                        quality.history,
+                                        quality.historyCapacity,
+                                        quality.postRemaining,
+                                        trace.estimatorCount,
+                                        records );
 }
 
 inline flatbuffers::Offset<DmSyncoSimulation>
@@ -438,8 +516,9 @@ telem_dmsynco::simulationTiming( flatbuffers::FlatBufferBuilder      &builder,
                                                       step.overlap ) );
     }
 
-    const auto outcomes = builder.CreateVector( steps );
-    const auto evidence = overlapTrace( builder, trace );
+    const auto outcomes  = builder.CreateVector( steps );
+    const auto evidence  = overlapTrace( builder, trace );
+    const auto estimator = estimatorTrace( builder, trace );
 
     return CreateDmSyncoSimulation( builder,
                                     summary.enabled,
@@ -483,7 +562,8 @@ telem_dmsynco::simulationTiming( flatbuffers::FlatBufferBuilder      &builder,
                                     summary.associations,
                                     outcomes,
                                     summary.cadenceMinPeriodNs,
-                                    evidence );
+                                    evidence,
+                                    estimator );
 }
 
 inline telem_dmsynco::messageT::messageT( int                                  state,
@@ -714,7 +794,8 @@ inline bool telem_dmsynco::validOverlapTrace( const DmSyncoOverlapTrace *trace )
     for( const auto *event : *trace->events() )
     {
         if( !event || event->id() <= previousId || event->id() > trace->detected() || !event->session() ||
-            event->step() < 0 || event->step() >= int( dmSyncoSimulation::maxSteps ) ||
+            event->plan_estimator_id() > event->last_estimator_id() || event->step() < 0 ||
+            event->step() >= int( dmSyncoSimulation::maxSteps ) ||
             ( event->origin() != DmSyncoOverlapOrigin_primary && event->origin() != DmSyncoOverlapOrigin_combined ) ||
             ( event->window() != DmSyncoOverlapWindow_copy && event->window() != DmSyncoOverlapWindow_readerHold ) ||
             event->observed_ns() <= 0 || event->main_grid_ns() < 0 || event->plan_grid_ns() <= 0 ||
@@ -772,6 +853,95 @@ inline bool telem_dmsynco::validOverlapTrace( const DmSyncoOverlapTrace *trace )
     return true;
 }
 
+inline bool telem_dmsynco::validEstimatorTrace( const DmSyncoEstimatorTrace *trace )
+{
+    if( !trace )
+    {
+        return true;
+    }
+
+    if( !trace->enabled() || !trace->samples() || !trace->capacity() ||
+        trace->capacity() > dmSyncoSimulation::estimatorTraceCapacity || trace->queued() > trace->capacity() ||
+        trace->selected() > trace->observed() || trace->drained() > trace->selected() ||
+        trace->dropped() > trace->selected() - trace->drained() ||
+        trace->queued() != trace->selected() - trace->drained() - trace->dropped() ||
+        trace->log_failed() > trace->drained() || !trace->history_capacity() ||
+        trace->history_capacity() > dmSyncoSimulation::estimatorHistoryCapacity ||
+        trace->history() > trace->history_capacity() || trace->history() > trace->observed() ||
+        trace->post_remaining() > dmSyncoSimulation::estimatorPostSamples ||
+        trace->batch_count() != trace->samples()->size() ||
+        trace->batch_count() > dmSyncoSimulation::estimatorBatchCapacity || trace->batch_count() > trace->drained() )
+    {
+        return false;
+    }
+
+    uint64_t previousId = 0;
+
+    for( const auto *sample : *trace->samples() )
+    {
+        if( !sample || sample->id() <= previousId || sample->id() > trace->observed() || !sample->session() ||
+            !sample->sequence() || sample->sequence() > sample->id() || sample->observed_ns() <= 0 ||
+            sample->period_samples() > dmSyncoSimulation::estimatorHistoryCapacity ||
+            sample->phase_samples() > dmSyncoSimulation::estimatorHistoryCapacity || !sample->phase_samples() ||
+            sample->period_samples() > sample->sequence() || sample->phase_samples() > sample->sequence() ||
+            sample->period_before_ns() <= 0 || sample->period_ns() <= 0 || sample->predicted_ns() < 0 ||
+            sample->source_grid_ns() < 0 || sample->base_grid_ns() < 0 || sample->candidate_ns() < 0 ||
+            sample->committed_grid_ns() < 0 || !mx::math::isFinite( sample->phase_gain() ) ||
+            sample->phase_gain() < 0 || sample->phase_gain() > 1 || sample->phase_slew_ns() < 0 ||
+            ( sample->sequential() && sample->sequence() < 2 ) ||
+            ( sample->interval_accepted() &&
+              ( !sample->sequential() || sample->publication_interval_ns() <= 0 || !sample->period_samples() ) ) )
+        {
+            return false;
+        }
+
+        previousId = sample->id();
+
+        if( !sample->next_counter() )
+        {
+            if( sample->source_plan_counter() || sample->source_estimator_id() || sample->source_grid_ns() ||
+                sample->base_grid_ns() || sample->candidate_ns() || sample->raw_correction_ns() ||
+                sample->applied_correction_ns() || sample->committed_grid_ns() || sample->committed() )
+            {
+                return false;
+            }
+
+            continue;
+        }
+
+        if( sample->counter() == std::numeric_limits<uint64_t>::max() ||
+            sample->next_counter() != sample->counter() + 1 ||
+            sample->source_plan_counter() >= sample->next_counter() || !sample->source_grid_ns() ||
+            !sample->source_estimator_id() || sample->source_estimator_id() > sample->id() )
+        {
+            return false;
+        }
+
+        const __int128 base =
+            __int128( sample->source_grid_ns() ) +
+            ( __int128( sample->next_counter() ) - sample->source_plan_counter() ) * sample->period_ns();
+        const int64_t  expectedBase = base > 0 && base <= std::numeric_limits<int64_t>::max() ? int64_t( base ) : 0;
+        const int64_t  raw          = sample->base_grid_ns() && sample->candidate_ns()
+                                          ? int64_t( sample->phase_gain() * ( static_cast<long double>( sample->candidate_ns() ) -
+                                                                    sample->base_grid_ns() ) )
+                                          : 0;
+        const int64_t  applied      = std::clamp( raw, -sample->phase_slew_ns(), sample->phase_slew_ns() );
+        const __int128 committed    = __int128( sample->base_grid_ns() ) + applied;
+
+        if( sample->base_grid_ns() != expectedBase || sample->raw_correction_ns() != raw ||
+            sample->applied_correction_ns() != applied ||
+            ( sample->committed()
+                  ? !sample->base_grid_ns() || committed <= 0 || committed > std::numeric_limits<int64_t>::max() ||
+                        sample->committed_grid_ns() != int64_t( committed )
+                  : sample->committed_grid_ns() != 0 ) )
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 inline bool telem_dmsynco::validSimulation( const DmSyncoSimulation *summary )
 {
     if( !summary )
@@ -788,11 +958,12 @@ inline bool telem_dmsynco::validSimulation( const DmSyncoSimulation *summary )
         summary->early_reserve_ns() < 0 || summary->delivery_ns() < 0 || summary->keepout_ns() < 0 ||
         summary->guard_ns() < 0 || summary->snapshot_ns() < 0 || summary->copy_ns() < 0 || summary->lead_ns() < 0 ||
         summary->observation_ns() < 0 || summary->visibility_ns() < 0 || summary->reserve_ns() < 0 ||
-        !validOverlapTrace( summary->overlap_trace() ) || !mx::math::isFinite( summary->phase_gain() ) ||
-        summary->phase_gain() < 0 || summary->phase_gain() > 1 || summary->phase_slew_ns() < 0 ||
-        summary->cadence_min_period_ns() < 0 || summary->phase_count() > summary->sequence() ||
-        summary->period_samples() > summary->sequence() || summary->phase_samples() > summary->sequence() ||
-        summary->period_samples() > summary->window() || summary->phase_samples() > summary->window() ||
+        !validOverlapTrace( summary->overlap_trace() ) || !validEstimatorTrace( summary->estimator_trace() ) ||
+        !mx::math::isFinite( summary->phase_gain() ) || summary->phase_gain() < 0 || summary->phase_gain() > 1 ||
+        summary->phase_slew_ns() < 0 || summary->cadence_min_period_ns() < 0 ||
+        summary->phase_count() > summary->sequence() || summary->period_samples() > summary->sequence() ||
+        summary->phase_samples() > summary->sequence() || summary->period_samples() > summary->window() ||
+        summary->phase_samples() > summary->window() ||
         ( summary->valid() && ( !summary->enabled() || summary->period_ns() == 0 || summary->grid_ns() == 0 ||
                                 summary->last_main_ns() == 0 || summary->window() == 0 ) ) )
     {
@@ -811,6 +982,17 @@ inline bool telem_dmsynco::validSimulation( const DmSyncoSimulation *summary )
                ( summary->phase_min_ns() != summary->phase_ns() || summary->phase_max_ns() != summary->phase_ns() ) ) )
     {
         return false;
+    }
+
+    if( summary->overlap_trace() && summary->estimator_trace() )
+    {
+        for( const auto *event : *summary->overlap_trace()->events() )
+        {
+            if( event->last_estimator_id() > summary->estimator_trace()->observed() )
+            {
+                return false;
+            }
+        }
     }
 
     for( const auto *step : *summary->outcomes() )
@@ -1043,6 +1225,7 @@ inline void telem_dmsynco::formatSimulation( std::ostream &output, const DmSynco
     }
 
     formatOverlapTrace( output, summary->overlap_trace() );
+    formatEstimatorTrace( output, summary->estimator_trace() );
 }
 
 inline void telem_dmsynco::formatOverlapTrace( std::ostream &output, const DmSyncoOverlapTrace *trace )
@@ -1064,6 +1247,7 @@ inline void telem_dmsynco::formatOverlapTrace( std::ostream &output, const DmSyn
                << ",window:" << ( event->window() == DmSyncoOverlapWindow_copy ? "copy" : "readerHold" )
                << ",mainCounter:" << event->main_counter() << ",combinedCounter:" << event->combined_counter()
                << ",planCounter:" << event->plan_counter() << ",lastMainCounter:" << event->last_main_counter()
+               << ",planEstimatorId:" << event->plan_estimator_id() << ",lastEstimatorId:" << event->last_estimator_id()
                << ",step:" << event->step() << ",model_clock:monotonic,observed_ns:" << event->observed_ns()
                << ",mainGrid_ns:" << event->main_grid_ns() << ",planGrid_ns:" << event->plan_grid_ns()
                << ",period_ns:" << event->period_ns() << ",copyBegin_ns:" << event->copy_begin_ns()
@@ -1075,6 +1259,41 @@ inline void telem_dmsynco::formatOverlapTrace( std::ostream &output, const DmSyn
                << ",producer_clock:unconverted,publication_ns:" << source->publication_ns()
                << ",primaryPublication_ns:" << source->primary_publication_ns() << ",start_ns:" << source->start_ns()
                << ",update_ns:" << source->update_ns() << '}';
+    }
+}
+
+inline void telem_dmsynco::formatEstimatorTrace( std::ostream &output, const DmSyncoEstimatorTrace *trace )
+{
+    if( !trace || !trace->enabled() )
+    {
+        return;
+    }
+
+    output << " estimator_quality={enabled:1,observed:" << trace->observed() << ",triggers:" << trace->triggers()
+           << ",selected:" << trace->selected() << ",drained:" << trace->drained() << ",dropped:" << trace->dropped()
+           << ",queued:" << trace->queued() << ",capacity:" << trace->capacity() << ",logFailed:" << trace->log_failed()
+           << ",history:" << trace->history() << ",historyCapacity:" << trace->history_capacity()
+           << ",postRemaining:" << trace->post_remaining() << ",batch:" << trace->batch_count() << '}';
+
+    for( const auto *sample : *trace->samples() )
+    {
+        output << " sim_estimator={id:" << sample->id() << ",session:" << sample->session()
+               << ",sequence:" << sample->sequence() << ",counter:" << sample->counter()
+               << ",model_clock:monotonic,observed_ns:" << sample->observed_ns()
+               << ",interval_clock:producer_elapsed,publicationInterval_ns:" << sample->publication_interval_ns()
+               << ",sequential:" << sample->sequential() << ",intervalAccepted:" << sample->interval_accepted()
+               << ",periodSamples:" << sample->period_samples() << ",phaseSamples:" << sample->phase_samples()
+               << ",periodBefore_ns:" << sample->period_before_ns() << ",period_ns:" << sample->period_ns()
+               << ",predicted_ns:" << sample->predicted_ns() << ",nextCounter:" << sample->next_counter()
+               << ",sourcePlanCounter:" << sample->source_plan_counter()
+               << ",sourceEstimatorId:" << sample->source_estimator_id()
+               << ",sourceGrid_ns:" << sample->source_grid_ns() << ",baseGrid_ns:" << sample->base_grid_ns()
+               << ",candidate_ns:" << sample->candidate_ns()
+               << ",phaseGain:" << std::setprecision( std::numeric_limits<double>::max_digits10 )
+               << sample->phase_gain() << std::setprecision( 10 ) << ",phaseSlew_ns:" << sample->phase_slew_ns()
+               << ",rawCorrection_ns:" << sample->raw_correction_ns()
+               << ",appliedCorrection_ns:" << sample->applied_correction_ns()
+               << ",committedGrid_ns:" << sample->committed_grid_ns() << ",committed:" << sample->committed() << '}';
     }
 }
 
