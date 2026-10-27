@@ -1,6 +1,5 @@
 /** \file orcaUtils_test.cpp
  * \brief Catch2 tests for the ORCA-Quest2 utility helpers.
- * \author Joshua Liberman (jliberman54@gmail.com)
  *
  * \ingroup orcaCtrl_files
  */
@@ -36,7 +35,8 @@ TEST_CASE( "orcaCtrl frame selection publishes frames in order", "[orcaUtils]" )
 {
     // clang-format off
     #ifdef ORCACTRL_TEST_DOXYGEN_REF
-    orcaSelectFrame( *(orcaFrameSelection *)nullptr, 0, 0, 0, 0, 0 );
+    orcaFrameSelection docSel;
+    orcaSelectFrame( docSel, 0, 1, 0, 10, 2 );
     #endif
     // clang-format on
 
@@ -102,7 +102,8 @@ TEST_CASE( "orcaCtrl frame selection handles ring-buffer overruns", "[orcaUtils]
 {
     // clang-format off
     #ifdef ORCACTRL_TEST_DOXYGEN_REF
-    orcaSelectFrame( *(orcaFrameSelection *)nullptr, 0, 0, 0, 0, 0 );
+    orcaFrameSelection docSel;
+    orcaSelectFrame( docSel, 0, 1, 0, 10, 2 );
     #endif
     // clang-format on
 
@@ -230,7 +231,9 @@ TEST_CASE( "orcaCtrl ROI clamping keeps the ROI valid on the sensor", "[orcaUtil
 {
     // clang-format off
     #ifdef ORCACTRL_TEST_DOXYGEN_REF
-    orcaClampROI( *(float *)nullptr, *(float *)nullptr, *(int *)nullptr, *(int *)nullptr, 0, 0, 0 );
+    float docX = 2047, docY = 1151;
+    int   docW = 128, docH = 128;
+    orcaClampROI( docX, docY, docW, docH, 4096, 2304, 4 );
     #endif
     // clang-format on
 

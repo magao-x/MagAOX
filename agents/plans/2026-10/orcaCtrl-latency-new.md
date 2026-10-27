@@ -559,3 +559,20 @@ no errors, 1024×1024 at 120.4 Hz).
   order without counting them (see the round 2d notes). Follow-up recorded.
 - **R6** (no regression at full frame): **pass**, 119.0 Hz at full frame with a 12-frame buffer. Binning
   wasn't tested.
+
+### Test fix: null-pointer dereferences in Doxygen reference blocks (2026-10-27)
+
+- `apps/orcaCtrl/tests/orcaUtils_test.cpp` had `*(T *)nullptr` dummy arguments in three
+  `#ifdef ORCACTRL_TEST_DOXYGEN_REF` blocks (`orcaSelectFrame()` twice, `orcaClampROI()` once; the pattern
+  came from `cred2Utils_test.cpp`). The `orcaClampROI()` block also passed a step of 0, which would divide by
+  zero. They're only compiled when the macro is defined, but are undefined behavior if they are.
+- They now use valid local variables and realistic arguments (`orcaFrameSelection docSel`; ROI 128×128 at
+  (2047, 1151) on a 4096×2304 sensor, step 4). The `\author` line was removed (AGENTS.md rule 2).
+- Verified on `exao0` with code-only work (no INDI or hardware, AGENTS.md rule 0):
+  - with `-DORCACTRL_TEST_DOXYGEN_REF -O0`, the previous version crashes with SIGSEGV at the
+    `orcaClampROI()` test case, and the fixed version passes (74 assertions, 5 test cases);
+  - the normal test build also passes (74 assertions, 5 test cases), and clang-format is clean.
+  - ASan and UBSan runtimes aren't installed for gcc-toolset-14 on `exao0` (`-lasan`/`-lubsan` not found),
+    so the check used a plain `-O0` build.
+- Not changed (out of scope): `apps/cred2Ctrl/tests/cred2Utils_test.cpp` uses the same `*(T *)nullptr`
+  pattern in its Doxygen reference blocks.
