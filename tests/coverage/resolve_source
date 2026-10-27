@@ -1,0 +1,20 @@
+#!/bin/bash
+# Resolve libMagAOX PCH source paths attributed to an application's directory.
+# Includes from sibling libraries (e.g. ../INDI) are relative to the repo root.
+# lcov passes a missing absolute source filename and reads the resolved path.
+# Leave unknown paths unresolved so lcov still reports missing source files.
+
+set -euo pipefail
+
+repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
+source_path=$1
+
+if [[ "$source_path" == "$repo_root/apps/"* && ! -f "$source_path" ]]; then
+    relative_path=${source_path#"$repo_root/apps/"}
+    for library_path in "$repo_root/libMagAOX/${relative_path#*/}" "$repo_root/$relative_path"; do
+        if [[ -f "$library_path" ]]; then
+            printf '%s\n' "$library_path"
+            exit 0
+        fi
+    done
+fi

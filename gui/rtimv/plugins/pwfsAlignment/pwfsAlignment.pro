@@ -15,6 +15,7 @@ QT           += widgets
 
 HEADERS       = pwfsAlignment.hpp
 SOURCES       = pwfsAlignment.cpp
+LIBS          += -lrtimv
 TARGET        = $$qtLibraryTarget(rtimv_pwfsAlignmentPlugin)
 DESTDIR       = ./
 
