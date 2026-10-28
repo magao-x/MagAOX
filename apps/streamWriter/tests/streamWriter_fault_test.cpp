@@ -4,10 +4,12 @@
  */
 #include "../../../tests/testXWC.hpp"
 
+#include <condition_variable>
 #include <deque>
 #include <functional>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <memory>
 
 #define protected public
@@ -52,13 +54,13 @@ struct Faults
     bool                  m_due{ false };                          ///< Force the next scheduled record.
     unsigned              m_mallocCalls{ 0 }, m_failMalloc{ 0 };   ///< Selected application allocation failure.
     unsigned              m_newCalls{ 0 }, m_failNew{ 0 };         ///< Selected XRIF handle failure.
-    unsigned              m_sigCalls{ 0 }, m_failSig{ 0 };         ///< Selected signal installation failure.
     unsigned              m_threadCalls{ 0 }, m_failThread{ 0 };   ///< Selected worker startup failure.
     unsigned              m_tryJoinCalls{ 0 }, m_failTryJoin{ 0 }; ///< Selected exited-worker check.
     bool                  m_throwTryJoin{ false };                 ///< Throw instead of reporting an exited worker.
     unsigned              m_joinCalls{ 0 }, m_failJoin{ 0 };       ///< Selected join exception.
     bool                  m_failSemInit{ false };                  ///< Fail writer semaphore initialization.
     bool                  m_failPost{ false };                     ///< Fail a queued write notification.
+    unsigned              m_postCalls{ 0 };                        ///< Writer notifications attempted by the producer.
     bool                  m_failClock{ false };                    ///< Fail realtime clock acquisition.
     bool                  m_failDirectories{ false };              ///< Throw a generic directory creation exception.
     bool                  m_failXrifAllocate{ false };             ///< Fail encoder raw-buffer allocation.
@@ -377,20 +379,6 @@ size_t swWrite( const void *data, size_t size, size_t count, FILE *file )
         count = 1;
     return ::fwrite( data, size, count, file );
 }
-/// Simulate signal registration without replacing the process's signal handlers.
-int swSigaction( int                     signal /**< [in] signal */,
-                 const struct sigaction *action /**< [in] action */,
-                 struct sigaction       *old /**< [out] old action */ );
-int swSigaction( int, const struct sigaction *, struct sigaction * )
-{
-    auto &f = streamWriterHarness::g_faults;
-    if( ++f.m_sigCalls == f.m_failSig )
-    {
-        errno = EINVAL;
-        return -1;
-    }
-    return 0;
-}
 /// Inject an exited worker or an exception without joining native threads.
 int swTryJoin( pthread_t thread /**< [in] native thread */, void **result /**< [out] thread result */ );
 int swTryJoin( pthread_t, void ** )
@@ -419,6 +407,7 @@ int swSemInit( sem_t *sem, int shared, unsigned value )
 int swPost( sem_t *sem /**< [in/out] writer semaphore */ );
 int swPost( sem_t * )
 {
+    ++streamWriterHarness::g_faults.m_postCalls;
     if( streamWriterHarness::g_faults.m_failPost )
     {
         errno = EINVAL;
@@ -550,7 +539,6 @@ int swFlush( IMAGE *, long )
 #define fwrite swWrite
 #define xrif_new swNew
 #define xrif_allocate_raw swAllocateRaw
-#define sigaction( ... ) swSigaction( __VA_ARGS__ )
 #define pthread_tryjoin_np swTryJoin
 #define sem_init swSemInit
 #define sem_post swPost
@@ -582,7 +570,6 @@ int swFlush( IMAGE *, long )
 #undef sem_post
 #undef sem_init
 #undef pthread_tryjoin_np
-#undef sigaction
 #undef xrif_configure
 #undef xrif_set_size
 #undef xrif_allocate_reordered
@@ -623,6 +610,12 @@ class Fixture
     int encode();
     /// Initialize the INDI status properties without launching workers.
     void properties();
+
+    /// Deliver a writing request through the real callback.
+    void toggle( pcf::IndiElement::SwitchStateType state /**< [in] requested writing switch state */ );
+
+    /// Decode the source-frame counters from the latest saved timing archive.
+    std::vector<uint64_t> savedFrameCounters();
 
     streamWriter          m_app;                                ///< Production application under test.
     std::filesystem::path m_path;                               ///< Owned unique output directory.
@@ -723,6 +716,37 @@ void Fixture::properties()
                               "encodeFPS" } )
         m_app.m_indiP_xrifStats.add( pcf::IndiElement( name ) );
 }
+void Fixture::toggle( pcf::IndiElement::SwitchStateType state )
+{
+    pcf::IndiProperty request = m_app.m_indiP_writing;
+    request["toggle"].setSwitchState( state );
+    REQUIRE( m_app.newCallBack_m_indiP_writing( request ) == 0 );
+}
+std::vector<uint64_t> Fixture::savedFrameCounters()
+{
+    std::ifstream file( m_app.m_outFilePath, std::ios::binary );
+    REQUIRE( file.good() );
+    xrif_t decoder = nullptr;
+    REQUIRE( ::xrif_new( &decoder ) == XRIF_NOERROR );
+    std::unique_ptr<std::remove_pointer_t<xrif_t>, decltype( &::xrif_delete )> owner( decoder, ::xrif_delete );
+    char                                                                       header[XRIF_HEADER_SIZE];
+    uint32_t                                                                   headerSize = 0;
+    file.read( header, sizeof( header ) );
+    REQUIRE( file.good() );
+    REQUIRE( ::xrif_read_header( decoder, &headerSize, header ) == XRIF_NOERROR );
+    file.seekg( decoder->compressed_size, std::ios::cur );
+    file.read( header, sizeof( header ) );
+    REQUIRE( file.good() );
+    REQUIRE( ::xrif_read_header( decoder, &headerSize, header ) == XRIF_NOERROR );
+    REQUIRE( ::xrif_allocate( decoder ) == XRIF_NOERROR );
+    file.read( decoder->raw_buffer, decoder->compressed_size );
+    REQUIRE( file.good() );
+    REQUIRE( ::xrif_decode( decoder ) == XRIF_NOERROR );
+    std::vector<uint64_t> counters;
+    for( size_t frame = 0; frame < decoder->frames; ++frame )
+        counters.push_back( reinterpret_cast<uint64_t *>( decoder->raw_buffer )[5 * frame] );
+    return counters;
+}
 /// \endcond
 
 /** \brief Schedule idle and active telemetry and propagate all helper failures.
@@ -779,6 +803,12 @@ TEST_CASE( "streamWriter schedules telemetry in every writing state and honors h
         app.m_writeStopTimeout = -1;
         REQUIRE( app.loadConfigImpl( app.config ) == 0 );
         REQUIRE( app.m_writeStopTimeout == 0 );
+    }
+    SECTION( "zero semaphore wait is rejected" )
+    {
+        app.setupConfig();
+        app.m_semWaitNSec = 0;
+        REQUIRE( app.loadConfigImpl( app.config ) == -1 );
     }
     SECTION( "logic errors are fatal while idle and active" )
     {
@@ -918,20 +948,10 @@ TEST_CASE( "streamWriter startup and worker health report dependency failures", 
     XWCTEST_DOXYGEN_REF(streamWriter::appStartup());
     XWCTEST_DOXYGEN_REF(streamWriter::appLogic());
     XWCTEST_DOXYGEN_REF(streamWriter::appShutdown());
-    XWCTEST_DOXYGEN_REF(streamWriter::setSigSegvHandler());
-    XWCTEST_DOXYGEN_REF(streamWriter::_handlerSigSegv(0,nullptr,nullptr));
 #endif
     // clang-format on
     Fixture f;
     auto   &app = f.m_app;
-    SECTION( "both signal installation failures abort startup" )
-    {
-        auto call          = GENERATE( 1u, 2u );
-        g_faults.m_failSig = call;
-        REQUIRE( app.appStartup() == -1 );
-        REQUIRE( g_faults.m_sigCalls == call );
-        REQUIRE( g_faults.m_threadCalls == 0 );
-    }
     SECTION( "semaphore initialization failure aborts startup" )
     {
         g_faults.m_failSemInit = true;
@@ -977,11 +997,6 @@ TEST_CASE( "streamWriter startup and worker health report dependency failures", 
         REQUIRE( app.m_rawImageCircBuff == nullptr );
         REQUIRE( app.m_xrif == nullptr );
         REQUIRE( app.m_xrif_timing == nullptr );
-    }
-    SECTION( "signal trampoline requests source restart" )
-    {
-        streamWriter::_handlerSigSegv( SIGBUS, nullptr, nullptr );
-        REQUIRE( app.m_restart );
     }
     SECTION( "summary warning backoff saturates and resets when quiet" )
     {
@@ -1388,7 +1403,7 @@ TEST_CASE( "streamWriter ingest loop handles stream events and notification fail
         app.m_maxChunkTime = 1;
         g_faults.m_wait    = [&]
         {
-            if( ++events <= 7 )
+            if( ++events <= 8 )
             {
                 f.frame( events, 100 + events * 2 );
                 return 0;
@@ -1399,7 +1414,7 @@ TEST_CASE( "streamWriter ingest loop handles stream events and notification fail
             return -1;
         };
         app.fgThreadExec();
-        REQUIRE( events == 8 );
+        REQUIRE( events == 9 );
         REQUIRE_FALSE( app.m_writePending );
         REQUIRE( g_faults.m_closeCalls == 1 );
     }
@@ -1445,6 +1460,470 @@ TEST_CASE( "streamWriter ingest loop handles stream events and notification fail
         REQUIRE( app.m_writing == ( stopping ? NOT_WRITING : START_WRITING ) );
         REQUIRE( app.m_resumeAfterReconnect == !stopping );
     }
+}
+
+/** \brief Empty recording sessions cannot publish stale idle data before or after circular-buffer wrap.
+ * \ingroup streamWriter_unit_test */
+TEST_CASE( "streamWriter empty toggles never save idle frames", "[streamWriter][idle-regression]" )
+{
+    // clang-format off
+#ifdef STREAMWRITER_TEST_DOXYGEN_REF
+    XWCTEST_DOXYGEN_REF(streamWriter::newCallBack_m_indiP_writing(pcf::IndiProperty()));
+    XWCTEST_DOXYGEN_REF(streamWriter::fgThreadExec());
+#endif
+    // clang-format on
+    const unsigned idleFrames = GENERATE( 0u, 1u, 3u, 5u, 7u );
+    const bool     nextFrame  = GENERATE( false, true );
+    Fixture        f;
+    auto          &app = f.m_app;
+    f.properties();
+    REQUIRE( app.initialize_xrif() == 0 );
+    app.m_writeStopTimeout = 0;
+    unsigned events        = 0;
+    g_faults.m_wait        = [&]
+    {
+        ++events;
+        if( events <= idleFrames )
+        {
+            f.frame( events );
+            return 0;
+        }
+        if( events == idleFrames + 1 )
+        {
+            f.toggle( pcf::IndiElement::On );
+            REQUIRE( app.m_writing == START_WRITING );
+            f.toggle( pcf::IndiElement::Off );
+            REQUIRE( app.m_writing == NOT_WRITING );
+            if( nextFrame )
+            {
+                f.frame( events );
+                return 0;
+            }
+            errno = ETIMEDOUT;
+            return -1;
+        }
+        REQUIRE( app.m_writing == NOT_WRITING );
+        REQUIRE_FALSE( app.m_writePending );
+        REQUIRE( g_faults.m_postCalls == 0 );
+        REQUIRE( g_faults.m_encode.m_calls == 0 );
+        REQUIRE( std::filesystem::is_empty( f.m_path ) );
+        app.m_shutdown = 1;
+        errno          = EINTR;
+        return -1;
+    };
+    app.fgThreadExec();
+    REQUIRE( events == idleFrames + 2 );
+}
+
+/** \brief A completed recording at ring wrap leaves no frames owned by the next empty recording.
+ * \ingroup streamWriter_unit_test */
+TEST_CASE( "streamWriter empty toggle after a wrapped recording preserves only earlier output",
+           "[streamWriter][idle-regression]" )
+{
+    // clang-format off
+#ifdef STREAMWRITER_TEST_DOXYGEN_REF
+    XWCTEST_DOXYGEN_REF(streamWriter::newCallBack_m_indiP_writing(pcf::IndiProperty()));
+    XWCTEST_DOXYGEN_REF(streamWriter::fgThreadExec());
+    XWCTEST_DOXYGEN_REF(streamWriter::doEncode());
+#endif
+    // clang-format on
+    Fixture f;
+    auto   &app = f.m_app;
+    f.properties();
+    REQUIRE( app.initialize_xrif() == 0 );
+    unsigned events = 0;
+    g_faults.m_wait = [&]
+    {
+        ++events;
+        if( events <= 4 )
+        {
+            if( events == 3 )
+                f.toggle( pcf::IndiElement::On );
+            if( events == 4 )
+                f.toggle( pcf::IndiElement::Off );
+            f.frame( events );
+            return 0;
+        }
+        if( events == 5 )
+        {
+            REQUIRE( app.m_currSaveStart == 2 );
+            REQUIRE( app.m_currSaveStop == 4 );
+            REQUIRE( app.m_currImage == 0 );
+            REQUIRE( app.doEncode() == 0 );
+            REQUIRE( f.savedFrameCounters() == std::vector<uint64_t>{ 3, 4 } );
+            f.toggle( pcf::IndiElement::On );
+            f.toggle( pcf::IndiElement::Off );
+            REQUIRE( app.m_writing == NOT_WRITING );
+            errno = ETIMEDOUT;
+            return -1;
+        }
+        REQUIRE( g_faults.m_postCalls == 1 );
+        REQUIRE( g_faults.m_encode.m_calls == 2 );
+        REQUIRE_FALSE( app.m_writePending );
+        app.m_shutdown = 1;
+        errno          = EINTR;
+        return -1;
+    };
+    app.fgThreadExec();
+    REQUIRE( events == 6 );
+}
+
+/** \brief Stopping an armed time-flush preserves its pending archive without duplicate publication.
+ * \ingroup streamWriter_unit_test */
+TEST_CASE( "streamWriter stop after time flush preserves queued frames exactly once",
+           "[streamWriter][idle-regression]" )
+{
+    // clang-format off
+#ifdef STREAMWRITER_TEST_DOXYGEN_REF
+    XWCTEST_DOXYGEN_REF(streamWriter::newCallBack_m_indiP_writing(pcf::IndiProperty()));
+    XWCTEST_DOXYGEN_REF(streamWriter::fgThreadExec());
+    XWCTEST_DOXYGEN_REF(streamWriter::doEncode());
+#endif
+    // clang-format on
+    Fixture f;
+    auto   &app = f.m_app;
+    f.properties();
+    REQUIRE( app.initialize_xrif() == 0 );
+    app.m_maxChunkTime     = 0;
+    app.m_writeStopTimeout = 0;
+    unsigned events        = 0;
+    g_faults.m_wait        = [&]
+    {
+        ++events;
+        if( events == 1 )
+        {
+            f.toggle( pcf::IndiElement::On );
+            f.frame( 1 );
+            return 0;
+        }
+        if( events == 3 )
+        {
+            REQUIRE( app.m_writing == START_WRITING );
+            REQUIRE( app.m_writePending );
+            f.toggle( pcf::IndiElement::Off );
+            REQUIRE( app.m_writing == STOP_WRITING );
+        }
+        if( events >= 3 )
+        {
+            REQUIRE( app.m_currSaveStart == 0 );
+            REQUIRE( app.m_currSaveStop == 1 );
+            REQUIRE( app.m_currSaveStopFrameNo == 1 );
+            REQUIRE( g_faults.m_postCalls == 1 );
+        }
+        if( events == 5 )
+        {
+            REQUIRE( app.doEncode() == 0 );
+            REQUIRE( app.m_writing == NOT_WRITING );
+            REQUIRE_FALSE( app.m_writePending );
+            REQUIRE( f.savedFrameCounters() == std::vector<uint64_t>{ 1 } );
+            REQUIRE( g_faults.m_encode.m_calls == 2 );
+            REQUIRE( g_faults.m_writeCalls == 4 );
+            app.m_shutdown = 1;
+            errno          = EINTR;
+            return -1;
+        }
+        errno = ETIMEDOUT;
+        return -1;
+    };
+    app.fgThreadExec();
+    REQUIRE( events == 5 );
+}
+
+/** \brief Slow-consumer ownership prevents a second descriptor from replacing the first queued save.
+ * \ingroup streamWriter_unit_test */
+TEST_CASE( "streamWriter pending save cannot be replaced when the consumer stalls", "[streamWriter][idle-regression]" )
+{
+    // clang-format off
+#ifdef STREAMWRITER_TEST_DOXYGEN_REF
+    XWCTEST_DOXYGEN_REF(streamWriter::queueWrite(std::unique_lock<std::mutex>(),0));
+#endif
+    // clang-format on
+    Fixture f;
+    auto   &app = f.m_app;
+    f.buffers();
+    { //mutex scope
+        std::unique_lock<std::mutex> lock( app.m_writeMutex );
+        app.m_writing        = WRITING;
+        app.m_currChunkStart = 0;
+        app.m_chunkFrames    = 2;
+        REQUIRE( app.queueWrite( lock, 2 ) == 0 );
+        REQUIRE( app.m_writePending );
+        app.m_currChunkStart = 2;
+        app.m_chunkFrames    = 1;
+        REQUIRE( app.queueWrite( lock, 3 ) == -1 );
+        REQUIRE( app.m_currSaveStart == 0 );
+        REQUIRE( app.m_currSaveStop == 2 );
+        REQUIRE( app.m_currSaveStopFrameNo == 2 );
+        REQUIRE( app.m_chunkFrames == 1 );
+        REQUIRE( app.m_writePending );
+        REQUIRE( g_faults.m_postCalls == 1 );
+    }
+}
+
+/** \brief A delayed consumer releases its descriptor before the next chunk is published.
+ * \ingroup streamWriter_unit_test */
+TEST_CASE( "streamWriter waits for the consumer and preserves both chunk archives", "[streamWriter][idle-regression]" )
+{
+    // clang-format off
+#ifdef STREAMWRITER_TEST_DOXYGEN_REF
+    XWCTEST_DOXYGEN_REF(streamWriter::queueWrite(std::unique_lock<std::mutex>(),0));
+    XWCTEST_DOXYGEN_REF(streamWriter::waitForWriteCompletion(0));
+    XWCTEST_DOXYGEN_REF(streamWriter::doEncode());
+#endif
+    // clang-format on
+    Fixture f;
+    auto   &app = f.m_app;
+    f.buffers();
+    app.m_writeCompletionTimeout = 2;
+    for( size_t frame = 0; frame < 3; ++frame )
+    {
+        reinterpret_cast<uint16_t *>( app.m_rawImageCircBuff )[frame] = 23 + frame;
+        uint64_t *timing                                              = app.m_timingCircBuff + 5 * frame;
+        timing[0]                                                     = frame + 1;
+        timing[1] = timing[3] = 100 + frame;
+        timing[2] = timing[4] = 1;
+    }
+    int         encoded = -1;
+    int         queued  = -1;
+    std::thread consumer;
+    { //mutex scope
+        std::unique_lock<std::mutex> lock( app.m_writeMutex );
+        app.m_writing        = WRITING;
+        app.m_currChunkStart = 0;
+        app.m_chunkFrames    = 2;
+        REQUIRE( app.queueWrite( lock, 2 ) == 0 );
+        app.m_currChunkStart = 2;
+        app.m_chunkFrames    = 1;
+        consumer             = std::thread( [&] { encoded = app.doEncode(); } );
+        queued               = app.queueWrite( lock, 3 );
+    }
+    consumer.join();
+    REQUIRE( encoded == 0 );
+    REQUIRE( queued == 0 );
+    REQUIRE( f.savedFrameCounters() == std::vector<uint64_t>{ 1, 2 } );
+    REQUIRE( app.m_currSaveStart == 2 );
+    REQUIRE( app.m_currSaveStop == 3 );
+    REQUIRE( app.m_currSaveStopFrameNo == 3 );
+    REQUIRE( g_faults.m_postCalls == 2 );
+    app.m_writing    = STOP_WRITING;
+    app.m_stopQueued = true;
+    REQUIRE( app.doEncode() == 0 );
+    REQUIRE( app.m_writing == NOT_WRITING );
+    REQUIRE_FALSE( app.m_writePending );
+    REQUIRE( f.savedFrameCounters() == std::vector<uint64_t>{ 3 } );
+    REQUIRE( g_faults.m_writeCalls == 8 );
+}
+
+/** \brief The producer cannot overwrite a stalled consumer's frames when idle ingestion wraps.
+ * \ingroup streamWriter_unit_test */
+TEST_CASE( "streamWriter protects a pending save from circular-buffer reuse", "[streamWriter][idle-regression]" )
+{
+    // clang-format off
+#ifdef STREAMWRITER_TEST_DOXYGEN_REF
+    XWCTEST_DOXYGEN_REF(streamWriter::fgThreadExec());
+    XWCTEST_DOXYGEN_REF(streamWriter::waitForWriteCompletion(0));
+    XWCTEST_DOXYGEN_REF(streamWriter::doEncode());
+#endif
+    // clang-format on
+    Fixture f;
+    auto   &app = f.m_app;
+    f.properties();
+    REQUIRE( app.initialize_xrif() == 0 );
+    app.m_writing   = START_WRITING;
+    unsigned events = 0;
+    g_faults.m_wait = [&]
+    {
+        ++events;
+        f.m_pixels[0] = 100 + events;
+        f.frame( events );
+        if( events >= 3 )
+        {
+            app.m_writePending = true;
+            if( events == 3 )
+                f.toggle( pcf::IndiElement::Off );
+        }
+        return 0;
+    };
+    app.fgThreadExec();
+    REQUIRE( events == 5 );
+    REQUIRE( app.shutdown() );
+    REQUIRE( app.m_writePending );
+    REQUIRE( app.m_currSaveStart == 0 );
+    REQUIRE( app.m_currSaveStop == 2 );
+    REQUIRE( g_faults.m_postCalls == 1 );
+    REQUIRE( reinterpret_cast<uint16_t *>( app.m_rawImageCircBuff )[0] == 101 );
+    REQUIRE( reinterpret_cast<uint16_t *>( app.m_rawImageCircBuff )[1] == 102 );
+    REQUIRE( app.doEncode() == 0 );
+    REQUIRE( f.savedFrameCounters() == std::vector<uint64_t>{ 1, 2 } );
+    REQUIRE( app.m_writing == NOT_WRITING );
+    REQUIRE_FALSE( app.m_writePending );
+}
+
+/** \brief Stop requests cancel reconnect resumption, and failed consumers prevent further publication.
+ * \ingroup streamWriter_unit_test */
+TEST_CASE( "streamWriter pending completion honors stop intent and consumer failure",
+           "[streamWriter][idle-regression]" )
+{
+    // clang-format off
+#ifdef STREAMWRITER_TEST_DOXYGEN_REF
+    XWCTEST_DOXYGEN_REF(streamWriter::newCallBack_m_indiP_writing(pcf::IndiProperty()));
+    XWCTEST_DOXYGEN_REF(streamWriter::completeWrite());
+    XWCTEST_DOXYGEN_REF(streamWriter::queueWrite(std::unique_lock<std::mutex>(),0));
+    XWCTEST_DOXYGEN_REF(streamWriter::doEncode());
+#endif
+    // clang-format on
+    Fixture f;
+    auto   &app = f.m_app;
+    f.buffers();
+    SECTION( "off during reconnect flush prevents recording from resuming" )
+    {
+        f.properties();
+        app.m_currSaveStart        = 0;
+        app.m_currSaveStop         = 1;
+        app.m_currSaveStopFrameNo  = 1;
+        app.m_writing              = STOP_WRITING;
+        app.m_writePending         = true;
+        app.m_stopQueued           = true;
+        app.m_resumeAfterReconnect = true;
+        f.toggle( pcf::IndiElement::Off );
+        REQUIRE_FALSE( app.m_resumeAfterReconnect );
+        REQUIRE( app.doEncode() == 0 );
+        REQUIRE( app.m_writing == NOT_WRITING );
+        REQUIRE_FALSE( app.m_writePending );
+        REQUIRE( f.savedFrameCounters() == std::vector<uint64_t>{ 1 } );
+    }
+    SECTION( "failed consumer release cannot publish the next unsaved chunk" )
+    {
+        { //mutex scope
+            std::unique_lock<std::mutex> lock( app.m_writeMutex );
+            app.m_writing        = WRITING;
+            app.m_currChunkStart = 0;
+            app.m_chunkFrames    = 1;
+            REQUIRE( app.queueWrite( lock, 1 ) == 0 );
+            app.m_currChunkStart = 1;
+            app.m_chunkFrames    = 1;
+        }
+        g_faults.m_failDirectories = true;
+        REQUIRE( app.doEncode() == -1 );
+        REQUIRE_FALSE( app.m_writePending );
+        { //mutex scope
+            std::unique_lock<std::mutex> lock( app.m_writeMutex );
+            REQUIRE( app.queueWrite( lock, 2 ) == -1 );
+            REQUIRE( app.m_chunkFrames == 1 );
+            REQUIRE( app.m_currSaveStart == 0 );
+            REQUIRE( app.m_currSaveStop == 1 );
+            REQUIRE( app.m_currSaveStopFrameNo == 1 );
+            REQUIRE( g_faults.m_postCalls == 1 );
+        }
+    }
+}
+
+/** \brief Stopping immediately after a completed full chunk records one stop event and inactive state.
+ * \ingroup streamWriter_unit_test */
+TEST_CASE( "streamWriter immediate stop reports a completed recording exactly once", "[streamWriter][idle-regression]" )
+{
+    // clang-format off
+#ifdef STREAMWRITER_TEST_DOXYGEN_REF
+    XWCTEST_DOXYGEN_REF(streamWriter::newCallBack_m_indiP_writing(pcf::IndiProperty()));
+    XWCTEST_DOXYGEN_REF(streamWriter::queueWrite(std::unique_lock<std::mutex>(),0));
+    XWCTEST_DOXYGEN_REF(streamWriter::doEncode());
+    XWCTEST_DOXYGEN_REF(streamWriter::recordSavingState());
+#endif
+    // clang-format on
+    Fixture f;
+    auto   &app = f.m_app;
+    f.buffers();
+    f.properties();
+    reinterpret_cast<uint16_t *>( app.m_rawImageCircBuff )[1] = 24;
+    uint64_t *timing                                          = app.m_timingCircBuff + 5;
+    timing[0]                                                 = 2;
+    timing[1] = timing[3] = 101;
+    timing[2] = timing[4] = 1;
+    { //mutex scope
+        std::unique_lock<std::mutex> lock( app.m_writeMutex );
+        app.m_writing        = WRITING;
+        app.m_currChunkStart = 0;
+        app.m_chunkFrames    = 2;
+        REQUIRE( app.queueWrite( lock, 2 ) == 0 );
+    }
+    REQUIRE( app.doEncode() == 0 );
+    REQUIRE( app.m_writing == WRITING );
+    REQUIRE_FALSE( app.m_writePending );
+    REQUIRE( logs( "Saving stopped" ) == 0 );
+    g_faults.m_telemetry.clear();
+
+    f.toggle( pcf::IndiElement::Off );
+    REQUIRE( app.m_writing == NOT_WRITING );
+    REQUIRE( logs( "Saving stopped at frame number 2" ) == 1 );
+    REQUIRE( g_faults.m_telemetry.size() == 1 );
+    const auto *state = GetSaving_state_change_fb( g_faults.m_telemetry.back().data() );
+    REQUIRE( state->state() == 0 );
+    REQUIRE( state->frameNo() == 2 );
+
+    f.toggle( pcf::IndiElement::Off );
+    REQUIRE( logs( "Saving stopped" ) == 1 );
+    REQUIRE( g_faults.m_telemetry.size() == 1 );
+    REQUIRE( g_faults.m_postCalls == 1 );
+}
+
+/** \brief Invalid save descriptors and insufficient encoder storage fail before encoder copies or output.
+ * \ingroup streamWriter_unit_test */
+TEST_CASE( "streamWriter rejects invalid save windows before touching encoder buffers",
+           "[streamWriter][idle-regression]" )
+{
+    // clang-format off
+#ifdef STREAMWRITER_TEST_DOXYGEN_REF
+    XWCTEST_DOXYGEN_REF(streamWriter::doEncode());
+#endif
+    // clang-format on
+    const int invalid = GENERATE( 0, 1, 2, 3, 4, 5, 6, 7, 8 );
+    Fixture   f;
+    auto     &app = f.m_app;
+    f.buffers();
+    const size_t imageCapacity  = app.m_xrif->raw_buffer_size;
+    const size_t timingCapacity = app.m_xrif_timing->raw_buffer_size;
+    memset( app.m_xrif->raw_buffer, 0x5a, imageCapacity );
+    memset( app.m_xrif_timing->raw_buffer, 0x5a, timingCapacity );
+    app.m_currSaveStart = 0;
+    app.m_currSaveStop  = 1;
+    if( invalid == 0 )
+    {
+        app.m_currSaveStart = 2;
+        app.m_currSaveStop  = 0;
+    }
+    else if( invalid == 1 )
+        app.m_currSaveStop = app.m_circBuffLength + 1;
+    else if( invalid == 2 )
+        app.m_currSaveStart = app.m_currSaveStop = app.m_circBuffLength + 1;
+    else if( invalid == 3 )
+        app.m_currSaveStop = app.m_writeChunkLength + 1;
+    else if( invalid == 4 )
+        app.m_xrif->raw_buffer_size = 1;
+    else if( invalid == 5 )
+        app.m_xrif_timing->raw_buffer_size = 1;
+    else if( invalid == 6 )
+        app.m_width = 0;
+    else if( invalid == 7 )
+    {
+        app.m_width  = std::numeric_limits<size_t>::max();
+        app.m_height = 2;
+    }
+    else
+        app.m_circBuffLength = std::numeric_limits<size_t>::max();
+    app.m_writing      = STOP_WRITING;
+    app.m_writePending = true;
+    REQUIRE( app.doEncode() == -1 );
+    REQUIRE_FALSE( app.m_writePending );
+    REQUIRE( g_faults.m_encode.m_calls == 0 );
+    REQUIRE( g_faults.m_writeCalls == 0 );
+    REQUIRE( std::filesystem::is_empty( f.m_path ) );
+    REQUIRE( std::all_of(
+        app.m_xrif->raw_buffer, app.m_xrif->raw_buffer + imageCapacity, []( char value ) { return value == 0x5a; } ) );
+    REQUIRE( std::all_of( app.m_xrif_timing->raw_buffer,
+                          app.m_xrif_timing->raw_buffer + timingCapacity,
+                          []( char value ) { return value == 0x5a; } ) );
+    app.m_xrif->raw_buffer_size        = imageCapacity;
+    app.m_xrif_timing->raw_buffer_size = timingCapacity;
 }
 
 /** \brief Exercise writer initialization, shutdown, timeouts, interrupts, and encode failure.
@@ -1509,6 +1988,28 @@ TEST_CASE( "streamWriter writer loop reports clock semaphore and encoding failur
         REQUIRE_FALSE( app.m_writePending );
         REQUIRE( logs( "error encoding data" ) == 0 );
     }
+    SECTION( "stray semaphore notification cannot repeat an already completed save" )
+    {
+        f.buffers();
+        app.state( stateCodes::READY );
+        app.m_writing       = WRITING;
+        app.m_currSaveStart = 0;
+        app.m_currSaveStop  = 1;
+        unsigned events     = 0;
+        g_faults.m_wait     = [&]
+        {
+            if( ++events == 1 )
+                return 0;
+            app.m_shutdown = 1;
+            errno          = EINTR;
+            return -1;
+        };
+        app.swThreadExec();
+        REQUIRE( events == 2 );
+        REQUIRE( g_faults.m_encode.m_calls == 0 );
+        REQUIRE( g_faults.m_writeCalls == 0 );
+        REQUIRE( std::filesystem::is_empty( f.m_path ) );
+    }
     SECTION( "encode error returns after clearing pending ownership" )
     {
         f.buffers();
@@ -1562,15 +2063,35 @@ TEST_CASE( "streamWriter XRIF errors and short headers retain their documented o
         REQUIRE( app.allocate_xrif() == -1 );
         REQUIRE( logs( "error." ) == 1 );
     }
+    SECTION( "either encoder sizing error aborts before encoding or writing" )
+    {
+        const auto call = GENERATE( 1u, 2u );
+        f.buffers();
+        const size_t imageCapacity  = app.m_xrif->raw_buffer_size;
+        const size_t timingCapacity = app.m_xrif_timing->raw_buffer_size;
+        memset( app.m_xrif->raw_buffer, 0x5a, imageCapacity );
+        memset( app.m_xrif_timing->raw_buffer, 0x5a, timingCapacity );
+        g_faults.m_setSize         = XrifFault{};
+        g_faults.m_setSize.m_fail  = call;
+        g_faults.m_setSize.m_after = GENERATE( false, true );
+        REQUIRE( f.encode() == -1 );
+        REQUIRE_FALSE( app.m_writePending );
+        REQUIRE( g_faults.m_encode.m_calls == 0 );
+        REQUIRE( g_faults.m_writeCalls == 0 );
+        REQUIRE( app.m_outFilePath.empty() );
+        REQUIRE( std::all_of( app.m_xrif->raw_buffer,
+                              app.m_xrif->raw_buffer + imageCapacity,
+                              []( char value ) { return value == 0x5a; } ) );
+        REQUIRE( std::all_of( app.m_xrif_timing->raw_buffer,
+                              app.m_xrif_timing->raw_buffer + timingCapacity,
+                              []( char value ) { return value == 0x5a; } ) );
+    }
     SECTION( "encode warnings retain a decodable image and timing archive" )
     {
-        int  operation = GENERATE( 0, 1, 2, 3 );
+        int  operation = GENERATE( 0, 1, 2 );
         auto call      = GENERATE( 1u, 2u );
         f.buffers();
-        auto *fault    = operation == 0   ? &g_faults.m_setSize
-                         : operation == 1 ? &g_faults.m_lz4
-                         : operation == 2 ? &g_faults.m_encode
-                                          : &g_faults.m_header;
+        auto *fault    = operation == 0 ? &g_faults.m_lz4 : operation == 1 ? &g_faults.m_encode : &g_faults.m_header;
         *fault         = XrifFault{};
         fault->m_fail  = call;
         fault->m_after = true;
