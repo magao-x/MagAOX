@@ -17,7 +17,9 @@ it does not shorten SDK execution or measure physical mirror settling.
 
 This change adds an optional publisher to `dev::dm`. It does **not** change
 dmSyncopation's live scheduler, shadow decisions, keepout or reader-hold bounds.
-A matching consumer and instrument qualification are subsequent work.
+A separate [shadow consumer comparison](dm-reader-protection-measurement.md)
+now observes this endpoint. Instrument qualification and any replacement of a
+scheduling hold remain subsequent work.
 
 ## Endpoint and transport
 
@@ -137,6 +139,8 @@ stubs. No agent runs commands on, deploys to or controls instrument hardware.
    DM timing and quality populations before/after enabling publication. Disabled
    timing must not disable the signal. Treat an INDI sample of busy as expected
    when it lands during a callback; it is not an aggregate fault rate.
-4. Add a bounded synco completion observer and record matched completion latency
-   before considering replacement of any fixed reader hold. Retain existing
-   guards until that integration is independently qualified.
+4. Run the new bounded
+   [reader-protection shadow measurement](dm-reader-protection-measurement.md)
+   before considering replacement of any fixed reader hold. Its optional synco
+   observer and telemetry consumer do not alter scheduling guards; instrument
+   qualification remains pending.

@@ -1581,10 +1581,14 @@ identity and explicit qualification. It is independent of droppable telemetry.
 See the [completion engineering record](dm-controller-completion.md) and
 [interface guide](../../../libMagAOX/app/dev/doc/dmCompletion.md).
 
-This is the publisher stage only. Synco's current reader-hold decisions remain
-unchanged. Matching completion observation, overhead measurement and instrument
-qualification are required before using the signal to release a hold. Physical
-DM settling, dmcomb consumption and early-main/copy protection remain separate.
+The publisher is followed by an optional
+[reader-protection shadow measurement](dm-reader-protection-measurement.md).
+It matches completion to the current observation baseline and reports remaining
+reader time, notice delay, modeled slack and lifetime extrema with quality and
+exact provenance. Synco's current reader-hold decisions remain unchanged.
+Overhead measurement and instrument qualification are required before using the
+signal to release a hold. Physical DM settling, dmcomb consumption and
+early-main/copy protection remain separate.
 
 ## Follow-up and Edge Cases
 

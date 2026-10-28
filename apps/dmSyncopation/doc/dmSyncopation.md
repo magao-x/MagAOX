@@ -1166,6 +1166,17 @@ seconds; status 137 indicates that its five-second kill grace was needed.
 Other nonzero statuses and short/empty telemetry files need review before
 interpreting the capture.
 
+## Measure the remaining DM reader lifetime
+
+The optional [reader-protection shadow test](reader-protection-test.md) matches
+the controller's dedicated completion stream to these same primary/combined
+observations. It reports signed time remaining, positive required hold,
+notification delay and slack against the current modeled budget, with exact
+lifetime worst-case evidence and matching/loss quality. It requires the updated
+controller publisher, synco and `logdump`, and is enabled only in simulation
+mode by `completionMonitor.shmimName`. Existing scheduling and shadow decisions
+remain unchanged.
+
 ## 200 Hz tip/tilt test provider
 
 The first dmSpeckle provider generates tip/tilt with a physical vibration frequency of 200 Hz, so the WFS can measure it. Its normalized x/y ramps are driven in quadrature:

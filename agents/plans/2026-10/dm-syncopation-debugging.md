@@ -3981,3 +3981,17 @@ measurement; completion INDI readbacks are latest-attempt diagnostics. The
 publisher is off by default, has no synco consumer yet, and does not relax any
 current reader-hold or physical timing bound. The next hardware comparison must
 measure its overhead and observe matched completion before scheduling changes.
+
+### Reader-protection measurement implementation
+
+The subsequent user request authorizes a test consuming the signal to quantify
+the reader requirement. That optional shadow observer is now implemented; see
+the [measurement engineering record](dm-reader-protection-measurement.md) and
+[operator procedure](../../../apps/dmSyncopation/doc/reader-protection-test.md).
+It retains the signed completion offset from max(primary observation, combined
+observation), nonnegative required/observed holds, controller duration,
+notification delay and slack against each sample's frozen configured budget.
+Lifetime maxima and exact worst-case evidence accompany rolling populations.
+Three independent bounded handoffs keep matching/statistics out of the monitor
+callbacks, and source lifecycle, unmatched evidence and loss remain visible.
+No simulated or live scheduling decision is changed.

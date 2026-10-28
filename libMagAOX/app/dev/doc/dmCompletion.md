@@ -36,8 +36,11 @@ or incompatible streams fail setup. Compatible stream files remain in place
 for attached readers across publisher restarts, with a new session each restart.
 
 This publisher does not change dmSyncopation's scheduler or shadow reader holds.
-There is no new telemetry schema or `logdump` build requirement. Rebuild the
-controller to use the feature. Existing
+The publisher itself has no telemetry schema or `logdump` build requirement.
+Rebuild the controller to use the feature. The separate
+[synco reader-protection shadow test](../../../../apps/dmSyncopation/doc/reader-protection-test.md)
+consumes this stream and adds matched `dmsynco` telemetry; that test requires an
+updated synco and reader. Existing
 [DM timing telemetry](dmTiming.md) remains the source of duration distributions.
 
 ## Read-only INDI
@@ -103,6 +106,11 @@ posts dedicated stream semaphores. Attachment, rejected receipt, disconnection
 and orderly shutdown publish unavailable and notify. Input inode change or
 counter rollback starts a new epoch; restart starts a new session. Synthetic
 initial callbacks never qualify, even if the backend sends a command.
+
+Both start and finish increment the completion stream's `cnt0`. A 2 kHz
+controller therefore normally shows a 4 kHz stream counter rate in monitoring
+tools, while finish semaphore notifications remain at 2 kHz. Lifecycle
+invalidation adds occasional notifications and counter updates.
 
 A semaphore wake means **read the latest record**. Notifications can be stale or
 coalesced; the semaphore count is not a command identity or a completion count.
