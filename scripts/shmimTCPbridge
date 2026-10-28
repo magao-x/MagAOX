@@ -90,15 +90,14 @@ if [ "$MODE" = "push" ]; then
     # Start receiver on remote machine
     echo "Starting receiver on ${REMOTE} (port ${PORT})"
 
-    ssh -t ${REMOTE} "
-    tmux kill-session -t ${TX_SESSION} 2>/dev/null || true
-    tmux new -d -s ${TX_SESSION}
-    tmux send -t ${TX_SESSION} C-c C-m \
-    'export PATH=/usr/local/milk/bin:/usr/local/bin:/usr/bin:\$PATH; \
-    sudo -n env PATH=\$PATH MILK_SHM_DIR=/milk/shm \
-    cgexec -g cpuset:shmimTCP \
-    shmimTCPtransmit ${STREAM} ${RECEIVER_IP} ${PORT}' C-m
-    "
+    ssh -t ${REMOTE} \
+    "bash -lc 'tmux new -d -s ${RX_SESSION}'" || true
+
+    ssh -t ${REMOTE} \
+    "bash -lc 'tmux send -t ${RX_SESSION} C-c C-m \"shmimTCPreceive ${PORT}\" C-m'"
+
+    #ssh -t ${REMOTE} \
+    #"bash -lc 'tmux send -t ${RX_SESSION} C-c C-m \"export PATH=/usr/local/milk/bin:/usr/local/bin:\$PATH; shmimTCPreceive ${PORT}\" C-m'"
     
     # Start transmitter locally
     echo "Starting transmitter on $(hostname)"
