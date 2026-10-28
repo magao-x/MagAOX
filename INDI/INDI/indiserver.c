@@ -950,7 +950,7 @@ static void startRemoteDvr(DvrInfo *dp)
     dp->rfd     = sockfd;
     dp->wfd     = sockfd;
     dp->gzfird  = NULL;
-    dp->gzfird  = gzdopen(dp->rfd, "r");
+    dp->gzfird  = use_is_zlib ? gzdopen(dp->rfd, "r") : NULL;
     // If cmd-line had -z, then assume server can do zlib decompression
     dp->gzfiwr  = use_is_zlib ? gzdopen(dp->wfd,"w9") : NULL;
     dp->lp      = newLilXML();
@@ -2246,6 +2246,9 @@ static int readFromDriver(DvrInfo *dp)
     else
     {
         nr = read(dp->rfd, buf, sizeof(buf));
+        if (nr < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+            return (0);
+
     }
     if (nr <= 0)
     {
