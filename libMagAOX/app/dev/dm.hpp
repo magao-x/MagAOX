@@ -13,6 +13,7 @@
 #include <mx/math/floatUtils.hpp>
 
 #include "dmTiming.hpp"
+#include "dmCompletion.hpp"
 #include "shmimMonitor.hpp"
 #include "../../logger/types/telem_dmtimings.hpp"
 #include "../../logger/types/telem_fgtimings.hpp"
@@ -124,6 +125,8 @@ class dm
     std::string m_shmimShape; ///< The name of the shmim stream to write the desaturated true shape to.
     std::string m_shmimDelta; ///< The name of the shmim stream to write the desaturated delta command to.
     std::string m_shmimDiff;  ///< The name of the shmim stream to write the difference to.
+
+    std::string m_completionStreamName; ///< Optional shared reader-completion stream; empty disables publication.
 
     uint32_t m_dmWidth{ 0 };  ///< The width of the images in the stream
     uint32_t m_dmHeight{ 0 }; ///< The height of the images in the stream
@@ -458,8 +461,7 @@ class dm
      */
     int allocate( const dev::shmimT &sp /**< [in] Monitored stream tag. */ );
 
-    /// Called by shmimMonitor when a new DM command is available.  This is just a pass-through to
-    /// derivedT::commandDM(char*).
+    /// Submit a monitored command, calculate delta products and publish timing/optional reader completion.
     int processImage( void              *curr_src /**< [in] Current combined command pixels. */,
                       const dev::shmimT &sp /**< [in] Monitored stream tag. */ );
 
@@ -818,6 +820,35 @@ class dm
     /// @}
 
   protected:
+    /** \name Reader Completion - Data
+     * @{ */
+
+    dev::dmCompletion m_dmCompletion; ///< Command-thread completion publisher, independent of droppable telemetry.
+
+    bool m_completionReceipt{ false }; ///< The next callback follows a genuine semaphore receipt, not initial data.
+
+    MagAOX::dmTiming::Outcome m_completionOutcome{
+        MagAOX::dmTiming::Outcome::unknown }; ///< Backend result even when timing is disabled.
+
+    pcf::IndiProperty m_indiP_dmCompletion; ///< Ordinary-thread latest completion state and diagnostic duration.
+
+    pcf::IndiProperty m_indiP_dmCompletionStream; ///< Completion stream identity and software-only endpoint contract.
+
+    /// @}
+
+  public:
+    /** \name Reader Completion
+     * @{ */
+
+    /// Register optional read-only completion properties without changing controller scheduling.
+    int setupDMCompletionINDI();
+
+    /// Publish a coherent latest completion snapshot outside the command thread.
+    void updateDMCompletionINDI();
+
+    /// @}
+
+  protected:
     /// Register read-only timing statistics and endpoint/quality descriptions.
     int setupDMTimingINDI();
 
@@ -852,15 +883,25 @@ void dm<derivedT, realT>::shmimMonitorTiming( const dev::shmimT &tag, shmimMonit
     if( event == shmimMonitorEvent::connected )
     {
         m_dmTiming.newSession();
+        m_completionReceipt = false;
+        m_dmCompletion.reset();
+    }
+    else if( event == shmimMonitorEvent::disconnected )
+    {
+        m_completionReceipt = false;
+        m_dmCompletion.reset();
     }
     else if( event == shmimMonitorEvent::receipt || event == shmimMonitorEvent::initial )
     {
         m_dmTiming.beginEvent( event == shmimMonitorEvent::receipt );
+        m_completionReceipt = event == shmimMonitorEvent::receipt;
     }
     else if( event == shmimMonitorEvent::discarded )
     {
         m_dmTiming.outcome( MagAOX::dmTiming::Outcome::rejected );
         m_dmTiming.finishEvent();
+        m_completionReceipt = false;
+        m_dmCompletion.reset();
     }
 }
 
@@ -873,7 +914,94 @@ void dm<derivedT, realT>::dmTimingMark( MagAOX::dmTiming::Marker marker )
 template <class derivedT, typename realT>
 void dm<derivedT, realT>::dmTimingOutcome( MagAOX::dmTiming::Outcome outcome )
 {
+    m_completionOutcome = outcome;
     m_dmTiming.outcome( outcome );
+}
+
+template <class derivedT, typename realT>
+int dm<derivedT, realT>::setupDMCompletionINDI()
+{
+    if( m_completionStreamName.empty() )
+    {
+        return 0;
+    }
+
+    m_indiP_dmCompletion = pcf::IndiProperty( pcf::IndiProperty::Number );
+    m_indiP_dmCompletion.setDevice( derived().configName() );
+    m_indiP_dmCompletion.setName( "dm_completion" );
+    m_indiP_dmCompletion.setPerm( pcf::IndiProperty::ReadOnly );
+    m_indiP_dmCompletion.setState( pcf::IndiProperty::Idle );
+
+    for( const auto *name : { "state",
+                              "session",
+                              "epoch",
+                              "sequence",
+                              "inputInode",
+                              "inputCounter",
+                              "processingUs",
+                              "ageSec",
+                              "outcome",
+                              "qualified" } )
+    {
+        m_indiP_dmCompletion.add( pcf::IndiElement( name ) );
+    }
+
+    if( derived().registerIndiPropertyReadOnly( m_indiP_dmCompletion ) < 0 )
+    {
+        return -1;
+    }
+
+    m_indiP_dmCompletionStream = pcf::IndiProperty( pcf::IndiProperty::Text );
+    m_indiP_dmCompletionStream.setDevice( derived().configName() );
+    m_indiP_dmCompletionStream.setName( "dm_completion_stream" );
+    m_indiP_dmCompletionStream.setPerm( pcf::IndiProperty::ReadOnly );
+    m_indiP_dmCompletionStream.setState( pcf::IndiProperty::Idle );
+    m_indiP_dmCompletionStream.add( pcf::IndiElement( "name" ) );
+    m_indiP_dmCompletionStream.add( pcf::IndiElement( "meaning" ) );
+    m_indiP_dmCompletionStream["name"] = m_completionStreamName;
+    m_indiP_dmCompletionStream["meaning"] =
+        std::string( "application channel reads finished; hardware settling is not measured" );
+
+    return derived().registerIndiPropertyReadOnly( m_indiP_dmCompletionStream );
+}
+
+template <class derivedT, typename realT>
+void dm<derivedT, realT>::updateDMCompletionINDI()
+{
+    if( !m_dmCompletion.enabled() || !derived().m_indiDriver )
+    {
+        return;
+    }
+
+    const auto record    = m_dmCompletion.snapshot();
+    const auto now       = dmTiming::monotonicNowNs();
+    const bool qualified = MagAOX::dmCompletion::qualified( record );
+    indi::updateIfChanged<double>(
+        m_indiP_dmCompletion,
+        { "state",
+          "session",
+          "epoch",
+          "sequence",
+          "inputInode",
+          "inputCounter",
+          "processingUs",
+          "ageSec",
+          "outcome",
+          "qualified" },
+        { double( record.state ),
+          double( record.session ),
+          double( record.epoch ),
+          double( record.sequence ),
+          double( record.inputInode ),
+          double( record.inputCounter ),
+          record.startedNs > 0 && record.finishedNs >= record.startedNs
+              ? ( record.finishedNs - record.startedNs ) / 1000.0
+              : -1,
+          record.finishedNs > 0 && now >= record.finishedNs ? ( now - record.finishedNs ) / 1e9 : -1,
+          double( record.outcome ),
+          qualified ? 1.0 : 0.0 },
+        derived().m_indiDriver,
+        qualified ? pcf::IndiProperty::Ok : pcf::IndiProperty::Idle );
 }
 
 template <class derivedT, typename realT>
@@ -1190,6 +1318,16 @@ const mx::improc::eigenImage<float> &dm<derivedT, realT>::totalFlat() const
 template <class derivedT, typename realT>
 int dm<derivedT, realT>::setupConfig( mx::app::appConfigurator &config )
 {
+    config.add( "dm.completionStream",
+                "",
+                "dm.completionStream",
+                argType::Required,
+                "dm",
+                "completionStream",
+                false,
+                "string",
+                "Optional reader-completion stream with its own notification semaphores; empty disables." );
+
     config.add( "dm.calibPath",
                 "",
                 "dm.calibPath",
@@ -1516,6 +1654,14 @@ int dm<derivedT, realT>::loadConfig( mx::app::appConfigurator &config )
     config( derived().m_smCpuset, "dm.cpuset" );
 
     config( derived().m_shmimName, "dm.shmimName" );
+    config( m_completionStreamName, "dm.completionStream" );
+
+    if( !m_completionStreamName.empty() && ( m_completionStreamName == derived().m_shmimName ||
+                                             m_completionStreamName.find_first_of( "/\\" ) != std::string::npos ) )
+    {
+        derivedT::template log<software_error>( { "invalid dm.completionStream" } );
+        return -1;
+    }
 
     config( m_timingWindow, "dm.latencyTime" );
     config( m_timingCapacity, "dm.latencySize" );
@@ -1652,6 +1798,17 @@ int dm<derivedT, realT>::appStartup()
     }
 
     if( setupDMTimingINDI() < 0 )
+    {
+        return -1;
+    }
+
+    if( m_dmCompletion.open( m_completionStreamName ) < 0 )
+    {
+        derivedT::template log<software_error>( { errno, "could not open DM completion stream" } );
+        return -1;
+    }
+
+    if( setupDMCompletionINDI() < 0 )
     {
         return -1;
     }
@@ -1835,6 +1992,13 @@ int dm<derivedT, realT>::appLogic()
 template <class derivedT, typename realT>
 int dm<derivedT, realT>::appShutdown()
 {
+    if( m_dmCompletion.enabled() )
+    {
+        // Existing apps call DM shutdown before monitor shutdown; join its sole publisher before closing the stream.
+        static_cast<dev::shmimMonitor<derivedT> &>( derived() ).appShutdown();
+        m_dmCompletion.close();
+    }
+
     if( m_satThread.joinable() )
     {
         pthread_kill( m_satThread.native_handle(), SIGUSR1 );
@@ -2067,6 +2231,9 @@ template <class derivedT, typename realT>
 int dm<derivedT, realT>::processImage( void *curr_src, const dev::shmimT &sp )
 {
     static_cast<void>( sp );
+    m_completionOutcome = MagAOX::dmTiming::Outcome::unknown;
+    m_dmCompletion.begin( &derived().m_imageStream, m_completionReceipt );
+    m_completionReceipt = false;
 
     if( !m_dmTiming.active() )
     {
@@ -2101,13 +2268,15 @@ int dm<derivedT, realT>::processImage( void *curr_src, const dev::shmimT &sp )
     {
         derivedT::template log<software_critical>( { errno, rv, "Error from commandDM" } );
 
-        if( m_dmTiming.outcome() != MagAOX::dmTiming::Outcome::partial )
+        if( m_completionOutcome != MagAOX::dmTiming::Outcome::partial )
         {
             dmTimingOutcome( MagAOX::dmTiming::Outcome::failed );
         }
 
         dmTimingMark( MagAOX::dmTiming::Marker::finish );
         m_dmTiming.finishEvent();
+
+        m_dmCompletion.finish( &derived().m_imageStream, rv, m_completionOutcome );
 
         return rv;
     }
@@ -2124,6 +2293,8 @@ int dm<derivedT, realT>::processImage( void *curr_src, const dev::shmimT &sp )
             dmTimingOutcome( MagAOX::dmTiming::Outcome::failed );
             dmTimingMark( MagAOX::dmTiming::Marker::finish );
             m_dmTiming.finishEvent();
+
+            m_dmCompletion.finish( &derived().m_imageStream, rv, MagAOX::dmTiming::Outcome::failed );
 
             return rv;
         }
@@ -2145,11 +2316,15 @@ int dm<derivedT, realT>::processImage( void *curr_src, const dev::shmimT &sp )
         dmTimingMark( MagAOX::dmTiming::Marker::finish );
         m_dmTiming.finishEvent();
 
+        m_dmCompletion.finish( &derived().m_imageStream, -1, MagAOX::dmTiming::Outcome::failed );
+
         return -1;
     }
 
     dmTimingMark( MagAOX::dmTiming::Marker::finish );
     m_dmTiming.finishEvent();
+
+    m_dmCompletion.finish( &derived().m_imageStream, rv, m_completionOutcome );
 
     return rv;
 }
@@ -3478,6 +3653,8 @@ int dm<derivedT, realT>::updateINDI()
     {
         return 0;
     }
+
+    updateDMCompletionINDI();
 
     const auto &summary = m_dmTiming.summary();
     auto        state   = summary.fgValid ? pcf::IndiProperty::Ok : pcf::IndiProperty::Idle;

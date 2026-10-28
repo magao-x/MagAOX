@@ -26,6 +26,7 @@ INCLUDEDEPS= \
 	app/dev/shmimMonitor.hpp \
 	app/dev/dm.hpp \
 	app/dev/dmTiming.hpp \
+	app/dev/dmCompletion.hpp \
 	app/dev/dmPipelineTiming.hpp \
 	app/dev/telemeter.hpp \
 	app/dev/dmPokeWFS.hpp \
@@ -33,6 +34,7 @@ INCLUDEDEPS= \
 	common/defaults.hpp \
 	common/environment.hpp \
 	common/dmTiming.hpp \
+	common/dmCompletion.hpp \
 	common/frameGrabberTiming.hpp \
 	common/spscQueue.hpp \
 	common/timingStats.hpp \

@@ -98,6 +98,8 @@ class monitorHarness : public dev::shmimMonitor<monitorHarness<withHook>>
 
     std::atomic<bool> m_rejectStateOnReceipt{ false }; ///< Request one state rejection after the next successful wait.
 
+    std::atomic<int> m_allocateResult{ 0 }; ///< Simulate controller allocation failure after attachment notification.
+
     std::atomic<unsigned> m_callbacks{ 0 }; ///< Number of actual processImage invocations.
 
     std::atomic<unsigned> m_receiptCallbacks{ 0 }; ///< Callbacks that observed a preceding real receipt.
@@ -165,7 +167,7 @@ template <bool withHook>
 int monitorHarness<withHook>::allocate( const dev::shmimT &specific )
 {
     static_cast<void>( specific );
-    return 0;
+    return m_allocateResult.load();
 }
 
 template <bool withHook>
@@ -271,7 +273,8 @@ struct streamFixture
     monitorHarness<withHook> m_monitor; ///< Real monitor worker, without an app or instrument process.
 
     /// Create a private four-by-four float stream and start its monitor.
-    explicit streamFixture( bool initial /**< [in] Enable the initial existing-image callback. */ );
+    explicit streamFixture( bool initial /**< [in] Enable the initial existing-image callback. */,
+                            int  allocateResult = 0 /**< [in] Controller allocation result for this attachment. */ );
 
     /// Join the worker before destroying and unmapping its input stream.
     ~streamFixture();
@@ -281,7 +284,7 @@ struct streamFixture
 };
 
 template <bool withHook>
-streamFixture<withHook>::streamFixture( bool initial )
+streamFixture<withHook>::streamFixture( bool initial, int allocateResult )
 {
     static_cast<void>( streamDirectory() );
     static unsigned sequence = 0;
@@ -289,6 +292,7 @@ streamFixture<withHook>::streamFixture( bool initial )
     uint32_t size[3]         = { 4, 4, 0 };
     REQUIRE( ImageStreamIO_createIm_gpu( &m_image, m_name.c_str(), 2, size, _DATATYPE_FLOAT, -1, 1, 10, 0, 0, 0 ) ==
              0 );
+    m_monitor.m_allocateResult.store( allocateResult );
     m_monitor.start( m_name, initial );
 }
 
@@ -361,6 +365,7 @@ TEST_CASE( "Monitor timing reports discarded receipts and reattachment", "[dev::
                                      100,
                                      static_cast<int>( shmimMonitorEvent::receipt ),
                                      static_cast<int>( shmimMonitorEvent::discarded ),
+                                     static_cast<int>( shmimMonitorEvent::disconnected ),
                                      static_cast<int>( shmimMonitorEvent::connected ),
                                      static_cast<int>( shmimMonitorEvent::initial ),
                                      100 };
@@ -388,11 +393,13 @@ TEST_CASE( "Monitor timing records state-rejected notifications", "[dev::shmimMo
     fixture.m_monitor.m_rejectStateOnReceipt.store( true );
     fixture.publish();
     REQUIRE( fixture.m_monitor.wait( static_cast<int>( shmimMonitorEvent::discarded ), 1 ) );
+    REQUIRE( fixture.m_monitor.wait( static_cast<int>( shmimMonitorEvent::disconnected ), 1 ) );
     CHECK( fixture.m_monitor.m_callbacks.load() == 0 );
     auto                   observations = fixture.m_monitor.observations();
     const std::vector<int> expected{ static_cast<int>( shmimMonitorEvent::connected ),
                                      static_cast<int>( shmimMonitorEvent::receipt ),
-                                     static_cast<int>( shmimMonitorEvent::discarded ) };
+                                     static_cast<int>( shmimMonitorEvent::discarded ),
+                                     static_cast<int>( shmimMonitorEvent::disconnected ) };
     CHECK( observations == expected );
 
     // clang-format off
@@ -426,8 +433,63 @@ TEST_CASE( "Monitor timing ignores timeouts and supports owners without hooks", 
         REQUIRE( fixture.m_monitor.wait( 100, 1 ) );
         fixture.publish();
         REQUIRE( fixture.m_monitor.wait( 100, 2 ) );
+        fixture.m_monitor.m_shutdown.store( true );
+        fixture.publish();
+        fixture.m_monitor.join();
         const std::vector<int> expected{ 100, 100 };
         CHECK( fixture.m_monitor.observations() == expected );
+    }
+
+    // clang-format off
+#ifdef XWCTEST_DOX_REF
+    MagAOX::app::dev::shmimMonitor::smThreadExec;
+    MagAOX::app::dev::shmimMonitor::timingHook;
+#endif
+    // clang-format on
+}
+
+/** \brief Shutdown and allocation failure revoke established attachment state exactly once.
+ * \ingroup shmimMonitor_timing_tests
+ */
+TEST_CASE( "Monitor timing reports disconnection after the last callback", "[dev::shmimMonitor][timing]" )
+{
+    CHECK( static_cast<int>( shmimMonitorEvent::connected ) == 0 );
+    CHECK( static_cast<int>( shmimMonitorEvent::receipt ) == 1 );
+    CHECK( static_cast<int>( shmimMonitorEvent::initial ) == 2 );
+    CHECK( static_cast<int>( shmimMonitorEvent::discarded ) == 3 );
+    CHECK( static_cast<int>( shmimMonitorEvent::disconnected ) == 4 );
+
+    SECTION( "Shutdown closes the established attachment after callbacks" )
+    {
+        streamFixture<true> fixture( true );
+        REQUIRE( fixture.m_monitor.wait( 100, 1 ) );
+        fixture.m_monitor.m_shutdown.store( true );
+        fixture.publish();
+        fixture.m_monitor.join();
+        const std::vector<int> direct{ static_cast<int>( shmimMonitorEvent::connected ),
+                                       static_cast<int>( shmimMonitorEvent::initial ),
+                                       100,
+                                       static_cast<int>( shmimMonitorEvent::disconnected ) };
+        const std::vector<int> waiting{ static_cast<int>( shmimMonitorEvent::connected ),
+                                        static_cast<int>( shmimMonitorEvent::initial ),
+                                        100,
+                                        static_cast<int>( shmimMonitorEvent::receipt ),
+                                        static_cast<int>( shmimMonitorEvent::discarded ),
+                                        static_cast<int>( shmimMonitorEvent::disconnected ) };
+        const auto             observations = fixture.m_monitor.observations();
+        CHECK( ( observations == direct || observations == waiting ) );
+        CHECK( fixture.m_monitor.m_callbacks.load() == 1 );
+    }
+
+    SECTION( "Allocation failure closes an attachment that never received pixels" )
+    {
+        streamFixture<true> fixture( true, -1 );
+        REQUIRE( fixture.m_monitor.wait( static_cast<int>( shmimMonitorEvent::disconnected ), 1 ) );
+        fixture.m_monitor.join();
+        const std::vector<int> expected{ static_cast<int>( shmimMonitorEvent::connected ),
+                                         static_cast<int>( shmimMonitorEvent::disconnected ) };
+        CHECK( fixture.m_monitor.observations() == expected );
+        CHECK( fixture.m_monitor.m_callbacks.load() == 0 );
     }
 
     // clang-format off

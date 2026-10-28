@@ -30,10 +30,11 @@ enum class shmimMonitorState
 /// Optional observational events emitted on the monitor thread.
 enum class shmimMonitorEvent
 {
-    connected, ///< A new stream attachment is ready for callbacks.
-    receipt,   ///< A semaphore wait returned successfully, before metadata checks.
-    initial,   ///< Existing pixels will be processed without a semaphore receipt.
-    discarded  ///< A successful receipt was rejected before processing.
+    connected,   ///< A new stream attachment is ready for callbacks.
+    receipt,     ///< A semaphore wait returned successfully, before metadata checks.
+    initial,     ///< Existing pixels will be processed without a semaphore receipt.
+    discarded,   ///< A successful receipt was rejected before processing.
+    disconnected ///< An established attachment is about to close, after all callbacks have finished.
 };
 
 /// Default configuration and INDI names for a single monitor.
@@ -81,8 +82,10 @@ struct shmimT
  *   Each of the above functions should return 0 on success, and -1 on an error.
  *
  * An optional `void shmimMonitorTiming(const specificT &, shmimMonitorEvent)`
- * observes attachment, successful wait return, initial reads and discarded
- * receipts on the monitor thread. It must not throw, block, alter monitor
+ * observes attachment, successful wait return, initial reads, discarded
+ * receipts and disconnection on the monitor thread. Disconnection is emitted
+ * before an established attachment closes, including allocation failure. The
+ * hook must not throw, block, alter monitor
  * decisions or perform telemetry serialization. Owners without this interface
  * use a no-op dispatch and incur no timing-clock reads.
  *
@@ -930,6 +933,7 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
             m_imageStream.semReadPID[m_semaphoreNumber] = 0; // release semaphore
         }
 
+        timingHook( derived(), shmimMonitorEvent::disconnected, 0 );
         ImageStreamIO_closeIm( &m_imageStream );
         opened = false;
 
@@ -944,6 +948,7 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
 
     if( opened )
     {
+        timingHook( derived(), shmimMonitorEvent::disconnected, 0 );
         ImageStreamIO_closeIm( &m_imageStream );
         opened = false;
     }
