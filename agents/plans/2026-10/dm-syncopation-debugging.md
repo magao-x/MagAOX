@@ -3796,3 +3796,188 @@ bound and timeout now round upward, accepting valid nearest-rounded seeds.
 An independent code review found no remaining actionable correctness issue.
 Changed C++ files are clang-formatted and whitespace checks pass. This local
 verification does not measure instrument overhead or qualify delivery bounds.
+
+### `synco-sim-20261027T185754Z`: stable long-baseline cadence, no modeled overlaps
+
+Read the workstation capture under
+`/home/jrmales/tmp/home/jrmales/tmp/synco-sim-20261027T185754Z`
+(archive `/home/jrmales/tmp/synco-sim-20261027T185754Z.tgz`). The saved
+checkout hash is `7c27ae394e8cc0326777697c3cdc19255c04e9bb`; this records
+the checkout, not an independent startup hash of the running binary. The new
+cadence fields confirm the revised observation path is present. There are
+120 complete synco rows covering 2026-10-27
+18:57:53.405727685–18:59:53.005049543 UTC, 119.599 seconds
+(11:57:53–11:59:53 Phoenix). All six snapshot commands succeed, error files
+are empty, and all three collectors return expected timeout status 124.
+
+The operator confirms no other camera/loop setting, dmcomb mode/delay,
+CPU/IRQ placement or workload change during this capture or from the prior
+comparison, apart from the app/reader rebuild and restart. Saved scalar loop
+gain is 0.8 rather than 1, but modal gains were all zero, so **effective loop
+gain remained zero**. The operator notes that modal gains were zero for
+almost all tests; do not retroactively assume that for every earlier capture.
+Current readbacks show loop On, camera bin2/2 kHz/EM gain 1, shutter On,
+synchronization On, target −45 C, and RTC latency On before and after.
+The unchanged dmcomb setup is mode 4 / 10 us by operator attestation; named
+primary linkage is measured, with writer PID 3948918 and trigger inode 4676.
+
+| INDI before/after delta | Passive step 0 | Active step 1 |
+| --- | ---: | ---: |
+| Considered | 241,209 | 241,208 |
+| Conditional would run | 241,209 | 241,206 |
+| Skipped | 0 | 2 |
+| Overlap evidence | 0 | 0 |
+
+The first/last telemetry rows cover 239,199 opportunities per step: every
+passive opportunity would run, and active opportunities split into 239,197
+would-run and two `readerHold` skips. Every other skip category is zero.
+The holds first appear in reports at 18:59:29.886902081 and
+18:59:34.912264970 UTC; these locate reporting intervals, not exact events.
+They are conditional modeled reader windows, not measured physical holds.
+Operational enable stays Off; no physical auxiliary deliveries are executed.
+The longer snapshot interval explains its slightly larger population.
+
+For these two active skips, the modeled copy starts approximately 240 us
+after its frozen main grid (250 us target minus 10 us copy budget). Reader
+protection lasts 155 us after the later primary/combined observation
+(20 us delivery + 115 us keepout + 20 us guard). A reader-hold skip therefore
+requires that later observation beyond approximately grid + 85 us. Primary
+observations never exceed grid + 27.983 us, and the prior active step's hold
+ends about 335 us before this copy start, so neither can explain these skips.
+The remaining cause is the correctly linked combined-output observation
+arriving beyond grid + 85 us, at least about 57 us after the primary
+observation. It must be known by approximately grid + 240 us; a first output
+observation after that start would instead count as missing output. These
+are bounds from the decision logic, not exact per-event measurements.
+Monitor wakeup, callback bookkeeping or lock delay can contribute; the
+result does not establish equally late physical publication or DM delivery.
+Skips do not currently trigger event history, so their exact counters,
+observation times and hold overrun are unavailable in this capture.
+
+The one-opportunity difference between the two snapshot deltas is a boundary
+effect: before the capture, cumulative considered counts are 160,955 for
+step 0 and 160,956 for step 1; afterward both are 402,164. Each step is
+counted when its own opportunity is evaluated, rather than incrementing a
+pair atomically. Startup also leaves the already-past initial passive step
+uncounted. Thus subtracting these endpoints gives 241,209 versus 241,208,
+with no unaccounted outcome. Using first/last telemetry-row deltas instead
+gives 239,199 opportunities for each step.
+
+Simulation remains session 3, valid/feasible, with full cadence epoch 3
+throughout. No duplicate, gap, invalid, excluded or output-gap counts
+increase; the reset count remains one. Associations advance with genuine
+primary observations. Cadence uses all 64 retained anchors; updates advance
+80→200 in the rows and 80→201 between snapshots, with zero rejected
+measurements. Actual selected spans are 10.001012936–10.003015318 seconds,
+representing 20,002–20,006 genuine counter advances.
+
+The exact period ranges from **499.999956161 to 500.000883367 us**, with
+sampled standard deviation **0.183817 ns per cycle**. All 120 Q32 periods
+exactly reproduce the rounded endpoint calculation from their recorded
+span and count. The whole-capture monotonic endpoint/counter ratio is
+500.000386327 us (1999.998454694 Hz). The rounded integer period field
+alternates between 500,000 and 500,001 ns; that is diagnostic rounding,
+not a one-nanosecond frequency step in the internal plan.
+
+Observed single-refresh separations are 1.000000118–1.000504862 seconds.
+One adjacent pair of roughly 1.005-second telemetry reports spans two
+updates, as expected from the two sampling cadences. Primary observation
+age is 0–123.423 us while cadence refresh age is 2.517–998.019 ms; the
+slow rate update is correctly independent of fresh primary observation.
+
+![Long-baseline cadence and frozen-grid phase during the capture](figures/synco-cadence-20261027T185754Z.png)
+
+The latest main at each of the 120 reports has phase range
+−5.013 to +8.948 us and RMS 2.054 us. These are sparse diagnostic samples,
+**not an all-frame phase RMS or residual distribution**. Cumulative extrema
+change from −9.388/+27.127 us to **−9.719/+27.983 us** during the capture;
+both new extrema therefore occurred in the saved interval. Their phase
+population advances by all 239,199 genuine observations. The figure's
+cumulative lines include the pre-capture session history until a new extreme
+is established.
+
+For comparison, `035855Z` has sampled cadence standard deviation 372.414 ns,
+passive skips 111 (110 early-main), passive overlap increments 275 and active
+skips four. The new run has about 2,000 times less sampled period-estimate
+spread, no passive skips or overlaps, and two active holds. The older
+capture's new negative phase extreme was −78.020 us. Its positive session
+extreme of +74.276 us already existed before the first saved row and must
+not be presented as a newly observed excursion in that interval. Comparing
+latest-per-report phase RMS gives 6.859→2.054 us, again only a sparse-sample
+comparison. Underlying primary timing improved slightly, while combined
+publication jitter remains essentially unchanged, so the new result does
+not require assuming that real timing excursions have vanished.
+
+| Independent interval | Prior median reported 2 s sigma, us | New median reported 2 s sigma, us | New retained extrema, us |
+| --- | ---: | ---: | --- |
+| Camera acquisition | 0.322 | 0.286 | 480–516 |
+| Camera publication | 0.841 | 0.867 | 478.904–516.816 |
+| Primary publication | 2.632 | 2.477 | 471.681–528.077 |
+| Combined publication, synco observer | 5.873 | 5.905 | 468.124–530.472 |
+| DM-controller publication | 5.875 | 5.887 | 468.124–530.472 |
+| DM receipt | 5.878 | 5.935 | 468.174–530.502 |
+| DM SDK-return interval | 5.920 | 5.951 | 468.274–531.073 |
+
+These summarize overlapping rolling windows, not independent frame counts
+or a pooled population RMS. Camera and DM summaries are contiguous and
+valid, with no new failures, counter/frame gaps, invalid timestamps or queue
+drops. Their existing lifetime errors predate this capture. The camera has
+113 summaries and 237,571 publication advances; the DM has 119 summaries
+and 236,321 receipts/submissions. Their slightly different emission spans
+are retained rather than forcing a common event denominator. No startup
+consumer backlog is apparent: newest-event ages remain about 0.5 ms or less.
+A lack of gaps alone does not rule out constant acquisition delay.
+
+There is modest controller-stage spread around 18:58:07–18:58:58 UTC, with
+different stages affected at different times. SDK duration reaches
+106.471 us, saturation 10.980 us, delta calculation 18.585 us, and post
+8.036 us. Receipt-to-complete-callback maximum is 136.107 us, versus
+131.368 us previously. The combiner's trace execution mean is 5.584 us
+(median window mean), maximum 21.962 us; linked primary trace update to
+combined publication has mean 12.233 us and maximum 24.015 us. These are
+same-producer-clock trace durations, not absolute cross-clock loop latency.
+No missed-frame indicator accompanies this variation. Four complete camera
+excursion traces show approximately 479 us early publication intervals with
+serial overlap; existing camera trace-drop counts do not increase.
+
+Primary, combiner and pipeline observer quality stays clean, including
+named linkage and trace topology. Camera acquisition and camera-write
+observers each record five rejected observations, first visible at
+18:58:04.460006612 UTC. Their counter-gap, invalid and drop counts stay zero.
+Rejection causes are not encoded; the metadata observer can reject an
+incoherent/write-active sample, unusable stamp or discarded callback.
+The independent camera collector records no frame gaps. These five metadata
+rejections do not establish physical frame loss.
+
+Overlap and estimator collection are enabled throughout. All event
+`detected`, estimator `triggers`/`selected`, drain/drop/log-failure and queue
+counts remain zero, including the history before the first saved row.
+Estimator history remains full at 256 entries and postRemaining is zero.
+Thus absent `sim_overlap` and `sim_estimator` entries are expected: there
+were no overlap triggers, rather than a failed export. This capture validates
+summary cadence arithmetic and aggregate decisions; it does not provide
+per-plan fractional-grid/candidate replay or exact histories for the two
+reader-hold skips.
+
+**Outcome:** the ten-second cadence revision behaves as intended in this
+shadow comparison. Keep its window, refresh and existing phase filter
+unchanged. A longer shadow run with fixed operating settings is the next
+useful qualification; retain per-step skip/overlap and collection-quality
+counts. This result does not qualify physical delivery/early-main bounds
+or demonstrate actual auxiliary updates. No runtime code, configuration or
+physical margin was changed by this analysis.
+
+### Controller completion follow-up
+
+The reader-hold discussion led to the user's request for a controller-done
+semaphore. The optional publisher is implemented in `dev::dm`; its
+[separate engineering record](dm-controller-completion.md) defines the endpoint,
+versioned identity, error/lifecycle handling and qualification tests.
+
+The signal occurs after `makeDelta()` and the final command-channel reads,
+following the approximately 101 us BMC SDK call and roughly 15–17 us of later
+work observed here. Existing timing telemetry remains the distribution
+measurement; completion INDI readbacks are latest-attempt diagnostics. The
+publisher is off by default, has no synco consumer yet, and does not relax any
+current reader-hold or physical timing bound. The next hardware comparison must
+measure its overhead and observe matched completion before scheduling changes.

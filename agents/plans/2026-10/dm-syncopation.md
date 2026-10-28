@@ -667,6 +667,42 @@ perform no scheduler sleeps. Optional telemetry accepts legacy records and
 rejects malformed conditional populations. C++ formatting and whitespace
 checks pass. These tests do not qualify instrument overhead or delivery bounds.
 
+### 2026-10-27 initial long-baseline shadow result
+
+Capture `synco-sim-20261027T185754Z` contains 120 complete reports over
+119.599 seconds, with full ten-second cadence, valid/feasible simulation,
+unchanged epoch and no rejected rate measurements. All 120 exact Q32 periods
+reproduce their endpoint span/count calculation. Selected period ranges
+499.999956161–500.000883367 us, sampled sigma 0.183817 ns per cycle,
+versus 372.414 ns from the previous adjacent-interval median capture.
+
+INDI snapshot deltas show 241,209/241,209 passive opportunities would run,
+with no passive skips or overlap evidence. Active opportunities have
+241,206 would-run and two reader-hold skips out of 241,208; no other skip
+reason or active overlap occurs. The telemetry-row interval gives the same
+two skips over 239,199 opportunities per step. Cumulative frozen-grid phase
+extrema establish new values of −9.719/+27.983 us during this capture.
+Latest-per-report phase RMS is 2.054 us, a sparse diagnostic rather than
+an all-frame population. No overlaps means no triggered estimator export;
+per-plan/candidate replay is unavailable for this run.
+
+The operator confirms no other camera/loop, dmcomb mode/delay, CPU/IRQ or
+workload changes beyond rebuild/restart. Scalar gain changed from 1 to 0.8,
+but modal gains were all zero, leaving effective loop gain zero for this
+comparison. RTC latency remains On. Independent combined/DM publication
+jitter remains about 5.9 us (median reported rolling-window sigma), despite
+the much steadier selected cadence. Named lineage and primary/combiner/
+pipeline collection quality remain clean. Five camera-observer metadata
+rejections have no accompanying camera frame-gap or independent-collector
+drop indication; their exact causes are unrecorded.
+
+The result supports retaining the ten-second cadence and current phase filter.
+Next qualify over a longer shadow capture with fixed operating settings;
+physical timing bounds and actual auxiliary delivery remain unqualified.
+The [debugging record](dm-syncopation-debugging.md) contains full populations,
+coverage limits and the [capture figure](figures/synco-cadence-20261027T185754Z.png).
+No runtime code, settings or margins change as part of this analysis.
+
 ### 2026-10-23 ordered excursion check implemented
 
 At the operator's request, add a measurement of whether late intervals are
@@ -1533,6 +1569,22 @@ alter the synco scheduler. Compilation/linkage against the copied 5.6.8.0 SDK
 passes; loaded-driver provenance and instrument qualification remain operator
 follow-up. See the [timing guide](../../../libMagAOX/app/dev/doc/frameGrabberTiming.md)
 for configuration and readbacks.
+
+## 2026-10-27 DM controller completion signal
+
+The user requested a semaphore indicating when the controller has finished,
+following the latest shadow capture's two conservative reader-hold skips.
+An optional `dm.completionStream` publisher is now implemented in the shared DM
+controller base. It signals after backend submission, delta/channel reads,
+saturation-worker notification and timing handoff, with a versioned command
+identity and explicit qualification. It is independent of droppable telemetry.
+See the [completion engineering record](dm-controller-completion.md) and
+[interface guide](../../../libMagAOX/app/dev/doc/dmCompletion.md).
+
+This is the publisher stage only. Synco's current reader-hold decisions remain
+unchanged. Matching completion observation, overhead measurement and instrument
+qualification are required before using the signal to release a hold. Physical
+DM settling, dmcomb consumption and early-main/copy protection remain separate.
 
 ## Follow-up and Edge Cases
 

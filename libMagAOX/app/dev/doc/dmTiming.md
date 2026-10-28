@@ -36,6 +36,11 @@ tokens can return immediately. `F` precedes timing-event handoff and final retur
 The saturation worker runs asynchronously and has no per-command completion
 measurement here. An initial existing-image callback has no `A`.
 
+An optional [reader-completion publisher](dmCompletion.md) signals after the
+timing-event handoff, when the callback has finished all command-channel reads.
+It has its own stream and semaphores and remains independent of timing-event
+loss or disabled collection. It does not change these telemetry endpoints.
+
 | Stable metric name | Measurement |
 | --- | --- |
 | `receiptInterval` | Successive valid receipts, `A[i] - A[i-1]` |
