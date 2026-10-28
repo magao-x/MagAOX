@@ -82,6 +82,11 @@ $ less tests/results/latest/run.log
  * \ingroup app_dev_unit_tests
  */
 
+/** \defgroup dmReaderTiming_unit_test DM Reader Protection Timing Unit Tests
+ * \brief Exact completion joins, observed reader lifetime and bounded collection quality.
+ * \ingroup app_dev_unit_tests
+ */
+
 /** \defgroup dmPipelineTelemetry_unit_test Upstream AO Timing Telemetry Unit Tests
  * \brief Independent camera, upstream trace and legacy serialization tests.
  * \ingroup logger_unit_test

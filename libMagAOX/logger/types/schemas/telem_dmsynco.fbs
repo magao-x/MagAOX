@@ -1,5 +1,5 @@
 /// \file telem_dmsynco.fbs
-/// \brief Scheduler telemetry with independent timing, fractional shadow cadence and bounded overlap evidence.
+/// \brief Scheduler telemetry with independent timing, reader protection and bounded shadow evidence.
 namespace MagAOX.logger;
 
 // Values and coverage are seconds; publication values retain their external clock.
@@ -351,6 +351,119 @@ table DmSyncoSimulation
     cadence:DmSyncoCadence;
 }
 
+// Raw publication fields identify producers and are never subtracted from the monotonic observer clock.
+table DmSyncoReaderIdentity
+{
+    inode:ulong;
+    counter:ulong;
+    publication_sec:long;
+    publication_nsec:long;
+}
+
+table DmSyncoReaderPrimary
+{
+    input:DmSyncoReaderIdentity (required);
+    observed_ns:long;
+}
+
+table DmSyncoReaderCombined
+{
+    input:DmSyncoReaderIdentity (required);
+    primary_inode:ulong;
+    primary_counter:ulong;
+    start_ns:long;
+    observed_ns:long;
+    budget_ns:long;
+}
+
+// Versioned controller outcome; started/finished/observed are same-host monotonic nanoseconds.
+table DmSyncoReaderCompletion
+{
+    protocol_version:ulong;
+    session:ulong;
+    epoch:ulong;
+    sequence:ulong;
+    state:ulong;
+    input:DmSyncoReaderIdentity (required);
+    started_ns:long;
+    finished_ns:long;
+    outcome:ubyte;
+    callback_result:long;
+    publisher_pid:ulong;
+    observed_ns:long;
+}
+
+// Completion offset and model slack are signed; all absolute local times are monotonic nanoseconds.
+table DmSyncoReaderSample
+{
+    primary:DmSyncoReaderPrimary (required);
+    combined:DmSyncoReaderCombined (required);
+    completed:DmSyncoReaderCompletion (required);
+    base_ns:long;
+    offset_ns:long;
+    required_ns:long;
+    observed_hold_ns:long;
+    slack_ns:long;
+}
+
+table DmSyncoReaderQuality
+{
+    events:ulong;
+    primary:ulong;
+    combined:ulong;
+    completion:ulong;
+    matched:ulong;
+    busy:ulong;
+    unavailable:ulong;
+    error:ulong;
+    unqualified:ulong;
+    invalid:ulong;
+    incoherent:ulong;
+    duplicates:ulong;
+    sequence_gaps:ulong;
+    counter_gaps:ulong;
+    source_resets:ulong;
+    stale_epoch:ulong;
+    missing_primary:ulong;
+    missing_combined:ulong;
+    identity_mismatch:ulong;
+    evicted:ulong;
+    expired:ulong;
+    dropped_primary:ulong;
+    dropped_combined:ulong;
+    dropped_completion:ulong;
+}
+
+// Trailing populations are in seconds; extrema and full worst-event evidence survive window expiration.
+// This is observational software-reader protection, not hardware settling or a scheduler release.
+table DmSyncoReaderTiming
+{
+    enabled:bool;
+    session:ulong;
+    sequence:ulong;
+    now_ns:long;
+    window_sec:double;
+    capacity:ulong;
+    queued:ulong;
+    pending_primary:ulong;
+    pending_combined:ulong;
+    pending_completion:ulong;
+    span_sec:double;
+    age_sec:double;
+    completion_offset:DmSyncoTimingStats (required);
+    required_hold:DmSyncoTimingStats (required);
+    observed_hold:DmSyncoTimingStats (required);
+    processing:DmSyncoTimingStats (required);
+    notification:DmSyncoTimingStats (required);
+    model_slack:DmSyncoTimingStats (required);
+    total:DmSyncoReaderQuality (required);
+    worst_valid:bool;
+    worst:DmSyncoReaderSample;
+    max_required_hold_ns:long;
+    max_observed_hold_ns:long;
+    over_budget:ulong;
+}
+
 table Telem_dmsynco_fb
 {
     state:int;
@@ -371,6 +484,7 @@ table Telem_dmsynco_fb
     pipeline_timing:DmSyncoPipelineTiming;
     camera_publication_timing:DmSyncoPrimaryTiming;
     simulation:DmSyncoSimulation;
+    reader_timing:DmSyncoReaderTiming;
 }
 
 root_type Telem_dmsynco_fb;

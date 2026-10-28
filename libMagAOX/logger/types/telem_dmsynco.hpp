@@ -1,5 +1,5 @@
 /** \file telem_dmsynco.hpp
- * \brief Aggregate syncopation timing, fractional shadow cadence and bounded overlap/estimator history telemetry.
+ * \brief Syncopation timing, shadow cadence, reader protection and bounded estimator history telemetry.
  */
 #ifndef logger_types_telem_dmsynco_hpp
 #define logger_types_telem_dmsynco_hpp
@@ -14,6 +14,7 @@
 
 #include "../../common/dmCombTiming.hpp"
 #include "../../common/dmPipelineTiming.hpp"
+#include "../../common/dmReaderTiming.hpp"
 #include "../../common/dmSyncoSimulation.hpp"
 #include "../../common/dmTiming.hpp"
 #include "generated/telem_dmsynco_generated.h"
@@ -35,26 +36,27 @@ struct telem_dmsynco : public flatbuffer_log
     struct messageT : public fbMessage
     {
         /// Serialize a coherent snapshot of scheduler diagnostics.
-        messageT( int                         state /**< [in] schedule state */,
-                  int                         steps /**< [in] requested count */,
-                  int64_t                     period /**< [in] measured period, ns */,
-                  uint64_t                    delivered /**< [in] confirmed extra combinations */,
-                  uint64_t                    missed /**< [in] failed timing events */,
-                  uint64_t                    faults /**< [in] synchronization/resource faults */,
-                  uint64_t                    cached /**< [in] source-cache fallback count */,
-                  int64_t                     snapshot /**< [in] maximum whole-snapshot time, ns */,
-                  int64_t                     copy /**< [in] maximum whole-copy time, ns */,
-                  const std::vector<int64_t> &residuals /**< [in] latest per-step residuals, ns */,
-                  const std::vector<int64_t> &advances /**< [in] per-step wait advances, ns */,
-                  const dmTiming::Summary    &primary = {} /**< [in] observed primary cadence; disabled by default */,
-                  bool scheduleValid = true /**< [in] false when scheduler fields are unavailable placeholders */,
-                  const dmCombTiming::Summary &combiner = {} /**< [in] independently observed combiner timing */,
-                  const dmTiming::Summary     &camera = {} /**< [in] independent camera acquisition-stamp intervals */,
-                  const dmPipelineTiming::Summary &pipeline  = {} /**< [in] upstream trace-stage populations */,
-                  const dmTiming::Summary &cameraPublication = {} /**< [in] independent camera writetime intervals */,
-                  const dmSyncoSimulation::Summary    &simulation = {} /**< [in] conditional shadow predictions */,
-                  const dmSyncoSimulation::TraceBatch &trace =
-                      {} /**< [in] drained overlap/estimator evidence and quality */ );
+        messageT(
+            int                         state /**< [in] schedule state */,
+            int                         steps /**< [in] requested count */,
+            int64_t                     period /**< [in] measured period, ns */,
+            uint64_t                    delivered /**< [in] confirmed extra combinations */,
+            uint64_t                    missed /**< [in] failed timing events */,
+            uint64_t                    faults /**< [in] synchronization/resource faults */,
+            uint64_t                    cached /**< [in] source-cache fallback count */,
+            int64_t                     snapshot /**< [in] maximum whole-snapshot time, ns */,
+            int64_t                     copy /**< [in] maximum whole-copy time, ns */,
+            const std::vector<int64_t> &residuals /**< [in] latest per-step residuals, ns */,
+            const std::vector<int64_t> &advances /**< [in] per-step wait advances, ns */,
+            const dmTiming::Summary    &primary = {} /**< [in] observed primary cadence; disabled by default */,
+            bool scheduleValid = true /**< [in] false when scheduler fields are unavailable placeholders */,
+            const dmCombTiming::Summary     &combiner = {} /**< [in] independently observed combiner timing */,
+            const dmTiming::Summary         &camera   = {} /**< [in] independent camera acquisition-stamp intervals */,
+            const dmPipelineTiming::Summary &pipeline = {} /**< [in] upstream trace-stage populations */,
+            const dmTiming::Summary         &cameraPublication = {} /**< [in] independent camera writetime intervals */,
+            const dmSyncoSimulation::Summary    &simulation    = {} /**< [in] conditional shadow predictions */,
+            const dmSyncoSimulation::TraceBatch &trace = {} /**< [in] drained overlap/estimator evidence and quality */,
+            const dmReaderTiming::Summary &reader = {} /**< [in] independently observed software reader completion */ );
     };
 
     /// Validate optional cadence and stage populations while accepting legacy records.
@@ -93,6 +95,16 @@ struct telem_dmsynco : public flatbuffer_log
     static flatbuffers::Offset<DmSyncoPipelineTiming>
     pipelineTiming( flatbuffers::FlatBufferBuilder  &builder /**< [in/out] destination builder */,
                     const dmPipelineTiming::Summary &summary /**< [in] coherent pipeline observation */ );
+
+    /// Serialize optional reader-protection measurements with signed offsets and lifetime worst provenance.
+    static flatbuffers::Offset<DmSyncoReaderTiming>
+    readerTiming( flatbuffers::FlatBufferBuilder &builder /**< [in/out] destination builder */,
+                  const dmReaderTiming::Summary  &summary /**< [in] matched observation and completion summary */ );
+
+    /// Serialize exact matched command identities and local monotonic evidence for the worst required hold.
+    static flatbuffers::Offset<DmSyncoReaderSample>
+    readerSample( flatbuffers::FlatBufferBuilder &builder /**< [in/out] destination builder */,
+                  const dmReaderTiming::Sample   &sample /**< [in] matched command evidence */ );
 
     /// Serialize conditional shadow outcomes without claiming auxiliary delivery.
     static flatbuffers::Offset<DmSyncoSimulation>
@@ -135,6 +147,12 @@ struct telem_dmsynco : public flatbuffer_log
     /// Check retained pipeline topology and conditional-population count bounds.
     static bool validPipeline( const DmSyncoPipelineTiming *summary /**< [in] optional trace-stage summary */ );
 
+    /// Check optional reader matching, signed populations, lifetime maxima and exact worst-command evidence.
+    static bool validReader( const DmSyncoReaderTiming *summary /**< [in] optional software reader measurement */ );
+
+    /// Recompute a matched command's signed reader-protection arithmetic without crossing clock domains.
+    static bool validReaderSample( const DmSyncoReaderSample *sample /**< [in] lifetime matched-command evidence */ );
+
     /// Check optional shadow model readiness and independently counted step outcomes.
     static bool validSimulation( const DmSyncoSimulation *summary /**< [in] optional conditional simulation */ );
 
@@ -154,6 +172,10 @@ struct telem_dmsynco : public flatbuffer_log
     /// Format retained pipeline stages and their independently counted conditional populations.
     static void formatPipeline( std::ostream                &output /**< [in/out] formatted aggregate */,
                                 const DmSyncoPipelineTiming *summary /**< [in] optional pipeline summary */ );
+
+    /// Format signed reader offsets in seconds and retain exact identities and monotonic worst-event evidence.
+    static void formatReader( std::ostream              &output /**< [in/out] formatted aggregate */,
+                              const DmSyncoReaderTiming *summary /**< [in] optional software reader measurement */ );
 
     /// Append explicitly hypothetical prediction and per-step outcome diagnostics when enabled.
     static void formatSimulation( std::ostream            &output /**< [in/out] formatted aggregate */,
@@ -620,6 +642,120 @@ telem_dmsynco::simulationTiming( flatbuffers::FlatBufferBuilder      &builder,
                                     cadence );
 }
 
+inline flatbuffers::Offset<DmSyncoReaderSample> telem_dmsynco::readerSample( flatbuffers::FlatBufferBuilder &builder,
+                                                                             const dmReaderTiming::Sample   &sample )
+{
+    const auto &primary         = sample.primary;
+    const auto &combined        = sample.combined;
+    const auto &record          = sample.completed.record;
+    const auto  primaryIdentity = CreateDmSyncoReaderIdentity(
+        builder, primary.input.inode, primary.input.counter, primary.input.sec, primary.input.nsec );
+    const auto primaryRecord    = CreateDmSyncoReaderPrimary( builder, primaryIdentity, primary.observedNs );
+    const auto combinedIdentity = CreateDmSyncoReaderIdentity(
+        builder, combined.input.inode, combined.input.counter, combined.input.sec, combined.input.nsec );
+    const auto combinedRecord    = CreateDmSyncoReaderCombined( builder,
+                                                             combinedIdentity,
+                                                             combined.primaryInode,
+                                                             combined.primaryCounter,
+                                                             combined.startNs,
+                                                             combined.observedNs,
+                                                             combined.budgetNs );
+    const auto completedIdentity = CreateDmSyncoReaderIdentity(
+        builder, record.inputInode, record.inputCounter, record.publicationSec, record.publicationNsec );
+    const auto completed = CreateDmSyncoReaderCompletion( builder,
+                                                          record.protocolVersion,
+                                                          record.session,
+                                                          record.epoch,
+                                                          record.sequence,
+                                                          static_cast<uint64_t>( record.state ),
+                                                          completedIdentity,
+                                                          record.startedNs,
+                                                          record.finishedNs,
+                                                          static_cast<uint8_t>( record.outcome ),
+                                                          record.callbackResult,
+                                                          record.publisherPid,
+                                                          sample.completed.observedNs );
+    return CreateDmSyncoReaderSample( builder,
+                                      primaryRecord,
+                                      combinedRecord,
+                                      completed,
+                                      sample.baseNs,
+                                      sample.offsetNs,
+                                      sample.requiredNs,
+                                      sample.observedHoldNs,
+                                      sample.slackNs );
+}
+
+inline flatbuffers::Offset<DmSyncoReaderTiming> telem_dmsynco::readerTiming( flatbuffers::FlatBufferBuilder &builder,
+                                                                             const dmReaderTiming::Summary  &summary )
+{
+    if( !summary.enabled )
+    {
+        return 0;
+    }
+
+    std::array<flatbuffers::Offset<DmSyncoTimingStats>, static_cast<size_t>( dmReaderTiming::Metric::count )> metrics;
+
+    for( size_t index = 0; index < metrics.size(); ++index )
+    {
+        metrics[index] = timingStats( builder, summary.metrics[index] );
+    }
+
+    const auto &counts  = summary.total;
+    const auto  quality = CreateDmSyncoReaderQuality( builder,
+                                                     counts.events,
+                                                     counts.primary,
+                                                     counts.combined,
+                                                     counts.completion,
+                                                     counts.matched,
+                                                     counts.busy,
+                                                     counts.unavailable,
+                                                     counts.error,
+                                                     counts.unqualified,
+                                                     counts.invalid,
+                                                     counts.incoherent,
+                                                     counts.duplicates,
+                                                     counts.sequenceGaps,
+                                                     counts.counterGaps,
+                                                     counts.sourceResets,
+                                                     counts.staleEpoch,
+                                                     counts.missingPrimary,
+                                                     counts.missingCombined,
+                                                     counts.identityMismatch,
+                                                     counts.evicted,
+                                                     counts.expired,
+                                                     counts.droppedPrimary,
+                                                     counts.droppedCombined,
+                                                     counts.droppedCompletion );
+    const auto  worst =
+        summary.worstValid ? readerSample( builder, summary.worst ) : flatbuffers::Offset<DmSyncoReaderSample>{};
+    return CreateDmSyncoReaderTiming( builder,
+                                      summary.enabled,
+                                      summary.session,
+                                      summary.sequence,
+                                      summary.nowNs,
+                                      summary.windowSec,
+                                      summary.capacity,
+                                      summary.queued,
+                                      summary.pendingPrimary,
+                                      summary.pendingCombined,
+                                      summary.pendingCompletion,
+                                      summary.span,
+                                      summary.age,
+                                      metrics[0],
+                                      metrics[1],
+                                      metrics[2],
+                                      metrics[3],
+                                      metrics[4],
+                                      metrics[5],
+                                      quality,
+                                      summary.worstValid,
+                                      worst,
+                                      summary.maxRequiredHoldNs,
+                                      summary.maxObservedHoldNs,
+                                      summary.overBudget );
+}
+
 inline telem_dmsynco::messageT::messageT( int                                  state,
                                           int                                  steps,
                                           int64_t                              period,
@@ -638,7 +774,8 @@ inline telem_dmsynco::messageT::messageT( int                                  s
                                           const dmPipelineTiming::Summary     &pipeline,
                                           const dmTiming::Summary             &cameraPublication,
                                           const dmSyncoSimulation::Summary    &simulation,
-                                          const dmSyncoSimulation::TraceBatch &trace )
+                                          const dmSyncoSimulation::TraceBatch &trace,
+                                          const dmReaderTiming::Summary       &reader )
 {
     builder.ForceDefaults( true ); // Keep nonfinite input available to verification under fast-math comparisons.
 
@@ -650,6 +787,7 @@ inline telem_dmsynco::messageT::messageT( int                                  s
     const auto upstreamTiming          = pipelineTiming( builder, pipeline );
     const auto combinedTiming          = combinerTiming( builder, combiner );
     const auto simulatedTiming         = simulationTiming( builder, simulation, trace );
+    const auto completedTiming         = readerTiming( builder, reader );
 
     builder.Finish( CreateTelem_dmsynco_fb( builder,
                                             state,
@@ -669,7 +807,8 @@ inline telem_dmsynco::messageT::messageT( int                                  s
                                             cameraTiming,
                                             upstreamTiming,
                                             cameraPublicationTiming,
-                                            simulatedTiming ) );
+                                            simulatedTiming,
+                                            completedTiming ) );
 }
 
 inline bool telem_dmsynco::validStats( const DmSyncoTimingStats *stats, bool signedValues )
@@ -824,6 +963,149 @@ inline bool telem_dmsynco::validPipeline( const DmSyncoPipelineTiming *summary )
     }
 
     return true;
+}
+
+inline bool telem_dmsynco::validReaderSample( const DmSyncoReaderSample *sample )
+{
+    if( !sample || !sample->primary() || !sample->combined() || !sample->completed() )
+    {
+        return false;
+    }
+
+    const auto *primary   = sample->primary();
+    const auto *combined  = sample->combined();
+    const auto *completed = sample->completed();
+    const auto *source    = primary->input();
+    const auto *input     = combined->input();
+    const auto *command   = completed->input();
+
+    if( !source || !input || !command || !source->inode() || !source->counter() || source->publication_sec() <= 0 ||
+        source->publication_nsec() < 0 || source->publication_nsec() >= 1000000000 || !input->inode() ||
+        !input->counter() || input->publication_sec() <= 0 || input->publication_nsec() < 0 ||
+        input->publication_nsec() >= 1000000000 || primary->observed_ns() <= 0 || combined->observed_ns() <= 0 ||
+        combined->budget_ns() < 0 || combined->primary_inode() != source->inode() ||
+        combined->primary_counter() != source->counter() || command->inode() != input->inode() ||
+        command->counter() != input->counter() || command->publication_sec() != input->publication_sec() ||
+        command->publication_nsec() != input->publication_nsec() ||
+        completed->observed_ns() < completed->finished_ns() )
+    {
+        return false;
+    }
+
+    MagAOX::dmCompletion::Record record;
+    record.protocolVersion = completed->protocol_version();
+    record.session         = completed->session();
+    record.epoch           = completed->epoch();
+    record.sequence        = completed->sequence();
+    record.state           = static_cast<MagAOX::dmCompletion::State>( completed->state() );
+    record.inputInode      = command->inode();
+    record.inputCounter    = command->counter();
+    record.publicationSec  = command->publication_sec();
+    record.publicationNsec = command->publication_nsec();
+    record.startedNs       = completed->started_ns();
+    record.finishedNs      = completed->finished_ns();
+    record.outcome         = static_cast<MagAOX::dmTiming::Outcome>( completed->outcome() );
+    record.callbackResult  = completed->callback_result();
+    record.publisherPid    = completed->publisher_pid();
+
+    if( !MagAOX::dmCompletion::qualified( record ) )
+    {
+        return false;
+    }
+
+    const __int128 sourcePublication = __int128( source->publication_sec() ) * 1000000000 + source->publication_nsec();
+    const __int128 inputPublication  = __int128( input->publication_sec() ) * 1000000000 + input->publication_nsec();
+    const int64_t  base              = std::max( primary->observed_ns(), combined->observed_ns() );
+    const __int128 offset            = __int128( completed->finished_ns() ) - base;
+    const __int128 observed          = __int128( completed->observed_ns() ) - base;
+    const __int128 slack             = __int128( combined->budget_ns() ) - offset;
+    return sourcePublication <= combined->start_ns() && combined->start_ns() <= inputPublication &&
+           inputPublication <= std::numeric_limits<int64_t>::max() && sample->base_ns() == base &&
+           sample->offset_ns() == offset && sample->required_ns() == std::max<__int128>( 0, offset ) &&
+           sample->observed_hold_ns() == std::max<__int128>( 0, observed ) && sample->slack_ns() == slack;
+}
+
+inline bool telem_dmsynco::validReader( const DmSyncoReaderTiming *summary )
+{
+    if( !summary )
+    {
+        return true;
+    }
+
+    const auto *quality = summary->total();
+
+    if( !quality || summary->now_ns() < 0 || !mx::math::isFinite( summary->window_sec() ) ||
+        summary->window_sec() < 0 || !mx::math::isFinite( summary->span_sec() ) || summary->span_sec() < 0 ||
+        summary->span_sec() > summary->window_sec() + 1e-9 || !mx::math::isFinite( summary->age_sec() ) ||
+        ( summary->age_sec() < 0 && summary->age_sec() != -1 ) ||
+        __uint128_t( summary->queued() ) > __uint128_t( summary->capacity() ) * 3 ||
+        summary->pending_primary() > summary->capacity() || summary->pending_combined() > summary->capacity() ||
+        summary->pending_completion() > summary->capacity() || summary->max_required_hold_ns() < 0 ||
+        summary->max_observed_hold_ns() < summary->max_required_hold_ns() ||
+        summary->over_budget() > quality->matched() ||
+        __uint128_t( quality->primary() ) + quality->combined() + quality->completion() != quality->events() ||
+        quality->matched() > quality->combined() || quality->matched() > quality->completion() ||
+        __uint128_t( quality->busy() ) + quality->unavailable() + quality->error() + quality->unqualified() >
+            quality->completion() ||
+        summary->worst_valid() != ( quality->matched() > 0 ) ||
+        ( summary->enabled() && ( !summary->session() || !summary->capacity() || summary->window_sec() <= 0 ) ) )
+    {
+        return false;
+    }
+
+    const DmSyncoTimingStats *populations[] = { summary->completion_offset(),
+                                                summary->required_hold(),
+                                                summary->observed_hold(),
+                                                summary->processing(),
+                                                summary->notification(),
+                                                summary->model_slack() };
+    uint64_t                  maximumCount  = 0;
+
+    for( size_t index = 0; index < static_cast<size_t>( dmReaderTiming::Metric::count ); ++index )
+    {
+        const auto *stats = populations[index];
+
+        if( !validStats( stats,
+                         index == dmReaderTiming::index( dmReaderTiming::Metric::completionOffset ) ||
+                             index == dmReaderTiming::index( dmReaderTiming::Metric::modelSlack ) ) ||
+            !mx::math::isFinite( stats->mean() ) || !mx::math::isFinite( stats->min() ) ||
+            !mx::math::isFinite( stats->max() ) || !mx::math::isFinite( stats->span() ) ||
+            !mx::math::isFinite( stats->stddev() ) || stats->stddev() < 0 || stats->count() > summary->capacity() ||
+            stats->count() > quality->matched() || stats->valid() != ( stats->count() > 1 ) ||
+            ( stats->count() < 2 && stats->stddev() != 0 ) || stats->span() > summary->span_sec() + 1e-9 ||
+            ( stats->count() == 1 && stats->span() != 0 ) ||
+            ( !stats->count() &&
+              ( stats->mean() != 0 || stats->min() != 0 || stats->max() != 0 || stats->span() != 0 ) ) )
+        {
+            return false;
+        }
+
+        maximumCount = std::max( maximumCount, stats->count() );
+    }
+
+    if( ( !maximumCount && ( summary->age_sec() != -1 || summary->span_sec() != 0 ) ) ||
+        ( maximumCount && summary->age_sec() < 0 ) ||
+        populations[0]->max() > summary->max_required_hold_ns() * 1e-9 + 1e-15 ||
+        populations[1]->max() > summary->max_required_hold_ns() * 1e-9 + 1e-15 ||
+        populations[2]->max() > summary->max_observed_hold_ns() * 1e-9 + 1e-15 ||
+        ( !summary->enabled() && ( maximumCount || summary->capacity() || summary->queued() ||
+                                   summary->pending_primary() || summary->pending_combined() ||
+                                   summary->pending_completion() || quality->events() || quality->matched() ) ) )
+    {
+        return false;
+    }
+
+    if( !summary->worst_valid() )
+    {
+        return !summary->worst() && !summary->max_required_hold_ns() && !summary->max_observed_hold_ns() &&
+               !summary->over_budget();
+    }
+
+    return validReaderSample( summary->worst() ) &&
+           summary->worst()->required_ns() == summary->max_required_hold_ns() &&
+           summary->worst()->observed_hold_ns() <= summary->max_observed_hold_ns() &&
+           ( summary->worst()->slack_ns() >= 0 || summary->over_budget() > 0 ) &&
+           ( summary->max_required_hold_ns() > 0 || !summary->over_budget() );
 }
 
 inline bool telem_dmsynco::validPeriod( uint64_t periodQ32, int64_t periodNs )
@@ -1167,7 +1449,7 @@ inline bool telem_dmsynco::verify( flatlogs::bufferPtrT &buffer, flatlogs::msgLe
 
     if( !validObservation( record->primary_timing() ) || !validObservation( record->camera_timing() ) ||
         !validPipeline( record->pipeline_timing() ) || !validObservation( record->camera_publication_timing() ) ||
-        !validSimulation( record->simulation() ) )
+        !validSimulation( record->simulation() ) || !validReader( record->reader_timing() ) )
     {
         return false;
     }
@@ -1300,6 +1582,77 @@ inline void telem_dmsynco::formatPipeline( std::ostream &output, const DmSyncoPi
         formatStats( output, "stageEarlyExecutionChange", stage->early_execution_change() );
         formatStats( output, "stageEarlyHandoffChange", stage->early_handoff_change() );
     }
+}
+
+inline void telem_dmsynco::formatReader( std::ostream &output, const DmSyncoReaderTiming *summary )
+{
+    if( !summary )
+    {
+        output << " reader_timing=unavailable";
+        return;
+    }
+
+    const auto *quality = summary->total();
+    output << " reader_enabled=" << summary->enabled() << " reader_mode=shadow_observation"
+           << " reader_session=" << summary->session() << " reader_sequence=" << summary->sequence()
+           << " reader_now_ns=" << summary->now_ns() << " reader_window_s=" << summary->window_sec()
+           << " reader_capacity=" << summary->capacity() << " reader_queued=" << summary->queued()
+           << " reader_pending={primary:" << summary->pending_primary() << ",combined:" << summary->pending_combined()
+           << ",completion:" << summary->pending_completion() << "} reader_span_s=" << summary->span_sec()
+           << " reader_age_s=" << summary->age_sec()
+           << " reader_max_required_hold_ns=" << summary->max_required_hold_ns()
+           << " reader_max_observed_hold_ns=" << summary->max_observed_hold_ns()
+           << " reader_over_budget=" << summary->over_budget() << " reader_quality={events:" << quality->events()
+           << ",primary:" << quality->primary() << ",combined:" << quality->combined()
+           << ",completion:" << quality->completion() << ",matched:" << quality->matched()
+           << ",busy:" << quality->busy() << ",unavailable:" << quality->unavailable() << ",error:" << quality->error()
+           << ",unqualified:" << quality->unqualified() << ",invalid:" << quality->invalid()
+           << ",incoherent:" << quality->incoherent() << ",duplicates:" << quality->duplicates()
+           << ",sequenceGaps:" << quality->sequence_gaps() << ",counterGaps:" << quality->counter_gaps()
+           << ",sourceResets:" << quality->source_resets() << ",staleEpoch:" << quality->stale_epoch()
+           << ",missingPrimary:" << quality->missing_primary() << ",missingCombined:" << quality->missing_combined()
+           << ",identityMismatch:" << quality->identity_mismatch() << ",evicted:" << quality->evicted()
+           << ",expired:" << quality->expired() << ",droppedPrimary:" << quality->dropped_primary()
+           << ",droppedCombined:" << quality->dropped_combined()
+           << ",droppedCompletion:" << quality->dropped_completion() << '}';
+    formatStats( output, "readerCompletionOffset", summary->completion_offset() );
+    formatStats( output, "readerRequiredHold", summary->required_hold() );
+    formatStats( output, "readerObservedHold", summary->observed_hold() );
+    formatStats( output, "readerProcessing", summary->processing() );
+    formatStats( output, "readerNotification", summary->notification() );
+    formatStats( output, "readerModelSlack", summary->model_slack() );
+    output << " reader_worst_valid=" << summary->worst_valid();
+
+    if( !summary->worst_valid() )
+    {
+        return;
+    }
+
+    const auto *sample    = summary->worst();
+    const auto *primary   = sample->primary();
+    const auto *combined  = sample->combined();
+    const auto *completed = sample->completed();
+    const auto *source    = primary->input();
+    const auto *input     = combined->input();
+    const auto *command   = completed->input();
+    output << " reader_worst={clock:monotonic,base_ns:" << sample->base_ns() << ",offset_ns:" << sample->offset_ns()
+           << ",required_ns:" << sample->required_ns() << ",observed_hold_ns:" << sample->observed_hold_ns()
+           << ",slack_ns:" << sample->slack_ns() << ",primary:{inode:" << source->inode()
+           << ",counter:" << source->counter() << ",publication_sec:" << source->publication_sec()
+           << ",publication_nsec:" << source->publication_nsec() << ",observed_ns:" << primary->observed_ns()
+           << "},combined:{inode:" << input->inode() << ",counter:" << input->counter()
+           << ",publication_sec:" << input->publication_sec() << ",publication_nsec:" << input->publication_nsec()
+           << ",primary_inode:" << combined->primary_inode() << ",primary_counter:" << combined->primary_counter()
+           << ",start_external_ns:" << combined->start_ns() << ",observed_ns:" << combined->observed_ns()
+           << ",budget_ns:" << combined->budget_ns()
+           << "},completion:{protocol_version:" << completed->protocol_version() << ",session:" << completed->session()
+           << ",epoch:" << completed->epoch() << ",sequence:" << completed->sequence()
+           << ",state:" << completed->state() << ",input_inode:" << command->inode()
+           << ",input_counter:" << command->counter() << ",publication_sec:" << command->publication_sec()
+           << ",publication_nsec:" << command->publication_nsec() << ",started_ns:" << completed->started_ns()
+           << ",finished_ns:" << completed->finished_ns() << ",outcome:" << unsigned( completed->outcome() )
+           << ",callback_result:" << completed->callback_result() << ",publisher_pid:" << completed->publisher_pid()
+           << ",observed_ns:" << completed->observed_ns() << "}}";
 }
 
 inline void telem_dmsynco::formatSimulation( std::ostream &output, const DmSyncoSimulation *summary )
@@ -1511,6 +1864,7 @@ inline std::string telem_dmsynco::msgString( void *buffer, flatlogs::msgLenT len
     formatPipeline( output, record->pipeline_timing() );
     formatObservation( output, "cameraWrite", "cameraWriteInterval", record->camera_publication_timing() );
     formatSimulation( output, record->simulation() );
+    formatReader( output, record->reader_timing() );
 
     return output.str();
 }

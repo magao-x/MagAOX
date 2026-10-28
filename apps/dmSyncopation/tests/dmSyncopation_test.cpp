@@ -77,8 +77,9 @@ void SimulationDriver::sendXml( const std::string &xml ) const
 class Harness : public dmSyncopation
 {
   public:
-    using CombinedMonitor = dev::shmimMonitor<dmSyncopation, syncoCombinerT>;
-    using CameraMonitor   = dev::shmimMonitor<dmSyncopation, syncoCameraT>;
+    using CombinedMonitor   = dev::shmimMonitor<dmSyncopation, syncoCombinerT>;
+    using CameraMonitor     = dev::shmimMonitor<dmSyncopation, syncoCameraT>;
+    using CompletionMonitor = dev::shmimMonitor<dmSyncopation, syncoCompletionT>;
 
     using dmSyncopation::allocate;
     using dmSyncopation::configureSimulation;
@@ -137,6 +138,8 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_indiP_primaryTiming;
     using dmSyncopation::m_indiP_primaryTimingQuality;
     using dmSyncopation::m_indiP_reacquire;
+    using dmSyncopation::m_indiP_readerQuality;
+    using dmSyncopation::m_indiP_readerTiming;
     using dmSyncopation::m_indiP_settings;
     using dmSyncopation::m_indiP_simulation;
     using dmSyncopation::m_indiP_simulationCadence;
@@ -172,6 +175,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_primaryTraceInode;
     using dmSyncopation::m_primed;
     using dmSyncopation::m_rateFrames;
+    using dmSyncopation::m_readerTiming;
     using dmSyncopation::m_reason;
     using dmSyncopation::m_record;
     using dmSyncopation::m_requested;
@@ -202,6 +206,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::setupCombinerCadenceINDI;
     using dmSyncopation::setupPipelineINDI;
     using dmSyncopation::setupPrimaryCadenceINDI;
+    using dmSyncopation::setupReaderTimingINDI;
     using dmSyncopation::setupSimulationINDI;
     using dmSyncopation::snapshot;
     using dmSyncopation::updateCadenceINDI;
@@ -211,6 +216,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::updatePipelineINDI;
     using dmSyncopation::updatePrimaryCadenceINDI;
     using dmSyncopation::updatePrimaryPairsINDI;
+    using dmSyncopation::updateReaderTimingINDI;
     using dmSyncopation::updateSimulationCadence;
     using dmSyncopation::updateSimulationINDI;
     using dmSyncopation::waitUntil;
@@ -267,6 +273,18 @@ class Harness : public dmSyncopation
 
     /// Return the independent monitor's configured thread priority.
     int combinedMonitorPriority() const;
+
+    /// Import the fixture's dedicated completion record without starting another monitor.
+    void attachCompletionOnly();
+
+    /// Access the completion observer's imported record for allocation and callback tests.
+    IMAGE &completionImage();
+
+    /// Return the optional completion observer's configured stream name.
+    const std::string &completionMonitorName() const;
+
+    /// Return the completion observer's scheduling priority.
+    int completionMonitorPriority() const;
 
     /// Import an isolated fixture stream for metadata-only acquisition observation.
     void attachCameraOnly();
@@ -329,6 +347,11 @@ Harness::~Harness() noexcept
     if( cameraImage().md )
     {
         ImageStreamIO_closeIm( &cameraImage() );
+    }
+
+    if( completionImage().md )
+    {
+        ImageStreamIO_closeIm( &completionImage() );
     }
 }
 
@@ -427,6 +450,29 @@ const std::string &Harness::combinedMonitorName() const
 int Harness::combinedMonitorSemaphore() const
 {
     return CombinedMonitor::m_semaphoreNumber;
+}
+
+void Harness::attachCompletionOnly()
+{
+    CompletionMonitor::m_shmimName = "synco_reader_done";
+    REQUIRE( ImageStreamIO_openIm( &completionImage(), CompletionMonitor::m_shmimName.c_str() ) == 0 );
+    REQUIRE( allocate( syncoCompletionT{} ) == 0 );
+    shmimMonitorTiming( syncoCompletionT{}, dev::shmimMonitorEvent::connected );
+}
+
+IMAGE &Harness::completionImage()
+{
+    return CompletionMonitor::m_imageStream;
+}
+
+const std::string &Harness::completionMonitorName() const
+{
+    return CompletionMonitor::m_shmimName;
+}
+
+int Harness::completionMonitorPriority() const
+{
+    return CompletionMonitor::m_smThreadPrio;
 }
 
 void Harness::attachCameraOnly()
@@ -909,6 +955,113 @@ int64_t prepareSimulationTrace( Harness &app /**< [in,out] Isolated simulation f
     REQUIRE( app.m_simulation.summary().valid );
     REQUIRE( app.m_simulation.traceStatus().detected == 0 );
     return app.m_simulation.summary().lastMainNs;
+}
+
+/// Own a private completion record that never contacts a DM controller or posts command semaphores.
+struct CompletionStream
+{
+    IMAGE m_image{}; ///< Test-owned uint64 transport, destroyed after all observer imports close.
+
+    /// Create the fixed protocol layout inside the already-isolated ImageStreamIO directory.
+    CompletionStream();
+
+    /// Destroy only this fixture's private completion stream.
+    ~CompletionStream();
+
+    /// Publish a test record without synthesizing any instrument or command-channel semaphore event.
+    void store( const MagAOX::dmCompletion::Record &record /**< [in] Exact record for the next local callback. */ );
+};
+
+CompletionStream::CompletionStream()
+{
+    uint32_t size = MagAOX::dmCompletion::words;
+    REQUIRE( ImageStreamIO_createIm_gpu(
+                 &m_image, "synco_reader_done", 1, &size, _DATATYPE_UINT64, -1, 1, IMAGE_NB_SEMAPHORE, 0, 0, 0 ) == 0 );
+}
+
+CompletionStream::~CompletionStream()
+{
+    ImageStreamIO_destroyIm( &m_image );
+}
+
+void CompletionStream::store( const MagAOX::dmCompletion::Record &record )
+{
+    const auto wire   = MagAOX::dmCompletion::encode( record );
+    m_image.md->write = 1;
+    std::copy( wire.begin(), wire.end(), m_image.array.UI64 );
+    ++m_image.md->cnt0;
+    m_image.md->write = 0;
+}
+
+/// Configure real shadow callbacks plus the optional completion observer without starting any worker.
+void prepareReaderTiming( Harness &app /**< [in,out] Isolated shadow observer. */ )
+{
+    app.attachPrimaryOnly();
+    app.m_simulationEnabled = true;
+    app.m_simulationWindow  = 4;
+    app.m_requested         = 2;
+    app.m_now               = CadenceClock::now;
+    app.m_wait              = CadenceClock::wait;
+    app.m_primaryCadence.configure( 2, 64 );
+    app.m_combinerCadence.configure( 2, 64 );
+    app.m_readerTiming.configure( 2, 64 );
+    REQUIRE( app.configureSimulation() );
+    REQUIRE( app.allocate( dev::shmimT{} ) == 0 );
+    app.attachCombinedOnly();
+    app.shmimMonitorTiming( dev::shmimT{}, dev::shmimMonitorEvent::connected );
+    app.shmimMonitorTiming( syncoCombinerT{}, dev::shmimMonitorEvent::connected );
+    app.attachCompletionOnly();
+}
+
+/// Construct successful software completion with independent raw and local-clock endpoints.
+MagAOX::dmCompletion::Record
+readerCompletion( const IMAGE &combined /**< [in] Combined publication whose identity must match. */,
+                  uint64_t     sequence /**< [in] Controller callback attempt. */,
+                  int64_t      started /**< [in] Local monotonic callback entry. */,
+                  int64_t      finished /**< [in] Local monotonic reader completion. */ )
+{
+    MagAOX::dmCompletion::Record result;
+    result.session         = 123456789;
+    result.epoch           = 1;
+    result.sequence        = sequence;
+    result.state           = MagAOX::dmCompletion::State::complete;
+    result.inputInode      = combined.md->inode;
+    result.inputCounter    = combined.md->cnt0;
+    result.publicationSec  = combined.md->writetime.tv_sec;
+    result.publicationNsec = combined.md->writetime.tv_nsec;
+    result.startedNs       = started;
+    result.finishedNs      = finished;
+    result.outcome         = MagAOX::dmTiming::Outcome::success;
+    result.publisherPid    = getpid();
+    return result;
+}
+
+/// Exercise the production completion hook and callback on one test-owned serialized record.
+void completionObservation(
+    Harness                            &app /**< [in,out] Isolated completion observer. */,
+    CompletionStream                   &stream /**< [in,out] Private record storage. */,
+    const MagAOX::dmCompletion::Record &record /**< [in] Record observed by the real callback. */,
+    int64_t                             observed /**< [in] Local monotonic receipt marker. */,
+    bool initial = false /**< [in] Use an initial callback without a genuine receipt. */ )
+{
+    stream.store( record );
+    CadenceClock::time = observed;
+    app.shmimMonitorTiming( syncoCompletionT{},
+                            initial ? dev::shmimMonitorEvent::initial : dev::shmimMonitorEvent::receipt );
+    REQUIRE( app.processImage( nullptr, syncoCompletionT{} ) == 0 );
+}
+
+/// Serialize the full public simulation state to detect any completion-observer scheduling mutation.
+std::vector<uint8_t> simulationBytes( const MagAOX::dmSyncoSimulation::Summary &summary
+                                      /**< [in] Full shadow state before or after observation. */ )
+{
+    using MagAOX::logger::telem_dmsynco;
+    telem_dmsynco::messageT message( 0, 0, 0, 0, 0, 0, 0, 0, 0, {}, {}, {}, false, {}, {}, {}, {}, summary );
+    flatlogs::bufferPtrT    buffer;
+    REQUIRE( flatlogs::logHeader::createLog<telem_dmsynco>( buffer, { 1, 2 }, message, flatlogs::logPrio::LOG_TELEM ) ==
+             0 );
+    const auto *begin = reinterpret_cast<const uint8_t *>( flatlogs::logHeader::messageBuffer( buffer ) );
+    return { begin, begin + flatlogs::logHeader::msgLen( buffer ) };
 }
 
 /// \endcond
@@ -4691,6 +4844,425 @@ TEST_CASE( "syncopation default observers do not collect overlap evidence",
     dmSyncopation::processImage( nullptr, dev::shmimT{} );
     dmSyncopation::processImage( nullptr, syncoCombinerT{} );
     dmSyncopation::setupSimulationINDI;
+#endif
+    // clang-format on
+}
+
+/// Require explicit shadow selection and an independent stream before enabling completion measurements.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation completion observation is optional and restricted to shadow configuration",
+           "[dmSyncopation][readerTiming]" )
+{
+    {
+        Harness defaults;
+        defaults.setupConfig();
+        REQUIRE( defaults.loadConfigImpl( defaults.config ) == 0 );
+        CHECK( defaults.completionMonitorName().empty() );
+        CHECK( defaults.completionMonitorPriority() == 0 );
+        CHECK_FALSE( defaults.m_readerTiming.enabled() );
+        REQUIRE( defaults.setupReaderTimingINDI() == 0 );
+        CHECK( defaults.m_indiP_readerTiming.getElements().empty() );
+        CHECK( defaults.m_indiP_readerQuality.getElements().empty() );
+    }
+
+    for( const auto &entry : { std::make_pair( std::string( "synco_reader_done" ), true ),
+                               std::make_pair( std::string( "dm01disp" ), false ),
+                               std::make_pair( std::string( "dm01disp07" ), false ),
+                               std::make_pair( std::string( "dm01disp07_aux" ), false ),
+                               std::make_pair( std::string( "dmC" ), false ),
+                               std::make_pair( std::string( "synco_test_timing" ), false ),
+                               std::make_pair( std::string( "/tmp/synco_reader_done" ), false ) } )
+    {
+        for( const bool simulation : { false, true } )
+        {
+            Harness app;
+            app.setupConfig();
+            char      path[]     = "/tmp/synco-reader-config-XXXXXX";
+            const int descriptor = mkstemp( path );
+            REQUIRE( descriptor >= 0 );
+            ::close( descriptor );
+
+            {
+                std::ofstream config( path );
+                config << "[simulation]\nenabled=" << ( simulation ? "true" : "false" )
+                       << "\n[completionMonitor]\nshmimName=" << entry.first << '\n';
+            }
+
+            app.config.readConfig( path );
+            std::remove( path );
+            const int result = app.loadConfigImpl( app.config );
+            CAPTURE( entry.first, simulation );
+            CHECK( ( result == 0 ) == ( simulation && entry.second ) );
+
+            if( result == 0 )
+            {
+                CHECK( app.completionMonitorName() == entry.first );
+                CHECK( app.m_simulationEnabled );
+                CHECK_FALSE( app.m_enabled );
+                CHECK_FALSE( app.m_resources );
+            }
+        }
+    }
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::setupConfig;
+    dmSyncopation::loadConfigImpl;
+    dmSyncopation::setupReaderTimingINDI;
+#endif
+    // clang-format on
+}
+
+/// Match real callback evidence without altering shadow decisions, command pixels or semaphore populations.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation measures controller reader completion without changing shadow execution",
+           "[dmSyncopation][readerTiming]" )
+{
+    using namespace MagAOX::dmReaderTiming;
+    Streams          streams;
+    CompletionStream completion;
+    Harness          app;
+    prepareReaderTiming( app );
+    app.localDriver( streams.directory );
+    REQUIRE( app.setupReaderTimingINDI() == 0 );
+    CHECK( app.m_indiP_readerTiming.getPerm() == pcf::IndiProperty::ReadOnly );
+    CHECK( app.m_indiP_readerQuality.getPerm() == pcf::IndiProperty::ReadOnly );
+    CHECK( app.m_indiP_readerTiming.getElements().size() == 36 );
+    CHECK( app.m_indiP_readerQuality.getElements().size() == 42 );
+    CHECK( app.m_indiP_readerTiming["completionOffset_mean"].get<double>() == -1 );
+    CHECK( app.m_indiP_readerTiming["requiredHold_count"].get<double>() == 0 );
+    std::array<std::vector<int>, 4> semaphoreValues;
+
+    for( size_t image = 0; image < streams.images.size(); ++image )
+    {
+        semaphoreValues[image].resize( streams.images[image].md->sem );
+
+        for( size_t semaphore = 0; semaphore < semaphoreValues[image].size(); ++semaphore )
+        {
+            REQUIRE( sem_getvalue( streams.images[image].semptr[semaphore], &semaphoreValues[image][semaphore] ) == 0 );
+        }
+    }
+
+    constexpr int64_t epoch = 1792000000000000000LL;
+    CadenceClock::waits     = 0;
+
+    for( uint64_t sample = 0; sample < 40; ++sample )
+    {
+        const int64_t observed = 1000000000 + int64_t( sample ) * 500000;
+        cadenceObservation( app, observed, epoch + int64_t( sample ) * 500000, sample + 10 );
+        combinedObservation( app,
+                             streams.images[1],
+                             observed + ( sample == 38 ? 180000 : 20000 ),
+                             epoch + int64_t( sample ) * 500000,
+                             sample + 10 );
+        const auto before = simulationBytes( app.m_simulation.summary() );
+        const auto record = readerCompletion( streams.images[1], sample + 1, observed + 30000, observed + 145000 );
+        completionObservation( app, completion, record, observed + ( sample == 38 ? 190000 : 150000 ) );
+        app.m_readerTiming.update( CadenceClock::time );
+        app.updateReaderTimingINDI();
+        CHECK( simulationBytes( app.m_simulation.summary() ) == before );
+    }
+
+    const auto &summary = app.m_readerTiming.summary();
+    REQUIRE( summary.total.matched == 40 );
+    CHECK( summary.total.primary == 40 );
+    CHECK( summary.total.combined == 40 );
+    CHECK( summary.total.completion == 40 );
+    CHECK( summary.total.identityMismatch == 0 );
+    CHECK( summary.total.droppedPrimary == 0 );
+    CHECK( summary.total.droppedCombined == 0 );
+    CHECK( summary.total.droppedCompletion == 0 );
+    CHECK( summary.metrics[index( Metric::completionOffset )].count == 40 );
+    CHECK( summary.metrics[index( Metric::completionOffset )].min < 0 );
+    CHECK( summary.metrics[index( Metric::requiredHold )].min == 0 );
+    CHECK( summary.metrics[index( Metric::processing )].mean == Approx( 115e-6 ) );
+    CHECK( summary.metrics[index( Metric::notification )].min == Approx( 5.001e-6 ) );
+    CHECK( summary.metrics[index( Metric::notification )].max == Approx( 45.001e-6 ) );
+    CHECK( summary.worstValid );
+    CHECK( summary.maxRequiredHoldNs > 120000 );
+    CHECK( summary.maxRequiredHoldNs < 130000 );
+    CHECK( summary.overBudget == 0 );
+    CHECK( app.m_indiP_readerTiming["completionOffset_mean"].get<double>() ==
+           Approx( summary.metrics[index( Metric::completionOffset )].mean ) );
+    CHECK( app.m_indiP_readerTiming["processing_mean"].get<double>() == Approx( 115e-6 ) );
+    CHECK( app.m_indiP_readerQuality["matched"].get<double>() == 40 );
+    CHECK( app.m_indiP_readerQuality["maxRequiredUs"].get<double>() == Approx( summary.maxRequiredHoldNs * 1e-3 ) );
+    CHECK( app.m_indiP_readerQuality["worstBudgetUs"].get<double>() == 155 );
+    CHECK( app.m_simulation.summary().valid );
+    CHECK( app.m_simulation.summary().sequence == 40 );
+    CHECK( app.m_simulation.summary().outcomes[1].readerHold > 0 );
+    CHECK( CadenceClock::waits == 0 );
+    CHECK_FALSE( app.m_enabled );
+    CHECK_FALSE( app.m_resources );
+    CHECK( app.m_delivered == 0 );
+    CHECK( app.m_mappings.empty() );
+    CHECK( app.m_timing.md == nullptr );
+
+    for( size_t image = 0; image < streams.images.size(); ++image )
+    {
+        for( size_t pixel = 0; pixel < 9; ++pixel )
+        {
+            CHECK( streams.images[image].array.F[pixel] == float( image ) );
+        }
+
+        if( image >= 2 )
+        {
+            CHECK( streams.images[image].md->cnt0 == 0 );
+            CHECK( streams.images[image].md->write == 0 );
+        }
+
+        for( size_t semaphore = 0; semaphore < semaphoreValues[image].size(); ++semaphore )
+        {
+            int value = -1;
+            REQUIRE( sem_getvalue( streams.images[image].semptr[semaphore], &value ) == 0 );
+            CHECK( value == semaphoreValues[image][semaphore] );
+        }
+    }
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::processImage( nullptr, dev::shmimT{} );
+    dmSyncopation::processImage( nullptr, syncoCombinerT{} );
+    dmSyncopation::processImage( nullptr, syncoCompletionT{} );
+    dmSyncopation::shmimMonitorTiming( syncoCompletionT{}, dev::shmimMonitorEvent::receipt );
+    dmSyncopation::setupReaderTimingINDI;
+    dmSyncopation::updateReaderTimingINDI;
+#endif
+    // clang-format on
+}
+
+/// Keep the completion monitor's bounded handoff independent of the model's timed-cycle mutex.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation completion callback does not wait for the simulation cycle", "[dmSyncopation][readerTiming]" )
+{
+    Streams          streams;
+    CompletionStream completion;
+    Harness          app;
+    prepareReaderTiming( app );
+    constexpr int64_t epoch = 1792000000000000000LL;
+    cadenceObservation( app, 1000000000, epoch, 10 );
+    combinedObservation( app, streams.images[1], 1000020000, epoch, 10 );
+    completion.store( readerCompletion( streams.images[1], 1, 1000030000, 1000145000 ) );
+    CadenceClock::time = 1000150000;
+    app.shmimMonitorTiming( syncoCompletionT{}, dev::shmimMonitorEvent::receipt );
+    const auto                   before = simulationBytes( app.m_simulation.summary() );
+    std::unique_lock<std::mutex> cycle( app.m_cycleMutex );
+    auto                         callback  = std::async( std::launch::async,
+                                [&]()
+                                {
+                                    return app.processImage( nullptr, syncoCompletionT{} );
+                                } );
+    const auto                   readiness = callback.wait_for( std::chrono::milliseconds( 500 ) );
+    cycle.unlock(); // A locking regression must finish before future destruction or test assertions.
+    CHECK( callback.get() == 0 );
+    CHECK( readiness == std::future_status::ready );
+    app.m_readerTiming.update( CadenceClock::time );
+    CHECK( app.m_readerTiming.summary().total.matched == 1 );
+    CHECK( simulationBytes( app.m_simulation.summary() ) == before );
+    CHECK_FALSE( app.m_enabled );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::processImage( nullptr, syncoCompletionT{} );
+#endif
+    // clang-format on
+}
+
+/// Keep malformed, synthetic, busy and mismatched completion evidence outside qualified reader statistics.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation rejects completion evidence without a matching genuine observation",
+           "[dmSyncopation][readerTiming]" )
+{
+    using namespace MagAOX::dmReaderTiming;
+    Streams          streams;
+    CompletionStream completion;
+    Harness          app;
+    prepareReaderTiming( app );
+    constexpr int64_t epoch = 1792000000000000000LL;
+    cadenceObservation( app, 1000000000, epoch, 10 );
+    combinedObservation( app, streams.images[1], 1000020000, epoch, 10 );
+    auto       record          = readerCompletion( streams.images[1], 1, 1000030000, 1000145000 );
+    const auto before          = simulationBytes( app.m_simulation.summary() );
+    uint64_t Counters::*reason = &Counters::incoherent;
+
+    SECTION( "An initial callback has no genuine completion notification" )
+    {
+        completionObservation( app, completion, record, 1000150000, true );
+    }
+
+    SECTION( "A malformed wire cannot qualify" )
+    {
+        completion.store( record );
+        completion.m_image.array.UI64[0] = 0;
+        CadenceClock::time               = 1000150000;
+        app.shmimMonitorTiming( syncoCompletionT{}, dev::shmimMonitorEvent::receipt );
+        REQUIRE( app.processImage( nullptr, syncoCompletionT{} ) == 0 );
+    }
+
+    SECTION( "An in-progress transport cannot qualify" )
+    {
+        completion.store( record );
+        completion.m_image.md->write = 1;
+        CadenceClock::time           = 1000150000;
+        app.shmimMonitorTiming( syncoCompletionT{}, dev::shmimMonitorEvent::receipt );
+        REQUIRE( app.processImage( nullptr, syncoCompletionT{} ) == 0 );
+        completion.m_image.md->write = 0;
+    }
+
+    SECTION( "Busy is distinct from completed even when an older post wakes the observer" )
+    {
+        reason            = &Counters::busy;
+        record.state      = MagAOX::dmCompletion::State::busy;
+        record.finishedNs = 0;
+        completionObservation( app, completion, record, 1000150000 );
+    }
+
+    SECTION( "An equal counter with a different raw publication stamp is not the same command" )
+    {
+        reason = &Counters::identityMismatch;
+        ++record.publicationNsec;
+        completionObservation( app, completion, record, 1000150000 );
+    }
+
+    SECTION( "No-send remains unqualified despite a successful software callback" )
+    {
+        reason         = &Counters::unqualified;
+        record.state   = MagAOX::dmCompletion::State::unqualified;
+        record.outcome = MagAOX::dmTiming::Outcome::noSend;
+        completionObservation( app, completion, record, 1000150000 );
+    }
+
+    SECTION( "A future completion timestamp cannot share the observer's monotonic clock" )
+    {
+        reason            = &Counters::invalid;
+        record.finishedNs = 1000160000;
+        completionObservation( app, completion, record, 1000150000 );
+    }
+
+    SECTION( "Old unmatched evidence expires instead of authorizing a reader release" )
+    {
+        reason = &Counters::invalid;
+        completionObservation( app, completion, record, 4000150000 );
+    }
+
+    app.m_readerTiming.update( CadenceClock::time );
+    const auto &summary = app.m_readerTiming.summary();
+    CHECK( summary.total.matched == 0 );
+    CHECK( summary.total.*reason > 0 );
+    CHECK( summary.metrics[index( Metric::requiredHold )].count == 0 );
+    CHECK_FALSE( summary.worstValid );
+    CHECK( simulationBytes( app.m_simulation.summary() ) == before );
+    CHECK_FALSE( app.m_enabled );
+    CHECK( app.m_delivered == 0 );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::processImage( nullptr, syncoCompletionT{} );
+    dmSyncopation::shmimMonitorTiming( syncoCompletionT{}, dev::shmimMonitorEvent::initial );
+#endif
+    // clang-format on
+}
+
+/// Attachment lifecycle changes invalidate pending observations before any three-way join.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation completion matching respects monitor lifecycle epochs", "[dmSyncopation][readerTiming]" )
+{
+    using namespace MagAOX::dmReaderTiming;
+    Streams          streams;
+    CompletionStream completion;
+    Harness          app;
+    prepareReaderTiming( app );
+    constexpr int64_t epoch = 1792000000000000000LL;
+    cadenceObservation( app, 1000000000, epoch, 10 );
+    combinedObservation( app, streams.images[1], 1000020000, epoch, 10 );
+    const auto record = readerCompletion( streams.images[1], 1, 1000030000, 1000145000 );
+    completionObservation( app, completion, record, 1000150000 );
+
+    SECTION( "Completion attachment reset" )
+    {
+        app.shmimMonitorTiming( syncoCompletionT{}, dev::shmimMonitorEvent::connected );
+    }
+
+    SECTION( "Completion attachment disconnect" )
+    {
+        app.shmimMonitorTiming( syncoCompletionT{}, dev::shmimMonitorEvent::disconnected );
+    }
+
+    SECTION( "Primary attachment disconnect" )
+    {
+        app.shmimMonitorTiming( dev::shmimT{}, dev::shmimMonitorEvent::disconnected );
+    }
+
+    SECTION( "Combined attachment disconnect" )
+    {
+        app.shmimMonitorTiming( syncoCombinerT{}, dev::shmimMonitorEvent::disconnected );
+    }
+
+    app.m_readerTiming.update( CadenceClock::time );
+    CHECK( app.m_readerTiming.summary().total.matched == 0 );
+    CHECK( app.m_readerTiming.summary().metrics[index( Metric::requiredHold )].count == 0 );
+    CHECK( app.m_readerTiming.summary().total.staleEpoch > 0 );
+    CHECK_FALSE( app.m_enabled );
+    CHECK( app.m_delivered == 0 );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::shmimMonitorTiming( dev::shmimT{}, dev::shmimMonitorEvent::disconnected );
+    dmSyncopation::shmimMonitorTiming( syncoCombinerT{}, dev::shmimMonitorEvent::disconnected );
+    dmSyncopation::shmimMonitorTiming( syncoCompletionT{}, dev::shmimMonitorEvent::disconnected );
+#endif
+    // clang-format on
+}
+
+/// Reject a completion monitor attached to pixels or a transport with an incompatible fixed layout.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation completion allocation requires its fixed CPU transport", "[dmSyncopation][readerTiming]" )
+{
+    Streams          streams;
+    CompletionStream completion;
+    Harness          app;
+    app.attachCompletionOnly();
+    auto *metadata = completion.m_image.md;
+
+    SECTION( "Pixel datatype" )
+    {
+        const auto original = metadata->datatype;
+        metadata->datatype  = _DATATYPE_FLOAT;
+        CHECK( app.allocate( syncoCompletionT{} ) < 0 );
+        metadata->datatype = original;
+    }
+
+    SECTION( "Unexpected word count" )
+    {
+        const auto original = metadata->size[0];
+        --metadata->size[0];
+        CHECK( app.allocate( syncoCompletionT{} ) < 0 );
+        metadata->size[0] = original;
+    }
+
+    SECTION( "Unexpected dimension" )
+    {
+        const auto original = metadata->naxis;
+        metadata->naxis     = 2;
+        CHECK( app.allocate( syncoCompletionT{} ) < 0 );
+        metadata->naxis = original;
+    }
+
+    SECTION( "GPU-backed declaration" )
+    {
+        const auto original = metadata->location;
+        metadata->location  = 0;
+        CHECK( app.allocate( syncoCompletionT{} ) < 0 );
+        metadata->location = original;
+    }
+
+    CHECK( app.allocate( syncoCompletionT{} ) == 0 );
+    CHECK_FALSE( app.m_resources );
+    CHECK_FALSE( app.m_enabled );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::allocate( syncoCompletionT{} );
 #endif
     // clang-format on
 }

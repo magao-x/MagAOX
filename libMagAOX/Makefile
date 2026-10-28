@@ -27,6 +27,7 @@ INCLUDEDEPS= \
 	app/dev/dm.hpp \
 	app/dev/dmTiming.hpp \
 	app/dev/dmCompletion.hpp \
+	app/dev/dmReaderTiming.hpp \
 	app/dev/dmPipelineTiming.hpp \
 	app/dev/telemeter.hpp \
 	app/dev/dmPokeWFS.hpp \
@@ -35,6 +36,7 @@ INCLUDEDEPS= \
 	common/environment.hpp \
 	common/dmTiming.hpp \
 	common/dmCompletion.hpp \
+	common/dmReaderTiming.hpp \
 	common/frameGrabberTiming.hpp \
 	common/spscQueue.hpp \
 	common/timingStats.hpp \
@@ -181,6 +183,7 @@ libMagAOX.a: libMagAOX.hpp.gch $(OBJS)
 
 logger/logMeta.o: logger/logMap.hpp logger/logMap.cpp logger/logMeta.hpp logger/logMeta.cpp logger/generated/logTypes.hpp
 logger/logMap.o: logger/logMap.hpp logger/logMap.cpp
+logger/logMeta.o logger/logMap.o: logger/types/telem_dmsynco.hpp common/dmReaderTiming.hpp
 logger/logBinarySchemata.o: logger/generated/logTypes.hpp logger/generated/binarySchemata.inc
 
 clean:

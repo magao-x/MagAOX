@@ -1,5 +1,5 @@
 /** \file dmSyncoTelemetry_test.cpp
- * \brief Syncopation timing, fractional cadence and overlap/estimator telemetry compatibility and validation.
+ * \brief Syncopation timing, reader protection and shadow telemetry compatibility and validation.
  * \ingroup logger_files
  */
 #include "../../../tests/testXWC.hpp"
@@ -227,12 +227,84 @@ dmSyncoSimulation::TraceBatch sampleEstimatorTrace()
     return trace;
 }
 
+/// Construct signed trailing reader measurements and full-width lifetime worst-command provenance.
+dmReaderTiming::Summary sampleReader()
+{
+    dmReaderTiming::Summary reader;
+    reader.enabled                = true;
+    reader.session                = ( uint64_t( 1 ) << 54 ) + 29;
+    reader.sequence               = 77;
+    reader.nowNs                  = 20000000000;
+    reader.windowSec              = 2;
+    reader.capacity               = 20000;
+    reader.queued                 = 3;
+    reader.pendingPrimary         = 1;
+    reader.pendingCombined        = 2;
+    reader.pendingCompletion      = 3;
+    reader.span                   = 0.5;
+    reader.age                    = 0.1;
+    reader.metrics[0]             = { 3, -5e-6, 10e-6, -15e-6, 5e-6, 0.5, true };
+    reader.metrics[1]             = { 3, 2e-6, 2e-6, 0, 5e-6, 0.5, true };
+    reader.metrics[2]             = { 3, 8e-6, 3e-6, 2e-6, 14e-6, 0.5, true };
+    reader.metrics[3]             = { 3, 100e-6, 1e-6, 99e-6, 101e-6, 0.5, true };
+    reader.metrics[4]             = { 3, 10e-6, 5e-6, 1e-6, 20e-6, 0.5, true };
+    reader.metrics[5]             = { 3, 160e-6, 10e-6, 150e-6, 170e-6, 0.5, true };
+    reader.total                  = { 1000, 400, 300, 300, 100, 10, 11, 12, 13, 14, 15, 16,
+                                      17,   18,  19,  20,  21,  22, 23, 24, 25, 26, 27, 28 };
+    reader.worstValid             = true;
+    auto &worst                   = reader.worst;
+    worst.primary.input           = { ( uint64_t( 1 ) << 56 ) + 3, ( uint64_t( 1 ) << 55 ) + 5, 1700000000, 100000 };
+    worst.primary.observedNs      = 999990000;
+    worst.combined.input          = { ( uint64_t( 1 ) << 56 ) + 7, ( uint64_t( 1 ) << 55 ) + 9, 1700000000, 200000 };
+    worst.combined.primaryInode   = worst.primary.input.inode;
+    worst.combined.primaryCounter = worst.primary.input.counter;
+    worst.combined.startNs        = 1700000000000150000;
+    worst.combined.observedNs     = 1000000000;
+    worst.combined.budgetNs       = 155000;
+    auto &completion              = worst.completed.record;
+    completion.session            = ( uint64_t( 1 ) << 54 ) + 31;
+    completion.epoch              = 4;
+    completion.sequence           = ( uint64_t( 1 ) << 55 ) + 39;
+    completion.state              = dmCompletion::State::complete;
+    completion.inputInode         = worst.combined.input.inode;
+    completion.inputCounter       = worst.combined.input.counter;
+    completion.publicationSec     = worst.combined.input.sec;
+    completion.publicationNsec    = worst.combined.input.nsec;
+    completion.startedNs          = 999920000;
+    completion.finishedNs         = 1000020000;
+    completion.outcome            = dmTiming::Outcome::success;
+    completion.publisherPid       = 1234;
+    worst.completed.observedNs    = 1000035000;
+    worst.baseNs                  = worst.combined.observedNs;
+    worst.offsetNs                = 20000;
+    worst.requiredNs              = 20000;
+    worst.observedHoldNs          = 35000;
+    worst.slackNs                 = 135000;
+    reader.maxRequiredHoldNs      = 20000;
+    reader.maxObservedHoldNs      = 60000;
+    reader.overBudget             = 1;
+    return reader;
+}
+
+/// Return all six explicitly named reader populations in their stable common metric order.
+std::array<const DmSyncoTimingStats *, static_cast<size_t>( dmReaderTiming::Metric::count )>
+readerStats( const DmSyncoReaderTiming *reader /**< [in] Deserialized reader-protection summary. */ )
+{
+    return { reader->completion_offset(),
+             reader->required_hold(),
+             reader->observed_hold(),
+             reader->processing(),
+             reader->notification(),
+             reader->model_slack() };
+}
+
 /// Populate unchanged scheduler fields with independently sampled primary and combiner timing.
 telem_dmsynco::messageT
 message( const dmTiming::Summary             &primary /**< [in] coherent primary summary */,
          const dmCombTiming::Summary         &combiner   = {} /**< [in] independent combiner summary */,
          const dmSyncoSimulation::Summary    &simulation = {} /**< [in] hypothetical shadow prediction */,
-         const dmSyncoSimulation::TraceBatch &trace      = {} /**< [in] drained overlap and estimator evidence */ )
+         const dmSyncoSimulation::TraceBatch &trace      = {} /**< [in] drained overlap and estimator evidence */,
+         const dmReaderTiming::Summary       &reader     = {} /**< [in] optional software-reader timing */ )
 {
     return telem_dmsynco::messageT( 3,
                                     2,
@@ -252,7 +324,8 @@ message( const dmTiming::Summary             &primary /**< [in] coherent primary
                                     {},
                                     {},
                                     simulation,
-                                    trace );
+                                    trace,
+                                    reader );
 }
 
 /// Build a real log envelope for shared verification dispatch.
@@ -276,6 +349,127 @@ void checkStats( const DmSyncoTimingStats *actual /**< [in] deserialized timing 
     REQUIRE( actual->max() == Approx( expected.max ) );
     REQUIRE( actual->span() == expected.span );
     REQUIRE( actual->valid() == expected.valid );
+}
+
+/// Check the exact raw identity fields without converting publication time to the local clock.
+void checkReaderIdentity( const DmSyncoReaderIdentity    *actual /**< [in] Decoded producer identity. */,
+                          const dmReaderTiming::Identity &expected /**< [in] Original producer identity. */ )
+{
+    REQUIRE( actual != nullptr );
+    CHECK( actual->inode() == expected.inode );
+    CHECK( actual->counter() == expected.counter );
+    CHECK( actual->publication_sec() == expected.sec );
+    CHECK( actual->publication_nsec() == expected.nsec );
+}
+
+/// Check every reader population, lifetime quality field and worst-command identity after a reader roundtrip.
+void checkReader( const DmSyncoReaderTiming     *actual /**< [in] Decoded reader measurement. */,
+                  const dmReaderTiming::Summary &expected /**< [in] Original matched-command summary. */ )
+{
+    REQUIRE( actual != nullptr );
+    CHECK( actual->enabled() == expected.enabled );
+    CHECK( actual->session() == expected.session );
+    CHECK( actual->sequence() == expected.sequence );
+    CHECK( actual->now_ns() == expected.nowNs );
+    CHECK( actual->window_sec() == expected.windowSec );
+    CHECK( actual->capacity() == expected.capacity );
+    CHECK( actual->queued() == expected.queued );
+    CHECK( actual->pending_primary() == expected.pendingPrimary );
+    CHECK( actual->pending_combined() == expected.pendingCombined );
+    CHECK( actual->pending_completion() == expected.pendingCompletion );
+    CHECK( actual->span_sec() == expected.span );
+    CHECK( actual->age_sec() == expected.age );
+    const auto stats = readerStats( actual );
+
+    for( size_t index = 0; index < stats.size(); ++index )
+    {
+        checkStats( stats[index], expected.metrics[index] );
+    }
+
+    const auto *quality = actual->total();
+    REQUIRE( quality != nullptr );
+    const std::array<uint64_t, 24> counts         = { quality->events(),
+                                                      quality->primary(),
+                                                      quality->combined(),
+                                                      quality->completion(),
+                                                      quality->matched(),
+                                                      quality->busy(),
+                                                      quality->unavailable(),
+                                                      quality->error(),
+                                                      quality->unqualified(),
+                                                      quality->invalid(),
+                                                      quality->incoherent(),
+                                                      quality->duplicates(),
+                                                      quality->sequence_gaps(),
+                                                      quality->counter_gaps(),
+                                                      quality->source_resets(),
+                                                      quality->stale_epoch(),
+                                                      quality->missing_primary(),
+                                                      quality->missing_combined(),
+                                                      quality->identity_mismatch(),
+                                                      quality->evicted(),
+                                                      quality->expired(),
+                                                      quality->dropped_primary(),
+                                                      quality->dropped_combined(),
+                                                      quality->dropped_completion() };
+    const auto                    &total          = expected.total;
+    const std::array<uint64_t, 24> expectedCounts = {
+        total.events,     total.primary,        total.combined,        total.completion,       total.matched,
+        total.busy,       total.unavailable,    total.error,           total.unqualified,      total.invalid,
+        total.incoherent, total.duplicates,     total.sequenceGaps,    total.counterGaps,      total.sourceResets,
+        total.staleEpoch, total.missingPrimary, total.missingCombined, total.identityMismatch, total.evicted,
+        total.expired,    total.droppedPrimary, total.droppedCombined, total.droppedCompletion };
+
+    for( size_t index = 0; index < counts.size(); ++index )
+    {
+        CHECK( counts[index] == expectedCounts[index] );
+    }
+
+    CHECK( actual->max_required_hold_ns() == expected.maxRequiredHoldNs );
+    CHECK( actual->max_observed_hold_ns() == expected.maxObservedHoldNs );
+    CHECK( actual->over_budget() == expected.overBudget );
+    CHECK( actual->worst_valid() == expected.worstValid );
+
+    if( !expected.worstValid )
+    {
+        CHECK( actual->worst() == nullptr );
+        return;
+    }
+
+    const auto *sample = actual->worst();
+    REQUIRE( sample != nullptr );
+    REQUIRE( sample->primary() != nullptr );
+    REQUIRE( sample->combined() != nullptr );
+    REQUIRE( sample->completed() != nullptr );
+    const auto &worst = expected.worst;
+    checkReaderIdentity( sample->primary()->input(), worst.primary.input );
+    checkReaderIdentity( sample->combined()->input(), worst.combined.input );
+    const auto &completion = worst.completed.record;
+    checkReaderIdentity(
+        sample->completed()->input(),
+        { completion.inputInode, completion.inputCounter, completion.publicationSec, completion.publicationNsec } );
+    CHECK( sample->primary()->observed_ns() == worst.primary.observedNs );
+    CHECK( sample->combined()->primary_inode() == worst.combined.primaryInode );
+    CHECK( sample->combined()->primary_counter() == worst.combined.primaryCounter );
+    CHECK( sample->combined()->start_ns() == worst.combined.startNs );
+    CHECK( sample->combined()->observed_ns() == worst.combined.observedNs );
+    CHECK( sample->combined()->budget_ns() == worst.combined.budgetNs );
+    CHECK( sample->completed()->protocol_version() == completion.protocolVersion );
+    CHECK( sample->completed()->session() == completion.session );
+    CHECK( sample->completed()->epoch() == completion.epoch );
+    CHECK( sample->completed()->sequence() == completion.sequence );
+    CHECK( sample->completed()->state() == static_cast<uint64_t>( completion.state ) );
+    CHECK( sample->completed()->started_ns() == completion.startedNs );
+    CHECK( sample->completed()->finished_ns() == completion.finishedNs );
+    CHECK( sample->completed()->outcome() == static_cast<uint8_t>( completion.outcome ) );
+    CHECK( sample->completed()->callback_result() == completion.callbackResult );
+    CHECK( sample->completed()->publisher_pid() == completion.publisherPid );
+    CHECK( sample->completed()->observed_ns() == worst.completed.observedNs );
+    CHECK( sample->base_ns() == worst.baseNs );
+    CHECK( sample->offset_ns() == worst.offsetNs );
+    CHECK( sample->required_ns() == worst.requiredNs );
+    CHECK( sample->observed_hold_ns() == worst.observedHoldNs );
+    CHECK( sample->slack_ns() == worst.slackNs );
 }
 
 /// Return the six explicitly named combiner populations in their stable metric order.
@@ -669,7 +863,7 @@ TEST_CASE( "Synco telemetry accepts legacy records and defaults primary timing d
              "[dmsynco] state=3 steps=2 period_ns=500000 delivered=11 missed=2 faults=3 schedule_valid=1 "
              "primary_timing=unavailable primary_pairs=unavailable combiner_timing=unavailable "
              "camera_timing=unavailable camera_pairs=unavailable pipeline_timing=unavailable "
-             "cameraWrite_timing=unavailable cameraWrite_pairs=unavailable" );
+             "cameraWrite_timing=unavailable cameraWrite_pairs=unavailable reader_timing=unavailable" );
 }
 
 /// Keep primary availability independent of SDK populations and unavailable scheduler snapshots.
@@ -1960,6 +2154,439 @@ TEST_CASE( "Synco telemetry rejects malformed fractional cadence", "[dmSyncoTele
         auto input  = message( samplePrimary(), {}, summary, trace );
         auto buffer = envelope( input );
         REQUIRE_FALSE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+    }
+}
+
+/// Preserve signed reader measurements and exact lifetime worst-command provenance through all readers.
+/** \ingroup dmSyncoTelemetry_unit_test */
+TEST_CASE( "Synco telemetry preserves qualified reader-protection measurements", "[dmSyncoTelemetry]" )
+{
+    // clang-format off
+#ifdef DMSYNCO_TELEMETRY_TEST_DOXYGEN_REF
+    MagAOX::logger::telem_dmsynco::messageT;
+    MagAOX::logger::telem_dmsynco::verify;
+    MagAOX::logger::telem_dmsynco::msgString;
+#endif
+    // clang-format on
+    const auto reader = sampleReader();
+    auto       input  = message( samplePrimary(), {}, {}, {}, reader );
+    auto       buffer = envelope( input );
+    REQUIRE( telem_dmsynco::verify( buffer, flatlogs::logHeader::msgLen( buffer ) ) );
+    REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+    const auto *decoded = GetTelem_dmsynco_fb( input.builder.GetBufferPointer() )->reader_timing();
+    checkReader( decoded, reader );
+    const auto text = telem_dmsynco::msgString( input.builder.GetBufferPointer(), input.builder.GetSize() );
+    CHECK( text.find( "reader_mode=shadow_observation" ) != std::string::npos );
+    CHECK( text.find( "reader_pending={primary:1,combined:2,completion:3}" ) != std::string::npos );
+    CHECK( text.find( "readerCompletionOffset[n=3 valid=1] mean_s=-5e-06" ) != std::string::npos );
+    CHECK( text.find( "readerRequiredHold[n=3 valid=1] mean_s=" ) != std::string::npos );
+    CHECK( text.find( "readerObservedHold[n=3 valid=1] mean_s=" ) != std::string::npos );
+    CHECK( text.find( "readerProcessing[n=3 valid=1] mean_s=" ) != std::string::npos );
+    CHECK( text.find( "readerNotification[n=3 valid=1] mean_s=" ) != std::string::npos );
+    CHECK( text.find( "readerModelSlack[n=3 valid=1] mean_s=" ) != std::string::npos );
+    CHECK( text.find( "reader_max_required_hold_ns=20000" ) != std::string::npos );
+    CHECK( text.find( "reader_max_observed_hold_ns=60000" ) != std::string::npos );
+    CHECK( text.find( "reader_over_budget=1" ) != std::string::npos );
+    CHECK( text.find( "reader_worst={clock:monotonic,base_ns:1000000000,offset_ns:20000" ) != std::string::npos );
+    CHECK( text.find( "budget_ns:155000" ) != std::string::npos );
+    CHECK( text.find( "session:" + std::to_string( reader.worst.completed.record.session ) ) != std::string::npos );
+    CHECK( text.find( "start_external_ns:1700000000000150000" ) != std::string::npos );
+    CHECK( text.find( "droppedCompletion:28" ) != std::string::npos );
+
+    const auto          json = telem_dmsynco::msgJSON( input.builder.GetBufferPointer(),
+                                              input.builder.GetSize(),
+                                              reinterpret_cast<const uint8_t *>( telem_dmsynco_bfbs ),
+                                              telem_dmsynco_bfbs_len );
+    flatbuffers::Parser parser;
+    REQUIRE( parser.Deserialize( reinterpret_cast<const uint8_t *>( telem_dmsynco_bfbs ), telem_dmsynco_bfbs_len ) );
+    REQUIRE( parser.Parse( json.c_str() ) );
+    decoded = GetTelem_dmsynco_fb( parser.builder_.GetBufferPointer() )->reader_timing();
+    checkReader( decoded, reader );
+    CHECK( logMemberAccessor( telem_dmsynco::eventCode, "reader_timing" ).accessor == nullptr );
+}
+
+/// Accept legacy absence, new warmup and expired windows without erasing lifetime reader evidence.
+/** \ingroup dmSyncoTelemetry_unit_test */
+TEST_CASE( "Synco telemetry keeps optional reader timing and lifetime evidence independent", "[dmSyncoTelemetry]" )
+{
+    // clang-format off
+#ifdef DMSYNCO_TELEMETRY_TEST_DOXYGEN_REF
+    MagAOX::logger::telem_dmsynco::messageT;
+    MagAOX::logger::telem_dmsynco::verify;
+#endif
+    // clang-format on
+    auto legacy = message( samplePrimary() );
+    auto buffer = envelope( legacy );
+    REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+    const auto *record = GetTelem_dmsynco_fb( legacy.builder.GetBufferPointer() );
+    CHECK( record->reader_timing() == nullptr );
+    CHECK_FALSE( flatbuffers::IsFieldPresent( record, Telem_dmsynco_fb::VT_READER_TIMING ) );
+    CHECK( telem_dmsynco::msgString( legacy.builder.GetBufferPointer(), legacy.builder.GetSize() )
+               .find( "reader_timing=unavailable" ) != std::string::npos );
+
+    dmReaderTiming::Summary warming;
+    warming.enabled   = true;
+    warming.session   = 1;
+    warming.capacity  = 20;
+    warming.windowSec = 2;
+
+    SECTION( "Before the first matched command" )
+    {
+        warming.queued            = warming.capacity * 3;
+        warming.pendingPrimary    = warming.capacity;
+        warming.pendingCombined   = warming.capacity;
+        warming.pendingCompletion = warming.capacity;
+        auto input                = message( samplePrimary(), {}, {}, {}, warming );
+        buffer                    = envelope( input );
+        REQUIRE( telem_dmsynco::verify( buffer, flatlogs::logHeader::msgLen( buffer ) ) );
+        checkReader( GetTelem_dmsynco_fb( input.builder.GetBufferPointer() )->reader_timing(), warming );
+    }
+
+    SECTION( "Lifetime worst command remains after all trailing samples expire" )
+    {
+        auto reader    = sampleReader();
+        reader.metrics = {};
+        reader.span    = 0;
+        reader.age     = -1;
+        auto input     = message( samplePrimary(), {}, {}, {}, reader );
+        buffer         = envelope( input );
+        REQUIRE( telem_dmsynco::verify( buffer, flatlogs::logHeader::msgLen( buffer ) ) );
+        REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+        checkReader( GetTelem_dmsynco_fb( input.builder.GetBufferPointer() )->reader_timing(), reader );
+    }
+
+    SECTION( "Completion before the protection baseline remains signed" )
+    {
+        auto reader                              = sampleReader();
+        reader.worst.completed.record.startedNs  = reader.worst.baseNs - 105000;
+        reader.worst.completed.record.finishedNs = reader.worst.baseNs - 5000;
+        reader.worst.completed.observedNs        = reader.worst.baseNs + 7000;
+        reader.worst.offsetNs                    = -5000;
+        reader.worst.requiredNs                  = 0;
+        reader.worst.observedHoldNs              = 7000;
+        reader.worst.slackNs                     = 160000;
+        reader.maxRequiredHoldNs                 = 0;
+        reader.maxObservedHoldNs                 = 10000;
+        reader.overBudget                        = 0;
+        reader.metrics[0]                        = { 3, -10e-6, 5e-6, -15e-6, -5e-6, 0.5, true };
+        reader.metrics[1]                        = { 3, 0, 0, 0, 0, 0.5, true };
+        reader.metrics[2]                        = { 3, 5e-6, 5e-6, 0, 10e-6, 0.5, true };
+        reader.metrics[5]                        = { 3, 165e-6, 5e-6, 160e-6, 170e-6, 0.5, true };
+        auto input                               = message( samplePrimary(), {}, {}, {}, reader );
+        buffer                                   = envelope( input );
+        REQUIRE( telem_dmsynco::verify( buffer, flatlogs::logHeader::msgLen( buffer ) ) );
+        REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+        checkReader( GetTelem_dmsynco_fb( input.builder.GetBufferPointer() )->reader_timing(), reader );
+        const auto text = telem_dmsynco::msgString( input.builder.GetBufferPointer(), input.builder.GetSize() );
+        CHECK( text.find( "offset_ns:-5000,required_ns:0,observed_hold_ns:7000,slack_ns:160000" ) !=
+               std::string::npos );
+    }
+
+    SECTION( "A single qualified completion has unavailable sample variance" )
+    {
+        auto reader = sampleReader();
+        reader.span = 0;
+
+        for( auto &stats : reader.metrics )
+        {
+            stats.count  = 1;
+            stats.valid  = false;
+            stats.stddev = 0;
+            stats.min    = stats.mean;
+            stats.max    = stats.mean;
+            stats.span   = 0;
+        }
+
+        auto input = message( samplePrimary(), {}, {}, {}, reader );
+        buffer     = envelope( input );
+        REQUIRE( telem_dmsynco::verify( buffer, flatlogs::logHeader::msgLen( buffer ) ) );
+        checkReader( GetTelem_dmsynco_fb( input.builder.GetBufferPointer() )->reader_timing(), reader );
+        CHECK( telem_dmsynco::msgString( input.builder.GetBufferPointer(), input.builder.GetSize() )
+                   .find( "readerCompletionOffset[n=1 valid=0] mean_s=-5e-06 stddev_s=unavailable" ) !=
+               std::string::npos );
+    }
+
+    SECTION( "Completion beyond a frozen model budget keeps negative slack" )
+    {
+        auto reader                              = sampleReader();
+        reader.worst.combined.budgetNs           = 20000;
+        reader.worst.completed.record.startedNs  = reader.worst.baseNs - 70000;
+        reader.worst.completed.record.finishedNs = reader.worst.baseNs + 30000;
+        reader.worst.completed.observedNs        = reader.worst.baseNs + 45000;
+        reader.worst.offsetNs                    = 30000;
+        reader.worst.requiredNs                  = 30000;
+        reader.worst.observedHoldNs              = 45000;
+        reader.worst.slackNs                     = -10000;
+        reader.maxRequiredHoldNs                 = 30000;
+        reader.metrics[0]                        = { 3, 20e-6, 10e-6, 10e-6, 30e-6, 0.5, true };
+        reader.metrics[1]                        = reader.metrics[0];
+        reader.metrics[2]                        = { 3, 35e-6, 10e-6, 25e-6, 45e-6, 0.5, true };
+        reader.metrics[5]                        = { 3, 0, 10e-6, -10e-6, 10e-6, 0.5, true };
+        auto input                               = message( samplePrimary(), {}, {}, {}, reader );
+        buffer                                   = envelope( input );
+        REQUIRE( telem_dmsynco::verify( buffer, flatlogs::logHeader::msgLen( buffer ) ) );
+        checkReader( GetTelem_dmsynco_fb( input.builder.GetBufferPointer() )->reader_timing(), reader );
+        const auto text = telem_dmsynco::msgString( input.builder.GetBufferPointer(), input.builder.GetSize() );
+        CHECK( text.find( "readerModelSlack[n=3 valid=1] mean_s=0 stddev_s=1e-05 min_s=-1e-05" ) != std::string::npos );
+        CHECK( text.find( "slack_ns:-10000" ) != std::string::npos );
+    }
+}
+
+/// Reject malformed quality accounting, bounds, identities, outcomes and exact signed completion arithmetic.
+/** \ingroup dmSyncoTelemetry_unit_test */
+TEST_CASE( "Synco telemetry rejects inconsistent reader-protection evidence", "[dmSyncoTelemetry]" )
+{
+    // clang-format off
+#ifdef DMSYNCO_TELEMETRY_TEST_DOXYGEN_REF
+    MagAOX::logger::telem_dmsynco::verify;
+#endif
+    // clang-format on
+    for( unsigned variant = 0; variant < 47; ++variant )
+    {
+        CAPTURE( variant );
+        auto  reader    = sampleReader();
+        auto &sample    = reader.worst;
+        auto &completed = sample.completed.record;
+
+        switch( variant )
+        {
+        case 0:
+            reader.session = 0;
+            break;
+        case 1:
+            reader.windowSec = std::numeric_limits<double>::quiet_NaN();
+            break;
+        case 2:
+            reader.windowSec = -1;
+            break;
+        case 3:
+            reader.nowNs = -1;
+            break;
+        case 4:
+            reader.capacity = 0;
+            break;
+        case 5:
+            reader.queued = reader.capacity * 3 + 1;
+            break;
+        case 6:
+            reader.pendingPrimary = reader.capacity + 1;
+            break;
+        case 7:
+            reader.pendingCombined = reader.capacity + 1;
+            break;
+        case 8:
+            reader.pendingCompletion = reader.capacity + 1;
+            break;
+        case 9:
+            reader.age = -0.5;
+            break;
+        case 10:
+            reader.span = -1;
+            break;
+        case 11:
+            ++reader.total.events;
+            break;
+        case 12:
+            reader.total.matched = reader.total.completion + 1;
+            break;
+        case 13:
+            reader.total.busy = reader.total.completion;
+            break;
+        case 14:
+            reader.worstValid = false;
+            break;
+        case 15:
+            ++sample.requiredNs;
+            break;
+        case 16:
+            reader.maxObservedHoldNs = reader.maxRequiredHoldNs - 1;
+            break;
+        case 17:
+            reader.overBudget = reader.total.matched + 1;
+            break;
+        case 18:
+            ++completed.inputCounter;
+            break;
+        case 19:
+            completed.publicationNsec = 1000000000;
+            break;
+        case 20:
+            ++sample.combined.primaryInode;
+            break;
+        case 21:
+            sample.combined.startNs = 1700000000000099999;
+            break;
+        case 22:
+            sample.combined.startNs = 1700000000000200001;
+            break;
+        case 23:
+            ++completed.protocolVersion;
+            break;
+        case 24:
+            completed.state = dmCompletion::State::busy;
+            break;
+        case 25:
+            completed.outcome = dmTiming::Outcome::failed;
+            break;
+        case 26:
+            completed.callbackResult = -1;
+            break;
+        case 27:
+            sample.completed.observedNs = completed.finishedNs - 1;
+            break;
+        case 28:
+            ++sample.baseNs;
+            break;
+        case 29:
+            ++sample.offsetNs;
+            break;
+        case 30:
+            ++sample.observedHoldNs;
+            break;
+        case 31:
+            ++sample.slackNs;
+            break;
+        case 32:
+            completed.session = 0;
+            break;
+        case 33:
+            completed.epoch = 0;
+            break;
+        case 34:
+            completed.sequence = 0;
+            break;
+        case 35:
+            completed.startedNs = 0;
+            break;
+        case 36:
+            completed.finishedNs = completed.startedNs - 1;
+            break;
+        case 37:
+            sample.primary.input.sec = std::numeric_limits<int64_t>::max();
+            break;
+        case 38:
+            reader.maxRequiredHoldNs = -1;
+            break;
+        case 39:
+            reader.age = std::numeric_limits<double>::infinity();
+            break;
+        case 40:
+            ++sample.combined.primaryCounter;
+            break;
+        case 41:
+            sample.primary.observedNs = 0;
+            break;
+        case 42:
+            sample.combined.budgetNs = -1;
+            break;
+        case 43:
+            reader.span = reader.windowSec + 1;
+            break;
+        case 44:
+            reader.total.primary    = std::numeric_limits<uint64_t>::max();
+            reader.total.combined   = 1;
+            reader.total.completion = 1;
+            reader.total.events     = 1;
+            break;
+        case 45:
+            reader.span = std::numeric_limits<double>::quiet_NaN();
+            break;
+        case 46:
+            reader.windowSec = 0;
+            break;
+        }
+
+        auto input  = message( samplePrimary(), {}, {}, {}, reader );
+        auto buffer = envelope( input );
+        REQUIRE_FALSE( telem_dmsynco::verify( buffer, flatlogs::logHeader::msgLen( buffer ) ) );
+        REQUIRE_FALSE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+    }
+
+    auto        input       = message( samplePrimary(), {}, {}, {}, sampleReader() );
+    auto        corrupt     = envelope( input );
+    const auto *record      = GetTelem_dmsynco_fb( flatlogs::logHeader::messageBuffer( corrupt ) );
+    auto       *readerBytes = const_cast<uint8_t *>( reinterpret_cast<const uint8_t *>( record->reader_timing() ) );
+    std::memset( readerBytes, 0xff, sizeof( flatbuffers::soffset_t ) );
+    REQUIRE_FALSE( telem_dmsynco::verify( corrupt, flatlogs::logHeader::msgLen( corrupt ) ) );
+    REQUIRE_FALSE( verifyLogEntry( telem_dmsynco::eventCode, corrupt.get() ) );
+}
+
+/// Validate each reader population independently, including signed values, empty windows and unavailable variance.
+/** \ingroup dmSyncoTelemetry_unit_test */
+TEST_CASE( "Synco telemetry validates every reader timing population", "[dmSyncoTelemetry]" )
+{
+    // clang-format off
+#ifdef DMSYNCO_TELEMETRY_TEST_DOXYGEN_REF
+    MagAOX::logger::telem_dmsynco::verify;
+#endif
+    // clang-format on
+    for( size_t metric = 0; metric < static_cast<size_t>( dmReaderTiming::Metric::count ); ++metric )
+    {
+        for( unsigned variant = 0; variant < 15; ++variant )
+        {
+            CAPTURE( metric, variant );
+            auto  reader = sampleReader();
+            auto &stats  = reader.metrics[metric];
+
+            switch( variant )
+            {
+            case 0:
+                stats.count = reader.capacity + 1;
+                break;
+            case 1:
+                stats.count = reader.total.matched + 1;
+                break;
+            case 2:
+                stats.valid = false;
+                break;
+            case 3:
+                stats.stddev = std::numeric_limits<double>::quiet_NaN();
+                break;
+            case 4:
+                stats.stddev = -1;
+                break;
+            case 5:
+                stats.mean = std::numeric_limits<double>::quiet_NaN();
+                break;
+            case 6:
+                stats.min = -std::numeric_limits<double>::infinity();
+                break;
+            case 7:
+                stats.max = std::numeric_limits<double>::infinity();
+                break;
+            case 8:
+                stats.span = std::numeric_limits<double>::quiet_NaN();
+                break;
+            case 9:
+                stats.mean = stats.min - 1;
+                break;
+            case 10:
+                stats.mean = stats.max + 1;
+                break;
+            case 11:
+                stats.count = 1;
+                break;
+            case 12:
+                reader.metrics              = {};
+                reader.age                  = -1;
+                reader.span                 = 0;
+                reader.metrics[metric].mean = std::numeric_limits<double>::quiet_NaN();
+                break;
+            case 13:
+                stats.span = reader.span + 1;
+                break;
+            case 14:
+                stats.count  = 1;
+                stats.valid  = false;
+                stats.stddev = 0;
+                break;
+            }
+
+            auto input  = message( samplePrimary(), {}, {}, {}, reader );
+            auto buffer = envelope( input );
+            REQUIRE_FALSE( telem_dmsynco::verify( buffer, flatlogs::logHeader::msgLen( buffer ) ) );
+            REQUIRE_FALSE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+        }
     }
 }
 

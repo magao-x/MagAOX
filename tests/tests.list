@@ -15,6 +15,7 @@
 ../libMagAOX/app/dev/tests/dmTiming_integration_test
 ../libMagAOX/app/dev/tests/dmCompletion_test
 ../libMagAOX/app/dev/tests/dmCompletion_integration_test
+../libMagAOX/app/dev/tests/dmReaderTiming_test
 ../libMagAOX/app/dev/tests/shmimMonitor_timing_test
 ../libMagAOX/app/dev/tests/dev_test
 ../libMagAOX/app/dev/tests/stdCamera_test

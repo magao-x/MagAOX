@@ -18,6 +18,8 @@
 #include "../../libMagAOX/libMagAOX.hpp"
 #include "../../libMagAOX/app/dev/dmCombTiming.hpp"
 #include "../../libMagAOX/app/dev/dmPipelineTiming.hpp"
+#include "../../libMagAOX/app/dev/dmReaderTiming.hpp"
+#include "../../libMagAOX/app/dev/dmCompletion.hpp"
 #include "../../libMagAOX/app/dev/dmTiming.hpp"
 #include "../../magaox_git_version.h"
 #include "syncoSchedule.hpp"
@@ -68,6 +70,26 @@ inline std::string syncoCameraT::indiPrefix()
     return "cam";
 }
 
+/// Ordinary-priority observer of the controller's dedicated completion record.
+struct syncoCompletionT
+{
+    /// Return the optional completion-stream monitor configuration section.
+    static std::string configSection();
+
+    /// Return the completion monitor's INDI prefix.
+    static std::string indiPrefix();
+};
+
+inline std::string syncoCompletionT::configSection()
+{
+    return "completionMonitor";
+}
+
+inline std::string syncoCompletionT::indiPrefix()
+{
+    return "done";
+}
+
 /// Access metadata while retaining milkImage's existing passive/normal publication implementation.
 class syncoImage : public mx::improc::milkImage<float>
 {
@@ -92,17 +114,20 @@ class dmSyncopation : public MagAOXApp<true>,
                       public dev::shmimMonitor<dmSyncopation>,
                       public dev::shmimMonitor<dmSyncopation, syncoCombinerT>,
                       public dev::shmimMonitor<dmSyncopation, syncoCameraT>,
+                      public dev::shmimMonitor<dmSyncopation, syncoCompletionT>,
                       public dev::telemeter<dmSyncopation>
 {
     friend class dev::shmimMonitor<dmSyncopation>;
     friend class dev::shmimMonitor<dmSyncopation, syncoCombinerT>;
     friend class dev::shmimMonitor<dmSyncopation, syncoCameraT>;
+    friend class dev::shmimMonitor<dmSyncopation, syncoCompletionT>;
     friend class dev::telemeter<dmSyncopation>;
     friend class dmSyncopation_test;
-    using shmimMonitorT    = dev::shmimMonitor<dmSyncopation>;
-    using combinerMonitorT = dev::shmimMonitor<dmSyncopation, syncoCombinerT>;
-    using cameraMonitorT   = dev::shmimMonitor<dmSyncopation, syncoCameraT>;
-    using telemeterT       = dev::telemeter<dmSyncopation>;
+    using shmimMonitorT      = dev::shmimMonitor<dmSyncopation>;
+    using combinerMonitorT   = dev::shmimMonitor<dmSyncopation, syncoCombinerT>;
+    using cameraMonitorT     = dev::shmimMonitor<dmSyncopation, syncoCameraT>;
+    using completionMonitorT = dev::shmimMonitor<dmSyncopation, syncoCompletionT>;
+    using telemeterT         = dev::telemeter<dmSyncopation>;
 
   protected:
     /// Fixed fault classes counted without formatting or logging in the timing callback.
@@ -238,11 +263,13 @@ class dmSyncopation : public MagAOXApp<true>,
     dev::dmTiming     m_cameraCadence;      ///< Independent camera acquisition intervals; never paired to DM events.
     dev::dmTiming
         m_cameraPublicationCadence; ///< Independent camera writetime intervals from the same metadata snapshot.
-    dev::dmPipelineTiming m_pipelineCadence;     ///< Best-effort upstream trace handoff and processing measurements.
-    int64_t       m_primaryReceiptNs{ -1 };      ///< Existing primary receipt timestamp reused by the pipeline handoff.
-    CameraHistory m_cameraAcquisitionHistory;    ///< Acquisition-clock progression checks.
-    CameraHistory m_cameraPublicationHistory;    ///< Publication-clock progression checks, independent of acquisition.
-    std::atomic<ino_t> m_primaryTraceInode{ 0 }; ///< Primary stream metadata identity, published by its monitor.
+    dev::dmPipelineTiming m_pipelineCadence; ///< Best-effort upstream trace handoff and processing measurements.
+    dev::dmReaderTiming   m_readerTiming; ///< Independent shadow completion/reader-hold measurement; no control output.
+    int64_t m_completionReceiptNs{ -1 };  ///< Completion monitor's genuine receipt marker; negative for initial reads.
+    int64_t m_primaryReceiptNs{ -1 };     ///< Existing primary receipt timestamp reused by the pipeline handoff.
+    CameraHistory m_cameraAcquisitionHistory;     ///< Acquisition-clock progression checks.
+    CameraHistory m_cameraPublicationHistory;     ///< Publication-clock progression checks, independent of acquisition.
+    std::atomic<ino_t> m_primaryTraceInode{ 0 };  ///< Primary stream metadata identity, published by its monitor.
     int64_t            m_combinerReceiptNs{ -1 }; ///< Combined-monitor-only receipt anchor; -1 for an initial callback.
     PrimaryTiming      m_faultTiming;          ///< Same-event context latched with the latest primary interval fault.
     int64_t m_previousPrimaryPublication{ 0 }; ///< Last consistency-checked positive primary publication timestamp, ns.
@@ -320,6 +347,8 @@ class dmSyncopation : public MagAOXApp<true>,
     pcf::IndiProperty m_indiP_cameraWritePairs;   ///< Camera publication excursion ordering around its own median.
     pcf::IndiProperty m_indiP_pipelineQuality;    ///< Upstream chain population and qualification counters.
     pcf::IndiProperty m_indiP_pipelineBoundary;   ///< Oldest-stage interval and primary publication-tail changes.
+    pcf::IndiProperty m_indiP_readerTiming;       ///< Observed reader lifetime and notification statistics, in seconds.
+    pcf::IndiProperty m_indiP_readerQuality; ///< Matching, loss, lifecycle and lifetime extrema of the shadow test.
     std::array<pcf::IndiProperty, MagAOX::dmPipelineTiming::maxStages> m_indiP_pipelineStages;
     ///< Per-row process identity, ordinary timings and excursion-conditioned latency changes.
 
@@ -362,7 +391,7 @@ class dmSyncopation : public MagAOXApp<true>,
     /// Accept the combined attachment without acquiring scheduler resources or copying pixels.
     int allocate( const syncoCombinerT &tag /**< [in] Combined-output monitor tag. */ );
 
-    /// Capture combined metadata and producer trace without acquiring the cycle mutex.
+    /// Capture combined metadata and producer trace, including optional shadow observations.
     int processImage( void                 *source /**< [in] Unused combined pixel pointer. */,
                       const syncoCombinerT &tag /**< [in] Combined-output monitor tag. */ );
 
@@ -380,6 +409,17 @@ class dmSyncopation : public MagAOXApp<true>,
     /// Retain camera receipts, rejected observations and attachment epochs.
     void shmimMonitorTiming( const syncoCameraT    &tag /**< [in] Camera monitor tag. */,
                              dev::shmimMonitorEvent event /**< [in] Actual lifecycle/receipt event. */ );
+
+    /// Validate the dedicated completion record without acquiring any DM resources.
+    int allocate( const syncoCompletionT &tag /**< [in] Completion monitor tag. */ );
+
+    /// Capture a coherent controller completion into its independent bounded handoff.
+    int processImage( void                   *source /**< [in] Unused completion pixel pointer. */,
+                      const syncoCompletionT &tag /**< [in] Completion monitor tag. */ );
+
+    /// Retain completion attachment epochs and distinguish real notifications from initial data.
+    void shmimMonitorTiming( const syncoCompletionT &tag /**< [in] Completion monitor tag. */,
+                             dev::shmimMonitorEvent  event /**< [in] Actual lifecycle/receipt event. */ );
 
     /// Schedule aggregate telemetry outside the timed callback.
     int checkRecordTimes();
@@ -478,6 +518,12 @@ class dmSyncopation : public MagAOXApp<true>,
     /// Publish ordinary and excursion-conditioned upstream stage measurements.
     void updatePipelineINDI();
 
+    /// Register optional shadow reader-protection populations and matching quality.
+    int setupReaderTimingINDI();
+
+    /// Publish the consumer-owned completion comparison outside all monitor callbacks.
+    void updateReaderTimingINDI();
+
     /// Execute one cycle while the caller holds the cycle mutex.
     int processPrimary( int64_t observed /**< [in] callback entry time on the monotonic scheduling clock */ );
 
@@ -542,16 +588,20 @@ class dmSyncopation : public MagAOXApp<true>,
 
 inline dmSyncopation::dmSyncopation() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
 {
-    shmimMonitorT::m_smThreadPrio       = 30;
-    shmimMonitorT::m_smCpuset           = "dmtweeter-synco";
-    shmimMonitorT::m_targetState        = stateCodes::READY;
-    combinerMonitorT::m_smThreadPrio    = 0;
-    combinerMonitorT::m_targetState     = stateCodes::READY;
-    combinerMonitorT::m_semaphoreNumber = -1;
-    cameraMonitorT::m_smThreadPrio      = 0;
-    cameraMonitorT::m_targetState       = stateCodes::READY;
-    cameraMonitorT::m_semaphoreNumber   = -1;
-    cameraMonitorT::m_shmimName         = "camwfs";
+    shmimMonitorT::m_smThreadPrio          = 30;
+    shmimMonitorT::m_smCpuset              = "dmtweeter-synco";
+    shmimMonitorT::m_targetState           = stateCodes::READY;
+    combinerMonitorT::m_smThreadPrio       = 0;
+    combinerMonitorT::m_targetState        = stateCodes::READY;
+    combinerMonitorT::m_semaphoreNumber    = -1;
+    cameraMonitorT::m_smThreadPrio         = 0;
+    cameraMonitorT::m_targetState          = stateCodes::READY;
+    cameraMonitorT::m_semaphoreNumber      = -1;
+    cameraMonitorT::m_shmimName            = "camwfs";
+    completionMonitorT::m_smThreadPrio     = 0;
+    completionMonitorT::m_targetState      = stateCodes::READY;
+    completionMonitorT::m_semaphoreNumber  = -1;
+    completionMonitorT::m_getExistingFirst = false;
 }
 
 inline bool dmSyncopation::finite( double value )
@@ -568,6 +618,8 @@ inline void dmSyncopation::setupConfig()
     SHMIMMONITOR_SETUP_CONFIG( config );
     SHMIMMONITORT_SETUP_CONFIG( combinerMonitorT, config );
     SHMIMMONITORT_SETUP_CONFIG( cameraMonitorT, config );
+    SHMIMMONITORT_SETUP_CONFIG( completionMonitorT, config );
+    completionMonitorT::m_shmimName.clear();
     shmimMonitorT::m_shmimName  = "dmC";
     cameraMonitorT::m_shmimName = "camwfs";
     TELEMETER_SETUP_CONFIG( config );
@@ -636,6 +688,7 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
     SHMIMMONITOR_LOAD_CONFIG( config );
     SHMIMMONITORT_LOAD_CONFIG( combinerMonitorT, config );
     SHMIMMONITORT_LOAD_CONFIG( cameraMonitorT, config );
+    SHMIMMONITORT_LOAD_CONFIG( completionMonitorT, config );
     TELEMETER_LOAD_CONFIG( config );
     shmimMonitorT::m_getExistingFirst = false;
     config( m_destinations, "streams.destinations" );
@@ -700,6 +753,11 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
 
     m_primaryCadenceMaxEvents = size_t( cadenceEvents );
 
+    if( !completionMonitorT::m_shmimName.empty() && !m_simulationEnabled )
+    {
+        return -1;
+    }
+
     if( m_simulationEnabled && m_primaryCadenceMaxEvents == 0 )
     {
         return -1;
@@ -752,6 +810,11 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
         return -1;
     }
     std::vector<std::string> names{ shmimMonitorT::m_shmimName, m_combinedName, m_timingName };
+
+    if( !completionMonitorT::m_shmimName.empty() )
+    {
+        names.push_back( completionMonitorT::m_shmimName );
+    }
     for( const auto &name : m_destinations )
     {
         if( name.size() != 10 || name.substr( 0, 2 ) != "dm" || name.substr( 4, 4 ) != "disp" ||
@@ -775,11 +838,12 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
     {
         return -1;
     }
-    m_period                             = int64_t( 1e9 / m_nominalRate );
-    shmimMonitorT::m_semaphoreNumber     = ( m_diagnosticsOnly || m_simulationEnabled ) ? -1 : m_primarySemaphore;
-    combinerMonitorT::m_shmimName        = m_combinedName;
-    combinerMonitorT::m_getExistingFirst = false;
-    cameraMonitorT::m_getExistingFirst   = false;
+    m_period                               = int64_t( 1e9 / m_nominalRate );
+    shmimMonitorT::m_semaphoreNumber       = ( m_diagnosticsOnly || m_simulationEnabled ) ? -1 : m_primarySemaphore;
+    combinerMonitorT::m_shmimName          = m_combinedName;
+    combinerMonitorT::m_getExistingFirst   = false;
+    cameraMonitorT::m_getExistingFirst     = false;
+    completionMonitorT::m_getExistingFirst = false;
     m_reason = m_simulationEnabled ? "simulation warming" : ( m_diagnosticsOnly ? "diagnostics only" : "disabled" );
 
     if( m_simulationEnabled && !configureSimulation() )
@@ -887,6 +951,7 @@ inline void dmSyncopation::readSimulationPrimary( int64_t callbackNs, int64_t re
 
     if( !metadata || metadata->write != 0 )
     {
+        m_readerTiming.primary( {}, false );
         m_simulation.primary( 0, -1 );
         return;
     }
@@ -900,6 +965,7 @@ inline void dmSyncopation::readSimulationPrimary( int64_t callbackNs, int64_t re
     if( metadata->write != 0 || metadata->cnt0 != counter || metadata->writetime.tv_sec != stamp.tv_sec ||
         metadata->writetime.tv_nsec != stamp.tv_nsec )
     {
+        m_readerTiming.primary( {}, false );
         m_simulation.primary( counter, -1 );
         return;
     }
@@ -911,6 +977,7 @@ inline void dmSyncopation::readSimulationPrimary( int64_t callbackNs, int64_t re
                                        : 0;
     context.publicationNs        = published;
     context.primaryPublicationNs = published;
+    m_readerTiming.primary( { { context.streamInode, counter, stamp.tv_sec, stamp.tv_nsec }, observed } );
     m_simulation.primary( counter, observed, interval, context );
 
     if( m_simulationPublication == 0 || counter != m_simulationCounter )
@@ -942,6 +1009,7 @@ inline void dmSyncopation::readSimulationCombined( int64_t callbackNs, int64_t r
 
     if( !metadata || metadata->write != 0 )
     {
+        m_readerTiming.combined( {}, false );
         m_simulation.combined( 0, 0, m_now(), false );
         return;
     }
@@ -984,6 +1052,13 @@ inline void dmSyncopation::readSimulationCombined( int64_t callbackNs, int64_t r
     context.primaryPublicationNs = primary == m_simulationCounter ? m_simulationPublication : 0;
     context.startNs              = startNs;
     context.updateNs             = updateNs;
+    m_readerTiming.combined( { { context.streamInode, counter, published.tv_sec, published.tv_nsec },
+                               uint64_t( input ),
+                               primary,
+                               startNs,
+                               observed,
+                               m_bounds.delivery + m_bounds.keepout + m_bounds.guard },
+                             coherent );
     m_simulation.combined( counter, primary, observed, coherent, context );
 
     if( coherent && !repeated )
@@ -1948,6 +2023,11 @@ inline void dmSyncopation::shmimMonitorTiming( const dev::shmimT &tag, dev::shmi
 {
     static_cast<void>( tag );
 
+    if( event == dev::shmimMonitorEvent::connected || event == dev::shmimMonitorEvent::disconnected )
+    {
+        m_readerTiming.resetPrimary();
+    }
+
     if( event == dev::shmimMonitorEvent::connected )
     {
         m_primaryTraceInode.store( shmimMonitorT::m_imageStream.md->inode, std::memory_order_release );
@@ -2033,6 +2113,11 @@ inline void dmSyncopation::shmimMonitorTiming( const syncoCombinerT &tag, dev::s
 {
     static_cast<void>( tag );
 
+    if( event == dev::shmimMonitorEvent::connected || event == dev::shmimMonitorEvent::disconnected )
+    {
+        m_readerTiming.resetCombined();
+    }
+
     if( !m_combinerCadence.enabled() )
     {
         return;
@@ -2055,6 +2140,59 @@ inline void dmSyncopation::shmimMonitorTiming( const syncoCombinerT &tag, dev::s
     {
         m_combinerCadence.rejected( m_combinerReceiptNs );
         m_combinerReceiptNs = -1;
+    }
+}
+
+inline int dmSyncopation::allocate( const syncoCompletionT &tag )
+{
+    static_cast<void>( tag );
+    const auto &image = completionMonitorT::m_imageStream;
+
+    if( !image.md || image.md->datatype != _DATATYPE_UINT64 || image.md->naxis != 1 ||
+        image.md->size[0] != MagAOX::dmCompletion::words || image.md->location != -1 )
+    {
+        return log<software_error, -1>( { "Completion monitor requires a 16-word uint64 CPU stream" } );
+    }
+
+    return 0;
+}
+
+inline int dmSyncopation::processImage( void *source, const syncoCompletionT &tag )
+{
+    static_cast<void>( source );
+    static_cast<void>( tag );
+    MagAOX::dmReaderTiming::Completed event;
+    const auto                       &image    = completionMonitorT::m_imageStream;
+    const bool                        coherent = dev::dmCompletion::read( &image, event.record );
+    event.observedNs                           = m_now();
+    m_readerTiming.completion( event, coherent && m_completionReceiptNs > 0 );
+    m_completionReceiptNs = -1;
+    return 0;
+}
+
+inline void dmSyncopation::shmimMonitorTiming( const syncoCompletionT &tag, dev::shmimMonitorEvent event )
+{
+    static_cast<void>( tag );
+
+    if( event == dev::shmimMonitorEvent::connected || event == dev::shmimMonitorEvent::disconnected )
+    {
+        m_completionReceiptNs = -1;
+        m_readerTiming.resetCompletion();
+    }
+    else if( event == dev::shmimMonitorEvent::receipt )
+    {
+        m_completionReceiptNs = m_now();
+    }
+    else if( event == dev::shmimMonitorEvent::initial )
+    {
+        m_completionReceiptNs = -1;
+    }
+    else if( event == dev::shmimMonitorEvent::discarded )
+    {
+        MagAOX::dmReaderTiming::Completed rejected;
+        rejected.observedNs = m_now();
+        m_readerTiming.completion( rejected, false );
+        m_completionReceiptNs = -1;
     }
 }
 
@@ -2857,6 +2995,208 @@ inline void dmSyncopation::updatePipelineINDI()
     }
 }
 
+inline int dmSyncopation::setupReaderTimingINDI()
+{
+    if( !m_readerTiming.enabled() )
+    {
+        return 0;
+    }
+
+    if( createROIndiNumber( m_indiP_readerTiming, "reader_timing" ) < 0 ||
+        createROIndiNumber( m_indiP_readerQuality, "reader_timing_quality" ) < 0 )
+    {
+        return -1;
+    }
+
+    for( size_t index = 0; index < size_t( MagAOX::dmReaderTiming::Metric::count ); ++index )
+    {
+        const std::string prefix = MagAOX::dmReaderTiming::metricName( MagAOX::dmReaderTiming::Metric( index ) );
+
+        for( const auto *field : { "mean", "jitter", "min", "max", "count", "span" } )
+        {
+            m_indiP_readerTiming.add( pcf::IndiElement( prefix + '_' + field ) );
+            m_indiP_readerTiming[prefix + '_' + field] = std::string( field ) == "count" ? 0.0 : -1.0;
+        }
+    }
+
+    for( const auto *name : { "enabled",
+                              "session",
+                              "sequence",
+                              "window",
+                              "capacity",
+                              "queued",
+                              "span",
+                              "age",
+                              "events",
+                              "primary",
+                              "combined",
+                              "completion",
+                              "matched",
+                              "busy",
+                              "unavailable",
+                              "error",
+                              "unqualified",
+                              "invalid",
+                              "incoherent",
+                              "duplicates",
+                              "sequenceGaps",
+                              "counterGaps",
+                              "sourceResets",
+                              "staleEpoch",
+                              "missingPrimary",
+                              "missingCombined",
+                              "identityMismatch",
+                              "evicted",
+                              "expired",
+                              "droppedPrimary",
+                              "droppedCombined",
+                              "droppedCompletion",
+                              "maxRequiredUs",
+                              "maxObservedUs",
+                              "overBudget",
+                              "worstValid",
+                              "worstOffsetUs",
+                              "worstBudgetUs",
+                              "worstSlackUs",
+                              "pendingPrimary",
+                              "pendingCombined",
+                              "pendingCompletion" } )
+    {
+        m_indiP_readerQuality.add( pcf::IndiElement( name ) );
+        m_indiP_readerQuality[name] = 0.0;
+    }
+
+    m_indiP_readerQuality["age"] = -1.0;
+
+    if( registerIndiPropertyReadOnly( m_indiP_readerTiming ) < 0 )
+    {
+        return -1;
+    }
+
+    return registerIndiPropertyReadOnly( m_indiP_readerQuality );
+}
+
+inline void dmSyncopation::updateReaderTimingINDI()
+{
+    if( !m_readerTiming.enabled() )
+    {
+        return;
+    }
+
+    const auto              &summary = m_readerTiming.summary();
+    std::vector<std::string> names;
+    std::vector<double>      values;
+
+    for( size_t index = 0; index < summary.metrics.size(); ++index )
+    {
+        const auto       &stats  = summary.metrics[index];
+        const std::string prefix = MagAOX::dmReaderTiming::metricName( MagAOX::dmReaderTiming::Metric( index ) );
+
+        for( const auto *field : { "mean", "jitter", "min", "max", "count", "span" } )
+        {
+            names.push_back( prefix + '_' + field );
+        }
+
+        values.insert( values.end(),
+                       { stats.count ? stats.mean : -1.0,
+                         stats.valid ? stats.stddev : -1.0,
+                         stats.count ? stats.min : -1.0,
+                         stats.count ? stats.max : -1.0,
+                         double( stats.count ),
+                         stats.count ? stats.span : -1.0 } );
+    }
+
+    const auto state = summary.metrics[0].count ? INDI_OK : INDI_IDLE;
+    updateIfChanged( m_indiP_readerTiming, names, values, state );
+    const auto &quality = summary.total;
+    updateIfChanged<double>( m_indiP_readerQuality,
+                             { "enabled",
+                               "session",
+                               "sequence",
+                               "window",
+                               "capacity",
+                               "queued",
+                               "span",
+                               "age",
+                               "events",
+                               "primary",
+                               "combined",
+                               "completion",
+                               "matched",
+                               "busy",
+                               "unavailable",
+                               "error",
+                               "unqualified",
+                               "invalid",
+                               "incoherent",
+                               "duplicates",
+                               "sequenceGaps",
+                               "counterGaps",
+                               "sourceResets",
+                               "staleEpoch",
+                               "missingPrimary",
+                               "missingCombined",
+                               "identityMismatch",
+                               "evicted",
+                               "expired",
+                               "droppedPrimary",
+                               "droppedCombined",
+                               "droppedCompletion",
+                               "maxRequiredUs",
+                               "maxObservedUs",
+                               "overBudget",
+                               "worstValid",
+                               "worstOffsetUs",
+                               "worstBudgetUs",
+                               "worstSlackUs",
+                               "pendingPrimary",
+                               "pendingCombined",
+                               "pendingCompletion" },
+                             { summary.enabled ? 1.0 : 0.0,
+                               double( summary.session ),
+                               double( summary.sequence ),
+                               summary.windowSec,
+                               double( summary.capacity ),
+                               double( summary.queued ),
+                               summary.span,
+                               summary.age,
+                               double( quality.events ),
+                               double( quality.primary ),
+                               double( quality.combined ),
+                               double( quality.completion ),
+                               double( quality.matched ),
+                               double( quality.busy ),
+                               double( quality.unavailable ),
+                               double( quality.error ),
+                               double( quality.unqualified ),
+                               double( quality.invalid ),
+                               double( quality.incoherent ),
+                               double( quality.duplicates ),
+                               double( quality.sequenceGaps ),
+                               double( quality.counterGaps ),
+                               double( quality.sourceResets ),
+                               double( quality.staleEpoch ),
+                               double( quality.missingPrimary ),
+                               double( quality.missingCombined ),
+                               double( quality.identityMismatch ),
+                               double( quality.evicted ),
+                               double( quality.expired ),
+                               double( quality.droppedPrimary ),
+                               double( quality.droppedCombined ),
+                               double( quality.droppedCompletion ),
+                               summary.maxRequiredHoldNs * 1e-3,
+                               summary.maxObservedHoldNs * 1e-3,
+                               double( summary.overBudget ),
+                               summary.worstValid ? 1.0 : 0.0,
+                               summary.worstValid ? summary.worst.offsetNs * 1e-3 : -1.0,
+                               summary.worstValid ? summary.worst.combined.budgetNs * 1e-3 : -1.0,
+                               summary.worstValid ? summary.worst.slackNs * 1e-3 : -1.0,
+                               double( summary.pendingPrimary ),
+                               double( summary.pendingCombined ),
+                               double( summary.pendingCompletion ) },
+                             state );
+}
+
 inline int dmSyncopation::appStartup()
 {
     try
@@ -2870,6 +3210,8 @@ inline int dmSyncopation::appStartup()
         m_pipelineCadence.configure( m_pipelineDiagnostics ? m_primaryCadenceWindow : 0,
                                      m_primaryCadenceMaxEvents,
                                      m_primaryExcursionUs * 1e-6 );
+        m_readerTiming.configure( completionMonitorT::m_shmimName.empty() ? 0 : m_primaryCadenceWindow,
+                                  m_primaryCadenceMaxEvents );
     }
     catch( const std::exception &error )
     {
@@ -2877,7 +3219,7 @@ inline int dmSyncopation::appStartup()
     }
 
     if( setupSimulationINDI() < 0 || setupPrimaryCadenceINDI() < 0 || setupCombinerCadenceINDI() < 0 ||
-        setupPipelineINDI() < 0 ||
+        setupPipelineINDI() < 0 || setupReaderTimingINDI() < 0 ||
         setupCadenceINDI( m_cameraCadence,
                           m_indiP_cameraTiming,
                           m_indiP_cameraQuality,
@@ -2993,6 +3335,11 @@ inline int dmSyncopation::appStartup()
         SHMIMMONITORT_APP_STARTUP( cameraMonitorT );
     }
 
+    if( m_readerTiming.enabled() )
+    {
+        SHMIMMONITORT_APP_STARTUP( completionMonitorT );
+    }
+
     return 0;
 }
 
@@ -3012,6 +3359,14 @@ inline int dmSyncopation::appLogic()
     updatePairsINDI( m_cameraPublicationCadence, m_indiP_cameraWritePairs );
     m_pipelineCadence.update( m_now() );
     updatePipelineINDI();
+    m_readerTiming.update( m_now() );
+    updateReaderTimingINDI();
+
+    if( m_readerTiming.enabled() )
+    {
+        SHMIMMONITORT_APP_LOGIC( completionMonitorT );
+        SHMIMMONITORT_UPDATE_INDI( completionMonitorT );
+    }
 
     if( m_combinerCadence.enabled() )
     {
@@ -3202,6 +3557,11 @@ inline int dmSyncopation::appShutdown()
         SHMIMMONITORT_APP_SHUTDOWN( cameraMonitorT );
     }
 
+    if( m_readerTiming.enabled() )
+    {
+        SHMIMMONITORT_APP_SHUTDOWN( completionMonitorT );
+    }
+
     m_primaryTraceInode.store( 0, std::memory_order_release );
     TELEMETER_APP_SHUTDOWN;
     std::lock_guard<std::mutex> lock( m_cycleMutex );
@@ -3299,7 +3659,8 @@ inline int dmSyncopation::recordTelem( const telem_dmsynco *record )
                                          m_pipelineCadence.summary(),
                                          m_cameraPublicationCadence.summary(),
                                          m_simulationSnapshot,
-                                         trace );
+                                         trace,
+                                         m_readerTiming.summary() );
 
         if( telem<telem_dmsynco>( message ) < 0 )
         {
