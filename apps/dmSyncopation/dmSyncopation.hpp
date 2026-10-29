@@ -2239,9 +2239,10 @@ inline int dmSyncopation::processImage( void *source, const syncoCompletionT &ta
     static_cast<void>( source );
     static_cast<void>( tag );
     MagAOX::dmReaderTiming::Completed event;
-    const auto                       &image    = completionMonitorT::m_imageStream;
-    const bool                        coherent = dev::dmCompletion::read( &image, event.record );
-    event.observedNs                           = m_now();
+    event.receiptNs      = m_completionReceiptNs;
+    const auto &image    = completionMonitorT::m_imageStream;
+    const bool  coherent = dev::dmCompletion::read( &image, event.record );
+    event.observedNs     = m_now();
     m_readerTiming.completion( event, coherent && m_completionReceiptNs > 0 );
     m_completionReceiptNs = -1;
     return 0;
@@ -2292,9 +2293,10 @@ inline int dmSyncopation::processImage( void *source, const syncoReaderReleaseT 
     static_cast<void>( source );
     static_cast<void>( tag );
     MagAOX::dmReaderTiming::Completed event;
-    const auto                       &image    = readerReleaseMonitorT::m_imageStream;
-    const bool                        coherent = dev::dmCompletion::read( &image, event.record );
-    event.observedNs                           = m_now();
+    event.receiptNs      = m_readerReleaseReceiptNs;
+    const auto &image    = readerReleaseMonitorT::m_imageStream;
+    const bool  coherent = dev::dmCompletion::read( &image, event.record );
+    event.observedNs     = m_now();
     m_readerReleaseTiming.completion( event, coherent && m_readerReleaseReceiptNs > 0 );
     m_readerReleaseReceiptNs = -1;
     return 0;
@@ -3201,6 +3203,9 @@ inline int dmSyncopation::setupReaderTimingINDIFor( dev::dmReaderTiming &reader,
                               "droppedPrimary",
                               "droppedCombined",
                               "droppedCompletion",
+                              "receiptUnavailable",
+                              "receiptInvalid",
+                              "firstEnriched",
                               "maxRequiredUs",
                               "maxObservedUs",
                               "overBudget",
@@ -3303,6 +3308,9 @@ inline void dmSyncopation::updateReaderTimingINDIFor( dev::dmReaderTiming &reade
                                "droppedPrimary",
                                "droppedCombined",
                                "droppedCompletion",
+                               "receiptUnavailable",
+                               "receiptInvalid",
+                               "firstEnriched",
                                "maxRequiredUs",
                                "maxObservedUs",
                                "overBudget",
@@ -3345,6 +3353,9 @@ inline void dmSyncopation::updateReaderTimingINDIFor( dev::dmReaderTiming &reade
                                double( quality.droppedPrimary ),
                                double( quality.droppedCombined ),
                                double( quality.droppedCompletion ),
+                               double( quality.receiptUnavailable ),
+                               double( quality.receiptInvalid ),
+                               double( quality.firstEnriched ),
                                summary.maxRequiredHoldNs * 1e-3,
                                summary.maxObservedHoldNs * 1e-3,
                                double( summary.overBudget ),

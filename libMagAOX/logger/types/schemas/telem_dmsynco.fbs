@@ -376,7 +376,8 @@ table DmSyncoReaderCombined
     budget_ns:long;
 }
 
-// Versioned controller outcome; started/finished/observed are same-host monotonic nanoseconds.
+// Versioned controller outcome; started/finished/receipt/observed are same-host monotonic nanoseconds.
+// receipt_ns is zero in legacy captures and otherwise preserves the raw semaphore-return observation.
 table DmSyncoReaderCompletion
 {
     protocol_version:ulong;
@@ -393,6 +394,7 @@ table DmSyncoReaderCompletion
     observed_ns:long;
     kind:ubyte;
     backend_result:long = -9223372036854775808;
+    receipt_ns:long;
 }
 
 // Completion offset and model slack are signed; all absolute local times are monotonic nanoseconds.
@@ -437,6 +439,9 @@ table DmSyncoReaderQuality
     sdk_results:ulong;
     sdk_success:ulong;
     sdk_failed:ulong;
+    receipt_unavailable:ulong;
+    receipt_invalid:ulong;
+    first_enriched:ulong;
 }
 
 // Trailing populations are in seconds; extrema and full worst-event evidence survive window expiration.
@@ -468,6 +473,11 @@ table DmSyncoReaderTiming
     max_observed_hold_ns:long;
     over_budget:ulong;
     kind:ubyte;
+    // Both absent is legacy; current writers emit both, including empty populations.
+    wake:DmSyncoTimingStats;
+    capture:DmSyncoTimingStats;
+    worst_notification_valid:bool;
+    worst_notification:DmSyncoReaderSample;
 }
 
 table Telem_dmsynco_fb

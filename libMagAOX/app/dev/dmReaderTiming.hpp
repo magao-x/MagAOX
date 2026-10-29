@@ -1,5 +1,5 @@
 /** \file dmReaderTiming.hpp
- * \brief Bounded observational joins of primary, combined and independent controller reader endpoints.
+ * \brief Bounded observational joins of primary, combined and independent controller reader endpoints and receipts.
  */
 #ifndef dev_dmReaderTiming_hpp
 #define dev_dmReaderTiming_hpp
@@ -141,7 +141,7 @@ class dmReaderTiming
     void consume( const Capture<MagAOX::dmReaderTiming::Combined> &capture /**< [in] Fixed combined handoff. */,
                   int64_t                                          nowNs /**< [in] Latest allowed local timestamp. */ );
 
-    /// Consume completion state and preserve only qualified current-publisher attempts for joining.
+    /// Consume completion state, qualify optional receipt provenance once and retain current-publisher attempts.
     void consume( const Capture<MagAOX::dmReaderTiming::Completed> &capture /**< [in] Fixed completion handoff. */,
                   int64_t nowNs /**< [in] Latest allowed local timestamp. */ );
 
@@ -664,6 +664,20 @@ inline void dmReaderTiming::consume( const Capture<MagAOX::dmReaderTiming::Compl
 
     if( progression( m_completionProgress, identity, value.observedNs ) )
     {
+        if( value.receiptNs == 0 )
+        {
+            ++m_total.receiptUnavailable;
+        }
+        else if( value.receiptNs <= 0 || value.receiptNs < record.finishedNs || value.receiptNs > value.observedNs )
+        {
+            ++m_total.receiptInvalid;
+        }
+
+        if( m_kind == MagAOX::dmCompletion::Kind::readers && record.outcome != MagAOX::dmTiming::Outcome::unknown )
+        {
+            ++m_total.firstEnriched;
+        }
+
         retain( m_completed, value );
     }
 }
@@ -729,6 +743,14 @@ inline void dmReaderTiming::join()
         {
             m_summary.worstValid = true;
             m_summary.worst      = sample;
+        }
+
+        if( !m_summary.worstNotificationValid || sample.completed.observedNs - record.finishedNs >
+                                                     m_summary.worstNotification.completed.observedNs -
+                                                         m_summary.worstNotification.completed.record.finishedNs )
+        {
+            m_summary.worstNotificationValid = true;
+            m_summary.worstNotification      = sample;
         }
 
         m_summary.maxRequiredHoldNs = std::max( m_summary.maxRequiredHoldNs, sample.requiredNs );
@@ -806,9 +828,22 @@ inline void dmReaderTiming::calculate( int64_t nowNs )
                                 sample.completed.observedNs - record.finishedNs,
                                 sample.slackNs };
 
-        for( size_t metric = 0; metric < populations.size(); ++metric )
+        for( size_t metric = 0; metric < MagAOX::dmReaderTiming::index( MagAOX::dmReaderTiming::Metric::wake );
+             ++metric )
         {
             populations[metric].add( values[metric] * 1e-9, entry.first, entry.first );
+        }
+
+        const auto receipt = sample.completed.receiptNs;
+
+        if( receipt > 0 && receipt >= record.finishedNs && receipt <= sample.completed.observedNs &&
+            ( record.kind != MagAOX::dmCompletion::Kind::readers ||
+              record.outcome == MagAOX::dmTiming::Outcome::unknown ) )
+        {
+            populations[MagAOX::dmReaderTiming::index( MagAOX::dmReaderTiming::Metric::wake )].add(
+                ( receipt - record.finishedNs ) * 1e-9, entry.first, entry.first );
+            populations[MagAOX::dmReaderTiming::index( MagAOX::dmReaderTiming::Metric::capture )].add(
+                ( sample.completed.observedNs - receipt ) * 1e-9, entry.first, entry.first );
         }
     }
 

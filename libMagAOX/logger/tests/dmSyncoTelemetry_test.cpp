@@ -231,62 +231,67 @@ dmSyncoSimulation::TraceBatch sampleEstimatorTrace()
 dmReaderTiming::Summary sampleReader()
 {
     dmReaderTiming::Summary reader;
-    reader.enabled                = true;
-    reader.session                = ( uint64_t( 1 ) << 54 ) + 29;
-    reader.sequence               = 77;
-    reader.nowNs                  = 20000000000;
-    reader.windowSec              = 2;
-    reader.capacity               = 20000;
-    reader.queued                 = 3;
-    reader.pendingPrimary         = 1;
-    reader.pendingCombined        = 2;
-    reader.pendingCompletion      = 3;
-    reader.span                   = 0.5;
-    reader.age                    = 0.1;
-    reader.metrics[0]             = { 3, -5e-6, 10e-6, -15e-6, 5e-6, 0.5, true };
-    reader.metrics[1]             = { 3, 2e-6, 2e-6, 0, 5e-6, 0.5, true };
-    reader.metrics[2]             = { 3, 8e-6, 3e-6, 2e-6, 14e-6, 0.5, true };
-    reader.metrics[3]             = { 3, 100e-6, 1e-6, 99e-6, 101e-6, 0.5, true };
-    reader.metrics[4]             = { 3, 10e-6, 5e-6, 1e-6, 20e-6, 0.5, true };
-    reader.metrics[5]             = { 3, 160e-6, 10e-6, 150e-6, 170e-6, 0.5, true };
-    reader.total                  = { 1000, 400, 300, 300, 100, 10, 11, 12, 13, 14, 15, 16,
-                                      17,   18,  19,  20,  21,  22, 23, 24, 25, 26, 27, 28 };
-    reader.worstValid             = true;
-    auto &worst                   = reader.worst;
-    worst.primary.input           = { ( uint64_t( 1 ) << 56 ) + 3, ( uint64_t( 1 ) << 55 ) + 5, 1700000000, 100000 };
-    worst.primary.observedNs      = 999990000;
-    worst.combined.input          = { ( uint64_t( 1 ) << 56 ) + 7, ( uint64_t( 1 ) << 55 ) + 9, 1700000000, 200000 };
-    worst.combined.primaryInode   = worst.primary.input.inode;
-    worst.combined.primaryCounter = worst.primary.input.counter;
-    worst.combined.startNs        = 1700000000000150000;
-    worst.combined.observedNs     = 1000000000;
-    worst.combined.budgetNs       = 155000;
-    auto &completion              = worst.completed.record;
-    completion.session            = ( uint64_t( 1 ) << 54 ) + 31;
-    completion.epoch              = 4;
-    completion.sequence           = ( uint64_t( 1 ) << 55 ) + 39;
-    completion.state              = dmCompletion::State::complete;
-    completion.inputInode         = worst.combined.input.inode;
-    completion.inputCounter       = worst.combined.input.counter;
-    completion.publicationSec     = worst.combined.input.sec;
-    completion.publicationNsec    = worst.combined.input.nsec;
-    completion.startedNs          = 999920000;
-    completion.finishedNs         = 1000020000;
-    completion.outcome            = dmTiming::Outcome::success;
-    completion.publisherPid       = 1234;
-    worst.completed.observedNs    = 1000035000;
-    worst.baseNs                  = worst.combined.observedNs;
-    worst.offsetNs                = 20000;
-    worst.requiredNs              = 20000;
-    worst.observedHoldNs          = 35000;
-    worst.slackNs                 = 135000;
-    reader.maxRequiredHoldNs      = 20000;
-    reader.maxObservedHoldNs      = 60000;
-    reader.overBudget             = 1;
+    reader.enabled                  = true;
+    reader.session                  = ( uint64_t( 1 ) << 54 ) + 29;
+    reader.sequence                 = 77;
+    reader.nowNs                    = 20000000000;
+    reader.windowSec                = 2;
+    reader.capacity                 = 20000;
+    reader.queued                   = 3;
+    reader.pendingPrimary           = 1;
+    reader.pendingCombined          = 2;
+    reader.pendingCompletion        = 3;
+    reader.span                     = 0.5;
+    reader.age                      = 0.1;
+    reader.metrics[0]               = { 3, -5e-6, 10e-6, -15e-6, 5e-6, 0.5, true };
+    reader.metrics[1]               = { 3, 2e-6, 2e-6, 0, 5e-6, 0.5, true };
+    reader.metrics[2]               = { 3, 8e-6, 3e-6, 2e-6, 14e-6, 0.5, true };
+    reader.metrics[3]               = { 3, 100e-6, 1e-6, 99e-6, 101e-6, 0.5, true };
+    reader.metrics[4]               = { 3, 10e-6, 5e-6, 1e-6, 20e-6, 0.5, true };
+    reader.metrics[5]               = { 3, 160e-6, 10e-6, 150e-6, 170e-6, 0.5, true };
+    reader.metrics[6]               = { 3, 7e-6, 3e-6, 1e-6, 12e-6, 0.5, true };
+    reader.metrics[7]               = { 3, 3e-6, 1e-6, 0, 8e-6, 0.5, true };
+    reader.total                    = { 1000, 400, 300, 300, 100, 10, 11, 12, 13, 14, 15, 16,
+                                        17,   18,  19,  20,  21,  22, 23, 24, 25, 26, 27, 28 };
+    reader.total.receiptUnavailable = 9;
+    reader.total.receiptInvalid     = 7;
+    reader.worstValid               = true;
+    auto &worst                     = reader.worst;
+    worst.primary.input             = { ( uint64_t( 1 ) << 56 ) + 3, ( uint64_t( 1 ) << 55 ) + 5, 1700000000, 100000 };
+    worst.primary.observedNs        = 999990000;
+    worst.combined.input            = { ( uint64_t( 1 ) << 56 ) + 7, ( uint64_t( 1 ) << 55 ) + 9, 1700000000, 200000 };
+    worst.combined.primaryInode     = worst.primary.input.inode;
+    worst.combined.primaryCounter   = worst.primary.input.counter;
+    worst.combined.startNs          = 1700000000000150000;
+    worst.combined.observedNs       = 1000000000;
+    worst.combined.budgetNs         = 155000;
+    auto &completion                = worst.completed.record;
+    completion.session              = ( uint64_t( 1 ) << 54 ) + 31;
+    completion.epoch                = 4;
+    completion.sequence             = ( uint64_t( 1 ) << 55 ) + 39;
+    completion.state                = dmCompletion::State::complete;
+    completion.inputInode           = worst.combined.input.inode;
+    completion.inputCounter         = worst.combined.input.counter;
+    completion.publicationSec       = worst.combined.input.sec;
+    completion.publicationNsec      = worst.combined.input.nsec;
+    completion.startedNs            = 999920000;
+    completion.finishedNs           = 1000020000;
+    completion.outcome              = dmTiming::Outcome::success;
+    completion.publisherPid         = 1234;
+    worst.completed.observedNs      = 1000035000;
+    worst.completed.receiptNs       = 1000030000;
+    worst.baseNs                    = worst.combined.observedNs;
+    worst.offsetNs                  = 20000;
+    worst.requiredNs                = 20000;
+    worst.observedHoldNs            = 35000;
+    worst.slackNs                   = 135000;
+    reader.maxRequiredHoldNs        = 20000;
+    reader.maxObservedHoldNs        = 60000;
+    reader.overBudget               = 1;
     return reader;
 }
 
-/// Return all six explicitly named reader populations in their stable common metric order.
+/// Return all reader populations in their stable common metric order, including optional receipt splits.
 std::array<const DmSyncoTimingStats *, static_cast<size_t>( dmReaderTiming::Metric::count )>
 readerStats( const DmSyncoReaderTiming *reader /**< [in] Deserialized reader-protection summary. */ )
 {
@@ -295,7 +300,9 @@ readerStats( const DmSyncoReaderTiming *reader /**< [in] Deserialized reader-pro
              reader->observed_hold(),
              reader->processing(),
              reader->notification(),
-             reader->model_slack() };
+             reader->model_slack(),
+             reader->wake(),
+             reader->capture() };
 }
 
 /// Populate unchanged scheduler fields with independently sampled primary and combiner timing.
@@ -339,6 +346,16 @@ flatlogs::bufferPtrT envelope( const telem_dmsynco::messageT &input /**< [in] se
     return buffer;
 }
 
+/// Remove an optional field from a valid table to reproduce an older writer's absent trailing fields.
+void omitField( const void            *table /**< [in/out] Valid table owned by the mutable test message. */,
+                flatbuffers::voffset_t field /**< [in] Generated optional-field vtable offset. */ )
+{
+    auto *bytes  = const_cast<uint8_t *>( static_cast<const uint8_t *>( table ) );
+    auto *vtable = bytes - flatbuffers::ReadScalar<flatbuffers::soffset_t>( bytes );
+    REQUIRE( field < flatbuffers::ReadScalar<flatbuffers::voffset_t>( vtable ) );
+    flatbuffers::WriteScalar<flatbuffers::voffset_t>( vtable + field, 0 );
+}
+
 /// Check a typed population's count, units and sample-statistic fields after binary or JSON roundtrip.
 void checkStats( const DmSyncoTimingStats *actual /**< [in] deserialized timing population */,
                  const dmTiming::Stats    &expected /**< [in] original values in seconds */ )
@@ -362,6 +379,47 @@ void checkReaderIdentity( const DmSyncoReaderIdentity    *actual /**< [in] Decod
     CHECK( actual->counter() == expected.counter );
     CHECK( actual->publication_sec() == expected.sec );
     CHECK( actual->publication_nsec() == expected.nsec );
+}
+
+/// Check exact worst-event identities, endpoint arithmetic and raw semaphore/capture observations.
+void checkReaderSample( const DmSyncoReaderSample    *sample /**< [in] Decoded matched-command evidence. */,
+                        const dmReaderTiming::Sample &worst /**< [in] Original exact endpoint sample. */ )
+{
+    REQUIRE( sample != nullptr );
+    REQUIRE( sample->primary() != nullptr );
+    REQUIRE( sample->combined() != nullptr );
+    REQUIRE( sample->completed() != nullptr );
+    checkReaderIdentity( sample->primary()->input(), worst.primary.input );
+    checkReaderIdentity( sample->combined()->input(), worst.combined.input );
+    const auto &completion = worst.completed.record;
+    checkReaderIdentity(
+        sample->completed()->input(),
+        { completion.inputInode, completion.inputCounter, completion.publicationSec, completion.publicationNsec } );
+    CHECK( sample->primary()->observed_ns() == worst.primary.observedNs );
+    CHECK( sample->combined()->primary_inode() == worst.combined.primaryInode );
+    CHECK( sample->combined()->primary_counter() == worst.combined.primaryCounter );
+    CHECK( sample->combined()->start_ns() == worst.combined.startNs );
+    CHECK( sample->combined()->observed_ns() == worst.combined.observedNs );
+    CHECK( sample->combined()->budget_ns() == worst.combined.budgetNs );
+    CHECK( sample->completed()->protocol_version() == completion.protocolVersion );
+    CHECK( sample->completed()->session() == completion.session );
+    CHECK( sample->completed()->epoch() == completion.epoch );
+    CHECK( sample->completed()->sequence() == completion.sequence );
+    CHECK( sample->completed()->state() == static_cast<uint64_t>( completion.state ) );
+    CHECK( sample->completed()->started_ns() == completion.startedNs );
+    CHECK( sample->completed()->finished_ns() == completion.finishedNs );
+    CHECK( sample->completed()->outcome() == static_cast<uint8_t>( completion.outcome ) );
+    CHECK( sample->completed()->callback_result() == completion.callbackResult );
+    CHECK( sample->completed()->publisher_pid() == completion.publisherPid );
+    CHECK( sample->completed()->kind() == static_cast<uint8_t>( completion.kind ) );
+    CHECK( sample->completed()->backend_result() == completion.backendResult );
+    CHECK( sample->completed()->observed_ns() == worst.completed.observedNs );
+    CHECK( sample->completed()->receipt_ns() == worst.completed.receiptNs );
+    CHECK( sample->base_ns() == worst.baseNs );
+    CHECK( sample->offset_ns() == worst.offsetNs );
+    CHECK( sample->required_ns() == worst.requiredNs );
+    CHECK( sample->observed_hold_ns() == worst.observedHoldNs );
+    CHECK( sample->slack_ns() == worst.slackNs );
 }
 
 /// Check every reader population, lifetime quality field and worst-command identity after a reader roundtrip.
@@ -394,6 +452,9 @@ void checkReader( const DmSyncoReaderTiming     *actual /**< [in] Decoded reader
     CHECK( quality->sdk_results() == expected.total.sdkResults );
     CHECK( quality->sdk_success() == expected.total.sdkSuccess );
     CHECK( quality->sdk_failed() == expected.total.sdkFailed );
+    CHECK( quality->receipt_unavailable() == expected.total.receiptUnavailable );
+    CHECK( quality->receipt_invalid() == expected.total.receiptInvalid );
+    CHECK( quality->first_enriched() == expected.total.firstEnriched );
     const std::array<uint64_t, 24> counts         = { quality->events(),
                                                       quality->primary(),
                                                       quality->combined(),
@@ -436,48 +497,25 @@ void checkReader( const DmSyncoReaderTiming     *actual /**< [in] Decoded reader
     CHECK( actual->over_budget() == expected.overBudget );
     CHECK( actual->worst_valid() == expected.worstValid );
 
-    if( !expected.worstValid )
+    CHECK( actual->worst_notification_valid() == expected.worstNotificationValid );
+
+    if( expected.worstNotificationValid )
     {
-        CHECK( actual->worst() == nullptr );
-        return;
+        checkReaderSample( actual->worst_notification(), expected.worstNotification );
+    }
+    else
+    {
+        CHECK( actual->worst_notification() == nullptr );
     }
 
-    const auto *sample = actual->worst();
-    REQUIRE( sample != nullptr );
-    REQUIRE( sample->primary() != nullptr );
-    REQUIRE( sample->combined() != nullptr );
-    REQUIRE( sample->completed() != nullptr );
-    const auto &worst = expected.worst;
-    checkReaderIdentity( sample->primary()->input(), worst.primary.input );
-    checkReaderIdentity( sample->combined()->input(), worst.combined.input );
-    const auto &completion = worst.completed.record;
-    checkReaderIdentity(
-        sample->completed()->input(),
-        { completion.inputInode, completion.inputCounter, completion.publicationSec, completion.publicationNsec } );
-    CHECK( sample->primary()->observed_ns() == worst.primary.observedNs );
-    CHECK( sample->combined()->primary_inode() == worst.combined.primaryInode );
-    CHECK( sample->combined()->primary_counter() == worst.combined.primaryCounter );
-    CHECK( sample->combined()->start_ns() == worst.combined.startNs );
-    CHECK( sample->combined()->observed_ns() == worst.combined.observedNs );
-    CHECK( sample->combined()->budget_ns() == worst.combined.budgetNs );
-    CHECK( sample->completed()->protocol_version() == completion.protocolVersion );
-    CHECK( sample->completed()->session() == completion.session );
-    CHECK( sample->completed()->epoch() == completion.epoch );
-    CHECK( sample->completed()->sequence() == completion.sequence );
-    CHECK( sample->completed()->state() == static_cast<uint64_t>( completion.state ) );
-    CHECK( sample->completed()->started_ns() == completion.startedNs );
-    CHECK( sample->completed()->finished_ns() == completion.finishedNs );
-    CHECK( sample->completed()->outcome() == static_cast<uint8_t>( completion.outcome ) );
-    CHECK( sample->completed()->callback_result() == completion.callbackResult );
-    CHECK( sample->completed()->publisher_pid() == completion.publisherPid );
-    CHECK( sample->completed()->kind() == static_cast<uint8_t>( completion.kind ) );
-    CHECK( sample->completed()->backend_result() == completion.backendResult );
-    CHECK( sample->completed()->observed_ns() == worst.completed.observedNs );
-    CHECK( sample->base_ns() == worst.baseNs );
-    CHECK( sample->offset_ns() == worst.offsetNs );
-    CHECK( sample->required_ns() == worst.requiredNs );
-    CHECK( sample->observed_hold_ns() == worst.observedHoldNs );
-    CHECK( sample->slack_ns() == worst.slackNs );
+    if( expected.worstValid )
+    {
+        checkReaderSample( actual->worst(), expected.worst );
+    }
+    else
+    {
+        CHECK( actual->worst() == nullptr );
+    }
 }
 
 /// Return the six explicitly named combiner populations in their stable metric order.
@@ -2193,6 +2231,10 @@ TEST_CASE( "Synco telemetry preserves qualified reader-protection measurements",
     CHECK( text.find( "readerProcessing[n=3 valid=1] mean_s=" ) != std::string::npos );
     CHECK( text.find( "readerNotification[n=3 valid=1] mean_s=" ) != std::string::npos );
     CHECK( text.find( "readerModelSlack[n=3 valid=1] mean_s=" ) != std::string::npos );
+    CHECK( text.find( "readerWake[n=3 valid=1] mean_s=" ) != std::string::npos );
+    CHECK( text.find( "readerCapture[n=3 valid=1] mean_s=" ) != std::string::npos );
+    CHECK( text.find( "receiptUnavailable:9,receiptInvalid:7,firstEnriched:0" ) != std::string::npos );
+    CHECK( text.find( "receipt_ns:1000030000" ) != std::string::npos );
     CHECK( text.find( "reader_max_required_hold_ns=20000" ) != std::string::npos );
     CHECK( text.find( "reader_max_observed_hold_ns=60000" ) != std::string::npos );
     CHECK( text.find( "reader_over_budget=1" ) != std::string::npos );
@@ -2626,6 +2668,7 @@ TEST_CASE( "Synco telemetry separates early read release from full SDK completio
         release.worst.completed.record.backendResult = 7;
         release.total.sdkResults                     = 1;
         release.total.sdkFailed                      = 1;
+        release.total.firstEnriched                  = 1;
     }
 
     auto input  = message( samplePrimary(), {}, {}, {}, {}, release );
@@ -2691,6 +2734,209 @@ TEST_CASE( "Synco telemetry validates independent release protocol and SDK cover
     auto buffer = envelope( input );
     REQUIRE_FALSE( telem_dmsynco::verify( buffer, flatlogs::logHeader::msgLen( buffer ) ) );
     REQUIRE_FALSE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+}
+
+/// Keep six-population legacy records readable while requiring complete optional wake/capture pairs.
+/** \ingroup dmSyncoTelemetry_unit_test */
+TEST_CASE( "Synco reader telemetry accepts legacy receipt absence and rejects partial splits", "[dmSyncoTelemetry]" )
+{
+    // clang-format off
+#ifdef DMSYNCO_TELEMETRY_TEST_DOXYGEN_REF
+    MagAOX::logger::telem_dmsynco::verify;
+    MagAOX::logger::telem_dmsynco::msgString;
+#endif
+    // clang-format on
+    auto        input  = message( samplePrimary(), {}, {}, {}, sampleReader() );
+    const auto *reader = GetTelem_dmsynco_fb( input.builder.GetBufferPointer() )->reader_timing();
+
+    SECTION( "Legacy writer omits both split populations and receipt provenance" )
+    {
+        omitField( reader, DmSyncoReaderTiming::VT_WAKE );
+        omitField( reader, DmSyncoReaderTiming::VT_CAPTURE );
+        omitField( reader->total(), DmSyncoReaderQuality::VT_RECEIPT_UNAVAILABLE );
+        omitField( reader->total(), DmSyncoReaderQuality::VT_RECEIPT_INVALID );
+        omitField( reader->worst()->completed(), DmSyncoReaderCompletion::VT_RECEIPT_NS );
+        auto buffer = envelope( input );
+        REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+        CHECK( reader->wake() == nullptr );
+        CHECK( reader->capture() == nullptr );
+        CHECK( reader->total()->receipt_unavailable() == 0 );
+        CHECK( reader->total()->receipt_invalid() == 0 );
+        CHECK( reader->total()->first_enriched() == 0 );
+        CHECK( reader->worst()->completed()->receipt_ns() == 0 );
+        CHECK_FALSE( reader->worst_notification_valid() );
+        CHECK( reader->worst_notification() == nullptr );
+        const auto text = telem_dmsynco::msgString( input.builder.GetBufferPointer(), input.builder.GetSize() );
+        CHECK( text.find( "readerWake=unavailable" ) != std::string::npos );
+        CHECK( text.find( "readerCapture=unavailable" ) != std::string::npos );
+        CHECK( text.find( "readerNotification[n=3 valid=1]" ) != std::string::npos );
+    }
+
+    SECTION( "Wake alone is incomplete" )
+    {
+        omitField( reader, DmSyncoReaderTiming::VT_CAPTURE );
+        auto buffer = envelope( input );
+        REQUIRE_FALSE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+    }
+
+    SECTION( "Capture alone is incomplete" )
+    {
+        omitField( reader, DmSyncoReaderTiming::VT_WAKE );
+        auto buffer = envelope( input );
+        REQUIRE_FALSE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+    }
+}
+
+/// Preserve genuine completion statistics when a missing or invalid semaphore timestamp prevents only the split.
+/** \ingroup dmSyncoTelemetry_unit_test */
+TEST_CASE( "Synco reader telemetry serializes empty splits without discarding raw receipts", "[dmSyncoTelemetry]" )
+{
+    // clang-format off
+#ifdef DMSYNCO_TELEMETRY_TEST_DOXYGEN_REF
+    MagAOX::logger::telem_dmsynco::messageT;
+    MagAOX::logger::telem_dmsynco::verify;
+#endif
+    // clang-format on
+    auto summary                                                              = sampleReader();
+    summary.metrics[dmReaderTiming::index( dmReaderTiming::Metric::wake )]    = {};
+    summary.metrics[dmReaderTiming::index( dmReaderTiming::Metric::capture )] = {};
+
+    SECTION( "Legacy producer has no receipt timestamp" )
+    {
+        summary.worst.completed.receiptNs = 0;
+    }
+
+    SECTION( "Bad timestamp remains diagnostic provenance" )
+    {
+        summary.worst.completed.receiptNs = -17;
+    }
+
+    auto input  = message( samplePrimary(), {}, {}, {}, summary );
+    auto buffer = envelope( input );
+    REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+    const auto *reader = GetTelem_dmsynco_fb( input.builder.GetBufferPointer() )->reader_timing();
+    checkReader( reader, summary );
+    REQUIRE( reader->wake() != nullptr );
+    REQUIRE( reader->capture() != nullptr );
+    CHECK( reader->wake()->count() == 0 );
+    CHECK( reader->capture()->count() == 0 );
+    const auto text = telem_dmsynco::msgString( input.builder.GetBufferPointer(), input.builder.GetSize() );
+    CHECK( text.find( "readerWake[n=0 valid=0]=unavailable" ) != std::string::npos );
+    CHECK( text.find( "readerCapture[n=0 valid=0]=unavailable" ) != std::string::npos );
+}
+
+/// Reject split coverage inconsistencies and impossible lifetime receipt-quality accounting.
+/** \ingroup dmSyncoTelemetry_unit_test */
+TEST_CASE( "Synco reader telemetry validates receipt-split coverage and quality", "[dmSyncoTelemetry]" )
+{
+    // clang-format off
+#ifdef DMSYNCO_TELEMETRY_TEST_DOXYGEN_REF
+    MagAOX::logger::telem_dmsynco::verify;
+#endif
+    // clang-format on
+    for( unsigned variant = 0; variant < 6; ++variant )
+    {
+        CAPTURE( variant );
+        auto summary = sampleReader();
+
+        switch( variant )
+        {
+        case 0:
+            ++summary.metrics[dmReaderTiming::index( dmReaderTiming::Metric::wake )].count;
+            break;
+        case 1:
+            summary.metrics[dmReaderTiming::index( dmReaderTiming::Metric::capture )].span /= 2;
+            break;
+        case 2:
+            --summary.metrics[dmReaderTiming::index( dmReaderTiming::Metric::notification )].count;
+            break;
+        case 3:
+            summary.total.receiptUnavailable = summary.total.completion;
+            break;
+        case 4:
+            summary.total.receiptUnavailable = std::numeric_limits<uint64_t>::max();
+            summary.total.receiptInvalid     = 1;
+            break;
+        case 5:
+            summary.total.firstEnriched = 1;
+            break;
+        }
+
+        auto input  = message( samplePrimary(), {}, {}, {}, summary );
+        auto buffer = envelope( input );
+        REQUIRE_FALSE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+    }
+}
+
+/// Retain separate lifetime notification-tail evidence with exact F/W/R stamps through binary and JSON readers.
+/** \ingroup dmSyncoTelemetry_unit_test */
+TEST_CASE( "Synco reader telemetry retains the independent worst notification", "[dmSyncoTelemetry]" )
+{
+    // clang-format off
+#ifdef DMSYNCO_TELEMETRY_TEST_DOXYGEN_REF
+    MagAOX::logger::telem_dmsynco::messageT;
+    MagAOX::logger::telem_dmsynco::verify;
+    MagAOX::logger::telem_dmsynco::msgString;
+#endif
+    // clang-format on
+    auto summary                   = sampleReader();
+    summary.worstNotificationValid = true;
+    summary.worstNotification      = summary.worst;
+    auto &sample                   = summary.worstNotification;
+    ++sample.completed.record.sequence;
+    sample.completed.record.finishedNs = sample.baseNs + 10000;
+    sample.completed.observedNs        = sample.baseNs + 60000;
+    sample.completed.receiptNs         = sample.baseNs + 50000;
+    sample.offsetNs = sample.requiredNs = 10000;
+    sample.observedHoldNs               = 60000;
+    sample.slackNs                      = 145000;
+
+    SECTION( "Distinct maxima roundtrip without changing either selection" )
+    {
+        auto input  = message( samplePrimary(), {}, {}, {}, summary );
+        auto buffer = envelope( input );
+        REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+        checkReader( GetTelem_dmsynco_fb( input.builder.GetBufferPointer() )->reader_timing(), summary );
+        const auto text = telem_dmsynco::msgString( input.builder.GetBufferPointer(), input.builder.GetSize() );
+        CHECK( text.find( "reader_worst_notification_valid=1" ) != std::string::npos );
+        CHECK( text.find( "reader_worst_notification={clock:monotonic" ) != std::string::npos );
+        CHECK( text.find( "receipt_ns:1000050000,observed_ns:1000060000" ) != std::string::npos );
+        const auto          json = telem_dmsynco::msgJSON( input.builder.GetBufferPointer(),
+                                                  input.builder.GetSize(),
+                                                  reinterpret_cast<const uint8_t *>( telem_dmsynco_bfbs ),
+                                                  telem_dmsynco_bfbs_len );
+        flatbuffers::Parser parser;
+        REQUIRE(
+            parser.Deserialize( reinterpret_cast<const uint8_t *>( telem_dmsynco_bfbs ), telem_dmsynco_bfbs_len ) );
+        REQUIRE( parser.Parse( json.c_str() ) );
+        checkReader( GetTelem_dmsynco_fb( parser.builder_.GetBufferPointer() )->reader_timing(), summary );
+    }
+
+    SECTION( "Malformed notification evidence is rejected independently of the original worst" )
+    {
+        ++sample.offsetNs;
+        auto input  = message( samplePrimary(), {}, {}, {}, summary );
+        auto buffer = envelope( input );
+        REQUIRE_FALSE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+    }
+
+    SECTION( "Validity flag cannot outlive its evidence" )
+    {
+        auto        input  = message( samplePrimary(), {}, {}, {}, summary );
+        const auto *reader = GetTelem_dmsynco_fb( input.builder.GetBufferPointer() )->reader_timing();
+        omitField( reader, DmSyncoReaderTiming::VT_WORST_NOTIFICATION );
+        auto buffer = envelope( input );
+        REQUIRE_FALSE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+    }
+
+    SECTION( "Evidence cannot lose its validity flag" )
+    {
+        auto        input  = message( samplePrimary(), {}, {}, {}, summary );
+        const auto *reader = GetTelem_dmsynco_fb( input.builder.GetBufferPointer() )->reader_timing();
+        omitField( reader, DmSyncoReaderTiming::VT_WORST_NOTIFICATION_VALID );
+        auto buffer = envelope( input );
+        REQUIRE_FALSE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+    }
 }
 
 } // namespace dmSyncoTelemetryTest

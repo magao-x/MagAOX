@@ -591,3 +591,351 @@ Hardware timing, installed SDK/transport and dedicated-core qualification
 remain pending. Rebuild/install `bmcCtrl`, `dmSyncopation` and `logdump` together
 before a synchronous-baseline/worker comparison. Keep operational syncopation
 disabled and the existing shadow protection budget unchanged for that test.
+
+## 12. 2026-10-28 initial hardware check
+
+The operator reports the installed worker is running with the loop closed at
+**2 kHz**. `dmtweeter_read_done` advances at **6 kHz**, consistent with three
+counter increments per command: callback begin, reader release and SDK-result
+enrichment. This is one command and one reader-release endpoint per attempt;
+the two latter updates post notifications.
+
+The operator also confirms `sdk_worker.completed` increases while `fault`,
+`admissionClosed`, `failures` and `timeouts` remain zero. `sdk_worker.active`
+alternates between one and zero as individual callbacks start and retire.
+It reports instantaneous callback ownership, not whether worker mode is enabled;
+the property itself is registered only when worker mode is enabled.
+
+This passes the initial functional check. Quantitative early-release timing,
+coverage, dispatch overhead and camera/loop timing comparison remain pending.
+The next measurement uses the existing simultaneous bounded 120-second capture
+with both completion observers configured, operational syncopation disabled and
+the **155 us** shadow protection budget unchanged. Record worker CPU/priority
+and installed SDK/transport alongside the capture before drawing conclusions
+about a smaller reader-protection interval.
+
+## 13. First worker capture: 20261029T055816Z
+
+Source: `synco-sim-20261029T055816Z.tgz`, extracted on the workstation at
+`/home/jrmales/tmp/home/jrmales/tmp/synco-sim-20261029T055816Z`.
+The controller contributes 120 records from **2026-10-29 05:58:16.781538770
+to 06:00:16.002307805 UTC**, or October 28, 22:58:16–23:00:16 Phoenix time.
+All saved INDI requests succeed with empty error files; the three bounded
+collectors return expected timeout status 124. The saved checkout is
+`f6f14f1c483a4cf2a55e8a116efc911120b379dd`, not independently established
+running-binary provenance.
+
+### Controller separation is visible
+
+The eighteen-metric controller records show early channel release while the
+monitor still waits for the SDK result. Numbers below are medians of reported
+overlapping two-second means and sigmas, with extrema retained in those
+windows; they are not pooled capture statistics or per-command medians.
+
+| Controller metric | Median window mean, us | Median window sigma, us | Retained minimum–maximum, us |
+| --- | ---: | ---: | ---: |
+| Callback entry to reader release | 19.548729 | 0.529944 | 17.813–25.308 |
+| SDK dispatch to actual SDK start | 2.926281 | 0.148003 | 2.455–4.068 |
+| Actual SDK call | 104.085655 | 0.113787 | 103.656–109.657 |
+| Monitor result wait | 100.054007 | 0.392135 | 98.406–105.980 |
+| Private delta staging | 4.636447 | 0.221475 | 4.228–5.901 |
+| Deferred product publication | 6.738440 | 0.199183 | 5.671–13.746 |
+| Receipt to SDK return | 117.892160 | 0.517016 | 116.009–124.816 |
+| Callback entry to finish | 129.797147 | 0.650153 | 127.571–137.810 |
+
+The typical separation between entry-relative release and callback completion
+is about **110 us**. These same-origin controller endpoints demonstrate the
+intended overlap. They do not supply the independently matched release offset
+from synco's primary/combined observation baseline. Worker `delta` wall time
+(about 114 us) includes staging, SDK-result wait and publication; it is not
+the old delta calculation cost, and overlapping durations must not be summed.
+
+Controller totals add **238,441** receipts and submissions between the first
+and last records, with no added failed, partial, no-send, rejected, duplicate,
+counter-gap, invalid or dropped events. The three rejected and two synthetic
+events predate the capture. Controller INDI was not saved, so worker timeout,
+admission and actual scheduling readbacks are not independently retained here.
+
+### Early observer missing; repeat the matched measurement
+
+All **119** synco records report `reader_release_timing=unavailable`; both
+INDI snapshots lack the early observer's properties and thread. The operator
+subsequently confirms synco was not set up correctly. This run is a controller
+check, not a completed early-reader protection qualification. Add
+`[readerReleaseMonitor] shmimName=dmtweeter_read_done` to the existing synco
+configuration, retain `completionMonitor.shmimName=dmtweeter_done`, restart
+synco, and verify enabled/advancing early matches before the repeat capture.
+
+The full-completion observer remains useful. Its median window mean required
+hold is **130.240831 us**; the retained maximum is **138.261 us**. It adds
+237,575 matches from 237,576 completion observations, with one added busy
+observation, sequence gap and counter gap. No queue drops, missing peers,
+errors, unqualified records or over-budget samples are added. Lifetime maxima
+245.083 us required / 487.531 us observed and 540,007 over-budget samples are
+unchanged prehistory, not current-run excursions. The stored worst event
+predates the capture by about 14.5 hours.
+
+### Camera, shadow model and comparison limits
+
+Camera telemetry adds 236,512 published frames between its first/last stage
+records, with no new frame/counter gaps, failures or queue drops. Median window
+acquisition-interval sigma is **0.300491 us** and publication-interval sigma
+**0.827865 us**. Retained acquisition intervals are 480–520 us; publication
+intervals are 477.902–521.495 us. There is no observed return of the earlier
+roughly 80 us camera excursions.
+
+Operational synco remains Off, simulation stays valid, and RTC latency is On.
+The unchanged 155 us model considers 237,577 opportunities per step: all
+step-0 opportunities would run; step 1 would run 237,575 and skip two for its
+fixed reader hold. Neither step adds overlaps. These decisions do not use the
+early signal. Combiner diagnostics add no new gap/drop/invalid observations.
+
+Saved scalar loop gain is **0.05** and camera target **+20 C**, compared with
+gain 1 and target -45 C in the preceding reader capture. The operator reports
+no other changes. Modal arrays and actual CPU/IRQ placement are not included
+in these snapshots. Compared with that earlier run, typical callback time is
+5.307 us greater, receipt-to-SDK return 9.389 us greater and actual SDK call
+3.288 us greater. These are cross-run differences, not an isolated estimate
+of worker overhead. A same-configuration synchronous/worker comparison and
+the corrected early observer remain pending. Keep the shadow protection
+budget at 155 us and operational syncopation disabled for the repeat.
+
+## 14. Corrected observer capture: 20261029T060958Z
+
+Source: `synco-sim-20261029T060958Z.tgz`, extracted on the workstation at
+`/home/jrmales/tmp/home/jrmales/tmp/synco-sim-20261029T060958Z`.
+There are **120 synco records**, from **2026-10-29 06:09:57.650460360 to
+06:11:57.741749796 UTC**, spanning **120.091289 seconds**; Phoenix local time
+is October 28, 23:09:57–23:11:57. The saved checkout remains
+`f6f14f1c483a4cf2a55e8a116efc911120b379dd`. All snapshots succeed, error files
+are empty, and the bounded collectors return expected timeout status 124.
+
+The operator confirms correcting/restarting synco was the only change since
+055816Z, with settings, CPU/IRQ placement and workload unchanged throughout.
+Saved camera/loop settings match: bin2, 2 kHz, EM gain 1, synchronization On,
+shutter SHUT, temperature target +20 C, closed loop and scalar gain 0.05.
+Modal arrays are not saved. Operational synco remains Off, the simulation
+retains its 155 us model budget and 20 us early reserve, and RTC latency is On.
+Both completion observers are now attached; the new release monitor requests
+ordinary priority zero. Controller and camera telemetry sessions are unchanged.
+
+### Independently matched release removes the SDK wait
+
+With B = max(primary observation, combined observation), F the selected
+controller endpoint and R its observer receipt, the new observer measures
+`max(0, F - B)` independently of full completion. Medians below summarize
+overlapping two-second means; maxima are observed in those rolling windows,
+not hard operating bounds or a pooled per-frame distribution.
+
+| Matched metric | Early release: median window mean, us | Early retained maximum, us | Full completion: median window mean, us | Full retained maximum, us |
+| --- | ---: | ---: | ---: | ---: |
+| Required hold from model baseline | 20.134308 | **28.303** | 131.453837 | **140.285** |
+| Controller processing to endpoint | 19.902783 | 27.952 | 131.381810 | 140.084 |
+| Hold until notice observation | 24.336999 | 109.978 | 135.406618 | 257.536 |
+| Endpoint-to-observation delay | 4.177800 | 85.131 | 3.972132 | 151.165 |
+
+The typical reader requirement is about **111.320 us lower** than full
+completion in this same run. This difference of summary statistics is not
+a paired per-command distribution. Minimum matched slack against the unchanged
+155 us model is **126.697 us** for release versus **14.715 us** for full
+completion; neither observer adds an over-budget event.
+
+![Matched reader-release and full-completion timing](figures/synco-reader-worker-20261029T060958Z.png)
+
+The ordinary-priority notice can arrive well after the reads finish: the early
+observer's retained observed-hold maximum is 109.978 us even though the required
+hold stays below 28.303 us. The full observer reaches 257.536 us until notice,
+while its actual required hold stays below 140.285 us. A future scheduler must
+distinguish the endpoint from observer-delivery latency; these measurements do
+not justify treating the ordinary observer's notification as an instantaneous
+release. Required/notification/observed maxima need not belong to the same event.
+
+### Coverage and worst-event provenance
+
+| First-to-last synco telemetry difference | Early release | Full completion |
+| --- | ---: | ---: |
+| Primary observations | 240,182 | 240,181 |
+| Combined observations | 240,182 | 240,181 |
+| Endpoint notices | 480,364 | 240,181 |
+| Matched commands | **240,182** | **240,181** |
+| Observed SDK results / successes | 240,182 / 240,182 | Not counted by this protocol |
+| Observed SDK failures | 0 | Not counted by this protocol |
+
+Both observers add **zero** busy, unavailable, error, unqualified, invalid,
+incoherent or duplicate observations, sequence/counter gaps, missing peers,
+identity mismatches, resets, stale epochs, evictions or queue drops. Their
+before/after INDI differences agree with these telemetry differences. Normal
+retained-source expiry adds one per matched command. The early observer's
+startup duplicate and reset/stale-epoch counts predate the capture. Its two
+notices per matched command are release plus SDK-result enrichment, not two
+submissions; per-summary results can trail matches by one or two in-flight
+updates, while capture differences retain one successful result per command.
+
+Both required-hold lifetime maxima increase within this capture. The early
+maximum first appears at **06:10:22.859653654 UTC**:
+
+```text
+Primary inode 4676 / counter 138928000
+Combined inode 4685 / counter 169636774
+Release session 2120408464588493 / epoch 7 / sequence 2430868
+Publisher PID 788488; kind readers; state released; processing result 0
+
+P = 2122061013114011 ns
+C = B = 2122061013131724 ns
+S = 2122061013132075 ns
+F = 2122061013160027 ns
+R = 2122061013164516 ns
+
+S - B = 0.351 us
+F - S = 27.952 us
+F - B = 28.303 us
+R - F = 4.489 us
+R - B = 32.792 us
+155 us - (F - B) = 126.697 us
+```
+
+The recorded release precedes SDK enrichment (outcome unknown and raw code
+unavailable), which is valid for read qualification. The full-completion
+maximum first appears at **06:10:15.799992673 UTC**, for combined counter
+169621974: processing 140.084 us plus 0.201 us from baseline to start gives
+140.285 us required, with 14.715 us slack and a successful SDK outcome.
+These are different commands and must not be subtracted as a per-command gain.
+
+Signed offsets reach -242.077 us early and -131.067 us full around 06:11:07,
+when synco's observation baseline is late relative to controller work.
+Clamped zero required holds therefore do not mean zero-time reads. The
+processing population remains positive (at least 17.964 us early and 129.134 us
+full); keep signed offsets alongside any future gating analysis.
+
+### Controller, camera and unchanged shadow policy
+
+The controller adds **236,422 successful submissions** between its own first
+and last records, with no added failures, partial/no-send/rejected commands,
+duplicates, counter gaps, invalid events or queue drops. Direct controller
+telemetry reports entry-to-release mean **19.727457 us**, maximum **27.762 us**;
+the dedicated publisher starts before the timing `entry` marker, explaining
+the slightly different processing population above. SDK dispatch is typically
+2.994569 us, the SDK call 104.006628 us, receipt-to-SDK return 118.120096 us,
+and the full callback 130.979665 us. Compared with 055816Z, typical release
+is 0.179 us later and callback completion 1.183 us later. These are descriptive
+run-to-run differences, not an isolated observer-overhead experiment.
+
+Camera stage totals add **238,571 frames**, with no new failures, frame/counter
+gaps, invalid records or queue drops. Acquisition-interval sigma is typically
+**0.300283 us** and publication-interval sigma **0.843026 us**, similar to the
+preceding run. Retained intervals are 480–519 us acquisition and
+478.643–518.519 us publication. Combiner/primary/pipeline quality remains clean.
+No controller INDI snapshots are included, so actual SDK worker affinity,
+priority and timeout/admission counts are still not independently saved here.
+
+The fixed shadow model considers 240,183 opportunities per step. Step 0 would
+run all of them. Step 1 would run 240,180 and skip three: two reader holds and
+one missing output at its modeled deadline. Neither step adds overlaps.
+The missing-output decision alone is not evidence of a lost physical command.
+These decisions still use the fixed 155 us hold, not the early signal.
+
+This establishes the intended earlier software clearance with clean observed
+coverage in the short run. A smaller fixed reader hold or release-aware gating
+is a separate policy change; SDK readiness, dmcomb consumption, newer callbacks,
+copy protection and early-main reserves remain separate constraints. Longer
+unchanged coverage and any same-configuration synchronous/worker comparison
+remain useful before selecting an operational bound. No runtime policy or
+configuration is changed by this analysis.
+
+## 15. 2026-10-29 notification-waiter comparison implemented
+
+The operator questioned whether the ordinary observer explains the 85 us
+notification tail, compared with optimized loop semaphore consumers, and
+authorized the split measurements and isolated real-time waiter comparison.
+Source review confirms the existing release observer blocks directly on
+`sem_timedwait`, but defaults to `SCHED_OTHER` priority zero and no dedicated
+cpuset. The primary monitor's FIFO30 / CPU41 configuration does not apply to
+this separate thread. No capture of its actual previous affinity was saved,
+so scheduling is a hypothesis for the tail, not an established attribution.
+
+### Endpoints and qualification
+
+Both observer callbacks now retain their already captured semaphore-return
+timestamp **W** in the fixed `Completed` handoff. **R** remains the timestamp
+after the coherent stream-record read. There is no added hot-path clock call,
+allocation, lock or wait; the only new producer payload is one int64 timestamp.
+Consumer-side populations append `wake = W - F` and `capture = R - W` to the
+six existing metrics. They require `0 < F <= W <= R`; the original match,
+notification and hold populations remain valid when that split is unavailable.
+`wake` includes record publication/posting before semaphore return and is not
+a pure kernel semaphore latency.
+
+The early stream posts a later SDK-result update while retaining the original
+release endpoint F. If an attempt is first observed after enrichment, the
+original `R - F` remains meaningful as observation delay but cannot establish
+an early-release wakeup. `firstEnriched` counts that first retained observation
+and both split metrics omit it. Subsequent enrichment of an already observed
+release does not repeat the receipt counters or replace its original sample.
+Full-completion success remains eligible for the split normally.
+
+`receiptUnavailable` counts zero/missing W and `receiptInvalid` counts nonzero
+W outside the causal interval. These are diagnostic first-retained-completion
+counts and can precede or outnumber successful joins. In particular, a leftover
+semaphore token followed by a newer coherent record can yield W < F; it must
+not become a negative wake duration or invalidate the genuine completion.
+
+An independent lifetime `worstNotification` sample retains the largest matched
+R - F with its exact F/W/R, identities and initial SDK outcome, in addition to
+the existing worst-required sample. It survives ordinary window expiry and
+source resets and resets on reconfiguration. This allows attribution of one
+actual notification tail, including an invalid receipt or enriched-first case,
+without combining maxima from different commands.
+
+### Interface, compatibility and test setup
+
+Both reader INDI metric properties gain `wake` and `capture` (seconds with
+mean/jitter/min/max/count/span). Their quality properties gain the three
+diagnostic counters. Telemetry appends optional paired stats, raw receipt
+provenance, counters and a separate worst-notification record. Legacy records
+without those fields remain readable; a partial split pair is rejected.
+Current writers serialize both new populations even when empty. Invalid raw
+receipt provenance is retained without invalidating a qualified original join.
+The controller publisher protocol and BMC implementation are unchanged.
+
+The [operator procedure](../../../apps/dmSyncopation/doc/reader-protection-test.md#compare-an-ordinary-and-an-isolated-real-time-release-waiter)
+requests a new ordinary-observer baseline with the split fields, followed by
+the same test with reader-release priority 30 on a dedicated available physical
+core. The additive
+[`dmtweeter_synco_reader_rt.conf`](../../../apps/dmSyncopation/dmtweeter_synco_reader_rt.conf)
+uses the operator-confirmed **spare57 / CPU57**, at priority 30. On October 29
+the operator confirmed the SDK worker uses **spare56 / CPU56** and spare57 is
+available for this observer. The primary monitor's and command monitor's
+dedicated cores remain separate.
+Production defaults remain ordinary priority zero with no dedicated cpuset.
+
+Rebuild/install **dmSyncopation and logdump**; this change does not require a
+BMC controller rebuild/restart. The expanded common capture block saves
+controller INDI before/after to retain SDK-worker diagnostics. The procedure
+also requests actual scheduler/affinity checks using the current observer TID,
+since requested INDI priority is not proof of actual policy or placement.
+Keep real syncopation Off, the 155 us model budget, RTC latency On and all
+camera/loop settings unchanged. No hardware action was executed by the agents.
+
+### Workstation verification
+
+| Suite | Assertions | Cases |
+| --- | ---: | ---: |
+| Reader collector | 518 | 23 |
+| Synco application | 8,657 | 68 |
+| Synco telemetry and compatibility | 5,407 | 29 |
+| **Total** | **14,582** | **120** |
+
+Deterministic tests cover causal boundaries, absent and unordered receipts,
+legacy captures, first-enriched release success/failure, delayed peer matching,
+subsequent enrichment without timestamp replacement, independent tail retention,
+expiry/reset/reconfigure behavior, real app receipt hooks and independent
+per-monitor configuration. Telemetry tests cover binary/JSON/text round trips,
+legacy omission, malformed partial pairs, quality bounds and invalid raw
+receipt preservation. No change to live/shadow scheduler decisions is made.
+
+Fresh library/PCH and schema generation, normal dmSyncopation and logdump
+builds pass. All seven changed C/C++ files pass full-file clang-format checks;
+whitespace, operator-guide local links and all documented Bash blocks pass
+validation. The operator has confirmed the RT core assignment; applying the
+profile and verifying the running thread's policy/affinity remain operator
+actions. No instrument commands were run by the agents.

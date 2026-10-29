@@ -179,6 +179,12 @@ struct telem_dmsynco : public flatbuffer_log
                               const DmSyncoReaderTiming *summary /**< [in] optional software reader measurement */,
                               const char                *prefix = "reader" /**< [in] Independent endpoint label. */ );
 
+    /// Format one exact worst-event record, including raw semaphore return and coherent capture times.
+    static void
+    formatReaderSample( std::ostream              &output /**< [in/out] Formatted aggregate. */,
+                        const char                *name /**< [in] Distinct worst-event label. */,
+                        const DmSyncoReaderSample *sample /**< [in] Qualified matched-command evidence. */ );
+
     /// Append explicitly hypothetical prediction and per-step outcome diagnostics when enabled.
     static void formatSimulation( std::ostream            &output /**< [in/out] formatted aggregate */,
                                   const DmSyncoSimulation *summary /**< [in] optional conditional simulation */ );
@@ -678,7 +684,8 @@ inline flatbuffers::Offset<DmSyncoReaderSample> telem_dmsynco::readerSample( fla
                                                           record.publisherPid,
                                                           sample.completed.observedNs,
                                                           static_cast<uint8_t>( record.kind ),
-                                                          record.backendResult );
+                                                          record.backendResult,
+                                                          sample.completed.receiptNs );
     return CreateDmSyncoReaderSample( builder,
                                       primaryRecord,
                                       combinedRecord,
@@ -733,9 +740,14 @@ inline flatbuffers::Offset<DmSyncoReaderTiming> telem_dmsynco::readerTiming( fla
                                                      counts.droppedCompletion,
                                                      counts.sdkResults,
                                                      counts.sdkSuccess,
-                                                     counts.sdkFailed );
+                                                     counts.sdkFailed,
+                                                     counts.receiptUnavailable,
+                                                     counts.receiptInvalid,
+                                                     counts.firstEnriched );
     const auto  worst =
         summary.worstValid ? readerSample( builder, summary.worst ) : flatbuffers::Offset<DmSyncoReaderSample>{};
+    const auto worstNotification = summary.worstNotificationValid ? readerSample( builder, summary.worstNotification )
+                                                                  : flatbuffers::Offset<DmSyncoReaderSample>{};
     return CreateDmSyncoReaderTiming( builder,
                                       summary.enabled,
                                       summary.session,
@@ -761,7 +773,11 @@ inline flatbuffers::Offset<DmSyncoReaderTiming> telem_dmsynco::readerTiming( fla
                                       summary.maxRequiredHoldNs,
                                       summary.maxObservedHoldNs,
                                       summary.overBudget,
-                                      static_cast<uint8_t>( summary.kind ) );
+                                      static_cast<uint8_t>( summary.kind ),
+                                      metrics[dmReaderTiming::index( dmReaderTiming::Metric::wake )],
+                                      metrics[dmReaderTiming::index( dmReaderTiming::Metric::capture )],
+                                      summary.worstNotificationValid,
+                                      worstNotification );
 }
 
 inline telem_dmsynco::messageT::messageT( int                                  state,
@@ -1050,7 +1066,10 @@ inline bool telem_dmsynco::validReader( const DmSyncoReaderTiming *summary )
 
     if( !quality || summary->kind() > static_cast<uint8_t>( dmCompletion::Kind::readers ) ||
         __uint128_t( quality->sdk_success() ) + quality->sdk_failed() != quality->sdk_results() ||
-        quality->sdk_results() > quality->completion() || ( summary->kind() == 0 && quality->sdk_results() != 0 ) ||
+        quality->sdk_results() > quality->completion() ||
+        __uint128_t( quality->receipt_unavailable() ) + quality->receipt_invalid() > quality->completion() ||
+        quality->first_enriched() > quality->completion() ||
+        ( summary->kind() == 0 && ( quality->sdk_results() != 0 || quality->first_enriched() != 0 ) ) ||
         summary->now_ns() < 0 || !mx::math::isFinite( summary->window_sec() ) || summary->window_sec() < 0 ||
         !mx::math::isFinite( summary->span_sec() ) || summary->span_sec() < 0 ||
         summary->span_sec() > summary->window_sec() + 1e-9 || !mx::math::isFinite( summary->age_sec() ) ||
@@ -1075,12 +1094,27 @@ inline bool telem_dmsynco::validReader( const DmSyncoReaderTiming *summary )
                                                 summary->observed_hold(),
                                                 summary->processing(),
                                                 summary->notification(),
-                                                summary->model_slack() };
+                                                summary->model_slack(),
+                                                summary->wake(),
+                                                summary->capture() };
     uint64_t                  maximumCount  = 0;
+
+    if( bool( summary->wake() ) != bool( summary->capture() ) ||
+        ( summary->wake() && ( summary->wake()->count() != summary->capture()->count() ||
+                               summary->wake()->span() != summary->capture()->span() ||
+                               summary->wake()->count() > summary->notification()->count() ) ) )
+    {
+        return false;
+    }
 
     for( size_t index = 0; index < static_cast<size_t>( dmReaderTiming::Metric::count ); ++index )
     {
         const auto *stats = populations[index];
+
+        if( !stats && index >= dmReaderTiming::index( dmReaderTiming::Metric::wake ) )
+        {
+            continue;
+        }
 
         if( !validStats( stats,
                          index == dmReaderTiming::index( dmReaderTiming::Metric::completionOffset ) ||
@@ -1108,6 +1142,17 @@ inline bool telem_dmsynco::validReader( const DmSyncoReaderTiming *summary )
         ( !summary->enabled() && ( maximumCount || summary->capacity() || summary->queued() ||
                                    summary->pending_primary() || summary->pending_combined() ||
                                    summary->pending_completion() || quality->events() || quality->matched() ) ) )
+    {
+        return false;
+    }
+
+    const auto *notification = summary->worst_notification();
+
+    if( summary->worst_notification_valid() != bool( notification ) ||
+        ( notification && ( !quality->matched() || !validReaderSample( notification ) ||
+                            notification->completed()->kind() != summary->kind() ||
+                            notification->required_ns() > summary->max_required_hold_ns() ||
+                            notification->observed_hold_ns() > summary->max_observed_hold_ns() ) ) )
     {
         return false;
     }
@@ -1487,6 +1532,12 @@ inline bool telem_dmsynco::verify( flatlogs::bufferPtrT &buffer, flatlogs::msgLe
 
 inline void telem_dmsynco::formatStats( std::ostream &output, const char *name, const DmSyncoTimingStats *stats )
 {
+    if( !stats )
+    {
+        output << ' ' << name << "=unavailable";
+        return;
+    }
+
     output << ' ' << name << "[n=" << stats->count() << " valid=" << stats->valid() << ']';
 
     if( !stats->count() )
@@ -1635,37 +1686,52 @@ inline void telem_dmsynco::formatReader( std::ostream &output, const DmSyncoRead
            << ",expired:" << quality->expired() << ",droppedPrimary:" << quality->dropped_primary()
            << ",droppedCombined:" << quality->dropped_combined()
            << ",droppedCompletion:" << quality->dropped_completion() << ",sdkResults:" << quality->sdk_results()
-           << ",sdkSuccess:" << quality->sdk_success() << ",sdkFailed:" << quality->sdk_failed() << '}';
+           << ",sdkSuccess:" << quality->sdk_success() << ",sdkFailed:" << quality->sdk_failed()
+           << ",receiptUnavailable:" << quality->receipt_unavailable()
+           << ",receiptInvalid:" << quality->receipt_invalid() << ",firstEnriched:" << quality->first_enriched() << '}';
     formatStats( output, ( std::string( prefix ) + "CompletionOffset" ).c_str(), summary->completion_offset() );
     formatStats( output, ( std::string( prefix ) + "RequiredHold" ).c_str(), summary->required_hold() );
     formatStats( output, ( std::string( prefix ) + "ObservedHold" ).c_str(), summary->observed_hold() );
     formatStats( output, ( std::string( prefix ) + "Processing" ).c_str(), summary->processing() );
     formatStats( output, ( std::string( prefix ) + "Notification" ).c_str(), summary->notification() );
     formatStats( output, ( std::string( prefix ) + "ModelSlack" ).c_str(), summary->model_slack() );
+    formatStats( output, ( std::string( prefix ) + "Wake" ).c_str(), summary->wake() );
+    formatStats( output, ( std::string( prefix ) + "Capture" ).c_str(), summary->capture() );
     output << " " << prefix << "_worst_valid=" << summary->worst_valid();
 
-    if( !summary->worst_valid() )
+    if( summary->worst_valid() )
     {
-        return;
+        formatReaderSample( output, ( std::string( prefix ) + "_worst" ).c_str(), summary->worst() );
     }
 
-    const auto *sample    = summary->worst();
+    output << " " << prefix << "_worst_notification_valid=" << summary->worst_notification_valid();
+
+    if( summary->worst_notification_valid() )
+    {
+        formatReaderSample(
+            output, ( std::string( prefix ) + "_worst_notification" ).c_str(), summary->worst_notification() );
+    }
+}
+
+inline void
+telem_dmsynco::formatReaderSample( std::ostream &output, const char *name, const DmSyncoReaderSample *sample )
+{
     const auto *primary   = sample->primary();
     const auto *combined  = sample->combined();
     const auto *completed = sample->completed();
     const auto *source    = primary->input();
     const auto *input     = combined->input();
     const auto *command   = completed->input();
-    output << " " << prefix << "_worst={clock:monotonic,base_ns:" << sample->base_ns()
-           << ",offset_ns:" << sample->offset_ns() << ",required_ns:" << sample->required_ns()
-           << ",observed_hold_ns:" << sample->observed_hold_ns() << ",slack_ns:" << sample->slack_ns()
-           << ",primary:{inode:" << source->inode() << ",counter:" << source->counter()
-           << ",publication_sec:" << source->publication_sec() << ",publication_nsec:" << source->publication_nsec()
-           << ",observed_ns:" << primary->observed_ns() << "},combined:{inode:" << input->inode()
-           << ",counter:" << input->counter() << ",publication_sec:" << input->publication_sec()
-           << ",publication_nsec:" << input->publication_nsec() << ",primary_inode:" << combined->primary_inode()
-           << ",primary_counter:" << combined->primary_counter() << ",start_external_ns:" << combined->start_ns()
-           << ",observed_ns:" << combined->observed_ns() << ",budget_ns:" << combined->budget_ns()
+    output << " " << name << "={clock:monotonic,base_ns:" << sample->base_ns() << ",offset_ns:" << sample->offset_ns()
+           << ",required_ns:" << sample->required_ns() << ",observed_hold_ns:" << sample->observed_hold_ns()
+           << ",slack_ns:" << sample->slack_ns() << ",primary:{inode:" << source->inode()
+           << ",counter:" << source->counter() << ",publication_sec:" << source->publication_sec()
+           << ",publication_nsec:" << source->publication_nsec() << ",observed_ns:" << primary->observed_ns()
+           << "},combined:{inode:" << input->inode() << ",counter:" << input->counter()
+           << ",publication_sec:" << input->publication_sec() << ",publication_nsec:" << input->publication_nsec()
+           << ",primary_inode:" << combined->primary_inode() << ",primary_counter:" << combined->primary_counter()
+           << ",start_external_ns:" << combined->start_ns() << ",observed_ns:" << combined->observed_ns()
+           << ",budget_ns:" << combined->budget_ns()
            << "},completion:{protocol_version:" << completed->protocol_version() << ",session:" << completed->session()
            << ",epoch:" << completed->epoch() << ",sequence:" << completed->sequence()
            << ",state:" << completed->state() << ",input_inode:" << command->inode()
@@ -1674,7 +1740,7 @@ inline void telem_dmsynco::formatReader( std::ostream &output, const DmSyncoRead
            << ",finished_ns:" << completed->finished_ns() << ",outcome:" << unsigned( completed->outcome() )
            << ",callback_result:" << completed->callback_result() << ",kind:" << unsigned( completed->kind() )
            << ",backend_result:" << completed->backend_result() << ",publisher_pid:" << completed->publisher_pid()
-           << ",observed_ns:" << completed->observed_ns() << "}}";
+           << ",receipt_ns:" << completed->receipt_ns() << ",observed_ns:" << completed->observed_ns() << "}}";
 }
 
 inline void telem_dmsynco::formatSimulation( std::ostream &output, const DmSyncoSimulation *summary )

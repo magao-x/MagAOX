@@ -67,6 +67,7 @@ Fixture::Fixture( uint64_t index )
     record.outcome            = Outcome::success;
     record.publisherPid       = 1234;
     m_completed.observedNs    = local + 140000;
+    m_completed.receiptNs     = record.finishedNs + 2000;
 }
 
 void Fixture::capture( Collector &collector ) const
@@ -84,7 +85,7 @@ int64_t Fixture::now() const
 } // namespace
 /// \endcond
 
-/** \brief Qualify exact producer identities and the six reader-protection duration populations.
+/** \brief Qualify exact producer identities and the independent reader-protection duration populations.
  * \ingroup dmReaderTiming_unit_test
  */
 TEST_CASE( "DM reader timing joins qualified identities and retains exact worst evidence", "[dmReaderTiming]" )
@@ -126,12 +127,16 @@ TEST_CASE( "DM reader timing joins qualified identities and retains exact worst 
     REQUIRE( summary.worst.requiredNs == 105000 );
     REQUIRE( summary.worst.observedHoldNs == 110000 );
     REQUIRE( summary.worst.slackNs == 50000 );
+    REQUIRE( summary.worstNotificationValid );
+    REQUIRE( summary.worstNotification.completed.receiptNs == first.m_completed.receiptNs );
     REQUIRE( summary.metrics[index( Metric::completionOffset )].mean == Approx( 105e-6 ) );
     REQUIRE( summary.metrics[index( Metric::requiredHold )].mean == Approx( 105e-6 ) );
     REQUIRE( summary.metrics[index( Metric::observedHold )].mean == Approx( 110e-6 ) );
     REQUIRE( summary.metrics[index( Metric::processing )].mean == Approx( 100e-6 ) );
     REQUIRE( summary.metrics[index( Metric::notification )].mean == Approx( 5e-6 ) );
     REQUIRE( summary.metrics[index( Metric::modelSlack )].mean == Approx( 50e-6 ) );
+    REQUIRE( summary.metrics[index( Metric::wake )].mean == Approx( 2e-6 ) );
+    REQUIRE( summary.metrics[index( Metric::capture )].mean == Approx( 3e-6 ) );
 
     const Fixture second( 1 );
     second.capture( collector );
@@ -894,6 +899,250 @@ TEST_CASE( "DM reader timing accepts a release already enriched with SDK failure
     CHECK( collector.summary().total.sdkResults == 1 );
     CHECK( collector.summary().total.sdkFailed == 1 );
     CHECK( collector.summary().total.sdkSuccess == 0 );
+}
+
+/** \brief Split finish-to-capture latency at a genuine wait return, including zero-duration boundary components.
+ * \ingroup dmReaderTiming_unit_test
+ */
+TEST_CASE( "DM reader timing splits notification at the semaphore receipt", "[dmReaderTiming][receipt]" )
+{
+    // clang-format off
+#ifdef DM_READER_TIMING_TEST_DOXYGEN_REF
+    MagAOX::app::dev::dmReaderTiming::completion;
+    MagAOX::app::dev::dmReaderTiming::update;
+    MagAOX::app::dev::dmReaderTiming::summary;
+#endif
+    // clang-format on
+
+    Collector collector;
+    collector.configure( 2, 16 );
+    Fixture    fixture;
+    const auto wakeNs             = GENERATE( int64_t( 0 ), int64_t( 2000 ), int64_t( 5000 ) );
+    fixture.m_completed.receiptNs = fixture.m_completed.record.finishedNs + wakeNs;
+    fixture.capture( collector );
+    collector.update( fixture.now() );
+    const auto &summary = collector.summary();
+    REQUIRE( summary.total.matched == 1 );
+    CHECK( summary.total.receiptUnavailable == 0 );
+    CHECK( summary.total.receiptInvalid == 0 );
+    CHECK( summary.total.firstEnriched == 0 );
+    CHECK( summary.metrics[index( Metric::wake )].count == 1 );
+    CHECK( summary.metrics[index( Metric::capture )].count == 1 );
+    CHECK( summary.metrics[index( Metric::wake )].mean == Approx( wakeNs * 1e-9 ) );
+    CHECK( summary.metrics[index( Metric::capture )].mean == Approx( ( 5000 - wakeNs ) * 1e-9 ) );
+    CHECK( summary.metrics[index( Metric::notification )].mean == Approx( 5e-6 ) );
+    CHECK( summary.metrics[index( Metric::wake )].mean + summary.metrics[index( Metric::capture )].mean ==
+           Approx( summary.metrics[index( Metric::notification )].mean ) );
+    REQUIRE( summary.worstNotificationValid );
+    CHECK( summary.worstNotification.completed.receiptNs == fixture.m_completed.receiptNs );
+    CHECK( summary.worstNotification.completed.record.outcome == Outcome::success );
+}
+
+/** \brief Preserve normal joins and notification timing when legacy or raced receipt timestamps cannot be split.
+ * \ingroup dmReaderTiming_unit_test
+ */
+TEST_CASE( "DM reader timing preserves samples with unavailable or unordered receipts", "[dmReaderTiming][receipt]" )
+{
+    // clang-format off
+#ifdef DM_READER_TIMING_TEST_DOXYGEN_REF
+    MagAOX::app::dev::dmReaderTiming::completion;
+    MagAOX::app::dev::dmReaderTiming::summary;
+#endif
+    // clang-format on
+
+    Collector collector;
+    collector.configure( 2, 16 );
+    Fixture fixture;
+
+    SECTION( "Legacy capture has no receipt" )
+    {
+        fixture.m_completed.receiptNs = 0;
+    }
+
+    SECTION( "Negative receipt is malformed" )
+    {
+        fixture.m_completed.receiptNs = -1;
+    }
+
+    SECTION( "An older semaphore token returns before the copied endpoint exists" )
+    {
+        fixture.m_completed.receiptNs = fixture.m_completed.record.finishedNs - 1;
+    }
+
+    SECTION( "Receipt cannot follow coherent capture" )
+    {
+        fixture.m_completed.receiptNs = fixture.m_completed.observedNs + 1;
+    }
+
+    fixture.capture( collector );
+    collector.update( fixture.now() );
+    const auto &summary = collector.summary();
+    REQUIRE( summary.total.matched == 1 );
+    CHECK( summary.total.invalid == 0 );
+    CHECK( summary.total.receiptUnavailable == ( fixture.m_completed.receiptNs == 0 ? 1 : 0 ) );
+    CHECK( summary.total.receiptInvalid == ( fixture.m_completed.receiptNs == 0 ? 0 : 1 ) );
+    CHECK( summary.total.firstEnriched == 0 );
+    CHECK( summary.metrics[index( Metric::notification )].count == 1 );
+    CHECK( summary.metrics[index( Metric::notification )].mean == Approx( 5e-6 ) );
+    CHECK( summary.metrics[index( Metric::wake )].count == 0 );
+    CHECK( summary.metrics[index( Metric::capture )].count == 0 );
+    CHECK( summary.worst.completed.receiptNs == fixture.m_completed.receiptNs );
+    REQUIRE( summary.worstNotificationValid );
+    CHECK( summary.worstNotification.completed.receiptNs == fixture.m_completed.receiptNs );
+
+    collector.completion( fixture.m_completed );
+    collector.update( fixture.now() + 1 );
+    CHECK( summary.total.matched == 1 );
+    CHECK( summary.total.receiptUnavailable + summary.total.receiptInvalid == 1 );
+}
+
+/** \brief Keep first-seen SDK-enriched releases measurable without attributing their later token to early wakeup.
+ * \ingroup dmReaderTiming_unit_test
+ */
+TEST_CASE( "DM reader timing excludes first enriched releases from paired receipt populations",
+           "[dmReaderTiming][receipt][readers]" )
+{
+    // clang-format off
+#ifdef DM_READER_TIMING_TEST_DOXYGEN_REF
+    MagAOX::app::dev::dmReaderTiming::completion;
+    MagAOX::app::dev::dmReaderTiming::summary;
+#endif
+    // clang-format on
+
+    Collector collector;
+    collector.configure( 2, 16, MagAOX::dmCompletion::Kind::readers );
+    Fixture fixture;
+    fixture.m_completed.record.kind          = MagAOX::dmCompletion::Kind::readers;
+    fixture.m_completed.record.state         = State::released;
+    fixture.m_completed.record.outcome       = GENERATE( Outcome::success, Outcome::failed );
+    fixture.m_completed.record.backendResult = fixture.m_completed.record.outcome == Outcome::success ? 0 : 7;
+    fixture.capture( collector );
+    collector.update( fixture.now() );
+    const auto &summary = collector.summary();
+    REQUIRE( summary.total.matched == 1 );
+    CHECK( summary.total.firstEnriched == 1 );
+    CHECK( summary.total.receiptUnavailable == 0 );
+    CHECK( summary.total.receiptInvalid == 0 );
+    CHECK( summary.total.sdkResults == 1 );
+    CHECK( summary.metrics[index( Metric::notification )].mean == Approx( 5e-6 ) );
+    CHECK( summary.metrics[index( Metric::wake )].count == 0 );
+    CHECK( summary.metrics[index( Metric::capture )].count == 0 );
+    REQUIRE( summary.worstNotificationValid );
+    CHECK( summary.worstNotification.completed.record.outcome == fixture.m_completed.record.outcome );
+    CHECK( summary.worstNotification.completed.receiptNs == fixture.m_completed.receiptNs );
+
+    collector.completion( fixture.m_completed );
+    collector.update( fixture.now() + 1 );
+    CHECK( summary.total.firstEnriched == 1 );
+    CHECK( summary.total.sdkResults == 1 );
+}
+
+/** \brief Retain the original receipt and unknown outcome across SDK enrichment before an out-of-order join.
+ * \ingroup dmReaderTiming_unit_test
+ */
+TEST_CASE( "DM reader timing preserves first release receipt through delayed matching and enrichment",
+           "[dmReaderTiming][receipt][readers]" )
+{
+    // clang-format off
+#ifdef DM_READER_TIMING_TEST_DOXYGEN_REF
+    MagAOX::app::dev::dmReaderTiming::completion;
+    MagAOX::app::dev::dmReaderTiming::update;
+#endif
+    // clang-format on
+
+    Collector collector;
+    collector.configure( 2, 16, MagAOX::dmCompletion::Kind::readers );
+    Fixture fixture;
+    fixture.m_completed.record.kind    = MagAOX::dmCompletion::Kind::readers;
+    fixture.m_completed.record.state   = State::released;
+    fixture.m_completed.record.outcome = Outcome::unknown;
+    const auto first                   = fixture.m_completed;
+    collector.completion( first );
+    collector.update( fixture.now() );
+    REQUIRE( collector.summary().pendingCompletion == 1 );
+    CHECK( collector.summary().total.matched == 0 );
+
+    fixture.m_completed.record.outcome       = Outcome::success;
+    fixture.m_completed.record.backendResult = 0;
+    fixture.m_completed.observedNs += 100000;
+    fixture.m_completed.receiptNs = -1;
+    collector.completion( fixture.m_completed );
+    collector.update( fixture.now() );
+    CHECK( collector.summary().total.sdkSuccess == 1 );
+    CHECK( collector.summary().total.receiptInvalid == 0 );
+    CHECK( collector.summary().total.firstEnriched == 0 );
+
+    collector.primary( fixture.m_primary );
+    collector.combined( fixture.m_combined );
+    collector.update( fixture.now() + 1 );
+    const auto &summary = collector.summary();
+    REQUIRE( summary.total.matched == 1 );
+    CHECK( summary.total.receiptUnavailable == 0 );
+    CHECK( summary.total.receiptInvalid == 0 );
+    CHECK( summary.total.firstEnriched == 0 );
+    CHECK( summary.metrics[index( Metric::notification )].mean == Approx( 5e-6 ) );
+    CHECK( summary.metrics[index( Metric::wake )].count == 1 );
+    CHECK( summary.metrics[index( Metric::wake )].mean == Approx( 2e-6 ) );
+    CHECK( summary.metrics[index( Metric::capture )].count == 1 );
+    CHECK( summary.metrics[index( Metric::capture )].mean == Approx( 3e-6 ) );
+    CHECK( summary.worst.completed.record.outcome == Outcome::unknown );
+    CHECK( summary.worst.completed.receiptNs == first.receiptNs );
+    REQUIRE( summary.worstNotificationValid );
+    CHECK( summary.worstNotification.completed.record.outcome == Outcome::unknown );
+    CHECK( summary.worstNotification.completed.receiptNs == first.receiptNs );
+
+    collector.completion( fixture.m_completed );
+    collector.update( fixture.now() + 2 );
+    CHECK( summary.total.matched == 1 );
+    CHECK( summary.total.sdkSuccess == 1 );
+    CHECK( summary.total.receiptInvalid == 0 );
+    CHECK( summary.metrics[index( Metric::wake )].count == 1 );
+}
+
+/** \brief Preserve the separate worst notification record across rolling expiry and attachment resets.
+ * \ingroup dmReaderTiming_unit_test
+ */
+TEST_CASE( "DM reader timing retains exact notification tail independently of required hold",
+           "[dmReaderTiming][receipt]" )
+{
+    // clang-format off
+#ifdef DM_READER_TIMING_TEST_DOXYGEN_REF
+    MagAOX::app::dev::dmReaderTiming::completion;
+    MagAOX::app::dev::dmReaderTiming::resetCompletion;
+    MagAOX::app::dev::dmReaderTiming::configure;
+#endif
+    // clang-format on
+
+    Collector collector;
+    collector.configure( 1, 16 );
+    const Fixture first;
+    first.capture( collector );
+    collector.update( first.now() );
+    Fixture delayed( 1 );
+    delayed.m_completed.record.finishedNs -= 10000;
+    delayed.m_completed.observedNs = delayed.m_completed.record.finishedNs + 80000;
+    delayed.m_completed.receiptNs  = delayed.m_completed.record.finishedNs + 70000;
+    delayed.capture( collector );
+    collector.update( delayed.now() );
+    const auto &summary = collector.summary();
+    REQUIRE( summary.worstNotificationValid );
+    CHECK( summary.worst.completed.record.sequence == first.m_completed.record.sequence );
+    CHECK( summary.worstNotification.completed.record.sequence == delayed.m_completed.record.sequence );
+    CHECK( summary.worstNotification.completed.receiptNs == delayed.m_completed.receiptNs );
+    CHECK( summary.metrics[index( Metric::notification )].max == Approx( 80e-6 ) );
+    CHECK( summary.metrics[index( Metric::wake )].max == Approx( 70e-6 ) );
+    CHECK( summary.metrics[index( Metric::capture )].max == Approx( 10e-6 ) );
+
+    collector.update( delayed.now() + 2000000000 );
+    CHECK( summary.metrics[index( Metric::notification )].count == 0 );
+    CHECK( summary.worstNotificationValid );
+    CHECK( summary.worstNotification.completed.record.sequence == delayed.m_completed.record.sequence );
+    collector.resetCompletion();
+    collector.update( delayed.now() + 2000000001 );
+    CHECK( summary.worstNotificationValid );
+    CHECK( summary.worstNotification.completed.receiptNs == delayed.m_completed.receiptNs );
+    collector.configure( 1, 16 );
+    CHECK_FALSE( collector.summary().worstNotificationValid );
 }
 
 } // namespace dmReaderTimingTest

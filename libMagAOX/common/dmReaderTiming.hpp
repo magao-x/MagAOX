@@ -1,6 +1,6 @@
 /** \file dmReaderTiming.hpp
  * \brief Qualified reader-protection measurements joining primary, combined and independent controller endpoint
- * observations.
+ * observations and semaphore-wait returns.
  */
 #ifndef common_dmReaderTiming_hpp
 #define common_dmReaderTiming_hpp
@@ -49,6 +49,7 @@ struct Completed
 {
     MagAOX::dmCompletion::Record record;          ///< Versioned controller record with exact combined-input identity.
     int64_t                      observedNs{ 0 }; ///< Local monotonic completion-stream observation time.
+    int64_t receiptNs{ 0 }; ///< Local monotonic semaphore-wait return; zero means unavailable in legacy captures.
 };
 
 /// Independent timing populations; offset and slack remain signed, all statistics use seconds.
@@ -60,6 +61,8 @@ enum class Metric : uint8_t
     processing,
     notification,
     modelSlack,
+    wake,    ///< Finish-to-wait-return delay for a valid original endpoint observation.
+    capture, ///< Wait-return-to-coherent-capture delay, paired with the same wake population.
     count
 };
 
@@ -107,6 +110,9 @@ struct Counters
     uint64_t sdkSuccess{ 0 };        ///< Observed actual SDK successes; reader release alone never increments this.
     uint64_t sdkFailed{
         0 }; ///< Observed backend failures or exceptions, including outcomes received after reader release.
+    uint64_t receiptUnavailable{ 0 }; ///< First retained completions without a semaphore-wait return timestamp.
+    uint64_t receiptInvalid{ 0 }; ///< First retained completions whose nonzero receipt lies outside finish-to-capture.
+    uint64_t firstEnriched{ 0 };  ///< First retained reader-release snapshots already containing an SDK outcome.
 };
 
 /// Consumer-owned trailing statistics and lifetime worst-case evidence.
@@ -134,6 +140,8 @@ struct Summary
     int64_t  maxRequiredHoldNs{ 0 }; ///< Lifetime maximum nonnegative software-reader hold.
     int64_t  maxObservedHoldNs{ 0 }; ///< Lifetime maximum nonnegative completion-observation hold.
     uint64_t overBudget{ 0 };        ///< Lifetime qualified joins whose signed completion offset exceeds their budget.
+    bool     worstNotificationValid{ false }; ///< A lifetime matched sample establishes the largest notification delay.
+    Sample   worstNotification; ///< Exact first-seen evidence for the largest finish-to-observation delay.
 };
 
 /// Convert one stable metric identifier to its array index.
@@ -149,8 +157,14 @@ inline constexpr size_t index( Metric metric )
 
 inline const char *metricName( Metric metric )
 {
-    constexpr const char *names[] = {
-        "completionOffset", "requiredHold", "observedHold", "processing", "notification", "modelSlack" };
+    constexpr const char *names[] = { "completionOffset",
+                                      "requiredHold",
+                                      "observedHold",
+                                      "processing",
+                                      "notification",
+                                      "modelSlack",
+                                      "wake",
+                                      "capture" };
     return index( metric ) < index( Metric::count ) ? names[index( metric )] : "unknown";
 }
 

@@ -296,6 +296,18 @@ class Harness : public dmSyncopation
     /// Return the completion observer's scheduling priority.
     int completionMonitorPriority() const;
 
+    /// Return the completion observer's configured CPU set.
+    const std::string &completionMonitorCpuset() const;
+
+    /// Return the optional early-release observer's configured stream name.
+    const std::string &readerReleaseMonitorName() const;
+
+    /// Return the early-release observer's scheduling priority.
+    int readerReleaseMonitorPriority() const;
+
+    /// Return the early-release observer's configured CPU set.
+    const std::string &readerReleaseMonitorCpuset() const;
+
     /// Import an isolated fixture stream for metadata-only acquisition observation.
     void attachCameraOnly();
 
@@ -501,6 +513,26 @@ const std::string &Harness::completionMonitorName() const
 int Harness::completionMonitorPriority() const
 {
     return CompletionMonitor::m_smThreadPrio;
+}
+
+const std::string &Harness::completionMonitorCpuset() const
+{
+    return CompletionMonitor::m_smCpuset;
+}
+
+const std::string &Harness::readerReleaseMonitorName() const
+{
+    return ReaderReleaseMonitor::m_shmimName;
+}
+
+int Harness::readerReleaseMonitorPriority() const
+{
+    return ReaderReleaseMonitor::m_smThreadPrio;
+}
+
+const std::string &Harness::readerReleaseMonitorCpuset() const
+{
+    return ReaderReleaseMonitor::m_smCpuset;
 }
 
 void Harness::attachCameraOnly()
@@ -4887,6 +4919,10 @@ TEST_CASE( "syncopation completion observation is optional and restricted to sha
         REQUIRE( defaults.loadConfigImpl( defaults.config ) == 0 );
         CHECK( defaults.completionMonitorName().empty() );
         CHECK( defaults.completionMonitorPriority() == 0 );
+        CHECK( defaults.completionMonitorCpuset().empty() );
+        CHECK( defaults.readerReleaseMonitorName().empty() );
+        CHECK( defaults.readerReleaseMonitorPriority() == 0 );
+        CHECK( defaults.readerReleaseMonitorCpuset().empty() );
         CHECK_FALSE( defaults.m_readerTiming.enabled() );
         REQUIRE( defaults.setupReaderTimingINDI() == 0 );
         CHECK( defaults.m_indiP_readerTiming.getElements().empty() );
@@ -4955,8 +4991,8 @@ TEST_CASE( "syncopation measures controller reader completion without changing s
     REQUIRE( app.setupReaderTimingINDI() == 0 );
     CHECK( app.m_indiP_readerTiming.getPerm() == pcf::IndiProperty::ReadOnly );
     CHECK( app.m_indiP_readerQuality.getPerm() == pcf::IndiProperty::ReadOnly );
-    CHECK( app.m_indiP_readerTiming.getElements().size() == 36 );
-    CHECK( app.m_indiP_readerQuality.getElements().size() == 42 );
+    CHECK( app.m_indiP_readerTiming.getElements().size() == 48 );
+    CHECK( app.m_indiP_readerQuality.getElements().size() == 45 );
     CHECK( app.m_indiP_readerTiming["completionOffset_mean"].get<double>() == -1 );
     CHECK( app.m_indiP_readerTiming["requiredHold_count"].get<double>() == 0 );
     std::array<std::vector<int>, 4> semaphoreValues;
@@ -5326,8 +5362,8 @@ TEST_CASE( "syncopation independently measures early reader release and SDK enri
     REQUIRE( app.setupReaderTimingINDI() == 0 );
     CHECK_FALSE( app.m_readerTiming.enabled() );
     CHECK( app.m_indiP_readerTiming.getElements().empty() );
-    CHECK( app.m_indiP_readerReleaseTiming.getElements().size() == 36 );
-    CHECK( app.m_indiP_readerReleaseQuality.getElements().size() == 45 );
+    CHECK( app.m_indiP_readerReleaseTiming.getElements().size() == 48 );
+    CHECK( app.m_indiP_readerReleaseQuality.getElements().size() == 48 );
     constexpr int64_t observed = 1000000000;
     constexpr int64_t external = 1792000000000000000LL;
     cadenceObservation( app, observed, external, 10 );
@@ -5443,6 +5479,230 @@ TEST_CASE( "syncopation early release callback never waits for the simulation cy
     app.m_readerReleaseTiming.update( CadenceClock::time );
     CHECK( app.m_readerReleaseTiming.summary().total.matched == 1 );
     CHECK( app.m_readerReleaseTiming.summary().total.sdkResults == 0 );
+}
+
+/// Split genuine receipt latency from later coherent capture without rejecting a valid endpoint after an older post.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation completion observers retain independent receipt and capture endpoints",
+           "[dmSyncopation][readerTiming]" )
+{
+    using namespace MagAOX::dmReaderTiming;
+    const bool       early  = GENERATE( false, true );
+    const bool       causal = GENERATE( false, true );
+    Streams          streams;
+    CompletionStream completion;
+    Harness          app;
+    prepareReaderTiming( app );
+
+    if( early )
+    {
+        app.m_readerReleaseTiming.configure( 2, 64, MagAOX::dmCompletion::Kind::readers );
+        app.attachReaderReleaseOnly();
+    }
+
+    app.localDriver( streams.directory );
+    REQUIRE( app.setupReaderTimingINDI() == 0 );
+    constexpr int64_t observed = 1000000000;
+    constexpr int64_t external = 1792000000000000000LL;
+    cadenceObservation( app, observed, external, 10 );
+    combinedObservation( app, streams.images[1], observed + 20000, external, 10 );
+    auto record = readerCompletion( streams.images[1], 1, observed + 30000, observed + 40000 );
+
+    if( early )
+    {
+        record.kind    = MagAOX::dmCompletion::Kind::readers;
+        record.state   = MagAOX::dmCompletion::State::released;
+        record.outcome = MagAOX::dmTiming::Outcome::unknown;
+    }
+
+    completion.store( record );
+    const auto before  = simulationBytes( app.m_simulation.summary() );
+    const auto receipt = observed + ( causal ? 45000 : 35000 );
+    CadenceClock::time = receipt;
+
+    if( early )
+    {
+        app.shmimMonitorTiming( syncoReaderReleaseT{}, dev::shmimMonitorEvent::receipt );
+    }
+    else
+    {
+        app.shmimMonitorTiming( syncoCompletionT{}, dev::shmimMonitorEvent::receipt );
+    }
+
+    CadenceClock::time = observed + 55000;
+
+    if( early )
+    {
+        REQUIRE( app.processImage( nullptr, syncoReaderReleaseT{} ) == 0 );
+    }
+    else
+    {
+        REQUIRE( app.processImage( nullptr, syncoCompletionT{} ) == 0 );
+    }
+
+    auto &collector = early ? app.m_readerReleaseTiming : app.m_readerTiming;
+    collector.update( CadenceClock::time );
+    app.updateReaderTimingINDI();
+    const auto &summary = collector.summary();
+    REQUIRE( summary.total.matched == 1 );
+    CHECK( summary.total.receiptUnavailable == 0 );
+    CHECK( summary.total.receiptInvalid == ( causal ? 0 : 1 ) );
+    CHECK( summary.total.firstEnriched == 0 );
+    CHECK( summary.metrics[index( Metric::notification )].mean == Approx( 15e-6 ) );
+    CHECK( summary.metrics[index( Metric::requiredHold )].mean == Approx( 20e-6 ).margin( 5e-9 ) );
+    REQUIRE( summary.worstValid );
+    CHECK( summary.worst.completed.receiptNs == receipt );
+    CHECK( summary.worst.completed.observedNs == observed + 55000 );
+    REQUIRE( summary.worstNotificationValid );
+    CHECK( summary.worstNotification.completed.receiptNs == receipt );
+    CHECK( summary.worstNotification.completed.observedNs == observed + 55000 );
+
+    if( causal )
+    {
+        CHECK( summary.metrics[index( Metric::wake )].count == 1 );
+        CHECK( summary.metrics[index( Metric::wake )].mean == Approx( 5e-6 ) );
+        CHECK( summary.metrics[index( Metric::capture )].count == 1 );
+        CHECK( summary.metrics[index( Metric::capture )].mean == Approx( 10e-6 ) );
+        CHECK( summary.metrics[index( Metric::wake )].mean + summary.metrics[index( Metric::capture )].mean ==
+               Approx( summary.metrics[index( Metric::notification )].mean ) );
+    }
+    else
+    {
+        CHECK( summary.metrics[index( Metric::wake )].count == 0 );
+        CHECK( summary.metrics[index( Metric::capture )].count == 0 );
+    }
+
+    const auto &quality = early ? app.m_indiP_readerReleaseQuality : app.m_indiP_readerQuality;
+    const auto &timing  = early ? app.m_indiP_readerReleaseTiming : app.m_indiP_readerTiming;
+    CHECK( quality["receiptInvalid"].get<double>() == ( causal ? 0 : 1 ) );
+    CHECK( quality["receiptUnavailable"].get<double>() == 0 );
+    CHECK( timing["wake_count"].get<double>() == ( causal ? 1 : 0 ) );
+    CHECK( timing["capture_count"].get<double>() == ( causal ? 1 : 0 ) );
+    CHECK( simulationBytes( app.m_simulation.summary() ) == before );
+    CHECK_FALSE( app.m_enabled );
+    CHECK_FALSE( app.m_resources );
+    CHECK( app.m_delivered == 0 );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::processImage( nullptr, syncoCompletionT{} );
+    dmSyncopation::processImage( nullptr, syncoReaderReleaseT{} );
+    dmSyncopation::shmimMonitorTiming( syncoCompletionT{}, dev::shmimMonitorEvent::receipt );
+    dmSyncopation::shmimMonitorTiming( syncoReaderReleaseT{}, dev::shmimMonitorEvent::receipt );
+    dmSyncopation::updateReaderTimingINDI;
+#endif
+    // clang-format on
+}
+
+/// Count a first SDK-enriched release without attributing its result notification to the earlier read-release wake.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation identifies an early release first captured after SDK enrichment",
+           "[dmSyncopation][readerTiming]" )
+{
+    using namespace MagAOX::dmReaderTiming;
+    Streams          streams;
+    CompletionStream completion;
+    Harness          app;
+    prepareReaderTiming( app );
+    app.m_readerReleaseTiming.configure( 2, 64, MagAOX::dmCompletion::Kind::readers );
+    app.attachReaderReleaseOnly();
+    constexpr int64_t observed = 1000000000;
+    constexpr int64_t external = 1792000000000000000LL;
+    cadenceObservation( app, observed, external, 10 );
+    combinedObservation( app, streams.images[1], observed + 20000, external, 10 );
+    auto record          = readerCompletion( streams.images[1], 1, observed + 30000, observed + 40000 );
+    record.kind          = MagAOX::dmCompletion::Kind::readers;
+    record.state         = MagAOX::dmCompletion::State::released;
+    record.backendResult = 0;
+    completion.store( record );
+    CadenceClock::time = observed + 150000;
+    app.shmimMonitorTiming( syncoReaderReleaseT{}, dev::shmimMonitorEvent::receipt );
+    CadenceClock::time = observed + 160000;
+    REQUIRE( app.processImage( nullptr, syncoReaderReleaseT{} ) == 0 );
+    app.m_readerReleaseTiming.update( CadenceClock::time );
+    const auto &summary = app.m_readerReleaseTiming.summary();
+    REQUIRE( summary.total.matched == 1 );
+    CHECK( summary.total.sdkResults == 1 );
+    CHECK( summary.total.sdkSuccess == 1 );
+    CHECK( summary.total.firstEnriched == 1 );
+    CHECK( summary.total.receiptInvalid == 0 );
+    CHECK( summary.total.receiptUnavailable == 0 );
+    CHECK( summary.metrics[index( Metric::notification )].mean == Approx( 120e-6 ) );
+    CHECK( summary.metrics[index( Metric::wake )].count == 0 );
+    CHECK( summary.metrics[index( Metric::capture )].count == 0 );
+    CHECK( summary.worst.completed.receiptNs == observed + 150000 );
+
+    completion.store( record );
+    CadenceClock::time = observed + 170000;
+    app.shmimMonitorTiming( syncoReaderReleaseT{}, dev::shmimMonitorEvent::receipt );
+    REQUIRE( app.processImage( nullptr, syncoReaderReleaseT{} ) == 0 );
+    app.m_readerReleaseTiming.update( CadenceClock::time );
+    CHECK( summary.total.matched == 1 );
+    CHECK( summary.total.sdkResults == 1 );
+    CHECK( summary.total.firstEnriched == 1 );
+    CHECK( summary.metrics[index( Metric::wake )].count == 0 );
+    CHECK( summary.metrics[index( Metric::capture )].count == 0 );
+    CHECK_FALSE( app.m_enabled );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::processImage( nullptr, syncoReaderReleaseT{} );
+    dmSyncopation::shmimMonitorTiming( syncoReaderReleaseT{}, dev::shmimMonitorEvent::receipt );
+#endif
+    // clang-format on
+}
+
+/// Apply observer scheduling overrides only to the selected optional monitor and preserve ordinary defaults.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation completion observer scheduling overrides remain independent", "[dmSyncopation][readerTiming]" )
+{
+    const bool early = GENERATE( false, true );
+    Harness    app;
+    app.setupConfig();
+    char      path[]     = "/tmp/synco-reader-priority-XXXXXX";
+    const int descriptor = mkstemp( path );
+    REQUIRE( descriptor >= 0 );
+    ::close( descriptor );
+
+    {
+        std::ofstream config( path );
+        config << "[simulation]\nenabled=true\n[completionMonitor]\nshmimName=synco_done\n";
+
+        if( !early )
+        {
+            config << "threadPrio=43\ncpuset=reader_test\n";
+        }
+
+        config << "[readerReleaseMonitor]\nshmimName=synco_early_done\n";
+
+        if( early )
+        {
+            config << "threadPrio=43\ncpuset=reader_test\n";
+        }
+    }
+
+    app.config.readConfig( path );
+    std::remove( path );
+    REQUIRE( app.loadConfigImpl( app.config ) == 0 );
+    CHECK( app.completionMonitorName() == "synco_done" );
+    CHECK( app.readerReleaseMonitorName() == "synco_early_done" );
+    CHECK( app.completionMonitorPriority() == ( early ? 0 : 43 ) );
+    CHECK( app.readerReleaseMonitorPriority() == ( early ? 43 : 0 ) );
+    CHECK( app.completionMonitorCpuset() == ( early ? "" : "reader_test" ) );
+    CHECK( app.readerReleaseMonitorCpuset() == ( early ? "reader_test" : "" ) );
+    CHECK( app.m_smThreadPrio == 30 );
+    CHECK( app.m_smCpuset == "dmtweeter-synco" );
+    CHECK( app.combinedMonitorPriority() == 0 );
+    CHECK( app.cameraMonitorPriority() == 0 );
+    CHECK_FALSE( app.m_enabled );
+    CHECK_FALSE( app.m_resources );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::setupConfig;
+    dmSyncopation::loadConfigImpl;
+#endif
+    // clang-format on
 }
 
 } // namespace dmSyncopationTest
