@@ -766,6 +766,7 @@ pupilGuide::pupilGuide( QWidget *Parent, Qt::WindowFlags f ) : xWidget( Parent, 
     ui.fitAvgTime->format( "%0.3f" );
 
     /* Camera Lens */
+    ui.camlensPresets->setup( "stagecamlensx", "stagecamlensy", "Preset" );
     setXwFont( ui.label_camlens );
     setXwFont( ui.label_camlensX_fsm );
     setXwFont( ui.label_camlensY_fsm );
@@ -993,6 +994,7 @@ void pupilGuide::subscribe()
     }
 
     forEachChildSubscriber( [this]( const childSubscription &sub ) { m_parent->addSubscriber( sub.subscriber ); } );
+    m_parent->addSubscriber( ui.camlensPresets );
 
     for( const auto &property : m_properties )
     {
@@ -1006,6 +1008,7 @@ void pupilGuide::onConnect()
 {
     m_connected = true;
     setEnabled( true );
+    ui.camlensPresets->onConnect();
     ui.label_modulation->setEnabled( true );
     ui.labelPupilFitting->setEnabled( true );
 
@@ -1050,6 +1053,7 @@ void pupilGuide::onDisconnect()
 {
     m_connected = false;
     setEnabled( false );
+    ui.camlensPresets->onDisconnect();
     resetConnectionState();
 
     ui.label_modulation->setEnabled( false );
