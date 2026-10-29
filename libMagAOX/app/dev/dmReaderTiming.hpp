@@ -1,5 +1,5 @@
 /** \file dmReaderTiming.hpp
- * \brief Bounded observational join of primary commands, combined commands and DM reader completion.
+ * \brief Bounded observational joins of primary, combined and independent controller reader endpoints.
  */
 #ifndef dev_dmReaderTiming_hpp
 #define dev_dmReaderTiming_hpp
@@ -74,9 +74,14 @@ class dmReaderTiming
 
     std::atomic<uint64_t> m_generation{ 1 };     ///< Any source reset invalidates queued observations from older joins.
     uint64_t              m_seenGeneration{ 1 }; ///< Generation owned by the current consumer join populations.
-    bool                  m_enabled{ false };    ///< Immutable configuration while producers run.
-    int64_t               m_windowNs{ 0 };       ///< Positive configured trailing retention, or zero when disabled.
-    size_t                m_capacity{ 0 };       ///< Per-source queue/pending and retained matched-sample bound.
+    MagAOX::dmCompletion::Kind m_kind{
+        MagAOX::dmCompletion::Kind::completion }; ///< Immutable expected endpoint protocol.
+    MagAOX::dmTiming::Outcome m_completionOutcome{
+        MagAOX::dmTiming::Outcome::unknown };        ///< Last observed result for same-attempt enrichment.
+    MagAOX::dmCompletion::Record m_completionRecord; ///< Frozen endpoint evidence for same-attempt result enrichment.
+    bool                         m_enabled{ false }; ///< Immutable configuration while producers run.
+    int64_t                      m_windowNs{ 0 };    ///< Positive configured trailing retention, or zero when disabled.
+    size_t                       m_capacity{ 0 };    ///< Per-source queue/pending and retained matched-sample bound.
 
     std::unordered_map<Key, MagAOX::dmReaderTiming::Primary, Hash>  m_primaries; ///< Bounded pending primary evidence.
     std::unordered_map<Key, MagAOX::dmReaderTiming::Combined, Hash> m_combined;  ///< Bounded pending combined evidence.
@@ -152,7 +157,9 @@ class dmReaderTiming
   public:
     /// Allocate all handoff storage while producers and consumer are stopped; zero disables collection.
     void configure( double windowSec /**< [in] Positive trailing retention duration in seconds; zero disables. */,
-                    size_t capacity /**< [in] Per-source capture/pending and matched-sample cap; zero disables. */ );
+                    size_t capacity /**< [in] Per-source capture/pending and matched-sample cap; zero disables. */,
+                    MagAOX::dmCompletion::Kind kind =
+                        MagAOX::dmCompletion::Kind::completion /**< [in] Independently measured endpoint protocol. */ );
 
     /// Capture fixed primary metadata without allocation, joining, waiting or statistics.
     void primary( const MagAOX::dmReaderTiming::Primary &value /**< [in] Primary observation. */,
@@ -222,12 +229,15 @@ inline bool dmReaderTiming::equal( const MagAOX::dmReaderTiming::Identity &first
            first.nsec == second.nsec;
 }
 
-inline void dmReaderTiming::configure( double windowSec, size_t capacity )
+inline void dmReaderTiming::configure( double windowSec, size_t capacity, MagAOX::dmCompletion::Kind kind )
 {
-    m_enabled  = mx::math::isFinite( windowSec ) && windowSec > 0 && windowSec < 9e9 && capacity > 0;
-    m_windowNs = m_enabled ? static_cast<int64_t>( windowSec * 1e9 ) : 0;
-    m_enabled  = m_enabled && m_windowNs > 0;
-    m_capacity = m_enabled ? capacity : 0;
+    m_kind              = kind;
+    m_completionOutcome = MagAOX::dmTiming::Outcome::unknown;
+    m_completionRecord  = {};
+    m_enabled           = mx::math::isFinite( windowSec ) && windowSec > 0 && windowSec < 9e9 && capacity > 0;
+    m_windowNs          = m_enabled ? static_cast<int64_t>( windowSec * 1e9 ) : 0;
+    m_enabled           = m_enabled && m_windowNs > 0;
+    m_capacity          = m_enabled ? capacity : 0;
     m_primaryQueue.configure( m_capacity );
     m_combinedQueue.configure( m_capacity );
     m_completionQueue.configure( m_capacity );
@@ -245,6 +255,7 @@ inline void dmReaderTiming::configure( double windowSec, size_t capacity )
     m_completed.reserve( m_capacity );
     m_summary           = {};
     m_summary.enabled   = m_enabled;
+    m_summary.kind      = m_kind;
     m_summary.session   = 1;
     m_summary.windowSec = m_enabled ? windowSec : 0;
     m_summary.capacity  = m_capacity;
@@ -504,7 +515,8 @@ inline void dmReaderTiming::consume( const Capture<MagAOX::dmReaderTiming::Compl
     const auto &record = value.record;
 
     if( value.observedNs <= 0 || value.observedNs > nowNs || record.protocolVersion != MagAOX::dmCompletion::version ||
-        record.session == 0 || record.epoch == 0 || record.state > MagAOX::dmCompletion::State::unqualified )
+        record.session == 0 || record.epoch == 0 || record.kind != m_kind ||
+        record.state > MagAOX::dmCompletion::State::released )
     {
         ++m_total.invalid;
         return;
@@ -533,7 +545,14 @@ inline void dmReaderTiming::consume( const Capture<MagAOX::dmReaderTiming::Compl
         return;
     }
 
-    if( m_haveCompletion && !newPublisher && record.sequence == m_completionSequence &&
+    const bool sameAttempt = m_haveCompletion && !newPublisher && record.sequence == m_completionSequence;
+    const bool enrichment  = sameAttempt && m_kind == MagAOX::dmCompletion::Kind::readers &&
+                            m_completionState == MagAOX::dmCompletion::State::released &&
+                            record.state == MagAOX::dmCompletion::State::released &&
+                            m_completionOutcome == MagAOX::dmTiming::Outcome::unknown &&
+                            record.outcome != MagAOX::dmTiming::Outcome::unknown;
+
+    if( sameAttempt && !enrichment &&
         ( m_completionState != MagAOX::dmCompletion::State::busy ||
           record.state == MagAOX::dmCompletion::State::busy ) )
     {
@@ -553,7 +572,10 @@ inline void dmReaderTiming::consume( const Capture<MagAOX::dmReaderTiming::Compl
     m_completionSequence = record.sequence;
     m_completionState    = record.state;
 
-    if( record.state != MagAOX::dmCompletion::State::complete )
+    const auto completedState = m_kind == MagAOX::dmCompletion::Kind::readers ? MagAOX::dmCompletion::State::released
+                                                                              : MagAOX::dmCompletion::State::complete;
+
+    if( record.state != completedState )
     {
         switch( record.state )
         {
@@ -570,16 +592,62 @@ inline void dmReaderTiming::consume( const Capture<MagAOX::dmReaderTiming::Compl
             ++m_total.unqualified;
             break;
         default:
+            ++m_total.invalid;
             break;
         }
 
         return;
     }
 
-    if( !MagAOX::dmCompletion::qualified( record ) || value.observedNs < record.finishedNs ||
-        value.observedNs - record.finishedNs > m_windowNs )
+    if( !( m_kind == MagAOX::dmCompletion::Kind::readers ? MagAOX::dmCompletion::readersQualified( record )
+                                                         : MagAOX::dmCompletion::qualified( record ) ) ||
+        value.observedNs < record.finishedNs || value.observedNs - record.finishedNs > m_windowNs )
     {
         ++m_total.invalid;
+        return;
+    }
+
+    if( enrichment &&
+        ( record.inputInode != m_completionRecord.inputInode ||
+          record.inputCounter != m_completionRecord.inputCounter ||
+          record.publicationSec != m_completionRecord.publicationSec ||
+          record.publicationNsec != m_completionRecord.publicationNsec ||
+          record.startedNs != m_completionRecord.startedNs || record.finishedNs != m_completionRecord.finishedNs ||
+          record.callbackResult != m_completionRecord.callbackResult ) )
+    {
+        ++m_total.invalid;
+        return;
+    }
+
+    if( m_kind == MagAOX::dmCompletion::Kind::readers && record.outcome != MagAOX::dmTiming::Outcome::unknown )
+    {
+        if( ( record.outcome != MagAOX::dmTiming::Outcome::success &&
+              record.outcome != MagAOX::dmTiming::Outcome::failed ) ||
+            ( record.backendResult != MagAOX::dmCompletion::unavailableResult &&
+              ( record.outcome == MagAOX::dmTiming::Outcome::success ) != ( record.backendResult == 0 ) ) )
+        {
+            ++m_total.invalid;
+        }
+        else
+        {
+            ++m_total.sdkResults;
+
+            if( record.outcome == MagAOX::dmTiming::Outcome::success )
+            {
+                ++m_total.sdkSuccess;
+            }
+            else
+            {
+                ++m_total.sdkFailed;
+            }
+        }
+    }
+
+    m_completionOutcome = record.outcome;
+    m_completionRecord  = record;
+
+    if( enrichment )
+    {
         return;
     }
 

@@ -7,6 +7,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 
 #include "dmTiming.hpp"
 
@@ -15,9 +16,18 @@ namespace MagAOX
 namespace dmCompletion
 {
 
-constexpr uint64_t magic   = 0x4d414758444d444eULL; ///< Distinguish this protocol from unrelated uint64 streams.
-constexpr uint64_t version = 1;                     ///< Current fixed-layout protocol version.
-constexpr size_t   words   = 16;                    ///< Number of uint64 words in one published record.
+constexpr uint64_t magic        = 0x4d414758444d444eULL; ///< Distinguish this protocol from unrelated uint64 streams.
+constexpr uint64_t readersMagic = 0x4d414758444d5244ULL; ///< Distinguish early read release from full completion.
+constexpr uint64_t version      = 1;                     ///< Current fixed-layout protocol version.
+constexpr size_t   words        = 16;                    ///< Number of uint64 words in one published record.
+constexpr int64_t  unavailableResult = std::numeric_limits<int64_t>::min(); ///< No actual backend result was supplied.
+
+/// Separate endpoint contracts; a read release never implies SDK success or backend readiness.
+enum class Kind : uint8_t
+{
+    completion,
+    readers
+};
 
 /// Reader state; a semaphore notification alone never establishes completion.
 enum class State : uint64_t
@@ -26,12 +36,15 @@ enum class State : uint64_t
     busy,
     complete,
     error,
-    unqualified
+    unqualified,
+    released
 };
 
 /// One controller attempt, identified independently of semaphore delivery.
-/** Complete means a successful, genuine callback finished all software channel
- * reads while the combined input identity remained stable. It does not assert
+/** Completion-kind complete means a successful, genuine callback finished all
+ * software channel reads while the combined input identity remained stable.
+ * Reader-kind released means external reads finished with a stable identity;
+ * its SDK outcome may still be unknown or may later fail. Neither asserts
  * physical mirror settling, atomic multi-stream provenance or ownership of any
  * future callback. External publication seconds/nanoseconds are identity only;
  * the started/finished timestamps use the local monotonic clock.
@@ -50,8 +63,11 @@ struct Record
     int64_t                   startedNs{ 0 };       ///< Local monotonic callback entry time.
     int64_t                   finishedNs{ 0 };      ///< Local monotonic completion time, zero while busy.
     MagAOX::dmTiming::Outcome outcome{ MagAOX::dmTiming::Outcome::unknown }; ///< Qualified backend result.
-    int64_t                   callbackResult{ 0 }; ///< Software callback result, distinct from backend qualification.
-    uint64_t                  publisherPid{ 0 };   ///< Publisher PID for diagnostics, not lifetime identity.
+    int64_t  callbackResult{ 0 };      ///< Final callback result, or frozen reader-stage result for early release.
+    uint64_t publisherPid{ 0 };        ///< Publisher PID for diagnostics, not lifetime identity.
+    Kind     kind{ Kind::completion }; ///< Distinct wire protocol and endpoint qualification contract.
+    int64_t  backendResult{
+        unavailableResult }; ///< Exact SDK result on the read-release protocol, independently of release.
 };
 
 /// Fixed word transport, independent of struct padding and enum representation.
@@ -67,12 +83,18 @@ inline bool decode( const Wire &wire /**< [in] Complete transport words. */,
 /// Return whether this record explicitly qualifies successful software reader completion.
 inline bool qualified( const Record &record /**< [in] Coherently observed record. */ ) noexcept;
 
+/// Qualify finished external reads independently of a pending or failed SDK submission.
+inline bool readersQualified( const Record &record /**< [in] Coherently observed early-release record. */ ) noexcept;
+
+/// Return whether the frozen attempt has representable identity and endpoint timestamps.
+inline bool validIdentity( const Record &record /**< [in] Coherently observed endpoint record. */ ) noexcept;
+
 /// Return the diagnostic name for one protocol state.
 inline const char *stateName( State state /**< [in] Reader state to describe. */ ) noexcept;
 
 inline Wire encode( const Record &record ) noexcept
 {
-    return { magic,
+    return { record.kind == Kind::completion ? magic : ( record.kind == Kind::readers ? readersMagic : 0 ),
              record.protocolVersion,
              record.session,
              record.epoch,
@@ -87,13 +109,17 @@ inline Wire encode( const Record &record ) noexcept
              static_cast<uint64_t>( record.outcome ),
              static_cast<uint64_t>( record.callbackResult ),
              record.publisherPid,
-             0 };
+             record.kind == Kind::readers ? static_cast<uint64_t>( record.backendResult ) : 0 };
 }
 
 inline bool decode( const Wire &wire, Record &record ) noexcept
 {
-    if( wire[0] != magic || wire[1] != version || wire[5] > static_cast<uint64_t>( State::unqualified ) ||
-        wire[12] > static_cast<uint64_t>( MagAOX::dmTiming::Outcome::rejected ) || wire[15] != 0 )
+    const bool readers = wire[0] == readersMagic;
+
+    if( ( wire[0] != magic && !readers ) || wire[1] != version ||
+        wire[5] > static_cast<uint64_t>( readers ? State::released : State::unqualified ) ||
+        wire[12] > static_cast<uint64_t>( MagAOX::dmTiming::Outcome::rejected ) || ( !readers && wire[15] != 0 ) ||
+        ( readers && wire[5] == static_cast<uint64_t>( State::complete ) ) )
     {
         return false;
     }
@@ -113,22 +139,35 @@ inline bool decode( const Wire &wire, Record &record ) noexcept
     result.outcome         = static_cast<MagAOX::dmTiming::Outcome>( wire[12] );
     result.callbackResult  = static_cast<int64_t>( wire[13] );
     result.publisherPid    = wire[14];
+    result.kind            = readers ? Kind::readers : Kind::completion;
+    result.backendResult   = readers ? static_cast<int64_t>( wire[15] ) : unavailableResult;
     record                 = result;
     return true;
 }
 
 inline bool qualified( const Record &record ) noexcept
 {
+    return record.kind == Kind::completion && record.state == State::complete && validIdentity( record ) &&
+           record.callbackResult == 0 && record.outcome == MagAOX::dmTiming::Outcome::success;
+}
+
+inline bool readersQualified( const Record &record ) noexcept
+{
+    return record.kind == Kind::readers && record.state == State::released && validIdentity( record ) &&
+           record.callbackResult == 0;
+}
+
+inline bool validIdentity( const Record &record ) noexcept
+{
     return record.protocolVersion == version && record.session != 0 && record.epoch != 0 && record.sequence != 0 &&
-           record.state == State::complete && record.inputInode != 0 && record.inputCounter != 0 &&
-           record.publicationSec > 0 && record.publicationNsec >= 0 && record.publicationNsec < 1000000000 &&
-           record.startedNs > 0 && record.finishedNs >= record.startedNs && record.callbackResult == 0 &&
-           record.outcome == MagAOX::dmTiming::Outcome::success;
+           record.inputInode != 0 && record.inputCounter != 0 && record.publicationSec > 0 &&
+           record.publicationNsec >= 0 && record.publicationNsec < 1000000000 && record.startedNs > 0 &&
+           record.finishedNs >= record.startedNs;
 }
 
 inline const char *stateName( State state ) noexcept
 {
-    constexpr const char *names[] = { "unavailable", "busy", "complete", "error", "unqualified" };
+    constexpr const char *names[] = { "unavailable", "busy", "complete", "error", "unqualified", "released" };
     const auto            index   = static_cast<size_t>( state );
     return index < sizeof( names ) / sizeof( names[0] ) ? names[index] : "invalid";
 }

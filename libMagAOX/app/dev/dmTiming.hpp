@@ -116,6 +116,14 @@ class dmTiming
     void markAt( MagAOX::dmTiming::Marker marker /**< [in] Endpoint to record. */,
                  int64_t                  ns /**< [in] Monotonic timestamp, or -1 on clock failure. */ );
 
+    /// Import one immutable worker result while allowing SDK execution to overlap monitor staging.
+    void importSdk( int64_t                   startNs /**< [in] Actual worker SDK entry timestamp. */,
+                    int64_t                   endNs /**< [in] Actual worker SDK return timestamp. */,
+                    MagAOX::dmTiming::Outcome outcome /**< [in] Actual submission outcome. */,
+                    int64_t dispatchNs  = -1 /**< [in] Monitor request-publication timestamp, or unavailable. */,
+                    int64_t waitStartNs = -1 /**< [in] Monitor SDK-result wait start, or unavailable. */,
+                    int64_t waitEndNs   = -1 /**< [in] Monitor SDK-result wait return, or unavailable. */ );
+
     /// Attach an observed input counter, without asserting verified frame identity.
     void inputCounter( uint64_t counter /**< [in] Stable counter observation supplied by the monitor. */ );
 
@@ -277,6 +285,98 @@ inline void dmTiming::markAt( MagAOX::dmTiming::Marker marker, int64_t ns )
 
     m_event.markers[markerIndex( marker )] = ns;
     m_event.valid |= bit;
+}
+
+inline void dmTiming::importSdk( int64_t                   startNs,
+                                 int64_t                   endNs,
+                                 MagAOX::dmTiming::Outcome result,
+                                 int64_t                   dispatchNs,
+                                 int64_t                   waitStartNs,
+                                 int64_t                   waitEndNs )
+{
+    using namespace MagAOX::dmTiming;
+
+    if( !m_active )
+    {
+        return;
+    }
+
+    const auto endpoint = [this]( Marker marker )
+    {
+        const auto index = markerIndex( marker );
+        return ( m_event.valid & ( 1u << index ) ) ? m_event.markers[index] : int64_t( -1 );
+    };
+    const auto store = [this]( Marker marker, int64_t ns )
+    {
+        const auto index       = markerIndex( marker );
+        m_event.markers[index] = ns;
+        m_event.valid |= 1u << index;
+    };
+    const auto reject = [this]( Marker first, Marker last )
+    {
+        m_event.valid &= ~( ( 1u << markerIndex( first ) ) | ( 1u << markerIndex( last ) ) );
+        ++m_event.invalidMarkers;
+    };
+    const auto finish = endpoint( Marker::finish );
+    const auto preparation =
+        std::max( { endpoint( Marker::receipt ), endpoint( Marker::entry ), endpoint( Marker::actuatorEnd ) } );
+
+    if( dispatchNs >= 0 )
+    {
+        if( dispatchNs < preparation || ( startNs >= 0 && dispatchNs > startNs ) ||
+            ( finish >= 0 && dispatchNs > finish ) )
+        {
+            reject( Marker::dispatch, Marker::dispatch );
+        }
+        else
+        {
+            store( Marker::dispatch, dispatchNs );
+        }
+    }
+
+    const auto dispatch = endpoint( Marker::dispatch );
+    const bool sdkValid = startNs >= 0 && endNs >= startNs && startNs >= preparation &&
+                          ( dispatch < 0 || startNs >= dispatch ) && ( finish < 0 || endNs <= finish );
+
+    if( sdkValid )
+    {
+        store( Marker::sdkStart, startNs );
+        store( Marker::sdkEnd, endNs );
+    }
+    else
+    {
+        reject( Marker::sdkStart, Marker::sdkEnd );
+    }
+
+    if( waitStartNs >= 0 || waitEndNs >= 0 )
+    {
+        const auto release = std::max( { endpoint( Marker::entry ),
+                                         endpoint( Marker::dispatch ),
+                                         endpoint( Marker::readRelease ),
+                                         endpoint( Marker::stagingEnd ) } );
+
+        if( waitStartNs < 0 || waitEndNs < 0 || waitStartNs < release || waitEndNs < waitStartNs ||
+            ( sdkValid && waitEndNs < endNs ) || ( finish >= 0 && waitEndNs > finish ) )
+        {
+            reject( Marker::waitStart, Marker::waitEnd );
+        }
+        else
+        {
+            store( Marker::waitStart, waitStartNs );
+            store( Marker::waitEnd, waitEndNs );
+        }
+    }
+
+    if( result == Outcome::success )
+    {
+        submitted();
+    }
+
+    if( m_event.outcome != Outcome::failed && m_event.outcome != Outcome::partial &&
+        m_event.outcome != Outcome::rejected )
+    {
+        outcome( result );
+    }
 }
 
 inline void dmTiming::inputCounter( uint64_t counter )
@@ -635,7 +735,12 @@ inline void dmTiming::calculate( int64_t nowNs )
                                        Metric::post,
                                        Metric::throughDelta,
                                        Metric::callback,
-                                       Metric::receiptCallback };
+                                       Metric::receiptCallback,
+                                       Metric::sdkDispatch,
+                                       Metric::readerRelease,
+                                       Metric::staging,
+                                       Metric::publication,
+                                       Metric::sdkWait };
         constexpr Marker starts[]  = { Marker::receipt,
                                        Marker::actuatorStart,
                                        Marker::sdkStart,
@@ -644,7 +749,12 @@ inline void dmTiming::calculate( int64_t nowNs )
                                        Marker::postStart,
                                        Marker::entry,
                                        Marker::entry,
-                                       Marker::receipt };
+                                       Marker::receipt,
+                                       Marker::dispatch,
+                                       Marker::entry,
+                                       Marker::stagingStart,
+                                       Marker::publicationStart,
+                                       Marker::waitStart };
         constexpr Marker ends[]    = { Marker::entry,
                                        Marker::actuatorEnd,
                                        Marker::sdkEnd,
@@ -653,7 +763,12 @@ inline void dmTiming::calculate( int64_t nowNs )
                                        Marker::postEnd,
                                        Marker::deltaEnd,
                                        Marker::finish,
-                                       Marker::finish };
+                                       Marker::finish,
+                                       Marker::sdkStart,
+                                       Marker::readRelease,
+                                       Marker::stagingEnd,
+                                       Marker::publicationEnd,
+                                       Marker::waitEnd };
 
         for( size_t i = 0; i < sizeof( metrics ) / sizeof( metrics[0] ); ++i )
         {

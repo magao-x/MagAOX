@@ -184,6 +184,7 @@ libMagAOX.a: libMagAOX.hpp.gch $(OBJS)
 logger/logMeta.o: logger/logMap.hpp logger/logMap.cpp logger/logMeta.hpp logger/logMeta.cpp logger/generated/logTypes.hpp
 logger/logMap.o: logger/logMap.hpp logger/logMap.cpp
 logger/logMeta.o logger/logMap.o: logger/types/telem_dmsynco.hpp common/dmReaderTiming.hpp
+logger/logMeta.o logger/logMap.o: logger/types/telem_dmtimings.hpp common/dmTiming.hpp
 logger/logBinarySchemata.o: logger/generated/logTypes.hpp logger/generated/binarySchemata.inc
 
 clean:

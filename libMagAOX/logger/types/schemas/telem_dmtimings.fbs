@@ -18,7 +18,13 @@ enum DmTimingMetric : ubyte
     callback = 10,
     receiptCallback = 11,
     // Producer-clock timestamp differences; coverage uses local observation anchors.
-    publicationInterval = 12
+    publicationInterval = 12,
+    // Optional worker-path populations, appended without changing historical IDs.
+    sdkDispatch = 13,
+    readerRelease = 14,
+    staging = 15,
+    publication = 16,
+    sdkWait = 17
 }
 
 enum DmTimingAvailability : ubyte

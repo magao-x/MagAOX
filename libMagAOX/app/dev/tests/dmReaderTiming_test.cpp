@@ -777,5 +777,124 @@ TEST_CASE( "DM reader timing maintains ownership with three concurrent capture p
     REQUIRE( summary.span == Approx( ( count - 1 ) * 500e-6 ) );
 }
 
+/// Measure early release independently of SDK success and count same-attempt enrichment once.
+/** \ingroup dmReaderTiming_unit_test */
+TEST_CASE( "DM reader timing separates early release from actual SDK result", "[dmReaderTiming][readers]" )
+{
+    // clang-format off
+#ifdef DM_READER_TIMING_TEST_DOXYGEN_REF
+    MagAOX::app::dev::dmReaderTiming::configure;
+    MagAOX::app::dev::dmReaderTiming::completion;
+#endif
+    // clang-format on
+    Collector collector;
+    collector.configure( 2, 16, MagAOX::dmCompletion::Kind::readers );
+    Fixture fixture;
+    fixture.m_completed.record.kind       = MagAOX::dmCompletion::Kind::readers;
+    fixture.m_completed.record.state      = State::released;
+    fixture.m_completed.record.outcome    = Outcome::unknown;
+    fixture.m_completed.record.finishedNs = fixture.m_combined.observedNs + 20000;
+    fixture.m_completed.record.startedNs  = fixture.m_primary.observedNs + 1000;
+    fixture.m_completed.observedNs        = fixture.m_completed.record.finishedNs + 5000;
+    fixture.capture( collector );
+    collector.update( fixture.now() );
+    REQUIRE( collector.summary().total.matched == 1 );
+    CHECK( collector.summary().kind == MagAOX::dmCompletion::Kind::readers );
+    CHECK( collector.summary().total.sdkResults == 0 );
+    CHECK( collector.summary().metrics[index( Metric::requiredHold )].mean == Approx( 20e-6 ) );
+
+    SECTION( "A later actual SDK success enriches the same release" )
+    {
+        fixture.m_completed.record.outcome       = Outcome::success;
+        fixture.m_completed.record.backendResult = 0;
+    }
+
+    SECTION( "A later SDK failure preserves the already-finished channel reads" )
+    {
+        fixture.m_completed.record.outcome       = Outcome::failed;
+        fixture.m_completed.record.backendResult = 7;
+    }
+
+    SECTION( "An SDK exception has a known failure without a raw return code" )
+    {
+        fixture.m_completed.record.outcome       = Outcome::failed;
+        fixture.m_completed.record.backendResult = MagAOX::dmCompletion::unavailableResult;
+    }
+
+    SECTION( "An enrichment cannot relabel the frozen command" )
+    {
+        fixture.m_completed.record.outcome       = Outcome::success;
+        fixture.m_completed.record.backendResult = 0;
+        ++fixture.m_completed.record.inputCounter;
+    }
+
+    fixture.m_completed.observedNs += 100000;
+    collector.completion( fixture.m_completed );
+    collector.update( fixture.now() );
+    CHECK( collector.summary().total.matched == 1 );
+    CHECK( collector.summary().metrics[index( Metric::requiredHold )].count == 1 );
+    const bool changed = fixture.m_completed.record.inputCounter != fixture.m_combined.input.counter;
+    CHECK( collector.summary().total.sdkResults == ( changed ? 0 : 1 ) );
+    CHECK( collector.summary().total.sdkSuccess ==
+           ( !changed && fixture.m_completed.record.outcome == Outcome::success ? 1 : 0 ) );
+    CHECK( collector.summary().total.sdkFailed == ( fixture.m_completed.record.outcome == Outcome::failed ? 1 : 0 ) );
+    CHECK( collector.summary().total.invalid == ( changed ? 1 : 0 ) );
+    collector.completion( fixture.m_completed );
+    collector.update( fixture.now() );
+    CHECK( collector.summary().total.matched == 1 );
+    CHECK( collector.summary().total.sdkResults <= 1 );
+}
+
+/// Reject the opposite endpoint protocol and retain independent source-lifecycle qualification.
+/** \ingroup dmReaderTiming_unit_test */
+TEST_CASE( "DM reader timing does not confuse submission completion and early release", "[dmReaderTiming][readers]" )
+{
+    // clang-format off
+#ifdef DM_READER_TIMING_TEST_DOXYGEN_REF
+    MagAOX::app::dev::dmReaderTiming::completion;
+    MagAOX::app::dev::dmReaderTiming::resetCompletion;
+#endif
+    // clang-format on
+    Collector collector;
+    collector.configure( 2, 16, MagAOX::dmCompletion::Kind::readers );
+    Fixture fixture;
+    fixture.capture( collector );
+    collector.update( fixture.now() );
+    CHECK( collector.summary().total.matched == 0 );
+    CHECK( collector.summary().total.invalid == 1 );
+    fixture.m_completed.record.kind    = MagAOX::dmCompletion::Kind::readers;
+    fixture.m_completed.record.state   = State::released;
+    fixture.m_completed.record.outcome = Outcome::unknown;
+    collector.resetCompletion();
+    fixture.capture( collector );
+    collector.update( fixture.now() );
+    CHECK( collector.summary().total.matched == 1 );
+    CHECK( collector.summary().total.sdkResults == 0 );
+}
+
+/// Preserve the release population when notifications coalesce and the first record already contains an SDK error.
+/** \ingroup dmReaderTiming_unit_test */
+TEST_CASE( "DM reader timing accepts a release already enriched with SDK failure", "[dmReaderTiming][readers]" )
+{
+    // clang-format off
+#ifdef DM_READER_TIMING_TEST_DOXYGEN_REF
+    MagAOX::app::dev::dmReaderTiming::completion;
+#endif
+    // clang-format on
+    Collector collector;
+    collector.configure( 2, 16, MagAOX::dmCompletion::Kind::readers );
+    Fixture fixture;
+    fixture.m_completed.record.kind          = MagAOX::dmCompletion::Kind::readers;
+    fixture.m_completed.record.state         = State::released;
+    fixture.m_completed.record.outcome       = Outcome::failed;
+    fixture.m_completed.record.backendResult = GENERATE( int64_t( 7 ), MagAOX::dmCompletion::unavailableResult );
+    fixture.capture( collector );
+    collector.update( fixture.now() );
+    CHECK( collector.summary().total.matched == 1 );
+    CHECK( collector.summary().total.sdkResults == 1 );
+    CHECK( collector.summary().total.sdkFailed == 1 );
+    CHECK( collector.summary().total.sdkSuccess == 0 );
+}
+
 } // namespace dmReaderTimingTest
 } // namespace libXWCTest

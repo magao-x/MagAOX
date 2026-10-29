@@ -147,9 +147,12 @@ struct Controller : MagAOX::app::MagAOXApp<false>,
     using dmT = MagAOX::app::dev::dm<Controller, float>;
     using dmT::m_completionStreamName;
     using dmT::m_dmCompletion;
+    using dmT::m_dmReaderRelease;
     using dmT::m_dmTiming;
     using dmT::m_indiP_dmCompletion;
     using dmT::m_indiP_dmCompletionStream;
+    using dmT::m_indiP_dmReaderRelease;
+    using dmT::m_indiP_dmReaderReleaseStream;
     using dmT::m_satSemaphore;
     using dmT::setupDMCompletionINDI;
     using dmT::updateDMCompletionINDI;
@@ -165,6 +168,18 @@ struct Controller : MagAOX::app::MagAOXApp<false>,
     int m_return{ 0 }; ///< Callback return independent of its submission qualification.
 
     std::function<void()> m_inCommand; ///< Observe busy state or change fixture data at the SDK endpoint.
+
+    bool m_deferred{ false }; ///< Select the private-product callback path for the software backend.
+
+    bool m_admit{ true }; ///< Nonblocking admission decision, without changing the fixture's input pointer.
+
+    unsigned m_finalized{ 0 }; ///< Backend finalizations, including processing-error drains.
+
+    unsigned m_retired{ 0 }; ///< Whole callbacks retired after their final completion publication.
+
+    std::function<void()> m_atFinalize; ///< Inspect the real last-read endpoint before SDK-result handoff.
+
+    std::function<void()> m_atRetire; ///< Inspect final products and completion before releasing the callback slot.
 
     std::vector<std::string> m_names; ///< Image names to destroy after all local attachments close.
 
@@ -195,14 +210,32 @@ struct Controller : MagAOX::app::MagAOXApp<false>,
     /// Observe the real callback's SDK endpoint and return a controlled result.
     int commandDM( void *pixels /**< [in] Unused local command pointer. */ );
 
+    /// Admit only when the software backend's callback slot is available.
+    bool admitCommand();
+
+    /// Select staged generic output products for the simulated worker.
+    bool deferredCommand() const;
+
+    /// Qualify the actual software SDK outcome after inspecting privately staged work.
+    int finalizeCommand( int result /**< [in] Earlier processing status, negative on failure. */ ) noexcept;
+
+    /// Observe that final callback ownership includes products, timing and completion publication.
+    void retireCommand() noexcept;
+
     /// Enable completion publication on a fixture-owned image.
     void enable();
+
+    /// Open the separate fixture-owned reader-release protocol.
+    void enableRelease();
 
     /// Issue a genuine monitor receipt followed by the real base callback.
     int receive();
 
     /// Connect one-pixel channel and output images used by the actual makeDelta implementation.
     void prepareDelta();
+
+    /// Reject private staging without throwing or accessing any instrument resources.
+    void invalidateStaging();
 
     /// Set the non-delta and delta channel pixels at the software SDK endpoint.
     void setChannels( float flat /**< [in] New non-delta command. */, float delta /**< [in] New delta command. */ );
@@ -232,6 +265,7 @@ Controller::~Controller() noexcept
     dmCompletionIntegration::m_atPost   = {};
     dmCompletionIntegration::m_failPost = false;
     m_dmCompletion.close();
+    m_dmReaderRelease.close();
     m_outputShape.close();
     m_outputDelta.close();
     m_outputDiff.close();
@@ -303,11 +337,55 @@ int Controller::commandDM( void *pixels )
     return m_return;
 }
 
+bool Controller::admitCommand()
+{
+    return m_admit;
+}
+
+bool Controller::deferredCommand() const
+{
+    return m_deferred;
+}
+
+int Controller::finalizeCommand( int result ) noexcept
+{
+    ++m_finalized;
+
+    if( m_atFinalize )
+    {
+        m_atFinalize();
+    }
+
+    if( m_deferred )
+    {
+        dmBackendResult( m_result, m_result == Outcome::success ? 0 : 7 );
+    }
+
+    return result < 0 || ( m_deferred && m_result != Outcome::success ) ? -1 : result;
+}
+
+void Controller::retireCommand() noexcept
+{
+    ++m_retired;
+
+    if( m_atRetire )
+    {
+        m_atRetire();
+    }
+}
+
 void Controller::enable()
 {
     m_completionStreamName = "completion";
     REQUIRE( m_dmCompletion.open( m_completionStreamName ) == 0 );
     m_names.push_back( m_completionStreamName );
+}
+
+void Controller::enableRelease()
+{
+    m_readerReleaseStreamName = "reader_release";
+    REQUIRE( m_dmReaderRelease.open( m_readerReleaseStreamName, MagAOX::dmCompletion::Kind::readers ) == 0 );
+    m_names.push_back( m_readerReleaseStreamName );
 }
 
 int Controller::receive()
@@ -318,6 +396,12 @@ int Controller::receive()
 
 void Controller::prepareDelta()
 {
+    m_dmWidth  = 1;
+    m_dmHeight = 1;
+    m_totalFlat.resize( 1, 1 );
+    m_totalDelta.resize( 1, 1 );
+    m_stagedDelta.resize( 1, 1 );
+    m_stagedDiff.resize( 1, 1 );
     m_names.insert( m_names.end(), { "flat", "delta", "shape", "out_delta", "out_diff" } );
     m_channels.push_back( new mx::improc::milkImage<float>( "flat", 1, 1 ) );
     m_channels.push_back( new mx::improc::milkImage<float>( "delta", 1, 1 ) );
@@ -337,6 +421,11 @@ void Controller::setChannels( float flat, float delta )
 {
     ( *m_channels[0] )()( 0, 0 ) = flat;
     ( *m_channels[1] )()( 0, 0 ) = delta;
+}
+
+void Controller::invalidateStaging()
+{
+    m_stagedDelta.resize( 0, 0 );
 }
 
 std::pair<float, float> Controller::products()
@@ -599,6 +688,242 @@ TEST_CASE( "DM completion configuration and INDI are optional", "[dev::dmComplet
     app.updateDMCompletionINDI();
     CHECK( app.m_indiP_dmCompletion["qualified"].get<double>() == 0 );
     CHECK( app.m_indiP_dmCompletion["state"].get<double>() == static_cast<double>( State::unqualified ) );
+}
+
+/// Release readers before finalization while retaining unpublished private products and callback ownership.
+/** \ingroup dmCompletionIntegration_tests */
+TEST_CASE( "DM deferred products publish only after finalization", "[dev::dmCompletionIntegration][deferred]" )
+{
+    // clang-format off
+    #ifdef DM_COMPLETION_INTEGRATION_TEST_DOXYGEN_REF
+    MagAOX::app::dev::dm<Controller, float>::processImage(nullptr, {});
+    MagAOX::app::dev::dm<Controller, float>::stageDelta();
+    MagAOX::app::dev::dm<Controller, float>::publishDelta();
+    MagAOX::app::dev::dm<Controller, float>::finalizeCommand(0);
+    MagAOX::app::dev::dm<Controller, float>::retireCommand();
+    #endif
+    // clang-format on
+    Controller app;
+    app.enable();
+    app.enableRelease();
+    app.prepareDelta();
+    app.m_deferred     = true;
+    app.m_reportResult = false;
+    app.m_dmTiming.configure( 2, 20 );
+    int64_t releasedNs = 0;
+    app.m_atFinalize   = [&]()
+    {
+        const auto readers = app.m_dmReaderRelease.snapshot();
+        CHECK( MagAOX::dmCompletion::readersQualified( readers ) );
+        CHECK( readers.outcome == Outcome::unknown );
+        CHECK( readers.backendResult == MagAOX::dmCompletion::unavailableResult );
+        CHECK( readers.inputCounter == 50 );
+        CHECK( app.m_dmCompletion.snapshot().state == State::busy );
+        CHECK( app.products() == std::make_pair( 0.0F, 0.0F ) );
+        CHECK( app.m_retired == 0 );
+        int posts = -1;
+        CHECK( sem_getvalue( &app.m_satSemaphore, &posts ) == 0 );
+        CHECK( posts == 0 );
+        releasedNs = readers.finishedNs;
+
+        // Permitted changes after release cannot change the privately captured products or SDK identity.
+        app.setChannels( 100, 200 );
+        ++app.m_metadata.cnt0;
+        ++app.m_metadata.writetime.tv_nsec;
+    };
+    dmCompletionIntegration::m_atPost = [&]()
+    {
+        CHECK( app.products() == std::make_pair( 16.0F, -7.0F ) );
+        CHECK( app.m_dmCompletion.snapshot().state == State::busy );
+        CHECK( app.m_retired == 0 );
+    };
+    app.m_atRetire = [&]()
+    {
+        CHECK( app.m_dmCompletion.snapshot().state == State::unqualified );
+        CHECK( app.products() == std::make_pair( 16.0F, -7.0F ) );
+    };
+
+    REQUIRE( app.receive() == 0 );
+    CHECK( app.m_finalized == 1 );
+    CHECK( app.m_retired == 1 );
+    const auto readers = app.m_dmReaderRelease.snapshot();
+    CHECK( MagAOX::dmCompletion::readersQualified( readers ) );
+    CHECK( readers.inputCounter == 50 );
+    CHECK( readers.finishedNs == releasedNs );
+    CHECK( readers.outcome == Outcome::success );
+    CHECK( readers.backendResult == 0 );
+    CHECK_FALSE( qualified( app.m_dmCompletion.snapshot() ) );
+    app.m_dmTiming.update();
+    CHECK( app.m_dmTiming.summary().total.submitted == 1 );
+    CHECK( app.m_dmTiming.summary().total.invalid == 0 );
+}
+
+/// Drain backend work on every deferred failure without publishing success-only products.
+/** \ingroup dmCompletionIntegration_tests */
+TEST_CASE( "DM deferred failures drain and retain actual SDK outcome", "[dev::dmCompletionIntegration][deferred]" )
+{
+    // clang-format off
+    #ifdef DM_COMPLETION_INTEGRATION_TEST_DOXYGEN_REF
+    MagAOX::app::dev::dm<Controller, float>::processImage(nullptr, {});
+    MagAOX::app::dev::dm<Controller, float>::dmBackendResult(Outcome::success, 0);
+    MagAOX::app::dev::dm<Controller, float>::stageDelta();
+    #endif
+    // clang-format on
+    Controller app;
+    app.enable();
+    app.enableRelease();
+    app.prepareDelta();
+    app.m_deferred     = true;
+    app.m_reportResult = false;
+    app.m_dmTiming.configure( 2, 20 );
+    bool stageFailed = false;
+    bool sdkFailed   = false;
+    bool postFailed  = false;
+
+    SECTION( "SDK failure after successful private reads" )
+    {
+        sdkFailed    = true;
+        app.m_result = Outcome::failed;
+    }
+
+    SECTION( "Private staging fails after dispatch" )
+    {
+        stageFailed = true;
+        app.invalidateStaging();
+    }
+
+    SECTION( "An exception after dispatch still finalizes the command" )
+    {
+        stageFailed     = true;
+        app.m_inCommand = []()
+        {
+            throw std::runtime_error( "offline post-dispatch failure" );
+        };
+    }
+
+    SECTION( "Post failure preserves the earlier successful SDK result" )
+    {
+        postFailed                          = true;
+        dmCompletionIntegration::m_failPost = true;
+    }
+
+    app.m_atFinalize = [&]()
+    {
+        CHECK( app.products() == std::make_pair( 0.0F, 0.0F ) );
+        CHECK( app.m_retired == 0 );
+    };
+
+    REQUIRE( app.receive() == -1 );
+    CHECK( app.m_finalized == 1 );
+    CHECK( app.m_retired == 1 );
+    CHECK( app.products() == ( postFailed ? std::make_pair( 16.0F, -7.0F ) : std::make_pair( 0.0F, 0.0F ) ) );
+    const auto readers = app.m_dmReaderRelease.snapshot();
+    CHECK( MagAOX::dmCompletion::readersQualified( readers ) == !stageFailed );
+    CHECK( readers.outcome == ( sdkFailed ? Outcome::failed : Outcome::success ) );
+    CHECK( readers.backendResult == ( sdkFailed ? 7 : 0 ) );
+    CHECK( app.m_dmCompletion.snapshot().state == State::error );
+    app.m_dmTiming.update();
+    CHECK( app.m_dmTiming.summary().total.submitted == ( sdkFailed ? 0 : 1 ) );
+    CHECK( app.m_dmTiming.summary().total.failed == 1 );
+    int posts = -1;
+    REQUIRE( sem_getvalue( &app.m_satSemaphore, &posts ) == 0 );
+    CHECK( posts == 0 );
+}
+
+/// Finalize no-delta callbacks and reject closed admission without taking callback ownership.
+/** \ingroup dmCompletionIntegration_tests */
+TEST_CASE( "DM deferred finalization handles no delta and closed admission",
+           "[dev::dmCompletionIntegration][deferred]" )
+{
+    // clang-format off
+    #ifdef DM_COMPLETION_INTEGRATION_TEST_DOXYGEN_REF
+    MagAOX::app::dev::dm<Controller, float>::admitCommand();
+    MagAOX::app::dev::dm<Controller, float>::processImage(nullptr, {});
+    #endif
+    // clang-format on
+    Controller app;
+    app.enableRelease();
+    app.m_deferred     = true;
+    app.m_reportResult = false;
+
+    SECTION( "No delta work still releases readers before SDK finalization" )
+    {
+        app.m_atFinalize = [&]()
+        {
+            CHECK( MagAOX::dmCompletion::readersQualified( app.m_dmReaderRelease.snapshot() ) );
+        };
+
+        REQUIRE( app.receive() == 0 );
+        CHECK( app.m_finalized == 1 );
+        CHECK( app.m_retired == 1 );
+    }
+
+    SECTION( "Closed admission has no SDK finalization or retirement" )
+    {
+        app.m_admit = false;
+        REQUIRE( app.receive() == 0 );
+        CHECK( app.m_finalized == 0 );
+        CHECK( app.m_retired == 0 );
+        CHECK_FALSE( MagAOX::dmCompletion::readersQualified( app.m_dmReaderRelease.snapshot() ) );
+    }
+}
+
+/// Expose independent last-read diagnostics and reject names that alias command or completion resources.
+/** \ingroup dmCompletionIntegration_tests */
+TEST_CASE( "DM reader release configuration and INDI are independent", "[dev::dmCompletionIntegration][deferred]" )
+{
+    // clang-format off
+    #ifdef DM_COMPLETION_INTEGRATION_TEST_DOXYGEN_REF
+    MagAOX::app::dev::dm<Controller, float>::setupConfig(config);
+    MagAOX::app::dev::dm<Controller, float>::loadConfig(config);
+    MagAOX::app::dev::dm<Controller, float>::setupDMCompletionINDI();
+    MagAOX::app::dev::dm<Controller, float>::updateDMCompletionINDI();
+    #endif
+    // clang-format on
+    Driver                   driver;
+    Controller               app;
+    mx::app::appConfigurator config;
+    REQUIRE( app.dmT::setupConfig( config ) == 0 );
+    const auto path = std::string( getenv( "MILK_SHM_DIR" ) ) + "/reader-controller.conf";
+
+    SECTION( "Reader publisher without full completion has independent readbacks" )
+    {
+        mx::app::writeConfigFile(
+            path, { "dm", "dm" }, { "shmimName", "readerReleaseStream" }, { "combined", "reader_release" } );
+        REQUIRE( config.readConfig( path ) == 0 );
+        REQUIRE( app.dmT::loadConfig( config ) == 0 );
+        REQUIRE( app.setupDMCompletionINDI() == 0 );
+        CHECK( app.m_indiP_dmCompletion.getNumElements() == 0 );
+        CHECK( app.m_indiP_dmReaderRelease.getPerm() == pcf::IndiProperty::ReadOnly );
+        CHECK( app.m_indiP_dmReaderRelease.getNumElements() == 11 );
+        CHECK( app.m_indiP_dmReaderReleaseStream["name"].get<std::string>() == "reader_release" );
+        app.enableRelease();
+        app.m_indiDriver = &driver;
+        REQUIRE( app.receive() == 0 );
+        app.updateDMCompletionINDI();
+        CHECK( app.m_indiP_dmReaderRelease["qualified"].get<double>() == 1 );
+        CHECK( app.m_indiP_dmReaderRelease["state"].get<double>() == double( State::released ) );
+        CHECK( app.m_indiP_dmReaderRelease["outcome"].get<double>() == double( Outcome::success ) );
+        CHECK_FALSE( driver.m_messages.empty() );
+    }
+
+    SECTION( "Reader stream cannot alias the combined command" )
+    {
+        mx::app::writeConfigFile(
+            path, { "dm", "dm" }, { "shmimName", "readerReleaseStream" }, { "combined", "combined" } );
+        REQUIRE( config.readConfig( path ) == 0 );
+        CHECK( app.dmT::loadConfig( config ) == -1 );
+    }
+
+    SECTION( "Reader stream cannot alias the full completion stream" )
+    {
+        mx::app::writeConfigFile( path,
+                                  { "dm", "dm", "dm" },
+                                  { "shmimName", "readerReleaseStream", "completionStream" },
+                                  { "combined", "reader_release", "reader_release" } );
+        REQUIRE( config.readConfig( path ) == 0 );
+        CHECK( app.dmT::loadConfig( config ) == -1 );
+    }
 }
 
 } // namespace dmCompletionIntegrationTest

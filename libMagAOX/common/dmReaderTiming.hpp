@@ -1,5 +1,6 @@
 /** \file dmReaderTiming.hpp
- * \brief Qualified reader-protection measurements joining primary, combined and DM completion observations.
+ * \brief Qualified reader-protection measurements joining primary, combined and independent controller endpoint
+ * observations.
  */
 #ifndef common_dmReaderTiming_hpp
 #define common_dmReaderTiming_hpp
@@ -102,11 +103,18 @@ struct Counters
     uint64_t droppedPrimary{ 0 };    ///< Primary capture handoffs dropped because their queue was full.
     uint64_t droppedCombined{ 0 };   ///< Combined capture handoffs dropped because their queue was full.
     uint64_t droppedCompletion{ 0 }; ///< Completion capture handoffs dropped because their queue was full.
+    uint64_t sdkResults{ 0 };        ///< Distinct release attempts with an explicitly observed backend outcome.
+    uint64_t sdkSuccess{ 0 };        ///< Observed actual SDK successes; reader release alone never increments this.
+    uint64_t sdkFailed{
+        0 }; ///< Observed backend failures or exceptions, including outcomes received after reader release.
 };
 
 /// Consumer-owned trailing statistics and lifetime worst-case evidence.
 struct Summary
 {
+    MagAOX::dmCompletion::Kind kind{
+        MagAOX::dmCompletion::Kind::completion }; ///< Endpoint protocol measured independently.
+
     bool     enabled{ false };       ///< Queues and consumer storage were configured before the producers started.
     uint64_t session{ 0 };           ///< Join epoch, incremented when attachment or publisher provenance changes.
     uint64_t sequence{ 0 };          ///< Consumer summary update sequence.

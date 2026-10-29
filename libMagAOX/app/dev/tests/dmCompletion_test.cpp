@@ -95,7 +95,8 @@ struct Fixture
     Publisher m_publisher; ///< Sole completion writer under test.
 
     /// Create a source and optionally open the completion writer and reader.
-    explicit Fixture( bool opened = true /**< [in] Create the completion stream immediately. */ );
+    explicit Fixture( bool opened = true /**< [in] Create the completion stream immediately. */,
+                      Kind kind   = Kind::completion /**< [in] Dedicated endpoint protocol to publish. */ );
 
     /// Invalidate completion before closing the reader and destroying the source.
     ~Fixture();
@@ -113,7 +114,7 @@ struct Fixture
     Record read();
 };
 
-Fixture::Fixture( bool opened )
+Fixture::Fixture( bool opened, Kind kind )
 {
     static_cast<void>( directory() );
     static unsigned sequence = 0;
@@ -130,7 +131,7 @@ Fixture::Fixture( bool opened )
 
     if( opened )
     {
-        REQUIRE( m_publisher.open( m_name ) == 0 );
+        REQUIRE( m_publisher.open( m_name, kind ) == 0 );
         attach();
     }
 }
@@ -632,6 +633,141 @@ TEST_CASE( "DM completion disabled and hot path operations preserve caller state
     fixture.m_publisher.finish( &fixture.m_source, 0, Outcome::success );
     CHECK( errno == EDOM );
     CHECK( qualified( fixture.read() ) );
+}
+
+/// Keep reader-release records distinct while preserving the historical full-completion wire layout.
+/** \ingroup dmCompletion_tests */
+TEST_CASE( "DM completion distinguishes early release from SDK success on the fixed transport", "[dev::dmCompletion]" )
+{
+    const auto completion = completeRecord();
+    const auto legacy     = encode( completion );
+    REQUIRE( legacy[0] == magic );
+    REQUIRE( legacy[15] == 0 );
+    Record decoded;
+    REQUIRE( decode( legacy, decoded ) );
+    REQUIRE( decoded.kind == Kind::completion );
+    REQUIRE( decoded.backendResult == unavailableResult );
+    REQUIRE( qualified( decoded ) );
+    REQUIRE_FALSE( readersQualified( decoded ) );
+
+    auto readers       = completion;
+    readers.kind       = Kind::readers;
+    readers.state      = State::released;
+    readers.outcome    = Outcome::unknown;
+    const auto pending = encode( readers );
+    REQUIRE( pending[0] == readersMagic );
+    REQUIRE( pending[15] == static_cast<uint64_t>( unavailableResult ) );
+    REQUIRE( decode( pending, decoded ) );
+    REQUIRE( decoded.kind == Kind::readers );
+    REQUIRE_FALSE( qualified( decoded ) );
+    REQUIRE( readersQualified( decoded ) );
+    readers.outcome       = Outcome::failed;
+    readers.backendResult = 147;
+    REQUIRE( decode( encode( readers ), decoded ) );
+    REQUIRE( readersQualified( decoded ) );
+    REQUIRE_FALSE( qualified( decoded ) );
+    REQUIRE( decoded.backendResult == 147 );
+
+    auto wrongState = pending;
+    wrongState[5]   = static_cast<uint64_t>( State::complete );
+    REQUIRE_FALSE( decode( wrongState, decoded ) );
+    auto wrongKind = legacy;
+    wrongKind[5]   = static_cast<uint64_t>( State::released );
+    REQUIRE_FALSE( decode( wrongKind, decoded ) );
+}
+
+/// Publish early release before actual SDK completion and preserve that endpoint through a late failure.
+/** \ingroup dmCompletion_tests */
+TEST_CASE( "DM early release survives later SDK failure without recapturing a newer command", "[dev::dmCompletion]" )
+{
+    Fixture fixture( true, Kind::readers );
+    auto   &publisher = fixture.m_publisher;
+    publisher.submission( Outcome::failed, 99 );
+    REQUIRE( fixture.drain() == 0 );
+    publisher.begin( &fixture.m_source );
+    const auto admitted = publisher.attempt();
+    publisher.submission( Outcome::success, 0 );
+    REQUIRE( fixture.drain() == 0 );
+    REQUIRE( fixture.read().state == State::busy );
+    publisher.release( &fixture.m_source );
+    REQUIRE( fixture.drain() == 1 );
+    const auto released = fixture.read();
+    REQUIRE( readersQualified( released ) );
+    REQUIRE_FALSE( qualified( released ) );
+    REQUIRE( released.outcome == Outcome::unknown );
+    REQUIRE( released.backendResult == unavailableResult );
+    REQUIRE( released.inputCounter == admitted.inputCounter );
+    REQUIRE( released.startedNs == admitted.startedNs );
+    REQUIRE( released.finishedNs > 0 );
+    fixture.next();
+    publisher.submission( Outcome::failed, 73 );
+    REQUIRE( fixture.drain() == 1 );
+    const auto failed = fixture.read();
+    REQUIRE( readersQualified( failed ) );
+    REQUIRE( failed.outcome == Outcome::failed );
+    REQUIRE( failed.backendResult == 73 );
+    REQUIRE( failed.inputCounter == released.inputCounter );
+    REQUIRE( failed.publicationNsec == released.publicationNsec );
+    REQUIRE( failed.finishedNs == released.finishedNs );
+    REQUIRE( failed.callbackResult == 0 );
+    REQUIRE( failed.sequence == released.sequence );
+    publisher.submission( Outcome::success, 0 );
+    REQUIRE( fixture.drain() == 0 );
+    REQUIRE( fixture.read().backendResult == 73 );
+    publisher.reset();
+    REQUIRE( fixture.drain() == 1 );
+    publisher.submission( Outcome::success, 0 );
+    REQUIRE( fixture.drain() == 0 );
+    REQUIRE( fixture.read().state == State::unavailable );
+}
+
+/// Revoke mismatched, synthetic and failed reader preparations while still retaining their actual SDK diagnostics.
+/** \ingroup dmCompletion_tests */
+TEST_CASE( "DM early release requires the admitted coherent reader identity", "[dev::dmCompletion]" )
+{
+    for( int variant = 0; variant < 4; ++variant )
+    {
+        Fixture fixture( true, Kind::readers );
+        fixture.m_publisher.begin( &fixture.m_source, variant != 0 );
+
+        if( variant == 1 )
+        {
+            fixture.next();
+        }
+
+        fixture.m_publisher.release( &fixture.m_source, variant == 2 ? -7 : 0, variant != 3 );
+        auto release = fixture.read();
+        REQUIRE_FALSE( readersQualified( release ) );
+        REQUIRE_FALSE( qualified( release ) );
+        REQUIRE( release.state == ( variant == 2 ? State::error : State::unqualified ) );
+        fixture.m_publisher.submission( Outcome::success, 0 );
+        release = fixture.read();
+        REQUIRE_FALSE( readersQualified( release ) );
+        REQUIRE( release.outcome == Outcome::success );
+        REQUIRE( release.backendResult == 0 );
+        REQUIRE( release.callbackResult == ( variant == 2 ? -7 : 0 ) );
+    }
+}
+
+/// Reject cross-protocol ownership and preserve reader attachment across a same-kind publisher restart.
+/** \ingroup dmCompletion_tests */
+TEST_CASE( "DM completion publisher never repurposes a reader release stream", "[dev::dmCompletion]" )
+{
+    Fixture fixture( true, Kind::readers );
+    fixture.m_publisher.begin( &fixture.m_source );
+    fixture.m_publisher.release( &fixture.m_source );
+    const auto session = fixture.read().session;
+    fixture.m_publisher.close();
+    Publisher wrong;
+    REQUIRE( wrong.open( fixture.m_name ) < 0 );
+    REQUIRE( fixture.read().kind == Kind::readers );
+    REQUIRE( fixture.m_publisher.open( fixture.m_name, Kind::readers ) == 0 );
+    REQUIRE( fixture.read().session != session );
+    REQUIRE( fixture.read().kind == Kind::readers );
+    REQUIRE( fixture.read().state == State::unavailable );
+    fixture.m_publisher.begin( &fixture.m_source );
+    fixture.m_publisher.release( &fixture.m_source );
+    REQUIRE( readersQualified( fixture.read() ) );
 }
 
 } // namespace dmCompletionTest

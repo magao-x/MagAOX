@@ -3995,3 +3995,27 @@ Lifetime maxima and exact worst-case evidence accompany rolling populations.
 Three independent bounded handoffs keep matching/statistics out of the monitor
 callbacks, and source lifecycle, unmatched evidence and loss remain visible.
 No simulated or live scheduling decision is changed.
+
+### First completion/reader-protection capture: 20261028T044834Z
+
+The [measurement record](dm-reader-protection-measurement.md#2026-10-27-first-operator-capture-044834z)
+contains the full results and plot. The operator confirms unchanged settings,
+dmcomb mode/delay, placement and workload during the capture, with modal gains
+zero (scalar gain 1). Across 119.798 seconds, 239,594 of 239,595 completion
+observations match. Required software protection is typically 124.985 us and
+has a newly observed maximum 133.372 us, leaving 21.628 us inside the configured
+155 us budget. No matched command exceeds that budget.
+
+The ordinary-priority observer adds about 3.897 us typical notification delay,
+with a 78.689 us retained maximum and 202.763 us maximum hold until notice
+observation. The lifetime 234.062 us notice hold predates the capture. One
+reader-specific combined observation is rejected; its reason is not recorded,
+while upstream command/combiner quality stays clean. The maximum is therefore
+observed evidence rather than a fully qualified hard bound.
+
+The unchanged shadow policy has no passive skips/overlaps and one new active
+reader hold. Its reporting window also contains a low 20.829 us offset after
+a late observation baseline, although per-event skip association is unavailable.
+The SDK remains about 100.8 us and later work about 16 us. Retain the current
+budget pending longer coverage, rejection attribution and any separate
+completion-aware policy test; no runtime code or setting is changed here.

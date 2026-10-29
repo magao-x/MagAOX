@@ -301,10 +301,11 @@ readerStats( const DmSyncoReaderTiming *reader /**< [in] Deserialized reader-pro
 /// Populate unchanged scheduler fields with independently sampled primary and combiner timing.
 telem_dmsynco::messageT
 message( const dmTiming::Summary             &primary /**< [in] coherent primary summary */,
-         const dmCombTiming::Summary         &combiner   = {} /**< [in] independent combiner summary */,
-         const dmSyncoSimulation::Summary    &simulation = {} /**< [in] hypothetical shadow prediction */,
-         const dmSyncoSimulation::TraceBatch &trace      = {} /**< [in] drained overlap and estimator evidence */,
-         const dmReaderTiming::Summary       &reader     = {} /**< [in] optional software-reader timing */ )
+         const dmCombTiming::Summary         &combiner      = {} /**< [in] independent combiner summary */,
+         const dmSyncoSimulation::Summary    &simulation    = {} /**< [in] hypothetical shadow prediction */,
+         const dmSyncoSimulation::TraceBatch &trace         = {} /**< [in] drained overlap and estimator evidence */,
+         const dmReaderTiming::Summary       &reader        = {} /**< [in] optional software-reader timing */,
+         const dmReaderTiming::Summary       &readerRelease = {} /**< [in] independent early-release timing */ )
 {
     return telem_dmsynco::messageT( 3,
                                     2,
@@ -325,7 +326,8 @@ message( const dmTiming::Summary             &primary /**< [in] coherent primary
                                     {},
                                     simulation,
                                     trace,
-                                    reader );
+                                    reader,
+                                    readerRelease );
 }
 
 /// Build a real log envelope for shared verification dispatch.
@@ -368,6 +370,7 @@ void checkReader( const DmSyncoReaderTiming     *actual /**< [in] Decoded reader
 {
     REQUIRE( actual != nullptr );
     CHECK( actual->enabled() == expected.enabled );
+    CHECK( actual->kind() == static_cast<uint8_t>( expected.kind ) );
     CHECK( actual->session() == expected.session );
     CHECK( actual->sequence() == expected.sequence );
     CHECK( actual->now_ns() == expected.nowNs );
@@ -388,6 +391,9 @@ void checkReader( const DmSyncoReaderTiming     *actual /**< [in] Decoded reader
 
     const auto *quality = actual->total();
     REQUIRE( quality != nullptr );
+    CHECK( quality->sdk_results() == expected.total.sdkResults );
+    CHECK( quality->sdk_success() == expected.total.sdkSuccess );
+    CHECK( quality->sdk_failed() == expected.total.sdkFailed );
     const std::array<uint64_t, 24> counts         = { quality->events(),
                                                       quality->primary(),
                                                       quality->combined(),
@@ -464,6 +470,8 @@ void checkReader( const DmSyncoReaderTiming     *actual /**< [in] Decoded reader
     CHECK( sample->completed()->outcome() == static_cast<uint8_t>( completion.outcome ) );
     CHECK( sample->completed()->callback_result() == completion.callbackResult );
     CHECK( sample->completed()->publisher_pid() == completion.publisherPid );
+    CHECK( sample->completed()->kind() == static_cast<uint8_t>( completion.kind ) );
+    CHECK( sample->completed()->backend_result() == completion.backendResult );
     CHECK( sample->completed()->observed_ns() == worst.completed.observedNs );
     CHECK( sample->base_ns() == worst.baseNs );
     CHECK( sample->offset_ns() == worst.offsetNs );
@@ -863,7 +871,8 @@ TEST_CASE( "Synco telemetry accepts legacy records and defaults primary timing d
              "[dmsynco] state=3 steps=2 period_ns=500000 delivered=11 missed=2 faults=3 schedule_valid=1 "
              "primary_timing=unavailable primary_pairs=unavailable combiner_timing=unavailable "
              "camera_timing=unavailable camera_pairs=unavailable pipeline_timing=unavailable "
-             "cameraWrite_timing=unavailable cameraWrite_pairs=unavailable reader_timing=unavailable" );
+             "cameraWrite_timing=unavailable cameraWrite_pairs=unavailable reader_timing=unavailable "
+             "reader_release_timing=unavailable" );
 }
 
 /// Keep primary availability independent of SDK populations and unavailable scheduler snapshots.
@@ -2588,6 +2597,100 @@ TEST_CASE( "Synco telemetry validates every reader timing population", "[dmSynco
             REQUIRE_FALSE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
         }
     }
+}
+
+/// Retain early-reader populations without requiring successful or observed version-one completion.
+/** \ingroup dmSyncoTelemetry_unit_test */
+TEST_CASE( "Synco telemetry separates early read release from full SDK completion", "[dmSyncoTelemetry]" )
+{
+    // clang-format off
+#ifdef DMSYNCO_TELEMETRY_TEST_DOXYGEN_REF
+    MagAOX::logger::telem_dmsynco::messageT;
+    MagAOX::logger::telem_dmsynco::verify;
+#endif
+    // clang-format on
+    auto release                           = sampleReader();
+    release.kind                           = dmCompletion::Kind::readers;
+    release.worst.completed.record.kind    = dmCompletion::Kind::readers;
+    release.worst.completed.record.state   = dmCompletion::State::released;
+    release.worst.completed.record.outcome = dmTiming::Outcome::unknown;
+
+    SECTION( "SDK result has not yet been observed" )
+    {
+        CHECK( release.worst.completed.record.backendResult == dmCompletion::unavailableResult );
+    }
+
+    SECTION( "An actual later SDK failure does not undo finished reads" )
+    {
+        release.worst.completed.record.outcome       = dmTiming::Outcome::failed;
+        release.worst.completed.record.backendResult = 7;
+        release.total.sdkResults                     = 1;
+        release.total.sdkFailed                      = 1;
+    }
+
+    auto input  = message( samplePrimary(), {}, {}, {}, {}, release );
+    auto buffer = envelope( input );
+    REQUIRE( telem_dmsynco::verify( buffer, flatlogs::logHeader::msgLen( buffer ) ) );
+    REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+    const auto *record = GetTelem_dmsynco_fb( input.builder.GetBufferPointer() );
+    CHECK( record->reader_timing() == nullptr );
+    checkReader( record->reader_release_timing(), release );
+    CHECK( telem_dmsynco::msgString( input.builder.GetBufferPointer(), input.builder.GetSize() )
+               .find( "reader_release_mode=shadow_observation" ) != std::string::npos );
+    const auto          json = telem_dmsynco::msgJSON( input.builder.GetBufferPointer(),
+                                              input.builder.GetSize(),
+                                              reinterpret_cast<const uint8_t *>( telem_dmsynco_bfbs ),
+                                              telem_dmsynco_bfbs_len );
+    flatbuffers::Parser parser;
+    REQUIRE( parser.Deserialize( reinterpret_cast<const uint8_t *>( telem_dmsynco_bfbs ), telem_dmsynco_bfbs_len ) );
+    REQUIRE( parser.Parse( json.c_str() ) );
+    checkReader( GetTelem_dmsynco_fb( parser.builder_.GetBufferPointer() )->reader_release_timing(), release );
+}
+
+/// Reject endpoint-protocol confusion and inconsistent opportunistic SDK-result counts.
+/** \ingroup dmSyncoTelemetry_unit_test */
+TEST_CASE( "Synco telemetry validates independent release protocol and SDK coverage", "[dmSyncoTelemetry]" )
+{
+    // clang-format off
+#ifdef DMSYNCO_TELEMETRY_TEST_DOXYGEN_REF
+    MagAOX::logger::telem_dmsynco::verify;
+#endif
+    // clang-format on
+    auto release                           = sampleReader();
+    release.kind                           = dmCompletion::Kind::readers;
+    release.worst.completed.record.kind    = dmCompletion::Kind::readers;
+    release.worst.completed.record.state   = dmCompletion::State::released;
+    release.worst.completed.record.outcome = dmTiming::Outcome::unknown;
+
+    SECTION( "Full-completion record cannot stand for early release" )
+    {
+        release.worst.completed.record.kind = dmCompletion::Kind::completion;
+    }
+
+    SECTION( "Full-completion table cannot carry a release population" )
+    {
+        auto input  = message( samplePrimary(), {}, {}, {}, release );
+        auto buffer = envelope( input );
+        REQUIRE_FALSE( telem_dmsynco::verify( buffer, flatlogs::logHeader::msgLen( buffer ) ) );
+        return;
+    }
+
+    SECTION( "SDK count does not equal its actual outcomes" )
+    {
+        release.total.sdkResults = 2;
+        release.total.sdkSuccess = 1;
+    }
+
+    SECTION( "SDK results exceed observed release records" )
+    {
+        release.total.sdkResults = release.total.completion + 1;
+        release.total.sdkSuccess = release.total.sdkResults;
+    }
+
+    auto input  = message( samplePrimary(), {}, {}, {}, {}, release );
+    auto buffer = envelope( input );
+    REQUIRE_FALSE( telem_dmsynco::verify( buffer, flatlogs::logHeader::msgLen( buffer ) ) );
+    REQUIRE_FALSE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
 }
 
 } // namespace dmSyncoTelemetryTest

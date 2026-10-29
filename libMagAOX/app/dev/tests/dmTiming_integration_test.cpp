@@ -472,7 +472,7 @@ TEST_CASE( "DM timing INDI follows valid, stale and disabled summaries", "[dev::
     REQUIRE( app.setupDMTimingINDI() == 0 );
     app.m_indiDriver = &driver;
     REQUIRE( app.m_indiP_dmTiming.getNumElements() == 15 );
-    REQUIRE( app.m_indiP_dmStages.getNumElements() == 60 );
+    REQUIRE( app.m_indiP_dmStages.getNumElements() == 90 );
     REQUIRE( app.m_indiP_dmTimingQuality.getNumElements() == 21 );
     app.shmimMonitorTiming( {}, MagAOX::app::dev::shmimMonitorEvent::receipt );
     REQUIRE( app.processImage( nullptr, {} ) == 0 );

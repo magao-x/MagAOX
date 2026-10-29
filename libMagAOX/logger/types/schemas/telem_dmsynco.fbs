@@ -391,6 +391,8 @@ table DmSyncoReaderCompletion
     callback_result:long;
     publisher_pid:ulong;
     observed_ns:long;
+    kind:ubyte;
+    backend_result:long = -9223372036854775808;
 }
 
 // Completion offset and model slack are signed; all absolute local times are monotonic nanoseconds.
@@ -432,6 +434,9 @@ table DmSyncoReaderQuality
     dropped_primary:ulong;
     dropped_combined:ulong;
     dropped_completion:ulong;
+    sdk_results:ulong;
+    sdk_success:ulong;
+    sdk_failed:ulong;
 }
 
 // Trailing populations are in seconds; extrema and full worst-event evidence survive window expiration.
@@ -462,6 +467,7 @@ table DmSyncoReaderTiming
     max_required_hold_ns:long;
     max_observed_hold_ns:long;
     over_budget:ulong;
+    kind:ubyte;
 }
 
 table Telem_dmsynco_fb
@@ -485,6 +491,7 @@ table Telem_dmsynco_fb
     camera_publication_timing:DmSyncoPrimaryTiming;
     simulation:DmSyncoSimulation;
     reader_timing:DmSyncoReaderTiming;
+    reader_release_timing:DmSyncoReaderTiming;
 }
 
 root_type Telem_dmsynco_fb;

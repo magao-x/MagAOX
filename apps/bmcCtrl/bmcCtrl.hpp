@@ -23,6 +23,11 @@ Test:
 #include "../../magaox_git_version.h"
 #include "../../libMagAOX/app/dev/telemeter.hpp"
 
+#include <condition_variable>
+#include <fstream>
+#include <memory>
+#include <sstream>
+
 /* BMC SDK C Header */
 #include <BMCApi.h>
 
@@ -82,7 +87,142 @@ class bmcCtrl : public MagAOXApp<true>,
 
     ///@}
 
-    long m_nsat{ 0 }; ///< Saturated actuator count accumulated for ordinary app reporting.
+    std::atomic<long> m_nsat{ 0 }; ///< Saturated actuator count accumulated for ordinary app reporting.
+
+    /** \name SDK Worker - Data
+     * @{ */
+
+    bool m_sdkWorkerEnabled{ false }; ///< Startup-only opt-in to overlapped SDK submission.
+
+    int m_sdkThreadPrio{ 0 }; ///< Requested SDK-worker scheduling priority.
+
+    std::string m_sdkCpuset; ///< Requested SDK-worker cpuset; empty retains inherited affinity.
+
+    double m_sdkTimeoutSec{ 1.0 }; ///< Diagnostic normal-command deadline; never cancels or relinquishes SDK ownership.
+
+    std::thread m_sdkThread; ///< Sole SDK owner while worker mode is enabled.
+
+    bool m_sdkThreadInit{ true }; ///< threadStart compatibility flag; the worker waits on m_sdkConfigured instead.
+
+    pid_t m_sdkThreadID{ 0 }; ///< Worker TID used by the standard thread readback.
+
+    pcf::IndiProperty m_sdkThreadProp; ///< Standard requested scheduling/TID readback.
+
+    pcf::IndiProperty m_indiP_sdkWorker; ///< Ordinary-thread snapshot of worker admission and result diagnostics.
+
+    /// SDK operations serialized on the same handle owner.
+    enum class SdkOperation
+    {
+        open,
+        loadMap,
+        set,
+        clear,
+        close
+    };
+
+    /// Fixed request whose pointees remain owned until its matching result is consumed.
+    struct SdkRequest
+    {
+        SdkOperation  operation{ SdkOperation::set }; ///< Operation selected by the serialized caller.
+        const char   *serial{ nullptr };              ///< Control-owned serial string for open.
+        const double *values{ nullptr };              ///< Immutable command or zero vector for set.
+        uint32_t     *map{ nullptr };                 ///< Control-owned mapping output for loadMap.
+        uint64_t      sequence{ 0 };                  ///< Unique request sequence, shared with its result.
+        uint64_t      generation{ 0 };                ///< Handle generation frozen at dispatch.
+        bool    normalCommand{ false }; ///< Only normal command submissions participate in the diagnostic watchdog.
+        int64_t dispatchNs{ 0 };        ///< Existing monitor dispatch timestamp; control operations remain exempt.
+    };
+
+    /// Fixed SDK result; only the monitor imports command timing.
+    struct SdkResult
+    {
+        BMCRC    result{ NO_ERR };    ///< Actual vendor result, or -1 when the SDK throws.
+        uint32_t actuatorCount{ 0 };  ///< Owned copy of handle metadata following open.
+        uint32_t driverType{ 0 };     ///< SDK-owner snapshot of the active transport interface ID.
+        uint32_t amplifierType{ 0 };  ///< SDK-owner snapshot of the PCIe amplifier configuration ID.
+        int64_t  startNs{ 0 };        ///< Actual monotonic SDK entry boundary.
+        int64_t  endNs{ 0 };          ///< Actual monotonic SDK return/exception boundary.
+        uint64_t sequence{ 0 };       ///< Matching request sequence.
+        uint64_t generation{ 0 };     ///< Matching handle generation.
+        bool     exception{ false };  ///< SDK raised a C++ exception instead of returning a code.
+        bool     timedOut{ false };   ///< A diagnostic deadline was observed; actual SDK ownership was retained.
+        bool     newTimeout{ false }; ///< Finalization detected a violation not already counted by ordinary app logic.
+    };
+
+    std::mutex
+        m_sdkMutex; ///< Protects fixed request/result visibility; nested locking always takes SDK before command mutex.
+
+    std::condition_variable m_sdkWake; ///< Wakes the sole worker for a pending request or orderly stop.
+
+    std::condition_variable m_sdkDone; ///< Wakes the exact request owner after actual SDK return.
+
+    SdkRequest m_sdkRequest; ///< One fixed request slot, never overwritten while occupied.
+
+    SdkResult m_sdkResult; ///< One fixed result slot, consumed by its exact request owner.
+
+    bool m_sdkPending{ false }; ///< A request has been dispatched and not yet consumed.
+
+    bool m_sdkReady{ false }; ///< The pending request has returned from the SDK.
+
+    bool m_sdkTimedOut{ false }; ///< Once-per-job timeout claim protected by the SDK handoff mutex.
+
+    bool m_sdkStop{ false }; ///< Stop requested only after control and command owners drain.
+
+    bool m_sdkConfigured{ false }; ///< Mutex-protected worker startup barrier after actual placement verification.
+
+    int m_sdkPolicy{ -1 }; ///< Verified worker scheduling policy, recorded before SDK access is enabled.
+
+    int m_sdkActualPrio{ -1 }; ///< Verified worker scheduling priority.
+
+    int m_sdkAllowedCpus{ 0 }; ///< Verified worker affinity-mask population.
+
+    uint64_t m_sdkSequence{ 0 }; ///< Monotonically increasing request sequence under the SDK mutex.
+
+    uint64_t m_sdkGeneration{ 0 }; ///< Control-owned handle generation, changed with admission closed.
+
+    std::mutex m_controlMutex; ///< Serializes whole control operations, including their drain and setup.
+
+    std::mutex
+        m_commandMutex; ///< Protects admission/callback ownership; never acquire SDK mutex while holding this mutex.
+
+    std::condition_variable m_commandRetired; ///< Control waits until the entire monitor callback retires.
+
+    bool m_admissionClosed{ true }; ///< Controls close admission before waiting for callback retirement.
+
+    bool m_commandActive{ false }; ///< Remains true through timing and full-completion publication.
+
+    bool m_sdkFault{ false }; ///< Fault latch; only release and successful reinitialization recover it.
+
+    bool m_haveInput{ false }; ///< A coherent input has been admitted in this handle generation.
+
+    ino_t m_inputInode{ 0 }; ///< Input stream identity used for duplicate/coalesced-post rejection.
+
+    uint64_t m_inputCounter{ 0 }; ///< Last admitted input counter; never replay semaphore backlog.
+
+    uint64_t m_rejectedInputs{ 0 }; ///< Attempts rejected while unavailable, incoherent or duplicate.
+
+    uint64_t m_coalescedInputs{ 0 }; ///< Counter advances skipped while the monitor was occupied.
+
+    uint64_t m_sdkFailures{ 0 }; ///< Command SDK failures/exceptions observed by finalization.
+
+    uint64_t m_completedCommands{ 0 }; ///< Matched command results collected at callback tail.
+
+    uint64_t m_sdkTimeouts{ 0 }; ///< Diagnostic deadline violations, counted once per normal command.
+
+    double m_sdkActiveAgeSec{ 0 }; ///< Ordinary-thread observed age of a pending normal SDK call.
+
+    std::vector<double> m_sdkValues; ///< Preallocated immutable SDK input, separate from saturation input.
+
+    std::vector<uint8_t> m_stagedSat; ///< Preallocated private instantaneous saturation results.
+
+    long m_stagedSatCount{ 0 }; ///< Saturation count committed only after all prepublication processing succeeds.
+
+    uint64_t m_commandJob{ 0 }; ///< Monitor-owned pending SDK sequence, zero when no command was dispatched.
+
+    int64_t m_sdkDispatchNs{ 0 }; ///< Monitor-side handoff timestamp for the active command.
+
+    /// @}
+
   public:
     /// Default c'tor.
     bmcCtrl();
@@ -154,11 +294,25 @@ class bmcCtrl : public MagAOXApp<true>,
 
     /// Send a command to the DM
     /** This is called by the shmim monitoring thread in response to a semaphore trigger.
+     * Worker mode returns after dispatch and private staging; finalizeCommand() collects actual SDK success.
+     * The default synchronous mode returns after SDK return and saturation processing.
      *
-     * \returns 0 on success
+     * \returns 0 on successful synchronous submission or deferred preparation
      * \returns -1 on error
      */
     int commandDM( void *curr_src /**< [in] Combined command pixels. */ );
+
+    /// Admit a fresh coherent semaphore command without waiting on a selected pixel pointer.
+    bool admitCommand();
+
+    /// Select generic staged processing only for worker-enabled callbacks.
+    bool deferredCommand() const;
+
+    /// Drain an actual SDK result and commit saturation only after successful processing and SDK return.
+    int finalizeCommand( int processingResult /**< [in] Preparation/channel-staging result. */ ) noexcept;
+
+    /// Release command ownership after all callback publication and timing have finished.
+    void retireCommand() noexcept;
 
     /// Release the DM, making it safe to turn off power.
     /** The application will be state READY at the conclusion of this.
@@ -182,11 +336,54 @@ class bmcCtrl : public MagAOXApp<true>,
     /// Calibrated command-vector address corresponding to each image-grid actuator.
     int *m_actuator_mapping{ nullptr };
 
-    double *m_dminputs{ nullptr }; ///< Pre-allocated command vector, used only in commandDM
+    double *m_dminputs{ nullptr }; ///< Monitor-owned preparation and saturation input; never modified by the worker.
 
-    DM m_dm = {}; ///< BMC SDK handle for the DM.
+    DM m_dm = {}; ///< Handle accessed by the sole SDK owner in worker mode; reset only after quiescence.
 
     bool m_dmopen{ false }; ///< Track whether the DM connection has been opened
+
+    /// Start and initialize the optional sole SDK owner using standard thread settings.
+    int startSdkWorker();
+
+    /// Verify actual scheduling and, when requested, exact cpuset affinity before allowing SDK work.
+    int verifySdkThread();
+
+    /// Drain command ownership, wake the idle worker and join before destroying resources.
+    void stopSdkWorker() noexcept;
+
+    /// Enter the worker loop after standard thread initialization.
+    static void sdkThreadStart( bmcCtrl *app /**< [in] Owning controller. */ );
+
+    /// Execute fixed SDK requests, returning all errors through the matching result slot.
+    void sdkThreadExec() noexcept;
+
+    /// Call one SDK operation on the sole owner and capture its actual boundaries.
+    SdkResult performSdk( const SdkRequest &request /**< [in] Immutable request and borrowed storage. */ ) noexcept;
+
+    /// Dispatch a fixed request without allocating; zero means the slot was unavailable.
+    uint64_t dispatchSdk( SdkRequest request /**< [in] Request whose storage remains valid through waitSdk. */ );
+
+    /// Collect the exact dispatched result without treating notifications as job tokens.
+    SdkResult waitSdk( uint64_t sequence /**< [in] Exact outstanding request sequence. */ );
+
+    /// Run a control operation synchronously through the worker, or directly in legacy mode.
+    SdkResult runSdk( SdkRequest request /**< [in] Control request with synchronous borrowed storage. */ );
+
+    /// Close admission and drain the whole callback; return whether it was previously open.
+    bool closeAdmission();
+
+    /// Reopen admission after a successful control operation when the handle is ready and unfaulted.
+    void openAdmission( bool reopen /**< [in] Whether the caller intends to resume commands. */ );
+
+    /// Zero through the selected SDK owner while the caller already holds control ownership.
+    int zeroDMImpl();
+
+    /// Observe a pending normal SDK call without waiting for return, retaining all resource ownership on timeout.
+    void
+    checkSdkTimeout( int64_t nowNs /**< [in] Local monotonic observation time; explicit for deterministic tests. */ );
+
+    /// Update read-only worker diagnostics outside realtime execution.
+    void updateSdkWorkerINDI();
 
     ///@}
 
@@ -232,6 +429,8 @@ bmcCtrl::bmcCtrl() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
 
 bmcCtrl::~bmcCtrl() noexcept
 {
+    stopSdkWorker();
+
     if( m_actuator_mapping )
     {
         free( m_actuator_mapping );
@@ -273,6 +472,44 @@ void bmcCtrl::setupConfig()
                 "string",
                 "Threshold above which to log saturation." );
 
+    config.add( "sdk.workerEnabled",
+                "",
+                "sdk.workerEnabled",
+                argType::Required,
+                "sdk",
+                "workerEnabled",
+                false,
+                "bool",
+                "Use the opt-in sole SDK worker and staged reader release. Requires restart." );
+    config.add( "sdk.threadPrio",
+                "",
+                "sdk.threadPrio",
+                argType::Required,
+                "sdk",
+                "threadPrio",
+                false,
+                "int",
+                "Requested SDK-worker FIFO priority (0 selects ordinary scheduling)." );
+    config.add( "sdk.cpuset",
+                "",
+                "sdk.cpuset",
+                argType::Required,
+                "sdk",
+                "cpuset",
+                false,
+                "string",
+                "SDK-worker cpuset; use a separate qualified physical core." );
+
+    config.add( "sdk.timeoutSec",
+                "",
+                "sdk.timeoutSec",
+                argType::Required,
+                "sdk",
+                "timeoutSec",
+                false,
+                "double",
+                "Positive finite diagnostic normal-command deadline in seconds; never cancels the SDK call." );
+
     DM_SETUP_CONFIG( config );
 
     TELEMETER_SETUP_CONFIG( config );
@@ -283,6 +520,15 @@ int bmcCtrl::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_calibRelDir, "dm.calibRelDir" );
     _config( m_serialNumber, "dm.serialNumber" );
     _config( m_satThresh, "dm.satThresh" );
+    _config( m_sdkWorkerEnabled, "sdk.workerEnabled" );
+    _config( m_sdkThreadPrio, "sdk.threadPrio" );
+    _config( m_sdkCpuset, "sdk.cpuset" );
+    _config( m_sdkTimeoutSec, "sdk.timeoutSec" );
+
+    if( m_sdkThreadPrio < 0 || m_sdkThreadPrio > 99 || !mx::math::isFinite( m_sdkTimeoutSec ) || m_sdkTimeoutSec <= 0 )
+    {
+        return -1;
+    }
 
     DM_LOAD_CONFIG( _config );
 
@@ -302,6 +548,13 @@ void bmcCtrl::loadConfig()
 
 int bmcCtrl::appStartup()
 {
+    // This cleanup token does not own the app; it joins a worker on every later startup error return.
+    auto stopWorker = []( bmcCtrl *app /**< [in] Controller whose startup did not finish. */ )
+    {
+        app->stopSdkWorker();
+    };
+    std::unique_ptr<bmcCtrl, decltype( stopWorker )> workerCleanup( this, stopWorker );
+
     if( parse_calibration_file() < 0 )
     {
         log<software_critical>( { __FILE__, __LINE__ } );
@@ -316,12 +569,47 @@ int bmcCtrl::appStartup()
         return -1;
     }
 
+    if( m_sdkWorkerEnabled )
+    {
+        if( startSdkWorker() < 0 )
+        {
+            return -1;
+        }
+
+        m_indiP_sdkWorker = pcf::IndiProperty( pcf::IndiProperty::Number );
+        m_indiP_sdkWorker.setDevice( configName() );
+        m_indiP_sdkWorker.setName( "sdk_worker" );
+        m_indiP_sdkWorker.setPerm( pcf::IndiProperty::ReadOnly );
+
+        for( const char *name : { "active",
+                                  "admissionClosed",
+                                  "fault",
+                                  "completed",
+                                  "failures",
+                                  "rejected",
+                                  "coalesced",
+                                  "policy",
+                                  "priority",
+                                  "allowedCpus",
+                                  "activeAgeSec",
+                                  "timeouts" } )
+        {
+            m_indiP_sdkWorker.add( pcf::IndiElement( name ) );
+        }
+
+        registerIndiPropertyReadOnly( m_indiP_sdkWorker );
+    }
+
+    const char *version = BMCVersionString();
+    log<text_log>( std::string( "BMC SDK version: " ) + ( version ? version : "unavailable" ) );
+
     DM_APP_STARTUP;
 
     TELEMETER_APP_STARTUP;
 
     SHMIMMONITOR_APP_STARTUP;
 
+    workerCleanup.release();
     return 0;
 }
 
@@ -331,6 +619,8 @@ int bmcCtrl::appLogic()
 
     SHMIMMONITOR_APP_LOGIC;
     TELEMETER_APP_LOGIC;
+    checkSdkTimeout( dev::dmTiming::monotonicNowNs() );
+    updateSdkWorkerINDI();
 
     if( state() == stateCodes::POWEROFF )
     {
@@ -344,12 +634,12 @@ int bmcCtrl::appLogic()
         state( stateCodes::NOTHOMED );
     }
 
-    if( m_nsat > m_satThresh )
-    {
-        log<text_log>( "Saturated actuators in last second: " + std::to_string( m_nsat ), logPrio::LOG_WARNING );
-    }
+    const long saturated = m_nsat.exchange( 0 );
 
-    m_nsat = 0;
+    if( saturated > m_satThresh )
+    {
+        log<text_log>( "Saturated actuators in last second: " + std::to_string( saturated ), logPrio::LOG_WARNING );
+    }
 
     DM_UPDATE_INDI;
     SHMIMMONITOR_UPDATE_INDI;
@@ -359,7 +649,7 @@ int bmcCtrl::appLogic()
 
 int bmcCtrl::appShutdown()
 {
-    if( m_dmopen )
+    if( m_sdkWorkerEnabled || m_dmopen )
     {
         releaseDM();
     }
@@ -369,25 +659,39 @@ int bmcCtrl::appShutdown()
     SHMIMMONITOR_APP_SHUTDOWN;
     TELEMETER_APP_SHUTDOWN;
 
+    stopSdkWorker();
+
     return 0;
 }
 
 int bmcCtrl::onPowerOff()
 {
     return dm<bmcCtrl, float>::onPowerOff();
-    ;
 }
 
 int bmcCtrl::whilePowerOff()
 {
     return dm<bmcCtrl, float>::whilePowerOff();
-    ;
 }
 
 int bmcCtrl::initDM()
 {
+    std::unique_lock<std::mutex> control( m_controlMutex, std::defer_lock );
+    bool                         reopen = false;
+
+    if( m_sdkWorkerEnabled )
+    {
+        control.lock();
+        reopen = closeAdmission();
+    }
+
     if( m_dmopen )
     {
+        if( m_sdkWorkerEnabled )
+        {
+            openAdmission( reopen );
+        }
+
         log<text_log>( "DM is already initialized.  Release first.", logPrio::LOG_ERROR );
 
         return -1;
@@ -395,7 +699,12 @@ int bmcCtrl::initDM()
 
     std::string ser = mx::ioutils::toUpper( m_serialNumber );
     BMCRC       ret = NO_ERR;
-    ret             = BMCOpen( &m_dm, ser.c_str() );
+    SdkRequest  open;
+    open.operation = SdkOperation::open;
+    open.serial    = ser.c_str();
+    ++m_sdkGeneration;
+    const auto opened = runSdk( open );
+    ret               = opened.result;
 
     if( ret == NO_ERR )
     {
@@ -419,13 +728,31 @@ int bmcCtrl::initDM()
         return -1;
     }
 
-    // Get number of actuators
-    m_nbAct = m_dm.ActCount;
+    // Handle metadata is copied on the SDK owner and read only after its matching result.
+    m_nbAct             = opened.actuatorCount;
+    const char *version = BMCVersionString();
+    log<text_log>( std::string( "BMC SDK " ) + ( version ? version : "unavailable" ) + " device driverType=" +
+                   std::to_string( opened.driverType ) + " amplifierType=" + std::to_string( opened.amplifierType ) );
+
+    if( m_nbAct == 0 || m_nbAct > MAX_DM_SIZE )
+    {
+        return log<software_error, -1>( { "invalid BMC actuator count" } );
+    }
 
     // Load the DM map
     uint32_t *map_lut;
     map_lut = reinterpret_cast<uint32_t *>( malloc( sizeof( uint32_t ) * MAX_DM_SIZE ) );
-    ret     = BMCLoadMap( &m_dm, NULL, map_lut );
+
+    if( map_lut == nullptr )
+    {
+        return log<software_error, -1>( { "allocating BMC map buffer" } );
+    }
+
+    SdkRequest load;
+    load.operation = SdkOperation::loadMap;
+    load.map       = map_lut;
+    ret            = runSdk( load ).result;
+    free( map_lut );
 
     if( ret != NO_ERR )
     {
@@ -433,7 +760,10 @@ int bmcCtrl::initDM()
         err = BMCErrorString( ret );
         log<text_log>( std::string( "DM initialization failed. Couldn't load map." ) + err, logPrio::LOG_ERROR );
 
-        m_dm = {};
+        if( !m_sdkWorkerEnabled )
+        {
+            m_dm = {};
+        }
 
         state( stateCodes::ERROR );
 
@@ -447,7 +777,12 @@ int bmcCtrl::initDM()
 
     m_dminputs = reinterpret_cast<double *>( calloc( m_nbAct, sizeof( double ) ) );
 
-    if( zeroDM() < 0 )
+    if( m_dminputs == nullptr )
+    {
+        return log<software_error, -1>( { "allocating BMC command buffer" } );
+    }
+
+    if( zeroDMImpl() < 0 )
     {
         log<text_log>( "DM initialization failed.  Error zeroing DM.", logPrio::LOG_ERROR );
         state( stateCodes::ERROR );
@@ -462,6 +797,11 @@ int bmcCtrl::initDM()
     }
 
     m_actuator_mapping = reinterpret_cast<int *>( malloc( m_nbAct * sizeof( int ) ) ); /* memory for actuator mapping */
+
+    if( m_actuator_mapping == nullptr )
+    {
+        return log<software_error, -1>( { "allocating BMC actuator mapping" } );
+    }
 
     /* initialize to -1 to allow for handling addressable but ignored actuators */
     for( uint32_t idx = 0; idx < m_nbAct; ++idx )
@@ -485,6 +825,20 @@ int bmcCtrl::initDM()
         return -1;
     }
 
+    if( m_sdkWorkerEnabled )
+    {
+        m_sdkValues.assign( m_nbAct, 0 );
+        m_stagedSat.assign( m_dmWidth * m_dmHeight, 0 );
+
+        { //mutex scope
+            std::lock_guard<std::mutex> lock( m_commandMutex );
+            m_sdkFault  = false;
+            m_haveInput = false;
+        }
+
+        openAdmission( true );
+    }
+
     log<text_log>( "BMC " + m_serialNumber + " initialized", logPrio::LOG_NOTICE );
     state( stateCodes::READY );
 
@@ -492,6 +846,20 @@ int bmcCtrl::initDM()
 }
 
 int bmcCtrl::zeroDM()
+{
+    if( !m_sdkWorkerEnabled )
+    {
+        return zeroDMImpl();
+    }
+
+    std::lock_guard<std::mutex> control( m_controlMutex );
+    const bool                  reopen = closeAdmission();
+    const int                   result = zeroDMImpl();
+    openAdmission( reopen && result == 0 );
+    return result;
+}
+
+int bmcCtrl::zeroDMImpl()
 {
     if( !m_dmopen )
     {
@@ -509,8 +877,16 @@ int bmcCtrl::zeroDM()
 
     double *dminputs = reinterpret_cast<double *>( calloc( m_nbAct, sizeof( double ) ) );
 
+    if( dminputs == nullptr )
+    {
+        return log<software_error, -1>( { "allocating BMC zero buffer" } );
+    }
+
     /* Send the all 0 command to the DM */
-    BMCRC ret = BMCSetArray( &m_dm, dminputs, NULL );
+    SdkRequest zero;
+    zero.operation = SdkOperation::set;
+    zero.values    = dminputs;
+    BMCRC ret      = runSdk( zero ).result;
 
     /* Release memory */
     free( dminputs );
@@ -582,13 +958,55 @@ int bmcCtrl::commandDM( void *curr_src )
 
     dmTimingMark( MagAOX::dmTiming::Marker::actuatorEnd );
 
+    if( m_sdkWorkerEnabled )
+    {
+        if( m_sdkValues.size() != m_nbAct || m_stagedSat.size() != size_t( m_instSatMap.size() ) )
+        {
+            return -1;
+        }
+
+        std::copy_n( m_dminputs, m_nbAct, m_sdkValues.data() );
+        SdkRequest request;
+        request.operation     = SdkOperation::set;
+        request.values        = m_sdkValues.data();
+        m_sdkDispatchNs       = dev::dmTiming::monotonicNowNs();
+        request.normalCommand = true;
+        request.dispatchNs    = m_sdkDispatchNs;
+        m_commandJob          = dispatchSdk( request );
+
+        if( m_commandJob == 0 )
+        {
+            return -1;
+        }
+
+        dmTimingMark( MagAOX::dmTiming::Marker::satStart );
+        m_stagedSatCount = 0;
+
+        for( uint32_t idx = 0; idx < m_nbAct; ++idx )
+        {
+            const int address = m_actuator_mapping[idx];
+
+            if( address < 0 )
+            {
+                continue;
+            }
+
+            const bool saturated = m_dminputs[idx] >= 1 || m_dminputs[idx] <= 0;
+            m_stagedSat[address] = saturated;
+            m_stagedSatCount += saturated;
+        }
+
+        dmTimingMark( MagAOX::dmTiming::Marker::satEnd );
+        return 0;
+    }
+
     /* Send the command to the DM */
     dmTimingMark( MagAOX::dmTiming::Marker::sdkStart );
     BMCRC ret = BMCSetArray( &m_dm, m_dminputs, NULL );
 
     dmTimingMark( MagAOX::dmTiming::Marker::sdkEnd );
 
-    dmTimingOutcome( ret == NO_ERR ? MagAOX::dmTiming::Outcome::success : MagAOX::dmTiming::Outcome::failed );
+    dmBackendResult( ret == NO_ERR ? MagAOX::dmTiming::Outcome::success : MagAOX::dmTiming::Outcome::failed, ret );
 
     /* Return immediately upon error, logging the error
     message first and then return the failure code. */
@@ -630,6 +1048,14 @@ int bmcCtrl::commandDM( void *curr_src )
 
 int bmcCtrl::releaseDM()
 {
+    std::unique_lock<std::mutex> control( m_controlMutex, std::defer_lock );
+
+    if( m_sdkWorkerEnabled )
+    {
+        control.lock();
+        closeAdmission();
+    }
+
     // Safe DM shutdown on interrupt
 
     if( !m_dmopen )
@@ -639,14 +1065,17 @@ int bmcCtrl::releaseDM()
 
     state( stateCodes::NOTHOMED );
 
-    if( !shutdown() )
+    if( !m_sdkWorkerEnabled )
     {
-        pthread_kill( m_smThread.native_handle(), SIGUSR1 );
+        if( !shutdown() )
+        {
+            pthread_kill( m_smThread.native_handle(), SIGUSR1 );
+        }
+
+        sleep( 1 );
     }
 
-    sleep( 1 );
-
-    if( zeroDM() < 0 )
+    if( zeroDMImpl() < 0 )
     {
         log<text_log>( "DM release failed.  Error zeroing DM.", logPrio::LOG_ERROR );
         state( stateCodes::ERROR );
@@ -655,8 +1084,10 @@ int bmcCtrl::releaseDM()
     }
 
     // Zero all actuators (this is probably redundant after zeroing the DM above)
-    BMCRC ret = NO_ERR;
-    ret       = BMCClearArray( &m_dm );
+    BMCRC      ret = NO_ERR;
+    SdkRequest clear;
+    clear.operation = SdkOperation::clear;
+    ret             = runSdk( clear ).result;
 
     if( ret != NO_ERR )
     {
@@ -669,7 +1100,9 @@ int bmcCtrl::releaseDM()
     }
 
     // Close BMC connection
-    ret = BMCClose( &m_dm );
+    SdkRequest close;
+    close.operation = SdkOperation::close;
+    ret             = runSdk( close ).result;
 
     if( ret == NO_ERR )
     {
@@ -687,6 +1120,7 @@ int bmcCtrl::releaseDM()
     }
 
     m_dm = {};
+    ++m_sdkGeneration;
 
     log<text_log>( "BMC " + m_serialNumber + " reset and released", logPrio::LOG_NOTICE );
 
@@ -822,6 +1256,568 @@ int bmcCtrl::get_actuator_mapping() // const char * serial, int nbAct, int * act
     log<text_log>( "BMC " + m_serialNumber + ": Using actuator mapping from " + calibpath );
 
     return 0;
+}
+
+int bmcCtrl::startSdkWorker()
+{
+    if( m_sdkThread.joinable() )
+    {
+        return 0;
+    }
+
+    m_sdkStop       = false;
+    m_sdkConfigured = false;
+    m_sdkPending    = false;
+    m_sdkReady      = false;
+    m_sdkTimedOut   = false;
+
+    if( threadStart( m_sdkThread,
+                     m_sdkThreadInit,
+                     m_sdkThreadID,
+                     m_sdkThreadProp,
+                     m_sdkThreadPrio,
+                     m_sdkCpuset,
+                     "sdk",
+                     this,
+                     sdkThreadStart ) < 0 )
+    {
+        stopSdkWorker();
+        return -1;
+    }
+
+    if( verifySdkThread() < 0 )
+    {
+        stopSdkWorker();
+        return -1;
+    }
+
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_sdkMutex );
+        m_sdkConfigured = true;
+    }
+
+    m_sdkWake.notify_one();
+    return 0;
+}
+
+int bmcCtrl::verifySdkThread()
+{
+    sched_param scheduling{};
+    int         policy = -1;
+    cpu_set_t   actual;
+    CPU_ZERO( &actual );
+
+    if( pthread_getschedparam( m_sdkThread.native_handle(), &policy, &scheduling ) != 0 ||
+        pthread_getaffinity_np( m_sdkThread.native_handle(), sizeof( actual ), &actual ) != 0 ||
+        policy != ( m_sdkThreadPrio == 0 ? SCHED_OTHER : MAGAOX_RT_SCHED_POLICY ) ||
+        scheduling.sched_priority != m_sdkThreadPrio || CPU_COUNT( &actual ) == 0 )
+    {
+        return log<software_error, -1>( { "SDK worker actual scheduling/affinity does not match configuration" } );
+    }
+
+    if( !m_sdkCpuset.empty() )
+    {
+        std::ifstream file( m_cpusetPath + "/" + m_sdkCpuset + "/cpuset.cpus" );
+        std::string   list;
+        std::getline( file, list );
+        cpu_set_t expected;
+        CPU_ZERO( &expected );
+
+        try
+        {
+            std::istringstream ranges( list );
+            std::string        range;
+
+            while( std::getline( ranges, range, ',' ) )
+            {
+                const size_t dash  = range.find( '-' );
+                const auto   first = std::stoul( range.substr( 0, dash ) );
+                const auto   last  = dash == std::string::npos ? first : std::stoul( range.substr( dash + 1 ) );
+
+                if( first > last || last >= CPU_SETSIZE )
+                {
+                    throw std::runtime_error( "unsupported SDK CPU range" );
+                }
+
+                for( auto cpu = first; cpu <= last; ++cpu )
+                {
+                    CPU_SET( cpu, &expected );
+                }
+            }
+        }
+        catch( ... )
+        {
+            return log<software_error, -1>( { "SDK cpuset CPU list could not be verified" } );
+        }
+
+        if( CPU_COUNT( &expected ) == 0 || !CPU_EQUAL( &actual, &expected ) )
+        {
+            return log<software_error, -1>( { "SDK worker actual affinity does not match requested cpuset" } );
+        }
+    }
+
+    m_sdkPolicy      = policy;
+    m_sdkActualPrio  = scheduling.sched_priority;
+    m_sdkAllowedCpus = CPU_COUNT( &actual );
+    return 0;
+}
+
+void bmcCtrl::stopSdkWorker() noexcept
+{
+    std::lock_guard<std::mutex> control( m_controlMutex );
+    closeAdmission();
+
+    if( !m_sdkThread.joinable() )
+    {
+        return;
+    }
+
+    { //mutex scope
+        std::unique_lock<std::mutex> lock( m_sdkMutex );
+        m_sdkDone.wait( lock,
+                        [this]()
+                        {
+                            return !m_sdkPending || m_sdkReady;
+                        } );
+        m_sdkStop       = true;
+        m_sdkConfigured = false;
+    }
+
+    m_sdkWake.notify_one();
+    m_sdkThread.join();
+}
+
+void bmcCtrl::sdkThreadStart( bmcCtrl *app )
+{
+    app->sdkThreadExec();
+}
+
+void bmcCtrl::sdkThreadExec() noexcept
+{
+    m_sdkThreadID = syscall( SYS_gettid );
+
+    { //mutex scope
+        std::unique_lock<std::mutex> lock( m_sdkMutex );
+        m_sdkWake.wait( lock,
+                        [this]()
+                        {
+                            return m_sdkConfigured || m_sdkStop;
+                        } );
+
+        if( m_sdkStop )
+        {
+            return;
+        }
+    }
+
+    for( ;; )
+    {
+        SdkRequest request;
+
+        { //mutex scope
+            std::unique_lock<std::mutex> lock( m_sdkMutex );
+            m_sdkWake.wait( lock,
+                            [this]()
+                            {
+                                return m_sdkStop || ( m_sdkPending && !m_sdkReady );
+                            } );
+
+            if( m_sdkStop )
+            {
+                return;
+            }
+
+            request = m_sdkRequest;
+        }
+
+        const auto result = performSdk( request );
+
+        { //mutex scope
+            std::lock_guard<std::mutex> lock( m_sdkMutex );
+            m_sdkResult = result;
+            m_sdkReady  = true;
+        }
+
+        m_sdkDone.notify_one();
+    }
+}
+
+bmcCtrl::SdkResult bmcCtrl::performSdk( const SdkRequest &request ) noexcept
+{
+    SdkResult result;
+    result.sequence   = request.sequence;
+    result.generation = request.generation;
+    result.startNs    = dev::dmTiming::monotonicNowNs();
+
+    try
+    {
+        switch( request.operation )
+        {
+        case SdkOperation::open:
+            result.result = BMCOpen( &m_dm, request.serial );
+
+            if( result.result == NO_ERR )
+            {
+                result.actuatorCount = m_dm.ActCount;
+                result.driverType    = m_dm.Driver_Type;
+                result.amplifierType = m_dm.HVA_Type;
+            }
+            break;
+        case SdkOperation::loadMap:
+            result.result = BMCLoadMap( &m_dm, nullptr, request.map );
+            break;
+        case SdkOperation::set:
+            result.result = BMCSetArray( &m_dm, request.values, nullptr );
+            break;
+        case SdkOperation::clear:
+            result.result = BMCClearArray( &m_dm );
+            break;
+        case SdkOperation::close:
+            result.result = BMCClose( &m_dm );
+            break;
+        }
+    }
+    catch( ... )
+    {
+        result.result    = static_cast<BMCRC>( -1 );
+        result.exception = true;
+    }
+
+    result.endNs = dev::dmTiming::monotonicNowNs();
+    return result;
+}
+
+uint64_t bmcCtrl::dispatchSdk( SdkRequest request )
+{
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_sdkMutex );
+
+        if( !m_sdkThread.joinable() || !m_sdkConfigured || m_sdkStop || m_sdkPending || m_sdkSequence == UINT64_MAX )
+        {
+            return 0;
+        }
+
+        request.sequence   = ++m_sdkSequence;
+        request.generation = m_sdkGeneration;
+        m_sdkRequest       = request;
+        m_sdkPending       = true;
+        m_sdkReady         = false;
+        m_sdkTimedOut      = false;
+    }
+
+    m_sdkWake.notify_one();
+    return request.sequence;
+}
+
+bmcCtrl::SdkResult bmcCtrl::waitSdk( uint64_t sequence )
+{
+    std::unique_lock<std::mutex> lock( m_sdkMutex );
+    m_sdkDone.wait( lock,
+                    [this, sequence]()
+                    {
+                        return m_sdkReady && m_sdkResult.sequence == sequence &&
+                               m_sdkResult.generation == m_sdkRequest.generation;
+                    } );
+    auto       result  = m_sdkResult;
+    const bool elapsed = m_sdkRequest.normalCommand && m_sdkRequest.dispatchNs > 0 &&
+                         result.endNs >= m_sdkRequest.dispatchNs &&
+                         ( result.endNs - m_sdkRequest.dispatchNs ) * 1e-9 >= m_sdkTimeoutSec;
+    result.newTimeout = elapsed && !m_sdkTimedOut;
+    result.timedOut   = elapsed || m_sdkTimedOut;
+    m_sdkTimedOut     = result.timedOut;
+    m_sdkPending      = false;
+    m_sdkReady        = false;
+    return result;
+}
+
+bmcCtrl::SdkResult bmcCtrl::runSdk( SdkRequest request )
+{
+    if( !m_sdkWorkerEnabled )
+    {
+        return performSdk( request );
+    }
+
+    const auto sequence = dispatchSdk( request );
+
+    if( sequence == 0 )
+    {
+        SdkResult failed;
+        failed.result = static_cast<BMCRC>( -1 );
+        return failed;
+    }
+
+    const auto result = waitSdk( sequence );
+
+    if( result.result != NO_ERR )
+    {
+        std::lock_guard<std::mutex> lock( m_commandMutex );
+        m_sdkFault        = true;
+        m_admissionClosed = true;
+    }
+
+    return result;
+}
+
+bool bmcCtrl::closeAdmission()
+{
+    std::unique_lock<std::mutex> lock( m_commandMutex );
+    const bool                   reopen = !m_admissionClosed;
+    m_admissionClosed                   = true;
+    m_commandRetired.notify_all();
+    m_commandRetired.wait( lock,
+                           [this]()
+                           {
+                               return !m_commandActive;
+                           } );
+    return reopen;
+}
+
+void bmcCtrl::openAdmission( bool reopen )
+{
+    std::lock_guard<std::mutex> lock( m_commandMutex );
+    m_admissionClosed = !reopen || !m_dmopen || m_sdkFault;
+}
+
+bool bmcCtrl::admitCommand()
+{
+    if( !m_sdkWorkerEnabled )
+    {
+        return true;
+    }
+
+    std::lock_guard<std::mutex> lock( m_commandMutex );
+    const auto                 *metadata = m_imageStream.md;
+
+    if( m_admissionClosed || m_sdkFault || m_commandActive || !m_dmopen || !m_completionReceipt ||
+        metadata == nullptr || __atomic_load_n( &metadata->write, __ATOMIC_ACQUIRE ) != 0 )
+    {
+        ++m_rejectedInputs;
+        return false;
+    }
+
+    const uint64_t inode   = __atomic_load_n( &metadata->inode, __ATOMIC_ACQUIRE );
+    const uint64_t counter = __atomic_load_n( &metadata->cnt0, __ATOMIC_ACQUIRE );
+
+    if( inode == 0 || __atomic_load_n( &metadata->write, __ATOMIC_ACQUIRE ) != 0 ||
+        inode != __atomic_load_n( &metadata->inode, __ATOMIC_ACQUIRE ) ||
+        counter != __atomic_load_n( &metadata->cnt0, __ATOMIC_ACQUIRE ) )
+    {
+        ++m_rejectedInputs;
+        return false;
+    }
+
+    if( counter == 0 || ( m_haveInput && inode == m_inputInode && counter <= m_inputCounter ) )
+    {
+        if( m_haveInput && inode == m_inputInode && counter < m_inputCounter )
+        {
+            m_haveInput = false;
+        }
+
+        ++m_rejectedInputs;
+        return false;
+    }
+
+    if( m_haveInput && inode == m_inputInode && counter > m_inputCounter + 1 )
+    {
+        m_coalescedInputs += counter - m_inputCounter - 1;
+    }
+
+    m_inputInode    = inode;
+    m_inputCounter  = counter;
+    m_haveInput     = true;
+    m_commandActive = true;
+    return true;
+}
+
+bool bmcCtrl::deferredCommand() const
+{
+    return m_sdkWorkerEnabled;
+}
+
+int bmcCtrl::finalizeCommand( int processingResult ) noexcept
+{
+    if( !m_sdkWorkerEnabled )
+    {
+        return processingResult;
+    }
+
+    if( m_commandJob == 0 )
+    {
+        if( processingResult < 0 )
+        {
+            std::lock_guard<std::mutex> lock( m_commandMutex );
+            m_sdkFault        = true;
+            m_admissionClosed = true;
+        }
+
+        return processingResult;
+    }
+
+    const auto waitStart = dev::dmTiming::monotonicNowNs();
+    const auto result    = waitSdk( m_commandJob );
+    const auto waitEnd   = dev::dmTiming::monotonicNowNs();
+    m_commandJob         = 0;
+    const auto outcome =
+        result.result == NO_ERR ? MagAOX::dmTiming::Outcome::success : MagAOX::dmTiming::Outcome::failed;
+    m_dmTiming.importSdk( result.startNs, result.endNs, outcome, m_sdkDispatchNs, waitStart, waitEnd );
+    dmBackendResult( outcome, result.exception ? MagAOX::dmCompletion::unavailableResult : int64_t( result.result ) );
+
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_commandMutex );
+        ++m_completedCommands;
+        m_sdkActiveAgeSec = 0;
+        m_sdkTimeouts += result.newTimeout;
+
+        if( result.result != NO_ERR || processingResult < 0 || result.timedOut )
+        {
+            m_sdkFault        = true;
+            m_admissionClosed = true;
+            m_sdkFailures += result.result != NO_ERR;
+        }
+    }
+
+    if( result.result != NO_ERR )
+    {
+        log<text_log>( result.exception ? "DM SDK threw during worker submission"
+                                        : std::string( "DM command failed: " ) + BMCErrorString( result.result ),
+                       logPrio::LOG_ERROR );
+        return -1;
+    }
+
+    if( result.timedOut )
+    {
+        if( result.newTimeout )
+        {
+            log<text_log>( "DM SDK command exceeded the diagnostic deadline; actual result was drained",
+                           logPrio::LOG_ERROR );
+        }
+
+        return -1;
+    }
+
+    if( processingResult < 0 )
+    {
+        return processingResult;
+    }
+
+    std::copy( m_stagedSat.begin(), m_stagedSat.end(), m_instSatMap.data() );
+    m_nsat.fetch_add( m_stagedSatCount );
+    return 0;
+}
+
+void bmcCtrl::retireCommand() noexcept
+{
+    if( !m_sdkWorkerEnabled )
+    {
+        return;
+    }
+
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_commandMutex );
+
+        if( m_completionOutcome == MagAOX::dmTiming::Outcome::failed ||
+            m_completionOutcome == MagAOX::dmTiming::Outcome::partial ||
+            m_completionOutcome == MagAOX::dmTiming::Outcome::rejected )
+        {
+            m_sdkFault        = true;
+            m_admissionClosed = true;
+        }
+
+        m_commandActive = false;
+    }
+
+    m_commandRetired.notify_all();
+}
+
+void bmcCtrl::checkSdkTimeout( int64_t nowNs )
+{
+    if( !m_sdkWorkerEnabled )
+    {
+        return;
+    }
+
+    bool expired = false;
+
+    { //mutex scope
+        // Keep this job's identity protected until its fault/count claim commits. Never reverse this lock order.
+        std::lock_guard<std::mutex> sdk( m_sdkMutex );
+        double                      ageSec = 0;
+
+        if( m_sdkPending && !m_sdkReady && m_sdkRequest.normalCommand && m_sdkRequest.dispatchNs > 0 &&
+            nowNs >= m_sdkRequest.dispatchNs )
+        {
+            ageSec  = ( nowNs - m_sdkRequest.dispatchNs ) * 1e-9;
+            expired = ageSec >= m_sdkTimeoutSec && !m_sdkTimedOut;
+        }
+
+        std::lock_guard<std::mutex> command( m_commandMutex );
+        m_sdkActiveAgeSec = ageSec;
+
+        if( expired )
+        {
+            m_sdkTimedOut = true;
+            ++m_sdkTimeouts;
+            m_sdkFault        = true;
+            m_admissionClosed = true;
+        }
+    }
+
+    if( expired )
+    {
+        log<text_log>( "DM SDK command exceeded the diagnostic deadline; still awaiting its matching SDK result",
+                       logPrio::LOG_ERROR );
+    }
+}
+
+void bmcCtrl::updateSdkWorkerINDI()
+{
+    if( !m_sdkWorkerEnabled )
+    {
+        return;
+    }
+
+    bool     active, closed, fault;
+    uint64_t completed, failures, rejected, coalesced, timeouts;
+    double   ageSec;
+
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_commandMutex );
+        active    = m_commandActive;
+        closed    = m_admissionClosed;
+        fault     = m_sdkFault;
+        completed = m_completedCommands;
+        failures  = m_sdkFailures;
+        rejected  = m_rejectedInputs;
+        coalesced = m_coalescedInputs;
+        timeouts  = m_sdkTimeouts;
+        ageSec    = m_sdkActiveAgeSec;
+    }
+
+    updateIfChanged<double>( m_indiP_sdkWorker,
+                             { "active",
+                               "admissionClosed",
+                               "fault",
+                               "completed",
+                               "failures",
+                               "rejected",
+                               "coalesced",
+                               "policy",
+                               "priority",
+                               "allowedCpus",
+                               "activeAgeSec",
+                               "timeouts" },
+                             { double( active ),
+                               double( closed ),
+                               double( fault ),
+                               double( completed ),
+                               double( failures ),
+                               double( rejected ),
+                               double( coalesced ),
+                               double( m_sdkPolicy ),
+                               double( m_sdkActualPrio ),
+                               double( m_sdkAllowedCpus ),
+                               ageSec,
+                               double( timeouts ) } );
 }
 
 int bmcCtrl::checkRecordTimes()

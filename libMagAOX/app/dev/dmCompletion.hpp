@@ -26,9 +26,9 @@ namespace app
 namespace dev
 {
 
-/// Publish successful software reader completion independently of timing telemetry.
+/// Publish full successful completion or independent early read release without timing telemetry dependence.
 /** Open/close only while the command thread is stopped. One command thread owns
- * begin/finish/reset; ordinary app logic may read snapshot concurrently. The
+ * begin/finish/release/submission/reset; ordinary app logic may read snapshot concurrently. The
  * stream's own semaphores are notifications, and the coherent versioned record
  * is authoritative. No input stream, input semaphore or hardware state changes.
  * Existing compatible streams are reused so attached readers survive restart.
@@ -56,6 +56,10 @@ class dmCompletion
     bool m_qualified{ false }; ///< This attempt began with a genuine, new stable input identity.
 
     bool m_haveInput{ false }; ///< The previous genuine coherent identity can qualify progression.
+
+    bool m_submissionPublished{ false }; ///< This frozen read-release attempt already recorded its SDK result.
+
+    MagAOX::dmCompletion::Kind m_kind{ MagAOX::dmCompletion::Kind::completion }; ///< Fixed protocol while enabled.
 
     Identity m_previous; ///< Command-thread-only progression baseline.
 
@@ -90,7 +94,9 @@ class dmCompletion
     ~dmCompletion() noexcept;
 
     /// Open an exclusive publisher; an empty name disables publication and succeeds.
-    int open( const std::string &name /**< [in] Dedicated ImageStreamIO name, without directory components. */ );
+    int open( const std::string         &name /**< [in] Dedicated ImageStreamIO name, without directory components. */,
+              MagAOX::dmCompletion::Kind kind = MagAOX::dmCompletion::Kind::completion
+              /**< [in] Full successful callback or independent early-reader release protocol. */ );
 
     /// Publish unavailable, notify readers and release the attachment without destroying its stream.
     void close() noexcept;
@@ -109,8 +115,26 @@ class dmCompletion
                  MagAOX::dmTiming::Outcome outcome = MagAOX::dmTiming::Outcome::unknown
                  /**< [in] Explicit backend submission result, independent of telemetry enable. */ ) noexcept;
 
+    /// Freeze the early-reader endpoint after the final external read, independently of SDK outcome.
+    void release(
+        const IMAGE *input /**< [in] Combined command stream whose identity must still match. */,
+        int          callbackResult = 0 /**< [in] Reader preparation result; zero qualifies successful reads. */,
+        bool coherent = true /**< [in] Frozen attempt agrees with the caller's admitted command identity. */ ) noexcept;
+
+    /// Enrich one finished read-release attempt with its immutable SDK result, without changing read permission.
+    /** The command-thread caller must first join the result to this exact admitted
+     * attempt. No live input metadata is reread, and the read endpoint is retained.
+     */
+    void
+    submission( MagAOX::dmTiming::Outcome outcome /**< [in] Actual backend outcome, not later publication errors. */,
+                int64_t                   backendResult = MagAOX::dmCompletion::unavailableResult
+                /**< [in] Actual SDK result code, or the unavailable sentinel. */ ) noexcept;
+
     /// Return whether this fixed attachment is publishing completion records.
     bool enabled() const noexcept;
+
+    /// Return the producer-owned attempt for identity comparison in that same command thread only.
+    const MagAOX::dmCompletion::Record &attempt() const noexcept;
 
     /// Return a bounded coherent snapshot, or unavailable when a concurrent publication prevents it.
     MagAOX::dmCompletion::Record snapshot() const noexcept;
@@ -221,9 +245,16 @@ inline void dmCompletion::publish( bool notify ) noexcept
     errno = savedErrno;
 }
 
-inline int dmCompletion::open( const std::string &name )
+inline int dmCompletion::open( const std::string &name, MagAOX::dmCompletion::Kind kind )
 {
     close();
+
+    if( kind != MagAOX::dmCompletion::Kind::completion && kind != MagAOX::dmCompletion::Kind::readers )
+    {
+        return -1;
+    }
+
+    m_kind = kind;
 
     if( name.empty() )
     {
@@ -262,6 +293,7 @@ inline int dmCompletion::open( const std::string &name )
     }
 
     m_record              = {};
+    m_record.kind         = m_kind;
     m_record.session      = static_cast<uint64_t>( now );
     m_record.epoch        = 1;
     m_record.publisherPid = static_cast<uint64_t>( getpid() );
@@ -294,7 +326,8 @@ inline int dmCompletion::open( const std::string &name )
             recognized = MagAOX::dmCompletion::decode( wire, previous );
         }
 
-        if( !recognized || previous.session == 0 || previous.session == std::numeric_limits<uint64_t>::max() )
+        if( !recognized || previous.kind != m_kind || previous.session == 0 ||
+            previous.session == std::numeric_limits<uint64_t>::max() )
         {
             close();
             return -1;
@@ -344,10 +377,11 @@ inline int dmCompletion::open( const std::string &name )
         unlink( temporaryFilename );
     }
 
-    m_enabled   = true;
-    m_active    = false;
-    m_qualified = false;
-    m_haveInput = false;
+    m_enabled             = true;
+    m_active              = false;
+    m_qualified           = false;
+    m_haveInput           = false;
+    m_submissionPublished = false;
     publish( true );
     return 0;
 }
@@ -361,10 +395,11 @@ inline void dmCompletion::close() noexcept
         reset();
     }
 
-    m_enabled   = false;
-    m_active    = false;
-    m_qualified = false;
-    m_haveInput = false;
+    m_enabled             = false;
+    m_active              = false;
+    m_qualified           = false;
+    m_haveInput           = false;
+    m_submissionPublished = false;
 
     if( m_stream.md != nullptr )
     {
@@ -393,6 +428,7 @@ inline void dmCompletion::reset() noexcept
     const auto sequence   = m_record.sequence;
     const auto pid        = m_record.publisherPid;
     m_record              = {};
+    m_record.kind         = m_kind;
     m_record.session      = session;
     m_record.epoch        = epoch == 0 ? 1 : epoch;
     m_record.sequence     = sequence;
@@ -400,6 +436,7 @@ inline void dmCompletion::reset() noexcept
     m_active              = false;
     m_qualified           = false;
     m_haveInput           = false;
+    m_submissionPublished = false;
     publish( true );
 }
 
@@ -429,6 +466,8 @@ inline void dmCompletion::begin( const IMAGE *input, bool genuine ) noexcept
     m_record.finishedNs      = 0;
     m_record.callbackResult  = 0;
     m_record.outcome         = MagAOX::dmTiming::Outcome::unknown;
+    m_record.backendResult   = MagAOX::dmCompletion::unavailableResult;
+    m_submissionPublished    = false;
     m_qualified = genuine && valid && m_record.startedNs > 0 && ( !m_haveInput || value.counter > m_previous.counter );
 
     if( m_qualified )
@@ -459,27 +498,58 @@ inline void dmCompletion::finish( const IMAGE *input, int callbackResult, MagAOX
                         value.nsec == m_record.publicationNsec;
     m_record.finishedNs     = dmTiming::monotonicNowNs();
     m_record.callbackResult = callbackResult;
-    m_record.outcome        = outcome;
+    const bool readers      = m_kind == MagAOX::dmCompletion::Kind::readers;
+    m_record.outcome        = readers ? MagAOX::dmTiming::Outcome::unknown : outcome;
     m_record.state          = MagAOX::dmCompletion::State::unqualified;
 
-    if( callbackResult != 0 || outcome == MagAOX::dmTiming::Outcome::failed ||
-        outcome == MagAOX::dmTiming::Outcome::partial || outcome == MagAOX::dmTiming::Outcome::rejected )
+    if( callbackResult != 0 ||
+        ( !readers && ( outcome == MagAOX::dmTiming::Outcome::failed || outcome == MagAOX::dmTiming::Outcome::partial ||
+                        outcome == MagAOX::dmTiming::Outcome::rejected ) ) )
     {
         m_record.state = MagAOX::dmCompletion::State::error;
     }
-    else if( m_qualified && stable && outcome == MagAOX::dmTiming::Outcome::success &&
+    else if( m_qualified && stable && ( readers || outcome == MagAOX::dmTiming::Outcome::success ) &&
              m_record.finishedNs >= m_record.startedNs )
     {
-        m_record.state = MagAOX::dmCompletion::State::complete;
+        m_record.state = readers ? MagAOX::dmCompletion::State::released : MagAOX::dmCompletion::State::complete;
     }
 
     m_active = false;
     publish( true );
 }
 
+inline void dmCompletion::release( const IMAGE *input, int callbackResult, bool coherent ) noexcept
+{
+    if( m_kind == MagAOX::dmCompletion::Kind::readers )
+    {
+        m_qualified = m_qualified && coherent;
+        finish( input, callbackResult, MagAOX::dmTiming::Outcome::unknown );
+    }
+}
+
+inline void dmCompletion::submission( MagAOX::dmTiming::Outcome outcome, int64_t backendResult ) noexcept
+{
+    if( !m_enabled || m_kind != MagAOX::dmCompletion::Kind::readers || m_active || m_record.finishedNs == 0 ||
+        m_submissionPublished || outcome > MagAOX::dmTiming::Outcome::rejected ||
+        ( outcome == MagAOX::dmTiming::Outcome::unknown && backendResult == MagAOX::dmCompletion::unavailableResult ) )
+    {
+        return;
+    }
+
+    m_record.outcome       = outcome;
+    m_record.backendResult = backendResult;
+    m_submissionPublished  = true;
+    publish( true );
+}
+
 inline bool dmCompletion::enabled() const noexcept
 {
     return m_enabled;
+}
+
+inline const MagAOX::dmCompletion::Record &dmCompletion::attempt() const noexcept
+{
+    return m_record;
 }
 
 inline MagAOX::dmCompletion::Record dmCompletion::snapshot() const noexcept

@@ -128,6 +128,8 @@ class dm
 
     std::string m_completionStreamName; ///< Optional shared reader-completion stream; empty disables publication.
 
+    std::string m_readerReleaseStreamName; ///< Optional last-channel-read signal, independent of backend success.
+
     uint32_t m_dmWidth{ 0 };  ///< The width of the images in the stream
     uint32_t m_dmHeight{ 0 }; ///< The height of the images in the stream
 
@@ -202,6 +204,12 @@ class dm
 
     mx::improc::eigenImage<realT> m_totalFlat;  ///< the total of all non-delta channels
     mx::improc::eigenImage<realT> m_totalDelta; ///< the total of all delta channels
+
+    mx::improc::eigenImage<realT> m_stagedDelta; ///< Private delta result retained until submission finalization.
+
+    mx::improc::eigenImage<realT> m_stagedDiff; ///< Private difference result calculated from the staged delta.
+
+    bool m_deltaStaged{ false }; ///< Current callback has unpublished private delta/difference products.
 
     mx::improc::milkImage<realT> m_outputDelta; ///< The true output delta command after saturation.
     mx::improc::milkImage<realT>
@@ -465,6 +473,18 @@ class dm
     int processImage( void              *curr_src /**< [in] Current combined command pixels. */,
                       const dev::shmimT &sp /**< [in] Monitored stream tag. */ );
 
+    /// Admit a callback without waiting on an already selected shared input; synchronous owners always admit.
+    bool admitCommand();
+
+    /// Return whether this callback requires private products until backend finalization.
+    bool deferredCommand() const;
+
+    /// Drain a pending submission and retain a prior processing error; synchronous owners need no join.
+    int finalizeCommand( int processingResult /**< [in] Earlier processing result, negative on failure. */ ) noexcept;
+
+    /// Release callback ownership after output, timing and completion finalization.
+    void retireCommand() noexcept;
+
     /// Calls derived()->initDM()
     /**
      * \returns 0 on success
@@ -560,6 +580,12 @@ class dm
 
     /// Calculate the delta command from the output shape.
     int makeDelta();
+
+    /// Read channels into private preallocated delta products without publishing shared pixels or notifications.
+    int stageDelta();
+
+    /// Publish previously staged products after successful backend finalization, without rereading channels.
+    int publishDelta();
 
     /// Clear the saturation maps and zero the shared memory.
     /**
@@ -808,6 +834,10 @@ class dm
     /// Record backend submission status without changing command handling.
     void dmTimingOutcome( MagAOX::dmTiming::Outcome outcome /**< [in] Observed submission/callback result. */ );
 
+    /// Retain the actual backend result for both timing and immutable reader-release diagnostics.
+    void dmBackendResult( MagAOX::dmTiming::Outcome outcome /**< [in] Actual backend submission outcome. */,
+                          int64_t result /**< [in] Raw backend return code; independent of callback failure. */ );
+
     /// Refresh the consumer-owned statistics outside the command thread.
     void updateDMTimings();
 
@@ -825,14 +855,23 @@ class dm
 
     dev::dmCompletion m_dmCompletion; ///< Command-thread completion publisher, independent of droppable telemetry.
 
+    dev::dmCompletion
+        m_dmReaderRelease; ///< Last-read publisher with immutable identity and later SDK-result enrichment.
+
     bool m_completionReceipt{ false }; ///< The next callback follows a genuine semaphore receipt, not initial data.
 
     MagAOX::dmTiming::Outcome m_completionOutcome{
         MagAOX::dmTiming::Outcome::unknown }; ///< Backend result even when timing is disabled.
 
+    int64_t m_completionBackendResult{ std::numeric_limits<int64_t>::min() }; ///< Raw result, or unavailable sentinel.
+
     pcf::IndiProperty m_indiP_dmCompletion; ///< Ordinary-thread latest completion state and diagnostic duration.
 
     pcf::IndiProperty m_indiP_dmCompletionStream; ///< Completion stream identity and software-only endpoint contract.
+
+    pcf::IndiProperty m_indiP_dmReaderRelease; ///< Latest last-read endpoint and independent SDK result.
+
+    pcf::IndiProperty m_indiP_dmReaderReleaseStream; ///< Separate reader-release stream identity and contract.
 
     /// @}
 
@@ -852,7 +891,27 @@ class dm
     /// Register read-only timing statistics and endpoint/quality descriptions.
     int setupDMTimingINDI();
 
+    /// Register the optional last-read endpoint and independent backend result properties.
+    int setupDMReaderReleaseINDI();
+
+    /// Refresh last-read diagnostics outside the command thread.
+    void updateDMReaderReleaseINDI();
+
   private:
+    /// Retire every admitted callback and drain an unexpected exceptional exit before releasing its storage.
+    struct CommandRetirement
+    {
+        dm &m_owner; ///< Generic controller retaining the callback's owned buffers.
+
+        bool m_finalized{ false }; ///< The ordinary callback path has collected its backend result.
+
+        /// Retain the admitted controller until the callback leaves scope.
+        explicit CommandRetirement( dm &owner /**< [in] Admitted controller. */ ) noexcept;
+
+        /// Drain any unfinished backend operation, then release whole-callback ownership.
+        ~CommandRetirement() noexcept;
+    };
+
     /// Emit timing records for owners with the standard telemetry interface.
     template <class ownerT>
     static auto timingRecord( ownerT                          &owner /**< [in] Concrete controller. */,
@@ -876,6 +935,45 @@ derivedT &dm<derivedT, realT>::derived()
 }
 
 template <class derivedT, typename realT>
+dm<derivedT, realT>::CommandRetirement::CommandRetirement( dm &owner ) noexcept : m_owner( owner )
+{
+}
+
+template <class derivedT, typename realT>
+dm<derivedT, realT>::CommandRetirement::~CommandRetirement() noexcept
+{
+    if( !m_finalized )
+    {
+        m_owner.derived().finalizeCommand( -1 );
+    }
+
+    m_owner.derived().retireCommand();
+}
+
+template <class derivedT, typename realT>
+bool dm<derivedT, realT>::admitCommand()
+{
+    return true;
+}
+
+template <class derivedT, typename realT>
+bool dm<derivedT, realT>::deferredCommand() const
+{
+    return false;
+}
+
+template <class derivedT, typename realT>
+int dm<derivedT, realT>::finalizeCommand( int processingResult ) noexcept
+{
+    return processingResult;
+}
+
+template <class derivedT, typename realT>
+void dm<derivedT, realT>::retireCommand() noexcept
+{
+}
+
+template <class derivedT, typename realT>
 void dm<derivedT, realT>::shmimMonitorTiming( const dev::shmimT &tag, shmimMonitorEvent event )
 {
     static_cast<void>( tag );
@@ -885,11 +983,13 @@ void dm<derivedT, realT>::shmimMonitorTiming( const dev::shmimT &tag, shmimMonit
         m_dmTiming.newSession();
         m_completionReceipt = false;
         m_dmCompletion.reset();
+        m_dmReaderRelease.reset();
     }
     else if( event == shmimMonitorEvent::disconnected )
     {
         m_completionReceipt = false;
         m_dmCompletion.reset();
+        m_dmReaderRelease.reset();
     }
     else if( event == shmimMonitorEvent::receipt || event == shmimMonitorEvent::initial )
     {
@@ -902,6 +1002,7 @@ void dm<derivedT, realT>::shmimMonitorTiming( const dev::shmimT &tag, shmimMonit
         m_dmTiming.finishEvent();
         m_completionReceipt = false;
         m_dmCompletion.reset();
+        m_dmReaderRelease.reset();
     }
 }
 
@@ -919,11 +1020,18 @@ void dm<derivedT, realT>::dmTimingOutcome( MagAOX::dmTiming::Outcome outcome )
 }
 
 template <class derivedT, typename realT>
+void dm<derivedT, realT>::dmBackendResult( MagAOX::dmTiming::Outcome outcome, int64_t result )
+{
+    m_completionBackendResult = result;
+    dmTimingOutcome( outcome );
+}
+
+template <class derivedT, typename realT>
 int dm<derivedT, realT>::setupDMCompletionINDI()
 {
     if( m_completionStreamName.empty() )
     {
-        return 0;
+        return setupDMReaderReleaseINDI();
     }
 
     m_indiP_dmCompletion = pcf::IndiProperty( pcf::IndiProperty::Number );
@@ -962,12 +1070,19 @@ int dm<derivedT, realT>::setupDMCompletionINDI()
     m_indiP_dmCompletionStream["meaning"] =
         std::string( "application channel reads finished; hardware settling is not measured" );
 
-    return derived().registerIndiPropertyReadOnly( m_indiP_dmCompletionStream );
+    if( derived().registerIndiPropertyReadOnly( m_indiP_dmCompletionStream ) < 0 )
+    {
+        return -1;
+    }
+
+    return setupDMReaderReleaseINDI();
 }
 
 template <class derivedT, typename realT>
 void dm<derivedT, realT>::updateDMCompletionINDI()
 {
+    updateDMReaderReleaseINDI();
+
     if( !m_dmCompletion.enabled() || !derived().m_indiDriver )
     {
         return;
@@ -1002,6 +1117,95 @@ void dm<derivedT, realT>::updateDMCompletionINDI()
           qualified ? 1.0 : 0.0 },
         derived().m_indiDriver,
         qualified ? pcf::IndiProperty::Ok : pcf::IndiProperty::Idle );
+}
+
+template <class derivedT, typename realT>
+int dm<derivedT, realT>::setupDMReaderReleaseINDI()
+{
+    if( m_readerReleaseStreamName.empty() )
+    {
+        return 0;
+    }
+
+    m_indiP_dmReaderRelease = pcf::IndiProperty( pcf::IndiProperty::Number );
+    m_indiP_dmReaderRelease.setDevice( derived().configName() );
+    m_indiP_dmReaderRelease.setName( "dm_reader_release" );
+    m_indiP_dmReaderRelease.setPerm( pcf::IndiProperty::ReadOnly );
+    m_indiP_dmReaderRelease.setState( pcf::IndiProperty::Idle );
+
+    for( const auto *name : { "state",
+                              "session",
+                              "epoch",
+                              "sequence",
+                              "inputInode",
+                              "inputCounter",
+                              "processingUs",
+                              "ageSec",
+                              "outcome",
+                              "backendResult",
+                              "qualified" } )
+    {
+        m_indiP_dmReaderRelease.add( pcf::IndiElement( name ) );
+    }
+
+    if( derived().registerIndiPropertyReadOnly( m_indiP_dmReaderRelease ) < 0 )
+    {
+        return -1;
+    }
+
+    m_indiP_dmReaderReleaseStream = pcf::IndiProperty( pcf::IndiProperty::Text );
+    m_indiP_dmReaderReleaseStream.setDevice( derived().configName() );
+    m_indiP_dmReaderReleaseStream.setName( "dm_reader_release_stream" );
+    m_indiP_dmReaderReleaseStream.setPerm( pcf::IndiProperty::ReadOnly );
+    m_indiP_dmReaderReleaseStream.setState( pcf::IndiProperty::Idle );
+    m_indiP_dmReaderReleaseStream.add( pcf::IndiElement( "name" ) );
+    m_indiP_dmReaderReleaseStream.add( pcf::IndiElement( "meaning" ) );
+    m_indiP_dmReaderReleaseStream["name"] = m_readerReleaseStreamName;
+    m_indiP_dmReaderReleaseStream["meaning"] =
+        std::string( "channel reads finished; SDK result independent; not backend readiness or mirror settling" );
+
+    return derived().registerIndiPropertyReadOnly( m_indiP_dmReaderReleaseStream );
+}
+
+template <class derivedT, typename realT>
+void dm<derivedT, realT>::updateDMReaderReleaseINDI()
+{
+    if( !m_dmReaderRelease.enabled() || !derived().m_indiDriver )
+    {
+        return;
+    }
+
+    const auto record   = m_dmReaderRelease.snapshot();
+    const auto now      = dmTiming::monotonicNowNs();
+    const bool released = MagAOX::dmCompletion::readersQualified( record );
+    indi::updateIfChanged<double>(
+        m_indiP_dmReaderRelease,
+        { "state",
+          "session",
+          "epoch",
+          "sequence",
+          "inputInode",
+          "inputCounter",
+          "processingUs",
+          "ageSec",
+          "outcome",
+          "backendResult",
+          "qualified" },
+        { double( record.state ),
+          double( record.session ),
+          double( record.epoch ),
+          double( record.sequence ),
+          double( record.inputInode ),
+          double( record.inputCounter ),
+          record.startedNs > 0 && record.finishedNs >= record.startedNs
+              ? ( record.finishedNs - record.startedNs ) / 1000.0
+              : -1,
+          record.finishedNs > 0 && now >= record.finishedNs ? ( now - record.finishedNs ) / 1e9 : -1,
+          double( record.outcome ),
+          double( record.backendResult ),
+          released ? 1.0 : 0.0 },
+        derived().m_indiDriver,
+        released ? pcf::IndiProperty::Ok : pcf::IndiProperty::Idle );
 }
 
 template <class derivedT, typename realT>
@@ -1318,6 +1522,16 @@ const mx::improc::eigenImage<float> &dm<derivedT, realT>::totalFlat() const
 template <class derivedT, typename realT>
 int dm<derivedT, realT>::setupConfig( mx::app::appConfigurator &config )
 {
+    config.add( "dm.readerReleaseStream",
+                "",
+                "dm.readerReleaseStream",
+                argType::Required,
+                "dm",
+                "readerReleaseStream",
+                false,
+                "string",
+                "Optional last-channel-read stream; SDK result is independent; empty disables." );
+
     config.add( "dm.completionStream",
                 "",
                 "dm.completionStream",
@@ -1655,6 +1869,7 @@ int dm<derivedT, realT>::loadConfig( mx::app::appConfigurator &config )
 
     config( derived().m_shmimName, "dm.shmimName" );
     config( m_completionStreamName, "dm.completionStream" );
+    config( m_readerReleaseStreamName, "dm.readerReleaseStream" );
 
     if( !m_completionStreamName.empty() && ( m_completionStreamName == derived().m_shmimName ||
                                              m_completionStreamName.find_first_of( "/\\" ) != std::string::npos ) )
@@ -1715,6 +1930,31 @@ int dm<derivedT, realT>::loadConfig( mx::app::appConfigurator &config )
         config.isSet( "dm.shmimShape" );
         config.isSet( "dm.shmimDelta" );
         config.isSet( "dm.deltaChannels" );
+    }
+
+    if( !m_readerReleaseStreamName.empty() )
+    {
+        const std::vector<std::string> reserved{ derived().m_shmimName,
+                                                 m_completionStreamName,
+                                                 m_shmimFlat,
+                                                 m_shmimTest,
+                                                 m_shmimSat,
+                                                 m_shmimSatPerc,
+                                                 m_shmimShape,
+                                                 m_shmimDelta,
+                                                 m_shmimDiff,
+                                                 derived().m_shmimName + "_actmask" };
+
+        if( m_readerReleaseStreamName.find_first_not_of(
+                "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-" ) != std::string::npos ||
+            std::find( reserved.begin(), reserved.end(), m_readerReleaseStreamName ) != reserved.end() ||
+            std::find( m_deltaChannels.begin(), m_deltaChannels.end(), m_readerReleaseStreamName ) !=
+                m_deltaChannels.end() ||
+            m_readerReleaseStreamName.starts_with( derived().m_shmimName ) )
+        {
+            derivedT::template log<software_error>( { "invalid or conflicting dm.readerReleaseStream" } );
+            return -1;
+        }
     }
 
     config( m_dmWidth, "dm.width" );
@@ -1805,6 +2045,12 @@ int dm<derivedT, realT>::appStartup()
     if( m_dmCompletion.open( m_completionStreamName ) < 0 )
     {
         derivedT::template log<software_error>( { errno, "could not open DM completion stream" } );
+        return -1;
+    }
+
+    if( m_dmReaderRelease.open( m_readerReleaseStreamName, MagAOX::dmCompletion::Kind::readers ) < 0 )
+    {
+        derivedT::template log<software_error>( { errno, "could not open DM reader-release stream" } );
         return -1;
     }
 
@@ -1992,11 +2238,12 @@ int dm<derivedT, realT>::appLogic()
 template <class derivedT, typename realT>
 int dm<derivedT, realT>::appShutdown()
 {
-    if( m_dmCompletion.enabled() )
+    if( m_dmCompletion.enabled() || m_dmReaderRelease.enabled() )
     {
         // Existing apps call DM shutdown before monitor shutdown; join its sole publisher before closing the stream.
         static_cast<dev::shmimMonitor<derivedT> &>( derived() ).appShutdown();
         m_dmCompletion.close();
+        m_dmReaderRelease.close();
     }
 
     if( m_satThread.joinable() )
@@ -2224,6 +2471,10 @@ int dm<derivedT, realT>::allocate( const dev::shmimT &sp )
     m_totalDelta.resize( m_dmWidth, m_dmHeight );
     m_totalDelta.setZero();
 
+    m_stagedDelta.resize( m_dmWidth, m_dmHeight );
+    m_stagedDiff.resize( m_dmWidth, m_dmHeight );
+    m_deltaStaged = false;
+
     return 0;
 }
 
@@ -2231,8 +2482,24 @@ template <class derivedT, typename realT>
 int dm<derivedT, realT>::processImage( void *curr_src, const dev::shmimT &sp )
 {
     static_cast<void>( sp );
-    m_completionOutcome = MagAOX::dmTiming::Outcome::unknown;
+
+    if( !derived().admitCommand() )
+    {
+        m_dmTiming.outcome( MagAOX::dmTiming::Outcome::rejected );
+        m_dmTiming.finishEvent();
+        m_completionReceipt = false;
+        m_dmCompletion.reset();
+        m_dmReaderRelease.reset();
+
+        return 0;
+    }
+
+    CommandRetirement retirement( *this );
+    m_completionOutcome       = MagAOX::dmTiming::Outcome::unknown;
+    m_completionBackendResult = MagAOX::dmCompletion::unavailableResult;
+    m_deltaStaged             = false;
     m_dmCompletion.begin( &derived().m_imageStream, m_completionReceipt );
+    m_dmReaderRelease.begin( &derived().m_imageStream, m_completionReceipt );
     m_completionReceipt = false;
 
     if( !m_dmTiming.active() )
@@ -2262,63 +2529,128 @@ int dm<derivedT, realT>::processImage( void *curr_src, const dev::shmimT &sp )
         }
     }
 
-    int rv = derived().commandDM( curr_src );
+    int  rv       = -1;
+    bool deferred = false;
 
-    if( rv < 0 )
+    try
     {
-        derivedT::template log<software_critical>( { errno, rv, "Error from commandDM" } );
+        rv       = derived().commandDM( curr_src );
+        deferred = derived().deferredCommand();
 
-        if( m_completionOutcome != MagAOX::dmTiming::Outcome::partial )
+        if( rv >= 0 )
         {
-            dmTimingOutcome( MagAOX::dmTiming::Outcome::failed );
-        }
+            if( !m_deltaChannels.empty() )
+            {
+                dmTimingMark( MagAOX::dmTiming::Marker::deltaStart );
 
-        dmTimingMark( MagAOX::dmTiming::Marker::finish );
-        m_dmTiming.finishEvent();
-
-        m_dmCompletion.finish( &derived().m_imageStream, rv, m_completionOutcome );
-
-        return rv;
-    }
-
-    if( !m_deltaChannels.empty() )
-    {
-        dmTimingMark( MagAOX::dmTiming::Marker::deltaStart );
-        rv = makeDelta();
-        dmTimingMark( MagAOX::dmTiming::Marker::deltaEnd );
-
-        if( rv < 0 )
-        {
-            derivedT::template log<software_critical>( { errno, rv, "Error from makeDelta" } );
-            dmTimingOutcome( MagAOX::dmTiming::Outcome::failed );
-            dmTimingMark( MagAOX::dmTiming::Marker::finish );
-            m_dmTiming.finishEvent();
-
-            m_dmCompletion.finish( &derived().m_imageStream, rv, MagAOX::dmTiming::Outcome::failed );
-
-            return rv;
+                if( deferred )
+                {
+                    dmTimingMark( MagAOX::dmTiming::Marker::stagingStart );
+                    rv = stageDelta();
+                    dmTimingMark( MagAOX::dmTiming::Marker::stagingEnd );
+                }
+                else
+                {
+                    rv = makeDelta();
+                    dmTimingMark( MagAOX::dmTiming::Marker::deltaEnd );
+                }
+            }
+            else if( !deferred )
+            {
+                // Preserve the synchronous processing-through-delta endpoint without delta work.
+                dmTimingMark( MagAOX::dmTiming::Marker::deltaEnd );
+            }
         }
     }
-    else
+    catch( const std::exception &error )
     {
-        // The legacy processing-through-delta endpoint exists even without delta work.
+        rv = -1;
+        derivedT::template log<software_critical>( { std::string( "DM command processing: " ) + error.what() } );
+    }
+    catch( ... )
+    {
+        rv = -1;
+        derivedT::template log<software_critical>( { "unknown exception processing DM command" } );
+    }
+
+    bool coherentIdentity = true;
+
+    if( m_dmCompletion.enabled() && m_dmReaderRelease.enabled() )
+    {
+        const auto &complete = m_dmCompletion.attempt();
+        const auto &readers  = m_dmReaderRelease.attempt();
+        coherentIdentity = complete.inputInode == readers.inputInode && complete.inputCounter == readers.inputCounter &&
+                           complete.publicationSec == readers.publicationSec &&
+                           complete.publicationNsec == readers.publicationNsec;
+    }
+
+    m_dmReaderRelease.release( &derived().m_imageStream, rv, coherentIdentity );
+
+    if( rv >= 0 )
+    {
+        if( m_dmReaderRelease.enabled() )
+        {
+            m_dmTiming.markAt( MagAOX::dmTiming::Marker::readRelease, m_dmReaderRelease.attempt().finishedNs );
+        }
+        else
+        {
+            dmTimingMark( MagAOX::dmTiming::Marker::readRelease );
+        }
+    }
+
+    // Finalization drains the backend even after command preparation or private staging failed.
+    const int processingResult = rv;
+    const int finalResult      = derived().finalizeCommand( processingResult );
+    retirement.m_finalized     = true;
+    rv                         = processingResult < 0 ? processingResult : finalResult;
+
+    // Freeze actual submission evidence before a later publication/post error changes callback status.
+    m_dmReaderRelease.submission( m_completionOutcome, m_completionBackendResult );
+
+    if( rv >= 0 && deferred )
+    {
+        try
+        {
+            dmTimingMark( MagAOX::dmTiming::Marker::publicationStart );
+            rv = publishDelta();
+            dmTimingMark( MagAOX::dmTiming::Marker::publicationEnd );
+        }
+        catch( const std::exception &error )
+        {
+            rv = -1;
+            dmTimingOutcome( MagAOX::dmTiming::Outcome::failed );
+            derivedT::template log<software_critical>( { std::string( "DM delta publication: " ) + error.what() } );
+        }
+        catch( ... )
+        {
+            rv = -1;
+            dmTimingOutcome( MagAOX::dmTiming::Outcome::failed );
+            derivedT::template log<software_critical>( { "unknown exception publishing DM delta" } );
+        }
+
         dmTimingMark( MagAOX::dmTiming::Marker::deltaEnd );
     }
 
-    dmTimingMark( MagAOX::dmTiming::Marker::postStart );
-    int postResult = sem_post( &m_satSemaphore );
-    dmTimingMark( MagAOX::dmTiming::Marker::postEnd );
+    m_deltaStaged = false;
 
-    if( postResult < 0 )
+    if( rv >= 0 )
     {
-        derivedT::template log<software_critical>( { errno, 0, "Error posting to semaphore" } );
+        dmTimingMark( MagAOX::dmTiming::Marker::postStart );
+        const int postResult = sem_post( &m_satSemaphore );
+        dmTimingMark( MagAOX::dmTiming::Marker::postEnd );
+
+        if( postResult < 0 )
+        {
+            rv = -1;
+            dmTimingOutcome( MagAOX::dmTiming::Outcome::failed );
+            derivedT::template log<software_critical>( { errno, 0, "Error posting to semaphore" } );
+        }
+    }
+
+    if( rv < 0 && m_completionOutcome != MagAOX::dmTiming::Outcome::partial )
+    {
         dmTimingOutcome( MagAOX::dmTiming::Outcome::failed );
-        dmTimingMark( MagAOX::dmTiming::Marker::finish );
-        m_dmTiming.finishEvent();
-
-        m_dmCompletion.finish( &derived().m_imageStream, -1, MagAOX::dmTiming::Outcome::failed );
-
-        return -1;
+        derivedT::template log<software_critical>( { errno, rv, "DM command callback failed" } );
     }
 
     dmTimingMark( MagAOX::dmTiming::Marker::finish );
@@ -3342,6 +3674,70 @@ int dm<derivedT, realT>::makeDelta()
     }
 
     m_outputDiff = m_totalDelta - m_outputDelta();
+
+    return 0;
+}
+
+template <class derivedT, typename realT>
+int dm<derivedT, realT>::stageDelta()
+{
+    m_deltaStaged = false;
+
+    if( m_notDeltas.empty() )
+    {
+        return 0;
+    }
+
+    if( m_deltas.empty() || m_stagedDelta.rows() != m_dmWidth || m_stagedDelta.cols() != m_dmHeight ||
+        m_stagedDiff.rows() != m_dmWidth || m_stagedDiff.cols() != m_dmHeight || m_totalFlat.rows() != m_dmWidth ||
+        m_totalFlat.cols() != m_dmHeight || m_totalDelta.rows() != m_dmWidth || m_totalDelta.cols() != m_dmHeight ||
+        m_outputShape().rows() != m_dmWidth || m_outputShape().cols() != m_dmHeight )
+    {
+        return -1;
+    }
+
+    for( const auto &indices : { &m_notDeltas, &m_deltas } )
+    {
+        for( const size_t index : *indices )
+        {
+            if( index >= m_channels.size() || m_channels[index] == nullptr ||
+                ( *m_channels[index] )().rows() != m_dmWidth || ( *m_channels[index] )().cols() != m_dmHeight )
+            {
+                return -1;
+            }
+        }
+    }
+
+    m_totalFlat = ( *m_channels[m_notDeltas[0]] )();
+
+    for( size_t n = 1; n < m_notDeltas.size(); ++n )
+    {
+        m_totalFlat += ( *m_channels[m_notDeltas[n]] )();
+    }
+
+    m_totalDelta = ( *m_channels[m_deltas[0]] )();
+
+    for( size_t n = 1; n < m_deltas.size(); ++n )
+    {
+        m_totalDelta += ( *m_channels[m_deltas[n]] )();
+    }
+
+    m_stagedDelta = m_outputShape() - m_totalFlat;
+    m_stagedDiff  = m_totalDelta - m_stagedDelta;
+    m_deltaStaged = true;
+
+    return 0;
+}
+
+template <class derivedT, typename realT>
+int dm<derivedT, realT>::publishDelta()
+{
+    if( m_deltaStaged )
+    {
+        m_outputDelta = m_stagedDelta;
+        m_outputDiff  = m_stagedDiff;
+        m_deltaStaged = false;
+    }
 
     return 0;
 }

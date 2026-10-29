@@ -992,5 +992,141 @@ TEST_CASE( "DM publication ordering breaks chains at duplicate gap session and q
     // clang-format on
 }
 
+/** \brief Import worker SDK timestamps after independent monitor staging while preserving actual SDK-return latency.
+ * \ingroup dmTiming_tests
+ */
+TEST_CASE( "DM timing imports overlapping SDK work without changing sequential captures", "[dev::dmTiming]" )
+{
+    Collector collector;
+    collector.configure( 2, 8 );
+
+    for( int attempt = 0; attempt < 3; ++attempt )
+    {
+        const int64_t base = 1000000000 + attempt * 500000;
+        collector.beginEventAt( true, base );
+        collector.markAt( Marker::entry, base + 100 );
+        collector.markAt( Marker::actuatorStart, base + 200 );
+        collector.markAt( Marker::actuatorEnd, base + 7200 );
+        collector.markAt( Marker::dispatch, base + 7300 );
+        collector.markAt( Marker::satStart, base + 7400 );
+        collector.markAt( Marker::satEnd, base + 12400 );
+        collector.markAt( Marker::deltaStart, base + 12500 );
+        collector.markAt( Marker::stagingStart, base + 12500 );
+        collector.markAt( Marker::stagingEnd, base + 22500 );
+        collector.markAt( Marker::readRelease, base + 22600 );
+        collector.importSdk( base + 8000, base + 109000, Outcome::success, base + 7300, base + 22900, base + 110000 );
+        collector.markAt( Marker::publicationStart, base + 110100 );
+        collector.markAt( Marker::publicationEnd, base + 111100 );
+        collector.markAt( Marker::deltaEnd, base + 111100 );
+        collector.markAt( Marker::postStart, base + 111200 );
+        collector.markAt( Marker::postEnd, base + 111300 );
+        collector.markAt( Marker::finish, base + 111400 );
+        collector.finishEvent();
+    }
+
+    collector.update( 1001200000 );
+    const auto &summary = collector.summary();
+    REQUIRE( summary.total.invalid == 0 );
+    REQUIRE( summary.total.submitted == 3 );
+    REQUIRE( summary.fgValid );
+    CHECK( summary.metrics[metricIndex( Metric::sdk )].mean == Approx( 101e-6 ) );
+    CHECK( summary.metrics[metricIndex( Metric::receiptSend )].mean == Approx( 109e-6 ) );
+    CHECK( summary.metrics[metricIndex( Metric::sdkDispatch )].mean == Approx( 0.7e-6 ) );
+    CHECK( summary.metrics[metricIndex( Metric::readerRelease )].mean == Approx( 22.5e-6 ) );
+    CHECK( summary.metrics[metricIndex( Metric::staging )].mean == Approx( 10e-6 ) );
+    CHECK( summary.metrics[metricIndex( Metric::publication )].mean == Approx( 1e-6 ) );
+    CHECK( summary.metrics[metricIndex( Metric::sdkWait )].mean == Approx( 87.1e-6 ) );
+    CHECK( summary.metrics[metricIndex( Metric::delta )].mean == Approx( 98.6e-6 ) );
+    CHECK( summary.metrics[metricIndex( Metric::callback )].mean == Approx( 111.3e-6 ) );
+    CHECK( metricIndex( Metric::publicationInterval ) == 12 );
+    CHECK( metricIndex( Metric::sdkDispatch ) == 13 );
+    CHECK( metricIndex( Metric::sdkWait ) == 17 );
+
+    // clang-format off
+#ifdef XWCTEST_DOX_REF
+    MagAOX::app::dev::dmTiming::importSdk;
+#endif
+    // clang-format on
+}
+
+/** \brief Reject causal SDK/wait violations without erasing known actual submission or unrelated populations.
+ * \ingroup dmTiming_tests
+ */
+TEST_CASE( "DM timing worker import validates causal endpoints and preserves failure independence", "[dev::dmTiming]" )
+{
+    for( int variant = 0; variant < 5; ++variant )
+    {
+        Collector collector;
+        collector.configure( 2, 8 );
+        const int64_t base = 1000000000;
+        collector.beginEventAt( true, base );
+        collector.markAt( Marker::entry, base + 100 );
+        collector.markAt( Marker::actuatorEnd, base + 7000 );
+        collector.markAt( Marker::stagingStart, base + 7100 );
+        collector.markAt( Marker::stagingEnd, base + 21000 );
+        collector.markAt( Marker::readRelease, base + 21100 );
+
+        if( variant == 0 )
+        {
+            collector.importSdk( base + 6000, base + 109000, Outcome::success );
+        }
+        else if( variant == 1 )
+        {
+            collector.importSdk(
+                base + 8000, base + 109000, Outcome::success, base + 7200, base + 30000, base + 20000 );
+        }
+        else if( variant == 2 )
+        {
+            collector.outcome( Outcome::failed );
+            collector.importSdk( base + 8000, base + 109000, Outcome::success );
+        }
+        else if( variant == 3 )
+        {
+            collector.importSdk( base + 8000, base + 109000, Outcome::failed );
+        }
+        else
+        {
+            collector.importSdk( base + 8000, base + 20000, Outcome::success, base + 7200, base + 22000, base + 22100 );
+        }
+
+        collector.markAt( Marker::finish, base + 120000 );
+        collector.finishEvent();
+        collector.update( base + 130000 );
+        const auto &summary = collector.summary();
+        CHECK( summary.total.invalid == ( variant < 2 ? 1 : 0 ) );
+        CHECK( summary.metrics[metricIndex( Metric::staging )].count == 1 );
+        CHECK( summary.metrics[metricIndex( Metric::readerRelease )].count == 1 );
+        CHECK( summary.total.submitted == ( variant == 3 ? 0 : 1 ) );
+        CHECK( summary.total.failed == ( variant == 2 || variant == 3 ? 1 : 0 ) );
+        CHECK( summary.metrics[metricIndex( Metric::sdk )].count == ( variant == 0 ? 0 : 1 ) );
+        CHECK( summary.metrics[metricIndex( Metric::sdkWait )].count == ( variant == 4 ? 1 : 0 ) );
+    }
+}
+
+/** \brief Preserve monotonic capture validation outside worker import and keep disabled imports inert.
+ * \ingroup dmTiming_tests
+ */
+TEST_CASE( "DM timing sequential marker rules remain strict after worker endpoint support", "[dev::dmTiming]" )
+{
+    Collector collector;
+    collector.configure( 2, 8 );
+    collector.importSdk( 1, 2, Outcome::success );
+    collector.beginEventAt( true, 1000000 );
+    collector.markAt( Marker::entry, 1000010 );
+    collector.markAt( Marker::satStart, 1000100 );
+    collector.markAt( Marker::sdkStart, 1000020 );
+    collector.markAt( Marker::finish, 1000200 );
+    collector.finishEvent();
+    collector.update( 1000300 );
+    CHECK( collector.summary().total.invalid == 1 );
+    CHECK( collector.summary().metrics[metricIndex( Metric::sdk )].count == 0 );
+    collector.configure( 0, 0 );
+    collector.beginEventAt( true, 1000000 );
+    collector.importSdk( 1000010, 1000020, Outcome::success, 1000005, 1000015, 1000025 );
+    collector.finishEvent();
+    collector.update( 1000030 );
+    CHECK( collector.summary().total.events == 0 );
+}
+
 } // namespace dmTimingTests
 } // namespace libXWCTest

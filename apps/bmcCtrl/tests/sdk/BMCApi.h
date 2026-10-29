@@ -12,7 +12,9 @@ constexpr unsigned MAX_DM_SIZE = 4096; ///< Capacity needed by the production in
 /// Software-only subset of the vendor handle fields used by this app.
 struct DM
 {
-    uint32_t ActCount{ 2 }; ///< Software actuator count used by initialization.
+    uint32_t ActCount{ 2 };    ///< Software actuator count used by initialization.
+    unsigned Driver_Type{ 1 }; ///< Scripted transport metadata copied only by the SDK owner.
+    unsigned HVA_Type{ 2 };    ///< Scripted amplifier metadata copied only by the SDK owner.
 };
 /// Open a software mirror handle.
 BMCRC BMCOpen( DM *dm /**< [out] Stub handle. */, const char *serial /**< [in] Unused serial. */ );
@@ -30,5 +32,7 @@ const char *BMCErrorString( BMCRC result /**< [in] Scripted result. */ );
 BMCRC BMCClearArray( DM *dm /**< [in] Stub handle. */ );
 /// Close a software mirror handle.
 BMCRC BMCClose( DM *dm /**< [in] Stub handle. */ );
+/// Return the software-only version without loading a vendor SDK.
+const char *BMCVersionString();
 /// \endcond
 #endif

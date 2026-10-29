@@ -54,6 +54,8 @@ struct telem_dmtimings : public flatbuffer_log
 
     static constexpr size_t legacyMetricCount = 12; ///< Complete metric set before publication intervals were appended.
 
+    static constexpr size_t publicationMetricCount = 13; ///< Complete metric set before worker stages were appended.
+
     /// Serialize one quality-counter population without changing its collection interval.
     static flatbuffers::Offset<DmTimingCounters>
     counters( flatbuffers::FlatBufferBuilder &builder /**< [in/out] destination builder */,
@@ -109,7 +111,7 @@ inline flatbuffers::Offset<DmTimingCounters> telem_dmtimings::counters( flatbuff
 inline telem_dmtimings::messageT::messageT( const dmTiming::Summary &summary )
 {
     static_assert( size_t( dmTiming::Metric::publicationInterval ) == 12 );
-    static_assert( size_t( dmTiming::Metric::count ) == 13 );
+    static_assert( size_t( dmTiming::Metric::count ) == 18 );
 
     builder.ForceDefaults( true ); // Preserve nonfinite input for verification even under fast-math comparisons.
 
@@ -171,7 +173,7 @@ inline bool telem_dmtimings::verify( flatlogs::bufferPtrT &buffer, flatlogs::msg
     const size_t rows = record->metrics()->size();
 
     if( record->state() < DmTimingAvailability_MIN || record->state() > DmTimingAvailability_MAX ||
-        ( rows != legacyMetricCount && rows != metricCount ) )
+        ( rows != legacyMetricCount && rows != publicationMetricCount && rows != metricCount ) )
     {
         return false;
     }
@@ -199,7 +201,7 @@ inline bool telem_dmtimings::verify( flatlogs::bufferPtrT &buffer, flatlogs::msg
         }
     }
 
-    for( size_t index = 0; index < legacyMetricCount; ++index )
+    for( size_t index = 0; index < rows; ++index )
     {
         if( !seen[index] )
         {

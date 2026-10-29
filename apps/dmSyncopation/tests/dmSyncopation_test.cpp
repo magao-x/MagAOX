@@ -77,9 +77,10 @@ void SimulationDriver::sendXml( const std::string &xml ) const
 class Harness : public dmSyncopation
 {
   public:
-    using CombinedMonitor   = dev::shmimMonitor<dmSyncopation, syncoCombinerT>;
-    using CameraMonitor     = dev::shmimMonitor<dmSyncopation, syncoCameraT>;
-    using CompletionMonitor = dev::shmimMonitor<dmSyncopation, syncoCompletionT>;
+    using CombinedMonitor      = dev::shmimMonitor<dmSyncopation, syncoCombinerT>;
+    using CameraMonitor        = dev::shmimMonitor<dmSyncopation, syncoCameraT>;
+    using ReaderReleaseMonitor = dev::shmimMonitor<dmSyncopation, syncoReaderReleaseT>;
+    using CompletionMonitor    = dev::shmimMonitor<dmSyncopation, syncoCompletionT>;
 
     using dmSyncopation::allocate;
     using dmSyncopation::configureSimulation;
@@ -139,6 +140,8 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_indiP_primaryTimingQuality;
     using dmSyncopation::m_indiP_reacquire;
     using dmSyncopation::m_indiP_readerQuality;
+    using dmSyncopation::m_indiP_readerReleaseQuality;
+    using dmSyncopation::m_indiP_readerReleaseTiming;
     using dmSyncopation::m_indiP_readerTiming;
     using dmSyncopation::m_indiP_settings;
     using dmSyncopation::m_indiP_simulation;
@@ -175,6 +178,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_primaryTraceInode;
     using dmSyncopation::m_primed;
     using dmSyncopation::m_rateFrames;
+    using dmSyncopation::m_readerReleaseTiming;
     using dmSyncopation::m_readerTiming;
     using dmSyncopation::m_reason;
     using dmSyncopation::m_record;
@@ -277,6 +281,12 @@ class Harness : public dmSyncopation
     /// Import the fixture's dedicated completion record without starting another monitor.
     void attachCompletionOnly();
 
+    /// Import only the independent early-release observer without starting workers.
+    void attachReaderReleaseOnly();
+
+    /// Access the early-release observer fixture attachment.
+    IMAGE &readerReleaseImage();
+
     /// Access the completion observer's imported record for allocation and callback tests.
     IMAGE &completionImage();
 
@@ -347,6 +357,11 @@ Harness::~Harness() noexcept
     if( cameraImage().md )
     {
         ImageStreamIO_closeIm( &cameraImage() );
+    }
+
+    if( readerReleaseImage().md )
+    {
+        ImageStreamIO_closeIm( &readerReleaseImage() );
     }
 
     if( completionImage().md )
@@ -450,6 +465,19 @@ const std::string &Harness::combinedMonitorName() const
 int Harness::combinedMonitorSemaphore() const
 {
     return CombinedMonitor::m_semaphoreNumber;
+}
+
+void Harness::attachReaderReleaseOnly()
+{
+    ReaderReleaseMonitor::m_shmimName = "synco_reader_done";
+    REQUIRE( ImageStreamIO_openIm( &readerReleaseImage(), ReaderReleaseMonitor::m_shmimName.c_str() ) == 0 );
+    REQUIRE( allocate( syncoReaderReleaseT{} ) == 0 );
+    shmimMonitorTiming( syncoReaderReleaseT{}, dev::shmimMonitorEvent::connected );
+}
+
+IMAGE &Harness::readerReleaseImage()
+{
+    return ReaderReleaseMonitor::m_imageStream;
 }
 
 void Harness::attachCompletionOnly()
@@ -5265,6 +5293,156 @@ TEST_CASE( "syncopation completion allocation requires its fixed CPU transport",
     dmSyncopation::allocate( syncoCompletionT{} );
 #endif
     // clang-format on
+}
+
+/// Observe early channel release without a full-completion peer or any scheduler mutation.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation independently measures early reader release and SDK enrichment",
+           "[dmSyncopation][readerTiming]" )
+{
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::processImage( nullptr, syncoReaderReleaseT{} );
+    dmSyncopation::shmimMonitorTiming( syncoReaderReleaseT{}, dev::shmimMonitorEvent::receipt );
+    dmSyncopation::setupReaderTimingINDI;
+#endif
+    // clang-format on
+    using namespace MagAOX::dmReaderTiming;
+    Streams          streams;
+    CompletionStream release;
+    Harness          app;
+    app.attachPrimaryOnly();
+    app.m_simulationEnabled = true;
+    app.m_simulationWindow  = 4;
+    app.m_requested         = 2;
+    app.m_now               = CadenceClock::now;
+    app.m_wait              = CadenceClock::wait;
+    app.m_readerReleaseTiming.configure( 2, 64, MagAOX::dmCompletion::Kind::readers );
+    REQUIRE( app.configureSimulation() );
+    REQUIRE( app.allocate( dev::shmimT{} ) == 0 );
+    app.attachCombinedOnly();
+    app.attachReaderReleaseOnly();
+    app.localDriver( streams.directory );
+    REQUIRE( app.setupReaderTimingINDI() == 0 );
+    CHECK_FALSE( app.m_readerTiming.enabled() );
+    CHECK( app.m_indiP_readerTiming.getElements().empty() );
+    CHECK( app.m_indiP_readerReleaseTiming.getElements().size() == 36 );
+    CHECK( app.m_indiP_readerReleaseQuality.getElements().size() == 45 );
+    constexpr int64_t observed = 1000000000;
+    constexpr int64_t external = 1792000000000000000LL;
+    cadenceObservation( app, observed, external, 10 );
+    combinedObservation( app, streams.images[1], observed + 20000, external, 10 );
+    auto record       = readerCompletion( streams.images[1], 1, observed + 1000, observed + 40000 );
+    record.kind       = MagAOX::dmCompletion::Kind::readers;
+    record.state      = MagAOX::dmCompletion::State::released;
+    record.outcome    = MagAOX::dmTiming::Outcome::unknown;
+    const auto before = simulationBytes( app.m_simulation.summary() );
+    release.store( record );
+    CadenceClock::time = observed + 45000;
+    app.shmimMonitorTiming( syncoReaderReleaseT{}, dev::shmimMonitorEvent::receipt );
+    REQUIRE( app.processImage( nullptr, syncoReaderReleaseT{} ) == 0 );
+    app.m_readerReleaseTiming.update( CadenceClock::time );
+    REQUIRE( app.m_readerReleaseTiming.summary().total.matched == 1 );
+    CHECK( app.m_readerReleaseTiming.summary().total.sdkResults == 0 );
+    // Metadata-bracket clock reads advance the deterministic clock by a few nanoseconds.
+    CHECK( app.m_readerReleaseTiming.summary().metrics[index( Metric::requiredHold )].mean ==
+           Approx( 20e-6 ).margin( 5e-9 ) );
+    CHECK( app.m_readerReleaseTiming.summary().worst.combined.budgetNs == 155000 );
+    CHECK( simulationBytes( app.m_simulation.summary() ) == before );
+
+    record.outcome       = MagAOX::dmTiming::Outcome::failed;
+    record.backendResult = 7;
+    release.store( record );
+    CadenceClock::time = observed + 150000;
+    app.shmimMonitorTiming( syncoReaderReleaseT{}, dev::shmimMonitorEvent::receipt );
+    REQUIRE( app.processImage( nullptr, syncoReaderReleaseT{} ) == 0 );
+    app.m_readerReleaseTiming.update( CadenceClock::time );
+    app.updateReaderTimingINDI();
+    CHECK( app.m_readerReleaseTiming.summary().total.matched == 1 );
+    CHECK( app.m_readerReleaseTiming.summary().total.sdkResults == 1 );
+    CHECK( app.m_readerReleaseTiming.summary().total.sdkFailed == 1 );
+    CHECK( app.m_indiP_readerReleaseQuality["sdkFailed"].get<double>() == 1 );
+    CHECK( app.m_indiP_readerReleaseQuality["matched"].get<double>() == 1 );
+    CHECK( simulationBytes( app.m_simulation.summary() ) == before );
+    CHECK_FALSE( app.m_enabled );
+    CHECK_FALSE( app.m_resources );
+    CHECK( app.m_delivered == 0 );
+    app.shmimMonitorTiming( syncoReaderReleaseT{}, dev::shmimMonitorEvent::disconnected );
+    app.m_readerReleaseTiming.update( CadenceClock::time );
+    CHECK( app.m_readerReleaseTiming.summary().metrics[index( Metric::requiredHold )].count == 0 );
+}
+
+/// Keep the early-release observer opt-in, shadow-only and distinct from every other configured stream.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation early release observer validates its independent configuration",
+           "[dmSyncopation][readerTiming]" )
+{
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::setupConfig;
+    dmSyncopation::loadConfigImpl;
+#endif
+    // clang-format on
+    const bool        simulation = GENERATE( false, true );
+    const std::string name =
+        GENERATE( std::string( "early_read_done" ), std::string( "dm01disp" ), std::string( "same_done" ) );
+    Harness app;
+    app.setupConfig();
+    char      path[]     = "/tmp/synco-release-config-XXXXXX";
+    const int descriptor = mkstemp( path );
+    REQUIRE( descriptor >= 0 );
+    ::close( descriptor );
+
+    {
+        std::ofstream config( path );
+        config << "[simulation]\nenabled=" << ( simulation ? "true" : "false" )
+               << "\n[completionMonitor]\nshmimName=same_done\n[readerReleaseMonitor]\nshmimName=" << name << '\n';
+    }
+
+    app.config.readConfig( path );
+    std::remove( path );
+    const auto result = app.loadConfigImpl( app.config );
+    CHECK( ( result == 0 ) == ( simulation && name == "early_read_done" ) );
+}
+
+/// Keep the independent early-release callback out of the realtime simulation mutex.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation early release callback never waits for the simulation cycle", "[dmSyncopation][readerTiming]" )
+{
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::processImage( nullptr, syncoReaderReleaseT{} );
+#endif
+    // clang-format on
+    Streams          streams;
+    CompletionStream release;
+    Harness          app;
+    prepareReaderTiming( app );
+    app.m_readerReleaseTiming.configure( 2, 64, MagAOX::dmCompletion::Kind::readers );
+    app.attachReaderReleaseOnly();
+    constexpr int64_t external = 1792000000000000000LL;
+    cadenceObservation( app, 1000000000, external, 10 );
+    combinedObservation( app, streams.images[1], 1000020000, external, 10 );
+    auto record    = readerCompletion( streams.images[1], 1, 1000030000, 1000040000 );
+    record.kind    = MagAOX::dmCompletion::Kind::readers;
+    record.state   = MagAOX::dmCompletion::State::released;
+    record.outcome = MagAOX::dmTiming::Outcome::unknown;
+    release.store( record );
+    CadenceClock::time = 1000045000;
+    app.shmimMonitorTiming( syncoReaderReleaseT{}, dev::shmimMonitorEvent::receipt );
+    std::unique_lock<std::mutex> cycle( app.m_cycleMutex );
+    auto                         callback  = std::async( std::launch::async,
+                                [&]()
+                                {
+                                    return app.processImage( nullptr, syncoReaderReleaseT{} );
+                                } );
+    const auto                   readiness = callback.wait_for( std::chrono::milliseconds( 500 ) );
+    cycle.unlock();
+    CHECK( callback.get() == 0 );
+    CHECK( readiness == std::future_status::ready );
+    app.m_readerReleaseTiming.update( CadenceClock::time );
+    CHECK( app.m_readerReleaseTiming.summary().total.matched == 1 );
+    CHECK( app.m_readerReleaseTiming.summary().total.sdkResults == 0 );
 }
 
 } // namespace dmSyncopationTest

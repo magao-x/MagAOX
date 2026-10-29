@@ -181,7 +181,7 @@ TEST_CASE( "DM timing metadata projects metrics and collection quality", "[dmTim
     const auto                         summary = sampleSummary();
     telem_dmtimings::messageT          message( summary );
     auto                              *payload = message.builder.GetBufferPointer();
-    const std::array<const char *, 13> names{ "receiptInterval",
+    const std::array<const char *, 18> names{ "receiptInterval",
                                               "sendInterval",
                                               "receiptSend",
                                               "dispatch",
@@ -193,7 +193,12 @@ TEST_CASE( "DM timing metadata projects metrics and collection quality", "[dmTim
                                               "throughDelta",
                                               "callback",
                                               "receiptCallback",
-                                              "publicationInterval" };
+                                              "publicationInterval",
+                                              "sdkDispatch",
+                                              "readerRelease",
+                                              "staging",
+                                              "publication",
+                                              "sdkWait" };
 
     for( size_t index = 0; index < names.size(); ++index )
     {
@@ -323,14 +328,18 @@ TEST_CASE( "DM timing telemetry distinguishes availability and rejects malformed
 /** \ingroup dmTimingTelemetry_unit_test */
 TEST_CASE( "DM timing telemetry verifies the stable metric set", "[dmTimingTelemetry]" )
 {
-    for( int variant = 0; variant < 7; ++variant )
+    for( int variant = 0; variant < 10; ++variant )
     {
         INFO( "metric-set variant " << variant );
         telem_dmtimings::messageT message( sampleSummary() );
         auto                     &builder = message.builder;
         builder.Clear();
         std::vector<flatbuffers::Offset<DmTimingStats>> rows;
-        const size_t count = variant == 0 || variant == 3 ? 12 : variant == 2 ? 11 : variant == 6 ? 14 : 13;
+        const size_t                                    count = variant == 0 || variant == 3 ? 12
+                                                                : variant == 2               ? 11
+                                                                : variant == 6               ? 14
+                                                                : variant >= 7               ? 18
+                                                                                             : 13;
 
         for( size_t index = 0; index < count; ++index )
         {
@@ -351,6 +360,16 @@ TEST_CASE( "DM timing telemetry verifies the stable metric set", "[dmTimingTelem
                 id = 99;
             }
 
+            if( variant == 8 && index == 0 )
+            {
+                id = 0;
+            }
+
+            if( variant == 9 && index == 0 )
+            {
+                id = 18;
+            }
+
             rows.push_back( CreateDmTimingStats( builder, DmTimingMetric( id ), 3, 1e-4, 1e-6, 9e-5, 2e-4, 1, true ) );
         }
 
@@ -363,7 +382,7 @@ TEST_CASE( "DM timing telemetry verifies the stable metric set", "[dmTimingTelem
         record.add_delta( delta );
         builder.Finish( record.Finish() );
         auto buffer = envelope( message );
-        REQUIRE( verifyLogEntry( telem_dmtimings::eventCode, buffer.get() ) == ( variant <= 1 ) );
+        REQUIRE( verifyLogEntry( telem_dmtimings::eventCode, buffer.get() ) == ( variant <= 1 || variant == 7 ) );
 
         if( variant <= 1 )
         {
@@ -385,6 +404,19 @@ TEST_CASE( "DM timing telemetry verifies the stable metric set", "[dmTimingTelem
         if( variant == 1 )
         {
             REQUIRE( project<double>( "publicationInterval_mean", builder.GetBufferPointer() ) == 1e-4 );
+        }
+
+        if( variant <= 1 )
+        {
+            REQUIRE( project<uint64_t>( "readerRelease_count", builder.GetBufferPointer() ) == 0 );
+            REQUIRE_FALSE( project<bool>( "sdkWait_valid", builder.GetBufferPointer() ) );
+            REQUIRE( mx::math::isNan( project<double>( "staging_mean", builder.GetBufferPointer() ) ) );
+        }
+
+        if( variant == 7 )
+        {
+            REQUIRE( project<double>( "readerRelease_mean", builder.GetBufferPointer() ) == 1e-4 );
+            REQUIRE( project<double>( "sdkWait_mean", builder.GetBufferPointer() ) == 1e-4 );
         }
     }
 }

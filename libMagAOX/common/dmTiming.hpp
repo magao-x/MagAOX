@@ -31,6 +31,11 @@ enum class Metric : uint8_t
     callback,
     receiptCallback,
     publicationInterval,
+    sdkDispatch,
+    readerRelease,
+    staging,
+    publication,
+    sdkWait,
     count
 };
 
@@ -50,6 +55,14 @@ enum class Marker : uint8_t
     postStart,
     postEnd,
     finish,
+    dispatch,
+    readRelease,
+    stagingStart,
+    stagingEnd,
+    publicationStart,
+    publicationEnd,
+    waitStart,
+    waitEnd,
     count
 };
 
@@ -193,7 +206,12 @@ inline const char *metricName( Metric metric )
                                       "throughDelta",
                                       "callback",
                                       "receiptCallback",
-                                      "publicationInterval" };
+                                      "publicationInterval",
+                                      "sdkDispatch",
+                                      "readerRelease",
+                                      "staging",
+                                      "publication",
+                                      "sdkWait" };
 
     return metricIndex( metric ) < metricIndex( Metric::count ) ? names[metricIndex( metric )] : "unknown";
 }
