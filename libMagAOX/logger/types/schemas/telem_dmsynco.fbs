@@ -164,11 +164,15 @@ table DmSyncoSimulationStep
     reader_hold:ulong;
     expired:ulong;
     overlap:ulong;
+    release_missing:ulong;
+    release_late:ulong;
+    backend_busy:ulong;
+    backend_wrap:ulong;
 }
 
 // Trigger provenance and overlap classification; all interval boundaries below are half-open.
 enum DmSyncoOverlapOrigin:ubyte { primary = 0, combined = 1 }
-enum DmSyncoOverlapWindow:ubyte { copy = 0, readerHold = 1 }
+enum DmSyncoOverlapWindow:ubyte { copy = 0, readerHold = 1, backend = 2 }
 
 // Slow counter/time cadence uses the monotonic observation clock, independently of phase filtering.
 enum DmSyncoCadenceState:ubyte { nominal = 0, growing = 1, full = 2 }
@@ -231,6 +235,7 @@ table DmSyncoOverlapEvent
     last_estimator_id:ulong;
     period_q32:ulong;
     plan_fraction_q32:long;
+    backend_end_ns:long;
 }
 
 // Lifetime queue accounting survives model resets; a drained batch can contain earlier sessions.
@@ -349,6 +354,7 @@ table DmSyncoSimulation
     overlap_trace:DmSyncoOverlapTrace;
     estimator_trace:DmSyncoEstimatorTrace;
     cadence:DmSyncoCadence;
+    readiness:DmSyncoReadiness;
 }
 
 // Raw publication fields identify producers and are never subtracted from the monotonic observer clock.
@@ -395,6 +401,40 @@ table DmSyncoReaderCompletion
     kind:ubyte;
     backend_result:long = -9223372036854775808;
     receipt_ns:long;
+}
+
+// Only actual main-command reader releases supply evidence. Virtual auxiliary readers/backend times are assumptions.
+table DmSyncoReadinessEvidence
+{
+    completed:DmSyncoReaderCompletion (required);
+    source_epoch:ulong;
+    coherent:bool;
+}
+
+table DmSyncoReadinessQuality
+{
+    observed:ulong;
+    qualified:ulong;
+    invalid:ulong;
+    incoherent:ulong;
+    duplicates:ulong;
+    gaps:ulong;
+    source_resets:ulong;
+    identity_mismatch:ulong;
+    sdk_failed:ulong;
+    queue_drops:ulong;
+}
+
+// Optional new shadow policy; no field asserts actual auxiliary delivery, backend readiness or hardware settling.
+table DmSyncoReadiness
+{
+    reader_release_ready:bool;
+    virtual_reader_ns:long;
+    backend_ns:long;
+    reader_cycle_feasible:bool;
+    backend_cycle_feasible:bool;
+    latest_release:DmSyncoReadinessEvidence;
+    total:DmSyncoReadinessQuality (required);
 }
 
 // Completion offset and model slack are signed; all absolute local times are monotonic nanoseconds.

@@ -97,6 +97,18 @@ struct telem_dmsynco : public flatbuffer_log
     pipelineTiming( flatbuffers::FlatBufferBuilder  &builder /**< [in/out] destination builder */,
                     const dmPipelineTiming::Summary &summary /**< [in] coherent pipeline observation */ );
 
+    /// Serialize a versioned endpoint and exact observer stamps without inventing auxiliary evidence.
+    static flatbuffers::Offset<DmSyncoReaderCompletion>
+    readerCompletion( flatbuffers::FlatBufferBuilder &builder /**< [in/out] Destination builder. */,
+                      const dmCompletion::Record     &record /**< [in] Actual versioned controller endpoint. */,
+                      int64_t                         observedNs /**< [in] Coherent local capture timestamp. */,
+                      int64_t receiptNs = 0 /**< [in] Optional raw semaphore-return timestamp. */ );
+
+    /// Serialize the opt-in shadow readiness policy, assumptions and observed main-release evidence.
+    static flatbuffers::Offset<DmSyncoReadiness>
+    readinessTiming( flatbuffers::FlatBufferBuilder   &builder /**< [in/out] Destination builder. */,
+                     const dmSyncoSimulation::Summary &summary /**< [in] Conditional readiness model. */ );
+
     /// Serialize optional reader-protection measurements with signed offsets and lifetime worst provenance.
     static flatbuffers::Offset<DmSyncoReaderTiming>
     readerTiming( flatbuffers::FlatBufferBuilder &builder /**< [in/out] destination builder */,
@@ -148,11 +160,18 @@ struct telem_dmsynco : public flatbuffer_log
     /// Check retained pipeline topology and conditional-population count bounds.
     static bool validPipeline( const DmSyncoPipelineTiming *summary /**< [in] optional trace-stage summary */ );
 
+    /// Recover exact endpoint fields from a structurally verified completion table.
+    static dmCompletion::Record readerRecord(
+        const DmSyncoReaderCompletion *completed /**< [in] Non-null endpoint with non-null input identity. */ );
+
     /// Check optional reader matching, signed populations, lifetime maxima and exact worst-command evidence.
     static bool validReader( const DmSyncoReaderTiming *summary /**< [in] optional software reader measurement */ );
 
     /// Recompute a matched command's signed reader-protection arithmetic without crossing clock domains.
     static bool validReaderSample( const DmSyncoReaderSample *sample /**< [in] lifetime matched-command evidence */ );
+
+    /// Validate optional shadow readiness assumptions and actual main-reader-release provenance.
+    static bool validReadiness( const DmSyncoReadiness *readiness /**< [in] Optional new-mode readiness record. */ );
 
     /// Check optional shadow model readiness and independently counted step outcomes.
     static bool validSimulation( const DmSyncoSimulation *summary /**< [in] optional conditional simulation */ );
@@ -460,7 +479,8 @@ telem_dmsynco::overlapTrace( flatbuffers::FlatBufferBuilder &builder, const dmSy
                                                      event.planEstimatorId,
                                                      event.lastEstimatorId,
                                                      event.periodQ32,
-                                                     event.planFractionQ32 ) );
+                                                     event.planFractionQ32,
+                                                     event.backendEndNs ) );
     }
 
     const auto  records = builder.CreateVector( events );
@@ -571,6 +591,46 @@ telem_dmsynco::estimatorTrace( flatbuffers::FlatBufferBuilder &builder, const dm
                                         records );
 }
 
+inline flatbuffers::Offset<DmSyncoReadiness> telem_dmsynco::readinessTiming( flatbuffers::FlatBufferBuilder   &builder,
+                                                                             const dmSyncoSimulation::Summary &summary )
+{
+    if( !summary.readerReleaseReady )
+    {
+        return {};
+    }
+
+    const auto                                   &counts  = summary.readiness;
+    const auto                                    quality = CreateDmSyncoReadinessQuality( builder,
+                                                        counts.observed,
+                                                        counts.qualified,
+                                                        counts.invalid,
+                                                        counts.incoherent,
+                                                        counts.duplicates,
+                                                        counts.gaps,
+                                                        counts.sourceResets,
+                                                        counts.identityMismatch,
+                                                        counts.sdkFailed,
+                                                        counts.queueDrops );
+    flatbuffers::Offset<DmSyncoReadinessEvidence> evidence;
+
+    if( summary.latestRelease.observedNs != 0 )
+    {
+        const auto completed =
+            readerCompletion( builder, summary.latestRelease.record, summary.latestRelease.observedNs );
+        evidence = CreateDmSyncoReadinessEvidence(
+            builder, completed, summary.latestRelease.sourceEpoch, summary.latestRelease.coherent );
+    }
+
+    return CreateDmSyncoReadiness( builder,
+                                   summary.readerReleaseReady,
+                                   summary.virtualReaderNs,
+                                   summary.backendNs,
+                                   summary.readerCycleFeasible,
+                                   summary.backendCycleFeasible,
+                                   evidence,
+                                   quality );
+}
+
 inline flatbuffers::Offset<DmSyncoSimulation>
 telem_dmsynco::simulationTiming( flatbuffers::FlatBufferBuilder      &builder,
                                  const dmSyncoSimulation::Summary    &summary,
@@ -595,13 +655,18 @@ telem_dmsynco::simulationTiming( flatbuffers::FlatBufferBuilder      &builder,
                                                       step.missingOutput,
                                                       step.readerHold,
                                                       step.expired,
-                                                      step.overlap ) );
+                                                      step.overlap,
+                                                      step.releaseMissing,
+                                                      step.releaseLate,
+                                                      step.backendBusy,
+                                                      step.backendWrap ) );
     }
 
     const auto outcomes  = builder.CreateVector( steps );
     const auto evidence  = overlapTrace( builder, trace );
     const auto estimator = estimatorTrace( builder, trace );
     const auto cadence   = cadenceTiming( builder, summary.cadence );
+    const auto readiness = readinessTiming( builder, summary );
 
     return CreateDmSyncoSimulation( builder,
                                     summary.enabled,
@@ -647,7 +712,31 @@ telem_dmsynco::simulationTiming( flatbuffers::FlatBufferBuilder      &builder,
                                     summary.cadenceMinPeriodNs,
                                     evidence,
                                     estimator,
-                                    cadence );
+                                    cadence,
+                                    readiness );
+}
+
+inline flatbuffers::Offset<DmSyncoReaderCompletion> telem_dmsynco::readerCompletion(
+    flatbuffers::FlatBufferBuilder &builder, const dmCompletion::Record &record, int64_t observedNs, int64_t receiptNs )
+{
+    const auto completedIdentity = CreateDmSyncoReaderIdentity(
+        builder, record.inputInode, record.inputCounter, record.publicationSec, record.publicationNsec );
+    return CreateDmSyncoReaderCompletion( builder,
+                                          record.protocolVersion,
+                                          record.session,
+                                          record.epoch,
+                                          record.sequence,
+                                          static_cast<uint64_t>( record.state ),
+                                          completedIdentity,
+                                          record.startedNs,
+                                          record.finishedNs,
+                                          static_cast<uint8_t>( record.outcome ),
+                                          record.callbackResult,
+                                          record.publisherPid,
+                                          observedNs,
+                                          static_cast<uint8_t>( record.kind ),
+                                          record.backendResult,
+                                          receiptNs );
 }
 
 inline flatbuffers::Offset<DmSyncoReaderSample> telem_dmsynco::readerSample( flatbuffers::FlatBufferBuilder &builder,
@@ -661,31 +750,14 @@ inline flatbuffers::Offset<DmSyncoReaderSample> telem_dmsynco::readerSample( fla
     const auto primaryRecord    = CreateDmSyncoReaderPrimary( builder, primaryIdentity, primary.observedNs );
     const auto combinedIdentity = CreateDmSyncoReaderIdentity(
         builder, combined.input.inode, combined.input.counter, combined.input.sec, combined.input.nsec );
-    const auto combinedRecord    = CreateDmSyncoReaderCombined( builder,
+    const auto combinedRecord = CreateDmSyncoReaderCombined( builder,
                                                              combinedIdentity,
                                                              combined.primaryInode,
                                                              combined.primaryCounter,
                                                              combined.startNs,
                                                              combined.observedNs,
                                                              combined.budgetNs );
-    const auto completedIdentity = CreateDmSyncoReaderIdentity(
-        builder, record.inputInode, record.inputCounter, record.publicationSec, record.publicationNsec );
-    const auto completed = CreateDmSyncoReaderCompletion( builder,
-                                                          record.protocolVersion,
-                                                          record.session,
-                                                          record.epoch,
-                                                          record.sequence,
-                                                          static_cast<uint64_t>( record.state ),
-                                                          completedIdentity,
-                                                          record.startedNs,
-                                                          record.finishedNs,
-                                                          static_cast<uint8_t>( record.outcome ),
-                                                          record.callbackResult,
-                                                          record.publisherPid,
-                                                          sample.completed.observedNs,
-                                                          static_cast<uint8_t>( record.kind ),
-                                                          record.backendResult,
-                                                          sample.completed.receiptNs );
+    const auto completed = readerCompletion( builder, record, sample.completed.observedNs, sample.completed.receiptNs );
     return CreateDmSyncoReaderSample( builder,
                                       primaryRecord,
                                       combinedRecord,
@@ -992,6 +1064,30 @@ inline bool telem_dmsynco::validPipeline( const DmSyncoPipelineTiming *summary )
     return true;
 }
 
+inline dmCompletion::Record telem_dmsynco::readerRecord( const DmSyncoReaderCompletion *completed )
+{
+    const auto          *command = completed->input();
+    dmCompletion::Record record;
+    record.protocolVersion = completed->protocol_version();
+    record.session         = completed->session();
+    record.epoch           = completed->epoch();
+    record.sequence        = completed->sequence();
+    record.state           = static_cast<MagAOX::dmCompletion::State>( completed->state() );
+    record.inputInode      = command->inode();
+    record.inputCounter    = command->counter();
+    record.publicationSec  = command->publication_sec();
+    record.publicationNsec = command->publication_nsec();
+    record.startedNs       = completed->started_ns();
+    record.finishedNs      = completed->finished_ns();
+    record.outcome         = static_cast<MagAOX::dmTiming::Outcome>( completed->outcome() );
+    record.callbackResult  = completed->callback_result();
+    record.publisherPid    = completed->publisher_pid();
+    record.kind            = static_cast<MagAOX::dmCompletion::Kind>( completed->kind() );
+    record.backendResult   = completed->backend_result();
+
+    return record;
+}
+
 inline bool telem_dmsynco::validReaderSample( const DmSyncoReaderSample *sample )
 {
     if( !sample || !sample->primary() || !sample->combined() || !sample->completed() )
@@ -1019,23 +1115,7 @@ inline bool telem_dmsynco::validReaderSample( const DmSyncoReaderSample *sample 
         return false;
     }
 
-    MagAOX::dmCompletion::Record record;
-    record.protocolVersion = completed->protocol_version();
-    record.session         = completed->session();
-    record.epoch           = completed->epoch();
-    record.sequence        = completed->sequence();
-    record.state           = static_cast<MagAOX::dmCompletion::State>( completed->state() );
-    record.inputInode      = command->inode();
-    record.inputCounter    = command->counter();
-    record.publicationSec  = command->publication_sec();
-    record.publicationNsec = command->publication_nsec();
-    record.startedNs       = completed->started_ns();
-    record.finishedNs      = completed->finished_ns();
-    record.outcome         = static_cast<MagAOX::dmTiming::Outcome>( completed->outcome() );
-    record.callbackResult  = completed->callback_result();
-    record.publisherPid    = completed->publisher_pid();
-    record.kind            = static_cast<MagAOX::dmCompletion::Kind>( completed->kind() );
-    record.backendResult   = completed->backend_result();
+    const auto record = readerRecord( completed );
 
     if( !( record.kind == MagAOX::dmCompletion::Kind::readers ? MagAOX::dmCompletion::readersQualified( record )
                                                               : MagAOX::dmCompletion::qualified( record ) ) )
@@ -1244,13 +1324,17 @@ inline bool telem_dmsynco::validOverlapTrace( const DmSyncoOverlapTrace *trace )
             event->plan_estimator_id() > event->last_estimator_id() || event->step() < 0 ||
             event->step() >= int( dmSyncoSimulation::maxSteps ) ||
             ( event->origin() != DmSyncoOverlapOrigin_primary && event->origin() != DmSyncoOverlapOrigin_combined ) ||
-            ( event->window() != DmSyncoOverlapWindow_copy && event->window() != DmSyncoOverlapWindow_readerHold ) ||
+            ( event->window() != DmSyncoOverlapWindow_copy && event->window() != DmSyncoOverlapWindow_readerHold &&
+              event->window() != DmSyncoOverlapWindow_backend ) ||
             event->observed_ns() <= 0 || event->main_grid_ns() < 0 || event->plan_grid_ns() <= 0 ||
             event->period_ns() <= 0 || event->copy_begin_ns() <= 0 || event->copy_end_ns() <= event->copy_begin_ns() ||
             event->last_main_ns() < 0 || event->last_main_ns() > event->observed_ns() || event->last_output_ns() < 0 ||
             event->last_output_ns() > event->observed_ns() || !validPeriod( event->period_q32(), event->period_ns() ) ||
             !validFraction( event->plan_fraction_q32() ) || ( !event->period_q32() && event->plan_fraction_q32() ) ||
-            ( event->step() == 0 ? event->reader_end_ns() != 0 : event->reader_end_ns() < event->copy_end_ns() ) )
+            event->backend_end_ns() < 0 ||
+            ( event->backend_end_ns() && event->backend_end_ns() < event->copy_end_ns() ) ||
+            ( event->step() == 0 ? event->reader_end_ns() != 0 || event->backend_end_ns() != 0
+                                 : event->reader_end_ns() < event->copy_end_ns() ) )
         {
             return false;
         }
@@ -1264,8 +1348,16 @@ inline bool telem_dmsynco::validOverlapTrace( const DmSyncoOverlapTrace *trace )
                 return false;
             }
         }
-        else if( event->step() == 0 || event->reader_end_ns() <= event->copy_end_ns() ||
-                 event->observed_ns() < event->copy_end_ns() || event->observed_ns() >= event->reader_end_ns() )
+        else if( event->window() == DmSyncoOverlapWindow_readerHold )
+        {
+            if( event->step() == 0 || event->reader_end_ns() <= event->copy_end_ns() ||
+                event->observed_ns() < event->copy_end_ns() || event->observed_ns() >= event->reader_end_ns() )
+            {
+                return false;
+            }
+        }
+        else if( event->step() == 0 || event->observed_ns() < event->reader_end_ns() ||
+                 event->observed_ns() >= event->backend_end_ns() )
         {
             return false;
         }
@@ -1404,6 +1496,50 @@ inline bool telem_dmsynco::validEstimatorTrace( const DmSyncoEstimatorTrace *tra
     return true;
 }
 
+inline bool telem_dmsynco::validReadiness( const DmSyncoReadiness *readiness )
+{
+    if( !readiness )
+    {
+        return true;
+    }
+
+    const auto *quality = readiness->total();
+
+    if( !readiness->reader_release_ready() || readiness->virtual_reader_ns() <= 0 ||
+        readiness->virtual_reader_ns() > 1000000000 || readiness->backend_ns() < readiness->virtual_reader_ns() ||
+        readiness->backend_ns() > 1000000000 || !quality || quality->qualified() > quality->observed() ||
+        quality->invalid() > quality->observed() || quality->incoherent() > quality->observed() ||
+        quality->duplicates() > quality->observed() || quality->identity_mismatch() > quality->observed() ||
+        quality->sdk_failed() > quality->observed() )
+    {
+        return false;
+    }
+
+    const auto *evidence = readiness->latest_release();
+
+    if( !evidence )
+    {
+        return true;
+    }
+
+    const auto *completed = evidence->completed();
+
+    if( !evidence->coherent() || !evidence->source_epoch() || !quality->qualified() || !completed ||
+        !completed->input() )
+    {
+        return false;
+    }
+
+    const auto     record      = readerRecord( completed );
+    const __int128 publication = __int128( record.publicationSec ) * 1000000000 + record.publicationNsec;
+    return dmCompletion::readersQualified( record ) && record.publisherPid > 0 &&
+           publication <= std::numeric_limits<int64_t>::max() && completed->observed_ns() >= record.finishedNs &&
+           ( record.outcome == dmTiming::Outcome::unknown
+                 ? record.backendResult == dmCompletion::unavailableResult
+                 : record.outcome == dmTiming::Outcome::success &&
+                       ( record.backendResult == dmCompletion::unavailableResult || record.backendResult == 0 ) );
+}
+
 inline bool telem_dmsynco::validSimulation( const DmSyncoSimulation *summary )
 {
     if( !summary )
@@ -1421,6 +1557,7 @@ inline bool telem_dmsynco::validSimulation( const DmSyncoSimulation *summary )
         summary->guard_ns() < 0 || summary->snapshot_ns() < 0 || summary->copy_ns() < 0 || summary->lead_ns() < 0 ||
         summary->observation_ns() < 0 || summary->visibility_ns() < 0 || summary->reserve_ns() < 0 ||
         !validOverlapTrace( summary->overlap_trace() ) || !validEstimatorTrace( summary->estimator_trace() ) ||
+        !validReadiness( summary->readiness() ) || ( summary->readiness() && !summary->enabled() ) ||
         !validCadence( summary->cadence() ) ||
         ( summary->cadence() && ( !validPeriod( summary->cadence()->period_q32(), summary->period_ns() ) ||
                                   summary->cadence()->observation_ns() > summary->now_ns() ) ) ||
@@ -1431,6 +1568,13 @@ inline bool telem_dmsynco::validSimulation( const DmSyncoSimulation *summary )
         summary->phase_samples() > summary->window() ||
         ( summary->valid() && ( !summary->enabled() || summary->period_ns() == 0 || summary->grid_ns() == 0 ||
                                 summary->last_main_ns() == 0 || summary->window() == 0 ) ) )
+    {
+        return false;
+    }
+
+    if( summary->readiness() && summary->feasible() != ( summary->readiness()->reader_cycle_feasible() &&
+                                                         summary->readiness()->backend_cycle_feasible() &&
+                                                         summary->period_ns() >= summary->cadence_min_period_ns() ) )
     {
         return false;
     }
@@ -1468,13 +1612,23 @@ inline bool telem_dmsynco::validSimulation( const DmSyncoSimulation *summary )
             return false;
         }
 
+        if( !summary->readiness() &&
+            ( step->release_missing() || step->release_late() || step->backend_busy() || step->backend_wrap() ) )
+        {
+            return false;
+        }
+
         uint64_t unclassified = step->skipped();
 
         for( uint64_t count : { step->early_main(),
                                 step->missing_main(),
                                 step->missing_output(),
                                 step->reader_hold(),
-                                step->expired() } )
+                                step->expired(),
+                                step->release_missing(),
+                                step->release_late(),
+                                step->backend_busy(),
+                                step->backend_wrap() } )
         {
             if( count > unclassified )
             {
@@ -1751,7 +1905,8 @@ inline void telem_dmsynco::formatSimulation( std::ostream &output, const DmSynco
     }
 
     output << " simulation_enabled=1 simulation_valid=" << summary->valid()
-           << " simulation_feasible=" << summary->feasible() << " simulation_mode=shadow_conditional"
+           << " simulation_feasible=" << summary->feasible()
+           << " simulation_mode=" << ( summary->readiness() ? "shadow_reader_release_ready" : "shadow_conditional" )
            << " simulation_session=" << summary->session() << " simulation_sequence=" << summary->sequence()
            << " simulation_now_ns=" << summary->now_ns() << " simulation_last_main_ns=" << summary->last_main_ns()
            << " simulation_counter=" << summary->counter() << " simulation_steps=" << summary->steps()
@@ -1778,6 +1933,40 @@ inline void telem_dmsynco::formatSimulation( std::ostream &output, const DmSynco
 
     formatCadence( output, "simulation_cadence", summary->cadence() );
 
+    if( const auto *readiness = summary->readiness() )
+    {
+        const auto *quality = readiness->total();
+        output << " simulation_readiness={readerReleaseReady:" << readiness->reader_release_ready()
+               << ",virtualAuxReader_ns:" << readiness->virtual_reader_ns()
+               << ",assumedBackend_ns:" << readiness->backend_ns()
+               << ",readerCycleFeasible:" << readiness->reader_cycle_feasible()
+               << ",backendCycleFeasible:" << readiness->backend_cycle_feasible() << '}';
+        output << " simulation_readiness_quality={observed:" << quality->observed()
+               << ",qualified:" << quality->qualified() << ",invalid:" << quality->invalid()
+               << ",incoherent:" << quality->incoherent() << ",duplicates:" << quality->duplicates()
+               << ",gaps:" << quality->gaps() << ",sourceResets:" << quality->source_resets()
+               << ",identityMismatch:" << quality->identity_mismatch() << ",sdkFailed:" << quality->sdk_failed()
+               << ",queueDrops:" << quality->queue_drops() << '}';
+
+        if( const auto *evidence = readiness->latest_release() )
+        {
+            const auto *completed = evidence->completed();
+            const auto *input     = completed->input();
+            output << " simulation_release_evidence={clock:monotonic,sourceEpoch:" << evidence->source_epoch()
+                   << ",coherent:" << evidence->coherent() << ",protocol_version:" << completed->protocol_version()
+                   << ",session:" << completed->session() << ",epoch:" << completed->epoch()
+                   << ",sequence:" << completed->sequence() << ",state:" << completed->state()
+                   << ",input_inode:" << input->inode() << ",input_counter:" << input->counter()
+                   << ",publication_sec:" << input->publication_sec()
+                   << ",publication_nsec:" << input->publication_nsec() << ",started_ns:" << completed->started_ns()
+                   << ",finished_ns:" << completed->finished_ns() << ",outcome:" << unsigned( completed->outcome() )
+                   << ",callback_result:" << completed->callback_result() << ",kind:" << unsigned( completed->kind() )
+                   << ",backend_result:" << completed->backend_result()
+                   << ",publisher_pid:" << completed->publisher_pid() << ",observed_ns:" << completed->observed_ns()
+                   << '}';
+        }
+    }
+
     for( size_t index = 0; index < summary->outcomes()->size(); ++index )
     {
         const auto *step = summary->outcomes()->Get( index );
@@ -1785,7 +1974,15 @@ inline void telem_dmsynco::formatSimulation( std::ostream &output, const DmSynco
                << ",wouldRun:" << step->would_run() << ",skipped:" << step->skipped()
                << ",earlyMain:" << step->early_main() << ",missingMain:" << step->missing_main()
                << ",missingOutput:" << step->missing_output() << ",readerHold:" << step->reader_hold()
-               << ",expired:" << step->expired() << ",overlap:" << step->overlap() << '}';
+               << ",expired:" << step->expired() << ",overlap:" << step->overlap();
+
+        if( summary->readiness() )
+        {
+            output << ",releaseMissing:" << step->release_missing() << ",releaseLate:" << step->release_late()
+                   << ",backendBusy:" << step->backend_busy() << ",backendWrap:" << step->backend_wrap();
+        }
+
+        output << '}';
     }
 
     formatOverlapTrace( output, summary->overlap_trace() );
@@ -1808,7 +2005,10 @@ inline void telem_dmsynco::formatOverlapTrace( std::ostream &output, const DmSyn
         const auto *source = event->observation();
         output << " sim_overlap={id:" << event->id() << ",session:" << event->session()
                << ",origin:" << ( event->origin() == DmSyncoOverlapOrigin_primary ? "primary" : "combined" )
-               << ",window:" << ( event->window() == DmSyncoOverlapWindow_copy ? "copy" : "readerHold" )
+               << ",window:"
+               << ( event->window() == DmSyncoOverlapWindow_copy
+                        ? "copy"
+                        : ( event->window() == DmSyncoOverlapWindow_readerHold ? "readerHold" : "backend" ) )
                << ",mainCounter:" << event->main_counter() << ",combinedCounter:" << event->combined_counter()
                << ",planCounter:" << event->plan_counter() << ",lastMainCounter:" << event->last_main_counter()
                << ",planEstimatorId:" << event->plan_estimator_id() << ",lastEstimatorId:" << event->last_estimator_id()
@@ -1823,6 +2023,11 @@ inline void telem_dmsynco::formatOverlapTrace( std::ostream &output, const DmSyn
                << ",producer_clock:unconverted,publication_ns:" << source->publication_ns()
                << ",primaryPublication_ns:" << source->primary_publication_ns() << ",start_ns:" << source->start_ns()
                << ",update_ns:" << source->update_ns();
+
+        if( event->backend_end_ns() )
+        {
+            output << ",backendEnd_ns:" << event->backend_end_ns();
+        }
 
         if( event->period_q32() )
         {

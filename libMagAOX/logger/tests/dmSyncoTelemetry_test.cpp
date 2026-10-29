@@ -291,6 +291,34 @@ dmReaderTiming::Summary sampleReader()
     return reader;
 }
 
+/// Construct conditional three-step readiness with actual main-release evidence and modeled auxiliary endpoints.
+dmSyncoSimulation::Summary sampleReadiness()
+{
+    auto summary                  = sampleSimulation();
+    summary.readerReleaseReady    = true;
+    summary.virtualReaderNs       = 30000;
+    summary.backendNs             = 155000;
+    summary.readerCycleFeasible   = true;
+    summary.backendCycleFeasible  = true;
+    summary.steps                 = 3;
+    summary.readiness             = { 10, 7, 1, 1, 1, 2, 1, 1, 1, 3 };
+    auto &evidence                = summary.latestRelease;
+    evidence.record               = sampleReader().worst.completed.record;
+    evidence.record.kind          = dmCompletion::Kind::readers;
+    evidence.record.state         = dmCompletion::State::released;
+    evidence.record.outcome       = dmTiming::Outcome::unknown;
+    evidence.record.backendResult = dmCompletion::unavailableResult;
+    evidence.record.startedNs     = ( int64_t( 1 ) << 56 ) + 1000001;
+    evidence.record.finishedNs    = evidence.record.startedNs + 20000;
+    evidence.observedNs           = evidence.record.finishedNs + 5000;
+    evidence.sourceEpoch          = ( uint64_t( 1 ) << 54 ) + 11;
+    evidence.coherent             = true;
+    summary.outcomes[0]           = { 14, 7, 7, 2, 0, 1, 0, 2, 17, 1, 1, 0, 0 };
+    summary.outcomes[1]           = { 12, 6, 6, 0, 1, 1, 2, 0, 3, 0, 0, 1, 1 };
+    summary.outcomes[2]           = { 8, 5, 3, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1 };
+    return summary;
+}
+
 /// Return all reader populations in their stable common metric order, including optional receipt splits.
 std::array<const DmSyncoTimingStats *, static_cast<size_t>( dmReaderTiming::Metric::count )>
 readerStats( const DmSyncoReaderTiming *reader /**< [in] Deserialized reader-protection summary. */ )
@@ -530,6 +558,66 @@ combinerStats( const DmSyncoCombinerTiming *timing /**< [in] deserialized combin
              timing->primary_publication() };
 }
 
+/// Check readiness assumptions and exact real-main release identity without treating virtual slots as measurements.
+void checkReadiness( const DmSyncoReadiness           *actual /**< [in] Optional decoded readiness subtable. */,
+                     const dmSyncoSimulation::Summary &expected /**< [in] Original shadow policy and evidence. */ )
+{
+    if( !expected.readerReleaseReady )
+    {
+        CHECK( actual == nullptr );
+        return;
+    }
+
+    REQUIRE( actual != nullptr );
+    CHECK( actual->reader_release_ready() );
+    CHECK( actual->virtual_reader_ns() == expected.virtualReaderNs );
+    CHECK( actual->backend_ns() == expected.backendNs );
+    CHECK( actual->reader_cycle_feasible() == expected.readerCycleFeasible );
+    CHECK( actual->backend_cycle_feasible() == expected.backendCycleFeasible );
+    const auto *quality = actual->total();
+    REQUIRE( quality != nullptr );
+    CHECK( quality->observed() == expected.readiness.observed );
+    CHECK( quality->qualified() == expected.readiness.qualified );
+    CHECK( quality->invalid() == expected.readiness.invalid );
+    CHECK( quality->incoherent() == expected.readiness.incoherent );
+    CHECK( quality->duplicates() == expected.readiness.duplicates );
+    CHECK( quality->gaps() == expected.readiness.gaps );
+    CHECK( quality->source_resets() == expected.readiness.sourceResets );
+    CHECK( quality->identity_mismatch() == expected.readiness.identityMismatch );
+    CHECK( quality->sdk_failed() == expected.readiness.sdkFailed );
+    CHECK( quality->queue_drops() == expected.readiness.queueDrops );
+
+    if( !expected.latestRelease.observedNs )
+    {
+        CHECK( actual->latest_release() == nullptr );
+        return;
+    }
+
+    const auto *evidence = actual->latest_release();
+    REQUIRE( evidence != nullptr );
+    CHECK( evidence->source_epoch() == expected.latestRelease.sourceEpoch );
+    CHECK( evidence->coherent() == expected.latestRelease.coherent );
+    const auto *completed = evidence->completed();
+    REQUIRE( completed != nullptr );
+    const auto &record = expected.latestRelease.record;
+    checkReaderIdentity( completed->input(),
+                         { record.inputInode, record.inputCounter, record.publicationSec, record.publicationNsec } );
+    CHECK( completed->protocol_version() == record.protocolVersion );
+    CHECK( completed->session() == record.session );
+    CHECK( completed->epoch() == record.epoch );
+    CHECK( completed->sequence() == record.sequence );
+    CHECK( completed->state() == static_cast<uint64_t>( record.state ) );
+    CHECK( completed->kind() == static_cast<uint8_t>( record.kind ) );
+    CHECK( completed->started_ns() == record.startedNs );
+    CHECK( completed->finished_ns() == record.finishedNs );
+    CHECK( completed->outcome() == static_cast<uint8_t>( record.outcome ) );
+    CHECK( completed->callback_result() == record.callbackResult );
+    CHECK( completed->backend_result() == record.backendResult );
+    CHECK( completed->publisher_pid() == record.publisherPid );
+    CHECK( completed->observed_ns() == expected.latestRelease.observedNs );
+    CHECK( completed->receipt_ns() == 0 );
+}
+
 /// Check every shadow model, phase, quality and conditional outcome field after serialization.
 void checkSimulation( const DmSyncoSimulation          *actual /**< [in] deserialized conditional prediction */,
                       const dmSyncoSimulation::Summary &expected /**< [in] source snapshot */ )
@@ -576,6 +664,7 @@ void checkSimulation( const DmSyncoSimulation          *actual /**< [in] deseria
     REQUIRE( actual->output_gaps() == expected.outputGaps );
     REQUIRE( actual->associations() == expected.associations );
     REQUIRE( actual->outcomes()->size() == size_t( expected.steps ) );
+    checkReadiness( actual->readiness(), expected );
 
     for( int index = 0; index < expected.steps; ++index )
     {
@@ -590,6 +679,10 @@ void checkSimulation( const DmSyncoSimulation          *actual /**< [in] deseria
         REQUIRE( step->reader_hold() == source.readerHold );
         REQUIRE( step->expired() == source.expired );
         REQUIRE( step->overlap() == source.overlap );
+        REQUIRE( step->release_missing() == source.releaseMissing );
+        REQUIRE( step->release_late() == source.releaseLate );
+        REQUIRE( step->backend_busy() == source.backendBusy );
+        REQUIRE( step->backend_wrap() == source.backendWrap );
     }
 }
 
@@ -632,6 +725,7 @@ void checkOverlapTrace( const DmSyncoOverlapTrace           *actual /**< [in] se
         CHECK( event->copy_begin_ns() == source.copyBeginNs );
         CHECK( event->copy_end_ns() == source.copyEndNs );
         CHECK( event->reader_end_ns() == source.readerEndNs );
+        CHECK( event->backend_end_ns() == source.backendEndNs );
         CHECK( event->last_main_ns() == source.lastMainNs );
         CHECK( event->last_output_ns() == source.lastOutputNs );
         const auto *observation = event->observation();
@@ -1466,6 +1560,115 @@ TEST_CASE( "Synco telemetry preserves raw overlap evidence across sessions", "[d
                        trace );
 }
 
+/// Distinguish actual-main backend conflicts from channel-reader overlap and preserve half-open endpoints.
+/** \ingroup dmSyncoTelemetry_unit_test */
+TEST_CASE( "Synco telemetry retains backend overlap independently of reader protection", "[dmSyncoTelemetry]" )
+{
+    // clang-format off
+#ifdef DMSYNCO_TELEMETRY_TEST_DOXYGEN_REF
+    MagAOX::logger::telem_dmsynco::messageT;
+    MagAOX::logger::telem_dmsynco::verify;
+    MagAOX::logger::telem_dmsynco::msgString;
+#endif
+    // clang-format on
+    auto  trace        = sampleOverlapTrace();
+    auto &event        = trace.events[1];
+    event.window       = dmSyncoSimulation::OverlapWindow::backend;
+    event.readerEndNs  = event.observedNs - 1000;
+    event.backendEndNs = event.observedNs + 5000;
+
+    SECTION( "Backend-only interval survives binary, text and JSON roundtrip" )
+    {
+        auto input  = message( samplePrimary(), {}, sampleSimulation(), trace );
+        auto buffer = envelope( input );
+        REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+        checkOverlapTrace( GetTelem_dmsynco_fb( input.builder.GetBufferPointer() )->simulation()->overlap_trace(),
+                           trace );
+        const auto text = telem_dmsynco::msgString( input.builder.GetBufferPointer(), input.builder.GetSize() );
+        CHECK( text.find( "origin:combined,window:backend" ) != std::string::npos );
+        CHECK( text.find( "backendEnd_ns:" + std::to_string( event.backendEndNs ) ) != std::string::npos );
+        const auto          json = telem_dmsynco::msgJSON( input.builder.GetBufferPointer(),
+                                                  input.builder.GetSize(),
+                                                  reinterpret_cast<const uint8_t *>( telem_dmsynco_bfbs ),
+                                                  telem_dmsynco_bfbs_len );
+        flatbuffers::Parser parser;
+        REQUIRE(
+            parser.Deserialize( reinterpret_cast<const uint8_t *>( telem_dmsynco_bfbs ), telem_dmsynco_bfbs_len ) );
+        REQUIRE( parser.Parse( json.c_str() ) );
+        checkOverlapTrace( GetTelem_dmsynco_fb( parser.builder_.GetBufferPointer() )->simulation()->overlap_trace(),
+                           trace );
+    }
+
+    SECTION( "Backend interval includes the reader-end boundary" )
+    {
+        event.observedNs  = event.readerEndNs;
+        event.observation = {};
+        auto input        = message( samplePrimary(), {}, sampleSimulation(), trace );
+        auto buffer       = envelope( input );
+        REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+    }
+
+    SECTION( "Reader classification takes precedence while guarded reads remain" )
+    {
+        event.window      = dmSyncoSimulation::OverlapWindow::readerHold;
+        event.observedNs  = event.readerEndNs - 1;
+        event.observation = {};
+        auto input        = message( samplePrimary(), {}, sampleSimulation(), trace );
+        auto buffer       = envelope( input );
+        REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+    }
+
+    SECTION( "Reader reserve can extend beyond modeled backend ownership" )
+    {
+        event.window       = dmSyncoSimulation::OverlapWindow::copy;
+        event.observedNs   = event.copyBeginNs;
+        event.backendEndNs = event.copyEndNs + 1000;
+        event.readerEndNs  = event.copyEndNs + 2000;
+        event.observation  = {};
+        auto input         = message( samplePrimary(), {}, sampleSimulation(), trace );
+        auto buffer        = envelope( input );
+        REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+    }
+
+    SECTION( "Malformed backend classification is rejected" )
+    {
+        for( unsigned variant = 0; variant < 6; ++variant )
+        {
+            CAPTURE( variant );
+            auto  bad             = trace;
+            auto &candidate       = bad.events[1];
+            candidate.observation = {};
+
+            switch( variant )
+            {
+            case 0:
+                candidate.observedNs = candidate.backendEndNs;
+                break;
+            case 1:
+                candidate.observedNs = candidate.readerEndNs - 1;
+                break;
+            case 2:
+                candidate.backendEndNs = 0;
+                break;
+            case 3:
+                candidate.backendEndNs = candidate.copyEndNs - 1;
+                break;
+            case 4:
+                candidate.backendEndNs = -1;
+                break;
+            case 5:
+                candidate.step        = 0;
+                candidate.readerEndNs = 0;
+                break;
+            }
+
+            auto input  = message( samplePrimary(), {}, sampleSimulation(), bad );
+            auto buffer = envelope( input );
+            REQUIRE_FALSE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+        }
+    }
+}
+
 /// Accept older simulations without the optional trace, empty drains and unavailable raw endpoints.
 /** \ingroup dmSyncoTelemetry_unit_test */
 TEST_CASE( "Synco telemetry keeps optional overlap evidence independent", "[dmSyncoTelemetry]" )
@@ -1575,7 +1778,7 @@ TEST_CASE( "Synco telemetry rejects malformed overlap evidence", "[dmSyncoTeleme
             event.origin = dmSyncoSimulation::OverlapOrigin( 2 );
             break;
         case 16:
-            event.window = dmSyncoSimulation::OverlapWindow( 2 );
+            event.window = dmSyncoSimulation::OverlapWindow( 3 );
             break;
         case 17:
             event.observedNs = 0;
@@ -2934,6 +3137,190 @@ TEST_CASE( "Synco reader telemetry retains the independent worst notification", 
         auto        input  = message( samplePrimary(), {}, {}, {}, summary );
         const auto *reader = GetTelem_dmsynco_fb( input.builder.GetBufferPointer() )->reader_timing();
         omitField( reader, DmSyncoReaderTiming::VT_WORST_NOTIFICATION_VALID );
+        auto buffer = envelope( input );
+        REQUIRE_FALSE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+    }
+}
+
+/// Preserve opt-in readiness assumptions, four exclusive skip reasons and full-width actual release evidence.
+/** \ingroup dmSyncoTelemetry_unit_test */
+TEST_CASE( "Synco telemetry preserves conditional reader-release readiness", "[dmSyncoTelemetry]" )
+{
+    // clang-format off
+#ifdef DMSYNCO_TELEMETRY_TEST_DOXYGEN_REF
+    MagAOX::logger::telem_dmsynco::messageT;
+    MagAOX::logger::telem_dmsynco::verify;
+    MagAOX::logger::telem_dmsynco::msgString;
+#endif
+    // clang-format on
+    auto simulation = sampleReadiness();
+
+    SECTION( "Actual release has no SDK result yet" )
+    {
+        CHECK( simulation.latestRelease.record.outcome == dmTiming::Outcome::unknown );
+    }
+
+    SECTION( "Later actual SDK success is not another virtual command" )
+    {
+        simulation.latestRelease.record.outcome       = dmTiming::Outcome::success;
+        simulation.latestRelease.record.backendResult = 0;
+    }
+
+    auto input  = message( samplePrimary(), {}, simulation );
+    auto buffer = envelope( input );
+    REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+    const auto *record = GetTelem_dmsynco_fb( input.builder.GetBufferPointer() );
+    checkSimulation( record->simulation(), simulation );
+    CHECK( record->delivered() == 11 );
+    const auto text = telem_dmsynco::msgString( input.builder.GetBufferPointer(), input.builder.GetSize() );
+    CHECK( text.find( "simulation_mode=shadow_reader_release_ready" ) != std::string::npos );
+    CHECK( text.find( "virtualAuxReader_ns:30000,assumedBackend_ns:155000" ) != std::string::npos );
+    CHECK( text.find( "readerCycleFeasible:1,backendCycleFeasible:1" ) != std::string::npos );
+    CHECK( text.find( "releaseMissing:1,releaseLate:1,backendBusy:0,backendWrap:0" ) != std::string::npos );
+    CHECK( text.find( "simulation_release_evidence={clock:monotonic" ) != std::string::npos );
+    CHECK( text.find( "finished_ns:" + std::to_string( simulation.latestRelease.record.finishedNs ) ) !=
+           std::string::npos );
+    CHECK( text.find( "simulation_delivered" ) == std::string::npos );
+    CHECK( text.find( "simulation_armed" ) == std::string::npos );
+    const auto          json = telem_dmsynco::msgJSON( input.builder.GetBufferPointer(),
+                                              input.builder.GetSize(),
+                                              reinterpret_cast<const uint8_t *>( telem_dmsynco_bfbs ),
+                                              telem_dmsynco_bfbs_len );
+    flatbuffers::Parser parser;
+    REQUIRE( parser.Deserialize( reinterpret_cast<const uint8_t *>( telem_dmsynco_bfbs ), telem_dmsynco_bfbs_len ) );
+    REQUIRE( parser.Parse( json.c_str() ) );
+    checkSimulation( GetTelem_dmsynco_fb( parser.builder_.GetBufferPointer() )->simulation(), simulation );
+}
+
+/// Keep legacy fixed-hold records unchanged and allow readiness warmup without invented evidence.
+/** \ingroup dmSyncoTelemetry_unit_test */
+TEST_CASE( "Synco telemetry keeps readiness optional and distinguishes unobserved releases", "[dmSyncoTelemetry]" )
+{
+    // clang-format off
+#ifdef DMSYNCO_TELEMETRY_TEST_DOXYGEN_REF
+    MagAOX::logger::telem_dmsynco::messageT;
+    MagAOX::logger::telem_dmsynco::verify;
+#endif
+    // clang-format on
+    SECTION( "Legacy fixed-hold mode has no new readiness table or text" )
+    {
+        const auto source = sampleSimulation();
+        auto       input  = message( samplePrimary(), {}, source );
+        auto       buffer = envelope( input );
+        REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+        const auto *simulation = GetTelem_dmsynco_fb( input.builder.GetBufferPointer() )->simulation();
+        checkSimulation( simulation, source );
+        CHECK_FALSE( flatbuffers::IsFieldPresent( simulation, DmSyncoSimulation::VT_READINESS ) );
+        const auto text = telem_dmsynco::msgString( input.builder.GetBufferPointer(), input.builder.GetSize() );
+        CHECK( text.find( "simulation_mode=shadow_conditional" ) != std::string::npos );
+        CHECK( text.find( "simulation_readiness" ) == std::string::npos );
+        CHECK( text.find( "releaseMissing" ) == std::string::npos );
+    }
+
+    SECTION( "New-mode warmup declares assumptions but no real release" )
+    {
+        dmSyncoSimulation::Summary source;
+        source.enabled            = true;
+        source.steps              = 3;
+        source.readerReleaseReady = true;
+        source.virtualReaderNs    = 30000;
+        source.backendNs          = 155000;
+        auto input                = message( samplePrimary(), {}, source );
+        auto buffer               = envelope( input );
+        REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+        checkSimulation( GetTelem_dmsynco_fb( input.builder.GetBufferPointer() )->simulation(), source );
+    }
+}
+
+/// Reject malformed readiness assumptions, evidence and skip accounting without weakening legacy validation.
+/** \ingroup dmSyncoTelemetry_unit_test */
+TEST_CASE( "Synco telemetry validates shadow readiness assumptions and provenance", "[dmSyncoTelemetry]" )
+{
+    // clang-format off
+#ifdef DMSYNCO_TELEMETRY_TEST_DOXYGEN_REF
+    MagAOX::logger::telem_dmsynco::verify;
+#endif
+    // clang-format on
+    for( unsigned variant = 0; variant < 20; ++variant )
+    {
+        CAPTURE( variant );
+        auto simulation = sampleReadiness();
+
+        switch( variant )
+        {
+        case 0:
+            simulation.virtualReaderNs = 0;
+            break;
+        case 1:
+            simulation.virtualReaderNs = 1000000001;
+            break;
+        case 2:
+            simulation.backendNs = simulation.virtualReaderNs - 1;
+            break;
+        case 3:
+            simulation.backendNs = 1000000001;
+            break;
+        case 4:
+            simulation.readiness.qualified = simulation.readiness.observed + 1;
+            break;
+        case 5:
+            simulation.readiness.sdkFailed = simulation.readiness.observed + 1;
+            break;
+        case 6:
+            simulation.latestRelease.coherent = false;
+            break;
+        case 7:
+            simulation.latestRelease.sourceEpoch = 0;
+            break;
+        case 8:
+            simulation.latestRelease.observedNs = simulation.latestRelease.record.finishedNs - 1;
+            break;
+        case 9:
+            simulation.latestRelease.record.kind = dmCompletion::Kind::completion;
+            break;
+        case 10:
+            simulation.latestRelease.record.state = dmCompletion::State::busy;
+            break;
+        case 11:
+            simulation.latestRelease.record.outcome       = dmTiming::Outcome::failed;
+            simulation.latestRelease.record.backendResult = 7;
+            break;
+        case 12:
+            simulation.latestRelease.record.backendResult = 0;
+            break;
+        case 13:
+            simulation.latestRelease.record.inputCounter = 0;
+            break;
+        case 14:
+            ++simulation.outcomes[0].releaseMissing;
+            break;
+        case 15:
+            simulation.readerReleaseReady = false;
+            break;
+        case 16:
+            simulation.readerCycleFeasible = false;
+            break;
+        case 17:
+            simulation.cadenceMinPeriodNs = simulation.periodNs + 1;
+            break;
+        case 18:
+            simulation.latestRelease.record.publisherPid = 0;
+            break;
+        case 19:
+            simulation.latestRelease.record.publicationSec = std::numeric_limits<int64_t>::max();
+            break;
+        }
+
+        auto input  = message( samplePrimary(), {}, simulation );
+        auto buffer = envelope( input );
+        REQUIRE_FALSE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+    }
+
+    SECTION( "Readiness table cannot masquerade as legacy mode" )
+    {
+        auto        input     = message( samplePrimary(), {}, sampleReadiness() );
+        const auto *readiness = GetTelem_dmsynco_fb( input.builder.GetBufferPointer() )->simulation()->readiness();
+        omitField( readiness, DmSyncoReadiness::VT_READER_RELEASE_READY );
         auto buffer = envelope( input );
         REQUIRE_FALSE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
     }

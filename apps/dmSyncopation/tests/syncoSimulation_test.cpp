@@ -34,6 +34,62 @@ static int64_t warm( Simulation &simulation /**< [in,out] configured model */ )
 
     return 1020000000;
 }
+
+/// Make exact raw combined identity independent of the local scheduling clock.
+static MagAOX::dmSyncoSimulation::Observation readyContext( uint64_t counter /**< [in] Combined counter. */ )
+{
+    MagAOX::dmSyncoSimulation::Observation context;
+    context.streamInode   = 55;
+    context.publicationNs = 1792000000000000000LL + int64_t( counter ) * 500000;
+    return context;
+}
+
+/// Construct a released actual-main record; no hypothetical auxiliary command receives this signal.
+static MagAOX::dmSyncoSimulation::Readiness readyRecord( uint64_t counter /**< [in] Exact combined identity. */,
+                                                         int64_t  main /**< [in] Actual main observation. */,
+                                                         int64_t available /**< [in] Coherent capture availability. */ )
+{
+    MagAOX::dmSyncoSimulation::Readiness event;
+    const auto                           context = readyContext( counter );
+    auto                                &record  = event.record;
+    record.kind                                  = MagAOX::dmCompletion::Kind::readers;
+    record.state                                 = MagAOX::dmCompletion::State::released;
+    record.session                               = 123;
+    record.epoch                                 = 1;
+    record.sequence                              = counter;
+    record.publisherPid                          = 456;
+    record.inputInode                            = context.streamInode;
+    record.inputCounter                          = counter;
+    record.publicationSec                        = context.publicationNs / 1000000000;
+    record.publicationNsec                       = context.publicationNs % 1000000000;
+    record.startedNs                             = main + 11000;
+    record.finishedNs                            = main + 30000;
+    event.observedNs                             = available;
+    event.sourceEpoch                            = 1;
+    return event;
+}
+
+/// Feed only the actual-main and exact combined identities, leaving release availability explicit.
+static void readyMain( Simulation &simulation /**< [in,out] Configured model. */,
+                       uint64_t    counter /**< [in] Primary and combined counter. */,
+                       int64_t     observed /**< [in] Actual main observation. */ )
+{
+    simulation.primary( counter, observed, counter == 1 ? 0 : 500000 );
+    simulation.combined( counter, counter, observed + 10000, true, readyContext( counter ) );
+}
+
+/// Warm readiness mode with a forty-microsecond actual release for every exact main command.
+static int64_t warmReady( Simulation &simulation /**< [in,out] Configured model. */ )
+{
+    for( uint64_t counter = 1; counter <= 40; ++counter )
+    {
+        const int64_t now = 1000000000 + int64_t( counter ) * 500000;
+        readyMain( simulation, counter, now );
+        simulation.release( readyRecord( counter, now, now + 40000 ) );
+    }
+
+    return 1020000000;
+}
 /// \endcond
 
 /** \brief Constant cadence acquires a pre-observation grid and evaluates each fixed slot once. */
@@ -1393,6 +1449,435 @@ TEST_CASE( "synco simulation cadence configuration bounds", "[dmSyncopation][sim
     CHECK( simulation.configure( config ) );
     config.cadenceWindowNs = std::numeric_limits<int64_t>::max();
     CHECK_FALSE( simulation.configure( config ) );
+}
+
+/// Keep observed readiness optional, split read and backend assumptions, and reject contradictory model settings.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "synco readiness preserves legacy defaults and validates separate assumptions",
+           "[dmSyncopation][simulation]" )
+{
+    Simulation         simulation;
+    Simulation::Config config;
+    CHECK_FALSE( config.readerReleaseReady );
+    CHECK( config.virtualReaderNs == 30000 );
+    CHECK( config.backendNs == 155000 );
+
+    SECTION( "Legacy three-step feasibility remains unchanged" )
+    {
+        config.steps = 3;
+        REQUIRE( simulation.configure( config ) );
+        warm( simulation );
+        CHECK_FALSE( simulation.summary().feasible );
+        CHECK_FALSE( simulation.summary().readerReleaseReady );
+    }
+
+    SECTION( "A whole backend cannot complete before its last modeled read" )
+    {
+        config.readerReleaseReady = true;
+        config.backendNs          = config.virtualReaderNs - 1;
+        CHECK_FALSE( simulation.configure( config ) );
+    }
+
+    SECTION( "Virtual durations require positive bounded values" )
+    {
+        config.readerReleaseReady = true;
+        config.virtualReaderNs    = 0;
+        CHECK_FALSE( simulation.configure( config ) );
+        config.virtualReaderNs = 30000;
+        config.backendNs       = 1000000001;
+        CHECK_FALSE( simulation.configure( config ) );
+    }
+}
+
+/// Use coherent availability plus guard at the immutable deadline, rather than an earlier publisher endpoint.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "synco readiness uses capture availability and skips independently", "[dmSyncopation][simulation]" )
+{
+    Simulation         simulation;
+    Simulation::Config config;
+    config.readerReleaseReady = true;
+    REQUIRE( simulation.configure( config ) );
+    const auto main = warmReady( simulation ) + 500000;
+    readyMain( simulation, 41, main );
+    const auto    before = simulation.summary().outcomes[1];
+    const int64_t start  = main + 240000;
+    const int     mode   = GENERATE( 0, 1, 2 );
+
+    if( mode )
+    {
+        simulation.release( readyRecord( 41, main, start - config.bounds.guard + ( mode == 2 ? 1 : 0 ) ) );
+    }
+
+    simulation.advance( main + 250000 );
+    const auto &summary = simulation.summary();
+    CHECK( summary.outcomes[1].considered == before.considered + 1 );
+    CHECK( summary.outcomes[1].wouldRun == before.wouldRun + ( mode == 1 ? 1 : 0 ) );
+    CHECK( summary.outcomes[1].releaseMissing == before.releaseMissing + ( mode == 0 ? 1 : 0 ) );
+    CHECK( summary.outcomes[1].releaseLate == before.releaseLate + ( mode == 2 ? 1 : 0 ) );
+    CHECK( summary.nextGridNs == main + 500000 );
+    CHECK( summary.periodNs == 500000 );
+
+    if( !mode )
+    {
+        simulation.release( readyRecord( 41, main, main + 251000 ) );
+        simulation.advance( main + 252000 );
+        CHECK( summary.outcomes[1].wouldRun == before.wouldRun );
+        CHECK( summary.outcomes[1].releaseMissing == before.releaseMissing + 1 );
+    }
+}
+
+/// Retain an early arrival until exact combined association and refuse a mismatching raw publication identity.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "synco readiness accepts either evidence order with exact combined identity", "[dmSyncopation][simulation]" )
+{
+    Simulation         simulation;
+    Simulation::Config config;
+    config.readerReleaseReady = true;
+    REQUIRE( simulation.configure( config ) );
+    const auto main = warmReady( simulation ) + 500000;
+    simulation.primary( 41, main, 500000 );
+    const auto before   = simulation.summary().outcomes[1];
+    auto       event    = readyRecord( 41, main, main + 40000 );
+    const bool mismatch = GENERATE( false, true );
+
+    if( mismatch )
+    {
+        ++event.record.publicationNsec;
+    }
+
+    simulation.release( event );
+    simulation.combined( 41, 41, main + 60000, true, readyContext( 41 ) );
+    simulation.advance( main + 250000 );
+    CHECK( simulation.summary().outcomes[1].wouldRun == before.wouldRun + ( mismatch ? 0 : 1 ) );
+    CHECK( simulation.summary().outcomes[1].releaseMissing == before.releaseMissing + ( mismatch ? 1 : 0 ) );
+}
+
+/// Recover from forward publisher/session epochs while revoking incoherent, dropped, regressed or failed evidence.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "synco readiness source lifecycle never reuses revoked releases", "[dmSyncopation][simulation]" )
+{
+    Simulation         simulation;
+    Simulation::Config config;
+    config.readerReleaseReady = true;
+    REQUIRE( simulation.configure( config ) );
+    const auto main  = warmReady( simulation );
+    auto       event = readyRecord( 40, main, main + 40000 );
+
+    SECTION( "A reset rejects duplicate release reuse" )
+    {
+        simulation.resetRelease();
+        simulation.release( event );
+        CHECK( simulation.summary().latestRelease.observedNs == 0 );
+        CHECK( simulation.summary().readiness.duplicates == 1 );
+    }
+
+    SECTION( "Transport drops retain the exact loss count" )
+    {
+        simulation.releaseDrop( 7 );
+        CHECK( simulation.summary().readiness.queueDrops == 7 );
+        simulation.release( event );
+        CHECK( simulation.summary().latestRelease.observedNs == 0 );
+    }
+
+    SECTION( "Incoherent transport revokes the previous qualified release" )
+    {
+        event.coherent = false;
+        simulation.release( event );
+        CHECK( simulation.summary().readiness.incoherent == 1 );
+        CHECK( simulation.summary().latestRelease.observedNs == 0 );
+    }
+
+    SECTION( "Forward publisher restart on the same stream permits a fresh sequence" )
+    {
+        ++event.record.session;
+        ++event.record.publisherPid;
+        event.record.sequence = 1;
+        simulation.release( event );
+        REQUIRE( simulation.summary().latestRelease.record.session == event.record.session );
+        --event.record.session;
+        simulation.release( event );
+        CHECK( simulation.summary().latestRelease.observedNs == 0 );
+        CHECK( simulation.summary().readiness.invalid == 1 );
+    }
+
+    SECTION( "Forward producer epoch clears old evidence and rejects its replay" )
+    {
+        ++event.record.epoch;
+        event.record.sequence = 1;
+        simulation.release( event );
+        REQUIRE( simulation.summary().latestRelease.record.epoch == event.record.epoch );
+        --event.record.epoch;
+        simulation.release( event );
+        CHECK( simulation.summary().latestRelease.observedNs == 0 );
+        CHECK( simulation.summary().readiness.invalid == 1 );
+    }
+
+    SECTION( "Old attachment epochs cannot replace a new source" )
+    {
+        event.sourceEpoch = 2;
+        simulation.release( event );
+        REQUIRE( simulation.summary().latestRelease.sourceEpoch == 2 );
+        event.sourceEpoch = 1;
+        simulation.release( event );
+        CHECK( simulation.summary().latestRelease.sourceEpoch == 2 );
+        CHECK( simulation.summary().readiness.invalid == 1 );
+        return;
+    }
+
+    SECTION( "A sequence gap revokes history and does not authorize the skipped attempt" )
+    {
+        event = readyRecord( 42, main + 50000, main + 100000 );
+        simulation.release( event );
+        CHECK( simulation.summary().readiness.gaps == 1 );
+        CHECK( simulation.summary().latestRelease.observedNs == 0 );
+    }
+
+    SECTION( "SDK failure revokes reads for scheduling until a producer epoch recovers" )
+    {
+        event.record.outcome       = MagAOX::dmTiming::Outcome::failed;
+        event.record.backendResult = 7;
+        simulation.release( event );
+        CHECK( simulation.summary().readiness.sdkFailed == 1 );
+        CHECK( simulation.summary().latestRelease.observedNs == 0 );
+        auto recovery = readyRecord( 41, main + 500000, main + 540000 );
+        simulation.release( recovery );
+        CHECK( simulation.summary().latestRelease.observedNs == 0 );
+        ++recovery.record.epoch;
+        simulation.release( recovery );
+        CHECK( simulation.summary().latestRelease.record.epoch == 2 );
+        return;
+    }
+
+    const auto missing = simulation.summary().outcomes[1].releaseMissing;
+    simulation.advance( main + 250000 );
+    CHECK( simulation.summary().outcomes[1].releaseMissing == missing + 1 );
+}
+
+/// Never use an observed actual-main acknowledgement to clear a hypothetical auxiliary reader interval.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "synco readiness preserves virtual auxiliary ownership", "[dmSyncopation][simulation]" )
+{
+    Simulation         simulation;
+    Simulation::Config config;
+    config.readerReleaseReady = true;
+    config.virtualReaderNs    = 200000;
+    config.backendNs          = 200000;
+    REQUIRE( simulation.configure( config ) );
+    const auto main   = warmReady( simulation );
+    const auto before = simulation.summary().outcomes;
+    simulation.advance( main + 475000 );
+    CHECK( simulation.summary().outcomes[1].wouldRun == before[1].wouldRun + 1 );
+    CHECK( simulation.summary().outcomes[0].wouldRun == before[0].wouldRun );
+    CHECK( simulation.summary().outcomes[0].readerHold == before[0].readerHold + 1 );
+}
+
+/// Report an incomplete three-step backend envelope without suppressing independently eligible earlier slots.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "synco readiness three-step geometry retains explicit backend qualification", "[dmSyncopation][simulation]" )
+{
+    Simulation         simulation;
+    Simulation::Config config;
+    config.readerReleaseReady = true;
+    config.steps              = 3;
+    const bool shorter        = GENERATE( false, true );
+
+    if( shorter )
+    {
+        config.backendNs = 120000; // Explicit conditional model, never silently inferred from the early release.
+    }
+
+    REQUIRE( simulation.configure( config ) );
+    const auto main   = warmReady( simulation );
+    const auto before = simulation.summary().outcomes;
+    REQUIRE( simulation.summary().nextActiveNs == main + 166667 );
+    CHECK( simulation.summary().readerCycleFeasible );
+    CHECK( simulation.summary().backendCycleFeasible == shorter );
+    CHECK( simulation.summary().feasible == shorter );
+    CHECK( simulation.summary().backendNs == ( shorter ? 120000 : 155000 ) );
+    simulation.advance( main + 475000 );
+    const auto &summary = simulation.summary();
+    CHECK( summary.outcomes[0].wouldRun == before[0].wouldRun + 1 );
+    CHECK( summary.outcomes[1].wouldRun == before[1].wouldRun + 1 );
+    CHECK( summary.outcomes[2].wouldRun == before[2].wouldRun + ( shorter ? 1 : 0 ) );
+    CHECK( summary.outcomes[2].backendWrap == before[2].backendWrap + ( shorter ? 0 : 1 ) );
+    CHECK( summary.nextGridNs == main + 500000 );
+    CHECK( summary.periodNs == 500000 );
+}
+
+/// An invalidation affects future slots without erasing a release that was already known at an earlier deadline.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "synco readiness revocation respects immutable earlier decisions", "[dmSyncopation][simulation]" )
+{
+    Simulation         simulation;
+    Simulation::Config config;
+    config.readerReleaseReady = true;
+    REQUIRE( simulation.configure( config ) );
+    const auto main         = warmReady( simulation );
+    const auto before       = simulation.summary().outcomes[1];
+    const bool late         = GENERATE( false, true );
+    auto       invalidation = readyRecord( 40, main, main + ( late ? 300000 : 100000 ) );
+    invalidation.coherent   = false;
+    simulation.release( invalidation );
+    simulation.advance( main + 400000 );
+    CHECK( simulation.summary().outcomes[1].considered == before.considered + 1 );
+    CHECK( simulation.summary().outcomes[1].wouldRun == before.wouldRun + ( late ? 1 : 0 ) );
+    CHECK( simulation.summary().outcomes[1].releaseMissing == before.releaseMissing + ( late ? 0 : 1 ) );
+    CHECK( simulation.summary().readiness.incoherent == 1 );
+    CHECK( simulation.summary().nextGridNs == main + 500000 );
+}
+
+/// Use exact frozen target rounding at the backend wrap boundary without silently changing the assumption.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "synco readiness backend wrap boundary is inclusive", "[dmSyncopation][simulation]" )
+{
+    Simulation         simulation;
+    Simulation::Config config;
+    config.readerReleaseReady = true;
+    config.steps              = 3;
+    config.backendNs          = GENERATE( 140000LL, 141666LL, 141667LL, 141668LL );
+    REQUIRE( simulation.configure( config ) );
+    const auto main   = warmReady( simulation );
+    const auto before = simulation.summary().outcomes[2];
+    simulation.advance( main + 475000 );
+    CHECK( simulation.summary().outcomes[2].wouldRun == before.wouldRun + ( config.backendNs <= 141667 ? 1 : 0 ) );
+    CHECK( simulation.summary().outcomes[2].backendWrap == before.backendWrap + ( config.backendNs > 141667 ? 1 : 0 ) );
+    CHECK( simulation.summary().backendNs == config.backendNs );
+}
+
+/// A later SDK result must not make success appear available at the earlier release capture.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "synco readiness preserves the first captured release through enrichment", "[dmSyncopation][simulation]" )
+{
+    Simulation         simulation;
+    Simulation::Config config;
+    config.readerReleaseReady = true;
+    REQUIRE( simulation.configure( config ) );
+    const auto main             = warmReady( simulation );
+    const auto qualified        = simulation.summary().readiness.qualified;
+    auto       result           = readyRecord( 40, main, main + 130000 );
+    result.record.outcome       = MagAOX::dmTiming::Outcome::success;
+    result.record.backendResult = 0;
+    simulation.release( result );
+    const auto &evidence = simulation.summary().latestRelease;
+    CHECK( evidence.record.outcome == MagAOX::dmTiming::Outcome::unknown );
+    CHECK( evidence.record.backendResult == MagAOX::dmCompletion::unavailableResult );
+    CHECK( evidence.observedNs == main + 40000 );
+    CHECK( simulation.summary().readiness.qualified == qualified );
+    CHECK( simulation.summary().readiness.duplicates == 0 );
+    const auto before = simulation.summary().outcomes[1].wouldRun;
+    simulation.advance( main + 250000 );
+    CHECK( simulation.summary().outcomes[1].wouldRun == before + 1 );
+}
+
+/// Reader clearance does not remove actual-main or prior virtual backend occupancy.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "synco readiness checks actual and virtual backend ownership separately", "[dmSyncopation][simulation]" )
+{
+    Simulation         simulation;
+    Simulation::Config config;
+    config.readerReleaseReady = true;
+    const bool virtualJob     = GENERATE( false, true );
+
+    if( virtualJob )
+    {
+        config.steps     = 3;
+        config.backendNs = 200000;
+    }
+
+    REQUIRE( simulation.configure( config ) );
+    warmReady( simulation );
+    const int64_t grid = simulation.summary().nextGridNs;
+    const int64_t main = grid + ( virtualJob ? -100000 : 120000 );
+    readyMain( simulation, 41, main );
+    simulation.release( readyRecord( 41, main, main + 40000 ) );
+    const auto before = simulation.summary().outcomes;
+    simulation.advance( grid + 350000 );
+    const auto &after = simulation.summary().outcomes;
+
+    if( virtualJob )
+    {
+        CHECK( after[1].wouldRun == before[1].wouldRun + 1 );
+        CHECK( after[2].wouldRun == before[2].wouldRun );
+        CHECK( after[2].backendBusy == before[2].backendBusy + 1 );
+    }
+    else
+    {
+        CHECK( after[1].wouldRun == before[1].wouldRun );
+        CHECK( after[1].backendBusy == before[1].backendBusy + 1 );
+        CHECK( after[1].releaseLate == before[1].releaseLate );
+    }
+
+    CHECK( simulation.summary().gridNs == grid );
+}
+
+/// Report main/backend conflicts after reader clearance and retain the exclusive backend-end boundary.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "synco readiness detects an early main during virtual backend ownership", "[dmSyncopation][simulation]" )
+{
+    Simulation         simulation;
+    Simulation::Config config;
+    config.readerReleaseReady = GENERATE( false, true );
+    const int64_t arrival     = GENERATE( 400000LL, 405000LL );
+    REQUIRE( simulation.configure( config ) );
+    const auto main = config.readerReleaseReady ? warmReady( simulation ) : warm( simulation );
+    simulation.advance( main + 350000 );
+    REQUIRE( simulation.traceStatus().detected == 0 );
+    const auto before = simulation.summary().outcomes[1].overlap;
+    simulation.primary( 41, main + arrival, arrival );
+    const bool conflict = arrival < 405000;
+    CHECK( simulation.summary().outcomes[1].overlap == before + ( conflict ? 1 : 0 ) );
+    MagAOX::dmSyncoSimulation::OverlapEvent event;
+    CHECK( simulation.popOverlap( event ) == conflict );
+
+    if( conflict )
+    {
+        CHECK( event.window == ( config.readerReleaseReady ? MagAOX::dmSyncoSimulation::OverlapWindow::backend
+                                                           : MagAOX::dmSyncoSimulation::OverlapWindow::readerHold ) );
+        CHECK( event.readerEndNs == main + ( config.readerReleaseReady ? 300000 : 405000 ) );
+        CHECK( event.backendEndNs == ( config.readerReleaseReady ? main + 405000 : 0 ) );
+        CHECK( event.observedNs == main + 400000 );
+        CHECK( event.copyBeginNs == main + 240000 );
+        CHECK( event.copyEndNs == main + 250000 );
+    }
+
+    simulation.reset();
+    simulation.primary( 1, main + 410000, 0 );
+    CHECK_FALSE( simulation.popOverlap( event ) );
+}
+
+/// Passive preparation must not erase the independently retained backend ownership of the preceding active step.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "synco readiness retains active backend provenance after passive copying", "[dmSyncopation][simulation]" )
+{
+    Simulation         simulation;
+    Simulation::Config config;
+    config.readerReleaseReady = true;
+    config.backendNs          = 223000;
+    REQUIRE( simulation.configure( config ) );
+    const auto main = warmReady( simulation );
+    REQUIRE( simulation.summary().feasible );
+    const auto before = simulation.summary().outcomes;
+    simulation.advance( main + 472000 );
+    REQUIRE( simulation.summary().outcomes[0].wouldRun == before[0].wouldRun + 1 );
+    const int64_t arrival = GENERATE( 472500LL, 473000LL );
+    simulation.primary( 41, main + arrival, arrival );
+    const bool conflict = arrival < 473000;
+    CHECK( simulation.summary().outcomes[0].overlap == before[0].overlap );
+    CHECK( simulation.summary().outcomes[1].overlap == before[1].overlap + ( conflict ? 1 : 0 ) );
+    MagAOX::dmSyncoSimulation::OverlapEvent event;
+    CHECK( simulation.popOverlap( event ) == conflict );
+
+    if( conflict )
+    {
+        CHECK( event.window == MagAOX::dmSyncoSimulation::OverlapWindow::backend );
+        CHECK( event.step == 1 );
+        CHECK( event.planCounter == 40 );
+        CHECK( event.copyBeginNs == main + 240000 );
+        CHECK( event.copyEndNs == main + 250000 );
+        CHECK( event.readerEndNs == main + 300000 );
+        CHECK( event.backendEndNs == main + 473000 );
+        CHECK( event.observedNs == main + 472500 );
+    }
 }
 
 } // namespace dmSyncopationTest

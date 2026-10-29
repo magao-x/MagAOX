@@ -39,6 +39,9 @@ class Simulation
         int64_t  timeout{ 4000000 };      ///< Maximum primary silence before clearing cadence and phase anchors.
         int64_t  cadenceWindowNs{ 10000000000LL }; ///< Requested monotonic counter/time baseline.
         int64_t  cadenceUpdateNs{ 1000000000LL };  ///< Minimum interval between cadence refreshes.
+        bool     readerReleaseReady{ false }; ///< Use exact observed main reader release instead of a fixed main hold.
+        int64_t  virtualReaderNs{ 30000 };    ///< Assumed auxiliary trigger-to-last-reader duration.
+        int64_t  backendNs{ 155000 };         ///< Assumed output/trigger-to-whole-backend-ready duration.
     };
 
     /// Validate configuration and begin a fresh simulation with empty estimators.
@@ -66,6 +69,15 @@ class Simulation
     /// Evaluate committed slots through a monotonic time without synthesizing main events.
     void advance( int64_t now /**< [in] same-host monotonic evaluation time */ );
 
+    /// Retain exact early-release evidence without advancing, retiming or revisiting any committed occurrence.
+    void release( const MagAOX::dmSyncoSimulation::Readiness &event /**< [in] Coherent observer capture. */ );
+
+    /// Revoke all retained release evidence after a lifecycle or transport-generation change.
+    void resetRelease();
+
+    /// Revoke evidence and retain the exact number of transport handoffs lost.
+    void releaseDrop( uint64_t count = 1 /**< [in] Newly dropped transport handoffs. */ );
+
     /// Return the bounded snapshot; callers copy it under their own serialization.
     const MagAOX::dmSyncoSimulation::Summary &summary() const;
 
@@ -82,6 +94,14 @@ class Simulation
     MagAOX::dmSyncoSimulation::EstimatorStatus estimatorStatus() const;
 
   private:
+    /// Frozen combined input identity whose release must match exactly.
+    struct Command
+    {
+        uint64_t inode{ 0 };         ///< Combined stream inode.
+        uint64_t counter{ 0 };       ///< Combined publication counter.
+        int64_t  publicationNs{ 0 }; ///< Raw producer publication time; used only for exact identity.
+    };
+
     /// One primary phase observation; counters label cycles independently of time proximity.
     struct Point
     {
@@ -100,6 +120,7 @@ class Simulation
         int64_t                       fractionQ32{ 0 }; ///< Signed fractional remainder of the frozen main prediction.
         int64_t                       main{ 0 };        ///< Actual associated primary observation, or zero.
         int64_t                       output{ 0 };      ///< Coherent combined observation, or zero.
+        Command                       outputKey;        ///< Exact combined identity associated with this plan.
         std::array<int64_t, maxSteps> starts{};         ///< Fixed modeled copy starts.
         std::array<int64_t, maxSteps> targets{};        ///< Fixed modeled copy completion/trigger targets.
         std::array<bool, maxSteps>    done{};           ///< Each occurrence contributes to outcomes at most once.
@@ -111,6 +132,7 @@ class Simulation
         uint64_t counter{ 0 };   ///< Referenced primary counter.
         int64_t  observed{ 0 };  ///< Monotonic combined observation.
         bool     usable{ true }; ///< Exact association remains unambiguous.
+        Command  key;            ///< Exact combined identity retained before its primary is observed.
     };
 
     std::array<Link, 4>                m_links{};        ///< Bounded future-output association buffer.
@@ -132,6 +154,26 @@ class Simulation
     bool                               m_mainOutput{ false };   ///< Latest actual main has a coherent combination.
     int64_t                            m_outputTime{ 0 };       ///< Latest main's combined observation.
     int64_t                            m_virtualHold{ 0 };      ///< Last modeled active command's reader lifetime.
+    int64_t m_virtualBackend{ 0 }; ///< Assumed backend-ready time for the latest hypothetical auxiliary command.
+    MagAOX::dmSyncoSimulation::OverlapEvent
+            m_backendPlan;   ///< Last active backend provenance, retained through passive copies.
+    Command m_mainOutputKey; ///< Exact current actual-main combined identity.
+    std::array<MagAOX::dmSyncoSimulation::Readiness, 16> m_releases{};       ///< Fixed exact-release history.
+    size_t                                               m_releaseNext{ 0 }; ///< Next release-history replacement.
+    uint64_t                     m_releaseSourceEpoch{ 0 }; ///< Highest accepted app-owned source epoch.
+    MagAOX::dmCompletion::Record m_releaseRecord; ///< Last observed release attempt for progression/enrichment checks.
+    int64_t m_releaseObserved{ 0 }; ///< Last distinct release observation for monotonic source progression.
+    bool m_releaseFault{ false };   ///< Explicit SDK failure closes readiness until a source or producer epoch changes.
+
+    /// Refresh nominal full-cycle diagnostics without suppressing individually feasible readiness-mode slots.
+    void feasibility( int64_t period /**< [in] Conservative period in whole nanoseconds. */ );
+
+    /// Return the exact retained reader-release capture, or null when unavailable.
+    const MagAOX::dmSyncoSimulation::Readiness *
+    released( const Command &key /**< [in] Frozen combined identity. */ ) const;
+
+    /// Clear only retained release identities while retaining source-progression fences.
+    void clearRelease();
     std::array<Point, MagAOX::dmSyncoSimulation::cadenceAnchorCapacity>
              m_cadenceAnchors{};     ///< Slow counter/time anchors.
     size_t   m_cadenceCount{ 0 };    ///< Retained cadence anchors.
@@ -216,7 +258,7 @@ class Simulation
     /// Evaluate one fixed copy start using actual-main associations and modeled reader holds.
     void evaluate( Plan &entry /**< [in,out] committed cycle */, int step /**< [in] step index */ );
 
-    /// Count a main observation that could overlap the last modeled copy or active reader interval.
+    /// Count a main observation that could overlap the last modeled copy, active reader or backend interval.
     void overlap( uint64_t mainCounter /**< [in] genuine primary counter supplying evidence */,
                   uint64_t combinedCounter /**< [in] current or last observed actual combined counter */,
                   int64_t  observed /**< [in] monotonic main evidence */,
@@ -235,6 +277,204 @@ class Simulation
     void next();
 };
 
+inline void Simulation::feasibility( int64_t period )
+{
+    if( !m_config.readerReleaseReady )
+    {
+        m_summary.feasible = feasible( period, m_config.steps, m_config.bounds ) && period >= m_config.cadenceMinPeriod;
+        return;
+    }
+
+    const auto   &b    = m_config.bounds;
+    const int64_t gap  = period / m_config.steps;
+    const int64_t tail = std::max( b.lead, b.early + b.observation + b.visibility );
+    m_summary.readerCycleFeasible =
+        gap >= m_config.virtualReaderNs + b.guard + b.copy + tail + b.reserve && gap > b.snapshot + b.copy + b.reserve;
+    m_summary.backendCycleFeasible =
+        gap >= m_config.backendNs && ( m_config.steps == 1 || gap >= m_config.backendNs + b.early + b.observation );
+    m_summary.feasible =
+        m_summary.readerCycleFeasible && m_summary.backendCycleFeasible && period >= m_config.cadenceMinPeriod;
+}
+
+inline void Simulation::clearRelease()
+{
+    m_releases              = {};
+    m_releaseNext           = 0;
+    m_summary.latestRelease = {};
+}
+
+inline void Simulation::resetRelease()
+{
+    clearRelease();
+    ++m_summary.readiness.sourceResets;
+}
+
+inline void Simulation::releaseDrop( uint64_t count )
+{
+    if( count )
+    {
+        resetRelease();
+        m_summary.readiness.queueDrops += count;
+    }
+}
+
+inline const MagAOX::dmSyncoSimulation::Readiness *Simulation::released( const Command &key ) const
+{
+    if( !key.inode || !key.counter || key.publicationNs <= 0 || m_releaseFault )
+    {
+        return nullptr;
+    }
+
+    for( const auto &event : m_releases )
+    {
+        const auto    &record = event.record;
+        const __int128 stamp  = __int128( record.publicationSec ) * 1000000000 + record.publicationNsec;
+
+        if( event.observedNs > 0 && record.inputInode == key.inode && record.inputCounter == key.counter &&
+            stamp == key.publicationNs )
+        {
+            return &event;
+        }
+    }
+
+    return nullptr;
+}
+
+inline void Simulation::release( const MagAOX::dmSyncoSimulation::Readiness &event )
+{
+    if( !m_summary.enabled || !m_config.readerReleaseReady )
+    {
+        return;
+    }
+
+    auto &quality = m_summary.readiness;
+    ++quality.observed;
+    const auto &record = event.record;
+
+    if( event.sourceEpoch && event.sourceEpoch >= m_releaseSourceEpoch && event.observedNs > 0 &&
+        event.observedNs >= m_summary.nowNs )
+    {
+        through( event.observedNs, false ); // Apply revocation only after earlier fixed deadlines were evaluated.
+    }
+
+    if( !event.sourceEpoch || event.sourceEpoch < m_releaseSourceEpoch )
+    {
+        ++quality.invalid;
+        return;
+    }
+
+    if( event.sourceEpoch > m_releaseSourceEpoch )
+    {
+        resetRelease();
+        m_releaseSourceEpoch = event.sourceEpoch;
+        m_releaseRecord      = {};
+        m_releaseObserved    = 0;
+        m_releaseFault       = false;
+    }
+
+    if( !event.coherent )
+    {
+        clearRelease();
+        ++quality.incoherent;
+        return;
+    }
+
+    const __int128 stamp = __int128( record.publicationSec ) * 1000000000 + record.publicationNsec;
+    const bool     base  = record.kind == MagAOX::dmCompletion::Kind::readers && record.session && record.epoch &&
+                      record.sequence && record.inputInode && record.inputCounter && record.publisherPid > 0 &&
+                      record.publicationSec > 0 && record.publicationNsec >= 0 && record.publicationNsec < 1000000000 &&
+                      stamp <= std::numeric_limits<int64_t>::max() && record.startedNs > 0 &&
+                      record.finishedNs >= record.startedNs && event.observedNs >= record.finishedNs &&
+                      event.observedNs > 0 && MagAOX::dmCompletion::readersQualified( record );
+
+    if( !base || ( m_releaseRecord.session && ( record.session < m_releaseRecord.session ||
+                                                ( record.session == m_releaseRecord.session &&
+                                                  ( record.publisherPid != m_releaseRecord.publisherPid ||
+                                                    record.epoch < m_releaseRecord.epoch ) ) ) ) )
+    {
+        clearRelease();
+        ++quality.invalid;
+        return;
+    }
+
+    if( m_releaseRecord.session &&
+        ( record.session > m_releaseRecord.session || record.epoch > m_releaseRecord.epoch ) )
+    {
+        resetRelease();
+        m_releaseRecord   = {};
+        m_releaseObserved = 0;
+        m_releaseFault    = false;
+    }
+
+    if( record.outcome != MagAOX::dmTiming::Outcome::unknown && record.outcome != MagAOX::dmTiming::Outcome::success )
+    {
+        clearRelease();
+        ++quality.sdkFailed;
+        m_releaseFault  = true;
+        m_releaseRecord = record;
+        return;
+    }
+
+    if( ( record.outcome == MagAOX::dmTiming::Outcome::unknown &&
+          record.backendResult != MagAOX::dmCompletion::unavailableResult ) ||
+        ( record.outcome == MagAOX::dmTiming::Outcome::success && record.backendResult != 0 &&
+          record.backendResult != MagAOX::dmCompletion::unavailableResult ) ||
+        m_releaseFault )
+    {
+        clearRelease();
+        ++quality.invalid;
+        return;
+    }
+
+    if( m_releaseRecord.sequence && record.sequence <= m_releaseRecord.sequence )
+    {
+        const auto &previous = m_releaseRecord;
+        const bool  same     = record.sequence == previous.sequence && record.inputInode == previous.inputInode &&
+                          record.inputCounter == previous.inputCounter &&
+                          record.publicationSec == previous.publicationSec &&
+                          record.publicationNsec == previous.publicationNsec &&
+                          record.startedNs == previous.startedNs && record.finishedNs == previous.finishedNs;
+
+        if( !same )
+        {
+            clearRelease();
+            ++quality.identityMismatch;
+        }
+        else if( previous.outcome == MagAOX::dmTiming::Outcome::unknown &&
+                 record.outcome == MagAOX::dmTiming::Outcome::success )
+        {
+            m_releaseRecord = record;
+            return;
+        }
+
+        ++quality.duplicates;
+        return;
+    }
+
+    const bool gap = m_releaseRecord.sequence && ( record.sequence != m_releaseRecord.sequence + 1 ||
+                                                   record.inputCounter > m_releaseRecord.inputCounter + 1 );
+    const bool regression =
+        m_releaseRecord.sequence &&
+        ( event.observedNs <= m_releaseObserved || record.inputInode != m_releaseRecord.inputInode ||
+          record.inputCounter <= m_releaseRecord.inputCounter || record.startedNs <= m_releaseRecord.startedNs ||
+          record.finishedNs <= m_releaseRecord.finishedNs );
+    m_releaseRecord   = record;
+    m_releaseObserved = event.observedNs;
+
+    if( gap || regression )
+    {
+        clearRelease();
+        quality.gaps += gap;
+        quality.invalid += regression;
+        return;
+    }
+
+    m_releases[m_releaseNext] = event;
+    m_releaseNext             = ( m_releaseNext + 1 ) % m_releases.size();
+    m_summary.latestRelease   = event;
+    ++quality.qualified;
+}
+
 inline void Simulation::clearCadence()
 {
     m_cadenceCount = m_cadenceNext = 0;
@@ -244,8 +484,7 @@ inline void Simulation::clearCadence()
     m_summary.cadence.windowNs     = m_config.cadenceWindowNs;
     m_summary.cadence.updateNs     = m_config.cadenceUpdateNs;
     m_summary.periodNs             = m_config.nominalPeriod;
-    m_summary.feasible             = feasible( m_config.nominalPeriod, m_config.steps, m_config.bounds ) &&
-                         m_config.nominalPeriod >= m_config.cadenceMinPeriod;
+    feasibility( m_config.nominalPeriod );
 }
 
 inline void Simulation::updateCadence( uint64_t counter, int64_t observed )
@@ -321,6 +560,8 @@ inline bool Simulation::configure( const Config &config )
         config.timeout < 2 * config.nominalPeriod || config.timeout > 1000000000000LL || config.cadenceMinPeriod < 0 ||
         config.cadenceMinPeriod > 1000000000000LL || config.cadenceUpdateNs <= 0 ||
         config.cadenceWindowNs < config.cadenceUpdateNs || config.cadenceWindowNs > 1000000000000LL ||
+        config.virtualReaderNs <= 0 || config.virtualReaderNs > 1000000000 ||
+        config.backendNs < config.virtualReaderNs || config.backendNs > 1000000000 ||
         __int128( config.cadenceWindowNs ) >
             __int128( MagAOX::dmSyncoSimulation::cadenceAnchorCapacity - 1 ) * config.cadenceUpdateNs )
     {
@@ -397,10 +638,21 @@ inline void Simulation::reset()
     m_summary.phaseGain          = m_config.phaseGain;
     m_summary.cadenceMinPeriodNs = m_config.cadenceMinPeriod;
     m_summary.phaseSlewNs        = m_config.phaseSlew;
+    m_summary.readerReleaseReady = m_config.readerReleaseReady;
+    m_summary.virtualReaderNs    = m_config.virtualReaderNs;
+    m_summary.backendNs          = m_config.backendNs;
     m_intervalCount = m_intervalNext = m_pointCount = m_pointNext = m_planCount = 0;
     m_linkCount                                                                 = 0;
     m_haveMain = m_haveCombined = m_mainOutput = false;
     m_outputTime = m_virtualHold = m_copyBegin = m_copyEnd = 0;
+    m_virtualBackend                                       = 0;
+    m_backendPlan                                          = {};
+    m_mainOutputKey                                        = {};
+    clearRelease();
+    m_releaseSourceEpoch = 0;
+    m_releaseRecord      = {};
+    m_releaseObserved    = 0;
+    m_releaseFault       = false;
     clearCadence();
     m_copyStep    = 0;
     m_copyCounter = 0;
@@ -597,7 +849,8 @@ inline void Simulation::evaluate( Plan &entry, int step )
     const int64_t start  = entry.starts[step];
     const int64_t target = entry.targets[step];
 
-    if( !feasible( entry.period, m_config.steps, b ) || entry.period < m_config.cadenceMinPeriod || start <= 0 )
+    if( ( !m_config.readerReleaseReady && !feasible( entry.period, m_config.steps, b ) ) ||
+        entry.period < m_config.cadenceMinPeriod || start <= 0 )
     {
         skip( entry, step, &Outcome::expired );
         return;
@@ -642,7 +895,30 @@ inline void Simulation::evaluate( Plan &entry, int step )
     }
 
     const int64_t actual = step ? std::max( entry.main, entry.output ) : std::max( m_summary.lastMainNs, m_outputTime );
-    const __int128 hold  = __int128( actual ) + b.delivery + b.keepout + b.guard;
+    const __int128 hold  = m_config.readerReleaseReady ? 0 : __int128( actual ) + b.delivery + b.keepout + b.guard;
+
+    if( m_config.readerReleaseReady )
+    {
+        const auto *evidence = released( step ? entry.outputKey : m_mainOutputKey );
+
+        if( !evidence )
+        {
+            skip( entry, step, &Outcome::releaseMissing );
+            return;
+        }
+
+        if( __int128( evidence->observedNs ) + b.guard > start )
+        {
+            skip( entry, step, &Outcome::releaseLate );
+            return;
+        }
+
+        if( step && ( __int128( actual ) + m_config.backendNs > target || m_virtualBackend > target ) )
+        {
+            skip( entry, step, &Outcome::backendBusy );
+            return;
+        }
+    }
 
     if( hold > start || m_virtualHold > start )
     {
@@ -653,7 +929,15 @@ inline void Simulation::evaluate( Plan &entry, int step )
     const auto   *following = plan( entry.counter + 1 );
     const int64_t nextGrid =
         following ? following->grid : shiftGrid( { entry.grid, entry.fractionQ32 }, 0, 1, entry.periodQ32 ).ns;
-    const __int128 readerEnd = __int128( target ) + b.delivery + b.keepout + b.guard;
+    const __int128 readerEnd = __int128( target ) + ( m_config.readerReleaseReady ? m_config.virtualReaderNs + b.guard
+                                                                                  : b.delivery + b.keepout + b.guard );
+
+    if( m_config.readerReleaseReady && step &&
+        ( !nextGrid || __int128( target ) + m_config.backendNs > __int128( nextGrid ) - b.early - b.observation ) )
+    {
+        skip( entry, step, &Outcome::backendWrap );
+        return;
+    }
 
     if( step && ( !nextGrid || readerEnd > __int128( nextGrid ) - b.early - b.observation ) )
     {
@@ -677,7 +961,24 @@ inline void Simulation::evaluate( Plan &entry, int step )
 
     if( step )
     {
-        m_virtualHold = int64_t( readerEnd );
+        m_virtualHold    = int64_t( readerEnd );
+        m_virtualBackend = m_config.readerReleaseReady ? target + m_config.backendNs : 0;
+
+        if( m_config.readerReleaseReady )
+        {
+            m_backendPlan                 = {};
+            m_backendPlan.step            = step;
+            m_backendPlan.planCounter     = m_copyCounter;
+            m_backendPlan.planEstimatorId = m_copyEstimatorId;
+            m_backendPlan.planGridNs      = m_copyGrid;
+            m_backendPlan.periodNs        = m_copyPeriod;
+            m_backendPlan.periodQ32       = m_copyPeriodQ32;
+            m_backendPlan.planFractionQ32 = m_copyFractionQ32;
+            m_backendPlan.copyBeginNs     = m_copyBegin;
+            m_backendPlan.copyEndNs       = m_copyEnd;
+            m_backendPlan.readerEndNs     = m_virtualHold;
+            m_backendPlan.backendEndNs    = m_virtualBackend;
+        }
     }
 }
 
@@ -712,10 +1013,15 @@ inline void Simulation::overlap( uint64_t                                      m
                                  MagAOX::dmSyncoSimulation::OverlapOrigin      origin,
                                  const MagAOX::dmSyncoSimulation::Observation &context )
 {
-    if( m_copyBegin && ( ( observed >= m_copyBegin && observed < m_copyEnd ) ||
-                         ( m_copyStep > 0 && observed >= m_copyEnd && observed < m_virtualHold ) ) )
+    const bool copying = m_copyBegin && observed >= m_copyBegin && observed < m_copyEnd;
+    const bool reading = m_copyBegin && m_copyStep > 0 && observed >= m_copyEnd && observed < m_virtualHold;
+    const bool backend = m_config.readerReleaseReady && m_backendPlan.backendEndNs > 0 &&
+                         observed >= m_backendPlan.readerEndNs && observed < m_backendPlan.backendEndNs;
+    const bool backendOnly = !copying && !reading && backend;
+
+    if( copying || reading || backend )
     {
-        ++m_summary.outcomes[m_copyStep].overlap;
+        ++m_summary.outcomes[backendOnly ? m_backendPlan.step : m_copyStep].overlap;
         ++m_traceDetected;
         triggerEstimator();
 
@@ -725,29 +1031,36 @@ inline void Simulation::overlap( uint64_t                                      m
             return;
         }
 
-        auto &event           = m_traceEvents[( m_traceHead + m_traceCount ) % m_traceEvents.size()];
-        event                 = {};
+        auto &event = m_traceEvents[( m_traceHead + m_traceCount ) % m_traceEvents.size()];
+        event       = backendOnly ? m_backendPlan : MagAOX::dmSyncoSimulation::OverlapEvent{};
+
+        if( !backendOnly )
+        {
+            event.planCounter     = m_copyCounter;
+            event.planEstimatorId = m_copyEstimatorId;
+            event.step            = m_copyStep;
+            event.planGridNs      = m_copyGrid;
+            event.periodNs        = m_copyPeriod;
+            event.periodQ32       = m_copyPeriodQ32;
+            event.planFractionQ32 = m_copyFractionQ32;
+            event.copyBeginNs     = m_copyBegin;
+            event.copyEndNs       = m_copyEnd;
+            event.readerEndNs     = m_copyStep > 0 ? m_virtualHold : 0;
+            event.backendEndNs    = m_config.readerReleaseReady && m_copyStep > 0 ? m_virtualBackend : 0;
+        }
+
         event.id              = m_traceDetected;
         event.session         = m_summary.session;
         event.mainCounter     = mainCounter;
         event.combinedCounter = combinedCounter;
-        event.planCounter     = m_copyCounter;
         event.lastMainCounter = m_summary.counter;
-        event.planEstimatorId = m_copyEstimatorId;
         event.lastEstimatorId = m_estimatorObserved;
-        event.step            = m_copyStep;
         event.origin          = origin;
-        event.window          = observed < m_copyEnd ? MagAOX::dmSyncoSimulation::OverlapWindow::copy
-                                                     : MagAOX::dmSyncoSimulation::OverlapWindow::readerHold;
+        event.window          = copying ? MagAOX::dmSyncoSimulation::OverlapWindow::copy
+                                        : ( reading ? MagAOX::dmSyncoSimulation::OverlapWindow::readerHold
+                                                    : MagAOX::dmSyncoSimulation::OverlapWindow::backend );
         event.observedNs      = observed;
         event.mainGridNs      = mainGrid;
-        event.planGridNs      = m_copyGrid;
-        event.periodNs        = m_copyPeriod;
-        event.periodQ32       = m_copyPeriodQ32;
-        event.planFractionQ32 = m_copyFractionQ32;
-        event.copyBeginNs     = m_copyBegin;
-        event.copyEndNs       = m_copyEnd;
-        event.readerEndNs     = m_copyStep > 0 ? m_virtualHold : 0;
         event.lastMainNs      = m_summary.lastMainNs;
         event.lastOutputNs    = m_outputTime;
         event.observation     = context;
@@ -758,11 +1071,13 @@ inline void Simulation::overlap( uint64_t                                      m
 inline void Simulation::badOutput()
 {
     ++m_summary.outputGaps;
-    m_mainOutput = false;
+    m_mainOutput    = false;
+    m_mainOutputKey = {};
 
     if( auto *entry = plan( m_summary.counter ) )
     {
-        entry->output = 0;
+        entry->output    = 0;
+        entry->outputKey = {};
     }
 
     for( size_t i = 0; i < m_linkCount; ++i )
@@ -801,6 +1116,13 @@ inline void Simulation::through( int64_t now, bool inclusive )
         m_haveCombined = m_mainOutput = false;
         m_outputTime                  = 0;
         m_virtualHold = m_copyBegin = m_copyEnd = 0;
+        m_virtualBackend                        = 0;
+        m_backendPlan                           = {};
+        m_mainOutputKey                         = {};
+        if( m_config.readerReleaseReady )
+        {
+            resetRelease();
+        }
         m_pointCount = m_pointNext = 0;
         m_summary.phaseSamples     = 0;
     }
@@ -933,8 +1255,9 @@ inline void Simulation::primary( uint64_t                                      c
     {
         if( m_links[i].counter == counter && m_links[i].usable )
         {
-            m_mainOutput = true;
-            m_outputTime = m_links[i].observed;
+            m_mainOutput    = true;
+            m_outputTime    = m_links[i].observed;
+            m_mainOutputKey = m_links[i].key;
             ++m_summary.associations;
         }
         else if( m_links[i].counter > counter )
@@ -965,8 +1288,7 @@ inline void Simulation::primary( uint64_t                                      c
 
     updateCadence( counter, observed );
     const int64_t conservativePeriod = int64_t( m_summary.cadence.periodQ32 / MagAOX::dmSyncoSimulation::periodScale );
-    m_summary.feasible               = feasible( conservativePeriod, m_config.steps, m_config.bounds ) &&
-                         conservativePeriod >= m_config.cadenceMinPeriod;
+    feasibility( conservativePeriod );
 
     if( predicted )
     {
@@ -1007,8 +1329,9 @@ inline void Simulation::primary( uint64_t                                      c
 
         if( current )
         {
-            current->main   = observed;
-            current->output = m_mainOutput ? m_outputTime : 0;
+            current->main      = observed;
+            current->output    = m_mainOutput ? m_outputTime : 0;
+            current->outputKey = m_mainOutputKey;
 
             if( !predicted )
             {
@@ -1123,7 +1446,8 @@ inline void Simulation::combined( uint64_t                                      
         }
         else
         {
-            m_links[m_linkCount++] = { primaryCounter, observed, true };
+            m_links[m_linkCount++] = {
+                primaryCounter, observed, true, { context.streamInode, counter, context.publicationNs } };
         }
     }
     else if( primaryCounter != m_summary.counter || m_mainOutput )
@@ -1133,12 +1457,14 @@ inline void Simulation::combined( uint64_t                                      
     else
     {
         ++m_summary.associations;
-        m_mainOutput = true;
-        m_outputTime = observed;
+        m_mainOutput    = true;
+        m_outputTime    = observed;
+        m_mainOutputKey = { context.streamInode, counter, context.publicationNs };
 
         if( auto *entry = plan( primaryCounter ) )
         {
-            entry->output = observed;
+            entry->output    = observed;
+            entry->outputKey = m_mainOutputKey;
         }
     }
 

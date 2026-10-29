@@ -939,3 +939,159 @@ whitespace, operator-guide local links and all documented Bash blocks pass
 validation. The operator has confirmed the RT core assignment; applying the
 profile and verifying the running thread's policy/affinity remain operator
 actions. No instrument commands were run by the agents.
+
+## 16. FIFO30 / CPU57 capture: 20261029T145715Z
+
+Source: `synco-sim-20261029T145715Z.tgz`, extracted on the workstation at
+`/home/jrmales/tmp/home/jrmales/tmp/synco-sim-20261029T145715Z`.
+The 119 synco records span **2026-10-29 14:57:14.763206540 to
+14:59:14.021664285 UTC**, **119.258458 seconds**, or October 29,
+07:57:14–07:59:14 Phoenix time. All snapshots succeed, error files are empty
+and the three bounded collectors return expected timeout status 124. Saved
+checkout is `ed98cf8a2a0997bfb65a49b285d4904215587167`.
+
+The operator reports no changes other than dmtweeter-synco. The release
+observer requests priority 30; the full-completion observer remains at requested
+priority zero. A subsequent operator check confirms the same release-monitor
+TID's actual policy and affinity:
+
+```text
+PID     TID      CLS RTPRIO PSR COMMAND
+1015912 1015922  FF      30  57 dmSyncopation
+pid 1015922's current affinity list: 57
+```
+
+This verifies **FIFO30 on CPU57 / spare57**. The SDK worker remains separate
+on operator-confirmed spare56; its saved readbacks verify actual FIFO policy 1,
+priority 55 and one allowed CPU. That allowed-CPU readback is a count, not a CPU
+number. Operational synco stays Off, RTC latency stays On, and the two-step
+shadow model retains its 155 us protection and 20 us early reserve.
+
+### The split localizes the long tail before semaphore return
+
+The following typical values are medians of overlapping two-second means;
+maxima are retained in those windows. They are not pooled capture statistics
+or an operating guarantee.
+
+| Metric | FIFO30 release: typical, us | Release maximum, us | Full completion: typical, us | Full maximum, us |
+| --- | ---: | ---: | ---: | ---: |
+| Required reader hold | 20.248687 | **25.708** | 131.384777 | 140.144 |
+| Controller processing to endpoint | 19.793095 | 25.248 | 131.078102 | 139.844 |
+| Hold until notice observation | 23.933678 | **29.425** | 135.390741 | 431.364 |
+| Notification, R - F | **3.680820** | **8.086** | 4.016485 | **326.256** |
+| Endpoint to wait return, W - F | **3.486370** | **7.885** | 3.763184 | **325.044** |
+| Wait return to record read, R - W | **0.194378** | **0.461** | 0.244091 | 21.260 |
+
+![Wait-return and post-wait timing](figures/synco-reader-wake-20261029T145715Z.png)
+
+The FIFO30 release observer's current notification maximum is 8.086 us,
+compared with 85.131 us in 060958Z. The ordinary full-completion observer in
+this same capture retains a 326.256 us notification event. Its independent
+worst-notification record, first reported at **14:57:29.914789947 UTC**,
+provides an exact same-event decomposition:
+
+```text
+Primary inode 4676 / counter 143446471
+Combined inode 4685 / counter 174155268
+Completion session 2120408464557324 / epoch 12 / sequence 4754842
+Publisher PID 788488; state complete; SDK success; callback result 0
+
+S = 2153687906454522 ns
+F = 2153687906586732 ns
+W = 2153687906911776 ns
+R = 2153687906912988 ns
+
+F - S = 132.210 us
+W - F = 325.044 us
+R - W =   1.212 us
+R - F = 326.256 us
+```
+
+About **99.63%** of that event's notification delay precedes semaphore return.
+It is not a 431 us controller operation: the synco baseline is already
+27.102 us after controller start for this command, giving 105.108 us required
+hold and 431.364 us hold until observation. The new timestamps therefore
+separate observer delay from controller work rather than relabeling the latter.
+
+This strongly supports scheduling/placement as the explanation for much of
+the previous observer tail and demonstrates the optimized waiter's measured
+behavior. W - F still includes producer record publication/posting before
+wakeup; no producer-post timestamp exists to assign every microsecond to
+scheduling. The test changes both priority and placement, so their separate
+individual contributions are not measured. The measurements give no reason to
+treat 85 us as an unavoidable cost of this semaphore-observation path.
+
+### Coverage and lifetime boundaries
+
+Early first-to-last telemetry differences add **238,516 matched commands**,
+**477,032 notices**, and **238,516 SDK results, all successful**. Full completion
+adds **238,515** observations and matches. Both observers add no invalid,
+incoherent, busy, unqualified/error, duplicate, missing-peer, sequence/counter
+gap, reset or queue-drop events. `receiptUnavailable`, `receiptInvalid` and
+`firstEnriched` stay **zero for the entire observer lifetime**, so every current
+match participates in the paired split. Normal retained-source expiry is
+not missing-command evidence. One-event before/after snapshot differences
+are accompanied by pending/in-flight boundary state rather than loss counters.
+
+The early lifetime maxima are unchanged prehistory: required hold **27.582 us**
+predates the first summary by 55.573 seconds, and observed hold **42.090 us** /
+notification **22.172 us** predate it by 82.878 seconds. The exact historical
+notification split is **21.981 us before wait return + 0.191 us afterward**,
+with SDK outcome still unknown, so it is a genuine early view. Current-run
+maxima must not be replaced by those older values or omitted from a lifetime
+latency assessment. The current 8.086 us notification and 7.885 us wake maxima
+share a reported window but lack exact event provenance because neither beats
+the lifetime worst; do not subtract their separate maxima as one event.
+
+Both required-hold over-budget counts remain zero. Full required-hold maximum
+increases to 140.144 us inside the capture. Its 326.256 us notification event
+is also inside the capture; old full-observer invalid/gap/missing-peer counts
+remain unchanged.
+
+### Controller, camera and shadow checks
+
+Controller snapshots add **240,427 completed commands**; SDK failures, fault,
+timeouts, admission-closed and coalesced counts stay zero. Rejected receipts
+stay at four. All 119 controller telemetry records are valid and add 236,421
+successful submissions between their own first/last records, with no new
+command gaps or dropped events. Typical direct entry-to-release time is
+19.611442 us (maximum 25.057 us), SDK time 103.993841 us and full callback
+130.662795 us, similar to 060958Z. The dedicated publisher and timing-entry
+markers start at slightly different points, so these are distinct populations
+from the matched processing row above.
+
+Camera stage telemetry adds 236,512 frames and 11 successful serial controls,
+with no new failures, frame/counter gaps, invalid or dropped events. Typical
+acquisition-interval sigma is 0.300907 us and publication-interval sigma
+0.869486 us; retained intervals are 479–525 us acquisition and
+479.134–525.962 us publication. Saved current temperature target is -45 C,
+whereas 060958Z saved +20 C, and the camera/controller timing sessions advanced
+before this run. Preserve that recorded difference when comparing archived
+runs despite the operator's report of only a synco change; the same-capture
+ordinary/RT observer comparison does not depend on equal temperatures across
+those two archives. No setting change within this capture is reported.
+
+Both shadow steps would run all **238,517** new opportunities, with **no new
+skips or overlaps**, and primary/combiner/pipeline quality stays clean.
+Historical step-0 skips 2331, step-1 skips 2554 / overlap 1 and large lifetime
+phase extrema are already present in the first summary and remain unchanged;
+they cannot be attributed to this steady capture. Sampled phase is
+-5.897 to +6.421 us, with a stable near-500 us cadence. The historical
+state needs separate provenance before treating the app's whole lifetime as
+overlap-free. No live/shadow policy or instrument configuration is changed by
+this analysis.
+
+## 17. 2026-10-29 release-qualified three-step shadow direction
+
+The operator selected `dmtweeter_read_done` for reader readiness and asked about
+6 kHz total cadence. The selected next milestone is **shadow at three steps
+first**. The separate [readiness shadow plan](dm-syncopation-release-readiness-shadow.md)
+captures the implementation and assumptions. It separates exact observed-main
+release, explicitly modeled virtual auxiliary readers and independent whole
+backend occupancy, preserving the fixed grid and existing reserves.
+
+The approximately 100 us earlier reader clearance does not shorten SDK service.
+At three steps in 500 us, the final active target has only about 141.667 us
+before the currently modeled early main. The conservative 155 us backend
+assumption therefore remains a distinct limiting condition and is reported as
+a backend skip, not hidden by lowering reader keepout or the early reserve.

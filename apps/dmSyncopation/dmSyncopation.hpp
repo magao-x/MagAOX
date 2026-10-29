@@ -215,34 +215,45 @@ class dmSyncopation : public MagAOXApp<true>,
     int                      m_primarySemaphore{ 5 }; ///< Required reader semaphore; reject allocation fallback.
     unsigned                 m_lockFrames{ 32 };  ///< Clean main observations before preparing the first active cycle.
     unsigned                 m_failureLimit{ 3 }; ///< Consecutive original event failures before reacquisition.
-    unsigned      m_rateFrames{ 32 }; ///< Cadence violation persistence and primary-rate qualification interval count.
-    double        m_nominalRate{ 2000 };       ///< Acquisition fallback, Hz.
-    double        m_maxCadence{ 6000 };        ///< Nominal sanity rating, Hz, including step 0.
-    double        m_rateTolerance{ 0.01 };     ///< Relative cadence-rating tolerance.
-    double        m_minRate{ 500 };            ///< Minimum accepted main rate, Hz.
-    double        m_maxRate{ 4000 };           ///< Maximum accepted main rate, Hz.
-    double        m_gain{ 0.1 };               ///< Per-event wait integrator gain.
-    double        m_maxAdvanceUs{ 20 };        ///< Absolute wait correction limit, us.
-    double        m_outputTimeoutUs{ 50 };     ///< Combination watchdog, separate from delivery allowance.
-    double        m_primaryCadenceWindow{ 2 }; ///< Independent primary diagnostics window in seconds; zero disables.
-    size_t        m_primaryCadenceMaxEvents{ 20000 }; ///< Queue and retained-event cap; zero disables diagnostics.
-    double        m_primaryExcursionUs{ 20 };    ///< Diagnostic interval excursion threshold around the window median.
-    bool          m_combinerDiagnostics{ true }; ///< Observe combined-output traces independently of scheduling.
-    bool          m_cameraDiagnostics{ true };   ///< Observe camera acquisition/publication independently of INDI FPS.
-    bool          m_pipelineDiagnostics{ true }; ///< Retain the primary's bounded upstream process trace.
-    bool          m_diagnosticsOnly{ false };    ///< Observe arbitrary primary metadata without attaching DM resources.
-    bool          m_simulationEnabled{ false };  ///< Startup-only shadow policy; live scheduling is prohibited.
-    unsigned      m_simulationWindow{ 32 };      ///< Bounded counter-normalized median phase window.
-    double        m_simulationCadenceWindowSec{ 10 }; ///< Requested counter/time cadence baseline, seconds.
-    double        m_simulationCadenceUpdateSec{ 1 };  ///< Minimum cadence refresh interval, seconds.
-    double        m_simulationPhaseGain{ 0.1 };       ///< Future-grid phase smoothing gain.
-    double        m_simulationPhaseSlewUs{ 1 };       ///< Maximum phase correction per newly planned cycle, us.
-    synco::Bounds m_bounds;                           ///< Explicit copy, observation and reader bounds, ns.
+    unsigned m_rateFrames{ 32 };      ///< Cadence violation persistence and primary-rate qualification interval count.
+    double   m_nominalRate{ 2000 };   ///< Acquisition fallback, Hz.
+    double   m_maxCadence{ 6000 };    ///< Nominal sanity rating, Hz, including step 0.
+    double   m_rateTolerance{ 0.01 }; ///< Relative cadence-rating tolerance.
+    double   m_minRate{ 500 };        ///< Minimum accepted main rate, Hz.
+    double   m_maxRate{ 4000 };       ///< Maximum accepted main rate, Hz.
+    double   m_gain{ 0.1 };           ///< Per-event wait integrator gain.
+    double   m_maxAdvanceUs{ 20 };    ///< Absolute wait correction limit, us.
+    double   m_outputTimeoutUs{ 50 }; ///< Combination watchdog, separate from delivery allowance.
+    double   m_primaryCadenceWindow{ 2 };        ///< Independent primary diagnostics window in seconds; zero disables.
+    size_t   m_primaryCadenceMaxEvents{ 20000 }; ///< Queue and retained-event cap; zero disables diagnostics.
+    double   m_primaryExcursionUs{ 20 };         ///< Diagnostic interval excursion threshold around the window median.
+    bool     m_combinerDiagnostics{ true };      ///< Observe combined-output traces independently of scheduling.
+    bool     m_cameraDiagnostics{ true };        ///< Observe camera acquisition/publication independently of INDI FPS.
+    bool     m_pipelineDiagnostics{ true };      ///< Retain the primary's bounded upstream process trace.
+    bool     m_diagnosticsOnly{ false };         ///< Observe arbitrary primary metadata without attaching DM resources.
+    bool     m_simulationEnabled{ false };       ///< Startup-only shadow policy; live scheduling is prohibited.
+    bool     m_simulationReaderReleaseReady{ false }; ///< Use timestamped actual-main read release in shadow decisions.
+    double   m_simulationVirtualReaderUs{ 30 }; ///< Assumed virtual auxiliary reader duration; not measured release.
+    double   m_simulationBackendUs{ 155 };      ///< Assumed whole backend occupancy, including delivery and retirement.
+    unsigned m_simulationWindow{ 32 };          ///< Bounded counter-normalized median phase window.
+    double   m_simulationCadenceWindowSec{ 10 }; ///< Requested counter/time cadence baseline, seconds.
+    double   m_simulationCadenceUpdateSec{ 1 };  ///< Minimum cadence refresh interval, seconds.
+    double   m_simulationPhaseGain{ 0.1 };       ///< Future-grid phase smoothing gain.
+    double   m_simulationPhaseSlewUs{ 1 };       ///< Maximum phase correction per newly planned cycle, us.
+    synco::Bounds m_bounds;                      ///< Explicit copy, observation and reader bounds, ns.
     ///@}
 
-    std::mutex                         m_cycleMutex; ///< Serializes lifecycle/configuration with a complete callback.
-    synco::Simulation                  m_simulation; ///< Fixed-storage shadow engine, serialized by the cycle mutex.
-    MagAOX::dmSyncoSimulation::Summary m_simulationSnapshot;        ///< Ordinary-thread cached telemetry/INDI snapshot.
+    std::mutex        m_cycleMutex; ///< Serializes lifecycle/configuration with a complete callback.
+    synco::Simulation m_simulation; ///< Fixed-storage shadow engine, serialized by the cycle mutex.
+    MagAOX::spscQueue<MagAOX::dmSyncoSimulation::Readiness>
+        m_simulationReleaseQueue; ///< Release producer to cycle consumer; allocated before monitor startup.
+    std::atomic<uint64_t> m_simulationReleaseEpoch{ 1 }; ///< Attachment/reset/drop fence for queued release evidence.
+    uint64_t m_simulationReleaseSeenEpoch{ 1 }; ///< Cycle-owned source generation whose evidence can be accepted.
+    uint64_t m_simulationReleaseSeenDrops{ 0 }; ///< Cycle-owned transport loss already invalidated.
+    MagAOX::dmSyncoSimulation::Readiness m_simulationReleasePending; ///< One popped future observation held until R.
+    bool   m_simulationReleaseHavePending{ false }; ///< A future observation is owned by the cycle, not the queue.
+    size_t m_simulationReleaseQueued{ 0 }; ///< Ordinary-thread queue/lookahead count cached with the shadow snapshot.
+    MagAOX::dmSyncoSimulation::Summary     m_simulationSnapshot;    ///< Ordinary-thread cached telemetry/INDI snapshot.
     MagAOX::dmSyncoSimulation::TraceStatus m_simulationTraceStatus; ///< Ordinary-thread cached overlap queue quality.
     uint64_t m_simulationTraceLogFailed{ 0 }; ///< Drained overlap events lost after a telemetry emission failure.
     MagAOX::dmSyncoSimulation::EstimatorStatus m_simulationEstimatorStatus; ///< Cached triggered estimator coverage.
@@ -347,17 +358,19 @@ class dmSyncopation : public MagAOXApp<true>,
     int64_t m_step0Wake{ 0 };       ///< Latest passive-copy start lateness relative to the requested wake, ns.
     int64_t m_step0WakeMax{ 0 };    ///< Maximum observed passive-copy wake/check lateness, ns.
 
-    pcf::IndiProperty m_indiP_enable;              ///< Enable request and acknowledged quiescence.
-    pcf::IndiProperty m_indiP_reacquire;           ///< Request fresh synchronization.
-    pcf::IndiProperty m_indiP_settings;            ///< Disabled-only essential numeric controls.
-    pcf::IndiProperty m_indiP_status;              ///< Compact rates/counts/outcome summary.
-    pcf::IndiProperty m_indiP_health;              ///< Schedule reason and stream identities.
-    pcf::IndiProperty m_indiP_camera;              ///< External camera FPS subscription.
-    pcf::IndiProperty m_indiP_simulation;          ///< Conditional grid, phase and collection-quality diagnostics.
-    pcf::IndiProperty m_indiP_simulationCadence;   ///< Long-baseline cadence state, coverage and independent freshness.
-    pcf::IndiProperty m_indiP_simulationSteps;     ///< Per-step hypothetical outcomes; never actual deliveries.
-    pcf::IndiProperty m_indiP_simulationStatus;    ///< Shadow state and conditional-policy identification.
-    pcf::IndiProperty m_indiP_simulationTrace;     ///< Read-only overlap capture, drain and loss counters.
+    pcf::IndiProperty m_indiP_enable;            ///< Enable request and acknowledged quiescence.
+    pcf::IndiProperty m_indiP_reacquire;         ///< Request fresh synchronization.
+    pcf::IndiProperty m_indiP_settings;          ///< Disabled-only essential numeric controls.
+    pcf::IndiProperty m_indiP_status;            ///< Compact rates/counts/outcome summary.
+    pcf::IndiProperty m_indiP_health;            ///< Schedule reason and stream identities.
+    pcf::IndiProperty m_indiP_camera;            ///< External camera FPS subscription.
+    pcf::IndiProperty m_indiP_simulation;        ///< Conditional grid, phase and collection-quality diagnostics.
+    pcf::IndiProperty m_indiP_simulationCadence; ///< Long-baseline cadence state, coverage and independent freshness.
+    pcf::IndiProperty
+        m_indiP_simulationReadiness;            ///< Signal-qualified main readiness and explicit virtual assumptions.
+    pcf::IndiProperty m_indiP_simulationSteps;  ///< Per-step hypothetical outcomes; never actual deliveries.
+    pcf::IndiProperty m_indiP_simulationStatus; ///< Shadow state and conditional-policy identification.
+    pcf::IndiProperty m_indiP_simulationTrace;  ///< Read-only overlap capture, drain and loss counters.
     pcf::IndiProperty m_indiP_simulationEstimator; ///< Read-only estimator pre/post history coverage and losses.
     pcf::IndiProperty m_indiP_primaryTiming; ///< Continuous observed primary publication/receipt statistics in seconds.
     pcf::IndiProperty
@@ -487,6 +500,9 @@ class dmSyncopation : public MagAOXApp<true>,
 
     /// Begin a new shadow attachment epoch and clear external-clock metadata baselines.
     void resetSimulation();
+
+    /// Drain fixed release evidence under the cycle mutex before evaluating deadlines, without backdating arrivals.
+    void drainSimulationRelease( int64_t now /**< [in] Latest observation time admissible to this evaluation. */ );
 
     /// Normalize an external metadata timestamp without mixing it with the monotonic clock.
     static int64_t simulationTimestamp( const timespec &stamp /**< [in] External timestamp; zero means invalid. */ );
@@ -717,6 +733,9 @@ inline void dmSyncopation::setupConfig()
         { "diagnostics.camera", "Observe camera acquisition/publication intervals independently of camera INDI FPS." },
         { "diagnostics.pipeline", "Observe the primary producer's bounded upstream processing trace." },
         { "simulation.enabled", "Observe a conditional fixed-grid policy without copying or triggering DM commands." },
+        { "simulation.readerReleaseReady", "Gate actual-main shadow reader clearance on exact observed release." },
+        { "simulation.virtualReaderUs", "Assumed virtual auxiliary reader duration, us; not measured evidence." },
+        { "simulation.backendUs", "Assumed complete backend occupancy, us, including delivery and retirement." },
         { "simulation.window", "Counter-normalized median phase sample count (4-256)." },
         { "simulation.cadenceWindowSec", "Requested counter/time cadence baseline, seconds (default 10)." },
         { "simulation.cadenceUpdateSec", "Minimum cadence refresh interval, seconds (default 1)." },
@@ -774,13 +793,20 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
     config( m_pipelineDiagnostics, "diagnostics.pipeline" );
     config( m_diagnosticsOnly, "diagnostics.only" );
     config( m_simulationEnabled, "simulation.enabled" );
+    config( m_simulationReaderReleaseReady, "simulation.readerReleaseReady" );
+    config( m_simulationVirtualReaderUs, "simulation.virtualReaderUs" );
+    config( m_simulationBackendUs, "simulation.backendUs" );
     config( m_simulationWindow, "simulation.window" );
     config( m_simulationCadenceWindowSec, "simulation.cadenceWindowSec" );
     config( m_simulationCadenceUpdateSec, "simulation.cadenceUpdateSec" );
     config( m_simulationPhaseGain, "simulation.phaseGain" );
     config( m_simulationPhaseSlewUs, "simulation.phaseSlewUs" );
 
-    if( ( m_simulationEnabled && ( m_diagnosticsOnly || !m_combinerDiagnostics || m_primaryCadenceWindow <= 0 ) ) ||
+    if( ( m_simulationReaderReleaseReady && ( !m_simulationEnabled || readerReleaseMonitorT::m_shmimName.empty() ) ) ||
+        !finite( m_simulationVirtualReaderUs ) || m_simulationVirtualReaderUs <= 0 ||
+        m_simulationVirtualReaderUs > 1000000 || !finite( m_simulationBackendUs ) || m_simulationBackendUs <= 0 ||
+        m_simulationBackendUs > 1000000 ||
+        ( m_simulationEnabled && ( m_diagnosticsOnly || !m_combinerDiagnostics || m_primaryCadenceWindow <= 0 ) ) ||
         m_simulationWindow < 4 || m_simulationWindow > 256 || !finite( m_simulationPhaseGain ) ||
         m_simulationPhaseGain <= 0 || m_simulationPhaseGain > 1 || !finite( m_simulationPhaseSlewUs ) ||
         m_simulationPhaseSlewUs < 0 || m_simulationPhaseSlewUs > 1000000 || !finite( m_simulationCadenceWindowSec ) ||
@@ -942,6 +968,9 @@ inline bool dmSyncopation::configureSimulation( double seedRate )
     synco::Simulation::Config settings;
     settings.bounds             = m_bounds;
     settings.steps              = m_requested;
+    settings.readerReleaseReady = m_simulationReaderReleaseReady;
+    settings.virtualReaderNs    = int64_t( std::ceil( m_simulationVirtualReaderUs * 1000 ) );
+    settings.backendNs          = int64_t( std::ceil( m_simulationBackendUs * 1000 ) );
     settings.window             = m_simulationWindow;
     settings.nominalPeriod      = int64_t( std::llround( 1e9 / rate ) );
     settings.cadenceWindowNs    = int64_t( std::llround( m_simulationCadenceWindowSec * 1e9 ) );
@@ -964,6 +993,8 @@ inline bool dmSyncopation::configureSimulation( double seedRate )
     {
         return false;
     }
+
+    m_simulationReleaseEpoch.fetch_add( 1, std::memory_order_acq_rel );
 
     m_simulationPublication         = 0;
     m_simulationCounter             = 0;
@@ -1010,7 +1041,8 @@ inline void dmSyncopation::readSimulationPrimary( int64_t callbackNs, int64_t re
     context.receiptNs     = receiptNs > 0 ? receiptNs : 0;
     context.lockRequestNs = m_now();
     std::lock_guard<std::mutex> lock( m_cycleMutex );
-    context.lockAcquiredNs        = m_now();
+    context.lockAcquiredNs = m_now();
+    drainSimulationRelease( context.lockAcquiredNs );
     const volatile auto *metadata = shmimMonitorT::m_imageStream.md;
 
     if( !metadata || metadata->write != 0 )
@@ -1057,10 +1089,77 @@ inline void dmSyncopation::readSimulationPrimary( int64_t callbackNs, int64_t re
 inline void dmSyncopation::resetSimulation()
 {
     m_simulation.reset();
+    m_simulationReleaseEpoch.fetch_add( 1, std::memory_order_acq_rel );
     m_simulationPublication         = 0;
     m_simulationCounter             = 0;
     m_simulationCombinedPublication = m_simulationCombinedStart = m_simulationCombinedUpdate = 0;
     m_simulationCombinedCounter                                                              = 0;
+}
+
+inline void dmSyncopation::drainSimulationRelease( int64_t now )
+{
+    if( !m_simulationReaderReleaseReady )
+    {
+        return;
+    }
+
+    const auto synchronize = [this]()
+    {
+        const auto dropped = m_simulationReleaseQueue.dropped();
+
+        if( dropped != m_simulationReleaseSeenDrops )
+        {
+            m_simulation.releaseDrop( dropped - m_simulationReleaseSeenDrops );
+            m_simulationReleaseSeenDrops = dropped;
+            m_simulationReleaseEpoch.fetch_add( 1, std::memory_order_acq_rel );
+        }
+
+        const auto epoch = m_simulationReleaseEpoch.load( std::memory_order_acquire );
+
+        if( epoch != m_simulationReleaseSeenEpoch )
+        {
+            m_simulation.resetRelease();
+            m_simulationReleaseSeenEpoch   = epoch;
+            m_simulationReleaseHavePending = false;
+        }
+    };
+
+    synchronize();
+    const auto available = std::min( m_simulationReleaseQueue.queued() + size_t( m_simulationReleaseHavePending ),
+                                     MagAOX::dmSyncoSimulation::readinessDrainCapacity );
+    size_t     handled   = 0;
+
+    while( handled < available )
+    {
+        if( !m_simulationReleaseHavePending )
+        {
+            if( !m_simulationReleaseQueue.pop( m_simulationReleasePending ) )
+            {
+                break;
+            }
+
+            m_simulationReleaseHavePending = true;
+        }
+
+        if( m_simulationReleasePending.sourceEpoch != m_simulationReleaseSeenEpoch )
+        {
+            ++handled;
+            m_simulationReleaseHavePending = false;
+            continue;
+        }
+
+        if( m_simulationReleasePending.observedNs > now )
+        {
+            break;
+        }
+
+        ++handled;
+        m_simulation.release( m_simulationReleasePending );
+        m_simulationReleaseHavePending = false;
+    }
+
+    // A reset/loss racing this bounded drain must revoke even evidence already consumed above.
+    synchronize();
 }
 
 inline void dmSyncopation::readSimulationCombined( int64_t callbackNs, int64_t receiptNs )
@@ -1070,7 +1169,8 @@ inline void dmSyncopation::readSimulationCombined( int64_t callbackNs, int64_t r
     context.receiptNs     = receiptNs > 0 ? receiptNs : 0;
     context.lockRequestNs = m_now();
     std::lock_guard<std::mutex> lock( m_cycleMutex );
-    context.lockAcquiredNs        = m_now();
+    context.lockAcquiredNs = m_now();
+    drainSimulationRelease( context.lockAcquiredNs );
     const auto          &image    = combinerMonitorT::m_imageStream;
     const volatile auto *metadata = image.md;
 
@@ -1203,6 +1303,30 @@ inline int dmSyncopation::setupSimulationINDI()
         {
             m_indiP_simulationSteps.add( pcf::IndiElement( "step" + std::to_string( step ) + suffix ) );
         }
+
+        if( m_simulationReaderReleaseReady )
+        {
+            for( const auto *suffix : { "ReleaseMissing", "ReleaseLate", "BackendBusy", "BackendWrap" } )
+            {
+                m_indiP_simulationSteps.add( pcf::IndiElement( "step" + std::to_string( step ) + suffix ) );
+            }
+        }
+    }
+
+    if( m_simulationReaderReleaseReady )
+    {
+        REG_INDI_NEWPROP_NOCB( m_indiP_simulationReadiness, "simulation_readiness", pcf::IndiProperty::Number );
+        m_indiP_simulationReadiness.setPerm( pcf::IndiProperty::ReadOnly );
+
+        for( const auto *name :
+             { "enabled",        "virtualReaderUs", "backendUs",        "readerCycleFeasible", "backendCycleFeasible",
+               "observed",       "qualified",       "invalid",          "incoherent",          "duplicates",
+               "gaps",           "sourceResets",    "identityMismatch", "sdkFailed",           "queueDrops",
+               "queued",         "sourceEpoch",     "releaseSession",   "releaseEpoch",        "releaseSequence",
+               "releaseCounter", "releaseAgeSec" } )
+        {
+            m_indiP_simulationReadiness.add( pcf::IndiElement( name ) );
+        }
     }
 
     REG_INDI_NEWPROP_NOCB( m_indiP_simulationStatus, "simulation_status", pcf::IndiProperty::Text );
@@ -1326,15 +1450,71 @@ inline void dmSyncopation::updateSimulationINDI()
                          double( outcome.wouldRun ),
                          double( outcome.skipped ),
                          double( outcome.overlap ) } );
+
+        if( m_simulationReaderReleaseReady )
+        {
+            for( const auto *suffix : { "ReleaseMissing", "ReleaseLate", "BackendBusy", "BackendWrap" } )
+            {
+                names.push_back( "step" + std::to_string( step ) + suffix );
+            }
+
+            values.insert( values.end(),
+                           { double( outcome.releaseMissing ),
+                             double( outcome.releaseLate ),
+                             double( outcome.backendBusy ),
+                             double( outcome.backendWrap ) } );
+        }
     }
 
     updateIfChanged( m_indiP_simulationSteps, names, values, state );
-    updateIfChanged(
-        m_indiP_simulationStatus,
-        "state",
-        std::string( !s.valid ? "warming or stale" : ( s.feasible ? "conditional grid ready" : "infeasible" ) ) );
-    updateIfChanged(
-        m_indiP_simulationStatus, "policy", std::string( "shadow only; timing bounds assumed; reserve undecided" ) );
+
+    if( m_simulationReaderReleaseReady )
+    {
+        const auto &quality = s.readiness;
+        const auto &release = s.latestRelease;
+        updateIfChanged<double>(
+            m_indiP_simulationReadiness,
+            { "enabled",        "virtualReaderUs", "backendUs",        "readerCycleFeasible", "backendCycleFeasible",
+              "observed",       "qualified",       "invalid",          "incoherent",          "duplicates",
+              "gaps",           "sourceResets",    "identityMismatch", "sdkFailed",           "queueDrops",
+              "queued",         "sourceEpoch",     "releaseSession",   "releaseEpoch",        "releaseSequence",
+              "releaseCounter", "releaseAgeSec" },
+            { 1.0,
+              s.virtualReaderNs / 1000.0,
+              s.backendNs / 1000.0,
+              s.readerCycleFeasible ? 1.0 : 0.0,
+              s.backendCycleFeasible ? 1.0 : 0.0,
+              double( quality.observed ),
+              double( quality.qualified ),
+              double( quality.invalid ),
+              double( quality.incoherent ),
+              double( quality.duplicates ),
+              double( quality.gaps ),
+              double( quality.sourceResets ),
+              double( quality.identityMismatch ),
+              double( quality.sdkFailed ),
+              double( quality.queueDrops ),
+              double( m_simulationReleaseQueued ),
+              double( release.sourceEpoch ),
+              double( release.record.session ),
+              double( release.record.epoch ),
+              double( release.record.sequence ),
+              double( release.record.inputCounter ),
+              release.observedNs > 0 && s.nowNs >= release.observedNs ? ( s.nowNs - release.observedNs ) / 1e9 : -1.0 },
+            state );
+    }
+    updateIfChanged( m_indiP_simulationStatus,
+                     "state",
+                     std::string( !s.valid ? "warming or stale"
+                                           : ( s.feasible ? "conditional grid ready"
+                                                          : ( s.readerReleaseReady && s.readerCycleFeasible
+                                                                  ? "conditional slots; backend bound limits full cycle"
+                                                                  : "infeasible" ) ) ) );
+    updateIfChanged( m_indiP_simulationStatus,
+                     "policy",
+                     std::string( s.readerReleaseReady
+                                      ? "shadow release gate; virtual readers/backend assumed; reserve undecided"
+                                      : "shadow only; timing bounds assumed; reserve undecided" ) );
     const auto &trace = m_simulationTraceStatus;
     updateIfChanged(
         m_indiP_simulationTrace,
@@ -2293,11 +2473,19 @@ inline int dmSyncopation::processImage( void *source, const syncoReaderReleaseT 
     static_cast<void>( source );
     static_cast<void>( tag );
     MagAOX::dmReaderTiming::Completed event;
-    event.receiptNs      = m_readerReleaseReceiptNs;
-    const auto &image    = readerReleaseMonitorT::m_imageStream;
-    const bool  coherent = dev::dmCompletion::read( &image, event.record );
-    event.observedNs     = m_now();
+    const auto                        sourceEpoch = m_simulationReleaseEpoch.load( std::memory_order_acquire );
+    event.receiptNs                               = m_readerReleaseReceiptNs;
+    const auto &image                             = readerReleaseMonitorT::m_imageStream;
+    const bool  coherent                          = dev::dmCompletion::read( &image, event.record );
+    event.observedNs                              = m_now();
     m_readerReleaseTiming.completion( event, coherent && m_readerReleaseReceiptNs > 0 );
+
+    if( m_simulationReaderReleaseReady )
+    {
+        m_simulationReleaseQueue.push(
+            { event.record, event.observedNs, sourceEpoch, coherent && m_readerReleaseReceiptNs > 0 } );
+    }
+
     m_readerReleaseReceiptNs = -1;
     return 0;
 }
@@ -2308,6 +2496,7 @@ inline void dmSyncopation::shmimMonitorTiming( const syncoReaderReleaseT &tag, d
 
     if( event == dev::shmimMonitorEvent::connected || event == dev::shmimMonitorEvent::disconnected )
     {
+        m_simulationReleaseEpoch.fetch_add( 1, std::memory_order_acq_rel );
         m_readerReleaseReceiptNs = -1;
         m_readerReleaseTiming.resetCompletion();
     }
@@ -2323,6 +2512,13 @@ inline void dmSyncopation::shmimMonitorTiming( const syncoReaderReleaseT &tag, d
     {
         MagAOX::dmReaderTiming::Completed rejected;
         rejected.observedNs = m_now();
+        if( m_simulationReaderReleaseReady )
+        {
+            m_simulationReleaseQueue.push( { rejected.record,
+                                             rejected.observedNs,
+                                             m_simulationReleaseEpoch.load( std::memory_order_acquire ),
+                                             false } );
+        }
         m_readerReleaseTiming.completion( rejected, false );
         m_readerReleaseReceiptNs = -1;
     }
@@ -3395,6 +3591,7 @@ inline int dmSyncopation::appStartup()
         m_readerReleaseTiming.configure( readerReleaseMonitorT::m_shmimName.empty() ? 0 : m_primaryCadenceWindow,
                                          m_primaryCadenceMaxEvents,
                                          MagAOX::dmCompletion::Kind::readers );
+        m_simulationReleaseQueue.configure( m_simulationReaderReleaseReady ? m_primaryCadenceMaxEvents : 0 );
     }
     catch( const std::exception &error )
     {
@@ -3583,8 +3780,12 @@ inline int dmSyncopation::appLogic()
             if( m_simulationEnabled )
             {
                 updateSimulationCadence();
-                m_simulation.advance( m_now() );
-                m_simulationSnapshot        = m_simulation.summary();
+                const auto evaluatedAt = m_now();
+                drainSimulationRelease( evaluatedAt );
+                m_simulation.advance( evaluatedAt );
+                m_simulationSnapshot = m_simulation.summary();
+                m_simulationReleaseQueued =
+                    m_simulationReleaseQueue.queued() + size_t( m_simulationReleaseHavePending );
                 m_simulationTraceStatus     = m_simulation.traceStatus();
                 m_simulationEstimatorStatus = m_simulation.estimatorStatus();
                 m_reason = m_simulationSnapshot.valid ? "simulation observing" : "simulation warming or stale";
@@ -3792,7 +3993,8 @@ inline int dmSyncopation::recordTelem( const telem_dmsynco *record )
 
         if( lock.owns_lock() && m_simulationEnabled )
         {
-            m_simulationSnapshot = m_simulation.summary();
+            m_simulationSnapshot      = m_simulation.summary();
+            m_simulationReleaseQueued = m_simulationReleaseQueue.queued() + size_t( m_simulationReleaseHavePending );
 
             while( trace.count < trace.events.size() && m_simulation.popOverlap( trace.events[trace.count] ) )
             {

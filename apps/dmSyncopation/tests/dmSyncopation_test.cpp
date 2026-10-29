@@ -86,6 +86,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::configureSimulation;
     using dmSyncopation::consume;
     using dmSyncopation::copyBatch;
+    using dmSyncopation::drainSimulationRelease;
     using dmSyncopation::executeStep;
     using dmSyncopation::Fault;
     using dmSyncopation::m_advances;
@@ -186,6 +187,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_resources;
     using dmSyncopation::m_scheduleState;
     using dmSyncopation::m_simulation;
+    using dmSyncopation::m_simulationBackendUs;
     using dmSyncopation::m_simulationCadenceUpdateSec;
     using dmSyncopation::m_simulationCadenceWindowSec;
     using dmSyncopation::m_simulationCameraTime;
@@ -194,10 +196,14 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_simulationEstimatorStatus;
     using dmSyncopation::m_simulationPhaseGain;
     using dmSyncopation::m_simulationPhaseSlewUs;
+    using dmSyncopation::m_simulationReaderReleaseReady;
     using dmSyncopation::m_simulationReferenceFps;
+    using dmSyncopation::m_simulationReleaseEpoch;
+    using dmSyncopation::m_simulationReleaseQueue;
     using dmSyncopation::m_simulationSnapshot;
     using dmSyncopation::m_simulationTraceLogFailed;
     using dmSyncopation::m_simulationTraceStatus;
+    using dmSyncopation::m_simulationVirtualReaderUs;
     using dmSyncopation::m_simulationWindow;
     using dmSyncopation::m_submission;
     using dmSyncopation::m_timing;
@@ -1109,6 +1115,56 @@ void completionObservation(
     app.shmimMonitorTiming( syncoCompletionT{},
                             initial ? dev::shmimMonitorEvent::initial : dev::shmimMonitorEvent::receipt );
     REQUIRE( app.processImage( nullptr, syncoCompletionT{} ) == 0 );
+}
+
+/// Warm the signal-aware shadow policy using real metadata callbacks and a bounded raw-release handoff.
+int64_t prepareReleaseReadiness( Harness &app /**< [in,out] Isolated shadow policy and observer. */,
+                                 Streams &streams /**< [in,out] Fixture-owned primary and combined images. */,
+                                 size_t   capacity = 64 /**< [in] Raw observer handoff capacity. */ )
+{
+    app.attachPrimaryOnly();
+    app.m_simulationEnabled            = true;
+    app.m_simulationReaderReleaseReady = true;
+    app.m_simulationWindow             = 4;
+    app.m_requested                    = 2;
+    app.m_now                          = CadenceClock::now;
+    app.m_wait                         = CadenceClock::wait;
+    app.m_primaryCadence.configure( 2, 64 );
+    app.m_combinerCadence.configure( 2, 64 );
+    app.m_readerReleaseTiming.configure( 2, std::max<size_t>( 64, capacity ), MagAOX::dmCompletion::Kind::readers );
+    app.m_simulationReleaseQueue.configure( capacity );
+    app.attachReaderReleaseOnly();
+    REQUIRE( app.configureSimulation() );
+    REQUIRE( app.allocate( dev::shmimT{} ) == 0 );
+    app.attachCombinedOnly();
+    app.shmimMonitorTiming( dev::shmimT{}, dev::shmimMonitorEvent::connected );
+    app.shmimMonitorTiming( syncoCombinerT{}, dev::shmimMonitorEvent::connected );
+    constexpr int64_t external = 1792000000000000000LL;
+
+    for( uint64_t sample = 0; sample < 40; ++sample )
+    {
+        const auto observed = 1000000000LL + int64_t( sample ) * 500000;
+        cadenceObservation( app, observed, external + int64_t( sample ) * 500000, sample + 10 );
+        combinedObservation(
+            app, streams.images[1], observed + 20000, external + int64_t( sample ) * 500000, sample + 10 );
+    }
+
+    REQUIRE( app.m_simulation.summary().valid );
+    REQUIRE( app.m_simulation.summary().readerReleaseReady );
+    return app.m_simulation.summary().lastMainNs;
+}
+
+/// Queue an early-release record through the genuine observer hook without draining ordinary timing summaries.
+void releaseReadinessObservation(
+    Harness                            &app /**< [in,out] Isolated observer and signal-aware shadow policy. */,
+    CompletionStream                   &stream /**< [in,out] Private early-release record transport. */,
+    const MagAOX::dmCompletion::Record &record /**< [in] Exact endpoint evidence captured by the callback. */,
+    int64_t                             observed /**< [in] Monotonic coherent record-capture time. */ )
+{
+    stream.store( record );
+    CadenceClock::time = observed;
+    app.shmimMonitorTiming( syncoReaderReleaseT{}, dev::shmimMonitorEvent::receipt );
+    REQUIRE( app.processImage( nullptr, syncoReaderReleaseT{} ) == 0 );
 }
 
 /// Serialize the full public simulation state to detect any completion-observer scheduling mutation.
@@ -5703,6 +5759,475 @@ TEST_CASE( "syncopation completion observer scheduling overrides remain independ
     dmSyncopation::loadConfigImpl;
 #endif
     // clang-format on
+}
+
+/// Keep signal-qualified readiness opt-in, shadow-only and dependent on the independently configured early stream.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation signal readiness validates startup mode and explicit model budgets",
+           "[dmSyncopation][simulation][readiness]" )
+{
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::setupConfig;
+    dmSyncopation::loadConfigImpl;
+    dmSyncopation::configureSimulation;
+#endif
+    // clang-format on
+
+    const bool simulation = GENERATE( false, true );
+    const bool readiness  = GENERATE( false, true );
+    const bool observer   = GENERATE( false, true );
+    Harness    app;
+    app.setupConfig();
+    CHECK_FALSE( app.m_simulationReaderReleaseReady );
+    CHECK( app.m_simulationVirtualReaderUs == 30 );
+    CHECK( app.m_simulationBackendUs == 155 );
+    const auto bounds     = app.m_bounds;
+    char       path[]     = "/tmp/synco-readiness-config-XXXXXX";
+    const int  descriptor = mkstemp( path );
+    REQUIRE( descriptor >= 0 );
+    ::close( descriptor );
+
+    {
+        std::ofstream settings( path );
+        settings << "[simulation]\nenabled=" << ( simulation ? "true" : "false" )
+                 << "\nreaderReleaseReady=" << ( readiness ? "true" : "false" )
+                 << "\nvirtualReaderUs=30\nbackendUs=155\n";
+
+        if( observer )
+        {
+            settings << "[readerReleaseMonitor]\nshmimName=early_read_done\n";
+        }
+    }
+
+    app.config.readConfig( path );
+    std::remove( path );
+    const auto result = app.loadConfigImpl( app.config );
+    const bool valid  = ( !observer || simulation ) && ( !readiness || ( simulation && observer ) );
+    CHECK( ( result == 0 ) == valid );
+
+    if( valid )
+    {
+        REQUIRE( app.configureSimulation() );
+        CHECK( app.m_simulation.summary().readerReleaseReady == readiness );
+        CHECK( app.m_simulation.summary().virtualReaderNs == 30000 );
+        CHECK( app.m_simulation.summary().backendNs == 155000 );
+
+        if( readiness )
+        {
+            CHECK( app.m_simulation.summary().steps == 3 );
+            CHECK_FALSE( synco::feasible( app.m_simulation.summary().periodNs, 3, bounds ) );
+        }
+
+        CHECK( app.m_bounds.keepout == bounds.keepout );
+        CHECK( app.m_bounds.guard == bounds.guard );
+        CHECK( app.m_bounds.delivery == bounds.delivery );
+        CHECK( app.m_bounds.copy == bounds.copy );
+        CHECK( app.m_bounds.snapshot == bounds.snapshot );
+        CHECK_FALSE( app.m_enabled );
+        CHECK_FALSE( app.m_resources );
+    }
+}
+
+/// Reject unusable simulation assumptions before any worker or channel attachment starts.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation signal readiness rejects nonpositive or nonfinite assumptions",
+           "[dmSyncopation][simulation][readiness]" )
+{
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::loadConfigImpl;
+#endif
+    // clang-format on
+
+    const std::string setting = GENERATE( std::string( "virtualReaderUs" ), std::string( "backendUs" ) );
+    const std::string value =
+        GENERATE( std::string( "-1" ), std::string( "0" ), std::string( "nan" ), std::string( "inf" ) );
+    Harness app;
+    app.setupConfig();
+    char      path[]     = "/tmp/synco-readiness-budget-XXXXXX";
+    const int descriptor = mkstemp( path );
+    REQUIRE( descriptor >= 0 );
+    ::close( descriptor );
+
+    {
+        std::ofstream settings( path );
+        settings << "[simulation]\nenabled=true\nreaderReleaseReady=true\n"
+                 << setting << '=' << value << "\n[readerReleaseMonitor]\nshmimName=early_read_done\n";
+    }
+
+    app.config.readConfig( path );
+    std::remove( path );
+    CHECK( app.loadConfigImpl( app.config ) < 0 );
+    CHECK_FALSE( app.m_resources );
+    CHECK_FALSE( app.m_enabled );
+}
+
+/// Use raw coherent-capture availability rather than producer finish time or an ordinary timing summary.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation readiness handoff cannot backdate a release to its producer endpoint",
+           "[dmSyncopation][simulation][readiness]" )
+{
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::processImage( nullptr, syncoReaderReleaseT{} );
+    dmSyncopation::shmimMonitorTiming( syncoReaderReleaseT{}, dev::shmimMonitorEvent::receipt );
+    dmSyncopation::drainSimulationRelease;
+#endif
+    // clang-format on
+
+    Streams          streams;
+    CompletionStream release;
+    Harness          app;
+    const auto       main  = prepareReleaseReadiness( app, streams );
+    const auto       start = app.m_simulation.summary().nextActiveNs - app.m_bounds.copy;
+    REQUIRE( start > main + 40000 );
+    const bool late   = GENERATE( false, true );
+    auto       record = readerCompletion( streams.images[1], 1, main + 21000, main + 40000 );
+    record.kind       = MagAOX::dmCompletion::Kind::readers;
+    record.state      = MagAOX::dmCompletion::State::released;
+    record.outcome    = MagAOX::dmTiming::Outcome::unknown;
+    const auto before = app.m_simulation.summary().outcomes[1];
+    releaseReadinessObservation( app, release, record, start + ( late ? 5000 : -app.m_bounds.guard - 5000 ) );
+    REQUIRE( app.m_simulationReleaseQueue.queued() == 1 );
+    CHECK( app.m_readerReleaseTiming.summary().total.events == 0 );
+    CHECK( app.m_simulation.summary().outcomes[1].wouldRun == before.wouldRun );
+
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( app.m_cycleMutex );
+        app.drainSimulationRelease( start + 1 );
+        app.m_simulation.advance( start + 1 );
+    }
+
+    const auto after = app.m_simulation.summary().outcomes[1];
+    CHECK( app.m_readerReleaseTiming.summary().total.events == 0 );
+    CHECK( after.wouldRun == before.wouldRun + ( late ? 0 : 1 ) );
+    CHECK( after.skipped == before.skipped + ( late ? 1 : 0 ) );
+    CHECK_FALSE( app.m_enabled );
+    CHECK_FALSE( app.m_resources );
+    CHECK( app.m_delivered == 0 );
+
+    if( late )
+    {
+        { //mutex scope
+            std::lock_guard<std::mutex> lock( app.m_cycleMutex );
+            app.drainSimulationRelease( start + 10000 );
+            app.m_simulation.advance( start + 10000 );
+        }
+
+        CHECK( app.m_simulation.summary().outcomes[1].wouldRun == after.wouldRun );
+        CHECK( app.m_simulation.summary().outcomes[1].skipped == after.skipped );
+    }
+}
+
+/// Drain genuine readiness before either callback advances past a previously committed fixed copy decision.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation primary and combined callbacks consume readiness before evaluating slots",
+           "[dmSyncopation][simulation][readiness]" )
+{
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::processImage( nullptr, dev::shmimT{} );
+    dmSyncopation::processImage( nullptr, syncoCombinerT{} );
+    dmSyncopation::drainSimulationRelease;
+#endif
+    // clang-format on
+
+    Streams          streams;
+    CompletionStream release;
+    Harness          app;
+    const auto       main   = prepareReleaseReadiness( app, streams );
+    auto             record = readerCompletion( streams.images[1], 1, main + 21000, main + 40000 );
+    record.kind             = MagAOX::dmCompletion::Kind::readers;
+    record.state            = MagAOX::dmCompletion::State::released;
+    record.outcome          = MagAOX::dmTiming::Outcome::unknown;
+    const auto before       = app.m_simulation.summary().outcomes[1];
+    releaseReadinessObservation( app, release, record, main + 45000 );
+    REQUIRE( app.m_simulationReleaseQueue.queued() == 1 );
+    const bool primary = GENERATE( false, true );
+
+    if( primary )
+    {
+        const auto *metadata = streams.images[0].md;
+        const auto  stamp    = int64_t( metadata->writetime.tv_sec ) * 1000000000 + metadata->writetime.tv_nsec;
+        cadenceObservation( app, main + 500000, stamp + 500000, metadata->cnt0 + 1 );
+    }
+    else
+    {
+        CadenceClock::time = main + 300000;
+        app.shmimMonitorTiming( syncoCombinerT{}, dev::shmimMonitorEvent::receipt );
+        REQUIRE( app.processImage( nullptr, syncoCombinerT{} ) == 0 );
+    }
+
+    CHECK( app.m_simulationReleaseQueue.queued() == 0 );
+    CHECK( app.m_simulation.summary().outcomes[1].wouldRun == before.wouldRun + 1 );
+    CHECK( app.m_simulation.summary().outcomes[1].skipped == before.skipped );
+    CHECK( app.m_readerReleaseTiming.summary().total.events == 0 );
+    CHECK_FALSE( app.m_enabled );
+    CHECK_FALSE( app.m_resources );
+    CHECK( app.m_delivered == 0 );
+}
+
+/// Enqueue readiness on the realtime observer without waiting for the serial model owner or running its joins.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation raw readiness callback never waits for the simulation mutex",
+           "[dmSyncopation][simulation][readiness]" )
+{
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::processImage( nullptr, syncoReaderReleaseT{} );
+#endif
+    // clang-format on
+
+    Streams          streams;
+    CompletionStream release;
+    Harness          app;
+    const auto       main   = prepareReleaseReadiness( app, streams );
+    auto             record = readerCompletion( streams.images[1], 1, main + 21000, main + 40000 );
+    record.kind             = MagAOX::dmCompletion::Kind::readers;
+    record.state            = MagAOX::dmCompletion::State::released;
+    record.outcome          = MagAOX::dmTiming::Outcome::unknown;
+    release.store( record );
+    CadenceClock::time = main + 45000;
+    app.shmimMonitorTiming( syncoReaderReleaseT{}, dev::shmimMonitorEvent::receipt );
+    const auto                   before = app.m_simulation.summary().sequence;
+    std::unique_lock<std::mutex> cycle( app.m_cycleMutex );
+    auto                         callback  = std::async( std::launch::async,
+                                [&]()
+                                {
+                                    return app.processImage( nullptr, syncoReaderReleaseT{} );
+                                } );
+    const auto                   readiness = callback.wait_for( std::chrono::milliseconds( 500 ) );
+    cycle.unlock();
+    CHECK( callback.get() == 0 );
+    CHECK( readiness == std::future_status::ready );
+    CHECK( app.m_simulationReleaseQueue.queued() == 1 );
+    CHECK( app.m_simulation.summary().sequence == before );
+    CHECK( app.m_readerReleaseTiming.summary().total.events == 0 );
+}
+
+/// Revoke a queued or retained clearance as soon as its observer attachment generation changes.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation readiness source reset fences queued and retained releases",
+           "[dmSyncopation][simulation][readiness]" )
+{
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::shmimMonitorTiming( syncoReaderReleaseT{}, dev::shmimMonitorEvent::disconnected );
+    dmSyncopation::drainSimulationRelease;
+#endif
+    // clang-format on
+
+    Streams          streams;
+    CompletionStream release;
+    Harness          app;
+    const auto       main   = prepareReleaseReadiness( app, streams );
+    const auto       start  = app.m_simulation.summary().nextActiveNs - app.m_bounds.copy;
+    auto             record = readerCompletion( streams.images[1], 1, main + 21000, main + 40000 );
+    record.kind             = MagAOX::dmCompletion::Kind::readers;
+    record.state            = MagAOX::dmCompletion::State::released;
+    record.outcome          = MagAOX::dmTiming::Outcome::unknown;
+    const auto before       = app.m_simulation.summary().outcomes[1];
+    releaseReadinessObservation( app, release, record, main + 45000 );
+    const bool retained = GENERATE( false, true );
+
+    if( retained )
+    {
+        { //mutex scope
+            std::lock_guard<std::mutex> lock( app.m_cycleMutex );
+            app.drainSimulationRelease( main + 50000 );
+        }
+    }
+
+    const auto epoch = app.m_simulationReleaseEpoch.load();
+    app.shmimMonitorTiming( syncoReaderReleaseT{}, dev::shmimMonitorEvent::disconnected );
+    CHECK( app.m_simulationReleaseEpoch.load() > epoch );
+
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( app.m_cycleMutex );
+        app.drainSimulationRelease( start + 1 );
+        app.m_simulation.advance( start + 1 );
+    }
+
+    CHECK( app.m_simulation.summary().outcomes[1].wouldRun == before.wouldRun );
+    CHECK( app.m_simulation.summary().outcomes[1].skipped == before.skipped + 1 );
+    CHECK_FALSE( app.m_enabled );
+    CHECK_FALSE( app.m_resources );
+}
+
+/// Close the conditional copy gate after loss in its raw handoff instead of trusting the preceding release.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation readiness queue overflow fails closed before a fixed copy decision",
+           "[dmSyncopation][simulation][readiness]" )
+{
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::processImage( nullptr, syncoReaderReleaseT{} );
+    dmSyncopation::drainSimulationRelease;
+#endif
+    // clang-format on
+
+    Streams          streams;
+    CompletionStream release;
+    Harness          app;
+    const auto       main   = prepareReleaseReadiness( app, streams, 1 );
+    const auto       start  = app.m_simulation.summary().nextActiveNs - app.m_bounds.copy;
+    auto             record = readerCompletion( streams.images[1], 1, main + 21000, main + 40000 );
+    record.kind             = MagAOX::dmCompletion::Kind::readers;
+    record.state            = MagAOX::dmCompletion::State::released;
+    record.outcome          = MagAOX::dmTiming::Outcome::unknown;
+    const auto before       = app.m_simulation.summary().outcomes[1];
+    releaseReadinessObservation( app, release, record, main + 45000 );
+    record.outcome       = MagAOX::dmTiming::Outcome::success;
+    record.backendResult = 0;
+    releaseReadinessObservation( app, release, record, main + 150000 );
+    REQUIRE( app.m_simulationReleaseQueue.dropped() == 1 );
+
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( app.m_cycleMutex );
+        app.drainSimulationRelease( start + 1 );
+        app.m_simulation.advance( start + 1 );
+    }
+
+    CHECK( app.m_simulation.summary().outcomes[1].wouldRun == before.wouldRun );
+    CHECK( app.m_simulation.summary().outcomes[1].skipped == before.skipped + 1 );
+    CHECK_FALSE( app.m_enabled );
+    CHECK_FALSE( app.m_resources );
+    CHECK( app.m_delivered == 0 );
+}
+
+/// Carry rejected observer evidence through the raw handoff so prior clearance cannot survive an unusable update.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation readiness revokes clearance on rejected observer evidence",
+           "[dmSyncopation][simulation][readiness]" )
+{
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::processImage( nullptr, syncoReaderReleaseT{} );
+    dmSyncopation::shmimMonitorTiming( syncoReaderReleaseT{}, dev::shmimMonitorEvent::initial );
+    dmSyncopation::drainSimulationRelease;
+#endif
+    // clang-format on
+
+    Streams          streams;
+    CompletionStream release;
+    Harness          app;
+    const auto       main   = prepareReleaseReadiness( app, streams );
+    const auto       start  = app.m_simulation.summary().nextActiveNs - app.m_bounds.copy;
+    auto             record = readerCompletion( streams.images[1], 1, main + 21000, main + 40000 );
+    record.kind             = MagAOX::dmCompletion::Kind::readers;
+    record.state            = MagAOX::dmCompletion::State::released;
+    record.outcome          = MagAOX::dmTiming::Outcome::unknown;
+    const auto before       = app.m_simulation.summary().outcomes[1];
+    releaseReadinessObservation( app, release, record, main + 45000 );
+
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( app.m_cycleMutex );
+        app.drainSimulationRelease( main + 50000 );
+    }
+
+    REQUIRE( app.m_simulation.summary().readiness.qualified == 1 );
+    const int variant = GENERATE( 0, 1, 2 );
+    CAPTURE( variant );
+
+    if( variant == 2 )
+    {
+        ++record.sequence;
+        record.state      = MagAOX::dmCompletion::State::busy;
+        record.finishedNs = 0;
+    }
+
+    release.store( record );
+
+    if( variant == 1 )
+    {
+        release.m_image.md->write = 1;
+    }
+
+    CadenceClock::time = main + 60000;
+    app.shmimMonitorTiming( syncoReaderReleaseT{},
+                            variant == 0 ? dev::shmimMonitorEvent::initial : dev::shmimMonitorEvent::receipt );
+    REQUIRE( app.processImage( nullptr, syncoReaderReleaseT{} ) == 0 );
+    release.m_image.md->write = 0;
+    REQUIRE( app.m_simulationReleaseQueue.queued() == 1 );
+
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( app.m_cycleMutex );
+        app.drainSimulationRelease( start + 1 );
+        app.m_simulation.advance( start + 1 );
+    }
+
+    CHECK( app.m_simulation.summary().outcomes[1].wouldRun == before.wouldRun );
+    CHECK( app.m_simulation.summary().outcomes[1].skipped == before.skipped + 1 );
+    CHECK( app.m_readerReleaseTiming.summary().total.events == 0 );
+    CHECK_FALSE( app.m_enabled );
+    CHECK_FALSE( app.m_resources );
+}
+
+/// Bound each raw handoff drain independently of queue capacity and retain the undispatched backlog.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation readiness drains only one fixed raw event batch", "[dmSyncopation][simulation][readiness]" )
+{
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::processImage( nullptr, syncoReaderReleaseT{} );
+    dmSyncopation::drainSimulationRelease;
+#endif
+    // clang-format on
+
+    constexpr size_t batch = MagAOX::dmSyncoSimulation::readinessDrainCapacity;
+    constexpr size_t count = batch + batch / 2;
+    Streams          streams;
+    CompletionStream release;
+    Harness          app;
+    const auto       main   = prepareReleaseReadiness( app, streams, count );
+    auto             record = readerCompletion( streams.images[1], 1, main + 21000, main + 40000 );
+    record.kind             = MagAOX::dmCompletion::Kind::readers;
+    record.state            = MagAOX::dmCompletion::State::released;
+    record.outcome          = MagAOX::dmTiming::Outcome::unknown;
+    const auto before       = app.m_simulation.summary().readiness.observed;
+    const bool pending      = GENERATE( false, true );
+
+    if( pending )
+    {
+        releaseReadinessObservation( app, release, record, main + 45000 );
+
+        { //mutex scope
+            std::lock_guard<std::mutex> lock( app.m_cycleMutex );
+            app.drainSimulationRelease( main + 44000 );
+        }
+
+        CHECK( app.m_simulationReleaseQueue.queued() == 0 );
+        CHECK( app.m_simulation.summary().readiness.observed == before );
+    }
+
+    for( size_t index = pending ? 1 : 0; index < count; ++index )
+    {
+        releaseReadinessObservation( app, release, record, main + 45000 + int64_t( index ) * 100 );
+    }
+
+    REQUIRE( app.m_simulationReleaseQueue.queued() == count - size_t( pending ) );
+    REQUIRE( app.m_simulationReleaseQueue.dropped() == 0 );
+
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( app.m_cycleMutex );
+        app.drainSimulationRelease( main + 100000 );
+    }
+
+    CHECK( app.m_simulation.summary().readiness.observed == before + batch );
+    CHECK( app.m_simulationReleaseQueue.queued() == count - batch );
+    CHECK( app.m_readerReleaseTiming.summary().total.events == 0 );
+
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( app.m_cycleMutex );
+        app.drainSimulationRelease( main + 100000 );
+    }
+
+    CHECK( app.m_simulation.summary().readiness.observed == before + count );
+    CHECK( app.m_simulationReleaseQueue.queued() == 0 );
+    CHECK( app.m_simulationReleaseQueue.dropped() == 0 );
+    CHECK_FALSE( app.m_enabled );
+    CHECK_FALSE( app.m_resources );
 }
 
 } // namespace dmSyncopationTest

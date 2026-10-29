@@ -8,6 +8,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "dmCompletion.hpp"
+
 namespace MagAOX
 {
 namespace dmSyncoSimulation
@@ -30,6 +32,8 @@ constexpr size_t estimatorBatchCapacity = 512; ///< Maximum estimator samples in
 constexpr uint64_t periodScale = uint64_t( 1 ) << 32; ///< Exact binary scale for fractional nanoseconds per cycle.
 
 constexpr size_t cadenceAnchorCapacity = 64; ///< Bounded approximately one-second counter/time anchors.
+
+constexpr size_t readinessDrainCapacity = 64; ///< Maximum early-release handoffs consumed per serialized cycle call.
 
 /// Qualification of the slow, monotonic counter/time cadence measurement.
 enum class CadenceState : uint8_t
@@ -67,7 +71,8 @@ enum class OverlapOrigin
 enum class OverlapWindow
 {
     copy       = 0,
-    readerHold = 1
+    readerHold = 1,
+    backend    = 2
 };
 
 /// Optional caller context; zero means unavailable and producer clocks are never treated as monotonic.
@@ -100,8 +105,8 @@ struct OverlapEvent
     int64_t       planFractionQ32{ 0 }; ///< Frozen target's signed fractional remainder after nanosecond rounding.
     int           step{ 0 };            ///< Index of the last modeled copy.
     OverlapOrigin origin{ OverlapOrigin::primary }; ///< Monitor path; repeated origins are deliberately retained.
-    OverlapWindow window{ OverlapWindow::copy };    ///< Copy or active-reader interval containing the evidence.
-    int64_t       observedNs{ 0 };                  ///< Same-host monotonic evidence time.
+    OverlapWindow window{ OverlapWindow::copy }; ///< Copy, active-reader or backend interval containing the evidence.
+    int64_t       observedNs{ 0 };               ///< Same-host monotonic evidence time.
     int64_t       mainGridNs{ 0 };   ///< Committed grid or extrapolation from the last frozen cycle; zero unavailable.
     int64_t       planGridNs{ 0 };   ///< Frozen main prediction for the last modeled copy's cycle.
     int64_t       periodNs{ 0 };     ///< Period frozen with that modeled copy's cycle.
@@ -111,6 +116,7 @@ struct OverlapEvent
     int64_t       lastMainNs{ 0 };   ///< Previous accepted primary observation on the monotonic clock.
     int64_t       lastOutputNs{ 0 }; ///< Latest associated combined observation on the monotonic clock.
     Observation   observation;       ///< Raw monitor/producer context supplied by the caller.
+    int64_t       backendEndNs{ 0 }; ///< Assumed active backend retirement; zero in legacy/passive events.
 };
 
 /// Process-lifetime FIFO accounting; detected equals drained plus dropped plus queued.
@@ -191,15 +197,43 @@ struct TraceBatch
 /// Counts for one step index; modeled copies and triggers never address a DM stream.
 struct Step
 {
-    uint64_t considered{ 0 };    ///< Committed occurrences evaluated once.
-    uint64_t wouldRun{ 0 };      ///< Occurrences eligible under the explicitly configured model bounds.
-    uint64_t skipped{ 0 };       ///< Occurrences unavailable before any modeled copy starts.
-    uint64_t earlyMain{ 0 };     ///< Passive preparations cancelled by an already observed main.
-    uint64_t missingMain{ 0 };   ///< Active slots without their genuine counter-labelled main.
-    uint64_t missingOutput{ 0 }; ///< Slots without a coherent main-to-combined association.
-    uint64_t readerHold{ 0 };    ///< Slots whose actual or modeled reader hold prevents the fixed target.
-    uint64_t expired{ 0 };       ///< Obsolete slots or unavailable future timing envelopes.
-    uint64_t overlap{ 0 };       ///< Observations that could overlap a modeled copy/reader interval.
+    uint64_t considered{ 0 };     ///< Committed occurrences evaluated once.
+    uint64_t wouldRun{ 0 };       ///< Occurrences eligible under the explicitly configured model bounds.
+    uint64_t skipped{ 0 };        ///< Occurrences unavailable before any modeled copy starts.
+    uint64_t earlyMain{ 0 };      ///< Passive preparations cancelled by an already observed main.
+    uint64_t missingMain{ 0 };    ///< Active slots without their genuine counter-labelled main.
+    uint64_t missingOutput{ 0 };  ///< Slots without a coherent main-to-combined association.
+    uint64_t readerHold{ 0 };     ///< Slots whose actual or modeled reader hold prevents the fixed target.
+    uint64_t expired{ 0 };        ///< Obsolete slots or unavailable future timing envelopes.
+    uint64_t overlap{ 0 };        ///< Observations that could overlap a modeled copy/reader interval.
+    uint64_t releaseMissing{ 0 }; ///< No exact qualified actual-main release was available at the copy deadline.
+    uint64_t releaseLate{ 0 };    ///< Exact actual-main release was captured after the fixed copy deadline.
+    uint64_t backendBusy{ 0 };    ///< Previous assumed backend ownership extends beyond this active trigger.
+    uint64_t backendWrap{ 0 };    ///< Candidate assumed backend ownership would extend into the next main reserve.
+};
+
+/// Coherent observer evidence; available time is capture, never the earlier publisher endpoint.
+struct Readiness
+{
+    MagAOX::dmCompletion::Record record; ///< Exact early-release identity and independent SDK outcome.
+    int64_t  observedNs{ 0 };            ///< Same-host monotonic time when the coherent record became available.
+    uint64_t sourceEpoch{ 0 };           ///< Monotonic app-owned attachment/drop fence; zero is unavailable.
+    bool     coherent{ true };           ///< False revokes readiness without supplying a release.
+};
+
+/// Readiness-source diagnostics, independent of physical or hypothetical command delivery.
+struct ReadinessQuality
+{
+    uint64_t observed{ 0 };         ///< Evidence events consumed, including rejected events.
+    uint64_t qualified{ 0 };        ///< Distinct exact release records retained.
+    uint64_t invalid{ 0 };          ///< Invalid time, identity, state or publisher progression.
+    uint64_t incoherent{ 0 };       ///< Observer captures explicitly failed consistency checks.
+    uint64_t duplicates{ 0 };       ///< Repeated or backward release sequences.
+    uint64_t gaps{ 0 };             ///< Missing release attempts inferred from sequence progression.
+    uint64_t sourceResets{ 0 };     ///< Source/producer epoch changes or explicit invalidations.
+    uint64_t identityMismatch{ 0 }; ///< Same sequence or combined counter carried contradictory raw identity.
+    uint64_t sdkFailed{ 0 };        ///< Explicit SDK failures that revoke readiness until recovery.
+    uint64_t queueDrops{ 0 };       ///< App-reported transport drops, counted exactly.
 };
 
 /// Coherent snapshot copied outside monitor callbacks for INDI and telemetry.
@@ -251,6 +285,13 @@ struct Summary
     uint64_t associations{ 0 };            ///< Coherent actual primary-to-combined observations accepted.
     std::array<Step, maxSteps> outcomes{}; ///< Current-session conditional outcomes indexed by step.
     Cadence                    cadence;    ///< Slow cadence qualification and separate observation/refresh timestamps.
+    bool    readerReleaseReady{ false };   ///< Actual main copy readiness uses observed early-release records.
+    int64_t virtualReaderNs{ 30000 }; ///< Assumed virtual auxiliary trigger-to-last-reader duration, not a measurement.
+    int64_t backendNs{ 155000 };      ///< Assumed actual-output/virtual-trigger-to-whole-backend-ready duration.
+    bool    readerCycleFeasible{ false };  ///< Nominal copy/read geometry can fit all requested slots.
+    bool    backendCycleFeasible{ false }; ///< Nominal backend occupancy can fit all slots and the early-main reserve.
+    Readiness        latestRelease; ///< Latest qualified release; cleared whenever its source evidence is revoked.
+    ReadinessQuality readiness;     ///< Current-session early-release source quality.
 };
 
 } // namespace dmSyncoSimulation
