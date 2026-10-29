@@ -89,3 +89,11 @@ Changes:
 - On this workstation, `make -C apps/dmPokeXCorr -j2` succeeded on this branch and left the tracked working tree clean. `git diff --check` for the three branch commits passed. These checks do not validate hardware timing.
 - The issue is resolved when repeated runs with a fixed positive amplitude produce the expected signed `m_pokeImage`, and captured transitions show which combined command and WFS frames contributed to each poke group. Document the tested rates, settle count, DM delay, and any remaining intermittent failures before opening a PR.
 - Rebase or merge current `dev` only after preserving a reproducible baseline; the changed header has not been touched on `dev` since the branch point, but the rest of the integration still needs validation.
+
+## 2026-10-29 PR checkpoint
+
+The operator reports no new sign flip since installing the current branch version. The automatic rejection and FITS capture are therefore available for the next event, but the latest detection path has not yet been observed catching a fresh inversion. The 2026-10-15 captured rejection predates the later low-correlation guard and combined-DM sign summary. The physical cause remains open; preserve this feature branch after the PR is merged so follow-up observations can be recorded here.
+
+The PR targets `dev` with the current synchronization, rejection, and diagnostic changes. At this checkpoint, `git merge-tree --write-tree origin/dev HEAD` succeeds without conflicts against `origin/dev` at `8ad54364`. The local `dmPokeXCorr` app builds with `COVERAGE=1`, matching coverage-instrumented libraries already present in this checkout; a normal link attempt failed on missing `__gcov_*` runtime symbols from those libraries, not on a source compile error. The targeted hardware-free test passes 13 assertions in three cases. Its `libgcov` warning concerns an existing profile-data checksum. `git diff --check origin/dev...HEAD` passes.
+
+The PR may merge the current safeguard without claiming that the sign-flip mechanism is fixed. At the next inverted event, retain the rejected FITS set and inspect `DMPLUS`, `DMMINUS`, `DMHALFDF`, `POKEAMP`, `XCNORM`, `INVNORM`, and the WFS and DM counters before changing the poke sign or timing. The operator will run any instrument-side checks and report the results.
