@@ -1114,7 +1114,7 @@ telemetry capture. Record the dmcomb trigger mode and AO gain with the result.
         synco_capture_pids+=( "$!" )
     done
 
-    for synco_device in dmtweeter-synco holoop camwfs sysMonRTC.set_latency.toggle
+    for synco_device in dmtweeter-synco dmtweeter holoop camwfs sysMonRTC.set_latency.toggle
     do
         if timeout -k 2s 8s getINDI "$synco_device" \
             > "$synco_capture_dir/$synco_device-indi-before.txt" \
@@ -1142,7 +1142,7 @@ telemetry capture. Record the dmcomb trigger mode and AO gain with the result.
             >> "$synco_capture_dir/status.txt"
     done
 
-    for synco_device in dmtweeter-synco sysMonRTC.set_latency.toggle
+    for synco_device in dmtweeter-synco dmtweeter sysMonRTC.set_latency.toggle
     do
         if timeout -k 2s 8s getINDI "$synco_device" \
             > "$synco_capture_dir/$synco_device-indi-after.txt" \
