@@ -833,6 +833,7 @@ INPUT                  = libMagAOX \
                          gui/widgets/coronAlign/tests/coronAlign_test.cpp \
                          gui/widgets/stage/stage.hpp \
                          gui/widgets/xWidgets/stageStatus.hpp \
+                         gui/widgets/xWidgets/stagePairStatus.hpp \
                          gui/widgets/xWidgets/statusCombo.hpp \
                          gui/lib/multiIndiPublisher.hpp \
                          gui/lib/tests/multiIndiPublisher_test.cpp \

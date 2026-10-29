@@ -61,8 +61,9 @@ and fake properties; no instrument client or hardware command was run.
   passed**. Together the two suites pass **6,354 assertions in 29 cases**.
 - Full changed-file documentation review and focused Doxygen generation passed.
   All seven new cases link to the paired selector's real APIs: 19 references
-  with HTML backlinks across seven APIs. All 225 production declarations/members
-  have briefs, and all 69 named parameters have inline documentation. There are
+  with HTML backlinks across seven APIs. The full-file audit, including hidden
+  test helpers, found briefs on all 266 declarations/members and documentation
+  for all 93 named parameters. There are
   no warnings naming changed source files; remaining focused-build diagnostics
   concern pre-existing configuration tags or references outside the input subset.
   Temporary documentation output is under `/tmp/camlens-doxygen`.
