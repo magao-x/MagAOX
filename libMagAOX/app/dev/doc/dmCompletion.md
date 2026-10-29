@@ -131,3 +131,56 @@ combined pixels and every input channel. Concurrent producer updates, including
 dmcomb paths that do not raise `write`, can defeat such an association. The signal
 reports the controller's observed software endpoint; use it with the cooperating
 system's ordering and protection rules.
+
+## Separate early reader release
+
+The optional last-read publisher uses a distinct protocol and stream. For the
+[BMC SDK worker](../../../../apps/bmcCtrl/doc/sdk-worker.md), it can release
+channel readers while `BMCSetArray()` remains in flight. Add to the controller:
+
+```ini
+[dm]
+readerReleaseStream=dmtweeter_read_done
+```
+
+This name defaults to empty and must differ from completion, command, channel
+and output streams. The early endpoint also works with a synchronous controller;
+there it follows the existing SDK and delta processing. It does not change the
+version-1 `completionStream` contract or any scheduling hold.
+
+The 16-word early record has magic **`0x4d414758444d5244`** and version 1.
+Common identity words retain their definitions above; differences are:
+
+| Word | Reader-release meaning |
+| --- | --- |
+| 5 | `released` (5) means qualified channel reads finished, independently of SDK outcome. Other applicable states remain unavailable, busy, error and unqualified. |
+| 11 | Frozen last-read endpoint in local monotonic nanoseconds. |
+| 12 | Actual backend outcome, initially unknown; updated after submission finalization. |
+| 13 | Reader/processing result at the last-read endpoint. A later SDK failure does not change it. |
+| 15 | Raw backend result, or `INT64_MIN` when unavailable. |
+
+Use `MagAOX::dmCompletion::readersQualified()` for early records; the existing
+`qualified()` predicate accepts only full-completion records. The helper's
+coherent `read()` decodes both distinct protocols. A released record can carry
+a failed SDK outcome and remain a truthful release of that attempt's input
+reads. It cannot authorize another hardware submission while the backend is busy.
+
+Begin updates the stream without posting. Release timestamps and posts the
+last-read result. Actual SDK outcome/code then enrich the same immutable job
+identity and endpoint and post another notification. A normal BMC command
+therefore produces three counter increments and two notifications: at 2 kHz,
+monitoring can show 6 kHz counter progression and 4 kHz semaphore posts.
+Notifications may coalesce or lead to repeated observations of the same enriched
+record. They do not represent multiple DM submissions.
+
+The later combined input may advance without changing the frozen release record.
+That advance can make the independent full-completion record unqualified;
+measure qualified release coverage independently of a full-completion peer.
+Consumers must still match the exact current command, reject stale/restarted
+publishers and protect against a newer callback already reading channels.
+
+When enabled, read-only `dm_reader_release` reports state, session, epoch,
+sequence, input inode/counter, processing microseconds, endpoint age seconds,
+backend outcome/result and release qualification. `dm_reader_release_stream`
+reports `name` and `meaning`. These properties appear independently of the
+full-completion properties; exact integer matching belongs to the shared record.

@@ -31,7 +31,7 @@ U  dmcomb writes input stream writetime and publishes combined command
      timing-event handoff, callback return, then next wait
 ```
 
-This ordering describes BMC/ALPAO. `A` follows the user-space wait return; queued
+This ordering describes synchronous BMC/ALPAO. `A` follows the user-space wait return; queued
 tokens can return immediately. `F` precedes timing-event handoff and final return.
 The saturation worker runs asynchronously and has no per-command completion
 measurement here. An initial existing-image callback has no `A`.
@@ -40,6 +40,13 @@ An optional [reader-completion publisher](dmCompletion.md) signals after the
 timing-event handoff, when the callback has finished all command-channel reads.
 It has its own stream and semaphores and remains independent of timing-event
 loss or disabled collection. It does not change these telemetry endpoints.
+
+With the optional [BMC SDK worker](../../../../apps/bmcCtrl/doc/sdk-worker.md),
+SDK execution overlaps private saturation/delta preparation. The monitor
+publishes a distinct last-read endpoint, waits for the matching SDK result,
+then publishes successful products and full completion. One monitor-owned
+event imports the worker's actual timestamps using causal ordering checks;
+the SDK worker never mutates the timing collector.
 
 | Stable metric name | Measurement |
 | --- | --- |
@@ -130,7 +137,7 @@ be useful while state is Idle.
 | Property | Elements and units |
 | --- | --- |
 | `dm_timing` | `receipt_fps`, `receipt_min`, `receipt_max`, `receipt_jitter`, `receipt_count`; `send_fps`, `send_min`, `send_max`, `send_jitter`, `send_count`; `receipt_send`, `receipt_send_jitter`, `receipt_send_min`, `receipt_send_max`, `receipt_send_count`. FPS is reciprocal mean interval; durations are seconds. |
-| `dm_timing_stages` | Ten names `dispatch`, `actuator`, `sdk`, `saturation`, `delta`, `post`, `throughDelta`, `callback`, `receiptCallback`, `publicationInterval`, each suffixed `_mean`, `_jitter`, `_min`, `_max`, `_count`, `_span`: 60 elements. Durations/coverage use seconds. |
+| `dm_timing_stages` | Names `dispatch`, `actuator`, `sdk`, `saturation`, `delta`, `post`, `throughDelta`, `callback`, `receiptCallback`, `publicationInterval`, `sdkDispatch`, `readerRelease`, `staging`, `publication`, `sdkWait`, each suffixed `_mean`, `_jitter`, `_min`, `_max`, `_count`, `_span`. Durations/coverage use seconds. |
 | `dm_timing_quality` | `window`, `span`, `age` in seconds; `capacity`, `queued`, `session`, `sequence`; `enabled`, `valid` as 0/1; cumulative counters listed below: 21 elements. `age=-1` means no retained endpoint. |
 | `dm_timing_state` | Text elements `state`, `clock`, `receipt`, `send`. States are `disabled`, `warmingUp`, `valid`, `stale`, `unavailable`; endpoint descriptions identify the clock and software return semantics. |
 
@@ -165,9 +172,27 @@ An old compatible record does not establish current validity: inspect the
 detailed record first. LogMeta names use `<metric>_mean`, `_stddev`, `_min`,
 `_max`, `_count`, `_span`, `_valid`; unavailable duration projections are NaN.
 The detailed record appends `publicationInterval` as metric ID 12; the original
-twelve IDs and compatible `fgtimings` fields are unchanged. Rebuilt readers accept
-both the original twelve-row records and the new thirteen-row records. Older
-readers that require exactly twelve rows must be rebuilt to read the new records.
+twelve IDs and compatible `fgtimings` fields are unchanged. Worker metrics append
+IDs 13–17. Rebuilt readers accept complete historical twelve/thirteen-row
+records and the current eighteen-row records. Rebuild `logdump` to read new
+records and access the new names.
+
+The appended metrics are:
+
+| Metric | Measurement |
+| --- | --- |
+| `sdkDispatch` | Worker SDK entry minus request dispatch. |
+| `readerRelease` | Last-read endpoint minus callback entry; independent of SDK outcome. |
+| `staging` | Private delta channel-read/calculation interval. |
+| `publication` | Deferred delta/difference publication after SDK success. |
+| `sdkWait` | Monitor's matching-result wait, including handoff overhead. |
+
+Worker-mode `delta` spans staging, SDK-result wait and publication. It is a wall
+interval rather than approximately the old delta computation cost; `staging`
+and `publication` separate that work. Overlapping stage durations do not sum
+to callback duration. Synchronous controller stage definitions remain intact;
+metrics for unexecuted worker stages remain unavailable. Successful SDK-return
+cadence and `fgtimes` receipt-to-return latency keep their existing meanings.
 
 BMC qualifies success from `BMCSetArray`; ALPAO uses `asdkSend`. IrisAO measures
 the final `MirrorCommand(...MirrorSendSettings)` span, but its success indication

@@ -154,3 +154,52 @@ multi-stream relationship between command pixels and semaphore tokens. Other
 readers and existing copy/early-main protections still apply. A lower measured
 requirement is evidence for a subsequent policy change; this test makes no such
 change automatically.
+
+## Early channel-release comparison
+
+The worker implementation can publish a separate early endpoint through
+`dm.readerReleaseStream=dmtweeter_read_done`. This endpoint means that the
+controller finished reading command/channel pixels; its SDK call may still be
+running. Keep `dm.completionStream=dmtweeter_done` for the independent version-1
+full-completion measurement. Configure worker execution and CPU placement as
+specified by the [BMC worker guide](../../bmcCtrl/doc/sdk-worker.md); engineering
+decisions are recorded in the
+[worker plan](../../../agents/plans/2026-10/bmc-sdk-worker-reader-release.md).
+
+Add this optional observer to the synco instance configuration:
+
+```ini
+[readerReleaseMonitor]
+shmimName=dmtweeter_read_done
+```
+
+The observer defaults to ordinary priority zero and is accepted only in shadow
+simulation mode. An empty name disables it. It has its own transport attachment,
+bounded queues, source epochs, matching, populations and extrema. It reuses the
+same coherent primary/combined observations as the full-completion measurement.
+A missing, failed or unqualified full-completion peer does not prevent a genuine
+early release from being measured.
+
+`reader_release_timing` and `reader_release_timing_quality` use the same units
+and metric definitions as their `reader_timing` counterparts, with `F` now the
+last-read endpoint. The optional `reader_release_timing` telemetry table retains
+the distinct protocol kind and raw SDK result when available. Both populations
+remain observational: the existing **155 us** budget and every live/shadow
+scheduler decision stay unchanged.
+
+A later SDK result can enrich the same release record without changing its
+identity or last-read timestamp. The observer counts that result once in
+`sdkResults`, `sdkSuccess` or `sdkFailed`, without adding a second reader sample.
+These count explicit backend outcomes; an SDK exception counts as failed even
+though its raw return code remains unavailable.
+A failed SDK call does not undo reads that already finished. These are
+opportunistic observed-result counts; missed/coalesced notifications can leave
+some reader samples without observed SDK-result coverage. Read them together
+with completion sequence gaps, duplicates, invalid captures and queue drops.
+An unknown SDK result is never counted as successful submission.
+
+Use the same simultaneous bounded capture after rebuilding the controller,
+`dmSyncopation` and `logdump`. Confirm that both independent matched populations
+advance when both publishers are configured. The early observer can also be
+qualified by itself; zero full-completion matches must not be presented as zero
+SDK latency or as a successful SDK result.
