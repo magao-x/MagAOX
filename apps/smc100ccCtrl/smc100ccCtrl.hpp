@@ -1,6 +1,5 @@
 /** \file smc100ccCtrl.hpp
-  * \brief The smc controller communicator
-  * \author Chris Bohlman (cbohlman@pm.me)
+  * \brief Newport SMC100CC stage controller application.
   *
   * \ingroup smc100ccCtrl_files
   *
@@ -23,20 +22,25 @@
 #include <iterator>
 #include <bitset>
 
+/** \defgroup smc100ccCtrl SMC100CC Stage Controller
+ * \brief Control an SMC100CC stage and assign its configured presets.
+ * \ingroup apps
+ */
+
+/** \defgroup smc100ccCtrl_files SMC100CC Stage Controller Files
+ * \ingroup smc100ccCtrl
+ */
+
 namespace MagAOX
 {
 namespace app
 {
 
-/** TS command: Checks if there were any errors during initialization
-  * Solid orange LED: everything is okay, TS should return 1TS00000A
-  * PW command: change all stage and motor configuration parameters
-  * OR command: gets controller to ready state (must go through homing first)
-  * In ready state, can move relative and move absolute
-  * RS command: TO get from ready to not referenced
-
-  Change to stateCodes::OPERATING and stateCodes::READY
-
+/// Control one SMC100CC stage and publish its position, presets, and motion state.
+/** The controller is addressed as axis 1 over a USB serial connection. Homing
+  * moves the stage to its configured offset before normal READY operation.
+  * Preset assignment compares measured positions against configured positions.
+ * \ingroup smc100ccCtrl
   */
 class smc100ccCtrl : public MagAOXApp<>, public tty::usbDevice, public dev::ioDevice,
                              public dev::stdMotionStage<smc100ccCtrl>, public dev::telemeter<smc100ccCtrl>
@@ -48,110 +52,117 @@ class smc100ccCtrl : public MagAOXApp<>, public tty::usbDevice, public dev::ioDe
 
 protected:
 
-   /** \name Configurable Parameters
+   /** \name Configurable Parameters - Data
      *
      *@{
      */
-   double m_homingOffset {0};
+   double m_homingOffset {0}; ///< Absolute position requested after the controller finishes homing.
 
-   double m_opDelta {0}; ///< The threshold for switching to OPERATING
+   double m_opDelta {0}; ///< Move-size threshold above which the application reports OPERATING.
 
    double m_presetTolerance {1e-3}; ///< Absolute position tolerance for assigning a preset, in stage position units.
 
    ///@}
 
 
-   pcf::IndiProperty m_indiP_position;   ///< Indi variable for reporting the stage position.
+   pcf::IndiProperty m_indiP_position;   ///< Current and requested stage positions exposed through INDI.
 
-   std::vector<std::string> m_validStateCodes{};
+   std::vector<std::string> m_validStateCodes{}; ///< Legacy controller-state list, currently unused.
 
-   double m_position {0};
+   double m_position {0}; ///< Most recently measured stage position used for telemetry and preset assignment.
 
-   double m_target {0};
+   double m_target {0}; ///< Last position target received through the position INDI property.
 
-   bool m_wasHoming {0};
+   bool m_wasHoming {0}; ///< Whether homing was observed and still requires the configured offset move.
 
-   bool m_powerOnHomed{false};
+   bool m_powerOnHomed{false}; ///< Whether automatic homing has been requested during this power cycle.
 
-   bool m_moveOp {true}; ///< Flag indicating that OPERATING should not be set for a move, because it's less than m_opDelta.
+   bool m_moveOp {true}; ///< Whether the current move is large enough to report OPERATING.
 public:
 
+   /// Handle a requested position update after validating its device and property names.
    INDI_NEWCALLBACK_DECL(smc100ccCtrl, m_indiP_position);
 
 
-   /// Default c'tor.
+   /// Initialize power management and disable default preset positions.
    smc100ccCtrl();
 
+   /// Destroy the controller application.
    ~smc100ccCtrl() noexcept
    {
    }
 
-   /// Setup the configuration system (called by MagAOXApp::setup())
+   /// Register controller, USB, motion-stage, and telemetry configuration options.
    virtual void setupConfig();
 
-   /// Load the configuration system results (called by MagAOXApp::setup())
+   /// Load controller options and delegated device configuration, requesting shutdown on errors.
    virtual void loadConfig();
 
-   /// Checks if the device was found during loadConfig.
+   /// Register the position property and initialize presets and telemetry.
    virtual int appStartup();
 
-   /// Changes device state based on testing connection and device status
+   /// Discover and connect the controller, then monitor homing, motion, positions, and presets.
    virtual int appLogic();
 
-   /// Do any needed shutdown tasks.  Currently nothing in this app.
+   /// Complete application shutdown; no controller-specific work is required.
    virtual int appShutdown();
 
+   /// Reset the power-cycle homing flag and record stage and position telemetry.
    virtual int onPowerOff();
 
-   int makeCom( std::string &str,
-                const std::string & com
+   /// Build an axis-1 serial command terminated by CR/LF.
+   int makeCom( std::string &str, /**< [out] Complete serial command. */
+                const std::string & com /**< [in] Controller command without axis or terminator. */
               );
 
-   int splitResponse( int &axis,
-                      std::string &com,
-                      std::string &val,
-                      std::string &resp
+   /// Split a controller reply into its axis, command, and value fields.
+   /** \returns 0 on a parsed response, including an unprefixed textual response.
+     * \returns -1 if the response is too short to parse.
+     */
+   int splitResponse( int &axis, /**< [out] Returned axis, or zero for an unprefixed textual response. */
+                      std::string &com, /**< [out] Two-character command, or empty for a textual response. */
+                      std::string &val, /**< [out] Response value with trailing CR/LF removed. */
+                      std::string &resp /**< [in] Controller response to parse. */
                     );
 
 
-   int getCtrlState( std::string &state );
+   /// Query and validate the controller's TS reply, extracting its two-character state code.
+   int getCtrlState( std::string &state /**< [out] Controller state code on a valid reply. */ );
 
-   /// Tests if device is cabale of recieving/executing IO commands
-   /** Sends command for device to return serial number, and compares to device serial number indi property
-    *
-    * \returns -1 on serial numbers being different, thus ensuring connection test was sucsessful
-    * \returns 0 on serial numbers being equal
+   /// Test serial communication by issuing a TS query without parsing its response.
+   /** \returns 0 if the serial exchange succeeds, or in simulation mode.
+    * \returns -1 if the serial exchange fails.
     */
    int testConnection();
 
-   /// Verifies current status of controller
-   /** Checks if controller is moving or has moved to correct position
-    *
-    * \returns 0 if controller is currently moving or has moved correctly.
-    * \returns -1 on error with sending commands or if current position does not match target position.
+   /// Query and parse the controller's measured position.
+   /** \returns 0 if the position was read and parsed.
+    * \returns -1 on a serial or parsing error.
     */
-   int getPosition( double & pos  /**< [out] on output, the current position*/);
+   int getPosition( double & pos  /**< [out] Measured stage position on success. */);
 
-   /// Returns any error controller has
-   /** Called after every command is sent
-    *
-    * \returns 0 if no error is reported
-    * \returns -1 if an error is reported and error string is set in reference
+   /// Query the controller's last command error and translate it to a readable message.
+   /** \returns 0 if the controller reports no error.
+    * \returns -1 on a controller error, malformed reply, or serial failure.
     */
-   int getLastError( std::string& errStr /** [out] the last error string */);
+   int getLastError( std::string& errStr /**< [out] Error description when available; unchanged on success. */);
 
    /** \name Standard Motion Stage Interface
      * @{
      *
      */
 
+   /// Record telemetry and send the immediate stop command without taking the INDI mutex.
    int stop();
 
+   /// Reset the home-request switch, record telemetry, and send the homing command.
    int startHoming();
 
+   /// Return the first preset within the configured strict position tolerance, or zero for no match.
    double presetNumber();
 
-   int moveTo(double position);
+   /// Command an absolute position and report OPERATING when the move exceeds the configured threshold.
+   int moveTo(double position /**< [in] Requested absolute position in stage position units. */);
 
 
    ///@}
@@ -161,15 +172,20 @@ public:
      *
      * @{
      */
+   /// Check whether stage or position telemetry is due for recording.
    int checkRecordTimes();
 
-   int recordTelem( const telem_stage *type );
+   /// Force a stage telemetry record when requested by the telemeter interface.
+   int recordTelem( const telem_stage *type /**< [in] Unused pointer selecting the stage telemetry type. */ );
 
-   int recordTelem( const telem_position *type );
+   /// Force a position telemetry record when requested by the telemeter interface.
+   int recordTelem( const telem_position *type /**< [in] Unused pointer selecting the position telemetry type. */ );
 
-   int recordStage( bool force = false );
+   /// Delegate stage telemetry recording to the standard motion-stage interface.
+   int recordStage( bool force = false /**< [in] Record even if the stage telemetry is unchanged. */ );
 
-   int recordPosition( bool force = false);
+   /// Record the measured position when it changes or recording is forced.
+   int recordPosition( bool force = false /**< [in] Record even if the position is unchanged. */);
 
    ///@}
 };
@@ -186,11 +202,11 @@ inline smc100ccCtrl::smc100ccCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO
 
 inline int smc100ccCtrl::onPowerOff()
 {
-      m_powerOnHomed=false;
-      recordStage(true);
-      recordPosition(true);
-      return 0;
-   }
+   m_powerOnHomed=false;
+   recordStage(true);
+   recordPosition(true);
+   return 0;
+}
 
 void smc100ccCtrl::setupConfig()
 {
@@ -439,8 +455,7 @@ int smc100ccCtrl::appLogic()
 
    //If we're here, we can get state from controller...
    std::string axState;
-   //mutex scope
-   {
+   { //mutex scope
       std::unique_lock<std::mutex> lock(m_indiMutex);
       if(getCtrlState(axState) < 0)
       {
