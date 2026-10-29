@@ -56,12 +56,14 @@ protected:
 
    double m_opDelta {0}; ///< The threshold for switching to OPERATING
 
+   double m_presetTolerance {1e-3}; ///< Absolute position tolerance for assigning a preset, in stage position units.
+
    ///@}
 
 
    pcf::IndiProperty m_indiP_position;   ///< Indi variable for reporting the stage position.
 
-   std::vector<std::string> validStateCodes{};
+   std::vector<std::string> m_validStateCodes{};
 
    double m_position {0};
 
@@ -99,13 +101,7 @@ public:
    /// Do any needed shutdown tasks.  Currently nothing in this app.
    virtual int appShutdown();
 
-   virtual int onPowerOff()
-   {
-      m_powerOnHomed=false;
-      recordStage(true);
-      recordPosition(true);
-      return 0;
-   }
+   virtual int onPowerOff();
 
    int makeCom( std::string &str,
                 const std::string & com
@@ -167,9 +163,9 @@ public:
      */
    int checkRecordTimes();
 
-   int recordTelem( const telem_stage * );
+   int recordTelem( const telem_stage *type );
 
-   int recordTelem( const telem_position * );
+   int recordTelem( const telem_position *type );
 
    int recordStage( bool force = false );
 
@@ -188,10 +184,19 @@ inline smc100ccCtrl::smc100ccCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO
    return;
 }
 
+inline int smc100ccCtrl::onPowerOff()
+{
+      m_powerOnHomed=false;
+      recordStage(true);
+      recordPosition(true);
+      return 0;
+   }
+
 void smc100ccCtrl::setupConfig()
 {
    config.add("stage.homingOffset", "", "stage.homingOffset", argType::Required, "stage", "homingOffset", false, "float", "Homing offset, a.k.a. default starting position.");
    config.add("stage.opDelta", "", "stage.opDelta", argType::Required, "stage", "opDelta", false, "float", "Threshold move size for switching to OPERATING.");
+   config.add("stage.presetTolerance", "", "stage.presetTolerance", argType::Required, "stage", "presetTolerance", false, "float", "Absolute position tolerance for assigning a preset, in stage position units. Default is 1e-3; the difference must be strictly smaller.");
 
    tty::usbDevice::setupConfig(config);
    dev::ioDevice::setupConfig(config);
@@ -205,6 +210,7 @@ void smc100ccCtrl::loadConfig()
    config(m_homingOffset, "stage.homingOffset");
 
    config(m_opDelta, "stage.opDelta");
+   config(m_presetTolerance, "stage.presetTolerance");
    this->m_baudRate = B57600; //default for SMC100CC controller.  Will be overridden by any config setting.
 
    int rv = tty::usbDevice::loadConfig(config);
@@ -1071,7 +1077,7 @@ double smc100ccCtrl::presetNumber()
 {
    for( size_t n=1; n < m_presetPositions.size(); ++n)
    {
-      if( fabs(m_position-m_presetPositions[n]) < 1e-3) return n;
+      if( fabs(m_position-m_presetPositions[n]) < m_presetTolerance) return n;
    }
 
    return 0;

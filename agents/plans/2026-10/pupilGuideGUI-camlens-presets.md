@@ -87,3 +87,58 @@ QT_QPA_PLATFORM=offscreen GCOV_PREFIX=/tmp/camlens-preset-tests/gcov ./pupilGuid
   between them can leave only one stage moved; the GUI cannot provide a
   transaction across independent controllers. It does not automatically retry.
 - This work does not implement pupil fitting or define new stage presets.
+
+## Controller tolerance follow-up
+
+The user reported that the GUI looks and works well, then requested that
+`smc100ccCtrl::presetNumber()` use a configurable tolerance instead of its
+hard-coded `1e-3` comparison. This extends the same feature branch.
+
+- Add optional `stage.presetTolerance` with `double` storage and default `1e-3`.
+  The setting uses the same units as the configured stage positions. For the
+  camera-lens stages these are millimeters.
+- Preserve the comparison `abs(position - presetPosition) < presetTolerance`:
+  equality is outside the tolerance, preset index zero remains the sentinel,
+  and the first matching configured preset wins when windows overlap.
+- Use the existing controller configuration parsing; add no controller commands,
+  motion changes, preset definitions, or changes to other stage drivers.
+- Test configuration defaults and overrides and preset assignment boundaries
+  offline, replacing USB discovery in the harness. Never start the app or invoke
+  hardware methods during verification.
+- Complete the full-file documentation pass and formatting required by
+  `AGENTS.md`, preserving unrelated behavior. Keep the functional change,
+  documentation cleanup, and formatting in separate commits.
+
+Example controller configuration:
+
+```ini
+[stage]
+presetTolerance=0.005
+```
+
+Verification completed:
+
+- Controller offline suite passed **50 assertions in three cases**. It exercises
+  the real INI configuration loader with USB discovery stubbed out, default and
+  wider/tighter tolerance values, both signed boundaries, overlapping presets,
+  the index-zero sentinel, and existing INDI callback validation.
+- Built the actual controller successfully without launching it. Commands:
+  `make -C tests -f Makefile.one t=../apps/smc100ccCtrl/tests/smc100ccCtrl_test.cpp COVERAGE=1 -j2`
+  and `make -C apps/smc100ccCtrl COVERAGE=1 -j2`. Tests ran with coverage output
+  redirected using `GCOV_PREFIX=/tmp/smc100cc-tolerance/gcov`. No compiler warnings
+  were reported; generated git-state notices reflect the local worktree.
+- Completed documentation for both changed C++ files, moved the unit-test group
+  to `tests/groups.dox`, and enabled the test-reference macro in Doxygen.
+  Focused generation verified all 40 function/member briefs, all 17 named
+  parameters, and six real-API references with HTML backlinks in the new cases.
+  No warnings name changed source files.
+- Required declaration cleanup moved `onPowerOff()` below the class while
+  preserving its inline behavior, renamed the unused protected state-list member
+  to `m_validStateCodes`, and named the telemetry pointer parameters. A token
+  comparison verified no other code changes between the functional snapshot and
+  the documented/formatted header, apart from these recorded mechanical changes.
+- `clang-format --dry-run --Werror` on both C++ files and `git diff --check` passed.
+
+The setting changes preset classification only. A tolerance large enough to cover
+multiple preset positions retains the existing first-match ordering. No stage
+configuration files or instrument settings were changed.
