@@ -449,11 +449,12 @@ records. Each `sim_overlap={...}` entry identifies:
 | --- | --- |
 | `id`, `session` | Process-lifetime evidence sequence and model session owning the event. Pending events survive model resets and can belong to an earlier session than the current summary. |
 | `planEstimatorId`, `lastEstimatorId` | Estimator update that created the modeled copy's frozen plan, and latest completed estimator update before the overlap evidence. Zero means unavailable in an older record. |
-| `origin`, `window` | Observer (`primary` or `combined`) and containing modeled interval (`copy` or active `readerHold`). Boundaries include the start and exclude the end. Passive step 0 has no reader hold. |
+| `origin`, `window` | Observer (`primary` or `combined`) and containing modeled interval (`copy`, active `readerHold`, or `backend` in release-readiness shadow mode). Boundaries include the start and exclude the end. Passive step 0 has no reader hold or its own backend operation. |
 | `mainCounter`, `combinedCounter`, `planCounter`, `step` | Actual main supplying evidence, observed combined counter, and cycle/step of the last modeled copy. On the primary path, the combined counter is the most recently observed one, possibly zero. |
 | `mainGrid_ns`, `planGrid_ns`, `period_ns` | Committed grid or extrapolation from the last frozen cycle for the evidence main, frozen main target for the modeled copy's cycle, and that cycle's period. Zero main-grid means unavailable. |
 | `period_q32`, `planFraction_q32` | Exact frozen period and signed subnanosecond remainder of `planGrid_ns`, scaled by 2^32. New records retain these alongside rounded period diagnostics. |
 | `observed_ns`, `copyBegin_ns`, `copyEnd_ns`, `readerEnd_ns` | Evidence time and modeled copy/reader boundaries on the same-host monotonic clock. Passive `readerEnd_ns` is zero. |
+| `backendEnd_ns` | Optional modeled backend retirement boundary for an active step in release-readiness mode. A backend conflict keeps that active command's provenance even after a later passive preparation copy. Zero/absent in legacy events. |
 | `lastMainCounter`, `lastMain_ns`, `lastOutput_ns` | Previously accepted primary identity/time and latest associated combined observation. |
 | `streamInode`, `triggerInode` | Observed stream identity and combined trace's named primary identity when available. |
 | `receipt_ns`, `callback_ns`, `lockRequest_ns`, `lockAcquired_ns` | Monotonic receipt, callback entry and model-lock endpoints. Zero means unavailable. Their differences separate callback bookkeeping and lock wait from model observation. |
@@ -463,6 +464,9 @@ Within one app process, group events by `(session, planCounter, step, mainCounte
 to identify repeated evidence for the same modeled step and actual main,
 while retaining origin and event IDs. Keep process restarts separate. The
 primary and combined observers can both report one main.
+Release-readiness mode also reports a main arriving after modeled readers clear
+but before the active backend retires. The [three-step shadow procedure](readiness-shadow-test.md)
+explains its independent reader and backend assumptions.
 The log labels model/observer times `model_clock:monotonic` and producer times
 `producer_clock:unconverted`. Do not subtract absolute producer timestamps
 from the monotonic grid. The telemetry record's wall-clock timestamp is its

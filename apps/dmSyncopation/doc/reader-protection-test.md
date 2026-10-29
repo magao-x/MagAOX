@@ -288,3 +288,11 @@ publication/posting with wake scheduling; separating those requires a producer
 post timestamp or trace. The two settings change scheduling and placement
 together; a smaller follow-up experiment can separate their individual effects.
 This test changes no live or shadow scheduling decision.
+
+## Use release evidence in a shadow decision
+
+The separate [release-qualified shadow test](readiness-shadow-test.md) uses raw
+timestamped main-command release evidence for modeled copy readiness and requests
+three fixed slots. It keeps virtual auxiliary readers and whole-backend occupancy
+as separate explicit assumptions. The independent measurements above remain
+diagnostics; their ordinary-thread joined summaries never authorize a copy.
