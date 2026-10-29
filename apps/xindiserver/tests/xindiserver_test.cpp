@@ -20,6 +20,10 @@ namespace app
 /// \cond DOXYGEN_SUPPRESS_TEST_HARNESS
 struct xindiserver_test
 {
+    void indiserver_d( xindiserver &xi, const int &d )
+    {
+        xi.indiserver_d = d;
+    }
     void indiserver_m( xindiserver &xi, const int &m )
     {
         xi.indiserver_m = m;
@@ -47,6 +51,10 @@ struct xindiserver_test
     void m_remote( xindiserver &xi, const std::vector<std::string> &mr )
     {
         xi.m_remote = mr;
+    }
+    void m_driversAtHosts( xindiserver &xi, const std::vector<std::string> &mh )
+    {
+        xi.m_driversAtHosts = mh;
     }
 
     tunnelMapT &tunnelMap( xindiserver &xi )
@@ -96,6 +104,31 @@ SCENARIO( "xindiserver constructs inserver options", "[xindiserver]" )
 
         int rv;
 
+        WHEN( "No options provided, the driver FIFO directory is always last" )
+        {
+            std::vector<std::string> clargs;
+
+            rv = xi.constructIndiserverCommand( clargs );
+            REQUIRE( rv == 0 );
+            REQUIRE( clargs.size() == 3 );
+            REQUIRE( clargs[0] == "indiserver" );
+            REQUIRE( clargs[1] == "-F" );
+            REQUIRE( clargs[2] == "/opt/MagAOX/drivers/fifos" );
+        }
+
+        WHEN( "Option d provided with argument" )
+        {
+            std::vector<std::string> clargs;
+            xi_test.indiserver_d( xi, 0 );
+
+            rv = xi.constructIndiserverCommand( clargs );
+            REQUIRE( rv == 0 );
+            REQUIRE( clargs.size() == 5 );
+            REQUIRE( clargs[0] == "indiserver" );
+            REQUIRE( clargs[1] == "-d" );
+            REQUIRE( clargs[2] == "0" );
+        }
+
         WHEN( "Option m with argument provided" )
         {
             std::vector<std::string> clargs;
@@ -103,7 +136,7 @@ SCENARIO( "xindiserver constructs inserver options", "[xindiserver]" )
 
             rv = xi.constructIndiserverCommand( clargs );
             REQUIRE( rv == 0 );
-            REQUIRE( clargs.size() == 3 );
+            REQUIRE( clargs.size() == 5 );
             REQUIRE( clargs[0] == "indiserver" );
             REQUIRE( clargs[1] == "-m" );
             REQUIRE( clargs[2] == "100" );
@@ -116,7 +149,7 @@ SCENARIO( "xindiserver constructs inserver options", "[xindiserver]" )
 
             rv = xi.constructIndiserverCommand( clargs );
             REQUIRE( rv == 0 );
-            REQUIRE( clargs.size() == 2 );
+            REQUIRE( clargs.size() == 4 );
             REQUIRE( clargs[0] == "indiserver" );
             REQUIRE( clargs[1] == "-n" );
         }
@@ -128,7 +161,7 @@ SCENARIO( "xindiserver constructs inserver options", "[xindiserver]" )
 
             rv = xi.constructIndiserverCommand( clargs );
             REQUIRE( rv == 0 );
-            REQUIRE( clargs.size() == 3 );
+            REQUIRE( clargs.size() == 5 );
             REQUIRE( clargs[0] == "indiserver" );
             REQUIRE( clargs[1] == "-p" );
             REQUIRE( clargs[2] == "2000" );
@@ -141,7 +174,7 @@ SCENARIO( "xindiserver constructs inserver options", "[xindiserver]" )
 
             rv = xi.constructIndiserverCommand( clargs );
             REQUIRE( rv == 0 );
-            REQUIRE( clargs.size() == 2 );
+            REQUIRE( clargs.size() == 4 );
             REQUIRE( clargs[0] == "indiserver" );
             REQUIRE( clargs[1] == "-v" );
         }
@@ -153,7 +186,7 @@ SCENARIO( "xindiserver constructs inserver options", "[xindiserver]" )
 
             rv = xi.constructIndiserverCommand( clargs );
             REQUIRE( rv == 0 );
-            REQUIRE( clargs.size() == 2 );
+            REQUIRE( clargs.size() == 4 );
             REQUIRE( clargs[0] == "indiserver" );
             REQUIRE( clargs[1] == "-vv" );
         }
@@ -165,7 +198,7 @@ SCENARIO( "xindiserver constructs inserver options", "[xindiserver]" )
 
             rv = xi.constructIndiserverCommand( clargs );
             REQUIRE( rv == 0 );
-            REQUIRE( clargs.size() == 2 );
+            REQUIRE( clargs.size() == 4 );
             REQUIRE( clargs[0] == "indiserver" );
             REQUIRE( clargs[1] == "-vvv" );
         }
@@ -177,7 +210,7 @@ SCENARIO( "xindiserver constructs inserver options", "[xindiserver]" )
 
             rv = xi.constructIndiserverCommand( clargs );
             REQUIRE( rv == 0 );
-            REQUIRE( clargs.size() == 2 );
+            REQUIRE( clargs.size() == 4 );
             REQUIRE( clargs[0] == "indiserver" );
             REQUIRE( clargs[1] == "-vvv" );
         }
@@ -189,7 +222,7 @@ SCENARIO( "xindiserver constructs inserver options", "[xindiserver]" )
 
             rv = xi.constructIndiserverCommand( clargs );
             REQUIRE( rv == 0 );
-            REQUIRE( clargs.size() == 1 );
+            REQUIRE( clargs.size() == 3 );
             REQUIRE( clargs[0] == "indiserver" );
         }
 
@@ -200,7 +233,7 @@ SCENARIO( "xindiserver constructs inserver options", "[xindiserver]" )
 
             rv = xi.constructIndiserverCommand( clargs );
             REQUIRE( rv == 0 );
-            REQUIRE( clargs.size() == 2 );
+            REQUIRE( clargs.size() == 4 );
             REQUIRE( clargs[0] == "indiserver" );
             REQUIRE( clargs[1] == "-x" );
         }
@@ -216,7 +249,7 @@ SCENARIO( "xindiserver constructs inserver options", "[xindiserver]" )
 
             rv = xi.constructIndiserverCommand( clargs );
             REQUIRE( rv == 0 );
-            REQUIRE( clargs.size() == 8 );
+            REQUIRE( clargs.size() == 10 );
             REQUIRE( clargs[0] == "indiserver" );
             REQUIRE( clargs[1] == "-m" );
             REQUIRE( clargs[2] == "100" );
@@ -248,7 +281,7 @@ SCENARIO( "xindiserver constructs local driver arguments", "[xindiserver]" )
             rv = xi.addLocalDrivers( clargs );
             REQUIRE( rv == 0 );
             REQUIRE( clargs.size() == 1 );
-            REQUIRE( clargs[0] == "/opt/MagAOX/drivers/driverX" );
+            REQUIRE( clargs[0] == "driverX" );
         }
 
         WHEN( "Two local drivers" )
@@ -260,8 +293,8 @@ SCENARIO( "xindiserver constructs local driver arguments", "[xindiserver]" )
             rv = xi.addLocalDrivers( clargs );
             REQUIRE( rv == 0 );
             REQUIRE( clargs.size() == 2 );
-            REQUIRE( clargs[0] == "/opt/MagAOX/drivers/driverY" );
-            REQUIRE( clargs[1] == "/opt/MagAOX/drivers/driverZ" );
+            REQUIRE( clargs[0] == "driverY" );
+            REQUIRE( clargs[1] == "driverZ" );
         }
 
         WHEN( "Three local drivers" )
@@ -273,9 +306,9 @@ SCENARIO( "xindiserver constructs local driver arguments", "[xindiserver]" )
             rv = xi.addLocalDrivers( clargs );
             REQUIRE( rv == 0 );
             REQUIRE( clargs.size() == 3 );
-            REQUIRE( clargs[0] == "/opt/MagAOX/drivers/driverX" );
-            REQUIRE( clargs[1] == "/opt/MagAOX/drivers/driverY" );
-            REQUIRE( clargs[2] == "/opt/MagAOX/drivers/driverZ" );
+            REQUIRE( clargs[0] == "driverX" );
+            REQUIRE( clargs[1] == "driverY" );
+            REQUIRE( clargs[2] == "driverZ" );
         }
 
         WHEN( "Three local drivers, with an error (@)" )
@@ -583,7 +616,15 @@ SCENARIO( "xindiserver constructs both local and remote driver arguments", "[xin
             REQUIRE( clargs.size() == 2 );
 
             REQUIRE( clargs[0] == "driverY@localhost:1000" );
-            REQUIRE( clargs[1] == "/opt/MagAOX/drivers/driverX" );
+            REQUIRE( clargs[1] == "driverX" );
+        }
+
+        WHEN( "Remote driver without a driver name is an error" )
+        {
+            std::vector<std::string> clargs;
+
+            xi_test.m_driversAtHosts( xi, { "@hostY" } );
+            REQUIRE( xi.addRemoteDrivers( clargs ) == XINDISERVER_E_BADDRIVERSPEC );
         }
 
         WHEN( "single local driver, single remote driver, single remote host -- duplicate driver" )
@@ -699,6 +740,7 @@ TEST_CASE( "xindiserver processes indiserver output lines", "[xindiserver]" )
         REQUIRE( xindiserver::isLogPriority( "Driver tSS:  (xindidriver): failed to lock /opt/x" ) ==
                  logPrio::LOG_CRITICAL );
         REQUIRE( xindiserver::isLogPriority( "bind: Address already in use" ) == logPrio::LOG_CRITICAL );
+        REQUIRE( xindiserver::isLogPriority( "WARNING Driver x@h: remote indiserver" ) == logPrio::LOG_WARNING );
 
         REQUIRE( xindiserver::isLogPriority( "failed to lock" ) == logPrio::LOG_INFO ); // only from xindidriver
         REQUIRE( xindiserver::isLogPriority( "Driver tSS:  (xindidriver): starting with x" ) == logPrio::LOG_INFO );

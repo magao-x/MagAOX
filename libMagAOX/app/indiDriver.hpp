@@ -113,6 +113,8 @@ public:
 
    virtual void handleSetProperty( const pcf::IndiProperty &ipRecv );
 
+   virtual void handleDelProperty( const pcf::IndiProperty &ipRecv );
+
    /// Define the execute virtual function.  This runs the processIndiRequests function in this thread, and does not return.
    virtual void execute(void);
 
@@ -242,6 +244,12 @@ template<class parentT>
 void indiDriver<parentT>::handleSetProperty( const pcf::IndiProperty &ipRecv )
 {
    if(m_parent) m_parent->handleSetProperty(ipRecv);
+}
+
+template<class parentT>
+void indiDriver<parentT>::handleDelProperty( const pcf::IndiProperty &ipRecv )
+{
+   if(m_parent) m_parent->handleDelProperty(ipRecv);
 }
 
 template<class parentT>

@@ -1037,6 +1037,14 @@ class MagAOXApp : public application
      */
     void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] The property being changed. */ );
 
+    /// Handler for the del INDI property notification
+    /** Marks the registered SetProperty subscriptions for the deleted device, or only the named property if one is
+     * given, as not received, so the main loop re-requests them through sendGetPropertySetList.
+     *
+     * This is called by m_indiDriver's indiDriver::handleDelProperty.
+     */
+    void handleDelProperty( const pcf::IndiProperty &ipRecv /**< [in] The property being deleted. */ );
+
   protected:
     /// Update an INDI property element value if it has changed.
     /** Will only peform a SetProperty if the new element value has changed
@@ -3828,6 +3836,34 @@ void MagAOXApp<_useINDI>::handleNewProperty( const pcf::IndiProperty &ipRecv )
     log<software_debug>( { __FILE__, __LINE__, "NewProperty callback null for " + ipRecv.createUniqueKey() } );
 
     return;
+}
+
+template <bool _useINDI>
+void MagAOXApp<_useINDI>::handleDelProperty( const pcf::IndiProperty &ipRecv )
+{
+    if( !m_useINDI || !ipRecv.hasValidDevice() )
+    {
+        return;
+    }
+
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_indiCallBackMutex );
+
+        for( auto &cb : m_indiSetCallBacks )
+        {
+            pcf::IndiProperty *prop = cb.second.property;
+
+            if( prop == nullptr || prop->getDevice() != ipRecv.getDevice() ||
+                ( ipRecv.hasValidName() && prop->getName() != ipRecv.getName() ) )
+            {
+                continue;
+            }
+
+            cb.second.m_defReceived = false;
+            resetIndiSetPropertyRetry( cb.second );
+            m_allDefsReceived = false;
+        }
+    } //mutex scope
 }
 
 template <bool _useINDI>
