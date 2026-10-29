@@ -900,3 +900,33 @@ The Python environment already existed; no dependencies were installed or change
 **Remaining compatibility differences and limits:** no known defect among the four requested fixes remains in source. Approved differences remain (6000-Hz default, fixed two channels/stricter validation, meaningful timer acquisition timestamps, bounded simulated catch-up, honest computation timing, additive sim_diag). Valid immediate `alpha`, `numChannels`, and `synchroDelay` controls still acknowledge Ok without the hardware's brief Busy transition; this previously recorded non-FPS transition difference was not one of the four requested corrections and was not silently changed. Exact live protocol equivalence and downstream substitution remain unverified. The user-supplied deployment identity/depth/config and downstream consumer are still unavailable here.
 
 Both retained build blockers are unchanged: macOS `timegm` visibility under mxlib's `_XOPEN_SOURCE=700`, and the missing installed `mx/math/floatUtils.hpp` API required by shared pupil-fit telemetry. No shared/dependency workaround was attempted. On a configured non-instrument Linux development host, build the normal app/tests and run `[accelSim]`, `[indi-regression]`, and `[accelSim-streams]` in their appropriate separate processes, followed by the approved ten-minute live test and actual INDI/subscription checks. Instrument-side or tunneled INDI execution remains excluded.
+
+### Destructor Exception-Specification Fix — 2026-10-28
+
+The user reported that the Linux/RTC build now reaches accelSim and rejects its implicitly declared `~accelSim() noexcept(false)` as a looser override of `MagAOXApp::~MagAOXApp() noexcept`. This is an **accelSim declaration omission**, separate from the previously documented workstation dependency blockers. Investigation and testing were performed only on the local workstation; no instrument connection or execution occurred. The starting tree was clean at commit `8e148b87`.
+
+**Cause and existing patterns:** `pcf::ReadWriteLock::~ReadWriteLock` in `INDI/libcommon/ReadWriteLock.hpp:84` is explicitly `noexcept(false)` and throws if `pthread_rwlock_destroy` fails. `pcf::IndiProperty` owns that lock as `m_rwData`; its destructor has no explicit exception specification and is consequently potentially throwing. accelSim owns INDI properties directly, and its frameGrabber base also owns INDI properties and has an implicit destructor. Either path makes accelSim's implicit destructor potentially throwing, violating its virtual MagAOXApp base contract. The current telemeter destructor is already explicitly `noexcept`, so changing telemeter alone would not address these remaining paths. This is unrelated to AR state, RNG, ADC conversion, or acquisition timing.
+
+`mcp3208Ctrl` uses precisely the same three bases and explicitly declares an empty `noexcept` destructor. `cameraSim` and `ocam2KCtrl` also include MagAOXApp, frameGrabber, and telemeter (plus other helpers) and explicitly declare/define `noexcept` destructors. accelSim now follows this convention with a documented public declaration `~accelSim() noexcept override;` and an out-of-class inline defaulted definition. Defaulting preserves automatic member/base cleanup; no duplicate shutdown, catch/suppression logic, resource handling, or shared-class change was introduced. As with the existing apps' explicit `noexcept` contract, an escaping member-destructor exception would terminate rather than propagate.
+
+**Exact changed files:**
+
+- `apps/accelSim/accelSim.hpp`: four added lines for the documented declaration and inline defaulted definition; the only production change.
+- `apps/accelSim/tests/accelSim_test.cpp`: a full-app-only `static_assert(std::is_nothrow_destructible_v<MagAOX::app::accelSim>)` and explanatory comment, using the already included `<type_traits>`.
+- This planning record, below the agent heading. No model, configuration, README, shared MagAO-X, mxlib, or build-file changes.
+
+**Verification:**
+
+| Check | Result |
+| --- | --- |
+| Independent compile diagnosis using the real INDI headers | `static_assert` confirms ReadWriteLock and IndiProperty are potentially throwing. A minimal virtual-noexcept-base class owning an IndiProperty fails with an implicit destructor and passes with the same explicit/defaulted noexcept fix. Both probes use C++20 syntax-only compilation, no stubs or dependency workarounds. Temporary sources: `/tmp/accelSim-destructor-implicit.cpp` and `/tmp/accelSim-destructor-fixed.cpp`. An existing unrelated IndiProperty warning remains. |
+| Fresh optimized standalone build and complete suite | **13 cases / 20764 assertions passed** in `/tmp/accelSim_destructor_model_test '[model]'`. |
+| Synchronization regressions | **5 cases / 12181 assertions passed**. |
+| Fresh ASan/UBSan build and complete standalone suite | **13 cases / 20764 assertions passed**, no sanitizer findings. |
+| Python PSD unit tests with warnings treated as errors | **4 tests passed**. |
+| Fresh 60-second diagnostic export | **1 case / 6 assertions passed**, 360000 pairs / 214 modes. Samples, modes, and metadata are byte-for-byte identical to the preceding INDI-fix export. |
+| Full offline PSD validation | Passed; all five plots, `psd.csv`, and `validation.json` in `/tmp/accelSim-destructor-validation`. Log: `/tmp/accelSim-destructor-psd.log`. |
+| Normal workstation app build | `make -C apps/accelSim` failed, exit 2, in shared compilation with the unchanged `stdFileName.hpp:366` timegm and `telem_pupilfit.hpp:8` missing mx/math/floatUtils.hpp errors. Log: `/tmp/accelSim-destructor-build.log`. No workaround applied. |
+| Formatting and scope | clang-format applied and checked on both touched C++ files with the existing mutex-comment preservation override; `git diff --check` passed. Specification and ANSWER entries preserved. |
+
+The added assertion is deliberately excluded from model-only builds: those do not instantiate the app and cannot validate its virtual override. The independent real-header probe confirms the exception-specification mechanism and fix, but is not a full app build. Rebuild the app and normal tests on the configured non-instrument Linux development host to exercise the actual app assertion and identify any subsequent compiler errors. No claim is made that the entire application now builds or that instrument integration is complete. No commit or push was performed.

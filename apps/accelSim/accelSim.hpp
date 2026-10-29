@@ -139,6 +139,8 @@ class accelSim : public MagAOXApp<true>, public dev::frameGrabber<accelSim>, pub
   public:
     /// Construct without opening any hardware or shared-memory stream.
     accelSim();
+    /// Preserve MagAOXApp's nonthrowing destructor contract despite potentially throwing INDI members.
+    ~accelSim() noexcept override;
     /// Register app and helper configuration keys.
     void setupConfig() override;
     /// Load and validate startup configuration.
@@ -187,6 +189,8 @@ inline accelSim::accelSim() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFI
 {
     m_shmimName = "acc000";
 }
+
+inline accelSim::~accelSim() noexcept = default;
 
 inline void accelSim::setupConfig()
 {

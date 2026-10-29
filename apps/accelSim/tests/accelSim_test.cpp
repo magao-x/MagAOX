@@ -14,6 +14,9 @@
     #include <filesystem>
     #include <thread>
     #include <unistd.h>
+
+// The full app must preserve its virtual base's destructor contract, including all helper/member destructors.
+static_assert( std::is_nothrow_destructible_v<MagAOX::app::accelSim> );
 #endif
 
 namespace libXWCTest
