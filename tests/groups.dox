@@ -232,4 +232,9 @@ report from their counters and then returns nonzero. An HTML report therefore do
 /** \defgroup frameGrabberTraceTelemetry_unit_test Framegrabber Excursion Trace Telemetry Unit Tests
  * \brief Chronological neighbor records, exact endpoint clocks, metadata and malformed-record rejection.
  * \ingroup logger_unit_test
+*/
+
+/** \defgroup streamWriter_unit_test streamWriter Unit Tests
+ * \brief Offline configuration, encoding, recording lifecycle, and buffer ownership regressions.
+ * \ingroup application_unit_test
  */
