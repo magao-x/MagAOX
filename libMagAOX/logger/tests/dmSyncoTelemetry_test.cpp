@@ -319,6 +319,34 @@ dmSyncoSimulation::Summary sampleReadiness()
     return summary;
 }
 
+/// Construct independent pipeline resources with reserved future credits and a prior reset discard.
+dmSyncoSimulation::Summary samplePipeline()
+{
+    auto summary                              = sampleReadiness();
+    summary.pipeline.enabled                  = true;
+    summary.pipeline.inFlight                 = 3;
+    summary.pipeline.maximumInFlight          = 3;
+    summary.pipeline.mainAdmitted             = ( uint64_t( 1 ) << 55 ) + 11;
+    summary.pipeline.auxiliaryAdmitted        = ( uint64_t( 1 ) << 54 ) + 13;
+    summary.pipeline.retired                  = summary.pipeline.mainAdmitted + summary.pipeline.auxiliaryAdmitted - 5;
+    summary.pipeline.discarded                = 2;
+    summary.pipeline.mainSdkWaits             = 17;
+    summary.pipeline.mainCreditMisses         = 19;
+    summary.pipeline.resets                   = 2;
+    summary.pipeline.sdkReadyNs               = summary.nowNs + 50000;
+    summary.pipeline.postReadyNs              = summary.nowNs + 100000;
+    summary.pipeline.maximumMainWaitNs        = 16000;
+    summary.pipeline.mainClearanceShortfallNs = 201000;
+    summary.pipeline.sdkCycleFeasible         = true;
+    summary.pipeline.postCycleFeasible        = true;
+    summary.pipeline.creditCycleFeasible      = true;
+    summary.pipeline.mainProtectionFeasible   = false;
+    summary.backendCycleFeasible              = false;
+    summary.feasible                          = false;
+    summary.outcomes[1]                       = { 12, 6, 6, 0, 1, 1, 0, 0, 3, 0, 0, 1, 1, 1, 1 };
+    return summary;
+}
+
 /// Return all reader populations in their stable common metric order, including optional receipt splits.
 std::array<const DmSyncoTimingStats *, static_cast<size_t>( dmReaderTiming::Metric::count )>
 readerStats( const DmSyncoReaderTiming *reader /**< [in] Deserialized reader-protection summary. */ )
@@ -618,6 +646,41 @@ void checkReadiness( const DmSyncoReadiness           *actual /**< [in] Optional
     CHECK( completed->receipt_ns() == 0 );
 }
 
+/// Check optional resource assumptions, occupancy and all main-service diagnostics without narrowing counts.
+void checkPipeline( const DmSyncoPipeline             *actual /**< [in] Serialized optional pipeline model. */,
+                    const dmSyncoSimulation::Pipeline &expected /**< [in] Exact source resource snapshot. */ )
+{
+    if( !expected.enabled )
+    {
+        REQUIRE( actual == nullptr );
+        return;
+    }
+
+    REQUIRE( actual != nullptr );
+    CHECK( actual->enabled() == expected.enabled );
+    CHECK( actual->prepare_ns() == expected.prepareNs );
+    CHECK( actual->sdk_service_ns() == expected.sdkServiceNs );
+    CHECK( actual->post_ns() == expected.postNs );
+    CHECK( actual->capacity() == expected.capacity );
+    CHECK( actual->in_flight() == expected.inFlight );
+    CHECK( actual->maximum_in_flight() == expected.maximumInFlight );
+    CHECK( actual->main_admitted() == expected.mainAdmitted );
+    CHECK( actual->auxiliary_admitted() == expected.auxiliaryAdmitted );
+    CHECK( actual->retired() == expected.retired );
+    CHECK( actual->discarded() == expected.discarded );
+    CHECK( actual->main_sdk_waits() == expected.mainSdkWaits );
+    CHECK( actual->main_credit_misses() == expected.mainCreditMisses );
+    CHECK( actual->resets() == expected.resets );
+    CHECK( actual->sdk_ready_ns() == expected.sdkReadyNs );
+    CHECK( actual->post_ready_ns() == expected.postReadyNs );
+    CHECK( actual->maximum_main_wait_ns() == expected.maximumMainWaitNs );
+    CHECK( actual->main_clearance_shortfall_ns() == expected.mainClearanceShortfallNs );
+    CHECK( actual->sdk_cycle_feasible() == expected.sdkCycleFeasible );
+    CHECK( actual->post_cycle_feasible() == expected.postCycleFeasible );
+    CHECK( actual->credit_cycle_feasible() == expected.creditCycleFeasible );
+    CHECK( actual->main_protection_feasible() == expected.mainProtectionFeasible );
+}
+
 /// Check every shadow model, phase, quality and conditional outcome field after serialization.
 void checkSimulation( const DmSyncoSimulation          *actual /**< [in] deserialized conditional prediction */,
                       const dmSyncoSimulation::Summary &expected /**< [in] source snapshot */ )
@@ -665,6 +728,7 @@ void checkSimulation( const DmSyncoSimulation          *actual /**< [in] deseria
     REQUIRE( actual->associations() == expected.associations );
     REQUIRE( actual->outcomes()->size() == size_t( expected.steps ) );
     checkReadiness( actual->readiness(), expected );
+    checkPipeline( actual->pipeline(), expected.pipeline );
 
     for( int index = 0; index < expected.steps; ++index )
     {
@@ -683,6 +747,8 @@ void checkSimulation( const DmSyncoSimulation          *actual /**< [in] deseria
         REQUIRE( step->release_late() == source.releaseLate );
         REQUIRE( step->backend_busy() == source.backendBusy );
         REQUIRE( step->backend_wrap() == source.backendWrap );
+        REQUIRE( step->preparation_busy() == source.preparationBusy );
+        REQUIRE( step->credit_full() == source.creditFull );
     }
 }
 
@@ -3323,6 +3389,228 @@ TEST_CASE( "Synco telemetry validates shadow readiness assumptions and provenanc
         omitField( readiness, DmSyncoReadiness::VT_READER_RELEASE_READY );
         auto buffer = envelope( input );
         REQUIRE_FALSE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+    }
+}
+
+/// Preserve independent pipeline assumptions, future credit reservations and exclusive auxiliary skip reasons.
+/** \ingroup dmSyncoTelemetry_unit_test */
+TEST_CASE( "Synco telemetry preserves conditional pipeline resources", "[dmSyncoTelemetry]" )
+{
+    // clang-format off
+#ifdef DMSYNCO_TELEMETRY_TEST_DOXYGEN_REF
+    MagAOX::logger::telem_dmsynco::messageT;
+    MagAOX::logger::telem_dmsynco::verify;
+    MagAOX::logger::telem_dmsynco::msgString;
+#endif
+    // clang-format on
+
+    const auto simulation = samplePipeline();
+    auto       input      = message( samplePrimary(), {}, simulation );
+    auto       buffer     = envelope( input );
+    REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+    const auto *record = GetTelem_dmsynco_fb( input.builder.GetBufferPointer() );
+    checkSimulation( record->simulation(), simulation );
+    CHECK( record->delivered() == 11 );
+    const auto text = telem_dmsynco::msgString( input.builder.GetBufferPointer(), input.builder.GetSize() );
+    CHECK( text.find( "simulation_mode=shadow_pipeline" ) != std::string::npos );
+    CHECK( text.find( "simulation_pipeline={prepare_ns:35000,sdkService_ns:120000,post_ns:150000" ) !=
+           std::string::npos );
+    CHECK( text.find( "capacity:3,inFlight:3,maximumInFlight:3" ) != std::string::npos );
+    CHECK( text.find( "discarded:2,mainSdkWaits:17,mainCreditMisses:19,resets:2" ) != std::string::npos );
+    CHECK( text.find( "maximumMainWait_ns:16000,mainClearanceShortfall_ns:201000" ) != std::string::npos );
+    CHECK( text.find( "sdkCycleFeasible:1,postCycleFeasible:1,creditCycleFeasible:1,mainProtectionFeasible:0" ) !=
+           std::string::npos );
+    CHECK( text.find( "preparationBusy:1,creditFull:1" ) != std::string::npos );
+    CHECK( text.find( "assumedBackend_ns" ) == std::string::npos );
+    CHECK( text.find( "simulation_delivered" ) == std::string::npos );
+
+    const auto          json = telem_dmsynco::msgJSON( input.builder.GetBufferPointer(),
+                                              input.builder.GetSize(),
+                                              reinterpret_cast<const uint8_t *>( telem_dmsynco_bfbs ),
+                                              telem_dmsynco_bfbs_len );
+    flatbuffers::Parser parser;
+    REQUIRE( parser.Deserialize( reinterpret_cast<const uint8_t *>( telem_dmsynco_bfbs ), telem_dmsynco_bfbs_len ) );
+    REQUIRE( parser.Parse( json.c_str() ) );
+    checkSimulation( GetTelem_dmsynco_fb( parser.builder_.GetBufferPointer() )->simulation(), simulation );
+}
+
+/// Keep historical fixed-hold/readiness tables compatible and permit an explicitly unobserved pipeline warmup.
+/** \ingroup dmSyncoTelemetry_unit_test */
+TEST_CASE( "Synco telemetry keeps pipeline modeling optional", "[dmSyncoTelemetry]" )
+{
+    // clang-format off
+#ifdef DMSYNCO_TELEMETRY_TEST_DOXYGEN_REF
+    MagAOX::logger::telem_dmsynco::messageT;
+    MagAOX::logger::telem_dmsynco::verify;
+#endif
+    // clang-format on
+
+    for( const bool readiness : { false, true } )
+    {
+        auto        source     = readiness ? sampleReadiness() : sampleSimulation();
+        auto        input      = message( samplePrimary(), {}, source );
+        const auto *simulation = GetTelem_dmsynco_fb( input.builder.GetBufferPointer() )->simulation();
+        REQUIRE( simulation->pipeline() == nullptr );
+        CHECK_FALSE( flatbuffers::IsFieldPresent( simulation, DmSyncoSimulation::VT_PIPELINE ) );
+
+        for( const auto *step : *simulation->outcomes() )
+        {
+            omitField( step, DmSyncoSimulationStep::VT_PREPARATION_BUSY );
+            omitField( step, DmSyncoSimulationStep::VT_CREDIT_FULL );
+        }
+
+        auto buffer = envelope( input );
+        REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+        checkSimulation( simulation, source );
+        const auto text = telem_dmsynco::msgString( input.builder.GetBufferPointer(), input.builder.GetSize() );
+        CHECK( text.find( "simulation_pipeline" ) == std::string::npos );
+        CHECK( text.find( "preparationBusy" ) == std::string::npos );
+        CHECK( text.find( readiness ? "simulation_mode=shadow_reader_release_ready"
+                                    : "simulation_mode=shadow_conditional" ) != std::string::npos );
+    }
+
+    SECTION( "Warmup carries assumptions with no invented admissions" )
+    {
+        dmSyncoSimulation::Summary source;
+        source.enabled            = true;
+        source.steps              = 3;
+        source.readerReleaseReady = true;
+        source.pipeline.enabled   = true;
+        auto input                = message( samplePrimary(), {}, source );
+        auto buffer               = envelope( input );
+        REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+        checkSimulation( GetTelem_dmsynco_fb( input.builder.GetBufferPointer() )->simulation(), source );
+    }
+
+    SECTION( "Unused legacy backend no longer constrains the virtual reader assumption" )
+    {
+        auto source      = samplePipeline();
+        source.backendNs = source.virtualReaderNs - 1;
+        auto input       = message( samplePrimary(), {}, source );
+        auto buffer      = envelope( input );
+        REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+    }
+}
+
+/// Reject malformed bounds, credit accounting, feasibility and exclusive skips without weakening older records.
+/** \ingroup dmSyncoTelemetry_unit_test */
+TEST_CASE( "Synco telemetry validates pipeline resource bounds and credit conservation", "[dmSyncoTelemetry]" )
+{
+    // clang-format off
+#ifdef DMSYNCO_TELEMETRY_TEST_DOXYGEN_REF
+    MagAOX::logger::telem_dmsynco::verify;
+#endif
+    // clang-format on
+
+    for( unsigned variant = 0; variant < 24; ++variant )
+    {
+        CAPTURE( variant );
+        auto source = samplePipeline();
+
+        switch( variant )
+        {
+        case 0:
+            source.pipeline.prepareNs = 0;
+            break;
+        case 1:
+            source.pipeline.prepareNs = 1000000001;
+            break;
+        case 2:
+            source.pipeline.sdkServiceNs = 0;
+            break;
+        case 3:
+            source.pipeline.sdkServiceNs = 1000000001;
+            break;
+        case 4:
+            source.pipeline.postNs = 0;
+            break;
+        case 5:
+            source.pipeline.postNs = 1000000001;
+            break;
+        case 6:
+            source.pipeline.capacity = 2;
+            break;
+        case 7:
+            source.pipeline.maximumInFlight = 2;
+            break;
+        case 8:
+            source.pipeline.inFlight = source.pipeline.maximumInFlight = 4;
+            break;
+        case 9:
+            ++source.pipeline.retired;
+            break;
+        case 10:
+            ++source.pipeline.discarded;
+            break;
+        case 11:
+            source.pipeline.sdkReadyNs = -1;
+            break;
+        case 12:
+            source.pipeline.postReadyNs = -1;
+            break;
+        case 13:
+            source.pipeline.maximumMainWaitNs = -1;
+            break;
+        case 14:
+            source.pipeline.mainClearanceShortfallNs = -1;
+            break;
+        case 15:
+            source.readerReleaseReady = false;
+            break;
+        case 16:
+            source.backendCycleFeasible = true;
+            break;
+        case 17:
+            source.feasible = true;
+            break;
+        case 18:
+            ++source.outcomes[1].preparationBusy;
+            break;
+        case 19:
+            ++source.outcomes[1].creditFull;
+            break;
+        case 20:
+            source.pipeline.enabled = false;
+            break;
+        case 21:
+            source.backendNs = 0;
+            break;
+        case 22:
+            source.backendNs = 1000000001;
+            break;
+        case 23:
+            source.pipeline.mainAdmitted      = std::numeric_limits<uint64_t>::max();
+            source.pipeline.auxiliaryAdmitted = 1;
+            source.pipeline.retired = source.pipeline.discarded = source.pipeline.inFlight = 0;
+            break;
+        }
+
+        auto input  = message( samplePrimary(), {}, source );
+        auto buffer = envelope( input );
+        REQUIRE_FALSE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+    }
+
+    SECTION( "A present resource table cannot disable itself" )
+    {
+        auto        input    = message( samplePrimary(), {}, samplePipeline() );
+        const auto *pipeline = GetTelem_dmsynco_fb( input.builder.GetBufferPointer() )->simulation()->pipeline();
+        omitField( pipeline, DmSyncoPipeline::VT_ENABLED );
+        auto buffer = envelope( input );
+        REQUIRE_FALSE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+    }
+
+    SECTION( "Wide admission totals retain exact conservation" )
+    {
+        auto source                       = samplePipeline();
+        source.pipeline.mainAdmitted      = std::numeric_limits<uint64_t>::max();
+        source.pipeline.auxiliaryAdmitted = std::numeric_limits<uint64_t>::max();
+        source.pipeline.retired           = std::numeric_limits<uint64_t>::max();
+        source.pipeline.discarded         = std::numeric_limits<uint64_t>::max() - source.pipeline.inFlight;
+        auto input                        = message( samplePrimary(), {}, source );
+        auto buffer                       = envelope( input );
+        REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+        checkPipeline( GetTelem_dmsynco_fb( input.builder.GetBufferPointer() )->simulation()->pipeline(),
+                       source.pipeline );
     }
 }
 

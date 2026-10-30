@@ -1880,5 +1880,137 @@ TEST_CASE( "synco readiness retains active backend provenance after passive copy
     }
 }
 
+/// Keep the pipelined mode opt-in and reject contradictory stage assumptions before acquiring a grid.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "synco pipeline configuration keeps legacy bounds separate", "[dmSyncopation][simulation][pipeline]" )
+{
+    // clang-format off
+    #ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::synco::Simulation::configure({});
+    #endif
+    // clang-format on
+    Simulation         simulation;
+    Simulation::Config config;
+    REQUIRE_FALSE( config.pipelineBackend );
+    config.pipelineBackend = true;
+    REQUIRE_FALSE( simulation.configure( config ) );
+    config.readerReleaseReady = true;
+    REQUIRE_FALSE( simulation.configure( config ) );
+    config.virtualReaderNs = 60000;
+    REQUIRE( simulation.configure( config ) );
+    REQUIRE( simulation.summary().pipeline.enabled );
+    REQUIRE( simulation.summary().pipeline.capacity == 3 );
+
+    config.backendNs = 1; // The legacy whole-backend duration is not a pipeline stage.
+    REQUIRE( simulation.configure( config ) );
+    config.pipelineSdkServiceNs = 0;
+    REQUIRE_FALSE( simulation.configure( config ) );
+}
+
+/// A measured SDK service can fit its stage while zero added main wait still excludes the final auxiliary slot.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "synco pipeline preserves zero added main SDK wait", "[dmSyncopation][simulation][pipeline]" )
+{
+    // clang-format off
+    #ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::synco::Simulation::advance(0);
+    #endif
+    // clang-format on
+    Simulation         simulation;
+    Simulation::Config config;
+    config.readerReleaseReady = config.pipelineBackend = true;
+    config.virtualReaderNs                             = 60000;
+    config.steps                                       = 3;
+    REQUIRE( simulation.configure( config ) );
+    const auto main     = warmReady( simulation );
+    const auto before   = simulation.summary().outcomes;
+    const auto admitted = simulation.summary().pipeline.auxiliaryAdmitted;
+    simulation.advance( main + 475000 );
+    const auto &summary = simulation.summary();
+    CHECK( summary.outcomes[0].wouldRun == before[0].wouldRun + 1 );
+    CHECK( summary.outcomes[1].wouldRun == before[1].wouldRun + 1 );
+    CHECK( summary.outcomes[1].backendBusy == before[1].backendBusy );
+    CHECK( summary.outcomes[2].wouldRun == before[2].wouldRun );
+    CHECK( summary.outcomes[2].backendWrap == before[2].backendWrap + 1 );
+    CHECK( summary.pipeline.auxiliaryAdmitted == admitted + 1 );
+    CHECK( summary.readerCycleFeasible );
+    CHECK( summary.pipeline.sdkCycleFeasible );
+    CHECK( summary.pipeline.postCycleFeasible );
+    CHECK( summary.pipeline.creditCycleFeasible );
+    CHECK_FALSE( summary.pipeline.mainProtectionFeasible );
+    CHECK_FALSE( summary.backendCycleFeasible );
+    CHECK_FALSE( summary.feasible );
+    CHECK( summary.pipeline.mainSdkWaits == 0 );
+    CHECK( summary.pipeline.mainCreditMisses == 0 );
+    CHECK( summary.pipeline.mainClearanceShortfallNs >= 33333 );
+    CHECK( summary.pipeline.mainAdmitted + summary.pipeline.auxiliaryAdmitted ==
+           summary.pipeline.retired + summary.pipeline.discarded + summary.pipeline.inFlight );
+}
+
+/// A conditional short-prefix scenario admits three slots while earlier post work still owns a credit.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "synco pipeline overlaps post retirement without shifting trigger targets",
+           "[dmSyncopation][simulation][pipeline]" )
+{
+    // clang-format off
+    #ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::synco::Simulation::advance(0);
+    #endif
+    // clang-format on
+    Simulation         simulation;
+    Simulation::Config config;
+    config.readerReleaseReady = config.pipelineBackend = true;
+    config.steps                                       = 3;
+    config.bounds.delivery                             = 0;
+    config.pipelinePrepareNs                           = 5000;
+    config.virtualReaderNs                             = 10000;
+    REQUIRE( simulation.configure( config ) );
+    const auto main   = warmReady( simulation );
+    const auto before = simulation.summary().outcomes;
+    const auto next   = simulation.summary().nextGridNs;
+    simulation.advance( main + 475000 );
+    const auto &summary = simulation.summary();
+    CHECK( summary.feasible );
+    CHECK( summary.outcomes[1].wouldRun == before[1].wouldRun + 1 );
+    CHECK( summary.outcomes[2].wouldRun == before[2].wouldRun + 1 );
+    CHECK( summary.nextGridNs == next );
+    CHECK( summary.periodNs == 500000 );
+    CHECK( summary.pipeline.sdkReadyNs < main + 475000 );
+    CHECK( summary.pipeline.postReadyNs > main + 475000 );
+    CHECK( summary.pipeline.inFlight > 0 );
+    CHECK( summary.pipeline.maximumInFlight <= 3 );
+    CHECK( summary.pipeline.mainSdkWaits == 0 );
+}
+
+/// Lost output provenance quarantines uncertain work instead of manufacturing an idle SDK owner.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "synco pipeline output loss retains a resource fence", "[dmSyncopation][simulation][pipeline]" )
+{
+    // clang-format off
+    #ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::synco::Simulation::combined(0,0,0);
+    #endif
+    // clang-format on
+    Simulation         simulation;
+    Simulation::Config config;
+    config.readerReleaseReady = config.pipelineBackend = true;
+    config.virtualReaderNs                             = 60000;
+    REQUIRE( simulation.configure( config ) );
+    const auto main   = warmReady( simulation );
+    const auto before = simulation.summary().pipeline;
+    simulation.combined( 41, 40, main + 50000, false );
+    CHECK( simulation.summary().outputGaps > 0 );
+    CHECK( simulation.summary().pipeline.resets == before.resets + 1 );
+    CHECK( simulation.summary().pipeline.discarded > before.discarded );
+    CHECK( simulation.summary().pipeline.inFlight == 0 );
+    CHECK( simulation.summary().pipeline.sdkReadyNs > main + 50000 );
+    simulation.primary( 41, main + 500000, 500000 );
+    simulation.combined( 42, 41, main + 510000, true, readyContext( 42 ) );
+    CHECK( simulation.summary().pipeline.mainCreditMisses == before.mainCreditMisses + 1 );
+    const auto &pipeline = simulation.summary().pipeline;
+    CHECK( pipeline.mainAdmitted + pipeline.auxiliaryAdmitted ==
+           pipeline.retired + pipeline.discarded + pipeline.inFlight );
+}
+
 } // namespace dmSyncopationTest
 } // namespace libXWCTest

@@ -197,19 +197,21 @@ struct TraceBatch
 /// Counts for one step index; modeled copies and triggers never address a DM stream.
 struct Step
 {
-    uint64_t considered{ 0 };     ///< Committed occurrences evaluated once.
-    uint64_t wouldRun{ 0 };       ///< Occurrences eligible under the explicitly configured model bounds.
-    uint64_t skipped{ 0 };        ///< Occurrences unavailable before any modeled copy starts.
-    uint64_t earlyMain{ 0 };      ///< Passive preparations cancelled by an already observed main.
-    uint64_t missingMain{ 0 };    ///< Active slots without their genuine counter-labelled main.
-    uint64_t missingOutput{ 0 };  ///< Slots without a coherent main-to-combined association.
-    uint64_t readerHold{ 0 };     ///< Slots whose actual or modeled reader hold prevents the fixed target.
-    uint64_t expired{ 0 };        ///< Obsolete slots or unavailable future timing envelopes.
-    uint64_t overlap{ 0 };        ///< Observations that could overlap a modeled copy/reader interval.
-    uint64_t releaseMissing{ 0 }; ///< No exact qualified actual-main release was available at the copy deadline.
-    uint64_t releaseLate{ 0 };    ///< Exact actual-main release was captured after the fixed copy deadline.
-    uint64_t backendBusy{ 0 };    ///< Previous assumed backend ownership extends beyond this active trigger.
-    uint64_t backendWrap{ 0 };    ///< Candidate assumed backend ownership would extend into the next main reserve.
+    uint64_t considered{ 0 };      ///< Committed occurrences evaluated once.
+    uint64_t wouldRun{ 0 };        ///< Occurrences eligible under the explicitly configured model bounds.
+    uint64_t skipped{ 0 };         ///< Occurrences unavailable before any modeled copy starts.
+    uint64_t earlyMain{ 0 };       ///< Passive preparations cancelled by an already observed main.
+    uint64_t missingMain{ 0 };     ///< Active slots without their genuine counter-labelled main.
+    uint64_t missingOutput{ 0 };   ///< Slots without a coherent main-to-combined association.
+    uint64_t readerHold{ 0 };      ///< Slots whose actual or modeled reader hold prevents the fixed target.
+    uint64_t expired{ 0 };         ///< Obsolete slots or unavailable future timing envelopes.
+    uint64_t overlap{ 0 };         ///< Observations that could overlap a modeled copy/reader interval.
+    uint64_t releaseMissing{ 0 };  ///< No exact qualified actual-main release was available at the copy deadline.
+    uint64_t releaseLate{ 0 };     ///< Exact actual-main release was captured after the fixed copy deadline.
+    uint64_t backendBusy{ 0 };     ///< Previous whole-backend or pipeline SDK ownership blocks the active slot.
+    uint64_t backendWrap{ 0 };     ///< Whole-backend hold or pipeline SDK service conflicts with the next main.
+    uint64_t preparationBusy{ 0 }; ///< Monitor preparation would delay this fixed auxiliary target.
+    uint64_t creditFull{ 0 };      ///< All bounded pipeline credits would remain owned at admission.
 };
 
 /// Coherent observer evidence; available time is capture, never the earlier publisher endpoint.
@@ -234,6 +236,37 @@ struct ReadinessQuality
     uint64_t identityMismatch{ 0 }; ///< Same sequence or combined counter carried contradictory raw identity.
     uint64_t sdkFailed{ 0 };        ///< Explicit SDK failures that revoke readiness until recovery.
     uint64_t queueDrops{ 0 };       ///< App-reported transport drops, counted exactly.
+};
+
+/// Optional conditional preparation, serialized SDK and ordered post-resource model.
+struct Pipeline
+{
+    bool enabled{ false }; ///< Startup-only pipeline-aware shadow selection; never authorizes a hardware write.
+
+    int64_t prepareNs{ 35000 };     ///< Assumed serialized command-preparation duration.
+    int64_t sdkServiceNs{ 120000 }; ///< Assumed native-entry through SDK-worker-ready service duration.
+    int64_t postNs{ 150000 };       ///< Assumed independent serialized post-service duration.
+
+    uint64_t capacity{ 3 };          ///< Fixed private command-credit capacity, matching the controller pipeline.
+    uint64_t inFlight{ 0 };          ///< Currently reserved or admitted credits whose modeled retirement is pending.
+    uint64_t maximumInFlight{ 0 };   ///< Maximum simultaneous owned credits in the current model session.
+    uint64_t mainAdmitted{ 0 };      ///< Genuine main commands represented by modeled resource admissions.
+    uint64_t auxiliaryAdmitted{ 0 }; ///< Conditional active auxiliary admissions, never physical deliveries.
+    uint64_t retired{ 0 };           ///< Modeled main/auxiliary jobs whose credits have been released.
+    uint64_t discarded{ 0 };         ///< Owned jobs fenced out by resource resets without modeled retirement.
+    uint64_t mainSdkWaits{ 0 };      ///< Genuine mains whose SDK entry is delayed by monitor or SDK ownership.
+    uint64_t mainCreditMisses{ 0 };  ///< Genuine mains arriving while every command credit is occupied.
+    uint64_t resets{ 0 };            ///< Resource-model fences clearing pending work after evidence loss.
+
+    int64_t sdkReadyNs{ 0 };        ///< Modeled end of the last reserved SDK service, zero without work.
+    int64_t postReadyNs{ 0 };       ///< Modeled end of the last reserved ordered post service.
+    int64_t maximumMainWaitNs{ 0 }; ///< Largest added main-entry delay from monitor preparation and SDK queue waits.
+    int64_t mainClearanceShortfallNs{ 0 }; ///< Largest modeled reader/SDK clearance overrun beyond the earliest main.
+
+    bool sdkCycleFeasible{ false };       ///< Nominal serialized SDK service can fit the requested cadence.
+    bool postCycleFeasible{ false };      ///< Nominal serialized post service can fit the requested cadence.
+    bool creditCycleFeasible{ false };    ///< Nominal pipeline occupancy can fit the fixed command-credit pool.
+    bool mainProtectionFeasible{ false }; ///< Nominal auxiliary service preserves the configured main reserve.
 };
 
 /// Coherent snapshot copied outside monitor callbacks for INDI and telemetry.
@@ -292,6 +325,7 @@ struct Summary
     bool    backendCycleFeasible{ false }; ///< Nominal backend occupancy can fit all slots and the early-main reserve.
     Readiness        latestRelease; ///< Latest qualified release; cleared whenever its source evidence is revoked.
     ReadinessQuality readiness;     ///< Current-session early-release source quality.
+    Pipeline         pipeline;      ///< Optional independent preparation, SDK and post-resource assumptions/state.
 };
 
 } // namespace dmSyncoSimulation

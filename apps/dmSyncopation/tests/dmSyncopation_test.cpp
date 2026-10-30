@@ -4,6 +4,7 @@
  */
 #include "../../../tests/testXWC.hpp"
 #include "../dmSyncopation.hpp"
+#include "../../../INDI/libcommon/IndiXmlParser.hpp"
 
 #include <atomic>
 #include <filesystem>
@@ -148,6 +149,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_indiP_simulation;
     using dmSyncopation::m_indiP_simulationCadence;
     using dmSyncopation::m_indiP_simulationEstimator;
+    using dmSyncopation::m_indiP_simulationPipeline;
     using dmSyncopation::m_indiP_simulationStatus;
     using dmSyncopation::m_indiP_simulationSteps;
     using dmSyncopation::m_indiP_simulationTrace;
@@ -196,10 +198,14 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_simulationEstimatorStatus;
     using dmSyncopation::m_simulationPhaseGain;
     using dmSyncopation::m_simulationPhaseSlewUs;
+    using dmSyncopation::m_simulationPipelineBackend;
+    using dmSyncopation::m_simulationPostUs;
+    using dmSyncopation::m_simulationPrepareUs;
     using dmSyncopation::m_simulationReaderReleaseReady;
     using dmSyncopation::m_simulationReferenceFps;
     using dmSyncopation::m_simulationReleaseEpoch;
     using dmSyncopation::m_simulationReleaseQueue;
+    using dmSyncopation::m_simulationSdkServiceUs;
     using dmSyncopation::m_simulationSnapshot;
     using dmSyncopation::m_simulationTraceLogFailed;
     using dmSyncopation::m_simulationTraceStatus;
@@ -5861,6 +5867,257 @@ TEST_CASE( "syncopation signal readiness rejects nonpositive or nonfinite assump
     CHECK( app.loadConfigImpl( app.config ) < 0 );
     CHECK_FALSE( app.m_resources );
     CHECK_FALSE( app.m_enabled );
+}
+
+/// Pipeline shadow needs explicit signal-qualified simulation and preserves every existing operational timing bound.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation pipeline shadow validates startup dependencies and ignores legacy backend geometry",
+           "[dmSyncopation][simulation][pipeline]" )
+{
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::setupConfig;
+    dmSyncopation::loadConfigImpl;
+    dmSyncopation::configureSimulation;
+#endif
+    // clang-format on
+    const bool simulation = GENERATE( false, true );
+    const bool readiness  = GENERATE( false, true );
+    const bool observer   = GENERATE( false, true );
+    Harness    app;
+    app.setupConfig();
+    CHECK_FALSE( app.m_simulationPipelineBackend );
+    CHECK( app.m_simulationPrepareUs == 35 );
+    CHECK( app.m_simulationSdkServiceUs == 120 );
+    CHECK( app.m_simulationPostUs == 150 );
+    const auto bounds     = app.m_bounds;
+    char       path[]     = "/tmp/synco-pipeline-config-XXXXXX";
+    const int  descriptor = mkstemp( path );
+    REQUIRE( descriptor >= 0 );
+    ::close( descriptor );
+
+    {
+        std::ofstream settings( path );
+        settings << "[simulation]\npipelineBackend=true\nvirtualReaderUs=60\nbackendUs=1\n"
+                 << "enabled=" << ( simulation ? "true" : "false" )
+                 << "\nreaderReleaseReady=" << ( readiness ? "true" : "false" ) << '\n';
+
+        if( observer )
+        {
+            settings << "[readerReleaseMonitor]\nshmimName=early_read_done\n";
+        }
+    }
+
+    app.config.readConfig( path );
+    std::remove( path );
+    const bool valid = simulation && readiness && observer;
+    CHECK( ( app.loadConfigImpl( app.config ) == 0 ) == valid );
+
+    if( valid )
+    {
+        const auto &summary = app.m_simulation.summary();
+        CHECK( summary.pipeline.enabled );
+        CHECK( summary.pipeline.prepareNs == 35000 );
+        CHECK( summary.pipeline.sdkServiceNs == 120000 );
+        CHECK( summary.pipeline.postNs == 150000 );
+        CHECK( summary.pipeline.capacity == 3 );
+        CHECK( summary.virtualReaderNs == 60000 );
+        CHECK( summary.backendNs == 1000 );
+        CHECK( app.m_bounds.keepout == bounds.keepout );
+        CHECK( app.m_bounds.guard == bounds.guard );
+        CHECK( app.m_bounds.delivery == bounds.delivery );
+        CHECK( app.m_bounds.early == bounds.early );
+        CHECK_FALSE( app.m_enabled );
+        CHECK_FALSE( app.m_resources );
+    }
+}
+
+/// Reject impossible or unbounded resource assumptions before callbacks or shared-stream attachments start.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation pipeline shadow rejects invalid service durations", "[dmSyncopation][simulation][pipeline]" )
+{
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::loadConfigImpl;
+#endif
+    // clang-format on
+    const std::string key =
+        GENERATE( std::string( "prepareUs" ), std::string( "sdkServiceUs" ), std::string( "postUs" ) );
+    const std::string value = GENERATE(
+        std::string( "-1" ), std::string( "0" ), std::string( "nan" ), std::string( "inf" ), std::string( "1000001" ) );
+    Harness app;
+    app.setupConfig();
+    char      path[]     = "/tmp/synco-pipeline-duration-XXXXXX";
+    const int descriptor = mkstemp( path );
+    REQUIRE( descriptor >= 0 );
+    ::close( descriptor );
+
+    {
+        std::ofstream settings( path );
+        settings << "[simulation]\nenabled=true\nreaderReleaseReady=true\npipelineBackend=true\nvirtualReaderUs=60\n"
+                 << key << '=' << value << "\n[readerReleaseMonitor]\nshmimName=early_read_done\n";
+    }
+
+    app.config.readConfig( path );
+    std::remove( path );
+    CHECK( app.loadConfigImpl( app.config ) < 0 );
+    CHECK_FALSE( app.m_enabled );
+    CHECK_FALSE( app.m_resources );
+}
+
+/// Reader protection covers delivery and preparation together, including explicitly overridden delivery bounds.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation pipeline virtual reader covers delivery plus preparation",
+           "[dmSyncopation][simulation][pipeline]" )
+{
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::loadConfigImpl;
+#endif
+    // clang-format on
+    const unsigned delivery = GENERATE( 20, 30 );
+    const unsigned reader   = GENERATE( 54, 55, 60, 65 );
+    Harness        app;
+    app.setupConfig();
+    char      path[]     = "/tmp/synco-pipeline-reader-XXXXXX";
+    const int descriptor = mkstemp( path );
+    REQUIRE( descriptor >= 0 );
+    ::close( descriptor );
+
+    {
+        std::ofstream settings( path );
+        settings << "[simulation]\nenabled=true\nreaderReleaseReady=true\npipelineBackend=true\nprepareUs=35\n"
+                 << "virtualReaderUs=" << reader << "\n[readerReleaseMonitor]\nshmimName=early_read_done\n"
+                 << "[scheduler]\ndeliveryUs=" << delivery << '\n';
+    }
+
+    app.config.readConfig( path );
+    std::remove( path );
+    CHECK( ( app.loadConfigImpl( app.config ) == 0 ) == ( reader >= delivery + 35 ) );
+    CHECK_FALSE( app.m_enabled );
+    CHECK_FALSE( app.m_resources );
+}
+
+/// Read back resource assumptions and credit accounting without allowing a pipeline shadow to write DM commands.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation pipeline INDI exposes conditional resources while live scheduling stays disabled",
+           "[dmSyncopation][simulation][pipeline][indi]" )
+{
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::setupSimulationINDI;
+    dmSyncopation::updateSimulationINDI;
+    dmSyncopation::newCallBack_m_indiP_enable;
+    dmSyncopation::allocate( dev::shmimT{} );
+#endif
+    // clang-format on
+    Streams          streams;
+    CompletionStream release;
+    Harness          app;
+    const bool       pipeline       = GENERATE( false, true );
+    app.m_simulationPipelineBackend = pipeline;
+    app.m_simulationVirtualReaderUs = 60;
+    prepareReleaseReadiness( app, streams );
+    app.localDriver( streams.directory );
+    app.properties();
+    REQUIRE( app.setupSimulationINDI() == 0 );
+
+    if( pipeline )
+    {
+        const auto xml =
+            pcf::IndiXmlParser( pcf::IndiMessage( pcf::IndiMessage::Define, app.m_indiP_simulationPipeline ), "1.7" )
+                .createXmlString();
+        CHECK( xml.find( "<defNumberVector" ) != std::string::npos );
+        CHECK( app.m_indiP_simulationPipeline.getPerm() == pcf::IndiProperty::ReadOnly );
+        CHECK( app.m_indiP_simulationPipeline["prepareUs"].get<double>() == 35 );
+        CHECK( app.m_indiP_simulationPipeline["sdkServiceUs"].get<double>() == 120 );
+        CHECK( app.m_indiP_simulationPipeline["postUs"].get<double>() == 150 );
+        CHECK( app.m_indiP_simulationPipeline["readerUs"].get<double>() == 60 );
+    }
+    else
+    {
+        CHECK( app.m_indiP_simulationPipeline.getElements().empty() );
+        CHECK_FALSE( app.m_indiP_simulationSteps.find( "step1PreparationBusy" ) );
+        CHECK_FALSE( app.m_indiP_simulationSteps.find( "step1CreditFull" ) );
+    }
+
+    app.m_simulationSnapshot = app.m_simulation.summary();
+
+    if( pipeline )
+    {
+        auto &resource                                       = app.m_simulationSnapshot.pipeline;
+        resource.mainAdmitted                                = 7;
+        resource.auxiliaryAdmitted                           = 11;
+        resource.retired                                     = 13;
+        resource.discarded                                   = 2;
+        resource.inFlight                                    = 3;
+        resource.maximumInFlight                             = 3;
+        resource.mainSdkWaits                                = 2;
+        resource.mainCreditMisses                            = 1;
+        resource.resets                                      = 1;
+        resource.sdkReadyNs                                  = 1234000000;
+        resource.postReadyNs                                 = 1235000000;
+        resource.maximumMainWaitNs                           = 4000;
+        resource.mainClearanceShortfallNs                    = 5000;
+        resource.sdkCycleFeasible                            = true;
+        resource.postCycleFeasible                           = true;
+        resource.creditCycleFeasible                         = true;
+        resource.mainProtectionFeasible                      = false;
+        app.m_simulationSnapshot.feasible                    = false;
+        app.m_simulationSnapshot.outcomes[1].preparationBusy = 2;
+        app.m_simulationSnapshot.outcomes[1].creditFull      = 3;
+    }
+
+    app.updateSimulationINDI();
+
+    if( pipeline )
+    {
+        for( const auto &[name, value] :
+             std::vector<std::pair<const char *, double>>{ { "enabled", 1 },
+                                                           { "deliveryUs", 20 },
+                                                           { "prepareUs", 35 },
+                                                           { "readerUs", 60 },
+                                                           { "sdkServiceUs", 120 },
+                                                           { "postUs", 150 },
+                                                           { "capacity", 3 },
+                                                           { "inFlight", 3 },
+                                                           { "maximumInFlight", 3 },
+                                                           { "mainAdmitted", 7 },
+                                                           { "auxiliaryAdmitted", 11 },
+                                                           { "retired", 13 },
+                                                           { "discarded", 2 },
+                                                           { "mainSdkWaits", 2 },
+                                                           { "mainCreditMisses", 1 },
+                                                           { "resets", 1 },
+                                                           { "sdkReadyNs", 1234000000 },
+                                                           { "postReadyNs", 1235000000 },
+                                                           { "maxMainWaitUs", 4 },
+                                                           { "mainClearanceShortfallUs", 5 },
+                                                           { "sdkCycleFeasible", 1 },
+                                                           { "postCycleFeasible", 1 },
+                                                           { "creditCycleFeasible", 1 },
+                                                           { "mainProtectionFeasible", 0 } } )
+        {
+            CHECK( app.m_indiP_simulationPipeline[name].get<double>() == value );
+        }
+
+        CHECK( app.m_indiP_simulationSteps["step1PreparationBusy"].get<double>() == 2 );
+        CHECK( app.m_indiP_simulationSteps["step1CreditFull"].get<double>() == 3 );
+        CHECK( app.m_indiP_simulationStatus["state"].get() ==
+               "conditional pipeline; resource or main protection limited" );
+        CHECK( app.m_indiP_simulationStatus["policy"].get().find( "zero added main SDK wait" ) != std::string::npos );
+    }
+
+    auto enable      = app.m_indiP_enable;
+    enable["toggle"] = pcf::IndiElement::On;
+    CHECK( app.newCallBack_m_indiP_enable( enable ) < 0 );
+    CHECK_FALSE( app.m_enabled );
+    CHECK_FALSE( app.m_resources );
+    CHECK( app.m_mappings.empty() );
+    CHECK( app.m_timing.md == nullptr );
+    CHECK( app.m_delivered == 0 );
+    CHECK( streams.images[2].md->cnt0 == 0 );
+    CHECK( streams.images[3].md->cnt0 == 0 );
 }
 
 /// Use raw coherent-capture availability rather than producer finish time or an ordinary timing summary.

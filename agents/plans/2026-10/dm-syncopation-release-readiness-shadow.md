@@ -1246,3 +1246,235 @@ configuration settings, DM commands or operational synco changes. Compare
 `sdkService` directly against native `sdk`, and use `sdkTail` to locate the added
 worker occupancy. Retain reader/full completion, post latency and admission/
 overload diagnostics for the later pipeline shadow model.
+
+## Instrument SDK service capture: `synco-sim-20261030T061730Z`
+
+The new capture contains 120 synco summaries from **2026-10-30
+06:17:28.675734762–06:19:28.915794761 UTC** (120.240060 s; October 29,
+23:17:28–23:19:28 Phoenix time) and 121 valid controller timing summaries.
+The saved checkout is `1ebd7ec5068365a9d5f5819fd0ad1d0ce21e8dae`. All snapshots
+succeed, their error files are empty, and collectors return expected status 124.
+Both new metrics are populated, establishing that the running controller and
+reader support the new measurement independently of the saved checkout hash.
+
+The operator confirms modal gains remain zero and settings, CPU/IRQ placement
+and workload are unchanged apart from rebuilding/restarting `bmcCtrl` and
+`logdump`. The loop is closed with scalar gain 1 and effective gain zero;
+dmcomb remains in mode 4. Camera settings remain bin2, 2 kHz, EM gain 1, shutter
+OPEN, synchronization On and target −45 °C. RTC latency is On at both boundaries.
+SDK scheduling remains actual FIFO55 with one permitted CPU, and post remains
+ordinary priority 0 with 60 permitted CPUs. Exact masks are not saved.
+
+### Measured SDK-worker occupancy
+
+All values below are microseconds. Typical means the median of the reported
+two-second window means; each maximum is taken directly from its own population.
+
+| Measurement | Typical | Recorded minimum | Recorded maximum |
+| --- | ---: | ---: | ---: |
+| Native `sdk` duration | 104.561 | 104.076 | 111.150 |
+| `sdkTail`: native return to worker ready | 2.234 | 1.263 | 4.820 |
+| `sdkService`: native entry to worker ready | **106.796** | **105.580** | **113.444** |
+
+This answers the worker-occupancy question: the measured maximum through
+readiness is **113.444 us**, including result publication and handoff. It is a
+direct per-command interval, without adding independent SDK/tail maxima or
+including the roughly 500 us idle spacing between input commands. In the 99
+summaries with identical populations, the means satisfy service = native + tail
+within printed precision. Other windows can retain one additional tail sample
+because its later start endpoint falls inside the trailing window; this does
+not indicate loss or require equal population counts.
+
+The SDK and service maxima first appear at **06:17:58.941344532 UTC**. Their
+shared window does not establish that they are the same command. The separate
+tail maximum occurs at **06:19:03.061982175 UTC**, whose service maximum is only
+109.387 us. No new raw per-command worst-event record identifies those jobs.
+
+A nominal 6 kHz interval is 166.667 us, leaving **53.223 us** beyond the largest
+recorded worker service duration. That is arithmetic SDK-resource headroom;
+delivery, next-request selection/native entry, preparation, independent reader
+clearance, early-main reserves and three-credit post retirement still need
+their own treatment. This 2 kHz measurement does not establish sustained 6 kHz
+operation. In particular, the old 155 us single-backend assumption cannot simply
+be replaced by the native-entry-to-ready measurement while retaining its old
+trigger/observation anchors.
+
+### Controller and completion health
+
+Controller timing totals add **240,452** events/receipts/submissions with no new
+failures, no-send events, invalid timestamps, duplicates, counter gaps or drops.
+Before/after INDI reports admitted +240,452 and native completed/retired
++240,451, with one job in flight at the last boundary. Fault, admission-closed,
+overload, vector rejection, supersession, qualification loss and preparation/post
+failures remain zero; rejected stays at its startup value 2 and coalesced at 0.
+
+Typical controller reader release is 29.294 us (maximum 38.042 us), and
+receipt-to-native-return is 128.151 us (maximum 135.736 us). Receipt-to-post timing
+finish remains 146.842 us typically and reaches **243.891 us**; private-product
+publication reaches 100.620 us in that same window. The window's native duration
+is at most 109.737 us and SDK service at most 112.072 us. Thus that long post
+latency does not represent extended native execution or SDK-worker occupancy.
+These different-start populations cannot be subtracted to manufacture a pure
+post duration for an unidentified command.
+
+Both reader observers add **240,480** primary/combined/completion matches, with
+no new incoherent captures, gaps, missing peers, qualification failures,
+sequence loss or drops. Early producer processing is typically 29.560 us,
+maximum 38.402 us; full producer processing is 146.511 us, maximum 243.530 us.
+Observed holds reach 42.751/245.203 us for early/full respectively. Notification
+maxima are 9.728/55.916 us. Current maxima cannot be decomposed into a single
+identified event from the independent aggregates. All retained raw lifetime
+worst-event snapshots predate this run and refer to older controller PIDs.
+
+### Shadow and camera observations
+
+The existing three-step shadow retains reader 30 us, backend 155 us and guard
+20 us; it still does not model the separate pipeline resources. New outcomes:
+
+| Step | Considered | Would run | Skipped | Skip reasons |
+| --- | ---: | ---: | ---: | --- |
+| 0 | 240,480 | 240,480 | 0 | None |
+| 1 | 240,480 | 85,524 | 154,956 | 154,955 backend busy; 1 release late |
+| 2 | 240,480 | 0 | 240,480 | 240,480 backend wrap |
+
+There are no new modeled overlaps, output gaps or resets. The single late-release
+increment first appears at **06:18:09.095397389 UTC**. The raw readiness gate adds
+240,480 observed and qualified releases without any new quality loss. Cadence
+accepts 120 updates with no rejection, retains 58–64 anchors and reports periods
+499999.862128–500000.749100 ns; sampled phase is −7.386 to +6.800 us.
+
+Camera acquisition/publication interval means remain 500.000250/500.000336 us,
+with typical rolling deviations 0.291/0.837 us. Actual camera telemetry adds
+238,535 published frames, with no new frame/counter gaps, duplicates, errors or
+drops, and 11 successful serial controls. Synco's two camera observers each
+count eight duplicates and two counter gaps in two separate bursts; these are
+observer quality changes, without corresponding camera publication loss.
+
+An isolated delivery excursion is visible in the camera summary at
+**06:18:08.548212317 UTC**: acquisition intervals remain 498–502 us, while SDK
+wait-return intervals span 391.449–608.509 us and publication intervals span
+392.481–607.667 us. Acquisition-to-write reaches 154.832 us, while conversion
+peaks at 31.128 us, rearm at 5.230 us and serial overlap is zero in that window.
+The roughly 108 us excursion is therefore already present at camera SDK wait
+return. Its window overlaps the late-release decision, but the aggregate records
+do not establish exact cross-device command identity or causation. No frame loss
+or frame-behind state is demonstrated by these statistics.
+
+The useful next scheduler evaluation is a pipeline-aware shadow using measured
+SDK service separately from preparation/reader clearance and post-credit
+retirement. This analysis changes only the engineering record; no runtime bound,
+settings or code is changed.
+
+## Pipeline-aware simulator implementation
+
+After reviewing the service capture, the operator authorized separating the
+shadow's delivery/preparation, SDK-worker service and post-credit retirement.
+The operator explicitly chose **zero added main SDK wait**. No minimum future
+main preparation interval or allowed main-wait budget is introduced.
+
+### Resource model and decision semantics
+
+The new `syncoPipelineSimulation.hpp` helper owns three fixed private leases and
+independent serialized monitor, SDK and ordered-post stages. A coherent genuine
+main is modeled from its observed combined command; a hypothetical auxiliary is
+modeled from its fixed trigger. Delivery precedes monitor preparation. The private
+vector can reach the SDK while monitor staging continues, and a subsequent SDK
+service can run while an earlier job still owns a post credit. A job's post stage
+requires both staged readers and SDK readiness. Final post retirement frees its
+credit.
+
+The helper advances bounded events only through caller time. Auxiliary admission
+forecasts use fixed-storage copies of the model, without committing future stage
+execution. Rejected forecasts retain the existing resource state; accepted
+auxiliaries reserve a credit at the copy decision while their future inputs remain
+pending. Input-time ordering handles a genuine main arriving before an already
+reserved future auxiliary. Services already started are never preempted. The model
+does not implement native queued-vector coalescing/supersession.
+
+An auxiliary is skipped if its preparation or SDK entry would queue, no credit is
+available, or its modeled readers/SDK would remain busy at the earliest next main.
+At least one credit must also be available for that main. The earliest-main test
+uses the existing reserves with **zero** preparation-time credit. An unexpectedly
+early main can still violate those assumptions after a decision was committed;
+`mainSdkWaits`/`maximumMainWaitNs` retain the predicted added monitor-plus-SDK queue
+delay, and `mainCreditMisses` retains model admission/quarantine failures. These
+counts describe the hypothetical resource model, not actual controller failures.
+
+All prior fixed copy/trigger targets and exact actual-main release gates remain.
+Release evidence cannot retire a virtual SDK or credit. Raw backend-overlap-at-input
+logic is retained only by the legacy mode: input arrival during an SDK service does
+not prove added SDK wait when preparation can overlap it. New resource diagnostics
+describe that conflict at the modeled SDK-entry boundary instead.
+
+Model reset projects existing leases through drain before discarding their
+identities, preserving a cooldown fence. Incoherent combined associations add a
+conservative unknown-command quarantine. Neither event manufactures an idle SDK or
+free replacement credit. Known retirement, discard and in-flight accounting obeys
+`mainAdmitted + auxiliaryAdmitted = retired + discarded + inFlight`. Resource
+counters/maxima survive fences and schedule resets until fresh configuration;
+per-step outcomes remain tied to their existing simulation session.
+
+### Configuration, telemetry and initial test
+
+The startup-only `simulation.pipelineBackend` defaults false. It requires
+simulation, exact reader-release gating and the existing release observer. Prior
+simulation/operational behavior remains selected by default. The additive
+`dmtweeter_synco_pipeline_shadow.conf` requests three steps and enables:
+
+| Assumption | Value | Anchor/ownership |
+| --- | ---: | --- |
+| Existing delivery | 20 us | Observation/trigger to controller input |
+| `simulation.prepareUs` | 35 us | Preparation start to private vector availability |
+| `simulation.virtualReaderUs` | 60 us | Total trigger-to-last-read interval, including delivery |
+| `simulation.sdkServiceUs` | 120 us | Native entry to worker readiness |
+| `simulation.postUs` | 150 us | Serialized post work through credit release |
+| Private credits | 3 | Shared by all stages; fixed capacity |
+
+These are explicit conditional assumptions, not qualified hardware bounds. SDK
+service includes about 6.6 us above the recorded maximum. Post service includes
+unmeasured completion-publication/retirement tails and is an assumption; the model
+does not claim that all historical long post excursions fit it. `virtualReaderUs`
+must cover delivery plus preparation. The legacy `backendUs` remains a valid
+configuration/readback but is unused in this mode.
+
+With the preset, SDK/post/credit geometry each fits nominal 166.667 us slots, but
+the last trigger at 333.333 us would clear SDK service at 508.333 us. The earliest
+next main is 475 us. Zero added main wait therefore vetoes that slot, recording a
+33.333 us `mainClearanceShortfallUs`; the preset deliberately does not assert full
+6 kHz feasibility. This diagnostic is a prospective clearance overrun, not a
+recommendation to alter the early-main reserve. A short-prefix conditional fixture
+exercises all three slots and verifies SDK progress while post work still owns a
+credit, without weakening zero-main-wait protection.
+
+The new read-only `simulation_pipeline` property exposes assumptions, occupancy,
+admission/retirement/discard conservation, retrospective main-delay diagnostics,
+clearance shortfall and separate SDK, post, credit and main-protection feasibility.
+New per-step reasons are `PreparationBusy` and `CreditFull`; the existing backend
+reasons identify SDK contention and next-main protection in this mode. Optional
+appended binary tables/fields retain historical reader compatibility; text labels
+the new mode `shadow_pipeline`. Live enable remains prohibited in simulation, and
+no new stream writer, semaphore poster or controller command path is introduced.
+
+### Verification and operator follow-up
+
+| Suite | Assertions | Cases |
+| --- | ---: | ---: |
+| Pure grid/resource integration, including legacy modes | 53,812 | 53 |
+| Independent three-stage resource helper | 230 | 12 |
+| Application configuration, INDI and write prohibitions | 11,917 | 81 |
+| Telemetry, malformed inputs and historical compatibility | 7,529 | 36 |
+| **Total** | **73,488** | **182** |
+
+Tests cover overlap, exact resource boundaries, future arrivals, fixed targets,
+rejection nonmutation, credit exhaustion, added main queuing, overflow, reset/source
+quarantine, independent feasibility and unchanged legacy behavior. Independent
+reviews find no blocking helper/integration issue. Shared library/PCH, production
+`dmSyncopation` and `logdump` builds pass. Changed C++ files are clang-formatted;
+whitespace, Markdown fences and documentation links are checked.
+
+The operator can rebuild/install `dmSyncopation` and `logdump`, merge the additive
+preset into the current instance configuration, and repeat the bounded simultaneous
+capture with operational synco Off and existing BMC/CPU/camera/loop settings retained.
+The [procedure](../../../apps/dmSyncopation/doc/readiness-shadow-test.md#pipeline-resource-shadow)
+defines the new assumptions and readbacks. All implementation and verification work
+is workstation-only; no instrument configuration or hardware commands are executed.

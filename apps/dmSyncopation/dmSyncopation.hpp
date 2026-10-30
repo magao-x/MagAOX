@@ -233,14 +233,18 @@ class dmSyncopation : public MagAOXApp<true>,
     bool     m_diagnosticsOnly{ false };         ///< Observe arbitrary primary metadata without attaching DM resources.
     bool     m_simulationEnabled{ false };       ///< Startup-only shadow policy; live scheduling is prohibited.
     bool     m_simulationReaderReleaseReady{ false }; ///< Use timestamped actual-main read release in shadow decisions.
-    double   m_simulationVirtualReaderUs{ 30 }; ///< Assumed virtual auxiliary reader duration; not measured release.
-    double   m_simulationBackendUs{ 155 };      ///< Assumed whole backend occupancy, including delivery and retirement.
-    unsigned m_simulationWindow{ 32 };          ///< Bounded counter-normalized median phase window.
-    double   m_simulationCadenceWindowSec{ 10 }; ///< Requested counter/time cadence baseline, seconds.
-    double   m_simulationCadenceUpdateSec{ 1 };  ///< Minimum cadence refresh interval, seconds.
-    double   m_simulationPhaseGain{ 0.1 };       ///< Future-grid phase smoothing gain.
-    double   m_simulationPhaseSlewUs{ 1 };       ///< Maximum phase correction per newly planned cycle, us.
-    synco::Bounds m_bounds;                      ///< Explicit copy, observation and reader bounds, ns.
+    bool   m_simulationPipelineBackend{ false }; ///< Independently model preparation, SDK and post resources in shadow.
+    double m_simulationVirtualReaderUs{ 30 };    ///< Assumed auxiliary trigger-to-last-read duration, us; not measured.
+    double m_simulationBackendUs{ 155 };         ///< Legacy whole-backend occupancy; ignored by pipeline shadow.
+    double m_simulationPrepareUs{ 35 };          ///< Assumed serialized controller preparation duration, us.
+    double m_simulationSdkServiceUs{ 120 };      ///< Assumed SDK entry-to-worker-ready service duration, us.
+    double m_simulationPostUs{ 150 };            ///< Assumed independent ordered post-service duration, us.
+    unsigned      m_simulationWindow{ 32 };      ///< Bounded counter-normalized median phase window.
+    double        m_simulationCadenceWindowSec{ 10 }; ///< Requested counter/time cadence baseline, seconds.
+    double        m_simulationCadenceUpdateSec{ 1 };  ///< Minimum cadence refresh interval, seconds.
+    double        m_simulationPhaseGain{ 0.1 };       ///< Future-grid phase smoothing gain.
+    double        m_simulationPhaseSlewUs{ 1 };       ///< Maximum phase correction per newly planned cycle, us.
+    synco::Bounds m_bounds;                           ///< Explicit copy, observation and reader bounds, ns.
     ///@}
 
     std::mutex        m_cycleMutex; ///< Serializes lifecycle/configuration with a complete callback.
@@ -367,10 +371,11 @@ class dmSyncopation : public MagAOXApp<true>,
     pcf::IndiProperty m_indiP_simulation;        ///< Conditional grid, phase and collection-quality diagnostics.
     pcf::IndiProperty m_indiP_simulationCadence; ///< Long-baseline cadence state, coverage and independent freshness.
     pcf::IndiProperty
-        m_indiP_simulationReadiness;            ///< Signal-qualified main readiness and explicit virtual assumptions.
-    pcf::IndiProperty m_indiP_simulationSteps;  ///< Per-step hypothetical outcomes; never actual deliveries.
-    pcf::IndiProperty m_indiP_simulationStatus; ///< Shadow state and conditional-policy identification.
-    pcf::IndiProperty m_indiP_simulationTrace;  ///< Read-only overlap capture, drain and loss counters.
+        m_indiP_simulationReadiness;              ///< Signal-qualified main readiness and explicit virtual assumptions.
+    pcf::IndiProperty m_indiP_simulationPipeline; ///< Optional separate-resource assumptions and bounded-credit state.
+    pcf::IndiProperty m_indiP_simulationSteps;    ///< Per-step hypothetical outcomes; never actual deliveries.
+    pcf::IndiProperty m_indiP_simulationStatus;   ///< Shadow state and conditional-policy identification.
+    pcf::IndiProperty m_indiP_simulationTrace;    ///< Read-only overlap capture, drain and loss counters.
     pcf::IndiProperty m_indiP_simulationEstimator; ///< Read-only estimator pre/post history coverage and losses.
     pcf::IndiProperty m_indiP_primaryTiming; ///< Continuous observed primary publication/receipt statistics in seconds.
     pcf::IndiProperty
@@ -734,8 +739,12 @@ inline void dmSyncopation::setupConfig()
         { "diagnostics.pipeline", "Observe the primary producer's bounded upstream processing trace." },
         { "simulation.enabled", "Observe a conditional fixed-grid policy without copying or triggering DM commands." },
         { "simulation.readerReleaseReady", "Gate actual-main shadow reader clearance on exact observed release." },
-        { "simulation.virtualReaderUs", "Assumed virtual auxiliary reader duration, us; not measured evidence." },
-        { "simulation.backendUs", "Assumed complete backend occupancy, us, including delivery and retirement." },
+        { "simulation.pipelineBackend", "Model separate preparation, SDK and ordered post resources in shadow." },
+        { "simulation.virtualReaderUs", "Assumed total auxiliary trigger-to-last-read duration, us; not measured." },
+        { "simulation.backendUs", "Legacy whole-backend occupancy, us; ignored by pipeline shadow." },
+        { "simulation.prepareUs", "Assumed serialized preparation duration, us; pipeline shadow only." },
+        { "simulation.sdkServiceUs", "Assumed SDK entry-to-worker-ready duration, us; pipeline shadow only." },
+        { "simulation.postUs", "Assumed serialized post-service duration, us; pipeline shadow only." },
         { "simulation.window", "Counter-normalized median phase sample count (4-256)." },
         { "simulation.cadenceWindowSec", "Requested counter/time cadence baseline, seconds (default 10)." },
         { "simulation.cadenceUpdateSec", "Minimum cadence refresh interval, seconds (default 1)." },
@@ -794,8 +803,12 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
     config( m_diagnosticsOnly, "diagnostics.only" );
     config( m_simulationEnabled, "simulation.enabled" );
     config( m_simulationReaderReleaseReady, "simulation.readerReleaseReady" );
+    config( m_simulationPipelineBackend, "simulation.pipelineBackend" );
     config( m_simulationVirtualReaderUs, "simulation.virtualReaderUs" );
     config( m_simulationBackendUs, "simulation.backendUs" );
+    config( m_simulationPrepareUs, "simulation.prepareUs" );
+    config( m_simulationSdkServiceUs, "simulation.sdkServiceUs" );
+    config( m_simulationPostUs, "simulation.postUs" );
     config( m_simulationWindow, "simulation.window" );
     config( m_simulationCadenceWindowSec, "simulation.cadenceWindowSec" );
     config( m_simulationCadenceUpdateSec, "simulation.cadenceUpdateSec" );
@@ -803,9 +816,13 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
     config( m_simulationPhaseSlewUs, "simulation.phaseSlewUs" );
 
     if( ( m_simulationReaderReleaseReady && ( !m_simulationEnabled || readerReleaseMonitorT::m_shmimName.empty() ) ) ||
+        ( m_simulationPipelineBackend && ( !m_simulationEnabled || !m_simulationReaderReleaseReady ) ) ||
         !finite( m_simulationVirtualReaderUs ) || m_simulationVirtualReaderUs <= 0 ||
         m_simulationVirtualReaderUs > 1000000 || !finite( m_simulationBackendUs ) || m_simulationBackendUs <= 0 ||
-        m_simulationBackendUs > 1000000 ||
+        m_simulationBackendUs > 1000000 || !finite( m_simulationPrepareUs ) || m_simulationPrepareUs <= 0 ||
+        m_simulationPrepareUs > 1000000 || !finite( m_simulationSdkServiceUs ) || m_simulationSdkServiceUs <= 0 ||
+        m_simulationSdkServiceUs > 1000000 || !finite( m_simulationPostUs ) || m_simulationPostUs <= 0 ||
+        m_simulationPostUs > 1000000 ||
         ( m_simulationEnabled && ( m_diagnosticsOnly || !m_combinerDiagnostics || m_primaryCadenceWindow <= 0 ) ) ||
         m_simulationWindow < 4 || m_simulationWindow > 256 || !finite( m_simulationPhaseGain ) ||
         m_simulationPhaseGain <= 0 || m_simulationPhaseGain > 1 || !finite( m_simulationPhaseSlewUs ) ||
@@ -868,6 +885,13 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
         }
         m_bounds.*entry.second = int64_t( std::ceil( value * 1000 ) );
     }
+
+    if( m_simulationPipelineBackend && int64_t( std::ceil( m_simulationVirtualReaderUs * 1000 ) ) <
+                                           m_bounds.delivery + int64_t( std::ceil( m_simulationPrepareUs * 1000 ) ) )
+    {
+        return -1;
+    }
+
     if( m_timingName.empty() )
     {
         m_timingName = configName() + "_timing";
@@ -966,21 +990,25 @@ inline bool dmSyncopation::configureSimulation( double seedRate )
     const double rate =
         seedRate > 0 ? seedRate : ( m_simulationReferenceFps > 0 ? m_simulationReferenceFps : m_nominalRate );
     synco::Simulation::Config settings;
-    settings.bounds             = m_bounds;
-    settings.steps              = m_requested;
-    settings.readerReleaseReady = m_simulationReaderReleaseReady;
-    settings.virtualReaderNs    = int64_t( std::ceil( m_simulationVirtualReaderUs * 1000 ) );
-    settings.backendNs          = int64_t( std::ceil( m_simulationBackendUs * 1000 ) );
-    settings.window             = m_simulationWindow;
-    settings.nominalPeriod      = int64_t( std::llround( 1e9 / rate ) );
-    settings.cadenceWindowNs    = int64_t( std::llround( m_simulationCadenceWindowSec * 1e9 ) );
-    settings.cadenceUpdateNs    = int64_t( std::llround( m_simulationCadenceUpdateSec * 1e9 ) );
-    settings.minInterval        = int64_t( 1e9 / m_maxRate );
-    settings.maxInterval        = int64_t( std::ceil( 1e9 / m_minRate ) );
-    settings.phaseGain          = m_simulationPhaseGain;
-    settings.phaseSlew          = int64_t( std::ceil( m_simulationPhaseSlewUs * 1000 ) );
-    settings.timeout            = int64_t( std::ceil( 2e9 / m_minRate ) );
-    const double cadenceMinimum = std::ceil( m_requested * 1e9 / ( m_maxCadence * ( 1 + m_rateTolerance ) ) );
+    settings.bounds               = m_bounds;
+    settings.steps                = m_requested;
+    settings.readerReleaseReady   = m_simulationReaderReleaseReady;
+    settings.pipelineBackend      = m_simulationPipelineBackend;
+    settings.virtualReaderNs      = int64_t( std::ceil( m_simulationVirtualReaderUs * 1000 ) );
+    settings.backendNs            = int64_t( std::ceil( m_simulationBackendUs * 1000 ) );
+    settings.pipelinePrepareNs    = int64_t( std::ceil( m_simulationPrepareUs * 1000 ) );
+    settings.pipelineSdkServiceNs = int64_t( std::ceil( m_simulationSdkServiceUs * 1000 ) );
+    settings.pipelinePostNs       = int64_t( std::ceil( m_simulationPostUs * 1000 ) );
+    settings.window               = m_simulationWindow;
+    settings.nominalPeriod        = int64_t( std::llround( 1e9 / rate ) );
+    settings.cadenceWindowNs      = int64_t( std::llround( m_simulationCadenceWindowSec * 1e9 ) );
+    settings.cadenceUpdateNs      = int64_t( std::llround( m_simulationCadenceUpdateSec * 1e9 ) );
+    settings.minInterval          = int64_t( 1e9 / m_maxRate );
+    settings.maxInterval          = int64_t( std::ceil( 1e9 / m_minRate ) );
+    settings.phaseGain            = m_simulationPhaseGain;
+    settings.phaseSlew            = int64_t( std::ceil( m_simulationPhaseSlewUs * 1000 ) );
+    settings.timeout              = int64_t( std::ceil( 2e9 / m_minRate ) );
+    const double cadenceMinimum   = std::ceil( m_requested * 1e9 / ( m_maxCadence * ( 1 + m_rateTolerance ) ) );
 
     if( !finite( cadenceMinimum ) || cadenceMinimum > 1e12 )
     {
@@ -1311,6 +1339,68 @@ inline int dmSyncopation::setupSimulationINDI()
                 m_indiP_simulationSteps.add( pcf::IndiElement( "step" + std::to_string( step ) + suffix ) );
             }
         }
+
+        if( m_simulationPipelineBackend )
+        {
+            for( const auto *suffix : { "PreparationBusy", "CreditFull" } )
+            {
+                const auto name = "step" + std::to_string( step ) + suffix;
+                m_indiP_simulationSteps.add( pcf::IndiElement( name ) );
+                m_indiP_simulationSteps[name].setMin( 0 );
+                m_indiP_simulationSteps[name].setMax( std::numeric_limits<double>::max() );
+                m_indiP_simulationSteps[name].setStep( 1 );
+                m_indiP_simulationSteps[name].setFormat( "%g" );
+                m_indiP_simulationSteps[name] = 0.0;
+            }
+        }
+    }
+
+    if( m_simulationPipelineBackend )
+    {
+        REG_INDI_NEWPROP_NOCB( m_indiP_simulationPipeline, "simulation_pipeline", pcf::IndiProperty::Number );
+        m_indiP_simulationPipeline.setPerm( pcf::IndiProperty::ReadOnly );
+        m_indiP_simulationPipeline.setState( pcf::IndiProperty::Idle );
+
+        for( const auto *name : { "enabled",
+                                  "deliveryUs",
+                                  "prepareUs",
+                                  "readerUs",
+                                  "sdkServiceUs",
+                                  "postUs",
+                                  "capacity",
+                                  "inFlight",
+                                  "maximumInFlight",
+                                  "mainAdmitted",
+                                  "auxiliaryAdmitted",
+                                  "retired",
+                                  "discarded",
+                                  "mainSdkWaits",
+                                  "mainCreditMisses",
+                                  "resets",
+                                  "sdkReadyNs",
+                                  "postReadyNs",
+                                  "maxMainWaitUs",
+                                  "mainClearanceShortfallUs",
+                                  "sdkCycleFeasible",
+                                  "postCycleFeasible",
+                                  "creditCycleFeasible",
+                                  "mainProtectionFeasible" } )
+        {
+            m_indiP_simulationPipeline.add( pcf::IndiElement( name ) );
+            m_indiP_simulationPipeline[name].setMin( 0 );
+            m_indiP_simulationPipeline[name].setMax( std::numeric_limits<double>::max() );
+            m_indiP_simulationPipeline[name].setStep( 0 );
+            m_indiP_simulationPipeline[name].setFormat( "%g" );
+            m_indiP_simulationPipeline[name] = 0.0;
+        }
+
+        m_indiP_simulationPipeline["enabled"]      = 1.0;
+        m_indiP_simulationPipeline["deliveryUs"]   = m_bounds.delivery / 1000.0;
+        m_indiP_simulationPipeline["prepareUs"]    = m_simulationPrepareUs;
+        m_indiP_simulationPipeline["readerUs"]     = m_simulationVirtualReaderUs;
+        m_indiP_simulationPipeline["sdkServiceUs"] = m_simulationSdkServiceUs;
+        m_indiP_simulationPipeline["postUs"]       = m_simulationPostUs;
+        m_indiP_simulationPipeline["capacity"]     = 3.0;
     }
 
     if( m_simulationReaderReleaseReady )
@@ -1464,6 +1554,13 @@ inline void dmSyncopation::updateSimulationINDI()
                              double( outcome.backendBusy ),
                              double( outcome.backendWrap ) } );
         }
+
+        if( m_simulationPipelineBackend )
+        {
+            names.push_back( "step" + std::to_string( step ) + "PreparationBusy" );
+            names.push_back( "step" + std::to_string( step ) + "CreditFull" );
+            values.insert( values.end(), { double( outcome.preparationBusy ), double( outcome.creditFull ) } );
+        }
     }
 
     updateIfChanged( m_indiP_simulationSteps, names, values, state );
@@ -1503,18 +1600,92 @@ inline void dmSyncopation::updateSimulationINDI()
               release.observedNs > 0 && s.nowNs >= release.observedNs ? ( s.nowNs - release.observedNs ) / 1e9 : -1.0 },
             state );
     }
-    updateIfChanged( m_indiP_simulationStatus,
-                     "state",
-                     std::string( !s.valid ? "warming or stale"
-                                           : ( s.feasible ? "conditional grid ready"
-                                                          : ( s.readerReleaseReady && s.readerCycleFeasible
-                                                                  ? "conditional slots; backend bound limits full cycle"
-                                                                  : "infeasible" ) ) ) );
-    updateIfChanged( m_indiP_simulationStatus,
-                     "policy",
-                     std::string( s.readerReleaseReady
-                                      ? "shadow release gate; virtual readers/backend assumed; reserve undecided"
-                                      : "shadow only; timing bounds assumed; reserve undecided" ) );
+
+    if( m_simulationPipelineBackend )
+    {
+        const auto &pipeline = s.pipeline;
+        updateIfChanged<double>( m_indiP_simulationPipeline,
+                                 { "enabled",
+                                   "deliveryUs",
+                                   "prepareUs",
+                                   "readerUs",
+                                   "sdkServiceUs",
+                                   "postUs",
+                                   "capacity",
+                                   "inFlight",
+                                   "maximumInFlight",
+                                   "mainAdmitted",
+                                   "auxiliaryAdmitted",
+                                   "retired",
+                                   "discarded",
+                                   "mainSdkWaits",
+                                   "mainCreditMisses",
+                                   "resets",
+                                   "sdkReadyNs",
+                                   "postReadyNs",
+                                   "maxMainWaitUs",
+                                   "mainClearanceShortfallUs",
+                                   "sdkCycleFeasible",
+                                   "postCycleFeasible",
+                                   "creditCycleFeasible",
+                                   "mainProtectionFeasible" },
+                                 { pipeline.enabled ? 1.0 : 0.0,
+                                   m_bounds.delivery / 1000.0,
+                                   pipeline.prepareNs / 1000.0,
+                                   s.virtualReaderNs / 1000.0,
+                                   pipeline.sdkServiceNs / 1000.0,
+                                   pipeline.postNs / 1000.0,
+                                   double( pipeline.capacity ),
+                                   double( pipeline.inFlight ),
+                                   double( pipeline.maximumInFlight ),
+                                   double( pipeline.mainAdmitted ),
+                                   double( pipeline.auxiliaryAdmitted ),
+                                   double( pipeline.retired ),
+                                   double( pipeline.discarded ),
+                                   double( pipeline.mainSdkWaits ),
+                                   double( pipeline.mainCreditMisses ),
+                                   double( pipeline.resets ),
+                                   double( pipeline.sdkReadyNs ),
+                                   double( pipeline.postReadyNs ),
+                                   pipeline.maximumMainWaitNs / 1000.0,
+                                   pipeline.mainClearanceShortfallNs / 1000.0,
+                                   pipeline.sdkCycleFeasible ? 1.0 : 0.0,
+                                   pipeline.postCycleFeasible ? 1.0 : 0.0,
+                                   pipeline.creditCycleFeasible ? 1.0 : 0.0,
+                                   pipeline.mainProtectionFeasible ? 1.0 : 0.0 },
+                                 state );
+    }
+
+    std::string status = "warming or stale";
+
+    if( s.valid )
+    {
+        if( s.pipeline.enabled )
+        {
+            status = s.feasible ? "conditional pipeline grid ready"
+                                : "conditional pipeline; resource or main protection limited";
+        }
+        else if( s.feasible )
+        {
+            status = "conditional grid ready";
+        }
+        else
+        {
+            status = s.readerReleaseReady && s.readerCycleFeasible
+                         ? "conditional slots; backend bound limits full cycle"
+                         : "infeasible";
+        }
+    }
+
+    updateIfChanged( m_indiP_simulationStatus, "state", status );
+    updateIfChanged(
+        m_indiP_simulationStatus,
+        "policy",
+        std::string( s.pipeline.enabled
+                         ? "shadow pipeline; resources assumed; zero added main SDK wait; reserve undecided"
+                         : ( s.readerReleaseReady
+                                 ? "shadow release gate; virtual readers/backend assumed; reserve undecided"
+                                 : "shadow only; timing bounds assumed; reserve undecided" ) ) );
     const auto &trace = m_simulationTraceStatus;
     updateIfChanged(
         m_indiP_simulationTrace,

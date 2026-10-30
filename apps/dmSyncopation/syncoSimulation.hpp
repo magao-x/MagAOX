@@ -11,6 +11,7 @@
 
 #include "syncoSchedule.hpp"
 #include "syncoCadence.hpp"
+#include "syncoPipelineSimulation.hpp"
 #include "../../libMagAOX/common/dmSyncoSimulation.hpp"
 
 namespace MagAOX
@@ -42,6 +43,10 @@ class Simulation
         bool     readerReleaseReady{ false }; ///< Use exact observed main reader release instead of a fixed main hold.
         int64_t  virtualReaderNs{ 30000 };    ///< Assumed auxiliary trigger-to-last-reader duration.
         int64_t  backendNs{ 155000 };         ///< Assumed output/trigger-to-whole-backend-ready duration.
+        bool     pipelineBackend{ false };    ///< Model preparation, serialized SDK service and three post credits.
+        int64_t  pipelinePrepareNs{ 35000 };  ///< Controller receipt through prepared SDK-vector availability.
+        int64_t  pipelineSdkServiceNs{ 120000 }; ///< Native entry through worker readiness, excluding idle wait.
+        int64_t  pipelinePostNs{ 150000 };       ///< Serialized post work through release of a private job credit.
     };
 
     /// Validate configuration and begin a fresh simulation with empty estimators.
@@ -135,13 +140,14 @@ class Simulation
         Command  key;            ///< Exact combined identity retained before its primary is observed.
     };
 
-    std::array<Link, 4>                m_links{};        ///< Bounded future-output association buffer.
-    size_t                             m_linkCount{ 0 }; ///< Initialized future-output links.
-    Config                             m_config;         ///< Immutable configuration after configure.
-    MagAOX::dmSyncoSimulation::Summary m_summary;        ///< Current-session conditional diagnostics and grid state.
-    std::array<int64_t, 256>           m_intervals{};    ///< Fixed publication-interval ring.
-    std::array<Point, 256>             m_points{};       ///< Fixed counter-labelled phase ring.
-    std::array<int64_t, 256>           m_scratch{};      ///< Median workspace; no event-path allocation.
+    std::array<Link, 4> m_links{};                ///< Bounded future-output association buffer.
+    size_t              m_linkCount{ 0 };         ///< Initialized future-output links.
+    Config              m_config;                 ///< Immutable configuration after configure.
+    PipelineSimulation  m_pipeline;               ///< Independent modeled stage owners; no controller or stream access.
+    MagAOX::dmSyncoSimulation::Summary m_summary; ///< Current-session conditional diagnostics and grid state.
+    std::array<int64_t, 256>           m_intervals{};        ///< Fixed publication-interval ring.
+    std::array<Point, 256>             m_points{};           ///< Fixed counter-labelled phase ring.
+    std::array<int64_t, 256>           m_scratch{};          ///< Median workspace; no event-path allocation.
     size_t                             m_intervalCount{ 0 }; ///< Number of initialized interval entries.
     size_t                             m_intervalNext{ 0 };  ///< Next interval ring replacement.
     size_t                             m_pointCount{ 0 };    ///< Number of initialized phase entries.
@@ -290,8 +296,30 @@ inline void Simulation::feasibility( int64_t period )
     const int64_t tail = std::max( b.lead, b.early + b.observation + b.visibility );
     m_summary.readerCycleFeasible =
         gap >= m_config.virtualReaderNs + b.guard + b.copy + tail + b.reserve && gap > b.snapshot + b.copy + b.reserve;
-    m_summary.backendCycleFeasible =
-        gap >= m_config.backendNs && ( m_config.steps == 1 || gap >= m_config.backendNs + b.early + b.observation );
+    if( m_config.pipelineBackend )
+    {
+        m_summary.pipeline         = m_pipeline.summary();
+        auto &pipeline             = m_summary.pipeline;
+        pipeline.sdkCycleFeasible  = gap >= m_config.pipelineSdkServiceNs;
+        pipeline.postCycleFeasible = gap >= m_config.pipelinePostNs;
+        const __int128 lifetime    = __int128( b.delivery ) +
+                                  std::max( __int128( m_config.pipelinePrepareNs ) + m_config.pipelineSdkServiceNs,
+                                            __int128( m_config.virtualReaderNs ) - b.delivery ) +
+                                  m_config.pipelinePostNs;
+        pipeline.creditCycleFeasible = lifetime <= __int128( pipeline.capacity ) * gap;
+        pipeline.mainProtectionFeasible =
+            m_config.steps == 1 || __int128( gap ) >= std::max( __int128( b.delivery ) + m_config.pipelinePrepareNs +
+                                                                    m_config.pipelineSdkServiceNs,
+                                                                __int128( m_config.virtualReaderNs ) ) +
+                                                          b.early + b.observation;
+        m_summary.backendCycleFeasible = pipeline.sdkCycleFeasible && pipeline.postCycleFeasible &&
+                                         pipeline.creditCycleFeasible && pipeline.mainProtectionFeasible;
+    }
+    else
+    {
+        m_summary.backendCycleFeasible =
+            gap >= m_config.backendNs && ( m_config.steps == 1 || gap >= m_config.backendNs + b.early + b.observation );
+    }
     m_summary.feasible =
         m_summary.readerCycleFeasible && m_summary.backendCycleFeasible && period >= m_config.cadenceMinPeriod;
 }
@@ -560,8 +588,9 @@ inline bool Simulation::configure( const Config &config )
         config.timeout < 2 * config.nominalPeriod || config.timeout > 1000000000000LL || config.cadenceMinPeriod < 0 ||
         config.cadenceMinPeriod > 1000000000000LL || config.cadenceUpdateNs <= 0 ||
         config.cadenceWindowNs < config.cadenceUpdateNs || config.cadenceWindowNs > 1000000000000LL ||
-        config.virtualReaderNs <= 0 || config.virtualReaderNs > 1000000000 ||
-        config.backendNs < config.virtualReaderNs || config.backendNs > 1000000000 ||
+        config.virtualReaderNs <= 0 || config.virtualReaderNs > 1000000000 || config.backendNs <= 0 ||
+        ( !config.pipelineBackend && config.backendNs < config.virtualReaderNs ) || config.backendNs > 1000000000 ||
+        ( config.pipelineBackend && !config.readerReleaseReady ) ||
         __int128( config.cadenceWindowNs ) >
             __int128( MagAOX::dmSyncoSimulation::cadenceAnchorCapacity - 1 ) * config.cadenceUpdateNs )
     {
@@ -590,6 +619,25 @@ inline bool Simulation::configure( const Config &config )
     if( b.visibility == 0 || b.reserve == 0 || b.snapshot == 0 || b.copy == 0 )
     {
         return false;
+    }
+
+    if( config.pipelineBackend )
+    {
+        PipelineSimulation::Config pipeline;
+        pipeline.deliveryNs   = b.delivery;
+        pipeline.prepareNs    = config.pipelinePrepareNs;
+        pipeline.readerNs     = config.virtualReaderNs;
+        pipeline.sdkServiceNs = config.pipelineSdkServiceNs;
+        pipeline.postNs       = config.pipelinePostNs;
+
+        if( !m_pipeline.configure( pipeline ) )
+        {
+            return false;
+        }
+    }
+    else
+    {
+        m_pipeline = {};
     }
 
     const uint64_t session = m_summary.enabled ? m_summary.session : 0;
@@ -641,6 +689,18 @@ inline void Simulation::reset()
     m_summary.readerReleaseReady = m_config.readerReleaseReady;
     m_summary.virtualReaderNs    = m_config.virtualReaderNs;
     m_summary.backendNs          = m_config.backendNs;
+
+    if( m_config.pipelineBackend )
+    {
+        const auto &pipeline = m_pipeline.summary();
+
+        if( pipeline.mainAdmitted || pipeline.auxiliaryAdmitted || pipeline.resets )
+        {
+            m_pipeline.reset();
+        }
+
+        m_summary.pipeline = m_pipeline.summary();
+    }
     m_intervalCount = m_intervalNext = m_pointCount = m_pointNext = m_planCount = 0;
     m_linkCount                                                                 = 0;
     m_haveMain = m_haveCombined = m_mainOutput = false;
@@ -913,7 +973,8 @@ inline void Simulation::evaluate( Plan &entry, int step )
             return;
         }
 
-        if( step && ( __int128( actual ) + m_config.backendNs > target || m_virtualBackend > target ) )
+        if( !m_config.pipelineBackend && step &&
+            ( __int128( actual ) + m_config.backendNs > target || m_virtualBackend > target ) )
         {
             skip( entry, step, &Outcome::backendBusy );
             return;
@@ -932,7 +993,7 @@ inline void Simulation::evaluate( Plan &entry, int step )
     const __int128 readerEnd = __int128( target ) + ( m_config.readerReleaseReady ? m_config.virtualReaderNs + b.guard
                                                                                   : b.delivery + b.keepout + b.guard );
 
-    if( m_config.readerReleaseReady && step &&
+    if( m_config.readerReleaseReady && !m_config.pipelineBackend && step &&
         ( !nextGrid || __int128( target ) + m_config.backendNs > __int128( nextGrid ) - b.early - b.observation ) )
     {
         skip( entry, step, &Outcome::backendWrap );
@@ -943,6 +1004,39 @@ inline void Simulation::evaluate( Plan &entry, int step )
     {
         skip( entry, step, &Outcome::expired );
         return;
+    }
+
+    if( m_config.pipelineBackend && step )
+    {
+        const auto result =
+            m_pipeline.auxiliary( entry.counter, step, start, target, nextGrid - b.early - b.observation );
+        using Result = PipelineSimulation::Result;
+
+        if( result != Result::accepted )
+        {
+            if( result == Result::prepareBusy )
+            {
+                skip( entry, step, &Outcome::preparationBusy );
+            }
+            else if( result == Result::creditsFull || result == Result::mainCreditsFull )
+            {
+                skip( entry, step, &Outcome::creditFull );
+            }
+            else if( result == Result::sdkBusy )
+            {
+                skip( entry, step, &Outcome::backendBusy );
+            }
+            else if( result == Result::mainSdkBusy )
+            {
+                skip( entry, step, &Outcome::backendWrap );
+            }
+            else
+            {
+                skip( entry, step, &Outcome::expired );
+            }
+
+            return;
+        }
     }
 
     entry.done[step] = true;
@@ -962,9 +1056,9 @@ inline void Simulation::evaluate( Plan &entry, int step )
     if( step )
     {
         m_virtualHold    = int64_t( readerEnd );
-        m_virtualBackend = m_config.readerReleaseReady ? target + m_config.backendNs : 0;
+        m_virtualBackend = m_config.readerReleaseReady && !m_config.pipelineBackend ? target + m_config.backendNs : 0;
 
-        if( m_config.readerReleaseReady )
+        if( m_config.readerReleaseReady && !m_config.pipelineBackend )
         {
             m_backendPlan                 = {};
             m_backendPlan.step            = step;
@@ -1015,7 +1109,7 @@ inline void Simulation::overlap( uint64_t                                      m
 {
     const bool copying = m_copyBegin && observed >= m_copyBegin && observed < m_copyEnd;
     const bool reading = m_copyBegin && m_copyStep > 0 && observed >= m_copyEnd && observed < m_virtualHold;
-    const bool backend = m_config.readerReleaseReady && m_backendPlan.backendEndNs > 0 &&
+    const bool backend = m_config.readerReleaseReady && !m_config.pipelineBackend && m_backendPlan.backendEndNs > 0 &&
                          observed >= m_backendPlan.readerEndNs && observed < m_backendPlan.backendEndNs;
     const bool backendOnly = !copying && !reading && backend;
 
@@ -1046,7 +1140,8 @@ inline void Simulation::overlap( uint64_t                                      m
             event.copyBeginNs     = m_copyBegin;
             event.copyEndNs       = m_copyEnd;
             event.readerEndNs     = m_copyStep > 0 ? m_virtualHold : 0;
-            event.backendEndNs    = m_config.readerReleaseReady && m_copyStep > 0 ? m_virtualBackend : 0;
+            event.backendEndNs =
+                m_config.readerReleaseReady && !m_config.pipelineBackend && m_copyStep > 0 ? m_virtualBackend : 0;
         }
 
         event.id              = m_traceDetected;
@@ -1071,6 +1166,12 @@ inline void Simulation::overlap( uint64_t                                      m
 inline void Simulation::badOutput()
 {
     ++m_summary.outputGaps;
+
+    if( m_config.pipelineBackend )
+    {
+        m_pipeline.invalidate( m_summary.nowNs );
+    }
+
     m_mainOutput    = false;
     m_mainOutputKey = {};
 
@@ -1153,7 +1254,20 @@ inline void Simulation::through( int64_t now, bool inclusive )
             break;
         }
 
+        if( m_config.pipelineBackend )
+        {
+            m_pipeline.advance( earliest );
+        }
+
         evaluate( *selected, step );
+    }
+
+    if( m_config.pipelineBackend )
+    {
+        m_pipeline.advance( now );
+        feasibility( m_summary.cadence.periodQ32
+                         ? int64_t( m_summary.cadence.periodQ32 / MagAOX::dmSyncoSimulation::periodScale )
+                         : m_summary.periodNs );
     }
 
     m_summary.nowNs = now;
@@ -1426,6 +1540,7 @@ inline void Simulation::combined( uint64_t                                      
 
     m_haveCombined    = true;
     m_combinedCounter = counter;
+    bool pipelineMain = false;
 
     if( !progression || !coherent )
     {
@@ -1448,6 +1563,7 @@ inline void Simulation::combined( uint64_t                                      
         {
             m_links[m_linkCount++] = {
                 primaryCounter, observed, true, { context.streamInode, counter, context.publicationNs } };
+            pipelineMain = true;
         }
     }
     else if( primaryCounter != m_summary.counter || m_mainOutput )
@@ -1460,12 +1576,18 @@ inline void Simulation::combined( uint64_t                                      
         m_mainOutput    = true;
         m_outputTime    = observed;
         m_mainOutputKey = { context.streamInode, counter, context.publicationNs };
+        pipelineMain    = true;
 
         if( auto *entry = plan( primaryCounter ) )
         {
             entry->output    = observed;
             entry->outputKey = m_mainOutputKey;
         }
+    }
+
+    if( m_config.pipelineBackend && pipelineMain )
+    {
+        m_pipeline.main( counter, observed );
     }
 
     through( observed, true );

@@ -168,6 +168,8 @@ table DmSyncoSimulationStep
     release_late:ulong;
     backend_busy:ulong;
     backend_wrap:ulong;
+    preparation_busy:ulong;
+    credit_full:ulong;
 }
 
 // Trigger provenance and overlap classification; all interval boundaries below are half-open.
@@ -355,6 +357,34 @@ table DmSyncoSimulation
     estimator_trace:DmSyncoEstimatorTrace;
     cadence:DmSyncoCadence;
     readiness:DmSyncoReadiness;
+    pipeline:DmSyncoPipeline;
+}
+
+// Conditional pipeline resources; fixed credits include future accepted auxiliary reservations.
+table DmSyncoPipeline
+{
+    enabled:bool;
+    prepare_ns:long;
+    sdk_service_ns:long;
+    post_ns:long;
+    capacity:ulong;
+    in_flight:ulong;
+    maximum_in_flight:ulong;
+    main_admitted:ulong;
+    auxiliary_admitted:ulong;
+    retired:ulong;
+    discarded:ulong;
+    main_sdk_waits:ulong;
+    main_credit_misses:ulong;
+    resets:ulong;
+    sdk_ready_ns:long;
+    post_ready_ns:long;
+    maximum_main_wait_ns:long;
+    main_clearance_shortfall_ns:long;
+    sdk_cycle_feasible:bool;
+    post_cycle_feasible:bool;
+    credit_cycle_feasible:bool;
+    main_protection_feasible:bool;
 }
 
 // Raw publication fields identify producers and are never subtracted from the monotonic observer clock.

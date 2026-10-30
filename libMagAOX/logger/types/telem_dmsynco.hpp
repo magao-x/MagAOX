@@ -109,6 +109,11 @@ struct telem_dmsynco : public flatbuffer_log
     readinessTiming( flatbuffers::FlatBufferBuilder   &builder /**< [in/out] Destination builder. */,
                      const dmSyncoSimulation::Summary &summary /**< [in] Conditional readiness model. */ );
 
+    /// Serialize optional pipeline assumptions, reserved credits and main-service diagnostics.
+    static flatbuffers::Offset<DmSyncoPipeline>
+    pipelineSimulation( flatbuffers::FlatBufferBuilder    &builder /**< [in/out] Destination builder. */,
+                        const dmSyncoSimulation::Pipeline &pipeline /**< [in] Conditional pipeline resources. */ );
+
     /// Serialize optional reader-protection measurements with signed offsets and lifetime worst provenance.
     static flatbuffers::Offset<DmSyncoReaderTiming>
     readerTiming( flatbuffers::FlatBufferBuilder &builder /**< [in/out] destination builder */,
@@ -171,7 +176,11 @@ struct telem_dmsynco : public flatbuffer_log
     static bool validReaderSample( const DmSyncoReaderSample *sample /**< [in] lifetime matched-command evidence */ );
 
     /// Validate optional shadow readiness assumptions and actual main-reader-release provenance.
-    static bool validReadiness( const DmSyncoReadiness *readiness /**< [in] Optional new-mode readiness record. */ );
+    static bool validReadiness( const DmSyncoReadiness *readiness /**< [in] Optional new-mode readiness record. */,
+                                bool pipeline = false /**< [in] Independent pipeline replaces legacy backend hold. */ );
+
+    /// Validate bounded conditional pipeline assumptions and exact command-credit conservation.
+    static bool validPipeline( const DmSyncoPipeline *pipeline /**< [in] Optional pipeline resource snapshot. */ );
 
     /// Check optional shadow model readiness and independently counted step outcomes.
     static bool validSimulation( const DmSyncoSimulation *summary /**< [in] optional conditional simulation */ );
@@ -631,6 +640,40 @@ inline flatbuffers::Offset<DmSyncoReadiness> telem_dmsynco::readinessTiming( fla
                                    quality );
 }
 
+inline flatbuffers::Offset<DmSyncoPipeline>
+telem_dmsynco::pipelineSimulation( flatbuffers::FlatBufferBuilder    &builder,
+                                   const dmSyncoSimulation::Pipeline &pipeline )
+{
+    if( !pipeline.enabled )
+    {
+        return {};
+    }
+
+    return CreateDmSyncoPipeline( builder,
+                                  pipeline.enabled,
+                                  pipeline.prepareNs,
+                                  pipeline.sdkServiceNs,
+                                  pipeline.postNs,
+                                  pipeline.capacity,
+                                  pipeline.inFlight,
+                                  pipeline.maximumInFlight,
+                                  pipeline.mainAdmitted,
+                                  pipeline.auxiliaryAdmitted,
+                                  pipeline.retired,
+                                  pipeline.discarded,
+                                  pipeline.mainSdkWaits,
+                                  pipeline.mainCreditMisses,
+                                  pipeline.resets,
+                                  pipeline.sdkReadyNs,
+                                  pipeline.postReadyNs,
+                                  pipeline.maximumMainWaitNs,
+                                  pipeline.mainClearanceShortfallNs,
+                                  pipeline.sdkCycleFeasible,
+                                  pipeline.postCycleFeasible,
+                                  pipeline.creditCycleFeasible,
+                                  pipeline.mainProtectionFeasible );
+}
+
 inline flatbuffers::Offset<DmSyncoSimulation>
 telem_dmsynco::simulationTiming( flatbuffers::FlatBufferBuilder      &builder,
                                  const dmSyncoSimulation::Summary    &summary,
@@ -659,7 +702,9 @@ telem_dmsynco::simulationTiming( flatbuffers::FlatBufferBuilder      &builder,
                                                       step.releaseMissing,
                                                       step.releaseLate,
                                                       step.backendBusy,
-                                                      step.backendWrap ) );
+                                                      step.backendWrap,
+                                                      step.preparationBusy,
+                                                      step.creditFull ) );
     }
 
     const auto outcomes  = builder.CreateVector( steps );
@@ -667,6 +712,7 @@ telem_dmsynco::simulationTiming( flatbuffers::FlatBufferBuilder      &builder,
     const auto estimator = estimatorTrace( builder, trace );
     const auto cadence   = cadenceTiming( builder, summary.cadence );
     const auto readiness = readinessTiming( builder, summary );
+    const auto pipeline  = pipelineSimulation( builder, summary.pipeline );
 
     return CreateDmSyncoSimulation( builder,
                                     summary.enabled,
@@ -713,7 +759,8 @@ telem_dmsynco::simulationTiming( flatbuffers::FlatBufferBuilder      &builder,
                                     evidence,
                                     estimator,
                                     cadence,
-                                    readiness );
+                                    readiness,
+                                    pipeline );
 }
 
 inline flatbuffers::Offset<DmSyncoReaderCompletion> telem_dmsynco::readerCompletion(
@@ -1496,7 +1543,7 @@ inline bool telem_dmsynco::validEstimatorTrace( const DmSyncoEstimatorTrace *tra
     return true;
 }
 
-inline bool telem_dmsynco::validReadiness( const DmSyncoReadiness *readiness )
+inline bool telem_dmsynco::validReadiness( const DmSyncoReadiness *readiness, bool pipeline )
 {
     if( !readiness )
     {
@@ -1506,7 +1553,8 @@ inline bool telem_dmsynco::validReadiness( const DmSyncoReadiness *readiness )
     const auto *quality = readiness->total();
 
     if( !readiness->reader_release_ready() || readiness->virtual_reader_ns() <= 0 ||
-        readiness->virtual_reader_ns() > 1000000000 || readiness->backend_ns() < readiness->virtual_reader_ns() ||
+        readiness->virtual_reader_ns() > 1000000000 || readiness->backend_ns() <= 0 ||
+        ( !pipeline && readiness->backend_ns() < readiness->virtual_reader_ns() ) ||
         readiness->backend_ns() > 1000000000 || !quality || quality->qualified() > quality->observed() ||
         quality->invalid() > quality->observed() || quality->incoherent() > quality->observed() ||
         quality->duplicates() > quality->observed() || quality->identity_mismatch() > quality->observed() ||
@@ -1540,6 +1588,27 @@ inline bool telem_dmsynco::validReadiness( const DmSyncoReadiness *readiness )
                        ( record.backendResult == dmCompletion::unavailableResult || record.backendResult == 0 ) );
 }
 
+inline bool telem_dmsynco::validPipeline( const DmSyncoPipeline *pipeline )
+{
+    if( !pipeline )
+    {
+        return true;
+    }
+
+    if( !pipeline->enabled() || pipeline->prepare_ns() <= 0 || pipeline->prepare_ns() > 1000000000 ||
+        pipeline->sdk_service_ns() <= 0 || pipeline->sdk_service_ns() > 1000000000 || pipeline->post_ns() <= 0 ||
+        pipeline->post_ns() > 1000000000 || pipeline->capacity() != 3 ||
+        pipeline->in_flight() > pipeline->maximum_in_flight() || pipeline->maximum_in_flight() > pipeline->capacity() ||
+        pipeline->sdk_ready_ns() < 0 || pipeline->post_ready_ns() < 0 || pipeline->maximum_main_wait_ns() < 0 ||
+        pipeline->main_clearance_shortfall_ns() < 0 )
+    {
+        return false;
+    }
+
+    return __int128( pipeline->main_admitted() ) + pipeline->auxiliary_admitted() ==
+           __int128( pipeline->retired() ) + pipeline->discarded() + pipeline->in_flight();
+}
+
 inline bool telem_dmsynco::validSimulation( const DmSyncoSimulation *summary )
 {
     if( !summary )
@@ -1557,8 +1626,9 @@ inline bool telem_dmsynco::validSimulation( const DmSyncoSimulation *summary )
         summary->guard_ns() < 0 || summary->snapshot_ns() < 0 || summary->copy_ns() < 0 || summary->lead_ns() < 0 ||
         summary->observation_ns() < 0 || summary->visibility_ns() < 0 || summary->reserve_ns() < 0 ||
         !validOverlapTrace( summary->overlap_trace() ) || !validEstimatorTrace( summary->estimator_trace() ) ||
-        !validReadiness( summary->readiness() ) || ( summary->readiness() && !summary->enabled() ) ||
-        !validCadence( summary->cadence() ) ||
+        !validReadiness( summary->readiness(), summary->pipeline() != nullptr ) ||
+        !validPipeline( summary->pipeline() ) || ( summary->readiness() && !summary->enabled() ) ||
+        ( summary->pipeline() && !summary->readiness() ) || !validCadence( summary->cadence() ) ||
         ( summary->cadence() && ( !validPeriod( summary->cadence()->period_q32(), summary->period_ns() ) ||
                                   summary->cadence()->observation_ns() > summary->now_ns() ) ) ||
         !mx::math::isFinite( summary->phase_gain() ) || summary->phase_gain() < 0 || summary->phase_gain() > 1 ||
@@ -1575,6 +1645,14 @@ inline bool telem_dmsynco::validSimulation( const DmSyncoSimulation *summary )
     if( summary->readiness() && summary->feasible() != ( summary->readiness()->reader_cycle_feasible() &&
                                                          summary->readiness()->backend_cycle_feasible() &&
                                                          summary->period_ns() >= summary->cadence_min_period_ns() ) )
+    {
+        return false;
+    }
+
+    if( const auto *pipeline = summary->pipeline();
+        pipeline && summary->readiness()->backend_cycle_feasible() !=
+                        ( pipeline->sdk_cycle_feasible() && pipeline->post_cycle_feasible() &&
+                          pipeline->credit_cycle_feasible() && pipeline->main_protection_feasible() ) )
     {
         return false;
     }
@@ -1618,6 +1696,11 @@ inline bool telem_dmsynco::validSimulation( const DmSyncoSimulation *summary )
             return false;
         }
 
+        if( !summary->pipeline() && ( step->preparation_busy() || step->credit_full() ) )
+        {
+            return false;
+        }
+
         uint64_t unclassified = step->skipped();
 
         for( uint64_t count : { step->early_main(),
@@ -1628,7 +1711,9 @@ inline bool telem_dmsynco::validSimulation( const DmSyncoSimulation *summary )
                                 step->release_missing(),
                                 step->release_late(),
                                 step->backend_busy(),
-                                step->backend_wrap() } )
+                                step->backend_wrap(),
+                                step->preparation_busy(),
+                                step->credit_full() } )
         {
             if( count > unclassified )
             {
@@ -1905,8 +1990,10 @@ inline void telem_dmsynco::formatSimulation( std::ostream &output, const DmSynco
     }
 
     output << " simulation_enabled=1 simulation_valid=" << summary->valid()
-           << " simulation_feasible=" << summary->feasible()
-           << " simulation_mode=" << ( summary->readiness() ? "shadow_reader_release_ready" : "shadow_conditional" )
+           << " simulation_feasible=" << summary->feasible() << " simulation_mode="
+           << ( summary->pipeline()    ? "shadow_pipeline"
+                : summary->readiness() ? "shadow_reader_release_ready"
+                                       : "shadow_conditional" )
            << " simulation_session=" << summary->session() << " simulation_sequence=" << summary->sequence()
            << " simulation_now_ns=" << summary->now_ns() << " simulation_last_main_ns=" << summary->last_main_ns()
            << " simulation_counter=" << summary->counter() << " simulation_steps=" << summary->steps()
@@ -1937,9 +2024,14 @@ inline void telem_dmsynco::formatSimulation( std::ostream &output, const DmSynco
     {
         const auto *quality = readiness->total();
         output << " simulation_readiness={readerReleaseReady:" << readiness->reader_release_ready()
-               << ",virtualAuxReader_ns:" << readiness->virtual_reader_ns()
-               << ",assumedBackend_ns:" << readiness->backend_ns()
-               << ",readerCycleFeasible:" << readiness->reader_cycle_feasible()
+               << ",virtualAuxReader_ns:" << readiness->virtual_reader_ns();
+
+        if( !summary->pipeline() )
+        {
+            output << ",assumedBackend_ns:" << readiness->backend_ns();
+        }
+
+        output << ",readerCycleFeasible:" << readiness->reader_cycle_feasible()
                << ",backendCycleFeasible:" << readiness->backend_cycle_feasible() << '}';
         output << " simulation_readiness_quality={observed:" << quality->observed()
                << ",qualified:" << quality->qualified() << ",invalid:" << quality->invalid()
@@ -1967,6 +2059,24 @@ inline void telem_dmsynco::formatSimulation( std::ostream &output, const DmSynco
         }
     }
 
+    if( const auto *pipeline = summary->pipeline() )
+    {
+        output << " simulation_pipeline={prepare_ns:" << pipeline->prepare_ns()
+               << ",sdkService_ns:" << pipeline->sdk_service_ns() << ",post_ns:" << pipeline->post_ns()
+               << ",capacity:" << pipeline->capacity() << ",inFlight:" << pipeline->in_flight()
+               << ",maximumInFlight:" << pipeline->maximum_in_flight() << ",mainAdmitted:" << pipeline->main_admitted()
+               << ",auxiliaryAdmitted:" << pipeline->auxiliary_admitted() << ",retired:" << pipeline->retired()
+               << ",discarded:" << pipeline->discarded() << ",mainSdkWaits:" << pipeline->main_sdk_waits()
+               << ",mainCreditMisses:" << pipeline->main_credit_misses() << ",resets:" << pipeline->resets()
+               << ",sdkReady_ns:" << pipeline->sdk_ready_ns() << ",postReady_ns:" << pipeline->post_ready_ns()
+               << ",maximumMainWait_ns:" << pipeline->maximum_main_wait_ns()
+               << ",mainClearanceShortfall_ns:" << pipeline->main_clearance_shortfall_ns()
+               << ",sdkCycleFeasible:" << pipeline->sdk_cycle_feasible()
+               << ",postCycleFeasible:" << pipeline->post_cycle_feasible()
+               << ",creditCycleFeasible:" << pipeline->credit_cycle_feasible()
+               << ",mainProtectionFeasible:" << pipeline->main_protection_feasible() << '}';
+    }
+
     for( size_t index = 0; index < summary->outcomes()->size(); ++index )
     {
         const auto *step = summary->outcomes()->Get( index );
@@ -1980,6 +2090,11 @@ inline void telem_dmsynco::formatSimulation( std::ostream &output, const DmSynco
         {
             output << ",releaseMissing:" << step->release_missing() << ",releaseLate:" << step->release_late()
                    << ",backendBusy:" << step->backend_busy() << ",backendWrap:" << step->backend_wrap();
+        }
+
+        if( summary->pipeline() )
+        {
+            output << ",preparationBusy:" << step->preparation_busy() << ",creditFull:" << step->credit_full();
         }
 
         output << '}';
