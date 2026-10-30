@@ -129,6 +129,16 @@ report from their counters and then returns nonzero. An HTML report therefore do
  * \ingroup application_unit_test
  */
 
+/** \defgroup frameGrabber_unit_test Frame Grabber Unit Tests
+ * \brief Offline worker tests for concurrent reconfiguration, retries, and power/readiness waits.
+ * \ingroup app_unit_test
+ */
+
+/** \defgroup ocam2KCtrl_reconfig_unit_test OCAM Reconfiguration Unit Tests
+ * \brief Offline tests of settings application and preservation of pending reconfiguration requests.
+ * \ingroup application_unit_test
+ */
+
 /** \defgroup stdCamera_unit_test stdCamera Unit Tests
  * \brief Shared camera temperature, ROI geometry, configuration, and callback tests.
  * \ingroup app_unit_test

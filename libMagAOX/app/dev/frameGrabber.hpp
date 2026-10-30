@@ -9,6 +9,7 @@
 #ifndef frameGrabber_hpp
 #define frameGrabber_hpp
 
+#include <atomic>
 #include <sys/syscall.h>
 
 #include <mx/sigproc/circularBuffer.hpp>
@@ -74,6 +75,13 @@ namespace dev
  *   Each of the above functions should return 0 on success, and -1 on an error (except fps).
  *   For `acquireAndCheckValid` >0 will indicate no data but not an error.  In most cases,
  *   an appropriate state code, such as NOTCONNECTED, should be set as well.
+ *
+ * - Set \ref m_reconfig after updating requested settings under the derived application's locks.
+ *   The worker atomically consumes requests immediately before calling `reconfig()`. Requests arriving
+ *   during cleanup, configuration, or output setup remain pending for another pass. Multiple requests
+ *   may coalesce, and a pass can already observe settings from a later request; derived reconfiguration
+ *   must therefore tolerate repeating the current settings. Failed cleanup requeues the request. The flag does
+ *   not protect the requested settings.
  *
  * - A derived class may optionally expose
  *   \code
@@ -146,7 +154,8 @@ class frameGrabber
 
     timespec m_currImageTimestamp{ 0, 0 }; ///< The timestamp of the current image.
 
-    bool m_reconfig{ false }; ///< Flag to set if a camera reconfiguration requires a framegrabber reset.
+    /// Pending reset request; the worker consumes it before derived reconfig(), never after configuration.
+    std::atomic<bool> m_reconfig{ false };
 
     IMAGE *m_imageStream{ nullptr }; ///< The ImageStreamIO shared memory buffer.
 
@@ -939,9 +948,6 @@ void frameGrabber<derivedT>::fgThreadExec()
             cbuff = true; // because we created it!
         }
 
-        // This completes the reconfiguration.
-        m_reconfig = false;
-
         if( derived().startAcquisition() < 0 )
         {
             continue;
@@ -1063,9 +1069,12 @@ void frameGrabber<derivedT>::fgThreadExec()
             }
         }
 
-        if( m_reconfig && !derived().shutdown() )
+        // Consume before cleanup, which may itself apply requested settings such as an EDT camera mode.
+        // Requests arriving after this exchange remain pending through the next configuration pass.
+        if( !derived().shutdown() && m_reconfig.exchange( false ) )
         {
-            derived().reconfig();
+            if( derived().reconfig() < 0 )
+                m_reconfig = true;
         }
 
     } // outer loop, will exit if m_shutdown==true
