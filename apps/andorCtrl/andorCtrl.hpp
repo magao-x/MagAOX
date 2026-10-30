@@ -502,6 +502,9 @@ public:
 
    int setEMGain();
 
+   /// Request logical unity gain, mapped to SDK gain zero, with the INDI mutex already held.
+   int setEMGainOff();
+
    int setCropMode();
 
    int getShutter();
@@ -1424,6 +1427,13 @@ int andorCtrl::setEMGain()
    log<text_log>("Set EM Gain to: " + std::to_string(emg), logPrio::LOG_WARNING);
 
    return 0;
+}
+
+inline
+int andorCtrl::setEMGainOff()
+{
+   m_emGainSet = 1;
+   return setEMGain();
 }
 
 inline

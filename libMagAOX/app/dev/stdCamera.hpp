@@ -368,6 +368,11 @@ struct stdCameraHasFocus<derivedT, std::void_t<decltype( derivedT::c_stdCamera_h
  *          \endcode
  *          must be defined which sets the camera EM Gain to \ref m_emGainSet.
  *
+ *        - The standard `emgain_off` request calls `int setEMGainOff()` with the INDI mutex held.
+ *          The derived camera chooses unity gain or disables EM gain, updates \ref m_emGainSet, and
+ *          applies it through its normal gain setter. This request remains available without temperature lock.
+ *          The callback returns zero on success or a negative value on failure; it must not increase gain above 1.
+ *
  *        - If true the implementation must keep \ref m_emGain up to date.
  *
  *        - If true the value of \ref m_maxEMGain should be set by the implementation and managed
@@ -613,6 +618,8 @@ class stdCamera
     pcf::IndiProperty m_indiP_vShiftSpeed; ///< INDI vertical-shift selection.
 
     pcf::IndiProperty m_indiP_emGain; ///< INDI electron-multiplication gain and target.
+
+    pcf::IndiProperty m_indiP_emGainOff; ///< Momentary request for the camera-specific unity or disabled EM gain.
 
     ///@}
 
@@ -1225,6 +1232,18 @@ class stdCamera
      */
     int newCallBack_emgain(
         const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
+
+    /// Dispatch a unity/off request to an EM-gain camera while the caller holds m_indiMutex.
+    int setEMGainOff( const mx::meta::trueFalseT<true> &t /**< [in] Enabled interface selector. */ );
+
+    /// No-op interface for cameras without EM gain.
+    int setEMGainOff( const mx::meta::trueFalseT<false> &f /**< [in] Disabled interface selector. */ );
+
+    /// Apply a momentary EM-gain-off request and reset its switch, reporting failures as INDI_ALERT.
+    /** The camera selects unity or disabled gain regardless of temperature lock.
+     * \returns The derived callback result, or -1 for an invalid property.
+     */
+    int newCallBack_emgain_off( const pcf::IndiProperty &ipRecv /**< [in] The INDI EM-gain-off request. */ );
 
     /// Interface to setExpTime when the derivedT uses exposure time controls
     /** Tag-dispatch resolution of c_stdCamera_exptimeCtrl==true will call this function.
@@ -2626,6 +2645,15 @@ int stdCamera<derivedT>::appStartup()
 #endif
             return -1;
         }
+
+        derived().createStandardIndiRequestSw( m_indiP_emGainOff, "emgain_off" );
+        if( derived().registerIndiPropertyNew( m_indiP_emGainOff, st_newCallBack_stdCamera ) < 0 )
+        {
+#ifndef STDCAMERA_TEST_NOLOG
+            derivedT::template log<software_error>( { __FILE__, __LINE__ } );
+#endif
+            return -1;
+        }
     }
 
     if( derivedT::c_stdCamera_exptimeCtrl )
@@ -3461,6 +3489,8 @@ int stdCamera<derivedT>::newCallBack_stdCamera( const pcf::IndiProperty &ipRecv 
         return newCallBack_vShiftSpeed( ipRecv );
     else if( derivedT::c_stdCamera_emGain && name == "emgain" )
         return newCallBack_emgain( ipRecv );
+    else if( derivedT::c_stdCamera_emGain && name == "emgain_off" )
+        return newCallBack_emgain_off( ipRecv );
     else if( derivedT::c_stdCamera_exptimeCtrl && name == "exptime" )
         return newCallBack_exptime( ipRecv );
     else if( derivedT::c_stdCamera_fpsCtrl && name == "fps" )
@@ -3906,6 +3936,52 @@ int stdCamera<derivedT>::newCallBack_emgain( const pcf::IndiProperty &ipRecv )
 
         mx::meta::trueFalseT<derivedT::c_stdCamera_emGain> tf;
         return setEMGain( tf );
+    }
+
+    return 0;
+}
+
+template <class derivedT>
+int stdCamera<derivedT>::setEMGainOff( const mx::meta::trueFalseT<true> &t )
+{
+    static_cast<void>( t );
+    return derived().setEMGainOff();
+}
+
+template <class derivedT>
+int stdCamera<derivedT>::setEMGainOff( const mx::meta::trueFalseT<false> &f )
+{
+    static_cast<void>( f );
+    return 0;
+}
+
+template <class derivedT>
+int stdCamera<derivedT>::newCallBack_emgain_off( const pcf::IndiProperty &ipRecv )
+{
+    if( derivedT::c_stdCamera_emGain )
+    {
+#ifdef XWCTEST_INDI_CALLBACK_VALIDATION
+        return 0;
+#endif
+
+        if( ipRecv.createUniqueKey() != m_indiP_emGainOff.createUniqueKey() )
+            return -1;
+
+        if( !ipRecv.find( "request" ) || ipRecv["request"].getSwitchState() != pcf::IndiElement::On )
+            return 0;
+
+        std::unique_lock<std::mutex> lock( derived().m_indiMutex );
+
+        indi::updateSwitchIfChanged(
+            m_indiP_emGainOff, "request", pcf::IndiElement::On, derived().m_indiDriver, INDI_BUSY );
+
+        mx::meta::trueFalseT<derivedT::c_stdCamera_emGain> tf;
+        int                                                rv    = setEMGainOff( tf );
+        auto                                               state = rv < 0 ? INDI_ALERT : INDI_IDLE;
+        derived().updateIfChanged( m_indiP_emGain, "target", m_emGainSet, state );
+        indi::updateSwitchIfChanged(
+            m_indiP_emGainOff, "request", pcf::IndiElement::Off, derived().m_indiDriver, state );
+        return rv;
     }
 
     return 0;

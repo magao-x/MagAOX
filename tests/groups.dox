@@ -149,6 +149,11 @@ report from their counters and then returns nonzero. An HTML report therefore do
  * \ingroup application_unit_test
  */
 
+/** \defgroup cameraGUI_unit_test Camera GUI Unit Tests
+ * \brief Offline EM-gain-off discovery, command routing, and availability tests.
+ * \ingroup application_unit_test
+ */
+
 /** \defgroup pupilGuideGUI_unit_test Pupil Guide GUI Unit Tests
  * \brief Offline device availability, recovery, and command routing tests.
  * \ingroup application_unit_test
@@ -176,5 +181,15 @@ report from their counters and then returns nonzero. An HTML report therefore do
 
 /** \defgroup streamWriter_unit_test streamWriter Unit Tests
  * \brief Offline configuration, encoding, recording lifecycle, and buffer ownership regressions.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup ocam2KCtrl_emgain_unit_test OCAM EM Gain Unit Tests
+ * \brief Offline camera-specific gain-off commands and protection behavior.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup cameraSim_emgain_unit_test Camera Simulator EM Gain Unit Tests
+ * \brief Offline simulated EM-gain disable behavior and generic shared interface compatibility.
  * \ingroup application_unit_test
  */

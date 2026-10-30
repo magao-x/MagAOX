@@ -55,6 +55,9 @@ struct Fake
     /// Number of online EM-gain commands.
     unsigned m_gainWrites{ 0 };
 
+    /// Result of an online EM-gain command.
+    PicamError m_gainError{ PicamError_None };
+
     /// ROI descriptor returned while configuring acquisition.
     PicamRoi m_roi{ 0, 2, 1, 0, 2, 1 };
 
@@ -89,6 +92,10 @@ struct Fixture : outletHarness::Controller<MagAOX::app::picamCtrl>
     using MagAOX::app::dev::stdCamera<MagAOX::app::picamCtrl>::m_emGainRequiresTemp;
     using MagAOX::app::dev::stdCamera<MagAOX::app::picamCtrl>::m_emGainTemp;
     using MagAOX::app::dev::stdCamera<MagAOX::app::picamCtrl>::m_indiP_emGain;
+    using MagAOX::app::dev::stdCamera<MagAOX::app::picamCtrl>::m_indiP_emGainOff;
+    using MagAOX::app::dev::stdCamera<MagAOX::app::picamCtrl>::m_emGain;
+    using MagAOX::app::dev::stdCamera<MagAOX::app::picamCtrl>::m_emGainSet;
+    using MagAOX::app::dev::stdCamera<MagAOX::app::picamCtrl>::m_readoutSpeedName;
     using MagAOX::app::dev::stdCamera<MagAOX::app::picamCtrl>::m_tempControlOnTarget;
     using MagAOX::app::dev::stdCamera<MagAOX::app::picamCtrl>::m_tempControlStatusStr;
     using MagAOX::app::dev::frameGrabber<MagAOX::app::picamCtrl>::m_reconfig;
@@ -517,6 +524,61 @@ TEST_CASE( "picamCtrl does not reuse temperature lock across deferred reconfigur
         REQUIRE( f.m_tempControlStatusStr == "LOCKED" );
     }
 }
+/// The off request applies unity regardless of temperature lock and reports SDK errors.
+/** \ingroup picamCtrl_unit_test */
+TEST_CASE( "picamCtrl standard EM-gain-off request selects unity", "[picamCtrl]" )
+{
+    // clang-format off
+    #ifdef PICAMCTRL_TEST_DOXYGEN_REF
+    picamCtrl::setEMGainOff(); picamCtrl::setEMGain();
+    dev::stdCamera<picamCtrl>::newCallBack_emgain_off();
+    #endif
+    // clang-format on
+    Fixture f;
+    REQUIRE( f.connect() == 0 );
+    REQUIRE( static_cast<dev::stdCamera<picamCtrl> &>( f ).appStartup() == 0 );
+    f.state( stateCodes::OPERATING );
+    f.m_emGainRequiresTemp  = true;
+    f.m_tempControlOnTarget = false;
+    f.m_emGain              = 100;
+    f.m_emGainSet           = 100;
+    pcf::IndiProperty request( pcf::IndiProperty::Switch, f.m_indiP_emGainOff.getDevice(), "emgain_off" );
+    request.add( pcf::IndiElement( "request", pcf::IndiElement::On ) );
+
+    SECTION( "electron-multiplying amplifier receives unity for each request" )
+    {
+        for( unsigned repeat = 1; repeat <= 2; ++repeat )
+        {
+            REQUIRE( f.newCallBack_stdCamera( request ) == 0 );
+            REQUIRE( g_fake.m_gainWrites == repeat );
+            REQUIRE( g_fake.m_gain == 1 );
+            REQUIRE( f.m_emGain == 1 );
+            REQUIRE( f.m_emGainSet == 1 );
+            REQUIRE( f.m_indiP_emGain["target"].get<float>() == 1 );
+            REQUIRE( f.m_indiP_emGainOff["request"].getSwitchState() == pcf::IndiElement::Off );
+            REQUIRE( f.m_indiP_emGainOff.getState() == INDI_IDLE );
+        }
+    }
+    SECTION( "conventional amplifier needs no EM-gain SDK command" )
+    {
+        f.m_readoutSpeedName = "ccd_01MHz";
+        REQUIRE( f.newCallBack_stdCamera( request ) == 0 );
+        REQUIRE( g_fake.m_gainWrites == 0 );
+        REQUIRE( f.m_emGain == 1 );
+        REQUIRE( f.m_emGainSet == 1 );
+        REQUIRE( f.m_indiP_emGainOff.getState() == INDI_IDLE );
+    }
+    SECTION( "SDK failure is visible and does not claim the measured gain changed" )
+    {
+        g_fake.m_gainError = PicamError_InvalidParameterValue;
+        REQUIRE( f.newCallBack_stdCamera( request ) == -1 );
+        REQUIRE( g_fake.m_gainWrites == 1 );
+        REQUIRE( f.m_emGain == 100 );
+        REQUIRE( f.m_emGainSet == 1 );
+        REQUIRE( f.m_indiP_emGainOff["request"].getSwitchState() == pcf::IndiElement::Off );
+        REQUIRE( f.m_indiP_emGainOff.getState() == INDI_ALERT );
+    }
+}
 } // namespace picamCtrlTest
 } // namespace libXWCTest
 
@@ -872,8 +934,10 @@ extern "C"
         ++picamHarness::g_fake.m_calls;
         if( parameter == PicamParameter_AdcEMGain )
         {
-            picamHarness::g_fake.m_gain = value;
             ++picamHarness::g_fake.m_gainWrites;
+            if( picamHarness::g_fake.m_gainError != PicamError_None )
+                return picamHarness::g_fake.m_gainError;
+            picamHarness::g_fake.m_gain = value;
         }
         return PicamError_None;
     }

@@ -307,6 +307,9 @@ class ocam2KCtrl : public MagAOXApp<>,
      */
     int setEMGain();
 
+    /// Request unity EM gain with the INDI mutex already held by stdCamera.
+    int setEMGainOff();
+
     /// Implementation of the framegrabber configureAcquisition interface
     /** Sends the mode command over serial, sets the FPS, and initializes the OCAM SDK.
      *
@@ -1402,6 +1405,12 @@ inline int ocam2KCtrl::setEMGain()
 
         return 0;
     }
+}
+
+inline int ocam2KCtrl::setEMGainOff()
+{
+    m_emGainSet = 1;
+    return setEMGain();
 }
 
 inline int ocam2KCtrl::configureAcquisition()

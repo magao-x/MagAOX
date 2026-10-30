@@ -1,5 +1,6 @@
 /** \file stdCamera_test.cpp
- * \brief Offline tests of shared camera temperature limits, startup targets, and EM-gain temperature protection.
+ * \brief Offline tests of shared camera temperature limits, startup targets, and EM-gain protection and disable
+ * requests.
  * \ingroup stdCamera_unit_test
  */
 
@@ -46,6 +47,7 @@ class Camera : public MagAOX::app::outletTestApp<>,
     using stdCameraT::m_emGainSet;
     using stdCameraT::m_emGainTemp;
     using stdCameraT::m_indiP_emGain;
+    using stdCameraT::m_indiP_emGainOff;
     using stdCameraT::m_indiP_temp;
     using stdCameraT::m_indiP_tempcont;
     using stdCameraT::m_maxTemp;
@@ -63,6 +65,15 @@ class Camera : public MagAOX::app::outletTestApp<>,
 
     /// Number of EM-gain requests dispatched to the derived setter.
     unsigned m_gainCalls{ 0 };
+
+    /// Number of gain-off requests dispatched to the camera-specific interface.
+    unsigned m_gainOffCalls{ 0 };
+
+    /// Camera-specific gain value selected by the gain-off operation.
+    float m_gainOffValue{ 1 };
+
+    /// Injected result of the camera-specific gain-off operation.
+    int m_gainOffResult{ 0 };
 
     /// Reconfiguration flag required by the shared callback dispatcher.
     bool m_reconfig{ false };
@@ -93,6 +104,9 @@ class Camera : public MagAOX::app::outletTestApp<>,
 
     /// Capture an EM-gain request without contacting a camera.
     int setEMGain();
+
+    /// Select the fake camera's gain-off value without contacting hardware.
+    int setEMGainOff();
 
     /// Discard camera telemetry without starting a logger.
     template <class telemT>
@@ -156,6 +170,15 @@ int Camera<tempLimits, emGain, tempControl>::setEMGain()
 }
 
 template <bool tempLimits, bool emGain, bool tempControl>
+int Camera<tempLimits, emGain, tempControl>::setEMGainOff()
+{
+    ++m_gainOffCalls;
+    if( m_gainOffResult >= 0 )
+        m_emGainSet = m_gainOffValue;
+    return m_gainOffResult;
+}
+
+template <bool tempLimits, bool emGain, bool tempControl>
 template <class telemT>
 int Camera<tempLimits, emGain, tempControl>::telem( const typename telemT::messageT & )
 {
@@ -181,6 +204,9 @@ class Fixture : public outletHarness::Controller<Camera<tempLimits, emGain, temp
 
     /// Request EM gain through the real shared callback.
     int requestGain( float target /**< [in] Requested EM gain. */ );
+
+    /// Request the camera-specific gain-off operation through the shared property dispatcher.
+    int requestGainOff();
 
     /// Request raw EM-gain text through the selected INDI element.
     int requestGainValue( const std::string &target /**< [in] Number text received from INDI. */,
@@ -230,6 +256,14 @@ template <bool tempLimits, bool emGain, bool tempControl>
 int Fixture<tempLimits, emGain, tempControl>::requestGain( float target )
 {
     return requestGainValue( std::to_string( target ) );
+}
+
+template <bool tempLimits, bool emGain, bool tempControl>
+int Fixture<tempLimits, emGain, tempControl>::requestGainOff()
+{
+    pcf::IndiProperty received( pcf::IndiProperty::Switch, this->configName(), "emgain_off" );
+    received.add( pcf::IndiElement( "request", pcf::IndiElement::On ) );
+    return this->newCallBack_stdCamera( received );
 }
 
 template <bool tempLimits, bool emGain, bool tempControl>
@@ -422,6 +456,156 @@ TEST_CASE( "stdCamera configures EM-gain temperature protection only for capable
         REQUIRE( f.requestGain( 100 ) == 0 );
         REQUIRE( f.m_gainCalls == 1 );
     }
+}
+
+/// Gain-off is a momentary standard request switch exposed only by EM-gain-capable cameras.
+/** \ingroup stdCamera_unit_test */
+TEST_CASE( "stdCamera exposes gain-off only for EM-gain-capable cameras", "[stdCamera]" )
+{
+    // clang-format off
+    #ifdef STDCAMERA_TEST_DOXYGEN_REF
+    MagAOX::app::dev::stdCamera::appStartup(); MagAOX::app::dev::stdCamera::newCallBack_stdCamera();
+    #endif
+    // clang-format on
+    SECTION( "EM gain with temperature control" )
+    {
+        Fixture<true, true> f;
+        REQUIRE( f.m_indiP_emGainOff.getType() == pcf::IndiProperty::Switch );
+        REQUIRE( f.m_indiP_emGainOff.getName() == "emgain_off" );
+        REQUIRE( f.m_indiP_emGainOff.getDevice() == f.configName() );
+        REQUIRE( f.m_indiP_emGainOff["request"].getSwitchState() == pcf::IndiElement::Off );
+        REQUIRE( f.m_indiP_emGainOff.getState() == INDI_IDLE );
+        REQUIRE( f.m_indiNewCallBacks.count( f.m_indiP_emGainOff.createUniqueKey() ) == 1 );
+        REQUIRE( f.requestGainOff() == 0 );
+        REQUIRE( f.m_gainOffCalls == 1 );
+    }
+    SECTION( "EM gain without temperature control" )
+    {
+        Fixture<false, true, false> f;
+        REQUIRE( f.m_indiNewCallBacks.count( f.m_indiP_emGainOff.createUniqueKey() ) == 1 );
+        REQUIRE( f.requestGainOff() == 0 );
+        REQUIRE( f.m_gainOffCalls == 1 );
+    }
+    SECTION( "camera without EM gain" )
+    {
+        Fixture<>         f;
+        pcf::IndiProperty received( pcf::IndiProperty::Switch, f.configName(), "emgain_off" );
+        received.add( pcf::IndiElement( "request", pcf::IndiElement::On ) );
+        REQUIRE( f.m_indiNewCallBacks.count( received.createUniqueKey() ) == 0 );
+        REQUIRE( f.newCallBack_stdCamera( received ) == -1 );
+        REQUIRE( f.m_gainOffCalls == 0 );
+    }
+}
+
+/// The dedicated safe-lowering action delegates the off value to the camera and can be repeated while warm or faulted.
+/** \ingroup stdCamera_unit_test */
+TEST_CASE( "stdCamera gain-off uses the camera-specific safe value despite temperature interlocks", "[stdCamera]" )
+{
+    // clang-format off
+    #ifdef STDCAMERA_TEST_DOXYGEN_REF
+    MagAOX::app::dev::stdCamera::newCallBack_stdCamera(); MagAOX::app::dev::stdCamera::newCallBack_emgain_off();
+    MagAOX::app::dev::stdCamera::setEMGainOff();
+    #endif
+    // clang-format on
+    Fixture<true, true> f;
+    f.configText( "[camera]\nemGainRequiresTemp=true\nemGainTemp=-55\n" );
+    REQUIRE( f.load() == 0 );
+    f.m_ccdTempSetpt        = -30;
+    f.m_tempControlStatus   = false;
+    f.m_tempControlOnTarget = false;
+    f.m_emGain              = 100;
+    f.m_emGainSet           = 100;
+    f.m_indiP_emGain["current"].set( 100 );
+    f.m_indiP_emGain["target"].set( 100 );
+    f.state( stateCodes::ERROR );
+    REQUIRE( f.requestGain( 200 ) == -1 );
+    REQUIRE( f.m_gainCalls == 0 );
+    f.messages();
+    for( float offValue : { 0.0f, 1.0f } )
+    {
+        f.m_gainOffValue = offValue;
+        for( int repeat = 0; repeat < 2; ++repeat )
+        {
+            REQUIRE( f.requestGainOff() == 0 );
+            REQUIRE( f.m_emGainSet == offValue );
+            REQUIRE( f.m_indiP_emGain["target"].get<float>() == offValue );
+            REQUIRE( f.m_indiP_emGain["current"].get<float>() == 100 );
+            REQUIRE( f.m_emGain == 100 );
+            REQUIRE( f.m_indiP_emGainOff["request"].getSwitchState() == pcf::IndiElement::Off );
+            REQUIRE( f.m_indiP_emGainOff.getState() == INDI_IDLE );
+            REQUIRE( f.m_indiP_emGain.getState() == INDI_IDLE );
+            REQUIRE( f.m_gainCalls == 0 );
+            std::vector<pcf::IndiProperty> acknowledgments;
+            for( auto &message : f.messages() )
+            {
+                if( message.getProperty().getName() == "emgain_off" )
+                    acknowledgments.push_back( message.getProperty() );
+            }
+            REQUIRE( acknowledgments.size() == 2 );
+            REQUIRE( acknowledgments[0]["request"].getSwitchState() == pcf::IndiElement::On );
+            REQUIRE( acknowledgments[0].getState() == INDI_BUSY );
+            REQUIRE( acknowledgments[1]["request"].getSwitchState() == pcf::IndiElement::Off );
+            REQUIRE( acknowledgments[1].getState() == INDI_IDLE );
+        }
+    }
+    REQUIRE( f.m_gainOffCalls == 4 );
+}
+
+/// Missing or Off requests do nothing, and mismatched properties cannot invoke the camera-specific operation.
+/** \ingroup stdCamera_unit_test */
+TEST_CASE( "stdCamera gain-off validates the request before dispatching", "[stdCamera]" )
+{
+    // clang-format off
+    #ifdef STDCAMERA_TEST_DOXYGEN_REF
+    MagAOX::app::dev::stdCamera::newCallBack_emgain_off(); MagAOX::app::dev::stdCamera::newCallBack_stdCamera();
+    #endif
+    // clang-format on
+    Fixture<true, true> f;
+    pcf::IndiProperty   received( pcf::IndiProperty::Switch, f.configName(), "emgain_off" );
+    REQUIRE( f.newCallBack_emgain_off( received ) == 0 );
+    received.add( pcf::IndiElement( "request", pcf::IndiElement::Off ) );
+    REQUIRE( f.newCallBack_emgain_off( received ) == 0 );
+    REQUIRE( f.newCallBack_stdCamera( received ) == 0 );
+    REQUIRE( f.m_gainOffCalls == 0 );
+    received["request"].setSwitchState( pcf::IndiElement::On );
+    received.setName( "invalid_gain_off" );
+    REQUIRE( f.newCallBack_emgain_off( received ) == -1 );
+    REQUIRE( f.newCallBack_stdCamera( received ) == -1 );
+    received.setName( "emgain_off" );
+    received.setDevice( "another-camera" );
+    REQUIRE( f.newCallBack_emgain_off( received ) == -1 );
+    REQUIRE( f.newCallBack_stdCamera( received ) == -1 );
+    REQUIRE( f.m_gainOffCalls == 0 );
+    REQUIRE( f.m_indiP_emGainOff["request"].getSwitchState() == pcf::IndiElement::Off );
+}
+
+/// Device failures clear the momentary request, report Alert, and permit a later retry.
+/** \ingroup stdCamera_unit_test */
+TEST_CASE( "stdCamera gain-off reports device failures and recovers on retry", "[stdCamera]" )
+{
+    // clang-format off
+    #ifdef STDCAMERA_TEST_DOXYGEN_REF
+    MagAOX::app::dev::stdCamera::newCallBack_emgain_off(); MagAOX::app::dev::stdCamera::setEMGainOff();
+    #endif
+    // clang-format on
+    Fixture<true, true> f;
+    f.m_emGainSet     = 100;
+    f.m_gainOffResult = -7;
+    f.m_indiP_emGain["target"].set( 100 );
+    REQUIRE( f.requestGainOff() == -7 );
+    REQUIRE( f.m_gainOffCalls == 1 );
+    REQUIRE( f.m_emGainSet == 100 );
+    REQUIRE( f.m_indiP_emGain["target"].get<float>() == 100 );
+    REQUIRE( f.m_indiP_emGain.getState() == INDI_ALERT );
+    REQUIRE( f.m_indiP_emGainOff["request"].getSwitchState() == pcf::IndiElement::Off );
+    REQUIRE( f.m_indiP_emGainOff.getState() == INDI_ALERT );
+    f.m_gainOffResult = 0;
+    REQUIRE( f.requestGainOff() == 0 );
+    REQUIRE( f.m_gainOffCalls == 2 );
+    REQUIRE( f.m_indiP_emGain["target"].get<float>() == 1 );
+    REQUIRE( f.m_indiP_emGain.getState() == INDI_IDLE );
+    REQUIRE( f.m_indiP_emGainOff["request"].getSwitchState() == pcf::IndiElement::Off );
+    REQUIRE( f.m_indiP_emGainOff.getState() == INDI_IDLE );
 }
 
 /// Enabling the EM-gain guard requires an explicit, finite setpoint within the camera's configured limits.

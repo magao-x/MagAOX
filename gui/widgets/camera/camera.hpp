@@ -80,6 +80,10 @@ class camera : public xWidget
 
     statusEntry *ui_emGain{ nullptr }; ///< EM-gain display and optional control.
 
+    QPushButton *ui_emGainOff{ nullptr }; ///< Optional request for the camera's non-multiplying gain.
+
+    bool m_emGainOffPresent{ false }; ///< Whether the current connection exposes the EM-gain-off request.
+
     statusEntry *ui_avgTime{ nullptr }; ///< Averaging time control from the averaging helper app.
 
     toggleSlider *ui_synchro{ nullptr }; ///< Synchronization toggle control.
@@ -188,6 +192,12 @@ class camera : public xWidget
     /// Creates the EM-gain widget.
     void setup_emGain( bool ro );
 
+    /// Creates the optional EM-gain-off request button.
+    void setup_emGainOff();
+
+    /// Requests the camera's non-multiplying EM-gain value when the camera is available.
+    void emGainOff();
+
     /// Creates the averaging-time widget.
     void setup_avgTime( bool ro );
 
@@ -253,6 +263,9 @@ class camera : public xWidget
     /// Queues creation of the EM-gain widget.
     void add_emGain( bool ro );
 
+    /// Queues creation of the EM-gain-off request button.
+    void add_emGainOff();
+
     /// Queues creation of the averaging-time widget.
     void add_avgTime( bool ro );
 
@@ -265,6 +278,12 @@ class camera : public xWidget
   private:
     /// Resets cached focus-property state when the camera disconnects or removes focus support.
     void clearFocusState();
+
+    /// Clears and hides EM-gain-off support until the camera advertises it again.
+    void clearEMGainOffState();
+
+    /// Whether the advertised EM-gain-off request can currently be sent.
+    bool canSetEMGainOff() const;
 
     /// Returns the base row used for left-column controls beneath the stage widgets.
     int leftColumnBaseRow() const;
@@ -308,6 +327,7 @@ camera::camera( std::string &camName, QWidget *Parent, Qt::WindowFlags f ) : xWi
     connect( this, SIGNAL( add_expTime( bool ) ), this, SLOT( setup_expTime( bool ) ) );
     connect( this, SIGNAL( add_fps( bool ) ), this, SLOT( setup_fps( bool ) ) );
     connect( this, SIGNAL( add_emGain( bool ) ), this, SLOT( setup_emGain( bool ) ) );
+    connect( this, SIGNAL( add_emGainOff() ), this, SLOT( setup_emGainOff() ) );
     connect( this, SIGNAL( add_avgTime( bool ) ), this, SLOT( setup_avgTime( bool ) ) );
     connect( this, SIGNAL( add_synchro() ), this, SLOT( setup_synchro() ) );
 
@@ -345,6 +365,7 @@ void camera::subscribe()
     m_parent->addSubscriberProperty( (multiIndiSubscriber *)this, m_camName, "fsm" );
     m_parent->addSubscriberProperty( (multiIndiSubscriber *)this, m_camName, "focus" );
     m_parent->addSubscriberProperty( (multiIndiSubscriber *)this, m_camName, "goto_focus" );
+    m_parent->addSubscriberProperty( (multiIndiSubscriber *)this, m_camName, "emgain_off" );
     m_parent->addSubscriberProperty( (multiIndiSubscriber *)this, m_darkName, "" );
     m_parent->addSubscriberProperty( (multiIndiSubscriber *)this, m_darkName, "start" );
     m_parent->addSubscriberProperty( (multiIndiSubscriber *)this, m_avgName, "" );
@@ -440,6 +461,9 @@ void camera::onConnect()
 
     clearFocus();
     clearFocusState();
+    clearEMGainOffState();
+
+    m_appState.clear();
 
     m_connected = true;
 
@@ -494,6 +518,9 @@ void camera::onDisconnect()
 
     clearFocus();
     clearFocusState();
+    clearEMGainOffState();
+
+    m_appState.clear();
 
     m_connected = false;
     while( m_inUpdate )
@@ -517,7 +544,10 @@ void camera::handleDelProperty( const pcf::IndiProperty &ipRecv )
 
     if( ipRecv.getDevice() == m_camName )
     {
-        if( ipRecv.getName() == "fsm" )
+        if( ipRecv.getName().empty() || ipRecv.getName() == "emgain_off" )
+            clearEMGainOffState();
+
+        if( ipRecv.getName().empty() || ipRecv.getName() == "fsm" )
         {
             m_appState.clear();
         }
@@ -693,6 +723,14 @@ void camera::handleSetProperty( const pcf::IndiProperty &ipRecv )
             }
         }
 
+        if( ipRecv.getName() == "emgain_off" && ipRecv.getType() == pcf::IndiProperty::Switch &&
+            ipRecv.find( "request" ) )
+        {
+            m_emGainOffPresent = true;
+            if( !ui_emGainOff )
+                emit add_emGainOff();
+        }
+
         if( ipRecv.getName() == "synchro" )
         {
             if( !ui_synchro )
@@ -766,6 +804,8 @@ void camera::setEnableDisable( bool tf, bool all )
         ui_fps->setEnabled( tf );
     if( ui_emGain )
         ui_emGain->setEnabled( tf );
+    if( ui_emGainOff )
+        ui_emGainOff->setEnabled( tf && canSetEMGainOff() );
     if( ui_avgTime )
         ui_avgTime->setEnabled( tf );
 
@@ -809,6 +849,9 @@ void camera::loadConfig( mx::app::appConfigurator &config )
 
 void camera::updateGUI()
 {
+    if( ui_emGainOff )
+        ui_emGainOff->setVisible( m_connected && m_emGainOffPresent );
+
     if( m_inUpdate || !m_connected )
         return;
     emit updateTimerStop();
@@ -1142,6 +1185,35 @@ void camera::setup_emGain( bool ro )
     m_parent->addSubscriber( ui_emGain );
 }
 
+void camera::setup_emGainOff()
+{
+    if( ui_emGainOff )
+        return;
+
+    ui_emGainOff = new QPushButton( this );
+    ui_emGainOff->setObjectName( QString::fromUtf8( "emGainOff" ) );
+    ui_emGainOff->setText( "EM gain off" );
+    ui_emGainOff->setToolTip( "Set EM gain to the camera's non-multiplying value." );
+    ui_emGainOff->setMaximumWidth( 200 );
+    ui_emGainOff->setFocusPolicy( Qt::NoFocus );
+    ui_emGainOff->setVisible( m_connected && m_emGainOffPresent );
+    ui_emGainOff->setEnabled( canSetEMGainOff() );
+    connect( ui_emGainOff, SIGNAL( pressed() ), this, SLOT( emGainOff() ) );
+    ui.grid->addWidget( ui_emGainOff, 10, 1, 1, 1, Qt::AlignHCenter );
+}
+
+void camera::emGainOff()
+{
+    if( !canSetEMGainOff() )
+        return;
+
+    pcf::IndiProperty request( pcf::IndiProperty::Switch );
+    request.setDevice( m_camName );
+    request.setName( "emgain_off" );
+    request.add( pcf::IndiElement( "request", pcf::IndiElement::On ) );
+    sendNewProperty( request );
+}
+
 void camera::setup_avgTime( bool ro )
 {
     if( ui_avgTime )
@@ -1153,7 +1225,7 @@ void camera::setup_avgTime( bool ro )
     ui_avgTime->highlightChanges( true );
     ui_avgTime->readOnly( ro );
 
-    ui.grid->addWidget( ui_avgTime, 11, 1, 1, 1 );
+    ui.grid->addWidget( ui_avgTime, 12, 1, 1, 1 );
 
     ui_avgTime->onDisconnect();
 
@@ -1168,7 +1240,7 @@ void camera::setup_synchro()
     ui_synchro = new toggleSlider( m_camName, "synchro", "Synchro", this );
     ui_synchro->setObjectName( QString::fromUtf8( "synchro" ) );
 
-    ui.grid->addWidget( ui_synchro, 10, 1, 1, 1 );
+    ui.grid->addWidget( ui_synchro, 11, 1, 1, 1 );
 
     ui_synchro->onDisconnect();
 
@@ -1227,6 +1299,22 @@ void camera::clearFocusState()
     }
 
     layoutLeftColumnControls();
+}
+
+void camera::clearEMGainOffState()
+{
+    m_emGainOffPresent = false;
+    if( ui_emGainOff )
+    {
+        ui_emGainOff->hide();
+        ui_emGainOff->setEnabled( false );
+    }
+}
+
+bool camera::canSetEMGainOff() const
+{
+    return m_connected && m_emGainOffPresent &&
+           ( m_appState == "READY" || m_appState == "OPERATING" || m_appState == "CONFIGURING" );
 }
 
 int camera::leftColumnBaseRow() const

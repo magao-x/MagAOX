@@ -207,6 +207,9 @@ class cameraSim : public MagAOXApp<>,
 
     int setEMGain();
 
+    /// Request simulated unity EM gain with the INDI mutex already held by stdCamera.
+    int setEMGainOff();
+
     /// Check the next ROI
     /** Checks if the target values are valid and adjusts them to the closest valid values if needed.
      *
@@ -740,6 +743,12 @@ inline int cameraSim::setEMGain()
 {
     m_emGain = m_emGainSet;
     return 0;
+}
+
+inline int cameraSim::setEMGainOff()
+{
+    m_emGainSet = 1;
+    return setEMGain();
 }
 
 inline int cameraSim::checkNextROI()

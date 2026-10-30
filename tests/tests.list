@@ -34,6 +34,7 @@
 ../apps/adcTracker/tests/adcTracker_test
 ../apps/alignLoop/tests/alignLoop_test
 ../apps/cacaoInterface/tests/cacaoInterface_test
+../apps/cameraSim/tests/cameraSim_emgain_test
 ../apps/closedLoopIndi/tests/closedLoopIndi_test
 ../apps/dmMode/tests/dmMode_test
 ../apps/dmPokeCenter/tests/dmPokeCenter_test
@@ -57,6 +58,7 @@
 ../apps/observerCtrl/tests/observerCtrl_test
 ../apps/ocam2KCtrl/tests/ocamUtils_test
 ../apps/ocam2KCtrl/tests/ocam2KCtrl_test
+../apps/ocam2KCtrl/tests/ocam2KCtrl_emgain_test
 ../apps/ocam2KCtrl/tests/ocam2KCtrl_reconfig_test
 ../apps/ocam2KCtrl/tests/ocam2KCtrl_lifecycle_test
 ../apps/ocam2KCtrl/tests/ocam2KCtrl_temperature_test

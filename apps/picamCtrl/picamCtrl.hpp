@@ -368,6 +368,9 @@ class picamCtrl : public MagAOXApp<>,
     /// Apply and record the requested electron-multiplication gain.
     int setEMGain();
 
+    /// Request unity EM gain with the INDI mutex already held by stdCamera.
+    int setEMGainOff();
+
     /// Apply the requested exposure time and update synchronization.
     int setExpTime();
 
@@ -1638,6 +1641,12 @@ inline int picamCtrl::setEMGain()
     m_adcSpeed = adcSpeed;
     recordCamera( true );
     return 0;
+}
+
+inline int picamCtrl::setEMGainOff()
+{
+    m_emGainSet = 1;
+    return setEMGain();
 }
 
 void picamCtrl::updateFxnGenSync()
