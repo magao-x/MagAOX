@@ -1128,6 +1128,127 @@ TEST_CASE( "DM timing sequential marker rules remain strict after worker endpoin
     CHECK( collector.summary().total.events == 0 );
 }
 
+/// Measure paired worker service independently of idle spacing and later post work.
+/** \ingroup dmTiming_tests */
+TEST_CASE( "DM timing worker service excludes idle waiting and post retirement", "[dev::dmTiming]" )
+{
+    // clang-format off
+#ifdef DM_TIMING_TEST_DOXYGEN_REF
+    MagAOX::app::dev::dmTiming::importSdk;
+    MagAOX::app::dev::dmTiming::importSdkEvent;
+    MagAOX::app::dev::dmTiming::detachEvent;
+    MagAOX::app::dev::dmTiming::submitEvent;
+#endif
+    // clang-format on
+
+    for( const bool detached : { false, true } )
+    {
+        Collector collector;
+        collector.configure( 2, 8 );
+        const int64_t                base = 1000000000;
+        const std::array<int64_t, 3> spacing{ 0, 500000, 20500000 };
+
+        for( size_t index = 0; index < spacing.size(); ++index )
+        {
+            const int64_t receipt = base + spacing[index];
+            const int64_t ready   = receipt + 111000 + index * 1000;
+            collector.beginEventAt( true, receipt );
+            collector.markAt( Marker::entry, receipt + 100 );
+            collector.markAt( Marker::actuatorEnd, receipt + 7000 );
+            collector.markAt( Marker::stagingStart, receipt + 22000 );
+            collector.markAt( Marker::stagingEnd, receipt + 200000 );
+
+            if( detached )
+            {
+                auto event = collector.detachEvent();
+                Collector::importSdkEvent(
+                    event, receipt + 8000, receipt + 109000, Outcome::success, receipt + 7200, -1, -1, ready );
+                Collector::markEvent( event, Marker::finish, receipt + 300000 + index * 100000 );
+                collector.submitEvent( event );
+            }
+            else
+            {
+                collector.importSdk(
+                    receipt + 8000, receipt + 109000, Outcome::success, receipt + 7200, -1, -1, ready );
+                collector.markAt( Marker::finish, receipt + 300000 + index * 100000 );
+                collector.finishEvent();
+            }
+        }
+
+        collector.update( base + 22000000 );
+        const auto &summary = collector.summary();
+        CHECK( summary.fgValid );
+        CHECK( summary.total.invalid == 0 );
+        CHECK( summary.metrics[metricIndex( Metric::sdk )].mean == Approx( 101e-6 ) );
+        CHECK( summary.metrics[metricIndex( Metric::sdkTail )].count == 3 );
+        CHECK( summary.metrics[metricIndex( Metric::sdkTail )].mean == Approx( 3e-6 ) );
+        CHECK( summary.metrics[metricIndex( Metric::sdkTail )].max == Approx( 4e-6 ) );
+        CHECK( summary.metrics[metricIndex( Metric::sdkService )].mean == Approx( 104e-6 ) );
+        CHECK( summary.metrics[metricIndex( Metric::sdkService )].max == Approx( 105e-6 ) );
+        CHECK( summary.metrics[metricIndex( Metric::staging )].mean == Approx( 178e-6 ) );
+        CHECK( summary.metrics[metricIndex( Metric::receiptCallback )].mean == Approx( 400e-6 ) );
+        CHECK( metricIndex( Metric::sdkTail ) == 18 );
+        CHECK( metricIndex( Metric::sdkService ) == 19 );
+    }
+}
+
+/// Keep absent or invalid readiness independent of actual submission and compatible frame timing.
+/** \ingroup dmTiming_tests */
+TEST_CASE( "DM timing validates optional worker readiness without erasing SDK success", "[dev::dmTiming]" )
+{
+    // clang-format off
+#ifdef DM_TIMING_TEST_DOXYGEN_REF
+    MagAOX::app::dev::dmTiming::importSdk;
+    MagAOX::app::dev::dmTiming::importSdkEvent;
+#endif
+    // clang-format on
+
+    for( const bool detached : { false, true } )
+    {
+        for( int variant = 0; variant < 4; ++variant )
+        {
+            Collector collector;
+            collector.configure( 2, 8 );
+
+            for( int index = 0; index < 3; ++index )
+            {
+                const int64_t base  = 1000000000 + index * 500000;
+                const int64_t ready = variant == 0   ? -1
+                                      : variant == 1 ? base + 111000
+                                      : variant == 2 ? base + 108000
+                                                     : base + 131001;
+                collector.beginEventAt( true, base );
+                collector.markAt( Marker::entry, base + 100 );
+                collector.markAt( Marker::actuatorEnd, base + 7000 );
+                collector.markAt( Marker::finish, base + 131000 );
+
+                if( detached )
+                {
+                    auto event = collector.detachEvent();
+                    Collector::importSdkEvent( event, base + 8000, base + 109000, Outcome::success, -1, -1, -1, ready );
+                    collector.submitEvent( event );
+                }
+                else
+                {
+                    collector.importSdk( base + 8000, base + 109000, Outcome::success, -1, -1, -1, ready );
+                    collector.finishEvent();
+                }
+            }
+
+            collector.update( 1001200000 );
+            const auto &summary = collector.summary();
+            CHECK( summary.fgValid );
+            CHECK( summary.total.submitted == 3 );
+            CHECK( summary.total.invalid == ( variant >= 2 ? 3 : 0 ) );
+            CHECK( summary.metrics[metricIndex( Metric::sdk )].count == 3 );
+            CHECK( summary.metrics[metricIndex( Metric::sdk )].mean == Approx( 101e-6 ) );
+            CHECK( summary.metrics[metricIndex( Metric::receiptSend )].mean == Approx( 109e-6 ) );
+            CHECK( summary.metrics[metricIndex( Metric::sdkTail )].count == ( variant == 1 ? 3 : 0 ) );
+            CHECK( summary.metrics[metricIndex( Metric::sdkService )].valid == ( variant == 1 ) );
+        }
+    }
+}
+
 /// Transfer independent events to one finalizer without overwriting a newer monitor capture.
 /** \ingroup dmTiming_tests */
 TEST_CASE( "DM timing detached events retain ownership across overlapping commands", "[dev::dmTiming]" )

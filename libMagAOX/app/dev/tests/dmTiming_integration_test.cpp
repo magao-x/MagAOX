@@ -472,7 +472,7 @@ TEST_CASE( "DM timing INDI follows valid, stale and disabled summaries", "[dev::
     REQUIRE( app.setupDMTimingINDI() == 0 );
     app.m_indiDriver = &driver;
     REQUIRE( app.m_indiP_dmTiming.getNumElements() == 15 );
-    REQUIRE( app.m_indiP_dmStages.getNumElements() == 90 );
+    REQUIRE( app.m_indiP_dmStages.getNumElements() == 102 );
     REQUIRE( app.m_indiP_dmTimingQuality.getNumElements() == 21 );
     app.shmimMonitorTiming( {}, MagAOX::app::dev::shmimMonitorEvent::receipt );
     REQUIRE( app.processImage( nullptr, {} ) == 0 );
@@ -484,6 +484,10 @@ TEST_CASE( "DM timing INDI follows valid, stale and disabled summaries", "[dev::
     CHECK( app.m_indiP_dmTiming["receipt_send_jitter"].get<double>() == -1 );
     CHECK( app.m_indiP_dmStages["delta_count"].get<double>() == 0 );
     CHECK( app.m_indiP_dmStages["delta_mean"].get<double>() == -1 );
+    CHECK( app.m_indiP_dmStages["sdkTail_count"].get<double>() == 0 );
+    CHECK( app.m_indiP_dmStages["sdkTail_mean"].get<double>() == -1 );
+    CHECK( app.m_indiP_dmStages["sdkService_count"].get<double>() == 0 );
+    CHECK( app.m_indiP_dmStages["sdkService_mean"].get<double>() == -1 );
 
     for( unsigned i = 0; i < 2; ++i )
     {

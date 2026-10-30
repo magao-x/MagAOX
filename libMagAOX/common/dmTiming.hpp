@@ -36,6 +36,8 @@ enum class Metric : uint8_t
     staging,
     publication,
     sdkWait,
+    sdkTail,    ///< Native return through worker readiness, excluding later idle wait.
+    sdkService, ///< Native entry through worker readiness; independent of post-job retirement.
     count
 };
 
@@ -63,6 +65,7 @@ enum class Marker : uint8_t
     publicationEnd,
     waitStart,
     waitEnd,
+    sdkReady, ///< SDK owner reached request selection/wait after finishing the preceding result handoff.
     count
 };
 
@@ -211,7 +214,9 @@ inline const char *metricName( Metric metric )
                                       "readerRelease",
                                       "staging",
                                       "publication",
-                                      "sdkWait" };
+                                      "sdkWait",
+                                      "sdkTail",
+                                      "sdkService" };
 
     return metricIndex( metric ) < metricIndex( Metric::count ) ? names[metricIndex( metric )] : "unknown";
 }

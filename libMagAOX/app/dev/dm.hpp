@@ -531,13 +531,14 @@ class dm
     void releasePipelineCommand( PipelineCommand &command /**< [in,out] Prepared command. */ );
 
     /// Publish successful private products and frozen completion on the sole finalizer.
-    int
-    finishPipelineCommand( PipelineCommand &command /**< [in,out] Fully prepared command with an SDK result. */,
-                           MagAOX::dmTiming::Outcome outcome /**< [in] Actual SDK outcome or no-send. */,
-                           int64_t                   backendResult /**< [in] Raw SDK return code, or unavailable. */,
-                           int64_t                   sdkStartNs /**< [in] SDK entry, or -1 for an unsent command. */,
-                           int64_t sdkEndNs /**< [in] Actual SDK return, or -1 for an unsent command. */,
-                           bool submitted /**< [in] Actual successful SDK submission independent of publication. */ );
+    int finishPipelineCommand(
+        PipelineCommand          &command /**< [in,out] Fully prepared command with an SDK result. */,
+        MagAOX::dmTiming::Outcome outcome /**< [in] Actual SDK outcome or no-send. */,
+        int64_t                   backendResult /**< [in] Raw SDK return code, or unavailable. */,
+        int64_t                   sdkStartNs /**< [in] SDK entry, or -1 for an unsent command. */,
+        int64_t                   sdkEndNs /**< [in] Actual SDK return, or -1 for an unsent command. */,
+        bool                      submitted /**< [in] Actual successful SDK submission independent of publication. */,
+        int64_t                   sdkReadyNs = -1 /**< [in] Worker available before its next wait, or unavailable. */ );
 
     /// Route monitor observations without writing the finalizer-owned timing queue or completion publisher.
     void pipelineShmimMonitorTiming( const dev::shmimT &tag /**< [in] Main DM monitor tag. */,
@@ -1194,7 +1195,8 @@ int dm<derivedT, realT>::finishPipelineCommand( PipelineCommand          &comman
                                                 int64_t                   backendResult,
                                                 int64_t                   sdkStartNs,
                                                 int64_t                   sdkEndNs,
-                                                bool                      submitted )
+                                                bool                      submitted,
+                                                int64_t                   sdkReadyNs )
 {
     using MagAOX::dmTiming::Marker;
     using MagAOX::dmTiming::Outcome;
@@ -1204,7 +1206,8 @@ int dm<derivedT, realT>::finishPipelineCommand( PipelineCommand          &comman
     {
         if( sdkStartNs > 0 && sdkEndNs >= sdkStartNs )
         {
-            dev::dmTiming::importSdkEvent( command.timing, sdkStartNs, sdkEndNs, outcome, command.dispatchNs );
+            dev::dmTiming::importSdkEvent(
+                command.timing, sdkStartNs, sdkEndNs, outcome, command.dispatchNs, -1, -1, sdkReadyNs );
         }
         else
         {

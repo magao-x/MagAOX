@@ -600,7 +600,8 @@ inline void bmcCtrl::pipelineThreadExec() noexcept
                                                                               : int64_t( job.result.result ),
                                        job.result.startNs,
                                        job.result.endNs,
-                                       successful );
+                                       successful,
+                                       job.result.readyNs );
         }
         catch( ... )
         {
@@ -645,7 +646,8 @@ inline void bmcCtrl::pipelineThreadExec() noexcept
 
 inline void bmcCtrl::sdkThreadExec() noexcept
 {
-    m_sdkThreadID = syscall( SYS_gettid );
+    m_sdkThreadID        = syscall( SYS_gettid );
+    size_t completedSlot = pipelineCapacity;
 
     { //mutex scope
         std::unique_lock<std::mutex> lock( m_sdkMutex );
@@ -664,6 +666,18 @@ inline void bmcCtrl::sdkThreadExec() noexcept
 
         { //mutex scope
             std::unique_lock<std::mutex> lock( m_sdkMutex );
+
+            if( completedSlot < pipelineCapacity )
+            {
+                auto &job     = m_pipelineJobs[completedSlot];
+                job.sdkDone   = true;
+                job.running   = false;
+                completedSlot = pipelineCapacity;
+                m_pipelineWake.notify_one();
+                m_sdkDone.notify_all();
+                job.result.readyNs = dev::dmTiming::monotonicNowNs();
+            }
+
             m_sdkWake.wait( lock,
                             [this]()
                             {
@@ -773,17 +787,14 @@ inline void bmcCtrl::sdkThreadExec() noexcept
                                                result.result == NO_ERR ? MagAOX::dmTiming::Outcome::success
                                                                        : MagAOX::dmTiming::Outcome::failed,
                                                result.endNs );
-            { //mutex scope
-                std::lock_guard<std::mutex> lock( m_sdkMutex );
-                m_pipelineJobs[slot].sdkDone = true;
-                m_pipelineJobs[slot].running = false;
-                m_pipelineSdkActive          = pipelineCapacity;
-            }
-
-            m_pipelineWake.notify_one();
+            // Retain this lease until the next loop captures readiness before any idle wait.
+            completedSlot = slot;
         }
 
-        m_sdkDone.notify_all();
+        if( slot == pipelineCapacity )
+        {
+            m_sdkDone.notify_all();
+        }
     }
 }
 

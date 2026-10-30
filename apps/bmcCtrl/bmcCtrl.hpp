@@ -144,6 +144,7 @@ class bmcCtrl : public MagAOXApp<true>,
         uint32_t amplifierType{ 0 };  ///< SDK-owner snapshot of the PCIe amplifier configuration ID.
         int64_t  startNs{ 0 };        ///< Actual monotonic SDK entry boundary.
         int64_t  endNs{ 0 };          ///< Actual monotonic SDK return/exception boundary.
+        int64_t  readyNs{ -1 };       ///< Pipeline worker ready before selection/wait; absent on joined/control paths.
         uint64_t sequence{ 0 };       ///< Matching request sequence.
         uint64_t generation{ 0 };     ///< Matching handle generation.
         bool     exception{ false };  ///< SDK raised a C++ exception instead of returning a code.
@@ -243,8 +244,8 @@ class bmcCtrl : public MagAOXApp<true>,
         bool                         busy{ false }; ///< Pool credit remains owned through post retirement.
         bool staged{ false };     ///< Monitor finished every channel read and detached reader release.
         bool queued{ false };     ///< SDK owner may select this prepared vector.
-        bool running{ false };    ///< Native SDK call currently owns this job's vector.
-        bool sdkDone{ false };    ///< Actual SDK result or explicit cancellation is available.
+        bool running{ false };    ///< SDK/result lease retained until the worker-ready commit.
+        bool sdkDone{ false };    ///< Result and worker-ready stamp, or explicit cancellation, are available to post.
         bool submitted{ false };  ///< This command actually entered the native SDK.
         bool posting{ false };    ///< Sole post worker owns finalization outside the SDK mutex.
         bool cancelled{ false };  ///< No SDK submission is allowed for this admitted command.

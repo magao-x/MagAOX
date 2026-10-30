@@ -130,16 +130,19 @@ class dmTiming
                     MagAOX::dmTiming::Outcome outcome /**< [in] Actual submission outcome. */,
                     int64_t dispatchNs  = -1 /**< [in] Monitor request-publication timestamp, or unavailable. */,
                     int64_t waitStartNs = -1 /**< [in] Monitor SDK-result wait start, or unavailable. */,
-                    int64_t waitEndNs   = -1 /**< [in] Monitor SDK-result wait return, or unavailable. */ );
+                    int64_t waitEndNs   = -1 /**< [in] Monitor SDK-result wait return, or unavailable. */,
+                    int64_t readyNs = -1 /**< [in] Worker ready for selection before idle wait, or unavailable. */ );
 
     /// Import SDK endpoints into caller-owned storage using the same causal checks as importSdk.
-    static void importSdkEvent( MagAOX::dmTiming::Event  &event /**< [in,out] Exclusively owned event. */,
-                                int64_t                   startNs /**< [in] Actual SDK entry timestamp. */,
-                                int64_t                   endNs /**< [in] Actual SDK return timestamp. */,
-                                MagAOX::dmTiming::Outcome outcome /**< [in] Actual backend submission outcome. */,
-                                int64_t dispatchNs  = -1 /**< [in] Request-publication timestamp, or unavailable. */,
-                                int64_t waitStartNs = -1 /**< [in] Result wait start, or unavailable. */,
-                                int64_t waitEndNs   = -1 /**< [in] Result wait return, or unavailable. */ );
+    static void
+    importSdkEvent( MagAOX::dmTiming::Event  &event /**< [in,out] Exclusively owned event. */,
+                    int64_t                   startNs /**< [in] Actual SDK entry timestamp. */,
+                    int64_t                   endNs /**< [in] Actual SDK return timestamp. */,
+                    MagAOX::dmTiming::Outcome outcome /**< [in] Actual backend submission outcome. */,
+                    int64_t dispatchNs  = -1 /**< [in] Request-publication timestamp, or unavailable. */,
+                    int64_t waitStartNs = -1 /**< [in] Result wait start, or unavailable. */,
+                    int64_t waitEndNs   = -1 /**< [in] Result wait return, or unavailable. */,
+                    int64_t readyNs     = -1 /**< [in] Worker ready before selection/idle wait, or unavailable. */ );
 
     /// Attach an observed input counter, without asserting verified frame identity.
     void inputCounter( uint64_t counter /**< [in] Stable counter observation supplied by the monitor. */ );
@@ -330,11 +333,12 @@ inline void dmTiming::importSdk( int64_t                   startNs,
                                  MagAOX::dmTiming::Outcome result,
                                  int64_t                   dispatchNs,
                                  int64_t                   waitStartNs,
-                                 int64_t                   waitEndNs )
+                                 int64_t                   waitEndNs,
+                                 int64_t                   readyNs )
 {
     if( m_active )
     {
-        importSdkEvent( m_event, startNs, endNs, result, dispatchNs, waitStartNs, waitEndNs );
+        importSdkEvent( m_event, startNs, endNs, result, dispatchNs, waitStartNs, waitEndNs, readyNs );
     }
 }
 
@@ -344,7 +348,8 @@ inline void dmTiming::importSdkEvent( MagAOX::dmTiming::Event  &event,
                                       MagAOX::dmTiming::Outcome result,
                                       int64_t                   dispatchNs,
                                       int64_t                   waitStartNs,
-                                      int64_t                   waitEndNs )
+                                      int64_t                   waitEndNs,
+                                      int64_t                   readyNs )
 {
     using namespace MagAOX::dmTiming;
 
@@ -411,6 +416,18 @@ inline void dmTiming::importSdkEvent( MagAOX::dmTiming::Event  &event,
         {
             store( Marker::waitStart, waitStartNs );
             store( Marker::waitEnd, waitEndNs );
+        }
+    }
+
+    if( readyNs >= 0 )
+    {
+        if( !sdkValid || readyNs < endNs || ( finish >= 0 && readyNs > finish ) )
+        {
+            reject( Marker::sdkReady, Marker::sdkReady );
+        }
+        else
+        {
+            store( Marker::sdkReady, readyNs );
         }
     }
 
@@ -807,7 +824,9 @@ inline void dmTiming::calculate( int64_t nowNs )
                                        Metric::readerRelease,
                                        Metric::staging,
                                        Metric::publication,
-                                       Metric::sdkWait };
+                                       Metric::sdkWait,
+                                       Metric::sdkTail,
+                                       Metric::sdkService };
         constexpr Marker starts[]  = { Marker::receipt,
                                        Marker::actuatorStart,
                                        Marker::sdkStart,
@@ -821,7 +840,9 @@ inline void dmTiming::calculate( int64_t nowNs )
                                        Marker::entry,
                                        Marker::stagingStart,
                                        Marker::publicationStart,
-                                       Marker::waitStart };
+                                       Marker::waitStart,
+                                       Marker::sdkEnd,
+                                       Marker::sdkStart };
         constexpr Marker ends[]    = { Marker::entry,
                                        Marker::actuatorEnd,
                                        Marker::sdkEnd,
@@ -835,7 +856,9 @@ inline void dmTiming::calculate( int64_t nowNs )
                                        Marker::readRelease,
                                        Marker::stagingEnd,
                                        Marker::publicationEnd,
-                                       Marker::waitEnd };
+                                       Marker::waitEnd,
+                                       Marker::sdkReady,
+                                       Marker::sdkReady };
 
         for( size_t i = 0; i < sizeof( metrics ) / sizeof( metrics[0] ); ++i )
         {

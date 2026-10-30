@@ -146,6 +146,8 @@ TEST_CASE( "DM timing telemetry preserves controller-local populations", "[dmTim
     REQUIRE( text.starts_with( "[dmtimes] session=" ) );
     REQUIRE( text.find( "state=valid" ) != std::string::npos );
     REQUIRE( text.find( "receiptInterval[n=3]=" ) != std::string::npos );
+    REQUIRE( text.find( "sdkTail[n=21]=" ) != std::string::npos );
+    REQUIRE( text.find( "sdkService[n=22]=" ) != std::string::npos );
     REQUIRE( text.find( "dropped:112" ) != std::string::npos );
     const auto          json = telem_dmtimings::msgJSON( payload,
                                                 message.builder.GetSize(),
@@ -172,6 +174,15 @@ TEST_CASE( "DM timing telemetry preserves controller-local populations", "[dmTim
     REQUIRE( publication->max() == Approx( expected.max ) );
     REQUIRE( publication->span() == expected.span );
     REQUIRE( publication->valid() );
+
+    for( const auto metric : { dmTiming::Metric::sdkTail, dmTiming::Metric::sdkService } )
+    {
+        const auto  index = size_t( metric );
+        const auto *row   = jsonRecord->metrics()->Get( index );
+        REQUIRE( size_t( row->metric() ) == index );
+        REQUIRE( row->mean() == Approx( summary.metrics[index].mean ) );
+        REQUIRE( row->max() == Approx( summary.metrics[index].max ) );
+    }
 }
 
 /// Expose every named metric and both counter populations without interpolating summaries or truncating counters.
@@ -181,7 +192,7 @@ TEST_CASE( "DM timing metadata projects metrics and collection quality", "[dmTim
     const auto                         summary = sampleSummary();
     telem_dmtimings::messageT          message( summary );
     auto                              *payload = message.builder.GetBufferPointer();
-    const std::array<const char *, 18> names{ "receiptInterval",
+    const std::array<const char *, 20> names{ "receiptInterval",
                                               "sendInterval",
                                               "receiptSend",
                                               "dispatch",
@@ -198,7 +209,9 @@ TEST_CASE( "DM timing metadata projects metrics and collection quality", "[dmTim
                                               "readerRelease",
                                               "staging",
                                               "publication",
-                                              "sdkWait" };
+                                              "sdkWait",
+                                              "sdkTail",
+                                              "sdkService" };
 
     for( size_t index = 0; index < names.size(); ++index )
     {
@@ -328,7 +341,7 @@ TEST_CASE( "DM timing telemetry distinguishes availability and rejects malformed
 /** \ingroup dmTimingTelemetry_unit_test */
 TEST_CASE( "DM timing telemetry verifies the stable metric set", "[dmTimingTelemetry]" )
 {
-    for( int variant = 0; variant < 10; ++variant )
+    for( int variant = 0; variant < 14; ++variant )
     {
         INFO( "metric-set variant " << variant );
         telem_dmtimings::messageT message( sampleSummary() );
@@ -338,6 +351,8 @@ TEST_CASE( "DM timing telemetry verifies the stable metric set", "[dmTimingTelem
         const size_t                                    count = variant == 0 || variant == 3 ? 12
                                                                 : variant == 2               ? 11
                                                                 : variant == 6               ? 14
+                                                                : variant == 11              ? 19
+                                                                : variant >= 10              ? 20
                                                                 : variant >= 7               ? 18
                                                                                              : 13;
 
@@ -370,6 +385,16 @@ TEST_CASE( "DM timing telemetry verifies the stable metric set", "[dmTimingTelem
                 id = 18;
             }
 
+            if( variant == 12 && index == 0 )
+            {
+                id = 0;
+            }
+
+            if( variant == 13 && index == 0 )
+            {
+                id = 20;
+            }
+
             rows.push_back( CreateDmTimingStats( builder, DmTimingMetric( id ), 3, 1e-4, 1e-6, 9e-5, 2e-4, 1, true ) );
         }
 
@@ -382,7 +407,8 @@ TEST_CASE( "DM timing telemetry verifies the stable metric set", "[dmTimingTelem
         record.add_delta( delta );
         builder.Finish( record.Finish() );
         auto buffer = envelope( message );
-        REQUIRE( verifyLogEntry( telem_dmtimings::eventCode, buffer.get() ) == ( variant <= 1 || variant == 7 ) );
+        REQUIRE( verifyLogEntry( telem_dmtimings::eventCode, buffer.get() ) ==
+                 ( variant <= 1 || variant == 7 || variant == 10 ) );
 
         if( variant <= 1 )
         {
@@ -417,6 +443,19 @@ TEST_CASE( "DM timing telemetry verifies the stable metric set", "[dmTimingTelem
         {
             REQUIRE( project<double>( "readerRelease_mean", builder.GetBufferPointer() ) == 1e-4 );
             REQUIRE( project<double>( "sdkWait_mean", builder.GetBufferPointer() ) == 1e-4 );
+        }
+
+        if( variant <= 1 || variant == 7 )
+        {
+            REQUIRE( project<uint64_t>( "sdkTail_count", builder.GetBufferPointer() ) == 0 );
+            REQUIRE_FALSE( project<bool>( "sdkService_valid", builder.GetBufferPointer() ) );
+            REQUIRE( mx::math::isNan( project<double>( "sdkTail_mean", builder.GetBufferPointer() ) ) );
+        }
+
+        if( variant == 10 )
+        {
+            REQUIRE( project<double>( "sdkTail_mean", builder.GetBufferPointer() ) == 1e-4 );
+            REQUIRE( project<double>( "sdkService_mean", builder.GetBufferPointer() ) == 1e-4 );
         }
     }
 }

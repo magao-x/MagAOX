@@ -24,7 +24,10 @@ enum DmTimingMetric : ubyte
     readerRelease = 14,
     staging = 15,
     publication = 16,
-    sdkWait = 17
+    sdkWait = 17,
+    // SDK owner service excludes idle waiting and independent post retirement.
+    sdkTail = 18,
+    sdkService = 19
 }
 
 enum DmTimingAvailability : ubyte

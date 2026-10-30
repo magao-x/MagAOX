@@ -405,6 +405,10 @@ class bmcCtrl_test : public bmcCtrl
     /// Return the active pipeline request's immutable diagnostic dispatch stamp.
     int64_t pipelineDispatchStamp();
 
+    /// Wait for one submitted command's SDK entry, return and worker-ready endpoints without requiring another input.
+    std::array<int64_t, 3>
+    waitPipelineSdkReady( uint64_t counter /**< [in] Input counter whose pool slot has not yet been reused. */ );
+
     /// Start the real worker loop without requesting workstation realtime privileges or an INDI server.
     void enableWorker();
 
@@ -629,6 +633,29 @@ int64_t bmcCtrl_test::pipelineDispatchStamp()
     return m_pipelineSdkActive < pipelineCapacity ? m_pipelineJobs[m_pipelineSdkActive].command.dispatchNs : 0;
 }
 
+std::array<int64_t, 3> bmcCtrl_test::waitPipelineSdkReady( uint64_t counter )
+{
+    std::unique_lock<std::mutex> lock( m_sdkMutex );
+    std::array<int64_t, 3>       endpoints{};
+    REQUIRE( m_sdkDone.wait_for( lock,
+                                 std::chrono::seconds( 3 ),
+                                 [this, counter, &endpoints]()
+                                 {
+                                     for( const auto &job : m_pipelineJobs )
+                                     {
+                                         if( job.submitted && job.identity.inputCounter == counter &&
+                                             job.result.readyNs >= 0 )
+                                         {
+                                             endpoints = { job.result.startNs, job.result.endNs, job.result.readyNs };
+                                             return true;
+                                         }
+                                     }
+
+                                     return false;
+                                 } ) );
+    return endpoints;
+}
+
 void bmcCtrl_test::prepareInput( uint64_t counter )
 {
     m_imageStream.md->cnt0  = counter;
@@ -807,6 +834,8 @@ TEST_CASE( "bmcCtrl records actual SDK outcomes and phase endpoints", "[bmcCtrl]
     REQUIRE( summary.total.failed == ( bmcTimingTest::result.load() ? 1 : 0 ) );
     REQUIRE( summary.metrics[metricIndex( Metric::actuator )].count == 1 );
     REQUIRE( summary.metrics[metricIndex( Metric::saturation )].count == ( bmcTimingTest::result.load() ? 0 : 1 ) );
+    REQUIRE( summary.metrics[metricIndex( Metric::sdkTail )].count == 0 );
+    REQUIRE( summary.metrics[metricIndex( Metric::sdkService )].count == 0 );
 
     const auto &sdk = summary.metrics[metricIndex( Metric::sdk )];
 
@@ -855,6 +884,8 @@ TEST_CASE( "BMC worker overlaps private staging and joins actual SDK result", "[
     REQUIRE( app.dmTimingSummary().total.submitted == 1 );
     REQUIRE( app.dmTimingSummary().total.invalid == 0 );
     REQUIRE( app.dmTimingSummary().metrics[metricIndex( Metric::sdk )].count == 1 );
+    REQUIRE( app.dmTimingSummary().metrics[metricIndex( Metric::sdkTail )].count == 0 );
+    REQUIRE( app.dmTimingSummary().metrics[metricIndex( Metric::sdkService )].count == 0 );
     app.retireCommand();
     REQUIRE_FALSE( app.m_commandActive );
     REQUIRE( app.admit( 2 ) );
@@ -1474,10 +1505,18 @@ TEST_CASE( "BMC pipeline overlaps preparation SDK and ordered post with frozen i
     bmcTimingTest::permitCalls( 1 );
     bmcTimingTest::waitPost();
     bmcTimingTest::waitCalls( 2 );
+    const auto firstSdk = app.waitPipelineSdkReady( 1 );
+    REQUIRE( firstSdk[2] >= firstSdk[1] );
     REQUIRE( app.delta( 0 ) == 0 );
     REQUIRE( app.pipelineCounts()[1] == 0 );
     REQUIRE( app.m_dmReaderRelease.snapshot().sequence == secondRelease.sequence );
     REQUIRE( app.m_dmReaderRelease.snapshot().outcome == MagAOX::dmTiming::Outcome::unknown );
+    bmcTimingTest::permitCalls( 2 );
+    const auto secondSdk = app.waitPipelineSdkReady( 2 );
+    REQUIRE( secondSdk[0] >= firstSdk[2] );
+    REQUIRE( secondSdk[2] >= secondSdk[1] );
+    REQUIRE( app.pipelineCounts()[1] == 0 );
+    REQUIRE( app.delta( 0 ) == 0 );
     bmcTimingTest::permitReturn();
     app.waitRetired( 2 );
     REQUIRE( app.pipelineCounts() == std::array<uint64_t, 6>{ 2, 2, 0, 0, 0, 0 } );
@@ -1497,9 +1536,65 @@ TEST_CASE( "BMC pipeline overlaps preparation SDK and ordered post with frozen i
     app.m_dmTiming.update();
     REQUIRE( app.dmTimingSummary().total.submitted == 2 );
     REQUIRE( app.dmTimingSummary().total.invalid == 0 );
+    REQUIRE( app.dmTimingSummary().metrics[MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::sdkTail )].count ==
+             2 );
+    REQUIRE(
+        app.dmTimingSummary().metrics[MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::sdkService )].count ==
+        2 );
     REQUIRE(
         app.dmTimingSummary().metrics[MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::saturation )].count ==
         0 );
+}
+
+/// An isolated command records readiness before waiting, and later pool reuse cannot overwrite its timing sample.
+/** \ingroup bmcCtrl_unit_test */
+TEST_CASE( "BMC pipeline worker service excludes idle waiting and survives pool reuse", "[bmcCtrl][pipeline][timing]" )
+{
+    // clang-format off
+    #ifdef BMCCTRL_TEST_DOXYGEN_REF
+    MagAOX::app::bmcCtrl::sdkThreadExec();
+    MagAOX::app::bmcCtrl::pipelineThreadExec();
+    #endif
+    // clang-format on
+    using namespace MagAOX::app;
+    using namespace MagAOX::dmTiming;
+    bmcCtrl_test app;
+    app.m_dmTiming.configure( 60, 32 );
+    app.enablePipeline();
+    int64_t previousReady = -1;
+    double  serviceSum    = 0;
+    double  tailSum       = 0;
+
+    for( uint64_t counter = 1; counter <= 4; ++counter )
+    {
+        const auto inputBoundary = dev::dmTiming::monotonicNowNs();
+        REQUIRE( previousReady <= inputBoundary );
+        REQUIRE( app.pipelineInput( counter ) == 0 );
+        app.waitRetired( counter );
+        const auto endpoints = app.waitPipelineSdkReady( counter );
+        REQUIRE( endpoints[0] >= inputBoundary );
+        REQUIRE( endpoints[1] >= endpoints[0] );
+        REQUIRE( endpoints[2] >= endpoints[1] );
+        REQUIRE( endpoints[2] <= dev::dmTiming::monotonicNowNs() );
+        previousReady = endpoints[2];
+        serviceSum += ( endpoints[2] - endpoints[0] ) * 1e-9;
+        tailSum += ( endpoints[2] - endpoints[1] ) * 1e-9;
+        app.m_dmTiming.update();
+        const auto &summary = app.dmTimingSummary();
+        const auto &service = summary.metrics[metricIndex( Metric::sdkService )];
+        const auto &tail    = summary.metrics[metricIndex( Metric::sdkTail )];
+        REQUIRE( summary.total.submitted == counter );
+        REQUIRE( summary.total.invalid == 0 );
+        REQUIRE( service.count == counter );
+        REQUIRE( tail.count == counter );
+        REQUIRE( service.mean == Approx( serviceSum / counter ) );
+        REQUIRE( tail.mean == Approx( tailSum / counter ) );
+        REQUIRE( service.valid == ( counter > 1 ) );
+        REQUIRE( tail.valid == ( counter > 1 ) );
+    }
+
+    REQUIRE_FALSE( app.m_sdkFault );
+    REQUIRE( app.pipelineCounts() == std::array<uint64_t, 6>{ 4, 4, 0, 0, 0, 0 } );
 }
 
 /// A full bounded pool still announces newer input, so old queued vectors never replay after an SDK stall.
@@ -1573,6 +1668,12 @@ TEST_CASE( "BMC pipeline native failures cancel queued jobs without false submit
     REQUIRE( app.dmTimingSummary().total.submitted == 0 );
     REQUIRE( app.dmTimingSummary().total.failed == 1 );
     REQUIRE( app.dmTimingSummary().total.noSend == 2 );
+    REQUIRE( app.dmTimingSummary().metrics[MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::sdkTail )].count ==
+             1 );
+    REQUIRE(
+        app.dmTimingSummary().metrics[MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::sdkService )].count ==
+        1 );
+    REQUIRE( app.dmTimingSummary().total.invalid == 0 );
 }
 
 /// A post error can follow SDK B entry; it fences C without cancelling the actual B call or replaying old products.
@@ -1714,6 +1815,10 @@ TEST_CASE( "BMC pipeline watchdog counts once and retains actual native ownershi
     REQUIRE( app.dmTimingSummary().total.submitted == 1 );
     REQUIRE( app.dmTimingSummary().total.failed == 1 );
     REQUIRE( app.dmTimingSummary().total.noSend == 1 );
+    REQUIRE(
+        app.dmTimingSummary().metrics[MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::sdkService )].count ==
+        1 );
+    REQUIRE( app.dmTimingSummary().total.invalid == 0 );
 }
 
 /// Validated private vector identity remains independent of later channel-staging and reader qualification.
@@ -1755,6 +1860,10 @@ TEST_CASE( "BMC pipeline late input advance revokes reader provenance without fa
     REQUIRE( record.outcome == MagAOX::dmTiming::Outcome::success );
     REQUIRE( record.state == State::complete );
     REQUIRE( sdkQualified( record ) );
+    const auto ready = app.waitPipelineSdkReady( 1 );
+    REQUIRE( ready[1] == record.finishedNs );
+    REQUIRE( ready[2] >= ready[1] );
+    REQUIRE( ready[2] <= dev::dmTiming::monotonicNowNs() );
     const bool advance = GENERATE( false, true );
 
     if( advance )
@@ -1780,6 +1889,12 @@ TEST_CASE( "BMC pipeline late input advance revokes reader provenance without fa
     REQUIRE( app.dmTimingSummary().fgValid );
     REQUIRE( app.dmTimingSummary().total.submitted == 3 );
     REQUIRE( app.dmTimingSummary().total.failed == 0 );
+    REQUIRE( app.dmTimingSummary().total.invalid == 0 );
+    REQUIRE( app.dmTimingSummary().metrics[MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::sdkTail )].count ==
+             3 );
+    REQUIRE(
+        app.dmTimingSummary().metrics[MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::sdkService )].count ==
+        3 );
     REQUIRE( ImageStreamIO_closeIm( &sdk ) == 0 );
 }
 
