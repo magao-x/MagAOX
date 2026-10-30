@@ -1112,7 +1112,7 @@ class stdCamera
      */
     static int st_newCallBack_stdCamera(
         void                    *app /**< [in] a pointer to this, will be static_cast-ed to derivedT. */,
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request. */
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request. */
     );
 
     /// The callback function for stdCamera properties
@@ -1122,7 +1122,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_stdCamera(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Interface to setTempSetPt when the derivedT has temperature control
     /** Tag-dispatch resolution of c_stdCamera_tempControl==true will call this function.
@@ -1142,7 +1142,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_temp(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Interface to setTempControl when the derivedT has temperature control
     /** Tag-dispatch resolution of c_stdCamera_tempControl==true will call this function.
@@ -1162,7 +1162,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_temp_controller(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Interface to setReadoutSpeed when the derivedT has readout speed control
     /** Tag-dispatch resolution of c_stdCamera_readoutSpeed==true will call this function.
@@ -1182,7 +1182,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_readoutSpeed(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Interface to setVShiftSpeed when the derivedT has vshift speed control
     /** Tag-dispatch resolution of c_stdCamera_vShiftSpeed==true will call this function.
@@ -1202,7 +1202,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_vShiftSpeed(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Interface to setEMGain when the derivedT has EM Gain
     /** Tag-dispatch resolution of c_stdCamera_emGain==true will call this function.
@@ -1244,7 +1244,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_exptime(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Interface to setFPS when the derivedT uses FPS controls
     /** Tag-dispatch resolution of c_stdCamera_fpsCtrl==true will call this function.
@@ -1264,7 +1264,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_fps(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Interface to setFanSpeed when the derivedT exposes fan controls.
     /** Tag-dispatch resolution of fan control availability will call this function.
@@ -1284,7 +1284,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_fanSpeed(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Interface to setAnalogGain when the derivedT exposes analog-gain controls.
     /** Tag-dispatch resolution of analog-gain control availability will call this function.
@@ -1304,7 +1304,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_analogGain(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Interface to setLED when the derivedT exposes LED controls.
     /** Tag-dispatch resolution of LED control availability will call this function.
@@ -1324,7 +1324,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_led(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Interface to setSynchro when the derivedT has synchronization
     /** Tag-dispatch resolution of c_stdCamera_synchro==true will call this function.
@@ -1344,7 +1344,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_synchro(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Callback to process a NEW mode request
     /**
@@ -1352,7 +1352,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_mode(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Callback to process a NEW reconfigure request
     /**
@@ -1360,7 +1360,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_reconfigure(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Interface to setCropMode when the derivedT has crop mode
     /** Tag-dispatch resolution of c_stdCamera_cropMode==true will call this function.
@@ -1380,7 +1380,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_cropMode(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Publish coherent ROI geometry and relative targets; caller holds m_indiMutex.
     void updateROIGeometry( bool available = true /**< [in] False invalidates coordinate-dependent controls. */ );
@@ -1395,7 +1395,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_roi_x(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Callback to process a NEW roi_y request
     /**
@@ -1403,7 +1403,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_roi_y(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Callback to process a NEW roi_w request
     /**
@@ -1411,7 +1411,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_roi_w(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Callback to process a NEW roi_h request
     /**
@@ -1419,7 +1419,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_roi_h(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Callback to process a NEW bin_x request
     /**
@@ -1427,7 +1427,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_roi_bin_x(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Callback to process a NEW bin_y request
     /**
@@ -1435,7 +1435,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_roi_bin_y(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Interface to checkNextROI when the derivedT uses ROIs
     /** Tag-dispatch resolution of c_stdCamera_usesROI==true will call this function.
@@ -1455,7 +1455,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_roi_check(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Interface to setNextROI when the derivedT uses ROIs
     /** Tag-dispatch resolution of c_stdCamera_usesROI==true will call this function.
@@ -1475,7 +1475,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_roi_set(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Callback to process a NEW roi_full request
     /**
@@ -1483,7 +1483,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_roi_full(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Callback to process a NEW roi_fullbin request
     /**
@@ -1491,7 +1491,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_roi_fullbin(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Callback to process a NEW roi_loadlast request
     /**
@@ -1499,7 +1499,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_roi_loadlast(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Callback to process a NEW roi_last request
     /**
@@ -1507,7 +1507,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_roi_last(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Callback to process a NEW roi_default request
     /**
@@ -1515,7 +1515,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_roi_default(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Interface to setShutter when the derivedT has a shutter
     /** Tag-dispatch resolution of c_stdCamera_hasShutter==true will call this function.
@@ -1537,7 +1537,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_shutter(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Interface to checkFocus when the derivedT exposes focus support.
     bool checkFocus( const mx::meta::trueFalseT<true> &t /**< [in] Enabled interface selector. */ );
@@ -3087,7 +3087,7 @@ int stdCamera<derivedT>::appLogic()
     try
     {
         if( derivedT::c_stdCamera_usesROI )
-        { // mutex scope
+        { //mutex scope
             std::lock_guard<std::mutex> lock( derived().m_indiMutex );
             updateROIGeometry();
         }

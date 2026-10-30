@@ -201,7 +201,7 @@ class picamCtrl : public MagAOXApp<>,
               ///@}
 
   protected:
-    /** \name configurable parameters
+    /** \name Configurable Parameters - Data
      *@{
      */
     std::string m_serialNumber; ///< The camera's identifying serial number
@@ -364,6 +364,7 @@ class picamCtrl : public MagAOXApp<>,
 
     /// Request a cooling-fan state change through the next reconfiguration.
     int setFanSpeed();
+
     /// Apply and record the requested electron-multiplication gain.
     int setEMGain();
 

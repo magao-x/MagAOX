@@ -1,8 +1,6 @@
 /** \file frameGrabber.hpp
  * \brief The MagAO-X generic frame grabber.
  *
- * \author Jared R. Males (jaredmales@gmail.com)
- *
  * \ingroup app_files
  */
 
@@ -28,9 +26,8 @@ namespace app
 namespace dev
 {
 
-/** MagAO-X generic frame grabber
- *
- *
+/// MagAO-X generic frame grabber.
+/**
  * The derived class `derivedT` has the following requirements:
  *
  * - Must be derived from MagAOXApp<true>
@@ -113,6 +110,7 @@ template <class derivedT>
 class frameGrabber
 {
   public:
+    /// Supported image orientations when the derived camera permits flipping.
     enum fgFlip
     {
         fgFlipNone,
@@ -121,10 +119,10 @@ class frameGrabber
         fgFlipUDLR
     };
 
-    typedef int32_t cbIndexT;
+    typedef int32_t cbIndexT; ///< Index type for latency circular buffers.
 
   protected:
-    /** \name Configurable Parameters
+    /** \name Configurable Parameters - Data
      * @{
      */
     std::string m_shmimName{ "" }; ///< The name of the shared memory image, is used in `/tmp/<shmimName>.im.shm`.
@@ -139,7 +137,7 @@ class frameGrabber
 
     float m_latencyCircBuffMaxTime{ 5 }; ///< Maximum time of the latency meaurement circular buffers
 
-    int m_defaultFlip{ fgFlipNone };
+    int m_defaultFlip{ fgFlipNone }; ///< Configured image orientation applied while copying frames.
 
     ///@}
 
@@ -165,29 +163,41 @@ class frameGrabber
 
     float m_cbFPS{ 0 }; ///< The FPS used to configure the circular buffers
 
-    mx::sigproc::circularBufferIndex<timespec, cbIndexT> m_atimes;
-    mx::sigproc::circularBufferIndex<timespec, cbIndexT> m_wtimes;
+    mx::sigproc::circularBufferIndex<timespec, cbIndexT> m_atimes; ///< Recent camera acquisition timestamps.
 
-    std::vector<double> m_atimesD;
-    std::vector<double> m_wtimesD;
-    std::vector<double> m_watimesD;
+    mx::sigproc::circularBufferIndex<timespec, cbIndexT> m_wtimes; ///< Corresponding stream-write timestamps.
 
-    timespec m_dummy_ts{ 0, 0 };
-    uint64_t m_dummy_cnt{ 0 };
-    char     m_dummy_c{ 0 };
+    std::vector<double> m_atimesD; ///< Acquisition intervals used to calculate timing statistics, in seconds.
 
-    double m_mna;
-    double m_vara;
-    double m_mina;
-    double m_maxa;
+    std::vector<double> m_wtimesD; ///< Stream-write intervals used to calculate timing statistics, in seconds.
 
-    double m_mnw;
-    double m_varw;
-    double m_minw;
-    double m_maxw;
+    std::vector<double> m_watimesD; ///< Acquisition-to-write latencies, in seconds.
 
-    double m_mnwa;
-    double m_varwa;
+    timespec m_dummy_ts{ 0, 0 }; ///< Scratch value used when touching the next frame's timestamp metadata.
+
+    uint64_t m_dummy_cnt{ 0 }; ///< Scratch value used when touching the next frame's counter metadata.
+
+    char m_dummy_c{ 0 }; ///< Scratch value used when touching the next frame's image buffer.
+
+    double m_mna; ///< Mean acquisition interval, in seconds.
+
+    double m_vara; ///< Acquisition-interval variance, in seconds squared.
+
+    double m_mina; ///< Minimum acquisition interval, in seconds.
+
+    double m_maxa; ///< Maximum acquisition interval, in seconds.
+
+    double m_mnw; ///< Mean stream-write interval, in seconds.
+
+    double m_varw; ///< Stream-write-interval variance, in seconds squared.
+
+    double m_minw; ///< Minimum stream-write interval, in seconds.
+
+    double m_maxw; ///< Maximum stream-write interval, in seconds.
+
+    double m_mnwa; ///< Mean acquisition-to-write latency, in seconds.
+
+    double m_varwa; ///< Acquisition-to-write latency variance, in seconds squared.
 
   public:
     /// Setup the configuration system
@@ -259,6 +269,7 @@ class frameGrabber
       */
     int appShutdown();
 
+    /// Resize latency buffers for the current frame rate and configured sampling window.
     int configCircBuffs();
 
   protected:
@@ -283,8 +294,14 @@ class frameGrabber
 
     ///@}
 
-    void *loadImageIntoStreamCopy( void *dest, void *src, size_t width, size_t height, size_t szof );
+    /// Copy a frame into the stream, applying the configured flip when supported.
+    void *loadImageIntoStreamCopy( void  *dest /**< [out] Destination frame buffer. */,
+                                   void  *src /**< [in] Source frame buffer. */,
+                                   size_t width /**< [in] Frame width in pixels. */,
+                                   size_t height /**< [in] Frame height in pixels. */,
+                                   size_t szof /**< [in] Bytes per pixel. */ );
 
+    /// Open an existing stream and load its geometry; return 1 while unavailable or -1 on a fatal error.
     int openShmim();
 
     /** \name INDI
@@ -298,7 +315,7 @@ class frameGrabber
 
     pcf::IndiProperty m_indiP_frameSize; ///< Property used to report the current frame size
 
-    pcf::IndiProperty m_indiP_timing;
+    pcf::IndiProperty m_indiP_timing; ///< Acquisition, publication, and latency statistics reported through INDI.
 
   public:
     /// Update the INDI properties for this device controller
@@ -316,7 +333,8 @@ class frameGrabber
      * @{
      */
 
-    int recordFGTimings( bool force = false );
+    /// Publish timing telemetry when values change or publication is explicitly requested.
+    int recordFGTimings( bool force = false /**< [in] Publish even when the timing statistics are unchanged. */ );
 
     /// @}
 
@@ -334,6 +352,7 @@ class frameGrabber
                                 long      callPriorityTag /**< [in] fallback overload selector */
     );
 
+    /// Access the derived camera or processing application.
     derivedT &derived()
     {
         return *static_cast<derivedT *>( this );
