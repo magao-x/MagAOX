@@ -172,3 +172,724 @@ readiness/backend evidence. Whole changed C/C++ files pass clang-format;
 whitespace and operator-guide Bash syntax/local links are checked. These are
 workstation checks only; no instrument action or 6 kHz hardware qualification
 was performed by the agents.
+
+## First two-step readiness capture: 20261030T024932Z
+
+The operator identifies this as `maxSubframes=2`, with the three-step capture
+still in progress. Source: `synco-sim-20261030T024932Z.tgz`, extracted at
+`/home/jrmales/tmp/home/jrmales/tmp/synco-sim-20261030T024932Z`.
+The 120 synco records span **2026-10-30 02:49:31.435598563 to
+02:51:31.647531800 UTC**, **120.211933 seconds**, or October 29,
+19:49:31–19:51:31 Phoenix time. All snapshots succeed, all error files are
+empty and the bounded collectors return expected timeout status 124. The
+saved checkout is `14ad6cd638f3de808b72b5b296d7e9f32638c635`, not independent
+running-binary provenance.
+
+### Readiness and two-step outcomes
+
+The records select `shadow_reader_release_ready`, two steps, with valid grid
+and both reader-cycle and backend-cycle feasibility throughout. Operational
+synco stays Off; no real auxiliary writes or deliveries are indicated. The
+model retains virtual reader 30 us plus guard 20 us, independent backend 155 us,
+and early reserve 20 us. The release monitor requests priority 30, with the
+full-completion observer at priority zero. Current actual thread policy and
+affinity are not independently saved in this capture.
+
+| First-to-last telemetry difference | Step 0 | Step 1 |
+| --- | ---: | ---: |
+| Considered | 240,423 | 240,423 |
+| Would run | **240,423** | **240,419** |
+| Skipped | 0 | **4** |
+| Backend busy | 0 | **4** |
+| Reader hold / release missing / release late / backend wrap | 0 | 0 |
+| Overlap | 0 | 0 |
+
+The active skip fraction is **0.001663734%**. The four increments first appear
+at 02:50:31.023934151, 02:50:52.242586256, 02:51:16.487456311 and
+02:51:25.582741774 UTC. These are conflicts with the **assumed** backend
+envelope, not observations that the SDK was busy or failed. At the nominal
+250 us active target, a 155 us backend bound requires
+`max(mainObservation, combinedObservation) <= grid + 95 us`.
+The retained primary phase maximum is only 41.709 us, so delayed combined
+observation or cycle-lock acquisition is a plausible explanation. Exact
+per-skip provenance is not retained, so the responsible event and exact delay
+cannot be established from aggregate windows alone.
+
+The raw gate adds **480,846 observations and 240,423 qualified releases**,
+exactly two records per command for release and SDK-result enrichment. There
+are **no new** invalid/incoherent records, duplicates, progression gaps, source
+resets, identity mismatches, SDK failures or transport drops. Queue readbacks
+are zero at both boundaries. Source epoch 5, publisher session
+2120408464588493, producer epoch 18, PID 788488 and combined inode 4685 stay
+stable. Retained input counter and sequence each advance exactly 240,423.
+All 120 latest-evidence samples satisfy S <= F <= R <= model evaluation time.
+They retain the initial unknown SDK outcome and unavailable raw result after
+enrichment, as required for truthful first-observation provenance.
+
+Historical invalid=3 / sourceResets=4 and approximately 61,744 per-step
+release-missing skips already exist at the first row and remain unchanged.
+They must not be counted as losses during this capture. Before/after INDI
+independently adds 238,405 qualified releases, the same number of passive
+would-run results, and 238,401 active would-run results with four skips.
+
+### Reader timing and exact paired gain
+
+The table summarizes medians of overlapping two-second means and maxima
+retained in those windows, not pooled per-command distributions.
+
+| Metric | Early typical, us | Early maximum, us | Full typical, us | Full maximum, us |
+| --- | ---: | ---: | ---: | ---: |
+| Required hold | 20.019172 | **29.466** | 131.194969 | **140.676** |
+| Processing to endpoint | 19.889490 | 29.376 | 131.262730 | 140.766 |
+| Hold until observation | 23.647830 | 33.463 | 135.144990 | 318.341 |
+| Notification | 3.632128 | **10.490** | 3.968425 | 189.748 |
+| Endpoint to wait return | 3.435597 | 10.289 | 3.730428 | 189.578 |
+| Wait return to record read | 0.196750 | 5.370 | 0.230320 | 18.535 |
+
+Both required-hold maxima occur on **the same command**, first visible at
+**02:50:05.771936636 UTC**:
+
+```text
+Primary inode 4676 / counter 228959219
+Combined inode 4685 / counter 259668039
+Publisher PID 788488 / epoch 18 / attempt sequence 44697532
+
+Baseline B = 2196444319127300 ns
+Early F    = 2196444319156766 ns
+Full F     = 2196444319267976 ns
+
+Early required hold =  29.466 us
+Full required hold  = 140.676 us
+Full F - early F    = 111.210 us
+```
+
+This is a genuinely paired early release, with unknown SDK outcome in the
+initial early record and successful SDK outcome at full completion. The new
+29.466 us maximum is inside the capture and supersedes the earlier 28.303 us
+observed maximum; it reinforces using the signal rather than treating 30 us
+as an established fixed operating bound. Actual-main decisions use the release
+plus guard, while the virtual 30 us duration remains an explicit assumption.
+
+The worst early notification inside the capture is **10.490 us**, exactly
+**10.289 us before wait return + 0.201 us afterward**, first reported at
+02:49:54.661946965 UTC. The separate 5.370 us post-wait maximum is from another
+event and must not be added to the wake maximum. The worst full notification
+is **189.748 us = 189.578 us before wait return + 0.170 us afterward**, inside
+the capture. Notification tails remain dominated by the pre-return interval.
+
+The early observer adds 240,423 matches, 480,847 notices and 240,424 SDK
+successes; full completion adds 240,422 matches from 240,423 primary/combined
+observations. One-event differences reflect boundary/in-flight phases. Neither
+observer adds invalid, busy, incoherent, gap, missing-peer, queue-drop, receipt
+or first-enriched exclusions. Old startup quality losses and one early
+first-enriched observation are unchanged history. No new over-budget joins
+are reported against the retained 155 us diagnostic comparison.
+
+### Controller, camera and cadence
+
+Controller telemetry adds **238,416 successful submissions** with no new
+errors, rejections, counter gaps or drops. SDK-worker snapshots add 238,415
+completed commands; fault, failures, timeouts, admission-closed and coalesced
+counts stay zero, with rejected receipts unchanged at seven. Actual worker
+policy/priority remain FIFO55, with one CPU permitted. Typical SDK time is
+103.994118 us and callback duration 130.835140 us; direct entry-to-release
+maximum is 29.205 us. The physical stream remains at about 2 kHz, not the
+conditional two-step 4 kHz request.
+
+Camera stage telemetry adds **234,505 frames** and 11 successful serial
+controls, without new failures, frame/counter gaps or drops. Typical acquisition
+interval sigma is 0.297354 us and publication sigma 0.874284 us, similar to
+145715Z. Recorded configuration also matches: bin2, 2 kHz, EM gain 1,
+synchronization On, shutter SHUT, target -45 C; loop closed at scalar gain 0.05,
+RTC latency On. Modal gains are not captured. Large historical camera/controller
+telemetry-drop totals predate the first records and remain unchanged, so this
+result establishes capture-local coverage rather than lifetime cleanliness.
+
+The ten-second cadence estimate remains full with 64 anchors, no rejects and
+period 500000.086178–500000.914713 ns. Sampled phase is -6.169 to +6.432 us.
+Primary, combined and pipeline diagnostics add no gaps or invalid evidence.
+No overlap/estimator events are triggered or dropped. This validates the
+two-step release-qualified baseline; the three-step capture is a separate
+comparison and is not inferred from these results. No runtime policy or
+instrument setting is changed by the analysis.
+
+## Three-step readiness capture: 20261030T025406Z
+
+The operator identifies this as the three-frame comparison. Source:
+`synco-sim-20261030T025406Z.tgz`, extracted at
+`/home/jrmales/tmp/home/jrmales/tmp/synco-sim-20261030T025406Z`.
+The 120 synco records span **2026-10-30 02:54:05.060525335 to
+02:56:05.196148246 UTC**, **120.135623 seconds**, or October 29,
+19:54:05–19:56:05 Phoenix time. Snapshot commands succeed, error files are
+empty and collectors return expected timeout status 124. The saved checkout
+is again `14ad6cd638f3de808b72b5b296d7e9f32638c635`; this does not independently
+identify the running binary.
+
+Saved settings match the two-step capture except steps 2 to 3 and the synco
+restart. Backend 155 us, virtual reader 30 us, guard 20 us, early reserve and
+RTC latency are unchanged. Live synco remains Off. The release observer
+requests priority 30 and full completion priority zero; actual observer policy
+and affinity are not independently saved. Actual DM commands remain at 2 kHz.
+
+### Three-step outcomes and limiting constraint
+
+| First-to-last telemetry difference | Step 0 | Step 1 | Step 2 |
+| --- | ---: | ---: | ---: |
+| Considered | 240,271 | 240,271 | 240,271 |
+| Would run | **240,271** | **97,901** | **0** |
+| Skipped | 0 | **142,370** | **240,271** |
+| Backend busy | 0 | **142,370** | 0 |
+| Backend wrap | 0 | 0 | **240,271** |
+| Reader hold / release missing / release late | 0 | 0 | 0 |
+| Overlap | 0 | 0 | 0 |
+
+Step 1 would run **40.746074%** of its opportunities and skip 59.253926%;
+step 2 always skips. The grid stays valid, with `readerCycleFeasible=1` and
+`backendCycleFeasible=0` throughout. These are conflicts with the explicit
+**155 us assumed backend envelope**, not measured SDK-busy events or SDK
+failures. Early channel release is working; it does not clear this independent
+backend constraint.
+
+The nominal first active target is 166.667 us. Retiring the actual main's
+assumed backend before that target requires
+`max(mainObservation, combinedObservation) <= grid + 11.667 us`.
+This much tighter observation allowance accounts for the large increase in
+`backendBusy` skips relative to the two-step target at 250 us. Aggregate
+outcomes do not retain exact provenance for each rejected occurrence, so they
+do not establish which observation caused each skip.
+
+The final active target is 333.333 us, with only **141.667 us** before the
+earliest modeled next main at 475 us. Its assumed completion at 488.333 us
+exceeds that boundary by **13.333 us**, explaining the systematic `backendWrap`
+rejection. Reader clearance cannot fix this arithmetic. The corresponding
+conditional total rate is about **2,814.9 Hz**, including approximately
+814.9 Hz of hypothetical auxiliary commands. The two-step run predicted
+almost 4 kHz; requesting three steps currently reduces modeled throughput
+because the earlier active target rejects many commands and the final target
+cannot fit. Neither run delivers real auxiliary commands.
+
+The raw readiness gate adds **480,542 observations and 240,271 qualified
+releases**, exactly two records per command. Invalid, incoherent, duplicate,
+gap, identity-mismatch, SDK-failure and queue-drop counts remain zero. Source
+epoch 5, publisher session 2120408464588493, producer epoch 18, PID 788488 and
+combined inode 4685 stay stable. Three startup source resets and 370 historical
+release-missing skips per step predate the first record and do not increase.
+All 120 sampled evidence records satisfy S <= F <= R <= model evaluation time.
+
+### Reader timing and observer delivery
+
+These are medians of overlapping two-second window means and maxima retained
+in those windows, not pooled distributions.
+
+| Metric | Early typical, us | Early maximum, us | Full typical, us | Full maximum, us |
+| --- | ---: | ---: | ---: | ---: |
+| Required hold | 20.129086 | **24.967** | 131.258332 | **136.307** |
+| Processing to endpoint | 19.850574 | 24.697 | 131.173418 | 140.255 |
+| Hold until observation | 23.745156 | 30.618 | 135.267750 | 262.045 |
+| Notification | 3.612330 | **6.802** | 3.983657 | **131.789** |
+| Endpoint to wait return | 3.415841 | 6.602 | 3.748807 | 131.608 |
+| Wait return to record read | 0.196470 | 0.712 | 0.226675 | 14.478 |
+
+The early lifetime observed-hold maximum 34.776 us and notification maximum
+14.177 us are unchanged pre-capture history, occurring 19.367 seconds before
+the first summary. They must not replace this capture's rolling maxima above.
+The required-hold maxima increase inside the capture, but their final values
+belong to different commands. An intermediate exact paired event, first
+visible at **02:54:20.193987456 UTC**, retains:
+
+```text
+Primary counter 229467614 / combined counter 260176434
+Producer epoch 18 / attempt sequence 45205927
+
+Baseline B = 2196698516866923 ns
+Early F    = 2196698516891880 ns
+Full F     = 2196698517003140 ns
+
+Early required hold =  24.957 us
+Full required hold  = 136.217 us
+Full F - early F    = 111.260 us
+```
+
+The worst full notification within the capture is
+**131.789 us = 131.608 us before wait return + 0.181 us afterward**.
+The ordinary full observer therefore still has a substantial delivery tail;
+its endpoint is not available to a scheduler before that observer receives it.
+Endpoint timestamps also precede final callback retirement, so neither the
+136.307 us full required-hold maximum nor the SDK-call duration alone qualifies
+a smaller whole-backend bound.
+
+The early observer adds 240,270 matched commands and 480,540 notices, with
+240,270 successful SDK results and no failures. Full completion adds 240,269
+matches from 240,270 primary/combined observations; the one-event difference
+is a boundary/pending phase. There are no new observer exclusions, invalid
+records, gaps, missing peers, source resets or drops. Historical full startup
+invalid/gap/missing-peer counts stay unchanged. Both diagnostic over-budget
+counters remain zero against 155 us.
+
+### Controller, camera and interpretation
+
+Controller telemetry adds **238,425 successful submissions**, with no new
+failures, rejections, gaps or drops. SDK-worker snapshots add 240,429 completed
+commands; fault/failure/timeout/admission-closed/coalesced counts remain zero
+and rejected receipts remain seven. Typical SDK time is **103.991303 us**,
+callback duration **130.751478 us**, and receipt-to-callback finish
+**131.296963 us**, with retained maximum **140.345 us**. Typical early reader
+release is 19.672748 us with maximum 24.516 us. The worker remains FIFO55 with
+one permitted CPU. Camera/controller timing sessions and thread IDs match the
+two-step run.
+
+Camera telemetry adds **238,515 frames** and 11 successful serial controls,
+with no new failures, frame/counter gaps or drops. Typical acquisition interval
+sigma is **0.315910 us** and publication sigma **0.937496 us**, versus
+0.297354 and 0.874284 us in the two-step capture. Acquisition extrema are
+480–525 us; publication extrema 479.786–525.422 us. These small differences
+between overlapping short-capture populations do not establish a causal
+performance change. Large historical telemetry-drop totals remain unchanged.
+
+The ten-second cadence estimate stays full, with no rejected updates and
+period 500000.199850–500000.778255 ns. Sampled phase is -6.196 to +7.226 us;
+the lifetime positive phase maximum increases to 27.637 us. Primary, combined
+and pipeline quality remain clean. No overlap/estimator events or trace drops
+occur; this describes hypothetical jobs against actual main arrivals, not
+observed 6 kHz operation.
+
+The result supports the new reader-readiness mechanism and isolates the
+remaining backend assumption. The next engineering question is whether a
+same-command backend-ready/retirement signal or a separately justified bound
+can replace 155 us. Changing reader guard, backdating full-observer availability
+or silently shrinking the backend bound would not answer that question. This
+analysis changes only the engineering record; runtime policy and instrument
+settings remain unchanged.
+
+## Backend-bound sensitivity from the latest two captures
+
+The operator asks what backend bound the latest simulations imply for 6 kHz.
+This analysis uses the same `024932Z` and `025406Z` text captures and current
+`Simulation::evaluate()` / `Simulation::feasibility()` expressions. It changes
+no runtime code or configuration. Local calculations are retained in
+`/tmp/synco-backend-bound-20261030.json`; exact retained-command extraction is
+also in `/tmp/backend-worst-pairs.py` and `/tmp/backend-worst-pairs.json`.
+
+### Backend duration that fits the configured schedule
+
+For period P, three steps, early-main allowance E and observation allowance O,
+the nominal final-slot condition is:
+
+```text
+backend <= P / 3 - E - O
+        <= 500 / 3 - 20 - 5
+        <= 141.667 us approximately
+```
+
+This is a scheduling ceiling, not a measured duration. The 20 us early-main
+allowance is the currently configured assumption, not a newly qualified
+early-arrival limit. The reader/copy check is independent and already fits.
+
+| Assumed backend, us | Latest actual-main/combined observation phase for step 1, us | Nominal final-slot slack, us |
+| --- | ---: | ---: |
+| 155 | +11.667 | -13.333 |
+| 145 | +21.667 | -3.333 |
+| 141 | +25.667 | +0.667 |
+| 140 | +26.667 | +1.667 |
+| 135 | +31.667 | +6.667 |
+| 130 | +36.667 | +11.667 |
+
+The phase column follows
+`max(mainObservation, combinedObservation) + backend <= grid + P / 3`.
+It is a threshold, not a predicted acceptance percentage. The three-step
+capture's new primary phase maximum alone reaches +27.637 us, so even 140 us
+cannot imply every first active opportunity succeeds. Combined-observation
+delay can tighten that constraint further. Occasional skips remain part of
+the requested excursion policy.
+
+The runtime wrap check uses the **following committed grid**, which can move
+by a phase correction relative to nominal extrapolation. For 118 usable saved
+three-step snapshots, the reconstructed final-slot ceiling is approximately
+**141.521–141.799 us**, with at most 1 ns uncertainty from the unsaved frozen
+fractional remainder. Two snapshots whose `nextGrid` still names the current
+early main are excluded. These are sparse samples, not all cycle decisions.
+The configured phase slew permits a -1 us following-grid correction, tightening
+the nominal ceiling to approximately **140.667 us** before nanosecond rounding.
+Thus **140 us is a useful counterfactual shadow test point** with some geometry
+headroom; 141 us has too little slack to cover the full configured correction.
+Neither value is thereby established as a physical backend bound.
+
+### Measured duration of the existing command path
+
+An important endpoint distinction emerges from the captures. The model applies
+the same scalar backend duration after:
+
+- `max(primary observation, combined observation)` for an actual main; and
+- the hypothetical auxiliary trigger target for a virtual command.
+
+The virtual command therefore needs delivery and dmcomb time that has largely
+already elapsed at the actual-main anchor. A duration measured only from
+combined observation cannot automatically be reused as a trigger-to-ready
+duration.
+
+| Measured population | Two-step typical / maximum, us | Three-step typical / maximum, us |
+| --- | ---: | ---: |
+| Primary trace update to combined writetime | 11.651922 / 22.783 | 11.440369 / 21.641 |
+| Full endpoint minus matched baseline B | 131.194969 / 140.676 | 131.258332 / 136.307 |
+| Controller start to full endpoint | 131.262730 / 140.766 | 131.173418 / 140.255 |
+
+Typical values are medians of overlapping window means; maxima are retained
+window extrema. Here B is the later primary/combined observer capture. Adding
+the typical delivery and matched-endpoint values gives an **indicative
+142.847 us and 142.699 us** for the existing primary path. These are sums of
+nearby aggregate populations and separately measured durations, not paired
+per-command statistics. They already exceed the nominal 141.667 us ceiling by
+about 1.0–1.2 us before final retirement work.
+
+Exact retained command records provide a stronger check without summing
+unrelated maxima. P, C and F below are same-host monotonic primary-observer,
+combined-observer and full-completion endpoint timestamps:
+
+| Capture / primary counter | C - P, us | F - C, us | F - P, us |
+| --- | ---: | ---: | ---: |
+| 024932Z / 228923617 | 17.372 | 138.281 | 155.653 |
+| 024932Z / 228926231 | 19.217 | 139.773 | **158.990** |
+| 024932Z / 228959219 | 14.197 | 140.676 | 154.873 |
+| 025406Z / 229467614 | 16.301 | 136.217 | 152.518 |
+| 025406Z / 229517991 | 18.846 | 136.307 | **155.153** |
+
+Each becomes newly reported inside its capture. The 158.990 us example first
+appears at **2026-10-30 02:49:49.610632855 UTC**, publisher session
+2120408464557324, epoch 18, attempt 44664544, combined counter 259635051:
+
+```text
+P = 2196427825110151 ns
+C = 2196427825129368 ns
+S = 2196427825129197 ns
+F = 2196427825269141 ns
+
+F - P = 158.990 us
+F - S = 139.944 us
+```
+
+P is observed **after** actual primary publication, so delayed primary
+observation reduces F - P; delayed combined observation cancels out of that
+direct difference. These are lower bounds on primary-publication-to-F time,
+subject to the existing best-effort metadata association. They include no
+completion-observer notification delay. F is stamped before full-record
+publication and `retireCommand()`, so actual command-slot availability is later.
+Selection retains worst required-hold/notification records, not the largest
+F - P across all commands: 158.990 us is an observed example, not an established
+global maximum. Auxiliary semaphore triggering could have different delivery
+behavior and remains unmeasured here.
+
+### Interpretation and limits of a counterfactual sweep
+
+The schedule needs approximately **140 us or less** for a practical nominal
+three-step backend assumption under the current reserves and phase correction.
+The existing primary path is approximately **143 us typically**, with selected
+same-command examples reaching **159 us before retirement**. The old 155 us is
+therefore conservative relative to combined-observation-to-endpoint timing,
+but not a demonstrated upper bound on trigger-to-ready time. Simply selecting
+140 us would make the geometry fit while understating some measured paths.
+
+A smaller backend assumption can still be explored explicitly in shadow mode
+to measure model sensitivity and skip reasons. The saved aggregate summaries
+do not contain every primary/combined observation, committed grid or candidate
+decision, and no estimator trace was selected in these captures. Exact
+counterfactual skip rates at 140/135/130 us cannot be recovered offline. In
+particular, extrapolating a 1 Hz grid to a retained worst command cannot recover
+its intervening per-cycle phase corrections.
+
+The current reserves are part of the tradeoff: retaining 155 us would require
+E <= 6.667 us nominally with O = 5 us; that is arithmetic, not a recommendation
+or qualification of a smaller early reserve. Useful next evidence is a
+consistent trigger-to-command-retirement measurement, separating real-main
+readiness from virtual auxiliary delivery and reporting skips for excursions.
+This distinguishes a nominal 6 kHz cadence with allowed skips from a claim that
+every three-step cycle fits. No operating bound is changed by this analysis.
+
+## Existing worker-enabled controller timing coverage
+
+The operator proposes returning to `bmcCtrl::commandDM()` to locate backend
+costs. Source review confirms existing `[dmtimes]` instrumentation covers the
+main worker and monitor stages; a new timing system is not required to begin.
+The following uses `025406Z`, with typical values taken as medians of reported
+overlapping two-second means. They are not per-command medians.
+
+| Work or interval | Execution context | Telemetry | Typical, us |
+| --- | --- | --- | ---: |
+| Receipt to callback entry | Monitor | `dispatch` | 0.546 |
+| Mapping, scaling, clipping, square root and output-shape post | Monitor | `actuator` | 7.702 |
+| Published SDK request to actual worker SDK entry | Monitor/worker handoff | `sdkDispatch` | 2.950 |
+| Actual SDK wrapper / `BMCSetArray` call | Worker | `sdk` | 103.991 |
+| Private saturation-map preparation | Monitor, overlapping SDK | `saturation` | 3.363 |
+| Channel reads / private delta staging | Monitor, overlapping SDK | `staging` | 4.737 |
+| Callback entry through early reader-release endpoint | Monitor, cumulative | `readerRelease` | 19.673 |
+| Finalization wait for the SDK result | Monitor, overlapping remaining SDK time | `sdkWait` | 98.422 |
+| Deferred delta/difference publication after SDK success | Monitor | `publication` | 6.783 |
+| Saturation semaphore post | Monitor | `post` | 0.897 |
+| Callback entry through timing-finish marker | Monitor, cumulative | `callback` | 130.751 |
+| Receipt through timing-finish marker | Monitor, cumulative | `receiptCallback` | 131.297 |
+
+Do not add overlapping SDK, preparation and wait durations. In worker mode,
+`delta` spans staging, result wait and publication; its approximately 114.950 us
+is not the cost of channel arithmetic alone. `sdkDispatch` excludes the earlier
+actuator-vector copy into worker-owned storage. `actuator` includes
+`m_outputShape.post()`, so it does not isolate numeric conversion from that
+stream's publication cost.
+
+Differences of means within each saved window estimate the main critical-path
+positions relative to callback entry:
+
+```text
+Request dispatch                         +10.448 us
+Actual SDK entry                         +13.395 us
+SDK return                               +117.39 us approximately
+Deferred publication starts              +123.02 us approximately
+Deferred publication ends                +129.80 us approximately
+Timing-finish marker                     +130.75 us approximately
+Full-completion publication / retirement  later; not separately timed
+```
+
+The median per-window SDK-return-to-timing-finish difference is **13.364 us**.
+SDK return to publication start accounts for approximately **5.628 us**;
+publication itself takes 6.783 us; publication end through callback finish is
+approximately 0.955 us, mostly the 0.897 us saturation post. These differences
+use nearby metric populations with possible one-event boundary differences;
+they are approximate aggregate diagnostics, not paired latency distributions
+or worst-case bounds.
+
+Existing coverage gaps are:
+
+- Separate numeric actuator preparation from output-shape publication, and
+  separately time the SDK-vector copy/request setup before dispatch.
+- Separate SDK result storage/notification, monitor wait-return latency,
+  imported timing/result bookkeeping, successful saturation-map copy and
+  reader-release SDK-result enrichment. Some of these share the approximately
+  5.628 us interval before deferred publication.
+- Measure early reader-release record encoding/posting independently of the
+  last-read endpoint and wait start.
+- Extend coverage past the timing-finish marker through full-completion record
+  publication and the point `retireCommand()` clears `m_commandActive`.
+
+The existing worker's `performSdk()` stamps actual entry/return and imports
+those immutable timestamps in `finalizeCommand()`, so `sdk` already follows
+the worker rather than the monitor's asynchronous `commandDM()` return.
+Current telemetry is sufficient to identify the major costs and target a
+small marker extension. No implementation is changed by this inventory.
+
+## Fully pipelined controller direction
+
+The operator proposes preparing a subsequent command while the previous SDK
+call is running, and moving success-dependent publication to another thread.
+This is a viable architectural direction. It is an evaluation, not an
+implemented change to the controller or the shadow model.
+
+### Throughput and latency
+
+Current typical stages are roughly 10.45 us from callback entry to request
+dispatch, 2.95 us for worker handoff, 104 us SDK service, and 13.36 us from SDK
+return to the recorded callback finish. Channel/saturation staging overlaps
+SDK execution and releases readers about 19.67 us after callback entry.
+
+With prepared work available and independent finalization, the sustained
+SDK-to-SDK initiation interval can approach SDK service plus result/next-job
+handoff: approximately **107 us** using current typical service and handoff
+figures. Thus **less than 110 us is a plausible throughput target**, not yet a
+measured bound. The SDK maximum is 105.680 us in the three-step capture and
+**110.900 us in the two-step capture**, already above 110 us before handoff.
+Existing handoff tails are also not bounded by their typical 2.950 us. Thus
+this is a typical service-interval target with excursion handling, not a hard
+less-than-110 us guarantee.
+
+An otherwise idle command still incurs delivery and preparation before its
+SDK call, and publication after it. Pipelining does not turn the current
+approximately 118 us receipt-to-SDK-return or 131 us receipt-to-timing-finish
+latency into 110 us. At 6 kHz, nominal arrivals are 166.667 us apart, so the
+main value is independent admission/readiness and handling excursions without
+serializing subsequent preparation behind an older callback's entire tail.
+
+### Proposed stages and ownership
+
+```text
+Monitor:   prepare job N+1 / snapshot channels / release readers / return
+                   | immutable SDK vector ready
+SDK owner:         +--> serialized BMCSetArray(N+1) --> keyed result
+                                                        |
+Finalizer:                 prepared products + SDK result --> publish / recycle
+```
+
+Retain early SDK launch as soon as a job's actuator vector is ready; remaining
+channel staging may finish concurrently, as it does now. Final publication
+requires both completed preparation and a successful matching SDK result.
+
+Use a small preallocated job pool, initially three slots for simultaneous
+preparation, SDK execution and finalization. Each slot owns its actuator
+vector, clipped output shape needed by delta calculations, saturation map and
+count, staged delta/difference, exact source identity, handle/configuration
+generation, result/outcome and timestamps. Monitor-only summation scratch can
+remain shared within that single owner. A slot cannot be reused until every
+owner has finished. Pool credits bound all intermediate backlogs; finalizer
+delay must stop admission rather than create an unbounded queue.
+
+Keep all BMC handle calls on the sole SDK worker. Keep external channel reads
+on the monitor before its per-job reader release; a publication thread must
+never rerun `makeDelta()` against newer channel contents. Publish completed
+products in job order through one writer per image. The output-shape stream
+currently posts during preparation, before SDK success: preserving that timing
+means it can lead the hardware further when a prepared job waits. Moving it
+to ordered success publication is a separate observable behavior decision.
+
+### Interfaces that need revision
+
+The current single `m_commandActive` gate intentionally spans SDK return,
+publication and whole-callback retirement. It must become separate job-credit,
+SDK ownership and finalization states; merely clearing it earlier would expose
+shared buffers and callback state. Likewise, the existing single SDK request
+and result must become a bounded job/result handoff.
+
+Completion and timing are also currently single-attempt objects:
+
+- An older SDK-result enrichment must not overwrite a newer job's busy/released
+  `read_done` record. Use explicit job identities and an ordered result protocol
+  or separate result stream, with prompt independent SDK-fault propagation.
+- Full completion must refer to the job's frozen input identity. Requiring the
+  current combined stream still to contain that old command would reject valid
+  completions after the next command arrives.
+- Capture timestamps in job-owned records and assemble telemetry through one
+  producer. Three threads must not mutate `m_dmTiming`'s current event.
+- Saturation needs a payload-preserving handoff or accumulation by the sole
+  finalizer. The current counting semaphore plus one `m_instSatMap` can otherwise
+  apply a newer mask to an older notification when publications arrive in a
+  burst.
+
+Reader clearance, SDK availability, products published and storage retired are
+distinct milestones. The shadow model must eventually represent those stages
+and any bounded waiting explicitly; lowering the old whole-backend scalar to
+110 us would not model this architecture correctly. Decisions still need
+defined SDK-start/deadline and freshness behavior for pending work, including
+counted skips/coalescing when capacity or an auxiliary deadline is exceeded.
+
+### Faults, control and evaluation scope
+
+The SDK owner must latch an SDK failure/exception/timeout before starting the
+next queued command, and cancel unsent jobs with their identities preserved.
+Publication failure in an older finalizer can occur after a newer SDK call has
+started: stop subsequent admissions and drain committed work, while reporting
+SDK success separately from product-publication failure. Preserving the old
+guarantee that no newer SDK call starts before all earlier publication succeeds
+would reintroduce a finalization barrier and its throughput cost.
+
+Close/reinitialize/map-change/shutdown operations must stop admission and drain
+all stages before altering the handle, buffers or generation. A timeout cannot
+free a buffer still owned by a live SDK call.
+
+The first implementation tests should demonstrate preparation B progressing
+while SDK A is blocked, SDK B progressing while finalizer A is blocked, exact
+per-job output/identity association and no overlapping SDK calls. Additional
+tests need bounded overload, source replacement, SDK failure with queued work,
+late publication failure, saturation payload accounting and full control-drain
+ownership. Instrument measurements should then separate SDK initiation spacing,
+input-reader clearance, per-command latency and publication/retirement lag.
+No runtime code, settings or operating bound is changed by this evaluation.
+
+## Full pipeline implementation record
+
+The operator authorized implementation after the evaluation above. The new
+startup-only `sdk.pipelineEnabled` defaults false and requires the existing
+SDK worker. The default synchronous and joined-worker paths remain available.
+The [controller guide](../../../apps/bmcCtrl/doc/sdk-worker.md#full-preparation--sdk--post-pipeline)
+contains the activation settings and changed stream semantics.
+
+### Implemented ownership and admission
+
+- Exactly three preallocated private command credits separate monitor
+  preparation, serialized native SDK execution and ordered post work. SDK
+  submission can progress while an earlier job is still publishing products.
+- Each job owns its actuator vector, clipped shape, saturation mask/count,
+  delta/difference, source identity, outcome, generation and timing. Shared
+  summation scratch remains monitor-owned; publication never rereads channels.
+- Preserve preparation-time output-shape publication. The monitor publishes
+  read clearance only after its last channel read; the post worker publishes
+  success-dependent products from that job's private storage.
+- Announce each latest coherent observed input even when every credit is
+  occupied. The SDK owner supersedes older unsent jobs before native entry,
+  without dereferencing the monitor's mapping. Disconnect/reattachment also
+  cancels unsent old-source jobs. Native calls already running drain truthfully.
+- Native failure/exception/timeout fences subsequent SDK work immediately.
+  Late post failure can occur after the next native call starts; admissions
+  close and committed work drains without pretending to undo submission.
+- Stream reallocation, control, reinitialization, release and shutdown drain
+  all preparing/native/post owners before changing buffers or handle state.
+  Initialization before monitor attachment is supported; job allocation occurs
+  once output geometry is available.
+
+SDK-result publication retains the job lease until its publication finishes.
+Native-active diagnostics clear when the actual call returns, independently
+of that retained lease, so result-publication delay cannot become a false
+native timeout. Failure-only logs run outside the handoff mutexes.
+
+### Signals, statistics and compatibility
+
+The monitor remains the only `read_done` writer. It no longer enriches that
+record with an older SDK result after a newer command begins. The optional
+`sdk.pipelineResultStream` has a distinct SDK-only protocol and publisher;
+full completion is separately published in job order using frozen identity,
+without requiring the live input still to contain that old command. SDK
+return before monitor validation retains actual return evidence with an
+unqualified source identity. SDK-result, reader-release and full-completion
+protocols cannot substitute for each other.
+
+At an actual 2 kHz rate without skips, `read_done` metadata advances at 4 kHz
+with 2 kHz semaphore posts, and SDK/full-result metadata each advance at 2 kHz.
+The standard post thread property is `th-pipeline`; `sdk_pipeline` exposes
+bounded occupancy, actual SDK/post activity, admission/retirement, overload,
+cancellation, supersession and publication failures. Requested placement is
+checked against actual thread scheduling and affinity at startup.
+
+Timing events detach from the monitor into jobs and are submitted by the sole
+finalizer; no collector has multiple mutable producers. Failed publication
+preserves actual successful SDK submission. Admission rejections are counted
+by the controller rather than emitted from a second timing-queue producer.
+The pipeline has no monitor SDK wait, and saturation classification is folded
+into actuator preparation, so `sdkWait` and separate `saturation` populations
+are unavailable in this mode. Existing timing endpoints precede full-record
+publication and final credit retirement, as documented.
+
+Saturation now has a preallocated, payload-preserving accumulator for the
+pipeline: every successful mask and sample count survives delayed/coalesced
+notifications. A 64-bit pipeline window is separate from legacy saturation
+storage. Reset and geometry changes are synchronized with the reporting
+consumer; neither add nor drain allocates. Legacy channel staging reuses the
+same arithmetic through a nonowning Eigen reference, avoiding a new temporary
+image allocation on the old path.
+
+### Workstation verification
+
+| Suite | Assertions | Cases |
+| --- | ---: | ---: |
+| BMC controller, including ten pipeline cases | 1,022 | 25 |
+| Detached/legacy timing helper | 417 | 21 |
+| Completion helper and protocol compatibility | 635 | 19 |
+| Completion integration | 293 | 9 |
+| Reader timing/qualification | 518 | 23 |
+| Saturation payload helper | 64 | 5 |
+| Generic pipeline integration | 126 | 5 |
+| Generic DM regression | 274 | 5 |
+| Timing integration regression | 153 | 8 |
+| ALPAO default-path regression | 18 | 1 |
+| Iris AO default-path regression | 24 | 1 |
+| **Total** | **3,544** | **122** |
+
+Deterministic barriers prove preparation while a previous native call is
+held, a subsequent native call while earlier post work is held, exact private
+products/identity, latest-input supersession after full-pool rejection,
+disconnect handling, source validation, native failures/exceptions, late
+publication failure, timeout ownership, startup-before-allocation and control/
+reallocation drain. Independent final review finds no blocking ownership or
+lock-order defect.
+
+The ten pipeline cases also pass under ThreadSanitizer (**439 assertions**)
+without reported races. The library/PCH builds and production controller
+object compiles against the real archived BMC 3.5.3 headers. Vendor libraries
+are absent locally, so a vendor-linked controller executable and instrument
+timing qualification remain operator follow-up. All changed C++ files pass
+clang-format; Markdown links/fences and whitespace are checked. No instrument
+commands or configuration edits are performed. The operator subsequently
+authorized committing and pushing the implementation and documentation.

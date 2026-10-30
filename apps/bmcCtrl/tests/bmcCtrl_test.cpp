@@ -13,18 +13,27 @@
 /// \cond TEST_HARNESS
 namespace bmcTimingTest
 {
-std::atomic<int>        result{ 0 };        ///< Scripted SDK return value.
-std::atomic<unsigned>   calls{ 0 };         ///< SDK submissions made by commandDM.
-std::atomic<int64_t>    firstEntry{ 0 };    ///< SDK entry after the start marker.
-std::atomic<int64_t>    lastReturn{ 0 };    ///< SDK completion before the end marker.
-std::mutex              mutex;              ///< Protects deterministic SDK barriers and recorded calls.
-std::condition_variable changed;            ///< Reports entry, permit-return and SDK exit transitions.
-bool                    block{ false };     ///< Set calls wait for permission after copying their input.
-bool                    entered{ false };   ///< At least one held set call has entered.
-bool                    release{ false };   ///< A test explicitly permitted the held set call to return.
-bool                    throws{ false };    ///< The held call throws after permission instead of returning its result.
-unsigned                active{ 0 };        ///< SDK handle operations currently executing.
-unsigned                maximumActive{ 0 }; ///< Maximum simultaneous handle operations.
+std::atomic<int>                 result{ 0 };           ///< Scripted SDK return value.
+std::atomic<unsigned>            calls{ 0 };            ///< SDK submissions made by commandDM.
+std::atomic<int64_t>             firstEntry{ 0 };       ///< SDK entry after the start marker.
+std::atomic<int64_t>             lastReturn{ 0 };       ///< SDK completion before the end marker.
+std::mutex                       mutex;                 ///< Protects deterministic SDK barriers and recorded calls.
+std::condition_variable          changed;               ///< Reports entry, permit-return and SDK exit transitions.
+bool                             block{ false };        ///< Set calls wait for permission after copying their input.
+bool                             entered{ false };      ///< At least one held set call has entered.
+bool                             release{ false };      ///< A test explicitly permitted the held set call to return.
+bool                             perCall{ false };      ///< Permits selected SDK returns independently.
+unsigned                         permits{ 0 };          ///< Number of native calls explicitly permitted to return.
+uint64_t                         heldPrep{ 0 };         ///< Monitor job to hold before channel staging.
+bool                             prepEntered{ false };  ///< Selected monitor job reached its barrier.
+bool                             prepReleased{ false }; ///< Test permitted monitor channel staging.
+uint64_t                         heldPost{ 0 };         ///< Ordered post job to hold before final publication.
+bool                             postEntered{ false };  ///< Held post job reached its deterministic barrier.
+bool                             postReleased{ false }; ///< Test permitted the held post job to finish.
+std::vector<std::vector<double>> history;               ///< Immutable SDK vectors read at each native return.
+bool     throws{ false };    ///< The held call throws after permission instead of returning its result.
+unsigned active{ 0 };        ///< SDK handle operations currently executing.
+unsigned maximumActive{ 0 }; ///< Maximum simultaneous handle operations.
 std::vector<std::pair<std::string, std::thread::id>> operations; ///< Ordered operation names and actual owner threads.
 std::vector<double> values; ///< SDK input observed at actual return, after tests mutate shared source pixels.
 
@@ -59,12 +68,20 @@ Operation::~Operation()
 void reset()
 {
     std::lock_guard<std::mutex> lock( mutex );
-    result        = 0;
-    calls         = 0;
-    block         = false;
-    entered       = false;
-    release       = false;
-    throws        = false;
+    result     = 0;
+    calls      = 0;
+    firstEntry = lastReturn = 0;
+    block                   = false;
+    entered                 = false;
+    release                 = false;
+    throws                  = false;
+    perCall                 = false;
+    permits                 = 0;
+    heldPost                = 0;
+    heldPrep                = 0;
+    prepEntered = prepReleased = false;
+    postEntered = postReleased = false;
+    history.clear();
     active        = 0;
     maximumActive = 0;
     operations.clear();
@@ -87,9 +104,89 @@ void waitEntered()
 void permitReturn()
 {
     std::lock_guard<std::mutex> lock( mutex );
-    release = true;
+    release      = true;
+    postReleased = true;
+    prepReleased = true;
     changed.notify_all();
 }
+/// Permit only the first selected native calls to retire.
+void permitCalls( unsigned count /**< [in] Highest native call number permitted to return. */ )
+{
+    std::lock_guard<std::mutex> lock( mutex );
+    permits = count;
+    changed.notify_all();
+}
+
+/// Wait for a selected native submission to enter without scheduler-delay assertions.
+void waitCalls( unsigned count /**< [in] Required native entry count. */ )
+{
+    std::unique_lock<std::mutex> lock( mutex );
+    REQUIRE( changed.wait_for( lock,
+                               std::chrono::seconds( 3 ),
+                               [count]()
+                               {
+                                   return calls >= count;
+                               } ) );
+}
+
+/// Block one ordered post job independently of the SDK owner.
+void beforePost( uint64_t order /**< [in] Private command admission order. */ )
+{
+    std::unique_lock<std::mutex> lock( mutex );
+
+    if( order == heldPost )
+    {
+        postEntered = true;
+        changed.notify_all();
+        changed.wait( lock,
+                      []()
+                      {
+                          return postReleased;
+                      } );
+    }
+}
+
+/// Hold a selected monitor job after vector dispatch but before channel staging.
+void beforePrep( uint64_t order /**< [in] Private command admission order. */ )
+{
+    std::unique_lock<std::mutex> lock( mutex );
+
+    if( order == heldPrep )
+    {
+        prepEntered = true;
+        changed.notify_all();
+        changed.wait( lock,
+                      []()
+                      {
+                          return prepReleased;
+                      } );
+    }
+}
+
+/// Wait for the monitor to reach the preparation barrier.
+void waitPrep()
+{
+    std::unique_lock<std::mutex> lock( mutex );
+    REQUIRE( changed.wait_for( lock,
+                               std::chrono::seconds( 3 ),
+                               []()
+                               {
+                                   return prepEntered;
+                               } ) );
+}
+
+/// Wait until the selected post job owns its immutable payload.
+void waitPost()
+{
+    std::unique_lock<std::mutex> lock( mutex );
+    REQUIRE( changed.wait_for( lock,
+                               std::chrono::seconds( 3 ),
+                               []()
+                               {
+                                   return postEntered;
+                               } ) );
+}
+
 /// Drain held SDK work before asynchronous test futures are destroyed during assertion unwinding.
 class ReturnGuard
 {
@@ -139,17 +236,19 @@ BMCRC BMCLoadMap( DM *, const char *, uint32_t *map )
 BMCRC BMCSetArray( DM *dm, const double *values, const void * )
 {
     bmcTimingTest::Operation operation( "set" );
-    ++bmcTimingTest::calls;
-    bmcTimingTest::firstEntry = MagAOX::app::dev::dmTiming::monotonicNowNs();
+    const auto               call = ++bmcTimingTest::calls;
+    bmcTimingTest::firstEntry     = MagAOX::app::dev::dmTiming::monotonicNowNs();
     std::unique_lock<std::mutex> lock( bmcTimingTest::mutex );
     bmcTimingTest::entered = true;
     bmcTimingTest::changed.notify_all();
     bmcTimingTest::changed.wait( lock,
-                                 []()
+                                 [call]()
                                  {
-                                     return !bmcTimingTest::block || bmcTimingTest::release;
+                                     return !bmcTimingTest::block || bmcTimingTest::release ||
+                                            ( bmcTimingTest::perCall && call <= bmcTimingTest::permits );
                                  } );
     bmcTimingTest::values.assign( values, values + dm->ActCount );
+    bmcTimingTest::history.push_back( bmcTimingTest::values );
     bmcTimingTest::lastReturn = MagAOX::app::dev::dmTiming::monotonicNowNs();
 
     if( bmcTimingTest::throws )
@@ -186,7 +285,11 @@ const char *BMCVersionString()
     return "offline-worker-test";
 }
 
+#define BMCCTRL_TEST_PIPELINE_PREP( order ) bmcTimingTest::beforePrep( order )
+#define BMCCTRL_TEST_PIPELINE_POST( order ) bmcTimingTest::beforePost( order )
 #include "../bmcCtrl.hpp"
+#undef BMCCTRL_TEST_PIPELINE_POST
+#undef BMCCTRL_TEST_PIPELINE_PREP
 
 namespace MagAOX
 {
@@ -219,6 +322,12 @@ class bmcCtrl_test : public bmcCtrl
     using bmcCtrl::m_commandActive;
     using bmcCtrl::m_commandJob;
     using bmcCtrl::m_completedCommands;
+    using bmcCtrl::m_nsat;
+    using bmcCtrl::m_pipelineCpuset;
+    using bmcCtrl::m_pipelineEnabled;
+    using bmcCtrl::m_pipelineResult;
+    using bmcCtrl::m_pipelineResultStream;
+    using bmcCtrl::m_pipelineThreadPrio;
     using bmcCtrl::m_rejectedInputs;
     using bmcCtrl::m_sdkFailures;
     using bmcCtrl::m_sdkFault;
@@ -227,6 +336,24 @@ class bmcCtrl_test : public bmcCtrl
     using bmcCtrl::m_sdkWorkerEnabled;
     using bmcCtrl::m_stagedSat;
     using bmcCtrl::stopSdkWorker;
+
+    /// Simulate initial hardware readiness before the monitor has created its output images.
+    void deferMonitorAllocation();
+
+    /// Start real pipeline owners with ordinary local scheduling and isolated result publishers.
+    void enablePipeline();
+
+    /// Drive one genuine monitor receipt and its private preparation synchronously.
+    int pipelineInput( uint64_t counter /**< [in] Current combined command counter. */ );
+
+    /// Wait for all stages of the selected admitted count to retire.
+    void waitRetired( uint64_t count /**< [in] Required whole-job retirement count. */ );
+
+    /// Return admitted, retired, overloaded, cancelled, superseded and post-failure counters under ownership lock.
+    std::array<uint64_t, 6> pipelineCounts();
+
+    /// Return the active pipeline request's immutable diagnostic dispatch stamp.
+    int64_t pipelineDispatchStamp();
 
     /// Start the real worker loop without requesting workstation realtime privileges or an INDI server.
     void enableWorker();
@@ -357,6 +484,84 @@ void bmcCtrl_test::enableWorker()
     m_sdkValues.assign( m_nbAct, 0 );
     m_stagedSat.assign( 2, 0 );
     m_admissionClosed = false;
+}
+
+void bmcCtrl_test::deferMonitorAllocation()
+{
+    m_outputShape.close();
+    m_width      = m_dmWidth;
+    m_height     = m_dmHeight;
+    m_dataType   = _DATATYPE_FLOAT;
+    m_shmimName  = "bmc_timing_";
+    m_shmimShape = "bmc_timing_shape";
+    m_shmimDelta = "bmc_test_delta_out";
+    m_shmimDiff  = "bmc_test_diff_out";
+
+    for( auto *channel : m_channels )
+    {
+        delete channel;
+    }
+
+    m_channels.clear();
+    m_notDeltas.clear();
+    m_deltas.clear();
+    m_deltaChannels.clear();
+
+    for( auto &job : m_pipelineJobs )
+    {
+        job.values.clear();
+        job.command.shape.resize( 0, 0 );
+    }
+}
+
+void bmcCtrl_test::enablePipeline()
+{
+    m_pipelineEnabled = true;
+    stagedProducts();
+    allocatePipelineJobs();
+    REQUIRE( m_dmCompletion.open( "bmc_pipeline_full" ) == 0 );
+    REQUIRE( m_dmReaderRelease.open( "bmc_pipeline_read", MagAOX::dmCompletion::Kind::readers ) == 0 );
+    REQUIRE( m_pipelineResult.open( "bmc_pipeline_sdk", MagAOX::dmCompletion::Kind::sdk ) == 0 );
+    m_pipelineThreadInit = false;
+    m_pipelineConfigured = true;
+    m_pipelineStop       = false;
+    m_pipelineThread     = std::thread( pipelineThreadStart, this );
+    enableWorker();
+}
+
+int bmcCtrl_test::pipelineInput( uint64_t counter )
+{
+    prepareInput( counter );
+    shmimMonitorTiming( dev::shmimT(), dev::shmimMonitorEvent::receipt );
+    return processImage( pixels(), dev::shmimT() );
+}
+
+void bmcCtrl_test::waitRetired( uint64_t count )
+{
+    std::unique_lock<std::mutex> lock( m_sdkMutex );
+    REQUIRE( m_sdkDone.wait_for( lock,
+                                 std::chrono::seconds( 3 ),
+                                 [this, count]()
+                                 {
+                                     return m_pipelineRetired >= count;
+                                 } ) );
+}
+
+std::array<uint64_t, 6> bmcCtrl_test::pipelineCounts()
+{
+    std::lock_guard<std::mutex> lock( m_sdkMutex );
+    return { m_pipelineAdmitted,
+             m_pipelineRetired,
+             m_pipelineOverloaded,
+             m_pipelineCancelled,
+             m_pipelineSuperseded,
+             m_pipelinePostFailures };
+}
+
+int64_t bmcCtrl_test::pipelineDispatchStamp()
+{
+    std::lock_guard<std::mutex> lock( m_sdkMutex );
+    return m_pipelineSdkActive < pipelineCapacity ? m_pipelineJobs[m_pipelineSdkActive].command.dispatchNs : 0;
 }
 
 void bmcCtrl_test::prepareInput( uint64_t counter )
@@ -1149,6 +1354,427 @@ TEST_CASE( "BMC timeout recovers only after drain release and successful reiniti
     REQUIRE( app.m_sdkFailures == 0 );
     app.retireCommand();
     REQUIRE( app.releaseDM() == 0 );
+    REQUIRE( bmcTimingTest::maximumActive == 1 );
+}
+
+/// Private preparation returns while SDK A is held, and SDK B proceeds while ordered post A is held.
+/** \ingroup bmcCtrl_unit_test */
+TEST_CASE( "BMC pipeline overlaps preparation SDK and ordered post with frozen identities", "[bmcCtrl][pipeline]" )
+{
+    // clang-format off
+    #ifdef BMCCTRL_TEST_DOXYGEN_REF
+    MagAOX::app::bmcCtrl::processImage(nullptr,MagAOX::app::dev::shmimT());
+    MagAOX::app::bmcCtrl::sdkThreadExec();
+    MagAOX::app::bmcCtrl::pipelineThreadExec();
+    #endif
+    // clang-format on
+    using namespace MagAOX::app;
+    using namespace MagAOX::dmCompletion;
+    bmcCtrl_test app;
+    app.enablePipeline();
+    bmcTimingTest::block = bmcTimingTest::perCall = true;
+    bmcTimingTest::heldPost                       = 1;
+    bmcTimingTest::ReturnGuard guard;
+    app.pixels()[0] = 0.25;
+    app.pixels()[1] = 2;
+    REQUIRE( app.pipelineInput( 1 ) == 0 );
+    bmcTimingTest::waitCalls( 1 );
+    const auto firstRelease = app.m_dmReaderRelease.snapshot();
+    REQUIRE( readersQualified( firstRelease ) );
+    REQUIRE( firstRelease.inputCounter == 1 );
+    REQUIRE( firstRelease.outcome == MagAOX::dmTiming::Outcome::unknown );
+    REQUIRE( bmcTimingTest::lastReturn == 0 );
+    app.pixels()[0] = 0.49;
+    app.pixels()[1] = 0.81;
+    REQUIRE( app.pipelineInput( 2 ) == 0 );
+    const auto secondRelease = app.m_dmReaderRelease.snapshot();
+    REQUIRE( secondRelease.inputCounter == 2 );
+    REQUIRE( readersQualified( secondRelease ) );
+    app.mutateChannels();
+    bmcTimingTest::permitCalls( 1 );
+    bmcTimingTest::waitPost();
+    bmcTimingTest::waitCalls( 2 );
+    REQUIRE( app.delta( 0 ) == 0 );
+    REQUIRE( app.pipelineCounts()[1] == 0 );
+    REQUIRE( app.m_dmReaderRelease.snapshot().sequence == secondRelease.sequence );
+    REQUIRE( app.m_dmReaderRelease.snapshot().outcome == MagAOX::dmTiming::Outcome::unknown );
+    bmcTimingTest::permitReturn();
+    app.waitRetired( 2 );
+    REQUIRE( app.pipelineCounts() == std::array<uint64_t, 6>{ 2, 2, 0, 0, 0, 0 } );
+    REQUIRE_FALSE( app.m_sdkFault );
+    REQUIRE_FALSE( app.m_commandActive );
+    REQUIRE( app.m_nsat == 1 );
+    REQUIRE( bmcTimingTest::maximumActive == 1 );
+    REQUIRE( bmcTimingTest::history[0] == std::vector<double>{ 0.5, 1 } );
+    REQUIRE( bmcTimingTest::history[1][0] == Approx( 0.7 ) );
+    REQUIRE( bmcTimingTest::history[1][1] == Approx( 0.9 ) );
+    REQUIRE( app.delta( 0 ) == Approx( 0.39 ) );
+    REQUIRE( app.delta( 1 ) == Approx( 0.61 ) );
+    REQUIRE( app.m_dmCompletion.snapshot().inputCounter == 2 );
+    REQUIRE( qualified( app.m_dmCompletion.snapshot() ) );
+    REQUIRE( app.m_pipelineResult.snapshot().inputCounter == 2 );
+    REQUIRE( sdkQualified( app.m_pipelineResult.snapshot() ) );
+    app.m_dmTiming.update();
+    REQUIRE( app.dmTimingSummary().total.submitted == 2 );
+    REQUIRE( app.dmTimingSummary().total.invalid == 0 );
+    REQUIRE(
+        app.dmTimingSummary().metrics[MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::saturation )].count ==
+        0 );
+}
+
+/// A full bounded pool still announces newer input, so old queued vectors never replay after an SDK stall.
+/** \ingroup bmcCtrl_unit_test */
+TEST_CASE( "BMC pipeline coalesces latest observed input even when all credits are busy", "[bmcCtrl][pipeline]" )
+{
+    // clang-format off
+    #ifdef BMCCTRL_TEST_DOXYGEN_REF
+    MagAOX::app::bmcCtrl::claimPipelineJob();
+    MagAOX::app::bmcCtrl::supersedePipelineJob(MagAOX::app::bmcCtrl::PipelineJob());
+    #endif
+    // clang-format on
+    MagAOX::app::bmcCtrl_test app;
+    app.enablePipeline();
+    bmcTimingTest::block = bmcTimingTest::perCall = true;
+    bmcTimingTest::ReturnGuard guard;
+    REQUIRE( app.pipelineInput( 1 ) == 0 );
+    bmcTimingTest::waitCalls( 1 );
+    REQUIRE( app.pipelineInput( 2 ) == 0 );
+    REQUIRE( app.pipelineInput( 3 ) == 0 );
+    REQUIRE( app.pipelineInput( 4 ) == 0 );
+    REQUIRE( app.pipelineCounts()[2] == 1 );
+    bmcTimingTest::permitReturn();
+    app.waitRetired( 3 );
+    REQUIRE( bmcTimingTest::calls == 1 );
+    REQUIRE( app.pipelineCounts() == std::array<uint64_t, 6>{ 3, 3, 1, 2, 2, 0 } );
+    REQUIRE_FALSE( app.m_sdkFault );
+    REQUIRE( app.pipelineInput( 5 ) == 0 );
+    app.waitRetired( 4 );
+    REQUIRE( bmcTimingTest::calls == 2 );
+    REQUIRE( app.m_coalescedInputs == 1 );
+    REQUIRE( app.m_pipelineResult.snapshot().inputCounter == 5 );
+    app.m_dmTiming.update();
+    REQUIRE( app.dmTimingSummary().total.noSend == 2 );
+    REQUIRE( app.dmTimingSummary().total.submitted == 2 );
+}
+
+/// SDK failure or exception fences every unsent private command and preserves successful-submission accounting.
+/** \ingroup bmcCtrl_unit_test */
+TEST_CASE( "BMC pipeline native failures cancel queued jobs without false submitted counts", "[bmcCtrl][pipeline]" )
+{
+    // clang-format off
+    #ifdef BMCCTRL_TEST_DOXYGEN_REF
+    MagAOX::app::bmcCtrl::faultPipeline();
+    #endif
+    // clang-format on
+    using namespace MagAOX::dmCompletion;
+    MagAOX::app::bmcCtrl_test app;
+    app.enablePipeline();
+    bmcTimingTest::block  = true;
+    bmcTimingTest::throws = GENERATE( false, true );
+    bmcTimingTest::result = 7;
+    bmcTimingTest::ReturnGuard guard;
+    REQUIRE( app.pipelineInput( 1 ) == 0 );
+    bmcTimingTest::waitCalls( 1 );
+    REQUIRE( app.pipelineInput( 2 ) == 0 );
+    REQUIRE( app.pipelineInput( 3 ) == 0 );
+    bmcTimingTest::permitReturn();
+    app.waitRetired( 3 );
+    REQUIRE( bmcTimingTest::calls == 1 );
+    REQUIRE( app.pipelineCounts()[3] == 2 );
+    REQUIRE( app.m_sdkFault );
+    REQUIRE( app.m_admissionClosed );
+    REQUIRE( app.m_sdkFailures == 1 );
+    REQUIRE_FALSE( app.m_commandActive );
+    REQUIRE_FALSE( sdkQualified( app.m_pipelineResult.snapshot() ) );
+    REQUIRE( app.m_pipelineResult.snapshot().inputCounter == 1 );
+    REQUIRE( app.m_pipelineResult.snapshot().backendResult == ( bmcTimingTest::throws ? unavailableResult : 7 ) );
+    REQUIRE( app.delta( 0 ) == 0 );
+    app.m_dmTiming.update();
+    REQUIRE( app.dmTimingSummary().total.submitted == 0 );
+    REQUIRE( app.dmTimingSummary().total.failed == 1 );
+    REQUIRE( app.dmTimingSummary().total.noSend == 2 );
+}
+
+/// A post error can follow SDK B entry; it fences C without cancelling the actual B call or replaying old products.
+/** \ingroup bmcCtrl_unit_test */
+TEST_CASE( "BMC pipeline late post failure drains a running SDK and cancels later work", "[bmcCtrl][pipeline]" )
+{
+    // clang-format off
+    #ifdef BMCCTRL_TEST_DOXYGEN_REF
+    MagAOX::app::bmcCtrl::pipelineThreadExec();
+    #endif
+    // clang-format on
+    MagAOX::app::bmcCtrl_test app;
+    app.enablePipeline();
+    bmcTimingTest::block = bmcTimingTest::perCall = true;
+    bmcTimingTest::heldPost                       = 1;
+    bmcTimingTest::ReturnGuard guard;
+    REQUIRE( app.pipelineInput( 1 ) == 0 );
+    bmcTimingTest::waitCalls( 1 );
+    REQUIRE( app.pipelineInput( 2 ) == 0 );
+    bmcTimingTest::permitCalls( 1 );
+    bmcTimingTest::waitPost();
+    bmcTimingTest::waitCalls( 2 );
+    REQUIRE( app.pipelineInput( 3 ) == 0 );
+    app.fullSaturationSemaphore();
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( bmcTimingTest::mutex );
+        bmcTimingTest::postReleased = true;
+        bmcTimingTest::changed.notify_all();
+    }
+    app.waitRetired( 1 );
+    REQUIRE( app.m_sdkFault );
+    REQUIRE( bmcTimingTest::calls == 2 );
+    bmcTimingTest::permitReturn();
+    app.waitRetired( 3 );
+    REQUIRE( bmcTimingTest::calls == 2 );
+    REQUIRE( app.pipelineCounts()[3] == 1 );
+    REQUIRE( app.pipelineCounts()[5] == 2 );
+    REQUIRE( app.m_sdkFailures == 0 );
+    app.m_dmTiming.update();
+    REQUIRE( app.dmTimingSummary().total.submitted == 2 );
+    REQUIRE( app.dmTimingSummary().total.failed == 2 );
+    REQUIRE( app.dmTimingSummary().total.noSend == 1 );
+}
+
+/// Disconnect invalidates queued old-source commands while a running SDK retains its frozen identity.
+/** \ingroup bmcCtrl_unit_test */
+TEST_CASE( "BMC pipeline disconnect cancels old queued identities without faulting the backend", "[bmcCtrl][pipeline]" )
+{
+    // clang-format off
+    #ifdef BMCCTRL_TEST_DOXYGEN_REF
+    MagAOX::app::bmcCtrl::shmimMonitorTiming(MagAOX::app::dev::shmimT(),MagAOX::app::dev::shmimMonitorEvent::disconnected);
+    #endif
+    // clang-format on
+    using namespace MagAOX::app;
+    bmcCtrl_test app;
+    app.enablePipeline();
+    bmcTimingTest::block = true;
+    bmcTimingTest::ReturnGuard guard;
+    REQUIRE( app.pipelineInput( 1 ) == 0 );
+    bmcTimingTest::waitCalls( 1 );
+    REQUIRE( app.pipelineInput( 2 ) == 0 );
+    app.shmimMonitorTiming( dev::shmimT(), dev::shmimMonitorEvent::disconnected );
+    bmcTimingTest::permitReturn();
+    app.waitRetired( 2 );
+    REQUIRE( bmcTimingTest::calls == 1 );
+    REQUIRE( app.pipelineCounts()[4] == 1 );
+    REQUIRE_FALSE( app.m_sdkFault );
+    REQUIRE( app.m_pipelineResult.snapshot().inputCounter == 1 );
+    REQUIRE( app.m_dmCompletion.snapshot().inputCounter == 2 );
+    REQUIRE( app.m_dmCompletion.snapshot().outcome == MagAOX::dmTiming::Outcome::noSend );
+}
+
+/// Control operations wait for whole ordered post retirement after native return, and all handle calls stay serialized.
+/** \ingroup bmcCtrl_unit_test */
+TEST_CASE( "BMC pipeline controls drain post ownership before touching the native handle",
+           "[bmcCtrl][pipeline][lifecycle]" )
+{
+    // clang-format off
+    #ifdef BMCCTRL_TEST_DOXYGEN_REF
+    MagAOX::app::bmcCtrl::zeroDM();
+    MagAOX::app::bmcCtrl::closeAdmission();
+    #endif
+    // clang-format on
+    MagAOX::app::bmcCtrl_test app;
+    app.enablePipeline();
+    bmcTimingTest::block = bmcTimingTest::perCall = true;
+    bmcTimingTest::heldPost                       = 1;
+    REQUIRE( app.pipelineInput( 1 ) == 0 );
+    bmcTimingTest::waitCalls( 1 );
+    bmcTimingTest::permitCalls( 1 );
+    bmcTimingTest::waitPost();
+    auto                       control = std::async( std::launch::async,
+                               [&app]()
+                               {
+                                   return app.zeroDM();
+                               } );
+    bmcTimingTest::ReturnGuard guard;
+    app.waitClosed();
+    REQUIRE( bmcTimingTest::calls == 1 );
+    REQUIRE( control.wait_for( std::chrono::seconds( 0 ) ) != std::future_status::ready );
+    bmcTimingTest::permitReturn();
+    REQUIRE( control.get() == 0 );
+    app.waitRetired( 1 );
+    REQUIRE( bmcTimingTest::maximumActive == 1 );
+    REQUIRE( bmcTimingTest::calls == 2 );
+}
+
+/// A diagnostic deadline cancels unsent jobs but never frees or cancels the actual in-flight native call.
+/** \ingroup bmcCtrl_unit_test */
+TEST_CASE( "BMC pipeline watchdog counts once and retains actual native ownership", "[bmcCtrl][pipeline][timeout]" )
+{
+    // clang-format off
+    #ifdef BMCCTRL_TEST_DOXYGEN_REF
+    MagAOX::app::bmcCtrl::checkSdkTimeout(0);
+    #endif
+    // clang-format on
+    MagAOX::app::bmcCtrl_test app;
+    app.enablePipeline();
+    bmcTimingTest::block = true;
+    bmcTimingTest::ReturnGuard guard;
+    REQUIRE( app.pipelineInput( 1 ) == 0 );
+    bmcTimingTest::waitCalls( 1 );
+    REQUIRE( app.pipelineInput( 2 ) == 0 );
+    app.m_sdkTimeoutSec = 1;
+    const auto dispatch = app.pipelineDispatchStamp();
+    app.checkSdkTimeout( dispatch + 2000000000LL );
+    app.checkSdkTimeout( dispatch + 3000000000LL );
+    REQUIRE( app.m_sdkTimeouts == 1 );
+    REQUIRE( app.m_commandActive );
+    REQUIRE( app.m_sdkFault );
+    REQUIRE( app.pipelineCounts()[1] == 0 );
+    bmcTimingTest::permitReturn();
+    app.waitRetired( 2 );
+    REQUIRE( app.m_sdkTimeouts == 1 );
+    REQUIRE( bmcTimingTest::calls == 1 );
+    REQUIRE( app.m_pipelineResult.snapshot().outcome == MagAOX::dmTiming::Outcome::success );
+    REQUIRE( app.delta( 0 ) == 0 );
+    app.m_dmTiming.update();
+    REQUIRE( app.dmTimingSummary().total.submitted == 1 );
+    REQUIRE( app.dmTimingSummary().total.failed == 1 );
+    REQUIRE( app.dmTimingSummary().total.noSend == 1 );
+}
+
+/// Native return alone never qualifies a frozen source before the monitor validates its last read.
+/** \ingroup bmcCtrl_unit_test */
+TEST_CASE( "BMC pipeline SDK result remains unqualified until private preparation is validated", "[bmcCtrl][pipeline]" )
+{
+    // clang-format off
+    #ifdef BMCCTRL_TEST_DOXYGEN_REF
+    MagAOX::app::bmcCtrl::processPipeline(nullptr);
+    #endif
+    // clang-format on
+    using namespace MagAOX::app;
+    using namespace MagAOX::dmCompletion;
+    bmcCtrl_test app;
+    app.enablePipeline();
+    bmcTimingTest::heldPrep            = 1;
+    auto                       prepare = std::async( std::launch::async,
+                               [&app]()
+                               {
+                                   return app.pipelineInput( 1 );
+                               } );
+    bmcTimingTest::ReturnGuard guard;
+    bmcTimingTest::waitPrep();
+    bmcTimingTest::waitCalls( 1 );
+    IMAGE sdk{};
+    REQUIRE( ImageStreamIO_openIm( &sdk, "bmc_pipeline_sdk" ) == 0 );
+    Record   record;
+    timespec deadline{};
+    clock_gettime( CLOCK_REALTIME, &deadline );
+    deadline.tv_sec += 3;
+
+    do
+    {
+        REQUIRE( sem_timedwait( sdk.semptr[0], &deadline ) == 0 );
+        REQUIRE( dev::dmCompletion::read( &sdk, record ) );
+    } while( record.inputCounter != 1 || record.finishedNs == 0 );
+
+    REQUIRE( record.outcome == MagAOX::dmTiming::Outcome::success );
+    REQUIRE( record.state == State::unqualified );
+    REQUIRE_FALSE( sdkQualified( record ) );
+    const bool advance = GENERATE( false, true );
+
+    if( advance )
+    {
+        app.prepareInput( 2 );
+    }
+
+    bmcTimingTest::permitReturn();
+    REQUIRE( prepare.get() == 0 );
+    app.waitRetired( 1 );
+    REQUIRE( app.m_sdkFault == advance );
+    REQUIRE( qualified( app.m_dmCompletion.snapshot() ) == !advance );
+    REQUIRE_FALSE( sdkQualified( app.m_pipelineResult.snapshot() ) );
+    REQUIRE( ImageStreamIO_closeIm( &sdk ) == 0 );
+}
+
+/// Pipeline configuration is startup-only, requires a worker, and cannot publish result records over DM images.
+/** \ingroup bmcCtrl_unit_test */
+TEST_CASE( "BMC pipeline configuration validates ownership and distinct result names", "[bmcCtrl][pipeline][config]" )
+{
+    // clang-format off
+    #ifdef BMCCTRL_TEST_DOXYGEN_REF
+    MagAOX::app::bmcCtrl::loadConfigImpl(mx::app::appConfigurator());
+    #endif
+    // clang-format on
+    MagAOX::app::bmcCtrl_test app;
+    app.setupConfig();
+    REQUIRE( app.loadConfigImpl( app.config ) == 0 );
+    REQUIRE_FALSE( app.m_pipelineEnabled );
+    REQUIRE( app.m_pipelineThreadPrio == 0 );
+    REQUIRE( app.m_pipelineCpuset.empty() );
+    REQUIRE( app.m_pipelineResultStream.empty() );
+    const auto setting =
+        GENERATE( std::string( "workerEnabled=false\npipelineEnabled=true" ),
+                  std::string( "workerEnabled=true\npipelineEnabled=false\npipelineResultStream=done" ),
+                  std::string( "workerEnabled=true\npipelineEnabled=true\npipelineThreadPrio=-1" ),
+                  std::string( "workerEnabled=true\npipelineEnabled=true\npipelineThreadPrio=100" ),
+                  std::string( "workerEnabled=true\npipelineEnabled=true\npipelineResultStream=bmcgrid07" ),
+                  std::string( "workerEnabled=true\npipelineEnabled=true\npipelineResultStream=read_done" ),
+                  std::string( "workerEnabled=true\npipelineEnabled=true\npipelineResultStream=flat" ),
+                  std::string( "workerEnabled=true\npipelineEnabled=true\npipelineResultStream=aux_source" ),
+                  std::string( "workerEnabled=true\npipelineEnabled=true\npipelineResultStream=bad/name" ),
+                  std::string( "workerEnabled=true\npipelineEnabled=true\npipelineResultStream=sdk_done" ) );
+    char      path[]     = "/tmp/bmc-pipeline-config-XXXXXX";
+    const int descriptor = mkstemp( path );
+    REQUIRE( descriptor >= 0 );
+    close( descriptor );
+    {
+        std::ofstream file( path );
+        file << "[dm]\nshmimName=bmcgrid\nreaderReleaseStream=read_done\nshmimFlat=flat\ndeltaChannels=aux_source\n["
+                "sdk]\n"
+             << setting << '\n';
+    }
+    app.config.readConfig( path );
+    const bool valid = setting.ends_with( "pipelineResultStream=sdk_done" );
+    REQUIRE( app.loadConfigImpl( app.config ) == ( valid ? 0 : -1 ) );
+    REQUIRE_FALSE( app.m_sdkThread.joinable() );
+    REQUIRE( unlink( path ) == 0 );
+}
+
+/// Hardware initialization can precede image allocation, and reconnect allocation waits for all old ownership.
+/** \ingroup bmcCtrl_unit_test */
+TEST_CASE( "BMC pipeline initializes before monitor images and drains before reallocation",
+           "[bmcCtrl][pipeline][lifecycle]" )
+{
+    // clang-format off
+    #ifdef BMCCTRL_TEST_DOXYGEN_REF
+    MagAOX::app::bmcCtrl::initDM();
+    MagAOX::app::bmcCtrl::allocate(MagAOX::app::dev::shmimT());
+    #endif
+    // clang-format on
+    using namespace MagAOX::app;
+    bmcCtrl_test app;
+    app.enablePipeline();
+    REQUIRE( app.releaseDM() == 0 );
+    app.deferMonitorAllocation();
+    app.mappingFile();
+    REQUIRE( app.initDM() == 0 );
+    REQUIRE( app.allocate( dev::shmimT() ) == 0 );
+    bmcTimingTest::block = bmcTimingTest::perCall = true;
+    bmcTimingTest::heldPost                       = 1;
+    REQUIRE( app.pipelineInput( 1 ) == 0 );
+    bmcTimingTest::waitCalls( 3 );
+    bmcTimingTest::permitCalls( 3 );
+    bmcTimingTest::waitPost();
+    auto                       allocation = std::async( std::launch::async,
+                                  [&app]()
+                                  {
+                                      return app.allocate( dev::shmimT() );
+                                  } );
+    bmcTimingTest::ReturnGuard guard;
+    app.waitClosed();
+    REQUIRE( allocation.wait_for( std::chrono::seconds( 0 ) ) != std::future_status::ready );
+    bmcTimingTest::permitReturn();
+    REQUIRE( allocation.get() == 0 );
+    app.waitRetired( 1 );
+    REQUIRE_FALSE( app.m_sdkFault );
+    REQUIRE_FALSE( app.m_admissionClosed );
+    REQUIRE( app.pipelineInput( 2 ) == 0 );
+    app.waitRetired( 2 );
+    REQUIRE( app.m_pipelineResult.snapshot().inputCounter == 2 );
     REQUIRE( bmcTimingTest::maximumActive == 1 );
 }
 

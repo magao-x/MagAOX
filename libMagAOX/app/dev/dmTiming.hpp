@@ -27,7 +27,10 @@ namespace dev
 
 /// Capture fixed-size timing events without blocking the command thread.
 /** Configure only before the producer starts or after it has stopped. Producer
- * methods and update/summary must each have one owning thread. The consumer
+ * capture methods and update/summary must each have one owning thread. In detached
+ * mode a separate finalizer exclusively owns submitEvent; the capture owner must
+ * detach every event before beginning another event or changing sessions. Never
+ * mix legacy finishEvent calls with a concurrent detached submission producer. The consumer
  * never reads a producer-owned slot and the producer never overwrites an unread
  * slot. Consumer-side window allocation and statistics are outside the RT path.
  */
@@ -116,6 +119,11 @@ class dmTiming
     void markAt( MagAOX::dmTiming::Marker marker /**< [in] Endpoint to record. */,
                  int64_t                  ns /**< [in] Monotonic timestamp, or -1 on clock failure. */ );
 
+    /// Validate and record one endpoint in caller-owned detached storage.
+    static void markEvent( MagAOX::dmTiming::Event &event /**< [in,out] Exclusively owned event. */,
+                           MagAOX::dmTiming::Marker marker /**< [in] Endpoint to record. */,
+                           int64_t                  ns /**< [in] Monotonic timestamp, or -1 on clock failure. */ );
+
     /// Import one immutable worker result while allowing SDK execution to overlap monitor staging.
     void importSdk( int64_t                   startNs /**< [in] Actual worker SDK entry timestamp. */,
                     int64_t                   endNs /**< [in] Actual worker SDK return timestamp. */,
@@ -123,6 +131,15 @@ class dmTiming
                     int64_t dispatchNs  = -1 /**< [in] Monitor request-publication timestamp, or unavailable. */,
                     int64_t waitStartNs = -1 /**< [in] Monitor SDK-result wait start, or unavailable. */,
                     int64_t waitEndNs   = -1 /**< [in] Monitor SDK-result wait return, or unavailable. */ );
+
+    /// Import SDK endpoints into caller-owned storage using the same causal checks as importSdk.
+    static void importSdkEvent( MagAOX::dmTiming::Event  &event /**< [in,out] Exclusively owned event. */,
+                                int64_t                   startNs /**< [in] Actual SDK entry timestamp. */,
+                                int64_t                   endNs /**< [in] Actual SDK return timestamp. */,
+                                MagAOX::dmTiming::Outcome outcome /**< [in] Actual backend submission outcome. */,
+                                int64_t dispatchNs  = -1 /**< [in] Request-publication timestamp, or unavailable. */,
+                                int64_t waitStartNs = -1 /**< [in] Result wait start, or unavailable. */,
+                                int64_t waitEndNs   = -1 /**< [in] Result wait return, or unavailable. */ );
 
     /// Attach an observed input counter, without asserting verified frame identity.
     void inputCounter( uint64_t counter /**< [in] Stable counter observation supplied by the monitor. */ );
@@ -134,11 +151,24 @@ class dmTiming
     /// Set callback outcome; success qualifies submission and later failures preserve it.
     void outcome( MagAOX::dmTiming::Outcome outcome /**< [in] Qualified backend or callback result. */ );
 
+    /// Set the result of an exclusively owned event while retaining prior successful submission evidence.
+    static void outcomeEvent( MagAOX::dmTiming::Event  &event /**< [in,out] Exclusively owned event. */,
+                              MagAOX::dmTiming::Outcome outcome /**< [in] Qualified callback result. */ );
+
     /// Return the currently qualified callback outcome.
     MagAOX::dmTiming::Outcome outcome() const;
 
     /// Explicitly qualify or revoke submission status independently of callback outcome.
     void submitted( bool success = true /**< [in] Actual SDK/transport success was established. */ );
+
+    /// Transfer the active event by value without queue publication; return an empty event when inactive.
+    MagAOX::dmTiming::Event detachEvent();
+
+    /// Publish an immutable event from the one handoff producer, dropping without waiting when full.
+    /** The capture and submission owners must transfer event ownership externally.
+     * This method never accesses the capture owner's current event or sequence.
+     */
+    void submitEvent( const MagAOX::dmTiming::Event &event /**< [in] Finished detached event. */ );
 
     /// Publish one finished event, or drop it without waiting when the queue is full.
     void finishEvent();
@@ -257,9 +287,17 @@ inline void dmTiming::mark( MagAOX::dmTiming::Marker marker )
 
 inline void dmTiming::markAt( MagAOX::dmTiming::Marker marker, int64_t ns )
 {
+    if( m_active )
+    {
+        markEvent( m_event, marker, ns );
+    }
+}
+
+inline void dmTiming::markEvent( MagAOX::dmTiming::Event &event, MagAOX::dmTiming::Marker marker, int64_t ns )
+{
     using namespace MagAOX::dmTiming;
 
-    if( !m_active || markerIndex( marker ) >= markerIndex( Marker::count ) )
+    if( markerIndex( marker ) >= markerIndex( Marker::count ) )
     {
         return;
     }
@@ -267,9 +305,9 @@ inline void dmTiming::markAt( MagAOX::dmTiming::Marker marker, int64_t ns )
     uint32_t bit     = 1u << markerIndex( marker );
     bool     ordered = ns >= 0;
 
-    for( size_t i = 0; ordered && i < m_event.markers.size(); ++i )
+    for( size_t i = 0; ordered && i < event.markers.size(); ++i )
     {
-        if( ( m_event.valid & ( 1u << i ) ) && m_event.markers[i] > ns )
+        if( ( event.valid & ( 1u << i ) ) && event.markers[i] > ns )
         {
             ordered = false;
         }
@@ -277,14 +315,14 @@ inline void dmTiming::markAt( MagAOX::dmTiming::Marker marker, int64_t ns )
 
     if( !ordered )
     {
-        m_event.valid &= ~bit;
-        ++m_event.invalidMarkers;
+        event.valid &= ~bit;
+        ++event.invalidMarkers;
 
         return;
     }
 
-    m_event.markers[markerIndex( marker )] = ns;
-    m_event.valid |= bit;
+    event.markers[markerIndex( marker )] = ns;
+    event.valid |= bit;
 }
 
 inline void dmTiming::importSdk( int64_t                   startNs,
@@ -294,28 +332,37 @@ inline void dmTiming::importSdk( int64_t                   startNs,
                                  int64_t                   waitStartNs,
                                  int64_t                   waitEndNs )
 {
+    if( m_active )
+    {
+        importSdkEvent( m_event, startNs, endNs, result, dispatchNs, waitStartNs, waitEndNs );
+    }
+}
+
+inline void dmTiming::importSdkEvent( MagAOX::dmTiming::Event  &event,
+                                      int64_t                   startNs,
+                                      int64_t                   endNs,
+                                      MagAOX::dmTiming::Outcome result,
+                                      int64_t                   dispatchNs,
+                                      int64_t                   waitStartNs,
+                                      int64_t                   waitEndNs )
+{
     using namespace MagAOX::dmTiming;
 
-    if( !m_active )
-    {
-        return;
-    }
-
-    const auto endpoint = [this]( Marker marker )
+    const auto endpoint = [&event]( Marker marker )
     {
         const auto index = markerIndex( marker );
-        return ( m_event.valid & ( 1u << index ) ) ? m_event.markers[index] : int64_t( -1 );
+        return ( event.valid & ( 1u << index ) ) ? event.markers[index] : int64_t( -1 );
     };
-    const auto store = [this]( Marker marker, int64_t ns )
+    const auto store = [&event]( Marker marker, int64_t ns )
     {
-        const auto index       = markerIndex( marker );
-        m_event.markers[index] = ns;
-        m_event.valid |= 1u << index;
+        const auto index     = markerIndex( marker );
+        event.markers[index] = ns;
+        event.valid |= 1u << index;
     };
-    const auto reject = [this]( Marker first, Marker last )
+    const auto reject = [&event]( Marker first, Marker last )
     {
-        m_event.valid &= ~( ( 1u << markerIndex( first ) ) | ( 1u << markerIndex( last ) ) );
-        ++m_event.invalidMarkers;
+        event.valid &= ~( ( 1u << markerIndex( first ) ) | ( 1u << markerIndex( last ) ) );
+        ++event.invalidMarkers;
     };
     const auto finish = endpoint( Marker::finish );
     const auto preparation =
@@ -369,13 +416,12 @@ inline void dmTiming::importSdk( int64_t                   startNs,
 
     if( result == Outcome::success )
     {
-        submitted();
+        event.submitted = true;
     }
 
-    if( m_event.outcome != Outcome::failed && m_event.outcome != Outcome::partial &&
-        m_event.outcome != Outcome::rejected )
+    if( event.outcome != Outcome::failed && event.outcome != Outcome::partial && event.outcome != Outcome::rejected )
     {
-        outcome( result );
+        outcomeEvent( event, result );
     }
 }
 
@@ -407,11 +453,16 @@ inline void dmTiming::outcome( MagAOX::dmTiming::Outcome outcome )
         return;
     }
 
-    m_event.outcome = outcome;
+    outcomeEvent( m_event, outcome );
+}
+
+inline void dmTiming::outcomeEvent( MagAOX::dmTiming::Event &event, MagAOX::dmTiming::Outcome outcome )
+{
+    event.outcome = outcome;
 
     if( outcome == MagAOX::dmTiming::Outcome::success )
     {
-        m_event.submitted = true;
+        event.submitted = true;
     }
 }
 
@@ -428,15 +479,31 @@ inline void dmTiming::submitted( bool success )
     }
 }
 
-inline void dmTiming::finishEvent()
+inline MagAOX::dmTiming::Event dmTiming::detachEvent()
 {
     if( !m_active )
     {
-        return;
+        return {};
     }
 
     m_active = false;
-    m_queue.push( m_event );
+    return m_event;
+}
+
+inline void dmTiming::submitEvent( const MagAOX::dmTiming::Event &event )
+{
+    if( m_enabled && event.session != 0 && event.sequence != 0 )
+    {
+        m_queue.push( event );
+    }
+}
+
+inline void dmTiming::finishEvent()
+{
+    if( m_active )
+    {
+        submitEvent( detachEvent() );
+    }
 }
 
 inline void dmTiming::newSession()

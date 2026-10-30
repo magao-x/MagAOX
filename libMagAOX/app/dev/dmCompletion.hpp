@@ -26,9 +26,11 @@ namespace app
 namespace dev
 {
 
-/// Publish full successful completion or independent early read release without timing telemetry dependence.
+/// Publish independent full, early-reader or SDK results without timing telemetry dependence.
 /** Open/close only while the command thread is stopped. One command thread owns
- * begin/finish/release/submission/reset; ordinary app logic may read snapshot concurrently. The
+ * begin/finish/release/submission/reset, or publishCompleted/reset. Detached capture
+ * is independent of any publisher; each result stream has one publication owner.
+ * Ordinary app logic may read snapshot concurrently. The
  * stream's own semaphores are notifications, and the coherent versioned record
  * is authoritative. No input stream, input semaphore or hardware state changes.
  * Existing compatible streams are reused so attached readers survive restart.
@@ -96,13 +98,32 @@ class dmCompletion
     /// Open an exclusive publisher; an empty name disables publication and succeeds.
     int open( const std::string         &name /**< [in] Dedicated ImageStreamIO name, without directory components. */,
               MagAOX::dmCompletion::Kind kind = MagAOX::dmCompletion::Kind::completion
-              /**< [in] Full successful callback or independent early-reader release protocol. */ );
+              /**< [in] Full callback, early-reader release, or independent SDK-return protocol. */ );
 
     /// Publish unavailable, notify readers and release the attachment without destroying its stream.
     void close() noexcept;
 
     /// Invalidate previous completion and start a new attachment/progression epoch.
     void reset() noexcept;
+
+    /// Capture pointer-free input identity and entry time without requiring an enabled publisher.
+    /** The caller must establish that the frozen identity matches its consumed
+     * channel snapshot. This bounded metadata capture alone is not a pixel lock.
+     */
+    static MagAOX::dmCompletion::Record
+    captureRecord( const IMAGE *input /**< [in] Combined command stream observed before private preparation. */,
+                   bool genuine /**< [in] A real successful semaphore receipt preceded this command. */ ) noexcept;
+
+    /// Publish one job-owned result without rereading its possibly advanced or detached input.
+    /** One result owner calls this after validating the consumed snapshot. The
+     * publisher assigns its own session, epoch, sequence and endpoint kind;
+     * captured busy/released/complete state qualifies a genuine stable snapshot.
+     */
+    void publishCompleted(
+        const MagAOX::dmCompletion::Record &record /**< [in] Frozen, caller-validated command identity and SDK code. */,
+        int                                 callbackResult /**< [in] Stage result; zero means success. */,
+        MagAOX::dmTiming::Outcome outcome /**< [in] Actual backend outcome for full/SDK result qualification. */,
+        int64_t finishedNs = -1 /**< [in] Local stage endpoint; -1 captures the current monotonic time. */ ) noexcept;
 
     /// Publish busy before channel reads, qualifying only a genuine new stable input identity.
     void begin(
@@ -249,7 +270,8 @@ inline int dmCompletion::open( const std::string &name, MagAOX::dmCompletion::Ki
 {
     close();
 
-    if( kind != MagAOX::dmCompletion::Kind::completion && kind != MagAOX::dmCompletion::Kind::readers )
+    if( kind != MagAOX::dmCompletion::Kind::completion && kind != MagAOX::dmCompletion::Kind::readers &&
+        kind != MagAOX::dmCompletion::Kind::sdk )
     {
         return -1;
     }
@@ -437,6 +459,89 @@ inline void dmCompletion::reset() noexcept
     m_qualified           = false;
     m_haveInput           = false;
     m_submissionPublished = false;
+    publish( true );
+}
+
+inline MagAOX::dmCompletion::Record dmCompletion::captureRecord( const IMAGE *input, bool genuine ) noexcept
+{
+    MagAOX::dmCompletion::Record record;
+    Identity                     value;
+    const bool                   valid = identity( input, value );
+    record.inputInode                  = valid ? value.inode : 0;
+    record.inputCounter                = valid ? value.counter : 0;
+    record.publicationSec              = valid ? value.sec : 0;
+    record.publicationNsec             = valid ? value.nsec : 0;
+    record.startedNs                   = dmTiming::monotonicNowNs();
+    record.state                       = genuine && valid && record.startedNs > 0 ? MagAOX::dmCompletion::State::busy
+                                                                                  : MagAOX::dmCompletion::State::unqualified;
+    return record;
+}
+
+inline void dmCompletion::publishCompleted( const MagAOX::dmCompletion::Record &record,
+                                            int                                 callbackResult,
+                                            MagAOX::dmTiming::Outcome           outcome,
+                                            int64_t                             finishedNs ) noexcept
+{
+    using namespace MagAOX::dmCompletion;
+
+    if( !m_enabled )
+    {
+        return;
+    }
+
+    // Preserve the supplied value even when it aliases this publisher's current attempt.
+    const auto     captured = record;
+    const Identity value{
+        captured.inputInode, captured.inputCounter, captured.publicationSec, captured.publicationNsec };
+    const bool valid = captured.protocolVersion == version && value.inode != 0 && value.counter != 0 && value.sec > 0 &&
+                       value.nsec >= 0 && value.nsec < 1000000000 && captured.startedNs > 0;
+
+    if( m_active ||
+        ( valid && m_haveInput && ( value.inode != m_previous.inode || value.counter < m_previous.counter ) ) )
+    {
+        reset();
+    }
+
+    const auto session       = m_record.session;
+    const auto epoch         = m_record.epoch;
+    const auto sequence      = m_record.sequence + 1;
+    const auto pid           = m_record.publisherPid;
+    m_record                 = captured;
+    m_record.protocolVersion = version;
+    m_record.session         = session;
+    m_record.epoch           = epoch;
+    m_record.sequence        = sequence;
+    m_record.publisherPid    = pid;
+    m_record.kind            = m_kind;
+    m_record.callbackResult  = callbackResult;
+    m_record.finishedNs      = finishedNs == -1 ? dmTiming::monotonicNowNs() : finishedNs;
+    m_record.outcome         = outcome;
+    m_record.state           = State::unqualified;
+    const bool readers       = m_kind == Kind::readers;
+    const bool capturedQualified =
+        captured.state == State::busy || captured.state == State::released || captured.state == State::complete;
+
+    if( callbackResult != 0 ||
+        ( !readers && ( outcome == MagAOX::dmTiming::Outcome::failed || outcome == MagAOX::dmTiming::Outcome::partial ||
+                        outcome == MagAOX::dmTiming::Outcome::rejected ) ) )
+    {
+        m_record.state = State::error;
+    }
+    else if( valid && capturedQualified && ( !m_haveInput || value.counter > m_previous.counter ) &&
+             m_record.finishedNs >= captured.startedNs && ( readers || outcome == MagAOX::dmTiming::Outcome::success ) )
+    {
+        m_record.state = readers ? State::released : State::complete;
+    }
+
+    if( valid && capturedQualified )
+    {
+        m_previous  = value;
+        m_haveInput = true;
+    }
+
+    m_active              = false;
+    m_qualified           = false;
+    m_submissionPublished = !readers || outcome != MagAOX::dmTiming::Outcome::unknown;
     publish( true );
 }
 

@@ -23,6 +23,7 @@ Test:
 #include "../../magaox_git_version.h"
 #include "../../libMagAOX/app/dev/telemeter.hpp"
 
+#include <array>
 #include <condition_variable>
 #include <fstream>
 #include <memory>
@@ -133,7 +134,7 @@ class bmcCtrl : public MagAOXApp<true>,
         int64_t dispatchNs{ 0 };        ///< Existing monitor dispatch timestamp; control operations remain exempt.
     };
 
-    /// Fixed SDK result; only the monitor imports command timing.
+    /// Fixed SDK result imported by the joined monitor or the detached post owner.
     struct SdkResult
     {
         BMCRC    result{ NO_ERR };    ///< Actual vendor result, or -1 when the SDK throws.
@@ -221,6 +222,87 @@ class bmcCtrl : public MagAOXApp<true>,
 
     int64_t m_sdkDispatchNs{ 0 }; ///< Monitor-side handoff timestamp for the active command.
 
+    /// Startup-only full pipeline selection; the existing SDK worker is required.
+    bool m_pipelineEnabled{ false };
+
+    int m_pipelineThreadPrio{ 0 }; ///< Requested post-processing worker priority.
+
+    std::string m_pipelineCpuset; ///< Post-processing worker CPU set; independently verified at startup.
+
+    std::string m_pipelineResultStream; ///< Optional dedicated actual SDK-result stream.
+
+    /// One bounded immutable command, retained until preparation, SDK execution and post-processing all retire.
+    struct PipelineJob
+    {
+        dmT::PipelineCommand         command;  ///< Generic private shape, staged products, timing and source identity.
+        MagAOX::dmCompletion::Record identity; ///< Immutable source identity copied before SDK dispatch.
+        std::vector<double>          values;   ///< Dedicated immutable SDK actuator vector.
+        SdkResult                    result;   ///< Actual SDK result and timestamps, consumed only after sdkDone.
+        uint64_t                     order{ 0 };    ///< Admission sequence for ordered submission and publication.
+        bool                         busy{ false }; ///< Pool credit remains owned through post retirement.
+        bool staged{ false };     ///< Monitor finished every channel read and detached reader release.
+        bool queued{ false };     ///< SDK owner may select this prepared vector.
+        bool running{ false };    ///< Native SDK call currently owns this job's vector.
+        bool sdkDone{ false };    ///< Actual SDK result or explicit cancellation is available.
+        bool submitted{ false };  ///< This command actually entered the native SDK.
+        bool posting{ false };    ///< Sole post worker owns finalization outside the SDK mutex.
+        bool cancelled{ false };  ///< No SDK submission is allowed for this admitted command.
+        bool timedOut{ false };   ///< Diagnostic timeout counted once while SDK ownership is retained.
+        bool superseded{ false }; ///< A newer observed command cancelled this unsent job without a backend fault.
+    };
+
+    static constexpr size_t pipelineCapacity{ 3 }; ///< Fixed preparation/SDK/post credits; never an unbounded FIFO.
+
+    std::array<PipelineJob, pipelineCapacity>
+        m_pipelineJobs; ///< Protected state under m_sdkMutex; payload owners differ.
+
+    uint64_t m_pipelineOrder{ 0 }; ///< Last admitted pipeline job sequence.
+
+    size_t m_pipelineInFlight{ 0 }; ///< Busy pool credits; protected by m_sdkMutex and reflected by commandActive.
+
+    size_t m_pipelineSdkActive{ pipelineCapacity }; ///< SDK-owned pool slot, or pipelineCapacity when idle.
+
+    uint64_t m_pipelineAdmitted{ 0 }; ///< Commands admitted into private pipeline storage.
+
+    uint64_t m_pipelineRetired{ 0 }; ///< Whole jobs whose ordered post work finished.
+
+    uint64_t m_pipelineOverloaded{ 0 }; ///< Fresh receipts rejected because every bounded credit was owned.
+
+    uint64_t m_pipelineCancelled{ 0 }; ///< Admitted commands cancelled before entering the SDK.
+
+    uint64_t m_pipelineSuperseded{ 0 }; ///< Unsent private commands displaced by a newer observed input.
+
+    MagAOX::dmCompletion::Record m_pipelineLatest; ///< Monitor-announced pointer-free identity under m_sdkMutex.
+
+    bool m_pipelineHaveLatest{ false }; ///< Latest observed source remains attached and coherently identified.
+
+    uint64_t m_pipelinePostFailures{
+        0 }; ///< Post-processing failures, including failures discovered after a later send.
+
+    std::thread m_pipelineThread; ///< Sole ordered post-processing and generic timing/completion owner.
+
+    bool m_pipelineThreadInit{ true }; ///< Standard threadStart compatibility; worker uses configured handshake.
+
+    pid_t m_pipelineThreadID{ 0 }; ///< Post-processing worker TID.
+
+    pcf::IndiProperty m_pipelineThreadProp; ///< Standard post-worker thread readback.
+
+    pcf::IndiProperty m_indiP_pipeline; ///< Ordinary-thread bounded pipeline diagnostics.
+
+    bool m_pipelineConfigured{ false }; ///< Post worker may run only after verified initialization.
+
+    bool m_pipelineStop{ false }; ///< Stop only after all pipeline credits have retired.
+
+    std::condition_variable m_pipelineWake; ///< SDK/preparation changes wake the ordered post worker.
+
+    int m_pipelinePolicy{ -1 }; ///< Verified post-worker scheduling policy.
+
+    int m_pipelineActualPrio{ -1 }; ///< Verified post-worker scheduling priority.
+
+    int m_pipelineAllowedCpus{ 0 }; ///< Verified post-worker affinity population.
+
+    dev::dmCompletion m_pipelineResult; ///< SDK-thread-only actual submission-result publisher.
+
     /// @}
 
   public:
@@ -291,6 +373,20 @@ class bmcCtrl : public MagAOXApp<true>,
      * \returns -1 on error
      */
     int zeroDM();
+
+    /// Select the full pipeline while preserving the inherited synchronous and joined-worker callback paths.
+    int processImage( void              *source /**< [in] Current combined command pixels. */,
+                      const dev::shmimT &tag /**< [in] Primary monitor tag. */ );
+
+    /// Drain all pipeline owners before inherited allocation changes shared channel/output storage.
+    int allocate( const dev::shmimT &tag /**< [in] Reconnected primary monitor. */ );
+
+    /// Preserve one timing producer by routing pipelined monitor events to detached captures.
+    void shmimMonitorTiming( const dev::shmimT     &tag /**< [in] Primary monitor tag. */,
+                             dev::shmimMonitorEvent event /**< [in] Receipt or lifecycle event. */ );
+
+    /// Expose the startup-only pipeline selection to generic DM helpers.
+    bool pipelinedCommand() const;
 
     /// Send a command to the DM
     /** This is called by the shmim monitoring thread in response to a semaphore trigger.
@@ -384,6 +480,47 @@ class bmcCtrl : public MagAOXApp<true>,
 
     /// Update read-only worker diagnostics outside realtime execution.
     void updateSdkWorkerINDI();
+
+    /// Allocate every fixed job only while command admission is closed and all earlier work is drained.
+    void allocatePipelineJobs();
+
+    /// Capture, prepare, dispatch and release one job without waiting for its SDK or post result.
+    int processPipeline( void *source /**< [in] Current combined command pixels. */ );
+
+    /// Reserve a fresh coherent command and a free private credit; pipelineCapacity means rejection.
+    size_t claimPipelineJob();
+
+    /// Return the oldest queued SDK job; caller holds m_sdkMutex.
+    size_t nextPipelineSdk() const;
+
+    /// Return the oldest busy job, including one whose staging/SDK result is not ready; caller holds m_sdkMutex.
+    size_t nextPipelinePost() const;
+
+    /// Close admission and cancel every not-yet-submitted job; caller holds m_sdkMutex.
+    void faultPipeline();
+
+    /// Cancel an unsent job displaced by newer source evidence; requires m_sdkMutex.
+    void supersedePipelineJob( PipelineJob &job /**< [in,out] Private unsent command. */ );
+
+    /// Start and verify the sole post worker before allowing any pipeline command.
+    int startPipelineWorker();
+
+    /// Stop the post owner after all credits drain; caller already closed admission.
+    void stopPipelineWorker() noexcept;
+
+    /// Enter the ordered post worker.
+    static void pipelineThreadStart( bmcCtrl *app /**< [in] Owning controller. */ );
+
+    /// Publish completed commands in admission order and retire their private storage.
+    void pipelineThreadExec() noexcept;
+
+    /// Verify scheduling and CPU placement for either worker using the existing startup contract.
+    int verifyWorkerThread( std::thread       &thread /**< [in] Started worker. */,
+                            int                priority /**< [in] Requested scheduling priority. */,
+                            const std::string &cpuset /**< [in] Requested CPU set, or inherited affinity. */,
+                            int               &actualPolicy /**< [out] Observed scheduling policy. */,
+                            int               &actualPriority /**< [out] Observed priority. */,
+                            int               &allowedCpus /**< [out] Observed allowed CPU count. */ );
 
     ///@}
 
@@ -510,6 +647,43 @@ void bmcCtrl::setupConfig()
                 "double",
                 "Positive finite diagnostic normal-command deadline in seconds; never cancels the SDK call." );
 
+    config.add( "sdk.pipelineEnabled",
+                "",
+                "sdk.pipelineEnabled",
+                argType::Required,
+                "sdk",
+                "pipelineEnabled",
+                false,
+                "bool",
+                "Opt into the three-credit preparation/SDK/post pipeline; requires workerEnabled and restart." );
+    config.add( "sdk.pipelineThreadPrio",
+                "",
+                "sdk.pipelineThreadPrio",
+                argType::Required,
+                "sdk",
+                "pipelineThreadPrio",
+                false,
+                "int",
+                "Post-processing worker priority; zero selects ordinary scheduling." );
+    config.add( "sdk.pipelineCpuset",
+                "",
+                "sdk.pipelineCpuset",
+                argType::Required,
+                "sdk",
+                "pipelineCpuset",
+                false,
+                "string",
+                "Dedicated post-processing worker CPU set." );
+    config.add( "sdk.pipelineResultStream",
+                "",
+                "sdk.pipelineResultStream",
+                argType::Required,
+                "sdk",
+                "pipelineResultStream",
+                false,
+                "string",
+                "Optional distinct stream containing actual SDK results only." );
+
     DM_SETUP_CONFIG( config );
 
     TELEMETER_SETUP_CONFIG( config );
@@ -524,13 +698,47 @@ int bmcCtrl::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_sdkThreadPrio, "sdk.threadPrio" );
     _config( m_sdkCpuset, "sdk.cpuset" );
     _config( m_sdkTimeoutSec, "sdk.timeoutSec" );
+    _config( m_pipelineEnabled, "sdk.pipelineEnabled" );
+    _config( m_pipelineThreadPrio, "sdk.pipelineThreadPrio" );
+    _config( m_pipelineCpuset, "sdk.pipelineCpuset" );
+    _config( m_pipelineResultStream, "sdk.pipelineResultStream" );
 
     if( m_sdkThreadPrio < 0 || m_sdkThreadPrio > 99 || !mx::math::isFinite( m_sdkTimeoutSec ) || m_sdkTimeoutSec <= 0 )
     {
         return -1;
     }
 
+    if( ( m_pipelineEnabled && !m_sdkWorkerEnabled ) || m_pipelineThreadPrio < 0 || m_pipelineThreadPrio > 99 ||
+        ( !m_pipelineEnabled && !m_pipelineResultStream.empty() ) )
+    {
+        return -1;
+    }
+
     DM_LOAD_CONFIG( _config );
+
+    if( m_pipelineEnabled && !m_pipelineResultStream.empty() )
+    {
+        const std::vector<std::string> reserved{ m_completionStreamName,
+                                                 m_readerReleaseStreamName,
+                                                 m_shmimFlat,
+                                                 m_shmimTest,
+                                                 m_shmimSat,
+                                                 m_shmimSatPerc,
+                                                 m_shmimShape,
+                                                 m_shmimDelta,
+                                                 m_shmimDiff,
+                                                 m_shmimName + "_actmask" };
+
+        if( m_pipelineResultStream.find_first_not_of(
+                "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-" ) != std::string::npos ||
+            std::find( reserved.begin(), reserved.end(), m_pipelineResultStream ) != reserved.end() ||
+            std::find( m_deltaChannels.begin(), m_deltaChannels.end(), m_pipelineResultStream ) !=
+                m_deltaChannels.end() ||
+            m_pipelineResultStream.starts_with( m_shmimName ) )
+        {
+            return -1;
+        }
+    }
 
     TELEMETER_LOAD_CONFIG( _config );
 
@@ -598,6 +806,40 @@ int bmcCtrl::appStartup()
         }
 
         registerIndiPropertyReadOnly( m_indiP_sdkWorker );
+    }
+
+    if( m_pipelineEnabled )
+    {
+        if( startPipelineWorker() < 0 )
+        {
+            return -1;
+        }
+
+        m_indiP_pipeline = pcf::IndiProperty( pcf::IndiProperty::Number );
+        m_indiP_pipeline.setDevice( configName() );
+        m_indiP_pipeline.setName( "sdk_pipeline" );
+        m_indiP_pipeline.setPerm( pcf::IndiProperty::ReadOnly );
+
+        for( const auto *name : { "enabled",
+                                  "capacity",
+                                  "inFlight",
+                                  "queued",
+                                  "sdkActive",
+                                  "postActive",
+                                  "admitted",
+                                  "retired",
+                                  "overloaded",
+                                  "cancelled",
+                                  "postFailures",
+                                  "superseded",
+                                  "policy",
+                                  "priority",
+                                  "allowedCpus" } )
+        {
+            m_indiP_pipeline.add( pcf::IndiElement( name ) );
+        }
+
+        registerIndiPropertyReadOnly( m_indiP_pipeline );
     }
 
     const char *version = BMCVersionString();
@@ -829,6 +1071,20 @@ int bmcCtrl::initDM()
     {
         m_sdkValues.assign( m_nbAct, 0 );
         m_stagedSat.assign( m_dmWidth * m_dmHeight, 0 );
+
+        if( m_pipelineEnabled && m_outputShape.data() != nullptr && m_outputShape.rows() == m_dmWidth &&
+            m_outputShape.cols() == m_dmHeight )
+        {
+            try
+            {
+                allocatePipelineJobs();
+            }
+            catch( const std::exception &error )
+            {
+                return log<software_error, -1>(
+                    { std::string( "allocating pipeline command storage: " ) + error.what() } );
+            }
+        }
 
         { //mutex scope
             std::lock_guard<std::mutex> lock( m_commandMutex );
@@ -1302,22 +1558,33 @@ int bmcCtrl::startSdkWorker()
 
 int bmcCtrl::verifySdkThread()
 {
+    return verifyWorkerThread(
+        m_sdkThread, m_sdkThreadPrio, m_sdkCpuset, m_sdkPolicy, m_sdkActualPrio, m_sdkAllowedCpus );
+}
+
+int bmcCtrl::verifyWorkerThread( std::thread       &thread,
+                                 int                priority,
+                                 const std::string &cpuset,
+                                 int               &actualPolicy,
+                                 int               &actualPriority,
+                                 int               &allowedCpus )
+{
     sched_param scheduling{};
     int         policy = -1;
     cpu_set_t   actual;
     CPU_ZERO( &actual );
 
-    if( pthread_getschedparam( m_sdkThread.native_handle(), &policy, &scheduling ) != 0 ||
-        pthread_getaffinity_np( m_sdkThread.native_handle(), sizeof( actual ), &actual ) != 0 ||
-        policy != ( m_sdkThreadPrio == 0 ? SCHED_OTHER : MAGAOX_RT_SCHED_POLICY ) ||
-        scheduling.sched_priority != m_sdkThreadPrio || CPU_COUNT( &actual ) == 0 )
+    if( pthread_getschedparam( thread.native_handle(), &policy, &scheduling ) != 0 ||
+        pthread_getaffinity_np( thread.native_handle(), sizeof( actual ), &actual ) != 0 ||
+        policy != ( priority == 0 ? SCHED_OTHER : MAGAOX_RT_SCHED_POLICY ) || scheduling.sched_priority != priority ||
+        CPU_COUNT( &actual ) == 0 )
     {
         return log<software_error, -1>( { "SDK worker actual scheduling/affinity does not match configuration" } );
     }
 
-    if( !m_sdkCpuset.empty() )
+    if( !cpuset.empty() )
     {
-        std::ifstream file( m_cpusetPath + "/" + m_sdkCpuset + "/cpuset.cpus" );
+        std::ifstream file( m_cpusetPath + "/" + cpuset + "/cpuset.cpus" );
         std::string   list;
         std::getline( file, list );
         cpu_set_t expected;
@@ -1356,9 +1623,9 @@ int bmcCtrl::verifySdkThread()
         }
     }
 
-    m_sdkPolicy      = policy;
-    m_sdkActualPrio  = scheduling.sched_priority;
-    m_sdkAllowedCpus = CPU_COUNT( &actual );
+    actualPolicy   = policy;
+    actualPriority = scheduling.sched_priority;
+    allowedCpus    = CPU_COUNT( &actual );
     return 0;
 }
 
@@ -1366,9 +1633,11 @@ void bmcCtrl::stopSdkWorker() noexcept
 {
     std::lock_guard<std::mutex> control( m_controlMutex );
     closeAdmission();
+    stopPipelineWorker();
 
     if( !m_sdkThread.joinable() )
     {
+        m_pipelineResult.close();
         return;
     }
 
@@ -1385,61 +1654,12 @@ void bmcCtrl::stopSdkWorker() noexcept
 
     m_sdkWake.notify_one();
     m_sdkThread.join();
+    m_pipelineResult.close();
 }
 
 void bmcCtrl::sdkThreadStart( bmcCtrl *app )
 {
     app->sdkThreadExec();
-}
-
-void bmcCtrl::sdkThreadExec() noexcept
-{
-    m_sdkThreadID = syscall( SYS_gettid );
-
-    { //mutex scope
-        std::unique_lock<std::mutex> lock( m_sdkMutex );
-        m_sdkWake.wait( lock,
-                        [this]()
-                        {
-                            return m_sdkConfigured || m_sdkStop;
-                        } );
-
-        if( m_sdkStop )
-        {
-            return;
-        }
-    }
-
-    for( ;; )
-    {
-        SdkRequest request;
-
-        { //mutex scope
-            std::unique_lock<std::mutex> lock( m_sdkMutex );
-            m_sdkWake.wait( lock,
-                            [this]()
-                            {
-                                return m_sdkStop || ( m_sdkPending && !m_sdkReady );
-                            } );
-
-            if( m_sdkStop )
-            {
-                return;
-            }
-
-            request = m_sdkRequest;
-        }
-
-        const auto result = performSdk( request );
-
-        { //mutex scope
-            std::lock_guard<std::mutex> lock( m_sdkMutex );
-            m_sdkResult = result;
-            m_sdkReady  = true;
-        }
-
-        m_sdkDone.notify_one();
-    }
 }
 
 bmcCtrl::SdkResult bmcCtrl::performSdk( const SdkRequest &request ) noexcept
@@ -1492,7 +1712,8 @@ uint64_t bmcCtrl::dispatchSdk( SdkRequest request )
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_sdkMutex );
 
-        if( !m_sdkThread.joinable() || !m_sdkConfigured || m_sdkStop || m_sdkPending || m_sdkSequence == UINT64_MAX )
+        if( !m_sdkThread.joinable() || !m_sdkConfigured || m_sdkStop || m_sdkPending || m_pipelineInFlight ||
+            m_sdkSequence == UINT64_MAX )
         {
             return 0;
         }
@@ -1707,7 +1928,7 @@ int bmcCtrl::finalizeCommand( int processingResult ) noexcept
 
 void bmcCtrl::retireCommand() noexcept
 {
-    if( !m_sdkWorkerEnabled )
+    if( m_pipelineEnabled || !m_sdkWorkerEnabled )
     {
         return;
     }
@@ -1743,22 +1964,52 @@ void bmcCtrl::checkSdkTimeout( int64_t nowNs )
         std::lock_guard<std::mutex> sdk( m_sdkMutex );
         double                      ageSec = 0;
 
-        if( m_sdkPending && !m_sdkReady && m_sdkRequest.normalCommand && m_sdkRequest.dispatchNs > 0 &&
-            nowNs >= m_sdkRequest.dispatchNs )
+        if( m_pipelineEnabled && m_pipelineSdkActive < pipelineCapacity )
         {
-            ageSec  = ( nowNs - m_sdkRequest.dispatchNs ) * 1e-9;
-            expired = ageSec >= m_sdkTimeoutSec && !m_sdkTimedOut;
+            auto &job = m_pipelineJobs[m_pipelineSdkActive];
+
+            if( job.result.endNs == 0 && job.command.dispatchNs > 0 && nowNs >= job.command.dispatchNs )
+            {
+                ageSec  = ( nowNs - job.command.dispatchNs ) * 1e-9;
+                expired = ageSec >= m_sdkTimeoutSec && !job.timedOut;
+            }
+
+            if( expired )
+            {
+                job.timedOut = true;
+
+                { //mutex scope
+                    std::lock_guard<std::mutex> command( m_commandMutex );
+                    ++m_sdkTimeouts;
+                }
+
+                faultPipeline();
+            }
+
+            { //mutex scope
+                std::lock_guard<std::mutex> command( m_commandMutex );
+                m_sdkActiveAgeSec = ageSec;
+            }
         }
-
-        std::lock_guard<std::mutex> command( m_commandMutex );
-        m_sdkActiveAgeSec = ageSec;
-
-        if( expired )
+        else
         {
-            m_sdkTimedOut = true;
-            ++m_sdkTimeouts;
-            m_sdkFault        = true;
-            m_admissionClosed = true;
+            if( m_sdkPending && !m_sdkReady && m_sdkRequest.normalCommand && m_sdkRequest.dispatchNs > 0 &&
+                nowNs >= m_sdkRequest.dispatchNs )
+            {
+                ageSec  = ( nowNs - m_sdkRequest.dispatchNs ) * 1e-9;
+                expired = ageSec >= m_sdkTimeoutSec && !m_sdkTimedOut;
+            }
+
+            std::lock_guard<std::mutex> command( m_commandMutex );
+            m_sdkActiveAgeSec = ageSec;
+
+            if( expired )
+            {
+                m_sdkTimedOut = true;
+                ++m_sdkTimeouts;
+                m_sdkFault        = true;
+                m_admissionClosed = true;
+            }
         }
     }
 
@@ -1774,6 +2025,37 @@ void bmcCtrl::updateSdkWorkerINDI()
     if( !m_sdkWorkerEnabled )
     {
         return;
+    }
+
+    std::array<double, 15> pipeline{};
+
+    if( m_pipelineEnabled )
+    {
+        std::lock_guard<std::mutex> lock( m_sdkMutex );
+        size_t                      queued  = 0;
+        bool                        posting = false;
+
+        for( const auto &job : m_pipelineJobs )
+        {
+            queued += job.queued;
+            posting = posting || job.posting;
+        }
+
+        pipeline = { 1,
+                     double( pipelineCapacity ),
+                     double( m_pipelineInFlight ),
+                     double( queued ),
+                     m_pipelineSdkActive < pipelineCapacity ? 1.0 : 0.0,
+                     posting ? 1.0 : 0.0,
+                     double( m_pipelineAdmitted ),
+                     double( m_pipelineRetired ),
+                     double( m_pipelineOverloaded ),
+                     double( m_pipelineCancelled ),
+                     double( m_pipelinePostFailures ),
+                     double( m_pipelineSuperseded ),
+                     double( m_pipelinePolicy ),
+                     double( m_pipelineActualPrio ),
+                     double( m_pipelineAllowedCpus ) };
     }
 
     bool     active, closed, fault;
@@ -1818,6 +2100,27 @@ void bmcCtrl::updateSdkWorkerINDI()
                                double( m_sdkAllowedCpus ),
                                ageSec,
                                double( timeouts ) } );
+
+    if( m_pipelineEnabled )
+    {
+        updateIfChanged<double>( m_indiP_pipeline,
+                                 { "enabled",
+                                   "capacity",
+                                   "inFlight",
+                                   "queued",
+                                   "sdkActive",
+                                   "postActive",
+                                   "admitted",
+                                   "retired",
+                                   "overloaded",
+                                   "cancelled",
+                                   "postFailures",
+                                   "superseded",
+                                   "policy",
+                                   "priority",
+                                   "allowedCpus" },
+                                 std::vector<double>( pipeline.begin(), pipeline.end() ) );
+    }
 }
 
 int bmcCtrl::checkRecordTimes()
@@ -1832,5 +2135,7 @@ int bmcCtrl::recordTelem( const telem_dmtimings * )
 
 } // namespace app
 } // namespace MagAOX
+
+#include "bmcPipeline.hpp"
 
 #endif // bmcCtrl_hpp

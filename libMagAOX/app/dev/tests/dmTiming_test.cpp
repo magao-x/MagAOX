@@ -1128,5 +1128,182 @@ TEST_CASE( "DM timing sequential marker rules remain strict after worker endpoin
     CHECK( collector.summary().total.events == 0 );
 }
 
+/// Transfer independent events to one finalizer without overwriting a newer monitor capture.
+/** \ingroup dmTiming_tests */
+TEST_CASE( "DM timing detached events retain ownership across overlapping commands", "[dev::dmTiming]" )
+{
+    // clang-format off
+#ifdef DM_TIMING_TEST_DOXYGEN_REF
+    MagAOX::app::dev::dmTiming::detachEvent;
+    MagAOX::app::dev::dmTiming::submitEvent;
+    MagAOX::app::dev::dmTiming::markEvent;
+    MagAOX::app::dev::dmTiming::importSdkEvent;
+    MagAOX::app::dev::dmTiming::outcomeEvent;
+#endif
+    // clang-format on
+
+    Collector collector;
+    collector.configure( 1, 8 );
+    const int64_t base = 1000000000;
+    collector.beginEventAt( true, base );
+    collector.inputCounter( 17 );
+    collector.markAt( Marker::entry, base + 10 );
+    collector.markAt( Marker::actuatorEnd, base + 30 );
+    auto first = collector.detachEvent();
+    REQUIRE_FALSE( collector.active() );
+    REQUIRE( collector.detachEvent().sequence == 0 );
+    collector.update( base + 100 );
+    CHECK( collector.summary().total.events == 0 );
+
+    collector.beginEventAt( true, base + 500000 );
+    collector.inputCounter( 18 );
+    collector.markAt( Marker::entry, base + 500010 );
+    Collector::importSdkEvent( first, base + 40, base + 100000, Outcome::success, base + 35 );
+    Collector::outcomeEvent( first, Outcome::failed );
+    Collector::markEvent( first, Marker::finish, base + 100100 );
+    collector.submitEvent( first );
+    CHECK( collector.active() );
+    CHECK( collector.outcome() == Outcome::unknown );
+    auto second = collector.detachEvent();
+    CHECK( second.sequence == first.sequence + 1 );
+    CHECK( second.counter == 18 );
+    CHECK( second.counterValid );
+    CHECK_FALSE( second.submitted );
+    Collector::importSdkEvent( second, base + 500040, base + 600000, Outcome::success );
+    Collector::markEvent( second, Marker::finish, base + 600100 );
+    collector.submitEvent( second );
+    collector.submitEvent( {} );
+    collector.update( base + 700000 );
+    const auto &summary = collector.summary();
+    CHECK( summary.total.events == 2 );
+    CHECK( summary.total.submitted == 2 );
+    CHECK( summary.total.failed == 1 );
+    CHECK( summary.total.invalid == 0 );
+    CHECK( summary.metrics[metricIndex( Metric::receiptInterval )].count == 1 );
+    CHECK( summary.metrics[metricIndex( Metric::sdk )].count == 2 );
+    CHECK( summary.metrics[metricIndex( Metric::sdk )].mean == Approx( 99960e-9 ) );
+}
+
+/// Preserve validation and submission evidence when detached endpoints overlap private preparation.
+/** \ingroup dmTiming_tests */
+TEST_CASE( "DM timing detached validation matches legacy SDK import", "[dev::dmTiming]" )
+{
+    // clang-format off
+#ifdef DM_TIMING_TEST_DOXYGEN_REF
+    MagAOX::app::dev::dmTiming::importSdk;
+    MagAOX::app::dev::dmTiming::importSdkEvent;
+    MagAOX::app::dev::dmTiming::markEvent;
+    MagAOX::app::dev::dmTiming::outcomeEvent;
+    MagAOX::app::dev::dmTiming::detachEvent;
+#endif
+    // clang-format on
+
+    for( const bool badSdk : { false, true } )
+    {
+        Collector collector;
+        collector.configure( 1, 4 );
+        collector.beginEventAt( true, 1000000 );
+        collector.markAt( Marker::entry, 1000010 );
+        collector.markAt( Marker::actuatorEnd, 1000030 );
+        collector.markAt( Marker::stagingEnd, 1000080 );
+        auto detached = collector.detachEvent();
+        collector.beginEventAt( true, 1000000 );
+        collector.markAt( Marker::entry, 1000010 );
+        collector.markAt( Marker::actuatorEnd, 1000030 );
+        collector.markAt( Marker::stagingEnd, 1000080 );
+        const auto start = badSdk ? 1000020 : 1000040;
+        collector.importSdk( start, 1000100, Outcome::success, 1000035, 1000090, 1000110 );
+        Collector::importSdkEvent( detached, start, 1000100, Outcome::success, 1000035, 1000090, 1000110 );
+        collector.markAt( Marker::finish, 1000120 );
+        Collector::markEvent( detached, Marker::finish, 1000120 );
+        collector.markAt( Marker::postEnd, 1000119 );
+        Collector::markEvent( detached, Marker::postEnd, 1000119 );
+        collector.outcome( Outcome::partial );
+        Collector::outcomeEvent( detached, Outcome::partial );
+        const auto legacy = collector.detachEvent();
+        CHECK( detached.markers == legacy.markers );
+        CHECK( detached.valid == legacy.valid );
+        CHECK( detached.invalidMarkers == legacy.invalidMarkers );
+        CHECK( detached.submitted == legacy.submitted );
+        CHECK( detached.outcome == legacy.outcome );
+        CHECK( detached.invalidMarkers == ( badSdk ? 3 : 1 ) );
+    }
+
+    Collector disabled;
+    disabled.beginEventAt( true, 100 );
+    CHECK( disabled.detachEvent().sequence == 0 );
+    Event frozen;
+    frozen.sequence = 1;
+    frozen.session  = 1;
+    disabled.submitEvent( frozen );
+    disabled.update( 1000 );
+    CHECK( disabled.summary().total.events == 0 );
+}
+
+/// Keep the handoff queue single-producer while a different monitor owns event capture.
+/** \ingroup dmTiming_tests */
+TEST_CASE( "DM timing detached finalizer is the only timing queue producer", "[dev::dmTiming]" )
+{
+    // clang-format off
+#ifdef DM_TIMING_TEST_DOXYGEN_REF
+    MagAOX::app::dev::dmTiming::beginEventAt;
+    MagAOX::app::dev::dmTiming::detachEvent;
+    MagAOX::app::dev::dmTiming::submitEvent;
+    MagAOX::app::dev::dmTiming::importSdkEvent;
+    MagAOX::app::dev::dmTiming::markEvent;
+#endif
+    // clang-format on
+
+    Collector collector;
+    collector.configure( 1, 128 );
+    MagAOX::spscQueue<Event> jobs;
+    jobs.configure( 8 );
+    constexpr size_t count = 100;
+    std::thread      finalizer(
+        [&]()
+        {
+            for( size_t index = 0; index < count; ++index )
+            {
+                Event event;
+
+                while( !jobs.pop( event ) )
+                {
+                    std::this_thread::yield();
+                }
+
+                const auto receipt = event.markers[markerIndex( Marker::receipt )];
+                Collector::importSdkEvent( event, receipt + 40, receipt + 100, Outcome::success );
+                Collector::markEvent( event, Marker::finish, receipt + 190 );
+                collector.submitEvent( event );
+            }
+        } );
+
+    for( size_t index = 0; index < count; ++index )
+    {
+        const auto receipt = 1000000000 + int64_t( index ) * 500000;
+        collector.beginEventAt( true, receipt );
+        collector.inputCounter( index + 1 );
+        collector.markAt( Marker::entry, receipt + 10 );
+        collector.markAt( Marker::actuatorEnd, receipt + 30 );
+        const auto event = collector.detachEvent();
+
+        while( !jobs.push( event ) )
+        {
+            std::this_thread::yield();
+        }
+    }
+
+    finalizer.join();
+    collector.update( 1050000000 );
+    const auto &summary = collector.summary();
+    CHECK( summary.total.events == count );
+    CHECK( summary.total.submitted == count );
+    CHECK( summary.total.invalid == 0 );
+    CHECK( summary.total.dropped == 0 );
+    CHECK( summary.total.counterGaps == 0 );
+    CHECK( summary.metrics[metricIndex( Metric::receiptInterval )].count == count - 1 );
+    CHECK( summary.metrics[metricIndex( Metric::receiptCallback )].mean == Approx( 190e-9 ) );
+}
+
 } // namespace dmTimingTests
 } // namespace libXWCTest

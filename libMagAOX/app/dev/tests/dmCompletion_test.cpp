@@ -770,5 +770,182 @@ TEST_CASE( "DM completion publisher never repurposes a reader release stream", "
     REQUIRE( readersQualified( fixture.read() ) );
 }
 
+/// Preserve identity by value after the original input advances and its mapping is destroyed.
+/** \ingroup dmCompletion_tests */
+TEST_CASE( "DM completion detached capture survives newer input and source destruction", "[dev::dmCompletion]" )
+{
+    // clang-format off
+#ifdef DM_COMPLETION_TEST_DOXYGEN_REF
+    MagAOX::app::dev::dmCompletion::captureRecord;
+    MagAOX::app::dev::dmCompletion::publishCompleted;
+#endif
+    // clang-format on
+
+    Record captured;
+
+    {
+        Fixture input( false );
+        REQUIRE_FALSE( input.m_publisher.enabled() );
+        captured = Publisher::captureRecord( &input.m_source, true );
+        CHECK( captured.state == State::busy );
+        CHECK( captured.session == 0 );
+        CHECK( captured.sequence == 0 );
+        const auto counter = captured.inputCounter;
+        input.next();
+        CHECK( captured.inputCounter == counter );
+        CHECK( input.m_source.md->cnt0 == counter + 1 );
+    }
+
+    const auto original = encode( captured );
+    Fixture    output;
+    output.m_publisher.publishCompleted( captured, 0, Outcome::success, captured.startedNs + 100 );
+    const auto result = output.read();
+    REQUIRE( qualified( result ) );
+    CHECK( result.inputInode == captured.inputInode );
+    CHECK( result.inputCounter == captured.inputCounter );
+    CHECK( result.publicationSec == captured.publicationSec );
+    CHECK( result.publicationNsec == captured.publicationNsec );
+    CHECK( result.startedNs == captured.startedNs );
+    CHECK( result.finishedNs == captured.startedNs + 100 );
+    CHECK( result.session != 0 );
+    CHECK( result.epoch == 1 );
+    CHECK( result.sequence == 1 );
+    CHECK( encode( captured ) == original );
+    CHECK( output.drain() == 1 );
+    output.m_publisher.publishCompleted( captured, 0, Outcome::success, captured.startedNs + 200 );
+    CHECK( output.read().state == State::unqualified );
+    CHECK( output.read().sequence == 2 );
+}
+
+/// Keep SDK return, early release and full completion as mutually exclusive endpoint protocols.
+/** \ingroup dmCompletion_tests */
+TEST_CASE( "DM completion SDK protocol cannot qualify reader or full completion", "[dev::dmCompletion]" )
+{
+    // clang-format off
+#ifdef DM_COMPLETION_TEST_DOXYGEN_REF
+    MagAOX::app::dev::dmCompletion::open;
+    MagAOX::app::dev::dmCompletion::captureRecord;
+    MagAOX::app::dev::dmCompletion::publishCompleted;
+    MagAOX::app::dev::dmCompletion::read;
+    MagAOX::dmCompletion::encode;
+    MagAOX::dmCompletion::decode;
+    MagAOX::dmCompletion::sdkQualified;
+    MagAOX::dmCompletion::qualified;
+    MagAOX::dmCompletion::readersQualified;
+#endif
+    // clang-format on
+
+    Fixture fixture( true, Kind::sdk );
+    auto    captured       = Publisher::captureRecord( &fixture.m_source, true );
+    captured.session       = 999;
+    captured.epoch         = 999;
+    captured.sequence      = 999;
+    captured.backendResult = 0;
+    fixture.m_publisher.publishCompleted( captured, 0, Outcome::success, captured.startedNs + 100 );
+    auto result = fixture.read();
+    REQUIRE( sdkQualified( result ) );
+    CHECK_FALSE( qualified( result ) );
+    CHECK_FALSE( readersQualified( result ) );
+    CHECK( result.kind == Kind::sdk );
+    CHECK( result.session != captured.session );
+    CHECK( result.epoch == 1 );
+    CHECK( result.sequence == 1 );
+    CHECK( result.backendResult == 0 );
+    CHECK( encode( result )[0] == sdkMagic );
+    CHECK( static_cast<unsigned>( Kind::sdk ) == 2 );
+    Record decoded;
+    REQUIRE( decode( encode( result ), decoded ) );
+    CHECK( encode( decoded ) == encode( result ) );
+    auto damaged = encode( result );
+    damaged[5]   = static_cast<uint64_t>( State::released );
+    CHECK_FALSE( decode( damaged, decoded ) );
+    CHECK( decoded.state == State::complete );
+    fixture.next();
+    captured               = Publisher::captureRecord( &fixture.m_source, true );
+    captured.backendResult = -17;
+    fixture.m_publisher.publishCompleted( captured, 0, Outcome::failed, captured.startedNs + 100 );
+    result = fixture.read();
+    CHECK( result.state == State::error );
+    CHECK( result.backendResult == -17 );
+    CHECK_FALSE( sdkQualified( result ) );
+    Publisher wrong;
+    CHECK( wrong.open( fixture.m_name, Kind::completion ) < 0 );
+    CHECK( wrong.open( fixture.m_name, Kind::readers ) < 0 );
+}
+
+/// Reject absent/synthetic/busy snapshots and invalid endpoints without manufacturing successful completion.
+/** \ingroup dmCompletion_tests */
+TEST_CASE( "DM completion detached qualification requires genuine stable capture and ordered time",
+           "[dev::dmCompletion]" )
+{
+    // clang-format off
+#ifdef DM_COMPLETION_TEST_DOXYGEN_REF
+    MagAOX::app::dev::dmCompletion::captureRecord;
+    MagAOX::app::dev::dmCompletion::publishCompleted;
+    MagAOX::app::dev::dmCompletion::snapshot;
+    MagAOX::dmCompletion::qualified;
+#endif
+    // clang-format on
+
+    Fixture fixture( false );
+    auto    captured = Publisher::captureRecord( &fixture.m_source, true );
+    fixture.m_publisher.publishCompleted( captured, 0, Outcome::success );
+    CHECK( fixture.m_publisher.snapshot().state == State::unavailable );
+    CHECK( Publisher::captureRecord( nullptr, true ).state == State::unqualified );
+    REQUIRE( fixture.m_publisher.open( fixture.m_name ) == 0 );
+    fixture.attach();
+
+    for( int variant = 0; variant < 5; ++variant )
+    {
+        fixture.next();
+        fixture.m_source.md->write = variant == 1 ? 1 : 0;
+        captured                   = Publisher::captureRecord( &fixture.m_source, variant != 0 );
+        fixture.m_source.md->write = 0;
+        const auto endpoint        = captured.startedNs + ( variant == 2 ? -1 : 100 );
+        fixture.m_publisher.publishCompleted(
+            captured, variant == 3 ? -7 : 0, variant == 4 ? Outcome::unknown : Outcome::success, endpoint );
+        const auto result = fixture.read();
+        CHECK_FALSE( qualified( result ) );
+        CHECK( result.state == ( variant == 3 ? State::error : State::unqualified ) );
+    }
+
+    fixture.next();
+    captured = Publisher::captureRecord( &fixture.m_source, true );
+    fixture.m_publisher.publishCompleted( captured, 0, Outcome::success );
+    CHECK( qualified( fixture.read() ) );
+    const auto epoch          = fixture.read().epoch;
+    fixture.m_source.md->cnt0 = 1;
+    captured                  = Publisher::captureRecord( &fixture.m_source, true );
+    fixture.m_publisher.publishCompleted( captured, 0, Outcome::success );
+    CHECK( qualified( fixture.read() ) );
+    CHECK( fixture.read().epoch == epoch + 1 );
+}
+
+/// Release frozen channel readers even if the SDK result later fails, without implying SDK availability.
+/** \ingroup dmCompletion_tests */
+TEST_CASE( "DM completion detached readers preserve independent release contract", "[dev::dmCompletion]" )
+{
+    // clang-format off
+#ifdef DM_COMPLETION_TEST_DOXYGEN_REF
+    MagAOX::app::dev::dmCompletion::captureRecord;
+    MagAOX::app::dev::dmCompletion::publishCompleted;
+    MagAOX::dmCompletion::readersQualified;
+    MagAOX::dmCompletion::qualified;
+    MagAOX::dmCompletion::sdkQualified;
+#endif
+    // clang-format on
+
+    Fixture fixture( true, Kind::readers );
+    auto    captured       = Publisher::captureRecord( &fixture.m_source, true );
+    captured.backendResult = -42;
+    fixture.m_publisher.publishCompleted( captured, 0, Outcome::failed, captured.startedNs + 100 );
+    const auto result = fixture.read();
+    CHECK( readersQualified( result ) );
+    CHECK_FALSE( qualified( result ) );
+    CHECK_FALSE( sdkQualified( result ) );
+    CHECK( result.outcome == Outcome::failed );
+    CHECK( result.backendResult == -42 );
+}
+
 } // namespace dmCompletionTest
 } // namespace libXWCTest

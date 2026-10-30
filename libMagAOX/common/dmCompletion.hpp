@@ -18,6 +18,7 @@ namespace dmCompletion
 
 constexpr uint64_t magic        = 0x4d414758444d444eULL; ///< Distinguish this protocol from unrelated uint64 streams.
 constexpr uint64_t readersMagic = 0x4d414758444d5244ULL; ///< Distinguish early read release from full completion.
+constexpr uint64_t sdkMagic     = 0x4d414758444d5344ULL; ///< Distinguish SDK return from reader/full completion.
 constexpr uint64_t version      = 1;                     ///< Current fixed-layout protocol version.
 constexpr size_t   words        = 16;                    ///< Number of uint64 words in one published record.
 constexpr int64_t  unavailableResult = std::numeric_limits<int64_t>::min(); ///< No actual backend result was supplied.
@@ -26,7 +27,8 @@ constexpr int64_t  unavailableResult = std::numeric_limits<int64_t>::min(); ///<
 enum class Kind : uint8_t
 {
     completion,
-    readers
+    readers,
+    sdk
 };
 
 /// Reader state; a semaphore notification alone never establishes completion.
@@ -41,12 +43,16 @@ enum class State : uint64_t
 };
 
 /// One controller attempt, identified independently of semaphore delivery.
-/** Completion-kind complete means a successful, genuine callback finished all
- * software channel reads while the combined input identity remained stable.
+/** Completion-kind complete means a successful genuine job finished its channel
+ * reads and required software products using a stable consumed input identity.
+ * Legacy publication rechecks the live input; detached publication relies on
+ * caller validation of the frozen job before its ownership transfer.
  * Reader-kind released means external reads finished with a stable identity;
  * its SDK outcome may still be unknown or may later fail. Neither asserts
  * physical mirror settling, atomic multi-stream provenance or ownership of any
- * future callback. External publication seconds/nanoseconds are identity only;
+ * future callback. SDK-kind complete reports only successful SDK return for
+ * its frozen command; it does not assert output publication or reader clearance.
+ * External publication seconds/nanoseconds are identity only;
  * the started/finished timestamps use the local monotonic clock.
  */
 struct Record
@@ -67,7 +73,7 @@ struct Record
     uint64_t publisherPid{ 0 };        ///< Publisher PID for diagnostics, not lifetime identity.
     Kind     kind{ Kind::completion }; ///< Distinct wire protocol and endpoint qualification contract.
     int64_t  backendResult{
-        unavailableResult }; ///< Exact SDK result on the read-release protocol, independently of release.
+        unavailableResult }; ///< Exact SDK result on reader-release or SDK protocols, independently of release.
 };
 
 /// Fixed word transport, independent of struct padding and enum representation.
@@ -86,6 +92,9 @@ inline bool qualified( const Record &record /**< [in] Coherently observed record
 /// Qualify finished external reads independently of a pending or failed SDK submission.
 inline bool readersQualified( const Record &record /**< [in] Coherently observed early-release record. */ ) noexcept;
 
+/// Qualify SDK return independently of reader release and full software completion.
+inline bool sdkQualified( const Record &record /**< [in] Coherently observed SDK-result record. */ ) noexcept;
+
 /// Return whether the frozen attempt has representable identity and endpoint timestamps.
 inline bool validIdentity( const Record &record /**< [in] Coherently observed endpoint record. */ ) noexcept;
 
@@ -94,7 +103,9 @@ inline const char *stateName( State state /**< [in] Reader state to describe. */
 
 inline Wire encode( const Record &record ) noexcept
 {
-    return { record.kind == Kind::completion ? magic : ( record.kind == Kind::readers ? readersMagic : 0 ),
+    return { record.kind == Kind::completion
+                 ? magic
+                 : ( record.kind == Kind::readers ? readersMagic : ( record.kind == Kind::sdk ? sdkMagic : 0 ) ),
              record.protocolVersion,
              record.session,
              record.epoch,
@@ -109,17 +120,19 @@ inline Wire encode( const Record &record ) noexcept
              static_cast<uint64_t>( record.outcome ),
              static_cast<uint64_t>( record.callbackResult ),
              record.publisherPid,
-             record.kind == Kind::readers ? static_cast<uint64_t>( record.backendResult ) : 0 };
+             record.kind == Kind::readers || record.kind == Kind::sdk ? static_cast<uint64_t>( record.backendResult )
+                                                                      : 0 };
 }
 
 inline bool decode( const Wire &wire, Record &record ) noexcept
 {
     const bool readers = wire[0] == readersMagic;
+    const bool sdk     = wire[0] == sdkMagic;
 
-    if( ( wire[0] != magic && !readers ) || wire[1] != version ||
+    if( ( wire[0] != magic && !readers && !sdk ) || wire[1] != version ||
         wire[5] > static_cast<uint64_t>( readers ? State::released : State::unqualified ) ||
-        wire[12] > static_cast<uint64_t>( MagAOX::dmTiming::Outcome::rejected ) || ( !readers && wire[15] != 0 ) ||
-        ( readers && wire[5] == static_cast<uint64_t>( State::complete ) ) )
+        wire[12] > static_cast<uint64_t>( MagAOX::dmTiming::Outcome::rejected ) ||
+        ( !readers && !sdk && wire[15] != 0 ) || ( readers && wire[5] == static_cast<uint64_t>( State::complete ) ) )
     {
         return false;
     }
@@ -139,8 +152,8 @@ inline bool decode( const Wire &wire, Record &record ) noexcept
     result.outcome         = static_cast<MagAOX::dmTiming::Outcome>( wire[12] );
     result.callbackResult  = static_cast<int64_t>( wire[13] );
     result.publisherPid    = wire[14];
-    result.kind            = readers ? Kind::readers : Kind::completion;
-    result.backendResult   = readers ? static_cast<int64_t>( wire[15] ) : unavailableResult;
+    result.kind            = readers ? Kind::readers : ( sdk ? Kind::sdk : Kind::completion );
+    result.backendResult   = readers || sdk ? static_cast<int64_t>( wire[15] ) : unavailableResult;
     record                 = result;
     return true;
 }
@@ -155,6 +168,12 @@ inline bool readersQualified( const Record &record ) noexcept
 {
     return record.kind == Kind::readers && record.state == State::released && validIdentity( record ) &&
            record.callbackResult == 0;
+}
+
+inline bool sdkQualified( const Record &record ) noexcept
+{
+    return record.kind == Kind::sdk && record.state == State::complete && validIdentity( record ) &&
+           record.callbackResult == 0 && record.outcome == MagAOX::dmTiming::Outcome::success;
 }
 
 inline bool validIdentity( const Record &record ) noexcept

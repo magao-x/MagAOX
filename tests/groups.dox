@@ -243,3 +243,13 @@ report from their counters and then returns nonzero. An HTML report therefore do
  * \brief Offline configuration, encoding, recording lifecycle, and buffer ownership regressions.
  * \ingroup application_unit_test
  */
+
+/** \defgroup dmSaturation_unit_test DM Saturation Payload Unit Tests
+ * \brief Lossless burst accumulation, validation, overflow and concurrent ownership tests.
+ * \ingroup app_dev_unit_tests
+ */
+
+/** \defgroup dmPipeline_integration_test DM Pipeline Integration Tests
+ * \brief Frozen command products, independent timing, reader release and ordered completion tests.
+ * \ingroup app_dev_unit_tests
+ */

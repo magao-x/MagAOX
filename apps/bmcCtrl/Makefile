@@ -1,7 +1,7 @@
 
 allall: all
 
-OTHER_HEADERS=
+OTHER_HEADERS=bmcPipeline.hpp
 TARGET=bmcCtrl
 
 BMC_PATH=/opt/Boston\ Micromachines

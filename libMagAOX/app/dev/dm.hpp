@@ -14,6 +14,7 @@
 
 #include "dmTiming.hpp"
 #include "dmCompletion.hpp"
+#include "dmSaturation.hpp"
 #include "shmimMonitor.hpp"
 #include "../../logger/types/telem_dmtimings.hpp"
 #include "../../logger/types/telem_fgtimings.hpp"
@@ -210,6 +211,16 @@ class dm
     mx::improc::eigenImage<realT> m_stagedDiff; ///< Private difference result calculated from the staged delta.
 
     bool m_deltaStaged{ false }; ///< Current callback has unpublished private delta/difference products.
+
+    dev::dmSaturation m_pipelineSaturation; ///< Lossless pending saturation payload for asynchronous publication.
+
+    std::mutex m_pipelineSatMutex; ///< Protects pipeline saturation geometry and consumer window state.
+
+    mx::improc::eigenImage<uint64_t> m_pipelineSatWindow; ///< Saturation-thread-owned pipeline accumulation.
+
+    std::atomic<bool> m_pipelineSatEnabled{ false }; ///< Published after pipeline saturation storage is ready.
+
+    uint64_t m_pipelineSatGeneration{ 0 }; ///< Geometry/reset generation protected by m_pipelineSatMutex.
 
     mx::improc::milkImage<realT> m_outputDelta; ///< The true output delta command after saturation.
     mx::improc::milkImage<realT>
@@ -485,6 +496,54 @@ class dm
     /// Release callback ownership after output, timing and completion finalization.
     void retireCommand() noexcept;
 
+    /// Private products and fixed provenance owned by one asynchronous command until final publication.
+    struct PipelineCommand
+    {
+        MagAOX::dmTiming::Event       timing;     ///< Detached event; one stage owns mutations at a time.
+        MagAOX::dmCompletion::Record  completion; ///< Frozen input identity captured before any external reads.
+        mx::improc::eigenImage<realT> shape;      ///< Clipped shape belonging to this command.
+        mx::improc::eigenImage<realT> delta;      ///< Private delta awaiting successful submission.
+        mx::improc::eigenImage<realT> diff;       ///< Private difference awaiting successful submission.
+        std::vector<uint8_t>          saturation; ///< Per-command actuator-grid flags retained through finalization.
+        long                          saturatedCount{ 0 };  ///< Number of saturated mapped actuators.
+        bool                          deltaStaged{ false }; ///< Private delta and difference are ready for publication.
+        int                           preparedStatus{ 0 }; ///< Preparation result independent of the actual SDK result.
+        int64_t dispatchNs{ -1 }; ///< Monitor handoff boundary, or unavailable for an unsent command.
+    };
+
+    /// Allocate one job's private products while command owners are drained.
+    void allocatePipelineCommand( PipelineCommand &command /**< [out] Reusable command storage. */ );
+
+    /// Capture a genuine command's frozen identity and detach its receipt timing on the monitor.
+    int capturePipelineCommand( PipelineCommand &command /**< [out] Exclusively leased command. */,
+                                void            *pixels /**< [in] Combined source selected by the monitor. */ );
+
+    /// Mark one exclusively owned job without modifying another thread's current event.
+    static void pipelineMark( PipelineCommand         &command /**< [in,out] Exclusively owned command. */,
+                              MagAOX::dmTiming::Marker marker /**< [in] Endpoint to capture. */ );
+
+    /// Stage channel-dependent products using the command's private clipped shape.
+    int stagePipelineCommand( PipelineCommand &command /**< [in,out] Monitor-owned command. */ );
+
+    /// Publish final external-read clearance from the monitor, retaining the original identity.
+    void releasePipelineCommand( PipelineCommand &command /**< [in,out] Prepared command. */ );
+
+    /// Publish successful private products and frozen completion on the sole finalizer.
+    int
+    finishPipelineCommand( PipelineCommand &command /**< [in,out] Fully prepared command with an SDK result. */,
+                           MagAOX::dmTiming::Outcome outcome /**< [in] Actual SDK outcome or no-send. */,
+                           int64_t                   backendResult /**< [in] Raw SDK return code, or unavailable. */,
+                           int64_t                   sdkStartNs /**< [in] SDK entry, or -1 for an unsent command. */,
+                           int64_t sdkEndNs /**< [in] Actual SDK return, or -1 for an unsent command. */,
+                           bool submitted /**< [in] Actual successful SDK submission independent of publication. */ );
+
+    /// Route monitor observations without writing the finalizer-owned timing queue or completion publisher.
+    void pipelineShmimMonitorTiming( const dev::shmimT &tag /**< [in] Main DM monitor tag. */,
+                                     shmimMonitorEvent  event /**< [in] Receipt/attachment observation. */ );
+
+    /// Discard an unadmitted receipt; the derived controller separately counts admission rejections.
+    void discardPipelineCommand();
+
     /// Calls derived()->initDM()
     /**
      * \returns 0 on success
@@ -583,6 +642,12 @@ class dm
 
     /// Read channels into private preallocated delta products without publishing shared pixels or notifications.
     int stageDelta();
+
+    /// Calculate private products using one command's clipped shape and monitor-owned summation scratch.
+    int stageDelta( Eigen::Ref<const mx::improc::eigenImage<realT>> shape /**< [in] Frozen clipped command shape. */,
+                    mx::improc::eigenImage<realT>                  &delta /**< [out] Preallocated private delta. */,
+                    mx::improc::eigenImage<realT>                  &diff /**< [out] Preallocated private difference. */,
+                    bool &staged /**< [out] Whether both private products are ready. */ );
 
     /// Publish previously staged products after successful backend finalization, without rereading channels.
     int publishDelta();
@@ -971,6 +1036,266 @@ int dm<derivedT, realT>::finalizeCommand( int processingResult ) noexcept
 template <class derivedT, typename realT>
 void dm<derivedT, realT>::retireCommand() noexcept
 {
+}
+
+template <class derivedT, typename realT>
+void dm<derivedT, realT>::allocatePipelineCommand( PipelineCommand &command )
+{
+    command.shape.resize( m_dmWidth, m_dmHeight );
+    command.shape.setZero();
+    command.delta.resize( m_dmWidth, m_dmHeight );
+    command.diff.resize( m_dmWidth, m_dmHeight );
+    command.saturation.assign( size_t( m_dmWidth ) * m_dmHeight, 0 );
+    command.deltaStaged    = false;
+    command.preparedStatus = 0;
+    command.saturatedCount = 0;
+    command.dispatchNs     = -1;
+
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_pipelineSatMutex );
+
+        if( !m_pipelineSatEnabled.load( std::memory_order_relaxed ) || m_pipelineSatWindow.rows() != m_dmWidth ||
+            m_pipelineSatWindow.cols() != m_dmHeight )
+        {
+            m_pipelineSaturation.configure( command.saturation.size() );
+            m_pipelineSatWindow.resize( m_dmWidth, m_dmHeight );
+            m_pipelineSatWindow.setZero();
+            ++m_pipelineSatGeneration;
+            m_pipelineSatEnabled.store( true, std::memory_order_release );
+        }
+    }
+}
+
+template <class derivedT, typename realT>
+int dm<derivedT, realT>::capturePipelineCommand( PipelineCommand &command, void *pixels )
+{
+    const bool genuine     = m_completionReceipt;
+    m_completionReceipt    = false;
+    command.completion     = dev::dmCompletion::captureRecord( &derived().m_imageStream, genuine );
+    command.preparedStatus = 0;
+    command.deltaStaged    = false;
+    command.saturatedCount = 0;
+    command.dispatchNs     = -1;
+    m_dmReaderRelease.begin( &derived().m_imageStream, genuine );
+
+    if( !m_dmTiming.active() )
+    {
+        m_dmTiming.beginEvent( false );
+    }
+
+    m_dmTiming.mark( MagAOX::dmTiming::Marker::entry );
+    m_dmTiming.inputCounter( command.completion.inputCounter );
+
+    if( command.completion.publicationSec > 0 && command.completion.publicationNsec >= 0 &&
+        command.completion.publicationNsec < 1000000000 &&
+        command.completion.publicationSec <=
+            ( std::numeric_limits<int64_t>::max() - command.completion.publicationNsec ) / 1000000000 )
+    {
+        m_dmTiming.inputPublication( command.completion.publicationSec * 1000000000 +
+                                     command.completion.publicationNsec );
+    }
+
+    command.timing = m_dmTiming.detachEvent();
+
+    if( pixels == nullptr || command.completion.state != MagAOX::dmCompletion::State::busy )
+    {
+        command.preparedStatus = -1;
+        return -1;
+    }
+
+    if( m_dmReaderRelease.enabled() )
+    {
+        const auto &readers = m_dmReaderRelease.attempt();
+
+        if( readers.inputInode != command.completion.inputInode ||
+            readers.inputCounter != command.completion.inputCounter ||
+            readers.publicationSec != command.completion.publicationSec ||
+            readers.publicationNsec != command.completion.publicationNsec )
+        {
+            command.preparedStatus = -1;
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+template <class derivedT, typename realT>
+void dm<derivedT, realT>::pipelineMark( PipelineCommand &command, MagAOX::dmTiming::Marker marker )
+{
+    if( command.timing.sequence != 0 )
+    {
+        dev::dmTiming::markEvent( command.timing, marker, dev::dmTiming::monotonicNowNs() );
+    }
+}
+
+template <class derivedT, typename realT>
+int dm<derivedT, realT>::stagePipelineCommand( PipelineCommand &command )
+{
+    if( command.preparedStatus < 0 )
+    {
+        return command.preparedStatus;
+    }
+
+    pipelineMark( command, MagAOX::dmTiming::Marker::deltaStart );
+    pipelineMark( command, MagAOX::dmTiming::Marker::stagingStart );
+    command.preparedStatus = stageDelta( command.shape, command.delta, command.diff, command.deltaStaged );
+    pipelineMark( command, MagAOX::dmTiming::Marker::stagingEnd );
+    return command.preparedStatus;
+}
+
+template <class derivedT, typename realT>
+void dm<derivedT, realT>::releasePipelineCommand( PipelineCommand &command )
+{
+    const auto current  = dev::dmCompletion::captureRecord( &derived().m_imageStream, true );
+    const bool coherent = current.state == MagAOX::dmCompletion::State::busy &&
+                          current.inputInode == command.completion.inputInode &&
+                          current.inputCounter == command.completion.inputCounter &&
+                          current.publicationSec == command.completion.publicationSec &&
+                          current.publicationNsec == command.completion.publicationNsec;
+
+    if( !coherent )
+    {
+        command.preparedStatus   = -1;
+        command.completion.state = MagAOX::dmCompletion::State::unqualified;
+    }
+
+    m_dmReaderRelease.release( &derived().m_imageStream, command.preparedStatus, coherent );
+
+    if( command.preparedStatus >= 0 )
+    {
+        if( m_dmReaderRelease.enabled() && command.timing.sequence != 0 )
+        {
+            dev::dmTiming::markEvent(
+                command.timing, MagAOX::dmTiming::Marker::readRelease, m_dmReaderRelease.attempt().finishedNs );
+        }
+        else
+        {
+            pipelineMark( command, MagAOX::dmTiming::Marker::readRelease );
+        }
+    }
+}
+
+template <class derivedT, typename realT>
+int dm<derivedT, realT>::finishPipelineCommand( PipelineCommand          &command,
+                                                MagAOX::dmTiming::Outcome outcome,
+                                                int64_t                   backendResult,
+                                                int64_t                   sdkStartNs,
+                                                int64_t                   sdkEndNs,
+                                                bool                      submitted )
+{
+    using MagAOX::dmTiming::Marker;
+    using MagAOX::dmTiming::Outcome;
+    int result = command.preparedStatus;
+
+    if( command.timing.sequence != 0 )
+    {
+        if( sdkStartNs > 0 && sdkEndNs >= sdkStartNs )
+        {
+            dev::dmTiming::importSdkEvent( command.timing, sdkStartNs, sdkEndNs, outcome, command.dispatchNs );
+        }
+        else
+        {
+            dev::dmTiming::outcomeEvent( command.timing, outcome );
+        }
+
+        command.timing.submitted = submitted;
+    }
+
+    if( outcome != Outcome::success )
+    {
+        result = -1;
+    }
+
+    if( result >= 0 )
+    {
+        try
+        {
+            pipelineMark( command, Marker::publicationStart );
+
+            if( command.deltaStaged )
+            {
+                m_outputDelta = command.delta;
+                m_outputDiff  = command.diff;
+            }
+
+            pipelineMark( command, Marker::publicationEnd );
+            pipelineMark( command, Marker::deltaEnd );
+
+            if( command.saturation.size() != size_t( m_instSatMap.size() ) ||
+                !m_pipelineSaturation.add( command.saturation.data(), command.saturation.size() ) )
+            {
+                result = -1;
+            }
+            else
+            {
+                std::copy( command.saturation.begin(), command.saturation.end(), m_instSatMap.data() );
+                pipelineMark( command, Marker::postStart );
+                result = sem_post( &m_satSemaphore );
+                pipelineMark( command, Marker::postEnd );
+            }
+        }
+        catch( const std::exception &error )
+        {
+            result = -1;
+            derivedT::template log<software_critical>( { std::string( "DM pipeline publication: " ) + error.what() } );
+        }
+        catch( ... )
+        {
+            result = -1;
+            derivedT::template log<software_critical>( { "unknown exception publishing DM pipeline command" } );
+        }
+    }
+
+    const auto callbackOutcome = result < 0 && outcome != Outcome::noSend ? Outcome::failed : outcome;
+
+    if( command.timing.sequence != 0 )
+    {
+        dev::dmTiming::outcomeEvent( command.timing, callbackOutcome );
+        command.timing.submitted = submitted;
+        pipelineMark( command, Marker::finish );
+    }
+
+    command.completion.backendResult = backendResult;
+    m_dmCompletion.publishCompleted( command.completion, result, callbackOutcome );
+
+    if( command.timing.sequence != 0 )
+    {
+        m_dmTiming.submitEvent( command.timing );
+    }
+
+    return result;
+}
+
+template <class derivedT, typename realT>
+void dm<derivedT, realT>::discardPipelineCommand()
+{
+    static_cast<void>( m_dmTiming.detachEvent() );
+    m_completionReceipt = false;
+}
+
+template <class derivedT, typename realT>
+void dm<derivedT, realT>::pipelineShmimMonitorTiming( const dev::shmimT &tag, shmimMonitorEvent event )
+{
+    static_cast<void>( tag );
+
+    if( event == shmimMonitorEvent::receipt || event == shmimMonitorEvent::initial )
+    {
+        discardPipelineCommand();
+        m_dmTiming.beginEvent( event == shmimMonitorEvent::receipt );
+        m_completionReceipt = event == shmimMonitorEvent::receipt;
+    }
+    else
+    {
+        discardPipelineCommand();
+
+        if( event == shmimMonitorEvent::connected )
+        {
+            m_dmTiming.newSession();
+        }
+
+        m_dmReaderRelease.reset();
+    }
 }
 
 template <class derivedT, typename realT>
@@ -2389,6 +2714,17 @@ int dm<derivedT, realT>::findDMChannels()
 template <class derivedT, typename realT>
 int dm<derivedT, realT>::allocate( const dev::shmimT &sp )
 {
+    std::unique_lock<std::mutex> pipelineLock( m_pipelineSatMutex, std::defer_lock );
+
+    if( m_pipelineSatEnabled.load( std::memory_order_acquire ) )
+    {
+        pipelineLock.lock();
+        m_pipelineSaturation.configure( size_t( m_dmWidth ) * m_dmHeight );
+        m_pipelineSatWindow.resize( m_dmWidth, m_dmHeight );
+        m_pipelineSatWindow.setZero();
+        ++m_pipelineSatGeneration;
+    }
+
     static_cast<void>( sp ); // be unused
 
     int err = 0;
@@ -3681,17 +4017,26 @@ int dm<derivedT, realT>::makeDelta()
 template <class derivedT, typename realT>
 int dm<derivedT, realT>::stageDelta()
 {
-    m_deltaStaged = false;
+    return stageDelta( m_outputShape(), m_stagedDelta, m_stagedDiff, m_deltaStaged );
+}
+
+template <class derivedT, typename realT>
+int dm<derivedT, realT>::stageDelta( Eigen::Ref<const mx::improc::eigenImage<realT>> shape,
+                                     mx::improc::eigenImage<realT>                  &delta,
+                                     mx::improc::eigenImage<realT>                  &diff,
+                                     bool                                           &staged )
+{
+    staged = false;
 
     if( m_notDeltas.empty() )
     {
         return 0;
     }
 
-    if( m_deltas.empty() || m_stagedDelta.rows() != m_dmWidth || m_stagedDelta.cols() != m_dmHeight ||
-        m_stagedDiff.rows() != m_dmWidth || m_stagedDiff.cols() != m_dmHeight || m_totalFlat.rows() != m_dmWidth ||
-        m_totalFlat.cols() != m_dmHeight || m_totalDelta.rows() != m_dmWidth || m_totalDelta.cols() != m_dmHeight ||
-        m_outputShape().rows() != m_dmWidth || m_outputShape().cols() != m_dmHeight )
+    if( m_deltas.empty() || delta.rows() != m_dmWidth || delta.cols() != m_dmHeight || diff.rows() != m_dmWidth ||
+        diff.cols() != m_dmHeight || m_totalFlat.rows() != m_dmWidth || m_totalFlat.cols() != m_dmHeight ||
+        m_totalDelta.rows() != m_dmWidth || m_totalDelta.cols() != m_dmHeight || shape.rows() != m_dmWidth ||
+        shape.cols() != m_dmHeight )
     {
         return -1;
     }
@@ -3722,9 +4067,9 @@ int dm<derivedT, realT>::stageDelta()
         m_totalDelta += ( *m_channels[m_deltas[n]] )();
     }
 
-    m_stagedDelta = m_outputShape() - m_totalFlat;
-    m_stagedDiff  = m_totalDelta - m_stagedDelta;
-    m_deltaStaged = true;
+    delta  = shape - m_totalFlat;
+    diff   = m_totalDelta - delta;
+    staged = true;
 
     return 0;
 }
@@ -3745,6 +4090,16 @@ int dm<derivedT, realT>::publishDelta()
 template <class derivedT, typename realT>
 int dm<derivedT, realT>::clearSat()
 {
+    std::unique_lock<std::mutex> pipelineLock( m_pipelineSatMutex, std::defer_lock );
+
+    if( m_pipelineSatEnabled.load( std::memory_order_acquire ) )
+    {
+        pipelineLock.lock();
+        m_pipelineSaturation.clear();
+        m_pipelineSatWindow.setZero();
+        ++m_pipelineSatGeneration;
+    }
+
     if( m_shmimSat == "" || m_dmWidth == 0 || m_dmHeight == 0 )
     {
         return 0;
@@ -3874,8 +4229,9 @@ void dm<derivedT, realT>::satThreadExec()
     // This is the working memory for making the 1/0 mask out of m_accumSatMap
     mx::improc::eigenImage<uint8_t> satmap( m_dmWidth, m_dmHeight );
 
-    int    naccum    = 0;
-    double t_accumst = mx::sys::get_curr_time();
+    uint64_t naccum             = 0;
+    uint64_t pipelineGeneration = 0;
+    double   t_accumst          = mx::sys::get_curr_time();
 
     // This is the main image grabbing loop.
     while( !derived().shutdown() )
@@ -3894,16 +4250,42 @@ void dm<derivedT, realT>::satThreadExec()
         // Wait on semaphore
         if( sem_timedwait( &m_satSemaphore, &ts ) == 0 )
         {
-            // not a timeout -->accumulate
-            for( int rr = 0; rr < m_instSatMap.rows(); ++rr )
-            {
-                for( int cc = 0; cc < m_instSatMap.cols(); ++cc )
-                {
-                    m_accumSatMap( rr, cc ) += m_instSatMap( rr, cc );
-                }
-            }
+            const bool                   pipeline = m_pipelineSatEnabled.load( std::memory_order_acquire );
+            std::unique_lock<std::mutex> pipelineLock( m_pipelineSatMutex, std::defer_lock );
 
-            ++naccum;
+            if( pipeline )
+            {
+                pipelineLock.lock();
+
+                if( pipelineGeneration != m_pipelineSatGeneration )
+                {
+                    pipelineGeneration = m_pipelineSatGeneration;
+                    naccum             = 0;
+                    t_accumst          = mx::sys::get_curr_time();
+                }
+
+                const uint64_t samples =
+                    m_pipelineSaturation.drain( m_pipelineSatWindow.data(), size_t( m_pipelineSatWindow.size() ) );
+
+                if( samples == 0 )
+                {
+                    continue;
+                }
+
+                naccum += samples;
+            }
+            else
+            {
+                for( int rr = 0; rr < m_instSatMap.rows(); ++rr )
+                {
+                    for( int cc = 0; cc < m_instSatMap.cols(); ++cc )
+                    {
+                        m_accumSatMap( rr, cc ) += m_instSatMap( rr, cc );
+                    }
+                }
+
+                ++naccum;
+            }
 
             // If less than avg int --> go back and wait again
             if( mx::sys::get_curr_time( ts ) - t_accumst < m_satAvgInt / 1000.0 )
@@ -3918,14 +4300,16 @@ void dm<derivedT, realT>::satThreadExec()
             {
                 for( int cc = 0; cc < m_instSatMap.cols(); ++cc )
                 {
-                    m_satPercMap( rr, cc ) = m_accumSatMap( rr, cc ) / naccum;
+                    const uint64_t accumulated = pipeline ? m_pipelineSatWindow( rr, cc ) : m_accumSatMap( rr, cc );
+                    m_satPercMap( rr, cc ) =
+                        pipeline ? float( accumulated ) / float( naccum ) : m_accumSatMap( rr, cc ) / naccum;
 
                     if( m_satPercMap( rr, cc ) >= m_percThreshold )
                     {
                         ++m_overSatAct;
                     }
 
-                    satmap( rr, cc ) = ( m_accumSatMap( rr, cc ) > 0 ); // it's  1/0 map
+                    satmap( rr, cc ) = accumulated > 0;
                 }
             }
 
@@ -3984,6 +4368,12 @@ void dm<derivedT, realT>::satThreadExec()
             ImageStreamIO_sempost( &m_satPercImageStream, -1 );
 
             m_accumSatMap.setZero();
+
+            if( pipeline )
+            {
+                m_pipelineSatWindow.setZero();
+            }
+
             naccum    = 0;
             t_accumst = mx::sys::get_curr_time( ts );
         }
