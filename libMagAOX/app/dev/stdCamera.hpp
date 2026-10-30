@@ -373,6 +373,13 @@ struct stdCameraHasFocus<derivedT, std::void_t<decltype( derivedT::c_stdCamera_h
  *        - If true the value of \ref m_maxEMGain should be set by the implementation and managed
  *          as needed. Additionally the configuration setting "camera.maxEMGain" is exposed.
  *
+ *        - For cameras with temperature control, `camera.emGainRequiresTemp` optionally requires active,
+ *          on-target cooling at the setpoint specified by `camera.emGainTemp` before accepting EM gain above 1.
+ *          The guard defaults to false; enabling it requires a finite `camera.emGainTemp`, in C, independent of
+ *          `camera.startupTemp`. The requested setpoint must match exactly; the camera determines temperature lock.
+ *          Gain 0 or 1 remains available subject to the derived camera's limits. This guards new requests; it does
+ *          not reduce existing gain when temperature lock is lost or the setpoint changes.
+ *
  *     - Camera Modes:
  *
  *       - A static configuration variable must be defined in derivedT as
@@ -528,6 +535,12 @@ class stdCamera
     std::string m_defaultFanSpeed; ///< The default fan speed to apply after power on.
 
     bool m_defaultLEDState{ true }; ///< The default LED state to apply after power on.
+
+    /// Require active, on-target cooling at m_emGainTemp for EM gain above 1 when temperature control is supported.
+    bool m_emGainRequiresTemp{ false };
+
+    /// Required EM-gain temperature setpoint, in C; nonfinite until explicitly configured.
+    float m_emGainTemp{ std::numeric_limits<float>::quiet_NaN() };
 
     ///@}
 
@@ -1203,13 +1216,15 @@ class stdCamera
      */
     int setEMGain( const mx::meta::trueFalseT<false> &f /**< [in] Disabled interface selector. */ );
 
-    /// Callback to process a NEW EM gain request
-    /**
+    /// Validate and dispatch a new EM-gain request, retaining the accepted target on rejection.
+    /** When camera.emGainRequiresTemp is enabled, gain above 1 requires active, on-target cooling with
+     * the requested setpoint equal to camera.emGainTemp, and READY or OPERATING state.
+     * Invalid numeric requests are rejected regardless of that setting.
      * \returns 0 on success.
-     * \returns -1 on error.
+     * \returns -1 on rejection or error.
      */
     int newCallBack_emgain(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Interface to setExpTime when the derivedT uses exposure time controls
     /** Tag-dispatch resolution of c_stdCamera_exptimeCtrl==true will call this function.
@@ -1745,6 +1760,30 @@ int stdCamera<derivedT>::setupConfig( mx::app::appConfigurator &config )
                     false,
                     "unsigned",
                     "The maximum EM gain which can be set by the user." );
+
+        if( derivedT::c_stdCamera_tempControl )
+        {
+            config.add( "camera.emGainRequiresTemp",
+                        "",
+                        "camera.emGainRequiresTemp",
+                        argType::Optional,
+                        "camera",
+                        "emGainRequiresTemp",
+                        false,
+                        "bool",
+                        "Require active, on-target cooling at camera.emGainTemp before setting EM gain above 1. "
+                        "Default: false." );
+            config.add( "camera.emGainTemp",
+                        "",
+                        "camera.emGainTemp",
+                        argType::Required,
+                        "camera",
+                        "emGainTemp",
+                        false,
+                        "float",
+                        "Required temperature setpoint in C for EM gain above 1. Must be configured when "
+                        "camera.emGainRequiresTemp is true; independent of camera.startupTemp." );
+        }
     }
 
     if( derivedT::c_stdCamera_usesModes )
@@ -1980,6 +2019,32 @@ int stdCamera<derivedT>::loadConfig( mx::app::appConfigurator &config )
     if( derivedT::c_stdCamera_emGain )
     {
         config( m_maxEMGain, "camera.maxEMGain" );
+        if( derivedT::c_stdCamera_tempControl )
+        {
+            config( m_emGainRequiresTemp, "camera.emGainRequiresTemp" );
+            m_emGainTemp = std::numeric_limits<float>::quiet_NaN();
+            if( config.isSet( "camera.emGainTemp" ) )
+            {
+                std::string target;
+                config( target, "camera.emGainTemp" );
+                std::istringstream value( target );
+                bool               parsed = static_cast<bool>( value >> m_emGainTemp );
+                if( parsed )
+                    value >> std::ws;
+                if( !parsed || !value.eof() || !mx::math::isFinite( m_emGainTemp ) )
+                {
+                    m_emGainTemp = std::numeric_limits<float>::quiet_NaN();
+                    return derivedT::template log<software_critical, -1>(
+                        { __FILE__, __LINE__, "camera.emGainTemp must be a finite temperature setpoint" } );
+                }
+            }
+            if( m_emGainRequiresTemp && ( !mx::math::isFinite( m_emGainTemp ) ||
+                                          ( c_hasTempLimits && validateTempSetPt( m_emGainTemp ) < 0 ) ) )
+                return derivedT::template log<software_critical, -1>(
+                    { __FILE__,
+                      __LINE__,
+                      "camera.emGainRequiresTemp requires camera.emGainTemp within the effective temperature range" } );
+        }
     }
 
     if( derivedT::c_stdCamera_usesModes )
@@ -3183,6 +3248,9 @@ int stdCamera<derivedT>::appLogic()
 template <class derivedT>
 int stdCamera<derivedT>::onPowerOff()
 {
+    if( derivedT::c_stdCamera_emGain && m_emGainRequiresTemp )
+        m_tempControlOnTarget = false;
+
     if( !derived().m_indiDriver )
     {
         return 0;
@@ -3506,6 +3574,9 @@ int stdCamera<derivedT>::validateTempSetPt( float target )
 template <class derivedT>
 int stdCamera<derivedT>::powerOnTemp()
 {
+    if( derivedT::c_stdCamera_emGain && m_emGainRequiresTemp )
+        m_tempControlOnTarget = false;
+
     if( c_hasTempLimits && !mx::math::isFinite( m_startupTemp ) )
         return validateTempSetPt( m_startupTemp );
     if( m_startupTemp > -999 )
@@ -3576,6 +3647,9 @@ int stdCamera<derivedT>::newCallBack_temp( const pcf::IndiProperty &ipRecv )
         m_ccdTempSetpt = target;
         mx::meta::trueFalseT<derivedT::c_stdCamera_tempControl> tf;
         int                                                     rv = setTempSetPt( tf );
+        if( rv >= 0 && target != previous && derivedT::c_stdCamera_emGain && m_emGainRequiresTemp )
+            m_tempControlOnTarget = false;
+
         if( rv < 0 && c_hasTempLimits )
         {
             m_ccdTempSetpt = previous;
@@ -3615,9 +3689,10 @@ int stdCamera<derivedT>::newCallBack_temp_controller( const pcf::IndiProperty &i
         if( !ipRecv.find( "toggle" ) )
             return 0;
 
-        m_tempControlStatusSet = false;
-
         std::unique_lock<std::mutex> lock( derived().m_indiMutex );
+
+        bool previous          = m_tempControlStatusSet;
+        m_tempControlStatusSet = false;
 
         if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On )
         {
@@ -3631,7 +3706,11 @@ int stdCamera<derivedT>::newCallBack_temp_controller( const pcf::IndiProperty &i
         }
 
         mx::meta::trueFalseT<derivedT::c_stdCamera_tempControl> tf;
-        return setTempControl( tf );
+        int                                                     rv = setTempControl( tf );
+        if( rv >= 0 && derivedT::c_stdCamera_emGain && m_emGainRequiresTemp &&
+            ( !m_tempControlStatusSet || m_tempControlStatusSet != previous ) )
+            m_tempControlOnTarget = false;
+        return rv;
     }
     else
     {
@@ -3784,9 +3863,38 @@ int stdCamera<derivedT>::newCallBack_emgain( const pcf::IndiProperty &ipRecv )
         return 0;
 #endif
 
-        float target;
+        float target{ 0 };
 
         std::unique_lock<std::mutex> lock( derived().m_indiMutex );
+
+        if( ipRecv.createUniqueKey() == m_indiP_emGain.createUniqueKey() &&
+            ( ipRecv.find( "target" ) || ipRecv.find( "current" ) ) )
+        {
+            const auto        &element = ipRecv[ipRecv.find( "target" ) ? "target" : "current"];
+            std::istringstream value( element.getValue() );
+            bool               parsed = static_cast<bool>( value >> target );
+            if( parsed )
+                value >> std::ws;
+            if( !parsed || !value.eof() || !mx::math::isFinite( target ) )
+            {
+                derived().updateIfChanged( m_indiP_emGain, "target", m_emGainSet, INDI_ALERT );
+                return derivedT::template log<text_log, -1>( "Invalid EM gain target: " + element.getValue(),
+                                                             logPrio::LOG_WARNING );
+            }
+
+            if( derivedT::c_stdCamera_tempControl && m_emGainRequiresTemp && target > 1 &&
+                ( !mx::math::isFinite( m_emGainTemp ) || !mx::math::isFinite( m_ccdTempSetpt ) ||
+                  m_ccdTempSetpt != m_emGainTemp || !m_tempControlStatus || !m_tempControlOnTarget ||
+                  ( derived().state() != stateCodes::READY && derived().state() != stateCodes::OPERATING ) ) )
+            {
+                derived().updateIfChanged( m_indiP_emGain, "target", m_emGainSet, INDI_ALERT );
+                return derivedT::template log<text_log, -1>(
+                    "EM gain above 1 requires an available camera with active, on-target temperature control at "
+                    "camera.emGainTemp=" +
+                        std::to_string( m_emGainTemp ) + " C",
+                    logPrio::LOG_WARNING );
+            }
+        }
 
         if( derived().indiTargetUpdate( m_indiP_emGain, target, ipRecv, true ) < 0 )
         {

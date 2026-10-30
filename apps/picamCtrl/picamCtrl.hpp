@@ -236,6 +236,9 @@ class picamCtrl : public MagAOXApp<>,
     bool m_fanSpeedLogPending{
         false }; ///< True when the next successful fan apply should emit a notice even without a state change.
 
+    /// True until the requested temperature target is committed, independent of framegrabber reconfiguration.
+    bool m_tempSetPtPending{ true };
+
   public:
     /// Default c'tor
     picamCtrl();
@@ -333,7 +336,7 @@ class picamCtrl : public MagAOXApp<>,
     /// Get the current cooling-fan state from the camera.
     int getFanSpeed();
 
-    /// Read sensor temperature and temperature-control status.
+    /// Read sensor temperature and status, withholding protected lock during pending reconfiguration.
     int getTemps();
 
     /// Intersect the configured temperature limits with the camera's required range.
@@ -411,7 +414,7 @@ class picamCtrl : public MagAOXApp<>,
     int setShutter( int sh /**< [in] Requested shutter state. */ );
 
     // Framegrabber interface:
-    /// Configure camera parameters and allocate the acquisition buffer.
+    /// Configure camera parameters and allocate the acquisition buffer, invalidating protected temperature lock.
     int configureAcquisition();
 
     /// Return the current acquisition frame rate, in Hz.
@@ -1371,6 +1374,10 @@ inline int picamCtrl::getTemps()
         return -1;
     }
 
+    // A queued reconfiguration can still report lock at the previous temperature target.
+    if( status == PicamSensorTemperatureStatus_Locked && m_emGainRequiresTemp && ( m_reconfig || m_tempSetPtPending ) )
+        status = PicamSensorTemperatureStatus_Unlocked;
+
     if( status == PicamSensorTemperatureStatus_Unlocked )
     {
         m_tempControlStatus    = true;
@@ -1502,6 +1509,8 @@ inline int picamCtrl::setFPS()
 
 inline int picamCtrl::powerOnDefaults()
 {
+    m_tempSetPtPending = true;
+
     /*m_currentROI.x = 511.5;
     m_currentROI.y = 511.5;
     m_currentROI.w = 1024;
@@ -1546,6 +1555,7 @@ inline int picamCtrl::setTempSetPt()
 {
     if( validateTempSetPt( m_ccdTempSetpt ) < 0 )
         return -1;
+    m_tempSetPtPending = true;
     recordCamera( true );
     m_reconfig = true;
     return 0;
@@ -1754,6 +1764,13 @@ inline int picamCtrl::configureAcquisition()
 
     std::unique_lock<std::mutex> lock( m_indiMutex );
 
+    if( m_emGainRequiresTemp )
+    {
+        m_tempControlOnTarget = false;
+        if( m_tempControlStatus )
+            m_tempControlStatusStr = "UNLOCKED";
+    }
+
     if( validateTempSetPt( m_ccdTempSetpt ) < 0 )
         return -1;
 
@@ -1867,6 +1884,8 @@ inline int picamCtrl::configureAcquisition()
         state( stateCodes::ERROR );
         return -1;
     }
+
+    m_tempSetPtPending = false;
 
     // log<text_log>( "Set temperature set point: " + std::to_string(m_ccdTempSetpt) + " C");
 
