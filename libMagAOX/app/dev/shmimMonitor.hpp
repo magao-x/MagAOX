@@ -223,9 +223,6 @@ class shmimMonitor
      */
     bool m_restart{ false }; ///< Flag indicating tha the shared memory should be reinitialized.
 
-    // static shmimMonitor *m_selfMonitor; ///< Static pointer to this (set in constructor).  Used for getting out of
-    // the static SIGSEGV handler.
-
     /** \name shmimmonitor Thread
      * This thread actually monitors the shared memory buffer
      * @{
@@ -292,9 +289,6 @@ class shmimMonitor
     }
 };
 
-// Set self pointer to null so app starts up uninitialized.
-// template <class derivedT, class specificT>
-// shmimMonitor<derivedT, specificT> *shmimMonitor<derivedT, specificT>::m_selfMonitor = nullptr;
 
 template <class derivedT, class specificT>
 const std::string &shmimMonitor<derivedT, specificT>::shmimName() const
