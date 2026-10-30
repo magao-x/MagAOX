@@ -87,25 +87,21 @@ class ocam2KCtrl : public MagAOXApp<>,
 
     static constexpr bool c_stdCamera_fpsCtrl = true; ///< app::dev config to tell stdCamera to expose FPS controls
 
-    static constexpr bool c_stdCamera_fps =
-        true; ///< app::dev config to tell stdCamera not to expose FPS status (ignored since fpsCtrl==true)
+    static constexpr bool c_stdCamera_fps = true; ///< app::dev config to expose FPS status (also enabled by fpsCtrl).
 
     static constexpr bool c_stdCamera_synchro =
         true; ///< app::dev config to tell stdCamera to expose synchro mode controls
 
-    static constexpr bool c_stdCamera_usesModes =
-        true; ///< app:dev config to tell stdCamera not to expose mode controls
+    static constexpr bool c_stdCamera_usesModes = true; ///< app::dev config to expose camera mode controls.
 
-    static constexpr bool c_stdCamera_usesROI = false; ///< app:dev config to tell stdCamera to expose ROI controls
+    static constexpr bool c_stdCamera_usesROI = false; ///< app::dev config to disable ROI controls.
 
-    static constexpr bool c_stdCamera_cropMode =
-        false; ///< app:dev config to tell stdCamera to expose Crop Mode controls
+    static constexpr bool c_stdCamera_cropMode = false; ///< app::dev config to disable crop-mode controls.
 
     static constexpr bool c_stdCamera_hasShutter =
         true; ///< app:dev config to tell stdCamera to expose shutter controls
 
-    static constexpr bool c_stdCamera_usesStateString =
-        true; ///< app::dev confg to tell stdCamera to expose the state string property
+    static constexpr bool c_stdCamera_usesStateString = true; ///< app::dev config to expose the state string property.
 
     static constexpr bool c_edtCamera_relativeConfigPath =
         true; ///< app::dev config to tell edtCamera to use relative path to camera config file
@@ -296,8 +292,9 @@ class ocam2KCtrl : public MagAOXApp<>,
                             const std::string &command /**< [in] Serial command to send. */,
                             bool               logErrors = true /**< [in] Log transport errors when true. */ );
 
-    /// Get the current device temperatures
-    /** A malformed reply leaves the readback unavailable for bounded confirmation retries.
+    /// Poll device temperatures and refresh measured-temperature gain permission.
+    /** Caller holds the INDI mutex. Failed/incomplete polls invalidate the previous measurement;
+     * malformed replies retain bounded housekeeping confirmation retries.
      * \returns 0 after a completed exchange, including a malformed numeric reply.
      * \returns -1 on transport failure.
      */
@@ -330,7 +327,7 @@ class ocam2KCtrl : public MagAOXApp<>,
     int setTempControl();
 
     /// Set the CCD temperature setpoint [stdCamera interface].
-    /** Sets the temperature to m_ccdTempSetpt.
+    /** Sets the temperature to m_ccdTempSetpt and requires a new poll for measured-temperature gain permission.
      * \returns 0 on success
      * \returns -1 on error
      */
@@ -400,6 +397,9 @@ class ocam2KCtrl : public MagAOXApp<>,
      */
     int setEMGain();
 
+    /// Request unity EM gain with the INDI mutex already held by stdCamera.
+    int setEMGainOff();
+
     /// Implementation of the framegrabber configureAcquisition interface
     /** Sends the mode command over serial, sets the FPS, and initializes the OCAM SDK.
      *
@@ -438,7 +438,7 @@ class ocam2KCtrl : public MagAOXApp<>,
     int loadImageIntoStream( void *dest /**< [out] Destination image buffer. */ );
 
     /// Implementation of the framegrabber reconfig interface
-    /** Serializes control access and calls edtCamera::pdvReconfig on the frame worker.
+    /** Locks INDI state before the camera and reloads the requested mode, or the current mode for a repeated request.
      * \returns 0 on success
      * \returns -1 on error
      */
@@ -498,9 +498,6 @@ class ocam2KCtrl : public MagAOXApp<>,
 
     /// Destroy the sync-only ImageStreamIO stream owned by this app.
     int destroySyncStream();
-
-    /// Acknowledge configuration under the control lock without erasing a newer requested mode.
-    void frameGrabberReconfigureComplete();
 
     /// Request same-mode recovery without replacing a newer control request.
     void requestAcquisitionRecovery();
@@ -872,6 +869,8 @@ inline void ocam2KCtrl::resetHousekeeping()
     m_tempExpectedControl  = -1;
     m_tempExpectedSet      = false;
     m_coolingKnown         = false;
+    m_tempControlOnTarget  = false;
+    invalidateTempReading();
 }
 
 inline int ocam2KCtrl::validateHousekeepingConfig()
@@ -1371,6 +1370,12 @@ inline int ocam2KCtrl::appLogic()
 
     if( state() == stateCodes::NOTCONNECTED || state() == stateCodes::ERROR )
     {
+        { //mutex scope
+            std::lock_guard<std::mutex> lock( m_indiMutex );
+            invalidateTempReading();
+            updateEMGainTempReady();
+        }
+
         m_temps.setInvalid();
 
         std::string response;
@@ -1388,6 +1393,8 @@ inline int ocam2KCtrl::appLogic()
         }
         if( ret == 0 )
         {
+            std::lock_guard<std::mutex> lock( m_indiMutex );
+
             resetHousekeeping();
             state( stateCodes::CONNECTED );
         }
@@ -1636,7 +1643,9 @@ inline void ocam2KCtrl::acceptTemps( const ocamTemps &temps )
         m_tempExpectedControl       = -1;
     }
 
-    m_tempControlOnTarget = m_coolingKnown && m_tempControlStatus && std::abs( temps.CCD - temps.SET ) < 1.0;
+    // A preserved user target is not yet applied when the camera still reports an older SET.
+    m_tempControlOnTarget = m_coolingKnown && m_tempControlStatus && std::abs( temps.SET - m_ccdTempSetpt ) < 0.05 &&
+                            std::abs( temps.CCD - temps.SET ) < 1.0;
     m_tempControlStatusStr =
         !m_coolingKnown
             ? "UNKNOWN"
@@ -1688,11 +1697,14 @@ inline int ocam2KCtrl::getTemps()
 {
     std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
     std::string                           response;
+    invalidateTempReading();
+    m_tempControlOnTarget  = false;
     m_housekeepingTempTime = 0;
     ++m_housekeepingTempQueries;
 
     if( pdvSerialWriteRead( response, "temp" ) != 0 )
     {
+        updateEMGainTempReady();
         return -1;
     }
 
@@ -1714,6 +1726,7 @@ inline int ocam2KCtrl::getTemps()
         }
 
         m_tempChanging = m_tempConfirmation.phase != ConfirmationPhase::failed;
+        updateEMGainTempReady();
         recordTemps();
         recordCamera();
 
@@ -1722,11 +1735,19 @@ inline int ocam2KCtrl::getTemps()
     }
 
     acceptTemps( temps );
+
+    if( m_coolingKnown && std::abs( temps.SET - m_ccdTempSetpt ) < 0.05 )
+    {
+        updateTempReading( temps.CCD );
+    }
+
+    updateEMGainTempReady();
     return 0;
 }
 
 inline int ocam2KCtrl::powerOnDefaults()
 {
+    invalidateTempReading();
     // Camera boots up with this true in most cases.
     m_tempControlStatusSet = false;
     m_tempControlStatus    = false;
@@ -1745,7 +1766,15 @@ inline int ocam2KCtrl::setTempControl()
     {
         const int result       = getTemps();
         m_tempControlStatusSet = requested;
-        m_ccdTempSetpt         = target;
+
+        if( m_ccdTempSetpt != target )
+        {
+            invalidateTempReading();
+            m_tempControlOnTarget = false;
+        }
+
+        m_ccdTempSetpt = target;
+        updateEMGainTempReady();
 
         if( result < 0 || m_housekeepingTempTime == 0 )
         {
@@ -1766,6 +1795,9 @@ inline int ocam2KCtrl::setTempControl()
     m_tempChanging        = true;
     m_tempSettledSamples  = 0;
     m_tempDue             = housekeepingNow();
+
+    invalidateTempReading();
+    updateEMGainTempReady();
 
     if( pdvSerialWriteRead( response, command ) != 0 )
     {
@@ -1801,6 +1833,9 @@ inline int ocam2KCtrl::setTempSetPt()
     {
         return -1;
     }
+
+    invalidateTempReading();
+    updateEMGainTempReady();
 
     const int expectedControl = m_tempConfirmation.phase == ConfirmationPhase::confirming ? m_tempExpectedControl : -1;
     const std::string tempStr = std::to_string( m_ccdTempSetpt );
@@ -2165,11 +2200,20 @@ inline int ocam2KCtrl::setEMGain()
     return log<text_log, 0>( { "set EM Gain: " + std::to_string( gain ) } );
 }
 
+inline int ocam2KCtrl::setEMGainOff()
+{
+    m_emGainSet = 1;
+    return setEMGain();
+}
+
 inline int ocam2KCtrl::configureAcquisition()
 {
     // lock mutex
     std::unique_lock<std::mutex>          lock( m_indiMutex );
     std::lock_guard<std::recursive_mutex> cameraGuard( m_cameraMutex );
+
+    invalidateTempReading();
+    updateEMGainTempReady();
 
     ++m_fpsConfirmation.generation;
     m_fpsConfirmation.phase = ConfirmationPhase::unavailable;
@@ -2445,7 +2489,11 @@ inline int ocam2KCtrl::reconfig()
     endHousekeepingPause( "camera reconfiguration" );
     ++m_fpsConfirmation.generation;
     m_fpsConfirmation.phase = ConfirmationPhase::unavailable;
-    m_reconfig              = false;
+
+    if( m_nextMode.empty() )
+    {
+        m_nextMode = m_modeName;
+    }
 
     int rv = edtCamera<ocam2KCtrl>::pdvReconfig();
 
@@ -2460,16 +2508,6 @@ inline int ocam2KCtrl::reconfig()
     return 0;
 }
 
-inline void ocam2KCtrl::frameGrabberReconfigureComplete()
-{
-    std::lock_guard<std::mutex> lock( m_indiMutex );
-
-    if( m_nextMode.empty() )
-    {
-        m_reconfig = false;
-    }
-}
-
 inline void ocam2KCtrl::requestAcquisitionRecovery()
 {
     edtCamera<ocam2KCtrl>::pdvFinishAcquisition( false );
@@ -2478,6 +2516,7 @@ inline void ocam2KCtrl::requestAcquisitionRecovery()
 
     endHousekeepingPause( "acquisition recovery" );
     resetHousekeeping();
+    updateEMGainTempReady();
 
     if( m_nextMode.empty() )
     {

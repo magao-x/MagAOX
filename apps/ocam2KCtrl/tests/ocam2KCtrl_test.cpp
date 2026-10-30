@@ -3617,6 +3617,7 @@ TEST_CASE( "ocam2KCtrl preserves a failed reconfiguration for retry", "[ocam2KCt
     app.m_reconfig = true;
     app.state( stateCodes::OPERATING );
     g_edtStubState.readcfgReturn = -1;
+    REQUIRE( app.m_reconfig.exchange( false ) );
     REQUIRE( app.reconfig() == -1 );
     CHECK( app.state() == stateCodes::ERROR );
     CHECK( app.m_nextMode == "science" );
@@ -3624,6 +3625,7 @@ TEST_CASE( "ocam2KCtrl preserves a failed reconfiguration for retry", "[ocam2KCt
     CHECK( app.m_pdv == nullptr );
 
     g_edtStubState.readcfgReturn = 0;
+    REQUIRE( app.m_reconfig.exchange( false ) );
     REQUIRE( app.reconfig() == 0 );
     CHECK( app.state() == stateCodes::READY );
     CHECK( app.m_nextMode.empty() );
@@ -3666,14 +3668,13 @@ TEST_CASE( "ocam2KCtrl timing ages while power is off", "[ocam2KCtrl][timing]" )
     // clang-format on
 }
 
-/** \brief Configuration acknowledgement preserves a later mode request and recovery coalesces with it.
+/** \brief Acquisition recovery coalesces with a later mode request without replacing it.
  * \ingroup ocam2KCtrl_unit_test
  */
-TEST_CASE( "ocam2KCtrl configuration acknowledgement preserves pending requests", "[ocam2KCtrl]" )
+TEST_CASE( "ocam2KCtrl acquisition recovery preserves pending requests", "[ocam2KCtrl]" )
 {
     // clang-format off
     #ifdef OCAM2KCTRL_TEST_DOXYGEN_REF
-    XWCTEST_DOXYGEN_REF( ocam2KCtrl::frameGrabberReconfigureComplete() );
     XWCTEST_DOXYGEN_REF( ocam2KCtrl::requestAcquisitionRecovery() );
     #endif
     // clang-format on
@@ -3682,23 +3683,21 @@ TEST_CASE( "ocam2KCtrl configuration acknowledgement preserves pending requests"
     app.m_modeName = "bin2";
     app.m_nextMode = "bin1";
     app.m_reconfig = true;
-    app.frameGrabberReconfigureComplete();
-    REQUIRE( app.m_reconfig.load() );
     app.requestAcquisitionRecovery();
+    REQUIRE( app.m_reconfig.load() );
     REQUIRE( app.m_nextMode == "bin1" );
 
     app.m_nextMode.clear();
-    app.frameGrabberReconfigureComplete();
-    REQUIRE_FALSE( app.m_reconfig.load() );
+    app.m_reconfig = false;
     app.requestAcquisitionRecovery();
     REQUIRE( app.m_nextMode == "bin2" );
     REQUIRE( app.m_reconfig.load() );
 }
 
-/** \brief A worker acknowledgement waits for an in-flight control request and preserves its associated mode.
+/** \brief Acquisition recovery waits for an in-flight control request and preserves its associated mode.
  * \ingroup ocam2KCtrl_unit_test
  */
-TEST_CASE( "ocam2KCtrl serializes configuration acknowledgement with control requests", "[ocam2KCtrl]" )
+TEST_CASE( "ocam2KCtrl serializes acquisition recovery with control requests", "[ocam2KCtrl]" )
 {
     resetStubState();
     ocam2KCtrl_test app;
@@ -3706,26 +3705,26 @@ TEST_CASE( "ocam2KCtrl serializes configuration acknowledgement with control req
     app.m_reconfig = true;
     std::unique_lock<std::mutex> control( app.m_indiMutex );
     std::promise<void>           entering;
-    auto                         entered      = entering.get_future();
-    auto                         acknowledged = std::async( std::launch::async,
-                                    [&]()
-                                    {
-                                        entering.set_value();
-                                        app.frameGrabberReconfigureComplete();
-                                    } );
+    auto                         entered    = entering.get_future();
+    auto                         recovering = std::async( std::launch::async,
+                                  [&]()
+                                  {
+                                      entering.set_value();
+                                      app.requestAcquisitionRecovery();
+                                  } );
     entered.wait();
-    const bool blocked = acknowledged.wait_for( std::chrono::milliseconds( 10 ) ) == std::future_status::timeout;
+    const bool blocked = recovering.wait_for( std::chrono::milliseconds( 10 ) ) == std::future_status::timeout;
     app.m_nextMode     = "bin1";
     app.m_reconfig     = true;
     control.unlock();
-    acknowledged.get();
+    recovering.get();
     CHECK( blocked );
     CHECK( app.m_reconfig.load() );
     CHECK( app.m_nextMode == "bin1" );
 
     // clang-format off
 #ifdef OCAM2KCTRL_TEST_DOXYGEN_REF
-    ocam2KCtrl::frameGrabberReconfigureComplete;
+    ocam2KCtrl::requestAcquisitionRecovery;
 #endif
     // clang-format on
 }

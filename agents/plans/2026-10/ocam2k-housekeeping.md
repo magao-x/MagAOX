@@ -562,3 +562,89 @@ SD **0.279 us**, range **499–501 us**; serial-containing windows retain
 drops occur. A separate conversion regime raises publication interval deviation
 to about **2.7 us** between exchanges. Continue that investigation separately
 from sparse serial-associated tails; production housekeeping remains unchanged.
+
+
+## Integrating dev camera controls and request consumption — 2026-10-30
+
+The operator requested merging `dev` into `jrmales/dm-syncopation` before the
+next DM timing test. The merge starts at feature commit `511672b4` and imports
+dev commit `c788f17f`. Conflicts concern `ocam2KCtrl.hpp`, `frameGrabber.hpp`,
+`tests/Makefile.one` and `tests/groups.dox`.
+
+The resolution retains this branch's bounded gain/FPS confirmation, adaptive
+temperature cadence, serial pause, PDV timestamps, stage telemetry and
+post-publication EDT rearming. It incorporates dev's EM-gain-Off interface and
+optional maximum-temperature permission without reinstating continuous serial
+polling or changing instrument configuration.
+
+The two implementations agree that configuration must use apply-only
+`setFPS(false)`/`setSynchro(false)`. Existing queued modes remain preserved when
+ordinary FPS/synchronization updates request another pass. Dev's new tests are
+adjusted to that existing branch coalescing policy and use the established
+private-FIFO INDI fixture for external synchronization commands.
+
+The generic frame worker now atomically consumes `m_reconfig` immediately before
+each cleanup attempt. A request arriving after that exchange survives cleanup
+and subsequent configuration/output setup. The branch's in-place powered
+cleanup retry remains: a failure requeues and retries before configuration,
+which is important because OCAM reports ERROR until cleanup succeeds. The
+former post-configuration completion hook and camera-level flag clear are
+removed; either could erase a later request. Empty repeated mode requests reload
+the current mode. Offline tests cover concurrent requests, retry and mode
+preservation; the old controller test now models the worker's consume-before-
+cleanup protocol explicitly.
+
+Temperature integration needs to distinguish the requested setpoint retained by
+housekeeping from the camera's reported applied `SET`. A complete cold report
+from an older setpoint cannot establish permission for the outstanding new
+target. `getTemps()` invalidates prior measured evidence, then qualifies a
+complete finite reading only with known cooling state and matching applied
+setpoint. Its on-target status also requires that setpoint match. Malformed or
+failed polls leave permission unavailable. Ordinary successful polls update the
+read-only permission after completion, avoiding an intermediate Off/On property
+toggle on every query.
+
+Temperature command acknowledgements do not establish the fresh measured
+validity required by `maxTemp`; a subsequent poll does. The inherited `locked`
+policy still uses verified on-target/cooling state rather than the measured
+validity flag. Resetting housekeeping clears cached on-target and measured
+evidence together with its unknown cooling state. Cooling-Off preflight retains
+its fresh-temperature/cold-refusal behavior; if it temporarily adopts a different
+reported setpoint, restoring the requested target also revokes that read's gain
+permission, including refusal paths. Terminal housekeeping confirmation failure
+does not revive itself, while a later matching fresh physical observation can
+establish gain permission under the shared camera policy. Existing gain is not
+automatically changed by any of these permission updates.
+
+Both branch and dev test groups and EDT test-build exceptions are retained.
+Application tests remain under `application_unit_test`. Validation runs only on
+workstation mx11 with software SDK/serial fixtures and private local streams;
+no instrument commands or camera executable are run by an agent.
+
+The reconnect path takes the INDI lock before resetting housekeeping/gain
+permission state, preserving the control-to-camera lock order. A duplicate
+`frameGrabber_unit_test` definition from the two parents is combined into the
+existing dev-helper group, preserving both publication and worker-test links.
+
+Offline verification after resolution:
+
+| Suite | Assertions | Cases |
+| --- | ---: | ---: |
+| Existing OCAM controller | 892 | 35 |
+| OCAM housekeeping | 640 | 26 |
+| OCAM lifecycle | 7 | 1 |
+| OCAM temperature/gain permission | 504 | 5 |
+| OCAM reconfiguration | 379 | 4 |
+| OCAM EM-gain Off | 34 | 1 |
+| Shared stdCamera | 5,283 | 22 |
+| Framegrabber worker | 74 | 6 |
+| Framegrabber publication integration | 118 | 7 |
+| Framegrabber timing | 323 | 20 |
+
+These **8,254 assertions / 127 cases** pass with normal optimized builds and
+offline SDK/serial fixtures. `libMagAOX`/precompiled-header rebuilding,
+clang-format checks for resolved/adjusted C++ files, and whitespace checks pass.
+Parent test registrations and Doxygen group IDs are retained without new
+duplicates. Inherited duplicate registrations elsewhere in `tests.list` are
+unchanged. SDK-linked camera execution and instrument deployment are not part
+of this workstation merge validation.

@@ -7,8 +7,8 @@
 #ifndef frameGrabber_hpp
 #define frameGrabber_hpp
 
-#include <sys/syscall.h>
 #include <atomic>
+#include <sys/syscall.h>
 
 #include <mx/improc/imageUtils.hpp>
 
@@ -27,9 +27,8 @@ namespace app
 namespace dev
 {
 
-/** MagAO-X generic frame grabber
- *
- *
+/// MagAO-X generic frame grabber.
+/**
  * The derived class `derivedT` has the following requirements:
  *
  * - Must be derived from MagAOXApp<true>
@@ -75,6 +74,13 @@ namespace dev
  *   For `acquireAndCheckValid` >0 will indicate no data but not an error.  In most cases,
  *   an appropriate state code, such as NOTCONNECTED, should be set as well.
  *
+ * - Set \ref m_reconfig after updating requested settings under the derived application's locks.
+ *   The worker atomically consumes requests immediately before calling `reconfig()`. Requests arriving
+ *   during cleanup, configuration, or output setup remain pending for another pass. Multiple requests
+ *   may coalesce, and a pass can already observe settings from a later request; derived reconfiguration
+ *   must therefore tolerate repeating the current settings. Failed cleanup requeues the request and retries
+ *   before configuration while powered. The flag does not protect the requested settings.
+ *
  * - A derived class may optionally expose
  *   \code
  *       int derivedT::frameGrabberPostPublish( IMAGE *imageStream );
@@ -105,6 +111,7 @@ template <class derivedT>
 class frameGrabber
 {
   public:
+    /// Supported image orientations when the derived camera permits flipping.
     enum fgFlip
     {
         fgFlipNone,
@@ -113,10 +120,10 @@ class frameGrabber
         fgFlipUDLR
     };
 
-    typedef int32_t cbIndexT;
+    typedef int32_t cbIndexT; ///< Index type for latency circular buffers.
 
   protected:
-    /** \name Configurable Parameters
+    /** \name Configurable Parameters - Data
      * @{
      */
     std::string m_shmimName{ "" }; ///< The name of the shared memory image, is used in `/tmp/<shmimName>.im.shm`.
@@ -155,8 +162,8 @@ class frameGrabber
 
     timespec m_currImageTimestamp{ 0, 0 }; ///< The timestamp of the current image.
 
-    std::atomic<bool> m_reconfig{
-        false }; ///< Restart request; derived apps must also protect associated configuration.
+    /// Pending reset request; the worker consumes it before derived reconfig(), never after configuration.
+    std::atomic<bool> m_reconfig{ false };
 
     IMAGE *m_imageStream{ nullptr }; ///< The ImageStreamIO shared memory buffer.
 
@@ -351,16 +358,6 @@ class frameGrabber
     /// @}
 
   private:
-    /// Let a controller acknowledge configuration requests under its own control lock.
-    template <class hookT>
-    static auto reconfigureCompleteHook( hookT &owner /**< [in] Controller with request ownership. */,
-                                         int    tag /**< [in] Preferred overload. */ )
-        -> decltype( owner.frameGrabberReconfigureComplete(), void() );
-
-    /// Preserve the legacy acknowledgement for controllers without a request hook.
-    static void reconfigureCompleteHook( derivedT &owner /**< [in] Controller using the legacy flag. */,
-                                         long      tag /**< [in] Fallback overload. */ );
-
     /// Call an optional derived-class hook after the main stream publication completes.
     template <class hookT>
     static auto postPublishHook( hookT &hookOwner,      /**< [in] derived object that may expose the hook */
@@ -1005,9 +1002,6 @@ void frameGrabber<derivedT>::fgThreadExec()
             cbuff = true; // because we created it!
         }
 
-        // The controller acknowledges only requests consumed by this configuration.
-        reconfigureCompleteHook( derived(), 0 );
-
         if( derived().startAcquisition() < 0 )
         {
             continue;
@@ -1145,13 +1139,16 @@ void frameGrabber<derivedT>::fgThreadExec()
             }
         }
 
-        while( m_reconfig && !derived().shutdown() && derived().powerState() > 0 )
+        // Consume before cleanup, which may itself apply requested settings such as an EDT camera mode.
+        // Requests arriving after this exchange remain pending through the next configuration pass.
+        while( !derived().shutdown() && derived().powerState() > 0 && m_reconfig.exchange( false ) )
         {
             if( derived().reconfig() >= 0 )
             {
                 break;
             }
 
+            m_reconfig = true;
             sleep( 1 );
         }
 
@@ -1171,22 +1168,6 @@ void frameGrabber<derivedT>::fgThreadExec()
         free( m_imageStream );
         m_imageStream = nullptr;
     }
-}
-
-template <class derivedT>
-template <class hookT>
-auto frameGrabber<derivedT>::reconfigureCompleteHook( hookT &owner, int tag )
-    -> decltype( owner.frameGrabberReconfigureComplete(), void() )
-{
-    static_cast<void>( tag );
-    owner.frameGrabberReconfigureComplete();
-}
-
-template <class derivedT>
-void frameGrabber<derivedT>::reconfigureCompleteHook( derivedT &owner, long tag )
-{
-    static_cast<void>( tag );
-    static_cast<frameGrabber &>( owner ).m_reconfig = false;
 }
 
 template <class derivedT>
