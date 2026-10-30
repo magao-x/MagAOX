@@ -174,7 +174,8 @@ empty. Its name must not match any command/channel/output image or use the
 configured DM stream prefix. The post worker appears as `th-pipeline`;
 `sdk_pipeline` reports verified `policy`, `priority`, `allowedCpus`, plus
 `capacity`, `inFlight`, `queued`, `sdkActive`, `postActive`, `admitted`,
-`retired`, `overloaded`, `cancelled`, `superseded`, and `postFailures`.
+`retired`, `overloaded`, `cancelled`, `superseded`, `postFailures`,
+`vectorRejected`, `readerUnqualified`, and `preparationFailures`.
 `cancelled` includes `superseded`; supersession is a nonfault `noSend`
 outcome. `sdk_worker.coalesced` retains its original meaning: skipped counter
 advances between admitted inputs. Overloaded receipts and admitted superseded
@@ -190,10 +191,20 @@ completion stream publishes one ordered retirement per admitted command
 (approximately 2 kHz each without skips). These are software notifications,
 not additional physical DM commands. SDK-result kind qualifies only native
 return; it does not qualify channel clearance or successful post work. If
-native return precedes monitor validation, or source validation fails, the
-SDK-result record preserves its actual outcome and raw code with unqualified
-source identity. A later successful full post can independently qualify its
-frozen identity after monitor validation.
+the combined input changes while its pixels are being converted, the private
+vector is discarded before SDK entry or shape publication (`vectorRejected`).
+This ordinary supersession is a nonfault `noSend`. A validated private vector
+can qualify its actual SDK result independently of later channel staging.
+If the combined input advances after that vector validation, the reader and
+full completion records lose exact source qualification (`readerUnqualified`),
+but successful native work, post products, timing and later admissions continue.
+Initial metadata-capture instability is also a `vectorRejected` skip.
+Qualification loss is distinct from actual conversion/channel-staging
+errors or unexpected preparation exceptions (`preparationFailures`), which still fault admission. The qualification
+counter can overlap vector rejection and preparation failures. Both diagnostic
+properties have complete numeric definitions and an Idle state at startup,
+before the first ordinary app update. A latched backend/preparation/post fault
+changes their ordinary readback state to Alert.
 
 Detached timing keeps each command's genuine receipt and counter, even when
 three stages overlap. SDK intervals use the actual native owner timestamps;
@@ -208,7 +219,7 @@ population is also empty because the monitor does not join the result. The
 producer copies only fixed job payloads; the ordinary saturation consumer drains accumulated
 mask counts without losing intermediate jobs when notifications coalesce.
 
-A native error, preparation error, diagnostic timeout or post error closes
+A native error, actual preparation error, diagnostic timeout or post error closes
 admission and cancels unsent jobs. Native success arriving after a timeout
 remains an actual successful SDK result, but its success-dependent post
 products are suppressed. A post failure can be detected after B has already
