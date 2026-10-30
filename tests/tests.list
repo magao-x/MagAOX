@@ -61,6 +61,7 @@
 ../apps/cred2Ctrl/tests/cred2Ctrl_test
 ../apps/cred2Ctrl/tests/cred2Ctrl_lifecycle_test
 ../apps/cred2Ctrl/tests/cred2Utils_test
+../apps/orcaCtrl/tests/orcaUtils_test
 ../apps/pi335Ctrl/tests/pi335Ctrl_test
 ../apps/picoMotorCtrl/tests/picoMotorCtrl_test
 ../apps/picamCtrl/tests/picamCtrl_test
