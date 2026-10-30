@@ -393,6 +393,7 @@ Application properties belong to the configured INDI device: `dmtweeter_synco` i
 | `simulation_pipeline` | Number, read-only | Pipeline-only stage assumptions, three-credit accounting, predicted main queue/credit conflicts, clearance shortfall and independent stage feasibility. |
 | `simulation_status` | Text, read-only | Current simulation state and explicit assumptions/limitations. |
 | `simulation_trace` | Number, read-only | Bounded overlap-event FIFO coverage and losses, detailed below. |
+| `simulation_main_wait_trace` | Number, read-only | Bounded delayed-main provenance FIFO coverage and losses in pipeline shadow mode. |
 | `simulation_estimator` | Number, read-only | Triggered estimator pre/post history, export coverage and losses. |
 | `simulation_cadence` | Number, read-only | Long-baseline cadence qualification, exact-period display, endpoint coverage and independent primary/refresh ages. |
 | `health` | Text, read-only | `reason`, `lastFault`, `periodSource`, `primary`, `combined`, `timingStream`, `mapping`, `mode`. Current phase/reason, latched fault, selected period reference and resolved stream identities. Mode also identifies simulation when selected. |
@@ -502,6 +503,44 @@ durability or detect filtering by the general logger. A busy model lock
 defers draining until a later record. `trace_quality` is absent from an older
 record or from a record where no queue snapshot could be taken. Inspect
 losses and pending events before interpreting a capture as complete.
+
+Pipeline shadow mode additionally records one `main_wait={...}` event when a
+modeled genuine main reaches SDK entry with nonzero added wait. It is independent
+of overlap detection and estimator-history selection. `prepWait_ns` measures
+input-to-preparation-start queueing; `sdkWait_ns` measures private-vector-ready
+to SDK-entry queueing. Their sum is that main's contribution to
+`maxMainWaitUs`. Preparation and native-service durations are excluded from
+these two waits.
+
+Each event identifies the waiting main and up to two distinct blocking jobs.
+Job IDs are model admissions; `kind=main` / `kind=aux` and `step` distinguish
+genuine commands from hypothetical auxiliary steps. `modelCounter` retains the
+combined counter for a genuine main and the cycle's primary counter for an
+auxiliary; `primaryCounter` provides the explicit associated primary identity.
+Each job includes its anchor, controller input, preparation/vector/reader,
+SDK/worker-ready and post/retirement endpoints. Zero stage endpoints mean that
+stage had not started at the captured state. Blockers retain their first
+blocking observation and the separate clipped preparation and SDK wait
+intervals; `provenanceComplete` states whether these intervals cover both waits.
+Snapshots survive job retirement and credit reuse.
+
+Raw receipt/callback/lock endpoints and producer publication/trace context are
+retained for genuine commands. Producer-clock timestamps remain unconverted;
+compare producer intervals separately from monotonic observer/model intervals.
+Auxiliary commands have no physical producer observation. Frozen service bounds
+travel with each event, so queued evidence remains interpretable after a
+configuration/session change. This describes conditional model contention,
+not a measured physical SDK stall.
+
+`simulation_main_wait_trace` and telemetry `main_wait_quality` expose the same
+seven accounting fields as `simulation_trace`. The fixed FIFO retains 64 events
+and telemetry drains at most eight per emission. IDs, queued evidence and
+coverage counters persist across model resets; each event retains its original
+session. `detected = drained + dropped + queued` and `logFailed` has the same
+telemetry-attempt meaning described above. A full queue drops new diagnostic
+evidence without changing admissions, skip decisions or wait counters. Older
+records omit this optional extension. A contended model lock defers draining;
+no current trace snapshot is published in that emission.
 
 An overlap also selects estimator history for the same `[dmsynco]` telemetry:
 up to 256 preceding completed primary updates, followed by 64 updates after
@@ -1064,7 +1103,7 @@ needed.
    `updates` increasing about once per second, and fresh `observationAgeSec`.
    A valid grid alone does not indicate a full cadence window. Inspect
    `simulation`, `simulation_cadence`, `simulation_steps`,
-   `simulation_status`, `simulation_trace`, `simulation_estimator`, `primary_timing_quality`, and
+   `simulation_status`, `simulation_trace`, `simulation_main_wait_trace`, `simulation_estimator`, `primary_timing_quality`, and
    `combiner_timing_quality`. A grid and a coherent output association are
    separate requirements. Before a long policy capture, confirm that
    `simulation.associations` increases and the combiner quality report has a

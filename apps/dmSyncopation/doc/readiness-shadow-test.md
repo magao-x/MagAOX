@@ -162,6 +162,7 @@ The operator can inspect:
 
 ```bash
 timeout -k 2s 8s getINDI dmtweeter-synco.simulation_pipeline
+timeout -k 2s 8s getINDI dmtweeter-synco.simulation_main_wait_trace
 timeout -k 2s 8s getINDI dmtweeter-synco.simulation_steps
 timeout -k 2s 8s getINDI dmtweeter-synco.simulation_status
 ```
@@ -189,6 +190,23 @@ It retains exact 64-bit counts; INDI numbers remain diagnostic doubles. Raw
 copy/reader overlap traces retain their observed timestamps. An observation
 during SDK work is not itself an SDK conflict when that main could still prepare
 concurrently; the pipeline wait/credit diagnostics report those modeled conflicts.
+
+When `mainSdkWaits` increases, `main_wait` telemetry now identifies the waiting
+main, separate preparation/SDK queue delays, and the earlier main or auxiliary
+jobs occupying those resources. It records every such SDK-entry event while
+FIFO capacity permits, without requiring an overlap trigger. Inspect
+`main_wait_quality` / `simulation_main_wait_trace` for pending/lost evidence;
+the FIFO holds 64 events and emits at most eight per telemetry record. Event
+IDs are process-lifetime; sessions and immutable job IDs preserve provenance
+across model resets and credit reuse. Preserve complete `[dmsynco]` lines or
+raw binary telemetry, including records after the capture's final main-wait
+increment while the queue drains. These events diagnose the model; they do
+not establish physical SDK delay. See the
+[main-wait field and clock descriptions](dmSyncopation.md).
+
+Rebuild/install both `dmSyncopation` and `logdump` for this trace. Keep the
+current pipeline preset and timing bounds unchanged. No controller or camera
+rebuild is required for this diagnostic change.
 
 After at least ten seconds of stable cadence, repeat the existing
 [bounded simultaneous capture](dmSyncopation.md#capture-a-simulation-run).
