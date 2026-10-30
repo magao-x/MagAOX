@@ -4,6 +4,8 @@ The optional BMC SDK worker lets the command monitor finish reading dmcomb's
 channels while `BMCSetArray()` is running. It can shorten the time those inputs
 need protection. SDK return and physical mirror response are separate endpoints;
 moving the call to a worker does not make the SDK itself faster.
+The first sections describe the joined worker; the final section describes
+the independently enabled full pipeline.
 
 ```text
 monitor: prepare command -> dispatch -> stage saturation and delta -> reader release
@@ -122,3 +124,102 @@ thread cancellation or concurrent close is not a supported recovery mechanism.
 
 The [engineering plan](../../../agents/plans/2026-10/bmc-sdk-worker-reader-release.md)
 records implementation decisions, tests and remaining hardware qualification.
+
+## Full preparation / SDK / post pipeline
+
+A second startup-only option removes the monitor's SDK-result join. The SDK
+owner still makes every native handle call in order, while a separate post
+worker publishes successful private products. Both options default off;
+`sdk.pipelineEnabled=true` requires `sdk.workerEnabled=true`.
+
+```text
+monitor: A prepare + stage -> read_done   B prepare + stage -> read_done
+SDK:          A BMCSetArray -----------------> B BMCSetArray ---------->
+post:                                         A publish -> done
+                                                                    B publish -> done
+```
+
+There are exactly three private job credits. Each owns its clipped shape,
+SDK vector, delta/difference, saturation mask, frozen input identity and timing
+record through ordered post retirement. The SDK may accept B while A's post
+work is running. Preparing B cannot change A's vector or publication products.
+The monitor remains the sole writer of the prepared `*_shape` image, preserving
+its preparation-time publication behavior. Delta/difference and saturation
+are published by the sole post owner after successful submission.
+
+The queue coalesces to the latest **observed** coherent input. Every genuine
+monitor receipt announces its pointer-free identity, including receipts
+rejected when all credits are busy. Before native entry, the SDK owner cancels
+an unsent job displaced by newer evidence. It does not reread a potentially
+closed monitor mapping. Source disconnect/reattachment also invalidates queued
+identities; a call already in the SDK drains with its original identity.
+Consequently an SDK stall does not cause an old FIFO of commands to replay.
+
+Add these settings to the worker configuration, selecting an available post
+core and a distinct SDK-result image name:
+
+```ini
+[sdk]
+workerEnabled=true
+pipelineEnabled=true
+pipelineThreadPrio=0
+pipelineCpuset=
+pipelineResultStream=dmtweeter_sdk_done
+```
+
+The post priority defaults to 0 and its cpuset to empty, meaning ordinary
+scheduling and inherited affinity. They are independently verified, using the
+same rules as the SDK owner. The SDK-result image is optional and defaults to
+empty. Its name must not match any command/channel/output image or use the
+configured DM stream prefix. The post worker appears as `th-pipeline`;
+`sdk_pipeline` reports verified `policy`, `priority`, `allowedCpus`, plus
+`capacity`, `inFlight`, `queued`, `sdkActive`, `postActive`, `admitted`,
+`retired`, `overloaded`, `cancelled`, `superseded`, and `postFailures`.
+`cancelled` includes `superseded`; supersession is a nonfault `noSend`
+outcome. `sdk_worker.coalesced` retains its original meaning: skipped counter
+advances between admitted inputs. Overloaded receipts and admitted superseded
+jobs are distinct populations.
+
+In this mode `readerReleaseStream` is written only by the monitor. It publishes
+a busy observation followed by reader release, with SDK outcome still unknown;
+later SDK results never rewrite that record. At an actual 2 kHz command rate,
+its metadata counter therefore advances at approximately 4 kHz, with one
+semaphore post per command (approximately 2 kHz). The separate
+SDK-result stream publishes one actual return per native call, and the full
+completion stream publishes one ordered retirement per admitted command
+(approximately 2 kHz each without skips). These are software notifications,
+not additional physical DM commands. SDK-result kind qualifies only native
+return; it does not qualify channel clearance or successful post work. If
+native return precedes monitor validation, or source validation fails, the
+SDK-result record preserves its actual outcome and raw code with unqualified
+source identity. A later successful full post can independently qualify its
+frozen identity after monitor validation.
+
+Detached timing keeps each command's genuine receipt and counter, even when
+three stages overlap. SDK intervals use the actual native owner timestamps;
+receipt-to-return and receipt-to-post-timing-finish measure latency, not the
+pipeline's admission spacing. The callback finish marker precedes full-record
+wire publication, timing-queue submission and credit retirement; those final
+tails are outside that duration. The full completion endpoint is also stamped
+before publishing its own wire record. Saturation decisions are made in the
+actuator preparation loop, so the separate `saturation` timing population is empty in
+pipeline mode and its cost is included in `actuator`. Its `sdkWait`
+population is also empty because the monitor does not join the result. The
+producer copies only fixed job payloads; the ordinary saturation consumer drains accumulated
+mask counts without losing intermediate jobs when notifications coalesce.
+
+A native error, preparation error, diagnostic timeout or post error closes
+admission and cancels unsent jobs. Native success arriving after a timeout
+remains an actual successful SDK result, but its success-dependent post
+products are suppressed. A post failure can be detected after B has already
+entered the SDK; B drains truthfully and later unsent work is cancelled.
+There is no rollback of a completed mirror submission. Controls, reallocation,
+release, reinitialization and shutdown wait for all preparation, native and
+post ownership to drain before changing or freeing shared resources. A stuck
+native call or stuck post worker can therefore prevent shutdown.
+
+This pipeline is opt-in and needs hardware qualification. Measured typical
+SDK work around 104 microseconds suggests more throughput headroom than the
+joined callback, but observed maxima already exceed 110 microseconds. This
+implementation does not establish a 6 kHz physical-delivery guarantee or
+change dmSyncopation's operational policy.

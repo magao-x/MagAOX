@@ -184,3 +184,47 @@ sequence, input inode/counter, processing microseconds, endpoint age seconds,
 backend outcome/result and release qualification. `dm_reader_release_stream`
 reports `name` and `meaning`. These properties appear independently of the
 full-completion properties; exact integer matching belongs to the shared record.
+
+## Detached jobs and SDK-only results
+
+`captureRecord(input, genuine)` freezes the combined stream's best-effort
+metadata identity and current monotonic entry time into a pointer-free value.
+It works when publication is disabled. Its busy/unqualified state records the
+capture's qualification; session, epoch and sequence are assigned later by a
+publisher. The caller must validate that this identity belongs to the consumed
+channel snapshot. Capturing metadata alone does not lock pixels or make a
+multi-stream snapshot atomic.
+
+After exclusive job ownership transfers to a result thread,
+`publishCompleted(record, callbackResult, outcome, finishedNs)` publishes its
+frozen result. It never rereads the combined image: that image may already
+contain a newer command or have been detached. Each publisher assigns its own
+session, epoch, sequence and kind, rejects duplicate input progression, and
+starts a new epoch on input inode change or counter rollback. An explicit
+`finishedNs` preserves the actual stage endpoint; its default `-1` captures the
+current monotonic time. Invalid captured identity, non-genuine input and
+backward endpoints remain unqualified. A nonzero stage result is an error.
+
+Each stream has exactly one publication owner. Do not mix detached publication
+with a concurrently active legacy `begin()`/`finish()` owner. An early-release
+stream belongs to the monitor; publishing an old SDK enrichment into it after
+a newer callback begins would overwrite current readiness. A pipeline therefore
+uses a separate SDK result publisher, opened with `Kind::sdk` (2), and leaves
+the early stream's current command untouched.
+
+The SDK-only version-1 wire uses magic **`0x4d414758444d5344`**, the same 16 words,
+`complete` for qualified successful SDK return, and word 15 for the native SDK
+result (or `INT64_MIN` when unavailable). The producer supplies the SDK-stage
+start/end timestamps in its record; the input identity remains the original
+job's. `sdkQualified()` accepts only this endpoint. `qualified()` and
+`readersQualified()` reject it, so an SDK success cannot substitute for early
+reader clearance or full output publication. Failure remains an error with the
+actual backend outcome/code. Notifications are still latest-record hints and
+can coalesce; this stream is not a lossless job-result queue.
+
+Full completion in detached mode is published by the ordered finalizer after
+that job's required output products and notifications. It qualifies the frozen,
+caller-validated job identity, even after the live input advances. This is
+separate from legacy `finish()`, which retains its original live-input stability
+check. A result stream never grants ownership of a later command or promises
+physical mirror settling.

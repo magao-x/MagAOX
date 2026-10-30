@@ -86,6 +86,31 @@ timestamp with the previous counter. These are **observed publication intervals*
 not a verified frame trace. Stream-clock jumps can also resemble publication stalls.
 The metric does not establish publication-to-receipt latency or camera-to-DM latency.
 
+## Detached pipeline events
+
+Controllers with preparation and finalization on separate threads can transfer
+an event with `detachEvent()`. This deactivates the monitor's current event and
+returns its complete value without publishing it. The monitor can then capture
+the next command; the finalizer exclusively owns the detached value and adds
+endpoints with `markEvent()`, `importSdkEvent()` and `outcomeEvent()`. These use
+the same timestamp validation and successful-submission preservation as the
+legacy member methods. `submitEvent()` finally copies the immutable event into
+the existing bounded telemetry queue.
+
+The finalizer must be the **only queue producer** in this mode. The monitor must
+detach every active event before another `beginEvent()` or `newSession()`, and
+must not call `finishEvent()` concurrently with finalizer submissions. Those
+legacy methods can themselves publish an active event. Disabled or empty events
+do not publish. Configuration still requires every producer and consumer to be
+stopped. External job ownership and ordered transfer are the controller's
+responsibility; the helper does not create a worker or retain job pointers.
+
+The SDK worker passes immutable result timestamps through the job; it does not
+mutate another thread's current event. Actual SDK execution and independent
+private preparation can overlap. The finalizer must join their evidence before
+submitting the event. Queue loss remains diagnostic and cannot control command
+ownership or invalidate an independent reader-release signal.
+
 ## Configuration and collection
 
 Add these keys to the controller configuration and restart to apply changes:
