@@ -56,7 +56,7 @@ the SDK worker never mutates the timing collector.
 | `dispatch` | Monitor dispatch, `P - A` |
 | `actuator` | Actuator preparation; includes BMC/ALPAO output-shape publication |
 | `sdk` | `W - S`; PI uses its grouped serial-write span |
-| `saturation` | Synchronous instantaneous saturation-map update |
+| `saturation` | Instantaneous saturation classification; synchronous or deferred by the controller |
 | `delta` | Configured delta-channel calculation |
 | `post` | Saturation-worker semaphore posting |
 | `throughDelta` | `D - P`, preserving the old `piTimes` endpoints |
@@ -162,7 +162,7 @@ be useful while state is Idle.
 | Property | Elements and units |
 | --- | --- |
 | `dm_timing` | `receipt_fps`, `receipt_min`, `receipt_max`, `receipt_jitter`, `receipt_count`; `send_fps`, `send_min`, `send_max`, `send_jitter`, `send_count`; `receipt_send`, `receipt_send_jitter`, `receipt_send_min`, `receipt_send_max`, `receipt_send_count`. FPS is reciprocal mean interval; durations are seconds. |
-| `dm_timing_stages` | Names `dispatch`, `actuator`, `sdk`, `saturation`, `delta`, `post`, `throughDelta`, `callback`, `receiptCallback`, `publicationInterval`, `sdkDispatch`, `readerRelease`, `staging`, `publication`, `sdkWait`, `sdkTail`, `sdkService`, each suffixed `_mean`, `_jitter`, `_min`, `_max`, `_count`, `_span`. Durations/coverage use seconds. |
+| `dm_timing_stages` | Names `dispatch`, `actuator`, `sdk`, `saturation`, `delta`, `post`, `throughDelta`, `callback`, `receiptCallback`, `publicationInterval`, `sdkDispatch`, `readerRelease`, `staging`, `publication`, `sdkWait`, `sdkTail`, `sdkService`, `conversion`, `sourceCheck`, `shapePublication`, `receiptSdk`, each suffixed `_mean`, `_jitter`, `_min`, `_max`, `_count`, `_span`. Durations/coverage use seconds. |
 | `dm_timing_quality` | `window`, `span`, `age` in seconds; `capacity`, `queued`, `session`, `sequence`; `enabled`, `valid` as 0/1; cumulative counters listed below: 21 elements. `age=-1` means no retained endpoint. |
 | `dm_timing_state` | Text elements `state`, `clock`, `receipt`, `send`. States are `disabled`, `warmingUp`, `valid`, `stale`, `unavailable`; endpoint descriptions identify the clock and software return semantics. |
 
@@ -198,9 +198,10 @@ detailed record first. LogMeta names use `<metric>_mean`, `_stddev`, `_min`,
 `_max`, `_count`, `_span`, `_valid`; unavailable duration projections are NaN.
 The detailed record appends `publicationInterval` as metric ID 12; the original
 twelve IDs and compatible `fgtimings` fields are unchanged. Worker metrics append
-IDs 13–17, and SDK-worker readiness appends IDs 18–19. Rebuilt readers accept
-complete historical twelve/thirteen/eighteen-row records and the current
-twenty-row records. Historical records project the absent new durations as NaN.
+IDs 13–17, SDK-worker readiness appends IDs 18–19, and preparation detail appends
+IDs 20–23. Rebuilt readers accept complete historical twelve/thirteen/eighteen/
+twenty-row records and the current twenty-four-row records. Historical records
+project the absent new durations as NaN.
 Rebuild `logdump` to read new records and access the new names.
 
 The appended metrics are:
@@ -214,6 +215,20 @@ The appended metrics are:
 | `sdkWait` | Monitor's matching-result wait, including handoff overhead. |
 | `sdkTail` | SDK return to worker readiness after result publication, bookkeeping and notifications. |
 | `sdkService` | SDK entry to that same worker-ready endpoint, excluding idle waiting for another request. |
+| `conversion` | Pipeline actuator-start through completed private shape initialization and numeric conversion. |
+| `sourceCheck` | Completed conversion through coherent source-identity revalidation. |
+| `shapePublication` | Completed source check through shared output-shape copy/publication and actuator-end. |
+| `receiptSdk` | Successful command's actual SDK entry minus genuine semaphore receipt, using existing timestamps. |
+
+The BMC pipeline records the three preparation segments inside `actuator`.
+Classification/counting of its private saturation mask runs in the ordered post
+worker from immutable actuator values, after monitor staging and SDK completion;
+its separate `saturation` duration is outside preparation and reader release.
+Other paths without preparation-segment markers leave those populations empty.
+`receiptSdk` excludes SDK execution but includes monitor dispatch and any wait
+for the SDK owner; it is a latency measurement, not isolated preparation service.
+Its directly accumulated extrema avoid subtracting independent population
+maxima. It remains unavailable for synthetic callbacks and unsuccessful sends.
 
 The BMC pipeline captures readiness on its next worker-loop mutex acquisition,
 after publishing the prior native result and committing its handoff, immediately

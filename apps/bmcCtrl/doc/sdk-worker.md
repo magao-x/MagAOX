@@ -212,12 +212,30 @@ receipt-to-return and receipt-to-post-timing-finish measure latency, not the
 pipeline's admission spacing. The callback finish marker precedes full-record
 wire publication, timing-queue submission and credit retirement; those final
 tails are outside that duration. The full completion endpoint is also stamped
-before publishing its own wire record. Saturation decisions are made in the
-actuator preparation loop, so the separate `saturation` timing population is empty in
-pipeline mode and its cost is included in `actuator`. Its `sdkWait`
-population is also empty because the monitor does not join the result. The
-producer copies only fixed job payloads; the ordinary saturation consumer drains accumulated
-mask counts without losing intermediate jobs when notifications coalesce.
+before publishing its own wire record. Saturation classification and mask clearing
+run in the ordered post worker from the job's immutable SDK vector, after both
+monitor staging and SDK completion. They contribute to the separate `saturation`
+timing population and no longer delay SDK dispatch or reader release. The job
+retains its private storage until post retirement. Its `sdkWait` population is
+empty because the monitor does not join the result. The producer copies only
+fixed job payloads; the ordinary saturation consumer drains accumulated mask
+counts without losing intermediate jobs when notifications coalesce.
+
+Preparation timing retains the existing `actuator` interval and divides it into
+`conversion` (private shape initialization and actuator conversion), `sourceCheck`
+(coherent input identity revalidation), and `shapePublication` (private-to-shared
+shape copy and publication). Saturation is outside all three. The conversion
+loop uses cached pointers/counts; private shape initialization remains in place
+to preserve unmapped pixels across job reuse. Source validation and shape
+publication still precede SDK admission.
+
+`receiptSdk` measures each successfully submitted command from genuine semaphore
+receipt to actual SDK entry, using the already captured endpoints. It reports a
+direct maximum rather than subtracting maxima for other populations. This is
+latency: it includes dispatch and any wait for an occupied SDK owner, so it does
+not by itself isolate conversion cost. The three new preparation stages are
+unavailable in synchronous and joined-worker modes; `receiptSdk` is available
+on those paths when receipt and successful SDK-entry evidence exist.
 
 Pipeline timing also reports `sdkTail` (native return to worker readiness) and
 `sdkService` (native entry to worker readiness). Readiness is stamped after result
