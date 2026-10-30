@@ -515,6 +515,7 @@ class dm
     void allocatePipelineCommand( PipelineCommand &command /**< [out] Reusable command storage. */ );
 
     /// Capture a genuine command's frozen identity and detach its receipt timing on the monitor.
+    /** A negative return rejects this source observation; it does not establish a backend fault. */
     int capturePipelineCommand( PipelineCommand &command /**< [out] Exclusively leased command. */,
                                 void            *pixels /**< [in] Combined source selected by the monitor. */ );
 
@@ -526,6 +527,7 @@ class dm
     int stagePipelineCommand( PipelineCommand &command /**< [in,out] Monitor-owned command. */ );
 
     /// Publish final external-read clearance from the monitor, retaining the original identity.
+    /** Source advancement withholds reader/full provenance without changing successful preparation status. */
     void releasePipelineCommand( PipelineCommand &command /**< [in,out] Prepared command. */ );
 
     /// Publish successful private products and frozen completion on the sole finalizer.
@@ -1084,7 +1086,10 @@ int dm<derivedT, realT>::capturePipelineCommand( PipelineCommand &command, void 
     }
 
     m_dmTiming.mark( MagAOX::dmTiming::Marker::entry );
-    m_dmTiming.inputCounter( command.completion.inputCounter );
+    if( command.completion.inputInode != 0 && command.completion.inputCounter != 0 )
+    {
+        m_dmTiming.inputCounter( command.completion.inputCounter );
+    }
 
     if( command.completion.publicationSec > 0 && command.completion.publicationNsec >= 0 &&
         command.completion.publicationNsec < 1000000000 &&
@@ -1148,7 +1153,8 @@ template <class derivedT, typename realT>
 void dm<derivedT, realT>::releasePipelineCommand( PipelineCommand &command )
 {
     const auto current  = dev::dmCompletion::captureRecord( &derived().m_imageStream, true );
-    const bool coherent = current.state == MagAOX::dmCompletion::State::busy &&
+    const bool coherent = command.completion.state == MagAOX::dmCompletion::State::busy &&
+                          current.state == MagAOX::dmCompletion::State::busy &&
                           current.inputInode == command.completion.inputInode &&
                           current.inputCounter == command.completion.inputCounter &&
                           current.publicationSec == command.completion.publicationSec &&
@@ -1156,11 +1162,17 @@ void dm<derivedT, realT>::releasePipelineCommand( PipelineCommand &command )
 
     if( !coherent )
     {
-        command.preparedStatus   = -1;
+        // A newer input revokes provenance; it does not invalidate successful private preparation or SDK work.
         command.completion.state = MagAOX::dmCompletion::State::unqualified;
     }
 
     m_dmReaderRelease.release( &derived().m_imageStream, command.preparedStatus, coherent );
+
+    if( m_dmReaderRelease.enabled() && !MagAOX::dmCompletion::readersQualified( m_dmReaderRelease.attempt() ) )
+    {
+        // The publisher performs another identity observation; keep either observation's loss nonfatal.
+        command.completion.state = MagAOX::dmCompletion::State::unqualified;
+    }
 
     if( command.preparedStatus >= 0 )
     {

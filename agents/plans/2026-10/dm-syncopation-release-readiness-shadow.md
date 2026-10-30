@@ -893,3 +893,103 @@ timing qualification remain operator follow-up. All changed C++ files pass
 clang-format; Markdown links/fences and whitespace are checked. No instrument
 commands or configuration edits are performed. The operator subsequently
 authorized committing and pushing the implementation and documentation.
+
+## First instrument pipeline run: stopped submissions and provenance fix
+
+The operator installed `5aee723de3c10c108d71d2e3a019008fb03e24c3` and reported
+that `dmtweeter_sdk_done` stopped updating and `fgtimes` was absent. Startup at
+**2026-10-30 04:48:10.516871821 UTC** confirms the requested pipeline and SDK
+result name, the monitor on `tweeter` at FIFO55, SDK owner on `spare56` at
+FIFO55, and ordinary-priority post worker with inherited affinity. The SDK
+reports **4.1.3**, `driverType=1`, `amplifierType=3`; this establishes the
+instrument's runtime version separately from the local 3.5.3 source archive.
+
+The supplied snapshots show:
+
+| Evidence | Value |
+| --- | ---: |
+| Pipeline admitted / retired / in flight | 2 / 2 / 0 |
+| Actual native completions / failures / timeouts | 2 / 0 / 0 |
+| Timing submitted / failed / no-send | 2 / 1 / 0 |
+| Pipeline post failures / cancelled / overloaded | 0 / 0 / 0 |
+| Worker fault / admission closed | 1 / 1 |
+| Rejected subsequent receipts | 454,742 |
+
+Both native calls succeeded, but one callback failed before post processing.
+There are only two events, insufficient to qualify interval statistics, and
+the two-second window subsequently becomes stale. Thus absent `fgtimes` and
+zero SDK-stream update rate are consequences of stopped command admission,
+rather than independent missing-telemetry configuration. A closed AO-loop
+flag did not establish continued DM updates. The operator was asked to open
+the AO loop while diagnosing the stopped controller; agents executed no
+instrument commands.
+
+### Reproduced policy error
+
+`releasePipelineCommand()` previously converted a late live-input identity
+change into `preparedStatus=-1`, which permanently faulted admission even
+after native submission succeeded. Existing source-advance tests reproduced
+that exact sequence and incorrectly expected the latch. The alternative
+publisher-side observation of the same change only withheld qualification,
+making the outcome depend on which of two nearby checks saw it first.
+
+The original run has no retained per-reason preparation record, so the
+specific hardware event cannot be proven from its aggregates. Static staging
+geometry loss remains another preparation-side possibility. The code-level
+provenance/fault coupling is nevertheless reproduced and corrected, with
+separate diagnostics to resolve any recurrence.
+
+The corrected stages now:
+
+- Validate combined-source identity immediately after actuator conversion,
+  before shape publication and native queue admission. An unstable initial
+  capture or vector observation is superseded/no-send without a hardware
+  fault. No SDK call receives that rejected vector.
+- Qualify SDK results from their validated immutable vector identity,
+  independently of later channel staging or reader/full qualification.
+- Withhold reader/full provenance on later input advancement, including loss
+  seen only by the publisher's second check, without changing successful
+  preparation status or actual SDK timing/outcome.
+- Retain the fault latch for actual conversion/staging errors, SDK errors,
+  timeouts and publication failures.
+
+`sdk_pipeline.vectorRejected` counts unstable pre-dispatch source observations;
+`readerUnqualified` counts late unqualified reader/full identities and can
+overlap vector rejection; `preparationFailures` counts real preparation errors.
+True negative preparation results now log their failed stage. Invalid capture
+tokens no longer manufacture a valid zero input counter in timing records.
+
+### Startup INDI definitions
+
+The startup log also directly reports invalid `sdk_worker` and `sdk_pipeline`
+definitions before the first ordinary app update: their property state was
+unset. The serializer additionally requires numeric element range, step and
+format. Both production definitions now initialize Idle state, complete
+numeric metadata, zero/default values and verified worker settings before
+registration. A latched fault changes their ordinary readback state to Alert.
+The regression serializes and round-trips the actual production properties
+through `IndiXmlParser`, before app logic can fill missing attributes.
+
+### Correction verification
+
+The corrected BMC suite passes **1,182 assertions / 28 cases**; generic pipeline
+integration passes **203 assertions / 6 cases**. Regressions cover unstable
+capture and prequeue vector rejection without native entry, later input
+advancement followed by three successful submissions and valid `fgtimes`,
+reader publication enabled/disabled, preserved private products, genuine
+staging-geometry failure retaining its fault, and valid initial INDI XML.
+Independent review finds no blocking ownership or policy regression.
+
+The corrected thirteen pipeline cases also pass ThreadSanitizer (**599
+assertions**) without reported races. A fresh library/PCH build and production
+controller-object compilation against the local vendor headers pass; formatting,
+Markdown links/fences and whitespace are checked. The correction is committed
+and pushed under the operator's continuing request to deliver this pipeline
+for instrument testing; hardware validation remains operator-owned.
+
+Hardware recovery still requires the operator to install the correction and
+reinitialize the controller. At a sustained input rate, check that native
+completions continue increasing, fault/admission-closed remain zero,
+`preparationFailures` remains zero and timing becomes valid. Provenance-loss
+counts can increase without implying a native failure. No instrument settings
+are changed by this correction.

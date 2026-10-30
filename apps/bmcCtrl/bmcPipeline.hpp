@@ -168,16 +168,26 @@ inline int bmcCtrl::processPipeline( void *source )
         return 0;
     }
 
-    auto &job    = m_pipelineJobs[slot];
-    int   result = -1;
+    auto       &job          = m_pipelineJobs[slot];
+    int         result       = -1;
+    const char *failureStage = "source capture";
 
     try
     {
+#ifdef BMCCTRL_TEST_PIPELINE_CAPTURE
+        BMCCTRL_TEST_PIPELINE_CAPTURE( job.order );
+#endif
         result       = capturePipelineCommand( job.command, source );
         job.identity = job.command.completion;
 
-        if( result >= 0 )
+        if( result < 0 )
         {
+            rejectPipelineVector( job );
+            job.command.preparedStatus = result = 0;
+        }
+        else
+        {
+            failureStage = "actuator conversion";
             pipelineMark( job.command, MagAOX::dmTiming::Marker::actuatorStart );
             const double scale   = m_volume_factor / m_act_gain;
             const float  inverse = 1.0 / scale;
@@ -209,29 +219,48 @@ inline int bmcCtrl::processPipeline( void *source )
                 job.command.saturatedCount += saturated;
             }
 
-            m_outputShape = job.command.shape;
-            pipelineMark( job.command, MagAOX::dmTiming::Marker::actuatorEnd );
-            job.command.dispatchNs = dev::dmTiming::monotonicNowNs();
-
-            { //mutex scope
-                std::lock_guard<std::mutex> sdk( m_sdkMutex );
-                std::lock_guard<std::mutex> command( m_commandMutex );
-
-                if( m_sdkFault || job.cancelled )
-                {
-                    job.cancelled = job.sdkDone = true;
-                }
-                else
-                {
-                    job.queued = true;
-                }
-            }
-
-            m_sdkWake.notify_one();
-#ifdef BMCCTRL_TEST_PIPELINE_PREP
-            BMCCTRL_TEST_PIPELINE_PREP( job.order );
+#ifdef BMCCTRL_TEST_PIPELINE_VECTOR
+            BMCCTRL_TEST_PIPELINE_VECTOR( job.order );
 #endif
-            result = stagePipelineCommand( job.command );
+            const auto current = dev::dmCompletion::captureRecord( &m_imageStream, true );
+            const bool stable  = current.state == MagAOX::dmCompletion::State::busy &&
+                                current.inputInode == job.identity.inputInode &&
+                                current.inputCounter == job.identity.inputCounter &&
+                                current.publicationSec == job.identity.publicationSec &&
+                                current.publicationNsec == job.identity.publicationNsec;
+
+            if( !stable )
+            {
+                rejectPipelineVector( job );
+            }
+            else
+            {
+                failureStage  = "shape publication";
+                m_outputShape = job.command.shape;
+                pipelineMark( job.command, MagAOX::dmTiming::Marker::actuatorEnd );
+                job.command.dispatchNs = dev::dmTiming::monotonicNowNs();
+
+                { //mutex scope
+                    std::lock_guard<std::mutex> sdk( m_sdkMutex );
+                    std::lock_guard<std::mutex> command( m_commandMutex );
+
+                    if( m_sdkFault || job.cancelled )
+                    {
+                        job.cancelled = job.sdkDone = true;
+                    }
+                    else
+                    {
+                        job.queued = true;
+                    }
+                }
+
+                m_sdkWake.notify_one();
+#ifdef BMCCTRL_TEST_PIPELINE_PREP
+                BMCCTRL_TEST_PIPELINE_PREP( job.order );
+#endif
+                failureStage = "channel staging";
+                result       = stagePipelineCommand( job.command );
+            }
         }
     }
     catch( const std::exception &error )
@@ -249,12 +278,23 @@ inline int bmcCtrl::processPipeline( void *source )
     releasePipelineCommand( job.command );
     result = job.command.preparedStatus;
 
+    if( result < 0 )
+    {
+        log<text_log>( std::string( "DM pipeline preparation failed during " ) + failureStage, logPrio::LOG_ERROR );
+    }
+
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_sdkMutex );
         job.staged = true;
 
+        if( job.command.completion.state != MagAOX::dmCompletion::State::busy )
+        {
+            ++m_pipelineReaderUnqualified;
+        }
+
         if( result < 0 )
         {
+            ++m_pipelinePreparationFailures;
             faultPipeline();
         }
 
@@ -303,6 +343,16 @@ inline size_t bmcCtrl::nextPipelinePost() const
     return selected;
 }
 
+inline void bmcCtrl::rejectPipelineVector( PipelineJob &job )
+{
+    job.command.completion.state = MagAOX::dmCompletion::State::unqualified;
+    job.identity.state           = MagAOX::dmCompletion::State::unqualified;
+    std::lock_guard<std::mutex> sdk( m_sdkMutex );
+    m_pipelineHaveLatest = false;
+    ++m_pipelineVectorRejected;
+    supersedePipelineJob( job );
+}
+
 inline void bmcCtrl::supersedePipelineJob( PipelineJob &job )
 {
     if( job.busy && !job.running && !job.submitted && !job.cancelled )
@@ -335,6 +385,88 @@ inline void bmcCtrl::faultPipeline()
 
     m_pipelineWake.notify_one();
     m_commandRetired.notify_all();
+}
+
+inline int bmcCtrl::setupSdkDiagnostics()
+{
+    if( m_sdkWorkerEnabled )
+    {
+        m_indiP_sdkWorker = pcf::IndiProperty( pcf::IndiProperty::Number );
+        m_indiP_sdkWorker.setDevice( configName() );
+        m_indiP_sdkWorker.setName( "sdk_worker" );
+        m_indiP_sdkWorker.setPerm( pcf::IndiProperty::ReadOnly );
+        m_indiP_sdkWorker.setState( pcf::IndiProperty::Idle );
+
+        for( const char *name : { "active",
+                                  "admissionClosed",
+                                  "fault",
+                                  "completed",
+                                  "failures",
+                                  "rejected",
+                                  "coalesced",
+                                  "policy",
+                                  "priority",
+                                  "allowedCpus",
+                                  "activeAgeSec",
+                                  "timeouts" } )
+        {
+            indi::addNumberElement( m_indiP_sdkWorker, name, -1.0, std::numeric_limits<double>::max(), 0.0, "%g" );
+        }
+
+        m_indiP_sdkWorker["admissionClosed"] = double( m_admissionClosed );
+        m_indiP_sdkWorker["policy"]          = double( m_sdkPolicy );
+        m_indiP_sdkWorker["priority"]        = double( m_sdkActualPrio );
+        m_indiP_sdkWorker["allowedCpus"]     = double( m_sdkAllowedCpus );
+
+        if( registerIndiPropertyReadOnly( m_indiP_sdkWorker ) < 0 )
+        {
+            return -1;
+        }
+    }
+
+    if( m_pipelineEnabled )
+    {
+        m_indiP_pipeline = pcf::IndiProperty( pcf::IndiProperty::Number );
+        m_indiP_pipeline.setDevice( configName() );
+        m_indiP_pipeline.setName( "sdk_pipeline" );
+        m_indiP_pipeline.setPerm( pcf::IndiProperty::ReadOnly );
+        m_indiP_pipeline.setState( pcf::IndiProperty::Idle );
+
+        for( const auto *name : { "enabled",
+                                  "capacity",
+                                  "inFlight",
+                                  "queued",
+                                  "sdkActive",
+                                  "postActive",
+                                  "admitted",
+                                  "retired",
+                                  "overloaded",
+                                  "cancelled",
+                                  "postFailures",
+                                  "superseded",
+                                  "vectorRejected",
+                                  "readerUnqualified",
+                                  "preparationFailures",
+                                  "policy",
+                                  "priority",
+                                  "allowedCpus" } )
+        {
+            indi::addNumberElement( m_indiP_pipeline, name, -1.0, std::numeric_limits<double>::max(), 0.0, "%g" );
+        }
+
+        m_indiP_pipeline["enabled"]     = 1.0;
+        m_indiP_pipeline["capacity"]    = double( pipelineCapacity );
+        m_indiP_pipeline["policy"]      = double( m_pipelinePolicy );
+        m_indiP_pipeline["priority"]    = double( m_pipelineActualPrio );
+        m_indiP_pipeline["allowedCpus"] = double( m_pipelineAllowedCpus );
+
+        if( registerIndiPropertyReadOnly( m_indiP_pipeline ) < 0 )
+        {
+            return -1;
+        }
+    }
+
+    return 0;
 }
 
 inline int bmcCtrl::startPipelineWorker()
@@ -608,11 +740,6 @@ inline void bmcCtrl::sdkThreadExec() noexcept
                     m_sdkFailures += result.result != NO_ERR;
                     m_sdkTimeouts += result.newTimeout;
                     m_sdkActiveAgeSec = 0;
-                }
-
-                if( !job.staged || job.command.preparedStatus < 0 )
-                {
-                    identity.state = MagAOX::dmCompletion::State::unqualified;
                 }
 
                 if( result.result != NO_ERR || result.timedOut )

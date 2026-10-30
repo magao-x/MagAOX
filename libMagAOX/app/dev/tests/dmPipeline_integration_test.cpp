@@ -480,5 +480,103 @@ TEST_CASE( "DM pipeline saturation payloads preserve batches rather than replayi
     CHECK( totals == std::array<uint64_t, 2>{ 1, 1 } );
 }
 
+/// Withhold stale read permission without turning newer live metadata into a failed private command.
+/** \ingroup dmPipeline_integration_test */
+TEST_CASE( "DM pipeline late input advancement preserves SDK success and subsequent frame timing", "[dev::dmPipeline]" )
+{
+    // clang-format off
+#ifdef DM_PIPELINE_TEST_DOXYGEN_REF
+    MagAOX::app::dev::dm<Controller, float>::capturePipelineCommand;
+    MagAOX::app::dev::dm<Controller, float>::stagePipelineCommand;
+    MagAOX::app::dev::dm<Controller, float>::releasePipelineCommand;
+    MagAOX::app::dev::dm<Controller, float>::finishPipelineCommand;
+    MagAOX::app::dev::dmTiming::update;
+    MagAOX::app::dev::dmCompletion::publishCompleted;
+#endif
+    // clang-format on
+    for( const bool releaseEnabled : { true, false } )
+    {
+        Controller                  app;
+        Controller::PipelineCommand first;
+        app.allocatePipelineCommand( first );
+
+        if( !releaseEnabled )
+        {
+            app.m_dmReaderRelease.close();
+        }
+
+        app.pipelineShmimMonitorTiming( {}, MagAOX::app::dev::shmimMonitorEvent::receipt );
+        REQUIRE( app.capturePipelineCommand( first, app.m_pixels.data() ) == 0 );
+        first.shape.setConstant( 20 );
+        app.pipelineMark( first, Marker::actuatorEnd );
+        first.dispatchNs = Clock::monotonicNowNs();
+        REQUIRE( app.stagePipelineCommand( first ) == 0 );
+        const auto firstCounter = first.completion.inputCounter;
+        REQUIRE( first.delta( 0, 0 ) == 16 );
+        REQUIRE( first.diff( 0, 0 ) == -7 );
+
+        // A's products are private before the producer publishes B; only provenance is now uncertain.
+        app.next();
+        app.channels( 6, 11 );
+        app.releasePipelineCommand( first );
+        CHECK( first.preparedStatus == 0 );
+        CHECK( first.completion.state == State::unqualified );
+        CHECK_FALSE( readersQualified( app.m_dmReaderRelease.snapshot() ) );
+
+        if( releaseEnabled )
+        {
+            CHECK( app.m_dmReaderRelease.snapshot().state == State::unqualified );
+        }
+
+        REQUIRE( app.complete( first ) == 0 );
+        CHECK( app.products() == std::make_pair( 16.0F, -7.0F ) );
+        CHECK( first.timing.submitted );
+        CHECK( first.timing.outcome == Outcome::success );
+        CHECK( app.m_dmCompletion.snapshot().state == State::unqualified );
+        CHECK( app.m_dmCompletion.snapshot().inputCounter == firstCounter );
+        CHECK_FALSE( qualified( app.m_dmCompletion.snapshot() ) );
+
+        for( int index = 0; index < 2; ++index )
+        {
+            Controller::PipelineCommand command;
+            app.allocatePipelineCommand( command );
+
+            if( index != 0 )
+            {
+                app.next();
+            }
+
+            app.pipelineShmimMonitorTiming( {}, MagAOX::app::dev::shmimMonitorEvent::receipt );
+            REQUIRE( app.capturePipelineCommand( command, app.m_pixels.data() ) == 0 );
+            command.shape.setConstant( 70 + index );
+            app.pipelineMark( command, Marker::actuatorEnd );
+            command.dispatchNs = Clock::monotonicNowNs();
+            REQUIRE( app.stagePipelineCommand( command ) == 0 );
+            app.releasePipelineCommand( command );
+            REQUIRE( command.preparedStatus == 0 );
+
+            if( releaseEnabled )
+            {
+                REQUIRE( readersQualified( app.m_dmReaderRelease.snapshot() ) );
+            }
+
+            REQUIRE( app.complete( command ) == 0 );
+            REQUIRE( qualified( app.m_dmCompletion.snapshot() ) );
+            CHECK( app.m_dmCompletion.snapshot().inputCounter == firstCounter + index + 1 );
+        }
+
+        app.m_dmTiming.update();
+        const auto &summary = app.m_dmTiming.summary();
+        CHECK( summary.total.events == 3 );
+        CHECK( summary.total.receipts == 3 );
+        CHECK( summary.total.submitted == 3 );
+        CHECK( summary.total.failed == 0 );
+        CHECK( summary.total.invalid == 0 );
+        CHECK( summary.total.dropped == 0 );
+        CHECK( summary.metrics[MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::sdk )].count == 3 );
+        CHECK( summary.fgValid );
+    }
+}
+
 } // namespace dmPipelineIntegrationTest
 } // namespace libXWCTest

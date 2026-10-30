@@ -4,6 +4,7 @@
  */
 #include "../../../tests/testXWC.hpp"
 #include "../../../libMagAOX/libMagAOX.hpp"
+#include "../../../INDI/libcommon/IndiXmlParser.hpp"
 #include "sdk/BMCApi.h"
 
 #include <condition_variable>
@@ -13,27 +14,31 @@
 /// \cond TEST_HARNESS
 namespace bmcTimingTest
 {
-std::atomic<int>                 result{ 0 };           ///< Scripted SDK return value.
-std::atomic<unsigned>            calls{ 0 };            ///< SDK submissions made by commandDM.
-std::atomic<int64_t>             firstEntry{ 0 };       ///< SDK entry after the start marker.
-std::atomic<int64_t>             lastReturn{ 0 };       ///< SDK completion before the end marker.
-std::mutex                       mutex;                 ///< Protects deterministic SDK barriers and recorded calls.
-std::condition_variable          changed;               ///< Reports entry, permit-return and SDK exit transitions.
-bool                             block{ false };        ///< Set calls wait for permission after copying their input.
-bool                             entered{ false };      ///< At least one held set call has entered.
-bool                             release{ false };      ///< A test explicitly permitted the held set call to return.
-bool                             perCall{ false };      ///< Permits selected SDK returns independently.
-unsigned                         permits{ 0 };          ///< Number of native calls explicitly permitted to return.
-uint64_t                         heldPrep{ 0 };         ///< Monitor job to hold before channel staging.
-bool                             prepEntered{ false };  ///< Selected monitor job reached its barrier.
-bool                             prepReleased{ false }; ///< Test permitted monitor channel staging.
-uint64_t                         heldPost{ 0 };         ///< Ordered post job to hold before final publication.
-bool                             postEntered{ false };  ///< Held post job reached its deterministic barrier.
-bool                             postReleased{ false }; ///< Test permitted the held post job to finish.
-std::vector<std::vector<double>> history;               ///< Immutable SDK vectors read at each native return.
-bool     throws{ false };    ///< The held call throws after permission instead of returning its result.
-unsigned active{ 0 };        ///< SDK handle operations currently executing.
-unsigned maximumActive{ 0 }; ///< Maximum simultaneous handle operations.
+std::atomic<int>        result{ 0 };      ///< Scripted SDK return value.
+std::atomic<unsigned>   calls{ 0 };       ///< SDK submissions made by commandDM.
+std::atomic<int64_t>    firstEntry{ 0 };  ///< SDK entry after the start marker.
+std::atomic<int64_t>    lastReturn{ 0 };  ///< SDK completion before the end marker.
+std::mutex              mutex;            ///< Protects deterministic SDK barriers and recorded calls.
+std::condition_variable changed;          ///< Reports entry, permit-return and SDK exit transitions.
+bool                    block{ false };   ///< Set calls wait for permission after copying their input.
+bool                    entered{ false }; ///< At least one held set call has entered.
+bool                    release{ false }; ///< A test explicitly permitted the held set call to return.
+bool                    perCall{ false }; ///< Permits selected SDK returns independently.
+unsigned                permits{ 0 };     ///< Number of native calls explicitly permitted to return.
+uint64_t heldVector{ 0 };         ///< Monitor job held after its last combined-pixel read, before source validation.
+bool     vectorEntered{ false };  ///< Selected vector conversion reached its validation barrier.
+bool     captureHold{ false };    ///< Select source-capture rather than post-conversion barrier.
+bool     vectorReleased{ false }; ///< Test permitted source validation and possible SDK dispatch.
+uint64_t heldPrep{ 0 };           ///< Monitor job to hold before channel staging.
+bool     prepEntered{ false };    ///< Selected monitor job reached its barrier.
+bool     prepReleased{ false };   ///< Test permitted monitor channel staging.
+uint64_t heldPost{ 0 };           ///< Ordered post job to hold before final publication.
+bool     postEntered{ false };    ///< Held post job reached its deterministic barrier.
+bool     postReleased{ false };   ///< Test permitted the held post job to finish.
+std::vector<std::vector<double>> history; ///< Immutable SDK vectors read at each native return.
+bool     throws{ false };                 ///< The held call throws after permission instead of returning its result.
+unsigned active{ 0 };                     ///< SDK handle operations currently executing.
+unsigned maximumActive{ 0 };              ///< Maximum simultaneous handle operations.
 std::vector<std::pair<std::string, std::thread::id>> operations; ///< Ordered operation names and actual owner threads.
 std::vector<double> values; ///< SDK input observed at actual return, after tests mutate shared source pixels.
 
@@ -79,6 +84,9 @@ void reset()
     permits                 = 0;
     heldPost                = 0;
     heldPrep                = 0;
+    heldVector              = 0;
+    captureHold             = false;
+    vectorEntered = vectorReleased = false;
     prepEntered = prepReleased = false;
     postEntered = postReleased = false;
     history.clear();
@@ -104,9 +112,10 @@ void waitEntered()
 void permitReturn()
 {
     std::lock_guard<std::mutex> lock( mutex );
-    release      = true;
-    postReleased = true;
-    prepReleased = true;
+    release        = true;
+    postReleased   = true;
+    prepReleased   = true;
+    vectorReleased = true;
     changed.notify_all();
 }
 /// Permit only the first selected native calls to retire.
@@ -161,6 +170,36 @@ void beforePrep( uint64_t order /**< [in] Private command admission order. */ )
                           return prepReleased;
                       } );
     }
+}
+
+/// Hold a selected private vector before its combined-source validation.
+void beforeVector( uint64_t order /**< [in] Private command admission order. */,
+                   bool     capture = false /**< [in] True selects capture before any source metadata is retained. */ )
+{
+    std::unique_lock<std::mutex> lock( mutex );
+
+    if( order == heldVector && capture == captureHold )
+    {
+        vectorEntered = true;
+        changed.notify_all();
+        changed.wait( lock,
+                      []()
+                      {
+                          return vectorReleased;
+                      } );
+    }
+}
+
+/// Wait for the monitor to finish its combined-pixel reads before changing source metadata.
+void waitVector()
+{
+    std::unique_lock<std::mutex> lock( mutex );
+    REQUIRE( changed.wait_for( lock,
+                               std::chrono::seconds( 3 ),
+                               []()
+                               {
+                                   return vectorEntered;
+                               } ) );
 }
 
 /// Wait for the monitor to reach the preparation barrier.
@@ -285,11 +324,15 @@ const char *BMCVersionString()
     return "offline-worker-test";
 }
 
+#define BMCCTRL_TEST_PIPELINE_CAPTURE( order ) bmcTimingTest::beforeVector( order, true )
+#define BMCCTRL_TEST_PIPELINE_VECTOR( order ) bmcTimingTest::beforeVector( order )
 #define BMCCTRL_TEST_PIPELINE_PREP( order ) bmcTimingTest::beforePrep( order )
 #define BMCCTRL_TEST_PIPELINE_POST( order ) bmcTimingTest::beforePost( order )
 #include "../bmcCtrl.hpp"
 #undef BMCCTRL_TEST_PIPELINE_POST
 #undef BMCCTRL_TEST_PIPELINE_PREP
+#undef BMCCTRL_TEST_PIPELINE_VECTOR
+#undef BMCCTRL_TEST_PIPELINE_CAPTURE
 
 namespace MagAOX
 {
@@ -322,7 +365,11 @@ class bmcCtrl_test : public bmcCtrl
     using bmcCtrl::m_commandActive;
     using bmcCtrl::m_commandJob;
     using bmcCtrl::m_completedCommands;
+    using bmcCtrl::m_indiP_pipeline;
+    using bmcCtrl::m_indiP_sdkWorker;
     using bmcCtrl::m_nsat;
+    using bmcCtrl::setupSdkDiagnostics;
+    using MagAOXApp<true>::m_configName;
     using bmcCtrl::m_pipelineCpuset;
     using bmcCtrl::m_pipelineEnabled;
     using bmcCtrl::m_pipelineResult;
@@ -352,6 +399,9 @@ class bmcCtrl_test : public bmcCtrl
     /// Return admitted, retired, overloaded, cancelled, superseded and post-failure counters under ownership lock.
     std::array<uint64_t, 6> pipelineCounts();
 
+    /// Return vector rejection, reader qualification loss and actual preparation failure counts.
+    std::array<uint64_t, 3> pipelineQuality();
+
     /// Return the active pipeline request's immutable diagnostic dispatch stamp.
     int64_t pipelineDispatchStamp();
 
@@ -369,6 +419,15 @@ class bmcCtrl_test : public bmcCtrl
 
     /// Change both live channel inputs after the published early reader release.
     void mutateChannels();
+
+    /// Corrupt staging geometry while the monitor is held before that stage.
+    void breakPipelineStaging();
+
+    /// Mark the combined stream busy after admission to reproduce an unstable metadata capture.
+    void busyInput();
+
+    /// Return the prepared-shape publication count independently of native result streams.
+    uint64_t shapeCounter() const;
 
     /// Return one published delta value from the production output stream.
     float delta( size_t index /**< [in] Image-grid actuator address. */ );
@@ -558,6 +617,12 @@ std::array<uint64_t, 6> bmcCtrl_test::pipelineCounts()
              m_pipelinePostFailures };
 }
 
+std::array<uint64_t, 3> bmcCtrl_test::pipelineQuality()
+{
+    std::lock_guard<std::mutex> lock( m_sdkMutex );
+    return { m_pipelineVectorRejected, m_pipelineReaderUnqualified, m_pipelinePreparationFailures };
+}
+
 int64_t bmcCtrl_test::pipelineDispatchStamp()
 {
     std::lock_guard<std::mutex> lock( m_sdkMutex );
@@ -618,6 +683,21 @@ void bmcCtrl_test::mutateChannels()
         m_products[index].array.F[0] = 42;
         m_products[index].array.F[1] = 42;
     }
+}
+
+void bmcCtrl_test::breakPipelineStaging()
+{
+    m_totalFlat.resize( 1, 1 );
+}
+
+void bmcCtrl_test::busyInput()
+{
+    m_imageStream.md->write = 1;
+}
+
+uint64_t bmcCtrl_test::shapeCounter() const
+{
+    return m_shape.md->cnt0;
 }
 
 float bmcCtrl_test::delta( size_t index )
@@ -1636,9 +1716,10 @@ TEST_CASE( "BMC pipeline watchdog counts once and retains actual native ownershi
     REQUIRE( app.dmTimingSummary().total.noSend == 1 );
 }
 
-/// Native return alone never qualifies a frozen source before the monitor validates its last read.
+/// Validated private vector identity remains independent of later channel-staging and reader qualification.
 /** \ingroup bmcCtrl_unit_test */
-TEST_CASE( "BMC pipeline SDK result remains unqualified until private preparation is validated", "[bmcCtrl][pipeline]" )
+TEST_CASE( "BMC pipeline late input advance revokes reader provenance without faulting successful native work",
+           "[bmcCtrl][pipeline]" )
 {
     // clang-format off
     #ifdef BMCCTRL_TEST_DOXYGEN_REF
@@ -1672,8 +1753,8 @@ TEST_CASE( "BMC pipeline SDK result remains unqualified until private preparatio
     } while( record.inputCounter != 1 || record.finishedNs == 0 );
 
     REQUIRE( record.outcome == MagAOX::dmTiming::Outcome::success );
-    REQUIRE( record.state == State::unqualified );
-    REQUIRE_FALSE( sdkQualified( record ) );
+    REQUIRE( record.state == State::complete );
+    REQUIRE( sdkQualified( record ) );
     const bool advance = GENERATE( false, true );
 
     if( advance )
@@ -1684,9 +1765,21 @@ TEST_CASE( "BMC pipeline SDK result remains unqualified until private preparatio
     bmcTimingTest::permitReturn();
     REQUIRE( prepare.get() == 0 );
     app.waitRetired( 1 );
-    REQUIRE( app.m_sdkFault == advance );
+    REQUIRE_FALSE( app.m_sdkFault );
+    REQUIRE_FALSE( app.m_admissionClosed );
     REQUIRE( qualified( app.m_dmCompletion.snapshot() ) == !advance );
-    REQUIRE_FALSE( sdkQualified( app.m_pipelineResult.snapshot() ) );
+    REQUIRE( sdkQualified( app.m_pipelineResult.snapshot() ) );
+    REQUIRE( app.m_dmCompletion.snapshot().outcome == MagAOX::dmTiming::Outcome::success );
+    REQUIRE( app.pipelineQuality() == std::array<uint64_t, 3>{ 0, uint64_t( advance ), 0 } );
+    REQUIRE( readersQualified( app.m_dmReaderRelease.snapshot() ) == !advance );
+    REQUIRE( app.pipelineInput( 3 ) == 0 );
+    app.waitRetired( 2 );
+    REQUIRE( app.pipelineInput( 4 ) == 0 );
+    app.waitRetired( 3 );
+    app.m_dmTiming.update();
+    REQUIRE( app.dmTimingSummary().fgValid );
+    REQUIRE( app.dmTimingSummary().total.submitted == 3 );
+    REQUIRE( app.dmTimingSummary().total.failed == 0 );
     REQUIRE( ImageStreamIO_closeIm( &sdk ) == 0 );
 }
 
@@ -1776,6 +1869,147 @@ TEST_CASE( "BMC pipeline initializes before monitor images and drains before rea
     app.waitRetired( 2 );
     REQUIRE( app.m_pipelineResult.snapshot().inputCounter == 2 );
     REQUIRE( bmcTimingTest::maximumActive == 1 );
+}
+
+/// An unstable combined source at the last-pixel boundary is never sent or published as a prepared shape.
+/** \ingroup bmcCtrl_unit_test */
+TEST_CASE( "BMC pipeline rejects changed private vector identity before native entry without fault",
+           "[bmcCtrl][pipeline]" )
+{
+    // clang-format off
+    #ifdef BMCCTRL_TEST_DOXYGEN_REF
+    MagAOX::app::bmcCtrl::processPipeline(nullptr);
+    #endif
+    // clang-format on
+    using namespace MagAOX::app;
+    using namespace MagAOX::dmCompletion;
+    bmcCtrl_test app;
+    app.enablePipeline();
+    const bool capture                 = GENERATE( false, true );
+    bmcTimingTest::captureHold         = capture;
+    bmcTimingTest::heldVector          = 1;
+    const auto shapeBefore             = app.shapeCounter();
+    app.pixels()[0]                    = 0.25;
+    auto                       prepare = std::async( std::launch::async,
+                               [&app]()
+                               {
+                                   return app.pipelineInput( 1 );
+                               } );
+    bmcTimingTest::ReturnGuard guard;
+    bmcTimingTest::waitVector();
+    if( capture )
+    {
+        app.busyInput();
+    }
+    else
+    {
+        app.prepareInput( 2 );
+    }
+    bmcTimingTest::permitReturn();
+    REQUIRE( prepare.get() == 0 );
+    app.waitRetired( 1 );
+    REQUIRE( bmcTimingTest::calls == 0 );
+    REQUIRE( app.shapeCounter() == shapeBefore );
+    REQUIRE_FALSE( app.m_sdkFault );
+    REQUIRE_FALSE( app.m_admissionClosed );
+    REQUIRE( app.pipelineCounts()[4] == 1 );
+    REQUIRE( app.pipelineQuality() == std::array<uint64_t, 3>{ 1, 1, 0 } );
+    REQUIRE_FALSE( readersQualified( app.m_dmReaderRelease.snapshot() ) );
+    REQUIRE_FALSE( qualified( app.m_dmCompletion.snapshot() ) );
+    REQUIRE( app.m_dmCompletion.snapshot().outcome == MagAOX::dmTiming::Outcome::noSend );
+    REQUIRE( app.pipelineInput( 3 ) == 0 );
+    app.waitRetired( 2 );
+    REQUIRE( bmcTimingTest::calls == 1 );
+    REQUIRE( app.m_pipelineResult.snapshot().inputCounter == 3 );
+    app.m_dmTiming.update();
+    REQUIRE( app.dmTimingSummary().total.noSend == 1 );
+    REQUIRE( app.dmTimingSummary().total.failed == 0 );
+}
+
+/// A true channel-staging geometry failure remains a fault, unlike ordinary late provenance loss.
+/** \ingroup bmcCtrl_unit_test */
+TEST_CASE( "BMC pipeline retains fatal preparation errors and diagnoses them separately", "[bmcCtrl][pipeline]" )
+{
+    // clang-format off
+    #ifdef BMCCTRL_TEST_DOXYGEN_REF
+    MagAOX::app::bmcCtrl::processPipeline(nullptr);
+    MagAOX::app::bmcCtrl::faultPipeline();
+    #endif
+    // clang-format on
+    using namespace MagAOX::app;
+    using namespace MagAOX::dmCompletion;
+    bmcCtrl_test app;
+    app.enablePipeline();
+    bmcTimingTest::block               = true;
+    bmcTimingTest::heldPrep            = 1;
+    auto                       prepare = std::async( std::launch::async,
+                               [&app]()
+                               {
+                                   return app.pipelineInput( 1 );
+                               } );
+    bmcTimingTest::ReturnGuard guard;
+    bmcTimingTest::waitPrep();
+    bmcTimingTest::waitCalls( 1 );
+    app.breakPipelineStaging();
+
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( bmcTimingTest::mutex );
+        bmcTimingTest::prepReleased = true;
+        bmcTimingTest::changed.notify_all();
+    }
+
+    REQUIRE( prepare.get() == 0 );
+    REQUIRE( app.m_sdkFault );
+    REQUIRE( app.m_admissionClosed );
+    REQUIRE( app.pipelineQuality() == std::array<uint64_t, 3>{ 0, 1, 1 } );
+    bmcTimingTest::permitReturn();
+    app.waitRetired( 1 );
+    REQUIRE( app.pipelineCounts()[5] == 0 );
+    REQUIRE( bmcTimingTest::calls == 1 );
+    REQUIRE( sdkQualified( app.m_pipelineResult.snapshot() ) );
+    REQUIRE( app.m_dmCompletion.snapshot().state == State::error );
+    app.m_dmTiming.update();
+    REQUIRE( app.dmTimingSummary().total.submitted == 1 );
+    REQUIRE( app.dmTimingSummary().total.failed == 1 );
+}
+
+/// Initial worker definitions must serialize before any appLogic update or hardware initialization.
+/** \ingroup bmcCtrl_unit_test */
+TEST_CASE( "BMC worker initial diagnostic definitions are complete valid INDI XML", "[bmcCtrl][pipeline][indi]" )
+{
+    // clang-format off
+    #ifdef BMCCTRL_TEST_DOXYGEN_REF
+    MagAOX::app::bmcCtrl::setupSdkDiagnostics();
+    #endif
+    // clang-format on
+    MagAOX::app::bmcCtrl_test app;
+    app.m_configName = "bmc-offline";
+    app.enablePipeline();
+    REQUIRE( app.setupSdkDiagnostics() == 0 );
+
+    for( const auto *property : { &app.m_indiP_sdkWorker, &app.m_indiP_pipeline } )
+    {
+        std::string xml;
+        REQUIRE_NOTHROW( xml = pcf::IndiXmlParser( pcf::IndiMessage( pcf::IndiMessage::Define, *property ), "1.7" )
+                                   .createXmlString() );
+        REQUIRE( xml.find( "<defNumberVector" ) != std::string::npos );
+        REQUIRE( xml.find( "state=\"Idle\"" ) != std::string::npos );
+        pcf::IndiXmlParser parser( "1.7" );
+        std::string        error;
+        parser.parseXml( xml, error );
+        REQUIRE( error.empty() );
+        REQUIRE( parser.getState() == pcf::IndiXmlParser::CompleteState );
+        const auto decoded = parser.createIndiMessage().getProperty();
+        REQUIRE( decoded.getNumElements() == property->getNumElements() );
+
+        for( unsigned index = 0; index < decoded.getNumElements(); ++index )
+        {
+            REQUIRE_NOTHROW( decoded[index].get<double>() );
+        }
+    }
+
+    REQUIRE( app.m_indiP_pipeline["enabled"].get<double>() == 1 );
+    REQUIRE( app.m_indiP_pipeline["capacity"].get<double>() == 3 );
 }
 
 } // namespace bmcCtrlTest

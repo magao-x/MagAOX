@@ -26,6 +26,7 @@ Test:
 #include <array>
 #include <condition_variable>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <sstream>
 
@@ -270,7 +271,16 @@ class bmcCtrl : public MagAOXApp<true>,
 
     uint64_t m_pipelineCancelled{ 0 }; ///< Admitted commands cancelled before entering the SDK.
 
-    uint64_t m_pipelineSuperseded{ 0 }; ///< Unsent private commands displaced by a newer observed input.
+    uint64_t m_pipelineSuperseded{
+        0 }; ///< Unsent commands superseded by newer observations or unstable source identity.
+
+    uint64_t m_pipelineVectorRejected{
+        0 }; ///< Source identity rejections before native dispatch, including unstable initial capture.
+
+    uint64_t m_pipelineReaderUnqualified{ 0 }; ///< Admitted jobs lacking stable late reader/full provenance.
+
+    uint64_t m_pipelinePreparationFailures{
+        0 }; ///< Actual conversion/staging errors or unexpected preparation exceptions.
 
     MagAOX::dmCompletion::Record m_pipelineLatest; ///< Monitor-announced pointer-free identity under m_sdkMutex.
 
@@ -499,8 +509,14 @@ class bmcCtrl : public MagAOXApp<true>,
     /// Close admission and cancel every not-yet-submitted job; caller holds m_sdkMutex.
     void faultPipeline();
 
+    /// Reject an unstable private source without faulting future admissions; before SDK dispatch only.
+    void rejectPipelineVector( PipelineJob &job /**< [in,out] Unsent job whose source cannot be proved stable. */ );
+
     /// Cancel an unsent job displaced by newer source evidence; requires m_sdkMutex.
     void supersedePipelineJob( PipelineJob &job /**< [in,out] Private unsent command. */ );
+
+    /// Define complete read-only worker diagnostics before any ordinary-loop updates occur.
+    int setupSdkDiagnostics();
 
     /// Start and verify the sole post worker before allowing any pipeline command.
     int startPipelineWorker();
@@ -777,69 +793,19 @@ int bmcCtrl::appStartup()
         return -1;
     }
 
-    if( m_sdkWorkerEnabled )
+    if( m_sdkWorkerEnabled && startSdkWorker() < 0 )
     {
-        if( startSdkWorker() < 0 )
-        {
-            return -1;
-        }
-
-        m_indiP_sdkWorker = pcf::IndiProperty( pcf::IndiProperty::Number );
-        m_indiP_sdkWorker.setDevice( configName() );
-        m_indiP_sdkWorker.setName( "sdk_worker" );
-        m_indiP_sdkWorker.setPerm( pcf::IndiProperty::ReadOnly );
-
-        for( const char *name : { "active",
-                                  "admissionClosed",
-                                  "fault",
-                                  "completed",
-                                  "failures",
-                                  "rejected",
-                                  "coalesced",
-                                  "policy",
-                                  "priority",
-                                  "allowedCpus",
-                                  "activeAgeSec",
-                                  "timeouts" } )
-        {
-            m_indiP_sdkWorker.add( pcf::IndiElement( name ) );
-        }
-
-        registerIndiPropertyReadOnly( m_indiP_sdkWorker );
+        return -1;
     }
 
-    if( m_pipelineEnabled )
+    if( m_pipelineEnabled && startPipelineWorker() < 0 )
     {
-        if( startPipelineWorker() < 0 )
-        {
-            return -1;
-        }
+        return -1;
+    }
 
-        m_indiP_pipeline = pcf::IndiProperty( pcf::IndiProperty::Number );
-        m_indiP_pipeline.setDevice( configName() );
-        m_indiP_pipeline.setName( "sdk_pipeline" );
-        m_indiP_pipeline.setPerm( pcf::IndiProperty::ReadOnly );
-
-        for( const auto *name : { "enabled",
-                                  "capacity",
-                                  "inFlight",
-                                  "queued",
-                                  "sdkActive",
-                                  "postActive",
-                                  "admitted",
-                                  "retired",
-                                  "overloaded",
-                                  "cancelled",
-                                  "postFailures",
-                                  "superseded",
-                                  "policy",
-                                  "priority",
-                                  "allowedCpus" } )
-        {
-            m_indiP_pipeline.add( pcf::IndiElement( name ) );
-        }
-
-        registerIndiPropertyReadOnly( m_indiP_pipeline );
+    if( setupSdkDiagnostics() < 0 )
+    {
+        return -1;
     }
 
     const char *version = BMCVersionString();
@@ -2027,7 +1993,7 @@ void bmcCtrl::updateSdkWorkerINDI()
         return;
     }
 
-    std::array<double, 15> pipeline{};
+    std::array<double, 18> pipeline{};
 
     if( m_pipelineEnabled )
     {
@@ -2053,6 +2019,9 @@ void bmcCtrl::updateSdkWorkerINDI()
                      double( m_pipelineCancelled ),
                      double( m_pipelinePostFailures ),
                      double( m_pipelineSuperseded ),
+                     double( m_pipelineVectorRejected ),
+                     double( m_pipelineReaderUnqualified ),
+                     double( m_pipelinePreparationFailures ),
                      double( m_pipelinePolicy ),
                      double( m_pipelineActualPrio ),
                      double( m_pipelineAllowedCpus ) };
@@ -2099,7 +2068,8 @@ void bmcCtrl::updateSdkWorkerINDI()
                                double( m_sdkActualPrio ),
                                double( m_sdkAllowedCpus ),
                                ageSec,
-                               double( timeouts ) } );
+                               double( timeouts ) },
+                             fault ? pcf::IndiProperty::Alert : pcf::IndiProperty::Ok );
 
     if( m_pipelineEnabled )
     {
@@ -2116,10 +2086,14 @@ void bmcCtrl::updateSdkWorkerINDI()
                                    "cancelled",
                                    "postFailures",
                                    "superseded",
+                                   "vectorRejected",
+                                   "readerUnqualified",
+                                   "preparationFailures",
                                    "policy",
                                    "priority",
                                    "allowedCpus" },
-                                 std::vector<double>( pipeline.begin(), pipeline.end() ) );
+                                 std::vector<double>( pipeline.begin(), pipeline.end() ),
+                                 fault ? pcf::IndiProperty::Alert : pcf::IndiProperty::Ok );
     }
 }
 
