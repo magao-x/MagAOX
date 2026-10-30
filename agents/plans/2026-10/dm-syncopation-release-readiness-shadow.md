@@ -1796,3 +1796,302 @@ classification and slot reuse. It also checks that the three preparation
 segments partition `actuator` and that direct prefix means match the retained
 SDK-entry/receipt pairs. Hardware timing improvement remains to be measured
 with the existing simultaneous capture procedure.
+
+## Preparation-reduction capture: `synco-sim-20261030T212117Z`
+
+The archive records checkout `511672b42a81e5e5822d8bfeeb471d687ca1b092`,
+which includes the preparation optimization and new telemetry but precedes the
+dev merge `63938bd3`. The new controller metrics are present. This is evidence
+for the preparation change, not validation of the subsequent merged camera code.
+
+Saved settings remain bin2/2 kHz/EM gain 1/synchronization On/target −45 C,
+closed loop with scalar gain 1, and RTC latency On. The shutter is SHUT rather
+than OPEN in `153807Z`; the operator confirms modal gains are still zero and
+notes that shutter state does not matter for this processing comparison. No
+independent CPU/IRQ/workload trace is supplied. SDK reports FIFO55 with one
+permitted CPU and post ordinary priority 0 with 60 permitted CPUs; the latter
+is an allowed-CPU count, not CPU number 60.
+
+### Capture completeness and controller quality
+
+The controller log has 121 consecutive valid two-second summaries, session 2,
+sequence 121–241, spanning **21:21:16.274218675–21:23:16.524619596 UTC**
+(120.250400921 s; October 30, 14:21–14:23 Phoenix time). Camera telemetry covers
+119.275328434 s with 114 consecutive valid stage summaries.
+
+The synco collector exits with **255**, rather than the expected timeout 124.
+It supplies only **31 summaries**, from **21:21:17.799821074 through
+21:21:48.085270347 UTC**, then stops with:
+
+```text
+Log .../dmtweeter-synco_20261030211221630583847.bintel failed verification on code=20891 at byte=4893468.
+```
+
+The error message's generic "possibly corrupt" wording does not establish file
+corruption or identify the failed semantic check. The archive contains decoded
+text, not the rejected binary record. All INDI commands succeed, stderr files
+are empty, and the controller/camera collectors end with expected status 124.
+Final INDI snapshots remain available across the broader interval; they must be
+kept separate from the readable 30.285449273 s synco prefix.
+
+Controller cumulative event/receipt/submission counters increase by **240,501**
+between its first/last summaries. Failed, partial, no-send, synthetic, rejected,
+duplicate, gap, invalid and dropped counts remain zero. Controller before/after
+INDI instead spans 240,500 admissions, native completions and retirements, with
+no new faults, overloads, coalescing, rejections, vector/preparation/post failures
+or reader-qualification loss. Worker rejected=1 is unchanged historical state.
+The one-count reader snapshot difference is compatible with independently
+sampled property endpoints; it is not evidence of a missing physical command.
+
+### Preparation timing result
+
+All values below are us. Typical is the median of overlapping rolling-window
+means; maxima are observed per-command extrema within those windows.
+
+| Metric | Previous typical (`153807Z`) | Current typical | Current maximum |
+| --- | ---: | ---: | ---: |
+| Receipt to SDK entry | 23.189, derived | **16.532, direct** | **22.342** |
+| Whole actuator preparation/publication | 19.002 | **12.390** | 17.373 |
+| Numeric conversion/initialization | unavailable | **10.654** | 15.349 |
+| Source revalidation | unavailable | **0.103** | 0.330 |
+| Shape publication | unavailable | **1.628** | 4.719 |
+| Controller entry to reader release | 28.799 | **21.865** | 28.714 |
+| Native SDK | 104.094 | 104.357 | 110.920 |
+| SDK entry to worker ready | 106.341 | 106.594 | 113.174 |
+| Deferred saturation | included in preparation | 3.523 | 46.017 |
+| Private channel staging | 8.257 | 8.104 | 11.622 |
+| Private-product publication | 8.566 | 9.174 | 60.313 |
+| Receipt to post timing finish | 145.881 | 142.846 | **568.523** |
+
+Using matching populations in each window, the comparable derived prefix
+decreases from 23.189154 to **16.529387 us**, a **28.719%** reduction. The directly
+reported prefix agrees with receipt-to-return mean minus native SDK mean in
+119 matching windows. All 121 direct-prefix populations match receipt-to-return
+counts. The new maximum is paired within each command; the previous 68.719 us
+value was only a loose bound and must not be treated as an old measured maximum.
+
+Whole preparation improves by **34.795%** and reader-release latency by
+**24.078%**. In 120 windows with matching populations, the three new segments sum
+to `actuator` to printed precision. Numeric conversion accounts for about **86%**
+of that interval; source validation is small and the shape publisher about 13%.
+The remaining one-window population difference is a retention-boundary effect.
+This identifies the next substantial prefix optimization target without
+attributing the entire gain separately to saturation relocation versus pointer
+hoisting. Older joined-worker preparation/prefix were about 7.7/13.9 us, so all
+historical performance has not been restored.
+
+Deferred saturation now has its own population. Delta wall latency increases
+by about 4.156 us while private staging improves slightly, consistent with
+classification moving into deferred completion rather than disappearing. Native
+SDK/service medians change by only about +0.25%; lower current extrema do not
+establish a newly qualified worst-case bound. The simulator still uses
+35/120/150 us preparation/SDK/post assumptions and is not automatically retuned.
+
+### Deferred completion excursion
+
+Overlapping windows at **21:22:38.445023901 and 21:22:39.447140838 UTC** retain
+a receipt-to-finish maximum of **568.523 us**, callback 567.491 us and delta
+547.093 us. They cannot be counted as two distinct events. In the same window,
+receipt-to-SDK-return max is 123.503 us and SDK-tail max 3.968 us, so the longest
+finish includes **at least 441.052 us after SDK-worker readiness**. SDK/service
+maxima there are only 105.229/108.225 us; prefix, staging, saturation and
+publication also lack a matching large execution excursion.
+
+This remains a deferred queue/wakeup/scheduling or other post-path latency
+problem, distinct from preparation and native SDK duration. The aggregate
+lower bound does not prove that one command's serialized post service exceeds
+150 us; it includes possible waiting behind other post work. Exact event count,
+post-start timing and scheduling cause are not recoverable from these rolling
+statistics. No actual controller overload or failed command accompanies it.
+
+### Shadow outcomes and a modeled main wait
+
+Live synco remains disabled. The shadow still requests three steps on a 500 us
+main period, with 60/20 us virtual reader/delivery and three credits. In the
+readable prefix, each step considers 60,570 slots: step 0 runs all; step 1 runs
+60,564 and skips five for SDK busy and one for preparation busy; step 2 skips
+all for next-main protection. Every summary conserves admissions, retirement,
+credits and skip reasons, with zero main wait in this limited prefix.
+
+Full before/after INDI counters instead show:
+
+| Step | Considered | Would run | Skipped | Reasons exported by INDI |
+| --- | ---: | ---: | ---: | --- |
+| 0 | 238,408 | 238,407 | 1 | One reason not exported |
+| 1 | 238,408 | 238,395 | 13 | 11 SDK busy; 1 preparation busy; 1 reason not exported |
+| 2 | 238,409 | 0 | 238,409 | 238,408 next-main protection; 1 reason not exported |
+
+Step 1 is eligible **99.994547%** of its considered occurrences. The one-count
+step boundary differences reflect non-atomic property snapshots. INDI exposes
+fewer skip-reason counters than detailed telemetry; do not assign the residual
+skips to a specific unrecorded reason.
+
+Modeled main/auxiliary admissions increase by **238,408/238,395**, retirements by
+**476,804**, with occupancy 2→1 and no discards. Thus 476,803 admissions equal
+476,804 retirements plus the −1 occupancy change. Associations and qualified
+readiness each add 238,408. Main-credit misses, resource resets and output gaps
+do not increase; their nonzero lifetime counts predate this run.
+
+However, the final snapshot reports **one modeled main SDK-entry wait**, with
+maximum **99.171 us**, compared with zero before. It occurs after the readable
+prefix, so its timestamp and event context are unavailable. This counter includes
+modeled preparation and SDK queue delay for a genuine main command; it is not
+measured hardware SDK delay, and it does not alone prove auxiliary causation or
+an implementation defect. The simulator deliberately admits unexpected genuine
+mains even when they contend. The whole run therefore cannot be described as
+having zero modeled added-main wait.
+
+SDK/post/credit cycle flags stay true; main-protection, aggregate backend and
+full-cycle feasibility stay false. Maximum prospective main-clearance shortfall
+remains 34.815 us. Faster measured preparation has not changed the fixed model's
+step-2 veto. A validated 6 kHz result is not established by this run.
+
+### Camera and observer checks
+
+Camera events/publications add **238,551**, with no new failure, frame/counter
+gap, invalid, bracket-wide, diagnostic drop or failed serial control. Median
+rolling acquisition/publication SD is **0.302/0.838 us**, comparable to the prior
+0.304/0.882 us. Acquisition intervals span 480–525 us and publication
+478.453–525.162 us. Eleven successful serial transactions retain approximately
+10.568 s cadence and 530.092 ms median transaction duration. Three qualified
+excursion traces overlap serial transactions; association alone is not a new
+causal demonstration. Overall acquisition-to-publication remains about 46.560 us.
+
+Full snapshots show no new primary/combiner/upstream/camera observation gap,
+identity mismatch, incoherence, source reset, rejection or transport-drop
+counter. Early/full reader matches each add 238,408. Early budget overruns stay
+zero; full overruns add 277. Lifetime retained worst holds remain unchanged and
+must not be presented as current maxima. In the readable prefix early processing
+is typically 22.150 us and notification 3.848 us, with observed hold at most
+33.083 us; full notification reaches 99.688 us in a different event. Signed early
+completion offsets can be negative when synco observes the associated command
+late; zero clamped hold is not zero controller processing.
+
+Next analysis should recover the rejected binary synco record and identify the
+single modeled main-wait event before retuning/qualifying the shadow. The
+preparation improvement itself is well supported by complete controller data.
+Only this engineering record is changed by the capture analysis; no runtime
+policy, bound or instrument setting is changed.
+
+## Raw recovery and live-reader correction for `212117Z`
+
+The operator supplied the original binary as the regular file
+`/home/jrmales/tmp/synco-sim-20261030T212117Z`. It contains **10,475,164 bytes and
+1,058 complete records**, spanning **21:12:21.630583847–21:30:14.844173703 UTC**.
+Every record passes FlatBuffers structural verification and the current
+`telem_dmsynco` semantic checks, both without fast math and with the project's
+`-O3 -ffast-math` flags. The unmodified workstation `logdump` also reads the full
+file successfully. There is no failing invariant in the retained binary.
+
+### Exact cause of the collector failure
+
+The first missing decoded record is zero-based index **557**, timestamp
+**21:21:49.096156210 UTC**, at physical file offset **4,897,526**. It has a
+14-byte header and 11,120-byte payload. Supplying only the first **8,192 bytes**
+of that record reproduces the original rejection exactly, including code 20891,
+reported byte 4,893,468, and the preceding last-good timestamp.
+
+Only 8,178 payload bytes were available; 2,942 remained unwritten when the reader
+checked the record. `logdump::execute()` performed one `fread()` and immediately
+verified the buffer without requiring the full payload, including in follow
+mode. The later-completed record is valid. Its byte accounting also omitted
+two extension-header bytes per record and subtracted the full expected payload
+even after reading less. The original message therefore reports
+4,897,526 − (558 × 2) − 2,942 = **4,893,468**, rather than the physical start.
+This is a live partial-append race, not demonstrated telemetry corruption.
+
+The reader correction retains partial base/extended headers and payloads until
+their remaining bytes arrive in follow mode. Finite reads stop at an unfinished
+tail without verifying stale bytes. Filtering consumes complete records rather
+than seeking past a live writer, file rotation retains completed old-file tails,
+and explicit-file follow waits without assuming an application prefix. Complete
+malformed records still fail semantic verification. Error offsets use physical
+record starts, including extension headers. No serializer, simulator, DM command
+or camera timing behavior is changed by this reader fix.
+
+### Recovered complete-capture shadow accounting
+
+For comparison with the camera/controller capture, select the 119 raw summaries
+from **21:21:17.799821074 through 21:23:17.004190843 UTC** (119.204369769 s;
+the last record is before the final camera summary). These were recovered from
+the binary; the original text collector itself still failed after 31 records.
+
+| Step | Considered | Would run | Skipped | Complete reasons |
+| --- | ---: | ---: | ---: | --- |
+| 0 | 238,408 | 238,407 | 1 | Missing output |
+| 1 | 238,408 | 238,395 | 13 | 11 SDK busy; 1 preparation busy; 1 missing output |
+| 2 | 238,408 | 0 | 238,408 | 238,407 next-main protection; 1 missing output |
+
+All skip-reason residuals are zero. Modeled admissions add 238,409 main and
+238,395 auxiliary jobs, retirement adds 476,803, and in-flight changes by +1;
+conservation holds in every summary. No new credit miss, reset or discard occurs.
+The one-count differences from INDI endpoint deltas are consistent with their
+different, independently sampled boundaries. Fixed bounds and feasibility flags
+remain as described above.
+
+### Locating the modeled delay
+
+The modeled main-wait counter first rises from zero to one in raw record **606**,
+timestamp **21:22:38.606862161 UTC**; record 605 at 21:22:37.596659758 still has
+zero. Maximum wait becomes **99,171 ns** and remains unchanged through the supplied
+file's end. The exact event lies within this roughly 1.010-second observation
+bracket, not necessarily at the summary timestamp.
+
+That record's two-second combined-stream **publication** intervals are
+481.198–518.048 us, while its observer **receipt** intervals range
+**23.014–987.554 us**. Camera producer intervals are 498–502 us while camera
+observer receipts span 388.634–610.483 us. Early reader completion can precede
+the later primary/combined observation baseline by **460.239 us**. These are
+strong nearby signs of delayed/bunched observation with steady producer cadence.
+There is no accompanying increase in observation quality errors or counter gaps.
+
+The model receives the combined callback's monotonic observation time, after
+callback scheduling and the cycle-mutex acquisition; it does not receive the
+producer publication timestamp or the controller's actual receipt timestamp.
+The ordinary app loop also holds that mutex while evaluating/copying simulation
+state and building status vectors, making lock ownership another candidate
+source of observer delay. No selected event trace identifies its contribution
+in this window.
+Its main-wait counter is preparation-queue delay plus SDK-queue delay, relative
+to an unobstructed delivery/preparation schedule. Two genuine observations
+20.829 us apart, with **no auxiliaries**, reproduce exactly one 99.171 us modeled
+wait in an offline test of the current resource model: 19.171 us preparation
+wait plus 80 us SDK queue wait. This is a counterexample to inferring auxiliary
+causation from the aggregate count, not reconstruction of the capture's jobs.
+
+Recovered full-completion **processing** reaches 568.183 us in records 606/607,
+coincident with the modeled-delay reporting window and consistent with the
+controller's independent 568.523 us receipt-to-finish maximum. Required and
+observed holds in the recovered capture reach only 238.831/241.566 us because
+those measures use synco's potentially delayed observation baseline. The retained
+worst-hold sample remains historical, so the current long-processing command's
+identity is not exported. Summaries are also collected sequentially: in record
+606 the combined timing evaluation precedes the model evaluation by 8.372237 ms.
+The correlated window cannot uniquely identify the waiting main, the blocking
+job, the preparation/SDK split, or a shared OS cause for these observations.
+
+This resolves the log-reader failure and locates the modeled-wait interval.
+It does not establish a physical 99.171 us SDK-entry stall or a failed physical
+command. Per-main model/job provenance would be required to attribute the
+conditional queue delay exactly; simulation bounds remain unchanged.
+
+### Reader-fix verification
+
+The existing placeholder `logdump_test` is replaced with seven offline cases
+(**205 assertions**, all passing with project optimization flags). Deterministic
+stdio-boundary fixtures split the base header, both extended header sizes and
+large payloads, including the observed 8,192-byte boundary. They verify that a
+valid record is emitted only after completion, complete malformed records still
+fail, offsets include filtered/extended records, explicit-file follow works,
+rotation drains a just-completed old tail, and time-span mode excludes unfinished
+tails. All temporary files are private to the workstation test. Doxygen links
+are grouped under `logdump_unit_test` / `application_unit_test`.
+
+The actual rebuilt `logdump` reads all **1,058** supplied records with exit 0.
+For the exact truncated reproduction it emits **557** complete records through
+21:21:48.085270347 and exits 0 without falsely reporting corruption. The focused
+tests separately exercise appending the remainder in follow mode. The utility
+build, clang-format check and diff whitespace check pass; independent framing/
+rotation/error-propagation review finds no blocking issue. Rebuild/install
+`logdump` for the next instrument-side collection; BMC, camera and synco
+executables do not change as part of this fix.

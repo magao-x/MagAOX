@@ -72,6 +72,11 @@ $ less tests/results/latest/run.log
  * \ingroup unit_test
  */
 
+/** \defgroup logdump_unit_test Logdump Unit Tests
+ * \brief Complete-record decoding, live partial appends, filtering, and log rotation tests.
+ * \ingroup application_unit_test
+ */
+
 /** \defgroup dmSyncopation_unit_test DM Syncopation Unit Tests
  * \brief Deterministic scheduling, control and local shared-memory publication tests.
  * \ingroup application_unit_test
