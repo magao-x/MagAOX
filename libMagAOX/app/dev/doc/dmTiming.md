@@ -162,7 +162,7 @@ be useful while state is Idle.
 | Property | Elements and units |
 | --- | --- |
 | `dm_timing` | `receipt_fps`, `receipt_min`, `receipt_max`, `receipt_jitter`, `receipt_count`; `send_fps`, `send_min`, `send_max`, `send_jitter`, `send_count`; `receipt_send`, `receipt_send_jitter`, `receipt_send_min`, `receipt_send_max`, `receipt_send_count`. FPS is reciprocal mean interval; durations are seconds. |
-| `dm_timing_stages` | Names `dispatch`, `actuator`, `sdk`, `saturation`, `delta`, `post`, `throughDelta`, `callback`, `receiptCallback`, `publicationInterval`, `sdkDispatch`, `readerRelease`, `staging`, `publication`, `sdkWait`, each suffixed `_mean`, `_jitter`, `_min`, `_max`, `_count`, `_span`. Durations/coverage use seconds. |
+| `dm_timing_stages` | Names `dispatch`, `actuator`, `sdk`, `saturation`, `delta`, `post`, `throughDelta`, `callback`, `receiptCallback`, `publicationInterval`, `sdkDispatch`, `readerRelease`, `staging`, `publication`, `sdkWait`, `sdkTail`, `sdkService`, each suffixed `_mean`, `_jitter`, `_min`, `_max`, `_count`, `_span`. Durations/coverage use seconds. |
 | `dm_timing_quality` | `window`, `span`, `age` in seconds; `capacity`, `queued`, `session`, `sequence`; `enabled`, `valid` as 0/1; cumulative counters listed below: 21 elements. `age=-1` means no retained endpoint. |
 | `dm_timing_state` | Text elements `state`, `clock`, `receipt`, `send`. States are `disabled`, `warmingUp`, `valid`, `stale`, `unavailable`; endpoint descriptions identify the clock and software return semantics. |
 
@@ -198,9 +198,10 @@ detailed record first. LogMeta names use `<metric>_mean`, `_stddev`, `_min`,
 `_max`, `_count`, `_span`, `_valid`; unavailable duration projections are NaN.
 The detailed record appends `publicationInterval` as metric ID 12; the original
 twelve IDs and compatible `fgtimings` fields are unchanged. Worker metrics append
-IDs 13–17. Rebuilt readers accept complete historical twelve/thirteen-row
-records and the current eighteen-row records. Rebuild `logdump` to read new
-records and access the new names.
+IDs 13–17, and SDK-worker readiness appends IDs 18–19. Rebuilt readers accept
+complete historical twelve/thirteen/eighteen-row records and the current
+twenty-row records. Historical records project the absent new durations as NaN.
+Rebuild `logdump` to read new records and access the new names.
 
 The appended metrics are:
 
@@ -211,6 +212,24 @@ The appended metrics are:
 | `staging` | Private delta channel-read/calculation interval. |
 | `publication` | Deferred delta/difference publication after SDK success. |
 | `sdkWait` | Monitor's matching-result wait, including handoff overhead. |
+| `sdkTail` | SDK return to worker readiness after result publication, bookkeeping and notifications. |
+| `sdkService` | SDK entry to that same worker-ready endpoint, excluding idle waiting for another request. |
+
+The BMC pipeline captures readiness on its next worker-loop mutex acquisition,
+after publishing the prior native result and committing its handoff, immediately
+before waiting for or selecting another request. The prior job remains leased
+until the stamp is stored, so post processing cannot recycle the result early.
+`sdkService` and `sdkTail` are paired within each command; their maxima need not
+belong to the command with the maximum `sdk` duration. Readiness can precede
+monitor staging/reader release when those stages overlap. These metrics remain
+unavailable on paths that do not supply a worker-ready endpoint.
+
+Worker readiness excludes subsequent request selection and native-entry glue.
+It also does not establish a free pipeline credit, successful post retirement or
+open admission after a fault. The SDK-result image still marks actual native
+return, which precedes this readiness endpoint. An isolated command contributes
+both new timing populations without requiring a following command or faster DM
+updates.
 
 Worker-mode `delta` spans staging, SDK-result wait and publication. It is a wall
 interval rather than approximately the old delta computation cost; `staging`

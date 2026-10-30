@@ -219,6 +219,27 @@ population is also empty because the monitor does not join the result. The
 producer copies only fixed job payloads; the ordinary saturation consumer drains accumulated
 mask counts without losing intermediate jobs when notifications coalesce.
 
+Pipeline timing also reports `sdkTail` (native return to worker readiness) and
+`sdkService` (native entry to worker readiness). Readiness is stamped after result
+publication, completion bookkeeping, notifications and the next loop's mutex
+acquisition, immediately before selecting or waiting for another request. The
+result lease is retained until that stamp is stored; ordered post work then
+receives the complete immutable result. No extra producer queue or allocation is
+needed. Native-active diagnostics still clear at actual SDK return.
+
+These populations measure SDK-worker occupancy even at a sparse command rate;
+the idle wait for the next command is excluded. They appear in `[dmtimes]` with
+mean, jitter, minimum, maximum, count and span, and in `dm_timing_stages` under
+the corresponding names. All durations use seconds. Rebuild `bmcCtrl` and
+`logdump`, then repeat the existing simultaneous 2 kHz capture; no new settings
+are required. Synchronous and joined-worker modes leave these populations empty.
+
+`sdkService` excludes next-request selection and native-entry glue; readiness
+also does not guarantee admission or a free three-job credit if post work stalls.
+The existing SDK-result stream retains its native-return endpoint and wire
+format. Its notification is not a worker-ready signal. Monitor reader clearance
+and full post completion retain their independent meanings.
+
 A native error, actual preparation error, diagnostic timeout or post error closes
 admission and cancels unsent jobs. Native success arriving after a timeout
 remains an actual successful SDK result, but its success-dependent post
