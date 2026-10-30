@@ -71,8 +71,7 @@ class cameraSim : public MagAOXApp<>,
     static constexpr bool c_stdCamera_fanSpeed =
         false; ///< app::dev config to tell stdCamera not to expose fan-speed control
 
-    static constexpr bool c_stdCamera_emGain =
-        true; ///< app::dev config to tell stdCamera to expose EM gain controls
+    static constexpr bool c_stdCamera_emGain = true; ///< app::dev config to tell stdCamera to expose EM gain controls
 
     static constexpr bool c_stdCamera_exptimeCtrl =
         true; ///< app::dev config to tell stdCamera to expose exposure time controls
