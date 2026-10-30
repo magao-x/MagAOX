@@ -498,7 +498,7 @@ class andorCtrl : public MagAOXApp<>,
     /// Initialize the SDK and select the configured camera.
     int cameraSelect();
 
-    /// Read sensor temperature and cooling status.
+    /// Read sensor temperature and cooling status, refreshing validity with the caller's INDI mutex held.
     int getTemp();
 
     /// Read exposure timing and the resulting frame rate.
@@ -787,6 +787,7 @@ inline int andorCtrl::appLogic()
     {
         sleep( 30 );
         writeConfig();
+        std::lock_guard<std::mutex> lock( m_indiMutex );
         m_shutterStatus = "READY";
 
         state( stateCodes::READY );
@@ -943,6 +944,11 @@ inline int andorCtrl::appShutdown()
 
 inline int andorCtrl::cameraSelect()
 {
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_indiMutex );
+        invalidateTempReading();
+        updateEMGainTempReady();
+    }
     unsigned int error;
 
     if( !m_libInit )
@@ -1267,6 +1273,7 @@ inline int andorCtrl::cameraSelect()
 
 inline int andorCtrl::getTemp()
 {
+    invalidateTempReading();
     // unsigned int error;
     // int temp_low {999}, temp_high {999};
     // error = GetTemperatureRange(&temp_low, &temp_high);
@@ -1307,11 +1314,13 @@ inline int andorCtrl::getTemp()
         m_tempControlStatus    = false;
         m_tempControlOnTarget  = false;
         m_ccdTemp              = -999;
+        updateEMGainTempReady();
         log<software_error>( { __FILE__, __LINE__, "ANDOR SDK GetTemperatureF:" + andorSDKErrorName( status ) } );
         return -1;
     }
 
-    m_ccdTemp = temp;
+    updateTempReading( temp );
+    updateEMGainTempReady();
     recordCamera();
 
     return 0;
@@ -1571,6 +1580,7 @@ inline int andorCtrl::writeConfig()
 
 inline int andorCtrl::powerOnDefaults()
 {
+    invalidateTempReading();
     // Camera boots up with this true in most cases.
     m_tempControlStatus    = false;
     m_tempControlStatusSet = false;
@@ -1596,6 +1606,7 @@ inline int andorCtrl::powerOnDefaults()
 
 inline int andorCtrl::setTempControl()
 {
+    invalidateTempReading();
     if( m_tempControlStatusSet )
     {
         unsigned int error = CoolerON();
@@ -1630,6 +1641,7 @@ inline int andorCtrl::setTempControl()
 
 inline int andorCtrl::setTempSetPt()
 {
+    invalidateTempReading();
     int temp = m_ccdTempSetpt + 0.5;
 
     unsigned int error = SetTemperature( temp );
@@ -1718,6 +1730,8 @@ inline int andorCtrl::configureAcquisition()
     // lock mutex
     std::unique_lock<std::mutex> lock( m_indiMutex );
 
+    invalidateTempReading();
+    updateEMGainTempReady();
     unsigned int error;
 
     int status;

@@ -46,6 +46,12 @@ struct Fake
     /// Sensor temperature status returned by the SDK.
     piint m_temperatureStatus{ PicamSensorTemperatureStatus_Locked };
 
+    /// Result of reading sensor temperature.
+    PicamError m_temperatureError{ PicamError_None };
+
+    /// Result of reading sensor temperature status.
+    PicamError m_temperatureStatusError{ PicamError_None };
+
     /// Last temperature setpoint written to the SDK.
     piflt m_temperatureTarget{ -55 };
 
@@ -91,6 +97,10 @@ struct Fixture : outletHarness::Controller<MagAOX::app::picamCtrl>
     using MagAOX::app::dev::stdCamera<MagAOX::app::picamCtrl>::m_configMaxTemp;
     using MagAOX::app::dev::stdCamera<MagAOX::app::picamCtrl>::m_emGainRequiresTemp;
     using MagAOX::app::dev::stdCamera<MagAOX::app::picamCtrl>::m_emGainTemp;
+    using MagAOX::app::dev::stdCamera<MagAOX::app::picamCtrl>::m_emGainTempMode;
+    using MagAOX::app::dev::stdCamera<MagAOX::app::picamCtrl>::m_emGainMaxTemp;
+    using MagAOX::app::dev::stdCamera<MagAOX::app::picamCtrl>::m_ccdTempValid;
+    using MagAOX::app::dev::stdCamera<MagAOX::app::picamCtrl>::m_indiP_emGainTempReady;
     using MagAOX::app::dev::stdCamera<MagAOX::app::picamCtrl>::m_indiP_emGain;
     using MagAOX::app::dev::stdCamera<MagAOX::app::picamCtrl>::m_indiP_emGainOff;
     using MagAOX::app::dev::stdCamera<MagAOX::app::picamCtrl>::m_emGain;
@@ -579,6 +589,145 @@ TEST_CASE( "picamCtrl standard EM-gain-off request selects unity", "[picamCtrl]"
         REQUIRE( f.m_indiP_emGainOff.getState() == INDI_ALERT );
     }
 }
+/// Maximum-temperature protection accepts cold unlocked readings only after the requested target is applied.
+/** \ingroup picamCtrl_unit_test */
+TEST_CASE( "picamCtrl maximum-temperature gain guard requires fresh applied-target readings", "[picamCtrl]" )
+{
+    // clang-format off
+    #ifdef PICAMCTRL_TEST_DOXYGEN_REF
+    picamCtrl::getTemps(); picamCtrl::configureAcquisition(); picamCtrl::connect();
+    picamCtrl::powerOnDefaults(); picamCtrl::setTempSetPt();
+    dev::stdCamera<picamCtrl>::newCallBack_emgain();
+    #endif
+    // clang-format on
+    Fixture f;
+    REQUIRE( f.connect() == 0 );
+    f.m_emGainRequiresTemp = true;
+    f.m_emGainTempMode     = "maxTemp";
+    f.m_emGainTemp         = -55;
+    f.m_emGainMaxTemp      = -45;
+    REQUIRE( static_cast<dev::stdCamera<picamCtrl> &>( f ).appStartup() == 0 );
+    f.state( stateCodes::OPERATING );
+    g_fake.m_temperatureStatus = PicamSensorTemperatureStatus_Unlocked;
+    g_fake.m_temperature       = -46;
+    REQUIRE( f.requestGain( 100 ) == -1 );
+    REQUIRE( f.getTemps() == 0 );
+    REQUIRE_FALSE( f.m_ccdTempValid );
+    REQUIRE( f.requestGain( 100 ) == -1 );
+    REQUIRE( g_fake.m_gainWrites == 0 );
+    REQUIRE( f.configureAcquisition() == 0 );
+    REQUIRE_FALSE( f.m_ccdTempValid );
+    REQUIRE( f.m_indiP_emGainTempReady["toggle"].getSwitchState() == pcf::IndiElement::Off );
+    REQUIRE( f.requestGain( 100 ) == -1 );
+    f.m_reconfig = true; // An unrelated queued reconfiguration does not stale a completed temperature poll.
+    REQUIRE( f.getTemps() == 0 );
+    REQUIRE( f.m_ccdTempValid );
+    REQUIRE_FALSE( f.m_tempControlOnTarget );
+    REQUIRE( f.m_tempControlStatusStr == "UNLOCKED" );
+    REQUIRE( f.m_indiP_emGainTempReady["toggle"].getSwitchState() == pcf::IndiElement::On );
+    REQUIRE( f.requestGain( 100 ) == 0 );
+    REQUIRE( g_fake.m_gainWrites == 1 );
+
+    SECTION( "the ceiling is inclusive and warmer readings block new gain commands" )
+    {
+        g_fake.m_temperature = -45;
+        REQUIRE( f.getTemps() == 0 );
+        REQUIRE( f.requestGain( 100 ) == 0 );
+        g_fake.m_temperature = -44.9;
+        REQUIRE( f.getTemps() == 0 );
+        REQUIRE( f.m_ccdTempValid );
+        REQUIRE( f.m_indiP_emGainTempReady["toggle"].getSwitchState() == pcf::IndiElement::Off );
+        REQUIRE( f.requestGain( 100 ) == -1 );
+        REQUIRE( g_fake.m_gainWrites == 2 );
+    }
+    SECTION( "invalid measurements and fault statuses discard prior cold readings" )
+    {
+        for( double temperature : { -999.0,
+                                    std::numeric_limits<double>::quiet_NaN(),
+                                    std::numeric_limits<double>::infinity(),
+                                    -std::numeric_limits<double>::infinity() } )
+        {
+            g_fake.m_temperature = temperature;
+            REQUIRE( f.getTemps() == 0 );
+            REQUIRE_FALSE( f.m_ccdTempValid );
+            REQUIRE( f.requestGain( 100 ) == -1 );
+        }
+        g_fake.m_temperature = -46;
+        for( piint status : { static_cast<piint>( PicamSensorTemperatureStatus_Faulted ), -1 } )
+        {
+            g_fake.m_temperatureStatus = status;
+            REQUIRE( f.getTemps() == 0 );
+            REQUIRE_FALSE( f.m_ccdTempValid );
+            REQUIRE( f.requestGain( 100 ) == -1 );
+        }
+        REQUIRE( g_fake.m_gainWrites == 1 );
+    }
+    SECTION( "failed temperature or status reads invalidate the last complete poll" )
+    {
+        for( bool failStatus : { false, true } )
+        {
+            f.state( stateCodes::OPERATING );
+            g_fake.m_temperatureError       = PicamError_None;
+            g_fake.m_temperatureStatusError = PicamError_None;
+            REQUIRE( f.getTemps() == 0 );
+            REQUIRE( f.m_ccdTempValid );
+            ( failStatus ? g_fake.m_temperatureStatusError : g_fake.m_temperatureError ) =
+                PicamError_InvalidParameterValue;
+            REQUIRE( f.getTemps() == -1 );
+            REQUIRE_FALSE( f.m_ccdTempValid );
+            REQUIRE( f.m_indiP_emGainTempReady["toggle"].getSwitchState() == pcf::IndiElement::Off );
+            f.state( stateCodes::OPERATING ); // Validity itself must prevent reuse after state recovery.
+            REQUIRE( f.requestGain( 100 ) == -1 );
+        }
+        REQUIRE( g_fake.m_gainWrites == 1 );
+    }
+    SECTION( "a deferred target and subsequent configuration each require a new applied-target reading" )
+    {
+        REQUIRE( f.request( -50 ) == 0 );
+        f.m_emGainTemp = -50;
+        f.m_reconfig   = false;
+        REQUIRE( f.getTemps() == 0 );
+        REQUIRE_FALSE( f.m_ccdTempValid );
+        REQUIRE( f.requestGain( 100 ) == -1 );
+        REQUIRE( f.configureAcquisition() == 0 );
+        REQUIRE( g_fake.m_temperatureTarget == -50 );
+        REQUIRE_FALSE( f.m_ccdTempValid );
+        REQUIRE( f.requestGain( 100 ) == -1 );
+        REQUIRE( f.getTemps() == 0 );
+        REQUIRE( f.requestGain( 100 ) == 0 );
+        REQUIRE( f.configureAcquisition() == 0 );
+        REQUIRE_FALSE( f.m_ccdTempValid );
+        REQUIRE( f.requestGain( 100 ) == -1 );
+        REQUIRE( f.getTemps() == 0 );
+        REQUIRE( f.requestGain( 100 ) == 0 );
+    }
+    SECTION( "repeated complete cold polls do not publish transient permission loss" )
+    {
+        f.messages();
+        REQUIRE( f.getTemps() == 0 );
+        REQUIRE( f.getTemps() == 0 );
+        REQUIRE( f.m_indiP_emGainTempReady["toggle"].getSwitchState() == pcf::IndiElement::On );
+        for( const auto &message : f.messages() )
+            REQUIRE( message.getProperty().getName() != "emgain_temp_ready" );
+    }
+    SECTION( "power defaults and reconnect cannot reuse the previous cold reading" )
+    {
+        REQUIRE( f.powerOnDefaults() == 0 );
+        REQUIRE_FALSE( f.m_ccdTempValid );
+        REQUIRE( f.getTemps() == 0 );
+        REQUIRE_FALSE( f.m_ccdTempValid );
+        REQUIRE( f.requestGain( 100 ) == -1 );
+        REQUIRE( f.configureAcquisition() == 0 );
+        REQUIRE( f.getTemps() == 0 );
+        REQUIRE( f.m_ccdTempValid );
+        REQUIRE( f.connect() == 0 );
+        f.state( stateCodes::OPERATING );
+        REQUIRE_FALSE( f.m_ccdTempValid );
+        REQUIRE( f.getTemps() == 0 );
+        REQUIRE_FALSE( f.m_ccdTempValid );
+        REQUIRE( f.requestGain( 100 ) == -1 );
+    }
+}
 } // namespace picamCtrlTest
 } // namespace libXWCTest
 
@@ -797,6 +946,9 @@ extern "C"
         static_cast<void>( parameter );
         static_cast<void>( value );
         ++picamHarness::g_fake.m_calls;
+        if( parameter == PicamParameter_SensorTemperatureReading &&
+            picamHarness::g_fake.m_temperatureError != PicamError_None )
+            return picamHarness::g_fake.m_temperatureError;
         *value = parameter == PicamParameter_SensorTemperatureReading ? picamHarness::g_fake.m_temperature : 1;
         return PicamError_None;
     }
@@ -812,7 +964,11 @@ extern "C"
         ++picamHarness::g_fake.m_calls;
         *value = 1;
         if( parameter == PicamParameter_SensorTemperatureStatus )
+        {
+            if( picamHarness::g_fake.m_temperatureStatusError != PicamError_None )
+                return picamHarness::g_fake.m_temperatureStatusError;
             *value = picamHarness::g_fake.m_temperatureStatus;
+        }
         else if( parameter == PicamParameter_ReadoutControlMode )
             *value = PicamReadoutControlMode_FrameTransfer;
         else if( parameter == PicamParameter_AdcEMGain )

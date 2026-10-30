@@ -7,6 +7,9 @@
 #include "../../../../tests/testXWC.hpp"
 #include "../../../../tests/outletAppTest.hpp"
 
+#include <chrono>
+#include <future>
+
 /// \cond DOXYGEN_SUPPRESS_TEST_HARNESS
 namespace temperatureHarness
 {
@@ -38,16 +41,22 @@ class Camera : public MagAOX::app::outletTestApp<>,
     static constexpr bool c_stdCamera_hasShutter      = false;       ///< Disable shutter control.
     static constexpr bool c_stdCamera_usesStateString = false;       ///< Disable persistent state descriptions.
 
+    using stdCameraT::emGainTempReady;
+    using stdCameraT::invalidateTempReading;
     using stdCameraT::m_ccdTemp;
     using stdCameraT::m_ccdTempSetpt;
+    using stdCameraT::m_ccdTempValid;
     using stdCameraT::m_configMaxTemp;
     using stdCameraT::m_configMinTemp;
     using stdCameraT::m_emGain;
+    using stdCameraT::m_emGainMaxTemp;
     using stdCameraT::m_emGainRequiresTemp;
     using stdCameraT::m_emGainSet;
     using stdCameraT::m_emGainTemp;
+    using stdCameraT::m_emGainTempMode;
     using stdCameraT::m_indiP_emGain;
     using stdCameraT::m_indiP_emGainOff;
+    using stdCameraT::m_indiP_emGainTempReady;
     using stdCameraT::m_indiP_temp;
     using stdCameraT::m_indiP_tempcont;
     using stdCameraT::m_maxTemp;
@@ -56,6 +65,8 @@ class Camera : public MagAOX::app::outletTestApp<>,
     using stdCameraT::m_tempControlOnTarget;
     using stdCameraT::m_tempControlStatus;
     using stdCameraT::onPowerOff;
+    using stdCameraT::updateEMGainTempReady;
+    using stdCameraT::updateTempReading;
 
     /// Number of derived setter calls.
     unsigned m_setCalls{ 0 };
@@ -428,6 +439,8 @@ TEST_CASE( "stdCamera configures EM-gain temperature protection only for capable
         Fixture<true, true> f;
         REQUIRE( f.config.m_targets.count( "camera.emGainRequiresTemp" ) == 1 );
         REQUIRE( f.config.m_targets.count( "camera.emGainTemp" ) == 1 );
+        REQUIRE( f.config.m_targets.count( "camera.emGainTempMode" ) == 1 );
+        REQUIRE( f.config.m_targets.count( "camera.emGainMaxTemp" ) == 1 );
         REQUIRE_FALSE( f.m_emGainRequiresTemp );
         REQUIRE( f.requestGain( 100 ) == 0 );
         REQUIRE( f.m_gainCalls == 1 );
@@ -447,12 +460,18 @@ TEST_CASE( "stdCamera configures EM-gain temperature protection only for capable
         Fixture<> f;
         REQUIRE( f.config.m_targets.count( "camera.emGainRequiresTemp" ) == 0 );
         REQUIRE( f.config.m_targets.count( "camera.emGainTemp" ) == 0 );
+        REQUIRE( f.config.m_targets.count( "camera.emGainTempMode" ) == 0 );
+        REQUIRE( f.config.m_targets.count( "camera.emGainMaxTemp" ) == 0 );
+        REQUIRE_FALSE( f.m_indiP_emGainTempReady.find( "toggle" ) );
     }
     SECTION( "cameras without temperature control retain EM gain" )
     {
         Fixture<false, true, false> f;
         REQUIRE( f.config.m_targets.count( "camera.emGainRequiresTemp" ) == 0 );
         REQUIRE( f.config.m_targets.count( "camera.emGainTemp" ) == 0 );
+        REQUIRE( f.config.m_targets.count( "camera.emGainTempMode" ) == 0 );
+        REQUIRE( f.config.m_targets.count( "camera.emGainMaxTemp" ) == 0 );
+        REQUIRE_FALSE( f.m_indiP_emGainTempReady.find( "toggle" ) );
         REQUIRE( f.requestGain( 100 ) == 0 );
         REQUIRE( f.m_gainCalls == 1 );
     }
@@ -649,6 +668,399 @@ TEST_CASE( "stdCamera validates the required EM-gain temperature setpoint", "[st
             REQUIRE( f.m_emGainTemp == target );
         }
     }
+}
+
+/// Locked behavior remains the default, while maximum-temperature mode requires an explicit compatible threshold.
+/** \ingroup stdCamera_unit_test */
+TEST_CASE( "stdCamera configures the EM-gain temperature enforcement mode", "[stdCamera]" )
+{
+    // clang-format off
+    #ifdef STDCAMERA_TEST_DOXYGEN_REF
+    MagAOX::app::dev::stdCamera::setupConfig(); MagAOX::app::dev::stdCamera::loadConfig();
+    MagAOX::app::dev::stdCamera::newCallBack_emgain();
+    #endif
+    // clang-format on
+    SECTION( "default locked mode retains existing behavior without a measured-temperature requirement" )
+    {
+        Fixture<true, true> f;
+        f.configText( "[camera]\nemGainRequiresTemp=true\nemGainTemp=-55\n" );
+        REQUIRE( f.load() == 0 );
+        REQUIRE( f.m_emGainTempMode == "locked" );
+        REQUIRE_FALSE( f.m_ccdTempValid );
+        f.state( stateCodes::OPERATING );
+        f.m_tempControlStatus   = true;
+        f.m_tempControlOnTarget = true;
+        REQUIRE( f.requestGain( 100 ) == 0 );
+    }
+    SECTION( "unknown enforcement modes are rejected" )
+    {
+        for( const char *mode : { "invalid", "maxtemp", "lockedjunk", "" } )
+        {
+            CAPTURE( mode );
+            Fixture<true, true> f;
+            f.configText( std::string( "[camera]\nemGainTempMode=" ) + mode + "\n" );
+            REQUIRE( f.load() == -1 );
+        }
+    }
+    SECTION( "malformed or non-finite explicit maxima are rejected even with protection disabled" )
+    {
+        for( const char *maximum : { "nan", "inf", "-inf", "1e100", "-30junk", "" } )
+        {
+            CAPTURE( maximum );
+            Fixture<true, true> f;
+            f.configText( std::string( "[camera]\nemGainMaxTemp=" ) + maximum + "\n" );
+            REQUIRE( f.load() == -1 );
+        }
+    }
+    SECTION( "enabled maximum-temperature mode requires its maximum" )
+    {
+        Fixture<true, true> f;
+        f.configText( "[camera]\nemGainRequiresTemp=true\nemGainTemp=-55\nemGainTempMode=maxTemp\n" );
+        REQUIRE( f.load() == -1 );
+    }
+    SECTION( "maximum cannot be colder than the required setpoint" )
+    {
+        Fixture<true, true> f;
+        f.configText( "[camera]\nemGainRequiresTemp=true\nemGainTemp=-55\nemGainTempMode=maxTemp\n"
+                      "emGainMaxTemp=-56\n" );
+        REQUIRE( f.load() == -1 );
+    }
+    SECTION( "maximum equal to the required setpoint is valid" )
+    {
+        Fixture<true, true> f;
+        f.configText( "[camera]\nemGainRequiresTemp=true\nemGainTemp=-55\nemGainTempMode=maxTemp\n"
+                      "emGainMaxTemp=-55\n" );
+        REQUIRE( f.load() == 0 );
+        REQUIRE( f.m_emGainTempMode == "maxTemp" );
+        REQUIRE( f.m_emGainMaxTemp == -55 );
+    }
+    SECTION( "the master flag still disables the temperature restriction" )
+    {
+        Fixture<true, true> f;
+        f.configText( "[camera]\nemGainRequiresTemp=false\nemGainTempMode=maxTemp\n" );
+        REQUIRE( f.load() == 0 );
+        REQUIRE_FALSE( f.m_ccdTempValid );
+        REQUIRE( f.requestGain( 100 ) == 0 );
+    }
+}
+
+/// Maximum-temperature mode admits an unlocked cold camera and rejects a locked camera above the inclusive threshold.
+/** \ingroup stdCamera_unit_test */
+TEST_CASE( "stdCamera enforces an inclusive measured EM-gain temperature maximum", "[stdCamera]" )
+{
+    // clang-format off
+    #ifdef STDCAMERA_TEST_DOXYGEN_REF
+    MagAOX::app::dev::stdCamera::loadConfig(); MagAOX::app::dev::stdCamera::updateTempReading();
+    MagAOX::app::dev::stdCamera::newCallBack_emgain();
+    #endif
+    // clang-format on
+    Fixture<true, true> f;
+    f.configText( "[camera]\nemGainRequiresTemp=true\nemGainTemp=-55\nemGainTempMode=maxTemp\n"
+                  "emGainMaxTemp=-30\n" );
+    REQUIRE( f.load() == 0 );
+    f.state( stateCodes::OPERATING );
+    f.m_tempControlStatus   = true;
+    f.m_tempControlOnTarget = false;
+    for( float temperature : { -40.0f, std::nextafter( -30.0f, -std::numeric_limits<float>::infinity() ), -30.0f } )
+    {
+        CAPTURE( temperature );
+        f.updateTempReading( temperature );
+        REQUIRE( f.m_ccdTempValid );
+        REQUIRE( f.requestGain( 100 ) == 0 );
+    }
+    REQUIRE( f.m_gainCalls == 3 );
+    f.m_tempControlOnTarget = true;
+    f.updateTempReading( std::nextafter( -30.0f, std::numeric_limits<float>::infinity() ) );
+    REQUIRE( f.requestGain( 200 ) == -1 );
+    REQUIRE( f.m_gainCalls == 3 );
+    REQUIRE( f.m_emGainSet == 100 );
+    REQUIRE( f.m_indiP_emGain["target"].get<float>() == 100 );
+    REQUIRE( f.m_indiP_emGain.getState() == INDI_ALERT );
+    for( float target : { 0.0f, 1.0f } )
+        REQUIRE( f.requestGain( target ) == 0 );
+    REQUIRE( f.requestGainOff() == 0 );
+    REQUIRE( f.m_gainOffCalls == 1 );
+}
+
+/// A cold valid reading cannot override an incorrect setpoint, inactive cooling, or an unavailable camera.
+/** \ingroup stdCamera_unit_test */
+TEST_CASE( "stdCamera retains camera prerequisites in maximum-temperature mode", "[stdCamera]" )
+{
+    // clang-format off
+    #ifdef STDCAMERA_TEST_DOXYGEN_REF
+    MagAOX::app::dev::stdCamera::updateTempReading(); MagAOX::app::dev::stdCamera::newCallBack_emgain();
+    MagAOX::app::dev::stdCamera::newCallBack_emgain_off();
+    #endif
+    // clang-format on
+    Fixture<true, true> f;
+    f.configText( "[camera]\nemGainRequiresTemp=true\nemGainTemp=-55\nemGainTempMode=maxTemp\n"
+                  "emGainMaxTemp=-30\n" );
+    REQUIRE( f.load() == 0 );
+    f.state( stateCodes::READY );
+    f.m_tempControlStatus = true;
+    f.updateTempReading( -40 );
+    REQUIRE( f.requestGain( 100 ) == 0 );
+    SECTION( "wrong requested setpoint" )
+    {
+        f.m_ccdTempSetpt = -40;
+    }
+    SECTION( "inactive cooling" )
+    {
+        f.m_tempControlStatus = false;
+    }
+    SECTION( "camera error state" )
+    {
+        f.state( stateCodes::ERROR );
+    }
+    SECTION( "non-finite required setpoint" )
+    {
+        f.m_emGainTemp = std::numeric_limits<float>::quiet_NaN();
+    }
+    SECTION( "non-finite requested setpoint" )
+    {
+        f.m_ccdTempSetpt = std::numeric_limits<float>::quiet_NaN();
+    }
+    SECTION( "non-finite runtime maximum" )
+    {
+        f.m_emGainMaxTemp = std::numeric_limits<float>::quiet_NaN();
+    }
+    SECTION( "runtime maximum colder than the required setpoint" )
+    {
+        f.m_emGainMaxTemp = -60;
+        f.updateTempReading( -65 );
+    }
+    REQUIRE( f.requestGain( 200 ) == -1 );
+    REQUIRE( f.m_gainCalls == 1 );
+    REQUIRE( f.m_emGainSet == 100 );
+    REQUIRE( f.m_indiP_emGain["target"].get<float>() == 100 );
+    REQUIRE( f.requestGain( 0 ) == 0 );
+    REQUIRE( f.requestGain( 1 ) == 0 );
+    REQUIRE( f.requestGainOff() == 0 );
+}
+
+/// Invalid, stale, sentinel, and non-finite readings must never satisfy a maximum-temperature restriction.
+/** \ingroup stdCamera_unit_test */
+TEST_CASE( "stdCamera requires a valid measured temperature for maximum-temperature mode", "[stdCamera]" )
+{
+    // clang-format off
+    #ifdef STDCAMERA_TEST_DOXYGEN_REF
+    MagAOX::app::dev::stdCamera::updateTempReading(); MagAOX::app::dev::stdCamera::invalidateTempReading();
+    MagAOX::app::dev::stdCamera::newCallBack_emgain();
+    #endif
+    // clang-format on
+    Fixture<true, true> f;
+    f.configText( "[camera]\nemGainRequiresTemp=true\nemGainTemp=-55\nemGainTempMode=maxTemp\n"
+                  "emGainMaxTemp=-30\n" );
+    REQUIRE( f.load() == 0 );
+    f.state( stateCodes::OPERATING );
+    f.m_tempControlStatus   = true;
+    f.m_tempControlOnTarget = true;
+    REQUIRE_FALSE( f.m_ccdTempValid );
+    REQUIRE( f.requestGain( 100 ) == -1 );
+    REQUIRE( f.m_gainCalls == 0 );
+    for( float temperature : { -999.0f,
+                               std::nextafter( -273.15f, -std::numeric_limits<float>::infinity() ),
+                               std::numeric_limits<float>::quiet_NaN(),
+                               std::numeric_limits<float>::infinity(),
+                               -std::numeric_limits<float>::infinity() } )
+    {
+        CAPTURE( temperature );
+        f.updateTempReading( temperature );
+        REQUIRE_FALSE( f.m_ccdTempValid );
+        REQUIRE( f.requestGain( 100 ) == -1 );
+        REQUIRE( f.m_gainCalls == 0 );
+    }
+    f.updateTempReading( -273.15f );
+    REQUIRE( f.m_ccdTempValid );
+    f.updateTempReading( -40 );
+    REQUIRE( f.requestGain( 100 ) == 0 );
+    f.invalidateTempReading();
+    REQUIRE_FALSE( f.m_ccdTempValid );
+    REQUIRE( f.requestGain( 200 ) == -1 );
+    REQUIRE( f.m_gainCalls == 1 );
+    for( float temperature : { -999.0f,
+                               std::nextafter( -273.15f, -std::numeric_limits<float>::infinity() ),
+                               std::numeric_limits<float>::quiet_NaN(),
+                               std::numeric_limits<float>::infinity(),
+                               -std::numeric_limits<float>::infinity() } )
+    {
+        f.m_ccdTemp      = temperature;
+        f.m_ccdTempValid = true;
+        REQUIRE( f.requestGain( 200 ) == -1 );
+        REQUIRE( f.m_gainCalls == 1 );
+    }
+    REQUIRE( f.requestGain( 0 ) == 0 );
+    REQUIRE( f.requestGain( 1 ) == 0 );
+    REQUIRE( f.requestGainOff() == 0 );
+}
+
+/// Shared temperature and power transitions invalidate readings until a subsequent measurement is reported.
+/** \ingroup stdCamera_unit_test */
+TEST_CASE( "stdCamera invalidates measured temperature across control and power transitions", "[stdCamera]" )
+{
+    // clang-format off
+    #ifdef STDCAMERA_TEST_DOXYGEN_REF
+    MagAOX::app::dev::stdCamera::newCallBack_temp(); MagAOX::app::dev::stdCamera::newCallBack_temp_controller();
+    MagAOX::app::dev::stdCamera::powerOnTemp(); MagAOX::app::dev::stdCamera::onPowerOff();
+    MagAOX::app::dev::stdCamera::newCallBack_emgain(); MagAOX::app::dev::stdCamera::updateTempReading();
+    #endif
+    // clang-format on
+    Fixture<true, true> f;
+    f.configText( "[camera]\nemGainRequiresTemp=true\nemGainTemp=-55\nemGainTempMode=maxTemp\n"
+                  "emGainMaxTemp=-30\n" );
+    REQUIRE( f.load() == 0 );
+    f.state( stateCodes::OPERATING );
+    f.m_tempControlStatus = true;
+    f.updateTempReading( -40 );
+    REQUIRE( f.requestGain( 100 ) == 0 );
+    SECTION( "successful target change" )
+    {
+        REQUIRE( f.request( -50 ) == 0 );
+        REQUIRE_FALSE( f.m_ccdTempValid );
+        REQUIRE( f.request( -55 ) == 0 );
+    }
+    SECTION( "controller disable request" )
+    {
+        REQUIRE( f.requestController( false ) == 0 );
+    }
+    SECTION( "controller enable request" )
+    {
+        REQUIRE( f.requestController( true ) == 0 );
+    }
+    SECTION( "power-on defaults" )
+    {
+        REQUIRE( f.powerOnTemp() == 0 );
+    }
+    SECTION( "power-off" )
+    {
+        REQUIRE( f.onPowerOff() == 0 );
+    }
+    REQUIRE_FALSE( f.m_ccdTempValid );
+    f.state( stateCodes::OPERATING );
+    f.m_tempControlStatus = true;
+    REQUIRE( f.requestGain( 200 ) == -1 );
+    REQUIRE( f.m_gainCalls == 1 );
+    f.updateTempReading( -30 );
+    REQUIRE( f.requestGain( 200 ) == 0 );
+    REQUIRE( f.m_gainCalls == 2 );
+}
+
+/// The read-only readiness switch uses the same predicate as amplified-gain requests and updates across invalidation.
+/** \ingroup stdCamera_unit_test */
+TEST_CASE( "stdCamera publishes the enforced EM-gain temperature readiness", "[stdCamera]" )
+{
+    // clang-format off
+    #ifdef STDCAMERA_TEST_DOXYGEN_REF
+    MagAOX::app::dev::stdCamera::appStartup(); MagAOX::app::dev::stdCamera::emGainTempReady();
+    MagAOX::app::dev::stdCamera::updateEMGainTempReady(); MagAOX::app::dev::stdCamera::updateINDI();
+    MagAOX::app::dev::stdCamera::newCallBack_emgain(); MagAOX::app::dev::stdCamera::newCallBack_temp();
+    MagAOX::app::dev::stdCamera::onPowerOff();
+    #endif
+    // clang-format on
+    SECTION( "readiness starts false when the property is first published" )
+    {
+        outletHarness::Controller<temperatureHarness::Camera<true, true, true>> f;
+        f.driver();
+        REQUIRE( f.appStartup() == 0 );
+        REQUIRE( f.m_indiP_emGainTempReady.getName() == "emgain_temp_ready" );
+        REQUIRE( f.m_indiP_emGainTempReady.getPerm() == pcf::IndiProperty::ReadOnly );
+        REQUIRE( f.m_indiP_emGainTempReady["toggle"].getSwitchState() == pcf::IndiElement::Off );
+    }
+    SECTION( "published maximum-temperature readiness agrees with gain enforcement" )
+    {
+        Fixture<true, true> f;
+        f.configText( "[camera]\nemGainRequiresTemp=true\nemGainTemp=-55\nemGainTempMode=maxTemp\n"
+                      "emGainMaxTemp=-30\n" );
+        REQUIRE( f.load() == 0 );
+        f.state( stateCodes::OPERATING );
+        f.m_tempControlStatus   = true;
+        f.m_tempControlOnTarget = false;
+        f.updateTempReading( -40 );
+        REQUIRE( f.updateINDI() == 0 );
+        REQUIRE( f.emGainTempReady() );
+        REQUIRE( f.m_indiP_emGainTempReady["toggle"].getSwitchState() == pcf::IndiElement::On );
+        REQUIRE( f.requestGain( 100 ) == 0 );
+
+        f.m_tempControlOnTarget = true;
+        f.updateTempReading( -20 );
+        REQUIRE( f.requestGain( 200 ) == -1 );
+        REQUIRE_FALSE( f.emGainTempReady() );
+        REQUIRE( f.m_indiP_emGainTempReady["toggle"].getSwitchState() == pcf::IndiElement::Off );
+
+        f.updateTempReading( -40 );
+        f.invalidateTempReading();
+        REQUIRE( f.updateINDI() == 0 );
+        REQUIRE_FALSE( f.emGainTempReady() );
+        REQUIRE( f.m_indiP_emGainTempReady["toggle"].getSwitchState() == pcf::IndiElement::Off );
+        REQUIRE( f.requestGain( 200 ) == -1 );
+
+        f.updateTempReading( -40 );
+        f.updateEMGainTempReady();
+        REQUIRE( f.m_indiP_emGainTempReady["toggle"].getSwitchState() == pcf::IndiElement::On );
+        REQUIRE( f.request( -50 ) == 0 );
+        REQUIRE_FALSE( f.emGainTempReady() );
+        REQUIRE( f.m_indiP_emGainTempReady["toggle"].getSwitchState() == pcf::IndiElement::Off );
+        REQUIRE( f.request( -55 ) == 0 );
+        f.updateTempReading( -40 );
+        REQUIRE( f.updateINDI() == 0 );
+        REQUIRE( f.emGainTempReady() );
+        REQUIRE( f.m_indiP_emGainTempReady["toggle"].getSwitchState() == pcf::IndiElement::On );
+        REQUIRE( f.onPowerOff() == 0 );
+        REQUIRE_FALSE( f.emGainTempReady() );
+        REQUIRE( f.m_indiP_emGainTempReady["toggle"].getSwitchState() == pcf::IndiElement::Off );
+
+        f.m_emGainRequiresTemp = false;
+        f.updateEMGainTempReady();
+        REQUIRE( f.emGainTempReady() );
+        REQUIRE( f.m_indiP_emGainTempReady["toggle"].getSwitchState() == pcf::IndiElement::On );
+    }
+}
+
+/// Readiness refresh must skip a busy INDI mutex and publish on the next uncontended application pass.
+/** \ingroup stdCamera_unit_test */
+TEST_CASE( "stdCamera readiness refresh does not wait for a busy INDI mutex", "[stdCamera]" )
+{
+    // clang-format off
+    #ifdef STDCAMERA_TEST_DOXYGEN_REF
+    MagAOX::app::dev::stdCamera::appLogic(); MagAOX::app::dev::stdCamera::updateEMGainTempReady();
+    #endif
+    // clang-format on
+    Fixture<true, true> f;
+    f.configText( "[camera]\nemGainRequiresTemp=true\nemGainTemp=-55\nemGainTempMode=maxTemp\n"
+                  "emGainMaxTemp=-30\n" );
+    REQUIRE( f.load() == 0 );
+    f.updateEMGainTempReady();
+    f.state( stateCodes::READY );
+    f.m_tempControlStatus = true;
+    f.updateTempReading( -40 );
+    REQUIRE( f.emGainTempReady() );
+    REQUIRE( f.m_indiP_emGainTempReady["toggle"].getSwitchState() == pcf::IndiElement::Off );
+
+    std::promise<void> entered;
+    auto               started = entered.get_future();
+    std::future<int>   result;
+    bool               enteredInTime       = false;
+    bool               returnedWhileLocked = false;
+    { //mutex scope
+        std::unique_lock<std::mutex> lock( f.m_indiMutex );
+        result        = std::async( std::launch::async,
+                             [&]
+                             {
+                                 entered.set_value();
+                                 return f.appLogic();
+                             } );
+        enteredInTime = started.wait_for( std::chrono::seconds( 2 ) ) == std::future_status::ready;
+        if( enteredInTime )
+            returnedWhileLocked = result.wait_for( std::chrono::milliseconds( 250 ) ) == std::future_status::ready;
+    }
+    // Always release the mutex before assertions or joining, including when a blocking implementation regresses.
+    REQUIRE( result.wait_for( std::chrono::seconds( 2 ) ) == std::future_status::ready );
+    REQUIRE( result.get() == 0 );
+    REQUIRE( enteredInTime );
+    REQUIRE( returnedWhileLocked );
+    REQUIRE( f.m_indiP_emGainTempReady["toggle"].getSwitchState() == pcf::IndiElement::Off );
+    REQUIRE( f.appLogic() == 0 );
+    REQUIRE( f.m_indiP_emGainTempReady["toggle"].getSwitchState() == pcf::IndiElement::On );
 }
 
 /// A locked camera must be configured to the dedicated EM-gain setpoint, independently of startup temperature.

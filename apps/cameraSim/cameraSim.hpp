@@ -165,13 +165,13 @@ class cameraSim : public MagAOXApp<>,
      */
     virtual int appStartup();
 
-    /// Run the simulated camera state machine
+    /// Run the simulated camera state machine and refresh its measured-temperature evidence.
     virtual int appLogic();
 
     /// Shut down the simulated framegrabber and telemetry.
     virtual int appShutdown();
 
-    /// Apply the requested ROI and allocate the simulated frame buffer.
+    /// Apply the requested ROI under the INDI mutex, invalidating the prior temperature measurement.
     int configureAcquisition();
 
     /// Initialize the simulated acquisition timing.
@@ -205,7 +205,7 @@ class cameraSim : public MagAOXApp<>,
     /// Apply the requested simulated temperature-controller state.
     int setTempControl();
 
-    /// Set simulated sensor temperature to the requested target.
+    /// Set simulated sensor temperature to the requested target, awaiting the next measurement cycle.
     int setTempSetPt();
 
     /// Apply the requested simulated readout speed.
@@ -483,6 +483,10 @@ inline void cameraSim::loadConfig()
 
 inline int cameraSim::appStartup()
 {
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_indiMutex );
+        invalidateTempReading();
+    }
 
     //=================================
     // Do camera configuration here
@@ -553,6 +557,8 @@ inline int cameraSim::appLogic()
         if( !lock.owns_lock() )
             return 0;
 
+        updateTempReading( m_ccdTemp );
+
         if( stdCamera<cameraSim>::updateINDI() < 0 )
         {
             log<software_error>( { __FILE__, __LINE__ } );
@@ -582,6 +588,10 @@ inline int cameraSim::appShutdown()
 
 int cameraSim::configureAcquisition()
 {
+    std::unique_lock<std::mutex> lock( m_indiMutex );
+    invalidateTempReading();
+    updateEMGainTempReady();
+
     try
     {
         recordCamera( true );
@@ -703,6 +713,7 @@ inline float cameraSim::fps()
 
 inline int cameraSim::powerOnDefaults()
 {
+    invalidateTempReading();
     m_nextROI.x     = m_default_x;
     m_nextROI.y     = m_default_y;
     m_nextROI.w     = m_default_w;
@@ -715,12 +726,14 @@ inline int cameraSim::powerOnDefaults()
 
 inline int cameraSim::setTempControl()
 {
+    invalidateTempReading();
     m_tempControlStatus = m_tempControlStatusSet;
     return 0;
 }
 
 inline int cameraSim::setTempSetPt()
 {
+    invalidateTempReading();
     m_ccdTemp = m_ccdTempSetpt;
     return 0;
 }

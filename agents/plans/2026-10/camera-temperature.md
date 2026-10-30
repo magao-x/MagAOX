@@ -95,6 +95,13 @@ consuming a request is earlier than successfully committing the SDK temperature.
 The implemented protocol, regressions, and remaining recovery boundaries are in
 [frameGrabber-reconfiguration-race.md](frameGrabber-reconfiguration-race.md).
 
+The subsequent optional maximum-temperature mode, including fresh-reading
+tracking and a camsci1 ceiling of -40 C at the unchanged -50 C setpoint, is
+recorded in [camera-max-temp.md](camera-max-temp.md). Lock-based enforcement
+remains the default. Its separate companion-config patch supersedes camsci1's
+original locked-status caution with the shared EM-gain temperature-readiness
+result.
+
 On 2026-10-30 the user reported that the behavior was working and requested a
 push and PR description. The code branch is published as
 `jrmales/camera-emgain-temperature`. The companion configuration is already
@@ -122,17 +129,18 @@ Description:
 ```md
 This work was performed by GPT-6 (Codex) in response to the prompt (condensed): "Address camera temperature setpoints (#270), require a configurable setpoint for EM-gain operation, fix lost framegrabber reconfiguration requests, and add a camera-specific EM-gain-off request and GUI button (#105)."
 
-When `camera.emGainRequiresTemp=true`, reject EM-gain requests above 1 unless the setpoint equals `camera.emGainTemp`, cooling is active and on target, and the camera is READY or OPERATING. Gain 0/1 remains available. PICam requires fresh lock after deferred temperature changes.
+When `camera.emGainRequiresTemp=true`, reject EM-gain requests above 1 unless the setpoint equals `camera.emGainTemp`, cooling is active, the camera is READY or OPERATING, and the selected temperature criterion is satisfied. The default `locked` mode requires on-target cooling; optional `maxTemp` mode requires a valid measured temperature at or below `camera.emGainMaxTemp` and ignores lock status. Gain 0/1 remains available. PICam requires a fresh poll after deferred temperature targets are committed.
 
 - Add `emgain_off.request` and a shared camera GUI button. Each camera selects its safe value: OCAM, PICam, and cameraSim use gain 1; Andor maps logical gain 1 to SDK gain 0.
 - Make framegrabber reconfiguration requests atomic and consume them before cleanup, retaining requests that arrive during cleanup/configuration and requeuing failed cleanup. Adjust OCAM's internal FPS/synchro application and mode locking for repeated passes.
 - Companion configuration enables protection and power-gated temperature cautions for camwfs (-45 C), camsci1 (-50 C), and camsci2 (-55 C). It is already merged into `magao-x/config` branch `onsky`; this PR includes a reference patch.
+- The maximum-temperature follow-up configures camsci1's ceiling to -40 C with its -50 C required setpoint. Its caution follows the new `emgain_temp_ready.toggle`, driven by the same guard predicate. This follow-up config is on `jrmales/camsci1-emgain-max-temp`; the additional patch and validation are recorded in `camera-max-temp.md`.
 
 Validation: 14,270 assertions across 57 camera/GUI cases passed, plus worker/consumer regressions and 264 configuration/rule checks. Deterministic lost-request tests fail against the original header. The user reports the behavior working. Andor's SDK was unavailable; MCP3208's six failures and a CRED2 test abort reproduce unchanged against the original header. No instrument hardware was operated by the agent.
 
 The temperature guard blocks new requests; it does not automatically lower existing gain. The off control is a momentary command. Documentation and formatting cleanup are separated from functional commits.
 
-Implementation records and affected files: `agents/plans/2026-10/camera-temperature.md`, `camera-emgain-off.md`, and `frameGrabber-reconfiguration-race.md`.
+Implementation records and affected files: `agents/plans/2026-10/camera-temperature.md`, `camera-emgain-off.md`, `frameGrabber-reconfiguration-race.md`, and `camera-max-temp.md`.
 
 Addresses #270 and #105.
 ```

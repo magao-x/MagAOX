@@ -203,8 +203,8 @@ class ocam2KCtrl : public MagAOXApp<>,
     /// Do any needed shutdown tasks.
     virtual int appShutdown();
 
-    /// Get the current device temperatures
-    /**
+    /// Poll device temperatures and refresh measured-temperature validity.
+    /** Caller holds the INDI mutex; incomplete polls invalidate the previous measurement.
      * \returns 0 on success
      * \returns -1 on error
      */
@@ -237,7 +237,7 @@ class ocam2KCtrl : public MagAOXApp<>,
     int setTempControl();
 
     /// Set the CCD temperature setpoint [stdCamera interface].
-    /** Sets the temperature to m_ccdTempSetpt.
+    /** Sets the temperature to m_ccdTempSetpt and requires a new poll before measured-temperature gain permission.
      * \returns 0 on success
      * \returns -1 on error
      */
@@ -697,6 +697,11 @@ inline int ocam2KCtrl::appLogic()
 
     if( state() == stateCodes::NOTCONNECTED || state() == stateCodes::ERROR )
     {
+        { //mutex scope
+            std::lock_guard<std::mutex> lock( m_indiMutex );
+            invalidateTempReading();
+            updateEMGainTempReady();
+        }
         m_temps.setInvalid();
 
         std::string response;
@@ -928,12 +933,14 @@ inline int ocam2KCtrl::appShutdown()
 
 inline int ocam2KCtrl::getTemps()
 {
+    invalidateTempReading();
     std::string response;
 
     { //mutex scope
         std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
         if( pdvSerialWriteRead( response, "temp" ) != 0 )
         {
+            updateEMGainTempReady();
             if( powerState() != 1 || powerStateTarget() != 1 )
                 return -1;
             return log<software_error, -1>( { "" } );
@@ -945,6 +952,7 @@ inline int ocam2KCtrl::getTemps()
 
         if( parseTemps( temps, response ) < 0 )
         {
+            updateEMGainTempReady();
             if( powerState() != 1 || powerStateTarget() != 1 )
                 return -1;
 
@@ -953,6 +961,7 @@ inline int ocam2KCtrl::getTemps()
             m_ccdTempSetpt         = m_temps.SET;
             m_tempControlStatus    = false;
             m_tempControlStatusStr = "UNKNOWN";
+            updateEMGainTempReady();
 
             recordTemps();
             recordCamera();
@@ -999,6 +1008,9 @@ inline int ocam2KCtrl::getTemps()
             m_tempControlOnTarget  = false;
         }
 
+        updateTempReading( m_temps.CCD );
+        updateEMGainTempReady();
+
         // Telemeter:
         recordTemps();
         recordCamera();
@@ -1016,6 +1028,7 @@ inline int ocam2KCtrl::getTemps()
 
 inline int ocam2KCtrl::powerOnDefaults()
 {
+    invalidateTempReading();
     // Camera boots up with this true in most cases.
     m_tempControlStatusSet = false;
     m_tempControlStatus    = false;
@@ -1052,6 +1065,7 @@ inline int ocam2KCtrl::setTempControl()
 
     comStr += command;
 
+    invalidateTempReading();
     { //mutex scope
         std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
         if( pdvSerialWriteRead( response, comStr ) != 0 )
@@ -1087,6 +1101,7 @@ inline int ocam2KCtrl::setTempSetPt()
     if( stdCameraT::validateTempSetPt( m_ccdTempSetpt ) < 0 )
         return -1;
 
+    invalidateTempReading();
     { //mutex scope
         std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
         if( pdvSerialWriteRead( response, "temp " + tempStr ) != 0 )
@@ -1419,6 +1434,8 @@ inline int ocam2KCtrl::configureAcquisition()
     std::unique_lock<std::mutex>          lock( m_indiMutex );
     std::lock_guard<std::recursive_mutex> cameraGuard( m_cameraMutex );
 
+    invalidateTempReading();
+    updateEMGainTempReady();
     // Send command to camera to place it in the correct mode
     std::string response;
     if( pdvSerialWriteRead( response, m_cameraModes[m_modeName].m_serialCommand ) != 0 )

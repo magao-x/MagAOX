@@ -336,7 +336,8 @@ class picamCtrl : public MagAOXApp<>,
     /// Get the current cooling-fan state from the camera.
     int getFanSpeed();
 
-    /// Read sensor temperature and status, withholding protected lock during pending reconfiguration.
+    /// Read sensor temperature and status, withholding valid readings until pending targets are committed.
+    /** Caller holds the INDI mutex; only a complete subsequent poll supplies measured-temperature permission. */
     int getTemps();
 
     /// Intersect the configured temperature limits with the camera's required range.
@@ -418,7 +419,7 @@ class picamCtrl : public MagAOXApp<>,
     int setShutter( int sh /**< [in] Requested shutter state. */ );
 
     // Framegrabber interface:
-    /// Configure camera parameters and allocate the acquisition buffer, invalidating protected temperature lock.
+    /// Configure camera parameters and acquisition storage, invalidating temperature lock and measured evidence.
     int configureAcquisition();
 
     /// Return the current acquisition frame rate, in Hz.
@@ -1105,6 +1106,10 @@ inline int picamCtrl::setPicamParameterOnline( PicamParameter parameter, piint v
 
 inline int picamCtrl::connect()
 {
+    invalidateTempReading();
+    m_tempSetPtPending = true;
+    updateEMGainTempReady();
+
     std::cerr << __LINE__ << '\n';
     PicamError     error;
     PicamCameraID *id_array;
@@ -1351,15 +1356,20 @@ inline int picamCtrl::getAcquisitionState()
 
 inline int picamCtrl::getTemps()
 {
+    invalidateTempReading();
     piflt currTemperature;
 
     if( getPicamParameter( currTemperature, PicamParameter_SensorTemperatureReading ) < 0 )
     {
         if( powerState() != 1 || powerStateTarget() != 1 )
+        {
+            updateEMGainTempReady();
             return -1;
+        }
 
         log<software_error>( { __FILE__, __LINE__ } );
         state( stateCodes::ERROR );
+        updateEMGainTempReady();
         return -1;
     }
 
@@ -1371,10 +1381,14 @@ inline int picamCtrl::getTemps()
     if( getPicamParameter( status, PicamParameter_SensorTemperatureStatus ) < 0 )
     {
         if( powerState() != 1 || powerStateTarget() != 1 )
+        {
+            updateEMGainTempReady();
             return -1;
+        }
 
         log<software_error>( { __FILE__, __LINE__ } );
         state( stateCodes::ERROR );
+        updateEMGainTempReady();
         return -1;
     }
 
@@ -1407,6 +1421,10 @@ inline int picamCtrl::getTemps()
         m_tempControlOnTarget  = false;
         m_tempControlStatusStr = "UNKNOWN";
     }
+
+    if( !m_tempSetPtPending && m_tempControlStatus )
+        updateTempReading( currTemperature );
+    updateEMGainTempReady();
 
     recordCamera();
 
@@ -1513,6 +1531,7 @@ inline int picamCtrl::setFPS()
 
 inline int picamCtrl::powerOnDefaults()
 {
+    invalidateTempReading();
     m_tempSetPtPending = true;
 
     /*m_currentROI.x = 511.5;
@@ -1547,6 +1566,7 @@ inline int picamCtrl::powerOnDefaults()
 
 inline int picamCtrl::setTempControl()
 {
+    invalidateTempReading();
     // Always on
     m_tempControlStatus    = true;
     m_tempControlStatusSet = true;
@@ -1559,6 +1579,7 @@ inline int picamCtrl::setTempSetPt()
 {
     if( validateTempSetPt( m_ccdTempSetpt ) < 0 )
         return -1;
+    invalidateTempReading();
     m_tempSetPtPending = true;
     recordCamera( true );
     m_reconfig = true;
@@ -1774,12 +1795,14 @@ inline int picamCtrl::configureAcquisition()
 
     std::unique_lock<std::mutex> lock( m_indiMutex );
 
+    invalidateTempReading();
     if( m_emGainRequiresTemp )
     {
         m_tempControlOnTarget = false;
         if( m_tempControlStatus )
             m_tempControlStatusStr = "UNLOCKED";
     }
+    updateEMGainTempReady();
 
     if( validateTempSetPt( m_ccdTempSetpt ) < 0 )
         return -1;
