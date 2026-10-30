@@ -189,36 +189,38 @@ inline int bmcCtrl::processPipeline( void *source )
         {
             failureStage = "actuator conversion";
             pipelineMark( job.command, MagAOX::dmTiming::Marker::actuatorStart );
-            const double scale   = m_volume_factor / m_act_gain;
-            const float  inverse = 1.0 / scale;
-            job.command.shape.setZero();
-            std::fill( job.command.saturation.begin(), job.command.saturation.end(), uint8_t( 0 ) );
-            job.command.saturatedCount = 0;
+            const auto count = m_nbAct;
 
-            if( job.values.size() != m_nbAct || job.command.saturation.size() != size_t( m_dmWidth * m_dmHeight ) )
+            if( job.values.size() != count || job.command.saturation.size() != size_t( m_dmWidth * m_dmHeight ) )
             {
                 throw std::runtime_error( "pipeline storage dimensions changed without a drained allocation" );
             }
 
-            for( uint32_t index = 0; index < m_nbAct; ++index )
+            const double scale   = m_volume_factor / m_act_gain;
+            const float  inverse = 1.0 / scale;
+            const auto  *mapping = m_actuator_mapping;
+            const auto  *pixels  = static_cast<const float *>( source );
+            auto        *values  = job.values.data();
+            auto        *shape   = job.command.shape.data();
+            job.command.shape.setZero();
+
+            for( uint32_t index = 0; index < count; ++index )
             {
-                const int address = m_actuator_mapping[index];
+                const int address = mapping[index];
 
                 if( address < 0 )
                 {
-                    job.values[index] = 0;
+                    values[index] = 0;
                     continue;
                 }
 
-                const float  input                = static_cast<float *>( source )[address];
-                const double value                = std::clamp( input * scale, 0.0, 1.0 );
-                job.values[index]                 = std::sqrt( value );
-                job.command.shape.data()[address] = input * scale > 1 ? inverse : ( input * scale < 0 ? 0 : input );
-                const bool saturated              = value >= 1 || value <= 0;
-                job.command.saturation[address]   = saturated;
-                job.command.saturatedCount += saturated;
+                const float  input = pixels[address];
+                const double value = input * scale;
+                values[index]      = std::sqrt( std::clamp( value, 0.0, 1.0 ) );
+                shape[address]     = value > 1 ? inverse : ( value < 0 ? 0 : input );
             }
 
+            pipelineMark( job.command, MagAOX::dmTiming::Marker::conversionEnd );
 #ifdef BMCCTRL_TEST_PIPELINE_VECTOR
             BMCCTRL_TEST_PIPELINE_VECTOR( job.order );
 #endif
@@ -228,6 +230,7 @@ inline int bmcCtrl::processPipeline( void *source )
                                 current.inputCounter == job.identity.inputCounter &&
                                 current.publicationSec == job.identity.publicationSec &&
                                 current.publicationNsec == job.identity.publicationNsec;
+            pipelineMark( job.command, MagAOX::dmTiming::Marker::sourceCheckEnd );
 
             if( !stable )
             {
@@ -583,7 +586,31 @@ inline void bmcCtrl::pipelineThreadExec() noexcept
 
         if( successful && prepared )
         {
-            m_nsat.fetch_add( job.command.saturatedCount );
+            pipelineMark( job.command, MagAOX::dmTiming::Marker::satStart );
+            auto       *saturation     = job.command.saturation.data();
+            const auto *values         = job.values.data();
+            const auto *mapping        = m_actuator_mapping;
+            const auto  count          = m_nbAct;
+            long        saturatedCount = 0;
+            std::fill( job.command.saturation.begin(), job.command.saturation.end(), uint8_t( 0 ) );
+
+            for( uint32_t index = 0; index < count; ++index )
+            {
+                const int address = mapping[index];
+
+                if( address < 0 )
+                {
+                    continue;
+                }
+
+                const bool saturated = values[index] >= 1 || values[index] <= 0;
+                saturation[address]  = saturated;
+                saturatedCount += saturated;
+            }
+
+            job.command.saturatedCount = saturatedCount;
+            m_nsat.fetch_add( saturatedCount );
+            pipelineMark( job.command, MagAOX::dmTiming::Marker::satEnd );
         }
 
         const auto outcome = !job.submitted ? MagAOX::dmTiming::Outcome::noSend

@@ -36,8 +36,12 @@ enum class Metric : uint8_t
     staging,
     publication,
     sdkWait,
-    sdkTail,    ///< Native return through worker readiness, excluding later idle wait.
-    sdkService, ///< Native entry through worker readiness; independent of post-job retirement.
+    sdkTail,          ///< Native return through worker readiness, excluding later idle wait.
+    sdkService,       ///< Native entry through worker readiness; independent of post-job retirement.
+    conversion,       ///< Pipeline actuator conversion before coherent-source validation.
+    sourceCheck,      ///< Pipeline coherent-source validation before shared-shape publication.
+    shapePublication, ///< Pipeline private-to-shared shape copy and publication.
+    receiptSdk,       ///< Real receipt through entry of a successfully submitted native SDK call.
     count
 };
 
@@ -65,7 +69,9 @@ enum class Marker : uint8_t
     publicationEnd,
     waitStart,
     waitEnd,
-    sdkReady, ///< SDK owner reached request selection/wait after finishing the preceding result handoff.
+    sdkReady,       ///< SDK owner reached request selection/wait after finishing the preceding result handoff.
+    conversionEnd,  ///< Pipeline numeric conversion finished; source validation has not begun.
+    sourceCheckEnd, ///< Pipeline source validation finished; shared-shape publication has not begun.
     count
 };
 
@@ -216,7 +222,11 @@ inline const char *metricName( Metric metric )
                                       "publication",
                                       "sdkWait",
                                       "sdkTail",
-                                      "sdkService" };
+                                      "sdkService",
+                                      "conversion",
+                                      "sourceCheck",
+                                      "shapePublication",
+                                      "receiptSdk" };
 
     return metricIndex( metric ) < metricIndex( Metric::count ) ? names[metricIndex( metric )] : "unknown";
 }

@@ -27,7 +27,12 @@ enum DmTimingMetric : ubyte
     sdkWait = 17,
     // SDK owner service excludes idle waiting and independent post retirement.
     sdkTail = 18,
-    sdkService = 19
+    sdkService = 19,
+    // Pipeline preparation segments and existing-endpoint receipt-to-SDK prefix.
+    conversion = 20,
+    sourceCheck = 21,
+    shapePublication = 22,
+    receiptSdk = 23
 }
 
 enum DmTimingAvailability : ubyte

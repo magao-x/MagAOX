@@ -472,7 +472,8 @@ TEST_CASE( "DM timing INDI follows valid, stale and disabled summaries", "[dev::
     REQUIRE( app.setupDMTimingINDI() == 0 );
     app.m_indiDriver = &driver;
     REQUIRE( app.m_indiP_dmTiming.getNumElements() == 15 );
-    REQUIRE( app.m_indiP_dmStages.getNumElements() == 102 );
+    REQUIRE( app.m_indiP_dmStages.getNumElements() ==
+             6 * ( metricIndex( Metric::count ) - metricIndex( Metric::dispatch ) ) );
     REQUIRE( app.m_indiP_dmTimingQuality.getNumElements() == 21 );
     app.shmimMonitorTiming( {}, MagAOX::app::dev::shmimMonitorEvent::receipt );
     REQUIRE( app.processImage( nullptr, {} ) == 0 );
@@ -488,6 +489,19 @@ TEST_CASE( "DM timing INDI follows valid, stale and disabled summaries", "[dev::
     CHECK( app.m_indiP_dmStages["sdkTail_mean"].get<double>() == -1 );
     CHECK( app.m_indiP_dmStages["sdkService_count"].get<double>() == 0 );
     CHECK( app.m_indiP_dmStages["sdkService_mean"].get<double>() == -1 );
+
+    for( const auto *name : { "conversion", "sourceCheck", "shapePublication" } )
+    {
+        CHECK( app.m_indiP_dmStages[std::string( name ) + "_count"].get<double>() == 0 );
+        CHECK( app.m_indiP_dmStages[std::string( name ) + "_mean"].get<double>() == -1 );
+    }
+
+    const auto &prefix = app.dmTimingSummary().metrics[metricIndex( Metric::receiptSdk )];
+    REQUIRE( prefix.count == 1 );
+    CHECK( app.m_indiP_dmStages["receiptSdk_count"].get<double>() == 1 );
+    CHECK( app.m_indiP_dmStages["receiptSdk_mean"].get<double>() == prefix.mean );
+    CHECK( app.m_indiP_dmStages["receiptSdk_max"].get<double>() == prefix.max );
+    CHECK( app.m_indiP_dmStages["receiptSdk_jitter"].get<double>() == -1 );
 
     for( unsigned i = 0; i < 2; ++i )
     {

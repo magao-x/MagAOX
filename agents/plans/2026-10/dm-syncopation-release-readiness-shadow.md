@@ -1478,3 +1478,321 @@ capture with operational synco Off and existing BMC/CPU/camera/loop settings ret
 The [procedure](../../../apps/dmSyncopation/doc/readiness-shadow-test.md#pipeline-resource-shadow)
 defines the new assumptions and readbacks. All implementation and verification work
 is workstation-only; no instrument configuration or hardware commands are executed.
+
+## Preset not yet applied: `synco-sim-20261030T152231Z`
+
+This capture records checkout `2c5c65b225bb68cb12c5ced72669472f9dd23482`, but
+telemetry still identifies `shadow_reader_release_ready`, with 30 us virtual
+readers and the legacy 155 us backend. The pipeline property/table is absent.
+The operator subsequently confirmed the additive pipeline preset had not been
+merged. This run therefore does not test the new resource model.
+
+Actual controller admissions, native completions and retirements increase by
+238,455 with no new faults, overloads or submission errors. SDK service is
+typically 106.261 us and reaches 109.607 us. Those values supplement the previous
+measurements; they do not replace the larger previously observed 113.444 us
+maximum. The operator then supplied the corrected pipeline configuration.
+
+## First pipeline resource capture: `synco-sim-20261030T153807Z`
+
+The preset is active in this capture: all 119 synco summaries identify
+**`shadow_pipeline`**, with preparation 35 us, SDK service 120 us, post service
+150 us and three credits. Reader/delivery assumptions remain 60/20 us. The
+recorded checkout is `2c5c65b225bb68cb12c5ced72669472f9dd23482`. All snapshots
+succeed, error files are empty and collectors exit with expected status 124.
+Synco records span **2026-10-30 15:38:07.021362371–15:40:06.221869856 UTC**
+(119.200507 s; October 30, 08:38:07–08:40:06 Phoenix time).
+
+### Fixed-model outcomes and protection
+
+Capture-local differences, rather than lifetime counts, are:
+
+| Step | Considered | Would run | Skipped | Skip reasons |
+| --- | ---: | ---: | ---: | --- |
+| 0 | 238,401 | 238,389 | 12 | 12 missing output |
+| 1 | 238,401 | 238,367 | 34 | 13 missing output; 16 SDK busy; 2 preparation busy; 3 credit/quarantine |
+| 2 | 238,401 | 0 | 238,401 | 238,385 next-main protection; 13 missing output; 3 credit/quarantine |
+
+Step 1 is eligible on **99.985738%** of occurrences. Step 2 retains the planned
+zero-added-main-wait veto: maximum prospective clearance shortfall increases
+from 33.711 to **33.763 us**, consistent with the 33.333 us nominal calculation
+plus fractional-grid/phase corrections. SDK, post and credit cycle flags remain
+true; main-protection, aggregate backend and complete-cycle feasibility remain
+false. No fixed targets are moved to accommodate the late slot.
+
+Modeled main admissions increase by 238,383, auxiliary admissions by 238,367,
+and retirements by 476,750; discarded stays zero and in-flight stays one at both
+telemetry boundaries. Exact admission/retirement/credit conservation holds in
+every summary. Maximum occupancy rises from two to three, but **modeled added
+main SDK-entry wait remains zero** throughout.
+
+The six modeled main-credit misses coincide with three unknown-source fences.
+At **15:39:47.023577620**, **15:39:49.045626620** and
+**15:39:50.057525856 UTC**, each summary adds one combined-observer counter gap,
+one simulation output gap, one resource reset and two modeled main-credit misses.
+Each also adds one credit skip on each active step. The configured unknown-work
+quarantine is 1.05 ms, naturally spanning two 500 us main periods. Discarded work
+does not increase. This is strong aggregate evidence of intentional quarantine
+rejections, rather than demonstrated persistent pool exhaustion; individual
+per-miss reason timestamps are not exported.
+
+The observation/admission totals reconcile exactly: 238,401 genuine primary
+observations contain 238,389 coherent associations; 238,383 admitted mains plus
+six model credit misses account for those associations. The other twelve
+observations lack usable association. These are observation/model outcomes,
+not proof of twelve dropped physical commands.
+
+### Actual controller timing and assumption excursions
+
+Actual before/after controller admissions, native completions and retirements
+each increase by **240,442**, with no jobs in flight at either boundary. There
+are no new native failures, faults, timeouts, overloads, rejections, supersessions,
+vector rejections, preparation/post failures or reader-qualification losses.
+The controller and telemetry intervals have different boundaries; their counts
+are not expected to match the synco first/last-summary interval exactly.
+
+Typical below means median of overlapping two-second window means, in us:
+
+| Controller metric | Typical | Current recorded maximum |
+| --- | ---: | ---: |
+| Native SDK duration | 104.094 | **147.939** |
+| SDK return to worker ready | 2.245 | 4.408 |
+| SDK entry to worker ready | **106.341** | **150.083** |
+| Controller reader release | 28.799 | 36.879 |
+| Receipt to native return | 127.303 | 172.445 |
+| Private-product publication | 8.566 | 146.647 |
+| Receipt to post timing finish | 145.881 | **521.715** |
+
+The native/SDK-service excursion first appears in the summary at
+**15:40:01.569085854 UTC**, and remains in the next overlapping summary. This
+establishes at least one command above the model's **120 us SDK-service
+assumption**; two reporting windows must not be counted as two distinct commands.
+The native-call wall interval accounts for almost all the excursion. It does not
+identify vendor work versus OS/interrupt scheduling within that interval. The
+150.083 us service maximum leaves only 16.584 us below a 166.667 us slot before
+other requirements; the fixed-model zero-wait outcome does not cover this larger
+real service interval.
+
+A separate post-completion stall occurs in the window at
+**15:38:55.448509752 UTC**. That window's receipt-to-finish maximum is 521.715 us,
+receipt-to-SDK-return maximum 132.550 us, and return-to-ready maximum 3.496 us.
+Thus its longest finish event includes **at least 385.669 us after SDK-worker
+readiness**, while every SDK service in that window is at most 110.369 us.
+This post/queue/scheduling latency is distinct from the later native excursion.
+The model's fixed post service does not capture arbitrary scheduling stalls;
+the lower bound alone cannot identify one job's serialized post service versus
+waiting behind earlier post work. Actual private-credit retirement is later
+than the reported timing-finish endpoint.
+
+The full completion observer retains a current raw command for the post stall:
+sequence 3,202,212, combined counter 284,905,756, primary 254,196,829. Its producer
+processing is **521.515 us**, required hold 520.313 us and observed hold
+523.108 us; notification contributes only 2.795 us. A separate command's full
+notification delay reaches 285.739 us. These maxima belong to different events
+and must not be added.
+
+### Observation quality, settings and interpretation
+
+Raw readiness adds 238,401 observed and qualified releases with no new invalid
+records, gaps, source resets or drops. Early/full joins each add 238,393 matches.
+Their nine duplicate and three counter-gap observations, followed by nine
+missing-combined associations, align with the combined-observer episodes above.
+No new reader identity mismatch, incoherent/invalid/sequence-loss or transport
+drop occurs. Current early processing peaks at 37.180 us and observed early
+hold at 41.428 us, remaining separate from the long full-completion stall.
+
+Cadence remains full, accepts 119 updates with no rejection, and reports periods
+499999.937–500000.785 ns. Primary, camera and upstream-stage observation quality
+has no new local fault. Actual camera telemetry adds 238,569 published frames
+and eleven successful serial controls, without new frame/counter gaps, failures
+or drops. Median rolling acquisition/publication standard deviations are 0.304/0.882 us;
+publication intervals remain 478.814–525.943 us, without the earlier roughly
+108 us camera-return excursion.
+
+Saved settings match the previous capture: bin2, 2 kHz, EM gain 1, synchronization
+On, shutter OPEN, target −45 °C, closed loop/scalar gain 1, and RTC latency On.
+The operator confirms modal gains remain zero and camera/loop settings, CPU/IRQ
+placement and workload were unchanged apart from merging the pipeline preset
+and restarting synco. Controller/SDK/post
+TIDs remain unchanged; SDK reports FIFO55 on one permitted CPU and post ordinary
+priority 0 with 60 permitted CPUs. Post scheduling is a candidate contributor to
+the long completion tail, not an established cause.
+
+The new simulator is operating and its zero-main-wait/credit safeguards behave
+as designed under the fixed assumptions. The capture also exposes real variable
+SDK and post latency beyond that nominal model. Subsequent qualification should
+exercise such excursions and the resulting skip/credit behavior explicitly,
+rather than interpreting zero modeled waits as a measured 6 kHz guarantee or
+automatically turning a rare maximum into every command's service duration.
+This analysis changes only the engineering record; no runtime bounds or
+instrument configuration are changed.
+
+## Pre-SDK preparation investigation after `153807Z`
+
+The operator recalled roughly 10 us before the SDK call and requested an
+investigation of the larger pipeline preparation interval. Historical controller
+telemetry confirms a real increase, with two endpoints to distinguish. All
+values below are in us; typical means the median of rolling-window means.
+
+| Path and capture | Actuator/conversion-publication typical | Actuator/conversion-publication maximum | Receipt to native SDK entry, typical |
+| --- | ---: | ---: | ---: |
+| Synchronous, `full-loop-20261026T023744Z` | 7.263 | 12.544 | 7.541 |
+| Joined SDK worker, `synco-sim-20261030T025406Z` | 7.702 | 12.203 | 13.943 |
+| Full pipeline, `synco-sim-20261030T052548Z` | 19.168 | 28.103 | 23.064 |
+| Full pipeline, `synco-sim-20261030T061730Z` | 19.286 | 26.821 | 23.457 |
+| Full pipeline, `synco-sim-20261030T153807Z` | 19.002 | 26.760 | 23.189 |
+
+Receipt-to-SDK-entry means are calculated per window as receipt-to-SDK-return
+mean minus SDK-duration mean, requiring matching sample populations, then
+summarized across windows. They exclude native SDK execution. The old conversion
+was typically 7–8 us, with recorded maxima around 12–14 us; the current
+pipeline's roughly 23 us prefix is not merely a renamed 10 us interval.
+The simulator's 35 us preparation setting remains an assumption, not a direct
+measurement of the maximum prefix.
+
+### Work moved into the prefix
+
+The joined worker path in `bmcCtrl::commandDM()` converts and clips actuator
+values while writing the shared output shape directly. It posts that shape,
+copies the actuator vector into SDK-worker storage, dispatches the SDK request,
+then classifies saturation while the SDK can run. Its separate saturation pass
+typically costs 3.363 us in `025406Z`.
+
+`bmcCtrl::processPipeline()` instead clears a private shape and saturation mask,
+converts/clips the input while classifying/counting saturation, revalidates source
+identity, and copies/publishes the private shape before queueing the SDK job.
+These operations all fall within its current actuator timer. The actuator vector
+is already private to the leased job, so the joined path's subsequent vector
+copy disappears. This difference in placement explains why the actuator timer
+increases by more than the complete receipt-to-SDK prefix does.
+
+There are also compiler-visible differences: byte-mask stores may alias other
+storage, and the generated conversion loop repeatedly reloads member/vector
+pointers and the actuator count. The new clamp/square-root formulation executes
+the square root for clipped values too; the old branch formulation skips it on
+out-of-range values. Source validation and shape publication must remain after
+conversion and before SDK admission unless their failure semantics are
+deliberately changed.
+
+Channel staging is **after SDK dispatch** in both worker paths. Its typical
+increase from 4.737 to 8.257 us affects reader-release timing but must not be
+added to preparation before native SDK entry. SDK dispatch-to-entry timing
+changes only from approximately 2.950 to 3.167 us; it is not the main measured
+increase.
+
+### What the workstation checks establish
+
+Production-object inspection on workstation mx11 finds scalar hardware square
+root instructions in both paths, without a loss of SIMD vectorization or new
+per-actuator library calls. Representative warm-cache loops compiled with the
+production optimization flags take approximately 2.915 us for the old conversion
+and 3.264 us for the new fused conversion/classification on this workstation.
+Caching pointers/counts locally reduces the latter to about 3.038 us. These
+numbers describe an Intel workstation microbenchmark, not RTC qualification.
+
+The shared-shape assignment uses an existing Eigen map: it does not allocate or
+transpose the image on each command. A separate local ImageStreamIO benchmark,
+using a process-private temporary shared-memory directory and no instrument or
+reader connections, likewise does not reproduce the multi-microsecond increase
+from adding the shape copy. It excludes RTC scheduling, cross-core cache traffic
+and real consumer wakeups. Neither benchmark accounts for the full measured
+roughly 9.25 us increase in the receipt-to-SDK prefix. Assigning all of that
+increase to saturation, clearing or the shape copy would therefore be premature.
+
+### Proposed next change
+
+Move private saturation classification out of the pre-SDK conversion path,
+retaining dimension checks before dispatch. It can run after dispatch, as in the
+joined implementation, or in the ordered post worker from the immutable job
+values before saturation publication. The latter requires keeping each leased
+job intact until post retirement and restoring explicit saturation timing.
+
+Cache conversion pointers and counts locally. Consider eliminating redundant
+whole-grid clears only after verifying unmapped pixels remain initialized and
+mapped pixels are fully overwritten on every slot reuse, including mapping
+changes and drained reallocation. Preserve prequeue coherent-source validation
+and shared-shape publication so rejected vectors do not produce an SDK command.
+
+Split preparation timing into conversion, source validation and shape
+publication to attribute the remaining cost. Also derive receipt-to-SDK-entry
+statistics directly from the existing receipt/SDK-start timestamps, without
+adding another hot-path timestamp. Current marginal maxima cannot supply that
+per-command maximum by subtraction: the latest capture establishes a prefix of
+at least 30.087 us in one window, but a separate loose 68.719 us upper bound is
+not evidence of a 69 us preparation event.
+
+This investigation updates the engineering record only. No preparation
+optimization, telemetry schema, simulator bound or instrument setting has been
+changed yet.
+
+## Pre-SDK reduction and preparation telemetry implemented
+
+Following operator approval, the full BMC pipeline now performs saturation-mask
+clearing, classification and counting in its ordered post worker. It reads the
+leased job's private normalized actuator vector only after monitor staging and
+SDK completion. Native failure/exception, cancellation, timeout or preparation
+failure suppresses this work and its successful-product publication. A later
+loss of reader provenance remains nonfatal to a successful private command.
+Controls/reallocation still drain all leased jobs before changing mapping or
+storage. The SDK owner can accept the next job independently of this post work.
+
+The conversion loop caches source, shape, vector and mapping pointers and the
+actuator count locally. Private shape clearing remains before conversion so
+unmapped pixels stay initialized across slot reuse. Coherent source revalidation
+and shared-shape publication still precede SDK dispatch, preserving rejection
+and publication-failure behavior. Synchronous and joined-worker processing are
+unchanged.
+
+Two appended markers divide the original `actuator` interval into three
+independently reported stages:
+
+| New metric | Endpoints / interpretation |
+| --- | --- |
+| `conversion` | Actuator start through private shape initialization, storage checks and numeric conversion. |
+| `sourceCheck` | Conversion end through coherent source-identity revalidation. |
+| `shapePublication` | Source-check end through shared-shape copy/publication and actuator end. |
+| `receiptSdk` | Genuine receipt through actual SDK entry for a successfully submitted command. |
+
+The first three use two additional capture timestamps; `receiptSdk` uses
+existing receipt and SDK-entry timestamps without another hot-path clock read.
+Its mean/extrema are paired per command, including any dispatch/SDK queue wait;
+it is not an isolated conversion-service measurement. Deferred classification
+now contributes to `saturation` in pipeline mode. Preparation segments remain
+unavailable on paths that do not capture them, while `receiptSdk` can qualify on
+synchronous/joined paths with the required successful-send evidence.
+
+The metric IDs append 20–23; all existing IDs and compatible `fgtimes` fields
+remain unchanged. Rebuilt readers accept complete historical 12/13/18/20-row
+records as well as new 24-row records, projecting absent metrics as unavailable.
+New stage names are exposed automatically in `dm_timing_stages` and detailed
+`dmtimes` telemetry. Rebuild `bmcCtrl` and `logdump`, including the normal shared
+library/precompiled-header dependencies. No new configuration is required, and
+the simulator's 35 us preparation assumption is unchanged pending measurement.
+
+Workstation-only validation on mx11:
+
+- Full BMC suite: **1,351 assertions / 30 cases** pass.
+- Pipeline ThreadSanitizer suite: **790 assertions / 15 cases** pass with no
+  reported data races.
+- Timing collector: **592 assertions / 25 cases** pass, including exact paired
+  prefix extrema, different SDK durations, segment endpoints and independent
+  missing/invalid/failed/synthetic qualification.
+- Detailed telemetry: **2,078 assertions / 7 cases** pass, including historical
+  20-row records, new metric projections and malformed metric sets.
+- DM timing/INDI integration: **168 assertions / 8 cases** pass, including new
+  stage availability and direct prefix statistics.
+- Generic detached pipeline integration: **203 assertions / 6 cases** pass.
+- `libMagAOX`/precompiled header and `logdump` builds pass. The production BMC
+  translation unit compiles against the available vendor headers; native BMC
+  SDK libraries are absent on this workstation, so a production executable link
+  and hardware run are not claimed.
+- Changed C++ files pass `clang-format` verification and the diff whitespace
+  check. Independent ownership/causality review found no blocking issue.
+
+The deterministic BMC test holds SDK and post execution separately, verifies
+that saturation has not run at SDK dispatch or while post is blocked, changes
+the shared source before the earlier job completes, and checks private-vector
+classification and slot reuse. It also checks that the three preparation
+segments partition `actuator` and that direct prefix means match the retained
+SDK-entry/receipt pairs. Hardware timing improvement remains to be measured
+with the existing simultaneous capture procedure.

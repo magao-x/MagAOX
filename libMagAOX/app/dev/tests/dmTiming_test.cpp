@@ -1426,5 +1426,131 @@ TEST_CASE( "DM timing detached finalizer is the only timing queue producer", "[d
     CHECK( summary.metrics[metricIndex( Metric::receiptCallback )].mean == Approx( 190e-9 ) );
 }
 
+/// Measure preparation segments and the paired prefix independently of variable SDK service and post work.
+/** \ingroup dmTiming_tests */
+TEST_CASE( "DM timing splits preparation and measures receipt to SDK entry directly", "[dev::dmTiming]" )
+{
+    // clang-format off
+#ifdef DM_TIMING_TEST_DOXYGEN_REF
+    MagAOX::app::dev::dmTiming::markEvent;
+    MagAOX::app::dev::dmTiming::importSdkEvent;
+    MagAOX::app::dev::dmTiming::calculate;
+#endif
+    // clang-format on
+
+    for( const bool detached : { false, true } )
+    {
+        Collector collector;
+        collector.configure( 2, 8 );
+
+        for( int index = 0; index < 2; ++index )
+        {
+            const int64_t receipt = 1000000000 + index * 500000;
+            const int64_t start   = receipt + 9000 + index * 4000;
+            const int64_t end     = start + 100000 - index * 20000;
+            collector.beginEventAt( true, receipt );
+            collector.markAt( Marker::entry, receipt + 100 );
+            collector.markAt( Marker::actuatorStart, receipt + 1000 );
+            collector.markAt( Marker::conversionEnd, receipt + 5000 + index * 2000 );
+            collector.markAt( Marker::sourceCheckEnd, receipt + 7000 + index * 2000 );
+            collector.markAt( Marker::actuatorEnd, receipt + 8000 + index * 2000 );
+            collector.markAt( Marker::stagingStart, receipt + 15000 );
+            collector.markAt( Marker::stagingEnd, receipt + 17000 );
+            collector.markAt( Marker::readRelease, receipt + 18000 );
+
+            if( detached )
+            {
+                auto event = collector.detachEvent();
+                Collector::importSdkEvent( event, start, end, Outcome::success );
+                Collector::markEvent( event, Marker::satStart, end + 1000 );
+                Collector::markEvent( event, Marker::satEnd, end + 4000 );
+                Collector::markEvent( event, Marker::finish, receipt + 130000 );
+                collector.submitEvent( event );
+            }
+            else
+            {
+                collector.importSdk( start, end, Outcome::success );
+                collector.markAt( Marker::satStart, end + 1000 );
+                collector.markAt( Marker::satEnd, end + 4000 );
+                collector.markAt( Marker::finish, receipt + 130000 );
+                collector.finishEvent();
+            }
+        }
+
+        collector.update( 1001000000 );
+        const auto &summary = collector.summary();
+        REQUIRE( summary.total.invalid == 0 );
+        const auto &prefix = summary.metrics[metricIndex( Metric::receiptSdk )];
+        CHECK( prefix.count == 2 );
+        CHECK( prefix.valid );
+        CHECK( prefix.mean == Approx( 11e-6 ) );
+        CHECK( prefix.min == Approx( 9e-6 ) );
+        CHECK( prefix.max == Approx( 13e-6 ) );
+        CHECK( summary.metrics[metricIndex( Metric::conversion )].mean == Approx( 5e-6 ) );
+        CHECK( summary.metrics[metricIndex( Metric::conversion )].max == Approx( 6e-6 ) );
+        CHECK( summary.metrics[metricIndex( Metric::sourceCheck )].mean == Approx( 2e-6 ) );
+        CHECK( summary.metrics[metricIndex( Metric::shapePublication )].mean == Approx( 1e-6 ) );
+        CHECK( summary.metrics[metricIndex( Metric::actuator )].mean == Approx( 8e-6 ) );
+        CHECK( summary.metrics[metricIndex( Metric::saturation )].mean == Approx( 3e-6 ) );
+        CHECK( summary.metrics[metricIndex( Metric::receiptSend )].max == Approx( 109e-6 ) );
+        CHECK( summary.metrics[metricIndex( Metric::sdk )].min == Approx( 80e-6 ) );
+        CHECK( metricIndex( Metric::conversion ) == 20 );
+        CHECK( metricIndex( Metric::sourceCheck ) == 21 );
+        CHECK( metricIndex( Metric::shapePublication ) == 22 );
+        CHECK( metricIndex( Metric::receiptSdk ) == 23 );
+        CHECK( markerIndex( Marker::conversionEnd ) == 22 );
+        CHECK( markerIndex( Marker::sourceCheckEnd ) == 23 );
+        CHECK( std::string( metricName( Metric::receiptSdk ) ) == "receiptSdk" );
+    }
+}
+
+/// Keep failed or synthetic submissions and absent preparation endpoints out of unrelated metric populations.
+/** \ingroup dmTiming_tests */
+TEST_CASE( "DM timing preparation metrics retain independent endpoint qualification", "[dev::dmTiming]" )
+{
+    // clang-format off
+#ifdef DM_TIMING_TEST_DOXYGEN_REF
+    MagAOX::app::dev::dmTiming::markAt;
+    MagAOX::app::dev::dmTiming::importSdk;
+    MagAOX::app::dev::dmTiming::calculate;
+#endif
+    // clang-format on
+
+    for( int variant = 0; variant < 4; ++variant )
+    {
+        Collector collector;
+        collector.configure( 2, 8 );
+        const int64_t receipt = 1000000000;
+        collector.beginEventAt( variant != 0, receipt );
+        collector.markAt( Marker::entry, receipt + 100 );
+        collector.markAt( Marker::actuatorStart, receipt + 1000 );
+
+        if( variant == 3 )
+        {
+            collector.markAt( Marker::conversionEnd, receipt + 900 );
+        }
+        else if( variant != 2 )
+        {
+            collector.markAt( Marker::conversionEnd, receipt + 5000 );
+        }
+
+        collector.markAt( Marker::sourceCheckEnd, receipt + 7000 );
+        collector.markAt( Marker::actuatorEnd, receipt + 8000 );
+        collector.importSdk( receipt + 9000, receipt + 109000, variant == 1 ? Outcome::failed : Outcome::success );
+        collector.markAt( Marker::finish, receipt + 130000 );
+        collector.finishEvent();
+        collector.update( receipt + 200000 );
+        const auto &summary = collector.summary();
+        CHECK( summary.total.invalid == ( variant == 3 ? 1 : 0 ) );
+        CHECK( summary.metrics[metricIndex( Metric::receiptSdk )].count == ( variant < 2 ? 0 : 1 ) );
+        CHECK( summary.metrics[metricIndex( Metric::receiptSend )].count == ( variant < 2 ? 0 : 1 ) );
+        CHECK( summary.metrics[metricIndex( Metric::sdk )].count == 1 );
+        CHECK( summary.metrics[metricIndex( Metric::conversion )].count == ( variant < 2 ? 1 : 0 ) );
+        CHECK( summary.metrics[metricIndex( Metric::sourceCheck )].count == ( variant < 2 ? 1 : 0 ) );
+        CHECK( summary.metrics[metricIndex( Metric::shapePublication )].count == 1 );
+        CHECK( summary.metrics[metricIndex( Metric::actuator )].count == 1 );
+    }
+}
+
 } // namespace dmTimingTests
 } // namespace libXWCTest

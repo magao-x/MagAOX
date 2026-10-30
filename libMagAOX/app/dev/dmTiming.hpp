@@ -778,6 +778,7 @@ inline void dmTiming::calculate( int64_t nowNs )
         {
             add( Metric::sendInterval, previousSend, send );
             add( Metric::receiptSend, receipt, send );
+            add( Metric::receiptSdk, receipt, endpoint( event, Marker::sdkStart ) );
             previousSend = send;
         }
         else if( event.outcome == Outcome::unknown )
@@ -826,7 +827,10 @@ inline void dmTiming::calculate( int64_t nowNs )
                                        Metric::publication,
                                        Metric::sdkWait,
                                        Metric::sdkTail,
-                                       Metric::sdkService };
+                                       Metric::sdkService,
+                                       Metric::conversion,
+                                       Metric::sourceCheck,
+                                       Metric::shapePublication };
         constexpr Marker starts[]  = { Marker::receipt,
                                        Marker::actuatorStart,
                                        Marker::sdkStart,
@@ -842,7 +846,10 @@ inline void dmTiming::calculate( int64_t nowNs )
                                        Marker::publicationStart,
                                        Marker::waitStart,
                                        Marker::sdkEnd,
-                                       Marker::sdkStart };
+                                       Marker::sdkStart,
+                                       Marker::actuatorStart,
+                                       Marker::conversionEnd,
+                                       Marker::sourceCheckEnd };
         constexpr Marker ends[]    = { Marker::entry,
                                        Marker::actuatorEnd,
                                        Marker::sdkEnd,
@@ -858,7 +865,10 @@ inline void dmTiming::calculate( int64_t nowNs )
                                        Marker::publicationEnd,
                                        Marker::waitEnd,
                                        Marker::sdkReady,
-                                       Marker::sdkReady };
+                                       Marker::sdkReady,
+                                       Marker::conversionEnd,
+                                       Marker::sourceCheckEnd,
+                                       Marker::actuatorEnd };
 
         for( size_t i = 0; i < sizeof( metrics ) / sizeof( metrics[0] ); ++i )
         {

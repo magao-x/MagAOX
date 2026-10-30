@@ -402,6 +402,10 @@ class bmcCtrl_test : public bmcCtrl
     /// Return vector rejection, reader qualification loss and actual preparation failure counts.
     std::array<uint64_t, 3> pipelineQuality();
 
+    /// Snapshot a private job only while a deterministic barrier excludes monitor and post writes.
+    std::pair<MagAOX::dmTiming::Event, std::vector<uint8_t>>
+    pipelinePreparation( uint64_t counter /**< [in] Input counter retained in an unreused pool slot. */ );
+
     /// Return the active pipeline request's immutable diagnostic dispatch stamp.
     int64_t pipelineDispatchStamp();
 
@@ -625,6 +629,21 @@ std::array<uint64_t, 3> bmcCtrl_test::pipelineQuality()
 {
     std::lock_guard<std::mutex> lock( m_sdkMutex );
     return { m_pipelineVectorRejected, m_pipelineReaderUnqualified, m_pipelinePreparationFailures };
+}
+
+std::pair<MagAOX::dmTiming::Event, std::vector<uint8_t>> bmcCtrl_test::pipelinePreparation( uint64_t counter )
+{
+    std::lock_guard<std::mutex> lock( m_sdkMutex );
+
+    for( const auto &job : m_pipelineJobs )
+    {
+        if( job.identity.inputCounter == counter )
+        {
+            return { job.command.timing, job.command.saturation };
+        }
+    }
+
+    throw std::runtime_error( "pipeline test job no longer retained" );
 }
 
 int64_t bmcCtrl_test::pipelineDispatchStamp()
@@ -1543,7 +1562,103 @@ TEST_CASE( "BMC pipeline overlaps preparation SDK and ordered post with frozen i
         2 );
     REQUIRE(
         app.dmTimingSummary().metrics[MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::saturation )].count ==
-        0 );
+        2 );
+}
+
+/// Saturation consumes immutable vectors only in post, while preparation subintervals partition the original timer.
+/** \ingroup bmcCtrl_unit_test */
+TEST_CASE( "BMC pipeline defers saturation beyond SDK dispatch and measures preparation",
+           "[bmcCtrl][pipeline][timing]" )
+{
+    // clang-format off
+    #ifdef BMCCTRL_TEST_DOXYGEN_REF
+    MagAOX::app::bmcCtrl::processPipeline(nullptr);
+    MagAOX::app::bmcCtrl::pipelineThreadExec();
+    #endif
+    // clang-format on
+    using namespace MagAOX::app;
+    using namespace MagAOX::dmTiming;
+    bmcCtrl_test app;
+    app.m_dmTiming.configure( 60, 32 );
+    app.enablePipeline();
+    bmcTimingTest::block = bmcTimingTest::perCall = true;
+    bmcTimingTest::heldPost                       = 1;
+    bmcTimingTest::ReturnGuard guard;
+    app.pixels()[0] = -0.25;
+    app.pixels()[1] = 2;
+    REQUIRE( app.pipelineInput( 1 ) == 0 );
+    bmcTimingTest::waitCalls( 1 );
+    const auto [preparation, mask] = app.pipelinePreparation( 1 );
+    REQUIRE( mask == std::vector<uint8_t>{ 0, 0 } );
+    REQUIRE( app.m_nsat == 0 );
+    REQUIRE( ( preparation.valid & ( 1u << markerIndex( Marker::satStart ) ) ) == 0 );
+    REQUIRE( ( preparation.valid & ( 1u << markerIndex( Marker::satEnd ) ) ) == 0 );
+
+    for( const auto marker : { Marker::receipt,
+                               Marker::actuatorStart,
+                               Marker::conversionEnd,
+                               Marker::sourceCheckEnd,
+                               Marker::actuatorEnd } )
+    {
+        REQUIRE( preparation.valid & ( 1u << markerIndex( marker ) ) );
+    }
+
+    const auto stamp = [&preparation]( Marker marker )
+    {
+        return preparation.markers[markerIndex( marker )];
+    };
+    REQUIRE( stamp( Marker::actuatorStart ) >= stamp( Marker::receipt ) );
+    REQUIRE( stamp( Marker::conversionEnd ) >= stamp( Marker::actuatorStart ) );
+    REQUIRE( stamp( Marker::sourceCheckEnd ) >= stamp( Marker::conversionEnd ) );
+    REQUIRE( stamp( Marker::actuatorEnd ) >= stamp( Marker::sourceCheckEnd ) );
+    const auto firstSdkEntry = bmcTimingTest::firstEntry.load();
+    REQUIRE( firstSdkEntry >= stamp( Marker::actuatorEnd ) );
+    app.pixels()[0] = 0.25;
+    app.pixels()[1] = 0.81;
+    REQUIRE( app.pipelineInput( 2 ) == 0 );
+    bmcTimingTest::permitCalls( 1 );
+    bmcTimingTest::waitPost();
+    bmcTimingTest::waitCalls( 2 );
+    REQUIRE( app.pipelinePreparation( 1 ).second == std::vector<uint8_t>{ 0, 0 } );
+    REQUIRE( app.m_nsat == 0 );
+    const auto firstSdk = app.waitPipelineSdkReady( 1 );
+    bmcTimingTest::permitCalls( 2 );
+    const auto secondSdk         = app.waitPipelineSdkReady( 2 );
+    const auto secondPreparation = app.pipelinePreparation( 2 ).first;
+    bmcTimingTest::permitReturn();
+    app.waitRetired( 2 );
+    REQUIRE( app.m_nsat == 2 );
+    REQUIRE( app.saturation( 0 ) == 0 );
+    REQUIRE( app.saturation( 1 ) == 0 );
+    REQUIRE( bmcTimingTest::history[0] == std::vector<double>{ 0, 1 } );
+    REQUIRE( bmcTimingTest::history[1][0] == Approx( 0.5 ) );
+    REQUIRE( bmcTimingTest::history[1][1] == Approx( 0.9 ) );
+    app.m_dmTiming.update();
+    const auto &summary = app.dmTimingSummary();
+    REQUIRE( summary.total.invalid == 0 );
+
+    for( const auto metric :
+         { Metric::conversion, Metric::sourceCheck, Metric::shapePublication, Metric::receiptSdk, Metric::saturation } )
+    {
+        REQUIRE( summary.metrics[metricIndex( metric )].count == 2 );
+    }
+
+    REQUIRE( summary.metrics[metricIndex( Metric::actuator )].mean ==
+             Approx( summary.metrics[metricIndex( Metric::conversion )].mean +
+                     summary.metrics[metricIndex( Metric::sourceCheck )].mean +
+                     summary.metrics[metricIndex( Metric::shapePublication )].mean ) );
+    const double prefix = ( firstSdk[0] - stamp( Marker::receipt ) + secondSdk[0] -
+                            secondPreparation.markers[markerIndex( Marker::receipt )] ) *
+                          0.5e-9;
+    REQUIRE( summary.metrics[metricIndex( Metric::receiptSdk )].mean == Approx( prefix ) );
+    app.pixels()[0] = 0.16;
+    app.pixels()[1] = 0.36;
+    REQUIRE( app.pipelineInput( 3 ) == 0 );
+    app.waitRetired( 3 );
+    REQUIRE( app.m_nsat == 2 );
+    REQUIRE( app.saturation( 0 ) == 0 );
+    REQUIRE( app.saturation( 1 ) == 0 );
+    REQUIRE_FALSE( app.m_sdkFault );
 }
 
 /// An isolated command records readiness before waiting, and later pool reuse cannot overwrite its timing sample.
