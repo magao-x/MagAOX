@@ -2012,5 +2012,131 @@ TEST_CASE( "synco pipeline output loss retains a resource fence", "[dmSyncopatio
            pipeline.retired + pipeline.discarded + pipeline.inFlight );
 }
 
+/// Keep exact waiting-main/blocker identities and separate preparation from native-worker queueing.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "synco delayed-main trace preserves main-only burst provenance", "[dmSyncopation][simulation][mainWait]" )
+{
+    Simulation         simulation;
+    Simulation::Config config;
+    config.readerReleaseReady = config.pipelineBackend = true;
+    config.virtualReaderNs                             = 60000;
+    config.steps                                       = 1;
+    REQUIRE( simulation.configure( config ) );
+    constexpr int64_t start = 1000000000;
+    auto              first = readyContext( 101 );
+    first.receiptNs         = start - 200;
+    first.callbackNs        = start - 150;
+    first.lockRequestNs     = start - 100;
+    first.lockAcquiredNs    = start - 50;
+    auto second             = readyContext( 102 );
+    second.receiptNs        = start + 20000;
+    second.callbackNs       = start + 20100;
+    second.lockRequestNs    = start + 20200;
+    second.lockAcquiredNs   = start + 20800;
+    simulation.primary( 1, start - 1000 );
+    simulation.combined( 101, 1, start, true, first );
+    simulation.primary( 2, start + 19829, 500000 );
+    simulation.combined( 102, 2, start + 20829, true, second );
+    CHECK( simulation.mainWaitStatus().detected == 0 ); // Not final until actual modeled SDK entry.
+    simulation.advance( start + 500000 );
+    CHECK( simulation.summary().pipeline.mainSdkWaits == 1 );
+    CHECK( simulation.summary().pipeline.maximumMainWaitNs == 99171 );
+    CHECK( simulation.summary().pipeline.auxiliaryAdmitted == 0 );
+    MagAOX::dmSyncoSimulation::MainWaitEvent event;
+    REQUIRE( simulation.popMainWait( event ) );
+    CHECK( event.id == 1 );
+    CHECK( event.session == simulation.summary().session );
+    CHECK( event.ordinal == 1 );
+    CHECK( event.prepWaitNs == 19171 );
+    CHECK( event.sdkWaitNs == 80000 );
+    CHECK( event.main.counter == 102 );
+    CHECK( event.main.primaryCounter == 2 );
+    CHECK( event.main.observation.receiptNs == second.receiptNs );
+    CHECK( event.main.observation.lockAcquiredNs == second.lockAcquiredNs );
+    CHECK( event.main.observation.publicationNs == second.publicationNs );
+    REQUIRE( event.blockerCount == 1 );
+    CHECK( event.blockers[0].job.counter == 101 );
+    CHECK( event.blockers[0].job.primaryCounter == 1 );
+    CHECK( event.blockers[0].job.step == 0 );
+    CHECK( event.blockers[0].job.observation.receiptNs == first.receiptNs );
+    CHECK( event.provenanceComplete );
+    CHECK_FALSE( simulation.popMainWait( event ) );
+    CHECK( simulation.mainWaitStatus().drained == 1 );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::synco::Simulation::combined(0,0,0);
+    MagAOX::app::synco::Simulation::advance(0);
+    MagAOX::app::synco::Simulation::popMainWait;
+#endif
+    // clang-format on
+}
+
+/// Diagnostic FIFO saturation and resets retain accounting without changing resource admission.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "synco delayed-main FIFO is bounded across sessions", "[dmSyncopation][simulation][mainWait]" )
+{
+    using namespace MagAOX::dmSyncoSimulation;
+    Simulation         simulation;
+    Simulation::Config config;
+    config.readerReleaseReady = config.pipelineBackend = true;
+    config.virtualReaderNs                             = 60000;
+    config.steps                                       = 1;
+    REQUIRE( simulation.configure( config ) );
+    const auto session = simulation.summary().session;
+
+    for( uint64_t index = 0; index < mainWaitTraceCapacity + 2; ++index )
+    {
+        const int64_t start = 1000000000 + int64_t( index ) * 1000000;
+        simulation.primary( 2 * index + 1, start - 1000 );
+        simulation.combined( 2 * index + 101, 2 * index + 1, start );
+        simulation.primary( 2 * index + 2, start + 19829, 500000 );
+        simulation.combined( 2 * index + 102, 2 * index + 2, start + 20829 );
+        simulation.advance( start + 500000 );
+    }
+
+    auto status = simulation.mainWaitStatus();
+    CHECK( status.enabled );
+    CHECK( status.capacity == mainWaitTraceCapacity );
+    CHECK( status.detected == mainWaitTraceCapacity + 2 );
+    CHECK( status.queued == mainWaitTraceCapacity );
+    CHECK( status.dropped == 2 );
+    CHECK( status.drained == 0 );
+    CHECK( simulation.summary().pipeline.mainSdkWaits == status.detected );
+    CHECK( simulation.summary().pipeline.mainAdmitted == 2 * status.detected );
+    CHECK( simulation.summary().pipeline.mainCreditMisses == 0 );
+    CHECK( simulation.summary().pipeline.auxiliaryAdmitted == 0 );
+    simulation.reset();
+    config.pipelineBackend = false;
+    REQUIRE( simulation.configure( config ) );
+    CHECK_FALSE( simulation.mainWaitStatus().enabled );
+    MainWaitEvent event;
+
+    for( uint64_t index = 0; index < mainWaitTraceCapacity; ++index )
+    {
+        REQUIRE( simulation.popMainWait( event ) );
+        CHECK( event.id == index + 1 );
+        CHECK( event.session == session );
+    }
+
+    CHECK_FALSE( simulation.popMainWait( event ) );
+    status = simulation.mainWaitStatus();
+    CHECK( status.detected == status.drained + status.dropped + status.queued );
+    REQUIRE( simulation.configure( config ) );
+    feed( simulation, 1, 2000000000 );
+    simulation.advance( 2001000000 );
+    CHECK( simulation.mainWaitStatus().detected == status.detected );
+    CHECK_FALSE( simulation.popMainWait( event ) );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::synco::Simulation::configure({});
+    MagAOX::app::synco::Simulation::reset;
+    MagAOX::app::synco::Simulation::mainWaitStatus;
+    MagAOX::app::synco::Simulation::popMainWait;
+#endif
+    // clang-format on
+}
+
 } // namespace dmSyncopationTest
 } // namespace libXWCTest

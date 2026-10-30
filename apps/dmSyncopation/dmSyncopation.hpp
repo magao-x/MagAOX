@@ -260,6 +260,8 @@ class dmSyncopation : public MagAOXApp<true>,
     MagAOX::dmSyncoSimulation::Summary     m_simulationSnapshot;    ///< Ordinary-thread cached telemetry/INDI snapshot.
     MagAOX::dmSyncoSimulation::TraceStatus m_simulationTraceStatus; ///< Ordinary-thread cached overlap queue quality.
     uint64_t m_simulationTraceLogFailed{ 0 }; ///< Drained overlap events lost after a telemetry emission failure.
+    MagAOX::dmSyncoSimulation::TraceStatus m_simulationMainWaitStatus; ///< Cached delayed-main provenance coverage.
+    uint64_t m_simulationMainWaitLogFailed{ 0 }; ///< Drained delayed-main records lost to detected telemetry failures.
     MagAOX::dmSyncoSimulation::EstimatorStatus m_simulationEstimatorStatus; ///< Cached triggered estimator coverage.
     uint64_t m_simulationEstimatorLogFailed{ 0 };  ///< Drained estimator samples lost to detected telemetry failures.
     double   m_simulationReferenceFps{ 0 };        ///< Accepted camera rate identifying material rate-change epochs.
@@ -376,6 +378,7 @@ class dmSyncopation : public MagAOXApp<true>,
     pcf::IndiProperty m_indiP_simulationSteps;    ///< Per-step hypothetical outcomes; never actual deliveries.
     pcf::IndiProperty m_indiP_simulationStatus;   ///< Shadow state and conditional-policy identification.
     pcf::IndiProperty m_indiP_simulationTrace;    ///< Read-only overlap capture, drain and loss counters.
+    pcf::IndiProperty m_indiP_simulationMainWait; ///< Read-only delayed-main capture, drain and loss counters.
     pcf::IndiProperty m_indiP_simulationEstimator; ///< Read-only estimator pre/post history coverage and losses.
     pcf::IndiProperty m_indiP_primaryTiming; ///< Continuous observed primary publication/receipt statistics in seconds.
     pcf::IndiProperty
@@ -1432,6 +1435,16 @@ inline int dmSyncopation::setupSimulationINDI()
         m_indiP_simulationTrace.add( pcf::IndiElement( name ) );
     }
 
+    REG_INDI_NEWPROP_NOCB( m_indiP_simulationMainWait, "simulation_main_wait_trace", pcf::IndiProperty::Number );
+    m_indiP_simulationMainWait.setPerm( pcf::IndiProperty::ReadOnly );
+    m_indiP_simulationMainWait.setState( pcf::IndiProperty::Idle );
+    m_simulationMainWaitStatus = m_simulation.mainWaitStatus();
+
+    for( const auto *name : { "enabled", "detected", "drained", "dropped", "queued", "capacity", "logFailed" } )
+    {
+        m_indiP_simulationMainWait.add( pcf::IndiElement( name ) );
+    }
+
     REG_INDI_NEWPROP_NOCB( m_indiP_simulationEstimator, "simulation_estimator", pcf::IndiProperty::Number );
     m_indiP_simulationEstimator.setPerm( pcf::IndiProperty::ReadOnly );
 
@@ -1697,6 +1710,17 @@ inline void dmSyncopation::updateSimulationINDI()
                              double( trace.queued ),
                              double( trace.capacity ),
                              double( m_simulationTraceLogFailed ) } );
+    const auto &mainWait = m_simulationMainWaitStatus;
+    updateIfChanged(
+        m_indiP_simulationMainWait,
+        std::vector<std::string>{ "enabled", "detected", "drained", "dropped", "queued", "capacity", "logFailed" },
+        std::vector<double>{ mainWait.enabled ? 1.0 : 0.0,
+                             double( mainWait.detected ),
+                             double( mainWait.drained ),
+                             double( mainWait.dropped ),
+                             double( mainWait.queued ),
+                             double( mainWait.capacity ),
+                             double( m_simulationMainWaitLogFailed ) } );
     const auto &estimator = m_simulationEstimatorStatus;
     updateIfChanged( m_indiP_simulationEstimator,
                      std::vector<std::string>{ "enabled",
@@ -3959,6 +3983,7 @@ inline int dmSyncopation::appLogic()
                     m_simulationReleaseQueue.queued() + size_t( m_simulationReleaseHavePending );
                 m_simulationTraceStatus     = m_simulation.traceStatus();
                 m_simulationEstimatorStatus = m_simulation.estimatorStatus();
+                m_simulationMainWaitStatus  = m_simulation.mainWaitStatus();
                 m_reason = m_simulationSnapshot.valid ? "simulation observing" : "simulation warming or stale";
             }
 
@@ -4182,6 +4207,16 @@ inline int dmSyncopation::recordTelem( const telem_dmsynco *record )
                 ++trace.estimatorCount;
             }
 
+            while( trace.mainWaitCount < trace.mainWait.size() &&
+                   m_simulation.popMainWait( trace.mainWait[trace.mainWaitCount] ) )
+            {
+                ++trace.mainWaitCount;
+            }
+
+            trace.mainWaitStatus           = m_simulation.mainWaitStatus();
+            trace.mainWaitStatus.logFailed = m_simulationMainWaitLogFailed;
+            m_simulationMainWaitStatus     = trace.mainWaitStatus;
+
             trace.estimatorStatus           = m_simulation.estimatorStatus();
             trace.estimatorStatus.logFailed = m_simulationEstimatorLogFailed;
             m_simulationEstimatorStatus     = trace.estimatorStatus;
@@ -4240,6 +4275,7 @@ inline int dmSyncopation::recordTelem( const telem_dmsynco *record )
         {
             m_simulationTraceLogFailed += trace.count;
             m_simulationEstimatorLogFailed += trace.estimatorCount;
+            m_simulationMainWaitLogFailed += trace.mainWaitCount;
             return -1;
         }
     }
@@ -4247,6 +4283,7 @@ inline int dmSyncopation::recordTelem( const telem_dmsynco *record )
     {
         m_simulationTraceLogFailed += trace.count;
         m_simulationEstimatorLogFailed += trace.estimatorCount;
+        m_simulationMainWaitLogFailed += trace.mainWaitCount;
         throw;
     }
 

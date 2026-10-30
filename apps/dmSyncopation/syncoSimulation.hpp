@@ -98,6 +98,12 @@ class Simulation
     /// Return process-lifetime triggered estimator coverage without consuming records.
     MagAOX::dmSyncoSimulation::EstimatorStatus estimatorStatus() const;
 
+    /// Remove the oldest delayed-main record without changing modeled resource ownership.
+    bool popMainWait( MagAOX::dmSyncoSimulation::MainWaitEvent &event /**< [out] Oldest retained event. */ );
+
+    /// Return lifetime delayed-main FIFO coverage; telemetry failure accounting belongs to the app.
+    MagAOX::dmSyncoSimulation::TraceStatus mainWaitStatus() const;
+
   private:
     /// Frozen combined input identity whose release must match exactly.
     struct Command
@@ -201,6 +207,20 @@ class Simulation
     uint64_t m_traceDetected{ 0 }; ///< Lifetime overlap evidence sequence, including dropped events.
     uint64_t m_traceDrained{ 0 };  ///< Lifetime events removed for telemetry attempts.
     uint64_t m_traceDropped{ 0 };  ///< Lifetime events discarded on FIFO saturation.
+    /// Fixed delayed-main FIFO; history and process IDs survive session resets and configuration changes.
+    std::array<MagAOX::dmSyncoSimulation::MainWaitEvent, MagAOX::dmSyncoSimulation::mainWaitTraceCapacity>
+             m_mainWaitEvents{};
+    size_t   m_mainWaitHead{ 0 };     ///< Oldest retained delayed-main event.
+    size_t   m_mainWaitCount{ 0 };    ///< Occupied delayed-main entries.
+    uint64_t m_mainWaitDetected{ 0 }; ///< Lifetime delayed-main sequence, including dropped records.
+    uint64_t m_mainWaitDrained{ 0 };  ///< Records removed for ordinary-thread telemetry attempts.
+    uint64_t m_mainWaitDropped{ 0 };  ///< Records lost to FIFO or bounded model-output saturation.
+    MagAOX::dmSyncoSimulation::MainWaitModelBatch
+        m_mainWaitPending; ///< Reused output scratch for actual model progress.
+
+    /// Assign lifetime identities and retain actual SDK-entry evidence without affecting model decisions.
+    void retainMainWait();
+
     /// Completed accepted-primary history; resets clear the history while preserving process IDs and export state.
     std::array<MagAOX::dmSyncoSimulation::EstimatorSample, MagAOX::dmSyncoSimulation::estimatorHistoryCapacity>
            m_estimatorHistory{};
@@ -1008,8 +1028,9 @@ inline void Simulation::evaluate( Plan &entry, int step )
 
     if( m_config.pipelineBackend && step )
     {
-        const auto result =
-            m_pipeline.auxiliary( entry.counter, step, start, target, nextGrid - b.early - b.observation );
+        const auto result = m_pipeline.auxiliary(
+            entry.counter, step, start, target, nextGrid - b.early - b.observation, &m_mainWaitPending );
+        retainMainWait();
         using Result = PipelineSimulation::Result;
 
         if( result != Result::accepted )
@@ -1169,6 +1190,8 @@ inline void Simulation::badOutput()
 
     if( m_config.pipelineBackend )
     {
+        m_pipeline.advance( m_summary.nowNs, &m_mainWaitPending );
+        retainMainWait();
         m_pipeline.invalidate( m_summary.nowNs );
     }
 
@@ -1256,7 +1279,8 @@ inline void Simulation::through( int64_t now, bool inclusive )
 
         if( m_config.pipelineBackend )
         {
-            m_pipeline.advance( earliest );
+            m_pipeline.advance( earliest, &m_mainWaitPending );
+            retainMainWait();
         }
 
         evaluate( *selected, step );
@@ -1264,7 +1288,8 @@ inline void Simulation::through( int64_t now, bool inclusive )
 
     if( m_config.pipelineBackend )
     {
-        m_pipeline.advance( now );
+        m_pipeline.advance( now, &m_mainWaitPending );
+        retainMainWait();
         feasibility( m_summary.cadence.periodQ32
                          ? int64_t( m_summary.cadence.periodQ32 / MagAOX::dmSyncoSimulation::periodScale )
                          : m_summary.periodNs );
@@ -1587,10 +1612,61 @@ inline void Simulation::combined( uint64_t                                      
 
     if( m_config.pipelineBackend && pipelineMain )
     {
-        m_pipeline.main( counter, observed );
+        m_pipeline.main( counter, observed, context, &m_mainWaitPending, primaryCounter );
+        retainMainWait();
     }
 
     through( observed, true );
+}
+
+inline void Simulation::retainMainWait()
+{
+    for( size_t i = 0; i < m_mainWaitPending.count; ++i )
+    {
+        auto &event   = m_mainWaitPending.events[i];
+        event.id      = ++m_mainWaitDetected;
+        event.session = m_summary.session;
+
+        if( m_mainWaitCount == m_mainWaitEvents.size() )
+        {
+            ++m_mainWaitDropped;
+            continue;
+        }
+
+        m_mainWaitEvents[( m_mainWaitHead + m_mainWaitCount ) % m_mainWaitEvents.size()] = event;
+        ++m_mainWaitCount;
+    }
+
+    m_mainWaitDetected += m_mainWaitPending.dropped;
+    m_mainWaitDropped += m_mainWaitPending.dropped;
+    m_mainWaitPending.count   = 0;
+    m_mainWaitPending.dropped = 0;
+}
+
+inline bool Simulation::popMainWait( MagAOX::dmSyncoSimulation::MainWaitEvent &event )
+{
+    if( !m_mainWaitCount )
+    {
+        return false;
+    }
+
+    event          = m_mainWaitEvents[m_mainWaitHead];
+    m_mainWaitHead = ( m_mainWaitHead + 1 ) % m_mainWaitEvents.size();
+    --m_mainWaitCount;
+    ++m_mainWaitDrained;
+    return true;
+}
+
+inline MagAOX::dmSyncoSimulation::TraceStatus Simulation::mainWaitStatus() const
+{
+    MagAOX::dmSyncoSimulation::TraceStatus status;
+    status.enabled  = m_summary.enabled && m_config.pipelineBackend;
+    status.detected = m_mainWaitDetected;
+    status.drained  = m_mainWaitDrained;
+    status.dropped  = m_mainWaitDropped;
+    status.queued   = m_mainWaitCount;
+    status.capacity = m_mainWaitEvents.size();
+    return status;
 }
 
 inline const MagAOX::dmSyncoSimulation::Summary &Simulation::summary() const

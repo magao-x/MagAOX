@@ -358,6 +358,75 @@ table DmSyncoSimulation
     cadence:DmSyncoCadence;
     readiness:DmSyncoReadiness;
     pipeline:DmSyncoPipeline;
+    main_wait_trace:DmSyncoMainWaitTrace;
+}
+
+// Self-contained conditional job stages use monotonic model time; zero stage endpoints are unavailable.
+// The existing counter is the combined-stream counter for a main, or the primary cycle for an auxiliary.
+// primary_counter explicitly labels the primary cycle; observation producer fields keep their own clock.
+table DmSyncoMainWaitJob
+{
+    id:ulong;
+    counter:ulong;
+    primary_counter:ulong;
+    step:int;
+    anchor_ns:long;
+    input_ns:long;
+    prep_ns:long;
+    vector_ns:long;
+    reader_ns:long;
+    sdk_ns:long;
+    sdk_ready_ns:long;
+    post_ns:long;
+    retired_ns:long;
+    observation:DmSyncoOverlapObservation (required);
+}
+
+// Clipped half-open resource-blocking intervals identify preparation/reader and native-worker roles.
+// captured_ns is the first model observation of this owner blocking the waiting main, not SDK evidence.
+table DmSyncoMainWaitBlocker
+{
+    job:DmSyncoMainWaitJob (required);
+    captured_ns:long;
+    prep_begin_ns:long;
+    prep_end_ns:long;
+    sdk_begin_ns:long;
+    sdk_end_ns:long;
+}
+
+// A genuine main whose modeled SDK entry waited; frozen assumptions survive session/configuration changes.
+// Waits exclude service: prep_wait=prep-input; sdk_wait=sdk-vector; emitted=sdk entry.
+table DmSyncoMainWaitEvent
+{
+    id:ulong;
+    session:ulong;
+    ordinal:ulong;
+    emitted_ns:long;
+    delivery_ns:long;
+    prepare_ns:long;
+    reader_ns:long;
+    sdk_service_ns:long;
+    post_service_ns:long;
+    prep_wait_ns:long;
+    sdk_wait_ns:long;
+    main:DmSyncoMainWaitJob (required);
+    blockers:[DmSyncoMainWaitBlocker] (required);
+    blocker_count:ulong;
+    provenance_complete:bool;
+}
+
+// Independent bounded delayed-main queue coverage; disabled collection can still drain historical evidence.
+table DmSyncoMainWaitTrace
+{
+    enabled:bool;
+    detected:ulong;
+    drained:ulong;
+    dropped:ulong;
+    queued:ulong;
+    capacity:ulong;
+    log_failed:ulong;
+    batch_count:ulong;
+    events:[DmSyncoMainWaitEvent] (required);
 }
 
 // Conditional pipeline resources; fixed credits include future accepted auxiliary reservations.

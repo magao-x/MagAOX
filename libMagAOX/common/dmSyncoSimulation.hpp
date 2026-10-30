@@ -35,6 +35,14 @@ constexpr size_t cadenceAnchorCapacity = 64; ///< Bounded approximately one-seco
 
 constexpr size_t readinessDrainCapacity = 64; ///< Maximum early-release handoffs consumed per serialized cycle call.
 
+constexpr size_t mainWaitTraceCapacity = 64; ///< Fixed FIFO for delayed-main evidence; overflow never changes policy.
+
+constexpr size_t mainWaitBatchCapacity = 8; ///< Maximum delayed-main records in one telemetry emission.
+
+constexpr size_t mainWaitBlockerCapacity = 2; ///< Other jobs preceding one admitted main in the three-credit model.
+
+constexpr size_t mainWaitModelBatchCapacity = 3; ///< Maximum waiting mains whose SDK entry can occur in one advance.
+
 /// Qualification of the slow, monotonic counter/time cadence measurement.
 enum class CadenceState : uint8_t
 {
@@ -90,6 +98,68 @@ struct Observation
     int64_t  updateNs{ 0 };             ///< Combined trace update on its producer clock; not monotonic.
 };
 
+/// Frozen identity, context and conditional stage times for one modeled command lease.
+/** All stage endpoints are monotonic model times. A zero endpoint means its stage had not started when
+ * this snapshot was captured; nonzero completion endpoints can still be future bounds at that capture.
+ * Observation publication/start/update fields retain their separate producer clock.
+ */
+struct MainWaitJob
+{
+    uint64_t id{ 0 };      ///< Admission ordinal within the configured resource model, independent of slot reuse.
+    uint64_t counter{ 0 }; ///< Existing model key: combined counter for a main, primary-cycle counter for an auxiliary.
+    uint64_t primaryCounter{ 0 }; ///< Associated genuine primary counter; zero when the caller has no provenance.
+    int      step{ 0 };           ///< Zero for a genuine main; positive for an auxiliary.
+    int64_t  anchorNs{ 0 };       ///< Genuine observed command or hypothetical auxiliary trigger.
+    int64_t  inputNs{ 0 };        ///< Anchor plus configured controller delivery.
+    int64_t  prepNs{ 0 };         ///< Actual modeled preparation start.
+    int64_t  vectorNs{ 0 };       ///< Private-vector readiness after preparation.
+    int64_t  readerNs{ 0 };       ///< Final shared-reader completion bound after preparation start.
+    int64_t  sdkNs{ 0 };          ///< Actual modeled SDK entry.
+    int64_t  sdkReadyNs{ 0 };     ///< SDK-worker readiness bound after native service.
+    int64_t  postNs{ 0 };         ///< Actual modeled ordered-post start.
+    int64_t  retiredNs{ 0 };      ///< Credit-retirement bound after ordered-post start.
+    Observation observation;      ///< Raw caller context; zero fields are unavailable, never inferred.
+};
+
+/// One distinct earlier lease occupying a resource needed by a waiting genuine main.
+struct MainWaitBlocker
+{
+    MainWaitJob job;              ///< Snapshot retained independently of subsequent credit retirement and slot reuse.
+    int64_t     capturedNs{ 0 };  ///< First model instant this lease was observed blocking the waiting main.
+    int64_t     prepBeginNs{ 0 }; ///< First preparation/shared-reader wait instant; zero without this role.
+    int64_t     prepEndNs{ 0 };   ///< Last preparation/shared-reader blocking instant, exclusive.
+    int64_t     sdkBeginNs{ 0 };  ///< First native-worker queue wait instant; zero without this role.
+    int64_t     sdkEndNs{ 0 };    ///< Last native-worker blocking instant, exclusive.
+};
+
+/// One genuine main's additional modeled SDK-entry latency and the leases responsible for it.
+struct MainWaitEvent
+{
+    uint64_t    id{ 0 };            ///< Process-lifetime diagnostic ID assigned by the owning simulation FIFO.
+    uint64_t    session{ 0 };       ///< Parent simulation session assigned when the evidence is enqueued.
+    uint64_t    ordinal{ 0 };       ///< Resource model's mainSdkWaits count at this SDK entry.
+    int64_t     emittedNs{ 0 };     ///< Modeled SDK entry when both wait components became final.
+    int64_t     deliveryNs{ 0 };    ///< Frozen anchor-to-controller-input assumption.
+    int64_t     prepareNs{ 0 };     ///< Frozen preparation service assumption.
+    int64_t     readerNs{ 0 };      ///< Frozen total anchor-to-last-reader assumption.
+    int64_t     sdkServiceNs{ 0 };  ///< Frozen native entry through worker-ready assumption.
+    int64_t     postServiceNs{ 0 }; ///< Frozen serialized ordered-post assumption.
+    int64_t     prepWaitNs{ 0 };    ///< Preparation start minus controller input; excludes preparation service.
+    int64_t     sdkWaitNs{ 0 };     ///< SDK entry minus private-vector readiness; excludes native service.
+    MainWaitJob main; ///< Waiting genuine command; publication and receipt context remains explicitly clocked.
+    std::array<MainWaitBlocker, mainWaitBlockerCapacity> blockers{}; ///< Initialized prefix of earlier leases.
+    size_t blockerCount{ 0 };          ///< Distinct retained blockers, bounded by mainWaitBlockerCapacity.
+    bool   provenanceComplete{ true }; ///< Retained resource intervals cover both waits without overflow or gaps.
+};
+
+/// Fixed caller-owned scratch output; model copies never contain a diagnostic FIFO or emission callback.
+struct MainWaitModelBatch
+{
+    std::array<MainWaitEvent, mainWaitModelBatchCapacity> events{}; ///< Initialized emitted-event prefix.
+    size_t   count{ 0 };   ///< Events already appended by actual progress calls.
+    uint64_t dropped{ 0 }; ///< Events omitted because this scratch batch was not drained before reuse.
+};
+
 /// One overlap observation; the session/planCounter/step/mainCounter tuple supports offline deduplication.
 struct OverlapEvent
 {
@@ -123,7 +193,7 @@ struct OverlapEvent
 struct TraceStatus
 {
     bool     enabled{ false };          ///< Model selection; queued older-session events remain drainable after reset.
-    uint64_t detected{ 0 };             ///< All overlap evidence, including records rejected by the full FIFO.
+    uint64_t detected{ 0 };             ///< All diagnostic evidence, including records rejected by the full FIFO.
     uint64_t drained{ 0 };              ///< Records removed from the FIFO for a telemetry attempt.
     uint64_t dropped{ 0 };              ///< New records discarded because the fixed FIFO was full.
     uint64_t queued{ 0 };               ///< Events awaiting a telemetry attempt.
@@ -192,6 +262,9 @@ struct TraceBatch
     std::array<EstimatorSample, estimatorBatchCapacity> estimator{}; ///< Selected pre/post estimator updates.
     size_t          estimatorCount{ 0 }; ///< Initialized estimator prefix, bounded by estimatorBatchCapacity.
     EstimatorStatus estimatorStatus;     ///< Independent estimator-history coverage and loss accounting.
+    std::array<MainWaitEvent, mainWaitBatchCapacity> mainWait{}; ///< Drained delayed-main provenance prefix.
+    size_t      mainWaitCount{ 0 }; ///< Initialized mainWait prefix, bounded by mainWaitBatchCapacity.
+    TraceStatus mainWaitStatus;     ///< Independent delayed-main FIFO coverage; its owner sets capacity explicitly.
 };
 
 /// Counts for one step index; modeled copies and triggers never address a DM stream.

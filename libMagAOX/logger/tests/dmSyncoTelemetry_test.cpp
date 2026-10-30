@@ -1,5 +1,5 @@
 /** \file dmSyncoTelemetry_test.cpp
- * \brief Syncopation timing, reader protection and shadow telemetry compatibility and validation.
+ * \brief Syncopation timing, reader protection, modeled main waits and telemetry compatibility validation.
  * \ingroup logger_files
  */
 #include "../../../tests/testXWC.hpp"
@@ -366,7 +366,7 @@ telem_dmsynco::messageT
 message( const dmTiming::Summary             &primary /**< [in] coherent primary summary */,
          const dmCombTiming::Summary         &combiner      = {} /**< [in] independent combiner summary */,
          const dmSyncoSimulation::Summary    &simulation    = {} /**< [in] hypothetical shadow prediction */,
-         const dmSyncoSimulation::TraceBatch &trace         = {} /**< [in] drained overlap and estimator evidence */,
+         const dmSyncoSimulation::TraceBatch &trace         = {} /**< [in] drained bounded diagnostic evidence */,
          const dmReaderTiming::Summary       &reader        = {} /**< [in] optional software-reader timing */,
          const dmReaderTiming::Summary       &readerRelease = {} /**< [in] independent early-release timing */ )
 {
@@ -942,6 +942,190 @@ void checkCadence( const DmSyncoCadence             *actual /**< [in] serialized
     CHECK( actual->observation_ns() == expected.observationNs );
     CHECK( actual->updated_ns() == expected.updatedNs );
 }
+
+/// Construct a frozen modeled lease with separately clocked observed publication provenance.
+dmSyncoSimulation::MainWaitJob mainWaitJob( uint64_t id /**< [in] Full-width admission identity. */,
+                                            uint64_t counter /**< [in] Combined command identity. */,
+                                            int64_t  anchor /**< [in] Modeled input-publication anchor. */,
+                                            int64_t  preparation /**< [in] Actual modeled preparation start. */,
+                                            int64_t  sdk /**< [in] Actual modeled SDK entry. */ )
+{
+    dmSyncoSimulation::MainWaitJob job;
+    job.id             = id;
+    job.counter        = counter;
+    job.primaryCounter = counter - 100;
+    job.anchorNs       = anchor;
+    job.inputNs        = anchor + 20000;
+    job.prepNs         = preparation;
+    job.vectorNs       = preparation + 35000;
+    job.readerNs       = preparation + 40000;
+    job.sdkNs          = sdk;
+    job.sdkReadyNs     = sdk + 120000;
+    job.observation    = { ( uint64_t( 1 ) << 57 ) + 31,
+                           ( uint64_t( 1 ) << 57 ) + 29,
+                           anchor - 400,
+                           anchor - 300,
+                           anchor - 200,
+                           anchor - 100,
+                           1800000000000000001,
+                           1799999999999990001,
+                           1799999999999995001,
+                           1799999999999999801 };
+    return job;
+}
+
+/// Reproduce bunched genuine commands with one shared blocker, then two independently retained blockers.
+dmSyncoSimulation::TraceBatch sampleMainWaitTrace()
+{
+    dmSyncoSimulation::TraceBatch trace;
+    const auto                    identity = ( uint64_t( 1 ) << 54 );
+    const auto                    counter  = ( uint64_t( 1 ) << 55 ) + 123;
+    const auto                    start    = ( int64_t( 1 ) << 56 ) + 1000000;
+    trace.mainWaitCount                    = 2;
+    trace.mainWaitStatus = { true, identity + 12, identity + 8, 1, 3, dmSyncoSimulation::mainWaitTraceCapacity, 2 };
+
+    for( size_t index = 0; index < trace.mainWaitCount; ++index )
+    {
+        auto      &event         = trace.mainWait[index];
+        const auto anchor        = start + int64_t( index ) * 500000;
+        const auto jobId         = identity + 102 + index * 3;
+        event.id                 = identity + 7 + index;
+        event.session            = samplePipeline().session - ( index ? 0 : 1 );
+        event.ordinal            = 13 + index;
+        event.deliveryNs         = 20000;
+        event.prepareNs          = 35000;
+        event.readerNs           = 60000;
+        event.sdkServiceNs       = 120000;
+        event.postServiceNs      = 150000;
+        event.provenanceComplete = true;
+
+        if( index == 0 )
+        {
+            event.main          = mainWaitJob( jobId, counter, anchor + 20829, anchor + 60000, anchor + 175000 );
+            event.prepWaitNs    = 19171;
+            event.sdkWaitNs     = 80000;
+            event.blockerCount  = 1;
+            auto &blocker       = event.blockers[0];
+            blocker.job         = mainWaitJob( jobId - 1, counter - 1, anchor, anchor + 20000, anchor + 55000 );
+            blocker.capturedNs  = anchor + 40829;
+            blocker.prepBeginNs = anchor + 40829;
+            blocker.prepEndNs   = anchor + 60000;
+            blocker.sdkBeginNs  = anchor + 95000;
+            blocker.sdkEndNs    = anchor + 175000;
+        }
+        else
+        {
+            event.main         = mainWaitJob( jobId, counter + 1, anchor + 60000, anchor + 100000, anchor + 295000 );
+            event.prepWaitNs   = 20000;
+            event.sdkWaitNs    = 160000;
+            event.blockerCount = 2;
+            auto &later        = event.blockers[0];
+            later.job          = mainWaitJob( jobId - 1, counter, anchor + 20829, anchor + 60000, anchor + 175000 );
+            later.capturedNs   = anchor + 80000;
+            later.prepBeginNs  = anchor + 80000;
+            later.prepEndNs    = anchor + 100000;
+            later.sdkBeginNs   = anchor + 175000;
+            later.sdkEndNs     = anchor + 295000;
+            auto &earlier      = event.blockers[1];
+            earlier.job        = mainWaitJob( jobId - 2, counter - 1, anchor, anchor + 20000, anchor + 55000 );
+            earlier.job.step   = 1;
+            earlier.job.primaryCounter = earlier.job.counter;
+            earlier.job.observation    = {};
+            earlier.job.postNs         = anchor + 175000;
+            earlier.job.retiredNs      = anchor + 325000;
+            earlier.capturedNs         = anchor + 135000;
+            earlier.sdkBeginNs         = anchor + 135000;
+            earlier.sdkEndNs           = anchor + 175000;
+        }
+
+        event.emittedNs = event.main.sdkNs;
+    }
+
+    return trace;
+}
+
+/// Preserve every modeled stage endpoint and independently clocked producer/observer context.
+void checkMainWaitJob( const DmSyncoMainWaitJob             *actual /**< [in] Serialized command lease. */,
+                       const dmSyncoSimulation::MainWaitJob &expected /**< [in] Original frozen command snapshot. */ )
+{
+    REQUIRE( actual != nullptr );
+    CHECK( actual->id() == expected.id );
+    CHECK( actual->counter() == expected.counter );
+    CHECK( actual->primary_counter() == expected.primaryCounter );
+    CHECK( actual->step() == expected.step );
+    CHECK( actual->anchor_ns() == expected.anchorNs );
+    CHECK( actual->input_ns() == expected.inputNs );
+    CHECK( actual->prep_ns() == expected.prepNs );
+    CHECK( actual->vector_ns() == expected.vectorNs );
+    CHECK( actual->reader_ns() == expected.readerNs );
+    CHECK( actual->sdk_ns() == expected.sdkNs );
+    CHECK( actual->sdk_ready_ns() == expected.sdkReadyNs );
+    CHECK( actual->post_ns() == expected.postNs );
+    CHECK( actual->retired_ns() == expected.retiredNs );
+    const auto *observed = actual->observation();
+    REQUIRE( observed != nullptr );
+    CHECK( observed->stream_inode() == expected.observation.streamInode );
+    CHECK( observed->trigger_inode() == expected.observation.triggerInode );
+    CHECK( observed->receipt_ns() == expected.observation.receiptNs );
+    CHECK( observed->callback_ns() == expected.observation.callbackNs );
+    CHECK( observed->lock_request_ns() == expected.observation.lockRequestNs );
+    CHECK( observed->lock_acquired_ns() == expected.observation.lockAcquiredNs );
+    CHECK( observed->publication_ns() == expected.observation.publicationNs );
+    CHECK( observed->primary_publication_ns() == expected.observation.primaryPublicationNs );
+    CHECK( observed->start_ns() == expected.observation.startNs );
+    CHECK( observed->update_ns() == expected.observation.updateNs );
+}
+
+/// Preserve bounded delayed-main records, exact resource roles and lifetime evidence-loss accounting.
+void checkMainWaitTrace( const DmSyncoMainWaitTrace          *actual /**< [in] Serialized delayed-main batch. */,
+                         const dmSyncoSimulation::TraceBatch &expected /**< [in] Original fixed diagnostic batch. */ )
+{
+    REQUIRE( actual != nullptr );
+    const auto &quality = expected.mainWaitStatus;
+    CHECK( actual->enabled() == quality.enabled );
+    CHECK( actual->detected() == quality.detected );
+    CHECK( actual->drained() == quality.drained );
+    CHECK( actual->dropped() == quality.dropped );
+    CHECK( actual->queued() == quality.queued );
+    CHECK( actual->capacity() == quality.capacity );
+    CHECK( actual->log_failed() == quality.logFailed );
+    REQUIRE( actual->batch_count() == expected.mainWaitCount );
+    REQUIRE( actual->events()->size() == expected.mainWaitCount );
+
+    for( size_t index = 0; index < expected.mainWaitCount; ++index )
+    {
+        const auto *event  = actual->events()->Get( index );
+        const auto &source = expected.mainWait[index];
+        CHECK( event->id() == source.id );
+        CHECK( event->session() == source.session );
+        CHECK( event->ordinal() == source.ordinal );
+        CHECK( event->emitted_ns() == source.emittedNs );
+        CHECK( event->delivery_ns() == source.deliveryNs );
+        CHECK( event->prepare_ns() == source.prepareNs );
+        CHECK( event->reader_ns() == source.readerNs );
+        CHECK( event->sdk_service_ns() == source.sdkServiceNs );
+        CHECK( event->post_service_ns() == source.postServiceNs );
+        CHECK( event->prep_wait_ns() == source.prepWaitNs );
+        CHECK( event->sdk_wait_ns() == source.sdkWaitNs );
+        CHECK( event->provenance_complete() == source.provenanceComplete );
+        checkMainWaitJob( event->main(), source.main );
+        REQUIRE( event->blocker_count() == source.blockerCount );
+        REQUIRE( event->blockers()->size() == source.blockerCount );
+
+        for( size_t blockerIndex = 0; blockerIndex < source.blockerCount; ++blockerIndex )
+        {
+            const auto *blocker = event->blockers()->Get( blockerIndex );
+            const auto &frozen  = source.blockers[blockerIndex];
+            checkMainWaitJob( blocker->job(), frozen.job );
+            CHECK( blocker->captured_ns() == frozen.capturedNs );
+            CHECK( blocker->prep_begin_ns() == frozen.prepBeginNs );
+            CHECK( blocker->prep_end_ns() == frozen.prepEndNs );
+            CHECK( blocker->sdk_begin_ns() == frozen.sdkBeginNs );
+            CHECK( blocker->sdk_end_ns() == frozen.sdkEndNs );
+        }
+    }
+}
+
 /// \endcond
 
 /// Preserve all old scheduler fields and independent primary cadence/quality through binary and JSON serialization.
@@ -3611,6 +3795,398 @@ TEST_CASE( "Synco telemetry validates pipeline resource bounds and credit conser
         REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
         checkPipeline( GetTelem_dmsynco_fb( input.builder.GetBufferPointer() )->simulation()->pipeline(),
                        source.pipeline );
+    }
+}
+
+/// Preserve each waiting command, separate resource delays and blocker roles through binary, JSON and text.
+/** \ingroup dmSyncoTelemetry_unit_test */
+TEST_CASE( "Synco telemetry preserves modeled main wait provenance", "[dmSyncoTelemetry]" )
+{
+    // clang-format off
+#ifdef DMSYNCO_TELEMETRY_TEST_DOXYGEN_REF
+    MagAOX::logger::telem_dmsynco::messageT;
+    MagAOX::logger::telem_dmsynco::verify;
+    MagAOX::logger::telem_dmsynco::msgString;
+#endif
+    // clang-format on
+
+    const auto source = sampleMainWaitTrace();
+    auto       input  = message( samplePrimary(), {}, samplePipeline(), source );
+    auto       buffer = envelope( input );
+    REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+    const auto *simulation = GetTelem_dmsynco_fb( input.builder.GetBufferPointer() )->simulation();
+    checkMainWaitTrace( simulation->main_wait_trace(), source );
+    CHECK( simulation->main_wait_trace()->events()->Get( 0 )->session() < simulation->session() );
+
+    const auto &first = source.mainWait[0];
+    CHECK( first.prepWaitNs + first.sdkWaitNs == 99171 );
+    CHECK( first.main.sdkNs - first.main.inputNs - first.prepareNs == 99171 );
+    const auto text = telem_dmsynco::msgString( input.builder.GetBufferPointer(), input.builder.GetSize() );
+    CHECK( text.find( "main_wait_quality={enabled:1,detected:" + std::to_string( source.mainWaitStatus.detected ) ) !=
+           std::string::npos );
+    CHECK( text.find( "main_wait={id:" + std::to_string( first.id ) ) != std::string::npos );
+    CHECK( text.find( "prepWait_ns:19171,sdkWait_ns:80000" ) != std::string::npos );
+    CHECK( text.find( "provenanceComplete:1" ) != std::string::npos );
+    CHECK( text.find( "model_clock:monotonic" ) != std::string::npos );
+    CHECK( text.find( "producer_clock:unconverted" ) != std::string::npos );
+    CHECK( text.find( "stage_zero:unavailable" ) != std::string::npos );
+    CHECK( text.find( "primaryCounter:" + std::to_string( first.main.primaryCounter ) ) != std::string::npos );
+
+    const auto          json = telem_dmsynco::msgJSON( input.builder.GetBufferPointer(),
+                                              input.builder.GetSize(),
+                                              reinterpret_cast<const uint8_t *>( telem_dmsynco_bfbs ),
+                                              telem_dmsynco_bfbs_len );
+    flatbuffers::Parser parser;
+    REQUIRE( parser.Deserialize( reinterpret_cast<const uint8_t *>( telem_dmsynco_bfbs ), telem_dmsynco_bfbs_len ) );
+    REQUIRE( parser.Parse( json.c_str() ) );
+    checkMainWaitTrace( GetTelem_dmsynco_fb( parser.builder_.GetBufferPointer() )->simulation()->main_wait_trace(),
+                        source );
+}
+
+/// Accept absent historical diagnostics, empty active collection and retained disabled-session evidence.
+/** \ingroup dmSyncoTelemetry_unit_test */
+TEST_CASE( "Synco telemetry keeps modeled main wait tracing optional", "[dmSyncoTelemetry]" )
+{
+    // clang-format off
+#ifdef DMSYNCO_TELEMETRY_TEST_DOXYGEN_REF
+    MagAOX::logger::telem_dmsynco::messageT;
+    MagAOX::logger::telem_dmsynco::verify;
+    MagAOX::logger::telem_dmsynco::msgString;
+#endif
+    // clang-format on
+
+    auto legacy = message( samplePrimary(), {}, samplePipeline() );
+    auto buffer = envelope( legacy );
+    REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+    CHECK( GetTelem_dmsynco_fb( legacy.builder.GetBufferPointer() )->simulation()->main_wait_trace() == nullptr );
+    CHECK( telem_dmsynco::msgString( legacy.builder.GetBufferPointer(), legacy.builder.GetSize() )
+               .find( "main_wait_quality=unavailable" ) != std::string::npos );
+
+    SECTION( "An active empty collection advertises complete zero accounting" )
+    {
+        dmSyncoSimulation::TraceBatch source;
+        source.mainWaitStatus.enabled  = true;
+        source.mainWaitStatus.capacity = dmSyncoSimulation::mainWaitTraceCapacity;
+        auto input                     = message( samplePrimary(), {}, samplePipeline(), source );
+        auto envelopeBuffer            = envelope( input );
+        REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, envelopeBuffer.get() ) );
+        checkMainWaitTrace( GetTelem_dmsynco_fb( input.builder.GetBufferPointer() )->simulation()->main_wait_trace(),
+                            source );
+    }
+
+    SECTION( "Disabling collection does not erase already drained historical records" )
+    {
+        auto source                   = sampleMainWaitTrace();
+        source.mainWaitStatus.enabled = false;
+        auto input                    = message( samplePrimary(), {}, sampleSimulation(), source );
+        auto envelopeBuffer           = envelope( input );
+        REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, envelopeBuffer.get() ) );
+        checkMainWaitTrace( GetTelem_dmsynco_fb( input.builder.GetBufferPointer() )->simulation()->main_wait_trace(),
+                            source );
+    }
+
+    SECTION( "Missing blocker provenance remains explicit rather than inventing a cause" )
+    {
+        auto source                            = sampleMainWaitTrace();
+        source.mainWait[0].provenanceComplete  = false;
+        source.mainWait[0].blockerCount        = 0;
+        source.mainWait[0].main.primaryCounter = 0;
+        source.mainWait[0].main.observation    = {};
+        auto input                             = message( samplePrimary(), {}, samplePipeline(), source );
+        auto envelopeBuffer                    = envelope( input );
+        REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, envelopeBuffer.get() ) );
+        checkMainWaitTrace( GetTelem_dmsynco_fb( input.builder.GetBufferPointer() )->simulation()->main_wait_trace(),
+                            source );
+        CHECK( telem_dmsynco::msgString( input.builder.GetBufferPointer(), input.builder.GetSize() )
+                   .find( "provenanceComplete:0" ) != std::string::npos );
+    }
+}
+
+/// Keep preparation-only and SDK-only waits distinct, including a wholly unstarted blocker SDK stage.
+/** \ingroup dmSyncoTelemetry_unit_test */
+TEST_CASE( "Synco telemetry distinguishes preparation and SDK blocker roles", "[dmSyncoTelemetry]" )
+{
+    // clang-format off
+#ifdef DMSYNCO_TELEMETRY_TEST_DOXYGEN_REF
+    MagAOX::logger::telem_dmsynco::messageT;
+    MagAOX::logger::telem_dmsynco::verify;
+#endif
+    // clang-format on
+
+    for( const bool preparationOnly : { false, true } )
+    {
+        CAPTURE( preparationOnly );
+        auto       source  = sampleMainWaitTrace();
+        auto      &event   = source.mainWait[0];
+        auto      &blocker = event.blockers[0];
+        const auto anchor  = blocker.job.anchorNs;
+
+        if( preparationOnly )
+        {
+            event.sdkServiceNs     = 10000;
+            event.sdkWaitNs        = 0;
+            event.main.sdkNs       = event.main.vectorNs;
+            event.main.sdkReadyNs  = event.main.sdkNs + event.sdkServiceNs;
+            blocker.job.sdkNs      = 0;
+            blocker.job.sdkReadyNs = 0;
+            blocker.sdkBeginNs     = 0;
+            blocker.sdkEndNs       = 0;
+        }
+        else
+        {
+            event.main =
+                mainWaitJob( event.main.id, event.main.counter, anchor + 100000, anchor + 120000, anchor + 175000 );
+            event.prepWaitNs    = 0;
+            event.sdkWaitNs     = 20000;
+            blocker.capturedNs  = anchor + 155000;
+            blocker.prepBeginNs = 0;
+            blocker.prepEndNs   = 0;
+            blocker.sdkBeginNs  = anchor + 155000;
+        }
+
+        event.emittedNs = event.main.sdkNs;
+        auto input      = message( samplePrimary(), {}, samplePipeline(), source );
+        auto buffer     = envelope( input );
+        REQUIRE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+        checkMainWaitTrace( GetTelem_dmsynco_fb( input.builder.GetBufferPointer() )->simulation()->main_wait_trace(),
+                            source );
+    }
+}
+
+/// Reject impossible command identities, model equations, clipped resource roles and evidence accounting.
+/** \ingroup dmSyncoTelemetry_unit_test */
+TEST_CASE( "Synco telemetry validates modeled main wait causality and conservation", "[dmSyncoTelemetry]" )
+{
+    // clang-format off
+#ifdef DMSYNCO_TELEMETRY_TEST_DOXYGEN_REF
+    MagAOX::logger::telem_dmsynco::verify;
+#endif
+    // clang-format on
+
+    for( unsigned variant = 0; variant < 55; ++variant )
+    {
+        CAPTURE( variant );
+        auto  source  = sampleMainWaitTrace();
+        auto &event   = source.mainWait[0];
+        auto &blocker = event.blockers[0];
+
+        switch( variant )
+        {
+        case 0:
+            ++source.mainWaitStatus.detected;
+            break;
+        case 1:
+            source.mainWaitStatus.capacity = dmSyncoSimulation::mainWaitTraceCapacity + 1;
+            break;
+        case 2:
+            source.mainWaitStatus.queued = source.mainWaitStatus.capacity + 1;
+            break;
+        case 3:
+            source.mainWaitStatus.logFailed = source.mainWaitStatus.drained + 1;
+            break;
+        case 4:
+            source.mainWaitStatus.drained = source.mainWaitCount - 1;
+            break;
+        case 5:
+            source.mainWaitCount = dmSyncoSimulation::mainWaitBatchCapacity + 1;
+            break;
+        case 6:
+            event.id = 0;
+            break;
+        case 7:
+            source.mainWait[1].id = event.id;
+            break;
+        case 8:
+            event.session = 0;
+            break;
+        case 9:
+            event.ordinal = 0;
+            break;
+        case 10:
+            event.emittedNs = 0;
+            break;
+        case 11:
+            event.deliveryNs = -1;
+            break;
+        case 12:
+            event.prepareNs = 0;
+            break;
+        case 13:
+            event.readerNs = event.deliveryNs + event.prepareNs - 1;
+            break;
+        case 14:
+            event.sdkServiceNs = 0;
+            break;
+        case 15:
+            event.postServiceNs = 0;
+            break;
+        case 16:
+            event.prepWaitNs = -1;
+            break;
+        case 17:
+            event.sdkWaitNs = -1;
+            break;
+        case 18:
+            ++event.prepWaitNs;
+            break;
+        case 19:
+            ++event.sdkWaitNs;
+            break;
+        case 20:
+            event.main.id = 0;
+            break;
+        case 21:
+            event.main.counter = 0;
+            break;
+        case 22:
+            event.main.step = 1;
+            break;
+        case 23:
+            ++event.main.inputNs;
+            break;
+        case 24:
+            ++event.main.vectorNs;
+            break;
+        case 25:
+            ++event.main.readerNs;
+            break;
+        case 26:
+            ++event.main.sdkReadyNs;
+            break;
+        case 27:
+            ++event.emittedNs;
+            break;
+        case 28:
+            event.main.postNs = event.main.sdkNs - 1;
+            break;
+        case 29:
+            event.main.retiredNs = event.main.sdkReadyNs;
+            break;
+        case 30:
+            event.blockerCount = dmSyncoSimulation::mainWaitBlockerCapacity + 1;
+            break;
+        case 31:
+            event.blockerCount = 0;
+            break;
+        case 32:
+            blocker.job.id = event.main.id;
+            break;
+        case 33:
+            blocker.job.step = int( dmSyncoSimulation::maxSteps );
+            break;
+        case 34:
+            blocker.capturedNs = 0;
+            break;
+        case 35:
+            blocker.capturedNs = event.emittedNs + 1;
+            break;
+        case 36:
+            blocker.prepBeginNs = 0;
+            break;
+        case 37:
+            blocker.prepEndNs = blocker.prepBeginNs;
+            break;
+        case 38:
+            blocker.sdkBeginNs = blocker.sdkEndNs;
+            break;
+        case 39:
+            --blocker.prepBeginNs;
+            break;
+        case 40:
+            ++blocker.prepEndNs;
+            break;
+        case 41:
+            --blocker.sdkBeginNs;
+            break;
+        case 42:
+            ++blocker.sdkEndNs;
+            break;
+        case 43:
+            --blocker.prepEndNs;
+            break;
+        case 44:
+            ++blocker.sdkBeginNs;
+            break;
+        case 45:
+            blocker.job.sdkNs = blocker.job.sdkReadyNs = 0;
+            break;
+        case 46:
+            blocker.job.readerNs = blocker.job.vectorNs = blocker.job.prepNs = 0;
+            break;
+        case 47:
+            source.mainWait[1].blockers[1].job.id = source.mainWait[1].blockers[0].job.id;
+            break;
+        case 48:
+            event.main.observation.publicationNs = -1;
+            break;
+        case 49:
+            event.main.observation.callbackNs = event.main.observation.receiptNs - 1;
+            break;
+        case 50:
+            event.main.observation.lockAcquiredNs = event.main.anchorNs + 1;
+            break;
+        case 51:
+            event.prepareNs = 1000000001;
+            break;
+        case 52:
+            event.main.inputNs = std::numeric_limits<int64_t>::max();
+            break;
+        case 53:
+            source.mainWaitStatus.detected = source.mainWaitStatus.drained = std::numeric_limits<uint64_t>::max();
+            source.mainWaitStatus.dropped                                  = 1;
+            source.mainWaitStatus.queued                                   = 0;
+            break;
+        case 54:
+            blocker.job.postNs    = event.emittedNs + 1;
+            blocker.job.retiredNs = blocker.job.postNs + event.postServiceNs;
+            break;
+        }
+
+        auto input  = message( samplePrimary(), {}, samplePipeline(), source );
+        auto buffer = envelope( input );
+        REQUIRE_FALSE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
+    }
+}
+
+/// Require structurally present nested evidence whenever a delayed-main table claims to contain events.
+/** \ingroup dmSyncoTelemetry_unit_test */
+TEST_CASE( "Synco telemetry rejects missing modeled main wait tables", "[dmSyncoTelemetry]" )
+{
+    // clang-format off
+#ifdef DMSYNCO_TELEMETRY_TEST_DOXYGEN_REF
+    MagAOX::logger::telem_dmsynco::verify;
+#endif
+    // clang-format on
+
+    for( unsigned variant = 0; variant < 5; ++variant )
+    {
+        CAPTURE( variant );
+        auto        input   = message( samplePrimary(), {}, samplePipeline(), sampleMainWaitTrace() );
+        const auto *trace   = GetTelem_dmsynco_fb( input.builder.GetBufferPointer() )->simulation()->main_wait_trace();
+        const auto *event   = trace->events()->Get( 0 );
+        const auto *blocker = event->blockers()->Get( 0 );
+
+        switch( variant )
+        {
+        case 0:
+            omitField( trace, DmSyncoMainWaitTrace::VT_EVENTS );
+            break;
+        case 1:
+            omitField( event, DmSyncoMainWaitEvent::VT_MAIN );
+            break;
+        case 2:
+            omitField( event, DmSyncoMainWaitEvent::VT_BLOCKERS );
+            break;
+        case 3:
+            omitField( blocker, DmSyncoMainWaitBlocker::VT_JOB );
+            break;
+        case 4:
+            omitField( event->main(), DmSyncoMainWaitJob::VT_OBSERVATION );
+            break;
+        }
+
+        auto buffer = envelope( input );
+        REQUIRE_FALSE( verifyLogEntry( telem_dmsynco::eventCode, buffer.get() ) );
     }
 }
 

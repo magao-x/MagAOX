@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <utility>
 
 #include "../../libMagAOX/common/dmSyncoSimulation.hpp"
 
@@ -55,25 +56,20 @@ class PipelineSimulation
 
   private:
     /// One fixed-storage command lease, including its completed times until the slot is reused.
-    struct Job
+    struct Job : MagAOX::dmSyncoSimulation::MainWaitJob
     {
-        bool     active{ false };      ///< This slot currently owns one command credit.
-        bool     main{ false };        ///< Genuine main rather than conditional auxiliary command.
-        bool     prepStarted{ false }; ///< Serialized monitor preparation has started.
-        bool     vectorReady{ false }; ///< Private vector can enter the SDK worker.
-        bool     staged{ false };      ///< Monitor has finished its last shared read.
-        bool     sdkStarted{ false };  ///< Serialized native service has started.
-        bool     sdkDone{ false };     ///< SDK worker is ready after this service.
-        bool     postStarted{ false }; ///< Ordered post service has started.
-        uint64_t counter{ 0 };         ///< Caller-supplied genuine main-cycle identity.
-        int      step{ 0 };            ///< Zero for genuine mains, positive for auxiliary slots.
-        int64_t  inputNs{ 0 };         ///< Anchor plus delivery, independent of reservation order.
-        int64_t  prepNs{ 0 };          ///< Actual monitor-stage start after earlier shared readers clear.
-        int64_t  vectorNs{ 0 };        ///< Actual private-vector readiness.
-        int64_t  readerNs{ 0 };        ///< Actual final shared-reader completion.
-        int64_t  sdkNs{ 0 };           ///< Actual native entry, also defining ordered-post sequence.
-        int64_t  sdkReadyNs{ 0 };      ///< Native entry plus bounded worker service.
-        int64_t  retiredNs{ 0 };       ///< Ordered-post completion and credit release.
+        bool active{ false };      ///< This slot currently owns one command credit.
+        bool main{ false };        ///< Genuine main rather than conditional auxiliary command.
+        bool prepStarted{ false }; ///< Serialized monitor preparation has started.
+        bool vectorReady{ false }; ///< Private vector can enter the SDK worker.
+        bool staged{ false };      ///< Monitor has finished its last shared read.
+        bool sdkStarted{ false };  ///< Serialized native service has started.
+        bool sdkDone{ false };     ///< SDK worker is ready after this service.
+        bool postStarted{ false }; ///< Ordered post service has started.
+        std::array<MagAOX::dmSyncoSimulation::MainWaitBlocker, MagAOX::dmSyncoSimulation::mainWaitBlockerCapacity>
+               blockers{};                 ///< Earlier owners retained by value.
+        size_t blockerCount{ 0 };          ///< Initialized blocker prefix; never controls stage scheduling.
+        bool   provenanceComplete{ true }; ///< False if diagnostic ownership cannot be retained completely.
     };
 
     Config m_config; ///< Bounds changed only by a successful configure operation.
@@ -93,12 +89,26 @@ class PipelineSimulation
     int64_t m_cooldownNs{ 0 }; ///< Fenced old jobs must have drained before reset credits can be reused.
 
     /// Reserve one credit after validating every pending job's possible drain arithmetic.
-    size_t admit( uint64_t counter /**< [in] Main-cycle identity. */,
+    size_t admit( uint64_t counter /**< [in] Existing combined-main or primary-auxiliary ordering key. */,
                   int      step /**< [in] Zero for a genuine main, positive for an auxiliary. */,
                   int64_t  anchorNs /**< [in] Genuine observation or hypothetical trigger. */ );
 
     /// Apply simultaneous completions, then start eligible independent stages at the current time.
-    void settle();
+    void settle( MagAOX::dmSyncoSimulation::MainWaitModelBatch *trace =
+                     nullptr /**< [out] Optional actual-progress evidence. */ );
+
+    /// Retain the resource owner while a genuine main waits; diagnostic state never affects execution.
+    void trackBlocker( Job       &waiting /**< [in,out] Waiting genuine main. */,
+                       const Job &owner /**< [in] Currently occupying resource. */,
+                       bool       preparation /**< [in] True for shared readers, false for native service. */ );
+
+    /// Snapshot active resource owners for every main whose stage has not started yet.
+    void trackBlocking();
+
+    /// Append one completed wait to caller-owned bounded output, preserving the policy counter on loss.
+    void
+    traceWait( const Job &job /**< [in] Main entering native service after contention. */,
+               MagAOX::dmSyncoSimulation::MainWaitModelBatch *trace /**< [out] Optional actual-progress evidence. */ );
 
     /// Select the earliest future transition, or return the maximum timestamp when no work remains.
     int64_t nextEvent() const;
@@ -121,11 +131,16 @@ class PipelineSimulation
     void invalidate( int64_t observedNs /**< [in] Latest observed command time, no earlier than model time. */ );
 
     /// Process only transitions at or before the requested nondecreasing monotonic time.
-    void advance( int64_t nowNs /**< [in] Latest time available to the resource model. */ );
+    void
+    advance( int64_t nowNs /**< [in] Latest time available to the resource model. */,
+             MagAOX::dmSyncoSimulation::MainWaitModelBatch *trace = nullptr /**< [out] Optional emitted waits. */ );
 
     /// Admit a genuine main, recording additional SDK-entry delay from preparation or SDK queues.
-    bool main( uint64_t counter /**< [in] Genuine main-cycle identity. */,
-               int64_t  observedNs /**< [in] Observed combined-command anchor. */ );
+    bool main( uint64_t counter /**< [in] Genuine combined-command counter used for model ordering. */,
+               int64_t  observedNs /**< [in] Observed combined-command anchor. */,
+               const MagAOX::dmSyncoSimulation::Observation  &observation = {} /**< [in] Unmodified caller context. */,
+               MagAOX::dmSyncoSimulation::MainWaitModelBatch *trace = nullptr /**< [out] Optional emitted waits. */,
+               uint64_t primaryCounter = 0 /**< [in] Associated primary counter, or zero when unavailable. */ );
 
     /// Forecast a conditional auxiliary without permitting any extra following-main SDK wait.
     /** A rejected forecast changes only the required-main-reserve diagnostic. Accepted input owns a
@@ -135,7 +150,9 @@ class PipelineSimulation
                       int      step /**< [in] Positive active auxiliary slot. */,
                       int64_t  decisionNs /**< [in] Current decision time, no later than the trigger. */,
                       int64_t  triggerNs /**< [in] Hypothetical command-publication anchor. */,
-                      int64_t  earliestMainNs /**< [in] Earliest following main; no preparation credit is assumed. */ );
+                      int64_t  earliestMainNs /**< [in] Earliest following main; no preparation credit is assumed. */,
+                      MagAOX::dmSyncoSimulation::MainWaitModelBatch *trace =
+                          nullptr /**< [out] Waits from committed progress only. */ );
 
     /// Return cumulative diagnostics and endpoints of services actually started by the model.
     const MagAOX::dmSyncoSimulation::Pipeline &summary() const;
@@ -244,13 +261,16 @@ inline size_t PipelineSimulation::admit( uint64_t counter, int step, int64_t anc
         return capacity;
     }
 
-    auto &job   = m_jobs[slot];
-    job         = {};
-    job.active  = true;
-    job.main    = step == 0;
-    job.counter = counter;
-    job.step    = step;
-    job.inputNs = int64_t( inputNs );
+    auto &job          = m_jobs[slot];
+    job                = {};
+    job.id             = m_summary.mainAdmitted + m_summary.auxiliaryAdmitted + 1;
+    job.active         = true;
+    job.main           = step == 0;
+    job.counter        = counter;
+    job.step           = step;
+    job.primaryCounter = step > 0 ? counter : 0;
+    job.anchorNs       = anchorNs;
+    job.inputNs        = int64_t( inputNs );
     ++m_summary.inFlight;
     m_summary.maximumInFlight = std::max( m_summary.maximumInFlight, m_summary.inFlight );
 
@@ -266,7 +286,7 @@ inline size_t PipelineSimulation::admit( uint64_t counter, int step, int64_t anc
     return slot;
 }
 
-inline void PipelineSimulation::settle()
+inline void PipelineSimulation::settle( MagAOX::dmSyncoSimulation::MainWaitModelBatch *trace )
 {
     for( auto &job : m_jobs )
     {
@@ -356,6 +376,7 @@ inline void PipelineSimulation::settle()
         {
             ++m_summary.mainSdkWaits;
             m_summary.maximumMainWaitNs = std::max( m_summary.maximumMainWaitNs, waitNs );
+            traceWait( job, trace );
         }
     }
 
@@ -363,9 +384,12 @@ inline void PipelineSimulation::settle()
     {
         auto &job             = m_jobs[post];
         job.postStarted       = true;
+        job.postNs            = m_nowNs;
         job.retiredNs         = m_nowNs + m_config.postNs;
         m_summary.postReadyNs = job.retiredNs;
     }
+
+    trackBlocking();
 }
 
 inline int64_t PipelineSimulation::nextEvent() const
@@ -397,7 +421,177 @@ inline int64_t PipelineSimulation::nextEvent() const
     return nextNs;
 }
 
-inline void PipelineSimulation::advance( int64_t nowNs )
+inline void PipelineSimulation::trackBlocker( Job &waiting, const Job &owner, bool preparation )
+{
+    size_t slot = waiting.blockerCount;
+
+    for( size_t i = 0; i < waiting.blockerCount; ++i )
+    {
+        if( waiting.blockers[i].job.id == owner.id )
+        {
+            slot = i;
+            break;
+        }
+    }
+
+    if( slot == waiting.blockers.size() )
+    {
+        waiting.provenanceComplete = false;
+        return;
+    }
+
+    auto &blocker = waiting.blockers[slot];
+
+    if( slot == waiting.blockerCount )
+    {
+        ++waiting.blockerCount;
+        blocker.capturedNs = m_nowNs;
+    }
+
+    blocker.job = static_cast<const MagAOX::dmSyncoSimulation::MainWaitJob &>( owner );
+
+    if( preparation )
+    {
+        const auto beginNs  = std::max( waiting.inputNs, owner.prepNs );
+        blocker.prepBeginNs = blocker.prepBeginNs == 0 ? beginNs : std::min( blocker.prepBeginNs, beginNs );
+        blocker.prepEndNs   = owner.readerNs;
+    }
+    else
+    {
+        const auto beginNs = std::max( waiting.vectorNs, owner.sdkNs );
+        blocker.sdkBeginNs = blocker.sdkBeginNs == 0 ? beginNs : std::min( blocker.sdkBeginNs, beginNs );
+        blocker.sdkEndNs   = owner.sdkReadyNs;
+    }
+}
+
+inline void PipelineSimulation::trackBlocking()
+{
+    size_t prep = capacity;
+    size_t sdk  = capacity;
+
+    for( size_t i = 0; i < capacity; ++i )
+    {
+        const auto &job = m_jobs[i];
+
+        if( job.active && job.prepStarted && !job.staged )
+        {
+            prep = i;
+        }
+
+        if( job.active && job.sdkStarted && !job.sdkDone )
+        {
+            sdk = i;
+        }
+    }
+
+    for( auto &job : m_jobs )
+    {
+        if( !job.active || !job.main || job.sdkStarted )
+        {
+            continue;
+        }
+
+        if( !job.prepStarted && job.inputNs <= m_nowNs && prep != capacity )
+        {
+            trackBlocker( job, m_jobs[prep], true );
+        }
+
+        if( job.vectorReady && sdk != capacity )
+        {
+            trackBlocker( job, m_jobs[sdk], false );
+        }
+    }
+}
+
+inline void PipelineSimulation::traceWait( const Job &job, MagAOX::dmSyncoSimulation::MainWaitModelBatch *trace )
+{
+    if( trace == nullptr )
+    {
+        return;
+    }
+
+    if( trace->count >= trace->events.size() )
+    {
+        ++trace->dropped;
+        return;
+    }
+
+    MagAOX::dmSyncoSimulation::MainWaitEvent event;
+    event.ordinal            = m_summary.mainSdkWaits;
+    event.emittedNs          = job.sdkNs;
+    event.deliveryNs         = m_config.deliveryNs;
+    event.prepareNs          = m_config.prepareNs;
+    event.readerNs           = m_config.readerNs;
+    event.sdkServiceNs       = m_config.sdkServiceNs;
+    event.postServiceNs      = m_config.postNs;
+    event.prepWaitNs         = job.prepNs - job.inputNs;
+    event.sdkWaitNs          = job.sdkNs - job.vectorNs;
+    event.main               = static_cast<const MagAOX::dmSyncoSimulation::MainWaitJob &>( job );
+    event.blockers           = job.blockers;
+    event.blockerCount       = job.blockerCount;
+    event.provenanceComplete = job.provenanceComplete;
+
+    for( size_t i = 0; i < event.blockerCount; ++i )
+    {
+        auto &blocker = event.blockers[i];
+
+        for( const auto &owner : m_jobs )
+        {
+            if( owner.id == blocker.job.id )
+            {
+                blocker.job = static_cast<const MagAOX::dmSyncoSimulation::MainWaitJob &>( owner );
+                break;
+            }
+        }
+    }
+
+    // At most two earlier credits can occupy each resource. Their retained intervals must tile
+    // the entire observed wait; incomplete diagnostics are explicit and never alter admission.
+    for( size_t stage = 0; stage < 2; ++stage )
+    {
+        const bool preparation = stage == 0;
+        std::array<std::pair<int64_t, int64_t>, MagAOX::dmSyncoSimulation::mainWaitBlockerCapacity> intervals{};
+        size_t                                                                                      count = 0;
+
+        for( size_t i = 0; i < event.blockerCount; ++i )
+        {
+            const auto &blocker = event.blockers[i];
+            const auto  beginNs = preparation ? blocker.prepBeginNs : blocker.sdkBeginNs;
+            const auto  endNs   = preparation ? blocker.prepEndNs : blocker.sdkEndNs;
+
+            if( beginNs != 0 || endNs != 0 )
+            {
+                intervals[count++] = { beginNs, endNs };
+            }
+        }
+
+        if( count == 2 && intervals[1] < intervals[0] )
+        {
+            std::swap( intervals[0], intervals[1] );
+        }
+
+        int64_t throughNs = preparation ? job.inputNs : job.vectorNs;
+
+        for( size_t i = 0; i < count; ++i )
+        {
+            if( intervals[i].first != throughNs || intervals[i].second <= intervals[i].first )
+            {
+                event.provenanceComplete = false;
+            }
+
+            throughNs = intervals[i].second;
+        }
+
+        if( throughNs != ( preparation ? job.prepNs : job.sdkNs ) )
+        {
+            event.provenanceComplete = false;
+        }
+    }
+
+    trace->events[trace->count++] = event;
+}
+
+inline void PipelineSimulation::advance( int64_t nowNs, MagAOX::dmSyncoSimulation::MainWaitModelBatch *trace )
 {
     if( !m_configured || nowNs < m_nowNs || nowNs < 0 )
     {
@@ -407,7 +601,7 @@ inline void PipelineSimulation::advance( int64_t nowNs )
     // Each of three leases contributes at most five transitions; no admission occurs in this loop.
     for( size_t transition = 0; transition <= capacity * 5; ++transition )
     {
-        settle();
+        settle( trace );
         const auto nextNs = nextEvent();
 
         if( nextNs > nowNs || nextNs == std::numeric_limits<int64_t>::max() )
@@ -421,14 +615,18 @@ inline void PipelineSimulation::advance( int64_t nowNs )
     m_nowNs = nowNs;
 }
 
-inline bool PipelineSimulation::main( uint64_t counter, int64_t observedNs )
+inline bool PipelineSimulation::main( uint64_t                                       counter,
+                                      int64_t                                        observedNs,
+                                      const MagAOX::dmSyncoSimulation::Observation  &observation,
+                                      MagAOX::dmSyncoSimulation::MainWaitModelBatch *trace,
+                                      uint64_t                                       primaryCounter )
 {
     if( !m_configured || observedNs <= 0 || observedNs < m_nowNs )
     {
         return false;
     }
 
-    advance( observedNs );
+    advance( observedNs, trace );
 
     if( observedNs < m_cooldownNs || m_summary.inFlight == capacity )
     {
@@ -443,12 +641,18 @@ inline bool PipelineSimulation::main( uint64_t counter, int64_t observedNs )
         return false;
     }
 
-    settle();
+    m_jobs[slot].observation    = observation;
+    m_jobs[slot].primaryCounter = primaryCounter;
+    settle( trace );
     return true;
 }
 
-inline PipelineSimulation::Result PipelineSimulation::auxiliary(
-    uint64_t counter, int step, int64_t decisionNs, int64_t triggerNs, int64_t earliestMainNs )
+inline PipelineSimulation::Result PipelineSimulation::auxiliary( uint64_t counter,
+                                                                 int      step,
+                                                                 int64_t  decisionNs,
+                                                                 int64_t  triggerNs,
+                                                                 int64_t  earliestMainNs,
+                                                                 MagAOX::dmSyncoSimulation::MainWaitModelBatch *trace )
 {
     if( !m_configured || step <= 0 || decisionNs <= 0 || decisionNs < m_nowNs || triggerNs < decisionNs ||
         earliestMainNs < triggerNs )
@@ -456,8 +660,9 @@ inline PipelineSimulation::Result PipelineSimulation::auxiliary(
         return Result::invalid;
     }
 
-    PipelineSimulation admitted = *this;
-    admitted.advance( decisionNs );
+    PipelineSimulation                            admitted = *this;
+    MagAOX::dmSyncoSimulation::MainWaitModelBatch committed;
+    admitted.advance( decisionNs, trace == nullptr ? nullptr : &committed );
 
     if( decisionNs < admitted.m_cooldownNs || admitted.m_summary.inFlight == capacity )
     {
@@ -471,7 +676,7 @@ inline PipelineSimulation::Result PipelineSimulation::auxiliary(
         return Result::invalid;
     }
 
-    admitted.settle();
+    admitted.settle( trace == nullptr ? nullptr : &committed );
     PipelineSimulation completed = admitted;
     PipelineSimulation atMain    = admitted;
     completed.advance( std::numeric_limits<int64_t>::max() );
@@ -523,6 +728,24 @@ inline PipelineSimulation::Result PipelineSimulation::auxiliary(
     }
 
     *this = admitted;
+
+    if( trace != nullptr )
+    {
+        trace->dropped += committed.dropped;
+
+        for( size_t i = 0; i < committed.count; ++i )
+        {
+            if( trace->count < trace->events.size() )
+            {
+                trace->events[trace->count++] = committed.events[i];
+            }
+            else
+            {
+                ++trace->dropped;
+            }
+        }
+    }
+
     return Result::accepted;
 }
 

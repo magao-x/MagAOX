@@ -2095,3 +2095,103 @@ build, clang-format check and diff whitespace check pass; independent framing/
 rotation/error-propagation review finds no blocking issue. Rebuild/install
 `logdump` for the next instrument-side collection; BMC, camera and synco
 executables do not change as part of this fix.
+
+## Per-main modeled-wait provenance — 2026-10-30
+
+The operator approved identifying the waiting main and its blocking jobs in the
+next capture. The partial-read correction above preserves records but does not
+add causal evidence by itself. This diagnostic extension leaves the pipeline
+preset, zero-added-main-wait admission policy, phase/grid calculations and all
+physical stream behavior unchanged.
+
+### Event contract and bounded collection
+
+An event is finalized exactly where the actual resource model increments
+`mainSdkWaits`: a genuine main enters modeled SDK service with nonzero added
+preparation and/or native-worker queueing. It retains both components separately
+and the frozen delivery/preparation/reader/SDK/post assumptions. Hypothetical
+forecast copies and reset-drain projections never export events. Actual
+committed progression is harvested immediately by the parent simulation.
+
+Each main and blocker carries a model admission ID, main/auxiliary step, the
+existing scheduling key and explicit associated primary counter. The main's
+scheduling key remains its combined counter; auxiliary keys remain primary-cycle
+counters. This preserves ordering behavior. Genuine job observations retain raw
+producer publication/trace endpoints and monotonic receipt/callback/lock timing.
+Auxiliary observations remain absent. The anchor remains the existing combined
+observer timestamp; this change does not substitute producer or controller time.
+
+Up to two distinct earlier jobs can block a main in the three-credit model.
+Their identities, conditional stage endpoints and clipped preparation/SDK
+blocking intervals are retained by value, including after credit retirement and
+reuse. A completeness flag states whether the retained intervals tile both
+waits. This distinguishes main-only bunching from auxiliary interference and
+keeps preparation delay separate from SDK queueing. Job stage endpoints are
+conditional model times; zero indicates that the stage had not started when
+captured, and future service-completion bounds are explicitly possible.
+
+The copied resource model has no diagnostic FIFO or logging callback. The parent
+simulation owns a fixed 64-event FIFO, with at most eight drained per telemetry
+emission. Overflow drops new diagnostic records without changing policy or
+aggregate counters. Process-lifetime event IDs, accounting and undrained records
+survive model resets/configuration changes; queued events retain their original
+session and assumptions. Event ordinal is the resource model's wait count and
+is distinct from process-lifetime diagnostic ID.
+
+### Telemetry, readbacks and next capture
+
+An optional FlatBuffer `main_wait_trace` extension preserves old-record decoding.
+Human-readable `[dmsynco]` lines carry `main_wait_quality` and individual
+`main_wait` records; JSON exposes the structured table. Semantic verification
+checks stage arithmetic, split waits, immutable identities, blocker roles,
+serialized-resource interval coverage and queue accounting. Historical records
+without the extension are explicitly marked unavailable by the updated reader.
+
+The read-only `simulation_main_wait_trace` property exposes `enabled`, `detected`,
+`drained`, `dropped`, `queued`, `capacity` and `logFailed`. Conservation is
+`detected = drained + dropped + queued`. Drained means removed for an ordinary
+telemetry attempt; `logFailed` counts drained records lost to a detected
+encoding/submission error, not disk durability or generic logger filtering.
+Cycle-lock contention defers draining; encoding and INDI publication remain
+outside that lock. No new thread, semaphore or hardware timestamp is added.
+
+For the next test, rebuild/install **dmSyncopation and logdump**, retain the
+current simulation configuration/bounds and use the existing simultaneous
+capture procedure. Camera and BMC-controller executables do not change for this
+trace. Preserve complete records, including subsequent emissions if the final
+snapshot shows queued evidence. A new model wait should identify the waiting
+combined/main identity, prep/SDK delay split and main/auxiliary blocking jobs;
+it still does not by itself prove a physical command stall.
+
+### Verification
+
+All four focused offline suites pass with project optimization flags:
+
+| Suite | Cases | Assertions |
+| --- | ---: | ---: |
+| Pipeline resource model | 19 | 418 |
+| Parent fixed-grid simulation | 55 | 54,046 |
+| dmSyncopation application integration | 83 | 12,037 |
+| dmsynco telemetry | 41 | 8,740 |
+
+The exact two-main/no-auxiliary reproduction exports 19.171 us preparation wait
+plus 80 us SDK wait and identifies the earlier main as both resource owners.
+Tests also cover preparation-only/SDK-only waits, auxiliary and mixed blockers,
+retired/reused credits, independent bounded outputs, forecast/reset silence,
+FIFO saturation, session preservation, lock-contention deferral, eight-event
+drains, repeated empty drains, real model-to-binary roundtrips, JSON/text output,
+legacy/disabled/incomplete traces and malformed causal/accounting fields.
+
+A separate differential harness compares every admission/result and all pipeline
+summary fields against the original model over **1,000,000** deterministic
+randomized operations, including reset/invalidation. All match. A varied corpus
+of **29,459** actual wait events also passes serialization and semantic
+verification without failures, including 10,812 auxiliary-blocker roles, 4,776
+two-owner events, 8,284 dual-resource blocker roles and explicit retired/reused
+blockers. A separate main-arrival corpus verifies another 27,761 events.
+
+Production dmSyncopation and logdump builds pass. The updated reader still
+verifies and decodes all **1,058** records in the supplied pre-extension binary,
+marking main-wait provenance unavailable. C++ clang-format verification and diff
+whitespace checks pass. These are workstation-only checks; no instrument state
+was inspected or changed by the agent.

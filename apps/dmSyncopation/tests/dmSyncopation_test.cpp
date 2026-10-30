@@ -149,6 +149,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_indiP_simulation;
     using dmSyncopation::m_indiP_simulationCadence;
     using dmSyncopation::m_indiP_simulationEstimator;
+    using dmSyncopation::m_indiP_simulationMainWait;
     using dmSyncopation::m_indiP_simulationPipeline;
     using dmSyncopation::m_indiP_simulationStatus;
     using dmSyncopation::m_indiP_simulationSteps;
@@ -196,6 +197,8 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_simulationEnabled;
     using dmSyncopation::m_simulationEstimatorLogFailed;
     using dmSyncopation::m_simulationEstimatorStatus;
+    using dmSyncopation::m_simulationMainWaitLogFailed;
+    using dmSyncopation::m_simulationMainWaitStatus;
     using dmSyncopation::m_simulationPhaseGain;
     using dmSyncopation::m_simulationPhaseSlewUs;
     using dmSyncopation::m_simulationPipelineBackend;
@@ -1184,6 +1187,50 @@ std::vector<uint8_t> simulationBytes( const MagAOX::dmSyncoSimulation::Summary &
              0 );
     const auto *begin = reinterpret_cast<const uint8_t *>( flatlogs::logHeader::messageBuffer( buffer ) );
     return { begin, begin + flatlogs::logHeader::msgLen( buffer ) };
+}
+
+/// Produce exact main-only bursts in the real shadow resource model without accessing any command stream.
+void prepareMainWaitTrace( Harness &app /**< [in,out] Isolated app owning the shadow and telemetry queue. */,
+                           size_t   count /**< [in] Number of independently spaced 99.171 microsecond waits. */ )
+{
+    app.m_simulationEnabled            = true;
+    app.m_simulationReaderReleaseReady = true;
+    app.m_simulationPipelineBackend    = true;
+    app.m_simulationVirtualReaderUs    = 60;
+    app.m_requested                    = 1;
+    REQUIRE( app.configureSimulation() );
+
+    for( size_t index = 0; index < count; ++index )
+    {
+        const auto                             start = 1000000000LL + int64_t( index ) * 1000000;
+        MagAOX::dmSyncoSimulation::Observation first;
+        first.streamInode          = 123;
+        first.triggerInode         = 456;
+        first.receiptNs            = start - 200;
+        first.callbackNs           = start - 150;
+        first.lockRequestNs        = start - 100;
+        first.lockAcquiredNs       = start - 50;
+        first.publicationNs        = 1792000000000000000LL + int64_t( index ) * 1000000;
+        first.primaryPublicationNs = first.publicationNs - 18000;
+        first.startNs              = first.publicationNs - 6000;
+        first.updateNs             = first.publicationNs - 2000;
+        auto second                = first;
+        second.receiptNs           = start + 20000;
+        second.callbackNs          = start + 20100;
+        second.lockRequestNs       = start + 20200;
+        second.lockAcquiredNs      = start + 20800;
+        second.publicationNs += 20829;
+        second.primaryPublicationNs += 20829;
+        second.startNs += 20829;
+        second.updateNs += 20829;
+        app.m_simulation.primary( 2 * index + 1, start - 1000 );
+        app.m_simulation.combined( 2 * index + 101, 2 * index + 1, start, true, first );
+        app.m_simulation.primary( 2 * index + 2, start + 19829, 500000 );
+        app.m_simulation.combined( 2 * index + 102, 2 * index + 2, start + 20829, true, second );
+        app.m_simulation.advance( start + 500000 );
+    }
+
+    REQUIRE( app.m_simulation.mainWaitStatus().queued == count );
 }
 
 /// \endcond
@@ -4341,6 +4388,8 @@ TEST_CASE( "syncopation simulation qualifies observations and exposes conditiona
     CHECK( app.m_indiP_simulationStatus.getPerm() == pcf::IndiProperty::ReadOnly );
     CHECK( app.m_indiP_simulationTrace.getPerm() == pcf::IndiProperty::ReadOnly );
     CHECK( app.m_indiP_simulationEstimator.getPerm() == pcf::IndiProperty::ReadOnly );
+    CHECK( app.m_indiP_simulationMainWait.getPerm() == pcf::IndiProperty::ReadOnly );
+    CHECK( app.m_indiP_simulationMainWait.getState() == pcf::IndiProperty::Idle );
     CHECK( app.m_indiP_simulation.getElements().size() == 23 );
     CHECK( app.m_indiP_simulationCadence.getName() == "simulation_cadence" );
     CHECK( app.m_indiP_simulationCadence.getElements().size() == 12 );
@@ -4349,10 +4398,13 @@ TEST_CASE( "syncopation simulation qualifies observations and exposes conditiona
     CHECK( app.m_indiP_simulationTrace.getElements().size() == 7 );
     CHECK( app.m_indiP_simulationEstimator.getName() == "simulation_estimator" );
     CHECK( app.m_indiP_simulationEstimator.getElements().size() == 12 );
+    CHECK( app.m_indiP_simulationMainWait.getName() == "simulation_main_wait_trace" );
+    CHECK( app.m_indiP_simulationMainWait.getElements().size() == 7 );
 
     for( const auto *name : { "enabled", "detected", "drained", "dropped", "queued", "capacity", "logFailed" } )
     {
         CHECK( app.m_indiP_simulationTrace.find( name ) );
+        CHECK( app.m_indiP_simulationMainWait.find( name ) );
     }
 
     for( const auto *name : { "state",
@@ -4930,6 +4982,114 @@ TEST_CASE( "syncopation estimator telemetry drains a bounded independent batch",
     // clang-format on
 }
 
+/// Validate real model output against the telemetry reader without inferring physical controller queueing.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation modeled main waits roundtrip through telemetry validation",
+           "[dmSyncopation][simulation][mainWait]" )
+{
+    using namespace MagAOX::dmSyncoSimulation;
+    using MagAOX::logger::telem_dmsynco;
+    Harness app;
+    prepareMainWaitTrace( app, 1 );
+    TraceBatch trace;
+    REQUIRE( app.m_simulation.popMainWait( trace.mainWait[0] ) );
+    trace.mainWaitCount  = 1;
+    trace.mainWaitStatus = app.m_simulation.mainWaitStatus();
+    const auto &event    = trace.mainWait[0];
+    REQUIRE( event.prepWaitNs == 19171 );
+    REQUIRE( event.sdkWaitNs == 80000 );
+    REQUIRE( event.blockerCount == 1 );
+    REQUIRE( event.provenanceComplete );
+    REQUIRE( event.main.counter == 102 );
+    REQUIRE( event.main.primaryCounter == 2 );
+    REQUIRE( event.blockers[0].job.counter == 101 );
+    REQUIRE( event.blockers[0].job.primaryCounter == 1 );
+    telem_dmsynco::messageT message(
+        0, 0, 0, 0, 0, 0, 0, 0, 0, {}, {}, {}, false, {}, {}, {}, {}, app.m_simulation.summary(), trace );
+    flatlogs::bufferPtrT buffer;
+    REQUIRE( flatlogs::logHeader::createLog<telem_dmsynco>( buffer, { 1, 2 }, message, flatlogs::logPrio::LOG_TELEM ) ==
+             0 );
+    REQUIRE( telem_dmsynco::verify( buffer, flatlogs::logHeader::msgLen( buffer ) ) );
+    const auto *decoded = MagAOX::logger::GetTelem_dmsynco_fb( flatlogs::logHeader::messageBuffer( buffer ) );
+    REQUIRE( decoded->simulation() != nullptr );
+    const auto *history = decoded->simulation()->main_wait_trace();
+    REQUIRE( history != nullptr );
+    REQUIRE( history->events()->size() == 1 );
+    const auto *record = history->events()->Get( 0 );
+    CHECK( record->prep_wait_ns() + record->sdk_wait_ns() == 99171 );
+    CHECK( record->emitted_ns() == event.main.sdkNs );
+    CHECK( record->main()->observation()->receipt_ns() == event.main.observation.receiptNs );
+    CHECK( record->main()->observation()->publication_ns() == event.main.observation.publicationNs );
+    CHECK( record->blockers()->Get( 0 )->prep_begin_ns() == event.blockers[0].prepBeginNs );
+    CHECK( record->blockers()->Get( 0 )->sdk_end_ns() == event.blockers[0].sdkEndNs );
+    CHECK_FALSE( app.m_enabled );
+    CHECK_FALSE( app.m_resources );
+    CHECK( app.m_delivered == 0 );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    synco::Simulation::popMainWait;
+    MagAOX::logger::telem_dmsynco::messageT;
+    MagAOX::logger::telem_dmsynco::verify;
+#endif
+    // clang-format on
+}
+
+/// Leave delayed-main evidence queued during contention and drain each record once in bounded ordinary-thread batches.
+/** \ingroup dmSyncopation_unit_test */
+TEST_CASE( "syncopation modeled main wait telemetry drains only bounded available batches",
+           "[dmSyncopation][simulation][mainWait]" )
+{
+    using namespace MagAOX::dmSyncoSimulation;
+    Harness          app;
+    constexpr size_t count = mainWaitBatchCapacity + 1;
+    prepareMainWaitTrace( app, count );
+    CHECK( app.m_simulation.mainWaitStatus().drained == 0 );
+
+    SECTION( "Cycle contention does not pop or duplicate waiting-main evidence" )
+    {
+        std::unique_lock<std::mutex> cycle( app.m_cycleMutex );
+        auto                         recording = std::async( std::launch::async,
+                                     [&]()
+                                     {
+                                         return app.recordTelem( nullptr );
+                                     } );
+        const auto                   ready     = recording.wait_for( std::chrono::milliseconds( 500 ) );
+        cycle.unlock();
+        REQUIRE( recording.get() == 0 );
+        CHECK( ready == std::future_status::ready );
+        CHECK( app.m_simulation.mainWaitStatus().queued == count );
+        CHECK( app.m_simulation.mainWaitStatus().drained == 0 );
+    }
+
+    REQUIRE( app.recordTelem( nullptr ) == 0 );
+    CHECK( app.m_simulationMainWaitStatus.enabled );
+    CHECK( app.m_simulationMainWaitStatus.detected == count );
+    CHECK( app.m_simulationMainWaitStatus.drained == mainWaitBatchCapacity );
+    CHECK( app.m_simulationMainWaitStatus.queued == 1 );
+    CHECK( app.m_simulationMainWaitStatus.capacity == mainWaitTraceCapacity );
+    REQUIRE( app.recordTelem( nullptr ) == 0 );
+    CHECK( app.m_simulationMainWaitStatus.drained == count );
+    CHECK( app.m_simulationMainWaitStatus.queued == 0 );
+    REQUIRE( app.recordTelem( nullptr ) == 0 );
+    CHECK( app.m_simulationMainWaitStatus.detected == count );
+    CHECK( app.m_simulationMainWaitStatus.drained == count );
+    CHECK( app.m_simulationMainWaitStatus.queued == 0 );
+    CHECK( app.m_simulationMainWaitStatus.dropped == 0 );
+    CHECK( app.m_simulationMainWaitStatus.logFailed == 0 );
+    CHECK( app.m_simulationMainWaitLogFailed == 0 );
+    CHECK_FALSE( app.m_enabled );
+    CHECK_FALSE( app.m_resources );
+    CHECK( app.m_delivered == 0 );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    dmSyncopation::recordTelem;
+    synco::Simulation::mainWaitStatus;
+#endif
+    // clang-format on
+}
+
 /// Leave overlap and estimator collection and their INDI interfaces absent from ordinary non-simulation operation.
 /** \ingroup dmSyncopation_unit_test */
 TEST_CASE( "syncopation default observers do not collect overlap evidence",
@@ -4960,6 +5120,9 @@ TEST_CASE( "syncopation default observers do not collect overlap evidence",
     CHECK_FALSE( app.m_simulation.popEstimator( sample ) );
     CHECK( app.m_indiP_simulationEstimator.getElements().empty() );
     CHECK( app.m_indiP_simulationCadence.getElements().empty() );
+    CHECK( app.m_indiP_simulationMainWait.getElements().empty() );
+    CHECK_FALSE( app.m_simulation.mainWaitStatus().enabled );
+    CHECK( app.m_simulation.mainWaitStatus().detected == 0 );
 
     // clang-format off
 #ifdef DMSYNCOPATION_TEST_DOXYGEN_REF

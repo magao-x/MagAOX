@@ -1,5 +1,5 @@
 /** \file telem_dmsynco.hpp
- * \brief Syncopation timing, shadow cadence, reader protection and bounded estimator history telemetry.
+ * \brief Syncopation timing, shadow cadence, reader protection and bounded shadow evidence telemetry.
  */
 #ifndef logger_types_telem_dmsynco_hpp
 #define logger_types_telem_dmsynco_hpp
@@ -8,6 +8,7 @@
 #include <iomanip>
 #include <limits>
 #include <sstream>
+#include <utility>
 #include <vector>
 
 #include <mx/math/floatUtils.hpp>
@@ -55,7 +56,7 @@ struct telem_dmsynco : public flatbuffer_log
             const dmPipelineTiming::Summary &pipeline = {} /**< [in] upstream trace-stage populations */,
             const dmTiming::Summary         &cameraPublication = {} /**< [in] independent camera writetime intervals */,
             const dmSyncoSimulation::Summary    &simulation    = {} /**< [in] conditional shadow predictions */,
-            const dmSyncoSimulation::TraceBatch &trace = {} /**< [in] drained overlap/estimator evidence and quality */,
+            const dmSyncoSimulation::TraceBatch &trace = {} /**< [in] drained bounded shadow evidence and quality */,
             const dmReaderTiming::Summary &reader = {} /**< [in] independently observed software reader completion */,
             const dmReaderTiming::Summary &readerRelease = {} /**< [in] independent early channel-reader release */ );
     };
@@ -140,6 +141,16 @@ struct telem_dmsynco : public flatbuffer_log
         flatbuffers::FlatBufferBuilder      &builder /**< [in/out] destination builder */,
         const dmSyncoSimulation::TraceBatch &trace /**< [in] selected samples and independent queue quality */ );
 
+    /// Serialize one conditional job without converting its producer-clock observations.
+    static flatbuffers::Offset<DmSyncoMainWaitJob>
+    mainWaitJob( flatbuffers::FlatBufferBuilder       &builder /**< [in/out] destination builder */,
+                 const dmSyncoSimulation::MainWaitJob &job /**< [in] frozen modeled job and raw context */ );
+
+    /// Serialize bounded delayed-main evidence and independent lifetime coverage, including disabled history.
+    static flatbuffers::Offset<DmSyncoMainWaitTrace>
+    mainWaitTrace( flatbuffers::FlatBufferBuilder      &builder /**< [in/out] destination builder */,
+                   const dmSyncoSimulation::TraceBatch &trace /**< [in] drained delayed-main records and quality */ );
+
     /// Serialize optional slow cadence measurement and its qualification on the monotonic clock.
     static flatbuffers::Offset<DmSyncoCadence>
     cadenceTiming( flatbuffers::FlatBufferBuilder   &builder /**< [in/out] destination builder */,
@@ -191,6 +202,13 @@ struct telem_dmsynco : public flatbuffer_log
     /// Check independent triggered coverage and actual estimator arithmetic across configuration epochs.
     static bool validEstimatorTrace( const DmSyncoEstimatorTrace *trace /**< [in] optional estimator history */ );
 
+    /// Validate self-contained modeled job stages and separately clocked optional producer observations.
+    static bool validMainWaitJob( const DmSyncoMainWaitJob   *job /**< [in] conditional job snapshot */,
+                                  const DmSyncoMainWaitEvent *event /**< [in] frozen service assumptions */ );
+
+    /// Check independent coverage, causal wait arithmetic and exact resource-owner interval provenance.
+    static bool validMainWaitTrace( const DmSyncoMainWaitTrace *trace /**< [in] optional delayed-main evidence */ );
+
     /// Format independent primary/camera cadence and ordered excursions with distinct names.
     static void
     formatObservation( std::ostream &output /**< [in/out] formatted aggregate */,
@@ -224,6 +242,14 @@ struct telem_dmsynco : public flatbuffer_log
     /// Append selected pre/post samples and independent coverage/loss accounting with explicit clock labels.
     static void formatEstimatorTrace( std::ostream                &output /**< [in/out] formatted aggregate */,
                                       const DmSyncoEstimatorTrace *trace /**< [in] optional estimator history */ );
+
+    /// Format one modeled job, with explicit command kind, counter role and separate producer clock.
+    static void formatMainWaitJob( std::ostream             &output /**< [in/out] formatted aggregate */,
+                                   const DmSyncoMainWaitJob *job /**< [in] validated conditional job */ );
+
+    /// Append delayed-main model provenance and coverage; missing endpoints remain explicitly zero.
+    static void formatMainWaitTrace( std::ostream               &output /**< [in/out] formatted aggregate */,
+                                     const DmSyncoMainWaitTrace *trace /**< [in] optional delayed-main evidence */ );
 
     /// Format cadence qualification and retain the exact binary rational period alongside nanoseconds.
     static void formatCadence( std::ostream         &output /**< [in/out] formatted aggregate */,
@@ -507,6 +533,108 @@ telem_dmsynco::overlapTrace( flatbuffers::FlatBufferBuilder &builder, const dmSy
                                       records );
 }
 
+inline flatbuffers::Offset<DmSyncoMainWaitJob> telem_dmsynco::mainWaitJob( flatbuffers::FlatBufferBuilder &builder,
+                                                                           const dmSyncoSimulation::MainWaitJob &job )
+{
+    const auto &source      = job.observation;
+    const auto  observation = CreateDmSyncoOverlapObservation( builder,
+                                                              source.streamInode,
+                                                              source.triggerInode,
+                                                              source.receiptNs,
+                                                              source.callbackNs,
+                                                              source.lockRequestNs,
+                                                              source.lockAcquiredNs,
+                                                              source.publicationNs,
+                                                              source.primaryPublicationNs,
+                                                              source.startNs,
+                                                              source.updateNs );
+
+    return CreateDmSyncoMainWaitJob( builder,
+                                     job.id,
+                                     job.counter,
+                                     job.primaryCounter,
+                                     job.step,
+                                     job.anchorNs,
+                                     job.inputNs,
+                                     job.prepNs,
+                                     job.vectorNs,
+                                     job.readerNs,
+                                     job.sdkNs,
+                                     job.sdkReadyNs,
+                                     job.postNs,
+                                     job.retiredNs,
+                                     observation );
+}
+
+inline flatbuffers::Offset<DmSyncoMainWaitTrace>
+telem_dmsynco::mainWaitTrace( flatbuffers::FlatBufferBuilder &builder, const dmSyncoSimulation::TraceBatch &trace )
+{
+    const auto &quality = trace.mainWaitStatus;
+
+    if( !quality.enabled && !quality.detected && !quality.drained && !quality.dropped && !quality.queued &&
+        !quality.logFailed && !trace.mainWaitCount )
+    {
+        return {};
+    }
+
+    std::vector<flatbuffers::Offset<DmSyncoMainWaitEvent>> events;
+    const size_t count = std::min<size_t>( trace.mainWaitCount, trace.mainWait.size() );
+    events.reserve( count );
+
+    for( size_t index = 0; index < count; ++index )
+    {
+        const auto                                              &event = trace.mainWait[index];
+        const auto                                               main  = mainWaitJob( builder, event.main );
+        std::vector<flatbuffers::Offset<DmSyncoMainWaitBlocker>> blockers;
+        const size_t blockerCount = std::min<size_t>( event.blockerCount, event.blockers.size() );
+        blockers.reserve( blockerCount );
+
+        for( size_t block = 0; block < blockerCount; ++block )
+        {
+            const auto &owner = event.blockers[block];
+            const auto  job   = mainWaitJob( builder, owner.job );
+            blockers.push_back( CreateDmSyncoMainWaitBlocker( builder,
+                                                              job,
+                                                              owner.capturedNs,
+                                                              owner.prepBeginNs,
+                                                              owner.prepEndNs,
+                                                              owner.sdkBeginNs,
+                                                              owner.sdkEndNs ) );
+        }
+
+        const auto owners = builder.CreateVector( blockers );
+        events.push_back( CreateDmSyncoMainWaitEvent( builder,
+                                                      event.id,
+                                                      event.session,
+                                                      event.ordinal,
+                                                      event.emittedNs,
+                                                      event.deliveryNs,
+                                                      event.prepareNs,
+                                                      event.readerNs,
+                                                      event.sdkServiceNs,
+                                                      event.postServiceNs,
+                                                      event.prepWaitNs,
+                                                      event.sdkWaitNs,
+                                                      main,
+                                                      owners,
+                                                      event.blockerCount,
+                                                      event.provenanceComplete ) );
+    }
+
+    const auto records = builder.CreateVector( events );
+
+    return CreateDmSyncoMainWaitTrace( builder,
+                                       quality.enabled,
+                                       quality.detected,
+                                       quality.drained,
+                                       quality.dropped,
+                                       quality.queued,
+                                       quality.capacity,
+                                       quality.logFailed,
+                                       trace.mainWaitCount,
+                                       records );
+}
+
 inline flatbuffers::Offset<DmSyncoCadence> telem_dmsynco::cadenceTiming( flatbuffers::FlatBufferBuilder   &builder,
                                                                          const dmSyncoSimulation::Cadence &cadence )
 {
@@ -713,6 +841,7 @@ telem_dmsynco::simulationTiming( flatbuffers::FlatBufferBuilder      &builder,
     const auto cadence   = cadenceTiming( builder, summary.cadence );
     const auto readiness = readinessTiming( builder, summary );
     const auto pipeline  = pipelineSimulation( builder, summary.pipeline );
+    const auto mainWait  = mainWaitTrace( builder, trace );
 
     return CreateDmSyncoSimulation( builder,
                                     summary.enabled,
@@ -760,7 +889,8 @@ telem_dmsynco::simulationTiming( flatbuffers::FlatBufferBuilder      &builder,
                                     estimator,
                                     cadence,
                                     readiness,
-                                    pipeline );
+                                    pipeline,
+                                    mainWait );
 }
 
 inline flatbuffers::Offset<DmSyncoReaderCompletion> telem_dmsynco::readerCompletion(
@@ -1440,6 +1570,227 @@ inline bool telem_dmsynco::validOverlapTrace( const DmSyncoOverlapTrace *trace )
     return true;
 }
 
+inline bool telem_dmsynco::validMainWaitJob( const DmSyncoMainWaitJob *job, const DmSyncoMainWaitEvent *event )
+{
+    if( !job || !job->id() || !job->counter() || job->step() < 0 || job->step() >= int( dmSyncoSimulation::maxSteps ) ||
+        job->anchor_ns() <= 0 || __int128( job->anchor_ns() ) + event->delivery_ns() != job->input_ns() ||
+        job->prep_ns() < 0 || job->vector_ns() < 0 || job->reader_ns() < 0 || job->sdk_ns() < 0 ||
+        job->sdk_ready_ns() < 0 || job->post_ns() < 0 || job->retired_ns() < 0 ||
+        job->prep_ns() > event->emitted_ns() || job->sdk_ns() > event->emitted_ns() ||
+        job->post_ns() > event->emitted_ns() || ( job->step() > 0 && job->primary_counter() != job->counter() ) )
+    {
+        return false;
+    }
+
+    if( job->prep_ns() )
+    {
+        if( job->prep_ns() < job->input_ns() || __int128( job->prep_ns() ) + event->prepare_ns() != job->vector_ns() ||
+            __int128( job->prep_ns() ) + event->reader_ns() - event->delivery_ns() != job->reader_ns() )
+        {
+            return false;
+        }
+    }
+    else if( job->vector_ns() || job->reader_ns() || job->sdk_ns() )
+    {
+        return false;
+    }
+
+    if( job->sdk_ns() )
+    {
+        if( job->sdk_ns() < job->vector_ns() ||
+            __int128( job->sdk_ns() ) + event->sdk_service_ns() != job->sdk_ready_ns() )
+        {
+            return false;
+        }
+    }
+    else if( job->sdk_ready_ns() || job->post_ns() )
+    {
+        return false;
+    }
+
+    if( job->post_ns() )
+    {
+        if( job->post_ns() < std::max( job->reader_ns(), job->sdk_ready_ns() ) ||
+            __int128( job->post_ns() ) + event->post_service_ns() != job->retired_ns() )
+        {
+            return false;
+        }
+    }
+    else if( job->retired_ns() )
+    {
+        return false;
+    }
+
+    const auto *source = job->observation();
+
+    if( !source || source->publication_ns() < 0 || source->primary_publication_ns() < 0 || source->start_ns() < 0 ||
+        source->update_ns() < 0 )
+    {
+        return false;
+    }
+
+    int64_t previousNs = 0;
+
+    for( const auto stamp : { source->receipt_ns(),
+                              source->callback_ns(),
+                              source->lock_request_ns(),
+                              source->lock_acquired_ns(),
+                              job->anchor_ns() } )
+    {
+        if( stamp < 0 || ( stamp && stamp < previousNs ) )
+        {
+            return false;
+        }
+
+        if( stamp )
+        {
+            previousNs = stamp;
+        }
+    }
+
+    return true;
+}
+
+inline bool telem_dmsynco::validMainWaitTrace( const DmSyncoMainWaitTrace *trace )
+{
+    if( !trace )
+    {
+        return true;
+    }
+
+    if( !trace->events() || !trace->capacity() || trace->capacity() > dmSyncoSimulation::mainWaitTraceCapacity ||
+        trace->queued() > trace->capacity() || trace->drained() > trace->detected() ||
+        trace->dropped() > trace->detected() - trace->drained() ||
+        trace->queued() != trace->detected() - trace->drained() - trace->dropped() ||
+        trace->log_failed() > trace->drained() || trace->batch_count() != trace->events()->size() ||
+        trace->batch_count() > dmSyncoSimulation::mainWaitBatchCapacity || trace->batch_count() > trace->drained() )
+    {
+        return false;
+    }
+
+    uint64_t previousId = 0;
+
+    for( const auto *event : *trace->events() )
+    {
+        if( !event || event->id() <= previousId || event->id() > trace->detected() || !event->session() ||
+            !event->ordinal() || event->emitted_ns() <= 0 || event->delivery_ns() < 0 ||
+            event->delivery_ns() > 1000000000 || event->prepare_ns() <= 0 || event->prepare_ns() > 1000000000 ||
+            event->reader_ns() > 1000000000 ||
+            __int128( event->reader_ns() ) - event->delivery_ns() < event->prepare_ns() ||
+            event->sdk_service_ns() <= 0 || event->sdk_service_ns() > 1000000000 || event->post_service_ns() <= 0 ||
+            event->post_service_ns() > 1000000000 || event->prep_wait_ns() < 0 || event->sdk_wait_ns() < 0 ||
+            __int128( event->prep_wait_ns() ) + event->sdk_wait_ns() <= 0 ||
+            __int128( event->prep_wait_ns() ) + event->sdk_wait_ns() > std::numeric_limits<int64_t>::max() ||
+            !validMainWaitJob( event->main(), event ) || event->main()->step() != 0 ||
+            event->main()->sdk_ns() != event->emitted_ns() ||
+            __int128( event->main()->prep_ns() ) - event->main()->input_ns() != event->prep_wait_ns() ||
+            __int128( event->main()->sdk_ns() ) - event->main()->vector_ns() != event->sdk_wait_ns() ||
+            !event->blockers() || event->blocker_count() != event->blockers()->size() ||
+            event->blocker_count() > dmSyncoSimulation::mainWaitBlockerCapacity )
+        {
+            return false;
+        }
+
+        previousId = event->id();
+        std::array<std::pair<int64_t, int64_t>, dmSyncoSimulation::mainWaitBlockerCapacity> preparation{};
+        std::array<std::pair<int64_t, int64_t>, dmSyncoSimulation::mainWaitBlockerCapacity> sdk{};
+        size_t                                                                              prepCount     = 0;
+        size_t                                                                              sdkCount      = 0;
+        uint64_t                                                                            previousOwner = 0;
+
+        for( size_t index = 0; index < event->blockers()->size(); ++index )
+        {
+            const auto *owner = event->blockers()->Get( index );
+
+            if( !owner || !validMainWaitJob( owner->job(), event ) || owner->job()->id() >= event->main()->id() ||
+                owner->job()->id() == previousOwner )
+            {
+                return false;
+            }
+
+            previousOwner       = owner->job()->id();
+            const bool prepRole = owner->prep_begin_ns() || owner->prep_end_ns();
+            const bool sdkRole  = owner->sdk_begin_ns() || owner->sdk_end_ns();
+
+            if( ( !prepRole && !sdkRole ) || owner->captured_ns() < event->main()->input_ns() ||
+                owner->captured_ns() > event->emitted_ns() )
+            {
+                return false;
+            }
+
+            if( prepRole )
+            {
+                if( !owner->job()->prep_ns() || owner->prep_begin_ns() < event->main()->input_ns() ||
+                    owner->prep_begin_ns() < owner->job()->prep_ns() ||
+                    owner->prep_end_ns() <= owner->prep_begin_ns() || owner->prep_end_ns() > event->main()->prep_ns() ||
+                    owner->prep_end_ns() > owner->job()->reader_ns() )
+                {
+                    return false;
+                }
+
+                preparation[prepCount++] = { owner->prep_begin_ns(), owner->prep_end_ns() };
+            }
+
+            if( sdkRole )
+            {
+                if( !owner->job()->sdk_ns() || owner->sdk_begin_ns() < event->main()->vector_ns() ||
+                    owner->sdk_begin_ns() < owner->job()->sdk_ns() || owner->sdk_end_ns() <= owner->sdk_begin_ns() ||
+                    owner->sdk_end_ns() > event->main()->sdk_ns() ||
+                    owner->sdk_end_ns() > owner->job()->sdk_ready_ns() )
+                {
+                    return false;
+                }
+
+                sdk[sdkCount++] = { owner->sdk_begin_ns(), owner->sdk_end_ns() };
+            }
+
+            const auto firstBegin = prepRole && ( !sdkRole || owner->prep_begin_ns() <= owner->sdk_begin_ns() )
+                                        ? owner->prep_begin_ns()
+                                        : owner->sdk_begin_ns();
+            const auto firstEnd   = prepRole && ( !sdkRole || owner->prep_begin_ns() <= owner->sdk_begin_ns() )
+                                        ? owner->prep_end_ns()
+                                        : owner->sdk_end_ns();
+
+            if( owner->captured_ns() < firstBegin || owner->captured_ns() >= firstEnd )
+            {
+                return false;
+            }
+        }
+
+        // Different owners cannot simultaneously own one serialized resource. Complete evidence must tile its wait.
+        const auto covers =
+            [complete = event->provenance_complete()]( auto intervals, size_t count, int64_t beginNs, int64_t endNs )
+        {
+            if( count == 2 && intervals[1] < intervals[0] )
+            {
+                std::swap( intervals[0], intervals[1] );
+            }
+
+            int64_t previousNs = beginNs;
+
+            for( size_t index = 0; index < count; ++index )
+            {
+                if( intervals[index].first < previousNs || ( complete && intervals[index].first != previousNs ) )
+                {
+                    return false;
+                }
+
+                previousNs = intervals[index].second;
+            }
+
+            return !complete || previousNs == endNs;
+        };
+
+        if( !covers( preparation, prepCount, event->main()->input_ns(), event->main()->prep_ns() ) ||
+            !covers( sdk, sdkCount, event->main()->vector_ns(), event->main()->sdk_ns() ) )
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 inline bool telem_dmsynco::validEstimatorTrace( const DmSyncoEstimatorTrace *trace )
 {
     if( !trace )
@@ -1626,6 +1977,7 @@ inline bool telem_dmsynco::validSimulation( const DmSyncoSimulation *summary )
         summary->guard_ns() < 0 || summary->snapshot_ns() < 0 || summary->copy_ns() < 0 || summary->lead_ns() < 0 ||
         summary->observation_ns() < 0 || summary->visibility_ns() < 0 || summary->reserve_ns() < 0 ||
         !validOverlapTrace( summary->overlap_trace() ) || !validEstimatorTrace( summary->estimator_trace() ) ||
+        !validMainWaitTrace( summary->main_wait_trace() ) ||
         !validReadiness( summary->readiness(), summary->pipeline() != nullptr ) ||
         !validPipeline( summary->pipeline() ) || ( summary->readiness() && !summary->enabled() ) ||
         ( summary->pipeline() && !summary->readiness() ) || !validCadence( summary->cadence() ) ||
@@ -2102,6 +2454,7 @@ inline void telem_dmsynco::formatSimulation( std::ostream &output, const DmSynco
 
     formatOverlapTrace( output, summary->overlap_trace() );
     formatEstimatorTrace( output, summary->estimator_trace() );
+    formatMainWaitTrace( output, summary->main_wait_trace() );
 }
 
 inline void telem_dmsynco::formatOverlapTrace( std::ostream &output, const DmSyncoOverlapTrace *trace )
@@ -2153,6 +2506,70 @@ inline void telem_dmsynco::formatOverlapTrace( std::ostream &output, const DmSyn
         }
 
         output << '}';
+    }
+}
+
+inline void telem_dmsynco::formatMainWaitJob( std::ostream &output, const DmSyncoMainWaitJob *job )
+{
+    const auto *source = job->observation();
+    output << "{id:" << job->id() << ",kind:" << ( job->step() ? "auxiliary" : "main" )
+           << ",modelCounter:" << job->counter() << ",counterRole:" << ( job->step() ? "primary_cycle" : "combined" )
+           << ",primaryCounter:" << job->primary_counter() << ",step:" << job->step()
+           << ",stage_zero:unavailable,anchor_ns:" << job->anchor_ns() << ",input_ns:" << job->input_ns()
+           << ",prep_ns:" << job->prep_ns() << ",vector_ns:" << job->vector_ns() << ",reader_ns:" << job->reader_ns()
+           << ",sdk_ns:" << job->sdk_ns() << ",sdkReady_ns:" << job->sdk_ready_ns() << ",post_ns:" << job->post_ns()
+           << ",retired_ns:" << job->retired_ns() << ",streamInode:" << source->stream_inode()
+           << ",triggerInode:" << source->trigger_inode() << ",receipt_ns:" << source->receipt_ns()
+           << ",callback_ns:" << source->callback_ns() << ",lockRequest_ns:" << source->lock_request_ns()
+           << ",lockAcquired_ns:" << source->lock_acquired_ns()
+           << ",producer_clock:unconverted,publication_ns:" << source->publication_ns()
+           << ",primaryPublication_ns:" << source->primary_publication_ns() << ",start_ns:" << source->start_ns()
+           << ",update_ns:" << source->update_ns() << '}';
+}
+
+inline void telem_dmsynco::formatMainWaitTrace( std::ostream &output, const DmSyncoMainWaitTrace *trace )
+{
+    if( !trace )
+    {
+        output << " main_wait_quality=unavailable";
+        return;
+    }
+
+    output << " main_wait_quality={enabled:" << trace->enabled() << ",detected:" << trace->detected()
+           << ",drained:" << trace->drained() << ",dropped:" << trace->dropped() << ",queued:" << trace->queued()
+           << ",capacity:" << trace->capacity() << ",logFailed:" << trace->log_failed()
+           << ",batch:" << trace->batch_count() << '}';
+
+    for( const auto *event : *trace->events() )
+    {
+        output << " main_wait={id:" << event->id() << ",session:" << event->session() << ",ordinal:" << event->ordinal()
+               << ",model_clock:monotonic,emitted_ns:" << event->emitted_ns() << ",delivery_ns:" << event->delivery_ns()
+               << ",prepare_ns:" << event->prepare_ns() << ",reader_ns:" << event->reader_ns()
+               << ",sdkService_ns:" << event->sdk_service_ns() << ",postService_ns:" << event->post_service_ns()
+               << ",prepWait_ns:" << event->prep_wait_ns() << ",sdkWait_ns:" << event->sdk_wait_ns()
+               << ",totalWait_ns:" << event->prep_wait_ns() + event->sdk_wait_ns()
+               << ",provenanceComplete:" << event->provenance_complete() << ",blockerCount:" << event->blocker_count()
+               << ",main:";
+        formatMainWaitJob( output, event->main() );
+        output << ",blockers:[";
+        bool first = true;
+
+        for( const auto *owner : *event->blockers() )
+        {
+            if( !first )
+            {
+                output << ',';
+            }
+
+            first = false;
+            output << "{captured_ns:" << owner->captured_ns() << ",prepBegin_ns:" << owner->prep_begin_ns()
+                   << ",prepEnd_ns:" << owner->prep_end_ns() << ",sdkBegin_ns:" << owner->sdk_begin_ns()
+                   << ",sdkEnd_ns:" << owner->sdk_end_ns() << ",job:";
+            formatMainWaitJob( output, owner->job() );
+            output << '}';
+        }
+
+        output << "]}";
     }
 }
 
