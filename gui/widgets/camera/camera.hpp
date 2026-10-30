@@ -1,7 +1,5 @@
 /** \file camera.hpp
  * \brief Widget providing the standard camera control panel for cameraGUI.
- *
- * \author Jared R. Males (jaredmales@gmail.com)
  */
 
 #ifndef camera_hpp
@@ -102,7 +100,7 @@ class camera : public xWidget
 
   public:
     /// Constructs the standard camera widget.
-    explicit camera( std::string    &camName,
+    explicit camera( std::string    &camName /**< [in] INDI camera device name. */,
                      QWidget        *Parent = 0 /**< [in] parent widget */,
                      Qt::WindowFlags f      = Qt::WindowFlags() /**< [in] Qt window flags */
     );
@@ -137,10 +135,10 @@ class camera : public xWidget
     );
 
     /// Adds the widget's configuration options before the widget is instantiated.
-    static void setupConfig( mx::app::appConfigurator &config );
+    static void setupConfig( mx::app::appConfigurator &config /**< [out] Configurator receiving widget options. */ );
 
     /// Loads widget configuration from the application configurator.
-    void loadConfig( mx::app::appConfigurator &config );
+    void loadConfig( mx::app::appConfigurator &config /**< [in] Configured widget options. */ );
 
   public slots:
 
@@ -148,7 +146,7 @@ class camera : public xWidget
     void updateGUI();
 
     /// Creates the detector-temperature widget.
-    void setup_temp_ccd( bool ro );
+    void setup_temp_ccd( bool ro /**< [in] Whether temperature control is read-only. */ );
 
     /// Creates the detector temperature-control status widget.
     void setup_tempStatus();
@@ -184,13 +182,13 @@ class camera : public xWidget
     void setup_cropMode();
 
     /// Creates the exposure-time widget.
-    void setup_expTime( bool ro );
+    void setup_expTime( bool ro /**< [in] Whether exposure time is read-only. */ );
 
     /// Creates the frame-rate widget.
-    void setup_fps( bool ro );
+    void setup_fps( bool ro /**< [in] Whether frame rate is read-only. */ );
 
     /// Creates the EM-gain widget.
-    void setup_emGain( bool ro );
+    void setup_emGain( bool ro /**< [in] Whether EM gain is read-only. */ );
 
     /// Creates the optional EM-gain-off request button.
     void setup_emGainOff();
@@ -199,7 +197,7 @@ class camera : public xWidget
     void emGainOff();
 
     /// Creates the averaging-time widget.
-    void setup_avgTime( bool ro );
+    void setup_avgTime( bool ro /**< [in] Whether averaging time is read-only. */ );
 
     /// Creates the synchronization toggle widget.
     void setup_synchro();
@@ -222,10 +220,10 @@ class camera : public xWidget
     void updateTimerStop();
 
     /// Starts the periodic update timer.
-    void updateTimerStart( int );
+    void updateTimerStart( int interval /**< [in] Update interval in milliseconds. */ );
 
     /// Queues creation of the detector-temperature widget.
-    void add_temp_ccd( bool ro );
+    void add_temp_ccd( bool ro /**< [in] Whether temperature control is read-only. */ );
 
     /// Queues creation of the temperature-status widget.
     void add_tempStatus();
@@ -255,19 +253,19 @@ class camera : public xWidget
     void add_cropMode();
 
     /// Queues creation of the exposure-time widget.
-    void add_expTime( bool ro );
+    void add_expTime( bool ro /**< [in] Whether exposure time is read-only. */ );
 
     /// Queues creation of the frame-rate widget.
-    void add_fps( bool ro );
+    void add_fps( bool ro /**< [in] Whether frame rate is read-only. */ );
 
     /// Queues creation of the EM-gain widget.
-    void add_emGain( bool ro );
+    void add_emGain( bool ro /**< [in] Whether EM gain is read-only. */ );
 
     /// Queues creation of the EM-gain-off request button.
     void add_emGainOff();
 
     /// Queues creation of the averaging-time widget.
-    void add_avgTime( bool ro );
+    void add_avgTime( bool ro /**< [in] Whether averaging time is read-only. */ );
 
     /// Queues creation of the synchronization widget.
     void add_synchro();
@@ -291,7 +289,7 @@ class camera : public xWidget
     /// Repositions optional left-column controls after stage or focus changes.
     void layoutLeftColumnControls();
 
-    Ui::camera ui;
+    Ui::camera ui; ///< Generated panel layout and fixed controls owned by this widget.
 };
 
 camera::camera( std::string &camName, QWidget *Parent, Qt::WindowFlags f ) : xWidget( Parent, f ), m_camName{ camName }

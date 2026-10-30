@@ -1,7 +1,6 @@
 /** \file andorCtrl.hpp
   * \brief The MagAO-X Andor EMCCD camera controller.
   *
-  * \author Jared R. Males (jaredmales@gmail.com)
   *
   * \ingroup andorCtrl_files
   */
@@ -19,7 +18,8 @@ namespace MagAOX
 namespace app
 {
 
-std::string andorSDKErrorName(unsigned int error)
+/// Translate an Andor SDK status code to its symbolic name.
+std::string andorSDKErrorName(unsigned int error /**< [in] SDK status code. */)
 {
    switch(error)
    {
@@ -274,9 +274,10 @@ std::string andorSDKErrorName(unsigned int error)
    }
 }
 
-int readoutParams( int & newa,
-                   int & newhss,
-                   const std::string & ron
+/// Translate a readout-speed name to its amplifier and horizontal-speed indices.
+int readoutParams( int & newa /**< [out] Amplifier index. */,
+                   int & newhss /**< [out] Horizontal readout-speed index. */,
+                   const std::string & ron /**< [in] Configured readout-speed name. */
                  )
 {
    if(ron == "ccd_00_08MHz")
@@ -322,9 +323,10 @@ int readoutParams( int & newa,
    return 0;
 }
 
-int vshiftParams( int & newvs,
-                  const std::string & vssn,
-                  float & vs
+/// Translate a vertical-shift name to its SDK index and shift time.
+int vshiftParams( int & newvs /**< [out] Vertical-shift index. */,
+                  const std::string & vssn /**< [in] Configured vertical-shift name. */,
+                  float & vs /**< [out] Vertical shift time, in microseconds. */
                 )
 {
    if(vssn == "0_3us")
@@ -411,7 +413,7 @@ public:
 
    static constexpr bool c_stdCamera_fpsCtrl = false; ///< app::dev config to tell stdCamera to not expose FPS controls
 
-   static constexpr bool c_stdCamera_fps = true; ///< app::dev config to tell stdCamera not to expose FPS status
+   static constexpr bool c_stdCamera_fps = true; ///< app::dev config to tell stdCamera to expose FPS status
 
    static constexpr bool c_stdCamera_synchro = false; ///< app::dev config to tell stdCamera to not expose synchro mode controls
 
@@ -433,19 +435,19 @@ public:
 
 protected:
 
-   /** \name configurable parameters
+   /** \name Configurable Parameters - Data
      *@{
      */
 
-
-
+   /// Path relative to configDir for the temporary camera configuration file.
+   std::string m_configFile;
 
    ///@}
 
-   std::string m_configFile; ///< The path, relative to configDir, where to write and read the temporary config file.
+   /// Whether the Andor SDK library is initialized.
+   bool m_libInit {false};
 
-   bool m_libInit {false}; ///< Whether or not the Andor SDK library is initialized.
-
+   /// Whether the startup temperature target must be applied on the next connection.
    bool m_poweredOn {false};
 
 public:
@@ -468,7 +470,7 @@ public:
      */
    virtual int appStartup();
 
-   /// Implementation of the FSM for the Siglent SDG
+   /// Run the Andor camera connection and acquisition state machine
    virtual int appLogic();
 
    /// Implementation of the on-power-off FSM logic
@@ -477,16 +479,20 @@ public:
    /// Implementation of the while-powered-off FSM
    virtual int whilePowerOff();
 
-   /// Do any needed shutdown tasks.  Currently nothing in this app.
+   /// Shut down telemetry, frame acquisition, and the camera SDK.
    virtual int appShutdown();
 
+   /// Initialize the SDK and select the configured camera.
    int cameraSelect();
 
+   /// Read sensor temperature and cooling status.
    int getTemp();
 
+   /// Read exposure timing and the resulting frame rate.
    int getFPS();
 
-   int setFPS(float fps);
+   /// Set the requested frame rate.
+   int setFPS(float fps /**< [in] Requested frames per second. */);
 
    /// Set the output amplifier and readout speed
    /** Sets according to stdCamera::m_readoutSpeedNameSet
@@ -498,20 +504,26 @@ public:
      */
    int setVShiftSpeed();
 
+   /// Read EM gain and report SDK gain zero as logical unity.
    int getEMGain();
 
+   /// Apply the requested EM gain, mapping logical unity to SDK gain zero.
    int setEMGain();
 
    /// Request logical unity gain, mapped to SDK gain zero, with the INDI mutex already held.
    int setEMGainOff();
 
+   /// Queue the requested crop mode when the selected amplifier supports it.
    int setCropMode();
 
+   /// Read the shutter state.
    int getShutter();
 
-   int setShutter( unsigned os);
+   /// Apply and publish the requested shutter state.
+   int setShutter( unsigned os /**< [in] Zero closes the shutter; nonzero opens it. */);
 
 
+   /// Write the next ROI to the temporary EDT configuration file.
    int writeConfig();
 
    /** \name stdCamera Interface
@@ -569,13 +581,25 @@ public:
      * @{
      */
 
+   /// Apply ROI and acquisition timing, then configure the EDT framegrabber.
    int configureAcquisition();
+
+   /// Return the current frame rate for frameGrabber timing.
    float fps();
+
+   /// Start acquisition in the Andor SDK and EDT framegrabber.
    int startAcquisition();
+
+   /// Acquire the next frame through the EDT framegrabber.
    int acquireAndCheckValid();
-   int loadImageIntoStream(void * dest);
+
+   /// Copy the current EDT frame to the shared-memory stream.
+   int loadImageIntoStream(void * dest /**< [out] Destination frame buffer. */);
+
+   /// Restart EDT configuration for the next acquisition.
    int reconfig();
 
+   ///@}
 
    //INDI:
 protected:
@@ -586,9 +610,11 @@ public:
      *
      * @{
      */
+   /// Check whether standard-camera telemetry is due.
    int checkRecordTimes();
 
-   int recordTelem( const telem_stdcam * );
+   /// Record the current standard-camera telemetry.
+   int recordTelem( const telem_stdcam *telem /**< [in] Telemetry type selector. */ );
 
    ///@}
 };

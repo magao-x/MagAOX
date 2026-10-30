@@ -1,7 +1,6 @@
 /** \file cameraSim.hpp
  * \brief The MagAO-X camera simulator.
  *
- * \author Jared R. Males (jaredmales@gmail.com)
  *
  * \ingroup cameraSim_files
  */
@@ -60,20 +59,20 @@ class cameraSim : public MagAOXApp<>,
      *@{
      */
     static constexpr bool c_stdCamera_tempControl =
-        true; ///< app::dev config to tell stdCamera to not expose temperature controls
+        true; ///< app::dev config to tell stdCamera to expose temperature controls
 
     static constexpr bool c_stdCamera_temp = true; ///< app::dev config to tell stdCamera to expose temperature
 
     static constexpr bool c_stdCamera_readoutSpeed =
-        true; ///< app::dev config to tell stdCamera not to  expose readout speed controls
+        true; ///< app::dev config to tell stdCamera to expose readout speed controls
 
     static constexpr bool c_stdCamera_vShiftSpeed =
-        true; ///< app:dev config to tell stdCamera not to expose vertical shift speed control
+        true; ///< app:dev config to tell stdCamera to expose vertical shift speed control
     static constexpr bool c_stdCamera_fanSpeed =
         false; ///< app::dev config to tell stdCamera not to expose fan-speed control
 
     static constexpr bool c_stdCamera_emGain =
-        true; ///< app::dev config to tell stdCamera to not expose EM gain controls
+        true; ///< app::dev config to tell stdCamera to expose EM gain controls
 
     static constexpr bool c_stdCamera_exptimeCtrl =
         true; ///< app::dev config to tell stdCamera to expose exposure time controls
@@ -81,10 +80,10 @@ class cameraSim : public MagAOXApp<>,
     static constexpr bool c_stdCamera_fpsCtrl = true; ///< app::dev config to tell stdCamera to expose FPS controls
 
     static constexpr bool c_stdCamera_fps =
-        true; ///< app::dev config to tell stdCamera not to expose FPS status (ignored since fpsCtrl=true)
+        true; ///< app::dev config to tell stdCamera to expose FPS status (ignored since fpsCtrl=true)
 
     static constexpr bool c_stdCamera_synchro =
-        true; ///< app::dev config to tell stdCamera to not expose synchro mode controls
+        true; ///< app::dev config to tell stdCamera to expose synchro mode controls
 
     static constexpr bool c_stdCamera_usesModes =
         false; ///< app:dev config to tell stdCamera not to expose mode controls
@@ -92,7 +91,7 @@ class cameraSim : public MagAOXApp<>,
     static constexpr bool c_stdCamera_usesROI = true; ///< app:dev config to tell stdCamera to expose ROI controls
 
     static constexpr bool c_stdCamera_cropMode =
-        true; ///< app:dev config to tell stdCamera not to expose Crop Mode controls
+        true; ///< app:dev config to tell stdCamera to expose Crop Mode controls
 
     static constexpr bool c_stdCamera_hasShutter =
         true; ///< app:dev config to tell stdCamera to expose shutter controls
@@ -109,23 +108,36 @@ class cameraSim : public MagAOXApp<>,
     ///@}
 
   protected:
+    /// Current simulated frame owned by the framegrabber.
     mx::improc::eigenImage<int16_t> m_fgimage;
 
+    /// Time at which the preceding frame was generated.
     double m_lastTime{ 0 };
+
+    /// Exposure timing offset used to schedule simulated frames.
     double m_offset = { 0 };
 
-    float m_bias{ 500 }; ///< the simulated bias level. default 500.
-    float m_ron{ 5 };    ///< the simulated readout noise, in counts/read. default 5.
+    /// Simulated bias level, in detector counts.
+    float m_bias{ 500 };
 
-    std::vector<float> m_xcen{ 0 };    /**< the simulated star x center coordinate, relative to image center.
-                                            one per star. default 0*/
-    std::vector<float> m_ycen{ 0 };    /**< the simulated star y center coordinate, relative to image center.
-                                            one per star. default 0.*/
-    std::vector<float> m_peak{ 2000 }; ///< the simulated star peak, in counts/second. one per star. default 2000.
-    float              m_fwhm{ 2 };    ///< the simulated star FWHM in pixels. the same for all stars. default 2.
+    /// Simulated read noise, in counts per read.
+    float m_ron{ 5 };
+
+    /// Simulated star x coordinates relative to image center, one per star.
+    std::vector<float> m_xcen{ 0 };
+
+    /// Simulated star y coordinates relative to image center, one per star.
+    std::vector<float> m_ycen{ 0 };
+
+    /// Simulated peak flux, in counts per second, for each star.
+    std::vector<float> m_peak{ 2000 };
+
+    /// Simulated stellar FWHM, in pixels, shared by all stars.
+    float m_fwhm{ 2 };
 
     float m_jitter{ 0.1 }; ///< the simulated jitter, in pixels/read. the same for all stars. default 0.1.
 
+    /// Normal random generator for simulated image noise and jitter.
     mx::math::normDistT<float> m_norm;
 
     bool m_focusInFocus{ false }; ///< Simulated in-focus state reported through the stdCamera focus interface.
@@ -143,7 +155,7 @@ class cameraSim : public MagAOXApp<>,
     virtual void setupConfig();
 
     /// load the configuration system results (called by MagAOXApp::setup())
-    virtual int loadConfigImpl( mx::app::appConfigurator &cfg );
+    virtual int loadConfigImpl( mx::app::appConfigurator &cfg /**< [in] Parsed application configuration. */ );
 
     /// load the configuration system results (called by MagAOXApp::setup())
     virtual void loadConfig();
@@ -154,19 +166,29 @@ class cameraSim : public MagAOXApp<>,
      */
     virtual int appStartup();
 
-    /// Implementation of the FSM for the Siglent SDG
+    /// Run the simulated camera state machine
     virtual int appLogic();
 
-    /// Do any needed shutdown tasks.  Currently nothing in this app.
+    /// Shut down the simulated framegrabber and telemetry.
     virtual int appShutdown();
 
+    /// Apply the requested ROI and allocate the simulated frame buffer.
     int configureAcquisition();
+
+    /// Initialize the simulated acquisition timing.
     int startAcquisition();
+
+    /// Wait for the next exposure interval and generate a simulated image.
     int acquireAndCheckValid();
-    int loadImageIntoStream( void *dest );
+
+    /// Copy the current simulated image to the shared-memory stream.
+    int loadImageIntoStream( void *dest /**< [out] Destination frame buffer. */ );
+
+    /// Complete the simulator framegrabber reconfiguration hook.
     int reconfig();
 
   protected:
+    /// Return the current simulated frame rate.
     float fps();
 
     /** \name stdCamera Interface
@@ -181,12 +203,16 @@ class cameraSim : public MagAOXApp<>,
      */
     int powerOnDefaults();
 
+    /// Apply the requested simulated temperature-controller state.
     int setTempControl();
 
+    /// Set simulated sensor temperature to the requested target.
     int setTempSetPt();
 
+    /// Apply the requested simulated readout speed.
     int setReadoutSpeed();
 
+    /// Apply the requested simulated vertical-shift speed.
     int setVShiftSpeed();
 
     /// Set the Exposure Time. [stdCamera interface]
@@ -203,8 +229,10 @@ class cameraSim : public MagAOXApp<>,
      */
     int setFPS();
 
+    /// Apply the requested simulated synchronization state.
     int setSynchro();
 
+    /// Set simulated EM gain to the requested target.
     int setEMGain();
 
     /// Request simulated unity EM gain with the INDI mutex already held by stdCamera.
@@ -217,6 +245,7 @@ class cameraSim : public MagAOXApp<>,
      */
     int checkNextROI();
 
+    /// Accept the simulated crop-mode request without additional action.
     int setCropMode();
 
     /// Set the next ROI
@@ -231,10 +260,13 @@ class cameraSim : public MagAOXApp<>,
     /// Simulate a goto-focus request.
     int gotoFocus();
 
-    int setShutter( int ss );
+    /// Apply the requested simulated shutter state.
+    int setShutter( int ss /**< [in] Requested shutter state. */ );
 
+    /// Return the simulated camera state string.
     std::string stateString();
 
+    /// Report whether the simulated camera state string is valid.
     bool stateStringValid();
 
     ///@}
@@ -244,9 +276,11 @@ class cameraSim : public MagAOXApp<>,
      * @{
      */
 
+    /// Check whether standard-camera telemetry is due.
     int checkRecordTimes();
 
-    int recordTelem( const telem_stdcam * );
+    /// Record the current simulated camera telemetry.
+    int recordTelem( const telem_stdcam *telem /**< [in] Telemetry type selector. */ );
 
     ///@}
 };
