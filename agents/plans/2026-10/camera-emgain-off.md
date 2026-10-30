@@ -101,8 +101,11 @@ scoped functional blockers.
 
 The issue #105 changes are recorded on `jrmales/camera-emgain-temperature`.
 Earlier work was committed before beginning this feature, as listed above.
-No GitHub comments, pull requests, or remote updates were made. Instrument
-validation is left to the user.
+The user reported successful behavior on 2026-10-30 and requested publication.
+The code branch is published; companion configuration is already merged into
+`magao-x/config` branch `onsky`. See [camera-temperature.md](camera-temperature.md)
+for the combined PR text and final warning wording. No GitHub comments or PR
+were created by the agent, and the agent performed no instrument validation.
 
 ## Suggested PR text
 

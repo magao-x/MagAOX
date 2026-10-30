@@ -95,23 +95,44 @@ consuming a request is earlier than successfully committing the SDK temperature.
 The implemented protocol, regressions, and remaining recovery boundaries are in
 [frameGrabber-reconfiguration-race.md](frameGrabber-reconfiguration-race.md).
 
-The changes are recorded in both local feature branches. No GitHub issue
-comments, pull requests, or remote branch updates were made.
+On 2026-10-30 the user reported that the behavior was working and requested a
+push and PR description. The code branch is published as
+`jrmales/camera-emgain-temperature`. The companion configuration is already
+merged into `magao-x/config` branch `onsky` through `cebce35`; remote `onsky` at
+`da14b03` also includes subsequent camera-display cautions and configuration
+organization. The saved config patch records the original companion change.
+
+The final warning wording is `EM gain above 1 requires on-target temperature
+control at -45.000000 C`, with the temperature taken from `camera.emGainTemp`.
+This wording change leaves the guard conditions unchanged. The configured
+setpoint must match exactly; the camera's own status determines temperature
+lock. The user's testing report does not change the offline-only scope of the
+agent's validation. No GitHub issue comments or PR were created by the agent.
 
 ## Suggested PR text
 
 Title:
 
 ```text
-Require the configured camera temperature for EM gain
+Guard camera EM gain by temperature and preserve reconfiguration requests
 ```
 
 Description:
 
 ```md
-This work was performed by GPT-6 (Codex) in response to the prompt: "camera temp setpoints: let's deal with https://github.com/magao-x/MagAOX/issues/270. We can add a caution rule to labrules config to notify when camwfs, camsci1, or camsci2 are not locked/ on target. But we also should add a flag to stdCamera that prevents setting EMG when not on target for temperature. It should allow setting EMG to 1 (or 0), but not increasing it." The user clarified: "We want a configurable set point that must be the set point for EM Gain operation."
+This work was performed by GPT-6 (Codex) in response to the prompt (condensed): "Address camera temperature setpoints (#270), require a configurable setpoint for EM-gain operation, fix lost framegrabber reconfiguration requests, and add a camera-specific EM-gain-off request and GUI button (#105)."
 
-Require active temperature lock at camera.emGainTemp before accepting EM gain above 1 when protection is enabled. Preserve gain 0/1 requests and prevent stale PICam lock across deferred temperature changes. Companion configuration enables protection and warns for unlocked or incorrect targets on camwfs, camsci1, and camsci2.
+When `camera.emGainRequiresTemp=true`, reject EM-gain requests above 1 unless the setpoint equals `camera.emGainTemp`, cooling is active and on target, and the camera is READY or OPERATING. Gain 0/1 remains available. PICam requires fresh lock after deferred temperature changes.
 
-Validation: 10206 camera-temperature assertions and 264 configuration/rule checks. Addresses #270. The companion framegrabber fix and its worker/consumer regressions are recorded in agents/plans/2026-10/frameGrabber-reconfiguration-race.md.
+- Add `emgain_off.request` and a shared camera GUI button. Each camera selects its safe value: OCAM, PICam, and cameraSim use gain 1; Andor maps logical gain 1 to SDK gain 0.
+- Make framegrabber reconfiguration requests atomic and consume them before cleanup, retaining requests that arrive during cleanup/configuration and requeuing failed cleanup. Adjust OCAM's internal FPS/synchro application and mode locking for repeated passes.
+- Companion configuration enables protection and power-gated temperature cautions for camwfs (-45 C), camsci1 (-50 C), and camsci2 (-55 C). It is already merged into `magao-x/config` branch `onsky`; this PR includes a reference patch.
+
+Validation: 14,270 assertions across 57 camera/GUI cases passed, plus worker/consumer regressions and 264 configuration/rule checks. Deterministic lost-request tests fail against the original header. The user reports the behavior working. Andor's SDK was unavailable; MCP3208's six failures and a CRED2 test abort reproduce unchanged against the original header. No instrument hardware was operated by the agent.
+
+The temperature guard blocks new requests; it does not automatically lower existing gain. The off control is a momentary command. Documentation and formatting cleanup are separated from functional commits.
+
+Implementation records and affected files: `agents/plans/2026-10/camera-temperature.md`, `camera-emgain-off.md`, and `frameGrabber-reconfiguration-race.md`.
+
+Addresses #270 and #105.
 ```

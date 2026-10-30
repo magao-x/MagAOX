@@ -3919,9 +3919,8 @@ int stdCamera<derivedT>::newCallBack_emgain( const pcf::IndiProperty &ipRecv )
             {
                 derived().updateIfChanged( m_indiP_emGain, "target", m_emGainSet, INDI_ALERT );
                 return derivedT::template log<text_log, -1>(
-                    "EM gain above 1 requires an available camera with active, on-target temperature control at "
-                    "camera.emGainTemp=" +
-                        std::to_string( m_emGainTemp ) + " C",
+                    "EM gain above 1 requires on-target temperature control at " + std::to_string( m_emGainTemp ) +
+                        " C",
                     logPrio::LOG_WARNING );
             }
         }
