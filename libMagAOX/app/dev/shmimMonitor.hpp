@@ -289,9 +289,6 @@ class shmimMonitor
     }
 };
 
-// Set self pointer to null so app starts up uninitialized.
-// template <class derivedT, class specificT>
-// shmimMonitor<derivedT, specificT> *shmimMonitor<derivedT, specificT>::m_selfMonitor = nullptr;
 
 template <class derivedT, class specificT>
 const std::string &shmimMonitor<derivedT, specificT>::shmimName() const
