@@ -930,3 +930,76 @@ The user reported that the Linux/RTC build now reaches accelSim and rejects its 
 | Formatting and scope | clang-format applied and checked on both touched C++ files with the existing mutex-comment preservation override; `git diff --check` passed. Specification and ANSWER entries preserved. |
 
 The added assertion is deliberately excluded from model-only builds: those do not instantiate the app and cannot validate its virtual override. The independent real-header probe confirms the exception-specification mechanism and fix, but is not a full app build. Rebuild the app and normal tests on the configured non-instrument Linux development host to exercise the actual app assertion and identify any subsequent compiler errors. No claim is made that the entire application now builds or that instrument integration is complete. No commit or push was performed.
+
+### Continuous WFS-Referenced Sampling — 2026-10-30
+
+The user now explicitly requires the WFS semaphore to be a phase reference, not an output trigger. This supersedes the earlier one-ADC-publication-per-source-notification behavior and its corresponding source-to-sample accounting assumptions. The user reports free-running `acc000` at **6000.013 Hz on exao2**; that is user-provided evidence, not a measurement made by this agent. All work here was local. No instrument access, shared infrastructure/dependency edits, commit, or push occurred.
+
+Before editing, inspection confirmed that every synchronized acquisition called `waitSync`, blocked on one semaphore, waited the model phase, and returned just one frame. Its recovery helper advanced missing numerical ticks but could not publish intervening samples. The revised implementation separates WFS reference accounting from an independent accelerometer clock. The physical model, ADC calibration, RNG sequences, timestamps/stream publication ownership, and free-running timer remain unchanged.
+
+**Implementation and scheduling decisions:**
+
+- Added app-local `phaseClock` in `accelSimModel.hpp`, replacing the obsolete `syncClock`/`syncTick` one-trigger accounting helper. The original `schedule` implementation remains unchanged and is still used by free-running operation.
+- Synchronized acquisition uses one worker/event loop, waiting for either a WFS semaphore or the next absolute accelerometer deadline. References never change the already pending deadline and never publish a frame. At an already-late deadline the loop consumes at most one queued reference, preventing source-accounting starvation under load, then proceeds with acquisition.
+- Let `Ta=1e9/fps`, `E` be the accelerometer epoch, `c` the source counter, and `Tr` the nominal WFS reference period. After measuring a first positive WFS period, retain its source counter `c0`. For each reference, compute the requested WFS phase `d` from the measured/smoothed period and the existing four latency terms plus signed postDelay. The desired accelerometer phase is `wrap_half_acc((arrival-E) + d - (c-c0)*Tr)`. Subtracting fractional WFS cycles is essential: snapping each individual WFS event to a sample would distort non-integer rate ratios.
+- The target and applied phase offsets stay within half an accelerometer period of the nominal epoch. Each completed acquisition applies a bounded correction only to the **following** interval. For on-time operation, deadlines have the form `E+n*Ta+bounded_phase`; the bounded phase cannot accumulate a long-term frequency change. Constant 2-kHz references therefore support both 8-kHz and 6-kHz sampling, and fractional ratios such as 5.5/2 kHz. A sample cannot coincide with every WFS phase reference for a non-integer ratio while retaining the requested rate; the relative phase advances fractionally instead.
+- Acquisition begins at the requested rate even before a reference is available. Phase acquisition takes several samples while bounded corrections settle; it is not an immediate phase jump or a withheld batch of samples. At a stable 2-kHz cadence, the existing latency sum 340.6 us yields **409.4 us**, calculated rather than hard-coded.
+- WFS cadence measurement divides the elapsed unique-arrival interval by source-counter progress, so missed notifications do not masquerade as a slower WFS. The first interval seeds the period estimate directly; subsequent measurements use the existing alpha EMA. This deliberately avoids the former zero-initialized EMA producing an artificially short startup period.
+- Source counters are committed immediately on receipt, independently of later wait cancellation or publication. Duplicate notifications do not create extra frames. `sync_frames_dropped` and gap counts now describe missing WFS references only. `skipped_publications` describes missed accelerometer deadlines only; there is no conversion of WFS gaps into accelerometer skips.
+- On a late acquisition, elapsed accelerometer ticks are accounted once; `model::advance` still advances up to eight skipped ticks and publishes only the newest sample. Larger gaps retain the existing counted stationary restart. The next synchronized publication deadline is at least half an accelerometer period beyond the acquisition, preventing an immediate catch-up burst. Normal corrections shorten an interval by at most the configured slew fraction.
+- Missing/stalled/replaced sources clear lock/cadence/delay measurements and enter holdover at the last applied phase. Sampling continues, including when the source is absent at startup. The input mapping is closed/retried within the worker, without requesting frameGrabber output reconfiguration, resetting output counters, or restarting the numerical model. A source counter reset also clears timing history without restarting physics. Explicit application reconfiguration and FPS changes retain their existing stationary-restart semantics.
+- FPS controls/subscriptions still specify the **accelerometer** nominal rate. No INDI property names or permissions changed. Leave `fps.device` empty unless its source advertises the requested accelerometer FPS; subscribing it to WFS `fps.current=2000` still requests 2000-Hz accelerometer operation. The new WFS cadence setting is separate.
+
+**New configuration (all app-local):**
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `synchro.referenceFps` | 0 | Nominal WFS cadence used only to unwrap fractional WFS cycles. Zero learns the first measured interval after timing acquisition/reset. A known nominal cadence such as 2000 is preferable when available because the first arrival interval can contain wake-up jitter. The phase-delay formula itself still uses measured/smoothed cadence. |
+| `synchro.maxSlew` | 0.05 | Maximum phase adjustment per accelerometer interval as a fraction of that period; valid `(0,0.25]`. Measured computation time and existing `cadenceGuard_ns` can reduce the available headroom. |
+| `synchro.timeout` | 0.01 s | Silence timeout and source-file probe/retry interval; valid positive values through 3600 seconds. Set longer than the expected WFS period for slow references. Sampling does not stop on timeout. |
+
+The reference period is a nominal phase-unwrapping baseline, fixed until timing reacquisition. A changed nominal WFS rate requires matching `referenceFps`/reacquiring the reference; an incorrect or noisy learned baseline can produce repeated correction transients. Bounded phase prevents those transients from changing the long-term requested accelerometer rate, but this is not a claim of stable phase lock with a wrong cadence baseline. This limitation is documented in the README rather than hiding a rate change in the simulation model. Configuration rejects nonfinite/negative/overflowing reference periods and invalid slew/timeout settings.
+
+The shipped example retains `sim.fps=6000`, empty source/subscription names, `acc000`, UINT16, and default `[2,1,1]`. Existing optional circular depth behavior is unchanged. For the requested synchronized example, set `sim.fps=8000`, `synchro.shmimName=camwfs_sync`, `synchro.referenceFps=2000`, and leave `fps.device` empty. No instrument startup file was added.
+
+**Diagnostic meanings updated where necessary:**
+
+- `delay_model_us`, target phase, and trigger prediction remain WFS-phase quantities. The first valid prediction still has no interval until a second prediction exists.
+- Applied delay represents the requested WFS phase plus the remaining scheduled-clock phase error, wrapped over the WFS period. Phase-error wrapping keeps the hardware's positive half-period convention. Lock requires a fresh reference, the existing absolute/fractional thresholds, and acceptable acquisition lateness; it is not an independently measured hardware-latency guarantee.
+- Delay budget/capped now describe available per-accelerometer-interval correction and remaining correction beyond that budget, rather than a single semaphore sleep.
+- Source-to-sample latency is measured for retained WFS predictions at the first sample at/after their phase. An intervening WFS event does not erase the pending latency measurement. Not every reference must contribute a measurement; latency-error uses that retained prediction, not a newer event's target. Service/readout reports actual model work.
+- Received/gap/ID fields describe WFS notifications; written counts all accelerometer publications in synchronized mode, including holdover. Written can exceed received. `source_period_ratio` is WFS period / accelerometer period, so 4 for 8/2 kHz and 3 for 6/2 kHz are expected.
+- Outage invalidation still sends a coherent snapshot and preserves lifetime accounting. Existing batched INDI publication and FPS Busy/Ok/Alert acknowledgment are unchanged.
+
+**Regression coverage and results:**
+
+The two old one-trigger accounting tests were replaced with tests of their relevant invariants under the new continuous-clock semantics; keeping their old expected one-to-one omissions would enforce the behavior the user asked to remove. All numerical tests and the existing diagnostic invalidation, half-period boundary, and startup prediction tests remain.
+
+| Check | Result |
+| --- | --- |
+| Requested-rate event-loop regression | Passed for WFS/accel pairs 2/8, 2/6, 2/5.5, 2.3/6, and 9/6 kHz, with one-second counts within one boundary sample of the requested rate. Reference receipt leaves the pending deadline unchanged; normal intervals remain at least 95% of the nominal accelerometer period. These are deterministic virtual-time results, not measured live publication rates. |
+| Unchanged free-running timer | Existing 6000-step test and added one-second 6000-Hz schedule check pass. Original timer schedule definitions, waitUntil, free-running acquisition branch, and stream-copy function are unchanged. |
+| Phase calculation/correction | Passed 409.4-us calculation at 2 kHz, exact settled phase grid, positive/negative corrections, duplicate-reference handling, and no immediate reference-triggered bursts. |
+| Missing references / holdover | Passed counter-gap normalization, continuous 6000-sample holdover, timeout and reacquisition, duplicate and reset source counters without extra samples. |
+| Jitter / persistent phase shifts / rate stability | Passed a two-second 8-kHz virtual run with alternating reference jitter, positive/negative phase steps, and a 50-ms reference outage. Output count remains within one sample of 16000; intervals respect the correction bound; holdover/recovery both occur. |
+| Missed sample / cancellation invariants | Passed immediate source accounting independent of canceled waits, preserved source history at FPS reset, exact numerical advance through three skipped accelerometer ticks, and bounded stationary recovery after a long stall. |
+| Optimized C++20 standalone build and complete suite | **16 cases / 154423 assertions passed**. Binary `/tmp/accelSim_phase_model_test`. |
+| Synchronization selection | **8 cases / 145840 assertions passed** with `[sync-regression]`. |
+| Fresh ASan/UBSan build and standalone suite | **16 cases / 154423 assertions passed**, no sanitizer findings. Binary `/tmp/accelSim_phase_sanitize`. |
+| Python PSD tests, warnings as errors | **4 tests passed**. |
+| Diagnostic export and full offline PSD analysis | Export **1 case / 6 assertions passed**; complete analyzer passed and wrote all five plots plus spectra/JSON in `/tmp/accelSim-phase-validation`. Exported samples, modes, and metadata are byte-identical to the preceding destructor-fix export, confirming unchanged physics/noise/ADC behavior. |
+| Normal app and full test builds | Both failed at the unchanged shared `timegm` and missing `mx/math/floatUtils.hpp` errors, before full-app validation. Logs `/tmp/accelSim-phase-app.log` and `/tmp/accelSim-phase-app-tests.log`. No dependency or shared build workaround applied. |
+| Formatting / scope / documentation | clang-format applied/checked with the existing mutex-comment spelling override; `git diff --check` passed. Only the app headers, app tests, example config, README, and this plan changed. |
+
+Full-app tests were updated to check phase/budget/lock and coherent holdover diagnostics, continued frameGrabber publication with a missing startup source, more accelerometer samples than source notifications, duplicates, disappearance/reconnection without output reconfiguration/model restart, and invalid new configuration values. These tests, existing INDI serialization tests, and real stream/timestamp/semaphore checks remain **uncompiled/unexecuted on this Mac** because of the shared build blockers. They must run on the configured non-instrument Linux development host. In particular, no actual 6/8-kHz synchronized rate, jitter distribution, semaphore wake latency, or sustained memory result is claimed here.
+
+**Files changed:** `apps/accelSim/accelSim.hpp`, `apps/accelSim/accelSimModel.hpp` (timing helpers only), `apps/accelSim/tests/accelSim_test.cpp`, `apps/accelSim/config/example.conf`, `apps/accelSim/README.md`, and this planning document below the agent heading. `MagAOXApp`, frameGrabber, telemeter, mcp3208Ctrl, ImageStreamIO, mxlib, and the reference notebook are untouched. The new synchronized behavior intentionally differs from mcp3208Ctrl's one ADC read per semaphore; free-running acquisition and the raw ADC stream contract remain as before.
+
+The existing read-only ten-minute benchmark now accepts the test-only environment variable `ACCELSIM_EXPECTED_FPS` (default 6000), so the same reader can validate an independently configured 8000-Hz producer without a hard-coded 6000-Hz assertion. For example, on the isolated non-instrument development host with the producer and private shared-memory namespace already configured:
+
+```sh
+ACCELSIM_LOCAL_BENCHMARK=1 ACCELSIM_EXPECTED_FPS=8000 \
+  ./apps/accelSim/tests/accelSim_test '[accelSim-live]'
+```
+
+This is validation tooling only and does not send an FPS command or change application configuration. It was not run here because the full test binary remains blocked.

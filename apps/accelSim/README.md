@@ -27,7 +27,7 @@ are 2048, 1.02, and 0.0083799 respectively. The three values and the sensor PSD
 are configurable in [config/example.conf](config/example.conf).
 
 Default sampling is 6000 Hz. The physics uses the configured nominal rate even
-when a synchronization source has scheduling jitter. Set the correct source
+when a synchronization source has scheduling jitter. Set the requested accelerometer
 rate through `sim.fps`, `fps.target`, or the external FPS subscription. Invalid,
 nonfinite, nonpositive, above-10000, and aliased rates are rejected. An accepted
 rate change takes effect at an acquisition boundary, recalculates the model,
@@ -41,23 +41,61 @@ gap redraws stationary histories instead of performing unbounded catch-up.
 Eight ticks represent 1.333 ms at 6 kHz. OS wake-up lateness is counted separately
 from skipped publication opportunities. There is no catch-up publication burst.
 
-Setting `synchro.shmimName` enables semaphore synchronization. Configuration names,
-phase wrapping, EMA, cadence budget, and lock criteria follow `mcp3208Ctrl`.
-Elapsed nominal time and cumulative source-counter progress are tracked independently;
-the later position determines the current opportunity. Short pauses advance all
-missed ticks, and overlapping counter/time gaps are counted once. Notifications
-for a repeated counter or a nominal opportunity already covered by recovery do
-not replay samples. Long pauses retain the same bounded recovery policy.
-A consumed trigger is finalized after acquisition or explicit cancellation;
-canceled current opportunities and older gaps remain counted even across FPS
-changes. Source replacement is detected on timeout and reconnects through the
-normal frameGrabber lifecycle. A timeout (including a mapped but stalled source)
-or reconfiguration clears lock/cadence/delay measurements and transfers that
-status to the app loop without waiting for another published frame. An input source must not be the output stream.
-`sim_diag.source_period_ratio` compares smoothed arrival cadence with the nominal
-model period; its startup settling follows the hardware EMA. A persistent value
-different from one requires matching the nominal FPS to the source. The code
-does not retune AR coefficients based on jitter.
+Setting `synchro.shmimName` enables a **WFS phase reference for a continuous
+accelerometer clock**. The worker waits for either the next accelerometer deadline
+or a WFS semaphore. A semaphore updates the phase reference; it never publishes a
+sample or moves the already pending deadline. Sampling starts even if the reference
+stream is absent, and continues through silence, missing notifications, or source
+replacement. These events clear lock/cadence diagnostics and enter holdover at the
+last applied phase; they do not recreate acc000 or restart the physical model.
+
+The measured WFS period is elapsed time divided by source-counter progress,
+initialized from the first measured interval and then smoothed by `alpha`. The
+phase remains `wrap(0.5*T_wfs - (dtTransfer + wfsProcess + dtF + wfsRead), T_wfs)`,
+with the signed `postDelay` added and wrapped. The default latency sum is 340.6 us,
+so a measured 500-us period gives 409.4 us without a hard-coded phase constant.
+
+The clock subtracts elapsed **fractional WFS cycles** before projecting the phase
+reference onto the accelerometer time grid. Thus a 2-kHz reference works with
+8 kHz, 6 kHz, 5.5 kHz, and other valid sampling rates; no integer samples-per-WFS
+counter or per-trigger burst is used. With a non-integer ratio, not every WFS
+reference can coincide with an accelerometer sample while preserving the requested
+rate. The relative phase advances continuously across WFS cycles instead.
+
+Three synchronization options control this behavior:
+
+- `synchro.referenceFps=0`: learn the nominal WFS phase-tracking cadence from the
+  first measured interval after acquisition/reconnection. Set the known nominal
+  WFS rate (for example 2000) when available to avoid basing the phase grid on a
+  noisy first interval. This affects fractional-cycle accounting, not accelerometer
+  FPS; the latency formula still uses measured/smoothed cadence. The learned value
+  is held until timing is invalidated. A changed WFS nominal rate requires matching
+  this setting/reacquiring the reference. A wrong nominal reference can produce
+  repeated correction transients; it cannot force the output rate to the WFS rate.
+- `synchro.maxSlew=0.05`: limit the phase adjustment of each following interval to
+  5% of an accelerometer period (valid range greater than zero through 0.25).
+  `cadenceGuard_ns` and measured computation time further limit available correction
+  headroom. Phase offset stays within half an accelerometer period of the nominal
+  epoch, so corrections cannot accumulate a long-term rate change. Lock acquisition
+  takes several samples. After an overrun, the next publication is at least half
+  an accelerometer period later, preventing an immediate recovery burst.
+- `synchro.timeout=0.01`: reference silence timeout and source-file check/retry
+  interval in seconds. Increase this above the expected source period for slow
+  references. Timeout clears lock while sampling continues; a replacement source
+  needs fresh timing before relocking.
+
+Source-counter gaps count missed **WFS references** only. Actual missed
+accelerometer deadlines count `skipped_publications` and advance numerical ticks
+using the existing eight-skipped-tick bound; larger gaps restart stationarity once.
+Counter receipt is accounted immediately, even if a subsequent wait is canceled.
+Duplicates cannot create extra samples. The code never retunes AR coefficients
+from WFS jitter. Keep `fps.device` empty unless that subscription supplies the
+requested **accelerometer** FPS; subscribing it to a 2-kHz WFS FPS still explicitly
+requests a 2-kHz accelerometer rate.
+
+For the 8-kHz / 2-kHz example, set `sim.fps=8000`,
+`synchro.shmimName=camwfs_sync`, `synchro.referenceFps=2000`, and leave
+`fps.device` empty. The free-running 6000-Hz defaults and timer path are unchanged.
 
 Acquisition timestamps use `CLOCK_REALTIME` immediately before sample generation,
 including recovery computation. They represent the current acquisition event,
@@ -85,9 +123,30 @@ SPI hardware timing. In timer mode synchronization-only measurements are zero.
 `alpha` controls timing smoothing, never AR damping.
 
 Each `timingDiag` update sends one coherent property, including source-loss
-invalidation. Phase error uses the hardware interval `(-T/2,T/2]`. Trigger
-predictions require a measured positive source period; the first valid prediction
-still has a zero interval. Reconnection resets this history.
+invalidation. Names and units are retained, but the synchronized meanings now
+reflect a phase-referenced sampling clock rather than one ADC read per semaphore:
+
+- `delay_model_us` / `synchro_delay_target_us`: measured-cadence WFS model and
+  offset-adjusted reference phase. `trigger_time_us` / `trigger_interval_us` describe
+  those WFS predictions, not accelerometer intervals.
+- `delay_applied_us` / `synchro_delay_us`: reference phase including the remaining
+  offset error of the scheduled accelerometer clock, wrapped over a WFS period.
+  `delay_phase_error_us` retains the positive half-period boundary. `delay_lock`
+  requires a fresh reference and the existing absolute/fractional phase thresholds;
+  excessive acquisition lateness also clears it. Lock is not an independent
+  measurement of hardware/WFS latency.
+- `delay_budget_us` / `delay_capped`: available per-accelerometer-interval phase
+  correction and whether correction remains beyond that budget.
+- `avg_read_latency_us`: smoothed arrival-to-sample latency for selected WFS
+  references, measured at the first sample at/after their predicted phase.
+  `read_latency_error_us` is that sample's lateness relative to its retained
+  reference prediction. A pending measurement survives an intervening WFS event;
+  not every reference necessarily contributes a measurement.
+- `sync_frames_received` counts semaphore receipts; source ID/gap/drop fields
+  describe WFS counters. `sync_frames_written` counts accelerometer publications
+  in synchronized mode, including holdover, and can exceed received references.
+- `sim_diag.source_period_ratio` is measured WFS period / accelerometer period:
+  approximately 4 for 8/2 kHz and 3 for 6/2 kHz, not an error requiring equal rates.
 
 The additional read-only `sim_diag` contains `skipped_publications`,
 `discontinuities`, `late_samples`, `max_lateness_us`, `source_period_ratio`, and
@@ -134,13 +193,14 @@ c++ -std=c++20 -O3 -fno-fast-math -Wall -Wextra \
 ```
 
 The standalone tests include the production synchronization accounting and
-status-invalidation logic, half-period phase boundaries, and trigger startup.
+status-invalidation logic, integer/fractional rate ratios, correction bounds,
+jitter/phase shifts, holdover, half-period phase boundaries, and trigger startup.
 The INDI regressions capture real XML serialization without a server, checking
 coherent timing snapshots and FPS Busy/Ok/Alert transitions. Their local driver
 fixture uses Linux `/proc/self/fd` to release its unactivated input descriptor.
 Full app tests additionally check snapshot delivery,
-phase-wait cancellation through a synthetic semaphore, stale-frame rejection,
-and source disappearance/reconnection; those require the normal dependencies.
+continued sampling with a missing or duplicate synthetic reference, stale-frame
+rejection, and source disappearance/reconnection; those require the normal dependencies.
 
 The app and normal test Makefiles disable fast-math locally, since nonfinite
 validation and near-unit-root calculations require ordinary floating-point
@@ -185,6 +245,11 @@ For a ten-minute read-only benchmark of the running producer:
 ```sh
 ACCELSIM_LOCAL_BENCHMARK=1 ./apps/accelSim/tests/accelSim_test '[accelSim-live]'
 ```
+
+For a producer configured at 8 kHz, add `ACCELSIM_EXPECTED_FPS=8000` to the
+benchmark command. This changes only the reader's expected-rate assertion; it
+does not configure the producer. The default remains 6000 Hz.
+
 
 It checks ADC ranges, counter progression, and mean publication rate within 1%
 of 6000 Hz, and reports reader counter gaps and write-interval mean, standard

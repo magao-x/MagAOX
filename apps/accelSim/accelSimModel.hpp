@@ -156,37 +156,48 @@ struct schedule
     uint64_t consume( int64_t now /**< [in] monotonic acquisition time, at or after deadline */ );
 };
 
-/// Tentative source notification; committed only after acquisition or explicit cancellation.
-struct syncTick
+/// Continuous accelerometer clock steered by a separate WFS phase reference.
+/** Phase offsets remain bounded relative to the nominal epoch, preserving the long-term requested rate.
+ * Source counter progress is never converted into accelerometer publication opportunities.
+ */
+struct phaseClock
 {
-    uint64_t m_producer{ 0 }, m_delta{ 0 };  ///< Producer counter and gap from the previous consumed notification.
-    uint64_t m_sourceTick{ 0 }, m_tick{ 0 }; ///< Independent source position and latest nominal opportunity.
-    uint64_t m_originTick{ 0 };              ///< Nominal position at the monotonic epoch.
-    int64_t  m_epoch{ 0 };                   ///< Monotonic epoch retained across arrival jitter.
-    uint64_t m_advance{ 0 }, m_skipped{ 0 }; ///< Model catch-up and newly omitted publications, respectively.
-    bool m_newFrame{ false }, m_due{ false }, m_reset{ false }; ///< Unique counter, new opportunity, producer reset.
-};
+    int64_t  m_epoch{ 0 }, m_deadline{ 0 }; ///< Nominal epoch and frozen next acquisition deadline [ns].
+    uint64_t m_next{ 1 };                   ///< Next accelerometer tick, independent of source frames.
+    double   m_period{ 0 };                 ///< Requested accelerometer period [ns].
+    double   m_applied{ 0 }, m_target{ 0 }; ///< Bounded applied and desired clock phase offsets [ns].
+    double   m_budget{ 0 };                 ///< Maximum phase adjustment per future interval [ns].
+    uint64_t m_producer{ 0 }, m_delta{ 0 }, m_referenceCounter{ 0 }; ///< Source counter accounting and phase anchor.
+    int64_t  m_arrival{ 0 };                              ///< Last unique source arrival on the monotonic clock.
+    double   m_sourcePeriod{ 0 }, m_referencePeriod{ 0 }; ///< Measured cadence and fixed phase-unwrapping cadence [ns].
+    double   m_modelDelay{ 0 }, m_delay{ 0 };             ///< Wrapped latency model and requested phase [ns].
+    bool     m_haveProducer{ false }, m_haveArrival{ false }, m_valid{ false }; ///< Counter, cadence, phase validity.
 
-/// Reconcile elapsed nominal time and producer progress without counting the same gap twice.
-struct syncClock
-{
-    uint64_t m_producer{ 0 }, m_sourceTick{ 0 };     ///< Last consumed producer counter and cumulative source progress.
-    uint64_t m_nextAccounted{ 0 }, m_nextModel{ 0 }; ///< First unaccounted opportunity and ungenerated model tick.
-    uint64_t m_originTick{ 0 };                      ///< Nominal position at the current timing epoch.
-    int64_t  m_epoch{ 0 };                           ///< Monotonic epoch, unaffected by per-trigger jitter.
-    bool     m_haveSource{ false }, m_haveTime{ false }; ///< Valid counter history and current-rate time anchor.
+    /// Reset only the sampling schedule and timing history, retaining consumed source-counter history.
+    void reset( int64_t now /**< [in] monotonic epoch [ns] */, double fps /**< [in] accelerometer rate [Hz] */ );
 
-    /// Inspect a notification without modifying committed counters or simulation time.
-    syncTick prepare( uint64_t producer /**< [in] current source counter */,
-                      int64_t  now /**< [in] monotonic arrival nanoseconds */,
-                      double   fps /**< [in] nominal model rate */ ) const;
+    /// Consume a unique source counter and update the bounded target phase, without moving the pending deadline.
+    bool reference( uint64_t producer /**< [in] source counter */,
+                    int64_t  now /**< [in] monotonic arrival [ns] */,
+                    double   alpha /**< [in] cadence EMA coefficient */,
+                    double   latency /**< [in] sum of configured WFS latency terms [ns] */,
+                    double   postDelay /**< [in] signed phase offset [ns] */,
+                    double   referenceFps /**< [in] nominal WFS rate; zero learns the first measured period */ );
 
-    /// Commit acquisition or cancellation and return newly omitted publication opportunities.
-    uint64_t finish( const syncTick &tick /**< [in] prepared notification */,
-                     bool            acquired /**< [in] whether its current model sample was generated */ );
+    /// Clear lock/cadence and freeze the last applied phase while continuing the accelerometer clock.
+    void invalidate( bool forgetProducer = false /**< [in] source replacement invalidates counter identity */ );
 
-    /// Start a new rate epoch while retaining consumed source-counter history.
-    void resetTime();
+    /// True when a previously seen source has exceeded the configured silence timeout.
+    bool expired( int64_t now /**< [in] monotonic time [ns] */,
+                  int64_t timeout /**< [in] maximum silence [ns] */ ) const;
+
+    /// Return the frozen deadline; references alone cannot cause a publication.
+    int64_t deadline() const;
+
+    /// Account for elapsed accelerometer ticks and slew only the following interval, with a minimum half-period gap.
+    uint64_t consume( int64_t now /**< [in] actual acquisition time [ns] */,
+                      double  slew /**< [in] maximum correction as a fraction of an accelerometer period */,
+                      double  headroom /**< [in] available service/guard headroom [ns] */ );
 };
 
 /// Indexed form of the unchanged mcp3208Ctrl timingDiag interface.
@@ -238,70 +249,7 @@ struct diagnostics
 
     /// Clear synchronization measurements on outage without erasing lifetime accounting.
     void invalidateSync( double postDelay /**< [in] configured phase offset in microseconds */ );
-
-    /// Finalize a consumed trigger exactly once, including canceled acquisitions.
-    void finishSync( syncClock      &clock /**< [in,out] committed nominal/source timeline */,
-                     const syncTick &tick /**< [in] tentative trigger */,
-                     bool            acquired /**< [in] whether a fresh model sample was generated */ );
 };
-
-inline syncTick syncClock::prepare( uint64_t producer, int64_t now, double fps ) const
-{
-    syncTick tick;
-    tick.m_producer = producer;
-    tick.m_newFrame = !m_haveSource || producer != m_producer;
-    if( !tick.m_newFrame )
-        return tick;
-    tick.m_reset = m_haveSource && producer < m_producer;
-    tick.m_delta = m_haveSource && !tick.m_reset ? producer - m_producer : 0;
-    if( !m_haveTime || tick.m_reset )
-    {
-        tick.m_epoch      = now;
-        tick.m_originTick = tick.m_delta ? tick.m_delta - 1 : 0;
-        tick.m_sourceTick = tick.m_tick = tick.m_originTick;
-        tick.m_due                      = true;
-        tick.m_advance = tick.m_skipped = tick.m_tick;
-    }
-    else
-    {
-        tick.m_epoch       = m_epoch;
-        tick.m_originTick  = m_originTick;
-        tick.m_sourceTick  = m_sourceTick + tick.m_delta;
-        const auto elapsed = static_cast<uint64_t>( std::floor( ( now - m_epoch + .5 ) * fps / 1e9 ) );
-        tick.m_tick        = std::max( tick.m_sourceTick, m_originTick + elapsed );
-        tick.m_due         = tick.m_tick >= m_nextAccounted;
-        if( tick.m_due )
-        {
-            tick.m_advance = tick.m_tick - m_nextModel;
-            tick.m_skipped = tick.m_tick - m_nextAccounted;
-        }
-    }
-    return tick;
-}
-
-inline uint64_t syncClock::finish( const syncTick &tick, bool acquired )
-{
-    if( !tick.m_newFrame )
-        return 0;
-    if( !m_haveTime || tick.m_reset )
-        m_nextAccounted = m_nextModel = 0;
-    m_producer   = tick.m_producer;
-    m_sourceTick = tick.m_sourceTick;
-    m_epoch      = tick.m_epoch;
-    m_originTick = tick.m_originTick;
-    m_haveSource = m_haveTime = true;
-    if( !tick.m_due )
-        return 0; // This opportunity was already covered by elapsed-time recovery.
-    m_nextAccounted = tick.m_tick + 1;
-    if( acquired )
-        m_nextModel = tick.m_tick + 1;
-    return tick.m_skipped + ( acquired ? 0 : 1 );
-}
-
-inline void syncClock::resetTime()
-{
-    m_haveTime = false;
-}
 
 inline void diagnostics::updatePhaseError()
 {
@@ -344,20 +292,6 @@ inline void diagnostics::invalidateSync( double postDelay )
     m_timing[delayTarget]   = postDelay;
     m_timing[producerDelta] = 0;
     m_cadenceRatio          = 0;
-}
-
-inline void diagnostics::finishSync( syncClock &clock, const syncTick &tick, bool acquired )
-{
-    if( !tick.m_newFrame )
-        return;
-    m_skipped += clock.finish( tick, acquired );
-    m_timing[producerId]    = tick.m_producer;
-    m_timing[producerDelta] = tick.m_delta;
-    if( tick.m_delta > 1 )
-    {
-        m_timing[dropped] += tick.m_delta - 1;
-        ++m_timing[gapCount];
-    }
 }
 
 inline void oscillator::configure( double frequency, double r, double fps, double rms )
@@ -564,6 +498,96 @@ inline uint64_t schedule::consume( int64_t now )
         std::max( m_next, static_cast<uint64_t>( std::floor( ( now - m_epoch + .5 ) * m_fps / 1e9 ) ) );
     const uint64_t skipped = latest - m_next;
     m_next                 = latest + 1;
+    return skipped;
+}
+
+inline void phaseClock::reset( int64_t now, double fps )
+{
+    schedule validated;
+    validated.reset( now, fps );
+    m_epoch   = now;
+    m_period  = 1e9 / fps;
+    m_next    = 1;
+    m_applied = m_target = m_budget = 0;
+    m_deadline                      = validated.deadline();
+    invalidate();
+}
+
+inline void phaseClock::invalidate( bool forgetProducer )
+{
+    m_haveArrival = m_valid = false;
+    m_sourcePeriod = m_referencePeriod = m_modelDelay = m_delay = 0;
+    m_target                                                    = m_applied;
+    m_delta                                                     = 0;
+    if( forgetProducer )
+        m_haveProducer = false;
+}
+
+inline bool phaseClock::reference(
+    uint64_t producer, int64_t now, double alpha, double latency, double postDelay, double referenceFps )
+{
+    if( m_haveProducer && producer == m_producer )
+        return false;
+    if( m_haveProducer && producer < m_producer )
+        invalidate( true );
+    m_delta        = m_haveProducer ? producer - m_producer : 0;
+    m_producer     = producer;
+    m_haveProducer = true; // Commit source accounting independently of sampling/cancellation.
+    if( !m_haveArrival )
+    {
+        m_arrival     = now;
+        m_haveArrival = true;
+        return true;
+    }
+    const double elapsed = double( now - m_arrival );
+    m_arrival            = now;
+    if( elapsed <= 0 || !m_delta )
+        return true;
+    const double measured = elapsed / m_delta;
+    m_sourcePeriod        = m_sourcePeriod > 0 ? alpha * measured + ( 1 - alpha ) * m_sourcePeriod : measured;
+    if( !m_valid )
+    {
+        m_referencePeriod  = referenceFps > 0 ? 1e9 / referenceFps : m_sourcePeriod;
+        m_referenceCounter = producer;
+    }
+    const auto wrap = []( double value, double period )
+    {
+        const double result = std::fmod( value, period );
+        return result < 0 ? result + period : result;
+    };
+    m_modelDelay = wrap( .5 * m_sourcePeriod - latency, m_sourcePeriod );
+    m_delay      = wrap( m_modelDelay + postDelay, m_sourcePeriod );
+    // Subtract full WFS cycles before projecting onto the accelerometer lattice. Without this
+    // fractional-cycle accounting, snapping every WFS trigger biases non-integer output rates.
+    const double origin =
+        double( now - m_epoch ) + m_delay - double( producer - m_referenceCounter ) * m_referencePeriod;
+    m_target = wrap( origin + .5 * m_period, m_period ) - .5 * m_period;
+    m_valid  = true;
+    return true;
+}
+
+inline bool phaseClock::expired( int64_t now, int64_t timeout ) const
+{
+    return m_haveArrival && now - m_arrival >= timeout;
+}
+
+inline int64_t phaseClock::deadline() const
+{
+    return m_deadline;
+}
+
+inline uint64_t phaseClock::consume( int64_t now, double slew, double headroom )
+{
+    if( now < m_deadline )
+        throw std::logic_error( "sample before phase-clock deadline" );
+    const uint64_t latest =
+        std::max( m_next, static_cast<uint64_t>( std::floor( ( now - m_epoch - m_applied + .5 ) / m_period ) ) );
+    const uint64_t skipped = latest - m_next;
+    m_next                 = latest + 1;
+    m_budget               = std::min( slew * m_period, std::max( 0.0, headroom ) );
+    m_applied += std::clamp( m_target - m_applied, -m_budget, m_budget );
+    m_deadline = std::max( m_epoch + int64_t( std::llround( m_next * m_period + m_applied ) ),
+                           now + int64_t( std::llround( .5 * m_period ) ) );
     return skipped;
 }
 

@@ -328,161 +328,206 @@ TEST_CASE( "accelSim pacing and bounded catch-up", "[accelSim][model]" )
     REQUIRE( clock.deadline() == 5250000 );
 }
 
-/** \brief Short pauses, jitter, and source gaps share one nominal timeline without duplicate catch-up.
+/** \brief A deterministic event loop preserves accelerometer cadence for integer and fractional WFS ratios.
  * \ingroup accelSim_unit_test
  */
-TEST_CASE( "accelSim synchronization accounts elapsed nominal ticks", "[accelSim][model][sync-regression]" )
+TEST_CASE( "accelSim phase reference preserves requested sampling rate", "[accelSim][model][sync-regression]" )
 {
-    constexpr int64_t epoch = 1000000000;
-    syncClock         clock;
-    diagnostics       diag;
-    model             actual, reference;
-    actual.configure( {}, referenceModes( 123 ) );
-    reference.configure( {}, referenceModes( 123 ) );
-    auto tick = clock.prepare( 10, epoch, 6000 );
-    REQUIRE( tick.m_due );
-    REQUIRE_FALSE( actual.advance( tick.m_advance ) );
-    reference.step();
-    diag.finishSync( clock, tick, true );
-
-    SECTION( "Consecutive counters after four periods advance all four samples" )
+    for( const auto rates :
+         { std::array<double, 2>{ 8000, 2000 }, { 6000, 2000 }, { 5500, 2000 }, { 6000, 2300 }, { 6000, 9000 } } )
     {
-        tick = clock.prepare( 11, epoch + 666667, 6000 );
-        REQUIRE( tick.m_advance == 3 );
-        REQUIRE( tick.m_skipped == 3 );
-        REQUIRE_FALSE( actual.advance( tick.m_advance ) );
-        for( int n = 0; n < 4; ++n )
-            reference.step();
-        REQUIRE( actual.m_sample.m_acceleration == reference.m_sample.m_acceleration );
-        diag.finishSync( clock, tick, true );
-        REQUIRE( diag.m_skipped == 3 );
-        REQUIRE( diag.m_timing[dropped] == 0 );
-        tick = clock.prepare( 12, epoch + 833333, 6000 );
-        REQUIRE( tick.m_due );
-        REQUIRE( tick.m_advance == 0 );
-        REQUIRE( tick.m_skipped == 0 );
-    }
-    SECTION( "Counter gap and elapsed time describe the same missed opportunities" )
-    {
-        tick = clock.prepare( 14, epoch + 666667, 6000 );
-        REQUIRE( tick.m_advance == 3 );
-        diag.finishSync( clock, tick, true );
-        REQUIRE( diag.m_skipped == 3 );
-        REQUIRE( diag.m_timing[dropped] == 3 );
-        REQUIRE( diag.m_timing[gapCount] == 1 );
-        REQUIRE_FALSE( clock.prepare( 14, epoch + 700000, 6000 ).m_newFrame );
-    }
-    SECTION( "Queued progress already covered by the wall clock does not run the model ahead" )
-    {
-        tick = clock.prepare( 11, epoch + 666667, 6000 );
-        diag.finishSync( clock, tick, true );
-        tick = clock.prepare( 14, epoch + 700000, 6000 );
-        REQUIRE( tick.m_newFrame );
-        REQUIRE_FALSE( tick.m_due );
-        diag.finishSync( clock, tick, false );
-        REQUIRE( diag.m_skipped == 3 );
-        REQUIRE( diag.m_timing[dropped] == 2 );
-        tick = clock.prepare( 15, epoch + 833333, 6000 );
-        REQUIRE( tick.m_due );
-        REQUIRE( tick.m_advance == 0 );
-        REQUIRE( tick.m_skipped == 0 );
-    }
-    SECTION( "Fractional periods and alternating arrival jitter do not accumulate extra misses" )
-    {
-        for( uint64_t n = 1; n <= 6000; ++n )
+        CAPTURE( rates[0], rates[1] );
+        phaseClock clock;
+        clock.reset( 0, rates[0] );
+        uint64_t source = 0, frames = 0;
+        int64_t  nextSource = 0, previous = 0;
+        while( std::min( nextSource, clock.deadline() ) <= 1000000000 )
         {
-            const auto arrival = epoch + int64_t( std::llround( n * ( 1e9 / 6000 ) ) ) + ( n % 2 ? 40000 : -40000 );
-            tick               = clock.prepare( 10 + n, arrival, 6000 );
-            REQUIRE( tick.m_due );
-            REQUIRE( tick.m_advance == 0 );
-            diag.finishSync( clock, tick, true );
+            if( nextSource <= clock.deadline() )
+            {
+                const auto deadline = clock.deadline();
+                REQUIRE( clock.reference( ++source, nextSource, .01, 340600, 0, rates[1] ) );
+                REQUIRE( clock.deadline() == deadline );
+                nextSource = std::llround( source * ( 1e9 / rates[1] ) );
+            }
+            else
+            {
+                const auto now = clock.deadline();
+                REQUIRE( clock.consume( now, .05, clock.m_period ) == 0 );
+                if( previous )
+                    REQUIRE( now - previous >= .95 * clock.m_period - 1 );
+                previous = now;
+                ++frames;
+            }
         }
-        REQUIRE( diag.m_skipped == 0 );
-        REQUIRE( clock.m_nextModel == 6001 );
+        REQUIRE( double( frames ) == Approx( rates[0] ).margin( 1 ) );
+        REQUIRE( clock.m_sourcePeriod == Approx( 1e9 / rates[1] ).margin( 1 ) );
+        REQUIRE( std::abs( clock.m_applied ) <= .5 * clock.m_period );
+        REQUIRE( std::abs( clock.m_applied - clock.m_target ) < 1 );
     }
-    SECTION( "Long pauses still take the bounded stationary-restart path" )
-    {
-        tick = clock.prepare( 11, epoch + 2000000, 6000 );
-        REQUIRE( tick.m_advance == 11 );
-        REQUIRE( actual.advance( tick.m_advance ) );
-        REQUIRE( actual.m_ticks == 2 );
-        diag.finishSync( clock, tick, true );
-        REQUIRE( diag.m_skipped == 11 );
-    }
+    schedule free;
+    free.reset( 0, 6000 );
+    for( size_t n = 0; n < 6000; ++n )
+        REQUIRE( free.consume( free.deadline() ) == 0 );
+    REQUIRE( free.deadline() == 1000166667 );
 }
 
-/** \brief Cancellation commits consumed source progress and counts the current omission exactly once.
+/** \brief WFS phase is computed from configured latencies and corrections cannot move an already scheduled sample.
  * \ingroup accelSim_unit_test
  */
-TEST_CASE( "accelSim synchronization cancellation retains accounting", "[accelSim][model][sync-regression]" )
+TEST_CASE( "accelSim phase corrections are bounded and do not burst", "[accelSim][model][sync-regression]" )
 {
-    constexpr int64_t epoch = 1000000000;
-    syncClock         clock;
-    diagnostics       diag;
-    auto              tick = clock.prepare( 10, epoch, 6000 );
-    diag.finishSync( clock, tick, true );
-    tick = clock.prepare( 14, epoch + 666667, 6000 );
-    REQUIRE( clock.m_producer == 10 ); // Merely preparing a phase wait commits nothing.
-    REQUIRE( clock.m_nextAccounted == 1 );
-    REQUIRE( diag.m_skipped == 0 );
-    REQUIRE( tick.m_skipped == 3 );
-    diag.finishSync( clock, tick, false );
-    REQUIRE( clock.m_producer == 14 );
-    REQUIRE( clock.m_nextAccounted == 5 );
-    REQUIRE( clock.m_nextModel == 1 ); // Cancellation did not generate a sample.
-    REQUIRE( diag.m_skipped == 4 );
-    REQUIRE( diag.m_timing[dropped] == 3 );
-    REQUIRE( diag.m_timing[gapCount] == 1 );
-    tick = clock.prepare( 14, epoch + 700000, 6000 );
-    REQUIRE_FALSE( tick.m_newFrame );
-    diag.finishSync( clock, tick, false );
-    REQUIRE( diag.m_skipped == 4 );
-    REQUIRE( diag.m_timing[dropped] == 3 );
+    phaseClock clock;
+    clock.reset( 0, 8000 );
+    REQUIRE( clock.reference( 1, 0, .01, 340600, 0, 0 ) );
+    REQUIRE_FALSE( clock.m_valid );
+    while( clock.deadline() < 500000 )
+        clock.consume( clock.deadline(), .05, clock.m_period );
+    const auto pending = clock.deadline();
+    REQUIRE( clock.reference( 2, 500000, .01, 340600, 0, 0 ) );
+    REQUIRE( clock.m_sourcePeriod == 500000 );
+    REQUIRE( clock.m_modelDelay == Approx( 409400 ) );
+    REQUIRE( clock.m_delay == Approx( 409400 ) );
+    REQUIRE( clock.deadline() == pending );
+    for( int n = 0; n < 20; ++n )
+    {
+        const auto now = clock.deadline();
+        REQUIRE( clock.consume( now, .05, clock.m_period ) == 0 );
+        REQUIRE( clock.deadline() - now >= 118750 );
+        REQUIRE( clock.deadline() - now <= 131250 );
+    }
+    REQUIRE( clock.m_applied == Approx( clock.m_target ) );
+    REQUIRE( std::remainder( clock.deadline() - 909400., 125000. ) == Approx( 0 ).margin( 1 ) );
+    // A large reference jump and signed phase-offset change can only slew future intervals.
+    const auto frozen = clock.deadline();
+    REQUIRE( clock.reference( 3, 1100000, 1, 340600, -100000, 2000 ) );
+    REQUIRE( clock.deadline() == frozen );
+    for( int n = 0; n < 20; ++n )
+    {
+        const auto now = clock.deadline();
+        REQUIRE( clock.consume( now, .05, clock.m_period ) == 0 );
+        REQUIRE( clock.deadline() - now >= 118750 );
+    }
+    const auto counter = clock.m_next;
+    REQUIRE_FALSE( clock.reference( 3, 1100001, 1, 340600, 0, 2000 ) );
+    REQUIRE( clock.m_next == counter );
+}
 
-    SECTION( "Recovery without a rate change advances canceled ticks but does not recount them" )
+/** \brief Source loss, duplicate notifications, and source-counter gaps never stop or advance the accelerometer clock.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim synchronization loss preserves holdover sampling", "[accelSim][model][sync-regression]" )
+{
+    phaseClock clock;
+    clock.reset( 0, 6000 );
+    REQUIRE( clock.reference( 10, 0, 1, 340600, 0, 2000 ) );
+    REQUIRE( clock.reference( 14, 2000000, 1, 340600, 0, 2000 ) );
+    REQUIRE( clock.m_delta == 4 );
+    REQUIRE( clock.m_sourcePeriod == 500000 ); // Gaps count WFS cycles, not accel ticks.
+    REQUIRE( clock.m_next == 1 );
+    REQUIRE( clock.consume( 2000000, .05, clock.m_period ) == 11 );
+    REQUIRE( clock.expired( 12000000, 10000000 ) );
+    const auto pending = clock.deadline();
+    clock.invalidate();
+    REQUIRE_FALSE( clock.m_valid );
+    REQUIRE( clock.deadline() == pending );
+    const double phase = clock.m_applied;
+    const auto   next  = clock.m_next;
+    for( int n = 0; n < 6000; ++n )
+        REQUIRE( clock.consume( clock.deadline(), .05, clock.m_period ) == 0 );
+    REQUIRE( clock.m_next == next + 6000 );
+    REQUIRE( clock.m_applied == phase );
+    REQUIRE_FALSE( clock.reference( 14, 1002000000, 1, 340600, 0, 2000 ) );
+    REQUIRE( clock.reference( 15, 1002500000, 1, 340600, 0, 2000 ) );
+    REQUIRE_FALSE( clock.m_valid );
+    REQUIRE( clock.reference( 16, 1003000000, 1, 340600, 0, 2000 ) );
+    REQUIRE( clock.m_valid );
+    REQUIRE( clock.reference( 1, 1003500000, 1, 340600, 0, 2000 ) );
+    REQUIRE_FALSE( clock.m_valid ); // Replaced/reset source needs fresh timing; physical model is unaffected.
+    REQUIRE( clock.m_delta == 0 );
+}
+
+/** \brief Jitter, persistent reference shifts, and a missing-WFS interval cannot change the mean sampling rate.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim noisy reference and reacquisition do not bias rate", "[accelSim][model][sync-regression]" )
+{
+    phaseClock clock;
+    clock.reset( 0, 8000 );
+    uint64_t frames = 0, counter = 1;
+    int64_t  nextSource = 500000, previous = 0;
+    bool     sawHoldover = false, sawRecovery = false;
+    while( std::min( nextSource, clock.deadline() ) <= 2000000000 )
     {
-        tick = clock.prepare( 15, epoch + 833333, 6000 );
-        REQUIRE( tick.m_advance == 4 );
-        REQUIRE( tick.m_skipped == 0 );
-        diag.finishSync( clock, tick, true );
-        REQUIRE( diag.m_skipped == 4 );
-        REQUIRE( clock.m_nextModel == 6 );
+        if( nextSource <= clock.deadline() )
+        {
+            const auto deadline = clock.deadline();
+            if( nextSource < 1000000000 || nextSource > 1050000000 )
+            {
+                clock.reference( counter, nextSource, .01, 340600, 0, 2000 );
+                if( sawHoldover && clock.m_valid )
+                    sawRecovery = true;
+            }
+            REQUIRE( clock.deadline() == deadline );
+            ++counter;
+            const int64_t nominal = counter * 500000;
+            const int64_t shift   = nominal >= 800000000 ? -50000 : nominal >= 500000000 ? 70000 : 0;
+            nextSource            = nominal + shift + ( counter % 2 ? 10000 : -10000 );
+        }
+        else
+        {
+            const auto now = clock.deadline();
+            if( clock.expired( now, 10000000 ) )
+            {
+                clock.invalidate();
+                sawHoldover = true;
+            }
+            REQUIRE( clock.consume( now, .05, clock.m_period ) == 0 );
+            if( previous )
+                REQUIRE( now - previous >= 118750 );
+            previous = now;
+            ++frames;
+        }
     }
-    SECTION( "Rate change rebases model time while retaining consumed source counters and totals" )
-    {
-        clock.resetTime();
-        REQUIRE_FALSE( clock.prepare( 14, epoch + 750000, 4000 ).m_newFrame );
-        tick = clock.prepare( 15, epoch + 833333, 4000 );
-        REQUIRE( tick.m_delta == 1 );
-        REQUIRE( tick.m_advance == 0 );
-        diag.finishSync( clock, tick, true );
-        REQUIRE( diag.m_skipped == 4 );
-        REQUIRE( diag.m_timing[dropped] == 3 );
-        tick = clock.prepare( 16, epoch + 1083333, 4000 );
-        REQUIRE( tick.m_advance == 0 );
-    }
-    SECTION( "Repeated cancellations count each omitted opportunity once" )
-    {
-        tick = clock.prepare( 15, epoch + 833333, 6000 );
-        diag.finishSync( clock, tick, false );
-        REQUIRE( diag.m_skipped == 5 );
-        tick = clock.prepare( 16, epoch + 1000000, 6000 );
-        REQUIRE( tick.m_advance == 5 );
-        REQUIRE( tick.m_skipped == 0 );
-        diag.finishSync( clock, tick, true );
-        REQUIRE( diag.m_skipped == 5 );
-    }
-    SECTION( "Producer reset starts a new epoch without erasing skipped totals" )
-    {
-        tick = clock.prepare( 1, epoch + 1000000, 6000 );
-        REQUIRE( tick.m_reset );
-        REQUIRE( tick.m_advance == 0 );
-        diag.finishSync( clock, tick, false );
-        REQUIRE( diag.m_skipped == 5 );
-        tick = clock.prepare( 2, epoch + 1166667, 6000 );
-        REQUIRE( tick.m_advance == 1 );
-        REQUIRE( tick.m_skipped == 0 );
-    }
+    REQUIRE( double( frames ) == Approx( 16000 ).margin( 1 ) );
+    REQUIRE( sawHoldover );
+    REQUIRE( sawRecovery );
+    REQUIRE( clock.m_valid );
+}
+
+/** \brief Canceled waits retain source accounting; missed sampling periods advance physics without replay.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim phase clock missed samples retain model time", "[accelSim][model][sync-regression]" )
+{
+    phaseClock clock;
+    clock.reset( 1000000000, 6000 );
+    REQUIRE( clock.reference( 10, 1000000000, 1, 340600, 0, 2000 ) );
+    const auto pending = clock.deadline();
+    REQUIRE( clock.reference( 14, 1002000000, 1, 340600, 0, 2000 ) );
+    REQUIRE( clock.m_producer == 14 ); // Accounting commits at receipt, not after a cancellable phase wait.
+    REQUIRE( clock.m_delta == 4 );
+    REQUIRE( clock.deadline() == pending );
+    REQUIRE( clock.m_next == 1 );
+    REQUIRE_FALSE( clock.reference( 14, 1002000001, 1, 340600, 0, 2000 ) );
+    clock.reset( 2000000000, 6000 );
+    REQUIRE( clock.m_producer == 14 );
+    parameters config;
+    model      a, b;
+    const auto modes = referenceModes( 123 );
+    a.configure( config, modes );
+    b.configure( config, modes );
+    const auto missed = clock.consume( 2000666667, .05, clock.m_period );
+    REQUIRE( missed == 3 );
+    REQUIRE_FALSE( a.advance( missed ) );
+    for( uint64_t n = 0; n <= missed; ++n )
+        b.step();
+    REQUIRE( a.m_sample.m_acceleration == b.m_sample.m_acceleration );
+    const auto stalled = clock.deadline() + 100000000;
+    const auto skipped = clock.consume( stalled, .05, clock.m_period );
+    REQUIRE( skipped > maxCatchUp );
+    REQUIRE( a.advance( skipped ) );
+    REQUIRE( clock.deadline() - stalled >= clock.m_period * .5 - 1 );
 }
 
 /** \brief Outage invalidation removes all lock/cadence measurements while retaining historical accounting.
@@ -696,7 +741,6 @@ class appTest : public MagAOX::app::accelSim
 {
   public:
     using accelSim::config;
-    using accelSim::finishSync;
     using accelSim::invalidateSync;
     using accelSim::m_activeFps;
     using accelSim::m_alpha;
@@ -716,26 +760,29 @@ class appTest : public MagAOX::app::accelSim
     using accelSim::m_indiP_synchroDelay;
     using accelSim::m_indiP_timingDiag;
     using accelSim::m_maxFrequency;
+    using accelSim::m_maxSlew;
     using accelSim::m_model;
+    using accelSim::m_nextSyncProbe;
     using accelSim::m_parameters;
+    using accelSim::m_phaseClock;
     using accelSim::m_postDelay;
     using accelSim::m_rateApplied;
     using accelSim::m_rateRequest;
     using accelSim::m_reconfig;
+    using accelSim::m_referenceFps;
     using accelSim::m_requestedFps;
     using accelSim::m_shmimName;
     using accelSim::m_shutdown;
     using accelSim::m_snapshot;
-    using accelSim::m_syncClock;
     using accelSim::m_syncImage;
     using accelSim::m_syncIndex;
     using accelSim::m_syncName;
-    using accelSim::m_syncPending;
-    using accelSim::m_syncTick;
+    using accelSim::m_syncTimeout;
     using accelSim::m_width;
     using accelSim::setupProperties;
     using accelSim::syncTiming;
     using accelSim::updateINDI;
+    using accelSim::updateSyncDiagnostics;
     using accelSim::waitSync;
 
     /// Install a recording driver using a private input file and /dev/null for unused endpoints.
@@ -1061,6 +1108,9 @@ TEST_CASE( "accelSim example configuration", "[accelSim][app]" )
     REQUIRE( app.m_parameters.m_noisePSD == 1e-8 );
     REQUIRE( app.m_parameters.m_seed == 42 );
     REQUIRE( app.m_parameters.m_modeSeed == 123 );
+    REQUIRE( app.m_syncTimeout == .01 );
+    REQUIRE( app.m_maxSlew == .05 );
+    REQUIRE( app.m_referenceFps == 0 );
     char      overrideFile[] = "/tmp/accelSim-config-XXXXXX";
     const int fd             = mkstemp( overrideFile );
     REQUIRE( fd >= 0 );
@@ -1084,6 +1134,33 @@ TEST_CASE( "accelSim example configuration", "[accelSim][app]" )
     app.config.readConfig( overrideFile );
     REQUIRE( app.loadConfigImpl( app.config ) < 0 );
     std::filesystem::remove( overrideFile );
+    // clang-format off
+#ifdef ACCELSIM_TEST_DOXYGEN_REF
+    MagAOX::app::accelSim::loadConfigImpl;
+#endif
+    // clang-format on
+}
+
+/** \brief Invalid phase-clock controls fail configuration before sampling begins.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim rejects invalid phase-clock controls", "[accelSim][app][sync-regression]" )
+{
+    char      path[] = "/tmp/accelSim-phase-config-XXXXXX";
+    const int fd     = mkstemp( path );
+    REQUIRE( fd >= 0 );
+    close( fd );
+    for( const std::string setting :
+         { "timeout=0", "timeout=3601", "maxSlew=0", "maxSlew=0.26", "referenceFps=-1", "referenceFps=1e-300" } )
+    {
+        CAPTURE( setting );
+        std::ofstream( path ) << "[synchro]\n" << setting << '\n';
+        appTest app;
+        app.setupConfig();
+        app.config.readConfig( path );
+        REQUIRE( app.loadConfigImpl( app.config ) < 0 );
+    }
+    std::filesystem::remove( path );
     // clang-format off
 #ifdef ACCELSIM_TEST_DOXYGEN_REF
     MagAOX::app::accelSim::loadConfigImpl;
@@ -1123,82 +1200,49 @@ TEST_CASE( "accelSim acquisition produces fresh timestamped ADC pairs", "[accelS
     // clang-format on
 }
 
-/** \brief Synchronization phase wraps, cadence cap, and lock follow the hardware equations.
+/** \brief The actual app reports phase correction, lock, and holdover consistently.
  * \ingroup accelSim_unit_test
  */
-TEST_CASE( "accelSim synchronized delay model", "[accelSim][app]" )
+TEST_CASE( "accelSim synchronized delay model", "[accelSim][app][sync-regression]" )
 {
     appTest app;
-    app.m_alpha     = 1;
-    app.m_postDelay = 25;
-    app.syncTiming( 1000000000 );
+    app.m_syncName = "accelSim-test-source";
+    app.m_phaseClock.reset( 1000000000, 6000 );
+    app.m_alpha = 1;
+    app.syncTiming( 1, 1000000000 );
     REQUIRE( app.m_diagnostics.m_timing[triggerTime] == 0 );
-    REQUIRE( app.m_diagnostics.m_timing[triggerInterval] == 0 );
-    app.m_postDelay = -5;
-    app.syncTiming( 1000500000 );
-    REQUIRE( app.m_diagnostics.m_timing[triggerInterval] == 0 );
-    app.syncTiming( 1001000000 );
-    REQUIRE( app.m_diagnostics.m_timing[triggerInterval] == 500 );
+    app.syncTiming( 2, 1000500000 );
     const auto &t = app.m_diagnostics.m_timing;
-    REQUIRE( t[11] == Approx( 500 ) );  // semaphorePeriod
-    REQUIRE( t[4] == Approx( 409.4 ) ); // wrap(250 - 340.6, 500)
-    REQUIRE( t[2] == Approx( 404.4 ) );
-    REQUIRE( t[3] == Approx( 404.4 ) );
-    REQUIRE( t[7] == Approx( 480 ) );
-    REQUIRE( t[6] == 1 );
-    REQUIRE( app.m_diagnostics.m_cadenceRatio == Approx( 3 ) );
-    app.m_postDelay = -250;
-    app.syncTiming( 1001500000 );
-    REQUIRE( t[phaseError] == Approx( 250 ) );
-    // clang-format off
-#ifdef ACCELSIM_TEST_DOXYGEN_REF
-    MagAOX::app::accelSim::syncTiming;
-#endif
-    // clang-format on
-}
-
-/** \brief An outage updates the app-loop snapshot without requiring another published frame.
- * \ingroup accelSim_unit_test
- */
-TEST_CASE( "accelSim outage and reconfiguration deliver unlocked diagnostics", "[accelSim][app][sync-regression]" )
-{
-    appTest app;
-    app.m_syncName  = "accelSim-test-source";
-    app.m_alpha     = 1;
-    app.m_postDelay = -5;
-    app.syncTiming( 1000000000 );
-    app.syncTiming( 1000500000 );
-    REQUIRE( app.m_diagnostics.m_timing[lock] == 1 );
-    REQUIRE( app.frameGrabberPostPublish( nullptr ) == 0 );
-    REQUIRE( app.m_snapshot.m_timing[lock] == 1 );
-    app.m_syncTick    = app.m_syncClock.prepare( 10, 1000500000, 6000 );
-    app.m_syncPending = true;
+    REQUIRE( t[semaphorePeriod] == 500 );
+    REQUIRE( t[delayModel] == Approx( 409.4 ) );
+    REQUIRE( t[delayTarget] == Approx( 409.4 ) );
+    REQUIRE( t[triggerInterval] == 0 );
+    for( int n = 0; n < 20; ++n )
+        app.m_phaseClock.consume( app.m_phaseClock.deadline(), .05, 166666 );
+    app.updateSyncDiagnostics();
+    REQUIRE( t[phaseError] == Approx( 0 ).margin( 1e-9 ) );
+    REQUIRE( t[lock] == 1 );
+    REQUIRE( t[delayBudget] == Approx( 8.333333 ) );
+    REQUIRE( t[capped] == 0 );
+    REQUIRE( app.m_diagnostics.m_cadenceRatio == 3 );
+    app.frameGrabberPostPublish( nullptr );
+    const auto deadline = app.m_phaseClock.deadline();
     app.invalidateSync();
-    REQUIRE_FALSE( app.m_syncPending );
-    REQUIRE( app.m_snapshot.m_skipped == 1 );
     REQUIRE( app.m_snapshot.m_timing[lock] == 0 );
     REQUIRE( app.m_snapshot.m_timing[semaphorePeriod] == 0 );
     REQUIRE( app.m_snapshot.m_timing[delayApplied] == 0 );
     REQUIRE( app.m_snapshot.m_cadenceRatio == 0 );
-    REQUIRE( app.m_snapshot.m_timing[delayTarget] == -5 );
-    app.finishSync( false );
-    REQUIRE( app.m_diagnostics.m_skipped == 1 ); // Finalization cannot count a cancellation twice.
-    REQUIRE( app.reconfig() == 0 );
-    REQUIRE( app.m_snapshot.m_discontinuities == 1 );
-    REQUIRE( app.m_snapshot.m_skipped == 1 );
-    REQUIRE( app.m_snapshot.m_timing[lock] == 0 );
-    app.syncTiming( 2000000000 );
-    REQUIRE( app.m_diagnostics.m_timing[lock] == 0 ); // Reconnection needs a fresh period measurement.
-    app.syncTiming( 2000500000 );
-    REQUIRE( app.frameGrabberPostPublish( nullptr ) == 0 );
-    REQUIRE( app.m_snapshot.m_timing[lock] == 1 );
+    REQUIRE( app.m_phaseClock.deadline() == deadline );
+    app.syncTiming( 3, 2000000000 );
+    REQUIRE( t[lock] == 0 );
+    app.syncTiming( 4, 2000500000 );
+    REQUIRE( t[triggerInterval] == 0 );
+    REQUIRE( app.m_phaseClock.m_valid );
     // clang-format off
 #ifdef ACCELSIM_TEST_DOXYGEN_REF
-    MagAOX::app::accelSim::invalidateSync;
-    MagAOX::app::accelSim::finishSync;
-    MagAOX::app::accelSim::frameGrabberPostPublish;
-    MagAOX::app::accelSim::reconfig;
     MagAOX::app::accelSim::syncTiming;
+    MagAOX::app::accelSim::updateSyncDiagnostics;
+    MagAOX::app::accelSim::invalidateSync;
 #endif
     // clang-format on
 }
@@ -1248,6 +1292,21 @@ TEST_CASE( "accelSim real local streams", "[.][accelSim-streams]" )
         }
     }
     {
+        appTest app;
+        app.setupConfig();
+        REQUIRE( app.loadConfigImpl( app.config ) == 0 );
+        app.m_syncName = "accelSim-absent-reference";
+        app.startWorker();
+        streamFixture reader;
+        reader.open( "acc000" );
+        for( int n = 0; n < 10; ++n )
+        {
+            const auto pair = reader.read();
+            REQUIRE( pair[0] <= 4095 );
+            REQUIRE( pair[1] <= 4095 );
+        }
+    }
+    {
         streamFixture source;
         source.create( "accelSim-trigger" );
         appTest app;
@@ -1260,58 +1319,43 @@ TEST_CASE( "accelSim real local streams", "[.][accelSim-streams]" )
         for( uint64_t counter : { 1u, 4u } )
         {
             source.m_image.md->cnt0 = counter;
-            clock_gettime( CLOCK_REALTIME, &source.m_image.md->atime );
             REQUIRE( ImageStreamIO_sempost( &source.m_image, -1 ) == 0 );
-            REQUIRE( app.acquireAndCheckValid() == 0 );
-            REQUIRE( app.loadImageIntoStream( pair.data() ) == 0 );
+            // A due accelerometer frame may precede processing the queued reference.
+            for( int n = 0; n < 4; ++n )
+            {
+                REQUIRE( app.acquireAndCheckValid() == 0 );
+                REQUIRE( app.loadImageIntoStream( pair.data() ) == 0 );
+            }
         }
-        REQUIRE( app.m_diagnostics.m_timing[18] == 2 ); // Source counter gaps.
-        REQUIRE( app.m_diagnostics.m_skipped >= 2 );
+        REQUIRE( app.m_diagnostics.m_timing[dropped] == 2 );
+        REQUIRE( app.m_diagnostics.m_timing[written] == 8 );
+        REQUIRE( app.m_diagnostics.m_timing[received] == 2 );
         REQUIRE( ImageStreamIO_sempost( &source.m_image, -1 ) == 0 );
-        REQUIRE( app.acquireAndCheckValid() > 0 ); // Duplicate notification never replays a frame.
-        const auto skippedBeforeCancel = app.m_diagnostics.m_skipped;
-        app.m_syncClock.resetTime(); // Isolate cancellation from scheduling delays earlier in this fixture.
-        source.m_image.md->cnt0 = 8;
-        REQUIRE( ImageStreamIO_sempost( &source.m_image, -1 ) == 0 );
-        app.m_requestedFps = 6001; // Force cancellation at the phase wait, after consuming the semaphore.
-        REQUIRE( app.waitSync() > 0 );
-        REQUIRE_FALSE( app.m_syncPending );
-        REQUIRE( app.m_syncClock.m_producer == 8 );
-        REQUIRE( app.m_diagnostics.m_timing[dropped] == 5 ); // Earlier gap of two plus this gap of three.
-        REQUIRE( app.m_diagnostics.m_skipped == skippedBeforeCancel + 4 );
-        REQUIRE( app.m_snapshot.m_skipped == app.m_diagnostics.m_skipped );
-        REQUIRE( app.m_snapshot.m_timing[lock] == 0 );
-        REQUIRE( app.loadImageIntoStream( pair.data() ) < 0 );
-        REQUIRE( ImageStreamIO_sempost( &source.m_image, -1 ) == 0 );
-        REQUIRE( app.waitSync() > 0 ); // Duplicate of canceled counter cannot be counted twice.
-        REQUIRE( app.m_diagnostics.m_skipped == app.m_snapshot.m_skipped );
-        app.m_requestedFps = 6000;
-        const int slot     = app.m_syncIndex;
-        REQUIRE( app.reconfig() == 0 );
-        REQUIRE( source.m_image.semReadPID[slot] == 0 );
-        REQUIRE( app.configureAcquisition() == 0 );
-        REQUIRE( app.startAcquisition() == 0 );
-        app.m_diagnostics.m_timing[lock]            = 1;
-        app.m_diagnostics.m_timing[semaphorePeriod] = 500;
-        app.m_diagnostics.m_cadenceRatio            = 3;
-        REQUIRE( app.frameGrabberPostPublish( nullptr ) == 0 );
-        REQUIRE( app.m_snapshot.m_timing[lock] == 1 );
+        for( int n = 0; n < 4; ++n )
+            REQUIRE( app.acquireAndCheckValid() == 0 );
+        REQUIRE( app.m_diagnostics.m_timing[dropped] == 2 );
+        REQUIRE( app.m_phaseClock.m_producer == 4 );
+        const auto discontinuities = app.m_diagnostics.m_discontinuities;
+        const int  slot            = app.m_syncIndex;
         REQUIRE( ImageStreamIO_destroyIm( &source.m_image ) == 0 );
-        source.m_open = false;
-        REQUIRE( app.acquireAndCheckValid() > 0 ); // Timed wait discovers the vanished backing file.
-        REQUIRE( app.m_reconfig );
+        source.m_open       = false;
+        app.m_nextSyncProbe = 0;
+        REQUIRE( app.acquireAndCheckValid() == 0 ); // Source loss cannot stop the accelerometer clock.
+        REQUIRE_FALSE( app.m_reconfig );
         REQUIRE( app.m_snapshot.m_timing[lock] == 0 );
-        REQUIRE( app.m_snapshot.m_timing[semaphorePeriod] == 0 );
-        REQUIRE( app.m_snapshot.m_cadenceRatio == 0 );
-        REQUIRE( app.reconfig() == 0 );
-        REQUIRE( app.m_snapshot.m_timing[lock] == 0 );
+        REQUIRE( app.m_diagnostics.m_discontinuities == discontinuities );
+        REQUIRE( app.loadImageIntoStream( pair.data() ) == 0 );
         source.create( "accelSim-trigger" );
-        REQUIRE( app.configureAcquisition() == 0 );
-        app.m_reconfig = false; // The real frameGrabber clears this after successful configuration.
-        REQUIRE( app.startAcquisition() == 0 );
+        app.m_nextSyncProbe = 0;
+        REQUIRE( app.acquireAndCheckValid() == 0 ); // Reattach without recreating acc000 or restarting physics.
+        REQUIRE( source.m_image.semReadPID[slot] != 0 );
         source.m_image.md->cnt0 = 1;
         REQUIRE( ImageStreamIO_sempost( &source.m_image, -1 ) == 0 );
-        REQUIRE( app.acquireAndCheckValid() == 0 );
+        for( int n = 0; n < 4; ++n )
+            REQUIRE( app.acquireAndCheckValid() == 0 );
+        REQUIRE( app.m_phaseClock.m_producer == 1 );
+        REQUIRE( app.reconfig() == 0 );
+        REQUIRE( source.m_image.semReadPID[slot] == 0 );
     }
     // clang-format off
 #ifdef ACCELSIM_TEST_DOXYGEN_REF
@@ -1333,6 +1377,10 @@ TEST_CASE( "accelSim sustained local publication benchmark", "[.][accelSim-live]
 {
     REQUIRE( std::getenv( "ACCELSIM_LOCAL_BENCHMARK" ) != nullptr );
     REQUIRE( std::getenv( "MILK_SHM_DIR" ) != nullptr );
+    const char  *rateSetting  = std::getenv( "ACCELSIM_EXPECTED_FPS" );
+    const double expectedRate = rateSetting ? std::stod( rateSetting ) : 6000;
+    REQUIRE( std::isfinite( expectedRate ) );
+    REQUIRE( expectedRate > 0 );
     streamFixture reader;
     reader.open( "acc000" );
     REQUIRE( reader.m_image.md->datatype == _DATATYPE_UINT16 );
@@ -1379,7 +1427,7 @@ TEST_CASE( "accelSim sustained local publication benchmark", "[.][accelSim-live]
         std::cout << bin << ',';
     std::cout
         << "\nCompare producer sim_diag/skipped_publications, late_samples, max_lateness_us and RSS separately.\n";
-    REQUIRE( rate == Approx( 6000 ).epsilon( .01 ) );
+    REQUIRE( rate == Approx( expectedRate ).epsilon( .01 ) );
 }
 #endif
 

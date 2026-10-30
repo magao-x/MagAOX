@@ -55,17 +55,20 @@ class accelSim : public MagAOXApp<true>, public dev::frameGrabber<accelSim>, pub
     double      m_dtTransfer{ 3000 }, m_wfsProcess{ 51500 }, m_dtF{ 10000 },
         m_wfsRead{ 276100 };                                                ///< Delay-model terms in ns.
     double m_lockAbsolute{ 50000 }, m_lockFraction{ .1 }, m_guard{ 20000 }; ///< Delay lock criteria and cadence margin.
-    IMAGE  m_syncImage{};                  ///< Synchronization input only; never the output image.
-    bool   m_syncOpen{ false };            ///< Whether the source mapping is owned by this app.
-    int    m_syncIndex{ 5 };               ///< Claimed source semaphore index, initially preferring index five.
-    ino_t  m_syncInode{ 0 };               ///< Backing-file inode used to detect source replacement.
-    accelSimDetail::syncClock m_syncClock; ///< Committed source and nominal-time accounting.
-    accelSimDetail::syncTick  m_syncTick;  ///< Notification awaiting acquisition or explicit cancellation.
-    bool                      m_syncPending{ false }; ///< True until the consumed notification has been finalized.
-    int64_t                   m_lastArrival{ 0 }, m_lastAcquisition{ 0 }; ///< Monotonic timestamps for observed timing.
-    int64_t                   m_triggerPrediction{ 0 };                   ///< Last predicted synchronized trigger time.
-    int64_t                   m_arrival{ 0 };   ///< Current synchronized semaphore-arrival timestamp.
-    bool                      m_fresh{ false }; ///< True only for an acquired sample not yet copied.
+    IMAGE  m_syncImage{};                    ///< Synchronization input only; never the output image.
+    bool   m_syncOpen{ false };              ///< Whether the source mapping is owned by this app.
+    int    m_syncIndex{ 5 };                 ///< Claimed source semaphore index, initially preferring index five.
+    ino_t  m_syncInode{ 0 };                 ///< Backing-file inode used to detect source replacement.
+    accelSimDetail::phaseClock m_phaseClock; ///< Continuous synchronized sampling schedule and WFS reference.
+    double                     m_syncTimeout{ .01 }, m_maxSlew{ .05 },
+        m_referenceFps{ 0 };      ///< Silence seconds, slew fraction, optional WFS Hz.
+    int64_t m_nextSyncProbe{ 0 }; ///< Next nonblocking source-open/inode check [monotonic ns].
+    int64_t m_lastAcquisition{ 0 }, m_triggerPrediction{ 0 }; ///< Acquisition history and latest WFS phase prediction.
+    int64_t m_latencyArrival{ 0 },
+        m_latencyPrediction{ 0 }; ///< Pending reference retained across intervening WFS events.
+    bool m_measureReference{
+        false }; ///< Awaiting a sample at/after the retained WFS prediction, independently of newer references.
+    bool m_fresh{ false }; ///< True only for an acquired sample not yet copied.
 
     using enum accelSimDetail::timingIndex;
     /// Hardware-compatible element names in timingIndex order.
@@ -112,16 +115,17 @@ class accelSim : public MagAOXApp<true>, public dev::frameGrabber<accelSim>, pub
     void closeSync();
     /// Detect a source mapping that vanished or was replaced.
     bool syncStale();
-    /// Wait for a synchronization trigger, retaining tentative accounting through the phase wait.
+    /// Wait for the next accelerometer deadline while accepting independent WFS references.
     int waitSync();
-    /// Finalize any pending notification once, including explicit cancellation.
-    void finishSync( bool acquired /**< [in] whether a fresh model sample was generated */ );
-    /// Clear synchronization status and publish it even when no frames can be acquired.
+    /// Enter holdover and publish unlocked status without stopping the sampling clock.
     void invalidateSync();
     /// Transfer diagnostics; forced transfers wait only for the app-loop snapshot copy.
     void snapshotDiagnostics( bool force /**< [in] require delivery for lifecycle events */ );
-    /// Compute hardware-compatible synchronized phase, budget, and lock diagnostics.
-    void syncTiming( int64_t arrival /**< [in] monotonic semaphore arrival */ );
+    /// Consume a source reference and update its phase/counter diagnostics independently of publication.
+    void syncTiming( uint64_t producer /**< [in] current source counter */,
+                     int64_t  arrival /**< [in] monotonic semaphore arrival */ );
+    /// Report bounded clock correction and lock against the most recent valid phase reference.
+    void updateSyncDiagnostics();
     /// Wait interruptibly for an absolute monotonic deadline.
     int waitUntil( int64_t deadline /**< [in] monotonic deadline in ns */ );
     /// Get monotonic nanoseconds without conversion of epoch time to double.
@@ -153,7 +157,7 @@ class accelSim : public MagAOXApp<true>, public dev::frameGrabber<accelSim>, pub
     int appLogic() override;
     /// Join acquisition before releasing synchronization resources.
     int appShutdown() override;
-    /// Set the two-channel stream geometry and connect any synchronization source.
+    /// Set the two-channel stream geometry; a missing synchronization source does not block acquisition.
     int configureAcquisition();
     /// Return the nominal active sampling rate to frameGrabber.
     float fps();
@@ -165,7 +169,7 @@ class accelSim : public MagAOXApp<true>, public dev::frameGrabber<accelSim>, pub
     int loadImageIntoStream( void *destination /**< [out] frameGrabber destination plane */ );
     /// Transfer a nonblocking diagnostic snapshot after successful publication.
     int frameGrabberPostPublish( IMAGE *stream /**< [in] framework-owned output, not modified here */ );
-    /// Release a stale synchronization source before framework reconfiguration.
+    /// Release synchronization input during an explicit framework reconfiguration.
     int reconfig();
     /// Check the existing frame-grabber telemetry cadence.
     int checkRecordTimes();
@@ -222,6 +226,12 @@ inline void accelSim::setupConfig()
     }
     add( "synchro", "shmimName", "string", "Trigger input stream; empty selects timer acquisition." );
     add( "synchro", "postDelay", "int", "Signed phase offset [us], default 0." );
+    add( "synchro", "timeout", "double", "Source silence timeout [s]; sampling continues in holdover, default 0.01." );
+    add( "synchro", "maxSlew", "double", "Maximum phase correction per accelerometer interval, fraction in (0,0.25]." );
+    add( "synchro",
+         "referenceFps",
+         "double",
+         "Nominal WFS cadence for phase tracking; 0 learns first measured period." );
     add( "synchro", "alpha", "double", "Timing EMA coefficient, default 0.01." );
     for( const std::string key : { "dtTransfer_ns",
                                    "wfsProcess_ns",
@@ -254,6 +264,9 @@ inline int accelSim::loadConfigImpl( mx::app::appConfigurator &config )
     config( m_channelsElement, "numChannels.element" );
     config( m_channelsTol, "numChannels.tol" );
     config( m_syncName, "synchro.shmimName" );
+    config( m_syncTimeout, "synchro.timeout" );
+    config( m_maxSlew, "synchro.maxSlew" );
+    config( m_referenceFps, "synchro.referenceFps" );
     config( m_dtTransfer, "synchro.dtTransfer_ns" );
     config( m_wfsProcess, "synchro.wfsProcess_ns" );
     config( m_dtF, "synchro.dtF_ns" );
@@ -272,6 +285,11 @@ inline int accelSim::loadConfigImpl( mx::app::appConfigurator &config )
         if( channels != 2 || !std::isfinite( alpha ) || postDelay < -1000000 || postDelay > 1000000 ||
             ( !m_syncName.empty() && m_syncName == m_shmimName ) )
             throw std::invalid_argument( "invalid channels, alpha, phase offset, or self-trigger stream" );
+        if( !std::isfinite( m_syncTimeout ) || m_syncTimeout <= 0 || m_syncTimeout > 3600 ||
+            !std::isfinite( m_maxSlew ) || m_maxSlew <= 0 || m_maxSlew > .25 || !std::isfinite( m_referenceFps ) ||
+            m_referenceFps < 0 || m_referenceFps > 1e9 ||
+            ( m_referenceFps > 0 && 1e9 / m_referenceFps > double( std::numeric_limits<int64_t>::max() ) ) )
+            throw std::invalid_argument( "invalid synchronization timeout, slew, or reference FPS" );
         for( double *value :
              { &m_dtTransfer, &m_wfsProcess, &m_dtF, &m_wfsRead, &m_lockAbsolute, &m_lockFraction, &m_guard } )
         {
@@ -450,7 +468,9 @@ inline int accelSim::configureAcquisition()
     m_width    = 2;
     m_height   = 1;
     m_dataType = _DATATYPE_UINT16;
-    return m_syncName.empty() ? 0 : openSync();
+    if( !m_syncName.empty() )
+        openSync(); // Optional reference: absence must not block acc000 creation.
+    return 0;
 }
 
 inline float accelSim::fps()
@@ -461,13 +481,15 @@ inline float accelSim::fps()
 inline int accelSim::startAcquisition()
 {
     m_schedule.reset( monotonicNow(), m_activeFps.load() );
-    m_lastArrival = m_lastAcquisition = m_triggerPrediction = 0;
-    m_syncClock                                             = {};
-    m_syncPending                                           = false;
-    m_fresh                                                 = false;
-    m_diagnostics.m_timing                                  = {};
-    m_diagnostics.m_timing[modeCode]                        = m_syncName.empty() ? 0 : 1;
-    m_diagnostics.m_timing[delayTarget]                     = m_postDelay.load();
+    m_lastAcquisition = m_triggerPrediction = 0;
+    if( !m_syncName.empty() )
+        m_phaseClock.reset( m_schedule.m_epoch, m_activeFps.load() );
+    m_nextSyncProbe                     = 0;
+    m_measureReference                  = false;
+    m_fresh                             = false;
+    m_diagnostics.m_timing              = {};
+    m_diagnostics.m_timing[modeCode]    = m_syncName.empty() ? 0 : 1;
+    m_diagnostics.m_timing[delayTarget] = m_postDelay.load();
     if( m_syncOpen )
         ImageStreamIO_semflush( &m_syncImage, m_syncIndex );
     snapshotDiagnostics( true );
@@ -478,12 +500,12 @@ inline int accelSim::openSync()
 {
     if( m_syncOpen )
         return 0;
-    if( ImageStreamIO_openIm( &m_syncImage, m_syncName.c_str() ) != 0 )
-        return 1;
-    m_syncOpen = true;
     char        filename[1024];
     struct stat status;
     ImageStreamIO_filename( filename, sizeof( filename ), m_syncName.c_str() );
+    if( stat( filename, &status ) != 0 || ImageStreamIO_openIm( &m_syncImage, m_syncName.c_str() ) != 0 )
+        return 1;
+    m_syncOpen = true;
     if( m_syncImage.md[0].sem < SEMAPHORE_MAXVAL || stat( filename, &status ) != 0 )
     {
         m_syncIndex = -1;
@@ -524,110 +546,137 @@ inline bool accelSim::syncStale()
     return stat( filename, &status ) != 0 || status.st_ino != m_syncInode;
 }
 
-inline void accelSim::syncTiming( int64_t arrival )
+inline void accelSim::syncTiming( uint64_t producer, int64_t arrival )
 {
-    auto        &t     = m_diagnostics.m_timing;
-    const double alpha = m_alpha.load();
-    if( m_lastArrival )
-        t[semaphorePeriod] = alpha * ( arrival - m_lastArrival ) / 1000.0 + ( 1 - alpha ) * t[semaphorePeriod];
-    m_lastArrival       = arrival;
-    const double period = t[semaphorePeriod];
-    t[delayModel]       = 0;
-    t[delayTarget]      = m_postDelay.load();
-    if( period > 0 )
+    if( !m_phaseClock.reference( producer,
+                                 arrival,
+                                 m_alpha.load(),
+                                 m_dtTransfer + m_wfsProcess + m_dtF + m_wfsRead,
+                                 m_postDelay.load() * 1000.0,
+                                 m_referenceFps ) )
+        return;
+    if( !m_phaseClock.m_valid )
     {
-        const auto wrap = [period]( double value )
-        {
-            const double v = std::fmod( value, period );
-            return v < 0 ? v + period : v;
-        };
-        t[delayModel]  = wrap( .5 * period - ( m_dtTransfer + m_wfsProcess + m_dtF + m_wfsRead ) / 1000 );
-        t[delayTarget] = wrap( t[delayModel] + m_postDelay.load() );
+        m_diagnostics.invalidateSync( m_postDelay.load() );
+        m_triggerPrediction = 0;
+        m_measureReference  = false;
     }
-    t[delayBudget]       = std::max( 0.0, period - t[service] - m_guard / 1000 );
-    const double desired = std::max( 0.0, t[delayTarget] );
-    t[delayApplied]      = std::min( desired, t[delayBudget] );
-    t[capped]            = desired > t[delayBudget] ? 1 : 0;
-    t[delay]             = t[delayTarget];
-    m_diagnostics.updatePhaseError();
-    t[lock] = period > 0 && std::abs( t[phaseError] ) <= m_lockAbsolute / 1000 &&
-                      std::abs( t[phaseError] ) <= m_lockFraction * period
-                  ? 1
-                  : 0;
+    auto &t          = m_diagnostics.m_timing;
+    t[producerId]    = m_phaseClock.m_producer;
+    t[producerDelta] = m_phaseClock.m_delta;
+    if( m_phaseClock.m_delta > 1 )
+    {
+        t[dropped] += m_phaseClock.m_delta - 1;
+        ++t[gapCount];
+    }
+    t[semaphorePeriod] = m_phaseClock.m_sourcePeriod / 1000;
+    t[delayModel]      = m_phaseClock.m_modelDelay / 1000;
+    t[delayTarget]     = m_phaseClock.m_valid ? m_phaseClock.m_delay / 1000 : m_postDelay.load();
+    if( !m_phaseClock.m_valid )
+        m_triggerPrediction = 0;
     m_diagnostics.updateTrigger( arrival, m_triggerPrediction );
-    m_diagnostics.m_cadenceRatio = period * m_activeFps.load() / 1e6;
+    if( m_phaseClock.m_valid && !m_measureReference )
+    {
+        m_measureReference  = true;
+        m_latencyArrival    = arrival;
+        m_latencyPrediction = m_triggerPrediction;
+    }
+    m_diagnostics.m_cadenceRatio = m_phaseClock.m_sourcePeriod * m_activeFps.load() / 1e9;
+    updateSyncDiagnostics();
 }
 
-inline void accelSim::finishSync( bool acquired )
+inline void accelSim::updateSyncDiagnostics()
 {
-    if( !m_syncPending )
+    auto &t = m_diagnostics.m_timing;
+    if( !m_phaseClock.m_valid )
+    {
+        t[lock] = 0;
         return;
-    m_diagnostics.finishSync( m_syncClock, m_syncTick, acquired );
-    m_syncPending = false;
+    }
+    const double residual = ( m_phaseClock.m_applied - m_phaseClock.m_target ) / 1000;
+    t[delayApplied]       = std::fmod( t[delayTarget] + residual, t[semaphorePeriod] );
+    if( t[delayApplied] < 0 )
+        t[delayApplied] += t[semaphorePeriod];
+    t[delay]       = t[delayApplied];
+    t[delayBudget] = m_phaseClock.m_budget / 1000;
+    t[capped]      = std::abs( residual ) > t[delayBudget] ? 1 : 0;
+    m_diagnostics.updatePhaseError();
+    t[lock] = std::abs( t[phaseError] ) <= m_lockAbsolute / 1000 &&
+                      std::abs( t[phaseError] ) <= m_lockFraction * t[semaphorePeriod]
+                  ? 1
+                  : 0;
 }
 
 inline void accelSim::invalidateSync()
 {
-    finishSync( false );
+    m_phaseClock.invalidate();
     m_diagnostics.invalidateSync( m_postDelay.load() );
-    m_lastArrival = m_lastAcquisition = m_triggerPrediction = 0;
-    m_fresh                                                 = false;
+    m_triggerPrediction = 0;
+    m_measureReference  = false;
     snapshotDiagnostics( true );
 }
 
 inline int accelSim::waitSync()
 {
-    if( !m_syncOpen || m_syncIndex < 0 )
+    const int64_t timeout = std::max<int64_t>( 1, std::llround( m_syncTimeout * 1e9 ) );
+    while( !shutdown() && !m_reconfig )
     {
-        m_reconfig = true;
-        invalidateSync();
-        return 1;
-    }
-    timespec timeout;
-    if( clock_gettime( CLOCK_REALTIME, &timeout ) < 0 )
-    {
-        invalidateSync();
-        return -1;
-    }
-    ++timeout.tv_sec;
-    if( sem_timedwait( m_syncImage.semptr[m_syncIndex], &timeout ) < 0 )
-    {
-        const int waitError = errno;
-        if( waitError != EINTR )
+        if( m_requestedFps.load() != m_activeFps.load() )
+            return 1;
+        int64_t now = monotonicNow();
+        if( now >= m_nextSyncProbe )
         {
-            if( waitError != ETIMEDOUT || syncStale() )
-                m_reconfig = true;
-            invalidateSync(); // Also invalidate a stalled but still mapped source.
+            m_nextSyncProbe = now + timeout;
+            if( m_syncOpen && syncStale() )
+            {
+                closeSync();
+                m_phaseClock.invalidate( true );
+                invalidateSync();
+            }
+            if( !m_syncOpen && openSync() == 0 )
+            {
+                m_phaseClock.invalidate( true );
+                ImageStreamIO_semflush( &m_syncImage, m_syncIndex );
+            }
         }
-        return 1;
+        if( m_phaseClock.expired( now, timeout ) )
+            invalidateSync();
+        now                     = monotonicNow();
+        const int64_t remaining = m_phaseClock.deadline() - now;
+        if( remaining <= 0 )
+        {
+            // Service at most one queued reference even when every acquisition is late;
+            // an overloaded producer must not starve source-counter/phase observations.
+            if( m_syncOpen && sem_trywait( m_syncImage.semptr[m_syncIndex] ) == 0 )
+            {
+                ++m_diagnostics.m_timing[received];
+                syncTiming( m_syncImage.md[0].cnt0, monotonicNow() );
+            }
+            return 0;
+        }
+        if( !m_syncOpen )
+            return waitUntil( m_phaseClock.deadline() );
+        // Wait for either a WFS reference or the next accelerometer deadline. Receiving a
+        // reference never changes that frozen deadline and never publishes a frame itself.
+        timespec until;
+        if( clock_gettime( CLOCK_REALTIME, &until ) < 0 )
+            return -1;
+        const int64_t ns = until.tv_nsec + std::min<int64_t>( remaining, 1000000 );
+        until.tv_sec += ns / 1000000000;
+        until.tv_nsec = ns % 1000000000;
+        if( sem_timedwait( m_syncImage.semptr[m_syncIndex], &until ) == 0 )
+        {
+            ++m_diagnostics.m_timing[received];
+            syncTiming( m_syncImage.md[0].cnt0, monotonicNow() );
+        }
+        else if( errno != ETIMEDOUT && errno != EINTR )
+        {
+            closeSync();
+            m_phaseClock.invalidate( true );
+            invalidateSync();
+        }
     }
-    ++m_diagnostics.m_timing[received];
-    m_arrival     = monotonicNow();
-    m_syncTick    = m_syncClock.prepare( m_syncImage.md[0].cnt0, m_arrival, m_activeFps.load() );
-    m_syncPending = m_syncTick.m_newFrame;
-    if( !m_syncPending )
-        return 1; // Drain repeated notifications without replay or duplicate accounting.
-    if( m_syncTick.m_reset )
-    {
-        m_model.restart();
-        ++m_diagnostics.m_discontinuities;
-        m_diagnostics.invalidateSync( m_postDelay.load() );
-        m_lastArrival = m_lastAcquisition = m_triggerPrediction = 0;
-    }
-    if( !m_syncTick.m_due )
-    {
-        finishSync( false ); // Source progressed within an already-accounted nominal opportunity.
-        return 1;
-    }
-    syncTiming( m_arrival );
-    const int result = waitUntil( m_arrival + int64_t( std::llround( m_diagnostics.m_timing[delayApplied] * 1000 ) ) );
-    if( result != 0 )
-    {
-        if( result < 0 )
-            m_reconfig = true;
-        invalidateSync(); // Counts the canceled current opportunity as well as older missed ticks.
-    }
-    return result;
+    return 1;
 }
 
 inline int accelSim::acquireAndCheckValid()
@@ -652,10 +701,12 @@ inline int accelSim::acquireAndCheckValid()
                 m_activeFps = requested;
                 ++m_diagnostics.m_discontinuities;
                 m_schedule.reset( monotonicNow(), requested );
-                m_lastArrival = m_lastAcquisition = m_triggerPrediction = 0;
-                m_syncClock.resetTime();
+                m_lastAcquisition = m_triggerPrediction = 0;
                 if( !m_syncName.empty() )
+                {
+                    m_phaseClock.reset( m_schedule.m_epoch, requested );
                     invalidateSync();
+                }
             }
             m_rateApplied = revision; // A newer callback remains Busy until its own boundary.
         }
@@ -676,8 +727,7 @@ inline int accelSim::acquireAndCheckValid()
             const int result = waitSync();
             if( result != 0 )
                 return result;
-            skipped  = m_syncTick.m_advance;
-            deadline = m_arrival + int64_t( std::llround( m_diagnostics.m_timing[delayApplied] * 1000 ) );
+            deadline = m_phaseClock.deadline();
         }
         if( shutdown() || m_reconfig || ( !m_syncName.empty() && m_requestedFps.load() != m_activeFps.load() ) )
         {
@@ -696,8 +746,10 @@ inline int accelSim::acquireAndCheckValid()
         if( late > 0 )
             ++m_diagnostics.m_late;
         m_diagnostics.m_maxLateUs = std::max( m_diagnostics.m_maxLateUs, late );
-        if( m_syncName.empty() )
-            m_diagnostics.m_skipped += skipped;
+        if( !m_syncName.empty() )
+            skipped = m_phaseClock.consume(
+                acquired, m_maxSlew, m_phaseClock.m_period - m_diagnostics.m_timing[service] * 1000 - m_guard );
+        m_diagnostics.m_skipped += skipped;
         if( m_model.advance( skipped ) )
             ++m_diagnostics.m_discontinuities;
         const int64_t completed = monotonicNow();
@@ -710,19 +762,19 @@ inline int accelSim::acquireAndCheckValid()
         }
         else
         {
-            const double latency = ( acquired - m_arrival ) / 1000.0;
-            const double alpha   = m_alpha.load();
-            t[readLatency]       = m_lastAcquisition ? alpha * latency + ( 1 - alpha ) * t[readLatency] : latency;
-            t[latencyError]      = t[readLatency] - t[delayTarget];
-            // Same bounded feedback diagnostic as mcp3208Ctrl; the next trigger recalculates its target.
-            double updated = std::max( 0.0, t[delayTarget] - .1 * t[latencyError] );
-            if( t[capped] && updated > t[delayTarget] )
-                updated = t[delayApplied];
-            t[delay]             = std::min( updated, t[delayBudget] );
-            const double elapsed = std::max( 0.0, ( completed - m_arrival ) / 1000.0 - t[delayApplied] );
-            t[service]           = m_lastAcquisition ? alpha * elapsed + ( 1 - alpha ) * t[service] : elapsed;
+            const double alpha = m_alpha.load();
+            t[service] = m_lastAcquisition ? alpha * t[channelReadout] + ( 1 - alpha ) * t[service] : t[channelReadout];
+            if( m_phaseClock.m_valid && m_measureReference && acquired >= m_latencyPrediction )
+            {
+                const double latency = ( acquired - m_latencyArrival ) / 1000.0;
+                t[readLatency]       = t[readLatency] > 0 ? alpha * latency + ( 1 - alpha ) * t[readLatency] : latency;
+                t[latencyError]      = ( acquired - m_latencyPrediction ) / 1000.0;
+                m_measureReference   = false;
+            }
+            updateSyncDiagnostics();
+            if( late > m_lockAbsolute / 1000 || late > m_lockFraction * t[semaphorePeriod] )
+                t[lock] = 0;
         }
-        finishSync( true );
         m_lastAcquisition = acquired;
         m_fresh           = true;
         return 0;
@@ -771,8 +823,9 @@ inline int accelSim::frameGrabberPostPublish( IMAGE *stream )
 
 inline int accelSim::reconfig()
 {
-    finishSync( false );
+    m_fresh = false;
     closeSync();
+    m_phaseClock.invalidate( true );
     m_model.restart();
     ++m_diagnostics.m_discontinuities;
     if( !m_syncName.empty() )
