@@ -167,5 +167,114 @@ TEST_CASE( "ocam2KCtrl restores rejected temperature requests", "[ocam2KCtrl]" )
     REQUIRE( app.m_indiP_temp.getState() == INDI_ALERT );
     REQUIRE( app.state() == stateCodes::OPERATING );
 }
+/// Maximum-temperature protection uses a complete fresh serial reading without changing OCAM lock status.
+/** \ingroup ocam2KCtrl_temperature_unit_test */
+TEST_CASE( "ocam2KCtrl maximum-temperature gain guard requires fresh serial readings", "[ocam2KCtrl]" )
+{
+    // clang-format off
+    #ifdef OCAM2KCTRL_TEST_DOXYGEN_REF
+    ocam2KCtrl::getTemps(); ocam2KCtrl::configureAcquisition(); ocam2KCtrl::powerOnDefaults();
+    ocam2KCtrl::setTempSetPt(); dev::stdCamera<ocam2KCtrl>::newCallBack_emgain();
+    #endif
+    // clang-format on
+    resetStubState();
+    outletHarness::Controller<ocam2KCtrl_test> app;
+    app.driver();
+    setPoweredOn( app );
+    app.state( stateCodes::OPERATING );
+    app.m_emGainRequiresTemp = true;
+    app.m_emGainTempMode     = "maxTemp";
+    app.m_emGainTemp         = -50;
+    app.m_emGainMaxTemp      = -45;
+    app.m_ccdTempSetpt       = -50;
+    app.m_protectionReset    = true;
+    app.m_maxEMGain          = 600;
+    app.createStandardIndiNumber<float>( app.m_indiP_emGain, "emgain", 0, 600, 1, "%0.0f" );
+    app.m_indiP_temps = pcf::IndiProperty( pcf::IndiProperty::Number );
+    for( const std::string name : { "cpu", "power", "bias", "water", "left", "right", "cooling" } )
+        app.m_indiP_temps.add( pcf::IndiElement( name ) );
+    auto requestGain = [&]()
+    {
+        pcf::IndiProperty request( pcf::IndiProperty::Number, app.m_indiP_emGain.getDevice(), "emgain" );
+        request.add( pcf::IndiElement( "target" ) );
+        request["target"].set( 100 );
+        return app.newCallBack_stdCamera( request );
+    };
+    auto poll = [&]( const std::string &temperature /**< [in] Scripted measured temperature, in C. */ )
+    {
+        queueSerialResponse( "Temperatures : CCD[" + temperature +
+                             "] CPU[41] POWER[34] BIAS[47] WATER[24.2] LEFT[33] RIGHT[38] "
+                             "SET[-500]\nCooling Power [102]mW.\n\n" );
+        return app.getTemps();
+    };
+    REQUIRE( requestGain() == -1 );
+    REQUIRE( g_edtStubState.serialCommands.empty() );
+    REQUIRE( poll( "-46" ) == 0 );
+    REQUIRE( app.m_ccdTempValid );
+    REQUIRE_FALSE( app.m_tempControlOnTarget );
+    REQUIRE( app.m_tempControlStatusStr == "OFF TARGET" );
+    queueSerialResponse( "gain set\n" );
+    REQUIRE( requestGain() == 0 );
+    REQUIRE( g_edtStubState.serialCommands.back() == "gain 100" );
+
+    SECTION( "the ceiling is inclusive and warmer readings reject gain" )
+    {
+        REQUIRE( poll( "-45" ) == 0 );
+        queueSerialResponse( "gain set\n" );
+        REQUIRE( requestGain() == 0 );
+        REQUIRE( poll( "-44.9" ) == 0 );
+        REQUIRE( app.m_ccdTempValid );
+        REQUIRE( requestGain() == -1 );
+        REQUIRE( g_edtStubState.serialCommands.back() == "temp" );
+    }
+    SECTION( "malformed or failed polls and sentinel readings invalidate old cold measurements" )
+    {
+        queueSerialResponse( "Temperatures : CCD[-46]\n" );
+        REQUIRE( app.getTemps() == 0 );
+        REQUIRE_FALSE( app.m_ccdTempValid );
+        REQUIRE( requestGain() == -1 );
+        REQUIRE( poll( "-46" ) == 0 );
+        REQUIRE( app.m_ccdTempValid );
+        queueSerialResponse( "", -1 );
+        REQUIRE( app.getTemps() == -1 );
+        REQUIRE_FALSE( app.m_ccdTempValid );
+        REQUIRE( requestGain() == -1 );
+        REQUIRE( poll( "-999" ) == 0 );
+        REQUIRE_FALSE( app.m_ccdTempValid );
+        REQUIRE( requestGain() == -1 );
+    }
+    SECTION( "power defaults and temperature commands invalidate previous readings" )
+    {
+        REQUIRE( app.powerOnDefaults() == 0 );
+        REQUIRE_FALSE( app.m_ccdTempValid );
+        REQUIRE( requestGain() == -1 );
+        REQUIRE( poll( "-46" ) == 0 );
+        REQUIRE( app.m_ccdTempValid );
+        queueSerialResponse( "target set\n" );
+        REQUIRE( app.setTempSetPt() == 0 );
+        REQUIRE_FALSE( app.m_ccdTempValid );
+        REQUIRE( requestGain() == -1 );
+        REQUIRE( poll( "-46" ) == 0 );
+        queueSerialResponse( "gain set\n" );
+        REQUIRE( requestGain() == 0 );
+    }
+    SECTION( "acquisition configuration requires a subsequent temperature poll" )
+    {
+        configureStartupMode( app );
+        app.m_raw_height         = 121;
+        app.m_ocamDescrambleFile = "ocam_descramble_stub.txt";
+        app.m_fpsSet             = 0;
+        app.m_synchro            = false;
+        app.m_synchroSet         = false;
+        for( int command = 0; command < 4; ++command )
+            queueSerialResponse( "ok\n" );
+        REQUIRE( app.configureAcquisition() == 0 );
+        REQUIRE_FALSE( app.m_ccdTempValid );
+        REQUIRE( requestGain() == -1 );
+        REQUIRE( poll( "-46" ) == 0 );
+        queueSerialResponse( "gain set\n" );
+        REQUIRE( requestGain() == 0 );
+    }
+}
 } // namespace ocam2KCtrlTest
 } // namespace libXWCTest

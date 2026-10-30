@@ -368,10 +368,27 @@ struct stdCameraHasFocus<derivedT, std::void_t<decltype( derivedT::c_stdCamera_h
  *          \endcode
  *          must be defined which sets the camera EM Gain to \ref m_emGainSet.
  *
+ *        - The standard `emgain_off` request calls `int setEMGainOff()` with the INDI mutex held.
+ *          The derived camera chooses unity gain or disables EM gain, updates \ref m_emGainSet, and
+ *          applies it through its normal gain setter. This request remains available without temperature lock.
+ *          The callback returns zero on success or a negative value on failure; it must not increase gain above 1.
+ *
  *        - If true the implementation must keep \ref m_emGain up to date.
  *
  *        - If true the value of \ref m_maxEMGain should be set by the implementation and managed
  *          as needed. Additionally the configuration setting "camera.maxEMGain" is exposed.
+ *
+ *        - For cameras with temperature control, `camera.emGainRequiresTemp` optionally requires active,
+ *          on-target cooling at the setpoint specified by `camera.emGainTemp` before accepting EM gain above 1.
+ *          The guard defaults to false; enabling it requires a finite `camera.emGainTemp`, in C, independent of
+ *          `camera.startupTemp`. The requested setpoint must match exactly; the camera determines temperature lock.
+ *          Gain 0 or 1 remains available subject to the derived camera's limits. This guards new requests; it does
+ *          not reduce existing gain when temperature lock is lost or the setpoint changes.
+ *          `camera.emGainTempMode` defaults to `locked`. The optional `maxTemp` mode instead requires a valid
+ *          measured temperature at or below `camera.emGainMaxTemp`, ignoring lock status but retaining active
+ *          cooling and the required setpoint. Derived cameras must invalidate readings during power, target,
+ *          and configuration transitions, then call updateTempReading() after a complete successful poll.
+ *          The read-only `emgain_temp_ready.toggle` reports the same temperature permission used by the guard.
  *
  *     - Camera Modes:
  *
@@ -529,6 +546,17 @@ class stdCamera
 
     bool m_defaultLEDState{ true }; ///< The default LED state to apply after power on.
 
+    /// Enable the configured temperature requirement for EM gain above 1 when temperature control is supported.
+    bool m_emGainRequiresTemp{ false };
+
+    /// Required EM-gain temperature setpoint, in C; nonfinite until explicitly configured.
+    float m_emGainTemp{ std::numeric_limits<float>::quiet_NaN() };
+
+    std::string m_emGainTempMode{ "locked" }; ///< Temperature criterion: camera lock or a maximum measured temperature.
+
+    /// Inclusive measured-temperature ceiling in C, required when maxTemp enforcement is enabled.
+    float m_emGainMaxTemp{ std::numeric_limits<float>::quiet_NaN() };
+
     ///@}
 
     /** \name Temperature Control Interface - Data
@@ -547,6 +575,8 @@ class stdCamera
 
     float m_ccdTemp{ -999 }; ///< The current temperature, in C
 
+    bool m_ccdTempValid{ false }; ///< A complete temperature poll succeeded since the last invalidating transition.
+
     float m_ccdTempSetpt{ -999 }; ///< The desired temperature, in C
 
     bool m_tempControlStatus{ false }; ///< Whether or not temperature control is active
@@ -562,6 +592,8 @@ class stdCamera
     pcf::IndiProperty m_indiP_tempcont; ///< INDI temperature-controller enable request.
 
     pcf::IndiProperty m_indiP_tempstat; ///< INDI temperature-control status text.
+
+    pcf::IndiProperty m_indiP_emGainTempReady; ///< Read-only temperature permission for EM-gain requests above 1.
 
     ///@}
 
@@ -600,6 +632,8 @@ class stdCamera
     pcf::IndiProperty m_indiP_vShiftSpeed; ///< INDI vertical-shift selection.
 
     pcf::IndiProperty m_indiP_emGain; ///< INDI electron-multiplication gain and target.
+
+    pcf::IndiProperty m_indiP_emGainOff; ///< Momentary request for the camera-specific unity or disabled EM gain.
 
     ///@}
 
@@ -1007,6 +1041,20 @@ class stdCamera
     /// Refresh the published focus.state property from the current helper or derived focus implementation.
     void updateFocusStateProperty();
 
+    /// Invalidate cached measured-temperature evidence; caller holds the INDI mutex.
+    void invalidateTempReading();
+
+    /// Store a complete fresh temperature reading, rejecting nonfinite or physically invalid values.
+    /** Caller holds the INDI mutex and has verified the associated camera status and applied target. */
+    void updateTempReading( float temperature /**< [in] Measured detector temperature, in C. */ );
+
+    /// Evaluate the configured EM-gain temperature requirement; caller holds the INDI mutex.
+    bool emGainTempReady();
+
+    /// Publish the guard's temperature permission without changing the camera's lock status.
+    /** Caller holds the INDI mutex; disabled protection reports permission regardless of temperature. */
+    void updateEMGainTempReady();
+
   public:
     /// Startup function
     /**
@@ -1099,7 +1147,7 @@ class stdCamera
      */
     static int st_newCallBack_stdCamera(
         void                    *app /**< [in] a pointer to this, will be static_cast-ed to derivedT. */,
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request. */
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request. */
     );
 
     /// The callback function for stdCamera properties
@@ -1109,7 +1157,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_stdCamera(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Interface to setTempSetPt when the derivedT has temperature control
     /** Tag-dispatch resolution of c_stdCamera_tempControl==true will call this function.
@@ -1129,7 +1177,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_temp(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Interface to setTempControl when the derivedT has temperature control
     /** Tag-dispatch resolution of c_stdCamera_tempControl==true will call this function.
@@ -1149,7 +1197,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_temp_controller(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Interface to setReadoutSpeed when the derivedT has readout speed control
     /** Tag-dispatch resolution of c_stdCamera_readoutSpeed==true will call this function.
@@ -1169,7 +1217,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_readoutSpeed(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Interface to setVShiftSpeed when the derivedT has vshift speed control
     /** Tag-dispatch resolution of c_stdCamera_vShiftSpeed==true will call this function.
@@ -1189,7 +1237,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_vShiftSpeed(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Interface to setEMGain when the derivedT has EM Gain
     /** Tag-dispatch resolution of c_stdCamera_emGain==true will call this function.
@@ -1203,13 +1251,27 @@ class stdCamera
      */
     int setEMGain( const mx::meta::trueFalseT<false> &f /**< [in] Disabled interface selector. */ );
 
-    /// Callback to process a NEW EM gain request
-    /**
+    /// Validate and dispatch a new EM-gain request, retaining the accepted target on rejection.
+    /** When camera.emGainRequiresTemp is enabled, gain above 1 requires active cooling with the requested
+     * setpoint equal to camera.emGainTemp, READY or OPERATING state, and the configured locked/maxTemp criterion.
+     * Invalid numeric requests are rejected regardless of that setting.
      * \returns 0 on success.
-     * \returns -1 on error.
+     * \returns -1 on rejection or error.
      */
     int newCallBack_emgain(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
+
+    /// Dispatch a unity/off request to an EM-gain camera while the caller holds m_indiMutex.
+    int setEMGainOff( const mx::meta::trueFalseT<true> &t /**< [in] Enabled interface selector. */ );
+
+    /// No-op interface for cameras without EM gain.
+    int setEMGainOff( const mx::meta::trueFalseT<false> &f /**< [in] Disabled interface selector. */ );
+
+    /// Apply a momentary EM-gain-off request and reset its switch, reporting failures as INDI_ALERT.
+    /** The camera selects unity or disabled gain regardless of temperature lock.
+     * \returns The derived callback result, or -1 for an invalid property.
+     */
+    int newCallBack_emgain_off( const pcf::IndiProperty &ipRecv /**< [in] The INDI EM-gain-off request. */ );
 
     /// Interface to setExpTime when the derivedT uses exposure time controls
     /** Tag-dispatch resolution of c_stdCamera_exptimeCtrl==true will call this function.
@@ -1229,7 +1291,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_exptime(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Interface to setFPS when the derivedT uses FPS controls
     /** Tag-dispatch resolution of c_stdCamera_fpsCtrl==true will call this function.
@@ -1249,7 +1311,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_fps(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Interface to setFanSpeed when the derivedT exposes fan controls.
     /** Tag-dispatch resolution of fan control availability will call this function.
@@ -1269,7 +1331,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_fanSpeed(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Interface to setAnalogGain when the derivedT exposes analog-gain controls.
     /** Tag-dispatch resolution of analog-gain control availability will call this function.
@@ -1289,7 +1351,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_analogGain(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Interface to setLED when the derivedT exposes LED controls.
     /** Tag-dispatch resolution of LED control availability will call this function.
@@ -1309,7 +1371,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_led(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Interface to setSynchro when the derivedT has synchronization
     /** Tag-dispatch resolution of c_stdCamera_synchro==true will call this function.
@@ -1329,7 +1391,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_synchro(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Callback to process a NEW mode request
     /**
@@ -1337,7 +1399,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_mode(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Callback to process a NEW reconfigure request
     /**
@@ -1345,7 +1407,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_reconfigure(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Interface to setCropMode when the derivedT has crop mode
     /** Tag-dispatch resolution of c_stdCamera_cropMode==true will call this function.
@@ -1365,7 +1427,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_cropMode(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Publish coherent ROI geometry and relative targets; caller holds m_indiMutex.
     void updateROIGeometry( bool available = true /**< [in] False invalidates coordinate-dependent controls. */ );
@@ -1380,7 +1442,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_roi_x(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Callback to process a NEW roi_y request
     /**
@@ -1388,7 +1450,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_roi_y(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Callback to process a NEW roi_w request
     /**
@@ -1396,7 +1458,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_roi_w(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Callback to process a NEW roi_h request
     /**
@@ -1404,7 +1466,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_roi_h(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Callback to process a NEW bin_x request
     /**
@@ -1412,7 +1474,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_roi_bin_x(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Callback to process a NEW bin_y request
     /**
@@ -1420,7 +1482,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_roi_bin_y(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Interface to checkNextROI when the derivedT uses ROIs
     /** Tag-dispatch resolution of c_stdCamera_usesROI==true will call this function.
@@ -1440,7 +1502,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_roi_check(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Interface to setNextROI when the derivedT uses ROIs
     /** Tag-dispatch resolution of c_stdCamera_usesROI==true will call this function.
@@ -1460,7 +1522,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_roi_set(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Callback to process a NEW roi_full request
     /**
@@ -1468,7 +1530,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_roi_full(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Callback to process a NEW roi_fullbin request
     /**
@@ -1476,7 +1538,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_roi_fullbin(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Callback to process a NEW roi_loadlast request
     /**
@@ -1484,7 +1546,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_roi_loadlast(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Callback to process a NEW roi_last request
     /**
@@ -1492,7 +1554,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_roi_last(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Callback to process a NEW roi_default request
     /**
@@ -1500,7 +1562,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_roi_default(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Interface to setShutter when the derivedT has a shutter
     /** Tag-dispatch resolution of c_stdCamera_hasShutter==true will call this function.
@@ -1522,7 +1584,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_shutter(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Interface to checkFocus when the derivedT exposes focus support.
     bool checkFocus( const mx::meta::trueFalseT<true> &t /**< [in] Enabled interface selector. */ );
@@ -1745,6 +1807,51 @@ int stdCamera<derivedT>::setupConfig( mx::app::appConfigurator &config )
                     false,
                     "unsigned",
                     "The maximum EM gain which can be set by the user." );
+
+        if( derivedT::c_stdCamera_tempControl )
+        {
+            config.add(
+                "camera.emGainRequiresTemp",
+                "",
+                "camera.emGainRequiresTemp",
+                argType::Optional,
+                "camera",
+                "emGainRequiresTemp",
+                false,
+                "bool",
+                "Require active cooling at camera.emGainTemp satisfying camera.emGainTempMode for EM gain above 1. "
+                "Default: false." );
+            config.add( "camera.emGainTemp",
+                        "",
+                        "camera.emGainTemp",
+                        argType::Required,
+                        "camera",
+                        "emGainTemp",
+                        false,
+                        "float",
+                        "Required temperature setpoint in C for EM gain above 1. Must be configured when "
+                        "camera.emGainRequiresTemp is true; independent of camera.startupTemp." );
+            config.add( "camera.emGainTempMode",
+                        "",
+                        "camera.emGainTempMode",
+                        argType::Optional,
+                        "camera",
+                        "emGainTempMode",
+                        false,
+                        "string",
+                        "EM-gain temperature criterion: locked (default), or maxTemp to ignore lock and require a "
+                        "valid measured temperature at or below camera.emGainMaxTemp." );
+            config.add( "camera.emGainMaxTemp",
+                        "",
+                        "camera.emGainMaxTemp",
+                        argType::Optional,
+                        "camera",
+                        "emGainMaxTemp",
+                        false,
+                        "float",
+                        "Inclusive maximum measured temperature in C for maxTemp mode. Required when enabled; "
+                        "must be finite and no colder than camera.emGainTemp." );
+        }
     }
 
     if( derivedT::c_stdCamera_usesModes )
@@ -1980,6 +2087,46 @@ int stdCamera<derivedT>::loadConfig( mx::app::appConfigurator &config )
     if( derivedT::c_stdCamera_emGain )
     {
         config( m_maxEMGain, "camera.maxEMGain" );
+        if( derivedT::c_stdCamera_tempControl )
+        {
+            config( m_emGainRequiresTemp, "camera.emGainRequiresTemp" );
+            m_emGainTempMode = "locked";
+            config( m_emGainTempMode, "camera.emGainTempMode" );
+            if( m_emGainTempMode != "locked" && m_emGainTempMode != "maxTemp" )
+                return derivedT::template log<software_critical, -1>(
+                    { __FILE__, __LINE__, "camera.emGainTempMode must be locked or maxTemp" } );
+
+            for( const std::string key : { "camera.emGainTemp", "camera.emGainMaxTemp" } )
+            {
+                float &temperature = key == "camera.emGainTemp" ? m_emGainTemp : m_emGainMaxTemp;
+                temperature        = std::numeric_limits<float>::quiet_NaN();
+                if( config.isSet( key ) )
+                {
+                    std::string target;
+                    config( target, key );
+                    std::istringstream value( target );
+                    bool               parsed = static_cast<bool>( value >> temperature );
+                    if( parsed )
+                        value >> std::ws;
+                    if( !parsed || !value.eof() || !mx::math::isFinite( temperature ) )
+                    {
+                        temperature = std::numeric_limits<float>::quiet_NaN();
+                        return derivedT::template log<software_critical, -1>(
+                            { __FILE__, __LINE__, key + " must be a finite temperature" } );
+                    }
+                }
+            }
+            if( m_emGainRequiresTemp && ( !mx::math::isFinite( m_emGainTemp ) ||
+                                          ( c_hasTempLimits && validateTempSetPt( m_emGainTemp ) < 0 ) ) )
+                return derivedT::template log<software_critical, -1>(
+                    { __FILE__,
+                      __LINE__,
+                      "camera.emGainRequiresTemp requires camera.emGainTemp within the effective temperature range" } );
+            if( m_emGainRequiresTemp && m_emGainTempMode == "maxTemp" &&
+                ( !mx::math::isFinite( m_emGainMaxTemp ) || m_emGainMaxTemp < m_emGainTemp ) )
+                return derivedT::template log<software_critical, -1>(
+                    { __FILE__, __LINE__, "maxTemp mode requires finite camera.emGainMaxTemp >= camera.emGainTemp" } );
+        }
     }
 
     if( derivedT::c_stdCamera_usesModes )
@@ -2561,6 +2708,23 @@ int stdCamera<derivedT>::appStartup()
 #endif
             return -1;
         }
+
+        derived().createStandardIndiRequestSw( m_indiP_emGainOff, "emgain_off" );
+        if( derived().registerIndiPropertyNew( m_indiP_emGainOff, st_newCallBack_stdCamera ) < 0 )
+        {
+#ifndef STDCAMERA_TEST_NOLOG
+            derivedT::template log<software_error>( { __FILE__, __LINE__ } );
+#endif
+            return -1;
+        }
+
+        if( derivedT::c_stdCamera_tempControl )
+        {
+            derived().createStandardIndiToggleSw( m_indiP_emGainTempReady, "emgain_temp_ready" );
+            m_indiP_emGainTempReady.setPerm( pcf::IndiProperty::ReadOnly );
+            if( derived().registerIndiPropertyReadOnly( m_indiP_emGainTempReady ) < 0 )
+                return -1;
+        }
     }
 
     if( derivedT::c_stdCamera_exptimeCtrl )
@@ -3021,8 +3185,15 @@ int stdCamera<derivedT>::appLogic()
 {
     try
     {
+        if( derivedT::c_stdCamera_emGain && derivedT::c_stdCamera_tempControl )
+        { //mutex scope
+            std::unique_lock<std::mutex> lock( derived().m_indiMutex, std::try_to_lock );
+            if( lock.owns_lock() )
+                updateEMGainTempReady();
+        }
+
         if( derivedT::c_stdCamera_usesROI )
-        { // mutex scope
+        { //mutex scope
             std::lock_guard<std::mutex> lock( derived().m_indiMutex );
             updateROIGeometry();
         }
@@ -3047,13 +3218,18 @@ int stdCamera<derivedT>::appLogic()
                 m_nextROI.bin_x = m_default_bin_x;
                 m_nextROI.bin_y = m_default_bin_y;
 
-                // Set power-on defaults
-                derived().powerOnDefaults();
+                { //mutex scope
+                    std::unique_lock<std::mutex> lock( derived().m_indiMutex, std::defer_lock );
+                    if( derivedT::c_stdCamera_emGain && derivedT::c_stdCamera_tempControl )
+                        lock.lock();
 
-                if( derivedT::c_stdCamera_tempControl )
-                {
-                    if( powerOnTemp() < 0 )
-                        return -1;
+                    // Set power-on defaults before invalidating the temperature reading and applying startupTemp.
+                    derived().powerOnDefaults();
+                    if( derivedT::c_stdCamera_tempControl )
+                    {
+                        if( powerOnTemp() < 0 )
+                            return -1;
+                    }
                 }
 
                 if( derivedT::c_stdCamera_usesROI )
@@ -3183,10 +3359,17 @@ int stdCamera<derivedT>::appLogic()
 template <class derivedT>
 int stdCamera<derivedT>::onPowerOff()
 {
+    invalidateTempReading();
+    if( derivedT::c_stdCamera_emGain && m_emGainRequiresTemp )
+        m_tempControlOnTarget = false;
+
     if( !derived().m_indiDriver )
     {
         return 0;
     }
+
+    if( m_indiP_emGainTempReady.find( "toggle" ) )
+        derived().updateSwitchIfChanged( m_indiP_emGainTempReady, "toggle", pcf::IndiElement::Off, INDI_IDLE );
 
     if( derivedT::c_stdCamera_usesModes )
     {
@@ -3393,6 +3576,8 @@ int stdCamera<derivedT>::newCallBack_stdCamera( const pcf::IndiProperty &ipRecv 
         return newCallBack_vShiftSpeed( ipRecv );
     else if( derivedT::c_stdCamera_emGain && name == "emgain" )
         return newCallBack_emgain( ipRecv );
+    else if( derivedT::c_stdCamera_emGain && name == "emgain_off" )
+        return newCallBack_emgain_off( ipRecv );
     else if( derivedT::c_stdCamera_exptimeCtrl && name == "exptime" )
         return newCallBack_exptime( ipRecv );
     else if( derivedT::c_stdCamera_fpsCtrl && name == "fps" )
@@ -3504,8 +3689,54 @@ int stdCamera<derivedT>::validateTempSetPt( float target )
 }
 
 template <class derivedT>
+void stdCamera<derivedT>::invalidateTempReading()
+{
+    m_ccdTempValid = false;
+}
+
+template <class derivedT>
+void stdCamera<derivedT>::updateTempReading( float temperature )
+{
+    m_ccdTemp      = temperature;
+    m_ccdTempValid = mx::math::isFinite( temperature ) && temperature >= -273.15f;
+}
+
+template <class derivedT>
+bool stdCamera<derivedT>::emGainTempReady()
+{
+    if( !m_emGainRequiresTemp )
+        return true;
+    if( derived().state() != stateCodes::READY && derived().state() != stateCodes::OPERATING )
+        return false;
+    if( !mx::math::isFinite( m_emGainTemp ) || !mx::math::isFinite( m_ccdTempSetpt ) ||
+        m_ccdTempSetpt != m_emGainTemp || !m_tempControlStatus )
+        return false;
+    if( m_emGainTempMode == "locked" )
+        return m_tempControlOnTarget;
+    return m_emGainTempMode == "maxTemp" && m_ccdTempValid && mx::math::isFinite( m_ccdTemp ) &&
+           m_ccdTemp >= -273.15f && mx::math::isFinite( m_emGainMaxTemp ) && m_emGainMaxTemp >= m_emGainTemp &&
+           m_ccdTemp <= m_emGainMaxTemp;
+}
+
+template <class derivedT>
+void stdCamera<derivedT>::updateEMGainTempReady()
+{
+    if( !m_indiP_emGainTempReady.find( "toggle" ) )
+        return;
+    bool ready = emGainTempReady();
+    derived().updateSwitchIfChanged( m_indiP_emGainTempReady,
+                                     "toggle",
+                                     ready ? pcf::IndiElement::On : pcf::IndiElement::Off,
+                                     ready ? INDI_OK : INDI_IDLE );
+}
+
+template <class derivedT>
 int stdCamera<derivedT>::powerOnTemp()
 {
+    invalidateTempReading();
+    if( derivedT::c_stdCamera_emGain && m_emGainRequiresTemp )
+        m_tempControlOnTarget = false;
+
     if( c_hasTempLimits && !mx::math::isFinite( m_startupTemp ) )
         return validateTempSetPt( m_startupTemp );
     if( m_startupTemp > -999 )
@@ -3516,6 +3747,7 @@ int stdCamera<derivedT>::powerOnTemp()
     }
     if( m_indiP_temp.find( "target" ) )
         derived().updateIfChanged( m_indiP_temp, "target", m_ccdTempSetpt, INDI_IDLE );
+    updateEMGainTempReady();
     return 0;
 }
 
@@ -3576,11 +3808,19 @@ int stdCamera<derivedT>::newCallBack_temp( const pcf::IndiProperty &ipRecv )
         m_ccdTempSetpt = target;
         mx::meta::trueFalseT<derivedT::c_stdCamera_tempControl> tf;
         int                                                     rv = setTempSetPt( tf );
+        if( rv >= 0 && target != previous )
+        {
+            invalidateTempReading();
+            if( derivedT::c_stdCamera_emGain && m_emGainRequiresTemp )
+                m_tempControlOnTarget = false;
+        }
+
         if( rv < 0 && c_hasTempLimits )
         {
             m_ccdTempSetpt = previous;
             derived().updateIfChanged( m_indiP_temp, "target", previous, INDI_ALERT );
         }
+        updateEMGainTempReady();
         return rv;
     }
     else
@@ -3615,9 +3855,10 @@ int stdCamera<derivedT>::newCallBack_temp_controller( const pcf::IndiProperty &i
         if( !ipRecv.find( "toggle" ) )
             return 0;
 
-        m_tempControlStatusSet = false;
-
         std::unique_lock<std::mutex> lock( derived().m_indiMutex );
+
+        bool previous          = m_tempControlStatusSet;
+        m_tempControlStatusSet = false;
 
         if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On )
         {
@@ -3631,7 +3872,15 @@ int stdCamera<derivedT>::newCallBack_temp_controller( const pcf::IndiProperty &i
         }
 
         mx::meta::trueFalseT<derivedT::c_stdCamera_tempControl> tf;
-        return setTempControl( tf );
+        int                                                     rv = setTempControl( tf );
+        if( rv >= 0 && ( !m_tempControlStatusSet || m_tempControlStatusSet != previous ) )
+        {
+            invalidateTempReading();
+            if( derivedT::c_stdCamera_emGain && m_emGainRequiresTemp )
+                m_tempControlOnTarget = false;
+        }
+        updateEMGainTempReady();
+        return rv;
     }
     else
     {
@@ -3784,9 +4033,41 @@ int stdCamera<derivedT>::newCallBack_emgain( const pcf::IndiProperty &ipRecv )
         return 0;
 #endif
 
-        float target;
+        float target{ 0 };
 
         std::unique_lock<std::mutex> lock( derived().m_indiMutex );
+
+        if( ipRecv.createUniqueKey() == m_indiP_emGain.createUniqueKey() &&
+            ( ipRecv.find( "target" ) || ipRecv.find( "current" ) ) )
+        {
+            const auto        &element = ipRecv[ipRecv.find( "target" ) ? "target" : "current"];
+            std::istringstream value( element.getValue() );
+            bool               parsed = static_cast<bool>( value >> target );
+            if( parsed )
+                value >> std::ws;
+            if( !parsed || !value.eof() || !mx::math::isFinite( target ) )
+            {
+                derived().updateIfChanged( m_indiP_emGain, "target", m_emGainSet, INDI_ALERT );
+                return derivedT::template log<text_log, -1>( "Invalid EM gain target: " + element.getValue(),
+                                                             logPrio::LOG_WARNING );
+            }
+
+            updateEMGainTempReady();
+            if( derivedT::c_stdCamera_tempControl && m_emGainRequiresTemp && target > 1 && !emGainTempReady() )
+            {
+                derived().updateIfChanged( m_indiP_emGain, "target", m_emGainSet, INDI_ALERT );
+                if( m_emGainTempMode == "maxTemp" )
+                    return derivedT::template log<text_log, -1>(
+                        "EM gain above 1 requires active temperature control at " + std::to_string( m_emGainTemp ) +
+                            " C and a valid measured temperature at or below " + std::to_string( m_emGainMaxTemp ) +
+                            " C",
+                        logPrio::LOG_WARNING );
+                return derivedT::template log<text_log, -1>(
+                    "EM gain above 1 requires on-target temperature control at " + std::to_string( m_emGainTemp ) +
+                        " C",
+                    logPrio::LOG_WARNING );
+            }
+        }
 
         if( derived().indiTargetUpdate( m_indiP_emGain, target, ipRecv, true ) < 0 )
         {
@@ -3798,6 +4079,52 @@ int stdCamera<derivedT>::newCallBack_emgain( const pcf::IndiProperty &ipRecv )
 
         mx::meta::trueFalseT<derivedT::c_stdCamera_emGain> tf;
         return setEMGain( tf );
+    }
+
+    return 0;
+}
+
+template <class derivedT>
+int stdCamera<derivedT>::setEMGainOff( const mx::meta::trueFalseT<true> &t )
+{
+    static_cast<void>( t );
+    return derived().setEMGainOff();
+}
+
+template <class derivedT>
+int stdCamera<derivedT>::setEMGainOff( const mx::meta::trueFalseT<false> &f )
+{
+    static_cast<void>( f );
+    return 0;
+}
+
+template <class derivedT>
+int stdCamera<derivedT>::newCallBack_emgain_off( const pcf::IndiProperty &ipRecv )
+{
+    if( derivedT::c_stdCamera_emGain )
+    {
+#ifdef XWCTEST_INDI_CALLBACK_VALIDATION
+        return 0;
+#endif
+
+        if( ipRecv.createUniqueKey() != m_indiP_emGainOff.createUniqueKey() )
+            return -1;
+
+        if( !ipRecv.find( "request" ) || ipRecv["request"].getSwitchState() != pcf::IndiElement::On )
+            return 0;
+
+        std::unique_lock<std::mutex> lock( derived().m_indiMutex );
+
+        indi::updateSwitchIfChanged(
+            m_indiP_emGainOff, "request", pcf::IndiElement::On, derived().m_indiDriver, INDI_BUSY );
+
+        mx::meta::trueFalseT<derivedT::c_stdCamera_emGain> tf;
+        int                                                rv    = setEMGainOff( tf );
+        auto                                               state = rv < 0 ? INDI_ALERT : INDI_IDLE;
+        derived().updateIfChanged( m_indiP_emGain, "target", m_emGainSet, state );
+        indi::updateSwitchIfChanged(
+            m_indiP_emGainOff, "request", pcf::IndiElement::Off, derived().m_indiDriver, state );
+        return rv;
     }
 
     return 0;
@@ -4947,6 +5274,8 @@ int stdCamera<derivedT>::updateINDI()
     {
         if( !derived().m_indiDriver )
             return 0;
+
+        updateEMGainTempReady();
 
         if( derivedT::c_stdCamera_readoutSpeed )
         {

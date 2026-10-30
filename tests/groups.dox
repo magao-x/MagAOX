@@ -129,6 +129,16 @@ report from their counters and then returns nonzero. An HTML report therefore do
  * \ingroup application_unit_test
  */
 
+/** \defgroup frameGrabber_unit_test Frame Grabber Unit Tests
+ * \brief Offline worker tests for concurrent reconfiguration, retries, and power/readiness waits.
+ * \ingroup app_unit_test
+ */
+
+/** \defgroup ocam2KCtrl_reconfig_unit_test OCAM Reconfiguration Unit Tests
+ * \brief Offline tests of settings application and preservation of pending reconfiguration requests.
+ * \ingroup application_unit_test
+ */
+
 /** \defgroup stdCamera_unit_test stdCamera Unit Tests
  * \brief Shared camera temperature, ROI geometry, configuration, and callback tests.
  * \ingroup app_unit_test
@@ -136,6 +146,11 @@ report from their counters and then returns nonzero. An HTML report therefore do
 
 /** \defgroup roiGUI_unit_test ROI GUI Unit Tests
  * \brief Offline coordinate display and command routing tests.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup cameraGUI_unit_test Camera GUI Unit Tests
+ * \brief Offline EM-gain-off discovery, command routing, and availability tests.
  * \ingroup application_unit_test
  */
 
@@ -166,5 +181,15 @@ report from their counters and then returns nonzero. An HTML report therefore do
 
 /** \defgroup streamWriter_unit_test streamWriter Unit Tests
  * \brief Offline configuration, encoding, recording lifecycle, and buffer ownership regressions.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup ocam2KCtrl_emgain_unit_test OCAM EM Gain Unit Tests
+ * \brief Offline camera-specific gain-off commands and protection behavior.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup cameraSim_emgain_unit_test Camera Simulator EM Gain Unit Tests
+ * \brief Offline simulated EM-gain disable behavior and generic shared interface compatibility.
  * \ingroup application_unit_test
  */
