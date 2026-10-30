@@ -328,6 +328,13 @@ The complete [dmtweeter_synco.conf example](../dmtweeter_synco.conf) contains th
 | `feedback.gain` | 0.1 | Independent per-event wait-integrator gain, 0–1. |
 | `feedback.maxAdvanceUs` | 20 | Maximum wait correction; step-0 advance is nonnegative and starts at this value after a feedback reset. |
 | `simulation.enabled` | false | Startup-only read-only grid simulation. Automatically observes with scheduler enable Off and rejects enable On; creates no auxiliary/provider streams or command writes. |
+| `simulation.readerReleaseReady` | false | Gate actual-main copy readiness on exact early-release evidence; requires the release observer. |
+| `simulation.virtualReaderUs` | 30 | Assumed auxiliary trigger-to-last-read duration. The pipeline preset uses 60 us to include delivery and monitor work. |
+| `simulation.backendUs` | 155 | Legacy whole-backend occupancy assumption; unused in pipeline mode. |
+| `simulation.pipelineBackend` | false | Opt-in separate preparation/SDK/post resource model with three fixed private credits and zero added main SDK-entry wait. Requires simulation and reader-release gating. |
+| `simulation.prepareUs` | 35 | Assumed controller input through private-vector readiness; pipeline mode only. |
+| `simulation.sdkServiceUs` | 120 | Assumed native entry through SDK-worker readiness; pipeline mode only. |
+| `simulation.postUs` | 150 | Assumed serialized post service through private-credit retirement; pipeline mode only. |
 | `simulation.window` | 32 | Counter/observation pairs in the median phase filter, 4–256. Also bounds the independent qualified producer-interval diagnostic count. |
 | `simulation.cadenceWindowSec` | 10 | Requested counter/time cadence baseline. At least the refresh interval, at most 1,000 seconds and at most 63 refresh intervals. Actual selected endpoint span is reported. |
 | `simulation.cadenceUpdateSec` | 1 | Minimum time between cadence refreshes, 0.01–60 seconds. The first measured estimate requires this much primary history. |
@@ -382,6 +389,8 @@ Application properties belong to the configured INDI device: `dmtweeter_synco` i
 | `pipeline_boundary_timing` | Number, read-only | Oldest represented stage-start intervals and signed changes in the primary publication tail. |
 | `simulation` | Number, read-only | Simulation estimator validity, period, frozen grid/phase residuals, configured early reserve and observation-quality counts. Durations use the units in their element names. |
 | `simulation_steps` | Number, read-only | Per-step conditional considered/would-run/skip/overlap counts. These are modeled outcomes, not DM deliveries. |
+| `simulation_readiness` | Number, read-only | Exact main-release quality and explicit virtual-reader assumptions when reader-release gating is selected. |
+| `simulation_pipeline` | Number, read-only | Pipeline-only stage assumptions, three-credit accounting, predicted main queue/credit conflicts, clearance shortfall and independent stage feasibility. |
 | `simulation_status` | Text, read-only | Current simulation state and explicit assumptions/limitations. |
 | `simulation_trace` | Number, read-only | Bounded overlap-event FIFO coverage and losses, detailed below. |
 | `simulation_estimator` | Number, read-only | Triggered estimator pre/post history, export coverage and losses. |
@@ -415,6 +424,16 @@ Use simulation fields for modeled outcomes; operational `timing.delivered`
 does not count hypothetical submissions. The requested count remains in
 `settings.steps`; the full assumed timing bounds and estimator settings are
 recorded in the appended telemetry table.
+
+The opt-in pipeline model separates monitor preparation, SDK service and ordered
+post retirement. It keeps copy/trigger targets fixed and reserves monitor/SDK
+clearance plus a free credit before the earliest next main, without assuming
+minimum main preparation time. `simulation_pipeline.mainClearanceShortfallUs`
+reports a prospective veto shortfall; `mainSdkWaits`, `maxMainWaitUs` and
+`mainCreditMisses` report modeled genuine-main conflicts. These are conditional
+resource predictions rather than hardware failure counters. See the
+[pipeline shadow procedure](readiness-shadow-test.md#pipeline-resource-shadow)
+for the additive preset, assumption definitions and capture instructions.
 
 The `simulation_cadence` property exposes:
 
