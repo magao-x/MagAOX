@@ -7,10 +7,15 @@
 #ifndef dmPokeWFS_hpp
 #define dmPokeWFS_hpp
 
+#include <atomic>
+
 #include <mx/improc/eigenImage.hpp>
 #include <mx/improc/milkImage.hpp>
 #include <mx/improc/eigenCube.hpp>
 using namespace mx::improc;
+
+#include <mx/ioutils/fileUtils.hpp>
+#include <mx/ioutils/fits/fitsFile.hpp>
 
 #include "semUtilsDerived.hpp"
 
@@ -106,7 +111,8 @@ namespace dev
   *   \endcode
   *   At the conclusion of analyzeSensor the measured signal (e.g. deltaX and deltaY) should be updated and set in m_indiP_measurement.
   *   The function \ref updateMeasurement() can be used for this.  However, the updating of the loop counter and the subsequent INDI
-  *   property update is handled automatically after that.
+  *   property update is handled automatically after that.  The measurement should first be checked with \ref measurementInRange(),
+  *   and if \ref m_saveDiagnostics is true analyzeSensor should clear it and save diagnostics with \ref writeDiagnostics().
   *
   * - Must be a telemeter with the following interface:
   *
@@ -182,14 +188,25 @@ protected:
 
     unsigned m_nPokeAverage {10}; ///< The number of poke sequences to average.  Default is 10.
 
-    std::string m_dmChan;
+    unsigned m_nSettleImages{ 1 }; ///< The number of WFS images to discard after the DM trigger.  Default is 1.
 
-    std::vector<int> m_poke_x;
-    std::vector<int> m_poke_y;
+    std::string m_dmChan; ///< The DM channel stream to write pokes to, e.g. dm01disp06.
 
-    float m_poke_amp {0.0};
+    std::vector<int> m_poke_x; ///< The x-coordinates of the actuators to poke.
+
+    std::vector<int> m_poke_y; ///< The y-coordinates of the actuators to poke.
+
+    float m_poke_amp{ 0.0 }; ///< The poke amplitude, in DM command units.  Default is 0.
 
     float m_dmSleep {10000}; ///<The time to sleep for the DM command to be applied, in microseconds. Default is 10000.
+
+    std::string m_dmTriggerChan; ///< ImageStreamIO channel whose semaphore indicates the DM command has updated.
+
+    float m_maxDelta{ 10 }; /**< Maximum magnitude of either measured delta component, in pixels.  Larger measurements
+                                 are rejected and diagnostics are written.  <= 0 disables the check.  Default is 10. */
+
+    std::string m_diagnosticsDir; /**< Directory for diagnostics written when a measurement is rejected.
+                                       Default is `<basePath>/rawimages/<configName>`. */
 
     ///@}
 
@@ -214,11 +231,45 @@ protected:
 
     mx::improc::eigenImage<float> m_dmImage;
 
-    float m_deltaX {0};
-    float m_deltaY {0};
-    uint64_t m_counter {0};
+    IMAGE m_dmTriggerStream {};
 
-public:
+    int m_dmTriggerSemaphoreNumber {0}; ///< ImageStreamIO semaphore number claimed on m_dmTriggerChan.
+
+    sem_t *m_dmTriggerSemaphore {nullptr}; ///< Semaphore posted when m_dmTriggerChan updates.
+
+    bool m_dmTriggerStreamOpen {false}; ///< True when m_dmTriggerStream is connected.
+
+    float m_deltaX{ 0 }; ///< The most recently published x delta measurement.
+
+    float m_deltaY{ 0 }; ///< The most recently published y delta measurement.
+
+    uint64_t m_counter{ 0 }; ///< The number of completed measurements.
+
+    uint64_t m_wfsFrames{ 0 }; ///< The number of WFS frames received by processImage, protected by m_wfsImageMutex.
+
+    timespec m_measStart{}; ///< The time the most recent measurement started.
+
+    timespec m_measEnd{}; ///< The time the most recent measurement finished.
+
+    uint64_t m_wfsFramesStart{ 0 }; ///< The value of m_wfsFrames when the most recent measurement started.
+
+    uint64_t m_wfsFramesEnd{ 0 }; ///< The value of m_wfsFrames when the most recent measurement finished.
+
+    uint64_t m_dmTriggerCnt0Start{ 0 }; ///< The DM trigger stream cnt0 when the most recent measurement started.
+
+    uint64_t m_dmTriggerCnt0End{ 0 }; ///< The DM trigger stream cnt0 when the most recent measurement finished.
+
+    double m_dmPlusSum{ 0 }; /**< Sum over + pokes of the mean DM trigger stream value at the poke actuators when
+                                  accumulation starts, for the most recent measurement. */
+
+    unsigned m_dmPlusN{ 0 }; ///< Number of + pokes summed in m_dmPlusSum.
+
+    double m_dmMinusSum{ 0 }; /**< Sum over - pokes of the mean DM trigger stream value at the poke actuators when
+                                   accumulation starts, for the most recent measurement. */
+
+    unsigned m_dmMinusN{ 0 }; ///< Number of - pokes summed in m_dmMinusSum.
+
+  public:
 
     /**\name MagAOXApp Interface
       *
@@ -346,6 +397,9 @@ protected:
 
     bool m_stopMeasurement {false}; ///< Used to request that the measurement in progress stop.
 
+    std::atomic<bool> m_saveDiagnostics{ false }; /**< Set by the save_diagnostics INDI request, cleared when
+                                                       diagnostics are saved after the next completed measurement. */
+
     ///@}
 
     sem_t m_imageSemaphore; ///< Semaphore used to signal that an image is ready
@@ -379,9 +433,46 @@ protected:
       */
     int basicRunSensor();
 
-    int updateMeasurement( float deltaX,
-                           float deltaY
-                         );
+    /// Wait for the combined DM stream to update.
+    /**
+     * \returns +1 if exit is due to shutdown or stop request
+     * \returns 0 if the DM trigger stream updated
+     * \returns -1 if an error occurs
+     */
+    int waitForDmTrigger();
+
+    /// Publish a delta measurement.
+    /** Sets m_deltaX and m_deltaY and the corresponding elements of m_indiP_measurement.
+     *
+     * \returns 0 on success
+     */
+    int updateMeasurement( float deltaX, /**< [in] the measured x delta */
+                           float deltaY  /**< [in] the measured y delta */
+    );
+
+    /// Check whether a delta measurement is within the allowed range.
+    /**
+     * \returns true if both components have magnitude no larger than m_maxDelta, or if m_maxDelta <= 0
+     * \returns false otherwise
+     */
+    bool measurementInRange( float deltaX, /**< [in] the measured x delta, in pixels */
+                             float deltaY  /**< [in] the measured y delta, in pixels */
+    ) const;
+
+    /// Write diagnostic FITS images for the most recent measurement.
+    /** Writes the poke image, the last raw WFS image, the dark, the poke DM channel, and the combined DM stream to
+     * `m_diagnosticsDir/YYYY_MM_DD/` as `<configName>_<timestamp>_<image>.fits`.  The configuration, timing, stream
+     * counters, and mean combined DM command at the poke actuators for each poke sign of the most recent measurement
+     * are appended to \p head, which is written to every file.
+     *
+     * \returns 0 on success
+     * \returns -1 on error, which is logged
+     */
+    int writeDiagnostics( std::string &prefix, /**< [out] the path and file name prefix, to which `_<image>.fits` is
+                                                          appended */
+                          mx::fits::fitsHeader<> &head /**< [in.out] header cards from the caller, to which this
+                                                                     function appends its own */
+    );
 
     /** \name INDI Interface
       * @{
@@ -397,6 +488,9 @@ protected:
     pcf::IndiProperty m_indiP_nPokeAverage;
     INDI_NEWCALLBACK_DECL(derivedT, m_indiP_nPokeAverage);
 
+    pcf::IndiProperty m_indiP_nSettleImages;
+    INDI_NEWCALLBACK_DECL( derivedT, m_indiP_nSettleImages );
+
     pcf::IndiProperty m_indiP_wfsFps; ///< Property to get the FPS from the WFS camera
     INDI_SETCALLBACK_DECL(derivedT, m_indiP_wfsFps);
 
@@ -408,6 +502,9 @@ protected:
 
     pcf::IndiProperty m_indiP_stop; ///< Switch to request that measurement stop
     INDI_NEWCALLBACK_DECL(derivedT, m_indiP_stop);
+
+    pcf::IndiProperty m_indiP_saveDiagnostics; ///< Switch to request diagnostics after the next completed measurement
+    INDI_NEWCALLBACK_DECL( derivedT, m_indiP_saveDiagnostics );
 
     pcf::IndiProperty m_indiP_measurement; ///< Property to report the delta measurement, including the loop counter.
 
@@ -452,13 +549,43 @@ int dmPokeWFS<derivedT>::setupConfig(mx::app::appConfigurator & config)
     }
 
     config.add("pokecen.dmChannel", "", "pokecen.dmChannel", argType::Required, "pokecen", "dmChannel", false, "string", "The dm channel to use for pokes, e.g. dm01disp06.");
+    config.add("pokecen.dmTriggerChannel", "", "pokecen.dmTriggerChannel", argType::Required, "pokecen", "dmTriggerChannel", false, "string", "The DM channel whose semaphore indicates that the combined DM command has updated. Defaults to dmChannel with a two digit channel suffix removed.");
     config.add("pokecen.pokeX", "", "pokecen.pokeX", argType::Required, "pokecen", "pokeX", false, "vector<int>", "The x-coordinates of the actuators to poke. ");
     config.add("pokecen.pokeY", "", "pokecen.pokeY", argType::Required, "pokecen", "pokeY", false, "vector<int>", "The y-coordinates of the actuators to poke. ");
     config.add("pokecen.pokeAmp", "", "pokecen.pokeAmp", argType::Required, "pokecen", "pokeAmp", false, "float", "The poke amplitude, in DM command units. Default is 0.");
     config.add("pokecen.dmSleep", "", "pokecen.dmSleep", argType::Required, "pokecen", "dmSleep", false, "float", "The time to sleep for the DM command to be applied, in microseconds. Default is 10000.");
+    config.add( "pokecen.nSettleImages",
+                "",
+                "pokecen.nSettleImages",
+                argType::Required,
+                "pokecen",
+                "nSettleImages",
+                false,
+                "int",
+                "The number of WFS images to discard after the DM trigger. Default 1." );
     config.add("pokecen.nPokeImages", "", "pokecen.nPokeImages", argType::Required, "pokecen", "nPokeImages", false, "int", "The number of poke images to average.  Default 5.");
     config.add("pokecen.nPokeAverage", "", "pokecen.nPokeAverage", argType::Required, "pokecen", "nPokeAverage", false, "int", "The number of poke sequences to average.  Default 10.");
-
+    config.add(
+        "pokecen.maxDelta",
+        "",
+        "pokecen.maxDelta",
+        argType::Required,
+        "pokecen",
+        "maxDelta",
+        false,
+        "float",
+        "Maximum magnitude of either measured delta component, in pixels.  Larger measurements are rejected and "
+        "diagnostics are written.  <= 0 disables the check.  Default 10." );
+    config.add( "pokecen.diagnosticsDir",
+                "",
+                "pokecen.diagnosticsDir",
+                argType::Required,
+                "pokecen",
+                "diagnosticsDir",
+                false,
+                "string",
+                "Directory for diagnostics written when a measurement is rejected.  Default is "
+                "<basePath>/rawimages/<configName>." );
 
     return 0;
 }
@@ -493,6 +620,15 @@ int dmPokeWFS<derivedT>::loadConfig( mx::app::appConfigurator & config)
 
     config(m_dmChan, "pokecen.dmChannel");
 
+    m_dmTriggerChan = m_dmChan;
+    if( m_dmTriggerChan.size() > 2 && m_dmTriggerChan[m_dmTriggerChan.size() - 1] >= '0' &&
+        m_dmTriggerChan[m_dmTriggerChan.size() - 1] <= '9' && m_dmTriggerChan[m_dmTriggerChan.size() - 2] >= '0' &&
+        m_dmTriggerChan[m_dmTriggerChan.size() - 2] <= '9' )
+    {
+        m_dmTriggerChan.resize( m_dmTriggerChan.size() - 2 );
+    }
+    config( m_dmTriggerChan, "pokecen.dmTriggerChannel" );
+
     config(m_poke_x, "pokecen.pokeX");
 
     config(m_poke_y, "pokecen.pokeY");
@@ -506,9 +642,21 @@ int dmPokeWFS<derivedT>::loadConfig( mx::app::appConfigurator & config)
 
     config(m_dmSleep, "pokecen.dmSleep");
 
+    config( m_nSettleImages, "pokecen.nSettleImages" );
+
     config(m_nPokeImages, "pokecen.nPokeImages");
 
     config(m_nPokeAverage, "pokecen.nPokeAverage");
+
+    config( m_maxDelta, "pokecen.maxDelta" );
+
+    std::string rawimageDir = mx::sys::getEnv( MAGAOX_env_rawimage );
+    if( rawimageDir == "" )
+    {
+        rawimageDir = MAGAOX_rawimageRelPath;
+    }
+    m_diagnosticsDir = derived().basePath() + "/" + rawimageDir + "/" + derived().m_configName;
+    config( m_diagnosticsDir, "pokecen.diagnosticsDir" );
 
     return 0;
 }
@@ -538,6 +686,10 @@ int dmPokeWFS<derivedT>::appStartup()
     m_indiP_nPokeAverage["current"].setValue(m_nPokeAverage);
     m_indiP_nPokeAverage["target"].setValue(m_nPokeAverage);
 
+    CREATE_REG_INDI_NEW_NUMBERI_DERIVED( m_indiP_nSettleImages, "nSettleImages", 0, 1000, 1, "%d", "", "" );
+    m_indiP_nSettleImages["current"].setValue( m_nSettleImages );
+    m_indiP_nSettleImages["target"].setValue( m_nSettleImages );
+
     REG_INDI_SETPROP_DERIVED(m_indiP_wfsFps, m_wfsCamDevName, std::string("fps"));
 
     CREATE_REG_INDI_NEW_TOGGLESWITCH_DERIVED( m_indiP_single, "single");
@@ -545,6 +697,8 @@ int dmPokeWFS<derivedT>::appStartup()
     CREATE_REG_INDI_NEW_TOGGLESWITCH_DERIVED( m_indiP_continuous, "continuous");
 
     CREATE_REG_INDI_NEW_REQUESTSWITCH_DERIVED( m_indiP_stop, "stop");
+
+    CREATE_REG_INDI_NEW_REQUESTSWITCH_DERIVED( m_indiP_saveDiagnostics, "save_diagnostics" );
 
     derived().template registerIndiPropertyReadOnly( m_indiP_measurement, "measurement", pcf::IndiProperty::Number, pcf::IndiProperty::ReadOnly, pcf::IndiProperty::Idle);
     m_indiP_measurement.add({"delta_x", 0.0});
@@ -627,6 +781,7 @@ int dmPokeWFS<derivedT>::appLogic()
 
     derived().template updateIfChanged( m_indiP_nPokeImages, "current", m_nPokeImages);
     derived().template updateIfChanged( m_indiP_nPokeAverage, "current", m_nPokeAverage);
+    derived().template updateIfChanged( m_indiP_nSettleImages, "current", m_nSettleImages );
     derived().template updateIfChanged( m_indiP_poke_amp, "current", m_poke_amp);
 
     return 0;
@@ -643,6 +798,18 @@ int dmPokeWFS<derivedT>::appShutdown()
     if(derived().darkShmimMonitor().appShutdown() < 0)
     {
         derivedT::template log<software_error>({__FILE__, __LINE__, "error from darkShmimMonitorT::appShutdown"});
+    }
+
+    if( m_dmTriggerStreamOpen )
+    {
+        if( m_dmTriggerSemaphoreNumber >= 0 )
+        {
+            m_dmTriggerStream.semReadPID[m_dmTriggerSemaphoreNumber] = 0;
+        }
+        ImageStreamIO_closeIm( &m_dmTriggerStream );
+        m_dmTriggerStreamOpen      = false;
+        m_dmTriggerSemaphore       = nullptr;
+        m_dmTriggerSemaphoreNumber = 0;
     }
 
     if (m_wfsThread.joinable())
@@ -683,6 +850,43 @@ int dmPokeWFS<derivedT>::allocate( const wfsShmimT & dummy)
     m_dmStream.passive(true);
 
     m_dmImage.resize(m_dmStream.rows(), m_dmStream.cols());
+
+    if( m_dmTriggerStreamOpen )
+    {
+        if( m_dmTriggerSemaphoreNumber >= 0 )
+        {
+            m_dmTriggerStream.semReadPID[m_dmTriggerSemaphoreNumber] = 0;
+        }
+        ImageStreamIO_closeIm( &m_dmTriggerStream );
+        m_dmTriggerStreamOpen      = false;
+        m_dmTriggerSemaphore       = nullptr;
+        m_dmTriggerSemaphoreNumber = 0;
+    }
+
+    if( ImageStreamIO_openIm( &m_dmTriggerStream, m_dmTriggerChan.c_str() ) != IMAGESTREAMIO_SUCCESS )
+    {
+        return derivedT::template log<software_error, -1>(
+            { __FILE__, __LINE__, "error opening DM trigger channel " + m_dmTriggerChan } );
+    }
+
+    if( m_dmTriggerStream.md[0].sem < SEMAPHORE_MAXVAL )
+    {
+        ImageStreamIO_closeIm( &m_dmTriggerStream );
+        return derivedT::template log<software_error, -1>(
+            { __FILE__, __LINE__, "DM trigger channel has no valid semaphore " + m_dmTriggerChan } );
+    }
+
+    m_dmTriggerSemaphoreNumber = ImageStreamIO_getsemwaitindex( &m_dmTriggerStream, m_dmTriggerSemaphoreNumber );
+    if( m_dmTriggerSemaphoreNumber < 0 )
+    {
+        ImageStreamIO_closeIm( &m_dmTriggerStream );
+        return derivedT::template log<software_error, -1>(
+            { __FILE__, __LINE__, "no valid semaphore found for DM trigger channel " + m_dmTriggerChan } );
+    }
+
+    ImageStreamIO_semflush( &m_dmTriggerStream, m_dmTriggerSemaphoreNumber );
+    m_dmTriggerSemaphore  = m_dmTriggerStream.semptr[m_dmTriggerSemaphoreNumber];
+    m_dmTriggerStreamOpen = true;
 
     if(derived().darkShmimMonitor().width() == derived().shmimMonitor().width() &&
          derived().darkShmimMonitor().height() == derived().shmimMonitor().height() )
@@ -733,6 +937,8 @@ int dmPokeWFS<derivedT>::processImage( void * curr_src,
             data[nn] = wfsPixget(curr_src, nn);
         }
     }
+
+    ++m_wfsFrames;
 
     if(sem_post(&m_imageSemaphore) < 0)
     {
@@ -856,7 +1062,7 @@ void dmPokeWFS<derivedT>::wfsThreadExec()
 
             if( derived().analyzeSensor() < 0)
             {
-                derivedT::template log<software_error>({__FILE__, __LINE__, "runSensor returned error"});
+                derivedT::template log<software_error>( { __FILE__, __LINE__, "analyzeSensor returned error" } );
                 break;
             }
 
@@ -902,22 +1108,58 @@ int dmPokeWFS<derivedT>::basicTimedPoke(float pokeSign)
     }
 
     //This is where the pokes are applied to the DM
+    ImageStreamIO_semflush( &m_dmTriggerStream, m_dmTriggerSemaphoreNumber );
     m_dmStream = m_dmImage;
+
+    int rv = waitForDmTrigger();
+    if(rv < 0)
+    {
+        m_dmImage.setZero();
+        m_dmStream = m_dmImage;
+        return derivedT::template log<software_error,-1>({__FILE__, __LINE__, "error waiting for DM trigger"});
+    }
+    else if(rv > 0)
+    {
+        m_dmImage.setZero();
+        m_dmStream = m_dmImage;
+        return rv;
+    }
 
     mx::sys::microSleep(m_dmSleep);
 
     //flush semaphore so we take the _next_ good image
     XWC_SEM_FLUSH_DERIVED(m_imageSemaphore);
 
-    //** And wait one image to be sure we are on a whole poke**//
-    XWC_SEM_WAIT_TS_DERIVED(ts, m_imageSemWait_sec, m_imageSemWait_nsec);
-    bool ready = false;
-    while(!ready && !(m_stopMeasurement || derived().m_shutdown))
+    //** And wait for settle images to be sure we are on a whole poke**//
+    uint32_t nSettle = 0;
+    while( nSettle < m_nSettleImages && !( m_stopMeasurement || derived().m_shutdown ) )
     {
+        XWC_SEM_WAIT_TS_DERIVED( ts, m_imageSemWait_sec, m_imageSemWait_nsec );
         XWC_SEM_TIMEDWAIT_LOOP_DERIVED( m_imageSemaphore, ts )
+
+        ++nSettle;
+    }
+
+    // Record the combined DM command at the poke actuators as accumulation starts
+    if( m_dmTriggerStreamOpen && m_dmTriggerStream.md->datatype == _DATATYPE_FLOAT &&
+        m_dmTriggerStream.md->size[0] == m_dmImage.rows() && m_dmTriggerStream.md->size[1] == m_dmImage.cols() )
+    {
+        double dmVal = 0;
+        for( size_t nn = 0; nn < m_poke_x.size(); ++nn )
+        {
+            dmVal += m_dmTriggerStream.array.F[m_poke_x[nn] + m_poke_y[nn] * m_dmTriggerStream.md->size[0]];
+        }
+        dmVal /= m_poke_x.size();
+
+        if( sign > 0 )
+        {
+            m_dmPlusSum += dmVal;
+            ++m_dmPlusN;
+        }
         else
         {
-            ready = true;
+            m_dmMinusSum += dmVal;
+            ++m_dmMinusN;
         }
     }
 
@@ -928,8 +1170,11 @@ int dmPokeWFS<derivedT>::basicTimedPoke(float pokeSign)
         XWC_SEM_WAIT_TS_DERIVED(ts, m_imageSemWait_sec, m_imageSemWait_nsec);
         XWC_SEM_TIMEDWAIT_LOOP_DERIVED( m_imageSemaphore, ts )
 
-        //If here, we got an image.  m_rawImage will have been updated
-        m_pokeLocal +=  sign*m_rawImage();
+        // If here, we got an image.  m_rawImage will have been updated
+        { // mutex scope
+            std::unique_lock<std::mutex> lock( m_wfsImageMutex );
+            m_pokeLocal += sign * m_rawImage();
+        }
 
         ++n;
     }
@@ -955,6 +1200,18 @@ int dmPokeWFS<derivedT>::basicRunSensor()
     }
 
     m_pokeLocal.setZero();
+
+    clock_gettime( CLOCK_REALTIME, &m_measStart );
+    { // mutex scope
+        std::unique_lock<std::mutex> lock( m_wfsImageMutex );
+        m_wfsFramesStart = m_wfsFrames;
+    }
+    m_dmTriggerCnt0Start = m_dmTriggerStreamOpen ? m_dmTriggerStream.md->cnt0 : 0;
+
+    m_dmPlusSum  = 0;
+    m_dmPlusN    = 0;
+    m_dmMinusSum = 0;
+    m_dmMinusN   = 0;
 
     for(unsigned nseq = 0; nseq < m_nPokeAverage; ++nseq)
     {
@@ -998,6 +1255,13 @@ int dmPokeWFS<derivedT>::basicRunSensor()
         }
     }
 
+    clock_gettime( CLOCK_REALTIME, &m_measEnd );
+    { // mutex scope
+        std::unique_lock<std::mutex> lock( m_wfsImageMutex );
+        m_wfsFramesEnd = m_wfsFrames;
+    }
+    m_dmTriggerCnt0End = m_dmTriggerStreamOpen ? m_dmTriggerStream.md->cnt0 : 0;
+
     try
     {
         m_pokeImage = m_pokeLocal/(2.0*m_nPokeImages*m_nPokeAverage);
@@ -1015,6 +1279,41 @@ int dmPokeWFS<derivedT>::basicRunSensor()
     return 0;
 }
 
+template <class derivedT>
+int dmPokeWFS<derivedT>::waitForDmTrigger()
+{
+    if( !m_dmTriggerStreamOpen || m_dmTriggerSemaphore == nullptr )
+    {
+        return derivedT::template log<software_error, -1>( { __FILE__, __LINE__, "DM trigger stream is not open" } );
+    }
+
+    bool ready = false;
+    while( !ready && !( m_stopMeasurement || derived().m_shutdown ) )
+    {
+        timespec ts;
+        XWC_SEM_WAIT_TS_DERIVED( ts, m_imageSemWait_sec, m_imageSemWait_nsec );
+
+        if( sem_timedwait( m_dmTriggerSemaphore, &ts ) != 0 )
+        {
+            if( errno == EINTR || errno == ETIMEDOUT )
+            {
+                continue;
+            }
+
+            return derivedT::template log<software_error, -1>( { __FILE__, __LINE__, errno, "sem_timedwait" } );
+        }
+
+        ready = true;
+    }
+
+    if(m_stopMeasurement || derived().m_shutdown)
+    {
+        return 1;
+    }
+
+    return 0;
+}
+
 template<class derivedT>
 int dmPokeWFS<derivedT>::updateMeasurement( float deltaX,
                                             float deltaY
@@ -1024,6 +1323,119 @@ int dmPokeWFS<derivedT>::updateMeasurement( float deltaX,
     m_deltaY = deltaY;
     m_indiP_measurement["delta_x"] = deltaX;
     m_indiP_measurement["delta_y"] = deltaY;
+
+    return 0;
+}
+
+template <class derivedT>
+bool dmPokeWFS<derivedT>::measurementInRange( float deltaX, float deltaY ) const
+{
+    if( m_maxDelta <= 0 )
+    {
+        return true;
+    }
+
+    return ( fabs( deltaX ) <= m_maxDelta && fabs( deltaY ) <= m_maxDelta );
+}
+
+template <class derivedT>
+int dmPokeWFS<derivedT>::writeDiagnostics( std::string &prefix, mx::fits::fitsHeader<> &head )
+{
+    try
+    {
+        timespec now;
+        clock_gettime( CLOCK_REALTIME, &now );
+
+        std::string tstamp, relPath;
+        if( !!file::fileTimeRelPath( tstamp, relPath, now.tv_sec, now.tv_nsec ) )
+        {
+            return derivedT::template log<software_error, -1>( { __FILE__, __LINE__, "error making timestamp" } );
+        }
+
+        std::string dir = m_diagnosticsDir + "/" + relPath;
+        if( !!mx::ioutils::createDirectories( dir ) )
+        {
+            return derivedT::template log<software_error, -1>( { __FILE__, __LINE__, "error creating " + dir } );
+        }
+
+        prefix = dir + "/" + derived().m_configName + "_" + tstamp;
+
+        // Copy images first so the header and files describe one consistent snapshot
+        mx::improc::eigenImage<float> raw, dark;
+        { // mutex scope
+            std::unique_lock<std::mutex> lock( m_wfsImageMutex );
+            raw  = m_rawImage();
+            dark = m_darkImage;
+        }
+
+        mx::improc::eigenImage<float> poke   = m_pokeImage();
+        mx::improc::eigenImage<float> dmChan = m_dmStream();
+
+        mx::improc::eigenImage<float> dmComb;
+        uint64_t                      dmTriggerCnt0 = 0;
+        if( m_dmTriggerStreamOpen && m_dmTriggerStream.md->datatype == _DATATYPE_FLOAT )
+        {
+            dmTriggerCnt0 = m_dmTriggerStream.md->cnt0;
+            dmComb        = mx::improc::eigenMap<float>(
+                m_dmTriggerStream.array.F, m_dmTriggerStream.md->size[0], m_dmTriggerStream.md->size[1] );
+        }
+
+        head.append( "COUNTER", m_counter, "number of completed measurements" );
+        head.append( "POKEAMP", m_poke_amp, "poke amplitude [DM units]" );
+        head.append( "NPOKEIM", m_nPokeImages, "images accumulated per poke" );
+        head.append( "NPOKEAVG", m_nPokeAverage, "poke pairs averaged" );
+        head.append( "NSETTLE", m_nSettleImages, "WFS images discarded after DM trigger" );
+        head.append( "DMSLEEP", m_dmSleep, "sleep after DM trigger [us]" );
+        head.append( "WFSFPS", m_wfsFps, "WFS camera frame rate [Hz]" );
+        head.append( "MAXDELTA", m_maxDelta, "maximum allowed delta [pix]" );
+        head.append( "WFSSHMIM", derived().shmimMonitor().shmimName(), "WFS stream" );
+        head.append( "DRKSHMIM", derived().darkShmimMonitor().shmimName(), "WFS dark stream" );
+        head.append( "DARKVLD", static_cast<int>( m_darkValid ), "dark subtraction applied" );
+        head.append( "DMCHAN", m_dmChan, "DM poke channel stream" );
+        head.append( "DMCHCNT0", m_dmStream.cnt0(), "DM poke channel cnt0" );
+        head.append( "DMTRIG", m_dmTriggerChan, "DM trigger stream" );
+        head.append( "DMTRCNT0", dmTriggerCnt0, "DM trigger stream cnt0 at write" );
+        head.append( "DMTRUPD", m_dmTriggerCnt0End - m_dmTriggerCnt0Start, "DM trigger updates during measurement" );
+        head.append( "WFSFRMS", m_wfsFramesEnd - m_wfsFramesStart, "WFS frames received during measurement" );
+        head.append( "WFSUSED",
+                     2 * m_nPokeAverage * ( m_nSettleImages + m_nPokeImages ),
+                     "WFS frames waited on in measurement" );
+        float dmPlus  = ( m_dmPlusN > 0 ) ? m_dmPlusSum / m_dmPlusN : 0;
+        float dmMinus = ( m_dmMinusN > 0 ) ? m_dmMinusSum / m_dmMinusN : 0;
+        head.append( "DMPLUS", dmPlus, "DM trigger at poke acts, + windows" );
+        head.append( "DMMINUS", dmMinus, "DM trigger at poke acts, - windows" );
+        head.append( "DMHALFDF", 0.5 * ( dmPlus - dmMinus ), "(DMPLUS-DMMINUS)/2, expect POKEAMP" );
+        head.append( "TSTART", mx::sys::ISO8601DateTimeStr( m_measStart ), "measurement start [UTC]" );
+        head.append( "TEND", mx::sys::ISO8601DateTimeStr( m_measEnd ), "measurement end [UTC]" );
+
+        const std::vector<std::pair<std::string, const mx::improc::eigenImage<float> *>> images = {
+            { "poke", &poke }, { "raw", &raw }, { "dark", &dark }, { "dmchan", &dmChan }, { "dmcomb", &dmComb } };
+
+        mx::fits::fitsFile<float> ff;
+        for( auto &im : images )
+        {
+            if( im.second->size() == 0 )
+            {
+                continue;
+            }
+
+            std::string fname = prefix + "_" + im.first + ".fits";
+            if( !!ff.write( fname, *im.second, head ) )
+            {
+                return derivedT::template log<software_error, -1>( { __FILE__, __LINE__, "error writing " + fname } );
+            }
+        }
+    }
+    catch( const std::exception &e )
+    {
+        return derivedT::template log<software_error, -1>(
+            { __FILE__, __LINE__, std::string( "exception writing diagnostics: " ) + e.what() } );
+    }
+    catch( ... )
+    {
+        return derivedT::template log<software_error, -1>(
+            { __FILE__, __LINE__, "unknown exception writing diagnostics" } );
+    }
 
     return 0;
 }
@@ -1058,6 +1470,23 @@ INDI_NEWCALLBACK_DEFN( dmPokeWFS<derivedT>, m_indiP_nPokeAverage )(const pcf::In
     }
 
     m_nPokeAverage = target;
+
+    return 0;
+}
+
+template <class derivedT>
+INDI_NEWCALLBACK_DEFN( dmPokeWFS<derivedT>, m_indiP_nSettleImages )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS_DERIVED( m_indiP_nSettleImages, ipRecv )
+
+    float target;
+
+    if( derived().template indiTargetUpdate( m_indiP_nSettleImages, target, ipRecv, false ) < 0 )
+    {
+        return derivedT::template log<software_error, -1>( { __FILE__, __LINE__ } );
+    }
+
+    m_nSettleImages = target;
 
     return 0;
 }
@@ -1169,6 +1598,25 @@ INDI_NEWCALLBACK_DEFN( dmPokeWFS<derivedT>, m_indiP_stop )(const pcf::IndiProper
         {
             m_stopMeasurement = true;
         }
+    }
+
+    return 0;
+}
+
+template <class derivedT>
+INDI_NEWCALLBACK_DEFN( dmPokeWFS<derivedT>, m_indiP_saveDiagnostics )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS_DERIVED( m_indiP_saveDiagnostics, ipRecv )
+
+    if( ipRecv.find( "request" ) != true ) // this isn't valid
+    {
+        return -1;
+    }
+
+    if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On )
+    {
+        m_saveDiagnostics = true;
+        derivedT::template log<text_log>( "diagnostics will be saved after the next completed measurement" );
     }
 
     return 0;

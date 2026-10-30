@@ -1,10 +1,11 @@
 /** \file pupilGuide_test.cpp
- * \brief Offline pupil-guide availability, recovery, and command tests.
+ * \brief Offline pupil-guide availability, recovery, paired-preset, and command tests.
  * \ingroup pupilGuideGUI_unit_test
  */
 #define CATCH_CONFIG_RUNNER
 #include "../../../../tests/testXWC.hpp"
 
+#include <QAbstractButton>
 #include <QApplication>
 
 #include "../pupilGuide.hpp"
@@ -73,6 +74,17 @@ class Widget : public xqt::pupilGuide
                  bool               on      = false, /**< [in] Observed switch state. */
                  const std::string &element = "toggle" /**< [in] Switch element. */ );
 
+    /// Supply named stage presets, replacing a definition or merging a partial update.
+    void presets( const std::string                               &device, /**< [in] Stage device name. */
+                  const std::vector<std::pair<std::string, bool>> &values, /**< [in] Preset names and active states. */
+                  bool definition = true /**< [in] False delivers a partial Set update. */ );
+
+    /// Return the real paired camera-lens preset control.
+    xqt::statusCombo *lensPresets();
+
+    /// Stage a camera-lens preset through the standard combo-box activation handler.
+    void selectLensPreset( const char *name /**< [in] Shared preset name. */ );
+
     /// Define command elements whose values are initially empty.
     void capability( const std::string                  &device,   /**< [in] Device name. */
                      const std::string                  &property, /**< [in] Command property. */
@@ -114,6 +126,35 @@ void Widget::toggle( const std::string &device, const std::string &name, bool on
     property.add( pcf::IndiElement( element ) );
     property[element].setSwitchState( on ? pcf::IndiElement::On : pcf::IndiElement::Off );
     define( property );
+}
+
+void Widget::presets( const std::string                               &device,
+                      const std::vector<std::pair<std::string, bool>> &values,
+                      bool                                             definition )
+{
+    pcf::IndiProperty property( pcf::IndiProperty::Switch, device, "presetName" );
+    property.setRule( pcf::IndiProperty::OneOfMany );
+    for( const auto &value : values )
+        property.add( pcf::IndiElement( value.first, value.second ? pcf::IndiElement::On : pcf::IndiElement::Off ) );
+    define( property, definition );
+}
+
+xqt::statusCombo *Widget::lensPresets()
+{
+    auto *presets = findChild<xqt::statusCombo *>( "camlensPresets" );
+    REQUIRE( presets != nullptr );
+    return presets;
+}
+
+void Widget::selectLensPreset( const char *name )
+{
+    auto *presets = lensPresets();
+    auto *combo   = presets->findChild<QComboBox *>( "status" );
+    REQUIRE( combo != nullptr );
+    const int index = combo->findText( name );
+    REQUIRE( index >= 0 );
+    combo->setCurrentIndex( index );
+    presets->on_status_activated( index );
 }
 
 void Widget::capability( const std::string                  &device,
@@ -889,6 +930,379 @@ TEST_CASE( "Pupil-guide command slots reject unavailable inputs", "[pupilGuideGU
         widget.move_picoscix( 50 );
         CHECK( widget.m_sent.empty() );
     }
+}
+
+/** \brief Camera-lens preset choices are the current exact-name intersection of both stages.
+ * \ingroup pupilGuideGUI_unit_test
+ */
+TEST_CASE( "Pupil-guide camera lens lists only shared presets", "[pupilGuideGUI][camlensPresets]" )
+{
+    // clang-format off
+#ifdef PUPILGUIDE_GUI_TEST_DOXYGEN_REF
+    xqt::stagePairStatus::subscribe; xqt::stagePairStatus::handleDefProperty;
+    xqt::stagePairStatus::handleSetProperty; xqt::pupilGuide::subscribe;
+#endif
+    // clang-format on
+    for( bool xFirst : { false, true } )
+    {
+        Widget widget;
+        widget.onConnect();
+        auto *presets = widget.lensPresets();
+        auto *combo   = presets->findChild<QComboBox *>( "status" );
+        REQUIRE( combo != nullptr );
+        CHECK( widget.m_publisher.count( "stagecamlensx.presetName" ) >= 1 );
+        CHECK( widget.m_publisher.count( "stagecamlensy.presetName" ) >= 1 );
+        CHECK_FALSE( combo->isEnabled() );
+        widget.state( "stagecamlensx", "READY" );
+        widget.state( "stagecamlensy", "READY" );
+        CHECK( combo->count() == 0 );
+        CHECK_FALSE( combo->isEnabled() );
+        const std::string first  = xFirst ? "stagecamlensx" : "stagecamlensy";
+        const std::string second = xFirst ? "stagecamlensy" : "stagecamlensx";
+        widget.presets( first,
+                        { { "pol", false },
+                          { "nominal", true },
+                          { "first-only", false },
+                          { "none", false },
+                          { "", false },
+                          { "Nominal", false } } );
+        CHECK( combo->count() == 0 );
+        CHECK_FALSE( combo->isEnabled() );
+        widget.presets(
+            second,
+            { { "nominal", true }, { "pol", false }, { "second-only", false }, { "none", false }, { "", false } } );
+        REQUIRE( combo->count() == 2 );
+        CHECK( combo->findText( "nominal" ) >= 0 );
+        CHECK( combo->findText( "pol" ) >= 0 );
+        CHECK( combo->findText( "Nominal" ) == -1 );
+        CHECK( combo->findText( "none" ) == -1 );
+        CHECK( combo->findText( "" ) == -1 );
+        CHECK( combo->isEnabled() );
+        CHECK( combo->placeholderText() == "nominal" );
+
+        // A new definition must remove old names even without an intervening deletion.
+        widget.selectLensPreset( "pol" );
+        widget.presets( first, { { "replacement", false } } );
+        CHECK( combo->count() == 0 );
+        CHECK( combo->currentIndex() == -1 );
+        CHECK_FALSE( combo->isEnabled() );
+        presets->on_buttonGo_pressed();
+        CHECK( widget.m_sent.empty() );
+        widget.presets( second, { { "replacement", false } }, false );
+        REQUIRE( combo->count() == 1 );
+        CHECK( combo->findText( "replacement" ) >= 0 );
+        CHECK( combo->isEnabled() );
+        widget.presets( second, { { "nominal", false } } );
+        CHECK( combo->count() == 0 );
+        CHECK_FALSE( combo->isEnabled() );
+        CHECK( widget.m_sent.empty() );
+    }
+}
+
+/** \brief Standard preset selection sends one named request to each stage and awaits both confirmations.
+ * \ingroup pupilGuideGUI_unit_test
+ */
+TEST_CASE( "Pupil-guide camera lens Go commands both stages", "[pupilGuideGUI][camlensPresets]" )
+{
+    // clang-format off
+#ifdef PUPILGUIDE_GUI_TEST_DOXYGEN_REF
+    xqt::stagePairStatus::on_buttonGo_pressed; xqt::stagePairStatus::handleSetProperty;
+    xqt::statusCombo::on_status_activated;
+#endif
+    // clang-format on
+    Widget widget;
+    widget.onConnect();
+    widget.state( "stagecamlensx", "READY" );
+    widget.state( "stagecamlensy", "READY" );
+    widget.presets( "stagecamlensx", { { "nominal", true }, { "pol", false }, { "x-only", false } } );
+    widget.presets( "stagecamlensy", { { "pol", false }, { "y-only", false }, { "nominal", true } } );
+    auto *presets = widget.lensPresets();
+    auto *combo   = presets->findChild<QComboBox *>( "status" );
+    auto *go      = presets->findChild<QAbstractButton *>( "buttonGo" );
+    REQUIRE( combo != nullptr );
+    REQUIRE( go != nullptr );
+    REQUIRE( go->isEnabled() );
+    widget.selectLensPreset( "pol" );
+    CHECK( widget.m_sent.empty() );
+    go->click();
+    REQUIRE( widget.m_sent.size() == 2 );
+    std::set<std::string> devices;
+    for( const auto &command : widget.m_sent )
+    {
+        devices.insert( command.getDevice() );
+        CHECK( command.getName() == "presetName" );
+        CHECK( command.getType() == pcf::IndiProperty::Switch );
+        CHECK( command.getRule() == pcf::IndiProperty::OneOfMany );
+        REQUIRE( command.find( "pol" ) );
+        CHECK( command["pol"].getSwitchState() == pcf::IndiElement::On );
+        for( const auto &element : command.getElements() )
+            if( element.first != "pol" )
+                CHECK( element.second.getSwitchState() == pcf::IndiElement::Off );
+        CHECK_FALSE( command.find( "x-only" ) );
+        CHECK_FALSE( command.find( "y-only" ) );
+    }
+    CHECK( devices == std::set<std::string>{ "stagecamlensx", "stagecamlensy" } );
+    presets->on_buttonGo_pressed();
+    CHECK( widget.m_sent.size() == 2 );
+    widget.presets( "stagecamlensx", { { "nominal", false }, { "pol", true } }, false );
+    CHECK( combo->currentText() == "pol" );
+    CHECK( combo->currentIndex() >= 0 );
+    widget.presets( "stagecamlensy", { { "nominal", false }, { "pol", true } }, false );
+    CHECK( combo->currentIndex() == -1 );
+    CHECK( combo->placeholderText() == "pol" );
+    CHECK( widget.m_sent.size() == 2 );
+    widget.selectLensPreset( "pol" );
+    presets->on_buttonGo_pressed();
+    CHECK( widget.m_sent.size() == 2 );
+}
+
+/** \brief Partial switch updates retain the other observed names and display a preset only when both agree.
+ * \ingroup pupilGuideGUI_unit_test
+ */
+TEST_CASE( "Pupil-guide camera lens displays only a shared active preset", "[pupilGuideGUI][camlensPresets]" )
+{
+    // clang-format off
+#ifdef PUPILGUIDE_GUI_TEST_DOXYGEN_REF
+    xqt::stagePairStatus::handleDefProperty; xqt::stagePairStatus::handleSetProperty;
+#endif
+    // clang-format on
+    Widget widget;
+    widget.onConnect();
+    widget.state( "stagecamlensx", "READY" );
+    widget.state( "stagecamlensy", "READY" );
+    widget.presets( "stagecamlensx", { { "nominal", true }, { "pol", false } } );
+    widget.presets( "stagecamlensy", { { "nominal", false }, { "pol", true } } );
+    auto *combo = widget.lensPresets()->findChild<QComboBox *>( "status" );
+    REQUIRE( combo != nullptr );
+    CHECK( combo->placeholderText() == "---" );
+    widget.presets( "stagecamlensy", { { "nominal", true }, { "pol", false } }, false );
+    CHECK( combo->placeholderText() == "nominal" );
+    widget.presets( "stagecamlensx", { { "pol", false } }, false );
+    CHECK( combo->count() == 2 );
+    CHECK( combo->placeholderText() == "nominal" );
+    widget.presets( "stagecamlensx", { { "nominal", false } }, false );
+    CHECK( combo->count() == 2 );
+    CHECK( combo->placeholderText() == "---" );
+    widget.presets( "stagecamlensx", { { "pol", true } }, false );
+    CHECK( combo->placeholderText() == "---" );
+    widget.presets( "stagecamlensy", { { "nominal", false }, { "pol", true } }, false );
+    CHECK( combo->placeholderText() == "pol" );
+    // Agreement on two active names is still ambiguous and must not choose either arbitrarily.
+    widget.presets( "stagecamlensx", { { "nominal", true } }, false );
+    CHECK( combo->placeholderText() == "---" );
+    widget.presets( "stagecamlensy", { { "nominal", true } }, false );
+    CHECK( combo->placeholderText() == "---" );
+    widget.presets( "stagecamlensx", { { "nominal", false } }, false );
+    CHECK( combo->placeholderText() == "---" );
+    widget.presets( "stagecamlensy", { { "nominal", false } }, false );
+    CHECK( combo->placeholderText() == "pol" );
+    widget.presets( "stagecamlensy", { { "none", true }, { "nominal", false }, { "pol", false } } );
+    CHECK( combo->placeholderText() == "---" );
+    CHECK( widget.m_sent.empty() );
+}
+
+/** \brief Preset, FSM, and device deletion cancel both staged and pending paired commands without affecting others.
+ * \ingroup pupilGuideGUI_unit_test
+ */
+TEST_CASE( "Pupil-guide camera lens presets recover locally without replay", "[pupilGuideGUI][camlensPresets]" )
+{
+    // clang-format off
+#ifdef PUPILGUIDE_GUI_TEST_DOXYGEN_REF
+    xqt::stagePairStatus::handleDelProperty; xqt::stagePairStatus::handleDefProperty;
+    xqt::stagePairStatus::on_buttonGo_pressed; xqt::pupilGuide::handleDelProperty;
+#endif
+    // clang-format on
+    for( const std::string device : { "stagecamlensx", "stagecamlensy" } )
+    {
+        for( const std::string deleted : { "", "fsm", "presetName" } )
+        {
+            for( bool submitted : { false, true } )
+            {
+                CAPTURE( device, deleted, submitted );
+                Widget widget;
+                widget.ready();
+                widget.state( "stagecamlensx", "READY" );
+                widget.state( "stagecamlensy", "READY" );
+                widget.presets( "stagecamlensx", { { "nominal", true }, { "pol", false } } );
+                widget.presets( "stagecamlensy", { { "nominal", true }, { "pol", false } } );
+                auto *presets = widget.lensPresets();
+                auto *combo   = presets->findChild<QComboBox *>( "status" );
+                REQUIRE( combo != nullptr );
+                widget.selectLensPreset( "pol" );
+                if( submitted )
+                {
+                    presets->on_buttonGo_pressed();
+                    REQUIRE( widget.m_sent.size() == 2 );
+                    widget.m_sent.clear();
+                }
+                widget.erase( device, deleted );
+                CHECK( combo->count() == 0 );
+                CHECK( combo->currentIndex() == -1 );
+                CHECK_FALSE( combo->isEnabled() );
+                CHECK( widget.control( "button_tip_u" )->isEnabled() );
+                CHECK( widget.control( "actAlignSensor_nImages" )->isEnabled() );
+                presets->on_buttonGo_pressed();
+                CHECK( widget.m_sent.empty() );
+                if( deleted != "presetName" )
+                {
+                    widget.state( device, "READY" );
+                    CHECK_FALSE( combo->isEnabled() );
+                }
+                widget.presets( device, { { "nominal", true }, { "pol", false } } );
+                CHECK( combo->count() == 2 );
+                CHECK( combo->isEnabled() );
+                CHECK( combo->currentIndex() == -1 );
+                CHECK( combo->placeholderText() == "nominal" );
+                presets->on_buttonGo_pressed();
+                CHECK( widget.m_sent.empty() );
+            }
+        }
+    }
+}
+
+/** \brief Paired presets require both READY states but do not depend on either numeric position property.
+ * \ingroup pupilGuideGUI_unit_test
+ */
+TEST_CASE( "Pupil-guide camera lens guards paired preset availability", "[pupilGuideGUI][camlensPresets]" )
+{
+    // clang-format off
+#ifdef PUPILGUIDE_GUI_TEST_DOXYGEN_REF
+    xqt::stagePairStatus::on_buttonGo_pressed; xqt::stagePairStatus::handleSetProperty;
+    xqt::stagePairStatus::handleDelProperty;
+#endif
+    // clang-format on
+    for( const std::string device : { "stagecamlensx", "stagecamlensy" } )
+    {
+        Widget widget;
+        widget.onConnect();
+        auto *presets = widget.lensPresets();
+        auto *combo   = presets->findChild<QComboBox *>( "status" );
+        REQUIRE( combo != nullptr );
+        widget.presets( "stagecamlensx", { { "nominal", true }, { "pol", false } } );
+        widget.presets( "stagecamlensy", { { "nominal", true }, { "pol", false } } );
+        CHECK_FALSE( combo->isEnabled() );
+        presets->on_buttonGo_pressed();
+        CHECK( widget.m_sent.empty() );
+        widget.state( "stagecamlensx", "READY" );
+        CHECK_FALSE( combo->isEnabled() );
+        widget.state( "stagecamlensy", "READY" );
+        REQUIRE( combo->isEnabled() );
+        widget.selectLensPreset( "pol" );
+        widget.erase( device, "position" );
+        CHECK( combo->isEnabled() );
+        CHECK( combo->currentText() == "pol" );
+        widget.erase( "twAlign-camwfs-wfs" );
+        CHECK( combo->currentText() == "pol" );
+        for( const std::string state : { "OPERATING", "NOTHOMED", "HOMING", "POWEROFF", "ERROR" } )
+        {
+            CAPTURE( device, state );
+            widget.state( device, state );
+            CHECK_FALSE( combo->isEnabled() );
+            widget.selectLensPreset( "pol" );
+            presets->on_buttonGo_pressed();
+            CHECK( widget.m_sent.empty() );
+            widget.state( device, "READY" );
+            CHECK( combo->isEnabled() );
+            CHECK( widget.m_sent.empty() );
+        }
+    }
+}
+
+/** \brief Wrong property types and unknown preset switch states cannot retain stale command availability.
+ * \ingroup pupilGuideGUI_unit_test
+ */
+TEST_CASE( "Pupil-guide camera lens rejects invalid observations", "[pupilGuideGUI][camlensPresets]" )
+{
+    // clang-format off
+#ifdef PUPILGUIDE_GUI_TEST_DOXYGEN_REF
+    xqt::stagePairStatus::handleDefProperty; xqt::stagePairStatus::handleSetProperty;
+    xqt::stagePairStatus::on_buttonGo_pressed;
+#endif
+    // clang-format on
+    for( const std::string device : { "stagecamlensx", "stagecamlensy" } )
+    {
+        for( bool definition : { false, true } )
+        {
+            CAPTURE( device, definition );
+            Widget widget;
+            widget.onConnect();
+            widget.state( "stagecamlensx", "READY" );
+            widget.state( "stagecamlensy", "READY" );
+            widget.presets( "stagecamlensx", { { "nominal", false } } );
+            widget.presets( "stagecamlensy", { { "nominal", false } } );
+            auto *presets = widget.lensPresets();
+            auto *combo   = presets->findChild<QComboBox *>( "status" );
+            REQUIRE( combo != nullptr );
+            REQUIRE( combo->isEnabled() );
+            for( auto type : { pcf::IndiProperty::Text, pcf::IndiProperty::Switch } )
+            {
+                widget.selectLensPreset( "nominal" );
+                pcf::IndiProperty bad( type, device, "presetName" );
+                bad.add( pcf::IndiElement( "nominal" ) ); // No valid switch state, including for Switch properties.
+                widget.define( bad, definition );
+                CHECK( combo->count() == 0 );
+                CHECK( combo->currentIndex() == -1 );
+                CHECK_FALSE( combo->isEnabled() );
+                presets->on_buttonGo_pressed();
+                CHECK( widget.m_sent.empty() );
+                widget.presets( device, { { "nominal", false } } );
+                REQUIRE( combo->isEnabled() );
+                CHECK( widget.m_sent.empty() );
+            }
+            widget.selectLensPreset( "nominal" );
+            pcf::IndiProperty bad( pcf::IndiProperty::Number, device, "fsm" );
+            bad.add( pcf::IndiElement( "state", "READY" ) );
+            widget.define( bad, definition );
+            CHECK_FALSE( combo->isEnabled() );
+            presets->on_buttonGo_pressed();
+            CHECK( widget.m_sent.empty() );
+            widget.state( device, "READY" );
+            CHECK( combo->isEnabled() );
+            CHECK( widget.m_sent.empty() );
+        }
+    }
+}
+
+/** \brief Shared disconnection discards both stage observations and cannot replay a previous selection.
+ * \ingroup pupilGuideGUI_unit_test
+ */
+TEST_CASE( "Pupil-guide camera lens reconnect needs fresh stage observations", "[pupilGuideGUI][camlensPresets]" )
+{
+    // clang-format off
+#ifdef PUPILGUIDE_GUI_TEST_DOXYGEN_REF
+    xqt::stagePairStatus::onDisconnect; xqt::stagePairStatus::onConnect;
+    xqt::stagePairStatus::on_buttonGo_pressed; xqt::pupilGuide::onDisconnect; xqt::pupilGuide::onConnect;
+#endif
+    // clang-format on
+    Widget widget;
+    widget.onConnect();
+    widget.state( "stagecamlensx", "READY" );
+    widget.state( "stagecamlensy", "READY" );
+    widget.presets( "stagecamlensx", { { "nominal", true }, { "pol", false } } );
+    widget.presets( "stagecamlensy", { { "nominal", true }, { "pol", false } } );
+    auto *presets = widget.lensPresets();
+    auto *combo   = presets->findChild<QComboBox *>( "status" );
+    REQUIRE( combo != nullptr );
+    widget.selectLensPreset( "pol" );
+    widget.onDisconnect();
+    CHECK( combo->count() == 0 );
+    CHECK_FALSE( combo->isEnabled() );
+    // Late callbacks on the old connection must not seed the next connection's state.
+    widget.state( "stagecamlensx", "READY" );
+    widget.presets( "stagecamlensx", { { "nominal", true }, { "pol", false } } );
+    widget.onConnect();
+    widget.state( "stagecamlensy", "READY" );
+    widget.presets( "stagecamlensy", { { "nominal", true }, { "pol", false } } );
+    CHECK_FALSE( combo->isEnabled() );
+    presets->on_buttonGo_pressed();
+    CHECK( widget.m_sent.empty() );
+    widget.state( "stagecamlensx", "READY" );
+    CHECK_FALSE( combo->isEnabled() );
+    widget.presets( "stagecamlensx", { { "nominal", true }, { "pol", false } } );
+    CHECK( combo->isEnabled() );
+    CHECK( combo->currentIndex() == -1 );
+    presets->on_buttonGo_pressed();
+    CHECK( widget.m_sent.empty() );
 }
 
 } // namespace pupilGuideGUITest

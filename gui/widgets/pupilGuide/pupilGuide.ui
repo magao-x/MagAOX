@@ -2432,6 +2432,13 @@
           </widget>
          </item>
          <item>
+          <widget class="xqt::stagePairStatus" name="camlensPresets">
+           <property name="toolTip">
+            <string>Select a preset shared by both camera-lens stages, then press Go.</string>
+           </property>
+          </widget>
+         </item>
+         <item>
           <layout class="QGridLayout" name="gl_camlens_fsm" columnstretch="1,10,1">
            <item row="0" column="0">
             <widget class="QLabel" name="label_camlensX_fsm">
@@ -3224,6 +3231,11 @@
   </layout>
  </widget>
  <customwidgets>
+  <customwidget>
+   <class>xqt::stagePairStatus</class>
+   <extends>QWidget</extends>
+   <header>../xWidgets/stagePairStatus.hpp</header>
+  </customwidget>
   <customwidget>
    <class>xqt::statusEntry</class>
    <extends>QLineEdit</extends>

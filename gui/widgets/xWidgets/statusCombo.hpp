@@ -22,6 +22,7 @@ class statusCombo : public xWidget
 {
     Q_OBJECT
 
+  protected:
     /// Editing state used to preserve staged selections until submission or cancellation.
     enum editchanges
     {
@@ -30,7 +31,6 @@ class statusCombo : public xWidget
         STOPPED
     };
 
-  protected:
     /// Optional detailed control widget opened from this summary row.
     xWidget *m_ctrlWidget{ nullptr };
 
@@ -146,7 +146,7 @@ class statusCombo : public xWidget
     void on_status_activated( int index /**< [in] combo-box index selected by the user */ );
 
     /// Send the selected value back to INDI.
-    void on_buttonGo_pressed();
+    virtual void on_buttonGo_pressed();
 
     /// Show the detailed control widget, if present.
     void on_buttonCtrl_pressed();
