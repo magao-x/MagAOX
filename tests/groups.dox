@@ -109,6 +109,11 @@ report from their counters and then returns nonzero. An HTML report therefore do
  * \ingroup application_unit_test
  */
 
+/** \defgroup smc100ccCtrl_unit_test smc100ccCtrl Unit Tests
+ * \brief Offline configuration, preset assignment, and INDI callback validation tests.
+ * \ingroup application_unit_test
+ */
+
 /** \defgroup kcubeCtrl_unit_test K-Cube Controller Unit Tests
  * \brief Offline two-axis connection, power-transition, and communication recovery tests.
  * \ingroup application_unit_test
