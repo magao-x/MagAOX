@@ -82,9 +82,13 @@ struct Controller : MagAOX::app::MagAOXApp<false>,
     using dmT::m_dmTiming;
     using dmT::m_indiP_dmStages;
     using dmT::m_indiP_dmTiming;
+    using dmT::m_indiP_dmTimingDelivery;
     using dmT::m_indiP_dmTimingQuality;
     using dmT::m_indiP_dmTimingState;
     using dmT::m_timingCapacity;
+    using dmT::m_timingDeliveryBracketUs;
+    using dmT::m_timingDeliveryClock;
+    using dmT::m_timingDeliveryClockName;
     using dmT::m_timingWindow;
     using dmT::setupDMTimingINDI;
     using MagAOX::app::dev::shmimMonitor<Controller>::m_imageStream;
@@ -499,8 +503,8 @@ TEST_CASE( "DM timing INDI follows valid, stale and disabled summaries", "[dev::
     const auto &prefix = app.dmTimingSummary().metrics[metricIndex( Metric::receiptSdk )];
     REQUIRE( prefix.count == 1 );
     CHECK( app.m_indiP_dmStages["receiptSdk_count"].get<double>() == 1 );
-    CHECK( app.m_indiP_dmStages["receiptSdk_mean"].get<double>() == prefix.mean );
-    CHECK( app.m_indiP_dmStages["receiptSdk_max"].get<double>() == prefix.max );
+    CHECK( app.m_indiP_dmStages["receiptSdk_mean"].get<double>() == Approx( prefix.mean ) );
+    CHECK( app.m_indiP_dmStages["receiptSdk_max"].get<double>() == Approx( prefix.max ) );
     CHECK( app.m_indiP_dmStages["receiptSdk_jitter"].get<double>() == -1 );
 
     for( unsigned i = 0; i < 2; ++i )
@@ -569,6 +573,117 @@ TEST_CASE( "DM timing continues aging in the power-off loop", "[dev::dmTimingInt
     CHECK( app.m_indiP_dmTimingState["state"].get<std::string>() == "stale" );
     CHECK( app.m_records.size() == 3 );
     CHECK_FALSE( MagAOX::logger::GetTelem_dmtimings_fb( app.m_detailed.data() )->fg_valid() );
+}
+
+/// Resolve explicit producer clocks without silently choosing the clock used by an unrelated camera stream.
+/** \ingroup dmTimingIntegration_tests */
+TEST_CASE( "DM delivery clock selection is explicit", "[dev::dmTimingIntegration][delivery]" )
+{
+    PublicationClock clock = PublicationClock::realtime;
+    CHECK( Controller::parseDeliveryClock( "none", clock ) );
+    CHECK( clock == PublicationClock::none );
+    CHECK( Controller::parseDeliveryClock( "realtime", clock ) );
+    CHECK( clock == PublicationClock::realtime );
+    REQUIRE( Controller::parseDeliveryClock( "isio", clock ) );
+#ifdef CLOCK_TAI
+    CHECK( clock == ( CLOCK_ISIO == CLOCK_TAI ? PublicationClock::tai : PublicationClock::realtime ) );
+    CHECK( Controller::parseDeliveryClock( "tai", clock ) );
+    CHECK( clock == PublicationClock::tai );
+#endif
+    const auto previous = clock;
+    CHECK_FALSE( Controller::parseDeliveryClock( "automatic", clock ) );
+    CHECK_FALSE( Controller::parseDeliveryClock( "monotonic", clock ) );
+    CHECK( clock == previous );
+
+    // clang-format off
+#ifdef DM_TIMING_INTEGRATION_TEST_DOXYGEN_REF
+    MagAOX::app::dev::dm<Controller, float>::parseDeliveryClock;
+#endif
+    // clang-format on
+}
+
+/// Keep opt-in delivery settings separate from existing timing-window and command settings.
+/** \ingroup dmTimingIntegration_tests */
+TEST_CASE( "DM delivery configuration validates clock and bracket", "[dev::dmTimingIntegration][delivery]" )
+{
+    Controller               app;
+    mx::app::appConfigurator config;
+    REQUIRE( app.dmT::setupConfig( config ) == 0 );
+    CHECK( app.m_timingDeliveryClockName == "none" );
+    CHECK( app.m_timingDeliveryBracketUs == 1 );
+    const std::string path    = "/tmp/dm-delivery-config-" + std::to_string( getpid() ) + ".conf";
+    const auto        clock   = GENERATE( "isio", "realtime", "none", "invalid" );
+    const auto        bracket = GENERATE( "1", "0", "nan", "-1", "0.0001", "1000001" );
+    mx::app::writeConfigFile( path, { "dm", "dm" }, { "deliveryClock", "deliveryBracketUs" }, { clock, bracket } );
+    REQUIRE( config.readConfig( path ) == 0 );
+    const bool valid = std::string( clock ) != "invalid" && std::string( bracket ) == "1";
+    CHECK( app.dmT::loadConfig( config ) == ( valid ? 0 : -1 ) );
+    CHECK( app.m_timingWindow == 2 );
+    CHECK( app.m_timingCapacity == 20000 );
+    unlink( path.c_str() );
+
+    // clang-format off
+#ifdef DM_TIMING_INTEGRATION_TEST_DOXYGEN_REF
+    MagAOX::app::dev::dm<Controller, float>::setupConfig(config);
+    MagAOX::app::dev::dm<Controller, float>::loadConfig(config);
+#endif
+    // clang-format on
+}
+
+/// Publish delivery qualification and paired latency statistics through a software-only INDI sink.
+/** \ingroup dmTimingIntegration_tests */
+TEST_CASE( "DM delivery statistics reach INDI without a producer clock assumption",
+           "[dev::dmTimingIntegration][delivery]" )
+{
+    Driver     driver;
+    Controller app;
+    REQUIRE( app.setupDMTimingINDI() == 0 );
+    app.m_indiDriver = &driver;
+    REQUIRE( app.dmT::updateINDI() == 0 );
+    CHECK( app.m_indiP_dmTimingDelivery.getNumElements() == 11 );
+    CHECK( app.m_indiP_dmTimingDelivery.getPerm() == pcf::IndiProperty::ReadOnly );
+    CHECK( app.m_indiP_dmTimingDelivery["enabled"].get<double>() == 0 );
+    CHECK( app.m_indiP_dmTimingState["deliveryClock"].get<std::string>() == "disabled" );
+    CHECK( app.m_indiP_dmStages["deliveryUpper_mean"].get<double>() == -1 );
+    app.m_dmTiming.configure( 2, 20, 0, PublicationClock::realtime, 1000 );
+    const int64_t base     = MagAOX::app::dev::dmTiming::monotonicNowNs() - 5000000;
+    const int64_t external = 1793000000000000000LL;
+
+    for( uint64_t index = 0; index < 3; ++index )
+    {
+        const auto receipt = base + int64_t( index ) * 500000;
+        app.m_dmTiming.beginEventClockAt( true, receipt, external + int64_t( index ) * 500000, receipt + 100 );
+        app.m_dmTiming.inputCounter( index + 1 );
+        app.m_dmTiming.inputPublication( external + int64_t( index ) * 500000 - 2000 );
+        app.m_dmTiming.markAt( Marker::entry, receipt + 200 );
+        app.m_dmTiming.markAt( Marker::dispatch, receipt + 10000 );
+        app.m_dmTiming.markAt( Marker::sdkStart, receipt + 13000 );
+        app.m_dmTiming.markAt( Marker::sdkEnd, receipt + 120000 );
+        app.m_dmTiming.outcome( Outcome::success );
+        app.m_dmTiming.markAt( Marker::finish, receipt + 140000 );
+        app.m_dmTiming.finishEvent();
+    }
+
+    app.m_dmTiming.update( base + 1200000 );
+    REQUIRE( app.dmT::updateINDI() == 0 );
+    const auto &delivery = app.dmTimingSummary().delivery;
+    CHECK( delivery.total.qualified > 0 );
+    CHECK( app.m_indiP_dmTimingDelivery["clock"].get<double>() == 1 );
+    CHECK( app.m_indiP_dmTimingDelivery["bracketUs"].get<double>() == 1 );
+    CHECK( app.m_indiP_dmTimingDelivery["attempted"].get<double>() == double( delivery.total.attempted ) );
+    CHECK( app.m_indiP_dmTimingDelivery["qualified"].get<double>() == double( delivery.total.qualified ) );
+    CHECK( app.m_indiP_dmTimingState["deliveryClock"].get<std::string>() == "CLOCK_REALTIME" );
+    CHECK( app.m_indiP_dmStages["preparation_mean"].get<double>() == Approx( 0.000010 ) );
+    CHECK( app.m_indiP_dmStages["deliveryUpper_mean"].get<double>() == Approx( 0.000002 ) );
+    CHECK( app.m_indiP_dmStages["deliveryLower_mean"].get<double>() == Approx( 0.0000019 ) );
+    CHECK( app.m_indiP_dmStages["deliveryBracket_mean"].get<double>() == Approx( 0.0000001 ) );
+
+    // clang-format off
+#ifdef DM_TIMING_INTEGRATION_TEST_DOXYGEN_REF
+    MagAOX::app::dev::dm<Controller, float>::setupDMTimingINDI();
+    MagAOX::app::dev::dm<Controller, float>::updateINDI();
+#endif
+    // clang-format on
 }
 
 } // namespace dmTimingIntegrationTest

@@ -3,6 +3,7 @@
  * \ingroup logger_files
  */
 #include "../../../tests/testXWC.hpp"
+#include "../../app/dev/dmTiming.hpp"
 #include "../logBinarySchemata.hpp"
 #include "../generated/logMemberAccessor.hpp"
 
@@ -48,8 +49,16 @@ dmTiming::Summary sampleSummary()
         value.valid  = true;
     }
 
-    summary.total = { 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112 };
-    summary.delta = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 };
+    summary.total                   = { 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112 };
+    summary.delta                   = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 };
+    summary.delivery.enabled        = true;
+    summary.delivery.clock          = dmTiming::PublicationClock::realtime;
+    summary.delivery.bracketLimitNs = 1000;
+    summary.delivery.total          = { 101, 80, 5, 4, 3, 3, 3, 3 };
+    summary.delivery.delta          = { 1, 1, 0, 0, 0, 0, 0, 0 };
+    summary.metrics[size_t( dmTiming::Metric::deliveryLower )]   = { 20, 3e-6, 1e-7, 2e-6, 4e-6, 1.5, true };
+    summary.metrics[size_t( dmTiming::Metric::deliveryUpper )]   = { 20, 3.2e-6, 1e-7, 2.2e-6, 4.2e-6, 1.5, true };
+    summary.metrics[size_t( dmTiming::Metric::deliveryBracket )] = { 20, 2e-7, 1e-8, 1e-7, 3e-7, 1.5, true };
     return summary;
 }
 
@@ -98,6 +107,17 @@ dmTiming::Summary pairSummary()
     pairs.lateEarlySum = { 3, 1001e-6, 2e-6, 999e-6, 1003e-6, 1.3, true };
     pairs.earlyLateSum = { 2, 998e-6, 3e-6, 995e-6, 1001e-6, 1.2, true };
     return summary;
+}
+
+/// Omit one optional or required field from a valid mutable test buffer without bypassing construction checks.
+template <typename tableT>
+void omitDeliveryField( const tableT          *table /**< [in,out] FlatBuffer table owned by the test builder. */,
+                        flatbuffers::voffset_t field /**< [in] Generated vtable field identifier. */ )
+{
+    auto *data   = reinterpret_cast<uint8_t *>( const_cast<tableT *>( table ) );
+    auto *vtable = data - flatbuffers::ReadScalar<flatbuffers::soffset_t>( data );
+    REQUIRE( field < flatbuffers::ReadScalar<flatbuffers::voffset_t>( vtable ) );
+    flatbuffers::WriteScalar<flatbuffers::voffset_t>( vtable + field, 0 );
 }
 
 /// \endcond
@@ -152,6 +172,13 @@ TEST_CASE( "DM timing telemetry preserves controller-local populations", "[dmTim
     REQUIRE( text.find( "sourceCheck[n=24]=" ) != std::string::npos );
     REQUIRE( text.find( "shapePublication[n=25]=" ) != std::string::npos );
     REQUIRE( text.find( "receiptSdk[n=26]=" ) != std::string::npos );
+    REQUIRE( text.find( "preparation[n=27]=" ) != std::string::npos );
+    REQUIRE( text.find( "deliveryLower[n=20]=" ) != std::string::npos );
+    REQUIRE( text.find( "deliveryUpper[n=20]=" ) != std::string::npos );
+    REQUIRE( text.find( "deliveryBracket[n=20]=" ) != std::string::npos );
+    REQUIRE( text.find( "delivery_quality={enabled:1,clock:realtime,bracketLimit_ns:1000}" ) != std::string::npos );
+    REQUIRE( text.find( "delivery_total={attempted:101,qualified:80,unavailable:5,invalid:4,wideBracket:3," ) !=
+             std::string::npos );
     REQUIRE( text.find( "dropped:112" ) != std::string::npos );
     const auto          json = telem_dmtimings::msgJSON( payload,
                                                 message.builder.GetSize(),
@@ -167,6 +194,12 @@ TEST_CASE( "DM timing telemetry preserves controller-local populations", "[dmTim
              Approx( summary.metrics[size_t( dmTiming::Metric::sdk )].mean ) );
     REQUIRE( jsonRecord->total()->dropped() == 112 );
     REQUIRE( jsonRecord->delta()->dropped() == 12 );
+    REQUIRE( jsonRecord->delivery_quality() != nullptr );
+    REQUIRE( jsonRecord->delivery_quality()->enabled() );
+    REQUIRE( jsonRecord->delivery_quality()->clock() == DmDeliveryClock_realtime );
+    REQUIRE( jsonRecord->delivery_quality()->bracket_limit_ns() == 1000 );
+    REQUIRE( jsonRecord->delivery_quality()->total()->qualified() == 80 );
+    REQUIRE( jsonRecord->delivery_quality()->delta()->qualified() == 1 );
 
     const auto *publication = jsonRecord->metrics()->Get( size_t( dmTiming::Metric::publicationInterval ) );
     const auto &expected    = summary.metrics[size_t( dmTiming::Metric::publicationInterval )];
@@ -184,7 +217,11 @@ TEST_CASE( "DM timing telemetry preserves controller-local populations", "[dmTim
                                dmTiming::Metric::conversion,
                                dmTiming::Metric::sourceCheck,
                                dmTiming::Metric::shapePublication,
-                               dmTiming::Metric::receiptSdk } )
+                               dmTiming::Metric::receiptSdk,
+                               dmTiming::Metric::preparation,
+                               dmTiming::Metric::deliveryLower,
+                               dmTiming::Metric::deliveryUpper,
+                               dmTiming::Metric::deliveryBracket } )
     {
         const auto  index = size_t( metric );
         const auto *row   = jsonRecord->metrics()->Get( index );
@@ -201,7 +238,7 @@ TEST_CASE( "DM timing metadata projects metrics and collection quality", "[dmTim
     const auto                         summary = sampleSummary();
     telem_dmtimings::messageT          message( summary );
     auto                              *payload = message.builder.GetBufferPointer();
-    const std::array<const char *, 24> names{ "receiptInterval",
+    const std::array<const char *, 28> names{ "receiptInterval",
                                               "sendInterval",
                                               "receiptSend",
                                               "dispatch",
@@ -224,7 +261,11 @@ TEST_CASE( "DM timing metadata projects metrics and collection quality", "[dmTim
                                               "conversion",
                                               "sourceCheck",
                                               "shapePublication",
-                                              "receiptSdk" };
+                                              "receiptSdk",
+                                              "preparation",
+                                              "deliveryLower",
+                                              "deliveryUpper",
+                                              "deliveryBracket" };
 
     for( size_t index = 0; index < names.size(); ++index )
     {
@@ -270,7 +311,35 @@ TEST_CASE( "DM timing metadata projects metrics and collection quality", "[dmTim
         REQUIRE( project<uint64_t>( std::string( "delta_" ) + counters[index], payload ) == index + 1 );
     }
 
-    for( const auto *name : { "absent", "receiptInterval_absent", "total_absent", "delta_absent" } )
+    REQUIRE( project<bool>( "delivery_enabled", payload ) );
+    REQUIRE( project<int>( "delivery_clock", payload ) == int( dmTiming::PublicationClock::realtime ) );
+    REQUIRE( project<int64_t>( "delivery_bracketLimitNs", payload ) == 1000 );
+    const std::array<const char *, 8> deliveryNames{ "attempted",
+                                                     "qualified",
+                                                     "unavailable",
+                                                     "invalid",
+                                                     "wideBracket",
+                                                     "clockDiscontinuity",
+                                                     "futurePublication",
+                                                     "identityRejected" };
+    const std::array<uint64_t, 8>     totals{ 101, 80, 5, 4, 3, 3, 3, 3 };
+    const std::array<uint64_t, 8>     deltas{ 1, 1, 0, 0, 0, 0, 0, 0 };
+
+    for( size_t index = 0; index < deliveryNames.size(); ++index )
+    {
+        REQUIRE( project<uint64_t>( std::string( "delivery_total_" ) + deliveryNames[index], payload ) ==
+                 totals[index] );
+        REQUIRE( project<uint64_t>( std::string( "delivery_delta_" ) + deliveryNames[index], payload ) ==
+                 deltas[index] );
+    }
+
+    for( const auto *name : { "absent",
+                              "receiptInterval_absent",
+                              "total_absent",
+                              "delta_absent",
+                              "delivery_absent",
+                              "delivery_total_absent",
+                              "delivery_delta_absent" } )
     {
         REQUIRE( telem_dmtimings::getAccessor( name ).accessor == nullptr );
     }
@@ -354,14 +423,16 @@ TEST_CASE( "DM timing telemetry distinguishes availability and rejects malformed
 /** \ingroup dmTimingTelemetry_unit_test */
 TEST_CASE( "DM timing telemetry verifies the stable metric set", "[dmTimingTelemetry]" )
 {
-    for( int variant = 0; variant < 18; ++variant )
+    for( int variant = 0; variant < 22; ++variant )
     {
         INFO( "metric-set variant " << variant );
         telem_dmtimings::messageT message( sampleSummary() );
         auto                     &builder = message.builder;
         builder.Clear();
         std::vector<flatbuffers::Offset<DmTimingStats>> rows;
-        const size_t                                    count = variant == 15                  ? 23
+        const size_t                                    count = variant == 21                  ? 27
+                                                                : variant >= 18                ? 28
+                                                                : variant == 15                ? 23
                                                                 : variant >= 14                ? 24
                                                                 : variant == 0 || variant == 3 ? 12
                                                                 : variant == 2                 ? 11
@@ -420,20 +491,53 @@ TEST_CASE( "DM timing telemetry verifies the stable metric set", "[dmTimingTelem
                 id = 24;
             }
 
-            rows.push_back( CreateDmTimingStats( builder, DmTimingMetric( id ), 3, 1e-4, 1e-6, 9e-5, 2e-4, 1, true ) );
+            if( variant == 19 && index == 0 )
+            {
+                id = 0;
+            }
+
+            if( variant == 20 && index == 0 )
+            {
+                id = 28;
+            }
+
+            if( variant >= 18 && id >= 25 )
+            {
+                rows.push_back( CreateDmTimingStats( builder, DmTimingMetric( id ) ) );
+            }
+            else
+            {
+                rows.push_back(
+                    CreateDmTimingStats( builder, DmTimingMetric( id ), 3, 1e-4, 1e-6, 9e-5, 2e-4, 1, true ) );
+            }
         }
 
-        const auto                metrics = builder.CreateVector( rows );
-        const auto                total   = CreateDmTimingCounters( builder );
-        const auto                delta   = CreateDmTimingCounters( builder );
+        const auto                             metrics = builder.CreateVector( rows );
+        const auto                             total   = CreateDmTimingCounters( builder );
+        const auto                             delta   = CreateDmTimingCounters( builder );
+        flatbuffers::Offset<DmDeliveryQuality> quality;
+
+        if( variant >= 18 )
+        {
+            const auto deliveryTotal = CreateDmDeliveryCounters( builder );
+            const auto deliveryDelta = CreateDmDeliveryCounters( builder );
+            quality = CreateDmDeliveryQuality( builder, false, DmDeliveryClock_none, 0, deliveryTotal, deliveryDelta );
+        }
+
         Telem_dmtimings_fbBuilder record( builder );
         record.add_metrics( metrics );
         record.add_total( total );
         record.add_delta( delta );
+
+        if( variant >= 18 )
+        {
+            record.add_delivery_quality( quality );
+        }
+
         builder.Finish( record.Finish() );
         auto buffer = envelope( message );
         REQUIRE( verifyLogEntry( telem_dmtimings::eventCode, buffer.get() ) ==
-                 ( variant <= 1 || variant == 7 || variant == 10 || variant == 14 ) );
+                 ( variant <= 1 || variant == 7 || variant == 10 || variant == 14 || variant == 18 ) );
 
         if( variant <= 1 )
         {
@@ -507,6 +611,324 @@ TEST_CASE( "DM timing telemetry verifies the stable metric set", "[dmTimingTelem
                 }
             }
         }
+    }
+}
+
+/// Distinguish disabled, sparse and declared realtime/TAI delivery captures while preserving exact units.
+/** \ingroup dmTimingTelemetry_unit_test */
+TEST_CASE( "DM delivery telemetry preserves sparse and clock qualification", "[dmTimingTelemetry][delivery]" )
+{
+    for( unsigned variant = 0; variant < 4; ++variant )
+    {
+        auto summary = sampleSummary();
+
+        if( variant == 0 )
+        {
+            summary.delivery = {};
+        }
+        else
+        {
+            summary.delivery.clock =
+                variant == 3 ? dmTiming::PublicationClock::tai : dmTiming::PublicationClock::realtime;
+        }
+
+        for( const auto metric :
+             { dmTiming::Metric::deliveryLower, dmTiming::Metric::deliveryUpper, dmTiming::Metric::deliveryBracket } )
+        {
+            auto &value = summary.metrics[size_t( metric )];
+
+            if( variant <= 1 )
+            {
+                value = {};
+            }
+            else if( variant == 2 )
+            {
+                value.count = 1;
+                value.min = value.max = value.mean;
+                value.stddev = value.span = 0;
+                value.valid               = false;
+            }
+        }
+
+        telem_dmtimings::messageT message( summary );
+        auto                      buffer = envelope( message );
+        REQUIRE( verifyLogEntry( telem_dmtimings::eventCode, buffer.get() ) );
+        const auto *payload = message.builder.GetBufferPointer();
+        const auto *record  = GetTelem_dmtimings_fb( payload );
+        REQUIRE( record->delivery_quality() != nullptr );
+        REQUIRE( record->delivery_quality()->enabled() == ( variant != 0 ) );
+        REQUIRE( int( record->delivery_quality()->clock() ) == int( summary.delivery.clock ) );
+        REQUIRE( record->metrics()->Get( 25 )->count() == ( variant < 2 ? 0 : variant == 2 ? 1 : 20 ) );
+        const auto text = telem_dmtimings::msgString( const_cast<uint8_t *>( payload ), message.builder.GetSize() );
+        REQUIRE( text.find( "delivery_quality=unavailable" ) == std::string::npos );
+
+        if( variant == 2 )
+        {
+            REQUIRE( text.find( "deliveryLower[n=1]=unavailable" ) != std::string::npos );
+            REQUIRE_FALSE( project<bool>( "deliveryLower_valid", const_cast<uint8_t *>( payload ) ) );
+            REQUIRE( project<uint64_t>( "deliveryLower_count", const_cast<uint8_t *>( payload ) ) == 1 );
+        }
+
+        const auto          json = telem_dmtimings::msgJSON( const_cast<uint8_t *>( payload ),
+                                                    message.builder.GetSize(),
+                                                    reinterpret_cast<const uint8_t *>( telem_dmtimings_bfbs ),
+                                                    telem_dmtimings_bfbs_len );
+        flatbuffers::Parser parser;
+        REQUIRE(
+            parser.Deserialize( reinterpret_cast<const uint8_t *>( telem_dmtimings_bfbs ), telem_dmtimings_bfbs_len ) );
+        REQUIRE( parser.Parse( json.c_str() ) );
+        REQUIRE( GetTelem_dmtimings_fb( parser.builder_.GetBufferPointer() )->delivery_quality()->enabled() ==
+                 ( variant != 0 ) );
+    }
+}
+
+/// Serialize real consumer summaries so rejected captures and qualified endpoint populations remain consistent.
+/** \ingroup dmTimingTelemetry_unit_test */
+TEST_CASE( "DM delivery telemetry accepts real engine qualification and expiration", "[dmTimingTelemetry][delivery]" )
+{
+    using namespace MagAOX::dmTiming;
+    MagAOX::app::dev::dmTiming timing;
+    timing.configure( 2, 32, 0, PublicationClock::realtime, 1000 );
+    constexpr int64_t base = 1000000000;
+
+    for( uint64_t index = 0; index < 5; ++index )
+    {
+        Event event;
+        event.sequence = event.counter = index + 1;
+        event.session                  = 1;
+        event.counterValid = event.submitted = true;
+        event.outcome                        = Outcome::success;
+        const int64_t receipt                = base + int64_t( index ) * 500000;
+        event.publicationClock               = PublicationClock::realtime;
+        event.receiptExternalNs              = 1792000000000000000LL + receipt;
+        event.receiptAfterNs                 = receipt + ( index == 2 ? 2000 : 200 );
+        event.publicationNs                  = event.receiptExternalNs - ( index == 1 ? 100 : 4000 );
+
+        for( const auto &[marker, offset] :
+             std::array<std::pair<Marker, int64_t>, 6>{ { { Marker::receipt, 0 },
+                                                          { Marker::entry, 1000 },
+                                                          { Marker::dispatch, 12000 },
+                                                          { Marker::sdkStart, 16000 },
+                                                          { Marker::sdkEnd, 120000 },
+                                                          { Marker::finish, 140000 } } } )
+        {
+            MagAOX::app::dev::dmTiming::markEvent( event, marker, receipt + offset );
+        }
+
+        timing.submitEvent( event );
+    }
+
+    timing.update( base + 2500000 );
+    const auto &summary = timing.summary();
+    REQUIRE( summary.delivery.total.attempted == 5 );
+    REQUIRE( summary.delivery.total.qualified == 3 );
+    REQUIRE( summary.delivery.total.futurePublication == 1 );
+    REQUIRE( summary.delivery.total.wideBracket == 1 );
+    REQUIRE( summary.metrics[size_t( Metric::preparation )].count == 5 );
+    REQUIRE( summary.metrics[size_t( Metric::preparation )].mean == Approx( 12e-6 ) );
+    REQUIRE( summary.metrics[size_t( Metric::deliveryLower )].mean == Approx( 3.8e-6 ) );
+    REQUIRE( summary.metrics[size_t( Metric::deliveryUpper )].mean == Approx( 4e-6 ) );
+    REQUIRE( summary.metrics[size_t( Metric::deliveryBracket )].mean == Approx( 0.2e-6 ) );
+    telem_dmtimings::messageT message( summary );
+    auto                      buffer = envelope( message );
+    REQUIRE( verifyLogEntry( telem_dmtimings::eventCode, buffer.get() ) );
+    const auto          json = telem_dmtimings::msgJSON( message.builder.GetBufferPointer(),
+                                                message.builder.GetSize(),
+                                                reinterpret_cast<const uint8_t *>( telem_dmtimings_bfbs ),
+                                                telem_dmtimings_bfbs_len );
+    flatbuffers::Parser parser;
+    REQUIRE(
+        parser.Deserialize( reinterpret_cast<const uint8_t *>( telem_dmtimings_bfbs ), telem_dmtimings_bfbs_len ) );
+    REQUIRE( parser.Parse( json.c_str() ) );
+    REQUIRE( GetTelem_dmtimings_fb( parser.builder_.GetBufferPointer() )->delivery_quality()->total()->qualified() ==
+             3 );
+    timing.update( base + 3000000000LL );
+    telem_dmtimings::messageT expired( timing.summary() );
+    buffer = envelope( expired );
+    REQUIRE( verifyLogEntry( telem_dmtimings::eventCode, buffer.get() ) );
+    REQUIRE( timing.summary().metrics[size_t( Metric::deliveryLower )].count == 0 );
+    REQUIRE( timing.summary().delivery.total.qualified == 3 );
+    REQUIRE( timing.summary().delivery.delta.attempted == 0 );
+
+    // clang-format off
+#ifdef DM_TIMING_TEST_DOXYGEN_REF
+    MagAOX::app::dev::dmTiming::configure;
+    MagAOX::app::dev::dmTiming::submitEvent;
+    MagAOX::app::dev::dmTiming::update;
+#endif
+    // clang-format on
+}
+
+/// Reject contradictory capture outcomes, unpaired delivery populations and impossible clock brackets.
+/** \ingroup dmTimingTelemetry_unit_test */
+TEST_CASE( "DM delivery telemetry rejects malformed qualification", "[dmTimingTelemetry][delivery]" )
+{
+    for( unsigned variant = 0; variant < 28; ++variant )
+    {
+        INFO( "delivery malformed variant " << variant );
+        auto  summary  = sampleSummary();
+        auto &delivery = summary.delivery;
+        auto &lower    = summary.metrics[size_t( dmTiming::Metric::deliveryLower )];
+        auto &upper    = summary.metrics[size_t( dmTiming::Metric::deliveryUpper )];
+        auto &bracket  = summary.metrics[size_t( dmTiming::Metric::deliveryBracket )];
+
+        switch( variant )
+        {
+        case 0:
+            delivery.clock = dmTiming::PublicationClock( 99 );
+            break;
+        case 1:
+            delivery.enabled = false;
+            break;
+        case 2:
+            delivery.clock = dmTiming::PublicationClock::none;
+            break;
+        case 3:
+            delivery.bracketLimitNs = 0;
+            break;
+        case 4:
+            delivery.bracketLimitNs = -1;
+            break;
+        case 5:
+            delivery.bracketLimitNs = 1000000001;
+            break;
+        case 6:
+            ++delivery.total.attempted;
+            break;
+        case 7:
+            ++delivery.delta.attempted;
+            break;
+        case 8:
+            delivery.total.qualified = std::numeric_limits<uint64_t>::max();
+            break;
+        case 9:
+            delivery.delta = delivery.total;
+            break;
+        case 10:
+            delivery.delta                  = { 1, 0, 0, 0, 0, 0, 0, 1 };
+            delivery.total.identityRejected = 0;
+            ++delivery.total.qualified;
+            break;
+        case 11:
+            --lower.count;
+            break;
+        case 12:
+            upper.span = 1.4;
+            break;
+        case 13:
+            bracket.valid = false;
+            break;
+        case 14:
+            delivery.total.unavailable += delivery.total.qualified;
+            delivery.total.qualified = 0;
+            break;
+        case 15:
+            upper.mean -= 1e-6;
+            upper.min -= 1e-6;
+            upper.max -= 1e-6;
+            break;
+        case 16:
+            lower.mean += 1e-6;
+            lower.min += 1e-6;
+            lower.max += 1e-6;
+            break;
+        case 17:
+            bracket.span = 1.4;
+            break;
+        case 18:
+            bracket.max = 2e-6;
+            break;
+        case 19:
+            bracket.mean = bracket.min = 1e-7;
+            break;
+        case 20:
+            upper.max = 5e-6;
+            break;
+        case 21:
+            upper.min = 2.5e-6;
+            break;
+        case 22:
+            lower.min = -1e-9;
+            break;
+        case 23:
+            bracket.mean = std::numeric_limits<double>::quiet_NaN();
+            break;
+        case 24:
+            lower.count = upper.count = bracket.count = 1;
+            lower.valid = upper.valid = bracket.valid = false;
+            break;
+        case 25:
+            lower.count = upper.count = bracket.count = 0;
+            lower.valid = upper.valid = bracket.valid = false;
+            break;
+        case 26:
+            delivery.total.attempted += 100;
+            delivery.total.unavailable += 100;
+            break;
+        case 27:
+            delivery                = {};
+            delivery.bracketLimitNs = 1000;
+            lower = upper = bracket = {};
+            break;
+        }
+
+        telem_dmtimings::messageT message( summary );
+        auto                      buffer = envelope( message );
+        REQUIRE_FALSE( verifyLogEntry( telem_dmtimings::eventCode, buffer.get() ) );
+    }
+}
+
+/// Historical metric sets omit delivery qualification; current records require all nested quality tables.
+/** \ingroup dmTimingTelemetry_unit_test */
+TEST_CASE( "DM delivery telemetry distinguishes missing tables from legacy records", "[dmTimingTelemetry][delivery]" )
+{
+    for( unsigned variant = 0; variant < 3; ++variant )
+    {
+        telem_dmtimings::messageT message( sampleSummary() );
+        const auto               *record  = GetTelem_dmtimings_fb( message.builder.GetBufferPointer() );
+        const auto               *quality = record->delivery_quality();
+
+        if( variant == 0 )
+        {
+            omitDeliveryField( record, Telem_dmtimings_fb::VT_DELIVERY_QUALITY );
+        }
+        else
+        {
+            omitDeliveryField( quality, variant == 1 ? DmDeliveryQuality::VT_TOTAL : DmDeliveryQuality::VT_DELTA );
+        }
+
+        auto buffer = envelope( message );
+        REQUIRE_FALSE( verifyLogEntry( telem_dmtimings::eventCode, buffer.get() ) );
+    }
+
+    for( const auto count : { 12, 13, 18, 20, 24 } )
+    {
+        telem_dmtimings::messageT message( sampleSummary() );
+        auto                     &builder = message.builder;
+        builder.Clear();
+        std::vector<flatbuffers::Offset<DmTimingStats>> rows;
+
+        for( int index = 0; index < count; ++index )
+        {
+            rows.push_back( CreateDmTimingStats( builder, DmTimingMetric( index ) ) );
+        }
+
+        const auto                metrics = builder.CreateVector( rows );
+        const auto                total   = CreateDmTimingCounters( builder );
+        const auto                delta   = CreateDmTimingCounters( builder );
+        Telem_dmtimings_fbBuilder record( builder );
+        record.add_metrics( metrics );
+        record.add_total( total );
+        record.add_delta( delta );
+        builder.Finish( record.Finish() );
+        auto buffer = envelope( message );
+        REQUIRE( verifyLogEntry( telem_dmtimings::eventCode, buffer.get() ) );
+        REQUIRE( telem_dmtimings::msgString( builder.GetBufferPointer(), builder.GetSize() )
+                     .find( "delivery_quality=unavailable" ) != std::string::npos );
+        REQUIRE_FALSE( project<bool>( "delivery_enabled", builder.GetBufferPointer() ) );
+        REQUIRE( project<uint64_t>( "delivery_total_attempted", builder.GetBufferPointer() ) == 0 );
+        REQUIRE( project<uint64_t>( "preparation_count", builder.GetBufferPointer() ) == 0 );
+        REQUIRE( mx::math::isNan( project<double>( "deliveryUpper_max", builder.GetBufferPointer() ) ) );
     }
 }
 

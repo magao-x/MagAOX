@@ -872,6 +872,14 @@ class dm
 
     size_t m_timingCapacity{ 20000 }; ///< Queue and consumer-window event cap; zero disables capture.
 
+    std::string m_timingDeliveryClockName{
+        "none" }; ///< Explicit input-producer clock; none preserves receipt-only capture.
+
+    MagAOX::dmTiming::PublicationClock m_timingDeliveryClock{
+        MagAOX::dmTiming::PublicationClock::none }; ///< Resolved producer clock for opt-in delivery measurements.
+
+    double m_timingDeliveryBracketUs{ 1 }; ///< Largest accepted producer-clock capture bracket, microseconds.
+
     dev::dmTiming m_dmTiming; ///< Single-producer capture and consumer-owned timing statistics.
 
     uint64_t m_timingLastRecord{ 0 }; ///< Summary sequence last emitted by this instance.
@@ -884,6 +892,9 @@ class dm
 
     pcf::IndiProperty m_indiP_dmTimingQuality; ///< Timing coverage and quality counters.
 
+    pcf::IndiProperty
+        m_indiP_dmTimingDelivery; ///< Selected producer clock and lifetime delivery-qualification coverage.
+
     pcf::IndiProperty m_indiP_dmTimingState; ///< Endpoint/clock definitions and measurement availability.
 
     /// @}
@@ -891,6 +902,11 @@ class dm
   public:
     /** \name Timing
      * @{ */
+
+    /// Resolve an explicitly selected input-producer clock without assuming that every stream uses CLOCK_ISIO.
+    static bool
+    parseDeliveryClock( const std::string                  &name /**< [in] none, isio, realtime or tai. */,
+                        MagAOX::dmTiming::PublicationClock &clock /**< [out] Resolved clock on success. */ );
 
     /// Observe monitor events on the sole command producer thread.
     void shmimMonitorTiming( const dev::shmimT &tag /**< [in] Main DM monitor tag. */,
@@ -1549,6 +1565,33 @@ void dm<derivedT, realT>::updateDMReaderReleaseINDI()
 }
 
 template <class derivedT, typename realT>
+bool dm<derivedT, realT>::parseDeliveryClock( const std::string &name, MagAOX::dmTiming::PublicationClock &clock )
+{
+    using Clock = MagAOX::dmTiming::PublicationClock;
+
+    if( name == "none" )
+    {
+        clock = Clock::none;
+    }
+    else if( name == "realtime" || ( name == "isio" && CLOCK_ISIO == CLOCK_REALTIME ) )
+    {
+        clock = Clock::realtime;
+    }
+#ifdef CLOCK_TAI
+    else if( name == "tai" || ( name == "isio" && CLOCK_ISIO == CLOCK_TAI ) )
+    {
+        clock = Clock::tai;
+    }
+#endif
+    else
+    {
+        return false;
+    }
+
+    return true;
+}
+
+template <class derivedT, typename realT>
 void dm<derivedT, realT>::updateDMTimings()
 {
     m_dmTiming.update();
@@ -1674,14 +1717,48 @@ int dm<derivedT, realT>::setupDMTimingINDI()
         return -1;
     }
 
+    derived().createROIndiNumber( m_indiP_dmTimingDelivery, "dm_timing_delivery" );
+
+    for( const auto *name : { "enabled",
+                              "clock",
+                              "bracketUs",
+                              "attempted",
+                              "qualified",
+                              "unavailable",
+                              "invalid",
+                              "wideBracket",
+                              "clockDiscontinuity",
+                              "futurePublication",
+                              "identityRejected" } )
+    {
+        m_indiP_dmTimingDelivery.add( pcf::IndiElement( name ) );
+        m_indiP_dmTimingDelivery[name] = 0.0;
+    }
+
+    const auto &delivery                  = m_dmTiming.summary().delivery;
+    m_indiP_dmTimingDelivery["enabled"]   = delivery.enabled ? 1.0 : 0.0;
+    m_indiP_dmTimingDelivery["clock"]     = static_cast<double>( delivery.clock );
+    m_indiP_dmTimingDelivery["bracketUs"] = delivery.bracketLimitNs * 0.001;
+
+    if( derived().registerIndiPropertyReadOnly( m_indiP_dmTimingDelivery ) < 0 )
+    {
+        return -1;
+    }
+
     derived().createROIndiText( m_indiP_dmTimingState, "dm_timing_state", "state" );
     m_indiP_dmTimingState.add( pcf::IndiElement( "clock" ) );
     m_indiP_dmTimingState.add( pcf::IndiElement( "receipt" ) );
     m_indiP_dmTimingState.add( pcf::IndiElement( "send" ) );
+    m_indiP_dmTimingState.add( pcf::IndiElement( "deliveryClock" ) );
     m_indiP_dmTimingState["state"]   = m_dmTiming.enabled() ? "warmingUp" : "disabled";
     m_indiP_dmTimingState["clock"]   = "local: CLOCK_MONOTONIC; publicationInterval: stream writetime; seconds";
     m_indiP_dmTimingState["receipt"] = "first timestamp after successful semaphore wait return";
     m_indiP_dmTimingState["send"]    = "qualified backend submission return; not physical completion";
+    const auto clock                 = m_dmTiming.summary().delivery.clock;
+    m_indiP_dmTimingState["deliveryClock"] =
+        clock == MagAOX::dmTiming::PublicationClock::tai
+            ? "CLOCK_TAI"
+            : ( clock == MagAOX::dmTiming::PublicationClock::realtime ? "CLOCK_REALTIME" : "disabled" );
     return derived().registerIndiPropertyReadOnly( m_indiP_dmTimingState );
 }
 
@@ -1964,6 +2041,25 @@ int dm<derivedT, realT>::setupConfig( mx::app::appConfigurator &config )
                 "size_t",
                 "Maximum queued and retained DM timing events; zero disables." );
 
+    config.add( "dm.deliveryClock",
+                "",
+                "dm.deliveryClock",
+                argType::Required,
+                "dm",
+                "deliveryClock",
+                false,
+                "string",
+                "Explicit input-producer clock for delivery diagnostics: none (default), isio, realtime or tai." );
+    config.add( "dm.deliveryBracketUs",
+                "",
+                "dm.deliveryBracketUs",
+                argType::Required,
+                "dm",
+                "deliveryBracketUs",
+                false,
+                "double",
+                "Maximum accepted delivery clock-capture bracket in microseconds; default 1." );
+
     config.add( "dm.threadPrio",
                 "",
                 "dm.threadPrio",
@@ -2220,6 +2316,16 @@ int dm<derivedT, realT>::loadConfig( mx::app::appConfigurator &config )
 
     config( m_timingWindow, "dm.latencyTime" );
     config( m_timingCapacity, "dm.latencySize" );
+    config( m_timingDeliveryClockName, "dm.deliveryClock" );
+    config( m_timingDeliveryBracketUs, "dm.deliveryBracketUs" );
+
+    if( !parseDeliveryClock( m_timingDeliveryClockName, m_timingDeliveryClock ) ||
+        !mx::math::isFinite( m_timingDeliveryBracketUs ) || m_timingDeliveryBracketUs < 0.001 ||
+        m_timingDeliveryBracketUs > 1000000 )
+    {
+        derivedT::template log<software_error>( { "invalid dm.deliveryClock or dm.deliveryBracketUs" } );
+        return -1;
+    }
 
     if( !mx::math::isFinite( m_timingWindow ) || m_timingWindow < 0 || m_timingWindow >= 9e9 )
     {
@@ -2369,7 +2475,11 @@ int dm<derivedT, realT>::appStartup()
 {
     try
     {
-        m_dmTiming.configure( m_timingWindow, m_timingCapacity );
+        m_dmTiming.configure( m_timingWindow,
+                              m_timingCapacity,
+                              0,
+                              m_timingDeliveryClock,
+                              static_cast<int64_t>( m_timingDeliveryBracketUs * 1000 ) );
     }
     catch( const std::exception &error )
     {
@@ -4551,6 +4661,40 @@ int dm<derivedT, realT>::updateINDI()
                                      static_cast<double>( q.dropped ) },
                                    derived().m_indiDriver,
                                    state );
+
+    const auto &delivery = summary.delivery;
+    const auto &d        = delivery.total;
+    indi::updateIfChanged<double>( m_indiP_dmTimingDelivery,
+                                   { "enabled",
+                                     "clock",
+                                     "bracketUs",
+                                     "attempted",
+                                     "qualified",
+                                     "unavailable",
+                                     "invalid",
+                                     "wideBracket",
+                                     "clockDiscontinuity",
+                                     "futurePublication",
+                                     "identityRejected" },
+                                   { delivery.enabled ? 1.0 : 0.0,
+                                     static_cast<double>( delivery.clock ),
+                                     delivery.bracketLimitNs * 0.001,
+                                     static_cast<double>( d.attempted ),
+                                     static_cast<double>( d.qualified ),
+                                     static_cast<double>( d.unavailable ),
+                                     static_cast<double>( d.invalid ),
+                                     static_cast<double>( d.wideBracket ),
+                                     static_cast<double>( d.clockDiscontinuity ),
+                                     static_cast<double>( d.futurePublication ),
+                                     static_cast<double>( d.identityRejected ) },
+                                   derived().m_indiDriver,
+                                   delivery.enabled && d.qualified ? pcf::IndiProperty::Ok : pcf::IndiProperty::Idle );
+    const auto deliveryClock =
+        delivery.clock == MagAOX::dmTiming::PublicationClock::tai
+            ? "CLOCK_TAI"
+            : ( delivery.clock == MagAOX::dmTiming::PublicationClock::realtime ? "CLOCK_REALTIME" : "disabled" );
+    indi::updateIfChanged(
+        m_indiP_dmTimingState, "deliveryClock", std::string( deliveryClock ), derived().m_indiDriver );
 
     const char *states[] = { "disabled", "warmingUp", "valid", "stale", "unavailable" };
     indi::updateIfChanged( m_indiP_dmTimingState,

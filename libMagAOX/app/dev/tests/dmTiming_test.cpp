@@ -2,9 +2,37 @@
  * \brief Deterministic and concurrent tests of bounded DM timing collection.
  */
 #include "../../../../tests/testXWC.hpp"
-#include "../dmTiming.hpp"
-
 #include <atomic>
+#include <cerrno>
+#include <ctime>
+
+/// \cond DM_TIMING_CLOCK_TEST_HELPERS
+namespace
+{
+std::atomic<size_t> dmTimingClockReads{ 0 }; ///< Count actual collector clock reads without changing production APIs.
+std::atomic<int>    dmTimingFailClock{ -1 }; ///< Optional producer-clock failure, independent of monotonic capture.
+
+/// Count collector clock calls and optionally fail a selected source clock.
+int dmTimingTestClockGettime( clockid_t clock /**< [in] Requested local clock. */,
+                              timespec *stamp /**< [out] Clock sample on success. */ )
+{
+    ++dmTimingClockReads;
+
+    if( clock == dmTimingFailClock.load() )
+    {
+        errno = EIO;
+        return -1;
+    }
+
+    return ::clock_gettime( clock, stamp );
+}
+} //namespace
+/// \endcond
+
+#define clock_gettime dmTimingTestClockGettime
+#include "../dmTiming.hpp"
+#undef clock_gettime
+
 #include <thread>
 #include <vector>
 
@@ -1550,6 +1578,330 @@ TEST_CASE( "DM timing preparation metrics retain independent endpoint qualificat
         CHECK( summary.metrics[metricIndex( Metric::shapePublication )].count == 1 );
         CHECK( summary.metrics[metricIndex( Metric::actuator )].count == 1 );
     }
+}
+
+/// Keep preparation separate from worker handoff and preserve all existing metric identifiers.
+/** \ingroup dmTiming_tests */
+TEST_CASE( "DM timing measures preparation without additional capture clocks", "[dev::dmTiming][delivery]" )
+{
+    Collector collector;
+    collector.configure( 2, 8 );
+    const auto clockCalls = dmTimingClockReads.load();
+
+    for( int64_t index = 0; index < 2; ++index )
+    {
+        const auto receipt = 1000000000 + index * 500000;
+        collector.beginEventAt( true, receipt );
+        collector.markAt( Marker::entry, receipt + 1000 );
+        collector.markAt( Marker::actuatorEnd, receipt + 12000 );
+        collector.importSdk( receipt + 16000, receipt + 116000, Outcome::success, receipt + 13000 );
+        collector.markAt( Marker::finish, receipt + 140000 );
+        collector.finishEvent();
+    }
+
+    collector.update( 1001000000 );
+    const auto &summary = collector.summary();
+    CHECK( dmTimingClockReads.load() == clockCalls );
+    CHECK( summary.metrics[metricIndex( Metric::preparation )].count == 2 );
+    CHECK( summary.metrics[metricIndex( Metric::preparation )].mean == Approx( 13e-6 ) );
+    CHECK( summary.metrics[metricIndex( Metric::sdkDispatch )].mean == Approx( 3e-6 ) );
+    CHECK( summary.metrics[metricIndex( Metric::receiptSdk )].mean == Approx( 16e-6 ) );
+    CHECK_FALSE( summary.delivery.enabled );
+    CHECK( summary.delivery.total.attempted == 0 );
+    CHECK( metricIndex( Metric::preparation ) == 24 );
+    CHECK( metricIndex( Metric::deliveryLower ) == 25 );
+    CHECK( metricIndex( Metric::deliveryUpper ) == 26 );
+    CHECK( metricIndex( Metric::deliveryBracket ) == 27 );
+    CHECK( metricIndex( Metric::count ) == 28 );
+    CHECK( std::string( metricName( Metric::preparation ) ) == "preparation" );
+
+    // clang-format off
+#ifdef DM_TIMING_TEST_DOXYGEN_REF
+    MagAOX::app::dev::dmTiming::calculate;
+    MagAOX::app::dev::dmTiming::importSdk;
+#endif
+    // clang-format on
+}
+
+/// Derive conservative producer-clock delivery bounds once and preserve their detached ownership.
+/** \ingroup dmTiming_tests */
+TEST_CASE( "DM delivery qualifies bounded producer-clock samples", "[dev::dmTiming][delivery]" )
+{
+    const bool detached = GENERATE( false, true );
+    Collector  collector;
+    collector.configure( 2, 8, 0, PublicationClock::tai, 1000 );
+    constexpr int64_t offset = 1792000000000000000LL;
+
+    for( int64_t index = 0; index < 2; ++index )
+    {
+        const auto receipt  = 1000000000 + index * 500000;
+        const auto external = offset + receipt + 50;
+        collector.beginEventClockAt( true, receipt, external, receipt + 100 );
+        collector.inputCounter( 100 + index );
+        collector.inputPublication( external - 5000 );
+        collector.markAt( Marker::finish, receipt + 20000 );
+
+        if( detached )
+        {
+            auto event = collector.detachEvent();
+            CHECK( event.receiptExternalNs == external );
+            CHECK( event.receiptAfterNs == receipt + 100 );
+            CHECK_FALSE( event.deliveryQualified );
+            collector.submitEvent( event );
+            event.receiptExternalNs = 0;
+        }
+        else
+        {
+            collector.finishEvent();
+        }
+    }
+
+    collector.update( 1001000000 );
+    const auto &summary = collector.summary();
+    REQUIRE( summary.delivery.enabled );
+    CHECK( summary.delivery.clock == PublicationClock::tai );
+    CHECK( summary.delivery.bracketLimitNs == 1000 );
+    CHECK( summary.delivery.total.attempted == 2 );
+    CHECK( summary.delivery.total.qualified == 2 );
+    CHECK( summary.delivery.delta.qualified == 2 );
+    CHECK( summary.total.invalid == 0 );
+    const auto &lower   = summary.metrics[metricIndex( Metric::deliveryLower )];
+    const auto &upper   = summary.metrics[metricIndex( Metric::deliveryUpper )];
+    const auto &bracket = summary.metrics[metricIndex( Metric::deliveryBracket )];
+    CHECK( lower.valid );
+    CHECK( upper.valid );
+    CHECK( bracket.valid );
+    CHECK( lower.count == 2 );
+    CHECK( lower.count == upper.count );
+    CHECK( lower.count == bracket.count );
+    CHECK( lower.span == upper.span );
+    CHECK( lower.span == bracket.span );
+    CHECK( lower.mean == Approx( 4.9e-6 ) );
+    CHECK( upper.mean == Approx( 5e-6 ) );
+    CHECK( bracket.mean == Approx( 0.1e-6 ) );
+    collector.update( 1001100000 );
+    CHECK( collector.summary().delivery.total.qualified == 2 );
+    CHECK( collector.summary().delivery.delta.attempted == 0 );
+    CHECK( collector.summary().delivery.delta.qualified == 0 );
+    collector.update( 4000000000LL );
+    CHECK( collector.summary().metrics[metricIndex( Metric::deliveryUpper )].count == 0 );
+    CHECK( collector.summary().delivery.total.qualified == 2 );
+
+    // clang-format off
+#ifdef DM_TIMING_TEST_DOXYGEN_REF
+    MagAOX::app::dev::dmTiming::beginEventClockAt;
+    MagAOX::app::dev::dmTiming::detachEvent;
+    MagAOX::app::dev::dmTiming::submitEvent;
+    MagAOX::app::dev::dmTiming::update;
+#endif
+    // clang-format on
+}
+
+/// Reject unusable delivery observations explicitly without contaminating the legacy timing populations.
+/** \ingroup dmTiming_tests */
+TEST_CASE( "DM delivery records disjoint qualification failures", "[dev::dmTiming][delivery]" )
+{
+    using Field = uint64_t      DeliveryCounters::*;
+    const std::array<Field, 18> expected{ &DeliveryCounters::unavailable,
+                                          &DeliveryCounters::unavailable,
+                                          &DeliveryCounters::invalid,
+                                          &DeliveryCounters::wideBracket,
+                                          &DeliveryCounters::futurePublication,
+                                          &DeliveryCounters::futurePublication,
+                                          &DeliveryCounters::identityRejected,
+                                          &DeliveryCounters::identityRejected,
+                                          &DeliveryCounters::identityRejected,
+                                          &DeliveryCounters::clockDiscontinuity,
+                                          &DeliveryCounters::identityRejected,
+                                          &DeliveryCounters::identityRejected,
+                                          &DeliveryCounters::identityRejected,
+                                          &DeliveryCounters::invalid,
+                                          &DeliveryCounters::invalid,
+                                          &DeliveryCounters::unavailable,
+                                          &DeliveryCounters::unavailable,
+                                          &DeliveryCounters::unavailable };
+
+    for( size_t variant = 0; variant < expected.size(); ++variant )
+    {
+        INFO( variant );
+        Collector collector;
+        collector.configure( 2, 8, 0, PublicationClock::tai, 1000 );
+        constexpr int64_t receipt = 1000000000;
+        constexpr int64_t offset  = 1792000000000000000LL;
+        collector.beginEventClockAt( true, receipt, offset + receipt + 50, receipt + 100 );
+        collector.inputCounter( 100 );
+        collector.inputPublication( offset + receipt - 4950 );
+        collector.markAt( Marker::finish, receipt + 10000 );
+        collector.finishEvent();
+        const auto next     = receipt + 500000;
+        const auto external = offset + next + 50 + ( variant == 9 ? 10000 : 0 );
+        collector.beginEventClockAt( variant != 0,
+                                     variant == 15 ? -1 : next,
+                                     variant == 1 ? -1 : ( variant == 14 ? -2 : external ),
+                                     next + ( variant == 2 ? -1 : ( variant == 3 ? 2000 : 100 ) ) );
+
+        if( variant != 16 )
+        {
+            collector.inputCounter( variant == 6 ? 100 : ( variant == 7 ? 102 : 101 ) );
+        }
+
+        if( variant != 17 )
+        {
+            collector.inputPublication( external - ( variant == 4    ? -1
+                                                     : variant == 5  ? 50
+                                                     : variant == 8  ? 3000000000LL
+                                                     : variant == 12 ? 505000
+                                                                     : 5000 ) );
+        }
+
+        if( variant == 10 )
+        {
+            collector.inputCounter( 999 );
+        }
+
+        if( variant == 11 )
+        {
+            collector.inputPublication( external - 4999 );
+        }
+
+        collector.markAt( Marker::finish, next + 10000 );
+        auto event = collector.detachEvent();
+
+        if( variant == 13 )
+        {
+            event.publicationClock = PublicationClock::realtime;
+        }
+
+        collector.submitEvent( event );
+        collector.update( next + 20000 );
+        const auto &summary = collector.summary();
+        const auto &quality = summary.delivery.total;
+        CHECK( quality.attempted == 2 );
+        CHECK( quality.qualified == 1 );
+        CHECK( quality.*expected[variant] == 1 );
+        CHECK( quality.attempted == quality.qualified + quality.unavailable + quality.invalid + quality.wideBracket +
+                                        quality.clockDiscontinuity + quality.futurePublication +
+                                        quality.identityRejected );
+        CHECK( summary.metrics[metricIndex( Metric::deliveryLower )].count == 1 );
+        CHECK( summary.metrics[metricIndex( Metric::deliveryUpper )].count == 1 );
+        CHECK( summary.metrics[metricIndex( Metric::deliveryBracket )].count == 1 );
+        CHECK( summary.total.events == 2 );
+    }
+
+    // clang-format off
+#ifdef DM_TIMING_TEST_DOXYGEN_REF
+    MagAOX::app::dev::dmTiming::qualifyDelivery;
+    MagAOX::app::dev::dmTiming::inputCounter;
+    MagAOX::app::dev::dmTiming::inputPublication;
+#endif
+    // clang-format on
+}
+
+/// Source epochs and post-loss gaps must not be interpreted as cross-clock discontinuities.
+/** \ingroup dmTiming_tests */
+TEST_CASE( "DM delivery isolates source sessions and recovers after gaps", "[dev::dmTiming][delivery]" )
+{
+    Collector collector;
+    collector.configure( 2, 2, 0, PublicationClock::tai, 1000 );
+    constexpr int64_t offset = 1792000000000000000LL;
+
+    for( int64_t index = 0; index < 3; ++index )
+    {
+        const auto receipt = 1000000000 + index * 500000;
+        collector.beginEventClockAt( true, receipt, offset + receipt + 50, receipt + 100 );
+        collector.inputCounter( 100 + index );
+        collector.inputPublication( offset + receipt - 4950 );
+        collector.markAt( Marker::finish, receipt + 10000 );
+        collector.finishEvent();
+    }
+
+    collector.update( 1002000000 );
+    CHECK( collector.summary().total.dropped == 1 );
+    CHECK( collector.summary().delivery.total.qualified == 2 );
+    const auto receipt = 1002000000;
+    collector.beginEventClockAt( true, receipt, offset + receipt + 10050, receipt + 100 );
+    collector.inputCounter( 104 );
+    collector.inputPublication( offset + receipt + 5050 );
+    collector.markAt( Marker::finish, receipt + 10000 );
+    collector.finishEvent();
+    collector.update( receipt + 20000 );
+    CHECK( collector.summary().delivery.total.identityRejected == 1 );
+    CHECK( collector.summary().delivery.total.clockDiscontinuity == 0 );
+    collector.newSession();
+    const auto restart = receipt + 500000;
+    collector.beginEventClockAt( true, restart, offset + restart + 20050, restart + 100 );
+    collector.inputCounter( 1 );
+    collector.inputPublication( offset + restart + 15050 );
+    collector.markAt( Marker::finish, restart + 10000 );
+    collector.finishEvent();
+    collector.update( restart + 20000 );
+    CHECK( collector.summary().delivery.total.qualified == 3 );
+    CHECK( collector.summary().delivery.total.clockDiscontinuity == 0 );
+    CHECK( collector.summary().metrics[metricIndex( Metric::deliveryUpper )].count == 1 );
+
+    // clang-format off
+#ifdef DM_TIMING_TEST_DOXYGEN_REF
+    MagAOX::app::dev::dmTiming::newSession;
+    MagAOX::app::dev::dmTiming::qualifyDelivery;
+#endif
+    // clang-format on
+}
+
+/// Disabled delivery and synthetic callbacks never add source-clock reads to the real-time path.
+/** \ingroup dmTiming_tests */
+TEST_CASE( "DM delivery clock capture is opt in and preserves errno", "[dev::dmTiming][delivery]" )
+{
+    Collector collector;
+    collector.configure( 0, 8, 0, PublicationClock::tai, 1000 );
+    auto before = dmTimingClockReads.load();
+    collector.beginEvent( true );
+    CHECK( dmTimingClockReads.load() == before );
+    CHECK_FALSE( collector.active() );
+    CHECK_FALSE( collector.summary().delivery.enabled );
+    collector.configure( 2, 8 );
+    before = dmTimingClockReads.load();
+    collector.beginEvent( true );
+    CHECK( dmTimingClockReads.load() == before + 1 );
+    collector.finishEvent();
+    collector.configure( 2, 8, 0, PublicationClock::tai, 1000 );
+    before = dmTimingClockReads.load();
+    collector.beginEvent( false );
+    CHECK( dmTimingClockReads.load() == before );
+    collector.finishEvent();
+    collector.update( 1000000000 );
+    CHECK( collector.summary().delivery.total.unavailable == 1 );
+    before            = dmTimingClockReads.load();
+    errno             = EDOM;
+    dmTimingFailClock = CLOCK_TAI;
+    collector.beginEvent( true );
+    dmTimingFailClock = -1;
+    CHECK( dmTimingClockReads.load() == before + 3 );
+    CHECK( errno == EDOM );
+    collector.mark( Marker::finish );
+    collector.finishEvent();
+    collector.update();
+    CHECK( collector.summary().delivery.total.unavailable == 2 );
+    CHECK( collector.summary().total.invalid == 0 );
+
+    for( const auto clock : { PublicationClock::none, static_cast<PublicationClock>( 3 ) } )
+    {
+        collector.configure( 2, 8, 0, clock, 1000 );
+        CHECK_FALSE( collector.summary().delivery.enabled );
+        CHECK( collector.summary().delivery.clock == PublicationClock::none );
+    }
+
+    for( const int64_t limit : { 0LL, -1LL, 1000000001LL } )
+    {
+        collector.configure( 2, 8, 0, PublicationClock::tai, limit );
+        CHECK_FALSE( collector.summary().delivery.enabled );
+    }
+
+    // clang-format off
+#ifdef DM_TIMING_TEST_DOXYGEN_REF
+    MagAOX::app::dev::dmTiming::beginEvent;
+    MagAOX::app::dev::dmTiming::configure;
+#endif
+    // clang-format on
 }
 
 } // namespace dmTimingTests

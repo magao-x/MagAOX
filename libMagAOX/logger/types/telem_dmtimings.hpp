@@ -1,11 +1,12 @@
 /** \file telem_dmtimings.hpp
- * \brief Controller timing, observed publication intervals, coverage and collection quality.
+ * \brief Controller durations, qualified producer-clock delivery brackets and collection coverage.
  * \ingroup logger_types_files
  */
 #ifndef logger_types_telem_dmtimings_hpp
 #define logger_types_telem_dmtimings_hpp
 
 #include <array>
+#include <cmath>
 #include <iomanip>
 #include <limits>
 #include <sstream>
@@ -60,6 +61,28 @@ struct telem_dmtimings : public flatbuffer_log
 
     static constexpr size_t serviceMetricCount = 20; ///< Complete metric set before preparation segments were appended.
 
+    static constexpr size_t preparationMetricCount = 24; ///< Complete set before direct delivery capture.
+
+    /// Serialize disjoint delivery-capture outcomes without changing their collection interval.
+    static flatbuffers::Offset<DmDeliveryCounters>
+    deliveryCounters( flatbuffers::FlatBufferBuilder   &builder /**< [in,out] Destination builder. */,
+                      const dmTiming::DeliveryCounters &values /**< [in] Lifetime or since-summary outcomes. */ );
+
+    /// Validate optional delivery qualification and its paired lower/upper/bracket populations.
+    static bool validDelivery( const Telem_dmtimings_fb *record /**< [in] Structurally verified timing snapshot. */ );
+
+    /// Extract one optional delivery-quality scalar, returning an unavailable zero for legacy records.
+    template <typename valueT, auto member>
+    static valueT deliveryScalar( void *buffer /**< [in] Serialized timing message. */ );
+
+    /// Extract one optional lifetime or since-summary delivery outcome.
+    template <bool delta, auto member>
+    static uint64_t deliveryCounter( void *buffer /**< [in] Serialized timing message. */ );
+
+    /// Resolve one lifetime or since-summary delivery counter for metadata access.
+    template <bool delta>
+    static logMetaDetail deliveryCounterAccessor( const std::string &member /**< [in] Delivery outcome name. */ );
+
     /// Serialize one quality-counter population without changing its collection interval.
     static flatbuffers::Offset<DmTimingCounters>
     counters( flatbuffers::FlatBufferBuilder &builder /**< [in/out] destination builder */,
@@ -112,6 +135,20 @@ inline flatbuffers::Offset<DmTimingCounters> telem_dmtimings::counters( flatbuff
                                    values.dropped );
 }
 
+inline flatbuffers::Offset<DmDeliveryCounters>
+telem_dmtimings::deliveryCounters( flatbuffers::FlatBufferBuilder &builder, const dmTiming::DeliveryCounters &values )
+{
+    return CreateDmDeliveryCounters( builder,
+                                     values.attempted,
+                                     values.qualified,
+                                     values.unavailable,
+                                     values.invalid,
+                                     values.wideBracket,
+                                     values.clockDiscontinuity,
+                                     values.futurePublication,
+                                     values.identityRejected );
+}
+
 inline telem_dmtimings::messageT::messageT( const dmTiming::Summary &summary )
 {
     static_assert( size_t( dmTiming::Metric::publicationInterval ) == 12 );
@@ -121,7 +158,11 @@ inline telem_dmtimings::messageT::messageT( const dmTiming::Summary &summary )
     static_assert( size_t( dmTiming::Metric::sourceCheck ) == 21 );
     static_assert( size_t( dmTiming::Metric::shapePublication ) == 22 );
     static_assert( size_t( dmTiming::Metric::receiptSdk ) == 23 );
-    static_assert( size_t( dmTiming::Metric::count ) == 24 );
+    static_assert( size_t( dmTiming::Metric::preparation ) == 24 );
+    static_assert( size_t( dmTiming::Metric::deliveryLower ) == 25 );
+    static_assert( size_t( dmTiming::Metric::deliveryUpper ) == 26 );
+    static_assert( size_t( dmTiming::Metric::deliveryBracket ) == 27 );
+    static_assert( size_t( dmTiming::Metric::count ) == 28 );
 
     builder.ForceDefaults( true ); // Preserve nonfinite input for verification even under fast-math comparisons.
 
@@ -141,9 +182,17 @@ inline telem_dmtimings::messageT::messageT( const dmTiming::Summary &summary )
                                            value.valid );
     }
 
-    const auto metrics = builder.CreateVector( rows.data(), rows.size() );
-    const auto total   = counters( builder, summary.total );
-    const auto delta   = counters( builder, summary.delta );
+    const auto metrics       = builder.CreateVector( rows.data(), rows.size() );
+    const auto total         = counters( builder, summary.total );
+    const auto delta         = counters( builder, summary.delta );
+    const auto deliveryTotal = deliveryCounters( builder, summary.delivery.total );
+    const auto deliveryDelta = deliveryCounters( builder, summary.delivery.delta );
+    const auto delivery      = CreateDmDeliveryQuality( builder,
+                                                   summary.delivery.enabled,
+                                                   DmDeliveryClock( summary.delivery.clock ),
+                                                   summary.delivery.bracketLimitNs,
+                                                   deliveryTotal,
+                                                   deliveryDelta );
 
     builder.Finish( CreateTelem_dmtimings_fb( builder,
                                               summary.session,
@@ -160,7 +209,8 @@ inline telem_dmtimings::messageT::messageT( const dmTiming::Summary &summary )
                                               DmTimingAvailability( summary.state ),
                                               metrics,
                                               total,
-                                              delta ) );
+                                              delta,
+                                              delivery ) );
 }
 
 inline bool telem_dmtimings::verify( flatlogs::bufferPtrT &buffer, flatlogs::msgLenT len )
@@ -184,7 +234,7 @@ inline bool telem_dmtimings::verify( flatlogs::bufferPtrT &buffer, flatlogs::msg
 
     if( record->state() < DmTimingAvailability_MIN || record->state() > DmTimingAvailability_MAX ||
         ( rows != legacyMetricCount && rows != publicationMetricCount && rows != workerMetricCount &&
-          rows != serviceMetricCount && rows != metricCount ) )
+          rows != serviceMetricCount && rows != preparationMetricCount && rows != metricCount ) )
     {
         return false;
     }
@@ -220,7 +270,102 @@ inline bool telem_dmtimings::verify( flatlogs::bufferPtrT &buffer, flatlogs::msg
         }
     }
 
-    return true;
+    return validDelivery( record );
+}
+
+inline bool telem_dmtimings::validDelivery( const Telem_dmtimings_fb *record )
+{
+    const auto *quality = record->delivery_quality();
+
+    if( record->metrics()->size() != metricCount )
+    {
+        return quality == nullptr;
+    }
+
+    if( !quality || !quality->total() || !quality->delta() || quality->clock() < DmDeliveryClock_MIN ||
+        quality->clock() > DmDeliveryClock_MAX || quality->bracket_limit_ns() < 0 ||
+        quality->bracket_limit_ns() > 1000000000 ||
+        quality->enabled() != ( quality->clock() != DmDeliveryClock_none ) ||
+        ( quality->enabled() && quality->bracket_limit_ns() == 0 ) )
+    {
+        return false;
+    }
+
+    const auto count = []( const DmDeliveryCounters *value )
+    {
+        return __uint128_t( value->qualified() ) + value->unavailable() + value->invalid() + value->wide_bracket() +
+               value->clock_discontinuity() + value->future_publication() + value->identity_rejected();
+    };
+    const auto *total = quality->total();
+    const auto *delta = quality->delta();
+
+    if( count( total ) != total->attempted() || count( delta ) != delta->attempted() ||
+        ( !quality->enabled() && ( total->attempted() != 0 || quality->bracket_limit_ns() != 0 ) ) ||
+        total->attempted() > record->total()->events() || delta->attempted() > record->delta()->events() )
+    {
+        return false;
+    }
+
+    for( const auto member : { &DmDeliveryCounters::attempted,
+                               &DmDeliveryCounters::qualified,
+                               &DmDeliveryCounters::unavailable,
+                               &DmDeliveryCounters::invalid,
+                               &DmDeliveryCounters::wide_bracket,
+                               &DmDeliveryCounters::clock_discontinuity,
+                               &DmDeliveryCounters::future_publication,
+                               &DmDeliveryCounters::identity_rejected } )
+    {
+        if( ( delta->*member )() > ( total->*member )() )
+        {
+            return false;
+        }
+    }
+
+    std::array<const DmTimingStats *, 3> populations{};
+
+    for( const auto *row : *record->metrics() )
+    {
+        const auto id = size_t( row->metric() );
+
+        if( id >= size_t( dmTiming::Metric::deliveryLower ) )
+        {
+            populations[id - size_t( dmTiming::Metric::deliveryLower )] = row;
+        }
+    }
+
+    const auto *lower   = populations[0];
+    const auto *upper   = populations[1];
+    const auto *bracket = populations[2];
+
+    if( !lower || !upper || !bracket || lower->count() != upper->count() || lower->count() != bracket->count() ||
+        lower->span() != upper->span() || lower->span() != bracket->span() || lower->valid() != upper->valid() ||
+        lower->valid() != bracket->valid() || lower->count() > total->qualified() )
+    {
+        return false;
+    }
+
+    for( const auto *row : populations )
+    {
+        if( !mx::math::isFinite( row->mean() ) || !mx::math::isFinite( row->stddev() ) ||
+            !mx::math::isFinite( row->min() ) || !mx::math::isFinite( row->max() ) ||
+            !mx::math::isFinite( row->span() ) || row->min() < 0 || row->mean() < row->min() ||
+            row->mean() > row->max() || row->stddev() < 0 || row->span() < 0 || row->valid() != ( row->count() >= 2 ) ||
+            ( row->count() == 0 &&
+              ( row->mean() != 0 || row->stddev() != 0 || row->min() != 0 || row->max() != 0 || row->span() != 0 ) ) ||
+            ( row->count() == 1 && ( row->stddev() != 0 || row->mean() != row->min() || row->mean() != row->max() ) ) )
+        {
+            return false;
+        }
+    }
+
+    constexpr double tolerance = 1e-12; // Guard aggregate arithmetic after nanosecond-to-second conversion.
+    return lower->mean() <= upper->mean() + tolerance && lower->min() <= upper->min() + tolerance &&
+           lower->max() <= upper->max() + tolerance && upper->mean() - lower->mean() <= bracket->mean() + tolerance &&
+           upper->min() - lower->min() >= bracket->min() - tolerance &&
+           upper->min() - lower->min() <= bracket->max() + tolerance &&
+           upper->max() - lower->max() >= bracket->min() - tolerance &&
+           upper->max() - lower->max() <= bracket->max() + tolerance &&
+           bracket->max() <= quality->bracket_limit_ns() * 1e-9 + tolerance;
 }
 
 inline std::string telem_dmtimings::msgString( void *buffer, flatlogs::msgLenT len )
@@ -269,6 +414,30 @@ inline std::string telem_dmtimings::msgString( void *buffer, flatlogs::msgLenT l
                    << ",duplicates:" << value->duplicates() << ",counterGaps:" << value->counter_gaps()
                    << ",invalid:" << value->invalid() << ",dropped:" << value->dropped() << '}';
         }
+    }
+
+    const auto *delivery = record->delivery_quality();
+
+    if( delivery )
+    {
+        output << " delivery_quality={enabled:" << delivery->enabled()
+               << ",clock:" << EnumNameDmDeliveryClock( delivery->clock() )
+               << ",bracketLimit_ns:" << delivery->bracket_limit_ns() << '}';
+
+        for( const bool delta : { false, true } )
+        {
+            const auto *value = delta ? delivery->delta() : delivery->total();
+            output << " delivery_" << ( delta ? "delta" : "total" ) << "={attempted:" << value->attempted()
+                   << ",qualified:" << value->qualified() << ",unavailable:" << value->unavailable()
+                   << ",invalid:" << value->invalid() << ",wideBracket:" << value->wide_bracket()
+                   << ",clockDiscontinuity:" << value->clock_discontinuity()
+                   << ",futurePublication:" << value->future_publication()
+                   << ",identityRejected:" << value->identity_rejected() << '}';
+        }
+    }
+    else
+    {
+        output << " delivery_quality=unavailable";
     }
 
     return output.str();
@@ -321,6 +490,66 @@ inline uint64_t telem_dmtimings::counter( void *buffer )
     const auto *values = delta ? record->delta() : record->total();
 
     return values ? ( values->*member )() : 0;
+}
+
+template <typename valueT, auto member>
+inline valueT telem_dmtimings::deliveryScalar( void *buffer )
+{
+    const auto *quality = GetTelem_dmtimings_fb( buffer )->delivery_quality();
+    return quality ? valueT( ( quality->*member )() ) : valueT{};
+}
+
+template <bool delta, auto member>
+inline uint64_t telem_dmtimings::deliveryCounter( void *buffer )
+{
+    const auto *quality = GetTelem_dmtimings_fb( buffer )->delivery_quality();
+    const auto *values  = quality ? ( delta ? quality->delta() : quality->total() ) : nullptr;
+    return values ? ( values->*member )() : 0;
+}
+
+template <bool delta>
+inline logMetaDetail telem_dmtimings::deliveryCounterAccessor( const std::string &member )
+{
+    void *accessor = nullptr;
+
+    if( member == "attempted" )
+    {
+        accessor = reinterpret_cast<void *>( &deliveryCounter<delta, &DmDeliveryCounters::attempted> );
+    }
+    else if( member == "qualified" )
+    {
+        accessor = reinterpret_cast<void *>( &deliveryCounter<delta, &DmDeliveryCounters::qualified> );
+    }
+    else if( member == "unavailable" )
+    {
+        accessor = reinterpret_cast<void *>( &deliveryCounter<delta, &DmDeliveryCounters::unavailable> );
+    }
+    else if( member == "invalid" )
+    {
+        accessor = reinterpret_cast<void *>( &deliveryCounter<delta, &DmDeliveryCounters::invalid> );
+    }
+    else if( member == "wideBracket" )
+    {
+        accessor = reinterpret_cast<void *>( &deliveryCounter<delta, &DmDeliveryCounters::wide_bracket> );
+    }
+    else if( member == "clockDiscontinuity" )
+    {
+        accessor = reinterpret_cast<void *>( &deliveryCounter<delta, &DmDeliveryCounters::clock_discontinuity> );
+    }
+    else if( member == "futurePublication" )
+    {
+        accessor = reinterpret_cast<void *>( &deliveryCounter<delta, &DmDeliveryCounters::future_publication> );
+    }
+    else if( member == "identityRejected" )
+    {
+        accessor = reinterpret_cast<void *>( &deliveryCounter<delta, &DmDeliveryCounters::identity_rejected> );
+    }
+
+    return accessor ? logMetaDetail{ std::string( delta ? "DM delivery_delta_" : "DM delivery_total_" ) + member,
+                                     mx::fits::fitsType<uint64_t>(),
+                                     logMeta::metaTypes::State,
+                                     accessor }
+                    : logMetaDetail{};
 }
 
 template <typename valueT, auto member>
@@ -515,6 +744,40 @@ inline logMetaDetail telem_dmtimings::getAccessor( const std::string &member )
     if( member == "state" )
     {
         return scalarAccessor<int, &Telem_dmtimings_fb::state>( member );
+    }
+
+    if( member == "delivery_enabled" )
+    {
+        return { "DM delivery enabled",
+                 mx::fits::fitsType<bool>(),
+                 logMeta::metaTypes::State,
+                 reinterpret_cast<void *>( &deliveryScalar<bool, &DmDeliveryQuality::enabled> ) };
+    }
+
+    if( member == "delivery_clock" )
+    {
+        return { "DM delivery clock",
+                 mx::fits::fitsType<int>(),
+                 logMeta::metaTypes::State,
+                 reinterpret_cast<void *>( &deliveryScalar<int, &DmDeliveryQuality::clock> ) };
+    }
+
+    if( member == "delivery_bracketLimitNs" )
+    {
+        return { "DM delivery bracket limit",
+                 mx::fits::fitsType<int64_t>(),
+                 logMeta::metaTypes::State,
+                 reinterpret_cast<void *>( &deliveryScalar<int64_t, &DmDeliveryQuality::bracket_limit_ns> ) };
+    }
+
+    if( member.starts_with( "delivery_total_" ) )
+    {
+        return deliveryCounterAccessor<false>( member.substr( 15 ) );
+    }
+
+    if( member.starts_with( "delivery_delta_" ) )
+    {
+        return deliveryCounterAccessor<true>( member.substr( 15 ) );
     }
 
     if( member.starts_with( "total_" ) )

@@ -32,7 +32,12 @@ enum DmTimingMetric : ubyte
     conversion = 20,
     sourceCheck = 21,
     shapePublication = 22,
-    receiptSdk = 23
+    receiptSdk = 23,
+    // Explicit pipeline preparation and producer-clock delivery brackets.
+    preparation = 24,
+    deliveryLower = 25,
+    deliveryUpper = 26,
+    deliveryBracket = 27
 }
 
 enum DmTimingAvailability : ubyte
@@ -73,6 +78,37 @@ table DmTimingCounters
     dropped:ulong;
 }
 
+// Selected producer clock, independent of the monotonic service endpoints.
+enum DmDeliveryClock : ubyte
+{
+    none = 0,
+    realtime = 1,
+    tai = 2
+}
+
+// Exclusive outcome accounting for each attempted delivery capture.
+table DmDeliveryCounters
+{
+    attempted:ulong;
+    qualified:ulong;
+    unavailable:ulong;
+    invalid:ulong;
+    wide_bracket:ulong;
+    clock_discontinuity:ulong;
+    future_publication:ulong;
+    identity_rejected:ulong;
+}
+
+// Optional extension; old records have no direct delivery measurement.
+table DmDeliveryQuality
+{
+    enabled:bool;
+    clock:DmDeliveryClock;
+    bracket_limit_ns:long;
+    total:DmDeliveryCounters (required);
+    delta:DmDeliveryCounters (required);
+}
+
 table Telem_dmtimings_fb
 {
     session:ulong;
@@ -90,6 +126,7 @@ table Telem_dmtimings_fb
     metrics:[DmTimingStats] (required);
     total:DmTimingCounters (required);
     delta:DmTimingCounters (required);
+    delivery_quality:DmDeliveryQuality;
 }
 
 root_type Telem_dmtimings_fb;

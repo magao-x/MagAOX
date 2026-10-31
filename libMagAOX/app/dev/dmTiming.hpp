@@ -71,6 +71,35 @@ class dmTiming
 
     bool m_counterValid{ false }; ///< Previous counter is suitable for quality comparison.
 
+    MagAOX::dmTiming::PublicationClock m_publicationClock{ MagAOX::dmTiming::PublicationClock::none };
+    ///< Immutable explicit source-clock selection; none performs no additional producer clock reads.
+
+    int64_t m_deliveryBracketLimitNs{ 0 }; ///< Positive maximum clock-capture uncertainty when delivery is enabled.
+
+    MagAOX::dmTiming::DeliveryCounters m_deliveryTotal; ///< Consumer-only disjoint lifetime delivery outcomes.
+
+    MagAOX::dmTiming::DeliveryCounters m_deliveryPrevious; ///< Coverage already included in the preceding summary.
+
+    uint64_t m_deliverySession{ 0 }; ///< Last consumed delivery event's monitor epoch.
+
+    uint64_t m_deliverySequence{ 0 }; ///< Last consumed event for contiguous delivery qualification.
+
+    uint64_t m_deliveryCounter{ 0 }; ///< Previously observed input counter, independent of clock qualification.
+
+    int64_t m_deliveryPublicationNs{ -1 }; ///< Previously observed publication for repeated-identity rejection.
+
+    bool m_deliveryCounterValid{ false }; ///< Prior event supplied a usable observed identity.
+
+    bool m_deliveryHavePair{ false }; ///< Prior adjacent qualified event supplies a clock-offset interval.
+
+    int64_t m_deliveryOffsetLower{ 0 }; ///< Lower selected-clock minus monotonic offset from the preceding pair.
+
+    int64_t m_deliveryOffsetUpper{ 0 }; ///< Upper selected-clock minus monotonic offset from the preceding pair.
+
+    /// Qualify one consumed delivery bracket once, before retention or statistics recomputation.
+    void
+    qualifyDelivery( MagAOX::dmTiming::Event &event /**< [in,out] Completed event and derived delivery bounds. */ );
+
     bool m_everEvent{ false }; ///< Current epoch previously supplied an event, for stale reporting.
 
     /// Count one consumed event independently of its retention in the time window.
@@ -97,7 +126,10 @@ class dmTiming
     void
     configure( double windowSec /**< [in] Positive elapsed-time window; zero disables. */,
                size_t capacity /**< [in] Maximum queued and retained events; zero disables. */,
-               double excursionSec = 0 /**< [in] Positive publication excursion threshold; zero disables pairs. */ );
+               double excursionSec = 0 /**< [in] Positive publication excursion threshold; zero disables pairs. */,
+               MagAOX::dmTiming::PublicationClock publicationClock = MagAOX::dmTiming::PublicationClock::none
+               /**< [in] Explicit producer-clock contract; none disables delivery measurement. */,
+               int64_t maxBracketNs = 1000 /**< [in] Maximum receipt-clock capture uncertainty, in nanoseconds. */ );
 
     /// Return whether collection was configured with nonzero storage and duration.
     bool enabled() const;
@@ -111,6 +143,12 @@ class dmTiming
     /// Start an event with a supplied receipt timestamp, primarily for deterministic validation.
     void beginEventAt( bool    hasReceipt /**< [in] Whether the event has a real receipt. */,
                        int64_t receiptNs /**< [in] Monotonic receipt timestamp, or -1 on capture failure. */ );
+
+    /// Supply a deterministic paired receipt/source-clock capture without reading clocks.
+    void beginEventClockAt( bool    hasReceipt /**< [in] A real semaphore receipt preceded the command. */,
+                            int64_t receiptNs /**< [in] First monotonic receipt timestamp, or -1. */,
+                            int64_t receiptExternalNs /**< [in] Selected producer-clock sample, or -1. */,
+                            int64_t receiptAfterNs /**< [in] Monotonic timestamp immediately after that sample. */ );
 
     /// Record one endpoint with an errno-preserving clock read.
     void mark( MagAOX::dmTiming::Marker marker /**< [in] Endpoint to record. */ );
@@ -196,7 +234,11 @@ inline int64_t dmTiming::monotonicNowNs()
     return rv == 0 ? static_cast<int64_t>( ts.tv_sec ) * 1000000000LL + ts.tv_nsec : -1;
 }
 
-inline void dmTiming::configure( double windowSec, size_t capacity, double excursionSec )
+inline void dmTiming::configure( double                             windowSec,
+                                 size_t                             capacity,
+                                 double                             excursionSec,
+                                 MagAOX::dmTiming::PublicationClock publicationClock,
+                                 int64_t                            maxBracketNs )
 {
     static_assert( std::atomic<uint64_t>::is_always_lock_free, "DM timing handoff requires lock-free positions" );
 
@@ -229,6 +271,25 @@ inline void dmTiming::configure( double windowSec, size_t capacity, double excur
     m_summary.intervalPairs.enabled   = m_excursionSec > 0;
     m_summary.intervalPairs.threshold = m_excursionSec;
 
+    using MagAOX::dmTiming::PublicationClock;
+    bool supportedClock = publicationClock == PublicationClock::realtime;
+
+#ifdef CLOCK_TAI
+    supportedClock = supportedClock || publicationClock == PublicationClock::tai;
+#endif
+
+    m_publicationClock                = m_enabled && maxBracketNs > 0 && maxBracketNs <= 1000000000 && supportedClock
+                                            ? publicationClock
+                                            : PublicationClock::none;
+    m_deliveryBracketLimitNs          = m_publicationClock != PublicationClock::none ? maxBracketNs : 0;
+    m_summary.delivery.enabled        = m_publicationClock != PublicationClock::none;
+    m_summary.delivery.clock          = m_publicationClock;
+    m_summary.delivery.bracketLimitNs = m_deliveryBracketLimitNs;
+    m_deliveryTotal = m_deliveryPrevious = {};
+    m_deliverySession = m_deliverySequence = m_deliveryCounter = 0;
+    m_deliveryPublicationNs                                    = -1;
+    m_deliveryCounterValid = m_deliveryHavePair = false;
+
     m_total        = {};
     m_previous     = {};
     m_counterValid = false;
@@ -252,7 +313,32 @@ inline void dmTiming::beginEvent( bool hasReceipt )
         return;
     }
 
-    beginEventAt( hasReceipt, hasReceipt ? monotonicNowNs() : -1 );
+    const auto receipt = hasReceipt ? monotonicNowNs() : -1;
+
+    if( !hasReceipt || m_publicationClock == MagAOX::dmTiming::PublicationClock::none )
+    {
+        beginEventAt( hasReceipt, receipt );
+        return;
+    }
+
+    const int savedErrno = errno;
+    timespec  stamp{};
+    clockid_t clock = CLOCK_REALTIME;
+
+#ifdef CLOCK_TAI
+    if( m_publicationClock == MagAOX::dmTiming::PublicationClock::tai )
+    {
+        clock = CLOCK_TAI;
+    }
+#endif
+
+    const auto result = clock_gettime( clock, &stamp );
+    const auto after  = monotonicNowNs();
+    const bool valid  = result == 0 && stamp.tv_sec >= 0 && stamp.tv_nsec >= 0 && stamp.tv_nsec < 1000000000 &&
+                       stamp.tv_sec <= ( std::numeric_limits<int64_t>::max() - stamp.tv_nsec ) / 1000000000;
+    const auto external = valid ? int64_t( stamp.tv_sec ) * 1000000000 + stamp.tv_nsec : -1;
+    errno               = savedErrno;
+    beginEventClockAt( true, receipt, external, after );
 }
 
 inline void dmTiming::beginEventAt( bool hasReceipt, int64_t receiptNs )
@@ -268,15 +354,28 @@ inline void dmTiming::beginEventAt( bool hasReceipt, int64_t receiptNs )
         finishEvent();
     }
 
-    m_event           = {};
-    m_event.sequence  = ++m_eventSequence;
-    m_event.session   = m_session.load( std::memory_order_relaxed );
-    m_event.synthetic = !hasReceipt;
-    m_active          = true;
+    m_event                  = {};
+    m_event.sequence         = ++m_eventSequence;
+    m_event.session          = m_session.load( std::memory_order_relaxed );
+    m_event.synthetic        = !hasReceipt;
+    m_event.publicationClock = m_publicationClock;
+    m_active                 = true;
 
     if( hasReceipt )
     {
         markAt( MagAOX::dmTiming::Marker::receipt, receiptNs );
+    }
+}
+
+inline void
+dmTiming::beginEventClockAt( bool hasReceipt, int64_t receiptNs, int64_t receiptExternalNs, int64_t receiptAfterNs )
+{
+    beginEventAt( hasReceipt, receiptNs );
+
+    if( m_active && hasReceipt && m_publicationClock != MagAOX::dmTiming::PublicationClock::none )
+    {
+        m_event.receiptExternalNs = receiptExternalNs;
+        m_event.receiptAfterNs    = receiptAfterNs;
     }
 }
 
@@ -449,6 +548,7 @@ inline void dmTiming::inputCounter( uint64_t counter )
         return;
     }
 
+    m_event.identityChanged |= m_event.counterValid && m_event.counter != counter;
     m_event.counter      = counter;
     m_event.counterValid = true;
 }
@@ -460,6 +560,7 @@ inline void dmTiming::inputPublication( int64_t publicationNs )
         return;
     }
 
+    m_event.identityChanged |= m_event.publicationNs > 0 && m_event.publicationNs != publicationNs;
     m_event.publicationNs = publicationNs > 0 ? publicationNs : -1;
 }
 
@@ -539,6 +640,111 @@ inline void dmTiming::newSession()
     m_session.fetch_add( 1, std::memory_order_release );
 }
 
+inline void dmTiming::qualifyDelivery( MagAOX::dmTiming::Event &event )
+{
+    using namespace MagAOX::dmTiming;
+    event.deliveryQualified = false;
+    event.deliveryLowerNs = event.deliveryUpperNs = event.deliveryBracketNs = -1;
+
+    if( m_publicationClock == PublicationClock::none )
+    {
+        return;
+    }
+
+    ++m_deliveryTotal.attempted;
+    const bool sameSession = event.session == m_deliverySession;
+    const bool contiguous  = sameSession && event.sequence == m_deliverySequence + 1;
+    const bool identityProgress =
+        !sameSession || !m_deliveryCounterValid ||
+        ( contiguous && m_deliveryCounter != std::numeric_limits<uint64_t>::max() &&
+          event.counter == m_deliveryCounter + 1 && event.publicationNs > m_deliveryPublicationNs );
+    m_deliverySession       = event.session;
+    m_deliverySequence      = event.sequence;
+    m_deliveryCounter       = event.counter;
+    m_deliveryPublicationNs = event.publicationNs;
+    m_deliveryCounterValid  = event.counterValid && event.publicationNs > 0 && !event.synthetic;
+    m_deliveryHavePair      = m_deliveryHavePair && contiguous;
+
+    const auto fail = [this]( uint64_t DeliveryCounters::*reason )
+    {
+        ++( m_deliveryTotal.*reason );
+        m_deliveryHavePair = false;
+    };
+    const auto receipt =
+        ( event.valid & ( 1u << markerIndex( Marker::receipt ) ) ) ? event.markers[markerIndex( Marker::receipt )] : -1;
+
+    if( event.synthetic || receipt < 0 || !event.counterValid || event.publicationNs <= 0 ||
+        event.receiptExternalNs == -1 || event.receiptAfterNs == -1 )
+    {
+        fail( &DeliveryCounters::unavailable );
+        return;
+    }
+
+    if( event.publicationClock != m_publicationClock || event.receiptExternalNs <= 0 || event.receiptAfterNs < receipt )
+    {
+        fail( &DeliveryCounters::invalid );
+        return;
+    }
+
+    const auto bracket = event.receiptAfterNs - receipt;
+
+    if( bracket > m_deliveryBracketLimitNs )
+    {
+        fail( &DeliveryCounters::wideBracket );
+        return;
+    }
+
+    if( event.identityChanged || event.outcome == Outcome::rejected || !identityProgress )
+    {
+        fail( &DeliveryCounters::identityRejected );
+        return;
+    }
+
+    if( event.publicationNs > event.receiptExternalNs )
+    {
+        fail( &DeliveryCounters::futurePublication );
+        return;
+    }
+
+    const auto upper = event.receiptExternalNs - event.publicationNs;
+
+    // A source publication inside the receipt-clock uncertainty could be newer than the actual wakeup.
+    // Require the complete bracket to follow it rather than admitting a clipped near-zero latency.
+    if( upper < bracket )
+    {
+        fail( &DeliveryCounters::futurePublication );
+        return;
+    }
+
+    // The declared producer clock must describe a recent observed input. In particular, a TAI/realtime
+    // mismatch must not silently qualify the positive leap-second offset as controller delivery.
+    if( upper > m_windowNs )
+    {
+        fail( &DeliveryCounters::identityRejected );
+        return;
+    }
+
+    const auto        offsetLower           = event.receiptExternalNs - event.receiptAfterNs;
+    const auto        offsetUpper           = event.receiptExternalNs - receipt;
+    constexpr int64_t continuityToleranceNs = 100; // Small capture/quantization tolerance; not a delivery reserve.
+
+    if( m_deliveryHavePair && ( __int128( offsetLower ) > __int128( m_deliveryOffsetUpper ) + continuityToleranceNs ||
+                                __int128( offsetUpper ) < __int128( m_deliveryOffsetLower ) - continuityToleranceNs ) )
+    {
+        fail( &DeliveryCounters::clockDiscontinuity );
+        return;
+    }
+
+    m_deliveryOffsetLower   = offsetLower;
+    m_deliveryOffsetUpper   = offsetUpper;
+    m_deliveryHavePair      = true;
+    event.deliveryQualified = true;
+    event.deliveryLowerNs   = upper - bracket;
+    event.deliveryUpperNs   = upper;
+    event.deliveryBracketNs = bracket;
+    ++m_deliveryTotal.qualified;
+}
+
 inline void dmTiming::countEvent( const MagAOX::dmTiming::Event &event )
 {
     using namespace MagAOX::dmTiming;
@@ -598,6 +804,7 @@ inline void dmTiming::update( int64_t nowNs )
             break;
         }
 
+        qualifyDelivery( event );
         countEvent( event );
 
         if( event.session > m_summary.session )
@@ -652,7 +859,23 @@ inline void dmTiming::update( int64_t nowNs )
         m_summary.delta.*field = m_total.*field - m_previous.*field;
     }
 
-    m_previous = m_total;
+    m_previous                                             = m_total;
+    m_summary.delivery.total                               = m_deliveryTotal;
+    constexpr uint64_t DeliveryCounters::*deliveryFields[] = { &DeliveryCounters::attempted,
+                                                               &DeliveryCounters::qualified,
+                                                               &DeliveryCounters::unavailable,
+                                                               &DeliveryCounters::invalid,
+                                                               &DeliveryCounters::wideBracket,
+                                                               &DeliveryCounters::clockDiscontinuity,
+                                                               &DeliveryCounters::futurePublication,
+                                                               &DeliveryCounters::identityRejected };
+
+    for( auto field : deliveryFields )
+    {
+        m_summary.delivery.delta.*field = m_deliveryTotal.*field - m_deliveryPrevious.*field;
+    }
+
+    m_deliveryPrevious = m_deliveryTotal;
 
     calculate( nowNs );
 }
@@ -812,63 +1035,31 @@ inline void dmTiming::calculate( int64_t nowNs )
 
         previousEvent = &event;
 
-        constexpr Metric metrics[] = { Metric::dispatch,
-                                       Metric::actuator,
-                                       Metric::sdk,
-                                       Metric::saturation,
-                                       Metric::delta,
-                                       Metric::post,
-                                       Metric::throughDelta,
-                                       Metric::callback,
-                                       Metric::receiptCallback,
-                                       Metric::sdkDispatch,
-                                       Metric::readerRelease,
-                                       Metric::staging,
-                                       Metric::publication,
-                                       Metric::sdkWait,
-                                       Metric::sdkTail,
-                                       Metric::sdkService,
-                                       Metric::conversion,
-                                       Metric::sourceCheck,
-                                       Metric::shapePublication };
-        constexpr Marker starts[]  = { Marker::receipt,
-                                       Marker::actuatorStart,
-                                       Marker::sdkStart,
-                                       Marker::satStart,
-                                       Marker::deltaStart,
-                                       Marker::postStart,
-                                       Marker::entry,
-                                       Marker::entry,
-                                       Marker::receipt,
-                                       Marker::dispatch,
-                                       Marker::entry,
-                                       Marker::stagingStart,
-                                       Marker::publicationStart,
-                                       Marker::waitStart,
-                                       Marker::sdkEnd,
-                                       Marker::sdkStart,
-                                       Marker::actuatorStart,
-                                       Marker::conversionEnd,
-                                       Marker::sourceCheckEnd };
-        constexpr Marker ends[]    = { Marker::entry,
-                                       Marker::actuatorEnd,
-                                       Marker::sdkEnd,
-                                       Marker::satEnd,
-                                       Marker::deltaEnd,
-                                       Marker::postEnd,
-                                       Marker::deltaEnd,
-                                       Marker::finish,
-                                       Marker::finish,
-                                       Marker::sdkStart,
-                                       Marker::readRelease,
-                                       Marker::stagingEnd,
-                                       Marker::publicationEnd,
-                                       Marker::waitEnd,
-                                       Marker::sdkReady,
-                                       Marker::sdkReady,
-                                       Marker::conversionEnd,
-                                       Marker::sourceCheckEnd,
-                                       Marker::actuatorEnd };
+        if( event.deliveryQualified )
+        {
+            addValue( Metric::deliveryLower, event.deliveryLowerNs, receipt, receipt );
+            addValue( Metric::deliveryUpper, event.deliveryUpperNs, receipt, receipt );
+            addValue( Metric::deliveryBracket, event.deliveryBracketNs, receipt, receipt );
+        }
+
+        constexpr Metric metrics[] = { Metric::dispatch,         Metric::actuator,      Metric::sdk,
+                                       Metric::saturation,       Metric::delta,         Metric::post,
+                                       Metric::throughDelta,     Metric::callback,      Metric::receiptCallback,
+                                       Metric::sdkDispatch,      Metric::readerRelease, Metric::staging,
+                                       Metric::publication,      Metric::sdkWait,       Metric::sdkTail,
+                                       Metric::sdkService,       Metric::conversion,    Metric::sourceCheck,
+                                       Metric::shapePublication, Metric::preparation };
+        constexpr Marker starts[]  = {
+            Marker::receipt,          Marker::actuatorStart, Marker::sdkStart,       Marker::satStart,
+            Marker::deltaStart,       Marker::postStart,     Marker::entry,          Marker::entry,
+            Marker::receipt,          Marker::dispatch,      Marker::entry,          Marker::stagingStart,
+            Marker::publicationStart, Marker::waitStart,     Marker::sdkEnd,         Marker::sdkStart,
+            Marker::actuatorStart,    Marker::conversionEnd, Marker::sourceCheckEnd, Marker::receipt };
+        constexpr Marker ends[] = {
+            Marker::entry,       Marker::actuatorEnd,   Marker::sdkEnd,         Marker::satEnd,      Marker::deltaEnd,
+            Marker::postEnd,     Marker::deltaEnd,      Marker::finish,         Marker::finish,      Marker::sdkStart,
+            Marker::readRelease, Marker::stagingEnd,    Marker::publicationEnd, Marker::waitEnd,     Marker::sdkReady,
+            Marker::sdkReady,    Marker::conversionEnd, Marker::sourceCheckEnd, Marker::actuatorEnd, Marker::dispatch };
 
         for( size_t i = 0; i < sizeof( metrics ) / sizeof( metrics[0] ); ++i )
         {
