@@ -155,9 +155,9 @@ class xInstGraph : public MagAOXApp<true>
 
     /// Serialize the current graph state into a complete XML document.
     /** \returns 0 on success with the document in xml.
-      * \returns -1 on a serialization failure, with the reason in error.
-      */
-    int renderGraph( std::string &xml,  /**< [out] complete XML document */
+     * \returns -1 on a serialization failure, with the reason in error.
+     */
+    int renderGraph( std::string &xml, /**< [out] complete XML document */
                      std::string &error /**< [out] serialization failure */ );
 
     /// Write and verify a complete graph snapshot through the staging descriptor.
