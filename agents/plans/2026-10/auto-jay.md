@@ -75,25 +75,417 @@ Analyze the above task and create a plan to implement a solution.  Document your
 Review AGENTS.md.  Do not alter any text above the "Agent Findings and Plan" below.  Do not begin implementation until the user has reviewed the plan and answered any questions.
 
 # Agent Findings and Plan
-<!-- This section will be filled out by the agent -->
+
+Status: proposed plan, 2026-10-30. Source review and planning only; implementation
+has not started. Reviewed on workstation `mx11`, on branch `jrmales/auto-jay`.
+No instrument connections or commands were used. Local `/opt/MagAOX/config`
+files were read only as examples; they do not establish the deployed setup.
 
 ## Task Summary
-<!-- The agent should summarize the task as they understand it -->
+
+Implement a two-DM registration sensor, provisionally named `autoJay`, beginning
+with `camflowfs`. After the existing tweeter/WFS alignment, acquire an unpoked
+image and separate NCPC and tweeter poke images, subtract the unpoked image,
+register each result to its own recorded reference, and publish the change in
+their relative registration. A separate `closedLoopIndi` instance will drive
+`ttmperi` toward the calibrated alignment.
+
+Reference capture will save a complete calibration containing both patterns,
+both measured references, their aligned relationship, and the required camera
+and optical setup. Loading a calibration selects its patterns and references
+together. The image processing will support different reference/live ROI sizes
+and origins without fitting the pupil or generating new poke patterns.
+
+### Source findings and reuse
+
+| Existing code | Finding and planned use |
+| --- | --- |
+| `apps/dmPokeXCorr/dmPokeXCorr.hpp` | Use its application, INDI, telemetry, diagnostic FITS, and cross-correlation conventions. Its reference comes from a zonal response matrix, and `analyzeSensor()` requires equal image dimensions; neither behavior meets this task unchanged. |
+| `libMagAOX/app/dev/dmPokeWFS.hpp` | Provides the current single-DM acquisition conventions, combined-DM trigger, settling, measurement publication, and diagnostic metadata. Its sequence is alternating positive/negative pokes on one channel. It cannot implement the requested three-state acquisition unchanged. |
+| `apps/dmPokeCenter/dmPokeCenter.hpp` | Records an unpoked pupil, but also takes a shutter-closed dark and uses positive/negative poke differencing. The new baseline must be an illuminated, unpoked image; do not copy its shutter or pupil-fitting procedure. |
+| `apps/shmimIntegrator/shmimIntegrator.hpp` | Follow calibration placement under `m_calibDir/m_configName`, timestamped `__T` names, FITS I/O, newest-file discovery, and generation checks around asynchronous loading. Extend these ideas to complete bundles rather than independently recalling two images. |
+| `libMagAOX/common/roiGeometry.hpp`, `libMagAOX/app/dev/stdCamera.hpp` | Reuse ROI coordinate conversion and the coherent applied `roi_region_state` property. Camera `state_string` is optional: PVCAM and CRED2 disable it. Explicit metadata is needed. |
+| `mx/improc/imageXCorrFFT.hpp` in installed/local mxlib | Requires equal array dimensions, but supports masks and subpixel registration. The installed version has `mftLimitPeakSearch(true)`; `maxLag()` alone does not constrain its MFT coarse-peak search. Verify the dependency version before using that API. |
+| `apps/closedLoopIndi/closedLoopIndi.hpp` | Accepts a two-component measurement and counter, then applies a configured 2-by-2 matrix. A changed counter triggers processing; it does not validate sample age, property state, or finite values. |
+| `apps/flipperCtrl/flipperCtrl.hpp` | Provides checked temporary-write/rename persistence to follow for atomic calibration publication. |
+
+The acquisition review also found that semaphore wakes can outnumber distinct
+camera images, and existing wait loops can retry timeouts indefinitely. A
+combined-DM stream event is not proof that a particular poke has reached the
+optics. The new acquisition path needs explicit frame identity, bounded waits,
+and cancellation/cleanup tests. The unresolved timing/sign investigation is
+recorded in `agents/plans/2026-09/dm-poke-sign-synchronization.md`; this task must
+not assume that investigation established the physical cause.
 
 ## Key Assumptions
-<!-- The agent should list any assumptions they have made -->
+
+1. The operator establishes the initial alignment and optical configuration.
+   This app verifies stage positions; it does not move setup stages, `ttmpupil`,
+   or `stagecamlensx/y`. Camlens follow-up remains an operator task initially.
+2. `camflowfs` is the first commissioned profile. Camera selection and calibration
+   metadata will also support a separate `camsci1` profile; its optical positions
+   and control matrix must be supplied before commissioning it.
+3. Each DM has an exclusively reserved additive poke channel. Zero in those
+   channels means no additional poke, while existing flats and other channels
+   remain active. Channel names, ownership, and transport are not yet confirmed.
+4. Patterns will be supplied as finite two-dimensional FITS command maps with
+   the corresponding DM dimensions and a documented scalar amplitude per DM.
+   Save the maps and amplitudes in each calibration. Pattern generation and
+   optimization are outside this task.
+5. The first version supports ROI size/origin changes with unchanged binning,
+   orientation, and pixel scale. Changes in binning or optical magnification
+   require a separate calibration; uncalibrated resampling is excluded.
+   **Confirmed by the user during plan review:** the NCPC and tweeter images
+   share one live ROI, and both reference images share one capture ROI. Only
+   the live ROI versus the reference-capture ROI may differ. The unpoked
+   baseline also uses that acquisition's ROI; any within-sequence ROI change
+   invalidates the whole sequence. Store one geometry per reference pair and
+   compute one shared reference-to-live mapping for both correlators.
+6. Reference capture defines the current aligned relationship as the desired
+   relationship. Any independently specified adjustment to that zero point
+   must be explicit, rather than silently changing a reference or controller
+   setpoint.
+7. Start idle, with corrections disabled. Calibration capture, reload, camera
+   changes, invalid setup, and measurement failures require an open correction
+   loop. Recovery does not automatically close it.
 
 ## Requirements
-<!-- The agent should list the requirements to which they are planning -->
+
+1. **Acquisition:** snapshot one calibration/setup generation; clear both owned
+   poke channels and confirm/settle their removal before averaging an unpoked
+   baseline; apply only the NCPC pattern, settle and average; clear NCPC and
+   confirm/settle its removal before applying the tweeter pattern; settle and
+   average tweeter, then clear it. Correlate the two baseline-subtracted images.
+   Ordered writes to independent DM pipelines alone do not establish this
+   ordering at the camera. No phase may contain both patterns.
+2. **Frame integrity:** copy image data and its source counter/timestamp as one
+   accepted sample, count each source frame at most once, discard configured
+   settling frames, and bound the whole phase wait. Abort on timeout, stream
+   recreation, camera reconfiguration, stop, shutdown, or a setup/calibration
+   generation change. Keep slow processing and disk I/O outside image locks.
+3. **Cleanup:** all normal, cancelled, failed, and exception exits clear both
+   owned additive channels. Validate a channel before writing; never clear a
+   combined stream or another writer's channel. Join workers before releasing
+   stream/semaphore resources. A failed cleanup is an explicit fault.
+4. **Setup validity:** require current, connected, settled device information.
+   For `camflowfs`, check `stagelosel` in pupil and the calibrated numeric
+   `stageflowfs` position, initially 32.0. Local configuration calls 33.0 the
+   `pupil` preset, so that preset alone is insufficient. For `camsci1`, check the
+   calibrated `fwscind`, `stagebs`, and `stagesci1` settings. Record any additional
+   mask/filter requirements in the selected profile. Recheck before every
+   phase and before publication.
+5. **Calibration:** capture/load patterns, references, geometry, setup, and
+   aligned offset as one versioned unit. Automatically recall the newest
+   complete valid bundle for the selected camera/profile, then verify its
+   compatibility with the current setup. Report the selected ID and mismatches.
+   Do not silently select an older optical setup just because its stages match.
+6. **Registration:** use one mapping from the shared reference ROI to the shared
+   live ROI, with known detector coordinates and valid-pixel masks. Build
+   equal-sized working arrays for mxlib without treating padding as data.
+   Require both references to have their declared common geometry. Permit
+   partial pattern visibility when enough unambiguous signal remains.
+7. **Acceptance:** independently validate both DM registrations and their
+   differential. Require finite data, nonzero usable signal, sufficient valid
+   overlap, adequate poke SNR, acceptable normalized correlation and peak
+   uniqueness, and bounded individual/differential displacement. Reject peaks
+   at the search boundary, sign-inverted matches, and ambiguous grid aliases.
+8. **Output:** publish one complete `measurement` vector containing
+   `delta_x`, `delta_y`, and a new `counter` only for an accepted pair. Publish
+   quality/status separately. No successful counter advance for reference
+   capture, partial acquisition, or rejection.
+9. **Control:** `closedLoopIndi` owns `ttmperi` commands. Its reference values
+   are zero because the sensor applies the calibration offset. Confirm the
+   camera-specific matrix and signs; do not copy another camera's matrix.
+   Hold `ttmperi` stable throughout a baseline/NCPC/tweeter sequence and wait
+   for the preceding correction to settle before the next baseline.
+   Exercise startup/reconnect/replay behavior before declaring the interface
+   safe for closed-loop use.
+10. **Observability:** expose calibration identity, setup mismatch, acquisition
+    state, per-DM displacement and quality, final residual, and rejection reason.
+    Preserve useful FITS diagnostics and measurement/frame/DM counters so a bad
+    measurement can be reproduced offline.
 
 ## Questions and Points of Clarification
-<!-- The agent should list any open issues requiring user clarification -->
+
+These questions should be resolved at plan review; proposed defaults are given
+where they permit a concrete design.
+
+1. **Operating sequence and optics:** confirm setup checking only, with manual
+   camlens follow-up. What position tolerances and mask/filter settings must
+   match? Is the main AO loop open or closed during these pokes, and should the
+   tweeter/WFS alignment loop be paused while `ttmperi` corrections run? Its
+   state can affect the measured reference response.
+
+ANSWER: AO loop needs to be off.  tweeter/WFS alignment loop off as well.
+
+2. **DM channels and execution host:** which dedicated NCPC/tweeter channels
+   should this app own, and where should it run? Local examples use
+   `dm02disp06` and `dm01disp06` for existing alignment apps; these are not
+   automatically available. Confirm access to the camera, both poke channels,
+   and both combined trigger streams, including any cross-host relays.
+
+ANSWER: use dm0Xdisp02
+
+3. **Pattern and ROI contract:** are full DM-sized FITS maps plus per-DM scalar
+   amplitudes acceptable? Is supporting different ROI sizes/origins at the same
+   binning sufficient for the first version? Proposed answer: yes to both.
+
+ANSWER: yes to both. 
+
+4. **Calibration selection and zero:** should recall mean newest valid bundle
+   within an explicitly selected profile, followed by setup verification, as
+   proposed? Does recording an aligned pair define zero residual, or is there
+   an externally measured nonzero offset that must be entered separately?
+
+ANSWER: Yes.  Yes let's start with assumption that the aligned references define zero without an additional offset. 
+
+5. **Controller calibration and acceptance targets:** is there a measured
+   `camflowfs` residual-to-`ttmperi` matrix? What alignment precision, capture
+   range, cycle time, and permissible correction per cycle are required? These
+   determine averaging, lag bounds, gains, and final acceptance thresholds.
+
+ANSWER: No, it has not been measured yet.  Start with 5 pixels as the largest shift we will report as valid, but make it configurable.  Anything larger should not be published.  For now it's fine to let the operator decide when to open the loop, not defining a convergence tolerance for automated stopping.  Assume gain=0.1 to start.
+
+No hardware interrogation is needed to begin the offline implementation after
+review. Unknown deployment values can remain explicitly required configuration;
+instrument measurements and commissioning must be performed by the user.
 
 ## Tests
-<!-- The agent should list and describe the test it plans to implement.  It should be specific about the purpose and goal of the test. -->
+
+All automated tests use synthetic images, temporary calibration directories,
+fake DM/frame interfaces, and captured INDI commands. They must not connect to
+instrument streams or devices.
+
+| Area | Cases and expected outcome |
+| --- | --- |
+| Calibration capture and round trip | Capture the first calibration from supplied patterns and setup with no existing references. Save and reload both maps/amplitudes, references, shared ROI, anchors/offset, setup, and acquisition metadata without changing their association. Reload remains independent of edits to the original pattern files. |
+| Recall policy | Multiple timestamps/profiles/cameras; no calibration; corrupt newest bundle; unsupported schema; abandoned staging directory. Select the newest valid complete candidate in the requested profile, report skipped candidates, and block use on setup mismatch. |
+| Persistence failures | Inject failure during each component write/read, final validation, and rename. No partial bundle becomes selectable; no partial in-memory swap; previous calibration remains intact. |
+| Compatibility and races | Missing/partial/disconnected properties, stage motion and tolerance boundaries, wrong mask, camera orientation/binning changes, and changes during capture/load/processing. Stale generations cannot publish or install. |
+| Acquisition order | Assert baseline/NCPC/tweeter command order, acknowledgment/settling of poke removal across independent DM pipelines, requested distinct-frame counts, reuse of the same baseline/ROI, and no simultaneous pokes. Duplicate wakeups cannot duplicate a frame; counters resetting/reallocated streams abort. |
+| Cleanup and deadlines | Stop, shutdown, timeout, exception, and stream loss in every phase clear accessible owned channels, report failed cleanup, publish no sample, and terminate without hanging. Unrelated DM channels remain unchanged. |
+| Coordinate/sign convention | Synthetic independent shifts, common-mode shifts, zero residual, and deliberate calibrated offset. Common motion cancels; differential sign matches the controller contract. Test a shared live ROI differing from a shared reference ROI in size/origin, rectangular arrays, odd/even extents, and supported nonunit binning. Reject unequal reference-pair geometry and ROI changes within an acquisition. |
+| Registration accuracy | Fixed synthetic patterns with known integer and subpixel translations across the accepted lag range. Proposed initial numerical target: no more than 0.1 detector pixel error in noiseless well-supported fixtures; operational accuracy and speed remain commissioning targets. |
+| Partial patterns | Remove or obscure N of M features in either DM image, including clipping at ROI/pupil edges. Recover the known shift when sufficient distinctive support remains; reject insufficient or periodic/ambiguous support. No all-pokes-visible requirement. |
+| Quality rejection | Baseline-only/no response, zero variance, low SNR, saturation, nonfinite pixels, inverted response, competing peaks, search-edge peaks, and large individual/differential shifts. No accepted output; retain a specific reason. Use finite checks that remain valid under project `-ffast-math` flags. |
+| Controller protocol | One valid pair produces one complete update and at most one correction. Rejection/capture never produces a correction. Test zero residual, matrix orientation, target endpoints, loop-open/unready states, duplicate counters, restart/reconnect/retained input, and both readiness/measurement message orders. Delay correction acknowledgment/readback and verify the next baseline waits; unexpected motion during a sequence invalidates it. |
+
+Build new suites through `tests/Makefile.one`, list them in `tests/tests.list`,
+and group application tests under `application_unit_test` in `tests/groups.dox`.
+Use per-case Doxygen blocks, `libXWCTest::autoJayTest`, and explicit API references
+through `tests/testXWC.hpp` when harness indirection prevents normal links. Run
+the existing `dmPokeXCorr` and `closedLoopIndi` suites for any shared changes.
+
+Commissioning is a separate user-run validation: capture aligned references,
+compare measured shifts with small known `ttmperi` moves, establish matrix sign
+and scale, check repeatability/SNR with the bump mask, then close at low gain.
+Record results for each camera profile and verify the subsequent camlens step.
 
 ## Implementation Plan
-<!-- Here the agent documents its plan for the implementation -->
+
+### 1. Establish interfaces and isolate reusable components
+
+Create `apps/autoJay/` following the existing header-only application pattern:
+class declarations and out-of-class definitions in `.hpp`, entrypoint in `.cpp`.
+Use `dev::shmimMonitor`, `dev::telemeter`, `mx::improc::milkImage`, mxlib FITS and
+correlation utilities, and the corresponding interface macros where provided.
+
+Keep calibration/compatibility and registration calculations independently
+testable. Use a small composable acquisition helper with explicit per-DM channel
+contexts, frame identity, deadlines, and transaction cleanup. The app owns the
+three-phase sequence. Do not force dual-DM behavior into the existing single-DM
+`dmPokeWFS` inheritance hierarchy.
+
+There is a useful future common utility here: frame-stack acquisition and DM
+channel cleanup are needed by both sensors. Extract only a narrowly reusable
+primitive if it can be shared with regression coverage; otherwise keep the new
+helper local and record promotion to `libMagAOX/app/dev` as follow-up. Avoid a
+broad rewrite of existing alignment apps as a prerequisite.
+
+### 2. Implement calibration bundles and setup snapshots
+
+Proposed layout beneath `m_calibDir/m_configName/<profile>/`:
+
+```text
+calibration__T<timestamp>/
+    calibration.conf
+    ncpc_pattern.fits
+    tweeter_pattern.fits
+    ncpc_reference.fits
+    tweeter_reference.fits
+    unpoked.fits
+```
+
+The versioned manifest records camera/stream identity; one shared reference ROI, binning,
+coordinate units and orientation; relevant camera mode/exposure/gain; optical
+profile and required positions/tolerances; both DM identities/dimensions and
+pattern amplitudes; settling/averaging settings; processing version; reference
+anchors and aligned offset; timestamp and provenance. Store masks as additional
+FITS components when needed. Keep paths relative and validate every component.
+
+Write a hidden sibling staging directory, check/close all files, validate the
+complete bundle, then atomically rename it on the same filesystem. Recall ignores
+staging directories. Load into a temporary immutable object and install only
+after all checks pass and its setup/configuration generation is still current.
+Never replace only one DM reference. Automatic recall and explicit selection use
+the same validator. A retained older active object cannot enable measurement
+unless it still matches the selected setup.
+
+Subscribe to typed camera/stage state, including coherent applied ROI geometry.
+Preserve ROI origin/extent as spatial metadata rather than including them in an
+exact setup key that would forbid the requested size mismatch. Require matching
+binning/orientation and sufficient usable image coverage. Invalidate snapshots
+on connection loss, reconfiguration, or motion; a selected preset can be Busy
+while its stage is still moving.
+
+### 3. Implement bounded three-state acquisition and reference capture
+
+Use one worker and an explicit state sequence: idle, validating/settling,
+baseline, NCPC, tweeter, cleanup, processing, then publish or save. Repeated
+measurement returns through correction settling, validation, and a fresh
+baseline for every pair. Capture uses the same acquisition code but never
+publishes control samples. It must work from supplied patterns and setup
+metadata without an existing calibration. Validate capture using signal/noise,
+saturation, usable support, template ambiguity, and repeatability checks rather
+than requiring correlation against an old reference. The operator-established
+alignment defines the desired relationship. Install/save only if the complete
+capture and setup snapshot remain valid.
+
+Accumulate frames in the monitor callback or a bounded frame queue, preserving
+data/counter/timestamp identity. Do not implement a count of semaphore wakes
+against one mutable latest-image buffer. Snapshot all amplitudes and timing
+parameters at the start. Wait for combined-DM updates and configured settling
+with deadlines; verify commanded contribution where possible and record the
+evidence. Physical response latency still needs operator validation.
+
+Use a single cleanup path/guard for both owned channels, including exceptions.
+Reject nonzero/unavailable channels at startup rather than claiming another
+writer's commands. On stream recreation, invalidate the acquisition and recheck
+ownership/geometry before any subsequent writes. Block capture/reload while a
+transaction is active, or cancel and join it before changing the active object.
+
+### 4. Implement registration, offset accounting, and quality gates
+
+For each DM, subtract the same averaged illuminated baseline. Build one mapping
+between the reference pair's shared ROI and the live sequence's shared ROI,
+then use it for both DMs. Map to a common grid with known detector origin,
+unchanged sampling, and separate validity masks. Pad/crop for equal FFT array
+dimensions without geometrically stretching either image. ROI-origin changes
+are common to both DM measurements and must not appear as differential motion;
+retain the coordinate mapping for overlap and individual-displacement checks.
+Prevent circular-wrap matches with suitable padding/support and a bounded
+physical displacement search.
+
+Let `q_N` and `q_T` be fixed reference anchors in detector coordinates, and
+`s_N`, `s_T` the measured displacements from those templates. Record the aligned
+relationship `C = q_T - q_N`. Then:
+
+```text
+p_N = q_N + s_N
+p_T = q_T + s_T
+delta = (p_T - p_N) - C = s_T - s_N
+```
+
+The anchors need no pupil or actuator-center fit; they establish consistent
+template coordinates. Thus two aligned capture images produce zero residual
+even if their grids occupy different absolute positions. Do not subtract the
+physical offset a second time from `s_T - s_N`. Express output and limits in
+detector pixels, converting from sampled-pixel shifts using the recorded binning.
+
+Use two mxlib correlators with subpixel peak estimation. Check availability of
+the bounded MFT search API, or provide a tested bounded-search alternative.
+Evaluate normalized correlation on actual shifted valid overlap; the existing
+`peak / full-array-pixel-count` rule is unsuitable once masks/padding differ.
+Require minimum supported reference signal, exclude a main-peak neighborhood
+when testing competing peaks, and estimate poke SNR from stack/background noise.
+Correlation coefficient alone is not a signal-to-noise measurement. Validate
+both DM results before forming/accepting the differential.
+
+### 5. Integrate publication and the correction loop
+
+Publish `measurement.delta_x/delta_y/counter` atomically as one property update
+and use a dedicated readiness toggle to open `closedLoopIndi` on stop, capture,
+invalid setup, or failure. Set `upstreamFollowClosed=false`; the operator closes
+the loop after readiness is restored. Publish diagnostics without advancing the
+accepted measurement counter.
+
+Define a bounded between-cycle acknowledgment/settling contract: after publishing
+a sample in closed-loop operation, wait until its correction (or explicit
+no-command outcome) has been processed, the commanded voltages are reported,
+and the configured settling interval has elapsed. An unchanged voltage for a
+zero correction must not cause an indefinite wait. Observe `ttmperi` command
+and current values throughout acquisition; an unexpected change invalidates the
+sequence. `OPERATING` alone is not evidence of settled motion. Establish this
+contract in offline integration tests, adding optional processed-counter
+reporting to `closedLoopIndi` if its current interface cannot supply the needed
+acknowledgment.
+
+The existing controller is sufficient for ordinary accepted-counter processing,
+but separate readiness and measurement messages are not an atomic validity
+contract. Add explicit startup/reconnect/replay tests first. If retained or
+late samples can command the actuator, include a narrow opt-in controller input
+guard covering validity, session/freshness, and rearming; preserve existing
+instances' behavior and test it. Do not claim a separate Off toggle eliminates
+that race, or leave failed protocol tests as an implicit deployment assumption.
+
+Provide example sensor/controller configs with zero controller references and
+the established `ttmperi.axis1_voltage` / `axis2_voltage` targets. Require an
+explicit measured control matrix; local `ncpcAlign-pupil-ctrl.conf` establishes
+the endpoint convention only. Keep correction disabled until its sign, scale,
+gain, and acceptable step size have been checked for this profile.
+
+### 6. Build integration, documentation, and commissioning handoff
+
+Expected implementation files:
+
+- New `apps/autoJay/autoJay.hpp`, `autoJay.cpp`, `Makefile`, focused helper headers,
+  tests, and example configuration files.
+- Top-level `Makefile` build lists after the execution-host decision.
+- `tests/tests.list` and `tests/groups.dox`; `tests/Makefile.one` only if additional
+  test linkage is actually needed.
+- `apps/closedLoopIndi/closedLoopIndi.hpp` and its tests only for the protocol guard
+  or correction acknowledgment described above, if required by integration tests.
+- Shared helper/library files only for a justified extraction with regression
+  tests; telemetry schema/registration files if richer binary records are needed
+  beyond the existing `telem_pokeloop` summary.
+- This plan as the engineering record. Prepare companion deployment configuration
+  changes for process lists, INDI subscriptions, reserved channels, and stream
+  routes once the host is known; do not edit/install operational `/opt` files as
+  part of offline development.
+
+After implementation, build the app and focused suites, run the offline tests,
+complete the full-file Doxygen pass, run `clang-format` on touched C++ files, and
+check the diff. Keep functional changes and this plan together, follow with
+documentation-only changes, and put any formatting-only cleanup last. All commits
+belong on the namespaced feature branch. No commit or PR is part of this planning
+step.
 
 ## Follow-up and Edge Cases
-<!-- The agent should list any planned follow up and any edge cases that are not addressed -->
+
+- **Required before commissioning:** resolve channel ownership/transport, camera
+  and mask profile, stage tolerances, loop sequencing, control matrix, numerical
+  thresholds, and timing on the real system. The agent will not run those tests.
+- **Sequential-image drift:** source/seeing/AO changes between baseline and the
+  two pokes can bias subtraction. Bound cycle time and detect unusable stacks;
+  consider interleaved baselines or signed pokes only if data show the requested
+  three-state sequence is inadequate.
+- **Partial grids:** fewer visible pokes can be acceptable, but a periodic or
+  symmetric remaining subset can make translation ambiguous even at high SNR.
+  Pattern design may need to improve identifiability; it remains outside scope.
+- **Calibration validity:** translation-only registration does not correct
+  rotation, magnification, changed binning, or unmodelled optical configuration.
+  These require another calibration or a separately reviewed model extension.
+- **Camera metadata timing:** INDI setup and shared-memory frames are separate
+  streams. Abort on geometry changes and require settled matching metadata/frame
+  dimensions; do not describe a source-counter snapshot as an acknowledgment of
+  physical camera or DM response.
+- **Process death or disconnected DM:** a cleanup guard cannot clear a channel
+  after uncatchable process death or loss of access. Document an operator recovery
+  procedure and avoid automatic reuse until channel state is verified.
+- **Later work:** commission `camsci1`, optimize patterns, automate camlens
+  following if desired, and promote acquisition/persistence helpers to common
+  library utilities when a second consumer justifies the extraction.
+
+Planning validation: reviewed the relevant acquisition, correlation, ROI,
+calibration, controller, and test/build sources. Only this Markdown file is
+changed; no application build or test run is needed for the planning edit.
