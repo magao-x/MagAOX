@@ -222,29 +222,29 @@ class dmSyncopation : public MagAOXApp<true>,
     int                      m_primarySemaphore{ 5 }; ///< Required reader semaphore; reject allocation fallback.
     unsigned                 m_lockFrames{ 32 };  ///< Clean main observations before preparing the first active cycle.
     unsigned                 m_failureLimit{ 3 }; ///< Consecutive original event failures before reacquisition.
-    unsigned m_rateFrames{ 32 };      ///< Cadence violation persistence and primary-rate qualification interval count.
-    double   m_nominalRate{ 2000 };   ///< Acquisition fallback, Hz.
-    double   m_maxCadence{ 6000 };    ///< Nominal sanity rating, Hz, including step 0.
-    double   m_rateTolerance{ 0.01 }; ///< Relative cadence-rating tolerance.
-    double   m_minRate{ 500 };        ///< Minimum accepted main rate, Hz.
-    double   m_maxRate{ 4000 };       ///< Maximum accepted main rate, Hz.
-    double   m_gain{ 0.1 };           ///< Per-event wait integrator gain.
-    double   m_maxAdvanceUs{ 20 };    ///< Absolute wait correction limit, us.
-    double   m_outputTimeoutUs{ 50 }; ///< Combination watchdog, separate from delivery allowance.
-    double   m_primaryCadenceWindow{ 2 };        ///< Independent primary diagnostics window in seconds; zero disables.
-    size_t   m_primaryCadenceMaxEvents{ 20000 }; ///< Queue and retained-event cap; zero disables diagnostics.
-    double   m_primaryExcursionUs{ 20 };         ///< Diagnostic interval excursion threshold around the window median.
-    bool     m_combinerDiagnostics{ true };      ///< Observe combined-output traces independently of scheduling.
-    bool     m_cameraDiagnostics{ true };        ///< Observe camera acquisition/publication independently of INDI FPS.
-    bool     m_pipelineDiagnostics{ true };      ///< Retain the primary's bounded upstream process trace.
-    bool     m_diagnosticsOnly{ false };         ///< Observe arbitrary primary metadata without attaching DM resources.
-    bool     m_simulationEnabled{ false };       ///< Startup-only shadow policy; live scheduling is prohibited.
+    unsigned    m_rateFrames{ 32 };    ///< Cadence violation persistence and primary-rate qualification interval count.
+    double      m_nominalRate{ 2000 }; ///< Acquisition fallback, Hz.
+    double      m_maxCadence{ 6000 };  ///< Nominal sanity rating, Hz, including step 0.
+    double      m_rateTolerance{ 0.01 };     ///< Relative cadence-rating tolerance.
+    double      m_minRate{ 500 };            ///< Minimum accepted main rate, Hz.
+    double      m_maxRate{ 4000 };           ///< Maximum accepted main rate, Hz.
+    double      m_gain{ 0.1 };               ///< Per-event wait integrator gain.
+    double      m_maxAdvanceUs{ 20 };        ///< Absolute wait correction limit, us.
+    double      m_outputTimeoutUs{ 50 };     ///< Combination watchdog, separate from delivery allowance.
+    double      m_primaryCadenceWindow{ 2 }; ///< Independent primary diagnostics window in seconds; zero disables.
+    size_t      m_primaryCadenceMaxEvents{ 20000 }; ///< Queue and retained-event cap; zero disables diagnostics.
+    double      m_primaryExcursionUs{ 20 };    ///< Diagnostic interval excursion threshold around the window median.
+    bool        m_combinerDiagnostics{ true }; ///< Observe combined-output traces independently of scheduling.
+    bool        m_cameraDiagnostics{ true };   ///< Observe camera acquisition/publication independently of INDI FPS.
+    bool        m_pipelineDiagnostics{ true }; ///< Retain the primary's bounded upstream process trace.
+    bool        m_diagnosticsOnly{ false };    ///< Observe arbitrary primary metadata without attaching DM resources.
+    bool        m_simulationEnabled{ false };  ///< Startup-only shadow policy; live scheduling is prohibited.
     bool        m_zeroTestEnabled{ false };    ///< Startup-only finite empirical coordinated zero-write trial.
     std::string m_zeroTestChannel{ "dm01disp07" }; ///< Existing exclusive zero auxiliary; never created or cleared.
     std::string m_zeroSdkStream{ "dmtweeter_sdk_done" }; ///< Optional exact native-entry/result observer.
     double      m_zeroDurationSec{ 120 };           ///< Maximum active duration after the long-baseline clock is ready.
     double      m_zeroLateUs{ 5 };                  ///< Maximum lateness before an immutable auxiliary slot is skipped.
-    bool     m_simulationReaderReleaseReady{ false }; ///< Use timestamped actual-main read release in shadow decisions.
+    bool   m_simulationReaderReleaseReady{ false }; ///< Use timestamped actual-main read release in shadow decisions.
     bool   m_simulationPipelineBackend{ false }; ///< Independently model preparation, SDK and post resources in shadow.
     double m_simulationVirtualReaderUs{ 30 };    ///< Assumed auxiliary trigger-to-last-read duration, us; not measured.
     double m_simulationBackendUs{ 155 };         ///< Legacy whole-backend occupancy; ignored by pipeline shadow.
@@ -1084,7 +1084,7 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
     {
         return -1;
     }
-    m_period                                  = int64_t( 1e9 / m_nominalRate );
+    m_period = int64_t( 1e9 / m_nominalRate );
     shmimMonitorT::m_semaphoreNumber =
         ( m_diagnosticsOnly || m_simulationEnabled || m_zeroTestEnabled ) ? -1 : m_primarySemaphore;
     combinerMonitorT::m_shmimName             = m_combinedName;
@@ -2541,7 +2541,7 @@ inline int dmSyncopation::allocate( const dev::shmimT &tag )
         }
         else
         {
-        resetSimulation();
+            resetSimulation();
         }
         return 0;
     }
@@ -2600,9 +2600,9 @@ inline int dmSyncopation::processImage( void *source, const dev::shmimT &tag )
 
     std::lock_guard<std::mutex> lock( m_cycleMutex );
     const int     result = m_zeroTestEnabled ? processZeroTestPrimary( observed, receipt ) : processPrimary( observed );
-    const int64_t               completed = m_now();
-    m_previousCallbackRuntime             = completed >= observed ? completed - observed : -1;
-    m_previousCallbackEnd                 = completed;
+    const int64_t completed   = m_now();
+    m_previousCallbackRuntime = completed >= observed ? completed - observed : -1;
+    m_previousCallbackEnd     = completed;
     m_primaryCadence.markAt( MagAOX::dmTiming::Marker::finish, completed );
     m_primaryCadence.outcome( MagAOX::dmTiming::Outcome::noSend );
     m_primaryCadence.finishEvent();

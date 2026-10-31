@@ -637,7 +637,7 @@ inline bool Simulation::configure( const Config &config )
         config.cadenceWindowNs < config.cadenceUpdateNs || config.cadenceWindowNs > 1000000000000LL ||
         ( !config.clockOnly &&
           ( config.virtualReaderNs <= 0 || config.virtualReaderNs > 1000000000 || config.backendNs <= 0 ||
-        ( !config.pipelineBackend && config.backendNs < config.virtualReaderNs ) || config.backendNs > 1000000000 ||
+            ( !config.pipelineBackend && config.backendNs < config.virtualReaderNs ) || config.backendNs > 1000000000 ||
             ( config.pipelineBackend && !config.readerReleaseReady ) ) ) ||
         __int128( config.cadenceWindowNs ) >
             __int128( MagAOX::dmSyncoSimulation::cadenceAnchorCapacity - 1 ) * config.cadenceUpdateNs )
@@ -649,27 +649,27 @@ inline bool Simulation::configure( const Config &config )
 
     if( !config.clockOnly )
     {
-    for( const auto value : { b.keepout,
-                              b.guard,
-                              b.delivery,
-                              b.observation,
-                              b.early,
-                              b.lead,
-                              b.visibility,
-                              b.reserve,
-                              b.snapshot,
-                              b.copy } )
-    {
-        if( value < 0 || value > 1000000000 )
+        for( const auto value : { b.keepout,
+                                  b.guard,
+                                  b.delivery,
+                                  b.observation,
+                                  b.early,
+                                  b.lead,
+                                  b.visibility,
+                                  b.reserve,
+                                  b.snapshot,
+                                  b.copy } )
+        {
+            if( value < 0 || value > 1000000000 )
+            {
+                return false;
+            }
+        }
+
+        if( b.visibility == 0 || b.reserve == 0 || b.snapshot == 0 || b.copy == 0 )
         {
             return false;
         }
-    }
-
-    if( b.visibility == 0 || b.reserve == 0 || b.snapshot == 0 || b.copy == 0 )
-    {
-        return false;
-    }
     }
 
     if( config.pipelineBackend && !config.clockOnly )
@@ -854,14 +854,14 @@ inline bool Simulation::commit( uint64_t counter, int64_t grid, uint64_t estimat
 
     if( !m_config.clockOnly )
     {
-    entry.targets[0]  = copyCutoff( grid, m_config.bounds ) - m_config.bounds.reserve;
-    entry.starts[0]   = entry.targets[0] - m_config.bounds.copy;
+        entry.targets[0] = copyCutoff( grid, m_config.bounds ) - m_config.bounds.reserve;
+        entry.starts[0]  = entry.targets[0] - m_config.bounds.copy;
 
-    for( int j = 1; j < m_config.steps; ++j )
-    {
-        entry.targets[j] = stepGrid( { grid, fractionQ32 }, entry.periodQ32, j, m_config.steps ).ns;
-        entry.starts[j]  = entry.targets[j] - m_config.bounds.copy;
-    }
+        for( int j = 1; j < m_config.steps; ++j )
+        {
+            entry.targets[j] = stepGrid( { grid, fractionQ32 }, entry.periodQ32, j, m_config.steps ).ns;
+            entry.starts[j]  = entry.targets[j] - m_config.bounds.copy;
+        }
     }
 
     m_plans[m_planCount++] = entry;
