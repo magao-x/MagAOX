@@ -24,11 +24,18 @@
 #include "../../magaox_git_version.h"
 #include "syncoSchedule.hpp"
 #include "syncoSimulation.hpp"
+#include "syncoZeroTiming.hpp"
 
 namespace MagAOX
 {
 namespace app
 {
+
+/// Existing text-log wire format with the timestamp required by dev::telemeter.
+struct syncoZeroLog : logger::text_log
+{
+    static inline timespec lastRecord{}; ///< Last ordinary-thread trial telemetry emission.
+};
 
 /// Configuration and INDI names for the independent combined-output observer.
 struct syncoCombinerT
@@ -232,6 +239,11 @@ class dmSyncopation : public MagAOXApp<true>,
     bool     m_pipelineDiagnostics{ true };      ///< Retain the primary's bounded upstream process trace.
     bool     m_diagnosticsOnly{ false };         ///< Observe arbitrary primary metadata without attaching DM resources.
     bool     m_simulationEnabled{ false };       ///< Startup-only shadow policy; live scheduling is prohibited.
+    bool        m_zeroTestEnabled{ false };    ///< Startup-only finite empirical coordinated zero-write trial.
+    std::string m_zeroTestChannel{ "dm01disp07" }; ///< Existing exclusive zero auxiliary; never created or cleared.
+    std::string m_zeroSdkStream{ "dmtweeter_sdk_done" }; ///< Optional exact native-entry/result observer.
+    double      m_zeroDurationSec{ 120 };           ///< Maximum active duration after the long-baseline clock is ready.
+    double      m_zeroLateUs{ 5 };                  ///< Maximum lateness before an immutable auxiliary slot is skipped.
     bool     m_simulationReaderReleaseReady{ false }; ///< Use timestamped actual-main read release in shadow decisions.
     bool   m_simulationPipelineBackend{ false }; ///< Independently model preparation, SDK and post resources in shadow.
     double m_simulationVirtualReaderUs{ 30 };    ///< Assumed auxiliary trigger-to-last-read duration, us; not measured.
@@ -249,6 +261,52 @@ class dmSyncopation : public MagAOXApp<true>,
 
     std::mutex        m_cycleMutex; ///< Serializes lifecycle/configuration with a complete callback.
     synco::Simulation m_simulation; ///< Fixed-storage shadow engine, serialized by the cycle mutex.
+    synco::Simulation m_zeroClock;  ///< Clock-only long-baseline estimator; never evaluates modeled admission.
+
+    /// Same-thread trial counters, copied under the cycle mutex by the ordinary app loop.
+    struct ZeroStats
+    {
+        uint64_t posted{ 0 }, acknowledged{ 0 }, skipped{ 0 }; ///< Requested active occurrences and output outcomes.
+        uint64_t late{ 0 }, readerMissing{ 0 }, primaryChanged{ 0 }; ///< Mutually exclusive per-slot skip reasons.
+        uint64_t cancelled{ 0 }; ///< Slots cancelled by operator request, finite expiry or shutdown.
+        uint64_t unclassified{ 0 }, resourceFaults{ 0 }; ///< Ambiguous output identities and resource failures.
+        uint64_t readerInvalid{ 0 }, readerDrops{ 0 };   ///< Readiness revocation/transport coverage.
+        uint64_t mainObserved{ 0 }, mainMatched{ 0 }, mainUnmatched{ 0 }; ///< Genuine main association coverage.
+        uint64_t mainImpactUnclassified{ 0 };    ///< Main acknowledgements lacking exact named-primary trace linkage.
+        int64_t  startedNs{ 0 }, stoppedNs{ 0 }; ///< Active finite interval on CLOCK_MONOTONIC.
+        bool     active{ false }, warming{ false }, finished{ false }; ///< Current finite-trial state.
+    };
+
+    /// One bounded hot-path observation, formatted only after the cycle lock is released.
+    struct ZeroEvent
+    {
+        uint64_t trial{ 0 }, primary{ 0 };       ///< Trial and genuine main identities.
+        int      step{ 0 }, outcome{ 0 };        ///< Zero is a main observation; positive values are auxiliary steps.
+        int64_t  targetNs{ 0 }, observedNs{ 0 }; ///< Frozen target and actual observation/publication time.
+        synco::ZeroTiming::Key key;              ///< Exact combined command, or an empty key when unclassified.
+    };
+
+    ZeroStats                    m_zeroStats;  ///< Finite-trial counters; no conditional shadow outcomes are mixed in.
+    synco::ZeroTiming            m_zeroTiming; ///< Exact main/controller receipt to native SDK-entry measurements.
+    MagAOX::spscQueue<ZeroEvent> m_zeroEvents; ///< Primary monitor to ordinary telemetry handoff.
+    IMAGE m_zeroChannel{}, m_zeroCombined{}, m_zeroSdk{}; ///< Existing auxiliary/output/SDK mappings, never destroyed.
+    ino_t m_zeroChannelInode{ 0 }, m_zeroCombinedInode{ 0 }, m_zeroSdkInode{ 0 }; ///< Backing identities.
+    uint64_t m_zeroChannelIdentity{ 0 }, m_zeroCombinedIdentity{ 0 },
+        m_zeroPrimaryIdentity{ 0 };                                     ///< Frozen metadata IDs.
+    uint64_t m_zeroExpected{ 0 }, m_zeroPrimary{ 0 }, m_zeroTrial{ 0 }; ///< Own publications and distinct mains.
+    uint64_t m_zeroClockCounter{ 0 };     ///< Counter paired with the producer-clock interval baseline.
+    int64_t  m_zeroClockPublication{ 0 }; ///< Previous coherent primary publication, in its own clock only.
+    int64_t  m_zeroIdleSince{ 0 }, m_zeroNextAttach{ 0 }, m_zeroNextFileCheck{ 0 }; ///< Bounded attachment/idle checks.
+    int64_t  m_zeroArmedAt{ 0 }; ///< On-request deadline origin; warmup is independently limited to 30 seconds.
+    uint32_t m_zeroWidth{ 0 }, m_zeroHeight{ 0 }; ///< Frozen two-dimensional CPU-float geometry.
+    size_t   m_zeroBytes{ 0 };                    ///< Exact bounded all-zero copy length.
+    bool     m_zeroAttached{ false }, m_zeroIdle{ false }, m_zeroArmed{ false }; ///< Ownership/preflight/request state.
+    bool     m_zeroHaveCombined{ false }, m_zeroHaveRelease{ false },
+        m_zeroReaderFault{ false };                     ///< Exact readiness state.
+    synco::ZeroTiming::Key m_zeroLastCombined;          ///< Most recent classified or rebaselined combined identity.
+    MagAOX::dmSyncoSimulation::Readiness m_zeroRelease; ///< Latest coherently observed reader release.
+    uint64_t m_zeroReleaseEpoch{ 0 }, m_zeroReleaseDrops{ 0 }; ///< Accepted source generation and queue loss baseline.
+    pcf::IndiProperty m_indiP_zeroTest; ///< Read-only actual trial state, counts and main timing coverage.
     MagAOX::spscQueue<MagAOX::dmSyncoSimulation::Readiness>
         m_simulationReleaseQueue; ///< Release producer to cycle consumer; allocated before monitor startup.
     std::atomic<uint64_t> m_simulationReleaseEpoch{ 1 }; ///< Attachment/reset/drop fence for queued release evidence.
@@ -601,6 +659,54 @@ class dmSyncopation : public MagAOXApp<true>,
     /// Execute one cycle while the caller holds the cycle mutex.
     int processPrimary( int64_t observed /**< [in] callback entry time on the monotonic scheduling clock */ );
 
+    /// Configure the clock-only estimator without changing the shadow or live scheduler.
+    bool configureZeroTest();
+
+    /// Attach only existing trial streams and begin non-publishing zero/idle preflight.
+    bool openZeroTest();
+
+    /// Close only this app's zero-test mappings; never unlink or modify pixels.
+    void closeZeroTest();
+
+    /// Process a genuine main and its immutable coordinated auxiliary slots.
+    int processZeroTestPrimary( int64_t observed /**< [in] Primary callback time. */,
+                                int64_t receipt /**< [in] Genuine primary semaphore receipt, or negative. */ );
+
+    /// Verify the attached zero target and optionally its backing stream identities.
+    bool zeroTestResources( bool files /**< [in] Include bounded backing-file checks. */ );
+
+    /// Require IEEE positive/negative zero pixels without relying on fast-math comparisons.
+    bool zeroTestPixels() const;
+
+    /// Sample coherent combined metadata without claiming a reader semaphore.
+    bool zeroTestCombined( synco::ZeroTiming::Key &key /**< [out] Coherent combined identity. */ ) const;
+
+    /// Drain bounded independent reader-release evidence into the cycle-owned readiness state.
+    void drainZeroTestReader( int64_t now /**< [in] Latest monotonic observation. */ );
+
+    /// Check exact current-command reader clearance; this does not qualify SDK readiness.
+    bool zeroTestReady( const synco::ZeroTiming::Key &key /**< [in] Current combined command. */ ) const;
+
+    /// Observe the optional native SDK-result stream for exact main timing joins only.
+    void sampleZeroTestSdk( int64_t now /**< [in] Monotonic sample time. */ );
+
+    /// Wait to one immutable deadline while checking cancellation, main identity and readiness transport.
+    bool zeroTestWait( int64_t  target /**< [in] Absolute monotonic target. */,
+                       uint64_t primary /**< [in] Genuine main counter that must remain current. */ );
+
+    /// Record one actual outcome without allocation, logging or unbounded buffering.
+    void zeroTestEvent( int                           step /**< [in] Zero for main; positive auxiliary slot. */,
+                        int                           outcome /**< [in] Fixed actual outcome code. */,
+                        int64_t                       target /**< [in] Immutable planned target. */,
+                        int64_t                       observed /**< [in] Actual observation. */,
+                        const synco::ZeroTiming::Key &key = {} /**< [in] Exact combined identity, when known. */ );
+
+    /// Register read-only actual zero-test state and timing coverage.
+    int setupZeroTestINDI();
+
+    /// Copy actual trial state and drain its telemetry outside the primary callback.
+    void updateZeroTest();
+
     /// Attach existing destinations/output and create only missing auxiliary/timing streams.
     bool openResources();
 
@@ -689,6 +795,7 @@ inline bool dmSyncopation::finite( double value )
 
 inline dmSyncopation::~dmSyncopation() noexcept
 {
+    closeZeroTest();
 }
 
 inline void dmSyncopation::setupConfig()
@@ -740,6 +847,11 @@ inline void dmSyncopation::setupConfig()
         { "diagnostics.combiner", "Observe combined-stream cadence and producer trace independently of scheduling." },
         { "diagnostics.camera", "Observe camera acquisition/publication intervals independently of camera INDI FPS." },
         { "diagnostics.pipeline", "Observe the primary producer's bounded upstream processing trace." },
+        { "zeroTest.enabled", "Finite coordinated all-zero auxiliary trial; mutually exclusive with simulation." },
+        { "zeroTest.channel", "Exclusive existing all-zero numbered auxiliary channel." },
+        { "zeroTest.durationSec", "Active trial duration after clock qualification, positive and at most120 seconds." },
+        { "zeroTest.lateUs", "Maximum immutable auxiliary-slot lateness before skipping, us." },
+        { "zeroTest.sdkStream", "Optional native SDK-result stream for exact main timing joins." },
         { "simulation.enabled", "Observe a conditional fixed-grid policy without copying or triggering DM commands." },
         { "simulation.readerReleaseReady", "Gate actual-main shadow reader clearance on exact observed release." },
         { "simulation.pipelineBackend", "Model separate preparation, SDK and ordered post resources in shadow." },
@@ -805,6 +917,11 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
     config( m_pipelineDiagnostics, "diagnostics.pipeline" );
     config( m_diagnosticsOnly, "diagnostics.only" );
     config( m_simulationEnabled, "simulation.enabled" );
+    config( m_zeroTestEnabled, "zeroTest.enabled" );
+    config( m_zeroTestChannel, "zeroTest.channel" );
+    config( m_zeroDurationSec, "zeroTest.durationSec" );
+    config( m_zeroLateUs, "zeroTest.lateUs" );
+    config( m_zeroSdkStream, "zeroTest.sdkStream" );
     config( m_simulationReaderReleaseReady, "simulation.readerReleaseReady" );
     config( m_simulationPipelineBackend, "simulation.pipelineBackend" );
     config( m_simulationVirtualReaderUs, "simulation.virtualReaderUs" );
@@ -839,6 +956,19 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
         return -1;
     }
 
+    if( m_zeroTestEnabled &&
+        ( m_simulationEnabled || m_diagnosticsOnly || m_requested < 2 || m_requested > 3 ||
+          !finite( m_zeroDurationSec ) || m_zeroDurationSec <= 0 || m_zeroDurationSec > 120 ||
+          !finite( m_zeroLateUs ) || m_zeroLateUs < 0 || m_zeroLateUs > 50 ||
+          readerReleaseMonitorT::m_shmimName.empty() || !m_combinerDiagnostics || m_primaryCadenceWindow <= 0 ||
+          m_zeroTestChannel.size() != 10 || m_zeroTestChannel.substr( 0, 8 ) != m_combinedName ||
+          m_zeroTestChannel.find_first_not_of( "0123456789", 8 ) != std::string::npos ||
+          m_zeroTestChannel == shmimMonitorT::m_shmimName ||
+          ( !m_zeroSdkStream.empty() && m_zeroSdkStream.find_first_of( "/\\ \t\n" ) != std::string::npos ) ) )
+    {
+        return -1;
+    }
+
     if( m_diagnosticsOnly )
     {
         m_combinerDiagnostics = false;
@@ -857,12 +987,12 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
     m_primaryCadenceMaxEvents = size_t( cadenceEvents );
 
     if( ( !completionMonitorT::m_shmimName.empty() || !readerReleaseMonitorT::m_shmimName.empty() ) &&
-        !m_simulationEnabled )
+        !m_simulationEnabled && !m_zeroTestEnabled )
     {
         return -1;
     }
 
-    if( m_simulationEnabled && m_primaryCadenceMaxEvents == 0 )
+    if( ( m_simulationEnabled || m_zeroTestEnabled ) && m_primaryCadenceMaxEvents == 0 )
     {
         return -1;
     }
@@ -955,7 +1085,8 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
         return -1;
     }
     m_period                                  = int64_t( 1e9 / m_nominalRate );
-    shmimMonitorT::m_semaphoreNumber          = ( m_diagnosticsOnly || m_simulationEnabled ) ? -1 : m_primarySemaphore;
+    shmimMonitorT::m_semaphoreNumber =
+        ( m_diagnosticsOnly || m_simulationEnabled || m_zeroTestEnabled ) ? -1 : m_primarySemaphore;
     combinerMonitorT::m_shmimName             = m_combinedName;
     combinerMonitorT::m_getExistingFirst      = false;
     cameraMonitorT::m_getExistingFirst        = false;
@@ -963,7 +1094,7 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
     readerReleaseMonitorT::m_getExistingFirst = false;
     m_reason = m_simulationEnabled ? "simulation warming" : ( m_diagnosticsOnly ? "diagnostics only" : "disabled" );
 
-    if( m_simulationEnabled && !configureSimulation() )
+    if( ( m_simulationEnabled && !configureSimulation() ) || ( m_zeroTestEnabled && !configureZeroTest() ) )
     {
         return -1;
     }
@@ -2390,7 +2521,7 @@ inline int dmSyncopation::allocate( const dev::shmimT &tag )
 
     std::lock_guard<std::mutex> lock( m_cycleMutex );
 
-    if( m_simulationEnabled )
+    if( m_simulationEnabled || m_zeroTestEnabled )
     {
         if( shmimMonitorT::m_semaphoreNumber == 9 )
         {
@@ -2402,7 +2533,16 @@ inline int dmSyncopation::allocate( const dev::shmimT &tag )
             return -1;
         }
 
+        if( m_zeroTestEnabled )
+        {
+            m_enabled = false;
+            closeZeroTest();
+            configureZeroTest();
+        }
+        else
+        {
         resetSimulation();
+        }
         return 0;
     }
 
@@ -2459,7 +2599,7 @@ inline int dmSyncopation::processImage( void *source, const dev::shmimT &tag )
     }
 
     std::lock_guard<std::mutex> lock( m_cycleMutex );
-    const int                   result    = processPrimary( observed );
+    const int     result = m_zeroTestEnabled ? processZeroTestPrimary( observed, receipt ) : processPrimary( observed );
     const int64_t               completed = m_now();
     m_previousCallbackRuntime             = completed >= observed ? completed - observed : -1;
     m_previousCallbackEnd                 = completed;
@@ -2675,7 +2815,7 @@ inline int dmSyncopation::processImage( void *source, const syncoReaderReleaseT 
     event.observedNs                              = m_now();
     m_readerReleaseTiming.completion( event, coherent && m_readerReleaseReceiptNs > 0 );
 
-    if( m_simulationReaderReleaseReady )
+    if( m_simulationReaderReleaseReady || m_zeroTestEnabled )
     {
         m_simulationReleaseQueue.push(
             { event.record, event.observedNs, sourceEpoch, coherent && m_readerReleaseReceiptNs > 0 } );
@@ -2707,7 +2847,7 @@ inline void dmSyncopation::shmimMonitorTiming( const syncoReaderReleaseT &tag, d
     {
         MagAOX::dmReaderTiming::Completed rejected;
         rejected.observedNs = m_now();
-        if( m_simulationReaderReleaseReady )
+        if( m_simulationReaderReleaseReady || m_zeroTestEnabled )
         {
             m_simulationReleaseQueue.push( { rejected.record,
                                              rejected.observedNs,
@@ -3786,15 +3926,17 @@ inline int dmSyncopation::appStartup()
         m_readerReleaseTiming.configure( readerReleaseMonitorT::m_shmimName.empty() ? 0 : m_primaryCadenceWindow,
                                          m_primaryCadenceMaxEvents,
                                          MagAOX::dmCompletion::Kind::readers );
-        m_simulationReleaseQueue.configure( m_simulationReaderReleaseReady ? m_primaryCadenceMaxEvents : 0 );
+        m_simulationReleaseQueue.configure(
+            ( m_simulationReaderReleaseReady || m_zeroTestEnabled ) ? m_primaryCadenceMaxEvents : 0 );
+        m_zeroEvents.configure( m_zeroTestEnabled ? m_primaryCadenceMaxEvents : 0 );
     }
     catch( const std::exception &error )
     {
         return log<software_error, -1>( { std::string( "Timing allocation: " ) + error.what() } );
     }
 
-    if( setupSimulationINDI() < 0 || setupPrimaryCadenceINDI() < 0 || setupCombinerCadenceINDI() < 0 ||
-        setupPipelineINDI() < 0 || setupReaderTimingINDI() < 0 ||
+    if( setupZeroTestINDI() < 0 || setupSimulationINDI() < 0 || setupPrimaryCadenceINDI() < 0 ||
+        setupCombinerCadenceINDI() < 0 || setupPipelineINDI() < 0 || setupReaderTimingINDI() < 0 ||
         setupCadenceINDI( m_cameraCadence,
                           m_indiP_cameraTiming,
                           m_indiP_cameraQuality,
@@ -3987,7 +4129,7 @@ inline int dmSyncopation::appLogic()
                 m_reason = m_simulationSnapshot.valid ? "simulation observing" : "simulation warming or stale";
             }
 
-            if( m_enabled && m_lastMain && m_now() - m_lastMain > int64_t( 2e9 / m_minRate ) )
+            if( !m_zeroTestEnabled && m_enabled && m_lastMain && m_now() - m_lastMain > int64_t( 2e9 / m_minRate ) )
             {
                 invalidate( "main timeout", Fault::primary );
             }
@@ -4117,11 +4259,14 @@ inline int dmSyncopation::appLogic()
             updateIfChanged( m_indiP_health, "timingStream", m_timingName );
             updateIfChanged( m_indiP_health, "mapping", mappings );
             const std::string mode =
-                m_simulationEnabled ? "shadow simulation" : ( m_diagnosticsOnly ? "diagnostics only" : "scheduler" );
+                m_zeroTestEnabled ? "coordinated zero test"
+                                  : ( m_simulationEnabled ? "shadow simulation"
+                                                          : ( m_diagnosticsOnly ? "diagnostics only" : "scheduler" ) );
             updateIfChanged( m_indiP_health, "mode", mode );
             updateSimulationINDI();
         }
     }
+    updateZeroTest();
     SHMIMMONITOR_UPDATE_INDI;
 
     if( m_primaryCadence.enabled() || m_combinerCadence.enabled() || m_cameraCadence.enabled() ||
@@ -4164,6 +4309,7 @@ inline int dmSyncopation::appShutdown()
     std::lock_guard<std::mutex> lock( m_cycleMutex );
     invalidate( "shutdown" );
     closeResources();
+    closeZeroTest();
     return 0;
 }
 
@@ -4222,7 +4368,7 @@ inline int dmSyncopation::recordTelem( const telem_dmsynco *record )
             m_simulationEstimatorStatus     = trace.estimatorStatus;
         }
 
-        if( lock.owns_lock() && !m_diagnosticsOnly && !m_simulationEnabled )
+        if( lock.owns_lock() && !m_diagnosticsOnly && !m_simulationEnabled && !m_zeroTestEnabled )
         {
             scheduleValid    = true;
             state            = m_scheduleState;
@@ -4310,7 +4456,31 @@ INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_enable )( const pcf::IndiProperty 
     }
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_cycleMutex );
-        if( !m_simulationEnabled )
+        if( m_zeroTestEnabled )
+        {
+            if( !enable )
+            {
+                m_zeroArmed         = false;
+                m_zeroStats.active  = false;
+                m_zeroStats.warming = false;
+                if( !m_zeroStats.stoppedNs )
+                {
+                    m_zeroStats.stoppedNs = m_now();
+                }
+                m_reason = "zero trial disabled";
+            }
+            else if( !m_enabled )
+            {
+                m_zeroStats         = {};
+                m_zeroStats.warming = true;
+                m_zeroArmedAt       = m_now();
+                m_zeroTiming.reset();
+                ++m_zeroTrial;
+                m_zeroArmed = true;
+                m_reason    = "zero trial clock/ownership warming";
+            }
+        }
+        else if( !m_simulationEnabled )
         {
             invalidate( enable ? "acquiring" : "disabled" );
         }
@@ -4336,7 +4506,13 @@ INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_reacquire )( const pcf::IndiProper
     {
         std::lock_guard<std::mutex> lock( m_cycleMutex );
 
-        if( m_simulationEnabled )
+        if( m_zeroTestEnabled )
+        {
+            m_enabled = false;
+            closeZeroTest();
+            configureZeroTest();
+        }
+        else if( m_simulationEnabled )
         {
             resetSimulation();
         }
@@ -4413,7 +4589,17 @@ INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_settings )( const pcf::IndiPropert
     m_requested                    = requested;
     m_maxCadence                   = cadence;
     m_bounds                       = bounds;
-    if( m_simulationEnabled )
+    if( m_zeroTestEnabled )
+    {
+        if( requested < 2 || requested > 3 || !configureZeroTest() )
+        {
+            m_requested  = previousRequested;
+            m_maxCadence = previousCadence;
+            m_bounds     = previousBounds;
+            return -1;
+        }
+    }
+    else if( m_simulationEnabled )
     {
         if( !configureSimulation() )
         {
@@ -4469,4 +4655,6 @@ INDI_SETCALLBACK_DEFN( dmSyncopation, m_indiP_camera )( const pcf::IndiProperty 
 
 } // namespace app
 } // namespace MagAOX
+
+#include "dmSyncopationZeroTest.hpp"
 #endif

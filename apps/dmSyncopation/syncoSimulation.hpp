@@ -1,5 +1,5 @@
 /** \file syncoSimulation.hpp
- * \brief Bounded, event-driven prediction of syncopation policy without stream access or DM writes.
+ * \brief Bounded fixed-grid estimation and optional policy prediction without stream access or DM writes.
  */
 #ifndef dmSyncopation_syncoSimulation_hpp
 #define dmSyncopation_syncoSimulation_hpp
@@ -21,13 +21,14 @@ namespace app
 namespace synco
 {
 
-/// Pure conditional scheduler; the caller serializes timestamp-ordered event delivery.
+/// Pure fixed-grid estimator and conditional scheduler; the caller serializes timestamp-ordered events.
 class Simulation
 {
   public:
     /// Startup-only model settings; these bounds do not qualify instrument safety.
     struct Config
     {
+        bool     clockOnly{ false };      ///< Estimate immutable grids only; ignore combined/release/resource models.
         Bounds   bounds;                  ///< Assumed copy, reader and next-main bounds.
         int      steps{ 2 };              ///< Fixed requested total steps, including passive zero.
         unsigned window{ 32 };            ///< Retained diagnostic intervals and robust phase observations.
@@ -85,6 +86,12 @@ class Simulation
 
     /// Return the bounded snapshot; callers copy it under their own serialization.
     const MagAOX::dmSyncoSimulation::Summary &summary() const;
+
+    /// Read a committed cycle's exact grid after the requested long cadence baseline is complete.
+    /** This returns geometry, not an admission decision or permission to write. */
+    bool frozenGrid( uint64_t  counter /**< [in] Genuine primary counter labelling the committed cycle. */,
+                     GridTime &out /**< [out] Exact frozen main prediction; cleared when unavailable. */,
+                     uint64_t &periodQ32 /**< [out] Period frozen with that cycle; zero when unavailable. */ ) const;
 
     /// Remove the oldest retained overlap; caller serialization must match primary/combined updates.
     bool popOverlap( MagAOX::dmSyncoSimulation::OverlapEvent &event /**< [out] oldest event on success */ );
@@ -305,6 +312,11 @@ class Simulation
 
 inline void Simulation::feasibility( int64_t period )
 {
+    if( m_config.clockOnly )
+    {
+        return;
+    }
+
     if( !m_config.readerReleaseReady )
     {
         m_summary.feasible = feasible( period, m_config.steps, m_config.bounds ) && period >= m_config.cadenceMinPeriod;
@@ -353,12 +365,22 @@ inline void Simulation::clearRelease()
 
 inline void Simulation::resetRelease()
 {
+    if( m_config.clockOnly )
+    {
+        return;
+    }
+
     clearRelease();
     ++m_summary.readiness.sourceResets;
 }
 
 inline void Simulation::releaseDrop( uint64_t count )
 {
+    if( m_config.clockOnly )
+    {
+        return;
+    }
+
     if( count )
     {
         resetRelease();
@@ -390,6 +412,11 @@ inline const MagAOX::dmSyncoSimulation::Readiness *Simulation::released( const C
 
 inline void Simulation::release( const MagAOX::dmSyncoSimulation::Readiness &event )
 {
+    if( m_config.clockOnly )
+    {
+        return;
+    }
+
     if( !m_summary.enabled || !m_config.readerReleaseReady )
     {
         return;
@@ -608,9 +635,10 @@ inline bool Simulation::configure( const Config &config )
         config.timeout < 2 * config.nominalPeriod || config.timeout > 1000000000000LL || config.cadenceMinPeriod < 0 ||
         config.cadenceMinPeriod > 1000000000000LL || config.cadenceUpdateNs <= 0 ||
         config.cadenceWindowNs < config.cadenceUpdateNs || config.cadenceWindowNs > 1000000000000LL ||
-        config.virtualReaderNs <= 0 || config.virtualReaderNs > 1000000000 || config.backendNs <= 0 ||
+        ( !config.clockOnly &&
+          ( config.virtualReaderNs <= 0 || config.virtualReaderNs > 1000000000 || config.backendNs <= 0 ||
         ( !config.pipelineBackend && config.backendNs < config.virtualReaderNs ) || config.backendNs > 1000000000 ||
-        ( config.pipelineBackend && !config.readerReleaseReady ) ||
+            ( config.pipelineBackend && !config.readerReleaseReady ) ) ) ||
         __int128( config.cadenceWindowNs ) >
             __int128( MagAOX::dmSyncoSimulation::cadenceAnchorCapacity - 1 ) * config.cadenceUpdateNs )
     {
@@ -619,6 +647,8 @@ inline bool Simulation::configure( const Config &config )
 
     const auto &b = config.bounds;
 
+    if( !config.clockOnly )
+    {
     for( const auto value : { b.keepout,
                               b.guard,
                               b.delivery,
@@ -640,8 +670,9 @@ inline bool Simulation::configure( const Config &config )
     {
         return false;
     }
+    }
 
-    if( config.pipelineBackend )
+    if( config.pipelineBackend && !config.clockOnly )
     {
         PipelineSimulation::Config pipeline;
         pipeline.deliveryNs   = b.delivery;
@@ -710,7 +741,7 @@ inline void Simulation::reset()
     m_summary.virtualReaderNs    = m_config.virtualReaderNs;
     m_summary.backendNs          = m_config.backendNs;
 
-    if( m_config.pipelineBackend )
+    if( m_config.pipelineBackend && !m_config.clockOnly )
     {
         const auto &pipeline = m_pipeline.summary();
 
@@ -820,6 +851,9 @@ inline bool Simulation::commit( uint64_t counter, int64_t grid, uint64_t estimat
     entry.periodQ32   = m_summary.cadence.periodQ32;
     entry.period      = int64_t( entry.periodQ32 / MagAOX::dmSyncoSimulation::periodScale );
     entry.fractionQ32 = fractionQ32;
+
+    if( !m_config.clockOnly )
+    {
     entry.targets[0]  = copyCutoff( grid, m_config.bounds ) - m_config.bounds.reserve;
     entry.starts[0]   = entry.targets[0] - m_config.bounds.copy;
 
@@ -827,6 +861,7 @@ inline bool Simulation::commit( uint64_t counter, int64_t grid, uint64_t estimat
     {
         entry.targets[j] = stepGrid( { grid, fractionQ32 }, entry.periodQ32, j, m_config.steps ).ns;
         entry.starts[j]  = entry.targets[j] - m_config.bounds.copy;
+    }
     }
 
     m_plans[m_planCount++] = entry;
@@ -888,7 +923,7 @@ inline void Simulation::finishEstimator( MagAOX::dmSyncoSimulation::EstimatorSam
 
 inline void Simulation::skip( Plan &entry, int step, uint64_t MagAOX::dmSyncoSimulation::Step::*reason )
 {
-    if( entry.done[step] )
+    if( m_config.clockOnly || entry.done[step] )
     {
         return;
     }
@@ -1110,7 +1145,7 @@ inline void Simulation::next()
             m_summary.nextGridNs = entry.grid;
         }
 
-        for( int j = 1; j < m_config.steps; ++j )
+        for( int j = 1; !m_config.clockOnly && j < m_config.steps; ++j )
         {
             if( !entry.done[j] && entry.targets[j] > m_summary.nowNs &&
                 ( !m_summary.nextActiveNs || entry.targets[j] < m_summary.nextActiveNs ) )
@@ -1128,6 +1163,11 @@ inline void Simulation::overlap( uint64_t                                      m
                                  MagAOX::dmSyncoSimulation::OverlapOrigin      origin,
                                  const MagAOX::dmSyncoSimulation::Observation &context )
 {
+    if( m_config.clockOnly )
+    {
+        return;
+    }
+
     const bool copying = m_copyBegin && observed >= m_copyBegin && observed < m_copyEnd;
     const bool reading = m_copyBegin && m_copyStep > 0 && observed >= m_copyEnd && observed < m_virtualHold;
     const bool backend = m_config.readerReleaseReady && !m_config.pipelineBackend && m_backendPlan.backendEndNs > 0 &&
@@ -1251,7 +1291,7 @@ inline void Simulation::through( int64_t now, bool inclusive )
         m_summary.phaseSamples     = 0;
     }
 
-    for( size_t attempts = 0; attempts < m_plans.size() * maxSteps; ++attempts )
+    for( size_t attempts = 0; !m_config.clockOnly && attempts < m_plans.size() * maxSteps; ++attempts )
     {
         Plan   *selected = nullptr;
         int     step     = 0;
@@ -1286,7 +1326,7 @@ inline void Simulation::through( int64_t now, bool inclusive )
         evaluate( *selected, step );
     }
 
-    if( m_config.pipelineBackend )
+    if( m_config.pipelineBackend && !m_config.clockOnly )
     {
         m_pipeline.advance( now, &m_mainWaitPending );
         retainMainWait();
@@ -1538,6 +1578,11 @@ inline void Simulation::combined( uint64_t                                      
                                   bool                                          coherent,
                                   const MagAOX::dmSyncoSimulation::Observation &context )
 {
+    if( m_config.clockOnly )
+    {
+        return;
+    }
+
     if( !m_summary.enabled || observed <= 0 || observed < m_summary.nowNs )
     {
         ++m_summary.invalid;
@@ -1660,7 +1705,7 @@ inline bool Simulation::popMainWait( MagAOX::dmSyncoSimulation::MainWaitEvent &e
 inline MagAOX::dmSyncoSimulation::TraceStatus Simulation::mainWaitStatus() const
 {
     MagAOX::dmSyncoSimulation::TraceStatus status;
-    status.enabled  = m_summary.enabled && m_config.pipelineBackend;
+    status.enabled  = m_summary.enabled && m_config.pipelineBackend && !m_config.clockOnly;
     status.detected = m_mainWaitDetected;
     status.drained  = m_mainWaitDrained;
     status.dropped  = m_mainWaitDropped;
@@ -1672,6 +1717,32 @@ inline MagAOX::dmSyncoSimulation::TraceStatus Simulation::mainWaitStatus() const
 inline const MagAOX::dmSyncoSimulation::Summary &Simulation::summary() const
 {
     return m_summary;
+}
+
+inline bool Simulation::frozenGrid( uint64_t counter, GridTime &out, uint64_t &periodQ32 ) const
+{
+    out       = {};
+    periodQ32 = 0;
+
+    if( !m_summary.enabled || !m_summary.valid ||
+        m_summary.cadence.state != MagAOX::dmSyncoSimulation::CadenceState::full )
+    {
+        return false;
+    }
+
+    for( size_t index = 0; index < m_planCount; ++index )
+    {
+        const auto &entry = m_plans[index];
+
+        if( entry.counter == counter )
+        {
+            out       = { entry.grid, entry.fractionQ32 };
+            periodQ32 = entry.periodQ32;
+            return out.ns > 0 && periodQ32 > 0;
+        }
+    }
+
+    return false;
 }
 
 inline bool Simulation::popOverlap( MagAOX::dmSyncoSimulation::OverlapEvent &event )
@@ -1691,7 +1762,7 @@ inline bool Simulation::popOverlap( MagAOX::dmSyncoSimulation::OverlapEvent &eve
 inline MagAOX::dmSyncoSimulation::TraceStatus Simulation::traceStatus() const
 {
     MagAOX::dmSyncoSimulation::TraceStatus status;
-    status.enabled  = m_summary.enabled;
+    status.enabled  = m_summary.enabled && !m_config.clockOnly;
     status.detected = m_traceDetected;
     status.drained  = m_traceDrained;
     status.dropped  = m_traceDropped;

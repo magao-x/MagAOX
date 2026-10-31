@@ -2138,5 +2138,245 @@ TEST_CASE( "synco delayed-main FIFO is bounded across sessions", "[dmSyncopation
     // clang-format on
 }
 
+/** \brief Clock-only estimation preserves fractional frozen grids and waits for the full cadence baseline. */
+TEST_CASE( "synco clock-only qualified frozen grid", "[dmSyncopation][simulation][clockOnly]" )
+{
+    using MagAOX::app::synco::GridTime;
+    using MagAOX::dmSyncoSimulation::CadenceState;
+    using MagAOX::dmSyncoSimulation::periodScale;
+    Simulation::Config config;
+    config.window    = 4;
+    config.steps     = 3;
+    config.clockOnly = true;
+    Simulation clock;
+    REQUIRE( clock.configure( config ) );
+    config.clockOnly = false;
+    Simulation shadow;
+    REQUIRE( shadow.configure( config ) );
+    GridTime clockGrid{ 123, 456 };
+    uint64_t clockPeriod = 789;
+    CHECK_FALSE( clock.frozenGrid( 1, clockGrid, clockPeriod ) );
+    CHECK( clockGrid.ns == 0 );
+    CHECK( clockGrid.fractionQ32 == 0 );
+    CHECK( clockPeriod == 0 );
+
+    for( uint64_t counter = 1; counter <= 20001; ++counter )
+    {
+        // A quarter-nanosecond period remainder must survive the ten-second endpoint estimate.
+        const int64_t observed = 1000000000 + int64_t( counter - 1 ) * 500000 + int64_t( ( counter - 1 ) / 4 );
+        clock.primary( counter, observed, counter == 1 ? 0 : 500000 );
+        shadow.primary( counter, observed, counter == 1 ? 0 : 500000 );
+
+        if( counter == 4 )
+        {
+            CHECK( clock.summary().valid );
+            CHECK( clock.summary().cadence.state == CadenceState::nominal );
+            CHECK_FALSE( clock.frozenGrid( counter, clockGrid, clockPeriod ) );
+        }
+    }
+
+    REQUIRE( clock.summary().cadence.state == CadenceState::full );
+    REQUIRE( clock.frozenGrid( 20001, clockGrid, clockPeriod ) );
+    GridTime shadowGrid;
+    uint64_t shadowPeriod = 0;
+    REQUIRE( shadow.frozenGrid( 20001, shadowGrid, shadowPeriod ) );
+    CHECK( clockGrid.ns == shadowGrid.ns );
+    CHECK( clockGrid.fractionQ32 == shadowGrid.fractionQ32 );
+    CHECK( clockPeriod == shadowPeriod );
+    CHECK( clockPeriod == uint64_t( 500000 ) * periodScale + periodScale / 4 );
+    CHECK( clock.summary().nextActiveNs == 0 );
+
+    GridTime frozenFuture;
+    uint64_t frozenPeriod = 0;
+    REQUIRE( clock.frozenGrid( 20002, frozenFuture, frozenPeriod ) );
+    clock.primary( 20002, frozenFuture.ns + 80000, 580000 );
+    REQUIRE( clock.frozenGrid( 20002, clockGrid, clockPeriod ) );
+    CHECK( clockGrid.ns == frozenFuture.ns );
+    CHECK( clockGrid.fractionQ32 == frozenFuture.fractionQ32 );
+    CHECK( clockPeriod == frozenPeriod );
+
+    CHECK_FALSE( clock.frozenGrid( 20001, clockGrid, clockPeriod ) );
+    CHECK( clockGrid.ns == 0 );
+    CHECK( clockPeriod == 0 );
+    CHECK_FALSE( clock.frozenGrid( 20004, clockGrid, clockPeriod ) );
+
+    for( const auto &step : clock.summary().outcomes )
+    {
+        CHECK( step.considered == 0 );
+        CHECK( step.wouldRun == 0 );
+        CHECK( step.skipped == 0 );
+        CHECK( step.overlap == 0 );
+    }
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::synco::Simulation::configure({});
+    MagAOX::app::synco::Simulation::primary(0,0);
+    MagAOX::app::synco::Simulation::frozenGrid;
+#endif
+    // clang-format on
+}
+
+/** \brief Clock-only mode ignores modeled resources and combined/release events without synthetic outcomes. */
+TEST_CASE( "synco clock-only excludes resource simulation", "[dmSyncopation][simulation][clockOnly]" )
+{
+    Simulation::Config config;
+    config.clockOnly            = true;
+    config.window               = 4;
+    config.steps                = 1;
+    config.pipelineBackend      = true;
+    config.virtualReaderNs      = -1;
+    config.backendNs            = -1;
+    config.pipelinePrepareNs    = -1;
+    config.pipelineSdkServiceNs = -1;
+    config.pipelinePostNs       = -1;
+    config.bounds.copy          = -1;
+    config.bounds.reserve       = -1;
+    Simulation clock;
+    REQUIRE( clock.configure( config ) );
+
+    for( uint64_t counter = 1; counter <= 20001; ++counter )
+    {
+        clock.primary( counter, 1000000000 + int64_t( counter - 1 ) * 500000, counter == 1 ? 0 : 500000 );
+    }
+
+    const auto before = clock.summary();
+    clock.combined( 1, before.counter + 100, before.nowNs + 100000, false );
+    clock.release( readyRecord( before.counter, before.lastMainNs, before.nowNs + 200000 ) );
+    clock.releaseDrop( 9 );
+    clock.resetRelease();
+    CHECK( clock.summary().nowNs == before.nowNs );
+    CHECK( clock.summary().counter == before.counter );
+    CHECK( clock.summary().sequence == before.sequence );
+    CHECK( clock.summary().invalid == before.invalid );
+    CHECK( clock.summary().outputGaps == 0 );
+    CHECK( clock.summary().associations == 0 );
+    CHECK( clock.summary().readiness.observed == 0 );
+    CHECK( clock.summary().readiness.queueDrops == 0 );
+    CHECK( clock.summary().readiness.sourceResets == 0 );
+    CHECK_FALSE( clock.summary().pipeline.enabled );
+    CHECK_FALSE( clock.mainWaitStatus().enabled );
+    CHECK_FALSE( clock.traceStatus().enabled );
+    CHECK( clock.mainWaitStatus().detected == 0 );
+    CHECK( clock.traceStatus().detected == 0 );
+    clock.advance( before.nowNs + 499999 );
+
+    for( const auto &step : clock.summary().outcomes )
+    {
+        CHECK( step.considered == 0 );
+        CHECK( step.wouldRun == 0 );
+        CHECK( step.skipped == 0 );
+        CHECK( step.overlap == 0 );
+    }
+
+    MagAOX::app::synco::GridTime grid;
+    uint64_t                     periodQ32 = 0;
+    REQUIRE( clock.frozenGrid( before.counter, grid, periodQ32 ) );
+    const auto epoch = clock.summary().cadence.epoch;
+    clock.advance( before.nowNs + config.timeout + 1 );
+    CHECK_FALSE( clock.frozenGrid( before.counter, grid, periodQ32 ) );
+    CHECK( grid.ns == 0 );
+    CHECK( periodQ32 == 0 );
+    CHECK( clock.summary().cadence.epoch > epoch );
+
+    for( const auto &step : clock.summary().outcomes )
+    {
+        CHECK( step.considered == 0 );
+    }
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::synco::Simulation::configure({});
+    MagAOX::app::synco::Simulation::combined(0,0,0);
+    MagAOX::app::synco::Simulation::release({});
+    MagAOX::app::synco::Simulation::releaseDrop;
+    MagAOX::app::synco::Simulation::resetRelease;
+    MagAOX::app::synco::Simulation::advance(0);
+    MagAOX::app::synco::Simulation::frozenGrid;
+#endif
+    // clang-format on
+}
+
+/** \brief Clock-only epochs reject stale/reset grids while forward gaps retain counter-normalized estimation. */
+TEST_CASE( "synco clock-only grid epoch qualification", "[dmSyncopation][simulation][clockOnly]" )
+{
+    using MagAOX::dmSyncoSimulation::CadenceState;
+    Simulation::Config config;
+    config.clockOnly       = true;
+    config.steps           = 1;
+    config.window          = 4;
+    config.cadenceWindowNs = 2000000;
+    config.cadenceUpdateNs = 1000000;
+    Simulation clock;
+    REQUIRE( clock.configure( config ) );
+
+    for( uint64_t counter = 1; counter <= 5; ++counter )
+    {
+        clock.primary( counter, 1000000000 + int64_t( counter - 1 ) * 500000, counter == 1 ? 0 : 500000 );
+    }
+
+    const auto                   before = clock.summary();
+    MagAOX::app::synco::GridTime grid;
+    uint64_t                     periodQ32 = 0;
+    REQUIRE( clock.frozenGrid( 5, grid, periodQ32 ) );
+
+    SECTION( "Forward gaps remain visible without changing the inherited counter-normalized estimator policy" )
+    {
+        clock.primary( 7, before.lastMainNs + 500000, 500000 );
+        CHECK( clock.summary().gaps == before.gaps + 1 );
+        CHECK( clock.summary().session == before.session );
+        CHECK( clock.summary().cadence.state == CadenceState::full );
+        // A caller requiring a contiguous observation epoch explicitly resets after noticing the gap.
+        clock.reset();
+    }
+
+    SECTION( "Counter regression starts a fresh unqualified epoch" )
+    {
+        clock.primary( 1, before.lastMainNs + 500000, 500000 );
+        CHECK( clock.summary().session > before.session );
+    }
+
+    SECTION( "Clock regression revokes an already advanced observation epoch" )
+    {
+        clock.advance( before.nowNs + 100 );
+        clock.primary( 6, before.nowNs + 50, 500000 );
+        CHECK( clock.summary().session > before.session );
+    }
+
+    SECTION( "Primary silence revokes the full cadence baseline" )
+    {
+        clock.advance( before.lastMainNs + config.timeout + 1 );
+        CHECK( clock.summary().cadence.epoch > before.cadence.epoch );
+    }
+
+    SECTION( "Explicit lifecycle reset revokes the full cadence baseline" )
+    {
+        clock.reset();
+        CHECK( clock.summary().session > before.session );
+    }
+
+    CHECK_FALSE( clock.summary().valid );
+    CHECK( clock.summary().cadence.state == CadenceState::nominal );
+    CHECK_FALSE( clock.frozenGrid( clock.summary().counter, grid, periodQ32 ) );
+    CHECK( grid.ns == 0 );
+    CHECK( grid.fractionQ32 == 0 );
+    CHECK( periodQ32 == 0 );
+
+    for( const auto &step : clock.summary().outcomes )
+    {
+        CHECK( step.considered == 0 );
+    }
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::synco::Simulation::configure({});
+    MagAOX::app::synco::Simulation::primary(0,0);
+    MagAOX::app::synco::Simulation::advance(0);
+    MagAOX::app::synco::Simulation::reset;
+    MagAOX::app::synco::Simulation::frozenGrid;
+#endif
+    // clang-format on
+}
+
 } // namespace dmSyncopationTest
 } // namespace libXWCTest

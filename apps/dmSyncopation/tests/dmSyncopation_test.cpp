@@ -85,9 +85,11 @@ class Harness : public dmSyncopation
 
     using dmSyncopation::allocate;
     using dmSyncopation::configureSimulation;
+    using dmSyncopation::configureZeroTest;
     using dmSyncopation::consume;
     using dmSyncopation::copyBatch;
     using dmSyncopation::drainSimulationRelease;
+    using dmSyncopation::drainZeroTestReader;
     using dmSyncopation::executeStep;
     using dmSyncopation::Fault;
     using dmSyncopation::m_advances;
@@ -218,7 +220,21 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_timing;
     using dmSyncopation::m_timingName;
     using dmSyncopation::m_wait;
+    using dmSyncopation::m_zeroAttached;
+    using dmSyncopation::m_zeroClock;
+    using dmSyncopation::m_zeroDurationSec;
+    using dmSyncopation::m_zeroEvents;
+    using dmSyncopation::m_zeroIdle;
+    using dmSyncopation::m_zeroLastCombined;
+    using dmSyncopation::m_zeroLateUs;
+    using dmSyncopation::m_zeroNextFileCheck;
+    using dmSyncopation::m_zeroSdkStream;
+    using dmSyncopation::m_zeroStats;
+    using dmSyncopation::m_zeroTestChannel;
+    using dmSyncopation::m_zeroTestEnabled;
+    using dmSyncopation::m_zeroTiming;
     using dmSyncopation::missedStep;
+    using dmSyncopation::processZeroTestPrimary;
     using dmSyncopation::readCamera;
     using dmSyncopation::readPrimaryTiming;
     using dmSyncopation::setupCadenceINDI;
@@ -227,6 +243,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::setupPrimaryCadenceINDI;
     using dmSyncopation::setupReaderTimingINDI;
     using dmSyncopation::setupSimulationINDI;
+    using dmSyncopation::setupZeroTestINDI;
     using dmSyncopation::snapshot;
     using dmSyncopation::updateCadenceINDI;
     using dmSyncopation::updateCombinerCadenceINDI;
@@ -238,7 +255,9 @@ class Harness : public dmSyncopation
     using dmSyncopation::updateReaderTimingINDI;
     using dmSyncopation::updateSimulationCadence;
     using dmSyncopation::updateSimulationINDI;
+    using dmSyncopation::updateZeroTest;
     using dmSyncopation::waitUntil;
+    using dmSyncopation::zeroTestReady;
     using MagAOXApp<true>::config;
     using dev::shmimMonitor<dmSyncopation>::m_imageStream;
     using dev::shmimMonitor<dmSyncopation>::m_shmimName;
@@ -6648,6 +6667,586 @@ TEST_CASE( "syncopation readiness drains only one fixed raw event batch", "[dmSy
     CHECK( app.m_simulationReleaseQueue.dropped() == 0 );
     CHECK_FALSE( app.m_enabled );
     CHECK_FALSE( app.m_resources );
+}
+
+/// \cond ZERO_TEST_CLOCK
+/// Emulate only fixture-owned combined/read-release events on the app's monotonic adapters.
+struct ZeroClock
+{
+    static inline int64_t  time{ 1000000000 }; ///< Current private virtual execution time.
+    static inline Harness *app{ nullptr };     ///< Unstarted app under test.
+    static inline Streams *streams{ nullptr }; ///< Private primary, combined and auxiliary pixels.
+    static inline uint64_t targetCounter{ 0 }; ///< Last auxiliary counter acknowledged by the fake combiner.
+    static inline uint64_t sequence{ 0 };      ///< Fake controller attempt sequence.
+    static inline bool     release{ true };    ///< Supply exact actual-reader clearance when requested.
+    static inline bool     combine{ true };    ///< Acknowledge auxiliary updates in the fake combiner.
+    static inline bool     earlyMain{ false }; ///< Advance the genuine primary during the next timed wait.
+    static inline bool     cancel{ false };    ///< Cancel the finite trial during its next timed wait.
+    static inline int64_t  wakeDelay{ 0 };     ///< Inject host wake lateness without changing any planned grid.
+    static inline int64_t  lateOnceAt{ 0 };    ///< Delay one selected wake without moving subsequent targets.
+    static inline int64_t  mainDelay{ 0 };     ///< Delay fake dmcomb relative to each genuine primary publication.
+    static inline int64_t  pendingMainAt{ 0 }; ///< A pending main combination in the private virtual clock.
+    static inline std::vector<int64_t> posts;  ///< Actual auxiliary publication times observed by the fixture.
+
+    /// Retain one exact combined publication and optional early release.
+    static void combined();
+
+    /// Observe completed auxiliary publications without waiting on real time or hardware.
+    static int64_t now();
+
+    /// Advance to an absolute deadline and inject one controlled cancellation or early main.
+    static int wait( const timespec *target /**< [in] Private absolute monotonic deadline. */ );
+
+    /// Initialize the production zero mode against only the fixture's existing images.
+    static void connect( Harness &scheduler /**< [in,out] Unstarted app. */,
+                         Streams &images /**< [in,out] Private shared-memory images. */,
+                         int      steps /**< [in] Total main-plus-auxiliary steps. */ );
+
+    /// Publish one genuine main and invoke the production primary callback.
+    static void primary( int64_t observed /**< [in] Private monotonic main time. */ );
+
+    /// Acquire the unchanged ten-second cadence while the finite writer is disabled.
+    static int64_t warm();
+};
+
+void ZeroClock::combined()
+{
+    auto &image     = streams->images[1];
+    image.md->write = 1;
+    ++image.md->cnt0;
+    image.md->writetime = synco::toTimespec( 2000000000000000000LL + time );
+    image.md->write     = 0;
+
+    if( release )
+    {
+        auto record  = readerCompletion( image, ++sequence, time - 1000, time - 100 );
+        record.kind  = MagAOX::dmCompletion::Kind::readers;
+        record.state = MagAOX::dmCompletion::State::released;
+        REQUIRE( app->m_simulationReleaseQueue.push( { record, time, app->m_simulationReleaseEpoch.load(), true } ) );
+    }
+}
+
+int64_t ZeroClock::now()
+{
+    time += 100;
+
+    if( pendingMainAt && time >= pendingMainAt )
+    {
+        pendingMainAt = 0;
+        combined();
+    }
+
+    if( app && streams->images[2].md->cnt0 != targetCounter )
+    {
+        targetCounter = streams->images[2].md->cnt0;
+        posts.push_back( time );
+
+        if( combine )
+        {
+            combined();
+        }
+    }
+
+    return time;
+}
+
+int ZeroClock::wait( const timespec *target )
+{
+    time = std::max( time, int64_t( target->tv_sec ) * 1000000000 + target->tv_nsec ) + wakeDelay;
+
+    if( lateOnceAt && time >= lateOnceAt )
+    {
+        time += 20000;
+        lateOnceAt = 0;
+    }
+
+    if( earlyMain )
+    {
+        ++streams->images[0].md->cnt0;
+        earlyMain = false;
+    }
+
+    if( cancel )
+    {
+        app->m_enabled = false;
+        cancel         = false;
+    }
+
+    return 0;
+}
+
+void ZeroClock::connect( Harness &scheduler, Streams &images, int steps )
+{
+    app      = &scheduler;
+    streams  = &images;
+    time     = 1000000000;
+    sequence = 0;
+    release = combine = true;
+    earlyMain = cancel = false;
+    wakeDelay          = 0;
+    lateOnceAt = mainDelay = pendingMainAt = 0;
+    posts.clear();
+    std::fill_n( images.images[0].array.F, 9, 0.25F );
+    std::fill_n( images.images[2].array.F, 9, 0.0F );
+    targetCounter = images.images[2].md->cnt0;
+    scheduler.attachPrimaryOnly();
+    scheduler.m_zeroTestEnabled = true;
+    scheduler.m_zeroTestChannel = "dm97disp07";
+    scheduler.m_zeroSdkStream.clear();
+    scheduler.m_requested                  = steps;
+    scheduler.m_simulationWindow           = 4;
+    scheduler.m_simulationCadenceWindowSec = 10;
+    scheduler.m_simulationCadenceUpdateSec = 1;
+    scheduler.m_zeroDurationSec            = 120;
+    scheduler.m_now                        = now;
+    scheduler.m_wait                       = wait;
+    scheduler.m_primaryCadence.configure( 2, 64 );
+    scheduler.m_simulationReleaseQueue.configure( 128 );
+    scheduler.m_zeroEvents.configure( 256 );
+    REQUIRE( scheduler.configureZeroTest() );
+}
+
+void ZeroClock::primary( int64_t observed )
+{
+    REQUIRE( observed >= time );
+
+    if( pendingMainAt && pendingMainAt <= observed )
+    {
+        time          = pendingMainAt;
+        pendingMainAt = 0;
+        combined();
+    }
+
+    time            = observed;
+    auto &image     = streams->images[0];
+    image.md->write = 1;
+    ++image.md->cnt0;
+    image.md->writetime = synco::toTimespec( 2000000000000000000LL + observed );
+    image.md->write     = 0;
+    if( mainDelay )
+    {
+        pendingMainAt = observed + mainDelay;
+    }
+    else
+    {
+        combined();
+    }
+    app->shmimMonitorTiming( dev::shmimT{}, dev::shmimMonitorEvent::receipt );
+    REQUIRE( app->processImage( nullptr, dev::shmimT{} ) == 0 );
+}
+
+int64_t ZeroClock::warm()
+{
+    for( int cycle = 0; cycle < 20006; ++cycle )
+    {
+        primary( 1000000000LL + int64_t( cycle ) * 500000 );
+    }
+
+    REQUIRE( app->m_zeroAttached );
+    REQUIRE( app->m_zeroIdle );
+    REQUIRE( app->m_zeroClock.summary().cadence.state == MagAOX::dmSyncoSimulation::CadenceState::full );
+    REQUIRE( posts.empty() );
+    return 1000000000LL + 20006LL * 500000;
+}
+/// \endcond
+
+/// Genuine step zero plus only N-1 timed auxiliary publications produces the requested total cadence.
+TEST_CASE( "coordinated zero trial publishes only intermediate main-grid slots", "[dmSyncopation][zeroTest]" )
+{
+    Streams    streams;
+    Harness    app;
+    const int  steps    = GENERATE( 2, 3 );
+    const bool lateMain = GENERATE( false, true );
+    ZeroClock::connect( app, streams, steps );
+    const auto      next          = ZeroClock::warm();
+    const auto      primaryBefore = streams.images[0].md->cnt0;
+    const auto      otherBefore   = streams.images[3].md->cnt0;
+    synco::GridTime grid;
+    uint64_t        period = 0;
+    REQUIRE( app.m_zeroClock.frozenGrid( primaryBefore + 1, grid, period ) );
+    app.m_enabled = true;
+    ZeroClock::primary( next + ( lateMain ? 80000 : 0 ) );
+    REQUIRE( app.m_zeroStats.posted == uint64_t( steps - 1 ) );
+    REQUIRE( app.m_zeroStats.acknowledged == uint64_t( steps - 1 ) );
+    REQUIRE( app.m_zeroStats.skipped == 0 );
+    REQUIRE( ZeroClock::posts.size() == size_t( steps - 1 ) );
+
+    for( int step = 1; step < steps; ++step )
+    {
+        const auto target = synco::stepGrid( grid, period, step, steps ).ns;
+        CHECK( ZeroClock::posts[step - 1] >= target );
+        CHECK( ZeroClock::posts[step - 1] - target <= int64_t( app.m_zeroLateUs * 1000 ) );
+    }
+
+    CHECK( streams.images[0].md->cnt0 == primaryBefore + 1 );
+    CHECK( streams.images[3].md->cnt0 == otherBefore );
+    CHECK( streams.images[2].md->write == 0 );
+    CHECK( streams.images[2].md->writetime.tv_sec > 0 );
+
+    for( size_t pixel = 0; pixel < 9; ++pixel )
+    {
+        CHECK( streams.images[0].array.F[pixel] == 0.25F );
+        CHECK( streams.images[2].array.F[pixel] == 0 );
+        CHECK( streams.images[3].array.F[pixel] == 3 );
+    }
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::processZeroTestPrimary;
+    MagAOX::app::dmSyncopation::configureZeroTest;
+#endif
+    // clang-format on
+}
+
+/// Lost reader evidence, late wakes and a newly arriving main suppress writes without catch-up.
+TEST_CASE( "coordinated zero trial skips lost readiness and obsolete slots", "[dmSyncopation][zeroTest]" )
+{
+    Streams streams;
+    Harness app;
+    ZeroClock::connect( app, streams, 3 );
+    const auto next = ZeroClock::warm();
+    app.m_enabled   = true;
+
+    SECTION( "missing exact reader release" )
+    {
+        ZeroClock::release = false;
+    }
+
+    SECTION( "late scheduler wake" )
+    {
+        ZeroClock::wakeDelay = 20000;
+    }
+
+    SECTION( "early next main" )
+    {
+        ZeroClock::earlyMain = true;
+    }
+
+    SECTION( "operator cancellation" )
+    {
+        ZeroClock::cancel = true;
+    }
+
+    ZeroClock::primary( next );
+    CHECK( app.m_zeroStats.posted == 0 );
+    CHECK( app.m_zeroStats.skipped == 2 );
+    CHECK( ZeroClock::posts.empty() );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::processZeroTestPrimary;
+    MagAOX::app::dmSyncopation::zeroTestReady;
+    MagAOX::app::dmSyncopation::zeroTestWait;
+#endif
+    // clang-format on
+}
+
+/// A finite interval ends without an auxiliary command at or beyond expiry.
+TEST_CASE( "coordinated zero trial expires independently of requested slots", "[dmSyncopation][zeroTest]" )
+{
+    Streams streams;
+    Harness app;
+    ZeroClock::connect( app, streams, 3 );
+    const auto next       = ZeroClock::warm();
+    app.m_zeroDurationSec = 0.0001;
+    app.m_enabled         = true;
+    ZeroClock::primary( next );
+    ZeroClock::primary( next + 500000 );
+    CHECK_FALSE( app.m_enabled );
+    CHECK( app.m_zeroStats.finished );
+    CHECK_FALSE( app.m_zeroStats.active );
+    CHECK( app.m_zeroStats.posted == 0 );
+    CHECK( ZeroClock::posts.empty() );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::processZeroTestPrimary;
+    MagAOX::app::dmSyncopation::zeroTestWait;
+#endif
+    // clang-format on
+}
+
+/// A competing writer or replacement revokes ownership before any trial mutation.
+TEST_CASE( "coordinated zero trial refuses changed channel ownership", "[dmSyncopation][zeroTest]" )
+{
+    Streams streams;
+    Harness app;
+    ZeroClock::connect( app, streams, 2 );
+    const auto next = ZeroClock::warm();
+    app.m_enabled   = true;
+
+    SECTION( "external counter update" )
+    {
+        ++streams.images[2].md->cnt0;
+        ZeroClock::targetCounter = streams.images[2].md->cnt0;
+    }
+
+    SECTION( "backing stream replacement" )
+    {
+        ImageStreamIO_destroyIm( &streams.images[2] );
+        streams.images[2] = {};
+        uint32_t size[]{ 3, 3 };
+        REQUIRE( ImageStreamIO_createIm_gpu(
+                     &streams.images[2], "dm97disp07", 2, size, _DATATYPE_FLOAT, -1, 1, IMAGE_NB_SEMAPHORE, 0, 0, 0 ) ==
+                 0 );
+        app.m_zeroNextFileCheck = 0;
+    }
+
+    ZeroClock::primary( next );
+    CHECK_FALSE( app.m_enabled );
+    CHECK( app.m_zeroStats.resourceFaults == 1 );
+    CHECK( app.m_zeroStats.posted == 0 );
+    CHECK( ZeroClock::posts.empty() );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::processZeroTestPrimary;
+    MagAOX::app::dmSyncopation::zeroTestResources;
+#endif
+    // clang-format on
+}
+
+/// Initial nonzero or nonfinite pixels are never silently cleared by the finite test.
+TEST_CASE( "coordinated zero trial refuses a nonzero initial contribution", "[dmSyncopation][zeroTest]" )
+{
+    Streams streams;
+    Harness app;
+    ZeroClock::connect( app, streams, 2 );
+    const bool nonfinite         = GENERATE( false, true );
+    streams.images[2].array.F[0] = nonfinite ? std::numeric_limits<float>::quiet_NaN() : 1.0F;
+    uint32_t before;
+    std::memcpy( &before, streams.images[2].array.F, sizeof( before ) );
+    app.m_enabled = true;
+    ZeroClock::primary( ZeroClock::time );
+    uint32_t after;
+    std::memcpy( &after, streams.images[2].array.F, sizeof( after ) );
+    CHECK( after == before );
+    CHECK_FALSE( app.m_zeroAttached );
+    CHECK( app.m_zeroStats.posted == 0 );
+    CHECK( ZeroClock::posts.empty() );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::openZeroTest;
+    MagAOX::app::dmSyncopation::zeroTestPixels;
+#endif
+    // clang-format on
+}
+
+/// One missed auxiliary occurrence does not suppress a later independently safe slot.
+TEST_CASE( "coordinated zero trial keeps the second slot after first-slot lateness", "[dmSyncopation][zeroTest]" )
+{
+    Streams streams;
+    Harness app;
+    ZeroClock::connect( app, streams, 3 );
+    const auto      next = ZeroClock::warm();
+    synco::GridTime grid;
+    uint64_t        period = 0;
+    REQUIRE( app.m_zeroClock.frozenGrid( streams.images[0].md->cnt0 + 1, grid, period ) );
+    ZeroClock::lateOnceAt = synco::stepGrid( grid, period, 1, 3 ).ns;
+    app.m_enabled         = true;
+    ZeroClock::primary( next );
+    REQUIRE( app.m_zeroStats.skipped == 1 );
+    REQUIRE( app.m_zeroStats.late == 1 );
+    REQUIRE( app.m_zeroStats.posted == 1 );
+    REQUIRE( app.m_zeroStats.acknowledged == 1 );
+    REQUIRE( ZeroClock::posts.size() == 1 );
+    const auto second = synco::stepGrid( grid, period, 2, 3 ).ns;
+    CHECK( ZeroClock::posts[0] >= second );
+    CHECK( ZeroClock::posts[0] - second <= int64_t( app.m_zeroLateUs * 1000 ) );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::processZeroTestPrimary;
+#endif
+    // clang-format on
+}
+
+/// Primary-before-combiner callback ordering cannot keep the trial one frame behind.
+TEST_CASE( "coordinated zero trial reacquires delayed genuine combinations", "[dmSyncopation][zeroTest]" )
+{
+    Streams streams;
+    Harness app;
+    ZeroClock::connect( app, streams, 3 );
+    ZeroClock::mainDelay = 10000;
+    const auto next      = ZeroClock::warm();
+    app.m_enabled        = true;
+    ZeroClock::primary( next );
+    ZeroClock::primary( next + 500000 );
+    ZeroClock::primary( next + 1000000 );
+    CHECK( app.m_zeroStats.acknowledged >= 4 );
+    CHECK( app.m_zeroStats.mainMatched >= 2 );
+    CHECK( app.m_zeroStats.mainUnmatched <= 1 );
+    CHECK( app.m_zeroStats.resourceFaults == 0 );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::processZeroTestPrimary;
+#endif
+    // clang-format on
+}
+
+/// A missing main counter revokes full cadence rather than authorizing slots from an uncertain cycle.
+TEST_CASE( "coordinated zero trial requalifies after a primary gap", "[dmSyncopation][zeroTest]" )
+{
+    Streams streams;
+    Harness app;
+    ZeroClock::connect( app, streams, 3 );
+    const auto next = ZeroClock::warm();
+    ++streams.images[0].md->cnt0;
+    app.m_enabled = true;
+    ZeroClock::primary( next );
+    CHECK( ZeroClock::posts.empty() );
+    CHECK( app.m_zeroStats.warming );
+    CHECK( app.m_zeroClock.summary().cadence.state != MagAOX::dmSyncoSimulation::CadenceState::full );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::processZeroTestPrimary;
+#endif
+    // clang-format on
+}
+
+/// Known transport loss fences all queued old-generation readiness before a fresh capture can authorize writes.
+TEST_CASE( "coordinated zero trial revokes queued release evidence after loss", "[dmSyncopation][zeroTest]" )
+{
+    Streams streams;
+    Harness app;
+    ZeroClock::connect( app, streams, 3 );
+    ZeroClock::warm();
+    const auto key = app.m_zeroLastCombined;
+    REQUIRE( app.zeroTestReady( key ) );
+    app.m_simulationReleaseQueue.configure( 1 );
+    auto record =
+        readerCompletion( streams.images[1], ++ZeroClock::sequence, ZeroClock::time - 1000, ZeroClock::time - 100 );
+    record.kind      = MagAOX::dmCompletion::Kind::readers;
+    record.state     = MagAOX::dmCompletion::State::released;
+    const auto epoch = app.m_simulationReleaseEpoch.load();
+    REQUIRE( app.m_simulationReleaseQueue.push( { record, ZeroClock::time, epoch, true } ) );
+    REQUIRE_FALSE( app.m_simulationReleaseQueue.push( { record, ZeroClock::time, epoch, true } ) );
+    app.drainZeroTestReader( ZeroClock::time );
+    CHECK( app.m_zeroStats.readerDrops == 1 );
+    CHECK_FALSE( app.zeroTestReady( key ) );
+    CHECK( app.m_simulationReleaseEpoch.load() > epoch );
+    REQUIRE(
+        app.m_simulationReleaseQueue.push( { record, ZeroClock::time, app.m_simulationReleaseEpoch.load(), true } ) );
+    app.drainZeroTestReader( ZeroClock::time );
+    CHECK( app.zeroTestReady( key ) );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::drainZeroTestReader;
+    MagAOX::app::dmSyncopation::zeroTestReady;
+#endif
+    // clang-format on
+}
+
+/// Both warmup and active limits cancel through the ordinary loop even without another main callback.
+TEST_CASE( "coordinated zero trial has independent wall-clock cancellation", "[dmSyncopation][zeroTest]" )
+{
+    Streams streams;
+    Harness app;
+    ZeroClock::connect( app, streams, 2 );
+    app.properties();
+    REQUIRE( app.setupZeroTestINDI() == 0 );
+
+    SECTION( "main never qualifies" )
+    {
+        auto enable      = app.m_indiP_enable;
+        enable["toggle"] = pcf::IndiElement::On;
+        REQUIRE( app.newCallBack_m_indiP_enable( enable ) == 0 );
+        ZeroClock::time += 30000000001LL;
+    }
+
+    SECTION( "main stops during the active trial" )
+    {
+        const auto next = ZeroClock::warm();
+        app.m_enabled   = true;
+        ZeroClock::primary( next );
+        REQUIRE( app.m_zeroStats.posted == 1 );
+        ZeroClock::time = app.m_zeroStats.startedNs + 120000000001LL;
+    }
+
+    const auto posts = ZeroClock::posts.size();
+    app.updateZeroTest();
+    CHECK_FALSE( app.m_enabled );
+    CHECK_FALSE( app.m_zeroStats.active );
+    CHECK_FALSE( app.m_zeroStats.warming );
+    CHECK( app.m_zeroStats.finished );
+    CHECK( ZeroClock::posts.size() == posts );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::updateZeroTest;
+    MagAOX::app::dmSyncopation::newCallBack_m_indiP_enable;
+#endif
+    // clang-format on
+}
+
+/// Startup selection cannot weaken the separate shadow no-write contract or enable an invalid finite trial.
+TEST_CASE( "coordinated zero trial validates explicit startup configuration", "[dmSyncopation][zeroTest]" )
+{
+    Harness app;
+    app.setupConfig();
+    const std::string extra      = GENERATE( std::string{},
+                                        std::string{ "[simulation]\nenabled=true\n" },
+                                        std::string{ "[simulation]\nreaderReleaseReady=true\n" },
+                                        std::string{ "[scheduler]\nmaxSubframes=4\n" },
+                                        std::string{ "[zeroTest]\ndurationSec=121\n" },
+                                        std::string{ "[zeroTest]\nchannel=dm01disp03\n" },
+                                        std::string{ "[zeroTest]\nlateUs=51\n" },
+                                        std::string{ "[readerReleaseMonitor]\nshmimName=\n" } );
+    char              path[]     = "/tmp/dm-synco-zero-config-XXXXXX";
+    const auto        descriptor = mkstemp( path );
+    REQUIRE( descriptor >= 0 );
+    close( descriptor );
+
+    {
+        std::ofstream output( path );
+        output << "[shmimMonitor]\nshmimName=dm01disp03\n";
+
+        if( extra.find( "[readerReleaseMonitor]" ) == std::string::npos )
+        {
+            output << "[readerReleaseMonitor]\nshmimName=dmtweeter_read_done\n";
+        }
+
+        output << "[scheduler]\nmaxSubframes=2\n"
+                  "[zeroTest]\nenabled=true\nchannel=dm01disp07\ndurationSec=120\nlateUs=5\n"
+               << extra;
+    }
+
+    app.config.readConfig( path );
+    std::remove( path );
+    const auto configured = app.loadConfigImpl( app.config );
+    CAPTURE( extra );
+
+    if( extra.empty() )
+    {
+        CHECK( configured == 0 );
+        CHECK( app.m_zeroTestEnabled );
+        CHECK( app.m_semaphoreNumber == -1 );
+    }
+    else
+    {
+        CHECK( configured < 0 );
+    }
+
+    CHECK_FALSE( app.m_enabled );
+    CHECK_FALSE( app.m_zeroAttached );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::setupConfig;
+    MagAOX::app::dmSyncopation::loadConfigImpl;
+#endif
+    // clang-format on
+}
+
+/// Existing log readers validate the finite trial's ordinary text telemetry without a new decoder.
+TEST_CASE( "coordinated zero trial telemetry preserves the text wire protocol", "[dmSyncopation][zeroTest]" )
+{
+    using namespace MagAOX::logger;
+    flatlogs::bufferPtrT         buffer;
+    const syncoZeroLog::messageT message( "[zero_test] kind=summary posted=1 skipped=0" );
+    REQUIRE( flatlogs::logHeader::createLog<syncoZeroLog>(
+                 buffer, flatlogs::timespecX( 1, 2 ), message, flatlogs::logPrio::LOG_TELEM ) == 0 );
+    CHECK( flatlogs::eventCodeT( syncoZeroLog::eventCode ) == flatlogs::eventCodeT( text_log::eventCode ) );
+    CHECK( verifyLogEntry( text_log::eventCode, buffer.get() ) );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::syncoZeroLog::messageT;
+#endif
+    // clang-format on
 }
 
 } // namespace dmSyncopationTest
