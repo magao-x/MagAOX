@@ -42,6 +42,7 @@ pythonapps_aoc = \
 
 # Apps common to RTC and ICC on MagAO-X
 apps_rtcicc = \
+    autoJay \
     alignLoop \
     acronameUsbHub \
 	baslerCtrl \
@@ -123,6 +124,7 @@ apps_sim = \
 	trippLitePDU
 
 all_buildable_apps = \
+	autoJay \
 	virtualPDU \
 	acronameUsbHub \
 	adcTracker \

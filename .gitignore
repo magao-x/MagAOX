@@ -51,6 +51,7 @@ apps/andorCtrl/andorCtrl
 apps/acronameUsbHub/acronameUsbHub
 apps/acronameUsbHub/utils/configusbhub
 apps/alignLoop/alignLoop
+apps/autoJay/autoJay
 apps/acesxeCtrl/acesxeCtrl
 
 #b

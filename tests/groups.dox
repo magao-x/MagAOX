@@ -72,6 +72,11 @@ $ less tests/results/latest/run.log
  * \ingroup unit_test
  */
 
+/** \defgroup autoJay_unit_test Automated J-test Unit Tests
+ * \brief Offline calibration, registration, acquisition, and control-interface tests.
+ * \ingroup application_unit_test
+ */
+
 /** \page page_test_coverage Test Coverage Report
  * \ingroup testing
 

@@ -76,10 +76,12 @@ Review AGENTS.md.  Do not alter any text above the "Agent Findings and Plan" bel
 
 # Agent Findings and Plan
 
-Status: proposed plan, 2026-10-30. Source review and planning only; implementation
-has not started. Reviewed on workstation `mx11`, on branch `jrmales/auto-jay`.
-No instrument connections or commands were used. Local `/opt/MagAOX/config`
-files were read only as examples; they do not establish the deployed setup.
+Status: implemented and validated offline, 2026-10-31, on workstation `mx11` and
+branch `jrmales/auto-jay`. The approved plan and the user's answers were committed
+unchanged as `2f954d10` before implementation. The proposal below is retained as
+the design record; the execution notes at the end document implementation choices
+and validation. No instrument connections or commands were used. Local
+`/opt/MagAOX/config` files were read only as examples, not as deployed-state evidence.
 
 ## Task Summary
 
@@ -486,6 +488,137 @@ step.
   following if desired, and promote acquisition/persistence helpers to common
   library utilities when a second consumer justifies the extraction.
 
-Planning validation: reviewed the relevant acquisition, correlation, ROI,
-calibration, controller, and test/build sources. Only this Markdown file is
-changed; no application build or test run is needed for the planning edit.
+Initial planning validation (2026-10-30): reviewed the relevant acquisition,
+correlation, ROI, calibration, controller, and test/build sources. Only this
+Markdown file changed at that checkpoint; no application build or test run was
+needed for the planning edit.
+
+## Execution Record — 2026-10-31
+
+### Implemented behavior
+
+- Added the header-only `autoJay` application and independently testable acquisition,
+  calibration, and registration helpers. The main application thread owns DM
+  transactions and processing; the existing image-monitor thread accumulates
+  coherent, distinct frames. A separate acquisition worker was unnecessary.
+- Enforced the answered operating conditions: both `holoop` and the tweeter/WFS
+  alignment loop must be open. Default owned channels are `dm02disp02` and
+  `dm01disp02`. Writes are active because AO is off and cannot trigger passive
+  channel updates. The app checks combined-command changes at affected pixels,
+  waits for settling, and explicitly removes NCPC before applying tweeter.
+- Frame counts, command/frame deadlines, source counter regressions, individual
+  raw-frame saturation, stream geometry/identity, channel ownership, and setup
+  changes are checked. Stops and exceptions clear accessible owned channels.
+  File replacement or another writer causes a fault instead of a write to a
+  different channel. Stream-close errors are reported during normal cleanup.
+- Implemented first-reference capture, immutable versioned bundles, strict FITS
+  dimensions/data validation, per-file integrity checks, atomic directory
+  publication, and newest-valid selection within the explicit profile. Failed
+  recall removes the previous calibration's eligibility. Loaded patterns and
+  references are always associated as one object, independent of later edits to
+  source pattern files.
+- Kept one shared ROI for each reference pair and one for each live triplet.
+  Mapping supports unequal extents/origins, fractional bin phases, and anisotropic
+  binning at unchanged sampling. Reference images themselves encode the aligned
+  relationship; the published residual is `tweeter shift - NCPC shift`, with no
+  additional offset, as answered by the user.
+- Registration uses mxlib FFT cross-products followed by overlap-specific normalized
+  correlation and mxlib cubic interpolation. Testing demonstrated that selecting
+  the original independently normalized FFT/MFT peak and only checking its quality
+  afterward could bias cropped/missing-poke measurements. This implementation does
+  not require the newer mxlib bounded-MFT API. A single bounded absent-feature
+  refinement is allowed only after the original template passes the ambiguity
+  check; a reproducer verified that masking must not turn an ambiguous match into
+  an accepted one.
+- Default displacement limits are 5 detector pixels per component for each DM and
+  the differential, configurable through `quality.maxShift`. Search-edge peaks
+  are rejected too. SNR comes from measured frame-stack variance, including the
+  shared baseline variance; noise-only first captures do not pass self-correlation
+  alone. The operator decides convergence and when to open the correction loop.
+- Setup rules are generic typed INDI bindings with numeric tolerances or exact
+  text/switch matching. Flowfs prerequisites are retained when extra mask/filter
+  requirements are configured: `stagelosel` pupil selection and captured numeric
+  position, plus `stageflowfs` numeric position (initially 32.0). Science-camera
+  profiles must supply `fwscind`, `stagebs`, and `stagesci1` bindings. Loaded
+  bundles must contain all configured setup bindings. Camera exposure is captured;
+  examples also capture the applicable readout/gain settings.
+
+### Control integration and deliberate choices
+
+- Added opt-in `input.guarded` to `closedLoopIndi`. Existing configurations retain
+  the legacy input contract. Guarded measurements include validity, process
+  session, counter, and completion time; stale, malformed, replayed, nonfinite,
+  or old-session input cannot command. New sessions and faults require manual
+  arming, and only newer post-arm samples may command. The controller reports a
+  `processed` acknowledgment with the sample identity, outcome, and target voltages.
+- The sensor waits for a matching acknowledgment, voltage readback, and a quiet
+  interval before the next transaction. Both correction axes must be enabled in
+  guarded operation. The default readback tolerance is 0.005 V, allowing one
+  150/32767 V controller quantization step. An acknowledgment is not a measurement
+  of optical settling; the configured timing still needs commissioning.
+- Guarded controller configuration requires all four explicit finite matrix
+  entries and a nonsingular matrix. The user has not measured this matrix, so
+  `control.enabled=false` is the sensor default: capture and observational
+  measurements work without a correction controller. Observational measurements
+  advance the accepted counter but publish `valid=0` and readiness Off, preventing
+  a guarded controller from using them. Enable corrections only after supplying
+  the measured matrix. The example gain is 0.1 and controller references are zero.
+- Saved reference pixels describe the setup at acquisition, not at completion of
+  disk I/O. If setup changes while a validated historical capture is being saved,
+  the complete bundle may remain on disk, but it is not installed and the status
+  explicitly says so. Installation and subsequent use require current validation.
+- Rotation, magnification, binning changes, pattern creation, automatic camlens
+  following, and instrument deployment remain outside this implementation.
+  `autoJay.orientation` is an explicit profile identity; it must reflect the
+  deployed stream orientation. No camera or setup-stage motion is commanded.
+
+### Offline validation
+
+| Suite | Cases | Assertions | Result |
+| --- | ---: | ---: | --- |
+| autoJay acquisition | 3 | 107 | Passed |
+| autoJay calibration | 9 | 426 | Passed |
+| autoJay registration | 9 | 105 | Passed |
+| autoJay application harness | 13 | 1127 | Passed |
+| closedLoopIndi guarded protocol | 7 | 2955 | Passed |
+| closedLoopIndi existing callbacks | 1 | 33 | Passed |
+| dmPokeXCorr existing regression | 3 | 13 | Passed |
+| **Total** | **45** | **4766** | **Passed** |
+
+New and changed suites were built with the normal `-O3 -ffast-math` settings.
+The existing `tests/testMain.o` and local libraries contain coverage instrumentation,
+so test links used the coverage runtime (`TESTLIBS=-lgcov` or `--coverage`). Both
+applications build at `-O3 -ffast-math` with `EXTRA_LDFLAGS=--coverage` for those
+same local libraries. An initial parallel app build collided when both makefiles
+removed their shared generated Git-version header; a serial build passed. No
+build-system changes were made for that unrelated behavior.
+
+Tests use synthetic images, temporary files, fake DM interfaces, and captured
+INDI commands; none start the sensor or connect to instrument resources. The
+calibration suite injects component write, validation, and rename failures and
+checks corrupt/truncated images and mixed bundles. Registration fixtures test
+subpixel shifts, unequal ROIs, missing/clipped features, ambiguous grids, and
+quality rejection. Protocol tests capture actual callback-generated commands,
+including replay, restart, invalid input, readiness, and partial send failures.
+Full-file Doxygen checks and `clang-format` were applied to touched C++ files;
+the required literal `{ //mutex scope` annotation is retained. `git diff --check`
+passes for the implementation.
+
+### Affected files and handoff
+
+- `apps/autoJay/{autoJay.hpp,autoJay.cpp,Makefile,autoJayTypes.hpp,autoJayAcquisition.hpp,
+  autoJayCalibration.hpp,autoJayRegistration.hpp}`.
+- `apps/autoJay/tests/{autoJayAcquisition_test.cpp,autoJayCalibration_test.cpp,
+  autoJayRegistration_test.cpp,autoJay_test.cpp}`.
+- `apps/autoJay/config/{camflowfs.conf,camflowfs-ctrl.conf,camsci1.conf}` and
+  `apps/autoJay/README.md`.
+- `apps/closedLoopIndi/closedLoopIndi.hpp` and its existing/new protocol tests.
+- Top-level `.gitignore` and `Makefile`, `tests/tests.list`, `tests/groups.dox`, and this plan.
+
+The app is included in RTC/ICC build lists; that does not select or configure its
+execution host. Examples are not installed. Before using hardware, the operator
+must supply patterns/amplitudes, confirm exclusive channel ownership and stream
+routes, resolve mask/stage profile settings and tolerances, measure the control
+matrix, and validate physical settling and image-quality thresholds. The science
+camera example intentionally has unresolved optical settings. Existing unrelated
+`tests/tmp.drawio` and `tests/xlog/` content is left untouched.

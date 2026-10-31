@@ -10,6 +10,11 @@
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 
+#include <cerrno>
+#include <cmath>
+#include <cstdlib>
+#include <mx/math/floatUtils.hpp>
+
 /** \defgroup closedLoopIndi
  * \brief The MagAO-X application to do closed-loop control using INDI properties
  *
@@ -30,6 +35,18 @@ namespace app
 
 /// The MagAO-X application to do closed-loop control using INDI properties
 /**
+ * Guarded input is opt-in through `input.guarded`. Each measurement contains the configured two residuals and
+ * counter plus `valid`, `session`, and `timestamp`. The session is a monotonically increasing producer epoch
+ * (for example Unix milliseconds), the counter increases within that epoch, and timestamp is Unix seconds
+ * at measurement completion. Epoch and counter are exactly represented nonnegative integers no larger than
+ * 2^53-1, with a positive epoch. Producer/controller clocks must agree; future timestamps are rejected.
+ *
+ * A fresh first sample establishes a session but cannot command. Manual arming requires a fresh known session
+ * and finite controller currents; only a newer sample completed after arming can command. Invalidity, stale
+ * input, or a new session opens the loop. Upstream automatic closing is disabled in guarded mode. The
+ * `processed` acknowledgment identifies each processed sample and whether targets were transmitted; it is
+ * not proof of physical motion. Consumers must verify the target currents and settling independently.
+ *
  * \ingroup closedLoopIndi
  */
 class closedLoopIndi : public MagAOXApp<true>
@@ -38,7 +55,7 @@ class closedLoopIndi : public MagAOXApp<true>
     friend class closedLoopIndi_test;
 
   protected:
-    /** \name Configurable Parameters
+    /** \name Configurable Parameters - Data
      *@{
      */
 
@@ -48,6 +65,10 @@ class closedLoopIndi : public MagAOXApp<true>
         "x", "y" }; ///< The elements with the input disturbances.  Must be two, defaults are "x" and "y".
     std::string m_inputCounterElement{
         "counter" }; ///< The element with the frame counter, a monotonically increasing integer. Default is "counter".
+
+    bool m_inputGuarded{ false }; ///< Require the session, timestamp, and validity protocol when true.
+
+    double m_inputMaxAge{ 5 }; ///< Maximum age in seconds of a guarded input at reception or arming.
 
     std::vector<std::string>
         m_ctrlDevices; ///< Device names of the controller(s). If only one, it's used for both properties.  Max two.
@@ -78,10 +99,10 @@ class closedLoopIndi : public MagAOXApp<true>
 
     ///@}
 
-    int64_t                       m_counter = -1; ///< The latest value of the loop counter
-    mx::improc::eigenImage<float> m_measurements; ///< The latest value of the measurements
-    float                         m_delta0{ 0 };  ///< Latest first-axis residual.
-    float                         m_delta1{ 0 };  ///< Latest second-axis residual.
+    int64_t                       m_counter{ -1 }; ///< The latest accepted loop counter.
+    mx::improc::eigenImage<float> m_measurements;  ///< The latest value of the measurements
+    float                         m_delta0{ 0 };   ///< Latest first-axis residual.
+    float                         m_delta1{ 0 };   ///< Latest second-axis residual.
 
     mx::improc::eigenImage<float> m_commands; ///< The latest commands
 
@@ -91,14 +112,24 @@ class closedLoopIndi : public MagAOXApp<true>
 
     bool m_loopClosed{ false }; ///< Whether or not the loop is closed
 
+    std::recursive_mutex m_loopMutex; ///< Serializes loop callbacks, watchdog checks, and command publication.
+
+    double m_inputSession{ 0 }; ///< Greatest accepted producer epoch; older sessions cannot rearm this instance.
+
+    double m_inputTimestamp{ 0 }; ///< Timestamp of the latest accepted guarded input, in Unix seconds.
+
+    double m_armedAfter{ 0 }; ///< Manual-arm time; an earlier input cannot command after arming.
+
+    bool m_inputReady{ false }; ///< A complete fresh input has established the current producer session.
+
+    std::vector<bool> m_currentValid; ///< Tracks receipt of finite current values for both controlled axes.
+
   public:
     /// Default c'tor.
     closedLoopIndi();
 
     /// D'tor, declared and defined for noexcept.
-    ~closedLoopIndi() noexcept
-    {
-    }
+    ~closedLoopIndi() noexcept = default;
 
     /// Set up the app configuration interface.
     virtual void setupConfig();
@@ -112,10 +143,7 @@ class closedLoopIndi : public MagAOXApp<true>
     /// Load the application configuration.
     virtual void loadConfig();
 
-    /// Startup function
-    /**
-     *
-     */
+    /// Register loop controls, input subscriptions, and optional guarded acknowledgments.
     virtual int appStartup();
 
     /// Implementation of the FSM for closedLoopIndi.
@@ -126,9 +154,6 @@ class closedLoopIndi : public MagAOXApp<true>
     virtual int appLogic();
 
     /// Shutdown the app.
-    /**
-     *
-     */
     virtual int appShutdown();
 
     /// Change the loop state
@@ -140,41 +165,81 @@ class closedLoopIndi : public MagAOXApp<true>
     /// Send commands to the control devices
     int sendCommands( std::vector<float> &commands /**< [in] command values to transmit */ );
 
+    /// Parse a complete finite number using mxlib's fast-math-safe classifier.
+    static bool readNumber( double            &value, /**< [out] Parsed finite value. */
+                            const std::string &text /**< [in] Numeric text without trailing characters. */ );
+
+    /// Read a finite numeric element without relying on fast-math finite assumptions.
+    static bool readNumber( double                  &value,    /**< [out] Parsed finite value. */
+                            const pcf::IndiProperty &property, /**< [in] Complete input property. */
+                            const std::string       &element /**< [in] Element to parse. */ );
+
+    /// Return Unix time in seconds for input-age and arm-boundary checks.
+    static double inputTime();
+
+    /// Check all controller states and, in guarded mode, received current values.
+    bool controllersReady() const;
+
+    /// Process a complete guarded input; invalid or new-session inputs open the loop.
+    int guardedInput( const pcf::IndiProperty &property /**< [in] Atomic measurement and validity tuple. */ );
+
+    /// Publish the result for one identified input after processing its commands.
+    /** Status: -2 send failure, -1 rejected, 0 open, 1 sent, 2 unready, 3 zero, 4 new session, 5 before arm.
+     */
+    void
+    publishProcessed( double                    session, /**< [in] Producer epoch identifying this input. */
+                      double                    counter, /**< [in] Counter identifying this input. */
+                      int                       status,  /**< [in] Processing outcome. */
+                      const std::vector<float> &targets /**< [in] Commanded targets, or currents when not applied. */ );
+
     // INDI
+
+    pcf::IndiProperty m_indiP_processed; ///< Guarded-input acknowledgment with identity, targets, and outcome.
 
     pcf::IndiProperty m_indiP_deltas; ///< Published loop residual values.
 
     pcf::IndiProperty m_indiP_reference0; ///< INDI property exposing the first reference value.
+    /// Handle updates to m_indiP_reference0.
     INDI_NEWCALLBACK_DECL( closedLoopIndi, m_indiP_reference0 );
 
     pcf::IndiProperty m_indiP_reference1; ///< INDI property exposing the second reference value.
+    /// Handle updates to m_indiP_reference1.
     INDI_NEWCALLBACK_DECL( closedLoopIndi, m_indiP_reference1 );
 
     pcf::IndiProperty m_indiP_inputs; ///< INDI property monitored for incoming disturbances.
+    /// Handle updates to m_indiP_inputs.
     INDI_SETCALLBACK_DECL( closedLoopIndi, m_indiP_inputs );
 
     pcf::IndiProperty m_indiP_ggain; ///< INDI property exposing the global loop gain.
+    /// Handle updates to m_indiP_ggain.
     INDI_NEWCALLBACK_DECL( closedLoopIndi, m_indiP_ggain );
 
     pcf::IndiProperty m_indiP_ctrlEnabled; ///< INDI property exposing the loop open/closed state.
+    /// Handle updates to m_indiP_ctrlEnabled.
     INDI_NEWCALLBACK_DECL( closedLoopIndi, m_indiP_ctrlEnabled );
 
     pcf::IndiProperty m_indiP_counterReset; ///< INDI property used to request a counter reset.
+    /// Handle updates to m_indiP_counterReset.
     INDI_NEWCALLBACK_DECL( closedLoopIndi, m_indiP_counterReset );
 
     pcf::IndiProperty m_indiP_ctrl0_fsm; ///< The INDI property for fsm state of axis 0
+    /// Handle updates to m_indiP_ctrl0_fsm.
     INDI_SETCALLBACK_DECL( closedLoopIndi, m_indiP_ctrl0_fsm );
 
     pcf::IndiProperty m_indiP_ctrl0; ///< The INDI property used for control of axis 0
+    /// Handle updates to m_indiP_ctrl0.
     INDI_SETCALLBACK_DECL( closedLoopIndi, m_indiP_ctrl0 );
 
     pcf::IndiProperty m_indiP_ctrl1_fsm; ///< The INDI property for fsm state of axis 1
+    /// Handle updates to m_indiP_ctrl1_fsm.
     INDI_SETCALLBACK_DECL( closedLoopIndi, m_indiP_ctrl1_fsm );
 
     pcf::IndiProperty m_indiP_ctrl1; ///< The INDI property used for control of axis 1
+    /// Handle updates to m_indiP_ctrl1.
     INDI_SETCALLBACK_DECL( closedLoopIndi, m_indiP_ctrl1 );
 
     pcf::IndiProperty m_indiP_upstream; ///< Property used to monitor the upstream loop state.
+    /// Handle updates to m_indiP_upstream.
     INDI_SETCALLBACK_DECL( closedLoopIndi, m_indiP_upstream );
 };
 
@@ -221,6 +286,25 @@ void closedLoopIndi::setupConfig()
                 false,
                 "string",
                 "The element with the frame counter, a monotonically increasing integer. Default is 'counter'." );
+
+    config.add( "input.guarded",
+                "",
+                "input.guarded",
+                argType::Required,
+                "input",
+                "guarded",
+                false,
+                "bool",
+                "Require atomic valid/session/timestamp input metadata and manual rearming. Default false." );
+    config.add( "input.maxAge",
+                "",
+                "input.maxAge",
+                argType::Required,
+                "input",
+                "maxAge",
+                false,
+                "double",
+                "Maximum guarded-input age in seconds. Must be positive; default 5." );
 
     config.add( "input.references",
                 "",
@@ -364,6 +448,13 @@ int closedLoopIndi::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_inputProperty, "input.property" );
     _config( m_inputElements, "input.elements" );
     _config( m_inputCounterElement, "input.counterElement" );
+    _config( m_inputGuarded, "input.guarded" );
+    _config( m_inputMaxAge, "input.maxAge" );
+    if( m_inputGuarded && ( !mx::math::isFinite( m_inputMaxAge ) || m_inputMaxAge <= 0 ) )
+    {
+        m_shutdown = 1;
+        return log<software_error, -1>( { __FILE__, __LINE__, "input.maxAge must be finite and positive" } );
+    }
 
     if( m_inputDevice == "" )
     {
@@ -440,10 +531,37 @@ int closedLoopIndi::loadConfigImpl( mx::app::appConfigurator &_config )
     float im10 = 0;
     float im11 = 1;
 
-    _config( im00, "loop.intMat00" );
-    _config( im01, "loop.intMat01" );
-    _config( im10, "loop.intMat10" );
-    _config( im11, "loop.intMat11" );
+    if( m_inputGuarded )
+    {
+        float *entries[] = { &im00, &im01, &im10, &im11 };
+        size_t n         = 0;
+        for( const auto &key : { "loop.intMat00", "loop.intMat01", "loop.intMat10", "loop.intMat11" } )
+        {
+            std::string text;
+            double      value = 0;
+            _config( text, key );
+            if( !_config.isSet( key ) || !readNumber( value, text ) ||
+                std::abs( value ) > std::numeric_limits<float>::max() )
+            {
+                m_shutdown = 1;
+                return log<software_error, -1>(
+                    { __FILE__, __LINE__, "guarded input requires an explicit finite calibrated 2-by-2 matrix" } );
+            }
+            *entries[n++] = value;
+        }
+        if( static_cast<double>( im00 ) * im11 - static_cast<double>( im01 ) * im10 == 0 )
+        {
+            m_shutdown = 1;
+            return log<software_error, -1>( { __FILE__, __LINE__, "guarded control matrix must be nonsingular" } );
+        }
+    }
+    else
+    {
+        _config( im00, "loop.intMat00" );
+        _config( im01, "loop.intMat01" );
+        _config( im10, "loop.intMat10" );
+        _config( im11, "loop.intMat11" );
+    }
 
     m_intMat.resize( 2, 2 );
     m_intMat( 0, 0 ) = im00;
@@ -469,6 +587,16 @@ void closedLoopIndi::loadConfig()
 int closedLoopIndi::appStartup()
 {
     REG_INDI_SETPROP( m_indiP_inputs, m_inputDevice, m_inputProperty );
+
+    if( m_inputGuarded )
+    {
+        CREATE_REG_INDI_RO_NUMBER( m_indiP_processed, "processed", "Processed input", "loop" );
+        for( const auto &name : { "session", "counter", "target0", "target1", "applied", "status" } )
+        {
+            m_indiP_processed.add( pcf::IndiElement( name ) );
+            m_indiP_processed[name] = 0;
+        }
+    }
 
     CREATE_REG_INDI_RO_NUMBER( m_indiP_deltas, "deltas", "Deltas", "Deltas" );
     m_indiP_deltas.add( pcf::IndiElement( "delta0" ) );
@@ -514,6 +642,7 @@ int closedLoopIndi::appStartup()
     m_measurements.setZero();
 
     m_currents.resize( m_ctrlDevices.size(), -1e15 );
+    m_currentValid.assign( m_ctrlDevices.size(), false );
 
     REG_INDI_SETPROP( m_indiP_ctrl0_fsm, m_ctrlDevices[0], "fsm" );
 
@@ -540,6 +669,13 @@ int closedLoopIndi::appStartup()
 
 int closedLoopIndi::appLogic()
 {
+    std::lock_guard<std::recursive_mutex> lock( m_loopMutex );
+    if( m_inputGuarded && m_inputReady &&
+        ( inputTime() < m_inputTimestamp || inputTime() - m_inputTimestamp > m_inputMaxAge ) )
+    {
+        m_inputReady = false;
+        toggleLoop( false );
+    }
     if( m_loopClosed )
     {
         state( stateCodes::OPERATING );
@@ -559,6 +695,16 @@ int closedLoopIndi::appShutdown()
 
 int closedLoopIndi::toggleLoop( bool onoff )
 {
+    std::lock_guard<std::recursive_mutex> lock( m_loopMutex );
+    if( m_inputGuarded && onoff && !m_loopClosed )
+    {
+        double now = inputTime();
+        if( !m_inputReady || now < m_inputTimestamp || now - m_inputTimestamp > m_inputMaxAge || !controllersReady() )
+        {
+            return 0;
+        }
+        m_armedAfter = now;
+    }
     if( !m_loopClosed && onoff ) // not enabled so change
     {
         m_loopClosed = true;
@@ -579,66 +725,171 @@ int closedLoopIndi::toggleLoop( bool onoff )
     return 0;
 }
 
-inline int closedLoopIndi::updateLoop()
+inline bool closedLoopIndi::controllersReady() const
 {
-    bool ready = false;
-
-    // This should only give ready == true if all devices exist and are ready
+    if( m_ctrlDevices.empty() )
+        return false;
     for( size_t n = 0; n < m_ctrlDevices.size(); ++n )
     {
-        if( m_fsmStates.count( m_ctrlDevices[n] ) > 0 )
-        {
-            if( m_fsmStates[m_ctrlDevices[n]] == "READY" ||
-                ( m_operatingOK && m_fsmStates[m_ctrlDevices[n]] == "OPERATING" ) )
-            {
-                ready = true;
-            }
-            else
-            {
-                ready = false;
-                break;
-            }
-        }
-        else
-        {
-            ready = false;
-            break;
-        }
+        auto state = m_fsmStates.find( m_ctrlDevices[n] );
+        if( state == m_fsmStates.end() ||
+            ( state->second != "READY" && !( m_operatingOK && state->second == "OPERATING" ) ) )
+            return false;
+        if( m_inputGuarded && ( n >= m_currentValid.size() || !m_currentValid[n] ) )
+            return false;
     }
+    return true;
+}
 
-    if( ready != true )
+inline int closedLoopIndi::updateLoop()
+{
+    std::lock_guard<std::recursive_mutex> lock( m_loopMutex );
+    if( !controllersReady() )
     {
+        if( m_inputGuarded )
+        {
+            toggleLoop( false );
+            publishProcessed( m_inputSession, m_counter, 2, m_currents );
+        }
         return 0;
     }
 
-    m_delta0 = m_measurements( 0, 0 ) - m_references( 0, 0 );
-    m_delta1 = m_measurements( 1, 0 ) - m_references( 1, 0 );
-
+    m_delta0            = m_measurements( 0, 0 ) - m_references( 0, 0 );
+    m_delta1            = m_measurements( 1, 0 ) - m_references( 1, 0 );
     m_commands.matrix() = m_intMat.matrix() * ( m_measurements - m_references ).matrix();
 
-    std::vector<float> commands;
-    commands.resize( m_measurements.rows() );
-
+    std::vector<float> commands( m_measurements.rows() );
+    bool               changed = false;
     for( int cc = 0; cc < m_measurements.rows(); ++cc )
     {
         commands[cc] = m_currents[cc] - m_ggain * m_gains[cc] * m_commands( cc, 0 );
+        changed      = changed || commands[cc] != m_currents[cc];
+        if( m_inputGuarded && !mx::math::isFinite( commands[cc] ) )
+        {
+            m_inputReady = false;
+            toggleLoop( false );
+            publishProcessed( m_inputSession, m_counter, -1, m_currents );
+            return -1;
+        }
     }
 
-    // And send commands.
-    int rv;
-    if( m_loopClosed )
-    {
+    int rv     = 0;
+    int status = m_loopClosed ? ( changed ? 1 : 3 ) : 0;
+    if( m_loopClosed && ( !m_inputGuarded || changed ) )
         rv = sendCommands( commands );
-    }
-    else
-    {
-        rv = 0;
-    }
 
+    if( m_inputGuarded )
+    {
+        if( rv < 0 )
+        {
+            status       = -2;
+            m_inputReady = false;
+            toggleLoop( false );
+        }
+        publishProcessed( m_inputSession, m_counter, status, status == 1 || status == -2 ? commands : m_currents );
+    }
     updateIfChanged( m_indiP_deltas,
                      std::vector<std::string>( { "delta0", "delta1" } ),
                      std::vector<float>( { m_delta0, m_delta1 } ) );
     return rv;
+}
+
+inline bool closedLoopIndi::readNumber( double &value, const std::string &text )
+{
+    char *end = nullptr;
+    errno     = 0;
+    value     = std::strtod( text.c_str(), &end );
+    return end != text.c_str() && *end == '\0' && errno != ERANGE && mx::math::isFinite( value );
+}
+
+inline bool closedLoopIndi::readNumber( double &value, const pcf::IndiProperty &property, const std::string &element )
+{
+    return property.find( element ) && readNumber( value, property[element].getValue() );
+}
+
+inline double closedLoopIndi::inputTime()
+{
+    timespec now{};
+    clock_gettime( CLOCK_REALTIME, &now );
+    return now.tv_sec + now.tv_nsec * 1e-9;
+}
+
+inline void
+closedLoopIndi::publishProcessed( double session, double counter, int status, const std::vector<float> &targets )
+{
+    m_indiP_processed["session"] = static_cast<uint64_t>( session );
+    m_indiP_processed["counter"] = static_cast<uint64_t>( counter );
+    m_indiP_processed["target0"] = targets.size() > 0 && mx::math::isFinite( targets[0] ) ? targets[0] : 0;
+    m_indiP_processed["target1"] = targets.size() > 1 && mx::math::isFinite( targets[1] ) ? targets[1] : 0;
+    m_indiP_processed["applied"] = status == 1 ? 1 : 0;
+    m_indiP_processed["status"]  = status;
+    m_indiP_processed.setState( status < 0 ? INDI_ALERT : INDI_OK );
+    if( m_indiDriver )
+        m_indiDriver->sendSetProperty( m_indiP_processed );
+}
+
+inline int closedLoopIndi::guardedInput( const pcf::IndiProperty &property )
+{
+    std::lock_guard<std::recursive_mutex> lock( m_loopMutex );
+    double                                session = 0, counter = 0, timestamp = 0, valid = 0, x = 0, y = 0;
+    bool identity = readNumber( session, property, "session" ) && session > 0 && session <= 9007199254740991.0 &&
+                    std::floor( session ) == session && readNumber( counter, property, m_inputCounterElement ) &&
+                    counter >= 0 && counter <= 9007199254740991.0 && std::floor( counter ) == counter;
+    double now = inputTime();
+    bool   complete =
+        identity && readNumber( valid, property, "valid" ) && valid == 1 &&
+        readNumber( timestamp, property, "timestamp" ) && timestamp <= now && now - timestamp <= m_inputMaxAge &&
+        readNumber( x, property, m_inputElements[0] ) && readNumber( y, property, m_inputElements[1] ) &&
+        std::abs( x ) <= std::numeric_limits<float>::max() && std::abs( y ) <= std::numeric_limits<float>::max();
+    if( !complete || session < m_inputSession )
+    {
+        m_inputReady = false;
+        toggleLoop( false );
+        if( identity )
+            publishProcessed( session, counter, -1, m_currents );
+        return 0;
+    }
+    if( session == m_inputSession && counter <= m_counter )
+    {
+        if( counter == m_counter )
+        {
+            // Repeat the original result if an acknowledgment was lost; never resend commands.
+            if( m_indiDriver && m_indiP_processed["session"].get<double>() == session &&
+                m_indiP_processed["counter"].get<double>() == counter )
+                m_indiDriver->sendSetProperty( m_indiP_processed );
+            return 0;
+        }
+        m_inputReady = false;
+        toggleLoop( false );
+        publishProcessed( session, counter, -1, m_currents );
+        return 0;
+    }
+    if( session == m_inputSession && timestamp <= m_inputTimestamp )
+    {
+        m_inputReady = false;
+        toggleLoop( false );
+        publishProcessed( session, counter, -1, m_currents );
+        return 0;
+    }
+    bool newSession        = session != m_inputSession;
+    m_inputSession         = session;
+    m_counter              = static_cast<int64_t>( counter );
+    m_inputTimestamp       = timestamp;
+    m_inputReady           = true;
+    m_measurements( 0, 0 ) = x;
+    m_measurements( 1, 0 ) = y;
+    if( newSession )
+    {
+        toggleLoop( false );
+        publishProcessed( session, counter, 4, m_currents );
+        return 0;
+    }
+    if( m_loopClosed && timestamp <= m_armedAfter )
+    {
+        publishProcessed( session, counter, 5, m_currents );
+        return 0;
+    }
+    return updateLoop();
 }
 
 inline int closedLoopIndi::sendCommands( std::vector<float> &commands )
@@ -652,7 +903,9 @@ inline int closedLoopIndi::sendCommands( std::vector<float> &commands )
         ip.add( pcf::IndiElement( m_ctrlTargets[n] ) );
         ip[m_ctrlTargets[n]] = commands[n];
 
-        sendNewProperty( ip );
+        int rv = sendNewProperty( ip );
+        if( m_inputGuarded && rv < 0 )
+            return rv;
     }
 
     return 0;
@@ -660,6 +913,7 @@ inline int closedLoopIndi::sendCommands( std::vector<float> &commands )
 
 INDI_NEWCALLBACK_DEFN( closedLoopIndi, m_indiP_reference0 )( const pcf::IndiProperty &ipRecv )
 {
+    std::lock_guard<std::recursive_mutex> lock( m_loopMutex );
     INDI_VALIDATE_CALLBACK_PROPS( ipRecv, m_indiP_reference0 );
 
     float target;
@@ -682,6 +936,7 @@ INDI_NEWCALLBACK_DEFN( closedLoopIndi, m_indiP_reference0 )( const pcf::IndiProp
 
 INDI_NEWCALLBACK_DEFN( closedLoopIndi, m_indiP_reference1 )( const pcf::IndiProperty &ipRecv )
 {
+    std::lock_guard<std::recursive_mutex> lock( m_loopMutex );
     INDI_VALIDATE_CALLBACK_PROPS( ipRecv, m_indiP_reference1 );
 
     float target;
@@ -704,7 +959,11 @@ INDI_NEWCALLBACK_DEFN( closedLoopIndi, m_indiP_reference1 )( const pcf::IndiProp
 
 INDI_SETCALLBACK_DEFN( closedLoopIndi, m_indiP_inputs )( const pcf::IndiProperty &ipRecv )
 {
+    std::lock_guard<std::recursive_mutex> lock( m_loopMutex );
     INDI_VALIDATE_CALLBACK_PROPS( ipRecv, m_indiP_inputs )
+
+    if( m_inputGuarded )
+        return guardedInput( ipRecv );
 
     if( !ipRecv.find( m_inputElements[0] ) )
         return -1;
@@ -729,6 +988,7 @@ INDI_SETCALLBACK_DEFN( closedLoopIndi, m_indiP_inputs )( const pcf::IndiProperty
 
 INDI_NEWCALLBACK_DEFN( closedLoopIndi, m_indiP_ggain )( const pcf::IndiProperty &ipRecv )
 {
+    std::lock_guard<std::recursive_mutex> lock( m_loopMutex );
     INDI_VALIDATE_CALLBACK_PROPS( ipRecv, m_indiP_ggain );
 
     float target;
@@ -751,6 +1011,7 @@ INDI_NEWCALLBACK_DEFN( closedLoopIndi, m_indiP_ggain )( const pcf::IndiProperty 
 
 INDI_NEWCALLBACK_DEFN( closedLoopIndi, m_indiP_ctrlEnabled )( const pcf::IndiProperty &ipRecv )
 {
+    std::lock_guard<std::recursive_mutex> lock( m_loopMutex );
     INDI_VALIDATE_CALLBACK_PROPS( ipRecv, m_indiP_ctrlEnabled );
 
     // switch is toggled to on
@@ -770,12 +1031,19 @@ INDI_NEWCALLBACK_DEFN( closedLoopIndi, m_indiP_ctrlEnabled )( const pcf::IndiPro
 
 INDI_NEWCALLBACK_DEFN( closedLoopIndi, m_indiP_counterReset )( const pcf::IndiProperty &ipRecv )
 {
+    std::lock_guard<std::recursive_mutex> lock( m_loopMutex );
     INDI_VALIDATE_CALLBACK_PROPS( ipRecv, m_indiP_counterReset );
 
     // switch is toggled to on
     if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On )
     {
-        m_counter = -1;
+        if( m_inputGuarded )
+        {
+            m_inputReady = false;
+            toggleLoop( false );
+        }
+        else
+            m_counter = -1;
     }
 
     return 0;
@@ -783,11 +1051,20 @@ INDI_NEWCALLBACK_DEFN( closedLoopIndi, m_indiP_counterReset )( const pcf::IndiPr
 
 INDI_SETCALLBACK_DEFN( closedLoopIndi, m_indiP_ctrl0_fsm )( const pcf::IndiProperty &ipRecv )
 {
+    std::lock_guard<std::recursive_mutex> lock( m_loopMutex );
     INDI_VALIDATE_CALLBACK_PROPS( ipRecv, m_indiP_ctrl0_fsm );
 
     if( ipRecv.find( "state" ) )
     {
         m_fsmStates[ipRecv.getDevice()] = ipRecv["state"].get();
+        if( m_inputGuarded && ipRecv["state"].get() != "READY" &&
+            !( m_operatingOK && ipRecv["state"].get() == "OPERATING" ) )
+        {
+            for( size_t n = 0; n < m_ctrlDevices.size(); ++n )
+                if( m_ctrlDevices[n] == ipRecv.getDevice() )
+                    m_currentValid[n] = false;
+            toggleLoop( false );
+        }
     }
 
     return 0;
@@ -795,11 +1072,25 @@ INDI_SETCALLBACK_DEFN( closedLoopIndi, m_indiP_ctrl0_fsm )( const pcf::IndiPrope
 
 INDI_SETCALLBACK_DEFN( closedLoopIndi, m_indiP_ctrl0 )( const pcf::IndiProperty &ipRecv )
 {
+    std::lock_guard<std::recursive_mutex> lock( m_loopMutex );
     INDI_VALIDATE_CALLBACK_PROPS( ipRecv, m_indiP_ctrl0 );
 
     if( ipRecv.find( m_ctrlCurrents[0] ) )
     {
-        m_currents[0] = ipRecv[m_ctrlCurrents[0]].get<float>();
+        if( m_inputGuarded )
+        {
+            double value      = 0;
+            m_currentValid[0] = readNumber( value, ipRecv, m_ctrlCurrents[0] ) &&
+                                std::abs( value ) <= std::numeric_limits<float>::max();
+            if( !m_currentValid[0] )
+            {
+                toggleLoop( false );
+                return 0;
+            }
+            m_currents[0] = value;
+        }
+        else
+            m_currents[0] = ipRecv[m_ctrlCurrents[0]].get<float>();
     }
 
     return 0;
@@ -807,11 +1098,20 @@ INDI_SETCALLBACK_DEFN( closedLoopIndi, m_indiP_ctrl0 )( const pcf::IndiProperty 
 
 INDI_SETCALLBACK_DEFN( closedLoopIndi, m_indiP_ctrl1_fsm )( const pcf::IndiProperty &ipRecv )
 {
+    std::lock_guard<std::recursive_mutex> lock( m_loopMutex );
     INDI_VALIDATE_CALLBACK_PROPS( ipRecv, m_indiP_ctrl1_fsm );
 
     if( ipRecv.find( "state" ) )
     {
         m_fsmStates[ipRecv.getDevice()] = ipRecv["state"].get();
+        if( m_inputGuarded && ipRecv["state"].get() != "READY" &&
+            !( m_operatingOK && ipRecv["state"].get() == "OPERATING" ) )
+        {
+            for( size_t n = 0; n < m_ctrlDevices.size(); ++n )
+                if( m_ctrlDevices[n] == ipRecv.getDevice() )
+                    m_currentValid[n] = false;
+            toggleLoop( false );
+        }
     }
 
     return 0;
@@ -819,11 +1119,25 @@ INDI_SETCALLBACK_DEFN( closedLoopIndi, m_indiP_ctrl1_fsm )( const pcf::IndiPrope
 
 INDI_SETCALLBACK_DEFN( closedLoopIndi, m_indiP_ctrl1 )( const pcf::IndiProperty &ipRecv )
 {
+    std::lock_guard<std::recursive_mutex> lock( m_loopMutex );
     INDI_VALIDATE_CALLBACK_PROPS( ipRecv, m_indiP_ctrl1 );
 
     if( ipRecv.find( m_ctrlCurrents[1] ) )
     {
-        m_currents[1] = ipRecv[m_ctrlCurrents[1]].get<float>();
+        if( m_inputGuarded )
+        {
+            double value      = 0;
+            m_currentValid[1] = readNumber( value, ipRecv, m_ctrlCurrents[1] ) &&
+                                std::abs( value ) <= std::numeric_limits<float>::max();
+            if( !m_currentValid[1] )
+            {
+                toggleLoop( false );
+                return 0;
+            }
+            m_currents[1] = value;
+        }
+        else
+            m_currents[1] = ipRecv[m_ctrlCurrents[1]].get<float>();
     }
 
     return 0;
@@ -831,12 +1145,13 @@ INDI_SETCALLBACK_DEFN( closedLoopIndi, m_indiP_ctrl1 )( const pcf::IndiProperty 
 
 INDI_SETCALLBACK_DEFN( closedLoopIndi, m_indiP_upstream )( const pcf::IndiProperty &ipRecv )
 {
+    std::lock_guard<std::recursive_mutex> lock( m_loopMutex );
     INDI_VALIDATE_CALLBACK_PROPS( ipRecv, m_indiP_upstream );
 
     if( !ipRecv.find( "toggle" ) )
         return 0;
 
-    if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On && m_upstreamFollowClosed )
+    if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On && m_upstreamFollowClosed && !m_inputGuarded )
     {
         std::cerr << "upstream on\n";
         return toggleLoop( true );
@@ -844,6 +1159,8 @@ INDI_SETCALLBACK_DEFN( closedLoopIndi, m_indiP_upstream )( const pcf::IndiProper
     else if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off )
     {
         std::cerr << "upstream off\n";
+        if( m_inputGuarded )
+            m_inputReady = false;
         return toggleLoop( false );
     }
 
