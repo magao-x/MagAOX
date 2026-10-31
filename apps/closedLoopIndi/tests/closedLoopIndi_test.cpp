@@ -1,6 +1,5 @@
 /** \file closedLoopIndi_test.cpp
  * \brief Catch2 tests for the closedLoopIndi app.
- * \author Jared R. Males (jaredmales@gmail.com)
  *
  * \ingroup closedLoopIndi_files
  */
@@ -31,24 +30,27 @@ namespace closedLoopIndiTest
 class closedLoopIndi_test : public closedLoopIndi
 {
   public:
-    closedLoopIndi_test( const std::string device )
-    {
-        m_configName = device;
-
-        XWCTEST_SETUP_INDI_NEW_PROP( reference0 );
-        XWCTEST_SETUP_INDI_NEW_PROP( reference1 );
-        XWCTEST_SETUP_INDI_NEW_PROP( ggain );
-        XWCTEST_SETUP_INDI_NEW_PROP( ctrlEnabled );
-        XWCTEST_SETUP_INDI_NEW_PROP( counterReset );
-
-        XWCTEST_SETUP_INDI_ARB_PROP( m_indiP_inputs, inputdev, measurement )
-        XWCTEST_SETUP_INDI_ARB_PROP( m_indiP_ctrl0_fsm, ctrl0dev, fsm )
-        XWCTEST_SETUP_INDI_ARB_PROP( m_indiP_ctrl0, ctrl0dev, prop0 )
-        XWCTEST_SETUP_INDI_ARB_PROP( m_indiP_ctrl1_fsm, ctrl1dev, fsm )
-        XWCTEST_SETUP_INDI_ARB_PROP( m_indiP_ctrl1, ctrl1dev, prop1 )
-        XWCTEST_SETUP_INDI_ARB_PROP( m_indiP_upstream, updev, loop_state )
-    }
+    /// Initialize expected INDI names for callback validation tests.
+    closedLoopIndi_test( const std::string device /**< [in] Device name owned by this fixture. */ );
 };
+
+closedLoopIndi_test::closedLoopIndi_test( const std::string device )
+{
+    m_configName = device;
+
+    XWCTEST_SETUP_INDI_NEW_PROP( reference0 );
+    XWCTEST_SETUP_INDI_NEW_PROP( reference1 );
+    XWCTEST_SETUP_INDI_NEW_PROP( ggain );
+    XWCTEST_SETUP_INDI_NEW_PROP( ctrlEnabled );
+    XWCTEST_SETUP_INDI_NEW_PROP( counterReset );
+
+    XWCTEST_SETUP_INDI_ARB_PROP( m_indiP_inputs, inputdev, measurement )
+    XWCTEST_SETUP_INDI_ARB_PROP( m_indiP_ctrl0_fsm, ctrl0dev, fsm )
+    XWCTEST_SETUP_INDI_ARB_PROP( m_indiP_ctrl0, ctrl0dev, prop0 )
+    XWCTEST_SETUP_INDI_ARB_PROP( m_indiP_ctrl1_fsm, ctrl1dev, fsm )
+    XWCTEST_SETUP_INDI_ARB_PROP( m_indiP_ctrl1, ctrl1dev, prop1 )
+    XWCTEST_SETUP_INDI_ARB_PROP( m_indiP_upstream, updev, loop_state )
+}
 /// \endcond
 
 /// Verify the closedLoopIndi INDI callback validators accept only the expected properties.
