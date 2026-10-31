@@ -2316,3 +2316,35 @@ Implementation and qualification details are tracked separately in
 The next shadow preset uses preparation 25 us from the two optimized controller
 captures; explicit controller-local producer-clock diagnostics measure delivery.
 Delivery20/SDK120/post150/reader60 and zero-added-main-wait protection are unchanged.
+
+## Corrected delivery/preparation capture: `synco-sim-20261031T171940Z`
+
+The corrected 2 kHz/synchronization-On run qualifies the new controller-local
+CLOCK_TAI delivery capture: downstream upper maximum 6.963 us, preparation
+maximum 18.044 us, full receipt-to-SDK maximum 21.751 us and SDK-service maximum
+112.592 us. The 25 us shadow preparation setting remains provisionally supported;
+whole-path delivery20 is not replaced by its downstream-only measurement.
+
+The model reports no new main wait, but the actual controller has three new
+full-credit overloads alongside a 2.698 ms post/finish tail. Existing post worker
+settings are ordinary policy0/priority0 with a broad allowed-CPU mask. This is a
+scheduling/deconfliction comparison to address before 6 kHz qualification. Full
+counts, caveats and next-test rationale are in
+[the delivery/preparation record](dm-syncopation-delivery-preparation-measurements.md#corrected-2-khz-capture-synco-sim-20261031t171940z).
+
+## FIFO post-worker comparison: `synco-sim-20261031T173634Z`
+
+Runtime post-worker readbacks confirm FIFO30 and one allowed CPU after the
+operator selected spare31. Relative to the ordinary-post baseline, measured
+receipt-to-callback maximum falls **2,697.954 → 150.133 us**, saturation maximum
+**2,558.901 → 4.018 us** and publication maximum **536.513 → 14.047 us**. No new
+actual overload, rejected admission or coalesced input occurs. The prior three
+overloads and four missing-release shadow skips do not recur in this window.
+
+This supports retaining the post-worker configuration, while separating the
+whole-callback duration from the still-unqualified 150 us serialized-post bound.
+Shadow preparation remains 25 us (full receipt-to-SDK maximum 24.205 us), final
+auxiliary next-main protection remains unchanged and physical 6 kHz is not
+qualified. Full accounting, clock-coverage caveats and next-measurement rationale
+are recorded in
+[the delivery/preparation record](dm-syncopation-delivery-preparation-measurements.md#fifo-post-worker-comparison-synco-sim-20261031t173634z).

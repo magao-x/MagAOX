@@ -168,3 +168,51 @@ leave a 3.333 us shortfall with preparation 25 us and SDK service 120 us. This
 measurement/preset update does not make the final slot feasible or qualify
 physical 6 kHz operation; the result supplies evidence for the next explicit
 choice of bounds.
+
+## Post-worker scheduling comparison on spare31
+
+The `171940Z` baseline measured a 2.698 ms post/finish tail and three new full-
+credit overloads while the post worker used ordinary priority and a broad CPU
+mask. The operator confirmed **spare31 is free** for this comparison. The RTC
+cpuset script assigns it to CPU31 with SMT sibling CPU95 offline.
+
+Add these two keys to the existing `[sdk]` section of **dmtweeter.conf**:
+
+```ini
+[sdk]
+pipelineThreadPrio=30
+pipelineCpuset=spare31
+```
+
+These keys configure the ordered **post worker**, named `pipeline`; they do not
+change the SDK worker's `threadPrio=55` / `cpuset=spare56`. Keep the early-release
+observer on spare57, all shadow bounds and credit capacity unchanged, and camera
+at 2 kHz with synchronization On. The current binary already supports these
+settings; this comparison needs a controller restart, not another rebuild.
+
+Restart dmtweeter through the normal operator procedure and restore the recorded
+loop state. Check the actual post-worker readbacks:
+
+```bash
+timeout -k 2s 8s getINDI dmtweeter.sdk_pipeline
+timeout -k 2s 8s getINDI dmtweeter.th-pipeline
+```
+
+Expect `sdk_pipeline.policy=1` (FIFO), `priority=30` and `allowedCpus=1`.
+Startup also verifies the configured cpuset and scheduling settings. After at
+least ten seconds of stable camera/main cadence and resource reacquisition,
+repeat the same simultaneous capture. Compare capture-local changes in
+`overloaded`, `rejected` and `coalesced`, post/saturation/publication tails, and
+model release/miss coverage. Preserve the before/after snapshots: restart changes
+counter baselines, so historical totals from `171940Z` are not new losses.
+
+This changes post-worker policy and placement together. Improvement would support
+using that configuration; it would not separately identify the contribution of
+CPU placement versus FIFO scheduling. It also does not by itself qualify a shorter
+post bound or physical 6 kHz operation.
+
+The next experiment is the [coordinated zero-auxiliary test](zero-aux-rate-test.md):
+retain the running 2 kHz main loop and add one or two scheduled zero auxiliary
+commands per main cycle for 4/6 kHz effective total cadence. Its explicit finite
+test mode uses actual reader clearance and measures main impact; the normal
+shadow admission rules remain unchanged.
