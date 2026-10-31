@@ -332,7 +332,7 @@ The complete [dmtweeter_synco.conf example](../dmtweeter_synco.conf) contains th
 | `simulation.virtualReaderUs` | 30 | Assumed auxiliary trigger-to-last-read duration. The pipeline preset uses 60 us to include delivery and monitor work. |
 | `simulation.backendUs` | 155 | Legacy whole-backend occupancy assumption; unused in pipeline mode. |
 | `simulation.pipelineBackend` | false | Opt-in separate preparation/SDK/post resource model with three fixed private credits and zero added main SDK-entry wait. Requires simulation and reader-release gating. |
-| `simulation.prepareUs` | 35 | Assumed controller input through private-vector readiness; pipeline mode only. |
+| `simulation.prepareUs` | 35 | Assumed controller input through private-vector readiness; pipeline mode only. The additive pipeline test preset explicitly selects a provisional 25 us; the compiled default is unchanged. |
 | `simulation.sdkServiceUs` | 120 | Assumed native entry through SDK-worker readiness; pipeline mode only. |
 | `simulation.postUs` | 150 | Assumed serialized post service through private-credit retirement; pipeline mode only. |
 | `simulation.window` | 32 | Counter/observation pairs in the median phase filter, 4–256. Also bounds the independent qualified producer-interval diagnostic count. |
@@ -435,6 +435,21 @@ reports a prospective veto shortfall; `mainSdkWaits`, `maxMainWaitUs` and
 resource predictions rather than hardware failure counters. See the
 [pipeline shadow procedure](readiness-shadow-test.md#pipeline-resource-shadow)
 for the additive preset, assumption definitions and capture instructions.
+
+The current additive preset uses a provisional 25 us preparation assumption,
+2.658 us above the largest 22.342 us receipt-to-SDK-entry maximum in the two
+optimized controller captures. That prefix includes SDK-worker handoff and
+possible queueing; it is not pure actuator conversion. The compiled default
+remains 35 us. With delivery 20 us and SDK service 120 us, a final trigger at
+333.333 us reaches modeled readiness at 498.333 us, beyond the protected next
+main at 475 us. This preset does not make all three slots feasible.
+
+The [delivery/preparation test](delivery-preparation-test.md) adds explicitly
+configured controller-side delivery measurement and paired preparation timing.
+It records producer-clock brackets and quality independently of observer
+latency; it does not automatically tune scheduling bounds, credit a minimum
+next-main preparation time, or change the current combined-observer anchor used
+for genuine-main jobs.
 
 The `simulation_cadence` property exposes:
 

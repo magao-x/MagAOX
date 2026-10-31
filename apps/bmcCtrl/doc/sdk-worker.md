@@ -237,6 +237,14 @@ not by itself isolate conversion cost. The three new preparation stages are
 unavailable in synchronous and joined-worker modes; `receiptSdk` is available
 on those paths when receipt and successful SDK-entry evidence exist.
 
+`preparation` separately measures genuine receipt through the worker dispatch
+endpoint, using timestamps already captured for the command. Together with
+`sdkDispatch`, it separates controller preparation from worker handoff/queueing;
+`receiptSdk` retains the complete paired prefix. The optional
+[producer-clock delivery capture](../../../libMagAOX/app/dev/doc/dmTiming.md#preparation-and-opt-in-delivery-measurements)
+measures combined publication to BMC receipt without a synco observer. Its clock
+must be selected explicitly; it does not change SDK admission or scheduling.
+
 Pipeline timing also reports `sdkTail` (native return to worker readiness) and
 `sdkService` (native entry to worker readiness). Readiness is stamped after result
 publication, completion bookkeeping, notifications and the next loop's mutex

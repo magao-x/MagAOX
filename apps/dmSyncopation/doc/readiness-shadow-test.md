@@ -92,7 +92,7 @@ enabled=true
 readerReleaseReady=true
 pipelineBackend=true
 virtualReaderUs=60
-prepareUs=35
+prepareUs=25
 sdkServiceUs=120
 postUs=150
 ```
@@ -101,10 +101,25 @@ The new controls are startup-only. Restart synco through the normal operator
 procedure after merging them. Actual DM commands continue at the main 2 kHz
 rate; the two auxiliary steps remain hypothetical.
 
+The 25 us preparation value is a provisional shadow assumption, with **2.658 us**
+above the largest measured receipt-to-SDK-entry maximum (**22.342 us**) across
+optimized captures `212117Z` and `234448Z`. That measured prefix includes worker
+handoff and any SDK queue wait; it is broader than pure preparation. The
+compiled default is still **35 us**. Delivery remains **20 us**, SDK service
+**120 us**, post service **150 us** and virtual readers **60 us**. Keep zero
+minimum next-main preparation credit and all existing timing reserves. This
+preset change does not establish that a physical auxiliary command meets those
+bounds or that three slots fit.
+
+Use the [delivery and preparation measurement procedure](delivery-preparation-test.md)
+to isolate pre-handoff preparation and directly bracket combined-publication to
+controller-receipt latency. Those controller diagnostics require a BMC-controller
+and reader rebuild/restart; changing the shadow preset alone does not.
+
 | Setting | Meaning |
 | --- | --- |
 | `pipelineBackend` | Select the separate preparation, SDK and post model; default false preserves the previous modes. Requires simulation and exact reader-release gating. |
-| `prepareUs` | Controller input arrival through private-vector readiness. Default 35 us is an explicit preparation/handoff assumption. |
+| `prepareUs` | Controller input arrival through private-vector readiness. The compiled default remains 35 us; this preset explicitly selects a provisional 25 us shadow bound, described below. |
 | `sdkServiceUs` | SDK entry through worker readiness. Default 120 us allows about 6.6 us beyond the measured 113.444 us maximum. |
 | `postUs` | Independent serialized post service through final credit release, after both SDK readiness and monitor staging. Default 150 us is an unqualified modeling assumption, including final publication/retirement tails. |
 | `virtualReaderUs` | Total hypothetical trigger-to-last-read duration. The preset uses 60 us, covering the existing 20 us delivery allowance plus 40 us monitor-reader occupancy. |
@@ -143,11 +158,19 @@ copy/trigger targets never move to accommodate contention.
 
 With the preset and a 500 us period, SDK, post and credit stages individually
 fit 166.667 us slots. The last trigger at 333.333 us nevertheless reaches SDK
-readiness at **508.333 us** after its 20 + 35 + 120 us path. The earliest next
+readiness at **498.333 us** after its 20 + 25 + 120 us path. The earliest next
 main is **475 us** with the existing reserves. Therefore that slot is skipped,
-and `mainClearanceShortfallUs` records approximately **33.333 us**. This is a
-clearance shortfall, not a recommendation to increase the early-main reserve.
-The new test does not assert that all three slots fit these assumptions.
+with a nominal clearance shortfall of approximately **23.333 us**. The
+`mainClearanceShortfallUs` maximum can be larger because it also retains other
+vetoed opportunities. With the unchanged compiled preparation default of 35 us,
+SDK readiness would instead be 508.333 us, a 33.333 us nominal shortfall.
+
+Even setting delivery to zero while keeping preparation 25 us and SDK service
+120 us would reach readiness at 478.333 us, still 3.333 us after the protected
+main boundary. Reducing preparation alone does not make the final slot feasible.
+The next-main minimum preparation credit remains zero; an upper preparation
+allowance or a measured average cannot supply a guaranteed lower bound for the
+next main. This test does not assert that all three slots fit these assumptions.
 
 An unexpectedly early genuine main can still violate the assumed arrival
 envelope after an auxiliary decision has been committed. The shadow reports

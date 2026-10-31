@@ -2195,3 +2195,124 @@ verifies and decodes all **1,058** records in the supplied pre-extension binary,
 marking main-wait provenance unavailable. C++ clang-format verification and diff
 whitespace checks pass. These are workstation-only checks; no instrument state
 was inspected or changed by the agent.
+
+## First main-wait trace capture: `synco-sim-20261030T234448Z`
+
+Capture checkout is `894f22701d24262716e8a0b51bb7d606edd0ee78`, including the
+partial-read correction and new delayed-main provenance. The operator confirms
+modal gains remain zero and no camera/loop, dmcomb mode/delay, CPU/IRQ placement
+or workload changes apart from the synco/reader rebuild/restart. Saved settings
+remain bin2, 2 kHz, EM gain 1, synchronization On, target −45 C, closed loop at
+scalar gain 1, and RTC latency On. CPU placement, modal gains and live dmcomb
+settings are operator context rather than independently measured in this archive.
+
+### Complete collection, no main-wait event
+
+All three collectors finish at the expected timeout status **124**, all before/
+after INDI reads return 0, and no verification failure occurs. There are **119**
+`dmsynco` records from **23:44:47.818899186 through 23:46:47.029857842 UTC**
+(119.210958656 s; October 30, 16:44–16:46 Phoenix time).
+
+The new trace is present and enabled, capacity 64. Its detected, drained,
+dropped, queued, logFailed and batch counts are all zero in the 116 records
+with a current queue snapshot. Three lock-contention emissions omit current
+queue state; final lifetime accounting and before/after INDI still show zero
+detections. All 119 pipeline summaries have `mainSdkWaits=0`, maximum main wait
+zero and no credit misses, resource resets or discarded jobs. Thus this capture
+contains no delayed-main/blocker event to reconstruct. It validates zero-event
+instrumentation and collection, not the cause of the prior 99.171 us event.
+
+The historical maximum clearance shortfall **102.928 us** is already present
+before collection and does not increase. It is an auxiliary-veto diagnostic,
+not a main stall observed during this run.
+
+### Conditional step and resource accounting
+
+Use first/last text-summary deltas on the 119.211-second interval:
+
+| Step | Considered | Would run | New skips |
+| --- | ---: | ---: | --- |
+| 0 | 238,422 | 238,422 | 0 |
+| 1 | 238,422 | 238,417 | 5 SDK-busy vetoes |
+| 2 | 238,422 | 0 | 238,422 next-main-protection vetoes |
+
+Every row conserves considered/run/skip counts and reasons. Pipeline admissions
+add **238,422 main + 238,417 auxiliary**, retirements add **476,839**, and endpoint
+in-flight occupancy is unchanged. Maximum occupancy stays two of three credits.
+The wider INDI snapshot interval contains six step-1 SDK-busy skips, including
+one after the last telemetry record. Its boundaries must not be mixed with the
+text deltas. The 370 historical missing-release skips do not increase.
+
+Cadence remains fully qualified with no refresh rejection/reset; exact periods
+range **499,999.994251–500,000.955507 ns**. Preparation/SDK/post assumptions remain
+35/120/150 us, delivery 20 us and virtual readers 60 us. Nominal SDK/post/credit
+throughput flags remain true; next-main protection remains false for the complete
+three-slot cycle. This is conditional approximately 4 kHz behavior: the second
+auxiliary slot is always vetoed, so the run does not demonstrate 6 kHz.
+
+### Actual controller and camera timing
+
+The DM controller supplies **121 consecutive valid summaries**, sequence
+8712–8832, spanning 120.272199389 s. Endpoint command/receipt/submission counts
+increase by **240,544**, with no new failed/partial/rejected/duplicate/gapped/
+invalid/dropped timing events. SDK-worker and pipeline fault/coalescing/rejection/
+overload counts do not increase. SDK-wait has no reported samples.
+
+| DM metric | Median of rolling means, us | Largest window maximum, us |
+| --- | ---: | ---: |
+| Receipt to SDK entry | 16.040 | 21.901 |
+| Actuator conversion | 10.455 | 13.385 |
+| Reader release | 21.510 | 27.402 |
+| SDK service through worker readiness | 106.103 | 109.247 |
+| Publication | 8.630 | 71.074 |
+| Saturation | 3.463 | 70.473 |
+| Receipt through callback finish | 141.651 | 295.959 |
+
+Preparation/reader/SDK maxima remain below the selected 35/60/120 us assumptions.
+These genuine-main 2 kHz measurements do not qualify auxiliary service at 6 kHz
+or the 150 us serialized-post assumption. `delta` includes staging, SDK service,
+post-thread scheduling and publication; it is not a pure post-work duration.
+
+Camera telemetry has **114 consecutive valid stage summaries**, sequence
+6893–7006, spanning 119.282643785 s and **238,565** additional published frames.
+There are no new camera frame/counter gaps, errors, bracket-wide events or
+diagnostic drops. Acquisition intervals span **480–525 us**, with rolling RMS
+**0.212–0.848 us**; camera publication intervals span **478.624–524.360 us**, RMS
+**0.766–1.142 us**. One late and three early intervals exceed the 20 us threshold,
+all in serial-query windows; eleven ordinary serial controls occur roughly every
+10.57 seconds. Temporal overlap is not an estimate of added per-frame delay.
+
+### Observer timing and interpretation
+
+Primary/combined producer and observer populations do not show the prior
+combined-input bunching:
+
+| Population | Interval extrema, us |
+| --- | ---: |
+| Primary producer publication | 469.246–531.023 |
+| Primary observer receipt | 469.066–531.193 |
+| Combined producer publication | 468.735–531.734 |
+| Combined observer receipt | 442.406–558.054 |
+
+Primary/combined/upstream and exact RT early-reader-release observers retain clean
+quality counters. Separately, the camera observer has **0.260–2,869.007 us**
+receipt intervals around 23:45:09, with four new duplicates and one counter gap.
+The ordinary full-completion observer gains four duplicates, four sequence gaps
+and one counter gap around 23:45:00.94. The camera and controller's own telemetry
+has no corresponding producer/receipt gap. These are observer discontinuities,
+not demonstrated physical camera/DM drops or a frame-behind condition; the
+combined-input simulation does not develop a main wait in either window.
+
+No scheduling bounds or implementation changes follow from this capture. A
+longer unchanged shadow capture can try to collect a rare wait for attribution;
+this quiet run cannot retrospectively assign the previous event to a main or
+an auxiliary. The new trace is ready to distinguish those cases when one occurs.
+
+## Next reduction: measured delivery and preparation
+
+The operator requested continued reduction of conservative unmeasured times.
+Implementation and qualification details are tracked separately in
+[dm-syncopation-delivery-preparation-measurements.md](dm-syncopation-delivery-preparation-measurements.md).
+The next shadow preset uses preparation 25 us from the two optimized controller
+captures; explicit controller-local producer-clock diagnostics measure delivery.
+Delivery20/SDK120/post150/reader60 and zero-added-main-wait protection are unchanged.

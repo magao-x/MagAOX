@@ -84,7 +84,74 @@ does not raise `write` before updating the combined stream, and publishes
 `writetime` before incrementing `cnt0`. A read can therefore briefly observe a new
 timestamp with the previous counter. These are **observed publication intervals**,
 not a verified frame trace. Stream-clock jumps can also resemble publication stalls.
-The metric does not establish publication-to-receipt latency or camera-to-DM latency.
+The publication-interval metric does not establish publication-to-receipt latency or camera-to-DM latency. The separately enabled delivery measurement below captures its own paired producer-clock endpoint.
+
+## Preparation and opt-in delivery measurements
+
+`preparation` measures genuine receipt to SDK-worker dispatch using the existing
+paired `receipt` and `dispatch` endpoints. It excludes worker handoff/queueing
+(`sdkDispatch`), native SDK service and post work. It needs no additional clock
+read. `receiptSdk` continues to measure the complete receipt-to-native-entry
+prefix; use each population's actual paired extrema rather than subtracting
+unrelated maxima.
+
+Delivery capture is disabled by default. A controller receiving MILK dmcomb
+output can explicitly select the producer clock:
+
+```ini
+[dm]
+deliveryClock=isio
+deliveryBracketUs=1
+```
+
+`deliveryClock` accepts `none`, `isio`, `realtime` or `tai`. `isio` resolves the
+build's `CLOCK_ISIO`; MILK dmcomb uses that clock. On builds where it is TAI,
+this is **CLOCK_TAI**, not CLOCK_REALTIME. Stream metadata does not identify its
+clock. Select the actual producer's clock explicitly; a camera stream that
+writes REALTIME is a different contract. Unsupported names and nonfinite,
+sub-nanosecond or greater-than-one-second bracket limits fail configuration.
+The selection is startup-only and does not alter command execution or scheduling.
+
+A genuine timing receipt first records monotonic time `M0`, then samples the
+selected producer clock `E`, then monotonic time `M1`. The existing receipt
+endpoint remains `M0`. No extra clock is read for disabled delivery capture,
+disabled timing or synthetic initial callbacks. After the immutable event is
+handed off, the ordinary timing consumer compares the paired source publication
+`P` with `E` in their declared common clock. It reports seconds:
+
+- `deliveryUpper = E - P`;
+- `deliveryBracket = M1 - M0`;
+- `deliveryLower = deliveryUpper - deliveryBracket`.
+
+The bounds describe uncertainty from the clock-read bracket. A publication
+inside/after the receipt uncertainty interval cannot establish that the sampled
+metadata preceded receipt and is rejected. Qualified triples have equal counts,
+coverage and validity. They do not contribute to compatible `fgtimes` validity.
+
+Qualification rejects missing/synthetic captures, failed or reversed clocks,
+wide brackets, inconsistent/reused identity, producer-offset discontinuities,
+future/ambiguous publication and publications older than the configured timing
+window. These checks also expose large clock-domain mistakes rather than
+presenting a roughly 37-second TAI/REALTIME offset as delivery. Wrong clock
+declarations cannot be ruled out solely from metadata; inspect the selected
+clock and quality counters with every capture. Discontinuities clear continuity
+evidence before measurements resume in a new valid chain.
+
+Metadata still has the best-effort association limitations described above;
+these are observed publication-to-receipt populations, not atomic proof of the
+consumed pixel/token identity. `dm_timing_delivery` and telemetry
+`delivery_quality` report configured clock/bracket and lifetime/since-summary
+qualification coverage. `attempted` equals `qualified + unavailable + invalid +
+wideBracket + clockDiscontinuity + futurePublication + identityRejected`.
+Queue drops remain in general timing quality; missing events cannot be inferred
+from the delivery population alone. These diagnostic samples never update live
+bounds automatically.
+
+This measures combined-command publication to **the DM controller's own
+receipt**, not a synco observer's wakeup. Upstream dmcomb scheduling/combination
+remains a separate part of full trigger-to-controller delivery. See the
+[delivery/preparation procedure](../../../../apps/dmSyncopation/doc/delivery-preparation-test.md)
+for the genuine-path comparison and shadow configuration.
 
 ## Detached pipeline events
 
@@ -162,9 +229,10 @@ be useful while state is Idle.
 | Property | Elements and units |
 | --- | --- |
 | `dm_timing` | `receipt_fps`, `receipt_min`, `receipt_max`, `receipt_jitter`, `receipt_count`; `send_fps`, `send_min`, `send_max`, `send_jitter`, `send_count`; `receipt_send`, `receipt_send_jitter`, `receipt_send_min`, `receipt_send_max`, `receipt_send_count`. FPS is reciprocal mean interval; durations are seconds. |
-| `dm_timing_stages` | Names `dispatch`, `actuator`, `sdk`, `saturation`, `delta`, `post`, `throughDelta`, `callback`, `receiptCallback`, `publicationInterval`, `sdkDispatch`, `readerRelease`, `staging`, `publication`, `sdkWait`, `sdkTail`, `sdkService`, `conversion`, `sourceCheck`, `shapePublication`, `receiptSdk`, each suffixed `_mean`, `_jitter`, `_min`, `_max`, `_count`, `_span`. Durations/coverage use seconds. |
+| `dm_timing_stages` | Names `dispatch`, `actuator`, `sdk`, `saturation`, `delta`, `post`, `throughDelta`, `callback`, `receiptCallback`, `publicationInterval`, `sdkDispatch`, `readerRelease`, `staging`, `publication`, `sdkWait`, `sdkTail`, `sdkService`, `conversion`, `sourceCheck`, `shapePublication`, `receiptSdk`, `preparation`, `deliveryLower`, `deliveryUpper`, `deliveryBracket`, each suffixed `_mean`, `_jitter`, `_min`, `_max`, `_count`, `_span`. Durations/coverage use seconds. |
 | `dm_timing_quality` | `window`, `span`, `age` in seconds; `capacity`, `queued`, `session`, `sequence`; `enabled`, `valid` as 0/1; cumulative counters listed below: 21 elements. `age=-1` means no retained endpoint. |
-| `dm_timing_state` | Text elements `state`, `clock`, `receipt`, `send`. States are `disabled`, `warmingUp`, `valid`, `stale`, `unavailable`; endpoint descriptions identify the clock and software return semantics. |
+| `dm_timing_delivery` | `enabled`, `clock` (0 none, 1 REALTIME, 2 TAI), `bracketUs`; lifetime `attempted`, `qualified`, `unavailable`, `invalid`, `wideBracket`, `clockDiscontinuity`, `futurePublication`, `identityRejected`. |
+| `dm_timing_state` | Text elements `state`, `clock`, `receipt`, `send`, `deliveryClock`. States are `disabled`, `warmingUp`, `valid`, `stale`, `unavailable`; endpoint descriptions identify the clock and software return semantics. |
 
 `dm_timing_quality.valid` means receipt interval, successful-return interval and
 paired receipt-to-return populations all have defined sample variance. `window`
