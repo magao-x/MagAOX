@@ -216,6 +216,77 @@ TEST_CASE( "MagAOXApp INDI SetProperty retry reset", "[app::MagAOXApp]" )
     REQUIRE( app.shouldRequestSetProperty( key, true, now ) == true );
 }
 
+/// Verify a DelProperty marks the matching SetProperty subscriptions as not received
+/**
+ * \ingroup MagAOXApp_unit_test
+ */
+TEST_CASE( "MagAOXApp INDI DelProperty marks subscriptions not received", "[app::MagAOXApp]" )
+{
+    // clang-format off
+    #ifdef MAGAOXAPP_TEST_DOXYGEN_REF
+    MagAOXApp<true>::handleDelProperty( *(pcf::IndiProperty *)nullptr );
+    #endif
+    // clang-format on
+
+    MagAOXApp_test app;
+
+    pcf::IndiProperty prop1, prop2, prop3;
+    REQUIRE( app.registerIndiPropertySet( prop1, "publisher", "property", callback ) == 0 );
+    REQUIRE( app.registerIndiPropertySet( prop2, "publisher", "other", callback ) == 0 );
+    REQUIRE( app.registerIndiPropertySet( prop3, "elsewhere", "property", callback ) == 0 );
+
+    std::string key1 = app.setPropertyKey( prop1 );
+    std::string key2 = app.setPropertyKey( prop2 );
+    std::string key3 = app.setPropertyKey( prop3 );
+
+    auto allReceived = [&]()
+    {
+        app.markSetPropertyReceived( key1, true );
+        app.markSetPropertyReceived( key2, true );
+        app.markSetPropertyReceived( key3, true );
+        app.allDefsReceived() = true;
+    };
+
+    pcf::IndiProperty del;
+
+    SECTION( "a named property marks only that property" )
+    {
+        allReceived();
+        del.setDevice( "publisher" );
+        del.setName( "property" );
+        app.handleDelProperty( del );
+
+        REQUIRE( app.setPropertyReceived( key1 ) == false );
+        REQUIRE( app.setPropertyReceived( key2 ) == true );
+        REQUIRE( app.setPropertyReceived( key3 ) == true );
+        REQUIRE( app.allDefsReceived() == false );
+    }
+
+    SECTION( "a whole device marks all of its properties" )
+    {
+        allReceived();
+        del.setDevice( "publisher" );
+        app.handleDelProperty( del );
+
+        REQUIRE( app.setPropertyReceived( key1 ) == false );
+        REQUIRE( app.setPropertyReceived( key2 ) == false );
+        REQUIRE( app.setPropertyReceived( key3 ) == true );
+        REQUIRE( app.allDefsReceived() == false );
+    }
+
+    SECTION( "an unwatched device changes nothing" )
+    {
+        allReceived();
+        del.setDevice( "nobody" );
+        app.handleDelProperty( del );
+
+        REQUIRE( app.setPropertyReceived( key1 ) == true );
+        REQUIRE( app.setPropertyReceived( key2 ) == true );
+        REQUIRE( app.setPropertyReceived( key3 ) == true );
+        REQUIRE( app.allDefsReceived() == true );
+    }
+}
+
 /// Setting defaults
 /**
  * \ingroup MagAOXApp_unit_test

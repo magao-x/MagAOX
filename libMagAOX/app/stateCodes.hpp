@@ -35,8 +35,8 @@ struct stateCodes
    typedef int16_t stateCodeT;
 
 
-   /// The numeric codes descrbing an application's state
-   /** \ingroup magaoxapp
+   /// The numeric codes describing an application's state
+   /**
      *
      */
    enum : stateCodeT { FAILURE=-20,       ///< The application has failed, should be used when m_shutdown is set for an error.

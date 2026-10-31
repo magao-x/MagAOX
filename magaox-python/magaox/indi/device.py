@@ -10,6 +10,7 @@ import re
 import signal
 import stat
 import sys
+import threading
 import time
 from functools import partial
 import logging
@@ -256,6 +257,11 @@ class XDevice(Device):
     _resurrectee_timeout : tuple[int, ...]
     _shutdown_requested : bool
     _prev_sigusr2_handler : typing.Any
+    _client_lock : threading.Lock
+    _client_resubscribe : bool
+    _client_pending : set
+    _client_retry_delay : float
+    _client_next_retry : float
 
     @classmethod
     def get_default_config_prefix(cls):
@@ -458,6 +464,11 @@ class XDevice(Device):
         self._resurrectee_timeout = self._normalize_resurrectee_timeout()
         self._shutdown_requested = False
         self._prev_sigusr2_handler = signal.SIG_DFL
+        self._client_lock = threading.Lock()  # guards _client_pending and its retry timing
+        self._client_resubscribe = False  # re-send all watched-property requests from the main loop
+        self._client_pending = set()  # watched (device, name) interests deleted and not yet defined again
+        self._client_retry_delay = 0.0
+        self._client_next_retry = 0.0
         self._init_logs(verbose, all_verbose)
         self._init_telem()
 
@@ -483,6 +494,66 @@ class XDevice(Device):
         log.debug(f"Writing PID file with PID {thisproc.pid}")
         subprocess.check_call(["/opt/MagAOX/bin/write_magaox_pidfile", str(thisproc.pid), self.name])
 
+    def handle_message(self, message : messages.IndiMessage):
+        # A getProperties without a property name may come from a restarted indiserver, which no
+        # longer knows what we watch, so re-send the client's requests from the main loop.
+        if (
+            isinstance(message, messages.GetProperties)
+            and message.name is None
+            and message.device in (None, self.name)
+        ):
+            self._client_resubscribe = True
+        super().handle_message(message)
+
+    def _client_interests(self):
+        # purepyindi2's IndiClient records the (device, name) pairs passed to get_properties() here
+        return tuple(getattr(self.client, '_interested_properties', ()))
+
+    def _handle_client_message(self, message : messages.IndiDefSetDelMessage):
+        '''Mark watched properties of a deleted device as not received, and received again once defined.'''
+        if isinstance(message, messages.DelProperty):
+            matches = [
+                (dev, name) for dev, name in self._client_interests()
+                if dev == message.device and (message.name is None or name in (constants.ALL, message.name))
+            ]
+            if matches:
+                with self._client_lock:
+                    self._client_pending.update(matches)
+                    self._client_retry_delay = 0.0
+                    self._client_next_retry = 0.0
+        elif isinstance(message, typing.get_args(messages.IndiDefMessage)):
+            with self._client_lock:
+                self._client_pending.discard((message.device, message.name))
+                self._client_pending.discard((message.device, constants.ALL))
+
+    def _send_client_get_properties(self, interests):
+        for dev, name in interests:
+            try:
+                self.client.connection.send(messages.GetProperties(
+                    device=None if dev is constants.ALL else dev,
+                    name=None if name is constants.ALL else name,
+                ))
+            except Exception:
+                self.log.exception("Failed to send getProperties for %s.%s", dev, name)
+
+    def _resubscribe_client(self):
+        '''Re-send all watched-property requests after a generic getProperties, and re-request
+        deleted ones with backoff (1 s doubling to 60 s) until they are defined again.'''
+        if not self.connected:
+            return
+        if self._client_resubscribe:
+            self._client_resubscribe = False
+            self._send_client_get_properties(self._client_interests())
+            return
+        now = time.monotonic()
+        with self._client_lock:
+            if not self._client_pending or now < self._client_next_retry:
+                return
+            pending = tuple(self._client_pending)
+            self._client_retry_delay = min(max(1.0, 2 * self._client_retry_delay), 60.0)
+            self._client_next_retry = now + self._client_retry_delay
+        self._send_client_get_properties(pending)
+
     def unlock_pid_file(self):
         pid_file = self.prefix_dir + f"/sys/{self.name}/pid"
         try:
@@ -504,6 +575,7 @@ class XDevice(Device):
     def run(self):
         self.client = client.IndiClient()
         self.client.connect()
+        self.client.register_callback(self._handle_client_message)
         self._install_signal_handlers()
         self._open_heartbeat_fifo()
         try:
@@ -520,6 +592,7 @@ class XDevice(Device):
             ):
                 # Tied to the app loop by design: if loop() blocks, heartbeats stop.
                 self._send_heartbeat(0)
+                self._resubscribe_client()
                 self._wrap_loop()
                 time.sleep(self.sleep_interval_sec)
         finally:

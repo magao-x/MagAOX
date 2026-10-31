@@ -7,6 +7,7 @@
 #ifndef xindiserver_hpp
 #define xindiserver_hpp
 
+#include <sys/prctl.h>
 #include <sys/wait.h>
 
 #include <iostream>
@@ -32,6 +33,15 @@
 /** \defgroup xindiserver_files xindiserver Files
   * \ingroup xindiserver
   */
+
+//Forward decl for test harness
+namespace libXWCTest
+{
+namespace xindiserverTest
+{
+    struct xindiserver_test;
+}
+}
 
 namespace MagAOX
 {
@@ -120,17 +130,16 @@ class xindiserver : public MagAOXApp<false>
 {
 
    //Give the test harness access.
-   friend class xindiserver_test;
+   friend class libXWCTest::xindiserverTest::xindiserver_test;
 
 protected:
 
-   std::string indiserver_f {""};  ///< FIFO for dynamic control of indiserver communications
+   int indiserver_d {-1};  ///< The indiserver stream BLOB drop MB behind setting (passed to indiserver)
    int indiserver_m {-1};  ///< The indiserver MB behind setting (passed to indiserver)
    bool indiserver_n {false}; ///< The indiserver ignore /tmp/noindi flag (passed to indiserver)
    int indiserver_p {-1}; ///< The indiserver port (passed to indiserver)
    int indiserver_v {-1}; ///< The indiserver verbosity (passed to indiserver)
    bool indiserver_x {false}; ///< The indiserver terminate after last exit flag (passed to indiserver)
-   bool indiserver_z {false}; ///< The inter-indiserver zlib compression flag
 
    std::string m_driverFIFOPath; ///< The path to the local drivers' FIFOs directory
 
@@ -221,7 +230,28 @@ public:
    void isLogThreadExec();
 
    /// Process a log entry from indiserver, putting it into MagAO-X standard form
-   int processISLog( std::string logs );
+   /** The entry is timestamped with the time the line is received. The timestamp created by
+     * indiserver is kept in the message.
+     * 
+     * \returns 0 on success
+     */
+   int processISLog( std::string logs /**< [in] log entry from indiserver */ );
+
+   /// Add data read from indiserver to the pending text, and move out every complete line
+   /** The data is appended by count, so a zero byte does not truncate it. Only an incomplete last line is kept in
+     * pending, to be completed by the next read.
+     */
+   static void extractISLines( std::string &pending,           /**< [in/out] text received but not yet processed */
+                               const char *data,               /**< [in] the data just read */
+                               size_t count,                   /**< [in] the number of bytes in data */
+                               std::vector<std::string> &lines /**< [out] complete lines appended */
+   );
+
+   /// Get the log priority for a line from indiserver
+   /** Fatal errors from xindidriver ("failed to lock") and indiserver ("bind: Address already in use") are
+     * critical, everything else is informational.
+     */
+   static logPrioT isLogPriority( const std::string &line /**< [in] the line from indiserver */ );
 
    /// Startup functions
    /**
@@ -251,13 +281,12 @@ xindiserver::xindiserver() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED
 inline
 void xindiserver::setupConfig()
 {
-   config.add("indiserver.f", "f", "", argType::Required, "indiserver", "f", false,  "string", "Path to fifo for dynamic startup and shutdown of drivers.");
+   config.add("indiserver.d", "d", "", argType::Required, "indiserver", "d", false,  "int", "indiserver drops streaming BLOBs to a client more than this many MB behind, default 5, 0 to disable");
    config.add("indiserver.m", "m", "", argType::Required, "indiserver", "m", false,  "int", "indiserver kills client if it gets more than this many MB behind, default 50");
    config.add("indiserver.N", "N", "", argType::True, "indiserver", "N", false,  "bool", "indiserver: ignore /tmp/noindi.  Capitalized to avoid conflict with --name");
    config.add("indiserver.p", "p", "", argType::Required, "indiserver", "p", false,  "int", "indiserver: alternate IP port, default 7624");
    config.add("indiserver.v", "v", "", argType::True, "indiserver", "v", false,  "int", "indiserver: log verbosity, -v, -vv or -vvv");
    config.add("indiserver.x", "x", "", argType::True, "indiserver", "x", false,  "bool", "exit after last client disconnects -- FOR PROFILING ONLY");
-   config.add("indiserver.z", "z", "", argType::Required, "indiserver", "z", false,  "bool", "Whether to use zlib compression between INDI servers");
 
    config.add("local.drivers","L", "local.drivers" , argType::Required, "local", "drivers", false,  "vector string", "List of local drivers to start.");
    config.add("remote.drivers","R", "remote.drivers" , argType::Required, "remote", "drivers", false,  "vector string", "List of remote drivers to start, in the form of name@tunnel, where tunnel is the name of a tunnel specified in sshTunnels.conf.");
@@ -273,7 +302,7 @@ inline
 void xindiserver::loadConfig()
 {
    //indiserver config:
-   config(indiserver_f, "indiserver.f");
+   config(indiserver_d, "indiserver.d");
    config(indiserver_m, "indiserver.m");
    config(indiserver_n, "indiserver.N");
    config(indiserver_p, "indiserver.p");
@@ -290,9 +319,8 @@ void xindiserver::loadConfig()
    }
 
    config(indiserver_x, "indiserver.x");
-   config(indiserver_z, "indiserver.z");
 
-   config(m_local, "local.drivers");// May be empty if [indiserver_ctrl_fifo] is configured to match [indiserver.f]
+   config(m_local, "local.drivers");
    config(m_remote, "remote.drivers");
    config(m_driversAtHosts, "remote.drivers@hosts");
    config(m_remoteServers, "remote.servers");
@@ -345,11 +373,11 @@ int xindiserver::constructIndiserverCommand( std::vector<std::string> & indiserv
    {
       indiserverCommand.push_back("indiserver");
 
-      // FIFO for dynamic control of indiserver communications
-      if(indiserver_f.size() > 0)
+      // The indiserver stream BLOB drop MB behind setting (passed to indiserver)
+      if(indiserver_d >= 0)
       {
-         indiserverCommand.push_back("-f");
-         indiserverCommand.push_back(std::format("{}", indiserver_f));
+         indiserverCommand.push_back("-d");
+         indiserverCommand.push_back(std::format("{}", indiserver_d));
       }
 
       // The indiserver MB behind setting (passed to indiserver)
@@ -379,7 +407,12 @@ int xindiserver::constructIndiserverCommand( std::vector<std::string> & indiserv
       // The indiserver terminate after last exit flag
       if(indiserver_x == true) indiserverCommand.push_back("-x");
 
-      if(indiserver_z == true) indiserverCommand.push_back("-z");
+      // The local drivers' FIFO directory
+      m_driverFIFOPath = MAGAOX_path;
+      m_driverFIFOPath += "/";
+      m_driverFIFOPath += MAGAOX_driverFIFORelPath;
+      indiserverCommand.push_back("-F");
+      indiserverCommand.push_back(m_driverFIFOPath);
    }
    catch(...)
    {
@@ -390,19 +423,9 @@ int xindiserver::constructIndiserverCommand( std::vector<std::string> & indiserv
    return 0;
 }
 
-/** If config keyword [indiserver_ctrl_fifo] is defined and matches
-  * config keyword [indiserver.f], then there do not need to be local
-  * INDI drivers specified via config keyword [local.drivers] that end
-  * up in vector m_local
-  */
 inline
 int xindiserver::addLocalDrivers( std::vector<std::string> & driverArgs )
 {
-   m_driverFIFOPath = MAGAOX_path;
-   m_driverFIFOPath += "/";
-   m_driverFIFOPath += MAGAOX_driverFIFORelPath;
-   m_driverFIFOPath += "/";
-
    // Loop through local driver names from INDI server configuration
    // TOML file element
    //
@@ -410,6 +433,12 @@ int xindiserver::addLocalDrivers( std::vector<std::string> & driverArgs )
 
    for(size_t i=0; i< m_local.size(); ++i)
    {
+      if(m_local[i].size() == 0 || std::all_of(m_local[i].begin(),m_local[i].end(), isspace))
+      {
+          log<text_log>("empty local driver", logPrio::LOG_WARNING);
+          continue;
+      }
+
       size_t bad = m_local[i].find_first_of("@:/", 0);
 
       if(bad != std::string::npos)
@@ -427,7 +456,7 @@ int xindiserver::addLocalDrivers( std::vector<std::string> & driverArgs )
 
       m_driverNames.insert(m_local[i]);
 
-      std::string dname = m_driverFIFOPath + m_local[i];
+      std::string dname = m_local[i];
 
       try
       {
@@ -458,10 +487,7 @@ int xindiserver::addRemoteDrivers( std::vector<std::string> & driverArgs )
 
       size_t p = m_driversAtHosts[i].find('@');
 
-      // OLD: if(p == 0 || p == std::string::npos)
-      // - Allow remote.drivers@hosts = @hostname i.e. no driver name
-
-      if(p == std::string::npos)
+      if(p == 0 || p == std::string::npos)
       {
          log<software_critical>("Error parsing remote driver@host[:port] specification: " + m_driversAtHosts[i]);
          return XINDISERVER_E_BADDRIVERSPEC;
@@ -497,15 +523,18 @@ int xindiserver::addRemoteDrivers( std::vector<std::string> & driverArgs )
 
    for(size_t i=0; i < m_remote.size(); ++i)
    {
+      if(m_remote[i].size() == 0 || std::all_of(m_remote[i].begin(),m_remote[i].end(), isspace))
+      {
+          log<text_log>("empty remote driver", logPrio::LOG_WARNING);
+          continue;
+      }
+
       std::string driver;
       std::string tunnel;
 
       size_t p = m_remote[i].find('@');
 
-      // OLD: if(p == 0 || p == std::string::npos)
-      // - Allow remote.drivers = @tunnel i.e. no driver name
-
-      if(p == std::string::npos)
+      if(p == 0 || p == std::string::npos)
       {
          log<software_critical>("Error parsing remote driver specification: " + m_remote[i]);
          return XINDISERVER_E_BADDRIVERSPEC;
@@ -686,8 +715,6 @@ int xindiserver::addRemoteServers( std::vector<std::string> & driverArgs )
    return 0;
 }
 
-extern "C" { int callable_indiserver(int,char**); }
-
 inline
 int xindiserver::initINDIServer()
 {
@@ -714,43 +741,59 @@ int xindiserver::initINDIServer()
       return -1;
    }
 
-   // Route (int)STDERR_FILENO, and also (FILE*)stderr, to pipe input.
-   // I.e. data written to filedes[1] can be read from filedes[0]
-   while ((dup2(filedes[1], STDERR_FILENO) == -1) && (errno == EINTR)) {}
+   pid_t parentPID = getpid();
+
+   m_isPID = fork();
+
+   if(m_isPID < 0)
+   {
+      log<software_error>({errno, "fork failed"});
+      return -1;
+   }
+
+   if(m_isPID == 0)
+   {
+      //Exit if xindiserver dies, even by SIGKILL, so a restarted xindiserver can bind the INDI port.
+      if(prctl(PR_SET_PDEATHSIG, SIGTERM) < 0 || getppid() != parentPID)
+      {
+         _exit(EXIT_FAILURE);
+      }
+
+      //Route STDERR of child to pipe input.
+      while ((dup2(filedes[1], STDERR_FILENO) == -1) && (errno == EINTR)) {}
+      close(filedes[1]);
+      close(filedes[0]);
+
+      const char ** drivers = new const char*[m_indiserverCommand.size()+1];
+
+      for(size_t i=0; i< m_indiserverCommand.size(); ++i)
+      {
+         drivers[i] = (m_indiserverCommand[i].data());
+      }
+      drivers[m_indiserverCommand.size()] = NULL;
+
+      execvp("indiserver", (char * const*) drivers);
+
+      log<software_error>({errno, "execvp returned"});
+
+      delete[] drivers;
+
+      _exit(EXIT_FAILURE);
+   }
 
    // Save pipe for logging thread; see isLogThreadExec()
    m_isSTDERR = filedes[0];
    m_isSTDERR_input = filedes[1];
 
-   // Start logging thread to read filedes[0] ***BEFORE***
-   // initialization of callable_indiserver(...), so logging during that
-   // initialization cannot fill the I/O buffer and block
    if(isLogThreadStart() < 0)
    {
       log<software_critical>();
       return -1;
    }
 
-   // Populate argument count and vector for callable_indiserver
-   int is_argc = m_indiserverCommand.size();
-   char** is_argv = new char*[m_indiserverCommand.size()];
-   for(size_t i=0; i< m_indiserverCommand.size(); ++i)
-   {
-      is_argv[i] = (m_indiserverCommand[i].data());
-   }
-
-   // Here's the beef:  initialize the INDI server
-   int rtn = callable_indiserver(is_argc, is_argv);
-
-   // Clean up the INDI server argument vector
-   delete[] is_argv;
-   {
-      log<text_log>(std::format("{}=m_isSTDERR(read);{}=m_isSTDERR_input(write)", m_isSTDERR, m_isSTDERR_input));
-   }
-
    if(m_log.logLevel() <= logPrio::LOG_INFO)
    {
-      log<text_log>(std::format("indiserver initialized with return {}", rtn));
+      log<text_log>(std::format("indiserver started with PID {}", m_isPID));
    }
 
    return 0;
@@ -823,23 +866,14 @@ void xindiserver::isLogThreadExec()
       }
       else
       {
-         buffer[count] = '\0';
+         // Process every complete line as soon as it arrives, keeping only an incomplete tail for the next read,
+         // so that each line is timestamped and logged on the read which completes it.
+         std::vector<std::string> lines;
+         extractISLines(logs, buffer, count, lines);
 
-         logs += buffer;
-
-         //Keep reading until \n found, then process.
-         if(logs.back() == '\n')
+         for(const std::string &line : lines)
          {
-            size_t bol = 0;
-            while(bol < logs.size())
-            {
-               size_t eol = logs.find('\n', bol);
-               if(eol == std::string::npos) break;
-
-               processISLog(logs.substr(bol, eol-bol));
-               bol = eol + 1;
-            }
-            logs = "";
+            processISLog(line);
          }
       }
    }
@@ -847,67 +881,52 @@ void xindiserver::isLogThreadExec()
 }
 
 inline
-int xindiserver::processISLog( std::string logs )
+void xindiserver::extractISLines( std::string &pending, const char *data, size_t count, std::vector<std::string> &lines )
 {
-   size_t st = 0;
-   size_t ed;
+   pending.append(data, count);
 
-   ed = logs.find(':', st);
-   if(ed != std::string::npos) ed = logs.find(':', ed+1);
-   if(ed != std::string::npos) ed = logs.find(':', ed+1);
-
-   if(ed == std::string::npos)
+   size_t bol = 0;
+   size_t eol;
+   while( (eol = pending.find('\n', bol)) != std::string::npos )
    {
-      log<text_log>(logs, logPrio::LOG_INFO);
-      return 0;
+      lines.push_back(pending.substr(bol, eol-bol));
+      bol = eol + 1;
    }
 
-   std::string ts = logs.substr(st, ed-st);
+   pending.erase(0, bol); //keep only the incomplete tail, if any
+}
 
-   double dsec;
-
-   tm bdt;
-   mx::sys::ISO8601dateBreakdown(bdt.tm_year, bdt.tm_mon, bdt.tm_mday, bdt.tm_hour, bdt.tm_min, dsec, ts);
-
-   bdt.tm_year -= 1900;
-   bdt.tm_mon -= 1;
-   bdt.tm_sec = (int) dsec;
-   bdt.tm_isdst = 0;
-   bdt.tm_gmtoff = 0;
-
-   timespecX tsp;
-
-   tsp.time_s = timegm(&bdt);
-   tsp.time_ns = (nanosecT) ((dsec-bdt.tm_sec)*1e9 + 0.5);
-
-   ++ed;
-   st = logs.find_first_not_of(" ", ed);
-
-   if(st == std::string::npos) st = ed;
-   if(st == logs.size())
+inline
+logPrioT xindiserver::isLogPriority( const std::string &line )
+{
+   if(line.find("xindidriver") != std::string::npos) //Errors from xindidriver
    {
-      log<software_error>("Did not find log entry.");
-      return -1;
-   }
-
-   std::string logstr = logs.substr(st, logs.size()-st);
-
-   logPrioT prio = logPrio::LOG_INFO;
-
-   //Look for fatal errors
-   if(logstr.find("xindidriver") != std::string::npos) //Errors from xindidriver
-   {
-      if(logstr.find("failed to lock") != std::string::npos)
+      if(line.find("failed to lock") != std::string::npos)
       {
-         prio = logPrio::LOG_CRITICAL;
+         return logPrio::LOG_CRITICAL;
       }
    }
-   else if(logstr.find("bind: Address already in use") != std::string::npos) //Errors from indiserver
+   else if(line.find("bind: Address already in use") != std::string::npos) //Errors from indiserver
    {
-      prio = logPrio::LOG_CRITICAL;
+      return logPrio::LOG_CRITICAL;
+   }
+   else if(line.find("WARNING") != std::string::npos) //Warnings from indiserver
+   {
+      return logPrio::LOG_WARNING;
    }
 
-   m_log.log<text_log>(tsp, "IS: " + logstr, prio);
+   return logPrio::LOG_INFO;
+}
+
+inline
+int xindiserver::processISLog( std::string logs )
+{
+   // Timestamped with the time the line is received. The time indiserver writes at the start of the line is kept
+   // in the text but not parsed: lines relayed from drivers can arrive without one, and parsing whatever text was
+   // there instead produced wrong times (year 0, stored as 2041).
+   logPrioT prio = isLogPriority(logs);
+
+   log<text_log>("IS: " + logs, prio);
 
    if(prio == logPrio::LOG_CRITICAL)
    {
@@ -935,19 +954,33 @@ int xindiserver::appStartup()
    return 0;
 }
 
-extern "C" { void indiRun(void); }
-
 inline
 int xindiserver::appLogic()
 {
-   state(stateCodes::CONNECTED);
-   indiRun();
+   int status;
+   pid_t result = waitpid(m_isPID, &status, WNOHANG);
+   if (result == 0)
+   {
+      state(stateCodes::CONNECTED);
+   }
+   else
+   {
+      //We don't care why.  If indiserver is not alive while in this function then it's a fatal error.
+      log<text_log>("indiserver has exited", logPrio::LOG_CRITICAL);
+      state(stateCodes::FAILURE);
+      return -1;
+   }
+
    return 0;
 }
 
 inline
 int xindiserver::appShutdown()
 {
+   if(m_isPID > 0)
+   {
+      kill(m_isPID, SIGTERM);
+   }
 
    // Wake up logging thread by sending it data
    if(m_isSTDERR_input >= 0)

@@ -1,7 +1,7 @@
 
 
-toBuild = liblilxml libcommon INDI xindidriver
-toInstall = INDI xindidriver
+toBuild = liblilxml libcommon INDI
+toInstall = INDI
 
 all:
 	for dir in ${toBuild}; do \

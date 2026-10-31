@@ -1,6 +1,5 @@
 /** \file streamWriter_test.cpp
  * \brief Catch2 tests for the streamWriter app.
- * \author Jared R. Males (jaredmales@gmail.com)
  *
  * \ingroup streamWriter_files
  */
@@ -61,10 +60,10 @@ state &faults();
 void reset();
 
 /// Return `true` when the XRIF fault should trigger for this call.
-bool shouldFault( xrifFault &fault );
+bool shouldFault( xrifFault &fault /**< [in/out] fault configuration and call count */ );
 
 /// Return `true` when the `fwrite()` fault should trigger for this call.
-bool shouldFault( fwriteFault &fault );
+bool shouldFault( fwriteFault &fault /**< [in/out] fault configuration and call count */ );
 
 /// Scope helper that automatically resets fault-injection state on entry and exit.
 struct resetScope
@@ -84,16 +83,42 @@ struct resetScope
 
 } // namespace streamWriterFaultInject
 
-xrif_error_t
-streamWriter_test_xrif_configure( xrif_t handle, int difference_method, int reorder_method, int compress_method );
-xrif_error_t streamWriter_test_xrif_set_size(
-    xrif_t handle, xrif_dimension_t w, xrif_dimension_t h, xrif_dimension_t d, xrif_dimension_t f, xrif_typecode_t c );
-xrif_error_t streamWriter_test_xrif_allocate_raw( xrif_t handle );
-xrif_error_t streamWriter_test_xrif_allocate_reordered( xrif_t handle );
-xrif_error_t streamWriter_test_xrif_set_lz4_acceleration( xrif_t handle, int32_t lz4_accel );
-xrif_error_t streamWriter_test_xrif_encode( xrif_t handle );
-xrif_error_t streamWriter_test_xrif_write_header( char *header, xrif_t handle );
-size_t       streamWriter_test_fwrite( const void *ptr, size_t size, size_t nmemb, FILE *stream );
+/// Configure a real XRIF handle unless a selected fault overrides the result.
+xrif_error_t streamWriter_test_xrif_configure( xrif_t handle /**< [in/out] encoder */,
+                                               int    difference_method /**< [in] differencing method */,
+                                               int    reorder_method /**< [in] reordering method */,
+                                               int    compress_method /**< [in] compression method */ );
+
+/// Set real encoder dimensions unless a selected fault overrides the result.
+xrif_error_t streamWriter_test_xrif_set_size( xrif_t           handle /**< [in/out] encoder */,
+                                              xrif_dimension_t w /**< [in] image width */,
+                                              xrif_dimension_t h /**< [in] image height */,
+                                              xrif_dimension_t d /**< [in] image depth */,
+                                              xrif_dimension_t f /**< [in] frame count */,
+                                              xrif_typecode_t  c /**< [in] pixel type */ );
+
+/// Allocate real raw storage unless a selected fault overrides the result.
+xrif_error_t streamWriter_test_xrif_allocate_raw( xrif_t handle /**< [in/out] encoder */ );
+
+/// Allocate real reordered storage unless a selected fault overrides the result.
+xrif_error_t streamWriter_test_xrif_allocate_reordered( xrif_t handle /**< [in/out] encoder */ );
+
+/// Set LZ4 acceleration unless a selected fault overrides the result.
+xrif_error_t streamWriter_test_xrif_set_lz4_acceleration( xrif_t  handle /**< [in/out] encoder */,
+                                                          int32_t lz4_accel /**< [in] acceleration */ );
+
+/// Encode real data unless a selected fault overrides the result.
+xrif_error_t streamWriter_test_xrif_encode( xrif_t handle /**< [in/out] encoder */ );
+
+/// Generate a real header unless a selected fault overrides the result.
+xrif_error_t streamWriter_test_xrif_write_header( char  *header /**< [out] archive header */,
+                                                  xrif_t handle /**< [in] encoder */ );
+
+/// Write archive bytes with an optional selected short write.
+size_t streamWriter_test_fwrite( const void *ptr /**< [in] source bytes */,
+                                 size_t      size /**< [in] item size */,
+                                 size_t      nmemb /**< [in] item count */,
+                                 FILE       *stream /**< [in/out] archive stream */ );
 /// \endcond
 
 #define xrif_configure streamWriter_test_xrif_configure
@@ -333,302 +358,386 @@ namespace streamWriterTest
 /// \cond DOXYGEN_SUPPRESS_TEST_HARNESS
 struct streamWriter_test : public streamWriter
 {
-    streamWriter *m_sw;
+    streamWriter *m_sw; ///< Legacy helper pointer; unused by this harness.
 
-    /// Construct a test harness instance with the minimum app identity needed by the callbacks.
-    streamWriter_test( const std::string &device )
-    {
-        m_configName = device;
-        m_outName    = device;
-
-        XWCTEST_SETUP_INDI_NEW_PROP( writing );
-    }
+    /// Construct the application identity and writing callback property.
+    streamWriter_test( const std::string &device /**< [in] test device name */ );
 };
-/// \endcond
 
-/// \cond DOXYGEN_SUPPRESS_TEST_HARNESS
+/// Borrow an application and provide synthetic data plus archive round-trip checks.
 struct streamWriter_data_test
 {
-    streamWriter_test *m_sw;
+    streamWriter_test *m_sw; ///< Borrowed application under test.
 
-    /// Bind the helper view to a `streamWriter` test harness.
-    streamWriter_data_test( streamWriter_test *sw )
-    {
-        m_sw = sw;
-    }
+    /// Bind the helper view to the application under test.
+    streamWriter_data_test( streamWriter_test *sw /**< [in] borrowed application */ );
 
     /// Return the configured raw image output directory.
-    std::string rawimageDir()
+    std::string rawimageDir();
+
+    /// Build a valid writing-toggle request.
+    pcf::IndiProperty writingToggle( pcf::IndiElement::SwitchStateType state /**< [in] requested switch state */ );
+
+    /// Allocate circular buffers for the requested synthetic stream.
+    int setup_circbufs( int width /**< [in] image width */,
+                        int height /**< [in] image height */,
+                        int dataType /**< [in] ImageStreamIO pixel type */,
+                        int circBuffLength /**< [in] circular capacity in frames */,
+                        int writeChunkLength /**< [in] archive capacity in frames */ );
+
+    /// Allocate encoder storage after configuring the circular buffers.
+    int setup_xrif();
+
+    /// Fill synthetic pixels and timestamps for archive round-trip comparisons.
+    int fill_circbuf_uint16();
+
+    /// Fill arbitrary pixel bytes, including floating-point special values, and valid timestamps.
+    int fill_circbuf_bytes();
+
+    /// Encode the requested frame window into an archive.
+    int write_frames( int start /**< [in] first frame index */, int stop /**< [in] exclusive end index */ );
+
+    /// Verify stored encoding methods and compare decoded image and timing frames byte for byte.
+    int comp_frames( size_t start /**< [in] first frame index */, size_t stop /**< [in] exclusive end index */ );
+};
+
+streamWriter_test::streamWriter_test( const std::string &device )
+{
+    m_configName = device;
+    m_outName    = device;
+
+    XWCTEST_SETUP_INDI_NEW_PROP( writing );
+}
+
+streamWriter_data_test::streamWriter_data_test( streamWriter_test *sw )
+{
+    m_sw = sw;
+}
+
+std::string streamWriter_data_test::rawimageDir()
+{
+    return m_sw->m_rawimageDir;
+}
+
+pcf::IndiProperty streamWriter_data_test::writingToggle( pcf::IndiElement::SwitchStateType state )
+{
+    pcf::IndiProperty ip;
+    m_sw->createStandardIndiToggleSw( ip, "writing" );
+    ip["toggle"].setSwitchState( state );
+
+    return ip;
+}
+
+int streamWriter_data_test::setup_circbufs(
+    int width, int height, int dataType, int circBuffLength, int writeChunkLength )
+{
+    m_sw->m_typeSize = ImageStreamIO_typesize( dataType );
+
+    m_sw->m_maxCircBuffLength   = circBuffLength;
+    m_sw->m_maxCircBuffSize     = ( width * height * m_sw->m_typeSize * circBuffLength + 1 ) / 1048576.0;
+    m_sw->m_maxWriteChunkLength = writeChunkLength;
+
+    m_sw->m_width    = width;
+    m_sw->m_height   = height;
+    m_sw->m_dataType = dataType;
+
+    return m_sw->allocate_circbufs();
+}
+
+int streamWriter_data_test::setup_xrif()
+{
+    m_sw->initialize_xrif();
+    return m_sw->allocate_xrif();
+}
+
+int streamWriter_data_test::fill_circbuf_uint16()
+{
+    // Fill image data with increasing 16-bit values.
+    for( size_t pp = 0; pp < m_sw->m_circBuffLength; ++pp )
     {
-        return m_sw->m_rawimageDir;
-    }
-
-    /// Build a valid `writing` toggle request property with the requested switch state.
-    pcf::IndiProperty writingToggle( pcf::IndiElement::SwitchStateType state )
-    {
-        pcf::IndiProperty ip;
-        m_sw->createStandardIndiToggleSw( ip, "writing" );
-        ip["toggle"].setSwitchState( state );
-
-        return ip;
-    }
-
-    /// Allocate circular buffers for a synthetic stream with the requested geometry and chunking.
-    int setup_circbufs( int width, int height, int dataType, int circBuffLength, int writeChunkLength )
-    {
-        m_sw->m_typeSize = ImageStreamIO_typesize( dataType );
-
-        m_sw->m_maxCircBuffLength   = circBuffLength;
-        m_sw->m_maxCircBuffSize     = ( width * height * m_sw->m_typeSize * circBuffLength + 1 ) / 1048576.0;
-        m_sw->m_maxWriteChunkLength = writeChunkLength;
-
-        m_sw->m_width    = width;
-        m_sw->m_height   = height;
-        m_sw->m_dataType = dataType;
-
-        return m_sw->allocate_circbufs();
-    }
-
-    /// Allocate the XRIF encoder state after the circular buffers have been configured.
-    int setup_xrif()
-    {
-        m_sw->initialize_xrif();
-        return m_sw->allocate_xrif();
-    }
-
-    /// Fill the circular buffers with deterministic image and timing data for round-trip comparisons.
-    int fill_circbuf_uint16()
-    {
-        // fill in image data with increasing 256 bit vals.
-        for( size_t pp = 0; pp < m_sw->m_circBuffLength; ++pp )
+        uint16_t v = pp;
+        for( size_t rr = 0; rr < m_sw->m_width; ++rr )
         {
-            uint16_t v = pp;
-            for( size_t rr = 0; rr < m_sw->m_width; ++rr )
+            for( size_t cc = 0; cc < m_sw->m_height; ++cc )
             {
-                for( size_t cc = 0; cc < m_sw->m_height; ++cc )
-                {
-                    ( (uint16_t *)
-                          m_sw->m_rawImageCircBuff )[pp * m_sw->m_width * m_sw->m_height + rr * m_sw->m_height + cc] =
-                        v;
-                    ++v;
-                }
-            }
-
-            // fitsFile<uint16_t> ff;
-            // ff.write("cb.fits", m_sw->m_rawImageCircBuff);
-
-            // Fill in timing values with unique vals.
-            uint64_t *curr_timing = m_sw->m_timingCircBuff + 5 * pp;
-            curr_timing[0]        = pp;                                 // image number
-            curr_timing[1]        = pp + 1000;                          // atime sec
-            curr_timing[2]        = pp + 2000;                          // atime nsec
-            curr_timing[3]        = pp + m_sw->m_circBuffLength + 1000; // wtime sec
-            curr_timing[4]        = pp + m_sw->m_circBuffLength + 2000; // wtime nsec
-        }
-        return 0;
-    }
-
-    /// Encode the requested frame window into an XRIF output file.
-    int write_frames( int start, int stop )
-    {
-        m_sw->m_rawimageDir = "/tmp";
-
-        m_sw->m_currSaveStart       = start;
-        m_sw->m_currSaveStop        = stop;
-        m_sw->m_currSaveStopFrameNo = stop;
-
-        m_sw->m_writing = WRITING;
-        return m_sw->doEncode();
-    }
-
-    /// Decode the saved image and timing archives and compare them against the requested frame window.
-    int comp_frames_uint16( size_t start, size_t stop )
-    {
-        std::cout << "Reading: " << m_sw->m_outFilePath << "\n";
-
-        xrif_t xrif = nullptr;
-        if( xrif_new( &xrif ) != XRIF_NOERROR )
-        {
-            std::cerr << "Error allocating XRIF image decoder.\n";
-            return -1;
-        }
-
-        xrif_t xrif_timing = nullptr;
-        if( xrif_new( &xrif_timing ) != XRIF_NOERROR )
-        {
-            std::cerr << "Error allocating XRIF timing decoder.\n";
-            xrif_delete( xrif );
-            return -1;
-        }
-
-        char header[XRIF_HEADER_SIZE];
-
-        FILE *fp_xrif = fopen( m_sw->m_outFilePath.c_str(), "rb" );
-        if( fp_xrif == nullptr )
-        {
-            std::cerr << "Error opening " << m_sw->m_outFilePath << " for readback.\n";
-            xrif_delete( xrif );
-            xrif_delete( xrif_timing );
-            return -1;
-        }
-
-        size_t nr = fread( header, 1, XRIF_HEADER_SIZE, fp_xrif );
-
-        if( nr != XRIF_HEADER_SIZE )
-        {
-            std::cerr << "Error reading header of " << m_sw->m_outFilePath << "\n";
-            fclose( fp_xrif );
-            xrif_delete( xrif );
-            xrif_delete( xrif_timing );
-            return -1;
-        }
-
-        uint32_t header_size;
-        xrif_read_header( xrif, &header_size, header );
-
-        int rv = 0;
-        if( xrif_width( xrif ) != m_sw->m_width )
-        {
-            std::cerr << "width mismatch\n";
-            rv = -1;
-        }
-
-        if( xrif_height( xrif ) != m_sw->m_height )
-        {
-            std::cerr << "height mismatch\n";
-            rv = -1;
-        }
-
-        if( xrif_depth( xrif ) != 1 )
-        {
-            std::cerr << "depth mismatch\n";
-            rv = -1;
-        }
-
-        if( xrif_frames( xrif ) != stop - start )
-        {
-            std::cerr << "frames mismatch\n";
-            rv = -1;
-        }
-
-        xrif_allocate( xrif );
-
-        nr = fread( xrif->raw_buffer, 1, xrif->compressed_size, fp_xrif );
-
-        if( nr != xrif->compressed_size )
-        {
-            std::cerr << "error reading compressed image buffer.\n";
-            fclose( fp_xrif );
-            xrif_delete( xrif );
-            xrif_delete( xrif_timing );
-            return -1;
-        }
-
-        if( xrif_decode( xrif ) != XRIF_NOERROR )
-        {
-            std::cerr << "error decoding compressed image buffer.\n";
-            fclose( fp_xrif );
-            xrif_delete( xrif );
-            xrif_delete( xrif_timing );
-            return -1;
-        }
-
-        size_t badpix = 0;
-
-        for( size_t n = 0; n < m_sw->m_width * m_sw->m_height * m_sw->m_typeSize * ( stop - start ); ++n )
-        {
-            if( m_sw->m_rawImageCircBuff[start * m_sw->m_width * m_sw->m_height * m_sw->m_typeSize + n] !=
-                xrif->raw_buffer[n] )
-                ++badpix;
-        }
-
-        if( badpix > 0 )
-        {
-            std::cerr << "Buffers don't match: " << badpix << " bad pixels.\n";
-            rv = -1;
-        }
-
-        char timing_header[XRIF_HEADER_SIZE];
-        nr = fread( timing_header, 1, XRIF_HEADER_SIZE, fp_xrif );
-        if( nr != XRIF_HEADER_SIZE )
-        {
-            std::cerr << "Error reading timing header of " << m_sw->m_outFilePath << "\n";
-            fclose( fp_xrif );
-            xrif_delete( xrif );
-            xrif_delete( xrif_timing );
-            return -1;
-        }
-
-        uint32_t timing_header_size;
-        xrif_read_header( xrif_timing, &timing_header_size, timing_header );
-
-        if( xrif_width( xrif_timing ) != 5 )
-        {
-            std::cerr << "timing width mismatch\n";
-            rv = -1;
-        }
-
-        if( xrif_height( xrif_timing ) != 1 )
-        {
-            std::cerr << "timing height mismatch\n";
-            rv = -1;
-        }
-
-        if( xrif_depth( xrif_timing ) != 1 )
-        {
-            std::cerr << "timing depth mismatch\n";
-            rv = -1;
-        }
-
-        if( xrif_frames( xrif_timing ) != stop - start )
-        {
-            std::cerr << "timing frame count mismatch\n";
-            rv = -1;
-        }
-
-        xrif_allocate( xrif_timing );
-
-        nr = fread( xrif_timing->raw_buffer, 1, xrif_timing->compressed_size, fp_xrif );
-        if( nr != xrif_timing->compressed_size )
-        {
-            std::cerr << "error reading compressed timing buffer.\n";
-            fclose( fp_xrif );
-            xrif_delete( xrif );
-            xrif_delete( xrif_timing );
-            return -1;
-        }
-
-        if( xrif_decode( xrif_timing ) != XRIF_NOERROR )
-        {
-            std::cerr << "error decoding compressed timing buffer.\n";
-            fclose( fp_xrif );
-            xrif_delete( xrif );
-            xrif_delete( xrif_timing );
-            return -1;
-        }
-
-        size_t badtiming = 0;
-        for( size_t n = 0; n < 5 * ( stop - start ); ++n )
-        {
-            if( m_sw->m_timingCircBuff[start * 5 + n] != reinterpret_cast<uint64_t *>( xrif_timing->raw_buffer )[n] )
-            {
-                ++badtiming;
+                ( (uint16_t *)
+                      m_sw->m_rawImageCircBuff )[pp * m_sw->m_width * m_sw->m_height + rr * m_sw->m_height + cc] = v;
+                ++v;
             }
         }
 
-        if( badtiming > 0 )
-        {
-            std::cerr << "Timing buffers don't match: " << badtiming << " bad entries.\n";
-            rv = -1;
-        }
+        // fitsFile<uint16_t> ff;
+        // ff.write("cb.fits", m_sw->m_rawImageCircBuff);
 
+        // Fill in timing values with unique vals.
+        uint64_t *curr_timing = m_sw->m_timingCircBuff + 5 * pp;
+        curr_timing[0]        = pp;                                 // image number
+        curr_timing[1]        = pp + 1000;                          // atime sec
+        curr_timing[2]        = pp + 2000;                          // atime nsec
+        curr_timing[3]        = pp + m_sw->m_circBuffLength + 1000; // wtime sec
+        curr_timing[4]        = pp + m_sw->m_circBuffLength + 2000; // wtime nsec
+    }
+    return 0;
+}
+
+int streamWriter_data_test::fill_circbuf_bytes()
+{
+    const uint32_t floatBits[] = {
+        0x00000000U, 0x80000000U, 0x7fc01234U, 0x7f801234U, 0x7f800000U, 0xff800000U, 0x00000001U, 0x3f800000U };
+    const uint64_t doubleBits[] = { 0x0000000000000000ULL,
+                                    0x8000000000000000ULL,
+                                    0x7ff8000000001234ULL,
+                                    0x7ff0000000001234ULL,
+                                    0x7ff0000000000000ULL,
+                                    0xfff0000000000000ULL,
+                                    0x0000000000000001ULL,
+                                    0x3ff0000000000000ULL };
+    const size_t   pixels       = m_sw->m_width * m_sw->m_height * m_sw->m_circBuffLength;
+    for( size_t index = 0; index < pixels * m_sw->m_typeSize; ++index )
+        m_sw->m_rawImageCircBuff[index] = static_cast<char>( index * 37 + index / 13 );
+
+    for( size_t index = 0; index < pixels; ++index )
+    {
+        char *pixel = m_sw->m_rawImageCircBuff + index * m_sw->m_typeSize;
+        if( m_sw->m_dataType == XRIF_TYPECODE_FLOAT )
+            std::memcpy( pixel, &floatBits[index % 8], sizeof( floatBits[0] ) );
+        else if( m_sw->m_dataType == XRIF_TYPECODE_DOUBLE )
+            std::memcpy( pixel, &doubleBits[index % 8], sizeof( doubleBits[0] ) );
+    }
+    for( size_t frame = 0; frame < m_sw->m_circBuffLength; ++frame )
+    {
+        uint64_t *timing = m_sw->m_timingCircBuff + 5 * frame;
+        timing[0]        = frame;
+        timing[1]        = frame + 1000;
+        timing[2]        = frame + 2000;
+        timing[3]        = frame + 3000;
+        timing[4]        = frame + 4000;
+    }
+    return 0;
+}
+
+int streamWriter_data_test::write_frames( int start, int stop )
+{
+    m_sw->m_rawimageDir = "/tmp";
+
+    m_sw->m_currSaveStart       = start;
+    m_sw->m_currSaveStop        = stop;
+    m_sw->m_currSaveStopFrameNo = stop;
+
+    m_sw->m_writing = WRITING;
+    return m_sw->doEncode();
+}
+
+int streamWriter_data_test::comp_frames( size_t start, size_t stop )
+{
+    std::cout << "Reading: " << m_sw->m_outFilePath << "\n";
+
+    xrif_t xrif = nullptr;
+    if( xrif_new( &xrif ) != XRIF_NOERROR )
+    {
+        std::cerr << "Error allocating XRIF image decoder.\n";
+        return -1;
+    }
+
+    xrif_t xrif_timing = nullptr;
+    if( xrif_new( &xrif_timing ) != XRIF_NOERROR )
+    {
+        std::cerr << "Error allocating XRIF timing decoder.\n";
+        xrif_delete( xrif );
+        return -1;
+    }
+
+    char header[XRIF_HEADER_SIZE];
+
+    FILE *fp_xrif = fopen( m_sw->m_outFilePath.c_str(), "rb" );
+    if( fp_xrif == nullptr )
+    {
+        std::cerr << "Error opening " << m_sw->m_outFilePath << " for readback.\n";
+        xrif_delete( xrif );
+        xrif_delete( xrif_timing );
+        return -1;
+    }
+
+    size_t nr = fread( header, 1, XRIF_HEADER_SIZE, fp_xrif );
+
+    if( nr != XRIF_HEADER_SIZE )
+    {
+        std::cerr << "Error reading header of " << m_sw->m_outFilePath << "\n";
         fclose( fp_xrif );
         xrif_delete( xrif );
         xrif_delete( xrif_timing );
-
-        return rv;
+        return -1;
     }
-};
+
+    uint32_t header_size;
+    xrif_read_header( xrif, &header_size, header );
+
+    int rv = 0;
+    if( xrif_width( xrif ) != m_sw->m_width )
+    {
+        std::cerr << "width mismatch\n";
+        rv = -1;
+    }
+
+    if( xrif_height( xrif ) != m_sw->m_height )
+    {
+        std::cerr << "height mismatch\n";
+        rv = -1;
+    }
+
+    if( xrif_depth( xrif ) != 1 )
+    {
+        std::cerr << "depth mismatch\n";
+        rv = -1;
+    }
+
+    if( xrif_frames( xrif ) != stop - start )
+    {
+        std::cerr << "frames mismatch\n";
+        rv = -1;
+    }
+
+    if( xrif->type_code != m_sw->m_dataType )
+    {
+        std::cerr << "pixel type mismatch\n";
+        rv = -1;
+    }
+
+    const bool integer16 = m_sw->m_dataType == XRIF_TYPECODE_INT16 || m_sw->m_dataType == XRIF_TYPECODE_UINT16;
+    const bool compress  = m_sw->m_compress && integer16;
+    if( xrif->difference_method != ( compress ? XRIF_DIFFERENCE_PREVIOUS : XRIF_DIFFERENCE_NONE ) ||
+        xrif->reorder_method != ( compress ? XRIF_REORDER_BYTEPACK : XRIF_REORDER_NONE ) ||
+        xrif->compress_method != ( compress ? XRIF_COMPRESS_LZ4 : XRIF_COMPRESS_NONE ) )
+    {
+        std::cerr << "image encoding methods mismatch\n";
+        rv = -1;
+    }
+
+    // Legacy xrif_read_header does not populate raw_size; derive it from the decoded dimensions.
+    const size_t rawSize = size_t( xrif->width ) * xrif->height * xrif->depth * xrif->frames * xrif->data_size;
+    if( !compress && xrif->compressed_size != rawSize )
+    {
+        std::cerr << "uncompressed image payload size mismatch\n";
+        rv = -1;
+    }
+
+    xrif_allocate( xrif );
+
+    nr = fread( xrif->raw_buffer, 1, xrif->compressed_size, fp_xrif );
+
+    if( nr != xrif->compressed_size )
+    {
+        std::cerr << "error reading compressed image buffer.\n";
+        fclose( fp_xrif );
+        xrif_delete( xrif );
+        xrif_delete( xrif_timing );
+        return -1;
+    }
+
+    if( xrif_decode( xrif ) != XRIF_NOERROR )
+    {
+        std::cerr << "error decoding compressed image buffer.\n";
+        fclose( fp_xrif );
+        xrif_delete( xrif );
+        xrif_delete( xrif_timing );
+        return -1;
+    }
+
+    size_t badpix = 0;
+
+    for( size_t n = 0; n < m_sw->m_width * m_sw->m_height * m_sw->m_typeSize * ( stop - start ); ++n )
+    {
+        if( m_sw->m_rawImageCircBuff[start * m_sw->m_width * m_sw->m_height * m_sw->m_typeSize + n] !=
+            xrif->raw_buffer[n] )
+            ++badpix;
+    }
+
+    if( badpix > 0 )
+    {
+        std::cerr << "Buffers don't match: " << badpix << " bad pixels.\n";
+        rv = -1;
+    }
+
+    char timing_header[XRIF_HEADER_SIZE];
+    nr = fread( timing_header, 1, XRIF_HEADER_SIZE, fp_xrif );
+    if( nr != XRIF_HEADER_SIZE )
+    {
+        std::cerr << "Error reading timing header of " << m_sw->m_outFilePath << "\n";
+        fclose( fp_xrif );
+        xrif_delete( xrif );
+        xrif_delete( xrif_timing );
+        return -1;
+    }
+
+    uint32_t timing_header_size;
+    xrif_read_header( xrif_timing, &timing_header_size, timing_header );
+
+    if( xrif_width( xrif_timing ) != 5 )
+    {
+        std::cerr << "timing width mismatch\n";
+        rv = -1;
+    }
+
+    if( xrif_height( xrif_timing ) != 1 )
+    {
+        std::cerr << "timing height mismatch\n";
+        rv = -1;
+    }
+
+    if( xrif_depth( xrif_timing ) != 1 )
+    {
+        std::cerr << "timing depth mismatch\n";
+        rv = -1;
+    }
+
+    if( xrif_frames( xrif_timing ) != stop - start )
+    {
+        std::cerr << "timing frame count mismatch\n";
+        rv = -1;
+    }
+
+    xrif_allocate( xrif_timing );
+
+    nr = fread( xrif_timing->raw_buffer, 1, xrif_timing->compressed_size, fp_xrif );
+    if( nr != xrif_timing->compressed_size )
+    {
+        std::cerr << "error reading compressed timing buffer.\n";
+        fclose( fp_xrif );
+        xrif_delete( xrif );
+        xrif_delete( xrif_timing );
+        return -1;
+    }
+
+    if( xrif_decode( xrif_timing ) != XRIF_NOERROR )
+    {
+        std::cerr << "error decoding compressed timing buffer.\n";
+        fclose( fp_xrif );
+        xrif_delete( xrif );
+        xrif_delete( xrif_timing );
+        return -1;
+    }
+
+    size_t badtiming = 0;
+    for( size_t n = 0; n < 5 * ( stop - start ); ++n )
+    {
+        if( m_sw->m_timingCircBuff[start * 5 + n] != reinterpret_cast<uint64_t *>( xrif_timing->raw_buffer )[n] )
+        {
+            ++badtiming;
+        }
+    }
+
+    if( badtiming > 0 )
+    {
+        std::cerr << "Timing buffers don't match: " << badtiming << " bad entries.\n";
+        rv = -1;
+    }
+
+    fclose( fp_xrif );
+    xrif_delete( xrif );
+    xrif_delete( xrif_timing );
+
+    return rv;
+}
 /// \endcond
 
 /// Verify the streamWriter INDI callback validator accepts only the expected property.
@@ -676,8 +785,15 @@ TEST_CASE( "streamWriter writing toggle transitions and stopped writes", "[strea
         REQUIRE( sw.m_writing == START_WRITING );
 
         REQUIRE( sw.newCallBack_m_indiP_writing( ipOff ) == 0 );
-        REQUIRE( sw.m_writing == STOP_WRITING );
+        REQUIRE( sw.m_writing == NOT_WRITING );
 
+        REQUIRE( sw.newCallBack_m_indiP_writing( ipOn ) == 0 );
+        REQUIRE( sw.m_writing == START_WRITING );
+
+        sw.m_writing     = WRITING;
+        sw.m_chunkFrames = 1;
+        REQUIRE( sw.newCallBack_m_indiP_writing( ipOff ) == 0 );
+        REQUIRE( sw.m_writing == STOP_WRITING );
         REQUIRE( sw.newCallBack_m_indiP_writing( ipOn ) == 0 );
         REQUIRE( sw.m_writing == STOP_WRITING );
 
@@ -702,14 +818,9 @@ TEST_CASE( "streamWriter writing toggle transitions and stopped writes", "[strea
         REQUIRE( sw.m_writing == START_WRITING );
 
         REQUIRE( sw.newCallBack_m_indiP_writing( ipOff ) == 0 );
-        REQUIRE( sw.m_writing == STOP_WRITING );
-
-        sw.m_currSaveStart       = 0;
-        sw.m_currSaveStop        = 0;
-        sw.m_currSaveStopFrameNo = 17;
-
-        REQUIRE( sw.doEncode() == 0 );
         REQUIRE( sw.m_writing == NOT_WRITING );
+        REQUIRE_FALSE( sw.m_writePending );
+        REQUIRE( sw.m_outFilePath.empty() );
     }
 
     SECTION( "stopping with pending frames encodes through the final queued frame" )
@@ -723,7 +834,8 @@ TEST_CASE( "streamWriter writing toggle transitions and stopped writes", "[strea
         REQUIRE( sw_test.setup_xrif() == 0 );
         REQUIRE( sw_test.fill_circbuf_uint16() == 0 );
 
-        sw.m_writing = WRITING;
+        sw.m_writing     = WRITING;
+        sw.m_chunkFrames = 3;
         REQUIRE( sw.newCallBack_m_indiP_writing( ipOff ) == 0 );
         REQUIRE( sw.m_writing == STOP_WRITING );
 
@@ -731,10 +843,13 @@ TEST_CASE( "streamWriter writing toggle transitions and stopped writes", "[strea
         sw.m_currSaveStart       = 5;
         sw.m_currSaveStop        = 8;
         sw.m_currSaveStopFrameNo = 8;
+        sw.m_chunkFrames         = 0;
+        sw.m_stopQueued          = true;
+        sw.m_writePending        = true;
 
         REQUIRE( sw.doEncode() == 0 );
         REQUIRE( sw.m_writing == NOT_WRITING );
-        REQUIRE( sw_test.comp_frames_uint16( 5, 8 ) == 0 );
+        REQUIRE( sw_test.comp_frames( 5, 8 ) == 0 );
     }
 }
 
@@ -778,7 +893,7 @@ TEST_CASE( "streamWriter allocation and encode edge cases", "[streamWriter]" )
         REQUIRE( sw_test.setup_xrif() == 0 );
         REQUIRE( sw_test.fill_circbuf_uint16() == 0 );
         REQUIRE( sw_test.write_frames( 0, 5 ) == 0 );
-        REQUIRE( sw_test.comp_frames_uint16( 0, 5 ) == 0 );
+        REQUIRE( sw_test.comp_frames( 0, 5 ) == 0 );
     }
 
     SECTION( "doEncode returns immediately when not writing" )
@@ -905,7 +1020,7 @@ TEST_CASE( "streamWriter fault injection covers XRIF setup and write warnings", 
         REQUIRE( sw.allocate_xrif() < 0 );
     }
 
-    SECTION( "doEncode still recovers frames when image XRIF size reports a warning after setup" )
+    SECTION( "doEncode aborts when image XRIF size reports an error after setup" )
     {
         streamWriterFaultInject::resetScope faultScope;
         streamWriter_test                   sw( "testdev" );
@@ -915,12 +1030,15 @@ TEST_CASE( "streamWriter fault injection covers XRIF setup and write warnings", 
         REQUIRE( sw_test.setup_xrif() == 0 );
         REQUIRE( sw_test.fill_circbuf_uint16() == 0 );
 
+        streamWriterFaultInject::reset();
         streamWriterFaultInject::faults().setSize.mode = streamWriterFaultInject::xrifFaultMode::passThroughError;
         streamWriterFaultInject::faults().setSize.triggerCall = 1;
         streamWriterFaultInject::faults().setSize.error       = XRIF_ERROR_INVALID_SIZE;
 
-        REQUIRE( sw_test.write_frames( 0, 5 ) == 0 );
-        REQUIRE( sw_test.comp_frames_uint16( 0, 5 ) == 0 );
+        REQUIRE( sw_test.write_frames( 0, 5 ) < 0 );
+        REQUIRE_FALSE( sw.m_writePending );
+        REQUIRE( streamWriterFaultInject::faults().encode.callCount == 0 );
+        REQUIRE( streamWriterFaultInject::faults().write.callCount == 0 );
     }
 
     SECTION( "doEncode still recovers frames when timing LZ4 setup reports a warning" )
@@ -938,7 +1056,7 @@ TEST_CASE( "streamWriter fault injection covers XRIF setup and write warnings", 
         streamWriterFaultInject::faults().setLz4.error       = XRIF_ERROR_BADARG;
 
         REQUIRE( sw_test.write_frames( 5, 10 ) == 0 );
-        REQUIRE( sw_test.comp_frames_uint16( 5, 10 ) == 0 );
+        REQUIRE( sw_test.comp_frames( 5, 10 ) == 0 );
     }
 
     SECTION( "doEncode still recovers frames when timing encode reports an alert after encoding" )
@@ -956,7 +1074,7 @@ TEST_CASE( "streamWriter fault injection covers XRIF setup and write warnings", 
         streamWriterFaultInject::faults().encode.error       = XRIF_ERROR_NOTIMPL;
 
         REQUIRE( sw_test.write_frames( 2, 5 ) == 0 );
-        REQUIRE( sw_test.comp_frames_uint16( 2, 5 ) == 0 );
+        REQUIRE( sw_test.comp_frames( 2, 5 ) == 0 );
     }
 
     SECTION( "doEncode still recovers frames when timing header generation reports an alert" )
@@ -974,7 +1092,7 @@ TEST_CASE( "streamWriter fault injection covers XRIF setup and write warnings", 
         streamWriterFaultInject::faults().writeHeader.error       = XRIF_ERROR_NULLPTR;
 
         REQUIRE( sw_test.write_frames( 5, 8 ) == 0 );
-        REQUIRE( sw_test.comp_frames_uint16( 5, 8 ) == 0 );
+        REQUIRE( sw_test.comp_frames( 5, 8 ) == 0 );
     }
 
     SECTION( "doEncode returns success but leaves a truncated archive after a short image-data write" )
@@ -992,7 +1110,7 @@ TEST_CASE( "streamWriter fault injection covers XRIF setup and write warnings", 
         streamWriterFaultInject::faults().write.resultNmemb = sw.m_xrif->compressed_size / 2;
 
         REQUIRE( sw_test.write_frames( 0, 5 ) == 0 );
-        REQUIRE( sw_test.comp_frames_uint16( 0, 5 ) < 0 );
+        REQUIRE( sw_test.comp_frames( 0, 5 ) < 0 );
     }
 
     SECTION( "doEncode returns success but leaves a truncated archive after a short timing-data write" )
@@ -1011,7 +1129,102 @@ TEST_CASE( "streamWriter fault injection covers XRIF setup and write warnings", 
             std::max<size_t>( 1, sw.m_xrif_timing->compressed_size / 2 );
 
         REQUIRE( sw_test.write_frames( 7, 8 ) == 0 );
-        REQUIRE( sw_test.comp_frames_uint16( 7, 8 ) < 0 );
+        REQUIRE( sw_test.comp_frames( 7, 8 ) < 0 );
+    }
+}
+
+/// Verify only 16-bit integers use requested compression while all scalar types retain their exact bytes.
+/**
+ * \ingroup streamWriter_unit_test
+ */
+TEST_CASE( "streamWriter pixel type round trips", "[streamWriter][pixelTypes]" )
+{
+    // clang-format off
+    #ifdef STREAMWRITER_TEST_DOXYGEN_REF
+    XWCTEST_DOXYGEN_REF( streamWriter::allocate_xrif() );
+    XWCTEST_DOXYGEN_REF( streamWriter::doEncode() );
+    #endif
+    // clang-format on
+
+    const int types[] = { XRIF_TYPECODE_FLOAT,
+                          XRIF_TYPECODE_DOUBLE,
+                          XRIF_TYPECODE_UINT16,
+                          XRIF_TYPECODE_INT16,
+                          XRIF_TYPECODE_UINT8,
+                          XRIF_TYPECODE_INT8,
+                          XRIF_TYPECODE_UINT32,
+                          XRIF_TYPECODE_INT32,
+                          XRIF_TYPECODE_UINT64,
+                          XRIF_TYPECODE_INT64 };
+    for( const auto type : types )
+        for( const bool compress : { false, true } )
+            for( const int frames : { 1, 3 } )
+            {
+                DYNAMIC_SECTION( "type=" << type << " compress=" << compress << " frames=" << frames )
+                {
+                    streamWriterFaultInject::resetScope faultScope;
+                    streamWriter_test                   sw( "pixelTypeTest" );
+                    streamWriter_data_test              sw_test( &sw );
+                    sw.m_compress = compress;
+
+                    REQUIRE( sw_test.setup_circbufs( 8, 2, type, 6, 3 ) == 0 );
+                    REQUIRE( sw_test.setup_xrif() == 0 );
+                    REQUIRE( sw_test.fill_circbuf_bytes() == 0 );
+                    REQUIRE( sw_test.write_frames( 3, 3 + frames ) == 0 );
+                    REQUIRE( sw_test.comp_frames( 3, 3 + frames ) == 0 );
+                    std::filesystem::remove( sw.m_outFilePath );
+                }
+            }
+}
+
+/// Verify reconnects retain the compression request and restore integer compression after uncompressed types.
+/**
+ * \ingroup streamWriter_unit_test
+ */
+TEST_CASE( "streamWriter pixel type reconnect round trips", "[streamWriter][pixelTypes]" )
+{
+    // clang-format off
+    #ifdef STREAMWRITER_TEST_DOXYGEN_REF
+    XWCTEST_DOXYGEN_REF( streamWriter::allocate_circbufs() );
+    XWCTEST_DOXYGEN_REF( streamWriter::allocate_xrif() );
+    XWCTEST_DOXYGEN_REF( streamWriter::doEncode() );
+    #endif
+    // clang-format on
+
+    for( const bool compress : { false, true } )
+    {
+        DYNAMIC_SECTION( "compression=" << compress )
+        {
+            streamWriterFaultInject::resetScope faultScope;
+            streamWriter_test                   sw( "pixelReconnectTest" );
+            streamWriter_data_test              sw_test( &sw );
+            sw.m_compress = compress;
+            REQUIRE( sw.initialize_xrif() == 0 );
+            const int types[] = { XRIF_TYPECODE_FLOAT,
+                                  XRIF_TYPECODE_FLOAT,
+                                  XRIF_TYPECODE_UINT16,
+                                  XRIF_TYPECODE_FLOAT,
+                                  XRIF_TYPECODE_DOUBLE,
+                                  XRIF_TYPECODE_INT16,
+                                  XRIF_TYPECODE_UINT8,
+                                  XRIF_TYPECODE_UINT32,
+                                  XRIF_TYPECODE_FLOAT };
+            for( const auto type : types )
+            {
+                INFO( "Reconnected pixel type: " << type );
+                REQUIRE( sw_test.setup_circbufs( 1563, 1, type, 30, 15 ) == 0 );
+                REQUIRE( sw.allocate_xrif() == 0 );
+                REQUIRE( sw.m_compress == compress );
+                REQUIRE( sw_test.fill_circbuf_bytes() == 0 );
+                for( const int frames : { 15, 1 } )
+                {
+                    INFO( "Saved frame count: " << frames );
+                    REQUIRE( sw_test.write_frames( 15, 15 + frames ) == 0 );
+                    REQUIRE( sw_test.comp_frames( 15, 15 + frames ) == 0 );
+                    std::filesystem::remove( sw.m_outFilePath );
+                }
+            }
+        }
     }
 }
 
@@ -1039,6 +1252,15 @@ SCENARIO( "streamWriter Configuration", "[streamWriter]" )
  */
 SCENARIO( "streamWriter encoding data", "[streamWriter]" )
 {
+    // clang-format off
+    #ifdef STREAMWRITER_TEST_DOXYGEN_REF
+    XWCTEST_DOXYGEN_REF( streamWriter::allocate_circbufs() );
+    XWCTEST_DOXYGEN_REF( streamWriter::initialize_xrif() );
+    XWCTEST_DOXYGEN_REF( streamWriter::allocate_xrif() );
+    XWCTEST_DOXYGEN_REF( streamWriter::doEncode() );
+    #endif
+    // clang-format on
+
     GIVEN( "A default constructed streamWriter and a 120x120 uint16 stream" )
     {
         streamWriter_test      sw( "testdev" );
@@ -1055,7 +1277,7 @@ SCENARIO( "streamWriter encoding data", "[streamWriter]" )
 
             REQUIRE( sw_test.write_frames( 0, 5 ) == 0 );
 
-            REQUIRE( sw_test.comp_frames_uint16( 0, 5 ) == 0 );
+            REQUIRE( sw_test.comp_frames( 0, 5 ) == 0 );
         }
 
         WHEN( "writing full 2nd chunk" )
@@ -1070,7 +1292,7 @@ SCENARIO( "streamWriter encoding data", "[streamWriter]" )
 
             REQUIRE( sw_test.write_frames( 5, 10 ) == 0 );
 
-            REQUIRE( sw_test.comp_frames_uint16( 5, 10 ) == 0 );
+            REQUIRE( sw_test.comp_frames( 5, 10 ) == 0 );
         }
 
         WHEN( "writing partial 1st chunk" )
@@ -1085,7 +1307,7 @@ SCENARIO( "streamWriter encoding data", "[streamWriter]" )
 
             REQUIRE( sw_test.write_frames( 2, 5 ) == 0 );
 
-            REQUIRE( sw_test.comp_frames_uint16( 2, 5 ) == 0 );
+            REQUIRE( sw_test.comp_frames( 2, 5 ) == 0 );
         }
 
         WHEN( "writing partial 2nd chunk" )
@@ -1100,7 +1322,7 @@ SCENARIO( "streamWriter encoding data", "[streamWriter]" )
 
             REQUIRE( sw_test.write_frames( 5, 8 ) == 0 );
 
-            REQUIRE( sw_test.comp_frames_uint16( 5, 8 ) == 0 );
+            REQUIRE( sw_test.comp_frames( 5, 8 ) == 0 );
         }
 
         WHEN( "writing a single middle frame" )
@@ -1114,7 +1336,7 @@ SCENARIO( "streamWriter encoding data", "[streamWriter]" )
 
             REQUIRE( sw_test.write_frames( 4, 5 ) == 0 );
 
-            REQUIRE( sw_test.comp_frames_uint16( 4, 5 ) == 0 );
+            REQUIRE( sw_test.comp_frames( 4, 5 ) == 0 );
         }
 
         WHEN( "writing a shorter follow-up save after a longer save" )
@@ -1127,10 +1349,10 @@ SCENARIO( "streamWriter encoding data", "[streamWriter]" )
             REQUIRE( sw_test.fill_circbuf_uint16() == 0 );
 
             REQUIRE( sw_test.write_frames( 0, 5 ) == 0 );
-            REQUIRE( sw_test.comp_frames_uint16( 0, 5 ) == 0 );
+            REQUIRE( sw_test.comp_frames( 0, 5 ) == 0 );
 
             REQUIRE( sw_test.write_frames( 7, 8 ) == 0 );
-            REQUIRE( sw_test.comp_frames_uint16( 7, 8 ) == 0 );
+            REQUIRE( sw_test.comp_frames( 7, 8 ) == 0 );
         }
     }
 }

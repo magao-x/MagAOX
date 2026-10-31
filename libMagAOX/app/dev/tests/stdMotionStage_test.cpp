@@ -2,7 +2,6 @@
  * \brief Catch2 tests for the stdMotionStage helper.
  * \author Jared R. Males (jaredmales@gmail.com)
  *
- * \ingroup testing
  */
 
 #include "../../../../tests/testXWC.hpp"
