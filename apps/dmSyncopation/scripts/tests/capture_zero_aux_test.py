@@ -86,6 +86,7 @@ class CaptureZeroAuxTest(unittest.TestCase):
             'case $2 in\n'
             'dmtweeter-synco.settings.steps=*)\n'
             ' [[ $(cat "$ZERO_TEST_ROOT/enable") == Off ]] || exit 9\n'
+            ' [[ ${ZERO_TEST_IGNORE_STEPS:-0} == "${2##*=}" ]] && exit 0\n'
             ' printf "%s" "${2##*=}" > "$ZERO_TEST_ROOT/steps";;\n'
             'dmtweeter-synco.enable.toggle=On)\n'
             ' printf On > "$ZERO_TEST_ROOT/enable"\n'
@@ -165,6 +166,30 @@ class CaptureZeroAuxTest(unittest.TestCase):
         self.assertEqual(code, 0, stderr)
         self.assertEqual(self.set_calls()[0], "-n dmtweeter-synco.settings.steps=3")
         self.assertIn("steps=3", (self.capture_dir() / "test.txt").read_text())
+
+    def test_eight_khz_requests_three_auxiliaries_per_main(self):
+        """An 8 kHz total trial selects four steps while preserving the 2 kHz main."""
+        code, _, stderr = self.run_capture("8000", "10")
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(
+            self.set_calls(),
+            ["-n dmtweeter-synco.settings.steps=4", "-s dmtweeter-synco.enable.toggle=On",
+             "-s dmtweeter-synco.enable.toggle=Off"],
+        )
+        metadata = (self.capture_dir() / "test.txt").read_text()
+        self.assertIn("steps=4", metadata)
+        self.assertIn("effectiveRate=8000", metadata)
+        self.assertIn("activeSeconds=10", metadata)
+        self.assertIn("mainRate=2000", metadata)
+
+    def test_eight_khz_requires_four_step_readback(self):
+        """An old app rejecting four steps is never enabled by a successful client request."""
+        self.env["ZERO_TEST_IGNORE_STEPS"] = "4"
+        code, _, stderr = self.run_capture("8000", "10")
+        self.assertEqual(code, 1)
+        self.assertEqual(self.set_calls(), ["-n dmtweeter-synco.settings.steps=4"])
+        self.assertEqual((self.root / "enable").read_text(), "Off")
+        self.assertIn("Disabled step-count readback failed", stderr)
 
     def test_preexisting_enabled_run_is_not_cancelled(self):
         """Refuse a run owned by another operator without sending any mutation."""
@@ -330,7 +355,7 @@ class CaptureZeroAuxTest(unittest.TestCase):
 
     def test_invalid_inputs_and_help_do_not_contact_services(self):
         """Reject additive/free-run arguments and invalid finite durations."""
-        for args in [("--with-main", "4000"), ("5000",), ("4000", "0"),
+        for args in [("--with-main", "4000"), ("5000",), ("10000",), ("4000", "0"),
                      ("4000", "121"), ("4000", "999999999999999999999")]:
             with self.subTest(args=args):
                 code, _, _ = self.run_capture(*args)

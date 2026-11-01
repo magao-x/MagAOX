@@ -9,10 +9,10 @@ usage()
     cat <<'HELP'
 Usage: capture-zero-aux-test.sh RATE [SECONDS]
 
-RATE is effective total cadence, 4000 or 6000 Hz, with the main loop at 2000 Hz.
+RATE is effective total cadence, 4000, 6000 or 8000 Hz, with the main loop at 2000 Hz.
 SECONDS is the active-trial duration, default 120, integer 1 through 120.
 The app must already be running with zeroTest.enabled=true and enable=Off.
-The script sets two/three steps while disabled, then starts the finite trial.
+The script sets two/three/four steps while disabled, then starts the finite trial.
 It never changes the main loop, camera, dmcomb, CPU placement or app config.
 
 Requires camwfs at 2 kHz/synchronization On, RTC latency On, a configured
@@ -32,9 +32,9 @@ then
 fi
 zero_rate=$1
 zero_seconds=${2:-120}
-if [[ $zero_rate != 4000 && $zero_rate != 6000 ]]
+if [[ $zero_rate != 4000 && $zero_rate != 6000 && $zero_rate != 8000 ]]
 then
-    printf 'RATE must be effective total cadence 4000 or 6000\n' >&2
+    printf 'RATE must be effective total cadence 4000, 6000 or 8000\n' >&2
     exit 2
 fi
 if [[ ! $zero_seconds =~ ^[0-9]{1,3}$ ]] || (( 10#$zero_seconds < 1 || 10#$zero_seconds > 120 ))

@@ -1034,7 +1034,7 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
     }
 
     if( m_zeroTestEnabled &&
-        ( m_simulationEnabled || m_diagnosticsOnly || m_requested < 2 || m_requested > 3 ||
+        ( m_simulationEnabled || m_diagnosticsOnly || m_requested < 2 || m_requested > 4 ||
           !finite( m_zeroDurationSec ) || m_zeroDurationSec <= 0 || m_zeroDurationSec > 120 ||
           !finite( m_zeroLateUs ) || m_zeroLateUs < 0 || m_zeroLateUs > 50 ||
           readerReleaseMonitorT::m_shmimName.empty() || !m_combinerDiagnostics || m_primaryCadenceWindow <= 0 ||
@@ -4668,7 +4668,7 @@ INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_settings )( const pcf::IndiPropert
     m_bounds                       = bounds;
     if( m_zeroTestEnabled )
     {
-        if( requested < 2 || requested > 3 || !configureZeroTest() )
+        if( requested < 2 || requested > 4 || !configureZeroTest() )
         {
             m_requested  = previousRequested;
             m_maxCadence = previousCadence;

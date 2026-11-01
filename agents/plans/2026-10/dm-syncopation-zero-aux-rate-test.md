@@ -568,3 +568,338 @@ build, shell syntax, clang-format and whitespace checks also pass. No instrument
 commands were run. The next operator test remains 4 kHz with `lateUs=5` after
 rebuilding/restarting synco; logdump and the DM controller need no rebuild for
 this change.
+
+## Ideal-publisher 4 kHz capture: `zero-aux-4000Hz-20261101T145916Z`
+
+The local directory and archive are under `/home/jrmales/tmp`. Recorded checkout
+is `fda6e4e2`; the running trial exposes `labelVersion=3` and `idealPublisher=1`.
+All snapshot/control commands and 44 polls succeed; the twelve error files are
+empty and collector status 143 follows requested termination. The operator
+confirms unchanged settings/workload, zero modal gains and stable closed-loop
+operation. Camera acquisition remains 2 kHz with synchronization On, bin2,
+EM gain 1, shutter SHUT and target -45 C; scalar loop gain is 1 and RTC latency
+is On. Camera/controller sessions differ from the earlier run, so comparisons
+between captures are observational rather than one uninterrupted process run.
+
+The exact active monotonic duration is 120.000087453 s. Paired camera
+writer-clock observations map the interval approximately to 14:59:34.6095 through
+15:01:34.6096 UTC on November 1 (07:59 through 08:01 Phoenix). Telemetry emission
+times are later than the events they describe; phase comparisons exclude
+transition windows.
+
+### Early staging and actual delivery
+
+| Population | Count |
+| --- | ---: |
+| Sequential genuine main observations / auxiliary opportunities | 240,000 / 240,000 |
+| Completed passive zero copies | 239,996 |
+| Posted / acknowledged auxiliary commands | 239,995 / 239,995 |
+| Posted but unacknowledged | 0 |
+| Skips, total | 5 (0.00208333%) |
+| Publication lateness, initial deadline check | 1 |
+| Unmatched main combinations | 4 |
+| Preparation late / reader missing / primary changed or writing | 0 |
+| Reader invalid / drops, resources/waits, SDK gaps/failures, event drops | 0 |
+
+All observed passive copies finish before their immutable publication targets.
+Staging lead is 160.067-221.005 us, median 200.065 us, p1 190.155 us and
+p99 209.698 us. The single late occurrence was already staged 206.084 us early;
+its publication check is 5.095 us after target, 0.095 us beyond `lateUs=5`.
+Successful post-return residuals have median 2.405 us and range 1.024-22.651 us.
+Those are after-call timestamps, not exact publication instants or proof that
+the before-call deadline check exceeded its limit.
+
+The recurring 9,426 post-copy deadline skips from the preceding capture are
+absent. This supports the intended ideal-source test: early preparation is
+complete before the deadline, while publication occurs on the retained grid.
+The 9,429 total skips previously have fallen to five without widening `lateUs`.
+
+Combined counter span 314148627 through 314628621 represents 479,995 updates
+and an effective cadence of approximately 3,999.955 Hz. The direct event-key
+union contains 479,994 distinct identities and has one hole, counter 314586418,
+in the unmatched-main cluster below. Report this exact-event coverage limitation
+separately from the complete auxiliary acknowledgement population and the
+controller's zero timing-counter-gap increment. Do not describe this capture's
+direct event identities as fully contiguous.
+
+### Remaining unmatched-main cluster
+
+One unmatched main occurs at activation. The other three are consecutive main
+identities 283198025-283198027, around 15:01:24.057 UTC. The first rejection is
+259.690 us after its predicted main grid point and has no coherent combined key;
+the following observations reacquire a combined identity and then encounter a
+two-counter advance. The current main-association logic discards the empty
+anchor and subsequently rebaselines, explaining the additional recovery skips.
+These labels do not mean that three genuine main commands were deliberately
+suppressed by synco.
+
+The encompassing primary producer-timestamp window contains 758.833 us and
+242.548 us intervals, with no primary counter gap. Its late-then-early paired
+sum reaches 1001.381 us. The upstream trace's third row (row 2, writer PID
+2523020, input inode 4719) has execution maximum 313.732 us, with late-conditioned
+execution change +258.327 us and early-conditioned change -257.245 us; source
+intervals for the late cases are 500.034-501.035 us. This supports an upstream
+processing excursion in the same window, followed by association recovery.
+These are window-conditioned trace populations, not an exact per-frame join
+that proves the row's duration for each of the three named mains. The current
+process name is not archived with that row's PID/inode.
+
+Camera intervals in the qualified window containing this cluster are
+498-502 us acquisition and 494.624-505.504 us publication, with no serial overlap
+or excursion count. The camera trace emitted near 15:01:24 actually describes
+exposures near 15:01:22.513, so it must not be aligned by its later log timestamp.
+Controller SDK/readiness maxima in the cluster window are 104.127/106.752 us,
+receipt-to-SDK 19.327 us and receipt-to-callback completion 141.267 us, with no
+error increments. Neither the camera nor BMC processing evidence shows a
+corresponding stall. Combiner execution is at most 6.622 us in the relevant
+primary-trace window.
+
+### Backend and camera comparison
+
+Controller endpoints add 526,930 admissions/completions and 526,929
+retirements/timed submissions. An in-flight job at the after endpoint accounts
+for the one-command difference. Historical rejection/unqualified-reader counts
+do not increase. There are no new overloads, coalescing, rejections, SDK failures
+or timeouts, preparation/post failures, supersessions/cancellations, invalid
+timing events, counter gaps or dropped events. Delivery measurements exclude
+174 additional wide clock brackets. There are 151 consecutive valid controller
+summaries; the broader telemetry endpoints cover 540,963 submissions.
+
+For 118 complete steady-active controller windows, median publication-interval
+mean is 250.000230 us and median RMS is 6.235154 us, versus 254.973 us and
+35.819 us in the preceding copy-after-target run. Active publication intervals
+span 212.231-505.845 us. Native SDK maximum is 111.150 us and service through
+worker readiness 113.524 us, below the provisional 120 us service assumption.
+Receipt-to-SDK maximum is 24.356 us, preparation 20.088 us, reader release
+31.800 us, publication 21.280 us and receipt-to-callback completion 152.738 us.
+The earlier 25.789 us receipt-to-SDK observation remains relevant; this run
+does not turn 25 us into a globally qualified bound.
+
+All 239,996 classified mains match exact SDK and reader evidence; twelve invalid
+timing-capture observations remain a coverage diagnostic. Primary-observer
+receipt to SDK entry is 30.817490 us mean / 42.170 us maximum; controller receipt
+to SDK is 15.773277 / 23.585 us, and native SDK service is 103.818653 / 111.150 us.
+These prefixes do not isolate added main SDK queue wait.
+
+Camera telemetry has 144 consecutive valid stage summaries, with 303,004
+additional published frames over its broader endpoints and no new gaps,
+failures, invalid/dropped observations or wide brackets. Median rolling
+acquisition RMS is 0.3147 us before, 0.3115 us active and 0.3001 us after;
+publication RMS is 0.8521, 0.7926 and 0.8604 us. The worst active rolling
+publication RMS is 1.1622 us. Temperature polling and serial transactions each
+increase by 13; FPS/gain query counts are unchanged. These overlapping-window
+comparisons show no material camera timing regression.
+
+This run demonstrates near-complete coordinated 4 kHz delivery with the ideal
+publisher and the original 5 us publication guard. It supports proceeding to
+the finite three-step / 6 kHz trial with the same readiness/identity guards and
+simultaneous main/controller/camera measurements. It does not itself qualify
+6 kHz or prove zero added main latency. No code or instrument setting is changed
+by this analysis.
+
+## Ideal-publisher 6 kHz capture: `zero-aux-6000Hz-20261101T224640Z`
+
+The workstation directory is
+`/home/jrmales/tmp/home/jrmales/tmp/zero-aux-6000Hz-20261101T224640Z`, with its
+archive under `/home/jrmales/tmp`. Recorded checkout remains `fda6e4e2`.
+This is trial **2**: baseline summaries retain trial-1 results, which must not
+be counted as new outcomes. The operator confirms stable AO operation, zero
+modal gains and no other settings/workload changes from the 4 kHz run. The
+helper changes disabled steps from two to three; camera/main cadence remains
+2 kHz, synchronization and RTC latency On, bin2, EM gain 1, shutter SHUT, target
+-45 C and scalar loop gain 1. The camera process/session/inode and worker CPU
+policies remain unchanged from the preceding comparison.
+
+All snapshots, step/enable controls and 43 polls succeed; all twelve error files
+are empty and collector status 143 follows requested shutdown. Trial 2 lasts
+120.000094182 s. Paired camera writer clocks map it approximately to
+22:46:58.830011-22:48:58.830105 UTC on November 1 (15:46-15:48 Phoenix).
+Use event/data times instead of delayed log-formatting timestamps for phase
+comparisons.
+
+### Actual six-command-per-millisecond behavior
+
+| Population | Count |
+| --- | ---: |
+| Sequential genuine main observations | 240,000 |
+| Step-1 / step-2 auxiliary opportunities | 240,000 / 240,000 |
+| Step-1 staged / posted / acknowledged | 239,999 / 239,999 / 239,999 |
+| Step-2 staged / posted / acknowledged | 239,999 / 239,999 / 239,999 |
+| Total posted / acknowledged auxiliaries | 479,998 / 479,998 |
+| Skipped auxiliaries | 2, both from the initial unmatched main |
+| Runtime preparation / publication deadline skips | 0 / 0 |
+| Missing reader clearance, changed/writing primary, resource/wait faults | 0 |
+| Unacknowledged posts, reader invalid/drops, SDK gaps/failures, event drops | 0 |
+
+There are 720,002 schema-3 event rows: one main and two auxiliary outcomes for
+each of 240,000 main cycles, plus start/finish. After the first unmatched main,
+all 239,999 complete cycles deliver both intermediate commands. Main input
+counters are sequential, without gaps.
+
+Every passive copy finishes before its immutable target. Step-1 staging lead
+is 80.194-138.057 us, median 116.810 us; step 2 is 94.959-122.383 us, median
+113.294 us. Targets remain +166.666-166.668 us and +333.333-333.335 us relative
+to the frozen main grid. Successful post-return residual medians are 2.439 us
+and 2.473 us. Their maxima, 11.648 and 5.702 us, are after-call observations;
+they do not show that the earlier 5 us publication-admission guard failed.
+
+All 719,998 combined event identities are contiguous, counters 370222119 through
+370942116, with no missing or conflicting publication stamps. The measured
+counter-span cadence is **5,999.978721 Hz**. Full-span combined intervals have
+mean 166.667258 us and RMS 6.420762 us. The 494.323 us maximum is the initial
+main-only interval from the two startup skips. Complete steady-active windows
+instead span 139.433-201.761 us, with no later 500 us skipped-slot interval.
+Excluding that initial main-only interval, the event-derived steady cadence is
+5,999.995104 Hz.
+Ordinary combiner observer gaps/duplicates also do not increase; its repeated
+primary count increases by exactly 479,998, matching the auxiliary publications.
+
+Main-to-step-1, step-1-to-step-2 and step-2-to-next-main mean combined intervals
+are 170.958381, 166.431078 and 162.610932 us. These distinguish actual main
+arrival/combination phase from the evenly spaced frozen auxiliary grid. Main
+combined periods have mean 500.000359 us, RMS 6.251817 us and range
+467.743-540.380 us.
+
+### Controller capacity and main prefixes
+
+Controller INDI endpoints add 761,207 admissions, completions and retirements.
+Timed/submitted events add 761,206, with one timing event queued at the after
+endpoint. There are no new overloads, coalescing, rejections, SDK failures or
+timeouts, preparation/post failures, supersessions/cancellations, unqualified
+reader events or timing-counter losses. Historical overload/coalescing counts
+of four, worker rejected count eight and reader-unqualified count two are
+already present before this capture and do not increase. SDK/post workers
+remain FIFO55/FIFO30 on one allowed CPU each, with three pipeline credits.
+
+There are 148 consecutive valid controller summaries, sequence 90334-90481.
+For 118 complete steady-active two-second windows:
+
+| Controller duration | Median rolling mean, us | Maximum, us |
+| --- | ---: | ---: |
+| Receipt to native SDK entry | 16.340833 | 21.841 |
+| Preparation | 13.354538 | 18.575 |
+| Native SDK call | 103.761253 | 109.367 |
+| SDK service through worker readiness | 106.123684 | 111.841 |
+| Reader release | 22.103405 | 29.416 |
+| Publication | 7.765697 | 21.611 |
+| Receipt to callback finish | 139.316857 | 167.065 |
+
+The whole-callback maximum is slightly longer than the nominal 166.667 us slot,
+yet the separated SDK/post stages and three credits sustain the requested
+throughput without a capacity failure. SDK service through readiness stays
+below both the provisional 120 us service bound and the nominal slot period.
+The shortest observed controller receipt/send intervals are 139.423/138.141 us,
+also above the measured SDK-service maximum. These independent extrema must
+not be added into a hypothetical single command path.
+
+All 239,999 classified mains match exact SDK and reader evidence, with one
+invalid timing-evidence observation and no unmatched classified joins, evictions
+or source resets. Primary-observer receipt to SDK is 30.731120 us mean /
+41.638 us maximum; controller receipt to SDK is 15.569901 / 19.497 us, and native
+main SDK service is 103.746610 / 107.172 us. The corresponding 4 kHz prefixes
+were 30.817490 / 42.170 us and 15.773277 / 23.585 us. There is no measured
+prefix growth here, but these measurements do not isolate added main SDK queue
+wait. Qualified delivery measurements exclude 38 additional wide brackets
+between the INDI endpoints; the broader telemetry endpoints exclude 50.
+
+### Camera comparison and conclusion
+
+Camera telemetry contains 142 consecutive valid stage summaries and 297,911
+additional published frames across its broader endpoints. There are no new
+failures, rejections, gaps, invalid samples, wide brackets or dropped samples.
+For baseline / steady-active / after windows, median acquisition RMS is
+0.2767 / 0.2992 / 0.2864 us and publication RMS is
+0.8572 / 0.8331 / 0.8508 us. The worst active rolling publication RMS is
+1.1098 us. Acquisition-to-write mean medians are 46.1652 / 46.2405 / 46.2859 us.
+Compared with the 4 kHz active acquisition/publication RMS of 0.3115/0.7926 us,
+these remain comparable. Temperature queries and serial transactions each
+increase by 14 while FPS/gain query counts remain fixed.
+
+The finite trial demonstrates sustained coordinated **6 kHz total** delivery
+with an ideal constant-zero publisher, a genuine 2 kHz main writer and the
+unchanged 5 us publication guard. All post-start auxiliary slots are delivered;
+the backend shows no new capacity/loss failures and measured main prefixes and
+camera cadence show no material regression. Rolling-window comparisons overlap
+and apply to this zero-command, zero-modal-gain workload. A real external
+publisher's command-ready/deadline protocol and nonzero command behavior remain
+separate production integration work; the finite trial does not implement that
+interface or establish a hard zero-added-main-wait guarantee. No code or
+instrument setting is changed by this analysis.
+
+## Finite ideal-zero extension to 8 kHz
+
+After the successful 6 kHz trial above, the user authorized extending the app and
+capture helper to a four-step empirical trial. The genuine main remains at
+2 kHz. Each immutable 500 us grid cycle has its main at step 0 and three
+auxiliary targets at +125, +250 and +375 us, for **8 kHz total**, not an added
+8 kHz auxiliary timer.
+
+Only the explicit finite ideal-zero trial gains this option. It retains
+`lateUs=5`, exact reader/identity and ownership checks, early staging by each
+target, three controller credits, existing CPU placement and the 120 s active
+upper bound. No ordinary live/shadow maximum-cadence default, controller bound
+or external-provider protocol is changed.
+
+No `scheduler.maxCadenceHz=8000` configuration edit is required. Source review
+confirms that `configureZeroTest()` selects `clockOnly=true` without setting a
+cadence-rating limit from `m_maxCadence`; the zero trial qualifies the genuine
+main near 2 kHz and selects its frozen subdivision by the explicit step count.
+The ordinary shadow's `configureSimulation()` and old live `processPrimary()`
+retain their separate cadence-rating behavior. A nominal 6000 readback in those
+ordinary settings therefore does not select or cap the four-step finite trial.
+
+Rebuild/install dmSyncopation and use the updated capture script; neither the
+controller nor logdump needs rebuilding for this extension. Keep the working
+instance configuration and instrument settings unchanged. The operator starts
+with ten active seconds:
+
+```bash
+bash apps/dmSyncopation/scripts/capture-zero-aux-test.sh 8000 10
+```
+
+After a clean short result, extend to the full active interval:
+
+```bash
+bash apps/dmSyncopation/scripts/capture-zero-aux-test.sh 8000 120
+```
+
+The helper maps 8000 to four total steps while Off and otherwise retains its
+bounded setup/enable/capture/cleanup procedure. This is an operator-run test;
+agents do not execute instrument commands. The app's arm/warmup and active
+timeouts remain independent of the helper.
+
+The 6 kHz run measured SDK service through worker readiness up to
+111.841 us. Against 125 us nominal 8 kHz spacing, that leaves **13.159 us of
+nominal headroom**. This is a comparison with an observed maximum, not a hard
+service bound or proof of zero added main wait. Actual entry spacing also
+depends on delivery, preparation, genuine-main excursions and pipeline resource
+ownership. Three overlapping credits still matter because whole-job retirement
+latency can exceed one nominal slot.
+
+Compare the short trial with the recorded 6 kHz main-prefix distributions and
+exact-match coverage: primary-observer receipt to SDK was 30.731120 us mean /
+41.638 us maximum, and controller receipt to SDK was 15.569901 / 19.497 us.
+These prefixes are not isolated SDK queue wait. Retain matched/unmatched and
+invalid/drop diagnostics, actual per-slot staged/posted/acknowledged/skip counts,
+controller admissions/completions/retirements, overload/rejection/coalescing,
+SDK failures/timeouts, queue losses and post-service tails. Preserve the first
+result before changing the setup or moving to the longer trial.
+
+The preceding 4 kHz and 6 kHz analyses remain measurements of their original
+rates and settings. The 8 kHz extension makes no retroactive qualification claim
+for them and does not qualify nonzero provider behavior or production operation.
+
+Workstation validation passes: 101 app cases / 2,175,886 assertions, including
+four-step publications at +125/+250/+375 us, three auxiliary posts and no extra
+main post, startup acceptance of four steps/rejection of five, disabled INDI
+selection and rejection of enabled settings changes. The startup fixture now
+writes each INI key once: concatenated duplicate defaults had produced `24`
+instead of the intended override `4`. Invalid-duration/channel/lateness cases
+also use unique keys so they exercise the intended validation values. Ordinary
+maximum cadence remains 6000 in the four-step test.
+
+All 20 offline capture-helper tests pass, including `8000 10` selecting four
+steps with main rate 2000, and refusal to enable an old app that silently keeps
+its previous step count. Unsupported 10000 Hz input is rejected. Production
+dmSyncopation build, shell syntax, clang-format and whitespace checks pass.
+No instrument commands or an actual 8 kHz trial were run by the agent.

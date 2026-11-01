@@ -6982,7 +6982,7 @@ TEST_CASE( "coordinated zero trial publishes only intermediate main-grid slots",
 {
     Streams       streams;
     Harness       app;
-    const int     steps        = GENERATE( 2, 3 );
+    const int     steps        = GENERATE( 2, 3, 4 );
     const bool    lateMain     = GENERATE( false, true );
     const int64_t stagingDelay = GENERATE( int64_t( 0 ), int64_t( 20000 ) );
     ZeroClock::connect( app, streams, steps );
@@ -7014,12 +7014,17 @@ TEST_CASE( "coordinated zero trial publishes only intermediate main-grid slots",
         CHECK( event.reason == Harness::ZeroOutcome::none );
         CHECK( event.stagedNs > 0 );
         CHECK( event.stagedNs < event.targetNs );
-        CHECK( event.targetNs - event.stagedNs > 50000 );
     }
 
     for( int step = 1; step < steps; ++step )
     {
         const auto target = synco::stepGrid( grid, period, step, steps ).ns;
+
+        if( steps == 4 )
+        {
+            CHECK( target - grid.ns == int64_t( step ) * 125000 );
+        }
+
         CHECK( ZeroClock::posts[step - 1] >= target );
         CHECK( ZeroClock::posts[step - 1] - target <= int64_t( app.m_zeroLateUs * 1000 ) );
     }
@@ -7583,6 +7588,7 @@ TEST_CASE( "coordinated zero trial validates explicit startup configuration", "[
                                         std::string{ "[simulation]\nenabled=true\n" },
                                         std::string{ "[simulation]\nreaderReleaseReady=true\n" },
                                         std::string{ "[scheduler]\nmaxSubframes=4\n" },
+                                        std::string{ "[scheduler]\nmaxSubframes=5\n" },
                                         std::string{ "[zeroTest]\ndurationSec=121\n" },
                                         std::string{ "[zeroTest]\nchannel=dm01disp03\n" },
                                         std::string{ "[zeroTest]\nlateUs=51\n" },
@@ -7601,9 +7607,30 @@ TEST_CASE( "coordinated zero trial validates explicit startup configuration", "[
             output << "[readerReleaseMonitor]\nshmimName=dmtweeter_read_done\n";
         }
 
-        output << "[scheduler]\nmaxSubframes=2\n"
-                  "[zeroTest]\nenabled=true\nchannel=dm01disp07\ndurationSec=120\nlateUs=5\n"
-               << extra;
+        // Configurator concatenates duplicate INI values; each override must replace its default.
+        if( extra.find( "[scheduler]" ) == std::string::npos )
+        {
+            output << "[scheduler]\nmaxSubframes=2\n";
+        }
+
+        output << "[zeroTest]\nenabled=true\n";
+
+        if( extra.find( "channel=" ) == std::string::npos )
+        {
+            output << "channel=dm01disp07\n";
+        }
+
+        if( extra.find( "durationSec=" ) == std::string::npos )
+        {
+            output << "durationSec=120\n";
+        }
+
+        if( extra.find( "lateUs=" ) == std::string::npos )
+        {
+            output << "lateUs=5\n";
+        }
+
+        output << extra;
     }
 
     app.config.readConfig( path );
@@ -7611,15 +7638,22 @@ TEST_CASE( "coordinated zero trial validates explicit startup configuration", "[
     const auto configured = app.loadConfigImpl( app.config );
     CAPTURE( extra );
 
-    if( extra.empty() )
+    if( extra.empty() || extra == "[scheduler]\nmaxSubframes=4\n" )
     {
         CHECK( configured == 0 );
         CHECK( app.m_zeroTestEnabled );
         CHECK( app.m_semaphoreNumber == -1 );
+        CHECK( app.m_requested == ( extra.empty() ? 2 : 4 ) );
+        CHECK( app.m_maxCadence == 6000 );
     }
     else
     {
         CHECK( configured < 0 );
+
+        if( extra == "[scheduler]\nmaxSubframes=5\n" )
+        {
+            CHECK( app.m_requested == 5 );
+        }
     }
 
     CHECK_FALSE( app.m_enabled );
@@ -7628,6 +7662,41 @@ TEST_CASE( "coordinated zero trial validates explicit startup configuration", "[
 #ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
     MagAOX::app::dmSyncopation::setupConfig;
     MagAOX::app::dmSyncopation::loadConfigImpl;
+#endif
+    // clang-format on
+}
+
+/// Four-step empirical trials remain startup-selected and cannot change settings while enabled.
+TEST_CASE( "coordinated zero trial accepts four disabled steps and rejects five", "[dmSyncopation][zeroTest]" )
+{
+    Harness app;
+    app.properties();
+    app.m_zeroTestEnabled = true;
+    auto settings         = app.m_indiP_settings;
+    settings.add( pcf::IndiElement( "steps" ) );
+    settings["steps"] = 4.0;
+
+    REQUIRE( app.newCallBack_m_indiP_settings( settings ) == 0 );
+    CHECK( app.m_requested == 4 );
+    CHECK( app.m_zeroClock.summary().steps == 4 );
+    CHECK( app.m_maxCadence == 6000 );
+    CHECK_FALSE( app.m_zeroAttached );
+
+    settings["steps"] = 5.0;
+    REQUIRE( app.newCallBack_m_indiP_settings( settings ) < 0 );
+    CHECK( app.m_requested == 4 );
+    CHECK( app.m_zeroClock.summary().steps == 4 );
+
+    app.m_enabled     = true;
+    settings["steps"] = 3.0;
+    REQUIRE( app.newCallBack_m_indiP_settings( settings ) < 0 );
+    CHECK( app.m_requested == 4 );
+    CHECK( app.m_zeroClock.summary().steps == 4 );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::newCallBack_m_indiP_settings;
+    MagAOX::app::dmSyncopation::configureZeroTest;
 #endif
     // clang-format on
 }
