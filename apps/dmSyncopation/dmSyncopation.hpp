@@ -284,7 +284,8 @@ class dmSyncopation : public MagAOXApp<true>,
         invalidTarget        = 14,
         ackTimeout           = 15,
         publicationFailed    = 16,
-        ackAmbiguous         = 17
+        ackAmbiguous         = 17,
+        preparationLate      = 18
     };
 
     /// Exact checkpoint where a trial observation was accepted or rejected.
@@ -299,18 +300,22 @@ class dmSyncopation : public MagAOXApp<true>,
         finalGuard,
         postCopyGuard,
         publication,
-        acknowledgement
+        acknowledgement,
+        preparation,
+        publicationGuard
     };
 
     /// Same-thread trial counters, copied under the cycle mutex by the ordinary app loop.
     struct ZeroStats
     {
         uint64_t posted{ 0 }; ///< Active publication API attempts, including API failures; not proof of DM submission.
+        uint64_t staged{ 0 }; ///< Complete passive zero copies, including preparation overruns; no active publication.
         uint64_t acknowledged{ 0 },
             unacknowledged{ 0 }; ///< Posted attempts with or without exact combined acknowledgement.
         uint64_t skipped{ 0 };   ///< Auxiliary occurrences rejected before the active publication API was called.
         uint64_t late{ 0 }, readerMissing{ 0 }, primaryChanged{ 0 }; ///< Mutually exclusive per-slot skip reasons.
-        uint64_t primaryWriting{ 0 }, resourceUnavailable{ 0 };      ///< Primary write flag or missing trial resources.
+        uint64_t preparationLate{ 0 }; ///< Zero-copy start or coherent completion was after its immutable target.
+        uint64_t primaryWriting{ 0 }, resourceUnavailable{ 0 }; ///< Primary write flag or missing trial resources.
         uint64_t cancelled{ 0 }, durationExpired{ 0 }, waitError{ 0 }; ///< Cancellation, finite expiry or wait failure.
         uint64_t invalidTarget{ 0 };        ///< Occurrences with no representable frozen target.
         uint64_t combinedUnclassified{ 0 }; ///< Skipped occurrences lacking an unambiguous combined identity.
@@ -332,6 +337,7 @@ class dmSyncopation : public MagAOXApp<true>,
         int         waitResult{ 0 };               ///< Exact absolute-wait error, only for a wait-error cause.
         int64_t     targetNs{ 0 }, observedNs{ 0 }; ///< Frozen target and actual observation/publication time.
         synco::ZeroTiming::Key key;                 ///< Exact combined command, or an empty key when unclassified.
+        int64_t stagedNs{ 0 }; ///< Coherent passive-copy completion, including overruns; zero if no copy occurred.
     };
 
     ZeroStats   m_zeroStats; ///< Finite-trial counters; no conditional shadow outcomes are mixed in.
@@ -751,7 +757,8 @@ class dmSyncopation : public MagAOXApp<true>,
                         int64_t     target /**< [in] Immutable planned target. */,
                         int64_t     observed /**< [in] Actual observation. */,
                         const synco::ZeroTiming::Key &key = {} /**< [in] Exact combined identity, when known. */,
-                        ZeroOutcome reason = ZeroOutcome::none /**< [in] Frozen failure cause, when distinct. */ );
+                        ZeroOutcome reason = ZeroOutcome::none /**< [in] Frozen failure cause, when distinct. */,
+                        int64_t stagedNs = 0 /**< [in] Coherent passive-copy completion; zero if no copy occurred. */ );
 
     /// Count and emit exactly one auxiliary occurrence rejected before active publication.
     void zeroTestSkip( int         step /**< [in] Positive auxiliary step. */,
@@ -759,7 +766,8 @@ class dmSyncopation : public MagAOXApp<true>,
                        ZeroStage   stage /**< [in] Exact rejecting checkpoint. */,
                        int64_t     target /**< [in] Frozen occurrence target. */,
                        int64_t     observed /**< [in] Rejecting clock sample for lateness; otherwise reporting time. */,
-                       const synco::ZeroTiming::Key &key = {} /**< [in] Combined identity, when available. */ );
+                       const synco::ZeroTiming::Key &key = {} /**< [in] Combined identity, when available. */,
+                       int64_t stagedNs = 0 /**< [in] Actual coherent-copy completion, including any overrun. */ );
 
     /// Return the stable text label for an event reason without allocation.
     static const char *zeroTestReasonName( ZeroOutcome reason /**< [in] Actual outcome or failure cause. */ );

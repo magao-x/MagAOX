@@ -178,12 +178,14 @@ zero_camera_before="$zero_capture_dir/camwfs-indi-before.txt"
 zero_latency_before="$zero_capture_dir/sysMonRTC.set_latency.toggle-indi-before.txt"
 zero_enabled=$(read_property dmtweeter-synco.enable.toggle "$zero_synco_before")
 zero_mode=$(read_property dmtweeter-synco.zero_test.enabled "$zero_synco_before")
+zero_ideal=$(read_property dmtweeter-synco.zero_test.idealPublisher "$zero_synco_before")
 zero_limit=$(read_property dmtweeter-synco.zero_test.durationSec "$zero_synco_before")
 zero_camera_fps=$(read_property camwfs.fps.current "$zero_camera_before")
 zero_camera_sync=$(read_property camwfs.synchro.toggle "$zero_camera_before")
 zero_latency=$(read_property sysMonRTC.set_latency.toggle "$zero_latency_before")
 [[ $zero_enabled == Off ]] || setup_failure dmtweeter-synco.enable.toggle "$zero_enabled" Off
 [[ $zero_mode == 1 ]] || setup_failure dmtweeter-synco.zero_test.enabled "$zero_mode" 1
+[[ $zero_ideal == 1 ]] || setup_failure dmtweeter-synco.zero_test.idealPublisher "$zero_ideal" 1
 [[ $zero_camera_sync == On ]] || setup_failure camwfs.synchro.toggle "$zero_camera_sync" On
 [[ $zero_latency == On ]] || setup_failure sysMonRTC.set_latency.toggle "$zero_latency" On
 if ! awk -v fps="$zero_camera_fps" \

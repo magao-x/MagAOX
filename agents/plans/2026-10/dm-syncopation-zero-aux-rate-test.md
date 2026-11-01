@@ -397,3 +397,174 @@ clock sample. Production `dmSyncopation` builds successfully; all 17 offline
 capture-helper tests, shell syntax, clang-format and whitespace checks pass.
 Instrument qualification awaits rebuilding/restarting synco and another capture;
 the text-log format remains readable by the existing reader.
+
+## Label-qualified 4 kHz trial: `zero-aux-4000Hz-20261101T050156Z`
+
+The workstation copy is under
+`/home/jrmales/tmp/home/jrmales/tmp/zero-aux-4000Hz-20261101T050156Z`, with the
+matching archive in `/home/jrmales/tmp`. The recorded checkout is `5baea984`;
+the observed `labelVersion=2` records establish that the new labels were running.
+The capture does not archive a startup binary hash. All snapshot/control
+commands and 44 polls succeed; collector status 143 follows requested shutdown.
+The twelve error files are empty.
+
+The active interval lasts 120.000102807 s, approximately 05:02:14.1086 through
+05:04:14.1087 UTC on November 1 (October 31 in Phoenix). Use event observation
+times and summary elapsed time for this interval, rather than the delayed
+telemetry formatting timestamps. The operator confirms the AO loop was stable,
+modal gains remained zero, and settings/workload were unchanged apart from
+rebuilding/restarting synco. The snapshots retain 2 kHz camera acquisition,
+synchronization On, bin2, EM gain 1, shutter SHUT, target -45 C, scalar loop gain
+1 and RTC latency On. The effective modal gain remains zero.
+
+### Actual auxiliary outcomes
+
+| Population | Count |
+| --- | ---: |
+| Sequential genuine main observations | 240,000 |
+| Auxiliary opportunities | 240,000 |
+| Posted / acknowledged | 230,571 / 230,571 |
+| Posted but unacknowledged | 0 |
+| Skipped, total | 9,429 (3.92875%) |
+| Late at post-copy guard | 9,426 |
+| Late at initial deadline check | 2 |
+| Initial unmatched main combination | 1 |
+| Primary changed / writing, reader missing, resource or wait failures | 0 |
+| Reader invalid / drops, SDK gaps / failures, event drops | 0 |
+
+There are exactly 480,002 event rows: one main and one auxiliary outcome for
+each main cycle, plus start/finish. All post-copy late events passed both the
+initial and final pre-copy deadline checks, copied zeros, then rejected the
+active publication at the unchanged 5 us limit. The channel counter/semaphore
+was not published for those occurrences.
+
+Post-copy rejection samples are 5.001-6.752 us after the frozen slot target:
+median 5.252 us, p95 5.561 us and p99 5.76025 us. The two initial-deadline
+rejections are 5.266 and 6.577 us late. This is total target-relative lateness,
+not the duration of the zero copy. Without a retained successful pre-copy clock
+sample, the actual copy/check duration cannot be isolated. The next genuine
+main callback is still 231.016-281.562 us later (median 244.201 us) for these
+late points. They do not represent early main arrivals or lost reader clearance.
+
+The exact event identities cover 470,571 consecutive combined counters,
+307507049 through 307977619, with no gaps or conflicting publication stamps.
+Achieved combined cadence is 3,921.421341 Hz, versus 3,915.254778 Hz previously.
+There are 740 fewer skips, a 0.308333 percentage-point difference; this variation
+does not establish a performance improvement from the label-only change.
+Combined intervals span 209.325-549.027 us. Exactly 9,429 intervals exceed
+350 us, matching the skipped opportunities; none are below 200 or above 600 us.
+Main-only combined intervals have mean 500.000464 us, RMS 6.256431 us and range
+456.462-549.027 us.
+
+The ordinary combiner observer separately adds two counter discontinuity
+observations and three duplicates, with no queue drops. These imperfect observer
+counts do not erase the complete counter coverage in the exact trial events.
+Exact main SDK and reader matches both total 239,999; there are no unmatched
+classified SDK joins or unclassified main-impact identities. Retain the ten
+invalid timing-evidence observations as a coverage diagnostic rather than
+describing every timing observation as valid.
+
+### Controller and camera checks
+
+There are 152 consecutive valid controller timing summaries. Across the INDI
+endpoints, admitted/completed/retired and timed/submitted events each increase
+by 517,521, with no new overload, coalescing, rejection, failure, timeout,
+preparation/post failure, supersession, cancellation, unqualified reader event
+or timing loss. The broader first/last telemetry endpoints cover 533,561
+submissions. Delivery-clock measurements exclude 79 new wide brackets.
+
+For 118 complete steady-active controller windows, native SDK call maximum is
+106.912 us and SDK-through-worker-readiness maximum is 109.347 us. Full
+controller-receipt-to-SDK-entry maximum is 22.242 us, preparation 19.306 us,
+reader release 27.933 us, publication 15.308 us and receipt-to-callback-finish
+153.730 us. Whole-capture SDK readiness reaches 111.651 us. No capacity failure
+is demonstrated. Exact main-only primary-observer-receipt-to-SDK timing is
+30.373852 us mean / 41.699 us maximum; controller receipt to SDK is 15.552648 /
+21.501 us, and native SDK service is 103.698884 / 106.912 us. These prefixes do
+not isolate added main SDK wait, and the prior-run comparison is not a paired
+main-only baseline using the same exact joins.
+
+Camera telemetry has 144 consecutive valid stage summaries and 301,973
+additional published frames over its broader first/last endpoints, with no new
+gaps, failures, invalid/dropped samples or wide clock brackets. Median rolling
+acquisition RMS is 0.2923 us before, 0.2935 us steady-active and 0.2860 us after;
+publication RMS is 0.9004, 0.8291 and 0.8708 us. Active acquisition intervals span
+479-525 us; the worst active rolling publication RMS is 1.1404 us. Temperature
+polls and serial transactions each increase by 13, while FPS/gain query counts
+stay fixed. No measured frame-scale excursion or camera timing regression is
+demonstrated. These are comparisons of overlapping two-second windows.
+
+The dominant limitation demonstrated by this run is the auxiliary deadline
+cutoff after the zero copy. At analysis time, a same-setup finite 4 kHz trial
+with `zeroTest.lateUs=10` was proposed because every recorded late rejection was
+earlier than that limit. **That proposal is superseded by the user's command-ready
+deadline contract below.** The wider-lateness experiment was not performed as
+part of this capture; the recorded 5 us results above are unchanged. No timing
+setting or scheduler code was changed by the capture analysis itself.
+
+## Ideal zero publisher and command-ready deadline
+
+The user chose to separate command preparation from the timed publication,
+instead of widening publication lateness to compensate for copying after the
+target. This finite trial has an ideal constant-zero source: the command is
+already available. It is not a simulation of an external producer, notification
+transport or full publisher protocol.
+
+For each immutable auxiliary target `T`, obtain exact reader clearance and stage
+the complete zero frame into the auxiliary destination early. Clear its shared
+write flag when the passive copy finishes; do not advance its counter, writetime
+or semaphores. A copy finishing **at or before `T`** meets the ready deadline.
+Then wait for `T`, revalidate the frozen primary/combined identities, auxiliary
+ownership and reader clearance, and issue the ordinary active publication.
+Preparation is not repeated at the publication wake.
+
+If exact reader clearance is unavailable by `T`, skip with `readerMissing`.
+A copy that starts or finishes after `T` is an exclusive `preparationLate` skip
+(`reason=preparation_late`, `stage=preparation`). Scheduler publication wake and
+admission lateness remain separate `late` outcomes against the existing
+`T + lateUs` limit, with `lateUs=5` unchanged. `deadline` and `publication_guard`
+identify those publication checks; the former ideal-mode `post_copy_guard` path
+is removed. Cancellation and identity/resource/readiness changes after staging
+still revoke the pending publication. There is no catch-up burst or movement of
+subsequent committed targets.
+
+The implementation identifies this behavior as `labelVersion=3` and
+`idealPublisher=1` in the trial readbacks/summary. Only dmSyncopation needs a
+rebuild; the existing text-log wire format remains readable by installed
+logdump. The capture helper checks the ideal-publisher readback so an older
+copy-after-target binary cannot silently satisfy the next trial's setup.
+
+`staged` counts completed zero copies, including an overrun or a command later
+cancelled before publication. It overlaps posted/skipped populations and is not
+another skip-reason counter. Each outcome event carries `stagedNs`: the actual
+copy-completion time, including an overrun, or zero when no copy completed.
+For positive `stagedNs`, `targetNs - stagedNs` supplies measured staging lead;
+a negative result documents preparation that missed its ready deadline.
+`preparationLate` is included once in the disjoint skip-reason sum. The existing
+`posted = acknowledged + unacknowledged` and one-outcome-per-auxiliary-slot
+accounting are retained.
+
+This ideal-source trial establishes the consumer/scheduler's behavior when the
+command can always be supplied. A future production provider contract must
+instead require a coherent command by its advertised ready deadline and skip
+if missing. No such external-provider interface is implemented by this change.
+The 4 kHz capture above remains evidence of the previous label-version-2
+copy-after-target policy; its post-copy residuals cannot retrospectively supply
+the new `stagedNs` measurements. Preserve its measurements when comparing the
+next finite trial.
+
+Workstation verification passes: the full app suite has 100 cases / 1,935,176
+assertions, including the ideal-staging boundary and revocation cases. Tests
+verify that a 20 us staging delay still succeeds when completed early, exact
+completion at `T-1 ns` and `T` qualifies while `T+1 ns` skips only that slot,
+reader evidence observed after the first deadline can qualify the second slot,
+and revocation after staging prevents publication. Wait checkpoints verify a
+clear write flag and unchanged auxiliary counter/writetime/semaphore before the
+first target. Existing main identity, cancellation, expiry, resource, publication
+acknowledgement and independent-slot accounting tests remain in the full suite.
+The capture helper passes all 18 private fake-service tests, including refusal
+of a binary lacking the ideal-publisher capability. Production dmSyncopation
+build, shell syntax, clang-format and whitespace checks also pass. No instrument
+commands were run. The next operator test remains 4 kHz with `lateUs=5` after
+rebuilding/restarting synco; logdump and the DM controller need no rebuild for
+this change.

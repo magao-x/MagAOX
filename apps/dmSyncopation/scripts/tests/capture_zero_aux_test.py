@@ -54,6 +54,7 @@ class CaptureZeroAuxTest(unittest.TestCase):
             ' printf "dmtweeter-synco.enable.toggle=%s\\n" "$enable"\n'
             ' printf "dmtweeter-synco.settings.steps=%s\\n" "$steps"\n'
             ' printf "dmtweeter-synco.zero_test.enabled=%s\\n" "${ZERO_TEST_MODE-1}"\n'
+            ' printf "dmtweeter-synco.zero_test.idealPublisher=%s\\n" "${ZERO_TEST_IDEAL-1}"\n'
             ' printf "dmtweeter-synco.zero_test.durationSec=%s\\n" "${ZERO_TEST_LIMIT-120}";;\n'
             'dmtweeter-synco.zero_test)\n'
             ' [[ ${ZERO_TEST_POLL_STATUS:-0} != 0 ]] && exit "$ZERO_TEST_POLL_STATUS"\n'
@@ -193,6 +194,16 @@ class CaptureZeroAuxTest(unittest.TestCase):
         self.assertIn("status=255", (self.capture_dir() / "status.txt").read_text())
         self.assertIn("telemetry collector dmtweeter-synco (pid ", stderr)
         self.assertIn('actual="not running"; expected="running"', stderr)
+
+    def test_ideal_publisher_capability_is_required(self):
+        """An old or non-ideal publisher cannot silently repeat the previous trial."""
+        for value in ["0", ""]:
+            with self.subTest(value=value):
+                self.env["ZERO_TEST_IDEAL"] = value
+                code, _, stderr = self.run_capture("4000", "1")
+                self.assertEqual(code, 1)
+                self.assertEqual(self.set_calls(), [])
+                self.assertIn("dmtweeter-synco.zero_test.idealPublisher", stderr)
 
     def test_setup_reports_every_mismatched_gate(self):
         """Print all actual/expected property mismatches without requesting writes."""
