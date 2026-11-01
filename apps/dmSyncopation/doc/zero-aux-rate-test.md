@@ -22,7 +22,20 @@ ran or that main timing was unaffected.
 
 Build/install the updated dmSyncopation through the normal operator workflow.
 The new records use the existing text-log wire format, so installed logdump can
-decode them without rebuilding. Merge
+decode them without rebuilding. From any directory in the MagAOX checkout,
+force a clean app rebuild and install before restarting synco:
+
+```bash
+cd "$(git rev-parse --show-toplevel)" &&
+make -C apps/dmSyncopation clean &&
+make -C apps/dmSyncopation &&
+make -C apps/dmSyncopation install
+```
+
+The installed binary must contain the coordinated-trial implementation
+(`45c85771` or later); `2d8c104a` does not recognize `zeroTest` configuration.
+The startup log's `MagAOX GIT` line identifies the launched binary independently
+of the capture directory's checkout hash. Merge
 [`dmtweeter_synco_zero_test.conf`](../dmtweeter_synco_zero_test.conf)
 into the working instance configuration; **do not replace the whole config**.
 The essential sections are:
@@ -149,6 +162,58 @@ reader-invalid/drop coverage, exact identity matches, resource faults and
 telemetry loss. Two steps supply one auxiliary opportunity per main cycle;
 three supply two. Actual combined/controller cadence should approach 4/6 kHz
 only when those opportunities are delivered.
+
+### Read actual slot outcomes
+
+`skipped` means that the app deliberately **did not issue an active auxiliary
+publication** for that slot. It may already have copied zeros before the final
+guard rejected publication. A skipped slot does not imply that the genuine main
+command arrived early.
+
+Each scheduled auxiliary slot has one outcome event. Two total steps schedule
+one auxiliary slot per main cycle; three schedule two. When the main combination
+cannot be matched, each dependent auxiliary slot gets its own skip event.
+
+| Counter | Meaning |
+| --- | --- |
+| `acknowledged` | An auxiliary publication was issued and its expected combined update was observed. |
+| `late` | A pre-publication deadline check exceeded `zeroTest.lateUs`, including the final checks before/after the zero copy. |
+| `readerMissing` | The current combined command lacked exact qualifying reader-release evidence. |
+| `primaryChanged` | Before publication, the primary counter actually changed from this cycle's main identity. |
+| `primaryWriting` | Before publication, the primary write flag was set; this does not assert a changed counter. |
+| `resourceUnavailable` | A slot's required stream/resource checks failed. |
+| `invalidTarget` | The computed slot target was invalid. |
+| `waitError` | The absolute wait failed. |
+| `combinedUnclassified` | The main or current combined identity could not be classified before an auxiliary publication. |
+| `cancelled` | Disable or shutdown cancelled the pending slot before publication. |
+| `durationExpired` | The finite active interval ended before publication. |
+| `unacknowledged` | An auxiliary publication was attempted, but the expected combined update was not confirmed. This is a posted attempt, not a skip. |
+
+The skipped population is the sum of its disjoint reason counters. The posted
+population separates into acknowledged and unacknowledged attempts. Reader
+invalid/drop diagnostics and resource faults outside a scheduled slot describe
+coverage/lifecycle conditions; they are not additional skip reasons to add again.
+A guard failure during acknowledgement belongs to the posted attempt's named
+reason and does not increment a pre-publication skip counter.
+
+New summaries/events carry `labelVersion=2`. Event text includes named `action`,
+`reason` and `stage` fields alongside the retained numeric `outcome`. The stage
+distinguishes an initial deadline check, reader/combined validation,
+`final_guard`, `post_copy_guard`, and acknowledgement
+work. A late guard event retains the exact rejecting clock sample. A
+timestamp/residual after a successful publication is a completion stamp;
+it can exceed 5 us even though the admission check occurred within the unchanged
+5 us limit.
+
+For example, `action=skipped reason=late stage=final_guard` is an intentional
+pre-publication deadline skip. `action=unacknowledged reason=ack_timeout` is a
+posted attempt whose expected combination was not confirmed in time. Other
+posted failures can name `ack_ambiguous` or `publication_failed`; a `wait_error`
+includes the wait's numeric `waitResult`.
+
+Earlier captures used compound labels: their `primaryChanged` and `unclassified`
+counts cannot be retrospectively split into the new causes. Use the new named
+fields and reason counters for subsequent attribution.
 
 Compare capture-local BMC overload/rejection/coalescing, superseded/cancelled
 jobs, SDK failures/timeouts, queue losses, publication/receipt/send intervals and
