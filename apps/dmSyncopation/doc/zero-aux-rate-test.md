@@ -10,7 +10,9 @@ dmSyncopation inserts zero-valued auxiliary updates on the established grid:
 
 There is no auxiliary post at step 0 and no independent 4/6 kHz timer added to
 the main loop. The zero contribution preserves the main, flat and other retained
-DM contributions. All instrument commands below are operator actions.
+DM contributions. This trial uses an ideal constant-zero publisher: its command
+is already available, so there is no external provider to wait for or emulate.
+All instrument commands below are operator actions.
 
 This finite empirical trial measures actual delivery and possible main impact.
 It deliberately does not impose the shadow's conservative prediction of zero
@@ -32,8 +34,9 @@ make -C apps/dmSyncopation &&
 make -C apps/dmSyncopation install
 ```
 
-The installed binary must contain the coordinated-trial implementation
-(`45c85771` or later); `2d8c104a` does not recognize `zeroTest` configuration.
+The installed binary must expose `zero_test.labelVersion=3` and
+`zero_test.idealPublisher=1`; an older coordinated-trial binary does not have
+the early-staging behavior described here. Only dmSyncopation needs rebuilding.
 The startup log's `MagAOX GIT` line identifies the launched binary independently
 of the capture directory's checkout hash. Merge
 [`dmtweeter_synco_zero_test.conf`](../dmtweeter_synco_zero_test.conf)
@@ -85,6 +88,14 @@ does not provide the required auxiliary combinations. The SDK-result stream is
 
 Keep other auxiliary providers idle during this comparison. Their counter
 updates would introduce additional combined commands and ambiguous acknowledgements.
+
+After restarting, check the new mode's readbacks while enable remains Off:
+
+```bash
+timeout -k 2s 8s getINDI dmtweeter-synco.zero_test
+```
+
+Expect `labelVersion=3` and `idealPublisher=1` in addition to `enabled=1`.
 
 ## Run and capture
 
@@ -148,8 +159,20 @@ main-labelled grid -> zero auxiliary slot(s) -----+           -> SDK -> ordered 
                 exact reader-release evidence
 ```
 
-Each actual slot copies a complete zero frame and performs a normal active
-publication. The trial never writes primary pixels or posts its semaphore.
+For each frozen auxiliary target `T`, the app waits for exact reader clearance
+and copies the complete zero frame **before** the target. It clears the shared
+write flag after this passive staging; counters, writetime and semaphores stay
+unchanged. If staging finishes at or before `T`, the app waits for `T`, rechecks
+the primary/combined identities, auxiliary ownership and reader clearance, and
+issues one normal active publication. It never writes primary pixels or posts
+the primary semaphore.
+
+`T` is the command-ready deadline for this ideal test. Missing reader clearance
+by the deadline skips the slot. A copy that starts or finishes after `T` is
+`preparationLate`, separate from scheduler publication lateness. A completed
+command does not get prepared again at the publication wake. The existing
+`lateUs=5` remains the publication-admission grace after `T`.
+
 Expired targets are skipped, never replayed in a catch-up burst. Genuine main
 excursions can cancel conflicting slots without shifting committed targets to
 chase those excursions.
@@ -176,9 +199,11 @@ cannot be matched, each dependent auxiliary slot gets its own skip event.
 
 | Counter | Meaning |
 | --- | --- |
+| `staged` | Completed zero copies, including a copy that overran its ready deadline or was later cancelled; this overlaps publication/skip populations. |
 | `acknowledged` | An auxiliary publication was issued and its expected combined update was observed. |
-| `late` | A pre-publication deadline check exceeded `zeroTest.lateUs`, including the final checks before/after the zero copy. |
-| `readerMissing` | The current combined command lacked exact qualifying reader-release evidence. |
+| `preparationLate` | A copy started or finished after the immutable command-ready target `T`; no active publication is issued. |
+| `late` | The publication wake or its admission guard exceeded `T + zeroTest.lateUs`, independently of preparation. |
+| `readerMissing` | Exact qualifying reader clearance was unavailable by the command-ready deadline or was revoked before publication. |
 | `primaryChanged` | Before publication, the primary counter actually changed from this cycle's main identity. |
 | `primaryWriting` | Before publication, the primary write flag was set; this does not assert a changed counter. |
 | `resourceUnavailable` | A slot's required stream/resource checks failed. |
@@ -196,17 +221,26 @@ coverage/lifecycle conditions; they are not additional skip reasons to add again
 A guard failure during acknowledgement belongs to the posted attempt's named
 reason and does not increment a pre-publication skip counter.
 
-New summaries/events carry `labelVersion=2`. Event text includes named `action`,
+New summaries/events carry `labelVersion=3`; summaries/INDI also identify
+`idealPublisher=1`. Event text includes named `action`,
 `reason` and `stage` fields alongside the retained numeric `outcome`. The stage
-distinguishes an initial deadline check, reader/combined validation,
-`final_guard`, `post_copy_guard`, and acknowledgement
-work. A late guard event retains the exact rejecting clock sample. A
+distinguishes preparation, reader/combined validation, publication deadline/
+`publication_guard`, and acknowledgement work. The former `post_copy_guard`
+path is not used by this ideal-publisher mode. `stagedNs` is the actual copy
+completion time, including an overrun; zero means that no copy completed.
+Compare `targetNs - stagedNs` only when `stagedNs` is positive: a nonnegative
+value means the command was staged by its ready deadline. `staged` is not another
+skip reason to add to `skipped`.
+
+A late guard event retains the exact rejecting clock sample. A
 timestamp/residual after a successful publication is a completion stamp;
 it can exceed 5 us even though the admission check occurred within the unchanged
 5 us limit.
 
-For example, `action=skipped reason=late stage=final_guard` is an intentional
-pre-publication deadline skip. `action=unacknowledged reason=ack_timeout` is a
+For example, `action=skipped reason=preparation_late stage=preparation` records a
+missed ready deadline. `action=skipped reason=late stage=publication_guard`
+records publication-admission lateness after preparation.
+`action=unacknowledged reason=ack_timeout` is a
 posted attempt whose expected combination was not confirmed in time. Other
 posted failures can name `ack_ambiguous` or `publication_failed`; a `wait_error`
 includes the wait's numeric `waitResult`.
@@ -214,6 +248,11 @@ includes the wait's numeric `waitResult`.
 Earlier captures used compound labels: their `primaryChanged` and `unclassified`
 counts cannot be retrospectively split into the new causes. Use the new named
 fields and reason counters for subsequent attribution.
+
+A production provider would need a coherent command available by its advertised
+ready deadline, with a missing command causing a skip. This finite test supplies
+that command as an invariant zero frame. It does not implement an external
+provider protocol, producer notification or full publisher emulator.
 
 Compare capture-local BMC overload/rejection/coalescing, superseded/cancelled
 jobs, SDK failures/timeouts, queue losses, publication/receipt/send intervals and
