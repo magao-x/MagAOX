@@ -263,14 +263,59 @@ class dmSyncopation : public MagAOXApp<true>,
     synco::Simulation m_simulation; ///< Fixed-storage shadow engine, serialized by the cycle mutex.
     synco::Simulation m_zeroClock;  ///< Clock-only long-baseline estimator; never evaluates modeled admission.
 
+    /// Actual event outcomes and diagnostic causes; numeric values before schema 2 were less specific.
+    enum class ZeroOutcome : int
+    {
+        none                 = -1,
+        mainAcknowledged     = 0,
+        acknowledged         = 1,
+        late                 = 2,
+        readerMissing        = 3,
+        primaryChanged       = 4,
+        combinedUnclassified = 5,
+        resourceUnavailable  = 6,
+        cancelled            = 7,
+        started              = 8,
+        primaryWriting       = 9,
+        waitError            = 10,
+        unacknowledged       = 11,
+        durationExpired      = 12,
+        finished             = 13,
+        invalidTarget        = 14,
+        ackTimeout           = 15,
+        publicationFailed    = 16,
+        ackAmbiguous         = 17
+    };
+
+    /// Exact checkpoint where a trial observation was accepted or rejected.
+    enum class ZeroStage
+    {
+        lifecycle,
+        mainAcknowledgement,
+        wait,
+        deadline,
+        combined,
+        reader,
+        finalGuard,
+        postCopyGuard,
+        publication,
+        acknowledgement
+    };
+
     /// Same-thread trial counters, copied under the cycle mutex by the ordinary app loop.
     struct ZeroStats
     {
-        uint64_t posted{ 0 }, acknowledged{ 0 }, skipped{ 0 }; ///< Requested active occurrences and output outcomes.
+        uint64_t posted{ 0 }; ///< Active publication API attempts, including API failures; not proof of DM submission.
+        uint64_t acknowledged{ 0 },
+            unacknowledged{ 0 }; ///< Posted attempts with or without exact combined acknowledgement.
+        uint64_t skipped{ 0 };   ///< Auxiliary occurrences rejected before the active publication API was called.
         uint64_t late{ 0 }, readerMissing{ 0 }, primaryChanged{ 0 }; ///< Mutually exclusive per-slot skip reasons.
-        uint64_t cancelled{ 0 }; ///< Slots cancelled by operator request, finite expiry or shutdown.
-        uint64_t unclassified{ 0 }, resourceFaults{ 0 }; ///< Ambiguous output identities and resource failures.
-        uint64_t readerInvalid{ 0 }, readerDrops{ 0 };   ///< Readiness revocation/transport coverage.
+        uint64_t primaryWriting{ 0 }, resourceUnavailable{ 0 };      ///< Primary write flag or missing trial resources.
+        uint64_t cancelled{ 0 }, durationExpired{ 0 }, waitError{ 0 }; ///< Cancellation, finite expiry or wait failure.
+        uint64_t invalidTarget{ 0 };        ///< Occurrences with no representable frozen target.
+        uint64_t combinedUnclassified{ 0 }; ///< Skipped occurrences lacking an unambiguous combined identity.
+        uint64_t resourceFaults{ 0 }; ///< Trial-wide resource or ownership failures, separate from per-slot skips.
+        uint64_t readerInvalid{ 0 }, readerDrops{ 0 };                    ///< Readiness revocation/transport coverage.
         uint64_t mainObserved{ 0 }, mainMatched{ 0 }, mainUnmatched{ 0 }; ///< Genuine main association coverage.
         uint64_t mainImpactUnclassified{ 0 };    ///< Main acknowledgements lacking exact named-primary trace linkage.
         int64_t  startedNs{ 0 }, stoppedNs{ 0 }; ///< Active finite interval on CLOCK_MONOTONIC.
@@ -280,13 +325,18 @@ class dmSyncopation : public MagAOXApp<true>,
     /// One bounded hot-path observation, formatted only after the cycle lock is released.
     struct ZeroEvent
     {
-        uint64_t trial{ 0 }, primary{ 0 };       ///< Trial and genuine main identities.
-        int      step{ 0 }, outcome{ 0 };        ///< Zero is a main observation; positive values are auxiliary steps.
-        int64_t  targetNs{ 0 }, observedNs{ 0 }; ///< Frozen target and actual observation/publication time.
-        synco::ZeroTiming::Key key;              ///< Exact combined command, or an empty key when unclassified.
+        uint64_t    trial{ 0 }, primary{ 0 };      ///< Trial and genuine main identities.
+        int         step{ 0 }, outcome{ 0 };       ///< Zero is a main observation; positive values are auxiliary steps.
+        ZeroOutcome reason{ ZeroOutcome::none };   ///< Frozen cause; a posted acknowledgement failure remains posted.
+        ZeroStage   stage{ ZeroStage::lifecycle }; ///< Checkpoint which produced this outcome.
+        int         waitResult{ 0 };               ///< Exact absolute-wait error, only for a wait-error cause.
+        int64_t     targetNs{ 0 }, observedNs{ 0 }; ///< Frozen target and actual observation/publication time.
+        synco::ZeroTiming::Key key;                 ///< Exact combined command, or an empty key when unclassified.
     };
 
-    ZeroStats                    m_zeroStats;  ///< Finite-trial counters; no conditional shadow outcomes are mixed in.
+    ZeroStats   m_zeroStats; ///< Finite-trial counters; no conditional shadow outcomes are mixed in.
+    ZeroOutcome m_zeroWaitFailure{ ZeroOutcome::none }; ///< Cause retained at the failing wait condition.
+    int m_zeroWaitResult{ 0 }; ///< Most recent absolute-wait return code, retained without a post-hoc clock read.
     synco::ZeroTiming            m_zeroTiming; ///< Exact main/controller receipt to native SDK-entry measurements.
     MagAOX::spscQueue<ZeroEvent> m_zeroEvents; ///< Primary monitor to ordinary telemetry handoff.
     IMAGE m_zeroChannel{}, m_zeroCombined{}, m_zeroSdk{}; ///< Existing auxiliary/output/SDK mappings, never destroyed.
@@ -695,11 +745,30 @@ class dmSyncopation : public MagAOXApp<true>,
                        uint64_t primary /**< [in] Genuine main counter that must remain current. */ );
 
     /// Record one actual outcome without allocation, logging or unbounded buffering.
-    void zeroTestEvent( int                           step /**< [in] Zero for main; positive auxiliary slot. */,
-                        int                           outcome /**< [in] Fixed actual outcome code. */,
-                        int64_t                       target /**< [in] Immutable planned target. */,
-                        int64_t                       observed /**< [in] Actual observation. */,
-                        const synco::ZeroTiming::Key &key = {} /**< [in] Exact combined identity, when known. */ );
+    void zeroTestEvent( int         step /**< [in] Zero for main; positive auxiliary slot. */,
+                        ZeroOutcome outcome /**< [in] Named actual outcome; numeric value retained in telemetry. */,
+                        ZeroStage   stage /**< [in] Exact checkpoint reporting the outcome. */,
+                        int64_t     target /**< [in] Immutable planned target. */,
+                        int64_t     observed /**< [in] Actual observation. */,
+                        const synco::ZeroTiming::Key &key = {} /**< [in] Exact combined identity, when known. */,
+                        ZeroOutcome reason = ZeroOutcome::none /**< [in] Frozen failure cause, when distinct. */ );
+
+    /// Count and emit exactly one auxiliary occurrence rejected before active publication.
+    void zeroTestSkip( int         step /**< [in] Positive auxiliary step. */,
+                       ZeroOutcome reason /**< [in] Cause captured at its rejecting condition. */,
+                       ZeroStage   stage /**< [in] Exact rejecting checkpoint. */,
+                       int64_t     target /**< [in] Frozen occurrence target. */,
+                       int64_t     observed /**< [in] Rejecting clock sample for lateness; otherwise reporting time. */,
+                       const synco::ZeroTiming::Key &key = {} /**< [in] Combined identity, when available. */ );
+
+    /// Return the stable text label for an event reason without allocation.
+    static const char *zeroTestReasonName( ZeroOutcome reason /**< [in] Actual outcome or failure cause. */ );
+
+    /// Return the stable text label for the reporting checkpoint without allocation.
+    static const char *zeroTestStageName( ZeroStage stage /**< [in] Exact reporting checkpoint. */ );
+
+    /// Distinguish main/lifecycle, skipped and actively posted event populations.
+    static const char *zeroTestActionName( const ZeroEvent &event /**< [in] Captured actual outcome. */ );
 
     /// Register read-only actual zero-test state and timing coverage.
     int setupZeroTestINDI();

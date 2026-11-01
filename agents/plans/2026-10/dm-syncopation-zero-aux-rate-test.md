@@ -162,3 +162,238 @@ also pass.
 Only the explicit zero-test path performs real zero auxiliary publications;
 ordinary scheduler and shadow defaults retain their existing behavior. Hardware
 delivery, disturbance and timing-tail qualification remain the next operator test.
+
+## First setup attempts: October 31, 2026
+
+`zero-aux-4000Hz-20261031T234136Z` and
+`zero-aux-4000Hz-20261031T234240Z` both stopped during baseline setup. Neither
+contains a control log or enable request; neither is a zero-write performance
+measurement. Both record checkout `b97d424f`; this does not identify the running
+application binary.
+
+Both baseline synco queries returned status 1 with
+`No dmtweeter-synco.*.* from localhost:7624`. The other four baseline INDI
+queries succeeded. Camera readbacks were 2000 Hz with synchronization On in both
+attempts. RTC latency was Off in the first and On in the second, leaving the
+missing synco response as the second attempt's blocker. Collector status 143
+reflects the script's requested cleanup after refusal.
+
+Each synco telemetry file contains only an old shadow-pipeline record at
+23:33:42.824064301 UTC, preceding both attempts; there are no zero-test records.
+Camera and controller telemetry are fresh at the capture times. Startup/error
+logs and process status are needed to distinguish an exited app from an
+initialization or communications problem; stale telemetry is not evidence of
+the newly configured mode running.
+
+The capture helper now reports every failed baseline command, collector and
+property gate with actual versus expected values, while preserving the same
+no-control-on-failure behavior. Seventeen offline fake-service cases pass;
+no instrument commands are executed by those tests.
+
+The subsequent operator startup log identifies the launch failure. The installed
+app reported `2d8c104a` at 23:33:48.612972790 UTC, while the capture checkout was
+`b97d424f`. It rejected all four `zeroTest` config targets as unrecognized and
+exited on invalid configuration; the process query found no dmSyncopation
+threads. That older validator also rejects configured completion/read-release
+observers when simulation is Off. The new trial configuration therefore cannot
+run under that binary. A clean rebuild, install and synco-only restart are
+required before retrying; the observations do not identify whether the earlier
+build, install or restart step was missed. Current build dependencies include
+the app header and both new implementation/timing headers.
+
+## First complete 4 kHz trial: `zero-aux-4000Hz-20261101T040937Z`
+
+The capture ran in the explicit coordinated zero-test mode, with two total
+steps, and completed **120.000099036 s** active time. Its estimated active wall
+interval was November 1, 04:09:55.706–04:11:55.706 UTC (October 31,
+21:09:55.706–21:11:55.706 Phoenix time). Deferred event-log headers are drain
+times; the estimate uses summary timestamps minus monotonic elapsed time.
+
+All baseline/configured/after queries and 44 polls succeeded. Step selection,
+On and Off requests succeeded; collector status 143 is requested cleanup.
+Runtime properties show the new mode, and checkout is `b97d424f`. No startup log
+independently records the installed binary hash. Synco was Off before and after.
+
+The camera remained bin2, 2000 Hz, synchronization On, EM gain 1, shutter SHUT,
+and target −45 C. Holoop snapshots show closed loop, scalar gain 1, unchanged
+multiplier; modal gains are not captured. RTC latency is On. BMC readbacks
+confirm FIFO55/single CPU for SDK, FIFO30/single CPU for ordered post, and three
+credits. Actual CPU-number lists and external GPU workload are not archived.
+The operator confirmed that the AO loop remained stable, modal gains stayed
+at zero, and settings/workload were unchanged during the capture. Stability at
+zero effective modal gain does not by itself exclude a small added main latency;
+the unchanged workload supports the within-capture timing comparison.
+
+### Actual delivery
+
+| Active-trial population | Result |
+| --- | ---: |
+| Genuine main observations | 240,000, all sequential |
+| Auxiliary opportunities | 240,000 |
+| Auxiliary posts / acknowledgements | 229,831 / 229,831 |
+| Auxiliary skips | 10,169 (4.2371%) |
+| Reader missing / invalid / dropped | 0 / 0 / 0 |
+| Resource faults | 0 |
+| Main output acknowledgements | 239,999; one initial unmatched main |
+| Exact main SDK / reader joins | 239,999 / 239,999 |
+| Main timing invalid captures | 2 |
+| SDK gaps / failures; event drops | 0 / 0; 0 |
+
+The union of main and acknowledged auxiliary identities covers **469,831
+contiguous combined counters**, `301000419` through `301470249`. Their producer
+timestamps measure **3915.254778 Hz** actual combined cadence. Every posted
+auxiliary produced an acknowledged combination; the deficit comes from skipped
+auxiliary opportunities, with no observed dmcomb coalescing in this population.
+
+Combined intervals have mean 255.411220 us, standard deviation 37.307615 us and
+range 210.738–536.873 us. Exactly 10,169 intervals exceed 350 us, matching the
+skips; none are below 200 us or above 600 us. Genuine-main combined intervals
+remain mean 500.000443 us, standard deviation 6.499861 us, range
+458.606–538.116 us. Main-to-aux intervals average 254.632673 us; aux-to-next-main
+intervals average 245.305756 us.
+
+### Skip classification needs correction
+
+The counters label 10,168 skips `primaryChanged` and one `unclassified` from the
+initial unmatched main. **This is not evidence of 10,168 early main arrivals.**
+The final compound guard in `processZeroTestPrimary` also assigns late deadline,
+resource and write-flag failures to `primaryChanged`.
+
+All 10,168 outcome-4 events occur **5.031–6.746 us after target**, median
+5.3135 us, against `lateUs=5`. The next main callback is another
+234.342–279.668 us later. This strongly points to the final lateness check,
+although these POD events do not preserve which individual guard failed and
+cannot exclude transient write-flag or resource conditions.
+
+Successful post-completion residuals have median 3.731 us, mean 3.87057 us,
+p99 5.725 us, maximum 21.112 us. That stamp is after the publication call returns;
+the admission deadline check occurs before the copy/publication. Thus successful
+completion residuals above 5 us do not contradict the configured admission rule.
+Separate the final guard's skip reasons before attributing another run's losses
+to main timing; no late-limit or production bound is changed by this analysis.
+
+### Backend and main timing
+
+Controller INDI endpoints show **no new overloads, coalescing, rejections,
+SDK failures/timeouts, preparation/post failures, supersession, cancellation,
+vector rejection, reader-unqualified outcomes or timing queue losses/gaps**.
+Historical rejected=2 and reader-unqualified=1 do not grow. Endpoint admitted,
+completed and retired each increase by 516,763 across the whole capture,
+including main-only baseline and drain time. Timing events/submitted increase
+by 516,764; different sampling endpoints explain the one-command difference.
+
+For complete steady-active rolling windows, native SDK call mean has median
+103.711 us and maximum 109.286 us. SDK service through worker readiness has
+median mean 106.068 us and maximum **111.751 us**. Full receipt-to-native-entry
+prefix has median mean 16.275 us and maximum **25.789 us**; this exceeds the
+provisional shadow `prepareUs=25` by 0.789 us. Pure preparation's 21.241 us
+maximum excludes handoff and cannot substitute for the complete prefix.
+The 120 us SDK assumption is not exceeded.
+
+Reader release reaches 36.699 us; publication work 21.390 us; whole
+receipt-to-callback-finish 168.428 us. Whole-job latency slightly exceeding one
+6 kHz period does not by itself violate pipelined throughput with three credits.
+The observed minimum receipt interval is 207.612 us and minimum send interval
+205.919 us, well above the measured SDK-service maximum. No backend capacity
+failure is demonstrated at this attempted 4 kHz cadence.
+
+Exact main-only joins, available in this capture, measure:
+
+| Duration | Mean, us | Maximum, us |
+| --- | ---: | ---: |
+| Primary observer receipt → native SDK entry | 30.158630 | 43.442 |
+| Controller receipt → native SDK entry | 15.500755 | 23.054 |
+| Main native SDK entry → return | 103.696589 | 107.973 |
+
+There is no same-definition paired main-only baseline for these exact joins:
+they reset on On and classify active mains. Prefix durations include delivery
+or preparation and are not isolated added SDK queue wait. `sdkWait[n=0]` is the
+monitor's SDK-result wait population, absent in the detached pipeline; it does
+not establish zero main queue wait.
+
+### Camera and measurement coverage
+
+There are 152 consecutive valid controller summaries and 143 consecutive valid
+camera stage summaries, with no malformed or backward-timestamp rows. Camera
+endpoints add 299,966 published frames, with no new frame/counter gaps,
+rejected/failed/invalid/dropped frames. There are 25 excluded wide controller
+delivery-clock brackets and 59 wide camera write brackets; retain those coverage
+exclusions when describing maxima.
+
+Median rolling camera acquisition period stays 500.0005 us; acquisition RMS is
+0.2890 us in the main-only baseline and 0.2957 us in the steady active segment.
+Publication RMS medians are 0.9168 and 0.8384 us, while the active worst rolling
+RMS is 2.9433 us. Acquisition extrema are 480–525 us before and 479–526 us
+active. Mean acquisition-to-write has rolling median 46.8709 us before,
+47.2197 us active and 47.0361 us after. These are overlapping rolling-window
+comparisons, not pooled independent-sample statistics.
+
+Temperature housekeeping remains on its 10 s cadence; gain/FPS query counts do
+not change. Ten qualified camera trace contexts include roughly 489–510 us of
+serial overlap, two before and eight active. No frame-scale timing excursion or
+frame-behind condition is demonstrated by this capture.
+
+The first complete trial therefore establishes successful coordinated delivery
+of all attempted zero commands, approximately 3.915 kHz achieved cadence, and
+backend headroom at this rate. It does not qualify 6 kHz or prove unchanged main
+latency. The immediate measurement issue is the compound skip label and its
+5 us deadline-edge population.
+
+## Explicit per-slot outcome labels
+
+The label cleanup follows the first complete 4 kHz trial above. It changes
+attribution and event coverage, not the scheduling policy: `lateUs=5`, frozen
+targets, actual reader clearance and the finite-trial rules are unchanged.
+The earlier 10,168 compound `primaryChanged` events remain ambiguous records;
+they are not retroactively relabelled as proven late or early-main events.
+
+Subsequent summaries/events identify `labelVersion=2`; events retain numeric
+`outcome` and add named `action`, `reason` and `stage`. A pending slot that is
+deliberately not actively published is `action=skipped`, even if its zero copy
+already occurred. The stage identifies
+main acknowledgement, wait/deadline, combined/readiness checks, `final_guard`,
+`post_copy_guard` or post-publication acknowledgement. Successful completion
+residuals remain after-call timestamps, separate from the 5 us admission check.
+
+Skip reasons are disjoint: `late`, `readerMissing`, `primaryChanged`,
+`primaryWriting`, `resourceUnavailable`, `waitError`, `combinedUnclassified`,
+`cancelled`, `durationExpired` and `invalidTarget`. All pre-publication deadline
+guards count `late`; `primaryChanged` now requires an actual primary counter
+change, and an asserted primary write flag has its own counter. Each scheduled
+auxiliary slot gets one outcome event, including each dependent slot skipped
+when the genuine main combination could not be matched. Two/three total steps
+still mean one/two auxiliary opportunities per main cycle.
+
+An active publication attempt without a confirmed expected combined update is
+`action=unacknowledged` and increments the separate `unacknowledged` counter.
+It is part of `posted`, not `skipped`. Thus `posted` separates into acknowledged
+and unacknowledged attempts, while `skipped` is the sum of its reason counters.
+The former compound `unclassified` population is separated into pre-publication
+`combinedUnclassified` and post-publication acknowledgement failure. Reader
+invalid/drop coverage and resource faults outside a scheduled slot must not be
+added as additional skips.
+
+Post-publication reasons distinguish `ack_timeout`, `ack_ambiguous` and
+`publication_failed`, as well as any captured cancellation, primary, resource
+or wait failure. `wait_error` retains the actual numeric `waitResult`. The stage
+and action retain the difference between an unpublished skip and a posted
+attempt even when they share a rejecting condition's name.
+
+The operator-facing counter table is in
+[the trial procedure](../../../apps/dmSyncopation/doc/zero-aux-rate-test.md#read-actual-slot-outcomes).
+The implementation's focused regression checks accompany the functional change;
+no historical capture, controller setting, timing bound or hardware state is
+changed by this documentation update.
+
+Workstation validation for the label cleanup passes: the complete app suite has
+97 cases / 1,393,294 assertions, including 14 coordinated-trial cases. Fault
+injection separately exercises the initial, final pre-copy and post-copy late
+checks, primary counter changes versus an active write flag, competing auxiliary
+ownership, cancellation, finite expiry and wait errors. Tests also verify one
+event per denied slot, the disjoint skip-reason sum, the posted
+acknowledged/unacknowledged partition, and a successful later slot following an
+earlier deadline skip. Final/post-copy late events retain the exact rejecting
+clock sample. Production `dmSyncopation` builds successfully; all 17 offline
+capture-helper tests, shell syntax, clang-format and whitespace checks pass.
+Instrument qualification awaits rebuilding/restarting synco and another capture;
+the text-log format remains readable by the existing reader.

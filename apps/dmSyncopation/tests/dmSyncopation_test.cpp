@@ -224,6 +224,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_zeroClock;
     using dmSyncopation::m_zeroDurationSec;
     using dmSyncopation::m_zeroEvents;
+    using dmSyncopation::m_zeroHaveCombined;
     using dmSyncopation::m_zeroIdle;
     using dmSyncopation::m_zeroLastCombined;
     using dmSyncopation::m_zeroLateUs;
@@ -257,7 +258,14 @@ class Harness : public dmSyncopation
     using dmSyncopation::updateSimulationINDI;
     using dmSyncopation::updateZeroTest;
     using dmSyncopation::waitUntil;
+    using dmSyncopation::ZeroEvent;
+    using dmSyncopation::ZeroOutcome;
+    using dmSyncopation::ZeroStage;
+    using dmSyncopation::zeroTestActionName;
     using dmSyncopation::zeroTestReady;
+    using dmSyncopation::zeroTestReasonName;
+    using dmSyncopation::zeroTestStageName;
+    using dmSyncopation::zeroTestWait;
     using MagAOXApp<true>::config;
     using dev::shmimMonitor<dmSyncopation>::m_imageStream;
     using dev::shmimMonitor<dmSyncopation>::m_shmimName;
@@ -6673,20 +6681,26 @@ TEST_CASE( "syncopation readiness drains only one fixed raw event batch", "[dmSy
 /// Emulate only fixture-owned combined/read-release events on the app's monotonic adapters.
 struct ZeroClock
 {
-    static inline int64_t  time{ 1000000000 }; ///< Current private virtual execution time.
-    static inline Harness *app{ nullptr };     ///< Unstarted app under test.
-    static inline Streams *streams{ nullptr }; ///< Private primary, combined and auxiliary pixels.
-    static inline uint64_t targetCounter{ 0 }; ///< Last auxiliary counter acknowledged by the fake combiner.
-    static inline uint64_t sequence{ 0 };      ///< Fake controller attempt sequence.
-    static inline bool     release{ true };    ///< Supply exact actual-reader clearance when requested.
-    static inline bool     combine{ true };    ///< Acknowledge auxiliary updates in the fake combiner.
-    static inline bool     earlyMain{ false }; ///< Advance the genuine primary during the next timed wait.
-    static inline bool     cancel{ false };    ///< Cancel the finite trial during its next timed wait.
-    static inline int64_t  wakeDelay{ 0 };     ///< Inject host wake lateness without changing any planned grid.
-    static inline int64_t  lateOnceAt{ 0 };    ///< Delay one selected wake without moving subsequent targets.
-    static inline int64_t  mainDelay{ 0 };     ///< Delay fake dmcomb relative to each genuine primary publication.
-    static inline int64_t  pendingMainAt{ 0 }; ///< A pending main combination in the private virtual clock.
-    static inline std::vector<int64_t> posts;  ///< Actual auxiliary publication times observed by the fixture.
+    static inline int64_t  time{ 1000000000 };   ///< Current private virtual execution time.
+    static inline Harness *app{ nullptr };       ///< Unstarted app under test.
+    static inline Streams *streams{ nullptr };   ///< Private primary, combined and auxiliary pixels.
+    static inline uint64_t targetCounter{ 0 };   ///< Last auxiliary counter acknowledged by the fake combiner.
+    static inline uint64_t sequence{ 0 };        ///< Fake controller attempt sequence.
+    static inline bool     release{ true };      ///< Supply exact actual-reader clearance when requested.
+    static inline bool     combine{ true };      ///< Acknowledge auxiliary updates in the fake combiner.
+    static inline bool     earlyMain{ false };   ///< Advance the genuine primary during the next timed wait.
+    static inline bool     cancel{ false };      ///< Cancel the finite trial during its next timed wait.
+    static inline bool primaryWriting{ false };  ///< Inject an in-progress primary write without changing its counter.
+    static inline bool targetIntrusion{ false }; ///< Inject a competing auxiliary publication during a timed wait.
+    static inline int  waitError{ 0 };           ///< Return one selected absolute-wait error on every timed wait.
+    static inline int64_t postCopyDelay{ 0 }; ///< One-shot delay only after the zero copy starts, before publication.
+    static inline int64_t costlyAt{ 0 };      ///< Start of one slot's simulated clock-read overhead window.
+    static inline int64_t nowCost{ 0 };       ///< Extra execution time per clock read inside that window.
+    static inline int64_t wakeDelay{ 0 };     ///< Inject host wake lateness without changing any planned grid.
+    static inline int64_t lateOnceAt{ 0 };    ///< Delay one selected wake without moving subsequent targets.
+    static inline int64_t mainDelay{ 0 };     ///< Delay fake dmcomb relative to each genuine primary publication.
+    static inline int64_t pendingMainAt{ 0 }; ///< A pending main combination in the private virtual clock.
+    static inline std::vector<int64_t> posts; ///< Actual auxiliary publication times observed by the fixture.
 
     /// Retain one exact combined publication and optional early release.
     static void combined();
@@ -6730,6 +6744,17 @@ int64_t ZeroClock::now()
 {
     time += 100;
 
+    if( costlyAt && time >= costlyAt && time < costlyAt + 50000 )
+    {
+        time += nowCost;
+    }
+
+    if( postCopyDelay && app && streams->images[2].md->write )
+    {
+        time += postCopyDelay;
+        postCopyDelay = 0;
+    }
+
     if( pendingMainAt && time >= pendingMainAt )
     {
         pendingMainAt = 0;
@@ -6766,13 +6791,25 @@ int ZeroClock::wait( const timespec *target )
         earlyMain = false;
     }
 
+    if( primaryWriting )
+    {
+        streams->images[0].md->write = 1;
+        primaryWriting               = false;
+    }
+
+    if( targetIntrusion )
+    {
+        targetCounter   = ++streams->images[2].md->cnt0;
+        targetIntrusion = false;
+    }
+
     if( cancel )
     {
         app->m_enabled = false;
         cancel         = false;
     }
 
-    return 0;
+    return waitError;
 }
 
 void ZeroClock::connect( Harness &scheduler, Streams &images, int steps )
@@ -6783,6 +6820,10 @@ void ZeroClock::connect( Harness &scheduler, Streams &images, int steps )
     sequence = 0;
     release = combine = true;
     earlyMain = cancel = false;
+    primaryWriting = targetIntrusion = false;
+    waitError                        = 0;
+    postCopyDelay                    = 0;
+    costlyAt = nowCost = 0;
     wakeDelay          = 0;
     lateOnceAt = mainDelay = pendingMainAt = 0;
     posts.clear();
@@ -6848,6 +6889,35 @@ int64_t ZeroClock::warm()
     REQUIRE( posts.empty() );
     return 1000000000LL + 20006LL * 500000;
 }
+
+/// Check that every auxiliary opportunity has exactly one disjoint publication or skip outcome.
+void checkZeroPartition( const Harness &app /**< [in] Completed private trial callback. */ )
+{
+    const auto &stats = app.m_zeroStats;
+    CHECK( stats.posted == stats.acknowledged + stats.unacknowledged );
+    CHECK( stats.skipped == stats.late + stats.readerMissing + stats.primaryChanged + stats.primaryWriting +
+                                stats.resourceUnavailable + stats.cancelled + stats.durationExpired + stats.waitError +
+                                stats.combinedUnclassified + stats.invalidTarget );
+    CHECK( app.m_zeroEvents.dropped() == 0 );
+}
+
+/// Drain only auxiliary outcomes, excluding genuine-main and trial lifecycle events.
+std::vector<Harness::ZeroEvent> zeroAuxiliaryEvents( Harness &app /**< [in,out] Private trial event queue. */ )
+{
+    std::vector<Harness::ZeroEvent> events;
+    Harness::ZeroEvent              event;
+
+    while( app.m_zeroEvents.pop( event ) )
+    {
+        if( event.step > 0 )
+        {
+            events.push_back( event );
+        }
+    }
+
+    CHECK( events.size() == app.m_zeroStats.posted + app.m_zeroStats.skipped );
+    return events;
+}
 /// \endcond
 
 /// Genuine step zero plus only N-1 timed auxiliary publications produces the requested total cadence.
@@ -6870,6 +6940,14 @@ TEST_CASE( "coordinated zero trial publishes only intermediate main-grid slots",
     REQUIRE( app.m_zeroStats.acknowledged == uint64_t( steps - 1 ) );
     REQUIRE( app.m_zeroStats.skipped == 0 );
     REQUIRE( ZeroClock::posts.size() == size_t( steps - 1 ) );
+    checkZeroPartition( app );
+
+    for( const auto &event : zeroAuxiliaryEvents( app ) )
+    {
+        CHECK( std::string( Harness::zeroTestActionName( event ) ) == "acknowledged" );
+        CHECK( event.stage == Harness::ZeroStage::acknowledgement );
+        CHECK( event.reason == Harness::ZeroOutcome::none );
+    }
 
     for( int step = 1; step < steps; ++step )
     {
@@ -6906,31 +6984,66 @@ TEST_CASE( "coordinated zero trial skips lost readiness and obsolete slots", "[d
     ZeroClock::connect( app, streams, 3 );
     const auto next = ZeroClock::warm();
     app.m_enabled   = true;
+    auto reason     = Harness::ZeroOutcome::none;
+    auto stage      = Harness::ZeroStage::wait;
 
     SECTION( "missing exact reader release" )
     {
         ZeroClock::release = false;
+        reason             = Harness::ZeroOutcome::readerMissing;
+        stage              = Harness::ZeroStage::reader;
     }
 
     SECTION( "late scheduler wake" )
     {
         ZeroClock::wakeDelay = 20000;
+        reason               = Harness::ZeroOutcome::late;
+        stage                = Harness::ZeroStage::deadline;
     }
 
     SECTION( "early next main" )
     {
         ZeroClock::earlyMain = true;
+        reason               = Harness::ZeroOutcome::primaryChanged;
     }
 
     SECTION( "operator cancellation" )
     {
         ZeroClock::cancel = true;
+        reason            = Harness::ZeroOutcome::cancelled;
+    }
+
+    SECTION( "in-progress primary write without a new counter" )
+    {
+        ZeroClock::primaryWriting = true;
+        reason                    = Harness::ZeroOutcome::primaryWriting;
+    }
+
+    SECTION( "competing auxiliary writer" )
+    {
+        ZeroClock::targetIntrusion = true;
+        reason                     = Harness::ZeroOutcome::resourceUnavailable;
+    }
+
+    SECTION( "absolute wait failure" )
+    {
+        ZeroClock::waitError = EIO;
+        reason               = Harness::ZeroOutcome::waitError;
     }
 
     ZeroClock::primary( next );
     CHECK( app.m_zeroStats.posted == 0 );
     CHECK( app.m_zeroStats.skipped == 2 );
     CHECK( ZeroClock::posts.empty() );
+    checkZeroPartition( app );
+
+    for( const auto &event : zeroAuxiliaryEvents( app ) )
+    {
+        CHECK( event.reason == reason );
+        CHECK( event.stage == stage );
+        CHECK( event.waitResult == ( reason == Harness::ZeroOutcome::waitError ? EIO : 0 ) );
+        CHECK( std::string( Harness::zeroTestActionName( event ) ) == "skipped" );
+    }
     // clang-format off
 #ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
     MagAOX::app::dmSyncopation::processZeroTestPrimary;
@@ -6956,6 +7069,15 @@ TEST_CASE( "coordinated zero trial expires independently of requested slots", "[
     CHECK_FALSE( app.m_zeroStats.active );
     CHECK( app.m_zeroStats.posted == 0 );
     CHECK( ZeroClock::posts.empty() );
+    CHECK( app.m_zeroStats.durationExpired == 2 );
+    CHECK( app.m_zeroStats.cancelled == 0 );
+    checkZeroPartition( app );
+
+    for( const auto &event : zeroAuxiliaryEvents( app ) )
+    {
+        CHECK( event.reason == Harness::ZeroOutcome::durationExpired );
+        CHECK( event.stage == Harness::ZeroStage::wait );
+    }
     // clang-format off
 #ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
     MagAOX::app::dmSyncopation::processZeroTestPrimary;
@@ -7029,7 +7151,7 @@ TEST_CASE( "coordinated zero trial refuses a nonzero initial contribution", "[dm
     // clang-format on
 }
 
-/// One missed auxiliary occurrence does not suppress a later independently safe slot.
+/// Every deadline check labels lateness without suppressing a later independently safe slot.
 TEST_CASE( "coordinated zero trial keeps the second slot after first-slot lateness", "[dmSyncopation][zeroTest]" )
 {
     Streams streams;
@@ -7039,20 +7161,128 @@ TEST_CASE( "coordinated zero trial keeps the second slot after first-slot latene
     synco::GridTime grid;
     uint64_t        period = 0;
     REQUIRE( app.m_zeroClock.frozenGrid( streams.images[0].md->cnt0 + 1, grid, period ) );
-    ZeroClock::lateOnceAt = synco::stepGrid( grid, period, 1, 3 ).ns;
-    app.m_enabled         = true;
+    const auto first = synco::stepGrid( grid, period, 1, 3 ).ns;
+    auto       stage = Harness::ZeroStage::deadline;
+
+    SECTION( "initial deadline after wake" )
+    {
+        ZeroClock::lateOnceAt = first;
+    }
+
+    SECTION( "final deadline before copying" )
+    {
+        ZeroClock::costlyAt = first;
+        ZeroClock::nowCost  = 2000;
+        stage               = Harness::ZeroStage::finalGuard;
+    }
+
+    SECTION( "deadline after copying but before publication" )
+    {
+        ZeroClock::postCopyDelay = 20000;
+        stage                    = Harness::ZeroStage::postCopyGuard;
+    }
+
+    const auto counterBefore = streams.images[2].md->cnt0;
+    app.m_enabled            = true;
     ZeroClock::primary( next );
     REQUIRE( app.m_zeroStats.skipped == 1 );
     REQUIRE( app.m_zeroStats.late == 1 );
     REQUIRE( app.m_zeroStats.posted == 1 );
     REQUIRE( app.m_zeroStats.acknowledged == 1 );
     REQUIRE( ZeroClock::posts.size() == 1 );
+    CHECK( app.m_zeroStats.primaryChanged == 0 );
+    CHECK( streams.images[2].md->cnt0 == counterBefore + 1 );
+    CHECK( streams.images[2].md->write == 0 );
+    checkZeroPartition( app );
+    const auto events = zeroAuxiliaryEvents( app );
+    REQUIRE( events.size() == 2 );
+    CHECK( events[0].step == 1 );
+    CHECK( events[0].reason == Harness::ZeroOutcome::late );
+    CHECK( events[0].stage == stage );
+    CHECK( events[0].observedNs - events[0].targetNs > int64_t( app.m_zeroLateUs * 1000 ) );
+    CHECK( std::string( Harness::zeroTestReasonName( events[0].reason ) ) == "late" );
+    CHECK( std::string( Harness::zeroTestActionName( events[0] ) ) == "skipped" );
+    CHECK( events[1].step == 2 );
+    CHECK( std::string( Harness::zeroTestActionName( events[1] ) ) == "acknowledged" );
     const auto second = synco::stepGrid( grid, period, 2, 3 ).ns;
     CHECK( ZeroClock::posts[0] >= second );
     CHECK( ZeroClock::posts[0] - second <= int64_t( app.m_zeroLateUs * 1000 ) );
     // clang-format off
 #ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
     MagAOX::app::dmSyncopation::processZeroTestPrimary;
+    MagAOX::app::dmSyncopation::zeroTestSkip;
+    MagAOX::app::dmSyncopation::zeroTestActionName;
+    MagAOX::app::dmSyncopation::zeroTestReasonName;
+#endif
+    // clang-format on
+}
+
+/// Missing acknowledgement remains a published attempt, while the next unsafe slot is skipped.
+TEST_CASE( "coordinated zero trial separates unacknowledged posts from skips", "[dmSyncopation][zeroTest]" )
+{
+    Streams streams;
+    Harness app;
+    ZeroClock::connect( app, streams, 3 );
+    const auto next    = ZeroClock::warm();
+    ZeroClock::combine = false;
+    app.m_enabled      = true;
+    ZeroClock::primary( next );
+    CHECK( app.m_zeroStats.posted == 1 );
+    CHECK( app.m_zeroStats.acknowledged == 0 );
+    CHECK( app.m_zeroStats.unacknowledged == 1 );
+    CHECK( app.m_zeroStats.skipped == 1 );
+    CHECK( app.m_zeroStats.readerMissing == 1 );
+    CHECK( app.m_zeroStats.combinedUnclassified == 0 );
+    CHECK( ZeroClock::posts.size() == 1 );
+    checkZeroPartition( app );
+    const auto events = zeroAuxiliaryEvents( app );
+    REQUIRE( events.size() == 2 );
+    CHECK( std::string( Harness::zeroTestActionName( events[0] ) ) == "unacknowledged" );
+    CHECK( events[0].reason == Harness::ZeroOutcome::ackTimeout );
+    CHECK( events[0].stage == Harness::ZeroStage::acknowledgement );
+    CHECK( std::string( Harness::zeroTestActionName( events[1] ) ) == "skipped" );
+    CHECK( events[1].reason == Harness::ZeroOutcome::readerMissing );
+    CHECK( std::string( Harness::zeroTestStageName( events[1].stage ) ) == "reader" );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::processZeroTestPrimary;
+    MagAOX::app::dmSyncopation::zeroTestEvent;
+    MagAOX::app::dmSyncopation::zeroTestActionName;
+    MagAOX::app::dmSyncopation::zeroTestStageName;
+#endif
+    // clang-format on
+}
+
+/// An unmatched genuine main records one classified skip for each denied auxiliary slot.
+TEST_CASE( "coordinated zero trial records every unmatched-main auxiliary skip", "[dmSyncopation][zeroTest]" )
+{
+    Streams streams;
+    Harness app;
+    ZeroClock::connect( app, streams, 3 );
+    const auto next        = ZeroClock::warm();
+    app.m_zeroHaveCombined = false;
+    app.m_enabled          = true;
+    ZeroClock::primary( next );
+    CHECK( app.m_zeroStats.mainUnmatched == 1 );
+    CHECK( app.m_zeroStats.posted == 0 );
+    CHECK( app.m_zeroStats.skipped == 2 );
+    CHECK( app.m_zeroStats.combinedUnclassified == 2 );
+    CHECK( ZeroClock::posts.empty() );
+    checkZeroPartition( app );
+    const auto events = zeroAuxiliaryEvents( app );
+    REQUIRE( events.size() == 2 );
+
+    for( size_t index = 0; index < events.size(); ++index )
+    {
+        CHECK( events[index].step == int( index + 1 ) );
+        CHECK( events[index].reason == Harness::ZeroOutcome::combinedUnclassified );
+        CHECK( events[index].stage == Harness::ZeroStage::mainAcknowledgement );
+        CHECK( std::string( Harness::zeroTestActionName( events[index] ) ) == "skipped" );
+    }
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::processZeroTestPrimary;
+    MagAOX::app::dmSyncopation::zeroTestSkip;
 #endif
     // clang-format on
 }

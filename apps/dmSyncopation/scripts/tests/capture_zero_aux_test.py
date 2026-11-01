@@ -53,8 +53,8 @@ class CaptureZeroAuxTest(unittest.TestCase):
             'dmtweeter-synco)\n'
             ' printf "dmtweeter-synco.enable.toggle=%s\\n" "$enable"\n'
             ' printf "dmtweeter-synco.settings.steps=%s\\n" "$steps"\n'
-            ' printf "dmtweeter-synco.zero_test.enabled=%s\\n" "${ZERO_TEST_MODE:-1}"\n'
-            ' printf "dmtweeter-synco.zero_test.durationSec=120\\n";;\n'
+            ' printf "dmtweeter-synco.zero_test.enabled=%s\\n" "${ZERO_TEST_MODE-1}"\n'
+            ' printf "dmtweeter-synco.zero_test.durationSec=%s\\n" "${ZERO_TEST_LIMIT-120}";;\n'
             'dmtweeter-synco.zero_test)\n'
             ' [[ ${ZERO_TEST_POLL_STATUS:-0} != 0 ]] && exit "$ZERO_TEST_POLL_STATUS"\n'
             ' count=0\n[[ -f $ZERO_TEST_ROOT/polls ]] && count=$(cat "$ZERO_TEST_ROOT/polls")\n'
@@ -73,8 +73,10 @@ class CaptureZeroAuxTest(unittest.TestCase):
             ' printf "dmtweeter-synco.zero_test.elapsedSec=%s\\n" "$elapsed"\n'
             ' printf "dmtweeter-synco.zero_test.finished=%s\\n" "$((count>=2))";;\n'
             'camwfs)\n'
-            ' printf "camwfs.fps.current=%s\\ncamwfs.synchro.toggle=On\\n" "${ZERO_TEST_FPS:-2000}";;\n'
-            'sysMonRTC.set_latency.toggle) printf "sysMonRTC.set_latency.toggle=On\\n";;\n'
+            ' printf "camwfs.fps.current=%s\\ncamwfs.synchro.toggle=%s\\n" '
+            '"${ZERO_TEST_FPS-2000}" "${ZERO_TEST_SYNC-On}";;\n'
+            'sysMonRTC.set_latency.toggle) printf "sysMonRTC.set_latency.toggle=%s\\n" '
+            '"${ZERO_TEST_LATENCY-On}";;\n'
             '*) printf "fake.current=1\\n";;\nesac',
         )
         self.stub(
@@ -166,10 +168,11 @@ class CaptureZeroAuxTest(unittest.TestCase):
     def test_preexisting_enabled_run_is_not_cancelled(self):
         """Refuse a run owned by another operator without sending any mutation."""
         (self.root / "enable").write_text("On")
-        code, _, _ = self.run_capture("4000", "1")
+        code, _, stderr = self.run_capture("4000", "1")
         self.assertEqual(code, 1)
         self.assertEqual(self.set_calls(), [])
         self.assertEqual((self.root / "enable").read_text(), "On")
+        self.assertIn('dmtweeter-synco.enable.toggle actual="On"; expected="Off"', stderr)
 
     def test_wrong_camera_or_mode_never_enables(self):
         """Startup defaults or a missing test binary cannot start a trial."""
@@ -184,10 +187,72 @@ class CaptureZeroAuxTest(unittest.TestCase):
     def test_baseline_reader_failure_never_enables(self):
         """A failed telemetry reader prevents the write request."""
         self.env["ZERO_TEST_COLLECTOR_STATUS"] = "255"
-        code, _, _ = self.run_capture("4000", "1")
+        code, _, stderr = self.run_capture("4000", "1")
         self.assertEqual(code, 1)
         self.assertEqual(self.set_calls(), [])
         self.assertIn("status=255", (self.capture_dir() / "status.txt").read_text())
+        self.assertIn("telemetry collector dmtweeter-synco (pid ", stderr)
+        self.assertIn('actual="not running"; expected="running"', stderr)
+
+    def test_setup_reports_every_mismatched_gate(self):
+        """Print all actual/expected property mismatches without requesting writes."""
+        (self.root / "enable").write_text("On")
+        self.env.update(
+            ZERO_TEST_MODE="0", ZERO_TEST_LIMIT="0", ZERO_TEST_FPS="3622",
+            ZERO_TEST_SYNC="Off", ZERO_TEST_LATENCY="Off",
+        )
+        code, _, stderr = self.run_capture("4000", "60")
+        self.assertEqual(code, 1)
+        self.assertEqual(self.set_calls(), [])
+        messages = [
+            'dmtweeter-synco.enable.toggle actual="On"; expected="Off"',
+            'dmtweeter-synco.zero_test.enabled actual="0"; expected="1"',
+            'camwfs.synchro.toggle actual="Off"; expected="On"',
+            'sysMonRTC.set_latency.toggle actual="Off"; expected="On"',
+            'camwfs.fps.current actual="3622"; expected="numeric FPS from 1999 through 2001"',
+            'dmtweeter-synco.zero_test.durationSec actual="0"; '
+            'expected="numeric seconds from requested 60 through 120"',
+        ]
+        saved = (self.capture_dir() / "status.txt").read_text()
+        for message in messages:
+            with self.subTest(message=message):
+                self.assertIn(message, stderr)
+                self.assertIn(message, saved)
+
+    def test_setup_reports_missing_numeric_values(self):
+        """Missing numeric readbacks name both failed gates explicitly."""
+        self.env.update(ZERO_TEST_LIMIT="", ZERO_TEST_FPS="")
+        code, _, stderr = self.run_capture("6000", "60")
+        self.assertEqual(code, 1)
+        self.assertEqual(self.set_calls(), [])
+        self.assertIn('camwfs.fps.current actual="<missing>"', stderr)
+        self.assertIn('dmtweeter-synco.zero_test.durationSec actual="<missing>"', stderr)
+
+    def test_setup_reports_duration_bounds(self):
+        """Preserve the requested-duration and 120-second upper-limit gates."""
+        for value in ["30", "121", "nan"]:
+            with self.subTest(value=value):
+                self.env["ZERO_TEST_LIMIT"] = value
+                code, _, stderr = self.run_capture("4000", "60")
+                self.assertEqual(code, 1)
+                self.assertEqual(self.set_calls(), [])
+                self.assertIn(
+                    f'dmtweeter-synco.zero_test.durationSec actual="{value}"; '
+                    'expected="numeric seconds from requested 60 through 120"',
+                    stderr,
+                )
+
+    def test_setup_reports_baseline_command_status(self):
+        """A failed baseline command names the device and actual nonzero status."""
+        self.env["ZERO_TEST_INDI_STATUS"] = "124"
+        code, _, stderr = self.run_capture("4000", "1")
+        self.assertEqual(code, 1)
+        self.assertEqual(self.set_calls(), [])
+        self.assertIn(
+            'getINDI dmtweeter-synco baseline status actual="124"; expected="0"',
+            stderr,
+        )
+        self.assertIn('dmtweeter-synco.enable.toggle actual="<missing>"; expected="Off"', stderr)
 
     def test_failed_enable_still_requests_off(self):
         """An uncertain enable result is cancelled because it may have applied."""

@@ -70,6 +70,16 @@ status()
     printf '%s\n' "$*" >> "$zero_capture_dir/status.txt"
 }
 
+setup_failure()
+{
+    local zero_actual=${2:-<missing>}
+    local zero_message
+    printf -v zero_message 'Setup check failed: %s actual="%s"; expected="%s"' "$1" "$zero_actual" "$3"
+    printf '%s\n' "$zero_message" >&2
+    status "$zero_message"
+    zero_capture_failed=1
+}
+
 read_property()
 {
     local zero_key=$1
@@ -89,6 +99,10 @@ snapshot()
     if (( zero_status != 0 ))
     then
         zero_capture_failed=1
+        if [[ $zero_phase == before ]]
+        then
+            setup_failure "getINDI $zero_device baseline status" "$zero_status" 0
+        fi
     fi
 }
 
@@ -150,11 +164,12 @@ for zero_device in dmtweeter-synco dmtweeter camwfs holoop sysMonRTC.set_latency
 do
     snapshot before "$zero_device"
 done
-for zero_pid in "${zero_collectors[@]}"
+for zero_index in "${!zero_collectors[@]}"
 do
+    zero_pid=${zero_collectors[$zero_index]}
     if ! kill -0 "$zero_pid" 2>/dev/null
     then
-        zero_capture_failed=1
+        setup_failure "telemetry collector ${zero_devices[$zero_index]} (pid $zero_pid)" 'not running' running
     fi
 done
 
@@ -167,10 +182,22 @@ zero_limit=$(read_property dmtweeter-synco.zero_test.durationSec "$zero_synco_be
 zero_camera_fps=$(read_property camwfs.fps.current "$zero_camera_before")
 zero_camera_sync=$(read_property camwfs.synchro.toggle "$zero_camera_before")
 zero_latency=$(read_property sysMonRTC.set_latency.toggle "$zero_latency_before")
-if (( zero_capture_failed )) || [[ $zero_enabled != Off || $zero_mode != 1 || $zero_camera_sync != On || $zero_latency != On ]] ||
-   ! awk -v fps="$zero_camera_fps" -v limit="$zero_limit" -v duration="$zero_seconds" \
-       'BEGIN { exit !(fps ~ /^[0-9]+([.][0-9]+)?$/ && fps >= 1999 && fps <= 2001 &&
-                       limit ~ /^[0-9]+([.][0-9]+)?$/ && limit >= duration && limit <= 120) }'
+[[ $zero_enabled == Off ]] || setup_failure dmtweeter-synco.enable.toggle "$zero_enabled" Off
+[[ $zero_mode == 1 ]] || setup_failure dmtweeter-synco.zero_test.enabled "$zero_mode" 1
+[[ $zero_camera_sync == On ]] || setup_failure camwfs.synchro.toggle "$zero_camera_sync" On
+[[ $zero_latency == On ]] || setup_failure sysMonRTC.set_latency.toggle "$zero_latency" On
+if ! awk -v fps="$zero_camera_fps" \
+     'BEGIN { exit !(fps ~ /^[0-9]+([.][0-9]+)?$/ && fps >= 1999 && fps <= 2001) }'
+then
+    setup_failure camwfs.fps.current "$zero_camera_fps" 'numeric FPS from 1999 through 2001'
+fi
+if ! awk -v limit="$zero_limit" -v duration="$zero_seconds" \
+     'BEGIN { exit !(limit ~ /^[0-9]+([.][0-9]+)?$/ && limit >= duration && limit <= 120) }'
+then
+    setup_failure dmtweeter-synco.zero_test.durationSec "$zero_limit" \
+        "numeric seconds from requested $zero_seconds through 120"
+fi
+if (( zero_capture_failed ))
 then
     printf 'Setup check failed; no enable request sent. Inspect before snapshots and status.txt.\n' >&2
     cleanup
