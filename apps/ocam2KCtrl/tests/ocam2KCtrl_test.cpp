@@ -1841,6 +1841,48 @@ TEST_CASE( "ocam2KCtrl acquisition recovery establishes a new timeout baseline",
     // clang-format on
 }
 
+/** \brief Invalid acquisitions request recovery while powered even if the power target is unknown.
+ *
+ * An unknown target, e.g. after the PDU restarts, previously suppressed recovery so the worker reran configuration on
+ * a failed EDT device indefinitely.
+ * \ingroup ocam2KCtrl_unit_test
+ */
+TEST_CASE( "ocam2KCtrl acquisition failures request recovery with an unknown power target",
+           "[ocam2KCtrl][acquisition]" )
+{
+    resetStubState();
+    ocam2KCtrl_test app;
+    setPoweredOn( app );
+    app.m_powerTargetState = -1;
+    app.m_modeName         = "science";
+    app.m_nextMode         = "";
+    app.m_reconfig         = false;
+    REQUIRE( app.startAcquisition() == 0 );
+
+    SECTION( "failed SDK acquisition" )
+    {
+        g_edtStubState.waitReturnsNull = true;
+        REQUIRE( app.acquireAndCheckValid() == -1 );
+    }
+
+    SECTION( "corrupt frame number" )
+    {
+        setStubFrameNumber( 500 );
+        app.m_lastImageNumber = 12;
+        REQUIRE( app.acquireAndCheckValid() == 1 );
+    }
+
+    CHECK( app.m_reconfig );
+    CHECK( app.m_nextMode == "science" );
+    CHECK( app.m_lastImageNumber == -1 );
+
+    // clang-format off
+#ifdef OCAM2KCTRL_TEST_DOXYGEN_REF
+    ocam2KCtrl::acquireAndCheckValid;
+#endif
+    // clang-format on
+}
+
 /// Verify eligible rings replenish their request after the sync publication and preserve immediate callers.
 /** \ingroup ocam2KCtrl_unit_test */
 TEST_CASE( "ocam2KCtrl defers eligible ring replenishment until both publications", "[ocam2KCtrl][acquisition]" )
