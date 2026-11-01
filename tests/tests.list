@@ -31,6 +31,7 @@
 ../apps/virtualPDU/tests/virtualPDU_test
 ../apps/acronameUsbHub/tests/acronameUsbHub_test
 ../apps/accelSim/tests/accelSim_test
+../apps/accelSim/tests/accelSimDisturbance_test
 ../apps/adcTracker/tests/adcTracker_test
 ../apps/alignLoop/tests/alignLoop_test
 ../apps/cacaoInterface/tests/cacaoInterface_test

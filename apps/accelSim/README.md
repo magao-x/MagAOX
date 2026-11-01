@@ -8,8 +8,74 @@ identity: supply the real instance with `-n` when its configuration is available
 
 The approved specification and engineering record are in
 [`acc-sim-app-creation.md`](../../agents/plans/2026-10/acc-sim-app-creation.md).
-There is no DM access, angular coordinate transform, transient generator, or
-instrument startup configuration in this implementation.
+There is no DM access, runtime angular coordinate transform, transient generator,
+or instrument startup configuration in this implementation. The independent
+numerical disturbance helpers described below do not run in the acquisition path.
+
+## Independent DM disturbance calculations
+
+[`accelSimDisturbance.hpp`](accelSimDisturbance.hpp) implements the physical
+conversion from the cleaned notebook without assuming a deployed DM configuration.
+It does **not** enable DM injection. There are no new application configuration keys,
+INDI controls, threads, or stream writes. The application and `acc000` timing code
+are unchanged. Deployment inputs and the remaining implementation are recorded in
+[`accelSim-dm-injection.md`](../../agents/plans/2026-10/accelSim-dm-injection.md).
+
+`accelSimDetail::pointingDisturbance` copies only `sample::m_pointing`, converting
+arcsec to radians in the simulator's X/Y axes. It does not use `m_wfsPointing`,
+sensor noise, or ADC values, and does not advance the model or draw random numbers.
+For supplied entrance-pupil coordinates in those same axes, it evaluates:
+
+- `opd(x,y)`: `theta_x*x + theta_y*y`, in metres.
+- `surface(x,y)`: half that OPD, converted to microns for a reflective surface.
+- `surfaceP2V(D)`: `D/2 * hypot(theta_x,theta_y) * 1e6`, in microns over a circular
+  pupil; the default entrance-pupil diameter is 6.5 m.
+
+These are ideal physical quantities, not actuator commands or a synthetic WFS.
+There is no assumed instrument-axis orientation. The notebook's example 30-degree
+rotation and 50-by-50 grid are not operational defaults. A 900-nm OPD P2V across
+6.5 m corresponds to 28.5597 mas pointing and 0.450 micron reflective surface P2V.
+The existing stationary C++ mode population predicts approximately 2.939 mas radial
+RMS and 0.04631 micron surface P2V RMS, consistent with the notebook's nominal
+scale. Individual finite records need not equal this ensemble result.
+
+`accelSimDetail::tipTiltBasis` separately accepts an explicit width, height, and
+two calibration planes. Each plane must express **native command units per radian
+of simulated X or Y pointing**, stored in native image order `x + width*y`. This
+is an input contract, not a supplied calibration. The caller must establish units,
+axis signs/orientation, pupil registration, and optical normalization, including
+reflection physics. The synthesis computes `theta_x*basis_x + theta_y*basis_y`
+without an additional factor of two, pupil scale, or inferred actuator geometry.
+No channel name, basis, or FITS-plane convention is selected by the helper.
+
+Calibration storage is copied/validated at construction; synthesis reuses a
+preallocated float image and replaces the whole contribution without accumulation.
+Nonfinite data, invalid dimensions, and output overflow are rejected. An overflow
+zeros the entire local output before throwing. `zero()` also clears only local
+memory: neither action promises that an applied DM command was cleared. Returned
+image references are owned by the helper and change on its next synthesis/zero
+call; one thread must own that mutable state. Numerical checks do not establish
+that calibration planes are physically correct, independent, or safe to apply.
+
+To test these helpers without MagAO-X runtime dependencies or shared memory:
+
+```sh
+c++ -std=c++20 -O3 -fno-fast-math -Wall -Wextra -DCATCH_CONFIG_MAIN \
+  apps/accelSim/tests/accelSimDisturbance_test.cpp \
+  -o /tmp/accelSim_disturbance_test
+/tmp/accelSim_disturbance_test '[disturbance]'
+```
+
+Do not compile the numerical checks with fast-math: finite-input validation and
+the near-unit-root vibration model require ordinary floating-point semantics.
+The suite is also registered in `tests/tests.list` with the usual application
+unit-test group. All bases in its tests are synthetic, explicitly defined fixtures.
+
+Runtime integration remains blocked on the target/channel reservation, deployed
+calibration and X/Y mapping, combiner trigger/cadence/phase contract, and applied
+zero/failure policy. Those inputs will determine configuration, FITS loading,
+the acquisition-to-DM snapshot handoff, and the writer lifecycle. Injection remains
+off and cannot be enabled by this numerical-only implementation.
 
 ## Model and timing
 

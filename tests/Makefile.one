@@ -44,6 +44,10 @@ ifeq ($(notdir $(TESTNAME)),accelSim_test)
     # Preserve nonfinite validation and near-unit-root arithmetic in the numerical model.
     CXXFLAGS += -fno-fast-math
     $(OBJNAME): $(PATHNAME)../accelSim.hpp $(PATHNAME)../accelSimModel.hpp
+else ifeq ($(notdir $(TESTNAME)),accelSimDisturbance_test)
+    # Keep finite-input checks and the shared stationary model's arithmetic intact.
+    CXXFLAGS += -fno-fast-math
+    $(OBJNAME): $(PATHNAME)../accelSimDisturbance.hpp $(PATHNAME)../accelSimModel.hpp
 else ifeq ($(notdir $(TESTNAME)),acronameUsbHub_test)
 	CPPFLAGS += -I$(TESTS_DIR)/../libs/BrainStem2
 else ifeq ($(notdir $(TESTNAME)),kcubeCtrl_test)
