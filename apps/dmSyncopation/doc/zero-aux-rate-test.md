@@ -7,8 +7,9 @@ dmSyncopation inserts zero-valued auxiliary updates on the established grid:
 | --- | --- | --- |
 | 4 kHz: two steps | One genuine main at step 0 | One zero write at +250 us |
 | 6 kHz: three steps | One genuine main at step 0 | Two zero writes at +166.667 and +333.333 us |
+| 8 kHz: four steps | One genuine main at step 0 | Three zero writes at +125, +250 and +375 us |
 
-There is no auxiliary post at step 0 and no independent 4/6 kHz timer added to
+There is no auxiliary post at step 0 and no independent 4/6/8 kHz timer added to
 the main loop. The zero contribution preserves the main, flat and other retained
 DM contributions. This trial uses an ideal constant-zero publisher: its command
 is already available, so there is no external provider to wait for or emulate.
@@ -37,6 +38,8 @@ make -C apps/dmSyncopation install
 The installed binary must expose `zero_test.labelVersion=3` and
 `zero_test.idealPublisher=1`; an older coordinated-trial binary does not have
 the early-staging behavior described here. Only dmSyncopation needs rebuilding.
+The 8 kHz option also requires the updated app's four-step support and capture
+script; the installed logdump and DM controller do not need rebuilding.
 The startup log's `MagAOX GIT` line identifies the launched binary independently
 of the capture directory's checkout hash. Merge
 [`dmtweeter_synco_zero_test.conf`](../dmtweeter_synco_zero_test.conf)
@@ -96,6 +99,10 @@ timeout -k 2s 8s getINDI dmtweeter-synco.zero_test
 ```
 
 Expect `labelVersion=3` and `idealPublisher=1` in addition to `enabled=1`.
+No `scheduler.maxCadenceHz=8000` setting is needed for the 8 kHz trial. This
+finite zero mode uses the clock-only grid estimator and its explicit total step
+count; it does not use the ordinary scheduler/shadow cadence-rating gate. The
+ordinary live/shadow maximum-cadence default is unchanged.
 
 ## Run and capture
 
@@ -112,11 +119,31 @@ After reviewing that result, run the **6 kHz total** trial:
 bash apps/dmSyncopation/scripts/capture-zero-aux-test.sh 6000 120
 ```
 
+For the **8 kHz total** extension, keep the same main loop, configuration and CPU
+placement. Start with ten active seconds:
+
+```bash
+bash apps/dmSyncopation/scripts/capture-zero-aux-test.sh 8000 10
+```
+
+If that capture shows clean admission/error counters and no material main-timing
+regression, repeat for the full interval:
+
+```bash
+bash apps/dmSyncopation/scripts/capture-zero-aux-test.sh 8000 120
+```
+
+This selects four total steps while Off; it does not add 8 kHz on top of the
+2 kHz main. Keep the existing 5 us publication guard, exact readiness/identity
+checks and three pipeline credits. No CPU or controller setting changes are
+part of this extension.
+
 The second argument is active seconds, an integer from 1 through 120. The script
 starts synco/controller/camera telemetry collectors first, saves bounded before
 snapshots, requires explicit test mode and Off, checks camera 2 kHz/synchronization
-and RTC latency, changes `settings.steps` to two/three while disabled and verifies
-the readback, then requests On. It allows up to 30 seconds to qualify the grid,
+and RTC latency, changes `settings.steps` to two/three/four while disabled and
+verifies the readback, then requests On. It allows up to 30 seconds to qualify
+the grid,
 waits for the trial or requested shorter duration, requests Off, saves after
 snapshots, and stops only its own collectors. No sudo is required.
 
@@ -143,7 +170,8 @@ timeout -k 2s 5s setINDI -s dmtweeter-synco.enable.toggle=On
 timeout -k 2s 8s getINDI dmtweeter-synco.zero_test
 ```
 
-Use three steps for 6 kHz, changing settings only while Off. Cancel with:
+Use three steps for 6 kHz or four for 8 kHz, changing settings only while Off.
+Cancel with:
 
 ```bash
 timeout -k 2s 5s setINDI -s dmtweeter-synco.enable.toggle=Off
@@ -182,9 +210,19 @@ Read `zero_test` and synco telemetry as actual outcomes, separately from shadow
 the trial uses `zero_test` and `[zero_test]` text telemetry. Compare
 posted/acknowledged counts, independent skips and lateness,
 reader-invalid/drop coverage, exact identity matches, resource faults and
-telemetry loss. Two steps supply one auxiliary opportunity per main cycle;
-three supply two. Actual combined/controller cadence should approach 4/6 kHz
-only when those opportunities are delivered.
+telemetry loss. Two, three and four steps supply one, two and three auxiliary
+opportunities per main cycle. Actual combined/controller cadence should approach
+4/6/8 kHz only when those opportunities are delivered.
+
+At 8 kHz, nominal spacing is 125 us. The preceding 6 kHz capture measured SDK
+service through worker readiness up to 111.841 us: **13.159 us nominal
+headroom**, not a hard bound. Actual native-entry spacing and credit use depend
+on delivery/preparation and genuine-main excursions as well. Compare main
+primary/controller-to-SDK prefixes and their exact-match coverage with the
+6 kHz baseline, alongside SDK service,
+admission/retirement, overload/rejection/coalescing, failures and queue loss.
+This remains a finite ideal-zero empirical test, not a change to ordinary
+production scheduling or a qualification of nonzero provider commands.
 
 ### Read actual slot outcomes
 
@@ -193,8 +231,8 @@ publication** for that slot. It may already have copied zeros before the final
 guard rejected publication. A skipped slot does not imply that the genuine main
 command arrived early.
 
-Each scheduled auxiliary slot has one outcome event. Two total steps schedule
-one auxiliary slot per main cycle; three schedule two. When the main combination
+Each scheduled auxiliary slot has one outcome event. Two/three/four total steps
+schedule one/two/three auxiliary slots per main cycle. When the main combination
 cannot be matched, each dependent auxiliary slot gets its own skip event.
 
 | Counter | Meaning |
