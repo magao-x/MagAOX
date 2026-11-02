@@ -71,3 +71,13 @@ $ bash ./testMagAOX.bash
  * \brief Shared camera temperature configuration and callback tests.
  * \ingroup app_unit_test
  */
+
+/** \defgroup learningCtrlGUI_unit_test Learning Control GUI Unit Tests
+ * \brief Offline state, request, reconnect and layout tests for the shared NN/PO4AO panel.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup gui_publisher_unit_test GUI Publisher Unit Tests
+ * \brief Socket-free discovery retry, routing and subscription lifecycle tests.
+ * \ingroup unit_test
+ */

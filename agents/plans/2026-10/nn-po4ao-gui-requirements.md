@@ -1,6 +1,6 @@
 # Shared NN / PO4AO GUI: requirements and implementation plan
 
-Created: 2026-10-28. Revised and reviewed: 2026-11-02. Status: implementation started on 2026-11-02; baseline committed and the first shared numerical-core increment implemented. Remaining phases and acceptance checks are tracked in `../2026-11/nn-po4ao-implementation.md`.
+Created: 2026-10-28. Revised and reviewed: 2026-11-02. Status: implementation started on 2026-11-02; baseline committed, the first shared numerical-core increment implemented, and the native Qt frontend built and tested. Remaining phases and acceptance checks are tracked in `../2026-11/nn-po4ao-implementation.md`.
 
 Prepared by GPT-6 from the user's shared-GUI request and subsequent decisions in this chat. This document is the implementation handoff. Sections 1–6 record the agreed behavior and explicit engineering defaults; sections 7–11 describe implementation, evidence, and acceptance work; section 12 records the final review. It supersedes conflicting proposals in `agents/plans/2026-09/nnReconstructor-gui.md` and the earlier interactive preview, particularly their loop-open and PO4AO-reset requirements.
 
