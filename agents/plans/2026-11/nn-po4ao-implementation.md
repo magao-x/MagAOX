@@ -57,3 +57,24 @@ These checks establish CPU extraction/packaging behavior only. No full training 
 6. Phase F: operator-run deployment and acceptance. Agents do not run on or connect commands to instrument hosts. Loop state and notebook/app responsibility remain operator-managed as agreed.
 
 No product decision was changed by this increment. The package is ready for continued implementation and local notebook experiments with explicit inputs; the complete GUI/trainer system is not ready for instrument deployment.
+
+## Native GUI increment, 2026-11-02
+
+The user requested continuing the GUI implementation and explicitly authorized read-only exao2 inspection. The earlier instruction-file change was reverted in `60b0d8a6`; `AGENTS.md` is now identical to the baseline and is not part of this GUI change.
+
+The current upstream revision was refreshed and remains `5a45f1c7b73faeb7dbe63dda18209e15306a2be8`. Import only `gui/lib/multiIndiPublisher.hpp` and its three offline test/harness files. The subscriber, manager, xWidget, common qmake settings and INDI dependencies required by that publisher already match this base. No pupilGuide implementation or unrelated upstream app change is needed. The upstream publisher's six offline cases passed 95 assertions before integration.
+
+The new `learningCtrl` widget and `learningCtrlGUI` launcher use the shared stylesheet, xWidget/statusLabel controls, Designer layouts, dynamic model definitions and queued publisher callbacks. Dropdown changes stay local until Enable. Reconstruction commands are explicit targets, independent of learning/collection state. Control labels reflect observed status; pending requests disable conflicting actions until Busy followed by Ok or Alert. The ten-second initial-acknowledgement timeout leaves the request visibly unknown and never retries it. Reset stays available during ordinary training/collection transitions. Property deletion, sparse updates, device mapping changes, two clients, disconnected state and long labels are covered by the socket-free widget tests.
+
+A request property must acknowledge Busy before sending its terminal state; requested values alone are not completion. This is the concrete GUI/companion contract documented in `gui/widgets/learningCtrl/README.md`. The supervisor is still required to implement it, including serialized operations and actual writer/worker completion. The GUI does not bypass the companion or invoke commands through a local shell. Its controls remain disabled when that companion is absent.
+
+Local verification: the real widget/launcher built with Qt 5.15.15, and 102 assertions in ten widget cases passed. The optional preview case passed four assertions and rendered the actual widget using the normal resource stylesheet. No socket is constructed in these tests. The local launcher build omits the unused mxlib pkg-config linkage via a command-line qmake override; the production project retains the common build rules. Qt reports that the installed macOS SDK is newer than its tested SDK, and the existing shared publisher emits missing-override warnings. Native Linux/instrument deployment remains untested.
+
+Read-only exao2 evidence:
+
+- All six numerical helper hashes match `source_manifest.json` exactly.
+- Instrument notebook SHA256: `cb8b68310b2b95e1506526b8bdfb87064f484b874c8fbdeab7bf0884528f3da6`. Its source differs only by commenting the initial random identity probe, adding a direct warmup plot, and whitespace; the training cell's numerical expressions are unchanged. The packaged core already leaves that optional probe to notebook code. The local parity fixture still intentionally includes the pinned notebook's probe and records its seed.
+- Installed milk source revision: `336160d054df5773a49d603ba987bea74692fcda`. `CacaoProcessTools.fps` exposes `RUNrunning`, `md().runpid`, `runpidstarttime` and status. `RUNrunning` checks PID liveness and distinguishes an unclean exit; clearing `CMDRUN` is only a stop request. PID identity/reuse still needs attention in the eventual adapter.
+- `FPSCONNECT_SIMPLE` writes bookkeeping metadata and connection logs, so no FPS object was instantiated during this read-only inspection. Only existing files, hashes, source definitions and directory/revision information were read. No INDI requests, control commands, process changes, installs or remote file writes occurred.
+
+Remaining acceptance is unchanged: managed configuration/worker/publication, C++ current-policy recollection, the companion's real operations and deployment are not supplied by a rendered frontend. This increment completes the native panel and its offline request/readback behavior; it does not claim working instrument control.
