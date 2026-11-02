@@ -388,9 +388,14 @@ Do not begin implementation until the user has reviewed the completed plan and a
 
 ## Task Summary
 
-Latest investigation update: 2026-11-01. **The user has now supplied the nominal physical pupil geometry and explicitly defined simulation X/Y as increasing DM image column/row. Direct projection onto the actual tweeter TT pair is numerically validated; the existing generic implementation requires no functional change. The telescope-secondary AEG offloading chain is excluded from disturbance calibration. Operational publication remains blocked, and acquisition, model, timing, and configuration are unchanged.** Current work updates documentation and synthetic regression coverage, with local real-calibration analysis under ignored scratch storage. Runtime publication, instrument access, channel/trigger selection, staging, commits, and pushes remain prohibited.
+Latest implementation update: 2026-11-02. **The user authorized runtime implementation and supplied the deployed combiner contract: changed summed additive `cnt0` causes recombination, AveMode=0, DClevel=0, process trigger mode 4 with 10-us delay. Active same-sample 8-kHz injection is now implemented for an explicitly configured existing channel, intended `dm01disp10`.** Startup enable is prohibited and scale defaults to zero. Preparation and final zero use the native active ImageStreamIO operation; no extra worker, model advance, or random draw is added. The original numerical projection remains unchanged. Only workstation numerical/mock tests have run; the full app/native-stream build is blocked by pre-existing macOS dependencies. See the final runtime implementation section for validation and commissioning limits. Preserve the earlier plan edits; no staging, commits, pushes, instrument access, deployed process changes, or physical stream writes.
 
-The final "Direct physical DM-pupil calibration" section records the current decision and validation. Earlier investigation entries retain their historical findings; statements that pupil scale or simulation-axis registration were unavailable are superseded by that section. No external Az/El, sky, or WFS registration is claimed.
+The "Direct physical DM-pupil calibration" section records the accepted physical mapping. The "Channel 10 and same-sample 8-kHz publication" section records the preceding design; its implementation gate was subsequently resolved by the user's deployed-system evidence and explicit authorization below. Earlier requirements for a separate worker, passive/lower-rate publication, or no runtime implementation are superseded. The original task specification above Agent Findings and Plan is retained verbatim; newer user instructions govern cadence, ownership, and implementation scope. No external Az/El, sky, or WFS registration is claimed, and the telescope-secondary AEG chain is excluded.
+
+Jared Males subsequently confirmed that existing MagAO-X/DM command protection is
+sufficient for this injection. The instrument-owner update at the end of this
+record removes the provisional actuator/P2V limiter. `dm.scale` remains an
+experiment amplitude control, not a hardware safety mechanism.
 
 Extend `accelSim` with an optional disturbance derived from its existing noise-free physical pointing state. Preserve its oscillator evolution, random draws, ADC conversion, `acc000` publication, timing, and phase synchronization. Use an exclusively assigned additive DM channel and the selected DM's calibrated actuator basis. Do not write the combined DM output, invent a WFS signal, or reproduce the notebook grid as an operational calibration.
 
@@ -410,7 +415,7 @@ Extend `accelSim` with an optional disturbance derived from its existing noise-f
 
 The supported architecture is therefore: existing vibration state -> calibrated two-mode actuator image -> exclusively assigned additive `dmXXdispYY` -> existing cacao dmcomb -> combined stream -> existing DM controller -> optical WFS. The normal flat and AO channels remain independently owned. A modal basis is useful internally, while the channel receives the complete instantaneous actuator contribution, never an accumulated increment.
 
-During the initial investigation, no deployed configuration/calibration was found in this checkout or the inspected sibling mxlib/handbook trees. `/opt/MagAOX`, `/opt/MagAOX/config`, and `/opt/MagAOX/calib` do not exist on this workstation. The actual cacao dmcomb implementation/configuration and ImageStreamIO C implementation were not available in those trees. The user subsequently supplied local copies of the tweeter cube, dmmask, and dmmap from the active default calibration (see the read-only validation below). The cube contents and fitting support are now validated. Channel assignments, gains, trigger selection, registered physical pupil coordinates, and writer assignments remain unresolved. No instrument connection or shared-memory access was attempted.
+During the initial investigation, no deployed configuration/calibration was found in this checkout or the inspected sibling mxlib/handbook trees. `/opt/MagAOX`, `/opt/MagAOX/config`, and `/opt/MagAOX/calib` do not exist on this workstation. The user subsequently supplied the calibration files and physical geometry, and then assigned channel 10 at 8 kHz. The actual deployed cacao dmcomb implementation/configuration, ImageStreamIO C implementation, and tweeterModulator executable/configuration mapping are still unavailable locally as of 2026-11-02. Gains, trigger behavior, and exclusive handover from existing writers remain to be verified. No instrument connection or shared-memory access was attempted.
 
 ### Physical reference and differences
 
@@ -426,29 +431,30 @@ During the initial investigation, no deployed configuration/calibration was foun
 
 - Use the current continuous C++ physical model unchanged, including its configured `sim.leverArm` (default 10 m) and unit vibration scale. No second oscillator bank and no integration of accelerometer samples.
 - Implementation remains header-only with out-of-class definitions, matching this app and its tests. Use the existing framegrabber/telemeter interface macros. No style ambiguity needs resolution for this proposed structure.
-- The operator must allocate the channel exclusively. ImageStreamIO's `write` flag, zero data, creator PID, or a name that looks like a disturbance channel does not establish exclusive writer ownership; network bridge receivers may also write it.
-- The proposed basis and worker design below are conditional on the answers. The supplied calibration identifies the tweeter; no additive channel number, sky-axis registration, operating amplitude limit, or numeric DM rate is assumed.
+- Channel 10 is operationally assigned for this experiment. The operator must complete exclusive handover from tweeterModulator/turbulence and any bridge writers before accelSim even zeros it. ImageStreamIO's `write` flag, zero data, or creator PID is not an ownership lock.
+- Both outputs target 8 kHz on RTC/exao2. The approximately 2-kHz WFS stream remains the existing phase reference, not the DM publication clock. The publication mechanism, actual combiner/driver throughput, and direct-path timing remain conditional on evidence.
 - All automated tests use numerical models, mocks, or isolated workstation/Linux-development shared memory without hardware drivers or bridges. Agents do not execute on instrument hosts, issue INDI hardware commands, commit, or push.
 
 ## Requirements
 
-1. Disabled by default; disabled operation must not open, zero, or otherwise access a DM stream. Preserve existing RNG sequence, physical/ADC outputs, INDI properties, and `acc000` creation and publication.
+1. Injection disabled and scale zero by default. With no configured/owned channel, perform no DM access. Once channel 10 is explicitly configured and exclusively handed over, validate it and publish startup zero even while disabled. Disabled does not mean ownership has been returned to tweeterModulator. Preserve existing RNG sequence, physical/ADC outputs, and `acc000` creation and publication.
 2. Preserve `waitUntil`, `waitSync`, `phaseClock`, deadlines, source-counter handling, catch-up, nominal rate changes, and framegrabber publication semantics. Keep 8 kHz acceleration sampling independent of a roughly 2 kHz reference.
-3. Reuse the completed sample's physical pointing with a sequence identifier and acquisition/model-time information. The DM worker must never advance, restart, reseed, or read mutable oscillator state concurrently.
+3. Reuse each successfully published accelerometer sample's physical `m_pointing`, with sequence and acquisition/model-time information. No additional model advancement, random draws, integration of ADC data, or use of `m_wfsPointing`. If a worker is necessary, pass an immutable sample snapshot rather than read mutable model state concurrently.
 4. Synthesize only calibrated tip/tilt into a preallocated actuator image with verified type, dimensions, mask, normalization, signs, and axis orientation. Preserve the normal flat and AO contributions.
-5. Perform stream connection, validation, calibration loading, image synthesis, waits, and semaphore publication outside the acquisition worker. The enabled acquisition path may only offer a bounded, nonblocking state copy; disabled operation bypasses that handoff.
-6. Establish the DM trigger contract and accepted sample-to-application latency before implementation. Dropped snapshots must not queue stale commands or create replay bursts. A 2 kHz command rate is plausible for modes up to 900 Hz, but is not inferred from the WFS reference alone; sample-and-hold and latency affect the spectrum.
+5. Load and validate calibration, solve the projection, connect streams, and preallocate/prefault buffers before enabling. Prefer bounded synthesis and publication in `frameGrabberPostPublish` after the corresponding ADC frame. No hot-path allocations, blocking locks, waits, filesystem I/O, calibration solves, or synchronous logging/INDI. Verify the installed publication helper before treating it as nonblocking. Use a preallocated nonblocking handoff only if the direct path cannot meet the timing budget.
+6. Publish one complete contribution per successful 8-kHz accelerometer sample while enabled/healthy, not one per WFS frame. Do not publish catch-up-only model steps or replay skipped frames. Verify whether active channel-10 writes cause each required combination; do not confuse an 8-kHz producer counter with measured combiner or hardware throughput. A failure to keep up must fault/inhibit injection without delaying `acc000`, not silently degrade to a lower-rate experiment.
 7. Enable only after validation and fresh state; disable/stop/fault must remove only the simulator contribution using the approved trigger/zero mechanism. A zero channel buffer does not prove that the mirror applied zero. Uncatchable process death cannot be handled solely by a destructor.
 8. Document conversions, operational ownership, verified calibration provenance, limitations, and validation evidence. Keep changes in the working tree and update this plan.
 
 ## Questions and Points of Clarification
 
-**Remaining operational questions (updated after direct DM-pupil calibration):**
+**Remaining operational inputs (updated after Jared's channel/rate guidance):**
 
-1. **Ownership and remaining calibration policy:** Which numbered tweeter additive channel is reserved exclusively for accelSim, and on which host will it be written? `dm01disp02` is not presumed available. Provide local copies of the effective controller/dmcomb configuration. The cube, resolved calibration identity, native array layout, surface-micron units, RMS-one normalization over dmmask, and fitting support are known. Nominal physical coordinates are now defined by center (24.5,24.5), diameter 48 pitches, D=6.5 m, +X=column, and +Y=row. Still needed are an accepted projection-residual tolerance and amplitude limits, channel gains/existing writers (including bridges), and `deltaChannels` classification. External sky/AzEl registration is not required for the intentional DM-pupil simulation convention.
-2. **Trigger, cadence, and zeroing:** Should writes be passive and sampled by the existing AO trigger, or should accelSim actively trigger a specified DM rate? Identify the trigger source/semantics, intended update phase relative to WFS exposure/AO output, and behavior when that trigger stops. Confirm how a final zero is applied during AO inactivity and what supervisor/operator mechanism removes a held disturbance after an uncatchable simulator failure. Existing driver clipping limits total commands but does not by itself remove a stale simulator channel.
+1. **Deployed writer identity and handover:** provide the RTC process-list entry, resolved tweeterModulator configuration/executable/version, channel-10 bridge/other writers, combiner channel gain, and `deltaChannels` classification. Channel `dm01disp10`, RTC host, and requested 8-kHz publication are already decided; do not ask to select them again.
+2. **Publication and zeroing semantics:** provide the deployed DMch2disp source/version/effective FPS settings and matching ImageStreamIO implementation. Establish counter/semaphore/trigger behavior, rereading/caching of channels, concurrent-copy handling, output posting, rate limiting, and zero application without an AO trigger. Determine how concurrent AO updates affect total output rate. Existing driver clipping does not remove a stale simulator channel.
+3. **Acceptance and timing:** finalize runtime calibration identity/residual tolerance. Measure direct publication latency and `acc000` deadline effects on an isolated suitable development host. Establish the external crash-cleanup procedure; no destructor can guarantee cleanup after process/host failure.
 
-These are missing implementation inputs, not a request to reapprove already authorized work. Do not implement the DM writer or select operational defaults until they are resolved. Any needed live configuration inspection or hardware checks must be performed by the user; only local copies are inspected by the agent.
+These are missing implementation inputs, not a request to reapprove the channel or cadence. Do not implement the DM writer until publication semantics are understood. Any needed live configuration inspection or hardware checks must be performed by the user; only local copies are inspected by the agent.
 
 ## Tests
 
@@ -469,38 +475,39 @@ No application build, live stream test, DM injection test, or instrument test is
 1. **Shared physics and disabled regression:** At fixed seeds, compare every physical/ADC sample and counters against the unchanged model with injection disabled and enabled. For a noise-free single mode verify the signed frequency-squared acceleration/pointing relation. Test X and Y independently, zero pointing, and rejection of nonfinite inputs. The disturbance must not include `m_wfsPointing` attenuation or ADC noise.
 2. **Physical conversion and basis:** Use synthetic calibrated basis fixtures to verify arcsec/radian conversion, factor of two, pupil scale, positive/negative X/Y mapping, basis normalization, and zero output. Check dimensions, type, plane count, masks, finite values, and bad calibration errors. Confirm the real basis with operator-supplied calibration evidence; a unit test cannot establish optical orientation.
 3. **Statistical comparison:** Compare ensemble predictions and spectra for equivalent mode parameters; use multiple seeds/statistical tolerances for narrow stationary modes. Check the roughly 0.046-micron / 2.9-mas nominal ensemble scale without renormalizing existing acceleration. Exact Python/C++ RNG identity is not required.
-4. **Handoff and cadence:** Test coherent sequence/timestamp snapshots under concurrency, stale/missing samples, noninteger rates, missed DM deadlines, and no stale replay. Retain all existing phase-clock regressions unchanged. Verify DM outages or backpressure cannot wait in the acquisition path.
+4. **Same-sample cadence:** Match each successful enabled ADC frame to its DM source sequence/timestamp at 8 kHz. Test missing frames, catch-up-only model steps, rate changes, stale state, and no replay. If a handoff is needed, test coherence, overflow, and explicit faulting rather than silent loss. Retain existing phase-clock regressions. Verify DM failures cannot wait in or terminate accelerometer acquisition.
 5. **Local ImageStreamIO fixture:** Use an isolated shared-memory directory, unique test names, no bridge, no hardware driver, and a fake combiner honoring the approved trigger contract. Verify datatype/shape checks, timestamps, write flag, `cnt0`, semaphore behavior, stream replacement, missing streams, and expected active/passive behavior. Verify only the assigned additive contribution changes and other channels/combined-stream ownership are preserved.
-6. **Lifecycle/safety:** Verify default-disabled opens nothing; zero/disable/shutdown remove the contribution, repeated zero is harmless, stream replacement requires revalidation/rearming, and stale state/inactive triggers follow the agreed policy. Verify command limits if required by the supplied calibration. Test the chosen external crash-cleanup mechanism separately rather than claiming in-process cleanup covers SIGKILL.
-7. **Runtime/load:** On an isolated non-instrument Linux development host, run the full app tests and sustained 8 kHz acceleration with a synthetic 2 kHz reference, with injection both off and on. Measure actual publication cadence, skipped samples, jitter, bounded handoff latency, resource growth, and drift. Run DM cadence independently at the approved rate. Numerical clock tests alone do not establish real-time performance.
+6. **Lifecycle/safety:** Verify unset/unowned startup accesses no DM; configured/owned startup explicitly zeros while disabled. Test enable, scale zero, disable/normal shutdown, repeated zero, concurrent control requests, stream replacement, calibration invalidation, and no later nonzero publication after disable acknowledgement. Test external crash cleanup independently of in-process cleanup.
+7. **Runtime/load:** On an isolated non-instrument Linux development host, run full app tests and sustained 8-kHz ADC plus 8-kHz DM publication with a synthetic 2-kHz reference. Compare disabled/enabled timing, skips, jitter tails, sample-to-DM latency, CPU/RSS, and allocations. Exercise concurrent synthetic AO updates and the matching combiner with no hardware driver. Measure distinct producer, combiner, and dummy-driver counts; numerical clock tests alone do not establish throughput or unique-frame delivery.
 
 Follow the existing `application_unit_test` group and namespace. Add TEST_CASE documentation and explicit real-API Doxygen references for harness indirection; hide harness-only helpers. Run clang-format on all touched C++ files after a full-file documentation pass.
 
 ## Implementation Plan
 
-1. **Resolve operational inputs first.** Record the selected DM/channel, owner, calibration files/normalization, signs, pupil geometry, combiner gain/trigger policy, delta-channel role, rate/phase, and clearing/fault contract here. Inspect local copies of those files and the matching dependency/combiner version. No DM writer implementation before this step. The independent numerical work authorized below does not depend on it.
-2. **Reuse physical state without modifying the model.** Read `m_model.m_sample.m_pointing` at a completed acquisition/publication boundary. Preserve all existing model functions and legacy fields. Offer a small coherent snapshot to a dedicated DM worker, with sequence and time markers, using preallocated storage and a bounded nonblocking producer operation. Do not add waits, image construction, calibration I/O, or DM stream operations to the accelerometer worker.
+1. **Resolve remaining operational inputs first.** Channel 10 at 8 kHz is assigned. Inspect matching local copies of the deployed modulator, combiner, ImageStreamIO, effective configuration, and clearing/fault contract. No DM writer implementation before these publication semantics are understood.
+2. **Reuse physical state without modifying the model.** Prefer `frameGrabberPostPublish` on the existing acquisition thread: after ADC publication, consume that same `m_model.m_sample` and publish the matching image. Preserve all model/timing functions. This hook still consumes the next deadline's budget, so code inspection and measured worst-case timing must justify direct publication. If necessary, use a preallocated bounded SPSC handoff carrying the same sample identity; overflow/staleness faults the injection instead of blocking acquisition or silently decimating it.
 3. **Implement calibrated synthesis.** Use existing mxlib FITS/eigen facilities, as `dmMode` does, to load/validate the approved two-plane basis before enabling. Form a full contribution from each selected physical sample. Prefer a small app-local header for nontrivial writer/synthesis state if that keeps `accelSim.hpp` manageable and testable; do not introduce a new generic base class without a reusable need. Do not derive from the hardware-owning `dev::dm` or the WFS-poke measurement helper.
-4. **Implement the agreed worker cadence and lifecycle.** Reuse app thread startup conventions and ImageStreamIO/milkImage mechanisms consistent with the selected trigger contract. Connect only to the existing assigned channel, validate it against the calibration, and detect replacement. Use the freshest eligible timestamped state according to the confirmed phase policy; quantify sample-hold delay. Require fresh state on enable and confirmed zero publication on disable/stop, with the approved trigger path and stale/failed-connection policy. Never invoke global zeroAll or alter the AO stream.
+4. **Implement the agreed publication and lifecycle.** Reuse native ImageStreamIO/milkImage mechanisms consistent with the verified channel-10 contract. Keep one writer, fixed buffers, sample identity, and separate acquisition/write timestamps where supported. Prefer no additional thread; if timing requires one, it consumes each snapshot promptly at the producer's 8-kHz cadence, not the WFS cadence. Connect only to existing channel 10 after exclusive handover; validate and zero before enabling. Serialize startup/disable/fault/shutdown zeros with nonzero writes. Never invoke global zeroAll or alter the AO stream.
 5. **Add minimal controls and documentation.** The following are proposed, not added or finalized:
 
    | Configuration/control | Proposed meaning |
    | --- | --- |
-   | `dm.enabled=false` | Startup opt-in; also expose an INDI enable toggle and a zero request with explicit status. Disabled startup performs no DM access. |
-   | `dm.channelName` (empty default) | Explicit exclusive additive channel; required to enable. No operational stream-name default. |
+   | `dm.enabled=false` | Injection off by default; runtime INDI toggle/status. Explicitly configured and owned startup publishes zero before any enable, including startup opt-in. |
+   | `dm.channelName` (empty default) | Experiment configuration explicitly supplies `dm01disp10`; empty means no DM access. This is not a request to reselect the channel. |
+   | `dm.scale=0` | Runtime current/target in [0,1], applied only to the DM contribution. Never changes model/RNG/ADC amplitudes. |
    | `dm.modeCube` (empty default) | Approved tip/tilt calibration in the existing FITS convention, with documented angular conversion. Required to enable. Add plane indices or a transform only if needed by the actual supplied basis. |
-   | Cadence/trigger setting, name pending | Add only the option(s) needed by the selected contract: either a specified active update rate or the approved trigger stream/phase. No inferred 8 kHz or 2 kHz default. |
+   | Cadence | No independent WFS-paced DM rate. One publication per successful 8-kHz ADC sample. Initially require the configured/active ADC rate to be 8000 Hz for injection; a rate change inhibits injection without overriding existing ADC rate behavior. |
 
-   Reuse existing `sim.leverArm=10`; do not add a second lever arm. Keep nominal vibration scale fixed at 1 initially; an independent DM gain must not be represented as changing the common vibration physics. The physical 6.5-m pupil scale belongs in verified calibration/conversion, not an arbitrary new actuator-grid generator. Add amplitude/staleness bounds only as required by the agreed operating contract.
+   Reuse existing `sim.leverArm=10`; do not add a second lever arm. Keep nominal vibration scale fixed at 1 initially; an independent DM gain must not be represented as changing the common vibration physics. The physical 6.5-m pupil scale belongs in verified calibration/conversion, not an arbitrary new actuator-grid generator. Preserve the agreed synchronization health checks.
 6. **Validate and report.** Extend `apps/accelSim/tests/accelSim_test.cpp`, `apps/accelSim/config/example.conf`, and `apps/accelSim/README.md` along with `accelSim.hpp` and any justified app-local helper. Avoid changes to `accelSimModel.hpp`, shared framegrabber/synchronization code, DM drivers, or global startup configurations unless newly discovered evidence requires them. Run the tests above, keep this plan current, and leave all changes uncommitted.
 
 ## Follow-up and Edge Cases
 
-- **Working-tree scope:** the independent numerical implementation and its tests/documentation described below, plus this plan below the Agent Findings and Plan heading. Application behavior, `acc000` timing, and configuration remain unchanged. No commits or pushes.
+- **Current working-tree scope:** this plan below the Agent Findings and Plan heading only. The numerical implementation is already committed/pushed per the user. Application behavior, `acc000` timing, and configuration remain unchanged. No new commits or pushes.
 - Local code proves neither current stream ownership nor an instrument calibration. Multiple writers and bridged channels need operational exclusion; a local cooperative lock cannot exclude unrelated producers that ignore it.
 - Writing zero passively may leave the last combined command applied if the normal trigger stops. Even an active zero depends on the deployed combiner trigger mode. Resolve this before claiming safe disable/stop behavior.
 - `SIGKILL`, process/host failure, a dead combiner/controller, and disappearing streams require an external recovery policy. Hardware clipping is not stale-disturbance cleanup. Decide whether changes in controller state must inhibit injection to avoid repopulating a channel after an operator global zero.
-- A lower DM rate introduces hold response, latency, and possible aliasing near the upper 900-Hz modes. Preserve the accelerometer physics; document any approved DM filtering separately rather than changing the shared state or silently dropping high-frequency modes.
+- Publishing at 8 kHz does not make the approximately 2-kHz WFS measure 8,000 independent exposures per second. Preserve the physical state and characterize DM hold, latency, WFS integration, and AO rejection without introducing synthetic WFS attenuation or silently changing DM cadence.
 - The AO loop may reject the injected optical disturbance, so a closed-loop WFS residual need not equal the open-loop command amplitude. Driver saturation and influence-function/pupil fitting also limit correspondence. Do not compensate using an invented WFS coupling factor.
 - Live tests are user-operated: low-amplitude positive/negative axes, WFS/DM orientation and physical scale, additive operation with AO, actual command timing and latency, saturation margin, disable/zero during normal operation and trigger loss, and sustained operation. Agents remain on non-instrument workstations.
 
@@ -646,9 +653,9 @@ runtime publication; unit tests remain independent of the scratch calibration.
 
 ### Exact inputs still required before a writer
 
-1. **Calibration acceptance and operating limits:** establish the acceptable surface-fit residual and operating amplitude limits, and validate the intended calibration identity at load time. The nominal physical coordinate convention is now established by the user: x=(column-24.5)*6.5/48 and y=(row-24.5)*6.5/48 metres. This resolves scale and registration for the chosen DM-pupil simulation axes; it does not assert external instrument registration. The local cube, native array layout, dmmask fitting support, surface-micron units, and measured normalization remain established. Runtime FITS loading remains unimplemented.
-2. **Exclusive channel and host:** the chosen `dm01dispXX`, current/occasional writers including network bridges, which machine will host accelSim, channel type/shape, combiner channel gain, and controller `dm.deltaChannels` classification. Do not assume `dm01disp02` or any other numbered channel is free.
-3. **Live combiner timing contract:** the deployed `DMch2disp-01`/controller configuration and matching implementation/version establishing active versus passive writes, triggering stream/channel/semaphore and counter semantics, intended update rate and phase relative to WFS exposure/AO output, and behavior during source/trigger loss. This determines the snapshot handoff and scheduling; existing `acc000` synchronization must remain untouched.
+1. **Calibration acceptance:** establish the acceptable surface-fit residual and validate the intended calibration identity at load time. The nominal physical coordinate convention is now established by the user: x=(column-24.5)*6.5/48 and y=(row-24.5)*6.5/48 metres. This resolves scale and registration for the chosen DM-pupil simulation axes; it does not assert external instrument registration. The local cube, native array layout, dmmask fitting support, surface-micron units, and measured normalization remain established. Runtime FITS loading remains unimplemented.
+2. **Exclusive handover and deployed settings:** Jared has assigned `dm01disp10` on RTC/exao2 for this experiment. Identify and exclude existing/occasional writers including tweeterModulator and network bridges, then validate channel type/shape, combiner channel gain, and controller `dm.deltaChannels` classification. No other channel is proposed.
+3. **Live combiner timing contract:** Jared specified 8-kHz publication from the same samples as `acc000`. The matching deployed `DMch2disp-01`/controller implementation and effective configuration must still establish active-write behavior, triggering stream/channel/semaphore and counter semantics, concurrent channel handling, actual output throughput, and zero application. Existing `acc000` synchronization must remain untouched; the approximately 2-kHz WFS reference does not decimate the DM path.
 4. **Applied-zero/failure contract:** how only the simulator contribution is removed on disable/exit, how zero is applied if AO triggering is stopped, how faults/stream replacement/controller restart/operator zero-all inhibit or rearm injection, and which supervisor/operator procedure clears a held contribution after an uncatchable process failure. Writing zeros into local memory is not confirmation of an applied optical zero.
 
 ### Finalization validation (2026-11-01)
@@ -820,8 +827,394 @@ Validation completed on the local workstation:
 Build flags and commands follow the preceding finalization section, with binary
 names `/tmp/accelSim_direct_disturbance`, `/tmp/accelSim_direct_combined`, and
 `/tmp/accelSim_direct_sanitize`. No full runtime/INDI build or live hardware test
-is claimed. The remaining publication blockers are calibration acceptance and
-amplitude limits, exclusive channel ownership, combiner gain and delta-channel
+is claimed. The remaining publication blockers are calibration acceptance,
+exclusive channel ownership, combiner gain and delta-channel
 classification, cadence/trigger/phase semantics, and applied-zero/failure policy.
 External Az/El registration and AEG calibration are not blockers for the chosen
 DM-pupil simulation convention.
+
+## Channel 10 and same-sample 8-kHz publication (2026-11-02)
+
+### Authoritative decisions and scope
+
+The user relayed Jared Males's operational guidance:
+
+- "for vibration simulation use 10 for now, that's what we use for turbulence simulation"
+- "So the idea is to publish commands to that dm at 8kHz"
+
+These settle the experiment's additive channel (`dm01disp10`) and requested
+publication cadence (8 kHz). They supersede the earlier approximately 2-kHz,
+WFS-paced passive design and the requirement for a separate DM worker. They do
+not establish the installed executable behind the tweeterModulator instance,
+its current write/trigger mode, or per-frame combiner/driver delivery.
+
+Only this plan is updated. The physical mapping and tests are already complete,
+validated, committed, and pushed according to the user. No runtime code,
+configuration, shared memory, process state, or hardware is changed here. The
+runtime implementation gate remains closed until publication semantics are
+understood from matching local deployment copies.
+
+### Publication evidence and unresolved deployed behavior
+
+Read-only inspection of this checkout, scratch, and sibling mxlib/handbook trees
+still finds no tweeterModulator configuration/process-list entry, cacao
+DMch2disp implementation, effective FPS settings, or ImageStreamIO C source.
+The bridge's channel-10 entry establishes 50-by-50 layout, not writer identity.
+`apps/ttmModulator` controls a different tip/tilt modulator; its name does not
+establish a tweeter additive-channel writer. The following are exact local code
+facts, with deployment applicability explicitly conditional:
+
+| Source/function | Established behavior |
+| --- | --- |
+| `apps/dmSpeckle/dmSpeckle.hpp:558`, `appLogic` | Opens an existing configured `dm.channelName`; checks float datatype at line 597. No channel creation at this point. |
+| Same file, `generateSpeckles`, line 637 | `arbcube` mode loads a FITS cube, validates dimensions, multiplies its planes by configured amplitude, and cycles them in its worker. This is a plausible turbulence-player implementation, not proof it is the deployed tweeterModulator executable. |
+| Same file, `modThreadExec`, lines 864-877 | Sets `write=1`, copies a complete plane, sets `atime`/`writetime`, increments `cnt0` when untriggered OR trigger delay is positive, clears `write`, and posts all image semaphores with index -1. A triggered zero-delay write leaves `cnt0` unchanged. This 2-D write does not update `cnt1`. |
+| Same file, lines 900-913 | Ordinary stop/loop exit writes a zero image, updates timestamps, increments `cnt0` only when untriggered, clears `write`, and posts all semaphores. The restart branch at line 895 skips this zero. |
+| Same file, `m_indiP_zero` callback, line 1250 | Refuses zero while modulating; an explicit accepted zero increments `cnt0` and posts all semaphores. A disabled modulation toggle alone is not an ownership transfer or exclusive lock. |
+| Same file, `appShutdown`, line 619 | Joins the modulation thread. This is normal lifecycle behavior, not a crash cleanup guarantee. No channel-ownership lease/release is demonstrated by these paths. |
+| `apps/dmMode/dmMode.hpp:351`, `sendCommand` | Native active-write precedent: write flag, full copy, `cnt0++`, clear flag, post all semaphores. Its wait on an existing write flag must not be copied into accelSim's acquisition hot path. |
+| Sibling `mxlib/include/improc/milkImage.hpp:790`, `post` | Active mode delegates to unavailable `ImageStreamIO_UpdateIm`; passive mode timestamps/clears write/posts all semaphores without incrementing `cnt0`. The documented passive contract intentionally avoids triggering dmcomb. Active mode's detailed blocking/error behavior still needs the deployed C implementation. |
+| `scripts/cacao/RTC/cacao-startup:19` | Starts `DMch2disp-01`, but supplies no evidence of its effective trigger settings. |
+| `libMagAOX/app/dev/shmimMonitor.hpp:743` | Driver-side monitor waits on its selected combined-stream semaphore, then processes the current image without a `cnt0` comparison in this loop. It does not establish combiner behavior on an additive channel. |
+| `libMagAOX/app/dev/dm.hpp:1897`, `apps/bmcCtrl/bmcCtrl.hpp:509` | The combined-stream handler dispatches `commandDM`, which submits the converted command through `BMCSetArray`. This proves the software path, not achieved frequency or hardware settling. |
+
+There are no grounds yet to report exact answers for how deployed DMcomb reacts
+to channel 10, whether each input write produces a unique combined frame, or
+whether each reaches the physical driver. A single image buffer is not a queue
+of immutable commands. Inspect semaphore accumulation/coalescing, counter tests,
+channel rereading/caching, write-flag handling, output posting, and rate limits.
+Concurrent AO writes could add output events or be coalesced; total driver rate
+is not necessarily exactly 8 kHz even with an 8-kHz channel-10 producer. Multiple
+semaphore wakes can also process the same latest buffer if earlier frames were
+overwritten. Do not claim per-frame delivery from mean counters alone.
+
+### Preferred minimal architecture
+
+Recommend option C: accelSim owns channel 10 for this experiment and reuses the
+verified native publication pattern. This means direct publication by accelSim,
+not sharing the channel with tweeterModulator. No existing local API is shown
+that accepts live, individually identified accelSim samples into the cube player.
+Routing through an independent player would add another clock, buffering, and
+ownership boundary without established benefit. Revisit only if deployed source
+reveals a suitable interface.
+
+Prefer no new thread. Use `accelSim::frameGrabberPostPublish` on the existing
+acquisition thread, after `acc000` metadata and semaphore publication and before
+any next `m_model.advance`. Sources: `frameGrabber.hpp:1014-1020`,
+`accelSim.hpp:753`, `accelSim.hpp:791-821`. This creates a deterministic software
+order, ADC then DM, from the same state. Two distinct streams cannot be published
+atomically; retain source sequence/timestamps and measure the publication skew.
+
+At startup, outside the hot path:
+
+1. Load the approved TT pair and dmmask; check provenance, dimensions, finite
+   samples, rank, and accepted projection residual. Do not substitute the
+   offloader mask. Reject stale/invalid calibration; any reload requires inhibit,
+   zero, and full validation before rearming.
+2. Compute K and full angular-response planes B*K using the validated geometry
+   and `tipTiltProjection`. Allocate/prefault the complete float output and any
+   metadata/control storage. Do not hardcode arrays or solve at sample rate.
+3. After operator handover, open existing `dm01disp10`, validate exactly 2-D
+   50-by-50 float32 and the matching publication contract, and explicitly zero it.
+   Never create/replace the channel or use the combined `dm01disp` as output.
+
+For every successful ADC publication while enabled/healthy:
+
+1. Use that exact `m_model.m_sample`, retaining its model tick, ADC sequence,
+   acquisition time, and calibration/control generation. Never take a second
+   model step or use catch-up-only intermediate states as extra DM frames.
+2. Construct the existing `pointingDisturbance` from `m_pointing`. The stored
+   angles are arcsec; the helper converts to radians once. Do not use legacy
+   `m_wfsPointing`, integrate ADC counts, or draw any additional random values.
+3. Use precomputed responses to fill the reusable image, mathematically
+   `c=K*theta_rad` and `h=B*c` in surface microns. Geometry remains +X increasing
+   column and +Y increasing row, center 24.5, nominal 48 pitches, D=6.5 m. No
+   Az/El/AEG/K-mirror/offload transform, controller gain, or P2V rescaling.
+4. Apply the requested experiment amplitude scale [0,1], preserving TT
+   direction/planarity across the full image, including outside dmmask.
+   Nonfinite/overflow or invalid state requests fault/zero; do not rely on allocating
+   exceptions as the planned hot-path error mechanism.
+5. Publish the complete 10,000-byte image through the verified active native
+   contract that drives combination at the required cadence. Expected metadata
+   pattern is write flag/copy/timestamps/`cnt0++`/clear flag/semaphore posts, but
+   actual order/helper selection awaits the deployed dependency. Leave `cnt1`
+   under its documented 2-D convention, not an invented ADC-sequence field.
+   Record the ADC source identity separately. Use acquisition and write times
+   distinctly if the supported metadata API allows it.
+6. Record compact counters/timing only; defer INDI/logging and filesystem checks
+   to ordinary app supervision. DM-only errors must inhibit/zero/report without
+   returning a fatal post-publish error that stops frameGrabber/acc000.
+
+The hook runs after the current ADC frame but still spends the next frame's
+125-microsecond budget. The source of `ImageStreamIO_UpdateIm`/semaphore posting
+must be inspected for waits, locks, allocation, retries, and failure behavior.
+The current `milkImage` wrapper has throwing error paths, so it must not be
+described as an allocation-free/nonblocking contract without further inspection.
+Use native utilities where their verified contract fits; do not blindly copy
+the modulation app's wait/sleep or timestamp code. Normal synthesis is already
+preallocated in `tipTiltBasis::synthesize`.
+
+If direct publication cannot meet the existing ADC timing requirements under
+load, use a preallocated bounded SPSC handoff of immutable same-sample state to
+one DM worker. No producer waits, allocation, second model, independent DM clock,
+or 2-kHz decimation. The healthy worker must sustain all 8-kHz samples. An overflow,
+stale backlog, or missed delivery invalidates the one-to-one experiment: inhibit
+and zero, count the fault, and continue ADC acquisition. Do not silently overwrite
+queued samples or burst stale commands to catch up. A worker mitigates blocking
+in the producer; it does not establish successful DM delivery by itself.
+
+### Enable, zero, shutdown, and ownership sequence
+
+Defaults: injection disabled, scale 0. Keep `dm.channelName` empty in generic
+configuration; the reviewed experiment explicitly sets `dm01disp10`. Require the
+active ADC rate to be 8 kHz before arming. An existing ADC-rate change remains
+effective and inhibits DM injection rather than silently overriding ADC control.
+
+1. **Handover/startup:** the operator disables/stops every channel-10 producer,
+   including automatic reactivation and bridge writes, waits for the old writer's
+   final zero to complete, and assigns exclusive ownership to accelSim. A late
+   tweeterModulator stop-zero could overwrite the first accelSim command. Only
+   after handover may accelSim open/validate and actively publish startup zero.
+   Do this even with injection disabled, provided the channel is configured and
+   owned. An unset or unowned configuration must perform no DM access.
+2. **Enable:** validate readiness, fresh same-sample state, 8-kHz active rate,
+   calibration/control generations, stream identity, and publication contract.
+   Accept enable at a sample boundary. Scale remains zero until explicitly raised.
+3. **Disable/fault:** request a control-generation change. The sole publisher
+   finishes any in-flight write, cancels queued nonzero work, writes zero using
+   the verified active mechanism, then acknowledges disabled. No later nonzero
+   write from the older generation is allowed. INDI callbacks never race-write
+   the image. Continue zero contribution while disabled without needless 8-kHz
+   zero traffic. Monitor state outside the sample path; invalidate/rearm on
+   stream replacement, lost calibration validity, restart, or stale/invalid sync
+   according to the accepted health policy. ADC holdover behavior stays intact.
+4. **Normal shutdown:** inhibit, quiesce/join acquisition (and the DM worker if
+   present), then publish the final zero while the validated channel remains
+   mapped. A designated shutdown owner may take over only after the hot-path
+   writer is quiescent. Bound/report failures; close the mapping afterward.
+   Do not use `zeroAll` or clear another app's channel. Existing accelSim shutdown
+   already joins frameGrabber before closing synchronization (`accelSim.hpp:425`).
+5. **Return ownership:** only after the final zero and no further accelSim writes
+   may an operator re-enable tweeterModulator. Disabling injection alone does not
+   grant permission for two owners to write, including their zero callbacks.
+
+Zero publication must cause recombination even without the usual AO stream;
+that remains a deployment verification gate. A channel-buffer zero is not proof
+of optical zero. Normal cleanup cannot cover SIGKILL/crash/host failure. The
+last complete image, a partial image, or `write=1` may remain. No channel-specific
+expiry watchdog was found locally; an external fenced cleanup/recovery policy
+is still required, and an automatic process restart is not a bounded crash-zero
+guarantee.
+
+### Required local deployment evidence and validation gate
+
+Obtain local copies of `/opt/MagAOX/config/proclist_RTC.txt`, the resolved
+tweeterModulator config (normally `/opt/MagAOX/config/tweeterModulator.conf`,
+confirm via the process entry), dmtweeter config, and the effective DMch2disp-01
+FPS settings/startup configuration. Also obtain the deployed modulator/combiner
+source and commit/build identifiers plus matching ImageStreamIO and mxlib source.
+The process list must establish instance-to-executable identity; do not assume
+that a configuration filename proves which binary is running. User-operated
+read-only commands from the preceding investigation can locate these files.
+No agent connects to instrument hosts or executes their control commands.
+
+Before implementation, trace precisely: input channel gains/enables, trigger
+channel/mode/semaphore, `cnt0` tests, write-flag consistency checks, output image
+counter/timestamps/semaphores, queue/coalescing policy, rate caps, and clearing
+behavior. The operational assignment and 8-kHz intent are already authoritative;
+these checks establish the mechanism and measurable delivery contract.
+
+After semantics are established, implement only the app-local integration,
+minimal enable/scale/status controls, and associated isolated tests. Validate:
+
+- Fixed-seed sample-by-sample ADC/model/RNG equality with injection off/on and
+  one DM source identity per successful ADC frame; no extra model advances.
+- Existing physical projection tests unchanged; nonfinite, invalid/stale
+  calibration, shape/type errors, amplitude scaling, and allocation-free error handling.
+- Private ImageStreamIO fixture: unique names, no bridge/hardware driver;
+  correct flag/counter/timestamp/semaphore order, verified combiner behavior,
+  concurrent synthetic AO updates, no torn reads, and final-zero application.
+- Enable/disable/shutdown races, generation cancellation, stream replacement,
+  source loss/holdover, ADC rate changes, no stale replay, and external crash
+  cleanup tested independently of normal cleanup.
+- Sustained 8-kHz ADC and DM with a synthetic 2-kHz phase reference on an isolated
+  suitable Linux development host. Measure actual source identities, distinct
+  combined/dummy-driver frames, timing/skew distributions, missed deadlines,
+  CPU/RSS, hot-path allocations, and syscall/blocking behavior. A mean rate alone
+  does not prove one-to-one delivery or preserve ADC jitter. Set explicit timing
+  acceptance criteria from the existing baseline before accepting the direct path.
+- Existing model/synchronization/full-app tests, sanitizer coverage, Python PSD
+  regressions, clang-format on eventual C++ changes, and git diff --check.
+
+Current validation is plan-only: diff/whitespace review, unchanged original task
+specification prefix, and unchanged production/test/configuration files. No
+runtime or physical performance result is claimed, no process was restarted,
+and nothing is staged, committed, or pushed.
+
+## Runtime implementation following deployed-system authorization (2026-11-02)
+
+### Resolved publication contract
+
+The user inspected the deployed `AOloopControl_DM_comb.c`: each compute iteration
+sums additive-channel `cnt0` values, and a changed sum causes recomputation from
+the current contents of all twelve channels and publication of `dm01disp`.
+Authoritative deployed settings are AveMode=0, DClevel=0, process trigger mode 4,
+triggerdelay=0.00001 seconds. `tweeterModulator` is confirmed configured for channel
+10. Together with the explicit instruction to implement, this resolves the prior
+publication gate. These facts are user-supplied deployment evidence; the combiner
+source is not independently available in this checkout.
+
+The app now uses **active** publication, never passive. Existing `dmMode`,
+`dmSpeckle`, `t2wOffloader`, and `dmPokeWFS` patterns were rechecked. The output
+adapter calls `ImageStreamIO_UpdateIm`, the primitive called by mxlib's active
+`milkImage::post`, after flagging/copying the complete image. It does not invent
+counter increments or semaphore logic. Raw existing-only attachment is used to
+validate `naxis`, exact dimensions, datatype, and metadata without allocating or
+throwing in the normal sample path. There is no image creation or consumer wait.
+
+### Implemented data flow and lifecycle
+
+- `accelSimDM.hpp`: independent, testable owner-thread state using the unchanged
+  `tipTiltProjection`, `pointingDisturbance`, and `tipTiltBasis`. At preparation,
+  construct the accepted center-24.5/D-6.5/48-pitch maps, fit B*K, and allocate
+  command storage. Runtime performs only synthesis, finite/overflow preflight,
+  requested amplitude scaling, and publisher invocation across the full image.
+- `accelSimDMStream.hpp`: attach only to an existing 2-D 50x50 float32 stream;
+  reject a busy write flag without waiting. Publish using the native active
+  primitive and retain ADC acquisition time separately from native write time.
+  Supervision checks backing-file inode outside acquisition and only invalidates;
+  it never automatically reconnects, replaces, or zeroes a newly recreated stream.
+- `accelSim.hpp`: cold FITS loading/validation, configured dmmask support, and
+  startup zero before frameGrabber starts. `frameGrabberPostPublish` consumes
+  exactly the already published ADC frame's `m_model.m_sample`; no second model
+  advance, RNG draw, integration, or legacy WFS attenuation. No worker or queue.
+  The model, acquisition deadlines, phase-clock algorithms, ADC conversion, and
+  shared frameGrabber code remain unchanged.
+- Controls use atomic, monotonically revised enable requests. All runtime image
+  writes and zero acknowledgements happen on the acquisition thread. An old
+  revision cannot rearm a completed disable. Scale changes do not change physical
+  model amplitudes. Faults latch until an explicit new request. Missing/invalid
+  calibration, changed files, invalid stream, nonfinite samples, source loss,
+  reconfiguration, and rate changes inhibit injection while ADC behavior continues.
+  Source loss uses the existing synchronization validity/timeout, not a new clock.
+- Clean shutdown joins acquisition before final zero/close, serialized against
+  callbacks. No global zero function, other-channel writes, process control, or
+  automatic tweeterModulator interaction is added. Failure to clear is reported;
+  process death cannot guarantee zero. Stream/calibration metadata supervision
+  is not instantaneous or a cryptographic calibration-provenance guarantee.
+- Configuration: `dm.channelName` empty by default, intended experiment value
+  `dm01disp10`; explicit `dm.modeCube` and `dm.mask`; `dm.enabled=false` (true is
+  rejected to prohibit startup enable); `dm.scale=0`;
+  `dm.maxRelativeResidual=1e-6`. Unset channel performs no access.
+  Configuring a channel transfers startup zeroing responsibility, so exclusive
+  handover must precede launching that configuration, not just nonzero enable.
+- INDI: `dm_enable.toggle`, `dm_scale.current/target`, numeric read-only
+  `dm_status.ready/active/fault`. Busy transitions acknowledge at sample boundaries;
+  no 8-kHz INDI traffic. Fault codes: 2 calibration, 3 stream, 4 numerical,
+  5 rate/synchronization. Active ADC rate must be 8000 Hz to arm; an ADC rate
+  change remains effective and inhibits the DM path rather than overriding it.
+
+There is no actual per-frame delivery guarantee from the combiner counter test:
+several writes can coalesce before one compute iteration. Concurrent AO updates
+can also add output events. Preserve sample identity and measure distinct
+combined/driver delivery and timing during commissioning; neither producer rate
+nor a count of semaphore receipts proves unique hardware commands.
+
+### Validation performed locally before the instrument-owner update below
+
+| Check | Result |
+| --- | --- |
+| New standalone runtime suite | 4 cases / 60,148 assertions passed. Includes disabled/scale-zero, same-sample model/ADC/noise equality for 8,000 samples, nonfinite faults, zero/disable/rearm, failed-publisher retry, and stale control rejection. |
+| Combined existing model/synchronization, physical projection, and runtime suite, O3/no fast-math | 34 cases / 226,594 assertions passed. |
+| Same combined suite, AddressSanitizer + UndefinedBehaviorSanitizer, O1/debug, halt-on-error | 34 cases / 226,594 assertions passed; no findings. |
+| Existing Python PSD regressions | 4 tests passed. |
+| Real local deployed TT/dmmask comparison | Runtime pixels equal the unchanged projector/synthesizer bit-for-bit at 1 and 2.9 mas for both axes; maximum difference zero. Full-image 2.9-mas P2V approximately 0.04474174 micron, preserving the accepted sampled-vs-ideal distinction. |
+| Allocation-instrumented real-calibration numerical/mock path | Zero C++ heap allocations over 80,000 healthy frames plus numerical-fault/disable zero paths. Startup allocation is outside measurement. This does not instrument native ImageStreamIO. |
+| Numerical synthesis plus preallocated mock publication timing | About 3.6 us/frame mean; final O3 suite observed 20.7 us maximum on this run. Instrumented 80,000-frame mean 3.59 us. OS-dependent measurements, not native stream, full-app scheduling, or hardware bounds. |
+| Full app and new full-runtime test build attempts | Both blocked in existing local macOS dependencies: `timegm` undeclared and `mx/math/floatUtils.hpp` missing. No full-app or native-stream build/pass claimed. |
+| Formatting, whitespace, and preservation | clang-format and dry-run passed on all touched C++ files, with comment-prefix minimum 0 to retain AGENTS.md's exact `//mutex scope` spelling. git diff --check passed. Original task prefix, numerical/model sources, original tests, and shared acquisition/synchronization sources remain unchanged. |
+
+New full-runtime tests are provided for a configured non-instrument Linux host:
+`[dm-controls]` tests INDI defaults/scale/rejected enable; hidden
+`[accelSim-dm-streams]` tests a synthetic existing channel, native counter/semaphore
+publication, timestamps, incorrect dimensions/datatype, busy flag, missing-image
+rejection, and the app's exact ADC-to-DM hook plus disable zero. The latter first
+checks that ImageStreamIO's resolved path belongs to a fresh private `/tmp`
+namespace; run it in its own process because namespace selection can be cached.
+These tests have not run on this macOS host. They never name a physical channel.
+`tests/Makefile.one` disables fast-math for the new suite and tracks header changes.
+
+The ignored `scratch/direct_tt_analysis/runtime_check.cpp` uses read-only local
+FITS data and a mock sink; it does not run the app or open any stream. Fresh
+standalone builds use the commands from the README, adding all three test files
+and `tests/testMain.cpp` for combined coverage. No instrument host was accessed,
+no deployed process/configuration was changed, and no physical stream was written.
+
+### Remaining development and commissioning checks
+
+1. On a suitable isolated Linux development host, build the app and full tests,
+   run the private native tests, and perform sustained 8-kHz ADC/DM testing with
+   a synthetic approximately 2-kHz phase reference. Measure native-update duration,
+   jitter/skips/skew, allocation/syscall behavior, and distinct combiner/dummy-driver
+   delivery under concurrent AO load. Numerical timing suggests no need for a worker,
+   but native timing is not established on this workstation. Keep injection disabled
+   until this acceptance is complete; if native latency requires a worker, implement
+   a separately reviewed bounded handoff with explicit overflow/fault handling.
+2. Operator handover must exclude tweeterModulator and bridge/automatic writers,
+   including their late zero callbacks. No software ownership lease is claimed.
+   Confirm the deployed channel gain and delta-channel accounting for the experiment.
+3. Review runtime calibration paths/identity and 1e-6 residual tolerance.
+   Commission at low scale with positive and negative axes, verifying WFS
+   response, combined command margin, actual timing,
+   stop/zero application during AO inactivity, and source-loss behavior.
+4. Establish external recovery for SIGKILL/crash/host/combiner/driver failure.
+   Neither close/destructor, normal final zero, nor automatic restart provides
+   a bounded crash-zero guarantee. No automatic supervisor is added in this scope.
+
+Final whitespace/formatting and preservation checks are recorded in the user
+report. All prior work is retained, including the original task specification
+prefix. Nothing is staged, committed, or pushed.
+
+## Instrument-owner command-protection guidance (2026-11-02)
+
+The user relayed Jared Males's confirmation that the existing MagAO-X/DM system
+already provides sufficient command protection for this vibration injection.
+Removed the provisional P2V/absolute-pixel bounds, their configuration keys and
+validation, the common reduction calculation/accessor, and their enforcement
+tests/documentation. There were no limit-specific INDI/status fields to remove;
+the readiness/activity/fault fields remain. `dm.scale` retains its existing [0,1]
+range and zero default solely to adjust experiment and commissioning amplitude.
+Each output pixel is now the unchanged synthesized float command multiplied by
+the requested scale, with no additional actuator or P2V limiting.
+
+Software-integrity protections are preserved: disabled startup, explicit
+operator enable, nonfinite/overflow detection, latched fault inhibition,
+controlled-disable zero, clean-shutdown zero after acquisition joins, stream
+validation, and exclusive channel ownership. The physical projector/basis,
+calibration acceptance, sample timing, synchronization, native active publisher,
+and existing same-sample model/RNG behavior are unchanged. The overflow preflight
+remains a numerical representability check, not an experiment amplitude bound.
+
+The mapping regression now compares the full calibrated surface at three scales
+for axis-aligned, mixed-sign, and large finite pointing samples, including commands
+above both former bounds. Lifecycle, failed-publication retry, nonfinite faults,
+zero/rearm, stale-control rejection, and 8,000-sample model/ADC/noise equality tests
+remain. The full native fixture's preparation calls use the revised helper API.
+
+Validation rerun on the local workstation:
+
+| Check | Result |
+| --- | --- |
+| Combined model/synchronization, physical projection, and DM runtime tests; C++20, O3, no fast-math | 34 cases / 236,598 assertions passed. |
+| Same combined suite; O1/debug, AddressSanitizer + UndefinedBehaviorSanitizer, halt-on-error | 34 cases / 236,598 assertions passed; no findings. |
+| Existing Python PSD regressions | 4 tests passed. |
+| App and full DM runtime test build attempts | Both still blocked by existing macOS dependencies: undeclared `timegm` and missing `mx/math/floatUtils.hpp`. Native-stream/INDI tests remain unexecuted here. |
+| Formatting and whitespace | clang-format run and checked on the three touched C++ files, retaining `//mutex scope`; `git diff --check` passed. |
+
+The combined builds use all three accelSim test source files plus
+`tests/testMain.cpp`, `-DACCELSIM_MODEL_ONLY`, and the existing Eigen include path;
+both binaries run the `[accelSim]` filter. Python tests use
+`python -m unittest discover -s apps/accelSim/tests -p test_validate_psd.py`.
+Full native/load commissioning checks above remain outstanding on an isolated
+non-instrument Linux development host. No instrument access, physical stream
+writes, staging, commits, or pushes occurred.

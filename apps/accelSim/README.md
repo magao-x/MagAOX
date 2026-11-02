@@ -8,17 +8,96 @@ identity: supply the real instance with `-n` when its configuration is available
 
 The approved specification and engineering record are in
 [`acc-sim-app-creation.md`](../../agents/plans/2026-10/acc-sim-app-creation.md).
-There is no DM access, runtime angular coordinate transform, transient generator,
-or instrument startup configuration in this implementation. The independent
-numerical disturbance helpers described below do not run in the acquisition path.
+Optional same-sample tweeter disturbance injection is implemented separately from
+the model and remains disabled by default. The default configuration has no DM
+channel and performs no DM access. No instrument startup configuration is supplied.
+
+## Optional runtime DM injection
+
+The intended experiment uses **dm01disp10**, a pre-existing 50x50 float32 additive
+image in physical DM surface microns, at **8 kHz**. Jared Males assigned channel 10
+for the experiment; tweeterModulator also uses it. The operator must establish
+exclusive handover, including its final zero and any bridge/automatic writers,
+**before configuring accelSim to attach**. accelSim does not stop other applications
+or acquire an ownership lease. Its startup zero would overwrite another owner's
+contribution if handover had not occurred.
+
+Configuration keys in `[dm]`:
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `channelName` | empty | Existing owned channel; intended deployment value `dm01disp10`. Never created/replaced. |
+| `modeCube` | empty | Approved TT FITS cube; first two planes in native order. |
+| `mask` | empty | Matching deployed dmmask fitting support. |
+| `enabled` | false | Must remain false; startup enable is rejected. |
+| `scale` | 0 | Independent experiment/commissioning amplitude factor in [0,1], applied only to the DM contribution. |
+| `maxRelativeResidual` | 1e-6 | Maximum physical projection residual; reviewed runtime acceptance setting. |
+
+Jared Males confirmed that the existing MagAO-X/DM system provides sufficient
+command protection for this injection. accelSim applies the requested `dm.scale`
+without additional actuator or P2V limiting. Scale adjusts experiment amplitude;
+it is not a hardware safety mechanism. The physical convention is +X increasing
+column, +Y increasing row, center (24.5,24.5), 48 pitches across 6.5 entrance-pupil metres. No sky/Az/El,
+K-mirror, AEG, or offloader calibration/gain is used.
+
+At startup, with an explicitly configured channel and valid calibration, accelSim
+loads/validates the calibration, precomputes B*K, opens the existing image, validates
+2-D 50x50 float32 geometry, and publishes zero. Any preparation failure leaves
+injection unavailable while accelerometer acquisition continues. There is no
+automatic reconnect/reload: stream replacement or changed calibration metadata
+requires operator review and restart/revalidation.
+
+Only `dm_enable.toggle` arms injection, and only at an active ADC rate of 8000 Hz.
+`dm_scale.current/target` controls commissioning amplitude; begin at zero and
+raise it deliberately. `dm_status` reports `ready`, `active`, and numeric `fault`:
+0 = no fault, 2 = calibration, 3 = stream, 4 = numerical, 5 = rate/synchronization.
+Enable/disable reports Busy until processed at a completed sample boundary, then
+Ok or Alert. These properties update at the ordinary application cadence.
+
+The existing `frameGrabberPostPublish` hook consumes the **same** completed
+`sample::m_pointing` after ADC publication. It converts arcsec to radians using
+`pointingDisturbance`, synthesizes from two precomputed angular responses, applies
+the requested scale, and copies the entire local command into the channel. Active
+publication uses `ImageStreamIO_UpdateIm`, the primitive used by mxlib's active
+`milkImage::post`. It does not manually reproduce counters or semaphore posting.
+The user-inspected deployed combiner recomputes when the sum of additive `cnt0`
+values changes (`AveMode=0`, `DClevel=0`, process trigger mode 4, 10-us delay).
+Passive publication would not satisfy this contract.
+
+No additional model/RNG step, acceleration integration, `m_wfsPointing` attenuation,
+FITS read, solve, heap allocation, consumer wait, or routine logging/INDI is added
+to the sample path. There is no DM worker/queue. The approximately 2-kHz WFS stream
+remains the existing ADC phase reference; it does not decimate DM publication.
+The two output publications have a measurable skew, not atomic simultaneous
+delivery. Coalescing in the combiner/driver can still prevent distinct delivery
+of every producer frame and must be measured.
+
+Disable requests stop nonzero output and actively publish zero before acknowledgement.
+Faults zero/inhibit and latch until an explicit new control request; they never
+stop ADC acquisition. Source loss zeros after the existing synchronization timeout;
+ADC holdover continues. A rate change away from 8 kHz inhibits injection. On normal
+shutdown acquisition joins before a final zero/close, preventing a late nonzero
+write. Only the configured channel is touched. An unset channel touches no DM.
+
+Calibration/backing-file supervision runs outside acquisition and is not an
+instantaneous content-hash guarantee. A vanished stream or failed zero is reported
+as a fault; zero cannot be guaranteed if the combiner/driver is down. A crash can
+leave a held/partial command or write flag. There is no crash watchdog/expiry lease:
+the operator/supervisor must provide recovery. Disabled does not transfer ownership
+back to tweeterModulator, whose zero callback must not race accelSim.
+
+The local numerical/mock publisher costs a few microseconds per frame, but the
+125-us budget includes native publication, scheduling, and model computation.
+Full Linux native-stream/load testing remains required before physical commissioning;
+the local macOS app build is blocked by existing platform dependencies. No physical
+DM stream is used during development tests.
 
 ## Independent DM disturbance calculations
 
 [`accelSimDisturbance.hpp`](accelSimDisturbance.hpp) implements the physical
 conversion from the cleaned notebook using the confirmed tweeter surface units.
-It does **not** enable DM injection. There are no new application configuration keys,
-INDI controls, threads, or stream writes. The application and `acc000` timing code
-are unchanged. Deployment inputs and the remaining implementation are recorded in
+The numerical helper itself has no stream access. Runtime integration is described
+above; its engineering record and commissioning requirements are recorded in
 [`accelSim-dm-injection.md`](../../agents/plans/2026-10/accelSim-dm-injection.md).
 
 `accelSimDetail::pointingDisturbance` copies only `sample::m_pointing`, converting
@@ -158,7 +237,7 @@ The relative residuals remain 8.47e-8 and 8.63e-8; float command synthesis keeps
 both below 8.9e-8. Fitted center piston is below 3.3e-11 micron for these cases.
 The asymmetric mask gives a small nonzero target mean, which is preserved rather
 than subtracted. The basis is sufficiently planar for this numerical conversion;
-runtime fit tolerances and operating limits still require an explicit policy.
+runtime acceptance uses the configured `dm.maxRelativeResidual` tolerance.
 
 An equivalent slope calculation fits the two mode gradients into G in surface
 microns per entrance-pupil metre. Then `theta_rad = 2e-6 * G * coefficients` and
@@ -200,16 +279,11 @@ the near-unit-root vibration model require ordinary floating-point semantics.
 The suite is also registered in `tests/tests.list` with the usual application
 unit-test group. All bases in its tests are synthetic, explicitly defined fixtures.
 
-Runtime integration remains blocked on exclusive additive-channel reservation,
-an accepted fit tolerance/amplitude limit, the combiner trigger/cadence/phase
-contract, and applied zero/failure policy. The cube, fitting support, surface
-units, measured TT normalization, nominal physical scale, and intentional
-DM-pupil simulation axes are known. External sky/AzEl registration would be
-additional work only if that interpretation is requested later.
-In particular, `dm01disp02` is not assumed free. Those inputs will determine
-configuration, FITS loading, the acquisition-to-DM snapshot handoff, and the writer
-lifecycle. Injection remains off and cannot be enabled by this numerical-only
-implementation.
+Runtime integration uses these unchanged numerical helpers with the explicit
+channel, calibration, enable, and scale controls described above. Exclusive
+channel handover and native publication/timing/zero verification remain required
+before commissioning. External sky/AzEl registration would be additional work
+only if that interpretation is requested later.
 
 ## Model and timing
 
@@ -391,6 +465,23 @@ c++ -std=c++20 -O3 -fno-fast-math -Wall -Wextra \
 /tmp/accelSim_model_test '[model]'
 /tmp/accelSim_model_test '[sync-regression]'
 ```
+
+The hardware-independent DM runtime tests additionally require Eigen:
+
+```sh
+c++ -std=c++20 -O3 -fno-fast-math -Wall -Wextra -DACCELSIM_MODEL_ONLY \
+  -DCATCH_CONFIG_MAIN $(pkg-config --cflags eigen3) \
+  apps/accelSim/tests/accelSimDM_test.cpp -o /tmp/accelSim_dm_test
+/tmp/accelSim_dm_test '[dm-runtime]'
+```
+
+On a configured non-instrument Linux development host, build the same test with
+`tests/Makefile.one`, then run `[dm-controls]` and, in a separate process,
+`[accelSim-dm-streams]`. The latter creates synthetic images with private names
+under a fresh `/tmp` ImageStreamIO namespace and rejects a cached different path
+before creating anything. It tests native active counters/semaphores, geometry/type
+rejection, and the app's same-sample post-publication/zero path. It never names a
+deployed DM stream. Sanitizers should also cover the numerical/runtime suites.
 
 The standalone tests include the production synchronization accounting and
 status-invalidation logic, integer/fractional rate ratios, correction bounds,
