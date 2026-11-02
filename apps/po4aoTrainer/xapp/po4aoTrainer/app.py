@@ -51,6 +51,15 @@ class TrainerConfig(BaseConfig):
         default="/opt/MagAOX/vendor/TensorRT-10.0.0.6/bin/trtexec",
         help="Installed engine builder",
     )
+    freshness_timeout: float = xconf.field(
+        default=5.0, help="Maximum age of current-lifetime INDI observations"
+    )
+    unmodulated_state: float = xconf.field(
+        default=3.0, help="Configured modwfs unmodulated SET state"
+    )
+    modulated_state: float = xconf.field(
+        default=4.0, help="Configured modwfs modulation-on state"
+    )
     operation_timeout: float = xconf.field(
         default=30.0, help="NN/routing/model acknowledgement deadline"
     )
@@ -78,6 +87,7 @@ class po4aoTrainer(XDevice):
         self._property_lock = threading.RLock()
         for name in (
             "operation_timeout",
+            "freshness_timeout",
             "worker_timeout",
             "collection_timeout",
             "build_timeout",
@@ -96,8 +106,12 @@ class po4aoTrainer(XDevice):
             self.config.po4ao_device,
             self.config.modulation_device,
             self.config.operation_timeout,
+            freshness_timeout=self.config.freshness_timeout,
+            unmodulated_state=self.config.unmodulated_state,
+            modulated_state=self.config.modulated_state,
         )
         self.supervisor = Supervisor(runtime, self.config)
+        self._heartbeat = 0
         self.log.info("PO4AO trainer source revision: %s", self.config.source_revision)
         for device in (runtime.nn, runtime.po4ao, runtime.modulation):
             self.client.get_properties(device)
@@ -207,7 +221,10 @@ class po4aoTrainer(XDevice):
 
     def loop(self):
         """Publish effective readback before terminal operation acknowledgements."""
+        self.supervisor.runtime.observations.refresh()
         events = self.supervisor.tick()
+        self._heartbeat += 1
+        self.supervisor.status["heartbeat"] = str(self._heartbeat)
         from .configuration import revision
 
         with self._property_lock:
@@ -246,6 +263,7 @@ class po4aoTrainer(XDevice):
         """Leave real-time controller selection alone while stopping owned numerical work."""
         if hasattr(self, "supervisor"):
             self.supervisor.close()
+            self.supervisor.runtime.close()
 
 
 main = po4aoTrainer.console_app

@@ -953,6 +953,8 @@ inline int po4ao::sendOutput()
 
 inline int po4ao::appStartup()
 {
+    m_runtimeInstance = std::to_string( getpid() ) + "-" +
+                        std::to_string( std::chrono::system_clock::now().time_since_epoch().count() );
     if( m_configVersion != 2 ||
         ( m_linearInferenceBackend != "auto" && m_linearInferenceBackend != "cpu" &&
           m_linearInferenceBackend != "tensorrt" ) ||
@@ -1008,6 +1010,9 @@ inline int po4ao::appStartup()
                                  "effective_controller",
                                  "effective_id",
                                  "control_request",
+                                 "control_target",
+                                 "instance",
+                                 "sequence",
                                  "control_applied",
                                  "reset_request",
                                  "reset_applied" } )
@@ -1117,26 +1122,40 @@ inline void po4ao::updateControlStatus()
     static const std::array<std::string, 4> controllers{ "unknown", "integrator", "po4ao", "pass-through" };
     static const std::array<std::string, 5> phases{ "idle", "collecting", "publishing", "ready", "interrupted" };
     const uint64_t                          active = m_activeModelId.load( std::memory_order_acquire );
-    updateIfChanged( m_indiP_modelStatus, "active_id", modelText( active ) );
-    updateIfChanged(
-        m_indiP_modelStatus,
-        "active_backend",
-        std::string( active == 0 ? "fallback"
-                                 : ( m_activeCpuInference.load( std::memory_order_acquire ) ? "cpu" : "tensorrt" ) ) );
-    updateIfChanged( m_indiP_modelStatus,
-                     "effective_controller",
-                     controllers[static_cast<size_t>( m_effectiveController.load( std::memory_order_acquire ) )] );
-    updateIfChanged(
-        m_indiP_modelStatus, "effective_id", modelText( m_effectiveModelId.load( std::memory_order_acquire ) ) );
-    updateIfChanged( m_indiP_modelStatus, "reload", reloadNames[static_cast<size_t>( reload )] );
+    std::string                             reloadError;
     { //mutex scope
         std::lock_guard<std::mutex> errorLock( m_reloadErrorMutex );
-        updateIfChanged( m_indiP_modelStatus, "reload_error", m_reloadError );
+        reloadError = m_reloadError;
     }
-    updateIfChanged( m_indiP_modelStatus, "control_request", std::to_string( control >> 1 ) );
-    updateIfChanged( m_indiP_modelStatus, "control_applied", std::to_string( applied >> 1 ) );
-    updateIfChanged( m_indiP_modelStatus, "reset_request", std::to_string( reset ) );
-    updateIfChanged( m_indiP_modelStatus, "reset_applied", std::to_string( resetApplied ) );
+    // Keep lifetime, request generations and heartbeat in one observed property update.
+    updateIfChanged<std::string>(
+        m_indiP_modelStatus,
+        { "active_id",
+          "active_backend",
+          "effective_controller",
+          "effective_id",
+          "reload",
+          "reload_error",
+          "instance",
+          "control_target",
+          "sequence",
+          "control_request",
+          "control_applied",
+          "reset_request",
+          "reset_applied" },
+        { modelText( active ),
+          active == 0 ? "fallback" : ( m_activeCpuInference.load( std::memory_order_acquire ) ? "cpu" : "tensorrt" ),
+          controllers[static_cast<size_t>( m_effectiveController.load( std::memory_order_acquire ) )],
+          modelText( m_effectiveModelId.load( std::memory_order_acquire ) ),
+          reloadNames[static_cast<size_t>( reload )],
+          reloadError,
+          m_runtimeInstance,
+          ( control & 1 ) ? "on" : "off",
+          std::to_string( ++m_statusSequence ),
+          std::to_string( control >> 1 ),
+          std::to_string( applied >> 1 ),
+          std::to_string( reset ),
+          std::to_string( resetApplied ) } );
     updateIfChanged( m_indiP_collectionStatus,
                      "state",
                      pendingCollection ? std::string( "pending" ) : phases[static_cast<size_t>( phase )] );

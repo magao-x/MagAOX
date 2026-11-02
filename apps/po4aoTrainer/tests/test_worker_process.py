@@ -9,6 +9,7 @@ from pathlib import Path
 import subprocess
 import sys
 import time
+import pytest
 
 from xapp.po4aoTrainer.process import Worker
 from xapp.po4aoTrainer.configuration import revision
@@ -165,8 +166,9 @@ time.sleep(60)
         unrelated.wait(timeout=5)
 
 
-def test_pause_cancels_export_child_but_retains_worker(tmp_path, monkeypatch):
-    """Exercise production export cancellation with an actual sleeping build child."""
+@pytest.mark.parametrize("outcome", [None, "loaded", "failed"])
+def test_export_pause_and_publication_outcome(tmp_path, monkeypatch, outcome):
+    """Exercise real worker cancellation, delayed issuance and persisted final publication outcomes."""
     import psutil
 
     config = json.loads(
@@ -197,6 +199,8 @@ managed.run(sys.argv[1])
     bootstrap = BOOTSTRAP.replace(
         "from xapp.po4aoTrainer.worker import run\nrun(sys.argv[1])", export_boundary
     )
+    if outcome is not None:
+        bootstrap = bootstrap.replace("import time;time.sleep(60)", "pass")
     original = subprocess.Popen
 
     def launch(command, **kwargs):
@@ -218,15 +222,29 @@ managed.run(sys.argv[1])
     )
     try:
         deadline = time.monotonic() + 20
-        while not worker.children:
+        candidates = []
+        while not worker.children and not (outcome is not None and candidates):
             worker.send(dict(collection="ready", generation="1"))
-            worker.events()
+            candidates.extend(
+                event for event in worker.events() if event["event"] == "candidate"
+            )
             assert worker.process.poll() is None, (
                 worker.run / "worker.log"
             ).read_text()
             assert time.monotonic() < deadline
             time.sleep(0.03)
-        build = worker.children[0]
+        build = worker.children[0] if worker.children else None
+        if outcome is not None:
+            while not candidates:
+                worker.send(dict(collection="ready", generation="1"))
+                candidates.extend(
+                    event for event in worker.events() if event["event"] == "candidate"
+                )
+                assert not worker.error, (worker.run / "worker.log").read_text()
+                assert time.monotonic() < deadline
+                time.sleep(0.03)
+            path = candidates[0]["path"]
+            worker.send({"candidate_path": path, "candidate_id": "a" * 16})
         worker.send({"run": False})
         while worker.state != "paused":
             worker.events()
@@ -234,6 +252,37 @@ managed.run(sys.argv[1])
             assert time.monotonic() < deadline
             time.sleep(0.03)
         assert worker.process.poll() is None
-        assert not build.is_running() or build.status() == psutil.STATUS_ZOMBIE
+        assert (
+            build is None
+            or not build.is_running()
+            or build.status() == psutil.STATUS_ZOMBIE
+        )
+        if outcome is not None:
+            worker.send({"candidate_outcome_path": path, "candidate_outcome": outcome})
+            records = []
+            while not any(
+                record.get("publication_outcome") == outcome for record in records
+            ):
+                records = [
+                    json.loads(line)
+                    for line in (worker.run / "metrics.jsonl").read_text().splitlines()
+                ]
+                worker.events()
+                assert not worker.error, (worker.run / "worker.log").read_text()
+                assert time.monotonic() < deadline
+                time.sleep(0.03)
+            from xapp.po4aoTrainer.observer import load_diagnostics
+
+            matching = next(
+                record
+                for record in records
+                if record.get("publication_outcome") == outcome
+            )
+            snapshot = load_diagnostics(
+                next((worker.run / "diagnostics").glob("*.npz"))
+            )
+            assert matching["published_model_id"] == "a" * 16
+            assert snapshot.metadata["history"][-1] == matching
+            assert worker.process.poll() is None and worker.state == "paused"
     finally:
         worker.stop()

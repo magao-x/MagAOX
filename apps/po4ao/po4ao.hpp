@@ -249,6 +249,10 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>
     /** \name Runtime Telemetry - Data
      *@{
      */
+    std::string m_runtimeInstance; ///< Process-lifetime identity for reset/restart reconciliation.
+
+    uint64_t m_statusSequence{ 0 }; ///< App-logic heartbeat independent of unchanged control values.
+
     static constexpr size_t                             c_latencySamples = 1024; ///< Callback-latency ring length.
     std::array<std::atomic<uint32_t>, c_latencySamples> m_latencySamples;        ///< Recent callback durations.
     std::atomic<uint64_t>                               m_latencyCount{ 0 }; ///< Number of recorded callback durations.

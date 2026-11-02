@@ -249,6 +249,13 @@ def load_training(path, runtime_path):
         raise ValueError("Replay fractions must sum to less than one")
     if t["max_policy_clip_fraction"] > 1:
         raise ValueError("Clip fraction must not exceed one")
+    nonlinear = config["nonlinear"]
+    if nonlinear["channels"] < 2 or nonlinear["shared_layers"] < 2:
+        raise ValueError("nonlinear channels and shared_layers must be at least two")
+    if not 0 < nonlinear["negative_slope"] < 1:
+        raise ValueError("negative_slope must be between zero and one")
+    if not 0 < config["normalization"]["rms_floor_fraction"] <= 1:
+        raise ValueError("rms_floor_fraction must be in (0, 1]")
     architecture = config["NN_models"]["policy_architecture"]
     if (
         architecture not in ("nonlinear_local", "nonlinear_global")

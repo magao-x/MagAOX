@@ -443,7 +443,7 @@ Review performed: local and GitHub source comparison, comparison of NN branch hi
 
 ## Implementation status, 2026-11-02
 
-The deployment candidate now implements the native GUI, managed companion/worker,
+The local branch implements the native GUI, managed companion/worker,
 hot configuration, switching, C++ warmup changes, atomic publication and shared
 notebook example. See [the execution record](../2026-11/nn-po4ao-implementation.md)
 for exact baseline, source reconciliation and local tests, and
@@ -451,3 +451,9 @@ for exact baseline, source reconciliation and local tests, and
 target acceptance. Earlier statements about unresolved implementation describe the
 planning snapshot. Actual SDK/GPU/FPS/INDI/timing acceptance remains outstanding;
 local tests do not substitute for it. `AGENTS.md` was not changed.
+
+The independent review of `4790c3c8` identified implementation defects against these
+requirements. The [review response](../2026-11/nn-po4ao-review-response.md) records
+their corrections and regression coverage. It supersedes the earlier deployment-trial
+readiness claim; the corrected branch requires independent re-review and operator-run
+target acceptance before control-capable instrument use. R1–R6 remain unchanged.

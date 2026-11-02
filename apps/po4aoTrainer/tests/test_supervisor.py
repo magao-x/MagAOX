@@ -78,6 +78,17 @@ class FakeRuntime:
         """Record operations and allow the reset test to hold a recollection."""
         self.calls = []
         self.hold = False
+        self.reload_ticket = None
+        self.observations = SimpleNamespace(refresh=lambda: None)
+        self.observed = dict(
+            instance="test-runtime",
+            reset_request="1",
+            reset_applied="1",
+            control_request="1",
+            control_target="off",
+            active_id="0" * 16,
+            reload="idle",
+        )
 
     def get(self, device, prop, element):
         """Supply observed device state without inferring it from pending requests."""
@@ -89,6 +100,8 @@ class FakeRuntime:
             "state": "ready",
             "requested_generation": "1",
             "current": "3",
+            "frames": "96",
+            "target_frames": "96",
         }[element]
 
     def source(self):
@@ -99,17 +112,58 @@ class FakeRuntime:
         """Use the production bounded/cancellable wait."""
         return Runtime.wait(self, predicate, cancel, label, timeout or 0.5)
 
-    def control(self, enabled, cancel):
-        """Record requested controller selection."""
+    def runtime_state(self):
+        """Return the fixture's independent observed generations."""
+        return dict(self.observed)
+
+    def request_control(self, enabled):
+        """Admit an immediate controller request at this test boundary."""
         self.calls.append(("control", enabled))
+        self.observed["control_request"] = str(
+            int(self.observed["control_request"]) + 1
+        )
+        self.observed["control_target"] = "on" if enabled else "off"
 
-    def reset(self, cancel):
-        """Record runtime reset after worker termination."""
+    def control_complete(self, enabled):
+        """The simple fixture acknowledges immediate control completion."""
+        return True
+
+    def control(self, enabled, cancel):
+        """Use the same request/readback entry point as the runtime adapter."""
+        self.request_control(enabled)
+
+    def request_reset(self):
+        """Record both requests before any frame/worker completion wait."""
+        ticket = dict(
+            instance=self.observed["instance"],
+            after=int(self.observed["reset_request"]),
+        )
+        self.request_control(False)
         self.calls.append(("reset",))
+        self.observed["reset_request"] = self.observed["reset_applied"] = str(
+            ticket["after"] + 1
+        )
+        self.observed["active_id"] = "0" * 16
+        return ticket
 
-    def reload(self, model, cancel):
-        """Record the exact verified model requested for reload."""
+    def reset_complete(self, ticket, external=False):
+        """Compare independently mutable applied reset identity."""
+        return int(self.observed["reset_applied"]) > ticket["after"]
+
+    def begin_reload(self, model):
+        """Record the model while allowing delayed-outcome subclasses to override acknowledgement."""
         self.calls.append(("reload", model))
+        self.reload_ticket = {"model_id": model, "outcome": "loaded"}
+        self.observed["active_id"] = model
+
+    def finish_reload(self, cancel):
+        """Use the production cancellable completion wait."""
+        self.wait(lambda: self.reload_outcome() is not None, cancel, "reload")
+        return self.reload_outcome()
+
+    def reload_outcome(self):
+        """Return a load outcome independent of delivery."""
+        return self.reload_ticket["outcome"] if self.reload_ticket else None
 
     def recollect(self, cancel, timeout):
         """Hold collection until Reset cancellation when requested by a test."""
@@ -212,7 +266,14 @@ def test_bundle_verification_and_reset_eligibility(config):
     (candidate / "policy.trt.json").write_text(json.dumps(metadata))
     with pytest.raises(ValueError):
         verify_candidate(candidate, supervisor.root, generation)
-    (candidate / "policy.trt.training.npz").touch()
+    import numpy as np
+
+    np.savez(
+        candidate / "policy.trt.training.npz",
+        metadata_json=json.dumps(dict(metadata, model_id=model)),
+        policy_state__weight=np.zeros(1),
+        dynamics_0_state__weight=np.zeros(1),
+    )
     assert supervisor.publish(candidate, generation, threading.Event()) == model
     assert (supervisor.root / "current").resolve() == candidate
     supervisor.submit("reset", {"request": True})
@@ -234,10 +295,34 @@ class Client:
         """Create an acknowledged disabled NN fixture and catalog."""
         self.props = {}
         self.sent = []
-        self.connection = SimpleNamespace(send=self.send)
+        self.callbacks = []
+        self.connection = SimpleNamespace(
+            send=self.send,
+            add_callback=lambda *a: None,
+            remove_callback=lambda *a: None,
+        )
 
     def get_properties(self, *args):
-        """Discovery is recorded by the real GUI publisher tests; no socket here."""
+        """Send fresh simulated definitions through the observer callback boundary."""
+        for key, prop in self.props.items():
+            prop.device = key.split(".")[0]
+            self.receive(prop)
+
+    def register_callback(self, callback, device_name=None, property_name=None):
+        """Attach the same scoped property callbacks as the production client."""
+        self.callbacks.append((callback, device_name, property_name))
+
+    def unregister_callback(self, callback, device_name=None, property_name=None):
+        """Detach a scoped observer."""
+        self.callbacks.remove((callback, device_name, property_name))
+
+    def receive(self, message):
+        """Dispatch a simulated server update, distinct from command delivery."""
+        for callback, device, prop in list(self.callbacks):
+            if (device is None or device == message.device) and (
+                prop is None or prop == message.name
+            ):
+                callback(message)
 
     def __getitem__(self, key):
         """Match the client property/element indexing contract."""
@@ -330,6 +415,7 @@ def test_switching_orders_actual_writers_and_optional_modulation(target, linked)
         {
             "status": "active" if target == "cacao" else "disabled",
             "loaded": "a.trt",
+            "active": "a.trt" if target == "cacao" else "",
             "requested": "a.trt",
         },
     )
@@ -371,10 +457,16 @@ def test_switching_orders_actual_writers_and_optional_modulation(target, linked)
             client.props["nn.model_status"]["status"] = (
                 "active" if message["toggle"] == C.SwitchState.ON else "disabled"
             )
+            client.props["nn.model_status"]["active"] = (
+                "a.trt" if message["toggle"] == C.SwitchState.ON else ""
+            )
             if message["toggle"] == C.SwitchState.ON:
                 assert not writer.enabled
         elif message.device == "mod":
             prop["current"] = message["target"]
+        client.receive(prop)
+        if message.device == "nn":
+            client.receive(client.props["nn.model_status"])
 
     client.connection.send = response
     runtime = Runtime(client, writer, "nn", "po4ao", "mod", 0.1)
@@ -385,20 +477,18 @@ def test_switching_orders_actual_writers_and_optional_modulation(target, linked)
     if target == "cacao":
         assert events.index(("nn", "enable")) < events.index(("cacao", True))
     else:
-        assert events.index(("observe", False)) < events.index(("nn", "enable"))
+        assert events.index(("cacao", False)) < len(events) - 1
 
 
 def test_missing_writer_evidence_never_enables_nn():
-    """FIFO delivery alone cannot authorize NN start."""
+    """Missing current definitions cannot authorize a writer handover."""
     client = Client()
-    client.props["nn.model"] = P.SwitchVector(
-        name="model", rule=C.SwitchRule.AT_MOST_ONE
-    )
     writer = SimpleNamespace(command=lambda enabled: None, running=lambda: True)
     runtime = Runtime(client, writer, "nn", "po4ao", "mod", 0.01)
-    with pytest.raises(TimeoutError):
+    with pytest.raises(ConnectionError):
         runtime.switch("nn", threading.Event())
     assert not client.sent
+    runtime.close()
 
 
 def test_duplicate_reset_does_not_cancel_accepted_reset(config):
@@ -466,14 +556,16 @@ def test_fifo_delivery_is_bounded_and_separate_from_writer_evidence(tmp_path):
 
 
 def test_reload_requires_fresh_ack_even_for_same_model():
-    """An old idle/model match or failure cannot complete/reject a new reload."""
+    """Old cached outcomes cannot settle a request; timeouts preserve its eventual acknowledgement."""
     client = Client()
-    client.callbacks = []
-    client.register_callback = lambda cb, *args: client.callbacks.append(cb)
-    client.unregister_callback = lambda cb, *args: client.callbacks.remove(cb)
     status = P.TextVector(device="po4ao", name="model_status")
     for key, value in dict(
-        active_id="model-a", reload="failed", reload_error="old failure"
+        instance="runtime",
+        sequence="1",
+        reset_request="1",
+        active_id="model-a",
+        reload="idle",
+        reload_error="old",
     ).items():
         status.add_element(DefText(name=key, _value=value))
     client.props["po4ao.model_status"] = status
@@ -482,22 +574,17 @@ def test_reload_requires_fresh_ack_even_for_same_model():
     )
     reload.add_element(DefSwitch(name="toggle", _value=C.SwitchState.OFF))
     client.props["po4ao.reload_engine"] = reload
-    runtime = Runtime(client, None, "nn", "po4ao", "mod", 0.08)
+    runtime = Runtime(client, None, "nn", "po4ao", "mod", 0.04)
     with pytest.raises(TimeoutError):
         runtime.reload("model-a", threading.Event())
-    assert not client.callbacks
-    status["reload"] = "idle"
-    with pytest.raises(TimeoutError):
-        runtime.reload("model-a", threading.Event())
-
-    def response(message):
-        """Deliver Busy and Ok faster than the polling interval, as a real callback can."""
-        for state in (C.PropertyState.BUSY, C.PropertyState.OK):
-            for cb in client.callbacks:
-                cb(SimpleNamespace(state=state))
-
-    client.connection.send = response
-    runtime.reload("model-a", threading.Event())
+    assert runtime.reload_ticket is not None
+    with pytest.raises(RuntimeError, match="unresolved"):
+        runtime.begin_reload("another-model")
+    for state in (C.PropertyState.BUSY, C.PropertyState.OK):
+        reload.state = state
+        client.receive(reload)
+    assert runtime.finish_reload(threading.Event()) == "loaded"
+    runtime.close()
     assert not client.callbacks
 
 
@@ -509,7 +596,7 @@ def test_cancelled_publication_releases_worker_candidate_wait(config):
         state="running", closed=False, send=messages.append, stop=lambda: None
     )
 
-    def cancelled(*args):
+    def cancelled(*args, **kwargs):
         """Reproduce cancellation after the candidate reached the training executor."""
         raise InterruptedError("Publication cancelled")
 
@@ -569,7 +656,7 @@ def test_disable_recollect_and_reset_preserve_the_expected_worker_lifecycle(conf
 
         operation("learning", {"run": True})
         operation("po4ao_enable", {"toggle": False})
-        assert runtime.calls[-2:] == [("worker", "paused"), ("control", False)]
+        assert runtime.calls[-2:] == [("control", False), ("worker", "paused")]
         operation("po4ao_enable", {"toggle": True})
         assert workers[0].state == "paused"
         operation("recollect", {"request": True})
@@ -579,7 +666,7 @@ def test_disable_recollect_and_reset_preserve_the_expected_worker_lifecycle(conf
         assert workers[0].state == "running"
         assert len(workers) == 1
         operation("reset", {"request": True})
-        assert runtime.calls[-3:] == [("stop",), ("control", False), ("reset",)]
+        assert runtime.calls[-3:] == [("control", False), ("reset",), ("stop",)]
         assert supervisor.worker is None and workers[0].closed
     finally:
         supervisor.close()
@@ -592,6 +679,7 @@ def test_disable_still_selects_integrator_after_worker_failure(config):
     supervisor.worker = SimpleNamespace(
         state="error",
         error="build failed",
+        closed=True,
         stop=lambda: runtime.calls.append(("stop",)),
     )
     supervisor.execute(
@@ -600,7 +688,7 @@ def test_disable_still_selects_integrator_after_worker_failure(config):
         threading.Event(),
         supervisor.record["generation"],
     )
-    assert runtime.calls == [("stop",), ("control", False)]
+    assert runtime.calls == [("control", False), ("stop",)]
     supervisor.close()
 
 

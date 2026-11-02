@@ -8,6 +8,7 @@
 #include <QApplication>
 #include <QFile>
 #include <QTextStream>
+#include <QThread>
 
 #include "../../../lib/tests/offlineIndiPublisher.hpp"
 #include "../learningCtrl.hpp"
@@ -125,7 +126,8 @@ void Fixture::ready()
                   { { "requested", "model-a.trt" }, { "loaded", "model-a.trt" }, { "active", "" } } ) );
     define( text( "trainer",
                   "status",
-                  { { "reconstructor", "cacao" },
+                  { { "heartbeat", "0" },
+                    { "reconstructor", "cacao" },
                     { "controller", "integrator" },
                     { "reconstruction_phase", "idle" },
                     { "training_phase", "idle" },
@@ -137,6 +139,7 @@ void Fixture::ready()
                     { "message", "Ready" },
                     { "error", "" } } ) );
     define( text( "trainer", "progress", { { "iteration", "0" } } ) );
+    status( { { "heartbeat", "1" } } );
 }
 
 void Fixture::define( const pcf::IndiProperty &property )
@@ -381,6 +384,77 @@ TEST_CASE( "Two GUI clients share readbacks without toggling optimistically", "[
     REQUIRE( first.m_publisher.m_commands[0]["target"].get() == first.m_publisher.m_commands[1]["target"].get() );
     REQUIRE( second.findChild<QComboBox *>( "comboEngine" )->currentIndex() == -1 );
     REQUIRE( first.control<QLabel>( "labelReconstructor" )->text() == "Active: CACAO" );
+}
+
+/** \brief A confirmed stopped/faulted NN permits recovery through either reconstruction control. */
+TEST_CASE( "Stopped writers expose explicit recovery", "[learningCtrl]" )
+{
+    Fixture f;
+    f.control<QComboBox>( "comboEngine" )->setCurrentIndex( 1 );
+    f.status( { { "reconstructor", "stopped" }, { "reconstruction_phase", "error" } } );
+    REQUIRE( f.control<QPushButton>( "buttonEnableNN" )->isEnabled() );
+    REQUIRE( f.control<QPushButton>( "buttonReconstructor" )->text() == "Use CACAO" );
+    f.m_widget.on_buttonReconstructor_clicked();
+    REQUIRE( f.m_publisher.m_commands.back()["expected"].get() == "stopped" );
+    REQUIRE( f.m_publisher.m_commands.back()["target"].get() == "cacao" );
+    // clang-format off
+#ifdef LEARNINGCTRL_TEST_DOXYGEN_REF
+    xqt::learningCtrl::updateGUI;
+    xqt::learningCtrl::on_buttonReconstructor_clicked;
+#endif
+    // clang-format on
+}
+
+/** \brief Disable can preserve a session during publication/recollection; Reset remains a separate action. */
+TEST_CASE( "Disable supersedes busy training operations", "[learningCtrl]" )
+{
+    for( const auto *phase : { "publishing", "recollecting" } )
+    {
+        Fixture f;
+        f.status( { { "controller", "po4ao" },
+                    { "training_phase", phase },
+                    { "collection", "collecting" },
+                    { "collection_frames", "21" },
+                    { "collection_target", "100" } } );
+        f.acknowledge( "recollect", pcf::IndiProperty::Busy );
+        REQUIRE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
+        REQUIRE( f.control<QLabel>( "labelCollection" )->text().contains( "21/100" ) );
+        f.m_widget.on_buttonPO4AO_clicked();
+        REQUIRE( f.m_publisher.m_commands.back().getName() == "po4ao_enable" );
+        REQUIRE( f.m_publisher.m_commands.back()["toggle"].getSwitchState() == pcf::IndiElement::Off );
+        REQUIRE_FALSE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
+    }
+    // clang-format off
+#ifdef LEARNINGCTRL_TEST_DOXYGEN_REF
+    xqt::learningCtrl::updateGUI;
+    xqt::learningCtrl::on_buttonPO4AO_clicked;
+#endif
+    // clang-format on
+}
+
+/** \brief Cached/unchanged heartbeat values cannot keep a silent companion actionable. */
+TEST_CASE( "Companion status expires until heartbeat advances", "[learningCtrl]" )
+{
+    Fixture f;
+    QThread::msleep( 5100 );
+    f.status( { { "heartbeat", "1" } } );
+    REQUIRE_FALSE( f.control<QPushButton>( "buttonReset" )->isEnabled() );
+    REQUIRE( f.control<QLabel>( "labelConnection" )->text().contains( "Stale" ) );
+    REQUIRE( f.control<QLabel>( "labelReconstructor" )->text().contains( "Unknown" ) );
+    f.status( { { "heartbeat", "2" } } );
+    REQUIRE( f.control<QPushButton>( "buttonReset" )->isEnabled() );
+    f.erase( "trainer", "status" );
+    f.define( text( "trainer", "status", { { "heartbeat", "2" } } ) );
+    REQUIRE_FALSE( f.control<QPushButton>( "buttonReset" )->isEnabled() );
+    f.status( { { "heartbeat", "3" } } );
+    REQUIRE( f.control<QPushButton>( "buttonReset" )->isEnabled() );
+    REQUIRE( f.m_publisher.m_commands.empty() );
+    // clang-format off
+#ifdef LEARNINGCTRL_TEST_DOXYGEN_REF
+    xqt::learningCtrl::observeHeartbeat;
+    xqt::learningCtrl::updateGUI;
+#endif
+    // clang-format on
 }
 
 /** \brief Config errors remain visible and long engine names stay accessible in a compact layout. */

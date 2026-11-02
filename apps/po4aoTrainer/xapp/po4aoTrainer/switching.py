@@ -2,13 +2,15 @@
 # \brief Completion-aware NN/CACAO routing using the existing INDI and milk interfaces.
 """No loop-state access and no coupling to PO4AO/training state."""
 
+import math
 import os
 from pathlib import Path
 import stat
 import threading
 import time
 import psutil
-from purepyindi2.constants import ConnectionStatus, PropertyState, SwitchState
+from purepyindi2.constants import PropertyState, SwitchState
+from .observations import Observations
 
 
 class MilkWriter:
@@ -88,8 +90,27 @@ class MilkWriter:
 class Runtime:
     """Narrow transport adapter shared by supervisor operations and offline fixtures."""
 
-    def __init__(self, client, writer, nn, po4ao, modulation, timeout=30):
+    def __init__(
+        self,
+        client,
+        writer,
+        nn,
+        po4ao,
+        modulation,
+        timeout=30,
+        *,
+        freshness_timeout=5.0,
+        unmodulated_state=3.0,
+        modulated_state=4.0,
+    ):
         """Bind configured device identities; do not infer them from filenames."""
+        if (
+            not all(
+                math.isfinite(value) for value in (unmodulated_state, modulated_state)
+            )
+            or unmodulated_state == modulated_state
+        ):
+            raise ValueError("Modulation states must be finite and distinct")
         self.client, self.writer = client, writer
         self.nn, self.po4ao, self.modulation, self.timeout = (
             nn,
@@ -98,23 +119,40 @@ class Runtime:
             timeout,
         )
 
+        self.observations = Observations(
+            client, (nn, po4ao, modulation), freshness_timeout, heartbeat_device=po4ao
+        )
+        self.unmodulated_state, self.modulated_state = (
+            unmodulated_state,
+            modulated_state,
+        )
+        self.reload_ticket = None
+        self.observations.refresh()
+
     def get(self, device, prop, element):
-        """Read only from a connected INDI cache; missing definitions fail explicitly."""
-        if self.client.status != ConnectionStatus.CONNECTED:
-            raise ConnectionError("INDI is disconnected")
-        return self.client[f"{device}.{prop}.{element}"]
+        """Read a current-lifetime, non-expired INDI observation."""
+        return self.observations.vector(device, prop)[element]
 
     def send(self, device, prop, values):
-        """Send one typed request, preserving multi-element target/selection semantics."""
-        vector = self.client[f"{device}.{prop}"]
-        if self.client.status != ConnectionStatus.CONNECTED:
-            raise ConnectionError("INDI is disconnected")
+        """Send through a freshly discovered typed property."""
+        vector = self.observations.vector(device, prop)
         self.client.connection.send(vector.make_new_property(**values))
+
+    def close(self):
+        """Release observation/reload callbacks without changing device state."""
+        if self.reload_ticket is not None:
+            self.client.unregister_callback(
+                self.reload_ticket["callback"], self.po4ao, "reload_engine"
+            )
+        self.observations.close()
 
     def wait(self, predicate, cancel, label, timeout=None):
         """Wait boundedly for observed completion, with cooperative cancellation."""
         deadline = time.monotonic() + (self.timeout if timeout is None else timeout)
-        while not predicate():
+        while True:
+            self.observations.refresh()
+            if predicate():
+                break
             if cancel.wait(0.05):
                 raise InterruptedError(label + " cancelled")
             if time.monotonic() >= deadline:
@@ -122,29 +160,54 @@ class Runtime:
         if cancel.is_set():
             raise InterruptedError(label + " cancelled")
 
-    def nn_enabled(self, enabled, cancel):
-        """Wait for the donor NN app's post-publication enable/disable acknowledgement."""
-        target = SwitchState.ON if enabled else SwitchState.OFF
-        self.send(self.nn, "enable", {"toggle": target})
-        self.wait(
-            lambda: self.get(self.nn, "enable", "toggle") == target
-            and self.client[f"{self.nn}.enable"].state == PropertyState.OK
+    def nn_quiescent(self):
+        """Recognize the donor's completed disable, including a latched model fault after quiescence."""
+        return (
+            self.get(self.nn, "enable", "toggle") == SwitchState.OFF
             and self.get(self.nn, "model_status", "status")
-            == ("active" if enabled else "disabled"),
+            in ("disabled", "fault: reload required")
+            and not self.get(self.nn, "model_status", "active")
+        )
+
+    def nn_enabled(self, enabled, cancel):
+        """Allow fault recovery only after confirmed quiescence; activation still requires healthy output."""
+        self.send(
+            self.nn,
+            "enable",
+            {"toggle": SwitchState.ON if enabled else SwitchState.OFF},
+        )
+        self.wait(
+            (
+                (
+                    lambda: self.get(self.nn, "enable", "toggle") == SwitchState.ON
+                    and self.observations.vector(self.nn, "enable").state
+                    == PropertyState.OK
+                    and self.get(self.nn, "model_status", "status") == "active"
+                    and bool(self.get(self.nn, "model_status", "active"))
+                )
+                if enabled
+                else self.nn_quiescent
+            ),
             cancel,
             "NN enable/disable",
         )
 
     def source(self):
-        """Combine actual NN acknowledgement with observed CACAO writer state."""
-        nn = self.get(self.nn, "enable", "toggle") == SwitchState.ON
-        if self.client[f"{self.nn}.enable"].state != PropertyState.OK:
+        """Distinguish verified stopped writers from unavailable observations and in-flight NN work."""
+        phase = self.get(self.nn, "model_status", "status")
+        active = (
+            self.get(self.nn, "enable", "toggle") == SwitchState.ON
+            and self.observations.vector(self.nn, "enable").state == PropertyState.OK
+            and phase == "active"
+            and bool(self.get(self.nn, "model_status", "active"))
+        )
+        if not active and not self.nn_quiescent():
             return "transition"
         cacao = self.writer.running()
         return (
             "conflict"
-            if nn and cacao
-            else "nn" if nn else "cacao" if cacao else "unknown"
+            if active and cacao
+            else "nn" if active else "cacao" if cacao else "stopped"
         )
 
     def modulation_target(self, target, cancel):
@@ -153,11 +216,17 @@ class Runtime:
             self.send(self.modulation, "modFrequency", {"target": 2000.0})
             self.send(self.modulation, "modRadius", {"target": 3.0})
         self.send(
-            self.modulation, "modState", {"target": 3.0 if target == "nn" else 4.0}
+            self.modulation,
+            "modState",
+            {
+                "target": (
+                    self.unmodulated_state if target == "nn" else self.modulated_state
+                )
+            },
         )
         self.wait(
             lambda: float(self.get(self.modulation, "modState", "current"))
-            == (3 if target == "nn" else 4),
+            == (self.unmodulated_state if target == "nn" else self.modulated_state),
             cancel,
             "modulation state",
         )
@@ -174,26 +243,37 @@ class Runtime:
             )
 
     def switch(self, target, cancel, *, linked=False, model=None, expected=None):
-        """Stop the old writer before starting the target; never issue loop/PO4AO/training commands."""
+        """Hand over verified writers, or recover from both stopped, without changing unrelated control state."""
         if target not in ("nn", "cacao"):
             raise ValueError("Unknown reconstructor target")
-        if expected is not None and self.source() != expected:
+        source = self.source()
+        if expected is not None and source != expected:
             raise ValueError("Reconstructor changed since the request")
+        if source not in ("nn", "cacao", "stopped"):
+            raise RuntimeError("Reconstructor state is not verified")
         if target == "nn":
-            catalog = self.client[f"{self.nn}.model"]
+            catalog = self.observations.vector(self.nn, "model")
             if model is not None and model not in catalog:
                 raise ValueError("Unknown NN catalog element")
-            self.writer.command(False)
-            self.wait(lambda: not self.writer.running(), cancel, "CACAO writer stop")
+            filename = (
+                catalog._elements[model].label
+                if model is not None
+                else self.get(self.nn, "model_status", "loaded")
+            )
+            if not filename:
+                raise ValueError("No selected/loaded NN model")
+            if (
+                source == "nn"
+                and self.get(self.nn, "model_status", "active") == filename
+            ):
+                return
             self.nn_enabled(False, cancel)
             if model is not None:
-                filename = catalog._elements[model].label
-                if not filename:
-                    raise ValueError("NN model catalog lacks filename labels")
                 already_loaded = (
                     self.get(self.nn, "model_status", "loaded") == filename
                     and self.get(self.nn, "model_status", "requested") == filename
-                    and catalog.state == PropertyState.OK
+                    and self.observations.vector(self.nn, "model").state
+                    == PropertyState.OK
                 )
                 if not already_loaded:
                     self.send(
@@ -207,70 +287,176 @@ class Runtime:
                 self.wait(
                     lambda: self.get(self.nn, "model_status", "loaded") == filename
                     and self.get(self.nn, "model_status", "requested") == filename
-                    and self.client[f"{self.nn}.model"].state == PropertyState.OK,
+                    and self.observations.vector(self.nn, "model").state
+                    == PropertyState.OK,
                     cancel,
                     "NN model load",
                 )
-            if linked:
-                self.modulation_target(target, cancel)
+            if source == "cacao":
+                self.writer.command(False)
+                self.wait(
+                    lambda: not self.writer.running(), cancel, "CACAO writer stop"
+                )
+                if linked:
+                    self.modulation_target(target, cancel)
             self.nn_enabled(True, cancel)
         else:
+            if source == "cacao":
+                return
             self.nn_enabled(False, cancel)
             if linked:
                 self.modulation_target(target, cancel)
             self.writer.command(True)
             self.wait(self.writer.running, cancel, "CACAO writer start")
 
+    def runtime_state(self):
+        """Read the identity and requested/applied control generations used for reconciliation."""
+        vector = self.observations.vector(self.po4ao, "model_status")
+        state = {
+            name: vector[name]
+            for name in (
+                "instance",
+                "reset_request",
+                "reset_applied",
+                "control_request",
+                "control_target",
+                "active_id",
+                "reload",
+            )
+        }
+        if (
+            not state["instance"]
+            or state["control_target"] not in ("on", "off")
+            or any(
+                not str(state[name]).isdigit()
+                for name in ("reset_request", "reset_applied", "control_request")
+            )
+            or len(state["active_id"]) != 16
+        ):
+            raise ConnectionError("Runtime status is not fully initialized")
+        return state
+
+    def request_control(self, enabled):
+        """Queue controller selection without waiting for an input frame."""
+        self.send(
+            self.po4ao,
+            "control_enable",
+            {"toggle": SwitchState.ON if enabled else SwitchState.OFF},
+        )
+
+    def control_complete(self, enabled):
+        """Require the requested selection to have reached an emitted frame."""
+        return (
+            self.get(self.po4ao, "control_enable", "toggle")
+            == (SwitchState.ON if enabled else SwitchState.OFF)
+            and self.observations.vector(self.po4ao, "control_enable").state
+            == PropertyState.OK
+        )
+
     def control(self, enabled, cancel):
-        """Wait for an emitted frame carrying the requested PO4AO selection."""
-        target = SwitchState.ON if enabled else SwitchState.OFF
-        self.send(self.po4ao, "control_enable", {"toggle": target})
-        self.wait(
-            lambda: self.get(self.po4ao, "control_enable", "toggle") == target
-            and self.client[f"{self.po4ao}.control_enable"].state == PropertyState.OK,
-            cancel,
-            "PO4AO control",
-        )
+        """Request selection and wait for post-frame acknowledgement."""
+        if cancel.is_set():
+            raise InterruptedError("PO4AO control cancelled")
+        self.request_control(enabled)
+        self.wait(lambda: self.control_complete(enabled), cancel, "PO4AO control")
 
-    def reset(self, cancel):
-        """Wait for a newer reset generation to reach an emitted frame."""
-        old = int(self.get(self.po4ao, "model_status", "reset_request"))
+    def request_reset(self):
+        """Send fallback and generation invalidation before waiting for any frame or worker."""
+        ticket = {
+            "instance": self.get(self.po4ao, "model_status", "instance"),
+            "after": int(self.get(self.po4ao, "model_status", "reset_request")),
+        }
+        self.request_control(False)
         self.send(self.po4ao, "reset_model", {"toggle": SwitchState.ON})
-        self.wait(
-            lambda: int(self.get(self.po4ao, "model_status", "reset_applied")) > old,
-            cancel,
-            "PO4AO reset",
+        return ticket
+
+    def reset_complete(self, ticket, external=False):
+        """Require post-frame reset completion in the intended runtime lifetime."""
+        same = self.get(self.po4ao, "model_status", "instance") == ticket["instance"]
+        reset = int(self.get(self.po4ao, "model_status", "reset_applied"))
+        return (
+            same
+            and reset > ticket["after"]
+            and (
+                external
+                or (
+                    self.get(self.po4ao, "control_enable", "toggle") == SwitchState.OFF
+                    and self.observations.vector(self.po4ao, "control_enable").state
+                    == PropertyState.OK
+                )
+            )
         )
 
-    def reload(self, model_id, cancel):
-        """Require a fresh Busy/terminal acknowledgement, even when reloading the same engine."""
-        busy, terminal = threading.Event(), threading.Event()
+    def begin_reload(self, model_id):
+        """Keep a ticket after issuance; cancelling a caller's wait cannot cancel C++ loading."""
+        if self.reload_ticket is not None:
+            if self.reload_outcome() is None:
+                raise RuntimeError("A runtime reload is still unresolved")
+            self.client.unregister_callback(
+                self.reload_ticket["callback"], self.po4ao, "reload_engine"
+            )
+        ticket = dict(
+            model_id=model_id,
+            instance=self.get(self.po4ao, "model_status", "instance"),
+            reset=int(self.get(self.po4ao, "model_status", "reset_request")),
+            epoch=self.observations.epoch,
+            busy=False,
+            terminal=False,
+            outcome=None,
+        )
 
         def acknowledge(message):
-            """Capture transitions that can occur between cache polls."""
+            """Remember Busy/terminal updates even when they occur between polls."""
             state = getattr(message, "state", None)
             if state == PropertyState.BUSY:
-                busy.set()
-            elif busy.is_set() and state in (PropertyState.OK, PropertyState.ALERT):
-                terminal.set()
+                ticket["busy"] = True
+            elif ticket["busy"] and state in (PropertyState.OK, PropertyState.ALERT):
+                ticket["terminal"] = True
 
-        def loaded():
-            """Read final model/error evidence only after this reload was acknowledged."""
-            if not terminal.is_set():
-                return False
-            if self.get(self.po4ao, "model_status", "reload") == "failed":
-                raise RuntimeError(self.get(self.po4ao, "model_status", "reload_error"))
-            return (
-                self.get(self.po4ao, "model_status", "active_id") == model_id
-                and self.get(self.po4ao, "model_status", "reload") == "idle"
-            )
-
+        ticket["callback"] = acknowledge
+        self.reload_ticket = ticket
         self.client.register_callback(acknowledge, self.po4ao, "reload_engine")
-        try:
-            self.send(self.po4ao, "reload_engine", {"toggle": SwitchState.ON})
-            self.wait(loaded, cancel, "PO4AO engine reload")
-        finally:
-            self.client.unregister_callback(acknowledge, self.po4ao, "reload_engine")
+        self.send(self.po4ao, "reload_engine", {"toggle": SwitchState.ON})
+
+    def reload_outcome(self):
+        """Return a settled load/reset outcome, retaining unresolved tickets through timeouts."""
+        ticket = self.reload_ticket
+        if ticket is None:
+            return None
+        if ticket["outcome"] is not None:
+            return ticket["outcome"]
+        if (
+            self.get(self.po4ao, "model_status", "instance") != ticket["instance"]
+            or int(self.get(self.po4ao, "model_status", "reset_request"))
+            != ticket["reset"]
+        ):
+            ticket["outcome"] = "invalidated"
+        elif ticket["terminal"] or (
+            ticket["busy"] and self.observations.epoch != ticket["epoch"]
+        ):
+            state = self.get(self.po4ao, "model_status", "reload")
+            if state == "failed":
+                ticket["outcome"] = "failed"
+            elif (
+                state == "idle"
+                and self.get(self.po4ao, "model_status", "active_id")
+                == ticket["model_id"]
+            ):
+                ticket["outcome"] = "loaded"
+        return ticket["outcome"]
+
+    def finish_reload(self, cancel):
+        """Wait for the issued load to settle; timeout/cancellation preserves its ticket."""
+        self.wait(
+            lambda: self.reload_outcome() is not None, cancel, "PO4AO engine reload"
+        )
+        return self.reload_ticket["outcome"]
+
+    def reload(self, model_id, cancel):
+        """Convenience operation for callers that do not own publication bookkeeping."""
+        self.begin_reload(model_id)
+        if self.finish_reload(cancel) != "loaded":
+            raise RuntimeError("PO4AO reload failed or was invalidated")
 
     def recollect(self, cancel, timeout):
         """Require a newer complete frozen snapshot; interrupted collection never resumes learning."""
@@ -329,7 +515,6 @@ def main():
                 config.modulation_device + "." + prop
                 for prop in ("modState", "modFrequency", "modRadius")
             ]
-        client.get_properties_and_wait(names, timeout_sec=config.operation_timeout)
         runtime = Runtime(
             client,
             MilkWriter(config.fps_name, config.fps_fifo, config.writer_process_match),
@@ -337,11 +522,29 @@ def main():
             config.po4ao_device,
             config.modulation_device,
             config.operation_timeout,
+            freshness_timeout=config.freshness_timeout,
+            unmodulated_state=config.unmodulated_state,
+            modulated_state=config.modulated_state,
         )
+
+        def discovered():
+            """Wait for definitions from this connection instead of the client's retained cache."""
+            try:
+                for name in names:
+                    device, prop = name.split(".", 1)
+                    runtime.observations.vector(device, prop)
+                return bool(runtime.source())
+            except (ConnectionError, KeyError):
+                runtime.observations.refresh()
+                return False
+
+        runtime.wait(discovered, threading.Event(), "fresh discovery")
         runtime.switch(
             args.target, threading.Event(), linked=args.linked, model=args.model
         )
     finally:
+        if "runtime" in locals():
+            runtime.close()
         client.connection.stop()
 
 

@@ -1,5 +1,5 @@
 ## \file artifacts.py
-# \brief Verify complete worker bundles without importing numerical/GPU libraries.
+# \brief Verify complete worker bundles without importing torch or GPU libraries.
 """Eligibility is tied to the supervisor reset generation, not file existence."""
 
 import json
@@ -39,6 +39,39 @@ def verify_candidate(directory, root, generation):
         or not metadata.get("session_id")
     ):
         raise ValueError("Candidate metadata does not match its engine/session")
-    if not (directory / "policy.trt.training.npz").is_file():
-        raise ValueError("Candidate training snapshot is missing")
+    import numpy as np
+
+    try:
+        snapshot_file = np.load(
+            directory / "policy.trt.training.npz", allow_pickle=False
+        )
+    except (OSError, ValueError, EOFError) as error:
+        raise ValueError(
+            "Candidate training snapshot is missing or unreadable"
+        ) from error
+    if not isinstance(snapshot_file, np.lib.npyio.NpzFile):
+        raise ValueError("Candidate training snapshot must be an NPZ archive")
+    with snapshot_file as snapshot:
+        saved = json.loads(str(snapshot["metadata_json"]))
+        for key in (
+            "active_model_id",
+            "generation",
+            "session_id",
+            "config_revision",
+            "config",
+        ):
+            if saved.get(key) != metadata[key]:
+                raise ValueError(
+                    "Candidate training snapshot identity mismatch: " + key
+                )
+        if saved.get("model_id") != model_id:
+            raise ValueError("Candidate training snapshot model hash mismatch")
+        policy = [name for name in snapshot.files if name.startswith("policy_state__")]
+        dynamics = [name for name in snapshot.files if name.startswith("dynamics_")]
+        if (
+            not policy
+            or not dynamics
+            or any(not np.isfinite(snapshot[name]).all() for name in policy + dynamics)
+        ):
+            raise ValueError("Candidate training snapshot lacks finite model state")
     return directory, model_id

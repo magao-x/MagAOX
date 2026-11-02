@@ -290,13 +290,36 @@ def run(directory):
             if control["generation"] != generation or control["collection"] != "ready":
                 continue
             emit("candidate", path=str(candidate), generation=launch["generation"])
-            # Do not advance policy_copy until the supervisor has accepted/rejected this exact candidate.
+            # Continue pumping acknowledgements while paused; no optimizer/model changes occur here.
             while control.get("candidate_path") != str(candidate):
-                checkpoint()
+                pump()
+                state("paused" if not control["run"] else "waiting")
                 time.sleep(0.05)
-            if control.pop("candidate_id", ""):
-                metadata = json.loads((candidate / "policy.trt.json").read_text())
-                session.stage_publication(metadata["active_model_id"])
+            model_id = control.pop("candidate_id", "")
+            if model_id:
+                session.stage_publication(model_id)
+                with (directory / "metrics.jsonl").open("a") as metrics:
+                    metrics.write(json.dumps(record, allow_nan=False) + "\n")
+                save_diagnostics(session, directory / "diagnostics")
+                while control.get("candidate_outcome_path") != str(candidate):
+                    pump()
+                    state("paused" if not control["run"] else "waiting")
+                    time.sleep(0.05)
+                outcome = control.pop("candidate_outcome")
+                control.pop("candidate_outcome_path", None)
+                if outcome != "loaded":
+                    session.policy_update.pending = None
+                record["publication_status"] = (
+                    "activated" if outcome == "loaded" else outcome
+                )
+                record["publication_outcome"] = outcome
+            else:
+                record["publication_status"] = "rejected before reload"
+                record["publication_outcome"] = "rejected"
+            # JSONL is append-only: later records for the same session/iteration replace the earlier status.
+            with (directory / "metrics.jsonl").open("a") as metrics:
+                metrics.write(json.dumps(record, allow_nan=False) + "\n")
+            save_diagnostics(session, directory / "diagnostics")
             control.pop("candidate_path", None)
     except Exception as error:
         emit("error", error=str(error))

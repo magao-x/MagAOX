@@ -8,6 +8,7 @@
 #include <set>
 #include <string>
 
+#include <QElapsedTimer>
 #include <QSignalBlocker>
 #include <QTimer>
 
@@ -41,6 +42,14 @@ class learningCtrl : public xWidget
     std::map<std::string, bool> m_pending; ///< Locally sent commands; value records an observed Busy acknowledgement.
 
     std::string m_message; ///< Local request/acknowledgement error, separate from backend status.
+
+    QTimer m_statusTimer; ///< Re-evaluates expiry even when no INDI message arrives.
+
+    QElapsedTimer m_heartbeatAge; ///< Monotonic age since an observed advancing companion heartbeat.
+
+    std::string m_lastHeartbeat; ///< Last sequence, used to reject unchanged cached definitions.
+
+    bool m_haveHeartbeat{ false }; ///< A baseline sequence has been observed in this device lifetime.
 
     QTimer m_ackTimer; ///< Bounds the wait for initial acknowledgement; never retries a command.
 
@@ -99,6 +108,9 @@ class learningCtrl : public xWidget
   private:
     Ui::learningCtrl m_ui; ///< Qt Designer layout, using standard MagAO-X controls.
 
+    /// Observe actual companion progress; repeated cached values do not renew freshness.
+    void observeHeartbeat( const pcf::IndiProperty &property /**< [in] Newly received message. */ );
+
     /// Look up an observed text element, returning empty when it is unavailable.
     std::string value( const std::string &device, /**< [in] Source device. */
                        const std::string &name,   /**< [in] Property name. */
@@ -141,6 +153,9 @@ inline learningCtrl::learningCtrl( const std::string &device, QWidget *parent ) 
     m_ui.setupUi( this );
     setWindowTitle( "NN / PO4AO" );
     setXwFont( this );
+    m_statusTimer.setInterval( 500 );
+    connect( &m_statusTimer, &QTimer::timeout, this, &learningCtrl::updateGUI );
+    m_statusTimer.start();
     m_ackTimer.setSingleShot( true );
     m_ackTimer.setInterval( 10000 );
     connect( &m_ackTimer, &QTimer::timeout, this, &learningCtrl::acknowledgementTimeout );
@@ -179,7 +194,9 @@ inline void learningCtrl::onConnect()
 
 inline void learningCtrl::onDisconnect()
 {
-    m_connected = false;
+    m_connected     = false;
+    m_haveHeartbeat = false;
+    m_heartbeatAge.invalidate();
     m_properties.clear();
     m_defined.clear();
     m_pending.clear();
@@ -315,12 +332,24 @@ inline void learningCtrl::acknowledge( const pcf::IndiProperty &property )
         m_ackTimer.stop();
 }
 
+inline void learningCtrl::observeHeartbeat( const pcf::IndiProperty &property )
+{
+    if( property.getDevice() != m_device || property.getName() != "status" || !property.find( "heartbeat" ) )
+        return;
+    const auto heartbeat = property["heartbeat"].get();
+    if( m_haveHeartbeat && heartbeat != m_lastHeartbeat )
+        m_heartbeatAge.start();
+    m_lastHeartbeat = heartbeat;
+    m_haveHeartbeat = true;
+}
+
 inline void learningCtrl::handleDefProperty( const pcf::IndiProperty &property )
 {
     if( property.getDevice() != m_device && property.getDevice() != m_nnDevice )
         return;
     m_properties[property.createUniqueKey()] = property;
     m_defined.insert( property.createUniqueKey() );
+    observeHeartbeat( property );
     acknowledge( property );
     if( property.getDevice() == m_device && property.getName() == "devices" )
         syncNNDevice();
@@ -349,6 +378,7 @@ inline void learningCtrl::handleSetProperty( const pcf::IndiProperty &property )
         if( property.hasValidState() )
             found->second.setState( property.getState() );
     }
+    observeHeartbeat( property );
     acknowledge( property );
     if( property.getDevice() == m_device && property.getName() == "devices" )
         syncNNDevice();
@@ -371,6 +401,11 @@ inline void learningCtrl::handleDelProperty( const pcf::IndiProperty &property )
             ++entry;
     if( property.getDevice() == m_device )
     {
+        if( whole || property.getName() == "status" )
+        {
+            m_haveHeartbeat = false;
+            m_heartbeatAge.invalidate();
+        }
         if( whole )
         {
             m_pending.clear();
@@ -388,10 +423,14 @@ inline void learningCtrl::handleDelProperty( const pcf::IndiProperty &property )
 inline void learningCtrl::updateGUI()
 {
     const auto fsm   = value( m_device, "fsm", "state" );
-    const bool ready = m_connected && ( fsm == "READY" || fsm == "OPERATING" );
-    m_ui.labelConnection->setText( !m_connected ? "Disconnected" : ready ? "Ready" : "Waiting for companion" );
-    const auto source              = status( "reconstructor" );
-    const bool knownSource         = source == "nn" || source == "cacao";
+    const bool fresh = m_heartbeatAge.isValid() && m_heartbeatAge.elapsed() < 5000;
+    const bool ready = m_connected && fresh && ( fsm == "READY" || fsm == "OPERATING" );
+    m_ui.labelConnection->setText( !m_connected ? "Disconnected"
+                                   : ready      ? "Ready"
+                                   : !fresh     ? "Stale / waiting for heartbeat"
+                                                : "Waiting for companion" );
+    const auto source              = ready ? status( "reconstructor" ) : std::string( "unknown" );
+    const bool knownSource         = source == "nn" || source == "cacao" || source == "stopped";
     const auto reconstructionPhase = status( "reconstruction_phase" );
     const bool reconstructionReady = ready && knownSource &&
                                      ( reconstructionPhase == "idle" || reconstructionPhase == "error" ) &&
@@ -403,8 +442,9 @@ inline void learningCtrl::updateGUI()
                                      commandAvailable( "nn_activate", pcf::IndiProperty::Text, { "model" } ) );
     const bool loaded = !value( m_nnDevice, "model_status", "loaded" ).empty();
     m_ui.buttonReconstructor->setEnabled(
-        reconstructionReady && ( source == "nn" || loaded ) &&
+        reconstructionReady && ( source == "nn" || source == "stopped" || loaded ) &&
         commandAvailable( "reconstructor", pcf::IndiProperty::Text, { "target", "expected" } ) );
+    m_ui.buttonReconstructor->setText( source == "stopped" ? "Use CACAO" : "Switch reconstructor" );
     m_ui.labelReconstructor->setText( "Active: " + stateLabel( source ) );
     m_ui.labelReconstructor->setToolTip(
         QString::fromStdString( "Requested: " + value( m_nnDevice, "model_status", "requested" ) +
@@ -418,19 +458,21 @@ inline void learningCtrl::updateGUI()
     }
     m_ui.checkModulation->setEnabled( ready &&
                                       commandAvailable( "link_modulation", pcf::IndiProperty::Switch, { "toggle" } ) );
-    m_ui.labelModulation->setText( "Modulation: " + QString::fromStdString( status( "modulation" ).empty()
+    m_ui.labelModulation->setText( "Modulation: " + QString::fromStdString( !ready || status( "modulation" ).empty()
                                                                                 ? "Unknown"
                                                                                 : status( "modulation" ) ) );
 
-    const auto controller      = status( "controller" );
+    const auto controller      = ready ? status( "controller" ) : std::string( "unknown" );
     const bool enabled         = controller == "po4ao" || controller == "fallback";
     const bool knownController = enabled || controller == "integrator";
-    const auto learning        = status( "learning" );
+    const auto learning        = ready ? status( "learning" ) : std::string( "unknown" );
     const auto phase           = status( "training_phase" );
     const bool trainingReady   = ready && ( phase == "idle" || phase == "error" ) &&
                                  !busy( { "po4ao_enable", "reset", "recollect", "learning" } );
     m_ui.buttonPO4AO->setText( enabled ? "Disable PO4AO" : "Enable PO4AO" );
-    m_ui.buttonPO4AO->setEnabled( trainingReady && knownController &&
+    const bool disableReady =
+        ready && enabled && phase != "resetting" && phase != "reset_pending" && !busy( { "reset", "po4ao_enable" } );
+    m_ui.buttonPO4AO->setEnabled( ( enabled ? disableReady : trainingReady && knownController ) &&
                                   commandAvailable( "po4ao_enable", pcf::IndiProperty::Switch, { "toggle" } ) );
     m_ui.labelController->setText( stateLabel( controller ) );
     m_ui.buttonReset->setEnabled( ready && phase != "resetting" &&
@@ -438,7 +480,11 @@ inline void learningCtrl::updateGUI()
     const auto collection = status( "collection" );
     m_ui.buttonWarmup->setEnabled( trainingReady && knownController && collection != "collecting" &&
                                    commandAvailable( "recollect", pcf::IndiProperty::Switch, { "request" } ) );
-    m_ui.labelCollection->setText( stateLabel( collection ) );
+    QString collectionText = ready ? stateLabel( collection ) : "Unknown";
+    if( ready && collection == "collecting" )
+        collectionText +=
+            QString::fromStdString( " " + status( "collection_frames" ) + "/" + status( "collection_target" ) );
+    m_ui.labelCollection->setText( collectionText );
     const bool running = learning == "running" || learning == "waiting";
     const bool paused  = learning == "paused" || learning == "completed";
     m_ui.buttonLearning->setText( running ? "Pause learning" : paused ? "Resume learning" : "Start learning" );
@@ -446,8 +492,8 @@ inline void learningCtrl::updateGUI()
                                      ( running || paused || learning == "idle" ) &&
                                      commandAvailable( "learning", pcf::IndiProperty::Switch, { "run", "pause" } ) );
     m_ui.labelLearning->setText( stateLabel( learning ) );
-    const auto active   = status( "active_policy" );
-    const auto retained = status( "retained_policy" );
+    const auto active   = ready ? status( "active_policy" ) : std::string{};
+    const auto retained = ready ? status( "retained_policy" ) : std::string{};
     m_ui.labelPolicy->setText(
         QString::fromStdString( "Policy: " + ( active.empty() ? "Unknown" : active ) +
                                 ( retained.empty() || retained == active ? "" : "  Retained: " + retained ) ) );
@@ -498,7 +544,7 @@ inline void learningCtrl::on_buttonReconstructor_clicked()
     if( !m_ui.buttonReconstructor->isEnabled() )
         return;
     pcf::IndiProperty property( pcf::IndiProperty::Text, m_device, "reconstructor" );
-    property.add( pcf::IndiElement( "target", status( "reconstructor" ) == "nn" ? "cacao" : "nn" ) );
+    property.add( pcf::IndiElement( "target", status( "reconstructor" ) == "cacao" ? "nn" : "cacao" ) );
     property.add( pcf::IndiElement( "expected", status( "reconstructor" ) ) );
     submit( property );
 }

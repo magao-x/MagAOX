@@ -4,14 +4,16 @@ Started 2026-11-02 from the user's approved [requirements](../2026-10/nn-po4ao-g
 
 ## Current status, 2026-11-02
 
-The agreed local implementation is complete as a deployment candidate: native GUI,
-C++ current-controller recollection/readbacks, managed XDevice supervisor/worker,
-hot configuration, switching, staged export, notebook example and installation
-entries. The latest section below supersedes the earlier incremental status notes.
-Full target SDK compilation, actual GPU export, live INDI/FPS acceptance and timing
-remain operator-run requirements in `apps/po4aoTrainer/DEPLOYMENT.md`; this record does
-not claim instrument deployment or physical acceptance. No source or configuration
-was changed on an instrument host in this completion increment.
+The independent review of `4790c3c8` found control-coordination bugs, so the earlier
+deployment-trial readiness statement was premature. All eight findings and the
+additional artifact/diagnostic/mapping/progress gaps are addressed in the
+[review response](nn-po4ao-review-response.md), with regression evidence and limits.
+The corrected branch is ready for independent re-review and operator-run target
+validation, not established ready for control-capable instrument use. Full target
+SDK compilation, actual GPU export, live INDI/FPS acceptance and timing remain
+requirements in `apps/po4aoTrainer/DEPLOYMENT.md`. Historical increment notes below
+describe their respective revisions; the review response supersedes their readiness
+claims and Reset/publication sequencing. This review used local resources only.
 
 ## Branches and baseline
 
@@ -240,7 +242,24 @@ Affected files in this completion increment:
 - `notebooks/po4ao/development.ipynb`, `gui/widgets/learningCtrl/README.md`.
 - This execution record and the requirements' current-instruction/status notes.
 
-No further product decision is needed for the operator deployment trial. Before
+At that revision, no further product decision was identified for an operator deployment trial. Before
 scientific or on-sky use, the target acceptance in DEPLOYMENT.md and the handbook's
 committed/pushed source-and-config provenance requirements still apply. This branch
 has not been pushed or deployed by the agent.
+
+## Independent-review corrections, 2026-11-02
+
+The [finding-by-finding response](nn-po4ao-review-response.md) records the implemented
+corrections and revised acceptance boundary. Runtime reset/process identity and
+advancing status now support external-state reconciliation. Pending Reset/load
+state survives a failed wait; pause preserves the exact issued model reference.
+Received definitions and heartbeat expiry replace reliance on retained client cache.
+NN fault recovery, same-model no-op, NN-only replacement, busy-state Disable,
+configuration validation, artifact identity, final diagnostic outcome, configurable
+modulation mappings and visible collection progress are covered by new tests.
+
+Current local results: 107 Python tests plus 15 subtests; 151 Qt assertions in 14
+cases; existing PO4AO CPU suite 259 assertions in 27 cases. Launcher and wheel build,
+and isolated installed-package imports pass. These do not compile/test the complete
+target C++ status path or establish GPU/hardware behavior. The requirements were not
+relaxed; no NN/dlDataCollection/AGENTS.md changes or instrument access were made.
