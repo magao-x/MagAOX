@@ -218,7 +218,7 @@ inline multiIndiPublisher::~multiIndiPublisher() noexcept
 
 inline int multiIndiPublisher::addSubscriber( multiIndiSubscriber *sub )
 {
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::recursive_mutex> lock( m_subMutex );
         registerSubscriber( sub );
     }
@@ -253,7 +253,7 @@ inline int multiIndiPublisher::addSubscriberProperty( multiIndiSubscriber *sub, 
     pcf::IndiProperty query;
     query.setDevice( ipSub.getDevice() );
     query.setName( ipSub.getName() );
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::recursive_mutex> lock( m_subMutex );
         const auto                            key   = ipSub.createUniqueKey();
         const auto                            range = subscribedProperties.equal_range( key );
@@ -296,7 +296,7 @@ inline int multiIndiPublisher::addSubscriberProperty( multiIndiSubscriber *sub,
 inline void multiIndiPublisher::handleDefProperty( const pcf::IndiProperty &ipRecv )
 {
     std::vector<multiIndiSubscriber *> subs;
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::recursive_mutex> lock( m_subMutex );
         auto                                  found = m_discovery.find( ipRecv.createUniqueKey() );
         if( found != m_discovery.end() )
@@ -315,7 +315,7 @@ inline void multiIndiPublisher::handleDefProperty( const pcf::IndiProperty &ipRe
 inline void multiIndiPublisher::handleDelProperty( const pcf::IndiProperty &ipRecv )
 {
     std::vector<multiIndiSubscriber *> subs;
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::recursive_mutex> lock( m_subMutex );
         for( auto &entry : m_discovery )
         {
@@ -343,7 +343,7 @@ inline void multiIndiPublisher::handleDelProperty( const pcf::IndiProperty &ipRe
 inline void multiIndiPublisher::handleSetProperty( const pcf::IndiProperty &ipRecv )
 {
     std::vector<multiIndiSubscriber *> subs;
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::recursive_mutex> lock( m_subMutex );
         auto                                  found = m_discovery.find( ipRecv.createUniqueKey() );
         if( found != m_discovery.end() )
@@ -395,7 +395,7 @@ inline void multiIndiPublisher::pruneDiscovery()
 inline void multiIndiPublisher::update()
 {
     std::vector<pcf::IndiProperty> queries;
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::recursive_mutex> lock( m_subMutex );
         const auto                            now = discoveryNow();
         for( auto &entry : m_discovery )
@@ -415,7 +415,7 @@ inline void multiIndiPublisher::update()
 inline void multiIndiPublisher::onConnect()
 {
     std::vector<multiIndiSubscriber *> subs;
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::recursive_mutex> lock( m_subMutex );
         subs.reserve( subscribers.size() );
         for( subSetIteratorT it = subscribers.begin(); it != subscribers.end(); ++it )

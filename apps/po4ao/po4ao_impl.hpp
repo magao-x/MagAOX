@@ -673,7 +673,7 @@ inline void po4ao::modelLoaderLoop()
 {
     while( !m_loaderShutdown.load( std::memory_order_acquire ) )
     {
-        { // mutex scope
+        { //mutex scope
             std::unique_lock<std::mutex> lock( m_loaderMutex );
             m_loaderCondition.wait( lock,
                                     [this]()
@@ -705,7 +705,7 @@ inline void po4ao::modelLoaderLoop()
             candidate.reset();
         if( candidate == nullptr )
         {
-            { // mutex scope
+            { //mutex scope
                 std::lock_guard<std::mutex> lock( m_reloadErrorMutex );
                 m_reloadError = error;
             }
@@ -1129,7 +1129,7 @@ inline void po4ao::updateControlStatus()
     updateIfChanged(
         m_indiP_modelStatus, "effective_id", modelText( m_effectiveModelId.load( std::memory_order_acquire ) ) );
     updateIfChanged( m_indiP_modelStatus, "reload", reloadNames[static_cast<size_t>( reload )] );
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> errorLock( m_reloadErrorMutex );
         updateIfChanged( m_indiP_modelStatus, "reload_error", m_reloadError );
     }
@@ -1293,7 +1293,7 @@ INDI_NEWCALLBACK_DEFN( po4ao, m_indiP_reloadToggle )( const pcf::IndiProperty &i
     if( ( expected != 0 && expected != 3 ) ||
         !m_reloadStatus.compare_exchange_strong( expected, 1, std::memory_order_acq_rel ) )
         return 0;
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> errorLock( m_reloadErrorMutex );
         m_reloadError.clear();
     }
@@ -1351,7 +1351,7 @@ INDI_NEWCALLBACK_DEFN( po4ao, m_indiP_recollectWarmup )( const pcf::IndiProperty
     if( ipRecv["toggle"].getSwitchState() != pcf::IndiElement::On )
         return 0;
 
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> publicationLock( m_publicationMutex );
         const uint64_t              generation = m_collectionGeneration.fetch_add( 1, std::memory_order_acq_rel ) + 1;
         invalidateReplay( m_replayStream, m_replayOpened, m_replayMetadataStream, m_replayMetadataOpened );
