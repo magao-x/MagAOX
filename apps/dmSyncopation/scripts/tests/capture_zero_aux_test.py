@@ -55,14 +55,24 @@ class CaptureZeroAuxTest(unittest.TestCase):
             ' printf "dmtweeter-synco.settings.steps=%s\\n" "$steps"\n'
             ' printf "dmtweeter-synco.zero_test.enabled=%s\\n" "${ZERO_TEST_MODE-1}"\n'
             ' printf "dmtweeter-synco.zero_test.idealPublisher=%s\\n" "${ZERO_TEST_IDEAL-1}"\n'
+            ' printf "dmtweeter-synco.zero_test.labelVersion=%s\\n" "${ZERO_TEST_SCHEMA-4}"\n'
+            ' printf "dmtweeter-synco.zero_test.snapshotValid=1\\n"\n'
+            ' printf "dmtweeter-synco.zero_test.snapshotAgeSec=0\\n"\n'
+            ' printf "dmtweeter-synco.zero_test.snapshotSequence=%s\\n" "${ZERO_TEST_BASELINE_SEQUENCE-1}"\n'
+            ' printf "dmtweeter-synco.zero_test.eventsDropped=0\\n"\n'
+            ' printf "dmtweeter-synco.logic_timing.eventsLogFailed=%s\\n" '
+            '"$(if [[ -f $ZERO_TEST_ROOT/polls ]]; then printf %s "${ZERO_TEST_LOG_FAILED-0}"; else printf 0; fi)"\n'
             ' printf "dmtweeter-synco.zero_test.durationSec=%s\\n" "${ZERO_TEST_LIMIT-120}";;\n'
             'dmtweeter-synco.zero_test)\n'
             ' [[ ${ZERO_TEST_POLL_STATUS:-0} != 0 ]] && exit "$ZERO_TEST_POLL_STATUS"\n'
             ' count=0\n[[ -f $ZERO_TEST_ROOT/polls ]] && count=$(cat "$ZERO_TEST_ROOT/polls")\n'
             ' count=$((count+1))\nprintf "%s" "$count" > "$ZERO_TEST_ROOT/polls"\n'
+            ' sequence=$((count+1))\n'
+            ' if [[ ${ZERO_TEST_FROZEN_SNAPSHOT:-0} == 1 ]]; then sequence=2; fi\n'
             ' if [[ ${ZERO_TEST_STALE_FINISHED:-0} == 1 ]]; then\n'
             '   if ((count==1)); then count=2; else count=$((count-1)); fi\nfi\n'
             ' if [[ ${ZERO_TEST_HOLD_ACTIVE:-0} == 1 ]]; then count=1; fi\n'
+            ' if [[ ${ZERO_TEST_FROZEN_SNAPSHOT:-0} == 1 ]]; then count=1; fi\n'
             ' active=$((count==1))\nwarming=0\n'
             ' if [[ ${ZERO_TEST_WARM_TIMEOUT:-0} == 1 ]]; then\n'
             '   active=0\nwarming=$((count==1))\nfi\n'
@@ -70,6 +80,10 @@ class CaptureZeroAuxTest(unittest.TestCase):
             ' if ((count>=2)); then elapsed=${ZERO_TEST_FINISHED_ELAPSED:-120}; fi\n'
             ' if [[ ${ZERO_TEST_WARM_TIMEOUT:-0} == 1 ]]; then elapsed=0; fi\n'
             ' printf "dmtweeter-synco.zero_test.active=%s\\n" "$active"\n'
+            ' printf "dmtweeter-synco.zero_test.snapshotSequence=%s\\n" "$sequence"\n'
+            ' printf "dmtweeter-synco.zero_test.snapshotValid=%s\\n" "${ZERO_TEST_SNAPSHOT_VALID-1}"\n'
+            ' printf "dmtweeter-synco.zero_test.snapshotAgeSec=%s\\n" "${ZERO_TEST_SNAPSHOT_AGE-0}"\n'
+            ' printf "dmtweeter-synco.zero_test.eventsDropped=%s\\n" "${ZERO_TEST_EVENT_DROPS-0}"\n'
             ' printf "dmtweeter-synco.zero_test.warming=%s\\n" "$warming"\n'
             ' printf "dmtweeter-synco.zero_test.elapsedSec=%s\\n" "$elapsed"\n'
             ' printf "dmtweeter-synco.zero_test.finished=%s\\n" "$((count>=2))";;\n'
@@ -190,6 +204,40 @@ class CaptureZeroAuxTest(unittest.TestCase):
         self.assertEqual(self.set_calls(), ["-n dmtweeter-synco.settings.steps=4"])
         self.assertEqual((self.root / "enable").read_text(), "Off")
         self.assertIn("Disabled step-count readback failed", stderr)
+
+    def test_progress_snapshot_capability_is_required(self):
+        """The earlier mutex-dependent status implementation cannot start this capture."""
+        self.env["ZERO_TEST_SCHEMA"] = "3"
+        code, _, stderr = self.run_capture("8000", "10")
+        self.assertEqual(code, 1)
+        self.assertEqual(self.set_calls(), [])
+        self.assertIn("progress snapshot", stderr)
+
+    def test_invalid_or_aged_progress_cancels_owned_trial(self):
+        """Freshness failures are reported instead of waiting through a false warmup."""
+        for key, value in [("ZERO_TEST_SNAPSHOT_VALID", "0"), ("ZERO_TEST_SNAPSHOT_AGE", "3")]:
+            with self.subTest(key=key):
+                self.env[key] = value
+                code, _, _ = self.run_capture("8000", "10")
+                self.assertEqual(code, 1)
+                self.assertEqual(self.set_calls()[-1], "-s dmtweeter-synco.enable.toggle=Off")
+                del self.env[key]
+
+    def test_frozen_progress_sequence_cancels_owned_trial(self):
+        """A cached active flag and cached small age cannot hide a frozen status publisher."""
+        self.env["ZERO_TEST_FROZEN_SNAPSHOT"] = "1"
+        code, _, _ = self.run_capture("8000", "120")
+        self.assertEqual(code, 1)
+        self.assertEqual(self.set_calls()[-1], "-s dmtweeter-synco.enable.toggle=Off")
+        self.assertIn("sequence did not advance", (self.capture_dir() / "status.txt").read_text())
+
+    def test_new_event_loss_marks_capture_incomplete(self):
+        """Intentional sampling is allowed, while a new queue overflow aborts qualification."""
+        self.env["ZERO_TEST_EVENT_DROPS"] = "1"
+        code, _, _ = self.run_capture("8000", "10")
+        self.assertEqual(code, 1)
+        self.assertEqual(self.set_calls()[-1], "-s dmtweeter-synco.enable.toggle=Off")
+        self.assertIn("new zero-event queue loss", (self.capture_dir() / "status.txt").read_text())
 
     def test_preexisting_enabled_run_is_not_cancelled(self):
         """Refuse a run owned by another operator without sending any mutation."""
@@ -352,6 +400,22 @@ class CaptureZeroAuxTest(unittest.TestCase):
             "trial finished before the requested active duration",
             (self.capture_dir() / "status.txt").read_text(),
         )
+
+    def test_app_restart_before_first_poll_cancels_owned_trial(self):
+        """Compare the first poll with the baseline identity as well as later polls."""
+        self.env["ZERO_TEST_BASELINE_SEQUENCE"] = "100"
+        code, _, _ = self.run_capture("8000", "10")
+        self.assertNotEqual(code, 0)
+        self.assertIn("sequence regressed", (self.capture_dir() / "status.txt").read_text())
+        self.assertEqual((self.root / "enable").read_text(), "Off")
+
+    def test_logger_enqueue_failure_invalidates_capture(self):
+        """Final transport quality includes popped rows lost after queue draining."""
+        self.env["ZERO_TEST_LOG_FAILED"] = "1"
+        code, _, _ = self.run_capture("8000", "1")
+        self.assertNotEqual(code, 0)
+        self.assertIn("final zero-event transport loss", (self.capture_dir() / "status.txt").read_text())
+        self.assertEqual((self.root / "enable").read_text(), "Off")
 
     def test_invalid_inputs_and_help_do_not_contact_services(self):
         """Reject additive/free-run arguments and invalid finite durations."""

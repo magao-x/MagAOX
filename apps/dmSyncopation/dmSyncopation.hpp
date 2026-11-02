@@ -21,6 +21,7 @@
 #include "../../libMagAOX/app/dev/dmReaderTiming.hpp"
 #include "../../libMagAOX/app/dev/dmCompletion.hpp"
 #include "../../libMagAOX/app/dev/dmTiming.hpp"
+#include "../../libMagAOX/common/latestSnapshot.hpp"
 #include "../../magaox_git_version.h"
 #include "syncoSchedule.hpp"
 #include "syncoSimulation.hpp"
@@ -243,6 +244,7 @@ class dmSyncopation : public MagAOXApp<true>,
     std::string m_zeroTestChannel{ "dm01disp07" }; ///< Existing exclusive zero auxiliary; never created or cleared.
     std::string m_zeroSdkStream{ "dmtweeter_sdk_done" }; ///< Optional exact native-entry/result observer.
     double      m_zeroDurationSec{ 120 };           ///< Maximum active duration after the long-baseline clock is ready.
+    unsigned    m_zeroEventStride{ 4 };             ///< Healthy-cycle event stride; exceptions are always retained.
     double      m_zeroLateUs{ 5 };                  ///< Maximum lateness before an immutable auxiliary slot is skipped.
     bool   m_simulationReaderReleaseReady{ false }; ///< Use timestamped actual-main read release in shadow decisions.
     bool   m_simulationPipelineBackend{ false }; ///< Independently model preparation, SDK and post resources in shadow.
@@ -305,7 +307,7 @@ class dmSyncopation : public MagAOXApp<true>,
         publicationGuard
     };
 
-    /// Same-thread trial counters, copied under the cycle mutex by the ordinary app loop.
+    /// Cycle-owned trial counters, published through a fixed-storage ordinary-thread snapshot.
     struct ZeroStats
     {
         uint64_t posted{ 0 }; ///< Active publication API attempts, including API failures; not proof of DM submission.
@@ -319,12 +321,58 @@ class dmSyncopation : public MagAOXApp<true>,
         uint64_t cancelled{ 0 }, durationExpired{ 0 }, waitError{ 0 }; ///< Cancellation, finite expiry or wait failure.
         uint64_t invalidTarget{ 0 };        ///< Occurrences with no representable frozen target.
         uint64_t combinedUnclassified{ 0 }; ///< Skipped occurrences lacking an unambiguous combined identity.
-        uint64_t resourceFaults{ 0 }; ///< Trial-wide resource or ownership failures, separate from per-slot skips.
+        uint64_t resourceFaults{ 0 };   ///< Trial-wide resource or ownership failures, separate from per-slot skips.
+        uint64_t eventsSampledOut{ 0 }; ///< Healthy event rows deliberately omitted by the configured cycle stride.
         uint64_t readerInvalid{ 0 }, readerDrops{ 0 };                    ///< Readiness revocation/transport coverage.
         uint64_t mainObserved{ 0 }, mainMatched{ 0 }, mainUnmatched{ 0 }; ///< Genuine main association coverage.
         uint64_t mainImpactUnclassified{ 0 };    ///< Main acknowledgements lacking exact named-primary trace linkage.
         int64_t  startedNs{ 0 }, stoppedNs{ 0 }; ///< Active finite interval on CLOCK_MONOTONIC.
         bool     active{ false }, warming{ false }, finished{ false }; ///< Current finite-trial state.
+    };
+
+    /// Complete cycle-owned status; publication never waits for the ordinary consumer.
+    struct ZeroSnapshot
+    {
+        ZeroStats stats; ///< Counters and finite-trial state from one complete callback/control boundary.
+        synco::ZeroTiming::Summary timing;                    ///< Exact timing joins from the same boundary.
+        uint64_t                   sequence{ 0 }, trial{ 0 }; ///< Monotonic publication sequence and trial generation.
+        uint64_t                   eventsDropped{ 0 }, eventsQueued{ 0 }; ///< Event transport quality at publication.
+        int64_t                    capturedNs{ 0 };                 ///< Same-host monotonic snapshot publication time.
+        double                     targetHz{ 0 }, durationSec{ 0 }; ///< Frozen clock rate and finite active bound.
+        int                        steps{ 0 };                      ///< Requested total main-plus-auxiliary steps.
+        unsigned eventStride{ 1 };   ///< Healthy-cycle telemetry sampling; no command or timing-population sampling.
+        bool     requested{ false }; ///< Actual enable request at this cycle/control boundary.
+    };
+
+    /// Coarse ordinary-loop groups include both diagnostic calculation and their INDI I/O.
+    enum class LogicStage : size_t
+    {
+        primary,
+        combiner,
+        camera,
+        pipeline,
+        readers,
+        legacy,
+        status,
+        events,
+        telemetry,
+        count
+    };
+
+    /// Names shared by the coarse profiling property and its text summary.
+    static constexpr std::array<const char *, size_t( LogicStage::count )> logicStageNames{
+        "primary", "combiner", "camera", "pipeline", "readers", "legacy", "status", "events", "telemetry" };
+
+    /// Ordinary-thread service costs and explicit event throughput; no hot-path profiling.
+    struct LogicTiming
+    {
+        std::array<int64_t, size_t( LogicStage::count )> lastNs{}, maxNs{}; ///< Additive loop and lifetime group costs.
+        int64_t  previousNs{ 0 }, gapNs{ 0 }, maxGapNs{ 0 };                ///< Start-to-start ordinary-loop cadence.
+        int64_t  reportNs{ 0 }, maxReportNs{ 0 }; ///< Previous complete profile-publication cost and lifetime maximum.
+        uint64_t sequence{ 0 }, drained{ 0 },
+            drainedLast{ 0 };    ///< Service loops and popped event rows handed to logging.
+        uint64_t logFailed{ 0 }; ///< Popped event rows rejected by telemetry enqueue; separate from queue overflow.
+        size_t   queueHighWater{ 0 }; ///< Greatest observed zero-event queue depth before a drain chunk.
     };
 
     /// One bounded hot-path observation, formatted only after the cycle lock is released.
@@ -340,8 +388,15 @@ class dmSyncopation : public MagAOXApp<true>,
         int64_t stagedNs{ 0 }; ///< Coherent passive-copy completion, including overruns; zero if no copy occurred.
     };
 
-    ZeroStats   m_zeroStats; ///< Finite-trial counters; no conditional shadow outcomes are mixed in.
-    ZeroOutcome m_zeroWaitFailure{ ZeroOutcome::none }; ///< Cause retained at the failing wait condition.
+    ZeroStats m_zeroStats; ///< Finite-trial counters; no conditional shadow outcomes are mixed in.
+    MagAOX::latestSnapshot<ZeroSnapshot>
+        m_zeroStatus; ///< Serialized cycle/control producer; ordinary app-loop consumer.
+    ZeroSnapshot
+        m_zeroPublished; ///< Producer-owned previous status, used only for publication cadence/change detection.
+    ZeroSnapshot m_zeroSnapshot; ///< Ordinary-thread last coherent status, retained when no newer value is pending.
+    LogicTiming  m_logicTiming;  ///< Ordinary app-loop profiling and event-drain accounting.
+    pcf::IndiProperty m_indiP_logicTiming;                    ///< Read-only coarse service costs and event throughput.
+    ZeroOutcome       m_zeroWaitFailure{ ZeroOutcome::none }; ///< Cause retained at the failing wait condition.
     int m_zeroWaitResult{ 0 }; ///< Most recent absolute-wait return code, retained without a post-hoc clock read.
     synco::ZeroTiming            m_zeroTiming; ///< Exact main/controller receipt to native SDK-entry measurements.
     MagAOX::spscQueue<ZeroEvent> m_zeroEvents; ///< Primary monitor to ordinary telemetry handoff.
@@ -781,8 +836,25 @@ class dmSyncopation : public MagAOXApp<true>,
     /// Register read-only actual zero-test state and timing coverage.
     int setupZeroTestINDI();
 
-    /// Copy actual trial state and drain its telemetry outside the primary callback.
-    void updateZeroTest();
+    /// Publish one complete status while holding the cycle mutex; never allocates or waits for the consumer.
+    void publishZeroTestStatus( int64_t now /**< [in] Same-host monotonic capture time. */,
+                                bool    force = false /**< [in] Bypass the 100 ms publication cadence. */ );
+
+    /// Refresh status independently of callback lock availability, with serialized idle/expiry servicing.
+    void updateZeroTest( bool record = true /**< [in] Emit a text summary in addition to refreshing INDI. */ );
+
+    /// Format at most one bounded event chunk on the ordinary thread and account for its service cost.
+    void drainZeroTestEvents( size_t limit = 4096 /**< [in] Maximum retained event rows in this chunk. */ );
+
+    /// Add one coarse ordinary-loop service duration to the current loop and lifetime maximum.
+    void recordLogicStage( LogicStage stage /**< [in] Coarse calculation/I/O group. */,
+                           int64_t    began /**< [in] Same-host monotonic group start. */ );
+
+    /// Register coarse ordinary-loop service and event-throughput properties.
+    int setupLogicTimingINDI();
+
+    /// Publish completed coarse service costs and the preceding profile report's own publication cost.
+    void updateLogicTimingINDI();
 
     /// Attach existing destinations/output and create only missing auxiliary/timing streams.
     bool openResources();
@@ -928,6 +1000,7 @@ inline void dmSyncopation::setupConfig()
         { "zeroTest.channel", "Exclusive existing all-zero numbered auxiliary channel." },
         { "zeroTest.durationSec", "Active trial duration after clock qualification, positive and at most120 seconds." },
         { "zeroTest.lateUs", "Maximum immutable auxiliary-slot lateness before skipping, us." },
+        { "zeroTest.eventStride", "Retain every Nth healthy cycle; 1..1024, default4; exceptions are never sampled." },
         { "zeroTest.sdkStream", "Optional native SDK-result stream for exact main timing joins." },
         { "simulation.enabled", "Observe a conditional fixed-grid policy without copying or triggering DM commands." },
         { "simulation.readerReleaseReady", "Gate actual-main shadow reader clearance on exact observed release." },
@@ -999,6 +1072,7 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
     config( m_zeroDurationSec, "zeroTest.durationSec" );
     config( m_zeroLateUs, "zeroTest.lateUs" );
     config( m_zeroSdkStream, "zeroTest.sdkStream" );
+    config( m_zeroEventStride, "zeroTest.eventStride" );
     config( m_simulationReaderReleaseReady, "simulation.readerReleaseReady" );
     config( m_simulationPipelineBackend, "simulation.pipelineBackend" );
     config( m_simulationVirtualReaderUs, "simulation.virtualReaderUs" );
@@ -1034,9 +1108,9 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
     }
 
     if( m_zeroTestEnabled &&
-        ( m_simulationEnabled || m_diagnosticsOnly || m_requested < 2 || m_requested > 4 ||
-          !finite( m_zeroDurationSec ) || m_zeroDurationSec <= 0 || m_zeroDurationSec > 120 ||
-          !finite( m_zeroLateUs ) || m_zeroLateUs < 0 || m_zeroLateUs > 50 ||
+        ( m_simulationEnabled || m_diagnosticsOnly || m_requested < 2 || m_requested > 4 || m_zeroEventStride < 1 ||
+          m_zeroEventStride > 1024 || !finite( m_zeroDurationSec ) || m_zeroDurationSec <= 0 ||
+          m_zeroDurationSec > 120 || !finite( m_zeroLateUs ) || m_zeroLateUs < 0 || m_zeroLateUs > 50 ||
           readerReleaseMonitorT::m_shmimName.empty() || !m_combinerDiagnostics || m_primaryCadenceWindow <= 0 ||
           m_zeroTestChannel.size() != 10 || m_zeroTestChannel.substr( 0, 8 ) != m_combinedName ||
           m_zeroTestChannel.find_first_not_of( "0123456789", 8 ) != std::string::npos ||
@@ -2677,7 +2751,8 @@ inline int dmSyncopation::processImage( void *source, const dev::shmimT &tag )
 
     std::lock_guard<std::mutex> lock( m_cycleMutex );
     const int     result = m_zeroTestEnabled ? processZeroTestPrimary( observed, receipt ) : processPrimary( observed );
-    const int64_t completed   = m_now();
+    const int64_t completed = m_now();
+    publishZeroTestStatus( completed );
     m_previousCallbackRuntime = completed >= observed ? completed - observed : -1;
     m_previousCallbackEnd     = completed;
     m_primaryCadence.markAt( MagAOX::dmTiming::Marker::finish, completed );
@@ -4012,8 +4087,9 @@ inline int dmSyncopation::appStartup()
         return log<software_error, -1>( { std::string( "Timing allocation: " ) + error.what() } );
     }
 
-    if( setupZeroTestINDI() < 0 || setupSimulationINDI() < 0 || setupPrimaryCadenceINDI() < 0 ||
-        setupCombinerCadenceINDI() < 0 || setupPipelineINDI() < 0 || setupReaderTimingINDI() < 0 ||
+    if( setupLogicTimingINDI() < 0 || setupZeroTestINDI() < 0 || setupSimulationINDI() < 0 ||
+        setupPrimaryCadenceINDI() < 0 || setupCombinerCadenceINDI() < 0 || setupPipelineINDI() < 0 ||
+        setupReaderTimingINDI() < 0 ||
         setupCadenceINDI( m_cameraCadence,
                           m_indiP_cameraTiming,
                           m_indiP_cameraQuality,
@@ -4144,11 +4220,33 @@ inline int dmSyncopation::appStartup()
 
 inline int dmSyncopation::appLogic()
 {
+    const auto loopBegan = m_now();
+    m_logicTiming.gapNs =
+        m_logicTiming.previousNs > 0 ? std::max<int64_t>( 0, loopBegan - m_logicTiming.previousNs ) : 0;
+    m_logicTiming.maxGapNs   = std::max( m_logicTiming.maxGapNs, m_logicTiming.gapNs );
+    m_logicTiming.previousNs = loopBegan;
+    ++m_logicTiming.sequence;
+    m_logicTiming.lastNs.fill( 0 );
+    m_logicTiming.drainedLast = 0;
+    auto began                = m_now();
+    updateZeroTest( false );
+    recordLogicStage( LogicStage::status, began );
+    drainZeroTestEvents();
+
+    began = m_now();
     SHMIMMONITOR_APP_LOGIC;
     m_primaryCadence.update( m_now() );
     updatePrimaryCadenceINDI();
+    recordLogicStage( LogicStage::primary, began );
+    drainZeroTestEvents();
+
+    began = m_now();
     m_combinerCadence.update( m_now() );
     updateCombinerCadenceINDI();
+    recordLogicStage( LogicStage::combiner, began );
+    drainZeroTestEvents();
+
+    began = m_now();
     m_cameraCadence.update( m_now() );
     updateCadenceINDI( m_cameraCadence, m_indiP_cameraTiming, m_indiP_cameraQuality, "acquisition_" );
     updatePairsINDI( m_cameraCadence, m_indiP_cameraPairs );
@@ -4156,8 +4254,16 @@ inline int dmSyncopation::appLogic()
     updateCadenceINDI(
         m_cameraPublicationCadence, m_indiP_cameraWriteTiming, m_indiP_cameraWriteQuality, "publication_" );
     updatePairsINDI( m_cameraPublicationCadence, m_indiP_cameraWritePairs );
+    recordLogicStage( LogicStage::camera, began );
+    drainZeroTestEvents();
+
+    began = m_now();
     m_pipelineCadence.update( m_now() );
     updatePipelineINDI();
+    recordLogicStage( LogicStage::pipeline, began );
+    drainZeroTestEvents();
+
+    began = m_now();
     m_readerTiming.update( m_now() );
     m_readerReleaseTiming.update( m_now() );
     updateReaderTimingINDI();
@@ -4174,17 +4280,29 @@ inline int dmSyncopation::appLogic()
         SHMIMMONITORT_UPDATE_INDI( completionMonitorT );
     }
 
+    recordLogicStage( LogicStage::readers, began );
+    drainZeroTestEvents();
+    began = m_now();
+
     if( m_combinerCadence.enabled() )
     {
         SHMIMMONITORT_APP_LOGIC( combinerMonitorT );
         SHMIMMONITORT_UPDATE_INDI( combinerMonitorT );
     }
 
+    recordLogicStage( LogicStage::combiner, began );
+    drainZeroTestEvents();
+    began = m_now();
+
     if( m_cameraCadence.enabled() || m_cameraPublicationCadence.enabled() )
     {
         SHMIMMONITORT_APP_LOGIC( cameraMonitorT );
         SHMIMMONITORT_UPDATE_INDI( cameraMonitorT );
     }
+
+    recordLogicStage( LogicStage::camera, began );
+    drainZeroTestEvents();
+    began = m_now();
     { //mutex scope
         std::unique_lock<std::mutex> lock( m_cycleMutex, std::try_to_lock );
         if( lock.owns_lock() )
@@ -4343,8 +4461,14 @@ inline int dmSyncopation::appLogic()
             updateSimulationINDI();
         }
     }
+    recordLogicStage( LogicStage::legacy, began );
+    drainZeroTestEvents();
+    began = m_now();
     updateZeroTest();
     SHMIMMONITOR_UPDATE_INDI;
+    recordLogicStage( LogicStage::status, began );
+
+    began = m_now();
 
     if( m_primaryCadence.enabled() || m_combinerCadence.enabled() || m_cameraCadence.enabled() ||
         m_cameraPublicationCadence.enabled() || m_pipelineCadence.enabled() )
@@ -4353,6 +4477,12 @@ inline int dmSyncopation::appLogic()
     }
 
     TELEMETER_APP_LOGIC;
+    recordLogicStage( LogicStage::telemetry, began );
+    drainZeroTestEvents();
+    began = m_now();
+    updateZeroTest( false );
+    recordLogicStage( LogicStage::status, began );
+    updateLogicTimingINDI();
     return 0;
 }
 
@@ -4387,6 +4517,14 @@ inline int dmSyncopation::appShutdown()
     invalidate( "shutdown" );
     closeResources();
     closeZeroTest();
+    m_zeroStats.active = m_zeroStats.warming = false;
+
+    if( m_zeroStats.startedNs && !m_zeroStats.stoppedNs )
+    {
+        m_zeroStats.stoppedNs = m_now();
+    }
+
+    publishZeroTestStatus( m_now(), true );
     return 0;
 }
 
@@ -4564,6 +4702,7 @@ INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_enable )( const pcf::IndiProperty 
         m_lastMain       = 0;
         m_trackingOutput = false;
         m_enabled        = enable;
+        publishZeroTestStatus( m_now(), true );
     }
     updateSwitchIfChanged( m_indiP_enable,
                            "toggle",
@@ -4599,6 +4738,7 @@ INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_reacquire )( const pcf::IndiProper
         }
         m_lastMain       = 0;
         m_trackingOutput = false;
+        publishZeroTestStatus( m_now(), true );
     }
     updateSwitchIfChanged( m_indiP_reacquire, "request", pcf::IndiElement::Off, INDI_IDLE );
     return 0;

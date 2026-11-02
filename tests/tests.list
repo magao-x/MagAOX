@@ -153,6 +153,7 @@
 
 
 ../libMagAOX/common/tests/spscQueue_test
+../libMagAOX/common/tests/latestSnapshot_test
 ../libMagAOX/common/tests/common_test
 ../libMagAOX/ImageStreamIO/tests/ImageStreamIO_test
 ../libMagAOX/modbus/tests/modbus_test

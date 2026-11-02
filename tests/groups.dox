@@ -234,6 +234,11 @@ report from their counters and then returns nonzero. An HTML report therefore do
  * \ingroup common_unit_test
  */
 
+/** \defgroup latestSnapshot_unit_test Latest-State Snapshot Unit Tests
+ * \brief Ownership-safe state coalescing and concurrent snapshot publication.
+ * \ingroup common_unit_test
+ */
+
 /** \defgroup frameGrabberTiming_unit_test Framegrabber Timing Unit Tests
  * \brief Paired timestamp collection and qualified stage decomposition.
  * \ingroup app_dev_unit_tests

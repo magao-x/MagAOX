@@ -32,7 +32,15 @@ inline bool dmSyncopation::configureZeroTest()
     m_zeroHaveCombined       = false;
     m_zeroHaveRelease        = false;
     m_zeroReaderFault        = false;
-    return m_zeroClock.configure( settings );
+
+    if( !m_enabled )
+    {
+        m_zeroStats.active = m_zeroStats.warming = false;
+    }
+
+    const bool configured = m_zeroClock.configure( settings );
+    publishZeroTestStatus( m_now(), true );
+    return configured;
 }
 
 inline void dmSyncopation::closeZeroTest()
@@ -463,6 +471,13 @@ inline void dmSyncopation::zeroTestEvent( int                           step,
                                           ZeroOutcome                   reason,
                                           int64_t                       stagedNs )
 {
+    if( ( outcome == ZeroOutcome::mainAcknowledged || outcome == ZeroOutcome::acknowledged ) &&
+        reason == ZeroOutcome::none && m_zeroEventStride > 1 && m_zeroStats.mainObserved % m_zeroEventStride != 0 )
+    {
+        ++m_zeroStats.eventsSampledOut;
+        return;
+    }
+
     const auto waitResult = reason == ZeroOutcome::waitError ? m_zeroWaitResult : 0;
     m_zeroEvents.push( { m_zeroTrial,
                          m_zeroPrimary,
@@ -1026,6 +1041,14 @@ inline int dmSyncopation::setupZeroTestINDI()
     for( const auto *name : { "enabled",
                               "labelVersion",
                               "idealPublisher",
+                              "requested",
+                              "snapshotSequence",
+                              "snapshotTimeNs",
+                              "snapshotAgeSec",
+                              "snapshotValid",
+                              "eventsQueued",
+                              "eventStride",
+                              "eventsSampledOut",
                               "steps",
                               "targetHz",
                               "active",
@@ -1078,26 +1101,58 @@ inline int dmSyncopation::setupZeroTestINDI()
     return registerIndiPropertyReadOnly( m_indiP_zeroTest );
 }
 
-inline void dmSyncopation::updateZeroTest()
+inline void dmSyncopation::publishZeroTestStatus( int64_t now, bool force )
+{
+    if( !m_zeroTestEnabled || now <= 0 )
+    {
+        return;
+    }
+
+    const bool requested = m_enabled.load( std::memory_order_acquire );
+
+    if( !force && m_zeroPublished.capturedNs > 0 && now >= m_zeroPublished.capturedNs &&
+        now - m_zeroPublished.capturedNs < 100000000 && requested == m_zeroPublished.requested &&
+        m_zeroStats.active == m_zeroPublished.stats.active && m_zeroStats.warming == m_zeroPublished.stats.warming &&
+        m_zeroStats.finished == m_zeroPublished.stats.finished && m_zeroTrial == m_zeroPublished.trial )
+    {
+        return;
+    }
+
+    const auto   period = m_zeroClock.summary().cadence.periodQ32;
+    ZeroSnapshot snapshot;
+    snapshot.stats         = m_zeroStats;
+    snapshot.timing        = m_zeroTiming.summary();
+    snapshot.sequence      = m_zeroPublished.sequence + 1;
+    snapshot.trial         = m_zeroTrial;
+    snapshot.eventsDropped = m_zeroEvents.dropped();
+    snapshot.eventsQueued  = m_zeroEvents.queued();
+    snapshot.capturedNs    = now;
+    snapshot.targetHz      = period ? double( m_requested ) * 1e9 * MagAOX::dmSyncoSimulation::periodScale / period : 0;
+    snapshot.durationSec   = m_zeroDurationSec;
+    snapshot.steps         = m_requested;
+    snapshot.eventStride   = m_zeroEventStride;
+    snapshot.requested     = requested;
+    m_zeroStatus.publish( snapshot );
+    m_zeroPublished = snapshot;
+}
+
+inline void dmSyncopation::updateZeroTest( bool record )
 {
     if( !m_zeroTestEnabled )
     {
         return;
     }
-    ZeroStats                  stats;
-    synco::ZeroTiming::Summary timing;
-    uint64_t                   trial    = 0;
-    double                     targetHz = 0;
-    int64_t                    elapsed  = 0;
-    int                        steps    = 0;
-    bool                       copied   = false;
 
+    m_zeroStatus.consume( m_zeroSnapshot );
+    auto now = m_now();
+
+    if( !m_zeroSnapshot.sequence || now < m_zeroSnapshot.capturedNs || now - m_zeroSnapshot.capturedNs >= 200000000 )
     { //mutex scope
         std::unique_lock<std::mutex> lock( m_cycleMutex, std::try_to_lock );
 
         if( lock.owns_lock() )
         {
-            const auto now = m_now();
+            now = m_now();
             drainZeroTestReader( now );
             sampleZeroTestSdk( now );
 
@@ -1119,24 +1174,40 @@ inline void dmSyncopation::updateZeroTest()
                 m_zeroStats.stoppedNs                    = now;
                 m_reason                                 = "zero trial finished";
             }
-            stats             = m_zeroStats;
-            timing            = m_zeroTiming.summary();
-            trial             = m_zeroTrial;
-            steps             = m_requested;
-            const auto period = m_zeroClock.summary().cadence.periodQ32;
-            targetHz = period ? double( m_requested ) * 1e9 * MagAOX::dmSyncoSimulation::periodScale / period : 0;
-            elapsed  = stats.startedNs
-                           ? std::max<int64_t>( 0, ( stats.stoppedNs ? stats.stoppedNs : now ) - stats.startedNs )
-                           : 0;
-            copied   = true;
+
+            publishZeroTestStatus( m_now(), true );
         }
     }
+
+    m_zeroStatus.consume( m_zeroSnapshot );
+    now                    = m_now();
+    const auto   &snapshot = m_zeroSnapshot;
+    const auto   &stats    = snapshot.stats;
+    const auto   &timing   = snapshot.timing;
+    const auto    trial    = snapshot.trial;
+    const auto    steps    = snapshot.steps;
+    const auto    targetHz = snapshot.targetHz;
+    const bool    valid    = snapshot.sequence && snapshot.capturedNs > 0 && snapshot.capturedNs <= now;
+    const double  age      = valid ? ( now - snapshot.capturedNs ) * 1e-9 : -1;
+    const int64_t elapsed =
+        stats.startedNs
+            ? std::max<int64_t>( 0, ( stats.stoppedNs ? stats.stoppedNs : snapshot.capturedNs ) - stats.startedNs )
+            : 0;
+    const bool copied = snapshot.sequence != 0;
 
     if( copied )
     {
         const std::vector<std::string> names{ "enabled",
                                               "labelVersion",
                                               "idealPublisher",
+                                              "requested",
+                                              "snapshotSequence",
+                                              "snapshotTimeNs",
+                                              "snapshotAgeSec",
+                                              "snapshotValid",
+                                              "eventsQueued",
+                                              "eventStride",
+                                              "eventsSampledOut",
                                               "steps",
                                               "targetHz",
                                               "active",
@@ -1183,15 +1254,23 @@ inline void dmSyncopation::updateZeroTest()
                                               "sdkGaps",
                                               "sdkFailed" };
         const std::vector<double>      values{ 1,
-                                          3,
+                                          4,
                                           1,
+                                          snapshot.requested ? 1.0 : 0.0,
+                                          double( snapshot.sequence ),
+                                          double( snapshot.capturedNs ),
+                                          age,
+                                          valid ? 1.0 : 0.0,
+                                          double( snapshot.eventsQueued ),
+                                          double( snapshot.eventStride ),
+                                          double( stats.eventsSampledOut ),
                                           double( steps ),
                                           targetHz,
                                           stats.active ? 1.0 : 0.0,
                                           stats.warming ? 1.0 : 0.0,
                                           stats.finished ? 1.0 : 0.0,
                                           elapsed * 1e-9,
-                                          m_zeroDurationSec,
+                                          snapshot.durationSec,
                                           double( stats.posted ),
                                           double( stats.staged ),
                                           double( stats.acknowledged ),
@@ -1211,7 +1290,7 @@ inline void dmSyncopation::updateZeroTest()
                                           double( stats.resourceFaults ),
                                           double( stats.readerInvalid ),
                                           double( stats.readerDrops ),
-                                          double( m_zeroEvents.dropped() ),
+                                          double( snapshot.eventsDropped ),
                                           double( stats.mainObserved ),
                                           double( stats.mainMatched ),
                                           double( stats.mainUnmatched ),
@@ -1235,49 +1314,171 @@ inline void dmSyncopation::updateZeroTest()
                                "toggle",
                                m_enabled ? pcf::IndiElement::On : pcf::IndiElement::Off,
                                m_enabled ? INDI_BUSY : INDI_IDLE );
-        std::ostringstream output;
-        output << "[zero_test] kind=summary labelVersion=3 idealPublisher=1 trial=" << trial
-               << " active=" << stats.active << " warming=" << stats.warming << " finished=" << stats.finished
-               << " steps=" << steps << " targetHz=" << targetHz << " elapsedSec=" << elapsed * 1e-9
-               << " posted=" << stats.posted << " staged=" << stats.staged << " acknowledged=" << stats.acknowledged
-               << " unacknowledged=" << stats.unacknowledged << " skipped=" << stats.skipped << " late=" << stats.late
-               << " preparationLate=" << stats.preparationLate << " readerMissing=" << stats.readerMissing
-               << " primaryChanged=" << stats.primaryChanged << " primaryWriting=" << stats.primaryWriting
-               << " resourceUnavailable=" << stats.resourceUnavailable << " waitError=" << stats.waitError
-               << " durationExpired=" << stats.durationExpired << " invalidTarget=" << stats.invalidTarget
-               << " cancelled=" << stats.cancelled << " combinedUnclassified=" << stats.combinedUnclassified
-               << " resourceFaults=" << stats.resourceFaults << " readerInvalid=" << stats.readerInvalid
-               << " readerDrops=" << stats.readerDrops << " eventsDropped=" << m_zeroEvents.dropped()
-               << " mainObserved=" << stats.mainObserved << " mainMatched=" << stats.mainMatched
-               << " mainUnmatched=" << stats.mainUnmatched << " mainImpactUnclassified=" << stats.mainImpactUnclassified
-               << " mainSdkMatched=" << timing.matched
-               << " mainSdkUnmatched=" << timing.classified - std::min( timing.classified, timing.matched )
-               << " mainReaderMatched=" << timing.readerMatched << " mainTimingInvalid=" << timing.invalid
-               << " mainTimingEvicted=" << timing.evicted << " mainTimingSourceResets=" << timing.sourceResets
-               << " primaryToSdkMeanUs=" << timing.primaryToSdk.meanNs * 1e-3
-               << " primaryToSdkMaxUs=" << ( timing.primaryToSdk.count ? timing.primaryToSdk.maxNs * 1e-3 : -1 )
-               << " controllerToSdkMeanUs=" << timing.controllerToSdk.meanNs * 1e-3 << " controllerToSdkMaxUs="
-               << ( timing.controllerToSdk.count ? timing.controllerToSdk.maxNs * 1e-3 : -1 )
-               << " mainSdkServiceMeanUs=" << timing.sdkService.meanNs * 1e-3
-               << " mainSdkServiceMaxUs=" << ( timing.sdkService.count ? timing.sdkService.maxNs * 1e-3 : -1 )
-               << " sdkGaps=" << timing.sdkGaps << " sdkFailed=" << timing.failed;
-        telemeterT::telem<syncoZeroLog>( { output.str() } );
+        if( record )
+        {
+            std::ostringstream output;
+            output << "[zero_test] kind=summary labelVersion=4 idealPublisher=1 trial=" << trial
+                   << " requested=" << snapshot.requested << " snapshotSequence=" << snapshot.sequence
+                   << " snapshotTimeNs=" << snapshot.capturedNs << " snapshotAgeSec=" << age
+                   << " snapshotValid=" << valid << " eventsQueued=" << snapshot.eventsQueued
+                   << " eventStride=" << snapshot.eventStride << " eventsSampledOut=" << stats.eventsSampledOut
+                   << " active=" << stats.active << " warming=" << stats.warming << " finished=" << stats.finished
+                   << " steps=" << steps << " targetHz=" << targetHz << " elapsedSec=" << elapsed * 1e-9
+                   << " posted=" << stats.posted << " staged=" << stats.staged << " acknowledged=" << stats.acknowledged
+                   << " unacknowledged=" << stats.unacknowledged << " skipped=" << stats.skipped
+                   << " late=" << stats.late << " preparationLate=" << stats.preparationLate
+                   << " readerMissing=" << stats.readerMissing << " primaryChanged=" << stats.primaryChanged
+                   << " primaryWriting=" << stats.primaryWriting << " resourceUnavailable=" << stats.resourceUnavailable
+                   << " waitError=" << stats.waitError << " durationExpired=" << stats.durationExpired
+                   << " invalidTarget=" << stats.invalidTarget << " cancelled=" << stats.cancelled
+                   << " combinedUnclassified=" << stats.combinedUnclassified
+                   << " resourceFaults=" << stats.resourceFaults << " readerInvalid=" << stats.readerInvalid
+                   << " readerDrops=" << stats.readerDrops << " eventsDropped=" << snapshot.eventsDropped
+                   << " mainObserved=" << stats.mainObserved << " mainMatched=" << stats.mainMatched
+                   << " mainUnmatched=" << stats.mainUnmatched
+                   << " mainImpactUnclassified=" << stats.mainImpactUnclassified << " mainSdkMatched=" << timing.matched
+                   << " mainSdkUnmatched=" << timing.classified - std::min( timing.classified, timing.matched )
+                   << " mainReaderMatched=" << timing.readerMatched << " mainTimingInvalid=" << timing.invalid
+                   << " mainTimingEvicted=" << timing.evicted << " mainTimingSourceResets=" << timing.sourceResets
+                   << " primaryToSdkMeanUs=" << timing.primaryToSdk.meanNs * 1e-3
+                   << " primaryToSdkMaxUs=" << ( timing.primaryToSdk.count ? timing.primaryToSdk.maxNs * 1e-3 : -1 )
+                   << " controllerToSdkMeanUs=" << timing.controllerToSdk.meanNs * 1e-3 << " controllerToSdkMaxUs="
+                   << ( timing.controllerToSdk.count ? timing.controllerToSdk.maxNs * 1e-3 : -1 )
+                   << " mainSdkServiceMeanUs=" << timing.sdkService.meanNs * 1e-3
+                   << " mainSdkServiceMaxUs=" << ( timing.sdkService.count ? timing.sdkService.maxNs * 1e-3 : -1 )
+                   << " sdkGaps=" << timing.sdkGaps << " sdkFailed=" << timing.failed;
+            telemeterT::telem<syncoZeroLog>( { output.str() } );
+        }
     }
+}
+
+inline void dmSyncopation::drainZeroTestEvents( size_t limit )
+{
+    if( !m_zeroTestEnabled )
+    {
+        return;
+    }
+
+    const auto began             = m_now();
+    m_logicTiming.queueHighWater = std::max( m_logicTiming.queueHighWater, m_zeroEvents.queued() );
     ZeroEvent  event;
-    const auto available = std::min<size_t>( m_zeroEvents.queued(), m_primaryCadenceMaxEvents );
+    const auto available = std::min( m_zeroEvents.queued(), limit );
 
     for( size_t index = 0; index < available && m_zeroEvents.pop( event ); ++index )
     {
         std::ostringstream output;
-        output << "[zero_test] kind=event labelVersion=3 trial=" << event.trial << " primary=" << event.primary
+        output << "[zero_test] kind=event labelVersion=4 trial=" << event.trial << " primary=" << event.primary
                << " step=" << event.step << " outcome=" << event.outcome << " action=" << zeroTestActionName( event )
                << " reason=" << zeroTestReasonName( event.reason ) << " stage=" << zeroTestStageName( event.stage )
                << " waitResult=" << event.waitResult << " targetNs=" << event.targetNs
                << " observedNs=" << event.observedNs << " stagedNs=" << event.stagedNs
                << " combinedInode=" << event.key.inode << " combinedCounter=" << event.key.counter
                << " publicationSec=" << event.key.sec << " publicationNsec=" << event.key.nsec;
-        telemeterT::telem<syncoZeroLog>( { output.str() } );
+        if( telemeterT::telem<syncoZeroLog>( { output.str() } ) < 0 )
+        {
+            ++m_logicTiming.logFailed;
+        }
+
+        ++m_logicTiming.drained;
+        ++m_logicTiming.drainedLast;
     }
+
+    recordLogicStage( LogicStage::events, began );
+}
+
+inline void dmSyncopation::recordLogicStage( LogicStage stage, int64_t began )
+{
+    const auto ended = m_now();
+    const auto index = size_t( stage );
+    m_logicTiming.lastNs[index] += std::max<int64_t>( 0, ended - began );
+    m_logicTiming.maxNs[index] = std::max( m_logicTiming.maxNs[index], m_logicTiming.lastNs[index] );
+}
+
+inline int dmSyncopation::setupLogicTimingINDI()
+{
+    if( createROIndiNumber( m_indiP_logicTiming, "logic_timing" ) < 0 )
+    {
+        return -1;
+    }
+
+    for( const auto *name : { "sequence",
+                              "loopGapUs",
+                              "loopGapMaxUs",
+                              "reportPublicationUs",
+                              "reportPublicationMaxUs",
+                              "eventsQueued",
+                              "eventsQueueHighWater",
+                              "eventsDrained",
+                              "eventsDrainedLast",
+                              "eventsLogFailed",
+                              "eventsDropped" } )
+    {
+        m_indiP_logicTiming.add( pcf::IndiElement( name ) );
+        m_indiP_logicTiming[name] = 0.0;
+    }
+
+    for( const auto *stage : logicStageNames )
+    {
+        for( const auto *suffix : { "Us", "MaxUs" } )
+        {
+            const auto name = std::string( stage ) + suffix;
+            m_indiP_logicTiming.add( pcf::IndiElement( name ) );
+            m_indiP_logicTiming[name] = 0.0;
+        }
+    }
+
+    return registerIndiPropertyReadOnly( m_indiP_logicTiming );
+}
+
+inline void dmSyncopation::updateLogicTimingINDI()
+{
+    const auto               began = m_now();
+    std::vector<std::string> names{ "sequence",
+                                    "loopGapUs",
+                                    "loopGapMaxUs",
+                                    "reportPublicationUs",
+                                    "reportPublicationMaxUs",
+                                    "eventsQueued",
+                                    "eventsQueueHighWater",
+                                    "eventsDrained",
+                                    "eventsDrainedLast",
+                                    "eventsLogFailed",
+                                    "eventsDropped" };
+    std::vector<double>      values{ double( m_logicTiming.sequence ),
+                                m_logicTiming.gapNs * 1e-3,
+                                m_logicTiming.maxGapNs * 1e-3,
+                                m_logicTiming.reportNs * 1e-3,
+                                m_logicTiming.maxReportNs * 1e-3,
+                                double( m_zeroEvents.queued() ),
+                                double( m_logicTiming.queueHighWater ),
+                                double( m_logicTiming.drained ),
+                                double( m_logicTiming.drainedLast ),
+                                double( m_logicTiming.logFailed ),
+                                double( m_zeroEvents.dropped() ) };
+    std::ostringstream       output;
+    output << "[synco_logic] sequence=" << m_logicTiming.sequence << " loopGapUs=" << m_logicTiming.gapNs * 1e-3
+           << " loopGapMaxUs=" << m_logicTiming.maxGapNs * 1e-3
+           << " reportPublicationUs=" << m_logicTiming.reportNs * 1e-3
+           << " reportPublicationMaxUs=" << m_logicTiming.maxReportNs * 1e-3
+           << " eventsQueued=" << m_zeroEvents.queued() << " eventsQueueHighWater=" << m_logicTiming.queueHighWater
+           << " eventsDrained=" << m_logicTiming.drained << " eventsDrainedLast=" << m_logicTiming.drainedLast
+           << " eventsLogFailed=" << m_logicTiming.logFailed << " eventsDropped=" << m_zeroEvents.dropped();
+
+    for( size_t index = 0; index < logicStageNames.size(); ++index )
+    {
+        const std::string stage = logicStageNames[index];
+        names.push_back( stage + "Us" );
+        names.push_back( stage + "MaxUs" );
+        values.push_back( m_logicTiming.lastNs[index] * 1e-3 );
+        values.push_back( m_logicTiming.maxNs[index] * 1e-3 );
+        output << ' ' << stage << "Us=" << m_logicTiming.lastNs[index] * 1e-3 << ' ' << stage
+               << "MaxUs=" << m_logicTiming.maxNs[index] * 1e-3;
+    }
+
+    updateIfChanged( m_indiP_logicTiming, names, values );
+    telemeterT::telem<syncoZeroLog>( { output.str() } );
+    m_logicTiming.reportNs    = std::max<int64_t>( 0, m_now() - began );
+    m_logicTiming.maxReportNs = std::max( m_logicTiming.maxReportNs, m_logicTiming.reportNs );
 }
 
 } // namespace app

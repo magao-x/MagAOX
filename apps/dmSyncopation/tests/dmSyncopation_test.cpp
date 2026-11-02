@@ -89,9 +89,11 @@ class Harness : public dmSyncopation
     using dmSyncopation::consume;
     using dmSyncopation::copyBatch;
     using dmSyncopation::drainSimulationRelease;
+    using dmSyncopation::drainZeroTestEvents;
     using dmSyncopation::drainZeroTestReader;
     using dmSyncopation::executeStep;
     using dmSyncopation::Fault;
+    using dmSyncopation::LogicStage;
     using dmSyncopation::m_advances;
     using dmSyncopation::m_bounds;
     using dmSyncopation::m_cameraCadence;
@@ -136,6 +138,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_indiP_combinerQuality;
     using dmSyncopation::m_indiP_combinerTiming;
     using dmSyncopation::m_indiP_enable;
+    using dmSyncopation::m_indiP_logicTiming;
     using dmSyncopation::m_indiP_pipelineBoundary;
     using dmSyncopation::m_indiP_pipelineQuality;
     using dmSyncopation::m_indiP_pipelineStages;
@@ -156,10 +159,12 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_indiP_simulationStatus;
     using dmSyncopation::m_indiP_simulationSteps;
     using dmSyncopation::m_indiP_simulationTrace;
+    using dmSyncopation::m_indiP_zeroTest;
     using dmSyncopation::m_lastFaultNs;
     using dmSyncopation::m_lastFaultReason;
     using dmSyncopation::m_lastMain;
     using dmSyncopation::m_lockFrames;
+    using dmSyncopation::m_logicTiming;
     using dmSyncopation::m_mappings;
     using dmSyncopation::m_maxCadence;
     using dmSyncopation::m_measuredPeriod;
@@ -224,22 +229,27 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_zeroClock;
     using dmSyncopation::m_zeroDurationSec;
     using dmSyncopation::m_zeroEvents;
+    using dmSyncopation::m_zeroEventStride;
     using dmSyncopation::m_zeroHaveCombined;
     using dmSyncopation::m_zeroIdle;
     using dmSyncopation::m_zeroLastCombined;
     using dmSyncopation::m_zeroLateUs;
     using dmSyncopation::m_zeroNextFileCheck;
     using dmSyncopation::m_zeroSdkStream;
+    using dmSyncopation::m_zeroSnapshot;
     using dmSyncopation::m_zeroStats;
     using dmSyncopation::m_zeroTestChannel;
     using dmSyncopation::m_zeroTestEnabled;
     using dmSyncopation::m_zeroTiming;
     using dmSyncopation::missedStep;
     using dmSyncopation::processZeroTestPrimary;
+    using dmSyncopation::publishZeroTestStatus;
     using dmSyncopation::readCamera;
     using dmSyncopation::readPrimaryTiming;
+    using dmSyncopation::recordLogicStage;
     using dmSyncopation::setupCadenceINDI;
     using dmSyncopation::setupCombinerCadenceINDI;
+    using dmSyncopation::setupLogicTimingINDI;
     using dmSyncopation::setupPipelineINDI;
     using dmSyncopation::setupPrimaryCadenceINDI;
     using dmSyncopation::setupReaderTimingINDI;
@@ -248,6 +258,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::snapshot;
     using dmSyncopation::updateCadenceINDI;
     using dmSyncopation::updateCombinerCadenceINDI;
+    using dmSyncopation::updateLogicTimingINDI;
     using dmSyncopation::updatePairsINDI;
     using dmSyncopation::updatePeriod;
     using dmSyncopation::updatePipelineINDI;
@@ -262,6 +273,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::ZeroOutcome;
     using dmSyncopation::ZeroStage;
     using dmSyncopation::zeroTestActionName;
+    using dmSyncopation::zeroTestEvent;
     using dmSyncopation::zeroTestReady;
     using dmSyncopation::zeroTestReasonName;
     using dmSyncopation::zeroTestStageName;
@@ -6864,7 +6876,7 @@ void ZeroClock::connect( Harness &scheduler, Streams &images, int steps )
 {
     app      = &scheduler;
     streams  = &images;
-    time     = 1000000000;
+    time     = 999999000; // Leave room for the configuration snapshot before the first fixed-grid main.
     sequence = 0;
     release = combine = true;
     earlyMain = cancel = false;
@@ -6889,6 +6901,7 @@ void ZeroClock::connect( Harness &scheduler, Streams &images, int steps )
     targetCounter = images.images[2].md->cnt0;
     scheduler.attachPrimaryOnly();
     scheduler.m_zeroTestEnabled = true;
+    scheduler.m_zeroEventStride = 1;
     scheduler.m_zeroTestChannel = "dm97disp07";
     scheduler.m_zeroSdkStream.clear();
     scheduler.m_requested                  = steps;
@@ -7579,6 +7592,236 @@ TEST_CASE( "coordinated zero trial has independent wall-clock cancellation", "[d
     // clang-format on
 }
 
+/// Progress is coherent and readable even while a different thread owns the whole active cycle.
+TEST_CASE( "coordinated zero status is independent of the cycle mutex", "[dmSyncopation][zeroTest]" )
+{
+    Streams streams;
+    Harness app;
+    app.properties();
+    app.localDriver( streams.directory );
+    app.m_zeroTestEnabled = true;
+    app.m_now             = +[]()
+    {
+        return ZeroClock::time;
+    };
+    ZeroClock::time = 7000000000LL;
+    REQUIRE( app.setupZeroTestINDI() == 0 );
+    const bool publish = GENERATE( false, true );
+
+    if( publish )
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( app.m_cycleMutex );
+        app.m_enabled                = true;
+        app.m_zeroStats.active       = true;
+        app.m_zeroStats.startedNs    = 2000000000LL;
+        app.m_zeroStats.mainObserved = 80;
+        app.m_zeroStats.posted       = 240;
+        app.publishZeroTestStatus( ZeroClock::time, true );
+    }
+
+    // A stale snapshot must retain its captured progress, not extrapolate through a blocked cycle.
+    ZeroClock::time += 1000000000LL;
+    std::promise<void> held, release;
+    auto               released = release.get_future();
+    auto               holder   = std::async( std::launch::async,
+                              [&]()
+                              { //mutex scope
+                                  std::lock_guard<std::mutex> lock( app.m_cycleMutex );
+                                  held.set_value();
+                                  released.wait();
+                              } );
+    held.get_future().wait();
+    auto       update    = std::async( std::launch::async,
+                              [&]()
+                              {
+                                  app.updateZeroTest( false );
+                              } );
+    const bool completed = update.wait_for( std::chrono::milliseconds( 250 ) ) == std::future_status::ready;
+    release.set_value();
+    holder.get();
+    update.get();
+    CHECK( completed );
+    CHECK( app.m_indiP_zeroTest["snapshotValid"].get<double>() == ( publish ? 1 : 0 ) );
+
+    if( publish )
+    {
+        CHECK( app.m_indiP_zeroTest["active"].get<double>() == 1 );
+        CHECK( app.m_indiP_zeroTest["requested"].get<double>() == 1 );
+        CHECK( app.m_indiP_zeroTest["posted"].get<double>() == 240 );
+        CHECK( app.m_indiP_zeroTest["mainObserved"].get<double>() == 80 );
+        CHECK( app.m_indiP_zeroTest["elapsedSec"].get<double>() == Approx( 5 ) );
+        CHECK( app.m_indiP_zeroTest["snapshotAgeSec"].get<double>() == Approx( 1 ) );
+        CHECK( app.m_indiP_zeroTest["labelVersion"].get<double>() == 4 );
+    }
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::publishZeroTestStatus;
+    MagAOX::app::dmSyncopation::updateZeroTest;
+#endif
+    // clang-format on
+}
+
+/// Unread progress coalesces, regular updates are bounded, and phase transitions publish immediately.
+TEST_CASE( "coordinated zero status coalesces at bounded cadence", "[dmSyncopation][zeroTest]" )
+{
+    Streams streams;
+    Harness app;
+    app.properties();
+    app.localDriver( streams.directory );
+    app.m_zeroTestEnabled = true;
+    app.m_now             = +[]()
+    {
+        return ZeroClock::time;
+    };
+    ZeroClock::time = 1000000000LL;
+    REQUIRE( app.setupZeroTestINDI() == 0 );
+
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( app.m_cycleMutex );
+        app.publishZeroTestStatus( ZeroClock::time, true );
+        app.m_zeroStats.posted = 10;
+        app.publishZeroTestStatus( ZeroClock::time + 10000000 );
+    }
+
+    app.updateZeroTest( false );
+    CHECK( app.m_zeroSnapshot.sequence == 1 );
+    CHECK( app.m_zeroSnapshot.stats.posted == 0 );
+    ZeroClock::time += 100000000;
+
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( app.m_cycleMutex );
+        app.publishZeroTestStatus( ZeroClock::time );
+        app.m_zeroStats.posted = 20;
+        app.m_zeroStats.active = true;
+        app.publishZeroTestStatus( ZeroClock::time + 1 );
+    }
+
+    ++ZeroClock::time;
+    app.updateZeroTest( false );
+    CHECK( app.m_zeroSnapshot.sequence == 3 );
+    CHECK( app.m_zeroSnapshot.stats.posted == 20 );
+    CHECK( app.m_zeroSnapshot.stats.active );
+    CHECK( app.m_indiP_zeroTest["snapshotAgeSec"].get<double>() == 0 );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::publishZeroTestStatus;
+    MagAOX::app::dmSyncopation::updateZeroTest;
+#endif
+    // clang-format on
+}
+
+/// Healthy-cycle sampling reduces text traffic without changing commands, exact counts or exception coverage.
+TEST_CASE( "coordinated zero event sampling retains all exceptional outcomes", "[dmSyncopation][zeroTest]" )
+{
+    Streams streams;
+    Harness app;
+    ZeroClock::connect( app, streams, 4 );
+    app.m_zeroEventStride = 4;
+    const auto next       = ZeroClock::warm();
+    app.m_enabled         = true;
+
+    for( int cycle = 0; cycle < 8; ++cycle )
+    {
+        ZeroClock::primary( next + cycle * 500000 );
+    }
+
+    CHECK( app.m_zeroStats.mainObserved == 8 );
+    CHECK( app.m_zeroStats.mainMatched == 8 );
+    CHECK( app.m_zeroStats.posted == 24 );
+    CHECK( app.m_zeroStats.acknowledged == 24 );
+    CHECK( app.m_zeroStats.skipped == 0 );
+    CHECK( app.m_zeroStats.eventsSampledOut == 24 );
+    CHECK( app.m_zeroEvents.queued() == 9 ); // Start plus two complete four-slot cycles.
+    ZeroClock::lateOnceAt = next + 8 * 500000 + 125000 - 1000;
+    ZeroClock::primary( next + 8 * 500000 );
+    CHECK( app.m_zeroStats.late == 1 );
+    CHECK( app.m_zeroStats.posted == 26 );
+    CHECK( app.m_zeroStats.eventsSampledOut == 27 );
+    checkZeroPartition( app );
+    Harness::ZeroEvent event;
+    size_t             healthy = 0, exceptions = 0, lifecycle = 0;
+
+    while( app.m_zeroEvents.pop( event ) )
+    {
+        if( event.reason == Harness::ZeroOutcome::late )
+        {
+            ++exceptions;
+            CHECK( event.step == 1 );
+        }
+        else if( event.step < 0 )
+        {
+            ++lifecycle;
+        }
+        else
+        {
+            ++healthy;
+            CHECK( event.reason == Harness::ZeroOutcome::none );
+        }
+    }
+
+    CHECK( healthy == 8 );
+    CHECK( exceptions == 1 );
+    CHECK( lifecycle == 1 );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::processZeroTestPrimary;
+    MagAOX::app::dmSyncopation::zeroTestEvent;
+#endif
+    // clang-format on
+}
+
+/// Bounded drain chunks preserve pending rows and expose service costs separately from command counters.
+TEST_CASE( "coordinated zero event draining reports bounded service", "[dmSyncopation][zeroTest]" )
+{
+    Streams streams;
+    Harness app;
+    app.localDriver( streams.directory );
+    app.m_zeroTestEnabled = true;
+    app.m_now             = +[]()
+    {
+        return ZeroClock::time;
+    };
+    ZeroClock::time = 1000000000LL;
+    app.m_zeroEvents.configure( 16 );
+    REQUIRE( app.setupLogicTimingINDI() == 0 );
+
+    for( int index = 0; index < 10; ++index )
+    {
+        app.zeroTestEvent( 1, Harness::ZeroOutcome::late, Harness::ZeroStage::deadline, 1, 2 );
+    }
+
+    app.drainZeroTestEvents( 3 );
+    CHECK( app.m_zeroEvents.queued() == 7 );
+    CHECK( app.m_logicTiming.drained == 3 );
+    CHECK( app.m_logicTiming.drainedLast == 3 );
+    CHECK( app.m_logicTiming.queueHighWater == 10 );
+    CHECK( app.m_zeroStats.posted == 0 );
+    app.recordLogicStage( Harness::LogicStage::primary, ZeroClock::time - 5000 );
+    app.recordLogicStage( Harness::LogicStage::primary, ZeroClock::time - 7000 );
+    app.m_logicTiming.reportNs    = 6000;
+    app.m_logicTiming.maxReportNs = 9000;
+    app.updateLogicTimingINDI();
+    CHECK( app.m_indiP_logicTiming["reportPublicationUs"].get<double>() == Approx( 6 ) );
+    CHECK( app.m_indiP_logicTiming["reportPublicationMaxUs"].get<double>() == Approx( 9 ) );
+    CHECK( app.m_indiP_logicTiming["primaryUs"].get<double>() == Approx( 12 ) );
+    CHECK( app.m_indiP_logicTiming["primaryMaxUs"].get<double>() == Approx( 12 ) );
+    CHECK( app.m_indiP_logicTiming["eventsQueued"].get<double>() == 7 );
+    CHECK( app.m_indiP_logicTiming["eventsDrained"].get<double>() == 3 );
+    CHECK( app.m_indiP_logicTiming["eventsDropped"].get<double>() == 0 );
+    app.drainZeroTestEvents( 20 );
+    CHECK( app.m_zeroEvents.queued() == 0 );
+    CHECK( app.m_logicTiming.drained == 10 );
+    CHECK( app.m_zeroEvents.dropped() == 0 );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::drainZeroTestEvents;
+    MagAOX::app::dmSyncopation::recordLogicStage;
+    MagAOX::app::dmSyncopation::updateLogicTimingINDI;
+#endif
+    // clang-format on
+}
+
 /// Startup selection cannot weaken the separate shadow no-write contract or enable an invalid finite trial.
 TEST_CASE( "coordinated zero trial validates explicit startup configuration", "[dmSyncopation][zeroTest]" )
 {
@@ -7592,6 +7835,8 @@ TEST_CASE( "coordinated zero trial validates explicit startup configuration", "[
                                         std::string{ "[zeroTest]\ndurationSec=121\n" },
                                         std::string{ "[zeroTest]\nchannel=dm01disp03\n" },
                                         std::string{ "[zeroTest]\nlateUs=51\n" },
+                                        std::string{ "[zeroTest]\neventStride=0\n" },
+                                        std::string{ "[zeroTest]\neventStride=1025\n" },
                                         std::string{ "[readerReleaseMonitor]\nshmimName=\n" } );
     char              path[]     = "/tmp/dm-synco-zero-config-XXXXXX";
     const auto        descriptor = mkstemp( path );
@@ -7645,6 +7890,7 @@ TEST_CASE( "coordinated zero trial validates explicit startup configuration", "[
         CHECK( app.m_semaphoreNumber == -1 );
         CHECK( app.m_requested == ( extra.empty() ? 2 : 4 ) );
         CHECK( app.m_maxCadence == 6000 );
+        CHECK( app.m_zeroEventStride == 4 );
     }
     else
     {

@@ -179,6 +179,12 @@ zero_latency_before="$zero_capture_dir/sysMonRTC.set_latency.toggle-indi-before.
 zero_enabled=$(read_property dmtweeter-synco.enable.toggle "$zero_synco_before")
 zero_mode=$(read_property dmtweeter-synco.zero_test.enabled "$zero_synco_before")
 zero_ideal=$(read_property dmtweeter-synco.zero_test.idealPublisher "$zero_synco_before")
+zero_schema=$(read_property dmtweeter-synco.zero_test.labelVersion "$zero_synco_before")
+zero_snapshot_valid=$(read_property dmtweeter-synco.zero_test.snapshotValid "$zero_synco_before")
+zero_snapshot_age=$(read_property dmtweeter-synco.zero_test.snapshotAgeSec "$zero_synco_before")
+zero_snapshot_sequence=$(read_property dmtweeter-synco.zero_test.snapshotSequence "$zero_synco_before")
+zero_drops_before=$(read_property dmtweeter-synco.zero_test.eventsDropped "$zero_synco_before")
+zero_log_failed_before=$(read_property dmtweeter-synco.logic_timing.eventsLogFailed "$zero_synco_before")
 zero_limit=$(read_property dmtweeter-synco.zero_test.durationSec "$zero_synco_before")
 zero_camera_fps=$(read_property camwfs.fps.current "$zero_camera_before")
 zero_camera_sync=$(read_property camwfs.synchro.toggle "$zero_camera_before")
@@ -186,6 +192,17 @@ zero_latency=$(read_property sysMonRTC.set_latency.toggle "$zero_latency_before"
 [[ $zero_enabled == Off ]] || setup_failure dmtweeter-synco.enable.toggle "$zero_enabled" Off
 [[ $zero_mode == 1 ]] || setup_failure dmtweeter-synco.zero_test.enabled "$zero_mode" 1
 [[ $zero_ideal == 1 ]] || setup_failure dmtweeter-synco.zero_test.idealPublisher "$zero_ideal" 1
+if ! awk -v schema="$zero_schema" -v valid="$zero_snapshot_valid" -v age="$zero_snapshot_age" \
+         -v seq="$zero_snapshot_sequence" -v drops="$zero_drops_before" -v failed="$zero_log_failed_before" \
+     'BEGIN { number="^[0-9]+([.][0-9]+)?([eE][+-]?[0-9]+)?$";
+              exit !(schema ~ /^[0-9]+$/ && schema >= 4 && valid == 1 &&
+                     age ~ number && age >= 0 && age <= 2 && seq ~ /^[0-9]+$/ && seq > 0 &&
+                     drops ~ /^[0-9]+$/ && failed ~ /^[0-9]+$/) }'
+then
+    setup_failure 'zero_test progress snapshot' \
+        "schema=$zero_schema valid=$zero_snapshot_valid age=$zero_snapshot_age sequence=$zero_snapshot_sequence" \
+        'schema>=4, valid=1, age<=2 seconds and a positive sequence'
+fi
 [[ $zero_camera_sync == On ]] || setup_failure camwfs.synchro.toggle "$zero_camera_sync" On
 [[ $zero_latency == On ]] || setup_failure sysMonRTC.set_latency.toggle "$zero_latency" On
 if ! awk -v fps="$zero_camera_fps" \
@@ -237,6 +254,8 @@ else
     zero_active_deadline=0
     zero_seen_progress=0
     zero_seen_active=0
+    zero_last_sequence=$zero_snapshot_sequence
+    zero_sequence_deadline=$((SECONDS + 5))
     while true
     do
         zero_poll_status=0
@@ -251,6 +270,42 @@ else
             break
         fi
         zero_current="$zero_capture_dir/zero-test-current.txt"
+        zero_current_sequence=$(read_property dmtweeter-synco.zero_test.snapshotSequence "$zero_current")
+        zero_current_valid=$(read_property dmtweeter-synco.zero_test.snapshotValid "$zero_current")
+        zero_current_age=$(read_property dmtweeter-synco.zero_test.snapshotAgeSec "$zero_current")
+        zero_current_drops=$(read_property dmtweeter-synco.zero_test.eventsDropped "$zero_current")
+        if ! awk -v seq="$zero_current_sequence" -v valid="$zero_current_valid" -v age="$zero_current_age" \
+             'BEGIN { exit !(seq ~ /^[0-9]+$/ && seq > 0 && valid == 1 &&
+                              age ~ /^[0-9]+([.][0-9]+)?([eE][+-]?[0-9]+)?$/ && age >= 0 && age <= 2) }'
+        then
+            status 'progress snapshot missing, invalid or older than 2 seconds'
+            zero_result=1
+            break
+        fi
+        if [[ -n $zero_last_sequence ]] &&
+           awk -v old="$zero_last_sequence" -v current="$zero_current_sequence" 'BEGIN { exit !(current < old) }'
+        then
+            status 'progress snapshot sequence regressed; app identity changed'
+            zero_result=1
+            break
+        fi
+        if [[ $zero_current_sequence != "$zero_last_sequence" ]]
+        then
+            zero_last_sequence=$zero_current_sequence
+            zero_sequence_deadline=$((SECONDS + 5))
+        elif (( SECONDS >= zero_sequence_deadline ))
+        then
+            status 'progress snapshot sequence did not advance within 5 seconds'
+            zero_result=1
+            break
+        fi
+        if ! awk -v before="$zero_drops_before" -v current="$zero_current_drops" \
+             'BEGIN { exit !(current ~ /^[0-9]+$/ && current <= before) }'
+        then
+            status 'new zero-event queue loss; capture is incomplete'
+            zero_result=1
+            break
+        fi
         zero_current_active=$(read_property dmtweeter-synco.zero_test.active "$zero_current")
         zero_current_warming=$(read_property dmtweeter-synco.zero_test.warming "$zero_current")
         if [[ $zero_current_active == 1 || $zero_current_warming == 1 ]]
@@ -310,6 +365,17 @@ for zero_device in dmtweeter-synco dmtweeter camwfs holoop sysMonRTC.set_latency
 do
     snapshot after "$zero_device"
 done
+zero_synco_after="$zero_capture_dir/dmtweeter-synco-indi-after.txt"
+zero_drops_after=$(read_property dmtweeter-synco.zero_test.eventsDropped "$zero_synco_after")
+zero_log_failed_after=$(read_property dmtweeter-synco.logic_timing.eventsLogFailed "$zero_synco_after")
+if ! awk -v before="$zero_drops_before" -v current="$zero_drops_after" \
+         -v logBefore="$zero_log_failed_before" -v logCurrent="$zero_log_failed_after" \
+     'BEGIN { exit !(current ~ /^[0-9]+$/ && current == before &&
+                      logCurrent ~ /^[0-9]+$/ && logCurrent == logBefore) }'
+then
+    status 'final zero-event transport loss or missing quality readback; capture is incomplete'
+    zero_result=1
+fi
 cleanup
 printf '%s\n' "$zero_capture_dir"
 if (( zero_result != 0 ))

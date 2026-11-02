@@ -903,3 +903,254 @@ steps with main rate 2000, and refusal to enable an old app that silently keeps
 its previous step count. Unsupported 10000 Hz input is rejected. Production
 dmSyncopation build, shell syntax, clang-format and whitespace checks pass.
 No instrument commands or an actual 8 kHz trial were run by the agent.
+
+## Short 8 kHz attempt: `zero-aux-8000Hz-20261101T232252Z`
+
+The local directory is
+`/home/jrmales/tmp/home/jrmales/tmp/zero-aux-8000Hz-20261101T232252Z`, with its
+archive under `/home/jrmales/tmp`. Recorded checkout is `1e06f6b3`; the helper
+requests four steps and ten active seconds. The operator confirms unchanged
+settings/workload, zero modal gains and stable AO operation.
+
+This is **not a completed ten-second helper-controlled capture**. All eleven
+INDI polls retain `active=0`, `posted=0`, `elapsedSec=0`, first idle and then
+warming, despite actual publication. The helper eventually reports that the
+trial failed to become active within its 30 s warmup guard and requests Off.
+Actual activity lasts approximately **25.2229 s**, from
+23:23:10.659159 through 23:23:35.882041 UTC on November 1 (16:23 Phoenix).
+The configured independent app limit remains 120 s. All command/snapshot
+statuses are zero and error files are empty, but the helper explicitly marks
+the attempt incomplete; successful INDI requests do not mean their returned
+progress values were fresh.
+
+### Actual command and staging outcomes
+
+Final post-cancellation telemetry, rather than the stale INDI snapshots, reports:
+
+| Population | Count |
+| --- | ---: |
+| Sequential genuine main cycles | 50,446 |
+| Auxiliary opportunities | 151,338 |
+| Completed passive copies | 151,335 |
+| Posted / acknowledged auxiliaries | 151,334 / 151,334 |
+| Initial unmatched-main dependent skips | 3 |
+| Final step-3 operator cancellation | 1 |
+| Late / preparation late / reader missing / resource failures | 0 |
+| Unacknowledged auxiliary attempts | 0 |
+
+Step 1 and step 2 each acknowledge 50,445 commands; step 3 acknowledges 50,444.
+The final cancelled step was already staged. The four skips account for all
+auxiliary opportunities, with no catch-up burst or replay. The combined counter
+span represents 201,780 updates and approximately 7,999.876 Hz, including the
+startup interval. Retained consecutive-counter publications have mean
+125.000052 us and range 91.914-152.357 us. Missing event-key spans must not be
+treated as long physical command intervals or converted into a falsely low
+delivered cadence.
+
+For retained copies, step-1 staging lead is 42.507-91.640 us (median 75.178 us),
+step 2 is 55.053-81.935 us (median 71.334 us), and step 3 is 54.533-81.405 us
+(median 71.478 us). These detailed distributions cover retained records only.
+
+### Status starvation and measurement loss
+
+There are 150,093 retained event rows and **51,692 dropped event records**.
+Their sum is exactly the 201,785 expected records: 50,446 main observations,
+151,334 posts, four skips and one start event. The drops omit 12,923 main
+observations and the corresponding auxiliary outcomes. The exact combined-key
+union has 150,088 observations over a 201,780-counter span, with four holes
+accounting for the same 51,692 records. Full per-event continuity is therefore
+unavailable, even though final outcome counters remain internally consistent.
+SDK-result observation gaps reach 46 and invalid sampled timing observations
+2,331; these are diagnostic coverage failures, not BMC admission/delivery-loss
+counters. All 50,445 classified main SDK and reader joins eventually match.
+
+Source review finds a direct progress-reporting weakness: `processImage()` holds
+`m_cycleMutex` for the complete active main/auxiliary cycle, while
+`updateZeroTest()` refreshes INDI and summary telemetry only after a successful
+`try_lock` of that mutex. Event draining occurs outside that snapshot condition.
+The last warming summary is at 23:23:10.250689, no active summary appears, and
+the first fresh summary follows Off at 23:23:37.813432. Event bursts continue
+while status is stale. This is strongly consistent with snapshot starvation;
+failed lock attempts and scheduling delays were not instrumented, so their
+exact timing is not directly measured.
+
+Ordinary-loop event-drain gaps reach **5.462 s**, exceeding the 20,000-event
+queue's roughly 2.5 s capacity at 8 kHz. Overflow is demonstrated by the exact
+record accounting. Formatting a full 20,000-record burst takes only about
+24-28 ms in emission timestamps, so formatting alone is not established as the
+cause of the multi-second drain gaps. Ordinary diagnostic work, logging handoff
+and thread scheduling need separate timing measurements.
+
+### Controller pressure and camera comparison
+
+BMC counters show no new overloads, coalescing, rejections, SDK failures or
+timeouts, preparation/post failures, supersession/cancellation, unqualified
+reader events or timing losses. Historical overload/coalescing/rejection/
+unqualified-reader values remain 4/4/8/2. Admissions increase by 237,703 and
+completions/retirements by 237,704, consistent with one pre-existing in-flight
+job draining. Independently sampled timing properties increase by 237,701;
+the broader first/last telemetry endpoints cover 255,747 submissions with no
+gaps, invalid/dropped timing events or delivery-quality exclusions. There are
+53 consecutive valid controller summaries.
+
+For 23 complete steady-active two-second windows, native SDK call median
+rolling mean/maximum is 103.797/105.168 us and service through worker readiness
+is 106.230/111.781 us, essentially unchanged from 6 kHz. Receipt-to-SDK is
+17.610/31.029 us, preparation 14.188/22.553 us, SDK dispatch 3.423/16.582 us,
+reader release 23.164/37.882 us and receipt-to-callback finish
+140.634/176.683 us. Front-end/handoff latency grows while active and returns
+toward baseline afterward. The shortest incoming controller interval is
+91.853 us, below the measured SDK-service minimum of 105.549 us; send intervals
+bottom at 105.970 us. This enters a serialization/queue-pressure regime absent
+from the 6 kHz run, without an observed capacity loss in this attempt.
+
+Exact main controller-receipt-to-SDK mean/maximum rises from 15.569901/19.497 us
+at 6 kHz to 17.0587/25.508 us. Primary-observer-receipt-to-SDK rises from
+30.731120/41.638 us to 32.2419/46.347 us: approximately **1.5 us added mean
+prefix duration**. Native main SDK service remains approximately 103.8 us.
+These prefixes and aggregate dispatch/preparation durations do not isolate
+added main-only SDK queue wait.
+
+Camera telemetry contains 49 consecutive valid stage summaries and 101,685
+additional published frames over its broader endpoints, with no new gaps,
+errors, invalid/dropped observations or wide brackets. Same camera process,
+session and settings as 6 kHz. Median acquisition RMS before/active/after is
+0.2880/0.2922/0.3017 us; publication RMS is 0.8194/0.8190/0.8461 us. Median
+acquisition-to-write mean increases from 46.2770 to 46.8503 us during activity
+and returns to 46.3036 us afterward. Cadence stays steady; the short set of
+22 overlapping active windows is limited tail evidence.
+
+### Next correction before a longer 8 kHz attempt
+
+The backend sustained approximately 8 kHz over the actual 25 s interval, but
+progress control and detailed measurement coverage failed. Correct these before
+the planned 120 s run. Publish an ownership-safe, coherent fixed-size latest
+progress/timing snapshot at a bounded rate, independent of ordinary-loop
+contention for the whole-cycle mutex; include sequence/time/age so the helper
+can distinguish stale status from genuine warmup. Independently profile and
+bound ordinary diagnostic/event work, or aggregate healthy event logging while
+preserving exact outcome totals, all rejection evidence and explicit coverage.
+Merely enlarging the event queue postpones overflow. Do not make the real-time
+command path wait for reporting or relax timing/readiness/admission guards.
+No code or instrument settings are changed by this capture analysis.
+
+## Progress and event reporting correction after the short 8 kHz attempt
+
+The user authorized fixing the monitoring failures above before repeating the
+short trial. This changes status transport and ordinary-thread diagnostics;
+immutable slot targets, the 5 us publication guard, exact reader clearance,
+identity/ownership checks and controller admission remain unchanged.
+
+### Cycle progress without ordinary-thread mutex acquisition
+
+The cycle/control owner publishes a fixed-size `ZeroSnapshot` at completed
+callback boundaries, at most every 100 ms during an unchanged phase. Enable,
+disable, settings, reacquire and phase transitions publish immediately under
+the existing cycle ownership. Startup configures it before workers start.
+The snapshot contains counters, timing summary, trial generation, requested
+state, steps/rate/duration, queue coverage and a monotonic capture timestamp
+and sequence. The publisher uses the callback's existing completed timestamp.
+
+`MagAOX::latestSnapshot<T>` provides three fixed inline slots with exclusive
+producer, consumer and atomic-handoff ownership. Unread publications coalesce;
+neither owner waits for the other or overwrites a payload still being copied.
+All producer calls are serialized by existing cycle ownership; only the
+ordinary app loop consumes. There is no allocation, retry loop or new mutex
+operation in publication. Live ownership is never reset while either owner
+can access it. The helper is reusable independently of this application.
+
+The ordinary loop consumes the latest state without needing the cycle mutex.
+A cold or at least 200 ms old snapshot permits a nonblocking mutex attempt for
+idle reader/SDK observation and stopped-main expiry servicing. Failure to
+acquire it leaves the last coherent state readable. `elapsedSec` advances only
+to that state's captured time (or recorded stop), while `snapshotAgeSec` exposes
+its age; stale progress is not extrapolated. Schema 4 adds `requested`,
+`snapshotSequence`, `snapshotTimeNs`, `snapshotAgeSec`, `snapshotValid`,
+`eventsQueued`, `eventStride` and `eventsSampledOut`. Snapshot validity means
+coherent publication with a valid local timestamp, not a freshness guarantee.
+
+### Bounded event service and explicit sampling
+
+`zeroTest.eventStride` defaults to 4, accepts 1 through 1024 at startup, and
+selects every Nth healthy main cycle for detailed main/auxiliary event rows.
+All lifecycle, skipped, unacknowledged and error outcomes are retained.
+`eventStride=1` restores all healthy event rows. Command execution, exact
+outcome counters and main timing joins remain full rate. The intentional row
+omissions are counted separately in per-trial `eventsSampledOut`; queue
+capacity loss remains cumulative `eventsDropped`.
+
+At steady 8 kHz, stride 4 reduces healthy text events from about 8,000 to 2,000
+per second, giving the unchanged 20,000-row queue approximately ten seconds of
+healthy-event headroom instead of 2.5 seconds. This covers the previously
+observed 5.462 s gap in capacity terms, but is not proof against an arbitrary
+stall or an exceptional-event flood. Detailed event data is explicitly sampled;
+it must not be presented as a full per-slot trace. A future full-trace
+qualification can select stride 1 once drain delays are understood.
+
+The ordinary loop drains at most 4,096 rows per chunk at entry, between coarse
+diagnostic groups and at exit. Each chunk freezes its available population so
+it cannot chase the producer indefinitely. It formats and logs without the
+cycle mutex. `logic_timing.eventsDrained` counts popped rows, not guaranteed
+log persistence; a negative logger enqueue result increments the separate
+`eventsLogFailed` counter. Existing text-log wire compatibility is preserved.
+
+### Locate remaining ordinary-loop delays
+
+The `logic_timing` INDI property and `[synco_logic]` text summary report ordinary
+loop sequence, start-to-start gap and maximum, queue depth/high-water,
+drained/current-loop-drained rows, queue loss and logger enqueue failures.
+Coarse `primary`, `combiner`, `camera`, `pipeline`, `readers`, `legacy`, `status`,
+`events` and `telemetry` durations include both computation and associated
+INDI/logging I/O. Multiple visits to a group add into its current loop total;
+maxima retain the largest loop total since startup. These measurements are on
+the ordinary thread and do not add per-step instrumentation to the command
+path. `reportPublicationUs` and `reportPublicationMaxUs` report the previous
+completed profile publication's cost, including formatting, INDI and telemetry
+enqueue, so its own I/O does not become an unmeasured group.
+
+The capture helper requires schema at least 4, a coherent baseline no older
+than two seconds, and a positive sequence. Polls reject invalid/missing/older
+snapshots, sequence regression (including the first poll versus baseline),
+five local seconds without sequence advancement, or new event queue loss.
+The local sequence watchdog also catches cached INDI ages that themselves stop
+updating. Final readback must preserve both queue-drop and logger-failure
+baselines; missing quality fields invalidate the capture. Cancellation still
+uses only the helper-owned enable request. No camera, main-loop, dmcomb, CPU or
+controller setting is changed by the helper.
+
+### Qualification and next instrument action
+
+Rebuild/install dmSyncopation and use the matching capture helper. Neither
+logdump nor the DM controller needs rebuilding for these existing text records.
+Keep all working instrument settings unchanged and repeat:
+
+```bash
+bash apps/dmSyncopation/scripts/capture-zero-aux-test.sh 8000 10
+```
+
+Verify fresh active progress, an approximately ten-second active interval,
+exact outcome totals, documented sampling and zero new queue/logger losses.
+Use the ordinary-loop profile to identify any remaining long gaps. Only after
+a clean short capture should the 120 s 8 kHz attempt proceed. Hardware
+qualification is pending; workstation tests cannot establish instrument drain
+throughput or backend timing.
+
+Workstation verification for this correction:
+
+- `latestSnapshot_test`: 3 cases / 139 assertions pass, including a slow
+  concurrent consumer overtaken by 100,000 multiword publications.
+- `dmSyncopation_test`: 105 cases / 2,236,431 assertions pass. New regressions
+  cover status delivery with the cycle mutex held by another thread, frozen
+  elapsed versus snapshot age, publication coalescing/cadence/phase transitions,
+  successful-cycle sampling with retained exceptions and exact command counts,
+  bounded event drains and profiling-property mappings. Existing timing,
+  ownership, wall-clock cancellation and no-write cases continue to pass.
+- `capture_zero_aux_test.py`: 26 offline cases pass, including cached/frozen
+  status, stale/missing snapshots, first-poll restart detection, queue loss and
+  final logger enqueue failure. Its services are private mocks, not instrument
+  connections.
+- Production dmSyncopation compiles and links successfully. Touched C++ files
+  were formatted with clang-format; shell syntax and `git diff --check` pass.
+
+No instrument command was executed by the agent. The unchanged-slot timing and
+new reporting throughput still require the operator's short rerun above.
