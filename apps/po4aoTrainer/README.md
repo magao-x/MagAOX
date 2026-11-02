@@ -5,8 +5,10 @@
 request/status contract. The C++ `po4ao` app retains real-time control. The same
 `TrainingSession` is available to notebooks without starting the companion.
 
-Implementation and local verification are complete; target CUDA/TensorRT, FPS,
-INDI and timing acceptance remains operator-run. Follow [DEPLOYMENT.md](DEPLOYMENT.md)
+The [independent-review corrections](../../agents/plans/2026-11/nn-po4ao-review-response.md)
+pass local regression checks. Target CUDA/TensorRT, FPS, INDI and timing acceptance
+remains operator-run; control-capable instrument readiness is not established.
+Follow [DEPLOYMENT.md](DEPLOYMENT.md)
 for the dedicated environment, shared paths, registration and acceptance steps.
 No personal source checkout is a production dependency. See the
 [requirements](../../agents/plans/2026-10/nn-po4ao-gui-requirements.md) and
@@ -15,16 +17,21 @@ and the checks actually performed.
 
 ## Controls and ownership
 
-- NN Enable stops the CACAO writer, disables the NN output, loads the selected
-  catalog model if needed, then enables NN. Switch reconstructor uses an explicit
+- NN Enable prepares the selected engine while NN is disabled, then stops CACAO
+  before enabling NN if handing over from CACAO. The already active NN model is a
+  no-op; NN-to-NN replacement touches only NN, leaving modulation unchanged.
+  Confirmed quiescent NN faults permit replacement or explicit CACAO recovery.
+  Switch reconstructor uses an explicit
   destination and the observed source. Writer exit/start is verified through the
   installed milk FPS interface. Optional linked modulation uses unmodulated NN
   versus CACAO at 2000 Hz/radius 3. Reconstruction is independent of learning.
 - Enable PO4AO reloads the latest eligible engine and selects learned control.
   Disable pauses learning and selects the integrator; Enable does not resume it.
 - Start/Resume and Pause retain the same process, models, Adam state and fixed
-  normalization. Pause stops an outstanding export child. Reset invalidates the
-  old session before stopping owned processes, then requests the runtime reset.
+  normalization. Pause stops an outstanding export child and waits for any issued
+  reload to settle, preserving its exact numerical reference. Reset invalidates
+  the old session, sends fallback/runtime invalidation before blocking cleanup,
+  then waits for runtime completion. A timed-out Reset stays pending across restart.
 - Recollect pauses managed learning, collects with exploration on the current
   controller, and resumes only a previously running session after a complete
   newer snapshot. Invalid or interrupted snapshots are never trained on.
@@ -32,6 +39,11 @@ and the checks actually performed.
   control pipe/heartbeat stops its worker; restarting the supervisor does not
   automatically start learning or change the real-time controller. A lost
   in-memory optimizer session requires Reset.
+- External runtime Reset/restart invalidates managed eligibility and terminates
+  the owned worker; an external Disable transition pauses it. An unknown external
+  policy pauses learning instead of being adopted as its numerical reference.
+- Reconnected/stale properties cannot authorize operations. Fresh definitions and
+  an advancing runtime heartbeat are required; the GUI expires a silent companion.
 
 The operator manages loop state and notebook/app responsibility. There are no loop
 interlocks, notebook detection, leases, locks against other trainers, or notebook
@@ -41,7 +53,8 @@ without inventing rollback or successful completion.
 
 ## Configuration and artifacts
 
-`configs/po4aoTrainer.conf` contains app/device mappings, deadlines and the shared
+`configs/po4aoTrainer.conf` contains app/device/modulation-state mappings, freshness
+and operation deadlines, and the shared
 artifact root. `configs/po4ao_training.conf` is typed TOML, watched by the supervisor.
 Runtime geometry/history capacity, gains and limits come from the C++ config.
 The parser rejects unknown keys and invalid combinations, retaining the last valid
@@ -54,12 +67,17 @@ Reset. The INDI `training_config` vector reports desired/applied revisions, vali
 errors and pending reset. Pending hot changes are applied when learning resumes.
 
 Each run contains its resolved launch/config snapshots, worker log, completed
-metrics JSONL and bounded diagnostic snapshots. Exports run in private candidate
-directories. The supervisor verifies engine hash, metadata/config revision and reset
-generation, then replaces one `current` directory symlink. C++ reload completion
+metrics JSONL and bounded diagnostic snapshots. Publication issuance/outcome append
+revisions to the same session/iteration record; **the last record for that pair is
+authoritative**. The matching diagnostic snapshot is rewritten with the outcome.
+Exports run in private candidate directories. The supervisor verifies engine hash,
+metadata/config revision, reset generation, matching NPZ identity and finite model
+state, then replaces one `current` directory symlink. C++ reload completion
 requires a fresh Busy/terminal acknowledgement and the intended model identity.
 The retained engine is eligible until Reset, including after Disable. Eligibility
-is persisted in `session.json`; old files alone never restore eligibility.
+is persisted in `session.json`, separately from unresolved publication and Reset.
+Old files alone never restore eligibility. A lost load ticket across a supervisor
+restart requires Reset; timeout/cancellation alone never promotes a candidate.
 
 Set the app's `source_revision` to the installed branch@commit when deploying.
 It is recorded in the app log, launch record, metrics and engine metadata. Diagnostic

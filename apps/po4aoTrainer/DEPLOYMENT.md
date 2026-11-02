@@ -6,6 +6,13 @@ installed FPS identity, INDI routing or real-time performance. Complete the targ
 checks below before using the controls on the instrument. Agents do not run these steps
 on instrument hosts. `AGENTS.md` is unchanged.
 
+The [independent-review response](../../agents/plans/2026-11/nn-po4ao-review-response.md)
+supersedes the earlier deployment-trial readiness claim. The corrected revision
+has local regression evidence; target compilation and control-capable acceptance
+are still outstanding. Deploy the updated companion and C++ runtime together:
+the companion requires the new `model_status.instance`, `sequence` and
+`control_target` fields. An older runtime stays unavailable rather than being guessed.
+
 ## Install only the affected components
 
 1. Use `rlandman/nn-po4ao-gui`, based on the recorded `rlandman/nn-po4ao-baseline`.
@@ -35,6 +42,13 @@ Copy `configs/po4aoTrainer.conf` and `configs/po4ao_training.conf` into the exis
 configuration repository/deployed config directory. Confirm all device names against
 actual definitions, particularly the NN name (some configurations use `dlReconstructor`).
 No agent has edited or installed the instrument configuration.
+
+Confirm `unmodulated_state`/`modulated_state` (defaults 3/4) against the installed
+modulation app. The linked CACAO preset stays 2000 Hz/radius 3. Keep the supervisor
+loop interval below the GUI's five-second heartbeat deadline. `freshness_timeout`
+(default five seconds) bounds runtime observations; it must exceed the C++ app-logic
+period. Periodic fresh discovery keeps unchanged live properties current, while
+runtime and GUI heartbeats detect stalled app loops.
 
 Provision an explicitly chosen shared artifact root with the normal runtime account's
 write/traverse permissions and the C++ runtime account's read/traverse permissions.
@@ -106,10 +120,28 @@ Then perform the approved fake-stream/lab acceptance:
   Pause must preserve PID/models/Adam and current runtime policy. Disable pauses learning.
   Reset must stop owned children and prevent reactivation of pre-reset artifacts.
   No notebook kernel is discovered, adopted, paused or terminated.
+- With input frames absent, Reset must still request runtime invalidation and stop
+  its owned worker. Verify persistent pending Reset across a supervisor restart,
+  rejection of Enable until completion, and no old-engine reactivation after frames
+  return. Repeat Reset if the runtime itself restarts during a pending Reset.
+- Issue Reset and Disable through the normal external INDI client. Verify managed
+  eligibility/session invalidation or pause respectively. Restart the runtime with
+  retained artifacts and verify that its new process identity invalidates eligibility.
+- Hold an engine load beyond the publication timeout, then Disable/Pause. It must
+  not report Ok while the issued activation is unresolved. Complete that load,
+  resume learning and verify the exact published reference remains known. Confirm
+  final publication outcomes in both metrics JSONL and the matching diagnostic NPZ.
+- Simulate a quiescent NN model fault, recover to CACAO and to a replacement NN.
+  Enabling the already active NN must issue no writes; NN-to-NN replacement must
+  issue no modulation/CACAO writes, even when modulation linking is selected.
 - Recollect under learned control and under integrator with a retained policy. Verify
   exploration, emitted-command history, full snapshot identity, interruption on gaps,
   unchanged normalization, and resume only when learning was previously running.
 - Disconnect/reconnect both GUI clients; check shared status and no replay of commands.
+  Before new definitions arrive, retained cache must not enable controls. Keep the
+  transport open but stop companion/status updates: the GUI must expire within five
+  seconds, mark state unknown and recover only after heartbeat advancement. Repeat
+  with a stalled runtime app loop and unchanged re-served definitions.
   Kill only the test supervisor/worker during a controlled trial: current C++ inference
   stays selected, orphaned managed publication stops, and lost optimizer sessions require Reset.
 - Measure actual inference latency and training/export contention. CPU tests cannot
@@ -128,11 +160,22 @@ a revision containing any such change is staged in its entirety.
 A failed operation reports Alert and does not invent a rollback or open/close the loop.
 Inspect actual state before retrying. A failed worker or supervisor restart loses the
 in-memory optimizer session; Reset clears this condition. Reset invalidates eligibility
-before it stops the worker; if reset completion is pending without input frames, old
-files remain ineligible. Enable can reactivate the last eligible managed engine but
+before it stops the worker; fallback and runtime reset requests precede all waits.
+If reset completion is pending without input frames, old files remain ineligible
+and ordinary training/Enable actions stay blocked. Retry Reset or restore frames/readback;
+an Alert does not clear this barrier. Enable can reactivate the last eligible managed engine but
 never resumes learning automatically. The operator manages notebook versus managed
 training. Use Reset when handing a managed session over to notebook experiments;
 the app does not import a notebook's optimizer or eligibility record.
+
+Disable remains available during publication/recollection when PO4AO is observed
+enabled. It pauses rather than destroys the session. A load that was already issued
+is retained until confirmed loaded, failed or reset-invalidated; cancelling a wait
+does not cancel C++ loading. A supervisor restart with an unresolved load requires
+Reset. External Reset or runtime restart also clears retained eligibility. An older
+session record without runtime identity requires Reset before reactivation.
+If an external policy falls outside the managed session's known references, learning
+pauses with an error; restore the eligible managed policy or Reset before resuming.
 
 For manual operator switching, the packaged implementation is shared with the app:
 `python -m xapp.po4aoTrainer.switching nn` or `cacao`, optionally `--linked` and
