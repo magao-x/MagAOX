@@ -2,11 +2,11 @@
 
 `learningCtrlGUI <companion-device>` is the native Qt client for the [approved requirements](../../../agents/plans/2026-10/nn-po4ao-gui-requirements.md). It reuses `xWidget`, `statusLabel`, the MagAO-X resource stylesheet and `multiIndiManager`/`multiIndiPublisher`. The default width is 500 pixels; layouts handle narrower windows. No web framework, shell commands, loop control or plotting panel is added.
 
-This is the frontend implementation. The managed `po4aoTrainer` supervisor and runtime completion readbacks are still being implemented; the GUI remains disabled when its companion is absent. Building it does not make the instrument controls operational.
+The managed `po4aoTrainer` supervisor and C++ completion readbacks implement this contract. The GUI remains disabled when its companion is absent. See [deployment instructions](../../../apps/po4aoTrainer/DEPLOYMENT.md) for installation, configuration and the required operator-run target acceptance.
 
 ## Behavior
 
-- The NN catalog comes from the NN device's `model` definition. Labels are displayed; element identifiers are sent only when Enable is pressed. A selected value is not claimed to be active. Requested/loaded/active NN filenames are available on the reconstructor status tooltip. The backend must perform the agreed disable/load/enable sequence.
+- The NN catalog comes from the NN device's `model` definition. Labels are displayed; element identifiers are sent only when Enable is pressed. A selected value is not claimed to be active. Requested/loaded/active NN filenames are available on the reconstructor status tooltip. The backend performs the agreed disable/load/enable sequence; selecting an already loaded model only requires re-enabling it.
 - Switch reconstructor sends a destination and expected source from observed state; it ignores the staged engine. Unknown/conflict/transition state disables that request. Learning, recollection and loop state never gate reconstruction controls.
 - Link modulation sends a preference to the companion. The checkbox reflects readback; it issues no modulation motion itself.
 - Enable/Disable PO4AO and Start/Pause/Resume learning labels follow the companion's effective state. A retained policy ID alone never implies PO4AO output is active. Disable's pause behavior, Reset's termination, and recollection noise/resume sequencing belong to the companion/runtime.
