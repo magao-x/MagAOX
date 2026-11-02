@@ -314,5 +314,133 @@ TEST_CASE( "PO4AO resets replay episode state", "[po4ao]" )
     REQUIRE( episode.generation == 0 );
 }
 
+/// Verify noise follows the current learned or fallback command and precedes limiting.
+/** \ingroup po4ao_unit_test */
+TEST_CASE( "PO4AO explores either base controller once before command limits", "[po4ao]" )
+{
+    const float observation[]{ 4.F, -2.F, 99.F };
+    const float noise[]{ -1.F, 2.F };
+    float       learned[]{ 3.F, -0.5F, 0.F };
+    REQUIRE( blendPolicyCommand( learned, observation, 2, 0.5F, 0.5F ) );
+    addExploration( learned, 2, noise, 0, 3, 1.F, 0.25F );
+    REQUIRE( finalizeControlledCommand( learned, observation, 3, 2, 2.F ) );
+    REQUIRE( learned[0] == Approx( 1.5F ) ); // Blend 2.5, then noise -1, then limit.
+    REQUIRE( learned[1] == Approx( 1.25F ) );
+    REQUIRE( learned[2] == 99.F );
+
+    float integrator[]{ 2.F, -1.F, 0.F };
+    addExploration( integrator, 2, noise, 2, 3, 1.F, 0.25F );
+    REQUIRE( finalizeControlledCommand( integrator, observation, 3, 2, 2.F ) );
+    REQUIRE( integrator[0] == Approx( 1.75F ) );
+    REQUIRE( integrator[1] == Approx( -0.5F ) );
+    REQUIRE( integrator[2] == 99.F );
+    CircularBuffer commands( 3, 2 );
+    commands.add( learned );
+    commands.add( integrator );
+    EpisodeBuffer episode;
+    episode.configure( 2, 3 );
+    REQUIRE( episode.add( observation, learned ) );
+    REQUIRE( episode.add( observation, integrator ) );
+    REQUIRE( commands.getItem( 0 )[0] == episode.commands[3] );
+    REQUIRE( commands.getItem( 1 )[1] == episode.commands[1] );
+}
+
+/// Verify emission completion and replay publication are distinct, generation-bound events.
+/** \ingroup po4ao_unit_test */
+TEST_CASE( "PO4AO collection completes only after snapshot publication", "[po4ao]" )
+{
+    WarmupCollection collection;
+    REQUIRE( WarmupCollection::phase( collection.token() ) == CollectionPhase::idle );
+    collection.begin( 10, 2, 3, 42, 1 );
+    collection.validate( 3, 42, 1, true );
+    REQUIRE( collection.frames() == 0 );
+    REQUIRE_FALSE( collection.published( 10 ) );
+    collection.emitted();
+    REQUIRE( collection.frames() == 1 );
+    REQUIRE( WarmupCollection::phase( collection.token() ) == CollectionPhase::collecting );
+    collection.emitted();
+    REQUIRE( WarmupCollection::phase( collection.token() ) == CollectionPhase::publishing );
+    collection.emitted();
+    REQUIRE( collection.frames() == 2 );
+    REQUIRE_FALSE( collection.published( 9 ) );
+    REQUIRE( collection.published( 10 ) );
+    REQUIRE( WarmupCollection::phase( collection.token() ) == CollectionPhase::ready );
+    REQUIRE_FALSE( collection.published( 10 ) );
+    collection.validate( 4, 0, 2, false );
+    REQUIRE( WarmupCollection::phase( collection.token() ) == CollectionPhase::ready );
+}
+
+/// Verify control-Off integrator collection neither activates nor requires a retained policy.
+/** \ingroup po4ao_unit_test */
+TEST_CASE( "PO4AO can collect under the disabled integrator", "[po4ao]" )
+{
+    WarmupCollection collection;
+    collection.begin( 2, 1, 4, 0, 1 );
+    collection.validate( 4, 0, 1, true );
+    collection.emitted();
+    REQUIRE( collection.published( 2 ) );
+    REQUIRE( collection.frames() == 1 );
+}
+
+/// Verify incompatible samples, failed publication and reset cannot complete a fixed-policy dataset.
+/** \ingroup po4ao_unit_test */
+TEST_CASE( "PO4AO interrupts collection on controller changes and source gaps", "[po4ao]" )
+{
+    WarmupCollection collection;
+    collection.begin( 5, 2, 3, 42, 1 );
+    collection.emitted();
+    SECTION( "control changed" )
+    {
+        collection.validate( 4, 42, 1, true );
+    }
+    SECTION( "policy changed" )
+    {
+        collection.validate( 3, 43, 1, true );
+    }
+    SECTION( "inference fell back" )
+    {
+        collection.validate( 3, 0, 1, true );
+    }
+    SECTION( "reset" )
+    {
+        collection.validate( 3, 42, 2, true );
+    }
+    SECTION( "source gap" )
+    {
+        collection.validate( 3, 42, 1, false );
+    }
+    SECTION( "publisher backlog or failure" )
+    {
+        collection.interrupt( 5 );
+    }
+    SECTION( "failure after final emission" )
+    {
+        collection.emitted();
+        collection.interrupt( 5 );
+    }
+    REQUIRE( WarmupCollection::phase( collection.token() ) == CollectionPhase::interrupted );
+    const auto frames = collection.frames();
+    collection.emitted();
+    REQUIRE( collection.frames() == frames );
+    REQUIRE_FALSE( collection.published( 5 ) );
+}
+
+/// Verify recollection starts a fresh schedule while old publisher callbacks cannot change it.
+/** \ingroup po4ao_unit_test */
+TEST_CASE( "PO4AO ignores stale collection publisher results", "[po4ao]" )
+{
+    WarmupCollection collection;
+    collection.begin( 1, 1, 3, 42, 1 );
+    collection.emitted();
+    collection.begin( 2, 1, 3, 42, 1 );
+    REQUIRE( collection.frames() == 0 );
+    collection.interrupt( 1 );
+    REQUIRE_FALSE( collection.published( 1 ) );
+    REQUIRE( WarmupCollection::phase( collection.token() ) == CollectionPhase::collecting );
+    collection.emitted();
+    REQUIRE_FALSE( collection.published( 1 ) );
+    REQUIRE( collection.published( 2 ) );
+}
+
 } // namespace po4aoTest
 } // namespace libXWCTest

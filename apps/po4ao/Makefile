@@ -1,5 +1,5 @@
 allall: all
-OTHER_HEADERS=po4ao_impl.hpp po4ao_utils.hpp
+OTHER_HEADERS=po4ao_impl.hpp po4ao_control.hpp po4ao_utils.hpp
 NEED_CUDA = yes
 TARGET=po4ao
 CXXFLAGS += -Wno-deprecated-declarations

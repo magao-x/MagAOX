@@ -8,6 +8,8 @@
 #ifndef po4ao_impl_hpp
 #define po4ao_impl_hpp
 
+#include "po4ao_control.hpp"
+
 inline po4ao::po4ao() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
 {
 }
@@ -707,6 +709,7 @@ inline void po4ao::modelLoaderLoop()
                 std::lock_guard<std::mutex> lock( m_reloadErrorMutex );
                 m_reloadError = error;
             }
+            log<text_log>( "PO4AO model reload failed: " + m_reloadError, logPrio::LOG_ERROR );
             m_reloadStatus.store( 3, std::memory_order_release );
             continue;
         }
@@ -720,6 +723,7 @@ inline void po4ao::modelLoaderLoop()
         {
             std::lock_guard<std::mutex> lock( m_reloadErrorMutex );
             m_reloadError = "a validated model is already awaiting activation";
+            log<text_log>( "PO4AO model reload failed: " + m_reloadError, logPrio::LOG_ERROR );
             m_reloadStatus.store( 3, std::memory_order_release );
             continue;
         }
@@ -798,36 +802,11 @@ inline bool po4ao::runInference( const float *observation )
     if( !blendPolicyCommand(
             m_output.get(), observation, static_cast<size_t>( m_nModesControlled ), m_integratorGain, m_policyBlend ) )
         return false;
-    return finalizeControlledCommand( m_output.get(),
-                                      observation,
-                                      static_cast<size_t>( m_nModes ),
-                                      static_cast<size_t>( m_nModesControlled ),
-                                      m_maxCommandAbs );
-}
-
-inline void po4ao::makeIntegratorCommand( const float *observation, bool addNoise )
-{
+    // Exploration and limits are applied once, after either base controller has run.
     for( int mode = 0; mode < m_nModesControlled; ++mode )
-        m_integratorCommands[mode] = m_integratorGain * observation[mode];
-    memcpy( m_output.get(), m_integratorCommands.get(), static_cast<size_t>( m_nModesControlled ) * sizeof( float ) );
-
-    if( addNoise && !m_explorationNoise.empty() )
-    {
-        const uint64_t warmupFrames = static_cast<uint64_t>( m_warmupEpisodes ) * m_iterationsPerEpisode;
-        const float    progress =
-            warmupFrames > 1 ? std::min( 1.F, static_cast<float>( m_frameCounter ) / ( warmupFrames - 1 ) ) : 1.F;
-        const float  sigma = m_explorationSigmaStart + progress * ( m_explorationSigmaEnd - m_explorationSigmaStart );
-        const float *noise =
-            m_explorationNoise.data() + ( m_frameCounter % m_explorationNoiseRows ) * m_explorationNoiseCols;
-        for( int mode = 0; mode < m_nModesControlled; ++mode )
-            m_output[mode] += sigma * noise[mode];
-    }
-    if( !finalizeControlledCommand( m_output.get(),
-                                    observation,
-                                    static_cast<size_t>( m_nModes ),
-                                    static_cast<size_t>( m_nModesControlled ),
-                                    m_maxCommandAbs ) )
-        memset( m_output.get(), 0, static_cast<size_t>( m_nModes ) * sizeof( float ) );
+        if( !finiteFloat( m_output[mode] ) )
+            return false;
+    return true;
 }
 
 inline int po4ao::openOutputStreams()
@@ -972,150 +951,6 @@ inline int po4ao::sendOutput()
     return 0;
 }
 
-inline int po4ao::invalidateReplay( IMAGE &stream, bool opened, IMAGE &metadataStream, bool metadataOpened )
-{
-    if( !opened || !metadataOpened )
-        return -1;
-    stream.md[0].write         = 1;
-    metadataStream.md[0].write = 1;
-    memset( metadataStream.array.raw, 0, 4 * sizeof( uint32_t ) );
-    const uint64_t publication = stream.md[0].cnt0 + 1;
-    metadataStream.md[0].cnt0  = publication;
-    stream.md[0].cnt0          = publication;
-    stream.md[0].cnt1          = 0;
-    stream.md[0].cnt2          = 0;
-    stream.md[0].write         = 0;
-    metadataStream.md[0].write = 0;
-    ImageStreamIO_sempost( &stream, -1 );
-    ImageStreamIO_sempost( &metadataStream, -1 );
-    return 0;
-}
-
-inline int po4ao::publishReplay(
-    IMAGE &stream, bool opened, IMAGE &metadataStream, bool metadataOpened, uint64_t episodeIdentifier )
-{
-    if( !opened || !metadataOpened || !m_publishObservations || !m_publishCommands )
-        return -1;
-    const size_t valid         = std::min( m_publishObservations->size(), m_publishCommands->size() );
-    const size_t planeSize     = static_cast<size_t>( m_nModes ) * m_replayBufferSize;
-    stream.md[0].write         = 1;
-    metadataStream.md[0].write = 1;
-    memset( stream.array.raw, 0, 2 * planeSize * sizeof( float ) );
-    auto *destination = static_cast<float *>( stream.array.raw );
-    for( size_t sample = 0; sample < valid; ++sample )
-    {
-        memcpy( destination + sample * m_nModes,
-                m_publishObservations->getItem( sample ),
-                static_cast<size_t>( m_nModes ) * sizeof( float ) );
-        memcpy( destination + planeSize + sample * m_nModes,
-                m_publishCommands->getItem( sample ),
-                static_cast<size_t>( m_nModes ) * sizeof( float ) );
-    }
-    const uint64_t publication = stream.md[0].cnt0 + 1;
-    const uint64_t modelId     = m_activeModelId.load( std::memory_order_acquire );
-    auto          *metadata    = static_cast<uint32_t *>( metadataStream.array.raw );
-    metadata[0]                = static_cast<uint32_t>( valid );
-    metadata[1]                = static_cast<uint32_t>( episodeIdentifier );
-    metadata[2]                = static_cast<uint32_t>( modelId & 0xFFFFFFFFULL );
-    metadata[3]                = static_cast<uint32_t>( modelId >> 32 );
-    stream.md[0].cnt1          = 0;
-    stream.md[0].cnt2          = 0;
-    metadataStream.md[0].cnt0  = publication;
-    stream.md[0].cnt0          = publication;
-    stream.md[0].write         = 0;
-    metadataStream.md[0].write = 0;
-    ImageStreamIO_sempost( &stream, -1 );
-    ImageStreamIO_sempost( &metadataStream, -1 );
-    return 0;
-}
-
-inline void po4ao::finishEpisode()
-{
-    EpisodeBuffer &completed = m_episodeBuffers[static_cast<size_t>( m_activeEpisodeSlot )];
-    completed.episode        = m_episodeCounter.fetch_add( 1, std::memory_order_acq_rel ) + 1;
-    completed.generation     = m_activeCollectionGeneration;
-
-    int next = -1;
-    for( size_t slot = 0; slot < c_episodeSlots; ++slot )
-    {
-        int expected = 0;
-        if( m_episodeStates[slot].compare_exchange_strong( expected, 1, std::memory_order_acq_rel ) )
-        {
-            next = static_cast<int>( slot );
-            break;
-        }
-    }
-    if( next < 0 )
-    {
-        completed.reset();
-        m_replayDrops.fetch_add( 1, std::memory_order_relaxed );
-        return;
-    }
-
-    const uint64_t write                 = m_readyWrite.load( std::memory_order_relaxed );
-    m_readyQueue[write % c_episodeSlots] = m_activeEpisodeSlot;
-    m_episodeStates[static_cast<size_t>( m_activeEpisodeSlot )].store( 2, std::memory_order_release );
-    m_readyWrite.store( write + 1, std::memory_order_release );
-    m_activeEpisodeSlot = next;
-    m_episodeBuffers[static_cast<size_t>( next )].reset();
-    m_replayCondition.notify_one();
-}
-
-inline void po4ao::replayPublisherLoop()
-{
-    while( true )
-    {
-        std::unique_lock<std::mutex> publicationLock( m_publicationMutex );
-        const uint64_t               read  = m_readyRead.load( std::memory_order_relaxed );
-        const uint64_t               write = m_readyWrite.load( std::memory_order_acquire );
-        if( read == write )
-        {
-            publicationLock.unlock();
-            if( m_replayShutdown.load( std::memory_order_acquire ) )
-                break;
-            std::unique_lock<std::mutex> lock( m_replayMutex );
-            m_replayCondition.wait( lock,
-                                    [this]()
-                                    {
-                                        return m_replayShutdown.load( std::memory_order_acquire ) ||
-                                               m_readyRead.load( std::memory_order_relaxed ) !=
-                                                   m_readyWrite.load( std::memory_order_acquire );
-                                    } );
-            continue;
-        }
-
-        const int slot = m_readyQueue[read % c_episodeSlots];
-        m_readyRead.store( read + 1, std::memory_order_release );
-        m_episodeStates[static_cast<size_t>( slot )].store( 3, std::memory_order_release );
-        EpisodeBuffer &episode             = m_episodeBuffers[static_cast<size_t>( slot )];
-        const uint64_t requestedGeneration = m_collectionGeneration.load( std::memory_order_acquire );
-        if( episode.generation != requestedGeneration )
-        {
-            episode.reset();
-            m_episodeStates[static_cast<size_t>( slot )].store( 0, std::memory_order_release );
-            continue;
-        }
-        if( m_publicationGeneration != requestedGeneration )
-        {
-            m_publishObservations->reset();
-            m_publishCommands->reset();
-            m_publicationGeneration = requestedGeneration;
-        }
-        for( size_t frame = 0; frame < episode.count; ++frame )
-        {
-            m_publishObservations->add( episode.observations.data() + frame * m_nModes );
-            m_publishCommands->add( episode.commands.data() + frame * m_nModes );
-        }
-        publishReplay(
-            m_replayStream, m_replayOpened, m_replayMetadataStream, m_replayMetadataOpened, episode.episode );
-        if( episode.episode == m_warmupEpisodes )
-            publishReplay(
-                m_warmupStream, m_warmupOpened, m_warmupMetadataStream, m_warmupMetadataOpened, episode.episode );
-        episode.reset();
-        m_episodeStates[static_cast<size_t>( slot )].store( 0, std::memory_order_release );
-    }
-}
-
 inline int po4ao::appStartup()
 {
     if( m_configVersion != 2 ||
@@ -1143,7 +978,7 @@ inline int po4ao::appStartup()
         sample.store( 0, std::memory_order_relaxed );
     for( auto &state : m_episodeStates )
         state.store( 0, std::memory_order_relaxed );
-    m_controlEnabled.store( m_controlEnabledConfig, std::memory_order_release );
+    m_controlRequest.store( 2 | static_cast<uint64_t>( m_controlEnabledConfig ), std::memory_order_release );
     m_lastStatsUpdate = std::chrono::steady_clock::now();
 
     createStandardIndiToggleSw( m_indiP_reloadToggle, "reload_engine" );
@@ -1168,7 +1003,18 @@ inline int po4ao::appStartup()
     REG_INDI_NEWPROP_NOCB( m_indiP_modelStatus, "model_status", pcf::IndiProperty::Text );
     m_indiP_modelStatus.add( pcf::IndiElement( "active_id" ) );
     m_indiP_modelStatus.add( pcf::IndiElement( "active_backend" ) );
-    m_indiP_modelStatus.add( pcf::IndiElement( "reload" ) );
+    for( const char *element : { "reload",
+                                 "reload_error",
+                                 "effective_controller",
+                                 "effective_id",
+                                 "control_request",
+                                 "control_applied",
+                                 "reset_request",
+                                 "reset_applied" } )
+        m_indiP_modelStatus.add( pcf::IndiElement( element ) );
+    REG_INDI_NEWPROP_NOCB( m_indiP_collectionStatus, "collection_status", pcf::IndiProperty::Text );
+    for( const char *element : { "state", "requested_generation", "generation", "frames", "target_frames" } )
+        m_indiP_collectionStatus.add( pcf::IndiElement( element ) );
 
     m_loaderThread = std::thread( [this]() { modelLoaderLoop(); } );
     m_replayThread = std::thread( [this]() { replayPublisherLoop(); } );
@@ -1236,14 +1082,9 @@ inline void po4ao::updateRuntimeStatistics()
     const uint64_t     activeModelId = m_activeModelId.load( std::memory_order_acquire );
     std::ostringstream modelId;
     modelId << std::hex << std::setw( 16 ) << std::setfill( '0' ) << activeModelId;
-    static const std::array<std::string, 4> reloadNames  = { "idle", "loading", "ready", "failed" };
-    const int                               reloadStatus = m_reloadStatus.load( std::memory_order_acquire );
-    updateIfChanged( m_indiP_modelStatus, "active_id", modelId.str() );
-    std::string activeBackend = "fallback";
-    if( activeModelId != 0 )
-        activeBackend = m_activeCpuInference.load( std::memory_order_acquire ) ? "cpu" : "tensorrt";
-    updateIfChanged( m_indiP_modelStatus, "active_backend", activeBackend );
-    updateIfChanged( m_indiP_modelStatus, "reload", reloadNames[static_cast<size_t>( reloadStatus )] );
+    const std::string activeBackend =
+        activeModelId == 0 ? "fallback"
+                           : ( m_activeCpuInference.load( std::memory_order_acquire ) ? "cpu" : "tensorrt" );
 
     std::ostringstream message;
     message << "PO4AO latency(us) p50=" << p50 << " p95=" << p95 << " p99=" << p99 << " max=" << maximum
@@ -1253,35 +1094,86 @@ inline void po4ao::updateRuntimeStatistics()
     log<text_log>( message.str(), logPrio::LOG_INFO );
 }
 
+inline void po4ao::updateControlStatus()
+{
+    const uint64_t control           = m_controlRequest.load( std::memory_order_acquire );
+    const uint64_t applied           = m_appliedControl.load( std::memory_order_acquire );
+    const uint64_t reset             = m_modelGeneration.load( std::memory_order_acquire );
+    const uint64_t resetApplied      = m_appliedReset.load( std::memory_order_acquire );
+    const int      reload            = m_reloadStatus.load( std::memory_order_acquire );
+    const uint64_t collection        = m_collection.token();
+    const auto     phase             = WarmupCollection::phase( collection );
+    const uint64_t generation        = WarmupCollection::generation( collection );
+    const uint64_t requested         = m_collectionGeneration.load( std::memory_order_acquire );
+    const bool     pendingCollection = m_warmupRecollectRequest.load( std::memory_order_acquire ) > generation;
+
+    auto modelText = []( uint64_t model )
+    {
+        std::ostringstream value;
+        value << std::hex << std::setw( 16 ) << std::setfill( '0' ) << model;
+        return value.str();
+    };
+    static const std::array<std::string, 4> reloadNames{ "idle", "loading", "ready", "failed" };
+    static const std::array<std::string, 4> controllers{ "unknown", "integrator", "po4ao", "pass-through" };
+    static const std::array<std::string, 5> phases{ "idle", "collecting", "publishing", "ready", "interrupted" };
+    const uint64_t                          active = m_activeModelId.load( std::memory_order_acquire );
+    updateIfChanged( m_indiP_modelStatus, "active_id", modelText( active ) );
+    updateIfChanged(
+        m_indiP_modelStatus,
+        "active_backend",
+        std::string( active == 0 ? "fallback"
+                                 : ( m_activeCpuInference.load( std::memory_order_acquire ) ? "cpu" : "tensorrt" ) ) );
+    updateIfChanged( m_indiP_modelStatus,
+                     "effective_controller",
+                     controllers[static_cast<size_t>( m_effectiveController.load( std::memory_order_acquire ) )] );
+    updateIfChanged(
+        m_indiP_modelStatus, "effective_id", modelText( m_effectiveModelId.load( std::memory_order_acquire ) ) );
+    updateIfChanged( m_indiP_modelStatus, "reload", reloadNames[static_cast<size_t>( reload )] );
+    { // mutex scope
+        std::lock_guard<std::mutex> errorLock( m_reloadErrorMutex );
+        updateIfChanged( m_indiP_modelStatus, "reload_error", m_reloadError );
+    }
+    updateIfChanged( m_indiP_modelStatus, "control_request", std::to_string( control >> 1 ) );
+    updateIfChanged( m_indiP_modelStatus, "control_applied", std::to_string( applied >> 1 ) );
+    updateIfChanged( m_indiP_modelStatus, "reset_request", std::to_string( reset ) );
+    updateIfChanged( m_indiP_modelStatus, "reset_applied", std::to_string( resetApplied ) );
+    updateIfChanged( m_indiP_collectionStatus,
+                     "state",
+                     pendingCollection ? std::string( "pending" ) : phases[static_cast<size_t>( phase )] );
+    updateIfChanged( m_indiP_collectionStatus, "requested_generation", std::to_string( requested ) );
+    updateIfChanged( m_indiP_collectionStatus, "generation", std::to_string( generation ) );
+    updateIfChanged( m_indiP_collectionStatus, "frames", std::to_string( m_collection.frames() ) );
+    updateIfChanged( m_indiP_collectionStatus,
+                     "target_frames",
+                     std::to_string( static_cast<uint64_t>( m_warmupEpisodes ) * m_iterationsPerEpisode ) );
+
+    // Publish observed state before terminal acknowledgements.
+    updateSwitchIfChanged( m_indiP_controlToggle,
+                           "toggle",
+                           ( applied & 1 ) ? pcf::IndiElement::On : pcf::IndiElement::Off,
+                           control == applied ? INDI_OK : INDI_BUSY );
+    updateSwitchIfChanged(
+        m_indiP_resetModel, "toggle", pcf::IndiElement::Off, reset == resetApplied ? INDI_OK : INDI_BUSY );
+    updateSwitchIfChanged( m_indiP_reloadToggle,
+                           "toggle",
+                           pcf::IndiElement::Off,
+                           reload == 3 ? INDI_ALERT : ( reload == 0 ? INDI_OK : INDI_BUSY ) );
+    updateSwitchIfChanged( m_indiP_recollectWarmup,
+                           "toggle",
+                           pcf::IndiElement::Off,
+                           pendingCollection || phase == CollectionPhase::collecting ||
+                                   phase == CollectionPhase::publishing
+                               ? INDI_BUSY
+                               : ( phase == CollectionPhase::interrupted ? INDI_ALERT : INDI_OK ) );
+}
+
 inline int po4ao::appLogic()
 {
     SHMIMMONITOR_APP_LOGIC;
     std::unique_lock<std::mutex> lock( m_indiMutex );
     SHMIMMONITOR_UPDATE_INDI;
-    updateSwitchIfChanged( m_indiP_controlToggle,
-                           "toggle",
-                           m_controlEnabled.load( std::memory_order_acquire ) ? pcf::IndiElement::On
-                                                                              : pcf::IndiElement::Off,
-                           INDI_OK );
-    updateSwitchIfChanged( m_indiP_reloadToggle,
-                           "toggle",
-                           pcf::IndiElement::Off,
-                           m_reloadStatus.load( std::memory_order_acquire ) == 1 ? INDI_BUSY : INDI_IDLE );
-    updateSwitchIfChanged( m_indiP_resetModel,
-                           "toggle",
-                           pcf::IndiElement::Off,
-                           m_modelResetRequest.load( std::memory_order_acquire ) != 0 ? INDI_BUSY : INDI_OK );
-    updateSwitchIfChanged( m_indiP_recollectWarmup,
-                           "toggle",
-                           pcf::IndiElement::Off,
-                           m_warmupRecollectRequest.load( std::memory_order_acquire ) != 0 ? INDI_BUSY : INDI_OK );
+    updateControlStatus();
     updateRuntimeStatistics();
-    if( m_reloadStatus.load( std::memory_order_acquire ) == 3 )
-    {
-        std::lock_guard<std::mutex> errorLock( m_reloadErrorMutex );
-        log<text_log>( "PO4AO model reload failed: " + m_reloadError, logPrio::LOG_ERROR );
-        m_reloadStatus.store( 0, std::memory_order_release );
-    }
     return 0;
 }
 
@@ -1289,7 +1181,7 @@ inline int po4ao::appShutdown()
 {
     // Always release worker/model resources, even when the monitor reports a shutdown error.
     const int monitorStatus = shmimMonitorT::appShutdown();
-    m_controlEnabled.store( false, std::memory_order_release );
+    m_controlRequest.fetch_and( ~uint64_t{ 1 }, std::memory_order_acq_rel );
     if( m_outputOpened && m_output )
     {
         memset( m_output.get(), 0, static_cast<size_t>( m_nModes ) * sizeof( float ) );
@@ -1351,13 +1243,11 @@ inline int po4ao::allocate( const dev::shmimT &dummy )
         {
             m_inputState = std::unique_ptr<float[], HostBufferDeleter>( new float[inputCapacity], HostBufferDeleter{} );
             m_output     = std::unique_ptr<float[], HostBufferDeleter>( new float[static_cast<size_t>( m_nModes )],
-                                                                    HostBufferDeleter{} );
+                                                                        HostBufferDeleter{} );
         }
     }
-    m_integratorCommands = std::make_unique<float[]>( static_cast<size_t>( m_nModes ) );
     memset( m_inputState.get(), 0, inputCapacity * sizeof( float ) );
     memset( m_output.get(), 0, static_cast<size_t>( m_nModes ) * sizeof( float ) );
-    memset( m_integratorCommands.get(), 0, static_cast<size_t>( m_nModes ) * sizeof( float ) );
     m_observationHistory  = std::make_unique<CircularBuffer>( m_nModes, m_historyCapacity );
     m_commandHistory      = std::make_unique<CircularBuffer>( m_nModes, m_historyCapacity - 1 );
     m_publishObservations = std::make_unique<CircularBuffer>( m_nModes, m_replayBufferSize );
@@ -1372,137 +1262,40 @@ inline int po4ao::allocate( const dev::shmimT &dummy )
     m_episodeStates[0].store( 1, std::memory_order_release );
     m_readyRead.store( 0, std::memory_order_relaxed );
     m_readyWrite.store( 0, std::memory_order_relaxed );
-    m_collectionGeneration.store( 1, std::memory_order_relaxed );
-    m_activeCollectionGeneration = 1;
-    m_publicationGeneration      = 1;
-    m_warmupRecollectRequest.store( 0, std::memory_order_relaxed );
-    m_frameCounter = 0;
+    // Reallocation invalidates snapshots, but must not lose a pre-attachment recollection request.
+    const bool recollectPending  = m_warmupRecollectRequest.load( std::memory_order_acquire ) >
+                                   WarmupCollection::generation( m_collection.token() );
+    m_activeCollectionGeneration = m_collectionGeneration.fetch_add( 1, std::memory_order_acq_rel ) + 1;
+    m_publicationGeneration      = 0;
+    m_initialWarmupPending       = WarmupCollection::phase( m_collection.token() ) == CollectionPhase::idle;
+    if( !m_initialWarmupPending )
+        m_collection.begin( m_activeCollectionGeneration, 0, 0, 0, 0 );
+    if( recollectPending )
+        m_warmupRecollectRequest.store( m_collectionGeneration.fetch_add( 1, std::memory_order_acq_rel ) + 1,
+                                        std::memory_order_release );
     m_episodeCounter.store( 0, std::memory_order_relaxed );
     m_lastInputCounter = 0;
     m_haveInputCounter = false;
+    m_effectiveController.store( 0, std::memory_order_release );
+    m_effectiveModelId.store( 0, std::memory_order_release );
+    m_appliedControl.store( 0, std::memory_order_release );
     return openOutputStreams();
-}
-
-inline void po4ao::beginWarmupCollection( uint64_t generation )
-{
-    m_episodeBuffers[static_cast<size_t>( m_activeEpisodeSlot )].reset();
-    m_observationHistory->reset();
-    m_commandHistory->reset();
-    m_frameCounter = 0;
-    m_episodeCounter.store( 0, std::memory_order_release );
-    m_activeCollectionGeneration = generation;
-    m_useNeuralNetwork.store( false, std::memory_order_release );
-}
-
-inline int po4ao::processImage( void *curr_src, const dev::shmimT &dummy )
-{
-    static_cast<void>( dummy );
-    const auto started       = std::chrono::steady_clock::now();
-    auto       recordLatency = [this, started]()
-    {
-        const auto elapsed =
-            std::chrono::duration_cast<std::chrono::microseconds>( std::chrono::steady_clock::now() - started );
-        const uint32_t latency =
-            static_cast<uint32_t>( std::min<int64_t>( elapsed.count(), std::numeric_limits<uint32_t>::max() ) );
-        const uint64_t sample = m_latencyCount.fetch_add( 1, std::memory_order_acq_rel );
-        m_latencySamples[sample % c_latencySamples].store( latency, std::memory_order_release );
-        if( latency > m_latencyDeadlineUs )
-            m_deadlineMisses.fetch_add( 1, std::memory_order_relaxed );
-    };
-    if( curr_src == nullptr || !m_inputState || !m_output || !m_outputOpened )
-        return -1;
-
-    const uint64_t sourceCounter = shmimMonitorT::m_imageStream.md[0].cnt0;
-    // Queued notifications can refer to the same latest image after a processing stall.
-    if( sourceCounterIsDuplicate( sourceCounter, m_lastInputCounter, m_haveInputCounter ) )
-    {
-        recordLatency();
-        return 0;
-    }
-
-    activatePendingEngine();
-    const uint64_t resetGeneration = m_modelResetRequest.exchange( 0, std::memory_order_acq_rel );
-    if( resetGeneration != 0 )
-        resetActiveModel( resetGeneration );
-    const auto *observation = static_cast<const float *>( curr_src );
-    const bool  consecutive = sourceCounterIsConsecutive( sourceCounter, m_lastInputCounter, m_haveInputCounter );
-    if( m_haveInputCounter && sourceCounter > m_lastInputCounter )
-    {
-        const uint64_t sourceAdvance = sourceCounter - m_lastInputCounter;
-        if( sourceAdvance > 1 )
-            m_missedFrames.fetch_add( sourceAdvance - 1, std::memory_order_relaxed );
-    }
-    m_lastInputCounter = sourceCounter;
-    m_haveInputCounter = true;
-
-    const uint64_t recollectGeneration = m_warmupRecollectRequest.exchange( 0, std::memory_order_acq_rel );
-    if( recollectGeneration != 0 )
-        beginWarmupCollection( recollectGeneration );
-
-    if( !consecutive )
-    {
-        m_observationHistory->reset();
-        m_commandHistory->reset();
-        m_episodeBuffers[static_cast<size_t>( m_activeEpisodeSlot )].reset();
-        if( m_controlEnabled.load( std::memory_order_acquire ) )
-            memcpy( m_output.get(), observation, static_cast<size_t>( m_nModes ) * sizeof( float ) );
-        else
-            makeIntegratorCommand( observation, false );
-        const int result = sendOutput();
-        ++m_frameCounter;
-        recordLatency();
-        return result;
-    }
-
-    if( !m_controlEnabled.load( std::memory_order_acquire ) )
-    {
-        m_observationHistory->reset();
-        m_commandHistory->reset();
-        m_episodeBuffers[static_cast<size_t>( m_activeEpisodeSlot )].reset();
-        makeIntegratorCommand( observation, false );
-        const int result = sendOutput();
-        recordLatency();
-        return result;
-    }
-
-    m_observationHistory->add( observation );
-    const bool warmup         = m_episodeCounter.load( std::memory_order_acquire ) < m_warmupEpisodes;
-    const bool inferenceReady = !warmup && m_activeEngine != nullptr &&
-                                m_useNeuralNetwork.load( std::memory_order_acquire ) &&
-                                m_observationHistory->size() >= static_cast<size_t>( m_activeEngine->historyLength ) &&
-                                m_commandHistory->size() + 1 >= static_cast<size_t>( m_activeEngine->historyLength );
-    bool inferenceOk = false;
-    if( inferenceReady )
-        inferenceOk = runInference( observation );
-    if( !inferenceOk )
-    {
-        if( inferenceReady )
-            m_inferenceFailures.fetch_add( 1, std::memory_order_relaxed );
-        makeIntegratorCommand( observation, warmup );
-    }
-    m_commandHistory->add( m_output.get() );
-    EpisodeBuffer &episode = m_episodeBuffers[static_cast<size_t>( m_activeEpisodeSlot )];
-    if( !episode.add( observation, m_output.get() ) )
-        m_replayDrops.fetch_add( 1, std::memory_order_relaxed );
-    else if( episode.count == episode.capacity )
-        finishEpisode();
-    if( sendOutput() < 0 )
-        return -1;
-
-    ++m_frameCounter;
-    recordLatency();
-    return 0;
 }
 
 INDI_NEWCALLBACK_DEFN( po4ao, m_indiP_reloadToggle )( const pcf::IndiProperty &ipRecv )
 {
-    if( ipRecv.getName() != m_indiP_reloadToggle.getName() )
+    if( ipRecv.getName() != m_indiP_reloadToggle.getName() || !ipRecv.find( "toggle" ) )
         return log<software_error, -1>( { __FILE__, __LINE__, "invalid reload property" } );
     if( ipRecv["toggle"].getSwitchState() != pcf::IndiElement::On )
         return 0;
-    int expected = 0;
-    if( !m_reloadStatus.compare_exchange_strong( expected, 1, std::memory_order_acq_rel ) )
+    int expected = m_reloadStatus.load( std::memory_order_acquire );
+    if( ( expected != 0 && expected != 3 ) ||
+        !m_reloadStatus.compare_exchange_strong( expected, 1, std::memory_order_acq_rel ) )
         return 0;
+    { // mutex scope
+        std::lock_guard<std::mutex> errorLock( m_reloadErrorMutex );
+        m_reloadError.clear();
+    }
     m_reloadGeneration.store( m_modelGeneration.load( std::memory_order_acquire ), std::memory_order_release );
     m_reloadRequested.store( true, std::memory_order_release );
     m_loaderCondition.notify_one();
@@ -1512,7 +1305,7 @@ INDI_NEWCALLBACK_DEFN( po4ao, m_indiP_reloadToggle )( const pcf::IndiProperty &i
 
 INDI_NEWCALLBACK_DEFN( po4ao, m_indiP_resetModel )( const pcf::IndiProperty &ipRecv )
 {
-    if( ipRecv.getName() != m_indiP_resetModel.getName() )
+    if( ipRecv.getName() != m_indiP_resetModel.getName() || !ipRecv.find( "toggle" ) )
         return log<software_error, -1>( { __FILE__, __LINE__, "invalid model-reset property" } );
     if( ipRecv["toggle"].getSwitchState() != pcf::IndiElement::On )
         return 0;
@@ -1528,23 +1321,38 @@ INDI_NEWCALLBACK_DEFN( po4ao, m_indiP_controlToggle )( const pcf::IndiProperty &
 {
     if( ipRecv.getName() != m_indiP_controlToggle.getName() )
         return log<software_error, -1>( { __FILE__, __LINE__, "invalid control property" } );
-    m_controlEnabled.store( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On, std::memory_order_release );
+    if( !ipRecv.find( "toggle" ) || ( ipRecv["toggle"].getSwitchState() != pcf::IndiElement::On &&
+                                      ipRecv["toggle"].getSwitchState() != pcf::IndiElement::Off ) )
+        return -1;
+    const uint64_t enabled  = ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On ? 1 : 0;
+    uint64_t       previous = m_controlRequest.load( std::memory_order_acquire );
+    if( ( previous & 1 ) == enabled )
+        return 0;
+    while( !m_controlRequest.compare_exchange_weak(
+        previous, ( ( previous & ~uint64_t{ 1 } ) + 2 ) | enabled, std::memory_order_acq_rel ) )
+    {
+    }
+    updateSwitchIfChanged( m_indiP_controlToggle,
+                           "toggle",
+                           ( m_appliedControl.load( std::memory_order_acquire ) & 1 ) ? pcf::IndiElement::On
+                                                                                      : pcf::IndiElement::Off,
+                           INDI_BUSY );
     return 0;
 }
 
 INDI_NEWCALLBACK_DEFN( po4ao, m_indiP_recollectWarmup )( const pcf::IndiProperty &ipRecv )
 {
-    if( ipRecv.getName() != m_indiP_recollectWarmup.getName() )
+    if( ipRecv.getName() != m_indiP_recollectWarmup.getName() || !ipRecv.find( "toggle" ) )
         return log<software_error, -1>( { __FILE__, __LINE__, "invalid warm-up recollection property" } );
     if( ipRecv["toggle"].getSwitchState() != pcf::IndiElement::On )
         return 0;
 
-    const uint64_t generation = m_collectionGeneration.fetch_add( 1, std::memory_order_acq_rel ) + 1;
-    m_warmupRecollectRequest.store( generation, std::memory_order_release );
     { // mutex scope
         std::lock_guard<std::mutex> publicationLock( m_publicationMutex );
+        const uint64_t              generation = m_collectionGeneration.fetch_add( 1, std::memory_order_acq_rel ) + 1;
         invalidateReplay( m_replayStream, m_replayOpened, m_replayMetadataStream, m_replayMetadataOpened );
         invalidateReplay( m_warmupStream, m_warmupOpened, m_warmupMetadataStream, m_warmupMetadataOpened );
+        m_warmupRecollectRequest.store( generation, std::memory_order_release );
     }
     updateSwitchIfChanged( m_indiP_recollectWarmup, "toggle", pcf::IndiElement::Off, INDI_BUSY );
     log<text_log>( "PO4AO warm-up recollection requested", logPrio::LOG_INFO );

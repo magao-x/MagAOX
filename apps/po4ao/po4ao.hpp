@@ -149,7 +149,7 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>
     int         m_historyCapacity{ 0 };          ///< Maximum history retained for hot-swappable policies.
     int         m_replayBufferSize{ 0 };         ///< Samples retained in the rolling replay buffer.
     uint32_t    m_iterationsPerEpisode{ 0 };     ///< Frames in one publication episode.
-    uint32_t    m_warmupEpisodes{ 0 };           ///< Episodes which use exploratory integrator commands.
+    uint32_t    m_warmupEpisodes{ 0 };           ///< Episodes in each fixed-controller exploratory collection.
     float       m_integratorGain{ 0.F };         ///< Proportional fallback gain; mfilt owns downstream integration.
     float       m_policyBlend{ 1.F };            ///< Learned-policy fraction relative to fallback control.
     float       m_explorationSigmaStart{ 0.F };  ///< Exploration-noise scale at warm-up start.
@@ -187,16 +187,22 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>
     float                      *m_deviceWarmupOutput{ nullptr }; ///< Loader-owned candidate output storage.
     std::unique_ptr<float[], HostBufferDeleter> m_inputState{ nullptr, HostBufferDeleter{} }; ///< Host policy input.
     std::unique_ptr<float[], HostBufferDeleter> m_output{ nullptr, HostBufferDeleter{} };     ///< Host policy output.
-    std::unique_ptr<float[]>                    m_integratorCommands;        ///< Safe proportional fallback command.
     std::unique_ptr<CircularBuffer>             m_commandHistory;            ///< Commands used for policy history.
     std::unique_ptr<CircularBuffer>             m_observationHistory;        ///< Observations used for policy history.
     std::vector<float>                          m_explorationNoise;          ///< Flattened exploration-noise table.
     size_t                                      m_explorationNoiseRows{ 0 }; ///< Exploration-noise row count.
     size_t                                      m_explorationNoiseCols{ 0 }; ///< Exploration-noise column count.
-    std::atomic<bool>     m_controlEnabled{ false };   ///< Whether the learned policy may replace fallback.
-    std::atomic<bool>     m_useNeuralNetwork{ false }; ///< Whether the policy may replace warm-up control.
-    uint64_t              m_frameCounter{ 0 };         ///< Frames processed since allocation or warm-up reset.
-    std::atomic<uint64_t> m_episodeCounter{ 0 };       ///< Completed episode count.
+    std::atomic<uint64_t> m_controlRequest{ 2 }; ///< Sequence in upper bits and requested enable state in bit zero.
+    std::atomic<uint64_t> m_appliedControl{ 0 }; ///< Control request acknowledged after command publication.
+    std::atomic<uint64_t> m_appliedReset{ 1 };   ///< Model-reset generation acknowledged after command publication.
+    std::atomic<int>      m_effectiveController{
+        0 }; ///< Last emitted controller: unknown, integrator, policy, or pass-through.
+    std::atomic<uint64_t> m_effectiveModelId{ 0 }; ///< Policy used for the last emitted command, zero for fallback.
+    bool                  m_initialWarmupPending{ true }; ///< Start initial exploration on the first enabled frame.
+    WarmupCollection      m_collection; ///< Collection lifecycle, independent of policy history and selection.
+    std::atomic<bool>     m_useNeuralNetwork{
+        false }; ///< Whether the retained policy is eligible after the most recent reset.
+    std::atomic<uint64_t> m_episodeCounter{ 0 }; ///< Completed episode count.
     ///@}
 
     /** \name Replay Publication - Data
@@ -212,8 +218,9 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>
 
     std::atomic<uint64_t> m_collectionGeneration{ 1 };       ///< Latest requested warm-up collection generation.
     uint64_t              m_activeCollectionGeneration{ 1 }; ///< Generation stamped by the real-time producer.
-    uint64_t              m_publicationGeneration{ 1 };      ///< Generation currently accumulated by the publisher.
-    std::atomic<uint64_t> m_warmupRecollectRequest{ 0 };     ///< Generation awaiting a real-time collection reset.
+    uint64_t              m_publicationGeneration{ 0 };      ///< Generation currently accumulated by the publisher.
+    std::atomic<uint64_t> m_warmupRecollectRequest{
+        0 }; ///< Latest explicit collection request; retained until superseded.
 
     std::thread                     m_replayThread;            ///< Non-real-time replay publisher.
     std::atomic<bool>               m_replayShutdown{ false }; ///< Replay-publisher shutdown flag.
@@ -259,8 +266,9 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>
     pcf::IndiProperty                     m_indiP_controlToggle;   ///< Select learned control or proportional fallback.
     pcf::IndiProperty                     m_indiP_recollectWarmup; ///< Fresh warm-up collection request.
     pcf::IndiProperty                     m_indiP_runtimeStats;    ///< Latency and failure counters.
-    pcf::IndiProperty                     m_indiP_modelStatus;     ///< Active model ID and reload state.
-                                                                   ///@}
+    pcf::IndiProperty m_indiP_collectionStatus; ///< Collection identity, progress and publication completion.
+    pcf::IndiProperty m_indiP_modelStatus;      ///< Active model ID and reload state.
+                                                ///@}
 
   public:
     /** \name Configuration
@@ -351,7 +359,8 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>
                        bool     opened /**< [in] Whether replay destination is usable. */,
                        IMAGE   &metadataStream /**< [in,out] Destination metadata stream. */,
                        bool     metadataOpened /**< [in] Whether metadata destination is usable. */,
-                       uint64_t episodeIdentifier /**< [in] Completed episode ID. */ );
+                       uint64_t episodeIdentifier /**< [in] Completed episode ID. */,
+                       uint64_t modelId /**< [in] Effective policy at the final frame of this episode. */ );
 
     /// Mark one replay stream invalid until a fresh snapshot is published.
     int invalidateReplay( IMAGE &stream /**< [in,out] Replay stream to invalidate. */,
@@ -360,14 +369,19 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>
                           bool   metadataOpened /**< [in] Whether the metadata stream is usable. */ );
 
     /// Restart warm-up collection at a real-time frame boundary.
-    void beginWarmupCollection( uint64_t generation /**< [in] New collection generation. */ );
+    void beginWarmupCollection( uint64_t generation /**< [in] New collection generation. */,
+                                uint64_t control /**< [in] Control request captured for this collection. */,
+                                uint64_t modelId /**< [in] Effective policy for the first collection frame. */,
+                                uint64_t reset /**< [in] Model-reset generation captured at the frame boundary. */ );
 
     /// Assemble modal history and run CPU-linear or dedicated-stream TensorRT inference.
     bool runInference( const float *observation /**< [in] Current full-sized modal observation. */ );
 
-    /// Fill the proportional fallback command, optionally with exploration noise.
-    void makeIntegratorCommand( const float *observation /**< [in] Current modal observation. */,
-                                bool         addNoise /**< [in] Whether to add scheduled exploration. */ );
+    /// Fill the controlled prefix with the proportional fallback, before noise and limiting.
+    void makeIntegratorCommand( const float *observation /**< [in] Current modal observation. */ );
+
+    /// Publish frame acknowledgements, effective controller, model and collection state.
+    void updateControlStatus();
 
     /// Publish latency percentiles and failure counters to INDI and the log.
     void updateRuntimeStatistics();

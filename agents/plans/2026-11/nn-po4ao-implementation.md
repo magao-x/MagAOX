@@ -78,3 +78,50 @@ Read-only exao2 evidence:
 - `FPSCONNECT_SIMPLE` writes bookkeeping metadata and connection logs, so no FPS object was instantiated during this read-only inspection. Only existing files, hashes, source definitions and directory/revision information were read. No INDI requests, control commands, process changes, installs or remote file writes occurred.
 
 Remaining acceptance is unchanged: managed configuration/worker/publication, C++ current-policy recollection, the companion's real operations and deployment are not supplied by a rendered frontend. This increment completes the native panel and its offline request/readback behavior; it does not claim working instrument control.
+
+## Current-controller recollection increment, 2026-11-02
+
+The PO4AO runtime now keeps collection state separate from policy history/selection.
+The production frame path computes the selected learned or integrator command,
+adds the existing exploration schedule once, applies existing limits, emits it,
+and records that emitted command in history/replay. Explicit collection also
+works with control Off and a retained model. Initial exploration still waits for
+an enabled frame. No loop readback, loop command or NN inference change was added.
+
+A generation-tagged lifecycle distinguishes collecting, awaiting snapshot
+publication, ready and interrupted. Source gaps, controller/model/reset changes,
+inference fallback, invalid output and publication backlog interrupt unfinished
+collection. Old publisher callbacks cannot complete a newer generation. Complete
+warmup publication requires contiguous episodes and the full target sample count;
+metadata captures the effective policy at the final episode frame rather than
+sampling the current model later. A reader must pair the existing stream counters
+with the requested collection's ready readback, rechecked after its copy.
+
+The C++ control/reset acknowledgements now follow successful frame publication.
+The collection request identity remains available after admission so appLogic
+cannot report completion in the interval before the frame starts collection.
+Reallocation invalidates old snapshots and preserves requests made before stream
+attachment. Observed effective controller/model, request/applied identities and
+collection progress are published every appLogic cycle before acknowledgements;
+latency statistics retain their configured period. Load errors remain observable
+until retry. A bounded publisher wait avoids an indefinite lost-notification stall
+without adding a real-time mutex.
+
+`po4ao_control.hpp` contains the actual frame/episode/publication definitions, still
+included by the header-only app. The CPU boundary harness includes those same
+methods, substituting only SDK/output/model-loading boundaries. This keeps runtime
+algorithms under test without importing a GPU SDK or copying the control logic.
+The new tests are registered with the existing application test group/list.
+
+Verification: 259 assertions in 27 cases passed, including AddressSanitizer and
+UndefinedBehaviorSanitizer. These checks cover helpers and production frame/replay
+methods; they do not compile the complete CUDA/TensorRT app or exercise real INDI
+callbacks, shared-memory transport, or instrument timing. Full SDK compilation and
+operator-run acceptance remain required. The GUI tests/build from the preceding
+increment remain valid; no GUI behavior changed during this runtime increment.
+
+Remaining implementation: typed hot configuration, managed worker/build lifecycle,
+atomic eligible-engine publication, the XDevice supervisor, actual NN/CACAO and
+modulation transactions, notebook adaptation, and deployment registration. The
+frontend and C++ runtime are committed development increments; the complete shared
+control system is not yet operational or ready for instrument installation.

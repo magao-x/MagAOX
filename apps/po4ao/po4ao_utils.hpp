@@ -54,6 +54,138 @@ inline bool sourceCounterIsConsecutive( uint64_t current /**< [in] Current sourc
     return !havePrevious || current == previous + 1;
 }
 
+/// Collection lifecycle shared by the frame producer and replay publisher.
+enum class CollectionPhase : uint64_t
+{
+    idle        = 0, ///< No collection has started.
+    collecting  = 1, ///< Exploration is active and frames are being accumulated.
+    publishing  = 2, ///< All commands were emitted; the frozen snapshot is pending.
+    ready       = 3, ///< A complete snapshot was published.
+    interrupted = 4  ///< This generation cannot produce a valid warmup snapshot.
+};
+
+/// Track a fixed-controller collection without owning or clearing controller history.
+/** The frame producer alone calls begin, validate and emitted. The publisher may
+ * interrupt or acknowledge publication. The generation and phase share one atomic
+ * token so a late publisher cannot complete or interrupt a newer collection.
+ */
+class WarmupCollection
+{
+  private:
+    std::atomic<uint64_t> m_token{ 0 };   ///< Collection generation and phase, published together.
+    std::atomic<uint64_t> m_frames{ 0 };  ///< Successfully emitted collection commands.
+    uint64_t              m_target{ 0 };  ///< Requested frame count, owned by the frame producer.
+    uint64_t              m_control{ 0 }; ///< Captured control request identity, including enable state.
+    uint64_t              m_model{ 0 };   ///< Captured effective policy hash; zero means integrator.
+    uint64_t              m_reset{ 0 };   ///< Captured model-reset generation.
+
+  public:
+    /// Start one collection, without touching history or model state.
+    void begin( uint64_t generation /**< [in] Monotonically increasing collection identity. */,
+                uint64_t target /**< [in] Number of emitted commands required. */,
+                uint64_t control /**< [in] Current control request identity. */,
+                uint64_t model /**< [in] Effective policy hash, or zero for integrator. */,
+                uint64_t reset /**< [in] Current model-reset generation. */ );
+
+    /// Return the generation and phase in one atomic snapshot.
+    uint64_t token() const;
+
+    /// Decode the phase of a previously read token.
+    static CollectionPhase phase( uint64_t token /**< [in] Atomic collection snapshot. */ );
+
+    /// Decode the collection identity of a previously read token.
+    static uint64_t generation( uint64_t token /**< [in] Atomic collection snapshot. */ );
+
+    /// Return the number of collection commands successfully emitted.
+    uint64_t frames() const;
+
+    /// Interrupt a pending collection if its controller or source continuity changed.
+    void validate( uint64_t control /**< [in] Current control request identity. */,
+                   uint64_t model /**< [in] Effective policy hash for this frame. */,
+                   uint64_t reset /**< [in] Current model-reset generation. */,
+                   bool     consecutive /**< [in] Whether the input follows the preceding frame. */ );
+
+    /// Advance the exploration schedule only after a successful command publication.
+    void emitted();
+
+    /// Invalidate a collecting or pending-publication generation; preserve an already completed snapshot.
+    void interrupt( uint64_t generation /**< [in] Collection identity to interrupt. */ );
+
+    /// Acknowledge a complete frozen snapshot only for the matching pending generation.
+    bool published( uint64_t generation /**< [in] Identity of the successfully published snapshot. */ );
+};
+
+inline void
+WarmupCollection::begin( uint64_t generation, uint64_t target, uint64_t control, uint64_t model, uint64_t reset )
+{
+    m_target  = target;
+    m_control = control;
+    m_model   = model;
+    m_reset   = reset;
+    m_frames.store( 0, std::memory_order_release );
+    m_token.store( ( generation << 3 ) |
+                       static_cast<uint64_t>( target ? CollectionPhase::collecting : CollectionPhase::interrupted ),
+                   std::memory_order_release );
+}
+
+inline uint64_t WarmupCollection::token() const
+{
+    return m_token.load( std::memory_order_acquire );
+}
+
+inline CollectionPhase WarmupCollection::phase( uint64_t token )
+{
+    return static_cast<CollectionPhase>( token & 7 );
+}
+
+inline uint64_t WarmupCollection::generation( uint64_t token )
+{
+    return token >> 3;
+}
+
+inline uint64_t WarmupCollection::frames() const
+{
+    return m_frames.load( std::memory_order_acquire );
+}
+
+inline void WarmupCollection::validate( uint64_t control, uint64_t model, uint64_t reset, bool consecutive )
+{
+    if( control != m_control || model != m_model || reset != m_reset || !consecutive )
+        interrupt( generation( token() ) );
+}
+
+inline void WarmupCollection::emitted()
+{
+    uint64_t current = token();
+    if( phase( current ) != CollectionPhase::collecting )
+        return;
+    if( m_frames.fetch_add( 1, std::memory_order_acq_rel ) + 1 >= m_target )
+        m_token.compare_exchange_strong( current,
+                                         ( generation( current ) << 3 ) |
+                                             static_cast<uint64_t>( CollectionPhase::publishing ),
+                                         std::memory_order_acq_rel );
+}
+
+inline void WarmupCollection::interrupt( uint64_t generation )
+{
+    uint64_t current = token();
+    while( WarmupCollection::generation( current ) == generation &&
+           ( phase( current ) == CollectionPhase::collecting || phase( current ) == CollectionPhase::publishing ) )
+    {
+        if( m_token.compare_exchange_weak( current,
+                                           ( generation << 3 ) | static_cast<uint64_t>( CollectionPhase::interrupted ),
+                                           std::memory_order_acq_rel ) )
+            break;
+    }
+}
+
+inline bool WarmupCollection::published( uint64_t generation )
+{
+    uint64_t expected = ( generation << 3 ) | static_cast<uint64_t>( CollectionPhase::publishing );
+    return m_token.compare_exchange_strong(
+        expected, ( generation << 3 ) | static_cast<uint64_t>( CollectionPhase::ready ), std::memory_order_acq_rel );
+}
+
 /// Evaluate independent per-mode linear temporal filters without CUDA.
 inline bool applyLinearLocalPolicy( float       *output /**< [out] Controlled modal commands. */,
                                     const float *input /**< [in] Feature-major modal input. */,
@@ -170,6 +302,7 @@ struct EpisodeBuffer
     size_t             count{ 0 };      ///< Valid frames currently stored.
     uint64_t           episode{ 0 };    ///< One-based episode identifier.
     uint64_t           generation{ 0 }; ///< Warm-up collection generation containing this episode.
+    uint64_t           modelId{ 0 };    ///< Effective policy at the final emitted frame; zero is integrator.
 
     /// Allocate storage once before real-time processing starts.
     void configure( size_t frameCapacity /**< [in] Frames per episode. */,
@@ -197,6 +330,7 @@ inline void EpisodeBuffer::reset()
     count      = 0;
     episode    = 0;
     generation = 0;
+    modelId    = 0;
 }
 
 inline bool EpisodeBuffer::add( const float *observation, const float *command )
@@ -279,6 +413,21 @@ inline bool limitCommand( float *command /**< [in,out] Differential modal comman
         command[mode] = std::max( -absoluteLimit, std::min( absoluteLimit, command[mode] ) );
     }
     return true;
+}
+
+/// Add one scheduled exploration sample to the base command before applying command limits.
+inline void addExploration( float       *command /**< [in,out] Base controller output. */,
+                            size_t       modes /**< [in] Controlled modal prefix. */,
+                            const float *noise /**< [in] Selected row of the configured noise table. */,
+                            uint64_t     frame /**< [in] Zero-based emitted collection frame. */,
+                            uint64_t     total /**< [in] Total collection frames. */,
+                            float        start /**< [in] Initial exploration scale. */,
+                            float        end /**< [in] Final exploration scale. */ )
+{
+    const float progress = total > 1 ? std::min( 1.F, static_cast<float>( frame ) / ( total - 1 ) ) : 1.F;
+    const float sigma    = start + progress * ( end - start );
+    for( size_t mode = 0; mode < modes; ++mode )
+        command[mode] += sigma * noise[mode];
 }
 
 /// Limit the controlled modal prefix and copy all remaining observations unchanged.
