@@ -388,7 +388,7 @@ Do not begin implementation until the user has reviewed the completed plan and a
 
 ## Task Summary
 
-Investigation completed on 2026-11-01. **The user subsequently authorized independent local numerical implementation while deployed-system access is unavailable. Operational DM publication remains blocked; the acquisition application and its configuration will remain unchanged in this stage.** The current user instruction authorizes implementation without a separate plan-approval round when the investigation resolves the important questions, superseding the earlier review gate above. The pause at the operational writer boundary is specifically required by the user's instruction to ask about unresolved DM stream, calibration, ownership, timing, and safety questions.
+Investigation completed on 2026-11-01. **The user subsequently authorized independent local numerical implementation while deployed-system access is unavailable. The user has confirmed tweeter surface-micron units and supplied local deployed calibration files, now validated read-only; projection is implemented below using explicitly supplied registered physical pupil geometry. Operational DM publication remains blocked, and the acquisition application/configuration remain unchanged.** The current scope is finalization of the hardware-independent implementation, documentation, and validation. The user explicitly prohibits runtime publication, instrument access, channel/trigger selection, staging, commits, and pushes; the user will perform the commit. The unresolved writer inputs are listed below.
 
 Extend `accelSim` with an optional disturbance derived from its existing noise-free physical pointing state. Preserve its oscillator evolution, random draws, ADC conversion, `acc000` publication, timing, and phase synchronization. Use an exclusively assigned additive DM channel and the selected DM's calibrated actuator basis. Do not write the combined DM output, invent a WFS signal, or reproduce the notebook grid as an operational calibration.
 
@@ -401,21 +401,21 @@ Extend `accelSim` with an optional disturbance derived from its existing noise-f
 | `apps/dmMode/dmMode.hpp` | Existing modal mechanism: load a FITS mode cube, form a weighted sum of actuator-space planes, and write an existing `dm.channelName`. It checks float datatype and mode/stream dimensions, then sets `write`, copies, increments `cnt0`, clears `write`, and posts semaphores. Mode coefficients inherit the supplied basis normalization; the app provides no universal conversion from sky angle to coefficient. |
 | `apps/dmSpeckle/dmSpeckle.hpp`, `apps/sparkleClock/sparkleClock.hpp` | Existing disturbance generators use additive image channels and separate worker threads, with timer or external semaphore triggering. `dmSpeckle` also supports arbitrary FITS cubes. Its counter updates depend on trigger/delay mode, and stopping writes zeros. These are useful writer/lifecycle references, but neither solves the shared accelSim state or supplies calibrated tip/tilt. The 28-degree science-camera angle offset in these apps is not evidence for a WFS tip/tilt calibration. |
 | `libMagAOX/app/dev/dm.hpp` | The driver monitors the combined `dm.shmimName` and calls the derived `commandDM`. Flat defaults to suffix `00`. The test-channel help says `01`, but `loadConfig` defaults to `02`; retrieve the deployed effective setting rather than assuming either reservation. It discovers the numbered channel images and supports `dm.deltaChannels` for computing the desaturated correction relative to non-delta channels. Assignment of the simulator to that accounting must be confirmed; it affects downstream correction interpretation. Its global `zeroAll` is inappropriate for stopping one simulator. |
-| `apps/bmcCtrl/bmcCtrl.hpp`, `apps/alpaoCtrl/alpaoCtrl.hpp` | Continuous-face-sheet commands are float actuator displacement images in micron-based calibrated command units, not sky angles, raw voltage, or OPD. The drivers map image pixels to hardware actuator order and apply stroke/gain and influence-volume calibration. BMC applies `volume_factor/act_gain`, clamps, and square-roots for fractional voltage; ALPAO applies `volume_factor/max_stroke`, removes mean, and clamps. The command-to-surface calibration and active pupil cannot be replaced by an arbitrary planar pixel grid. Do not apply driver calibration a second time in accelSim. |
+| `apps/bmcCtrl/bmcCtrl.hpp`, `apps/alpaoCtrl/alpaoCtrl.hpp` | For the tweeter, the user confirms float actuator images in **microns of physical DM surface**, not sky angles, raw voltage, or OPD. The drivers map image pixels to hardware actuator order and apply stroke/gain and influence-volume calibration. BMC applies `volume_factor/act_gain`, clamps, and square-roots for fractional voltage; ALPAO applies `volume_factor/max_stroke`, removes mean, and clamps. The confirmed TT cube supplies surface-micron modes; its pupil registration still cannot be replaced by an arbitrary planar pixel grid. Do not apply driver calibration a second time in accelSim. |
 | `scripts/dmdispbridge` and local handbook `operating/software/utils/shmimTCP.rst` | Instrument conventions identify `dm00dispYY` as woofer (11 by 11) and `dm01dispYY` as tweeter (50 by 50), with bridge support. These are layout conventions, not evidence that a particular channel is free, locally driven, or correctly calibrated. The tweeter's numerical agreement with the notebook's 50 by 50 size does not establish equivalent pupil coordinates. |
 | Local handbook `testbed/index.rst` | CACTI examples use channel 11 for turbulence, 03 for AO, and 00 for flat; its BMC DM is 32 by 32 and IrisAO uses piston/tip/tilt with mixed micron/milliradian units. Those testbed examples must not be adopted as MagAO-X channel reservations or calibration. |
 | `apps/accelSim/accelSimModel.hpp`, `accelSim.hpp`, README, example config, and tests | `model::step` already sums physical pointing in arcsec separately from sensor noise and ADC counts. `m_pointing` is the correct source. `m_wfsPointing` retains legacy per-mode attenuation and must not be used for DM generation. The framegrabber owns `acc000` metadata/semaphores; its post-publication hook is available for a bounded state handoff. The phase clock continues independent sampling through missing references. |
 
 The supported architecture is therefore: existing vibration state -> calibrated two-mode actuator image -> exclusively assigned additive `dmXXdispYY` -> existing cacao dmcomb -> combined stream -> existing DM controller -> optical WFS. The normal flat and AO channels remain independently owned. A modal basis is useful internally, while the channel receives the complete instantaneous actuator contribution, never an accumulated increment.
 
-No deployed configuration/calibration was found in this checkout or the inspected sibling mxlib/handbook trees. `/opt/MagAOX`, `/opt/MagAOX/config`, and `/opt/MagAOX/calib` do not exist on this workstation. The actual cacao dmcomb implementation/configuration and ImageStreamIO C implementation were not available in those trees. Stream names, gains, trigger selection, active mode files, masks, and writer assignments consequently cannot be verified from this source checkout. No instrument connection or shared-memory access was attempted.
+During the initial investigation, no deployed configuration/calibration was found in this checkout or the inspected sibling mxlib/handbook trees. `/opt/MagAOX`, `/opt/MagAOX/config`, and `/opt/MagAOX/calib` do not exist on this workstation. The actual cacao dmcomb implementation/configuration and ImageStreamIO C implementation were not available in those trees. The user subsequently supplied local copies of the tweeter cube, dmmask, and dmmap from the active default calibration (see the read-only validation below). The cube contents and fitting support are now validated. Channel assignments, gains, trigger selection, registered physical pupil coordinates, and writer assignments remain unresolved. No instrument connection or shared-memory access was attempted.
 
 ### Physical reference and differences
 
 - The cleaned notebook contains the same 14 prominent acceleration modes and a 200-mode population spanning 100–900 Hz. Defaults are lever arm 10 m, vibration scale 1, and pupil diameter 6.5 m. Independent X/Y AR(2) pointing states produce modal acceleration through `a_i = -(2*pi*f_i)^2 * L * theta_i_rad`; sensor noise is added afterward.
 - The cleaned notebook has no legacy per-mode optical attenuation. Its example `XY_TO_TT` is a positive 30-degree rotation. No inspected source establishes this rotation as the actual DM/WFS orientation. Retain all existing C++ model outputs and random evolution, but consume only `m_pointing` for the new feature.
 - Convert arcsec to radians once. For physically calibrated pupil axes, `OPD = theta_x*x + theta_y*y` and reflective surface `h_um = 0.5e6 * OPD_m`. Across a circular pupil, surface P2V is `0.5 * D * hypot(theta_x_rad, theta_y_rad) * 1e6`. This is a physical validation formula, not a prescription to interpolate across an unknown actuator footprint.
-- Prefer existing calibrated tip/tilt actuator planes. After verifying their units and normalization, define their conversion so each plane corresponds to a known angular displacement. Then synthesize `command = theta_x * basis_x + theta_y * basis_y`, with the verified coordinate transform either incorporated in the planes or applied once before synthesis. Do not assume Zernike index/order, unit RMS, unit P2V, an illuminated radius, or an extra reflection factor.
+- Prefer existing calibrated tip/tilt actuator planes. Use the confirmed surface-micron/RMS-one normalization and derive the angular response by projecting physical pupil-coordinate planes onto the supplied modes, as implemented below. Then synthesize `command = theta_x * basis_x + theta_y * basis_y`, with the verified coordinate transform either incorporated in the planes or applied once before synthesis. The supplied CMmodesDM.00 pair has unit RMS surface over dmmask and measured masked P2V of approximately 3.8492 and 3.8128 microns. P2V/RMS = 4 is the nominal ideal continuous-pupil pure-tilt relation, not an exact sampled-grid requirement; do not assume its X/Y order/sign, registered illuminated radius in pixels, or an extra reflection factor.
 - Saved notebook outputs: radial pointing RMS **2.9076 mas**, surface P2V RMS **0.045814 micron**, maximum **9.5257 mas / 0.150091 micron**. The ideal-plane reconstruction reports errors near `5e-19` arcsec; that is a numerical geometry check, not a hardware calibration or a WFS signal to implement.
 - Independent scale check gives `900 nm / 6.5 m = 28.5597424 mas`; 0.450 micron reflective surface P2V produces 0.900 micron OPD P2V.
 - Existing C++ uses analytically scaled innovations and stationary initial histories; Python uses initially zero filter history and finite-record normalization after a burn interval. Their RNGs and weak-mode populations also differ. Preserve the C++ behavior as requested. The C++ stationary population predicts **2.939379 mas / 0.0463142 micron**. A fresh seed-42, 60-second C++ record gives **3.255637 mas / 0.0512973 micron**. Narrow, high-radius modes retain realization-to-realization amplitude variation. Exact finite-record equality to 2.9 mas is not an appropriate regression requirement and must not be forced by changing accelerometer amplitudes.
@@ -425,7 +425,7 @@ No deployed configuration/calibration was found in this checkout or the inspecte
 - Use the current continuous C++ physical model unchanged, including its configured `sim.leverArm` (default 10 m) and unit vibration scale. No second oscillator bank and no integration of accelerometer samples.
 - Implementation remains header-only with out-of-class definitions, matching this app and its tests. Use the existing framegrabber/telemeter interface macros. No style ambiguity needs resolution for this proposed structure.
 - The operator must allocate the channel exclusively. ImageStreamIO's `write` flag, zero data, creator PID, or a name that looks like a disturbance channel does not establish exclusive writer ownership; network bridge receivers may also write it.
-- The proposed basis and worker design below are conditional on the answers. No target DM, channel number, sky-axis transform, safe amplitude, or numeric DM rate is assumed.
+- The proposed basis and worker design below are conditional on the answers. The supplied calibration identifies the tweeter; no additive channel number, sky-axis registration, operating amplitude limit, or numeric DM rate is assumed.
 - All automated tests use numerical models, mocks, or isolated workstation/Linux-development shared memory without hardware drivers or bridges. Agents do not execute on instrument hosts, issue INDI hardware commands, commit, or push.
 
 ## Requirements
@@ -441,9 +441,9 @@ No deployed configuration/calibration was found in this checkout or the inspecte
 
 ## Questions and Points of Clarification
 
-**Blocking operational questions sent to the user on 2026-11-01:**
+**Remaining operational questions (updated after read-only validation of the supplied deployed calibration):**
 
-1. **Target, ownership, and calibration:** Which physical DM and numbered additive channel should accelSim exclusively own? Supply the location of a local copy of the relevant controller/dmcomb configuration and tip/tilt calibration. Needed facts include dimensions/type, channel gains and existing writers (including bridges/disturbance apps), active actuator/pupil geometry, basis plane order and normalization, command units, simulated-X/Y to optical-axis sign/orientation, and `deltaChannels` classification. Existing `dmMode` basis files may be suitable if their angular normalization can be established. The notebook's 30-degree transform and the testbed's channel 11 are not substitutes for these facts.
+1. **Ownership and remaining calibration data:** Which numbered tweeter additive channel is reserved exclusively for accelSim, and on which host will it be written? `dm01disp02` is not presumed available. Provide local copies of the effective controller/dmcomb configuration. The cube, resolved calibration identity, native array layout, surface-micron units, RMS-one normalization over dmmask, and fitting support are now known. Still needed are physical pupil coordinates registered to simulation X/Y across the 6.5-m pupil, an accepted projection-residual tolerance, channel gains/existing writers (including bridges), and `deltaChannels` classification. A mask plus pupil center/diameter, pitch, and axis-registration transform can supply coordinates instead of explicit maps. The basis rotation is inferred from those data; neither the notebook's 30-degree rotation nor the cube's RMS normalization establishes the missing external registration.
 2. **Trigger, cadence, and zeroing:** Should writes be passive and sampled by the existing AO trigger, or should accelSim actively trigger a specified DM rate? Identify the trigger source/semantics, intended update phase relative to WFS exposure/AO output, and behavior when that trigger stops. Confirm how a final zero is applied during AO inactivity and what supervisor/operator mechanism removes a held disturbance after an uncatchable simulator failure. Existing driver clipping limits total commands but does not by itself remove a stale simulator channel.
 
 These are missing implementation inputs, not a request to reapprove already authorized work. Do not implement the DM writer or select operational defaults until they are resolved. Any needed live configuration inspection or hardware checks must be performed by the user; only local copies are inspected by the agent.
@@ -505,20 +505,20 @@ Follow the existing `application_unit_test` group and namespace. Add TEST_CASE d
 
 ## Independent numerical implementation — authorized continuation
 
-The user cannot retrieve deployed configuration yet and explicitly requested all safe local implementation and testing. This supersedes the earlier all-implementation pause, while preserving the operational questions. This stage implemented:
+At the independent numerical stage, the user could not retrieve deployed configuration yet and explicitly requested all safe local implementation and testing. This supersedes the earlier all-implementation pause, while preserving the operational questions. This stage implemented:
 
 1. An app-local, header-only `accelSimDisturbance.hpp` numerical helper consuming the existing `sample::m_pointing` by const reference. It expresses physical pointing in **simulated X/Y coordinates**, provide OPD and reflective surface evaluation at supplied entrance-pupil coordinates, and circular-pupil surface P2V (nominal diameter 6.5 m). It does not change the model, RNG, sensor noise, ADC, or legacy coupled output.
-2. A separate numerical two-plane actuator synthesis helper. Callers must supply dimensions and both calibration planes explicitly, in **native command units per radian of simulated X/Y pointing**, in native stream pixel order. This defines an input contract, not an instrument calibration. The planes must already incorporate measured orientation/sign, pupil fitting, reflection physics, and unit normalization. No default basis, geometric grid, factor-of-two reapplication, FITS convention, channel, or trigger will be assumed. Synthesis replaces the entire local contribution, does not accumulate, and has no stream access.
+2. A separate numerical two-plane actuator synthesis helper. Callers must supply dimensions and both calibration planes explicitly, in **surface microns per radian of simulated X/Y pointing** (units subsequently confirmed by the user), in native stream pixel order. This defines an input contract, not an instrument calibration. At this stage the planes had to incorporate measured orientation/sign, pupil fitting, reflection physics, and unit normalization. The subsequent `tipTiltProjection` layer below now derives them from the confirmed surface-micron modes and supplied registered pupil coordinates. No default basis, geometric grid, factor-of-two reapplication, FITS convention, channel, or trigger will be assumed. Synthesis replaces the entire local contribution, does not accumulate, and has no stream access.
 3. A separate application-unit-test file registered with the existing accelSim group and build system. Test physical sign/scale and the notebook's optical formulas, model immutability and RNG/ADC equivalence, nominal population scale, explicit synthetic orientation and non-square geometry, numerical validation, output replacement/zeroing, and storage reuse. Re-run existing model/phase-clock tests unchanged.
 4. README documentation and a reproducible standalone test command. Use only local numerical fixtures; no physical hardware, shared-memory streams, synthetic WFS, worker threads, or publication.
 
-**Exact remaining boundary:** connecting the helper to acquisition, selecting sample/trigger phase and DM cadence, inter-thread snapshot delivery, loading a deployed FITS calibration, app configuration/INDI enable controls, channel ownership checks, DM stream writes, applied zero confirmation, and fault/supervisor behavior remain unimplemented. These depend on the unavailable operational contract. There is no functional `dm.enabled` option in this stage; injection remains unavailable and consequently off. The eventual channel and calibration will be explicit configuration inputs, never hard-coded defaults. No fake option that appears to enable a DM is added.
+**Exact remaining boundary:** connecting the helper to acquisition, selecting sample/trigger phase and DM cadence, inter-thread snapshot delivery, loading a deployed FITS calibration, app configuration/INDI enable controls, channel ownership checks, DM stream writes, applied zero confirmation, and fault/supervisor behavior remain unimplemented. Stream publication depends on the unavailable operational contract; offline physical projection and normalization do not. There is no functional `dm.enabled` option in this stage; injection remains unavailable and consequently off. The eventual channel and calibration will be explicit configuration inputs, never hard-coded defaults. No fake option that appears to enable a DM is added.
 
 ### Results and review boundary
 
 Implemented `pointingDisturbance` and `tipTiltBasis` in `apps/accelSim/accelSimDisturbance.hpp`. Both are independent of the MagAO-X runtime and consume caller-provided values only. No production app header includes the helper yet, and there are no new configuration keys. `pointingDisturbance` copies the physical state before any optical-axis interpretation; `tipTiltBasis` applies only explicitly supplied planes. Initial/local zero and synthesis-overflow cleanup affect memory only. Returned vector references are owned by the basis object, so a future publisher must obey the documented lifetime/thread-ownership contract.
 
-The numeric input contract allows arbitrary supplied calibration geometry and simulated-X/Y orientation; it does not claim that any provided calibration has been optically validated. Empty/mismatched/overflowed dimensions and nonfinite planes are rejected. Synthesis uses preallocated storage, replaces the entire image, and clears all output before throwing on nonfinite or float-overflowed commands. Zero/dependent calibration planes are not interpreted as physically valid or invalid by this numerical layer; optical validity is a deployment responsibility.
+The numeric input contract allows arbitrary supplied calibration geometry and simulated-X/Y orientation; it does not claim that any provided calibration has been optically validated. Empty/mismatched/overflowed dimensions and nonfinite planes are rejected. Synthesis uses preallocated storage, replaces the entire image, and clears all output before throwing on nonfinite or float-overflowed commands. The low-level angular-response synthesizer does not interpret zero/dependent response planes. The subsequent projection layer rejects rank-deficient input modes or coordinate geometry and checks the physical fit residual; optical validity remains a deployment responsibility.
 
 Changed files:
 
@@ -538,10 +538,11 @@ Changed files:
 | Direct cleaned-notebook comparison | Generated 1000 existing-model samples through the new C++ helper. Executed the notebook's actual cell-11 surface function with those same simulated-axis angles and compared coordinate `[32,7]` of its 50-by-50 validation grid plus the cell-12 circular-pupil P2V formula. Passed `rtol=1e-12`, `atol=1e-16`; maximum absolute surface error **3.46945e-18 micron**, P2V error **2.77556e-17 micron**. No example rotation was assumed to be instrument calibration. |
 | Formatting/documentation/scope | clang-format 23.1.3 applied and `--dry-run --Werror` passed on both new C++ files. Full-file declaration/member/test documentation checked. `git diff --check` passed. Byte comparisons against HEAD confirmed the specification prefix and existing app/model/config/test files unchanged. |
 
-Reproducible combined numerical command (run from repository root):
+Reproducible combined numerical command (run from repository root; Eigen include flags added for the projection layer):
 
 ```sh
 c++ -std=c++20 -O3 -fno-fast-math -Wall -Wextra -DACCELSIM_MODEL_ONLY \
+  $(pkg-config --cflags eigen3) \
   tests/testMain.cpp apps/accelSim/tests/accelSim_test.cpp \
   apps/accelSim/tests/accelSimDisturbance_test.cpp -o /tmp/accelSim_combined_test
 /tmp/accelSim_combined_test '[accelSim]'
@@ -549,4 +550,151 @@ c++ -std=c++20 -O3 -fno-fast-math -Wall -Wextra -DACCELSIM_MODEL_ONLY \
 
 The initial combined-build invocation incorrectly defined `CATCH_CONFIG_MAIN` for both test translation units and failed with duplicate Catch symbols. Using the repository's single `tests/testMain.cpp` corrected the command; no source workaround was needed. New-suite sanitizer binary: `/tmp/accelSim_disturbance_sanitize`. Direct notebook comparison source/executable/data: `/tmp/accelSim-disturbance-compare.cpp`, `/tmp/accelSim-disturbance-compare`, `/tmp/accelSim-disturbance-compare.csv`. The comparison used available `/opt/anaconda3/bin/python` (NumPy 2.3.5); it did not execute the notebook's full simulator/movie/WFS cells. clang-format was installed with network approval in `/tmp/accelsim-dm-tools`, without project dependency changes.
 
-No full MagAO-X runtime build, shared-memory publication, instrument operation, wall-clock performance test, or live zeroing result is claimed. The application source is unchanged, so disabled-path preservation is structural as well as numerically tested; this is not evidence of the future enabled path's real-time performance. All deployment questions and the exact runtime boundary above remain open. No commits or pushes were made.
+No full MagAO-X runtime build, shared-memory publication, instrument operation, wall-clock performance test, or live zeroing result is claimed. The application source is unchanged, so disabled-path preservation is structural as well as numerically tested; this is not evidence of the future enabled path's real-time performance. The exact runtime boundary remains open; the confirmed units/normalization and subsequent projection work below supersede those earlier unknowns. No commits or pushes were made.
+
+
+## Confirmed tweeter calibration and projection implementation
+
+The user supplied the following deployed calibration facts after the independent numerical stage. They supersede earlier unknown-unit/normalization statements: all `dm01dispXX` values are **microns of physical DM surface displacement**. `/opt/MagAOX/cacao/tweeter-vispyr/tweeter-vispyr-calibs/default/CMmodesDM/CMmodesDM.00.fits` is a `(2,50,50)` pair of approximately orthogonal rotated TT modes, each RMS-normalized to **1 micron of DM surface over the deployed dmmask**. **P2V = 4 * RMS** is the nominal pure-tilt relation for a uniformly weighted continuous circular pupil, not an exact requirement on a sampled actuator grid. Local validation measured masked P2V of approximately **3.8492 and 3.8128 microns**. Neither mode is assumed to equal simulation X/Y. No channel is assigned, including `dm01disp02`.
+
+Implementation decision before editing code: add a calibration projection layer that takes the actual mode samples B, explicit entrance-pupil X/Y coordinate maps in simulation axes, and nonnegative pupil weights. Construct H = 0.5e6 * [x,y] (surface microns/radian), and solve min ||sqrt(W) (B K - H)|| for the two-by-two map K. At runtime c = K theta_rad and h = B c. Reuse Eigen's column-pivoted Householder QR (already a project dependency), not an explicit inverse of the normal equations. Normalize columns internally for numerical conditioning only, then restore their scales; never renormalize the supplied calibration modes or a stochastic realization. Preserve existing `tipTiltBasis` synthesis by supplying projected angular-response planes B K.
+
+Require both mode and coordinate fits to have rank two; report per-axis relative fit residuals and reject a fit above an explicitly supplied tolerance. A zero-weight pixel is excluded from fitting, but output follows the complete supplied mode planes (no invented outside-pupil mask). This performs no piston subtraction or optical geometry inference. Registered physical pupil coordinates, channel ownership, and combiner trigger/zero/fault contracts remain publication blockers. For ideal RMS-one orthogonal TT on a continuous circular pupil, ||c|| = D ||theta|| * 1e6 / 8 is only an ideal-basis sanity check: 2.9 mas gives about 0.04569 micron P2V and 0.01142 coefficient magnitude. These are checks, not calibration constants or gain corrections.
+
+Added tests: arbitrary rotated/sign-swapped and nonorthogonal pairs, exact physical surface reconstruction, unit RMS/four-micron P2V synthetic normalization, mask handling, rank deficiency and residual rejection, nominal ensemble scale in modal coefficients, and unchanged RNG/ADC/time regressions. Runtime remains entirely disabled and no stream/trigger behavior is added.
+
+
+### Projection execution results
+
+The branch is `parkertjohnson1/accelSim`. Changes in this continuation are limited to `accelSimDisturbance.hpp`, its test file, README, and this plan. The deployed FITS cube was not available during the initial projection implementation; subsequent local validation is recorded below. No instrument or shared-memory connection was made, and no additive channel was chosen.
+
+`tipTiltProjection` now computes the two-by-two coefficient map and full-image angular responses once at construction. `coefficients()` applies the map to the existing noise-free sample, and `response()` supplies B K to the unchanged preallocated `tipTiltBasis` synthesis. Construction uses scale-normalized column-pivoted QR with relative pivot threshold 1e-10 for both mode and pupil matrices, explicit caller-selected residual tolerance, finite-input checks, and overflow rejection. Stored outputs retain the original physical calibration scale. Zero-weight coordinates can be undefined; every mode pixel must be finite because the original complete mode shapes define the synthesized surface. Fit errors are reported rather than hidden by renormalizing modes or changing oscillator amplitudes.
+
+The synthetic fixture uses a non-square 5-by-4 storage layout with explicit circular-pupil coordinates: two radial Gauss quadrature nodes and eight azimuths give exact RMS-one tilts, with four zero-weight boundary samples verifying the four-micron P2V normalization. Tests cover several arbitrary rotations, positive/negative X/Y, mixed and zero pointing, 6.5-m and 8-m pupils, swapped/reversed/rescaled/nonorthogonal modes, masks, residual rejection, rank/conditioning checks, overflow, and surface reconstruction. This fixture establishes numerical behavior only, not deployed geometry or orientation.
+
+| Check | Result |
+| --- | --- |
+| Fresh combined C++20/O3 build, `-fno-fast-math -Wall -Wextra`, Eigen include path, existing `ACCELSIM_MODEL_ONLY` path | **29 cases / 165928 assertions passed** in `/tmp/accelSim_TT_combined_test '[accelSim]'`: 16 existing model/timing cases plus 13 disturbance/projection cases. |
+| Fresh O1/debug AddressSanitizer + UndefinedBehaviorSanitizer build, `-fno-omit-frame-pointer` | **13 cases / 11505 assertions passed**, no sanitizer findings, in `/tmp/accelSim_TT_sanitize '[disturbance]'`. |
+| Existing Python PSD regressions | **4 tests passed** using `/opt/anaconda3/bin/python -m unittest discover -s apps/accelSim/tests -p 'test_validate_psd.py' -v`. |
+| Formatting and diff | clang-format 23.1.3 applied/checked on both touched C++ files; `git diff --check` passed. |
+| Disabled-path preservation | Byte comparisons against HEAD confirm no changes to `accelSim.hpp`, `accelSimModel.hpp`, `config/example.conf`, or existing `accelSim_test.cpp`. The deterministic sequence regression now also invokes the new projected calibration; ADC, physical state, RNG progression, counters, recovery, and rate changes remain equal. |
+
+Eigen is an existing project dependency (`Make/common.mk` already supplies `pkg-config --cflags eigen3`). Standalone instructions now include that flag. No application/runtime timing benchmark or live publication test is claimed. No empirical realization gain, additional reflection factor, calibration-mode rescaling, synthetic WFS, trigger logic, or DM enable control was added. The protected specification prefix is unchanged. No commits or pushes were made.
+
+### Read-only deployed-calibration validation
+
+The user supplied `scratch/accelSim_dm_calib/{CMmodesDM.00,dmmask,dmmap}.fits`
+from the active `default` calibration
+`fklcombo_z10_2400_smoothed_co0.27_pb0.5_mod3_20241113_181929_1563modes`.
+Only local files were read; no instrument access, shared-memory writes, mode
+renormalization, or physical-axis registration was performed. All three FITS
+SHA-256 hashes were unchanged after analysis:
+
+| File | SHA-256 |
+| --- | --- |
+| `CMmodesDM.00.fits` | `a5bb41b535fe46cb225c17f1086dbf9ac190cf3bd451379e9551ffb77383daf9` |
+| `dmmask.fits` | `0970dab118bcdb73236ae045da93c550288a4d632b70b2748903272f2aa166f8` |
+| `dmmap.fits` | `c4d7f4fffad70d122b138507093feba9421713c5e201ffbf09b01ff0f42a5cd9` |
+
+`dmmask` is a binary 50-by-50 image with 1715 included pixels, approximately
+annular with additional exclusions. Equal weights on that support reproduce the
+specified unit RMS and are appropriate fitting support for this calibration.
+`dmmap` is a nonnegative 50-by-50 scalar image with 2039 positive pixels and 461
+zeros, spanning 0 to 7.08180e-6 in undocumented units. Its appearance suggests a
+response/sensitivity map, but its provenance is not established. It must not be
+used as a coordinate map or fitting weights based on current evidence; direct
+weighting by dmmap gives RMS 0.951004 and 0.988255 rather than the specified unity.
+
+Statistics below use W = dmmask / 1715, without piston removal or mode rescaling:
+
+| Measurement | Mode 0 | Mode 1 |
+| --- | --- | --- |
+| Masked RMS [surface micron] | 0.9999999269 | 0.9999999916 |
+| Masked mean [surface micron] | 0.0009943123 | 0.0000768712 |
+| Masked sampled P2V [surface micron] | 3.849202037 | 3.812793255 |
+
+The weighted dot product is -0.0004894652373 micron squared; its normalized
+value is -0.0004894652772 (mean-subtracted correlation -0.0004895419546).
+The weighted two-mode basis has rank two, singular values 1.000244662 and
+0.999755197, and condition number 1.000489585. Normalized pivoted QR agrees
+with an independent SVD least-squares pixel fit to 5.33e-15 in the coefficients.
+This supports the current least-squares implementation for the real basis.
+
+Pixel X/Y ramps reconstruct with relative residuals 8.46879e-8 and 8.63474e-8,
+respectively. They used column/row offsets from (24.5,24.5); the modes' fitted common
+zero is (24.4999999655,24.4999999874). Using the slightly asymmetric mask centroid
+instead introduces piston and increases relative residuals to 8.94846e-4 and
+4.39726e-4. The helper deliberately does not remove piston. There are 244 nonzero
+pixels outside dmmask in each mode, consistent with preserving full supplied
+mode shapes rather than imposing the fitting mask on output.
+
+The measured P2V/RMS ratios are 3.849202318 and 3.812793287, below the nominal
+continuous-pupil ratio by 3.76994% and 4.68017%. No empirical gain or normalization
+correction is justified: use the supplied modes and registered physical targets.
+The ideal-basis D*theta*1e6/8 check is not a deployed conversion constant.
+
+The FITS headers contain no physical pupil scale or simulation-axis registration.
+The pixel geometry and modal rotation do not establish entrance-pupil metres,
+rotation/reflection/sign relative to accelSim, or a final physical theta mapping.
+No measured pixel mapping is hard-coded. Runtime projection must still derive
+its mapping from supplied modes, weights, and registered physical pupil x/y.
+The local analysis validates the numerical basis, not optical registration or
+runtime publication; unit tests remain independent of the scratch calibration.
+
+### Exact inputs still required before a writer
+
+1. **Physical pupil scale and registration:** pupil X/Y coordinates in entrance-pupil metres registered to simulation X/Y. Alternatively provide the optical pupil center/diameter in pixels, entrance-pupil metres per pixel (including any unequal scales/distortion), and external X/Y rotation/reflection/sign transform needed to construct those coordinates. Also establish the acceptable surface-fit residual and operating amplitude limits. The local cube, resolved calibration identity, native array layout, dmmask fitting support, surface-micron units, RMS-one normalization, and measured sampled P2V are established. Neither the TT mode rotation nor dmmap establishes physical coordinates or simulation-axis registration.
+2. **Exclusive channel and host:** the chosen `dm01dispXX`, current/occasional writers including network bridges, which machine will host accelSim, channel type/shape, combiner channel gain, and controller `dm.deltaChannels` classification. Do not assume `dm01disp02` or any other numbered channel is free.
+3. **Live combiner timing contract:** the deployed `DMch2disp-01`/controller configuration and matching implementation/version establishing active versus passive writes, triggering stream/channel/semaphore and counter semantics, intended update rate and phase relative to WFS exposure/AO output, and behavior during source/trigger loss. This determines the snapshot handoff and scheduling; existing `acc000` synchronization must remain untouched.
+4. **Applied-zero/failure contract:** how only the simulator contribution is removed on disable/exit, how zero is applied if AO triggering is stopped, how faults/stream replacement/controller restart/operator zero-all inhibit or rearm injection, and which supervisor/operator procedure clears a held contribution after an uncatchable process failure. Writing zeros into local memory is not confirmation of an applied optical zero.
+
+### Finalization validation (2026-11-01)
+
+Updated the README, helper comments, and engineering record to distinguish
+unit-RMS normalization over dmmask from the ideal continuous-pupil P2V relation,
+record the measured sampled P2V, identify the validated fitting support, and
+retain the requirement for registered physical coordinates. No pixel mapping,
+physical scale, orientation, channel, or trigger was added as a runtime default.
+
+Fresh builds and validation on the local macOS workstation:
+
+| Check | Result |
+| --- | --- |
+| Standalone disturbance suite, C++20/O3, `-fno-fast-math -Wall -Wextra` | **13 cases / 11505 assertions passed**. |
+| Combined disturbance and existing model/timing suite, same flags with `ACCELSIM_MODEL_ONLY` | **29 cases / 165928 assertions passed** (13 disturbance plus 16 existing model/timing cases). |
+| Disturbance suite, O1/debug with AddressSanitizer and UndefinedBehaviorSanitizer, `-fno-omit-frame-pointer`, both sanitizers configured to halt on errors | **13 cases / 11505 assertions passed**, no sanitizer findings. |
+| Existing Python PSD regressions | **4 tests passed**. |
+| clang-format 23.1.3 | Applied to both changed C++ files; `--dry-run --Werror` passed. |
+| Whitespace and scope | `git diff --check` passed; final diff reviewed for unrelated or accidental changes. |
+| Preservation checks | App, model/timing helper, example config, existing model/timing and Python test sources, and plan specification prefix are byte-identical to HEAD. All three calibration FITS hashes and the Git index hash are unchanged. |
+
+Reproduction commands (Eigen is the existing project dependency):
+
+```sh
+c++ -std=c++20 -O3 -fno-fast-math -Wall -Wextra -DCATCH_CONFIG_MAIN \
+  $(pkg-config --cflags eigen3) apps/accelSim/tests/accelSimDisturbance_test.cpp \
+  -o /tmp/accelSim_finalize_disturbance
+/tmp/accelSim_finalize_disturbance '[disturbance]'
+c++ -std=c++20 -O3 -fno-fast-math -Wall -Wextra -DACCELSIM_MODEL_ONLY \
+  $(pkg-config --cflags eigen3) tests/testMain.cpp \
+  apps/accelSim/tests/accelSim_test.cpp apps/accelSim/tests/accelSimDisturbance_test.cpp \
+  -o /tmp/accelSim_finalize_combined
+/tmp/accelSim_finalize_combined '[accelSim]'
+c++ -std=c++20 -O1 -g -fno-fast-math -Wall -Wextra -fno-omit-frame-pointer \
+  -fsanitize=address,undefined -DCATCH_CONFIG_MAIN $(pkg-config --cflags eigen3) \
+  apps/accelSim/tests/accelSimDisturbance_test.cpp -o /tmp/accelSim_finalize_sanitize
+ASAN_OPTIONS=halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
+  /tmp/accelSim_finalize_sanitize '[disturbance]'
+PYTHONDONTWRITEBYTECODE=1 /opt/anaconda3/bin/python -m unittest discover \
+  -s apps/accelSim/tests -p 'test_validate_psd.py' -v
+/tmp/accelsim-dm-tools/bin/clang-format --dry-run --Werror \
+  apps/accelSim/accelSimDisturbance.hpp apps/accelSim/tests/accelSimDisturbance_test.cpp
+git diff --check
+```
+
+Only the four intended files remain modified: this plan, `apps/accelSim/README.md`,
+`apps/accelSim/accelSimDisturbance.hpp`, and its disturbance test source. Nothing
+is staged or committed. No full runtime/INDI/shared-memory build or live DM test
+is claimed. Publication, FITS runtime loading, acquisition handoff, enable controls,
+and trigger behavior remain unimplemented; the exact writer blockers above remain.

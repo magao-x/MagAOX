@@ -15,7 +15,7 @@ numerical disturbance helpers described below do not run in the acquisition path
 ## Independent DM disturbance calculations
 
 [`accelSimDisturbance.hpp`](accelSimDisturbance.hpp) implements the physical
-conversion from the cleaned notebook without assuming a deployed DM configuration.
+conversion from the cleaned notebook using the confirmed tweeter surface units.
 It does **not** enable DM injection. There are no new application configuration keys,
 INDI controls, threads, or stream writes. The application and `acc000` timing code
 are unchanged. Deployment inputs and the remaining implementation are recorded in
@@ -39,14 +39,79 @@ The existing stationary C++ mode population predicts approximately 2.939 mas rad
 RMS and 0.04631 micron surface P2V RMS, consistent with the notebook's nominal
 scale. Individual finite records need not equal this ensemble result.
 
-`accelSimDetail::tipTiltBasis` separately accepts an explicit width, height, and
-two calibration planes. Each plane must express **native command units per radian
-of simulated X or Y pointing**, stored in native image order `x + width*y`. This
-is an input contract, not a supplied calibration. The caller must establish units,
-axis signs/orientation, pupil registration, and optical normalization, including
-reflection physics. The synthesis computes `theta_x*basis_x + theta_y*basis_y`
-without an additional factor of two, pupil scale, or inferred actuator geometry.
-No channel name, basis, or FITS-plane convention is selected by the helper.
+The deployed tweeter additive streams `dm01dispXX` contain **microns of physical
+DM surface displacement**, not OPD or voltage. The user-confirmed TT calibration is:
+
+```text
+/opt/MagAOX/cacao/tweeter-vispyr/tweeter-vispyr-calibs/default/CMmodesDM/CMmodesDM.00.fits
+```
+
+This `(2,50,50)` cube contains an approximately orthogonal rotated TT pair. Each
+mode is RMS-normalized to **1 micron of DM surface over the deployed dmmask** at
+coefficient one. **P2V = 4 * RMS** is the nominal pure-tilt relation for a uniformly
+weighted continuous circular pupil, not an exact requirement on the sampled
+actuator grid. The actual masked P2V values are approximately **3.8492 and 3.8128
+microns**. For an ideal orthogonal pair and pupil diameter D,
+`D * hypot(theta_x,theta_y) * 1e6 / 8` is only an ideal-basis coefficient sanity
+check. At 2.9 mas and D=6.5 m, that gives approximately 0.01142, with ideal physical
+surface P2V of 0.04569 micron. The simulation is never empirically rescaled to make
+a finite realization match these checks, and the supplied modes are never
+renormalized by the code.
+
+Read-only validation used local copies from the active calibration
+`fklcombo_z10_2400_smoothed_co0.27_pb0.5_mod3_20241113_181929_1563modes`.
+Its `dmmask.fits` is binary with 1,715 included pixels and is appropriate fitting
+support: the measured mode RMS values are 0.999999927 and 0.999999992 microns.
+`dmmap.fits` is a nonnegative scalar image with undocumented units/provenance;
+current evidence does **not** establish it as a coordinate map or fitting weights.
+Do not use it for either purpose without further calibration evidence.
+
+`accelSimDetail::tipTiltProjection` derives the mapping from two supplied mode
+arrays, explicit physical pupil X/Y coordinate arrays in metres, and nonnegative
+pupil fitting weights. All arrays share native pixel order `x + width*y`.
+Coordinates must already be registered to the **simulation's axes**: the cube's
+rotation relative to those coordinates is inferred, but the physical registration
+cannot be inferred from the TT mode rotation, cube dimensions, or RMS normalization.
+The validated FITS files contain no physical pupil scale or simulation-axis
+registration; runtime physical projection still requires registered coordinates.
+
+Let B contain the two surface-micron mode columns, W the pupil weights, and
+`H = 0.5e6 * [x,y]` the required surface per radian. The helper solves
+
+```text
+K = argmin ||sqrt(W) * (B*K - H)||
+coefficients = K * theta_rad
+surface_um = B * coefficients
+```
+
+It uses Eigen's column-pivoted Householder QR, with internal column scaling for
+numerical conditioning and restoration of the original units. This supports
+rotations, reversed signs, swapped modes, and nonorthogonal pairs without a
+hard-coded angle or a direct X/Y correspondence. Both mode and coordinate matrices
+must have rank two (relative pivot threshold 1e-10 after column scaling).
+`relativeResidual()` reports weighted residual norm divided by target norm for
+each axis. Construction requires an explicit maximum allowed residual in [0,1);
+there is no assumed deployment tolerance. Non-TT components can cause a residual
+and are not silently removed through piston subtraction or mode renormalization.
+
+Zero weights exclude samples from the fit; coordinates there may be nonfinite.
+Every mode pixel must be finite because the **entire supplied modes**, including
+outside-pupil pixels, define the output. The helper does not impose an output mask.
+Local calibration analysis found rank two, condition number 1.000489585, and
+normalized weighted mode dot product -0.0004894653. Pixel X/Y ramps centered at
+column/row (24.5,24.5) reconstruct with relative residuals 8.47e-8 and 8.63e-8.
+This validates the least-squares approach for the supplied basis, not a physical
+metre scale or axis registration. The measured pixel mapping is not a runtime
+constant. There are 244 nonzero pixels outside the mask in each mode; retaining
+the full supplied mode shapes is intentional. Unit tests use synthetic modes
+and explicitly registered coordinates independently of these local FITS files.
+
+`projection.response()` returns the two full-image angular-response columns B*K,
+in **surface microns per radian of simulated X/Y pointing**. Supply these to
+`tipTiltBasis(width, height, response[0], response[1])` to reuse its preallocated
+float-image synthesis. `projection.coefficients(pointing)` exposes the matching
+modal amplitudes. No additional reflection factor, pupil scaling, or driver gain
+is applied after projection. Neither helper opens a stream or chooses a channel.
 
 Calibration storage is copied/validated at construction; synthesis reuses a
 preallocated float image and replaces the whole contribution without accumulation.
@@ -57,10 +122,12 @@ image references are owned by the helper and change on its next synthesis/zero
 call; one thread must own that mutable state. Numerical checks do not establish
 that calibration planes are physically correct, independent, or safe to apply.
 
-To test these helpers without MagAO-X runtime dependencies or shared memory:
+To test these helpers with the existing Eigen dependency, without MagAO-X runtime
+dependencies or shared memory:
 
 ```sh
 c++ -std=c++20 -O3 -fno-fast-math -Wall -Wextra -DCATCH_CONFIG_MAIN \
+  $(pkg-config --cflags eigen3) \
   apps/accelSim/tests/accelSimDisturbance_test.cpp \
   -o /tmp/accelSim_disturbance_test
 /tmp/accelSim_disturbance_test '[disturbance]'
@@ -71,11 +138,14 @@ the near-unit-root vibration model require ordinary floating-point semantics.
 The suite is also registered in `tests/tests.list` with the usual application
 unit-test group. All bases in its tests are synthetic, explicitly defined fixtures.
 
-Runtime integration remains blocked on the target/channel reservation, deployed
-calibration and X/Y mapping, combiner trigger/cadence/phase contract, and applied
-zero/failure policy. Those inputs will determine configuration, FITS loading,
-the acquisition-to-DM snapshot handoff, and the writer lifecycle. Injection remains
-off and cannot be enabled by this numerical-only implementation.
+Runtime integration remains blocked on exclusive additive-channel reservation,
+registered physical pupil coordinates and an accepted fit tolerance/amplitude
+limit, the combiner trigger/cadence/phase contract, and applied zero/failure policy.
+The cube, fitting support, surface units, and measured TT normalization are known.
+In particular, `dm01disp02` is not assumed free. Those inputs will determine
+configuration, FITS loading, the acquisition-to-DM snapshot handoff, and the writer
+lifecycle. Injection remains off and cannot be enabled by this numerical-only
+implementation.
 
 ## Model and timing
 
