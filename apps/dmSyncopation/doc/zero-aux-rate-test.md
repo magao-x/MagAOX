@@ -35,11 +35,13 @@ make -C apps/dmSyncopation &&
 make -C apps/dmSyncopation install
 ```
 
-The installed binary must expose `zero_test.labelVersion=3` and
+The installed binary must expose `zero_test.labelVersion=4` and
 `zero_test.idealPublisher=1`; an older coordinated-trial binary does not have
-the early-staging behavior described here. Only dmSyncopation needs rebuilding.
+the current progress/reporting interface. Only dmSyncopation needs rebuilding.
 The 8 kHz option also requires the updated app's four-step support and capture
 script; the installed logdump and DM controller do not need rebuilding.
+Use the capture helper from the same updated checkout. After this reporting
+update, repeat the ten-second 8 kHz capture below before the longer run.
 The startup log's `MagAOX GIT` line identifies the launched binary independently
 of the capture directory's checkout hash. Merge
 [`dmtweeter_synco_zero_test.conf`](../dmtweeter_synco_zero_test.conf)
@@ -57,6 +59,7 @@ enabled=true
 channel=dm01disp07
 durationSec=120
 lateUs=5
+eventStride=4
 
 [scheduler]
 maxSubframes=2
@@ -98,7 +101,9 @@ After restarting, check the new mode's readbacks while enable remains Off:
 timeout -k 2s 8s getINDI dmtweeter-synco.zero_test
 ```
 
-Expect `labelVersion=3` and `idealPublisher=1` in addition to `enabled=1`.
+Expect `labelVersion=4`, `idealPublisher=1`, `enabled=1` and a valid, fresh
+progress snapshot. `eventStride=4` is the default successful-event sampling
+described below; it does not reduce the command rate or timing populations.
 No `scheduler.maxCadenceHz=8000` setting is needed for the 8 kHz trial. This
 finite zero mode uses the clock-only grid estimator and its explicit total step
 count; it does not use the ordinary scheduler/shadow cadence-rating gate. The
@@ -143,9 +148,16 @@ starts synco/controller/camera telemetry collectors first, saves bounded before
 snapshots, requires explicit test mode and Off, checks camera 2 kHz/synchronization
 and RTC latency, changes `settings.steps` to two/three/four while disabled and
 verifies the readback, then requests On. It allows up to 30 seconds to qualify
-the grid,
-waits for the trial or requested shorter duration, requests Off, saves after
-snapshots, and stops only its own collectors. No sudo is required.
+the grid, waits for the trial or requested shorter duration, requests Off, saves
+after snapshots, and stops only its own collectors. No sudo is required.
+
+Before requesting On, the helper requires reporting version at least 4,
+`snapshotValid=1`, positive `snapshotSequence`, and reported `snapshotAgeSec`
+from zero through two seconds. During the trial it repeats the freshness
+checks and uses its own local five-second watchdog for sequence progress.
+Sequence regression, a stalled sequence, invalid/stale progress or new event
+queue loss stops the owned trial and marks the capture incomplete. The local
+watchdog matters because a cached INDI response can repeat an old age value.
 
 A prior finished readback is ignored until new trial progress appears. Completion
 requires an observed active phase and the requested active duration; a warmup
@@ -156,6 +168,10 @@ interruption or a control/read failure causes a bounded Off request in cleanup.
 The app's configured duration is the independent upper bound if the capture shell
 exits unexpectedly. The script does not change main-loop, camera, dmcomb,
 controller, CPU or persistent configuration settings.
+
+Final quality checks also require no increase in event-queue drops or logged-event
+enqueue failures; a missing quality readback is incomplete. Read `status.txt`
+alongside the captures rather than inferring success from the directory name.
 
 Results under `$HOME/tmp/zero-aux-<total-rate>Hz-<UTC>` include simultaneous
 `dmtweeter-synco.txt`, `dmtweeter.txt`, `camwfs.txt`, before/configured/after INDI,
@@ -231,9 +247,11 @@ publication** for that slot. It may already have copied zeros before the final
 guard rejected publication. A skipped slot does not imply that the genuine main
 command arrived early.
 
-Each scheduled auxiliary slot has one outcome event. Two/three/four total steps
-schedule one/two/three auxiliary slots per main cycle. When the main combination
-cannot be matched, each dependent auxiliary slot gets its own skip event.
+Each scheduled auxiliary slot contributes one counted outcome. Healthy event
+rows can be intentionally sampled, as described below; skipped and failed rows
+are always offered to the diagnostic queue. Two/three/four total steps schedule
+one/two/three auxiliary slots per main cycle. When the main combination cannot
+be matched, each dependent auxiliary slot gets its own skip outcome.
 
 | Counter | Meaning |
 | --- | --- |
@@ -259,7 +277,7 @@ coverage/lifecycle conditions; they are not additional skip reasons to add again
 A guard failure during acknowledgement belongs to the posted attempt's named
 reason and does not increment a pre-publication skip counter.
 
-New summaries/events carry `labelVersion=3`; summaries/INDI also identify
+New summaries/events carry `labelVersion=4`; summaries/INDI also identify
 `idealPublisher=1`. Event text includes named `action`,
 `reason` and `stage` fields alongside the retained numeric `outcome`. The stage
 distinguishes preparation, reader/combined validation, publication deadline/
@@ -286,6 +304,71 @@ includes the wait's numeric `waitResult`.
 Earlier captures used compound labels: their `primaryChanged` and `unclassified`
 counts cannot be retrospectively split into the new causes. Use the new named
 fields and reason counters for subsequent attribution.
+
+### Progress snapshots and reporting coverage
+
+The ordinary reporting thread consumes a coherent latest snapshot without
+waiting for the timed cycle's lock. Intermediate state snapshots can coalesce;
+their sequences need not be contiguous. Command execution, outcome counters and
+main timing joins remain full-rate.
+
+| `zero_test` field | Interpretation |
+| --- | --- |
+| `requested` | Captured enable request; it is distinct from actual `warming`, `active` and `finished` state. |
+| `snapshotSequence` | Monotonic snapshot publication identity within the app; it must keep advancing. |
+| `snapshotTimeNs` | Capture time in the RTC's local monotonic clock. |
+| `snapshotAgeSec` | Age computed by ordinary reporting on the RTC. |
+| `snapshotValid` | A coherent positive capture time not later than the reporting clock; freshness still requires age and sequence checks. |
+| `eventsQueued` | Diagnostic event queue depth captured with that snapshot. |
+| `eventStride` | Startup selection stride for healthy event rows. |
+| `eventsSampledOut` | Healthy rows deliberately omitted in this trial. |
+| `eventsDropped` | Diagnostic queue overflow; an unintentional coverage loss. |
+
+`elapsedSec` is evaluated at the snapshot's capture/stopped time. Rereading a
+cached snapshot does not make elapsed time advance. Keep producer-clock image
+timestamps separate from `snapshotTimeNs`; the latter is a local monotonic time.
+
+`zeroTest.eventStride` defaults to **4**, with allowed values 1 through 1024.
+Successful main and auxiliary rows use the same cycle selector, retaining every
+fourth cycle's healthy rows by default. Lifecycle, skipped, unacknowledged and
+other exceptional rows are never intentionally sampled. Actual commands, all
+outcome counters and timing joins are unchanged by this selection.
+Set `eventStride=1` in the startup configuration and restart synco when a full
+healthy event stream is needed; this increases reporting traffic. Keep the
+default four for the next short 8 kHz reporting test.
+
+With sampling enabled, missing healthy event rows are expected and counted by
+`eventsSampledOut`; they are not missing commands. Full per-command contiguous
+identity reconstruction cannot use that sampled stream alone. Use the exact
+summary populations and controller delivery counts for total throughput, and
+retain any `eventsDropped` or logger-failure coverage losses separately.
+
+### Ordinary-loop diagnostics
+
+`logic_timing` and `[synco_logic]` text records measure reporting/housekeeping
+service, separately from the main, auxiliary and SDK command timings:
+
+- `sequence`, `loopGapUs` and `loopGapMaxUs` describe start-to-start ordinary-loop
+  progress, including time spent servicing diagnostics and the normal loop wait.
+- `eventsQueued` and `eventsQueueHighWater` show current and greatest observed
+  diagnostic queue depth.
+- `eventsDrained` and `eventsDrainedLast` count rows popped and offered to the
+  logger, not proof of successful persistence.
+- `eventsLogFailed` counts popped rows rejected by telemetry enqueue;
+  `eventsDropped` counts queue overflow before draining. Both are distinct from
+  intentional `eventsSampledOut`.
+- `primaryUs`, `combinerUs`, `cameraUs`, `pipelineUs`, `readersUs`, `legacyUs`,
+  `statusUs`, `eventsUs` and `telemetryUs`, with corresponding `MaxUs` fields,
+  measure each group's last-loop total and process maximum. They include each
+  group's INDI work; event service includes formatting/enqueue work.
+- `reportPublicationUs` and `reportPublicationMaxUs` measure the last completed
+  profile report's own formatting, INDI publication and telemetry enqueue, and
+  its process maximum. They describe the previous report because a report
+  cannot include the time needed to finish publishing itself.
+
+Use these fields to locate slow ordinary reporting stages and queue pressure.
+They do not measure physical DM latency or change any command-ready deadline,
+publication guard or reader-clearance rule.
 
 A production provider would need a coherent command available by its advertised
 ready deadline, with a missing command causing a skip. This finite test supplies
