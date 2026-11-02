@@ -388,7 +388,9 @@ Do not begin implementation until the user has reviewed the completed plan and a
 
 ## Task Summary
 
-Investigation completed on 2026-11-01. **The user subsequently authorized independent local numerical implementation while deployed-system access is unavailable. The user has confirmed tweeter surface-micron units and supplied local deployed calibration files, now validated read-only; projection is implemented below using explicitly supplied registered physical pupil geometry. Operational DM publication remains blocked, and the acquisition application/configuration remain unchanged.** The current scope is finalization of the hardware-independent implementation, documentation, and validation. The user explicitly prohibits runtime publication, instrument access, channel/trigger selection, staging, commits, and pushes; the user will perform the commit. The unresolved writer inputs are listed below.
+Latest investigation update: 2026-11-01. **The user has now supplied the nominal physical pupil geometry and explicitly defined simulation X/Y as increasing DM image column/row. Direct projection onto the actual tweeter TT pair is numerically validated; the existing generic implementation requires no functional change. The telescope-secondary AEG offloading chain is excluded from disturbance calibration. Operational publication remains blocked, and acquisition, model, timing, and configuration are unchanged.** Current work updates documentation and synthetic regression coverage, with local real-calibration analysis under ignored scratch storage. Runtime publication, instrument access, channel/trigger selection, staging, commits, and pushes remain prohibited.
+
+The final "Direct physical DM-pupil calibration" section records the current decision and validation. Earlier investigation entries retain their historical findings; statements that pupil scale or simulation-axis registration were unavailable are superseded by that section. No external Az/El, sky, or WFS registration is claimed.
 
 Extend `accelSim` with an optional disturbance derived from its existing noise-free physical pointing state. Preserve its oscillator evolution, random draws, ADC conversion, `acc000` publication, timing, and phase synchronization. Use an exclusively assigned additive DM channel and the selected DM's calibrated actuator basis. Do not write the combined DM output, invent a WFS signal, or reproduce the notebook grid as an operational calibration.
 
@@ -441,9 +443,9 @@ During the initial investigation, no deployed configuration/calibration was foun
 
 ## Questions and Points of Clarification
 
-**Remaining operational questions (updated after read-only validation of the supplied deployed calibration):**
+**Remaining operational questions (updated after direct DM-pupil calibration):**
 
-1. **Ownership and remaining calibration data:** Which numbered tweeter additive channel is reserved exclusively for accelSim, and on which host will it be written? `dm01disp02` is not presumed available. Provide local copies of the effective controller/dmcomb configuration. The cube, resolved calibration identity, native array layout, surface-micron units, RMS-one normalization over dmmask, and fitting support are now known. Still needed are physical pupil coordinates registered to simulation X/Y across the 6.5-m pupil, an accepted projection-residual tolerance, channel gains/existing writers (including bridges), and `deltaChannels` classification. A mask plus pupil center/diameter, pitch, and axis-registration transform can supply coordinates instead of explicit maps. The basis rotation is inferred from those data; neither the notebook's 30-degree rotation nor the cube's RMS normalization establishes the missing external registration.
+1. **Ownership and remaining calibration policy:** Which numbered tweeter additive channel is reserved exclusively for accelSim, and on which host will it be written? `dm01disp02` is not presumed available. Provide local copies of the effective controller/dmcomb configuration. The cube, resolved calibration identity, native array layout, surface-micron units, RMS-one normalization over dmmask, and fitting support are known. Nominal physical coordinates are now defined by center (24.5,24.5), diameter 48 pitches, D=6.5 m, +X=column, and +Y=row. Still needed are an accepted projection-residual tolerance and amplitude limits, channel gains/existing writers (including bridges), and `deltaChannels` classification. External sky/AzEl registration is not required for the intentional DM-pupil simulation convention.
 2. **Trigger, cadence, and zeroing:** Should writes be passive and sampled by the existing AO trigger, or should accelSim actively trigger a specified DM rate? Identify the trigger source/semantics, intended update phase relative to WFS exposure/AO output, and behavior when that trigger stops. Confirm how a final zero is applied during AO inactivity and what supervisor/operator mechanism removes a held disturbance after an uncatchable simulator failure. Existing driver clipping limits total commands but does not by itself remove a stale simulator channel.
 
 These are missing implementation inputs, not a request to reapprove already authorized work. Do not implement the DM writer or select operational defaults until they are resolved. Any needed live configuration inspection or hardware checks must be performed by the user; only local copies are inspected by the agent.
@@ -644,7 +646,7 @@ runtime publication; unit tests remain independent of the scratch calibration.
 
 ### Exact inputs still required before a writer
 
-1. **Physical pupil scale and registration:** pupil X/Y coordinates in entrance-pupil metres registered to simulation X/Y. Alternatively provide the optical pupil center/diameter in pixels, entrance-pupil metres per pixel (including any unequal scales/distortion), and external X/Y rotation/reflection/sign transform needed to construct those coordinates. Also establish the acceptable surface-fit residual and operating amplitude limits. The local cube, resolved calibration identity, native array layout, dmmask fitting support, surface-micron units, RMS-one normalization, and measured sampled P2V are established. Neither the TT mode rotation nor dmmap establishes physical coordinates or simulation-axis registration.
+1. **Calibration acceptance and operating limits:** establish the acceptable surface-fit residual and operating amplitude limits, and validate the intended calibration identity at load time. The nominal physical coordinate convention is now established by the user: x=(column-24.5)*6.5/48 and y=(row-24.5)*6.5/48 metres. This resolves scale and registration for the chosen DM-pupil simulation axes; it does not assert external instrument registration. The local cube, native array layout, dmmask fitting support, surface-micron units, and measured normalization remain established. Runtime FITS loading remains unimplemented.
 2. **Exclusive channel and host:** the chosen `dm01dispXX`, current/occasional writers including network bridges, which machine will host accelSim, channel type/shape, combiner channel gain, and controller `dm.deltaChannels` classification. Do not assume `dm01disp02` or any other numbered channel is free.
 3. **Live combiner timing contract:** the deployed `DMch2disp-01`/controller configuration and matching implementation/version establishing active versus passive writes, triggering stream/channel/semaphore and counter semantics, intended update rate and phase relative to WFS exposure/AO output, and behavior during source/trigger loss. This determines the snapshot handoff and scheduling; existing `acc000` synchronization must remain untouched.
 4. **Applied-zero/failure contract:** how only the simulator contribution is removed on disable/exit, how zero is applied if AO triggering is stopped, how faults/stream replacement/controller restart/operator zero-all inhibit or rearm injection, and which supervisor/operator procedure clears a held contribution after an uncatchable process failure. Writing zeros into local memory is not confirmation of an applied optical zero.
@@ -698,3 +700,128 @@ Only the four intended files remain modified: this plan, `apps/accelSim/README.m
 is staged or committed. No full runtime/INDI/shared-memory build or live DM test
 is claimed. Publication, FITS runtime loading, acquisition handoff, enable controls,
 and trigger behavior remain unimplemented; the exact writer blockers above remain.
+
+### Direct physical DM-pupil calibration (2026-11-01)
+
+The user rejected the tweeter -> woofer -> telescope-secondary offload path as
+the disturbance amplitude calibration. AEG command units are now confirmed as
+arcsec, but neither those commands nor their matrix belongs in this conversion.
+The deployed ten-mode offloader has significant TT overlap with higher modes;
+its static result differed from direct actuator offloading by 25.64% in relative
+Frobenius norm. That analysis remains an ignored scratch artifact, not an input
+to accelSim. Both 0.05 controller gains are excluded.
+
+The user explicitly defines the current simulation axes as **+X = increasing DM
+image column, +Y = increasing DM image row**. These are not telescope Az/El, sky,
+or WFS axes. No notebook rotation is used. With zero-based indices and native
+linear index `column + 50*row`, the expert-supplied nominal geometry is:
+
+```text
+center_column = center_row = 24.5
+pupil_diameter_pitches = 48
+entrance_pupil_diameter_m = 6.5
+metres_per_pitch = 6.5 / 48 = 0.1354166666666667
+x = (column - 24.5) * metres_per_pitch
+y = (row    - 24.5) * metres_per_pitch
+H = 0.5e6 * [x,y]                       # surface micron per radian
+K = argmin ||sqrt(W) * (B*K - H)||
+```
+
+`scratch/accelSim_dm_calib/dmmask.fits`, with 1715 active pixels, remains the
+fitting support. It reproduces the confirmed unit RMS of the supplied TT pair.
+The 2039-pixel `bmc_2k_actuator_mask_F32.fits` is the offloader normalization
+support and is not substituted. `dmmap.fits` is not used. The first two planes
+of `scratch/accelSim_offload_calib/CMmodesDM.fits` are bit-for-bit identical to
+the supplied `CMmodesDM.00.fits`; no modes are renormalized or forced to P2V=4.
+
+The existing `tipTiltProjection` already accepts these coordinates and weights.
+No coordinate-helper API or numerical implementation change is necessary.
+The production header changes are documentation only. The new synthetic unit
+test exercises center 24.5, 48 pitches, D=6.5 m, native column/row order, both
+signs, rotated/swapped/sign-flipped bases, reflective and unit factors, and the
+47/48 sampled-to-ideal P2V ratio. It does not require any scratch FITS file or
+offloader component. Existing tests continue to verify unchanged RNG, ADC,
+catch-up, rate changes, and phase-clock behavior.
+
+Local analysis `scratch/direct_tt_analysis/project.cpp` calls the unchanged
+production projector and float synthesizer. It uses 1e-6 as an explicit analysis
+fit tolerance, not an adopted runtime acceptance policy. Independent NumPy SVD
+and physical-slope calculations in `analyze.py` cross-check the result. All input
+calibration files are read-only; outputs remain ignored under that directory.
+
+```text
+K [coefficient/radian] = [[-798911.7511681296, -315942.5949319362],
+                         [ 318826.6904934726, -792420.6490882029]]
+K [coefficient/mas]    = [[-0.003873233469655, -0.001531732924683],
+                         [ 0.001545715414541, -0.003841763718717]]
+K^-1 [radian/coefficient] = [[-1.079878906139e-6,  4.305538279578e-7],
+                            [-4.344841570877e-7, -1.088724718299e-6]]
+det(K) = 7.338051003529e11
+singular values = [860183.102069, 853080.115836]
+condition number = 1.008326282726
+```
+
+Mode gradient directions, measured from increasing column toward increasing row,
+are -158.082845 and -68.422878 degrees. Their separation is 89.659968 degrees.
+This mixing is derived from the actual planes in the chosen DM-pupil axes, not
+an external registration or an imposed pure rotation.
+
+| Input | c0 | c1 | Sampled P2V [micron] | Ideal P2V [micron] |
+| --- | --- | --- | --- | --- |
+| +1 mas X | -0.003873233470 | 0.001545715415 | 0.01542818566 | 0.01575644464 |
+| +1 mas Y | -0.001531732925 | -0.003841763719 | 0.01542818690 | 0.01575644464 |
+| +2.9 mas X | -0.011232377062 | 0.004482574702 | 0.04474173842 | 0.04569368944 |
+| +2.9 mas Y | -0.004442025482 | -0.011141114784 | 0.04474174201 | 0.04569368944 |
+
+The axis-aligned mask extrema are at indices 1 and 48, separated by 47 pitches.
+Thus the sampled target P2V is 47/48 of the nominal 48-pitch optical P2V, to
+calibration precision. The full supplied-mode synthesis has the same extrema
+for these four cases. The 0.04569368944-micron ideal result at 2.9 mas is
+consistent with the physical D*theta/2 relationship; no amplitude correction is
+justified by the smaller sampled value.
+
+| Input | RMS residual [micron] | Maximum residual [micron] | Relative residual |
+| --- | --- | --- | --- |
+| +1 mas X | 3.53231e-10 | 1.62500e-9 | 8.46879e-8 |
+| +1 mas Y | 3.57061e-10 | 1.47503e-9 | 8.63474e-8 |
+| +2.9 mas X | 1.02437e-9 | 4.71251e-9 | 8.46879e-8 |
+| +2.9 mas Y | 1.03548e-9 | 4.27759e-9 | 8.63474e-8 |
+
+These residuals compare double-precision B*K*theta with the physical target over
+dmmask. After float synthesis, the +2.9 mas X/Y RMS residuals are 1.06887e-9 and
+1.06550e-9 micron, with relative errors 8.83668e-8 and 8.88508e-8. The fitted
+center intercepts are 3.28525e-11 and 1.19539e-11 micron. The target's masked
+means (-1.08239e-5 and -5.27320e-6 micron) reflect mask asymmetry; they are not
+removed. No piston correction is applied. The supplied two-mode basis is
+sufficiently planar for this numerical purpose. All 244 nonzero out-of-mask
+pixels per mode remain in synthesized commands.
+
+If S holds the mode gradients in surface microns per actuator pitch, then
+`theta = 2e-6 / metres_per_pitch * S * c`. Equivalently, with G in microns per
+entrance-pupil metre, `theta = 2e-6 * G * c`, so `K = inverse(2e-6 * G)`.
+This slope calculation agrees with the projection to 2.05e-12 relative error.
+Its pixel-to-metre conversion uses precisely the same D/48 scale. Telescope D
+appears because the physical angle is an OPD gradient across entrance-pupil
+metres; a measured empirical angular calibration could absorb that geometry.
+This work uses the explicit geometry and surface modes instead.
+
+Validation completed on the local workstation:
+
+| Check | Result |
+| --- | --- |
+| Production QR vs independent SVD | Max K difference 1.63e-9 coefficient/radian (about 2e-15 relative scale). |
+| Standalone disturbance suite, O3, no fast-math | 14 cases / 12023 assertions passed. |
+| Combined disturbance and existing model/timing suite, `ACCELSIM_MODEL_ONLY` | 30 cases / 166446 assertions passed. |
+| AddressSanitizer + UndefinedBehaviorSanitizer disturbance suite | 14 cases / 12023 assertions passed, no findings. |
+| Existing Python PSD regressions | 4 tests passed. |
+| Formatting and whitespace | clang-format applied to touched C++ files; dry-run and git diff --check passed. |
+| Preservation | App/model/config/existing model and PSD test files, all nine calibration FITS files, Git index, and plan specification prefix unchanged. Production helper code tokens unchanged; comments only. |
+
+Build flags and commands follow the preceding finalization section, with binary
+names `/tmp/accelSim_direct_disturbance`, `/tmp/accelSim_direct_combined`, and
+`/tmp/accelSim_direct_sanitize`. No full runtime/INDI build or live hardware test
+is claimed. The remaining publication blockers are calibration acceptance and
+amplitude limits, exclusive channel ownership, combiner gain and delta-channel
+classification, cadence/trigger/phase semantics, and applied-zero/failure policy.
+External Az/El registration and AEG calibration are not blockers for the chosen
+DM-pupil simulation convention.

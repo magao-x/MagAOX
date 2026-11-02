@@ -418,6 +418,90 @@ TEST_CASE( "accelSim nominal modal TT coefficient scale", "[accelSim][disturbanc
     REQUIRE( std::hypot( nominal[0], nominal[1] ) == Approx( 6.5 * .0029 * arcsecToRad * 1e6 / 8 ) );
 }
 
+/** \brief The nominal 48-pitch pupil maps column/row pointing to reflective surface without an offload calibration.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim nominal DM pupil coordinates and sampled optical scale", "[accelSim][disturbance][projection]" )
+{
+    // Synthetic planes keep this regression independent of local/deployed FITS files.
+    constexpr size_t    width = 50, height = 50;
+    constexpr double    center = 24.5, diameter = 6.5, pupilPitches = 48;
+    const double        pitch = diameter / pupilPitches;
+    std::vector<double> x( width * height ), y( x.size() ), weights( x.size() );
+    for( size_t row = 0; row < height; ++row )
+        for( size_t column = 0; column < width; ++column )
+        {
+            const size_t pixel = column + width * row;
+            x[pixel]           = ( double( column ) - center ) * pitch;
+            y[pixel]           = ( double( row ) - center ) * pitch;
+            weights[pixel]     = std::hypot( x[pixel], y[pixel] ) <= diameter / 2 ? 1 : 0;
+        }
+    REQUIRE( pitch == Approx( .13541666666666667 ) );
+    REQUIRE( x[24 + width * 24] == Approx( -pitch / 2 ) );
+    REQUIRE( y[24 + width * 24] == Approx( -pitch / 2 ) );
+    REQUIRE( x[25 + width * 24] == Approx( pitch / 2 ) );
+    REQUIRE( y[24 + width * 25] == Approx( pitch / 2 ) );
+
+    for( double angle : { 0.0, .37, 2.4 } )
+        for( int convention = 0; convention < 3; ++convention )
+        {
+            std::vector<double> mode0( x.size() ), mode1( x.size() );
+            for( size_t pixel = 0; pixel < x.size(); ++pixel )
+            {
+                mode0[pixel] = 4 / diameter * ( std::cos( angle ) * x[pixel] + std::sin( angle ) * y[pixel] );
+                mode1[pixel] = 4 / diameter * ( -std::sin( angle ) * x[pixel] + std::cos( angle ) * y[pixel] );
+                if( convention == 1 )
+                    std::swap( mode0[pixel], mode1[pixel] );
+                if( convention == 2 )
+                    mode0[pixel] = -mode0[pixel];
+            }
+            const tipTiltProjection projection( mode0, mode1, x, y, weights, 1e-12 );
+            tipTiltBasis            basis( width, height, projection.response()[0], projection.response()[1] );
+            for( const auto mas :
+                 { std::array<double, 2>{ 1, 0 }, { 0, 1 }, { 2.9, 0 }, { 0, 2.9 }, { -1, 0 }, { 0, -1 }, { 1, -2 } } )
+            {
+                CAPTURE( angle, convention, mas );
+                sample value;
+                value.m_pointing = { mas[0] / 1000, mas[1] / 1000 };
+                const pointingDisturbance pointing( value );
+                const double              tx = mas[0] * pi / 648000000, ty = mas[1] * pi / 648000000;
+                REQUIRE( pointing.radians()[0] == Approx( tx ).margin( 1e-24 ) );
+                REQUIRE( pointing.radians()[1] == Approx( ty ).margin( 1e-24 ) );
+                std::array<double, 2> expected{
+                    diameter * 1e6 / 8 * ( std::cos( angle ) * tx + std::sin( angle ) * ty ),
+                    diameter * 1e6 / 8 * ( -std::sin( angle ) * tx + std::cos( angle ) * ty ) };
+                if( convention == 1 )
+                    std::swap( expected[0], expected[1] );
+                if( convention == 2 )
+                    expected[0] = -expected[0];
+                const auto coefficients = projection.coefficients( pointing );
+                REQUIRE( coefficients[0] == Approx( expected[0] ).margin( 1e-15 ) );
+                REQUIRE( coefficients[1] == Approx( expected[1] ).margin( 1e-15 ) );
+                const auto &command = basis.synthesize( pointing );
+                double      minimum = INFINITY, maximum = -INFINITY, maxError = 0;
+                for( size_t pixel = 0; pixel < x.size(); ++pixel )
+                {
+                    const double surface = ( tx * x[pixel] + ty * y[pixel] ) * 1e6 / 2;
+                    maxError             = std::max( maxError, std::abs( command[pixel] - surface ) );
+                    if( weights[pixel] )
+                    {
+                        minimum = std::min( minimum, double( command[pixel] ) );
+                        maximum = std::max( maximum, double( command[pixel] ) );
+                    }
+                }
+                REQUIRE( maxError < 2e-9 );
+                REQUIRE( command[25 + width * 24] - command[24 + width * 24] ==
+                         Approx( tx * pitch * 1e6 / 2 ).margin( 1e-9 ) );
+                REQUIRE( command[24 + width * 25] - command[24 + width * 24] ==
+                         Approx( ty * pitch * 1e6 / 2 ).margin( 1e-9 ) );
+                if( mas[0] == 0 || mas[1] == 0 )
+                    REQUIRE( maximum - minimum == Approx( pointing.surfaceP2V() * 47 / 48 ).margin( 2e-9 ) );
+                if( std::hypot( mas[0], mas[1] ) == 2.9 )
+                    REQUIRE( pointing.surfaceP2V() == Approx( .04569368944457377 ).margin( 1e-15 ) );
+            }
+        }
+}
+
 /** \brief Missing/degenerate calibration geometry, invalid weights, and poorly conditioned fits are rejected.
  * \ingroup accelSim_unit_test
  */

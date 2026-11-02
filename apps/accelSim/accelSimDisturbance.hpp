@@ -16,9 +16,11 @@ namespace app
 namespace accelSimDetail
 {
 
-/// Immutable physical pointing in the simulator's X/Y coordinates, independent of any DM orientation.
+/// Immutable physical pointing in the simulator's explicitly defined pupil axes.
 /** Uses only sample::m_pointing, before sensor noise, ADC conversion, or legacy WFS attenuation.
  * Coordinates supplied to opd() and surface() are entrance-pupil metres in those same simulated axes.
+ * The current accelSim convention is +X along increasing DM image column and +Y along increasing row.
+ * This is a simulation definition, not a claim of telescope Az/El, sky, or WFS registration.
  * These evaluations describe an ideal plane, not an actuator calibration or a synthetic WFS.
  */
 class pointingDisturbance
@@ -93,8 +95,12 @@ class tipTiltBasis
  * check. The fit derives physical scaling from supplied data without rescaling a simulated realization.
  * Input coordinates must already be registered to the simulator's axes and the entrance pupil in metres.
  * The TT mode rotation does not establish this registration or the physical pupil scale.
+ * For the current DM-pupil simulation convention, the supplied nominal geometry is x = (column-24.5)*6.5/48
+ * and y = (row-24.5)*6.5/48, in native order column + width*row. The diameter is 48 actuator pitches,
+ * not the array width or the distance between the outermost fitting samples. Geometry remains caller supplied.
  * dmmask is appropriate fitting support for the validated calibration; current evidence does not establish
  * dmmap as either a coordinate map or fitting weights. Neither file is selected automatically here.
+ * The offloader's actuator mask is different from dmmask. No telescope offload matrix or controller gain is used.
  * Pupil weights select/weight fit samples only; the full supplied modes determine the output everywhere.
  * No piston removal, mode renormalization, default pupil geometry, or FITS loading is performed.
  */

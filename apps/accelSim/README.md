@@ -32,8 +32,10 @@ For supplied entrance-pupil coordinates in those same axes, it evaluates:
   pupil; the default entrance-pupil diameter is 6.5 m.
 
 These are ideal physical quantities, not actuator commands or a synthetic WFS.
-There is no assumed instrument-axis orientation. The notebook's example 30-degree
-rotation and 50-by-50 grid are not operational defaults. A 900-nm OPD P2V across
+The current simulation convention explicitly defines **+X as increasing DM image
+column and +Y as increasing DM image row**. These are DM-pupil coordinates, not
+telescope Az/El, sky, or WFS coordinates. The notebook's example 30-degree rotation
+is not used. A 900-nm OPD P2V across
 6.5 m corresponds to 28.5597 mas pointing and 0.450 micron reflective surface P2V.
 The existing stationary C++ mode population predicts approximately 2.939 mas radial
 RMS and 0.04631 micron surface P2V RMS, consistent with the notebook's nominal
@@ -62,18 +64,34 @@ Read-only validation used local copies from the active calibration
 `fklcombo_z10_2400_smoothed_co0.27_pb0.5_mod3_20241113_181929_1563modes`.
 Its `dmmask.fits` is binary with 1,715 included pixels and is appropriate fitting
 support: the measured mode RMS values are 0.999999927 and 0.999999992 microns.
+The first two planes of the supplied full `CMmodesDM.fits` cube are bit-for-bit
+identical to this pair. The 2,039-pixel `bmc_2k_actuator_mask_F32.fits` used by
+`t2wOffloader` is a different actuator normalization mask; it does not replace
+`dmmask` for this fit. The telescope AEG/offloading chain is not used to determine
+disturbance amplitude. Neither offloader's 0.05 controller gain is used.
 `dmmap.fits` is a nonnegative scalar image with undocumented units/provenance;
 current evidence does **not** establish it as a coordinate map or fitting weights.
 Do not use it for either purpose without further calibration evidence.
 
 `accelSimDetail::tipTiltProjection` derives the mapping from two supplied mode
 arrays, explicit physical pupil X/Y coordinate arrays in metres, and nonnegative
-pupil fitting weights. All arrays share native pixel order `x + width*y`.
-Coordinates must already be registered to the **simulation's axes**: the cube's
-rotation relative to those coordinates is inferred, but the physical registration
-cannot be inferred from the TT mode rotation, cube dimensions, or RMS normalization.
-The validated FITS files contain no physical pupil scale or simulation-axis
-registration; runtime physical projection still requires registered coordinates.
+pupil fitting weights. All arrays share native pixel order `column + width*row`.
+For the current simulation convention, the expert-supplied pupil center is
+`(24.5,24.5)`, the nominal pupil diameter is **48 actuator pitches**, and the
+entrance pupil diameter is **6.5 m**. Construct the supplied maps as:
+
+```text
+metres_per_pitch = 6.5 / 48
+x[column + 50*row] = (column - 24.5) * metres_per_pitch
+y[column + 50*row] = (row    - 24.5) * metres_per_pitch
+```
+
+These values specify a nominal linear, isotropic pupil scale. They are supplied
+geometry, not inferred from cube dimensions, mode RMS, or the mask centroid.
+The existing generic projector already accepts these maps; no new numerical
+helper, hardcoded calibration arrays, or production mapping constant is needed.
+No external instrument-axis registration is implied or required for this
+intentional DM-pupil simulation convention.
 
 Let B contain the two surface-micron mode columns, W the pupil weights, and
 `H = 0.5e6 * [x,y]` the required surface per radian. The helper solves
@@ -100,11 +118,55 @@ outside-pupil pixels, define the output. The helper does not impose an output ma
 Local calibration analysis found rank two, condition number 1.000489585, and
 normalized weighted mode dot product -0.0004894653. Pixel X/Y ramps centered at
 column/row (24.5,24.5) reconstruct with relative residuals 8.47e-8 and 8.63e-8.
-This validates the least-squares approach for the supplied basis, not a physical
-metre scale or axis registration. The measured pixel mapping is not a runtime
-constant. There are 244 nonzero pixels outside the mask in each mode; retaining
+With the explicitly supplied nominal geometry above, this now also determines
+the physical mapping for the chosen simulation axes. There are 244 nonzero
+pixels outside the mask in each mode; retaining
 the full supplied mode shapes is intentional. Unit tests use synthetic modes
 and explicitly registered coordinates independently of these local FITS files.
+
+For these exact local modes, nominal geometry, and `dmmask`, the measured mapping
+is shown below for review; it is **not hardcoded** into the helper:
+
+```text
+K [coefficient/radian] = [[-798911.751168, -315942.594932],
+                         [ 318826.690493, -792420.649088]]
+K [coefficient/mas]    = [[-0.003873233470, -0.001531732925],
+                         [ 0.001545715415, -0.003841763719]]
+```
+
+The condition number is 1.00832628. Positive mode gradients are at approximately
+-158.082845 and -68.422878 degrees, measured from increasing column toward
+increasing row. Their 89.659968-degree separation and unequal slopes are retained;
+the projector does not replace the pair with a perfect rotation.
+
+| Pointing | c0 | c1 | Sampled surface P2V [micron] | Ideal circular-pupil P2V [micron] |
+| --- | --- | --- | --- | --- |
+| +1 mas X | -0.003873233470 | 0.001545715415 | 0.01542818566 | 0.01575644464 |
+| +1 mas Y | -0.001531732925 | -0.003841763719 | 0.01542818690 | 0.01575644464 |
+| +2.9 mas X | -0.011232377062 | 0.004482574702 | 0.04474173842 | 0.04569368944 |
+| +2.9 mas Y | -0.004442025482 | -0.011141114784 | 0.04474174201 | 0.04569368944 |
+
+For these axis-aligned cases, fitting samples span indices 1 through 48, a
+47-pitch separation. Their P2V is therefore 47/48 of the nominal 48-pitch ideal,
+within the measured calibration residual. The full supplied-mode images have
+the same extrema in these cases. Do not force sampled P2V to the ideal by
+renormalizing the modes, adjusting vibration amplitude, or changing the diameter.
+
+At +2.9 mas, masked double-precision surface residuals are 1.02437e-9 micron RMS
+and 4.71251e-9 maximum for X, and 1.03548e-9 RMS and 4.27759e-9 maximum for Y.
+The relative residuals remain 8.47e-8 and 8.63e-8; float command synthesis keeps
+both below 8.9e-8. Fitted center piston is below 3.3e-11 micron for these cases.
+The asymmetric mask gives a small nonzero target mean, which is preserved rather
+than subtracted. The basis is sufficiently planar for this numerical conversion;
+runtime fit tolerances and operating limits still require an explicit policy.
+
+An equivalent slope calculation fits the two mode gradients into G in surface
+microns per entrance-pupil metre. Then `theta_rad = 2e-6 * G * coefficients` and
+`K = inverse(2e-6 * G)`. Its relative agreement with the coordinate projection is
+2.1e-12. Converting micron-per-pixel slopes into G requires the same `6.5/48`
+metre scale: a sampled surface slope alone does not determine entrance-pupil
+angle. An empirical angular calibration could absorb that scale, but the
+telescope-secondary AEG offload path is not used here.
 
 `projection.response()` returns the two full-image angular-response columns B*K,
 in **surface microns per radian of simulated X/Y pointing**. Supply these to
@@ -139,9 +201,11 @@ The suite is also registered in `tests/tests.list` with the usual application
 unit-test group. All bases in its tests are synthetic, explicitly defined fixtures.
 
 Runtime integration remains blocked on exclusive additive-channel reservation,
-registered physical pupil coordinates and an accepted fit tolerance/amplitude
-limit, the combiner trigger/cadence/phase contract, and applied zero/failure policy.
-The cube, fitting support, surface units, and measured TT normalization are known.
+an accepted fit tolerance/amplitude limit, the combiner trigger/cadence/phase
+contract, and applied zero/failure policy. The cube, fitting support, surface
+units, measured TT normalization, nominal physical scale, and intentional
+DM-pupil simulation axes are known. External sky/AzEl registration would be
+additional work only if that interpretation is requested later.
 In particular, `dm01disp02` is not assumed free. Those inputs will determine
 configuration, FITS loading, the acquisition-to-DM snapshot handoff, and the writer
 lifecycle. Injection remains off and cannot be enabled by this numerical-only
