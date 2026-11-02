@@ -2,8 +2,8 @@
 
 PO4AO receives reconstructed WFS modal values and publishes a differential
 modal input for downstream `mfilt`. Leakage, modal integration, actuator-space
-conversion, and physical DM limits remain downstream. The Python trainer and
-instrument configuration live in separate repositories.
+conversion, and physical DM limits remain downstream. The shared Python training core lives in `apps/po4aoTrainer`; instrument
+configuration is maintained separately.
 
 ## Runtime behavior
 
@@ -11,16 +11,28 @@ instrument configuration live in separate repositories.
   modal prefix controlled by the policy; all higher modes pass through.
 - Startup uses proportional fallback and model ID zero. Persisted models are
   ignored until an explicit `reload_engine` request.
-- With `control_enable` Off, controlled modes use
-  `integrator_gain * observation`, without exploration, and replay collection
-  pauses. This is transparent pass-through when the gain is one and commands
-  remain within the configured limit.
-- With control On, warm-up uses the same fallback plus scheduled noise. A
-  compatible published model replaces it once warm-up/history are ready.
+- With `control_enable` Off, controlled modes use `integrator_gain * observation`.
+  A retained model is not activated. Explicit recollection adds exploration to
+  this integrator output; it does not enable the retained policy.
+- Initial exploration starts on the first enabled input frame. A loaded policy
+  can run as soon as its history is ready; collection never forces integrator
+  control. Outside initial or explicitly requested collection, no noise is added.
 - `reset_model` deactivates the selected policy and clears history/partial
   replay at the next input frame. Only a reload from the new reset generation
   may activate afterward; model destruction stays on the background thread.
-- `recollect_warmup` invalidates replay snapshots and restarts warm-up/history.
+- `recollect_warmup` invalidates replay snapshots and starts a new generation,
+  resetting collection counters and partial episodes while preserving the
+  controller's history and policy. It adds the configured noise once, after
+  the base controller and before command limits. History/replay records the
+  command only after output publication succeeds.
+- Collection stops exploration after the configured number of emitted frames.
+  It becomes ready only when the background publisher has written every
+  required episode into the frozen snapshot. Control changes, reset, source
+  gaps, inference fallback, invalid commands and publication backlog interrupt
+  an unfinished collection. An interrupted generation cannot become ready.
+- History follows emitted commands even with control Off. Rolling replay
+  continues after explicit integrator recollection; control-Off startup alone
+  does not start exploration or collection.
 - Repeated semaphore notifications for the same source counter are ignored,
   without republishing output or changing history/replay state.
 - Source-counter gaps reset history and the partial replay episode. The gap
@@ -66,8 +78,8 @@ after a restart that changes dimensions.
 Replay streams have logical shape `(Nmodes, replay_buffer_size, 2)` and float32
 values: observation in plane 0 and the emitted modal command in plane 1.
 Snapshot samples are stored newest first. Metadata has four uint32 values:
-valid sample count, episode ID, and the low/high words of the publication-time
-model ID. Replay and metadata publication counters match.
+valid sample count, episode ID, and the low/high words of the effective
+model ID at the final emitted frame of that episode (zero for integrator). Replay and metadata publication counters match.
 
 A reader must copy only while both write flags are clear, counters match, and
 neither counter changes during the copy. A valid count of zero invalidates the
@@ -76,15 +88,35 @@ the real-time callback fills preallocated episode slots and drops an episode if
 publication cannot keep up.
 
 Replay records PO4AO's emitted commands before downstream integration/clipping.
-It does not measure the actual applied DM command, and a model can change within
-an episode. Those distinctions matter for training-data quality checks.
+It does not measure the actual applied DM command. Ordinary rolling replay can
+span policy changes; the frozen warmup accepts only one effective controller
+and policy for its entire collection. Those distinctions matter for training-data quality checks.
 
 `runtime_stats` reports callback p50/p95/p99/max latency and cumulative missed
 source frames, deadline misses, inference failures, and replay drops.
-`model_status` identifies the selected policy, inference backend, and reload
-state. The latency ring contains the latest 1024 callback samples; its maximum
-is not the maximum over the entire logging interval. These timings exclude
-upstream notification and downstream `mfilt`/DM scheduling.
+`model_status` distinguishes the retained model (`active_id`, `active_backend`)
+from the last emitted command (`effective_controller`, `effective_id`). Controllers
+are `unknown`, `integrator`, `po4ao` or the existing source-gap `pass-through`.
+`control_request`/`control_applied` and `reset_request`/`reset_applied` are decimal
+sequence/generation strings. A control/reset request remains Busy until its
+selected state has produced an output frame. Duplicate input notifications do
+not acknowledge requests. Reload stays Busy through pending activation; a load
+failure stays Alert with `reload_error` until another explicit reload.
+
+`collection_status` is read-only text with `state`, `requested_generation`,
+`generation`, `frames` and `target_frames`. States are `idle`, `pending`,
+`collecting`, `publishing`, `ready` and `interrupted`. A supervisor must require
+`ready` for its requested generation **and** a valid paired snapshot; the request
+switch returning Off is not completion. Recheck this generation/state after
+copying a snapshot, since a new request or interruption can invalidate it.
+The generation may also advance when the monitored stream is reallocated.
+Controller/model/collection readbacks and acknowledgements update in every app
+logic cycle, independently of the slower statistics period. Readbacks precede
+terminal request acknowledgements.
+
+The latency ring contains the latest 1024 callback samples; its maximum is not
+the maximum over the entire logging interval. These timings exclude upstream
+notification and downstream `mfilt`/DM scheduling.
 
 ## Build and tests
 
@@ -99,10 +131,22 @@ make
 sudo make install
 ```
 
-The registered Catch2 suite tests CPU handoff ownership/generation, source-counter
-continuity and duplicates, feature ordering, CPU linear inference, controlled-prefix
-pass-through, command limiting, and replay reset behavior. Its helpers do not
-require camera or DM access.
+The registered Catch2 suites cover CPU model handoff, history/feature ordering,
+command limiting, exploration scheduling and collection generations. The app-local
+suite also includes the production frame/episode/publication methods against
+CPU output/inference boundaries: policy and integrator recollection, duplicate
+frames, interrupted data, queue backlog, publication races, and emitted-command
+history/replay. The harness does not replace these algorithms with copies.
+It does not exercise CUDA, the full MagAOXApp lifecycle, INDI serialization or
+physical downstream behavior.
+
+Local CPU tests (including the production-method boundary tests):
+
+```sh
+make -C apps/po4ao/tests
+make -C apps/po4ao/tests asan
+```
+
 On a configured MagAO-X development environment:
 
 ```sh

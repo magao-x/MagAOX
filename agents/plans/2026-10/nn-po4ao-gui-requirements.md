@@ -1,6 +1,6 @@
 # Shared NN / PO4AO GUI: requirements and implementation plan
 
-Created: 2026-10-28. Revised and reviewed: 2026-11-02. Status: implementation started on 2026-11-02; baseline committed, the first shared numerical-core increment implemented, and the native Qt frontend built and tested. Remaining phases and acceptance checks are tracked in `../2026-11/nn-po4ao-implementation.md`.
+Created: 2026-10-28. Revised and reviewed: 2026-11-02. Status: implementation started on 2026-11-02; baseline committed, the first shared numerical-core increment implemented, the native Qt frontend built and tested, and C++ current-policy recollection implemented with CPU boundary tests. Remaining phases and acceptance checks are tracked in `../2026-11/nn-po4ao-implementation.md`.
 
 Prepared by GPT-6 from the user's shared-GUI request and subsequent decisions in this chat. This document is the implementation handoff. Sections 1–6 record the agreed behavior and explicit engineering defaults; sections 7–11 describe implementation, evidence, and acceptance work; section 12 records the final review. It supersedes conflicting proposals in `agents/plans/2026-09/nnReconstructor-gui.md` and the earlier interactive preview, particularly their loop-open and PO4AO-reset requirements.
 
@@ -22,6 +22,8 @@ The user explicitly decided:
 - Warmup recollection runs under the current controller with exploration noise and leaves that controller selected afterward.
 - Omit modal gains, tuning panels, plots from the compact GUI, and automatic loop management. Preserve the training/debug plots in the notebook.
 - The operator chooses and manages notebook versus app training. GUI learning controls affect only the app's own worker; they do not pause, reset, terminate, or adopt a notebook kernel.
+
+The user subsequently authorized read-only exao2 inspection on 2026-11-02; that limited exception is recorded in the implementation record. No remote control, process changes or file writes are authorized.
 
 All agent development and tests run on a local workstation or an isolated non-instrument environment. Under `AGENTS.md` rule 0, the agent must not execute on exao1/exao2/exao3/exao5, SSH there for inspection, or issue INDI commands through a tunnel to the instrument. An operator performs instrument installation, process changes, routing checks, and acceptance tests. The conventional PO4AO/training software is not an LLM agent; its operator-run deployment is the intended eventual product.
 
