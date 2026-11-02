@@ -4,9 +4,35 @@ Created: 2026-10-28. Revised and reviewed: 2026-11-02. Status: implementation st
 
 Prepared by GPT-6 from the user's shared-GUI request and subsequent decisions in this chat. This document is the implementation handoff. Sections 1–6 record the agreed behavior and explicit engineering defaults; sections 7–11 describe implementation, evidence, and acceptance work; section 12 records the final review. It supersedes conflicting proposals in `agents/plans/2026-09/nnReconstructor-gui.md` and the earlier interactive preview, particularly their loop-open and PO4AO-reset requirements.
 
-Packaging revision, 2026-10-28: use a first-class installed `po4aoTrainer` Python application alongside the C++ `po4ao` app. This replaces the earlier `learningCtrl` backend and its home-directory worker/helper proposal. The GUI keeps its proposed name `learningCtrlGUI`. Production execution must not depend on a personal checkout, editable install, or home-directory interpreter.
+Packaging revision, 2026-10-28: use a first-class installed `po4aoTrainer` Python application alongside the C++ `po4ao` app. This replaces the earlier `learningCtrl` backend and its home-directory worker/helper proposal. The initial launcher name was `learningCtrlGUI`; the notebook-independence revision below replaces it with `po4aoGUI`. Production execution must not depend on a personal checkout, editable install, or home-directory interpreter.
 
 Final scope decisions, 2026-11-02: start from `rlandman/po4ao-pr`, import the newer NN correctness/control implementation from `rlandman/nnreconstructor-correctness-controls` at `4353737e331671cd6a9b6aad5d92039c27f26715`, and import the newest committed `dlDataCollection` separately. Exclude the NN speedup changes, not the newer control functionality. Preserve notebook training and plots using the same numerical core as the installed app. The operator manages notebook/app training responsibilities; do not add notebook detection, session locks, leases, or ownership enforcement. Reuse current upstream GUI infrastructure. Include C++ recollection under the current active policy with exploration noise.
+
+Notebook-independence revision, 2026-11-02: one `po4aoGUI` must support both the
+C++ runtime alone and the optional managed trainer. It replaces the existing launcher;
+do not add separate notebook and managed GUIs. Launch `po4aoGUI [po4ao-device
+[trainer-device]]` (defaults `po4ao`, `po4aoTrainer`). Subscribe to the C++ device
+independently, so no trainer installation or process is required for notebook testing.
+An existing training notebook and its environment may be used without migrating to
+`TrainingSession`; the supplied synthetic example is optional.
+
+When a live trainer advertises this runtime in `devices.po4ao`, retain the managed
+button behaviors below. Otherwise Enable/Disable writes `control_enable.toggle`,
+Reset requests control Off if needed then `reset_model.toggle=On`, and Recollect
+writes `recollect_warmup.toggle=On`. Native Enable selects the resident policy; the
+notebook owns engine export/reload as before. Learning controls are disabled and
+labelled trainer unavailable. Native controls read `fsm`, `model_status`,
+`collection_status` and their switch acknowledgements. They require advancing
+`model_status.sequence`; a changed `instance` invalidates old runtime capabilities.
+No native request controls notebook execution or Python objects. In notebook use,
+Disable selects the integrator, Reset clears the runtime policy, and the operator
+manages training/collection compatibility in the notebook. No automatic loop action
+or notebook ownership enforcement is added. The existing NN section still uses the
+companion and is unavailable without it; splitting NN is outside this correction.
+Trainer arrival/loss changes availability only: never replay or reroute a sent
+request. Keep unresolved local requests latched to their original device until
+acknowledgement or device invalidation. The same window supports both workflows.
+These decisions supersede any earlier mandatory-companion or notebook-migration wording.
 
 ## 1. Scope and execution boundary
 
@@ -213,7 +239,7 @@ No live attachment to worker Python variables, automatic notebook/app optimizer 
 
 ### 7.1 GUI: one widget and one launcher
 
-Add `gui/widgets/learningCtrl/learningCtrl.hpp` and `learningCtrl.ui`, plus `gui/apps/learningCtrlGUI/{learningCtrlGUI_main.cpp,learningCtrlGUI.pro,Makefile}`.
+Add `gui/widgets/learningCtrl/learningCtrl.hpp` and `learningCtrl.ui`, plus `gui/apps/po4aoGUI/{po4aoGUI_main.cpp,po4aoGUI.pro,Makefile}`.
 
 Reuse these references directly:
 
@@ -227,7 +253,7 @@ Reuse these references directly:
 
 Reuse stock QPushButton/QComboBox/QCheckBox and existing status helpers. Keep widget updates on the Qt thread. Apart from importing existing upstream fixes and dependencies, no new shared widget infrastructure is anticipated. Do not use a generic immediate-send selection widget for the NN dropdown if it would load on selection instead of Enable.
 
-Launch as `learningCtrlGUI po4aoTrainer`, using the existing INDI transport/aggregation. Device-name mappings come from the companion's configuration/status, not duplicated hard-coded GUI names. Use the current localhost:7624 launcher convention initially; no new SSH tunnel manager or browser server.
+Launch as `po4aoGUI po4ao po4aoTrainer`, using the existing INDI transport/aggregation. Runtime and optional trainer names are launcher arguments; NN/modulation mappings come from the companion configuration/status. Native PO4AO subscriptions do not depend on the companion. Use the current localhost:7624 launcher convention initially; no new SSH tunnel manager or browser server.
 
 ### 7.2 One Python INDI companion, not a service per button
 
@@ -339,15 +365,15 @@ Read-only status reflects observed completion, not writable request values. Busy
 
 ## 9. Minimal installation and launch impact
 
-The following are future operator-side deployment steps, not commands for the agent to execute on the instrument.
+The following are operator-side deployment steps, not commands for the agent to execute on the instrument. Notebook-only testing needs the C++ runtime and GUI; trainer installation and registration steps apply only to managed testing. The single current runbook is `apps/po4aoTrainer/DEPLOYMENT.md`.
 
-1. Build/install only `gui/apps/learningCtrlGUI` using its existing Makefile pattern. `Make/magAOXGUI.mk` runs qmake/make and installs the binary into `/usr/local/bin`. No change to the shared Makefile fragment is needed. Add one entry to top-level `all_guis` for normal aggregate builds; RTC roles already exclude GUI builds.
+1. Build/install only `gui/apps/po4aoGUI` using its existing Makefile pattern. `Make/magAOXGUI.mk` runs qmake/make and installs the binary into `/usr/local/bin`. No change to the shared Makefile fragment is needed. Add one entry to top-level `all_guis` for normal aggregate builds; RTC roles already exclude GUI builds.
 2. Install `apps/po4aoTrainer` using `Make/pythonApp.mk` into the selected shared environment. Match the Makefile target, package import, and console entry point to `po4aoTrainer`; the launcher is linked into `/opt/MagAOX/bin`. Add one entry to `pythonapps_rtc` for standard role-based installation, ensuring that this app selects its configured environment without changing other apps' environments. Do not add heavy training dependencies to the global instrument environment.
 3. In the separate instrument-config repository, add `po4aoTrainer.conf`, `po4ao_training.conf`, one `po4aoTrainer po4aoTrainer` process entry to `proclist_RTC.txt`, and a local driver entry in `isRTC.conf`. Include the normal per-device runtime directories/FIFO driver setup used by the deployment environment; `pythonApp.mk` alone does not establish all of this.
 4. Expose the new device through the existing INDI aggregation path used by the operator workstation/AOC. Add only required remote driver entries where the aggregator uses explicit allowlists. Do not create a new tunnel service or assume every RTC property is automatically forwarded. Verify underlying NN/PO4AO/modulation names through the same path.
 5. Install the worker, numerical dependencies, and switching resources with the trainer package. Provision shared writable artifact/diagnostics/session directories and configure their exact paths and permissions for the runtime account. Verify operation without access to the developer's home directory, and training/build GPU separation from inference using the existing helper/configuration. Install the selected pre-speedup NN baseline and PO4AO recollection/status changes; deploy the imported collection app separately if requested by the operator.
 6. Start the companion using the standard named `xctrl startup po4aoTrainer` workflow after operator registration. This starts the supervisor only; training starts from the GUI. Reset stops its numerical worker and owned build children, not the supervisor or C++ PO4AO app.
-7. Launch `learningCtrlGUI po4aoTrainer` manually, like other GUI executables. Adding it to `gui/scripts/magaox_guis.sh` is optional and deferred by default, so routine observing startup does not gain another window unexpectedly.
+7. Launch `po4aoGUI po4ao po4aoTrainer` manually, like other GUI executables. Adding it to `gui/scripts/magaox_guis.sh` is optional and deferred by default, so routine observing startup does not gain another window unexpectedly.
 
 No new service manager, HTTP server, Qt framework, C++ base class, core XDevice modification, or broad instrument rebuild is proposed. Existing INDI aggregation may need an operator-managed bridge reload/restart for its new device; do not hide that deployment requirement or restart unrelated processes.
 
@@ -412,7 +438,7 @@ Functional commits include the relevant updated plan; follow with documentation-
 
 | Planned files / location | Purpose |
 | --- | --- |
-| `gui/widgets/learningCtrl/`, `gui/apps/learningCtrlGUI/` | New compact Qt widget and launcher/build files. |
+| `gui/widgets/learningCtrl/`, `gui/apps/po4aoGUI/` | New compact Qt widget and launcher/build files. |
 | `apps/po4aoTrainer/` | Installed Python INDI supervisor, numerical worker/training helpers, switching helper/resources, packaging, and tests. |
 | `apps/nnReconstructor/` from pinned correctness/control donor | Import newer controls/correctness fixes, tests and relevant configuration/export documentation; exclude all later speedups. |
 | `po4ao-pr`'s `apps/po4ao/po4ao.hpp`, `po4ao_impl.hpp`, helpers/tests/README as needed | Current-policy exploration/recollection and precise operational status. |

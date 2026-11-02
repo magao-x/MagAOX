@@ -227,7 +227,7 @@ ifeq ($(ALL_APPS),1)
 endif
 
 all_guis = \
-	learningCtrlGUI \
+	po4aoGUI \
 	dmCtrlGUI \
 	dmModeGUI \
 	offloadCtrlGUI \

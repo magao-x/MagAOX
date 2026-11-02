@@ -15,6 +15,39 @@ requirements in `apps/po4aoTrainer/DEPLOYMENT.md`. Historical increment notes be
 describe their respective revisions; the review response supersedes their readiness
 claims and Reset/publication sequencing. This review used local resources only.
 
+## Notebook independence and one launcher, 2026-11-02
+
+The user rejected the mandatory companion and a second runtime-only GUI. Replaced
+`learningCtrlGUI` with one `po4aoGUI [po4ao-device [trainer-device]]`, keeping the
+existing widget, Designer layout, stylesheet, publisher and build rules. Default
+names are `po4ao` and `po4aoTrainer`. Both devices are independently subscribed.
+Without the trainer, native Enable/Disable, Reset and Recollect remain available;
+Start/Pause is disabled. With a fresh trainer mapped to this runtime, the same
+buttons use existing managed transactions. The NN section remains unchanged and
+needs the companion. No C++ or Python backend changes are needed for this correction.
+
+Native Reset sends control Off only when observed enabled, then requests runtime
+reset. Enable selects the resident model; notebook export/reload remains notebook
+code. No Python kernel, models or optimizer objects are manipulated. The old notebook
+can remain in its existing environment; the shared-core example is optional.
+
+Requests and acknowledgements are scoped by device/property. Independent heartbeats
+and runtime process identity reject stale capabilities. Trainer arrival/loss sends
+no commands, and unresolved local requests cannot be retried through the other
+backend. GUI actions do not open/close the loop or enforce notebook/app exclusivity.
+
+Local verification: Qt widget suite passes 240 assertions in 19 cases, including
+native-only use, Reset ordering, optional trainer arrival/departure, independent
+freshness, native permissions, restart invalidation and cross-device acknowledgement.
+The shared publisher suite also passes 95 assertions in 6 cases. The native-only
+500-pixel preview was rendered and inspected. The renamed launcher builds with
+Qt 5.15.15 on macOS. Local qmake overrides disable
+unavailable mxlib pkg-config linkage; production build files keep standard linkage.
+Existing shared-INDI override and SDK/deployment-target warnings remain unchanged.
+No remote access, instrument build, deployment, GPU or live INDI test was performed.
+The consolidated `apps/po4aoTrainer/DEPLOYMENT.md` replaces the notebook runbook and
+contains both installation paths without requiring another guide.
+
 ## Branches and baseline
 
 - Fixed baseline branch: `rlandman/nn-po4ao-baseline`, commit `88271a3e6ec3c3add36a4983d806f05501108f20`.

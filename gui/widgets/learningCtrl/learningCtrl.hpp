@@ -1,5 +1,5 @@
 /** \file learningCtrl.hpp
- * \brief Compact NN and PO4AO control panel using the shared INDI publisher.
+ * \brief PO4AO inference and optional managed training through the shared INDI publisher.
  */
 #ifndef learningCtrl_hpp
 #define learningCtrl_hpp
@@ -18,9 +18,10 @@
 namespace xqt
 {
 
-/// Display observed controller state and send explicit requests to po4aoTrainer.
+/// Control PO4AO directly when its optional trainer is unavailable.
 /** The shared publisher queues all callbacks onto this widget's Qt thread.
- * Compound operations and completion belong to the companion, not this client.
+ * Managed compound operations belong to the companion. Without it, native C++
+ * controls remain available and Python training stays entirely with the notebook.
  * No loop state or training state gates reconstruction controls.
  */
 class learningCtrl : public xWidget
@@ -29,6 +30,14 @@ class learningCtrl : public xWidget
 
   protected:
     std::string m_device; ///< Companion INDI device, supplied by the launcher.
+
+    std::string m_runtimeDevice; ///< C++ PO4AO device, available independently of the trainer.
+
+    std::string m_runtimeInstance; ///< Process identity used to invalidate previous-runtime capabilities.
+
+    QElapsedTimer m_runtimeAge; ///< Age since an advancing C++ model-status sequence.
+
+    std::string m_runtimeSequence; ///< Last C++ sequence; empty until discovery.
 
     std::string m_nnDevice; ///< NN device discovered through the companion's devices property.
 
@@ -39,7 +48,8 @@ class learningCtrl : public xWidget
 
     std::set<std::string> m_defined; ///< Properties with observed definitions, including command permissions.
 
-    std::map<std::string, bool> m_pending; ///< Locally sent commands; value records an observed Busy acknowledgement.
+    std::map<std::string, bool>
+        m_pending; ///< Requests keyed by device.property; value records an observed Busy acknowledgement.
 
     std::string m_message; ///< Local request/acknowledgement error, separate from backend status.
 
@@ -54,9 +64,10 @@ class learningCtrl : public xWidget
     QTimer m_ackTimer; ///< Bounds the wait for initial acknowledgement; never retries a command.
 
   public:
-    /// Construct a compact panel for one companion device.
-    explicit learningCtrl( const std::string &device, /**< [in] Companion device name. */
-                           QWidget           *parent = nullptr /**< [in] Optional Qt parent. */ );
+    /// Construct one panel for C++ inference and an optional companion.
+    explicit learningCtrl( const std::string &device,                  /**< [in] Companion device name. */
+                           QWidget           *parent        = nullptr, /**< [in] Optional Qt parent. */
+                           const std::string &runtimeDevice = "po4ao" /**< [in] C++ runtime device. */ );
 
     /// Attach named property subscriptions through the existing publisher.
     void subscribe() override;
@@ -93,7 +104,7 @@ class learningCtrl : public xWidget
     /// Request PO4AO activation or coordinated disable according to observed control state.
     void on_buttonPO4AO_clicked();
 
-    /// Request reset of the managed training session and runtime policy.
+    /// Reset the runtime policy and, when connected, the managed training session.
     void on_buttonReset_clicked();
 
     /// Request noisy warmup recollection under the current controller.
@@ -108,7 +119,13 @@ class learningCtrl : public xWidget
   private:
     Ui::learningCtrl m_ui; ///< Qt Designer layout, using standard MagAO-X controls.
 
-    /// Observe actual companion progress; repeated cached values do not renew freshness.
+    /// Determine whether the optional trainer is live and controls this C++ device.
+    bool trainerReady() const;
+
+    /// Render native inference controls without depending on trainer state.
+    void updateRuntimeGUI();
+
+    /// Observe independent runtime/trainer progress; cached values do not renew freshness.
     void observeHeartbeat( const pcf::IndiProperty &property /**< [in] Newly received message. */ );
 
     /// Look up an observed text element, returning empty when it is unavailable.
@@ -123,12 +140,14 @@ class learningCtrl : public xWidget
     std::string status( const std::string &element /**< [in] Status element name. */ ) const;
 
     /// Check that a defined writable command has the expected type and elements.
-    bool commandAvailable( const std::string                  &name, /**< [in] Companion command property. */
-                           pcf::IndiProperty::Type             type, /**< [in] Expected INDI type. */
-                           std::initializer_list<const char *> elements /**< [in] Required elements. */ ) const;
+    bool commandAvailable( const std::string                  &name,     /**< [in] Command property. */
+                           pcf::IndiProperty::Type             type,     /**< [in] Expected INDI type. */
+                           std::initializer_list<const char *> elements, /**< [in] Required elements. */
+                           const std::string &device = "" /**< [in] Source device; empty selects trainer. */ ) const;
 
     /// Determine whether this domain has a pending or observed Busy command.
-    bool busy( std::initializer_list<const char *> names /**< [in] Commands sharing an operation domain. */ ) const;
+    bool busy( std::initializer_list<const char *> names, /**< [in] Commands sharing an operation domain. */
+               const std::string &device = "" /**< [in] Source device; empty selects trainer. */ ) const;
 
     /// Update dynamic NN subscriptions after the companion's device mapping changes.
     void syncNNDevice();
@@ -137,21 +156,23 @@ class learningCtrl : public xWidget
     void syncModels();
 
     /// Observe the Busy then terminal command acknowledgement sequence.
-    void acknowledge( const pcf::IndiProperty &property /**< [in] Companion readback. */ );
+    void acknowledge( const pcf::IndiProperty &property /**< [in] Device readback. */ );
 
     /// Latch a local request before sending it, preventing duplicate clicks until acknowledgement.
     void submit( const pcf::IndiProperty &property /**< [in] Explicit command payload. */ );
 
-    /// Construct a single-element switch request for a defined companion command.
+    /// Construct a single-element switch request for a defined device command.
     void submitSwitch( const std::string &name,    /**< [in] Command property. */
                        const std::string &element, /**< [in] Switch element. */
-                       bool               on /**< [in] Explicit requested value. */ );
+                       bool               on,      /**< [in] Explicit requested value. */
+                       const std::string &device = "" /**< [in] Destination; empty selects trainer. */ );
 };
 
-inline learningCtrl::learningCtrl( const std::string &device, QWidget *parent ) : xWidget( parent ), m_device( device )
+inline learningCtrl::learningCtrl( const std::string &device, QWidget *parent, const std::string &runtimeDevice )
+    : xWidget( parent ), m_device( device ), m_runtimeDevice( runtimeDevice )
 {
     m_ui.setupUi( this );
-    setWindowTitle( "NN / PO4AO" );
+    setWindowTitle( "PO4AO / NN" );
     setXwFont( this );
     m_statusTimer.setInterval( 500 );
     connect( &m_statusTimer, &QTimer::timeout, this, &learningCtrl::updateGUI );
@@ -181,6 +202,9 @@ inline void learningCtrl::subscribe()
                               "progress",
                               "training_config" } )
         m_parent->addSubscriberProperty( this, m_device, name );
+    for( const auto *name :
+         { "fsm", "control_enable", "reset_model", "recollect_warmup", "model_status", "collection_status" } )
+        m_parent->addSubscriberProperty( this, m_runtimeDevice, name );
     if( !m_nnDevice.empty() )
         for( const auto *name : { "fsm", "model", "model_status" } )
             m_parent->addSubscriberProperty( this, m_nnDevice, name );
@@ -197,6 +221,9 @@ inline void learningCtrl::onDisconnect()
     m_connected     = false;
     m_haveHeartbeat = false;
     m_heartbeatAge.invalidate();
+    m_runtimeAge.invalidate();
+    m_runtimeInstance.clear();
+    m_runtimeSequence.clear();
     m_properties.clear();
     m_defined.clear();
     m_pending.clear();
@@ -239,13 +266,14 @@ inline std::string learningCtrl::status( const std::string &element ) const
 
 inline bool learningCtrl::commandAvailable( const std::string                  &name,
                                             pcf::IndiProperty::Type             type,
-                                            std::initializer_list<const char *> elements ) const
+                                            std::initializer_list<const char *> elements,
+                                            const std::string                  &device ) const
 {
-    const auto key   = m_device + "." + name;
+    const auto key   = ( device.empty() ? m_device : device ) + "." + name;
     const auto found = m_properties.find( key );
     if( !m_connected || !m_defined.count( key ) || found == m_properties.end() || found->second.getType() != type ||
         found->second.getPerm() == pcf::IndiProperty::ReadOnly || !found->second.hasValidPerm() ||
-        found->second.getState() == pcf::IndiProperty::Busy || m_pending.count( name ) )
+        found->second.getState() == pcf::IndiProperty::Busy || m_pending.count( key ) )
         return false;
     for( const auto *element : elements )
         if( !found->second.find( element ) )
@@ -253,12 +281,13 @@ inline bool learningCtrl::commandAvailable( const std::string                  &
     return true;
 }
 
-inline bool learningCtrl::busy( std::initializer_list<const char *> names ) const
+inline bool learningCtrl::busy( std::initializer_list<const char *> names, const std::string &device ) const
 {
     for( const auto *name : names )
     {
-        const auto found = m_properties.find( m_device + "." + name );
-        if( m_pending.count( name ) ||
+        const auto key   = ( device.empty() ? m_device : device ) + "." + name;
+        const auto found = m_properties.find( key );
+        if( m_pending.count( key ) ||
             ( found != m_properties.end() && found->second.getState() == pcf::IndiProperty::Busy ) )
             return true;
     }
@@ -309,9 +338,7 @@ inline void learningCtrl::syncModels()
 
 inline void learningCtrl::acknowledge( const pcf::IndiProperty &property )
 {
-    if( property.getDevice() != m_device )
-        return;
-    auto pending = m_pending.find( property.getName() );
+    auto pending = m_pending.find( property.createUniqueKey() );
     if( pending == m_pending.end() )
         return;
     if( property.getState() == pcf::IndiProperty::Busy )
@@ -332,8 +359,38 @@ inline void learningCtrl::acknowledge( const pcf::IndiProperty &property )
         m_ackTimer.stop();
 }
 
+inline bool learningCtrl::trainerReady() const
+{
+    const auto fsm = value( m_device, "fsm", "state" );
+    return m_connected && m_heartbeatAge.isValid() && m_heartbeatAge.elapsed() < 5000 &&
+           m_defined.count( m_device + ".status" ) && ( fsm == "READY" || fsm == "OPERATING" ) &&
+           value( m_device, "devices", "po4ao" ) == m_runtimeDevice;
+}
+
 inline void learningCtrl::observeHeartbeat( const pcf::IndiProperty &property )
 {
+    if( property.getDevice() == m_runtimeDevice && property.getName() == "model_status" )
+    {
+        if( property.find( "instance" ) )
+        {
+            const auto instance = property["instance"].get();
+            if( !m_runtimeInstance.empty() && instance != m_runtimeInstance )
+            {
+                pcf::IndiProperty request;
+                request.setDevice( m_runtimeDevice );
+                handleDelProperty( request );
+                sendGetProperties( request );
+            }
+            m_runtimeInstance = instance;
+        }
+        if( property.find( "sequence" ) )
+        {
+            const auto sequence = property["sequence"].get();
+            if( !m_runtimeSequence.empty() && sequence != m_runtimeSequence )
+                m_runtimeAge.start();
+            m_runtimeSequence = sequence;
+        }
+    }
     if( property.getDevice() != m_device || property.getName() != "status" || !property.find( "heartbeat" ) )
         return;
     const auto heartbeat = property["heartbeat"].get();
@@ -345,11 +402,12 @@ inline void learningCtrl::observeHeartbeat( const pcf::IndiProperty &property )
 
 inline void learningCtrl::handleDefProperty( const pcf::IndiProperty &property )
 {
-    if( property.getDevice() != m_device && property.getDevice() != m_nnDevice )
+    if( property.getDevice() != m_device && property.getDevice() != m_nnDevice &&
+        property.getDevice() != m_runtimeDevice )
         return;
+    observeHeartbeat( property );
     m_properties[property.createUniqueKey()] = property;
     m_defined.insert( property.createUniqueKey() );
-    observeHeartbeat( property );
     acknowledge( property );
     if( property.getDevice() == m_device && property.getName() == "devices" )
         syncNNDevice();
@@ -360,8 +418,10 @@ inline void learningCtrl::handleDefProperty( const pcf::IndiProperty &property )
 
 inline void learningCtrl::handleSetProperty( const pcf::IndiProperty &property )
 {
-    if( property.getDevice() != m_device && property.getDevice() != m_nnDevice )
+    if( property.getDevice() != m_device && property.getDevice() != m_nnDevice &&
+        property.getDevice() != m_runtimeDevice )
         return;
+    observeHeartbeat( property );
     const auto key   = property.createUniqueKey();
     auto       found = m_properties.find( key );
     if( found == m_properties.end() )
@@ -378,7 +438,6 @@ inline void learningCtrl::handleSetProperty( const pcf::IndiProperty &property )
         if( property.hasValidState() )
             found->second.setState( property.getState() );
     }
-    observeHeartbeat( property );
     acknowledge( property );
     if( property.getDevice() == m_device && property.getName() == "devices" )
         syncNNDevice();
@@ -387,7 +446,8 @@ inline void learningCtrl::handleSetProperty( const pcf::IndiProperty &property )
 
 inline void learningCtrl::handleDelProperty( const pcf::IndiProperty &property )
 {
-    if( property.getDevice() != m_device && property.getDevice() != m_nnDevice )
+    if( property.getDevice() != m_device && property.getDevice() != m_nnDevice &&
+        property.getDevice() != m_runtimeDevice )
         return;
     const bool whole = property.getName().empty() || property.getName() == "fsm";
     for( auto entry = m_properties.begin(); entry != m_properties.end(); )
@@ -406,25 +466,35 @@ inline void learningCtrl::handleDelProperty( const pcf::IndiProperty &property )
             m_haveHeartbeat = false;
             m_heartbeatAge.invalidate();
         }
-        if( whole )
-        {
-            m_pending.clear();
-            m_ackTimer.stop();
-        }
-        else
-            m_pending.erase( property.getName() );
         if( whole || property.getName() == "devices" )
             syncNNDevice();
     }
+    if( property.getDevice() == m_runtimeDevice )
+    {
+        if( whole || property.getName() == "model_status" )
+        {
+            m_runtimeAge.invalidate();
+            m_runtimeSequence.clear();
+            m_runtimeInstance.clear();
+        }
+    }
+    const auto prefix = property.getDevice() + ".";
+    for( auto pending = m_pending.begin(); pending != m_pending.end(); )
+        if( ( whole && pending->first.compare( 0, prefix.size(), prefix ) == 0 ) ||
+            pending->first == property.createUniqueKey() )
+            pending = m_pending.erase( pending );
+        else
+            ++pending;
+    if( m_pending.empty() )
+        m_ackTimer.stop();
     syncModels();
     updateGUI();
 }
 
 inline void learningCtrl::updateGUI()
 {
-    const auto fsm   = value( m_device, "fsm", "state" );
     const bool fresh = m_heartbeatAge.isValid() && m_heartbeatAge.elapsed() < 5000;
-    const bool ready = m_connected && fresh && ( fsm == "READY" || fsm == "OPERATING" );
+    const bool ready = trainerReady();
     m_ui.labelConnection->setText( !m_connected ? "Disconnected"
                                    : ready      ? "Ready"
                                    : !fresh     ? "Stale / waiting for heartbeat"
@@ -462,20 +532,29 @@ inline void learningCtrl::updateGUI()
                                                                                 ? "Unknown"
                                                                                 : status( "modulation" ) ) );
 
+    if( !ready )
+    {
+        updateRuntimeGUI();
+        return;
+    }
+
+    const bool runtimePending  = m_pending.count( m_runtimeDevice + ".control_enable" ) ||
+                                 m_pending.count( m_runtimeDevice + ".reset_model" ) ||
+                                 m_pending.count( m_runtimeDevice + ".recollect_warmup" );
     const auto controller      = ready ? status( "controller" ) : std::string( "unknown" );
     const bool enabled         = controller == "po4ao" || controller == "fallback";
     const bool knownController = enabled || controller == "integrator";
     const auto learning        = ready ? status( "learning" ) : std::string( "unknown" );
     const auto phase           = status( "training_phase" );
-    const bool trainingReady   = ready && ( phase == "idle" || phase == "error" ) &&
+    const bool trainingReady   = ready && !runtimePending && ( phase == "idle" || phase == "error" ) &&
                                  !busy( { "po4ao_enable", "reset", "recollect", "learning" } );
     m_ui.buttonPO4AO->setText( enabled ? "Disable PO4AO" : "Enable PO4AO" );
-    const bool disableReady =
-        ready && enabled && phase != "resetting" && phase != "reset_pending" && !busy( { "reset", "po4ao_enable" } );
+    const bool disableReady = ready && !runtimePending && enabled && phase != "resetting" && phase != "reset_pending" &&
+                              !busy( { "reset", "po4ao_enable" } );
     m_ui.buttonPO4AO->setEnabled( ( enabled ? disableReady : trainingReady && knownController ) &&
                                   commandAvailable( "po4ao_enable", pcf::IndiProperty::Switch, { "toggle" } ) );
     m_ui.labelController->setText( stateLabel( controller ) );
-    m_ui.buttonReset->setEnabled( ready && phase != "resetting" &&
+    m_ui.buttonReset->setEnabled( ready && !runtimePending && phase != "resetting" &&
                                   commandAvailable( "reset", pcf::IndiProperty::Switch, { "request" } ) );
     const auto collection = status( "collection" );
     m_ui.buttonWarmup->setEnabled( trainingReady && knownController && collection != "collecting" &&
@@ -501,6 +580,8 @@ inline void learningCtrl::updateGUI()
     const auto iteration = value( m_device, "progress", "iteration" );
     m_ui.labelIteration->setText( "Iteration: " + QString::fromStdString( iteration.empty() ? "—" : iteration ) );
     std::string message = m_message.empty() ? status( "message" ) : m_message;
+    if( runtimePending )
+        message = "Waiting for native PO4AO command completion";
     if( !status( "error" ).empty() )
         message = status( "error" );
     const auto configError   = value( m_device, "training_config", "error" );
@@ -513,19 +594,77 @@ inline void learningCtrl::updateGUI()
     m_ui.labelStatus->setToolTip( QString::fromStdString( message ) );
 }
 
+inline void learningCtrl::updateRuntimeGUI()
+{
+    const auto fsm            = value( m_runtimeDevice, "fsm", "state" );
+    const bool fresh          = m_runtimeAge.isValid() && m_runtimeAge.elapsed() < 5000;
+    const bool trainerPending = m_pending.count( m_device + ".po4ao_enable" ) ||
+                                m_pending.count( m_device + ".reset" ) || m_pending.count( m_device + ".recollect" ) ||
+                                m_pending.count( m_device + ".learning" );
+    const bool ready = m_connected && fresh && !trainerPending && !m_runtimeInstance.empty() &&
+                       m_defined.count( m_runtimeDevice + ".model_status" ) && ( fsm == "READY" || fsm == "OPERATING" );
+    m_ui.labelConnection->setText( !m_connected ? "Disconnected"
+                                   : ready      ? "PO4AO ready / trainer unavailable"
+                                   : !fresh     ? "Stale / waiting for heartbeat"
+                                                : "Waiting for PO4AO" );
+    const auto selection = m_properties.find( m_runtimeDevice + ".control_enable" );
+    const bool known     = selection != m_properties.end() && selection->second.find( "toggle" ) &&
+                           ( selection->second["toggle"].getSwitchState() == pcf::IndiElement::On ||
+                             selection->second["toggle"].getSwitchState() == pcf::IndiElement::Off );
+    const bool enabled   = known && selection->second["toggle"].getSwitchState() == pcf::IndiElement::On;
+    m_ui.buttonPO4AO->setText( enabled ? "Disable PO4AO" : "Enable PO4AO" );
+    m_ui.buttonPO4AO->setEnabled(
+        ready && known && !busy( { "reset_model" }, m_runtimeDevice ) &&
+        commandAvailable( "control_enable", pcf::IndiProperty::Switch, { "toggle" }, m_runtimeDevice ) );
+    m_ui.buttonReset->setEnabled(
+        ready && known && !busy( { "control_enable" }, m_runtimeDevice ) &&
+        ( !enabled ||
+          commandAvailable( "control_enable", pcf::IndiProperty::Switch, { "toggle" }, m_runtimeDevice ) ) &&
+        commandAvailable( "reset_model", pcf::IndiProperty::Switch, { "toggle" }, m_runtimeDevice ) );
+    m_ui.buttonWarmup->setEnabled(
+        ready && !busy( { "control_enable", "reset_model" }, m_runtimeDevice ) &&
+        commandAvailable( "recollect_warmup", pcf::IndiProperty::Switch, { "toggle" }, m_runtimeDevice ) );
+    m_ui.buttonLearning->setEnabled( false );
+    m_ui.buttonLearning->setText( "Start learning" );
+    m_ui.labelLearning->setText( "Trainer unavailable" );
+    m_ui.labelIteration->setText( "Iteration: —" );
+    const auto controller = ready ? value( m_runtimeDevice, "model_status", "effective_controller" ) : std::string{};
+    m_ui.labelController->setText( stateLabel( controller ) );
+    QString collection = ready ? stateLabel( value( m_runtimeDevice, "collection_status", "state" ) ) : "Unknown";
+    if( ready )
+        collection += QString::fromStdString( " " + value( m_runtimeDevice, "collection_status", "frames" ) + "/" +
+                                              value( m_runtimeDevice, "collection_status", "target_frames" ) );
+    m_ui.labelCollection->setText( collection );
+    const auto loaded    = ready ? value( m_runtimeDevice, "model_status", "active_id" ) : std::string{};
+    const auto effective = ready ? value( m_runtimeDevice, "model_status", "effective_id" ) : std::string{};
+    m_ui.labelPolicy->setText( QString::fromStdString( "Loaded: " + ( loaded.empty() ? "Unknown" : loaded ) +
+                                                       "  Active: " + ( effective.empty() ? "Unknown" : effective ) ) );
+    m_ui.labelPolicy->setToolTip( m_ui.labelPolicy->text() );
+    std::string message = trainerPending ? "Trainer request unresolved; awaiting acknowledgement" : m_message;
+    const auto  error   = ready ? value( m_runtimeDevice, "model_status", "reload_error" ) : std::string{};
+    if( !error.empty() )
+        message = error;
+    else if( message.empty() )
+        message =
+            ready ? "Reload: " + value( m_runtimeDevice, "model_status", "reload" ) : "Waiting for runtime readback";
+    m_ui.labelStatus->setText( QString::fromStdString( message ) );
+    m_ui.labelStatus->setToolTip( m_ui.labelStatus->text() );
+}
+
 inline void learningCtrl::submit( const pcf::IndiProperty &property )
 {
-    m_pending[property.getName()] = false;
-    m_message                     = "Awaiting acknowledgement";
+    m_pending[property.createUniqueKey()] = false;
+    m_message                             = "Awaiting acknowledgement";
     if( !m_ackTimer.isActive() )
         m_ackTimer.start();
     updateGUI();
     sendNewProperty( property );
 }
 
-inline void learningCtrl::submitSwitch( const std::string &name, const std::string &element, bool on )
+inline void
+learningCtrl::submitSwitch( const std::string &name, const std::string &element, bool on, const std::string &device )
 {
-    pcf::IndiProperty property( pcf::IndiProperty::Switch, m_device, name );
+    pcf::IndiProperty property( pcf::IndiProperty::Switch, device.empty() ? m_device : device, name );
     property.add( pcf::IndiElement( element, on ? pcf::IndiElement::On : pcf::IndiElement::Off ) );
     submit( property );
 }
@@ -557,24 +696,48 @@ inline void learningCtrl::on_checkModulation_clicked( bool checked )
 
 inline void learningCtrl::on_buttonPO4AO_clicked()
 {
-    if( m_ui.buttonPO4AO->isEnabled() )
+    updateGUI();
+    if( !m_ui.buttonPO4AO->isEnabled() )
+        return;
+    if( trainerReady() )
         submitSwitch( "po4ao_enable", "toggle", status( "controller" ) == "integrator" );
+    else
+        submitSwitch( "control_enable",
+                      "toggle",
+                      m_properties.at( m_runtimeDevice + ".control_enable" )["toggle"].getSwitchState() !=
+                          pcf::IndiElement::On,
+                      m_runtimeDevice );
 }
 
 inline void learningCtrl::on_buttonReset_clicked()
 {
-    if( m_ui.buttonReset->isEnabled() )
+    updateGUI();
+    if( !m_ui.buttonReset->isEnabled() )
+        return;
+    if( trainerReady() )
         submitSwitch( "reset", "request", true );
+    else
+    {
+        if( m_properties.at( m_runtimeDevice + ".control_enable" )["toggle"].getSwitchState() == pcf::IndiElement::On )
+            submitSwitch( "control_enable", "toggle", false, m_runtimeDevice );
+        submitSwitch( "reset_model", "toggle", true, m_runtimeDevice );
+    }
 }
 
 inline void learningCtrl::on_buttonWarmup_clicked()
 {
-    if( m_ui.buttonWarmup->isEnabled() )
+    updateGUI();
+    if( !m_ui.buttonWarmup->isEnabled() )
+        return;
+    if( trainerReady() )
         submitSwitch( "recollect", "request", true );
+    else
+        submitSwitch( "recollect_warmup", "toggle", true, m_runtimeDevice );
 }
 
 inline void learningCtrl::on_buttonLearning_clicked()
 {
+    updateGUI();
     if( !m_ui.buttonLearning->isEnabled() )
         return;
     const bool        run = status( "learning" ) != "running" && status( "learning" ) != "waiting";
@@ -586,7 +749,7 @@ inline void learningCtrl::on_buttonLearning_clicked()
 
 inline void learningCtrl::acknowledgementTimeout()
 {
-    m_message = "No acknowledgement; operation state is unknown. Check companion status.";
+    m_message = "No acknowledgement; operation state is unknown. Check device status.";
     updateGUI(); // Keep the request latched. A timeout is not permission to resend it.
 }
 

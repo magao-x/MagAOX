@@ -29,6 +29,12 @@ text( const std::string                                         &device, /**< [i
       const std::string                                         &name,   /**< [in] Property name. */
       std::initializer_list<std::pair<std::string, std::string>> elements /**< [in] Text elements. */ );
 
+/// Construct a native runtime switch readback with an explicit acknowledgement state.
+pcf::IndiProperty
+runtimeSwitch( const std::string                   &name,    /**< [in] Native command name. */
+               bool                                 enabled, /**< [in] Applied toggle value. */
+               pcf::IndiProperty::PropertyStateType state = pcf::IndiProperty::Ok /**< [in] Command state. */ );
+
 /// Own an actual widget and the upstream offline publisher.
 struct Fixture
 {
@@ -37,7 +43,11 @@ struct Fixture
     xqt::learningCtrl m_widget{ "trainer" }; ///< Production widget under test.
 
     /// Connect and define representative independent control domains.
-    Fixture();
+    explicit Fixture( bool companion = true /**< [in] Define the optional trainer on startup. */ );
+
+    /// Define native runtime state independently of any trainer.
+    void runtime( bool               enabled  = false, /**< [in] Applied control selection. */
+                  const std::string &instance = "runtime-1" /**< [in] Process identity. */ );
 
     /// Redefine the representative device properties for all attached clients.
     void ready();
@@ -82,18 +92,49 @@ pcf::IndiProperty text( const std::string                                       
     return property;
 }
 
-Fixture::Fixture()
+pcf::IndiProperty runtimeSwitch( const std::string &name, bool enabled, pcf::IndiProperty::PropertyStateType state )
+{
+    pcf::IndiProperty property( pcf::IndiProperty::Switch, "po4ao", name );
+    property.setPerm( pcf::IndiProperty::ReadWrite );
+    property.setState( state );
+    property.add( pcf::IndiElement( "toggle", enabled ? pcf::IndiElement::On : pcf::IndiElement::Off ) );
+    return property;
+}
+
+void Fixture::runtime( bool enabled, const std::string &instance )
+{
+    define( text( "po4ao",
+                  "model_status",
+                  { { "instance", instance },
+                    { "sequence", "0" },
+                    { "active_id", "1234567812345678" },
+                    { "effective_id", enabled ? "1234567812345678" : "0000000000000000" },
+                    { "effective_controller", enabled ? "po4ao" : "integrator" },
+                    { "reload", "idle" },
+                    { "reload_error", "" } } ) );
+    define( text( "po4ao", "fsm", { { "state", "READY" } } ) );
+    define( runtimeSwitch( "control_enable", enabled ) );
+    define( runtimeSwitch( "reset_model", false ) );
+    define( runtimeSwitch( "recollect_warmup", false ) );
+    define(
+        text( "po4ao", "collection_status", { { "state", "ready" }, { "frames", "96" }, { "target_frames", "96" } } ) );
+    m_publisher.handleSetProperty( text( "po4ao", "model_status", { { "sequence", "1" } } ) );
+    drain();
+}
+
+Fixture::Fixture( bool companion )
 {
     m_publisher.addSubscriber( &m_widget );
     m_publisher.onConnect();
     drain();
-    ready();
+    if( companion )
+        ready();
 }
 
 void Fixture::ready()
 {
     define( text( "trainer", "fsm", { { "state", "READY" } } ) );
-    define( text( "trainer", "devices", { { "nn", "nn_test" } } ) );
+    define( text( "trainer", "devices", { { "nn", "nn_test" }, { "po4ao", "po4ao" } } ) );
     define( text( "trainer", "nn_activate", { { "model", "" } } ) );
     define( text( "trainer", "reconstructor", { { "target", "" }, { "expected", "" } } ) );
     for( const auto *name : { "po4ao_enable", "link_modulation", "reset", "recollect", "learning" } )
@@ -488,6 +529,181 @@ TEST_CASE( "Compact layout retains long labels and configuration errors", "[lear
         REQUIRE( f.m_widget.rect().contains( QRect( button->mapTo( &f.m_widget, QPoint() ), button->size() ) ) );
 }
 
+/** \brief Native inference controls work with no trainer definitions or process. */
+TEST_CASE( "PO4AO inference is independent of the optional trainer", "[learningCtrl]" )
+{
+    Fixture f( false );
+    f.runtime();
+    REQUIRE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
+    REQUIRE( f.control<QPushButton>( "buttonReset" )->isEnabled() );
+    REQUIRE( f.control<QPushButton>( "buttonWarmup" )->isEnabled() );
+    REQUIRE_FALSE( f.control<QPushButton>( "buttonLearning" )->isEnabled() );
+    REQUIRE_FALSE( f.control<QPushButton>( "buttonReconstructor" )->isEnabled() );
+    f.m_widget.on_buttonLearning_clicked();
+    REQUIRE( f.m_publisher.m_commands.empty() );
+    f.m_widget.on_buttonPO4AO_clicked();
+    REQUIRE( f.m_publisher.m_commands.back().getDevice() == "po4ao" );
+    REQUIRE( f.m_publisher.m_commands.back().getName() == "control_enable" );
+    REQUIRE( f.m_publisher.m_commands.back()["toggle"].getSwitchState() == pcf::IndiElement::On );
+    REQUIRE( f.control<QPushButton>( "buttonPO4AO" )->text() == "Enable PO4AO" );
+    f.define( runtimeSwitch( "control_enable", false, pcf::IndiProperty::Busy ) );
+    f.define( runtimeSwitch( "control_enable", true ) );
+    REQUIRE( f.control<QPushButton>( "buttonPO4AO" )->text() == "Disable PO4AO" );
+    f.m_widget.on_buttonWarmup_clicked();
+    REQUIRE( f.m_publisher.m_commands.back().getName() == "recollect_warmup" );
+    f.define( runtimeSwitch( "recollect_warmup", false, pcf::IndiProperty::Busy ) );
+    f.m_publisher.handleSetProperty(
+        text( "po4ao", "collection_status", { { "state", "collecting" }, { "frames", "12" } } ) );
+    drain();
+    REQUIRE( f.control<QLabel>( "labelCollection" )->text().contains( "12/96" ) );
+    REQUIRE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
+    f.m_widget.on_buttonPO4AO_clicked();
+    REQUIRE( f.m_publisher.m_commands.back()["toggle"].getSwitchState() == pcf::IndiElement::Off );
+    for( const auto &command : f.m_publisher.m_commands )
+        REQUIRE( command.getDevice() == "po4ao" );
+    // clang-format off
+#ifdef LEARNINGCTRL_TEST_DOXYGEN_REF
+    xqt::learningCtrl::updateRuntimeGUI;
+    xqt::learningCtrl::on_buttonPO4AO_clicked;
+    xqt::learningCtrl::on_buttonWarmup_clicked;
+    xqt::learningCtrl::on_buttonLearning_clicked;
+#endif
+    // clang-format on
+}
+
+/** \brief Direct Reset selects integrator when needed and waits for native acknowledgements. */
+TEST_CASE( "Native Reset leaves notebook ownership with the operator", "[learningCtrl]" )
+{
+    for( const bool enabled : { false, true } )
+    {
+        Fixture f( false );
+        f.runtime( enabled );
+        f.m_widget.on_buttonReset_clicked();
+        REQUIRE( f.m_publisher.m_commands.size() == ( enabled ? 2 : 1 ) );
+        REQUIRE( f.m_publisher.m_commands.back().getName() == "reset_model" );
+        REQUIRE( f.m_publisher.m_commands.back()["toggle"].getSwitchState() == pcf::IndiElement::On );
+        if( enabled )
+        {
+            REQUIRE( f.m_publisher.m_commands.front().getName() == "control_enable" );
+            REQUIRE( f.m_publisher.m_commands.front()["toggle"].getSwitchState() == pcf::IndiElement::Off );
+            f.define( runtimeSwitch( "control_enable", true, pcf::IndiProperty::Busy ) );
+            f.define( runtimeSwitch( "control_enable", false ) );
+        }
+        REQUIRE_FALSE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
+        f.define( runtimeSwitch( "reset_model", false, pcf::IndiProperty::Busy ) );
+        f.define( runtimeSwitch( "reset_model", false ) );
+        REQUIRE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
+        for( const auto &command : f.m_publisher.m_commands )
+            REQUIRE( command.getDevice() == "po4ao" );
+    }
+    // clang-format off
+#ifdef LEARNINGCTRL_TEST_DOXYGEN_REF
+    xqt::learningCtrl::on_buttonReset_clicked;
+    xqt::learningCtrl::acknowledge;
+#endif
+    // clang-format on
+}
+
+/** \brief The same window uses managed coordination after discovery without replaying native requests. */
+TEST_CASE( "Trainer arrival and departure do not require another GUI", "[learningCtrl]" )
+{
+    Fixture f( false );
+    f.runtime();
+    f.m_widget.on_buttonWarmup_clicked();
+    f.ready();
+    REQUIRE( f.m_publisher.m_commands.size() == 1 );
+    REQUIRE_FALSE( f.control<QPushButton>( "buttonLearning" )->isEnabled() );
+    f.define( runtimeSwitch( "recollect_warmup", false, pcf::IndiProperty::Busy ) );
+    f.define( runtimeSwitch( "recollect_warmup", false ) );
+    REQUIRE( f.control<QPushButton>( "buttonLearning" )->isEnabled() );
+    f.m_widget.on_buttonLearning_clicked();
+    REQUIRE( f.m_publisher.m_commands.back().getDevice() == "trainer" );
+    REQUIRE( f.m_publisher.m_commands.back().getName() == "learning" );
+    f.complete( "learning" );
+    f.m_widget.on_buttonPO4AO_clicked();
+    REQUIRE( f.m_publisher.m_commands.back().getName() == "po4ao_enable" );
+    f.complete( "po4ao_enable" );
+    f.erase( "trainer", "" );
+    REQUIRE( f.m_publisher.m_commands.size() == 3 );
+    REQUIRE_FALSE( f.control<QPushButton>( "buttonLearning" )->isEnabled() );
+    REQUIRE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
+    f.m_widget.on_buttonPO4AO_clicked();
+    REQUIRE( f.m_publisher.m_commands.back().getDevice() == "po4ao" );
+    REQUIRE( f.m_publisher.m_commands.back().getName() == "control_enable" );
+    // clang-format off
+#ifdef LEARNINGCTRL_TEST_DOXYGEN_REF
+    xqt::learningCtrl::trainerReady;
+    xqt::learningCtrl::handleDelProperty;
+    xqt::learningCtrl::updateGUI;
+#endif
+    // clang-format on
+}
+
+/** \brief Runtime permissions, deletion and restart never inherit previous-process capabilities. */
+TEST_CASE( "Native PO4AO discovery and restart invalidate stale state", "[learningCtrl]" )
+{
+    Fixture f( false );
+    f.runtime();
+    auto control = runtimeSwitch( "control_enable", false );
+    control.setPerm( pcf::IndiProperty::ReadOnly );
+    f.define( control );
+    REQUIRE_FALSE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
+    f.erase( "po4ao", "recollect_warmup" );
+    REQUIRE_FALSE( f.control<QPushButton>( "buttonWarmup" )->isEnabled() );
+    f.m_publisher.handleSetProperty(
+        text( "po4ao", "model_status", { { "instance", "runtime-2" }, { "sequence", "0" } } ) );
+    drain();
+    REQUIRE_FALSE( f.control<QPushButton>( "buttonReset" )->isEnabled() );
+    f.m_publisher.handleSetProperty( text( "po4ao", "model_status", { { "sequence", "1" } } ) );
+    drain();
+    REQUIRE_FALSE( f.control<QPushButton>( "buttonReset" )->isEnabled() );
+    f.runtime( false, "runtime-2" );
+    REQUIRE( f.control<QPushButton>( "buttonReset" )->isEnabled() );
+    f.m_widget.onDisconnect();
+    f.m_widget.onConnect();
+    REQUIRE_FALSE( f.control<QPushButton>( "buttonReset" )->isEnabled() );
+    REQUIRE( f.m_publisher.m_commands.empty() );
+    // clang-format off
+#ifdef LEARNINGCTRL_TEST_DOXYGEN_REF
+    xqt::learningCtrl::observeHeartbeat;
+    xqt::learningCtrl::commandAvailable;
+    xqt::learningCtrl::onDisconnect;
+#endif
+    // clang-format on
+}
+
+/** \brief Independent heartbeats permit native control after trainer loss, without rerouting an unresolved action. */
+TEST_CASE( "Trainer expiry preserves independent runtime control", "[learningCtrl]" )
+{
+    Fixture f;
+    f.runtime();
+    QThread::msleep( 5100 );
+    f.m_publisher.handleSetProperty( text( "po4ao", "model_status", { { "sequence", "1" } } ) );
+    drain();
+    REQUIRE_FALSE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
+    f.m_publisher.handleSetProperty( text( "po4ao", "model_status", { { "sequence", "2" } } ) );
+    drain();
+    REQUIRE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
+    REQUIRE_FALSE( f.control<QPushButton>( "buttonLearning" )->isEnabled() );
+    REQUIRE( f.control<QLabel>( "labelConnection" )->text().contains( "trainer unavailable" ) );
+    f.status( { { "heartbeat", "2" } } );
+    REQUIRE( f.control<QPushButton>( "buttonLearning" )->isEnabled() );
+    f.m_widget.on_buttonReset_clicked();
+    f.erase( "trainer", "status" );
+    REQUIRE_FALSE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
+    f.m_widget.on_buttonPO4AO_clicked();
+    REQUIRE( f.m_publisher.m_commands.size() == 1 );
+    f.complete( "reset" );
+    REQUIRE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
+    // clang-format off
+#ifdef LEARNINGCTRL_TEST_DOXYGEN_REF
+    xqt::learningCtrl::observeHeartbeat;
+    xqt::learningCtrl::updateRuntimeGUI;
+    xqt::learningCtrl::acknowledge;
+#endif
+    // clang-format on
+}
+
 /** \brief Save a representative real-widget preview without connecting an INDI client. */
 TEST_CASE( "Save the compact panel preview", "[.preview]" )
 {
@@ -499,6 +715,11 @@ TEST_CASE( "Save the compact panel preview", "[.preview]" )
                 { "active_policy", "a31c480de728b941" },
                 { "retained_policy", "a31c480de728b941" } } );
     f.define( text( "trainer", "progress", { { "iteration", "250" } } ) );
+    if( std::getenv( "LEARNINGCTRL_NOTEBOOK_PREVIEW" ) )
+    {
+        f.erase( "trainer", "" );
+        f.runtime( true );
+    }
     f.m_widget.resize( 500, 310 );
     f.m_widget.show();
     drain();

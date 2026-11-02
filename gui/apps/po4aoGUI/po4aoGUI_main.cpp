@@ -1,4 +1,4 @@
-/** \file learningCtrlGUI_main.cpp
+/** \file po4aoGUI_main.cpp
  * \brief Standard Qt/INDI launcher for the shared NN and PO4AO control panel.
  */
 #include <QApplication>
@@ -10,14 +10,15 @@
 
 /// Launch one panel against the existing local INDI aggregation service.
 int main( int   argc, /**< [in] Argument count. */
-          char *argv[] /**< [in] Arguments; first positional argument is the companion device. */ )
+          char *argv[] /**< [in] Arguments; optional runtime and companion device names. */ )
 {
-    if( argc != 2 )
+    if( argc > 3 )
     {
-        std::cerr << "Usage: learningCtrlGUI <po4aoTrainer device>\n";
+        std::cerr << "Usage: po4aoGUI [po4ao device [po4aoTrainer device]]\n";
         return 1;
     }
-    const std::string device = argv[1];
+    const std::string runtime = argc > 1 ? argv[1] : "po4ao";
+    const std::string trainer = argc > 2 ? argv[2] : "po4aoTrainer";
     QApplication      app( argc, argv );
     QFile             file( ":/magaox.qss" );
     if( !file.open( QFile::ReadOnly | QFile::Text ) )
@@ -27,8 +28,8 @@ int main( int   argc, /**< [in] Argument count. */
     }
     QTextStream stream( &file );
     app.setStyleSheet( stream.readAll() );
-    multiIndiManager  manager( device, "127.0.0.1", 7624 );
-    xqt::learningCtrl panel( device );
+    multiIndiManager  manager( runtime, "127.0.0.1", 7624 );
+    xqt::learningCtrl panel( trainer, nullptr, runtime );
     manager.addSubscriber( &panel );
     manager.activate();
     panel.show();
