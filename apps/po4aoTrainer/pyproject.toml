@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xapp-po4aoTrainer"
+version = "2026.11.02"
+description = "Shared PO4AO nonlinear training core for notebooks and the managed app"
+requires-python = ">=3.10"
+dependencies = ["numpy", "torch", "scipy"]
+
+[project.optional-dependencies]
+plots = ["matplotlib"]
+test = ["pytest"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["xapp*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,6 +1,6 @@
 # Shared NN / PO4AO GUI: requirements and implementation plan
 
-Created: 2026-10-28. Revised and reviewed: 2026-11-02. Status: ready for implementation handoff, including the explicit baseline-preparation and operator-acceptance tasks below; implementation not started.
+Created: 2026-10-28. Revised and reviewed: 2026-11-02. Status: implementation started on 2026-11-02; baseline committed and the first shared numerical-core increment implemented. Remaining phases and acceptance checks are tracked in `../2026-11/nn-po4ao-implementation.md`.
 
 Prepared by GPT-6 from the user's shared-GUI request and subsequent decisions in this chat. This document is the implementation handoff. Sections 1–6 record the agreed behavior and explicit engineering defaults; sections 7–11 describe implementation, evidence, and acceptance work; section 12 records the final review. It supersedes conflicting proposals in `agents/plans/2026-09/nnReconstructor-gui.md` and the earlier interactive preview, particularly their loop-open and PO4AO-reset requirements.
 
@@ -25,7 +25,7 @@ The user explicitly decided:
 
 All agent development and tests run on a local workstation or an isolated non-instrument environment. Under `AGENTS.md` rule 0, the agent must not execute on exao1/exao2/exao3/exao5, SSH there for inspection, or issue INDI commands through a tunnel to the instrument. An operator performs instrument installation, process changes, routing checks, and acceptance tests. The conventional PO4AO/training software is not an LLM agent; its operator-run deployment is the intended eventual product.
 
-This drafting task changes documentation only. Do not treat this document as authorization to implement, install, launch, or operate the instrument until implementation is separately requested.
+Implementation was separately authorized on 2026-11-02, including creating a baseline branch and a child implementation branch. Instrument installation, launch and operation remain operator-run under the boundary above.
 
 ## 2. Sources inspected and revision boundaries
 
@@ -406,7 +406,7 @@ Follow the full current `AGENTS.md`: minimal scoped edits, existing include guar
 
 For application Catch2 tests, register under `application_unit_test`, use the established `libXWCTest::<appName>Test` namespace and TEST_CASE documentation, and preserve explicit Doxygen-only API references when harness indirection breaks linking. Python companion/worker tests follow local Python conventions; do not force them into a C++ harness.
 
-Functional commits include the relevant updated plan; follow with documentation-only and then formatting-only commits if needed. Use short commit messages and the required actual-model attribution. PR descriptions require the agent/prompt-or-plan attribution and separately copyable title/description. No commit or PR is part of this drafting request.
+Functional commits include the relevant updated plan; follow with documentation-only and then formatting-only commits if needed. Use short commit messages and the required actual-model attribution. PR descriptions require the agent/prompt-or-plan attribution and separately copyable title/description. The original drafting request did not include commits or a PR. The subsequent baseline/implementation request authorizes local feature-branch commits; no push or PR has been requested.
 
 | Planned files / location | Purpose |
 | --- | --- |

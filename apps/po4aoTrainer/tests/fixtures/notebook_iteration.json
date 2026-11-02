@@ -1,0 +1,10 @@
+{
+  "source_revision": "b9076dd7aaf00ff7cd4f7f644e8f40dc1ff10a4f",
+  "notebook_sha256": "5c55f82729577402a5dc545cebd506d4a2d3ac70a831cf421f850dd6a71e500d",
+  "numpy": "2.4.6",
+  "torch": "2.13.0",
+  "seed": 42,
+  "replay_seed": 20261102,
+  "device": "cpu",
+  "description": "Original notebook cells 2 scalar bindings, 3 model/Adam initialization including identity probe, and cell 6 historical.observe through publication feedback; synthetic ReplaySnapshot inputs, CPU synchronize omitted, no streams or export. All model state, Adam state and selected diagnostic/publication results."
+}
