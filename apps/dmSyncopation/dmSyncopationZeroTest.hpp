@@ -1041,6 +1041,7 @@ inline int dmSyncopation::setupZeroTestINDI()
     for( const auto *name : { "enabled",
                               "labelVersion",
                               "idealPublisher",
+                              "trial",
                               "requested",
                               "snapshotSequence",
                               "snapshotTimeNs",
@@ -1056,6 +1057,7 @@ inline int dmSyncopation::setupZeroTestINDI()
                               "finished",
                               "elapsedSec",
                               "durationSec",
+                              "durationLimitSec",
                               "posted",
                               "staged",
                               "acknowledged",
@@ -1129,9 +1131,10 @@ inline void dmSyncopation::publishZeroTestStatus( int64_t now, bool force )
     snapshot.capturedNs    = now;
     snapshot.targetHz      = period ? double( m_requested ) * 1e9 * MagAOX::dmSyncoSimulation::periodScale / period : 0;
     snapshot.durationSec   = m_zeroDurationSec;
-    snapshot.steps         = m_requested;
-    snapshot.eventStride   = m_zeroEventStride;
-    snapshot.requested     = requested;
+    snapshot.durationLimitSec = m_zeroDurationLimitSec;
+    snapshot.steps            = m_requested;
+    snapshot.eventStride      = m_zeroEventStride;
+    snapshot.requested        = requested;
     m_zeroStatus.publish( snapshot );
     m_zeroPublished = snapshot;
 }
@@ -1200,6 +1203,7 @@ inline void dmSyncopation::updateZeroTest( bool record )
         const std::vector<std::string> names{ "enabled",
                                               "labelVersion",
                                               "idealPublisher",
+                                              "trial",
                                               "requested",
                                               "snapshotSequence",
                                               "snapshotTimeNs",
@@ -1215,6 +1219,7 @@ inline void dmSyncopation::updateZeroTest( bool record )
                                               "finished",
                                               "elapsedSec",
                                               "durationSec",
+                                              "durationLimitSec",
                                               "posted",
                                               "staged",
                                               "acknowledged",
@@ -1254,8 +1259,9 @@ inline void dmSyncopation::updateZeroTest( bool record )
                                               "sdkGaps",
                                               "sdkFailed" };
         const std::vector<double>      values{ 1,
-                                          4,
+                                          5,
                                           1,
+                                          double( snapshot.trial ),
                                           snapshot.requested ? 1.0 : 0.0,
                                           double( snapshot.sequence ),
                                           double( snapshot.capturedNs ),
@@ -1271,6 +1277,7 @@ inline void dmSyncopation::updateZeroTest( bool record )
                                           stats.finished ? 1.0 : 0.0,
                                           elapsed * 1e-9,
                                           snapshot.durationSec,
+                                          snapshot.durationLimitSec,
                                           double( stats.posted ),
                                           double( stats.staged ),
                                           double( stats.acknowledged ),
@@ -1310,6 +1317,10 @@ inline void dmSyncopation::updateZeroTest( bool record )
                                           double( timing.sdkGaps ),
                                           double( timing.failed ) };
         updateIfChanged( m_indiP_zeroTest, names, values, stats.active ? INDI_BUSY : INDI_IDLE );
+        if( m_indiP_settings.find( "durationSec" ) )
+        {
+            updateIfChanged( m_indiP_settings, "durationSec", snapshot.durationSec );
+        }
         updateSwitchIfChanged( m_indiP_enable,
                                "toggle",
                                m_enabled ? pcf::IndiElement::On : pcf::IndiElement::Off,
@@ -1317,13 +1328,14 @@ inline void dmSyncopation::updateZeroTest( bool record )
         if( record )
         {
             std::ostringstream output;
-            output << "[zero_test] kind=summary labelVersion=4 idealPublisher=1 trial=" << trial
+            output << "[zero_test] kind=summary labelVersion=5 idealPublisher=1 trial=" << trial
                    << " requested=" << snapshot.requested << " snapshotSequence=" << snapshot.sequence
                    << " snapshotTimeNs=" << snapshot.capturedNs << " snapshotAgeSec=" << age
                    << " snapshotValid=" << valid << " eventsQueued=" << snapshot.eventsQueued
                    << " eventStride=" << snapshot.eventStride << " eventsSampledOut=" << stats.eventsSampledOut
                    << " active=" << stats.active << " warming=" << stats.warming << " finished=" << stats.finished
                    << " steps=" << steps << " targetHz=" << targetHz << " elapsedSec=" << elapsed * 1e-9
+                   << " durationSec=" << snapshot.durationSec << " durationLimitSec=" << snapshot.durationLimitSec
                    << " posted=" << stats.posted << " staged=" << stats.staged << " acknowledged=" << stats.acknowledged
                    << " unacknowledged=" << stats.unacknowledged << " skipped=" << stats.skipped
                    << " late=" << stats.late << " preparationLate=" << stats.preparationLate
@@ -1367,7 +1379,7 @@ inline void dmSyncopation::drainZeroTestEvents( size_t limit )
     for( size_t index = 0; index < available && m_zeroEvents.pop( event ); ++index )
     {
         std::ostringstream output;
-        output << "[zero_test] kind=event labelVersion=4 trial=" << event.trial << " primary=" << event.primary
+        output << "[zero_test] kind=event labelVersion=5 trial=" << event.trial << " primary=" << event.primary
                << " step=" << event.step << " outcome=" << event.outcome << " action=" << zeroTestActionName( event )
                << " reason=" << zeroTestReasonName( event.reason ) << " stage=" << zeroTestStageName( event.stage )
                << " waitResult=" << event.waitResult << " targetNs=" << event.targetNs

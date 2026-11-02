@@ -243,9 +243,10 @@ class dmSyncopation : public MagAOXApp<true>,
     bool        m_zeroTestEnabled{ false };    ///< Startup-only finite empirical coordinated zero-write trial.
     std::string m_zeroTestChannel{ "dm01disp07" }; ///< Existing exclusive zero auxiliary; never created or cleared.
     std::string m_zeroSdkStream{ "dmtweeter_sdk_done" }; ///< Optional exact native-entry/result observer.
-    double      m_zeroDurationSec{ 120 };           ///< Maximum active duration after the long-baseline clock is ready.
-    unsigned    m_zeroEventStride{ 4 };             ///< Healthy-cycle event stride; exceptions are always retained.
-    double      m_zeroLateUs{ 5 };                  ///< Maximum lateness before an immutable auxiliary slot is skipped.
+    double      m_zeroDurationSec{ 120 };      ///< Selected app-enforced active bound; writable only while disabled.
+    double      m_zeroDurationLimitSec{ 120 }; ///< Immutable startup ceiling for the selected active duration.
+    unsigned    m_zeroEventStride{ 4 };        ///< Healthy-cycle event stride; exceptions are always retained.
+    double      m_zeroLateUs{ 5 };             ///< Maximum lateness before an immutable auxiliary slot is skipped.
     bool   m_simulationReaderReleaseReady{ false }; ///< Use timestamped actual-main read release in shadow decisions.
     bool   m_simulationPipelineBackend{ false }; ///< Independently model preparation, SDK and post resources in shadow.
     double m_simulationVirtualReaderUs{ 30 };    ///< Assumed auxiliary trigger-to-last-read duration, us; not measured.
@@ -338,10 +339,11 @@ class dmSyncopation : public MagAOXApp<true>,
         uint64_t                   sequence{ 0 }, trial{ 0 }; ///< Monotonic publication sequence and trial generation.
         uint64_t                   eventsDropped{ 0 }, eventsQueued{ 0 }; ///< Event transport quality at publication.
         int64_t                    capturedNs{ 0 };                 ///< Same-host monotonic snapshot publication time.
-        double                     targetHz{ 0 }, durationSec{ 0 }; ///< Frozen clock rate and finite active bound.
-        int                        steps{ 0 };                      ///< Requested total main-plus-auxiliary steps.
-        unsigned eventStride{ 1 };   ///< Healthy-cycle telemetry sampling; no command or timing-population sampling.
-        bool     requested{ false }; ///< Actual enable request at this cycle/control boundary.
+        double                     targetHz{ 0 }, durationSec{ 0 }; ///< Frozen clock rate and selected active bound.
+        double   durationLimitSec{ 0 }; ///< Startup ceiling; changing the selected bound cannot raise this limit.
+        int      steps{ 0 };            ///< Requested total main-plus-auxiliary steps.
+        unsigned eventStride{ 1 };      ///< Healthy-cycle telemetry sampling; no command or timing-population sampling.
+        bool     requested{ false };    ///< Actual enable request at this cycle/control boundary.
     };
 
     /// Coarse ordinary-loop groups include both diagnostic calculation and their INDI I/O.
@@ -750,6 +752,12 @@ class dmSyncopation : public MagAOXApp<true>,
     /// Publish ordinary and excursion-conditioned upstream stage measurements.
     void updatePipelineINDI();
 
+    /// Configure legacy joins only where their primary/combined sources are supplied.
+    void configureReaderTiming();
+
+    /// Keep the zero-test readiness worker independent of the disabled legacy join collector.
+    bool readerReleaseMonitorEnabled() const;
+
     /// Register optional shadow reader-protection populations and matching quality.
     int setupReaderTimingINDI();
 
@@ -998,7 +1006,8 @@ inline void dmSyncopation::setupConfig()
         { "diagnostics.pipeline", "Observe the primary producer's bounded upstream processing trace." },
         { "zeroTest.enabled", "Finite coordinated all-zero auxiliary trial; mutually exclusive with simulation." },
         { "zeroTest.channel", "Exclusive existing all-zero numbered auxiliary channel." },
-        { "zeroTest.durationSec", "Active trial duration after clock qualification, positive and at most120 seconds." },
+        { "zeroTest.durationSec",
+          "Startup active-duration ceiling, positive and at most120 seconds; selectable downward while Off." },
         { "zeroTest.lateUs", "Maximum immutable auxiliary-slot lateness before skipping, us." },
         { "zeroTest.eventStride", "Retain every Nth healthy cycle; 1..1024, default4; exceptions are never sampled." },
         { "zeroTest.sdkStream", "Optional native SDK-result stream for exact main timing joins." },
@@ -1070,6 +1079,7 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
     config( m_zeroTestEnabled, "zeroTest.enabled" );
     config( m_zeroTestChannel, "zeroTest.channel" );
     config( m_zeroDurationSec, "zeroTest.durationSec" );
+    m_zeroDurationLimitSec = m_zeroDurationSec;
     config( m_zeroLateUs, "zeroTest.lateUs" );
     config( m_zeroSdkStream, "zeroTest.sdkStream" );
     config( m_zeroEventStride, "zeroTest.eventStride" );
@@ -2910,7 +2920,10 @@ inline int dmSyncopation::processImage( void *source, const syncoCompletionT &ta
     const auto &image    = completionMonitorT::m_imageStream;
     const bool  coherent = dev::dmCompletion::read( &image, event.record );
     event.observedNs     = m_now();
-    m_readerTiming.completion( event, coherent && m_completionReceiptNs > 0 );
+    if( !m_zeroTestEnabled )
+    {
+        m_readerTiming.completion( event, coherent && m_completionReceiptNs > 0 );
+    }
     m_completionReceiptNs = -1;
     return 0;
 }
@@ -2936,7 +2949,10 @@ inline void dmSyncopation::shmimMonitorTiming( const syncoCompletionT &tag, dev:
     {
         MagAOX::dmReaderTiming::Completed rejected;
         rejected.observedNs = m_now();
-        m_readerTiming.completion( rejected, false );
+        if( !m_zeroTestEnabled )
+        {
+            m_readerTiming.completion( rejected, false );
+        }
         m_completionReceiptNs = -1;
     }
 }
@@ -2965,7 +2981,10 @@ inline int dmSyncopation::processImage( void *source, const syncoReaderReleaseT 
     const auto &image                             = readerReleaseMonitorT::m_imageStream;
     const bool  coherent                          = dev::dmCompletion::read( &image, event.record );
     event.observedNs                              = m_now();
-    m_readerReleaseTiming.completion( event, coherent && m_readerReleaseReceiptNs > 0 );
+    if( !m_zeroTestEnabled )
+    {
+        m_readerReleaseTiming.completion( event, coherent && m_readerReleaseReceiptNs > 0 );
+    }
 
     if( m_simulationReaderReleaseReady || m_zeroTestEnabled )
     {
@@ -3006,7 +3025,10 @@ inline void dmSyncopation::shmimMonitorTiming( const syncoReaderReleaseT &tag, d
                                              m_simulationReleaseEpoch.load( std::memory_order_acquire ),
                                              false } );
         }
-        m_readerReleaseTiming.completion( rejected, false );
+        if( !m_zeroTestEnabled )
+        {
+            m_readerReleaseTiming.completion( rejected, false );
+        }
         m_readerReleaseReceiptNs = -1;
     }
 }
@@ -3810,6 +3832,22 @@ inline void dmSyncopation::updatePipelineINDI()
     }
 }
 
+inline void dmSyncopation::configureReaderTiming()
+{
+    m_readerTiming.configure( !m_zeroTestEnabled && !completionMonitorT::m_shmimName.empty() ? m_primaryCadenceWindow
+                                                                                             : 0,
+                              m_primaryCadenceMaxEvents );
+    m_readerReleaseTiming.configure(
+        !m_zeroTestEnabled && !readerReleaseMonitorT::m_shmimName.empty() ? m_primaryCadenceWindow : 0,
+        m_primaryCadenceMaxEvents,
+        MagAOX::dmCompletion::Kind::readers );
+}
+
+inline bool dmSyncopation::readerReleaseMonitorEnabled() const
+{
+    return !readerReleaseMonitorT::m_shmimName.empty() && ( m_zeroTestEnabled || m_readerReleaseTiming.enabled() );
+}
+
 inline int dmSyncopation::setupReaderTimingINDI()
 {
     if( setupReaderTimingINDIFor( m_readerTiming, m_indiP_readerTiming, m_indiP_readerQuality, "reader" ) < 0 )
@@ -3832,7 +3870,7 @@ inline int dmSyncopation::setupReaderTimingINDIFor( dev::dmReaderTiming &reader,
                                                     pcf::IndiProperty   &qualityProperty,
                                                     const std::string   &propertyPrefix )
 {
-    if( !reader.enabled() )
+    if( !reader.enabled() && !m_zeroTestEnabled )
     {
         return 0;
     }
@@ -4073,11 +4111,7 @@ inline int dmSyncopation::appStartup()
         m_pipelineCadence.configure( m_pipelineDiagnostics ? m_primaryCadenceWindow : 0,
                                      m_primaryCadenceMaxEvents,
                                      m_primaryExcursionUs * 1e-6 );
-        m_readerTiming.configure( completionMonitorT::m_shmimName.empty() ? 0 : m_primaryCadenceWindow,
-                                  m_primaryCadenceMaxEvents );
-        m_readerReleaseTiming.configure( readerReleaseMonitorT::m_shmimName.empty() ? 0 : m_primaryCadenceWindow,
-                                         m_primaryCadenceMaxEvents,
-                                         MagAOX::dmCompletion::Kind::readers );
+        configureReaderTiming();
         m_simulationReleaseQueue.configure(
             ( m_simulationReaderReleaseReady || m_zeroTestEnabled ) ? m_primaryCadenceMaxEvents : 0 );
         m_zeroEvents.configure( m_zeroTestEnabled ? m_primaryCadenceMaxEvents : 0 );
@@ -4130,6 +4164,15 @@ inline int dmSyncopation::appStartup()
         m_indiP_settings[name].setMax( std::string( name ) == "steps" ? synco::maxSteps : 1000000 );
         m_indiP_settings[name].setStep( std::string( name ) == "steps" ? 1 : 0 );
         m_indiP_settings[name].setFormat( "%g" );
+    }
+    if( m_zeroTestEnabled )
+    {
+        m_indiP_settings.add( pcf::IndiElement( "durationSec" ) );
+        m_indiP_settings["durationSec"].setMin( 0 );
+        m_indiP_settings["durationSec"].setMax( m_zeroDurationLimitSec );
+        m_indiP_settings["durationSec"].setStep( 0 );
+        m_indiP_settings["durationSec"].setFormat( "%g" );
+        m_indiP_settings["durationSec"] = m_zeroDurationSec;
     }
     REG_INDI_NEWPROP_NOCB( m_indiP_status, "timing", pcf::IndiProperty::Number );
     m_indiP_status.setPerm( pcf::IndiProperty::ReadOnly );
@@ -4205,12 +4248,12 @@ inline int dmSyncopation::appStartup()
         SHMIMMONITORT_APP_STARTUP( cameraMonitorT );
     }
 
-    if( m_readerReleaseTiming.enabled() )
+    if( readerReleaseMonitorEnabled() )
     {
         SHMIMMONITORT_APP_STARTUP( readerReleaseMonitorT );
     }
 
-    if( m_readerTiming.enabled() )
+    if( !m_zeroTestEnabled && m_readerTiming.enabled() )
     {
         SHMIMMONITORT_APP_STARTUP( completionMonitorT );
     }
@@ -4264,17 +4307,20 @@ inline int dmSyncopation::appLogic()
     drainZeroTestEvents();
 
     began = m_now();
-    m_readerTiming.update( m_now() );
-    m_readerReleaseTiming.update( m_now() );
-    updateReaderTimingINDI();
+    if( !m_zeroTestEnabled )
+    {
+        m_readerTiming.update( m_now() );
+        m_readerReleaseTiming.update( m_now() );
+        updateReaderTimingINDI();
+    }
 
-    if( m_readerReleaseTiming.enabled() )
+    if( readerReleaseMonitorEnabled() )
     {
         SHMIMMONITORT_APP_LOGIC( readerReleaseMonitorT );
         SHMIMMONITORT_UPDATE_INDI( readerReleaseMonitorT );
     }
 
-    if( m_readerTiming.enabled() )
+    if( !m_zeroTestEnabled && m_readerTiming.enabled() )
     {
         SHMIMMONITORT_APP_LOGIC( completionMonitorT );
         SHMIMMONITORT_UPDATE_INDI( completionMonitorT );
@@ -4501,12 +4547,12 @@ inline int dmSyncopation::appShutdown()
         SHMIMMONITORT_APP_SHUTDOWN( cameraMonitorT );
     }
 
-    if( m_readerReleaseTiming.enabled() )
+    if( readerReleaseMonitorEnabled() )
     {
         SHMIMMONITORT_APP_SHUTDOWN( readerReleaseMonitorT );
     }
 
-    if( m_readerTiming.enabled() )
+    if( !m_zeroTestEnabled && m_readerTiming.enabled() )
     {
         SHMIMMONITORT_APP_SHUTDOWN( completionMonitorT );
     }
@@ -4751,14 +4797,16 @@ INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_settings )( const pcf::IndiPropert
     {
         return -1;
     }
-    std::lock_guard<std::mutex> lock( m_cycleMutex );
+    std::unique_lock<std::mutex> lock( m_cycleMutex );
     if( m_enabled )
     {
         return -1;
     }
-    int    requested = m_requested;
-    double cadence   = m_maxCadence;
-    auto   bounds    = m_bounds;
+    int    requested   = m_requested;
+    double cadence     = m_maxCadence;
+    double duration    = m_zeroDurationSec;
+    bool   reconfigure = false;
+    auto   bounds      = m_bounds;
     for( const auto &element : ipRecv.getElements() )
     {
         const auto  &name  = element.first;
@@ -4767,7 +4815,18 @@ INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_settings )( const pcf::IndiPropert
         {
             return -1;
         }
-        if( name == "steps" )
+        reconfigure = reconfigure || name != "durationSec";
+
+        if( name == "durationSec" )
+        {
+            if( !m_zeroTestEnabled || value <= 0 || value > m_zeroDurationLimitSec )
+            {
+                return -1;
+            }
+
+            duration = value;
+        }
+        else if( name == "steps" )
         {
             if( value < 1 || value > synco::maxSteps || value != std::floor( value ) )
             {
@@ -4802,17 +4861,20 @@ INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_settings )( const pcf::IndiPropert
     }
     const int    previousRequested = m_requested;
     const double previousCadence   = m_maxCadence;
+    const double previousDuration  = m_zeroDurationSec;
     const auto   previousBounds    = m_bounds;
     m_requested                    = requested;
     m_maxCadence                   = cadence;
     m_bounds                       = bounds;
+    m_zeroDurationSec              = duration;
     if( m_zeroTestEnabled )
     {
-        if( requested < 2 || requested > 4 || !configureZeroTest() )
+        if( requested < 2 || requested > 4 || ( reconfigure && !configureZeroTest() ) )
         {
-            m_requested  = previousRequested;
-            m_maxCadence = previousCadence;
-            m_bounds     = previousBounds;
+            m_requested       = previousRequested;
+            m_maxCadence      = previousCadence;
+            m_bounds          = previousBounds;
+            m_zeroDurationSec = previousDuration;
             return -1;
         }
     }
@@ -4820,9 +4882,10 @@ INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_settings )( const pcf::IndiPropert
     {
         if( !configureSimulation() )
         {
-            m_requested  = previousRequested;
-            m_maxCadence = previousCadence;
-            m_bounds     = previousBounds;
+            m_requested       = previousRequested;
+            m_maxCadence      = previousCadence;
+            m_bounds          = previousBounds;
+            m_zeroDurationSec = previousDuration;
             return -1;
         }
     }
@@ -4830,6 +4893,14 @@ INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_settings )( const pcf::IndiPropert
     {
         invalidate( "disabled settings changed" );
     }
+    publishZeroTestStatus( m_now(), true );
+    lock.unlock(); // Property I/O must not hold cycle ownership.
+
+    if( m_zeroTestEnabled && m_indiP_settings.find( "durationSec" ) )
+    {
+        updateIfChanged( m_indiP_settings, "durationSec", duration );
+    }
+
     return 0;
 }
 

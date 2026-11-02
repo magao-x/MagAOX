@@ -24,6 +24,16 @@ using MagAOX::dmTiming::Outcome;
 namespace
 {
 
+/// Expose consumer-owned retention only for bounded-storage invariants without source or hardware threads.
+class RetentionHarness : public Collector
+{
+  public:
+    using Collector::m_combined;
+    using Collector::m_completed;
+    using Collector::m_primaries;
+    using Collector::retain;
+};
+
 /// Create exact identities and independently clocked source observations without any hardware or shared streams.
 struct Fixture
 {
@@ -408,6 +418,187 @@ TEST_CASE( "DM reader timing bounds independent queues and pending populations",
     missingPrimary.update( first.now() + 2000000000 );
     REQUIRE( missingPrimary.summary().total.missingPrimary == 1 );
     REQUIRE( missingPrimary.summary().total.expired == 2 );
+}
+
+/** \brief Retain the newest bounded completion population while repeatedly overflowing full capture batches.
+ * \ingroup dmReaderTiming_unit_test
+ */
+TEST_CASE( "DM reader timing evicts oldest pending completions under repeated full batches", "[dmReaderTiming]" )
+{
+    RetentionHarness collector;
+    constexpr size_t capacity = 20000;
+    collector.configure( 60, capacity );
+
+    for( size_t batch = 0; batch < 3; ++batch )
+    {
+        for( size_t position = 0; position < capacity; ++position )
+        {
+            const Fixture fixture( batch * capacity + position );
+            collector.completion( fixture.m_completed );
+        }
+
+        collector.update( Fixture( ( batch + 1 ) * capacity - 1 ).now() );
+        REQUIRE( collector.summary().pendingCompletion == capacity );
+        CHECK( collector.summary().total.completion == ( batch + 1 ) * capacity );
+        CHECK( collector.summary().total.evicted == batch * capacity );
+        CHECK( collector.summary().total.missingCombined == batch * capacity );
+        CHECK( collector.summary().total.expired == 0 );
+        CHECK( collector.summary().total.droppedCompletion == 0 );
+        CHECK( collector.m_completed.begin()->first.counter == 200 + batch * capacity );
+        CHECK( collector.m_completed.rbegin()->first.counter == 199 + ( batch + 1 ) * capacity );
+    }
+
+    const Fixture oldest( 2 * capacity );
+    collector.primary( oldest.m_primary );
+    collector.combined( oldest.m_combined );
+    collector.update( Fixture( 3 * capacity - 1 ).now() + 1 );
+    CHECK( collector.summary().total.matched == 1 );
+    CHECK( collector.summary().pendingCompletion == capacity - 1 );
+    CHECK( collector.summary().worst.completed.record.sequence == oldest.m_completed.record.sequence );
+    // clang-format off
+#ifdef DM_READER_TIMING_TEST_DOXYGEN_REF
+    MagAOX::app::dev::dmReaderTiming::retain;
+    MagAOX::app::dev::dmReaderTiming::completion;
+    MagAOX::app::dev::dmReaderTiming::update;
+#endif
+    // clang-format on
+}
+
+/** \brief Replace an existing retained key at capacity without discarding another command's evidence.
+ * \ingroup dmReaderTiming_unit_test
+ */
+TEST_CASE( "DM reader timing replacement does not evict a full pending population", "[dmReaderTiming]" )
+{
+    RetentionHarness collector;
+    collector.configure( 2, 2 );
+    const Fixture first;
+    const Fixture second( 1 );
+    collector.completion( first.m_completed );
+    collector.completion( second.m_completed );
+    collector.update( second.now() );
+    auto replacement = first.m_completed;
+    ++replacement.receiptNs;
+    collector.retain( collector.m_completed, replacement );
+    CHECK( collector.m_completed.size() == 2 );
+    CHECK( collector.m_completed.begin()->second.receiptNs == replacement.receiptNs );
+    CHECK( collector.summary().total.evicted == 0 );
+
+    const Fixture third( 2 );
+    collector.completion( third.m_completed );
+    collector.update( third.now() );
+    CHECK( collector.summary().pendingCompletion == 2 );
+    CHECK( collector.summary().total.evicted == 1 );
+    CHECK( collector.summary().total.missingCombined == 1 );
+    CHECK( collector.m_completed.begin()->first.counter == second.m_completed.record.inputCounter );
+    // clang-format off
+#ifdef DM_READER_TIMING_TEST_DOXYGEN_REF
+    MagAOX::app::dev::dmReaderTiming::retain;
+    MagAOX::app::dev::dmReaderTiming::update;
+#endif
+    // clang-format on
+}
+
+/** \brief Reject a backward source observation without corrupting oldest-first expiration of accepted evidence.
+ * \ingroup dmReaderTiming_unit_test
+ */
+TEST_CASE( "DM reader timing ordered expiry rejects backward captures", "[dmReaderTiming]" )
+{
+    RetentionHarness collector;
+    collector.configure( 0.001, 8 );
+    const Fixture first;
+    collector.completion( first.m_completed );
+    collector.update( first.now() );
+    Fixture backward( 1 );
+    backward.m_completed.record.startedNs  = first.m_completed.record.startedNs;
+    backward.m_completed.record.finishedNs = first.m_completed.record.finishedNs;
+    backward.m_completed.observedNs        = first.m_completed.observedNs - 1;
+    backward.m_completed.receiptNs         = first.m_completed.receiptNs;
+    collector.completion( backward.m_completed );
+    collector.update( backward.now() );
+    CHECK( collector.summary().total.invalid == 1 );
+    CHECK( collector.summary().pendingCompletion == 1 );
+
+    const Fixture latest( 2 );
+    collector.completion( latest.m_completed );
+    collector.update( latest.now() );
+    CHECK( collector.summary().total.expired == 1 );
+    CHECK( collector.summary().total.evicted == 0 );
+    CHECK( collector.summary().pendingCompletion == 1 );
+    CHECK( collector.m_completed.begin()->first.counter == latest.m_completed.record.inputCounter );
+    // clang-format off
+#ifdef DM_READER_TIMING_TEST_DOXYGEN_REF
+    MagAOX::app::dev::dmReaderTiming::progression;
+    MagAOX::app::dev::dmReaderTiming::expire;
+    MagAOX::app::dev::dmReaderTiming::update;
+#endif
+    // clang-format on
+}
+
+/** \brief Clear every ordered source population together when a queued attachment generation changes.
+ * \ingroup dmReaderTiming_unit_test
+ */
+TEST_CASE( "DM reader timing reset clears all ordered pending populations", "[dmReaderTiming]" )
+{
+    RetentionHarness collector;
+    collector.configure( 2, 8 );
+    const Fixture primary;
+    const Fixture combined( 1 );
+    const Fixture completed( 2 );
+    collector.primary( primary.m_primary );
+    collector.combined( combined.m_combined );
+    collector.completion( completed.m_completed );
+    collector.update( completed.now() );
+    REQUIRE( collector.summary().pendingPrimary == 1 );
+    REQUIRE( collector.summary().pendingCombined == 1 );
+    REQUIRE( collector.summary().pendingCompletion == 1 );
+    collector.resetPrimary();
+    const Fixture fresh( 3 );
+    fresh.capture( collector );
+    collector.update( fresh.now() );
+    CHECK( collector.summary().total.sourceResets == 1 );
+    CHECK( collector.summary().total.evicted == 3 );
+    CHECK( collector.summary().total.matched == 1 );
+    CHECK( collector.m_primaries.size() == 1 );
+    CHECK( collector.m_primaries.begin()->first.counter == fresh.m_primary.input.counter );
+    CHECK( collector.m_combined.empty() );
+    CHECK( collector.m_completed.empty() );
+    // clang-format off
+#ifdef DM_READER_TIMING_TEST_DOXYGEN_REF
+    MagAOX::app::dev::dmReaderTiming::resetPrimary;
+    MagAOX::app::dev::dmReaderTiming::clear;
+    MagAOX::app::dev::dmReaderTiming::update;
+#endif
+    // clang-format on
+}
+
+/** \brief Join a delayed queued peer before expiring its old pending completion and retained sample.
+ * \ingroup dmReaderTiming_unit_test
+ */
+TEST_CASE( "DM reader timing joins delayed peers before ordered expiration", "[dmReaderTiming]" )
+{
+    Collector collector;
+    collector.configure( 0.001, 8 );
+    const Fixture fixture;
+    collector.completion( fixture.m_completed );
+    collector.update( fixture.now() );
+    REQUIRE( collector.summary().pendingCompletion == 1 );
+    collector.primary( fixture.m_primary );
+    collector.combined( fixture.m_combined );
+    collector.update( fixture.now() + 2000000 );
+    CHECK( collector.summary().total.matched == 1 );
+    CHECK( collector.summary().total.expired == 1 );
+    CHECK( collector.summary().total.evicted == 0 );
+    CHECK( collector.summary().total.missingCombined == 0 );
+    CHECK( collector.summary().metrics[0].count == 0 );
+    CHECK( collector.summary().worstValid );
+    CHECK( collector.summary().pendingCompletion == 0 );
+    // clang-format off
+#ifdef DM_READER_TIMING_TEST_DOXYGEN_REF
+    MagAOX::app::dev::dmReaderTiming::join;
+    MagAOX::app::dev::dmReaderTiming::expire;
+    MagAOX::app::dev::dmReaderTiming::update;
+#endif
+    // clang-format on
 }
 
 /** \brief Invalidate queued and pending old-source joins without erasing lifetime extreme evidence or requalifying
@@ -1050,8 +1241,9 @@ TEST_CASE( "DM reader timing preserves first release receipt through delayed mat
 #endif
     // clang-format on
 
-    Collector collector;
-    collector.configure( 2, 16, MagAOX::dmCompletion::Kind::readers );
+    Collector    collector;
+    const size_t capacity = GENERATE( size_t( 1 ), size_t( 16 ) );
+    collector.configure( 2, capacity, MagAOX::dmCompletion::Kind::readers );
     Fixture fixture;
     fixture.m_completed.record.kind    = MagAOX::dmCompletion::Kind::readers;
     fixture.m_completed.record.state   = State::released;
@@ -1069,6 +1261,8 @@ TEST_CASE( "DM reader timing preserves first release receipt through delayed mat
     collector.completion( fixture.m_completed );
     collector.update( fixture.now() );
     CHECK( collector.summary().total.sdkSuccess == 1 );
+    CHECK( collector.summary().pendingCompletion == 1 );
+    CHECK( collector.summary().total.evicted == 0 );
     CHECK( collector.summary().total.receiptInvalid == 0 );
     CHECK( collector.summary().total.firstEnriched == 0 );
 

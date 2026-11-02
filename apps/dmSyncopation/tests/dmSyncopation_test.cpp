@@ -84,6 +84,7 @@ class Harness : public dmSyncopation
     using CompletionMonitor    = dev::shmimMonitor<dmSyncopation, syncoCompletionT>;
 
     using dmSyncopation::allocate;
+    using dmSyncopation::configureReaderTiming;
     using dmSyncopation::configureSimulation;
     using dmSyncopation::configureZeroTest;
     using dmSyncopation::consume;
@@ -227,6 +228,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_wait;
     using dmSyncopation::m_zeroAttached;
     using dmSyncopation::m_zeroClock;
+    using dmSyncopation::m_zeroDurationLimitSec;
     using dmSyncopation::m_zeroDurationSec;
     using dmSyncopation::m_zeroEvents;
     using dmSyncopation::m_zeroEventStride;
@@ -241,10 +243,12 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_zeroTestChannel;
     using dmSyncopation::m_zeroTestEnabled;
     using dmSyncopation::m_zeroTiming;
+    using dmSyncopation::m_zeroWaitFailure;
     using dmSyncopation::missedStep;
     using dmSyncopation::processZeroTestPrimary;
     using dmSyncopation::publishZeroTestStatus;
     using dmSyncopation::readCamera;
+    using dmSyncopation::readerReleaseMonitorEnabled;
     using dmSyncopation::readPrimaryTiming;
     using dmSyncopation::recordLogicStage;
     using dmSyncopation::setupCadenceINDI;
@@ -7651,7 +7655,7 @@ TEST_CASE( "coordinated zero status is independent of the cycle mutex", "[dmSync
         CHECK( app.m_indiP_zeroTest["mainObserved"].get<double>() == 80 );
         CHECK( app.m_indiP_zeroTest["elapsedSec"].get<double>() == Approx( 5 ) );
         CHECK( app.m_indiP_zeroTest["snapshotAgeSec"].get<double>() == Approx( 1 ) );
-        CHECK( app.m_indiP_zeroTest["labelVersion"].get<double>() == 4 );
+        CHECK( app.m_indiP_zeroTest["labelVersion"].get<double>() == 5 );
     }
 
     // clang-format off
@@ -7832,6 +7836,8 @@ TEST_CASE( "coordinated zero trial validates explicit startup configuration", "[
                                         std::string{ "[simulation]\nreaderReleaseReady=true\n" },
                                         std::string{ "[scheduler]\nmaxSubframes=4\n" },
                                         std::string{ "[scheduler]\nmaxSubframes=5\n" },
+                                        std::string{ "[zeroTest]\ndurationSec=10\n" },
+                                        std::string{ "[zeroTest]\ndurationSec=0\n" },
                                         std::string{ "[zeroTest]\ndurationSec=121\n" },
                                         std::string{ "[zeroTest]\nchannel=dm01disp03\n" },
                                         std::string{ "[zeroTest]\nlateUs=51\n" },
@@ -7883,12 +7889,14 @@ TEST_CASE( "coordinated zero trial validates explicit startup configuration", "[
     const auto configured = app.loadConfigImpl( app.config );
     CAPTURE( extra );
 
-    if( extra.empty() || extra == "[scheduler]\nmaxSubframes=4\n" )
+    if( extra.empty() || extra == "[scheduler]\nmaxSubframes=4\n" || extra == "[zeroTest]\ndurationSec=10\n" )
     {
         CHECK( configured == 0 );
         CHECK( app.m_zeroTestEnabled );
         CHECK( app.m_semaphoreNumber == -1 );
-        CHECK( app.m_requested == ( extra.empty() ? 2 : 4 ) );
+        CHECK( app.m_requested == ( extra == "[scheduler]\nmaxSubframes=4\n" ? 4 : 2 ) );
+        CHECK( app.m_zeroDurationLimitSec == ( extra == "[zeroTest]\ndurationSec=10\n" ? 10 : 120 ) );
+        CHECK( app.m_zeroDurationSec == app.m_zeroDurationLimitSec );
         CHECK( app.m_maxCadence == 6000 );
         CHECK( app.m_zeroEventStride == 4 );
     }
@@ -7908,6 +7916,226 @@ TEST_CASE( "coordinated zero trial validates explicit startup configuration", "[
 #ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
     MagAOX::app::dmSyncopation::setupConfig;
     MagAOX::app::dmSyncopation::loadConfigImpl;
+#endif
+    // clang-format on
+}
+
+/// Finite zero trials preserve raw reader readiness without retaining unjoinable legacy completion evidence.
+TEST_CASE( "coordinated zero reader readiness is independent of legacy diagnostic joins",
+           "[dmSyncopation][zeroTest][readerTiming]" )
+{
+    Streams          streams;
+    CompletionStream completion;
+    Harness          app;
+    ZeroClock::connect( app, streams, 4 );
+    app.attachReaderReleaseOnly();
+    app.attachCompletionOnly();
+    app.configureReaderTiming();
+    CHECK_FALSE( app.m_readerTiming.enabled() );
+    CHECK_FALSE( app.m_readerReleaseTiming.enabled() );
+    CHECK( app.readerReleaseMonitorEnabled() );
+    REQUIRE( app.setupReaderTimingINDI() == 0 );
+    CHECK( app.m_indiP_readerQuality["enabled"].get<double>() == 0 );
+    CHECK( app.m_indiP_readerReleaseQuality["enabled"].get<double>() == 0 );
+    CHECK( app.m_indiP_readerReleaseTiming["requiredHold_count"].get<double>() == 0 );
+
+    SECTION( "zero-mode callbacks also fence manually enabled legacy collectors" )
+    {
+        app.m_readerTiming.configure( 2, 1 );
+        app.m_readerReleaseTiming.configure( 2, 1, MagAOX::dmCompletion::Kind::readers );
+    }
+
+    SECTION( "ordinary shadow selection still configures both legacy joins" )
+    {
+        app.m_zeroTestEnabled = false;
+        app.configureReaderTiming();
+        CHECK( app.m_readerTiming.enabled() );
+        CHECK( app.m_readerReleaseTiming.enabled() );
+        CHECK( app.readerReleaseMonitorEnabled() );
+        app.m_zeroTestEnabled = true;
+    }
+
+    const auto next = ZeroClock::warm();
+    ZeroClock::time = next;
+    auto record     = readerCompletion( streams.images[1], 1, next - 1000, next - 100 );
+    record.kind     = MagAOX::dmCompletion::Kind::readers;
+    record.state    = MagAOX::dmCompletion::State::released;
+    const auto key  = synco::ZeroTiming::key( record );
+
+    for( uint64_t sequence = 1; sequence <= 1024; ++sequence )
+    {
+        record.sequence = ++ZeroClock::sequence;
+        completion.store( record );
+        app.shmimMonitorTiming( syncoReaderReleaseT{}, dev::shmimMonitorEvent::receipt );
+        REQUIRE( app.processImage( nullptr, syncoReaderReleaseT{} ) == 0 );
+        app.shmimMonitorTiming( syncoCompletionT{}, dev::shmimMonitorEvent::receipt );
+        REQUIRE( app.processImage( nullptr, syncoCompletionT{} ) == 0 );
+        app.drainZeroTestReader( ZeroClock::time );
+        CHECK( app.zeroTestReady( key ) );
+    }
+
+    app.m_readerTiming.update( ZeroClock::time );
+    app.m_readerReleaseTiming.update( ZeroClock::time );
+
+    for( const auto *collector : { &app.m_readerTiming, &app.m_readerReleaseTiming } )
+    {
+        CHECK( collector->summary().total.completion == 0 );
+        CHECK( collector->summary().total.droppedCompletion == 0 );
+        CHECK( collector->summary().pendingCompletion == 0 );
+    }
+
+    CHECK( app.m_simulationReleaseQueue.dropped() == 0 );
+    app.shmimMonitorTiming( syncoReaderReleaseT{}, dev::shmimMonitorEvent::discarded );
+    app.drainZeroTestReader( ZeroClock::time );
+    CHECK_FALSE( app.zeroTestReady( key ) );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::configureReaderTiming;
+    MagAOX::app::dmSyncopation::readerReleaseMonitorEnabled;
+    MagAOX::app::dmSyncopation::processImage( nullptr, MagAOX::app::syncoReaderReleaseT{} );
+    MagAOX::app::dmSyncopation::processImage( nullptr, MagAOX::app::syncoCompletionT{} );
+    MagAOX::app::dmSyncopation::drainZeroTestReader;
+#endif
+    // clang-format on
+}
+
+/// A duration-only request leaves the established cadence intact and cannot change the immutable ceiling.
+TEST_CASE( "coordinated zero duration is selectable only while disabled", "[dmSyncopation][zeroTest]" )
+{
+    Streams streams;
+    Harness app;
+    ZeroClock::connect( app, streams, 4 );
+    app.properties();
+    app.localDriver( streams.directory );
+    app.m_indiP_settings.add( pcf::IndiElement( "durationSec" ) );
+    app.m_indiP_settings["durationSec"] = 120.0;
+    REQUIRE( app.setupZeroTestINDI() == 0 );
+    ZeroClock::warm();
+    const auto cadence      = app.m_zeroClock.summary().cadence.state;
+    auto       settings     = app.m_indiP_settings;
+    settings["durationSec"] = 10.0;
+    REQUIRE( app.newCallBack_m_indiP_settings( settings ) == 0 );
+    CHECK( app.m_zeroDurationSec == 10 );
+    CHECK( app.m_zeroDurationLimitSec == 120 );
+    CHECK( app.m_zeroClock.summary().cadence.state == cadence );
+    CHECK( app.m_indiP_settings["durationSec"].get<double>() == 10 );
+    app.updateZeroTest( false );
+    CHECK( app.m_indiP_zeroTest["durationSec"].get<double>() == 10 );
+    CHECK( app.m_indiP_zeroTest["durationLimitSec"].get<double>() == 120 );
+    CHECK( app.m_indiP_zeroTest["trial"].get<double>() == 0 );
+    CHECK( app.m_indiP_zeroTest["labelVersion"].get<double>() == 5 );
+
+    for( const auto value :
+         { 0.0, -1.0, 121.0, std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity() } )
+    {
+        settings["durationSec"] = value;
+        CHECK( app.newCallBack_m_indiP_settings( settings ) < 0 );
+        CHECK( app.m_zeroDurationSec == 10 );
+    }
+
+    settings["durationSec"] = 120.0;
+    app.m_enabled           = true;
+    CHECK( app.newCallBack_m_indiP_settings( settings ) < 0 );
+    CHECK( app.m_zeroDurationSec == 10 );
+    app.m_enabled = false;
+    REQUIRE( app.newCallBack_m_indiP_settings( settings ) == 0 );
+    CHECK( app.m_zeroDurationSec == 120 );
+    CHECK( app.m_zeroDurationLimitSec == 120 );
+    app.m_zeroTestEnabled   = false;
+    settings["durationSec"] = 5.0;
+    CHECK( app.newCallBack_m_indiP_settings( settings ) < 0 );
+    CHECK( app.m_zeroDurationSec == 120 );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::newCallBack_m_indiP_settings;
+    MagAOX::app::dmSyncopation::updateZeroTest;
+#endif
+    // clang-format on
+}
+
+/// A rejected multi-setting request cannot commit an otherwise valid selected duration.
+TEST_CASE( "coordinated zero duration and step settings commit atomically", "[dmSyncopation][zeroTest]" )
+{
+    Harness app;
+    app.properties();
+    app.m_zeroTestEnabled      = true;
+    app.m_zeroDurationLimitSec = 10;
+    app.m_zeroDurationSec      = 10;
+    const auto previousSteps   = app.m_requested;
+    auto       settings        = app.m_indiP_settings;
+    settings.add( pcf::IndiElement( "durationSec" ) );
+    settings.add( pcf::IndiElement( "steps" ) );
+    settings["durationSec"] = 1.0;
+    settings["steps"]       = 5.0;
+    CHECK( app.newCallBack_m_indiP_settings( settings ) < 0 );
+    CHECK( app.m_zeroDurationSec == 10 );
+    CHECK( app.m_requested == previousSteps );
+    settings["steps"] = 4.0;
+    REQUIRE( app.newCallBack_m_indiP_settings( settings ) == 0 );
+    CHECK( app.m_zeroDurationSec == 1 );
+    CHECK( app.m_zeroDurationLimitSec == 10 );
+    CHECK( app.m_requested == 4 );
+    settings["durationSec"] = 11.0;
+    settings["steps"]       = 3.0;
+    CHECK( app.newCallBack_m_indiP_settings( settings ) < 0 );
+    CHECK( app.m_zeroDurationSec == 1 );
+    CHECK( app.m_requested == 4 );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::newCallBack_m_indiP_settings;
+#endif
+    // clang-format on
+}
+
+/// A selected short duration prevents further publications without waiting for any ordinary status poll.
+TEST_CASE( "coordinated zero short durations expire in the command path", "[dmSyncopation][zeroTest]" )
+{
+    Streams streams;
+    Harness app;
+    ZeroClock::connect( app, streams, 4 );
+    app.properties();
+    const int seconds  = GENERATE( 1, 10 );
+    auto      settings = app.m_indiP_settings;
+    settings.add( pcf::IndiElement( "durationSec" ) );
+    settings["durationSec"] = double( seconds );
+    REQUIRE( app.newCallBack_m_indiP_settings( settings ) == 0 );
+    const auto next = ZeroClock::warm();
+    app.updateZeroTest( false );
+    app.m_enabled = true;
+    ZeroClock::primary( next );
+    REQUIRE( app.m_zeroStats.active );
+    REQUIRE( app.m_zeroStats.posted == 3 );
+    const auto trial   = app.m_zeroSnapshot.trial;
+    const auto started = app.m_zeroStats.startedNs;
+    const auto posts   = ZeroClock::posts.size();
+    ZeroClock::time    = started + int64_t( seconds ) * 1000000000 - 100000;
+    CHECK_FALSE( app.zeroTestWait( started + int64_t( seconds ) * 1000000000 + 10000, streams.images[0].md->cnt0 ) );
+    CHECK( app.m_zeroWaitFailure == Harness::ZeroOutcome::durationExpired );
+    CHECK( ZeroClock::posts.size() == posts );
+    ZeroClock::primary( started + int64_t( seconds ) * 1000000000 + 500000 );
+    CHECK_FALSE( app.m_enabled );
+    CHECK_FALSE( app.m_zeroStats.active );
+    CHECK( app.m_zeroStats.finished );
+    CHECK( ZeroClock::posts.size() == posts );
+    app.updateZeroTest( false );
+    CHECK( app.m_zeroSnapshot.trial == trial + 1 );
+    CHECK( app.m_zeroSnapshot.stats.finished );
+    CHECK( app.m_zeroSnapshot.durationSec == seconds );
+    const auto finishedTrial = app.m_zeroSnapshot.trial;
+    auto       enable        = app.m_indiP_enable;
+    enable["toggle"]         = pcf::IndiElement::On;
+    REQUIRE( app.newCallBack_m_indiP_enable( enable ) == 0 );
+    app.updateZeroTest( false );
+    CHECK( app.m_zeroSnapshot.trial == finishedTrial + 1 );
+    CHECK( app.m_zeroSnapshot.stats.warming );
+    CHECK_FALSE( app.m_zeroSnapshot.stats.finished );
+    CHECK( app.m_zeroSnapshot.stats.mainObserved == 0 );
+    CHECK( app.m_zeroSnapshot.durationSec == seconds );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::zeroTestWait;
+    MagAOX::app::dmSyncopation::processZeroTestPrimary;
+    MagAOX::app::dmSyncopation::updateZeroTest;
 #endif
     // clang-format on
 }

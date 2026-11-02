@@ -10,7 +10,6 @@
 #include <limits>
 #include <map>
 #include <type_traits>
-#include <unordered_map>
 
 #include "../../common/dmReaderTiming.hpp"
 #include "../../common/spscQueue.hpp"
@@ -30,6 +29,9 @@ namespace dev
  * Captures copy fixed records into separate bounded SPSC queues. Resets use an
  * atomic join generation, conservatively preventing any old/new attachment join.
  * Pending storage and retained matched samples are independently capacity capped.
+ * Accepted observations for each source have one current inode, strictly increasing
+ * counters and nondecreasing capture times. Ordered identity maps therefore expose
+ * the oldest pending capture without scanning the retained population.
  */
 class dmReaderTiming
 {
@@ -43,7 +45,7 @@ class dmReaderTiming
         bool     coherent{ false }; ///< Source's repeated metadata bracket succeeded.
     };
 
-    /// Efficient pending lookup; exact raw publication identity is checked when joining.
+    /// Ordered pending lookup; each current source's counters follow nondecreasing capture times.
     struct Key
     {
         uint64_t inode{ 0 };   ///< Source inode.
@@ -51,13 +53,9 @@ class dmReaderTiming
 
         /// Compare the shared inode/counter lookup key.
         bool operator==( const Key &other /**< [in] Other key to compare. */ ) const;
-    };
 
-    /// Hash only the lookup identity; raw timestamps remain part of qualification.
-    struct Hash
-    {
-        /// Return a mixed inode/counter hash for bounded pending storage.
-        size_t operator()( const Key &key /**< [in] Lookup key to hash. */ ) const;
+        /// Order one source's accepted observations by counter within its current inode.
+        bool operator<( const Key &other /**< [in] Other key to compare. */ ) const;
     };
 
     /// Consumer-only progression baseline for one stream observer.
@@ -83,10 +81,9 @@ class dmReaderTiming
     int64_t                      m_windowNs{ 0 };    ///< Positive configured trailing retention, or zero when disabled.
     size_t                       m_capacity{ 0 };    ///< Per-source queue/pending and retained matched-sample bound.
 
-    std::unordered_map<Key, MagAOX::dmReaderTiming::Primary, Hash>  m_primaries; ///< Bounded pending primary evidence.
-    std::unordered_map<Key, MagAOX::dmReaderTiming::Combined, Hash> m_combined;  ///< Bounded pending combined evidence.
-    std::unordered_map<Key, MagAOX::dmReaderTiming::Completed, Hash>
-        m_completed; ///< Bounded pending completion evidence.
+    std::map<Key, MagAOX::dmReaderTiming::Primary>   m_primaries; ///< Pending primary evidence, oldest capture first.
+    std::map<Key, MagAOX::dmReaderTiming::Combined>  m_combined;  ///< Pending combined evidence, oldest capture first.
+    std::map<Key, MagAOX::dmReaderTiming::Completed> m_completed; ///< Pending completions, oldest capture first.
     std::multimap<int64_t, MagAOX::dmReaderTiming::Sample>
         m_window; ///< Matched samples ordered by completion observation.
 
@@ -125,10 +122,14 @@ class dmReaderTiming
                       const MagAOX::dmReaderTiming::Identity &identity /**< [in] New producer identity. */,
                       int64_t                                 observedNs /**< [in] New local capture timestamp. */ );
 
-    /// Store a pending observation, evicting the oldest when its independent fixed cap is reached.
+    /// Store accepted forward source evidence, evicting the oldest counter at its independent cap.
+    /** Progression enforces one current inode and monotonic captures; generation changes clear all maps.
+     * Replacing an existing identity does not consume another slot. Completion enrichment preserves
+     * the first capture rather than replacing its observed time.
+     */
     template <class valueT>
-    void retain( std::unordered_map<Key, valueT, Hash> &pending /**< [in,out] Source's pending population. */,
-                 const valueT                          &value /**< [in] Accepted source observation. */ );
+    void retain( std::map<Key, valueT> &pending /**< [in,out] Source's ordered pending population. */,
+                 const valueT          &value /**< [in] Accepted source observation. */ );
 
     /// Explain a removed unmatched completion using the evidence still retained.
     void missing( const MagAOX::dmReaderTiming::Completed &value /**< [in] Completion being removed. */ );
@@ -148,7 +149,7 @@ class dmReaderTiming
     /// Join all currently available three-way identities once, before expiring unmatched evidence.
     void join();
 
-    /// Remove expired pending/window evidence after every captured queue has received its bounded drain.
+    /// Remove expired ordered prefixes after every queue has received its drain and all available joins ran.
     void expire( int64_t nowNs /**< [in] Current monotonic evaluation time. */ );
 
     /// Recompute retained independent duration populations and publish one coherent cache.
@@ -197,10 +198,9 @@ inline bool dmReaderTiming::Key::operator==( const Key &other ) const
     return inode == other.inode && counter == other.counter;
 }
 
-inline size_t dmReaderTiming::Hash::operator()( const Key &key ) const
+inline bool dmReaderTiming::Key::operator<( const Key &other ) const
 {
-    const auto mixed = key.inode ^ ( key.counter + 0x9e3779b97f4a7c15ULL + ( key.inode << 6 ) + ( key.inode >> 2 ) );
-    return static_cast<size_t>( mixed );
+    return inode < other.inode || ( inode == other.inode && counter < other.counter );
 }
 
 inline bool dmReaderTiming::publication( const MagAOX::dmReaderTiming::Identity &identity, int64_t &ns )
@@ -250,15 +250,12 @@ inline void dmReaderTiming::configure( double windowSec, size_t capacity, MagAOX
     m_completionEpoch    = 0;
     m_completionSequence = 0;
     m_completionState    = MagAOX::dmCompletion::State::unavailable;
-    m_primaries.reserve( m_capacity );
-    m_combined.reserve( m_capacity );
-    m_completed.reserve( m_capacity );
-    m_summary           = {};
-    m_summary.enabled   = m_enabled;
-    m_summary.kind      = m_kind;
-    m_summary.session   = 1;
-    m_summary.windowSec = m_enabled ? windowSec : 0;
-    m_summary.capacity  = m_capacity;
+    m_summary            = {};
+    m_summary.enabled    = m_enabled;
+    m_summary.kind       = m_kind;
+    m_summary.session    = 1;
+    m_summary.windowSec  = m_enabled ? windowSec : 0;
+    m_summary.capacity   = m_capacity;
 }
 
 inline void dmReaderTiming::primary( const MagAOX::dmReaderTiming::Primary &value, bool coherent )
@@ -379,7 +376,7 @@ dmReaderTiming::progression( Progress &progress, const MagAOX::dmReaderTiming::I
 }
 
 template <class valueT>
-inline void dmReaderTiming::retain( std::unordered_map<Key, valueT, Hash> &pending, const valueT &value )
+inline void dmReaderTiming::retain( std::map<Key, valueT> &pending, const valueT &value )
 {
     Key key;
 
@@ -392,14 +389,17 @@ inline void dmReaderTiming::retain( std::unordered_map<Key, valueT, Hash> &pendi
         key = { value.input.inode, value.input.counter };
     }
 
+    const auto existing = pending.find( key );
+
+    if( existing != pending.end() )
+    {
+        existing->second = value;
+        return;
+    }
+
     if( pending.size() >= m_capacity )
     {
-        const auto oldest = std::min_element( pending.begin(),
-                                              pending.end(),
-                                              []( const auto &first, const auto &second )
-                                              {
-                                                  return first.second.observedNs < second.second.observedNs;
-                                              } );
+        const auto oldest = pending.begin();
 
         if constexpr( std::is_same_v<valueT, MagAOX::dmReaderTiming::Completed> )
         {
@@ -410,7 +410,7 @@ inline void dmReaderTiming::retain( std::unordered_map<Key, valueT, Hash> &pendi
         ++m_total.evicted;
     }
 
-    pending.insert_or_assign( key, value );
+    pending.emplace( key, value );
 }
 
 inline void dmReaderTiming::missing( const MagAOX::dmReaderTiming::Completed &value )
@@ -778,33 +778,19 @@ inline void dmReaderTiming::expire( int64_t nowNs )
 {
     const auto cutoff = nowNs > m_windowNs ? nowNs - m_windowNs : 0;
 
-    for( auto entry = m_completed.begin(); entry != m_completed.end(); )
+    while( !m_completed.empty() && m_completed.begin()->second.observedNs < cutoff )
     {
-        if( entry->second.observedNs < cutoff )
-        {
-            missing( entry->second );
-            entry = m_completed.erase( entry );
-            ++m_total.expired;
-        }
-        else
-        {
-            ++entry;
-        }
+        missing( m_completed.begin()->second );
+        m_completed.erase( m_completed.begin() );
+        ++m_total.expired;
     }
 
     const auto expireSource = [this, cutoff]( auto &pending )
     {
-        for( auto entry = pending.begin(); entry != pending.end(); )
+        while( !pending.empty() && pending.begin()->second.observedNs < cutoff )
         {
-            if( entry->second.observedNs < cutoff )
-            {
-                entry = pending.erase( entry );
-                ++m_total.expired;
-            }
-            else
-            {
-                ++entry;
-            }
+            pending.erase( pending.begin() );
+            ++m_total.expired;
         }
     };
     expireSource( m_primaries );
@@ -912,6 +898,7 @@ inline void dmReaderTiming::update( int64_t nowNs )
     }
 
     synchronize();
+    // A delayed consumer can still join captured peers before dropping their old-window samples.
     join();
     expire( nowNs );
     calculate( nowNs );

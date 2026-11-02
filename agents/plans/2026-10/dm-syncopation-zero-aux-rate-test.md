@@ -1154,3 +1154,357 @@ Workstation verification for this correction:
 
 No instrument command was executed by the agent. The unchanged-slot timing and
 new reporting throughput still require the operator's short rerun above.
+
+## Reporting-corrected 8 kHz captures: `20261102T003833Z` and `20261102T003954Z`
+
+The short and full captures use checkout `14881210a7b05dd96cba2571d76d9dd2273c0a96`,
+schema 4, four steps and `eventStride=4`. Local copies were found under
+`/home/jrmales/tmp/home/jrmales/tmp/zero-aux-8000Hz-<UTC>`, with the corresponding
+`.tgz` archives in `/home/jrmales/tmp`. No instrument commands were run by the
+agent. This analysis changes only this engineering record.
+
+**Changed baseline:** the operator reports that a compilation-settings fix made
+`acquWFS-1` about 70 us faster. The loop otherwise remained as before and stable;
+modal gains remain zero under the previously established test setup. This is
+an upstream latency/phase change, so comparisons with older 6/8 kHz captures
+cannot attribute differences solely to syncopation. The comparisons below use
+each new capture's own disabled baseline. The saved camera/main settings remain
+2 kHz, synchronization On, scalar loop gain 1 and RTC latency On.
+
+### Short trial: coverage restored, requested duration still overshoots
+
+`zero-aux-8000Hz-20261102T003833Z` requested ten active seconds. It actually ran
+**16.246623416 s** in the final duration statistic preserved in the next
+capture's baseline. The start-to-last-cancel-event span is 16.246618567 s;
+the 4.849 us difference is the subsequent stop bookkeeping. Approximate UTC
+activity is 00:38:51.33838 through 00:39:07.58498 on November 2.
+
+- 32,494 genuine-main observations and 97,482 auxiliary opportunities.
+- 97,435 auxiliary publications, all acknowledged; zero unacknowledged attempts.
+- 47 skips: three initial unclassified combinations, 41 deadline misses and
+  three final operator-cancelled slots.
+- All 41 deadline misses were step 2, 5.023-6.907 us late. Their commands had
+  already been staged 66.421-80.507 us before target. They began 13.4508 s into
+  the actual interval, after the requested ten seconds, and were publication
+  wake/deadline failures rather than publisher preparation failures.
+- Excluding startup/shutdown cycles, auxiliary delivery is 97,435 / 97,476 =
+  99.95794%. No preparation, readiness, identity, resource or wait-error skips
+  occurred.
+
+Coverage closes exactly: **32,523 retained events + 97,454 intentionally
+sampled-out = 129,977 expected rows**, comprising 32,494 main observations,
+97,482 auxiliary opportunities and one start event. Every exceptional event is
+retained. Queue drops and logger enqueue failures stay zero, and the final event
+queue is empty. All 32,493 classified mains have matching SDK and reader
+records; separate result-observer coverage counters are 1,424 invalid samples
+and 35 skipped SDK counters, with no failed SDK outcomes.
+
+All eight helper polls and control commands returned success. Unlike the
+previous run, progress advances: active elapsed readbacks are 1.2034, 4.4129,
+5.4159, 9.7274 and 13.4364 s, with reported snapshot ages 7.95-82.32 ms. The
+post-Off INDI snapshot still reports active progress from 15.8429 s even though
+the enable switch reads Off; later telemetry correctly reports the stop.
+
+The remaining overshoot combines coarse/cached ordinary status with the
+helper's polling behavior. `INDI/INDI/getINDI.c` defaults to a two-second wait
+for a wildcard whole-property query; the script also sleeps one second and
+starts its local duration deadline when it first observes active status.
+`setINDI` exit zero proves request transmission, not callback completion.
+Off's callback clears the atomic enable flag before acquiring the cycle mutex,
+so continued posts must not be attributed to cycle-mutex blocking after that
+callback starts. The app's independent duration remains configured at 120 s,
+not the helper's shorter ten-second request. App-enforced requested duration
+would avoid relying on polling for the precise short stop.
+
+The short capture has 43 consecutive valid controller summaries. No new
+controller overload, coalescing, rejection, SDK failure/timeout, preparation/
+post failure or timing loss occurs. Delivery-clock qualification excludes 136
+new wide brackets. Its 32,493 exact main joins show receipt-to-SDK mean/max
+17.071066/24.295 us; a 39,998-sample nonoverlapping disabled baseline has mean
+16.347216 us, a descriptive increase of about 0.724 us. Camera records remain
+qualified and continuous, with no new frame/counter gaps, errors or timing
+loss. The short interval is supporting evidence, not the two-minute result.
+
+### Full 120-second trial: sustained delivery with small deadline skips
+
+`zero-aux-8000Hz-20261102T003954Z` finishes under the app's independent duration
+limit at **120.000107659 s**, measured directly from lifecycle monotonic times
+2447850961447200 through 2447970961554859. Approximate UTC activity is
+00:40:12.37146 through 00:42:12.37157, with 55 us spread in the local-to-UTC
+mapping. All 44 helper polls/control requests succeed; final readback is Off,
+finished, with elapsed 120.000107659 and no queued events.
+
+| Actual population | Count |
+| --- | ---: |
+| Genuine-main observations | 240,000 |
+| Auxiliary opportunities | 720,000 |
+| Auxiliary publications, all acknowledged | 719,745 |
+| Initial unclassified skips | 3 |
+| Deadline-late skips | 252 |
+| All other skip/fault classes | 0 |
+
+Excluding the three startup slots, auxiliary delivery is
+719,745 / 719,997 = **99.96500%**. Counting main observations plus issued
+auxiliary publications gives approximately **7,997.9 commands/s** over the
+active interval, with the genuine main remaining at 2 kHz. This is near the
+requested total 8 kHz with explicitly skipped occurrences, not an assertion
+that every nominal 125 us slot was delivered.
+
+Actual posts by step are 239,750 / 239,996 / 239,999. Late skips are 249 at
+step 1 and three at step 2, unlike the short trial's exclusively step-2 pattern.
+Each affects a distinct main cycle; 244 occur between 70 and 80 seconds of
+activity. Of the 252, 237 fail the `deadline` check 5.003-7.336 us late and
+15 fail `publication_guard` 5.004-5.846 us late. Every late command had already
+been staged 57.267-83.673 us before its ready deadline. All 719,997 non-startup
+slots were staged; preparation/readiness did not cause the skips. Keep the
+existing 5 us guard when interpreting this result; no guard was relaxed.
+The changed step distribution and clustering do not establish a permanent
+step-specific backend bottleneck or identify the cause of wake lateness.
+
+Coverage again closes exactly: **240,122 retained + 719,880 sampled-out =
+960,002 expected events**, comprising 240,000 main observations, 720,000
+auxiliary opportunities and start/finish. Zero-event queue drops and logger
+enqueue failures remain zero, and the queue drains completely. Lifetime event
+drain count increases from 32,523 to 272,645, exactly 240,122. Reported snapshot
+ages are 0.339-99.657 ms; two repeated sequences subsequently advance without
+triggering the local watchdog.
+
+There are 239,999 matched main combinations and one unmatched startup main.
+One additional main has unclassified impact, leaving **239,998 exact SDK and
+reader joins**, all matched. Result-observer diagnostics separately report
+11,371 invalid observations and 256 skipped SDK counters; these are coverage
+exclusions, not evidence of that many lost DM commands. No timing-source
+resets, evictions, failed SDK results or real-time reader-readiness queue loss
+occur.
+
+### Full-run controller timing and camera behavior
+
+There are 152 consecutive valid controller summaries with no sequence gaps.
+Their broader endpoints cover 1,023,207 additional submissions; INDI admissions
+increase by 1,005,165 and retirements/completions by 1,005,164, with one job in
+flight afterward. There are no new overloads, coalescing, rejections, SDK
+failures/timeouts, preparation/post failures, supersession/cancellation,
+unqualified-reader/vector rejection or timing drops/gaps/invalids. Delivery
+qualification excludes 301 new wide clock brackets; other delivery-error
+counters do not increase.
+
+The table uses median rolling means and the greatest observed sample maximum,
+in microseconds. It covers 20 disabled baseline, 117 complete active two-second
+and 11 post-trial windows; adjacent windows overlap.
+
+| Measurement | Before mean / maximum | Active mean / maximum | After mean / maximum |
+| --- | ---: | ---: | ---: |
+| Native SDK | 103.860 / 104.527 | 103.811 / 109.527 | 103.897 / 105.259 |
+| SDK service through readiness | 106.167 / 107.153 | 106.233 / 116.530 | 106.209 / 107.643 |
+| Receipt to SDK, mixed active population | 16.288 / 19.477 | 17.590 / 42.941 | 16.370 / 19.547 |
+| Preparation | 13.299 / 16.652 | 14.184 / 23.625 | 13.302 / 16.351 |
+| SDK dispatch | 2.988 / 3.767 | 3.413 / 28.895 | 3.063 / 3.647 |
+| Reader release | 21.894 / 26.029 | 23.188 / 36.639 | 21.931 / 25.929 |
+
+The main-only join is the relevant comparison for main impact. Controller
+receipt to SDK is **17.019824 us mean / 24.907 us maximum**; observer receipt to
+SDK is 31.975720 / 45.456 us. A nonoverlapping 39,999-sample disabled baseline
+has receipt-to-SDK mean 16.289952 us: approximately **0.730 us added mean prefix
+duration**. This prefix includes preparation/dispatch and does not isolate
+added main SDK wait. Exact native main SDK service is 103.914297 / 109.527 us.
+The 116.530 us mixed-population readiness maximum leaves only 8.470 us nominal
+headroom in a 125 us slot; a finite observed maximum is not a hard bound.
+
+Camera telemetry has 144 consecutive valid stage summaries and 301,960
+additional published frames, without new frame/counter gaps, errors, rejected/
+invalid/wide observations or dropped records. Fourteen serial-control
+transactions occur without control failures/loss. Across 112 complete active
+windows, median acquisition RMS before/active/after is
+0.285772/0.489764/0.293593 us; publication RMS is
+0.830161/0.785300/0.828159 us. Median acquisition-to-write mean rises from
+46.715216 to 47.413302 us and returns to 46.837170 us afterward.
+
+Preserve a separate pretrial event: camera windows emitted at 00:40:03.063 and
+00:40:04.066, before activation, contain publication intervals
+390.498-610.002 us and acquisition-to-write up to 157.721 us. PDV acquisition
+intervals remain 498-502 us, while wait-return intervals already span
+390.607-610.132 us. This excursion was present by SDK return and preceded
+syncopation activation; it does not identify hardware versus driver versus
+scheduling. During active operation, publication intervals span
+479.205-525.763 us. Unbroken frame numbers alone still cannot exclude the
+previously discussed frame-behind condition.
+
+### Remaining ordinary-reader diagnostic cost
+
+The zero-event queue fix works in both captures, but ordinary reader diagnostics
+still have multi-second service times. The full capture has 82 consecutive
+profile rows, sequence 89 through 170. New observed maxima are:
+
+- Reader diagnostics: **3.837887970 s**, versus 3.271835604 s in the short run.
+- Start-to-start ordinary-loop gap: **4.860362745 s**, including the normal
+  one-second sleep, versus 4.291238914 s in the short run.
+- Event formatting/enqueue per loop: 12.166681 ms; camera/pipeline/primary/
+  combiner groups remain below 3.843/3.317/2.731/2.189 ms.
+- Status work: 1.341660 ms; previous report's own publication: 121.529 us.
+- Event queue high-water: **7,676 / 20,000**, versus 6,543 in the short run.
+
+The largest event-emission gap is 3.837892919 s, within about 5 us of the
+reader-group maximum. Thus the profile locates the gap in that group; event
+formatting and status publication do not account for its seconds of cost.
+
+Both legacy reader collectors have **primary=combined=matched=0** throughout
+these zero trials, while retaining completion observations. Their primary and
+combined feeds are confined to simulation branches in `dmSyncopation.hpp`.
+`dev::dmReaderTiming::retain()` scans its entire pending map with
+`std::min_element` on each capacity eviction. `update()` drains the captured
+completion batch before joining and expiring records. At 8 kHz, two seconds of
+retention (~16,000 records) plus a one-second incoming batch (~8,000) crosses
+the 20,000 cap, potentially causing thousands of full-map scans in each of two
+collectors. This is a strong source-backed explanation for the measured reader
+cost, although individual collector calculation and INDI I/O were not separately
+timed. It is not evidence of an isolated-core scheduling problem.
+
+Before/after full-capture changes in these legacy diagnostic populations are:
+
+| Counter | Completion collector | Release collector |
+| --- | ---: | ---: |
+| Consumed completion records | +794,607 | +794,721 |
+| Dropped completion records | +211,608 | +211,494 |
+| Capacity evictions | +332,967 | +326,499 |
+| Expirations | +461,638 | +468,222 |
+| Missing combined identities | +794,605 | +794,721 |
+
+Those are **diagnostic coverage losses**, separate from clean zero-event
+transport, exact main-impact joins and the dedicated real-time readiness queue.
+The short capture already shows +23,085/+22,086 legacy completion-queue drops.
+Do not present the legacy reader diagnostics as qualified timing evidence for
+these trials.
+
+The next reporting cleanup should stop retaining unjoinable legacy completions
+in zero-test mode while preserving the independent release observer and actual
+readiness evidence. The general collector should also expire before capacity
+pressure and avoid a full-map scan for each overflow. Separately, move the
+requested short duration into an app-enforced bound, or use exact-element
+bounded polling when only prompt status is required. No code, guard, controller
+setting or hardware configuration is changed by this analysis.
+
+The full result supports sustained finite ideal-zero **8 kHz total** operation
+with about 0.035% deadline skips and no observed controller admission loss on
+this workload. It does not qualify nonzero external publishers, prove zero
+added main SDK wait, or make the lossy legacy diagnostic collectors valid.
+
+## Implemented cleanup: zero-test reader work and app-enforced short durations
+
+Following the two reporting-corrected captures, the user authorized the next
+cleanup. Slot grids, 5 us publication admission, early staging, exact readiness
+and controller admission are unchanged.
+
+### Separate readiness observation from unused legacy joins
+
+Zero-test startup now configures both legacy `dev::dmReaderTiming` collectors
+disabled. Their INDI quality properties remain visible with `enabled=0`; no
+legacy reader-protection population is qualified in this mode. Zero-mode
+callbacks also avoid enqueuing legacy completion observations, and ordinary
+logic skips their update/statistics/INDI work. The unused full-completion
+observer thread is not started for this mode.
+
+The independent reader-release monitor has an explicit lifecycle predicate
+separate from its legacy diagnostic collector. It still starts, captures the
+coherent release record and receipt, forwards it to the real-time readiness
+queue, observes attachment epochs and invalid/discarded records, and shuts down
+normally. Disabling the unused join therefore does not disable
+`dmtweeter_read_done`, its queue/drop guards or exact `ZeroTiming` main-impact
+joins. Ordinary and shadow collector behavior remains selected as before.
+
+### Remove repeated full-map eviction work in the shared collector
+
+Consumer-owned pending evidence uses ordered `std::map` lookup in place of
+unordered maps with a full `min_element` scan for every eviction. Existing
+progression rules admit one current inode per source/generation, increasing
+counters and nondecreasing local observation times; source resets clear pending
+state. The first identity is consequently the oldest pending observation.
+Eviction removes that entry directly, and expiration walks only the expired
+prefix. Replacing an already retained key does not evict an unrelated entry at
+capacity. Same-attempt result enrichment still preserves its original timing.
+
+The queues still receive their bounded captured-population drains, followed by
+joining and then expiration. Expiring first could discard old pending evidence
+whose matching peer is already in another captured queue. Ordered eviction
+removes the excessive scan cost without changing that lifetime-join behavior.
+All joining/container work remains on the ordinary consumer; capture methods
+retain their fixed-record, nonblocking SPSC handoff.
+
+### Schema 5 selected duration and trial identity
+
+`zeroTest.durationSec` remains the startup ceiling, positive and no greater than
+120 seconds. It initializes the selected duration. While zero-test enable is
+Off, `settings.durationSec` can select any positive finite duration up to that
+ceiling. Other modes, active changes, nonfinite/nonpositive values and values
+above the ceiling are rejected. Multi-element settings changes validate and
+commit atomically; failure preserves the previous selected duration and steps.
+A duration-only change preserves the warmed cadence instead of reconfiguring it.
+
+Schema 5 exposes the existing trial generation as `zero_test.trial`, the
+selected app-enforced `durationSec`, and immutable startup `durationLimitSec`.
+The selected bound is used by the existing command-path wait, cycle expiry and
+stopped-main ordinary fallback; it does not depend on a helper polling at the
+right instant. Snapshots publish selected duration, ceiling and trial identity
+coherently. Settings duration readback is refreshed outside cycle ownership.
+The 30-second independent arm/warmup limit is unchanged.
+
+The capture helper now requires schema at least 5 and checks the startup ceiling
+against the requested interval. While Off, it sets steps and selected duration,
+then verifies disabled status, effective duration and trial/sequence readback
+before requesting On. Polls request exact `zero_test` elements together, so
+getINDI can return as soon as that vector arrives rather than waiting for its
+whole-property wildcard timeout.
+
+The configured trial generation is the baseline: old-generation finished or
+active readbacks cannot complete the new capture. The helper requires exactly
+the next generation and rejects subsequent identity changes. Success requires
+that trial to report finished, requested/active/warming all false, positive main
+observations and at least the requested elapsed interval. A short trial can
+finish before any active poll and still qualify from that evidence. Reaching
+elapsed time while still active is no longer success. Bounded reporting grace
+allows status to arrive after physical stopping; failure to confirm completion
+or a finish beyond that grace marks the capture incomplete and requests Off.
+Existing ownership, interruption, freshness and event-loss checks remain active.
+
+### Operator follow-up
+
+Rebuild/install dmSyncopation and use the matching updated helper. No controller
+or logdump rebuild, working configuration replacement or instrument retuning is
+required. A startup ceiling of 120 permits both requested intervals. Repeat the
+short test first:
+
+```bash
+bash apps/dmSyncopation/scripts/capture-zero-aux-test.sh 8000 10
+```
+
+Confirm app-enforced elapsed near ten seconds, finished/Off at the matching new
+trial identity, disabled legacy diagnostic collectors with active readiness,
+no new event/readiness/controller loss and a much smaller reader diagnostic
+service cost. Then repeat the 120-second capture under the same faster-acquWFS
+baseline. Workstation verification cannot establish the instrument's new
+ordinary-loop cost or qualify a hard worst-case backend bound.
+
+Workstation verification for this implementation:
+
+- `dmReaderTiming_test`: **28 cases / 603 assertions pass**. New pressure tests
+  process 60,000 unjoined completions with a 20,000-entry cap, exercise full-cap
+  replacement without spurious eviction, backward-observation rejection,
+  source-reset cleanup and delayed queued-peer joins before expiration. Existing
+  enrichment coverage also runs at capacity one.
+- `dmSyncopation_test`: **109 cases / 2,542,975 assertions pass**. New coverage
+  includes disabled legacy populations with a 1,024-callback readiness burst,
+  readiness invalidation on discard, normal collector selection, selected
+  duration/ceiling/readback validation and rollback, independent 1/10-second
+  command-path expiry and new trial identity. Existing slot timing, no-write,
+  ownership and cancellation cases still pass.
+- `capture_zero_aux_test.py`: **35 private-mock cases pass**. They cover schema
+  rejection, ignored duration writes, a longer selection after a short one,
+  exact-element polling, stale or wrong trial identity, first-poll completion,
+  active/premature/late finish failures, control ownership, interruption,
+  freshness and event-loss checks. No instrument connection is used.
+- Production dmSyncopation compiles and links. Touched C++ files pass
+  clang-format verification, the helper passes Bash syntax checking, and
+  `git diff --check` passes.
+
+Only the operator can qualify the new stop timing and diagnostic service cost
+on the instrument. No hardware command, deployment, commit or push was performed
+as part of this implementation step.

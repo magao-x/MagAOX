@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Capture an operator-run finite, main-coordinated zero-auxiliary trial.
-# Only synco's disabled step count and finite-trial enable switch are changed.
+# Only synco's disabled steps/duration and finite-trial enable switch are changed.
 set -u
 set -o pipefail
 
@@ -12,7 +12,7 @@ Usage: capture-zero-aux-test.sh RATE [SECONDS]
 RATE is effective total cadence, 4000, 6000 or 8000 Hz, with the main loop at 2000 Hz.
 SECONDS is the active-trial duration, default 120, integer 1 through 120.
 The app must already be running with zeroTest.enabled=true and enable=Off.
-The script sets two/three/four steps while disabled, then starts the finite trial.
+The script sets steps and the app-enforced duration while disabled, then starts the trial.
 It never changes the main loop, camera, dmcomb, CPU placement or app config.
 
 Requires camwfs at 2 kHz/synchronization On, RTC latency On, a configured
@@ -185,7 +185,7 @@ zero_snapshot_age=$(read_property dmtweeter-synco.zero_test.snapshotAgeSec "$zer
 zero_snapshot_sequence=$(read_property dmtweeter-synco.zero_test.snapshotSequence "$zero_synco_before")
 zero_drops_before=$(read_property dmtweeter-synco.zero_test.eventsDropped "$zero_synco_before")
 zero_log_failed_before=$(read_property dmtweeter-synco.logic_timing.eventsLogFailed "$zero_synco_before")
-zero_limit=$(read_property dmtweeter-synco.zero_test.durationSec "$zero_synco_before")
+zero_limit=$(read_property dmtweeter-synco.zero_test.durationLimitSec "$zero_synco_before")
 zero_camera_fps=$(read_property camwfs.fps.current "$zero_camera_before")
 zero_camera_sync=$(read_property camwfs.synchro.toggle "$zero_camera_before")
 zero_latency=$(read_property sysMonRTC.set_latency.toggle "$zero_latency_before")
@@ -195,13 +195,13 @@ zero_latency=$(read_property sysMonRTC.set_latency.toggle "$zero_latency_before"
 if ! awk -v schema="$zero_schema" -v valid="$zero_snapshot_valid" -v age="$zero_snapshot_age" \
          -v seq="$zero_snapshot_sequence" -v drops="$zero_drops_before" -v failed="$zero_log_failed_before" \
      'BEGIN { number="^[0-9]+([.][0-9]+)?([eE][+-]?[0-9]+)?$";
-              exit !(schema ~ /^[0-9]+$/ && schema >= 4 && valid == 1 &&
+              exit !(schema ~ /^[0-9]+$/ && schema >= 5 && valid == 1 &&
                      age ~ number && age >= 0 && age <= 2 && seq ~ /^[0-9]+$/ && seq > 0 &&
                      drops ~ /^[0-9]+$/ && failed ~ /^[0-9]+$/) }'
 then
     setup_failure 'zero_test progress snapshot' \
         "schema=$zero_schema valid=$zero_snapshot_valid age=$zero_snapshot_age sequence=$zero_snapshot_sequence" \
-        'schema>=4, valid=1, age<=2 seconds and a positive sequence'
+        'schema>=5, valid=1, age<=2 seconds and a positive sequence'
 fi
 [[ $zero_camera_sync == On ]] || setup_failure camwfs.synchro.toggle "$zero_camera_sync" On
 [[ $zero_latency == On ]] || setup_failure sysMonRTC.set_latency.toggle "$zero_latency" On
@@ -213,7 +213,7 @@ fi
 if ! awk -v limit="$zero_limit" -v duration="$zero_seconds" \
      'BEGIN { exit !(limit ~ /^[0-9]+([.][0-9]+)?$/ && limit >= duration && limit <= 120) }'
 then
-    setup_failure dmtweeter-synco.zero_test.durationSec "$zero_limit" \
+    setup_failure dmtweeter-synco.zero_test.durationLimitSec "$zero_limit" \
         "numeric seconds from requested $zero_seconds through 120"
 fi
 if (( zero_capture_failed ))
@@ -224,7 +224,8 @@ then
     exit 1
 fi
 
-if ! set_property -n "dmtweeter-synco.settings.steps=$zero_steps"
+if ! set_property -n "dmtweeter-synco.settings.steps=$zero_steps" ||
+   ! set_property -n "dmtweeter-synco.settings.durationSec=$zero_seconds"
 then
     cleanup
     printf '%s\n' "$zero_capture_dir"
@@ -233,16 +234,31 @@ fi
 sleep 1
 snapshot configured dmtweeter-synco
 zero_synco_configured="$zero_capture_dir/dmtweeter-synco-indi-configured.txt"
+zero_trial_before=$(read_property dmtweeter-synco.zero_test.trial "$zero_synco_configured")
+zero_configured_duration=$(read_property dmtweeter-synco.zero_test.durationSec "$zero_synco_configured")
+zero_configured_sequence=$(read_property dmtweeter-synco.zero_test.snapshotSequence "$zero_synco_configured")
 if (( zero_capture_failed )) ||
    [[ $(read_property dmtweeter-synco.enable.toggle "$zero_synco_configured") != Off ||
-      $(read_property dmtweeter-synco.settings.steps "$zero_synco_configured") != "$zero_steps" ]]
+      $(read_property dmtweeter-synco.settings.steps "$zero_synco_configured") != "$zero_steps" ]] ||
+   ! awk -v trial="$zero_trial_before" -v selected="$zero_configured_duration" -v expected="$zero_seconds" \
+         -v seq="$zero_configured_sequence" -v before="$zero_snapshot_sequence" \
+     'BEGIN { exit !(trial ~ /^[0-9]+$/ && selected ~ /^[0-9]+([.][0-9]+)?$/ && selected == expected &&
+                      seq ~ /^[0-9]+$/ && seq >= before) }'
 then
-    printf 'Disabled step-count readback failed; no enable request sent.\n' >&2
+    printf 'Disabled step-count/duration readback failed; no enable request sent.\n' >&2
     cleanup
     printf '%s\n' "$zero_capture_dir"
     exit 1
 fi
 
+# Exact elements let getINDI exit on one complete vector instead of its wildcard timeout.
+zero_poll_fields=()
+for zero_field in active warming finished requested trial mainObserved durationSec elapsedSec \
+                  snapshotSequence snapshotValid snapshotAgeSec eventsDropped
+do
+    zero_poll_fields+=("dmtweeter-synco.zero_test.$zero_field")
+done
+zero_expected_trial=$((zero_trial_before + 1))
 # Mark ownership before requesting On, since a timeout can leave the request applied.
 zero_started=1
 zero_result=0
@@ -252,14 +268,13 @@ then
 else
     zero_warm_deadline=$((SECONDS + 30))
     zero_active_deadline=0
-    zero_seen_progress=0
-    zero_seen_active=0
-    zero_last_sequence=$zero_snapshot_sequence
+    zero_seen_trial=0
+    zero_last_sequence=$zero_configured_sequence
     zero_sequence_deadline=$((SECONDS + 5))
     while true
     do
         zero_poll_status=0
-        timeout -k 2s 8s getINDI dmtweeter-synco.zero_test \
+        timeout -k 2s 8s getINDI "${zero_poll_fields[@]}" \
             > "$zero_capture_dir/zero-test-current.txt" \
             2>> "$zero_capture_dir/zero-test-poll.err" || zero_poll_status=$?
         status "zero_test poll status=$zero_poll_status"
@@ -306,29 +321,65 @@ else
             zero_result=1
             break
         fi
+        zero_current_trial=$(read_property dmtweeter-synco.zero_test.trial "$zero_current")
+        if ! [[ $zero_current_trial =~ ^[0-9]+$ ]]
+        then
+            status 'missing trial identity'
+            zero_result=1
+            break
+        fi
+        # Old finished/active readbacks can survive On; only the exact new generation counts.
+        if [[ $zero_current_trial == "$zero_trial_before" ]] && (( !zero_seen_trial ))
+        then
+            if (( SECONDS >= zero_warm_deadline ))
+            then
+                status 'new trial failed to appear within 30 seconds'
+                zero_result=1
+                break
+            fi
+            sleep 1
+            continue
+        fi
+        if [[ $zero_current_trial != "$zero_expected_trial" ]]
+        then
+            status 'unexpected trial identity; capture is incomplete'
+            zero_result=1
+            break
+        fi
+        zero_seen_trial=1
+        zero_current_duration=$(read_property dmtweeter-synco.zero_test.durationSec "$zero_current")
+        zero_current_elapsed=$(read_property dmtweeter-synco.zero_test.elapsedSec "$zero_current")
+        if ! awk -v selected="$zero_current_duration" -v expected="$zero_seconds" -v elapsed="$zero_current_elapsed" \
+             'BEGIN { number="^[0-9]+([.][0-9]+)?([eE][+-]?[0-9]+)?$";
+                      exit !(selected ~ number && selected == expected && elapsed ~ number && elapsed >= 0) }'
+        then
+            status 'app duration differs from the requested trial'
+            zero_result=1
+            break
+        fi
         zero_current_active=$(read_property dmtweeter-synco.zero_test.active "$zero_current")
         zero_current_warming=$(read_property dmtweeter-synco.zero_test.warming "$zero_current")
-        if [[ $zero_current_active == 1 || $zero_current_warming == 1 ]]
+        if [[ $(read_property dmtweeter-synco.zero_test.finished "$zero_current") == 1 ]]
         then
-            zero_seen_progress=1
-        fi
-        if [[ $zero_current_active == 1 ]]
-        then
-            zero_seen_active=1
-        fi
-        # An old finished readback can survive until the next INDI refresh after On.
-        if (( zero_seen_progress )) &&
-           [[ $(read_property dmtweeter-synco.zero_test.finished "$zero_current") == 1 ]]
-        then
-            zero_finished_elapsed=$(read_property dmtweeter-synco.zero_test.elapsedSec "$zero_current")
-            if (( !zero_seen_active ))
+            zero_current_mains=$(read_property dmtweeter-synco.zero_test.mainObserved "$zero_current")
+            if ! [[ $zero_current_mains =~ ^[0-9]+$ ]] || (( zero_current_mains == 0 ))
             then
                 status 'trial finished without reaching active qualification'
                 zero_result=1
-            elif ! awk -v elapsed="$zero_finished_elapsed" -v duration="$zero_seconds" \
+            elif [[ $zero_current_active != 0 || $zero_current_warming != 0 ||
+                    $(read_property dmtweeter-synco.zero_test.requested "$zero_current") != 0 ]]
+            then
+                status 'finished trial has inconsistent active/requested state'
+                zero_result=1
+            elif ! awk -v elapsed="$zero_current_elapsed" -v duration="$zero_seconds" \
                      'BEGIN { exit !(elapsed ~ /^[0-9]+([.][0-9]+)?$/ && elapsed >= duration) }'
             then
                 status 'trial finished before the requested active duration'
+                zero_result=1
+            elif awk -v elapsed="$zero_current_elapsed" -v duration="$zero_seconds" \
+                     'BEGIN { exit !(elapsed > duration+5) }'
+            then
+                status 'trial finished beyond the app duration plus reporting grace'
                 zero_result=1
             fi
             break
@@ -337,16 +388,20 @@ else
         then
             if (( zero_active_deadline == 0 ))
             then
-                zero_active_deadline=$((SECONDS + zero_seconds))
+                zero_remaining=$(awk -v elapsed="$zero_current_elapsed" -v duration="$zero_seconds" \
+                    'BEGIN { left=duration-elapsed; print (left>0 ? int(left)+1 : 0) }')
+                zero_active_deadline=$((SECONDS + zero_remaining + 5))
             fi
-            zero_active_elapsed=$(read_property dmtweeter-synco.zero_test.elapsedSec "$zero_current")
             if (( SECONDS >= zero_active_deadline )) ||
-               awk -v elapsed="$zero_active_elapsed" -v duration="$zero_seconds" \
-                   'BEGIN { exit !(elapsed ~ /^[0-9]+([.][0-9]+)?$/ && elapsed >= duration) }'
+               awk -v elapsed="$zero_current_elapsed" -v duration="$zero_seconds" \
+                   'BEGIN { exit !(elapsed ~ /^[0-9]+([.][0-9]+)?$/ && elapsed > duration+5) }'
             then
+                status 'app did not report completion within the duration plus reporting grace'
+                zero_result=1
                 break
             fi
-        elif (( zero_active_deadline != 0 || SECONDS >= zero_warm_deadline ))
+        elif [[ $zero_current_warming != 1 ]] ||
+             (( zero_active_deadline != 0 || SECONDS >= zero_warm_deadline ))
         then
             status 'trial stopped early or failed to become active within 30 seconds'
             zero_result=1

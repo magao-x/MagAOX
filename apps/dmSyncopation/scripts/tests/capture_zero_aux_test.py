@@ -32,6 +32,7 @@ class CaptureZeroAuxTest(unittest.TestCase):
         )
         (self.root / "enable").write_text("Off")
         (self.root / "steps").write_text("2")
+        (self.root / "duration").write_text("120")
         self.stub("timeout", 'while [[ $1 == -* ]]; do shift 2; done\nshift\nexec "$@"')
         self.stub("git", "printf 'offline-test-commit\\n'")
         self.stub("sleep", "/bin/sleep 0.02")
@@ -45,54 +46,82 @@ class CaptureZeroAuxTest(unittest.TestCase):
         )
         self.stub(
             "getINDI",
-            'printf "%s\\n" "$*" >> "$ZERO_TEST_ROOT/indi-calls"\n'
-            '/bin/sleep 0.02\n'
-            '[[ ${ZERO_TEST_INDI_STATUS:-0} != 0 ]] && exit "$ZERO_TEST_INDI_STATUS"\n'
-            'enable=$(cat "$ZERO_TEST_ROOT/enable")\nsteps=$(cat "$ZERO_TEST_ROOT/steps")\n'
-            'case $1 in\n'
-            'dmtweeter-synco)\n'
-            ' printf "dmtweeter-synco.enable.toggle=%s\\n" "$enable"\n'
-            ' printf "dmtweeter-synco.settings.steps=%s\\n" "$steps"\n'
-            ' printf "dmtweeter-synco.zero_test.enabled=%s\\n" "${ZERO_TEST_MODE-1}"\n'
-            ' printf "dmtweeter-synco.zero_test.idealPublisher=%s\\n" "${ZERO_TEST_IDEAL-1}"\n'
-            ' printf "dmtweeter-synco.zero_test.labelVersion=%s\\n" "${ZERO_TEST_SCHEMA-4}"\n'
-            ' printf "dmtweeter-synco.zero_test.snapshotValid=1\\n"\n'
-            ' printf "dmtweeter-synco.zero_test.snapshotAgeSec=0\\n"\n'
-            ' printf "dmtweeter-synco.zero_test.snapshotSequence=%s\\n" "${ZERO_TEST_BASELINE_SEQUENCE-1}"\n'
-            ' printf "dmtweeter-synco.zero_test.eventsDropped=0\\n"\n'
-            ' printf "dmtweeter-synco.logic_timing.eventsLogFailed=%s\\n" '
-            '"$(if [[ -f $ZERO_TEST_ROOT/polls ]]; then printf %s "${ZERO_TEST_LOG_FAILED-0}"; else printf 0; fi)"\n'
-            ' printf "dmtweeter-synco.zero_test.durationSec=%s\\n" "${ZERO_TEST_LIMIT-120}";;\n'
-            'dmtweeter-synco.zero_test)\n'
-            ' [[ ${ZERO_TEST_POLL_STATUS:-0} != 0 ]] && exit "$ZERO_TEST_POLL_STATUS"\n'
-            ' count=0\n[[ -f $ZERO_TEST_ROOT/polls ]] && count=$(cat "$ZERO_TEST_ROOT/polls")\n'
-            ' count=$((count+1))\nprintf "%s" "$count" > "$ZERO_TEST_ROOT/polls"\n'
-            ' sequence=$((count+1))\n'
-            ' if [[ ${ZERO_TEST_FROZEN_SNAPSHOT:-0} == 1 ]]; then sequence=2; fi\n'
-            ' if [[ ${ZERO_TEST_STALE_FINISHED:-0} == 1 ]]; then\n'
-            '   if ((count==1)); then count=2; else count=$((count-1)); fi\nfi\n'
-            ' if [[ ${ZERO_TEST_HOLD_ACTIVE:-0} == 1 ]]; then count=1; fi\n'
-            ' if [[ ${ZERO_TEST_FROZEN_SNAPSHOT:-0} == 1 ]]; then count=1; fi\n'
-            ' active=$((count==1))\nwarming=0\n'
-            ' if [[ ${ZERO_TEST_WARM_TIMEOUT:-0} == 1 ]]; then\n'
-            '   active=0\nwarming=$((count==1))\nfi\n'
-            ' elapsed=${ZERO_TEST_ELAPSED:-0}\n'
-            ' if ((count>=2)); then elapsed=${ZERO_TEST_FINISHED_ELAPSED:-120}; fi\n'
-            ' if [[ ${ZERO_TEST_WARM_TIMEOUT:-0} == 1 ]]; then elapsed=0; fi\n'
-            ' printf "dmtweeter-synco.zero_test.active=%s\\n" "$active"\n'
-            ' printf "dmtweeter-synco.zero_test.snapshotSequence=%s\\n" "$sequence"\n'
-            ' printf "dmtweeter-synco.zero_test.snapshotValid=%s\\n" "${ZERO_TEST_SNAPSHOT_VALID-1}"\n'
-            ' printf "dmtweeter-synco.zero_test.snapshotAgeSec=%s\\n" "${ZERO_TEST_SNAPSHOT_AGE-0}"\n'
-            ' printf "dmtweeter-synco.zero_test.eventsDropped=%s\\n" "${ZERO_TEST_EVENT_DROPS-0}"\n'
-            ' printf "dmtweeter-synco.zero_test.warming=%s\\n" "$warming"\n'
-            ' printf "dmtweeter-synco.zero_test.elapsedSec=%s\\n" "$elapsed"\n'
-            ' printf "dmtweeter-synco.zero_test.finished=%s\\n" "$((count>=2))";;\n'
-            'camwfs)\n'
-            ' printf "camwfs.fps.current=%s\\ncamwfs.synchro.toggle=%s\\n" '
-            '"${ZERO_TEST_FPS-2000}" "${ZERO_TEST_SYNC-On}";;\n'
-            'sysMonRTC.set_latency.toggle) printf "sysMonRTC.set_latency.toggle=%s\\n" '
-            '"${ZERO_TEST_LATENCY-On}";;\n'
-            '*) printf "fake.current=1\\n";;\nesac',
+            r'''printf "%s\n" "$*" >> "$ZERO_TEST_ROOT/indi-calls"
+/bin/sleep 0.02
+[[ ${ZERO_TEST_INDI_STATUS:-0} != 0 ]] && exit "$ZERO_TEST_INDI_STATUS"
+enable=$(cat "$ZERO_TEST_ROOT/enable")
+steps=$(cat "$ZERO_TEST_ROOT/steps")
+duration=$(cat "$ZERO_TEST_ROOT/duration")
+case $1 in
+    dmtweeter-synco)
+        printf "dmtweeter-synco.enable.toggle=%s\n" "$enable"
+        printf "dmtweeter-synco.settings.steps=%s\n" "$steps"
+        printf "dmtweeter-synco.settings.durationSec=%s\n" "$duration"
+        printf "dmtweeter-synco.zero_test.enabled=%s\n" "${ZERO_TEST_MODE-1}"
+        printf "dmtweeter-synco.zero_test.idealPublisher=%s\n" "${ZERO_TEST_IDEAL-1}"
+        printf "dmtweeter-synco.zero_test.labelVersion=%s\n" "${ZERO_TEST_SCHEMA-5}"
+        printf "dmtweeter-synco.zero_test.snapshotValid=1\n"
+        printf "dmtweeter-synco.zero_test.snapshotAgeSec=0\n"
+        printf "dmtweeter-synco.zero_test.snapshotSequence=%s\n" "${ZERO_TEST_BASELINE_SEQUENCE-1}"
+        printf "dmtweeter-synco.zero_test.eventsDropped=0\n"
+        printf "dmtweeter-synco.logic_timing.eventsLogFailed=%s\n" \
+            "$(if [[ -f $ZERO_TEST_ROOT/polls ]]; then printf %s "${ZERO_TEST_LOG_FAILED-0}"; else printf 0; fi)"
+        printf "dmtweeter-synco.zero_test.durationSec=%s\n" "$duration"
+        printf "dmtweeter-synco.zero_test.durationLimitSec=%s\n" "${ZERO_TEST_LIMIT-120}"
+        printf "dmtweeter-synco.zero_test.trial=%s\n" "${ZERO_TEST_BASELINE_TRIAL-0}"
+        ;;
+    dmtweeter-synco.zero_test.active)
+        [[ ${ZERO_TEST_POLL_STATUS:-0} != 0 ]] && exit "$ZERO_TEST_POLL_STATUS"
+        count=0
+        [[ -f $ZERO_TEST_ROOT/polls ]] && count=$(cat "$ZERO_TEST_ROOT/polls")
+        count=$((count+1))
+        printf "%s" "$count" > "$ZERO_TEST_ROOT/polls"
+        sequence=$((count+1))
+        trial=${ZERO_TEST_CURRENT_TRIAL-$(( ${ZERO_TEST_BASELINE_TRIAL:-0} + 1 ))}
+        if [[ ${ZERO_TEST_FROZEN_SNAPSHOT:-0} == 1 ]]; then sequence=2; fi
+        if [[ ${ZERO_TEST_STALE_FINISHED:-0} == 1 ]]; then
+            if ((count==1)); then
+                count=2
+                trial=${ZERO_TEST_BASELINE_TRIAL:-0}
+            else
+                count=$((count-1))
+            fi
+        fi
+        if [[ ${ZERO_TEST_HOLD_ACTIVE:-0} == 1 || ${ZERO_TEST_FROZEN_SNAPSHOT:-0} == 1 ]]; then count=1; fi
+        if [[ ${ZERO_TEST_FINISH_FIRST:-0} == 1 ]]; then count=2; fi
+        active=$((count==1))
+        warming=0
+        if [[ ${ZERO_TEST_WARM_TIMEOUT:-0} == 1 ]]; then
+            active=0
+            warming=$((count==1))
+        fi
+        elapsed=${ZERO_TEST_ELAPSED:-0}
+        if ((count>=2)); then elapsed=${ZERO_TEST_FINISHED_ELAPSED-$duration}; fi
+        if [[ ${ZERO_TEST_WARM_TIMEOUT:-0} == 1 ]]; then elapsed=0; fi
+        mains=2000
+        if [[ ${ZERO_TEST_WARM_TIMEOUT:-0} == 1 ]]; then mains=0; fi
+        printf "dmtweeter-synco.zero_test.active=%s\n" "$active"
+        printf "dmtweeter-synco.zero_test.requested=%s\n" "$((count<2))"
+        printf "dmtweeter-synco.zero_test.trial=%s\n" "$trial"
+        printf "dmtweeter-synco.zero_test.mainObserved=%s\n" "$mains"
+        printf "dmtweeter-synco.zero_test.durationSec=%s\n" "${ZERO_TEST_CURRENT_DURATION-$duration}"
+        printf "dmtweeter-synco.zero_test.snapshotSequence=%s\n" "$sequence"
+        printf "dmtweeter-synco.zero_test.snapshotValid=%s\n" "${ZERO_TEST_SNAPSHOT_VALID-1}"
+        printf "dmtweeter-synco.zero_test.snapshotAgeSec=%s\n" "${ZERO_TEST_SNAPSHOT_AGE-0}"
+        printf "dmtweeter-synco.zero_test.eventsDropped=%s\n" "${ZERO_TEST_EVENT_DROPS-0}"
+        printf "dmtweeter-synco.zero_test.warming=%s\n" "$warming"
+        printf "dmtweeter-synco.zero_test.elapsedSec=%s\n" "$elapsed"
+        printf "dmtweeter-synco.zero_test.finished=%s\n" "$((count>=2))"
+        ;;
+    camwfs)
+        printf "camwfs.fps.current=%s\ncamwfs.synchro.toggle=%s\n" \
+            "${ZERO_TEST_FPS-2000}" "${ZERO_TEST_SYNC-On}"
+        ;;
+    sysMonRTC.set_latency.toggle)
+        printf "sysMonRTC.set_latency.toggle=%s\n" "${ZERO_TEST_LATENCY-On}"
+        ;;
+    *) printf "fake.current=1\n" ;;
+esac''',
         )
         self.stub(
             "setINDI",
@@ -102,6 +131,10 @@ class CaptureZeroAuxTest(unittest.TestCase):
             ' [[ $(cat "$ZERO_TEST_ROOT/enable") == Off ]] || exit 9\n'
             ' [[ ${ZERO_TEST_IGNORE_STEPS:-0} == "${2##*=}" ]] && exit 0\n'
             ' printf "%s" "${2##*=}" > "$ZERO_TEST_ROOT/steps";;\n'
+            'dmtweeter-synco.settings.durationSec=*)\n'
+            ' [[ $(cat "$ZERO_TEST_ROOT/enable") == Off ]] || exit 9\n'
+            ' [[ ${ZERO_TEST_IGNORE_DURATION:-0} == 1 ]] && exit 0\n'
+            ' printf "%s" "${2##*=}" > "$ZERO_TEST_ROOT/duration";;\n'
             'dmtweeter-synco.enable.toggle=On)\n'
             ' printf On > "$ZERO_TEST_ROOT/enable"\n'
             ' exit "${ZERO_TEST_ON_STATUS:-0}";;\n'
@@ -165,7 +198,8 @@ class CaptureZeroAuxTest(unittest.TestCase):
         self.assertEqual(code, 0, stderr)
         self.assertEqual(
             self.set_calls(),
-            ["-n dmtweeter-synco.settings.steps=2", "-s dmtweeter-synco.enable.toggle=On",
+            ["-n dmtweeter-synco.settings.steps=2", "-n dmtweeter-synco.settings.durationSec=1",
+             "-s dmtweeter-synco.enable.toggle=On",
              "-s dmtweeter-synco.enable.toggle=Off"],
         )
         directory = self.capture_dir()
@@ -187,7 +221,8 @@ class CaptureZeroAuxTest(unittest.TestCase):
         self.assertEqual(code, 0, stderr)
         self.assertEqual(
             self.set_calls(),
-            ["-n dmtweeter-synco.settings.steps=4", "-s dmtweeter-synco.enable.toggle=On",
+            ["-n dmtweeter-synco.settings.steps=4", "-n dmtweeter-synco.settings.durationSec=10",
+             "-s dmtweeter-synco.enable.toggle=On",
              "-s dmtweeter-synco.enable.toggle=Off"],
         )
         metadata = (self.capture_dir() / "test.txt").read_text()
@@ -201,9 +236,10 @@ class CaptureZeroAuxTest(unittest.TestCase):
         self.env["ZERO_TEST_IGNORE_STEPS"] = "4"
         code, _, stderr = self.run_capture("8000", "10")
         self.assertEqual(code, 1)
-        self.assertEqual(self.set_calls(), ["-n dmtweeter-synco.settings.steps=4"])
+        self.assertEqual(self.set_calls(), ["-n dmtweeter-synco.settings.steps=4",
+                                           "-n dmtweeter-synco.settings.durationSec=10"])
         self.assertEqual((self.root / "enable").read_text(), "Off")
-        self.assertIn("Disabled step-count readback failed", stderr)
+        self.assertIn("Disabled step-count/duration readback failed", stderr)
 
     def test_progress_snapshot_capability_is_required(self):
         """The earlier mutex-dependent status implementation cannot start this capture."""
@@ -294,7 +330,7 @@ class CaptureZeroAuxTest(unittest.TestCase):
             'camwfs.synchro.toggle actual="Off"; expected="On"',
             'sysMonRTC.set_latency.toggle actual="Off"; expected="On"',
             'camwfs.fps.current actual="3622"; expected="numeric FPS from 1999 through 2001"',
-            'dmtweeter-synco.zero_test.durationSec actual="0"; '
+            'dmtweeter-synco.zero_test.durationLimitSec actual="0"; '
             'expected="numeric seconds from requested 60 through 120"',
         ]
         saved = (self.capture_dir() / "status.txt").read_text()
@@ -310,7 +346,7 @@ class CaptureZeroAuxTest(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertEqual(self.set_calls(), [])
         self.assertIn('camwfs.fps.current actual="<missing>"', stderr)
-        self.assertIn('dmtweeter-synco.zero_test.durationSec actual="<missing>"', stderr)
+        self.assertIn('dmtweeter-synco.zero_test.durationLimitSec actual="<missing>"', stderr)
 
     def test_setup_reports_duration_bounds(self):
         """Preserve the requested-duration and 120-second upper-limit gates."""
@@ -321,7 +357,7 @@ class CaptureZeroAuxTest(unittest.TestCase):
                 self.assertEqual(code, 1)
                 self.assertEqual(self.set_calls(), [])
                 self.assertIn(
-                    f'dmtweeter-synco.zero_test.durationSec actual="{value}"; '
+                    f'dmtweeter-synco.zero_test.durationLimitSec actual="{value}"; '
                     'expected="numeric seconds from requested 60 through 120"',
                     stderr,
                 )
@@ -363,12 +399,12 @@ class CaptureZeroAuxTest(unittest.TestCase):
         self.assertEqual(self.set_calls()[-1], "-s dmtweeter-synco.enable.toggle=Off")
 
     def test_requested_shorter_duration_uses_app_elapsed(self):
-        """The operator's shorter duration uses monotonic active time from the app."""
-        self.env["ZERO_TEST_HOLD_ACTIVE"] = "1"
+        """Elapsed reaching the target cannot substitute for the app finishing its trial."""
         self.env["ZERO_TEST_ELAPSED"] = "1"
         code, _, stderr = self.run_capture("6000", "1")
         self.assertEqual(code, 0, stderr)
-        self.assertEqual((self.root / "polls").read_text(), "1")
+        self.assertEqual((self.root / "polls").read_text(), "2")
+        self.assertEqual((self.root / "duration").read_text(), "1")
         self.assertEqual((self.root / "enable").read_text(), "Off")
 
     def test_previous_finished_readback_does_not_end_new_trial(self):
@@ -416,6 +452,75 @@ class CaptureZeroAuxTest(unittest.TestCase):
         self.assertNotEqual(code, 0)
         self.assertIn("final zero-event transport loss", (self.capture_dir() / "status.txt").read_text())
         self.assertEqual((self.root / "enable").read_text(), "Off")
+
+    def test_old_duration_capability_never_enables(self):
+        """Schema 4 cannot promise an app-enforced selected short interval."""
+        self.env["ZERO_TEST_SCHEMA"] = "4"
+        code, _, _ = self.run_capture("8000", "10")
+        self.assertEqual(code, 1)
+        self.assertEqual(self.set_calls(), [])
+
+    def test_ignored_duration_setting_never_enables(self):
+        """A successful client send still requires the effective app duration readback."""
+        self.env["ZERO_TEST_IGNORE_DURATION"] = "1"
+        code, _, stderr = self.run_capture("8000", "10")
+        self.assertEqual(code, 1)
+        self.assertNotIn("-s dmtweeter-synco.enable.toggle=On", self.set_calls())
+        self.assertIn("duration readback failed", stderr)
+
+    def test_longer_selection_after_short_run_uses_startup_ceiling(self):
+        """A previous one-second selection does not lower the immutable maximum."""
+        (self.root / "duration").write_text("1")
+        code, _, stderr = self.run_capture("8000", "120")
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual((self.root / "duration").read_text(), "120")
+
+    def test_completed_trial_can_arrive_before_first_active_poll(self):
+        """A new finished identity with commands and full elapsed qualifies a short run."""
+        self.env["ZERO_TEST_FINISH_FIRST"] = "1"
+        code, _, stderr = self.run_capture("8000", "1")
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual((self.root / "polls").read_text(), "1")
+
+    def test_wrong_trial_identity_cancels_owned_run(self):
+        """A different generation cannot be accepted as this script's measurement."""
+        self.env["ZERO_TEST_CURRENT_TRIAL"] = "2"
+        code, _, _ = self.run_capture("8000", "10")
+        self.assertEqual(code, 1)
+        self.assertIn("unexpected trial identity", (self.capture_dir() / "status.txt").read_text())
+
+    def test_mismatched_active_duration_cancels_owned_run(self):
+        """Readbacks must keep the selected duration frozen throughout the new trial."""
+        self.env["ZERO_TEST_CURRENT_DURATION"] = "120"
+        code, _, _ = self.run_capture("8000", "10")
+        self.assertEqual(code, 1)
+        self.assertIn("duration differs", (self.capture_dir() / "status.txt").read_text())
+
+    def test_active_overrun_is_incomplete_not_success(self):
+        """A controller that fails its own bound is cancelled after reporting grace."""
+        self.env.update(ZERO_TEST_HOLD_ACTIVE="1", ZERO_TEST_ELAPSED="7")
+        code, _, _ = self.run_capture("8000", "1")
+        self.assertEqual(code, 1)
+        self.assertIn("did not report completion", (self.capture_dir() / "status.txt").read_text())
+
+    def test_finished_overrun_is_incomplete(self):
+        """A finished report cannot excuse an app that ran far past its selected bound."""
+        self.env.update(ZERO_TEST_FINISH_FIRST="1", ZERO_TEST_FINISHED_ELAPSED="120")
+        code, _, _ = self.run_capture("8000", "10")
+        self.assertEqual(code, 1)
+        self.assertIn("finished beyond", (self.capture_dir() / "status.txt").read_text())
+
+    def test_poll_uses_exact_element_specs(self):
+        """Polling returns on a complete vector rather than the wildcard timeout."""
+        code, _, stderr = self.run_capture("8000", "1")
+        self.assertEqual(code, 0, stderr)
+        polls = [line.split() for line in (self.root / "indi-calls").read_text().splitlines()
+                 if line.startswith("dmtweeter-synco.zero_test.")]
+        self.assertTrue(polls)
+        for fields in polls:
+            self.assertIn("dmtweeter-synco.zero_test.trial", fields)
+            self.assertIn("dmtweeter-synco.zero_test.finished", fields)
+            self.assertTrue(all(field.count(".") == 2 and "*" not in field for field in fields))
 
     def test_invalid_inputs_and_help_do_not_contact_services(self):
         """Reject additive/free-run arguments and invalid finite durations."""
