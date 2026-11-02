@@ -141,3 +141,8 @@ Follow these code style and documentation rules exactly.
 - Summarize what changed.
 - List affected files.
 - Note any follow-up items or potential edge cases.
+
+26) Standalone Script Location
+  - Keep standalone analysis, data inspection, training, and operator helper scripts outside `apps/`.
+  - Put these scripts in a separate folder in the user's home directory. For the NN reconstruction workflow, use `/home/rlandman/NNReconstructor_2026B/tools/`.
+  - Keep application directories focused on the C++ application rather than ad hoc analysis scripts.
