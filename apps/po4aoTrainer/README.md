@@ -80,6 +80,9 @@ Exports run in private candidate directories. The supervisor verifies engine has
 metadata/config revision, reset generation, matching NPZ identity and finite model
 state, then replaces one `current` directory symlink. C++ reload completion
 requires a fresh Busy/terminal acknowledgement and the intended model identity.
+Completion is bound to the exact candidate and reload ticket under the supervisor
+lock; an older status-thread result cannot promote a newer candidate. An unresolved
+load cannot be replaced, and a send failure never borrows the preceding ticket.
 The retained engine is eligible until Reset, including after Disable. Eligibility
 is persisted in `session.json`, separately from unresolved publication and Reset.
 Old files alone never restore eligibility. A lost load ticket across a supervisor

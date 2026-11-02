@@ -11,13 +11,16 @@ requests and learning becomes available in the same window. Arrival/loss sends n
 
 ## Behavior
 
-Without the trainer, Enable/Disable writes `control_enable.toggle`; Reset sends Off
-when observed enabled followed by `reset_model.toggle=On`; Recollect sends
+Without the trainer, Enable/Disable writes `control_enable.toggle`; Reset always
+sends Off followed by `reset_model.toggle=On`; Recollect sends
 `recollect_warmup.toggle=On`. Enable selects the resident engine; notebook export/reload
 remains notebook code. Readbacks use native `fsm`, `model_status`, `collection_status`
 and switch acknowledgements. No button controls notebook execution or Python objects.
 Loaded and effective model IDs are shown separately. Native Disable remains available
-during recollection. Native Reset does not wait for frames before sending both requests.
+during recollection. Native Reset supersedes pending selection without waiting for
+frames. Its completion requires a newer applied reset generation, matching control
+request/applied generations and observed control Off/Ok. The idempotent Off request
+needs no separate Busy edge.
 
 The following coordinated behaviors apply when the trainer is ready:
 
@@ -27,7 +30,18 @@ The following coordinated behaviors apply when the trainer is ready:
 - Link modulation sends a preference to the companion. The checkbox reflects readback; it issues no modulation motion itself.
 - Enable/Disable PO4AO and Start/Pause/Resume learning labels follow the companion's effective state. A retained policy ID alone never implies PO4AO output is active. Disable's pause behavior, Reset's termination, and recollection noise/resume sequencing belong to the companion/runtime.
 - Disable remains available during publication/recollection when PO4AO is observed enabled, using the backend's superseding pause path. Enable stays serialized. A persistent pending Reset blocks ordinary training actions while leaving Reset available to retry. Collection displays frames/target beside its state.
-- Device/property-scoped request latches prevent repeated clicks before acknowledgement. Busy is followed by Ok or Alert after the backend has updated its result state. A ten-second failure to receive initial Busy/Alert reports unknown state, keeps the action latched and never retries. Once Busy is acknowledged, the backend owns the operation deadline. An unresolved request is never retried through the other backend when trainer availability changes. Reset remains available during ordinary learning/collection operations.
+- Device/property-scoped request latches prevent repeated clicks before acknowledgement.
+  Busy is followed by Ok or Alert after the backend has updated its result state.
+  A ten-second failure to receive initial Busy/Alert reports unknown state, keeps
+  the action latched and never retries. Once Busy is acknowledged, the backend owns
+  the operation deadline. When trainer availability changes, unresolved local
+  requests, other clients' observed Busy operations and active managed phases block
+  commands through the new route until completion or device/property invalidation.
+  No cross-route supersession is attempted. Returning to the original route restores
+  its normal coordination. Within the same route, managed Reset/Disable retain
+  their existing superseding behavior; native Reset supersedes selection, and
+  native Disable remains available during recollection. Reset remains available
+  during ordinary learning/collection operations.
 - Disconnect and device/property deletion invalidate cached capabilities. Reconnection performs discovery, never command replay. Sparse updates preserve catalog definitions and the user's unsent selection. Changing the NN mapping drops the old catalog. Closing the GUI does not control training or inference.
 - An advancing `status.heartbeat` is required after discovery. Five seconds without advancement marks the companion stale and disables its managed controls. Native PO4AO controls independently require an advancing `model_status.sequence` and defined native capabilities; a changed `model_status.instance` invalidates previous-process state and requests fresh definitions. Repeated cached heartbeat values do not renew freshness; unchanged controller/model values are otherwise normal.
 

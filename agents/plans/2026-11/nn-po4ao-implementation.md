@@ -365,7 +365,8 @@ baseline `88271a3e6ec3c3add36a4983d806f05501108f20`; notebook code/environment/p
 and NN/CACAO writer switching were not changed. No remote access or deployment occurred.
 
 The requirements now record these acknowledgement rules and the user's manual-only
-downstream routing decision. Deployment documentation will include initial warmup
-before managed learning and verification/restoration of the recorded downstream
-route and calibration. One GUI, optional trainer and operator-managed loop state
-remain the agreed design.
+downstream routing decision. The deployment guide includes initial warmup before
+managed learning and verification/restoration of the recorded downstream route and
+calibration. The updated review response assesses notebook and managed trials
+separately; routine instrument readiness remains unverified. One GUI, optional
+trainer and operator-managed loop state remain the agreed design.

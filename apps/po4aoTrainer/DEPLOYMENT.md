@@ -13,9 +13,11 @@ Examples use the device names `po4ao` and `po4aoTrainer`; substitute actual name
 
 Use the normal deployment account/build environment (normally `xdev`). Make branch
 `rlandman/nn-po4ao-gui` available on both build hosts through your normal Git workflow;
-GUI functionality requires commit `73a7b73e` or later; local agent commits have
+The reviewed fixes require commit `be3f7652` or later; local agent commits have
 **not been pushed**. Preserve the previous installed source,
-config revisions and binaries for rollback. On each host, set the checkout path:
+config revisions and binaries for rollback. Record the current downstream mfilt
+input stream and active calibration/setup as well; do not infer them from PO4AO
+status. On each host, set the checkout path:
 
 ```sh
 MAGAOX_SRC=/opt/MagAOX/source/MagAOX
@@ -81,9 +83,23 @@ advancing `sequence`. Merely seeing a process or an old model ID is insufficient
 | GUI action | Notebook workflow |
 | --- | --- |
 | Enable / Disable PO4AO | Select the resident learned policy / integrator through `control_enable.toggle`. Disable retains the loaded engine. Export/reload remains notebook code. |
-| Reset PO4AO | Select integrator if needed, then request `reset_model.toggle=On`. Reset notebook Python models yourself if intended. |
+| Reset PO4AO | Request control Off, then `reset_model.toggle=On`. This also cancels an Enable awaiting frames; completion uses native request/applied generations. Reset notebook Python models yourself if intended. |
 | Recollect warmup | Request `recollect_warmup.toggle=On`; collect with exploration on the current controller and keep that controller selected. |
 | Start / Pause learning | Unavailable. Start/pause training and manage replay refresh in the notebook. |
+
+Before comparing correction, select the downstream route **manually** on RTC in
+the normal CACAO environment:
+
+```sh
+howfs_mfilt_switch po4ao_output && cacao-calib-apply default
+```
+
+After **both** commands, verify in the live CACAO/mfilt configuration that its input
+is `po4ao_output`, matching the configured PO4AO output, and verify its input/frame
+counters advance as that stream updates. Record that evidence. If the route cannot
+be verified, stop the comparison. The GUI/supervisor does not run these commands.
+PO4AO model/controller telemetry describes emitted output; it does not establish
+that CACAO consumes it. Actual instrument routing remains unverified here.
 
 Test Enable → Disable → Enable after a notebook export/reload: the loaded ID should
 remain the same while the effective controller changes. Test Recollect on that
@@ -93,6 +109,8 @@ Busy until the required runtime frames complete it. Pause notebook iteration/exp
 when necessary to prevent your own code from republishing during Reset or using old
 replay during recollection. Closing the GUI changes neither training nor inference.
 The retained NN controls need the companion and are unavailable in this stage.
+Also test Reset after Enable is waiting for input frames: Reset must remain
+available and complete when frames return, without a stranded Busy indication.
 
 ## 3. Add managed Python training later
 
@@ -169,13 +187,21 @@ xctrl peek po4aoTrainer
 
 The checker validates imports/config/paths/atomic publication, not GPU execution.
 The same GUI now enables managed training controls; discovery itself starts no work.
-Click **Reset**, wait for completion, then **Start learning**. Verify a real export
-loads successfully, iteration increases, and the active model ID matches publication.
+Use **Reset → wait for completion → Enable PO4AO (fallback) → wait for collection
+Ready at its full frame target → Start learning**. Reset leaves control Off, so
+Start alone does not acquire initial warmup. Enable selects fallback and starts its
+initial exploratory collection; keep that selection through collection. Reverify
+the manual downstream route above after any runtime/configuration change. Then
+verify a real export loads, iteration increases, and the active ID matches publication.
 Pause/Resume must preserve the worker/models; Disable must pause learning and select
 integrator; Enable restores the latest eligible policy without resuming learning.
 Recollect preserves the controller, adds exploration and resumes only previously
 running learning. Reset stops the worker and clears retained eligibility. The app
 writes metrics and diagnostic snapshots for notebook plotting.
+Test trainer loss/arrival while another client has an outstanding operation:
+commands must not bypass it through the other route. Verify delayed publication,
+Reset/Disable from another client and status expiry/recovery before accepting
+managed operation. Measure inference latency during training and export.
 
 Valid hot training-config edits apply at iteration boundaries; architecture/history/
 normalization/GPU changes require Reset, shown in the GUI. No app restart is needed.
@@ -196,8 +222,12 @@ means stopping managed training/export, stopping the trainer, and restoring the
 notebook engine path/restarting C++ if it differs. The same GUI remains usable.
 
 Rollback: stop the named trainer, restore the saved runtime binary/config and prior
-source versions, then restart only affected processes and select the intended
-controller yourself. Stopping the trainer alone does not stop C++ inference.
+source versions, then restart only affected processes. Manually restore the mfilt
+input and calibration/setup recorded before the trial using the normal routing
+and calibration commands; do not assume a restoration target. Verify the effective
+input stream and advancing consumption counters again after both changes, then
+select the intended controller yourself. Stopping the trainer alone does not stop
+C++ inference.
 Record target builds, successful export/reload, button results and inference latency.
 Commit/push software and config revisions before scientific use, following the
 [MagAO-X development guide](https://magao-x.org/docs/handbook/software/hacking.html).
