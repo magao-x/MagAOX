@@ -1,5 +1,10 @@
 # Operator deployment of the shared NN / PO4AO controls
 
+For the 2026-11-03 notebook-first trial followed by managed training, use the
+[step-by-step GUI test runbook](GUI_TESTING.md). It distinguishes the notebook's
+synthetic example, required live acquisition adaptation, and GUI actions that only
+control the managed worker. The existing combined GUI is the test target.
+
 This branch supplies the numerical core, managed Python worker/supervisor, native GUI,
 and C++ recollection/readbacks. Local tests do not establish CUDA/TensorRT compatibility,
 installed FPS identity, INDI routing or real-time performance. Complete the target-side
