@@ -52,6 +52,11 @@ $ bash ./testMagAOX.bash
  * \ingroup unit_test
  */
 
+/** \defgroup po4aoTrainer_unit_test PO4AO Trainer Unit Tests
+ * \brief Offline configuration, worker lifecycle, publication and switching tests.
+ * \ingroup application_unit_test
+ */
+
 /** \defgroup po4ao_unit_test PO4AO Unit Tests
  * \brief Model handoff, modal history, and command-safety tests for PO4AO.
  * \ingroup application_unit_test

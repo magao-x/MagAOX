@@ -2,12 +2,23 @@
 
 Started 2026-11-02 from the user's approved [requirements](../2026-10/nn-po4ao-gui-requirements.md). This is an execution record, not a replacement for the agreed behavior.
 
+## Current status, 2026-11-02
+
+The agreed local implementation is complete as a deployment candidate: native GUI,
+C++ current-controller recollection/readbacks, managed XDevice supervisor/worker,
+hot configuration, switching, staged export, notebook example and installation
+entries. The latest section below supersedes the earlier incremental status notes.
+Full target SDK compilation, actual GPU export, live INDI/FPS acceptance and timing
+remain operator-run requirements in `apps/po4aoTrainer/DEPLOYMENT.md`; this record does
+not claim instrument deployment or physical acceptance. No source or configuration
+was changed on an instrument host in this completion increment.
+
 ## Branches and baseline
 
 - Fixed baseline branch: `rlandman/nn-po4ao-baseline`, commit `88271a3e6ec3c3add36a4983d806f05501108f20`.
 - Child implementation branch: `rlandman/nn-po4ao-gui`, created directly from that baseline.
 - Isolated managed checkout: `/Users/ricolandman/.codex/worktrees/nn-po4ao-gui/MagAOX`.
-- The original dirty checkout remains intact. No instrument access, deployment, push or PR was performed.
+- The original dirty checkout remains intact. No instrument deployment, push or PR was performed. The separately authorized historical read-only inspection is recorded below; the completion increment used local evidence only.
 
 The [baseline record](nn-po4ao-baseline.md) identifies exact source revisions and verification. NN comes from the newer correctness/control implementation, without the speedups. Collection comes from the latest committed donor subtree, with its test registrations merged into the PO4AO base. The accepted attachment is preserved byte-for-byte in the baseline commit; this child updates its implementation-status statements.
 
@@ -130,3 +141,106 @@ Final source review also found that the inherited PO4AO callbacks updated shared
 INDI properties without the app mutex used by appLogic. The four runtime request
 callbacks now use that existing mutex, matching NN callback practice. This
 serializes property/request publication without adding a lock to the frame path.
+
+## Managed operations and deployment increment, 2026-11-02
+
+The companion now uses the existing XDevice/BaseConfig/xconf and PurePyINDI2
+interfaces, not a second GUI transport or service manager. Reconstruction and
+training each have one serialized operation queue. Callbacks acknowledge Busy
+before scheduling; observed status precedes terminal Ok/Alert. GUI disconnects do
+not own process lifetime. Multiple clients share the same backend state.
+
+Implemented scope:
+
+- Typed TOML configuration, explicit hot-field map and whole-revision reset
+  staging. Runtime dimensions/history/gains/limits come from the C++ configuration.
+  Invalid edits retain the last good revision; hot learning-rate updates preserve
+  Adam. The current numerical contract requires equal recent/warmup capacities:
+  `warmup_episodes * iterations_per_ep == replay_buffer_size`.
+- One owned worker with JSON-line control, cooperative checkpoints, persistent
+  models/Adam/normalization, immutable config snapshots, metrics and bounded
+  diagnostics. EOF/heartbeat loss stops the worker. Worker errors remain observable
+  through the companion and do not block independent reconstruction or Disable.
+- An owned, cancellable export child wraps the unchanged numerical export helper
+  in a private candidate directory. Pause stops that child while retaining the
+  worker. Reset first invalidates the old generation, then stops owned processes,
+  selects the integrator and waits for runtime reset acknowledgement. No notebook
+  discovery, ownership locks or notebook process control were introduced.
+- Complete candidate verification ties the engine hash, metadata, config revision,
+  snapshot and generation together. A single atomic directory symlink exposes the
+  matching bundle to C++. Eligible retained engines survive Disable; Reset makes
+  old files ineligible. Reloading even the same ID requires a fresh Busy/terminal
+  callback. Cancelled/failed publication always releases the worker's candidate
+  wait. Recollection pauses/resumes only its managed session, preserving the actual
+  controller and requiring the newer full snapshot.
+- The narrow switching adapter uses the installed milk FPS fields observed in the
+  preceding source inspection, PID creation identity/command-line matching and
+  nonblocking FIFO delivery. Shared FPS observation is serialized across polling
+  and operation threads. Commands never query/change loop state or gate on PO4AO.
+  Linked modulation is optional and uses 2000 Hz/radius 3 for CACAO. An already
+  loaded selected NN model does not issue a redundant reload; other selections
+  disable, load and enable through the pinned donor controls.
+- Standard console entry point, app Makefile and RTC Python-app registration;
+  dedicated `INSTRUMENT_CONDA_ENV=po4aoTrainer` selection without modifying shared
+  Python build infrastructure. The wheel includes config examples and the numerical
+  source manifest. Shared paths and external instrument-config entries remain
+  explicit deployment steps. The configured installed `source_revision` is logged
+  and recorded in launches, metrics and engine metadata for experiment provenance.
+- `notebooks/po4ao/development.ipynb` uses the shared core for an executable synthetic
+  CPU session, repeated iterations, direct plots and recorded diagnostics. It stays
+  outside `apps/` and does not connect to the instrument. The original notebook is
+  not overwritten. Its existing operator acquisition cells can supply explicit
+  snapshots to this same core; notebook exports are not automatically adopted by
+  the managed supervisor.
+
+Review fixes included stale same-engine reload acknowledgements, release of a
+cancelled publication wait, duplicate Reset cancellation, worker failure during
+Disable, failed protocol handling, and independent loaded-versus-effective model
+identity (learning can acknowledge a published model while the integrator is
+selected). These are operation correctness fixes, not new loop interlocks.
+
+Local validation:
+
+- 82 Python tests and 15 subtests passed. This includes the original numerical/plot
+  parity checks, actual XDevice property definitions without sockets, hot config,
+  two operation domains, generation eligibility, writer/modulation order, real
+  owned worker pause/resume/recollection/EOF, export cancellation and cleanup that
+  preserves an unrelated process. GPU/stream/export numerical boundaries are
+  synthetic in process tests. Process metadata checks needed normal local process
+  visibility; no instrument process was inspected or controlled.
+- PO4AO CPU production-method/helper suite: 259 assertions in 27 cases, using the
+  existing sanitizer build. Native GUI: 115 assertions in 11 cases. Upstream
+  publisher: 95 assertions in 6 cases. Earlier launcher build remains applicable;
+  no native GUI/C++ implementation changed in this completion increment.
+- The notebook's code cells executed on synthetic CPU inputs and rendered both
+  direct and recorded diagnostic figures. Existing optional SciencePlots/Matplotlib
+  deprecation and STIX font warnings remain; they do not fail plot comparisons.
+- Normal wheels were built/installed in a temporary local Python 3.11 environment.
+  From `/tmp`, isolated mode imports the installed supervisor without importing
+  torch/SHM/FPS bindings; console/manual-adapter/deployment-check help works.
+  Config examples and source manifest are installed under `share/po4aoTrainer`.
+  No personal source-project path is a runtime import dependency.
+- The offline framework checks used actual xwcl xconf
+  `d6f4de40bd290510bfe191b777d85d36b467d0ce` and purepyindi2
+  `c26a8276c95b95aef145c50439e291b782eab190`. No unrelated PyPI xconf package is
+  substituted. Target deployments must use compatible installed framework builds.
+- Python formatted with Black; declaration docstrings checked. New app tests are
+  grouped under `application_unit_test` in `tests/groups.dox`. No new C++ formatting
+  was necessary. `git diff --check` passes. NN and dlDataCollection remain exactly
+  equal to their pinned donor subtrees; `AGENTS.md` remains equal to the baseline.
+
+Affected files in this completion increment:
+
+- `Makefile`, `tests/groups.dox`.
+- `apps/po4aoTrainer/Makefile`, `pyproject.toml`, `README.md`, `DEPLOYMENT.md`.
+- `apps/po4aoTrainer/configs/po4aoTrainer.conf`, `po4ao_training.conf`.
+- `apps/po4aoTrainer/xapp/po4aoTrainer/{app,configuration,supervisor,process,worker,switching,artifacts,check_deployment}.py`.
+- `apps/po4aoTrainer/xapp/po4aoTrainer/__init__.py` (description only).
+- `apps/po4aoTrainer/tests/test_supervisor.py`, `test_worker_process.py`.
+- `notebooks/po4ao/development.ipynb`, `gui/widgets/learningCtrl/README.md`.
+- This execution record and the requirements' current-instruction/status notes.
+
+No further product decision is needed for the operator deployment trial. Before
+scientific or on-sky use, the target acceptance in DEPLOYMENT.md and the handbook's
+committed/pushed source-and-config provenance requirements still apply. This branch
+has not been pushed or deployed by the agent.

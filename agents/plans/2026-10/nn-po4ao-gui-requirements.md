@@ -264,7 +264,7 @@ The user requested a proper Python trainer app to avoid dependence on home-direc
 
 This follows the existing Python app pattern: `pyproject.toml` declares a console entry point and installable `xapp.*` modules; `Make/pythonApp.mk` performs a normal pip install into the selected interpreter, links the target into `/opt/MagAOX/bin`, checks imports from outside the source directory, and adds read/traverse permissions to the installed app package. Runtime imports come from installed site-packages, not the source checkout. Match the Makefile target, console script, package namespace, and device name consistently. The local `efcControl` example has a target/entry-point spelling mismatch (`efcControl` versus `efcCtrl`), so use the consistent `pythonIndiExample`/`aoSim` pattern rather than copying that mismatch.
 
-`AGENTS.md` rule 26 still applies to standalone/ad hoc scripts. These modules are part of an installed, tested first-class Python application, as explicitly requested, and do not require a blanket change to that rule. Keep the C++ `apps/po4ao/` directory focused on the real-time app.
+These modules are part of the installed, tested first-class Python application explicitly requested by the user. Follow the current user-supplied `AGENTS.md` instructions without editing that file. Keep the C++ `apps/po4ao/` directory focused on the real-time app.
 
 Use separate configured locations for installed code, editable config, and runtime output:
 
@@ -439,3 +439,15 @@ Ready to share for implementation with the following scope and dependencies made
 No further product decision is required to begin. Phase A must still resolve technical integration details: verify the supplied trainer snapshot, obtain the operator's installed milk writer-observation interface, and pin runtime paths/device mappings. These are explicit implementation/deployment tasks, not evidence that runtime acceptance has already passed. A missing milk observation adapter blocks acceptance of automatic reconstructor handover, not notebook/core/GUI development with fixtures.
 
 Review performed: local and GitHub source comparison, comparison of NN branch histories/subtrees and correctness/control publication semantics, collection revision/dependency review, requirements consistency pass and Markdown checks. No application changes, branch integration, builds, training runs, installation, instrument access or live acceptance tests were performed in this planning turn.
+
+
+## Implementation status, 2026-11-02
+
+The deployment candidate now implements the native GUI, managed companion/worker,
+hot configuration, switching, C++ warmup changes, atomic publication and shared
+notebook example. See [the execution record](../2026-11/nn-po4ao-implementation.md)
+for exact baseline, source reconciliation and local tests, and
+[deployment instructions](../../../apps/po4aoTrainer/DEPLOYMENT.md) for operator-run
+target acceptance. Earlier statements about unresolved implementation describe the
+planning snapshot. Actual SDK/GPU/FPS/INDI/timing acceptance remains outstanding;
+local tests do not substitute for it. `AGENTS.md` was not changed.

@@ -83,7 +83,8 @@ apps_rtc = \
 	modalFilter \
 	dmRecon
 pythonapps_rtc = \
-	efcControl
+	efcControl \
+	po4aoTrainer
 
 # Apps needed on ICC
 apps_icc = \
