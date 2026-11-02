@@ -1,10 +1,25 @@
 # Shared NN / PO4AO control panel
 
-`learningCtrlGUI <companion-device>` is the native Qt client for the [approved requirements](../../../agents/plans/2026-10/nn-po4ao-gui-requirements.md). It reuses `xWidget`, `statusLabel`, the MagAO-X resource stylesheet and `multiIndiManager`/`multiIndiPublisher`. The default width is 500 pixels; layouts handle narrower windows. No web framework, shell commands, loop control or plotting panel is added.
+`po4aoGUI [po4ao-device [trainer-device]]` is the native Qt client for the [approved requirements](../../../agents/plans/2026-10/nn-po4ao-gui-requirements.md). It reuses `xWidget`, `statusLabel`, the MagAO-X resource stylesheet and `multiIndiManager`/`multiIndiPublisher`. The default width is 500 pixels; layouts handle narrower windows. No web framework, shell commands, loop control or plotting panel is added.
 
-The managed `po4aoTrainer` supervisor and C++ completion readbacks implement this contract. The GUI remains disabled when its companion is absent. See [deployment instructions](../../../apps/po4aoTrainer/DEPLOYMENT.md) for installation, configuration and the required operator-run target acceptance.
+Defaults are `po4ao` and `po4aoTrainer`. This single launcher replaces `learningCtrlGUI`.
+The C++ runtime is subscribed independently of the optional trainer. Without a ready
+trainer, native inference controls remain available; Start/Pause and the existing NN
+controls are unavailable. An existing live training notebook needs no package migration.
+With a live trainer mapped to this runtime, the same PO4AO controls use its coordinated
+requests and learning becomes available in the same window. Arrival/loss sends no commands. See [deployment instructions](../../../apps/po4aoTrainer/DEPLOYMENT.md) for installation, configuration and the required operator-run target acceptance.
 
 ## Behavior
+
+Without the trainer, Enable/Disable writes `control_enable.toggle`; Reset sends Off
+when observed enabled followed by `reset_model.toggle=On`; Recollect sends
+`recollect_warmup.toggle=On`. Enable selects the resident engine; notebook export/reload
+remains notebook code. Readbacks use native `fsm`, `model_status`, `collection_status`
+and switch acknowledgements. No button controls notebook execution or Python objects.
+Loaded and effective model IDs are shown separately. Native Disable remains available
+during recollection. Native Reset does not wait for frames before sending both requests.
+
+The following coordinated behaviors apply when the trainer is ready:
 
 - The NN catalog comes from the NN device's `model` definition. Labels are displayed; element identifiers are sent only when Enable is pressed. A selected value is not claimed to be active. Requested/loaded/active NN filenames are available on the reconstructor status tooltip. The backend performs the agreed disable/load/enable sequence; selecting an already loaded disabled model only requires re-enabling it. Selecting the already active model is a no-op. NN-to-NN replacement leaves CACAO/modulation unchanged.
 - Switch reconstructor sends a destination and expected source from observed state; it ignores the staged engine. Unknown/conflict/transition state disables that request. Learning, recollection and loop state never gate reconstruction controls.
@@ -12,13 +27,13 @@ The managed `po4aoTrainer` supervisor and C++ completion readbacks implement thi
 - Link modulation sends a preference to the companion. The checkbox reflects readback; it issues no modulation motion itself.
 - Enable/Disable PO4AO and Start/Pause/Resume learning labels follow the companion's effective state. A retained policy ID alone never implies PO4AO output is active. Disable's pause behavior, Reset's termination, and recollection noise/resume sequencing belong to the companion/runtime.
 - Disable remains available during publication/recollection when PO4AO is observed enabled, using the backend's superseding pause path. Enable stays serialized. A persistent pending Reset blocks ordinary training actions while leaving Reset available to retry. Collection displays frames/target beside its state.
-- Local request latches prevent repeated clicks before acknowledgement. Busy is followed by Ok or Alert after the backend has updated its result state. A ten-second failure to receive initial Busy/Alert reports unknown state, keeps the action latched and never retries. Once Busy is acknowledged, the backend owns the operation deadline. Reset remains available during ordinary learning/collection operations.
+- Device/property-scoped request latches prevent repeated clicks before acknowledgement. Busy is followed by Ok or Alert after the backend has updated its result state. A ten-second failure to receive initial Busy/Alert reports unknown state, keeps the action latched and never retries. Once Busy is acknowledged, the backend owns the operation deadline. An unresolved request is never retried through the other backend when trainer availability changes. Reset remains available during ordinary learning/collection operations.
 - Disconnect and device/property deletion invalidate cached capabilities. Reconnection performs discovery, never command replay. Sparse updates preserve catalog definitions and the user's unsent selection. Changing the NN mapping drops the old catalog. Closing the GUI does not control training or inference.
-- An advancing `status.heartbeat` is required after discovery. Five seconds without advancement marks the companion stale, displays unknown state and disables controls. Repeated cached heartbeat values do not renew freshness; unchanged controller/model values are otherwise normal.
+- An advancing `status.heartbeat` is required after discovery. Five seconds without advancement marks the companion stale and disables its managed controls. Native PO4AO controls independently require an advancing `model_status.sequence` and defined native capabilities; a changed `model_status.instance` invalidates previous-process state and requests fresh definitions. Repeated cached heartbeat values do not renew freshness; unchanged controller/model values are otherwise normal.
 
 ## Concrete companion contract
 
-All commands target the named companion. INDI types/permissions and required elements are checked from definitions. The GUI subscribes to `fsm`, `devices`, the command properties below, `status`, `progress`, and `training_config`. It discovers the NN device from `devices.nn` and subscribes to that device's `fsm`, `model`, and `model_status` through the existing publisher.
+Managed commands target the named companion; the direct runtime fallback above is separate. INDI types/permissions and required elements are checked from definitions. The GUI subscribes to `fsm`, `devices`, the command properties below, `status`, `progress`, and `training_config`. It discovers the NN device from `devices.nn` and subscribes to that device's `fsm`, `model`, and `model_status` through the existing publisher.
 
 | Property | Type / elements | Request semantics |
 | --- | --- | --- |
@@ -49,11 +64,11 @@ Every accepted request must publish Busy before work and then Ok/Alert after act
 
 `progress.iteration` is a read-only number. `training_config.error` carries validation errors; `training_config.pending_reset` is empty or the pending configuration revision requiring Reset, distinct from an unfinished runtime Reset. Missing readbacks are not filled with presumed success. A connected INDI transport is distinguished from a ready companion through the heartbeat; unchanged controller/model values are not treated as disconnection.
 
-This contract does not implement notebook ownership, leases or locks. It does not change the operator's responsibility for loop state or notebook/app use.
+Neither interface implements notebook ownership, leases or locks. It does not change the operator's responsibility for loop state or notebook/app use.
 
 ## Build and verification
 
-Use the existing GUI app build/install flow in `gui/apps/learningCtrlGUI`. The only aggregate-build change is adding `learningCtrlGUI` to `all_guis`; role-based exclusions and the startup window script stay unchanged. Installation and running against the instrument remain operator actions.
+Use the existing GUI app build/install flow in `gui/apps/po4aoGUI`. The only aggregate-build change is adding `po4aoGUI` to `all_guis`; role-based exclusions and the startup window script stay unchanged. Installation and running against the instrument remain operator actions.
 
 Offline tests reuse the upstream socket-free publisher:
 
@@ -68,3 +83,7 @@ Build the existing INDI static libraries first, as for other GUI tests. The opti
 
 Review regressions additionally cover stopped/fault recovery, Disable while publishing
 or recollecting, collection frame progress, heartbeat expiry and fresh recovery.
+
+Native-only regressions cover no trainer definitions, enable/disable/recollection,
+Reset with control On/Off, late trainer arrival/departure, independent heartbeat
+expiry, process restart, native permissions and unresolved cross-device requests.

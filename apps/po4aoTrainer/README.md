@@ -1,9 +1,12 @@
 # Shared NN / PO4AO trainer and controls
 
 `po4aoTrainer` is the standard `XDevice` companion for the compact native
-`learningCtrlGUI`. It owns one numerical worker and exposes the shared INDI
+`po4aoGUI`. It owns one numerical worker and exposes the shared INDI
 request/status contract. The C++ `po4ao` app retains real-time control. The same
-`TrainingSession` is available to notebooks without starting the companion.
+`TrainingSession` is available to notebooks without starting the companion. The same
+GUI also controls native C++ inference with the trainer stopped; Start/Pause is then
+disabled. An existing notebook can keep its own training implementation/environment.
+It need not migrate to the packaged core or use the optional synthetic example.
 
 The [independent-review corrections](../../agents/plans/2026-11/nn-po4ao-review-response.md)
 pass local regression checks. Target CUDA/TensorRT, FPS, INDI and timing acceptance
@@ -16,6 +19,9 @@ No personal source checkout is a production dependency. See the
 and the checks actually performed.
 
 ## Controls and ownership
+
+The coordinated behaviors below describe the optional managed trainer. In notebook
+use, the GUI sends native C++ controls and the notebook owns all Python training state.
 
 - NN Enable prepares the selected engine while NN is disabled, then stops CACAO
   before enabling NN if handing over from CACAO. The already active NN model is a
