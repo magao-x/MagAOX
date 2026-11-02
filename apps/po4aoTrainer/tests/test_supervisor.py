@@ -150,20 +150,22 @@ class FakeRuntime:
         """Compare independently mutable applied reset identity."""
         return int(self.observed["reset_applied"]) > ticket["after"]
 
-    def begin_reload(self, model):
+    def begin_reload(self, model, issued=None):
         """Record the model while allowing delayed-outcome subclasses to override acknowledgement."""
         self.calls.append(("reload", model))
         self.reload_ticket = {"model_id": model, "outcome": "loaded"}
+        if issued:
+            issued(self.reload_ticket)
         self.observed["active_id"] = model
 
-    def finish_reload(self, cancel):
-        """Use the production cancellable completion wait."""
-        self.wait(lambda: self.reload_outcome() is not None, cancel, "reload")
-        return self.reload_outcome()
+    def finish_reload(self, cancel, ticket=None):
+        """Use the production wait with the captured ticket identity."""
+        return Runtime.finish_reload(self, cancel, ticket)
 
-    def reload_outcome(self):
-        """Return a load outcome independent of delivery."""
-        return self.reload_ticket["outcome"] if self.reload_ticket else None
+    def reload_outcome(self, ticket=None):
+        """Return a load outcome independent of delivery and later tickets."""
+        ticket = self.reload_ticket if ticket is None else ticket
+        return ticket["outcome"] if ticket else None
 
     def recollect(self, cancel, timeout):
         """Hold collection until Reset cancellation when requested by a test."""

@@ -387,7 +387,7 @@ class Runtime:
             )
         )
 
-    def begin_reload(self, model_id):
+    def begin_reload(self, model_id, issued=None):
         """Keep a ticket after issuance; cancelling a caller's wait cannot cancel C++ loading."""
         if self.reload_ticket is not None:
             if self.reload_outcome() is None:
@@ -416,11 +416,13 @@ class Runtime:
         ticket["callback"] = acknowledge
         self.reload_ticket = ticket
         self.client.register_callback(acknowledge, self.po4ao, "reload_engine")
+        if issued:
+            issued(ticket)
         self.send(self.po4ao, "reload_engine", {"toggle": SwitchState.ON})
 
-    def reload_outcome(self):
+    def reload_outcome(self, ticket=None):
         """Return a settled load/reset outcome, retaining unresolved tickets through timeouts."""
-        ticket = self.reload_ticket
+        ticket = self.reload_ticket if ticket is None else ticket
         if ticket is None:
             return None
         if ticket["outcome"] is not None:
@@ -445,12 +447,15 @@ class Runtime:
                 ticket["outcome"] = "loaded"
         return ticket["outcome"]
 
-    def finish_reload(self, cancel):
-        """Wait for the issued load to settle; timeout/cancellation preserves its ticket."""
+    def finish_reload(self, cancel, ticket=None):
+        """Wait on the captured load even if a later request replaces the runtime's current ticket."""
+        ticket = self.reload_ticket if ticket is None else ticket
         self.wait(
-            lambda: self.reload_outcome() is not None, cancel, "PO4AO engine reload"
+            lambda: self.reload_outcome(ticket) is not None,
+            cancel,
+            "PO4AO engine reload",
         )
-        return self.reload_ticket["outcome"]
+        return ticket["outcome"]
 
     def reload(self, model_id, cancel):
         """Convenience operation for callers that do not own publication bookkeeping."""

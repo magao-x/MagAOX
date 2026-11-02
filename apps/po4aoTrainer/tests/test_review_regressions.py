@@ -746,3 +746,176 @@ def test_snapshot_contents_and_identity_are_verified(config):
         verify_candidate(path, supervisor.root, supervisor.record["generation"])
     supervisor.close()
     rig.close()
+
+
+def test_publication_completion_cannot_promote_a_replacement_candidate(
+    config, monkeypatch
+):
+    """Hold the status thread's A result while publication replaces it with a still-loading B."""
+    rig = Rig(0.03)
+    rig.auto_load = False
+    supervisor = Supervisor(rig.runtime, config)
+    worker = NumericalWorker(supervisor.desired)
+    supervisor.worker = worker
+    a, model_a = bundle(supervisor, "a", worker.session)
+    b, model_b = bundle(supervisor, "b", worker.session)
+    generation = supervisor.record["generation"]
+    captured, release = threading.Event(), threading.Event()
+    original = supervisor.finish_publication
+    errors = []
+
+    def delayed_completion(*args):
+        """Pause after obtaining A's result but before committing it under the supervisor lock."""
+        if threading.current_thread() is thread:
+            captured.set()
+            assert release.wait(2)
+        return original(*args)
+
+    def status_tick():
+        """Surface assertion/thread failures in the calling test."""
+        try:
+            supervisor.tick()
+        except BaseException as error:
+            errors.append(error)
+
+    thread = threading.Thread(target=status_tick)
+    try:
+        with pytest.raises(TimeoutError):
+            supervisor.publish(a, generation, threading.Event())
+        rig.complete_load()
+        monkeypatch.setattr(supervisor, "finish_publication", delayed_completion)
+        thread.start()
+        assert captured.wait(2)
+        with pytest.raises(TimeoutError):
+            supervisor.publish(b, generation, threading.Event())
+        assert rig.loading[0] == model_b
+        release.set()
+        thread.join(2)
+        assert not thread.is_alive() and not errors
+        assert rig.runtime.runtime_state()["active_id"] == model_a
+        saved = json.loads(supervisor.record_path.read_text())
+        assert saved["pending"]["model_id"] == model_b
+        assert saved["eligible"]["model_id"] == model_a
+        assert not any(
+            m.get("candidate_outcome_path") == str(b) for m in worker.messages
+        )
+        monkeypatch.setattr(supervisor, "finish_publication", original)
+        rig.complete_load()
+        supervisor.tick()
+        assert supervisor.record["eligible"]["model_id"] == model_b
+        assert supervisor.record["pending"] is None
+        assert (
+            sum(m.get("candidate_outcome_path") == str(b) for m in worker.messages) == 1
+        )
+    finally:
+        release.set()
+        if thread.ident is not None:
+            thread.join(2)
+        supervisor.close()
+        rig.close()
+
+
+@pytest.mark.parametrize("after_ticket", [False, True])
+def test_failed_reload_issuance_never_reuses_the_previous_ticket(
+    config, monkeypatch, after_ticket
+):
+    """A pre-issuance failure rejects B; an uncertain send retains only B's own ticket/reference."""
+    rig = Rig(0.03)
+    supervisor = Supervisor(rig.runtime, config)
+    worker = NumericalWorker(supervisor.desired)
+    supervisor.worker = worker
+    a, model_a = bundle(supervisor, "a", worker.session)
+    b, model_b = bundle(supervisor, "b", worker.session)
+    generation = supervisor.record["generation"]
+    supervisor.publish(a, generation, threading.Event())
+    rig.auto_load = False
+    original = rig.runtime.begin_reload
+
+    def fail(model, issued=None):
+        """Inject failure on either side of ticket installation/possible remote delivery."""
+        if after_ticket:
+            original(model, issued=issued)
+        raise OSError("reload issuance failed")
+
+    monkeypatch.setattr(rig.runtime, "begin_reload", fail)
+    try:
+        with pytest.raises(OSError, match="issuance failed"):
+            supervisor.execute(
+                "publish", {"path": str(b)}, threading.Event(), generation
+            )
+        supervisor.tick()
+        saved = json.loads(supervisor.record_path.read_text())
+        assert saved["eligible"]["model_id"] == model_a
+        assert not any(
+            m.get("candidate_outcome_path") == str(b) for m in worker.messages
+        )
+        if after_ticket:
+            assert saved["pending"]["model_id"] == model_b
+            assert {
+                "candidate_path": str(b),
+                "candidate_id": model_b,
+            } in worker.messages
+            rig.complete_load()
+            supervisor.tick()
+            assert supervisor.record["eligible"]["model_id"] == model_b
+        else:
+            assert saved["pending"] is None
+            assert {"candidate_path": str(b), "candidate_id": ""} in worker.messages
+            assert rig.loading is None
+    finally:
+        supervisor.close()
+        rig.close()
+
+
+def test_candidate_reference_is_bound_before_reload_delivery(config, monkeypatch):
+    """Even an immediate load cannot reach the runtime before the worker knows its exact candidate."""
+    rig = Rig()
+    supervisor = Supervisor(rig.runtime, config)
+    worker = NumericalWorker(supervisor.desired)
+    supervisor.worker = worker
+    path, model = bundle(supervisor, session=worker.session)
+    command = rig.command
+
+    def observe(message):
+        """Check the production issuance boundary before acknowledging any engine load."""
+        if message.device == "po4ao" and message.name == "reload_engine":
+            pending, ticket = supervisor.publication
+            assert pending["model_id"] == ticket["model_id"] == model
+            assert ticket is rig.runtime.reload_ticket
+            assert worker.session.policy_update.pending[0] == model
+        command(message)
+
+    monkeypatch.setattr(rig, "command", observe)
+    try:
+        supervisor.execute(
+            "publish",
+            {"path": str(path)},
+            threading.Event(),
+            supervisor.record["generation"],
+        )
+        assert supervisor.record["eligible"]["model_id"] == model
+    finally:
+        supervisor.close()
+        rig.close()
+
+
+def test_new_publication_cannot_replace_an_unresolved_ticket(config):
+    """Reject B before changing the link or persisted pending A when A may still activate."""
+    rig = Rig(0.03)
+    rig.auto_load = False
+    supervisor = Supervisor(rig.runtime, config)
+    a, model_a = bundle(supervisor, "a")
+    b, _ = bundle(supervisor, "b")
+    try:
+        with pytest.raises(TimeoutError):
+            supervisor.publish(a, supervisor.record["generation"], threading.Event())
+        with pytest.raises(RuntimeError, match="reload is still unresolved"):
+            supervisor.publish(b, supervisor.record["generation"], threading.Event())
+        assert supervisor.record["pending"]["model_id"] == model_a
+        assert (supervisor.root / "current").resolve() == a
+        rig.complete_load()
+        supervisor.tick()
+        assert supervisor.record["eligible"]["model_id"] == model_a
+    finally:
+        supervisor.close()
+        rig.close()

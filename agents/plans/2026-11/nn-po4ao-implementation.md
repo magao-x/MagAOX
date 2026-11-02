@@ -296,3 +296,33 @@ cases; existing PO4AO CPU suite 259 assertions in 27 cases. Launcher and wheel b
 and isolated installed-package imports pass. These do not compile/test the complete
 target C++ status path or establish GPU/hardware behavior. The requirements were not
 relaxed; no NN/dlDataCollection/AGENTS.md changes or instrument access were made.
+
+## Follow-up review: exact publication identity, 2026-11-02
+
+The review of `91ec5e2841bd63b73ef94eeeea8221d425185ff0` identified a second
+publication interleaving: the status thread could capture candidate A's completion
+and apply it after candidate B became pending. Each pending publication now carries
+its exact runtime reload ticket in memory. Completion checks candidate object,
+ticket, model and generation under the existing supervisor lock before changing
+eligibility or notifying the worker. A stale completion becomes a no-op.
+
+The worker's candidate reference is registered after ticket creation and before
+reload delivery. A failure before ticket issuance rejects the new candidate; an
+uncertain send retains only the new ticket and reference until completion or Reset.
+A second candidate cannot replace the current link/pending record while a previous
+load is unresolved. Restart recovery continues to require Reset when the ticket
+and numerical session were lost; no new persistence or orchestration layer was added.
+
+A deterministic two-thread regression holds A's status result while B is issued,
+then verifies persisted eligibility and worker notifications before and after B
+actually loads. Additional tests cover both sides of issuance failure, immediate
+delivery and admission while a load remains unresolved. The stale-completion and
+pre-ticket-failure regressions fail against the reviewed revision in an isolated
+temporary source tree.
+
+Validation: the complete local source suite passed **112 Python tests and 15
+subtests** with the actual xwcl xconf/PurePyINDI2 framework. Normal local process
+visibility was needed for the existing owned-export-child test; no instrument
+processes or sockets were used. The wheel rebuilt and all 18 packaged Python
+modules match this checkout byte-for-byte. Existing plot/font warnings remain.
+Black and `git diff --check` pass. This does not validate target GPU export/reload.

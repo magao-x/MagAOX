@@ -53,6 +53,9 @@ class Supervisor:
                 reset_pending={"ticket": None, "external": False},
             )
             atomic_json(self.record_path, self.record)
+        self.publication = (
+            None  # In-memory (persisted candidate, exact runtime ticket) binding.
+        )
         self.last_control = None
         self.foreign_model = ""
         self.worker = None
@@ -187,6 +190,7 @@ class Supervisor:
                         "external": bool(values.get("external")),
                     },
                 )
+                self.publication = None
                 self.foreign_model = ""
                 self.status["learning"] = "resetting"
                 atomic_json(self.record_path, self.record)
@@ -379,6 +383,15 @@ class Supervisor:
                 "reset": current["reset_request"],
             }:
                 raise InterruptedError("Runtime reset changed before publication")
+            if self.record["pending"] is not None:
+                if self.publication is None:
+                    raise RuntimeError(
+                        "A previous reload was unresolved at restart; Reset is required"
+                    )
+                outcome = self.runtime.reload_outcome(self.publication[1])
+                if outcome is None:
+                    raise RuntimeError("A runtime reload is still unresolved")
+                self.finish_publication(self.publication, outcome)
             link = self.root / ("current-" + uuid.uuid4().hex)
             link.symlink_to(candidate, target_is_directory=True)
             os.replace(link, self.root / "current")
@@ -387,21 +400,49 @@ class Supervisor:
                 "model_id": model_id,
                 "generation": generation,
             }
+            self.publication = None
             self.record["pending"] = pending
             atomic_json(self.record_path, self.record)
-            if issued:
-                issued(model_id)
-            self.runtime.begin_reload(model_id)
-        outcome = self.settle_publication(cancel)
+            previous_ticket = self.runtime.reload_ticket
+
+            def bind(ticket):
+                """Register the exact candidate/reference before its load can reach C++."""
+                self.publication = (pending, ticket)
+                if issued:
+                    issued(model_id)
+
+            try:
+                self.runtime.begin_reload(model_id, issued=bind)
+            finally:
+                ticket = self.runtime.reload_ticket
+                if (
+                    ticket is not None
+                    and ticket is not previous_ticket
+                    and ticket["model_id"] == model_id
+                ):
+                    # A send failure after ticket installation may still have reached C++.
+                    if self.publication is None:
+                        bind(ticket)
+                else:
+                    self.record["pending"] = None
+                    atomic_json(self.record_path, self.record)
+            publication = self.publication
+        outcome = self.settle_publication(cancel, publication)
         if outcome != "loaded":
             raise RuntimeError("PO4AO reload failed or was invalidated")
         return model_id
 
-    def finish_publication(self, outcome):
-        """Persist a settled result once and report it to the worker's exact candidate wait."""
+    def finish_publication(self, publication, outcome):
+        """Commit only the captured candidate/ticket pair; discard stale status-thread results."""
         with self.lock:
-            pending = self.record["pending"]
-            if pending is None:
+            pending, ticket = publication
+            if (
+                self.publication is not publication
+                or self.record["pending"] is not pending
+                or self.runtime.reload_ticket is not ticket
+                or ticket["model_id"] != pending["model_id"]
+                or pending["generation"] != self.record["generation"]
+            ):
                 return
             if (
                 outcome == "loaded"
@@ -413,6 +454,7 @@ class Supervisor:
                 }
                 self.status["retained_policy"] = pending["model_id"]
             self.record["pending"] = None
+            self.publication = None
             atomic_json(self.record_path, self.record)
             if self.worker:
                 self.worker.send(
@@ -422,20 +464,26 @@ class Supervisor:
                     }
                 )
 
-    def settle_publication(self, cancel):
-        """Retain timed-out/cancelled loads until they complete or a runtime reset invalidates them."""
-        if self.record["pending"] is None:
-            return (
-                self.runtime.reload_outcome()
-                if self.runtime.reload_ticket is not None
-                else None
-            )
-        if self.runtime.reload_ticket is None:
-            raise RuntimeError(
-                "A previous reload was unresolved at restart; Reset is required"
-            )
-        outcome = self.runtime.finish_reload(cancel)
-        self.finish_publication(outcome)
+    def settle_publication(self, cancel, publication=None):
+        """Wait on one captured ticket; cancellation or a send failure cannot replace its identity."""
+        with self.lock:
+            if publication is None:
+                if self.record["pending"] is None:
+                    return None
+                publication = self.publication
+            if publication is None:
+                raise RuntimeError(
+                    "A previous reload was unresolved at restart; Reset is required"
+                )
+        pending, ticket = publication
+        outcome = self.runtime.finish_reload(cancel, ticket)
+        with self.lock:
+            if (
+                self.runtime.reload_ticket is not ticket
+                or pending["generation"] != self.record["generation"]
+            ):
+                raise InterruptedError("Publication was superseded")
+            self.finish_publication(publication, outcome)
         return outcome
 
     def complete_reset(self):
@@ -657,11 +705,13 @@ class Supervisor:
                     worker.stop()
                 if self.desired and worker.revision == revision(self.desired):
                     self.applied = deepcopy(self.desired)
-        if self.record["pending"] and self.runtime.reload_ticket is not None:
+        with self.lock:
+            publication = self.publication
+        if publication is not None:
             try:
-                outcome = self.runtime.reload_outcome()
+                outcome = self.runtime.reload_outcome(publication[1])
                 if outcome is not None:
-                    self.finish_publication(outcome)
+                    self.finish_publication(publication, outcome)
             except (ConnectionError, KeyError):
                 pass
         with self.lock:
