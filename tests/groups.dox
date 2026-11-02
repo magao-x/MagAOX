@@ -4,6 +4,11 @@
 
 /// \defgroup testing Testing XWCTk
 
+/** \defgroup dlDataCollection_unit_test dlDataCollection Unit Tests
+ * \brief Tests of command-bank validation, synchronized capture and checked file output.
+ * \ingroup application_unit_test
+ */
+
 /** \defgroup test_build_run Building and Running Tests
   * \ingroup testing
 

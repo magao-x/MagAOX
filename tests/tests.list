@@ -31,6 +31,7 @@
 ../apps/alignLoop/tests/alignLoop_test
 ../apps/cacaoInterface/tests/cacaoInterface_test
 ../apps/closedLoopIndi/tests/closedLoopIndi_test
+../apps/dlDataCollection/tests/dlDataCollection_test
 ../apps/dmMode/tests/dmMode_test
 ../apps/dmPokeCenter/tests/dmPokeCenter_test
 ../apps/dmPokeXCorr/tests/dmPokeXCorr_test

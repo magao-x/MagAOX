@@ -1,16 +1,15 @@
 /** \file dlDataCollection.cpp
-  * \brief The MagAO-X ImageStreamIO integrator main program source file.
-  *
-  * \ingroup dlDataCollection_files
-  */
+ * \brief Main entrypoint for synchronized PWFS training-data collection.
+ *
+ * \ingroup dlDataCollection_files
+ */
 
 #include "dlDataCollection.hpp"
 
-
-int main(int argc, char **argv)
+/// Run the collector using the standard MagAOX application lifecycle.
+int main( int argc /**< [in] Number of command-line arguments. */, char **argv /**< [in] Command-line arguments. */ )
 {
-   MagAOX::app::dlDataCollection xapp;
+    MagAOX::app::dlDataCollection xapp;
 
-   return xapp.main(argc, argv);
-
+    return xapp.main( argc, argv );
 }

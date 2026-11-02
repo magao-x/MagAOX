@@ -1,5 +1,5 @@
 /** \file nnReconstructor.hpp
- * \brief The MagAO-X generic ImageStreamIO stream integrator
+ * \brief TensorRT WFS reconstruction with checked model loading and acknowledged publication controls
  *
  * \ingroup app_files
  */
@@ -7,60 +7,81 @@
 #ifndef nnReconstructor_hpp
 #define nnReconstructor_hpp
 
-#include <NvInfer.h>
-#include <cuda_fp16.h>
-#include <cuda_runtime_api.h>
-#include <iostream>
+#ifdef NNRECONSTRUCTOR_TEST
+    #include "tests/nnTestSupport.hpp"
+#else
+    #include <NvInfer.h>
+    #include <cuda_runtime_api.h>
+    #include <iostream>
+    #include <fstream>
+    #include <vector>
+    #include <limits>
+
+    #include <mx/improc/eigenCube.hpp>
+    #include <mx/improc/eigenImage.hpp>
+
+    #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
+    #include "../../magaox_git_version.h"
+#endif
+
+#include <algorithm>
+#include <cstring>
+#include <array>
+#include <atomic>
+#include <bit>
+#include <condition_variable>
+#include <cstdint>
 #include <fstream>
-#include <vector>
+#include <filesystem>
+#include <memory>
+#include <mutex>
+#include <cmath>
+#include <cctype>
 #include <limits>
-
-#include <mx/improc/eigenCube.hpp>
-#include <mx/improc/eigenImage.hpp>
-
-#include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
-#include "../../magaox_git_version.h"
+#include <stdexcept>
+#include <vector>
+#include <thread>
+#include <chrono>
+#include <sys/stat.h>
 
 using namespace nvinfer1;
 
-// Logger for TensorRT info/warning/errors
-class Logger : public ILogger {
-    void log(Severity severity, const char* msg) noexcept override {
-        if (severity <= Severity::kWARNING) {
-            std::cout << msg << std::endl;
-        }
-    }
+/// Forward TensorRT warnings and errors to the existing diagnostic stream.
+class Logger : public ILogger
+{
+    /// Emit warnings/errors without changing TensorRT logger exception guarantees.
+    void log( Severity    severity /**< [in] TensorRT severity. */,
+              const char *msg /**< [in] TensorRT-owned message. */ ) noexcept override;
 };
 
-// #define MAGAOX_CURRENT_SHA1 0
-// #define MAGAOX_REPO_MODIFIED 0
-
-void halfToFloatArray(float* dst, const half* src, size_t num_elements) {
-    for (size_t i = 0; i < num_elements; ++i) {
-        dst[i] = __half2float(src[i]);
-    }
+inline void Logger::log( Severity severity, const char *msg ) noexcept
+{
+    if( severity <= Severity::kWARNING )
+        std::cout << msg << std::endl;
 }
-
-void floatToHalfArray(half* dst, const float* src, size_t num_elements) {
-    for (size_t i = 0; i < num_elements; ++i) {
-        dst[i] = __float2half(src[i]);  // Convert each float to half-precision
-    }
-}
-
 
 namespace MagAOX
 {
 namespace app
 {
 
-class nnReconstructor : public MagAOXApp<true>, public dev::shmimMonitor<nnReconstructor>, public dev::frameGrabber<nnReconstructor>, public dev::telemeter<nnReconstructor>
+/// Reconstruct normalized WFS pupils into an externally owned modal stream.
+/** The monitor owns inference; the framegrabber owns claimed snapshots and timestamps.
+ * Runtime controls share only the protected handoff state. Model replacement is allowed
+ * while disabled and never changes activation. Loop state and writer ownership remain
+ * operator responsibilities; this app does not provide an inter-process loop interlock.
+ */
+class nnReconstructor : public MagAOXApp<true>,
+                        public dev::shmimMonitor<nnReconstructor>,
+                        public dev::frameGrabber<nnReconstructor>,
+                        public dev::telemeter<nnReconstructor>
 {
-    // Give the test harness access.
+    /// Allow focused app-local tests to exercise the production methods.
     friend class nnReconstructor_test;
 
     friend class dev::shmimMonitor<nnReconstructor>;
 
-    // The base shmimMonitor type
+    /// WFS stream monitor interface.
     typedef dev::shmimMonitor<nnReconstructor> shmimMonitorT;
 
     friend class dev::frameGrabber<nnReconstructor>;
@@ -85,98 +106,174 @@ class nnReconstructor : public MagAOXApp<true>, public dev::shmimMonitor<nnRecon
     ///@}
 
   protected:
-    /** \name Configurable Parameters
+    /** \name Configurable Parameters - Data
      *@{
      */
-    std::string dataDirs;     // Location where the data (onnx file, engine, WFS reference) is stored
-    std::string engineName;   // Name of the engine
-    std::string engineDirs;   // Name of the engine
-    bool rebuildEngine {false};       // If true, it will rebuild the engine and save it at engineName
+    std::string engineName; ///< Configured startup engine filename.
+
+    std::string engineDirs; ///< Directory containing the configured serialized engines.
+
+    bool rebuildEngine{ false }; ///< Legacy flag retained for compatibility; no engine building occurs.
 
     std::string m_fpsSource{ "camwfs" }; /**< Device name for getting fps of the loop.
                                               This device must have *.fps.current.  Default is camwfs*/
 
-                                              ///@}
+    ///@}
 
-    Logger logger;			  // The tensorRT logger
-    std::vector<char> engineData; // for loading the engine file.
+    Logger logger; ///< Logger retained for the lifetime of all TensorRT resources.
 
-    IRuntime* runtime {nullptr};
-    ICudaEngine* engine {nullptr};
-    IExecutionContext* context {nullptr};
-    int inputC {0};
-    int inputH {0};
-    int inputW {0};
-    int inputSize {0};
-    int input2Size {4};
-    uint32_t outputSize {0};
-    int zeroPad { 2 };
+    std::vector<char> engineData; ///< Serialized bytes belonging to the loaded model.
 
-    float* d_input {nullptr};
-    float* d_input2 {nullptr};
-    float* d_output {nullptr};
-    bool use_fp16 = false;
-    bool explicit_tt = false;
+    IRuntime *runtime{ nullptr }; ///< Owned runtime; destroyed after its engine.
 
-    float imageNorm; // Normalization constant for the image intensities
-    float modalNorm; // Normalization constant for the modal coefficients
+    ICudaEngine *engine{ nullptr }; ///< Owned engine; replaced only while workers are quiescent.
 
-    int m_pupPix;      // Number of pixels in the pupil used for the Neural Network
-    int pup_offset1_x; // Horizontal offset to the first set of pupils
-    int pup_offset1_y; // Vertical offset to the first set of pupils
-    int pup_offset2_x; // Horizontal offset to the second set of pupils
-    int pup_offset2_y; // Horizontal offset to the second set of pupils
-    int pixels_per_quadrant;
+    IExecutionContext *context{ nullptr }; ///< Owned execution context used only by the admitted inference.
 
-    int Npup{ 4 };        // Number of pupils
+    int inputC{ 0 }; ///< Validated image-channel count.
 
-    eigenImage<float> modeval;
+    int inputH{ 0 }; ///< Validated padded pupil height.
 
-    half *modeval_half{ nullptr };
+    int inputW{ 0 }; ///< Validated padded pupil width.
 
-    float *pp_image{ nullptr };
-    float *pup_Is{ nullptr };
-    half *pp_image_half{ nullptr };
-    half *pup_Is_half{ nullptr };
+    int inputSize{ 0 }; ///< Validated input element count; immutable after startup.
 
-    size_t m_pwfsWidth{ 0 };  ///< The width of the image
+    uint32_t outputSize{ 0 }; ///< Modal count fixed by the startup engine and preserved across replacements.
+
+    int zeroPad{ 2 }; ///< Existing zero-padding width on each pupil edge.
+
+    float *d_input{ nullptr }; ///< Owned device input allocation; holds FP32 elements.
+
+    float *d_output{ nullptr }; ///< Owned device modal-output allocation.
+
+    float imageNorm{
+        std::numeric_limits<float>::quiet_NaN() }; ///< Existing multiplicative scale applied to cropped WFS pixels.
+
+    float modalNorm{ 1 }; ///< Legacy value loaded but intentionally not applied.
+
+    int m_pupPix{ -1 }; ///< Padded pupil side length supplied to the network.
+
+    int pup_offset1_x{ -1 }; ///< First pupil-column origin in the source image.
+
+    int pup_offset1_y{ -1 }; ///< First pupil-row origin in the source image.
+
+    int pup_offset2_x{ -1 }; ///< Second pupil-column origin in the source image.
+
+    int pup_offset2_y{ -1 }; ///< Second pupil-row origin in the source image.
+
+    int pixels_per_quadrant{ -1 }; ///< Fixed stride between flattened padded pupils.
+
+    int Npup{ 4 }; ///< Four pupils in the existing channel order.
+
+    eigenImage<float> modeval; ///< Inference-owned download buffer; never read by the publisher.
+
+    float *pp_image{ nullptr }; ///< Owned CPU preprocessing buffer, reused on WFS reconnection.
+
+    size_t m_pwfsWidth{ 0 }; ///< The width of the image
+
     size_t m_pwfsHeight{ 0 }; ///< The height of the image.
 
     uint8_t m_pwfsDataType{ 0 }; ///< The ImageStreamIO type code.
-    size_t m_pwfsTypeSize{ 0 };  ///< The size of the type, in bytes.
 
-    float m_fps{ 0 }; ///< Current FPS from the FPS source.
+    size_t m_pwfsTypeSize{ 0 }; ///< The size of the type, in bytes.
 
-    sem_t m_smSemaphore{ 0 }; ///< Semaphore used to synchronize the fg thread and the dm command thread.
+    std::atomic<float> m_fps{ 0 }; ///< Current FPS from the FPS source.
 
-    bool m_updated{ false }; ///< Flag indicating that the mode vals have been updated
+    std::mutex m_resultMutex; ///< Protects the result handoff and worker admission.
 
+    std::condition_variable m_resultReady; ///< Wakes publication for a result or shutdown.
+
+    std::vector<float> m_pendingModes; ///< Latest complete inference, protected by m_resultMutex.
+
+    std::vector<float> m_publishModes; ///< Snapshot owned exclusively by the framegrabber.
+
+    timespec m_pendingTime{ 0, 0 }; ///< Timestamp paired with m_pendingModes.
+
+    bool m_updated{ false }; ///< A complete result is waiting under m_resultMutex.
+
+    bool m_inferencing{ false }; ///< An admitted inference has not yet returned.
+
+    bool m_publishing{ false }; ///< A claimed publication has not reached the base hook.
+
+    bool m_stopping{ false }; ///< Prevents new work during cleanup.
+
+    bool m_sourceReady{ false }; ///< The current WFS attachment passed validation.
+
+    std::string m_fault; ///< Latched runtime failure; no further inference is admitted.
+
+    std::array<void *, 2> m_bindings{}; ///< Device addresses in the engine's validated I/O order.
+
+    bool m_smStarted{ false }; ///< Monitor startup was attempted and needs shutdown.
+
+    bool m_fgStarted{ false }; ///< Framegrabber startup was attempted and needs shutdown.
+
+    bool m_telemStarted{ false }; ///< Telemeter startup was attempted and needs shutdown.
+
+    std::vector<std::string> m_models; ///< Validated startup catalog; configured filenames plus discovered engines.
+
+    bool m_startEnabled{ true }; ///< Preserve legacy automatic startup unless explicitly disabled.
+
+    double m_transitionTimeout{ 30 }; ///< Seconds before an unfinished transition is reported as a fault.
+
+    bool m_enabled{ true }; ///< Admission gate for new inference, protected by m_resultMutex.
+
+    bool m_enableReadback{ true }; ///< Last acknowledged enable state.
+
+    bool m_disabling{ false }; ///< Disable awaits worker quiescence and its one zero publication.
+
+    bool m_zeroPending{ false }; ///< The explicit disable zero has not been claimed.
+
+    bool m_publishZero{ false }; ///< The publisher-owned snapshot completes a disable request.
+
+    bool m_loading{ false }; ///< A queued or running model replacement blocks inference.
+
+    bool m_loadPending{ false }; ///< appLogic must launch the loader for this request.
+
+    bool m_cancelLoad{ false }; ///< A timed-out load must not later replace the model.
+
+    bool m_waitForFreshFrame{ false }; ///< Anchor the source counter on first callback after enabling.
+
+    bool m_requireNewCounter{ false }; ///< Wait for a newer counter than the enable/reconnect anchor.
+
+    uint64_t m_resumeCounter{ 0 }; ///< Counter sampled after enable, on the monitor thread.
+
+    bool m_hadSource{ false }; ///< Distinguishes initial attachment from a reconnection.
+
+    std::thread m_modelThread; ///< Loads candidates only while disabled; joined before resource cleanup.
+
+    std::chrono::steady_clock::time_point m_transitionStart{}; ///< Monotonic request time.
+
+    std::string m_requestedModel; ///< Most recent accepted selection, including failed loads.
+
+    std::string m_loadedModel; ///< Successfully installed engine filename.
+
+    std::string m_activeModel; ///< Model that supplied the last publication while enabled.
+
+    std::chrono::steady_clock::time_point m_outputCheck{}; ///< Publisher-owned output identity check deadline.
+
+    std::string m_requestError; ///< Rejected operator request, separate from a runtime fault.
 
   public:
     /// Default c'tor.
     nnReconstructor();
 
-    /// D'tor, declared and defined for noexcept.
-    ~nnReconstructor() noexcept
-    {
-    }
+    /// Unwind partial startup as well as normal shutdown without retaining owned resources.
+    ~nnReconstructor() noexcept;
 
+    /// Register existing parameters and app-local control configuration.
     virtual void setupConfig();
 
     /// Implementation of loadConfig logic, separated for testing.
     /** This is called by loadConfig().
      */
-    int loadConfigImpl(
-        mx::app::appConfigurator &_config /**< [in] an application configuration
-        from which to load values*/
+    int loadConfigImpl( mx::app::appConfigurator &_config /**< [in] an application configuration
+                        from which to load values*/
     );
 
+    /// Load configuration and prevent startup when its contract is invalid.
     virtual void loadConfig();
 
-    /// Startup function
-    /**
-     *
-     */
+    /// Load the initial engine, register controls and start the existing base workers.
     virtual int appStartup();
 
     /// Implementation of the FSM for nnReconstructor.
@@ -186,44 +283,89 @@ class nnReconstructor : public MagAOXApp<true>, public dev::shmimMonitor<nnRecon
      */
     virtual int appLogic();
 
-    /// Shutdown the app.
-    /**
-     *
-     */
+    /// Cancel unclaimed work, join workers and release resources; safe to call repeatedly.
     virtual int appShutdown();
 
-    // Custom functions
-    //int send_to_shmim();
+    /// Read the configured startup engine, throwing on incomplete or invalid file input.
+    void load_engine( const std::string filename /**< [in] Serialized engine path. */ );
 
-    void load_engine(const std::string filename);
+    /// Deserialize and validate the startup engine, then allocate fixed inference buffers.
     void create_engine_context();
+
+    /// Allocate device and host buffers; partial failures are unwound by shutdown.
     void prepare_engine_memory();
+
+    /// Free device allocations after the workers stop; repeated calls are harmless.
     void cleanup_engine_memory();
+
+    /// Destroy the context, engine and runtime in dependency order.
     void cleanup_engine_context();
 
-    // void build_engine(){};
+    /// Validate a candidate without changing the currently installed engine.
+    std::array<int, 2> validateEngine( ICudaEngine *candidate /**< [in] Candidate engine. */,
+                                       uint32_t    &outputs /**< [out] Modal count. */ );
+
+    /// Discover and validate engine files before registering controls or starting workers.
+    void discoverModels();
+
+    /// Build a readable, unique INDI element name from a configured filename.
+    std::string modelId( size_t index /**< [in] Configured model index. */ ) const;
+
+    /// Read a complete, nonempty serialized engine.
+    std::vector<char> readEngineFile( const std::string &filename /**< [in] Engine path. */ );
+
+    /// Load a replacement while disabled; failure leaves the old model installed.
+    void replaceModel( const std::string &name /**< [in] Configured model filename. */ );
+
+    /// Detect incompatible metadata or a replaced external output before claiming a publication.
+    bool verifyOutput();
+
+    /// Launch pending model work, report timeouts and update control readbacks.
+    void updateControls();
+
+    /// Release host allocations after both data-path threads have stopped.
+    void cleanup_host_memory();
+
+    /// Check a CUDA result and throw with the failing operation on error.
+    void checkCuda( cudaError_t result /**< [in] CUDA status. */, const char *operation /**< [in] Operation name. */ );
+
+    /// Check IEEE float exponent bits even when fast-math assumes finite arithmetic.
+    static bool isFinite( const float &value /**< [in] Configuration or downloaded coefficient. */ );
+
+    /// Check IEEE double exponent bits without changing the app's arithmetic flags.
+    static bool isFinite( const double &value /**< [in] Configured transition timeout. */ );
+
+    /// Latch a fault and discard unclaimed results without freeing in-use resources.
+    void fail( const std::string &reason /**< [in] Failure description. */ );
+
+    /// Perform the existing preprocessing and synchronous inference on one valid frame.
+    void infer( void *curr_src /**< [in] CPU-backed float WFS frame. */ );
+
+    /// Acknowledge publication only after the base has updated metadata and posted.
+    int frameGrabberPostPublish( IMAGE *imageStream /**< [in] Published stream. */ );
 
   protected:
+    /// Validate a WFS attachment and invalidate pending results without reallocating buffers.
     int allocate( const dev::shmimT &dummy /**< [in] tag to differentiate shmimMonitor parents.*/ );
 
-    int processImage( void *curr_src,          ///< [in] pointer to start of current frame.
-                      const dev::shmimT &dummy ///< [in] tag to differentiate shmimMonitor parents.
+    /// Admit one frame, run inference and hand off a complete result or latch its failure.
+    int processImage( void              *curr_src /**< [in] Pointer to the current CPU-backed WFS frame. */,
+                      const dev::shmimT &dummy /**< [in] Monitor tag. */
     );
-
 
     /** \name frameGrabber Interface
      * @{
      */
 
-    /// Configure the output stream for acquistion.
-    /** Tests if stream exists and is expected size.  Creates it if needed.
-     *  will set m_width, m_height, and m_dataType.
+    /// Attach to a compatible existing output stream.
+    /** Attaches only to an existing external stream and checks its size/type/location.
+     * Sets the base width, height and datatype; never creates or owns the stream.
      */
     int configureAcquisition();
 
     /// Gets the frames-per-second readout rate
     /** Used for the latency statistics
-      */
+     */
     float fps();
 
     /// Start acquisition.
@@ -232,26 +374,40 @@ class nnReconstructor : public MagAOXApp<true>, public dev::shmimMonitor<nnRecon
     int startAcquisition();
 
     /// Acquire data.
-    /** Here just waits on the semaphore.
+    /** Waits for a protected result or the explicit disable zero, then claims a publisher snapshot.
      */
     int acquireAndCheckValid();
 
     /// Loads the modevals into the stream
-    int loadImageIntoStream(void * dest);
+    int loadImageIntoStream( void *dest /**< [out] Destination supplied by the framegrabber. */ );
 
-    ///Take any actions needed to reconfigure the system.  Called if m_reconfig is set to true.
+    /// Complete the base reconfiguration interface; attachment occurs in configureAcquisition.
     int reconfig();
 
     ///@}
 
     /** \name INDI interface
      * @{
-    */
+     */
 
-    pcf::IndiProperty m_indiP_fpsSource;
+    pcf::IndiProperty m_indiP_model; ///< Configured model selection, independent of activation.
+
+    /// Queue exactly one configured model only when reconstruction and publication are quiescent.
+    INDI_NEWCALLBACK_DECL( nnReconstructor, m_indiP_model );
+
+    pcf::IndiProperty m_indiP_enable; ///< Explicit enable/disable request and acknowledged state.
+
+    /// Request fresh-frame activation or a single acknowledged zero publication.
+    INDI_NEWCALLBACK_DECL( nnReconstructor, m_indiP_enable );
+
+    pcf::IndiProperty m_indiP_modelStatus; ///< Requested, loaded, active and transition/error descriptions.
+
+    pcf::IndiProperty m_indiP_fpsSource; ///< Subscription to the configured WFS frame-rate source.
+
+    /// Update the atomic frame-rate estimate used by framegrabber telemetry.
     INDI_SETCALLBACK_DECL( nnReconstructor, m_indiP_fpsSource );
 
-    pcf::IndiProperty m_indiP_fps;
+    pcf::IndiProperty m_indiP_fps; ///< Read-only copy of the source frame rate.
 
     ///@}
 
@@ -259,110 +415,273 @@ class nnReconstructor : public MagAOXApp<true>, public dev::shmimMonitor<nnRecon
      * @{
      */
 
+    /// Request the existing framegrabber timing telemetry at its configured cadence.
     int checkRecordTimes();
 
-    int recordTelem( const telem_fgtimings * );
+    /// Record the existing framegrabber timing statistics without redefining their scope.
+    int recordTelem( const telem_fgtimings *record /**< [in] Telemetry dispatch tag. */ );
 
     ///@}
 };
 
-void nnReconstructor::load_engine(const std::string filename) {
-
-    std::ifstream file(filename, std::ios::binary);
-    if (!file) {
-        std::cout << "Error opening " << filename << std::endl;
-    }
-
-    file.seekg(0, std::ios::end);
-
-    engineData = std::vector<char>(file.tellg());
-    file.seekg(0, std::ios::beg);
-    file.read(engineData.data(), engineData.size());
-
+inline bool nnReconstructor::isFinite( const float &value )
+{
+    // Inspect storage by reference; fast-math can assume by-value FP arguments are finite.
+    static_assert( sizeof( float ) == sizeof( uint32_t ) && std::numeric_limits<float>::is_iec559 );
+    return ( std::bit_cast<uint32_t>( value ) & 0x7f800000U ) != 0x7f800000U;
 }
 
-void nnReconstructor::create_engine_context(){
-
-    // Create the runtime and deserialize the engine
-    runtime = createInferRuntime(logger);
-    if (!runtime) {
-        std::cout << "Failed to createInferRuntime\n";
-    }
-
-    engine = runtime->deserializeCudaEngine(engineData.data(), engineData.size());
-    if (!engine) {
-        std::cout << "Failed to deserialize CUDA engine.\n";
-    } else {
-        std::cout << "Deserialized CUDA engine.\n";
-    }
-
-    context = engine->createExecutionContext();
-
-
-    int numIOTensors = engine->getNbIOTensors();
-    std::cout << "Number of IO Tensors: " << numIOTensors << std::endl;
-
-
-    auto inputName = engine->getIOTensorName(0);
-    auto outputName = engine->getIOTensorName(1);
-    std::cout << "Tensor IO names: " << inputName << ", " << outputName << std::endl;
-
-
-    const auto inputDims = engine->getTensorShape(inputName);
-    const auto outputDims = engine->getTensorShape(outputName);
-    inputC = inputDims.d[1];
-    inputH = inputDims.d[2];
-    inputW = inputDims.d[3];
-    inputSize = inputC * inputH * inputW;
-
-    outputSize = outputDims.d[1];
-    std::cout << "Tensor input dimensions: " << inputC << "x" << inputH << "x" << inputW << std::endl;
-    std::cout << "Tensor output dimensions: " << outputSize << std::endl;
-
+inline bool nnReconstructor::isFinite( const double &value )
+{
+    static_assert( sizeof( double ) == sizeof( uint64_t ) && std::numeric_limits<double>::is_iec559 );
+    return ( std::bit_cast<uint64_t>( value ) & 0x7ff0000000000000ULL ) != 0x7ff0000000000000ULL;
 }
 
-void nnReconstructor::prepare_engine_memory(){
+inline std::string nnReconstructor::modelId( size_t index ) const
+{
+    std::string id = "model" + std::to_string( index ) + "_" + m_models[index];
+    for( char &character : id )
+        if( !std::isalnum( static_cast<unsigned char>( character ) ) && character != '_' )
+            character = '_';
+    return id;
+}
 
-    // Allocate device memory for input and output
-    if (use_fp16) {
-        // Allocate FP16 memory
-        cudaMalloc((void**)&d_input, inputSize * sizeof(half));
-        if (explicit_tt) {
-            cudaMalloc((void**)&d_input2, input2Size * sizeof(half));
+inline std::vector<char> nnReconstructor::readEngineFile( const std::string &filename )
+{
+    std::ifstream file( filename, std::ios::binary | std::ios::ate );
+    if( !file )
+        throw std::runtime_error( "cannot open engine: " + filename );
+    const auto size = file.tellg();
+    if( size <= 0 || static_cast<uintmax_t>( size ) > std::numeric_limits<size_t>::max() )
+        throw std::runtime_error( "invalid engine file size: " + filename );
+    std::vector<char> data( static_cast<size_t>( size ) );
+    file.seekg( 0 );
+    if( !file.read( data.data(), size ) )
+        throw std::runtime_error( "incomplete engine read: " + filename );
+    return data;
+}
+
+inline void nnReconstructor::load_engine( const std::string filename )
+{
+    engineData = readEngineFile( filename );
+}
+
+inline void nnReconstructor::create_engine_context()
+{
+    runtime = createInferRuntime( logger );
+    if( !runtime )
+        throw std::runtime_error( "createInferRuntime failed" );
+    engine = runtime->deserializeCudaEngine( engineData.data(), engineData.size() );
+    if( !engine )
+        throw std::runtime_error( "engine deserialization failed" );
+    const auto indices    = validateEngine( engine, outputSize );
+    const int  imageIndex = indices[0], outputIndex = indices[1];
+    inputC = Npup;
+    inputH = inputW = m_pupPix;
+    inputSize       = Npup * pixels_per_quadrant;
+    context         = engine->createExecutionContext();
+    if( !context )
+        throw std::runtime_error( "createExecutionContext failed" );
+    prepare_engine_memory();
+    m_bindings[imageIndex]  = d_input;
+    m_bindings[outputIndex] = d_output;
+    log<text_log>( std::format( "Tensor input dimensions: {}x{}x{}; tensor output dimensions: {}; I/O precision: FP32",
+                                inputC,
+                                inputH,
+                                inputW,
+                                outputSize ),
+                   logPrio::LOG_INFO );
+}
+
+inline std::array<int, 2> nnReconstructor::validateEngine( ICudaEngine *candidate, uint32_t &outputs )
+{
+    constexpr int count = 2;
+    if( candidate->getNbIOTensors() != count )
+        throw std::runtime_error( "unexpected engine I/O count" );
+    int imageIndex = -1, outputIndex = -1;
+    for( int i = 0; i < count; ++i )
+    {
+        const char *name = candidate->getIOTensorName( i );
+        if( !name || candidate->getTensorDataType( name ) != DataType::kFLOAT ||
+            candidate->getTensorFormat( name ) != TensorFormat::kLINEAR ||
+            candidate->getTensorLocation( name ) != TensorLocation::kDEVICE )
+            throw std::runtime_error( "unsupported engine I/O dtype, layout or location" );
+        const auto dims   = candidate->getTensorShape( name );
+        size_t     volume = 1;
+        if( dims.nbDims < 1 )
+            throw std::runtime_error( "invalid tensor rank" );
+        for( int d = 0; d < dims.nbDims; ++d )
+        {
+            if( dims.d[d] <= 0 || volume > size_t( std::numeric_limits<int>::max() ) / dims.d[d] )
+                throw std::runtime_error( "dynamic, empty or oversized tensor" );
+            volume *= dims.d[d];
         }
-        cudaMalloc((void**)&d_output, outputSize * sizeof(half));
-    } else {
-        // Allocate FP32 memory
-        cudaMalloc((void**)&d_input, inputSize * sizeof(float));
-        if (explicit_tt) {
-            cudaMalloc((void**)&d_input2, input2Size * sizeof(float));
+        if( candidate->getTensorIOMode( name ) == TensorIOMode::kOUTPUT )
+        {
+            if( outputIndex >= 0 || dims.nbDims != 2 || dims.d[0] != 1 )
+                throw std::runtime_error( "expected one batch-one modal output" );
+            outputIndex = i;
+            outputs     = dims.d[1];
         }
-        cudaMalloc((void**)&d_output, outputSize * sizeof(float));
+        else if( candidate->getTensorIOMode( name ) == TensorIOMode::kINPUT && dims.nbDims == 4 )
+        {
+            if( imageIndex >= 0 || dims.d[0] != 1 || dims.d[1] != Npup || dims.d[2] != m_pupPix ||
+                dims.d[3] != m_pupPix )
+                throw std::runtime_error( "engine image shape does not match configured padded pupils" );
+            imageIndex = i;
+        }
+        else
+            throw std::runtime_error( "unsupported engine tensor role or shape" );
     }
-
-    //cudaMalloc((void**)&d_input, inputSize * sizeof(float));
-    //cudaMalloc((void**)&d_output, outputSize * sizeof(float));
-
+    if( imageIndex < 0 || outputIndex < 0 )
+        throw std::runtime_error( "missing required engine tensor" );
+    return { imageIndex, outputIndex };
 }
 
-void nnReconstructor::cleanup_engine_memory(){
-    if(d_input)
-        cudaFree(d_input);
-    if(d_input2)
-        cudaFree(d_input2);
-
-    if(d_output)
-        cudaFree(d_output);
+inline void nnReconstructor::discoverModels()
+{
+    // Preserve explicit entries (including nonstandard extensions), then append sorted discoveries.
+    auto                     candidates = m_models;
+    std::vector<std::string> discovered;
+    for( const auto &entry : std::filesystem::directory_iterator( engineDirs ) )
+    {
+        const auto extension = entry.path().extension().string();
+        if( entry.is_regular_file() && ( extension == ".trt" || extension == ".engine" || extension == ".plan" ) )
+            discovered.push_back( entry.path().filename().string() );
+    }
+    std::sort( discovered.begin(), discovered.end() );
+    candidates.insert( candidates.end(), discovered.begin(), discovered.end() );
+    m_models = { engineName }; // Already loaded and validated; never select another startup model implicitly.
+    std::vector<std::string> checked{ engineName };
+    for( const auto &name : candidates )
+    {
+        if( std::find( checked.begin(), checked.end(), name ) != checked.end() )
+            continue;
+        checked.push_back( name );
+        try
+        {
+            auto                         data = readEngineFile( engineDirs + "/" + name );
+            std::unique_ptr<ICudaEngine> candidate( runtime->deserializeCudaEngine( data.data(), data.size() ) );
+            if( !candidate )
+                throw std::runtime_error( "engine deserialization failed" );
+            uint32_t outputs = 0;
+            validateEngine( candidate.get(), outputs );
+            if( outputs != outputSize )
+                throw std::runtime_error( "modal count differs from startup model" );
+            std::unique_ptr<IExecutionContext> candidateContext( candidate->createExecutionContext() );
+            if( !candidateContext )
+                throw std::runtime_error( "createExecutionContext failed" );
+            m_models.push_back( name );
+        }
+        catch( const std::exception &error )
+        {
+            log<text_log>( "Skipping model " + name + ": " + error.what(), logPrio::LOG_WARNING );
+        }
+    }
 }
 
-void nnReconstructor::cleanup_engine_context(){
-    if(context)
-        delete context;
-    if(engine)
-        delete engine;
-    if(runtime)
-        delete runtime;
-};
+inline void nnReconstructor::replaceModel( const std::string &name )
+{
+    auto                      data = readEngineFile( engineDirs + "/" + name );
+    std::unique_ptr<IRuntime> nextRuntime( createInferRuntime( logger ) );
+    if( !nextRuntime )
+        throw std::runtime_error( "createInferRuntime failed" );
+    std::unique_ptr<ICudaEngine> nextEngine( nextRuntime->deserializeCudaEngine( data.data(), data.size() ) );
+    if( !nextEngine )
+        throw std::runtime_error( "engine deserialization failed" );
+    uint32_t   outputs = 0;
+    const auto indices = validateEngine( nextEngine.get(), outputs );
+    if( outputs != outputSize )
+        throw std::runtime_error( "replacement must preserve the configured modal count" );
+    std::unique_ptr<IExecutionContext> nextContext( nextEngine->createExecutionContext() );
+    if( !nextContext )
+        throw std::runtime_error( "createExecutionContext failed" );
+    { // mutex scope
+        std::lock_guard<std::mutex> lock( m_resultMutex );
+        if( m_stopping || m_cancelLoad ||
+            std::chrono::duration<double>( std::chrono::steady_clock::now() - m_transitionStart ).count() >
+                m_transitionTimeout )
+            throw std::runtime_error( "model load cancelled or timed out before installation" );
+        // Admission is closed throughout loading. Swapping cannot race inference or publication.
+        auto *oldRuntime = runtime;
+        runtime          = nextRuntime.release();
+        nextRuntime.reset( oldRuntime );
+        auto *oldEngine = engine;
+        engine          = nextEngine.release();
+        nextEngine.reset( oldEngine );
+        auto *oldContext = context;
+        context          = nextContext.release();
+        nextContext.reset( oldContext );
+        m_bindings.fill( nullptr );
+        m_bindings[indices[0]] = d_input;
+        m_bindings[indices[1]] = d_output;
+        engineData.swap( data );
+        m_loadedModel = name;
+        m_activeModel.clear();
+        m_updated           = false;
+        m_waitForFreshFrame = true;
+        m_fault.clear();
+    }
+}
+
+inline void nnReconstructor::checkCuda( cudaError_t result, const char *operation )
+{
+    if( result != cudaSuccess )
+        throw std::runtime_error( std::string( operation ) + ": " + cudaGetErrorString( result ) );
+}
+
+inline void nnReconstructor::prepare_engine_memory()
+{
+    constexpr size_t size = sizeof( float );
+    checkCuda( cudaMalloc( reinterpret_cast<void **>( &d_input ), inputSize * size ), "allocate image input" );
+    checkCuda( cudaMalloc( reinterpret_cast<void **>( &d_output ), outputSize * size ), "allocate modal output" );
+    pp_image = new float[inputSize]{};
+    modeval.resize( outputSize, 1 );
+    m_pendingModes.resize( outputSize );
+    m_publishModes.resize( outputSize );
+}
+
+inline void nnReconstructor::cleanup_engine_memory()
+{
+    for( auto pointer : { d_input, d_output } )
+        if( pointer && cudaFree( pointer ) != cudaSuccess )
+            log<software_error>( { "cudaFree failed during cleanup" } );
+    d_input = d_output = nullptr;
+    m_bindings.fill( nullptr );
+}
+
+inline void nnReconstructor::cleanup_engine_context()
+{
+    delete context;
+    context = nullptr;
+    delete engine;
+    engine = nullptr;
+    delete runtime;
+    runtime = nullptr;
+}
+
+inline void nnReconstructor::cleanup_host_memory()
+{
+    delete[] pp_image;
+    pp_image = nullptr;
+}
+
+inline nnReconstructor::~nnReconstructor() noexcept
+{
+    appShutdown();
+}
+
+inline void nnReconstructor::fail( const std::string &reason )
+{
+    { // mutex scope
+        std::lock_guard<std::mutex> lock( m_resultMutex );
+        m_fault   = reason;
+        m_enabled = false;
+        m_updated = false;
+    }
+    m_resultReady.notify_all();
+    log<software_error>( { reason } );
+}
 
 inline nnReconstructor::nnReconstructor() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
 {
@@ -375,17 +694,7 @@ inline void nnReconstructor::setupConfig()
 
     SHMIMMONITOR_SETUP_CONFIG( config );
     FRAMEGRABBER_SETUP_CONFIG( config );
-    TELEMETER_SETUP_CONFIG(config);
-
-    config.add( "parameters.dataDirs",
-                "",
-                "parameters.dataDirs",
-                argType::Required,
-                "parameters",
-                "dataDirs",
-                false,
-                "string",
-                "The path to the directory with the onnx model." );
+    TELEMETER_SETUP_CONFIG( config );
 
     config.add( "parameters.engineDirs",
                 "",
@@ -437,26 +746,6 @@ inline void nnReconstructor::setupConfig()
                 "float",
                 "Normalization term for the modal coefficients." );
 
-    config.add( "parameters.use_fp16",
-                "",
-                "parameters.use_fp16",
-                argType::Required,
-                "parameters",
-                "use_fp16",
-                false,
-                "bool",
-                "If true the half precision mode will be used." );
-
-    config.add( "parameters.explicit_tt",
-                "",
-                "parameters.explicit_tt",
-                argType::Required,
-                "parameters",
-                "explicit_tt",
-                false,
-                "bool",
-                "If true the model will additionally give the pupil intensities as input to the NN." );
-
     config.add( "parameters.m_pupPix",
                 "",
                 "parameters.m_pupPix",
@@ -507,25 +796,50 @@ inline void nnReconstructor::setupConfig()
                 "int",
                 "Vertical offset to the top left of the furthest set op PWFS pupils." );
 
+    config.add( "parameters.models",
+                "",
+                "parameters.models",
+                argType::Required,
+                "parameters",
+                "models",
+                false,
+                "vector<string>",
+                "Optional extra engine filenames; compatible files in engineDirs are also discovered at startup." );
+    config.add( "parameters.startEnabled",
+                "",
+                "parameters.startEnabled",
+                argType::Required,
+                "parameters",
+                "startEnabled",
+                false,
+                "bool",
+                "Start reconstructing automatically (legacy default true)." );
+    config.add(
+        "parameters.transitionTimeout",
+        "",
+        "parameters.transitionTimeout",
+        argType::Required,
+        "parameters",
+        "transitionTimeout",
+        false,
+        "double",
+        "Seconds before an unfinished disable/load is reported as a fault; does not cancel native CUDA calls." );
 }
 
 inline int nnReconstructor::loadConfigImpl( mx::app::appConfigurator &_config )
 {
     std::cout << "loadConfigImpl()" << std::endl;
 
-    SHMIMMONITOR_LOAD_CONFIG(_config);
+    SHMIMMONITOR_LOAD_CONFIG( _config );
 
     frameGrabberT::m_ownShmim = false;
-    FRAMEGRABBER_LOAD_CONFIG(_config);
+    FRAMEGRABBER_LOAD_CONFIG( _config );
 
-    _config( dataDirs, "parameters.dataDirs" );
     _config( engineDirs, "parameters.engineDirs" );
     _config( engineName, "parameters.engineName" );
     _config( rebuildEngine, "parameters.rebuildEngine" );
     _config( imageNorm, "parameters.imageNorm" );
     _config( modalNorm, "parameters.modalNorm" );
-    _config( use_fp16, "parameters.use_fp16" );
-    _config( explicit_tt, "parameters.explicit_tt" );
 
     _config( m_pupPix, "parameters.m_pupPix" );
     _config( pup_offset1_x, "parameters.pup_offset1_x" );
@@ -534,20 +848,28 @@ inline int nnReconstructor::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( pup_offset2_y, "parameters.pup_offset2_y" );
 
     _config( m_fpsSource, "recon.fpsSource" );
+    _config( m_models, "parameters.models" );
+    _config( m_startEnabled, "parameters.startEnabled" );
+    _config( m_transitionTimeout, "parameters.transitionTimeout" );
+    if( engineName.empty() || !isFinite( m_transitionTimeout ) || m_transitionTimeout <= 0 )
+        return log<software_error, -1>( { "engineName and a positive finite transitionTimeout are required" } );
+    if( std::find( m_models.begin(), m_models.end(), engineName ) == m_models.end() )
+        m_models.insert( m_models.begin(), engineName );
+    for( size_t i = 0; i < m_models.size(); ++i )
+        if( m_models[i].empty() ||
+            std::find( m_models.begin(), m_models.begin() + i, m_models[i] ) != m_models.begin() + i )
+            return log<software_error, -1>( { "model filenames must be nonempty and unique" } );
 
-    TELEMETER_LOAD_CONFIG(_config);
+    TELEMETER_LOAD_CONFIG( _config );
 
     if( true )
     {
         std::cout << "Debug configuration loading: " << std::endl;
-        std::cout << "dataDirs: " << dataDirs << std::endl;
         std::cout << "engineDirs: " << engineDirs << std::endl;
         std::cout << "engineName: " << engineName << std::endl;
         std::cout << "rebuildEngine: " << rebuildEngine << std::endl;
         std::cout << "imageNorm: " << imageNorm << std::endl;
         std::cout << "modalNorm: " << modalNorm << std::endl;
-        std::cout << "use_fp16: " << use_fp16 << std::endl;
-        std::cout << "explicit_tt: " << explicit_tt << std::endl;
         std::cout << "modeval Channel: " << frameGrabberT::m_shmimName << std::endl;
 
         std::cout << "m_pupPix: " << m_pupPix << std::endl;
@@ -557,12 +879,17 @@ inline int nnReconstructor::loadConfigImpl( mx::app::appConfigurator &_config )
         std::cout << "pup_offset2_y: " << pup_offset2_y << std::endl;
     }
 
+    if( m_pupPix <= 2 * zeroPad || m_pupPix > 23170 || !isFinite( imageNorm ) || pup_offset1_x < 0 ||
+        pup_offset1_y < 0 || pup_offset2_x < 0 || pup_offset2_y < 0 )
+        return log<software_error, -1>( { "invalid pupil crop or image normalization" } );
+    pixels_per_quadrant = m_pupPix * m_pupPix;
     return 0;
 }
 
 inline void nnReconstructor::loadConfig()
 {
-    loadConfigImpl( config );
+    if( loadConfigImpl( config ) < 0 )
+        m_shutdown = true;
 }
 
 inline int nnReconstructor::appStartup()
@@ -578,25 +905,42 @@ inline int nnReconstructor::appStartup()
         return -1;
     }
 
-    if( sem_init( &m_smSemaphore, 0, 0 ) < 0 )
+    try
     {
-        log<software_critical>( { errno, "Initializing S.M. semaphore" } );
+        load_engine( engineDirs + "/" + engineName );
+        create_engine_context();
+        discoverModels();
+        m_requestedModel = m_loadedModel = engineName;
+        m_enabled = m_enableReadback = m_startEnabled;
+        std::vector<std::string> ids;
+        for( size_t i = 0; i < m_models.size(); ++i )
+            ids.push_back( modelId( i ) );
+        if( createStandardIndiSelectionSw( m_indiP_model, "model", ids, m_models ) < 0 ||
+            registerIndiPropertyNew( m_indiP_model, INDI_NEWCALLBACK( m_indiP_model ) ) < 0 )
+            throw std::runtime_error( "cannot register model selection" );
+        createStandardIndiToggleSw( m_indiP_enable, "enable" );
+        if( registerIndiPropertyNew( m_indiP_enable, INDI_NEWCALLBACK( m_indiP_enable ) ) < 0 )
+            throw std::runtime_error( "cannot register enable control" );
+        createROIndiText( m_indiP_modelStatus, "model_status", "requested" );
+        for( const char *element : { "loaded", "active", "status", "error" } )
+            m_indiP_modelStatus.add( pcf::IndiElement( element ) );
+        if( registerIndiPropertyReadOnly( m_indiP_modelStatus ) < 0 )
+            throw std::runtime_error( "cannot register model status" );
+        updateControls();
+        // The base startup macros return on failure; the destructor also unwinds partial startup.
+        m_fgStarted = true;
+        FRAMEGRABBER_APP_STARTUP;
+        m_smStarted = true;
+        SHMIMMONITOR_APP_STARTUP;
+        m_telemStarted = true;
+        TELEMETER_APP_STARTUP;
+    }
+    catch( const std::exception &error )
+    {
+        fail( error.what() );
+        appShutdown();
         return -1;
     }
-
-    std::string full_filepath = engineDirs + "/" + engineName;
-    std::cout << "file: " << full_filepath << std::endl;
-
-    load_engine(full_filepath);
-    create_engine_context();
-    prepare_engine_memory();
-
-    //Do this after everything is configured so we can check sizes propertly
-    FRAMEGRABBER_APP_STARTUP;
-
-    SHMIMMONITOR_APP_STARTUP;
-
-    TELEMETER_APP_STARTUP;
 
     state( stateCodes::OPERATING );
     return 0;
@@ -610,191 +954,194 @@ inline int nnReconstructor::appLogic()
 
     TELEMETER_APP_LOGIC;
 
+    updateControls();
+
     std::unique_lock<std::mutex> lock( m_indiMutex );
 
     SHMIMMONITOR_UPDATE_INDI;
 
     FRAMEGRABBER_UPDATE_INDI;
 
-
     return 0;
 }
 
 inline int nnReconstructor::appShutdown()
 {
-    SHMIMMONITOR_APP_SHUTDOWN;
-
-    FRAMEGRABBER_APP_SHUTDOWN;
-
-    TELEMETER_APP_SHUTDOWN;
-
-    if( pp_image )
-    {
-        delete[] pp_image;
+    { // mutex scope
+        std::lock_guard<std::mutex> lock( m_resultMutex );
+        m_stopping    = true;
+        m_enabled     = false;
+        m_zeroPending = false;
+        m_updated     = false;
     }
-    if( pp_image_half )
+    m_shutdown = true;
+    m_resultReady.notify_all();
+    if( m_smStarted )
     {
-        delete[] pp_image_half;
+        shmimMonitorT::appShutdown();
+        m_smStarted = false;
     }
-    if( pup_Is )
+    if( m_fgStarted )
     {
-        delete[] pup_Is;
+        frameGrabberT::appShutdown();
+        m_fgStarted = false;
     }
-    if( pup_Is_half)
+    if( m_telemStarted )
     {
-        delete[] pup_Is_half;
+        telemeterT::appShutdown();
+        m_telemStarted = false;
     }
-
-    if( modeval_half )
-    {
-        delete[] modeval_half;
-    }
-
+    if( m_modelThread.joinable() )
+        m_modelThread.join();
     cleanup_engine_context();
     cleanup_engine_memory();
-
+    cleanup_host_memory();
     return 0;
 }
 
 inline int nnReconstructor::allocate( const dev::shmimT &dummy )
 {
-    std::cout << "allocate()" << std::endl;
-    static_cast<void>( dummy ); // be unused
-
-    // Wavefront sensor setup
-    m_pwfsWidth = shmimMonitorT::m_width;
-    m_pwfsHeight = shmimMonitorT::m_height;
-    std::cout << "Width: " << m_pwfsWidth << " Height: " << m_pwfsHeight << std::endl;
-
-    pixels_per_quadrant = m_pupPix * m_pupPix;
-    std::cout << "Pixels: " << pixels_per_quadrant << std::endl;
-    pp_image = new float[Npup * pixels_per_quadrant];
-    pup_Is = new float[4];
-    //modeval = new float[outputSize];
-    modeval.resize(outputSize, 1);
-
-    memset( pp_image, 0, sizeof( float ) * Npup * pixels_per_quadrant );
-        if (explicit_tt){
-            memset( pup_Is, 0, sizeof( float) * 4);
-        }
-    //memset( modeval, 0, sizeof( float) * outputSize);
-    modeval.setZero();
-
-    if (use_fp16){
-        pp_image_half = new half[Npup * pixels_per_quadrant];
-        modeval_half = new half[outputSize];
-        pup_Is_half = new half[4];
-        memset( pp_image_half, 0, sizeof( half ) * Npup * pixels_per_quadrant );
-        if (explicit_tt){
-            memset( pup_Is_half, 0, sizeof( half ) * 4);
-        }
-        memset( modeval_half, 0, sizeof( half) * outputSize);
+    static_cast<void>( dummy );
+    const auto  &md    = shmimMonitorT::m_imageStream.md[0];
+    const size_t crop  = m_pupPix - 2 * zeroPad;
+    const size_t width = shmimMonitorT::m_width, height = shmimMonitorT::m_height;
+    const bool   valid = md.datatype == _DATATYPE_FLOAT && md.location == -1 && ( md.naxis == 2 || md.naxis == 3 ) &&
+                       shmimMonitorT::m_imageStream.array.raw && size_t( pup_offset1_x ) + crop <= width &&
+                       size_t( pup_offset2_x ) + crop <= width && size_t( pup_offset1_y ) + crop <= height &&
+                       size_t( pup_offset2_y ) + crop <= height;
+    { // mutex scope
+        std::lock_guard<std::mutex> lock( m_resultMutex );
+        m_updated     = false;
+        m_sourceReady = valid;
+        if( m_hadSource )
+            m_waitForFreshFrame = true;
+        m_hadSource  = true;
+        m_pwfsWidth  = width;
+        m_pwfsHeight = height;
     }
-
+    // Buffers belong to the loaded engine, not to a WFS attachment.
+    if( !valid )
+        fail( "incompatible WFS stream or crop; reconnect a valid stream and reload before resuming" );
     return 0;
 }
 
 inline int nnReconstructor::processImage( void *curr_src, const dev::shmimT &dummy )
 {
-    static_cast<void>( dummy ); // be unused
-
-    //record arrival time as the atime
-    if( clock_gettime( CLOCK_REALTIME, &(frameGrabberT::m_currImageTimestamp) ) < 0 )
-    {
-        m_shutdown = true;
-        return log<software_critical,-1>( { errno, "clock_gettime" } );
+    static_cast<void>( dummy );
+    { // mutex scope
+        std::lock_guard<std::mutex> lock( m_resultMutex );
+        if( m_stopping || !m_enabled || m_loading || !m_fault.empty() || !m_sourceReady )
+            return 0;
+        const uint64_t counter = shmimMonitorT::m_imageStream.md[0].cnt0;
+        if( m_waitForFreshFrame )
+        {
+            m_resumeCounter     = counter;
+            m_waitForFreshFrame = false;
+            m_requireNewCounter = true;
+            return 0;
+        }
+        if( m_requireNewCounter && counter == m_resumeCounter )
+            return 0;
+        m_requireNewCounter = false;
+        m_inferencing       = true;
     }
+    timespec timestamp{};
+    try
+    {
+        if( clock_gettime( CLOCK_REALTIME, &timestamp ) != 0 )
+            throw std::runtime_error( "clock_gettime failed" );
+        infer( curr_src );
+        { // mutex scope
+            std::lock_guard<std::mutex> lock( m_resultMutex );
+            if( !m_stopping && m_enabled && m_fault.empty() )
+            {
+                std::copy( modeval.data(), modeval.data() + outputSize, m_pendingModes.begin() );
+                m_pendingTime = timestamp;
+                m_updated     = true;
+            }
+        }
+    }
+    catch( const std::exception &error )
+    {
+        fail( error.what() );
+    }
+    catch( ... )
+    {
+        fail( "unknown inference failure" );
+    }
+    { // mutex scope
+        std::lock_guard<std::mutex> lock( m_resultMutex );
+        m_inferencing = false;
+    }
+    m_resultReady.notify_all();
+    return 0;
+}
 
+inline void nnReconstructor::infer( void *curr_src )
+{
     // aol_imwfs2 is reference and dark subtracted and is power normalized.
 
-    Eigen::Map<eigenImage<float>> pwfsIm(reinterpret_cast<float*>(curr_src), m_pwfsHeight, m_pwfsWidth);
+    Eigen::Map<eigenImage<float>> pwfsIm( reinterpret_cast<float *>( curr_src ), m_pwfsHeight, m_pwfsWidth );
 
     // Split up the four pupils for the Neural Network.
     int ki = 0;
 
-
-    for( int col_i = -zeroPad; col_i < (m_pupPix - zeroPad); ++col_i )
+    for( int col_i = -zeroPad; col_i < ( m_pupPix - zeroPad ); ++col_i )
     {
-        for( int row_i = -zeroPad; row_i < (m_pupPix - zeroPad); ++row_i )
+        for( int row_i = -zeroPad; row_i < ( m_pupPix - zeroPad ); ++row_i )
         {
-            if ((col_i < 0) or (col_i >= (m_pupPix - 2*zeroPad)) or (row_i < 0) or (row_i >= (m_pupPix - 2*zeroPad))){
-                pp_image[ki] = 0;
-                pp_image[ki + pixels_per_quadrant] = 0;
+            if( ( col_i < 0 ) or ( col_i >= ( m_pupPix - 2 * zeroPad ) ) or ( row_i < 0 ) or
+                ( row_i >= ( m_pupPix - 2 * zeroPad ) ) )
+            {
+                pp_image[ki]                           = 0;
+                pp_image[ki + pixels_per_quadrant]     = 0;
                 pp_image[ki + 2 * pixels_per_quadrant] = 0;
                 pp_image[ki + 3 * pixels_per_quadrant] = 0;
             }
-            else {
-                pp_image[ki] = imageNorm * (realT)pwfsIm(pup_offset1_y + row_i, pup_offset1_x + col_i );
-                pp_image[ki + pixels_per_quadrant] = imageNorm * (realT)pwfsIm( pup_offset1_y + row_i, pup_offset2_x + col_i );
-                pp_image[ki + 2 * pixels_per_quadrant] = imageNorm * (realT)pwfsIm( pup_offset2_y + row_i, pup_offset1_x + col_i );
-                pp_image[ki + 3 * pixels_per_quadrant] = imageNorm * (realT)pwfsIm( pup_offset2_y + row_i, pup_offset2_x + col_i );
+            else
+            {
+                pp_image[ki] = imageNorm * (realT)pwfsIm( pup_offset1_y + row_i, pup_offset1_x + col_i );
+                pp_image[ki + pixels_per_quadrant] =
+                    imageNorm * (realT)pwfsIm( pup_offset1_y + row_i, pup_offset2_x + col_i );
+                pp_image[ki + 2 * pixels_per_quadrant] =
+                    imageNorm * (realT)pwfsIm( pup_offset2_y + row_i, pup_offset1_x + col_i );
+                pp_image[ki + 3 * pixels_per_quadrant] =
+                    imageNorm * (realT)pwfsIm( pup_offset2_y + row_i, pup_offset2_x + col_i );
             }
             ++ki;
         }
     }
 
     // Copy input data to device
-    if (use_fp16){
-        floatToHalfArray(pp_image_half, pp_image, inputSize);
-        cudaMemcpy(d_input, pp_image_half, inputSize * sizeof(half), cudaMemcpyHostToDevice);
-        if (explicit_tt){
-            floatToHalfArray(pup_Is_half, pup_Is, input2Size);
-            cudaMemcpy(d_input2, pup_Is_half, input2Size * sizeof(half), cudaMemcpyHostToDevice);
-        }
-    }
-    else {
-        cudaMemcpy(d_input, pp_image, inputSize * sizeof(float), cudaMemcpyHostToDevice);
-        if (explicit_tt){
-            cudaMemcpy(d_input2, pup_Is, input2Size * sizeof(float), cudaMemcpyHostToDevice);
+    checkCuda( cudaMemcpy( d_input, pp_image, inputSize * sizeof( float ), cudaMemcpyHostToDevice ), "cudaMemcpy" );
 
-        }
-    }
-
-
-    // Run inference
-    if (explicit_tt){
-        void* buffers[] = {d_input, d_input2, d_output};
-        context->executeV2(buffers);
-    }
-    else {
-        void* buffers[] = {d_input, d_output};
-        context->executeV2(buffers);
-    }
+    // Keep synchronous execution; tensor roles determine the binding slots.
+    if( !context->executeV2( m_bindings.data() ) )
+        throw std::runtime_error( "executeV2 failed" );
 
     // Copy output data back to host
-    if (use_fp16){
-        cudaMemcpy(modeval_half, d_output, outputSize * sizeof(half), cudaMemcpyDeviceToHost);
-        halfToFloatArray(modeval.data(), modeval_half, outputSize);
-    }
-    else {
-        cudaMemcpy(modeval.data(), d_output, outputSize * sizeof(float), cudaMemcpyDeviceToHost);
-    }
+    checkCuda( cudaMemcpy( modeval.data(), d_output, outputSize * sizeof( float ), cudaMemcpyDeviceToHost ),
+               "cudaMemcpy" );
 
-    // Send modal coefficients to the correct stream
-    m_updated = true;
-
-    // trigger framegrabber
-    if( sem_post( &m_smSemaphore ) < 0 )
-    {
-        log<software_critical>( { errno, 0, "Error posting to semaphore" } );
-        return -1;
-    }
-
-    return 0;
+    for( uint32_t i = 0; i < outputSize; ++i )
+        if( !isFinite( modeval.data()[i] ) )
+            throw std::runtime_error( "non-finite modal output" );
 }
 
-int nnReconstructor::configureAcquisition()
+inline int nnReconstructor::configureAcquisition()
 {
     static bool logged = false;
 
     int rv = openShmim();
-    if(rv != 0)
+    if( rv != 0 )
     {
         return rv;
     }
 
     if( frameGrabberT::m_width != outputSize || frameGrabberT::m_height != 1 ||
-        frameGrabberT::m_dataType != _DATATYPE_FLOAT )
+        frameGrabberT::m_dataType != _DATATYPE_FLOAT || !frameGrabberT::m_imageStream ||
+        !frameGrabberT::m_imageStream->array.raw || frameGrabberT::m_imageStream->md[0].location != -1 ||
+        frameGrabberT::m_imageStream->md[0].naxis < 1 || frameGrabberT::m_imageStream->md[0].naxis > 3 )
     {
         if( !logged )
         {
@@ -809,63 +1156,305 @@ int nnReconstructor::configureAcquisition()
         return 1;
     }
 
-
-    logged = false;
+    logged        = false;
+    m_outputCheck = std::chrono::steady_clock::now();
 
     return 0;
 }
 
-float nnReconstructor::fps()
+inline float nnReconstructor::fps()
 {
-    return m_fps;
+    return m_fps.load();
 }
 
-int nnReconstructor::startAcquisition()
+inline int nnReconstructor::startAcquisition()
 {
     return 0;
 }
 
-int nnReconstructor::acquireAndCheckValid()
+inline bool nnReconstructor::verifyOutput()
 {
-    timespec ts;
-
-    errno = 0;
-    if( clock_gettime( CLOCK_REALTIME, &ts ) < 0 )
+    const auto *stream = frameGrabberT::m_imageStream;
+    if( !stream || !stream->md || !stream->array.raw )
     {
-        log<software_critical>( { errno, "clock_gettime" } );
-        return -1;
+        fail( "output mapping unavailable" );
+        return false;
     }
-
-    ts.tv_sec += 1;
-
-    if( sem_timedwait( &m_smSemaphore, &ts ) == 0 )
+    const auto &md = stream->md[0];
+    if( md.datatype != _DATATYPE_FLOAT || md.location != -1 || md.size[0] != outputSize || md.naxis < 1 ||
+        md.naxis > 3 || ( md.naxis > 1 && md.size[1] != 1 ) || md.sem <= 0 ||
+        ( md.naxis == 3 && md.size[2] != frameGrabberT::m_circBuffLength ) )
     {
-        if( m_updated )
+        fail( "output metadata changed; publication stopped" );
+        return false;
+    }
+    const auto now = std::chrono::steady_clock::now();
+    if( now >= m_outputCheck )
+    {
+        m_outputCheck = now + std::chrono::seconds( 1 );
+        char filename[1024];
+        ImageStreamIO_filename( filename, sizeof( filename ), frameGrabberT::m_shmimName.c_str() );
+        struct stat info;
+        if( ::stat( filename, &info ) != 0 || info.st_ino != frameGrabberT::m_inode )
         {
-            return 0;
+            fail( "output stream removed or replaced; reattachment and explicit reload required" );
+            return false;
         }
-        else
+    }
+    return true;
+}
+
+inline int nnReconstructor::acquireAndCheckValid()
+{
+    std::unique_lock<std::mutex> lock( m_resultMutex );
+    m_resultReady.wait_for( lock,
+                            std::chrono::seconds( 1 ),
+                            [this] { return m_stopping || m_updated || ( m_zeroPending && !m_inferencing ); } );
+    if( m_stopping )
+        return 1;
+    lock.unlock();
+    const bool outputValid = verifyOutput();
+    lock.lock();
+    if( !outputValid )
+        return -1;
+    if( m_stopping )
+        return 1;
+    m_publishZero = m_zeroPending && !m_inferencing;
+    if( m_publishZero )
+    {
+        if( clock_gettime( CLOCK_REALTIME, &( frameGrabberT::m_currImageTimestamp ) ) != 0 )
         {
+            m_fault       = "disable incomplete: cannot timestamp zero publication; retry Off";
+            m_zeroPending = false;
             return 1;
         }
+        std::fill( m_publishModes.begin(), m_publishModes.end(), 0.F );
+        m_zeroPending = false;
     }
     else
     {
-        return 1;
+        if( !m_enabled || m_loading || !m_fault.empty() || !m_updated )
+            return 1;
+        std::copy( m_pendingModes.begin(), m_pendingModes.end(), m_publishModes.begin() );
+        frameGrabberT::m_currImageTimestamp = m_pendingTime;
     }
-}
-
-int nnReconstructor::loadImageIntoStream(void * dest)
-{
-    memcpy( dest, modeval.data(), modeval.rows() * frameGrabberT::m_typeSize );
-
-    m_updated = false;
-
+    m_updated    = false;
+    m_publishing = true;
     return 0;
 }
 
-int nnReconstructor::reconfig()
+inline int nnReconstructor::loadImageIntoStream( void *dest )
 {
+    memcpy( dest, m_publishModes.data(), m_publishModes.size() * sizeof( float ) );
+    return 0;
+}
+
+inline int nnReconstructor::frameGrabberPostPublish( IMAGE *imageStream )
+{
+    static_cast<void>( imageStream );
+    { // mutex scope
+        std::lock_guard<std::mutex> lock( m_resultMutex );
+        m_publishing = false;
+        if( m_publishZero )
+        {
+            m_disabling      = false;
+            m_enableReadback = false;
+            m_activeModel.clear();
+        }
+        else if( m_enabled && m_fault.empty() )
+            m_activeModel = m_loadedModel;
+        else
+            m_activeModel.clear();
+    }
+    m_resultReady.notify_all();
+    return 0;
+}
+
+inline int nnReconstructor::reconfig()
+{
+    return 0;
+}
+
+inline void nnReconstructor::updateControls()
+{
+    bool        launch = false, finished = false;
+    std::string name;
+    { // mutex scope
+        std::lock_guard<std::mutex> lock( m_resultMutex );
+        finished = !m_loading;
+        if( m_loadPending && !m_stopping )
+        {
+            launch        = true;
+            name          = m_requestedModel;
+            m_loadPending = false;
+        }
+        if( ( m_loading || m_disabling ) &&
+            std::chrono::duration<double>( std::chrono::steady_clock::now() - m_transitionStart ).count() >
+                m_transitionTimeout )
+        {
+            m_cancelLoad = m_loading;
+            if( m_fault.empty() )
+                m_fault = m_loading ? "load incomplete: worker must finish, then reload explicitly"
+                                    : "disable incomplete: zero publication not acknowledged";
+        }
+    }
+    if( ( finished || launch ) && m_modelThread.joinable() )
+        m_modelThread.join();
+    if( launch )
+    {
+        try
+        {
+            m_modelThread = std::thread(
+                [this, name]
+                {
+                    try
+                    {
+                        replaceModel( name );
+                    }
+                    catch( const std::exception &error )
+                    {
+                        fail( error.what() );
+                    }
+                    catch( ... )
+                    {
+                        fail( "unknown model loading failure" );
+                    }
+                    { // mutex scope
+                        std::lock_guard<std::mutex> lock( m_resultMutex );
+                        m_loading = false;
+                    }
+                    m_resultReady.notify_all();
+                } );
+        }
+        catch( const std::exception &error )
+        {
+            fail( error.what() );
+            std::lock_guard<std::mutex> lock( m_resultMutex );
+            m_loading = false;
+        }
+    }
+    bool                                 enabled;
+    pcf::IndiProperty::PropertyStateType status;
+    std::string                          phase, requested, loaded, active, error;
+    { // mutex scope
+        std::lock_guard<std::mutex> lock( m_resultMutex );
+        if( !m_fault.empty() && !m_inferencing && !m_publishing && !m_disabling )
+        {
+            m_enableReadback = false;
+            m_activeModel.clear();
+        }
+        const bool busy = m_disabling || m_loading;
+        status          = !m_fault.empty() || !m_requestError.empty() ? INDI_ALERT : busy ? INDI_BUSY : INDI_OK;
+        phase           = m_stopping              ? "stopping"
+                          : m_disabling           ? "disabling: zero pending"
+                          : m_loading             ? "loading"
+                          : !m_fault.empty()      ? "fault: reload required"
+                          : !m_enabled            ? "disabled"
+                          : m_activeModel.empty() ? "waiting for fresh result"
+                                                  : "active";
+        enabled         = m_enableReadback;
+        requested       = m_requestedModel;
+        loaded          = m_loadedModel;
+        active          = m_activeModel;
+        error           = m_fault.empty() ? m_requestError : m_fault;
+    }
+    // Network/property updates must not hold the real-time handoff lock.
+    std::lock_guard<std::mutex> indiLock( m_indiMutex );
+    updateSwitchIfChanged( m_indiP_enable, "toggle", enabled ? pcf::IndiElement::On : pcf::IndiElement::Off, status );
+    for( size_t i = 0; i < m_models.size(); ++i )
+        updateSwitchIfChanged( m_indiP_model,
+                               modelId( i ),
+                               m_models[i] == requested ? pcf::IndiElement::On : pcf::IndiElement::Off,
+                               status );
+    updateIfChanged( m_indiP_modelStatus, "requested", requested, status );
+    updateIfChanged( m_indiP_modelStatus, "loaded", loaded, status );
+    updateIfChanged( m_indiP_modelStatus, "active", active, status );
+    updateIfChanged( m_indiP_modelStatus, "status", phase, status );
+    updateIfChanged( m_indiP_modelStatus, "error", error, status );
+}
+
+INDI_NEWCALLBACK_DEFN( nnReconstructor, m_indiP_enable )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_enable, ipRecv );
+    if( !ipRecv.find( "toggle" ) )
+        return 0;
+    { // mutex scope
+        std::lock_guard<std::mutex> lock( m_resultMutex );
+        const auto                  value = ipRecv["toggle"].getSwitchState();
+        if( value != pcf::IndiElement::On && value != pcf::IndiElement::Off )
+        {
+            m_requestError = "enable requires On or Off";
+            return -1;
+        }
+        const bool on = value == pcf::IndiElement::On;
+        if( m_stopping || ( on && ( m_loading || m_disabling || !m_fault.empty() || !m_sourceReady ) ) )
+        {
+            m_requestError = "enable rejected: shutdown, transition, source validation or fault recovery pending";
+            return -1;
+        }
+        m_requestError.clear();
+        if( on && !m_enabled )
+        {
+            m_enabled           = true;
+            m_enableReadback    = true;
+            m_waitForFreshFrame = true;
+            m_activeModel.clear();
+        }
+        else if( !on && m_disabling && !m_zeroPending && !m_publishing && !m_inferencing )
+        {
+            m_zeroPending     = true;
+            m_transitionStart = std::chrono::steady_clock::now();
+        }
+        else if( !on && !m_disabling && ( m_enabled || m_enableReadback ) )
+        {
+            m_enabled   = false;
+            m_disabling = m_zeroPending = true;
+            m_transitionStart           = std::chrono::steady_clock::now();
+            m_updated                   = false;
+        }
+    }
+    m_resultReady.notify_all();
+    return 0;
+}
+
+INDI_NEWCALLBACK_DEFN( nnReconstructor, m_indiP_model )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_model, ipRecv );
+    std::lock_guard<std::mutex> lock( m_resultMutex );
+    int                         selected = -1;
+    for( const auto &element : ipRecv.getElements() )
+    {
+        if( !m_indiP_model.find( element.first ) )
+        {
+            m_requestError = "unknown model selection element";
+            return -1;
+        }
+        if( element.second.getSwitchState() != pcf::IndiElement::On )
+            continue;
+        if( selected >= 0 )
+        {
+            m_requestError = "select exactly one model";
+            return -1;
+        }
+        for( size_t i = 0; i < m_models.size(); ++i )
+            if( element.first == modelId( i ) )
+                selected = i;
+    }
+    if( selected < 0 )
+    {
+        m_requestError = "select exactly one model";
+        return -1;
+    }
+    if( m_stopping || m_enabled || m_disabling || m_loading || m_publishing || m_inferencing )
+    {
+        m_requestError = "model load requires completed disable and quiescent workers";
+        return -1;
+    }
+    m_requestError.clear();
+    m_requestedModel = m_models[selected];
+    m_loading = m_loadPending = true;
+    m_cancelLoad              = false;
+    m_transitionStart         = std::chrono::steady_clock::now();
     return 0;
 }
 
@@ -885,18 +1474,18 @@ INDI_SETCALLBACK_DEFN( nnReconstructor, m_indiP_fpsSource )( const pcf::IndiProp
     if( fps != m_fps )
     {
         m_fps = fps;
-        updateIfChanged( m_indiP_fps, "current", m_fps );
+        updateIfChanged( m_indiP_fps, "current", m_fps.load() );
     }
 
     return 0;
 }
 
-int nnReconstructor::checkRecordTimes()
+inline int nnReconstructor::checkRecordTimes()
 {
     return telemeterT::checkRecordTimes( telem_fgtimings() );
 }
 
-int nnReconstructor::recordTelem( const telem_fgtimings * )
+inline int nnReconstructor::recordTelem( const telem_fgtimings * )
 {
     return recordFGTimings( true );
 }

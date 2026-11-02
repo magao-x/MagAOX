@@ -1,0 +1,3 @@
+# Install only these optional converter packages; keep the existing TF/CUDA/TRT stack.
+tf2onnx==1.17.0
+onnx==1.17.0
