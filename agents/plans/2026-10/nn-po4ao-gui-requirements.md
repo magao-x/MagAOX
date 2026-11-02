@@ -18,7 +18,7 @@ An existing training notebook and its environment may be used without migrating 
 
 When a live trainer advertises this runtime in `devices.po4ao`, retain the managed
 button behaviors below. Otherwise Enable/Disable writes `control_enable.toggle`,
-Reset requests control Off if needed then `reset_model.toggle=On`, and Recollect
+Reset always requests control Off then `reset_model.toggle=On`, and Recollect
 writes `recollect_warmup.toggle=On`. Native Enable selects the resident policy; the
 notebook owns engine export/reload as before. Learning controls are disabled and
 labelled trainer unavailable. Native controls read `fsm`, `model_status`,
@@ -32,6 +32,17 @@ companion and is unavailable without it; splitting NN is outside this correction
 Trainer arrival/loss changes availability only: never replay or reroute a sent
 request. Keep unresolved local requests latched to their original device until
 acknowledgement or device invalidation. The same window supports both workflows.
+Independent-review clarification: observed Busy operations from other clients and
+active managed operation phases must also survive a route change until completion
+or invalidation. No cross-route supersession is allowed; normal managed Reset/Disable
+supersession remains available within its route. Native Reset supersedes pending
+selection, with completion tracked by the runtime request/applied generations so
+an idempotent Off does not strand acknowledgement tracking.
+Downstream mfilt routing remains manual: the operator records the previous route,
+runs `howfs_mfilt_switch po4ao_output && cacao-calib-apply default`, and verifies
+actual downstream consumption afterward. The GUI/supervisor must not run this
+setup automatically. Restoration uses the recorded route and calibration, never an
+assumed target. NN/CACAO writer switching remains unchanged.
 These decisions supersede any earlier mandatory-companion or notebook-migration wording.
 
 ## 1. Scope and execution boundary

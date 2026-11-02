@@ -51,6 +51,14 @@ class learningCtrl : public xWidget
     std::map<std::string, bool>
         m_pending; ///< Requests keyed by device.property; value records an observed Busy acknowledgement.
 
+    bool m_managed{ false }; ///< Last selected command route, independent of transport connection.
+
+    std::set<std::string> m_routePending; ///< Outstanding old-route commands, including other clients' Busy readbacks.
+
+    bool m_nativeResetPending{ false }; ///< Native Reset completion is tracked by generations, not switch edges.
+
+    qulonglong m_nativeResetAfter{ 0 }; ///< Last reset request generation before this window requested Reset.
+
     std::string m_message; ///< Local request/acknowledgement error, separate from backend status.
 
     QTimer m_statusTimer; ///< Re-evaluates expiry even when no INDI message arrives.
@@ -122,6 +130,9 @@ class learningCtrl : public xWidget
     /// Determine whether the optional trainer is live and controls this C++ device.
     bool trainerReady() const;
 
+    /// Preserve unresolved operations when optional-trainer availability changes the command route.
+    void updateRoute( bool managed /**< [in] Whether the optional trainer currently owns GUI commands. */ );
+
     /// Render native inference controls without depending on trainer state.
     void updateRuntimeGUI();
 
@@ -140,10 +151,12 @@ class learningCtrl : public xWidget
     std::string status( const std::string &element /**< [in] Status element name. */ ) const;
 
     /// Check that a defined writable command has the expected type and elements.
-    bool commandAvailable( const std::string                  &name,     /**< [in] Command property. */
-                           pcf::IndiProperty::Type             type,     /**< [in] Expected INDI type. */
-                           std::initializer_list<const char *> elements, /**< [in] Required elements. */
-                           const std::string &device = "" /**< [in] Source device; empty selects trainer. */ ) const;
+    bool
+    commandAvailable( const std::string                  &name,     /**< [in] Command property. */
+                      pcf::IndiProperty::Type             type,     /**< [in] Expected INDI type. */
+                      std::initializer_list<const char *> elements, /**< [in] Required elements. */
+                      const std::string &device = "",               /**< [in] Source device; empty selects trainer. */
+                      bool supersede = false /**< [in] Permit native Reset to supersede control selection. */ ) const;
 
     /// Determine whether this domain has a pending or observed Busy command.
     bool busy( std::initializer_list<const char *> names, /**< [in] Commands sharing an operation domain. */
@@ -202,8 +215,13 @@ inline void learningCtrl::subscribe()
                               "progress",
                               "training_config" } )
         m_parent->addSubscriberProperty( this, m_device, name );
-    for( const auto *name :
-         { "fsm", "control_enable", "reset_model", "recollect_warmup", "model_status", "collection_status" } )
+    for( const auto *name : { "fsm",
+                              "control_enable",
+                              "reset_model",
+                              "recollect_warmup",
+                              "reload_engine",
+                              "model_status",
+                              "collection_status" } )
         m_parent->addSubscriberProperty( this, m_runtimeDevice, name );
     if( !m_nnDevice.empty() )
         for( const auto *name : { "fsm", "model", "model_status" } )
@@ -227,6 +245,9 @@ inline void learningCtrl::onDisconnect()
     m_properties.clear();
     m_defined.clear();
     m_pending.clear();
+    m_routePending.clear();
+    m_managed            = false;
+    m_nativeResetPending = false;
     m_message.clear();
     m_ackTimer.stop();
     syncModels();
@@ -267,13 +288,14 @@ inline std::string learningCtrl::status( const std::string &element ) const
 inline bool learningCtrl::commandAvailable( const std::string                  &name,
                                             pcf::IndiProperty::Type             type,
                                             std::initializer_list<const char *> elements,
-                                            const std::string                  &device ) const
+                                            const std::string                  &device,
+                                            bool                                supersede ) const
 {
     const auto key   = ( device.empty() ? m_device : device ) + "." + name;
     const auto found = m_properties.find( key );
     if( !m_connected || !m_defined.count( key ) || found == m_properties.end() || found->second.getType() != type ||
         found->second.getPerm() == pcf::IndiProperty::ReadOnly || !found->second.hasValidPerm() ||
-        found->second.getState() == pcf::IndiProperty::Busy || m_pending.count( key ) )
+        ( !supersede && ( found->second.getState() == pcf::IndiProperty::Busy || m_pending.count( key ) ) ) )
         return false;
     for( const auto *element : elements )
         if( !found->second.find( element ) )
@@ -338,25 +360,91 @@ inline void learningCtrl::syncModels()
 
 inline void learningCtrl::acknowledge( const pcf::IndiProperty &property )
 {
-    auto pending = m_pending.find( property.createUniqueKey() );
-    if( pending == m_pending.end() )
-        return;
-    if( property.getState() == pcf::IndiProperty::Busy )
+    const auto resetKey = m_runtimeDevice + ".reset_model";
+    if( m_nativeResetPending && property.getDevice() == m_runtimeDevice )
     {
-        pending->second = true;
-        m_message.clear();
+        bool       requestedValid = false, appliedValid = false;
+        const auto requested = QString::fromStdString( value( m_runtimeDevice, "model_status", "reset_request" ) )
+                                   .toULongLong( &requestedValid );
+        const auto applied   = QString::fromStdString( value( m_runtimeDevice, "model_status", "reset_applied" ) )
+                                   .toULongLong( &appliedValid );
+        if( requestedValid && requested > m_nativeResetAfter )
+        {
+            m_pending[resetKey] = true; // Generation advancement acknowledges even a coalesced Busy transition.
+            m_message.clear();
+            const auto control   = value( m_runtimeDevice, "model_status", "control_request" );
+            const auto selection = m_properties.find( m_runtimeDevice + ".control_enable" );
+            if( appliedValid && applied == requested && !control.empty() &&
+                control == value( m_runtimeDevice, "model_status", "control_applied" ) &&
+                value( m_runtimeDevice, "model_status", "control_target" ) == "off" &&
+                selection != m_properties.end() && selection->second.find( "toggle" ) &&
+                selection->second["toggle"].getSwitchState() == pcf::IndiElement::Off &&
+                selection->second.getState() == pcf::IndiProperty::Ok )
+            {
+                m_pending.erase( resetKey );
+                m_nativeResetPending = false;
+            }
+        }
     }
-    else if( property.getState() == pcf::IndiProperty::Alert ||
-             ( pending->second && property.getState() == pcf::IndiProperty::Ok ) )
+    auto pending = m_pending.find( property.createUniqueKey() );
+    if( pending != m_pending.end() )
     {
-        m_message = property.getState() == pcf::IndiProperty::Alert ? "Request failed; check backend status" : "";
-        m_pending.erase( pending );
+        if( property.getState() == pcf::IndiProperty::Busy )
+        {
+            pending->second = true;
+            m_message.clear();
+        }
+        else if( property.getState() == pcf::IndiProperty::Alert ||
+                 ( pending->second && property.getState() == pcf::IndiProperty::Ok &&
+                   !( m_nativeResetPending && pending->first == resetKey ) ) )
+        {
+            m_message = property.getState() == pcf::IndiProperty::Alert ? "Request failed; check backend status" : "";
+            if( pending->first == resetKey )
+                m_nativeResetPending = false;
+            m_pending.erase( pending );
+        }
     }
     bool waiting = false;
     for( const auto &request : m_pending )
         waiting |= !request.second;
     if( !waiting )
         m_ackTimer.stop();
+}
+
+inline void learningCtrl::updateRoute( bool managed )
+{
+    if( managed != m_managed )
+    {
+        const auto &previous = m_managed ? m_device : m_runtimeDevice;
+        for( const auto *name : { "po4ao_enable",
+                                  "reset",
+                                  "recollect",
+                                  "learning",
+                                  "control_enable",
+                                  "reset_model",
+                                  "recollect_warmup",
+                                  "reload_engine" } )
+            if( busy( { name }, previous ) )
+                m_routePending.insert( previous + "." + name );
+        const auto phase = status( "training_phase" );
+        if( m_managed && !phase.empty() && phase != "idle" && phase != "error" )
+            m_routePending.insert( m_device + ".status" ); // Automatic publication has no command vector.
+        m_managed = managed;
+    }
+    const auto prefix = ( managed ? m_device : m_runtimeDevice ) + ".";
+    for( auto pending = m_routePending.begin(); pending != m_routePending.end(); )
+    {
+        const auto property = m_properties.find( *pending );
+        const auto phase    = status( "training_phase" );
+        const bool phasePending =
+            *pending == m_device + ".status" && !phase.empty() && phase != "idle" && phase != "error";
+        if( pending->compare( 0, prefix.size(), prefix ) == 0 ||
+            ( !m_pending.count( *pending ) && !phasePending &&
+              ( property == m_properties.end() || property->second.getState() != pcf::IndiProperty::Busy ) ) )
+            pending = m_routePending.erase( pending );
+        else
+            ++pending;
+    }
 }
 
 inline bool learningCtrl::trainerReady() const
@@ -476,7 +564,11 @@ inline void learningCtrl::handleDelProperty( const pcf::IndiProperty &property )
             m_runtimeAge.invalidate();
             m_runtimeSequence.clear();
             m_runtimeInstance.clear();
+            m_nativeResetPending = false;
+            m_pending.erase( m_runtimeDevice + ".reset_model" );
         }
+        if( property.getName() == "reset_model" )
+            m_nativeResetPending = false;
     }
     const auto prefix = property.getDevice() + ".";
     for( auto pending = m_pending.begin(); pending != m_pending.end(); )
@@ -495,6 +587,7 @@ inline void learningCtrl::updateGUI()
 {
     const bool fresh = m_heartbeatAge.isValid() && m_heartbeatAge.elapsed() < 5000;
     const bool ready = trainerReady();
+    updateRoute( ready );
     m_ui.labelConnection->setText( !m_connected ? "Disconnected"
                                    : ready      ? "Ready"
                                    : !fresh     ? "Stale / waiting for heartbeat"
@@ -538,9 +631,7 @@ inline void learningCtrl::updateGUI()
         return;
     }
 
-    const bool runtimePending  = m_pending.count( m_runtimeDevice + ".control_enable" ) ||
-                                 m_pending.count( m_runtimeDevice + ".reset_model" ) ||
-                                 m_pending.count( m_runtimeDevice + ".recollect_warmup" );
+    const bool runtimePending  = !m_routePending.empty();
     const auto controller      = ready ? status( "controller" ) : std::string( "unknown" );
     const bool enabled         = controller == "po4ao" || controller == "fallback";
     const bool knownController = enabled || controller == "integrator";
@@ -598,10 +689,8 @@ inline void learningCtrl::updateRuntimeGUI()
 {
     const auto fsm            = value( m_runtimeDevice, "fsm", "state" );
     const bool fresh          = m_runtimeAge.isValid() && m_runtimeAge.elapsed() < 5000;
-    const bool trainerPending = m_pending.count( m_device + ".po4ao_enable" ) ||
-                                m_pending.count( m_device + ".reset" ) || m_pending.count( m_device + ".recollect" ) ||
-                                m_pending.count( m_device + ".learning" );
-    const bool ready = m_connected && fresh && !trainerPending && !m_runtimeInstance.empty() &&
+    const bool trainerPending = !m_routePending.empty();
+    const bool ready = m_connected && fresh && !m_runtimeInstance.empty() &&
                        m_defined.count( m_runtimeDevice + ".model_status" ) && ( fsm == "READY" || fsm == "OPERATING" );
     m_ui.labelConnection->setText( !m_connected ? "Disconnected"
                                    : ready      ? "PO4AO ready / trainer unavailable"
@@ -614,15 +703,17 @@ inline void learningCtrl::updateRuntimeGUI()
     const bool enabled   = known && selection->second["toggle"].getSwitchState() == pcf::IndiElement::On;
     m_ui.buttonPO4AO->setText( enabled ? "Disable PO4AO" : "Enable PO4AO" );
     m_ui.buttonPO4AO->setEnabled(
-        ready && known && !busy( { "reset_model" }, m_runtimeDevice ) &&
+        ready && !trainerPending && known && !busy( { "reset_model" }, m_runtimeDevice ) &&
         commandAvailable( "control_enable", pcf::IndiProperty::Switch, { "toggle" }, m_runtimeDevice ) );
+    bool resetKnown = false;
+    QString::fromStdString( value( m_runtimeDevice, "model_status", "reset_request" ) ).toULongLong( &resetKnown );
+    const auto target = value( m_runtimeDevice, "model_status", "control_target" );
     m_ui.buttonReset->setEnabled(
-        ready && known && !busy( { "control_enable" }, m_runtimeDevice ) &&
-        ( !enabled ||
-          commandAvailable( "control_enable", pcf::IndiProperty::Switch, { "toggle" }, m_runtimeDevice ) ) &&
+        ready && !trainerPending && resetKnown && ( target == "on" || target == "off" ) &&
+        commandAvailable( "control_enable", pcf::IndiProperty::Switch, { "toggle" }, m_runtimeDevice, true ) &&
         commandAvailable( "reset_model", pcf::IndiProperty::Switch, { "toggle" }, m_runtimeDevice ) );
     m_ui.buttonWarmup->setEnabled(
-        ready && !busy( { "control_enable", "reset_model" }, m_runtimeDevice ) &&
+        ready && !trainerPending && !busy( { "control_enable", "reset_model" }, m_runtimeDevice ) &&
         commandAvailable( "recollect_warmup", pcf::IndiProperty::Switch, { "toggle" }, m_runtimeDevice ) );
     m_ui.buttonLearning->setEnabled( false );
     m_ui.buttonLearning->setText( "Start learning" );
@@ -645,8 +736,9 @@ inline void learningCtrl::updateRuntimeGUI()
     if( !error.empty() )
         message = error;
     else if( message.empty() )
-        message =
-            ready ? "Reload: " + value( m_runtimeDevice, "model_status", "reload" ) : "Waiting for runtime readback";
+        message = m_nativeResetPending ? "Reset pending: waiting for runtime completion"
+                  : ready              ? "Reload: " + value( m_runtimeDevice, "model_status", "reload" )
+                                       : "Waiting for runtime readback";
     m_ui.labelStatus->setText( QString::fromStdString( message ) );
     m_ui.labelStatus->setToolTip( m_ui.labelStatus->text() );
 }
@@ -699,7 +791,7 @@ inline void learningCtrl::on_buttonPO4AO_clicked()
     updateGUI();
     if( !m_ui.buttonPO4AO->isEnabled() )
         return;
-    if( trainerReady() )
+    if( m_managed )
         submitSwitch( "po4ao_enable", "toggle", status( "controller" ) == "integrator" );
     else
         submitSwitch( "control_enable",
@@ -714,12 +806,18 @@ inline void learningCtrl::on_buttonReset_clicked()
     updateGUI();
     if( !m_ui.buttonReset->isEnabled() )
         return;
-    if( trainerReady() )
+    if( m_managed )
         submitSwitch( "reset", "request", true );
     else
     {
-        if( m_properties.at( m_runtimeDevice + ".control_enable" )["toggle"].getSwitchState() == pcf::IndiElement::On )
-            submitSwitch( "control_enable", "toggle", false, m_runtimeDevice );
+        m_nativeResetAfter =
+            QString::fromStdString( value( m_runtimeDevice, "model_status", "reset_request" ) ).toULongLong();
+        m_nativeResetPending = true;
+        m_ackTimer.start();
+        m_pending.erase( m_runtimeDevice + ".control_enable" ); // Reset owns completion of the superseded selection.
+        pcf::IndiProperty control( pcf::IndiProperty::Switch, m_runtimeDevice, "control_enable" );
+        control.add( pcf::IndiElement( "toggle", pcf::IndiElement::Off ) );
+        sendNewProperty( control ); // Off can be idempotent; its own Busy edge is not required.
         submitSwitch( "reset_model", "toggle", true, m_runtimeDevice );
     }
 }
@@ -729,7 +827,7 @@ inline void learningCtrl::on_buttonWarmup_clicked()
     updateGUI();
     if( !m_ui.buttonWarmup->isEnabled() )
         return;
-    if( trainerReady() )
+    if( m_managed )
         submitSwitch( "recollect", "request", true );
     else
         submitSwitch( "recollect_warmup", "toggle", true, m_runtimeDevice );

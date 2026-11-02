@@ -59,6 +59,10 @@ struct Fixture
     void
     status( std::initializer_list<std::pair<std::string, std::string>> elements /**< [in] Changed status fields. */ );
 
+    /// Send a coherent sparse native runtime status update.
+    void runtimeStatus(
+        std::initializer_list<std::pair<std::string, std::string>> elements /**< [in] Changed native fields. */ );
+
     /// Publish a command's observed property state without changing its definition.
     void acknowledge( const std::string                   &name, /**< [in] Command property. */
                       pcf::IndiProperty::PropertyStateType state /**< [in] Acknowledged state. */ );
@@ -107,6 +111,11 @@ void Fixture::runtime( bool enabled, const std::string &instance )
                   "model_status",
                   { { "instance", instance },
                     { "sequence", "0" },
+                    { "control_target", enabled ? "on" : "off" },
+                    { "control_request", "1" },
+                    { "control_applied", "1" },
+                    { "reset_request", "1" },
+                    { "reset_applied", "1" },
                     { "active_id", "1234567812345678" },
                     { "effective_id", enabled ? "1234567812345678" : "0000000000000000" },
                     { "effective_controller", enabled ? "po4ao" : "integrator" },
@@ -192,6 +201,12 @@ void Fixture::define( const pcf::IndiProperty &property )
 void Fixture::status( std::initializer_list<std::pair<std::string, std::string>> elements )
 {
     m_publisher.handleSetProperty( text( "trainer", "status", elements ) );
+    drain();
+}
+
+void Fixture::runtimeStatus( std::initializer_list<std::pair<std::string, std::string>> elements )
+{
+    m_publisher.handleSetProperty( text( "po4ao", "model_status", elements ) );
     drain();
 }
 
@@ -579,7 +594,7 @@ TEST_CASE( "Native Reset leaves notebook ownership with the operator", "[learnin
         Fixture f( false );
         f.runtime( enabled );
         f.m_widget.on_buttonReset_clicked();
-        REQUIRE( f.m_publisher.m_commands.size() == ( enabled ? 2 : 1 ) );
+        REQUIRE( f.m_publisher.m_commands.size() == 2 );
         REQUIRE( f.m_publisher.m_commands.back().getName() == "reset_model" );
         REQUIRE( f.m_publisher.m_commands.back()["toggle"].getSwitchState() == pcf::IndiElement::On );
         if( enabled )
@@ -592,6 +607,12 @@ TEST_CASE( "Native Reset leaves notebook ownership with the operator", "[learnin
         REQUIRE_FALSE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
         f.define( runtimeSwitch( "reset_model", false, pcf::IndiProperty::Busy ) );
         f.define( runtimeSwitch( "reset_model", false ) );
+        REQUIRE_FALSE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
+        f.runtimeStatus( { { "reset_request", "2" },
+                           { "reset_applied", "2" },
+                           { "control_target", "off" },
+                           { "control_request", enabled ? "2" : "1" },
+                           { "control_applied", enabled ? "2" : "1" } } );
         REQUIRE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
         for( const auto &command : f.m_publisher.m_commands )
             REQUIRE( command.getDevice() == "po4ao" );
@@ -699,6 +720,112 @@ TEST_CASE( "Trainer expiry preserves independent runtime control", "[learningCtr
 #ifdef LEARNINGCTRL_TEST_DOXYGEN_REF
     xqt::learningCtrl::observeHeartbeat;
     xqt::learningCtrl::updateRuntimeGUI;
+    xqt::learningCtrl::acknowledge;
+#endif
+    // clang-format on
+}
+
+/** \brief Another client's managed operation remains unresolved after trainer heartbeat expiry. */
+TEST_CASE( "Trainer expiry cannot bypass an observed Busy operation", "[learningCtrl][review]" )
+{
+    Fixture f;
+    f.runtime();
+    SECTION( "A command from another client" )
+    {
+        f.acknowledge( "recollect", pcf::IndiProperty::Busy );
+    }
+    SECTION( "Automatic publication has no command vector" )
+    {
+        f.status( { { "training_phase", "publishing" } } );
+    }
+    QThread::msleep( 5100 );
+    f.runtimeStatus( { { "sequence", "2" } } );
+    REQUIRE_FALSE( f.control<QPushButton>( "buttonWarmup" )->isEnabled() );
+    REQUIRE_FALSE( f.control<QPushButton>( "buttonReset" )->isEnabled() );
+    f.m_widget.on_buttonWarmup_clicked();
+    REQUIRE( f.m_publisher.m_commands.empty() );
+    f.acknowledge( "recollect", pcf::IndiProperty::Ok );
+    f.status( { { "training_phase", "idle" } } );
+    REQUIRE( f.control<QPushButton>( "buttonWarmup" )->isEnabled() );
+    f.m_widget.on_buttonWarmup_clicked();
+    REQUIRE( f.m_publisher.m_commands.back().getDevice() == "po4ao" );
+    // clang-format off
+#ifdef LEARNINGCTRL_TEST_DOXYGEN_REF
+    xqt::learningCtrl::updateGUI;
+    xqt::learningCtrl::updateRoute;
+    xqt::learningCtrl::updateRuntimeGUI;
+#endif
+    // clang-format on
+}
+
+/** \brief Trainer arrival cannot bypass another native client; normal managed supersession remains available. */
+TEST_CASE( "Trainer arrival preserves outstanding native operations", "[learningCtrl][review]" )
+{
+    Fixture f( false );
+    f.runtime();
+    f.define( runtimeSwitch( "recollect_warmup", false, pcf::IndiProperty::Busy ) );
+    f.ready();
+    REQUIRE_FALSE( f.control<QPushButton>( "buttonLearning" )->isEnabled() );
+    REQUIRE_FALSE( f.control<QPushButton>( "buttonReset" )->isEnabled() );
+    f.m_widget.on_buttonReset_clicked();
+    REQUIRE( f.m_publisher.m_commands.empty() );
+    SECTION( "Completion releases the route" )
+    {
+        f.define( runtimeSwitch( "recollect_warmup", false ) );
+    }
+    SECTION( "Device invalidation releases the route" )
+    {
+        f.erase( "po4ao", "" );
+    }
+    REQUIRE( f.control<QPushButton>( "buttonLearning" )->isEnabled() );
+    // Native work issued during the current managed route belongs to its existing coordination.
+    f.define( runtimeSwitch( "control_enable", true, pcf::IndiProperty::Busy ) );
+    f.status( { { "controller", "po4ao" }, { "training_phase", "publishing" } } );
+    REQUIRE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
+    REQUIRE( f.control<QPushButton>( "buttonReset" )->isEnabled() );
+    // clang-format off
+#ifdef LEARNINGCTRL_TEST_DOXYGEN_REF
+    xqt::learningCtrl::updateGUI;
+    xqt::learningCtrl::updateRoute;
+    xqt::learningCtrl::handleDelProperty;
+#endif
+    // clang-format on
+}
+
+/** \brief Reset cancels pending Enable without frames; generation readback settles superseded/no-op selections. */
+TEST_CASE( "Native Reset supersedes Enable awaiting input frames", "[learningCtrl][review]" )
+{
+    for( const bool observed : { false, true } )
+    {
+        Fixture f( false );
+        f.runtime();
+        f.m_widget.on_buttonPO4AO_clicked();
+        if( observed )
+        {
+            f.runtimeStatus( { { "control_target", "on" }, { "control_request", "2" } } );
+            f.define( runtimeSwitch( "control_enable", false, pcf::IndiProperty::Busy ) );
+        }
+        REQUIRE( f.control<QPushButton>( "buttonReset" )->isEnabled() );
+        f.m_widget.on_buttonReset_clicked();
+        REQUIRE( f.m_publisher.m_commands.size() == 3 );
+        REQUIRE( f.m_publisher.m_commands[1].getName() == "control_enable" );
+        REQUIRE( f.m_publisher.m_commands[1]["toggle"].getSwitchState() == pcf::IndiElement::Off );
+        REQUIRE( f.m_publisher.m_commands[2].getName() == "reset_model" );
+        f.runtimeStatus( { { "control_target", "off" }, { "control_request", "3" }, { "reset_request", "2" } } );
+        // Cached switch Ok alone cannot finish Reset; a Busy transition may have been coalesced.
+        f.define( runtimeSwitch( "reset_model", false ) );
+        REQUIRE_FALSE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
+        f.runtimeStatus( { { "reset_applied", "2" } } );
+        REQUIRE_FALSE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
+        f.define( runtimeSwitch( "control_enable", false ) );
+        f.runtimeStatus( { { "control_applied", "3" } } );
+        REQUIRE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
+        REQUIRE( f.control<QPushButton>( "buttonReset" )->isEnabled() );
+        REQUIRE( f.m_publisher.m_commands.size() == 3 );
+    }
+    // clang-format off
+#ifdef LEARNINGCTRL_TEST_DOXYGEN_REF
+    xqt::learningCtrl::on_buttonReset_clicked;
     xqt::learningCtrl::acknowledge;
 #endif
     // clang-format on

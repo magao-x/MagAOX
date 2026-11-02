@@ -326,3 +326,46 @@ visibility was needed for the existing owned-export-child test; no instrument
 processes or sockets were used. The wheel rebuilt and all 18 packaged Python
 modules match this checkout byte-for-byte. Existing plot/font warnings remain.
 Black and `git diff --check` pass. This does not validate target GPU export/reload.
+
+## Follow-up review: GUI route changes and native Reset, 2026-11-02
+
+The same review's two GUI findings are accepted. Route changes now retain observed
+Busy operations, including other clients' requests and managed publication phases,
+in addition to this window's local acknowledgement tracking. Trainer expiry cannot
+bypass managed work through native controls, and trainer arrival cannot bypass
+native work through managed controls. Completion or property/device invalidation
+releases the old route. Returning to its original route restores normal same-route
+coordination. No cross-route superseding action is introduced; existing managed
+Reset/Disable and native Disable-during-recollection rules remain available.
+
+Native Reset can supersede Enable while input frames are absent. It always sends
+control Off before reset_model, even when the applied toggle remains Off and its
+requested target is On. Reset owns the superseded selection's completion: advancing
+reset_request acknowledges admission; matching reset/control applied generations,
+target Off and actual control Off/Ok confirm completion. A coalesced Busy update or
+an idempotent Off cannot strand a separate local request latch. Runtime invalidation
+discards the old generation ticket without replaying a command. Button handlers
+use the same route snapshot as their availability check.
+
+The new GUI tests reproduced all three failing cases on the reviewed header: both
+route-transition directions and Reset during pending Enable. The corrected suite
+passes **313 assertions in 22 cases**, including other-client Busy and internal
+publication state, completion/invalidation, stale/coalesced acknowledgements and
+eventual Reset completion. Existing publisher tests pass **95 assertions in 6
+cases**. All use the production queued publisher with a socket-free transport.
+The renamed po4aoGUI launcher builds with local Qt 5.15.15; the existing local qmake
+override omits unavailable mxlib pkg-config linkage without changing production
+build rules. The executable was not launched against an endpoint.
+
+The unchanged PO4AO CPU production-method/helper suite also passes **259 assertions
+in 27 cases**. Full target CUDA/TensorRT compilation and real INDI/FPS behavior are
+not established by these checks. clang-format and `git diff --check` pass; existing
+Qt SDK/INDI/publisher warnings remain. NN, dlDataCollection and AGENTS.md still match
+baseline `88271a3e6ec3c3add36a4983d806f05501108f20`; notebook code/environment/plots
+and NN/CACAO writer switching were not changed. No remote access or deployment occurred.
+
+The requirements now record these acknowledgement rules and the user's manual-only
+downstream routing decision. Deployment documentation will include initial warmup
+before managed learning and verification/restoration of the recorded downstream
+route and calibration. One GUI, optional trainer and operator-managed loop state
+remain the agreed design.
