@@ -35,13 +35,15 @@ make -C apps/dmSyncopation &&
 make -C apps/dmSyncopation install
 ```
 
-The installed binary must expose `zero_test.labelVersion=4` and
+The installed binary must expose `zero_test.labelVersion=5` and
 `zero_test.idealPublisher=1`; an older coordinated-trial binary does not have
 the current progress/reporting interface. Only dmSyncopation needs rebuilding.
 The 8 kHz option also requires the updated app's four-step support and capture
 script; the installed logdump and DM controller do not need rebuilding.
-Use the capture helper from the same updated checkout. After this reporting
-update, repeat the ten-second 8 kHz capture below before the longer run.
+Use the capture helper from the same updated checkout. After the duration and
+reader-diagnostic update, repeat the ten-second 8 kHz capture below before the
+longer run. An existing configuration with `zeroTest.durationSec=120` needs no
+change for that shorter trial.
 The startup log's `MagAOX GIT` line identifies the launched binary independently
 of the capture directory's checkout hash. Merge
 [`dmtweeter_synco_zero_test.conf`](../dmtweeter_synco_zero_test.conf)
@@ -68,9 +70,20 @@ maxSubframes=2
 The three simulation flags must all be false. Turning the old live scheduler
 On alone is not this trial. This explicit startup mode remains disabled until
 `enable.toggle=On`; Off cancels it. The app independently bounds arm/warmup at
-30 seconds and active duration at at most 120 seconds, without the capture script.
-The cadence estimator can warm while disabled and requires the established
-ten-second baseline before real writes begin.
+30 seconds and active duration at the selected `settings.durationSec`, without
+the capture script. The cadence estimator can warm while disabled and requires
+the established ten-second baseline before real writes begin.
+
+The startup setting `zeroTest.durationSec` establishes the immutable duration
+ceiling and initial selected duration, positive and no greater than 120 seconds.
+It appears as `zero_test.durationLimitSec`. While Off, select a shorter duration
+with `settings.durationSec`; `zero_test.durationSec` reports that selected app
+time limit. Values above the startup ceiling, nonpositive/nonfinite values,
+changes while enabled and duration writes outside zero-test mode are rejected.
+The selection persists between trials until changed or the app restarts; the
+capture helper sets and verifies it for every run. A shorter selection does not
+reduce the startup ceiling, so a subsequent 120-second run remains available
+when the configuration ceiling is 120.
 
 Restart **dmSyncopation only** through the normal operator procedure. Keep the
 normal main writer, camera, reconstruction, DM controller and dmcomb running,
@@ -101,7 +114,7 @@ After restarting, check the new mode's readbacks while enable remains Off:
 timeout -k 2s 8s getINDI dmtweeter-synco.zero_test
 ```
 
-Expect `labelVersion=4`, `idealPublisher=1`, `enabled=1` and a valid, fresh
+Expect `labelVersion=5`, `idealPublisher=1`, `enabled=1` and a valid, fresh
 progress snapshot. `eventStride=4` is the default successful-event sampling
 described below; it does not reduce the command rate or timing populations.
 No `scheduler.maxCadenceHz=8000` setting is needed for the 8 kHz trial. This
@@ -143,30 +156,48 @@ This selects four total steps while Off; it does not add 8 kHz on top of the
 checks and three pipeline credits. No CPU or controller setting changes are
 part of this extension.
 
-The second argument is active seconds, an integer from 1 through 120. The script
-starts synco/controller/camera telemetry collectors first, saves bounded before
-snapshots, requires explicit test mode and Off, checks camera 2 kHz/synchronization
-and RTC latency, changes `settings.steps` to two/three/four while disabled and
-verifies the readback, then requests On. It allows up to 30 seconds to qualify
-the grid, waits for the trial or requested shorter duration, requests Off, saves
-after snapshots, and stops only its own collectors. No sudo is required.
+The second argument is active seconds, an integer from 1 through 120 and no
+greater than `zero_test.durationLimitSec`. The script starts
+synco/controller/camera telemetry collectors first, saves bounded before
+snapshots, requires explicit test mode and Off, and checks camera
+2 kHz/synchronization and RTC latency. It changes `settings.steps` to
+two/three/four and `settings.durationSec` to the requested duration while
+disabled, then verifies the step and selected-duration readbacks before On.
+The app enforces that duration after the grid qualifies; a shell timer no longer
+determines a successful stop. The helper waits for the app's finished state,
+sends Off in cleanup, saves after snapshots and stops only its own collectors.
+No sudo is required.
 
-Before requesting On, the helper requires reporting version at least 4,
+Before requesting On, the helper requires reporting version at least 5,
 `snapshotValid=1`, positive `snapshotSequence`, and reported `snapshotAgeSec`
-from zero through two seconds. During the trial it repeats the freshness
-checks and uses its own local five-second watchdog for sequence progress.
-Sequence regression, a stalled sequence, invalid/stale progress or new event
-queue loss stops the owned trial and marks the capture incomplete. The local
-watchdog matters because a cached INDI response can repeat an old age value.
+from zero through two seconds. Polls request an explicit list of fully qualified
+`zero_test` elements. They return when all requested fields arrive, avoiding the
+whole-property wildcard query's normal two-second wait. During the trial the
+helper repeats freshness checks and uses its own local five-second watchdog
+for sequence progress. Sequence regression, a stalled sequence, invalid/stale
+progress or new event queue loss stops the owned trial and marks the capture
+incomplete. The local watchdog matters because a cached INDI response can
+repeat an old age value.
 
-A prior finished readback is ignored until new trial progress appears. Completion
-requires an observed active phase and the requested active duration; a warmup
-timeout or premature finish is recorded as incomplete with a nonzero exit status.
+The configured `zero_test.trial` identifies the preceding trial. Old active or
+finished readbacks from that identity do not count as new progress. The helper
+requires exactly the next trial identity and the requested selected duration.
+Success requires that new trial to finish with positive main observations,
+elapsed time at least the requested duration and requested/active/warming all
+Off. A brief trial can finish between polls; observing an intermediate active
+readback is not required. Unexpected trial identities, a warmup timeout or a
+premature/inconsistent finish produce a nonzero exit status.
+
+The helper allows five seconds of reporting grace after the selected active
+duration. Grace permits delayed observation of an app stop; it does not extend
+the app's active time limit. An active readback reaching the selected duration
+is not itself success. Failure to report completion within the bound and grace
+causes an Off request and an incomplete capture.
 
 A pre-existing On trial is refused and left alone. If this script attempted On,
 interruption or a control/read failure causes a bounded Off request in cleanup.
-The app's configured duration is the independent upper bound if the capture shell
-exits unexpectedly. The script does not change main-loop, camera, dmcomb,
+The app's selected duration is the independent active bound if the capture
+shell exits unexpectedly. The script does not change main-loop, camera, dmcomb,
 controller, CPU or persistent configuration settings.
 
 Final quality checks also require no increase in event-queue drops or logged-event
@@ -182,12 +213,16 @@ Equivalent manual controls, after setup and with telemetry already recording:
 
 ```bash
 timeout -k 2s 5s setINDI -n dmtweeter-synco.settings.steps=2
+timeout -k 2s 5s setINDI -n dmtweeter-synco.settings.durationSec=120
+timeout -k 2s 8s getINDI dmtweeter-synco.settings.durationSec dmtweeter-synco.zero_test.durationSec
 timeout -k 2s 5s setINDI -s dmtweeter-synco.enable.toggle=On
-timeout -k 2s 8s getINDI dmtweeter-synco.zero_test
+timeout -k 2s 8s getINDI dmtweeter-synco.zero_test.trial dmtweeter-synco.zero_test.active \
+    dmtweeter-synco.zero_test.finished dmtweeter-synco.zero_test.elapsedSec
 ```
 
-Use three steps for 6 kHz or four for 8 kHz, changing settings only while Off.
-Cancel with:
+Verify the selected duration readback before requesting On. Use three steps
+for 6 kHz or four for 8 kHz, and select the desired duration every time while
+Off. Cancel with:
 
 ```bash
 timeout -k 2s 5s setINDI -s dmtweeter-synco.enable.toggle=Off
@@ -234,9 +269,10 @@ At 8 kHz, nominal spacing is 125 us. The preceding 6 kHz capture measured SDK
 service through worker readiness up to 111.841 us: **13.159 us nominal
 headroom**, not a hard bound. Actual native-entry spacing and credit use depend
 on delivery/preparation and genuine-main excursions as well. Compare main
-primary/controller-to-SDK prefixes and their exact-match coverage with the
-6 kHz baseline, alongside SDK service,
-admission/retirement, overload/rejection/coalescing, failures and queue loss.
+primary/controller-to-SDK prefixes and exact-match coverage with the same
+capture's disabled baseline, alongside SDK service, admission/retirement,
+overload/rejection/coalescing, failures and queue loss. Retain upstream
+compilation or workload changes when comparing historical 6/8 kHz runs.
 This remains a finite ideal-zero empirical test, not a change to ordinary
 production scheduling or a qualification of nonzero provider commands.
 
@@ -277,7 +313,7 @@ coverage/lifecycle conditions; they are not additional skip reasons to add again
 A guard failure during acknowledgement belongs to the posted attempt's named
 reason and does not increment a pre-publication skip counter.
 
-New summaries/events carry `labelVersion=4`; summaries/INDI also identify
+New summaries/events carry `labelVersion=5`; summaries/INDI also identify
 `idealPublisher=1`. Event text includes named `action`,
 `reason` and `stage` fields alongside the retained numeric `outcome`. The stage
 distinguishes preparation, reader/combined validation, publication deadline/
@@ -314,7 +350,10 @@ main timing joins remain full-rate.
 
 | `zero_test` field | Interpretation |
 | --- | --- |
+| `trial` | Monotonic trial identity; settings changes preserve it and a new enable request starts the next trial. |
 | `requested` | Captured enable request; it is distinct from actual `warming`, `active` and `finished` state. |
+| `durationSec` | Selected app-enforced active time limit, writable through `settings.durationSec` only while Off. |
+| `durationLimitSec` | Immutable startup ceiling from `zeroTest.durationSec`; a shorter runtime selection cannot raise it. |
 | `snapshotSequence` | Monotonic snapshot publication identity within the app; it must keep advancing. |
 | `snapshotTimeNs` | Capture time in the RTC's local monotonic clock. |
 | `snapshotAgeSec` | Age computed by ordinary reporting on the RTC. |
@@ -369,6 +408,23 @@ service, separately from the main, auxiliary and SDK command timings:
 Use these fields to locate slow ordinary reporting stages and queue pressure.
 They do not measure physical DM latency or change any command-ready deadline,
 publication guard or reader-clearance rule.
+
+In zero-test mode the legacy `reader_timing` and `reader_release_timing` join
+collectors are disabled. Their quality properties expose `enabled=0`, with no
+qualified legacy timing population. Their primary/combined inputs are not
+populated in this mode, so retaining completion records would perform diagnostic
+work without producing joins.
+The independent `dmtweeter_read_done` observer remains active: its exact release
+records, epoch/loss checks and readiness queue still protect every timed write.
+Zero-test SDK/main-impact joins and their coverage counters also remain active.
+The `readersUs` profile group can therefore include monitor upkeep even though
+the unused legacy joins are disabled.
+
+The general reader collector used by other modes now keeps pending identities
+in counter order, allowing bounded oldest-record eviction without repeated
+full-map scans. It still drains captured source batches and joins available
+peers before expiring old evidence, preserving joins whose matching observation
+was already queued.
 
 A production provider would need a coherent command available by its advertised
 ready deadline, with a missing command causing a skip. This finite test supplies
