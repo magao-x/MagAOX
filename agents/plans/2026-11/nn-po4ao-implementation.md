@@ -125,3 +125,8 @@ atomic eligible-engine publication, the XDevice supervisor, actual NN/CACAO and
 modulation transactions, notebook adaptation, and deployment registration. The
 frontend and C++ runtime are committed development increments; the complete shared
 control system is not yet operational or ready for instrument installation.
+
+Final source review also found that the inherited PO4AO callbacks updated shared
+INDI properties without the app mutex used by appLogic. The four runtime request
+callbacks now use that existing mutex, matching NN callback practice. This
+serializes property/request publication without adding a lock to the frame path.

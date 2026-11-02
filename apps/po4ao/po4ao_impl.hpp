@@ -1284,6 +1284,7 @@ inline int po4ao::allocate( const dev::shmimT &dummy )
 
 INDI_NEWCALLBACK_DEFN( po4ao, m_indiP_reloadToggle )( const pcf::IndiProperty &ipRecv )
 {
+    std::lock_guard<std::mutex> indiLock( m_indiMutex );
     if( ipRecv.getName() != m_indiP_reloadToggle.getName() || !ipRecv.find( "toggle" ) )
         return log<software_error, -1>( { __FILE__, __LINE__, "invalid reload property" } );
     if( ipRecv["toggle"].getSwitchState() != pcf::IndiElement::On )
@@ -1305,6 +1306,7 @@ INDI_NEWCALLBACK_DEFN( po4ao, m_indiP_reloadToggle )( const pcf::IndiProperty &i
 
 INDI_NEWCALLBACK_DEFN( po4ao, m_indiP_resetModel )( const pcf::IndiProperty &ipRecv )
 {
+    std::lock_guard<std::mutex> indiLock( m_indiMutex );
     if( ipRecv.getName() != m_indiP_resetModel.getName() || !ipRecv.find( "toggle" ) )
         return log<software_error, -1>( { __FILE__, __LINE__, "invalid model-reset property" } );
     if( ipRecv["toggle"].getSwitchState() != pcf::IndiElement::On )
@@ -1319,6 +1321,7 @@ INDI_NEWCALLBACK_DEFN( po4ao, m_indiP_resetModel )( const pcf::IndiProperty &ipR
 
 INDI_NEWCALLBACK_DEFN( po4ao, m_indiP_controlToggle )( const pcf::IndiProperty &ipRecv )
 {
+    std::lock_guard<std::mutex> indiLock( m_indiMutex );
     if( ipRecv.getName() != m_indiP_controlToggle.getName() )
         return log<software_error, -1>( { __FILE__, __LINE__, "invalid control property" } );
     if( !ipRecv.find( "toggle" ) || ( ipRecv["toggle"].getSwitchState() != pcf::IndiElement::On &&
@@ -1342,6 +1345,7 @@ INDI_NEWCALLBACK_DEFN( po4ao, m_indiP_controlToggle )( const pcf::IndiProperty &
 
 INDI_NEWCALLBACK_DEFN( po4ao, m_indiP_recollectWarmup )( const pcf::IndiProperty &ipRecv )
 {
+    std::lock_guard<std::mutex> indiLock( m_indiMutex );
     if( ipRecv.getName() != m_indiP_recollectWarmup.getName() || !ipRecv.find( "toggle" ) )
         return log<software_error, -1>( { __FILE__, __LINE__, "invalid warm-up recollection property" } );
     if( ipRecv["toggle"].getSwitchState() != pcf::IndiElement::On )
