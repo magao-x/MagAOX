@@ -72,7 +72,7 @@ engineName=policy.trt
 class FakeRuntime:
     """Observe/wait boundary double; operation ordering stays in Supervisor."""
 
-    nn, po4ao, modulation = "nn", "po4ao", "mod"
+    po4ao = "po4ao"
 
     def __init__(self):
         """Record operations and allow the reset test to hold a recollection."""
@@ -103,10 +103,6 @@ class FakeRuntime:
             "frames": "96",
             "target_frames": "96",
         }[element]
-
-    def source(self):
-        """Return an observed NN source for expected-source tests."""
-        return "nn"
 
     def wait(self, predicate, cancel, label, timeout=None):
         """Use the production bounded/cancellable wait."""
@@ -172,10 +168,6 @@ class FakeRuntime:
         self.calls.append(("recollect",))
         self.wait(lambda: not self.hold, cancel, "collection", timeout)
 
-    def switch(self, target, cancel, **kwargs):
-        """Record independent reconstruction work."""
-        self.calls.append(("switch", target))
-
 
 def finish(supervisor, domain="training"):
     """Pump the real supervisor while its bounded operation executes."""
@@ -230,18 +222,15 @@ def test_invalid_edit_retains_last_good_configuration(config):
     supervisor.close()
 
 
-def test_reset_cancels_collection_but_reconstruction_is_independent(config):
-    """A held warmup never locks reconstruction and Reset supersedes it."""
+def test_reset_cancels_collection(config):
+    """Reset supersedes a held warmup."""
     runtime = FakeRuntime()
     runtime.hold = True
     supervisor = Supervisor(runtime, config)
     supervisor.submit("recollect", {"request": True})
-    supervisor.submit("reconstructor", {"target": "cacao", "expected": "nn"})
-    assert finish(supervisor, "reconstruction")[0][1] == "Ok"
     supervisor.submit("reset", {"request": True})
     events = finish(supervisor)
     assert any(name == "reset" and status == "Ok" for name, status, _ in events)
-    assert ("switch", "cacao") in runtime.calls
     assert runtime.calls[-2:] == [("control", False), ("reset",)]
     supervisor.close()
 
@@ -349,14 +338,15 @@ def test_real_xdevice_gui_contract_without_network(config):
     emitted = []
     app.update_property = lambda prop: emitted.append((prop.name, prop.state))
     app.setup()
-    prop = app.properties["link_modulation"]
-    message = prop.make_new_property(toggle=C.SwitchState.ON)
-    app.handle_request(prop, message)
-    assert emitted[-1] == ("link_modulation", C.PropertyState.BUSY)
-    time.sleep(0.02)
+    assert (
+        not {"nn_activate", "reconstructor", "link_modulation"} & app.properties.keys()
+    )
+    assert app.supervisor.runtime.observations.devices == ("po4ao",)
+    assert set(app.properties["devices"]) == {"po4ao"}
+    for name in ("nn_activate", "reconstructor", "link_modulation"):
+        with pytest.raises(ValueError, match="Unknown PO4AO"):
+            app.supervisor.submit(name, {})
     app.loop()
-    assert emitted[-1] == ("link_modulation", C.PropertyState.OK)
-    assert prop["toggle"] == C.SwitchState.ON
     assert set(app.properties["status"]) == set(app.supervisor.status)
     assert all(
         p.perm == C.PropertyPerm.READ_ONLY
@@ -365,132 +355,6 @@ def test_real_xdevice_gui_contract_without_network(config):
     )
     app.teardown()
     app._telem_file = SimpleNamespace(close=lambda: None)
-
-
-@pytest.mark.parametrize(
-    "target,linked", [("nn", False), ("nn", True), ("cacao", False), ("cacao", True)]
-)
-def test_switching_orders_actual_writers_and_optional_modulation(target, linked):
-    """Use real INDI vectors to confirm ordering, zero unlinked writes, and no loop/PO4AO access."""
-    client = Client()
-
-    def vector(device, name, values, switch=False):
-        """Build a real readback definition for the remote simulator."""
-        prop = (
-            P.SwitchVector
-            if switch
-            else P.NumberVector if device == "mod" else P.TextVector
-        )(
-            device=device,
-            name=name,
-            state=C.PropertyState.OK,
-            **({"rule": C.SwitchRule.AT_MOST_ONE} if switch else {}),
-        )
-        for key, value in values.items():
-            prop.add_element(
-                DefSwitch(name=key, _value=value)
-                if switch
-                else (
-                    DefNumber(
-                        name=key,
-                        _value=float(value),
-                        format="%g",
-                        min=0,
-                        max=10000,
-                        step=1,
-                    )
-                    if device == "mod"
-                    else DefText(name=key, _value=value)
-                )
-            )
-        client.props[f"{device}.{name}"] = prop
-
-    vector(
-        "nn",
-        "enable",
-        {"toggle": C.SwitchState.ON if target == "cacao" else C.SwitchState.OFF},
-        True,
-    )
-    vector(
-        "nn",
-        "model_status",
-        {
-            "status": "active" if target == "cacao" else "disabled",
-            "loaded": "a.trt",
-            "active": "a.trt" if target == "cacao" else "",
-            "requested": "a.trt",
-        },
-    )
-    vector("nn", "model", {"model_0000": C.SwitchState.ON}, True)
-    client.props["nn.model"]._elements["model_0000"].label = "a.trt"
-    for prop, value in [
-        ("modState", 4 if target == "nn" else 3),
-        ("modRadius", 3),
-        ("modFrequency", 2000),
-    ]:
-        vector("mod", prop, {"current": str(value), "target": str(value)})
-    events = []
-
-    class Writer:
-        """Writer completion double, preserving command/observation ordering."""
-
-        enabled = target == "nn"
-
-        def command(self, enabled):
-            """Only this fixture acknowledges synchronous process exit/start."""
-            events.append(("cacao", enabled))
-            self.enabled = enabled
-
-        def running(self):
-            """Record completion evidence separate from FIFO delivery."""
-            events.append(("observe", self.enabled))
-            return self.enabled
-
-    writer = Writer()
-
-    def response(message):
-        """Acknowledge NN outputs and modulation readbacks without loop properties."""
-        client.sent.append(message)
-        events.append((message.device, message.name))
-        prop = client.props[f"{message.device}.{message.name}"]
-        for name in message:
-            prop[name] = message[name]
-        if message.name == "enable":
-            client.props["nn.model_status"]["status"] = (
-                "active" if message["toggle"] == C.SwitchState.ON else "disabled"
-            )
-            client.props["nn.model_status"]["active"] = (
-                "a.trt" if message["toggle"] == C.SwitchState.ON else ""
-            )
-            if message["toggle"] == C.SwitchState.ON:
-                assert not writer.enabled
-        elif message.device == "mod":
-            prop["current"] = message["target"]
-        client.receive(prop)
-        if message.device == "nn":
-            client.receive(client.props["nn.model_status"])
-
-    client.connection.send = response
-    runtime = Runtime(client, writer, "nn", "po4ao", "mod", 0.1)
-    runtime.switch(target, threading.Event(), linked=linked)
-    assert runtime.source() == target
-    assert all(msg.device in ("nn", "mod") for msg in client.sent)
-    assert any(msg.device == "mod" for msg in client.sent) == linked
-    if target == "cacao":
-        assert events.index(("nn", "enable")) < events.index(("cacao", True))
-    else:
-        assert events.index(("cacao", False)) < len(events) - 1
-
-
-def test_missing_writer_evidence_never_enables_nn():
-    """Missing current definitions cannot authorize a writer handover."""
-    client = Client()
-    writer = SimpleNamespace(command=lambda enabled: None, running=lambda: True)
-    runtime = Runtime(client, writer, "nn", "po4ao", "mod", 0.01)
-    with pytest.raises(ConnectionError):
-        runtime.switch("nn", threading.Event())
-    assert not client.sent
-    runtime.close()
 
 
 def test_duplicate_reset_does_not_cancel_accepted_reset(config):
@@ -503,58 +367,6 @@ def test_duplicate_reset_does_not_cancel_accepted_reset(config):
     assert not cancel.is_set()
     assert finish(supervisor)[-1][1] == "Ok"
     supervisor.close()
-
-
-def test_milk_writer_requires_live_identity_and_detects_reused_pid(monkeypatch):
-    """Installed binding fields are verified independently of command flags."""
-    from xapp.po4aoTrainer.switching import MilkWriter
-
-    md = SimpleNamespace(
-        runpid=123, runpidstarttime=SimpleNamespace(tv_sec=1, tv_nsec=2)
-    )
-    fps = SimpleNamespace(md=lambda: md, RUNrunning=1)
-    birth = [10.0]
-    process = SimpleNamespace(
-        status=lambda: "running",
-        cmdline=lambda: ["milk", "wfs2cmodeval-1"],
-        create_time=lambda: birth[0],
-    )
-    monkeypatch.setattr(
-        "xapp.po4aoTrainer.switching.psutil.Process", lambda pid: process
-    )
-    writer = MilkWriter("wfs2cmodeval-1", "unused", "wfs2cmodeval-1", fps=fps)
-    assert writer.running()
-    birth[0] = 20
-    with pytest.raises(RuntimeError, match="reused"):
-        writer.running()
-    fps.RUNrunning = -1
-    with pytest.raises(RuntimeError, match="unverified"):
-        writer.running()
-    fps.RUNrunning = 0
-    assert not writer.running()
-
-
-def test_fifo_delivery_is_bounded_and_separate_from_writer_evidence(tmp_path):
-    """Opening an absent reader never blocks, and an ordinary file is never treated as a FIFO."""
-    import os
-    from xapp.po4aoTrainer.switching import MilkWriter
-
-    path = tmp_path / "controller.fifo"
-    os.mkfifo(path)
-    writer = MilkWriter("wfs2cmodeval-1", path, "wfs2cmodeval-1", fps=object())
-    with pytest.raises(OSError):
-        writer.command(False)
-    fd = os.open(path, os.O_RDWR | os.O_NONBLOCK)
-    try:
-        writer.command(False)
-        assert os.read(fd, 100) == b"runstop wfs2cmodeval-1\n"
-    finally:
-        os.close(fd)
-    path.unlink()
-    path.write_text("unchanged")
-    with pytest.raises(RuntimeError, match="not a FIFO"):
-        writer.command(True)
-    assert path.read_text() == "unchanged"
 
 
 def test_reload_requires_fresh_ack_even_for_same_model():
@@ -576,7 +388,7 @@ def test_reload_requires_fresh_ack_even_for_same_model():
     )
     reload.add_element(DefSwitch(name="toggle", _value=C.SwitchState.OFF))
     client.props["po4ao.reload_engine"] = reload
-    runtime = Runtime(client, None, "nn", "po4ao", "mod", 0.04)
+    runtime = Runtime(client, "po4ao", 0.04)
     with pytest.raises(TimeoutError):
         runtime.reload("model-a", threading.Event())
     assert runtime.reload_ticket is not None
@@ -714,6 +526,4 @@ def test_worker_protocol_failure_is_reported_without_stopping_companion(config):
     assert supervisor.status["learning"] == "error"
     assert supervisor.status["error"] == "malformed worker record"
     assert stopped
-    supervisor.submit("reconstructor", {"target": "cacao", "expected": "nn"})
-    assert finish(supervisor, "reconstruction")[-1][1] == "Ok"
     supervisor.close()

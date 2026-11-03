@@ -39,7 +39,11 @@ class learningCtrl : public xWidget
 
     std::string m_runtimeSequence; ///< Last C++ sequence; empty until discovery.
 
-    std::string m_nnDevice; ///< NN device discovered through the companion's devices property.
+    std::string m_nnDevice; ///< NN device supplied independently by the launcher.
+
+    QElapsedTimer m_nnAge; ///< Age since the independent NN application's advancing heartbeat.
+
+    std::string m_nnHeartbeat, m_nnInstance; ///< Current NN process-lifetime heartbeat baseline.
 
     bool m_connected{ false }; ///< Transport connection; readiness also needs property definitions.
 
@@ -75,7 +79,8 @@ class learningCtrl : public xWidget
     /// Construct one panel for C++ inference and an optional companion.
     explicit learningCtrl( const std::string &device,                  /**< [in] Companion device name. */
                            QWidget           *parent        = nullptr, /**< [in] Optional Qt parent. */
-                           const std::string &runtimeDevice = "po4ao" /**< [in] C++ runtime device. */ );
+                           const std::string &runtimeDevice = "po4ao", /**< [in] C++ PO4AO device. */
+                           const std::string &nnDevice      = "nnReconstructor" /**< [in] Independent NN device. */ );
 
     /// Attach named property subscriptions through the existing publisher.
     void subscribe() override;
@@ -86,7 +91,7 @@ class learningCtrl : public xWidget
     /// Invalidate cached states and pending requests on disconnect.
     void onDisconnect() override;
 
-    /// Replace a definition and discover a changed NN device mapping.
+    /// Replace a definition for its independently configured device.
     void
     handleDefProperty( const pcf::IndiProperty &property /**< [in] Definition received on the Qt thread. */ ) override;
 
@@ -162,8 +167,11 @@ class learningCtrl : public xWidget
     bool busy( std::initializer_list<const char *> names, /**< [in] Commands sharing an operation domain. */
                const std::string &device = "" /**< [in] Source device; empty selects trainer. */ ) const;
 
-    /// Update dynamic NN subscriptions after the companion's device mapping changes.
-    void syncNNDevice();
+    /// Determine whether the independent NN control endpoint is live.
+    bool nnReady() const;
+
+    /// Read the independent NN handover status.
+    std::string nnStatus( const std::string &element /**< [in] Status element name. */ ) const;
 
     /// Synchronize catalog labels while preserving the user's unsent selection.
     void syncModels();
@@ -181,8 +189,11 @@ class learningCtrl : public xWidget
                        const std::string &device = "" /**< [in] Destination; empty selects trainer. */ );
 };
 
-inline learningCtrl::learningCtrl( const std::string &device, QWidget *parent, const std::string &runtimeDevice )
-    : xWidget( parent ), m_device( device ), m_runtimeDevice( runtimeDevice )
+inline learningCtrl::learningCtrl( const std::string &device,
+                                   QWidget           *parent,
+                                   const std::string &runtimeDevice,
+                                   const std::string &nnDevice )
+    : xWidget( parent ), m_device( device ), m_runtimeDevice( runtimeDevice ), m_nnDevice( nnDevice )
 {
     m_ui.setupUi( this );
     setWindowTitle( "PO4AO / NN" );
@@ -204,9 +215,6 @@ inline void learningCtrl::subscribe()
         return;
     for( const auto *name : { "fsm",
                               "devices",
-                              "nn_activate",
-                              "reconstructor",
-                              "link_modulation",
                               "po4ao_enable",
                               "reset",
                               "recollect",
@@ -224,7 +232,13 @@ inline void learningCtrl::subscribe()
                               "collection_status" } )
         m_parent->addSubscriberProperty( this, m_runtimeDevice, name );
     if( !m_nnDevice.empty() )
-        for( const auto *name : { "fsm", "model", "model_status" } )
+        for( const auto *name : { "fsm",
+                                  "model",
+                                  "model_status",
+                                  "nn_activate",
+                                  "reconstructor",
+                                  "link_modulation",
+                                  "reconstruction_status" } )
             m_parent->addSubscriberProperty( this, m_nnDevice, name );
 }
 
@@ -240,6 +254,9 @@ inline void learningCtrl::onDisconnect()
     m_haveHeartbeat = false;
     m_heartbeatAge.invalidate();
     m_runtimeAge.invalidate();
+    m_nnAge.invalidate();
+    m_nnHeartbeat.clear();
+    m_nnInstance.clear();
     m_runtimeInstance.clear();
     m_runtimeSequence.clear();
     m_properties.clear();
@@ -268,7 +285,7 @@ inline QString learningCtrl::stateLabel( const std::string &state )
     if( state.empty() )
         return "Unknown";
     if( state == "nn" )
-        return "NN";
+        return "CNN";
     if( state == "cacao" )
         return "CACAO";
     if( state == "po4ao" )
@@ -316,25 +333,16 @@ inline bool learningCtrl::busy( std::initializer_list<const char *> names, const
     return false;
 }
 
-inline void learningCtrl::syncNNDevice()
+inline std::string learningCtrl::nnStatus( const std::string &element ) const
 {
-    const auto name = value( m_device, "devices", "nn" );
-    if( name == m_nnDevice )
-        return;
-    const auto old = m_nnDevice;
-    m_nnDevice     = name;
-    if( !old.empty() )
-        for( const auto *prop : { "fsm", "model", "model_status" } )
-        {
-            if( m_parent )
-                m_parent->unsubscribe( this, old, prop );
-            m_properties.erase( old + "." + prop );
-            m_defined.erase( old + "." + prop );
-        }
-    if( m_parent && !m_nnDevice.empty() )
-        for( const auto *prop : { "fsm", "model", "model_status" } )
-            m_parent->addSubscriberProperty( this, m_nnDevice, prop );
-    syncModels();
+    return value( m_nnDevice, "reconstruction_status", element );
+}
+
+inline bool learningCtrl::nnReady() const
+{
+    const auto fsm = value( m_nnDevice, "fsm", "state" );
+    return m_connected && m_nnAge.isValid() && m_nnAge.elapsed() < 5000 && !m_nnInstance.empty() &&
+           m_defined.count( m_nnDevice + ".reconstruction_status" ) && ( fsm == "READY" || fsm == "OPERATING" );
 }
 
 inline void learningCtrl::syncModels()
@@ -457,6 +465,29 @@ inline bool learningCtrl::trainerReady() const
 
 inline void learningCtrl::observeHeartbeat( const pcf::IndiProperty &property )
 {
+    if( property.getDevice() == m_nnDevice && property.getName() == "reconstruction_status" )
+    {
+        if( property.find( "instance" ) )
+        {
+            const auto instance = property["instance"].get();
+            if( !m_nnInstance.empty() && m_nnInstance != instance )
+            {
+                pcf::IndiProperty request;
+                request.setDevice( m_nnDevice );
+                handleDelProperty( request );
+                sendGetProperties( request );
+            }
+            m_nnInstance = instance;
+        }
+        if( property.find( "heartbeat" ) )
+        {
+            const auto heartbeat = property["heartbeat"].get();
+            if( !m_nnHeartbeat.empty() && heartbeat != m_nnHeartbeat )
+                m_nnAge.start();
+            m_nnHeartbeat = heartbeat;
+        }
+    }
+
     if( property.getDevice() == m_runtimeDevice && property.getName() == "model_status" )
     {
         if( property.find( "instance" ) )
@@ -497,8 +528,6 @@ inline void learningCtrl::handleDefProperty( const pcf::IndiProperty &property )
     m_properties[property.createUniqueKey()] = property;
     m_defined.insert( property.createUniqueKey() );
     acknowledge( property );
-    if( property.getDevice() == m_device && property.getName() == "devices" )
-        syncNNDevice();
     if( property.getDevice() == m_nnDevice && property.getName() == "model" )
         syncModels();
     updateGUI();
@@ -527,8 +556,6 @@ inline void learningCtrl::handleSetProperty( const pcf::IndiProperty &property )
             found->second.setState( property.getState() );
     }
     acknowledge( property );
-    if( property.getDevice() == m_device && property.getName() == "devices" )
-        syncNNDevice();
     updateGUI();
 }
 
@@ -554,8 +581,12 @@ inline void learningCtrl::handleDelProperty( const pcf::IndiProperty &property )
             m_haveHeartbeat = false;
             m_heartbeatAge.invalidate();
         }
-        if( whole || property.getName() == "devices" )
-            syncNNDevice();
+    }
+    if( property.getDevice() == m_nnDevice && ( whole || property.getName() == "reconstruction_status" ) )
+    {
+        m_nnAge.invalidate();
+        m_nnHeartbeat.clear();
+        m_nnInstance.clear();
     }
     if( property.getDevice() == m_runtimeDevice )
     {
@@ -592,38 +623,40 @@ inline void learningCtrl::updateGUI()
                                    : ready      ? "Ready"
                                    : !fresh     ? "Stale / waiting for heartbeat"
                                                 : "Waiting for companion" );
-    const auto source              = ready ? status( "reconstructor" ) : std::string( "unknown" );
+    const bool nnLive              = nnReady();
+    const auto source              = nnLive ? nnStatus( "reconstructor" ) : std::string( "unknown" );
     const bool knownSource         = source == "nn" || source == "cacao" || source == "stopped";
-    const auto reconstructionPhase = status( "reconstruction_phase" );
-    const bool reconstructionReady = ready && knownSource &&
+    const auto reconstructionPhase = nnStatus( "phase" );
+    const bool reconstructionReady = nnLive && knownSource &&
                                      ( reconstructionPhase == "idle" || reconstructionPhase == "error" ) &&
-                                     !busy( { "nn_activate", "reconstructor" } );
+                                     !busy( { "nn_activate", "reconstructor" }, m_nnDevice );
     const bool catalog             = m_defined.count( m_nnDevice + ".model" ) && m_ui.comboEngine->count() > 0;
-    m_ui.comboEngine->setEnabled( ready && catalog && !busy( { "nn_activate", "reconstructor" } ) );
+    m_ui.comboEngine->setEnabled( nnLive && catalog && !busy( { "nn_activate", "reconstructor" }, m_nnDevice ) );
     m_ui.comboEngine->setToolTip( m_ui.comboEngine->currentText() );
-    m_ui.buttonEnableNN->setEnabled( reconstructionReady && catalog && m_ui.comboEngine->currentIndex() >= 0 &&
-                                     commandAvailable( "nn_activate", pcf::IndiProperty::Text, { "model" } ) );
+    m_ui.buttonEnableNN->setEnabled(
+        reconstructionReady && catalog && m_ui.comboEngine->currentIndex() >= 0 &&
+        commandAvailable( "nn_activate", pcf::IndiProperty::Text, { "model" }, m_nnDevice ) );
     const bool loaded = !value( m_nnDevice, "model_status", "loaded" ).empty();
     m_ui.buttonReconstructor->setEnabled(
         reconstructionReady && ( source == "nn" || source == "stopped" || loaded ) &&
-        commandAvailable( "reconstructor", pcf::IndiProperty::Text, { "target", "expected" } ) );
-    m_ui.buttonReconstructor->setText( source == "stopped" ? "Use CACAO" : "Switch reconstructor" );
+        commandAvailable( "reconstructor", pcf::IndiProperty::Text, { "target", "expected" }, m_nnDevice ) );
+    m_ui.buttonReconstructor->setText( source == "cacao" ? "Switch to CNN" : "Switch to CACAO" );
     m_ui.labelReconstructor->setText( "Active: " + stateLabel( source ) );
-    m_ui.labelReconstructor->setToolTip(
-        QString::fromStdString( "Requested: " + value( m_nnDevice, "model_status", "requested" ) +
-                                "\nLoaded: " + value( m_nnDevice, "model_status", "loaded" ) +
-                                "\nActive NN: " + value( m_nnDevice, "model_status", "active" ) ) );
+    m_ui.labelReconstructor->setToolTip( QString::fromStdString(
+        "Requested: " + value( m_nnDevice, "model_status", "requested" ) +
+        "\nLoaded: " + value( m_nnDevice, "model_status", "loaded" ) + "\nActive NN: " +
+        value( m_nnDevice, "model_status", "active" ) + "\n" + nnStatus( "phase" ) + "\n" + nnStatus( "error" ) ) );
     {
         QSignalBlocker blocker( m_ui.checkModulation );
-        const auto     link = m_properties.find( m_device + ".link_modulation" );
+        const auto     link = m_properties.find( m_nnDevice + ".link_modulation" );
         m_ui.checkModulation->setChecked( link != m_properties.end() && link->second.find( "toggle" ) &&
                                           link->second["toggle"].getSwitchState() == pcf::IndiElement::On );
     }
-    m_ui.checkModulation->setEnabled( ready &&
-                                      commandAvailable( "link_modulation", pcf::IndiProperty::Switch, { "toggle" } ) );
-    m_ui.labelModulation->setText( "Modulation: " + QString::fromStdString( !ready || status( "modulation" ).empty()
+    m_ui.checkModulation->setEnabled(
+        nnLive && commandAvailable( "link_modulation", pcf::IndiProperty::Switch, { "toggle" }, m_nnDevice ) );
+    m_ui.labelModulation->setText( "Modulation: " + QString::fromStdString( !nnLive || nnStatus( "modulation" ).empty()
                                                                                 ? "Unknown"
-                                                                                : status( "modulation" ) ) );
+                                                                                : nnStatus( "modulation" ) ) );
 
     if( !ready )
     {
@@ -681,6 +714,8 @@ inline void learningCtrl::updateGUI()
         message += "  Config: " + configError;
     else if( !pendingConfig.empty() )
         message += "  Configuration change requires Reset";
+    if( nnReady() && !nnStatus( "error" ).empty() )
+        message += "  NN: " + nnStatus( "error" );
     m_ui.labelStatus->setText( QString::fromStdString( message.empty() ? "Status: —" : message ) );
     m_ui.labelStatus->setToolTip( QString::fromStdString( message ) );
 }
@@ -694,6 +729,7 @@ inline void learningCtrl::updateRuntimeGUI()
                        m_defined.count( m_runtimeDevice + ".model_status" ) && ( fsm == "READY" || fsm == "OPERATING" );
     m_ui.labelConnection->setText( !m_connected ? "Disconnected"
                                    : ready      ? "PO4AO ready / trainer unavailable"
+                                   : nnReady()  ? "NN ready / PO4AO unavailable"
                                    : !fresh     ? "Stale / waiting for heartbeat"
                                                 : "Waiting for PO4AO" );
     const auto selection = m_properties.find( m_runtimeDevice + ".control_enable" );
@@ -739,6 +775,8 @@ inline void learningCtrl::updateRuntimeGUI()
         message = m_nativeResetPending ? "Reset pending: waiting for runtime completion"
                   : ready              ? "Reload: " + value( m_runtimeDevice, "model_status", "reload" )
                                        : "Waiting for runtime readback";
+    if( nnReady() && !nnStatus( "error" ).empty() )
+        message += "  NN: " + nnStatus( "error" );
     m_ui.labelStatus->setText( QString::fromStdString( message ) );
     m_ui.labelStatus->setToolTip( m_ui.labelStatus->text() );
 }
@@ -763,27 +801,29 @@ learningCtrl::submitSwitch( const std::string &name, const std::string &element,
 
 inline void learningCtrl::on_buttonEnableNN_clicked()
 {
+    updateGUI();
     if( !m_ui.buttonEnableNN->isEnabled() )
         return;
-    pcf::IndiProperty property( pcf::IndiProperty::Text, m_device, "nn_activate" );
+    pcf::IndiProperty property( pcf::IndiProperty::Text, m_nnDevice, "nn_activate" );
     property.add( pcf::IndiElement( "model", m_ui.comboEngine->currentData().toString().toStdString() ) );
     submit( property );
 }
 
 inline void learningCtrl::on_buttonReconstructor_clicked()
 {
+    updateGUI();
     if( !m_ui.buttonReconstructor->isEnabled() )
         return;
-    pcf::IndiProperty property( pcf::IndiProperty::Text, m_device, "reconstructor" );
-    property.add( pcf::IndiElement( "target", status( "reconstructor" ) == "cacao" ? "nn" : "cacao" ) );
-    property.add( pcf::IndiElement( "expected", status( "reconstructor" ) ) );
+    pcf::IndiProperty property( pcf::IndiProperty::Text, m_nnDevice, "reconstructor" );
+    property.add( pcf::IndiElement( "target", nnStatus( "reconstructor" ) == "cacao" ? "nn" : "cacao" ) );
+    property.add( pcf::IndiElement( "expected", nnStatus( "reconstructor" ) ) );
     submit( property );
 }
 
 inline void learningCtrl::on_checkModulation_clicked( bool checked )
 {
     if( m_ui.checkModulation->isEnabled() )
-        submitSwitch( "link_modulation", "toggle", checked );
+        submitSwitch( "link_modulation", "toggle", checked, m_nnDevice );
 }
 
 inline void learningCtrl::on_buttonPO4AO_clicked()

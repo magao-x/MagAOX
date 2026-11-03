@@ -409,3 +409,78 @@ commands or notebook execution occurred on the instrument. The installed PO4AO
 binary and config SHA-256 values remained unchanged:
 `048af3ba45a1c2353e2712cd29da080330225307378142610310adbef0a28553` and
 `51b3badd85fe660a928b7f50b4bcb43aada802437e286c3e2def589a7145bc38` respectively.
+
+
+## Independent NN control ownership and section labels, 2026-11-03
+
+The user rejected the trainer dependency for NN operation. The earlier companion-based
+NN contract was therefore incorrect and is superseded. One GUI remains; `po4aoTrainer`
+is optional for notebook use and has no NN role. The user also requested explicit
+section titles and destination/action labels.
+
+Implemented:
+
+- Configure the NN device independently in the launcher (optional third device argument,
+  default `nnReconstructor`); discover its catalog, command definitions and advancing
+  `reconstruction_status` heartbeat directly. Trainer absence/deletion/remapping cannot
+  remove NN capabilities. NN restart invalidates only NN capabilities.
+- Move `nn_activate`, expected-source `reconstructor`, and `link_modulation` into the
+  native NN app. Reuse its existing enable/quiescence/model loader, with serialized
+  compound phases in `appLogic`. No new real-time thread, numerical kernel, speedup,
+  loop check, or automatic downstream routing was added. Explicit low-level Off cancels
+  pending NN activation; low-level On/model commands cannot bypass an ongoing handover.
+- Port the FPS evidence/FIFO boundary into a small native transport. It reads the
+  installed milk metadata ABI and Linux process identity, verifies completion separately
+  from bounded FIFO delivery, and handles a disappearing reader without SIGPIPE killing
+  inference. No writable FPS mapping or additional milk library linkage is used.
+  A timed-out delivered CACAO start stays unresolved until observed RUN completion;
+  late completion never causes a follow-on action. Target headers must match its milk.
+- Remove the competing Python NN handover implementation and trainer discovery/config
+  fields. The trainer now observes only PO4AO and no longer needs CacaoProcessTools.
+  Existing managed publication ticket, Reset, worker and native/managed-route guarantees
+  remain. Old trainer configs need the removed NN/writer/modulator keys removed.
+- Add nnReconstructor / PO4AO headings. Use CNN Reconstructor, Set reconstructor,
+  Switch to CACAO and Switch to CNN. Keep the standard Qt widgets and resource style.
+- Update the single deployment guide for the existing IOC container, normal-user
+  `make install`, NN plus GUI upgrade, and notebook-first/optional-trainer testing.
+
+Validation:
+
+- Native NN production methods with CPU SDK doubles: 545 assertions / 33 cases.
+- Production FPS/FIFO transport with fixture metadata and process files: 19 assertions /
+  2 cases. The fixture deliberately substitutes the milk ABI; it does not validate the
+  target's installed layout. Real local FIFO and PID operations are exercised.
+- Qt widget using the real socket-free publisher: 344 assertions / 23 cases; independent
+  NN startup, trainer mapping/deletion, NN heartbeat expiry/restart, labels, handover
+  requests, existing PO4AO route barriers and Reset semantics pass.
+- Trainer suite: 99 passed plus 15 subtests, 9 existing plotting/deprecation warnings.
+  NN regressions moved to the native owner's tests; obsolete Python NN fixtures were
+  removed. Worker tests require ordinary local process visibility for owned-child cleanup.
+- Launcher builds with the existing local Qt setup; offscreen preview inspected at
+  500 pixels. The native header also syntax-checks against real libcommon INDI types
+  with SDK doubles, rather than relying solely on the simplified INDI test boundary.
+- Trainer wheel builds; all 18 packaged Python modules and the installed supervisor
+  configuration match the checkout byte-for-byte.
+- clang-format, Black and `git diff --check` pass. Full Linux/CUDA/TensorRT app build,
+  installed milk ABI, real FPS/INDI handover, modulator and latency acceptance remain
+  operator work. No instrument access, installation, restart or control occurred in
+  this increment. AGENTS.md, dlDataCollection and PO4AO numerical code are untouched.
+
+The milk RUNrunning semantics were checked against the prior read-only source capture
+and public milk source (local temporary checkout `add4f667c501392447161f35be8b9c056ed40153`).
+Production compilation uses installed headers, not that checkout. Definitions are in
+[function_parameters.h](https://github.com/milk-org/milk/blob/add4f667c501392447161f35be8b9c056ed40153/src/CommandLineInterface/function_parameters.h).
+
+Affected files for this increment:
+
+- `apps/nnReconstructor/nnReconstructor.hpp`, `reconstructorControls.hpp`,
+  `cacaoWriter.hpp`, `cacaoWriter.cpp`, `Makefile`, `README.md`.
+- `apps/nnReconstructor/tests/nnReconstructor_test.cpp`, `nnTestSupport.hpp`,
+  `cacaoWriter_test.hpp`, `cacaoWriter_test.cpp`, `cacaoWriterTestAbi.hpp`, `Makefile`;
+  `tests/groups.dox`.
+- `gui/apps/po4aoGUI/po4aoGUI_main.cpp`; `gui/widgets/learningCtrl/learningCtrl.hpp`,
+  `learningCtrl.ui`, `tests/learningCtrl_test.cpp`, `README.md`.
+- `apps/po4aoTrainer/xapp/po4aoTrainer/app.py`, `supervisor.py`, `switching.py`,
+  `check_deployment.py`; `configs/po4aoTrainer.conf`, `pyproject.toml`,
+  `tests/test_supervisor.py`, `tests/test_review_regressions.py`, `README.md`, `DEPLOYMENT.md`.
+- This record and `agents/plans/2026-10/nn-po4ao-gui-requirements.md`.

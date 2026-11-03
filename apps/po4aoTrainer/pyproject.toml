@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "xapp-po4aoTrainer"
 version = "2026.11.02"
-description = "Shared NN/PO4AO control supervisor and nonlinear notebook training core"
+description = "PO4AO training supervisor and nonlinear notebook training core"
 requires-python = ">=3.11"
 dependencies = ["numpy", "torch", "scipy", "xconf", "purepyindi2", "psutil", "onnx", "onnxscript"]
 

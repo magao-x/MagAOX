@@ -44,6 +44,8 @@
 #include <chrono>
 #include <sys/stat.h>
 
+#include "cacaoWriter.hpp"
+
 using namespace nvinfer1;
 
 /// Forward TensorRT warnings and errors to the existing diagnostic stream.
@@ -68,8 +70,8 @@ namespace app
 /// Reconstruct normalized WFS pupils into an externally owned modal stream.
 /** The monitor owns inference; the framegrabber owns claimed snapshots and timestamps.
  * Runtime controls share only the protected handoff state. Model replacement is allowed
- * while disabled and never changes activation. Loop state and writer ownership remain
- * operator responsibilities; this app does not provide an inter-process loop interlock.
+ * while disabled. Compound GUI requests coordinate the CACAO writer outside the
+ * real-time workers. Loop state and downstream routing remain operator responsibilities.
  */
 class nnReconstructor : public MagAOXApp<true>,
                         public dev::shmimMonitor<nnReconstructor>,
@@ -253,6 +255,36 @@ class nnReconstructor : public MagAOXApp<true>,
 
     std::string m_requestError; ///< Rejected operator request, separate from a runtime fault.
 
+    cacaoWriter m_cacaoWriter; ///< CACAO FPS transport, used only by the application/control thread.
+
+    std::string m_modDevice{ "modwfs" }; ///< Device providing the optional linked modulation preset.
+
+    std::string m_switchPhase{ "idle" }; ///< Compound NN operation phase, protected by m_indiMutex.
+
+    std::string m_switchTarget, m_switchExpected, m_switchSource; ///< Accepted handover intent and observed origin.
+
+    int m_switchModel{ -1 }; ///< Catalog index for an explicit activation; -1 retains the loaded engine.
+
+    bool m_linkModulation{ false }; ///< Shared preference; changing it never moves the modulator.
+
+    bool m_cacaoStartPending{ false }; ///< Delivered CACAO start without observed RUN completion.
+
+    bool m_switchLinked{ false }; ///< Preference captured when the operation is accepted.
+
+    std::string m_switchError; ///< Last compound-operation failure, separate from inference faults.
+
+    std::string m_reconstructor{ "unknown" }; ///< Observed writer ownership, never inferred from a request.
+
+    uint64_t m_switchSequence{ 0 }; ///< Advancing application heartbeat for GUI freshness.
+
+    std::string m_switchInstance; ///< Process-lifetime identity for invalidating cached GUI state.
+
+    std::chrono::steady_clock::time_point m_switchStarted{}, m_modQuery{}; ///< Phase deadline and query throttle.
+
+    std::array<double, 3> m_modCurrent{}; ///< Observed modulation state, frequency and radius.
+
+    std::array<std::chrono::steady_clock::time_point, 3> m_modObserved{}; ///< Readback age for each preset element.
+
   public:
     /// Default c'tor.
     nnReconstructor();
@@ -322,6 +354,36 @@ class nnReconstructor : public MagAOXApp<true>,
 
     /// Launch pending model work, report timeouts and update control readbacks.
     void updateControls();
+
+    /// Register compound NN controls independently of PO4AO and its trainer.
+    int setupReconstructorControls();
+
+    /// Start the destination only after the previous writer has stopped; caller holds m_indiMutex.
+    void startReconstructor();
+
+    /// Apply the optional comparison preset before starting the destination; caller holds m_indiMutex.
+    void prepareModulation();
+
+    /// Advance one bounded handover phase and publish observed status.
+    void updateReconstructorControls();
+
+    /// Queue a compound operation after validating its catalog and expected writer state.
+    int requestReconstructor( const std::string &target,   /**< [in] NN or CACAO. */
+                              const std::string &expected, /**< [in] Last observed source; empty for activation. */
+                              int                model /**< [in] Catalog index or -1 to retain the loaded model. */ );
+
+    /// Set a phase and start its bounded completion deadline; caller holds m_indiMutex.
+    void reconstructorPhase( const std::string &phase /**< [in] Next operation phase. */ );
+
+    /// Submit the existing enable control from the serialized handover; caller holds m_indiMutex.
+    int requestEnabled( bool enabled /**< [in] Desired inference admission state. */ );
+
+    /// Submit the existing model selection after disable; caller holds m_indiMutex.
+    int requestModel( const pcf::IndiProperty &property /**< [in] Catalog selection. */ );
+
+    /// Store one valid modulation readback; caller holds m_indiMutex.
+    void observeModulation( const pcf::IndiProperty &property, /**< [in] Current-value update. */
+                            size_t                   index /**< [in] State, frequency or radius slot. */ );
 
     /// Release host allocations after both data-path threads have stopped.
     void cleanup_host_memory();
@@ -401,6 +463,34 @@ class nnReconstructor : public MagAOXApp<true>,
     INDI_NEWCALLBACK_DECL( nnReconstructor, m_indiP_enable );
 
     pcf::IndiProperty m_indiP_modelStatus; ///< Requested, loaded, active and transition/error descriptions.
+
+    pcf::IndiProperty m_indiP_nnActivate; ///< Compound selected-engine activation request.
+
+    /// Accept one catalog element for disable/load/enable and any required CACAO handover.
+    INDI_NEWCALLBACK_DECL( nnReconstructor, m_indiP_nnActivate );
+
+    pcf::IndiProperty m_indiP_reconstructor; ///< Explicit target plus expected source for compare switching.
+
+    /// Accept a writer handover without accessing loop state.
+    INDI_NEWCALLBACK_DECL( nnReconstructor, m_indiP_reconstructor );
+
+    pcf::IndiProperty m_indiP_linkModulation; ///< Shared comparison preference, initially off.
+
+    /// Set the preference for subsequent handovers.
+    INDI_NEWCALLBACK_DECL( nnReconstructor, m_indiP_linkModulation );
+
+    pcf::IndiProperty m_indiP_reconstructionStatus; ///< Independent ownership, operation and heartbeat readback.
+
+    pcf::IndiProperty m_indiP_modState, m_indiP_modFrequency, m_indiP_modRadius; ///< Modulator subscriptions.
+
+    /// Observe the modulator state.
+    INDI_SETCALLBACK_DECL( nnReconstructor, m_indiP_modState );
+
+    /// Observe the modulator frequency.
+    INDI_SETCALLBACK_DECL( nnReconstructor, m_indiP_modFrequency );
+
+    /// Observe the modulator radius.
+    INDI_SETCALLBACK_DECL( nnReconstructor, m_indiP_modRadius );
 
     pcf::IndiProperty m_indiP_fpsSource; ///< Subscription to the configured WFS frame-rate source.
 
@@ -796,6 +886,17 @@ inline void nnReconstructor::setupConfig()
                 "int",
                 "Vertical offset to the top left of the furthest set op PWFS pupils." );
 
+    for( const auto *name : { "fpsName", "fpsFifo", "writerProcessMatch", "modulationDevice" } )
+        config.add( std::string( "recon." ) + name,
+                    "",
+                    std::string( "recon." ) + name,
+                    argType::Required,
+                    "recon",
+                    name,
+                    false,
+                    "string",
+                    "Optional NN/CACAO handover configuration." );
+
     config.add( "parameters.models",
                 "",
                 "parameters.models",
@@ -834,6 +935,16 @@ inline int nnReconstructor::loadConfigImpl( mx::app::appConfigurator &_config )
 
     frameGrabberT::m_ownShmim = false;
     FRAMEGRABBER_LOAD_CONFIG( _config );
+
+    _config( m_cacaoWriter.m_name, "recon.fpsName" );
+    _config( m_cacaoWriter.m_fifo, "recon.fpsFifo" );
+    _config( m_cacaoWriter.m_processMatch, "recon.writerProcessMatch" );
+    _config( m_modDevice, "recon.modulationDevice" );
+    if( m_cacaoWriter.m_name.empty() || m_cacaoWriter.m_name.size() > 100 ||
+        m_cacaoWriter.m_name.find_first_not_of( "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-." ) !=
+            std::string::npos ||
+        m_cacaoWriter.m_fifo.empty() || m_cacaoWriter.m_processMatch.empty() || m_modDevice.empty() )
+        return log<software_error, -1>( { "invalid recon writer/modulation configuration" } );
 
     _config( engineDirs, "parameters.engineDirs" );
     _config( engineName, "parameters.engineName" );
@@ -926,6 +1037,8 @@ inline int nnReconstructor::appStartup()
             m_indiP_modelStatus.add( pcf::IndiElement( element ) );
         if( registerIndiPropertyReadOnly( m_indiP_modelStatus ) < 0 )
             throw std::runtime_error( "cannot register model status" );
+        if( setupReconstructorControls() < 0 )
+            throw std::runtime_error( "cannot register reconstructor controls" );
         updateControls();
         // The base startup macros return on failure; the destructor also unwinds partial startup.
         m_fgStarted = true;
@@ -955,6 +1068,7 @@ inline int nnReconstructor::appLogic()
     TELEMETER_APP_LOGIC;
 
     updateControls();
+    updateReconstructorControls();
 
     std::unique_lock<std::mutex> lock( m_indiMutex );
 
@@ -1006,9 +1120,9 @@ inline int nnReconstructor::allocate( const dev::shmimT &dummy )
     const size_t crop  = m_pupPix - 2 * zeroPad;
     const size_t width = shmimMonitorT::m_width, height = shmimMonitorT::m_height;
     const bool   valid = md.datatype == _DATATYPE_FLOAT && md.location == -1 && ( md.naxis == 2 || md.naxis == 3 ) &&
-                       shmimMonitorT::m_imageStream.array.raw && size_t( pup_offset1_x ) + crop <= width &&
-                       size_t( pup_offset2_x ) + crop <= width && size_t( pup_offset1_y ) + crop <= height &&
-                       size_t( pup_offset2_y ) + crop <= height;
+                         shmimMonitorT::m_imageStream.array.raw && size_t( pup_offset1_x ) + crop <= width &&
+                         size_t( pup_offset2_x ) + crop <= width && size_t( pup_offset1_y ) + crop <= height &&
+                         size_t( pup_offset2_y ) + crop <= height;
     { // mutex scope
         std::lock_guard<std::mutex> lock( m_resultMutex );
         m_updated     = false;
@@ -1378,15 +1492,28 @@ INDI_NEWCALLBACK_DEFN( nnReconstructor, m_indiP_enable )( const pcf::IndiPropert
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_enable, ipRecv );
     if( !ipRecv.find( "toggle" ) )
         return 0;
+    std::lock_guard<std::mutex> indiLock( m_indiMutex );
+    const auto                  value = ipRecv["toggle"].getSwitchState();
+    if( value != pcf::IndiElement::On && value != pcf::IndiElement::Off )
     { // mutex scope
         std::lock_guard<std::mutex> lock( m_resultMutex );
-        const auto                  value = ipRecv["toggle"].getSwitchState();
-        if( value != pcf::IndiElement::On && value != pcf::IndiElement::Off )
-        {
-            m_requestError = "enable requires On or Off";
+        m_requestError = "enable requires On or Off";
+        return -1;
+    }
+    if( m_switchPhase != "idle" && m_switchPhase != "error" )
+    {
+        if( value == pcf::IndiElement::On )
             return -1;
-        }
-        const bool on = value == pcf::IndiElement::On;
+        m_switchError = "Handover cancelled by an explicit disable";
+        reconstructorPhase( m_cacaoStartPending ? "awaiting_cacao" : "error" );
+    }
+    return requestEnabled( value == pcf::IndiElement::On );
+}
+
+inline int nnReconstructor::requestEnabled( bool on )
+{
+    { // mutex scope
+        std::lock_guard<std::mutex> lock( m_resultMutex );
         if( m_stopping || ( on && ( m_loading || m_disabling || !m_fault.empty() || !m_sourceReady ) ) )
         {
             m_requestError = "enable rejected: shutdown, transition, source validation or fault recovery pending";
@@ -1420,6 +1547,14 @@ INDI_NEWCALLBACK_DEFN( nnReconstructor, m_indiP_enable )( const pcf::IndiPropert
 INDI_NEWCALLBACK_DEFN( nnReconstructor, m_indiP_model )( const pcf::IndiProperty &ipRecv )
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_model, ipRecv );
+    std::lock_guard<std::mutex> indiLock( m_indiMutex );
+    if( m_switchPhase != "idle" && m_switchPhase != "error" )
+        return -1;
+    return requestModel( ipRecv );
+}
+
+inline int nnReconstructor::requestModel( const pcf::IndiProperty &ipRecv )
+{
     std::lock_guard<std::mutex> lock( m_resultMutex );
     int                         selected = -1;
     for( const auto &element : ipRecv.getElements() )
@@ -1489,6 +1624,8 @@ inline int nnReconstructor::recordTelem( const telem_fgtimings * )
 {
     return recordFGTimings( true );
 }
+
+#include "reconstructorControls.hpp"
 
 } // namespace app
 } // namespace MagAOX

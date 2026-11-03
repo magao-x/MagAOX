@@ -27,7 +27,6 @@ def main():
         "torch",
         "onnx",
         "ImageStreamIOWrap",
-        "CacaoProcessTools",
     ):
         imported = importlib.import_module(module)
         print(module, getattr(imported, "__file__", "built-in"))
@@ -65,7 +64,7 @@ def main():
         )
     )
     print(
-        "GPU export, full C++ build, writer identity and live INDI acceptance still require operator verification."
+        "GPU export, full C++ build, live INDI acceptance still require operator verification."
     )
 
 

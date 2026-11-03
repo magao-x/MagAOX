@@ -58,23 +58,9 @@ class Rig:
         """Define all remote capabilities before attaching the production observer."""
         self.discovery, self.frames, self.auto_load = True, True, True
         self.requests, self.props = [], {}
-        self.writer_enabled, self.writer_stops = True, True
-        self.writer_calls = []
         self.loading = None
         self.client = IndiClient()
         self.client.connection = Wire(self)
-        self.text(
-            "nn",
-            "model_status",
-            status="disabled",
-            loaded="a.trt",
-            requested="a.trt",
-            active="",
-            error="",
-        )
-        self.switch("nn", "enable", toggle=C.SwitchState.OFF)
-        catalog = self.switch("nn", "model", a=C.SwitchState.ON, b=C.SwitchState.OFF)
-        catalog._elements["a"].label, catalog._elements["b"].label = "a.trt", "b.trt"
         self.text(
             "po4ao",
             "model_status",
@@ -107,23 +93,7 @@ class Rig:
             frames="96",
             target_frames="96",
         )
-        for name, value in (
-            ("modState", 4.0),
-            ("modFrequency", 2000.0),
-            ("modRadius", 3.0),
-        ):
-            prop = P.NumberVector(device="mod", name=name, state=C.PropertyState.OK)
-            for key in ("current", "target"):
-                prop.add_element(
-                    M.DefNumber(
-                        name=key, _value=value, min=0, max=10000, step=1, format="%g"
-                    )
-                )
-            self.props["mod", name] = prop
-        writer = SimpleNamespace(
-            running=lambda: self.writer_enabled, command=self.writer_command
-        )
-        self.runtime = Runtime(self.client, writer, "nn", "po4ao", "mod", timeout)
+        self.runtime = Runtime(self.client, "po4ao", timeout)
 
     def text(self, device, name, **values):
         """Create real text definitions with string-valued runtime fields."""
@@ -157,52 +127,10 @@ class Rig:
             vector[key] = value
         self.emit(vector)
 
-    def writer_command(self, enabled):
-        """Keep request delivery separate from verified FPS RUN completion."""
-        self.writer_calls.append(enabled)
-        if enabled or self.writer_stops:
-            self.writer_enabled = enabled
-
     def command(self, message):
-        """Simulate the donor's fault/quiescence and C++ request/after-frame semantics."""
+        """Simulate PO4AO request/after-frame semantics."""
         device, name = message.device, message.name
-        if device == "nn":
-            status = self.props["nn", "model_status"]
-            if name == "enable":
-                enabled = message["toggle"] == C.SwitchState.ON
-                self.update("nn", "enable", toggle=message["toggle"])
-                self.update(
-                    "nn",
-                    "model_status",
-                    active=status["loaded"] if enabled else "",
-                    status=(
-                        "active"
-                        if enabled
-                        else "fault: reload required" if status["error"] else "disabled"
-                    ),
-                )
-            elif name == "model":
-                selected = next(
-                    key for key in message if message[key] == C.SwitchState.ON
-                )
-                filename = self.props["nn", "model"]._elements[selected].label
-                for prop in ("model", "enable"):
-                    self.props["nn", prop].state = C.PropertyState.OK
-                    self.emit(self.props["nn", prop])
-                self.update(
-                    "nn",
-                    "model_status",
-                    requested=filename,
-                    loaded=filename,
-                    active="",
-                    status="disabled",
-                    error="",
-                )
-        elif device == "mod":
-            self.update(
-                device, name, current=message["target"], target=message["target"]
-            )
-        elif device == "po4ao":
+        if device == "po4ao":
             status = self.props["po4ao", "model_status"]
             if name == "control_enable":
                 target = "on" if message["toggle"] == C.SwitchState.ON else "off"
@@ -522,22 +450,22 @@ def test_timed_out_load_cannot_acknowledge_pause_until_eventual_completion(confi
 def test_real_client_cache_is_not_current_after_reconnect_or_device_deletion():
     """Use the actual retained cache rather than a fixture that clears it on reconnect."""
     rig = Rig()
-    assert rig.runtime.source() == "cacao"
+    assert rig.runtime.get("po4ao", "control_enable", "toggle") == C.SwitchState.OFF
     wire = rig.client.connection
     wire.status = C.ConnectionStatus.STOPPED
     wire.dispatch_callbacks(C.TransportEvent.disconnection, wire.status)
     wire.status = C.ConnectionStatus.CONNECTED
     wire.dispatch_callbacks(C.TransportEvent.connection, wire.status)
     assert (
-        rig.client["nn.model_status.loaded"] == "a.trt"
+        rig.client["po4ao.control_enable.toggle"] == C.SwitchState.OFF
     )  # The actual client retained its cache.
     with pytest.raises(ConnectionError):
-        rig.runtime.source()
+        rig.runtime.get("po4ao", "control_enable", "toggle")
     rig.runtime.observations.refresh()
-    assert rig.runtime.source() == "cacao"
-    rig.client.handle_message(M.DelProperty(device="nn"))
+    assert rig.runtime.get("po4ao", "control_enable", "toggle") == C.SwitchState.OFF
+    rig.client.handle_message(M.DelProperty(device="po4ao"))
     with pytest.raises(ConnectionError):
-        rig.runtime.source()
+        rig.runtime.get("po4ao", "control_enable", "toggle")
     rig.close()
 
 
@@ -550,9 +478,10 @@ def test_silent_device_expires_but_unchanged_fresh_definitions_renew_it(monkeypa
     )
     clock[0] += 6
     with pytest.raises(ConnectionError):
-        rig.runtime.source()
+        rig.runtime.get("po4ao", "control_enable", "toggle")
+    rig.props["po4ao", "model_status"]["sequence"] = "2"
     rig.runtime.observations.refresh()
-    assert rig.runtime.source() == "cacao"
+    assert rig.runtime.get("po4ao", "control_enable", "toggle") == C.SwitchState.OFF
     rig.close()
 
 
@@ -611,79 +540,6 @@ def test_reset_invalidates_already_issued_load_and_exact_reference(config):
     )
     assert rig.runtime.get("po4ao", "model_status", "active_id") == "0" * 16
     supervisor.close()
-    rig.close()
-
-
-@pytest.mark.parametrize("linked", [False, True])
-def test_active_nn_selection_is_noop_and_replacement_keeps_modulation(linked):
-    """R1 same-model no-op and R2 NN-to-NN replacement never touch CACAO/modulation."""
-    rig = Rig()
-    rig.writer_enabled = False
-    rig.update("nn", "enable", toggle=C.SwitchState.ON)
-    rig.update("nn", "model_status", status="active", active="a.trt")
-    rig.requests.clear()
-    rig.runtime.switch("nn", threading.Event(), model="a", linked=linked)
-    assert not rig.requests and not rig.writer_calls
-    rig.runtime.switch("nn", threading.Event(), model="b", linked=linked)
-    assert all(device == "nn" for device, _, _ in rig.requests)
-    assert not rig.writer_calls
-    assert rig.runtime.get("nn", "model_status", "active") == "b.trt"
-    rig.close()
-
-
-@pytest.mark.parametrize("target", ["nn", "cacao"])
-def test_confirmed_nn_fault_allows_recovery_without_claiming_activation(target):
-    """Fault plus confirmed Off/quiescence permits reload or CACAO recovery."""
-    rig = Rig()
-    rig.writer_enabled = False
-    rig.props["nn", "enable"].state = C.PropertyState.ALERT
-    rig.emit(rig.props["nn", "enable"])
-    rig.update(
-        "nn",
-        "model_status",
-        status="fault: reload required",
-        error="bad engine",
-        active="",
-    )
-    rig.props["nn", "model"].state = C.PropertyState.ALERT
-    rig.emit(rig.props["nn", "model"])
-    assert rig.runtime.source() == "stopped"
-    rig.runtime.switch(
-        target,
-        threading.Event(),
-        model="b" if target == "nn" else None,
-        expected="stopped",
-    )
-    assert rig.runtime.source() == target
-    rig.close()
-
-
-def test_unverified_writer_stop_never_enables_nn():
-    """The complete NN preparation path still requires actual CACAO RUN exit."""
-    rig = Rig(0.02)
-    rig.writer_stops = False
-    with pytest.raises(TimeoutError):
-        rig.runtime.switch("nn", threading.Event(), model="b")
-    assert not any(
-        name == "enable" and values["toggle"] == C.SwitchState.ON
-        for _, name, values in rig.requests
-    )
-    rig.close()
-
-
-def test_linked_handover_uses_configured_modulation_states():
-    """Hardware state numbers are mappings; the agreed CACAO frequency/radius remain fixed."""
-    rig = Rig()
-    rig.runtime.unmodulated_state, rig.runtime.modulated_state = 7.0, 8.0
-    rig.runtime.switch("nn", threading.Event(), linked=True, model="b")
-    rig.runtime.switch("cacao", threading.Event(), linked=True)
-    assert [
-        values["target"]
-        for device, name, values in rig.requests
-        if device == "mod" and name == "modState"
-    ] == [7.0, 8.0]
-    assert rig.runtime.get("mod", "modFrequency", "current") == 2000.0
-    assert rig.runtime.get("mod", "modRadius", "current") == 3.0
     rig.close()
 
 

@@ -1,5 +1,5 @@
 ## \file app.py
-# \brief Standard XDevice entry point for the shared NN/PO4AO GUI companion.
+# \brief Standard XDevice entry point for the optional PO4AO training companion.
 """Only the numerical child imports torch or opens training replay streams."""
 
 import math
@@ -8,7 +8,7 @@ import xconf
 from magaox.indi.device import XDevice, BaseConfig
 from purepyindi2 import properties, constants
 from purepyindi2.messages import DefText, DefSwitch, DefNumber
-from .switching import Runtime, MilkWriter
+from .switching import Runtime
 from .supervisor import Supervisor
 
 
@@ -16,22 +16,7 @@ from .supervisor import Supervisor
 class TrainerConfig(BaseConfig):
     """Shared device mappings, installed configuration paths and bounded operation deadlines."""
 
-    nn_device: str = xconf.field(
-        default="nnReconstructor", help="NN INDI device identity"
-    )
     po4ao_device: str = xconf.field(default="po4ao", help="C++ runtime INDI identity")
-    modulation_device: str = xconf.field(
-        default="modwfs", help="Modulation device identity"
-    )
-    fps_name: str = xconf.field(default="wfs2cmodeval-1", help="CACAO FPS writer name")
-    fps_fifo: str = xconf.field(
-        default="/milk/shm/tweeter-vispyr_fpsCTRL.fifo",
-        help="Existing FPS controller FIFO",
-    )
-    writer_process_match: str = xconf.field(
-        default="wfs2cmodeval",
-        help="Required substring of observed RUN process command line",
-    )
     training_config: str = xconf.field(
         default="/opt/MagAOX/config/po4ao_training.conf",
         help="Hot TOML training settings",
@@ -54,14 +39,8 @@ class TrainerConfig(BaseConfig):
     freshness_timeout: float = xconf.field(
         default=5.0, help="Maximum age of current-lifetime INDI observations"
     )
-    unmodulated_state: float = xconf.field(
-        default=3.0, help="Configured modwfs unmodulated SET state"
-    )
-    modulated_state: float = xconf.field(
-        default=4.0, help="Configured modwfs modulation-on state"
-    )
     operation_timeout: float = xconf.field(
-        default=30.0, help="NN/routing/model acknowledgement deadline"
+        default=30.0, help="PO4AO runtime acknowledgement deadline"
     )
     worker_timeout: float = xconf.field(
         default=120.0, help="Worker start/pause deadline"
@@ -96,34 +75,18 @@ class po4aoTrainer(XDevice):
             value = getattr(self.config, name)
             if not math.isfinite(value) or value <= 0:
                 raise ValueError(name + " must be finite and positive")
-        writer = MilkWriter(
-            self.config.fps_name, self.config.fps_fifo, self.config.writer_process_match
-        )
         runtime = Runtime(
             self.client,
-            writer,
-            self.config.nn_device,
             self.config.po4ao_device,
-            self.config.modulation_device,
             self.config.operation_timeout,
             freshness_timeout=self.config.freshness_timeout,
-            unmodulated_state=self.config.unmodulated_state,
-            modulated_state=self.config.modulated_state,
         )
         self.supervisor = Supervisor(runtime, self.config)
         self._heartbeat = 0
         self.log.info("PO4AO trainer source revision: %s", self.config.source_revision)
-        for device in (runtime.nn, runtime.po4ao, runtime.modulation):
-            self.client.get_properties(device)
+        self.client.get_properties(runtime.po4ao)
         self.text("fsm", {"state": "READY"})
-        self.text(
-            "devices",
-            {
-                "nn": runtime.nn,
-                "po4ao": runtime.po4ao,
-                "modulation": runtime.modulation,
-            },
-        )
+        self.text("devices", {"po4ao": runtime.po4ao})
         self.text("status", self.supervisor.status)
         self.text(
             "training_config",
@@ -135,10 +98,7 @@ class po4aoTrainer(XDevice):
                 "error": "",
             },
         )
-        self.text("nn_activate", {"model": ""}, writable=True)
-        self.text("reconstructor", {"target": "", "expected": ""}, writable=True)
         for name, elements in {
-            "link_modulation": ["toggle"],
             "po4ao_enable": ["toggle"],
             "reset": ["request"],
             "recollect": ["request"],
@@ -186,9 +146,6 @@ class po4aoTrainer(XDevice):
             try:
                 values = {key: message[key] for key in message}
                 required = {
-                    "nn_activate": {"model"},
-                    "reconstructor": {"target", "expected"},
-                    "link_modulation": {"toggle"},
                     "po4ao_enable": {"toggle"},
                     "reset": {"request"},
                     "recollect": {"request"},
@@ -196,17 +153,15 @@ class po4aoTrainer(XDevice):
                 }[prop.name]
                 if set(values) != required:
                     raise ValueError("Request elements do not match " + prop.name)
-                if prop.name not in ("nn_activate", "reconstructor"):
-                    if any(
-                        value
-                        not in (constants.SwitchState.ON, constants.SwitchState.OFF)
-                        for value in values.values()
-                    ):
-                        raise ValueError("Expected explicit On/Off switches")
-                    values = {
-                        key: value == constants.SwitchState.ON
-                        for key, value in values.items()
-                    }
+                if any(
+                    value not in (constants.SwitchState.ON, constants.SwitchState.OFF)
+                    for value in values.values()
+                ):
+                    raise ValueError("Expected explicit On/Off switches")
+                values = {
+                    key: value == constants.SwitchState.ON
+                    for key, value in values.items()
+                }
                 if prop.name in ("reset", "recollect") and not values["request"]:
                     return
                 if prop.name == "learning" and values["run"] == values["pause"]:
@@ -251,12 +206,6 @@ class po4aoTrainer(XDevice):
             for command, state, error in events:
                 prop = self.properties[command]
                 prop.state = constants.PropertyState(state)
-                if command == "link_modulation":
-                    prop["toggle"] = (
-                        constants.SwitchState.ON
-                        if self.supervisor.linked
-                        else constants.SwitchState.OFF
-                    )
                 self.update_property(prop)
 
     def teardown(self):

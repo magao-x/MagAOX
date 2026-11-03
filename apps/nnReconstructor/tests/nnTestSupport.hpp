@@ -315,6 +315,11 @@ struct IndiElement
     std::string     name, text;
     float           value = 0;
     SwitchStateType sw    = Off;
+    /// Match numeric request construction at the INDI boundary.
+    IndiElement( std::string n /**< [in] Element name. */, double value /**< [in] Numeric value. */ )
+        : name( std::move( n ) ), value( value )
+    {
+    }
     explicit IndiElement( std::string n, SwitchStateType s = Off ) : name( std::move( n ) ), sw( s )
     {
     }
@@ -422,6 +427,12 @@ struct IndiProperty
     {
         return device;
     }
+    /// Return the observed vector state.
+    PropertyStateType getState() const
+    {
+        return status;
+    }
+
     void setState( PropertyStateType v )
     {
         status = v;
@@ -520,6 +531,23 @@ struct logMessage
 template <bool>
 struct MagAOXApp
 {
+    /// Socket-free discovery boundary; no instrument connection is opened.
+    struct Driver
+    {
+        /// Ignore read-only discovery requests in the CPU fixture.
+        void sendGetProperties( const pcf::IndiProperty &property /**< [in] Requested vector. */ )
+        {
+            (void)property;
+        }
+    };
+    Driver                        *m_indiDriver{ nullptr }; ///< No live driver is owned by tests.
+    std::vector<pcf::IndiProperty> m_sent;                  ///< Recorded external control requests.
+    /// Record the production modulation command without network access.
+    int sendNewProperty( const pcf::IndiProperty &property /**< [in] Command payload. */ )
+    {
+        m_sent.push_back( property );
+        return 0;
+    }
     std::atomic<bool>        m_shutdown{ false };
     std::mutex               m_indiMutex;
     mx::app::appConfigurator config;
@@ -699,7 +727,9 @@ struct Map
 #define TELEMETER_APP_LOGIC
 #define SHMIMMONITOR_UPDATE_INDI
 #define FRAMEGRABBER_UPDATE_INDI
-#define REG_INDI_SETPROP( ... )
+#define REG_INDI_SETPROP( prop, dev, name )                                                                            \
+    ( prop ).setDevice( dev );                                                                                         \
+    ( prop ).setName( name )
 #define INDI_SETCALLBACK_DECL( cls, prop ) int setCallBack_##prop( const pcf::IndiProperty & )
 #define INDI_SETCALLBACK_DEFN( cls, prop ) int cls::setCallBack_##prop
 #define INDI_NEWCALLBACK_DECL( cls, prop ) int newCallBack_##prop( const pcf::IndiProperty & )
@@ -709,4 +739,5 @@ struct Map
     if( ( recv ).getName() != ( prop ).getName() )                                                                     \
     return -1
 /** \endcond */
+#include "cacaoWriter_test.hpp"
 #endif

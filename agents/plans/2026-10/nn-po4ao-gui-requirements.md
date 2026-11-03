@@ -8,6 +8,26 @@ Packaging revision, 2026-10-28: use a first-class installed `po4aoTrainer` Pytho
 
 Final scope decisions, 2026-11-02: start from `rlandman/po4ao-pr`, import the newer NN correctness/control implementation from `rlandman/nnreconstructor-correctness-controls` at `4353737e331671cd6a9b6aad5d92039c27f26715`, and import the newest committed `dlDataCollection` separately. Exclude the NN speedup changes, not the newer control functionality. Preserve notebook training and plots using the same numerical core as the installed app. The operator manages notebook/app training responsibilities; do not add notebook detection, session locks, leases, or ownership enforcement. Reuse current upstream GUI infrastructure. Include C++ recollection under the current active policy with exploration noise.
 
+NN-independence and labeling revision, 2026-11-03: the `nnReconstructor` app and
+its GUI controls must work with both `po4ao` and `po4aoTrainer` absent. Keep one GUI.
+The NN device owns `nn_activate`, `reconstructor`, `link_modulation`, and independent
+`reconstruction_status` readback/heartbeat. The GUI subscribes directly to that device;
+trainer discovery must not determine NN identity or availability. The trainer controls
+only PO4AO learning and its associated inference operations. Remove its competing NN
+switching implementation and Python `CacaoProcessTools` dependency. The native owner
+uses the existing NN disable/load/enable implementation and milk FPS metadata/FIFO;
+no numerical, inference-speedup, loop-state, or downstream-routing change is authorized.
+Build the FPS transport against the target's installed milk headers, not a copied ABI.
+
+The compact panel has **nnReconstructor** and **PO4AO** titles. The engine row reads
+**CNN Reconstructor:** and **Set reconstructor**. The compare button reads
+**Switch to CNN** while CACAO is observed, otherwise **Switch to CACAO**; it remains
+disabled for unknown/conflicting/transitional ownership. Confirmed stopped writers
+permit explicit CACAO recovery. These names supersede Engine/Enable/Switch reconstructor.
+Launcher: `po4aoGUI [po4ao-device [trainer-device [nn-device]]]`, defaulting to
+`po4ao`, `po4aoTrainer`, `nnReconstructor`. This revision supersedes all earlier wording
+placing NN operations, discovery, or writer/modulation configuration in the trainer.
+
 Notebook-independence revision, 2026-11-02: one `po4aoGUI` must support both the
 C++ runtime alone and the optional managed trainer. It replaces the existing launcher;
 do not add separate notebook and managed GUIs. Launch `po4aoGUI [po4ao-device
@@ -27,8 +47,8 @@ labelled trainer unavailable. Native controls read `fsm`, `model_status`,
 No native request controls notebook execution or Python objects. In notebook use,
 Disable selects the integrator, Reset clears the runtime policy, and the operator
 manages training/collection compatibility in the notebook. No automatic loop action
-or notebook ownership enforcement is added. The existing NN section still uses the
-companion and is unavailable without it; splitting NN is outside this correction.
+or notebook ownership enforcement is added. NN controls use their independent native
+backend as specified in the 2026-11-03 revision above.
 Trainer arrival/loss changes availability only: never replay or reroute a sent
 request. Keep unresolved local requests latched to their original device until
 acknowledgement or device invalidation. The same window supports both workflows.

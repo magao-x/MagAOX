@@ -1,7 +1,6 @@
 /** \file nnReconstructor_test.cpp
  * \brief Exercise the real app methods using deterministic CPU-only SDK doubles.
- * \defgroup nnReconstructor_unit_test nnReconstructor Unit Tests
- * \ingroup application_unit_test
+ * \ingroup nnReconstructor_unit_test
  */
 #define CATCH_CONFIG_MAIN
 #include "../../../tests/testXWC.hpp"
@@ -22,6 +21,28 @@ class nnReconstructor_test : public nnReconstructor
     /// Run the production startup and stream-attachment interfaces.
     void prepare( bool enabled /**< [in] Startup admission state. */                  = true,
                   bool discover /**< [in] Omit the optional configured model list. */ = false );
+
+    /// Send the independent compound activation callback.
+    int activate( int index /**< [in] Catalog index; invalid indices test rejection. */ );
+
+    /// Send an explicit writer handover request.
+    int switchTo( const std::string &target, /**< [in] Desired writer. */
+                  const std::string &expected /**< [in] Observed source. */ );
+
+    /// Advance production application control without starting real workers.
+    void switchStep();
+
+    /// Return the compound operation's current phase.
+    std::string switchPhase() const;
+
+    /// Enable the shared modulation preference through its callback.
+    void linkModulation();
+
+    /// Supply current modulation readbacks through the production subscription callbacks.
+    void modulationReadback();
+
+    /// Expire the current phase without sleeping.
+    void expireSwitch();
 
     /// Return the immutable startup catalog.
     std::vector<std::string> models() const;
@@ -111,6 +132,9 @@ class nnReconstructor_test : public nnReconstructor
 
 inline nnReconstructor_test::nnReconstructor_test()
 {
+    nnTest::cacaoRunning = false;
+    nnTest::cacaoKnown = nnTest::cacaoStopCompletes = nnTest::cacaoStartCompletes = nnTest::cacaoDelivery = true;
+    nnTest::cacaoCommands.clear();
     engineDirs = ".build/catalog";
     std::filesystem::remove_all( engineDirs );
     std::filesystem::create_directories( engineDirs );
@@ -148,6 +172,65 @@ inline void nnReconstructor_test::prepare( bool enabled, bool discover )
         throw std::runtime_error( "startup rejected" );
     allocate( dev::shmimT{} );
     configureAcquisition();
+}
+
+inline int nnReconstructor_test::activate( int index )
+{
+    pcf::IndiProperty request( pcf::IndiProperty::Text );
+    request.setName( "nn_activate" );
+    request.add( pcf::IndiElement( "model" ) );
+    request["model"] = index < 0 ? "invalid" : modelId( index );
+    return newCallBack_m_indiP_nnActivate( request );
+}
+
+inline int nnReconstructor_test::switchTo( const std::string &target, const std::string &expected )
+{
+    pcf::IndiProperty request( pcf::IndiProperty::Text );
+    request.setName( "reconstructor" );
+    request.add( pcf::IndiElement( "target" ) );
+    request.add( pcf::IndiElement( "expected" ) );
+    request["target"]   = target;
+    request["expected"] = expected;
+    return newCallBack_m_indiP_reconstructor( request );
+}
+
+inline void nnReconstructor_test::switchStep()
+{
+    updateControls();
+    updateReconstructorControls();
+}
+
+inline std::string nnReconstructor_test::switchPhase() const
+{
+    return m_switchPhase;
+}
+
+inline void nnReconstructor_test::linkModulation()
+{
+    pcf::IndiProperty request( pcf::IndiProperty::Switch );
+    request.setName( "link_modulation" );
+    request.add( pcf::IndiElement( "toggle", pcf::IndiElement::On ) );
+    newCallBack_m_indiP_linkModulation( request );
+}
+
+inline void nnReconstructor_test::modulationReadback()
+{
+    pcf::IndiProperty request( pcf::IndiProperty::Number );
+    request.add( pcf::IndiElement( "current" ) );
+    request.setName( "modState" );
+    request["current"] = m_switchTarget == "nn" ? 3.0 : 4.0;
+    setCallBack_m_indiP_modState( request );
+    request.setName( "modFrequency" );
+    request["current"] = 2000.0;
+    setCallBack_m_indiP_modFrequency( request );
+    request.setName( "modRadius" );
+    request["current"] = 3.0;
+    setCallBack_m_indiP_modRadius( request );
+}
+
+inline void nnReconstructor_test::expireSwitch()
+{
+    m_switchStarted -= std::chrono::seconds( 31 );
 }
 
 inline std::vector<std::string> nnReconstructor_test::models() const
@@ -1129,5 +1212,226 @@ TEST_CASE( "startup discovers compatible engines without an explicit list", "[nn
     REQUIRE( nnTest::runtimes == 0 );
     REQUIRE( nnTest::engines == 0 );
     REQUIRE( nnTest::contexts == 0 );
+}
+/** \brief Native activation loads after quiescence and stops CACAO before enabling NN. */
+TEST_CASE( "NN activation works without PO4AO or a trainer", "[nnReconstructor][independentNN]" )
+{
+    nnReconstructor_test app;
+    app.prepare( false );
+    nnTest::cacaoRunning = true;
+    REQUIRE( app.activate( 1 ) == 0 );
+    REQUIRE( app.activate( 0 ) < 0 ); // Another client cannot replace an accepted request.
+    app.switchStep();
+    REQUIRE( app.switchPhase() == "disabling" );
+    app.switchStep();
+    REQUIRE( app.switchPhase() == "loading" );
+    REQUIRE( nnTest::cacaoCommands.empty() );
+    REQUIRE( app.waitLoad() );
+    app.switchStep();
+    REQUIRE( app.loaded() == "second.trt" );
+    REQUIRE_FALSE( app.acknowledged() );
+    app.switchStep();
+    REQUIRE( nnTest::cacaoCommands == std::vector<bool>{ false } );
+    REQUIRE_FALSE( app.acknowledged() );
+    app.switchStep();
+    REQUIRE( app.switchPhase() == "starting_nn" );
+    REQUIRE( app.acknowledged() );
+    app.frame(); // First frame anchors the counter.
+    app.frame();
+    REQUIRE( app.claim() );
+    app.copy();
+    app.complete();
+    app.switchStep();
+    REQUIRE( app.switchPhase() == "idle" );
+    REQUIRE( app.m_sent.empty() );
+    // clang-format off
+#ifdef NNRECONSTRUCTOR_TEST_DOXYGEN_REF
+    MagAOX::app::nnReconstructor::requestReconstructor;
+    MagAOX::app::nnReconstructor::updateReconstructorControls;
+    MagAOX::app::nnReconstructor::startReconstructor;
+#endif
+    // clang-format on
+}
+
+/** \brief Replacing an active NN waits for zero publication and leaves modulation/CACAO alone. */
+TEST_CASE( "Native NN replacement and same-model no-op", "[nnReconstructor][independentNN]" )
+{
+    nnReconstructor_test app;
+    app.prepare();
+    app.frame();
+    REQUIRE( app.claim() );
+    app.copy();
+    app.complete();
+    app.linkModulation();
+    REQUIRE( app.activate( 0 ) == 0 );
+    app.switchStep();
+    REQUIRE( app.switchPhase() == "idle" );
+    REQUIRE( app.acknowledged() );
+    REQUIRE( app.activate( 1 ) == 0 );
+    app.switchStep();
+    app.switchStep();
+    REQUIRE( app.switchPhase() == "disabling" );
+    REQUIRE( app.loaded() == "first.trt" );
+    REQUIRE( app.claim() );
+    REQUIRE( app.copy() == std::vector<float>( 3, 0 ) );
+    app.complete();
+    app.switchStep();
+    REQUIRE( app.waitLoad() );
+    app.switchStep();
+    app.switchStep();
+    REQUIRE( app.switchPhase() == "starting_nn" );
+    REQUIRE( app.m_sent.empty() );
+    REQUIRE( nnTest::cacaoCommands.empty() );
+    // clang-format off
+#ifdef NNRECONSTRUCTOR_TEST_DOXYGEN_REF
+    MagAOX::app::nnReconstructor::requestEnabled;
+    MagAOX::app::nnReconstructor::requestModel;
+    MagAOX::app::nnReconstructor::updateReconstructorControls;
+#endif
+    // clang-format on
+}
+
+/** \brief Missing FPS evidence, a rejected load, or uncompleted stop must not activate NN. */
+TEST_CASE( "Native handover failures leave NN disabled", "[nnReconstructor][independentNN]" )
+{
+    nnReconstructor_test app;
+    app.prepare( false );
+    nnTest::cacaoRunning = true;
+    SECTION( "Unknown writer" )
+    {
+        nnTest::cacaoKnown = false;
+        REQUIRE( app.activate( 0 ) == 0 );
+        app.switchStep();
+        REQUIRE( app.switchPhase() == "error" );
+        REQUIRE( nnTest::cacaoCommands.empty() );
+    }
+    SECTION( "Uncompleted writer stop" )
+    {
+        nnTest::cacaoStopCompletes = false;
+        REQUIRE( app.activate( 0 ) == 0 );
+        for( int i = 0; i < 5; ++i )
+            app.switchStep();
+        REQUIRE( app.switchPhase() == "stopping_cacao" );
+        app.expireSwitch();
+        app.switchStep();
+        REQUIRE( app.switchPhase() == "error" );
+    }
+    SECTION( "Unavailable FIFO" )
+    {
+        nnTest::cacaoDelivery = false;
+        REQUIRE( app.activate( 0 ) == 0 );
+        for( int i = 0; i < 4; ++i )
+            app.switchStep();
+        REQUIRE( app.switchPhase() == "error" );
+    }
+    SECTION( "Load failure" )
+    {
+        std::filesystem::remove( ".build/catalog/second.trt" );
+        REQUIRE( app.activate( 1 ) == 0 );
+        app.switchStep();
+        app.switchStep();
+        REQUIRE( app.waitLoad() );
+        app.switchStep();
+        REQUIRE( app.switchPhase() == "error" );
+        REQUIRE( app.loaded() == "first.trt" );
+        REQUIRE( nnTest::cacaoCommands.empty() );
+    }
+    REQUIRE_FALSE( app.acknowledged() );
+    // clang-format off
+#ifdef NNRECONSTRUCTOR_TEST_DOXYGEN_REF
+    MagAOX::app::nnReconstructor::updateReconstructorControls;
+#endif
+    // clang-format on
+}
+
+/** \brief Linked comparison presets are acknowledged before the destination writer starts. */
+TEST_CASE( "Native linked handover uses current modulation readbacks", "[nnReconstructor][independentNN]" )
+{
+    nnReconstructor_test app;
+    app.prepare( false );
+    app.linkModulation();
+    const bool toNN      = GENERATE( true, false );
+    nnTest::cacaoRunning = toNN;
+    REQUIRE( app.switchTo( toNN ? "nn" : "cacao", toNN ? "cacao" : "stopped" ) == 0 );
+    for( int i = 0; i < 4; ++i )
+        app.switchStep();
+    REQUIRE( app.switchPhase() == "modulation" );
+    REQUIRE_FALSE( app.acknowledged() );
+    REQUIRE( app.m_sent.size() == ( toNN ? 1 : 3 ) );
+    REQUIRE( app.m_sent.back().getName() == "modState" );
+    REQUIRE( app.m_sent.back()["target"].get<double>() == ( toNN ? 3.0 : 4.0 ) );
+    if( !toNN )
+    {
+        REQUIRE( app.m_sent[0].getName() == "modFrequency" );
+        REQUIRE( app.m_sent[0]["target"].get<double>() == 2000.0 );
+        REQUIRE( app.m_sent[1]["target"].get<double>() == 3.0 );
+        REQUIRE( nnTest::cacaoCommands.empty() );
+    }
+    app.switchStep();
+    REQUIRE( app.switchPhase() == "modulation" );
+    app.modulationReadback();
+    app.switchStep();
+    REQUIRE( app.switchPhase() == ( toNN ? "starting_nn" : "starting_cacao" ) );
+    // clang-format off
+#ifdef NNRECONSTRUCTOR_TEST_DOXYGEN_REF
+    MagAOX::app::nnReconstructor::prepareModulation;
+    MagAOX::app::nnReconstructor::observeModulation;
+#endif
+    // clang-format on
+}
+
+/** \brief Expected-source mismatch and explicit disable cannot accidentally enable a queued model. */
+TEST_CASE( "Native handover validates intent and permits cancellation", "[nnReconstructor][independentNN]" )
+{
+    nnReconstructor_test app;
+    app.prepare( false );
+    REQUIRE( app.activate( -1 ) < 0 );
+    REQUIRE( app.switchTo( "nn", "cacao" ) == 0 );
+    app.switchStep();
+    REQUIRE( app.switchPhase() == "error" );
+    REQUIRE( app.activate( 1 ) == 0 );
+    app.switchStep();
+    app.switchStep();
+    REQUIRE( app.enable( true ) < 0 );
+    REQUIRE( app.select( 0 ) < 0 );
+    REQUIRE( app.enable( false ) == 0 );
+    REQUIRE( app.waitLoad() );
+    app.switchStep();
+    REQUIRE( app.switchPhase() == "error" );
+    REQUIRE_FALSE( app.acknowledged() );
+    REQUIRE( nnTest::cacaoCommands.empty() );
+    // clang-format off
+#ifdef NNRECONSTRUCTOR_TEST_DOXYGEN_REF
+    MagAOX::app::nnReconstructor::requestReconstructor;
+    MagAOX::app::nnReconstructor::newCallBack_m_indiP_enable;
+    MagAOX::app::nnReconstructor::newCallBack_m_indiP_model;
+#endif
+    // clang-format on
+}
+/** \brief A delivered but unobserved CACAO start cannot be followed by NN activation after timeout. */
+TEST_CASE( "Late CACAO start retains the handover barrier", "[nnReconstructor][independentNN]" )
+{
+    nnReconstructor_test app;
+    app.prepare( false );
+    nnTest::cacaoStartCompletes = false;
+    REQUIRE( app.switchTo( "cacao", "stopped" ) == 0 );
+    for( int i = 0; i < 4; ++i )
+        app.switchStep();
+    REQUIRE( app.switchPhase() == "starting_cacao" );
+    app.expireSwitch();
+    app.switchStep();
+    REQUIRE( app.switchPhase() == "awaiting_cacao" );
+    REQUIRE( app.activate( 0 ) < 0 );
+    REQUIRE( app.enable( false ) == 0 );
+    REQUIRE( app.activate( 0 ) < 0 );
+    nnTest::cacaoRunning = true;
+    app.switchStep();
+    REQUIRE( app.switchPhase() == "error" );
+    REQUIRE( app.switchTo( "nn", "cacao" ) == 0 );
+    // clang-format off
+#ifdef NNRECONSTRUCTOR_TEST_DOXYGEN_REF
+    MagAOX::app::nnReconstructor::updateReconstructorControls;
+#endif
+    // clang-format on
 }
 } // namespace libXWCTest::nnReconstructorTest

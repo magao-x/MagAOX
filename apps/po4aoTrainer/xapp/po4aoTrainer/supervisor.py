@@ -17,7 +17,7 @@ from .process import Worker, atomic_json
 
 
 class Supervisor:
-    """Serialize reconstruction and training separately, with reset-generation publication eligibility."""
+    """Serialize managed training with reset-generation publication eligibility."""
 
     def __init__(self, runtime, config, worker_factory=Worker):
         """Load persistent eligibility without automatically starting or reloading anything."""
@@ -62,7 +62,6 @@ class Supervisor:
         self.desired = self.applied = None
         self.config_error = ""
         self.pending_reset = ""
-        self.linked = False
         self.events = []
         self.domains = {
             name: dict(
@@ -72,14 +71,12 @@ class Supervisor:
                 command=None,
                 values={},
             )
-            for name in ("reconstruction", "training")
+            for name in ("training",)
         }
         self.status = dict(
             heartbeat="",
             collection_frames="0",
             collection_target="0",
-            reconstructor="unknown",
-            reconstruction_phase="idle",
             controller="unknown",
             learning=(
                 "resetting"
@@ -90,7 +87,6 @@ class Supervisor:
             collection="unknown",
             active_policy="",
             retained_policy=(self.record["eligible"] or {}).get("model_id", ""),
-            modulation="Unknown",
             message="",
             error="",
         )
@@ -134,11 +130,9 @@ class Supervisor:
 
     def submit(self, command, values):
         """Admit a request quickly; callbacks never wait for processes or device transitions."""
-        domain = (
-            "reconstruction"
-            if command in ("nn_activate", "reconstructor", "link_modulation")
-            else "training"
-        )
+        if command not in ("reset", "po4ao_enable", "recollect", "learning", "publish"):
+            raise ValueError("Unknown PO4AO training command: " + command)
+        domain = "training"
         with self.lock:
             operation = self.domains[domain]
             if domain == "training" and command != "reset":
@@ -235,18 +229,7 @@ class Supervisor:
         if cancel.is_set() and command != "publish":
             raise InterruptedError("Operation cancelled")
         r = self.runtime
-        if command == "link_modulation":
-            self.linked = values["toggle"]
-        elif command == "nn_activate":
-            r.switch("nn", cancel, linked=self.linked, model=values["model"])
-        elif command == "reconstructor":
-            r.switch(
-                values["target"],
-                cancel,
-                linked=self.linked,
-                expected=values["expected"],
-            )
-        elif command == "reset":
+        if command == "reset":
             try:
                 if not values.get("external"):
                     ticket = (
@@ -587,10 +570,6 @@ class Supervisor:
         """Refresh observed status independently of operation/button history."""
         r = self.runtime
         try:
-            self.status["reconstructor"] = r.source()
-        except Exception:
-            self.status["reconstructor"] = "unknown"
-        try:
             effective = r.get(r.po4ao, "model_status", "effective_controller")
             from purepyindi2.constants import SwitchState
 
@@ -619,10 +598,6 @@ class Supervisor:
             self.status.update(
                 controller="unknown", active_policy="", collection="unknown"
             )
-        try:
-            self.status["modulation"] = str(r.get(r.modulation, "modState", "current"))
-        except Exception:
-            self.status["modulation"] = "Unknown"
 
     def tick(self):
         """Drain worker events and completed operations; drive heartbeat/config without blocking callbacks."""

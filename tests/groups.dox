@@ -52,8 +52,13 @@ $ bash ./testMagAOX.bash
  * \ingroup unit_test
  */
 
+/** \defgroup nnReconstructor_unit_test nnReconstructor Unit Tests
+ * \brief Reconstruction, native handover and FPS/FIFO transport tests.
+ * \ingroup application_unit_test
+ */
+
 /** \defgroup po4aoTrainer_unit_test PO4AO Trainer Unit Tests
- * \brief Offline configuration, worker lifecycle, publication and switching tests.
+ * \brief Offline configuration, worker lifecycle and PO4AO publication tests.
  * \ingroup application_unit_test
  */
 

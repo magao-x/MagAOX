@@ -40,7 +40,7 @@ struct Fixture
 {
     Publisher m_publisher; ///< Real dispatcher using a socket-free transport.
 
-    xqt::learningCtrl m_widget{ "trainer" }; ///< Production widget under test.
+    xqt::learningCtrl m_widget{ "trainer", nullptr, "po4ao", "nn_test" }; ///< Production widget under test.
 
     /// Connect and define representative independent control domains.
     explicit Fixture( bool companion = true /**< [in] Define the optional trainer on startup. */ );
@@ -48,6 +48,9 @@ struct Fixture
     /// Define native runtime state independently of any trainer.
     void runtime( bool               enabled  = false, /**< [in] Applied control selection. */
                   const std::string &instance = "runtime-1" /**< [in] Process identity. */ );
+
+    /// Define independent NN capabilities without a trainer or PO4AO device.
+    void nn();
 
     /// Redefine the representative device properties for all attached clients.
     void ready();
@@ -144,9 +147,7 @@ void Fixture::ready()
 {
     define( text( "trainer", "fsm", { { "state", "READY" } } ) );
     define( text( "trainer", "devices", { { "nn", "nn_test" }, { "po4ao", "po4ao" } } ) );
-    define( text( "trainer", "nn_activate", { { "model", "" } } ) );
-    define( text( "trainer", "reconstructor", { { "target", "" }, { "expected", "" } } ) );
-    for( const auto *name : { "po4ao_enable", "link_modulation", "reset", "recollect", "learning" } )
+    for( const auto *name : { "po4ao_enable", "reset", "recollect", "learning" } )
     {
         pcf::IndiProperty property( pcf::IndiProperty::Switch, "trainer", name );
         property.setPerm( pcf::IndiProperty::ReadWrite );
@@ -162,18 +163,7 @@ void Fixture::ready()
                 pcf::IndiElement::Off ) );
         define( property );
     }
-    pcf::IndiProperty catalog( pcf::IndiProperty::Switch, "nn_test", "model" );
-    for( const auto &entry :
-         { std::make_pair( "engine0", "model-a.trt" ), std::make_pair( "engine1", "model-b.trt" ) } )
-    {
-        pcf::IndiElement element( entry.first, pcf::IndiElement::Off );
-        element.setLabel( entry.second );
-        catalog.add( element );
-    }
-    define( catalog );
-    define( text( "nn_test",
-                  "model_status",
-                  { { "requested", "model-a.trt" }, { "loaded", "model-a.trt" }, { "active", "" } } ) );
+    nn();
     define( text( "trainer",
                   "status",
                   { { "heartbeat", "0" },
@@ -192,6 +182,38 @@ void Fixture::ready()
     status( { { "heartbeat", "1" } } );
 }
 
+void Fixture::nn()
+{
+    define( text( "nn_test", "fsm", { { "state", "OPERATING" } } ) );
+    define( text( "nn_test", "nn_activate", { { "model", "" } } ) );
+    define( text( "nn_test", "reconstructor", { { "target", "" }, { "expected", "" } } ) );
+    auto link = runtimeSwitch( "link_modulation", false );
+    link.setDevice( "nn_test" );
+    define( link );
+    define( text( "nn_test",
+                  "reconstruction_status",
+                  { { "instance", "nn-1" },
+                    { "heartbeat", "0" },
+                    { "reconstructor", "cacao" },
+                    { "phase", "idle" },
+                    { "modulation", "Off" },
+                    { "error", "" } } ) );
+    pcf::IndiProperty catalog( pcf::IndiProperty::Switch, "nn_test", "model" );
+    for( const auto &entry :
+         { std::make_pair( "engine0", "model-a.trt" ), std::make_pair( "engine1", "model-b.trt" ) } )
+    {
+        pcf::IndiElement element( entry.first, pcf::IndiElement::Off );
+        element.setLabel( entry.second );
+        catalog.add( element );
+    }
+    define( catalog );
+    define( text( "nn_test",
+                  "model_status",
+                  { { "requested", "model-a.trt" }, { "loaded", "model-a.trt" }, { "active", "" } } ) );
+    m_publisher.handleSetProperty( text( "nn_test", "reconstruction_status", { { "heartbeat", "1" } } ) );
+    drain();
+}
+
 void Fixture::define( const pcf::IndiProperty &property )
 {
     m_publisher.handleDefProperty( property );
@@ -201,6 +223,12 @@ void Fixture::define( const pcf::IndiProperty &property )
 void Fixture::status( std::initializer_list<std::pair<std::string, std::string>> elements )
 {
     m_publisher.handleSetProperty( text( "trainer", "status", elements ) );
+    for( const auto &entry : elements )
+        if( entry.first == "reconstructor" || entry.first == "reconstruction_phase" )
+            m_publisher.handleSetProperty(
+                text( "nn_test",
+                      "reconstruction_status",
+                      { { entry.first == "reconstruction_phase" ? "phase" : entry.first, entry.second } } ) );
     drain();
 }
 
@@ -212,7 +240,8 @@ void Fixture::runtimeStatus( std::initializer_list<std::pair<std::string, std::s
 
 void Fixture::acknowledge( const std::string &name, pcf::IndiProperty::PropertyStateType state )
 {
-    pcf::IndiProperty property( pcf::IndiProperty::Text, "trainer", name );
+    const bool        nn = name == "nn_activate" || name == "reconstructor" || name == "link_modulation";
+    pcf::IndiProperty property( pcf::IndiProperty::Text, nn ? "nn_test" : "trainer", name );
     property.setState( state );
     m_publisher.handleSetProperty( property );
     drain();
@@ -257,7 +286,7 @@ TEST_CASE( "NN selection is staged until Enable", "[learningCtrl]" )
     f.m_widget.on_buttonEnableNN_clicked();
     REQUIRE( f.m_publisher.m_commands.size() == 1 );
     const auto &command = f.m_publisher.m_commands.back();
-    REQUIRE( command.getDevice() == "trainer" );
+    REQUIRE( command.getDevice() == "nn_test" );
     REQUIRE( command.getName() == "nn_activate" );
     REQUIRE( command["model"].get<std::string>() == "engine1" );
     REQUIRE_FALSE( f.control<QPushButton>( "buttonReconstructor" )->isEnabled() );
@@ -318,8 +347,8 @@ TEST_CASE( "Learning and PO4AO labels follow acknowledgements", "[learningCtrl]"
     REQUIRE( f.m_publisher.m_commands.back()["run"].getSwitchState() == pcf::IndiElement::On );
 }
 
-/** \brief Remaining controls send only companion commands and never direct hardware operations. */
-TEST_CASE( "Modulation reset and warmup use companion requests", "[learningCtrl]" )
+/** \brief Each domain sends requests only to its own backend. */
+TEST_CASE( "Modulation and PO4AO requests use independent backends", "[learningCtrl]" )
 {
     Fixture f;
     f.m_widget.on_checkModulation_clicked( true );
@@ -331,7 +360,7 @@ TEST_CASE( "Modulation reset and warmup use companion requests", "[learningCtrl]
     f.m_widget.on_buttonReset_clicked(); // Reset remains available to cancel a running operation.
     REQUIRE( f.m_publisher.m_commands.back().getName() == "reset" );
     for( const auto &command : f.m_publisher.m_commands )
-        REQUIRE( command.getDevice() == "trainer" );
+        REQUIRE( command.getDevice() == ( command.getName() == "link_modulation" ? "nn_test" : "trainer" ) );
 }
 
 /** \brief Unknown/conflicting reconstructor evidence is not interpreted as CACAO active. */
@@ -374,24 +403,53 @@ TEST_CASE( "Catalog and device lifecycle preserve staged selection safely", "[le
     REQUIRE_FALSE( f.control<QPushButton>( "buttonReset" )->isEnabled() );
 }
 
-/** \brief Changing the configured NN device invalidates the old catalog and ignores its later readbacks. */
-TEST_CASE( "NN mapping changes invalidate stale definitions", "[learningCtrl]" )
+/** \brief Optional trainer mapping changes and deletion cannot change NN subscriptions. */
+TEST_CASE( "NN controls are independent of trainer discovery", "[learningCtrl][independentNN]" )
+{
+    Fixture f( false );
+    f.nn();
+    auto *combo = f.control<QComboBox>( "comboEngine" );
+    combo->setCurrentIndex( 1 );
+    REQUIRE( f.control<QLabel>( "labelNNTitle" )->text() == "nnReconstructor" );
+    REQUIRE( f.control<QLabel>( "labelPO4AOTitle" )->text() == "PO4AO" );
+    REQUIRE( f.control<QLabel>( "labelEngine" )->text() == "CNN Reconstructor:" );
+    REQUIRE( f.control<QPushButton>( "buttonEnableNN" )->text() == "Set reconstructor" );
+    REQUIRE( f.control<QPushButton>( "buttonReconstructor" )->text() == "Switch to CNN" );
+    REQUIRE( f.control<QPushButton>( "buttonEnableNN" )->isEnabled() );
+    REQUIRE_FALSE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
+    f.define( text( "trainer", "devices", { { "nn", "new_nn" } } ) );
+    f.erase( "trainer", "" );
+    REQUIRE( combo->count() == 2 );
+    REQUIRE( combo->currentIndex() == 1 );
+    f.m_widget.on_buttonEnableNN_clicked();
+    REQUIRE( f.m_publisher.m_commands.size() == 1 );
+    REQUIRE( f.m_publisher.m_commands.back().getDevice() == "nn_test" );
+    REQUIRE( f.m_publisher.m_commands.back().getName() == "nn_activate" );
+    f.complete( "nn_activate" );
+    f.status( { { "reconstructor", "nn" } } );
+    REQUIRE( f.control<QPushButton>( "buttonReconstructor" )->text() == "Switch to CACAO" );
+    f.m_widget.on_buttonReconstructor_clicked();
+    REQUIRE( f.m_publisher.m_commands.back().getDevice() == "nn_test" );
+    REQUIRE( f.m_publisher.m_commands.back()["target"].get() == "cacao" );
+}
+
+/** \brief An NN restart invalidates NN controls without invalidating an available trainer. */
+TEST_CASE( "Independent NN restart requires fresh capabilities", "[learningCtrl][independentNN]" )
 {
     Fixture f;
-    auto   *combo = f.control<QComboBox>( "comboEngine" );
-    combo->setCurrentIndex( 1 );
-    f.define( text( "trainer", "devices", { { "nn", "new_nn" } } ) );
-    REQUIRE( combo->count() == 0 );
-    pcf::IndiProperty old( pcf::IndiProperty::Switch, "nn_test", "model" );
-    old.add( pcf::IndiElement( "stale", pcf::IndiElement::On ) );
-    f.define( old );
-    REQUIRE( combo->count() == 0 );
-    pcf::IndiProperty fresh( pcf::IndiProperty::Switch, "new_nn", "model" );
-    fresh.add( pcf::IndiElement( "new", pcf::IndiElement::Off ) );
-    f.define( fresh );
-    REQUIRE( combo->count() == 1 );
-    REQUIRE( combo->currentIndex() == -1 );
+    f.m_publisher.handleSetProperty(
+        text( "nn_test", "reconstruction_status", { { "instance", "nn-2" }, { "heartbeat", "0" } } ) );
+    drain();
+    REQUIRE_FALSE( f.control<QPushButton>( "buttonReconstructor" )->isEnabled() );
+    REQUIRE( f.control<QComboBox>( "comboEngine" )->count() == 0 );
+    REQUIRE( f.control<QPushButton>( "buttonLearning" )->isEnabled() );
     REQUIRE( f.m_publisher.m_commands.empty() );
+    // clang-format off
+#ifdef LEARNINGCTRL_TEST_DOXYGEN_REF
+    xqt::learningCtrl::observeHeartbeat;
+    xqt::learningCtrl::handleDelProperty;
+#endif
+    // clang-format on
 }
 
 /** \brief Reconnection discards request state and never replays commands; read-only properties stay disabled. */
@@ -404,7 +462,7 @@ TEST_CASE( "Disconnect and permissions prevent stale commands", "[learningCtrl]"
     f.m_widget.onConnect();
     REQUIRE_FALSE( f.control<QPushButton>( "buttonLearning" )->isEnabled() );
     REQUIRE( f.m_publisher.m_commands.size() == 1 );
-    auto command = text( "trainer", "nn_activate", { { "model", "" } } );
+    auto command = text( "nn_test", "nn_activate", { { "model", "" } } );
     command.setPerm( pcf::IndiProperty::ReadOnly );
     f.define( command );
     REQUIRE_FALSE( f.control<QPushButton>( "buttonEnableNN" )->isEnabled() );
@@ -428,7 +486,7 @@ TEST_CASE( "Acknowledgement timeout does not imply remote completion", "[learnin
 TEST_CASE( "Two GUI clients share readbacks without toggling optimistically", "[learningCtrl]" )
 {
     Fixture           first;
-    xqt::learningCtrl second( "trainer" );
+    xqt::learningCtrl second( "trainer", nullptr, "po4ao", "nn_test" );
     first.m_publisher.addSubscriber( &second );
     first.m_publisher.onConnect();
     drain();
@@ -449,7 +507,7 @@ TEST_CASE( "Stopped writers expose explicit recovery", "[learningCtrl]" )
     f.control<QComboBox>( "comboEngine" )->setCurrentIndex( 1 );
     f.status( { { "reconstructor", "stopped" }, { "reconstruction_phase", "error" } } );
     REQUIRE( f.control<QPushButton>( "buttonEnableNN" )->isEnabled() );
-    REQUIRE( f.control<QPushButton>( "buttonReconstructor" )->text() == "Use CACAO" );
+    REQUIRE( f.control<QPushButton>( "buttonReconstructor" )->text() == "Switch to CACAO" );
     f.m_widget.on_buttonReconstructor_clicked();
     REQUIRE( f.m_publisher.m_commands.back()["expected"].get() == "stopped" );
     REQUIRE( f.m_publisher.m_commands.back()["target"].get() == "cacao" );
@@ -499,6 +557,15 @@ TEST_CASE( "Companion status expires until heartbeat advances", "[learningCtrl]"
     REQUIRE( f.control<QLabel>( "labelReconstructor" )->text().contains( "Unknown" ) );
     f.status( { { "heartbeat", "2" } } );
     REQUIRE( f.control<QPushButton>( "buttonReset" )->isEnabled() );
+    REQUIRE_FALSE( f.control<QPushButton>( "buttonReconstructor" )->isEnabled() );
+    f.define(
+        text( "nn_test",
+              "reconstruction_status",
+              { { "instance", "nn-1" }, { "heartbeat", "1" }, { "reconstructor", "cacao" }, { "phase", "idle" } } ) );
+    REQUIRE_FALSE( f.control<QPushButton>( "buttonReconstructor" )->isEnabled() );
+    f.m_publisher.handleSetProperty( text( "nn_test", "reconstruction_status", { { "heartbeat", "2" } } ) );
+    drain();
+    REQUIRE( f.control<QPushButton>( "buttonReconstructor" )->isEnabled() );
     f.erase( "trainer", "status" );
     f.define( text( "trainer", "status", { { "heartbeat", "2" } } ) );
     REQUIRE_FALSE( f.control<QPushButton>( "buttonReset" )->isEnabled() );
