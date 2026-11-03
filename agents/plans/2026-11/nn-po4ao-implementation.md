@@ -511,3 +511,39 @@ instrument build remain with the operator.
 Affected files: `apps/nnReconstructor/Makefile`, `cacaoWriter.cpp`,
 `tests/Makefile`, `tests/cacaoWriter_test.cpp`, `tests/test_cacao_writer_build.py`,
 `README.md`, and this record. No shared build rules or AGENTS.md changes.
+
+## Trainer startup dependency and diagnostics, 2026-11-03
+
+The captured startup traceback fails in purepyindi2's FIFO constructor before
+trainer setup. Revision `c26a8276c95b95aef145c50439e291b782eab190` resolves a default
+`ctrl_path` but calls `os.open(self.indiserver_ctrl_path)`, which is still `None`.
+The failure appears only when the server control FIFO exists, so imports and the
+previous socket-free property tests did not catch it. The subsequent `_telem_file`
+destructor exception follows partial XDevice construction.
+
+Use purepyindi2 `6595f5770d84fcf010223e317e07c970a8ba3f17` in the dedicated trainer
+environment. The entire upstream diff from that revision to the previous pin is
+the faulty automatic-registration addition. This restores the existing
+configured-driver handshake without modifying XDevice or patching site-packages.
+It supersedes the earlier dependency pin recorded above. The user performs the
+package replacement and startup; no instrument changes were made in this increment.
+
+The new FIFO startup regression constructs the real dependency transport in a
+temporary directory with and without an `indiserver.ctrl` FIFO. Only the fixture's
+allowed username and handle cleanup are substituted; no server or worker starts.
+It reproduces `os.open(None)` with the former pin and passes with the selected
+revision. Full trainer validation with that revision: **101 tests and 15 subtests
+passed**, with 9 existing plotting warnings. GPU and live INDI startup remain
+operator validation; this is transport construction and CPU validation only.
+
+The operator also reported `NameError: name '_brief_status' is not defined`.
+Local `scripts/xctrl` confirms that `peek` calls an undefined helper; this is
+independent of the trainer failure. The deployment guide now uses tmux capture
+for startup tracebacks and `status` for process liveness. It uses `startup` for
+the failed trainer because this xctrl's targeted `restart` also selects isRTC.
+No shared xctrl code was changed. The guide also carries forward the previously
+agreed isolated Python installation, explicit notebook package versions, shared
+directory permissions, and actual Enable PO4AO button label.
+
+Affected files: `apps/po4aoTrainer/tests/test_fifo_startup.py`,
+`apps/po4aoTrainer/DEPLOYMENT.md`, and this record.
