@@ -547,3 +547,36 @@ directory permissions, and actual Enable PO4AO button label.
 
 Affected files: `apps/po4aoTrainer/tests/test_fifo_startup.py`,
 `apps/po4aoTrainer/DEPLOYMENT.md`, and this record.
+
+## Trainer output prevents driver startup flush, 2026-11-03
+
+The operator supplied process and log evidence: trainer PID 3527998 completed
+setup at 13:37:44 UTC; isRTC PID 3530456 started at 13:42:37 UTC with the correct
+trainer driver, PID 3530704. Its log completes the trainer `.in` FIFO flush and
+then stops at `Starting flush ... po4aoTrainer.out`. No heartbeat is served.
+This confirms that the driver is registered but cannot complete its output flush.
+
+`INDI/xindidriver/xindidriver.cpp::flushFIFO` drains until a one-second quiet gap.
+The supplied trainer config used a 0.2-second main-loop interval; each iteration
+unconditionally publishes status, configuration and progress, so the output FIFO
+never becomes quiet. A temporary local C++ harness compiled the production
+`flushFIFO` function unchanged and used a real temporary FIFO: 5 Hz writes kept
+the flush active for the entire four-second probe; stopping writes let it finish
+one second after the last write. A two-second update interval permits completion.
+Only local temporary files/processes were used; the instrument evidence was
+provided by the operator.
+
+Change the supplied `sleep_interval_sec` to 2.0 and document the same one-line
+change for existing installations. This is the smallest configuration correction;
+no shared driver, framework, GUI or numerical implementation changes. Supervisor
+polling and periodic status/publication handling now occur every two seconds,
+still within the GUI's five-second heartbeat window and the default 30-second
+worker heartbeat timeout. Command callbacks run separately; real-time C++
+inference and the numerical worker's training loop retain their own cadence.
+
+The operator should restart only po4aoTrainer with shutdown/startup, keeping isRTC
+running. The updated interval is parsed from the distributed TOML config locally.
+Recovery and heartbeat advancement on the instrument remain to be verified.
+
+Affected files: `apps/po4aoTrainer/configs/po4aoTrainer.conf`,
+`apps/po4aoTrainer/DEPLOYMENT.md`, and this record.
