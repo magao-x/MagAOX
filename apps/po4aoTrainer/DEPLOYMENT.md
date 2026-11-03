@@ -29,9 +29,9 @@ xctrl shutdown nnReconstructor && make -C apps/nnReconstructor install && \
   xctrl startup nnReconstructor
 xctrl shutdown po4ao && make -C apps/po4ao install && xctrl startup po4ao
 xctrl status nnReconstructor
-xctrl peek nnReconstructor
+sudo -u xsup tmux capture-pane -p -t nnReconstructor -S -80
 xctrl status po4ao
-xctrl peek po4ao
+sudo -u xsup tmux capture-pane -p -t po4ao -S -80
 ```
 
 Keep the backup path and verify the recorded route/calibration identify the previous
@@ -115,19 +115,25 @@ uses `CacaoProcessTools`, so no milk Python module build is needed:
 
 ```sh
 cd /home/rlandman/MagAOX
-sudo /opt/conda/bin/conda create -y -n po4aoTrainer --clone /opt/conda/envs/torchpy
+sudo /opt/conda/bin/conda create -y --copy -n po4aoTrainer --clone /opt/conda/envs/torchpy
 TRAIN_PY=/opt/conda/envs/po4aoTrainer/bin/python
-sudo -H "$TRAIN_PY" -m pip install \
+sudo -H "$TRAIN_PY" -I -m pip install --index-url https://download.pytorch.org/whl/cu128 torch==2.10.0
+sudo -H "$TRAIN_PY" -I -m pip install \
+  numpy==2.0.0 onnx==1.20.1 onnxscript==0.6.2 onnx-ir==0.2.0 \
   'xconf @ git+https://github.com/xwcl/xconf.git@d6f4de40bd290510bfe191b777d85d36b467d0ce' \
-  'purepyindi2 @ git+https://github.com/xwcl/purepyindi2.git@c26a8276c95b95aef145c50439e291b782eab190'
-sudo -H "$TRAIN_PY" -m pip install ./magaox-python
-make -C apps/po4aoTrainer INSTRUMENT_CONDA_ENV=po4aoTrainer install
+  'purepyindi2 @ git+https://github.com/xwcl/purepyindi2.git@6595f5770d84fcf010223e317e07c970a8ba3f17' \
+  ./magaox-python
+make -C apps/po4aoTrainer INSTRUMENT_CONDA_ENV=po4aoTrainer PYTHON="$TRAIN_PY -I" install
 cp -i apps/po4aoTrainer/configs/{po4aoTrainer.conf,po4ao_training.conf} /opt/MagAOX/config/
-sudo install -d -o xsup -g "$(id -gn xsup)" -m 2755 \
+sudo install -d -o xsup -g magaox -m 2775 \
   /data/po4aoTrainer /opt/MagAOX/logs/po4aoTrainer /opt/MagAOX/telem/po4aoTrainer
+"$TRAIN_PY" -I -m pip check
 ```
 
-Skip environment creation if it already exists. For an older trainer config, remove
+Skip environment creation if it already exists. Cloning does not copy the notebook's
+user-site packages; the explicit numerical versions above match the previously
+inspected notebook environment. Isolated Python (`-I`) avoids imports from a home
+directory. For an older trainer config, remove
 `nn_device`, `modulation_device`, `fps_name`, `fps_fifo`, `writer_process_match`,
 `unmodulated_state`, and `modulated_state`; NN configuration now belongs in
 `nnReconstructor.conf` (`recon` section). Review the two config files:
@@ -155,14 +161,14 @@ Run the checker as the runtime account (`xsup`); then start the apps:
 
 ```sh
 cd /tmp
-sudo -u xsup env -u PYTHONPATH /opt/conda/envs/po4aoTrainer/bin/python -m xapp.po4aoTrainer.check_deployment
-xctrl restart po4ao
+sudo -u xsup /opt/conda/envs/po4aoTrainer/bin/python -I -m xapp.po4aoTrainer.check_deployment
+xctrl shutdown po4ao && xctrl startup po4ao
 xctrl startup po4aoTrainer
 xctrl status po4aoTrainer
-xctrl peek po4aoTrainer
+sudo -u xsup tmux capture-pane -p -t po4aoTrainer -S -80
 ```
 
-In the same GUI: **Reset → wait → Enable fallback → collection Ready/full target →
+In the same GUI: **Reset → wait → Enable PO4AO → collection Ready/full target →
 Start learning**. Start alone does not acquire initial warmup. Reverify downstream
 routing after configuration changes. Confirm real export/reload and matching model ID,
 then test Pause/Resume, Disable/Enable, Recollect and Reset. Disable pauses learning;
@@ -174,6 +180,29 @@ GUI. Before accepting managed operation, test delayed loads, other-client operat
 trainer loss/return and status recovery, and measure latency during training/export.
 
 ## Recovery
+
+`Session po4aoTrainer does not exist` is normal on first startup; it should be
+followed by session creation. Use `xctrl status po4aoTrainer` and the tmux capture
+above to distinguish a missing session from a crashed app. In this `xctrl` version,
+`peek` calls the missing `_brief_status` function; its `NameError` is a log-command
+failure, not evidence that the app failed.
+
+If an earlier installation used purepyindi2 `c26a8276`, its FIFO constructor fails
+with `os.open(None)` when `indiserver.ctrl` exists. Replace only that package in the
+dedicated environment, then start the failed trainer:
+
+```sh
+sudo -H /opt/conda/envs/po4aoTrainer/bin/python -I -m pip install --no-deps --force-reinstall \
+  'purepyindi2 @ git+https://github.com/xwcl/purepyindi2.git@6595f5770d84fcf010223e317e07c970a8ba3f17'
+xctrl startup po4aoTrainer
+xctrl status po4aoTrainer
+sudo -u xsup tmux capture-pane -p -t po4aoTrainer -S -80
+```
+
+This revision keeps the standard configured-driver FIFO handshake and predates the
+broken automatic registration code. No environment rebuild or INDI-server restart
+is needed for this dependency correction. Use `startup` for this failed process:
+in this `xctrl` version, `restart po4aoTrainer` also adds the role's INDI server.
 
 On Alert, inspect readback/logs before retrying. Missing frames can leave Reset
 pending; a lost managed worker session requires Reset. To return to the notebook,
