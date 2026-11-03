@@ -45,7 +45,7 @@ make -C apps/dmSyncopation &&
 make -C apps/dmSyncopation install
 ```
 
-The installed binary must expose `zero_test.labelVersion=6` and
+The installed binary must expose `zero_test.labelVersion=7` and
 `zero_test.idealPublisher=1`; an older coordinated-trial binary does not have
 the current progress/reporting interface. Only dmSyncopation needs rebuilding.
 The 8 kHz option also requires the updated app's four-step support and capture
@@ -124,7 +124,7 @@ After restarting, check the new mode's readbacks while enable remains Off:
 timeout -k 2s 8s getINDI dmtweeter-synco.zero_test
 ```
 
-Expect `labelVersion=6`, `idealPublisher=1`, `enabled=1` and a valid, fresh
+Expect `labelVersion=7`, `idealPublisher=1`, `enabled=1` and a valid, fresh
 progress snapshot. `eventStride=4` is the default successful-event sampling
 described below; it does not reduce the command rate or timing populations.
 No `scheduler.maxCadenceHz=8000` setting is needed for the 8 kHz trial. This
@@ -144,16 +144,18 @@ are. The changed settings are:
 [zeroTest]
 publicationAdvanceUs=5
 lateUs=2
+wakeAheadUs=10
 ```
 
 Restart dmSyncopation, leaving enable Off, then start with:
 
 ```bash
-bash apps/dmSyncopation/scripts/capture-zero-aux-test.sh 8000 10 5
+bash apps/dmSyncopation/scripts/capture-zero-aux-test.sh 8000 10 5 10
 ```
 
-The last argument verifies the configured 5 us advance; it does not change that
-startup setting. After reviewing the short capture, use `8000 120 5` for the
+The last two arguments verify the configured 5 us advance and 10 us early wake;
+they do not change either startup setting. After reviewing the short capture,
+use `8000 120 5 10` for the
 long run. Only dmSyncopation needs rebuilding and restarting; no logdump or DM
 controller change is required.
 
@@ -167,10 +169,29 @@ per-frame feedback or catch-up. All reader-clearance checks remain active.
 Mean phase, jitter/tails, skip fractions and controller admission must be
 reviewed together before further tuning.
 
+The early-wake mode addresses the failed first compensated capture, which
+skipped about 10% of auxiliary occurrences while sleeping toward the
+publication target and then checking a 2 us allowance. With `wakeAheadUs=10`,
+the app instead services diagnostics and performs full validation at the earlier
+wake point. Those checks must finish by the publication target. It then uses a
+bounded final spin, with no sleeps, queue draining, timing joins or logging.
+Only current identity/ownership, cancellation, finite-duration and readiness/
+fault guards remain active in that window. Unsafe reader observations revoke
+clearance atomically; healthy duplicate release notifications do not.
+
+`wakeAheadUs` is startup-only, finite from 0 through 50 us; a positive value must
+round to at least one nanosecond. Zero retains the legacy waiting path. The
+nominal final-spin window is at most that lead; preemption beyond the admission cutoff
+still causes a deadline skip when the thread resumes. This remains
+an isolated-core experiment; the new capture must establish its delivery and
+phase behavior. The earlier wake does not remove dmcomb's polling jitter.
+
 To reproduce the previous **unadvanced control**, restore
-`publicationAdvanceUs=0`, `lateUs=5`, restart synco, and use the two-argument
+`publicationAdvanceUs=0`, `lateUs=5`, `wakeAheadUs=0`, restart synco, and use the two-argument
 commands below. Omitting the helper's third argument expects zero advance;
 it will reject a compensated preset rather than silently mixing the tests.
+Omitting the fourth argument likewise expects zero wake-ahead; schema 7 is
+required when a positive wake-ahead is requested.
 
 Start with `dmtweeter-synco.enable.toggle=Off`. From the repository root, run the
 finite **4 kHz total** trial:
@@ -218,7 +239,7 @@ No sudo is required.
 
 ## Read the compensated timing evidence
 
-`zero_test` version 6 reports `publicationAdvanceUs` and `lateUs`. Event
+`zero_test` version 7 reports `publicationAdvanceUs`, `lateUs` and `wakeAheadUs`. Event
 `targetNs` continues to mean the auxiliary publication target; it is not
 redefined as a combined trigger. The new fields are:
 
@@ -227,12 +248,26 @@ redefined as a combined trigger. The new fields are:
 | `referenceTargetNs` | Unadvanced frozen primary-observer grid point. |
 | `publicationDeadlineNs` | Latest final admission checkpoint: `targetNs + lateUs`. |
 | `publicationBeginNs`, `publicationEndNs` | Monotonic final-guard-to-update-return bracket; zero when no update was attempted. |
+| `wakeTargetNs` | Earlier full-validation wake point: `targetNs - wakeAheadUs`. Zero for the legacy wait. |
+| `wokeNs` | Immediate clock sample after the final timed wait, before its diagnostic/check work; entry sample if no sleep was needed. |
+| `validatedNs` | Full validation completion, required no later than `targetNs`; zero if validation was not reached. |
 | `auxiliaryInode`, `auxiliaryCounter`, `auxiliaryPublicationSec/Nsec` | Coherent auxiliary publication identity and raw producer timestamp. |
 
 `observedNs` remains update-return time for posted commands. The raw auxiliary
 and combined publication timestamps use the same producer clock and can be
 subtracted from each other; do not subtract their absolute values from the
 monotonic target or API bracket.
+
+For early-wake events, compare `wokeNs - wakeTargetNs` for observed wake error,
+`validatedNs - wokeNs` for validation/service cost, and
+`publicationBeginNs - targetNs` for final admission error. An interrupted wait
+can have a wake sample before its planned point; do not reinterpret that field
+as a hardware IRQ timestamp. `late` at stage `validation` means the full checks
+missed their target, whereas `final_wait` reports a live veto during the quiet
+window and `publication_guard` reports the final deadline check. The
+`validationLate` summary counter is a **subset of `late`**, not another skip
+reason to add to the disjoint outcome totals. The existing 2 us admission grace
+is not used to excuse validation that finishes after the target.
 
 The new `zero_phase` INDI property and `[zero_test] kind=phase` text records
 contain **full-rate** measurements, independent of successful-event sampling.
@@ -379,7 +414,7 @@ be matched, each dependent auxiliary slot gets its own skip outcome.
 | `staged` | Completed zero copies, including a copy that overran its ready deadline or was later cancelled; this overlaps publication/skip populations. |
 | `acknowledged` | An auxiliary publication was issued and its expected combined update was observed. |
 | `preparationLate` | A copy started or finished after the immutable command-ready target `T`; no active publication is issued. |
-| `late` | The publication wake or its admission guard exceeded `T + zeroTest.lateUs`, independently of preparation. |
+| `late` | An admission checkpoint exceeded `T + zeroTest.lateUs`, or full early validation finished after `T`. The event stage distinguishes `validation`, `deadline` and `publication_guard`. |
 | `readerMissing` | Exact qualifying reader clearance was unavailable by the command-ready deadline or was revoked before publication. |
 | `primaryChanged` | Before publication, the primary counter actually changed from this cycle's main identity. |
 | `primaryWriting` | Before publication, the primary write flag was set; this does not assert a changed counter. |
@@ -398,7 +433,7 @@ coverage/lifecycle conditions; they are not additional skip reasons to add again
 A guard failure during acknowledgement belongs to the posted attempt's named
 reason and does not increment a pre-publication skip counter.
 
-New summaries/events carry `labelVersion=6`; summaries/INDI also identify
+New summaries/events carry `labelVersion=7`; summaries/INDI also identify
 `idealPublisher=1`. Event text includes named `action`,
 `reason` and `stage` fields alongside the retained numeric `outcome`. The stage
 distinguishes preparation, reader/combined validation, publication deadline/
