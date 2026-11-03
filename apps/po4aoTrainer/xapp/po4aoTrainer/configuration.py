@@ -6,6 +6,7 @@ from copy import deepcopy
 from dataclasses import asdict
 from configparser import ConfigParser
 from pathlib import Path
+from typing import Union
 import hashlib
 import json
 import math
@@ -95,7 +96,9 @@ class ReplayBuffersConfig:
 class PolicyUpdateConfig:
     """policy_update training settings; all values are explicit in the TOML file."""
 
-    weight: float | list[float] = xconf.field(help="weight")
+    penalty: Union[float, list[float]] = xconf.field(
+        help="Penalty on normalized action changes from the acknowledged policy"
+    )
     anchor_samples: int = xconf.field(help="anchor samples")
 
 
@@ -130,6 +133,7 @@ class TrainingConfig:
     compute: ComputeConfig = xconf.field(help="compute settings")
 
 
+# Hot fields use resolved notebook keys, after normalization of the TOML names.
 HOT = {
     "RL": {"loss_function_penalty"},
     "NN_models": {"training_batch"},
@@ -168,10 +172,20 @@ def needs_reset(previous, candidate):
 
 
 def load_training(path, runtime_path):
-    """Validate typed TOML and merge immutable geometry from the C++ app configuration."""
-    config = asdict(
-        xconf.from_dict(TrainingConfig, tomllib.loads(Path(path).read_text()))
-    )
+    """Resolve TOML names to notebook keys and merge the C++ runtime contract.
+
+    Accept the previous policy_update.weight spelling for deployed files, but
+    reject both spellings together instead of silently choosing a value.
+    """
+    settings = tomllib.loads(Path(path).read_text())
+    update = settings.get("policy_update", {})
+    if "weight" in update:
+        if "penalty" in update:
+            raise ValueError("Use policy_update.penalty or legacy weight, not both")
+        update["penalty"] = update.pop("weight")
+    config = asdict(xconf.from_dict(TrainingConfig, settings))
+    # Preserve the numerical notebook API and config identity for a spelling-only edit.
+    config["policy_update"]["weight"] = config["policy_update"].pop("penalty")
     parser = ConfigParser(inline_comment_prefixes=("#", ";"))
     if not parser.read(runtime_path):
         raise FileNotFoundError(runtime_path)

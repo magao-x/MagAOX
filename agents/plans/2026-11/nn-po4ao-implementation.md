@@ -605,3 +605,65 @@ optimizer object. No instrument file was changed and no live training was run.
 
 Affected files: `apps/po4aoTrainer/configs/po4ao_training.conf`,
 `apps/po4aoTrainer/DEPLOYMENT.md`, and this record.
+
+## Notebook settings comparison and public penalty name, 2026-11-03
+
+Compared the operator's pasted nonlinear settings source (attachment
+`0f9e54a5-6a91-4767-a201-8a5d434c7863/Pasted text.txt`, SHA-256
+`976d2c417f8196ebffef3cf993055894e764729cce614796c221c4ccba66113a`) using
+literal AST assignments without executing the attachment. All 33 explicit
+constants were mapped to the managed configuration. The pasted source assigns
+both penalty constants twice: the later FAINT values 0.1 and 1.0 are effective.
+The operator explicitly requested keeping the earlier 0.01 and 0.5 values now.
+
+Six other defaults differed and are aligned in the distributed example:
+
+| Managed setting | Previous | Notebook setting |
+| --- | --- | --- |
+| `NN_models.training_batch` | 256 | 128 |
+| `nonlinear.channels` | 8 | 32 |
+| `nonlinear.shared_layers` | 2 | 3 |
+| `training.model_publish_interval` | 100 | 50 |
+| `training.first_model_publish_iteration` | 250 | 150 |
+| `training.max_candidate_action_rms_ratio` | 1.5 | 5.0 |
+
+The other explicit settings match. Both networks are constructed from the same
+`nonlinear` block by `build_nonlinear_models`, so the notebook's duplicate
+`NN_models.dynamics_architecture` and `policy_hidden_channels` assignments do not
+require additional managed keys. Inherited `po4ao_config` contents were not
+provided: no claim is made about parity of stream paths/dimensions, gains,
+command limits, compute devices or the diagnostic sample rate. The runtime
+contract remains supplied by the installed C++ configuration.
+
+Rename the public TOML field to `[policy_update] penalty`. At the existing
+configuration boundary, accept the former `weight` spelling for deployed files
+and reject both spellings together. Resolve either spelling to the numerical
+notebook core's original `weight` key. This keeps existing notebooks and recorded
+resolved snapshots compatible, preserves configuration hashes for spelling-only
+edits, and reuses the established hot-update path without changing numerical
+code or adding another migration layer. The updated app must be installed before
+an operator changes an existing file to the new spelling; older apps reject it.
+Changing network channels/layers requires Reset, even though the penalties and
+other changed operational settings are hot fields.
+
+Regression coverage exercises scalar and per-mode penalties, equal/conflicting
+duplicate names, invalid signs/counts/non-finite values, stable revisions, and a
+real CPU regularizer whose hot-updated cost halves without replacing the policy,
+optimizer or normalization. Per-mode tests exposed the pinned xconf parser's lack
+of PEP 604 union handling; use its supported `typing.Union` spelling as in the
+framework, without changing dependencies.
+
+Validation: 111 tests and 15 subtests passed, including the existing notebook
+numerical parity suite; 9 existing plotting warnings remain. The full distributed
+TOML also passed the production loader with an explicit synthetic runtime fixture.
+AST comparison now finds only the two intentional FAINT-penalty differences.
+Black and `git diff --check` pass. No instrument operation or installed-file change
+was performed; full GPU execution with the larger notebook network is unverified.
+
+Future request recorded: expose action and policy-update penalty editing in the
+GUI. This increment changes the config and defaults only; it adds no GUI controls.
+
+Affected files: `apps/po4aoTrainer/xapp/po4aoTrainer/configuration.py`,
+`apps/po4aoTrainer/configs/po4ao_training.conf`,
+`apps/po4aoTrainer/tests/test_configuration.py`, `apps/po4aoTrainer/README.md`,
+`apps/po4aoTrainer/DEPLOYMENT.md`, and this record.
