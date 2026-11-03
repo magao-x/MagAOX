@@ -15,7 +15,7 @@ from psycopg import sql
 from tqdm import tqdm
 
 from .records import Telem, FileOrigin, FileReplica, FileIngestTime, UserLog
-from ..utils import creation_time_from_filename, parse_iso_datetime_as_utc
+from ..utils import creation_time_from_filename, parse_iso_datetime_as_utc, log_extensions_for
 
 log = logging.getLogger(__name__)
 
@@ -93,10 +93,12 @@ def identify_new_files(conn: psycopg.Connection, this_host: str, paths: Iterable
 #add non-ingested-userlogs?
 
 def identify_non_ingested_telem(cur: psycopg.Cursor, host: str) -> list[str]:
-    '''Use ``file_origins`` table to find ``.bintel`` file paths on the host
-    ``host`` which need to be ingested'''
+    '''Use ``file_origins`` table to find telemetry file paths which need
+    to be ingested (``.bintel`` and ``.bintel2``) on the host'''
     # select file origins matching given hostname without ingest records
-    # with extensions like '%.bintel'
+    # with telemetry extensions. The patterns are parameter values, so they
+    # take a single '%'.
+    patterns = ['%' + ext for ext in log_extensions_for('.bintel')]
     fns = []
     cur.execute('''
 SELECT fi.origin_path as origin_path
@@ -115,9 +117,9 @@ WHERE
     )
     AND
     fi.origin_host = %s AND
-    fi.origin_path LIKE '%%.bintel'
+    fi.origin_path LIKE ANY(%s)
 ;
-''', (host,))
+''', (host, patterns))
     for row in cur:
         fns.append(row['origin_path'])
     return fns

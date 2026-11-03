@@ -79,11 +79,11 @@ struct empty_log
       return 0;
    }
 
-   static bool verify( flatlogs::bufferPtrT & logBuff,  ///< [in] Buffer containing the flatbuffer serialized message.
-                       flatlogs::msgLenT len            ///< [in] length of msgBuffer.
+   static bool verify( void * msgBuffer,      ///< [in] Buffer containing the flatbuffer serialized message.
+                       flatlogs::msgLenT len  ///< [in] length of msgBuffer.
                      )
    {
-      static_cast<void>(logBuff);
+      static_cast<void>(msgBuffer);
       return (len == 0);
    }
 

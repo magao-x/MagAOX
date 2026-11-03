@@ -21,35 +21,93 @@
 namespace flatlogs
 {
 
-/// Function for generate a JSON-formatted text representation of a flatlog record
+/// Get a decoded entry's message, to hand to log type.
+/**
+  * \returns a pointer to the entry's message.
+  *
+  * \ingroup logformat
+  */
+inline void * entryMessage( const parsedEntry & entry /**< [in] the decoded entry */ )
+{
+   // Not modified, but the log type functions don't take const
+   return const_cast<char *>( entry.msg );
+}
+
+/// Get an entry's message as text.
+/** An entry handed to a formatter should decode in full.
+  * If it doesn't, a placeholder is returned instead.
+  *
+  * \returns the log type's text for the message, or "<undecodable entry>".
+  *
+  * \ingroup logformat
+  */
+template<typename logT>
+std::string entryMessageString( const parsedEntry & entry /**< [in] the decoded entry */ )
+{
+   if( entry.msg == nullptr ) return "<undecodable entry>";
+
+   return logT::msgString(entryMessage(entry), entry.msgLen);
+}
+
+/// Decode a raw log entry with the default version.
+/** Used only by raw-entry formatters (for entries this build has just written).
+  *
+  * \returns the decoded entry.
+  *
+  * \ingroup logformat
+  */
+inline parsedEntry decodeWithDefaultVersion( bufferPtrT & logBuffer /**< [in] a raw log entry */ )
+{
+   return logHeader::parse( logBuffer.get(), logHeader::totalSize( logBuffer.get() ) );
+}
+
+/// Generate a JSON-formatted text representation of a flatlog record.
 /**
   *
   * \ingroup logformat
   */
 template<typename logT, typename iosT>
-iosT & jsonFormat( iosT & ios, ///< [out] the iostream to output the log too
-                  bufferPtrT & logBuffer, ///< [in] the binary log buffer to output
-                  const std::string & eventCodeName,
-                  const uint8_t * binarySchema,
-                  const unsigned int binarySchemaLength
-                )
+iosT & jsonFormat( iosT & ios,                           ///< [out] the iostream to output the log to
+                   const parsedEntry & entry,            ///< [in] the log to output
+                   const std::string & eventCodeName,    ///< [in] the name of the entry's log type
+                   const uint8_t * binarySchema,         ///< [in] the binary schema of the log type, or nullptr
+                   const unsigned int binarySchemaLength ///< [in] the length of the binary schema
+                 )
 {
-   logPrioT prio;
-   eventCodeT ec;
-   timespecX ts;
-   msgLenT len;
-
-   logHeader::extractBasicLog( prio, ec, ts, len, logBuffer);
+   timespecX ts = entry.ts;
+   logPrioT prio = entry.prio;
 
    ios << "{";
    ios << "\"ts\": \"" << ts.ISO8601DateTimeStrX() << "\", ";
    ios << "\"prio\": \"" << priorityString(prio) << "\", ";
    ios << "\"ec\": \"" << eventCodeName << "\", ";
-   ios << "\"msg\": " << logT::msgJSON(logHeader::messageBuffer(logBuffer), len, binarySchema, binarySchemaLength);
+   if( entry.msg == nullptr )
+   {
+      ios << "\"msg\": null";
+   }
+   else
+   {
+      ios << "\"msg\": " << logT::msgJSON(entryMessage(entry), entry.msgLen, binarySchema, binarySchemaLength);
+   }
    ios << "}";
    return ios;
 }
 
+/// Generate a JSON-formatted text representation of a flatlog record
+/** For entries this build has just written; decodes the entry with the default version.
+  *
+  * \ingroup logformat
+  */
+template<typename logT, typename iosT>
+iosT & jsonFormat( iosT & ios,                            ///< [out] the iostream to output the log to
+                  bufferPtrT & logBuffer,                 ///< [in] the binary log buffer to output
+                  const std::string & eventCodeName,      ///< [in] the name of the entry's log type
+                  const uint8_t * binarySchema,           ///< [in] the binary schema of the log type, or nullptr
+                  const unsigned int binarySchemaLength   ///< [in] the length of the binary schema
+                )
+{
+   return jsonFormat<logT>( ios, decodeWithDefaultVersion( logBuffer ), eventCodeName, binarySchema, binarySchemaLength );
+}
 
 /// Worker function that formats a log into the standard text representation.
 /**
@@ -57,20 +115,29 @@ iosT & jsonFormat( iosT & ios, ///< [out] the iostream to output the log too
   * \ingroup logformat
   */
 template<typename logT, typename iosT>
-iosT & stdFormat( iosT & ios, ///< [out] the iostream to output the log too
-                  bufferPtrT & logBuffer ///< [in] the binary log buffer to output
+iosT & stdFormat( iosT & ios,               ///< [out] the iostream to output the log to
+                  const parsedEntry & entry ///< [in] the log to output
                 )
 {
-   logPrioT prio;
-   eventCodeT ec;
-   timespecX ts;
-   msgLenT len;
+   timespecX ts = entry.ts;
+   logPrioT prio = entry.prio;
 
-   logHeader::extractBasicLog( prio, ec, ts, len, logBuffer);
-
-   ios << ts.ISO8601DateTimeStrX() << " " << priorityString(prio) << " " << logT::msgString(logHeader::messageBuffer(logBuffer) , len);
+   ios << ts.ISO8601DateTimeStrX() << " " << priorityString(prio) << " " << entryMessageString<logT>(entry);
 
    return ios;
+}
+
+/// Worker function that formats a log into the standard text representation.
+/** For entries this build has just written; decodes the entry with the default version.
+  *
+  * \ingroup logformat
+  */
+template<typename logT, typename iosT>
+iosT & stdFormat( iosT & ios,               ///< [out] the iostream to output the log to
+                  bufferPtrT & logBuffer    ///< [in] the binary log buffer to output
+                )
+{
+   return stdFormat<logT>( ios, decodeWithDefaultVersion( logBuffer ) );
 }
 
 /// Worker function that formats a log into the standard text representation with short timespec.
@@ -79,17 +146,13 @@ iosT & stdFormat( iosT & ios, ///< [out] the iostream to output the log too
   * \ingroup logformat
   */
 template<typename logT, typename iosT>
-iosT & stdShortFormat( iosT & ios, ///< [out] the iostream to output the log to
-                       const std::string & appName,
-                       bufferPtrT & logBuffer ///< [in] the binary log buffer to output
+iosT & stdShortFormat( iosT & ios,                  ///< [out] the iostream to output the log to
+                       const std::string & appName, ///< [in] the name of the app that wrote the entry
+                       const parsedEntry & entry    ///< [in] the log to output
                      )
 {
-   logPrioT prio;
-   eventCodeT ec;
-   timespecX ts;
-   msgLenT len;
-
-   logHeader::extractBasicLog( prio, ec, ts, len, logBuffer);
+   timespecX ts = entry.ts;
+   logPrioT prio = entry.prio;
 
    std::string outApp;
 
@@ -111,31 +174,53 @@ iosT & stdShortFormat( iosT & ios, ///< [out] the iostream to output the log to
    }
 
 
-   ios << outApp << " " << ts.secondStrX() << " " << priorityString(prio) << " " << logT::msgString(logHeader::messageBuffer(logBuffer) , len);
+   ios << outApp << " " << ts.secondStrX() << " " << priorityString(prio) << " " << entryMessageString<logT>(entry);
 
    return ios;
 }
 
-/// Worker function that formats a log into the standard text representation.
+/// Worker function that formats a log into the standard text representation with short timespec.
+/** For entries this build has just written; decodes the entry with the default version.
+  *
+  * \ingroup logformat
+  */
+template<typename logT, typename iosT>
+iosT & stdShortFormat( iosT & ios,                    ///< [out] the iostream to output the log to
+                       const std::string & appName,   ///< [in] the name of the app that wrote the entry
+                       bufferPtrT & logBuffer         ///< [in] the binary log buffer to output
+                     )
+{
+   return stdShortFormat<logT>( ios, appName, decodeWithDefaultVersion( logBuffer ) );
+}
+
+/// Worker function that formats a log into the minimal text representation.
 /**
   *
   * \ingroup logformat
   */
 template<typename logT, typename iosT>
-iosT & minFormat( iosT & ios, ///< [out] the iostream to output the log too
+iosT & minFormat( iosT & ios,               ///< [out] the iostream to output the log to
+                  const parsedEntry & entry ///< [in] the log to output
+                )
+{
+   logPrioT prio = entry.prio;
+
+   ios << priorityString(prio) << " " << entryMessageString<logT>(entry);
+
+   return ios;
+}
+
+/// Worker function that formats a log into the minimal text representation.
+/** For entries this build has just written; decodes the entry with the default version.
+  *
+  * \ingroup logformat
+  */
+template<typename logT, typename iosT>
+iosT & minFormat( iosT & ios,            ///< [out] the iostream to output the log to
                   bufferPtrT & logBuffer ///< [in] the binary log buffer to output
                 )
 {
-   logPrioT prio;
-   eventCodeT ec;
-   timespecX ts;
-   msgLenT len;
-
-   logHeader::extractBasicLog( prio, ec, ts, len, logBuffer);
-
-   ios << priorityString(prio) << " " << logT::msgString(logHeader::messageBuffer(logBuffer) , len);
-
-   return ios;
+   return minFormat<logT>( ios, decodeWithDefaultVersion( logBuffer ) );
 }
 
 } //namespace flatlogs

@@ -7,6 +7,9 @@
 
 #include "../logMeta.hpp"
 #include "../types/telem_teldata.hpp"
+#include "../types/text_log.hpp"
+
+#include "logTestFiles.hpp"
 
 namespace libXWCTest
 {
@@ -100,6 +103,88 @@ TEST_CASE( "telem_teldata parallactic angle accessor is continuous angle metadat
     REQUIRE( lmd.keyword == "PARANG" );
     REQUIRE( lmd.valType == MagAOX::logger::logMeta::valTypes::Double );
     REQUIRE( lmd.metaType == MagAOX::logger::logMeta::metaTypes::Continuous_Angle );
+}
+
+/// State metadata read across the change from v1 to v2 files.
+/**
+ * \ingroup logMeta_unit_test
+ */
+TEST_CASE( "State metadata across v1 and v2 log files", "[libMagAOX::logger::logMeta]" )
+{
+    using namespace MagAOX::logger;
+
+    const time_t t0 = 1732000000; // 2024-11-19 07:06:40
+
+    tempDir td( "logMeta_cutover" );
+
+    std::vector<size_t> offs1, offs2;
+    std::vector<char>   bytes1 =
+        fileBytes( offs1, flatlogs::logVersion1, { { t0, 0, "A" }, { t0 + 1, 0, "A" }, { t0 + 3, 0, "bad" } } );
+
+    // The last v1 entry's message fails its schema check: v1 has no checksum, so it loads, and is caught later.
+    size_t   badMsg = offs1[2] + flatlogs::logHeaderV1::headerSize( bytes1.data() + offs1[2] );
+    uint32_t root   = 0xFFFFFFF0;
+    memcpy( bytes1.data() + badMsg, &root, sizeof( root ) );
+
+    auto sfn1 = writeLogFile( td.m_path, "dev1", "binlog", t0, 0, bytes1 );
+    auto sfn2 = writeLogFile( td.m_path,
+                              "dev1",
+                              "binlog2",
+                              t0 + 10,
+                              0,
+                              fileBytes( offs2, flatlogs::logVersion2, { { t0 + 10, 0, "A" }, { t0 + 20, 0, "B" } } ) );
+
+    logMap<> lm;
+    lm.m_appToFileMap["dev1"].insert( sfn1 );
+    lm.m_appToFileMap["dev1"].insert( sfn2 );
+
+    cerrCapture cap;
+
+    SECTION( "The value before the exposure is in a v1 file, and the next one is in a v2 file" )
+    {
+        std::string val;
+        std::string reason;
+        REQUIRE( getLogStateVal( val,
+                                 lm,
+                                 "dev1",
+                                 eventCodes::TEXT_LOG,
+                                 flatlogs::timespecX( t0 + 2, 0 ),
+                                 flatlogs::timespecX( t0 + 15, 0 ),
+                                 &text_log::message,
+                                 -1,
+                                 &reason ) == 0 );
+        REQUIRE( val == "A" );
+
+        // The unverifiable v1 entry between them was skipped and reported once.
+        REQUIRE( cap.count( "Unverifiable log entry skipped while processing FITS metadata: app=dev1 ev=10 source=" +
+                            sfn1.fullName() + " sourceByte=" + std::to_string( offs1[2] ) ) == 1 );
+        REQUIRE( lm.recoverableErrors() == 1 );
+    }
+
+    SECTION( "A value that changes during the exposure is taken from the v2 file" )
+    {
+        std::string val;
+        REQUIRE( getLogStateVal( val,
+                                 lm,
+                                 "dev1",
+                                 eventCodes::TEXT_LOG,
+                                 flatlogs::timespecX( t0 + 2, 0 ),
+                                 flatlogs::timespecX( t0 + 25, 0 ),
+                                 &text_log::message ) == 0 );
+        REQUIRE( val == "B" );
+    }
+
+    SECTION( "The prior value alone is found by a lookup inside the v2 file" )
+    {
+        logEntryRecord prior;
+        REQUIRE( lm.getPriorEntry( prior, "dev1", eventCodes::TEXT_LOG, flatlogs::timespecX( t0 + 15, 0 ) ) == 0 );
+        REQUIRE( verifyLogEntry( eventCodes::TEXT_LOG, prior ) );
+        REQUIRE( prior.m_integrity == logIntegrity::verified );
+        REQUIRE( text_log::message( prior.message() ) == "A" );
+
+        logEntryRecord none;
+        REQUIRE( verifyLogEntry( eventCodes::TEXT_LOG, none ) == false );
+    }
 }
 
 } // namespace logMetaTest

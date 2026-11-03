@@ -10,6 +10,7 @@
 #include "../xrif2fits/xrif2fits.hpp"
 
 #include <filesystem>
+#include <sstream>
 #include <string>
 #include <unistd.h>
 
@@ -154,10 +155,19 @@ TEST_CASE( "xrif2fits metadata source validation handles missing and empty direc
     {
         std::filesystem::create_directories( tmp.m_path / "telemetry" / "cam1" );
 
+        std::ostringstream captured;
+        std::streambuf    *oldCerr = std::cerr.rdbuf( captured.rdbuf() );
+
         mx::error_t errc = app.loadTelemetryMaps( { ( tmp.m_path / "telemetry" ).string() } );
+
+        std::cerr.rdbuf( oldCerr );
 
         REQUIRE( errc == mx::error_t::noerror );
         REQUIRE( app.hasTelemetry( "cam1" ) == false );
+
+        // The one report names both extensions searched.
+        REQUIRE( captured.str().find( "No telemetry files found in the requested time range for cam1 (searched "
+                                      ".bintel and .bintel2)" ) != std::string::npos );
     }
 }
 
@@ -194,7 +204,7 @@ TEST_CASE( "xrif2fits log metadata lookup handles empty loaded buffers", "[xrif2
 {
     // clang-format off
     #ifdef XRIF2FITS_TEST_DOXYGEN_REF
-    MagAOX::logger::logMap<>::getPriorLog();
+    MagAOX::logger::logMap<>::getPriorEntry();
     #endif
     // clang-format on
 
@@ -203,13 +213,13 @@ TEST_CASE( "xrif2fits log metadata lookup handles empty loaded buffers", "[xrif2
 
     logMap.m_appToFileMap["cam1"].insert( logFile );
 
-    char                *prior = nullptr;
-    flatlogs::timespecX  ts{ 10, 0 };
-    flatlogs::eventCodeT ev = MagAOX::logger::telem_stdcam::eventCode;
-    int                  rv = logMap.getPriorLog( prior, "cam1", ev, ts );
+    MagAOX::logger::logEntryRecord prior;
+    flatlogs::timespecX            ts{ 10, 0 };
+    flatlogs::eventCodeT           ev = MagAOX::logger::telem_stdcam::eventCode;
+    int                            rv = logMap.getPriorEntry( prior, "cam1", ev, ts );
 
     REQUIRE( rv == -1 );
-    REQUIRE( prior == nullptr );
+    REQUIRE( prior.empty() );
 }
 
 } // namespace xrif2fitsTest

@@ -14,6 +14,7 @@ __all__ = [
     'get_current_semester',
     'semester_to_datetime_range',
     'FunkyJSONDecoder',
+    'log_extensions_for',
 ]
 
 # note: we must truncate to microsecond precision due to limitations in
@@ -24,6 +25,22 @@ XFILENAME_TIME_FORMAT = "%Y%m%d%H%M%S%f"
 XFILENAME_TIME_FORMAT_OUT = "%Y%m%d%H%M%S%f000"
 # Python devices use a different time stamp format
 PUREPYINDI_DEVICE_FILENAME_TIME_FORMAT = "%Y-%m-%dT%H%M%S"
+
+def log_extensions_for(base_ext):
+    '''Given a base extension, get the file extensions to search for.
+
+    Assuming that files ending in "base_ext" correspond to v1 entries and 
+    files ending in "base_ext" + "2" correspond to v2 entries, both are returned.
+    If "base_ext" already ends in "2", only "base_ext" is returned and the 
+    entries are assumed to be v2.
+    An empty base matches files of any extension.
+
+    This is the Python copy of ``logExtensionsFor`` in
+    ``libMagAOX/logger/logExtensions.hpp``; the two must follow the same rule.
+    '''
+    if base_ext == '' or base_ext.endswith('2'):
+        return [base_ext]
+    return [base_ext, base_ext + '2']
 
 def make_filename_safe(name):
     return name.replace('/', '__')

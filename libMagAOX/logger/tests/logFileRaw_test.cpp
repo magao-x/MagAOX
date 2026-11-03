@@ -7,6 +7,7 @@
 
 #include "../logFileRaw.hpp"
 
+#include <fstream>
 #include <sstream>
 
 namespace libXWCTest
@@ -67,7 +68,20 @@ class logFileRawTest : public MagAOX::logger::logFileRaw<XWC_DEFAULT_VERBOSITY>
     {
         return ( m_fout != nullptr );
     }
+
+    /// The extension new files are named with: the base extension, for the version this build writes.
+    std::string writtenExt()
+    {
+        return MagAOX::logger::logExtensionForVersion( m_logExt, flatlogs::logVersionDefault );
+    }
 };
+
+/// The size of one test entry (a 256-byte message), as this build writes it.
+inline size_t entrySize()
+{
+    flatlogs::msgLenT len = 256;
+    return flatlogs::logHeader::totalSize( len );
+}
 
 /// Construction of logFileRaw
 /**
@@ -147,7 +161,7 @@ TEST_CASE( "Creating a log file", "[libMagAOX::logger::logFileRaw]" )
         REQUIRE( std::filesystem::exists( lfr.testPath ) );
         REQUIRE( std::filesystem::exists( lfr.testPath + "/2024_11_21/" ) );
         REQUIRE( std::filesystem::exists( lfr.testPath + "/2024_11_21/" + lfr.logName() + "_20241121063300000000001." +
-                                          lfr.logExt() ) );
+                                          lfr.writtenExt() ) );
 
         flatlogs::timespecX ts2( 1763706780, 50 );
 
@@ -157,7 +171,7 @@ TEST_CASE( "Creating a log file", "[libMagAOX::logger::logFileRaw]" )
         REQUIRE( std::filesystem::exists( lfr.testPath ) );
         REQUIRE( std::filesystem::exists( lfr.testPath + "/2025_11_21/" ) );
         REQUIRE( std::filesystem::exists( lfr.testPath + "/2025_11_21/" + lfr.logName() + "_20251121063300000000050." +
-                                          lfr.logExt() ) );
+                                          lfr.writtenExt() ) );
     }
 
     SECTION( "logPath without permissions" )
@@ -205,7 +219,7 @@ TEST_CASE( "Creating a log file", "[libMagAOX::logger::logFileRaw]" )
         REQUIRE( std::filesystem::exists( lfr.testPath ) );
         REQUIRE( std::filesystem::exists( lfr.testPath + "/2024_11_21/" ) );
         REQUIRE( std::filesystem::exists( lfr.testPath + "/2024_11_21/" + lfr.logName() + "_20241121063300000000001." +
-                                          lfr.logExt() ) );
+                                          lfr.writtenExt() ) );
 
         flatlogs::timespecX ts2( 1732170780, 1 );
 
@@ -289,7 +303,7 @@ TEST_CASE( "Writing to a log file", "[libMagAOX::logger::logFileRaw]" )
         REQUIRE( std::filesystem::exists( lfr.testPath + "/2024_11_21/" ) );
 
         std::string fullPath = lfr.testPath + "/2024_11_21/" + lfr.logName() + "_20241121063300000000001.";
-        fullPath += lfr.logExt();
+        fullPath += lfr.writtenExt();
 
         REQUIRE( std::filesystem::exists( fullPath ) );
 
@@ -306,7 +320,7 @@ TEST_CASE( "Writing to a log file", "[libMagAOX::logger::logFileRaw]" )
 
         std::uintmax_t fsz = std::filesystem::file_size( fullPath );
 
-        REQUIRE( fsz == 1 * ( 256 + 14 ) );
+        REQUIRE( fsz == 1 * entrySize() );
     }
 
     SECTION( "Write to log that doesn't exist yet" )
@@ -338,7 +352,7 @@ TEST_CASE( "Writing to a log file", "[libMagAOX::logger::logFileRaw]" )
         REQUIRE( std::filesystem::exists( lfr.testPath + "/2024_11_21/" ) );
 
         std::string fullPath = lfr.testPath + "/2024_11_21/" + lfr.logName() + "_20241121063300000000002.";
-        fullPath += lfr.logExt();
+        fullPath += lfr.writtenExt();
 
         REQUIRE( std::filesystem::exists( fullPath ) );
 
@@ -346,7 +360,7 @@ TEST_CASE( "Writing to a log file", "[libMagAOX::logger::logFileRaw]" )
 
         std::uintmax_t fsz = std::filesystem::file_size( fullPath );
 
-        REQUIRE( fsz == 1 * ( 256 + 14 ) );
+        REQUIRE( fsz == 1 * entrySize() );
     }
 
     SECTION( "Write to log twice, does not exceed size" )
@@ -378,7 +392,7 @@ TEST_CASE( "Writing to a log file", "[libMagAOX::logger::logFileRaw]" )
         REQUIRE( std::filesystem::exists( lfr.testPath + "/2024_11_21/" ) );
 
         std::string fullPath = lfr.testPath + "/2024_11_21/" + lfr.logName() + "_20241121063300000000002.";
-        fullPath += lfr.logExt();
+        fullPath += lfr.writtenExt();
 
         REQUIRE( std::filesystem::exists( fullPath ) );
 
@@ -391,7 +405,7 @@ TEST_CASE( "Writing to a log file", "[libMagAOX::logger::logFileRaw]" )
 
         // New file not created
         std::string fullPath2 = lfr.testPath + "/2024_11_21/" + lfr.logName() + "_20241121063300000000050.";
-        fullPath2 += lfr.logExt();
+        fullPath2 += lfr.writtenExt();
 
         REQUIRE( !std::filesystem::exists( fullPath2 ) );
 
@@ -399,7 +413,7 @@ TEST_CASE( "Writing to a log file", "[libMagAOX::logger::logFileRaw]" )
 
         std::uintmax_t fsz = std::filesystem::file_size( fullPath );
 
-        REQUIRE( fsz == 2 * ( 256 + 14 ) ); // has two logs in it
+        REQUIRE( fsz == 2 * entrySize() ); // has two logs in it
     }
 
     SECTION( "Write to log twice, does exceed size" )
@@ -432,7 +446,7 @@ TEST_CASE( "Writing to a log file", "[libMagAOX::logger::logFileRaw]" )
         REQUIRE( std::filesystem::exists( lfr.testPath + "/2024_11_21/" ) );
 
         std::string fullPath = lfr.testPath + "/2024_11_21/" + lfr.logName() + "_20241121063300000000002.";
-        fullPath += lfr.logExt();
+        fullPath += lfr.writtenExt();
 
         REQUIRE( std::filesystem::exists( fullPath ) );
 
@@ -445,20 +459,20 @@ TEST_CASE( "Writing to a log file", "[libMagAOX::logger::logFileRaw]" )
 
         // New file created
         std::string fullPath2 = lfr.testPath + "/2024_11_21/" + lfr.logName() + "_20241121063300000000050.";
-        fullPath2 += lfr.logExt();
+        fullPath2 += lfr.writtenExt();
 
         REQUIRE( std::filesystem::exists( fullPath2 ) );
 
         // Test this before closing, as this will probably only pass if the previous file was closed
         std::uintmax_t fsz = std::filesystem::file_size( fullPath );
 
-        REQUIRE( fsz == 1 * ( 256 + 14 ) );
+        REQUIRE( fsz == 1 * entrySize() );
 
         lfr.close();
 
         fsz = std::filesystem::file_size( fullPath2 );
 
-        REQUIRE( fsz == 1 * ( 256 + 14 ) );
+        REQUIRE( fsz == 1 * entrySize() );
     }
 }
 
@@ -487,7 +501,7 @@ TEST_CASE( "Time based rotation of a log file", "[libMagAOX::logger::logFileRaw]
 
     /// Path of the file that an entry at this timestamp would create
     auto pathFor = []( logFileRawTest &lfr, const std::string &stamp )
-    { return lfr.testPath + "/2024_11_21/" + lfr.logName() + "_" + stamp + "." + lfr.logExt(); };
+    { return lfr.testPath + "/2024_11_21/" + lfr.logName() + "_" + stamp + "." + lfr.writtenExt(); };
 
     /// Guard against deleting all of /tmp, and clear any previous run
     auto resetPath = []( logFileRawTest &lfr )
@@ -519,7 +533,7 @@ TEST_CASE( "Time based rotation of a log file", "[libMagAOX::logger::logFileRaw]
         REQUIRE( !std::filesystem::exists( pathFor( lfr, "20241121063959000000003" ) ) );
 
         lfr.close();
-        REQUIRE( std::filesystem::file_size( pathFor( lfr, "20241121063300000000002" ) ) == 2 * ( 256 + 14 ) );
+        REQUIRE( std::filesystem::file_size( pathFor( lfr, "20241121063300000000002" ) ) == 2 * entrySize() );
     }
 
     SECTION( "an entry in the next interval starts a new file" )
@@ -537,13 +551,13 @@ TEST_CASE( "Time based rotation of a log file", "[libMagAOX::logger::logFileRaw]
         REQUIRE( std::filesystem::exists( pathFor( lfr, "20241121063300000000002" ) ) );
         REQUIRE( std::filesystem::exists( pathFor( lfr, "20241121064000000000004" ) ) );
 
-        REQUIRE( std::filesystem::file_size( pathFor( lfr, "20241121063300000000002" ) ) == 1 * ( 256 + 14 ) );
+        REQUIRE( std::filesystem::file_size( pathFor( lfr, "20241121063300000000002" ) ) == 1 * entrySize() );
 
         // The new file, not the old one, is now the current file
         REQUIRE( lfr.test_currFileStartSec() == 1732171200 );
 
         lfr.close();
-        REQUIRE( std::filesystem::file_size( pathFor( lfr, "20241121064000000000004" ) ) == 1 * ( 256 + 14 ) );
+        REQUIRE( std::filesystem::file_size( pathFor( lfr, "20241121064000000000004" ) ) == 1 * entrySize() );
     }
 
     SECTION( "a size triggered split does not shift the interval boundary" )
@@ -592,7 +606,7 @@ TEST_CASE( "Time based rotation of a log file", "[libMagAOX::logger::logFileRaw]
         REQUIRE( !std::filesystem::exists( pathFor( lfr, "20241121064000000000004" ) ) );
 
         lfr.close();
-        REQUIRE( std::filesystem::file_size( pathFor( lfr, "20241121063300000000002" ) ) == 2 * ( 256 + 14 ) );
+        REQUIRE( std::filesystem::file_size( pathFor( lfr, "20241121063300000000002" ) ) == 2 * entrySize() );
     }
 
     SECTION( "a change to maxLogTime takes effect on the next entry" )
@@ -634,7 +648,7 @@ TEST_CASE( "Requested rotation of a log file", "[libMagAOX::logger::logFileRaw]"
     };
 
     auto pathFor = []( logFileRawTest &lfr, const std::string &stamp )
-    { return lfr.testPath + "/2024_11_21/" + lfr.logName() + "_" + stamp + "." + lfr.logExt(); };
+    { return lfr.testPath + "/2024_11_21/" + lfr.logName() + "_" + stamp + "." + lfr.writtenExt(); };
 
     auto resetPath = []( logFileRawTest &lfr )
     {
@@ -673,7 +687,7 @@ TEST_CASE( "Requested rotation of a log file", "[libMagAOX::logger::logFileRaw]"
         REQUIRE( !std::filesystem::exists( pathFor( lfr, "20241121064000000000004" ) ) );
 
         lfr.close();
-        REQUIRE( std::filesystem::file_size( pathFor( lfr, "20241121063959000000003" ) ) == 2 * ( 256 + 14 ) );
+        REQUIRE( std::filesystem::file_size( pathFor( lfr, "20241121063959000000003" ) ) == 2 * entrySize() );
     }
 
     SECTION( "a request with no subsequent entry creates no file" )
@@ -728,7 +742,7 @@ TEST_CASE( "Requested rotation of a log file", "[libMagAOX::logger::logFileRaw]"
         REQUIRE( !std::filesystem::exists( pathFor( lfr, "20241121064100000000005" ) ) );
 
         lfr.close();
-        REQUIRE( std::filesystem::file_size( pathFor( lfr, "20241121064000000000004" ) ) == 2 * ( 256 + 14 ) );
+        REQUIRE( std::filesystem::file_size( pathFor( lfr, "20241121064000000000004" ) ) == 2 * entrySize() );
     }
 }
 
@@ -871,8 +885,8 @@ TEST_CASE( "Interval close of a log file", "[libMagAOX::logger::logFileRaw]" )
         REQUIRE( lfr.test_isOpen() );
         REQUIRE( lfr.test_currFileStartSec() == 1732171200 );
 
-        std::string p1 = lfr.testPath + "/2024_11_21/" + lfr.logName() + "_20241121063300000000002." + lfr.logExt();
-        std::string p2 = lfr.testPath + "/2024_11_21/" + lfr.logName() + "_20241121064000000000004." + lfr.logExt();
+        std::string p1 = lfr.testPath + "/2024_11_21/" + lfr.logName() + "_20241121063300000000002." + lfr.writtenExt();
+        std::string p2 = lfr.testPath + "/2024_11_21/" + lfr.logName() + "_20241121064000000000004." + lfr.writtenExt();
 
         REQUIRE( std::filesystem::exists( p1 ) );
         REQUIRE( std::filesystem::exists( p2 ) );
@@ -967,7 +981,7 @@ TEST_CASE( "Rotation with late and future timestamps", "[libMagAOX::logger::logF
 
         REQUIRE( countFiles( lfr.testPath ) == 1 );
         REQUIRE( std::filesystem::file_size( lfr.testPath + "/2024_11_21/" + lfr.logName() +
-                                             "_20241121064000000000002." + lfr.logExt() ) == 2 * ( 256 + 14 ) );
+                                             "_20241121064000000000002." + lfr.writtenExt() ) == 2 * entrySize() );
     }
 
     SECTION( "a future timestamp does not start a new file or a future-dated directory" )
@@ -1030,7 +1044,7 @@ TEST_CASE( "Unique file names when entries share a timestamp", "[libMagAOX::logg
     };
 
     auto pathFor = []( logFileRawTest &lfr, const std::string &stamp )
-    { return lfr.testPath + "/2024_11_21/" + lfr.logName() + "_" + stamp + "." + lfr.logExt(); };
+    { return lfr.testPath + "/2024_11_21/" + lfr.logName() + "_" + stamp + "." + lfr.writtenExt(); };
 
     auto resetPath = []( logFileRawTest &lfr )
     {
@@ -1247,6 +1261,76 @@ TEST_CASE( "Validation of maxLogTime", "[libMagAOX::logger::logFileRaw]" )
             REQUIRE( v == 7 );
         }
     }
+}
+
+/// New files are named and written in the version this build writes.
+/** With v2 the base extension gets "2" appended, and every entry carries the version byte and a checksum that matches.
+ *
+ * \ingroup logFileRaw_unit_test
+ */
+TEST_CASE( "Log files are written in the default version", "[libMagAOX::logger::logFileRaw]" )
+{
+    // clang-format off
+    #ifdef LOGFILERAW_TEST_DOXYGEN_REF
+    MagAOX::logger::logFileRaw<XWC_DEFAULT_VERBOSITY>::createFile();
+    MagAOX::logger::logExtensionForVersion();
+    #endif
+    // clang-format on
+
+    logFileRawTest lfr;
+
+    // safety check to make sure we don't delete all of /tmp
+    if( lfr.testPath == "/tmp" )
+    {
+        return;
+    }
+    std::filesystem::remove_all( lfr.testPath );
+
+    flatlogs::bufferPtrT logbuff;
+    std::string          msg( 256, 'v' );
+    for( int n = 0; n < 3; ++n )
+    {
+        flatlogs::logHeader::createLog<dummyLog>(
+            logbuff, flatlogs::timespecX( 1732170780 + n, 1 ), msg, flatlogs::logPrio::LOG_NOTICE );
+        REQUIRE( lfr.writeLog( logbuff ) == mx::error_t::noerror );
+    }
+    REQUIRE( lfr.close() == mx::error_t::noerror );
+
+    std::string path = lfr.testPath + "/2024_11_21/" + lfr.logName() + "_20241121063300000000001." +
+                       MagAOX::logger::logExtensionForVersion( MAGAOX_default_logExt, flatlogs::logVersionDefault );
+    REQUIRE( std::filesystem::exists( path ) );
+
+    // The file's name says the version it was written in.
+    REQUIRE( MagAOX::logger::logVersionForFile( path ) == flatlogs::logVersionDefault );
+    if( flatlogs::logVersionDefault >= flatlogs::logVersion2 )
+    {
+        REQUIRE( path.back() == '2' );
+    }
+
+    // Every entry decodes as that version; for v2 the checksum matches.
+    std::ifstream     in( path, std::ios::binary );
+    std::vector<char> bytes( ( std::istreambuf_iterator<char>( in ) ), std::istreambuf_iterator<char>() );
+    REQUIRE( bytes.size() == 3 * entrySize() );
+
+    size_t pos = 0;
+    for( int n = 0; n < 3; ++n )
+    {
+        flatlogs::parsedEntry pe =
+            flatlogs::parseEntry( bytes.data() + pos, bytes.size() - pos, flatlogs::logVersionDefault );
+        if( flatlogs::logVersionDefault >= flatlogs::logVersion2 )
+        {
+            REQUIRE( pe.status == flatlogs::entryStatus::checksumOk );
+        }
+        else
+        {
+            REQUIRE( pe.status == flatlogs::entryStatus::noChecksum );
+        }
+        REQUIRE( pe.msgLen == msg.size() );
+        pos += pe.entrySize;
+    }
+    REQUIRE( pos == bytes.size() );
+
+    std::filesystem::remove_all( lfr.testPath );
 }
 
 } // namespace logFileRawTest

@@ -141,9 +141,12 @@ struct logMetaDetail
                                );
 */
 
-/// Verify that a raw log entry matches its flatbuffer schema.
-bool verifyLogEntry( flatlogs::eventCodeT ev, /**< [in] expected event code for the raw log entry */
-                     char                *log /**< [in] raw log entry buffer to verify */
+/// Verify that a log entry's message matches its flatbuffer schema.
+/**
+ * \returns true if \p log holds an entry whose message passes the schema check for \p ev
+ */
+bool verifyLogEntry( flatlogs::eventCodeT ev, /**< [in] expected event code for the log entry */
+                     logEntryRecord      &log /**< [in] the log entry to verify */
 );
 
 /// Check whether two metadata timestamps are separated by no more than the configured gap.
@@ -233,24 +236,26 @@ inline double logMetaNormalizeInterpolatedAngle( double angle, /**< [in] interpo
 }
 
 /// Report a skipped unverifiable log entry without aborting metadata processing.
+/** Each entry is reported once.
+ */
 inline void
-reportUnverifiableLogEntry( const std::string   &appName, /**< [in] app/device name being searched */
-                            flatlogs::eventCodeT ev,      /**< [in] event code being searched */
-                            char *before,  /**< [in] verified entry before the bad entry, or null if unknown */
-                            char *failure, /**< [in] unverifiable entry that was skipped */
-                            char *after,   /**< [in] verified entry after the bad entry, or null if none was found */
-                            const std::string &sourceFile, /**< [in] source log file containing the bad entry */
-                            size_t             sourceByte, /**< [in] byte offset of the bad entry in the source file */
-                            const std::string &context     /**< [in] search context that encountered the bad entry */
+reportUnverifiableLogEntry( const std::string    &appName, /**< [in] app/device name being searched */
+                            flatlogs::eventCodeT  ev,      /**< [in] event code being searched */
+                            const logEntryRecord &before,  /**< [in] verified entry before the bad entry, if known */
+                            const logEntryRecord &failure, /**< [in] unverifiable entry that was skipped */
+                            const logEntryRecord &after,   /**< [in] verified entry after the bad entry, if found */
+                            const std::string    &context  /**< [in] search context that encountered the bad entry */
 )
 {
-    if( failure != nullptr )
+    std::string sourceFile = !failure.empty() ? failure.m_sourceFile : std::string( "<unknown>" );
+    size_t sourceByte = !failure.empty() ? failure.m_sourceOffset : std::numeric_limits<size_t>::max();
+
+    if( !failure.empty() )
     {
         static std::set<std::string> reported;
-        flatlogs::timespecX          failureTs = flatlogs::logHeader::timespec( failure );
-        std::string                  reportKey = appName + "|" + std::to_string( ev ) + "|" + sourceFile + "|" +
-                                std::to_string( sourceByte ) + "|" + std::to_string( failureTs.time_s ) + "|" +
-                                std::to_string( failureTs.time_ns );
+        std::string reportKey = appName + "|" + std::to_string( ev ) + "|" + sourceFile + "|" +
+                                std::to_string( sourceByte ) + "|" + std::to_string( failure.m_ts.time_s ) + "|" +
+                                std::to_string( failure.m_ts.time_ns );
 
         if( reported.count( reportKey ) > 0 )
         {
@@ -272,29 +277,28 @@ reportUnverifiableLogEntry( const std::string   &appName, /**< [in] app/device n
         std::cerr << " sourceByte=<unknown>";
     }
 
-    if( before != nullptr )
+    if( !before.empty() )
     {
-        std::cerr << " beforeTs=" << logMapDebugTime( flatlogs::logHeader::timespec( before ) );
+        std::cerr << " beforeTs=" << logMapDebugTime( before.m_ts );
     }
     else
     {
         std::cerr << " beforeTs=<none>";
     }
 
-    if( failure != nullptr )
+    if( !failure.empty() )
     {
-        std::cerr << " failureTs=" << logMapDebugTime( flatlogs::logHeader::timespec( failure ) )
-                  << " msgLen=" << flatlogs::logHeader::msgLen( failure )
-                  << " totalSize=" << flatlogs::logHeader::totalSize( failure );
+        std::cerr << " failureTs=" << logMapDebugTime( failure.m_ts ) << " msgLen=" << failure.m_msgLen
+                  << " totalSize=" << failure.m_entrySize;
     }
     else
     {
         std::cerr << " failureTs=<none>";
     }
 
-    if( after != nullptr )
+    if( !after.empty() )
     {
-        std::cerr << " afterTs=" << logMapDebugTime( flatlogs::logHeader::timespec( after ) );
+        std::cerr << " afterTs=" << logMapDebugTime( after.m_ts );
     }
     else
     {
@@ -305,89 +309,63 @@ reportUnverifiableLogEntry( const std::string   &appName, /**< [in] app/device n
 }
 
 /// Find the nearest prior log entry that also passes flatbuffer schema verification.
+/** Searches the loaded files for \p appName.
+ *
+ * \returns the entry found, or an empty record if there is none
+ */
 template <class verboseT = XWC_DEFAULT_VERBOSITY>
-char *getPriorVerifiedLog( logMap<verboseT>          &lm,      /**< [in] loaded log map to search */
-                           const std::string         &appName, /**< [in] app/device name to search */
-                           flatlogs::eventCodeT       ev,      /**< [in] event code to search for */
-                           const flatlogs::timespecX &ts       /**< [in] timestamp to be prior to */
+logEntryRecord getPriorVerifiedEntry( logMap<verboseT>          &lm,      /**< [in] loaded log map to search */
+                                      const std::string         &appName, /**< [in] app/device name to search */
+                                      flatlogs::eventCodeT       ev,      /**< [in] event code to search for */
+                                      const flatlogs::timespecX &ts       /**< [in] timestamp to be prior to */
 )
 {
+    logEntryRecord prior;
+
     auto appBuffer = lm.m_appToBufferMap.find( appName );
     if( appBuffer == lm.m_appToBufferMap.end() || appBuffer->second.m_memory.size() == 0 )
     {
-        return nullptr;
+        return prior;
     }
 
-    logInMemory &lim       = appBuffer->second;
-    char        *buffer    = lim.m_memory.data();
-    char        *bufferEnd = lim.m_memory.data() + lim.m_memory.size();
-    char        *prior     = nullptr;
+    logInMemory &lim = appBuffer->second;
 
-    while( buffer < bufferEnd )
+    logMemoryWalk walk( lim );
+    logStep       step;
+    size_t        file   = 0;
+    size_t        offset = 0;
+    while( walk.next( step, file, offset ) )
     {
-        size_t               totalSize = 0;
-        flatlogs::timespecX  minTs;
-        flatlogs::timespecX *minTsPtr = nullptr;
-        if( prior != nullptr )
-        {
-            minTs    = flatlogs::logHeader::timespec( prior );
-            minTsPtr = &minTs;
-        }
-
-        if( !logMapEntrySane( totalSize, buffer, bufferEnd, minTsPtr ) )
-        {
-            DEBUG_CRUMB( "getPriorVerifiedLog invalid entry app=" + appName + " ev=" + std::to_string( ev ) +
-                         " offset=" + std::to_string( buffer - lim.m_memory.data() ) + " totalSize=" +
-                         std::to_string( totalSize ) + " memoryBytes=" + std::to_string( lim.m_memory.size() ) + " " );
-
-            char *resynced = logMapResync( buffer, bufferEnd, minTsPtr );
-            if( resynced != nullptr )
-            {
-                DEBUG_CRUMB( "getPriorVerifiedLog resync app=" + appName + " ev=" + std::to_string( ev ) +
-                             " offset=" + std::to_string( buffer - lim.m_memory.data() ) +
-                             " resyncOffset=" + std::to_string( resynced - lim.m_memory.data() ) );
-                buffer = resynced;
-                continue;
-            }
-
-            DEBUG_CRUMB( "getPriorVerifiedLog resync failed app=" + appName + " ev=" + std::to_string( ev ) +
-                         " offset=" + std::to_string( buffer - lim.m_memory.data() ) );
-            return prior;
-        }
-
-        flatlogs::timespecX logTs = flatlogs::logHeader::timespec( buffer );
-        if( ts < logTs )
+        if( ts < step.m_entry.ts )
         {
             break;
         }
 
-        if( flatlogs::logHeader::eventCode( buffer ) == ev )
+        if( step.m_entry.eventCode == ev )
         {
-            if( verifyLogEntry( ev, buffer ) )
+            logEntryRecord candidate = lim.record( file, offset, step );
+            if( verifyLogEntry( ev, candidate ) )
             {
-                prior = buffer;
+                prior = std::move( candidate );
             }
             else
             {
-                DEBUG_CRUMB( "getPriorVerifiedLog rejected app=" + appName + " ev=" + std::to_string( ev ) +
-                             " logTs=" + logMapDebugTime( logTs ) +
-                             " msgLen=" + std::to_string( flatlogs::logHeader::msgLen( buffer ) ) +
-                             " totalSize=" + std::to_string( totalSize ) + " " );
+                DEBUG_CRUMB( "getPriorVerifiedEntry rejected app=" + appName + " ev=" + std::to_string( ev ) +
+                             " logTs=" + logMapDebugTime( step.m_entry.ts ) +
+                             " msgLen=" + std::to_string( step.m_entry.msgLen ) +
+                             " totalSize=" + std::to_string( step.m_entry.entrySize ) + " " );
             }
         }
-
-        buffer += totalSize;
     }
 
-    if( prior != nullptr )
+    if( !prior.empty() )
     {
-        DEBUG_CRUMB( "getPriorVerifiedLog found app=" + appName + " ev=" + std::to_string( ev ) +
-                     " queryTs=" + logMapDebugTime( ts ) +
-                     " logTs=" + logMapDebugTime( flatlogs::logHeader::timespec( prior ) ) + " " );
+        DEBUG_CRUMB( "getPriorVerifiedEntry found app=" + appName + " ev=" + std::to_string( ev ) +
+                     " queryTs=" + logMapDebugTime( ts ) + " logTs=" + logMapDebugTime( prior.m_ts ) + " " );
     }
     else
     {
-        DEBUG_CRUMB( "getPriorVerifiedLog no match app=" + appName + " ev=" + std::to_string( ev ) +
+        DEBUG_CRUMB( "getPriorVerifiedEntry no match app=" + appName + " ev=" + std::to_string( ev ) +
                      " queryTs=" + logMapDebugTime( ts ) + " " );
     }
 
@@ -395,149 +373,134 @@ char *getPriorVerifiedLog( logMap<verboseT>          &lm,      /**< [in] loaded 
 }
 
 /// Find the next log entry that also passes flatbuffer schema verification.
+/** Every unverifiable entry passed over, including \p current if it fails, is counted as a recoverable error and
+ * reported.
+ *
+ * \returns the entry found, or an empty record if there is none
+ */
 template <class verboseT = XWC_DEFAULT_VERBOSITY>
-char *getNextVerifiedLog( logMap<verboseT>  &lm,                 /**< [in] loaded log map to search */
-                          char              *logCurrent,         /**< [in] entry before the desired verified entry */
-                          const std::string &appName,            /**< [in] app/device name to search */
-                          char              *logBefore = nullptr /**< [in] verified entry before logCurrent, if any */
+logEntryRecord getNextVerifiedEntry( logMap<verboseT>     &lm,      /**< [in] loaded log map to search */
+                                     const logEntryRecord &current, /**< [in] entry before the desired verified entry */
+                                     const std::string    &appName, /**< [in] app/device name to search */
+                                     const logEntryRecord &before   /**< [in] verified entry before current, if any */
 )
 {
-    if( logCurrent == nullptr )
+    logEntryRecord found;
+
+    if( current.empty() )
     {
-        return nullptr;
+        return found;
     }
 
-    flatlogs::eventCodeT ev = flatlogs::logHeader::eventCode( logCurrent );
-    char                *candidate{ nullptr };
-    char                *current{ logCurrent };
+    flatlogs::eventCodeT ev = current.m_eventCode;
+
+    /// An unverifiable entry skipped during the search, with the entry before it.
     struct rejectedLog
     {
-        char *m_before{ nullptr };  ///< Entry immediately before the unverifiable entry in the search.
-        char *m_failure{ nullptr }; ///< Unverifiable entry skipped during the search.
+        logEntryRecord m_before;  ///< Entry immediately before the unverifiable entry in the search.
+        logEntryRecord m_failure; ///< Unverifiable entry skipped during the search.
     };
 
     std::vector<rejectedLog> rejected;
 
-    auto appBuffer = lm.m_appToBufferMap.find( appName );
-    if( appBuffer != lm.m_appToBufferMap.end() && !verifyLogEntry( ev, logCurrent ) )
+    logEntryRecord currentCopy = current;
+    if( !verifyLogEntry( ev, currentCopy ) )
     {
-        rejected.push_back( { logBefore, logCurrent } );
+        rejected.push_back( { before, current } );
     }
 
-    while( lm.getNextLog( candidate, current, appName ) == 0 )
+    logEntryRecord at = current;
+    logEntryRecord candidate;
+    while( lm.getNextEntry( candidate, at, appName ) == 0 )
     {
-        if( candidate == nullptr )
-        {
-            return nullptr;
-        }
-
         if( verifyLogEntry( ev, candidate ) )
         {
-            if( appBuffer != lm.m_appToBufferMap.end() )
+            for( const rejectedLog &badLog : rejected )
             {
-                for( const rejectedLog &badLog : rejected )
-                {
-                    lm.recordRecoverableError( appName );
-                    reportUnverifiableLogEntry( appName,
-                                                ev,
-                                                badLog.m_before,
-                                                badLog.m_failure,
-                                                candidate,
-                                                appBuffer->second.sourceFile( badLog.m_failure ),
-                                                appBuffer->second.sourceOffset( badLog.m_failure ),
-                                                "next-verified-search" );
-                }
+                lm.recordRecoverableError( appName );
+                reportUnverifiableLogEntry(
+                    appName, ev, badLog.m_before, badLog.m_failure, candidate, "next-verified-search" );
             }
 
-            DEBUG_CRUMB( "getNextVerifiedLog found app=" + appName + " ev=" + std::to_string( ev ) +
-                         " currentTs=" + logMapDebugTime( flatlogs::logHeader::timespec( logCurrent ) ) +
-                         " logTs=" + logMapDebugTime( flatlogs::logHeader::timespec( candidate ) ) + " " );
-            return candidate;
+            DEBUG_CRUMB( "getNextVerifiedEntry found app=" + appName + " ev=" + std::to_string( ev ) + " currentTs=" +
+                         logMapDebugTime( current.m_ts ) + " logTs=" + logMapDebugTime( candidate.m_ts ) + " " );
+            found = std::move( candidate );
+            return found;
         }
 
-        DEBUG_CRUMB( "getNextVerifiedLog rejected app=" + appName + " ev=" + std::to_string( ev ) +
-                     " logTs=" + logMapDebugTime( flatlogs::logHeader::timespec( candidate ) ) +
-                     " msgLen=" + std::to_string( flatlogs::logHeader::msgLen( candidate ) ) +
-                     " totalSize=" + std::to_string( flatlogs::logHeader::totalSize( candidate ) ) + " " );
+        DEBUG_CRUMB( "getNextVerifiedEntry rejected app=" + appName + " ev=" + std::to_string( ev ) +
+                     " logTs=" + logMapDebugTime( candidate.m_ts ) + " msgLen=" + std::to_string( candidate.m_msgLen ) +
+                     " totalSize=" + std::to_string( candidate.m_entrySize ) + " " );
 
-        rejected.push_back( { current, candidate } );
-        current = candidate;
+        rejected.push_back( { at, candidate } );
+        at = candidate;
     }
 
-    if( appBuffer != lm.m_appToBufferMap.end() )
+    for( const rejectedLog &badLog : rejected )
     {
-        for( const rejectedLog &badLog : rejected )
-        {
-            lm.recordRecoverableError( appName );
-            reportUnverifiableLogEntry( appName,
-                                        ev,
-                                        badLog.m_before,
-                                        badLog.m_failure,
-                                        nullptr,
-                                        appBuffer->second.sourceFile( badLog.m_failure ),
-                                        appBuffer->second.sourceOffset( badLog.m_failure ),
-                                        "next-verified-search" );
-        }
+        lm.recordRecoverableError( appName );
+        reportUnverifiableLogEntry(
+            appName, ev, badLog.m_before, badLog.m_failure, logEntryRecord(), "next-verified-search" );
     }
 
-    DEBUG_CRUMB( "getNextVerifiedLog no match app=" + appName + " ev=" + std::to_string( ev ) +
-                 " currentTs=" + logMapDebugTime( flatlogs::logHeader::timespec( logCurrent ) ) + " " );
+    DEBUG_CRUMB( "getNextVerifiedEntry no match app=" + appName + " ev=" + std::to_string( ev ) +
+                 " currentTs=" + logMapDebugTime( current.m_ts ) + " " );
 
-    return nullptr;
+    return found;
 }
 
+/// Get the value of a state-type metadata item over an exposure.
+/** If the value is updated during the exposure, the new value is used, otherwise the value set at the start
+ * of the exposure is used.
+ *
+ * \returns 0 on success
+ * \returns -1 if the value is unavailable, with the reason in \p failureReason
+ */
 template <typename valT, class verboseT = XWC_DEFAULT_VERBOSITY>
-int getLogStateVal( valT                      &val,
-                    logMap<verboseT>          &lm,
-                    const std::string         &appName,
-                    flatlogs::eventCodeT       ev,
-                    const flatlogs::timespecX &stime,
-                    const flatlogs::timespecX &atime,
-                    valT ( *getter )( void * ),
-                    char       **hint          = 0,
-                    double       maxGap        = -1,
-                    std::string *failureReason = 0 )
+int getLogStateVal( valT                      &val,     /**< [out] the value */
+                    logMap<verboseT>          &lm,      /**< [in,out] loaded logs to search */
+                    const std::string         &appName, /**< [in] app/device name to search */
+                    flatlogs::eventCodeT       ev,      /**< [in] event code of the log type holding the value */
+                    const flatlogs::timespecX &stime,   /**< [in] exposure start time */
+                    const flatlogs::timespecX &atime,   /**< [in] exposure end time */
+                    valT ( *getter )( void * ),         /**< [in] gets the value from a log entry's message */
+                    double       maxGap        = -1,    /**< [in] maximum allowed metadata gap in seconds */
+                    std::string *failureReason = 0      /**< [out] [optional] reason the value is unavailable */
+)
 {
-    char *atprior = nullptr;
-    char *stprior = nullptr;
-
-    char *_hint = nullptr;
-
-    if( hint )
-        _hint = *hint;
-    else
-        _hint = 0;
+    logEntryRecord atprior;
+    logEntryRecord stprior;
 
 #ifdef DEBUG
     std::cerr << __FILE__ << " " << __LINE__ << "\n";
 #endif
 
-    if( lm.getPriorLog( stprior, appName, ev, stime, _hint ) != 0 )
+    if( lm.getPriorEntry( stprior, appName, ev, stime ) != 0 )
     {
         return logMetaFail( failureReason, "due to missing prior telemetry" );
     }
 
-    if( stprior == nullptr || flatlogs::logHeader::eventCode( stprior ) != ev )
+    if( stprior.empty() || stprior.m_eventCode != ev )
     {
         return logMetaFail( failureReason, "due to missing prior telemetry" );
     }
     if( !verifyLogEntry( ev, stprior ) )
     {
         DEBUG_CRUMB( "getLogStateVal prior verify failed app=" + appName + " ev=" + std::to_string( ev ) +
-                     " logTs=" + logMapDebugTime( flatlogs::logHeader::timespec( stprior ) ) + " " );
-        stprior = getPriorVerifiedLog( lm, appName, ev, stime );
-        if( stprior == nullptr )
+                     " logTs=" + logMapDebugTime( stprior.m_ts ) + " " );
+        stprior = getPriorVerifiedEntry( lm, appName, ev, stime );
+        if( stprior.empty() )
         {
             return logMetaFail( failureReason, "due to unverifiable prior telemetry" );
         }
     }
 
-    if( !logMetaGapValid( flatlogs::logHeader::timespec( stprior ), stime, maxGap ) )
+    if( !logMetaGapValid( stprior.m_ts, stime, maxGap ) )
     {
         return logMetaFail( failureReason, logMetaGapReason( maxGap ) );
     }
 
-    valT stprV = getter( flatlogs::logHeader::messageBuffer( stprior ) );
+    valT stprV = getter( stprior.message() );
 
     valT atprV;
 
@@ -545,22 +508,20 @@ int getLogStateVal( valT                      &val,
     std::cerr << __FILE__ << " " << __LINE__ << "\n";
 #endif
 
-    if( lm.getNextLog( atprior, stprior, appName ) != 0 )
+    if( lm.getNextEntry( atprior, stprior, appName ) != 0 )
     {
-        if( !logMetaGapValid( flatlogs::logHeader::timespec( stprior ), atime, maxGap ) )
+        if( !logMetaGapValid( stprior.m_ts, atime, maxGap ) )
         {
             return logMetaFail( failureReason, logMetaGapReason( maxGap ) );
         }
 
         return logMetaFail( failureReason, "due to missing following telemetry" );
     }
-    if( atprior == nullptr )
+    if( atprior.empty() )
     {
-        if( logMetaGapValid( flatlogs::logHeader::timespec( stprior ), atime, maxGap ) )
+        if( logMetaGapValid( stprior.m_ts, atime, maxGap ) )
         {
             val = stprV;
-            if( hint )
-                *hint = stprior;
             return 0;
         }
 
@@ -569,9 +530,9 @@ int getLogStateVal( valT                      &val,
     if( !verifyLogEntry( ev, atprior ) )
     {
         DEBUG_CRUMB( "getLogStateVal next verify failed app=" + appName + " ev=" + std::to_string( ev ) +
-                     " logTs=" + logMapDebugTime( flatlogs::logHeader::timespec( atprior ) ) + " " );
-        atprior = getNextVerifiedLog( lm, atprior, appName, stprior );
-        if( atprior == nullptr )
+                     " logTs=" + logMapDebugTime( atprior.m_ts ) + " " );
+        atprior = getNextVerifiedEntry( lm, atprior, appName, stprior );
+        if( atprior.empty() )
         {
             return logMetaFail( failureReason, "due to unverifiable following telemetry" );
         }
@@ -581,39 +542,34 @@ int getLogStateVal( valT                      &val,
     std::cerr << __FILE__ << " " << __LINE__ << "\n";
 #endif
 
-    while( flatlogs::logHeader::timespec( atprior ) < atime )
+    while( atprior.m_ts < atime )
     {
-        if( !logMetaGapValid(
-                flatlogs::logHeader::timespec( stprior ), flatlogs::logHeader::timespec( atprior ), maxGap ) )
+        if( !logMetaGapValid( stprior.m_ts, atprior.m_ts, maxGap ) )
         {
             return logMetaFail( failureReason, logMetaGapReason( maxGap ) );
         }
 
-        atprV = getter( flatlogs::logHeader::messageBuffer( atprior ) );
+        atprV = getter( atprior.message() );
         if( atprV != stprV )
         {
             val = atprV;
-            if( hint )
-                *hint = stprior;
             return 0;
         }
         stprior = atprior;
-        if( lm.getNextLog( atprior, stprior, appName ) != 0 )
+        if( lm.getNextEntry( atprior, stprior, appName ) != 0 )
         {
-            if( !logMetaGapValid( flatlogs::logHeader::timespec( stprior ), atime, maxGap ) )
+            if( !logMetaGapValid( stprior.m_ts, atime, maxGap ) )
             {
                 return logMetaFail( failureReason, logMetaGapReason( maxGap ) );
             }
 
             return logMetaFail( failureReason, "due to missing following telemetry" );
         }
-        if( atprior == nullptr )
+        if( atprior.empty() )
         {
-            if( logMetaGapValid( flatlogs::logHeader::timespec( stprior ), atime, maxGap ) )
+            if( logMetaGapValid( stprior.m_ts, atime, maxGap ) )
             {
                 val = stprV;
-                if( hint )
-                    *hint = stprior;
                 return 0;
             }
 
@@ -622,113 +578,106 @@ int getLogStateVal( valT                      &val,
         if( !verifyLogEntry( ev, atprior ) )
         {
             DEBUG_CRUMB( "getLogStateVal next verify failed app=" + appName + " ev=" + std::to_string( ev ) +
-                         " logTs=" + logMapDebugTime( flatlogs::logHeader::timespec( atprior ) ) + " " );
-            atprior = getNextVerifiedLog( lm, atprior, appName, stprior );
-            if( atprior == nullptr )
+                         " logTs=" + logMapDebugTime( atprior.m_ts ) + " " );
+            atprior = getNextVerifiedEntry( lm, atprior, appName, stprior );
+            if( atprior.empty() )
             {
                 return logMetaFail( failureReason, "due to unverifiable following telemetry" );
             }
         }
     }
 
-    if( !logMetaGapValid( flatlogs::logHeader::timespec( stprior ), atime, maxGap ) )
+    if( !logMetaGapValid( stprior.m_ts, atime, maxGap ) )
     {
         return logMetaFail( failureReason, logMetaGapReason( maxGap ) );
     }
 
     val = stprV;
 
-    if( hint )
-        *hint = stprior;
     return 0;
 }
 
+/// Interpolate the value of a continuous metadata item to the middle of an exposure.
+/** Interpolates linearly between the last entry before the middle of the exposure and the next entry after it.
+ *
+ * \returns 0 on success
+ * \returns 1 if the value is unavailable, with the reason in \p failureReason
+ */
 template <typename valT, class verboseT = XWC_DEFAULT_VERBOSITY>
-int getLogContVal( valT                      &val,
-                   logMap<verboseT>          &lm,
-                   const std::string         &appName,
-                   flatlogs::eventCodeT       ev,
-                   const flatlogs::timespecX &stime,
-                   const flatlogs::timespecX &atime,
-                   valT ( *getter )( void * ),
-                   char       **hint          = 0,
-                   double       maxGap        = -1,
-                   std::string *failureReason = 0,
-                   bool         isAngle       = false )
+int getLogContVal( valT                      &val,     /**< [out] the value */
+                   logMap<verboseT>          &lm,      /**< [in,out] loaded logs to search */
+                   const std::string         &appName, /**< [in] app/device name to search */
+                   flatlogs::eventCodeT       ev,      /**< [in] event code of the log type holding the value */
+                   const flatlogs::timespecX &stime,   /**< [in] exposure start time */
+                   const flatlogs::timespecX &atime,   /**< [in] exposure acquisition/end time */
+                   valT ( *getter )( void * ),         /**< [in] gets the value from a log entry's message */
+                   double       maxGap        = -1,    /**< [in] maximum allowed metadata gap in seconds */
+                   std::string *failureReason = 0,     /**< [out] [optional] reason the value is unavailable */
+                   bool         isAngle       = false  /**< [in] true if the value is an angle in degrees */
+)
 {
-    char *atafter;
-    char *stprior;
-
-    char *_hint;
-    if( hint )
-        _hint = *hint;
-    else
-        _hint = 0;
+    logEntryRecord atafter;
+    logEntryRecord stprior;
 
     flatlogs::timespecX midexp = meanTimespecX( atime, stime );
 
     // Get log entry before midexp
-    if( lm.getPriorLog( stprior, appName, ev, midexp, _hint ) != 0 )
+    if( lm.getPriorEntry( stprior, appName, ev, midexp ) != 0 )
     {
         return logMetaFail( failureReason, "due to missing prior telemetry", 1 );
     }
 
-    if( stprior == nullptr || flatlogs::logHeader::eventCode( stprior ) != ev )
+    if( stprior.empty() || stprior.m_eventCode != ev )
     {
         return logMetaFail( failureReason, "due to missing prior telemetry", 1 );
     }
     if( !verifyLogEntry( ev, stprior ) )
     {
-        DEBUG_CRUMB( "getLogContVal prior verify failed app=" + appName + " ev=" + std::to_string( ev ) +
-                     " logTs=" + logMapDebugTime( flatlogs::logHeader::timespec( stprior ) ) + " " );
-        stprior = getPriorVerifiedLog( lm, appName, ev, midexp );
-        if( stprior == nullptr )
+        stprior = getPriorVerifiedEntry( lm, appName, ev, midexp );
+        if( stprior.empty() )
         {
             return logMetaFail( failureReason, "due to unverifiable prior telemetry", 1 );
         }
     }
 
-    if( !logMetaGapValid( flatlogs::logHeader::timespec( stprior ), midexp, maxGap ) )
+    if( !logMetaGapValid( stprior.m_ts, midexp, maxGap ) )
     {
         return logMetaFail( failureReason, logMetaGapReason( maxGap ), 1 );
     }
 
-    valT stprV = getter( flatlogs::logHeader::messageBuffer( stprior ) );
+    valT stprV = getter( stprior.message() );
 
     // Get log entry after.
-    if( lm.getNextLog( atafter, stprior, appName ) != 0 )
+    if( lm.getNextEntry( atafter, stprior, appName ) != 0 )
     {
 #ifdef HARD_EXIT
         exit( -1 );
 #endif
         return logMetaFail( failureReason, "due to missing following telemetry", 1 );
     }
-    if( atafter == nullptr )
+    if( atafter.empty() )
     {
         return logMetaFail( failureReason, "due to missing following telemetry", 1 );
     }
     if( !verifyLogEntry( ev, atafter ) )
     {
-        DEBUG_CRUMB( "getLogContVal next verify failed app=" + appName + " ev=" + std::to_string( ev ) +
-                     " logTs=" + logMapDebugTime( flatlogs::logHeader::timespec( atafter ) ) + " " );
-        atafter = getNextVerifiedLog( lm, atafter, appName, stprior );
-        if( atafter == nullptr )
+        atafter = getNextVerifiedEntry( lm, atafter, appName, stprior );
+        if( atafter.empty() )
         {
             return logMetaFail( failureReason, "due to unverifiable following telemetry", 1 );
         }
     }
 
-    if( !logMetaGapValid( midexp, flatlogs::logHeader::timespec( atafter ), maxGap ) ||
-        !logMetaGapValid( flatlogs::logHeader::timespec( stprior ), flatlogs::logHeader::timespec( atafter ), maxGap ) )
+    if( !logMetaGapValid( midexp, atafter.m_ts, maxGap ) || !logMetaGapValid( stprior.m_ts, atafter.m_ts, maxGap ) )
     {
         return logMetaFail( failureReason, logMetaGapReason( maxGap ), 1 );
     }
 
-    valT atprV = getter( flatlogs::logHeader::messageBuffer( atafter ) );
+    valT atprV = getter( atafter.message() );
 
-    double st = flatlogs::logHeader::timespec( stprior ).asDouble();
+    double st = stprior.m_ts.asDouble();
     double it = midexp.asDouble();
-    double et = flatlogs::logHeader::timespec( atafter ).asDouble();
+    double et = atafter.m_ts.asDouble();
 
     double delta = atprV - stprV;
     if( isAngle )
@@ -743,9 +692,6 @@ int getLogContVal( valT                      &val,
     }
 
     val = static_cast<valT>( interp );
-
-    if( hint )
-        *hint = stprior;
 
     return 0;
 }
@@ -812,8 +758,6 @@ struct logMeta
 
     bool        m_isValid{ false };                   ///< True when the metadata member resolved to an accessor.
     std::string m_invalidValue{ unavailableValue() }; ///< Sentinel returned when metadata cannot be read.
-
-    char *m_hint{ nullptr }; ///< Cached log-search hint for repeated lookups of the same metadata item.
 
     std::string m_unavailableReason; ///< Reason the last metadata lookup returned unavailable, if known.
 
