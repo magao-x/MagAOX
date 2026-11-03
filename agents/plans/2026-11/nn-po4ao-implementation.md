@@ -580,3 +580,28 @@ Recovery and heartbeat advancement on the instrument remain to be verified.
 
 Affected files: `apps/po4aoTrainer/configs/po4aoTrainer.conf`,
 `apps/po4aoTrainer/DEPLOYMENT.md`, and this record.
+
+## Operator penalty settings, 2026-11-03
+
+The operator identified the intended notebook values as `ACTION_PENALTY_WEIGHT =
+0.01` and `POLICY_UPDATE_PENALTY_WEIGHT = 0.5`. These already map to the managed
+schema's `[RL] loss_function_penalty` and `[policy_update] weight`, respectively.
+The former weights normalized action magnitude in `train_policy`; the latter
+weights normalized action changes from the acknowledged reference policy in
+`PolicyUpdatePenalty.penalty`. Both are in `configuration.HOT` and are applied
+between training iterations without resetting models or replacing Adam.
+
+The distributed example had values 0.2 and 1.0 and did not identify the notebook
+variable names. Correct the example to the operator's values, label both mappings
+in comments, and document them in the single deployment guide. Keep schema keys
+and numerical implementations unchanged. Historical CPU parity fixtures and the
+explicitly synthetic example notebook retain their recorded reference settings;
+this correction is to the managed deployment configuration.
+
+Validation: the full supplied training TOML parses through `TrainingConfig`; a
+local CPU session accepts both changes through `needs_reset`/`apply_hot`, updates
+the action coefficient and regularizer weight to 0.01/0.5, and retains the same
+optimizer object. No instrument file was changed and no live training was run.
+
+Affected files: `apps/po4aoTrainer/configs/po4ao_training.conf`,
+`apps/po4aoTrainer/DEPLOYMENT.md`, and this record.
