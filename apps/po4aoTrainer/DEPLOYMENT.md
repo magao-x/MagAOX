@@ -146,10 +146,13 @@ directory. For an older trainer config, remove
 - `po4ao_training.conf`: training settings and GPU assignments. Current defaults use
   GPU 1 for training/building, with runtime inference on GPU 0; verify compatibility.
   The notebook's `ACTION_PENALTY_WEIGHT` is `[RL] loss_function_penalty = 0.01`;
-  `POLICY_UPDATE_PENALTY_WEIGHT` is `[policy_update] weight = 0.5`. Older examples
+  `POLICY_UPDATE_PENALTY_WEIGHT` is `[policy_update] penalty = 0.5`. Older examples
   used 0.2 and 1.0 respectively; edit the existing keys to use the operator's values.
   Both support hot updates at a training iteration boundary (on resume if paused),
   without restarting the app. Keep the other keys in those sections.
+  Install the updated trainer before using `penalty`; older installed versions
+  require `weight`. The updated app accepts either spelling, but rejects both in
+  one section. Renaming the key alone preserves the resolved config revision.
 - Existing `po4ao.conf`: keep geometry/gains/limits. Its current `10 * 1000 == 10000`
   warmup/replay dimensions already satisfy the trainer. Change only the engine path:
 
@@ -158,6 +161,26 @@ directory. For an older trainer config, remove
 engineDirs=/data/po4aoTrainer/current
 engineName=policy.trt
 ```
+
+The distributed training example now matches all 33 explicit settings in the
+operator's 2026-11-03 nonlinear notebook excerpt, except the two penalty values
+deliberately kept at 0.01 and 0.5. The excerpt's later FAINT assignments would
+otherwise override them to 0.1 and 1.0. Six other defaults changed:
+
+| Training setting | Earlier example | Notebook-matched example |
+| --- | --- | --- |
+| `NN_models.training_batch` | 256 | 128 |
+| `nonlinear.channels` | 8 | 32 |
+| `nonlinear.shared_layers` | 2 | 3 |
+| `training.model_publish_interval` | 100 | 50 |
+| `training.first_model_publish_iteration` | 250 | 150 |
+| `training.max_candidate_action_rms_ratio` | 1.5 | 5.0 |
+
+Changing network channels/layers requires Reset before the worker adopts the new
+architecture. The excerpt inherits geometry, stream paths, command limits, gains
+and compute settings from `po4ao_config`, which was not supplied; parity of those
+inherited settings is not established. Diagnostic sample rate also remains the
+existing 2000 Hz setting. Existing installed files are not overwritten automatically.
 
 Publication creates `current`; do not make it a directory. Add
 `po4aoTrainer po4aoTrainer` to `proclist_RTC.txt` and append `po4aoTrainer` to

@@ -59,6 +59,13 @@ Runtime geometry/history capacity, gains and limits come from the C++ config.
 The parser rejects unknown keys and invalid combinations, retaining the last valid
 revision after an incomplete edit.
 
+The action penalty is `[RL] loss_function_penalty`; the policy-change penalty is
+`[policy_update] penalty`. The supplied values are 0.01 and 0.5. The loader accepts
+the previous `weight` spelling for existing installations, but rejects both names
+in one section. It resolves either name to the notebook core's existing `weight`
+key so a spelling-only edit preserves config hashes and notebook compatibility.
+Install the updated trainer before using the new `penalty` spelling.
+
 `configuration.HOT` is the explicit hot-field list. Valid hot revisions apply as a
 whole at iteration boundaries; learning-rate changes update existing Adam parameter
 groups. A revision containing any reset-only field is staged in its entirety until
