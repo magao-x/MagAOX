@@ -145,6 +145,11 @@ directory. For an older trainer config, remove
   startup. The older 0.2-second setting can keep it flushing output indefinitely.
 - `po4ao_training.conf`: training settings and GPU assignments. Current defaults use
   GPU 1 for training/building, with runtime inference on GPU 0; verify compatibility.
+  The notebook's `ACTION_PENALTY_WEIGHT` is `[RL] loss_function_penalty = 0.01`;
+  `POLICY_UPDATE_PENALTY_WEIGHT` is `[policy_update] weight = 0.5`. Older examples
+  used 0.2 and 1.0 respectively; edit the existing keys to use the operator's values.
+  Both support hot updates at a training iteration boundary (on resume if paused),
+  without restarting the app. Keep the other keys in those sections.
 - Existing `po4ao.conf`: keep geometry/gains/limits. Its current `10 * 1000 == 10000`
   warmup/replay dimensions already satisfy the trainer. Change only the engine path:
 
