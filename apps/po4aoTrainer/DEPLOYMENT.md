@@ -141,6 +141,8 @@ directory. For an older trainer config, remove
 - `po4aoTrainer.conf`: actual PO4AO device name, `artifact_root="/data/po4aoTrainer"`,
   and `source_revision="rlandman/nn-po4ao-gui@<git rev-parse HEAD>"`. The configured
   TensorRT builder exists at `/opt/MagAOX/vendor/TensorRT-10.0.0.6/bin/trtexec`.
+  Keep `sleep_interval_sec = 2.0`: the driver needs a one-second quiet gap during
+  startup. The older 0.2-second setting can keep it flushing output indefinitely.
 - `po4ao_training.conf`: training settings and GPU assignments. Current defaults use
   GPU 1 for training/building, with runtime inference on GPU 0; verify compatibility.
 - Existing `po4ao.conf`: keep geometry/gains/limits. Its current `10 * 1000 == 10000`
@@ -180,6 +182,35 @@ GUI. Before accepting managed operation, test delayed loads, other-client operat
 trainer loss/return and status recovery, and measure latency during training/export.
 
 ## Recovery
+
+If the trainer and driver run but no heartbeat appears on exao2, check:
+
+```sh
+logdump -n 1 isRTC 2>&1 | grep 'po4aoTrainer' | tail -30
+```
+
+A final `Starting flush ... po4aoTrainer.out` without completion indicates that
+continuous trainer updates prevent the driver's one-second quiet gap. Change
+`sleep_interval_sec = 0.2` to `sleep_interval_sec = 2.0` in
+`/opt/MagAOX/config/po4aoTrainer.conf`, then restart only the trainer:
+
+```sh
+xctrl shutdown po4aoTrainer && xctrl startup po4aoTrainer
+```
+
+Allow the driver to reconnect, then run this twice a few seconds apart:
+
+```sh
+getINDI -t 3 'po4aoTrainer.status.heartbeat'
+```
+
+The counter must increase. This changes the supervisor/status interval, not the
+C++ inference or numerical training-loop rate; no package reinstall or isRTC
+restart is required for this correction. Check the same heartbeat on exao1 and
+in the GUI container only after it works on exao2. Remote-server configurations
+can import local copies of `isRTC.conf` through `[remote] servers`; update the
+configuration actually used by each server instead of assuming every hop needs
+an explicit `[remote] drivers` entry. A direct TCP tunnel needs no device list.
 
 `Session po4aoTrainer does not exist` is normal on first startup; it should be
 followed by session creation. Use `xctrl status po4aoTrainer` and the tmux capture
