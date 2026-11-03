@@ -92,7 +92,9 @@ modulationDevice=modwfs
 
 `make` now compiles `cacaoWriter.cpp` against the installed milk headers under
 `/usr/local/milk/include`; no Python module, helper service, or additional linked milk
-library is needed. Build/reinstall both this app and `po4aoGUI` for the new independent
+library is needed. This helper omits the forced MagAO-X header to keep milk's and EDT's
+conflicting `BOOL` typedefs separate; its milk paths precede mxlib's include paths.
+Other app objects keep the standard build flags. Build/reinstall both this app and `po4aoGUI` for the new independent
 contract. The GPU/instrument build and live handover still require operator validation.
 
 ## Operator-managed transitions
@@ -152,15 +154,17 @@ make -C apps/nnReconstructor/tests asan
 make -C apps/nnReconstructor/tests tsan
 ```
 
-All test outputs stay in the app's ignored `tests/.build` directory. Tests compile the actual app
+CPU test outputs stay in the app's ignored `tests/.build` directory. The build regression
+uses a temporary directory, removed when it finishes. It compiles the real FPS helper
+through the app Makefile with conflicting header fixtures, without requiring installed
+milk or EDT. Tests compile the actual app
 methods against CPU-only CUDA/TensorRT, INDI and base-class boundary doubles. They exercise the
 production preprocessing, validation, state transitions, real C++ loader thread and result handoff.
 They do not validate the SDK ABI, GPU inference, network INDI transport, actual ImageStreamIO posting,
 or the real base-class thread lifecycle. The non-unit modalNorm fixture verifies its legacy no-op.
 
-The test Doxygen group lives in this directory to honor the app-only scope. No global test/build or
-Doxygen-group file is changed. New test cases must exercise production behavior, not a parallel model
-of the state machine.
+The test Doxygen group is registered under `application_unit_test` in `tests/groups.dox`.
+New test cases must exercise production behavior, not a parallel model of the state machine.
 
 The `optimized` target also runs the suite with the repository's default `-O3 -ffast-math` flags.
 Finite-value validation inspects IEEE exponent bits by reference: ordinary `std::isfinite()` and
