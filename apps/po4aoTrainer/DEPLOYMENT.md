@@ -1,5 +1,50 @@
 # PO4AO deployment: existing notebook, then managed training
 
+## Update an already working trainer and open the progress notebook
+
+For the cached-replay performance correction, update only the trainer. Run these
+commands yourself on exao2 after transferring `nn-po4ao-gui-performance.bundle`
+to `/tmp`. Start with a clean checkout. Pause learning and let any pending model
+load settle first. Restarting the trainer discards its in-memory Python models and
+Adam state; start a fresh managed session afterward. No NN, C++ PO4AO, GUI or INDI
+server rebuild/restart is needed for this patch, and existing configs stay in place.
+
+```sh
+cd /home/rlandman/MagAOX
+git status --short --branch
+git fetch /tmp/nn-po4ao-gui-performance.bundle rlandman/nn-po4ao-gui
+git merge --ff-only FETCH_HEAD
+xctrl shutdown po4aoTrainer
+TRAIN_PY=/opt/conda/envs/po4aoTrainer/bin/python
+make -C apps/po4aoTrainer INSTRUMENT_CONDA_ENV=po4aoTrainer PYTHON="$TRAIN_PY -I" install
+```
+
+After installation succeeds, set `source_revision` in
+`/opt/MagAOX/config/po4aoTrainer.conf` to `rlandman/nn-po4ao-gui@` followed by
+`git rev-parse HEAD`, then:
+
+```sh
+xctrl startup po4aoTrainer
+cp -i notebooks/po4ao/watch_training.ipynb /home/rlandman/PO4AO_2026/po4ao_training_progress.ipynb
+"$TRAIN_PY" -m ipykernel install --user --name po4aoTrainer --display-name "PO4AO trainer"
+```
+
+Open `po4ao_training_progress.ipynb` in your existing Jupyter interface and select
+**PO4AO trainer**. In the GUI, use **Reset → Enable PO4AO → collection Ready → Start
+learning** for the fresh session. Run the notebook cells; set `AUTO_REFRESH = True`
+in its final cell to watch continuously, or rerun `latest_record = refresh()`.
+Interrupting this observer notebook leaves training running. It reads files only;
+keep the original training notebook's training/export cells stopped.
+
+Plots normally update every 50 iterations after any publication finishes. The
+notebook shows run identity and measurement age, residual RMS/PSD, model diagnostics,
+publication outcomes and timing fields. While an export is running, the publication
+record may be newer than the plots. Pausing training also pauses snapshot updates.
+Use live instrument measurements for paused-policy PO4AO/integrator comparisons;
+predicted cost reductions alone do not establish closed-loop improvement.
+
+The remaining sections cover a first installation or a full native-app deployment.
+
 Use the same `po4aoGUI` for NN selection, notebook-based PO4AO, and optional managed
 training. **NN controls require only `nnReconstructor`; no trainer installation is
 needed.** You run the commands and manage loop state. All checkouts must contain the
@@ -63,10 +108,12 @@ po4aoGUI po4ao po4aoTrainer nnReconstructor &
 Run `make install` as the normal build user; the install rule itself uses sudo.
 For a fresh checkout only, first build `INDI/liblilxml` and `INDI/libcommon` with
 `make -C`. No Qt installation on the outer IOC host or your laptop is needed.
-The container's existing localhost:7624 INDI aggregation must expose `nnReconstructor`
-and `po4ao`. If either is absent, append that device using the existing RTC tunnel
-name to its `[remote] drivers` and restart only that local aggregator. The trainer
-entry is needed only for managed training.
+The container's existing localhost:7624 endpoint must expose `nnReconstructor` and
+`po4ao`. In the operator's working deployment these arrive through **isAOC on
+exao1**. Its imported RTC device list must also contain `po4aoTrainer` for managed
+training. After changing that list on exao1, run `xctrl restart isAOC` there; this
+was the missing step when the trainer heartbeat worked on exao2 but not at the GUI.
+A container using only a tunnel needs no local driver-list edit or server restart.
 
 With the trainer stopped, verify the NN catalog appears, choose a model and use
 **Set reconstructor**. The adjacent button should read **Switch to CNN** when CACAO
@@ -184,8 +231,10 @@ existing 2000 Hz setting. Existing installed files are not overwritten automatic
 
 Publication creates `current`; do not make it a directory. Add
 `po4aoTrainer po4aoTrainer` to `proclist_RTC.txt` and append `po4aoTrainer` to
-`isRTC.conf`'s `[local] drivers`. Expose it through the IOC container's aggregation as in
-step 2, then restart only affected INDI servers (`xctrl restart isRTC` on exao2).
+`isRTC.conf`'s `[local] drivers` on exao2. Expose it through exao1's isAOC as in
+step 2. For this initial registration, restart the affected servers: `xctrl restart
+isRTC` on exao2 and `xctrl restart isAOC` on exao1 after their respective list changes.
+Skip server restarts when updating an already connected trainer.
 
 Run the checker as the runtime account (`xsup`); then start the apps:
 

@@ -75,7 +75,9 @@ errors and pending reset. Pending hot changes are applied when learning resumes.
 Each run contains its resolved launch/config snapshots, worker log, completed
 metrics JSONL and bounded diagnostic snapshots. Publication issuance/outcome append
 revisions to the same session/iteration record; **the last record for that pair is
-authoritative**. The matching diagnostic snapshot is rewritten with the outcome.
+authoritative**. Compress the matching diagnostic snapshot once, after publication
+finishes (or immediately if no candidate is ready). During a build, the JSONL can
+be newer than the latest plot snapshot.
 Exports run in private candidate directories. The supervisor verifies engine hash,
 metadata/config revision, reset generation, matching NPZ identity and finite model
 state, then replaces one `current` directory symlink. C++ reload completion
@@ -116,7 +118,11 @@ result = session.step(
 
 Inputs are `ReplaySnapshot` objects with `[stream modes, samples, 2]` data in the
 producer's newest-first order; the last dimension is observations and commands.
-`None` means waiting for complete fresh data or reaching the iteration target.
+`None` means waiting for complete data/new warmup after invalidation, or reaching
+the iteration target. Complete cached snapshots can train repeatedly, matching the
+notebook. Treat snapshots as immutable and supply a new object for each publication.
+The managed worker copies streams only when their counters change and clears both
+caches on recollection. It no longer limits training to one update per replay episode.
 Repeated calls preserve models, optimizers, fixed normalization and reference state.
 `session.config` is a copy. Use `configuration.apply_hot` only at an iteration
 boundary; reset-only changes require explicit reinitialization.
@@ -130,7 +136,11 @@ session and prevent publication.
 
 Direct plots remain available through `plot_training_diagnostics` and
 `plot_model_debug_diagnostics`, including optional direct model inspection. While
-the app trains, observe a completed snapshot without accessing its worker:
+the app trains, use [watch_training.ipynb](../../notebooks/po4ao/watch_training.ipynb)
+for manual/automatic refresh of saved plots, final publication results and timings.
+It follows the newest run without falling back to old-run plots while waiting for
+new diagnostics. It starts no training and makes no instrument connection. Or load
+one completed snapshot explicitly:
 
 ```python
 from xapp.po4aoTrainer.observer import load_diagnostics
@@ -146,6 +156,15 @@ is optional and is not imported by the headless worker. The original synchronous
 export helper remains available for explicit operator notebook use; the managed
 worker calls it only inside a cancellable child/private candidate directory.
 Notebook exports do not acquire managed-session eligibility automatically.
+
+The worker logs its GPU roles, assigned system CPUs and Torch CPU thread count.
+Torch's CPU threads are capped at the allowed CPU count without raising an existing
+lower limit. Diagnostic records separate `training_seconds` (including array
+conversion), `replay_seconds`, `diagnostics_seconds`, `export_seconds`, and
+`activation_seconds`. These describe sampled iterations, not whole-run averages;
+disk snapshot writes and operator pauses also contribute to elapsed time. Exports
+remain synchronous/cancellable, but construct only the two models needed for export,
+not another training session with an extra policy copy and optimizers.
 
 ## Verification and source
 
