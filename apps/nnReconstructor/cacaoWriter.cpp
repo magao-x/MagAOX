@@ -41,9 +41,11 @@ bool cacaoWriter::running()
     const bool valid =
         fstat( fd, &info ) == 0 && S_ISREG( info.st_mode ) && pread( fd, &md, sizeof( md ), 0 ) == sizeof( md );
     close( fd );
+    const auto metadataSize  = static_cast<off_t>( sizeof( md ) );
+    const auto parameterSize = static_cast<off_t>( sizeof( FUNCTION_PARAMETER ) );
     if( !valid || std::string( md.name, strnlen( md.name, sizeof( md.name ) ) ) != m_name || md.NBparamMAX <= 0 ||
-        md.NBparamMAX > ( info.st_size - sizeof( md ) ) / sizeof( FUNCTION_PARAMETER ) ||
-        info.st_size != sizeof( md ) + md.NBparamMAX * sizeof( FUNCTION_PARAMETER ) )
+        info.st_size < metadataSize || md.NBparamMAX != ( info.st_size - metadataSize ) / parameterSize ||
+        ( info.st_size - metadataSize ) % parameterSize != 0 )
         throw std::runtime_error( "CACAO FPS layout does not match installed milk headers" );
 
     // Match milk RUNrunning: a missing process is stopped only after CMDRUN clears.

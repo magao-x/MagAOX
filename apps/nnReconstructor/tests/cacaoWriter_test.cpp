@@ -92,6 +92,25 @@ TEST_CASE( "CACAO writer verifies metadata and process lifetime", "[nnReconstruc
         f.save();
         REQUIRE_THROWS( f.m_writer.running() );
     }
+    SECTION( "Nonpositive parameter count" )
+    {
+        f.m_metadata.NBparamMAX = 0;
+        f.save();
+        REQUIRE_THROWS( f.m_writer.running() );
+        f.m_metadata.NBparamMAX = -1;
+        f.save();
+        REQUIRE_THROWS( f.m_writer.running() );
+    }
+    SECTION( "Partial parameter payload" )
+    {
+        const auto path = f.m_root + "/" + f.m_writer.m_name + ".fps.shm";
+        const auto size = std::filesystem::file_size( path );
+        std::filesystem::resize_file( path, size - 1 );
+        REQUIRE_THROWS( f.m_writer.running() );
+        f.save();
+        std::filesystem::resize_file( path, size + 1 );
+        REQUIRE_THROWS( f.m_writer.running() );
+    }
     // clang-format off
 #ifdef NNRECONSTRUCTOR_TEST_DOXYGEN_REF
     MagAOX::app::cacaoWriter::running;

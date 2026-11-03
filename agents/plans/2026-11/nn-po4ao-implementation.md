@@ -484,3 +484,30 @@ Affected files for this increment:
   `check_deployment.py`; `configs/po4aoTrainer.conf`, `pyproject.toml`,
   `tests/test_supervisor.py`, `tests/test_review_regressions.py`, `README.md`, `DEPLOYMENT.md`.
 - This record and `agents/plans/2026-10/nn-po4ao-gui-requirements.md`.
+
+## EDT/milk build conflict, 2026-11-03
+
+The operator's exao2 build reached `cacaoWriter.cpp` and failed because the common
+Makefile force-includes `libMagAOX.hpp`, which brings in EDT's `typedef int BOOL`;
+milk's `CLIcore.h` declares a different `BOOL`. The compile log also showed nested
+milk headers coming from a second installation supplied by mxlib's include flags.
+This is a build integration defect, unrelated to sudo permissions or GPU inference.
+
+The app-local `cacaoWriter.o` rule now removes only that forced include, puts its
+selected milk include directories first, and depends on the Makefile rather than
+the unused MagAO-X precompiled header. Other app objects retain their normal flags
+and forced header. FPS file-size validation uses signed sizes and division/remainder
+to avoid the reported signedness warnings and multiplication overflow.
+
+Validation: 545 assertions / 33 native NN cases and 25 assertions / 2 FPS/FIFO cases
+pass. A new local build regression compiles the real helper through the actual app
+Makefile using conflicting EDT/milk header fixtures; it also confirms the main app
+object still receives its forced header. Reintroducing either the forced-include
+collision or mixed milk include order makes that regression fail for the intended
+reason. The fixtures do not validate installed milk ABI or a full Linux/GPU build.
+clang-format, Black and `git diff --check` pass. Installation/restart and the actual
+instrument build remain with the operator.
+
+Affected files: `apps/nnReconstructor/Makefile`, `cacaoWriter.cpp`,
+`tests/Makefile`, `tests/cacaoWriter_test.cpp`, `tests/test_cacao_writer_build.py`,
+`README.md`, and this record. No shared build rules or AGENTS.md changes.
