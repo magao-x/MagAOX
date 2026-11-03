@@ -1,37 +1,91 @@
 # PO4AO deployment: existing notebook, then managed training
 
-## Update an already working trainer and open the progress notebook
+## Update an existing installation: parameters and saved models
 
-For the cached-replay performance correction, update only the trainer. Run these
-commands yourself on exao2 after transferring `nn-po4ao-gui-performance.bundle`
-to `/tmp`. Start with a clean checkout. Pause learning and let any pending model
-load settle first. Restarting the trainer discards its in-memory Python models and
-Adam state; start a fresh managed session afterward. No NN, C++ PO4AO, GUI or INDI
-server rebuild/restart is needed for this patch, and existing configs stay in place.
+This update requires **po4aoTrainer on exao2 and po4aoGUI in the IOC container**.
+Run the commands yourself. Keep your existing configurations and Python environment;
+no dependency, native PO4AO, nnReconstructor, or INDI-server update is required.
+Pause learning and let any pending model load finish before restarting the trainer.
+Restarting loses unsaved in-memory training state; acknowledged publications remain
+on disk and can be saved with the new GUI after the update.
+
+Transfer `nn-po4ao-gui-policy-library.bundle` into `/tmp` on both machines, with
+read permission for the account running Git. It updates an existing deployment of
+this feature branch; preserve local changes if `git status` is not clean.
+
+**On exao2, from your checkout:**
 
 ```sh
 cd /home/rlandman/MagAOX
 git status --short --branch
-git fetch /tmp/nn-po4ao-gui-performance.bundle rlandman/nn-po4ao-gui
+git fetch /tmp/nn-po4ao-gui-policy-library.bundle rlandman/nn-po4ao-gui
 git merge --ff-only FETCH_HEAD
 xctrl shutdown po4aoTrainer
 TRAIN_PY=/opt/conda/envs/po4aoTrainer/bin/python
 make -C apps/po4aoTrainer INSTRUMENT_CONDA_ENV=po4aoTrainer PYTHON="$TRAIN_PY -I" install
+sudo install -d -o xsup -g magaox -m 2775 /data/po4aoTrainer/saved_engines
+git rev-parse HEAD
 ```
 
-After installation succeeds, set `source_revision` in
-`/opt/MagAOX/config/po4aoTrainer.conf` to `rlandman/nn-po4ao-gui@` followed by
-`git rev-parse HEAD`, then:
+Set `source_revision` in `/opt/MagAOX/config/po4aoTrainer.conf` to
+`rlandman/nn-po4ao-gui@` followed by that commit, then run `xctrl startup po4aoTrainer`.
+The library defaults to `<artifact_root>/saved_engines`; only add `saved_engines`
+to the app config if using a different absolute path. Provision that path instead
+if your artifact root differs from `/data/po4aoTrainer`.
+
+**Inside the working IOC GUI container:**
 
 ```sh
-xctrl startup po4aoTrainer
+cd "$HOME/MagAOX-po4ao-gui"
+git status --short --branch
+git fetch /tmp/nn-po4ao-gui-policy-library.bundle rlandman/nn-po4ao-gui
+git merge --ff-only FETCH_HEAD
+make -C gui/apps/po4aoGUI && make -C gui/apps/po4aoGUI install
+po4aoGUI po4ao po4aoTrainer nnReconstructor &
+```
+
+Close the old GUI window and use the newly launched one. The three fields show
+values from your installed training config. Enter submits an edit; the displayed
+number remains the acknowledged value, with requested value in its tooltip and
+pending state in the status line. Paused edits apply on resume. Edits survive Reset
+and Set policy, but a trainer restart restores file settings. A valid file edit to
+one of these three keys replaces that key's session override.
+
+**Test the saved-model workflow:**
+
+1. Save an acknowledged trained pair as, for example, `internal-bright`. Save is
+   also available for the retained managed pair after Disable or trainer restart.
+   If no complete acknowledged pair exists yet, first Reset and train one.
+2. Choose it in the Policy dropdown and click **Set policy**. Wait for completion;
+   both models are restored in a new paused session. Controller enable state stays
+   unchanged, while optimizers/replay/iteration start fresh. Current parameter
+   settings remain in force. The engine is rebuilt, so this step can take time and
+   temporarily needs memory for both the old and prepared training sessions.
+3. Enable PO4AO if needed, click **Recollect warmup**, wait for Ready, then **Resume
+   learning**. Recollection applies exploration noise to the loaded policy. Set
+   policy alone does not inject noise or start learning.
+4. Save again after a newly trained engine is acknowledged. Reusing a label creates
+   another timestamped entry; Reset never removes saved entries. The delta-policy
+   penalty follows current acknowledged runtime policy changes, including each
+   newly activated engine, rather than staying tied to the initialization.
+
+Matching dimensions does not establish modal-basis/calibration compatibility;
+verify the instrument setup yourself. Loop state and routing remain operator-owned.
+GPU export and actual control improvement still require instrument acceptance.
+If an interrupted load shows **Set policy or Reset required**, resolve it with one
+of those actions before resuming. Before on-sky use, push the tested source and
+configuration revisions to the approved remotes and record their identities, as
+required by the [development policy](https://magao-x.org/docs/handbook/software/hacking.html).
+
+**Optional progress notebook**, on exao2:
+
+```sh
 cp -i notebooks/po4ao/watch_training.ipynb /home/rlandman/PO4AO_2026/po4ao_training_progress.ipynb
 "$TRAIN_PY" -m ipykernel install --user --name po4aoTrainer --display-name "PO4AO trainer"
 ```
 
 Open `po4ao_training_progress.ipynb` in your existing Jupyter interface and select
-**PO4AO trainer**. In the GUI, use **Reset → Enable PO4AO → collection Ready → Start
-learning** for the fresh session. Run the notebook cells; set `AUTO_REFRESH = True`
+**PO4AO trainer**. Run the notebook cells; set `AUTO_REFRESH = True`
 in its final cell to watch continuously, or rerun `latest_record = refresh()`.
 Interrupting this observer notebook leaves training running. It reads files only;
 keep the original training notebook's training/export cells stopped.
@@ -173,7 +227,8 @@ sudo -H "$TRAIN_PY" -I -m pip install \
 make -C apps/po4aoTrainer INSTRUMENT_CONDA_ENV=po4aoTrainer PYTHON="$TRAIN_PY -I" install
 cp -i apps/po4aoTrainer/configs/{po4aoTrainer.conf,po4ao_training.conf} /opt/MagAOX/config/
 sudo install -d -o xsup -g magaox -m 2775 \
-  /data/po4aoTrainer /opt/MagAOX/logs/po4aoTrainer /opt/MagAOX/telem/po4aoTrainer
+  /data/po4aoTrainer /data/po4aoTrainer/saved_engines \
+  /opt/MagAOX/logs/po4aoTrainer /opt/MagAOX/telem/po4aoTrainer
 "$TRAIN_PY" -I -m pip check
 ```
 

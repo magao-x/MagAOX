@@ -1,7 +1,7 @@
 # PO4AO trainer and controls
 
 `po4aoTrainer` is the standard `XDevice` companion for the compact native
-`po4aoGUI`. It owns one numerical worker and exposes the shared INDI
+`po4aoGUI`. It owns the active numerical worker and exposes the shared INDI
 PO4AO request/status contract. NN selection, writer handover and modulation linking
 belong to `nnReconstructor`, independently of this trainer. The C++ `po4ao` app retains real-time control. The same
 `TrainingSession` is available to notebooks without starting the companion. The same
@@ -37,7 +37,7 @@ use, the GUI sends native C++ controls and the notebook owns all Python training
 - Closing the GUI leaves inference and training alone. Loss of the supervisor's
   control pipe/heartbeat stops its worker; restarting the supervisor does not
   automatically start learning or change the real-time controller. A lost
-  in-memory optimizer session requires Reset.
+  in-memory optimizer session requires Reset or explicit Set policy from the saved library.
 - External runtime Reset/restart invalidates managed eligibility and terminates
   the owned worker; an external Disable transition pauses it. An unknown external
   policy pauses learning instead of being adopted as its numerical reference.
@@ -46,7 +46,7 @@ use, the GUI sends native C++ controls and the notebook owns all Python training
 
 The operator manages loop state and notebook/app responsibility. There are no loop
 interlocks, notebook detection, leases, locks against other trainers, or notebook
-process control. Only Reset discards the managed in-memory session; files remain
+process control. Reset and Set policy replace the managed in-memory session; files remain
 available for analysis. Failed operations report their actual partial state,
 without inventing rollback or successful completion.
 
@@ -71,6 +71,46 @@ whole at iteration boundaries; learning-rate changes update existing Adam parame
 groups. A revision containing any reset-only field is staged in its entirety until
 Reset. The INDI `training_config` vector reports desired/applied revisions, validation
 errors and pending reset. Pending hot changes are applied when learning resumes.
+
+The GUI exposes `command_regularization`, `delta_policy_regularization`, and
+`policy_learning_rate` as NumberVectors with `current`/`target`. Enter submits a
+session override, without writing system configuration. A sequence ticket accompanies
+each desired revision; paused or superseded edits stay Busy until the worker
+acknowledges that request, including a rapid edit back to an earlier value. Overrides
+survive Reset/Set/Pause and unrelated file edits; a valid edit to the same file key
+supersedes its override. Restart restores file defaults. Nonuniform per-mode delta
+weights remain file-controlled and disable only that scalar GUI entry.
+
+### Saved paired models
+
+The `saved_engines` app setting defaults to `<artifact_root>/saved_engines`.
+`policy_catalog` exposes immutable IDs and display labels through INDI. `save_policy.label`
+requests a save with an optional label; `set_policy.id` loads a catalog ID. Names are
+`<label>__<UTC timestamp>__<uuid8>` and repeated labels never overwrite earlier saves.
+
+Save pins one acknowledged immutable publication before copying its engine, metadata,
+and full policy/dynamics NPZ snapshot, with a versioned manifest and SHA-256 hashes.
+It may run during learning/publication. It never mixes active policy weights with
+unpublished dynamics. The catalog is updated only after atomic directory publication.
+
+Set validates compatibility, pauses and settles pending loads, and restores both
+networks in a separate worker while retaining the preceding paused session. It
+rebuilds an engine using the existing exporter and admits the new session only after
+the exact candidate/load-ticket acknowledgement. Enable state is preserved; learning
+stays paused. If an interrupted load may have activated without admitting its new
+session, Start remains unavailable until a new Set policy or Reset resolves it. Normalization buffers/scales are retained, current hyperparameters
+prevail, and Adam/replay/history/iteration start fresh. Loaded dynamics bypass cold
+pretraining and the cold first-publication delay. Source bundle/session/iteration
+remain in `origin` metadata. Fresh warmup is required before Start/Resume: explicitly
+Enable if needed, Recollect with exploration noise, then resume. Reset removes this
+initialization and eligibility, never library files or session parameter overrides.
+
+The delta-policy reference follows acknowledged effective runtime policy readback at
+each gradient checkpoint. A temporary fallback retains the known network so returning
+to it does not lose its reference; an unknown external policy still pauses learning.
+It is not permanently anchored to the saved initialization. Shape compatibility is
+checked strictly; calibration identity remains unknown unless recorded by the source,
+and the operator must verify the modal basis/setup.
 
 Each run contains its resolved launch/config snapshots, worker log, completed
 metrics JSONL and bounded diagnostic snapshots. Publication issuance/outcome append
@@ -183,10 +223,15 @@ and native/managed PO4AO operation ordering. Native NN handover tests live in
 `apps/nnReconstructor/tests`. The notebook example's cells are executable locally.
 GPU execution and live instrument behavior are separate acceptance checks.
 
-`source_manifest.json` pins numerical helpers from `PO4AO_2026` revision
+`source_manifest.json` records the original numerical helpers from `PO4AO_2026` revision
 `b9076dd7aaf00ff7cd4f7f644e8f40dc1ff10a4f`. Previously authorized read-only inspection
 matched all six helper hashes and confirmed unchanged numerical expressions in the
 instrument notebook; details and notebook hash are in the execution record.
 `tests/fixtures/notebook_iteration.npz` retains source hash, seeds and library versions
 in its adjacent JSON. The CPU comparison uses `rtol=1e-5`, `atol=1e-7`; pause/resume
 also compares exact CPU outputs, and direct/recorded plots compare rendered pixels.
+
+The saved-library extension changes `po4ao_policy_update.py` reference bookkeeping:
+temporary fallback retains the last acknowledged network and a pending publication.
+The source manifest remains provenance for the imported versions, not a claim that
+the current packaged helpers are byte-identical to those imports.

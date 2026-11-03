@@ -1,10 +1,11 @@
 # Shared NN / PO4AO control panel
 
-`po4aoGUI [po4ao-device [trainer-device [nn-device]]]` is the native Qt client for the [approved requirements](../../../agents/plans/2026-10/nn-po4ao-gui-requirements.md). It reuses `xWidget`, `statusLabel`, the MagAO-X resource stylesheet and `multiIndiManager`/`multiIndiPublisher`. The default width is 500 pixels; layouts handle narrower windows. No web framework, shell commands, loop control or plotting panel is added.
+`po4aoGUI [po4ao-device [trainer-device [nn-device]]]` is the native Qt client for the [approved requirements](../../../agents/plans/2026-10/nn-po4ao-gui-requirements.md). It reuses `xWidget`, `statusLabel`, `statusLineEdit`, the MagAO-X resource stylesheet and `multiIndiManager`/`multiIndiPublisher`. The default width is 540 pixels; layouts handle narrower windows. No web framework, shell commands, loop control or plotting panel is added.
 
 Defaults are `po4ao`, `po4aoTrainer`, and `nnReconstructor`. This single launcher replaces `learningCtrlGUI`.
 The C++ runtime is subscribed independently of the optional trainer. Without a ready
-trainer, native inference controls remain available and Start/Pause is unavailable.
+trainer, native inference controls remain available; Start/Pause, saved-pair controls,
+and numeric training settings are unavailable.
 NN controls independently subscribe to the configured NN device and remain available
 without either PO4AO app. The panel has nnReconstructor and PO4AO section titles. An existing live training notebook needs no package migration.
 With a live trainer mapped to this runtime, the same PO4AO controls use its coordinated
@@ -58,6 +59,10 @@ Managed commands target the named companion; the direct runtime fallback above i
 | `po4ao_enable` | Read/write Switch: `toggle` | Explicit enabled/disabled target, with coordinated pause on disable. |
 | `reset`, `recollect` | Read/write Switch: `request` | On requests the corresponding operation. |
 | `learning` | Read/write Switch: `run`, `pause` | Explicit run/pause selection; Run starts or resumes according to the managed session. |
+| `command_regularization`, `delta_policy_regularization`, `policy_learning_rate` | Read/write Number: `current`, `target` | Enter sends only `target`. Current remains the acknowledged value; requested value and pending status are shown in the tooltip/status line. |
+| `policy_catalog` | Read-only Text: stable catalog IDs | Display labels; selecting alone never loads. Selection survives catalog delete/redefine refreshes. |
+| `set_policy` | Read/write Text: `id` | Restore a paired model initialization and rebuild its engine; remain paused and preserve enable state. |
+| `save_policy` | Read/write Text: `label` | Save the acknowledged immutable pair, optionally named in a small dialog. Does not pause training. |
 
 Every accepted request must publish Busy before work and then Ok/Alert after actual completion/failure. Set effective status before the terminal command acknowledgement. Return Alert for a rejected conflicting/stale request. A request vector is not an effective-state readback. Multiple clients must be serialized/idempotent in the owning backend; local UI latching is not backend serialization.
 
@@ -73,6 +78,12 @@ Every accepted request must publish Busy before work and then Ok/Alert after act
 | `collection_frames`, `collection_target` | Current and required frames for the observed collection. |
 | `active_policy`, `retained_policy` | Effective and eligible retained model identities, respectively. |
 | `message`, `error` | Current operation/result and persistent error details. |
+| `save_available` | `yes` only when a retained acknowledged managed pair is available. |
+| `warmup_required` | `yes` after Set policy until a newer warmup collection is ready; disable Start/Resume and display Fresh warmup required. |
+| `selected_policy`, `saved_policy` | Last successfully loaded initialization and most recently saved catalog IDs. |
+| `delta_policy_mode` | `scalar` or `per_mode`; the latter disables only the scalar delta entry and shows Per-mode: configured in file. |
+| `library_phase` | Independent save operation state, so Save can overlap publication. |
+| `initialization_required` | `yes` when an interrupted Set policy may have activated without admitting its session. Require Set policy or Reset before resuming. |
 
 `progress.iteration` is a read-only number. `training_config.error` carries validation errors; `training_config.pending_reset` is empty or the pending configuration revision requiring Reset, distinct from an unfinished runtime Reset. Missing readbacks are not filled with presumed success. A connected INDI transport is distinguished from a ready companion through the heartbeat; unchanged controller/model values are not treated as disconnection.
 
