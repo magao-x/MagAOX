@@ -8,11 +8,15 @@ import os
 import struct
 import tempfile
 import unittest
+from unittest.mock import patch
+from pathlib import Path
 
 import numpy as np
 
 from xapp.po4aoTrainer.po4ao_runtime import (
     CPU_LINEAR_ARTIFACT_MAGIC,
+    cached_replay_snapshot,
+    configure_compute_resources,
     LINEAR_POLICY_MAGIC,
     LINEAR_POLICY_VERSION,
     _engine_id,
@@ -147,6 +151,30 @@ class FakeImage:
 class StableReplaySnapshotTest(unittest.TestCase):
     """Validate stable-copy metadata and slicing."""
 
+    def test_cache_refreshes_only_after_coherent_publication(self):
+        """Reuse unchanged data; mismatched counters and busy writes cannot replace the cache."""
+        image = FakeImage(np.ones((2, 6, 2), dtype=np.float32))
+        metadata = FakeImage(np.array([6, 7, 0, 0], dtype=np.uint32))
+        first = cached_replay_snapshot(image, metadata)
+        with patch(
+            "xapp.po4aoTrainer.po4ao_runtime.stable_replay_snapshot",
+            wraps=stable_replay_snapshot,
+        ) as capture:
+            self.assertIs(cached_replay_snapshot(image, metadata, first), first)
+            capture.assert_not_called()
+            image.md.cnt0 = 4
+            with self.assertRaises(TimeoutError):
+                cached_replay_snapshot(image, metadata, first, attempts=1)
+            metadata.md.cnt0 = 4
+            image.data *= 2
+            second = cached_replay_snapshot(image, metadata, first)
+            self.assertIsNot(second, first)
+            np.testing.assert_array_equal(first.data, np.ones_like(first.data))
+            np.testing.assert_array_equal(second.data, np.full_like(second.data, 2))
+            image.md.write = True
+            with self.assertRaises(TimeoutError):
+                cached_replay_snapshot(image, metadata, second, attempts=1)
+
     def test_uses_valid_length_and_publication_metadata(self):
         """Verify uses valid length and publication metadata."""
         image = FakeImage(np.arange(24).reshape(2, 6, 2))
@@ -235,6 +263,40 @@ class ComputeIsolationTest(unittest.TestCase):
     def test_parses_linux_cpu_list(self):
         """Verify parses linux cpu list."""
         self.assertEqual(_parse_cpu_list("0-2,5,8-9\n"), {0, 1, 2, 5, 8, 9})
+
+    def test_bounds_torch_threads_without_expanding_cpu_affinity(self):
+        """Intersect system/allowed CPUs and retain a smaller operator-selected thread count."""
+        properties = SimpleNamespace(name="test GPU", major=8, minor=6)
+        with tempfile.TemporaryDirectory() as directory:
+            cpuset = Path(directory) / "cpuset.cpus"
+            cpuset.write_text("1-2,8")
+            for threads in (1, 16):
+                with self.subTest(threads=threads), patch(
+                    "xapp.po4aoTrainer.po4ao_runtime.SYSTEM_CPUSET_FILE", cpuset
+                ), patch(
+                    "os.sched_getaffinity", side_effect=[{1, 2, 7}, {1, 2}], create=True
+                ), patch(
+                    "os.sched_setaffinity", create=True
+                ) as affinity, patch(
+                    "torch.cuda.is_available", return_value=True
+                ), patch(
+                    "torch.cuda.device_count", return_value=2
+                ), patch(
+                    "torch.cuda.set_device"
+                ), patch(
+                    "torch.cuda.get_device_properties", return_value=properties
+                ), patch(
+                    "torch.get_num_threads", side_effect=[threads, min(threads, 2)]
+                ), patch(
+                    "torch.set_num_threads"
+                ) as limit:
+                    result = configure_compute_resources(0, 1, 1)
+                    limit.assert_called_once_with(min(threads, 2))
+                    self.assertTrue(affinity.called)
+                    self.assertTrue(
+                        all(call.args[1] == {1, 2} for call in affinity.call_args_list)
+                    )
+                    self.assertEqual(result["torch_cpu_threads"], min(threads, 2))
 
 
 class LinearPolicySidecarTest(unittest.TestCase):

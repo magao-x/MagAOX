@@ -146,7 +146,7 @@ def _parse_cpu_list(value):
 
 
 def configure_compute_resources(inference_device, training_device, build_device):
-    """Validate GPU isolation and keep notebook CPU work off real-time cores."""
+    """Validate GPU isolation and bound Torch CPU threads to the allowed CPU set."""
     import torch
 
     devices = (inference_device, training_device, build_device)
@@ -198,10 +198,14 @@ def configure_compute_resources(inference_device, training_device, build_device)
                 except ProcessLookupError:
                     pass
 
+        allowed_cpus = os.sched_getaffinity(0)
+        torch.set_num_threads(min(torch.get_num_threads(), len(allowed_cpus)))
+
     return {
         "inference_gpu": inference_contract,
         "training_gpu": training_contract,
         "system_cpus": sorted(assigned_cpus) if assigned_cpus is not None else None,
+        "torch_cpu_threads": torch.get_num_threads(),
     }
 
 
@@ -214,6 +218,22 @@ def _engine_id(path):
                 value ^= byte
                 value = (value * 1099511628211) & 0xFFFFFFFFFFFFFFFF
     return f"{value:016x}"
+
+
+def cached_replay_snapshot(image, metadata_image, previous=None, *, attempts=5):
+    """Reuse a coherent private snapshot until either stream's publication changes.
+
+    Callers discard the cache at recollection/reset boundaries. A changed or busy
+    stream still uses the existing stable-copy checks before replacing the cache.
+    """
+    if (
+        previous is not None
+        and not bool(image.md.write)
+        and not bool(metadata_image.md.write)
+        and int(image.md.cnt0) == int(metadata_image.md.cnt0) == previous.counter
+    ):
+        return previous
+    return stable_replay_snapshot(image, metadata_image, attempts=attempts)
 
 
 def stable_replay_snapshot(image, metadata_image, *, attempts=100, poll_seconds=0.001):

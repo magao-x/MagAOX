@@ -91,8 +91,10 @@ def test_matches_pinned_notebook_iteration(inputs):
         )
 
 
-def test_waits_do_not_advance_or_reinitialize(inputs):
-    """Partial and duplicate snapshots never change weights, Adam, history or counters."""
+def test_cached_replay_keeps_training_without_recopies_or_reinitialization(
+    inputs, monkeypatch
+):
+    """Partial data waits; cached data advances Adam without recopying or refreshing history."""
     config, recent, warmup = inputs
     session = make_session(config)
     assert (
@@ -102,24 +104,35 @@ def test_waits_do_not_advance_or_reinitialize(inputs):
     assert session.iteration == 0 and session.normalization_metadata is None
     session.step(recent, warmup, active_model_id="0")
     optimizer = session.policy_optimizer
-    state = deepcopy(optimizer.state_dict())
+    steps = {key: value["step"].clone() for key, value in optimizer.state.items()}
     parameters = deepcopy(session.policy.state_dict())
     history_count = session.historical.metrics()["historical_episodes"]
-    assert session.step(recent, warmup, active_model_id="0") is None
-    assert session.iteration == 1
+    original_pair = session._replay_pair
+    copied = []
+
+    def copy_pair(snapshot):
+        """Record expensive array conversion while retaining the real validation."""
+        copied.append(snapshot)
+        return original_pair(snapshot)
+
+    monkeypatch.setattr(session, "_replay_pair", copy_pair)
+    assert session.step(recent, warmup, active_model_id="0") is not None
+    assert session.iteration == 2 and not copied
     assert session.historical.metrics()["historical_episodes"] == history_count
-    for key, value in parameters.items():
-        torch.testing.assert_close(
-            value, session.policy.state_dict()[key], rtol=0, atol=0
+    assert any(
+        not torch.equal(value, session.policy.state_dict()[key])
+        for key, value in parameters.items()
+    )
+    for key, value in steps.items():
+        assert (
+            optimizer.state[key]["step"]
+            == value + config["training"]["policy_grad_steps"]
         )
-    for index, values in state["state"].items():
-        for key, value in values.items():
-            torch.testing.assert_close(
-                value, optimizer.state_dict()["state"][index][key], rtol=0, atol=0
-            )
-    session.step(replace(recent, counter=2, episode_id=4), warmup, active_model_id="0")
+    new_replay = replace(recent, counter=2, episode_id=4)
+    session.step(new_replay, warmup, active_model_id="0")
+    assert len(copied) == 1 and copied[0] is new_replay
     assert session.policy_optimizer is optimizer
-    assert session.iteration == 2
+    assert session.iteration == 3
     assert (
         session.last_result["record"]["dynamics_gradient_steps"]
         == config["training"]["dynamics_grad_steps"]
@@ -301,3 +314,56 @@ def test_recorded_diagnostics_match_direct_plots(inputs, tmp_path):
     finally:
         for figure in direct + recorded:
             plt.close(figure)
+
+
+def test_monitor_notebook_reads_final_records_and_never_uses_an_old_run(
+    inputs, tmp_path, monkeypatch
+):
+    """Execute the observer cells on saved files, including partial log tails and a new empty run."""
+    import os
+    import matplotlib.pyplot as plt
+    from xapp.po4aoTrainer.observer import DiagnosticSnapshot, save_diagnostics
+
+    config, recent, warmup = inputs
+    session = make_session(config)
+    result = session.step(recent, warmup, active_model_id="0")
+    run = tmp_path / "run-first"
+    run.mkdir()
+    launch = run / "launch.json"
+    launch.write_text("{}")
+    save_diagnostics(session, run / "diagnostics")
+    initial = result["record"]
+    final = dict(initial, publication_status="activated", published_model_id="a" * 16)
+    (run / "metrics.jsonl").write_text(
+        json.dumps(initial) + "\n" + json.dumps(final) + '\n{"partial":'
+    )
+    plots = []
+
+    def plot(snapshot):
+        """Keep this notebook I/O test small; plot parity is covered separately above."""
+        plots.append(snapshot.metadata["iteration"])
+        return (plt.figure(),)
+
+    monkeypatch.setattr(DiagnosticSnapshot, "plot", plot)
+    notebook = (
+        Path(__file__).resolve().parents[3] / "notebooks/po4ao/watch_training.ipynb"
+    )
+    cells = json.loads(notebook.read_text())["cells"]
+    namespace = {}
+    for index, cell in enumerate(cells):
+        if cell["cell_type"] == "code":
+            exec(compile("".join(cell["source"]), str(notebook), "exec"), namespace)
+            if index == 1:
+                namespace["ARTIFACT_ROOT"] = tmp_path
+    assert namespace["latest_record"] == final
+    assert namespace["refresh"]() == final
+    assert plots == [1]  # Repeated refreshes do not recompute the plots.
+    newer = tmp_path / "run-newest"
+    newer.mkdir()
+    (newer / "launch.json").write_text("{}")
+    timestamp = launch.stat().st_mtime_ns + 1_000_000_000
+    os.utime(newer / "launch.json", ns=(timestamp, timestamp))
+    assert namespace["refresh"]() == {}
+    assert plots == [1]
+    namespace["RUN_DIRECTORY"] = run
+    assert namespace["refresh"]() == final

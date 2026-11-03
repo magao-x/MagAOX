@@ -16,7 +16,7 @@ import uuid
 def export_candidate(directory):
     """Build in a private immutable candidate directory using the original export helper."""
     import torch
-    from .training import TrainingSession
+    from .po4ao_nonlinear_models import build_nonlinear_models
     from .po4ao_runtime import publish_tensorrt_engine, configure_compute_resources
 
     directory = Path(directory)
@@ -26,12 +26,15 @@ def export_candidate(directory):
     configure_compute_resources(
         c["inference_device"], c["training_device"], c["build_device"]
     )
-    session = TrainingSession(config, device=f"cuda:{c['training_device']}")
+    device = torch.device(f"cuda:{c['training_device']}")
+    dynamics, policy = build_nonlinear_models(config)
+    dynamics.to(device)
+    policy.to(device)
     stored = torch.load(
-        directory / "weights.pt", weights_only=True, map_location=session.device
+        directory / "weights.pt", weights_only=True, map_location=device
     )
-    session.policy.load_state_dict(stored["policy"])
-    session.dynamics.load_state_dict(stored["dynamics"])
+    policy.load_state_dict(stored["policy"])
+    dynamics.load_state_dict(stored["dynamics"])
     sample = torch.zeros(
         (
             1,
@@ -39,10 +42,10 @@ def export_candidate(directory):
             1,
             config["runtime"]["n_modes_controlled"],
         ),
-        device=session.device,
+        device=device,
     )
     publish_tensorrt_engine(
-        session.policy.eval(),
+        policy.eval(),
         sample,
         directory / "policy.trt",
         build_device=c["build_device"],
@@ -50,7 +53,7 @@ def export_candidate(directory):
         timing_cache=str(directory.parent / "timing.cache"),
         log_path=str(directory / "build.log"),
         metadata=metadata,
-        dynamics=session.dynamics,
+        dynamics=dynamics,
     )
 
 
@@ -164,14 +167,15 @@ def run(directory):
         import ImageStreamIOWrap as shmio
         from .training import TrainingSession
         from .configuration import apply_hot
-        from .po4ao_runtime import configure_compute_resources, stable_replay_snapshot
+        from .po4ao_runtime import configure_compute_resources, cached_replay_snapshot
         from .observer import save_diagnostics
 
         config = launch["config"]
         c = config["compute"]
-        configure_compute_resources(
+        resources = configure_compute_resources(
             c["inference_device"], c["training_device"], c["build_device"]
         )
+        print("Compute resources: " + json.dumps(resources), flush=True)
         session = TrainingSession(config, device=f"cuda:{c['training_device']}")
         streams = []
         for name in launch["streams"]:
@@ -180,6 +184,7 @@ def run(directory):
                 raise RuntimeError("Could not open replay stream " + name)
             streams.append(image)
         generation = None
+        replay = warmup = None
         while True:
             checkpoint()
             if control.get("config_path"):
@@ -188,19 +193,22 @@ def run(directory):
                 state("running")
             if control["generation"] != generation:
                 session.invalidate_replay()
+                replay = warmup = None
                 generation = control["generation"]
             if control["collection"] != "ready":
                 state("waiting")
                 time.sleep(0.1)
                 continue
             before = generation
+            replay_start = time.monotonic()
             try:
-                replay = stable_replay_snapshot(*streams[:2], attempts=5)
-                warmup = stable_replay_snapshot(*streams[2:], attempts=5)
+                replay = cached_replay_snapshot(*streams[:2], replay)
+                warmup = cached_replay_snapshot(*streams[2:], warmup)
             except TimeoutError:
                 state("waiting")
                 time.sleep(0.1)
                 continue
+            replay_seconds = time.monotonic() - replay_start
             pump()
             if before != control["generation"] or control["collection"] != "ready":
                 continue
@@ -222,11 +230,13 @@ def run(directory):
             if record is None:
                 continue
             record["source_revision"] = launch.get("source_revision", "unrecorded")
+            record["replay_seconds"] = replay_seconds
             with (directory / "metrics.jsonl").open("a") as metrics:
                 metrics.write(json.dumps(record, allow_nan=False) + "\n")
-            save_diagnostics(session, directory / "diagnostics")
             if record["publication_status"] != "ready":
+                save_diagnostics(session, directory / "diagnostics")
                 continue
+            export_start = time.monotonic()
             candidate = directory / ("candidate-" + uuid.uuid4().hex)
             candidate.mkdir()
             metadata = dict(
@@ -279,6 +289,10 @@ def run(directory):
                         raise TimeoutError("Engine export exceeded build_timeout")
                     time.sleep(0.1)
                 if build is None:
+                    record["publication_status"] = "export cancelled"
+                    with (directory / "metrics.jsonl").open("a") as metrics:
+                        metrics.write(json.dumps(record, allow_nan=False) + "\n")
+                    save_diagnostics(session, directory / "diagnostics")
                     continue
                 code = build.wait()
                 build = None
@@ -286,10 +300,12 @@ def run(directory):
                 raise RuntimeError(
                     "Engine export failed; see " + str(candidate / "export.log")
                 )
+            record["export_seconds"] = time.monotonic() - export_start
             checkpoint()
             if control["generation"] != generation or control["collection"] != "ready":
                 continue
             emit("candidate", path=str(candidate), generation=launch["generation"])
+            activation_start = time.monotonic()
             # Continue pumping acknowledgements while paused; no optimizer/model changes occur here.
             while control.get("candidate_path") != str(candidate):
                 pump()
@@ -300,7 +316,6 @@ def run(directory):
                 session.stage_publication(model_id)
                 with (directory / "metrics.jsonl").open("a") as metrics:
                     metrics.write(json.dumps(record, allow_nan=False) + "\n")
-                save_diagnostics(session, directory / "diagnostics")
                 while control.get("candidate_outcome_path") != str(candidate):
                     pump()
                     state("paused" if not control["run"] else "waiting")
@@ -316,6 +331,7 @@ def run(directory):
             else:
                 record["publication_status"] = "rejected before reload"
                 record["publication_outcome"] = "rejected"
+            record["activation_seconds"] = time.monotonic() - activation_start
             # JSONL is append-only: later records for the same session/iteration replace the earlier status.
             with (directory / "metrics.jsonl").open("a") as metrics:
                 metrics.write(json.dumps(record, allow_nan=False) + "\n")

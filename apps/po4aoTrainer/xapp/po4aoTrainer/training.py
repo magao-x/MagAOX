@@ -116,7 +116,8 @@ class TrainingSession:
         self.published_cost_by_model = {}
         self.metrics_history = []
         self.last_result = None
-        self.last_replay_identity = None
+        self.buffer_snapshot = None
+        self.warmup_snapshot = None
         self.warmup_generation = None
         self.invalidated_warmup = None
         self.state = "waiting"
@@ -135,7 +136,8 @@ class TrainingSession:
         """
         self.invalidated_warmup = self.warmup_generation
         self.last_result = None
-        self.last_replay_identity = None
+        self.buffer_snapshot = None
+        self.warmup_snapshot = None
         self.historical.clear()
         if self.policy_update is not None:
             self.policy_update.anchors = self.policy_update.reference_actions = None
@@ -195,10 +197,11 @@ class TrainingSession:
         telemetry=None,
         checkpoint=None,
     ):
-        """Complete one update on fresh complete data, or return None while waiting.
+        """Complete one update on cached complete data, or return None while waiting.
 
         ``replay`` and ``warmup`` are ReplaySnapshot objects captured by the
-        caller. No counters advance on incomplete/duplicate data. The optional
+        caller and treated as immutable. Reuse them between publications, as in
+        the notebook; incomplete or invalidated warmup data cannot train. The optional
         checkpoint can wait for resume while retaining this exact Python stack;
         returning resumes the same update, without recreating Adam or models.
         """
@@ -224,20 +227,21 @@ class TrainingSession:
             if self.policy_update is not None:
                 self.policy_update.anchors = self.policy_update.reference_actions = None
             self.warmup_generation = warmup.counter
-        identity = (replay.counter, replay.episode_id, warmup.counter)
         if (
-            identity == self.last_replay_identity
-            or warmup.counter == self.invalidated_warmup
+            warmup.counter == self.invalidated_warmup
             or min(replay.valid_length, warmup.valid_length) < self.required_samples
         ):
             self.state = "waiting"
             return None
-        self.obs_replay, self.act_replay = self._replay_pair(replay)
-        self.obs_replay_warmup, self.act_replay_warmup = self._replay_pair(warmup)
-        self.buffer_snapshot = replay
+        start = time.monotonic()
+        if replay is not self.buffer_snapshot:
+            self.obs_replay, self.act_replay = self._replay_pair(replay)
+            self.buffer_snapshot = replay
+        if warmup is not self.warmup_snapshot:
+            self.obs_replay_warmup, self.act_replay_warmup = self._replay_pair(warmup)
+            self.warmup_snapshot = warmup
         self.last_result = None
         config = self._config
-        start = time.monotonic()
         self.historical.observe(
             self.obs_replay,
             self.act_replay,
@@ -315,7 +319,6 @@ class TrainingSession:
         check()
         self.policy_copy.load_state_dict(self.policy.state_dict())
         self.iteration += 1
-        self.last_replay_identity = identity
         result = {
             "training_iteration": self.iteration,
             "dynamics_loss": dyn_loss,
@@ -325,6 +328,7 @@ class TrainingSession:
             "record": None,
         }
         if self.iteration % config["training"]["diagnostics_interval"] == 0:
+            diagnostic_start = time.monotonic()
             result["record"] = self._diagnostics(
                 dyn_loss,
                 pol_loss,
@@ -334,6 +338,9 @@ class TrainingSession:
                 telemetry or {},
             )
             self.metrics_history.append(result["record"])
+            result["record"]["diagnostics_seconds"] = (
+                time.monotonic() - diagnostic_start
+            )
         check()
         self.last_result = result
         self.state = (

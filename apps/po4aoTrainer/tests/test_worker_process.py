@@ -26,14 +26,17 @@ class Image:
     def open(self,name):
         self.name=name
         return 0
+    @property
+    def md(self):
+        counter = int(Path(sys.argv[1]).parent.joinpath("warmup-counter").read_text()) if "warm" in self.name else 1
+        return types.SimpleNamespace(cnt0=counter, write=False)
 sys.modules["ImageStreamIOWrap"]=types.SimpleNamespace(Image=Image)
 rng=np.random.default_rng(42)
 data=rng.normal(size=(6,96,2)).astype(np.float32)
-counter=0
 def snapshot(image,metadata,**kwargs):
-    global counter
-    counter+=1
-    return runtime.ReplaySnapshot(data, int(Path(sys.argv[1]).parent.joinpath("warmup-counter").read_text()) if "warmup" in image.name else counter,96,3,"0000000000000000")
+    with Path(sys.argv[1]).joinpath("copies.log").open("a") as output:
+        output.write(image.name + "\n")
+    return runtime.ReplaySnapshot(data, image.md.cnt0,96,3,"0000000000000000")
 runtime.stable_replay_snapshot=snapshot
 from xapp.po4aoTrainer.worker import run
 run(sys.argv[1])
@@ -92,7 +95,7 @@ def test_owned_worker_pauses_resumes_recollects_and_exits_on_eof(tmp_path, monke
             time.sleep(0.03)
 
     try:
-        wait(lambda: worker.iteration > 0)
+        wait(lambda: worker.iteration > 1)
         worker.send({"run": False})
         wait(lambda: worker.state == "paused")
         iteration = worker.iteration
@@ -100,6 +103,10 @@ def test_owned_worker_pauses_resumes_recollects_and_exits_on_eof(tmp_path, monke
         worker.events()
         assert worker.iteration == iteration
         assert worker.process.pid == pid
+        assert (worker.run / "copies.log").read_text().splitlines() == [
+            "replay",
+            "warmup",
+        ]
         config["training"]["policy_learning_rate"] *= 2
         changed = tmp_path / "hot.json"
         changed.write_text(json.dumps(config))
@@ -178,6 +185,14 @@ def test_export_pause_and_publication_outcome(tmp_path, monkeypatch, outcome):
     config["training"].update(training_iterations=1000, diagnostics_interval=1)
     export_boundary = """
 import xapp.po4aoTrainer.worker as managed
+import xapp.po4aoTrainer.observer as observer
+actual_save=observer.save_diagnostics
+def save(*args, **kwargs):
+    result=actual_save(*args, **kwargs)
+    with Path(sys.argv[1]).joinpath("snapshots.log").open("a") as output:
+        output.write(str(result) + "\\n")
+    return result
+observer.save_diagnostics=save
 actual_popen=managed.subprocess.Popen
 def fake_export(command, **kwargs):
     return actual_popen([sys.executable, '-c', 'import time;time.sleep(60)'], **kwargs)
@@ -278,11 +293,80 @@ managed.run(sys.argv[1])
                 for record in records
                 if record.get("publication_outcome") == outcome
             )
+            # The outcome log is visible before compression of the final snapshot completes.
+            while not (worker.run / "snapshots.log").exists():
+                worker.events()
+                assert not worker.error
+                assert time.monotonic() < deadline
+                time.sleep(0.03)
             snapshot = load_diagnostics(
                 next((worker.run / "diagnostics").glob("*.npz"))
             )
             assert matching["published_model_id"] == "a" * 16
             assert snapshot.metadata["history"][-1] == matching
+            assert len((worker.run / "snapshots.log").read_text().splitlines()) == 1
+            assert matching["export_seconds"] >= 0
+            assert matching["activation_seconds"] >= 0
             assert worker.process.poll() is None and worker.state == "paused"
     finally:
         worker.stop()
+
+
+def test_export_restores_models_without_allocating_a_training_session(
+    tmp_path, monkeypatch
+):
+    """Check exported weights, device and build arguments without a GPU or extra Adam/policy copy."""
+    import torch
+    from unittest.mock import Mock
+    from xapp.po4aoTrainer.worker import export_candidate
+    from xapp.po4aoTrainer import po4ao_runtime, po4ao_nonlinear_models, training
+
+    config = json.loads(
+        (Path(__file__).parent / "fixtures/session_config.json").read_text()
+    )
+    config["compute"] = dict(inference_device=0, training_device=1, build_device=1)
+    metadata = dict(config=config, trtexec="test-trtexec")
+    (tmp_path / "request.json").write_text(json.dumps(metadata))
+    weights = dict(policy={"policy": 1}, dynamics={"dynamics": 2})
+    dynamics, policy = Mock(), Mock()
+    policy.eval.return_value = policy
+    publisher = Mock()
+    session = Mock(
+        side_effect=AssertionError("Export must not create a TrainingSession")
+    )
+    loader = Mock(return_value=weights)
+    zeros = Mock(return_value="sample")
+    monkeypatch.setattr(training, "TrainingSession", session)
+    monkeypatch.setattr(
+        po4ao_nonlinear_models,
+        "build_nonlinear_models",
+        lambda config: (dynamics, policy),
+    )
+    monkeypatch.setattr(
+        po4ao_runtime, "configure_compute_resources", lambda *args: None
+    )
+    monkeypatch.setattr(po4ao_runtime, "publish_tensorrt_engine", publisher)
+    monkeypatch.setattr(torch, "load", loader)
+    monkeypatch.setattr(torch, "zeros", zeros)
+    export_candidate(tmp_path)
+    session.assert_not_called()
+    policy.load_state_dict.assert_called_once_with(weights["policy"])
+    dynamics.load_state_dict.assert_called_once_with(weights["dynamics"])
+    policy.to.assert_called_once_with(torch.device("cuda:1"))
+    dynamics.to.assert_called_once_with(torch.device("cuda:1"))
+    loader.assert_called_once_with(
+        tmp_path / "weights.pt", weights_only=True, map_location=torch.device("cuda:1")
+    )
+    zeros.assert_called_once_with(
+        (
+            1,
+            2 * config["MDP"]["n_history"] - 1,
+            1,
+            config["runtime"]["n_modes_controlled"],
+        ),
+        device=torch.device("cuda:1"),
+    )
+    assert publisher.call_args.args == (policy, "sample", tmp_path / "policy.trt")
+    assert publisher.call_args.kwargs["dynamics"] is dynamics
+    assert publisher.call_args.kwargs["build_device"] == 1
+    assert publisher.call_args.kwargs["metadata"] == metadata

@@ -667,3 +667,62 @@ Affected files: `apps/po4aoTrainer/xapp/po4aoTrainer/configuration.py`,
 `apps/po4aoTrainer/configs/po4ao_training.conf`,
 `apps/po4aoTrainer/tests/test_configuration.py`, `apps/po4aoTrainer/README.md`,
 `apps/po4aoTrainer/DEPLOYMENT.md`, and this record.
+
+## 2026-11-03: restore notebook replay reuse and add a progress notebook
+
+The operator reported slow managed training and requested the notebook's behavior
+and an observing notebook. Local comparison with the previously captured instrument
+notebook (`cb8b68310b2b95e1506526b8bdfb87064f484b874c8fbdeab7bf0884528f3da6`)
+found that the notebook keeps training on cached replay between publications. The
+managed session instead rejected repeated replay identities, and the worker copied
+both buffers every iteration. No instrument command was run for this review/change.
+
+- Restore repeated optimization on complete cached replay. Copy/validate stream
+  arrays only when a publication changes, and convert each snapshot to chronological
+  controlled-mode arrays once. Preserve the existing stable-copy checks, incomplete
+  data handling, collection-generation cancellation, and newer-warmup requirement
+  after invalidation. Historical episodes retain their original age; repeated
+  optimization does not create additional experience or repeat dynamics pretraining.
+- Bound Torch CPU threads by the process's allowed CPU count after the existing
+  system-cpuset intersection, retaining any smaller thread limit. Log the resolved
+  GPU/CPU resources. This addresses thread oversubscription without moving work onto
+  real-time cores or changing GPU assignments; actual latency remains unmeasured.
+- Export only the policy/dynamics models, without constructing another session,
+  extra policy copy or Adam objects. Keep cancellable child export and the existing
+  candidate/activation handshake; the notebook also exports synchronously. No
+  asynchronous publication redesign or NN inference change is included.
+- Compress each completed diagnostic snapshot once, after publication outcome (or
+  immediately for an iteration that does not publish). Keep the append-only JSONL
+  issuance/outcome records, so publication status can be newer than plot data while
+  building. Cancelled exports retain a diagnostic snapshot with cancellation status.
+- Add sampled replay, diagnostics, export and activation timings. Training time now
+  includes chronological-array conversion. Snapshot writes are not separately timed;
+  the elapsed interval between diagnostic measurements includes writes and pauses.
+- Add `notebooks/po4ao/watch_training.ipynb`: file-only observation of the latest or
+  explicitly selected run, existing training/debug plots, measurement age, model IDs,
+  publication result, measured/predicted costs and timings. It tolerates an incomplete
+  final JSONL line and prefers the last record for each iteration. A new empty run
+  never falls back to a previous run's plots. Refreshing unchanged snapshots reuses
+  figures. Automatic refresh is opt-in; interrupting it has no effect on training.
+
+Validation: **115 tests and 17 subtests passed**, including the pinned first-iteration
+numerical/Adam fixture, repeated cached updates, unchanged history count, coherent
+cache refresh, recollection/pause/resume, one snapshot per publication, export-only
+model restoration, and execution of the observing notebook cells on saved CPU data.
+Nine existing plotting warnings remain. The local suite uses the deployment-pinned
+purepyindi2 `6595f577`; the older local environment reproduced the already documented
+FIFO-constructor bug. Real child-process tests required local macOS process-list
+permission. No instrument access was involved. Black, notebook JSON/Python syntax
+checks and `git diff --check` pass; no C++ files require clang-format in this change.
+
+Delivery: preserve the current training configuration and update only the Python
+trainer. Its restart loses in-memory Python models/Adam; the operator starts a fresh
+managed session. The deployment guide provides the notebook copy/kernel commands.
+The agent prepares the notebook and Git bundle locally because `AGENTS.md` prohibits
+agent commands on exao2. GPU training speed, TensorRT export, physical performance
+and NN latency still require operator measurements; no speedup factor is claimed.
+
+Affected files: `training.py`, `worker.py`, `po4ao_runtime.py` under
+`apps/po4aoTrainer/xapp/po4aoTrainer/`; their three regression test files;
+`notebooks/po4ao/watch_training.ipynb`; this execution record. The subsequent
+documentation commit updates `apps/po4aoTrainer/README.md` and `DEPLOYMENT.md`.
