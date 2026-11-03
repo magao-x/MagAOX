@@ -15,6 +15,16 @@ DM contributions. This trial uses an ideal constant-zero publisher: its command
 is already available, so there is no external provider to wait for or emulate.
 All instrument commands below are operator actions.
 
+By default the trial targets auxiliary publication. The optional compensated
+test below advances those publications to bring dmcomb's combined output closer
+to +125/+250/+375 us relative to the genuine main. Its initial 5 us advance is
+based on the previous measured 4.2-4.9 us mean relative-output offset. It is a
+differential phase experiment, not a measured full-path transport bound or a
+guarantee of exact semaphore-post times. The
+[combined-trigger deadline plan](../../../agents/plans/2026-11/dm-syncopation-combined-trigger-deadlines.md)
+records the remaining endpoint qualification. A controller fgtimes mean near
+125 us does not alone establish each labelled combined-output phase.
+
 This finite empirical trial measures actual delivery and possible main impact.
 It deliberately does not impose the shadow's conservative prediction of zero
 added future main SDK wait. Actual reader clearance, identity/lifecycle and
@@ -35,7 +45,7 @@ make -C apps/dmSyncopation &&
 make -C apps/dmSyncopation install
 ```
 
-The installed binary must expose `zero_test.labelVersion=5` and
+The installed binary must expose `zero_test.labelVersion=6` and
 `zero_test.idealPublisher=1`; an older coordinated-trial binary does not have
 the current progress/reporting interface. Only dmSyncopation needs rebuilding.
 The 8 kHz option also requires the updated app's four-step support and capture
@@ -114,7 +124,7 @@ After restarting, check the new mode's readbacks while enable remains Off:
 timeout -k 2s 8s getINDI dmtweeter-synco.zero_test
 ```
 
-Expect `labelVersion=5`, `idealPublisher=1`, `enabled=1` and a valid, fresh
+Expect `labelVersion=6`, `idealPublisher=1`, `enabled=1` and a valid, fresh
 progress snapshot. `eventStride=4` is the default successful-event sampling
 described below; it does not reduce the command rate or timing populations.
 No `scheduler.maxCadenceHz=8000` setting is needed for the 8 kHz trial. This
@@ -123,6 +133,44 @@ count; it does not use the ordinary scheduler/shadow cadence-rating gate. The
 ordinary live/shadow maximum-cadence default is unchanged.
 
 ## Run and capture
+
+For the new **compensated 8 kHz** test, merge
+[`dmtweeter_synco_zero_phase_test.conf`](../dmtweeter_synco_zero_phase_test.conf)
+after the ordinary zero-test settings in the working instance config. Keep the
+rest of that config and all camera/loop/controller/dmcomb/CPU settings as they
+are. The changed settings are:
+
+```ini
+[zeroTest]
+publicationAdvanceUs=5
+lateUs=2
+```
+
+Restart dmSyncopation, leaving enable Off, then start with:
+
+```bash
+bash apps/dmSyncopation/scripts/capture-zero-aux-test.sh 8000 10 5
+```
+
+The last argument verifies the configured 5 us advance; it does not change that
+startup setting. After reviewing the short capture, use `8000 120 5` for the
+long run. Only dmSyncopation needs rebuilding and restarting; no logdump or DM
+controller change is required.
+
+Each frozen auxiliary publication target is 5 us earlier than the existing
+primary-observer grid. Passive preparation must finish by that earlier target;
+the final admission checkpoint may be at most 2 us later. Thus the checkpoint
+is at least 3 us before the unadvanced grid point. Remaining update/API and
+dmcomb work can still produce an early or late downstream output, which the
+test measures. The 5 us advance is a fixed initial calibration, with no
+per-frame feedback or catch-up. All reader-clearance checks remain active.
+Mean phase, jitter/tails, skip fractions and controller admission must be
+reviewed together before further tuning.
+
+To reproduce the previous **unadvanced control**, restore
+`publicationAdvanceUs=0`, `lateUs=5`, restart synco, and use the two-argument
+commands below. Omitting the helper's third argument expects zero advance;
+it will reject a compensated preset rather than silently mixing the tests.
 
 Start with `dmtweeter-synco.enable.toggle=Off`. From the repository root, run the
 finite **4 kHz total** trial:
@@ -167,6 +215,43 @@ The app enforces that duration after the grid qualifies; a shell timer no longer
 determines a successful stop. The helper waits for the app's finished state,
 sends Off in cleanup, saves after snapshots and stops only its own collectors.
 No sudo is required.
+
+## Read the compensated timing evidence
+
+`zero_test` version 6 reports `publicationAdvanceUs` and `lateUs`. Event
+`targetNs` continues to mean the auxiliary publication target; it is not
+redefined as a combined trigger. The new fields are:
+
+| Field | Meaning |
+| --- | --- |
+| `referenceTargetNs` | Unadvanced frozen primary-observer grid point. |
+| `publicationDeadlineNs` | Latest final admission checkpoint: `targetNs + lateUs`. |
+| `publicationBeginNs`, `publicationEndNs` | Monotonic final-guard-to-update-return bracket; zero when no update was attempted. |
+| `auxiliaryInode`, `auxiliaryCounter`, `auxiliaryPublicationSec/Nsec` | Coherent auxiliary publication identity and raw producer timestamp. |
+
+`observedNs` remains update-return time for posted commands. The raw auxiliary
+and combined publication timestamps use the same producer clock and can be
+subtracted from each other; do not subtract their absolute values from the
+monotonic target or API bracket.
+
+The new `zero_phase` INDI property and `[zero_test] kind=phase` text records
+contain **full-rate** measurements, independent of successful-event sampling.
+For each destination step `j` they report count, mean, standard deviation
+(`RmsUs`), minimum and maximum:
+
+| Population | Definition |
+| --- | --- |
+| `intervalj` | Adjacent combined publications, with exact consecutive counters and slot labels. Step 0 is the final auxiliary to the next genuine main. |
+| `intervalErrorj` | That interval minus the preceding frozen `period / steps`; nominally 125 us at 8 kHz. |
+| `phaseErrorj` | Auxiliary combined publication minus its same-cycle actual main publication, less `j * period / steps`. Desired mean is zero. Main timing excursions remain visible in this population. |
+| `transportj` | Combined publication minus the matched raw auxiliary publication. |
+
+Missing steps and unmatched identities are counted in `counterGaps`,
+`labelGaps`, `phaseExcluded`, `transportExcluded` and `invalid`; a gap is never
+reported as a nominal 125 us pair. Counts reset on each new trial. Missing
+populations have count zero and extrema/RMS of -1. These endpoints are combined
+publication proxies before the selected controller semaphore post. Controller
+receipt jitter and SDK service remain separate evidence in dmtweeter telemetry.
 
 Before requesting On, the helper requires reporting version at least 5,
 `snapshotValid=1`, positive `snapshotSequence`, and reported `snapshotAgeSec`
@@ -313,7 +398,7 @@ coverage/lifecycle conditions; they are not additional skip reasons to add again
 A guard failure during acknowledgement belongs to the posted attempt's named
 reason and does not increment a pre-publication skip counter.
 
-New summaries/events carry `labelVersion=5`; summaries/INDI also identify
+New summaries/events carry `labelVersion=6`; summaries/INDI also identify
 `idealPublisher=1`. Event text includes named `action`,
 `reason` and `stage` fields alongside the retained numeric `outcome`. The stage
 distinguishes preparation, reader/combined validation, publication deadline/
@@ -326,8 +411,8 @@ skip reason to add to `skipped`.
 
 A late guard event retains the exact rejecting clock sample. A
 timestamp/residual after a successful publication is a completion stamp;
-it can exceed 5 us even though the admission check occurred within the unchanged
-5 us limit.
+it can exceed the configured `lateUs` even though the admission checkpoint
+occurred within that limit (5 us for the control, 2 us for the compensated preset).
 
 For example, `action=skipped reason=preparation_late stage=preparation` records a
 missed ready deadline. `action=skipped reason=late stage=publication_guard`
@@ -393,7 +478,7 @@ service, separately from the main, auxiliary and SDK command timings:
   diagnostic queue depth.
 - `eventsDrained` and `eventsDrainedLast` count rows popped and offered to the
   logger, not proof of successful persistence.
-- `eventsLogFailed` counts popped rows rejected by telemetry enqueue;
+- `eventsLogFailed` counts event rows and phase evidence rejected by telemetry enqueue;
   `eventsDropped` counts queue overflow before draining. Both are distinct from
   intentional `eventsSampledOut`.
 - `primaryUs`, `combinerUs`, `cameraUs`, `pipelineUs`, `readersUs`, `legacyUs`,
@@ -436,16 +521,20 @@ jobs, SDK failures/timeouts, queue losses, publication/receipt/send intervals an
 post-service tails. Clean timed-event statistics alone cannot exclude admission
 losses before timing handoff.
 
-Exact main-impact joins provide primary-to-SDK and controller-to-SDK prefixes
-and SDK service where identities are classified. Those prefixes include delivery
-and preparation; they are not an isolated SDK-wait measurement. Aggregate
-`sdkWait` mixes main and auxiliary jobs. Report matched/unmatched/unclassified
+Exact main-impact joins provide primary-observer-to-SDK and reader-begin-to-SDK
+prefixes and SDK service where identities are classified. The compatibility
+field `controllerToSdk` starts at `read_done.startedNs`, captured after input
+identity is read; it is later than the true semaphore-wake receipt used by
+aggregate `dmtimes.receiptSdk`. Do not subtract that aggregate baseline from the
+exact field and describe the result as added main latency. A matched true
+receipt is needed for that comparison. These prefixes also do not isolate SDK
+queue wait. Aggregate `sdkWait` mixes main and auxiliary jobs. Report matched/unmatched/unclassified
 and dropped coverage with timing claims, using simultaneous camera and primary
 cadence to check changed excursions. Target FPS alone does not prove an
 undisturbed main loop.
 
 `mainReaderMatched`, `mainTimingInvalid`, `mainTimingEvicted` and
-`mainTimingSourceResets` expose coverage of the receipt/SDK joins. A zero-count
+`mainTimingSourceResets` expose coverage of the classified main/SDK joins. A zero-count
 population is unavailable even when its mean field is zero.
 
 In mode 4, dmcomb may have a blank named-primary process trace. Then exact

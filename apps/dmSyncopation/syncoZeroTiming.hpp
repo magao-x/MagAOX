@@ -17,8 +17,9 @@ namespace app
 namespace synco
 {
 
-/// Bounded main-to-SDK measurements; the caller serializes all updates.
-/** Reader receipt through native entry includes preparation and handoff. It is
+/// Bounded main/read-begin-to-SDK measurements; the caller serializes all updates.
+/** Reader record startedNs follows input-identity capture, after the true
+ * semaphore receipt. Read-begin through native entry includes preparation and handoff. It is
  * not the vector-ready-to-entry SDK queue wait. Negative primary-observer-to-SDK
  * values remain signed because a monitor can observe a main after native entry.
  */
@@ -48,11 +49,11 @@ class ZeroTiming
     struct Summary
     {
         Stats    primaryToSdk;         ///< Primary monitor receipt through native SDK entry; signed.
-        Stats    controllerToSdk;      ///< Controller receipt through native SDK entry, not pure SDK wait.
+        Stats    controllerToSdk;      ///< Controller read-begin through native SDK entry, not pure SDK wait.
         Stats    sdkService;           ///< Native SDK entry through return, for classified main commands.
         uint64_t classified{ 0 };      ///< Unique combined commands classified as genuine mains by the caller.
         uint64_t matched{ 0 };         ///< Classified mains matched to successful native SDK records.
-        uint64_t readerMatched{ 0 };   ///< SDK-matched mains also joined to exact reader receipt records.
+        uint64_t readerMatched{ 0 };   ///< SDK-matched mains also joined to exact reader endpoint records.
         uint64_t evicted{ 0 };         ///< Main classifications overwritten before all three records joined.
         uint64_t invalid{ 0 };         ///< Rejected identity, protocol or timing evidence.
         uint64_t duplicates{ 0 };      ///< Repeated classifications or endpoint captures.
@@ -100,10 +101,10 @@ class ZeroTiming
         Key                  identity;               ///< Exact publication occupying this slot.
         bool                 occupied{ false };      ///< A key has been retained.
         bool                 haveMain{ false };      ///< Caller supplied an unambiguous main classification.
-        bool                 haveReader{ false };    ///< Exact reader receipt is present.
+        bool                 haveReader{ false };    ///< Exact reader endpoint is present.
         bool                 haveSdk{ false };       ///< Exact native SDK result is present.
         bool                 counted{ false };       ///< Main-to-SDK and service populations were emitted once.
-        bool                 readerCounted{ false }; ///< Controller-receipt population was emitted once.
+        bool                 readerCounted{ false }; ///< Controller read-begin population was emitted once.
         uint64_t             primaryCounter{ 0 };    ///< Genuine main identity.
         int64_t              primaryReceiptNs{ 0 };  ///< Monotonic primary observer timestamp.
         dmCompletion::Record reader;                 ///< Frozen reader endpoint.
