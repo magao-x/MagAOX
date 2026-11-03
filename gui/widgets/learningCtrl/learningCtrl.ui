@@ -172,22 +172,6 @@
         </layout>
       </item>
       <item>
-        <layout class="QHBoxLayout" name="layoutParameters">
-          <item><layout class="QVBoxLayout" name="layoutCommandRegularization">
-            <item><widget class="QLabel" name="labelCommandRegularization"><property name="text"><string>Command regularization</string></property><property name="wordWrap"><bool>true</bool></property></widget></item>
-            <item><widget class="xqt::statusLineEdit" name="entryCommandRegularization"/></item>
-          </layout></item>
-          <item><layout class="QVBoxLayout" name="layoutDeltaRegularization">
-            <item><widget class="QLabel" name="labelDeltaRegularization"><property name="text"><string>Delta policy regularization</string></property><property name="wordWrap"><bool>true</bool></property></widget></item>
-            <item><widget class="xqt::statusLineEdit" name="entryDeltaRegularization"/></item>
-          </layout></item>
-          <item><layout class="QVBoxLayout" name="layoutLearningRate">
-            <item><widget class="QLabel" name="labelLearningRate"><property name="text"><string>Learning rate</string></property><property name="wordWrap"><bool>true</bool></property></widget></item>
-            <item><widget class="xqt::statusLineEdit" name="entryLearningRate"/></item>
-          </layout></item>
-        </layout>
-      </item>
-      <item>
         <layout class="QHBoxLayout" name="layoutPO4AO">
           <item>
             <widget class="QPushButton" name="buttonPO4AO">
@@ -252,6 +236,22 @@
               </property>
             </widget>
           </item>
+        </layout>
+      </item>
+      <item>
+        <layout class="QHBoxLayout" name="layoutParameters">
+          <item><layout class="QVBoxLayout" name="layoutCommandRegularization">
+            <item><widget class="QLabel" name="labelCommandRegularization"><property name="text"><string>Command regularization</string></property><property name="wordWrap"><bool>true</bool></property></widget></item>
+            <item><widget class="xqt::statusLineEdit" name="entryCommandRegularization"/></item>
+          </layout></item>
+          <item><layout class="QVBoxLayout" name="layoutDeltaRegularization">
+            <item><widget class="QLabel" name="labelDeltaRegularization"><property name="text"><string>Delta policy regularization</string></property><property name="wordWrap"><bool>true</bool></property></widget></item>
+            <item><widget class="xqt::statusLineEdit" name="entryDeltaRegularization"/></item>
+          </layout></item>
+          <item><layout class="QVBoxLayout" name="layoutLearningRate">
+            <item><widget class="QLabel" name="labelLearningRate"><property name="text"><string>Learning rate</string></property><property name="wordWrap"><bool>true</bool></property></widget></item>
+            <item><widget class="xqt::statusLineEdit" name="entryLearningRate"/></item>
+          </layout></item>
         </layout>
       </item>
       <item>

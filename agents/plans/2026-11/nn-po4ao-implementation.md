@@ -822,3 +822,12 @@ linkage; production project settings retain the standard linkage. Existing SDK,
 shared-header override and deployment-target warnings remain. Black, clang-format
 and `git diff --check` pass. CUDA/TensorRT execution, actual GPU memory headroom,
 live INDI deployment and closed-loop improvement remain operator acceptance items.
+
+### Layout follow-up for independent review
+
+Moved the three hyperparameter entries directly above Start/Pause learning, after
+Recollect warmup, following the operator's preference. This changes only Designer
+layout order. The real widget rebuilds; 28 assertions in the narrow-layout and
+preview cases pass, and the refreshed 540 px preview was inspected. Backend,
+subscriptions and control semantics are unchanged. The deployment bundle is
+regenerated to include this follow-up.
