@@ -1,5 +1,26 @@
 # Coordinated zero-auxiliary empirical trial
 
+## Current endpoint and timing-interpretation clarification
+
+The user now explicitly places the desired 125 us cadence at dmcomb's combined
+semaphore trigger to the controller, with sufficiently earlier auxiliary
+publication/provider deadlines. The default finite trial schedules auxiliary
+publication on its primary-observer phase grid. The opt-in 2026-11-03 test at
+the end of this record advances that grid by 5 us and measures the result. The
+[combined-trigger deadline plan](../2026-11/dm-syncopation-combined-trigger-deadlines.md)
+records the revision, existing-capture phase analysis and experimental change.
+
+**Exact-main prefix correction:** throughout the capture history below,
+`zero_test.controllerToSdk` actually measures native SDK entry minus the
+reader record's callback/read-begin timestamp, which follows input-identity
+capture. It does not start at the first semaphore-wait receipt. Aggregate
+`dmtimes.receiptSdk` does start at that earlier receipt. Baseline/active
+subtractions of +0.724, +0.730, +0.570 and +0.496 us using those different
+origins are not measurements of added main latency; that interpretation is
+withdrawn. Raw values, command joins, primary-observer-to-SDK and native SDK
+service remain valid. A matched true-receipt export is needed for the intended
+main-only wake-to-SDK comparison. The new plan gives the source evidence.
+
 ## Objective and decision
 
 Keep the genuine main loop at 2 kHz and insert zero-valued auxiliary commands on
@@ -1219,9 +1240,10 @@ would avoid relying on polling for the precise short stop.
 The short capture has 43 consecutive valid controller summaries. No new
 controller overload, coalescing, rejection, SDK failure/timeout, preparation/
 post failure or timing loss occurs. Delivery-clock qualification excludes 136
-new wide brackets. Its 32,493 exact main joins show receipt-to-SDK mean/max
-17.071066/24.295 us; a 39,998-sample nonoverlapping disabled baseline has mean
-16.347216 us, a descriptive increase of about 0.724 us. Camera records remain
+new wide brackets. Its 32,493 exact main joins show reader-begin-to-SDK mean/max
+17.071066/24.295 us; a 39,998-sample nonoverlapping disabled baseline has true
+receipt-to-SDK mean 16.347216 us. The arithmetic difference of 0.724 us has
+mismatched origins and does not measure added main latency. Camera records remain
 qualified and continuous, with no new frame/counter gaps, errors or timing
 loss. The short interval is supporting evidence, not the two-minute result.
 
@@ -1301,12 +1323,12 @@ and 11 post-trial windows; adjacent windows overlap.
 | SDK dispatch | 2.988 / 3.767 | 3.413 / 28.895 | 3.063 / 3.647 |
 | Reader release | 21.894 / 26.029 | 23.188 / 36.639 | 21.931 / 25.929 |
 
-The main-only join is the relevant comparison for main impact. Controller
-receipt to SDK is **17.019824 us mean / 24.907 us maximum**; observer receipt to
-SDK is 31.975720 / 45.456 us. A nonoverlapping 39,999-sample disabled baseline
-has receipt-to-SDK mean 16.289952 us: approximately **0.730 us added mean prefix
-duration**. This prefix includes preparation/dispatch and does not isolate
-added main SDK wait. Exact native main SDK service is 103.914297 / 109.527 us.
+The exact main reader-begin-to-SDK population is **17.019824 us mean /
+24.907 us maximum**; primary-observer receipt to SDK is 31.975720 / 45.456 us.
+A nonoverlapping 39,999-sample disabled baseline has true receipt-to-SDK mean
+16.289952 us. Their 0.730 us arithmetic difference mixes start endpoints and
+cannot establish added main latency or SDK wait. Exact native main SDK service
+is 103.914297 / 109.527 us.
 The 116.530 us mixed-population readiness maximum leaves only 8.470 us nominal
 headroom in a 125 us slot; a finite observed maximum is not a hard bound.
 
@@ -1508,3 +1530,349 @@ Workstation verification for this implementation:
 Only the operator can qualify the new stop timing and diagnostic service cost
 on the instrument. No hardware command, deployment, commit or push was performed
 as part of this implementation step.
+
+## Schema-5 short qualification: `zero-aux-8000Hz-20261102T025610Z`
+
+The operator provided the extracted directory, located locally under
+`/home/jrmales/tmp/home/jrmales/tmp/zero-aux-8000Hz-20261102T025610Z`.
+The checkout is `97f04b6a3eddbb9a29e5d4c64b9bb29bb7577e9c`, reporting schema 5,
+four steps and `eventStride=4`. The user confirms stable loop operation, modal
+gains zero and no settings/workload changes apart from synco/helper updates.
+Saved before/after settings are 2 kHz, synchronization On, scalar loop gain 1,
+RTC latency On, camera EM gain 1, target +20 C and shutter open. The latter
+thermal/shutter settings differ from the older -45 C/shut capture; timing
+comparisons below use this capture's own disabled baseline. No instrument
+command was executed by the agent and no application code changes accompany
+this analysis.
+
+### Selected ten-second bound and actual delivery
+
+The helper successfully selects `settings.durationSec=10` while Off, with a
+startup `durationLimitSec=120`. Lifecycle monotonic times
+2456028634694279 through 2456038634700321 give **10.000006042 s**, approximately
+02:56:30.044704 through 02:56:40.044710 UTC on November 2. The local-to-UTC
+mapping spread is 18 us. The selected app bound now works without a delayed
+helper stop extending the actual active interval.
+
+| Actual population | Count |
+| --- | ---: |
+| Genuine-main observations | 20,000 |
+| Auxiliary opportunities | 60,000 |
+| Posted, all acknowledged | 59,994 |
+| Startup-unclassified skips | 3 |
+| Deadline-late skips | 3 |
+| All other skip/fault classes | 0 |
+
+All three late skips are step 3: two `deadline` observations at 5.009 and
+5.083 us, and one `publication_guard` observation at 5.018 us. They occur
+0.054881, 1.315381 and 5.396884 s into activity. Their commands had already
+been staged 68.510, 80.343 and 68.146 us early. This is publication-admission
+lateness at the unchanged 5 us guard, not a publisher preparation miss.
+Actual posts by step are 19,999 / 19,999 / 19,996. Excluding the three startup
+slots, auxiliary delivery is 59,994 / 59,997 = **99.9950%**.
+
+Coverage closes exactly: **20,009 retained events + 59,993 sampled-out = 80,002
+expected**, comprising 20,000 main observations, 60,000 auxiliary opportunities
+and start/finish. Queue drops and logger enqueue failures stay zero; the queue
+is empty at completion. All 19,999 classified mains match both SDK and reader
+evidence, with no unclassified impact. Separate result-observer sampling
+exclusions are 767 invalid observations and 14 skipped SDK counters, without
+failed SDK outcomes, resets or evictions.
+
+All 19 exact-element helper polls and control requests succeed. An initial old
+trial-0 response is ignored, followed by trial-1 warming, active progress and
+confirmed finish. Sequences advance strictly from 270 to 453; reported snapshot
+ages are 1.282-70.118 ms. Final readback is Off, finished, trial 1, elapsed
+10.000006042 s, selected duration 10 and ceiling 120.
+
+### Reader-diagnostic stalls removed, readiness retained
+
+Forty consecutive ordinary profile records cover sequence 15 through 54.
+Observed reader-group median/maximum is **4.0475 / 5.630 us**. Its 6.002 us
+lifetime maximum was already present before the capture. This replaces the
+previous long run's 3.837888 s reader-group maximum. The removal of unused
+legacy work is validated here; this is not a hardware benchmark of ordered-map
+performance while those collectors are enabled.
+
+The ordinary start-to-start gap is 1.005995 s median and **1.009874656 s
+maximum**, including the configured one-second wait. The largest event-emission
+gap is 1.000889282 s; there is no extra multi-second computation gap. Event
+formatting/enqueue per-loop maximum is 2.912509 ms, status 714.629 us and profile
+publication 100.299 us. Event queue high-water is **2,004 / 20,000**; drained
+count increases from zero to 20,009, exactly matching the event text rows.
+
+Both legacy reader collectors explicitly report `enabled=0`. Their completion,
+queue, pending, drop, eviction and expiration counts remain zero before and
+after. The independent reader-release observer remains present at requested
+priority 30, and real readiness retains 19,999 main-reader matches with zero
+`readerDrops` or `readerInvalid`. These snapshots do not independently verify
+actual CPU affinity/FIFO policy, but there is no need to change placement for
+this qualification.
+
+### Controller and camera comparison
+
+There are 40 consecutive valid controller summaries, no sequence gaps and
+138,237 additional submissions over their broader endpoints. All 138,237 are
+delivery-clock qualified, with zero new wide brackets or delivery errors.
+No new overload, coalescing, rejection, SDK failure/timeout, preparation/post
+failure, supersession/cancellation, unqualified-reader/vector rejection or
+timing gap/invalid/drop occurs. INDI admissions/retirements increase by 122,200;
+worker completions increase by 122,201 across separately sampled endpoints.
+
+Eight complete active two-second controller windows show native SDK median
+rolling mean/max 103.796/105.529 us and service through readiness
+106.196/110.900 us. Mixed main-plus-aux receipt-to-SDK is 17.555/22.703 us,
+preparation 14.240/18.925 us, dispatch 3.316/8.656 us and reader release
+22.893/27.943 us. These maxima are finite observations, not hard bounds.
+
+Exact main reader-begin-to-SDK mean/max is **16.890124/21.371 us**. The
+43,997-sample nonoverlapping disabled baseline has true receipt-to-SDK mean
+16.320308 us. The 0.570 us arithmetic difference uses different starts and
+cannot be described as added main latency. Primary-observer receipt to SDK is
+32.148816/41.618 us and native main SDK is 103.787392/105.529 us; these exact
+measurements retain their stated origins.
+
+Camera telemetry has 38 consecutive valid stage records and 78,526 additional
+published frames, with no new frame/counter gaps, errors, invalid/wide
+observations or dropped records. Four serial controls occur over the broader
+telemetry endpoints without failures/loss; before/after INDI has three additional
+temperature queries with fixed FPS/gain query counts. Eight complete active
+windows give median acquisition RMS before/active/after
+0.272315/0.458731/0.228472 us, publication RMS
+0.880850/0.751582/0.883563 us, and acquisition-to-write mean
+47.596842/47.372584/47.606406 us. Active acquisition intervals span 481-514 us,
+publication 479.515-513.008 us. No previous roughly 110 us publication excursion
+appears in this short capture; short duration limits tail evidence.
+
+Both requested reporting corrections are qualified by this short run: the
+selected app duration stops on time, and the unused reader-diagnostic stalls
+are absent while readiness and event coverage remain intact. The next action
+is a same-settings 120-second capture using the updated helper. Retain the
+unchanged publication guard, controller settings and faster-acquWFS baseline;
+this short result does not replace long-duration tail qualification.
+
+## Schema-5 full qualification: `zero-aux-8000Hz-20261102T025808Z`
+
+This is the same-checkout (`97f04b6a3eddbb9a29e5d4c64b9bb29bb7577e9c`),
+same-settings full follow-up to the short qualification above. The extracted
+capture is under
+`/home/jrmales/tmp/home/jrmales/tmp/zero-aux-8000Hz-20261102T025808Z`.
+Saved camera/main/latency and worker settings match the short run: 2 kHz,
+synchronization On, EM gain 1, camera target +20 C/shutter open, scalar loop gain
+1 and RTC latency On. Modal gains and stability were confirmed for the short
+run; this follows the requested unchanged-condition comparison, with no further
+changes reported. The analysis uses the full run's own disabled baseline.
+No instrument command or application code change accompanies this record.
+
+### App bound, command populations and coverage
+
+The helper restores selected `durationSec=120` within startup
+`durationLimitSec=120` while Off. Trial 2 starts at monotonic
+2456145445295833 and finishes at 2456265445395684: **120.000099851 s**.
+Approximate UTC activity is 02:58:26.855311-03:00:26.855411 on November 2,
+with 34 us local-to-UTC mapping spread. Prior trial-1 summaries and counters
+remain in the baseline; trial-2 event populations are counted independently,
+not subtracted from the previous short trial's resettable totals.
+
+| Actual population | Count |
+| --- | ---: |
+| Genuine-main observations | 240,000 |
+| Auxiliary opportunities | 720,000 |
+| Posted, all acknowledged | 719,927 |
+| Startup-unclassified skips | 3 |
+| Deadline-late skips | 70 |
+| Other skip/fault classes | 0 |
+
+Excluding startup, auxiliary delivery is 719,927 / 719,997 = **99.99028%**;
+the steady deadline-skip fraction is **0.009722%**. Main observations plus
+auxiliary publications give approximately **7,999.4 commands/s** over the
+active interval. All 719,997 non-startup slots were staged. Actual posts by
+step are 239,999 / 239,929 / 239,999.
+
+All 70 late slots are step 2, each in a distinct main cycle, between
+105.769845 and 112.866850 s into activity. There are 64 `deadline` failures at
+5.008-6.751 us late and six `publication_guard` failures at 5.006-5.034 us.
+Their commands had already been staged **64.988-80.357 us early**. Preparation,
+reader clearance, resource/identity checks and wait errors do not cause skips.
+The 5 us admission guard is unchanged; these are controlled publication skips,
+not commands submitted late or missing publisher data. The late-step pattern
+varies between trials, so this cluster does not establish a permanent
+step-specific bottleneck or identify the cause of wake lateness.
+
+Event coverage closes exactly: **240,041 retained + 719,961 sampled-out =
+960,002 expected events** (240,000 main + 720,000 auxiliary + start/finish).
+All event rows belong to trial 2. Lifetime drained count rises from 20,009 to
+260,050, exactly 240,041. Queue drops and logger enqueue failures stay zero.
+The immediate after-INDI `zero_test.eventsQueued=381` is a depth captured with
+that particular snapshot, not evidence of residual data loss: current
+`logic_timing.eventsQueued=0` and subsequent telemetry show queue zero, and the
+complete accounting proves the tail was retained.
+
+All **239,999 classified mains** match both SDK and reader records, with no
+unclassified impact; one startup main is unmatched. Separate result-sampling
+coverage records 8,159 invalid observations and 324 skipped SDK counters, with
+zero failed SDK results, source resets or timing evictions. These sampling
+exclusions are not lost DM commands.
+
+All 125 helper polls and control requests succeed. The old trial-1 finished
+response is ignored before trial 2; sequences advance strictly from 1439 to
+2720, and reported snapshot ages are 1.412-100.118 ms. Final state is trial 2,
+Off and finished at the selected interval. The capture therefore validates
+both the short-to-long duration selection and full-run completion protocol.
+
+### Ordinary diagnostics remain bounded in observed service time
+
+The capture contains 148 consecutive ordinary profile reports, sequences
+132-279. Reader-group median/maximum is **3.9625 / 19.477 us**, with no return
+of the previous 3.84-second stalls. The ordinary loop gap is 1.009810 s median,
+**1.011542363 s maximum**, including its normal one-second wait. Maximum
+event-emission gap is 1.001068217 s, consistent with that wait.
+
+Event queue high-water is **2,012 / 20,000**, slightly above the preceding
+2,004. Observed per-loop event service peaks at 3.100473 ms; camera, pipeline,
+combiner and primary groups remain below 3.540, 2.239, 1.419 and 1.237 ms.
+Status peaks at 805.650 us and profile publication at 99.388 us. Inherited
+lifetime maxima are distinguished from these current-capture observations.
+
+Both legacy reader collectors remain disabled, with all completion, queue,
+pending, drop, eviction and expiration populations zero before and after.
+The dedicated observer keeps the same TID 2838414 and requested priority 30;
+actual affinity/FIFO policy is not independently measured here. Real readiness
+continues to provide 239,999 main-reader matches with zero `readerDrops` or
+`readerInvalid`. These data validate the unused-work removal and its separation
+from active readiness, rather than measuring enabled-collector map performance.
+
+### Controller capacity and main prefix
+
+There are 148 consecutive valid controller summaries with no sequence gaps.
+Their broader endpoints contain **1,015,351 new submissions**, without new
+admission failure, timing loss/gap/invalid or failed outcomes. Delivery-clock
+qualification excludes 126 wide brackets, with other delivery-error counters
+unchanged. No new overload, coalescing, rejection, SDK failure/timeout,
+preparation/post failure, supersession/cancellation, unqualified-reader or
+vector rejection occurs. INDI admissions/retirements/completions each increase
+by 999,316; independently sampled timing admissions increase by 999,315.
+
+Timing below is median rolling mean / greatest observed sample maximum in us,
+from 20 disabled baseline, 117 complete active and seven post-trial two-second
+windows. Adjacent windows overlap.
+
+| Measurement | Before | Active | After |
+| --- | ---: | ---: | ---: |
+| Native SDK | 103.858 / 105.149 | 103.793 / 109.828 | 103.864 / 104.647 |
+| SDK service through readiness | 106.191 / 107.643 | 106.200 / 112.773 | 106.199 / 107.112 |
+| Receipt to SDK, mixed active population | 16.334 / 19.747 | 17.545 / 26.611 | 16.369 / 19.718 |
+| Preparation | 13.366 / 16.531 | 14.204 / 22.593 | 13.429 / 16.752 |
+| SDK dispatch | 2.966 / 6.251 | 3.343 / 11.401 | 2.936 / 3.747 |
+| Reader release | 21.648 / 25.689 | 22.907 / 31.720 | 21.825 / 25.718 |
+
+Exact main reader-begin-to-SDK mean/max is **16.823482 / 23.744 us**. A
+nonoverlapping pretrial baseline contains 39,998 true receipt-to-SDK samples
+with mean 16.327502 us. The 0.496 us arithmetic difference mixes origins and
+is not a measurement of added main latency. Primary-observer receipt to SDK is
+31.995927 / 49.043 us; native main SDK service is 103.786113 / 106.902 us.
+A common true-receipt origin is required before assessing added main latency. The mixed-population
+readiness maximum of 112.773 us leaves 12.227 us nominal room against a 125 us
+slot, without proving a hard bound.
+
+### Camera coverage and qualification outcome
+
+Camera telemetry has 140 consecutive valid stage records and 297,088 additional
+published frames, with no new frame/counter gaps, rejected/failed/invalid
+observations or dropped records. Ten wide brackets occur before active output,
+in records emitted at 02:58:08.375 and 02:58:09.378. Four baseline windows have
+nonzero ambiguity; all **110 complete active camera windows have ambiguity
+zero**. Seventeen serial controls occur across the broader endpoints without
+control failure/loss.
+
+Median acquisition RMS before/active/after is 0.278457/0.500492/0.273015 us;
+publication RMS is 2.636073/0.797061/0.868297 us. Median acquisition-to-write
+mean is 48.819635/47.387026/47.539646 us and conversion mean is
+28.032058/26.422811/26.673565 us. The disabled baseline is noisier than the short
+run; the improvement during activity is not proof that auxiliary output caused
+better camera timing. Active publication intervals span 479.305-523.739 us,
+acquisition 480-525 us, with no earlier roughly 110 us excursion in the active
+interval.
+
+The full run confirms the reporting fixes and sustained finite ideal-zero
+8 kHz total operation on this workload: app-controlled 120-second stopping,
+complete sampled-event coverage, correct readiness, small controlled deadline
+skips and no observed controller admission loss. Further identical zero runs
+are not required to establish that these fixes work. Production external
+publisher integration, nonzero command qualification and a strict zero-added-
+main-SDK-wait contract remain separate work; this result does not extend the
+ordinary live/shadow cadence limit or change scheduling guards.
+
+
+## Revised downstream target following the full schema-5 capture
+
+The user confirms the goal is dmcomb's trigger to the controller every nominal
+125 us, and directs earlier deadlines for the auxiliary actions. The existing
+full capture already supports relative output-phase analysis: 59,965 complete
+selected cycles have mean main-to-auxiliary combined-publication offsets
+129.314 / 254.161 / 379.905 us. These are about 4-5 us later than nominal,
+even though aggregate controller receipt intervals average close to 125 us.
+They compare same-clock publication durations and are not literal semaphore
+post timestamps or full auxiliary path delays. Sampling does not retain the
+immediate last-to-next-main pair, which needs explicit future coverage.
+
+The [new endpoint/deadline plan](../2026-11/dm-syncopation-combined-trigger-deadlines.md)
+separates combined trigger targets, earlier auxiliary publication/admission,
+validation/wake and provider-ready cutoffs. It preserves the long-baseline grid,
+immutable advertised cycles, exact readiness and per-step skips. Lead selection
+will account for the main combined phase as well as the auxiliary path, avoiding
+a blind subtraction from the current primary-observer phase. It also specifies
+clock-safe paired measurements and true controller-receipt export. No schedule,
+configuration or application source is changed by this analysis/planning step.
+
+## 2026-11-03: compensated-grid experiment prepared
+
+The user requests a test aiming to put combined outputs at n*125 us. The first
+experimental correction is a fixed **5 us differential publication advance**,
+based on the previous mean relative-output offsets, with **2 us admission
+grace**. The final check therefore occurs at least 3 us before the old grid
+point. This is not a qualified transport bound or an absolute selected-post
+deadline. Ordinary zero mode defaults to advance zero; the experiment is opt-in.
+
+Version 6 distinguishes the reference grid, earlier publication target, final
+admission deadline, final-guard-to-update-return bracket and raw auxiliary
+publication identity. The new fixed-storage `ZeroPhase` collector uses all
+acknowledged command identities, independently of sampled event rows. Its
+same-clock interval populations cover main-to-1, 1-to-2, 2-to-3 and
+3-to-next-main; gaps and omitted labels are excluded explicitly. Per-step
+same-main phase error and auxiliary-to-combined transport populations report
+count/mean/spread/min/max through coherent snapshots, INDI and text telemetry.
+Phase statistics reset on trial enable and unused step fields clear after
+reconfiguration. Reader readiness and finite duration remain enforced.
+
+The dedicated overlay and operator procedure are in
+[`dmtweeter_synco_zero_phase_test.conf`](../../../apps/dmSyncopation/dmtweeter_synco_zero_phase_test.conf)
+and the [trial guide](../../../apps/dmSyncopation/doc/zero-aux-rate-test.md).
+After rebuilding/restarting synco and merging the overlay, the first command is:
+
+```bash
+bash apps/dmSyncopation/scripts/capture-zero-aux-test.sh 8000 10 5
+```
+
+The third argument verifies the startup advance before enabling; the helper
+requires version 6 and a nonnegative grace smaller than the advance. It records
+that selection and preserves existing finite-duration/snapshot/loss checks.
+After reviewing this short run, a 120-second capture uses `8000 120 5`.
+No logdump, controller, dmcomb, camera or CPU-setting change is part of this test.
+
+Workstation verification passed:
+
+- Production dmSyncopation clean build.
+- Full application suite: **117 cases / 3,024,414 assertions**. Coverage includes
+  4/6/8 kHz advanced targets, earlier preparation/admission skips, immutable later
+  slots, exact auxiliary metadata and API brackets, full-rate phase collection
+  despite sampling, all four adjacent transitions, identity/gap exclusions,
+  normal-enable trial reset and clearing unused step fields.
+- **41 private fake-service capture-helper tests**, including wrong/missing
+  preset/schema rejection before enabling and legacy zero-advance compatibility.
+- Bash syntax, clang-format verification and `git diff --check`.
+
+Changes are scoped to dmSyncopation trial code, the new `syncoZeroPhase.hpp`
+collector, the capture helper and its tests, preset and documentation. No DM
+controller endpoint, dmcomb implementation or hardware state was changed. The
+operator capture is pending; no agent operated the instrument.

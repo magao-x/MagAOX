@@ -52,6 +52,12 @@ class CaptureZeroAuxTest(unittest.TestCase):
 enable=$(cat "$ZERO_TEST_ROOT/enable")
 steps=$(cat "$ZERO_TEST_ROOT/steps")
 duration=$(cat "$ZERO_TEST_ROOT/duration")
+advance=${ZERO_TEST_ADVANCE-0}
+late=${ZERO_TEST_LATE-5}
+if [[ -f $ZERO_TEST_ROOT/set-calls ]]; then
+    advance=${ZERO_TEST_CONFIGURED_ADVANCE-$advance}
+    late=${ZERO_TEST_CONFIGURED_LATE-$late}
+fi
 case $1 in
     dmtweeter-synco)
         printf "dmtweeter-synco.enable.toggle=%s\n" "$enable"
@@ -60,6 +66,8 @@ case $1 in
         printf "dmtweeter-synco.zero_test.enabled=%s\n" "${ZERO_TEST_MODE-1}"
         printf "dmtweeter-synco.zero_test.idealPublisher=%s\n" "${ZERO_TEST_IDEAL-1}"
         printf "dmtweeter-synco.zero_test.labelVersion=%s\n" "${ZERO_TEST_SCHEMA-5}"
+        printf "dmtweeter-synco.zero_test.publicationAdvanceUs=%s\n" "$advance"
+        printf "dmtweeter-synco.zero_test.lateUs=%s\n" "$late"
         printf "dmtweeter-synco.zero_test.snapshotValid=1\n"
         printf "dmtweeter-synco.zero_test.snapshotAgeSec=0\n"
         printf "dmtweeter-synco.zero_test.snapshotSequence=%s\n" "${ZERO_TEST_BASELINE_SEQUENCE-1}"
@@ -240,6 +248,66 @@ esac''',
                                            "-n dmtweeter-synco.settings.durationSec=10"])
         self.assertEqual((self.root / "enable").read_text(), "Off")
         self.assertIn("Disabled step-count/duration readback failed", stderr)
+
+    def test_compensated_trial_checks_numeric_startup_preset(self):
+        """A 5 us advance is verified numerically without changing startup configuration."""
+        self.env.update(ZERO_TEST_SCHEMA="6", ZERO_TEST_ADVANCE="5", ZERO_TEST_LATE="2")
+        code, _, stderr = self.run_capture("8000", "10", "5.0")
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(
+            self.set_calls(),
+            ["-n dmtweeter-synco.settings.steps=4", "-n dmtweeter-synco.settings.durationSec=10",
+             "-s dmtweeter-synco.enable.toggle=On", "-s dmtweeter-synco.enable.toggle=Off"],
+        )
+        self.assertIn("publicationAdvanceUs=5.0", (self.capture_dir() / "test.txt").read_text())
+
+    def test_compensated_trial_requires_new_schema(self):
+        """A legacy publisher cannot qualify a requested nonzero phase advance."""
+        self.env.update(ZERO_TEST_SCHEMA="5", ZERO_TEST_ADVANCE="5", ZERO_TEST_LATE="2")
+        code, _, stderr = self.run_capture("8000", "10", "5")
+        self.assertEqual(code, 1)
+        self.assertEqual(self.set_calls(), [])
+        self.assertIn("before publication-advance preset", stderr)
+
+    def test_compensated_trial_rejects_wrong_or_missing_preset(self):
+        """The requested advance and a strictly earlier publication guard are both required."""
+        self.env.update(ZERO_TEST_SCHEMA="6", ZERO_TEST_ADVANCE="5", ZERO_TEST_LATE="2")
+        for key, value in [("ZERO_TEST_ADVANCE", "4"), ("ZERO_TEST_ADVANCE", ""),
+                           ("ZERO_TEST_ADVANCE", "nan"), ("ZERO_TEST_LATE", "5"),
+                           ("ZERO_TEST_LATE", "6"), ("ZERO_TEST_LATE", "-1"),
+                           ("ZERO_TEST_LATE", ""), ("ZERO_TEST_LATE", "nan")]:
+            with self.subTest(key=key, value=value):
+                original = self.env[key]
+                self.env[key] = value
+                code, _, stderr = self.run_capture("8000", "10", "5")
+                self.assertEqual(code, 1)
+                self.assertEqual(self.set_calls(), [])
+                self.assertIn("before publication-advance preset", stderr)
+                self.env[key] = original
+
+    def test_legacy_command_requires_zero_advance_on_new_app(self):
+        """Omitting the optional advance cannot silently run a compensated schema-6 preset."""
+        self.env.update(ZERO_TEST_SCHEMA="6", ZERO_TEST_ADVANCE="5", ZERO_TEST_LATE="2")
+        code, _, stderr = self.run_capture("8000", "10")
+        self.assertEqual(code, 1)
+        self.assertEqual(self.set_calls(), [])
+        self.assertIn("advanceUs=0", stderr)
+
+    def test_new_app_allows_legacy_zero_advance_trial(self):
+        """A schema-6 app with zero advance preserves the original two-argument capture."""
+        self.env.update(ZERO_TEST_SCHEMA="6", ZERO_TEST_ADVANCE="0", ZERO_TEST_LATE="5")
+        code, _, stderr = self.run_capture("8000", "10")
+        self.assertEqual(code, 0, stderr)
+        self.assertIn("publicationAdvanceUs=0", (self.capture_dir() / "test.txt").read_text())
+
+    def test_preset_is_checked_again_before_enable(self):
+        """A changed startup preset between snapshots cannot be mistaken for the requested test."""
+        self.env.update(ZERO_TEST_SCHEMA="6", ZERO_TEST_ADVANCE="5", ZERO_TEST_LATE="2",
+                        ZERO_TEST_CONFIGURED_ADVANCE="0")
+        code, _, stderr = self.run_capture("8000", "10", "5")
+        self.assertEqual(code, 1)
+        self.assertNotIn("-s dmtweeter-synco.enable.toggle=On", self.set_calls())
+        self.assertIn("configured publication-advance preset", stderr)
 
     def test_progress_snapshot_capability_is_required(self):
         """The earlier mutex-dependent status implementation cannot start this capture."""
@@ -525,7 +593,10 @@ esac''',
     def test_invalid_inputs_and_help_do_not_contact_services(self):
         """Reject additive/free-run arguments and invalid finite durations."""
         for args in [("--with-main", "4000"), ("5000",), ("10000",), ("4000", "0"),
-                     ("4000", "121"), ("4000", "999999999999999999999")]:
+                     ("4000", "121"), ("4000", "999999999999999999999"),
+                     ("8000", "10", "-1"), ("8000", "10", "51"),
+                     ("8000", "10", "nan"), ("8000", "10", "1;echo bad"),
+                     ("8000", "10", "5", "extra")]:
             with self.subTest(args=args):
                 code, _, _ = self.run_capture(*args)
                 self.assertEqual(code, 2)

@@ -160,6 +160,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_indiP_simulationStatus;
     using dmSyncopation::m_indiP_simulationSteps;
     using dmSyncopation::m_indiP_simulationTrace;
+    using dmSyncopation::m_indiP_zeroPhase;
     using dmSyncopation::m_indiP_zeroTest;
     using dmSyncopation::m_lastFaultNs;
     using dmSyncopation::m_lastFaultReason;
@@ -237,6 +238,8 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_zeroLastCombined;
     using dmSyncopation::m_zeroLateUs;
     using dmSyncopation::m_zeroNextFileCheck;
+    using dmSyncopation::m_zeroPhase;
+    using dmSyncopation::m_zeroPublicationAdvanceUs;
     using dmSyncopation::m_zeroSdkStream;
     using dmSyncopation::m_zeroSnapshot;
     using dmSyncopation::m_zeroStats;
@@ -7066,6 +7069,284 @@ TEST_CASE( "coordinated zero trial publishes only intermediate main-grid slots",
     // clang-format on
 }
 
+/// Differential compensation advances publication while retaining the original frozen reference grid.
+TEST_CASE( "coordinated zero trial advances publication before downstream reference slots",
+           "[dmSyncopation][zeroTest][combinedPhase]" )
+{
+    Streams   streams;
+    Harness   app;
+    const int steps = GENERATE( 2, 3, 4 );
+    ZeroClock::connect( app, streams, steps );
+    app.m_zeroPublicationAdvanceUs = 5;
+    app.m_zeroLateUs               = 2;
+    const auto      next           = ZeroClock::warm();
+    const auto      primaryBefore  = streams.images[0].md->cnt0;
+    const auto      channelBefore  = streams.images[2].md->cnt0;
+    const auto      otherBefore    = streams.images[3].md->cnt0;
+    synco::GridTime grid;
+    uint64_t        period = 0;
+    REQUIRE( app.m_zeroClock.frozenGrid( primaryBefore + 1, grid, period ) );
+    ZeroClock::noPostBefore = synco::stepGrid( grid, period, 1, steps ).ns - 5000;
+    ZeroClock::idleCounter  = channelBefore;
+    ZeroClock::idleStamp    = streams.images[2].md->writetime;
+    REQUIRE( sem_getvalue( streams.images[2].semptr[0], &ZeroClock::idleSemaphore ) == 0 );
+    app.m_enabled = true;
+    ZeroClock::primary( next );
+    REQUIRE( app.m_zeroStats.posted == uint64_t( steps - 1 ) );
+    REQUIRE( app.m_zeroStats.acknowledged == uint64_t( steps - 1 ) );
+    REQUIRE( app.m_zeroStats.skipped == 0 );
+    REQUIRE( ZeroClock::posts.size() == size_t( steps - 1 ) );
+    const auto events = zeroAuxiliaryEvents( app );
+    REQUIRE( events.size() == size_t( steps - 1 ) );
+
+    for( int step = 1; step < steps; ++step )
+    {
+        const auto &event     = events[step - 1];
+        const auto  reference = synco::stepGrid( grid, period, step, steps ).ns;
+        CHECK( event.step == step );
+        CHECK( event.referenceTargetNs == reference );
+        CHECK( event.targetNs == reference - 5000 );
+        CHECK( event.publicationDeadlineNs == event.targetNs + 2000 );
+        CHECK( event.publicationDeadlineNs < reference );
+        CHECK( event.stagedNs <= event.targetNs );
+        CHECK( event.publicationBeginNs >= event.targetNs );
+        CHECK( event.publicationBeginNs <= event.publicationDeadlineNs );
+        CHECK( event.publicationEndNs >= event.publicationBeginNs );
+        CHECK( event.publicationEndNs == event.observedNs );
+        CHECK( ZeroClock::posts[step - 1] >= event.targetNs );
+        CHECK( ZeroClock::posts[step - 1] < reference );
+        CHECK( event.auxiliaryKey.inode == streams.images[2].md->inode );
+        CHECK( event.auxiliaryKey.counter == channelBefore + uint64_t( step ) );
+        CHECK( synco::ZeroTiming::valid( event.auxiliaryKey ) );
+
+        if( steps == 4 )
+        {
+            CHECK( reference - grid.ns == int64_t( step ) * 125000 );
+        }
+    }
+
+    checkZeroPartition( app );
+    CHECK( streams.images[0].md->cnt0 == primaryBefore + 1 );
+    CHECK( streams.images[3].md->cnt0 == otherBefore );
+    CHECK( streams.images[2].md->write == 0 );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::processZeroTestPrimary;
+    MagAOX::app::dmSyncopation::zeroTestEvent;
+#endif
+    // clang-format on
+}
+
+/// Sampling healthy event rows does not sample the downstream interval or phase populations.
+TEST_CASE( "coordinated phase measurements remain full rate when trace rows are sampled",
+           "[dmSyncopation][zeroTest][combinedPhase]" )
+{
+    Streams streams;
+    Harness app;
+    ZeroClock::connect( app, streams, 4 );
+    app.m_zeroPublicationAdvanceUs = 5;
+    app.m_zeroLateUs               = 2;
+    app.m_zeroEventStride          = 1024;
+    const auto next                = ZeroClock::warm();
+    app.m_enabled                  = true;
+    ZeroClock::primary( next );
+    ZeroClock::primary( next + 500000 );
+    REQUIRE( app.m_zeroStats.posted == 6 );
+    CHECK( app.m_zeroStats.eventsSampledOut == 8 );
+    CHECK( app.m_zeroPhase.summary().observed == 8 );
+    CHECK( app.m_zeroPhase.summary().paired == 7 );
+    CHECK( app.m_zeroPhase.summary().phaseMatched == 6 );
+    CHECK( app.m_zeroPhase.summary().interval[0].count == 1 );
+    CHECK( app.m_zeroPhase.summary().interval[1].count == 2 );
+    CHECK( app.m_zeroPhase.summary().interval[2].count == 2 );
+    CHECK( app.m_zeroPhase.summary().interval[3].count == 2 );
+    checkZeroPartition( app );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::processZeroTestPrimary;
+    MagAOX::app::dmSyncopation::zeroTestEvent;
+    MagAOX::app::synco::ZeroPhase::observe;
+#endif
+    // clang-format on
+}
+
+/// The public Off/On path starts a fresh phase population without bridging across trial generations.
+TEST_CASE( "coordinated phase populations reset through the enable callback",
+           "[dmSyncopation][zeroTest][combinedPhase]" )
+{
+    Streams streams;
+    Harness app;
+    ZeroClock::connect( app, streams, 4 );
+    app.properties();
+    app.localDriver( streams.directory );
+    REQUIRE( app.setupZeroTestINDI() == 0 );
+    const auto next   = ZeroClock::warm();
+    auto       enable = app.m_indiP_enable;
+    enable["toggle"]  = pcf::IndiElement::On;
+    REQUIRE( app.newCallBack_m_indiP_enable( enable ) == 0 );
+    ZeroClock::primary( next );
+    ZeroClock::primary( next + 500000 );
+    // Publish this completed boundary without waiting for the normal 100-ms status cadence.
+    app.publishZeroTestStatus( ZeroClock::time, true );
+    app.updateZeroTest( false );
+    REQUIRE( app.m_zeroPhase.summary().observed == 8 );
+    REQUIRE( app.m_zeroPhase.summary().paired == 7 );
+    REQUIRE( app.m_zeroPhase.summary().interval[0].count == 1 );
+    REQUIRE( app.m_indiP_zeroPhase["observed"].get<double>() == 8 );
+    const auto trial = app.m_zeroSnapshot.trial;
+
+    enable["toggle"] = pcf::IndiElement::Off;
+    REQUIRE( app.newCallBack_m_indiP_enable( enable ) == 0 );
+    CHECK( app.m_zeroPhase.summary().observed == 8 );
+    enable["toggle"] = pcf::IndiElement::On;
+    REQUIRE( app.newCallBack_m_indiP_enable( enable ) == 0 );
+    app.updateZeroTest( false );
+    CHECK( app.m_zeroSnapshot.trial == trial + 1 );
+    CHECK( app.m_zeroSnapshot.stats.warming );
+    CHECK( app.m_zeroSnapshot.stats.mainObserved == 0 );
+    CHECK( app.m_zeroSnapshot.phase.observed == 0 );
+    CHECK( app.m_zeroPhase.summary().observed == 0 );
+    CHECK( app.m_zeroPhase.summary().paired == 0 );
+    CHECK( app.m_zeroPhase.summary().phaseMatched == 0 );
+    CHECK( app.m_indiP_zeroPhase["observed"].get<double>() == 0 );
+    CHECK( app.m_indiP_zeroPhase["paired"].get<double>() == 0 );
+    CHECK( app.m_indiP_zeroPhase["phaseMatched"].get<double>() == 0 );
+    CHECK( app.m_zeroClock.summary().cadence.state == MagAOX::dmSyncoSimulation::CadenceState::full );
+    ZeroClock::primary( next + 1000000 );
+    CHECK( app.m_zeroPhase.summary().observed == 4 );
+    CHECK( app.m_zeroPhase.summary().paired == 3 );
+    CHECK( app.m_zeroPhase.summary().phaseMatched == 3 );
+    CHECK( app.m_zeroPhase.summary().interval[0].count == 0 );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::newCallBack_m_indiP_enable;
+    MagAOX::app::dmSyncopation::updateZeroTest;
+    MagAOX::app::synco::ZeroPhase::reset;
+#endif
+    // clang-format on
+}
+
+/// Shrinking a disabled trial clears all previously published higher-step phase values.
+TEST_CASE( "coordinated phase INDI clears unused steps after reconfiguration",
+           "[dmSyncopation][zeroTest][combinedPhase]" )
+{
+    Streams streams;
+    Harness app;
+    ZeroClock::connect( app, streams, 4 );
+    app.properties();
+    app.localDriver( streams.directory );
+    REQUIRE( app.setupZeroTestINDI() == 0 );
+    const auto next   = ZeroClock::warm();
+    auto       enable = app.m_indiP_enable;
+    enable["toggle"]  = pcf::IndiElement::On;
+    REQUIRE( app.newCallBack_m_indiP_enable( enable ) == 0 );
+    ZeroClock::primary( next );
+    ZeroClock::primary( next + 500000 );
+    // Publish this completed boundary without waiting for the normal 100-ms status cadence.
+    app.publishZeroTestStatus( ZeroClock::time, true );
+    app.updateZeroTest( false );
+
+    for( int step = 2; step < 4; ++step )
+    {
+        const auto suffix = std::to_string( step );
+        REQUIRE( app.m_indiP_zeroPhase["interval" + suffix + "Count"].get<double>() == 2 );
+        REQUIRE( app.m_indiP_zeroPhase["phaseError" + suffix + "Count"].get<double>() == 2 );
+        REQUIRE( app.m_indiP_zeroPhase["interval" + suffix + "MeanUs"].get<double>() > 0 );
+    }
+
+    enable["toggle"] = pcf::IndiElement::Off;
+    REQUIRE( app.newCallBack_m_indiP_enable( enable ) == 0 );
+    auto settings = app.m_indiP_settings;
+    settings.add( pcf::IndiElement( "steps" ) );
+    settings["steps"] = 2.0;
+    REQUIRE( app.newCallBack_m_indiP_settings( settings ) == 0 );
+    app.updateZeroTest( false );
+    CHECK( app.m_requested == 2 );
+    CHECK( app.m_zeroSnapshot.steps == 2 );
+    CHECK( app.m_zeroSnapshot.phase.steps == 2 );
+
+    for( int step = 2; step < 4; ++step )
+    {
+        for( const auto *population : { "interval", "intervalError", "phaseError", "transport" } )
+        {
+            const auto prefix = std::string( population ) + std::to_string( step );
+            CHECK( app.m_indiP_zeroPhase[prefix + "Count"].get<double>() == 0 );
+            CHECK( app.m_indiP_zeroPhase[prefix + "MeanUs"].get<double>() == 0 );
+            CHECK( app.m_indiP_zeroPhase[prefix + "RmsUs"].get<double>() == -1 );
+            CHECK( app.m_indiP_zeroPhase[prefix + "MinUs"].get<double>() == -1 );
+            CHECK( app.m_indiP_zeroPhase[prefix + "MaxUs"].get<double>() == -1 );
+        }
+    }
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::newCallBack_m_indiP_settings;
+    MagAOX::app::dmSyncopation::updateZeroTest;
+    MagAOX::app::dmSyncopation::configureZeroTest;
+#endif
+    // clang-format on
+}
+
+/// An earlier publication cutoff rejects late preparation or admission without shifting a later slot.
+TEST_CASE( "coordinated compensated trial skips only the missed advanced occurrence",
+           "[dmSyncopation][zeroTest][combinedPhase]" )
+{
+    Streams streams;
+    Harness app;
+    ZeroClock::connect( app, streams, 4 );
+    app.m_zeroPublicationAdvanceUs = 5;
+    app.m_zeroLateUs               = 2;
+    const auto      next           = ZeroClock::warm();
+    synco::GridTime grid;
+    uint64_t        period = 0;
+    REQUIRE( app.m_zeroClock.frozenGrid( streams.images[0].md->cnt0 + 1, grid, period ) );
+    const auto first  = synco::stepGrid( grid, period, 1, 4 ).ns - 5000;
+    auto       reason = Harness::ZeroOutcome::late;
+
+    SECTION( "wakeup misses the earlier admission cutoff" )
+    {
+        ZeroClock::lateOnceAt = first;
+    }
+
+    SECTION( "preparation misses the earlier ready cutoff" )
+    {
+        ZeroClock::stageFinishAt = first + 1;
+        reason                   = Harness::ZeroOutcome::preparationLate;
+    }
+
+    app.m_enabled = true;
+    ZeroClock::primary( next );
+    REQUIRE( app.m_zeroStats.skipped == 1 );
+    REQUIRE( app.m_zeroStats.posted == 2 );
+    REQUIRE( app.m_zeroStats.acknowledged == 2 );
+    REQUIRE( ZeroClock::posts.size() == 2 );
+    const auto events = zeroAuxiliaryEvents( app );
+    REQUIRE( events.size() == 3 );
+    CHECK( events[0].targetNs == first );
+    CHECK( events[0].reason == reason );
+    CHECK( events[0].publicationBeginNs == 0 );
+    CHECK( events[0].publicationEndNs == 0 );
+    CHECK( events[0].auxiliaryKey.inode == 0 );
+
+    for( int step = 2; step < 4; ++step )
+    {
+        const auto reference = synco::stepGrid( grid, period, step, 4 ).ns;
+        CHECK( events[step - 1].referenceTargetNs == reference );
+        CHECK( events[step - 1].targetNs == reference - 5000 );
+        CHECK( events[step - 1].reason == Harness::ZeroOutcome::none );
+        CHECK( ZeroClock::posts[step - 2] >= reference - 5000 );
+        CHECK( ZeroClock::posts[step - 2] < reference );
+    }
+
+    checkZeroPartition( app );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::processZeroTestPrimary;
+    MagAOX::app::dmSyncopation::zeroTestSkip;
+#endif
+    // clang-format on
+}
+
 /// Lost reader evidence, late wakes and a newly arriving main suppress writes without catch-up.
 TEST_CASE( "coordinated zero trial skips lost readiness and obsolete slots", "[dmSyncopation][zeroTest]" )
 {
@@ -7655,7 +7936,7 @@ TEST_CASE( "coordinated zero status is independent of the cycle mutex", "[dmSync
         CHECK( app.m_indiP_zeroTest["mainObserved"].get<double>() == 80 );
         CHECK( app.m_indiP_zeroTest["elapsedSec"].get<double>() == Approx( 5 ) );
         CHECK( app.m_indiP_zeroTest["snapshotAgeSec"].get<double>() == Approx( 1 ) );
-        CHECK( app.m_indiP_zeroTest["labelVersion"].get<double>() == 5 );
+        CHECK( app.m_indiP_zeroTest["labelVersion"].get<double>() == 6 );
     }
 
     // clang-format off
@@ -7841,6 +8122,12 @@ TEST_CASE( "coordinated zero trial validates explicit startup configuration", "[
                                         std::string{ "[zeroTest]\ndurationSec=121\n" },
                                         std::string{ "[zeroTest]\nchannel=dm01disp03\n" },
                                         std::string{ "[zeroTest]\nlateUs=51\n" },
+                                        std::string{ "[zeroTest]\npublicationAdvanceUs=6\n" },
+                                        std::string{ "[zeroTest]\npublicationAdvanceUs=5\n" },
+                                        std::string{ "[zeroTest]\npublicationAdvanceUs=4\n" },
+                                        std::string{ "[zeroTest]\npublicationAdvanceUs=-1\n" },
+                                        std::string{ "[zeroTest]\npublicationAdvanceUs=51\n" },
+                                        std::string{ "[zeroTest]\npublicationAdvanceUs=nan\n" },
                                         std::string{ "[zeroTest]\neventStride=0\n" },
                                         std::string{ "[zeroTest]\neventStride=1025\n" },
                                         std::string{ "[readerReleaseMonitor]\nshmimName=\n" } );
@@ -7889,7 +8176,8 @@ TEST_CASE( "coordinated zero trial validates explicit startup configuration", "[
     const auto configured = app.loadConfigImpl( app.config );
     CAPTURE( extra );
 
-    if( extra.empty() || extra == "[scheduler]\nmaxSubframes=4\n" || extra == "[zeroTest]\ndurationSec=10\n" )
+    if( extra.empty() || extra == "[scheduler]\nmaxSubframes=4\n" || extra == "[zeroTest]\ndurationSec=10\n" ||
+        extra == "[zeroTest]\npublicationAdvanceUs=6\n" )
     {
         CHECK( configured == 0 );
         CHECK( app.m_zeroTestEnabled );
@@ -7899,6 +8187,7 @@ TEST_CASE( "coordinated zero trial validates explicit startup configuration", "[
         CHECK( app.m_zeroDurationSec == app.m_zeroDurationLimitSec );
         CHECK( app.m_maxCadence == 6000 );
         CHECK( app.m_zeroEventStride == 4 );
+        CHECK( app.m_zeroPublicationAdvanceUs == ( extra == "[zeroTest]\npublicationAdvanceUs=6\n" ? 6 : 0 ) );
     }
     else
     {
@@ -8023,7 +8312,7 @@ TEST_CASE( "coordinated zero duration is selectable only while disabled", "[dmSy
     CHECK( app.m_indiP_zeroTest["durationSec"].get<double>() == 10 );
     CHECK( app.m_indiP_zeroTest["durationLimitSec"].get<double>() == 120 );
     CHECK( app.m_indiP_zeroTest["trial"].get<double>() == 0 );
-    CHECK( app.m_indiP_zeroTest["labelVersion"].get<double>() == 5 );
+    CHECK( app.m_indiP_zeroTest["labelVersion"].get<double>() == 6 );
 
     for( const auto value :
          { 0.0, -1.0, 121.0, std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity() } )
@@ -8171,6 +8460,207 @@ TEST_CASE( "coordinated zero trial accepts four disabled steps and rejects five"
 #ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
     MagAOX::app::dmSyncopation::newCallBack_m_indiP_settings;
     MagAOX::app::dmSyncopation::configureZeroTest;
+#endif
+    // clang-format on
+}
+
+/// Full-rate publication pairs cover every destination, including the last auxiliary into the next main.
+TEST_CASE( "coordinated phase collector retains all adjacent combined intervals",
+           "[dmSyncopation][zeroTest][combinedPhase]" )
+{
+    synco::ZeroPhase phase;
+    const unsigned   steps  = GENERATE( 2U, 3U, 4U );
+    const uint64_t   period = 500000 * MagAOX::dmSyncoSimulation::periodScale;
+    const int64_t    grid   = 1000000000;
+    const auto       key    = []( uint64_t counter, int64_t stamp )
+    {
+        return synco::ZeroTiming::Key{ 42, counter, 2000000000 + stamp / 1000000000, stamp % 1000000000 };
+    };
+    REQUIRE( phase.configure( steps ) );
+    phase.observe( 100, 0, steps, key( 10, grid ), grid, period );
+
+    for( unsigned step = 1; step < steps; ++step )
+    {
+        const auto stamp     = synco::stepGrid( { grid, 0 }, period, step, steps ).ns;
+        auto       auxiliary = key( 20 + step, stamp - 1000 );
+        auxiliary.inode      = 43;
+        phase.observe( 100, step, steps, key( 10 + step, stamp ), grid, period, auxiliary );
+    }
+
+    phase.observe( 101, 0, steps, key( 10 + steps, grid + 500000 ), grid + 500000, period );
+    const auto &summary = phase.summary();
+    CHECK( summary.observed == steps + 1 );
+    CHECK( summary.paired == steps );
+    CHECK( summary.phaseMatched == steps - 1 );
+    CHECK( summary.invalid == 0 );
+    CHECK( summary.counterGaps == 0 );
+    CHECK( summary.labelGaps == 0 );
+
+    for( unsigned destination = 0; destination < steps; ++destination )
+    {
+        CHECK( summary.interval[destination].count == 1 );
+        CHECK( summary.intervalError[destination].count == 1 );
+        CHECK( std::abs( summary.intervalError[destination].meanNs ) <= 1 );
+
+        if( steps == 4 )
+        {
+            CHECK( summary.interval[destination].meanNs == 125000 );
+            CHECK( summary.intervalError[destination].meanNs == 0 );
+        }
+
+        if( destination != 0 )
+        {
+            CHECK( summary.phaseError[destination].count == 1 );
+            CHECK( summary.phaseError[destination].meanNs == 0 );
+            CHECK( summary.transport[destination].count == 1 );
+            CHECK( summary.transport[destination].meanNs == 1000 );
+        }
+    }
+
+    phase.reset();
+    CHECK( phase.summary().observed == 0 );
+    CHECK( phase.summary().paired == 0 );
+    CHECK( phase.summary().phaseMatched == 0 );
+    CHECK( phase.summary().steps == steps );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::synco::ZeroPhase::configure;
+    MagAOX::app::synco::ZeroPhase::reset;
+    MagAOX::app::synco::ZeroPhase::observe;
+    MagAOX::app::synco::ZeroPhase::summary;
+#endif
+    // clang-format on
+}
+
+/// A skipped or unobserved command is not reinterpreted as a nominal 125-us transition.
+TEST_CASE( "coordinated phase collector excludes missing steps and counter discontinuities",
+           "[dmSyncopation][zeroTest][combinedPhase]" )
+{
+    synco::ZeroPhase   phase;
+    constexpr uint64_t period = 500000 * MagAOX::dmSyncoSimulation::periodScale;
+    constexpr int64_t  grid   = 1000000000;
+    const auto         key    = []( uint64_t counter, int64_t stamp )
+    {
+        return synco::ZeroTiming::Key{ 42, counter, 2000000000 + stamp / 1000000000, stamp % 1000000000 };
+    };
+    REQUIRE( phase.configure( 4 ) );
+    phase.observe( 100, 0, 4, key( 10, grid ), grid, period );
+
+    SECTION( "one auxiliary occurrence is intentionally skipped" )
+    {
+        phase.observe( 100, 1, 4, key( 11, grid + 125000 ), grid, period );
+        phase.observe( 100, 3, 4, key( 12, grid + 375000 ), grid, period );
+        CHECK( phase.summary().interval[1].count == 1 );
+        CHECK( phase.summary().interval[2].count == 0 );
+        CHECK( phase.summary().interval[3].count == 0 );
+        CHECK( phase.summary().labelGaps == 1 );
+        phase.observe( 101, 0, 4, key( 13, grid + 500000 ), grid + 500000, period );
+        CHECK( phase.summary().interval[0].count == 1 );
+        CHECK( phase.summary().interval[0].meanNs == 125000 );
+    }
+
+    SECTION( "a combined publication was not classified" )
+    {
+        phase.observe( 100, 1, 4, key( 12, grid + 125000 ), grid, period );
+        CHECK( phase.summary().interval[1].count == 0 );
+        CHECK( phase.summary().counterGaps == 1 );
+    }
+
+    SECTION( "the next main has a nonconsecutive genuine identity" )
+    {
+        phase.observe( 100, 3, 4, key( 11, grid + 375000 ), grid, period );
+        phase.observe( 102, 0, 4, key( 12, grid + 1000000 ), grid + 1000000, period );
+        CHECK( phase.summary().interval[0].count == 0 );
+        CHECK( phase.summary().labelGaps >= 1 );
+    }
+
+    SECTION( "a different frozen reference cannot be joined within one cycle" )
+    {
+        phase.observe( 100, 1, 4, key( 11, grid + 125000 ), grid + 1, period );
+        CHECK( phase.summary().interval[1].count == 0 );
+        CHECK( phase.summary().phaseError[1].count == 0 );
+        CHECK( phase.summary().phaseExcluded == 1 );
+    }
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::synco::ZeroPhase::observe;
+#endif
+    // clang-format on
+}
+
+/// Duplicate, malformed and replaced identities cannot add false downstream phase evidence.
+TEST_CASE( "coordinated phase collector rejects ambiguous identity evidence",
+           "[dmSyncopation][zeroTest][combinedPhase]" )
+{
+    synco::ZeroPhase             phase;
+    constexpr uint64_t           period = 500000 * MagAOX::dmSyncoSimulation::periodScale;
+    constexpr int64_t            grid   = 1000000000;
+    const synco::ZeroTiming::Key main{ 42, 10, 2000000001, 0 };
+    const synco::ZeroTiming::Key aux{ 42, 11, 2000000001, 125000 };
+    REQUIRE( phase.configure( 4 ) );
+    phase.observe( 100, 0, 4, main, grid, period );
+
+    SECTION( "an exact repeated observation is counted only once" )
+    {
+        phase.observe( 100, 0, 4, main, grid, period );
+        CHECK( phase.summary().duplicates == 1 );
+        phase.observe( 100, 1, 4, aux, grid, period );
+        CHECK( phase.summary().paired == 1 );
+        CHECK( phase.summary().phaseMatched == 1 );
+    }
+
+    SECTION( "a torn metadata sample invalidates pending interval evidence" )
+    {
+        auto invalid = aux;
+        invalid.nsec = 1000000000;
+        phase.observe( 100, 1, 4, invalid, grid, period );
+        CHECK( phase.summary().invalid == 1 );
+        phase.observe( 100, 1, 4, aux, grid, period );
+        CHECK( phase.summary().paired == 0 );
+        CHECK( phase.summary().phaseMatched == 0 );
+    }
+
+    SECTION( "replaced stream metadata is not the same producer" )
+    {
+        auto replaced  = aux;
+        replaced.inode = 43;
+        phase.observe( 100, 1, 4, replaced, grid, period );
+        CHECK( phase.summary().paired == 0 );
+        CHECK( phase.summary().phaseMatched == 0 );
+    }
+
+    SECTION( "producer time regressed after the genuine main" )
+    {
+        auto regressed = aux;
+        --regressed.sec;
+        phase.observe( 100, 1, 4, regressed, grid, period );
+        CHECK( phase.summary().invalid == 1 );
+        CHECK( phase.summary().paired == 0 );
+        CHECK( phase.summary().phaseMatched == 0 );
+    }
+
+    SECTION( "the same identity cannot claim a different step label" )
+    {
+        phase.observe( 100, 1, 4, main, grid, period );
+        CHECK( phase.summary().invalid == 1 );
+        CHECK( phase.summary().paired == 0 );
+        CHECK( phase.summary().phaseMatched == 0 );
+    }
+
+    SECTION( "a future auxiliary stamp cannot become negative transport latency" )
+    {
+        auto future  = aux;
+        future.inode = 43;
+        ++future.nsec;
+        phase.observe( 100, 1, 4, aux, grid, period, future );
+        CHECK( phase.summary().transport[1].count == 0 );
+        CHECK( phase.summary().transportExcluded == 1 );
+    }
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::synco::ZeroPhase::observe;
 #endif
     // clang-format on
 }

@@ -7,10 +7,12 @@ set -o pipefail
 usage()
 {
     cat <<'HELP'
-Usage: capture-zero-aux-test.sh RATE [SECONDS]
+Usage: capture-zero-aux-test.sh RATE [SECONDS [ADVANCE_US]]
 
 RATE is effective total cadence, 4000, 6000 or 8000 Hz, with the main loop at 2000 Hz.
 SECONDS is the active-trial duration, default 120, integer 1 through 120.
+ADVANCE_US is the expected startup publication advance, default 0, from 0 through 50 us.
+For an advanced trial, the app must report schema 6 or newer and lateUs < ADVANCE_US.
 The app must already be running with zeroTest.enabled=true and enable=Off.
 The script sets steps and the app-enforced duration while disabled, then starts the trial.
 It never changes the main loop, camera, dmcomb, CPU placement or app config.
@@ -25,13 +27,14 @@ then
     usage
     exit 0
 fi
-if (( $# < 1 || $# > 2 ))
+if (( $# < 1 || $# > 3 ))
 then
     usage >&2
     exit 2
 fi
 zero_rate=$1
 zero_seconds=${2:-120}
+zero_advance=${3:-0}
 if [[ $zero_rate != 4000 && $zero_rate != 6000 && $zero_rate != 8000 ]]
 then
     printf 'RATE must be effective total cadence 4000, 6000 or 8000\n' >&2
@@ -52,13 +55,19 @@ do
         exit 2
     fi
 done
+if ! awk -v advance="$zero_advance" \
+     'BEGIN { exit !(advance ~ /^[0-9]+([.][0-9]+)?$/ && advance >= 0 && advance <= 50) }'
+then
+    printf 'ADVANCE_US must be numeric microseconds from 0 through 50\n' >&2
+    exit 2
+fi
 
 zero_capture_dir="$HOME/tmp/zero-aux-${zero_rate}Hz-$(date -u +%Y%m%dT%H%M%SZ)"
 mkdir -p "$zero_capture_dir" || exit 1
 zero_script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 git -C "$zero_script_dir/../../.." rev-parse HEAD > "$zero_capture_dir/git.txt" || exit 1
-printf 'effectiveRate=%s\nsteps=%s\nactiveSeconds=%s\nmainRate=2000\n' \
-    "$zero_rate" "$zero_steps" "$zero_seconds" > "$zero_capture_dir/test.txt"
+printf 'effectiveRate=%s\nsteps=%s\nactiveSeconds=%s\nmainRate=2000\npublicationAdvanceUs=%s\n' \
+    "$zero_rate" "$zero_steps" "$zero_seconds" "$zero_advance" > "$zero_capture_dir/test.txt"
 zero_collectors=()
 zero_devices=()
 zero_started=0
@@ -85,6 +94,28 @@ read_property()
     local zero_key=$1
     local zero_file=$2
     awk -F= -v key="$zero_key" '$1 == key { value = $2 } END { print value }' "$zero_file"
+}
+
+check_phase_preset()
+{
+    local zero_file=$1
+    local zero_phase=$2
+    local zero_phase_schema zero_actual_advance zero_actual_late
+    zero_phase_schema=$(read_property dmtweeter-synco.zero_test.labelVersion "$zero_file")
+    zero_actual_advance=$(read_property dmtweeter-synco.zero_test.publicationAdvanceUs "$zero_file")
+    zero_actual_late=$(read_property dmtweeter-synco.zero_test.lateUs "$zero_file")
+    if ! awk -v schema="$zero_phase_schema" -v actual="$zero_actual_advance" \
+             -v late="$zero_actual_late" -v expected="$zero_advance" \
+         'BEGIN { number="^[0-9]+([.][0-9]+)?([eE][+-]?[0-9]+)?$";
+                  legacy=(schema ~ /^[0-9]+$/ && schema == 5 && expected == 0);
+                  exit !(legacy || (schema ~ /^[0-9]+$/ && schema >= 6 &&
+                                     actual ~ number && actual == expected && late ~ number && late >= 0 &&
+                                     (expected == 0 || late < expected))) }'
+    then
+        setup_failure "$zero_phase publication-advance preset" \
+            "schema=$zero_phase_schema advanceUs=$zero_actual_advance lateUs=$zero_actual_late" \
+            "advanceUs=$zero_advance; schema>=6 and 0<=lateUs<advanceUs when advance is positive"
+    fi
 }
 
 snapshot()
@@ -192,6 +223,7 @@ zero_latency=$(read_property sysMonRTC.set_latency.toggle "$zero_latency_before"
 [[ $zero_enabled == Off ]] || setup_failure dmtweeter-synco.enable.toggle "$zero_enabled" Off
 [[ $zero_mode == 1 ]] || setup_failure dmtweeter-synco.zero_test.enabled "$zero_mode" 1
 [[ $zero_ideal == 1 ]] || setup_failure dmtweeter-synco.zero_test.idealPublisher "$zero_ideal" 1
+check_phase_preset "$zero_synco_before" before
 if ! awk -v schema="$zero_schema" -v valid="$zero_snapshot_valid" -v age="$zero_snapshot_age" \
          -v seq="$zero_snapshot_sequence" -v drops="$zero_drops_before" -v failed="$zero_log_failed_before" \
      'BEGIN { number="^[0-9]+([.][0-9]+)?([eE][+-]?[0-9]+)?$";
@@ -234,6 +266,7 @@ fi
 sleep 1
 snapshot configured dmtweeter-synco
 zero_synco_configured="$zero_capture_dir/dmtweeter-synco-indi-configured.txt"
+check_phase_preset "$zero_synco_configured" configured
 zero_trial_before=$(read_property dmtweeter-synco.zero_test.trial "$zero_synco_configured")
 zero_configured_duration=$(read_property dmtweeter-synco.zero_test.durationSec "$zero_synco_configured")
 zero_configured_sequence=$(read_property dmtweeter-synco.zero_test.snapshotSequence "$zero_synco_configured")

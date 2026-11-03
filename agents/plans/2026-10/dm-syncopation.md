@@ -4,6 +4,30 @@
 
 We need a system that enables dm updates within the loop time (i.e. at 8 kHz when the loop is at 2 kHz).  The challenge is that we have to space dm writes due to the time it takes to process a DM command.
 
+## 2026-11-01 timing endpoint clarification
+
+The user confirms that at 2 kHz main / 8 kHz total, the desired 125 us cadence
+belongs to **dmcomb's combined-stream semaphore trigger to the DM controller**.
+Auxiliary publication and provider-ready deadlines must precede the desired
+125/250/375 us downstream points by qualified path/check/wake budgets. The main
+counter still supplies genuine cycle identity; combined-main timing must supply
+the downstream phase, without chasing individual main excursions.
+
+The finite zero trial currently targets auxiliary publication on a phase fitted
+to primary-monitor observations. That implementation and its successful capacity
+captures do not themselves implement compensated downstream targets. The
+[combined-trigger deadline plan](../2026-11/dm-syncopation-combined-trigger-deadlines.md)
+records measured relative output bias, the endpoint/clock distinctions and the
+measurement-first revision. No numerical lead or runtime timing change is made
+by this clarification. The 5 us analysis guideline and safety/readiness rules
+remain distinct from any newly specified downstream output-error tolerance.
+
+On 2026-11-03 the first opt-in differential-advance finite test was implemented:
+5 us earlier publication with 2 us admission grace, plus full-rate combined
+phase/interval measurements. See the linked plan's implementation section.
+Default zero-test targets remain unadvanced; the qualified downstream/provider
+deadline contract is still follow-up work.
+
 ## Discussion
 
 The DM is normally triggered by the AO loop, which is itself triggered by the WFS readout semaphore.  The WFS readout triggers the reconstruction, which triggers the filter, which triggers the command calculation.  At the end of this the command is written to shared memory channel dmC (symlink for dm01disp03 in MagAO-X).  That causes dmcomb to trigger a sum to dm01disp, and that sempahore then triggers the DM controller app to actually address the hardware.    
