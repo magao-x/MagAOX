@@ -4,11 +4,13 @@
 #ifndef learningCtrl_hpp
 #define learningCtrl_hpp
 
+#include <cmath>
 #include <map>
 #include <set>
 #include <string>
 
 #include <QElapsedTimer>
+#include <QInputDialog>
 #include <QSignalBlocker>
 #include <QTimer>
 
@@ -73,6 +75,8 @@ class learningCtrl : public xWidget
 
     bool m_haveHeartbeat{ false }; ///< A baseline sequence has been observed in this device lifetime.
 
+    QString m_policySelection; ///< Stable staged library ID, retained across catalog delete/redefine updates.
+
     QTimer m_ackTimer; ///< Bounds the wait for initial acknowledgement; never retries a command.
 
   public:
@@ -107,6 +111,12 @@ class learningCtrl : public xWidget
 
     /// Submit the staged catalog element; selecting a combo item alone sends nothing.
     void on_buttonEnableNN_clicked();
+
+    /// Load the staged saved pair without starting learning or changing enable state.
+    void on_buttonSetPolicy_clicked();
+
+    /// Ask for an optional label and save the last acknowledged policy/dynamics pair.
+    void on_buttonSavePolicy_clicked();
 
     /// Request the opposite of the observed reconstructor, with the expected source state.
     void on_buttonReconstructor_clicked();
@@ -176,6 +186,16 @@ class learningCtrl : public xWidget
     /// Synchronize catalog labels while preserving the user's unsent selection.
     void syncModels();
 
+    /// Refresh the saved catalog while retaining the operator's staged identity.
+    void syncPolicies();
+
+    /// Render the optional trainer's numeric and saved-library controls.
+    void updateTrainingControls( bool ready /**< [in] Whether the trainer has fresh readback. */ );
+
+    /// Submit one scalar target using the standard status entry editing behavior.
+    void submitParameter( const std::string &name, /**< [in] INDI numeric property. */
+                          statusLineEdit    *entry /**< [in] Standard editable status field. */ );
+
     /// Observe the Busy then terminal command acknowledgement sequence.
     void acknowledge( const pcf::IndiProperty &property /**< [in] Device readback. */ );
 
@@ -198,6 +218,8 @@ inline learningCtrl::learningCtrl( const std::string &device,
     m_ui.setupUi( this );
     setWindowTitle( "PO4AO / NN" );
     setXwFont( this );
+    for( auto *label : { m_ui.labelCommandRegularization, m_ui.labelDeltaRegularization, m_ui.labelLearningRate } )
+        label->setMinimumHeight( 2 * label->fontMetrics().height() );
     m_statusTimer.setInterval( 500 );
     connect( &m_statusTimer, &QTimer::timeout, this, &learningCtrl::updateGUI );
     m_statusTimer.start();
@@ -206,6 +228,23 @@ inline learningCtrl::learningCtrl( const std::string &device,
     connect( &m_ackTimer, &QTimer::timeout, this, &learningCtrl::acknowledgementTimeout );
     connect(
         m_ui.comboEngine, QOverload<int>::of( &QComboBox::currentIndexChanged ), this, [this]( int ) { updateGUI(); } );
+    connect( m_ui.comboPolicy,
+             QOverload<int>::of( &QComboBox::currentIndexChanged ),
+             this,
+             [this]( int index )
+             {
+                 if( index >= 0 )
+                     m_policySelection = m_ui.comboPolicy->currentData().toString();
+                 updateGUI();
+             } );
+    for( const auto &entry :
+         std::map<std::string, statusLineEdit *>{ { "command_regularization", m_ui.entryCommandRegularization },
+                                                  { "delta_policy_regularization", m_ui.entryDeltaRegularization },
+                                                  { "policy_learning_rate", m_ui.entryLearningRate } } )
+        connect( entry.second,
+                 &QLineEdit::returnPressed,
+                 this,
+                 [this, entry]() { submitParameter( entry.first, entry.second ); } );
     updateGUI();
 }
 
@@ -221,7 +260,13 @@ inline void learningCtrl::subscribe()
                               "learning",
                               "status",
                               "progress",
-                              "training_config" } )
+                              "training_config",
+                              "command_regularization",
+                              "delta_policy_regularization",
+                              "policy_learning_rate",
+                              "policy_catalog",
+                              "set_policy",
+                              "save_policy" } )
         m_parent->addSubscriberProperty( this, m_device, name );
     for( const auto *name : { "fsm",
                               "control_enable",
@@ -250,7 +295,8 @@ inline void learningCtrl::onConnect()
 
 inline void learningCtrl::onDisconnect()
 {
-    m_connected     = false;
+    m_connected = false;
+    m_policySelection.clear();
     m_haveHeartbeat = false;
     m_heartbeatAge.invalidate();
     m_runtimeAge.invalidate();
@@ -268,6 +314,7 @@ inline void learningCtrl::onDisconnect()
     m_message.clear();
     m_ackTimer.stop();
     syncModels();
+    syncPolicies();
     updateGUI();
 }
 
@@ -366,6 +413,111 @@ inline void learningCtrl::syncModels()
     m_ui.comboEngine->setCurrentIndex( previous ); // A redefinition never silently selects a different engine.
 }
 
+inline void learningCtrl::syncPolicies()
+{
+    QSignalBlocker blocker( m_ui.comboPolicy );
+    const auto     selected = m_policySelection;
+    m_ui.comboPolicy->clear();
+    const auto key   = m_device + ".policy_catalog";
+    const auto found = m_properties.find( key );
+    if( m_defined.count( key ) && found != m_properties.end() && found->second.getType() == pcf::IndiProperty::Text )
+        for( const auto &entry : found->second.getElements() )
+        {
+            if( entry.first == "none" )
+                continue;
+            const auto label = QString::fromStdString( entry.second.get() );
+            m_ui.comboPolicy->addItem( label, QString::fromStdString( entry.first ) );
+            m_ui.comboPolicy->setItemData( m_ui.comboPolicy->count() - 1, label, Qt::ToolTipRole );
+        }
+    m_ui.comboPolicy->setCurrentIndex( m_ui.comboPolicy->findData( selected ) );
+}
+
+inline void learningCtrl::updateTrainingControls( bool ready )
+{
+    const auto phase = status( "training_phase" );
+    const bool idle  = ready && m_routePending.empty() && ( phase == "idle" || phase == "error" ) &&
+                       !busy( { "po4ao_enable", "reset", "recollect", "learning", "set_policy" } );
+    m_ui.comboPolicy->setEnabled( ready && m_ui.comboPolicy->count() > 0 );
+    m_ui.comboPolicy->setToolTip( m_ui.comboPolicy->currentText() );
+    m_ui.buttonSetPolicy->setEnabled( idle && m_ui.comboPolicy->currentIndex() >= 0 &&
+                                      commandAvailable( "set_policy", pcf::IndiProperty::Text, { "id" } ) );
+    m_ui.buttonSavePolicy->setEnabled( ready && status( "save_available" ) == "yes" &&
+                                       commandAvailable( "save_policy", pcf::IndiProperty::Text, { "label" } ) );
+    for( const auto &entry :
+         std::map<std::string, statusLineEdit *>{ { "command_regularization", m_ui.entryCommandRegularization },
+                                                  { "delta_policy_regularization", m_ui.entryDeltaRegularization },
+                                                  { "policy_learning_rate", m_ui.entryLearningRate } } )
+    {
+        const bool perMode =
+            entry.first == "delta_policy_regularization" && status( "delta_policy_mode" ) == "per_mode";
+        const auto key   = m_device + "." + entry.first;
+        const auto found = m_properties.find( key );
+        const bool available =
+            ready && commandAvailable( entry.first, pcf::IndiProperty::Number, { "current", "target" }, "", true );
+        entry.second->setEnabled( available && !perMode );
+        if( !available )
+        {
+            entry.second->QLineEdit::setText( "---" );
+            continue;
+        }
+        if( perMode )
+        {
+            entry.second->QLineEdit::setText( "Per-mode: configured in file" );
+            entry.second->setToolTip( "Per-mode: configured in file" );
+            continue;
+        }
+        const auto current = value( m_device, entry.first, "current" );
+        const auto target  = value( m_device, entry.first, "target" );
+        const bool pending = found->second.getState() == pcf::IndiProperty::Busy || m_pending.count( key );
+        const auto text    = QString::fromStdString( current );
+        if( entry.second->currText() != text )
+            entry.second->setTextChanged( text );
+        entry.second->setToolTip( QString::fromStdString( "Current: " + current + "  Requested: " + target +
+                                                          ( pending ? " (pending until iteration boundary)" : "" ) ) );
+    }
+}
+
+inline void learningCtrl::submitParameter( const std::string &name, statusLineEdit *entry )
+{
+    if( !entry->isEnabled() || !trainerReady() )
+        return;
+    bool         valid  = false;
+    const double number = entry->text().toDouble( &valid );
+    if( !valid || !std::isfinite( number ) || number < 0 || ( name == "policy_learning_rate" && number == 0 ) )
+    {
+        m_message = "Enter a finite nonnegative penalty or a positive learning rate";
+        updateGUI();
+        return;
+    }
+    pcf::IndiProperty property( pcf::IndiProperty::Number, m_device, name );
+    property.add( pcf::IndiElement( "target", number ) );
+    entry->stopEditing();
+    submit( property );
+}
+
+inline void learningCtrl::on_buttonSetPolicy_clicked()
+{
+    if( !m_ui.buttonSetPolicy->isEnabled() )
+        return;
+    pcf::IndiProperty property( pcf::IndiProperty::Text, m_device, "set_policy" );
+    property.add( pcf::IndiElement( "id", m_ui.comboPolicy->currentData().toString().toStdString() ) );
+    submit( property );
+}
+
+inline void learningCtrl::on_buttonSavePolicy_clicked()
+{
+    if( !m_ui.buttonSavePolicy->isEnabled() )
+        return;
+    bool       accepted = false;
+    const auto label =
+        QInputDialog::getText( this, "Save policy", "Label (optional):", QLineEdit::Normal, "", &accepted );
+    if( !accepted )
+        return;
+    pcf::IndiProperty property( pcf::IndiProperty::Text, m_device, "save_policy" );
+    property.add( pcf::IndiElement( "label", label.trimmed().toStdString() ) );
+    submit( property );
+}
+
 inline void learningCtrl::acknowledge( const pcf::IndiProperty &property )
 {
     const auto resetKey = m_runtimeDevice + ".reset_model";
@@ -428,6 +580,7 @@ inline void learningCtrl::updateRoute( bool managed )
                                   "reset",
                                   "recollect",
                                   "learning",
+                                  "set_policy",
                                   "control_enable",
                                   "reset_model",
                                   "recollect_warmup",
@@ -530,6 +683,7 @@ inline void learningCtrl::handleDefProperty( const pcf::IndiProperty &property )
     acknowledge( property );
     if( property.getDevice() == m_nnDevice && property.getName() == "model" )
         syncModels();
+    syncPolicies();
     updateGUI();
 }
 
@@ -556,6 +710,8 @@ inline void learningCtrl::handleSetProperty( const pcf::IndiProperty &property )
             found->second.setState( property.getState() );
     }
     acknowledge( property );
+    if( property.getDevice() == m_device && property.getName() == "policy_catalog" )
+        syncPolicies();
     updateGUI();
 }
 
@@ -611,6 +767,7 @@ inline void learningCtrl::handleDelProperty( const pcf::IndiProperty &property )
     if( m_pending.empty() )
         m_ackTimer.stop();
     syncModels();
+    syncPolicies();
     updateGUI();
 }
 
@@ -658,6 +815,7 @@ inline void learningCtrl::updateGUI()
                                                                                 ? "Unknown"
                                                                                 : nnStatus( "modulation" ) ) );
 
+    updateTrainingControls( ready );
     if( !ready )
     {
         updateRuntimeGUI();
@@ -671,7 +829,7 @@ inline void learningCtrl::updateGUI()
     const auto learning        = ready ? status( "learning" ) : std::string( "unknown" );
     const auto phase           = status( "training_phase" );
     const bool trainingReady   = ready && !runtimePending && ( phase == "idle" || phase == "error" ) &&
-                                 !busy( { "po4ao_enable", "reset", "recollect", "learning" } );
+                                 !busy( { "po4ao_enable", "reset", "recollect", "learning", "set_policy" } );
     m_ui.buttonPO4AO->setText( enabled ? "Disable PO4AO" : "Enable PO4AO" );
     const bool disableReady = ready && !runtimePending && enabled && phase != "resetting" && phase != "reset_pending" &&
                               !busy( { "reset", "po4ao_enable" } );
@@ -687,14 +845,18 @@ inline void learningCtrl::updateGUI()
     if( ready && collection == "collecting" )
         collectionText +=
             QString::fromStdString( " " + status( "collection_frames" ) + "/" + status( "collection_target" ) );
+    if( status( "warmup_required" ) == "yes" && collection != "collecting" )
+        collectionText = "Fresh warmup required";
     m_ui.labelCollection->setText( collectionText );
     const bool running = learning == "running" || learning == "waiting";
     const bool paused  = learning == "paused" || learning == "completed";
     m_ui.buttonLearning->setText( running ? "Pause learning" : paused ? "Resume learning" : "Start learning" );
-    m_ui.buttonLearning->setEnabled( trainingReady && collection != "collecting" &&
-                                     ( running || paused || learning == "idle" ) &&
-                                     commandAvailable( "learning", pcf::IndiProperty::Switch, { "run", "pause" } ) );
-    m_ui.labelLearning->setText( stateLabel( learning ) );
+    m_ui.buttonLearning->setEnabled(
+        trainingReady && collection != "collecting" && ( running || paused || learning == "idle" ) &&
+        ( running || ( status( "warmup_required" ) != "yes" && status( "initialization_required" ) != "yes" ) ) &&
+        commandAvailable( "learning", pcf::IndiProperty::Switch, { "run", "pause" } ) );
+    m_ui.labelLearning->setText( status( "initialization_required" ) == "yes" ? "Set policy or Reset required"
+                                                                              : stateLabel( learning ) );
     const auto active   = ready ? status( "active_policy" ) : std::string{};
     const auto retained = ready ? status( "retained_policy" ) : std::string{};
     m_ui.labelPolicy->setText(
@@ -714,6 +876,8 @@ inline void learningCtrl::updateGUI()
         message += "  Config: " + configError;
     else if( !pendingConfig.empty() )
         message += "  Configuration change requires Reset";
+    if( busy( { "command_regularization", "delta_policy_regularization", "policy_learning_rate" } ) )
+        message += paused ? "  Parameter edits pending until learning resumes" : "  Parameter edits pending";
     if( nnReady() && !nnStatus( "error" ).empty() )
         message += "  NN: " + nnStatus( "error" );
     m_ui.labelStatus->setText( QString::fromStdString( message.empty() ? "Status: —" : message ) );

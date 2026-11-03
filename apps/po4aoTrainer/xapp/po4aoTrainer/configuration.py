@@ -157,6 +157,23 @@ HOT = {
 }
 
 
+# INDI property names map to resolved training keys, never to config-file writes.
+PARAMETERS = {
+    "command_regularization": ("RL", "loss_function_penalty"),
+    "delta_policy_regularization": ("policy_update", "weight"),
+    "policy_learning_rate": ("training", "policy_learning_rate"),
+}
+
+
+def parameter_value(config, name):
+    """Return a scalar control value, or None for a nonuniform per-mode penalty."""
+    group, key = PARAMETERS[name]
+    value = config[group][key]
+    if isinstance(value, list):
+        return value[0] if value and all(x == value[0] for x in value) else None
+    return value
+
+
 def revision(config):
     """Hash the resolved numerical snapshot, identically to TrainingSession."""
     return hashlib.sha256(json.dumps(config, sort_keys=True).encode()).hexdigest()
@@ -203,6 +220,18 @@ def load_training(path, runtime_path):
     config["integrator"] = {"gain": p.getfloat("integrator_gain")}
     config["safety"] = {"max_command_abs": p.getfloat("max_command_abs")}
     config["compute"]["inference_device"] = p.getint("cuda_device")
+    if (
+        p.getint("warmup_episodes") * config["RL"]["episode_length"]
+        != config["replay_buffers"]["capacity"]
+    ):
+        raise ValueError(
+            "Shared session requires warmup_episodes * iterations_per_ep == replay_buffer_size"
+        )
+    return validate_training(config)
+
+
+def validate_training(config):
+    """Validate resolved settings from a file or a merged live parameter request."""
     for group, values in config.items():
         for key, value in values.items():
             if isinstance(value, (int, float)) and (
@@ -254,10 +283,6 @@ def load_training(path, runtime_path):
     ):
         raise ValueError(
             "Need complete training and validation episodes with sufficient history"
-        )
-    if p.getint("warmup_episodes") * ep != r["capacity"]:
-        raise ValueError(
-            "Shared session requires warmup_episodes * iterations_per_ep == replay_buffer_size"
         )
     if r["train_warmup_percent"] + r["train_historical_percent"] >= 1:
         raise ValueError("Replay fractions must sum to less than one")

@@ -726,3 +726,99 @@ Affected files: `training.py`, `worker.py`, `po4ao_runtime.py` under
 `apps/po4aoTrainer/xapp/po4aoTrainer/`; their three regression test files;
 `notebooks/po4ao/watch_training.ipynb`; this execution record. The subsequent
 documentation commit updates `apps/po4aoTrainer/README.md` and `DEPLOYMENT.md`.
+
+## 2026-11-03: live parameters and paired saved-model library
+
+Implemented the approved parameter/library plan from attachment
+`7ffd48f8-a057-4714-a5c5-fe730cf748e5`, based on `881ce8cb`, with the operator's
+correction: the delta-policy penalty follows the currently acknowledged effective
+policy, never a permanently frozen saved initialization. Work stays on
+`rlandman/nn-po4ao-gui`; AGENTS.md, native PO4AO, NN and instrument configuration
+are unchanged. No instrument commands, access, installation or restart were used.
+
+Behavior and implementation decisions:
+
+- Three `statusLineEdit` fields share one horizontal row in the existing widget:
+  command regularization, delta policy regularization, and policy learning rate.
+  Defaults/readback come from the trainer, not GUI constants. Enter sends a numeric
+  `target`; `current` remains acknowledged state. Busy and requested values are
+  visible in status/tooltip. Nonuniform modal delta penalties remain file-controlled.
+  Standard font/resource styles are preserved; default width is 540 px and wrapped
+  headings reserve two lines to avoid clipping. Native/NN controls remain independent.
+- Session overrides merge into the latest validated configuration. Same-field valid
+  file edits supersede only that override. Reset, loading, pause and disable retain
+  overrides; app restart restores file values. Configuration tickets accompany hashes
+  so A → B → A while paused cannot mistake an earlier A acknowledgement for completion.
+  The worker acknowledges only at an iteration boundary, retaining models, Adam and
+  replay. No system configuration writes or dependency additions are introduced.
+- `library.py` adds only the immutable bundle/catalog functionality. The configurable
+  library defaults to `<artifact_root>/saved_engines`. IDs are sanitized label + UTC
+  timestamp + UUID suffix; display names include original iteration. Manifest version 1
+  records provenance and SHA-256 hashes. Complete engine/metadata/NPZ files are copied
+  from one pinned acknowledged publication, verified, then atomically renamed into
+  view. Save uses its own operation queue, permitting concurrent learning/publication.
+  Reset and restart never delete the library. Missing/malformed entries are skipped.
+- Set policy validates compatibility and hashes, pauses learning and settles exact
+  outstanding tickets, then prepares a separate CPU/GPU training session using the
+  existing worker/exporter. Strict tensor loading restores both networks and their
+  normalization buffers, plus policy-update scales. Current hyperparameters prevail;
+  optimizers, replay, anchors, diagnostics and iteration start fresh. The old session
+  remains paused until exact new activation succeeds. This can temporarily use more
+  training GPU memory; an allocation/export failure leaves the previous session paused.
+- Set policy preserves controller enable state, does not invoke Reset or alter loop,
+  reconstruction, modulation or CACAO routing, and does not start learning or noise.
+  Loaded dynamics bypass cold pretraining and the cold first-publication delay.
+  Source bundle/session/iteration remain separate from the new session/generation.
+  A newer ready warmup generation is required before learning resumes. Explicit
+  Enable (if needed) → Recollect warmup → Resume uses noise on the loaded policy.
+- The worker can follow active-ID readback at every gradient checkpoint, refreshing
+  anchor reference actions only when the acknowledged policy changes. Publication
+  outcomes carry fresh effective-policy readback; heartbeat reads are ordered with
+  them under the supervisor lock. Temporary fallback retains the known network and
+  pending candidate so return to PO4AO does not discard the reference. Unknown external
+  networks are not guessed. The original numerical equations/normalization remain.
+- Failed preparation/reload does not admit the new worker. Reset invalidates staged
+  generations and stops the owned preparation process. An interrupted issued load
+  can still complete remotely; when that would leave old training networks against a
+  different engine, a persistent initialization-required flag blocks Start until an
+  explicit successful Set policy or Reset. No unrelated ticket can clear this state.
+- Calibration identity is recorded if available and otherwise explicitly unknown.
+  Matching architecture/mode/history dimensions is not a calibration-compatibility
+  claim. The operator continues to own notebook/app use and instrument setup.
+
+Validation covers exact CPU policy/dynamics outputs and buffers after save/restore,
+retained normalization, fresh optimizers/replay, warm-start cadence, same-iteration
+reference changes, scalar/file/per-mode parameter precedence and acknowledgements,
+concurrent Save/publication, duplicate labels, incomplete/corrupt/incompatible
+bundles, preparation/reload failures, Reset and post-activation cancellation,
+restart persistence, and real owned worker preparation/pause/config protocols.
+Qt tests use the actual widget and socket-free publisher, including staged stable
+catalog IDs across deletion/redefinition, numeric target-only sends, a real name
+input dialog, pending/rejected/disconnected states, warmup/initialization gating,
+and unchanged native/NN independence. The real widget preview was inspected.
+
+Affected functional files:
+- `apps/po4aoTrainer/xapp/po4aoTrainer/{app,configuration,library,po4ao_policy_update,process,supervisor,training,worker}.py`
+- `apps/po4aoTrainer/configs/po4aoTrainer.conf`
+- `apps/po4aoTrainer/tests/{test_library,test_review_regressions,test_supervisor,test_worker_process}.py`
+- `gui/widgets/learningCtrl/{learningCtrl.hpp,learningCtrl.ui}` and its two test sources/project files
+- `gui/apps/po4aoGUI/po4aoGUI.pro` and this execution record.
+
+The following documentation commit updates the trainer README, widget README and
+consolidated deployment guide. Deployment updates only the trainer in its existing
+environment and the GUI in its normal IOC container, and provisions the library
+with existing xsup/magaox permissions. The bundle contains feature commits since
+baseline `88271a3e` for existing installations of this branch. On-sky release still
+requires publishing/recording tested source/config revisions under the handbook's
+version-control policy; local CPU/Qt tests do not establish CUDA/TensorRT or live
+instrument performance.
+
+Final local results: **133 Python tests + 17 subtests passed**, including the pinned
+notebook numerical/Adam fixture and real child-process tests. Nine existing plotting
+warnings remain. **403 Qt assertions in 26 cases passed**; the separate actual-widget
+preview passes five assertions. The production launcher builds with the existing
+local Qt 5.15.15 setup and a command-line override for unavailable mxlib pkg-config
+linkage; production project settings retain the standard linkage. Existing SDK,
+shared-header override and deployment-target warnings remain. Black, clang-format
+and `git diff --check` pass. CUDA/TensorRT execution, actual GPU memory headroom,
+live INDI deployment and closed-loop improvement remain operator acceptance items.

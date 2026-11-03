@@ -57,6 +57,36 @@ def export_candidate(directory):
     )
 
 
+def write_candidate(session, directory, launch):
+    """Freeze both models and their normalization at one publication boundary."""
+    import torch
+
+    candidate = directory / ("candidate-" + uuid.uuid4().hex)
+    candidate.mkdir()
+    metadata = dict(
+        normalization=session.normalization_metadata,
+        policy_update_action_scale=session.update_scale.tolist(),
+        origin=session.origin,
+        config=session.config,
+        config_revision=session.config_revision,
+        generation=launch["generation"],
+        session_id=session.session_id,
+        iteration=session.iteration,
+        policy_architecture=session.config["NN_models"]["policy_architecture"],
+        source_revision=launch.get("source_revision", "unrecorded"),
+        trtexec=launch["trtexec"],
+    )
+    (candidate / "request.json").write_text(json.dumps(metadata))
+    torch.save(
+        {
+            "policy": session.policy_copy.state_dict(),
+            "dynamics": session.dynamics.state_dict(),
+        },
+        candidate / "weights.pt",
+    )
+    return candidate
+
+
 def run(directory):
     """Use one session and optimizer set until Reset, EOF, heartbeat loss or terminal failure."""
     directory = Path(directory)
@@ -109,6 +139,8 @@ def run(directory):
                 command = json.loads(line)
                 last_heartbeat = time.monotonic()
                 control.update(command)
+                if session is not None and control.get("restore_id"):
+                    session.acknowledge_restore(control.pop("restore_id"))
         if time.monotonic() - last_heartbeat > launch.get("heartbeat_timeout", 10):
             raise SystemExit("Supervisor heartbeat lost")
 
@@ -166,7 +198,7 @@ def run(directory):
         import torch
         import ImageStreamIOWrap as shmio
         from .training import TrainingSession
-        from .configuration import apply_hot
+        from .configuration import apply_hot, revision
         from .po4ao_runtime import configure_compute_resources, cached_replay_snapshot
         from .observer import save_diagnostics
 
@@ -177,6 +209,18 @@ def run(directory):
         )
         print("Compute resources: " + json.dumps(resources), flush=True)
         session = TrainingSession(config, device=f"cuda:{c['training_device']}")
+        if launch.get("initial_snapshot"):
+            session.restore(launch["initial_snapshot"])
+            session.origin["bundle_id"] = launch["source_bundle"]
+            candidate = write_candidate(session, directory, launch)
+            export_candidate(candidate)
+            control["run"] = False
+            emit("prepared", path=str(candidate))
+        emit(
+            "configuration",
+            revision=session.config_revision,
+            ticket=launch.get("config_ticket", 0),
+        )
         streams = []
         for name in launch["streams"]:
             image = shmio.Image()
@@ -189,7 +233,13 @@ def run(directory):
             checkpoint()
             if control.get("config_path"):
                 candidate = json.loads(Path(control.pop("config_path")).read_text())
-                apply_hot(session, candidate)
+                if revision(candidate) != session.config_revision:
+                    apply_hot(session, candidate)
+                emit(
+                    "configuration",
+                    revision=session.config_revision,
+                    ticket=control.pop("config_ticket", 0),
+                )
                 state("running")
             if control["generation"] != generation:
                 session.invalidate_replay()
@@ -216,7 +266,7 @@ def run(directory):
                 result = session.step(
                     replay,
                     warmup,
-                    active_model_id=control["active_id"],
+                    active_model_id=lambda: control["active_id"],
                     checkpoint=lambda: checkpoint(training=True),
                 )
             except ReplayChanged:
@@ -237,26 +287,7 @@ def run(directory):
                 save_diagnostics(session, directory / "diagnostics")
                 continue
             export_start = time.monotonic()
-            candidate = directory / ("candidate-" + uuid.uuid4().hex)
-            candidate.mkdir()
-            metadata = dict(
-                config=session.config,
-                config_revision=session.config_revision,
-                generation=launch["generation"],
-                session_id=session.session_id,
-                iteration=session.iteration,
-                policy_architecture=session.config["NN_models"]["policy_architecture"],
-                source_revision=launch.get("source_revision", "unrecorded"),
-                trtexec=launch["trtexec"],
-            )
-            (candidate / "request.json").write_text(json.dumps(metadata))
-            torch.save(
-                {
-                    "policy": session.policy_copy.state_dict(),
-                    "dynamics": session.dynamics.state_dict(),
-                },
-                candidate / "weights.pt",
-            )
+            candidate = write_candidate(session, directory, launch)
             with (candidate / "export.log").open("wb") as log:
                 build = subprocess.Popen(
                     [

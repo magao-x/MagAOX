@@ -6,8 +6,8 @@
       <rect>
         <x>0</x>
         <y>0</y>
-        <width>500</width>
-        <height>310</height>
+        <width>540</width>
+        <height>400</height>
       </rect>
     </property>
     <property name="windowTitle">
@@ -159,6 +159,33 @@
           <property name="text"><string>PO4AO</string></property>
           <property name="textFormat"><enum>Qt::PlainText</enum></property>
         </widget>
+      </item>
+      <item>
+        <layout class="QHBoxLayout" name="layoutSavedPolicy">
+          <item><widget class="QLabel" name="labelSavedPolicy"><property name="text"><string>Policy:</string></property></widget></item>
+          <item><widget class="QComboBox" name="comboPolicy">
+            <property name="sizeAdjustPolicy"><enum>QComboBox::AdjustToMinimumContentsLengthWithIcon</enum></property>
+            <property name="minimumContentsLength"><number>18</number></property>
+          </widget></item>
+          <item><widget class="QPushButton" name="buttonSetPolicy"><property name="text"><string>Set policy</string></property></widget></item>
+          <item><widget class="QPushButton" name="buttonSavePolicy"><property name="text"><string>Save policy</string></property></widget></item>
+        </layout>
+      </item>
+      <item>
+        <layout class="QHBoxLayout" name="layoutParameters">
+          <item><layout class="QVBoxLayout" name="layoutCommandRegularization">
+            <item><widget class="QLabel" name="labelCommandRegularization"><property name="text"><string>Command regularization</string></property><property name="wordWrap"><bool>true</bool></property></widget></item>
+            <item><widget class="xqt::statusLineEdit" name="entryCommandRegularization"/></item>
+          </layout></item>
+          <item><layout class="QVBoxLayout" name="layoutDeltaRegularization">
+            <item><widget class="QLabel" name="labelDeltaRegularization"><property name="text"><string>Delta policy regularization</string></property><property name="wordWrap"><bool>true</bool></property></widget></item>
+            <item><widget class="xqt::statusLineEdit" name="entryDeltaRegularization"/></item>
+          </layout></item>
+          <item><layout class="QVBoxLayout" name="layoutLearningRate">
+            <item><widget class="QLabel" name="labelLearningRate"><property name="text"><string>Learning rate</string></property><property name="wordWrap"><bool>true</bool></property></widget></item>
+            <item><widget class="xqt::statusLineEdit" name="entryLearningRate"/></item>
+          </layout></item>
+        </layout>
       </item>
       <item>
         <layout class="QHBoxLayout" name="layoutPO4AO">
@@ -321,6 +348,7 @@
     </layout>
   </widget>
   <customwidgets>
+    <customwidget><class>xqt::statusLineEdit</class><extends>QLineEdit</extends><header>../xWidgets/statusLineEdit.hpp</header></customwidget>
     <customwidget>
       <class>xqt::statusLabel</class>
       <extends>QLabel</extends>

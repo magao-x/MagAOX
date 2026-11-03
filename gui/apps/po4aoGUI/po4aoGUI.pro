@@ -3,6 +3,7 @@ include(../magaoxQtApp.pri)
 INCLUDEPATH += ../../lib ../../widgets/learningCtrl
 HEADERS += ../../widgets/learningCtrl/learningCtrl.hpp \
            ../../widgets/xWidgets/xWidget.hpp \
+           ../../widgets/xWidgets/statusLineEdit.hpp \
            ../../widgets/xWidgets/statusLabel.hpp \
            ../../lib/multiIndiManager.hpp
 SOURCES += po4aoGUI_main.cpp

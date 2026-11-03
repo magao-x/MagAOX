@@ -57,6 +57,8 @@ class Worker:
         self.iteration = 0
         self.error = ""
         self.closed = False
+        self.prepared_path = None
+        self.config_ticket = None
 
     def send(self, message):
         """Send one atomic short control record, without blocking the app loop."""
@@ -86,6 +88,11 @@ class Worker:
                 line, self.buffer = self.buffer.split(b"\n", 1)
                 event = json.loads(line)
                 records.append(event)
+                if event["event"] == "configuration":
+                    self.config_ticket = event["ticket"]
+                    self.revision = event["revision"]
+                if event["event"] == "prepared":
+                    self.prepared_path = event["path"]
                 if event["event"] == "build":
                     try:
                         child = psutil.Process(event["pid"])

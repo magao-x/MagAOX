@@ -101,6 +101,9 @@ class PolicyUpdatePenalty:
         self.baseline_gain = float(baseline_gain)
         self.reference = None  # Frozen acknowledged policy; None means fallback.
         self.reference_id = "0000000000000000"
+        self.retained = (
+            None  # Last acknowledged network, retained across temporary fallback.
+        )
         self.pending = None  # At most one (model ID, frozen exported policy) pair.
         self.anchors = (
             None  # Fixed real histories, renewed only on acknowledgment/reset.
@@ -116,15 +119,18 @@ class PolicyUpdatePenalty:
         return f"{number:016x}"
 
     def observe_active_model(self, model_id):
-        """Advance only to the pending acknowledged model, or reset to fallback."""
+        """Follow the effective acknowledged policy, including temporary fallback and return."""
         model_id = self._model_id(model_id)
         if self.pending is not None and model_id == self.pending[0]:
             self.reference_id, self.reference = self.pending
+            self.retained = self.pending
             self.pending = None
         elif model_id == self.reference_id:
             return
+        elif self.retained is not None and model_id == self.retained[0]:
+            self.reference_id, self.reference = self.retained
         elif model_id == "0000000000000000":
-            self.reference_id, self.reference, self.pending = model_id, None, None
+            self.reference_id, self.reference = model_id, None
         else:
             raise RuntimeError(
                 "Active policy is unknown to this trainer; reset_model and start a fresh run"

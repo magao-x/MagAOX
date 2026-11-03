@@ -11,6 +11,7 @@ MAKEFILE = makefile.learningCtrl_test
 SOURCES += learningCtrl_test.cpp
 HEADERS += ../learningCtrl.hpp \
            ../../xWidgets/xWidget.hpp \
+           ../../xWidgets/statusLineEdit.hpp \
            ../../xWidgets/statusLabel.hpp
 FORMS += ../learningCtrl.ui
 INCLUDEPATH += ../../xWidgets

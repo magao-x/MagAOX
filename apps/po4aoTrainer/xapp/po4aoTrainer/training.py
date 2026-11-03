@@ -121,6 +121,94 @@ class TrainingSession:
         self.warmup_generation = None
         self.invalidated_warmup = None
         self.state = "waiting"
+        self.origin = None
+
+    def restore(self, path):
+        """Initialize both networks from a portable snapshot; retain fresh Adam/replay and current settings."""
+        from .library import compatible
+
+        if self.iteration or self.normalization_metadata is not None:
+            raise RuntimeError("Restore requires a new training session")
+        with np.load(path, allow_pickle=False) as saved:
+            metadata = json.loads(str(saved["metadata_json"]))
+            compatible(metadata["config"], self._config)
+            models = [("policy_state__", self.policy)] + [
+                (f"dynamics_{index}_state__", model)
+                for index, model in enumerate(self.dynamics.models)
+            ]
+            expected = {"metadata_json"}
+            for prefix, model in models:
+                state = {}
+                for name, tensor in model.state_dict().items():
+                    key = prefix + name
+                    expected.add(key)
+                    array = saved[key]
+                    if (
+                        array.shape != tuple(tensor.shape)
+                        or not np.isfinite(array).all()
+                    ):
+                        raise ValueError("Invalid saved model tensor: " + key)
+                    state[name] = torch.as_tensor(
+                        array.copy(), dtype=tensor.dtype, device=self.device
+                    )
+                model.load_state_dict(state, strict=True)
+            if set(saved.files) != expected:
+                raise ValueError("Saved snapshot contains unexpected model state")
+        self.policy_copy.load_state_dict(self.policy.state_dict())
+        self.observation_scale = (
+            self.policy.normalizer.observation_scale.detach().cpu().numpy().copy()
+        )
+        self.action_scale = (
+            self.policy.normalizer.action_scale.detach().cpu().numpy().copy()
+        )
+        if (self.observation_scale <= 0).any() or (self.action_scale <= 0).any():
+            raise ValueError("Saved normalization scales must be positive")
+        self.normalization_metadata = metadata.get("normalization") or dict(
+            method="restored_per_mode_rms",
+            observation_scale=self.observation_scale.tolist(),
+            action_scale=self.action_scale.tolist(),
+        )
+        source = metadata["config"]
+        self.update_scale = np.asarray(
+            metadata.get(
+                "policy_update_action_scale",
+                np.maximum(
+                    abs(source["integrator"]["gain"]) * self.observation_scale,
+                    source["normalization"]["rms_floor_fraction"]
+                    * np.median(self.action_scale),
+                ),
+            ),
+            dtype=np.float32,
+        )
+        self.policy_update = PolicyUpdatePenalty(
+            architecture=self._config["NN_models"]["policy_architecture"],
+            action_scale=self.update_scale,
+            baseline_gain=self._config["integrator"]["gain"],
+            weight=self._config["policy_update"]["weight"],
+        )
+        self.dynamics_pretrained = True
+        self.last_publish_iteration = 0
+        self.origin = dict(
+            session_id=metadata["session_id"],
+            iteration=metadata.get("iteration", 0),
+            model_id=metadata["model_id"],
+        )
+
+    def acknowledge_restore(self, model_id):
+        """Register restored weights only after the supervisor acknowledges their exact load."""
+        if self.origin is None:
+            raise RuntimeError("No restored model is pending")
+        self.policy_update.stage_publication(self.policy_copy, model_id)
+        self.sync_active_policy(model_id)
+
+    def sync_active_policy(self, model_id):
+        """Follow acknowledged active policy changes, recomputing anchors against that policy."""
+        if self.policy_update is None:
+            return
+        anchors = self.policy_update.anchors
+        self.policy_update.observe_active_model(model_id)
+        if anchors is not None and self.policy_update.anchors is None:
+            self.policy_update.set_anchors(anchors)
 
     @property
     def config(self):
@@ -204,6 +292,8 @@ class TrainingSession:
         the notebook; incomplete or invalidated warmup data cannot train. The optional
         checkpoint can wait for resume while retaining this exact Python stack;
         returning resumes the same update, without recreating Adam or models.
+        A callable active_model_id follows current acknowledged runtime readback
+        at every gradient checkpoint, rather than freezing it for this iteration.
         """
         if self.state == "failed":
             raise RuntimeError("Discard the failed training session before continuing")
@@ -216,7 +306,15 @@ class TrainingSession:
 
     def _step(self, replay, warmup, active_model_id, telemetry, checkpoint):
         """Run one numerical iteration; the public wrapper invalidates failed candidates."""
-        check = checkpoint if checkpoint is not None else lambda: None
+
+        def check():
+            """Observe the latest active reference after each cooperative control checkpoint."""
+            if checkpoint is not None:
+                checkpoint()
+            self.sync_active_policy(
+                active_model_id() if callable(active_model_id) else active_model_id
+            )
+
         check()
         if self.iteration >= self._config["training"]["training_iterations"]:
             self.state = "completed"
@@ -252,7 +350,9 @@ class TrainingSession:
             self._initialize_normalization(
                 (self.obs_replay_warmup, self.act_replay_warmup)
             )
-        self.policy_update.observe_active_model(active_model_id)
+        self.sync_active_policy(
+            active_model_id() if callable(active_model_id) else active_model_id
+        )
         if self.policy_update.anchors is None:
             self.policy_update.set_anchors(
                 torch.cat(
@@ -334,7 +434,9 @@ class TrainingSession:
                 pol_loss,
                 dynamics_steps,
                 result["training_seconds"],
-                PolicyUpdatePenalty._model_id(active_model_id),
+                PolicyUpdatePenalty._model_id(
+                    active_model_id() if callable(active_model_id) else active_model_id
+                ),
                 telemetry or {},
             )
             self.metrics_history.append(result["record"])
@@ -369,7 +471,9 @@ class TrainingSession:
         command_limit = config["safety"]["max_command_abs"]
         training_device = self.device
         update_settings = config["policy_update"]
-        first_publish_iteration = config["training"]["first_model_publish_iteration"]
+        first_publish_iteration = (
+            0 if self.origin else config["training"]["first_model_publish_iteration"]
+        )
         publish_interval = config["training"]["model_publish_interval"]
         max_clip_fraction = config["training"]["max_policy_clip_fraction"]
         max_candidate_action_rms_ratio = config["training"][

@@ -10,6 +10,7 @@ from purepyindi2 import properties, constants
 from purepyindi2.messages import DefText, DefSwitch, DefNumber
 from .switching import Runtime
 from .supervisor import Supervisor
+from .configuration import PARAMETERS
 
 
 @xconf.config
@@ -27,6 +28,10 @@ class TrainerConfig(BaseConfig):
     )
     artifact_root: str = xconf.field(
         help="Provisioned shared artifact directory; C++ reads current/policy.trt beneath it"
+    )
+    saved_engines: str = xconf.field(
+        default="",
+        help="Shared saved model library; empty uses artifact_root/saved_engines",
     )
     source_revision: str = xconf.field(
         default="unrecorded",
@@ -115,6 +120,24 @@ class po4aoTrainer(XDevice):
                     DefSwitch(name=element, _value=constants.SwitchState.OFF)
                 )
             self.add_property(prop, callback=self.handle_request)
+        for name in PARAMETERS:
+            prop = properties.NumberVector(
+                name=name,
+                perm=constants.PropertyPerm.READ_WRITE,
+                state=constants.PropertyState.IDLE,
+            )
+            for element in ("current", "target"):
+                prop.add_element(
+                    DefNumber(
+                        name=element, _value=0, min=0, max=1e30, step=0, format="%.9g"
+                    )
+                )
+            self.add_property(prop, callback=self.handle_request)
+        self.text("set_policy", {"id": ""}, writable=True)
+        self.text("save_policy", {"label": ""}, writable=True)
+        self._catalog = None
+        self.publish_parameters()
+        self.publish_catalog()
         progress = properties.NumberVector(
             name="progress",
             perm=constants.PropertyPerm.READ_ONLY,
@@ -145,34 +168,76 @@ class po4aoTrainer(XDevice):
         with self._property_lock:
             try:
                 values = {key: message[key] for key in message}
-                required = {
-                    "po4ao_enable": {"toggle"},
-                    "reset": {"request"},
-                    "recollect": {"request"},
-                    "learning": {"run", "pause"},
-                }[prop.name]
-                if set(values) != required:
-                    raise ValueError("Request elements do not match " + prop.name)
-                if any(
-                    value not in (constants.SwitchState.ON, constants.SwitchState.OFF)
-                    for value in values.values()
-                ):
-                    raise ValueError("Expected explicit On/Off switches")
-                values = {
-                    key: value == constants.SwitchState.ON
-                    for key, value in values.items()
-                }
-                if prop.name in ("reset", "recollect") and not values["request"]:
+                if prop.name in PARAMETERS:
+                    if set(values) != {"target"}:
+                        raise ValueError("Set only the target element")
+                    self.supervisor.set_parameter(prop.name, values["target"])
+                    prop["target"] = float(values["target"])
+                    prop.state = constants.PropertyState.BUSY
+                    self.update_property(prop)
+                    self.publish_parameters()
                     return
-                if prop.name == "learning" and values["run"] == values["pause"]:
-                    raise ValueError("Select exactly one learning action")
-                self.supervisor.submit(prop.name, values)
+                if prop.name in ("set_policy", "save_policy"):
+                    element = "id" if prop.name == "set_policy" else "label"
+                    if set(values) != {element}:
+                        raise ValueError("Request elements do not match " + prop.name)
+                    self.supervisor.submit(prop.name, values)
+                    prop[element] = values[element]
+                else:
+                    required = {
+                        "po4ao_enable": {"toggle"},
+                        "reset": {"request"},
+                        "recollect": {"request"},
+                        "learning": {"run", "pause"},
+                    }[prop.name]
+                    if set(values) != required:
+                        raise ValueError("Request elements do not match " + prop.name)
+                    if any(
+                        value
+                        not in (constants.SwitchState.ON, constants.SwitchState.OFF)
+                        for value in values.values()
+                    ):
+                        raise ValueError("Expected explicit On/Off switches")
+                    values = {
+                        key: value == constants.SwitchState.ON
+                        for key, value in values.items()
+                    }
+                    if prop.name in ("reset", "recollect") and not values["request"]:
+                        return
+                    if prop.name == "learning" and values["run"] == values["pause"]:
+                        raise ValueError("Select exactly one learning action")
+                    self.supervisor.submit(prop.name, values)
                 prop.state = constants.PropertyState.BUSY
             except Exception as error:
                 prop.state = constants.PropertyState.ALERT
+                if prop.name in PARAMETERS:
+                    self.supervisor.parameter_errors[prop.name] = str(error)
                 self.supervisor.status["error"] = str(error)
                 self.log.error(str(error))
             self.update_property(prop)
+
+    def publish_parameters(self):
+        """Publish desired and acknowledged values without pretending paused edits have applied."""
+        for name, values in self.supervisor.parameters().items():
+            prop = self.properties[name]
+            prop["current"], prop["target"] = values["current"], values["target"]
+            prop.state = constants.PropertyState(values["state"])
+            self.update_property(prop)
+
+    def publish_catalog(self):
+        """Redefine the text catalog only when completed immutable entries change."""
+        catalog = {
+            identity: f"{entry['label']} | {entry['created_utc'][:16].replace('T', ' ')} UTC | iteration {entry['iteration']}"
+            for identity, entry in self.supervisor.catalog.items()
+        }
+        # INDI clients also need an explicit empty definition to distinguish no entries from unavailable.
+        if not catalog:
+            catalog = {"none": "No saved policies"}
+        if catalog != self._catalog:
+            if self._catalog is not None:
+                self.delete_property(self.properties["policy_catalog"])
+            self.text("policy_catalog", catalog)
+            self._catalog = catalog
 
     def loop(self):
         """Publish effective readback before terminal operation acknowledgements."""
@@ -183,6 +248,8 @@ class po4aoTrainer(XDevice):
         from .configuration import revision
 
         with self._property_lock:
+            self.publish_parameters()
+            self.publish_catalog()
             status = self.properties["status"]
             for key, value in self.supervisor.status.items():
                 status[key] = value

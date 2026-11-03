@@ -218,6 +218,9 @@ class NumericalWorker:
         self.session.last_result["record"]["publication_status"] = "ready"
         self.state, self.closed, self.error = "running", False, ""
         self.revision, self.iteration = revision(config), self.session.iteration
+        self.config_ticket = (
+            1  # The initial supervisor configuration has been acknowledged.
+        )
         self.process = SimpleNamespace(poll=lambda: 0 if self.closed else None)
         self.messages = []
 

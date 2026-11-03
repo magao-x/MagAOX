@@ -442,6 +442,7 @@ def test_disable_recollect_and_reset_preserve_the_expected_worker_lifecycle(conf
                 1,
                 "",
             )
+            self.config_ticket = launch["config_ticket"]
             self.process = SimpleNamespace(poll=lambda: None)
             workers.append(self)
 
@@ -519,6 +520,7 @@ def test_worker_protocol_failure_is_reported_without_stopping_companion(config):
         state="running",
         error="",
         events=malformed,
+        revision="",
         process=SimpleNamespace(poll=lambda: 1),
         stop=lambda: stopped.append(True),
     )
@@ -527,3 +529,42 @@ def test_worker_protocol_failure_is_reported_without_stopping_companion(config):
     assert supervisor.status["error"] == "malformed worker record"
     assert stopped
     supervisor.close()
+
+
+def test_live_parameter_and_catalog_indi_contract(config):
+    """The actual XDevice sends Busy/current/target, rejects forged current, and redefines catalogs."""
+    from collections import defaultdict
+
+    app = object.__new__(po4aoTrainer)
+    app.config, app.name, app.client = config, "po4aoTrainer", Client()
+    app.connection = app.client.connection
+    app.properties, app.callbacks = {}, defaultdict(list)
+    app.log = logging.getLogger("offline-po4ao")
+    emitted = []
+    app.update_property = lambda prop: emitted.append(
+        (prop.name, prop.state, {key: prop[key] for key in prop})
+    )
+    app.setup()
+    try:
+        prop = app.properties["command_regularization"]
+        app.handle_request(prop, {"target": 0.025})
+        states = [state for name, state, values in emitted if name == prop.name]
+        assert states[-2:] == [C.PropertyState.BUSY, C.PropertyState.OK]
+        assert prop["current"] == prop["target"] == 0.025
+        app.handle_request(prop, {"current": 1, "target": 1})
+        app.loop()
+        assert prop.state == C.PropertyState.ALERT
+        assert prop["target"] == 0.025
+        app.handle_request(prop, {"target": 0.01})
+        assert prop.state == C.PropertyState.OK
+        app.supervisor.catalog = {
+            "saved_id": dict(
+                label="internal", created_utc="2026-11-03T15:22:00+00:00", iteration=300
+            )
+        }
+        app.publish_catalog()
+        assert set(app.properties["policy_catalog"]) == {"saved_id"}
+        assert app.properties["policy_catalog"].perm == C.PropertyPerm.READ_ONLY
+    finally:
+        app.teardown()
+        app._telem_file = SimpleNamespace(close=lambda: None)

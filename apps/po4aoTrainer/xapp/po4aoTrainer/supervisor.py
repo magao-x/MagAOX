@@ -12,7 +12,15 @@ import threading
 import time
 import uuid
 
-from .configuration import load_training, needs_reset, revision
+from .configuration import (
+    PARAMETERS,
+    load_training,
+    needs_reset,
+    parameter_value,
+    revision,
+    validate_training,
+)
+from .library import FILES, PolicyLibrary
 from .process import Worker, atomic_json
 
 
@@ -59,6 +67,16 @@ class Supervisor:
         self.last_control = None
         self.foreign_model = ""
         self.worker = None
+        self.preparing_worker = None
+        self.library = PolicyLibrary(
+            getattr(config, "saved_engines", "") or self.root / "saved_engines"
+        )
+        self.catalog = self.library.catalog()
+        self.file_config = None
+        self.overrides = {}
+        self.config_history = {}
+        self.config_ticket = 0
+        self.parameter_errors = {}
         self.desired = self.applied = None
         self.config_error = ""
         self.pending_reset = ""
@@ -71,10 +89,21 @@ class Supervisor:
                 command=None,
                 values={},
             )
-            for name in ("training",)
+            for name in ("training", "library")
         }
         self.status = dict(
             heartbeat="",
+            library_phase="idle",
+            initialization_required=(
+                "yes" if self.record.get("initialization_required") else "no"
+            ),
+            selected_policy=self.record.get("selected_policy", ""),
+            saved_policy="",
+            save_available="no",
+            warmup_required=(
+                "yes" if self.record.get("warmup_required") is not None else "no"
+            ),
+            delta_policy_mode="scalar",
             collection_frames="0",
             collection_target="0",
             controller="unknown",
@@ -113,27 +142,118 @@ class Supervisor:
         self.reconcile_runtime()
 
     def poll_config(self):
-        """Retain the last good snapshot after an incomplete/invalid edit."""
-        try:
-            candidate = load_training(
-                self.config.training_config, self.config.runtime_config
+        """Merge session overrides; only valid edits to the same file field supersede them."""
+        with self.lock:
+            try:
+                candidate = load_training(
+                    self.config.training_config, self.config.runtime_config
+                )
+                if self.file_config is not None:
+                    for name, (group, key) in PARAMETERS.items():
+                        if candidate[group][key] != self.file_config[group][key]:
+                            self.overrides.pop(name, None)
+                            self.parameter_errors.pop(name, None)
+                self.file_config = deepcopy(candidate)
+                for name, value in self.overrides.items():
+                    group, key = PARAMETERS[name]
+                    candidate[group][key] = value
+                self.set_desired(candidate)
+                self.config_error = ""
+            except Exception as error:
+                self.config_error = str(error)
+
+    def set_desired(self, candidate):
+        """Keep the desired snapshot and each sent revision for accurate worker readback."""
+        validate_training(candidate)
+        identity = revision(candidate)
+        if self.desired is None or revision(self.desired) != identity:
+            self.config_ticket += 1
+        self.desired = candidate
+        self.config_history[identity] = deepcopy(candidate)
+        self.pending_reset = (
+            identity if self.applied and needs_reset(self.applied, candidate) else ""
+        )
+        self.status["delta_policy_mode"] = (
+            "per_mode"
+            if parameter_value(candidate, "delta_policy_regularization") is None
+            else "scalar"
+        )
+
+    def set_parameter(self, name, value):
+        """Merge one scalar override without recreating the numerical session or writing system config."""
+        with self.lock:
+            if name not in PARAMETERS or self.desired is None:
+                raise ValueError("Training configuration is unavailable")
+            if parameter_value(self.desired, name) is None:
+                raise ValueError("Per-mode: configured in file")
+            candidate = deepcopy(self.desired)
+            group, key = PARAMETERS[name]
+            candidate[group][key] = float(value)
+            validate_training(candidate)
+            self.overrides[name] = candidate[group][key]
+            previous_error = self.parameter_errors.pop(name, None)
+            if previous_error and self.status["error"] == previous_error:
+                self.status["error"] = ""
+            self.set_desired(candidate)
+
+    def parameters(self):
+        """Return current/target and state; a paused worker keeps edits pending until its acknowledgement."""
+        with self.lock:
+            values = {}
+            current = self.applied if self.worker and self.applied else self.desired
+            for name in PARAMETERS:
+                actual = parameter_value(current, name) if current else None
+                target = parameter_value(self.desired, name) if self.desired else None
+                values[name] = dict(
+                    current=actual if actual is not None else 0,
+                    target=target if target is not None else 0,
+                    state=(
+                        "Alert"
+                        if name in self.parameter_errors or self.desired is None
+                        else (
+                            "Busy"
+                            if actual != target
+                            or (
+                                self.worker is not None
+                                and getattr(self.worker, "config_ticket", None)
+                                != self.config_ticket
+                            )
+                            else "Ok"
+                        )
+                    ),
+                )
+            return values
+
+    def save_source(self):
+        """Pin the complete acknowledged pair, including the retained pair while disabled."""
+        eligible = self.record["eligible"]
+        if eligible is None or self.record["reset_pending"]:
+            raise RuntimeError("No acknowledged policy/dynamics pair is available")
+        if not all((Path(eligible["path"]) / name).is_file() for name in FILES):
+            raise RuntimeError("The acknowledged publication is missing model files")
+        observed = self.runtime.runtime_state()
+        if observed["active_id"] != eligible["model_id"]:
+            raise RuntimeError(
+                "The runtime policy is not the acknowledged managed pair"
             )
-            self.desired = candidate
-            self.config_error = ""
-            self.pending_reset = (
-                revision(candidate)
-                if self.applied and needs_reset(self.applied, candidate)
-                else ""
-            )
-        except Exception as error:
-            self.config_error = str(error)
+        return dict(path=eligible["path"], generation=self.record["generation"])
 
     def submit(self, command, values):
         """Admit a request quickly; callbacks never wait for processes or device transitions."""
-        if command not in ("reset", "po4ao_enable", "recollect", "learning", "publish"):
+        if command not in (
+            "reset",
+            "po4ao_enable",
+            "recollect",
+            "learning",
+            "publish",
+            "save_policy",
+            "set_policy",
+        ):
             raise ValueError("Unknown PO4AO training command: " + command)
-        domain = "training"
+        domain = "library" if command == "save_policy" else "training"
         with self.lock:
+            if command == "save_policy":
+                values = dict(values, **self.save_source())
             operation = self.domains[domain]
             if domain == "training" and command != "reset":
                 if self.record["reset_pending"]:
@@ -152,9 +272,25 @@ class Supervisor:
                     raise RuntimeError(
                         "External policy is not part of this managed session; restore an eligible policy or Reset"
                     )
+            if (
+                command == "learning"
+                and values.get("run")
+                and self.record.get("initialization_required")
+            ):
+                raise RuntimeError(
+                    "Set policy was interrupted after reload issuance; Set policy again or Reset before learning"
+                )
             busy = operation["future"] is not None
             if command == "reset" and operation["command"] == "reset":
                 raise RuntimeError("Reset is already in progress")
+            if (
+                command == "learning"
+                and values.get("run")
+                and self.record.get("warmup_required") is not None
+            ):
+                raise RuntimeError(
+                    "Fresh warmup required: enable PO4AO, recollect warmup, then Start learning"
+                )
             supersede = command == "reset" or (
                 command == "po4ao_enable"
                 and not values["toggle"]
@@ -189,6 +325,9 @@ class Supervisor:
                 self.status["learning"] = "resetting"
                 atomic_json(self.record_path, self.record)
                 self.status["retained_policy"] = ""
+                self.status["selected_policy"] = ""
+                self.status["warmup_required"] = "no"
+                self.status["initialization_required"] = "no"
             cancel = threading.Event()
             operation.update(cancel=cancel, command=command, values=dict(values))
             self.status[domain + "_phase"] = {
@@ -239,6 +378,9 @@ class Supervisor:
                         self.record["reset_pending"]["ticket"] = ticket
                         atomic_json(self.record_path, self.record)
             finally:
+                if self.preparing_worker:
+                    self.preparing_worker.stop()
+                    self.preparing_worker = None
                 if self.worker:
                     self.worker.stop()
                     self.worker = None
@@ -285,8 +427,9 @@ class Supervisor:
                             "Previous worker session was lost; Reset is required"
                         )
                     run = self.root / ("run-" + uuid.uuid4().hex)
-                    self.applied = deepcopy(self.desired)
                     with self.lock:
+                        self.applied = deepcopy(self.desired)
+                        config_ticket = self.config_ticket
                         if generation != self.record["generation"] or cancel.is_set():
                             raise InterruptedError("Start superseded by Reset")
                         self.record["worker_started"] = True
@@ -295,6 +438,7 @@ class Supervisor:
                         run,
                         dict(
                             config=self.applied,
+                            config_ticket=config_ticket,
                             generation=generation,
                             streams=self.streams,
                             trtexec=self.config.trtexec,
@@ -320,6 +464,15 @@ class Supervisor:
                     "learning start/resume",
                     self.config.worker_timeout,
                 )
+        elif command == "save_policy":
+            saved = self.library.save(
+                values["path"], self.root, values["generation"], values["label"]
+            )
+            with self.lock:
+                self.catalog = self.library.catalog()
+                self.status["saved_policy"] = saved["id"]
+        elif command == "set_policy":
+            self.load_policy(values["id"], cancel, generation)
         elif command == "publish":
             worker = self.worker
             issued = False
@@ -347,6 +500,98 @@ class Supervisor:
                     worker.send({"candidate_path": values["path"], "candidate_id": ""})
         else:
             raise ValueError("Unknown command " + command)
+
+    def load_policy(self, identity, cancel, generation):
+        """Prepare a separate paused session; replace the old session only after its exact runtime load."""
+        with self.lock:
+            if self.config_error or self.desired is None:
+                raise ValueError(
+                    self.config_error or "Training configuration is unavailable"
+                )
+            config = deepcopy(self.desired)
+            config_ticket = self.config_ticket
+        directory, manifest = self.library.load(identity, config)
+        self.pause(cancel)
+        # Retain the paused old session until preparation and activation have both succeeded.
+        old = self.worker
+        staged = self.worker_factory(
+            self.root / ("run-" + uuid.uuid4().hex),
+            dict(
+                config=config,
+                config_ticket=config_ticket,
+                generation=generation,
+                streams=self.streams,
+                trtexec=self.config.trtexec,
+                build_timeout=self.config.build_timeout,
+                heartbeat_timeout=self.config.heartbeat_timeout,
+                source_revision=self.config.source_revision,
+                initial_snapshot=str(directory / "policy.trt.training.npz"),
+                source_bundle=manifest["id"],
+            ),
+        )
+        self.preparing_worker = staged
+        last_heartbeat = 0.0
+        try:
+
+            def prepared():
+                """Drain only the staged worker and keep its supervision alive during export."""
+                nonlocal last_heartbeat
+                staged.events()
+                if staged.state == "error":
+                    raise RuntimeError(staged.error)
+                if time.monotonic() - last_heartbeat > 0.5:
+                    staged.send({"run": False})
+                    last_heartbeat = time.monotonic()
+                return staged.prepared_path is not None and staged.state == "paused"
+
+            self.runtime.wait(
+                prepared,
+                cancel,
+                "saved policy preparation",
+                self.config.build_timeout + self.config.worker_timeout,
+            )
+            collection_generation = int(
+                self.runtime.get(
+                    self.runtime.po4ao, "collection_status", "requested_generation"
+                )
+            )
+            model_id = self.publish(staged.prepared_path, generation, cancel)
+            with self.lock:
+                if cancel.is_set() or generation != self.record["generation"]:
+                    raise InterruptedError("Set policy superseded")
+                staged.send(
+                    {"restore_id": model_id, "active_id": model_id, "run": False}
+                )
+                self.worker = staged
+                self.applied = config
+                self.record.update(
+                    worker_started=True,
+                    initialization_required=False,
+                    selected_policy=identity,
+                    warmup_required=collection_generation,
+                )
+                atomic_json(self.record_path, self.record)
+                self.status.update(
+                    selected_policy=identity,
+                    warmup_required="yes",
+                    learning="paused",
+                    initialization_required="no",
+                )
+            if old is not None:
+                old.stop()
+        finally:
+            if self.worker is not staged:
+                with self.lock:
+                    # An issued load can finish after cancellation. Never resume the old networks against it.
+                    if generation == self.record["generation"] and any(
+                        record and record["path"] == staged.prepared_path
+                        for record in (self.record["pending"], self.record["eligible"])
+                    ):
+                        self.record["initialization_required"] = True
+                        self.status["initialization_required"] = "yes"
+                        atomic_json(self.record_path, self.record)
+                staged.stop()
+            self.preparing_worker = None
 
     def publish(self, directory, generation, cancel, issued=None):
         """Commit a verified bundle; retain unresolved loads separately from eligible policies."""
@@ -440,12 +685,16 @@ class Supervisor:
             self.publication = None
             atomic_json(self.record_path, self.record)
             if self.worker:
-                self.worker.send(
-                    {
-                        "candidate_outcome_path": pending["path"],
-                        "candidate_outcome": outcome,
-                    }
+                message = dict(
+                    candidate_outcome_path=pending["path"], candidate_outcome=outcome
                 )
+                try:
+                    message["active_id"] = self.runtime.get(
+                        self.runtime.po4ao, "model_status", "effective_id"
+                    )
+                except (ConnectionError, KeyError):
+                    message["collection"] = "unknown"
+                self.worker.send(message)
 
     def settle_publication(self, cancel, publication=None):
         """Wait on one captured ticket; cancellation or a send failure cannot replace its identity."""
@@ -604,6 +853,29 @@ class Supervisor:
         self.poll_config()
         self.reconcile_runtime()
         self.readback()
+        try:
+            with self.lock:
+                self.save_source()
+                self.status["save_available"] = "yes"
+        except (ConnectionError, KeyError, RuntimeError):
+            self.status["save_available"] = "no"
+        with self.lock:
+            required = self.record.get("warmup_required")
+            if required is not None and self.status["collection"] == "ready":
+                try:
+                    observed = int(
+                        self.runtime.get(
+                            self.runtime.po4ao,
+                            "collection_status",
+                            "requested_generation",
+                        )
+                    )
+                    if observed > required:
+                        self.record.pop("warmup_required")
+                        atomic_json(self.record_path, self.record)
+                        self.status["warmup_required"] = "no"
+                except (ConnectionError, KeyError, ValueError):
+                    pass
         worker = self.worker
         if worker:
             try:
@@ -616,7 +888,8 @@ class Supervisor:
                     with self.lock:
                         operation = self.domains["training"]
                         if (
-                            operation["future"] is None
+                            worker is self.worker
+                            and operation["future"] is None
                             and event["generation"] == self.record["generation"]
                         ):
                             cancel = threading.Event()
@@ -650,36 +923,54 @@ class Supervisor:
                     if self.foreign_model or self.record["reset_pending"]:
                         message["collection"] = "unknown"
                         message.pop("active_id", None)
-                    else:
-                        message["active_id"] = self.runtime.get(
-                            self.runtime.po4ao, "model_status", "active_id"
-                        )
+                    elif self.status["controller"] == "unknown":
+                        message["collection"] = "unknown"
+                        message.pop("active_id", None)
                     self.collection_generation = self.runtime.get(
                         self.runtime.po4ao, "collection_status", "requested_generation"
                     )
                     message["generation"] = self.collection_generation
                 except Exception:
                     message["collection"] = "unknown"
+                with self.lock:
+                    desired = deepcopy(self.desired)
+                    config_ticket = self.config_ticket
+                    pending_reset = self.pending_reset
                 if (
-                    self.desired
-                    and not self.pending_reset
-                    and revision(self.desired) != worker.revision
+                    desired
+                    and not pending_reset
+                    and (
+                        revision(desired) != worker.revision
+                        or getattr(worker, "config_ticket", None) != config_ticket
+                    )
                 ):
-                    path = worker.run / (revision(self.desired) + ".json")
+                    path = worker.run / (revision(desired) + ".json")
                     if not path.exists():
-                        atomic_json(path, self.desired)
+                        atomic_json(path, desired)
                     message["config_path"] = str(path)
+                    message["config_ticket"] = config_ticket
                 try:
-                    worker.send(message)
-                    self.last_heartbeat = time.monotonic()
+                    with self.lock:
+                        # Order effective-policy readback with publication outcomes, not an earlier tick snapshot.
+                        if not self.foreign_model and not self.record["reset_pending"]:
+                            try:
+                                message["active_id"] = self.runtime.get(
+                                    self.runtime.po4ao, "model_status", "effective_id"
+                                )
+                            except (ConnectionError, KeyError):
+                                message.pop("active_id", None)
+                                message["collection"] = "unknown"
+                        worker.send(message)
+                        self.last_heartbeat = time.monotonic()
                 except BlockingIOError:
                     pass
                 except OSError as error:
                     worker.state, worker.error = "error", str(error)
                     self.status["learning"], self.status["error"] = "error", str(error)
                     worker.stop()
-                if self.desired and worker.revision == revision(self.desired):
-                    self.applied = deepcopy(self.desired)
+            with self.lock:
+                if worker is self.worker and worker.revision in self.config_history:
+                    self.applied = deepcopy(self.config_history[worker.revision])
         with self.lock:
             publication = self.publication
         if publication is not None:

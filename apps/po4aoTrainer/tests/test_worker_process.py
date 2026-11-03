@@ -110,9 +110,15 @@ def test_owned_worker_pauses_resumes_recollects_and_exits_on_eof(tmp_path, monke
         config["training"]["policy_learning_rate"] *= 2
         changed = tmp_path / "hot.json"
         changed.write_text(json.dumps(config))
-        worker.send({"config_path": str(changed), "run": True})
+        worker.send({"config_path": str(changed), "config_ticket": 1})
+        time.sleep(0.1)
+        worker.events()
+        assert worker.config_ticket == 0  # Paused edits have not been applied.
+        worker.send({"run": True})
         wait(
-            lambda: worker.revision == revision(config) and worker.iteration > iteration
+            lambda: worker.revision == revision(config)
+            and worker.config_ticket == 1
+            and worker.iteration > iteration
         )
         worker.send({"run": False})
         wait(lambda: worker.state == "paused")
@@ -370,3 +376,76 @@ def test_export_restores_models_without_allocating_a_training_session(
     assert publisher.call_args.kwargs["dynamics"] is dynamics
     assert publisher.call_args.kwargs["build_device"] == 1
     assert publisher.call_args.kwargs["metadata"] == metadata
+
+
+def test_restored_worker_prepares_paused_and_accepts_activation(tmp_path, monkeypatch):
+    """Exercise the real restore/export protocol while replacing only GPU, streams and engine compilation."""
+    from test_library import candidate
+    from test_training import make_session
+    from xapp.po4aoTrainer.po4ao_runtime import ReplaySnapshot
+    import numpy as np
+
+    config = json.loads(
+        (Path(__file__).parent / "fixtures/session_config.json").read_text()
+    )
+    config["compute"] = dict(inference_device=0, training_device=1, build_device=1)
+    session = make_session(config)
+    data = np.random.default_rng(43).normal(size=(6, 96, 2)).astype(np.float32)
+    replay = ReplaySnapshot(data, 1, 96, 3, "0" * 16)
+    session.step(replay, replay, active_model_id="0")
+    source = tmp_path / "source"
+    model_id = candidate(source, session, "original-generation")
+    bootstrap = BOOTSTRAP.replace(
+        "from xapp.po4aoTrainer.worker import run\nrun(sys.argv[1])",
+        "import xapp.po4aoTrainer.worker as managed\n"
+        "managed.export_candidate=lambda directory: directory.joinpath('compiled').write_text('CPU test only')\n"
+        "managed.run(sys.argv[1])",
+    )
+    original = subprocess.Popen
+
+    def launch(command, **kwargs):
+        """Keep the production worker process/pipe and restore code around synthetic hardware boundaries."""
+        return original([sys.executable, "-c", bootstrap, command[-1]], **kwargs)
+
+    monkeypatch.setattr("xapp.po4aoTrainer.process.subprocess.Popen", launch)
+    worker = Worker(
+        tmp_path / "restored",
+        dict(
+            config=config,
+            config_ticket=7,
+            generation="new-generation",
+            streams=["replay", "meta", "warmup", "warmmeta"],
+            heartbeat_timeout=5,
+            build_timeout=5,
+            trtexec="unused",
+            initial_snapshot=str(source / "policy.trt.training.npz"),
+            source_bundle="internal-test",
+        ),
+    )
+    try:
+        end = time.monotonic() + 20
+        while worker.prepared_path is None or worker.state != "paused":
+            worker.send({"run": False})
+            worker.events()
+            assert not worker.error, worker.error
+            assert time.monotonic() < end
+            time.sleep(0.03)
+        assert worker.iteration == 0 and worker.config_ticket == 7
+        metadata = json.loads((Path(worker.prepared_path) / "request.json").read_text())
+        assert metadata["generation"] == "new-generation"
+        assert metadata["session_id"] != session.session_id
+        assert metadata["origin"]["bundle_id"] == "internal-test"
+        assert metadata["origin"]["model_id"] == model_id
+        assert not (worker.run / "copies.log").exists()
+        worker.send({"restore_id": model_id, "active_id": model_id, "run": True})
+        while worker.state != "waiting":
+            worker.send({"collection": "unknown"})
+            worker.events()
+            assert not worker.error, worker.error
+            assert time.monotonic() < end
+            time.sleep(0.03)
+        assert (
+            worker.iteration == 0
+        )  # Preparing and activation never inject noise or train.
+    finally:
+        worker.stop()

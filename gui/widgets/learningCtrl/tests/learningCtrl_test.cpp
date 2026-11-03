@@ -55,6 +55,9 @@ struct Fixture
     /// Redefine the representative device properties for all attached clients.
     void ready();
 
+    /// Define the optional numeric controls and immutable saved policy catalog.
+    void trainingControls();
+
     /// Define a property through the production queued dispatcher.
     void define( const pcf::IndiProperty &property /**< [in] Definition. */ );
 
@@ -180,6 +183,29 @@ void Fixture::ready()
                     { "error", "" } } ) );
     define( text( "trainer", "progress", { { "iteration", "0" } } ) );
     status( { { "heartbeat", "1" } } );
+    trainingControls();
+}
+
+void Fixture::trainingControls()
+{
+    define( text( "trainer",
+                  "policy_catalog",
+                  { { "internal_a", "internal-bright | 2026-11-03 15:22 UTC | iteration 300" },
+                    { "sky_b", "onsky | 2026-11-03 19:14 UTC | iteration 500" } } ) );
+    define( text( "trainer", "set_policy", { { "id", "" } } ) );
+    define( text( "trainer", "save_policy", { { "label", "" } } ) );
+    for( const auto &entry : std::map<std::string, double>{ { "command_regularization", 0.01 },
+                                                            { "delta_policy_regularization", 0.5 },
+                                                            { "policy_learning_rate", 0.001 } } )
+    {
+        pcf::IndiProperty property( pcf::IndiProperty::Number, "trainer", entry.first );
+        property.setPerm( pcf::IndiProperty::ReadWrite );
+        property.setState( pcf::IndiProperty::Ok );
+        property.add( pcf::IndiElement( "current", entry.second ) );
+        property.add( pcf::IndiElement( "target", entry.second ) );
+        define( property );
+    }
+    status( { { "save_available", "yes" }, { "warmup_required", "no" }, { "delta_policy_mode", "scalar" } } );
 }
 
 void Fixture::nn()
@@ -898,6 +924,104 @@ TEST_CASE( "Native Reset supersedes Enable awaiting input frames", "[learningCtr
     // clang-format on
 }
 
+/** \brief Numeric Enter sends only the target and preserves current readback until acknowledgement. */
+TEST_CASE( "Trainer numeric targets retain current readback", "[learningCtrl]" )
+{
+    Fixture f;
+    auto   *entry = f.control<xqt::statusLineEdit>( "entryLearningRate" );
+    REQUIRE( entry->isEnabled() );
+    REQUIRE( entry->currText().toDouble() == Approx( 0.001 ) );
+    entry->setEditText( "1e-7" );
+    REQUIRE( QMetaObject::invokeMethod( entry, "returnPressed", Qt::DirectConnection ) );
+    REQUIRE( f.m_publisher.m_commands.size() == 1 );
+    const auto &sent = f.m_publisher.m_commands.back();
+    REQUIRE( sent.getType() == pcf::IndiProperty::Number );
+    REQUIRE( sent.getName() == "policy_learning_rate" );
+    REQUIRE( sent.getElements().size() == 1 );
+    REQUIRE( sent["target"].get<double>() == Approx( 1e-7 ) );
+    pcf::IndiProperty update( pcf::IndiProperty::Number, "trainer", "policy_learning_rate" );
+    update.setState( pcf::IndiProperty::Busy );
+    update.add( pcf::IndiElement( "target", 1e-7 ) );
+    f.m_publisher.handleSetProperty( update );
+    drain();
+    REQUIRE( entry->currText().toDouble() == Approx( 0.001 ) );
+    REQUIRE( entry->toolTip().contains( "pending" ) );
+    update.setState( pcf::IndiProperty::Ok );
+    update.add( pcf::IndiElement( "current", 1e-7 ) );
+    f.m_publisher.handleSetProperty( update );
+    drain();
+    REQUIRE( entry->currText().toDouble() == Approx( 1e-7 ) );
+    REQUIRE_FALSE( entry->toolTip().contains( "pending" ) );
+    entry->setEditText( "0" );
+    QMetaObject::invokeMethod( entry, "returnPressed", Qt::DirectConnection );
+    REQUIRE( f.m_publisher.m_commands.size() == 1 );
+    f.status( { { "delta_policy_mode", "per_mode" } } );
+    REQUIRE_FALSE( f.control<xqt::statusLineEdit>( "entryDeltaRegularization" )->isEnabled() );
+    REQUIRE( f.control<xqt::statusLineEdit>( "entryDeltaRegularization" )->text().contains( "Per-mode" ) );
+    REQUIRE( entry->isEnabled() );
+    f.erase( "trainer", "" );
+    f.runtime( true );
+    REQUIRE_FALSE( entry->isEnabled() );
+    REQUIRE_FALSE( f.control<QPushButton>( "buttonSetPolicy" )->isEnabled() );
+    REQUIRE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
+    REQUIRE( f.control<QPushButton>( "buttonReconstructor" )->isEnabled() );
+}
+
+/** \brief Stable saved IDs survive redefinition; selection alone cannot load or resume training. */
+TEST_CASE( "Saved pairs use staged stable catalog selection", "[learningCtrl]" )
+{
+    Fixture f;
+    auto   *combo = f.control<QComboBox>( "comboPolicy" );
+    REQUIRE( combo->currentIndex() == -1 );
+    combo->setCurrentIndex( combo->findData( "internal_a" ) );
+    REQUIRE( f.m_publisher.m_commands.empty() );
+    f.erase( "trainer", "policy_catalog" );
+    f.define( text( "trainer", "policy_catalog", { { "aaa", "Other" }, { "internal_a", "New display label" } } ) );
+    REQUIRE( combo->currentData().toString() == "internal_a" );
+    REQUIRE( f.m_publisher.m_commands.empty() );
+    f.m_widget.on_buttonSetPolicy_clicked();
+    REQUIRE( f.m_publisher.m_commands.size() == 1 );
+    REQUIRE( f.m_publisher.m_commands.back().getName() == "set_policy" );
+    REQUIRE( f.m_publisher.m_commands.back()["id"].get<std::string>() == "internal_a" );
+    REQUIRE_FALSE( f.control<QPushButton>( "buttonLearning" )->isEnabled() );
+    f.complete( "set_policy" );
+    f.status( { { "learning", "paused" }, { "warmup_required", "yes" } } );
+    REQUIRE_FALSE( f.control<QPushButton>( "buttonLearning" )->isEnabled() );
+    REQUIRE( f.control<QLabel>( "labelCollection" )->text() == "Fresh warmup required" );
+    REQUIRE( f.control<QPushButton>( "buttonWarmup" )->isEnabled() );
+    f.status( { { "warmup_required", "no" } } );
+    REQUIRE( f.control<QPushButton>( "buttonLearning" )->isEnabled() );
+    f.status( { { "initialization_required", "yes" } } );
+    REQUIRE_FALSE( f.control<QPushButton>( "buttonLearning" )->isEnabled() );
+    REQUIRE( f.control<QLabel>( "labelLearning" )->text() == "Set policy or Reset required" );
+}
+
+/** \brief Save remains available during publication and transmits only the operator's optional label. */
+TEST_CASE( "Saving a pair does not pause a running publication", "[learningCtrl]" )
+{
+    Fixture f;
+    f.status( { { "training_phase", "publishing" }, { "learning", "running" } } );
+    REQUIRE( f.control<QPushButton>( "buttonSavePolicy" )->isEnabled() );
+    QTimer::singleShot( 0,
+                        []()
+                        {
+                            for( auto *widget : QApplication::topLevelWidgets() )
+                                if( auto *dialog = qobject_cast<QInputDialog *>( widget ) )
+                                {
+                                    dialog->setTextValue( "internal-bright" );
+                                    dialog->accept();
+                                }
+                        } );
+    f.m_widget.on_buttonSavePolicy_clicked();
+    REQUIRE( f.m_publisher.m_commands.size() == 1 );
+    const auto &sent = f.m_publisher.m_commands.back();
+    REQUIRE( sent.getName() == "save_policy" );
+    REQUIRE( sent["label"].get<std::string>() == "internal-bright" );
+    f.complete( "save_policy" );
+    f.status( { { "save_available", "no" } } );
+    REQUIRE_FALSE( f.control<QPushButton>( "buttonSavePolicy" )->isEnabled() );
+}
+
 /** \brief Save a representative real-widget preview without connecting an INDI client. */
 TEST_CASE( "Save the compact panel preview", "[.preview]" )
 {
@@ -914,10 +1038,11 @@ TEST_CASE( "Save the compact panel preview", "[.preview]" )
         f.erase( "trainer", "" );
         f.runtime( true );
     }
-    f.m_widget.resize( 500, 310 );
+    f.control<QComboBox>( "comboPolicy" )->setCurrentIndex( 0 );
+    f.m_widget.resize( 540, 410 );
     f.m_widget.show();
     drain();
-    REQUIRE( f.m_widget.width() == 500 );
+    REQUIRE( f.m_widget.width() == 540 );
     const char *path = std::getenv( "LEARNINGCTRL_SCREENSHOT" );
     REQUIRE( path != nullptr );
     REQUIRE( f.m_widget.grab().save( path ) );
