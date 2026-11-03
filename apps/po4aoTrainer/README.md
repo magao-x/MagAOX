@@ -1,8 +1,9 @@
-# Shared NN / PO4AO trainer and controls
+# PO4AO trainer and controls
 
 `po4aoTrainer` is the standard `XDevice` companion for the compact native
 `po4aoGUI`. It owns one numerical worker and exposes the shared INDI
-request/status contract. The C++ `po4ao` app retains real-time control. The same
+PO4AO request/status contract. NN selection, writer handover and modulation linking
+belong to `nnReconstructor`, independently of this trainer. The C++ `po4ao` app retains real-time control. The same
 `TrainingSession` is available to notebooks without starting the companion. The same
 GUI also controls native C++ inference with the trainer stopped; Start/Pause is then
 disabled. An existing notebook can keep its own training implementation/environment.
@@ -23,14 +24,6 @@ and the checks actually performed.
 The coordinated behaviors below describe the optional managed trainer. In notebook
 use, the GUI sends native C++ controls and the notebook owns all Python training state.
 
-- NN Enable prepares the selected engine while NN is disabled, then stops CACAO
-  before enabling NN if handing over from CACAO. The already active NN model is a
-  no-op; NN-to-NN replacement touches only NN, leaving modulation unchanged.
-  Confirmed quiescent NN faults permit replacement or explicit CACAO recovery.
-  Switch reconstructor uses an explicit
-  destination and the observed source. Writer exit/start is verified through the
-  installed milk FPS interface. Optional linked modulation uses unmodulated NN
-  versus CACAO at 2000 Hz/radius 3. Reconstruction is independent of learning.
 - Enable PO4AO reloads the latest eligible engine and selects learned control.
   Disable pauses learning and selects the integrator; Enable does not resume it.
 - Start/Resume and Pause retain the same process, models, Adam state and fixed
@@ -59,7 +52,7 @@ without inventing rollback or successful completion.
 
 ## Configuration and artifacts
 
-`configs/po4aoTrainer.conf` contains app/device/modulation-state mappings, freshness
+`configs/po4aoTrainer.conf` contains PO4AO device mapping, freshness
 and operation deadlines, and the shared
 artifact root. `configs/po4ao_training.conf` is typed TOML, watched by the supervisor.
 Runtime geometry/history capacity, gains and limits come from the C++ config.
@@ -160,7 +153,8 @@ MPLBACKEND=Agg python -m pytest apps/po4aoTrainer/tests
 Tests use synthetic CPU data, real INDI property classes without sockets, and owned
 local subprocesses. They cover numerical parity, persistent optimization, config
 boundaries, worker/export cancellation, reset eligibility, request acknowledgements
-and writer/modulation ordering. The notebook example's cells are executable locally.
+and native/managed PO4AO operation ordering. Native NN handover tests live in
+`apps/nnReconstructor/tests`. The notebook example's cells are executable locally.
 GPU execution and live instrument behavior are separate acceptance checks.
 
 `source_manifest.json` pins numerical helpers from `PO4AO_2026` revision

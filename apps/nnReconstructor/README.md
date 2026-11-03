@@ -50,12 +50,56 @@ disable until the zero publication completes. An enabled-but-waiting state is no
 
 `startEnabled=true` preserves automatic startup. `false` starts passively: it performs no inference
 or unsolicited zero publication. Automatic startup must only be used with the existing exclusive-writer
-arrangement. Neither the app nor these controls stop/restart MVM or change the loop state.
+arrangement. Low-level `model`/`enable` controls leave CACAO alone. The compound GUI controls below
+coordinate its writer; none of these controls check or change loop state.
+
+## Independent GUI controls
+
+`po4aoGUI` talks directly to this app, with no `po4ao` or `po4aoTrainer` requirement.
+The **nnReconstructor** section provides **CNN Reconstructor**, **Set reconstructor**,
+and **Switch to CACAO / Switch to CNN**. These compound requests run in `appLogic`,
+outside the inference workers:
+
+- `nn_activate.model`: a catalog element ID. Disable and wait for zero publication,
+  load if needed, stop CACAO if necessary, then enable and wait for an NN result.
+  Selecting the active model is a no-op. NN-to-NN replacement leaves modulation alone.
+- `reconstructor.target/expected`: `nn` or `cacao`, plus observed `nn`, `cacao`, or
+  `stopped`. A stale expected source is rejected. Switching to CACAO waits for NN
+  quiescence before starting the CACAO writer.
+- `link_modulation.toggle`: preference only. On linked handovers use unmodulated
+  state 3 for CNN, or 2000 Hz/radius 3/state 4 for CACAO, waiting for readback.
+- `reconstruction_status`: observed `reconstructor`, `phase`, `error`, `modulation`,
+  advancing `heartbeat`, and process `instance`. GUI availability uses this independent
+  heartbeat. Command Busy precedes work; Ok follows completion, Alert reports failure.
+
+The native transport reads the existing FPS RUN PID/start identity and checks Linux
+process evidence. FIFO delivery is nonblocking and is not a completion acknowledgement.
+Unknown writer evidence disables handover; it does not stop ordinary NN inference.
+An explicit low-level disable cancels pending compound activation. Timeouts never
+start an automatic rollback or reactivate a late-loaded engine. A timed-out delivered
+CACAO start retains an `awaiting_cacao` barrier until RUN completion is observed;
+its eventual completion never launches another action.
+
+Optional overrides in `nnReconstructor.conf` (these are the existing instrument defaults):
+
+```ini
+[recon]
+fpsName=wfs2cmodeval-1
+fpsFifo=/milk/shm/tweeter-vispyr_fpsCTRL.fifo
+writerProcessMatch=wfs2cmodeval
+modulationDevice=modwfs
+```
+
+`make` now compiles `cacaoWriter.cpp` against the installed milk headers under
+`/usr/local/milk/include`; no Python module, helper service, or additional linked milk
+library is needed. Build/reinstall both this app and `po4aoGUI` for the new independent
+contract. The GPU/instrument build and live handover still require operator validation.
 
 ## Operator-managed transitions
 
-Open the relevant loop and establish exclusive writer ownership before changing reconstruction.
-There is no guaranteed app-local loop interlock and no use of cached loop state as one.
+The operator manages loop state and downstream routing. Low-level controls require
+operator-established writer ownership. The GUI compound controls coordinate the two
+writers without checking or changing the loop; it can remain closed.
 
 - **Disable:** close new-inference admission and discard unclaimed results. An admitted inference
   may finish, but its result is discarded. An already-claimed publication may finish. The publisher
