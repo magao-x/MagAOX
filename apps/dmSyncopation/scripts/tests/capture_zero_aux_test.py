@@ -54,9 +54,11 @@ steps=$(cat "$ZERO_TEST_ROOT/steps")
 duration=$(cat "$ZERO_TEST_ROOT/duration")
 advance=${ZERO_TEST_ADVANCE-0}
 late=${ZERO_TEST_LATE-5}
+wake_ahead=${ZERO_TEST_WAKE_AHEAD-0}
 if [[ -f $ZERO_TEST_ROOT/set-calls ]]; then
     advance=${ZERO_TEST_CONFIGURED_ADVANCE-$advance}
     late=${ZERO_TEST_CONFIGURED_LATE-$late}
+    wake_ahead=${ZERO_TEST_CONFIGURED_WAKE_AHEAD-$wake_ahead}
 fi
 case $1 in
     dmtweeter-synco)
@@ -68,6 +70,7 @@ case $1 in
         printf "dmtweeter-synco.zero_test.labelVersion=%s\n" "${ZERO_TEST_SCHEMA-5}"
         printf "dmtweeter-synco.zero_test.publicationAdvanceUs=%s\n" "$advance"
         printf "dmtweeter-synco.zero_test.lateUs=%s\n" "$late"
+        printf "dmtweeter-synco.zero_test.wakeAheadUs=%s\n" "$wake_ahead"
         printf "dmtweeter-synco.zero_test.snapshotValid=1\n"
         printf "dmtweeter-synco.zero_test.snapshotAgeSec=0\n"
         printf "dmtweeter-synco.zero_test.snapshotSequence=%s\n" "${ZERO_TEST_BASELINE_SEQUENCE-1}"
@@ -268,6 +271,67 @@ esac''',
         self.assertEqual(code, 1)
         self.assertEqual(self.set_calls(), [])
         self.assertIn("before publication-advance preset", stderr)
+
+    def test_early_validation_trial_checks_numeric_startup_preset(self):
+        """Schema 7 verifies a 10 us validation lead without changing configuration."""
+        self.env.update(ZERO_TEST_SCHEMA="7", ZERO_TEST_ADVANCE="5", ZERO_TEST_LATE="2",
+                        ZERO_TEST_WAKE_AHEAD="10")
+        code, _, stderr = self.run_capture("8000", "10", "5", "10.0")
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(
+            self.set_calls(),
+            ["-n dmtweeter-synco.settings.steps=4", "-n dmtweeter-synco.settings.durationSec=10",
+             "-s dmtweeter-synco.enable.toggle=On", "-s dmtweeter-synco.enable.toggle=Off"],
+        )
+        metadata = (self.capture_dir() / "test.txt").read_text()
+        self.assertIn("publicationAdvanceUs=5", metadata)
+        self.assertIn("wakeAheadUs=10.0", metadata)
+
+    def test_early_validation_requires_new_schema(self):
+        """Schema 6 cannot qualify a requested nonzero validation lead."""
+        self.env.update(ZERO_TEST_SCHEMA="6", ZERO_TEST_ADVANCE="5", ZERO_TEST_LATE="2",
+                        ZERO_TEST_WAKE_AHEAD="10")
+        code, _, stderr = self.run_capture("8000", "10", "5", "10")
+        self.assertEqual(code, 1)
+        self.assertEqual(self.set_calls(), [])
+        self.assertIn("before wake-ahead preset", stderr)
+
+    def test_early_validation_rejects_wrong_or_missing_preset(self):
+        """A schema-7 capability requires a finite exact startup validation lead."""
+        self.env.update(ZERO_TEST_SCHEMA="7", ZERO_TEST_ADVANCE="5", ZERO_TEST_LATE="2")
+        for value in ["0", "9", "", "nan", "inf", "-1", "51"]:
+            with self.subTest(value=value):
+                self.env["ZERO_TEST_WAKE_AHEAD"] = value
+                code, _, stderr = self.run_capture("8000", "10", "5", "10")
+                self.assertEqual(code, 1)
+                self.assertEqual(self.set_calls(), [])
+                self.assertIn("before wake-ahead preset", stderr)
+
+    def test_omitted_validation_lead_cannot_silently_select_new_policy(self):
+        """An advanced trial must explicitly request a nonzero schema-7 validation lead."""
+        self.env.update(ZERO_TEST_SCHEMA="7", ZERO_TEST_ADVANCE="5", ZERO_TEST_LATE="2",
+                        ZERO_TEST_WAKE_AHEAD="10")
+        code, _, stderr = self.run_capture("8000", "10", "5")
+        self.assertEqual(code, 1)
+        self.assertEqual(self.set_calls(), [])
+        self.assertIn("wakeAheadUs=0", stderr)
+
+    def test_new_schema_preserves_zero_validation_lead(self):
+        """Schema 7 may reproduce the legacy zero-lead trial with no fourth argument."""
+        self.env.update(ZERO_TEST_SCHEMA="7", ZERO_TEST_ADVANCE="0", ZERO_TEST_LATE="5",
+                        ZERO_TEST_WAKE_AHEAD="0")
+        code, _, stderr = self.run_capture("8000", "10")
+        self.assertEqual(code, 0, stderr)
+        self.assertIn("wakeAheadUs=0", (self.capture_dir() / "test.txt").read_text())
+
+    def test_validation_lead_is_rechecked_before_enable(self):
+        """The configured snapshot cannot silently lose the expected validation lead."""
+        self.env.update(ZERO_TEST_SCHEMA="7", ZERO_TEST_ADVANCE="5", ZERO_TEST_LATE="2",
+                        ZERO_TEST_WAKE_AHEAD="10", ZERO_TEST_CONFIGURED_WAKE_AHEAD="0")
+        code, _, stderr = self.run_capture("8000", "10", "5", "10")
+        self.assertEqual(code, 1)
+        self.assertNotIn("-s dmtweeter-synco.enable.toggle=On", self.set_calls())
+        self.assertIn("configured wake-ahead preset", stderr)
 
     def test_compensated_trial_rejects_wrong_or_missing_preset(self):
         """The requested advance and a strictly earlier publication guard are both required."""
@@ -596,7 +660,9 @@ esac''',
                      ("4000", "121"), ("4000", "999999999999999999999"),
                      ("8000", "10", "-1"), ("8000", "10", "51"),
                      ("8000", "10", "nan"), ("8000", "10", "1;echo bad"),
-                     ("8000", "10", "5", "extra")]:
+                     ("8000", "10", "5", "extra"), ("8000", "10", "5", "-1"),
+                     ("8000", "10", "5", "51"), ("8000", "10", "5", "nan"),
+                     ("8000", "10", "5", "10", "extra")]:
             with self.subTest(args=args):
                 code, _, _ = self.run_capture(*args)
                 self.assertEqual(code, 2)

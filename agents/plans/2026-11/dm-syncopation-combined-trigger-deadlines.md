@@ -269,3 +269,105 @@ as follow-up work. A mean phase improvement by itself does not qualify them.
 Workstation verification and capture results are recorded in the associated
 [finite-trial engineering record](../2026-10/dm-syncopation-zero-aux-rate-test.md).
 No agent operates or changes instrument hardware.
+
+## First-test result: wake/check scheduling must precede the tighter deadline
+
+`zero-aux-8000Hz-20261103T215627Z` does not qualify the initial preset. In ten
+seconds it posts 53,987 of 60,000 auxiliary opportunities; 6,010 are rejected
+for 2.001-4.451 us admission lateness despite being staged at least 46.056 us
+early. Another three slots are startup exclusions. All posted commands are
+acknowledged, and controller counters show no new admission/backend losses.
+Effective total output is approximately 7.40 kHz, with real roughly 250 us gaps
+where intermediate commands were skipped.
+
+The delivered per-step phase means are now approximately 1.8 / 2.7 / 1.9 us
+early, with roughly 5 us spread. The correction moves the bias but leaves jitter;
+the tighter guard independently removes about 10% of auxiliary occurrences.
+Camera temperature/gain and process identities differ from the preceding
+capture, so the mean-phase difference is not a controlled one-variable result.
+The operator confirms stable AO operation, zero modal gains and unchanged
+dmcomb mode/delay, CPU placement and workload during this comparison.
+
+The implementation still sleeps toward the publication target and performs
+release/SDK sampling and identity/resource checks before returning. Its first
+fresh caller-side deadline check accounts for 5,863 of the 6,010 late skips.
+This result makes the earlier wake/validation stage in the hierarchy above
+necessary for the next test: finish that work before the target, use a short
+bounded final wait, retain cheap final guards, and capture wake/check/publication
+endpoints separately. Do not increase advance alone or claim a pure kernel-wake
+cause from the present combined measurement.
+
+The measured auxiliary-to-combined leg spans approximately 5-18 us, with about
+3.2 us spread. Even after correcting wake/check scheduling, fixed advance
+cannot remove this mode-4 polling variation. Treat a later event-driven
+combiner comparison as a separate experiment if the output phase still misses
+the desired precision; do not promise that a better publication wait alone
+will make selected semaphore posts exact.
+
+Full counts, controller/camera qualification limits and the unavailable exact
+main-only SDK joins are recorded in the
+[finite-trial record](../2026-10/dm-syncopation-zero-aux-rate-test.md).
+This result updates the plan only; no runtime setting is changed here.
+
+## 2026-11-03: early validation and quiet final wait implemented
+
+The user directs finishing the checks early and waiting for the optimum trigger
+time. The finite zero trial now offers startup-only `zeroTest.wakeAheadUs`,
+default zero for the previous wait path. The revised preset uses **10 us**,
+leaving the **5 us advance and 2 us admission grace unchanged** so the next
+capture isolates the waiting-path change.
+
+After early staging and exact reader clearance, the active callback waits to
+`publicationTarget - wakeAheadUs`. It captures `wokeNs` immediately after the
+last timed wait, before the wait loop's diagnostic/check work, then completes
+full stream/resource, combined-identity, release and SDK checks. The resulting
+`validatedNs` must be no later than the frozen publication target; otherwise
+the occurrence is skipped with stage `validation` and the `validationLate`
+subset of `late` increments. A late check is not excused by the later admission
+grace.
+
+Once validated, the callback waits to the publication target without sleeping,
+draining queues, accumulating timing joins, scanning resources or logging.
+This final spin is bounded by the configured lead, which is finite in [0, 50]
+us; a positive setting must round to at least one nanosecond. Cheap guards
+retain cancellation/shutdown, main and auxiliary ownership, coherent combined
+identity, release source generation/drop state, finite expiry and changed SDK
+fault evidence. A newly changed healthy SDK record is checked once and its
+counter cached. A fresh final clock sample enforces the original admission
+cutoff and active-duration limit. No committed target is moved and there is no
+catch-up publication.
+
+During this quiet window the independent release observer revokes its atomic
+generation immediately on unusable/busy/error/future observations, regressing
+source order, a changed publisher/source/input identity or discarded input.
+Queued records are tagged after revocation. Qualified same-command duplicate
+release/enrichment notifications leave the generation intact, avoiding a false
+requirement that the handoff queue be empty. The observer's source cursor is
+owned only by that thread and reset on attachment changes; all normal pending
+release joins remain on the cycle thread.
+
+Version 7 retains prior target/publication meanings and adds `wakeAheadUs`,
+`wakeTargetNs`, `wokeNs`, `validatedNs` and `validationLate`. The event checkpoints
+separate observed wake error, validation/service time and final admission/API
+cost. A no-sleep call uses its entry sample; an interrupted or earlier coarse
+wait can have a sample before the requested wake point. These are software
+clock checkpoints, not hardware IRQ timestamps.
+
+The revised operator command is:
+
+```bash
+bash apps/dmSyncopation/scripts/capture-zero-aux-test.sh 8000 10 5 10
+```
+
+The fourth argument verifies the configured early-wake lead and requires
+schema 7; it does not write startup settings. Omitting it expects zero lead,
+so an old or mismatched setup cannot silently repeat the wrong policy. Rebuild
+and restart dmSyncopation only, merge `wakeAheadUs=10` into the existing
+compensated preset, and keep dmcomb, camera, loop and CPU settings unchanged.
+Review the short capture before a 120 s run. No claimed improvement or new
+numerical phase calibration is established until that measurement.
+
+This change addresses synco's wake/check deadline. The independently measured
+mode-4 combiner transport variation remains, and exact selected-post timing and
+external provider qualification are still follow-up work. Workstation checks
+are recorded in the associated finite-trial record.

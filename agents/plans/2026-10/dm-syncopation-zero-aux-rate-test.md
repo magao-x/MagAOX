@@ -1539,8 +1539,8 @@ The checkout is `97f04b6a3eddbb9a29e5d4c64b9bb29bb7577e9c`, reporting schema 5,
 four steps and `eventStride=4`. The user confirms stable loop operation, modal
 gains zero and no settings/workload changes apart from synco/helper updates.
 Saved before/after settings are 2 kHz, synchronization On, scalar loop gain 1,
-RTC latency On, camera EM gain 1, target +20 C and shutter open. The latter
-thermal/shutter settings differ from the older -45 C/shut capture; timing
+RTC latency On, camera EM gain 1, target +20 C and shutter SHUT. The thermal
+setting differs from the older -45 C capture; timing
 comparisons below use this capture's own disabled baseline. No instrument
 command was executed by the agent and no application code changes accompany
 this analysis.
@@ -1658,7 +1658,7 @@ same-settings full follow-up to the short qualification above. The extracted
 capture is under
 `/home/jrmales/tmp/home/jrmales/tmp/zero-aux-8000Hz-20261102T025808Z`.
 Saved camera/main/latency and worker settings match the short run: 2 kHz,
-synchronization On, EM gain 1, camera target +20 C/shutter open, scalar loop gain
+synchronization On, EM gain 1, camera target +20 C/shutter SHUT, scalar loop gain
 1 and RTC latency On. Modal gains and stability were confirmed for the short
 run; this follows the requested unchanged-condition comparison, with no further
 changes reported. The analysis uses the full run's own disabled baseline.
@@ -1876,3 +1876,214 @@ Changes are scoped to dmSyncopation trial code, the new `syncoZeroPhase.hpp`
 collector, the capture helper and its tests, preset and documentation. No DM
 controller endpoint, dmcomb implementation or hardware state was changed. The
 operator capture is pending; no agent operated the instrument.
+
+## 2026-11-03: first compensated short capture regresses delivery
+
+The operator supplies `zero-aux-8000Hz-20261103T215627Z` and reports noticeably
+worse behavior. The local copy is beneath
+`/home/jrmales/tmp/home/jrmales/tmp/`. Checkout revision is `945f1e49`; the saved
+test and readbacks confirm 8 kHz total, four steps, 10 active seconds,
+`publicationAdvanceUs=5`, `lateUs=2`, schema 6 and stride 4. Trial 3 runs
+**10.000007111 s** and finishes disabled through the app's normal duration path.
+All helper commands and 18 status polls succeed.
+
+Saved settings retain camera/main 2 kHz, synchronization On, closed loop at
+scalar gain 1, and RTC latency On. Camera EM gain is now 50 and target -45 C
+(on target), versus gain 1 and +20 C in the prior captures; process IDs have
+also changed. Both captures' `stdcam` records say shutter SHUT. The previous
+record's description of that shutter as open was incorrect and is corrected
+above. The operator confirms that the AO loop remained stable, modal gains
+remained zero, and dmcomb mode/delay, CPU placement and workload were unchanged.
+The camera gain/temperature differences above remain captured setup differences
+from the preceding run, rather than changes during this capture.
+
+### Main regression: scheduler-side lateness skips
+
+| Actual outcome | Previous 10 s control | New 10 s compensated trial |
+| --- | ---: | ---: |
+| Main observations | 20,000 | 20,000 |
+| Auxiliary opportunities | 60,000 | 60,000 |
+| Posted, all acknowledged | 59,994 | 53,987 |
+| Late skips | 3 | 6,010 |
+| Startup unclassified skips | 3 | 3 |
+| Preparation/readiness skips | 0 | 0 |
+
+The new auxiliary skip fraction is **10.0217%**, giving approximately
+**7,398.7 Hz total** instead of 8 kHz. Late skips by step are
+**3,876 / 1,897 / 237**, leaving 16,123 / 18,102 / 19,762 acknowledged auxiliary
+outputs. All 6,010 late payloads were staged **46.056-122.354 us early**
+(mean 70.172 us). The ideal publisher and copying are not the source of these
+misses; neither actual reader clearance nor the controller pipeline rejects
+these occurrences.
+
+Of the late skips, **5,863** fail the first fresh deadline check after
+`zeroTestWait(target)` returns and **147** fail the final publication guard.
+Rejecting lateness is **2.001-4.451 us**, mean 3.049 us, median 3.059 us and
+99th percentile 4.144 us. Every rejecting sample is below the former 5 us
+grace, and is 0.549-2.999 us before the old unadvanced reference point. This
+does not prove that every occurrence would pass all subsequent checks under a
+5 us guard: the first-check failures did not execute that remaining path.
+
+The test tightened the guard without advancing its wake/validation schedule.
+`zeroTestWait` takes a clock sample, drains release records, samples SDK
+diagnostics and checks identities/resources before testing that earlier sample
+against the target. The caller then takes a fresh sample and performs final
+checks. Consequently this lateness includes timer wake plus synco's own wait,
+validation and dispatch work. The trace does not isolate kernel wake latency.
+New phase collection also adds bounded work; there is no claim of identical
+hot-path overhead to the previous binary.
+
+Successful sampled final checks are already 1.353 / 1.388 / 1.402 us after their
+advanced target on average. The guard-to-update-return bracket averages
+0.960 us overall, maximum 2.114 us. Return timestamps can exceed the 2 us
+admission grace without violating its checkpoint. All retained auxiliary
+reference shifts are exactly 5,000 ns and admission grace is 2,000 ns.
+
+### Delivered output phase and gaps
+
+The full-rate collector measures these exact, consecutive **combined-publication
+proxies**, not literal selected semaphore posts:
+
+| Transition | Count | Mean +/- spread us | Range us |
+| --- | ---: | ---: | ---: |
+| Last auxiliary to next main | 19,761 | 126.848 +/- 4.356 | 113.825-163.538 |
+| Main to step 1 | 16,123 | 123.224 +/- 5.879 | 91.804-129.304 |
+| Step 1 to 2 | 14,247 | 124.905 +/- 5.099 | 114.106-131.980 |
+| Step 2 to 3 | 17,865 | 125.753 +/- 4.699 | 114.667-130.616 |
+
+Per-step errors relative to the same actual main have mean
+**-1.776 / -2.672 / -1.863 us** and spread 5.879 / 5.694 / 4.673 us. Thus the
+correction moved delivered commands early on average; it did not remove the
+several-microsecond spread. These conditional survivor populations do not
+describe the missing-command gaps, and changed camera conditions prevent a
+strict one-variable comparison with the older capture.
+
+The retained sampled cycles show 827 skipped step-1 occurrences followed by
+actual adjacent main-to-step-2 gaps averaging **244.743 us**, 93 skipped step-2
+occurrences with step-1-to-3 gaps averaging **251.284 us**, and one main-to-step-3
+gap of 376.791 us. These are real omitted auxiliary commands, rather than a
+long dmcomb processing delay. Nominal-125-us populations correctly exclude
+missing slot labels. Raw auxiliary-to-combined transport has means
+**11.077 / 10.649 / 11.254 us** and observed range 4.959-17.613 us.
+
+### Controller, camera and measurement coverage
+
+Controller before/after counters increase by 110,170 admitted, retired and
+completed commands, with **no new** failures, rejected admissions, overload,
+coalescing, cancellation, vector/reader rejection, timeout, timing drops or
+counter gaps. Nonzero lifetime counts were already present before the capture.
+Eight complete active two-second controller windows have mean receipt/send
+interval about **135.347 us**, consistent with the skipped output slots;
+median receipt-interval RMS is 33.975 us. SDK service mean/max is
+106.155 / 110.288 us, native SDK 103.796 / 105.329 us, preparation
+13.776 / 19.587 us and reader release 22.786 / 30.287 us. There is no observed
+backend capacity collapse explaining the delivery holes.
+
+Camera acquisition RMS medians before/active/after are approximately
+0.286 / 0.286 / 0.276 us; publication RMS is 0.934 / 0.973 / 0.872 us. There are
+no new camera frame gaps, rejected/failed observations or drops. These counters
+do not establish AO optical stability or a main-only latency bound.
+
+Exact main SDK-impact joins are unavailable: all **19,999** acknowledged mains
+lack named-primary trace classification, a condition already present in the
+pretrial state. Do not report zero added main latency from the empty main-only
+timing population. Aggregate controller service measurements remain valid.
+
+Telemetry is complete: **25,032 retained + 54,970 deliberately sampled events =
+80,002**, exactly mains, auxiliary opportunities and two lifecycle records.
+Drained events increase by 25,032, with zero new queue overflow or logger
+failure. A cached after-snapshot queue count of 2,355 is later drained; ordinary
+logic and final telemetry show zero queued. The 17 new-trial polls progress
+coherently after one old-trial snapshot, with ages 13.742-96.082 ms. Full-rate
+phase evidence has no invalid identity, counter gap or transport exclusion;
+5,989 label gaps reflect deliberately omitted commands.
+
+### Outcome and next scheduler change
+
+The 5 us advance / 2 us grace preset **does not qualify** for a longer test as
+currently implemented. The skip regression is directly observed in synco's
+admission path; increasing phase advance alone does not fix it. The 5 us advance
+also overshoots the desired average phase on this run, but phase tuning should
+follow restoration of reliable delivery.
+
+The next targeted change is to separate the **wake/validation deadline** from
+the publication point: wake early enough to complete diagnostic and readiness
+work, then use a short bounded final wait to the frozen publication target,
+retaining cheap final identity/cancellation checks and the hard admission
+cutoff. Instrument those separate endpoints so timer wake and validation cost
+can be distinguished. Keep exact reader clearance, immutable targets, finite
+duration and no catch-up; do not simply loosen the output objective to hide
+misses. Repeat a short comparison before considering a new long run.
+
+Restoring reliable publication does not by itself remove the measured roughly
+5-18 us auxiliary-to-combined transport variation. Mode-4 counter polling
+remains a separate downstream source of phase spread. If the corrected wake
+path restores delivery but output errors remain too broad, the next distinct
+experiment should address the combiner trigger path, rather than assigning
+that downstream jitter to the ideal publisher or expecting another constant
+phase shift to remove it.
+
+This entry changes the engineering record only. No runtime or instrument
+configuration is modified in response to this capture.
+
+## 2026-11-03: finish checks early, then wait for publication
+
+Following the failed compensated capture, the user directs completing the
+checks early and waiting for the optimum trigger time. The finite zero trial
+now has opt-in `zeroTest.wakeAheadUs=10`; default zero preserves the previous
+waiting path. The revised preset retains `publicationAdvanceUs=5`, `lateUs=2`
+and all original frozen targets, reader-clearance and finite-duration rules.
+
+The new path sleeps/services diagnostics toward `targetNs - 10 us`, captures an
+immediate post-wait `wokeNs`, then completes full identity/resource/readiness and
+SDK checks. Full validation must finish by `targetNs`. Afterwards a bounded
+final spin contains no sleeps, queue draining, timing joins or logging. Cheap
+current ownership/identity, cancellation, expiry and fault/release-generation
+guards remain live. A fresh admission timestamp still enforces `targetNs + 2 us`.
+Late wake/validation or final preemption skips an occurrence without moving the
+later targets.
+
+The release observer now revokes clearance atomically when it observes unsafe
+or changed source/input evidence during that quiet interval. Healthy duplicate
+release messages do not revoke it. Source ordering and future timestamps are
+checked in the observer, with its own cursor, rather than relying on a delayed
+queue drain. SDK status changes are checked without accumulating diagnostics
+in the quiet window; a healthy checked counter is cached.
+
+Schema 7 records `wakeTargetNs`, `wokeNs` and `validatedNs` alongside the existing
+publication brackets. `validationLate` is a subset of `late`, not an additional
+disjoint skip count. The helper verifies a fourth expected wake-ahead argument
+and rejects missing/wrong settings before enabling. The next operator-run
+short capture is:
+
+```bash
+bash apps/dmSyncopation/scripts/capture-zero-aux-test.sh 8000 10 5 10
+```
+
+Only dmSyncopation needs rebuilding/restarting. Merge the revised compensated
+preset into the working instance config; do not replace the rest of that config.
+No logdump, controller, camera, dmcomb or CPU-setting change is required. A
+longer run remains conditional on the new short result. This does not remove
+mode-4 combiner transport jitter or qualify exact selected semaphore-post time.
+
+Workstation verification passed:
+
+- Full application suite: **124 cases / 4,346,217 assertions**. New coverage
+  includes 4/6/8 kHz delivery with injected 3 us wake delay, validation overrun,
+  final-window preemption/expiry, unchanged subsequent targets, no early
+  publication or final sleeps, cancellation and changed primary/auxiliary
+  identities, actual SDK failure records and actual observer notifications.
+  Observer cases include healthy repeated releases versus busy, future,
+  regressing, missing-PID, changed-input and changed-source evidence.
+- **47 private fake-service helper tests**, including expected wake-ahead/schema
+  verification before enabling and rejecting a mismatched configured readback.
+- Production dmSyncopation clean build, clang-format verification, Bash syntax
+  and `git diff --check`.
+- Independent review of the quiet-window guards, source ownership/freshness,
+  timing markers and operator workflow found no remaining blocking issue.
+
+Affected runtime files are `dmSyncopation.hpp` and `dmSyncopationZeroTest.hpp`;
+the capture helper, its private tests, application tests, compensated preset,
+operator guide and endpoint plan are updated alongside them. No backend,
+combiner, camera or common device helper changed. No instrument command has
+been run by an agent, and the new short hardware capture is pending.

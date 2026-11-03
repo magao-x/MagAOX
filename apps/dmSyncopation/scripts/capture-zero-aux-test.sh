@@ -7,12 +7,14 @@ set -o pipefail
 usage()
 {
     cat <<'HELP'
-Usage: capture-zero-aux-test.sh RATE [SECONDS [ADVANCE_US]]
+Usage: capture-zero-aux-test.sh RATE [SECONDS [ADVANCE_US [WAKE_AHEAD_US]]]
 
 RATE is effective total cadence, 4000, 6000 or 8000 Hz, with the main loop at 2000 Hz.
 SECONDS is the active-trial duration, default 120, integer 1 through 120.
 ADVANCE_US is the expected startup publication advance, default 0, from 0 through 50 us.
 For an advanced trial, the app must report schema 6 or newer and lateUs < ADVANCE_US.
+WAKE_AHEAD_US is the expected startup validation lead, default 0, from 0 through 50 us.
+A positive validation lead requires schema 7 or newer and matching wakeAheadUs.
 The app must already be running with zeroTest.enabled=true and enable=Off.
 The script sets steps and the app-enforced duration while disabled, then starts the trial.
 It never changes the main loop, camera, dmcomb, CPU placement or app config.
@@ -27,7 +29,7 @@ then
     usage
     exit 0
 fi
-if (( $# < 1 || $# > 3 ))
+if (( $# < 1 || $# > 4 ))
 then
     usage >&2
     exit 2
@@ -35,6 +37,7 @@ fi
 zero_rate=$1
 zero_seconds=${2:-120}
 zero_advance=${3:-0}
+zero_wake_ahead=${4:-0}
 if [[ $zero_rate != 4000 && $zero_rate != 6000 && $zero_rate != 8000 ]]
 then
     printf 'RATE must be effective total cadence 4000, 6000 or 8000\n' >&2
@@ -61,13 +64,20 @@ then
     printf 'ADVANCE_US must be numeric microseconds from 0 through 50\n' >&2
     exit 2
 fi
+if ! awk -v ahead="$zero_wake_ahead" \
+     'BEGIN { exit !(ahead ~ /^[0-9]+([.][0-9]+)?$/ && ahead >= 0 && ahead <= 50) }'
+then
+    printf 'WAKE_AHEAD_US must be numeric microseconds from 0 through 50\n' >&2
+    exit 2
+fi
 
 zero_capture_dir="$HOME/tmp/zero-aux-${zero_rate}Hz-$(date -u +%Y%m%dT%H%M%SZ)"
 mkdir -p "$zero_capture_dir" || exit 1
 zero_script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 git -C "$zero_script_dir/../../.." rev-parse HEAD > "$zero_capture_dir/git.txt" || exit 1
-printf 'effectiveRate=%s\nsteps=%s\nactiveSeconds=%s\nmainRate=2000\npublicationAdvanceUs=%s\n' \
-    "$zero_rate" "$zero_steps" "$zero_seconds" "$zero_advance" > "$zero_capture_dir/test.txt"
+printf 'effectiveRate=%s\nsteps=%s\nactiveSeconds=%s\nmainRate=2000\npublicationAdvanceUs=%s\nwakeAheadUs=%s\n' \
+    "$zero_rate" "$zero_steps" "$zero_seconds" "$zero_advance" "$zero_wake_ahead" \
+    > "$zero_capture_dir/test.txt"
 zero_collectors=()
 zero_devices=()
 zero_started=0
@@ -115,6 +125,18 @@ check_phase_preset()
         setup_failure "$zero_phase publication-advance preset" \
             "schema=$zero_phase_schema advanceUs=$zero_actual_advance lateUs=$zero_actual_late" \
             "advanceUs=$zero_advance; schema>=6 and 0<=lateUs<advanceUs when advance is positive"
+    fi
+    local zero_actual_wake
+    zero_actual_wake=$(read_property dmtweeter-synco.zero_test.wakeAheadUs "$zero_file")
+    if ! awk -v schema="$zero_phase_schema" -v actual="$zero_actual_wake" -v expected="$zero_wake_ahead" \
+         'BEGIN { number="^[0-9]+([.][0-9]+)?([eE][+-]?[0-9]+)?$";
+                  legacy=(schema ~ /^[0-9]+$/ && schema >= 5 && schema < 7 && expected == 0);
+                  exit !(legacy || (schema ~ /^[0-9]+$/ && schema >= 7 &&
+                                     actual ~ number && actual == expected && actual >= 0 && actual <= 50)) }'
+    then
+        setup_failure "$zero_phase wake-ahead preset" \
+            "schema=$zero_phase_schema wakeAheadUs=$zero_actual_wake" \
+            "wakeAheadUs=$zero_wake_ahead; schema>=7 when wake ahead is positive"
     fi
 }
 

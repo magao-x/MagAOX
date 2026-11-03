@@ -249,6 +249,7 @@ class dmSyncopation : public MagAOXApp<true>,
     unsigned    m_zeroEventStride{ 4 };          ///< Healthy-cycle event stride; exceptions are always retained.
     double      m_zeroLateUs{ 5 };               ///< Maximum lateness before an immutable auxiliary slot is skipped.
     double      m_zeroPublicationAdvanceUs{ 0 }; ///< Experimental differential advance from the primary-observer grid.
+    double      m_zeroWakeAheadUs{ 0 }; ///< Full validation starts this many us early; zero selects the legacy wait.
     bool   m_simulationReaderReleaseReady{ false }; ///< Use timestamped actual-main read release in shadow decisions.
     bool   m_simulationPipelineBackend{ false }; ///< Independently model preparation, SDK and post resources in shadow.
     double m_simulationVirtualReaderUs{ 30 };    ///< Assumed auxiliary trigger-to-last-read duration, us; not measured.
@@ -307,7 +308,9 @@ class dmSyncopation : public MagAOXApp<true>,
         publication,
         acknowledgement,
         preparation,
-        publicationGuard
+        publicationGuard,
+        validation,
+        finalWait
     };
 
     /// Cycle-owned trial counters, published through a fixed-storage ordinary-thread snapshot.
@@ -320,6 +323,7 @@ class dmSyncopation : public MagAOXApp<true>,
         uint64_t skipped{ 0 };   ///< Auxiliary occurrences rejected before the active publication API was called.
         uint64_t late{ 0 }, readerMissing{ 0 }, primaryChanged{ 0 }; ///< Mutually exclusive per-slot skip reasons.
         uint64_t preparationLate{ 0 }; ///< Zero-copy start or coherent completion was after its immutable target.
+        uint64_t validationLate{ 0 };  ///< Subset of late skips: full validation did not finish before the target.
         uint64_t primaryWriting{ 0 }, resourceUnavailable{ 0 }; ///< Primary write flag or missing trial resources.
         uint64_t cancelled{ 0 }, durationExpired{ 0 }, waitError{ 0 }; ///< Cancellation, finite expiry or wait failure.
         uint64_t invalidTarget{ 0 };        ///< Occurrences with no representable frozen target.
@@ -347,7 +351,8 @@ class dmSyncopation : public MagAOXApp<true>,
         int      steps{ 0 };            ///< Requested total main-plus-auxiliary steps.
         unsigned eventStride{ 1 };      ///< Healthy-cycle telemetry sampling; no command or timing-population sampling.
         double   publicationAdvanceUs{ 0 }, lateUs{ 0 }; ///< Frozen differential target advance and admission grace.
-        bool     requested{ false };                     ///< Actual enable request at this cycle/control boundary.
+        double   wakeAheadUs{ 0 };   ///< Frozen early-validation lead; zero retains the legacy wait path.
+        bool     requested{ false }; ///< Actual enable request at this cycle/control boundary.
     };
 
     /// Coarse ordinary-loop groups include both diagnostic calculation and their INDI I/O.
@@ -381,6 +386,14 @@ class dmSyncopation : public MagAOXApp<true>,
         size_t   queueHighWater{ 0 }; ///< Greatest observed zero-event queue depth before a drain chunk.
     };
 
+    /// Distinct local monotonic checkpoints for early validation and the quiet final wait.
+    struct ZeroPublicationWait
+    {
+        int64_t wakeTargetNs{ 0 }; ///< Planned start of full validation before the publication target.
+        int64_t wokeNs{ 0 };      ///< First clock sample after the final timed wait, or entry when no sleep was needed.
+        int64_t validatedNs{ 0 }; ///< Full validation completed here; must precede or equal the publication target.
+    };
+
     /// One bounded hot-path observation, formatted only after the cycle lock is released.
     struct ZeroEvent
     {
@@ -396,6 +409,7 @@ class dmSyncopation : public MagAOXApp<true>,
         int64_t publicationDeadlineNs{ 0 }; ///< Last permissible guarded admission, including the configured grace.
         int64_t publicationBeginNs{ 0 }, publicationEndNs{ 0 }; ///< Monotonic guard-to-update-return bracket.
         synco::ZeroTiming::Key auxiliaryKey; ///< Exact auxiliary publication metadata, separate from combined key.
+        ZeroPublicationWait    wait;         ///< Frozen wake and validation checkpoints; zero for the legacy path.
     };
 
     ZeroStats m_zeroStats; ///< Finite-trial counters; no conditional shadow outcomes are mixed in.
@@ -407,7 +421,14 @@ class dmSyncopation : public MagAOXApp<true>,
     LogicTiming  m_logicTiming;  ///< Ordinary app-loop profiling and event-drain accounting.
     pcf::IndiProperty m_indiP_logicTiming;                    ///< Read-only coarse service costs and event throughput.
     ZeroOutcome       m_zeroWaitFailure{ ZeroOutcome::none }; ///< Cause retained at the failing wait condition.
-    int m_zeroWaitResult{ 0 };      ///< Most recent absolute-wait return code, retained without a post-hoc clock read.
+    ZeroStage         m_zeroWaitStage{ ZeroStage::wait }; ///< Exact early-validation or final-wait failure checkpoint.
+    ZeroPublicationWait m_zeroPublicationWait;            ///< Current auxiliary occurrence's wake/validation evidence.
+    int64_t             m_zeroWaitObservedNs{ 0 }; ///< Exact rejecting sample or final guarded admission timestamp.
+    uint64_t            m_zeroValidatedSdkCounter{ 0 }; ///< SDK stream counter already checked before the final wait.
+    MagAOX::dmCompletion::Record
+            m_zeroReaderObserved;        ///< Reader-observer-owned source cursor for immediate revocation.
+    int64_t m_zeroReaderObservedNs{ 0 }; ///< Reader-observer-owned last accepted local observation time.
+    int     m_zeroWaitResult{ 0 };  ///< Most recent absolute-wait return code, retained without a post-hoc clock read.
     synco::ZeroTiming m_zeroTiming; ///< Exact primary receipt and controller read-begin to native SDK-entry joins.
     synco::ZeroPhase  m_zeroPhase;  ///< Bounded full-rate downstream evidence, independent of event-row sampling.
     MagAOX::spscQueue<ZeroEvent> m_zeroEvents;            ///< Primary monitor to ordinary telemetry handoff.
@@ -820,8 +841,21 @@ class dmSyncopation : public MagAOXApp<true>,
     void sampleZeroTestSdk( int64_t now /**< [in] Monotonic sample time. */ );
 
     /// Wait to one immutable deadline while checking cancellation, main identity and readiness transport.
-    bool zeroTestWait( int64_t  target /**< [in] Absolute monotonic target. */,
-                       uint64_t primary /**< [in] Genuine main counter that must remain current. */ );
+    bool zeroTestWait(
+        int64_t  target /**< [in] Absolute monotonic target. */,
+        uint64_t primary /**< [in] Genuine main counter that must remain current. */,
+        int64_t *wokeNs = nullptr /**< [out] Optional immediate post-wait sample; no-sleep entry otherwise. */ );
+
+    /// Check only current ownership, cancellation and readiness/fault evidence without diagnostic accumulation.
+    ZeroOutcome zeroTestFinalGuard( uint64_t                      primary /**< [in] Genuine primary counter. */,
+                                    const synco::ZeroTiming::Key &key /**< [in] Prepared combined command. */,
+                                    uint64_t counter /**< [in] Frozen auxiliary counter before publication. */ );
+
+    /// Finish full checks early and wait without sleeping or diagnostic work through the final publication window.
+    bool zeroTestPublicationReady( int64_t  target /**< [in] Frozen monotonic publication target. */,
+                                   uint64_t primary /**< [in] Genuine primary counter. */,
+                                   const synco::ZeroTiming::Key &key /**< [in] Prepared combined command. */,
+                                   uint64_t counter /**< [in] Frozen auxiliary counter before publication. */ );
 
     /// Advance a frozen primary-grid slot with checked arithmetic; zero denotes an invalid target.
     int64_t zeroTestPublicationTarget( int64_t reference /**< [in] Unadvanced monotonic slot. */ ) const;
@@ -1026,6 +1060,7 @@ inline void dmSyncopation::setupConfig()
         { "zeroTest.lateUs", "Maximum immutable auxiliary-slot lateness before skipping, us." },
         { "zeroTest.publicationAdvanceUs",
           "Experimental differential publication advance from the primary grid, us; zero retains legacy targets." },
+        { "zeroTest.wakeAheadUs", "Full-validation lead and maximum final-spin window, us; zero retains legacy wait." },
         { "zeroTest.eventStride", "Retain every Nth healthy cycle; 1..1024, default4; exceptions are never sampled." },
         { "zeroTest.sdkStream", "Optional native SDK-result stream for exact main timing joins." },
         { "simulation.enabled", "Observe a conditional fixed-grid policy without copying or triggering DM commands." },
@@ -1099,6 +1134,7 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
     m_zeroDurationLimitSec = m_zeroDurationSec;
     config( m_zeroLateUs, "zeroTest.lateUs" );
     config( m_zeroPublicationAdvanceUs, "zeroTest.publicationAdvanceUs" );
+    config( m_zeroWakeAheadUs, "zeroTest.wakeAheadUs" );
     config( m_zeroSdkStream, "zeroTest.sdkStream" );
     config( m_zeroEventStride, "zeroTest.eventStride" );
     config( m_simulationReaderReleaseReady, "simulation.readerReleaseReady" );
@@ -1140,6 +1176,8 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
           m_zeroEventStride > 1024 || !finite( m_zeroDurationSec ) || m_zeroDurationSec <= 0 ||
           m_zeroDurationSec > 120 || !finite( m_zeroLateUs ) || m_zeroLateUs < 0 || m_zeroLateUs > 50 ||
           !finite( m_zeroPublicationAdvanceUs ) || m_zeroPublicationAdvanceUs < 0 || m_zeroPublicationAdvanceUs > 50 ||
+          !finite( m_zeroWakeAheadUs ) || m_zeroWakeAheadUs < 0 || m_zeroWakeAheadUs > 50 ||
+          ( m_zeroWakeAheadUs > 0 && std::llround( m_zeroWakeAheadUs * 1000 ) <= 0 ) ||
           ( m_zeroPublicationAdvanceUs > 0 &&
             std::llround( m_zeroPublicationAdvanceUs * 1000 ) <= int64_t( m_zeroLateUs * 1000 ) ) ||
           readerReleaseMonitorT::m_shmimName.empty() || !m_combinerDiagnostics || m_primaryCadenceWindow <= 0 ||
@@ -2997,11 +3035,46 @@ inline int dmSyncopation::processImage( void *source, const syncoReaderReleaseT 
     static_cast<void>( source );
     static_cast<void>( tag );
     MagAOX::dmReaderTiming::Completed event;
-    const auto                        sourceEpoch = m_simulationReleaseEpoch.load( std::memory_order_acquire );
+    auto                              sourceEpoch = m_simulationReleaseEpoch.load( std::memory_order_acquire );
     event.receiptNs                               = m_readerReleaseReceiptNs;
     const auto &image                             = readerReleaseMonitorT::m_imageStream;
     const bool  coherent                          = dev::dmCompletion::read( &image, event.record );
     event.observedNs                              = m_now();
+
+    const auto &record = event.record;
+    const auto &prior  = m_zeroReaderObserved;
+    const bool  regressed =
+        prior.session && ( record.session < prior.session ||
+                           ( record.session == prior.session &&
+                             ( record.epoch < prior.epoch ||
+                               ( record.epoch == prior.epoch && ( record.sequence < prior.sequence ||
+                                                                  record.publisherPid != prior.publisherPid ) ) ) ) );
+    const bool changed =
+        prior.session &&
+        ( record.session != prior.session || record.epoch != prior.epoch || record.publisherPid != prior.publisherPid ||
+          !synco::ZeroTiming::equal( synco::ZeroTiming::key( record ), synco::ZeroTiming::key( prior ) ) );
+
+    if( m_zeroTestEnabled && m_zeroWakeAheadUs > 0 &&
+        ( !coherent || m_readerReleaseReceiptNs <= 0 || !MagAOX::dmCompletion::readersQualified( event.record ) ||
+          event.observedNs <= 0 || event.observedNs < m_zeroReaderObservedNs || record.finishedNs > event.observedNs ||
+          regressed || changed || !record.publisherPid ||
+          ( event.record.outcome != MagAOX::dmTiming::Outcome::unknown &&
+            event.record.outcome != MagAOX::dmTiming::Outcome::success ) ||
+          ( event.record.backendResult != MagAOX::dmCompletion::unavailableResult &&
+            event.record.backendResult != 0 ) ) )
+    {
+        // Revoke latched clearance immediately while the cycle is in its quiet final wait.
+        sourceEpoch = m_simulationReleaseEpoch.fetch_add( 1, std::memory_order_acq_rel ) + 1;
+    }
+
+    if( m_zeroTestEnabled && m_zeroWakeAheadUs > 0 && coherent && !regressed && event.observedNs > 0 &&
+        event.observedNs >= m_zeroReaderObservedNs && record.protocolVersion == MagAOX::dmCompletion::version &&
+        record.kind == MagAOX::dmCompletion::Kind::readers && record.session && record.epoch && record.sequence &&
+        record.publisherPid && record.finishedNs <= event.observedNs )
+    {
+        m_zeroReaderObserved   = record;
+        m_zeroReaderObservedNs = event.observedNs;
+    }
     if( !m_zeroTestEnabled )
     {
         m_readerReleaseTiming.completion( event, coherent && m_readerReleaseReceiptNs > 0 );
@@ -3026,6 +3099,8 @@ inline void dmSyncopation::shmimMonitorTiming( const syncoReaderReleaseT &tag, d
         m_simulationReleaseEpoch.fetch_add( 1, std::memory_order_acq_rel );
         m_readerReleaseReceiptNs = -1;
         m_readerReleaseTiming.resetCompletion();
+        m_zeroReaderObserved   = {};
+        m_zeroReaderObservedNs = 0;
     }
     else if( event == dev::shmimMonitorEvent::receipt )
     {
@@ -3039,6 +3114,11 @@ inline void dmSyncopation::shmimMonitorTiming( const syncoReaderReleaseT &tag, d
     {
         MagAOX::dmReaderTiming::Completed rejected;
         rejected.observedNs = m_now();
+
+        if( m_zeroTestEnabled && m_zeroWakeAheadUs > 0 )
+        {
+            m_simulationReleaseEpoch.fetch_add( 1, std::memory_order_acq_rel );
+        }
         if( m_simulationReaderReleaseReady || m_zeroTestEnabled )
         {
             m_simulationReleaseQueue.push( { rejected.record,

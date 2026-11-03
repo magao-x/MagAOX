@@ -240,6 +240,8 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_zeroNextFileCheck;
     using dmSyncopation::m_zeroPhase;
     using dmSyncopation::m_zeroPublicationAdvanceUs;
+    using dmSyncopation::m_zeroPublicationWait;
+    using dmSyncopation::m_zeroSdk;
     using dmSyncopation::m_zeroSdkStream;
     using dmSyncopation::m_zeroSnapshot;
     using dmSyncopation::m_zeroStats;
@@ -247,6 +249,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_zeroTestEnabled;
     using dmSyncopation::m_zeroTiming;
     using dmSyncopation::m_zeroWaitFailure;
+    using dmSyncopation::m_zeroWakeAheadUs;
     using dmSyncopation::missedStep;
     using dmSyncopation::processZeroTestPrimary;
     using dmSyncopation::publishZeroTestStatus;
@@ -6729,7 +6732,16 @@ struct ZeroClock
     static inline int64_t  releaseDelay{ 0 };  ///< Delay the observer's release capture without changing its endpoint.
     static inline int64_t  pendingReleaseAt{ 0 }; ///< Scheduled local observation of one delayed release record.
     static inline MagAOX::dmSyncoSimulation::Readiness pendingRelease; ///< Delayed fixture-owned release evidence.
-    static inline std::vector<int64_t> posts; ///< Actual auxiliary publication times observed by the fixture.
+    static inline int64_t  validationDelay{ 0 }; ///< One-shot cost after the early wake, before validation completes.
+    static inline int64_t  injectionAt{ 0 };     ///< Absolute one-shot mutation during the bounded final wait.
+    static inline int      injection{ 0 };  ///< Selected final-window identity, cancellation, readiness or SDK fault.
+    static inline uint64_t injections{ 0 }; ///< Completed one-shot mutations, independently of timed sleeps.
+    static inline CompletionStream *endpoint{ nullptr }; ///< Private endpoint used by an SDK or observer injection.
+    static inline bool     observerRelease{ false }; ///< Route fake releases through the real observer in source tests.
+    static inline uint64_t epochAtInjection{ 0 }; ///< Source generation immediately before the quiet-window mutation.
+    static inline uint64_t epochAfterInjection{ 0 }; ///< Source generation immediately after that mutation callback.
+    static inline std::vector<int64_t> waits;        ///< Absolute sleep deadlines, excluding the final spin.
+    static inline std::vector<int64_t> posts;        ///< Actual auxiliary publication times observed by the fixture.
 
     /// Retain one exact combined publication and optional early release.
     static void combined();
@@ -6770,6 +6782,11 @@ void ZeroClock::combined()
             pendingReleaseAt = time + releaseDelay;
             pendingRelease   = { record, pendingReleaseAt, app->m_simulationReleaseEpoch.load(), true };
         }
+        else if( observerRelease )
+        {
+            REQUIRE( endpoint != nullptr );
+            releaseReadinessObservation( *app, *endpoint, record, time );
+        }
         else
         {
             REQUIRE(
@@ -6782,9 +6799,101 @@ int64_t ZeroClock::now()
 {
     time += 100;
 
+    if( validationDelay && app && app->m_zeroPublicationWait.wokeNs > 0 &&
+        app->m_zeroPublicationWait.wokeNs >= app->m_zeroPublicationWait.wakeTargetNs &&
+        app->m_zeroPublicationWait.validatedNs == 0 )
+    {
+        time += validationDelay;
+        validationDelay = 0;
+    }
+
     if( costlyAt && time >= costlyAt && time < costlyAt + 50000 )
     {
         time += nowCost;
+    }
+
+    if( injectionAt && time >= injectionAt )
+    {
+        injectionAt = 0;
+        ++injections;
+        epochAtInjection = app->m_simulationReleaseEpoch.load();
+
+        if( injection == 1 )
+        {
+            ++streams->images[0].md->cnt0;
+        }
+        else if( injection == 2 )
+        {
+            streams->images[0].md->write = 1;
+        }
+        else if( injection == 3 )
+        {
+            targetCounter = ++streams->images[2].md->cnt0;
+        }
+        else if( injection == 4 )
+        {
+            app->m_enabled = false;
+        }
+        else if( injection == 5 )
+        {
+            app->m_simulationReleaseEpoch.fetch_add( 1 );
+        }
+        else if( injection == 6 )
+        {
+            REQUIRE( endpoint != nullptr );
+            auto record          = readerCompletion( streams->images[1], ++sequence, time - 1000, time - 100 );
+            record.kind          = MagAOX::dmCompletion::Kind::sdk;
+            record.state         = MagAOX::dmCompletion::State::error;
+            record.backendResult = -1;
+            endpoint->store( record );
+        }
+        else if( injection == 9 )
+        {
+            time += 20000;
+        }
+        else if( injection == 7 || injection == 8 || ( injection >= 10 && injection <= 16 ) )
+        {
+            REQUIRE( endpoint != nullptr );
+            auto record  = readerCompletion( streams->images[1], sequence, time - 1000, time - 100 );
+            record.kind  = MagAOX::dmCompletion::Kind::readers;
+            record.state = injection == 7 ? MagAOX::dmCompletion::State::busy : MagAOX::dmCompletion::State::released;
+
+            if( injection == 7 )
+            {
+                record.finishedNs = 0;
+                record.outcome    = MagAOX::dmTiming::Outcome::unknown;
+            }
+            else if( injection == 10 )
+            {
+                record.finishedNs = time + 50000;
+            }
+            else if( injection == 11 )
+            {
+                record.sequence -= 2;
+            }
+            else if( injection == 12 )
+            {
+                --record.session;
+            }
+            else if( injection == 13 )
+            {
+                ++record.publisherPid;
+            }
+            else if( injection == 14 )
+            {
+                ++record.inputCounter;
+            }
+            else if( injection == 15 )
+            {
+                record.publisherPid = 0;
+            }
+            else if( injection == 16 )
+            {
+                ++record.epoch;
+            }
+            releaseReadinessObservation( *app, *endpoint, record, time );
+        }
+        epochAfterInjection = app->m_simulationReleaseEpoch.load();
     }
 
     if( app && app->m_zeroStats.staged > observedStages )
@@ -6824,6 +6933,7 @@ int64_t ZeroClock::now()
 
 int ZeroClock::wait( const timespec *target )
 {
+    waits.push_back( int64_t( target->tv_sec ) * 1000000000 + target->tv_nsec );
     if( app->m_zeroStats.active )
     {
         CHECK( streams->images[2].md->write == 0 );
@@ -6902,6 +7012,14 @@ void ZeroClock::connect( Harness &scheduler, Streams &images, int steps )
     lateOnceAt = mainDelay = pendingMainAt = 0;
     releaseDelay = pendingReleaseAt = 0;
     pendingRelease                  = {};
+    validationDelay                 = 0;
+    injectionAt = injection = 0;
+    injections              = 0;
+    endpoint                = nullptr;
+    observerRelease         = false;
+    epochAtInjection        = 0;
+    epochAfterInjection     = 0;
+    waits.clear();
     posts.clear();
     std::fill_n( images.images[0].array.F, 9, 0.25F );
     std::fill_n( images.images[2].array.F, 9, 0.0F );
@@ -7133,6 +7251,375 @@ TEST_CASE( "coordinated zero trial advances publication before downstream refere
 #ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
     MagAOX::app::dmSyncopation::processZeroTestPrimary;
     MagAOX::app::dmSyncopation::zeroTestEvent;
+#endif
+    // clang-format on
+}
+
+/// An early wake absorbs timer delay and finishes validation before a sleep-free final publication wait.
+TEST_CASE( "coordinated zero trial validates before waiting for the publication target",
+           "[dmSyncopation][zeroTest][earlyWait]" )
+{
+    Streams   streams;
+    Harness   app;
+    const int steps = GENERATE( 2, 3, 4 );
+    ZeroClock::connect( app, streams, steps );
+    app.m_zeroPublicationAdvanceUs = 5;
+    app.m_zeroLateUs               = 2;
+    app.m_zeroWakeAheadUs          = 10;
+    const auto next                = ZeroClock::warm();
+    ZeroClock::waits.clear();
+    ZeroClock::wakeDelay = 3000;
+    app.m_enabled        = true;
+    ZeroClock::primary( next );
+    REQUIRE( app.m_zeroStats.posted == uint64_t( steps - 1 ) );
+    REQUIRE( app.m_zeroStats.acknowledged == uint64_t( steps - 1 ) );
+    REQUIRE( app.m_zeroStats.skipped == 0 );
+    CHECK( app.m_zeroStats.validationLate == 0 );
+    const auto events = zeroAuxiliaryEvents( app );
+    REQUIRE( events.size() == size_t( steps - 1 ) );
+
+    for( const auto &event : events )
+    {
+        CHECK( event.wait.wakeTargetNs == event.targetNs - 10000 );
+        int64_t lastSleep = 0;
+
+        for( const auto deadline : ZeroClock::waits )
+        {
+            if( deadline <= event.wait.wokeNs )
+            {
+                lastSleep = std::max( lastSleep, deadline );
+            }
+        }
+        REQUIRE( lastSleep > 0 );
+        CHECK( event.wait.wokeNs >= lastSleep + 3000 );
+        CHECK( event.wait.wokeNs <= event.wait.validatedNs );
+        CHECK( event.wait.validatedNs <= event.targetNs );
+        CHECK( event.publicationBeginNs >= event.targetNs );
+        CHECK( event.publicationBeginNs <= event.publicationDeadlineNs );
+        CHECK( event.publicationEndNs >= event.publicationBeginNs );
+
+        for( const auto deadline : ZeroClock::waits )
+        {
+            CHECK_FALSE( ( deadline > event.wait.validatedNs && deadline <= event.targetNs ) );
+        }
+    }
+    checkZeroPartition( app );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::processZeroTestPrimary;
+    MagAOX::app::dmSyncopation::zeroTestWait;
+    MagAOX::app::dmSyncopation::zeroTestFinalGuard;
+#endif
+    // clang-format on
+}
+
+/// A missed early-validation deadline skips that occurrence without chasing or retiming later slots.
+TEST_CASE( "coordinated zero early validation rejects overruns without catchup",
+           "[dmSyncopation][zeroTest][earlyWait]" )
+{
+    Streams streams;
+    Harness app;
+    ZeroClock::connect( app, streams, 4 );
+    app.m_zeroPublicationAdvanceUs = 5;
+    app.m_zeroLateUs               = 2;
+    app.m_zeroWakeAheadUs          = 10;
+    const auto      next           = ZeroClock::warm();
+    synco::GridTime grid;
+    uint64_t        period = 0;
+    REQUIRE( app.m_zeroClock.frozenGrid( streams.images[0].md->cnt0 + 1, grid, period ) );
+    const auto first    = synco::stepGrid( grid, period, 1, 4 ).ns - 5000;
+    bool       lateWake = false;
+
+    SECTION( "timer wake itself passes the publication point" )
+    {
+        lateWake              = true;
+        ZeroClock::lateOnceAt = first - 10000;
+    }
+
+    SECTION( "validation work overruns after an early wake" )
+    {
+        ZeroClock::validationDelay = 20000;
+    }
+
+    app.m_enabled = true;
+    ZeroClock::primary( next );
+    REQUIRE( app.m_zeroStats.skipped == 1 );
+    CHECK( app.m_zeroStats.late == 1 );
+    CHECK( app.m_zeroStats.validationLate == 1 );
+    REQUIRE( app.m_zeroStats.posted == 2 );
+    REQUIRE( app.m_zeroStats.acknowledged == 2 );
+    const auto events = zeroAuxiliaryEvents( app );
+    REQUIRE( events.size() == 3 );
+    CHECK( events[0].reason == Harness::ZeroOutcome::late );
+    CHECK( events[0].stage == Harness::ZeroStage::validation );
+    CHECK( events[0].targetNs == first );
+    CHECK( events[0].wait.wakeTargetNs == first - 10000 );
+    CHECK( events[0].wait.wokeNs > 0 );
+    CHECK( ( events[0].wait.wokeNs > first ) == lateWake );
+    CHECK( events[0].observedNs > first );
+    CHECK( events[0].publicationBeginNs == 0 );
+    CHECK( events[0].publicationEndNs == 0 );
+
+    for( int step = 2; step < 4; ++step )
+    {
+        const auto target = synco::stepGrid( grid, period, step, 4 ).ns - 5000;
+        CHECK( events[step - 1].targetNs == target );
+        CHECK( events[step - 1].outcome == int( Harness::ZeroOutcome::acknowledged ) );
+        CHECK( events[step - 1].publicationBeginNs >= target );
+        CHECK( events[step - 1].publicationBeginNs <= target + 2000 );
+    }
+    checkZeroPartition( app );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::processZeroTestPrimary;
+    MagAOX::app::dmSyncopation::zeroTestSkip;
+#endif
+    // clang-format on
+}
+
+/// Preemption beyond the final admission cutoff cannot produce a delayed command or shift the next slot.
+TEST_CASE( "coordinated zero final wait retains the absolute publication cutoff",
+           "[dmSyncopation][zeroTest][earlyWait]" )
+{
+    Streams streams;
+    Harness app;
+    ZeroClock::connect( app, streams, 4 );
+    app.m_zeroPublicationAdvanceUs = 5;
+    app.m_zeroLateUs               = 2;
+    app.m_zeroWakeAheadUs          = 10;
+    const auto      next           = ZeroClock::warm();
+    synco::GridTime grid;
+    uint64_t        period = 0;
+    REQUIRE( app.m_zeroClock.frozenGrid( streams.images[0].md->cnt0 + 1, grid, period ) );
+    const auto first       = synco::stepGrid( grid, period, 1, 4 ).ns - 5000;
+    ZeroClock::injection   = 9;
+    ZeroClock::injectionAt = first - 500;
+    app.m_enabled          = true;
+    ZeroClock::primary( next );
+    CHECK( ZeroClock::injections == 1 );
+    CHECK( app.m_zeroStats.skipped == 1 );
+    CHECK( app.m_zeroStats.validationLate == 0 );
+    REQUIRE( app.m_zeroStats.posted == 2 );
+    const auto events = zeroAuxiliaryEvents( app );
+    REQUIRE( events.size() == 3 );
+    CHECK( events[0].reason == Harness::ZeroOutcome::late );
+    CHECK( events[0].wait.validatedNs < first - 500 );
+    CHECK( events[0].observedNs > events[0].publicationDeadlineNs );
+    CHECK( events[0].publicationBeginNs == 0 );
+    CHECK( events[0].publicationEndNs == 0 );
+
+    for( int step = 2; step < 4; ++step )
+    {
+        const auto target = synco::stepGrid( grid, period, step, 4 ).ns - 5000;
+        CHECK( events[step - 1].targetNs == target );
+        CHECK( events[step - 1].outcome == int( Harness::ZeroOutcome::acknowledged ) );
+        CHECK( events[step - 1].publicationBeginNs >= target );
+        CHECK( events[step - 1].publicationBeginNs <= target + 2000 );
+    }
+    checkZeroPartition( app );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::processZeroTestPrimary;
+    MagAOX::app::dmSyncopation::zeroTestFinalGuard;
+#endif
+    // clang-format on
+}
+
+/// The app-enforced active duration remains a live veto throughout the final bounded wait.
+TEST_CASE( "coordinated zero final wait cannot publish after finite expiry", "[dmSyncopation][zeroTest][earlyWait]" )
+{
+    Streams streams;
+    Harness app;
+    ZeroClock::connect( app, streams, 4 );
+    app.m_zeroPublicationAdvanceUs = 5;
+    app.m_zeroLateUs               = 2;
+    app.m_zeroWakeAheadUs          = 10;
+    const auto next                = ZeroClock::warm();
+    app.m_zeroDurationSec          = 0.000119;
+    app.m_enabled                  = true;
+    ZeroClock::primary( next );
+    CHECK( app.m_zeroStats.posted == 0 );
+    CHECK( app.m_zeroStats.durationExpired == 3 );
+    CHECK( ZeroClock::posts.empty() );
+    const auto events = zeroAuxiliaryEvents( app );
+    REQUIRE( events.size() == 3 );
+    CHECK( events[0].reason == Harness::ZeroOutcome::durationExpired );
+    CHECK( events[0].stage == Harness::ZeroStage::finalWait );
+    CHECK( events[0].wait.validatedNs > 0 );
+    CHECK( events[0].wait.validatedNs < app.m_zeroStats.startedNs + 119000 );
+    CHECK( events[0].publicationBeginNs == 0 );
+    CHECK( events[0].publicationEndNs == 0 );
+    checkZeroPartition( app );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::zeroTestFinalGuard;
+    MagAOX::app::dmSyncopation::processZeroTestPrimary;
+#endif
+    // clang-format on
+}
+
+/// Quiet-window final guards still observe cancellation and changes to command identity or reader clearance.
+TEST_CASE( "coordinated zero final wait retains essential live vetoes", "[dmSyncopation][zeroTest][earlyWait]" )
+{
+    Streams streams;
+    Harness app;
+    ZeroClock::connect( app, streams, 4 );
+    app.m_zeroPublicationAdvanceUs = 5;
+    app.m_zeroLateUs               = 2;
+    app.m_zeroWakeAheadUs          = 10;
+    const auto      next           = ZeroClock::warm();
+    synco::GridTime grid;
+    uint64_t        period = 0;
+    REQUIRE( app.m_zeroClock.frozenGrid( streams.images[0].md->cnt0 + 1, grid, period ) );
+    const auto first  = synco::stepGrid( grid, period, 1, 4 ).ns - 5000;
+    auto       reason = Harness::ZeroOutcome::none;
+
+    SECTION( "a genuine primary arrives during the final wait" )
+    {
+        ZeroClock::injection = 1;
+        reason               = Harness::ZeroOutcome::primaryChanged;
+    }
+
+    SECTION( "primary pixels start changing before its counter" )
+    {
+        ZeroClock::injection = 2;
+        reason               = Harness::ZeroOutcome::primaryWriting;
+    }
+
+    SECTION( "an unrelated writer updates the trial auxiliary" )
+    {
+        ZeroClock::injection = 3;
+        reason               = Harness::ZeroOutcome::resourceUnavailable;
+    }
+
+    SECTION( "the operator cancels after early validation" )
+    {
+        ZeroClock::injection = 4;
+        reason               = Harness::ZeroOutcome::cancelled;
+    }
+
+    SECTION( "the release observer revokes its attachment epoch" )
+    {
+        ZeroClock::injection = 5;
+        reason               = Harness::ZeroOutcome::readerMissing;
+    }
+
+    ZeroClock::injectionAt = first - 3000;
+    app.m_enabled          = true;
+    ZeroClock::primary( next );
+    CHECK( ZeroClock::injections == 1 );
+    REQUIRE( app.m_zeroStats.posted == 0 );
+    REQUIRE( app.m_zeroStats.skipped == 3 );
+    CHECK( ZeroClock::posts.empty() );
+    const auto events = zeroAuxiliaryEvents( app );
+    REQUIRE( events.size() == 3 );
+    CHECK( events[0].reason == reason );
+    CHECK( events[0].stage == Harness::ZeroStage::finalWait );
+    CHECK( events[0].wait.validatedNs > 0 );
+    CHECK( events[0].wait.validatedNs < first - 3000 );
+    CHECK( events[0].publicationBeginNs == 0 );
+    CHECK( events[0].publicationEndNs == 0 );
+    checkZeroPartition( app );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::zeroTestFinalGuard;
+    MagAOX::app::dmSyncopation::processZeroTestPrimary;
+#endif
+    // clang-format on
+}
+
+/// Backend failure during the quiet interval is detected from the private SDK stream before publication.
+TEST_CASE( "coordinated zero final wait observes a new SDK failure", "[dmSyncopation][zeroTest][earlyWait]" )
+{
+    Streams          streams;
+    CompletionStream sdk;
+    Harness          app;
+    ZeroClock::connect( app, streams, 2 );
+    app.m_zeroPublicationAdvanceUs = 5;
+    app.m_zeroLateUs               = 2;
+    app.m_zeroWakeAheadUs          = 10;
+    const auto next                = ZeroClock::warm();
+    auto       record    = readerCompletion( streams.images[1], ZeroClock::sequence, next - 2000, next - 1000 );
+    record.kind          = MagAOX::dmCompletion::Kind::sdk;
+    record.backendResult = 0;
+    sdk.store( record );
+    REQUIRE( ImageStreamIO_openIm( &app.m_zeroSdk, "synco_reader_done" ) == 0 );
+    synco::GridTime grid;
+    uint64_t        period = 0;
+    REQUIRE( app.m_zeroClock.frozenGrid( streams.images[0].md->cnt0 + 1, grid, period ) );
+    const auto target      = synco::stepGrid( grid, period, 1, 2 ).ns - 5000;
+    ZeroClock::endpoint    = &sdk;
+    ZeroClock::injection   = 6;
+    ZeroClock::injectionAt = target - 3000;
+    app.m_enabled          = true;
+    ZeroClock::primary( next );
+    CHECK( ZeroClock::injections == 1 );
+    CHECK( app.m_zeroStats.posted == 0 );
+    CHECK( app.m_zeroStats.skipped == 1 );
+    const auto events = zeroAuxiliaryEvents( app );
+    REQUIRE( events.size() == 1 );
+    CHECK( events[0].reason == Harness::ZeroOutcome::readerMissing );
+    CHECK( events[0].stage == Harness::ZeroStage::finalWait );
+    CHECK( events[0].wait.validatedNs < target - 3000 );
+    CHECK( events[0].publicationBeginNs == 0 );
+    checkZeroPartition( app );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::zeroTestFinalGuard;
+#endif
+    // clang-format on
+}
+
+/// Unsafe observer evidence revokes quiet-window clearance; a repeated qualified release does not.
+TEST_CASE( "coordinated zero final wait distinguishes new reader evidence", "[dmSyncopation][zeroTest][earlyWait]" )
+{
+    Streams          streams;
+    CompletionStream release;
+    Harness          app;
+    ZeroClock::connect( app, streams, 2 );
+    app.m_zeroPublicationAdvanceUs = 5;
+    app.m_zeroLateUs               = 2;
+    app.m_zeroWakeAheadUs          = 10;
+    const auto next                = ZeroClock::warm();
+    app.attachReaderReleaseOnly();
+    synco::GridTime grid;
+    uint64_t        period = 0;
+    REQUIRE( app.m_zeroClock.frozenGrid( streams.images[0].md->cnt0 + 1, grid, period ) );
+    const auto target  = synco::stepGrid( grid, period, 1, 2 ).ns - 5000;
+    const int  variant = GENERATE( 7, 8, 10, 11, 12, 13, 14, 15, 16 );
+    CAPTURE( variant );
+    const bool unsafe          = variant != 8;
+    ZeroClock::endpoint        = &release;
+    ZeroClock::observerRelease = true;
+    ZeroClock::injection       = variant;
+    ZeroClock::injectionAt     = target - 3000;
+    app.m_enabled              = true;
+    ZeroClock::primary( next );
+    CHECK( ZeroClock::injections == 1 );
+    CHECK( app.m_zeroStats.posted == uint64_t( !unsafe ) );
+    CHECK( app.m_zeroStats.skipped == uint64_t( unsafe ) );
+    const auto events = zeroAuxiliaryEvents( app );
+    REQUIRE( events.size() == 1 );
+    CHECK( events[0].wait.validatedNs < target - 3000 );
+
+    if( unsafe )
+    {
+        CHECK( ZeroClock::epochAfterInjection > ZeroClock::epochAtInjection );
+        CHECK( events[0].reason == Harness::ZeroOutcome::readerMissing );
+        CHECK( events[0].stage == Harness::ZeroStage::finalWait );
+    }
+    else
+    {
+        CHECK( ZeroClock::epochAfterInjection == ZeroClock::epochAtInjection );
+        CHECK( events[0].outcome == int( Harness::ZeroOutcome::acknowledged ) );
+        CHECK( events[0].publicationBeginNs >= target );
+        CHECK( events[0].publicationBeginNs <= target + 2000 );
+    }
+    checkZeroPartition( app );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::processImage( nullptr, MagAOX::app::syncoReaderReleaseT{} );
+    MagAOX::app::dmSyncopation::zeroTestFinalGuard;
 #endif
     // clang-format on
 }
@@ -7936,7 +8423,7 @@ TEST_CASE( "coordinated zero status is independent of the cycle mutex", "[dmSync
         CHECK( app.m_indiP_zeroTest["mainObserved"].get<double>() == 80 );
         CHECK( app.m_indiP_zeroTest["elapsedSec"].get<double>() == Approx( 5 ) );
         CHECK( app.m_indiP_zeroTest["snapshotAgeSec"].get<double>() == Approx( 1 ) );
-        CHECK( app.m_indiP_zeroTest["labelVersion"].get<double>() == 6 );
+        CHECK( app.m_indiP_zeroTest["labelVersion"].get<double>() == 7 );
     }
 
     // clang-format off
@@ -8128,6 +8615,11 @@ TEST_CASE( "coordinated zero trial validates explicit startup configuration", "[
                                         std::string{ "[zeroTest]\npublicationAdvanceUs=-1\n" },
                                         std::string{ "[zeroTest]\npublicationAdvanceUs=51\n" },
                                         std::string{ "[zeroTest]\npublicationAdvanceUs=nan\n" },
+                                        std::string{ "[zeroTest]\nwakeAheadUs=10\n" },
+                                        std::string{ "[zeroTest]\nwakeAheadUs=-1\n" },
+                                        std::string{ "[zeroTest]\nwakeAheadUs=51\n" },
+                                        std::string{ "[zeroTest]\nwakeAheadUs=nan\n" },
+                                        std::string{ "[zeroTest]\nwakeAheadUs=0.0001\n" },
                                         std::string{ "[zeroTest]\neventStride=0\n" },
                                         std::string{ "[zeroTest]\neventStride=1025\n" },
                                         std::string{ "[readerReleaseMonitor]\nshmimName=\n" } );
@@ -8177,7 +8669,7 @@ TEST_CASE( "coordinated zero trial validates explicit startup configuration", "[
     CAPTURE( extra );
 
     if( extra.empty() || extra == "[scheduler]\nmaxSubframes=4\n" || extra == "[zeroTest]\ndurationSec=10\n" ||
-        extra == "[zeroTest]\npublicationAdvanceUs=6\n" )
+        extra == "[zeroTest]\npublicationAdvanceUs=6\n" || extra == "[zeroTest]\nwakeAheadUs=10\n" )
     {
         CHECK( configured == 0 );
         CHECK( app.m_zeroTestEnabled );
@@ -8188,6 +8680,7 @@ TEST_CASE( "coordinated zero trial validates explicit startup configuration", "[
         CHECK( app.m_maxCadence == 6000 );
         CHECK( app.m_zeroEventStride == 4 );
         CHECK( app.m_zeroPublicationAdvanceUs == ( extra == "[zeroTest]\npublicationAdvanceUs=6\n" ? 6 : 0 ) );
+        CHECK( app.m_zeroWakeAheadUs == ( extra == "[zeroTest]\nwakeAheadUs=10\n" ? 10 : 0 ) );
     }
     else
     {
@@ -8312,7 +8805,7 @@ TEST_CASE( "coordinated zero duration is selectable only while disabled", "[dmSy
     CHECK( app.m_indiP_zeroTest["durationSec"].get<double>() == 10 );
     CHECK( app.m_indiP_zeroTest["durationLimitSec"].get<double>() == 120 );
     CHECK( app.m_indiP_zeroTest["trial"].get<double>() == 0 );
-    CHECK( app.m_indiP_zeroTest["labelVersion"].get<double>() == 6 );
+    CHECK( app.m_indiP_zeroTest["labelVersion"].get<double>() == 7 );
 
     for( const auto value :
          { 0.0, -1.0, 121.0, std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity() } )
