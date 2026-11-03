@@ -370,3 +370,42 @@ managed learning and verification/restoration of the recorded downstream route a
 calibration. The updated review response assesses notebook and managed trials
 separately; routine instrument readiness remains unverified. One GUI, optional
 trainer and operator-managed loop state remain the agreed design.
+
+## Home-checkout update and shorter deployment guide, 2026-11-03
+
+The user explicitly authorized updating the home checkout on exao2 and reading
+deployment files there. `/home/rlandman/MagAOX` was on
+`rlandman/nnreconstructor-correctness-controls` at `4353737e3`, with six modified
+dlDataCollection files and nine untracked files. The modified code and four new
+source files already matched this GUI branch; its README only lacked three lines
+present here. The complete old working state was saved in Git stash
+`7a5d3f59f05a13ef000595fb0f424327f2ed9034`, named
+`Before nn-po4ao-gui branch update 2026-11-03`. After switching to
+`rlandman/nn-po4ao-gui`, the five remaining untracked helpers/binaries were restored
+and compared byte-for-byte with that stash. Tracked files match the new branch.
+Transfer used a Git bundle, without publishing to GitHub.
+
+File inspection confirmed existing PO4AO process/INDI registration, notebook kernel
+`/opt/conda/envs/torchpy/bin/python3.11`, the notebook engine path, current
+10-by-1000 warmup/10000 replay configuration and installed TensorRT builder.
+Neither trainer nor GUI was installed, and qmake was not on PATH. The downstream
+symlink pointed to `aol1_modevalWFS`; its calibration-source record named `default`.
+Those files do not establish actual stream consumption or current control state.
+The installed routing scripts were read, not executed. They restart CACAO processes
+and the calibration script opens the loop, so the guide retains manual setup and
+verification in the recorded HOWFS loop directory.
+
+The deployment guide is shortened from 1663 to about 1200 words. It uses actual RTC
+paths and the notebook environment, removes already-completed registration steps,
+and includes the two INDI archives needed by a fresh GUI checkout. Inspection also
+found no Python 3.11 CacaoProcessTools module: installed milk copies are for 3.10
+and 3.13. The guide uses milk's existing standalone Python-module CMake target,
+installed headers/libraries and the trainer's python3-config to build just this
+extension into the separate environment; it does not reinstall milk. The build
+command was checked against source/build files, not executed. All five shell
+blocks pass `bash -n`; no deployment block was executed. No application code changed,
+so functional suites were not rerun. No builds, installs, process/loop changes, INDI
+commands or notebook execution occurred on the instrument. The installed PO4AO
+binary and config SHA-256 values remained unchanged:
+`048af3ba45a1c2353e2712cd29da080330225307378142610310adbef0a28553` and
+`51b3badd85fe660a928b7f50b4bcb43aada802437e286c3e2def589a7145bc38` respectively.
