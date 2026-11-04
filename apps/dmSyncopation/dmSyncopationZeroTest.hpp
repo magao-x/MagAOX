@@ -1134,11 +1134,12 @@ inline int dmSyncopation::processZeroTestPrimary( int64_t observed, int64_t rece
                 baseline     = main;
                 haveBaseline = true;
             }
-            else if( main.inode != baseline.inode ||
-                     ( main.counter == baseline.counter && !synco::ZeroTiming::equal( main, baseline ) ) )
+            else if( main.inode != baseline.inode )
             {
                 break;
             }
+            // UpdateIm writes the timestamp before incrementing cnt0. Keep waiting on the trusted counter;
+            // a changed timestamp alone neither completes publication nor establishes a new baseline.
             else if( main.counter != baseline.counter )
             {
                 if( baseline.counter == UINT64_MAX || main.counter != baseline.counter + 1 ||
@@ -1185,9 +1186,11 @@ inline int dmSyncopation::processZeroTestPrimary( int64_t observed, int64_t rece
             const auto target = zeroTestPublicationTarget( synco::stepGrid( grid, periodQ32, step, m_requested ).ns );
             zeroTestSkip( step, reason, ZeroStage::mainAcknowledgement, target, rejectedAt, main );
         }
-        m_zeroLastCombined = main;
+        const bool pendingCommit = haveBaseline && main.inode == baseline.inode && main.counter == baseline.counter &&
+                                   !synco::ZeroTiming::equal( main, baseline );
+        m_zeroLastCombined = pendingCommit ? baseline : main;
         m_zeroHaveCombined =
-            synco::ZeroTiming::valid( main ) &&
+            !pendingCommit && synco::ZeroTiming::valid( main ) && main.inode == m_zeroCombinedIdentity &&
             ( !recovering || simulationTimestamp( { time_t( main.sec ), long( main.nsec ) } ) >= publication );
         return 0;
     }

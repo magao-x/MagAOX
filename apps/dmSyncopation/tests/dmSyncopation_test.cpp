@@ -6737,8 +6737,15 @@ struct ZeroClock
     static inline int64_t  lateOnceAt{ 0 };            ///< Delay one selected wake without moving subsequent targets.
     static inline int64_t  mainDelay{ 0 };     ///< Delay fake dmcomb relative to each genuine primary publication.
     static inline int64_t  pendingMainAt{ 0 }; ///< A pending main combination in the private virtual clock.
-    static inline int64_t  releaseDelay{ 0 };  ///< Delay the observer's release capture without changing its endpoint.
-    static inline int64_t  pendingReleaseAt{ 0 }; ///< Scheduled local observation of one delayed release record.
+    static inline int64_t  mainTimestampLeadNs{ 0 }; ///< Main writetime becomes visible this long before cnt0 advances.
+    static inline int64_t  pendingMainCounterAt{ 0 }; ///< Scheduled completion of the timestamp-first publication.
+    static inline timespec pendingMainStamp{}; ///< Producer timestamp retained unchanged when its counter advances.
+    static inline bool     auxiliaryDuringMainSplit{
+        false };                                    ///< An auxiliary was observed before main publication finished.
+    static inline uint64_t mainMatchesAtSplit{ 0 };     ///< Association count before exposing the next main timestamp.
+    static inline bool mainMatchedDuringSplit{ false }; ///< A pending timestamp was incorrectly accepted as complete.
+    static inline int64_t releaseDelay{ 0 }; ///< Delay the observer's release capture without changing its endpoint.
+    static inline int64_t pendingReleaseAt{ 0 }; ///< Scheduled local observation of one delayed release record.
     static inline MagAOX::dmSyncoSimulation::Readiness pendingRelease; ///< Delayed fixture-owned release evidence.
     static inline int64_t validationDelay{ 0 }; ///< One-shot cost after the early wake, before validation completes.
     static inline int64_t injectionAt{ 0 };     ///< Absolute one-shot mutation during a bounded trial wait.
@@ -6752,7 +6759,14 @@ struct ZeroClock
     static inline std::vector<int64_t> posts;        ///< Actual auxiliary publication times observed by the fixture.
 
     /// Retain one exact combined publication and optional early release.
-    static void combined();
+    static void
+    combined( const timespec *stamp = nullptr /**< [in] Optional already-visible publication timestamp. */ );
+
+    /// Begin a main publication, optionally exposing its timestamp before its counter while write remains clear.
+    static void beginMain();
+
+    /// Complete an already-started main publication without changing its visible timestamp.
+    static void finishMain();
 
     /// Observe completed auxiliary publications without waiting on real time or hardware.
     static int64_t now();
@@ -6777,12 +6791,12 @@ struct ZeroClock
     static int64_t warm();
 };
 
-void ZeroClock::combined()
+void ZeroClock::combined( const timespec *stamp )
 {
     auto &image     = streams->images[1];
     image.md->write = 1;
     ++image.md->cnt0;
-    image.md->writetime = synco::toTimespec( 2000000000000000000LL + publicationClockStep + time );
+    image.md->writetime = stamp ? *stamp : synco::toTimespec( 2000000000000000000LL + publicationClockStep + time );
     image.md->write     = 0;
 
     if( release )
@@ -6806,6 +6820,28 @@ void ZeroClock::combined()
                 app->m_simulationReleaseQueue.push( { record, time, app->m_simulationReleaseEpoch.load(), true } ) );
         }
     }
+}
+
+void ZeroClock::beginMain()
+{
+    if( mainTimestampLeadNs == 0 )
+    {
+        combined();
+        return;
+    }
+
+    // ImageStreamIO publishes writetime before cnt0; dmcomb need not assert write around this metadata window.
+    pendingMainStamp                 = synco::toTimespec( 2000000000000000000LL + publicationClockStep + time );
+    mainMatchesAtSplit               = app->m_zeroStats.mainMatched;
+    streams->images[1].md->writetime = pendingMainStamp;
+    streams->images[1].md->write     = 0;
+    pendingMainCounterAt             = time + mainTimestampLeadNs;
+}
+
+void ZeroClock::finishMain()
+{
+    pendingMainCounterAt = 0;
+    combined( &pendingMainStamp );
 }
 
 int64_t ZeroClock::now()
@@ -6872,6 +6908,14 @@ int64_t ZeroClock::now()
         {
             ++streams->images[1].md->inode;
         }
+        else if( injection == 19 )
+        {
+            streams->images[1].md->cnt0 += 2;
+        }
+        else if( injection == 20 )
+        {
+            --streams->images[1].md->cnt0;
+        }
         else if( injection == 7 || injection == 8 || ( injection >= 10 && injection <= 16 ) )
         {
             REQUIRE( endpoint != nullptr );
@@ -6929,7 +6973,17 @@ int64_t ZeroClock::now()
     if( pendingMainAt && time >= pendingMainAt )
     {
         pendingMainAt = 0;
-        combined();
+        beginMain();
+    }
+
+    if( pendingMainCounterAt && app->m_zeroStats.mainMatched > mainMatchesAtSplit )
+    {
+        mainMatchedDuringSplit = true;
+    }
+
+    if( pendingMainCounterAt && time >= pendingMainCounterAt )
+    {
+        finishMain();
     }
 
     if( pendingReleaseAt && time >= pendingReleaseAt )
@@ -6940,7 +6994,8 @@ int64_t ZeroClock::now()
 
     if( app && streams->images[2].md->cnt0 != targetCounter )
     {
-        targetCounter = streams->images[2].md->cnt0;
+        auxiliaryDuringMainSplit = auxiliaryDuringMainSplit || pendingMainCounterAt != 0;
+        targetCounter            = streams->images[2].md->cnt0;
         posts.push_back( time );
         // The private SDK-free publisher uses the same synthetic producer clock as its main.
         streams->images[2].md->writetime = synco::toTimespec( 2000000000000000000LL + publicationClockStep + time );
@@ -7042,6 +7097,11 @@ void ZeroClock::connect( Harness &scheduler, Streams &images, int steps )
     wakeDelay            = 0;
     publicationClockStep = publicationClockDelay = 0;
     lateOnceAt = mainDelay = pendingMainAt = 0;
+    mainTimestampLeadNs = pendingMainCounterAt = 0;
+    pendingMainStamp                           = {};
+    auxiliaryDuringMainSplit                   = false;
+    mainMatchesAtSplit                         = 0;
+    mainMatchedDuringSplit                     = false;
     releaseDelay = pendingReleaseAt = 0;
     pendingRelease                  = {};
     validationDelay                 = 0;
@@ -7083,7 +7143,13 @@ void ZeroClock::primary( int64_t observed, int64_t publication )
     {
         time          = pendingMainAt;
         pendingMainAt = 0;
-        combined();
+        beginMain();
+    }
+
+    if( pendingMainCounterAt && pendingMainCounterAt <= observed )
+    {
+        time = pendingMainCounterAt;
+        finishMain();
     }
 
     time            = observed;
@@ -7099,7 +7165,7 @@ void ZeroClock::primary( int64_t observed, int64_t publication )
     }
     else
     {
-        combined();
+        beginMain();
     }
     app->shmimMonitorTiming( dev::shmimT{}, dev::shmimMonitorEvent::receipt );
     REQUIRE( app->processImage( nullptr, dev::shmimT{} ) == 0 );
@@ -9461,6 +9527,149 @@ TEST_CASE( "counter publication trial recovers delayed main output after a rejec
     CHECK( app.m_zeroStats.clockExcludedCycles == 1 );
     CHECK( app.m_zeroStats.clockExcludedSlots == 3 );
     CHECK( app.m_zeroStats.mainUnmatched == 0 );
+    checkZeroPartition( app );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::processZeroTestPrimary;
+    MagAOX::app::dmSyncopation::zeroTestWait;
+#endif
+    // clang-format on
+}
+
+/// Timestamp-first publication is pending evidence until its counter advances, in both normal and recovery paths.
+TEST_CASE( "counter publication main association waits through timestamp-first metadata",
+           "[dmSyncopation][zeroTest][publication][clockRecovery]" )
+{
+    Streams streams;
+    Harness app;
+    ZeroClock::connect( app, streams, 4 );
+    app.m_zeroWakeAheadUs = 10;
+    app.m_zeroLateUs      = 2;
+    const auto next       = ZeroClock::warm();
+    app.m_enabled         = true;
+    ZeroClock::primary( next );
+    REQUIRE( app.m_zeroStats.posted == 3 );
+    const bool recovery = GENERATE( false, true );
+    auto       current  = next + 500000;
+
+    if( recovery )
+    {
+        ZeroClock::mainDelay             = 10000;
+        ZeroClock::publicationClockDelay = 2000;
+        ZeroClock::primary( current );
+        REQUIRE_FALSE( app.m_zeroHaveCombined );
+        REQUIRE( app.m_zeroStats.posted == 3 );
+        current += 500000;
+    }
+
+    ZeroClock::mainDelay           = 10000;
+    ZeroClock::mainTimestampLeadNs = 4000;
+
+    for( unsigned cycle = 0; cycle < 3; ++cycle )
+    {
+        ZeroClock::primary( current + int64_t( cycle ) * 500000 );
+        CHECK( app.m_zeroStats.mainMatched == cycle + 2 );
+        CHECK( app.m_zeroStats.mainUnmatched == 0 );
+        CHECK( app.m_zeroStats.posted == ( cycle + 2 ) * 3 );
+        CHECK( app.m_zeroStats.skipped == 0 );
+        CHECK( app.m_zeroStats.mainRebaselined == ( recovery ? 1 : 0 ) );
+        CHECK( ZeroClock::pendingMainCounterAt == 0 );
+        CHECK_FALSE( ZeroClock::auxiliaryDuringMainSplit );
+        CHECK_FALSE( ZeroClock::mainMatchedDuringSplit );
+    }
+
+    REQUIRE( ZeroClock::posts.size() == 12 );
+
+    for( unsigned cycle = 0; cycle < 3; ++cycle )
+    {
+        for( unsigned step = 1; step < 4; ++step )
+        {
+            const auto target = current + int64_t( cycle ) * 500000 + step * 125000;
+            CHECK( ZeroClock::posts[3 + cycle * 3 + step - 1] >= target );
+            CHECK( ZeroClock::posts[3 + cycle * 3 + step - 1] <= target + 2000 );
+        }
+    }
+    CHECK( app.m_zeroStats.clockExcludedCycles == ( recovery ? 1 : 0 ) );
+    checkZeroPartition( app );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::processZeroTestPrimary;
+    MagAOX::app::dmSyncopation::zeroTestWait;
+    MagAOX::app::dmSyncopation::zeroTestResources;
+#endif
+    // clang-format on
+}
+
+/// A timestamp change with no completed counter update cannot authorize a write or extend the association deadline.
+TEST_CASE( "counter publication pending metadata preserves association guards",
+           "[dmSyncopation][zeroTest][publication][clockRecovery]" )
+{
+    Streams streams;
+    Harness app;
+    ZeroClock::connect( app, streams, 4 );
+    app.m_zeroWakeAheadUs = 10;
+    const auto next       = ZeroClock::warm();
+    app.m_enabled         = true;
+    ZeroClock::primary( next );
+    REQUIRE( app.m_zeroStats.posted == 3 );
+    const auto current             = next + 500000;
+    const auto baseline            = app.m_zeroLastCombined;
+    ZeroClock::mainDelay           = 10000;
+    ZeroClock::mainTimestampLeadNs = 1000000;
+    auto expected                  = Harness::ZeroOutcome::combinedUnclassified;
+
+    SECTION( "unchanged counter times out without adopting the pending timestamp" )
+    {
+    }
+
+    SECTION( "disable while the timestamp is pending cancels the cycle" )
+    {
+        ZeroClock::injectionAt = current + 12000;
+        ZeroClock::injection   = 4;
+        expected               = Harness::ZeroOutcome::cancelled;
+    }
+
+    SECTION( "finite expiry while the timestamp is pending cancels the cycle" )
+    {
+        app.m_zeroDurationSec = ( current - app.m_zeroStats.startedNs + 15000 ) * 1e-9;
+        expected              = Harness::ZeroOutcome::durationExpired;
+    }
+
+    SECTION( "a counter jump while metadata is pending is ambiguous" )
+    {
+        ZeroClock::injectionAt = current + 12000;
+        ZeroClock::injection   = 19;
+    }
+
+    SECTION( "a counter regression while metadata is pending is ambiguous" )
+    {
+        ZeroClock::injectionAt = current + 12000;
+        ZeroClock::injection   = 20;
+    }
+
+    ZeroClock::primary( current );
+    CHECK( app.m_zeroStats.posted == 3 );
+    CHECK( app.m_zeroStats.mainMatched == 1 );
+    CHECK( app.m_zeroStats.mainUnmatched == 1 );
+    CHECK( app.m_zeroStats.mainRebaselined == 0 );
+    CHECK( app.m_zeroStats.skipped == 3 );
+    CHECK_FALSE( ZeroClock::auxiliaryDuringMainSplit );
+    CHECK_FALSE( ZeroClock::mainMatchedDuringSplit );
+    CHECK( ZeroClock::pendingMainCounterAt > ZeroClock::time );
+    CHECK( ZeroClock::time <= current + 55000 );
+
+    if( streams.images[1].md->cnt0 == baseline.counter )
+    {
+        CHECK( synco::ZeroTiming::equal( app.m_zeroLastCombined, baseline ) );
+    }
+    const auto events = zeroAuxiliaryEvents( app );
+    REQUIRE( events.size() == 6 );
+
+    for( size_t index = 3; index < events.size(); ++index )
+    {
+        CHECK( events[index].reason == expected );
+        CHECK( events[index].stage == Harness::ZeroStage::mainAcknowledgement );
+    }
     checkZeroPartition( app );
     // clang-format off
 #ifdef DMSYNCOPATION_TEST_DOXYGEN_REF

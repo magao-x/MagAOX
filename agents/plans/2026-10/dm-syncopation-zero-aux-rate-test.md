@@ -2307,3 +2307,59 @@ unchanged 120-second test; no logdump/controller/configuration change is needed.
 The [counter-publication plan](../2026-11/dm-syncopation-counter-publication-targets.md#2026-11-04-clock-rejection-evidence-and-bounded-rebaselining)
 records the design, tests and next command. No agent operated the instrument;
 hardware validation of the updated recovery remains pending.
+
+## 2026-11-04: schema-9 capture finds a normal-publication guard regression
+
+`zero-aux-8000Hz-20261104T202704Z`, revision `656be22d`, repeats the unchanged
+120-second setup. The new counters reconcile **720,000 opportunities** as
+**717,480 posted + 2,517 explicit skips + 3 clock-excluded slots**. There are
+717,479 observed acknowledgements; the final acknowledgement wait is truncated
+by finite expiry. Publication delivery is 99.650000%.
+
+The one 1,313 ns clock bracket at active approximately 19.888 s is retained with
+exact before/producer/after times. It excludes three auxiliary slots and is
+followed by `mainRebaselined=1` without the old extra association cascade. The
+other failures have a different cause: 589 unmatched mains comprise startup
+plus 196 repeating triplets, accounting for 1,767 auxiliary skips. The first
+sample has an unchanged combined counter but newly published writetime, and
+the next increment retains that exact writetime. The new strict guard mistakes
+ImageStreamIO's normal writetime-before-counter transition for an association
+fault. A correction and regression tests are in progress; this capture does not
+qualify that correction.
+
+The other 750 skips are all step-2 final-guard lateness, even primary counters,
+at active 74.556-78.917 s and target phase 136.695-139.539 us modulo 1 ms. Their
+payloads and validation finished early. This reproduces the periodic phase band
+without identifying the interrupt/preemption or guard operation responsible.
+
+Controller execution/admission/loss counters and camera frame-loss counters
+show no new faults. Exact SDK/reader joins cover all 239,410 classified mains;
+diagnostic invalid/gap counts and `readerInvalid=1` remain explicit exclusions.
+There are no event/log/reader queue drops. The
+[counter-publication plan](../2026-11/dm-syncopation-counter-publication-targets.md#2026-11-04-schema-9-capture-validates-clock-recovery-and-exposes-a-metadata-guard-regression)
+records detailed counter, phase, timing and sampling evidence. No agent operated
+the instrument, and the next task is the narrowly scoped metadata-transition
+guard correction rather than a timing-limit relaxation.
+
+## 2026-11-04: fix and verify the metadata-transition regression
+
+Corrected `dmSyncopationZeroTest.hpp` to wait while the combined counter remains
+unchanged, even when writetime has advanced. It does not accept or rebaseline
+from the timestamp alone. Matching still requires the exact next counter,
+current-main timestamp, source identity, deadline and downstream reader
+clearance. If an incomplete transition times out, the stable key is retained
+and the uncommitted pair is not promoted into a trusted baseline.
+
+The private main-publication fixture now models writetime-before-counter order
+with the write flag clear during the intermediate window. Ordinary and
+recovery tests wait through that window without accepting a main or posting
+auxiliary data early, retain the frozen targets and avoid later cascades.
+Timeout, cancellation, expiry, jump and regression remain fail-closed.
+
+Verification passes **143 app cases / 6,090,323 assertions**, a clean production
+build, formatting and diff checks. Schema 9, helper, configuration and timing
+bounds remain unchanged. Rebuild/restart dmSyncopation only and repeat the same
+120-second capture; separate investigation of the recurring final-guard phase
+band remains open. The
+[counter-publication plan](../2026-11/dm-syncopation-counter-publication-targets.md#2026-11-04-correct-the-writetime-before-counter-transition)
+records the correction and verification. No agent operated the instrument.

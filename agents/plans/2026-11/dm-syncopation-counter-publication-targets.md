@@ -562,3 +562,180 @@ Affected runtime files are `dmSyncopation.hpp` and `dmSyncopationZeroTest.hpp`;
 the app tests, capture helper/private tests, operator guide and engineering
 record accompany them. No common device or backend code changed. The new
 hardware comparison remains pending.
+
+## 2026-11-04: schema-9 capture validates clock recovery and exposes a metadata guard regression
+
+`zero-aux-8000Hz-20261104T202704Z` uses revision `656be22d`, schema 9 and the
+same 120-second preset. The operator reports no external changes. The helper
+finishes normally after **120.000003839 s** with 240,000 counted main cycles and
+720,000 auxiliary opportunities. The new denominator fields reconcile directly:
+
+```text
+717480 posted + 2517 explicit skips + 3 clock-excluded slots = 720000
+```
+
+Thus 717,480 auxiliary publications were made (**99.650000%** of opportunities),
+of which 717,479 acknowledgements were observed. The final unacknowledged
+publication again has `duration_expired` during acknowledgement; it is not a
+demonstrated SDK or publication failure. The 2,517 explicit skips separate into
+**1,767 main-association skips** and **750 step-2 final-guard lateness skips**.
+There are no preparation-late, validation-late, reader-missing, changed-primary,
+resource, wait-error or cancellation outcomes. `readerInvalid=1` remains an
+explicit readiness-evidence exclusion, not a reader queue drop.
+
+### Clock recovery works on the one rejected bracket
+
+There is one active clock rejection at approximately **19.888 s**, primary
+counter `115541820`. The retained event is `wide_bracket`, with exact readings:
+
+| Field | Nanoseconds |
+| --- | ---: |
+| Monotonic before | 2691901085839841 |
+| Producer clock | 1793824062495714834 |
+| Monotonic after | 2691901085841154 |
+| Bracket width | 1,313 |
+| Acceptance limit | 1,000 |
+
+The local read bracket spans **839.841-841.154 us modulo 1 ms**, away from the
+roughly 137 us final-guard disturbance band. It omits exactly one cycle's three
+auxiliary opportunities. `mainRebaselined=1` and the neighboring association
+evidence show recovery without the old two-cycle stale-output cascade. No
+clock discontinuity, malformed/future/stale publication or mapping error is
+reported. The other main-association failures therefore cannot be assigned to
+clock recovery. Accepted active brackets reach 480 ns, and source statistics
+have no invalid evidence, timing exclusions or source fault, with one excluded
+source gap corresponding to the rejected cycle.
+
+### The new unchanged-counter guard rejects a normal publication transition
+
+There are **589 unmatched mains**: one startup event plus **196 repeating
+three-main sequences** (192 isolated triplets and two adjacent six-main groups).
+Those 589 mains account for all 1,767 association-dependent auxiliary skips.
+The new stricter unchanged-counter/changed-timestamp check is implicated by the
+reconstructed counter sequence. For 43 groups, the directly retained preceding
+step-3 sample independently proves the unchanged counter/new writetime at the
+first rejection; the repeating unmatched-main identities support the same
+pattern throughout:
+
+1. The combined counter still equals the preceding retained counter, but its
+   writetime has already changed to the current main publication.
+2. The next sampled counter is one higher with **the exact same writetime**.
+3. The following current output is two counters ahead of that stale association
+   baseline, causing another conservative reset.
+
+ImageStreamIO publishes writetime before incrementing the counter. Treating
+that intermediate metadata state as a fatal association change introduces a
+regression in otherwise normal publication handling. The improved rejected-clock
+recovery is not the cause of these 196 groups. The implementation needs to wait
+through the unchanged-counter metadata transition while preserving the frozen
+source identity, fixed deadline and exact increment requirement. That correction
+and its regression tests are in progress; this capture is not its qualification.
+
+### The periodic final-guard pattern also recurs
+
+All **750 late skips** affect step 2 and **even** primary counters. They occur at
+active **74.556324-78.917325 s**, with targets **136.695-139.539 us modulo 1 ms**.
+The parity differs from the earlier run, but the absolute phase band agrees.
+Rejection samples are **2.001-4.924 us late**, median 2.5965 us. Full validation
+had completed **8.072-9.363 us early**, and payload staging **65.550-81.393 us
+early**. This remains a final-wait/guard timing disturbance rather than slow
+preparation. No particular interrupt or kernel operation is identified.
+
+Full-rate auxiliary raw-target errors, in microseconds:
+
+| Step | Count | Mean error | Standard deviation | Maximum lateness |
+| --- | ---: | ---: | ---: | ---: |
+| Auxiliary 1 | 239,410 | +0.076070 | 0.013751 | 3.276 |
+| Auxiliary 2 | 238,660 | +0.084660 | 0.111166 | 5.150 |
+| Auxiliary 3 | 239,410 | +0.076112 | 0.011354 | 0.849 |
+
+Healthy event sampling retains 239,007 of 956,889 healthy outcomes and
+intentionally omits 717,882. The 3,109 exceptional/lifecycle rows are retained,
+for 242,116 event rows total. There are no event/log or reader queue drops.
+Retained healthy successes are still only a subset; use full-rate populations
+for timing tails and all retained exceptions for the association/skip patterns.
+
+### Controller and camera remain free of new execution/loss faults
+
+Controller snapshots add 996,838 timing receipts/submissions and 996,837 SDK
+completions, admissions and retirements; the cross-property snapshots differ
+by one count. There is no increase in overload, rejection/coalescing,
+cancellation/supersession, preparation/post failure, SDK failure/timeout,
+no-send, timing counter-gap or timing-drop totals. Whole-text timing records add
+1,012,874 events/submissions without those failures, with 77 wide-bracket
+exclusions in the controller's separate delivery-clock collector.
+
+Fully active controller receipt intervals span **90.441-518.769 us**, with
+two-second window means 124.9997-130.4130 us and standard deviations
+2.54-28.70 us. Missing auxiliary slots remain visible as real delivery gaps;
+there is no accompanying controller admission-failure increase. SDK worker
+service means are 106.231-106.601 us, maximum 115.948 us. Preparation maximum
+is 24.036 us and reader-release maximum 32.741 us.
+
+All **239,410 classified mains** have SDK and reader matches. Main observer
+receipt-to-SDK mean/maximum is **29.338 / 39.875 us**, reader-start-to-SDK is
+**15.947 / 23.795 us**, and native main SDK service is **103.873 / 107.984 us**.
+The separate diagnostic exclusions are 8,617 invalid timing observations and
+1,036 SDK-observation gaps. These records do not isolate added main SDK wait.
+
+Camera snapshots add 276,778 frames, with no new failed/rejected frames,
+frame/counter gaps, drops or wide brackets. Four new excursion traces and
+13 housekeeping controls are recorded without new control/trace failures.
+Active acquisition interval standard deviations are 0.238-0.838 us and
+publication deviations 1.060-1.435 us; mean acquisition-to-write is
+48.154-48.571 us, maximum 53.681 us. The four retained camera excursions show
+serial overlap and acquisition/publication changes of roughly 20-27 us; they
+do not establish frame loss or identify the separate 1 kHz synco disturbance.
+Contiguous camera frame counters still do not measure persistent frame lag.
+
+No instrument action was performed by an agent. The immediate next step is to
+correct and test the normal metadata-transition regression, while retaining the
+new clock evidence, complete opportunity accounting and existing timing bounds.
+
+## 2026-11-04: correct the writetime-before-counter transition
+
+The capture exposes a regression introduced in the association hardening: a
+new writetime with an unchanged counter was treated as a fatal mismatch. The
+ImageStreamIO update sequence stores writetime before incrementing `cnt0`.
+Polling can observe that intermediate state consistently across both snapshot
+reads, so metadata consistency alone is not proof of completed publication.
+
+The correction keeps the trusted/local baseline unchanged while the observed
+counter is unchanged, even if writetime has advanced. It continues the existing
+bounded wait; it neither accepts the current command nor copies auxiliary data
+on timestamp evidence alone. Matching still requires exactly the expected
+counter increment, a progressing current-main timestamp, the frozen source
+identity and the original association deadline. Reader clearance and all final
+publication guards remain unchanged.
+
+If that pending counter never commits before timeout/cancellation/expiry, the
+uncommitted timestamp/counter pair is not promoted into `m_zeroLastCombined`.
+The old stable key is retained and `m_zeroHaveCombined` is cleared. This also
+avoids turning a timeout during a partial publication into a poisoned baseline
+and subsequent counter-reset cascade. The existing conservative fallback for
+an already-fresh candidate with no known baseline remains unchanged.
+
+This is a narrowly scoped correction to `dmSyncopationZeroTest.hpp`, with a
+private fixture that exposes writetime first and delays the main counter
+commit while the write flag remains clear. Schema 9, capture arguments,
+configuration and timing thresholds are unchanged. The periodic approximately
+137 us modulo-1-ms final-guard disturbance remains a separate open issue; this
+correction addresses only the normal-publication association regression.
+
+Workstation verification passes **143 application cases / 6,090,323
+assertions**, a clean production dmSyncopation build, clang-format and diff
+checks. The new fixture exposes the main timestamp while leaving the old
+counter and a clear write flag visible, then advances the counter while
+preserving that exact timestamp. Both ordinary association and rejected-clock
+recovery wait through a 4 us intermediate state, publish all scheduled slots
+on their original targets and avoid subsequent cascades. Assertions explicitly
+exclude main acceptance or auxiliary publication before counter completion.
+An uncompleted transition remains fail-closed under timeout, cancellation,
+finite expiry, counter jump and regression; pending metadata never replaces
+the stable baseline.
+
+No capture-helper/schema/configuration changes are needed. Rebuild/restart
+dmSyncopation only and repeat the unchanged 120-second command above. The
+periodic final-guard delay still needs separate IRQ/scheduling investigation.
+The hardware capture does not qualify this correction, and no agent operated
+the instrument.
