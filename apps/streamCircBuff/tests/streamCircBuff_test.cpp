@@ -81,9 +81,9 @@ int streamCircBuff_test::source( uint32_t depth )
     m_wtimes.assign( depth, timespec{ 0, 0 } );
     m_cnts.assign( depth, 0 );
 
-    IMAGE &src = shmimMonitorT::m_imageStream;
-    src        = IMAGE{};
-    src.md     = &m_md;
+    IMAGE &src    = shmimMonitorT::m_imageStream;
+    src           = IMAGE{};
+    src.md        = &m_md;
     src.array.raw = m_pixels.data();
     if( depth > 1 )
     {
@@ -238,8 +238,8 @@ TEST_CASE( "streamCircBuff keeps the published counter increasing", "[streamCirc
     streamCircBuff_test app;
     REQUIRE( app.source( 1 ) == 0 );
 
-    std::vector<int16_t> out( 4 );
-    uint64_t           published = 0;
+    std::vector<int16_t>  out( 4 );
+    uint64_t              published = 0;
     std::vector<uint64_t> got;
     for( uint64_t srcCnt0 : { 41, 42, 3, 4, 10 } )
     {

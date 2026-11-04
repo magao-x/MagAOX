@@ -251,7 +251,7 @@ void Camera::start()
 
 void Camera::stop()
 {
-    { //mutex scope
+    { // mutex scope
         std::lock_guard<std::mutex> lock( m_mutex );
         m_stop = true;
     }
@@ -262,7 +262,7 @@ void Camera::stop()
 
 void Camera::request( int target )
 {
-    { //mutex scope
+    { // mutex scope
         std::lock_guard<std::mutex> lock( m_mutex );
         m_requested = target;
         m_reconfig  = true;
@@ -272,7 +272,7 @@ void Camera::request( int target )
 
 void Camera::release()
 {
-    { //mutex scope
+    { // mutex scope
         std::lock_guard<std::mutex> lock( m_mutex );
         m_release = true;
     }
@@ -522,7 +522,7 @@ RelayCamera::~RelayCamera()
 
 void RelayCamera::push( const Frame &frame )
 {
-    { //mutex scope
+    { // mutex scope
         std::lock_guard<std::mutex> lock( m_mutex );
         m_queued.push_back( frame );
     }
@@ -549,7 +549,7 @@ void RelayCamera::stop()
 
 void RelayCamera::dataType( uint8_t type )
 {
-    { //mutex scope
+    { // mutex scope
         std::lock_guard<std::mutex> lock( m_mutex );
         m_dataType = type;
         m_reconfig = true;
@@ -607,7 +607,7 @@ int RelayCamera::frameGrabberRelayTiming( timespec &writetime, uint64_t &cnt0 )
 int RelayCamera::frameGrabberPostPublish( IMAGE *imageStream )
 {
     uint64_t slot = imageStream->md->cnt1;
-    { //mutex scope
+    { // mutex scope
         std::lock_guard<std::mutex> lock( m_mutex );
         m_publishedTypes.push_back( imageStream->md->datatype );
         m_published.push_back( { imageStream->md->atime, imageStream->md->writetime, imageStream->md->cnt0, false } );
@@ -842,7 +842,8 @@ TEST_CASE( "frameGrabber retains requests while waiting for readiness and power"
     REQUIRE( camera.m_restarts == 1 );
 }
 
-/// A relaying derived class sets the published write time and counter, and declining falls back to the clock and increment.
+/// A relaying derived class sets the published write time and counter, and declining falls back to the clock and
+/// increment.
 /** \ingroup frameGrabber_unit_test */
 TEST_CASE( "frameGrabber publishes relayed write times and counters", "[frameGrabber]" )
 {

@@ -405,7 +405,10 @@ int frameGrabber<derivedT>::postPublishHook( derivedT &hookOwner, IMAGE *imageSt
 
 template <class derivedT>
 template <class hookT>
-auto frameGrabber<derivedT>::relayTimingHook( hookT &hookOwner, timespec &writetime, uint64_t &cnt0, int callPriorityTag )
+auto frameGrabber<derivedT>::relayTimingHook( hookT    &hookOwner,
+                                              timespec &writetime,
+                                              uint64_t &cnt0,
+                                              int       callPriorityTag )
     -> decltype( hookOwner.frameGrabberRelayTiming( writetime, cnt0 ) )
 {
     static_cast<void>( callPriorityTag );
@@ -414,7 +417,10 @@ auto frameGrabber<derivedT>::relayTimingHook( hookT &hookOwner, timespec &writet
 }
 
 template <class derivedT>
-int frameGrabber<derivedT>::relayTimingHook( derivedT &hookOwner, timespec &writetime, uint64_t &cnt0, long callPriorityTag )
+int frameGrabber<derivedT>::relayTimingHook( derivedT &hookOwner,
+                                             timespec &writetime,
+                                             uint64_t &cnt0,
+                                             long      callPriorityTag )
 {
     static_cast<void>( hookOwner );
     static_cast<void>( writetime );
@@ -964,8 +970,8 @@ void frameGrabber<derivedT>::fgThreadExec()
             }
         }
 
-        if( m_width != imsize[0] || m_height != imsize[1] || m_circBuffLength != imsize[2] || m_imageStream == nullptr ||
-            m_imageStream->md[0].datatype != m_dataType )
+        if( m_width != imsize[0] || m_height != imsize[1] || m_circBuffLength != imsize[2] ||
+            m_imageStream == nullptr || m_imageStream->md[0].datatype != m_dataType )
         {
             if( m_imageStream != nullptr && m_ownShmim )
             {
