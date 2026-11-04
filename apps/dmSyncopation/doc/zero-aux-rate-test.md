@@ -49,7 +49,7 @@ make -C apps/dmSyncopation &&
 make -C apps/dmSyncopation install
 ```
 
-The installed binary must expose `zero_test.labelVersion=8`,
+The installed binary must expose `zero_test.labelVersion=9`,
 `zero_test.targetEndpoint=1` and `zero_test.idealPublisher=1`; an older
 coordinated-trial binary does not have the current progress/reporting interface.
 Only dmSyncopation needs rebuilding.
@@ -110,7 +110,8 @@ with gains/workload/settings unchanged:
 - BMC SDK worker FIFO55/spare56 and ordered post worker FIFO30/spare31.
 - The working three-credit pipeline and matching delivery-clock diagnostics.
 - `sysMonRTC.set_latency.toggle=On`.
-- dmcomb mode 4 / DELAY / 10 us, using auxiliary-counter change detection.
+- dmcomb mode 4 / DELAY / 5 us, using auxiliary-counter change detection. This
+  is the current optimized baseline; earlier captures used 10 us.
 
 The selected existing auxiliary, here `dm01disp07`, must already contain zeros
 and be exclusively available to this trial. Stop its other provider; **keep the
@@ -129,7 +130,7 @@ After restarting, check the new mode's readbacks while enable remains Off:
 timeout -k 2s 8s getINDI dmtweeter-synco.zero_test
 ```
 
-Expect `labelVersion=8`, `targetEndpoint=1`, `idealPublisher=1`, `enabled=1` and a
+Expect `labelVersion=9`, `targetEndpoint=1`, `idealPublisher=1`, `enabled=1` and a
 valid, fresh progress snapshot. `eventStride=4` is the default successful-event sampling
 described below; it does not reduce the command rate or timing populations.
 No `scheduler.maxCadenceHz=8000` setting is needed for the 8 kHz trial. This
@@ -197,7 +198,7 @@ set `publicationAdvanceUs=0`, `commitLeadUs=0`, `lateUs=5`, `wakeAheadUs=0`,
 restart synco, and use the two-argument commands below. This does not reproduce
 the older callback-clock phase fit. Omitting the third, fourth and fifth helper
 arguments expects zero downstream advance, wake-ahead and commit lead,
-respectively. All runs require schema 8 and endpoint 1; mismatched presets are
+respectively. All runs require schema 9 and endpoint 1; mismatched presets are
 rejected before enable.
 
 Start with `dmtweeter-synco.enable.toggle=Off`. From the repository root, run the
@@ -246,7 +247,7 @@ No sudo is required.
 
 ## Read the counter-publication timing evidence
 
-`zero_test` version 8 reports `targetEndpoint=1`, `commitLeadUs`, `lateUs` and
+`zero_test` version 9 reports `targetEndpoint=1`, `commitLeadUs`, `lateUs` and
 `wakeAheadUs`. `publicationAdvanceUs` must be zero. The event fields distinguish
 the desired counter point from the earlier dispatch and validation points:
 
@@ -277,6 +278,51 @@ Use the integer text-event and `kind=clock` fields for nanosecond arithmetic;
 large absolute nanosecond values in INDI number properties have floating-point
 rounding. The small duration/error populations are already computed before
 that conversion.
+
+Every rejected clock capture or publication mapping while requested On produces
+an unsampled event with
+`action=clock_rejected`, `reason=clock_rejected` and `stage=clock_qualification`.
+It retains the primary source identity, raw fitted target when available, and
+these exact fields before a later callback can overwrite them:
+
+| Field | Meaning |
+| --- | --- |
+| `clockFailure` | `invalid_capture`, `wide_bracket`, `discontinuity`, `future_publication`, `stale_publication` or `invalid_mapping`. |
+| `clockBeforeNs`, `clockProducerNs`, `clockAfterNs` | Monotonic / CLOCK_ISIO / monotonic read bracket. The before/after times can be compared modulo 1 ms without a clock conversion. |
+| `clockBracketNs`, `clockBracketLimitNs` | Actual bracket width and the unchanged 1 us acceptance limit. |
+| `clockMaxAgeNs` | Applied publication age limit. |
+| `clockActive`, `clockExcludedSlots` | Whether this main observation falls inside the started finite interval, and its omitted auxiliary opportunities. Warmup and terminal observations have zero excluded slots. |
+
+The local mapped target is zero in a rejected-clock event; it must not be
+treated as a qualified wait target. When `clockActive=1`, this event records an
+active whole-cycle exclusion; warmup/terminal rows are diagnostic only. It is
+not a posted main command or an additional per-slot skip.
+
+`zero_test` and summary records distinguish the complete counted population:
+
+| Field | Meaning |
+| --- | --- |
+| `clockRejected` | All rejected observations while requested On, including warmup. |
+| `clockExcludedCycles`, `clockExcludedSlots` | Rejected-clock observations and auxiliary slots within the started finite interval. These slots are outside `skipped`. |
+| `mainCycles` | `mainObserved + clockExcludedCycles`. |
+| `auxiliaryOpportunities` | Accumulated active-cycle slots, including clock-excluded slots; a later disabled step change cannot rewrite this total. |
+| `mainRebaselined` | Main associations recovered by observing a coherent stale output followed by exactly one current output. |
+
+For counted active cycles, auxiliary opportunities reconcile as
+`posted + skipped + clockExcludedSlots`. These counters do not reconstruct
+upstream commands whose callbacks or coherent metadata were never observed.
+Qualified callbacks that remain in cadence warmup/reacquisition are also outside
+the scheduled-cycle population until the grid is ready.
+
+After a clock exclusion, main association may use a coherent stale combined
+output as a local waiting baseline. It waits within the original main-output
+deadline for exactly one counter increment and a publication timestamp at or
+after the current main. It commits that current identity before auxiliary work.
+This avoids using the preceding main's stale output as the next cycle's trusted
+baseline. Counter jumps, source changes, timeout, primary changes, cancellation
+and expiry still veto the cycle. An already-fresh output with no trustworthy
+baseline retains the conservative one-cycle skip; its timestamp alone does not
+prove which command produced it. Exact reader clearance remains required.
 
 The primary timing evidence is `zero_publication` and `[zero_test]
 kind=publication endpoint=cnt0_writetime_proxy`. Its full-rate populations are
@@ -333,7 +379,7 @@ populations have count zero and extrema/RMS of -1. These endpoints are combined
 publication proxies before the selected controller semaphore post. Controller
 receipt jitter and SDK service remain separate evidence in dmtweeter telemetry.
 
-Before requesting On, the helper requires reporting version at least 8 and endpoint 1,
+Before requesting On, the helper requires reporting version at least 9 and endpoint 1,
 `snapshotValid=1`, positive `snapshotSequence`, and reported `snapshotAgeSec`
 from zero through two seconds. Polls request an explicit list of fully qualified
 `zero_test` elements. They return when all requested fields arrive, avoiding the
@@ -478,7 +524,7 @@ coverage/lifecycle conditions; they are not additional skip reasons to add again
 A guard failure during acknowledgement belongs to the posted attempt's named
 reason and does not increment a pre-publication skip counter.
 
-New summaries/events carry `labelVersion=8`; summaries/INDI also identify
+New summaries/events carry `labelVersion=9`; summaries/INDI also identify
 `idealPublisher=1`. Event text includes named `action`,
 `reason` and `stage` fields alongside the retained numeric `outcome`. The stage
 distinguishes preparation, reader/combined validation, publication deadline/
