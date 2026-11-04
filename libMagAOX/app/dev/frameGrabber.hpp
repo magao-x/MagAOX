@@ -964,7 +964,8 @@ void frameGrabber<derivedT>::fgThreadExec()
             }
         }
 
-        if( m_width != imsize[0] || m_height != imsize[1] || m_circBuffLength != imsize[2] || m_imageStream == nullptr )
+        if( m_width != imsize[0] || m_height != imsize[1] || m_circBuffLength != imsize[2] || m_imageStream == nullptr ||
+            m_imageStream->md[0].datatype != m_dataType )
         {
             if( m_imageStream != nullptr && m_ownShmim )
             {

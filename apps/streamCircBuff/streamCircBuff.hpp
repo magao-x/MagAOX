@@ -52,8 +52,6 @@ public:
 
    ///@}
 
-   typedef float realT;
-
    /// The base shmimMonitor type
    typedef dev::shmimMonitor<streamCircBuff> shmimMonitorT;
 
@@ -75,7 +73,7 @@ protected:
 
    std::mutex m_stageMutex; ///< Protects the staged frame and its timing, which the sm thread writes and the fg thread reads.
 
-   std::vector<char> m_staged; ///< Copy of the latest source frame in the source data type, written by the sm thread.
+   std::vector<char> m_staged; ///< Copy of the latest source frame, written by the sm thread.
 
    timespec m_stagedAtime {0,0}; ///< Source acquisition time of the staged frame.
 
@@ -133,8 +131,6 @@ public:
 
 
 protected:
-
-   float (*pixget)(void *, size_t) {nullptr}; ///< Pointer to a function to extract the image data as float
 
    //shmimMonitor Interface
    int allocate( const dev::shmimT & dummy /**< [in] tag to differentiate shmimMonitor parents.*/);
@@ -310,8 +306,6 @@ int streamCircBuff::allocate( const dev::shmimT & dummy)
 {
    static_cast<void>(dummy);
 
-   pixget = getPixPointer<float>(shmimMonitorT::m_dataType);
-
    { //mutex scope
       std::lock_guard<std::mutex> lock(m_stageMutex);
       m_staged.resize(shmimMonitorT::m_width * shmimMonitorT::m_height * shmimMonitorT::m_typeSize);
@@ -396,7 +390,7 @@ int streamCircBuff::configureAcquisition()
 
    frameGrabberT::m_width = shmimMonitorT::m_width;
    frameGrabberT::m_height = shmimMonitorT::m_height;
-   frameGrabberT::m_dataType = IMAGESTRUCT_FLOAT;
+   frameGrabberT::m_dataType = shmimMonitorT::m_dataType;
 
    return 0;
 }
@@ -430,20 +424,14 @@ int streamCircBuff::acquireAndCheckValid()
 
 int streamCircBuff::loadImageIntoStream(void * dest)
 {
-   float * fdest = reinterpret_cast<float *>(dest);
-   size_t npix = frameGrabberT::m_width * frameGrabberT::m_height;
-
    std::lock_guard<std::mutex> lock(m_stageMutex);
 
-   if(m_staged.size() != npix * shmimMonitorT::m_typeSize)
+   if(m_staged.size() != frameGrabberT::m_width * frameGrabberT::m_height * frameGrabberT::m_typeSize)
    {
       return -1; //the source changed, so reconfigure
    }
 
-   for(size_t n = 0; n < npix; ++n)
-   {
-      fdest[n] = pixget(m_staged.data(), n);
-   }
+   memcpy(dest, m_staged.data(), m_staged.size());
 
    m_currImageTimestamp = m_stagedAtime;
    m_relayWritetime = m_stagedWritetime;

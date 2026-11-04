@@ -443,6 +443,9 @@ class RelayCamera : public MagAOX::app::dev::frameGrabber<RelayCamera>
     /// Timing read back from the stream's per-frame arrays after each publication, protected by m_mutex.
     std::vector<Frame> m_publishedArrays;
 
+    /// Stream data type after each publication, protected by m_mutex.
+    std::vector<uint8_t> m_publishedTypes;
+
     /// Initialize a unique local output circular buffer and disable latency accumulation.
     RelayCamera();
 
@@ -458,6 +461,9 @@ class RelayCamera : public MagAOX::app::dev::frameGrabber<RelayCamera>
     /// Stop and join the worker.
     void stop();
 
+    /// Request a new output data type, applied on the next configuration.
+    void dataType( uint8_t type /**< [in] ImageStreamIO data type. */ );
+
     /// Accept the preset geometry.
     int configureAcquisition();
 
@@ -467,7 +473,7 @@ class RelayCamera : public MagAOX::app::dev::frameGrabber<RelayCamera>
     /// Accept acquisition start.
     int startAcquisition();
 
-    /// Wait for a queued frame and set its acquisition time.
+    /// Wait for a queued frame and set its acquisition time, returning early for shutdown or reconfiguration.
     int acquireAndCheckValid();
 
     /// Accept the frame without pixels.
@@ -541,6 +547,16 @@ void RelayCamera::stop()
         m_worker.join();
 }
 
+void RelayCamera::dataType( uint8_t type )
+{
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_mutex );
+        m_dataType = type;
+        m_reconfig = true;
+    }
+    m_condition.notify_all();
+}
+
 int RelayCamera::configureAcquisition()
 {
     return 0;
@@ -559,7 +575,8 @@ int RelayCamera::startAcquisition()
 int RelayCamera::acquireAndCheckValid()
 {
     std::unique_lock<std::mutex> lock( m_mutex );
-    if( !m_condition.wait_for( lock, 5s, [this] { return m_stop || !m_queued.empty(); } ) || m_stop )
+    if( !m_condition.wait_for( lock, 5s, [this] { return m_stop || m_reconfig || !m_queued.empty(); } ) || m_stop ||
+        m_reconfig )
         return 1;
     m_current = m_queued.front();
     m_queued.pop_front();
@@ -592,6 +609,7 @@ int RelayCamera::frameGrabberPostPublish( IMAGE *imageStream )
     uint64_t slot = imageStream->md->cnt1;
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_mutex );
+        m_publishedTypes.push_back( imageStream->md->datatype );
         m_published.push_back( { imageStream->md->atime, imageStream->md->writetime, imageStream->md->cnt0, false } );
         m_publishedArrays.push_back(
             { imageStream->atimearray[slot], imageStream->writetimearray[slot], imageStream->cntarray[slot], false } );
@@ -854,6 +872,26 @@ TEST_CASE( "frameGrabber publishes relayed write times and counters", "[frameGra
         REQUIRE( p[2].writetime.tv_sec > 1000000000 );
         REQUIRE( p[2].cnt0 == 201 );
     }
+}
+
+/// A data type change with unchanged geometry recreates the output stream.
+/** \ingroup frameGrabber_unit_test */
+TEST_CASE( "frameGrabber recreates the stream when only the data type changes", "[frameGrabber]" )
+{
+    // clang-format off
+    #ifdef FRAMEGRABBER_TEST_DOXYGEN_REF
+    MagAOX::app::dev::frameGrabber::fgThreadExec;
+    #endif
+    // clang-format on
+    RelayCamera camera;
+    camera.push( { { 10, 1 }, { 10, 2 }, 100, true } );
+    REQUIRE( camera.waitPublished( 1 ) );
+    camera.dataType( _DATATYPE_INT16 );
+    camera.push( { { 11, 1 }, { 11, 2 }, 101, true } );
+    REQUIRE( camera.waitPublished( 2 ) );
+    camera.stop();
+
+    REQUIRE( camera.m_publishedTypes == std::vector<uint8_t>{ _DATATYPE_FLOAT, _DATATYPE_INT16 } );
 }
 } // namespace frameGrabberTest
 } // namespace libXWCTest

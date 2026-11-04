@@ -99,7 +99,12 @@ int streamCircBuff_test::source( uint32_t depth )
     shmimMonitorT::m_typeSize = sizeof( int16_t );
 
     int rv = allocate( dev::shmimT() );
-    return rv < 0 ? rv : configureAcquisition();
+    if( rv < 0 || ( rv = configureAcquisition() ) < 0 )
+    {
+        return rv;
+    }
+    frameGrabberT::m_typeSize = ImageStreamIO_typesize( frameGrabberT::m_dataType ); // as the worker does
+    return 0;
 }
 
 void *streamCircBuff_test::frame( size_t slot )
@@ -133,7 +138,7 @@ bool same( const timespec &a /**< [in] first time */, const timespec &b /**< [in
     return a.tv_sec == b.tv_sec && a.tv_nsec == b.tv_nsec;
 }
 
-/// A relayed frame keeps the source pixels, acquisition time, write time and counter.
+/// A relayed frame keeps the source pixels and data type, acquisition time, write time and counter.
 /**
  * \ingroup streamCircBuff_unit_test
  */
@@ -157,9 +162,9 @@ TEST_CASE( "streamCircBuff relays the source frame and its timing", "[streamCirc
     REQUIRE( app.processImage( app.frame( 0 ), dev::shmimT() ) == 0 );
     REQUIRE( app.acquireAndCheckValid() == 0 );
 
-    std::vector<float> out( 4 );
+    std::vector<int16_t> out( 4 );
     REQUIRE( app.loadImageIntoStream( out.data() ) == 0 );
-    REQUIRE( out == std::vector<float>{ 1, 2, 3, 4 } );
+    REQUIRE( out == std::vector<int16_t>{ 1, 2, 3, 4 } );
     REQUIRE( same( app.m_currImageTimestamp, { 5, 6 } ) );
 
     timespec wt{ 0, 0 };
@@ -212,7 +217,7 @@ TEST_CASE( "streamCircBuff publishes each staged frame once", "[streamCircBuff]"
     REQUIRE( app.processImage( app.frame( 0 ), dev::shmimT() ) == 0 );
     sem_post( &app.m_smSemaphore );
 
-    std::vector<float> out( 4 );
+    std::vector<int16_t> out( 4 );
     REQUIRE( app.acquireAndCheckValid() == 0 );
     REQUIRE( app.loadImageIntoStream( out.data() ) == 0 );
     REQUIRE( app.acquireAndCheckValid() == 1 );
@@ -233,7 +238,7 @@ TEST_CASE( "streamCircBuff keeps the published counter increasing", "[streamCirc
     streamCircBuff_test app;
     REQUIRE( app.source( 1 ) == 0 );
 
-    std::vector<float> out( 4 );
+    std::vector<int16_t> out( 4 );
     uint64_t           published = 0;
     std::vector<uint64_t> got;
     for( uint64_t srcCnt0 : { 41, 42, 3, 4, 10 } )
@@ -276,9 +281,9 @@ TEST_CASE( "streamCircBuff relays a multi-frame source using its per-frame timin
     REQUIRE( app.processImage( app.frame( 1 ), dev::shmimT() ) == 0 );
     REQUIRE( app.acquireAndCheckValid() == 0 );
 
-    std::vector<float> out( 4 );
+    std::vector<int16_t> out( 4 );
     REQUIRE( app.loadImageIntoStream( out.data() ) == 0 );
-    REQUIRE( out == std::vector<float>{ 5, 6, 7, 8 } );
+    REQUIRE( out == std::vector<int16_t>{ 5, 6, 7, 8 } );
     REQUIRE( same( app.m_currImageTimestamp, { 11, 12 } ) );
 
     timespec wt;
