@@ -242,6 +242,33 @@ class IndiDeviceHandler(logging.Handler):
         if self.device.connected:
             self.device.connection.send(messages.Message(message=msg, device=self.device.name, timestamp=datetime.datetime.now(timezone.utc)))
 
+class XIndiFifoConnection(transports.IndiFifoConnection):
+    '''FIFO transport for the MagAO-X indiserver, which XDevice announces itself to with
+    "start NAME PID" and "alive NAME PID" lines on the indiserver control FIFO.'''
+
+    def _register_with_indiserver(self):
+        # XDevice announces instead, after locking its PID file and emptying the input FIFO
+        pass
+
+    def drain_input(self):
+        '''Discard whatever is waiting in the input FIFO, sent to a previous instance.
+        Returns the number of bytes discarded.'''
+        fd = self.input_pipe.fileno()
+        n = 0
+        os.set_blocking(fd, False)
+        try:
+            while True:
+                chunk = os.read(fd, 65536)
+                if not chunk:
+                    break
+                n += len(chunk)
+        except BlockingIOError:
+            pass
+        finally:
+            os.set_blocking(fd, True)
+        return n
+
+
 class XDevice(Device):
     prefix_dir : str  = "/opt/MagAOX"
     logs_dir : str = "logs"
@@ -262,6 +289,11 @@ class XDevice(Device):
     _client_pending : set
     _client_retry_delay : float
     _client_next_retry : float
+    indiserver_announce_interval_sec : float = 5.0  # between "alive" announcements to indiserver, 0 disables
+    _indi_ctrl_path : str
+    _indi_announced : bool
+    _indi_announce_time : float
+    _indi_gate_end : float  # NewProperty messages are ignored until indiserver greets us or this time
 
     @classmethod
     def get_default_config_prefix(cls):
@@ -437,25 +469,31 @@ class XDevice(Device):
 
     @classmethod
     def _get_indiserver_ctrl_path(cls):
+        '''The indiserver control FIFO: [indiserver] f in is{MAGAOX_ROLE}.conf if set, else
+        indiserver.ctrl with the driver FIFOs, the indiserver default.'''
         import configparser
         role = os.environ.get("MAGAOX_ROLE", "")
-        if not role:
-            return None
-        conf_path = os.path.join(cls.prefix_dir, cls.config_dir, f"is{role}.conf")
-        try:
-            cp = configparser.ConfigParser()
-            cp.read(conf_path)
-            return cp.get("indiserver", "f", fallback=None)
-        except Exception:
-            return None
+        if role:
+            conf_path = os.path.join(cls.prefix_dir, cls.config_dir, f"is{role}.conf")
+            try:
+                cp = configparser.ConfigParser()
+                cp.read(conf_path)
+                path = cp.get("indiserver", "f", fallback=None)
+                if path:
+                    return path
+            except Exception:
+                pass
+        return os.path.join(cls.prefix_dir, "drivers", "fifos", "indiserver.ctrl")
 
     def __init__(self, name, config, *args, verbose=False, all_verbose=False, **kwargs):
         self._startup_time = datetime.datetime.now(timezone.utc)
         fifos_root = self.prefix_dir + "/drivers/fifos"
         conn_kwargs = dict(name=name, fifos_root=fifos_root)
-        if 'indiserver_ctrl_path' in inspect.signature(transports.IndiFifoConnection.__init__).parameters:
-            conn_kwargs['indiserver_ctrl_path'] = self._get_indiserver_ctrl_path()
-        super().__init__(name, *args, connection_class=partial(transports.IndiFifoConnection, **conn_kwargs), **kwargs)
+        super().__init__(name, *args, connection_class=partial(XIndiFifoConnection, **conn_kwargs), **kwargs)
+        self._indi_ctrl_path = self._get_indiserver_ctrl_path()
+        self._indi_announced = False
+        self._indi_announce_time = 0.0
+        self._indi_gate_end = 0.0
         self.config = config
         self._hb_fd = None
         self._hb_last_time = 0
@@ -497,13 +535,50 @@ class XDevice(Device):
     def handle_message(self, message : messages.IndiMessage):
         # A getProperties without a property name may come from a restarted indiserver, which no
         # longer knows what we watch, so re-send the client's requests from the main loop.
+        # It also greets this instance after its start announcement.
         if (
             isinstance(message, messages.GetProperties)
             and message.name is None
             and message.device in (None, self.name)
         ):
             self._client_resubscribe = True
+            self._indi_gate_end = 0.0
+        elif (
+            isinstance(message, typing.get_args(messages.IndiNewMessage))
+            and time.monotonic() < self._indi_gate_end
+        ):
+            self.log.info("Ignoring %s.%s sent before indiserver greeted this instance", message.device, message.name)
+            return
         super().handle_message(message)
+
+    def _announce(self, verb):
+        '''Write "verb name pid" to the indiserver control FIFO without blocking.
+        "start" once when the input FIFO has been emptied, so indiserver registers us or resets
+        its session with a previous instance, "alive" periodically so a restarted indiserver
+        registers us again. Returns True if written.'''
+        self._indi_announce_time = time.monotonic()
+        line = f"{verb} {self.name} {os.getpid()}\n".encode()
+        try:
+            fd = os.open(self._indi_ctrl_path, os.O_WRONLY | os.O_NONBLOCK)
+            try:
+                ok = os.write(fd, line) == len(line)
+            finally:
+                os.close(fd)
+            err = None
+        except OSError as e:
+            ok, err = False, e
+        # log only changes, a missing indiserver would otherwise be logged every time
+        if ok != self._indi_announced or verb == "start":
+            if ok:
+                self.log.info("Announced %s on indiserver control FIFO %s", verb, self._indi_ctrl_path)
+            else:
+                self.log.info("Could not announce %s on indiserver control FIFO %s: %s", verb, self._indi_ctrl_path, err)
+        self._indi_announced = ok
+        return ok
+
+    def _indiserver_upkeep(self):
+        if self.indiserver_announce_interval_sec > 0 and time.monotonic() - self._indi_announce_time >= self.indiserver_announce_interval_sec:
+            self._announce("alive")
 
     def _client_interests(self):
         # purepyindi2's IndiClient records the (device, name) pairs passed to get_properties() here
@@ -568,6 +643,13 @@ class XDevice(Device):
     def main(self):
         self.lock_pid_file()
         try:
+            # only now that no other instance runs, empty our input FIFO and tell indiserver
+            # this is a new instance, it greets us with a getProperties
+            ndrained = self.connection.drain_input()
+            if ndrained:
+                self.log.info("Discarded %d bytes of INDI input sent to a previous instance", ndrained)
+            if self._announce("start"):
+                self._indi_gate_end = time.monotonic() + 10
             super().main()
         finally:
             self.unlock_pid_file()
@@ -592,6 +674,7 @@ class XDevice(Device):
             ):
                 # Tied to the app loop by design: if loop() blocks, heartbeats stop.
                 self._send_heartbeat(0)
+                self._indiserver_upkeep()
                 self._resubscribe_client()
                 self._wrap_loop()
                 time.sleep(self.sleep_interval_sec)

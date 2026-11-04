@@ -86,7 +86,8 @@ public:
 
    /// Public c'tor
    /** Call pcf::IndiDriver c'tor, and then opens the FIFOs specified
-     * by parent.  If this fails, then m_good is set to false.
+     * by parent, emptying the input FIFO of anything sent to a previous instance.
+     * If this fails, then m_good is set to false.
      * test this with good().
      */
    indiDriver( parentT * parent,
@@ -152,6 +153,20 @@ indiDriver<parentT>::indiDriver ( parentT * parent,
    }
    setInputFd(fd);
 
+   // Empty the input FIFO of anything sent to a previous instance, before opening the
+   // output FIFO so that an indiserver connecting now greets us after this.
+   int flags = fcntl(fd, F_GETFL);
+   fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+   char buf[4096];
+   ssize_t nr;
+   size_t ndrained = 0;
+   while( (nr = read(fd, buf, sizeof(buf))) > 0 ) ndrained += nr;
+   fcntl(fd, F_SETFL, flags);
+   if(ndrained > 0)
+   {
+      parentT::template log<logger::text_log>("discarded " + std::to_string(ndrained) + " bytes of INDI input sent to a previous instance");
+   }
+
    errno = 0;
    fd = open( parent->driverOutName().c_str(), O_RDWR);
    if(fd < 0)
@@ -161,58 +176,6 @@ indiDriver<parentT>::indiDriver ( parentT * parent,
       return;
    }
    setOutputFd(fd);
-
-   // If the INDI server ctrl FIFO name is an empty string, then return
-   if (parent->indiserver_ctrl_fifo() == "") { return; }
-
-   /////////////////////////////////////////////////////////////////////
-   // If the INDI server ctrl FIFO name is not an empty string, then
-   // open that INDI server ctrl FIFO, and write to it the prefix string
-   //
-   //   start /opt/MagAOX/fifos/driver_name
-   //
-   // This will notify the INDI server that this INDI driver is live and
-   // where to find its .in and .out FIFOs (above)
-   /////////////////////////////////////////////////////////////////////
-
-   // - Append the the INDI driver .in file name to "start "
-   std::string start_string{"start "};
-   start_string += parent->driverInName();
-
-   // - Ensure the last three characters in the string are ".in"
-   int nchars = start_string.size() - 3;
-
-   if (nchars < 1 || start_string.substr(nchars<0 ? 0 : nchars) != ".in")
-   {
-      parentT::template log<logger::software_error>({__FILE__, __LINE__, 0, "Error:  INDI driver input FIFO name does not end in [.in]"});
-      m_good = false;
-      return;
-   }
-
-   // - Truncate that ".in" extension from the string, append a newline,
-   //   and increment the char count
-   start_string = start_string.substr(0,nchars++) + std::string("\n");
-
-   // - Open the INDI server ctrl FIFO
-   errno = 0;
-   fd = open( parent->indiserver_ctrl_fifo().c_str(), O_RDWR);
-   if(fd < 0)
-   {
-      parentT::template log<logger::software_error>({__FILE__, __LINE__, errno, "Error opening INDI server control FIFO."});
-      m_good = false;
-      return;
-   }
-
-   // - Write the "start ...\n" string to the INDI server ctrl FIFO
-   int wrno = write(fd, start_string.c_str(), nchars);
-   if(wrno < 0)
-   {
-      parentT::template log<logger::software_error>({__FILE__, __LINE__, errno, "Error writing to INDI server control FIFO."});
-      m_good = false;
-   }
-
-   // - Close the INDI server ctrl FIFO
-   close(fd);
 }
 
 template<class parentT>

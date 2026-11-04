@@ -415,7 +415,7 @@ class MagAOXApp : public application
     );
 
     std::string m_indiserver_ctrl_fifo{
-        "" }; ///< INDI server control FIFO for starting and stopping comms with INDI drivers
+        "" }; ///< INDI server control FIFO this app announces itself on, default indiserver.ctrl with the driver FIFOs
 
     ///@} -- Signal Handling
 
@@ -746,6 +746,26 @@ class MagAOXApp : public application
     /// Full path name of the INDI driver output FIFO.
     std::string m_driverOutName;
 
+    /// Seconds between "alive" announcements on the INDI server control FIFO, 0 disables them.
+    double m_indiAnnounceInterval{ 5 };
+
+    /// When this instance last announced itself on the INDI server control FIFO.
+    std::chrono::steady_clock::time_point m_indiAnnounceTime;
+
+    /// True if the last announcement on the INDI server control FIFO was written.
+    bool m_indiAnnounced{ false };
+
+    /// True from a written "start" announcement until indiserver greets this instance with a getProperties.
+    /** NewProperty requests are ignored meanwhile, they were sent to a previous instance.
+     */
+    std::atomic<bool> m_indiGated{ false };
+
+    /// When m_indiGated stops applying, in case indiserver never greets this instance.
+    std::chrono::steady_clock::time_point m_indiGateEnd;
+
+    /// INDI messages dropped as of the last check because indiserver was not reading the output FIFO.
+    uint64_t m_indiOutputDrops{ 0 };
+
     /// Full path name of the resurrector/resurrectee FIFO.
     std::string m_resurrecteeFifoName;
 
@@ -988,6 +1008,22 @@ class MagAOXApp : public application
      * \returns -1 on error.  This is fatal.
      */
     int startINDI();
+
+    /// Announce this instance to the INDI server on its control FIFO
+    /** Writes "verb configName pid" without blocking.  "start" is sent once by startINDI, after the input FIFO
+     * is emptied, so indiserver registers this driver or resets its session with a previous instance.  "alive" is
+     * sent every m_indiAnnounceInterval seconds so a restarted indiserver registers this driver again.
+     *
+     * \returns 0 if written
+     * \returns -1 if not, e.g. when no indiserver is reading the control FIFO
+     */
+    int announceINDI( const std::string &verb /**< [in] "start" or "alive" */ );
+
+    /// Periodic INDI server upkeep, called from the main loop
+    /** Announces "alive" every m_indiAnnounceInterval seconds and logs any INDI messages dropped since the last
+     * call because indiserver was not reading the output FIFO.
+     */
+    void indiServerUpkeep();
 
     /// Create the resurrectee FIFOs
     /**
@@ -1660,9 +1696,20 @@ void MagAOXApp<_useINDI>::setupBasicConfig() // virtual
                 "indiserver_ctrl_fifo",
                 false,
                 "string",
-                "INDI drivers can send [start /opt/MagAOX/drivers/fifos/indi-driver-name] messages to this INDI server"
-                " ctrl FIFO ( typically [/opt/MagAOX/drivers/fifos/indiserver.ctrl] ) on startup; the value should"
-                " match that of [indiserver.f] in /.../is*.conf" );
+                "INDI server control FIFO this driver announces itself on with [start name pid] at startup and"
+                " [alive name pid] periodically.  Default is indiserver.ctrl in the driver FIFO directory, which is"
+                " also the indiserver default; if set it should match [indiserver.f] in is*.conf" );
+
+    config.add( "indiserver_announce_interval",
+                "",
+                "indiserver-announce-interval",
+                argType::Required,
+                "",
+                "indiserver_announce_interval",
+                false,
+                "double",
+                "Seconds between [alive name pid] announcements on the INDI server control FIFO, so a restarted"
+                " indiserver registers this driver again.  0 disables them.  Default is 5." );
     // Logger Stuff
     m_log.setupConfig( config );
     // Resurrectee configuration setup - static
@@ -1745,6 +1792,7 @@ void MagAOXApp<_useINDI>::loadBasicConfig() // virtual
     }
 
     config( m_indiserver_ctrl_fifo, "indiserver_ctrl_fifo" );
+    config( m_indiAnnounceInterval, "indiserver_announce_interval" );
 
     if( !ig && m_gitAlert )
     {
@@ -2065,6 +2113,12 @@ int MagAOXApp<_useINDI>::execute() // virtual
             // send a heartbeat
             m_resurrectee->execute();
 
+            // the power state comes through indiserver, which must know us
+            if( m_useINDI )
+            {
+                indiServerUpkeep();
+            }
+
             sleep( 1 );
             if( m_powerState < 0 )
             {
@@ -2198,6 +2252,9 @@ int MagAOXApp<_useINDI>::execute() // virtual
             // And handles cases where we miss a Def becuase the other driver wasn't started up
             // when we sent our Get.
             sendGetPropertySetList( false ); // Only does anything if it needs to be done.
+
+            // Keep indiserver aware of us, and note any messages it was too slow to take.
+            indiServerUpkeep();
         }
 
         // This is purely to make sure INDI is up to date in case
@@ -3442,6 +3499,11 @@ int MagAOXApp<_useINDI>::createINDIFIFOS()
     m_driverInName = driverFIFOPath + "/" + configName() + ".in";
     m_driverOutName = driverFIFOPath + "/" + configName() + ".out";
 
+    if( m_indiserver_ctrl_fifo == "" )
+    {
+        m_indiserver_ctrl_fifo = driverFIFOPath + "/indiserver.ctrl";
+    }
+
     // Get max permissions
     elevatedPrivileges elPriv( this );
 
@@ -3526,6 +3588,13 @@ int MagAOXApp<_useINDI>::startINDI()
         return -1;
     }
 
+    //======= Tell indiserver this is a new instance, it greets us with a getProperties
+    if( announceINDI( "start" ) == 0 )
+    {
+        m_indiGateEnd = std::chrono::steady_clock::now() + std::chrono::seconds( 10 );
+        m_indiGated = true;
+    }
+
     //======= Now we start talkin'
     m_indiDriver->activate();
     log<indidriver_start>();
@@ -3533,6 +3602,66 @@ int MagAOXApp<_useINDI>::startINDI()
     sendGetPropertySetList( true );
 
     return 0;
+}
+
+template <bool _useINDI>
+int MagAOXApp<_useINDI>::announceINDI( const std::string &verb )
+{
+    std::string msg = verb + " " + m_configName + " " + std::to_string( getpid() ) + "\n";
+
+    m_indiAnnounceTime = std::chrono::steady_clock::now();
+
+    errno  = 0;
+    int fd = open( m_indiserver_ctrl_fifo.c_str(), O_WRONLY | O_NONBLOCK );
+    bool ok = fd >= 0 && write( fd, msg.c_str(), msg.size() ) == (ssize_t)msg.size();
+    int  en = errno;
+    if( fd >= 0 )
+    {
+        close( fd );
+    }
+
+    // Log only changes, a missing indiserver would otherwise be logged every time.
+    if( ok != m_indiAnnounced || verb == "start" )
+    {
+        if( ok )
+        {
+            log<text_log>( "announced " + verb + " on INDI server control FIFO " + m_indiserver_ctrl_fifo );
+        }
+        else
+        {
+            log<text_log>( "could not announce " + verb + " on INDI server control FIFO " + m_indiserver_ctrl_fifo +
+                               ": " + strerror( en ),
+                           logPrio::LOG_NOTICE );
+        }
+    }
+    m_indiAnnounced = ok;
+
+    return ok ? 0 : -1;
+}
+
+template <bool _useINDI>
+void MagAOXApp<_useINDI>::indiServerUpkeep()
+{
+    if( !m_useINDI || m_indiDriver == nullptr )
+    {
+        return;
+    }
+
+    if( m_indiAnnounceInterval > 0 &&
+        std::chrono::steady_clock::now() - m_indiAnnounceTime >=
+            std::chrono::duration<double>( m_indiAnnounceInterval ) )
+    {
+        announceINDI( "alive" );
+
+        uint64_t drops = m_indiDriver->outputDrops();
+        if( drops != m_indiOutputDrops )
+        {
+            log<text_log>( "dropped " + std::to_string( drops - m_indiOutputDrops ) +
+                               " INDI messages because indiserver was not reading " + m_driverOutName,
+                           logPrio::LOG_WARNING );
+            m_indiOutputDrops = drops;
+        }
+    }
 }
 
 template <bool _useINDI>
@@ -3741,6 +3870,9 @@ void MagAOXApp<_useINDI>::handleGetProperties( const pcf::IndiProperty &ipRecv )
     // Send all properties if requested.
     if( !ipRecv.hasValidName() )
     {
+        // indiserver has greeted this instance, what follows is meant for it
+        m_indiGated = false;
+
         std::vector<pcf::IndiProperty *> propsToSend;
 
         { //mutex scope
@@ -3813,6 +3945,14 @@ void MagAOXApp<_useINDI>::handleNewProperty( const pcf::IndiProperty &ipRecv )
         return;
     if( m_indiDriver == nullptr )
         return;
+
+    // Ignore requests sent to a previous instance, until indiserver greets this one
+    if( m_indiGated && std::chrono::steady_clock::now() < m_indiGateEnd )
+    {
+        log<text_log>( "ignoring NewProperty " + ipRecv.createUniqueKey() + " sent before indiserver greeted this instance",
+                       logPrio::LOG_NOTICE );
+        return;
+    }
 
     int ( *callBack )( void *, const pcf::IndiProperty & ) = nullptr;
     {

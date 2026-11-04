@@ -44,6 +44,10 @@ struct xindiserver_test
     {
         xi.indiserver_x = x;
     }
+    void indiserver_f( xindiserver &xi, const std::string &f )
+    {
+        xi.indiserver_f = f;
+    }
     void m_local( xindiserver &xi, const std::vector<std::string> &ml )
     {
         xi.m_local = ml;
@@ -236,6 +240,20 @@ SCENARIO( "xindiserver constructs inserver options", "[xindiserver]" )
             REQUIRE( clargs.size() == 4 );
             REQUIRE( clargs[0] == "indiserver" );
             REQUIRE( clargs[1] == "-x" );
+        }
+
+        WHEN( "Option f provided with argument" )
+        {
+            std::vector<std::string> clargs;
+            xi_test.indiserver_f( xi, "/tmp/is.ctrl" );
+
+            rv = xi.constructIndiserverCommand( clargs );
+            REQUIRE( rv == 0 );
+            REQUIRE( clargs.size() == 5 );
+            REQUIRE( clargs[0] == "indiserver" );
+            REQUIRE( clargs[1] == "-f" );
+            REQUIRE( clargs[2] == "/tmp/is.ctrl" );
+            REQUIRE( clargs[3] == "-F" );
         }
 
         WHEN( "All options provided" )

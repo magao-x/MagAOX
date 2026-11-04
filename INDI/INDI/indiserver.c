@@ -63,6 +63,8 @@
 #include <time.h>
 #include <fcntl.h>
 #include <ctype.h>
+#include <poll.h>
+#include <limits.h>
 #include <pthread.h>
 #include <sys/time.h>
 #include <sys/types.h>
@@ -85,12 +87,17 @@
 #define	ISVERDEV	"indiserver"	/* device answering server version requests */
 #define	ISVERPROP	"version"	/* property of ISVERDEV holding the server version */
 #define	ISLEVEL		1		/* feature level, bump when peers must handle a change */
-#define	ISFEATURES	"fifo-drivers,stream-blob-drop,per-property-blob,snoop-delproperty,version"
+#define	ISFEATURES	"fifo-drivers,ctrl-fifo,stream-blob-drop,per-property-blob,snoop-delproperty,version"
 #ifndef GIT_TAG_STRING
 #define	GIT_TAG_STRING	"unknown"	/* git describe of this build, from the Makefile */
 #endif
 #define	FIFORESTARTDT	1		/* don't reconnect a FIFO driver sooner than this, seconds */
 #define	FIFOPIPESZ	(1024*1024)	/* FIFO driver pipe capacity, bytes, so drivers rarely block */
+#define	CTRLFIFO	"indiserver.ctrl"	/* default control FIFO, in the -F directory */
+#define	MAXDYNDVR	256		/* max FIFO drivers that may register through the control FIFO */
+#define	WAKENEW		'n'		/* wake reason: a new instance of a FIFO driver */
+#define	WAKEQ		'q'		/* wake reason: a FIFO driver fell too far behind */
+#define	MAXLOGL		(PIPE_BUF-1)	/* max log line, so each is one atomic write */
 #define	MAXRBUF		40960		/* max read buffer */
 #define	MAXWSIZ		40960		/* max bytes/write */
 #define	DEFMAXQSIZ	50		/* default max q behind, MB */
@@ -187,9 +194,13 @@ typedef struct {
     pthread_cond_t go_cond;		/* tell writer thread to send next msqq */
     pthread_mutex_t q_lock;		/* guard access to msqg and go_cond */
     pthread_rwlock_t restart_lock;	/* lock out this device while restarting */
+    int ready;				/* 1 once first started, so others may use restart_lock */
+    int apppid;				/* pid a FIFO driver gave on the control FIFO, 0 if unknown */
+    int wakefd[2];			/* pipe to wake a FIFO driver's reader to reset its session */
 } DvrInfo;
-static DvrInfo *dvrinfo;		/* malloced array of DvrInfo */
-static int ndvrinfo;			/* n total */
+static DvrInfo *dvrinfo;		/* malloced array of DvrInfo, never moves */
+static int ndvrinfo;			/* n in use, grows as FIFO drivers register -- use atomically */
+static int maxdvrinfo;			/* n allocated */
 
 /* local variables */
 static char *me;			/* our argv[0] name */
@@ -203,6 +214,8 @@ static int maxqsiz = (DEFMAXQSIZ*1024*1024); /* kill if these many bytes behind 
 static int maxstreamsiz = (DEFMAXSSIZ*1024*1024); /* drop stream BLOBs if these many bytes behind, 0 never drops */
 static int ignore_lockout;              /* whether to honor lockout_fn */
 static char *fifodir;			/* dir of named pipes for drivers named without a path, if -F */
+static char *ctrlpath;			/* control FIFO drivers register through, if -F */
+static int logdrops;			/* n log lines dropped because stderr was full */
 
 /* local prototypes */
 static void logDrivers (int ac, char *av[]);
@@ -222,6 +235,14 @@ static void sendVersion (ClInfo *cp);
 static void checkPeerVersion (DvrInfo *dp, XMLEle *root);
 static void listMissing (char *have, char *want, char *missing, int n);
 static int openFifo (char *path, int flags);
+static void sendGetProperties (DvrInfo *dp);
+static int waitFifoDvr (DvrInfo *dp);
+static int resetFifoDvr (DvrInfo *dp);
+static void wakeDvr (DvrInfo *dp, char why);
+static void startCtrlFifo (void);
+static void *ctrlReaderThread (void *);
+static void ctrlCommand (char *line);
+static DvrInfo *findDvr (char *name);
 static void startRemoteDvr (DvrInfo *dp);
 static int openRemoteConnection (char host[], int port);
 static void restartDvr (DvrInfo *dp);
@@ -282,6 +303,14 @@ main (int ac, char *av[])
 		    maxstreamsiz = 1024*1024*atoi(*++av);
 		    ac--;
 		    break;
+		case 'f':
+		    if (ac < 2) {
+			fprintf (stderr, "-f requires control FIFO path\n");
+			usage();
+		    }
+		    ctrlpath = *++av;
+		    ac--;
+		    break;
 		case 'F':
 		    if (ac < 2) {
 			fprintf (stderr, "-F requires FIFO directory\n");
@@ -329,9 +358,15 @@ main (int ac, char *av[])
 		}
 	}
 
-	/* at this point there are ac args in av[] to name our drivers */
-	if (ac == 0) {
+	/* at this point there are ac args in av[] to name our drivers,
+	 * with -F more may register later through the control FIFO
+	 */
+	if (ac == 0 && !fifodir) {
 	    fprintf (stderr, "Must give at least one driver\n");
+	    usage();
+	}
+	if (ctrlpath && !fifodir) {
+	    fprintf (stderr, "-f requires -F\n");
 	    usage();
 	}
 
@@ -346,6 +381,13 @@ main (int ac, char *av[])
 	noSIGPIPE();
 	close (0);
 
+	/* never let a slow reader of our stderr pipe stall us, drop log lines instead */
+	if (!ldir) {
+	    struct stat st;
+	    if (fstat (2, &st) == 0 && S_ISFIFO (st.st_mode))
+		(void) fcntl (2, F_SETFL, fcntl (2, F_GETFL) | O_NONBLOCK);
+	}
+
 	/* seed realloc for client pool and prep lock */
 	clinfo = (ClInfo **) malloc (1);
 	nclinfo = 0;
@@ -354,11 +396,18 @@ main (int ac, char *av[])
 	/* announce we are online before starting remote drivers */
 	indiListen();
 
-	/* start each driver */
+	/* start each driver, with room for FIFO drivers that register later */
 	ndvrinfo = ac;
-	dvrinfo = (DvrInfo *) calloc (ndvrinfo, sizeof(DvrInfo));
+	maxdvrinfo = ac + (fifodir ? MAXDYNDVR : 0);
+	dvrinfo = (DvrInfo *) calloc (maxdvrinfo, sizeof(DvrInfo));
+	if (!dvrinfo)
+	    Bye ("No memory for %d drivers\n", maxdvrinfo);
 	while (ac-- > 0)
 	    initDvr (&dvrinfo[ac], *av++);
+
+	/* listen for FIFO drivers registering and restarting */
+	if (fifodir)
+	    startCtrlFifo();
 
 	/* handle new clients forever */
 	while (1)
@@ -391,6 +440,7 @@ usage(void)
 	fprintf (stderr,"Code %s. Protocol %g.\n", "$Revision: 1.18 $", INDIV);
 	fprintf (stderr,"Options:\n");
 	fprintf (stderr," -d m  : drop streaming BLOBs to client if more than this many MB behind, default %d, 0 never drops\n", DEFMAXSSIZ);
+	fprintf (stderr," -f p  : control FIFO for drivers to register and restart, default d/%s with -F\n", CTRLFIFO);
 	fprintf (stderr," -F d  : drivers named without a path use named pipes d/driver.in and d/driver.out\n");
 	fprintf (stderr," -l d  : log messages to <d>/YYYY-MM-DD.islog, else stderr\n");
 	fprintf (stderr," -m m  : kill client if gets more than this many MB behind, default %d\n", DEFMAXQSIZ);
@@ -443,6 +493,10 @@ initDvr (DvrInfo *dp, char *name)
 	/* init this thread's restart lock */
 	pthread_rwlock_init (&dp->restart_lock, NULL);
 
+	/* pipe to wake a FIFO driver's reader to reset its session, kept for good */
+	if (pipe2 (dp->wakefd, O_NONBLOCK|O_CLOEXEC) < 0)
+	    Bye ("Driver %s wake pipe: %s\n", dp->name, strerror(errno));
+
 	/* new thread will be detached so we need no join */
 	if (pthread_attr_init (&attr))
 	    Bye ("Driver %s attr init: %s\n", dp->name, strerror(errno));
@@ -461,8 +515,9 @@ startDvrThread (void *vp)
 {
 	DvrInfo *dp = (DvrInfo *)vp;
 
-	/* lock while setting up driver */
+	/* lock while setting up driver, others may use the lock once it is held */
 	pthread_rwlock_wrlock (&dp->restart_lock);
+	__atomic_store_n (&dp->ready, 1, __ATOMIC_RELEASE);
 	startDvr (dp);
 	pthread_rwlock_unlock (&dp->restart_lock);
 
@@ -534,9 +589,6 @@ startFifoDvr (DvrInfo *dp)
 	pthread_attr_t attr;
 	pthread_t thr;
 	char inpath[1024], outpath[1024];
-	char buf[1024];
-	Msg *mp;
-	int l;
 
 	snprintf (inpath, sizeof(inpath), "%s/%s.in", fifodir, dp->name);
 	snprintf (outpath, sizeof(outpath), "%s/%s.out", fifodir, dp->name);
@@ -591,9 +643,20 @@ startFifoDvr (DvrInfo *dp)
 	if (pthread_attr_destroy (&attr))
 	    Bye ("Driver %s attr destroy: %s\n", dp->name, strerror(errno));
 
-	/* first message primes driver to report its properties -- dev already
-	 * known if just reconnecting
-	 */
+	/* first message primes driver to report its properties */
+	sendGetProperties (dp);
+}
+
+/* queue the message that primes driver dp to report its properties --
+ * dev already known if just reconnecting or resetting
+ */
+static void
+sendGetProperties (DvrInfo *dp)
+{
+	char buf[1024];
+	Msg *mp;
+	int l;
+
 	mp = newMsg();
 	if (dp->dev[0])
 	    l = snprintf (buf, sizeof(buf), "<getProperties device='%s' version='%g'/>\n", dp->dev, INDIV);
@@ -602,6 +665,283 @@ startFifoDvr (DvrInfo *dp)
 	addMsg (mp, buf, l);
 	(void) pushMsg (dp, NULL, mp);
 	decMsg (mp);
+}
+
+/* wait until FIFO driver dp has output for its reader, resetting its session
+ * whenever asked through its wake pipe meanwhile.
+ * return 0 when output, or EOF or an error, is ready to read, -1 if trouble.
+ */
+static int
+waitFifoDvr (DvrInfo *dp)
+{
+	struct pollfd pfd[2];
+
+	while (1) {
+	    pfd[0].fd = dp->rfd;
+	    pfd[0].events = POLLIN;
+	    pfd[1].fd = dp->wakefd[0];
+	    pfd[1].events = POLLIN;
+	    if (poll (pfd, 2, -1) < 0) {
+		if (errno == EINTR)
+		    continue;
+		logMessage ("from Driver %s: poll %s\n", dp->name, strerror(errno));
+		return (-1);
+	    }
+	    if (pfd[1].revents) {
+		if (resetFifoDvr (dp) < 0) {
+		    logMessage ("from Driver %s: stdin EOF\n", dp->name);
+		    return (-1);
+		}
+		continue;	/* output may have been drained, poll again */
+	    }
+	    if (pfd[0].revents)
+		return (0);
+	}
+}
+
+/* reset the session with FIFO driver dp as asked through its wake pipe, keeping
+ *   its named pipes open: drop what is queued for it and ask for its properties
+ *   again. for a new instance also discard what is left in its output pipe,
+ *   restart parsing and forget its snoops, it asks again.
+ * N.B. only call from dp's reader thread.
+ * return 0 if ok, -1 if its output pipe has no writer left.
+ */
+static int
+resetFifoDvr (DvrInfo *dp)
+{
+	char buf[MAXRBUF];
+	long ndrop = 0;
+	int isnew = 0, nr = -1;
+	int i, nq, fl;
+
+	/* collect the reasons, a new instance includes falling behind */
+	while ((nr = read (dp->wakefd[0], buf, sizeof(buf))) > 0)
+	    isnew |= memchr (buf, WAKENEW, nr) != NULL;
+	nr = -1;
+
+	/* lock out other threads while we edit */
+	pthread_rwlock_wrlock (&dp->restart_lock);
+
+	if (isnew) {
+	    /* discard what the old instance left, without waiting for more */
+	    fl = fcntl (dp->rfd, F_GETFL);
+	    (void) fcntl (dp->rfd, F_SETFL, fl | O_NONBLOCK);
+	    while ((nr = read (dp->rfd, buf, sizeof(buf))) > 0)
+		ndrop += nr;
+	    (void) fcntl (dp->rfd, F_SETFL, fl);
+
+	    /* parse from scratch, dropping any partial message */
+	    ndrop += dp->mp->used;
+	    delLilXML (dp->lp);
+	    dp->lp = newLilXML();
+	    decMsg (dp->mp);
+	    dp->mp = newMsg();
+
+	    /* forget snoops */
+	    pthread_rwlock_wrlock (&dp->sprops_rwlock);
+	    for (i = 0; i < dp->nsprops; i++)
+		free (dp->sprops[i]);
+	    dp->nsprops = 0;
+	    pthread_rwlock_unlock (&dp->sprops_rwlock);
+	}
+
+	/* drop everything still queued for it */
+	pthread_mutex_lock (&dp->q_lock);
+	nq = nFQ (dp->msgq);
+	drainMsgs (dp->msgq);
+	pthread_mutex_unlock (&dp->q_lock);
+
+	/* ask for its properties again */
+	sendGetProperties (dp);
+
+	pthread_rwlock_unlock (&dp->restart_lock);
+
+	if (isnew)
+	    logMessage ("Driver %s: session reset for new instance pid %d, discarded %ld bytes from old instance and %d messages queued to it\n",
+	    		dp->name, __atomic_load_n (&dp->apppid, __ATOMIC_RELAXED), ndrop, nq);
+	else
+	    logMessage ("Driver %s: session reset for falling behind, discarded %d messages queued to it\n",
+	    		dp->name, nq);
+
+	return (isnew && nr == 0 ? -1 : 0);
+}
+
+/* ask the reader of FIFO driver dp to reset its session, why is WAKENEW or WAKEQ.
+ * never blocks, a full wake pipe already has a reset pending.
+ */
+static void
+wakeDvr (DvrInfo *dp, char why)
+{
+	(void) write (dp->wakefd[1], &why, 1);
+}
+
+/* open the control FIFO through which FIFO drivers register and restart, and
+ * start its reader. we hold it open read-write so it never reports EOF.
+ * carry on without it if trouble, listed drivers still work.
+ */
+static void
+startCtrlFifo (void)
+{
+	pthread_attr_t attr;
+	pthread_t thr;
+	char path[1024];
+	int fd;
+
+	if (!ctrlpath) {
+	    snprintf (path, sizeof(path), "%s/%s", fifodir, CTRLFIFO);
+	    ctrlpath = strdup (path);
+	}
+
+	fd = openFifo (ctrlpath, O_RDWR);
+	if (fd < 0) {
+	    logMessage ("WARNING control FIFO %s: %s, drivers can not register or restart through it\n",
+	    		ctrlpath, strerror(errno));
+	    return;
+	}
+
+	if (pthread_attr_init (&attr))
+	    Bye ("Control FIFO attr init: %s\n", strerror(errno));
+	if (pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED))
+	    Bye ("Control FIFO setdetacthed: %s\n", strerror(errno));
+	if (pthread_create (&thr, &attr, ctrlReaderThread, (void *)(long)fd))
+	    Bye ("Control FIFO thread: %s\n", strerror(errno));
+	if (pthread_attr_destroy (&attr))
+	    Bye ("Control FIFO attr destroy: %s\n", strerror(errno));
+
+	logMessage ("listening for drivers on control FIFO %s\n", ctrlpath);
+}
+
+/* thread to read lines from the control FIFO and act on each.
+ * lines longer than a FIFO writes atomically are not commands, drop them.
+ */
+static void *
+ctrlReaderThread (void *vp)
+{
+	int fd = (int)(long)vp;
+	char buf[PIPE_BUF+1];
+	char *line, *nl;
+	int have = 0, nr;
+
+	while (1) {
+	    nr = read (fd, buf + have, sizeof(buf) - 1 - have);
+	    if (nr <= 0) {
+		if (nr < 0 && errno == EINTR)
+		    continue;
+		logMessage ("Control FIFO %s: %s, stopped reading\n", ctrlpath,
+				nr < 0 ? strerror(errno) : "EOF");
+		return (NULL);	/* thread exit */
+	    }
+	    have += nr;
+	    buf[have] = '\0';
+
+	    line = buf;
+	    while ((nl = strchr (line, '\n')) != NULL) {
+		*nl = '\0';
+		ctrlCommand (line);
+		line = nl + 1;
+	    }
+	    have = strlen (line);
+	    if (have == sizeof(buf) - 1) {
+		logMessage ("Control FIFO %s: dropping %d bytes without a newline\n", ctrlpath, have);
+		have = 0;
+	    } else
+		memmove (buf, line, have);
+	}
+
+	/* for lint */
+	return (NULL);
+}
+
+/* act on one line from the control FIFO:
+ *   start NAME PID    new instance PID of FIFO driver NAME: register NAME if new,
+ *                     else reset its session. sent once by each instance after it
+ *                     has emptied its NAME.in. older drivers send start DIR/NAME.
+ *   alive NAME PID    sent periodically: register NAME if new, e.g. after we
+ *                     restart, reset its session if PID changed without a start.
+ *   restart NAME      reset the session of FIFO driver NAME.
+ * a session reset is done by the driver's reader, see resetFifoDvr().
+ */
+static void
+ctrlCommand (char *line)
+{
+	static const char namechars[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-";
+	char verb[32], arg[1024];
+	char *name;
+	DvrInfo *dp;
+	int pid = 0, oldpid, n, i;
+
+	n = sscanf (line, "%31s %1023s %d", verb, arg, &pid);
+	if (n < 2 || (strcmp (verb, "start") && strcmp (verb, "alive") && strcmp (verb, "restart"))) {
+	    logMessage ("Control FIFO: ignoring \"%s\"\n", line);
+	    return;
+	}
+
+	/* bare FIFO driver name, as on our command line */
+	name = strrchr (arg, '/');
+	name = name ? name+1 : arg;
+	if (!isalnum ((unsigned char)name[0]) || strspn (name, namechars) != strlen (name)
+						|| strlen (name) >= MAXINDIDEVICE) {
+	    logMessage ("Control FIFO: ignoring \"%s\", not a driver name\n", line);
+	    return;
+	}
+
+	dp = findDvr (name);
+
+	/* new name: register as another FIFO driver */
+	if (!dp) {
+	    if (!strcmp (verb, "restart")) {
+		logMessage ("Control FIFO: ignoring \"%s\", no driver %s\n", line, name);
+		return;
+	    }
+	    for (i = 0; i < ndvrinfo; i++) {
+		char *at = strchr (dvrinfo[i].name, '@');
+		if (at && at - dvrinfo[i].name == (long)strlen (name)
+					&& !strncmp (dvrinfo[i].name, name, at - dvrinfo[i].name)) {
+		    logMessage ("WARNING Control FIFO: ignoring \"%s\", %s is served by remote driver %s\n",
+		    		line, name, dvrinfo[i].name);
+		    return;
+		}
+	    }
+	    if (ndvrinfo == maxdvrinfo) {
+		logMessage ("WARNING Control FIFO: ignoring \"%s\", already %d drivers\n", line, maxdvrinfo);
+		return;
+	    }
+	    dp = &dvrinfo[ndvrinfo];
+	    dp->apppid = pid;
+	    initDvr (dp, strdup (name));
+	    __atomic_store_n (&ndvrinfo, ndvrinfo+1, __ATOMIC_RELEASE);
+	    logMessage ("Driver %s: registered by %s from pid %d\n", name, verb, pid);
+	    return;
+	}
+
+	/* known: reset session unless this is the same instance still alive */
+	if (!strcmp (verb, "alive")) {
+	    if (pid <= 0)
+		return;
+	    oldpid = __atomic_exchange_n (&dp->apppid, pid, __ATOMIC_RELAXED);
+	    if (oldpid == 0 || oldpid == pid)
+		return;
+	    logMessage ("Driver %s: pid %d replaced pid %d without a start\n", name, pid, oldpid);
+	} else if (pid > 0) {
+	    __atomic_store_n (&dp->apppid, pid, __ATOMIC_RELAXED);
+	    logMessage ("Driver %s: %s from pid %d\n", name, verb, pid);
+	} else
+	    logMessage ("Driver %s: %s\n", name, verb);
+	wakeDvr (dp, WAKENEW);
+}
+
+/* return the driver named name, else NULL.
+ * N.B. only call from the main or control FIFO threads, they alone add drivers.
+ */
+static DvrInfo *
+findDvr (char *name)
+{
+	int i;
+
+	for (i = 0; i < ndvrinfo; i++)
+	    if (!strcmp (dvrinfo[i].name, name))
+		return (&dvrinfo[i]);
+	return (NULL);
 }
 
 /* start the given local INDI driver process.
@@ -1212,6 +1552,12 @@ driverStdoutReaderThread (void *vp)
 	int i, nr;
 
 	while (1) {
+	    /* a FIFO driver's reader also handles requests to reset its session */
+	    if (dp->pid == FIFODVR && waitFifoDvr (dp) < 0) {
+		onDriverError (dp);
+		return (NULL);	/* thread exit */
+	    }
+
 	    /* insure more message space */
 	    minMsg (dp->mp, MAXRBUF);
 
@@ -1545,9 +1891,10 @@ restartDvr (DvrInfo *dp)
 	    shutdown (dp->wfd, SHUT_RDWR);
 	    close (dp->wfd);	/* same as rfd */
 	} else if (dp->pid == FIFODVR) {
-	    /* named pipes, the driver process is not ours */
+	    /* named pipes, the driver process is not ours, nor known on the next connection */
 	    close (dp->wfd);
 	    close (dp->rfd);
+	    __atomic_store_n (&dp->apppid, 0, __ATOMIC_RELAXED);
 	} else {
 	    /* local pipe connection broke */
 	    int status, wpid = waitpid (dp->pid, &status, 0);
@@ -1712,14 +2059,16 @@ static void
 q2Drivers (char *dev, Msg *mp, char *roottag)
 {
 	int isggp = !strcmp (roottag, "getProperties") && !dev[0];
+	int n = __atomic_load_n (&ndvrinfo, __ATOMIC_ACQUIRE);
 	DvrInfo *dp;
 
 	/* queue message to each driver unless it is restarting or we
 	 * know it does not support this dev
 	 */
-	for (dp = dvrinfo; dp < &dvrinfo[ndvrinfo]; dp++) {
+	for (dp = dvrinfo; dp < &dvrinfo[n]; dp++) {
 
-	    if (pthread_rwlock_tryrdlock (&dp->restart_lock) == 0) {
+	    if (__atomic_load_n (&dp->ready, __ATOMIC_ACQUIRE)
+	    		&& pthread_rwlock_tryrdlock (&dp->restart_lock) == 0) {
 
 		if (!dev[0] || !dp->dev[0] || !strcmp (dev, dp->dev)) {
 
@@ -1748,7 +2097,10 @@ q2Drivers (char *dev, Msg *mp, char *roottag)
                     if (verbose > 2)
                         logMsg ("queue to", dp, NULL, sendmp);
 		    ql = pushMsg (dp, NULL, sendmp);
-		    if (ql > maxqsiz) {
+		    if (ql > maxqsiz && dp->pid == FIFODVR) {
+			/* a stuck FIFO driver keeps its pipes, its reader drops its queue */
+			wakeDvr (dp, WAKEQ);
+		    } else if (ql > maxqsiz) {
 			int rfd = -1;
 
 			logMessage ("Driver %s: %d bytes behind in %d messages, restarting\n",
@@ -1787,15 +2139,17 @@ q2Drivers (char *dev, Msg *mp, char *roottag)
 static void
 q2SnoopingDrivers (int isblob, int anyname, char *dev, char *name, Msg *mp)
 {
+	int n = __atomic_load_n (&ndvrinfo, __ATOMIC_ACQUIRE);
 	DvrInfo *dp;
 	int ql;
 
 	/* queue message to each driver if it is not restarting and
 	 * it is snooping for this dev/name
 	 */
-	for (dp = dvrinfo; dp < &dvrinfo[ndvrinfo]; dp++) {
+	for (dp = dvrinfo; dp < &dvrinfo[n]; dp++) {
 
-	    if (pthread_rwlock_tryrdlock (&dp->restart_lock) == 0) {
+	    if (__atomic_load_n (&dp->ready, __ATOMIC_ACQUIRE)
+	    		&& pthread_rwlock_tryrdlock (&dp->restart_lock) == 0) {
 
 		Snoopee *sp = findSnoopDevice (dp, dev, name, anyname);
 
@@ -1804,7 +2158,10 @@ q2SnoopingDrivers (int isblob, int anyname, char *dev, char *name, Msg *mp)
 
 		    /* ok: queue message to this driver -- beware it getting too far behind */
 		    ql = pushMsg (dp, NULL, mp);
-		    if (ql > maxqsiz) {
+		    if (ql > maxqsiz && dp->pid == FIFODVR) {
+			/* a stuck FIFO driver keeps its pipes, its reader drops its queue */
+			wakeDvr (dp, WAKEQ);
+		    } else if (ql > maxqsiz) {
 			int rfd = -1;
 
 			logMessage ("Driver %s: %d bytes behind in %d messages, restarting\n",
@@ -2425,8 +2782,22 @@ logMessage (const char *fmt, ...)
                 exit(1);
             }
 	} else {
-	    fprintf (stderr, "%s: ", ts);
-	    vfprintf (stderr, fmt, ap);
+	    /* one write per line so a full stderr pipe drops it rather than stalls us */
+	    char line[MAXLOGL+1];
+	    int l = 0;
+	    if (logdrops)
+		l = snprintf (line, sizeof(line), "%s: dropped %d log lines, stderr was full\n", ts, logdrops);
+	    l += snprintf (line+l, sizeof(line)-l, "%s: ", ts);
+	    if (l < (int)sizeof(line))
+		l += vsnprintf (line+l, sizeof(line)-l, fmt, ap);
+	    if (l >= (int)sizeof(line)) {
+		l = sizeof(line)-1;
+		line[l-1] = '\n';
+	    }
+	    if (write (2, line, l) == l)
+		logdrops = 0;
+	    else
+		logdrops++;
 	}
 
 	va_end (ap);

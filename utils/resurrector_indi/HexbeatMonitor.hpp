@@ -16,6 +16,7 @@
 #include <iostream>
 
 #include <dirent.h>
+#include <ctime>
 
 // /////////////////////////////////////////////////////////////////////
 // /////////////////////////////////////////////////////////////////////
@@ -186,6 +187,47 @@ public: // interfaces
 
     int init_dly() const { return m_init_delay; }
 
+    bool restart_pending_get() const { return m_restart_pending; }
+    void restart_pending_set(bool tf) { m_restart_pending = tf; }
+
+    // /////////////////////////////////////////////////////////////////
+    // /////////////////////////////////////////////////////////////////
+    /// Check on the process stop_hexbeater last asked to stop
+    /** Sends it SIGKILL if kill_after_sec >= 0 and it still runs that
+      * many seconds after it was asked to stop
+      * \returns true while that process still runs
+      * \returns false once it is gone, or if none was asked to stop
+      * \arg \c kill_after_sec is the grace period before SIGKILL, or
+      *         negative to never send SIGKILL
+      */
+    bool
+    stopping(int kill_after_sec)
+    {
+        if (m_stop_pid < 1) { return false; }
+        // Reap it if it is our child, then see whether it still exists
+        waitpid(m_stop_pid, 0, WNOHANG);
+        if (kill(m_stop_pid, 0) < 0 && errno == ESRCH)
+        {
+            m_stop_pid = 0;
+            return false;
+        }
+        if (!m_stop_killed && kill_after_sec >= 0
+         && time(0) - m_stop_time >= kill_after_sec)
+        {
+            std::cerr << "[resurrector killing pid " << m_stop_pid
+                      << " of " << *this << ", still running "
+                      << kill_after_sec << "s after SIGUSR2 at "
+                      << time_to_hb(0).substr(0,9) << "]\n";
+            kill(m_stop_pid, SIGKILL);
+            m_stop_killed = true;
+        }
+        return true;
+    }
+    // /////////////////////////////////////////////////////////////////
+
+    /// PID last asked to stop by stop_hexbeater, until it is gone
+    int stop_pid() const { return m_stop_pid; }
+
     // /////////////////////////////////////////////////////////////////
     // /////////////////////////////////////////////////////////////////
     /// Open a named FIFO, load results into HexbeatMonitor instance
@@ -267,6 +309,7 @@ public: // interfaces
         // Find running hexbeater or fork new hexbeater; return on error
         int pid = fork_hexbeater(delay,check_existing);
         if (pid < 0) { return pid; }
+        m_restart_pending = false;
 
         // Update, select monitoring flag, [fd_set] bit, and nfds
         update_status(m_fd, true, fd_set_cpy, nfds);
@@ -301,6 +344,10 @@ public: // interfaces
         }
         int istatus = kill(pid, SIGUSR2);
         if (istatus < 0) { return -1; }
+        // Remember it, so callers can wait for it to go (see stopping)
+        m_stop_pid = pid;
+        m_stop_time = time(0);
+        m_stop_killed = false;
         update_status(m_fd, false, fd_set_cpy, nfds);
         return pid;
     }
@@ -319,8 +366,9 @@ public: // interfaces
     close_hexbeater(fd_set& fd_set_cpy, int& nfds)
     {
         if (m_fd < 0) { return -1; }
-        // Stop hexbeater process, if one is running
+        // Stop hexbeater process, if one is running, and never restart it
         stop_hexbeater(fd_set_cpy, nfds);
+        m_restart_pending = false;
         // Reset FD to -1, update caller's [fd_set], close FD
         update_status(-1, false, fd_set_cpy, nfds);
         return 0;
@@ -523,6 +571,14 @@ private: // Internal attributes and interfaces
     std::string m_buffer{""};  ///< Accumulated heartbeat data
 
     bool m_pending_close{false}; ///< Mark for possible closure
+
+    bool m_restart_pending{false}; ///< Start again once m_stop_pid is gone
+
+    int m_stop_pid{0}; ///< PID asked to stop by stop_hexbeater, 0 once gone
+
+    time_t m_stop_time{0}; ///< When m_stop_pid was asked to stop
+
+    bool m_stop_killed{false}; ///< True once m_stop_pid was sent SIGKILL
 
     void (*m_output_redirect)(std::string){nullptr}; ///< forked outputs
 

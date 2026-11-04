@@ -140,6 +140,7 @@ protected:
    int indiserver_p {-1}; ///< The indiserver port (passed to indiserver)
    int indiserver_v {-1}; ///< The indiserver verbosity (passed to indiserver)
    bool indiserver_x {false}; ///< The indiserver terminate after last exit flag (passed to indiserver)
+   std::string indiserver_f; ///< The indiserver control FIFO path (passed to indiserver), empty for its default in the driver FIFO directory
 
    std::string m_driverFIFOPath; ///< The path to the local drivers' FIFOs directory
 
@@ -287,6 +288,7 @@ void xindiserver::setupConfig()
    config.add("indiserver.p", "p", "", argType::Required, "indiserver", "p", false,  "int", "indiserver: alternate IP port, default 7624");
    config.add("indiserver.v", "v", "", argType::True, "indiserver", "v", false,  "int", "indiserver: log verbosity, -v, -vv or -vvv");
    config.add("indiserver.x", "x", "", argType::True, "indiserver", "x", false,  "bool", "exit after last client disconnects -- FOR PROFILING ONLY");
+   config.add("indiserver.f", "f", "", argType::Required, "indiserver", "f", false,  "string", "indiserver: control FIFO drivers register and restart through, default indiserver.ctrl in the driver FIFO directory; must match indiserver_ctrl_fifo in magaox.conf if set");
 
    config.add("local.drivers","L", "local.drivers" , argType::Required, "local", "drivers", false,  "vector string", "List of local drivers to start.");
    config.add("remote.drivers","R", "remote.drivers" , argType::Required, "remote", "drivers", false,  "vector string", "List of remote drivers to start, in the form of name@tunnel, where tunnel is the name of a tunnel specified in sshTunnels.conf.");
@@ -319,6 +321,7 @@ void xindiserver::loadConfig()
    }
 
    config(indiserver_x, "indiserver.x");
+   config(indiserver_f, "indiserver.f");
 
    config(m_local, "local.drivers");
    config(m_remote, "remote.drivers");
@@ -406,6 +409,13 @@ int xindiserver::constructIndiserverCommand( std::vector<std::string> & indiserv
 
       // The indiserver terminate after last exit flag
       if(indiserver_x == true) indiserverCommand.push_back("-x");
+
+      // The indiserver control FIFO, if not its default
+      if(indiserver_f != "")
+      {
+         indiserverCommand.push_back("-f");
+         indiserverCommand.push_back(indiserver_f);
+      }
 
       // The local drivers' FIFO directory
       m_driverFIFOPath = MAGAOX_path;
