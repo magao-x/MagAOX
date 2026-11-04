@@ -15,15 +15,19 @@ DM contributions. This trial uses an ideal constant-zero publisher: its command
 is already available, so there is no external provider to wait for or emulate.
 All instrument commands below are operator actions.
 
-By default the trial targets auxiliary publication. The optional compensated
-test below advances those publications to bring dmcomb's combined output closer
-to +125/+250/+375 us relative to the genuine main. Its initial 5 us advance is
-based on the previous measured 4.2-4.9 us mean relative-output offset. It is a
-differential phase experiment, not a measured full-path transport bound or a
-guarantee of exact semaphore-post times. The
-[combined-trigger deadline plan](../../../agents/plans/2026-11/dm-syncopation-combined-trigger-deadlines.md)
-records the remaining endpoint qualification. A controller fgtimes mean near
-125 us does not alone establish each labelled combined-output phase.
+The target is the **source `cnt0++` publication that requests dmcomb work**.
+Main and auxiliary streams have separate counters; their interleaved
+publications should follow the table above on average. The grid is fitted from
+coherent main-stream publication timestamps over the established ten-second
+baseline, then frozen for each cycle. Callback arrival jitter does not define
+the phase, and a late publication does not move the following slots.
+
+The [counter-publication plan](../../../agents/plans/2026-11/dm-syncopation-counter-publication-targets.md)
+records this endpoint and its clock mapping. Stream `writetime` is sampled just
+before the counter update, so it provides a pre-counter timing proxy rather
+than an exact timestamp of the store. dmcomb output and controller wakeup occur
+later and remain separate diagnostics. The earlier downstream 5 us advance is
+superseded; a nonzero `publicationAdvanceUs` is now rejected.
 
 This finite empirical trial measures actual delivery and possible main impact.
 It deliberately does not impose the shadow's conservative prediction of zero
@@ -45,9 +49,10 @@ make -C apps/dmSyncopation &&
 make -C apps/dmSyncopation install
 ```
 
-The installed binary must expose `zero_test.labelVersion=7` and
-`zero_test.idealPublisher=1`; an older coordinated-trial binary does not have
-the current progress/reporting interface. Only dmSyncopation needs rebuilding.
+The installed binary must expose `zero_test.labelVersion=8`,
+`zero_test.targetEndpoint=1` and `zero_test.idealPublisher=1`; an older
+coordinated-trial binary does not have the current progress/reporting interface.
+Only dmSyncopation needs rebuilding.
 The 8 kHz option also requires the updated app's four-step support and capture
 script; the installed logdump and DM controller do not need rebuilding.
 Use the capture helper from the same updated checkout. After the duration and
@@ -124,8 +129,8 @@ After restarting, check the new mode's readbacks while enable remains Off:
 timeout -k 2s 8s getINDI dmtweeter-synco.zero_test
 ```
 
-Expect `labelVersion=7`, `idealPublisher=1`, `enabled=1` and a valid, fresh
-progress snapshot. `eventStride=4` is the default successful-event sampling
+Expect `labelVersion=8`, `targetEndpoint=1`, `idealPublisher=1`, `enabled=1` and a
+valid, fresh progress snapshot. `eventStride=4` is the default successful-event sampling
 described below; it does not reduce the command rate or timing populations.
 No `scheduler.maxCadenceHz=8000` setting is needed for the 8 kHz trial. This
 finite zero mode uses the clock-only grid estimator and its explicit total step
@@ -134,7 +139,7 @@ ordinary live/shadow maximum-cadence default is unchanged.
 
 ## Run and capture
 
-For the new **compensated 8 kHz** test, merge
+For the new **counter-target 8 kHz** test, merge
 [`dmtweeter_synco_zero_phase_test.conf`](../dmtweeter_synco_zero_phase_test.conf)
 after the ordinary zero-test settings in the working instance config. Keep the
 rest of that config and all camera/loop/controller/dmcomb/CPU settings as they
@@ -142,7 +147,8 @@ are. The changed settings are:
 
 ```ini
 [zeroTest]
-publicationAdvanceUs=5
+publicationAdvanceUs=0
+commitLeadUs=0
 lateUs=2
 wakeAheadUs=10
 ```
@@ -150,30 +156,30 @@ wakeAheadUs=10
 Restart dmSyncopation, leaving enable Off, then start with:
 
 ```bash
-bash apps/dmSyncopation/scripts/capture-zero-aux-test.sh 8000 10 5 10
+bash apps/dmSyncopation/scripts/capture-zero-aux-test.sh 8000 10 0 10
 ```
 
-The last two arguments verify the configured 5 us advance and 10 us early wake;
-they do not change either startup setting. After reviewing the short capture,
-use `8000 120 5 10` for the
+The last two arguments verify zero downstream advance and a 10 us early wake;
+they do not change either startup setting. The optional fifth argument verifies
+`commitLeadUs` and defaults to zero. After reviewing the short capture,
+use `8000 120 0 10` for the
 long run. Only dmSyncopation needs rebuilding and restarting; no logdump or DM
 controller change is required.
 
-Each frozen auxiliary publication target is 5 us earlier than the existing
-primary-observer grid. Passive preparation must finish by that earlier target;
-the final admission checkpoint may be at most 2 us later. Thus the checkpoint
-is at least 3 us before the unadvanced grid point. Remaining update/API and
-dmcomb work can still produce an early or late downstream output, which the
-test measures. The 5 us advance is a fixed initial calibration, with no
-per-frame feedback or catch-up. All reader-clearance checks remain active.
-Mean phase, jitter/tails, skip fractions and controller admission must be
-reviewed together before further tuning.
+Each auxiliary counter target is the corresponding frozen main-publication
+grid point. `commitLeadUs` places the final dispatch slightly before that point
+to allow for guard-to-counter work only. It starts at **zero until that work is
+measured**; it must not be inferred from dmcomb transport or complete API-return
+cost. The setting is finite from 0 through 10 us. It does not move the counter
+target, accumulate per-frame feedback or permit catch-up writes. All
+reader-clearance checks remain active. Review source publication error,
+jitter/tails, skip fractions and controller admission together before tuning.
 
 The early-wake mode addresses the failed first compensated capture, which
 skipped about 10% of auxiliary occurrences while sleeping toward the
 publication target and then checking a 2 us allowance. With `wakeAheadUs=10`,
 the app instead services diagnostics and performs full validation at the earlier
-wake point. Those checks must finish by the publication target. It then uses a
+wake point. Those checks must finish by the dispatch point. It then uses a
 bounded final spin, with no sleeps, queue draining, timing joins or logging.
 Only current identity/ownership, cancellation, finite-duration and readiness/
 fault guards remain active in that window. Unsafe reader observations revoke
@@ -186,12 +192,13 @@ still causes a deadline skip when the thread resumes. This remains
 an isolated-core experiment; the new capture must establish its delivery and
 phase behavior. The earlier wake does not remove dmcomb's polling jitter.
 
-To reproduce the previous **unadvanced control**, restore
-`publicationAdvanceUs=0`, `lateUs=5`, `wakeAheadUs=0`, restart synco, and use the two-argument
-commands below. Omitting the helper's third argument expects zero advance;
-it will reject a compensated preset rather than silently mixing the tests.
-Omitting the fourth argument likewise expects zero wake-ahead; schema 7 is
-required when a positive wake-ahead is requested.
+For a **zero-lead, no-early-wake comparison** with the current source-clock grid,
+set `publicationAdvanceUs=0`, `commitLeadUs=0`, `lateUs=5`, `wakeAheadUs=0`,
+restart synco, and use the two-argument commands below. This does not reproduce
+the older callback-clock phase fit. Omitting the third, fourth and fifth helper
+arguments expects zero downstream advance, wake-ahead and commit lead,
+respectively. All runs require schema 8 and endpoint 1; mismatched presets are
+rejected before enable.
 
 Start with `dmtweeter-synco.enable.toggle=Off`. From the repository root, run the
 finite **4 kHz total** trial:
@@ -237,26 +244,64 @@ determines a successful stop. The helper waits for the app's finished state,
 sends Off in cleanup, saves after snapshots and stops only its own collectors.
 No sudo is required.
 
-## Read the compensated timing evidence
+## Read the counter-publication timing evidence
 
-`zero_test` version 7 reports `publicationAdvanceUs`, `lateUs` and `wakeAheadUs`. Event
-`targetNs` continues to mean the auxiliary publication target; it is not
-redefined as a combined trigger. The new fields are:
+`zero_test` version 8 reports `targetEndpoint=1`, `commitLeadUs`, `lateUs` and
+`wakeAheadUs`. `publicationAdvanceUs` must be zero. The event fields distinguish
+the desired counter point from the earlier dispatch and validation points:
 
 | Field | Meaning |
 | --- | --- |
-| `referenceTargetNs` | Unadvanced frozen primary-observer grid point. |
+| `counterTargetRawNs` | Frozen desired source publication in the ImageStreamIO producer clock. |
+| `counterTargetNs`, `referenceTargetNs` | That same counter point projected into local monotonic time. |
+| `targetNs` | Final dispatch point: `counterTargetNs - commitLeadUs`. |
 | `publicationDeadlineNs` | Latest final admission checkpoint: `targetNs + lateUs`. |
 | `publicationBeginNs`, `publicationEndNs` | Monotonic final-guard-to-update-return bracket; zero when no update was attempted. |
 | `wakeTargetNs` | Earlier full-validation wake point: `targetNs - wakeAheadUs`. Zero for the legacy wait. |
 | `wokeNs` | Immediate clock sample after the final timed wait, before its diagnostic/check work; entry sample if no sleep was needed. |
 | `validatedNs` | Full validation completion, required no later than `targetNs`; zero if validation was not reached. |
 | `auxiliaryInode`, `auxiliaryCounter`, `auxiliaryPublicationSec/Nsec` | Coherent auxiliary publication identity and raw producer timestamp. |
+| `sourceInode`, `sourceCounter`, `sourceSec/Nsec` | Main or auxiliary source identity, distinct from the combined command. |
+| `clockOffsetNs`, `clockBracketNs`, `clockEpoch` | Frozen producer-minus-monotonic offset, sampling bracket and mapping generation. |
 
 `observedNs` remains update-return time for posted commands. The raw auxiliary
 and combined publication timestamps use the same producer clock and can be
 subtracted from each other; do not subtract their absolute values from the
-monotonic target or API bracket.
+monotonic target or API bracket without the qualified clock offset. `zero_clock`
+and `kind=clock` records expose that mapping's bounds and coverage. A wide
+sampling bracket suppresses current writes while preserving the raw cadence
+fit; a clock discontinuity resets the fit. `clockRejected` counts excluded
+primary observations. Clock qualification failure still respects the app's
+finite active and arm timeouts.
+Use the integer text-event and `kind=clock` fields for nanosecond arithmetic;
+large absolute nanosecond values in INDI number properties have floating-point
+rounding. The small duration/error populations are already computed before
+that conversion.
+
+The primary timing evidence is `zero_publication` and `[zero_test]
+kind=publication endpoint=cnt0_writetime_proxy`. Its full-rate populations are
+independent of successful-event sampling and downstream acknowledgement:
+
+| Population | Definition |
+| --- | --- |
+| `intervalj` | Adjacent interleaved source publications ending at step `j`, with consecutive cycle/slot labels and stream-local counter progression. Step 0 includes the final auxiliary to the next genuine main. |
+| `intervalErrorj` | That interval minus the preceding frozen `period / steps`; nominally 125 us at 8 kHz. |
+| `phaseErrorj` | Source publication minus the same-cycle actual main publication, less `j * period / steps`. |
+| `publicationErrorj` | Raw source publication minus its frozen raw counter target. |
+| `preCounterLeadj` | Auxiliary raw writetime proxy minus the final monotonic guard sample mapped with the qualified offset. |
+| `apiCostj` | Complete guard-to-update-return duration, including post-counter work. |
+
+Each population exposes count, mean, standard deviation (`RmsUs`), minimum and
+maximum. Missing slots are excluded from nominal adjacent intervals. Source
+gaps, label gaps, duplicates, invalid timing and clock exclusions are explicit;
+same-source replacement/regression latches a measurement fault until reset.
+An out-of-order pair across main and auxiliary streams is counted and excluded
+without permanently stopping collection. A main
+with no dmcomb association and an auxiliary with no later acknowledgement can
+still contribute coherent source-publication evidence. Use `preCounterLead`
+with its clock uncertainty to choose any later dispatch lead; `apiCost` is not
+that lead. Preemption within the publication API remains observable and cannot
+be prevented by an earlier admission check.
 
 For early-wake events, compare `wokeNs - wakeTargetNs` for observed wake error,
 `validatedNs - wokeNs` for validation/service cost, and
@@ -269,7 +314,7 @@ window and `publication_guard` reports the final deadline check. The
 reason to add to the disjoint outcome totals. The existing 2 us admission grace
 is not used to excuse validation that finishes after the target.
 
-The new `zero_phase` INDI property and `[zero_test] kind=phase` text records
+The separate `zero_phase` INDI property and `[zero_test] kind=phase` text records
 contain **full-rate** measurements, independent of successful-event sampling.
 For each destination step `j` they report count, mean, standard deviation
 (`RmsUs`), minimum and maximum:
@@ -288,7 +333,7 @@ populations have count zero and extrema/RMS of -1. These endpoints are combined
 publication proxies before the selected controller semaphore post. Controller
 receipt jitter and SDK service remain separate evidence in dmtweeter telemetry.
 
-Before requesting On, the helper requires reporting version at least 5,
+Before requesting On, the helper requires reporting version at least 8 and endpoint 1,
 `snapshotValid=1`, positive `snapshotSequence`, and reported `snapshotAgeSec`
 from zero through two seconds. Polls request an explicit list of fully qualified
 `zero_test` elements. They return when all requested fields arrive, avoiding the
@@ -433,7 +478,7 @@ coverage/lifecycle conditions; they are not additional skip reasons to add again
 A guard failure during acknowledgement belongs to the posted attempt's named
 reason and does not increment a pre-publication skip counter.
 
-New summaries/events carry `labelVersion=7`; summaries/INDI also identify
+New summaries/events carry `labelVersion=8`; summaries/INDI also identify
 `idealPublisher=1`. Event text includes named `action`,
 `reason` and `stage` fields alongside the retained numeric `outcome`. The stage
 distinguishes preparation, reader/combined validation, publication deadline/
@@ -447,7 +492,8 @@ skip reason to add to `skipped`.
 A late guard event retains the exact rejecting clock sample. A
 timestamp/residual after a successful publication is a completion stamp;
 it can exceed the configured `lateUs` even though the admission checkpoint
-occurred within that limit (5 us for the control, 2 us for the compensated preset).
+occurred within that limit (5 us for the no-early-wake comparison, 2 us for the
+counter-target preset).
 
 For example, `action=skipped reason=preparation_late stage=preparation` records a
 missed ready deadline. `action=skipped reason=late stage=publication_guard`

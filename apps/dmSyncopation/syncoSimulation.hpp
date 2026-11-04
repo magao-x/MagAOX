@@ -28,7 +28,7 @@ class Simulation
     /// Startup-only model settings; these bounds do not qualify instrument safety.
     struct Config
     {
-        bool     clockOnly{ false };      ///< Estimate immutable grids only; ignore combined/release/resource models.
+        bool     clockOnly{ false };      ///< Fit grids in one ordered caller clock; ignore admission/resource models.
         Bounds   bounds;                  ///< Assumed copy, reader and next-main bounds.
         int      steps{ 2 };              ///< Fixed requested total steps, including passive zero.
         unsigned window{ 32 };            ///< Retained diagnostic intervals and robust phase observations.
@@ -60,8 +60,8 @@ class Simulation
     /// output/evaluation calls.
     void
     primary( uint64_t counter /**< [in] genuine primary counter */,
-             int64_t  observed /**< [in] coherent same-host monotonic observation */,
-             int64_t  publicationInterval = 0 /**< [in] producer-clock diagnostic interval, ns; zero unavailable */,
+             int64_t observed /**< [in] Coherent monotonic observation, or declared producer time in clockOnly mode. */,
+             int64_t publicationInterval = 0 /**< [in] producer-clock diagnostic interval, ns; zero unavailable */,
              const MagAOX::dmSyncoSimulation::Observation &context = {} /**< [in] optional raw monitor context */ );
 
     /// Observe coherent combined-output linkage; false coherence never supplies an acknowledgement.
@@ -88,7 +88,10 @@ class Simulation
     const MagAOX::dmSyncoSimulation::Summary &summary() const;
 
     /// Read a committed cycle's exact grid after the requested long cadence baseline is complete.
-    /** This returns geometry, not an admission decision or permission to write. */
+    /** This returns geometry in the configured event clock, not admission or
+     * permission to write. A clock-only producer-clock grid must be mapped to
+     * local monotonic time before it is used for waits.
+     */
     bool frozenGrid( uint64_t  counter /**< [in] Genuine primary counter labelling the committed cycle. */,
                      GridTime &out /**< [out] Exact frozen main prediction; cleared when unavailable. */,
                      uint64_t &periodQ32 /**< [out] Period frozen with that cycle; zero when unavailable. */ ) const;

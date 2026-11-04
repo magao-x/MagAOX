@@ -1,5 +1,15 @@
 # Task Description
 
+## 2026-11-03 current target: source counter publications
+
+The latest clarification targets the interleaved main and auxiliary `cnt0++`
+publications at nominal 0/125/250/375 us, rather than the subsequent dmcomb
+output. Fit the main source publication clock, freeze future slots and finish
+checks early. Compensate only measured pre-counter preparation, not dmcomb
+transport. The [counter-publication plan](../2026-11/dm-syncopation-counter-publication-targets.md)
+supersedes the downstream endpoint interpretation below and records schema 8,
+clock mapping and direct source timing evidence.
+
 ## Problem Statement
 
 We need a system that enables dm updates within the loop time (i.e. at 8 kHz when the loop is at 2 kHz).  The challenge is that we have to space dm writes due to the time it takes to process a DM command.

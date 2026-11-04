@@ -1,5 +1,12 @@
 # dmSyncopation combined-trigger targets and earlier publication deadlines
 
+**Superseded endpoint interpretation:** the user subsequently specifies the
+interleaved source `cnt0++` publications as the target, rather than dmcomb's
+later output. The current contract and implementation are in
+[counter-publication targets](dm-syncopation-counter-publication-targets.md).
+The experiments below remain historical evidence; the 5 us downstream advance
+is not part of the current preset.
+
 ## Direction and current status
 
 The user clarified the timing objective: at 2 kHz main / 8 kHz total, dmcomb
