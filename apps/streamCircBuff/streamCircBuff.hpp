@@ -30,7 +30,12 @@ namespace app
 {
 
 /// Class for application to keep a circular buffer of a stream and publish it to another stream
-/**
+/** Each source frame is copied as it arrives, and then published to the circular buffer in the source data
+  * type with the source acquisition time, write time and frame counter.  Readers of the circular buffer
+  * therefore see the same timing as readers of the source.  The published counter is offset if needed so
+  * that it keeps increasing when the source restarts.  A single-frame source frame which is rewritten during
+  * the copy is dropped, and the number of such frames is logged.
+  *
   * \ingroup streamCircBuff
   */
 class streamCircBuff : public MagAOXApp<true>,
@@ -64,11 +69,6 @@ public:
 
 protected:
 
-   /** \name Configurable Parameters
-     *@{
-     */
-   ///@}
-
    sem_t m_smSemaphore {0}; ///< Semaphore used to synchronize the fg thread and the sm thread.
 
    std::mutex m_stageMutex; ///< Protects the staged frame and its timing, which the sm thread writes and the fg thread reads.
@@ -101,6 +101,7 @@ public:
    ~streamCircBuff() noexcept
    {}
 
+   /// Setup the configuration of the shmimMonitor, frameGrabber and telemeter
    virtual void setupConfig();
 
    /// Implementation of loadConfig logic, separated for testing.
@@ -108,16 +109,19 @@ public:
      */
    int loadConfigImpl( mx::app::appConfigurator & _config /**< [in] an application configuration from which to load values*/);
 
+   /// Load the configuration, calling loadConfigImpl
    virtual void loadConfig();
 
    /// Startup function
    /**
-     *
+     * \returns 0 on success
+     * \returns -1 on error
      */
    virtual int appStartup();
 
    /// Implementation of the FSM for streamCircBuff.
-   /**
+   /** Also logs the number of source frames dropped since the last call.
+     *
      * \returns 0 on no critical error
      * \returns -1 on an error requiring shutdown
      */
@@ -125,14 +129,17 @@ public:
 
    /// Shutdown the app.
    /**
-     *
+     * \returns 0
      */
    virtual int appShutdown();
 
 
 protected:
 
-   //shmimMonitor Interface
+   /// Size the stage for a new source and request a framegrabber reconfiguration
+   /**
+     * \returns 0
+     */
    int allocate( const dev::shmimT & dummy /**< [in] tag to differentiate shmimMonitor parents.*/);
 
    /// Copy the current source frame and its timing to the stage, and wake the fg thread
@@ -141,8 +148,8 @@ protected:
      * \returns 0 on success
      * \returns -1 on error
      */
-   int processImage( void * curr_src,          ///< [in] pointer to start of current frame.
-                     const dev::shmimT & dummy ///< [in] tag to differentiate shmimMonitor parents.
+   int processImage( void * curr_src,          /**< [in] pointer to start of current frame. */
+                     const dev::shmimT & dummy /**< [in] tag to differentiate shmimMonitor parents. */
                    );
 
    /** \name dev::frameGrabber interface
@@ -151,14 +158,16 @@ protected:
      */
 
    /// Implementation of the framegrabber configureAcquisition interface
-   /**
+   /** Sets the output size and data type to those of the source.
+     *
      * \returns 0 on success
      * \returns -1 on error
      */
    int configureAcquisition();
 
    /// Implementation of the framegrabber fps interface
-   /**
+   /** Always 1, so the framegrabber latency statistics do not cover the source rate.
+     *
      * \todo this needs to infer the stream fps and return it
      */
    float fps()
@@ -174,18 +183,20 @@ protected:
    int startAcquisition();
 
    /// Implementation of the framegrabber acquireAndCheckValid interface
-   /**
-     * \returns 0 on success
-     * \returns -1 on error
+   /** Waits up to 1 second for a staged frame which has not been published yet.
+     *
+     * \returns 0 if a frame is ready
+     * \returns 1 if no frame is ready
      */
    int acquireAndCheckValid();
 
    /// Implementation of the framegrabber loadImageIntoStream interface
-   /**
+   /** Copies the staged frame and sets the acquisition time, write time and counter to publish.
+     *
      * \returns 0 on success
-     * \returns -1 on error
+     * \returns -1 if the stage no longer matches the output size, so the framegrabber reconfigures
      */
-   int loadImageIntoStream( void * dest  /**< [in] */);
+   int loadImageIntoStream( void * dest  /**< [out] the next frame of the output stream */);
 
    /// Implementation of the framegrabber reconfig interface
    /**
@@ -200,8 +211,8 @@ protected:
      *
      * \returns 0
      */
-   int frameGrabberRelayTiming( timespec & writetime, ///< [out] the source write time
-                                uint64_t & cnt0       ///< [in/out] on entry the next counter, on exit the counter to publish
+   int frameGrabberRelayTiming( timespec & writetime, /**< [out] the source write time */
+                                uint64_t & cnt0       /**< [in/out] on entry the next counter, on exit the counter to publish */
                               );
 
    ///@}
@@ -210,9 +221,19 @@ protected:
      *
      * @{
      */
+   /// Check whether the framegrabber timing telemetry is due
+   /**
+     * \returns 0 on success
+     * \returns -1 on error
+     */
    int checkRecordTimes();
 
-   int recordTelem( const telem_fgtimings * );
+   /// Record the framegrabber timing telemetry
+   /**
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+   int recordTelem( const telem_fgtimings * /**< [in] tag to select the telemetry type */ );
 
    ///@}
 
