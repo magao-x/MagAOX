@@ -9,8 +9,11 @@ ifeq "$(QMAKE_PATH)" ""
   QMAKE_PATH := $(shell which $(QMAKE) 2>/dev/null)
 endif
 
+# Cleaning must also work on systems without Qt development tools.
+ifneq ($(MAKECMDGOALS),clean)
 ifeq "$(QMAKE_PATH)" ""
   $(error No qmake found on PATH (are the Qt development libraries installed?))
+endif
 endif
 
 ##############################

@@ -1,3 +1,5 @@
+\ingroup magaoxapp
+
 Adding An application {#page_module_appadd}
 ==========
 

@@ -1,0 +1,15 @@
+TEMPLATE = app
+TARGET = roi_test
+QT += widgets
+CONFIG += console c++20 link_pkgconfig
+CONFIG -= app_bundle
+PKGCONFIG += mxlib
+MOC_DIR = moc/
+OBJECTS_DIR = obj/
+UI_DIR = ui/
+MAKEFILE = makefile.roi_test
+SOURCES += roi_test.cpp
+HEADERS += ../roi.hpp ../../xWidgets/xWidget.hpp ../../xWidgets/statusLabel.hpp ../../xWidgets/statusLineEdit.hpp
+FORMS += ../roi.ui
+INCLUDEPATH += ../../xWidgets
+LIBS += ../../../../INDI/libcommon/libcommon.a ../../../../INDI/liblilxml/liblilxml.a

@@ -5,6 +5,12 @@
 #define MACRO_FD_SETSIZE FD_SETSIZE
 #endif
 
+/// Seconds a late hexbeater may take to exit after SIGUSR2 before SIGKILL
+#define HBR_KILL_LATE_SEC 5
+
+/// Seconds to wait for closed hexbeaters to exit, e.g. on SIGUSR1
+#define HBR_WAIT_CLOSED_SEC 10
+
 template <bool _HBM_SIGCHLD_HNDLR = true, int HBR_FD_SETSIZE = MACRO_FD_SETSIZE>
 class resurrectorT
 {
@@ -56,15 +62,40 @@ public:
     }
 
     /// Close any HexbeatMonitors that remain pending to be closed
+    /** Then wait up to HBR_WAIT_CLOSED_SEC for their processes to exit,
+      * logging any still running; they are not killed, an orderly
+      * shutdown may take longer
+      */
     void
     pending_close_all_close()
     {
+        bool any{false};
         for (auto it = m_hbmarr.begin(); it != m_hbmarr.end(); ++it)
         {
             if (it->pending_close_get())
             {
                 it->close_hexbeater(m_fdset_cpy, m_nfds);
                 it->pending_close_set(false); // Probably not necessary
+                any = true;
+            }
+        }
+        for (int ms = 0; any && ms < 1000*HBR_WAIT_CLOSED_SEC; ms += 100)
+        {
+            any = false;
+            for (auto it = m_hbmarr.begin(); it != m_hbmarr.end(); ++it)
+            {
+                any = it->stopping(-1) || any;
+            }
+            struct timeval tv{0,100000};
+            if (any) { select(0, 0,0,0, &tv); }
+        }
+        for (auto it = m_hbmarr.begin(); any && it != m_hbmarr.end(); ++it)
+        {
+            if (it->stopping(-1))
+            {
+                std::cerr << "[resurrector: pid " << it->stop_pid()
+                          << " of " << *it << " still running "
+                          << HBR_WAIT_CLOSED_SEC << "s after SIGUSR2]\n";
             }
         }
     }
@@ -113,6 +144,15 @@ public:
         // Loop on the active FDs, each representing an active hexbeater
         for (auto it = m_hbmarr.begin(); it != m_hbmarr.end(); ++it)
         {
+            // A late hexbeater asked to stop is started again only once
+            // it is gone, so the new process does not find the old one
+            // still holding its PID lock; SIGKILL it if it takes too long
+            if (it->restart_pending_get())
+            {
+                if (!it->stopping(HBR_KILL_LATE_SEC)) { restart_hexbeater(it); }
+                continue;
+            }
+
             // Read any hexbeat data from the hexbeater FIFO, compare
             // the local hexbeat (hbnow, above) to the latest received
             // hexbeat, and if that received hexbeat has not timed out,
@@ -131,9 +171,8 @@ public:
 
             // To here, the current hexbeater, represented by the fd
             // from m_fds and hbm, has timed out.  Attempt to stop the
-            // hexbeater process, in case it is locked up, then wait
-            // for a tenth of a second, then re-start a new hexbeater
-            // process.
+            // hexbeater process, in case it is locked up, then re-start
+            // a new hexbeater process once the old one is gone, above.
             // Pass the the [fd_set] bits (m_fdset_cpy) and the range of
             // bits (m_nfds) for the active hexbeaters to be updated
             // with each call
@@ -153,17 +192,24 @@ public:
                       << " at " << time_to_hb(0).substr(0,9) << "]\n";
             }
             it->stop_hexbeater(m_fdset_cpy, m_nfds);
-            struct timeval tv{0,99999};
-            select(0, 0,0,0, &tv);
-            if (m_logging)
-            {
-                std::cerr << "[resurrector re-starting " << *it
-                          << " at " << time_to_hb(0).substr(0,9)
-                          << "]\n";
-            }
-            it->start_hexbeater(m_fdset_cpy, m_nfds,it->init_dly()
-                               ,false);
+            it->restart_pending_set(true);
+            if (!it->stopping(HBR_KILL_LATE_SEC)) { restart_hexbeater(it); }
         }
+    }
+
+    /// Start a new process for a hexbeater whose old process is gone
+    template <typename itT>
+    void
+    restart_hexbeater(itT it)
+    {
+        if (m_logging)
+        {
+            std::cerr << "[resurrector re-starting " << *it
+                      << " at " << time_to_hb(0).substr(0,9)
+                      << "]\n";
+        }
+        it->start_hexbeater(m_fdset_cpy, m_nfds,it->init_dly()
+                           ,false);
     }
 
     /// Add one hexbeat monitor

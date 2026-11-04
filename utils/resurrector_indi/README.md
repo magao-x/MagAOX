@@ -62,11 +62,11 @@ This diagram shows how it works, although with a single INDI driver:
     * resurrectee - A resurrectee class instance
     * Device Controller - The MagAO-X business logic
 * /path/to/fifos/isXXX.hb - A named FIFO for transmitting INDI server heartbeats (Hexbeats) to the resurrector_indi process
-* /path/to/config/magaox.conf - A file with host-wide global configuration parameters, specifically "indiserver_ctrl_fifo" here
+* /path/to/config/magaox.conf - A file with host-wide global configuration parameters, specifically "indiserver_ctrl_fifo" and "indiserver_announce_interval" here
 * /path/to/fifos/drivername.hb - A named FIFO for transmitting INDI driver heartbeats (Hexbeats) to the resurrector_indi process
 * /path/to/fifos/drivername.in - A named FIFO for transmitting INDI protocol messages to the INDI driver process
 * /path/to/fifos/drivername.out - A named FIFO for transmitting INDI protocol messages to the INDI server process
-* /path/to/fifos/indiserver.ctrl - A named FIFO telling the INDI server process to start listening for specific INDI driver processes
+* /path/to/fifos/indiserver.ctrl - A named FIFO through which INDI driver processes register with, and announce restarts to, the INDI server process
 * /path/to/config/proclist_role.txt - A configuration file with list of Device Controller names and executable binaries
 
 ## resurrector_indi, fork(2)
@@ -83,6 +83,8 @@ The resurrector_indi process is designed to replace the xctrl Python script for 
 The resurrector_indi process parses the names and executables of the INDI server and INDI drivers from the "/opt/MagAOX/config/proclist_role.txt" process list configuration file.
 The resurrector_indi process forks a single INDI server, and multiple INDI driver, childen processes as parsed from the process list.
 The resurrector_indi process then listens, at ~1Hz, on the "*.hb" named FIFOs for Hexbeats (cf. below) from its children processes; those children processes are also known as resurrectees.
+When a Hexbeat expires the resurrector_indi process sends SIGUSR2 to that process, waits for it to exit, sends SIGKILL if it is still running 5s later, and only then starts a new process, so the new process never finds the old one still holding its PID lock.
+
 If the resurrector_indi process receives a SIGUSR2 signal, it then re-parses the process list configuration file, kills any children processes that were previously started but are no longer in the configuration process list, starts any new children processes, and restarts any old children processes **that are not currently running**.  N.B. this means that this signal to the resurrector_indi process will **_not_** kill a locked up process; that will happen when the current time passes the last Hexbeat of the locked process.
 
 A Hexbeat is a representation of a time at some point in the future.
@@ -138,8 +140,19 @@ A Hexbeat is a representation of a time at some point in the future.
 
 ### indiserver.ctrl, magaox.conf
 
-The INDI server control FIFO is named "indiserver.ctrl" and it must be configured both as the INDI server parameter "indiserver.f" in isXXX.conf, and as the global parameter "indiserver_ctrl_fifo" in magaox.conf.
-This is a named FIFO used by any INDI driver process for transmitting a "start /path/to/fifos/drivername<LF>" message to the INDI server process, which message notifies the INDI server that a new driver is joining the INDI protocol network.
+The INDI server control FIFO is named "indiserver.ctrl" and is in the same directory as the driver FIFOs by default, for both the INDI server and the INDI drivers.
+If another path is used it must be configured both as the INDI server parameter "indiserver.f" in isXXX.conf, and as the global parameter "indiserver_ctrl_fifo" in magaox.conf.
+The INDI server creates it and holds it open; INDI drivers write one-line messages to it without blocking:
+
+* "start drivername pid<LF>" - sent once by each new driver process, after it has emptied its drivername.in of anything sent to a previous process.
+  The INDI server registers a driver name it does not know yet, so drivers need not be listed in isXXX.conf.
+  For a known driver it resets the session in place: it drops what it queued for the previous process, discards what that process left in drivername.out, and sends the new process a getProperties.
+  This works even if the INDI server never saw the previous process exit, because the new process opened the FIFOs first.
+  Until that getProperties arrives the new process ignores newXXX commands, which were meant for the previous process.
+* "alive drivername pid<LF>" - sent every "indiserver_announce_interval" seconds (default 5, 0 disables) so a restarted INDI server registers the driver again, and so a new pid is noticed even if its "start" was lost.
+* "restart drivername<LF>" - resets the session of a known driver, e.g. by hand.
+
+Older drivers send "start /path/to/fifos/drivername<LF>", which is treated as a "start" without a pid.
 
 The file "magaox.conf" is a global configuration TOML file that is read by all INDI processes, both server and drivers.  See "EXAMPLES" below for a sample magaox.conf file.
 
@@ -224,7 +237,10 @@ fpga0_um_fg             CGFSMUIfpga
 indiserver_ctrl_fifo = /opt/MagAOX/drivers/fifos/indiserver.ctrl
 
 ### N.B. this *must* match the [indiserver.f] value in is{THISHOST}.conf
-###      and it might be better to move the local [indiserver] TOML here
+###      if that is set; both default to indiserver.ctrl in the FIFO directory
+
+### Seconds between the drivers' "alive" announcements on that FIFO
+indiserver_announce_interval = 5
 ```
 
 ## Techniques

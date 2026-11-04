@@ -19,6 +19,7 @@ SOURCES       = indiDictionary.cpp
 
 LIBS         += ../../../../INDI/libcommon/libcommon.a
 LIBS         += ../../../../INDI/liblilxml/liblilxml.a
+LIBS         += -lrtimv
 
 TARGET        = $$qtLibraryTarget(rtimv_indiDictionaryPlugin)
 DESTDIR       = ./
@@ -28,3 +29,10 @@ PKGCONFIG += mxlib
 
 unix:target.path=/usr/local/bin/plugins
 INSTALLS+=target
+
+# Optional workspace build of the command interface; system paths remain the default.
+INCLUDEPATH += $$RTIMV_INCLUDEPATH
+!isEmpty(RTIMV_LIBDIR) {
+    LIBS += -L$$RTIMV_LIBDIR
+    QMAKE_RPATHDIR += $$RTIMV_LIBDIR
+}

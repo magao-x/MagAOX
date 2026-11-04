@@ -1,0 +1,38 @@
+// Settings applying to subsequent pupil-fit records.
+namespace MagAOX.logger;
+
+struct PupilFitSetpoint
+{
+    /// Active full-image x setpoint in input pixels.
+    x:float;
+    /// Active full-image y setpoint in input pixels.
+    y:float;
+    /// Active diameter setpoint in input pixels.
+    D:float;
+}
+
+table Telem_pupilfit_state_fb
+{
+    /// Active setpoints in quadrant order; length is the pupil count.
+    setpoints:[PupilFitSetpoint];
+    /// Selected reference mode: default=0, reference image=1, user=2.
+    requested_mode:ubyte;
+    /// Setpoint source: default=0, reference=1, user=2, current fit=3, unallocated=255.
+    active_mode:ubyte;
+    /// Normalized edge threshold.
+    threshold:float;
+    /// Sorted-pixel quantile estimating illuminated-pupil intensity.
+    pup_index:float;
+    /// Sorted-pixel quantile estimating background intensity.
+    bg_index:float;
+    /// Input image width in pixels.
+    width:uint;
+    /// Input image height in pixels.
+    height:uint;
+    /// Whether successful live fits enter the temporal window.
+    averaging:bool;
+    /// Counter incremented on every averaging start/reset.
+    window:ulong;
+}
+
+root_type Telem_pupilfit_state_fb;

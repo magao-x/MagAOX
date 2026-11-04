@@ -302,6 +302,16 @@ struct MagAOXApp_test : public APP_XWCTEST_BASE
     {
         m_indiSetCallBacks.at( key ).m_defReceived = received;
     }
+
+    bool setPropertyReceived( const std::string &key )
+    {
+        return m_indiSetCallBacks.at( key ).m_defReceived;
+    }
+
+    bool &allDefsReceived()
+    {
+        return m_allDefsReceived;
+    }
 };
 
 int callback( void *app, const pcf::IndiProperty &ipRecv )

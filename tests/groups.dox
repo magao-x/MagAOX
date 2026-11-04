@@ -1,5 +1,9 @@
+/** \file
+ * \brief Defines Doxygen groups and pages for XWCTk testing.
+ */
 
-/// \defgroup testing Testing XWCTk
+/** \defgroup testing Testing XWCTk
+ */
 
 /** \defgroup test_build_run Building and Running Tests
   * \ingroup testing
@@ -9,9 +13,9 @@ To build a single test, from inside the `tests` subfolder, run
 $ make -B -f Makefile.one t=../apps/zaberCtrl/tests/zaberCtrl_test.cpp
 $ ../apps/zaberCtrl/tests/zaberCtrl_test
 \endverbatim
-which shows how to build the test suited defined in \ref zaberCtrl_test.cpp.  Note that the `.cpp` is not required.  The `-B` switch
-for make is not always necessary, but is a good idea to make sure the right things get built.  If you have only edited the `*_test.cpp`
-file you can leave `-B` out.
+which shows how to build the test suite defined in \ref zaberCtrl_test.cpp.  Note that the `.cpp` is not required.  The
+`-B` switch for make is not always necessary, but is a good idea to make sure the right things get built.  If you have
+only edited the `*_test.cpp` file you can leave `-B` out.
 
 To build all the tests:
 \verbatim
@@ -19,30 +23,143 @@ $ make
 \endverbatim
 possibly with the `-B` flag.
 
-Then to run all tests:
+Then to run all tests, including the generated logger suites:
 \verbatim
 $ bash ./testMagAOX.bash
+\endverbatim
+
+The runner also works from the repository root:
+\verbatim
+$ bash tests/testMagAOX.bash
+\endverbatim
+Alternatively, `make test` from the `tests` directory builds the tests and invokes the same runner.
+
+Each run creates a unique, timestamped directory under `tests/results/`. Previous runs are preserved, and
+`tests/results/latest` points to the newest run. These generated results are ignored by git.
+
+- `run.log` saves both stdout and stderr while displaying them in the terminal, including Catch2 assertion failures,
+  generated logger build output, and the final failure summary.
+- `summary.tsv` records `PASS` or `FAIL`, the exit code, and the executable or logger-suite name for each invocation.
+  These are executable-level results; the individual Catch2 case and assertion counts are in `run.log`.
+
+Ordinary test failures, crashes, and missing executables do not skip subsequent tests. The runner returns nonzero if
+any invocation fails. The old `tests/test_stderr.txt` is no longer updated; use the saved run directory instead.
+Output from test builds performed before invoking the runner is not included in `run.log`.
+
+To inspect the latest run from the repository root:
+\verbatim
+$ cat tests/results/latest/summary.tsv
+$ less tests/results/latest/run.log
 \endverbatim
 
 */
 
 /** \defgroup test_indi Tests of INDI Communications
-  * \ingroup testing
-  */
+ * \ingroup testing
+ */
 
 /** \defgroup unit_test Unit Testing
-  * \brief Unit tests in XWCTk.
-  * \ingroup testing
-  */
+ * \brief Unit tests in XWCTk.
+ * \ingroup testing
+ */
 
 /** \defgroup app_unit_test libMagAOX::app Unit Tests
-  * \ingroup unit_test
-  */
-  
+ * \ingroup unit_test
+ */
+
 /** \defgroup application_unit_test Application Unit Tests
-  * \brief Unit tests for MagAO-X applications.
-  * \ingroup unit_test
-*/
+ * \brief Unit tests for MagAO-X applications.
+ * \ingroup unit_test
+ */
 
+/** \page page_test_coverage Test Coverage Report
+ * \ingroup testing
 
+From the repository root, build and run the tests and generate the coverage report and API documentation:
+\verbatim
+$ tests/coverage/make_coverage
+$ make doc
+\endverbatim
+The coverage helper writes `doc/output/coverage/index.html`, which is embedded below.
+`make coverage` alone only builds instrumented application binaries; it does not run tests or generate the HTML report.
+The coverage helper saves test output through the runner described above. If tests fail, it still generates the coverage
+report from their counters and then returns nonzero. An HTML report therefore does not imply that every test passed.
 
+\htmlonly
+<iframe
+  title="MagAO-X test coverage report"
+  src="../coverage/index.html"
+  style="width: 100%; height: 85vh; border: 0;">
+</iframe>
+\endhtmlonly
+ */
+
+/** \defgroup flatlogs_unit_test Flatlogs Unit Tests
+ * \brief Generated serialization and mixed-log round-trip tests.
+ * \ingroup logger_unit_test
+ */
+
+/** \defgroup pupilFit_unit_test Pupil Fit Unit Tests
+ * \brief Offline fitting, per-image telemetry, derived averages, and failure handling.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup filterWheelCtrl_unit_test Filter Wheel Controller Unit Tests
+ * \brief Offline communication recovery, homing, and power-transition tests.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup kcubeCtrl_unit_test K-Cube Controller Unit Tests
+ * \brief Offline two-axis connection, power-transition, and communication recovery tests.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup picamCtrl_unit_test picamCtrl Unit Tests
+ * \brief Offline temperature configuration and validation tests for picamCtrl.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup ocam2KCtrl_temperature_unit_test OCAM Temperature Unit Tests
+ * \brief Shared OCAM temperature configuration and request-validation tests.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup stdCamera_unit_test stdCamera Unit Tests
+ * \brief Shared camera temperature, ROI geometry, configuration, and callback tests.
+ * \ingroup app_unit_test
+ */
+
+/** \defgroup roiGUI_unit_test ROI GUI Unit Tests
+ * \brief Offline coordinate display and command routing tests.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup pupilGuideGUI_unit_test Pupil Guide GUI Unit Tests
+ * \brief Offline device availability, recovery, and command routing tests.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup rtimvROI_unit_test rtimv ROI Plugin Unit Tests
+ * \brief Offline INDI command lifecycle and ROI interaction tests.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup gui_publisher_unit_test GUI Publisher Unit Tests
+ * \brief Socket-free discovery retry, routing, and subscription lifecycle tests.
+ * \ingroup unit_test
+ */
+
+/** \defgroup coronAlignGUI_unit_test Coronagraph Alignment GUI Unit Tests
+ * \brief Offline device recovery, position validity, and motion routing tests.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup shmimIntegrator_unit_test ImageStreamIO Integrator Unit Tests
+ * \brief Offline numerical, configuration, restart, and publication ownership regressions.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup streamWriter_unit_test streamWriter Unit Tests
+ * \brief Offline configuration, encoding, recording lifecycle, and buffer ownership regressions.
+ * \ingroup application_unit_test
+ */

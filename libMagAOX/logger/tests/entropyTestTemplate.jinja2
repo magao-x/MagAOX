@@ -1,3 +1,7 @@
+/** \file generated_test_e{{entropyOpt}}_n{{nTypesOpt}}.cpp
+ * \brief Generated mixed-log serialization tests.
+ * \ingroup flatlogs_unit_test
+ */
 #include <assert.h>
 #include "../../../../tests/catch2/catch.hpp"
 #include "../generated/logCodes.hpp"
@@ -7,7 +11,7 @@
 #include "types/flatbuffer_log.hpp"
 
 /* GENERATED ENTROPY TEST FILE
- * s={{seedOpt}} n={{nTypesOpt}} e={{entropyOpt}} t={{dTypesOpt}}
+ * s={{seedOpt}} n={{nTypesOpt}} e={{entropyOpt}} f={{dTypesOpt}}
  *
  * including types:
  {% for type in types %}
@@ -24,6 +28,9 @@
  {% endfor %}
 
 
+/** \brief Verify fields and log validity across {{entropyOpt}} repetitions of {{nTypesOpt}} log types.
+ * \ingroup flatlogs_unit_test
+ */
 SCENARIO( "test_e{{entropyOpt}}_n{{nTypesOpt}}", "[]")
 {
     GIVEN("a entropy={{entropyOpt}} and nTypes={{nTypesOpt}}")

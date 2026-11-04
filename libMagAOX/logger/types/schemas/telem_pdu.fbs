@@ -1,0 +1,11 @@
+/// \file telem_pdu.fbs
+/// \brief Tripp Lite electrical sample with acquisition validity.
+namespace MagAOX.logger;
+table Telem_pdu_fb
+{
+    frequency:float;
+    voltage:float;
+    current:float;
+    valid:bool;
+}
+root_type Telem_pdu_fb;

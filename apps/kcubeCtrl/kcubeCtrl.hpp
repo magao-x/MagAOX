@@ -1,26 +1,25 @@
 /** \file kcubeCtrl.hpp
- * \brief The MagAO-X K-Cube Controller header file
- *
+ * \brief Two-axis K-Cube piezo control with power-aware communication recovery.
  * \ingroup kcubeCtrl_files
  */
-
 #ifndef kcubeCtrl_hpp
 #define kcubeCtrl_hpp
 
-#include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
+#include "../../libMagAOX/libMagAOX.hpp" // Included on the command line to trigger the PCH.
 #include "../../magaox_git_version.h"
-
+#include <mx/math/floatUtils.hpp>
 #include "tmcController.hpp"
 
-/** \defgroup kcubeCtrl
- * \brief The K-Cube Controller application
- *
- * <a href="../handbook/operating/software/apps/kcubeCtrl.html">Application Documentation</a>
- *
- * \ingroup apps
- *
- */
+#ifndef TMCC_IO_RECOVERY_VERSION
+    #error                                                                                                             \
+        "kcubeCtrl requires tmcController with bounded I/O recovery (see agents/plans/2026-10/kcubeCtrl-power-recovery.md)."
+#endif
 
+/** \defgroup kcubeCtrl
+ * \brief The K-Cube Controller application.
+ * <a href="../handbook/operating/software/apps/kcubeCtrl.html">Application Documentation</a>
+ * \ingroup apps
+ */
 /** \defgroup kcubeCtrl_files
  * \ingroup kcubeCtrl
  */
@@ -30,1159 +29,958 @@ namespace MagAOX
 namespace app
 {
 
-/// Local derivation of tmcController to implement MagAO-X logging
-template<class parentT>
+/// Capture transport diagnostics until the app can classify the power state.
+template <class parentT>
 class tmcCon : public tmcController
 {
-public:
+  protected:
+    /// Owning app; never deleted by the transport.
+    parentT *m_parent{ nullptr };
+    /// Most recent transport failure, retained before cleanup changes FTDI diagnostics.
+    std::string m_error;
 
-    /// Print a message to MagAO-X logs describing an error from an \libftdi1 function
-    /** Intended to be overriden in a derived class to provide custom error messaging.
-      */
-    virtual void ftdiErrmsg( const std::string & src,  ///< [in] The source of the error (the tmcController function)
-                             const std::string & msg,  ///< [in] The message describing the error
-                             int rv,                   ///< [in] The return value of the \libftdi1 function
-                             const std::string & file, ///< [in] The file name of this file
-                             int line                  ///< [in] The line number at which the error was recorded
-                           )
-    {
-        std::stringstream logs;
-        logs << src << ": " << msg << " [ libftdi1: " << ftdi_get_error_string(m_ftdi) << " ] ";
-        uint32_t ln = line; //avoid narrowing warning
-        parentT::template log<software_error>({file.c_str(), ln, 0, rv, logs.str()});
-    }
+  public:
+    /// Attach the application supplying cancellation state.
+    void owner( parentT *parent /**< [in] Owning app. */ );
 
-    /// Print a message to MagAO-X logs describing an error
-    /** Intended to be overriden in a derived class to provide custom error messaging.
-      */
-    virtual void otherErrmsg( const std::string & src,  ///< [in] The source of the error (the tmcController function)
-                              const std::string & msg,  ///< [in] The message describing the error
-                              const std::string & file, ///< [in] The file name of this file
-                              int line                  ///< [in] The line number at which the error was recorded
-                            )
-    {
-        uint32_t ln = line; //avoid narrowing warning
-        parentT::template log<software_error>({file.c_str(), ln, src + ": " + msg});
-    }
+    /// Check power and the connection generation before each dependency I/O step.
+    bool communicationAllowed() const override;
 
+    /// Read the most recent transport diagnostic.
+    const std::string &error() const;
+
+    /// Clear the diagnostic before an operation.
+    void clearError();
+
+    /// Capture an FTDI error without prematurely logging an expected power-off failure.
+    void ftdiErrmsg( const std::string &src /**< [in] Operation. */,
+                     const std::string &msg /**< [in] Failure description. */,
+                     int                rv /**< [in] FTDI result. */,
+                     const std::string &file /**< [in] Source file. */,
+                     int                line /**< [in] Source line. */ ) override;
+
+    /// Capture a protocol or lifecycle error.
+    void otherErrmsg( const std::string &src /**< [in] Operation. */,
+                      const std::string &msg /**< [in] Failure description. */,
+                      const std::string &file /**< [in] Source file. */,
+                      int                line /**< [in] Source line. */ ) override;
 };
 
-/// The MagAO-X K-Cube Controller
-/**
-  * \ingroup kcubeCtrl
-  */
+/// Coordinate both piezo controllers without replaying interrupted commands.
+/** \ingroup kcubeCtrl */
 class kcubeCtrl : public MagAOXApp<true>
 {
-
-    ///\todo needs telems
-
-    // Give the test harness access.
-    friend class kcubeCtrl_test;
-
-protected:
-    /** \name Configurable Parameters
-     *@{
-     */
-
-    // here add parameters which will be config-able at runtime
-
+  protected:
+    /** \name Connection Configuration - Data
+     * @{ */
+    /// Minimum interval between connection attempts, in milliseconds.
+    unsigned m_retryInterval{ 1000 };
+    /// Overall response deadline and individual USB control timeout, in milliseconds.
+    unsigned m_ioTimeout{ 1000 };
     ///@}
 
+    /// Owned axis-1 controller; all access is serialized by m_indiMutex.
     tmcCon<kcubeCtrl> m_kAxis1;
-    bool m_axis1Enabled {false};
-
+    /// Last successfully commanded axis-1 enable state; invalid while disconnected.
+    bool m_axis1Enabled{ false };
+    /// Owned axis-2 controller; all access is serialized by m_indiMutex.
     tmcCon<kcubeCtrl> m_kAxis2;
-    bool m_axis2Enabled {false};
+    /// Last successfully commanded axis-2 enable state; invalid while disconnected.
+    bool m_axis2Enabled{ false };
+    /// True only after every step of the most recent set command succeeds.
+    bool m_isSet{ false };
+    /// Shutdown admission flag, protected by m_indiMutex.
+    bool m_stopping{ false };
+    /// Atomic actual/target snapshot: two bits each encode state+1; upper bits count interruptions.
+    std::atomic<uint64_t> m_powerStatus{ 0 };
+    /// Power snapshot under which the current connection attempt began, protected by m_indiMutex.
+    uint64_t m_connectionPower{ 0 };
+    /// Earliest next connection attempt, including configured power-on delay.
+    std::chrono::steady_clock::time_point m_nextAttempt{};
+    /// Last logged recovery error, suppressing repeated identical failures while retrying.
+    std::string m_lastError;
 
-    bool m_isSet {false};
+    /// Release both controllers and invalidate published state; caller holds m_indiMutex.
+    void
+    resetConnection( pcf::IndiProperty::PropertyStateType status /**< [in] Idle for Off, Alert for uncertainty. */ );
 
-public:
+    /// Abandon the active sequence and schedule recovery; returns -1 to stop its caller's sequence.
+    int recover( tmcCon<kcubeCtrl> &axis /**< [in] Failed controller. */,
+                 const char        *operation /**< [in] Failed operation. */,
+                 int                result /**< [in] Transport result, or cancellation. */ );
 
-    /// Default c'tor.
+    /// Execute one transport step with power checks before and after it; caller holds m_indiMutex.
+    template <class operationT>
+    int transact( tmcCon<kcubeCtrl> &axis /**< [in] Controller to use. */,
+                  const char        *name /**< [in] Diagnostic operation name. */,
+                  operationT         operation /**< [in] Transport operation returning an integer result. */ );
+
+    /// Require initialized controllers and a commandable state after locking.
+    bool commandAllowed();
+
+    /// Initialize either axis using the existing disabled-output startup policy.
+    int initialize( tmcCon<kcubeCtrl> &axis /**< [in] Controller to configure. */,
+                    bool              &enabled /**< [out] Last commanded enable state. */ );
+
+    /// Command an axis enable state and update its local state only on success.
+    int enable( tmcCon<kcubeCtrl> &axis /**< [in] Controller to command. */,
+                bool              &enabled /**< [out] Last commanded enable state. */,
+                bool               value /**< [in] Requested enable state. */ );
+
+    /// Clamp a finite voltage and write it to one axis.
+    int voltage( tmcCon<kcubeCtrl> &axis /**< [in] Controller to command. */,
+                 float             &value /**< [in/out] Requested voltage, clamped to 0..150 V. */ );
+
+    /// Validate and execute either axis's identify callback with the transport lock held.
+    int identifyRequest( const pcf::IndiProperty &request /**< [in] Received switch. */,
+                         pcf::IndiProperty       &property /**< [in/out] Published request. */,
+                         tmcCon<kcubeCtrl>       &axis /**< [in] Controller. */ );
+
+    /// Validate and execute either axis's enable callback.
+    int enableRequest( const pcf::IndiProperty &request /**< [in] Received toggle. */,
+                       tmcCon<kcubeCtrl>       &axis /**< [in] Controller. */,
+                       bool                    &enabled /**< [in/out] Last commanded enable state. */ );
+
+    /// Validate and execute either axis's voltage callback.
+    int voltageRequest( const pcf::IndiProperty &request /**< [in] Received voltage. */,
+                        pcf::IndiProperty       &property /**< [in/out] Published voltage. */,
+                        tmcCon<kcubeCtrl>       &axis /**< [in] Controller. */ );
+
+  public:
+    /// Construct with immediate startup attempts and bounded nonfatal retries.
     kcubeCtrl();
 
-    /// D'tor, declared and defined for noexcept.
-    ~kcubeCtrl() noexcept
-    {
-    }
+    /// Release controllers through their owning destructors.
+    ~kcubeCtrl() noexcept = default;
 
-    virtual void setupConfig();
+    /// Register serial numbers and bounded connection timing.
+    void setupConfig() override;
 
-    /// Implementation of loadConfig logic, separated for testing.
-    /** This is called by loadConfig().
-     */
-    int loadConfigImpl(mx::app::appConfigurator &_config /**< [in] an application configuration from which to load values*/);
+    /// Load and validate application configuration.
+    int loadConfigImpl( mx::app::appConfigurator &config /**< [in] Configuration source. */ );
 
-    virtual void loadConfig();
+    /// Load application configuration and stop startup on invalid settings.
+    void loadConfig() override;
 
-    /// Startup function
-    /**
-     *
-     */
-    virtual int appStartup();
+    /// Register INDI commands and wrap the existing power subscription.
+    int appStartup() override;
 
-    /// Implementation of the FSM for kcubeCtrl.
-    /**
-     * \returns 0 on no critical error
-     * \returns -1 on an error requiring shutdown
-     */
-    virtual int appLogic();
+    /// Discover, initialize, and poll both axes, recovering nonfatally from device errors.
+    int appLogic() override;
 
-    /// Shutdown the app.
-    /**
-     *
-     */
-    virtual int appShutdown();
+    /// Block new commands and release both connections before INDI shutdown.
+    int appShutdown() override;
 
-    /** \name K-cube Interface
-     *
-     * @{
-     */
-    int modIdentify(){return 0;}
+    /// Release connections and clear stale command state after actual power-off.
+    int onPowerOff() override;
 
-    ///@}
+    /// Keep the app idle while power is off.
+    int whilePowerOff() override;
 
+    /// Require confirmed On/On in the synchronized snapshot, or unmanaged power.
+    bool powerOnExpected() const;
+
+    /// Test known actual or target Off in the synchronized snapshot.
+    bool powerOffRequested() const;
+
+    /// Cancel transport when power changes or shutdown begins; caller holds m_indiMutex.
+    bool communicationAllowed() const;
+
+    /// Retain the legacy no-op identify interface.
+    int modIdentify();
+
+    /// Initialize the axis with its output disabled. Caller holds m_indiMutex.
     int axis1Initialize();
 
+    /// Enable the axis after admission checks. Caller holds m_indiMutex.
     int axis1Enable();
 
+    /// Disable the axis after admission checks. Caller holds m_indiMutex.
     int axis1Disable();
 
-    int axis1Voltage(float & v);
+    /// Set a finite axis voltage, clamping to the supported range. Caller holds m_indiMutex.
+    int axis1Voltage( float &value /**< [in/out] Requested volts. */ );
 
+    /// Initialize the axis with its output disabled. Caller holds m_indiMutex.
     int axis2Initialize();
 
+    /// Enable the axis after admission checks. Caller holds m_indiMutex.
     int axis2Enable();
 
+    /// Disable the axis after admission checks. Caller holds m_indiMutex.
     int axis2Disable();
 
-    int axis2Voltage(float & v);
+    /// Set a finite axis voltage, clamping to the supported range. Caller holds m_indiMutex.
+    int axis2Voltage( float &value /**< [in/out] Requested volts. */ );
 
+    /// Enable both axes at 75 V only after every step succeeds; caller holds m_indiMutex.
     int set();
 
+    /// Zero and disable both axes without resuming interrupted work; caller holds m_indiMutex.
     int rest();
 
-    /** \name INDI
-     *
-     * @{
-     */
+    /// Apply partial power updates and latch interruptions without taking the transport mutex.
+    int setCallBack_m_indiP_powerChannel( const pcf::IndiProperty &request /**< [in] Power update. */ );
 
+    /// Dispatch the power subscription to this application.
+    static int st_setCallBack_m_indiP_powerChannel( void                    *app /**< [in] Owning app. */,
+                                                    const pcf::IndiProperty &request /**< [in] Power update. */ );
+
+    /** \name INDI Commands
+     * @{ */
+    /// Published axis1 identify command and status.
     pcf::IndiProperty m_indiP_axis1_identify;
-    INDI_NEWCALLBACK_DECL(kcubeCtrl, m_indiP_axis1_identify);
 
+    /// Validate and dispatch the axis1 identify command.
+    int newCallBack_m_indiP_axis1_identify( const pcf::IndiProperty &request /**< [in] Command update. */ );
+
+    /// Dispatch the registered axis1 identify callback.
+    static int st_newCallBack_m_indiP_axis1_identify( void                    *app /**< [in] Owning app. */,
+                                                      const pcf::IndiProperty &request /**< [in] Command update. */ );
+
+    /// Published axis1 enable command and status.
     pcf::IndiProperty m_indiP_axis1_enable;
-    INDI_NEWCALLBACK_DECL(kcubeCtrl, m_indiP_axis1_enable);
 
+    /// Validate and dispatch the axis1 enable command.
+    int newCallBack_m_indiP_axis1_enable( const pcf::IndiProperty &request /**< [in] Command update. */ );
+
+    /// Dispatch the registered axis1 enable callback.
+    static int st_newCallBack_m_indiP_axis1_enable( void                    *app /**< [in] Owning app. */,
+                                                    const pcf::IndiProperty &request /**< [in] Command update. */ );
+
+    /// Published axis1 voltage command and status.
     pcf::IndiProperty m_indiP_axis1_voltage;
-    INDI_NEWCALLBACK_DECL(kcubeCtrl, m_indiP_axis1_voltage);
 
+    /// Validate and dispatch the axis1 voltage command.
+    int newCallBack_m_indiP_axis1_voltage( const pcf::IndiProperty &request /**< [in] Command update. */ );
+
+    /// Dispatch the registered axis1 voltage callback.
+    static int st_newCallBack_m_indiP_axis1_voltage( void                    *app /**< [in] Owning app. */,
+                                                     const pcf::IndiProperty &request /**< [in] Command update. */ );
+
+    /// Published axis2 identify command and status.
     pcf::IndiProperty m_indiP_axis2_identify;
-    INDI_NEWCALLBACK_DECL(kcubeCtrl, m_indiP_axis2_identify);
 
+    /// Validate and dispatch the axis2 identify command.
+    int newCallBack_m_indiP_axis2_identify( const pcf::IndiProperty &request /**< [in] Command update. */ );
+
+    /// Dispatch the registered axis2 identify callback.
+    static int st_newCallBack_m_indiP_axis2_identify( void                    *app /**< [in] Owning app. */,
+                                                      const pcf::IndiProperty &request /**< [in] Command update. */ );
+
+    /// Published axis2 enable command and status.
     pcf::IndiProperty m_indiP_axis2_enable;
-    INDI_NEWCALLBACK_DECL(kcubeCtrl, m_indiP_axis2_enable);
 
+    /// Validate and dispatch the axis2 enable command.
+    int newCallBack_m_indiP_axis2_enable( const pcf::IndiProperty &request /**< [in] Command update. */ );
+
+    /// Dispatch the registered axis2 enable callback.
+    static int st_newCallBack_m_indiP_axis2_enable( void                    *app /**< [in] Owning app. */,
+                                                    const pcf::IndiProperty &request /**< [in] Command update. */ );
+
+    /// Published axis2 voltage command and status.
     pcf::IndiProperty m_indiP_axis2_voltage;
-    INDI_NEWCALLBACK_DECL(kcubeCtrl, m_indiP_axis2_voltage);
 
+    /// Validate and dispatch the axis2 voltage command.
+    int newCallBack_m_indiP_axis2_voltage( const pcf::IndiProperty &request /**< [in] Command update. */ );
+
+    /// Dispatch the registered axis2 voltage callback.
+    static int st_newCallBack_m_indiP_axis2_voltage( void                    *app /**< [in] Owning app. */,
+                                                     const pcf::IndiProperty &request /**< [in] Command update. */ );
+
+    /// Published set command and status.
     pcf::IndiProperty m_indiP_set;
-    INDI_NEWCALLBACK_DECL(kcubeCtrl, m_indiP_set);
+
+    /// Validate and dispatch the set command.
+    int newCallBack_m_indiP_set( const pcf::IndiProperty &request /**< [in] Command update. */ );
+
+    /// Dispatch the registered set callback.
+    static int st_newCallBack_m_indiP_set( void                    *app /**< [in] Owning app. */,
+                                           const pcf::IndiProperty &request /**< [in] Command update. */ );
 
     ///@}
 };
 
-kcubeCtrl::kcubeCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
+template <class parentT>
+void tmcCon<parentT>::owner( parentT *parent )
+{
+    m_parent = parent;
+}
+
+template <class parentT>
+bool tmcCon<parentT>::communicationAllowed() const
+{
+    return m_parent && m_parent->communicationAllowed();
+}
+
+template <class parentT>
+const std::string &tmcCon<parentT>::error() const
+{
+    return m_error;
+}
+
+template <class parentT>
+void tmcCon<parentT>::clearError()
+{
+    m_error.clear();
+}
+
+template <class parentT>
+void tmcCon<parentT>::ftdiErrmsg( const std::string &src, const std::string &msg, int, const std::string &, int )
+{
+    m_error = src + ": " + msg + " [libftdi1: " + ( m_ftdi ? ftdi_get_error_string( m_ftdi ) : "no context" ) + "]";
+}
+
+template <class parentT>
+void tmcCon<parentT>::otherErrmsg( const std::string &src, const std::string &msg, const std::string &, int )
+{
+    m_error = src + ": " + msg;
+}
+
+inline kcubeCtrl::kcubeCtrl() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
 {
     m_powerMgtEnabled = true;
-    return;
+    m_powerOnWait     = 0; // Preserve immediate startup; late firmware readiness is handled by retries.
 }
 
-void kcubeCtrl::setupConfig()
+inline void kcubeCtrl::setupConfig()
 {
-    config.add("axis1.serial", "", "axis1.serial", argType::Required, "axis1", "serial", false, "string", "USB serial number");
-    config.add("axis2.serial", "", "axis2.serial", argType::Required, "axis2", "serial", false, "string", "USB serial number");
+    config.add( "axis1.serial",
+                "",
+                "axis1.serial",
+                argType::Required,
+                "axis1",
+                "serial",
+                false,
+                "string",
+                "USB serial number" );
+    config.add( "axis2.serial",
+                "",
+                "axis2.serial",
+                argType::Required,
+                "axis2",
+                "serial",
+                false,
+                "string",
+                "USB serial number" );
+    config.add( "connection.retryInterval",
+                "",
+                "connection.retryInterval",
+                argType::Required,
+                "connection",
+                "retryInterval",
+                false,
+                "unsigned",
+                "Connection retry interval in ms (1..60000), default 1000." );
+    config.add( "timeouts.io",
+                "",
+                "timeouts.io",
+                argType::Required,
+                "timeouts",
+                "io",
+                false,
+                "unsigned",
+                "USB operation/response timeout in ms (1..60000), default 1000." );
 }
 
-int kcubeCtrl::loadConfigImpl(mx::app::appConfigurator &_config)
+inline int kcubeCtrl::loadConfigImpl( mx::app::appConfigurator &config )
 {
-    std::string ser = m_kAxis1.serial();
-    _config(ser, "axis1.serial");
-    m_kAxis1.serial(ser);
+    std::string serial;
+    config( serial, "axis1.serial" );
+    m_kAxis1.serial( serial );
+    serial.clear();
+    config( serial, "axis2.serial" );
+    m_kAxis2.serial( serial );
+    config( m_retryInterval, "connection.retryInterval" );
+    config( m_ioTimeout, "timeouts.io" );
+    if( m_kAxis1.serial().empty() || m_kAxis2.serial().empty() || m_kAxis1.serial() == m_kAxis2.serial() ||
+        m_retryInterval == 0 || m_retryInterval > 60000 || m_ioTimeout == 0 || m_ioTimeout > 60000 )
+        return log<software_error, -1>(
+            { __FILE__, __LINE__, "Two distinct axis serials and timeouts in 1..60000 ms are required." } );
+    return 0;
+}
 
-    ser = m_kAxis2.serial();
-    _config(ser, "axis2.serial");
-    m_kAxis2.serial(ser);
+inline void kcubeCtrl::loadConfig()
+{
+    if( loadConfigImpl( config ) < 0 )
+        m_shutdown = true;
+}
+
+inline int kcubeCtrl::appStartup()
+{
+    if( m_powerMgtEnabled )
+    { // mutex scope
+        std::lock_guard<std::mutex> guard( m_indiCallBackMutex );
+        auto                        callback = m_indiSetCallBacks.find( m_indiP_powerChannel.createUniqueKey() );
+        if( callback == m_indiSetCallBacks.end() )
+            return log<software_error, -1>( { __FILE__, __LINE__, "Power channel callback is not registered." } );
+        callback->second.callBack = st_setCallBack_m_indiP_powerChannel;
+    }
+    // Startup runs before the INDI receive thread; subsequent snapshots are published by its callback.
+    m_powerStatus =
+        static_cast<uint64_t>( powerState() + 1 ) | ( static_cast<uint64_t>( powerStateTarget() + 1 ) << 2 );
+    m_kAxis1.owner( this );
+    m_kAxis2.owner( this );
+    m_kAxis1.ioTimeout( m_ioTimeout );
+    m_kAxis2.ioTimeout( m_ioTimeout );
+
+    createStandardIndiRequestSw( m_indiP_axis1_identify, "axis1_identify" );
+    if( registerIndiPropertyNew( m_indiP_axis1_identify, INDI_NEWCALLBACK( m_indiP_axis1_identify ) ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__ - 2 } );
+        return -1;
+    }
+
+    createStandardIndiToggleSw( m_indiP_axis1_enable, "axis1_enable" );
+    if( registerIndiPropertyNew( m_indiP_axis1_enable, INDI_NEWCALLBACK( m_indiP_axis1_enable ) ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__ - 2 } );
+        return -1;
+    }
+    createStandardIndiNumber<float>( m_indiP_axis1_voltage, "axis1_voltage", 0, 150, 1.0 / 32767, "%0.4f" );
+    if( registerIndiPropertyNew( m_indiP_axis1_voltage, INDI_NEWCALLBACK( m_indiP_axis1_voltage ) ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__ - 2 } );
+        return -1;
+    }
+    m_indiP_axis1_voltage["current"] = 0;
+    m_indiP_axis1_voltage["target"]  = 0;
+
+    createStandardIndiRequestSw( m_indiP_axis2_identify, "axis2_identify" );
+    if( registerIndiPropertyNew( m_indiP_axis2_identify, INDI_NEWCALLBACK( m_indiP_axis2_identify ) ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__ - 2 } );
+        return -1;
+    }
+
+    createStandardIndiToggleSw( m_indiP_axis2_enable, "axis2_enable" );
+    if( registerIndiPropertyNew( m_indiP_axis2_enable, INDI_NEWCALLBACK( m_indiP_axis2_enable ) ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__ - 2 } );
+        return -1;
+    }
+
+    createStandardIndiNumber<float>( m_indiP_axis2_voltage, "axis2_voltage", 0, 150, 1.0 / 32767, "%0.4f" );
+    if( registerIndiPropertyNew( m_indiP_axis2_voltage, INDI_NEWCALLBACK( m_indiP_axis2_voltage ) ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__ - 2 } );
+        return -1;
+    }
+    m_indiP_axis2_voltage["current"] = 0;
+    m_indiP_axis2_voltage["target"]  = 0;
+
+    createStandardIndiToggleSw( m_indiP_set, "set" );
+    if( registerIndiPropertyNew( m_indiP_set, INDI_NEWCALLBACK( m_indiP_set ) ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__ - 2 } );
+        return -1;
+    }
+
+    state( stateCodes::NODEVICE );
 
     return 0;
 }
 
-void kcubeCtrl::loadConfig()
+inline bool kcubeCtrl::powerOnExpected() const
 {
-    loadConfigImpl(config);
+    return !m_powerMgtEnabled || ( m_powerStatus.load() & 15 ) == 10;
 }
 
-int kcubeCtrl::appStartup()
+inline bool kcubeCtrl::powerOffRequested() const
 {
-    createStandardIndiRequestSw( m_indiP_axis1_identify, "axis1_identify");
-    if( registerIndiPropertyNew( m_indiP_axis1_identify, INDI_NEWCALLBACK(m_indiP_axis1_identify)) < 0)
-    {
-        log<software_error>({__FILE__,__LINE__ - 2});
-        return -1;
-    }
+    auto power = m_powerStatus.load();
+    return m_powerMgtEnabled && ( ( power & 3 ) == 1 || ( ( power >> 2 ) & 3 ) == 1 );
+}
 
-    createStandardIndiToggleSw( m_indiP_axis1_enable, "axis1_enable");
-    if( registerIndiPropertyNew( m_indiP_axis1_enable, INDI_NEWCALLBACK(m_indiP_axis1_enable)) < 0)
-    {
-        log<software_error>({__FILE__,__LINE__ - 2});
-        return -1;
-    }
-    ///\todo if format is "" this crashes INDI startup... wtf
-    createStandardIndiNumber<float>( m_indiP_axis1_voltage, "axis1_voltage", 0, 150, 1.0/32767, "%0.4f");
-    if( registerIndiPropertyNew( m_indiP_axis1_voltage, INDI_NEWCALLBACK(m_indiP_axis1_voltage)) < 0)
-    {
-        log<software_error>({__FILE__,__LINE__ - 2});
-        return -1;
-    }
-    m_indiP_axis1_voltage["current"]=0;
-    m_indiP_axis1_voltage["target"]=0;
+inline bool kcubeCtrl::communicationAllowed() const
+{
+    return !m_stopping &&
+           ( !m_powerMgtEnabled || ( ( m_connectionPower & 15 ) == 10 && m_powerStatus.load() == m_connectionPower ) );
+}
 
-    createStandardIndiRequestSw( m_indiP_axis2_identify, "axis2_identify");
-    if( registerIndiPropertyNew( m_indiP_axis2_identify, INDI_NEWCALLBACK(m_indiP_axis2_identify)) < 0)
+inline bool kcubeCtrl::commandAllowed()
+{
+    return communicationAllowed() && m_kAxis1.connected() && m_kAxis2.connected() &&
+           ( state() == stateCodes::READY || state() == stateCodes::OPERATING );
+}
+
+inline int kcubeCtrl::setCallBack_m_indiP_powerChannel( const pcf::IndiProperty &request )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_powerChannel, request );
+    int rv = MagAOXApp<true>::setCallBack_m_indiP_powerChannel( request );
+    // Only the receive thread writes snapshots. Base fields are read here, not by the hardware thread.
+    uint64_t snapshot =
+        static_cast<uint64_t>( powerState() + 1 ) | ( static_cast<uint64_t>( powerStateTarget() + 1 ) << 2 );
+    uint64_t generation = m_powerStatus.load() & ~uint64_t( 15 );
+    if( snapshot != 10 )
+        generation += 16;
+    m_powerStatus.store( generation | snapshot );
+    return rv;
+}
+
+inline int kcubeCtrl::st_setCallBack_m_indiP_powerChannel( void *app, const pcf::IndiProperty &request )
+{
+    return static_cast<kcubeCtrl *>( app )->setCallBack_m_indiP_powerChannel( request );
+}
+
+inline void kcubeCtrl::resetConnection( pcf::IndiProperty::PropertyStateType status )
+{
+    m_kAxis1.close( false );
+    m_kAxis2.close( false );
+    m_axis1Enabled = m_axis2Enabled = m_isSet = false;
+    for( auto *property : { &m_indiP_axis1_enable, &m_indiP_axis2_enable, &m_indiP_set } )
+        if( property->find( "toggle" ) )
+            updateSwitchIfChanged( *property, "toggle", pcf::IndiElement::Off, status );
+    for( auto *property : { &m_indiP_axis1_identify, &m_indiP_axis2_identify } )
+        if( property->find( "request" ) )
+            updateSwitchIfChanged( *property, "request", pcf::IndiElement::Off, status );
+    // Retain last measured voltages, but mark them unavailable rather than inventing zero readbacks.
+    for( auto *property : { &m_indiP_axis1_voltage, &m_indiP_axis2_voltage } )
+        if( property->find( "current" ) )
+            updateIfChanged( *property, "current", ( *property )["current"].get<float>(), status );
+}
+
+inline int kcubeCtrl::recover( tmcCon<kcubeCtrl> &axis, const char *operation, int result )
+{
+    if( communicationAllowed() )
     {
-        log<software_error>({__FILE__,__LINE__ - 2});
-        return -1;
+        std::string error = std::string( &axis == &m_kAxis1 ? "axis1 " : "axis2 " ) + axis.serial() + " " + operation +
+                            " result=" + std::to_string( result ) + " " + axis.error();
+        if( error != m_lastError )
+        {
+            if( std::string( operation ) == "open" && result == -3 )
+                log<text_log>( error, logPrio::LOG_INFO );
+            else
+                log<software_error>( { __FILE__,
+                                       __LINE__,
+                                       0,
+                                       result,
+                                       error + " state=" + std::to_string( state() ) + " power=On target=On" } );
+            m_lastError = error;
+        }
     }
+    resetConnection( powerOffRequested() ? INDI_IDLE : INDI_ALERT );
+    if( state() != stateCodes::POWEROFF && !m_stopping )
+        state( stateCodes::NODEVICE );
+    m_nextAttempt = std::chrono::steady_clock::now() + std::chrono::milliseconds( m_retryInterval );
+    return -1;
+}
 
-    createStandardIndiToggleSw( m_indiP_axis2_enable, "axis2_enable");
-    if( registerIndiPropertyNew( m_indiP_axis2_enable, INDI_NEWCALLBACK(m_indiP_axis2_enable)) < 0)
-    {
-        log<software_error>({__FILE__,__LINE__ - 2});
-        return -1;
-    }
-
-    createStandardIndiNumber<float>( m_indiP_axis2_voltage, "axis2_voltage",0,150,1.0/32767, "%0.4f");
-    if( registerIndiPropertyNew( m_indiP_axis2_voltage, INDI_NEWCALLBACK(m_indiP_axis2_voltage)) < 0)
-    {
-        log<software_error>({__FILE__,__LINE__ - 2});
-        return -1;
-    }
-    m_indiP_axis2_voltage["current"]=0;
-    m_indiP_axis2_voltage["target"]=0;
-
-    createStandardIndiToggleSw( m_indiP_set, "set");
-    if( registerIndiPropertyNew( m_indiP_set, INDI_NEWCALLBACK(m_indiP_set)) < 0)
-    {
-        log<software_error>({__FILE__,__LINE__ - 2});
-        return -1;
-    }
-
-    state(stateCodes::NODEVICE);
-
+template <class operationT>
+int kcubeCtrl::transact( tmcCon<kcubeCtrl> &axis, const char *name, operationT operation )
+{
+    axis.clearError();
+    if( !communicationAllowed() )
+        return recover( axis, name, -666 );
+    int result = operation();
+    if( result != 0 || !communicationAllowed() )
+        return recover( axis, name, result );
     return 0;
 }
 
-int kcubeCtrl::appLogic()
+inline int kcubeCtrl::appLogic()
 {
-    if( state() == stateCodes::POWERON || state() == stateCodes::NODEVICE || state() == stateCodes::ERROR)
+    std::unique_lock<std::mutex> lock( m_indiMutex, std::try_to_lock );
+    if( !lock.owns_lock() || m_stopping )
+        return 0;
+
+    auto power = m_powerStatus.load();
+    if( !powerOnExpected() )
     {
-        int rv1;
-        {
-            elevatedPrivileges elPriv(this);
-            rv1 = m_kAxis1.open(false);
-        }
-
-        int rv2;
-        {
-            elevatedPrivileges elPriv(this);
-            rv2 = m_kAxis2.open(false);
-        }
-
-        if(rv1 == 0 && rv2 == 0)
-        {
-            if(!stateLogged())
-            {
-                std::stringstream logs1;
-                logs1 << "Axis-1 USB Device " << m_kAxis1.vendor() << ":" << m_kAxis1.product() << ":";
-                        logs1 << m_kAxis1.serial() << " found";
-                log<text_log>(logs1.str());
-
-                std::stringstream logs2;
-                logs2 << "Axis-2 USB Device " << m_kAxis2.vendor() << ":" << m_kAxis2.product() << ":";
-                        logs2 << m_kAxis2.serial() << " found";
-                log<text_log>(logs2.str());
-            }
-
-            state(stateCodes::NOTCONNECTED);
-        }
-        else if(rv1 == -3 && rv2 == -3)
-        {
-            state(stateCodes::NODEVICE);
-            return 0;
-        }
-        else
-        {
-            if(rv1 == 0)
-            {
-                if(!stateLogged())
-                {
-                    std::stringstream logs1;
-                    logs1 << "Axis-1 USB Device " << m_kAxis1.vendor() << ":" << m_kAxis1.product() << ":";
-                        logs1 << m_kAxis1.serial() << " found";
-                    log<text_log>(logs1.str());
-                }
-            }
-
-            if(rv1 != 0)
-            {
-                log<software_error>({__FILE__, __LINE__, 0, rv1, "axis1 tmcController::open failed. "});
-            }
-
-            if(rv2 == 0)
-            {
-                if(!stateLogged())
-                {
-                    std::stringstream logs2;
-                    logs2 << "Axis-2 USB Device " << m_kAxis2.vendor() << ":" << m_kAxis2.product() << ":";
-                        logs2 << m_kAxis2.serial() << " found";
-                    log<text_log>(logs2.str());
-                }
-            }
-
-            if(rv2 != 0)
-            {
-                log<software_error>({__FILE__, __LINE__, 0, rv1, "axis 2 tmcController::open failed. "});
-            }
-
-            state(stateCodes::ERROR);
-            return 0;
-        }
+        resetConnection( powerOffRequested() ? INDI_IDLE : INDI_ALERT );
+        if( state() != stateCodes::POWEROFF )
+            state( stateCodes::NODEVICE );
+        return 0;
     }
-
+    if( ( m_powerMgtEnabled && power != m_connectionPower ) || state() == stateCodes::POWERON )
+    {
+        resetConnection( INDI_IDLE );
+        m_connectionPower = power;
+        m_nextAttempt =
+            std::chrono::steady_clock::now() + std::chrono::seconds( m_powerMgtEnabled ? m_powerOnWait : 0 );
+        state( stateCodes::NODEVICE );
+    }
+    if( state() == stateCodes::ERROR )
+    {
+        recover( m_kAxis1, "connection invalidated", -1 );
+        return 0;
+    }
+    if( state() == stateCodes::NODEVICE )
+    {
+        if( std::chrono::steady_clock::now() < m_nextAttempt )
+            return 0;
+        if( transact( m_kAxis1,
+                      "open",
+                      [&]
+                      {
+                          elevatedPrivileges privileges( this );
+                          return m_kAxis1.open();
+                      } ) < 0 ||
+            transact( m_kAxis2,
+                      "open",
+                      [&]
+                      {
+                          elevatedPrivileges privileges( this );
+                          return m_kAxis2.open();
+                      } ) < 0 )
+            return 0;
+        state( stateCodes::NOTCONNECTED );
+    }
     if( state() == stateCodes::NOTCONNECTED )
     {
-        std::lock_guard<std::mutex> guard(m_indiMutex);
-
-        int rv;
-        {
-            elevatedPrivileges elPriv(this);
-            rv = m_kAxis1.connect();
-        }
-
-        if(rv < 0)
-        {
-            //if connect failed, and there is a device, then we have some other problem.
-            sleep(1); //wait to see if power state updates
-            if(m_powerState == 0) return -1;
-
-            log<software_error>({__FILE__, __LINE__, 0, rv, "axis1 tmcController::connect failed. "});
-            std::cerr << "tmcController::connectFailed\n";
-            state(stateCodes::ERROR);
+        if( transact( m_kAxis1,
+                      "connect",
+                      [&]
+                      {
+                          elevatedPrivileges privileges( this );
+                          return m_kAxis1.connect();
+                      } ) < 0 ||
+            transact( m_kAxis2,
+                      "connect",
+                      [&]
+                      {
+                          elevatedPrivileges privileges( this );
+                          return m_kAxis2.connect();
+                      } ) < 0 )
             return 0;
-        }
-
-        {
-            elevatedPrivileges elPriv(this);
-            rv = m_kAxis2.connect();
-        }
-
-        if(rv < 0)
-        {
-            //if connect failed, and there is a device, then we have some other problem.
-            sleep(1); //wait to see if power state updates
-            if(m_powerState == 0) return -1;
-
-            log<software_error>({__FILE__, __LINE__, 0, rv, "axis 2 tmcController::connect failed. "});
-
-            state(stateCodes::ERROR);
+        state( stateCodes::CONNECTED );
+    }
+    if( state() == stateCodes::CONNECTED )
+    {
+        if( axis1Initialize() < 0 || axis2Initialize() < 0 )
             return 0;
-        }
-
-        state(stateCodes::CONNECTED);
+        state( stateCodes::READY );
+        m_lastError.clear();
     }
-
-    if(state()==stateCodes::CONNECTED)
+    if( state() == stateCodes::READY || state() == stateCodes::OPERATING )
     {
-        std::lock_guard<std::mutex> guard(m_indiMutex);
-
-        if(axis1Initialize() < 0)
-        {
-            return log<software_error, -1>({__FILE__,__LINE__, "error during axis 1 initialization"});
-        }
-
-        if(axis2Initialize() < 0)
-        {
-            return log<software_error, -1>({__FILE__,__LINE__, "error during axis 2 initialization"});
-        }
-
-        state(stateCodes::READY);
+        float volts1 = 0, volts2 = 0;
+        if( transact( m_kAxis1, "read voltage", [&] { return m_kAxis1.pz_req_outputvolts( volts1 ); } ) < 0 ||
+            transact( m_kAxis2, "read voltage", [&] { return m_kAxis2.pz_req_outputvolts( volts2 ); } ) < 0 )
+            return 0;
+        updateIfChanged( m_indiP_axis1_voltage, "current", volts1 * 150, m_axis1Enabled ? INDI_OK : INDI_IDLE );
+        updateIfChanged( m_indiP_axis2_voltage, "current", volts2 * 150, m_axis2Enabled ? INDI_OK : INDI_IDLE );
+        updateSwitchIfChanged( m_indiP_axis1_enable,
+                               "toggle",
+                               m_axis1Enabled ? pcf::IndiElement::On : pcf::IndiElement::Off,
+                               m_axis1Enabled ? INDI_OK : INDI_IDLE );
+        updateSwitchIfChanged( m_indiP_axis2_enable,
+                               "toggle",
+                               m_axis2Enabled ? pcf::IndiElement::On : pcf::IndiElement::Off,
+                               m_axis2Enabled ? INDI_OK : INDI_IDLE );
+        updateSwitchIfChanged( m_indiP_set,
+                               "toggle",
+                               m_isSet ? pcf::IndiElement::On : pcf::IndiElement::Off,
+                               m_isSet ? INDI_OK : INDI_IDLE );
+        updateSwitchIfChanged( m_indiP_axis1_identify, "request", pcf::IndiElement::Off, INDI_IDLE );
+        updateSwitchIfChanged( m_indiP_axis2_identify, "request", pcf::IndiElement::Off, INDI_IDLE );
+        state( m_axis1Enabled && m_axis2Enabled ? stateCodes::OPERATING : stateCodes::READY );
     }
-
-    if(state() == stateCodes::READY || state() == stateCodes::OPERATING)
-    {
-        //We try_to_lock at each step, to let it go in case an actual command is waiting
-
-        //Update Voltage Axis 1
-        {
-            std::unique_lock<std::mutex> lock(m_indiMutex, std::try_to_lock);
-            if(!lock.owns_lock()) return 0;
-
-            float ov;
-            int rv = m_kAxis1.pz_req_outputvolts(ov);
-            if(rv < 0)
-            {
-                sleep(1); //wait to see if power state updates
-                if(m_powerState == 0) return -1;
-
-                log<software_error>({__FILE__, __LINE__, 0, rv, "axis1 tmcController::pz_req_outputvolts failed. "});
-                state(stateCodes::ERROR);
-                return 0;
-            }
-
-            ov *= 150.0;
-
-            if(m_axis1Enabled)
-            {
-                updateIfChanged(m_indiP_axis1_voltage, "current", ov, INDI_OK);
-            }
-            else
-            {
-                updateIfChanged(m_indiP_axis1_voltage, "current", ov, INDI_IDLE);
-            }
-
-        }
-
-        //Update Voltage Axis 2
-        {
-            std::unique_lock<std::mutex> lock(m_indiMutex, std::try_to_lock);
-
-            //but don't wait for it, just go back around.
-            if(!lock.owns_lock()) return 0;
-
-            float ov;
-            int rv = m_kAxis2.pz_req_outputvolts(ov);
-            if(rv < 0)
-            {
-                sleep(1); //wait to see if power state updates
-                if(m_powerState == 0) return -1;
-
-                log<software_error>({__FILE__, __LINE__, 0, rv, "axis1 tmcController::pz_req_outputvolts failed. "});
-                state(stateCodes::ERROR);
-                return 0;
-            }
-
-            ov *= 150.0;
-
-            if(m_axis2Enabled)
-            {
-                updateIfChanged(m_indiP_axis2_voltage, "current", ov, INDI_OK);
-            }
-            else
-            {
-                updateIfChanged(m_indiP_axis2_voltage, "current", ov, INDI_IDLE);
-            }
-        }
-
-
-        //Update the Properties that don't need to talk to device here
-        {
-            std::unique_lock<std::mutex> lock(m_indiMutex, std::try_to_lock);
-            if(!lock.owns_lock()) return 0;
-
-            if(m_axis1Enabled)
-            {
-                updateSwitchIfChanged(m_indiP_axis1_enable, "toggle", pcf::IndiElement::On, INDI_OK);
-            }
-            else
-            {
-                updateSwitchIfChanged(m_indiP_axis1_enable, "toggle", pcf::IndiElement::Off, INDI_IDLE);
-            }
-
-            if(m_axis2Enabled)
-            {
-                updateSwitchIfChanged(m_indiP_axis2_enable, "toggle", pcf::IndiElement::On, INDI_OK);
-            }
-            else
-            {
-                updateSwitchIfChanged(m_indiP_axis2_enable, "toggle", pcf::IndiElement::Off, INDI_IDLE);
-            }
-
-            if(m_axis1Enabled && m_axis2Enabled)
-            {
-                state(stateCodes::OPERATING);
-            }
-            else
-            {
-                state(stateCodes::READY);
-            }
-
-            if(m_isSet)
-            {
-                updateSwitchIfChanged(m_indiP_set, "toggle", pcf::IndiElement::On, INDI_OK);
-            }
-            else
-            {
-                updateSwitchIfChanged(m_indiP_set, "toggle", pcf::IndiElement::Off, INDI_IDLE);
-            }
-
-            updateSwitchIfChanged(m_indiP_axis1_identify, "request", pcf::IndiElement::Off, INDI_IDLE);
-            updateSwitchIfChanged(m_indiP_axis2_identify, "request", pcf::IndiElement::Off, INDI_IDLE);
-        }
-
-    } //READY || OPERATING
-
     return 0;
 }
 
-int kcubeCtrl::appShutdown()
+inline int kcubeCtrl::appShutdown()
+{
+    std::lock_guard<std::mutex> lock( m_indiMutex );
+    m_stopping = true;
+    resetConnection( INDI_IDLE );
+    return 0;
+}
+
+inline int kcubeCtrl::onPowerOff()
+{
+    std::lock_guard<std::mutex> lock( m_indiMutex );
+    resetConnection( INDI_IDLE );
+    m_lastError.clear();
+    return 0;
+}
+
+inline int kcubeCtrl::whilePowerOff()
 {
     return 0;
 }
 
-int kcubeCtrl::axis1Initialize()
+inline int kcubeCtrl::modIdentify()
 {
-    int rv;
-
-    tmcController::HWInfo hwi;
-
-    rv = m_kAxis1.hw_req_info(hwi);
-    if( rv < 0)
-    {
-        sleep(1); //wait to see if power state updates
-        if(m_powerState == 0) return -1;
-
-        log<software_error>({__FILE__, __LINE__, 0, rv, "axis1 tmcController::hw_req_info failed. "});
-        return -1;
-    }
-
-    std::stringstream logs1;
-    logs1 << "Axis-1 ";
-    hwi.dump(logs1);
-    log<text_log>(logs1.str());
-
-    rv = m_kAxis1.mod_set_chanenablestate(0x01, tmcController::EnableState::disabled);
-    if(rv < 0)
-    {
-        sleep(1); //wait to see if power state updates
-        if(m_powerState == 0) return -1;
-
-        log<software_error>({__FILE__, __LINE__, 0, rv, "axis1 tmcController::mod_set_chanenablestate failed. "});
-        return -1;
-    }
-    m_axis1Enabled = false;
-    m_isSet = false;
-
-    //Setup the user interface
-    rv = m_kAxis1.hw_stop_updatemsgs();
-    if(rv < 0)
-    {
-        sleep(1); //wait to see if power state updates
-        if(m_powerState == 0) return -1;
-
-        log<software_error>({__FILE__, __LINE__, 0, rv, "axis1 tmcController::hw_stop_updatemsgs failed. "});
-        return -1;
-    }
-
-    tmcController::KMMIParams par;
-    rv = m_kAxis1.kpz_req_kcubemmiparams(par);
-    if(rv < 0)
-    {
-        sleep(1); //wait to see if power state updates
-        if(m_powerState == 0) return -1;
-
-        log<software_error>({__FILE__, __LINE__, 0, rv, "axis1 tmcController::kpz_req_kcubemmiparams failed. "});
-        return -1;
-    }
-
-    par.DispBrightness = 0;
-
-    rv = m_kAxis1.kpz_set_kcubemmiparams(par);
-    if(rv < 0)
-    {
-        sleep(1); //wait to see if power state updates
-        if(m_powerState == 0) return -1;
-
-        log<software_error>({__FILE__, __LINE__, 0, rv, "axis1 tmcController::kpz_set_kcubemmiparams failed. "});
-        return -1;
-    }
-
-    rv = m_kAxis1.kpz_req_kcubemmiparams(par);
-    if(rv < 0)
-    {
-        sleep(1); //wait to see if power state updates
-        if(m_powerState == 0) return -1;
-
-        log<software_error>({__FILE__, __LINE__, 0, rv, "axis1 tmcController::kpz_req_kcubemmiparams failed. "});
-        return -1;
-    }
-
-    logs1.str("");
-    logs1 << "Axis-1 ";
-    par.dump(logs1);
-    log<text_log>(logs1.str());
-
-    //Get and set TPZ IO Settings, setting limit to 150 V
-    //First reads current settings, and only updates the 150 V limit.
-    tmcController::TPZIOSettings tios;
-    rv = m_kAxis1.pz_req_tpz_iosettings(tios);
-    if(rv < 0)
-    {
-        sleep(1); //wait to see if power state updates
-        if(m_powerState == 0) return -1;
-
-        log<software_error>({__FILE__, __LINE__, 0, rv, "axis1 tmcController::pz_req_tpz_iosettings failed. "});
-        return -1;
-    }
-    tios.VoltageLimit = tmcController::VoltLimit::V150;
-
-    rv = m_kAxis1.pz_set_tpz_iosettings(tios);
-    if(rv < 0)
-    {
-        sleep(1); //wait to see if power state updates
-        if(m_powerState == 0) return -1;
-
-        log<software_error>({__FILE__, __LINE__, 0, rv, "axis1 tmcController::pz_set_tpz_iosettings failed. "});
-        return -1;
-    }
-
-    rv = m_kAxis1.pz_req_tpz_iosettings(tios);
-    if(rv < 0)
-    {
-        sleep(1); //wait to see if power state updates
-        if(m_powerState == 0) return -1;
-
-        log<software_error>({__FILE__, __LINE__, 0, rv, "axis1 tmcController::pz_req_tpz_iosettings failed. "});
-        return -1;
-    }
-
-    logs1.str("");
-    logs1 << "Axis-1 ";
-    tios.dump(logs1);
-    log<text_log>(logs1.str());
-
     return 0;
 }
 
-int kcubeCtrl::axis1Enable()
+inline int kcubeCtrl::initialize( tmcCon<kcubeCtrl> &axis, bool &enabled )
 {
-    int rv = m_kAxis1.mod_set_chanenablestate(0x01, tmcController::EnableState::enabled);
-    if(rv < 0)
-    {
-        sleep(1); //wait to see if power state updates
-        if(m_powerState == 0) return -1;
-
-        log<software_error>({__FILE__, __LINE__, 0, rv, "axis1 tmcController::mod_set_chanenablestate failed. "});
+    if( state() != stateCodes::CONNECTED || !axis.connected() || !communicationAllowed() )
+        return recover( axis, "initialize", -666 );
+    tmcController::HWInfo        info;
+    tmcController::KMMIParams    parameters;
+    tmcController::TPZIOSettings settings;
+    if( transact( axis, "hardware information", [&] { return axis.hw_req_info( info ); } ) < 0 ||
+        enable( axis, enabled, false ) < 0 ||
+        transact( axis, "stop updates", [&] { return axis.hw_stop_updatemsgs(); } ) < 0 ||
+        transact( axis, "read MMI", [&] { return axis.kpz_req_kcubemmiparams( parameters ); } ) < 0 )
         return -1;
-    }
-
-    m_axis1Enabled = true;
-
-    log<text_log>("enabled axis 1 piezo", logPrio::LOG_NOTICE);
-
+    parameters.DispBrightness = 0;
+    if( transact( axis, "write MMI", [&] { return axis.kpz_set_kcubemmiparams( parameters ); } ) < 0 ||
+        transact( axis, "verify MMI", [&] { return axis.kpz_req_kcubemmiparams( parameters ); } ) < 0 ||
+        transact( axis, "read IO settings", [&] { return axis.pz_req_tpz_iosettings( settings ); } ) < 0 )
+        return -1;
+    settings.VoltageLimit = tmcController::VoltLimit::V150;
+    if( transact( axis, "write IO settings", [&] { return axis.pz_set_tpz_iosettings( settings ); } ) < 0 ||
+        transact( axis, "verify IO settings", [&] { return axis.pz_req_tpz_iosettings( settings ); } ) < 0 )
+        return -1;
+    std::stringstream message;
+    message << ( &axis == &m_kAxis1 ? "Axis-1 " : "Axis-2 " );
+    info.dump( message );
+    parameters.dump( message );
+    settings.dump( message );
+    log<text_log>( message.str() );
     return 0;
 }
 
-int kcubeCtrl::axis1Disable()
+inline int kcubeCtrl::enable( tmcCon<kcubeCtrl> &axis, bool &enabled, bool value )
 {
-    int rv = m_kAxis1.mod_set_chanenablestate(0x01, tmcController::EnableState::disabled);
-    if(rv < 0)
-    {
-        sleep(1); //wait to see if power state updates
-        if(m_powerState == 0) return -1;
-
-        log<software_error>({__FILE__, __LINE__, 0, rv, "axis1 tmcController::mod_set_chanenablestate failed. "});
+    if( transact( axis,
+                  value ? "enable" : "disable",
+                  [&]
+                  {
+                      return axis.mod_set_chanenablestate(
+                          1, value ? tmcController::EnableState::enabled : tmcController::EnableState::disabled );
+                  } ) < 0 )
         return -1;
-    }
-
-    m_axis1Enabled = false;
-    m_isSet = false;
-
-    log<text_log>("disabled axis 1 piezo", logPrio::LOG_NOTICE);
-
+    enabled = value;
+    if( !value )
+        m_isSet = false;
+    if( state() != stateCodes::CONNECTED )
+        log<text_log>( std::string( value ? "enabled " : "disabled " ) +
+                           ( &axis == &m_kAxis1 ? "axis 1 piezo" : "axis 2 piezo" ),
+                       logPrio::LOG_NOTICE );
     return 0;
 }
 
-int kcubeCtrl::axis1Voltage(float & v)
+inline int kcubeCtrl::voltage( tmcCon<kcubeCtrl> &axis, float &value )
 {
-    if(v < 0)
-    {
-        log<text_log>("axis 1 voltage clamped at 0 (" + std::to_string(v) + ")", logPrio::LOG_WARNING);
-        v = 0;
-    }
-    else if(v > 150)
-    {
-        log<text_log>("axis 1 voltage clamped at 150 (" + std::to_string(v) + ")", logPrio::LOG_WARNING);
-        v = 150;
-    }
-
-    int rv = m_kAxis1.pz_set_outputvolts(v/150.0);
-    if(rv < 0)
-    {
-        sleep(1); //wait to see if power state updates
-        if(m_powerState == 0) return -1;
-
-        log<software_error>({__FILE__, __LINE__, 0, rv, "axis1 tmcController::pz_set_outputvolts failed. "});
+    if( !mx::math::isFinite( value ) )
         return -1;
+    if( value < 0 || value > 150 )
+    {
+        log<text_log>( std::string( &axis == &m_kAxis1 ? "axis 1" : "axis 2" ) + " voltage clamped to 0..150 V (" +
+                           std::to_string( value ) + ")",
+                       logPrio::LOG_WARNING );
+        value = std::clamp( value, 0.0f, 150.0f );
     }
-
-    return 0;
-
+    return transact( axis, "write voltage", [&] { return axis.pz_set_outputvolts( value / 150 ); } );
 }
 
-int kcubeCtrl::axis2Initialize()
+inline int kcubeCtrl::axis1Initialize()
 {
-    int rv;
-
-    tmcController::HWInfo hwi;
-
-    rv = m_kAxis2.hw_req_info(hwi);
-    if( rv < 0)
-    {
-        sleep(1); //wait to see if power state updates
-        if(m_powerState == 0) return -1;
-
-        log<software_error>({__FILE__, __LINE__, 0, rv, "axis 2 tmcController::hw_req_info failed. "});
-        return -1;
-    }
-
-    std::stringstream logs1;
-    logs1 << "Axis-2 ";
-    hwi.dump(logs1);
-    log<text_log>(logs1.str());
-
-    rv = m_kAxis2.mod_set_chanenablestate(0x01, tmcController::EnableState::disabled);
-    if(rv < 0)
-    {
-        sleep(1); //wait to see if power state updates
-        if(m_powerState == 0) return -1;
-
-        log<software_error>({__FILE__, __LINE__, 0, rv, "axis 2 tmcController::mod_set_chanenablestate failed. "});
-        return -1;
-    }
-    m_axis2Enabled = false;
-    m_isSet = false;
-
-    //Setup the user interface
-    rv = m_kAxis2.hw_stop_updatemsgs();
-    if(rv < 0)
-    {
-        sleep(1); //wait to see if power state updates
-        if(m_powerState == 0) return -1;
-
-        log<software_error>({__FILE__, __LINE__, 0, rv, "axis 2 tmcController::hw_stop_updatemsgs failed. "});
-        return -1;
-    }
-
-    tmcController::KMMIParams par;
-    rv = m_kAxis2.kpz_req_kcubemmiparams(par);
-    if(rv < 0)
-    {
-        sleep(1); //wait to see if power state updates
-        if(m_powerState == 0) return -1;
-
-        log<software_error>({__FILE__, __LINE__, 0, rv, "axis 2 tmcController::kpz_req_kcubemmiparams failed. "});
-        return -1;
-    }
-
-    par.DispBrightness = 0;
-
-    rv = m_kAxis2.kpz_set_kcubemmiparams(par);
-    if(rv < 0)
-    {
-        sleep(1); //wait to see if power state updates
-        if(m_powerState == 0) return -1;
-
-
-        log<software_error>({__FILE__, __LINE__, 0, rv, "axis 2 tmcController::kpz_set_kcubemmiparams failed. "});
-        return -1;
-    }
-
-    rv = m_kAxis2.kpz_req_kcubemmiparams(par);
-    if(rv < 0)
-    {
-        sleep(1); //wait to see if power state updates
-        if(m_powerState == 0) return -1;
-
-        log<software_error>({__FILE__, __LINE__, 0, rv, "axis 2 tmcController::kpz_req_kcubemmiparams failed. "});
-        return -1;
-    }
-
-    logs1.str("");
-    logs1 << "Axis-2 ";
-    par.dump(logs1);
-    log<text_log>(logs1.str());
-
-    //Get and set TPZ IO Settings, setting limit to 150 V
-    //First reads current settings, and only updates the 150 V limit.
-    tmcController::TPZIOSettings tios;
-    rv = m_kAxis2.pz_req_tpz_iosettings(tios);
-    if(rv < 0)
-    {
-        sleep(1); //wait to see if power state updates
-        if(m_powerState == 0) return -1;
-
-        log<software_error>({__FILE__, __LINE__, 0, rv, "axis 2 tmcController::pz_req_tpz_iosettings failed. "});
-        return -1;
-    }
-    tios.VoltageLimit = tmcController::VoltLimit::V150;
-
-    rv = m_kAxis2.pz_set_tpz_iosettings(tios);
-    if(rv < 0)
-    {
-        sleep(1); //wait to see if power state updates
-        if(m_powerState == 0) return -1;
-
-        log<software_error>({__FILE__, __LINE__, 0, rv, "axis 2 tmcController::pz_set_tpz_iosettings failed. "});
-        return -1;
-    }
-
-    rv = m_kAxis2.pz_req_tpz_iosettings(tios);
-    if(rv < 0)
-    {
-        sleep(1); //wait to see if power state updates
-        if(m_powerState == 0) return -1;
-
-        log<software_error>({__FILE__, __LINE__, 0, rv, "axis 2 tmcController::pz_req_tpz_iosettings failed. "});
-        return -1;
-    }
-
-    logs1.str("");
-    logs1 << "Axis-2 ";
-    tios.dump(logs1);
-    log<text_log>(logs1.str());
-
-    return 0;
+    return initialize( m_kAxis1, m_axis1Enabled );
 }
 
-int kcubeCtrl::axis2Enable()
+inline int kcubeCtrl::axis1Enable()
 {
-    int rv = m_kAxis2.mod_set_chanenablestate(0x01, tmcController::EnableState::enabled);
-    if(rv < 0)
-    {
-        sleep(1); //wait to see if power state updates
-        if(m_powerState == 0) return -1;
-
-        log<software_error>({__FILE__, __LINE__, 0, rv, "axis 2 tmcController::mod_set_chanenablestate failed. "});
+    if( !commandAllowed() )
         return -1;
-    }
-
-    m_axis2Enabled = true;
-
-    log<text_log>("enabled axis 2 piezo", logPrio::LOG_NOTICE);
-
-    return 0;
+    return enable( m_kAxis1, m_axis1Enabled, true );
 }
 
-int kcubeCtrl::axis2Disable()
+inline int kcubeCtrl::axis1Disable()
 {
-    int rv = m_kAxis2.mod_set_chanenablestate(0x01, tmcController::EnableState::disabled);
-    if(rv < 0)
-    {
-        sleep(1); //wait to see if power state updates
-        if(m_powerState == 0) return -1;
-
-        log<software_error>({__FILE__, __LINE__, 0, rv, "axis 2 tmcController::mod_set_chanenablestate failed. "});
+    if( !commandAllowed() )
         return -1;
-    }
-
-    m_axis2Enabled = false;
-    m_isSet = false;
-
-    log<text_log>("disabled axis 2 piezo", logPrio::LOG_NOTICE);
-
-    return 0;
+    return enable( m_kAxis1, m_axis1Enabled, false );
 }
 
-int kcubeCtrl::axis2Voltage(float & v)
+inline int kcubeCtrl::axis1Voltage( float &value )
 {
-    if(v < 0)
-    {
-        log<text_log>("axis 2 voltage clamped at 0 (" + std::to_string(v) + ")", logPrio::LOG_WARNING);
-        v = 0;
-    }
-    else if(v > 150)
-    {
-        log<text_log>("axis 2 voltage clamped at 150 (" + std::to_string(v) + ")", logPrio::LOG_WARNING);
-        v = 150;
-    }
-
-    int rv = m_kAxis2.pz_set_outputvolts(v/150.0);
-    if(rv < 0)
-    {
-        sleep(1); //wait to see if power state updates
-        if(m_powerState == 0) return -1;
-
-        log<software_error>({__FILE__, __LINE__, 0, rv, "axis 2 tmcController::pz_set_outputvolts failed. "});
+    if( !commandAllowed() )
         return -1;
-    }
-
-    return 0;
+    return voltage( m_kAxis1, value );
 }
 
-int kcubeCtrl::set()
+inline int kcubeCtrl::axis2Initialize()
 {
-    if(m_isSet) return 0;
+    return initialize( m_kAxis2, m_axis2Enabled );
+}
 
-    float v = 75.0;
+inline int kcubeCtrl::axis2Enable()
+{
+    if( !commandAllowed() )
+        return -1;
+    return enable( m_kAxis2, m_axis2Enabled, true );
+}
 
-    if(axis1Enable() < 0)
-    {
-        sleep(1); //wait to see if power state updates
-        if(m_powerState == 0) return -1;
+inline int kcubeCtrl::axis2Disable()
+{
+    if( !commandAllowed() )
+        return -1;
+    return enable( m_kAxis2, m_axis2Enabled, false );
+}
 
-        return log<software_error,-1>({__FILE__, __LINE__, "axis 1 enable error in set"});
-    }
+inline int kcubeCtrl::axis2Voltage( float &value )
+{
+    if( !commandAllowed() )
+        return -1;
+    return voltage( m_kAxis2, value );
+}
 
-    if(axis1Voltage(v) < 0)
-    {
-        sleep(1); //wait to see if power state updates
-        if(m_powerState == 0) return -1;
-
-        return log<software_error,-1>({__FILE__, __LINE__, "axis 1 enable voltage in set"});
-    }
-
-    if(axis2Enable() < 0)
-    {
-        sleep(1); //wait to see if power state updates
-        if(m_powerState == 0) return -1;
-
-        return log<software_error,-1>({__FILE__, __LINE__, "axis 2 enable error in set"});
-    }
-
-    if(axis2Voltage(v) < 0)
-    {
-        sleep(1); //wait to see if power state updates
-        if(m_powerState == 0) return -1;
-
-        return log<software_error,-1>({__FILE__, __LINE__, "axis 2 enable voltage in set"});
-    }
-
+inline int kcubeCtrl::set()
+{
+    if( !commandAllowed() )
+        return -1;
+    if( m_isSet )
+        return 0;
+    float value = 75;
+    if( axis1Enable() < 0 || axis1Voltage( value ) < 0 || axis2Enable() < 0 || axis2Voltage( value ) < 0 )
+        return -1;
     m_isSet = true;
-
-    log<text_log>("set", logPrio::LOG_NOTICE);
-
+    log<text_log>( "set", logPrio::LOG_NOTICE );
     return 0;
 }
 
-int kcubeCtrl::rest()
+inline int kcubeCtrl::rest()
 {
-    if(!m_isSet) return 0;
-
-    float v = 0.0;
-
-    if(axis1Voltage(v) < 0)
-    {
-        sleep(1); //wait to see if power state updates
-        if(m_powerState == 0) return -1;
-
-        return log<software_error,-1>({__FILE__, __LINE__, "axis 1 enable voltage in rest"});
-    }
-
-    if(axis1Disable() < 0)
-    {
-        sleep(1); //wait to see if power state updates
-        if(m_powerState == 0) return -1;
-
-        return log<software_error,-1>({__FILE__, __LINE__, "axis 1 disable error in rest"});
-    }
-
-    if(axis2Voltage(v) < 0)
-    {
-        sleep(1); //wait to see if power state updates
-        if(m_powerState == 0) return -1;
-
-        return log<software_error,-1>({__FILE__, __LINE__, "axis 2 enable voltage in rest"});
-    }
-
-    if(axis2Disable() < 0)
-    {
-        sleep(1); //wait to see if power state updates
-        if(m_powerState == 0) return -1;
-
-        return log<software_error,-1>({__FILE__, __LINE__, "axis 2 disable error in rest"});
-    }
-
+    if( !commandAllowed() )
+        return -1;
+    if( !m_isSet )
+        return 0;
+    float value = 0;
+    if( axis1Voltage( value ) < 0 || axis1Disable() < 0 || axis2Voltage( value ) < 0 || axis2Disable() < 0 )
+        return -1;
     m_isSet = false;
-
-    log<text_log>("rested", logPrio::LOG_NOTICE);
-
+    log<text_log>( "rested", logPrio::LOG_NOTICE );
     return 0;
 }
 
-INDI_NEWCALLBACK_DEFN(kcubeCtrl, m_indiP_axis1_identify)(const pcf::IndiProperty &ipRecv)
+inline int
+kcubeCtrl::identifyRequest( const pcf::IndiProperty &request, pcf::IndiProperty &property, tmcCon<kcubeCtrl> &axis )
 {
-    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_axis1_identify, ipRecv);
-
-    if(state() != stateCodes::READY) return 0;
-
-    //switch is toggled to on
-    if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+    std::lock_guard<std::mutex> lock( m_indiMutex );
+    if( request.getType() != pcf::IndiProperty::Switch || !request.find( "request" ) || !commandAllowed() ||
+        state() != stateCodes::READY )
+        return -1;
+    auto value = request["request"].getSwitchState();
+    if( value != pcf::IndiElement::On && value != pcf::IndiElement::Off )
+        return -1;
+    if( value == pcf::IndiElement::On )
     {
-        std::lock_guard<std::mutex> guard(m_indiMutex);
-        updateSwitchIfChanged(m_indiP_axis1_identify, "request", pcf::IndiElement::On, INDI_BUSY);
-        return m_kAxis1.mod_identify();
+        updateSwitchIfChanged( property, "request", pcf::IndiElement::On, INDI_BUSY );
+        return transact( axis, "identify", [&] { return axis.mod_identify(); } );
     }
-
     return 0;
 }
 
-INDI_NEWCALLBACK_DEFN(kcubeCtrl, m_indiP_axis1_enable)(const pcf::IndiProperty &ipRecv)
+inline int kcubeCtrl::enableRequest( const pcf::IndiProperty &request, tmcCon<kcubeCtrl> &axis, bool &enabled )
 {
-    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_axis1_enable, ipRecv);
-
-    if(!(state() == stateCodes::READY || state() == stateCodes::OPERATING) ) return 0;
-
-    //switch is toggled to on
-    if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
-    {
-        std::lock_guard<std::mutex> guard(m_indiMutex);
-        if(axis1Enable() < 0)
-        {
-            if(m_powerState == 0) return 0;
-            return log<software_error,-1>({__FILE__, __LINE__, "axis 1 enable error in INDI callback"});
-        }
-    }
-    else
-    {
-        std::lock_guard<std::mutex> guard(m_indiMutex);
-        if(axis1Disable() < 0)
-        {
-            if(m_powerState == 0) return 0;
-            log<software_error,-1>({__FILE__, __LINE__, "axis 1 disable error in INDI callback"});
-        }
-    }
-
-   return 0;
+    std::lock_guard<std::mutex> lock( m_indiMutex );
+    if( request.getType() != pcf::IndiProperty::Switch || !request.find( "toggle" ) || !commandAllowed() )
+        return -1;
+    auto value = request["toggle"].getSwitchState();
+    if( value != pcf::IndiElement::On && value != pcf::IndiElement::Off )
+        return -1;
+    return enable( axis, enabled, value == pcf::IndiElement::On );
 }
 
-
-INDI_NEWCALLBACK_DEFN(kcubeCtrl, m_indiP_axis1_voltage)(const pcf::IndiProperty &ipRecv)
+inline int
+kcubeCtrl::voltageRequest( const pcf::IndiProperty &request, pcf::IndiProperty &property, tmcCon<kcubeCtrl> &axis )
 {
-    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_axis1_voltage, ipRecv);
-
-    if(!(state() == stateCodes::READY || state() == stateCodes::OPERATING) ) return 0;
-
-    float target;
-    indiTargetUpdate(m_indiP_axis1_voltage, target, ipRecv, true);
-
-    std::lock_guard<std::mutex> guard(m_indiMutex);
-    if(axis1Voltage(target) < 0)
-    {
-        if(m_powerState == 0) return 0;
-        return log<software_error,-1>({__FILE__, __LINE__, "axis 1 voltage error in INDI callback"});
-    }
-
+    std::lock_guard<std::mutex> lock( m_indiMutex );
+    if( request.getType() != pcf::IndiProperty::Number || !commandAllowed() ||
+        !( request.find( "target" ) || request.find( "current" ) ) )
+        return -1;
+    float              value = 0;
+    std::istringstream input( request[request.find( "target" ) ? "target" : "current"].get() );
+    if( !( input >> value ) || !( input >> std::ws ).eof() )
+        return -1;
+    if( !mx::math::isFinite( value ) || voltage( axis, value ) < 0 )
+        return -1;
+    updateIfChanged( property, "target", value, INDI_BUSY );
     return 0;
 }
 
-INDI_NEWCALLBACK_DEFN(kcubeCtrl, m_indiP_axis2_identify)(const pcf::IndiProperty &ipRecv)
+inline int kcubeCtrl::newCallBack_m_indiP_axis1_identify( const pcf::IndiProperty &request )
 {
-    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_axis2_identify, ipRecv);
-
-    if(state() != stateCodes::READY) return 0;
-
-    //switch is toggled to on
-    if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
-    {
-        std::lock_guard<std::mutex> guard(m_indiMutex);
-        updateSwitchIfChanged(m_indiP_axis2_identify, "request", pcf::IndiElement::On, INDI_BUSY);
-        return m_kAxis2.mod_identify();
-    }
-
-   return 0;
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_axis1_identify, request );
+    return identifyRequest( request, m_indiP_axis1_identify, m_kAxis1 );
 }
 
-INDI_NEWCALLBACK_DEFN(kcubeCtrl, m_indiP_axis2_enable)(const pcf::IndiProperty &ipRecv)
+inline int kcubeCtrl::newCallBack_m_indiP_axis1_enable( const pcf::IndiProperty &request )
 {
-    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_axis2_enable, ipRecv);
-
-    if(!(state() == stateCodes::READY || state() == stateCodes::OPERATING) ) return 0;
-
-    //switch is toggled to on
-    if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
-    {
-        std::lock_guard<std::mutex> guard(m_indiMutex);
-        if(axis2Enable() < 0)
-        {
-            if(m_powerState == 0) return 0;
-            return log<software_error,-1>({__FILE__, __LINE__, "axis 2 enable error in INDI callback"});
-        }
-    }
-    else
-    {
-        std::lock_guard<std::mutex> guard(m_indiMutex);
-        if(axis2Disable() < 0)
-        {
-            if(m_powerState == 0) return 0;
-            return log<software_error,-1>({__FILE__, __LINE__, "axis 2 disable error in INDI callback"});
-        }
-    }
-
-   return 0;
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_axis1_enable, request );
+    return enableRequest( request, m_kAxis1, m_axis1Enabled );
 }
 
-INDI_NEWCALLBACK_DEFN(kcubeCtrl, m_indiP_axis2_voltage)(const pcf::IndiProperty &ipRecv)
+inline int kcubeCtrl::newCallBack_m_indiP_axis1_voltage( const pcf::IndiProperty &request )
 {
-    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_axis2_voltage, ipRecv);
-
-    if(!(state() == stateCodes::READY || state() == stateCodes::OPERATING) ) return 0;
-
-    float target;
-    indiTargetUpdate(m_indiP_axis2_voltage, target, ipRecv, true);
-
-    std::lock_guard<std::mutex> guard(m_indiMutex);
-    if(axis2Voltage(target) < 0)
-    {
-        if(m_powerState == 0) return 0;
-        return log<software_error,-1>({__FILE__, __LINE__, "axis 2 voltage error in INDI callback"});
-    }
-
-    return 0;
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_axis1_voltage, request );
+    return voltageRequest( request, m_indiP_axis1_voltage, m_kAxis1 );
 }
 
-INDI_NEWCALLBACK_DEFN(kcubeCtrl, m_indiP_set)(const pcf::IndiProperty &ipRecv)
+inline int kcubeCtrl::newCallBack_m_indiP_axis2_identify( const pcf::IndiProperty &request )
 {
-    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_set, ipRecv);
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_axis2_identify, request );
+    return identifyRequest( request, m_indiP_axis2_identify, m_kAxis2 );
+}
 
-    if(!(state() == stateCodes::READY || state() == stateCodes::OPERATING) ) return 0;
+inline int kcubeCtrl::newCallBack_m_indiP_axis2_enable( const pcf::IndiProperty &request )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_axis2_enable, request );
+    return enableRequest( request, m_kAxis2, m_axis2Enabled );
+}
 
-    //switch is toggled to on
-    if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
-    {
-        std::lock_guard<std::mutex> guard(m_indiMutex);
-        if(!m_isSet)
-        {
-            //Set it to busy if we think this is a state change
-            updateSwitchIfChanged(m_indiP_set, "toggle", pcf::IndiElement::On, INDI_BUSY);
-        }
-        //--else: if already set we probably don't need to call set(), but do it anyway to be sure
+inline int kcubeCtrl::newCallBack_m_indiP_axis2_voltage( const pcf::IndiProperty &request )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_axis2_voltage, request );
+    return voltageRequest( request, m_indiP_axis2_voltage, m_kAxis2 );
+}
 
-        if(set() < 0)
-        {
-            if(m_powerState == 0) return 0;
-            return log<software_error,-1>({__FILE__, __LINE__, "set error in INDI callback"});
-        }
-    }
-    else
-    {
-        std::lock_guard<std::mutex> guard(m_indiMutex);
-        if(m_isSet)
-        {
-            //Set it to busy if we think this is a state change
-            updateSwitchIfChanged(m_indiP_set, "toggle", pcf::IndiElement::Off, INDI_BUSY);
-        }
-        //--else: if already rested we probably don't need to call rest(), but do it anyway to be sure
+inline int kcubeCtrl::newCallBack_m_indiP_set( const pcf::IndiProperty &request )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_set, request );
+    std::lock_guard<std::mutex> lock( m_indiMutex );
+    if( request.getType() != pcf::IndiProperty::Switch || !request.find( "toggle" ) || !commandAllowed() )
+        return -1;
+    auto value = request["toggle"].getSwitchState();
+    if( value != pcf::IndiElement::On && value != pcf::IndiElement::Off )
+        return -1;
+    int result = value == pcf::IndiElement::On ? set() : rest();
+    if( result == 0 )
+        updateSwitchIfChanged( m_indiP_set, "toggle", value, INDI_OK );
+    return result;
+}
 
-        if(rest() < 0)
-        {
-            if(m_powerState == 0) return 0;
-            return log<software_error,-1>({__FILE__, __LINE__, "rest error in INDI callback"});
-        }
-    }
+inline int kcubeCtrl::st_newCallBack_m_indiP_axis1_identify( void *app, const pcf::IndiProperty &request )
+{
+    return static_cast<kcubeCtrl *>( app )->newCallBack_m_indiP_axis1_identify( request );
+}
 
-   return 0;
+inline int kcubeCtrl::st_newCallBack_m_indiP_axis1_enable( void *app, const pcf::IndiProperty &request )
+{
+    return static_cast<kcubeCtrl *>( app )->newCallBack_m_indiP_axis1_enable( request );
+}
+
+inline int kcubeCtrl::st_newCallBack_m_indiP_axis1_voltage( void *app, const pcf::IndiProperty &request )
+{
+    return static_cast<kcubeCtrl *>( app )->newCallBack_m_indiP_axis1_voltage( request );
+}
+
+inline int kcubeCtrl::st_newCallBack_m_indiP_axis2_identify( void *app, const pcf::IndiProperty &request )
+{
+    return static_cast<kcubeCtrl *>( app )->newCallBack_m_indiP_axis2_identify( request );
+}
+
+inline int kcubeCtrl::st_newCallBack_m_indiP_axis2_enable( void *app, const pcf::IndiProperty &request )
+{
+    return static_cast<kcubeCtrl *>( app )->newCallBack_m_indiP_axis2_enable( request );
+}
+
+inline int kcubeCtrl::st_newCallBack_m_indiP_axis2_voltage( void *app, const pcf::IndiProperty &request )
+{
+    return static_cast<kcubeCtrl *>( app )->newCallBack_m_indiP_axis2_voltage( request );
+}
+
+inline int kcubeCtrl::st_newCallBack_m_indiP_set( void *app, const pcf::IndiProperty &request )
+{
+    return static_cast<kcubeCtrl *>( app )->newCallBack_m_indiP_set( request );
 }
 
 } // namespace app
 } // namespace MagAOX
-
 #endif // kcubeCtrl_hpp

@@ -21,15 +21,136 @@ using namespace mx::sys::tscomp;
 
 #include <flatlogs/flatlogs.hpp>
 #include "../file/stdFileName.hpp"
+#include "generated/logCodes.hpp"
 
 #ifndef DEBUG_CRUMB
-#define DEBUG_CRUMB(msg) {std::cerr << msg << '(' << __FILE__ << ' ' << __LINE__ << "\n";}
+    #ifdef DEBUG
+        #define DEBUG_CRUMB( msg )                                                                                     \
+            {                                                                                                          \
+                std::cerr << msg << '(' << __FILE__ << ' ' << __LINE__ << "\n";                                        \
+            }
+    #else
+        #define DEBUG_CRUMB( msg )
+    #endif
 #endif
 
 namespace MagAOX
 {
 namespace logger
 {
+
+/// Format a flatlogs timestamp for debug messages.
+inline std::string logMapDebugTime( flatlogs::timespecX ts /**< [in] timestamp to format */ )
+{
+    std::string tstamp;
+    ts.timeStamp( tstamp );
+    return tstamp + " (" + std::to_string( ts.time_s ) + "." + std::to_string( ts.time_ns ) + ")";
+}
+
+/// Check whether a flatlog priority value is one of the defined on-disk priorities.
+inline bool logMapPriorityValid( flatlogs::logPrioT prio /**< [in] priority value to check */ )
+{
+    return ( prio >= flatlogs::logPrio::LOG_EMERGENCY && prio <= flatlogs::logPrio::LOG_DEBUG2 ) ||
+           prio == flatlogs::logPrio::LOG_TELEM;
+}
+
+/// Check whether a flatlog entry's header and claimed size fit in the loaded buffer.
+inline bool logMapEntryExtentValid( size_t &totalSize, /**< [out] total entry size claimed by the header */
+                                    char   *buffer,    /**< [in] candidate flatlog entry */
+                                    char   *bufferEnd  /**< [in] one past the loaded buffer */
+)
+{
+    totalSize = 0;
+    if( buffer == nullptr || bufferEnd == nullptr || buffer >= bufferEnd )
+    {
+        return false;
+    }
+
+    size_t remaining = bufferEnd - buffer;
+    if( remaining < static_cast<size_t>( flatlogs::logHeader::minHeadSize ) )
+    {
+        return false;
+    }
+
+    size_t headerSize = flatlogs::logHeader::headerSize( buffer );
+    if( headerSize == 0 || headerSize > remaining )
+    {
+        return false;
+    }
+
+    totalSize = flatlogs::logHeader::totalSize( buffer );
+    return totalSize > 0 && totalSize <= remaining;
+}
+
+/// Check whether a flatlog entry has a sane envelope for length-chain traversal.
+inline bool logMapEntrySane( size_t              &totalSize, /**< [out] total entry size claimed by the header */
+                             char                *buffer,    /**< [in] candidate flatlog entry */
+                             char                *bufferEnd, /**< [in] one past the loaded buffer */
+                             flatlogs::timespecX *minTs = 0  /**< [in] optional minimum plausible timestamp */
+)
+{
+    if( !logMapEntryExtentValid( totalSize, buffer, bufferEnd ) )
+    {
+        return false;
+    }
+
+    if( !logMapPriorityValid( flatlogs::logHeader::logLevel( buffer ) ) )
+    {
+        return false;
+    }
+
+    if( eventCodeName( flatlogs::logHeader::eventCode( buffer ) ) == "unknown event code" )
+    {
+        return false;
+    }
+
+    return minTs == 0 || !( flatlogs::logHeader::timespec( buffer ) < *minTs );
+}
+
+/// Byte-scan forward to the next sane flatlog envelope.
+inline char *logMapResync( char                *buffer,    /**< [in] failed flatlog entry */
+                           char                *bufferEnd, /**< [in] one past the loaded buffer */
+                           flatlogs::timespecX *minTs = 0  /**< [in] optional minimum plausible timestamp */
+)
+{
+    if( buffer == nullptr || bufferEnd == nullptr )
+    {
+        return nullptr;
+    }
+
+    for( char *candidate = buffer + 1; candidate < bufferEnd; ++candidate )
+    {
+        char                *chain      = candidate;
+        size_t               chainLinks = 0;
+        flatlogs::timespecX  chainMinTs;
+        flatlogs::timespecX *chainMinTsPtr = minTs;
+        while( chain < bufferEnd )
+        {
+            size_t totalSize = 0;
+            if( !logMapEntrySane( totalSize, chain, bufferEnd, chainMinTsPtr ) )
+            {
+                break;
+            }
+
+            ++chainLinks;
+            if( chainLinks >= 3 )
+            {
+                return candidate;
+            }
+
+            chainMinTs    = flatlogs::logHeader::timespec( chain );
+            chainMinTsPtr = &chainMinTs;
+            chain += totalSize;
+        }
+
+        if( chain == bufferEnd && chainLinks > 0 )
+        {
+            return candidate;
+        }
+    }
+
+    return nullptr;
+}
 
 #ifdef XWCTEST_NAMESPACE
 namespace XWCTEST_NAMESPACE
@@ -41,12 +162,33 @@ struct logInMemory
 {
     typedef XWC_DEFAULT_VERBOSITY verboseT;
 
+    /// Source file range in the loaded log buffer.
+    struct loadedFile
+    {
+        size_t      m_begin{ 0 }; ///< First byte offset from this source file.
+        size_t      m_end{ 0 };   ///< One past the last byte offset from this source file.
+        std::string m_name;       ///< Full source file path.
+    };
+
     std::vector<char> m_memory; ///< The buffer holding the log data.
 
-    flatlogs::timespecX m_startTime{ 0, 0 };
-    flatlogs::timespecX m_endTime{ 0, 0 };
+    flatlogs::timespecX m_startTime{ 0, 0 }; ///< Earliest timestamp covered by the loaded buffer.
+    flatlogs::timespecX m_endTime{ 0, 0 };   ///< Latest timestamp covered by the loaded buffer.
 
-    int loadFile( file::stdFileName<verboseT> const &lfn );
+    std::vector<loadedFile> m_loadedFiles; ///< Source-file provenance ranges for the loaded buffer.
+
+    size_t m_recoverableErrors{ 0 }; ///< Count of recoverable log parsing errors encountered while loading.
+
+    std::string m_reportPrefix; ///< Optional prefix for user-facing recoverable log parsing reports.
+
+    /// Load one flatlog file into memory.
+    int loadFile( file::stdFileName<verboseT> const &lfn /**< [in] standard file name to load */ );
+
+    /// Get the source file name for a log entry pointer.
+    std::string sourceFile( char *log /**< [in] pointer to a log entry in m_memory */ ) const;
+
+    /// Get the byte offset in the source file for a log entry pointer.
+    size_t sourceOffset( char *log /**< [in] pointer to a log entry in m_memory */ ) const;
 };
 
 /// Map of log entries by application name, mapping both to files and to loaded buffers.
@@ -63,11 +205,19 @@ struct logMap
     /// The app-name to buffer map type, for looking up the currently loaded logs for a given app.
     typedef std::map<std::string, logInMemory> appToBufferMapT;
 
-    int m_searchDaySpan {100}; ///< Maximum number of days to search for files in the past/future.
+    int m_searchDaySpan{ 100 }; ///< Maximum number of days to search for files in the past/future.
 
-    appToFileMapT m_appToFileMap;
+    appToFileMapT m_appToFileMap; ///< Available log files grouped by app/device name.
 
-    appToBufferMapT m_appToBufferMap;
+    appToBufferMapT m_appToBufferMap; ///< Loaded log buffers grouped by app/device name.
+
+    std::string m_reportPrefix; ///< Optional prefix for user-facing recoverable log parsing reports.
+
+    /// Record one recoverable log-processing error.
+    void recordRecoverableError( const std::string &appName /**< [in] app/device associated with the error */ );
+
+    /// Get the number of recoverable errors encountered in loaded logs.
+    size_t recoverableErrors() const;
 
     /// Add a list of files to the file map
     /** This is a worker function for loadAppToFileMap
@@ -113,12 +263,35 @@ struct logMap
                     const std::string &appName     ///< [in] the name of the app specifying which log to search
     );
 
-    int getNearestLogs( flatlogs::bufferPtrT &logBefore, flatlogs::bufferPtrT &logAfter, const std::string &appName );
+    /// Get the nearest loaded logs around the current search point.
+    int getNearestLogs( flatlogs::bufferPtrT &logBefore, /**< [out] log before the search time */
+                        flatlogs::bufferPtrT &logAfter,  /**< [out] log after the search time */
+                        const std::string    &appName    /**< [in] app/device name to search */
+    );
 
-    int loadFiles( const std::string         &appName,  ///< MagAO-X app name for which to load files
-                   const flatlogs::timespecX &startTime ///<
+    /// Load files that cover a requested timestamp for an app.
+    int loadFiles( const std::string         &appName,  /**< [in] MagAO-X app name for which to load files */
+                   const flatlogs::timespecX &startTime /**< [in] timestamp that must be covered by loaded logs */
     );
 };
+
+template <class verboseT>
+void logMap<verboseT>::recordRecoverableError( const std::string &appName )
+{
+    m_appToBufferMap[appName].m_recoverableErrors++;
+}
+
+template <class verboseT>
+size_t logMap<verboseT>::recoverableErrors() const
+{
+    size_t nErrors = 0;
+    for( const auto &appBuffer : m_appToBufferMap )
+    {
+        nErrors += appBuffer.second.m_recoverableErrors;
+    }
+
+    return nErrors;
+}
 
 template <class verboseT>
 mx::error_t logMap<verboseT>::addFileListToFileMap( const std::string              &dev,
@@ -146,17 +319,23 @@ mx::error_t logMap<verboseT>::addFileListToFileMap( const std::string           
         {
             file::stdFileName<verboseT> sfn( flist[n] );
 
+            DEBUG_CRUMB( "logMap add candidate dev=" + dev + " file=" + flist[n] );
+
             if( !sfn.valid() ) // this is just not a standard file name.
             {
+                DEBUG_CRUMB( "logMap skip invalid dev=" + dev + " file=" + flist[n] );
                 continue;
             }
 
             if( sfn.appName() != dev ) // this is just a different app
             {
+                DEBUG_CRUMB( "logMap skip app mismatch dev=" + dev + " file=" + sfn.fullName() );
                 continue;
             }
 
             m_appToFileMap[dev].insert( sfn );
+            DEBUG_CRUMB( "logMap added dev=" + dev + " file=" + sfn.fullName() +
+                         " timestamp=" + logMapDebugTime( sfn.timestamp() ) );
         }
 
         return mx::error_t::noerror;
@@ -204,6 +383,11 @@ mx::error_t logMap<verboseT>::loadAppToFileMap( const std::string               
     mx_error_check_code( errc );
 
     follts.time_s += 3600; // Move 3600 seconds in future.  This is a config setting
+
+    DEBUG_CRUMB( "logMap loadAppToFileMap begin dev=" + dev + " dir=" + dir + " ext=" + ext +
+                 " first=" + firstFile.fullName() + " firstTs=" + logMapDebugTime( firstFile.timestamp() ) +
+                 " last=" + lastFile.fullName() + " lastTs=" + logMapDebugTime( lastFile.timestamp() ) +
+                 " prevLimit=" + logMapDebugTime( prevts ) + " follLimit=" + logMapDebugTime( follts ) );
 
     // Coordinates of the previous log, after it's found
     bool            prevLogFound = false;
@@ -276,7 +460,8 @@ mx::error_t logMap<verboseT>::loadAppToFileMap( const std::string               
                 prevLogSubDir = subdir;
                 prevLogFile_n = n;
 
-                std::cerr << "found previous log: " << tmp_flist[n] << '\n';
+                DEBUG_CRUMB( "logMap previous boundary dev=" + dev + " file=" + sfn.fullName() +
+                             " timestamp=" + logMapDebugTime( sfn.timestamp() ) );
                 break;
             }
         } // iteration over tmp_flist
@@ -349,6 +534,8 @@ mx::error_t logMap<verboseT>::loadAppToFileMap( const std::string               
                     follLogFound  = true;
                     follLogSubDir = subdir;
                     follLogFile_n = n;
+                    DEBUG_CRUMB( "logMap following boundary dev=" + dev + " file=" + sfn.fullName() +
+                                 " timestamp=" + logMapDebugTime( sfn.timestamp() ) );
                     break;
                 }
 
@@ -368,22 +555,28 @@ mx::error_t logMap<verboseT>::loadAppToFileMap( const std::string               
     // In this case we use the last log available and hope for the best
     if( !follLogFound )
     {
+        DEBUG_CRUMB( "logMap following boundary not found dev=" + dev );
         follLogSubDir = lastFile.subDir( &errc );
         mx_error_check_code( errc );
 
-        DEBUG_CRUMB("checking for: " + basedir + follLogSubDir.path());
+        DEBUG_CRUMB( "checking for: " + basedir + follLogSubDir.path() );
 
-        bool exists = mx::ioutils::dir_exists_is(basedir + follLogSubDir.path(), errc);
+        bool exists = mx::ioutils::dir_exists_is( basedir + follLogSubDir.path(), errc );
 
-        int n =0;
-        while(!exists && n < m_searchDaySpan)
+        int n = 0;
+        while( !exists && n < m_searchDaySpan )
         {
             follLogSubDir.subDay();
 
-            DEBUG_CRUMB("checking for: " + basedir + follLogSubDir.path());
+            DEBUG_CRUMB( "checking for: " + basedir + follLogSubDir.path() );
 
-            exists = mx::ioutils::dir_exists_is(basedir + follLogSubDir.path(), errc);
+            exists = mx::ioutils::dir_exists_is( basedir + follLogSubDir.path(), errc );
             ++n;
+        }
+
+        if( !exists )
+        {
+            follLogSubDir = prevLogSubDir;
         }
 
         follLogFile_n = static_cast<size_t>( -1 );
@@ -391,13 +584,13 @@ mx::error_t logMap<verboseT>::loadAppToFileMap( const std::string               
 
     if( prevLogSubDir == follLogSubDir ) // special case, probably most common
     {
-        DEBUG_CRUMB("prevLogSubDir == follLogSubDir");
+        DEBUG_CRUMB( "prevLogSubDir == follLogSubDir" );
 
         try
         {
-            #ifdef XWCTEST_LOGMAP_LATFM_BADALL3
-                throw xwcException("std::bad_alloc"); // LCOV_EXCL_LINE
-            #endif
+#ifdef XWCTEST_LOGMAP_LATFM_BADALL3
+            throw xwcException( "std::bad_alloc" ); // LCOV_EXCL_LINE
+#endif
             // clang-format on
 
             subdir = prevLogSubDir;
@@ -429,7 +622,6 @@ mx::error_t logMap<verboseT>::loadAppToFileMap( const std::string               
     }
     else
     {
-        std::cerr << "prevLogSubDir != follLogSubDir\n";
         try
         {
             // clang-format off
@@ -513,8 +705,7 @@ mx::error_t logMap<verboseT>::loadAppToFileMap( const std::string               
 
             mx_error_check( mx::ioutils::getFileNames( tmp_flist, basedir + subdir.path(), dev, "", ext ) );
 
-
-            if(errc == mx::error_t::noerror)
+            if( errc == mx::error_t::noerror )
             {
 
                 if( follLogFile_n == static_cast<size_t>( -1 ) )
@@ -527,7 +718,7 @@ mx::error_t logMap<verboseT>::loadAppToFileMap( const std::string               
                     if( follLogFile_n > tmp_flist.size() )
                     {
                         return mx::error_report<verboseT>( mx::error_t::sizeerr,
-                                                       "miscounted the number of files somewhere" );
+                                                           "miscounted the number of files somewhere" );
                     }
                 }
 
@@ -540,6 +731,9 @@ mx::error_t logMap<verboseT>::loadAppToFileMap( const std::string               
         }
     }
 
+    DEBUG_CRUMB( "logMap loadAppToFileMap end dev=" + dev +
+                 " mappedFiles=" + std::to_string( m_appToFileMap[dev].size() ) );
+
     return mx::error_t::noerror;
 }
 
@@ -550,17 +744,18 @@ int logMap<verboseT>::getPriorLog( char                      *&logBefore,
                                    const flatlogs::timespecX  &ts,
                                    char                       *hint )
 {
-    flatlogs::eventCodeT evL;
+    static_cast<void>( hint );
 
-    DEBUG_CRUMB("");
+    DEBUG_CRUMB( "" );
 
     if( m_appToFileMap[appName].size() == 0 )
     {
-        std::cerr << __FILE__ << " " << __LINE__ << " getPriorLog empty map\n";
+        DEBUG_CRUMB( "getPriorLog no file map app=" + appName + " ev=" + std::to_string( ev ) +
+                     " ts=" + logMapDebugTime( ts ) );
         return -1;
     }
 
-    DEBUG_CRUMB("");
+    DEBUG_CRUMB( "getPriorLog begin app=" + appName + " ev=" + std::to_string( ev ) + " ts=" + logMapDebugTime( ts ) );
 
     logInMemory &lim = m_appToBufferMap[appName];
 
@@ -568,100 +763,83 @@ int logMap<verboseT>::getPriorLog( char                      *&logBefore,
     et.time_s += 30;
     if( lim.m_startTime > ts || et < ts )
     {
-        DEBUG_CRUMB("");
+        DEBUG_CRUMB( "getPriorLog loading files app=" + appName + " ev=" + std::to_string( ev ) +
+                     " ts=" + logMapDebugTime( ts ) + " loadedStart=" + logMapDebugTime( lim.m_startTime ) +
+                     " loadedEnd=" + logMapDebugTime( lim.m_endTime ) );
 
         if( loadFiles( appName, ts ) < 0 )
         {
-            std::cerr << __FILE__ << " " << __LINE__ << " error returned from loadfiles\n";
+            DEBUG_CRUMB( "getPriorLog loadFiles failed app=" + appName + " ev=" + std::to_string( ev ) +
+                         " ts=" + logMapDebugTime( ts ) );
             return -1;
         }
     }
 
-    char *buffer, *priorBuffer;
-
-    if( hint )
+    if( lim.m_memory.size() == 0 )
     {
-        if( flatlogs::logHeader::timespec( hint ) <= ts )
-        {
-            buffer = hint;
-        }
-        else
-        {
-            buffer = lim.m_memory.data();
-        }
-    }
-    else
-    {
-        buffer = lim.m_memory.data();
-    }
-
-    priorBuffer = buffer;
-    evL         = flatlogs::logHeader::eventCode( buffer );
-
-    while( evL != ev )
-    {
-        priorBuffer = buffer;
-        buffer += flatlogs::logHeader::totalSize( buffer );
-        if( buffer >= lim.m_memory.data() + lim.m_memory.size() )
-            break;
-        evL = flatlogs::logHeader::eventCode( buffer );
-    }
-
-    if( evL != ev )
-    {
-        std::cerr << __FILE__ << " " << __LINE__ << " Event code not found.\n";
+        DEBUG_CRUMB( "getPriorLog empty memory app=" + appName + " ev=" + std::to_string( ev ) +
+                     " ts=" + logMapDebugTime( ts ) );
         return -1;
     }
 
-    if( flatlogs::logHeader::timespec( buffer ) < ts )
+    char *buffer      = lim.m_memory.data();
+    char *bufferEnd   = lim.m_memory.data() + lim.m_memory.size();
+    char *priorBuffer = nullptr;
+
+    while( buffer < bufferEnd )
     {
-        while( flatlogs::logHeader::timespec( buffer ) < ts ) // Loop until buffer is after the timestamp we want
+        size_t               totalSize = 0;
+        flatlogs::timespecX  minTs;
+        flatlogs::timespecX *minTsPtr = nullptr;
+        if( priorBuffer != nullptr )
         {
-            if( buffer > lim.m_memory.data() + lim.m_memory.size() )
-            {
-                std::cerr << __FILE__ << " " << __LINE__
-                          << " attempt to read too mach data, possible log corruption.\n";
-                return -1;
-            }
-
-            if( buffer == lim.m_memory.data() + lim.m_memory.size() )
-            {
-                std::cerr << __FILE__ << " " << __LINE__ << " did not find following log for " << appName
-                          << " -- need to load more data.\n";
-                // Proper action here is to load the next file if possible...
-                return 1;
-            }
-
-            priorBuffer = buffer;
-
-            buffer += flatlogs::logHeader::totalSize( buffer );
-
-            evL = flatlogs::logHeader::eventCode( buffer );
-
-            while( evL != ev ) // Find the next log with the event code we want.
-            {
-                if( buffer > lim.m_memory.data() + lim.m_memory.size() )
-                {
-                    std::cerr << __FILE__ << " " << __LINE__
-                              << " attempt to read too mach data, possible log corruption.\n";
-                    return -1;
-                }
-
-                if( buffer == lim.m_memory.data() + lim.m_memory.size() )
-                {
-                    std::cerr << __FILE__ << " " << __LINE__ << " did not find following log for " << appName
-                              << " -- need to load more data.\n";
-                    // Proper action here is to load the next file if possible...
-                    return 1;
-                }
-
-                buffer += flatlogs::logHeader::totalSize( buffer );
-                evL = flatlogs::logHeader::eventCode( buffer );
-            }
+            minTs    = flatlogs::logHeader::timespec( priorBuffer );
+            minTsPtr = &minTs;
         }
+
+        if( !logMapEntrySane( totalSize, buffer, bufferEnd, minTsPtr ) )
+        {
+            char *resynced = logMapResync( buffer, bufferEnd, minTsPtr );
+            if( resynced != nullptr )
+            {
+                DEBUG_CRUMB( "getPriorLog resync app=" + appName + " ev=" + std::to_string( ev ) +
+                             " offset=" + std::to_string( buffer - lim.m_memory.data() ) +
+                             " resyncOffset=" + std::to_string( resynced - lim.m_memory.data() ) );
+                buffer = resynced;
+                continue;
+            }
+
+            DEBUG_CRUMB( "getPriorLog resync failed app=" + appName + " ev=" + std::to_string( ev ) +
+                         " offset=" + std::to_string( buffer - lim.m_memory.data() ) );
+            break;
+        }
+
+        if( ts < flatlogs::logHeader::timespec( buffer ) )
+        {
+            break;
+        }
+
+        if( flatlogs::logHeader::eventCode( buffer ) == ev )
+        {
+            priorBuffer = buffer;
+        }
+
+        buffer += totalSize;
+    }
+
+    if( priorBuffer == nullptr )
+    {
+        DEBUG_CRUMB( "getPriorLog no prior app=" + appName + " ev=" + std::to_string( ev ) +
+                     " ts=" + logMapDebugTime( ts ) + " loadedStart=" + logMapDebugTime( lim.m_startTime ) +
+                     " loadedEnd=" + logMapDebugTime( lim.m_endTime ) +
+                     " memoryBytes=" + std::to_string( lim.m_memory.size() ) );
+        return -1;
     }
 
     logBefore = priorBuffer;
+
+    DEBUG_CRUMB( "getPriorLog found app=" + appName + " ev=" + std::to_string( ev ) + " ts=" + logMapDebugTime( ts ) +
+                 " logTs=" + logMapDebugTime( flatlogs::logHeader::timespec( logBefore ) ) );
 
     return 0;
 } // getPriorLog
@@ -669,49 +847,71 @@ int logMap<verboseT>::getPriorLog( char                      *&logBefore,
 template <class verboseT>
 int logMap<verboseT>::getNextLog( char *&logAfter, char *logCurrent, const std::string &appName )
 {
-    flatlogs::eventCodeT ev, evL;
-
     logInMemory &lim = m_appToBufferMap[appName];
 
-    char *buffer;
-
-    ev = flatlogs::logHeader::eventCode( logCurrent );
-
-    buffer = logCurrent;
-
-    buffer += flatlogs::logHeader::totalSize( buffer );
-    if( buffer >= lim.m_memory.data() + lim.m_memory.size() )
+    if( logCurrent == nullptr || lim.m_memory.size() == 0 )
     {
-        std::cerr << __FILE__ << " " << __LINE__ << " Reached end of data for " << appName
-                  << " -- need to load more data\n";
-        // propoer action is to load the next file if possible.
-        return 1;
-    }
-
-    evL = flatlogs::logHeader::eventCode( buffer );
-
-    while( evL != ev )
-    {
-        buffer += flatlogs::logHeader::totalSize( buffer );
-        if( buffer >= lim.m_memory.data() + lim.m_memory.size() )
-        {
-            std::cerr << __FILE__ << " " << __LINE__ << " Reached end of data for " << appName
-                      << "-- need to load more data\n";
-            // propoer action is to load the next file if possible.
-            return 1;
-        }
-        evL = flatlogs::logHeader::eventCode( buffer );
-    }
-
-    if( evL != ev )
-    {
-        std::cerr << "Event code not found.\n";
+        DEBUG_CRUMB( "getNextLog missing current/buffer app=" + appName );
         return -1;
     }
 
-    logAfter = buffer;
+    char *bufferStart = lim.m_memory.data();
+    char *bufferEnd   = lim.m_memory.data() + lim.m_memory.size();
+    if( logCurrent < bufferStart || logCurrent >= bufferEnd )
+    {
+        DEBUG_CRUMB( "getNextLog current outside buffer app=" + appName );
+        return -1;
+    }
 
-    return 0;
+    size_t currentSize = flatlogs::logHeader::totalSize( logCurrent );
+    if( currentSize == 0 || logCurrent + currentSize > bufferEnd )
+    {
+        std::cerr << "attempt to read invalid log entry, possible log corruption.\n";
+        return -1;
+    }
+
+    flatlogs::eventCodeT ev     = flatlogs::logHeader::eventCode( logCurrent );
+    char                *buffer = logCurrent + currentSize;
+
+    DEBUG_CRUMB( "getNextLog begin app=" + appName + " ev=" + std::to_string( ev ) +
+                 " currentTs=" + logMapDebugTime( flatlogs::logHeader::timespec( logCurrent ) ) + " loadedStart=" +
+                 logMapDebugTime( lim.m_startTime ) + " loadedEnd=" + logMapDebugTime( lim.m_endTime ) );
+
+    while( buffer < bufferEnd )
+    {
+        size_t              totalSize = 0;
+        flatlogs::timespecX currentTs = flatlogs::logHeader::timespec( logCurrent );
+        if( !logMapEntrySane( totalSize, buffer, bufferEnd, &currentTs ) )
+        {
+            char *resynced = logMapResync( buffer, bufferEnd, &currentTs );
+            if( resynced != nullptr )
+            {
+                DEBUG_CRUMB( "getNextLog resync app=" + appName + " ev=" + std::to_string( ev ) +
+                             " offset=" + std::to_string( buffer - lim.m_memory.data() ) +
+                             " resyncOffset=" + std::to_string( resynced - lim.m_memory.data() ) );
+                buffer = resynced;
+                continue;
+            }
+
+            DEBUG_CRUMB( "getNextLog resync failed app=" + appName + " ev=" + std::to_string( ev ) +
+                         " offset=" + std::to_string( buffer - lim.m_memory.data() ) );
+            break;
+        }
+
+        if( flatlogs::logHeader::eventCode( buffer ) == ev )
+        {
+            logAfter = buffer;
+            DEBUG_CRUMB( "getNextLog found app=" + appName + " ev=" + std::to_string( ev ) +
+                         " logTs=" + logMapDebugTime( flatlogs::logHeader::timespec( logAfter ) ) );
+            return 0;
+        }
+
+        buffer += totalSize;
+    }
+
+    DEBUG_CRUMB( "getNextLog no next app=" + appName + " ev=" + std::to_string( ev ) +
+                 " loadedEnd=" + logMapDebugTime( lim.m_endTime ) );
+    return 1;
 }
 
 template <class verboseT>
@@ -719,22 +919,21 @@ int logMap<verboseT>::loadFiles( const std::string &appName, const flatlogs::tim
 {
     if( m_appToFileMap[appName].size() == 0 )
     {
-        std::cerr << "*************************************\n\n";
-        std::cerr << "No files for " << appName << "\n";
-        std::cerr << "*************************************\n\n";
+        DEBUG_CRUMB( "loadFiles no file map app=" + appName + " startTime=" + logMapDebugTime( startTime ) );
         return -1;
     }
 
-#ifdef DEBUG
-    std::cerr << __FILE__ << " " << __LINE__ << "\n";
-#endif
+    DEBUG_CRUMB( "loadFiles begin app=" + appName + " startTime=" + logMapDebugTime( startTime ) +
+                 " mappedFiles=" + std::to_string( m_appToFileMap[appName].size() ) );
 
     // First check if already loaded files cover this time
     if( m_appToBufferMap[appName].m_memory.size() > 0 )
     {
         if( m_appToBufferMap[appName].m_startTime <= startTime && m_appToBufferMap[appName].m_endTime >= startTime )
         {
-            std::cerr << "good!\n";
+            DEBUG_CRUMB( "loadFiles already covered app=" + appName +
+                         " loadedStart=" + logMapDebugTime( m_appToBufferMap[appName].m_startTime ) +
+                         " loadedEnd=" + logMapDebugTime( m_appToBufferMap[appName].m_endTime ) );
             return 0;
         }
 
@@ -766,11 +965,13 @@ int logMap<verboseT>::loadFiles( const std::string &appName, const flatlogs::tim
             }
 
             // Now open each of these files, in reverse
-            std::cerr << "open earlier files!\n";
             --last;
             --first;
             for( auto it = last; it != first; --it )
             {
+                DEBUG_CRUMB( "loadFiles append backward app=" + appName + " file=" + it->fullName() +
+                             " timestamp=" + logMapDebugTime( it->timestamp() ) );
+                m_appToBufferMap[appName].m_reportPrefix = m_reportPrefix;
                 m_appToBufferMap[appName].loadFile( *it );
             }
 
@@ -797,9 +998,11 @@ int logMap<verboseT>::loadFiles( const std::string &appName, const flatlogs::tim
             }
 
             // Now open each of these files
-            std::cerr << "open later file for " << appName << "!\n";
             for( auto it = first; it != last; ++it )
             {
+                DEBUG_CRUMB( "loadFiles append forward app=" + appName + " file=" + it->fullName() +
+                             " timestamp=" + logMapDebugTime( it->timestamp() ) );
+                m_appToBufferMap[appName].m_reportPrefix = m_reportPrefix;
                 m_appToBufferMap[appName].loadFile( *it );
             }
             return 0;
@@ -826,7 +1029,8 @@ int logMap<verboseT>::loadFiles( const std::string &appName, const flatlogs::tim
 
     if( before == m_appToFileMap[appName].begin() )
     {
-        std::cerr << "No files in range for " << appName << "\n";
+        DEBUG_CRUMB( "loadFiles no prior file app=" + appName + " startTime=" + logMapDebugTime( startTime ) );
+        return -1;
     }
     --before;
 
@@ -840,15 +1044,22 @@ int logMap<verboseT>::loadFiles( const std::string &appName, const flatlogs::tim
     std::cerr << __FILE__ << " " << __LINE__ << "\n";
 #endif
 
+    m_appToBufferMap[appName].m_reportPrefix = m_reportPrefix;
     m_appToBufferMap[appName].loadFile( *before );
+    DEBUG_CRUMB( "loadFiles initial before app=" + appName + " file=" + before->fullName() +
+                 " timestamp=" + logMapDebugTime( before->timestamp() ) );
     if( ++before != m_appToFileMap[appName].end() )
     {
+        m_appToBufferMap[appName].m_reportPrefix = m_reportPrefix;
         m_appToBufferMap[appName].loadFile( *before );
+        DEBUG_CRUMB( "loadFiles initial after app=" + appName + " file=" + before->fullName() +
+                     " timestamp=" + logMapDebugTime( before->timestamp() ) );
     }
 
-#ifdef DEBUG
-    std::cerr << __FILE__ << " " << __LINE__ << "\n";
-#endif
+    DEBUG_CRUMB( "loadFiles end app=" + appName +
+                 " loadedStart=" + logMapDebugTime( m_appToBufferMap[appName].m_startTime ) +
+                 " loadedEnd=" + logMapDebugTime( m_appToBufferMap[appName].m_endTime ) +
+                 " memoryBytes=" + std::to_string( m_appToBufferMap[appName].m_memory.size() ) );
 
     return 0;
 }

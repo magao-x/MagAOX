@@ -9,6 +9,8 @@
 #include <signal.h>
 #include <errno.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <sys/ioctl.h>
 #include <stdexcept>
 #include <sys/types.h>    // provides 'umask'
 #include <sys/stat.h>     // provides 'umask'
@@ -390,10 +392,36 @@ void IndiConnection::sendXml( const string &szXml ) const
     size_t target{szXml.length()};   // last character is usually \0
     if (target == 0) { return; }     // do nothing if string length is 0
     if (!szXml[target-1]) { --target; } // send final char if non-\0
+
+    // Never block on a FIFO whose reader is gone or stuck: wait briefly for room,
+    // then drop whole messages until there is room again.
+    int capacity = m_oOutputIsFifo ? ::fcntl(m_fdOutput, F_GETPIPE_SZ) : -1;
+    if (capacity > 0 && target <= (size_t)capacity)
+    {
+        int queued = 0;
+        int waitedMs = 0;
+        while (::ioctl(m_fdOutput, FIONREAD, &queued) == 0 && target > (size_t)(capacity - queued))
+        {
+            if (m_oOutputStalled || waitedMs >= OutputWaitMs)
+            {
+                m_oOutputStalled = true;
+                ++m_nOutputDrops;
+                return;
+            }
+            ::usleep(1000);
+            ++waitedMs;
+        }
+        m_oOutputStalled = false;
+    }
+
     while (sofar < target)
     {
         int writ;
         writ = ::write(m_fdOutput, szXml.c_str()+sofar, target-sofar);
+        if (writ < 0 && errno == EINTR)
+        {
+            continue;
+        }
         if (writ < 1)
         {
             break;
@@ -440,7 +468,20 @@ void IndiConnection::setInputFd( const int &iFd )
 
 void IndiConnection::setOutputFd( const int &iFd )
 {
+    struct stat st;
     m_fdOutput = iFd;
+    m_oOutputIsFifo = iFd >= 0 && ::fstat( iFd, &st ) == 0 && S_ISFIFO( st.st_mode );
+    m_oOutputStalled = false;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+/// \brief outputDrops
+/// How many messages were dropped because the output FIFO was full?
+/// \return the count since this connection was made.
+
+uint64_t IndiConnection::outputDrops() const
+{
+    return m_nOutputDrops;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
