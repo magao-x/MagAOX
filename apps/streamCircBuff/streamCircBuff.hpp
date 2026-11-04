@@ -71,9 +71,29 @@ protected:
      */
    ///@}
 
-   char * m_currSrc {nullptr};
-
    sem_t m_smSemaphore {0}; ///< Semaphore used to synchronize the fg thread and the sm thread.
+
+   std::mutex m_stageMutex; ///< Protects the staged frame and its timing, which the sm thread writes and the fg thread reads.
+
+   std::vector<char> m_staged; ///< Copy of the latest source frame in the source data type, written by the sm thread.
+
+   timespec m_stagedAtime {0,0}; ///< Source acquisition time of the staged frame.
+
+   timespec m_stagedWritetime {0,0}; ///< Source write time of the staged frame.
+
+   uint64_t m_stagedCnt0 {0}; ///< Source frame counter of the staged frame.
+
+   bool m_stagedFresh {false}; ///< True when the staged frame has not been published yet.
+
+   timespec m_relayWritetime {0,0}; ///< Source write time of the frame being published, used only by the fg thread.
+
+   uint64_t m_relayCnt0 {0}; ///< Source frame counter of the frame being published, used only by the fg thread.
+
+   uint64_t m_cnt0Offset {0}; ///< Added to the source frame counter so the published counter keeps increasing after a source restart.
+
+   std::atomic<uint64_t> m_rewritten {0}; ///< Number of source frames dropped because the source was rewritten during the copy.
+
+   uint64_t m_rewrittenLogged {0}; ///< Value of m_rewritten when last logged.
 
 public:
    /// Default c'tor.
@@ -119,8 +139,12 @@ protected:
    //shmimMonitor Interface
    int allocate( const dev::shmimT & dummy /**< [in] tag to differentiate shmimMonitor parents.*/);
 
-   int allocatePSDStreams();
-
+   /// Copy the current source frame and its timing to the stage, and wake the fg thread
+   /** The frame is dropped if the source was written during the copy.
+     *
+     * \returns 0 on success
+     * \returns -1 on error
+     */
    int processImage( void * curr_src,          ///< [in] pointer to start of current frame.
                      const dev::shmimT & dummy ///< [in] tag to differentiate shmimMonitor parents.
                    );
@@ -173,6 +197,18 @@ protected:
      * \returns -1 on error
      */
    int reconfig();
+
+   /// Supply the source write time and frame counter of the frame being published
+   /** Called by the framegrabber after loadImageIntoStream.  The published counter is offset so it keeps
+     * increasing if the source counter restarts.
+     *
+     * \returns 0
+     */
+   int frameGrabberRelayTiming( timespec & writetime, ///< [out] the source write time
+                                uint64_t & cnt0       ///< [in/out] on entry the next counter, on exit the counter to publish
+                              );
+
+   ///@}
 
    /** \name Telemeter Interface
      *
@@ -245,6 +281,13 @@ int streamCircBuff::appLogic()
 
    TELEMETER_APP_LOGIC;
 
+   uint64_t rewritten = m_rewritten;
+   if(rewritten != m_rewrittenLogged)
+   {
+      log<text_log>("Source frames dropped because they were rewritten during the copy: " + std::to_string(rewritten - m_rewrittenLogged), logPrio::LOG_WARNING);
+      m_rewrittenLogged = rewritten;
+   }
+
    std::unique_lock<std::mutex> lock(m_indiMutex);
 
    SHMIMMONITOR_UPDATE_INDI;
@@ -267,9 +310,13 @@ int streamCircBuff::allocate( const dev::shmimT & dummy)
 {
    static_cast<void>(dummy);
 
-   //we don't actually do anything here -- just a pass through to f.g.
-
    pixget = getPixPointer<float>(shmimMonitorT::m_dataType);
+
+   { //mutex scope
+      std::lock_guard<std::mutex> lock(m_stageMutex);
+      m_staged.resize(shmimMonitorT::m_width * shmimMonitorT::m_height * shmimMonitorT::m_typeSize);
+      m_stagedFresh = false;
+   }
 
    m_reconfig = true;
 
@@ -282,7 +329,47 @@ int streamCircBuff::processImage( void * curr_src,
 {
    static_cast<void>(dummy);
 
-   m_currSrc = static_cast<char *>(curr_src);
+   IMAGE & src = shmimMonitorT::m_imageStream;
+
+   { //mutex scope
+      std::lock_guard<std::mutex> lock(m_stageMutex);
+
+      size_t frameBytes = m_staged.size();
+
+      if(shmimMonitorT::m_depth > 1 && src.cntarray != nullptr)
+      {
+         //A multi-frame source does not rewrite this frame until it wraps around
+         size_t slot = (static_cast<char *>(curr_src) - static_cast<char *>(src.array.raw)) / frameBytes;
+
+         memcpy(m_staged.data(), curr_src, frameBytes);
+         m_stagedAtime = src.atimearray[slot];
+         m_stagedWritetime = src.writetimearray[slot];
+         m_stagedCnt0 = src.cntarray[slot];
+      }
+      else
+      {
+         //The source sets write before it writes, and increments cnt0 before clearing write
+         uint64_t cnt0 = src.md->cnt0;
+         int write = src.md->write;
+         std::atomic_thread_fence(std::memory_order_acquire);
+
+         memcpy(m_staged.data(), curr_src, frameBytes);
+         m_stagedAtime = src.md->atime;
+         m_stagedWritetime = src.md->writetime;
+
+         std::atomic_thread_fence(std::memory_order_acquire);
+         if(write != 0 || src.md->write != 0 || src.md->cnt0 != cnt0)
+         {
+            m_stagedFresh = false;
+            ++m_rewritten;
+            return 0;
+         }
+
+         m_stagedCnt0 = cnt0;
+      }
+
+      m_stagedFresh = true;
+   }
 
    //Now tell the f.g. to get going
    if(sem_post(&m_smSemaphore) < 0)
@@ -331,42 +418,59 @@ int streamCircBuff::acquireAndCheckValid()
 
    ts.tv_sec += 1;
 
-   if(sem_timedwait(&m_smSemaphore, &ts) == 0)
-   {
-      clock_gettime(CLOCK_REALTIME, &m_currImageTimestamp);
-      return 0;
-   }
-   else
+   if(sem_timedwait(&m_smSemaphore, &ts) != 0)
    {
       return 1;
    }
 
-   if(m_currSrc == nullptr)
-   {
-      return 1;
-   }
+   //A frame already published, e.g. after several posts, is not published again
+   std::lock_guard<std::mutex> lock(m_stageMutex);
+   return m_stagedFresh ? 0 : 1;
 }
 
 int streamCircBuff::loadImageIntoStream(void * dest)
 {
-   if(m_currSrc == nullptr)
-   {
-      return -1;
-   }
-
    float * fdest = reinterpret_cast<float *>(dest);
+   size_t npix = frameGrabberT::m_width * frameGrabberT::m_height;
 
-   for(size_t n = 0; n < shmimMonitorT::m_width*shmimMonitorT::m_height; ++n)
+   std::lock_guard<std::mutex> lock(m_stageMutex);
+
+   if(m_staged.size() != npix * shmimMonitorT::m_typeSize)
    {
-      fdest[n] = pixget(m_currSrc,n);
+      return -1; //the source changed, so reconfigure
    }
 
-   //memcpy(dest, m_currSrc, shmimMonitorT::m_width*shmimMonitorT::m_height*frameGrabberT::m_typeSize  );
+   for(size_t n = 0; n < npix; ++n)
+   {
+      fdest[n] = pixget(m_staged.data(), n);
+   }
+
+   m_currImageTimestamp = m_stagedAtime;
+   m_relayWritetime = m_stagedWritetime;
+   m_relayCnt0 = m_stagedCnt0;
+   m_stagedFresh = false;
+
    return 0;
 }
 
 int streamCircBuff::reconfig()
 {
+   return 0;
+}
+
+int streamCircBuff::frameGrabberRelayTiming( timespec & writetime,
+                                             uint64_t & cnt0
+                                           )
+{
+   writetime = m_relayWritetime;
+
+   if(m_relayCnt0 + m_cnt0Offset < cnt0)
+   {
+      m_cnt0Offset = cnt0 - m_relayCnt0; //the source counter restarted, or the output stream is newer than the source
+   }
+
+   cnt0 = m_relayCnt0 + m_cnt0Offset;
+
    return 0;
 }
 

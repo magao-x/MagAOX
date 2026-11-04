@@ -86,6 +86,14 @@ namespace dev
  *   \endcode
  *   to perform additional publication work immediately after the main image stream semaphores are posted.
  *
+ * - A derived class which relays frames from another stream may optionally expose
+ *   \code
+ *       int derivedT::frameGrabberRelayTiming( timespec &writetime, uint64_t &cnt0 );
+ *   \endcode
+ *   which is called after `loadImageIntoStream`.  Returning 0 publishes the supplied write time and
+ *   frame counter instead of the current time and the incremented counter.  `cnt0` holds the incremented
+ *   counter on entry, and must increase from frame to frame.
+ *
  * - A static configuration variable must be defined in derivedT as
  *   \code
  *       static constexpr bool c_frameGrabber_flippable =true; //or: false
@@ -352,6 +360,22 @@ class frameGrabber
                                 long      callPriorityTag /**< [in] fallback overload selector */
     );
 
+    /// Call an optional derived-class hook supplying the write time and frame counter of a relayed frame.
+    template <class hookT>
+    static auto relayTimingHook( hookT    &hookOwner,      /**< [in] derived object that may expose the hook */
+                                 timespec &writetime,      /**< [out] write time to publish */
+                                 uint64_t &cnt0,           /**< [in/out] frame counter to publish */
+                                 int       callPriorityTag /**< [in] overload selector preferring the hook */
+                                 ) -> decltype( hookOwner.frameGrabberRelayTiming( writetime, cnt0 ) );
+
+    /// Return 1, so that the current time and incremented counter are published, when the derived class does
+    /// not expose the relay timing hook.
+    static int relayTimingHook( derivedT &hookOwner,      /**< [in] derived object lacking the optional hook */
+                                timespec &writetime,      /**< [out] unused write time */
+                                uint64_t &cnt0,           /**< [in/out] unused frame counter */
+                                long      callPriorityTag /**< [in] fallback overload selector */
+    );
+
     /// Access the derived camera or processing application.
     derivedT &derived()
     {
@@ -377,6 +401,27 @@ int frameGrabber<derivedT>::postPublishHook( derivedT &hookOwner, IMAGE *imageSt
     static_cast<void>( callPriorityTag );
 
     return 0;
+}
+
+template <class derivedT>
+template <class hookT>
+auto frameGrabber<derivedT>::relayTimingHook( hookT &hookOwner, timespec &writetime, uint64_t &cnt0, int callPriorityTag )
+    -> decltype( hookOwner.frameGrabberRelayTiming( writetime, cnt0 ) )
+{
+    static_cast<void>( callPriorityTag );
+
+    return hookOwner.frameGrabberRelayTiming( writetime, cnt0 );
+}
+
+template <class derivedT>
+int frameGrabber<derivedT>::relayTimingHook( derivedT &hookOwner, timespec &writetime, uint64_t &cnt0, long callPriorityTag )
+{
+    static_cast<void>( hookOwner );
+    static_cast<void>( writetime );
+    static_cast<void>( cnt0 );
+    static_cast<void>( callPriorityTag );
+
+    return 1;
 }
 
 template <class derivedT>
@@ -1013,12 +1058,18 @@ void frameGrabber<derivedT>::fgThreadExec()
                 break;
             }
 
-            // Set the time of last write
-            // clock_gettime(CLOCK_REALTIME, &m_imageStream->md->writetime);
-            if( clock_gettime( CLOCK_REALTIME, &m_imageStream->md->writetime ) < 0 )
+            // Set the time of last write and the frame counter, unless the derived class relays them from a source
+            timespec writetime;
+            uint64_t cnt0 = m_imageStream->md->cnt0 + 1;
+            if( relayTimingHook( derived(), writetime, cnt0, 0 ) != 0 )
             {
-                derivedT::template log<software_critical>( { errno, "clock_gettime" } );
+                cnt0 = m_imageStream->md->cnt0 + 1;
+                if( clock_gettime( CLOCK_REALTIME, &writetime ) < 0 )
+                {
+                    derivedT::template log<software_critical>( { errno, "clock_gettime" } );
+                }
             }
+            m_imageStream->md->writetime = writetime;
 
             // Set the image acquisition timestamp
             m_imageStream->md->atime = m_currImageTimestamp;
@@ -1027,7 +1078,7 @@ void frameGrabber<derivedT>::fgThreadExec()
             m_imageStream->md->cnt1 = next_cnt1;
 
             // Update cnt0
-            m_imageStream->md->cnt0++;
+            m_imageStream->md->cnt0 = cnt0;
 
             if( cbuff )
             {
