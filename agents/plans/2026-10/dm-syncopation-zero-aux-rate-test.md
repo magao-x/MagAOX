@@ -2087,3 +2087,89 @@ the capture helper, its private tests, application tests, compensated preset,
 operator guide and endpoint plan are updated alongside them. No backend,
 combiner, camera or common device helper changed. No instrument command has
 been run by an agent, and the new short hardware capture is pending.
+
+## 2026-11-03: target the interleaved cnt0 publications
+
+The user clarifies that the desired 125 us grid belongs to the **source counter
+updates that request a combination**, rather than the later dmcomb output or
+controller wake. At 2 kHz main / 8 kHz total, the sequence is genuine main at
+0 us, auxiliary publications at 125/250/375 us, then the next genuine main at
+500 us. Main and auxiliary streams have separate counters; they form one
+interleaved timing sequence, not one shared counter. This supersedes the
+downstream-target interpretation used in the preceding experimental presets.
+
+The finite trial now fits its established long-baseline cadence and phase from
+**raw primary publication writetimes in CLOCK_ISIO**, not callback arrival
+timestamps. A checked monotonic/producer/monotonic bracket maps each frozen
+producer-clock grid to local waiting times. The mapping rejects wide, stale,
+future, malformed or discontinuous evidence, reports its bounds and epoch, and
+does not assume a fixed realtime/TAI offset. Its default capture limit is 1 us
+and projection horizon is 4 ms. A wide capture vetoes that occurrence without
+discarding an otherwise established raw cadence; a clock discontinuity starts
+a new fit. Waiting does not chase a late individual main or auxiliary update.
+
+The desired `counterTargetNs` and `counterTargetRawNs` remain fixed. Dispatch
+uses `targetNs = counterTargetNs - commitLeadUs`; this optional lead covers only
+the final guard/API work before the counter update. The initial preset is:
+
+```ini
+[zeroTest]
+publicationAdvanceUs=0
+commitLeadUs=0
+lateUs=2
+wakeAheadUs=10
+```
+
+The old nonzero downstream `publicationAdvanceUs` setting is rejected explicitly.
+`commitLeadUs` starts at zero because its small pre-counter cost is not yet
+measured on the instrument. The roughly 1 us complete update-API return cost
+includes work after the counter update and must not be reused as that lead.
+Early full validation, the quiet final wait, current readiness/fault guards,
+immutable targets, no catch-up and finite duration remain in place.
+
+Schema 8 identifies `targetEndpoint=1` and adds separate `zero_publication` and
+`zero_clock` readbacks plus `kind=publication` / `kind=clock` records. Source
+statistics require fixed distinct stream identities, per-source counter
+progression and consecutive slot/cycle labels. They cover main-to-auxiliary,
+auxiliary-to-auxiliary and last-auxiliary-to-next-main intervals, relative-main
+phase, frozen-target error, measured pre-counter lead and complete API cost.
+Main publication evidence is retained even without a combined association;
+successful auxiliary counter updates are counted before any downstream
+acknowledgement outcome. Existing combined-output statistics remain separate.
+An equal or inverted timestamp pair across the two streams excludes the
+affected adjacency and current main commitment, then permits recovery on a
+later cycle. It does not permanently latch a source fault; same-source
+regression and source replacement still do.
+
+The actual publication timestamp remains the ImageStreamIO writetime sampled
+immediately **before** `cnt0++`; it is a close pre-counter proxy, not an exact
+counter-store timestamp. Paired-clock bracket uncertainty is reported alongside
+derived local costs. ImageStreamIO's update/history/semaphore behavior is reused
+unchanged. No result here establishes an exact hardware-send or controller
+semaphore-post time.
+
+Expiry is enforced before status coalescing, including callbacks that return
+early on bad clock captures. An active finite interval still stops on time,
+and a cold arm that never obtains a usable clock still stops after its separate
+30 s warmup limit; fresh unqualified callbacks cannot keep either request On.
+
+Workstation verification passed: **137 application cases / 4,707,580
+assertions**, **51 private capture-helper tests**, a clean production
+dmSyncopation build, Bash syntax, formatting and diff checks. New coverage
+includes callback jitter with fixed raw targets, qualified clock mapping and
+recovery, clock-step invalidation, independent publication/combiner evidence,
+distinct-source adjacency/gaps, cross-source ordering recovery, commit-target
+separation and the bad-clock active/warmup expiry regressions. The final build
+logs contain no compiler warnings or errors.
+
+The next operator-run short capture is:
+
+```bash
+bash apps/dmSyncopation/scripts/capture-zero-aux-test.sh 8000 10 0 10
+```
+
+The helper requires schema 8, the cnt0 endpoint and matching startup leads before
+enabling; omitted commit lead means zero. Merge the revised preset into the
+working configuration and rebuild/restart dmSyncopation only. The new capture
+must establish source publication spacing and the small measured commit lead
+before tuning that value or extending the run. No agent operated the instrument.

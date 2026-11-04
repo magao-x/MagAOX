@@ -7,14 +7,14 @@ set -o pipefail
 usage()
 {
     cat <<'HELP'
-Usage: capture-zero-aux-test.sh RATE [SECONDS [ADVANCE_US [WAKE_AHEAD_US]]]
+Usage: capture-zero-aux-test.sh RATE [SECONDS [ADVANCE_US [WAKE_AHEAD_US [COMMIT_LEAD_US]]]]
 
 RATE is effective total cadence, 4000, 6000 or 8000 Hz, with the main loop at 2000 Hz.
 SECONDS is the active-trial duration, default 120, integer 1 through 120.
-ADVANCE_US is the expected startup publication advance, default 0, from 0 through 50 us.
-For an advanced trial, the app must report schema 6 or newer and lateUs < ADVANCE_US.
+ADVANCE_US must be 0: downstream dmcomb compensation is not used for counter targets.
 WAKE_AHEAD_US is the expected startup validation lead, default 0, from 0 through 50 us.
-A positive validation lead requires schema 7 or newer and matching wakeAheadUs.
+COMMIT_LEAD_US is the expected startup final guard/API lead, default 0, from 0 through 10 us.
+The app must report schema 8 or newer, targetEndpoint=1 (cnt0), and matching startup leads.
 The app must already be running with zeroTest.enabled=true and enable=Off.
 The script sets steps and the app-enforced duration while disabled, then starts the trial.
 It never changes the main loop, camera, dmcomb, CPU placement or app config.
@@ -29,7 +29,7 @@ then
     usage
     exit 0
 fi
-if (( $# < 1 || $# > 4 ))
+if (( $# < 1 || $# > 5 ))
 then
     usage >&2
     exit 2
@@ -38,6 +38,7 @@ zero_rate=$1
 zero_seconds=${2:-120}
 zero_advance=${3:-0}
 zero_wake_ahead=${4:-0}
+zero_commit_lead=${5:-0}
 if [[ $zero_rate != 4000 && $zero_rate != 6000 && $zero_rate != 8000 ]]
 then
     printf 'RATE must be effective total cadence 4000, 6000 or 8000\n' >&2
@@ -59,9 +60,15 @@ do
     fi
 done
 if ! awk -v advance="$zero_advance" \
-     'BEGIN { exit !(advance ~ /^[0-9]+([.][0-9]+)?$/ && advance >= 0 && advance <= 50) }'
+     'BEGIN { exit !(advance ~ /^[0-9]+([.][0-9]+)?$/ && advance == 0) }'
 then
-    printf 'ADVANCE_US must be numeric microseconds from 0 through 50\n' >&2
+    printf 'ADVANCE_US must be 0 for the cnt0 publication target\n' >&2
+    exit 2
+fi
+if ! awk -v lead="$zero_commit_lead" \
+     'BEGIN { exit !(lead ~ /^[0-9]+([.][0-9]+)?$/ && lead >= 0 && lead <= 10) }'
+then
+    printf 'COMMIT_LEAD_US must be numeric microseconds from 0 through 10\n' >&2
     exit 2
 fi
 if ! awk -v ahead="$zero_wake_ahead" \
@@ -75,8 +82,8 @@ zero_capture_dir="$HOME/tmp/zero-aux-${zero_rate}Hz-$(date -u +%Y%m%dT%H%M%SZ)"
 mkdir -p "$zero_capture_dir" || exit 1
 zero_script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 git -C "$zero_script_dir/../../.." rev-parse HEAD > "$zero_capture_dir/git.txt" || exit 1
-printf 'effectiveRate=%s\nsteps=%s\nactiveSeconds=%s\nmainRate=2000\npublicationAdvanceUs=%s\nwakeAheadUs=%s\n' \
-    "$zero_rate" "$zero_steps" "$zero_seconds" "$zero_advance" "$zero_wake_ahead" \
+printf 'effectiveRate=%s\nsteps=%s\nactiveSeconds=%s\nmainRate=2000\ntargetEndpoint=cnt0\npublicationAdvanceUs=%s\nwakeAheadUs=%s\ncommitLeadUs=%s\n' \
+    "$zero_rate" "$zero_steps" "$zero_seconds" "$zero_advance" "$zero_wake_ahead" "$zero_commit_lead" \
     > "$zero_capture_dir/test.txt"
 zero_collectors=()
 zero_devices=()
@@ -110,33 +117,50 @@ check_phase_preset()
 {
     local zero_file=$1
     local zero_phase=$2
-    local zero_phase_schema zero_actual_advance zero_actual_late
+    local zero_phase_schema zero_actual_advance zero_actual_late zero_actual_endpoint
     zero_phase_schema=$(read_property dmtweeter-synco.zero_test.labelVersion "$zero_file")
+    zero_actual_endpoint=$(read_property dmtweeter-synco.zero_test.targetEndpoint "$zero_file")
+    if ! awk -v schema="$zero_phase_schema" -v endpoint="$zero_actual_endpoint" \
+         'BEGIN { exit !(schema ~ /^[0-9]+$/ && schema >= 8 &&
+                         endpoint ~ /^[0-9]+([.][0-9]+)?$/ && endpoint == 1) }'
+    then
+        setup_failure "$zero_phase counter-target endpoint" \
+            "schema=$zero_phase_schema targetEndpoint=$zero_actual_endpoint" \
+            'schema>=8 and targetEndpoint=1 (cnt0)'
+    fi
     zero_actual_advance=$(read_property dmtweeter-synco.zero_test.publicationAdvanceUs "$zero_file")
     zero_actual_late=$(read_property dmtweeter-synco.zero_test.lateUs "$zero_file")
     if ! awk -v schema="$zero_phase_schema" -v actual="$zero_actual_advance" \
              -v late="$zero_actual_late" -v expected="$zero_advance" \
          'BEGIN { number="^[0-9]+([.][0-9]+)?([eE][+-]?[0-9]+)?$";
-                  legacy=(schema ~ /^[0-9]+$/ && schema == 5 && expected == 0);
-                  exit !(legacy || (schema ~ /^[0-9]+$/ && schema >= 6 &&
-                                     actual ~ number && actual == expected && late ~ number && late >= 0 &&
-                                     (expected == 0 || late < expected))) }'
+                  exit !(schema ~ /^[0-9]+$/ && schema >= 8 && expected == 0 &&
+                         actual ~ number && actual == 0 && late ~ number && late >= 0 && late <= 50) }'
     then
         setup_failure "$zero_phase publication-advance preset" \
             "schema=$zero_phase_schema advanceUs=$zero_actual_advance lateUs=$zero_actual_late" \
-            "advanceUs=$zero_advance; schema>=6 and 0<=lateUs<advanceUs when advance is positive"
+            'advanceUs=0; schema>=8 and 0<=lateUs<=50'
     fi
     local zero_actual_wake
     zero_actual_wake=$(read_property dmtweeter-synco.zero_test.wakeAheadUs "$zero_file")
     if ! awk -v schema="$zero_phase_schema" -v actual="$zero_actual_wake" -v expected="$zero_wake_ahead" \
          'BEGIN { number="^[0-9]+([.][0-9]+)?([eE][+-]?[0-9]+)?$";
-                  legacy=(schema ~ /^[0-9]+$/ && schema >= 5 && schema < 7 && expected == 0);
-                  exit !(legacy || (schema ~ /^[0-9]+$/ && schema >= 7 &&
-                                     actual ~ number && actual == expected && actual >= 0 && actual <= 50)) }'
+                  exit !(schema ~ /^[0-9]+$/ && schema >= 8 &&
+                         actual ~ number && actual == expected && actual >= 0 && actual <= 50) }'
     then
         setup_failure "$zero_phase wake-ahead preset" \
             "schema=$zero_phase_schema wakeAheadUs=$zero_actual_wake" \
-            "wakeAheadUs=$zero_wake_ahead; schema>=7 when wake ahead is positive"
+            "wakeAheadUs=$zero_wake_ahead; schema>=8"
+    fi
+    local zero_actual_commit
+    zero_actual_commit=$(read_property dmtweeter-synco.zero_test.commitLeadUs "$zero_file")
+    if ! awk -v schema="$zero_phase_schema" -v actual="$zero_actual_commit" -v expected="$zero_commit_lead" \
+         'BEGIN { number="^[0-9]+([.][0-9]+)?([eE][+-]?[0-9]+)?$";
+                  exit !(schema ~ /^[0-9]+$/ && schema >= 8 && actual ~ number &&
+                         actual == expected && actual >= 0 && actual <= 10) }'
+    then
+        setup_failure "$zero_phase commit-lead preset" \
+            "schema=$zero_phase_schema commitLeadUs=$zero_actual_commit" \
+            "commitLeadUs=$zero_commit_lead; schema>=8"
     fi
 }
 
@@ -249,13 +273,13 @@ check_phase_preset "$zero_synco_before" before
 if ! awk -v schema="$zero_schema" -v valid="$zero_snapshot_valid" -v age="$zero_snapshot_age" \
          -v seq="$zero_snapshot_sequence" -v drops="$zero_drops_before" -v failed="$zero_log_failed_before" \
      'BEGIN { number="^[0-9]+([.][0-9]+)?([eE][+-]?[0-9]+)?$";
-              exit !(schema ~ /^[0-9]+$/ && schema >= 5 && valid == 1 &&
+              exit !(schema ~ /^[0-9]+$/ && schema >= 8 && valid == 1 &&
                      age ~ number && age >= 0 && age <= 2 && seq ~ /^[0-9]+$/ && seq > 0 &&
                      drops ~ /^[0-9]+$/ && failed ~ /^[0-9]+$/) }'
 then
     setup_failure 'zero_test progress snapshot' \
         "schema=$zero_schema valid=$zero_snapshot_valid age=$zero_snapshot_age sequence=$zero_snapshot_sequence" \
-        'schema>=5, valid=1, age<=2 seconds and a positive sequence'
+        'schema>=8, valid=1, age<=2 seconds and a positive sequence'
 fi
 [[ $zero_camera_sync == On ]] || setup_failure camwfs.synchro.toggle "$zero_camera_sync" On
 [[ $zero_latency == On ]] || setup_failure sysMonRTC.set_latency.toggle "$zero_latency" On

@@ -55,10 +55,14 @@ duration=$(cat "$ZERO_TEST_ROOT/duration")
 advance=${ZERO_TEST_ADVANCE-0}
 late=${ZERO_TEST_LATE-5}
 wake_ahead=${ZERO_TEST_WAKE_AHEAD-0}
+commit_lead=${ZERO_TEST_COMMIT_LEAD-0}
+endpoint=${ZERO_TEST_TARGET_ENDPOINT-1}
 if [[ -f $ZERO_TEST_ROOT/set-calls ]]; then
     advance=${ZERO_TEST_CONFIGURED_ADVANCE-$advance}
     late=${ZERO_TEST_CONFIGURED_LATE-$late}
     wake_ahead=${ZERO_TEST_CONFIGURED_WAKE_AHEAD-$wake_ahead}
+    commit_lead=${ZERO_TEST_CONFIGURED_COMMIT_LEAD-$commit_lead}
+    endpoint=${ZERO_TEST_CONFIGURED_TARGET_ENDPOINT-$endpoint}
 fi
 case $1 in
     dmtweeter-synco)
@@ -67,10 +71,12 @@ case $1 in
         printf "dmtweeter-synco.settings.durationSec=%s\n" "$duration"
         printf "dmtweeter-synco.zero_test.enabled=%s\n" "${ZERO_TEST_MODE-1}"
         printf "dmtweeter-synco.zero_test.idealPublisher=%s\n" "${ZERO_TEST_IDEAL-1}"
-        printf "dmtweeter-synco.zero_test.labelVersion=%s\n" "${ZERO_TEST_SCHEMA-5}"
+        printf "dmtweeter-synco.zero_test.labelVersion=%s\n" "${ZERO_TEST_SCHEMA-8}"
         printf "dmtweeter-synco.zero_test.publicationAdvanceUs=%s\n" "$advance"
         printf "dmtweeter-synco.zero_test.lateUs=%s\n" "$late"
         printf "dmtweeter-synco.zero_test.wakeAheadUs=%s\n" "$wake_ahead"
+        printf "dmtweeter-synco.zero_test.commitLeadUs=%s\n" "$commit_lead"
+        printf "dmtweeter-synco.zero_test.targetEndpoint=%s\n" "$endpoint"
         printf "dmtweeter-synco.zero_test.snapshotValid=1\n"
         printf "dmtweeter-synco.zero_test.snapshotAgeSec=0\n"
         printf "dmtweeter-synco.zero_test.snapshotSequence=%s\n" "${ZERO_TEST_BASELINE_SEQUENCE-1}"
@@ -252,31 +258,39 @@ esac''',
         self.assertEqual((self.root / "enable").read_text(), "Off")
         self.assertIn("Disabled step-count/duration readback failed", stderr)
 
-    def test_compensated_trial_checks_numeric_startup_preset(self):
-        """A 5 us advance is verified numerically without changing startup configuration."""
-        self.env.update(ZERO_TEST_SCHEMA="6", ZERO_TEST_ADVANCE="5", ZERO_TEST_LATE="2")
-        code, _, stderr = self.run_capture("8000", "10", "5.0")
+    def test_counter_target_trial_records_current_endpoint(self):
+        """The current endpoint is cnt0 publication with no downstream phase advance."""
+        code, _, stderr = self.run_capture("8000", "10", "0.0")
         self.assertEqual(code, 0, stderr)
-        self.assertEqual(
-            self.set_calls(),
-            ["-n dmtweeter-synco.settings.steps=4", "-n dmtweeter-synco.settings.durationSec=10",
-             "-s dmtweeter-synco.enable.toggle=On", "-s dmtweeter-synco.enable.toggle=Off"],
-        )
-        self.assertIn("publicationAdvanceUs=5.0", (self.capture_dir() / "test.txt").read_text())
+        metadata = (self.capture_dir() / "test.txt").read_text()
+        self.assertIn("targetEndpoint=cnt0", metadata)
+        self.assertIn("publicationAdvanceUs=0.0", metadata)
+        self.assertIn("commitLeadUs=0", metadata)
 
-    def test_compensated_trial_requires_new_schema(self):
-        """A legacy publisher cannot qualify a requested nonzero phase advance."""
-        self.env.update(ZERO_TEST_SCHEMA="5", ZERO_TEST_ADVANCE="5", ZERO_TEST_LATE="2")
-        code, _, stderr = self.run_capture("8000", "10", "5")
-        self.assertEqual(code, 1)
-        self.assertEqual(self.set_calls(), [])
-        self.assertIn("before publication-advance preset", stderr)
+    def test_counter_target_rejects_all_previous_endpoint_schemas(self):
+        """Old schemas cannot silently repeat the downstream-compensated experiment."""
+        for schema in ["5", "6", "7"]:
+            with self.subTest(schema=schema):
+                self.env["ZERO_TEST_SCHEMA"] = schema
+                code, _, stderr = self.run_capture("8000", "10")
+                self.assertEqual(code, 1)
+                self.assertEqual(self.set_calls(), [])
+                self.assertIn("before counter-target endpoint", stderr)
 
-    def test_early_validation_trial_checks_numeric_startup_preset(self):
-        """Schema 7 verifies a 10 us validation lead without changing configuration."""
-        self.env.update(ZERO_TEST_SCHEMA="7", ZERO_TEST_ADVANCE="5", ZERO_TEST_LATE="2",
-                        ZERO_TEST_WAKE_AHEAD="10")
-        code, _, stderr = self.run_capture("8000", "10", "5", "10.0")
+    def test_counter_target_requires_explicit_endpoint_kind(self):
+        """Schema capability alone cannot identify the target's meaning."""
+        for endpoint in ["0", "2", "", "nan", "inf", "cnt0"]:
+            with self.subTest(endpoint=endpoint):
+                self.env["ZERO_TEST_TARGET_ENDPOINT"] = endpoint
+                code, _, stderr = self.run_capture("8000", "10")
+                self.assertEqual(code, 1)
+                self.assertEqual(self.set_calls(), [])
+                self.assertIn("before counter-target endpoint", stderr)
+
+    def test_commit_lead_checks_numeric_startup_preset(self):
+        """A measured small API lead is verified without changing startup configuration."""
+        self.env.update(ZERO_TEST_COMMIT_LEAD="5e-1", ZERO_TEST_LATE="2", ZERO_TEST_WAKE_AHEAD="10")
+        code, _, stderr = self.run_capture("8000", "10", "0", "10", "0.50")
         self.assertEqual(code, 0, stderr)
         self.assertEqual(
             self.set_calls(),
@@ -284,91 +298,114 @@ esac''',
              "-s dmtweeter-synco.enable.toggle=On", "-s dmtweeter-synco.enable.toggle=Off"],
         )
         metadata = (self.capture_dir() / "test.txt").read_text()
-        self.assertIn("publicationAdvanceUs=5", metadata)
-        self.assertIn("wakeAheadUs=10.0", metadata)
+        self.assertIn("commitLeadUs=0.50", metadata)
+        self.assertIn("targetEndpoint=cnt0", metadata)
 
-    def test_early_validation_requires_new_schema(self):
-        """Schema 6 cannot qualify a requested nonzero validation lead."""
-        self.env.update(ZERO_TEST_SCHEMA="6", ZERO_TEST_ADVANCE="5", ZERO_TEST_LATE="2",
-                        ZERO_TEST_WAKE_AHEAD="10")
-        code, _, stderr = self.run_capture("8000", "10", "5", "10")
+    def test_commit_lead_rejects_wrong_missing_or_nonfinite_readback(self):
+        """The expected API lead must match a finite bounded startup value."""
+        self.env["ZERO_TEST_WAKE_AHEAD"] = "10"
+        for lead in ["0", "0.4", "", "nan", "inf", "-1", "11"]:
+            with self.subTest(lead=lead):
+                self.env["ZERO_TEST_COMMIT_LEAD"] = lead
+                code, _, stderr = self.run_capture("8000", "10", "0", "10", "0.5")
+                self.assertEqual(code, 1)
+                self.assertEqual(self.set_calls(), [])
+                self.assertIn("before commit-lead preset", stderr)
+
+    def test_omitted_commit_lead_cannot_silently_select_nonzero_setting(self):
+        """An omitted fifth argument explicitly expects an uncalibrated zero API lead."""
+        self.env["ZERO_TEST_COMMIT_LEAD"] = "0.5"
+        code, _, stderr = self.run_capture("8000", "10")
         self.assertEqual(code, 1)
         self.assertEqual(self.set_calls(), [])
-        self.assertIn("before wake-ahead preset", stderr)
+        self.assertIn("commitLeadUs=0", stderr)
+
+    def test_commit_lead_is_rechecked_before_enable(self):
+        """A changed API-lead readback after disabled settings prevents enabling."""
+        self.env.update(ZERO_TEST_COMMIT_LEAD="0.5", ZERO_TEST_CONFIGURED_COMMIT_LEAD="0.4")
+        code, _, stderr = self.run_capture("8000", "10", "0", "0", "0.5")
+        self.assertEqual(code, 1)
+        self.assertNotIn("-s dmtweeter-synco.enable.toggle=On", self.set_calls())
+        self.assertIn("configured commit-lead preset", stderr)
+
+    def test_counter_endpoint_is_rechecked_before_enable(self):
+        """The configured snapshot must retain the counter-publication endpoint."""
+        self.env["ZERO_TEST_CONFIGURED_TARGET_ENDPOINT"] = "0"
+        code, _, stderr = self.run_capture("8000", "10")
+        self.assertEqual(code, 1)
+        self.assertNotIn("-s dmtweeter-synco.enable.toggle=On", self.set_calls())
+        self.assertIn("configured counter-target endpoint", stderr)
+
+    def test_early_validation_trial_checks_numeric_startup_preset(self):
+        """A counter-target trial verifies a 10 us validation lead numerically."""
+        self.env.update(ZERO_TEST_LATE="2", ZERO_TEST_WAKE_AHEAD="10")
+        code, _, stderr = self.run_capture("8000", "10", "0", "10.0")
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(
+            self.set_calls(),
+            ["-n dmtweeter-synco.settings.steps=4", "-n dmtweeter-synco.settings.durationSec=10",
+             "-s dmtweeter-synco.enable.toggle=On", "-s dmtweeter-synco.enable.toggle=Off"],
+        )
+        metadata = (self.capture_dir() / "test.txt").read_text()
+        self.assertIn("publicationAdvanceUs=0", metadata)
+        self.assertIn("wakeAheadUs=10.0", metadata)
 
     def test_early_validation_rejects_wrong_or_missing_preset(self):
-        """A schema-7 capability requires a finite exact startup validation lead."""
-        self.env.update(ZERO_TEST_SCHEMA="7", ZERO_TEST_ADVANCE="5", ZERO_TEST_LATE="2")
+        """The current capability still requires its exact finite validation lead."""
         for value in ["0", "9", "", "nan", "inf", "-1", "51"]:
             with self.subTest(value=value):
                 self.env["ZERO_TEST_WAKE_AHEAD"] = value
-                code, _, stderr = self.run_capture("8000", "10", "5", "10")
+                code, _, stderr = self.run_capture("8000", "10", "0", "10")
                 self.assertEqual(code, 1)
                 self.assertEqual(self.set_calls(), [])
                 self.assertIn("before wake-ahead preset", stderr)
 
     def test_omitted_validation_lead_cannot_silently_select_new_policy(self):
-        """An advanced trial must explicitly request a nonzero schema-7 validation lead."""
-        self.env.update(ZERO_TEST_SCHEMA="7", ZERO_TEST_ADVANCE="5", ZERO_TEST_LATE="2",
-                        ZERO_TEST_WAKE_AHEAD="10")
-        code, _, stderr = self.run_capture("8000", "10", "5")
+        """The fourth argument must explicitly select a configured nonzero validation lead."""
+        self.env["ZERO_TEST_WAKE_AHEAD"] = "10"
+        code, _, stderr = self.run_capture("8000", "10", "0")
         self.assertEqual(code, 1)
         self.assertEqual(self.set_calls(), [])
         self.assertIn("wakeAheadUs=0", stderr)
 
     def test_new_schema_preserves_zero_validation_lead(self):
-        """Schema 7 may reproduce the legacy zero-lead trial with no fourth argument."""
-        self.env.update(ZERO_TEST_SCHEMA="7", ZERO_TEST_ADVANCE="0", ZERO_TEST_LATE="5",
-                        ZERO_TEST_WAKE_AHEAD="0")
+        """The new publication grid can retain the zero-lead waiting policy."""
         code, _, stderr = self.run_capture("8000", "10")
         self.assertEqual(code, 0, stderr)
         self.assertIn("wakeAheadUs=0", (self.capture_dir() / "test.txt").read_text())
 
     def test_validation_lead_is_rechecked_before_enable(self):
         """The configured snapshot cannot silently lose the expected validation lead."""
-        self.env.update(ZERO_TEST_SCHEMA="7", ZERO_TEST_ADVANCE="5", ZERO_TEST_LATE="2",
-                        ZERO_TEST_WAKE_AHEAD="10", ZERO_TEST_CONFIGURED_WAKE_AHEAD="0")
-        code, _, stderr = self.run_capture("8000", "10", "5", "10")
+        self.env.update(ZERO_TEST_WAKE_AHEAD="10", ZERO_TEST_CONFIGURED_WAKE_AHEAD="0")
+        code, _, stderr = self.run_capture("8000", "10", "0", "10")
         self.assertEqual(code, 1)
         self.assertNotIn("-s dmtweeter-synco.enable.toggle=On", self.set_calls())
         self.assertIn("configured wake-ahead preset", stderr)
 
-    def test_compensated_trial_rejects_wrong_or_missing_preset(self):
-        """The requested advance and a strictly earlier publication guard are both required."""
-        self.env.update(ZERO_TEST_SCHEMA="6", ZERO_TEST_ADVANCE="5", ZERO_TEST_LATE="2")
-        for key, value in [("ZERO_TEST_ADVANCE", "4"), ("ZERO_TEST_ADVANCE", ""),
-                           ("ZERO_TEST_ADVANCE", "nan"), ("ZERO_TEST_LATE", "5"),
-                           ("ZERO_TEST_LATE", "6"), ("ZERO_TEST_LATE", "-1"),
-                           ("ZERO_TEST_LATE", ""), ("ZERO_TEST_LATE", "nan")]:
-            with self.subTest(key=key, value=value):
-                original = self.env[key]
-                self.env[key] = value
-                code, _, stderr = self.run_capture("8000", "10", "5")
+    def test_nonzero_downstream_advance_readback_never_enables(self):
+        """The counter-target app must not retain the former downstream compensation."""
+        for value in ["5", "", "nan", "inf", "-1"]:
+            with self.subTest(value=value):
+                self.env["ZERO_TEST_ADVANCE"] = value
+                code, _, stderr = self.run_capture("8000", "10")
                 self.assertEqual(code, 1)
                 self.assertEqual(self.set_calls(), [])
                 self.assertIn("before publication-advance preset", stderr)
-                self.env[key] = original
 
-    def test_legacy_command_requires_zero_advance_on_new_app(self):
-        """Omitting the optional advance cannot silently run a compensated schema-6 preset."""
-        self.env.update(ZERO_TEST_SCHEMA="6", ZERO_TEST_ADVANCE="5", ZERO_TEST_LATE="2")
-        code, _, stderr = self.run_capture("8000", "10")
-        self.assertEqual(code, 1)
-        self.assertEqual(self.set_calls(), [])
-        self.assertIn("advanceUs=0", stderr)
-
-    def test_new_app_allows_legacy_zero_advance_trial(self):
-        """A schema-6 app with zero advance preserves the original two-argument capture."""
-        self.env.update(ZERO_TEST_SCHEMA="6", ZERO_TEST_ADVANCE="0", ZERO_TEST_LATE="5")
-        code, _, stderr = self.run_capture("8000", "10")
-        self.assertEqual(code, 0, stderr)
-        self.assertIn("publicationAdvanceUs=0", (self.capture_dir() / "test.txt").read_text())
+    def test_admission_grace_requires_finite_bounded_readback(self):
+        """The zero advance does not remove the independent admission grace checks."""
+        for value in ["-1", "51", "", "nan", "inf"]:
+            with self.subTest(value=value):
+                self.env["ZERO_TEST_LATE"] = value
+                code, _, stderr = self.run_capture("8000", "10")
+                self.assertEqual(code, 1)
+                self.assertEqual(self.set_calls(), [])
+                self.assertIn("before publication-advance preset", stderr)
 
     def test_preset_is_checked_again_before_enable(self):
-        """A changed startup preset between snapshots cannot be mistaken for the requested test."""
-        self.env.update(ZERO_TEST_SCHEMA="6", ZERO_TEST_ADVANCE="5", ZERO_TEST_LATE="2",
-                        ZERO_TEST_CONFIGURED_ADVANCE="0")
-        code, _, stderr = self.run_capture("8000", "10", "5")
+        """A changed startup advance cannot reintroduce the wrong endpoint policy."""
+        self.env["ZERO_TEST_CONFIGURED_ADVANCE"] = "5"
+        code, _, stderr = self.run_capture("8000", "10")
         self.assertEqual(code, 1)
         self.assertNotIn("-s dmtweeter-synco.enable.toggle=On", self.set_calls())
         self.assertIn("configured publication-advance preset", stderr)
@@ -660,9 +697,11 @@ esac''',
                      ("4000", "121"), ("4000", "999999999999999999999"),
                      ("8000", "10", "-1"), ("8000", "10", "51"),
                      ("8000", "10", "nan"), ("8000", "10", "1;echo bad"),
-                     ("8000", "10", "5", "extra"), ("8000", "10", "5", "-1"),
-                     ("8000", "10", "5", "51"), ("8000", "10", "5", "nan"),
-                     ("8000", "10", "5", "10", "extra")]:
+                     ("8000", "10", "5"), ("8000", "10", "0", "extra"),
+                     ("8000", "10", "0", "-1"), ("8000", "10", "0", "51"),
+                     ("8000", "10", "0", "nan"), ("8000", "10", "0", "10", "extra"),
+                     ("8000", "10", "0", "10", "-1"), ("8000", "10", "0", "10", "11"),
+                     ("8000", "10", "0", "10", "nan"), ("8000", "10", "0", "10", "0", "extra")]:
             with self.subTest(args=args):
                 code, _, _ = self.run_capture(*args)
                 self.assertEqual(code, 2)

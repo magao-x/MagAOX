@@ -190,6 +190,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_primaryTiming;
     using dmSyncopation::m_primaryTraceInode;
     using dmSyncopation::m_primed;
+    using dmSyncopation::m_publicationNow;
     using dmSyncopation::m_rateFrames;
     using dmSyncopation::m_readerReleaseTiming;
     using dmSyncopation::m_readerTiming;
@@ -229,6 +230,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_wait;
     using dmSyncopation::m_zeroAttached;
     using dmSyncopation::m_zeroClock;
+    using dmSyncopation::m_zeroCommitLeadUs;
     using dmSyncopation::m_zeroDurationLimitSec;
     using dmSyncopation::m_zeroDurationSec;
     using dmSyncopation::m_zeroEvents;
@@ -240,6 +242,8 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_zeroNextFileCheck;
     using dmSyncopation::m_zeroPhase;
     using dmSyncopation::m_zeroPublicationAdvanceUs;
+    using dmSyncopation::m_zeroPublicationClock;
+    using dmSyncopation::m_zeroPublicationTiming;
     using dmSyncopation::m_zeroPublicationWait;
     using dmSyncopation::m_zeroSdk;
     using dmSyncopation::m_zeroSdkStream;
@@ -284,6 +288,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::ZeroStage;
     using dmSyncopation::zeroTestActionName;
     using dmSyncopation::zeroTestEvent;
+    using dmSyncopation::zeroTestGrid;
     using dmSyncopation::zeroTestReady;
     using dmSyncopation::zeroTestReasonName;
     using dmSyncopation::zeroTestStageName;
@@ -6722,11 +6727,13 @@ struct ZeroClock
     static inline int64_t noPostBefore{ 0 };  ///< First slot target for verifying passive staging has no publication.
     static inline uint64_t idleCounter{ 0 };  ///< Auxiliary counter before the active callback.
     static inline timespec idleStamp{};       ///< Auxiliary publication stamp before passive staging.
-    static inline int      idleSemaphore{ 0 }; ///< First auxiliary semaphore value before passive staging.
-    static inline int64_t  costlyAt{ 0 };      ///< Start of one slot's simulated clock-read overhead window.
-    static inline int64_t  nowCost{ 0 };       ///< Extra execution time per clock read inside that window.
-    static inline int64_t  wakeDelay{ 0 };     ///< Inject host wake lateness without changing any planned grid.
-    static inline int64_t  lateOnceAt{ 0 };    ///< Delay one selected wake without moving subsequent targets.
+    static inline int      idleSemaphore{ 0 };         ///< First auxiliary semaphore value before passive staging.
+    static inline int64_t  costlyAt{ 0 };              ///< Start of one slot's simulated clock-read overhead window.
+    static inline int64_t  nowCost{ 0 };               ///< Extra execution time per clock read inside that window.
+    static inline int64_t  publicationClockStep{ 0 };  ///< Persistent private producer-clock offset change.
+    static inline int64_t  publicationClockDelay{ 0 }; ///< One-shot producer-clock call delay for bracket rejection.
+    static inline int64_t  wakeDelay{ 0 };             ///< Inject host wake lateness without changing any planned grid.
+    static inline int64_t  lateOnceAt{ 0 };            ///< Delay one selected wake without moving subsequent targets.
     static inline int64_t  mainDelay{ 0 };     ///< Delay fake dmcomb relative to each genuine primary publication.
     static inline int64_t  pendingMainAt{ 0 }; ///< A pending main combination in the private virtual clock.
     static inline int64_t  releaseDelay{ 0 };  ///< Delay the observer's release capture without changing its endpoint.
@@ -6749,6 +6756,9 @@ struct ZeroClock
     /// Observe completed auxiliary publications without waiting on real time or hardware.
     static int64_t now();
 
+    /// Read the paired producer clock at the midpoint of two private monotonic reads.
+    static int64_t publicationNow();
+
     /// Advance to an absolute deadline and inject one controlled cancellation or early main.
     static int wait( const timespec *target /**< [in] Private absolute monotonic deadline. */ );
 
@@ -6758,7 +6768,9 @@ struct ZeroClock
                          int      steps /**< [in] Total main-plus-auxiliary steps. */ );
 
     /// Publish one genuine main and invoke the production primary callback.
-    static void primary( int64_t observed /**< [in] Private monotonic main time. */ );
+    static void
+    primary( int64_t observed /**< [in] Private monotonic callback time. */,
+             int64_t publication = 0 /**< [in] Genuine producer publication time; zero uses callback time. */ );
 
     /// Acquire the unchanged ten-second cadence while the finite writer is disabled.
     static int64_t warm();
@@ -6769,7 +6781,7 @@ void ZeroClock::combined()
     auto &image     = streams->images[1];
     image.md->write = 1;
     ++image.md->cnt0;
-    image.md->writetime = synco::toTimespec( 2000000000000000000LL + time );
+    image.md->writetime = synco::toTimespec( 2000000000000000000LL + publicationClockStep + time );
     image.md->write     = 0;
 
     if( release )
@@ -6921,6 +6933,8 @@ int64_t ZeroClock::now()
     {
         targetCounter = streams->images[2].md->cnt0;
         posts.push_back( time );
+        // The private SDK-free publisher uses the same synthetic producer clock as its main.
+        streams->images[2].md->writetime = synco::toTimespec( 2000000000000000000LL + publicationClockStep + time );
 
         if( combine )
         {
@@ -6929,6 +6943,14 @@ int64_t ZeroClock::now()
     }
 
     return time;
+}
+
+int64_t ZeroClock::publicationNow()
+{
+    const auto value = 2000000000000000000LL + publicationClockStep + time + 50;
+    time += publicationClockDelay;
+    publicationClockDelay = 0;
+    return value;
 }
 
 int ZeroClock::wait( const timespec *target )
@@ -7007,8 +7029,9 @@ void ZeroClock::connect( Harness &scheduler, Streams &images, int steps )
     idleCounter                      = 0;
     idleStamp                        = {};
     idleSemaphore                    = 0;
-    costlyAt = nowCost = 0;
-    wakeDelay          = 0;
+    costlyAt = nowCost   = 0;
+    wakeDelay            = 0;
+    publicationClockStep = publicationClockDelay = 0;
     lateOnceAt = mainDelay = pendingMainAt = 0;
     releaseDelay = pendingReleaseAt = 0;
     pendingRelease                  = {};
@@ -7035,6 +7058,7 @@ void ZeroClock::connect( Harness &scheduler, Streams &images, int steps )
     scheduler.m_simulationCadenceUpdateSec = 1;
     scheduler.m_zeroDurationSec            = 120;
     scheduler.m_now                        = now;
+    scheduler.m_publicationNow             = publicationNow;
     scheduler.m_wait                       = wait;
     scheduler.m_primaryCadence.configure( 2, 64 );
     scheduler.m_simulationReleaseQueue.configure( 128 );
@@ -7042,7 +7066,7 @@ void ZeroClock::connect( Harness &scheduler, Streams &images, int steps )
     REQUIRE( scheduler.configureZeroTest() );
 }
 
-void ZeroClock::primary( int64_t observed )
+void ZeroClock::primary( int64_t observed, int64_t publication )
 {
     REQUIRE( observed >= time );
 
@@ -7057,8 +7081,9 @@ void ZeroClock::primary( int64_t observed )
     auto &image     = streams->images[0];
     image.md->write = 1;
     ++image.md->cnt0;
-    image.md->writetime = synco::toTimespec( 2000000000000000000LL + observed );
-    image.md->write     = 0;
+    image.md->writetime =
+        synco::toTimespec( 2000000000000000000LL + publicationClockStep + ( publication ? publication : observed ) );
+    image.md->write = 0;
     if( mainDelay )
     {
         pendingMainAt = observed + mainDelay;
@@ -7129,7 +7154,7 @@ TEST_CASE( "coordinated zero trial publishes only intermediate main-grid slots",
     const auto      otherBefore   = streams.images[3].md->cnt0;
     synco::GridTime grid;
     uint64_t        period = 0;
-    REQUIRE( app.m_zeroClock.frozenGrid( primaryBefore + 1, grid, period ) );
+    REQUIRE( app.zeroTestGrid( primaryBefore + 1, grid, period ) );
     ZeroClock::postCopyDelay = stagingDelay;
     ZeroClock::noPostBefore  = synco::stepGrid( grid, period, 1, steps ).ns;
     ZeroClock::idleCounter   = streams.images[2].md->cnt0;
@@ -7187,23 +7212,23 @@ TEST_CASE( "coordinated zero trial publishes only intermediate main-grid slots",
     // clang-format on
 }
 
-/// Differential compensation advances publication while retaining the original frozen reference grid.
-TEST_CASE( "coordinated zero trial advances publication before downstream reference slots",
+/// A pre-counter commit lead changes dispatch time while retaining the desired source-publication grid.
+TEST_CASE( "coordinated zero trial keeps counter targets fixed while advancing dispatch",
            "[dmSyncopation][zeroTest][combinedPhase]" )
 {
     Streams   streams;
     Harness   app;
     const int steps = GENERATE( 2, 3, 4 );
     ZeroClock::connect( app, streams, steps );
-    app.m_zeroPublicationAdvanceUs = 5;
-    app.m_zeroLateUs               = 2;
-    const auto      next           = ZeroClock::warm();
-    const auto      primaryBefore  = streams.images[0].md->cnt0;
-    const auto      channelBefore  = streams.images[2].md->cnt0;
-    const auto      otherBefore    = streams.images[3].md->cnt0;
+    app.m_zeroCommitLeadUs        = 5;
+    app.m_zeroLateUs              = 2;
+    const auto      next          = ZeroClock::warm();
+    const auto      primaryBefore = streams.images[0].md->cnt0;
+    const auto      channelBefore = streams.images[2].md->cnt0;
+    const auto      otherBefore   = streams.images[3].md->cnt0;
     synco::GridTime grid;
     uint64_t        period = 0;
-    REQUIRE( app.m_zeroClock.frozenGrid( primaryBefore + 1, grid, period ) );
+    REQUIRE( app.zeroTestGrid( primaryBefore + 1, grid, period ) );
     ZeroClock::noPostBefore = synco::stepGrid( grid, period, 1, steps ).ns - 5000;
     ZeroClock::idleCounter  = channelBefore;
     ZeroClock::idleStamp    = streams.images[2].md->writetime;
@@ -7223,7 +7248,11 @@ TEST_CASE( "coordinated zero trial advances publication before downstream refere
         const auto  reference = synco::stepGrid( grid, period, step, steps ).ns;
         CHECK( event.step == step );
         CHECK( event.referenceTargetNs == reference );
+        CHECK( event.counterTargetNs == reference );
+        CHECK( event.counterTargetRawNs == 2000000000000000000LL + reference );
         CHECK( event.targetNs == reference - 5000 );
+        CHECK( event.clockOffsetNs == 2000000000000000000LL );
+        CHECK( event.clockBracketNs == 100 );
         CHECK( event.publicationDeadlineNs == event.targetNs + 2000 );
         CHECK( event.publicationDeadlineNs < reference );
         CHECK( event.stagedNs <= event.targetNs );
@@ -7263,10 +7292,10 @@ TEST_CASE( "coordinated zero trial validates before waiting for the publication 
     Harness   app;
     const int steps = GENERATE( 2, 3, 4 );
     ZeroClock::connect( app, streams, steps );
-    app.m_zeroPublicationAdvanceUs = 5;
-    app.m_zeroLateUs               = 2;
-    app.m_zeroWakeAheadUs          = 10;
-    const auto next                = ZeroClock::warm();
+    app.m_zeroCommitLeadUs = 5;
+    app.m_zeroLateUs       = 2;
+    app.m_zeroWakeAheadUs  = 10;
+    const auto next        = ZeroClock::warm();
     ZeroClock::waits.clear();
     ZeroClock::wakeDelay = 3000;
     app.m_enabled        = true;
@@ -7320,13 +7349,13 @@ TEST_CASE( "coordinated zero early validation rejects overruns without catchup",
     Streams streams;
     Harness app;
     ZeroClock::connect( app, streams, 4 );
-    app.m_zeroPublicationAdvanceUs = 5;
-    app.m_zeroLateUs               = 2;
-    app.m_zeroWakeAheadUs          = 10;
-    const auto      next           = ZeroClock::warm();
+    app.m_zeroCommitLeadUs = 5;
+    app.m_zeroLateUs       = 2;
+    app.m_zeroWakeAheadUs  = 10;
+    const auto      next   = ZeroClock::warm();
     synco::GridTime grid;
     uint64_t        period = 0;
-    REQUIRE( app.m_zeroClock.frozenGrid( streams.images[0].md->cnt0 + 1, grid, period ) );
+    REQUIRE( app.zeroTestGrid( streams.images[0].md->cnt0 + 1, grid, period ) );
     const auto first    = synco::stepGrid( grid, period, 1, 4 ).ns - 5000;
     bool       lateWake = false;
 
@@ -7384,13 +7413,13 @@ TEST_CASE( "coordinated zero final wait retains the absolute publication cutoff"
     Streams streams;
     Harness app;
     ZeroClock::connect( app, streams, 4 );
-    app.m_zeroPublicationAdvanceUs = 5;
-    app.m_zeroLateUs               = 2;
-    app.m_zeroWakeAheadUs          = 10;
-    const auto      next           = ZeroClock::warm();
+    app.m_zeroCommitLeadUs = 5;
+    app.m_zeroLateUs       = 2;
+    app.m_zeroWakeAheadUs  = 10;
+    const auto      next   = ZeroClock::warm();
     synco::GridTime grid;
     uint64_t        period = 0;
-    REQUIRE( app.m_zeroClock.frozenGrid( streams.images[0].md->cnt0 + 1, grid, period ) );
+    REQUIRE( app.zeroTestGrid( streams.images[0].md->cnt0 + 1, grid, period ) );
     const auto first       = synco::stepGrid( grid, period, 1, 4 ).ns - 5000;
     ZeroClock::injection   = 9;
     ZeroClock::injectionAt = first - 500;
@@ -7431,12 +7460,12 @@ TEST_CASE( "coordinated zero final wait cannot publish after finite expiry", "[d
     Streams streams;
     Harness app;
     ZeroClock::connect( app, streams, 4 );
-    app.m_zeroPublicationAdvanceUs = 5;
-    app.m_zeroLateUs               = 2;
-    app.m_zeroWakeAheadUs          = 10;
-    const auto next                = ZeroClock::warm();
-    app.m_zeroDurationSec          = 0.000119;
-    app.m_enabled                  = true;
+    app.m_zeroCommitLeadUs = 5;
+    app.m_zeroLateUs       = 2;
+    app.m_zeroWakeAheadUs  = 10;
+    const auto next        = ZeroClock::warm();
+    app.m_zeroDurationSec  = 0.000119;
+    app.m_enabled          = true;
     ZeroClock::primary( next );
     CHECK( app.m_zeroStats.posted == 0 );
     CHECK( app.m_zeroStats.durationExpired == 3 );
@@ -7464,13 +7493,13 @@ TEST_CASE( "coordinated zero final wait retains essential live vetoes", "[dmSync
     Streams streams;
     Harness app;
     ZeroClock::connect( app, streams, 4 );
-    app.m_zeroPublicationAdvanceUs = 5;
-    app.m_zeroLateUs               = 2;
-    app.m_zeroWakeAheadUs          = 10;
-    const auto      next           = ZeroClock::warm();
+    app.m_zeroCommitLeadUs = 5;
+    app.m_zeroLateUs       = 2;
+    app.m_zeroWakeAheadUs  = 10;
+    const auto      next   = ZeroClock::warm();
     synco::GridTime grid;
     uint64_t        period = 0;
-    REQUIRE( app.m_zeroClock.frozenGrid( streams.images[0].md->cnt0 + 1, grid, period ) );
+    REQUIRE( app.zeroTestGrid( streams.images[0].md->cnt0 + 1, grid, period ) );
     const auto first  = synco::stepGrid( grid, period, 1, 4 ).ns - 5000;
     auto       reason = Harness::ZeroOutcome::none;
 
@@ -7535,18 +7564,18 @@ TEST_CASE( "coordinated zero final wait observes a new SDK failure", "[dmSyncopa
     CompletionStream sdk;
     Harness          app;
     ZeroClock::connect( app, streams, 2 );
-    app.m_zeroPublicationAdvanceUs = 5;
-    app.m_zeroLateUs               = 2;
-    app.m_zeroWakeAheadUs          = 10;
-    const auto next                = ZeroClock::warm();
-    auto       record    = readerCompletion( streams.images[1], ZeroClock::sequence, next - 2000, next - 1000 );
-    record.kind          = MagAOX::dmCompletion::Kind::sdk;
-    record.backendResult = 0;
+    app.m_zeroCommitLeadUs = 5;
+    app.m_zeroLateUs       = 2;
+    app.m_zeroWakeAheadUs  = 10;
+    const auto next        = ZeroClock::warm();
+    auto       record      = readerCompletion( streams.images[1], ZeroClock::sequence, next - 2000, next - 1000 );
+    record.kind            = MagAOX::dmCompletion::Kind::sdk;
+    record.backendResult   = 0;
     sdk.store( record );
     REQUIRE( ImageStreamIO_openIm( &app.m_zeroSdk, "synco_reader_done" ) == 0 );
     synco::GridTime grid;
     uint64_t        period = 0;
-    REQUIRE( app.m_zeroClock.frozenGrid( streams.images[0].md->cnt0 + 1, grid, period ) );
+    REQUIRE( app.zeroTestGrid( streams.images[0].md->cnt0 + 1, grid, period ) );
     const auto target      = synco::stepGrid( grid, period, 1, 2 ).ns - 5000;
     ZeroClock::endpoint    = &sdk;
     ZeroClock::injection   = 6;
@@ -7577,14 +7606,14 @@ TEST_CASE( "coordinated zero final wait distinguishes new reader evidence", "[dm
     CompletionStream release;
     Harness          app;
     ZeroClock::connect( app, streams, 2 );
-    app.m_zeroPublicationAdvanceUs = 5;
-    app.m_zeroLateUs               = 2;
-    app.m_zeroWakeAheadUs          = 10;
-    const auto next                = ZeroClock::warm();
+    app.m_zeroCommitLeadUs = 5;
+    app.m_zeroLateUs       = 2;
+    app.m_zeroWakeAheadUs  = 10;
+    const auto next        = ZeroClock::warm();
     app.attachReaderReleaseOnly();
     synco::GridTime grid;
     uint64_t        period = 0;
-    REQUIRE( app.m_zeroClock.frozenGrid( streams.images[0].md->cnt0 + 1, grid, period ) );
+    REQUIRE( app.zeroTestGrid( streams.images[0].md->cnt0 + 1, grid, period ) );
     const auto target  = synco::stepGrid( grid, period, 1, 2 ).ns - 5000;
     const int  variant = GENERATE( 7, 8, 10, 11, 12, 13, 14, 15, 16 );
     CAPTURE( variant );
@@ -7631,11 +7660,11 @@ TEST_CASE( "coordinated phase measurements remain full rate when trace rows are 
     Streams streams;
     Harness app;
     ZeroClock::connect( app, streams, 4 );
-    app.m_zeroPublicationAdvanceUs = 5;
-    app.m_zeroLateUs               = 2;
-    app.m_zeroEventStride          = 1024;
-    const auto next                = ZeroClock::warm();
-    app.m_enabled                  = true;
+    app.m_zeroCommitLeadUs = 5;
+    app.m_zeroLateUs       = 2;
+    app.m_zeroEventStride  = 1024;
+    const auto next        = ZeroClock::warm();
+    app.m_enabled          = true;
     ZeroClock::primary( next );
     ZeroClock::primary( next + 500000 );
     REQUIRE( app.m_zeroStats.posted == 6 );
@@ -7781,12 +7810,12 @@ TEST_CASE( "coordinated compensated trial skips only the missed advanced occurre
     Streams streams;
     Harness app;
     ZeroClock::connect( app, streams, 4 );
-    app.m_zeroPublicationAdvanceUs = 5;
-    app.m_zeroLateUs               = 2;
-    const auto      next           = ZeroClock::warm();
+    app.m_zeroCommitLeadUs = 5;
+    app.m_zeroLateUs       = 2;
+    const auto      next   = ZeroClock::warm();
     synco::GridTime grid;
     uint64_t        period = 0;
-    REQUIRE( app.m_zeroClock.frozenGrid( streams.images[0].md->cnt0 + 1, grid, period ) );
+    REQUIRE( app.zeroTestGrid( streams.images[0].md->cnt0 + 1, grid, period ) );
     const auto first  = synco::stepGrid( grid, period, 1, 4 ).ns - 5000;
     auto       reason = Harness::ZeroOutcome::late;
 
@@ -8020,7 +8049,7 @@ TEST_CASE( "coordinated zero trial keeps the second slot after first-slot latene
     const auto      next = ZeroClock::warm();
     synco::GridTime grid;
     uint64_t        period = 0;
-    REQUIRE( app.m_zeroClock.frozenGrid( streams.images[0].md->cnt0 + 1, grid, period ) );
+    REQUIRE( app.zeroTestGrid( streams.images[0].md->cnt0 + 1, grid, period ) );
     const auto first  = synco::stepGrid( grid, period, 1, 3 ).ns;
     auto       stage  = Harness::ZeroStage::deadline;
     auto       reason = Harness::ZeroOutcome::late;
@@ -8090,7 +8119,7 @@ TEST_CASE( "coordinated ideal publisher enforces the preparation deadline", "[dm
     const auto      next = ZeroClock::warm();
     synco::GridTime grid;
     uint64_t        period = 0;
-    REQUIRE( app.m_zeroClock.frozenGrid( streams.images[0].md->cnt0 + 1, grid, period ) );
+    REQUIRE( app.zeroTestGrid( streams.images[0].md->cnt0 + 1, grid, period ) );
     const auto    target     = synco::stepGrid( grid, period, 1, 3 ).ns;
     const int64_t offset     = GENERATE( int64_t( -1 ), int64_t( 0 ), int64_t( 1 ) );
     ZeroClock::stageFinishAt = target + offset;
@@ -8123,7 +8152,7 @@ TEST_CASE( "coordinated ideal publisher waits for timely reader clearance", "[dm
     const auto      next = ZeroClock::warm();
     synco::GridTime grid;
     uint64_t        period = 0;
-    REQUIRE( app.m_zeroClock.frozenGrid( streams.images[0].md->cnt0 + 1, grid, period ) );
+    REQUIRE( app.zeroTestGrid( streams.images[0].md->cnt0 + 1, grid, period ) );
     const auto target       = synco::stepGrid( grid, period, 1, 3 ).ns;
     ZeroClock::releaseDelay = target - next + 10000;
     app.m_enabled           = true;
@@ -8423,7 +8452,8 @@ TEST_CASE( "coordinated zero status is independent of the cycle mutex", "[dmSync
         CHECK( app.m_indiP_zeroTest["mainObserved"].get<double>() == 80 );
         CHECK( app.m_indiP_zeroTest["elapsedSec"].get<double>() == Approx( 5 ) );
         CHECK( app.m_indiP_zeroTest["snapshotAgeSec"].get<double>() == Approx( 1 ) );
-        CHECK( app.m_indiP_zeroTest["labelVersion"].get<double>() == 7 );
+        CHECK( app.m_indiP_zeroTest["labelVersion"].get<double>() == 8 );
+        CHECK( app.m_indiP_zeroTest["targetEndpoint"].get<double>() == 1 );
     }
 
     // clang-format off
@@ -8615,6 +8645,11 @@ TEST_CASE( "coordinated zero trial validates explicit startup configuration", "[
                                         std::string{ "[zeroTest]\npublicationAdvanceUs=-1\n" },
                                         std::string{ "[zeroTest]\npublicationAdvanceUs=51\n" },
                                         std::string{ "[zeroTest]\npublicationAdvanceUs=nan\n" },
+                                        std::string{ "[zeroTest]\ncommitLeadUs=0.5\n" },
+                                        std::string{ "[zeroTest]\ncommitLeadUs=10\n" },
+                                        std::string{ "[zeroTest]\ncommitLeadUs=-1\n" },
+                                        std::string{ "[zeroTest]\ncommitLeadUs=11\n" },
+                                        std::string{ "[zeroTest]\ncommitLeadUs=nan\n" },
                                         std::string{ "[zeroTest]\nwakeAheadUs=10\n" },
                                         std::string{ "[zeroTest]\nwakeAheadUs=-1\n" },
                                         std::string{ "[zeroTest]\nwakeAheadUs=51\n" },
@@ -8669,7 +8704,8 @@ TEST_CASE( "coordinated zero trial validates explicit startup configuration", "[
     CAPTURE( extra );
 
     if( extra.empty() || extra == "[scheduler]\nmaxSubframes=4\n" || extra == "[zeroTest]\ndurationSec=10\n" ||
-        extra == "[zeroTest]\npublicationAdvanceUs=6\n" || extra == "[zeroTest]\nwakeAheadUs=10\n" )
+        extra == "[zeroTest]\ncommitLeadUs=0.5\n" || extra == "[zeroTest]\ncommitLeadUs=10\n" ||
+        extra == "[zeroTest]\nwakeAheadUs=10\n" )
     {
         CHECK( configured == 0 );
         CHECK( app.m_zeroTestEnabled );
@@ -8679,7 +8715,10 @@ TEST_CASE( "coordinated zero trial validates explicit startup configuration", "[
         CHECK( app.m_zeroDurationSec == app.m_zeroDurationLimitSec );
         CHECK( app.m_maxCadence == 6000 );
         CHECK( app.m_zeroEventStride == 4 );
-        CHECK( app.m_zeroPublicationAdvanceUs == ( extra == "[zeroTest]\npublicationAdvanceUs=6\n" ? 6 : 0 ) );
+        CHECK( app.m_zeroPublicationAdvanceUs == 0 );
+        CHECK( app.m_zeroCommitLeadUs == ( extra == "[zeroTest]\ncommitLeadUs=0.5\n"  ? 0.5
+                                           : extra == "[zeroTest]\ncommitLeadUs=10\n" ? 10
+                                                                                      : 0 ) );
         CHECK( app.m_zeroWakeAheadUs == ( extra == "[zeroTest]\nwakeAheadUs=10\n" ? 10 : 0 ) );
     }
     else
@@ -8805,7 +8844,8 @@ TEST_CASE( "coordinated zero duration is selectable only while disabled", "[dmSy
     CHECK( app.m_indiP_zeroTest["durationSec"].get<double>() == 10 );
     CHECK( app.m_indiP_zeroTest["durationLimitSec"].get<double>() == 120 );
     CHECK( app.m_indiP_zeroTest["trial"].get<double>() == 0 );
-    CHECK( app.m_indiP_zeroTest["labelVersion"].get<double>() == 7 );
+    CHECK( app.m_indiP_zeroTest["labelVersion"].get<double>() == 8 );
+    CHECK( app.m_indiP_zeroTest["targetEndpoint"].get<double>() == 1 );
 
     for( const auto value :
          { 0.0, -1.0, 121.0, std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity() } )
@@ -8922,6 +8962,104 @@ TEST_CASE( "coordinated zero short durations expire in the command path", "[dmSy
     // clang-format on
 }
 
+/// Fresh callbacks with unusable clock pairs cannot extend an already active finite trial.
+TEST_CASE( "counter publication trial expires while fresh clock captures remain invalid",
+           "[dmSyncopation][zeroTest][publication][duration]" )
+{
+    Streams streams;
+    Harness app;
+    ZeroClock::connect( app, streams, 4 );
+    app.properties();
+    app.m_zeroWakeAheadUs = 10;
+    app.m_zeroDurationSec = 1;
+    const auto next       = ZeroClock::warm();
+    app.m_enabled         = true;
+    ZeroClock::primary( next );
+    REQUIRE( app.m_zeroStats.active );
+    REQUIRE( app.m_zeroStats.posted == 3 );
+    const auto started  = app.m_zeroStats.startedNs;
+    const auto posted   = ZeroClock::posts.size();
+    uint64_t   sequence = 0;
+
+    for( int index = 1; index <= 5; ++index )
+    {
+        ZeroClock::publicationClockDelay = 2000;
+        ZeroClock::primary( started + int64_t( index ) * 200000000 );
+        app.updateZeroTest( false );
+        CHECK( app.m_zeroSnapshot.sequence > sequence );
+        sequence = app.m_zeroSnapshot.sequence;
+        CHECK( ZeroClock::posts.size() == posted );
+
+        if( index < 5 )
+        {
+            CHECK( app.m_enabled );
+            CHECK_FALSE( app.m_zeroStats.finished );
+        }
+    }
+
+    CHECK_FALSE( app.m_enabled );
+    CHECK_FALSE( app.m_zeroStats.active );
+    CHECK_FALSE( app.m_zeroStats.warming );
+    CHECK( app.m_zeroStats.finished );
+    CHECK( app.m_zeroStats.stoppedNs >= started + 1000000000 );
+    CHECK( app.m_zeroSnapshot.stats.finished );
+    CHECK_FALSE( app.m_zeroSnapshot.requested );
+    CHECK( app.m_zeroSnapshot.stats.startedNs == started );
+    CHECK( app.m_zeroStats.posted == 3 );
+    checkZeroPartition( app );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::processZeroTestPrimary;
+    MagAOX::app::dmSyncopation::publishZeroTestStatus;
+#endif
+    // clang-format on
+}
+
+/// An armed trial that never obtains a usable clock still stops after its independent warmup bound.
+TEST_CASE( "counter publication trial times out cold arming with invalid clocks",
+           "[dmSyncopation][zeroTest][publication][duration]" )
+{
+    Streams streams;
+    Harness app;
+    ZeroClock::connect( app, streams, 4 );
+    app.properties();
+    auto enable      = app.m_indiP_enable;
+    enable["toggle"] = pcf::IndiElement::On;
+    REQUIRE( app.newCallBack_m_indiP_enable( enable ) == 0 );
+    const auto armed = ZeroClock::time;
+
+    for( const auto offset : { int64_t( 500000 ), int64_t( 15000000000LL ), int64_t( 30000000000LL ) } )
+    {
+        ZeroClock::publicationClockDelay = 2000;
+        ZeroClock::primary( armed + offset );
+        app.updateZeroTest( false );
+        CHECK( ZeroClock::posts.empty() );
+
+        if( offset < 30000000000LL )
+        {
+            CHECK( app.m_enabled );
+            CHECK_FALSE( app.m_zeroStats.finished );
+        }
+    }
+
+    CHECK_FALSE( app.m_enabled );
+    CHECK_FALSE( app.m_zeroStats.active );
+    CHECK_FALSE( app.m_zeroStats.warming );
+    CHECK( app.m_zeroStats.finished );
+    CHECK( app.m_zeroStats.startedNs == 0 );
+    CHECK( app.m_zeroStats.stoppedNs >= armed + 30000000000LL );
+    CHECK( app.m_zeroSnapshot.stats.finished );
+    CHECK_FALSE( app.m_zeroSnapshot.requested );
+    CHECK( app.m_zeroStats.posted == 0 );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::newCallBack_m_indiP_enable;
+    MagAOX::app::dmSyncopation::processZeroTestPrimary;
+    MagAOX::app::dmSyncopation::publishZeroTestStatus;
+#endif
+    // clang-format on
+}
+
 /// Four-step empirical trials remain startup-selected and cannot change settings while enabled.
 TEST_CASE( "coordinated zero trial accepts four disabled steps and rejects five", "[dmSyncopation][zeroTest]" )
 {
@@ -8953,6 +9091,534 @@ TEST_CASE( "coordinated zero trial accepts four disabled steps and rejects five"
 #ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
     MagAOX::app::dmSyncopation::newCallBack_m_indiP_settings;
     MagAOX::app::dmSyncopation::configureZeroTest;
+#endif
+    // clang-format on
+}
+
+/// Source publications retain a steady counter grid despite a late or irregular monitor callback.
+TEST_CASE( "counter publication grid ignores callback observation jitter", "[dmSyncopation][zeroTest][publication]" )
+{
+    Streams streams;
+    Harness app;
+    ZeroClock::connect( app, streams, 4 );
+    app.m_zeroWakeAheadUs     = 10;
+    app.m_zeroLateUs          = 2;
+    const auto         next   = ZeroClock::warm();
+    constexpr unsigned cycles = 12;
+    app.m_enabled             = true;
+
+    for( unsigned cycle = 0; cycle < cycles; ++cycle )
+    {
+        constexpr std::array<int64_t, 4> delays{ 0, 30000, 80000, 10000 };
+        const auto                       publication = next + int64_t( cycle ) * 500000;
+        ZeroClock::primary( publication + delays[cycle % delays.size()], publication );
+    }
+
+    REQUIRE( app.m_zeroStats.posted == cycles * 3 );
+    REQUIRE( app.m_zeroStats.skipped == 0 );
+    REQUIRE( app.m_zeroPublicationTiming.summary().mainObserved == cycles );
+    REQUIRE( app.m_zeroPublicationTiming.summary().auxiliaryObserved == cycles * 3 );
+    const auto events = zeroAuxiliaryEvents( app );
+    REQUIRE( events.size() == cycles * 3 );
+
+    for( unsigned cycle = 0; cycle < cycles; ++cycle )
+    {
+        for( unsigned step = 1; step < 4; ++step )
+        {
+            const auto &event  = events[cycle * 3 + step - 1];
+            const auto  target = next + int64_t( cycle ) * 500000 + step * 125000;
+            CHECK( event.counterTargetNs == target );
+            CHECK( event.counterTargetRawNs == 2000000000000000000LL + target );
+            CHECK( event.targetNs == target );
+            CHECK( event.publicationBeginNs >= target );
+            CHECK( event.publicationBeginNs <= target + 2000 );
+        }
+    }
+    checkZeroPartition( app );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::processZeroTestPrimary;
+    MagAOX::app::dmSyncopation::zeroTestGrid;
+#endif
+    // clang-format on
+}
+
+/// A wide bracket suppresses writes without losing the raw cadence; a real clock step starts a new fit.
+TEST_CASE( "counter publication trial handles clock qualification failures", "[dmSyncopation][zeroTest][publication]" )
+{
+    Streams streams;
+    Harness app;
+    ZeroClock::connect( app, streams, 4 );
+    app.m_zeroWakeAheadUs = 10;
+    const auto next       = ZeroClock::warm();
+    const auto epoch      = app.m_zeroPublicationClock.status().epoch;
+    app.m_enabled         = true;
+
+    SECTION( "one wide clock bracket does not require another ten-second cadence acquisition" )
+    {
+        ZeroClock::publicationClockDelay = 2000;
+        ZeroClock::primary( next );
+        CHECK( app.m_zeroStats.posted == 0 );
+        CHECK( app.m_zeroPublicationClock.status().wideBracket == 1 );
+        CHECK( app.m_zeroPublicationClock.status().epoch == epoch );
+        CHECK( app.m_zeroClock.summary().cadence.state == MagAOX::dmSyncoSimulation::CadenceState::full );
+        ZeroClock::primary( next + 500000 );
+        ZeroClock::primary( next + 1000000 );
+        CHECK( app.m_zeroPublicationClock.status().valid );
+        CHECK( app.m_zeroClock.summary().cadence.state == MagAOX::dmSyncoSimulation::CadenceState::full );
+        CHECK( app.m_zeroStats.posted > 0 );
+    }
+
+    SECTION( "a producer clock step invalidates previously fitted targets" )
+    {
+        ZeroClock::publicationClockStep = 1000000;
+        ZeroClock::primary( next );
+        CHECK( app.m_zeroStats.posted == 0 );
+        CHECK( app.m_zeroPublicationClock.status().epoch != epoch );
+        CHECK( app.m_zeroPublicationClock.status().discontinuity == 1 );
+        CHECK( app.m_zeroClock.summary().cadence.state != MagAOX::dmSyncoSimulation::CadenceState::full );
+    }
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::processZeroTestPrimary;
+    MagAOX::app::synco::PublicationClock::sample;
+#endif
+    // clang-format on
+}
+
+/// Missing combined linkage cannot suppress evidence that a source counter was actually published.
+TEST_CASE( "counter publication evidence is independent of combined acknowledgement",
+           "[dmSyncopation][zeroTest][publication]" )
+{
+    Streams streams;
+    Harness app;
+    ZeroClock::connect( app, streams, 2 );
+    app.m_zeroWakeAheadUs = 10;
+    const auto next       = ZeroClock::warm();
+    app.m_enabled         = true;
+
+    SECTION( "main cannot be classified in the combined stream" )
+    {
+        app.m_zeroHaveCombined = false;
+        ZeroClock::primary( next );
+        CHECK( app.m_zeroStats.mainUnmatched == 1 );
+        CHECK( app.m_zeroStats.posted == 0 );
+        CHECK( app.m_zeroPublicationTiming.summary().mainObserved == 1 );
+        CHECK( app.m_zeroPublicationTiming.summary().auxiliaryObserved == 0 );
+    }
+
+    SECTION( "auxiliary counter changes without a combined acknowledgement" )
+    {
+        ZeroClock::combine = false;
+        ZeroClock::primary( next );
+        CHECK( app.m_zeroStats.posted == 1 );
+        CHECK( app.m_zeroStats.acknowledged == 0 );
+        CHECK( app.m_zeroStats.unacknowledged == 1 );
+        CHECK( app.m_zeroPublicationTiming.summary().mainObserved == 1 );
+        CHECK( app.m_zeroPublicationTiming.summary().auxiliaryObserved == 1 );
+    }
+    checkZeroPartition( app );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::processZeroTestPrimary;
+    MagAOX::app::synco::PublicationTiming::main;
+    MagAOX::app::synco::PublicationTiming::auxiliary;
+#endif
+    // clang-format on
+}
+
+/// A bounded paired clock maps source timestamps and future targets without mixing their absolute origins.
+TEST_CASE( "counter publication clock maps qualified producer timestamps", "[dmSyncopation][publicationClock]" )
+{
+    synco::PublicationClock clock;
+    const int64_t           offset = GENERATE( int64_t( 2000000000000000000LL ), int64_t( -100000000 ) );
+    constexpr int64_t       mono   = 1000000000;
+    REQUIRE( clock.configure() );
+    REQUIRE( clock.sample( mono, offset + mono + 50, mono + 100 ) );
+    CHECK( clock.status().offsetNs == offset );
+    CHECK( clock.status().bracketNs == 100 );
+    CHECK( clock.map( offset + mono - 1000 ) == mono - 1000 );
+    CHECK( clock.status().publicationLowerNs == mono - 1051 );
+    CHECK( clock.status().publicationUpperNs == mono - 949 );
+    CHECK( clock.project( offset + mono + 125000 ) == mono + 125000 );
+    CHECK( clock.map( offset + mono + 125000 ) == 0 );
+    CHECK( clock.status().futurePublication == 1 );
+    CHECK( clock.project( offset + mono + 5000000 ) == 0 );
+    CHECK( clock.status().projectionOutside == 1 );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::synco::PublicationClock::configure;
+    MagAOX::app::synco::PublicationClock::sample;
+    MagAOX::app::synco::PublicationClock::map;
+    MagAOX::app::synco::PublicationClock::project;
+    MagAOX::app::synco::PublicationClock::status;
+#endif
+    // clang-format on
+}
+
+/// A wide capture revokes the current mapping without throwing away the established continuity epoch.
+TEST_CASE( "counter publication clock rejects wide captures and recovers", "[dmSyncopation][publicationClock]" )
+{
+    synco::PublicationClock clock;
+    constexpr int64_t       offset = 2000000000000000000LL;
+    constexpr int64_t       mono   = 1000000000;
+    REQUIRE( clock.configure() );
+    REQUIRE( clock.sample( mono, offset + mono + 50, mono + 100 ) );
+    const auto epoch = clock.status().epoch;
+    CHECK_FALSE( clock.sample( mono + 500000, offset + mono + 501000, mono + 502000 ) );
+    CHECK( clock.status().wideBracket == 1 );
+    CHECK( clock.status().epoch == epoch );
+    CHECK_FALSE( clock.status().valid );
+    CHECK( clock.map( offset + mono ) == 0 );
+    CHECK( clock.project( offset + mono + 1000000 ) == 0 );
+    REQUIRE( clock.sample( mono + 1000000, offset + mono + 1000050, mono + 1000100 ) );
+    CHECK( clock.status().epoch == epoch );
+    CHECK( clock.status().qualified == 2 );
+    CHECK( clock.project( offset + mono + 1125000 ) == mono + 1125000 );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::synco::PublicationClock::sample;
+    MagAOX::app::synco::PublicationClock::map;
+    MagAOX::app::synco::PublicationClock::project;
+#endif
+    // clang-format on
+}
+
+/// Real clock steps and regressions begin a new epoch rather than changing previously committed targets.
+TEST_CASE( "counter publication clock separates discontinuous epochs", "[dmSyncopation][publicationClock]" )
+{
+    synco::PublicationClock clock;
+    constexpr int64_t       offset = 2000000000000000000LL;
+    constexpr int64_t       mono   = 1000000000;
+    REQUIRE( clock.configure() );
+    REQUIRE( clock.sample( mono, offset + mono + 50, mono + 100 ) );
+    const auto epoch = clock.status().epoch;
+    CHECK_FALSE( clock.sample( mono + 500000, offset + mono + 1500050, mono + 500100 ) );
+    CHECK( clock.status().discontinuity == 1 );
+    CHECK( clock.status().epoch != epoch );
+    CHECK_FALSE( clock.status().valid );
+    CHECK( clock.project( offset + mono + 625000 ) == 0 );
+    REQUIRE( clock.sample( mono + 1000000, offset + mono + 2000050, mono + 1000100 ) );
+    CHECK( clock.status().offsetNs == offset + 1000000 );
+    CHECK( clock.project( offset + mono + 2125000 ) == mono + 1125000 );
+    const auto recovered = clock.status().epoch;
+    CHECK_FALSE( clock.sample( mono + 999000, offset + mono + 1999050, mono + 999100 ) );
+    CHECK( clock.status().epoch != recovered );
+    CHECK( clock.status().discontinuity == 2 );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::synco::PublicationClock::sample;
+    MagAOX::app::synco::PublicationClock::project;
+    MagAOX::app::synco::PublicationClock::reset;
+#endif
+    // clang-format on
+}
+
+/// Invalid limits, malformed pairs, overflow and a realtime/TAI mismatch fail explicitly.
+TEST_CASE( "counter publication clock bounds unusable timestamp evidence", "[dmSyncopation][publicationClock]" )
+{
+    synco::PublicationClock clock;
+    CHECK_FALSE( clock.configure( 0 ) );
+    CHECK_FALSE( clock.configure( 1000, -1 ) );
+    CHECK_FALSE( clock.configure( 1000, 1000, 0 ) );
+    REQUIRE( clock.configure() );
+    CHECK_FALSE( clock.sample( 0, 1, 2 ) );
+    CHECK( clock.status().invalid == 1 );
+    constexpr int64_t offset = 2000000000000000000LL;
+    REQUIRE( clock.sample( 1000000000, offset + 1000000050, 1000000100 ) );
+    CHECK( clock.map( offset + 1000000050 - 37000000000LL ) == 0 );
+    CHECK( clock.status().stalePublication == 1 );
+    CHECK( clock.project( offset + 1000000050 + 37000000000LL ) == 0 );
+    CHECK( clock.status().projectionOutside == 1 );
+    clock.reset();
+    const auto high = std::numeric_limits<int64_t>::max();
+    REQUIRE( clock.sample( high - 100, high - 50, high ) );
+    CHECK( clock.project( high ) == 0 );
+    CHECK( clock.status().projectionInvalid == 1 );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::synco::PublicationClock::configure;
+    MagAOX::app::synco::PublicationClock::sample;
+    MagAOX::app::synco::PublicationClock::map;
+    MagAOX::app::synco::PublicationClock::project;
+#endif
+    // clang-format on
+}
+
+/// Two distinct source counters form one complete nominal publication grid, including the next main boundary.
+TEST_CASE( "counter publication collector joins interleaved stream identities", "[dmSyncopation][publicationTiming]" )
+{
+    synco::PublicationTiming timing;
+    const unsigned           steps    = GENERATE( 2U, 3U, 4U );
+    constexpr int64_t        offset   = 2000000000000000000LL;
+    constexpr int64_t        monoGrid = 1000000000;
+    const synco::GridTime    grid{ offset + monoGrid, 0 };
+    constexpr uint64_t       period = 500000 * MagAOX::dmSyncoSimulation::periodScale;
+    const auto               key    = []( uint64_t inode, uint64_t counter, int64_t raw )
+    {
+        return synco::ZeroTiming::Key{ inode, counter, raw / 1000000000, raw % 1000000000 };
+    };
+    REQUIRE( timing.configure( steps ) );
+    timing.main( key( 10, 100, grid.ns ), grid, period );
+
+    for( unsigned step = 1; step < steps; ++step )
+    {
+        const auto target = synco::stepGrid( grid, period, step, steps ).ns;
+        const auto mono   = target - offset;
+        timing.auxiliary( step, key( 11, 200 + step, target ), target, mono, mono - 200, mono + 800, offset, 100 );
+    }
+
+    timing.main( key( 10, 101, grid.ns + 500000 ), { grid.ns + 500000, 0 }, period );
+    const auto &summary = timing.summary();
+    CHECK( summary.mainObserved == 2 );
+    CHECK( summary.auxiliaryObserved == steps - 1 );
+    CHECK( summary.paired == steps );
+    CHECK( summary.phaseMatched == steps - 1 );
+    CHECK( summary.sourceGaps == 0 );
+    CHECK( summary.labelGaps == 0 );
+    CHECK( summary.invalid == 0 );
+    CHECK( summary.timingExcluded == 0 );
+    CHECK_FALSE( summary.sourceFault );
+    CHECK( summary.maxBracketNs == 100 );
+
+    for( unsigned step = 0; step < steps; ++step )
+    {
+        CHECK( summary.interval[step].count == 1 );
+        CHECK( std::abs( summary.intervalError[step].meanNs ) <= 1 );
+        CHECK( summary.publicationError[step].meanNs == 0 );
+
+        if( steps == 4 )
+        {
+            CHECK( summary.interval[step].meanNs == 125000 );
+        }
+
+        if( step > 0 )
+        {
+            CHECK( summary.phaseError[step].meanNs == 0 );
+            CHECK( summary.preCounterLead[step].meanNs == 200 );
+            CHECK( summary.apiCost[step].meanNs == 1000 );
+        }
+    }
+    timing.reset();
+    CHECK( timing.summary().steps == steps );
+    CHECK( timing.summary().mainObserved == 0 );
+    CHECK( timing.summary().auxiliaryObserved == 0 );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::synco::PublicationTiming::configure;
+    MagAOX::app::synco::PublicationTiming::main;
+    MagAOX::app::synco::PublicationTiming::auxiliary;
+    MagAOX::app::synco::PublicationTiming::summary;
+    MagAOX::app::synco::PublicationTiming::reset;
+#endif
+    // clang-format on
+}
+
+/// Missing slots are distinguished from stream-local counter gaps and are not called nominal 125-us pairs.
+TEST_CASE( "counter publication collector excludes omitted labels", "[dmSyncopation][publicationTiming]" )
+{
+    synco::PublicationTiming timing;
+    constexpr int64_t        offset   = 2000000000000000000LL;
+    constexpr int64_t        monoGrid = 1000000000;
+    const synco::GridTime    grid{ offset + monoGrid, 0 };
+    constexpr uint64_t       period = 500000 * MagAOX::dmSyncoSimulation::periodScale;
+    const auto               key    = []( uint64_t inode, uint64_t counter, int64_t raw )
+    {
+        return synco::ZeroTiming::Key{ inode, counter, raw / 1000000000, raw % 1000000000 };
+    };
+    REQUIRE( timing.configure( 4 ) );
+    timing.main( key( 10, 100, grid.ns ), grid, period );
+    timing.auxiliary( 1,
+                      key( 11, 201, grid.ns + 125000 ),
+                      grid.ns + 125000,
+                      monoGrid + 125000,
+                      monoGrid + 124800,
+                      monoGrid + 125800,
+                      offset,
+                      100 );
+    timing.auxiliary( 3,
+                      key( 11, 202, grid.ns + 375000 ),
+                      grid.ns + 375000,
+                      monoGrid + 375000,
+                      monoGrid + 374800,
+                      monoGrid + 375800,
+                      offset,
+                      100 );
+    CHECK( timing.summary().auxiliaryObserved == 2 );
+    CHECK( timing.summary().sourceGaps == 0 );
+    CHECK( timing.summary().labelGaps == 1 );
+    CHECK( timing.summary().interval[1].count == 1 );
+    CHECK( timing.summary().interval[2].count == 0 );
+    CHECK( timing.summary().interval[3].count == 0 );
+    CHECK( timing.summary().phaseMatched == 2 );
+    timing.main( key( 10, 101, grid.ns + 500000 ), { grid.ns + 500000, 0 }, period );
+    CHECK( timing.summary().interval[0].count == 1 );
+    CHECK( timing.summary().interval[0].meanNs == 125000 );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::synco::PublicationTiming::main;
+    MagAOX::app::synco::PublicationTiming::auxiliary;
+#endif
+    // clang-format on
+}
+
+/// A main/auxiliary publication race excludes its pair without mistaking valid sources for a permanent reset.
+TEST_CASE( "counter publication collector recovers after a cross-source ordering violation",
+           "[dmSyncopation][publicationTiming]" )
+{
+    synco::PublicationTiming timing;
+    constexpr int64_t        offset   = 2000000000000000000LL;
+    constexpr int64_t        monoGrid = 1000000000;
+    const synco::GridTime    grid{ offset + monoGrid, 0 };
+    constexpr uint64_t       period = 500000 * MagAOX::dmSyncoSimulation::periodScale;
+    const int64_t            lateBy = GENERATE( 0, 1 );
+    const auto               key    = []( uint64_t inode, uint64_t counter, int64_t raw )
+    {
+        return synco::ZeroTiming::Key{ inode, counter, raw / 1000000000, raw % 1000000000 };
+    };
+    REQUIRE( timing.configure( 2 ) );
+    timing.main( key( 10, 100, grid.ns ), grid, period );
+
+    // The auxiliary races just after the next main, whose callback is processed afterward.
+    timing.auxiliary( 1,
+                      key( 11, 201, grid.ns + 500000 + lateBy ),
+                      grid.ns + 250000,
+                      monoGrid + 250000,
+                      monoGrid + 499800,
+                      monoGrid + 500800 + lateBy,
+                      offset,
+                      100 );
+    timing.main( key( 10, 101, grid.ns + 500000 ), { grid.ns + 500000, 0 }, period );
+    CHECK( timing.summary().invalid == 1 );
+    CHECK_FALSE( timing.summary().sourceFault );
+    CHECK( timing.summary().mainObserved == 1 );
+    CHECK( timing.summary().auxiliaryObserved == 1 );
+    CHECK( timing.summary().interval[0].count == 0 );
+
+    // A fresh main commitment restores source and phase measurements on the following cycle.
+    timing.main( key( 10, 102, grid.ns + 1000000 ), { grid.ns + 1000000, 0 }, period );
+    timing.auxiliary( 1,
+                      key( 11, 202, grid.ns + 1250000 ),
+                      grid.ns + 1250000,
+                      monoGrid + 1250000,
+                      monoGrid + 1249800,
+                      monoGrid + 1250800,
+                      offset,
+                      100 );
+    timing.main( key( 10, 103, grid.ns + 1500000 ), { grid.ns + 1500000, 0 }, period );
+    CHECK( timing.summary().invalid == 1 );
+    CHECK_FALSE( timing.summary().sourceFault );
+    CHECK( timing.summary().sourceGaps == 1 );
+    CHECK( timing.summary().mainObserved == 3 );
+    CHECK( timing.summary().auxiliaryObserved == 2 );
+    CHECK( timing.summary().phaseMatched == 2 );
+    CHECK( timing.summary().paired == 3 );
+    CHECK( timing.summary().interval[0].count == 1 );
+    CHECK( timing.summary().interval[0].meanNs == 250000 );
+    CHECK( timing.summary().interval[1].count == 2 );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::synco::PublicationTiming::main;
+    MagAOX::app::synco::PublicationTiming::auxiliary;
+    MagAOX::app::synco::PublicationTiming::summary;
+#endif
+    // clang-format on
+}
+
+/// Replaced/regressing sources fail closed, while missing clock evidence excludes only derived local costs.
+TEST_CASE( "counter publication collector qualifies source and clock evidence", "[dmSyncopation][publicationTiming]" )
+{
+    synco::PublicationTiming timing;
+    constexpr int64_t        offset   = 2000000000000000000LL;
+    constexpr int64_t        monoGrid = 1000000000;
+    const synco::GridTime    grid{ offset + monoGrid, 0 };
+    constexpr uint64_t       period = 500000 * MagAOX::dmSyncoSimulation::periodScale;
+    const auto               key    = []( uint64_t inode, uint64_t counter, int64_t raw )
+    {
+        return synco::ZeroTiming::Key{ inode, counter, raw / 1000000000, raw % 1000000000 };
+    };
+    REQUIRE( timing.configure( 4 ) );
+    const auto main = key( 10, 100, grid.ns );
+    const auto aux  = key( 11, 201, grid.ns + 125000 );
+    timing.main( main, grid, period );
+
+    SECTION( "a repeated primary observation is not a new source publication" )
+    {
+        timing.main( main, grid, period );
+        CHECK( timing.summary().mainObserved == 1 );
+        CHECK( timing.summary().duplicates == 1 );
+    }
+
+    SECTION( "one source cannot stand in for both main and auxiliary" )
+    {
+        auto same  = aux;
+        same.inode = 10;
+        timing.auxiliary(
+            1, same, grid.ns + 125000, monoGrid + 125000, monoGrid + 124800, monoGrid + 125800, offset, 100 );
+        CHECK( timing.summary().sourceFault );
+        CHECK( timing.summary().auxiliaryObserved == 0 );
+    }
+
+    SECTION( "a new inode is not a continuation of the auxiliary source" )
+    {
+        timing.auxiliary(
+            1, aux, grid.ns + 125000, monoGrid + 125000, monoGrid + 124800, monoGrid + 125800, offset, 100 );
+        timing.auxiliary( 2,
+                          key( 12, 202, grid.ns + 250000 ),
+                          grid.ns + 250000,
+                          monoGrid + 250000,
+                          monoGrid + 249800,
+                          monoGrid + 250800,
+                          offset,
+                          100 );
+        CHECK( timing.summary().sourceFault );
+        CHECK( timing.summary().auxiliaryObserved == 1 );
+    }
+
+    SECTION( "a forward source-counter gap is explicit but does not become a nominal pair" )
+    {
+        timing.auxiliary(
+            1, aux, grid.ns + 125000, monoGrid + 125000, monoGrid + 124800, monoGrid + 125800, offset, 100 );
+        timing.auxiliary( 2,
+                          key( 11, 203, grid.ns + 250000 ),
+                          grid.ns + 250000,
+                          monoGrid + 250000,
+                          monoGrid + 249800,
+                          monoGrid + 250800,
+                          offset,
+                          100 );
+        CHECK( timing.summary().sourceGaps == 1 );
+        CHECK( timing.summary().interval[2].count == 0 );
+        CHECK( timing.summary().auxiliaryObserved == 2 );
+    }
+
+    SECTION( "clock mismatch does not erase raw publication evidence" )
+    {
+        timing.auxiliary( 1,
+                          aux,
+                          grid.ns + 125000,
+                          monoGrid + 125000,
+                          monoGrid + 124800,
+                          monoGrid + 125800,
+                          offset + 37000000000LL,
+                          100 );
+        CHECK( timing.summary().auxiliaryObserved == 1 );
+        CHECK( timing.summary().phaseMatched == 1 );
+        CHECK( timing.summary().timingExcluded == 1 );
+        CHECK( timing.summary().preCounterLead[1].count == 0 );
+    }
+
+    SECTION( "a wrong frozen source target is invalid before measurement" )
+    {
+        timing.auxiliary(
+            1, aux, grid.ns + 125001, monoGrid + 125000, monoGrid + 124800, monoGrid + 125800, offset, 100 );
+        CHECK( timing.summary().invalid == 1 );
+        CHECK( timing.summary().auxiliaryObserved == 0 );
+    }
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::synco::PublicationTiming::main;
+    MagAOX::app::synco::PublicationTiming::auxiliary;
 #endif
     // clang-format on
 }

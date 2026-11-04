@@ -27,6 +27,8 @@
 #include "syncoSimulation.hpp"
 #include "syncoZeroPhase.hpp"
 #include "syncoZeroTiming.hpp"
+#include "syncoPublicationClock.hpp"
+#include "syncoPublicationTiming.hpp"
 
 namespace MagAOX
 {
@@ -244,12 +246,13 @@ class dmSyncopation : public MagAOXApp<true>,
     bool        m_zeroTestEnabled{ false };    ///< Startup-only finite empirical coordinated zero-write trial.
     std::string m_zeroTestChannel{ "dm01disp07" }; ///< Existing exclusive zero auxiliary; never created or cleared.
     std::string m_zeroSdkStream{ "dmtweeter_sdk_done" }; ///< Optional exact native-entry/result observer.
-    double      m_zeroDurationSec{ 120 };        ///< Selected app-enforced active bound; writable only while disabled.
-    double      m_zeroDurationLimitSec{ 120 };   ///< Immutable startup ceiling for the selected active duration.
-    unsigned    m_zeroEventStride{ 4 };          ///< Healthy-cycle event stride; exceptions are always retained.
-    double      m_zeroLateUs{ 5 };               ///< Maximum lateness before an immutable auxiliary slot is skipped.
-    double      m_zeroPublicationAdvanceUs{ 0 }; ///< Experimental differential advance from the primary-observer grid.
-    double      m_zeroWakeAheadUs{ 0 }; ///< Full validation starts this many us early; zero selects the legacy wait.
+    double      m_zeroDurationSec{ 120 };      ///< Selected app-enforced active bound; writable only while disabled.
+    double      m_zeroDurationLimitSec{ 120 }; ///< Immutable startup ceiling for the selected active duration.
+    unsigned    m_zeroEventStride{ 4 };        ///< Healthy-cycle event stride; exceptions are always retained.
+    double      m_zeroLateUs{ 5 };             ///< Maximum lateness before an immutable auxiliary slot is skipped.
+    double m_zeroPublicationAdvanceUs{ 0 }; ///< Deprecated downstream advance; counter-publication trials require zero.
+    double m_zeroCommitLeadUs{ 0 };         ///< Guard-to-counter dispatch lead only; initially zero until measured.
+    double m_zeroWakeAheadUs{ 0 }; ///< Full validation starts this many us early; zero selects the legacy wait.
     bool   m_simulationReaderReleaseReady{ false }; ///< Use timestamped actual-main read release in shadow decisions.
     bool   m_simulationPipelineBackend{ false }; ///< Independently model preparation, SDK and post resources in shadow.
     double m_simulationVirtualReaderUs{ 30 };    ///< Assumed auxiliary trigger-to-last-read duration, us; not measured.
@@ -267,7 +270,7 @@ class dmSyncopation : public MagAOXApp<true>,
 
     std::mutex        m_cycleMutex; ///< Serializes lifecycle/configuration with a complete callback.
     synco::Simulation m_simulation; ///< Fixed-storage shadow engine, serialized by the cycle mutex.
-    synco::Simulation m_zeroClock;  ///< Clock-only long-baseline estimator; never evaluates modeled admission.
+    synco::Simulation m_zeroClock;  ///< Raw producer-clock cadence/phase estimator; never evaluates modeled admission.
 
     /// Actual event outcomes and diagnostic causes; numeric values before schema 2 were less specific.
     enum class ZeroOutcome : int
@@ -324,6 +327,7 @@ class dmSyncopation : public MagAOXApp<true>,
         uint64_t late{ 0 }, readerMissing{ 0 }, primaryChanged{ 0 }; ///< Mutually exclusive per-slot skip reasons.
         uint64_t preparationLate{ 0 }; ///< Zero-copy start or coherent completion was after its immutable target.
         uint64_t validationLate{ 0 };  ///< Subset of late skips: full validation did not finish before the target.
+        uint64_t clockRejected{ 0 };   ///< Primary observations excluded by an unqualified publication-clock mapping.
         uint64_t primaryWriting{ 0 }, resourceUnavailable{ 0 }; ///< Primary write flag or missing trial resources.
         uint64_t cancelled{ 0 }, durationExpired{ 0 }, waitError{ 0 }; ///< Cancellation, finite expiry or wait failure.
         uint64_t invalidTarget{ 0 };        ///< Occurrences with no representable frozen target.
@@ -341,17 +345,20 @@ class dmSyncopation : public MagAOXApp<true>,
     struct ZeroSnapshot
     {
         ZeroStats stats; ///< Counters and finite-trial state from one complete callback/control boundary.
-        synco::ZeroTiming::Summary timing; ///< Exact timing joins from the same boundary.
-        synco::ZeroPhase::Summary  phase;  ///< Full-rate combined-publication intervals and relative-main phase.
-        uint64_t                   sequence{ 0 }, trial{ 0 }; ///< Monotonic publication sequence and trial generation.
-        uint64_t                   eventsDropped{ 0 }, eventsQueued{ 0 }; ///< Event transport quality at publication.
-        int64_t                    capturedNs{ 0 };                 ///< Same-host monotonic snapshot publication time.
-        double                     targetHz{ 0 }, durationSec{ 0 }; ///< Frozen clock rate and selected active bound.
+        synco::ZeroTiming::Summary        timing; ///< Exact timing joins from the same boundary.
+        synco::ZeroPhase::Summary         phase;  ///< Full-rate combined-publication intervals and relative-main phase.
+        synco::PublicationTiming::Summary publication; ///< Interleaved source-counter publication measurements.
+        synco::PublicationClock::Status   clock; ///< Producer/local clock mapping bounds and qualification coverage.
+        uint64_t sequence{ 0 }, trial{ 0 };      ///< Monotonic publication sequence and trial generation.
+        uint64_t eventsDropped{ 0 }, eventsQueued{ 0 }; ///< Event transport quality at publication.
+        int64_t  capturedNs{ 0 };                       ///< Same-host monotonic snapshot publication time.
+        double   targetHz{ 0 }, durationSec{ 0 };       ///< Frozen clock rate and selected active bound.
         double   durationLimitSec{ 0 }; ///< Startup ceiling; changing the selected bound cannot raise this limit.
         int      steps{ 0 };            ///< Requested total main-plus-auxiliary steps.
         unsigned eventStride{ 1 };      ///< Healthy-cycle telemetry sampling; no command or timing-population sampling.
         double   publicationAdvanceUs{ 0 }, lateUs{ 0 }; ///< Frozen differential target advance and admission grace.
         double   wakeAheadUs{ 0 };   ///< Frozen early-validation lead; zero retains the legacy wait path.
+        double   commitLeadUs{ 0 };  ///< Final guard-to-counter lead, independent of dmcomb processing.
         bool     requested{ false }; ///< Actual enable request at this cycle/control boundary.
     };
 
@@ -405,11 +412,15 @@ class dmSyncopation : public MagAOXApp<true>,
         int64_t     targetNs{ 0 }, observedNs{ 0 }; ///< Frozen target and actual observation/publication time.
         synco::ZeroTiming::Key key;                 ///< Exact combined command, or an empty key when unclassified.
         int64_t stagedNs{ 0 }; ///< Coherent passive-copy completion, including overruns; zero if no copy occurred.
-        int64_t referenceTargetNs{ 0 };     ///< Unadvanced primary-observer grid; not a measured combined post.
+        int64_t referenceTargetNs{ 0 }; ///< Desired counter point mapped to the local clock; equals counterTargetNs.
         int64_t publicationDeadlineNs{ 0 }; ///< Last permissible guarded admission, including the configured grace.
         int64_t publicationBeginNs{ 0 }, publicationEndNs{ 0 }; ///< Monotonic guard-to-update-return bracket.
         synco::ZeroTiming::Key auxiliaryKey; ///< Exact auxiliary publication metadata, separate from combined key.
         ZeroPublicationWait    wait;         ///< Frozen wake and validation checkpoints; zero for the legacy path.
+        int64_t  counterTargetNs{ 0 }, counterTargetRawNs{ 0 }; ///< Desired counter point in local and producer clocks.
+        int64_t  clockOffsetNs{ 0 }, clockBracketNs{ 0 }; ///< Frozen producer-minus-local offset and uncertainty width.
+        uint64_t clockEpoch{ 0 };                         ///< Mapping generation frozen for this cycle's targets.
+        synco::ZeroTiming::Key sourceKey; ///< Main or auxiliary source publication, distinct from dmcomb output.
     };
 
     ZeroStats m_zeroStats; ///< Finite-trial counters; no conditional shadow outcomes are mixed in.
@@ -431,7 +442,12 @@ class dmSyncopation : public MagAOXApp<true>,
     int     m_zeroWaitResult{ 0 };  ///< Most recent absolute-wait return code, retained without a post-hoc clock read.
     synco::ZeroTiming m_zeroTiming; ///< Exact primary receipt and controller read-begin to native SDK-entry joins.
     synco::ZeroPhase  m_zeroPhase;  ///< Bounded full-rate downstream evidence, independent of event-row sampling.
-    MagAOX::spscQueue<ZeroEvent> m_zeroEvents;            ///< Primary monitor to ordinary telemetry handoff.
+    synco::PublicationClock  m_zeroPublicationClock;  ///< CLOCK_ISIO-to-monotonic conversion used only for waiting.
+    synco::PublicationTiming m_zeroPublicationTiming; ///< Main/auxiliary source publications, independently of dmcomb.
+    uint64_t m_zeroClockEpoch{ 0 };         ///< Mapping generation whose raw-source cadence fit is currently retained.
+    int64_t  m_zeroCounterTargetRawNs{ 0 }; ///< Current occurrence's desired counter point in the producer clock.
+    synco::ZeroTiming::Key m_zeroPrimaryPublication; ///< Coherent genuine main source publication for this callback.
+    MagAOX::spscQueue<ZeroEvent> m_zeroEvents;       ///< Primary monitor to ordinary telemetry handoff.
     IMAGE m_zeroChannel{}, m_zeroCombined{}, m_zeroSdk{}; ///< Existing auxiliary/output/SDK mappings, never destroyed.
     ino_t m_zeroChannelInode{ 0 }, m_zeroCombinedInode{ 0 }, m_zeroSdkInode{ 0 }; ///< Backing identities.
     uint64_t m_zeroChannelIdentity{ 0 }, m_zeroCombinedIdentity{ 0 },
@@ -449,8 +465,10 @@ class dmSyncopation : public MagAOXApp<true>,
     synco::ZeroTiming::Key m_zeroLastCombined;          ///< Most recent classified or rebaselined combined identity.
     MagAOX::dmSyncoSimulation::Readiness m_zeroRelease; ///< Latest coherently observed reader release.
     uint64_t m_zeroReleaseEpoch{ 0 }, m_zeroReleaseDrops{ 0 }; ///< Accepted source generation and queue loss baseline.
-    pcf::IndiProperty m_indiP_zeroTest;  ///< Read-only actual trial state, counts and main timing coverage.
-    pcf::IndiProperty m_indiP_zeroPhase; ///< Full-rate combined-publication phase/interval populations.
+    pcf::IndiProperty m_indiP_zeroTest;        ///< Read-only actual trial state, counts and main timing coverage.
+    pcf::IndiProperty m_indiP_zeroPhase;       ///< Full-rate combined-publication phase/interval populations.
+    pcf::IndiProperty m_indiP_zeroPublication; ///< Interleaved counter-publication timing populations.
+    pcf::IndiProperty m_indiP_zeroClock;       ///< Clock mapping bounds, generations and qualification coverage.
     MagAOX::spscQueue<MagAOX::dmSyncoSimulation::Readiness>
         m_simulationReleaseQueue; ///< Release producer to cycle consumer; allocated before monitor startup.
     std::atomic<uint64_t> m_simulationReleaseEpoch{ 1 }; ///< Attachment/reset/drop fence for queued release evidence.
@@ -556,10 +574,11 @@ class dmSyncopation : public MagAOXApp<true>,
     uint64_t    m_copiedLate{ 0 };        ///< Step-0 copies completed after the effective cutoff.
     int64_t     m_snapshotMax{ 0 };       ///< Observed maximum complete snapshot batch time.
     int64_t     m_copyMax{ 0 };           ///< Observed maximum complete destination copy time.
-    std::array<int64_t, synco::maxSteps> m_advances{};  ///< Independent bounded wait integrators.
-    std::array<int64_t, synco::maxSteps> m_residuals{}; ///< Latest actual-minus-target timings, ns.
-    int64_t ( *m_now )(){ synco::monotonicNs };         ///< Local clock adapter for deterministic tests.
-    int ( *m_wait )( const timespec * ){ nullptr };     ///< Optional absolute-wait adapter used by deterministic tests.
+    std::array<int64_t, synco::maxSteps> m_advances{};    ///< Independent bounded wait integrators.
+    std::array<int64_t, synco::maxSteps> m_residuals{};   ///< Latest actual-minus-target timings, ns.
+    int64_t ( *m_now )(){ synco::monotonicNs };           ///< Local clock adapter for deterministic tests.
+    int64_t ( *m_publicationNow )(){ zeroTestStreamNow }; ///< Producer-clock adapter; never treated as local time.
+    int ( *m_wait )( const timespec * ){ nullptr }; ///< Optional absolute-wait adapter used by deterministic tests.
     bool    m_copyStarted{ false }; ///< Per-call outcome, independent of historical maximum copy duration.
     int64_t m_copyAttemptedAt{ 0 }; ///< Actual copy-attempt start, including safely rejected attempts.
     int64_t m_copyCompleted{ 0 };   ///< Per-call completion timestamp for passive-copy classification.
@@ -857,8 +876,21 @@ class dmSyncopation : public MagAOXApp<true>,
                                    const synco::ZeroTiming::Key &key /**< [in] Prepared combined command. */,
                                    uint64_t counter /**< [in] Frozen auxiliary counter before publication. */ );
 
-    /// Advance a frozen primary-grid slot with checked arithmetic; zero denotes an invalid target.
+    /// Place the final dispatch before a frozen counter target using only the configured pre-counter lead.
     int64_t zeroTestPublicationTarget( int64_t reference /**< [in] Unadvanced monotonic slot. */ ) const;
+
+    /// Sample the ImageStreamIO producer clock without assuming a TAI/UTC offset.
+    static int64_t zeroTestStreamNow();
+
+    /// Map a frozen producer-clock main grid to local waiting time, retaining its exact fractional period.
+    bool zeroTestGrid( uint64_t         counter /**< [in] Genuine main cycle label. */,
+                       synco::GridTime &grid /**< [out] Frozen local monotonic main grid. */,
+                       uint64_t        &periodQ32 /**< [out] Frozen cadence, scaled nanoseconds. */,
+                       synco::GridTime *rawGrid = nullptr /**< [out] Optional frozen producer-clock main grid. */ );
+
+    /// Publish source-counter timing and clock-quality populations only from an ordinary-thread snapshot.
+    void updateZeroPublication( const ZeroSnapshot &snapshot /**< [in] Coherent cycle-owned state copy. */,
+                                bool record /**< [in] Include text telemetry alongside INDI updates. */ );
 
     /// Record one actual outcome without allocation, logging or unbounded buffering.
     void zeroTestEvent( int         step /**< [in] Zero for main; positive auxiliary slot. */,
@@ -1059,7 +1091,8 @@ inline void dmSyncopation::setupConfig()
           "Startup active-duration ceiling, positive and at most120 seconds; selectable downward while Off." },
         { "zeroTest.lateUs", "Maximum immutable auxiliary-slot lateness before skipping, us." },
         { "zeroTest.publicationAdvanceUs",
-          "Experimental differential publication advance from the primary grid, us; zero retains legacy targets." },
+          "Deprecated downstream advance; must be zero for counter-publication targets." },
+        { "zeroTest.commitLeadUs", "Final guard-to-counter lead, us; zero until measured; excludes dmcomb delay." },
         { "zeroTest.wakeAheadUs", "Full-validation lead and maximum final-spin window, us; zero retains legacy wait." },
         { "zeroTest.eventStride", "Retain every Nth healthy cycle; 1..1024, default4; exceptions are never sampled." },
         { "zeroTest.sdkStream", "Optional native SDK-result stream for exact main timing joins." },
@@ -1134,6 +1167,7 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
     m_zeroDurationLimitSec = m_zeroDurationSec;
     config( m_zeroLateUs, "zeroTest.lateUs" );
     config( m_zeroPublicationAdvanceUs, "zeroTest.publicationAdvanceUs" );
+    config( m_zeroCommitLeadUs, "zeroTest.commitLeadUs" );
     config( m_zeroWakeAheadUs, "zeroTest.wakeAheadUs" );
     config( m_zeroSdkStream, "zeroTest.sdkStream" );
     config( m_zeroEventStride, "zeroTest.eventStride" );
@@ -1171,15 +1205,20 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
         return -1;
     }
 
+    if( m_zeroTestEnabled && finite( m_zeroPublicationAdvanceUs ) && m_zeroPublicationAdvanceUs != 0 )
+    {
+        log<software_error>( { "zeroTest.publicationAdvanceUs must be0 for the counter-publication target; use "
+                               "commitLeadUs only for measured guard-to-counter cost" } );
+        return -1;
+    }
+
     if( m_zeroTestEnabled &&
         ( m_simulationEnabled || m_diagnosticsOnly || m_requested < 2 || m_requested > 4 || m_zeroEventStride < 1 ||
           m_zeroEventStride > 1024 || !finite( m_zeroDurationSec ) || m_zeroDurationSec <= 0 ||
           m_zeroDurationSec > 120 || !finite( m_zeroLateUs ) || m_zeroLateUs < 0 || m_zeroLateUs > 50 ||
-          !finite( m_zeroPublicationAdvanceUs ) || m_zeroPublicationAdvanceUs < 0 || m_zeroPublicationAdvanceUs > 50 ||
-          !finite( m_zeroWakeAheadUs ) || m_zeroWakeAheadUs < 0 || m_zeroWakeAheadUs > 50 ||
-          ( m_zeroWakeAheadUs > 0 && std::llround( m_zeroWakeAheadUs * 1000 ) <= 0 ) ||
-          ( m_zeroPublicationAdvanceUs > 0 &&
-            std::llround( m_zeroPublicationAdvanceUs * 1000 ) <= int64_t( m_zeroLateUs * 1000 ) ) ||
+          !finite( m_zeroPublicationAdvanceUs ) || m_zeroPublicationAdvanceUs != 0 || !finite( m_zeroCommitLeadUs ) ||
+          m_zeroCommitLeadUs < 0 || m_zeroCommitLeadUs > 10 || !finite( m_zeroWakeAheadUs ) || m_zeroWakeAheadUs < 0 ||
+          m_zeroWakeAheadUs > 50 || ( m_zeroWakeAheadUs > 0 && std::llround( m_zeroWakeAheadUs * 1000 ) <= 0 ) ||
           readerReleaseMonitorT::m_shmimName.empty() || !m_combinerDiagnostics || m_primaryCadenceWindow <= 0 ||
           m_zeroTestChannel.size() != 10 || m_zeroTestChannel.substr( 0, 8 ) != m_combinedName ||
           m_zeroTestChannel.find_first_not_of( "0123456789", 8 ) != std::string::npos ||
@@ -4838,6 +4877,7 @@ INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_enable )( const pcf::IndiProperty 
                 m_zeroArmedAt       = m_now();
                 m_zeroTiming.reset();
                 m_zeroPhase.reset();
+                m_zeroPublicationTiming.reset();
                 ++m_zeroTrial;
                 m_zeroArmed = true;
                 m_reason    = "zero trial clock/ownership warming";
@@ -4852,10 +4892,11 @@ INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_enable )( const pcf::IndiProperty 
         m_enabled        = enable;
         publishZeroTestStatus( m_now(), true );
     }
+    const bool actualEnable = m_enabled.load( std::memory_order_acquire );
     updateSwitchIfChanged( m_indiP_enable,
                            "toggle",
-                           enable ? pcf::IndiElement::On : pcf::IndiElement::Off,
-                           enable ? INDI_BUSY : INDI_IDLE );
+                           actualEnable ? pcf::IndiElement::On : pcf::IndiElement::Off,
+                           actualEnable ? INDI_BUSY : INDI_IDLE );
     return 0;
 }
 
