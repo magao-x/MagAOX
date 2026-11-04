@@ -3,6 +3,13 @@
 AT=@
 GEN_TEST_FILES = ./generated_tests/*_generated_tests.cpp
 C_STD=c++20
+
+# Flatlogs uses mxlib headers and must share its include paths and ABI flags.
+MXLIB_CFLAGS = $(shell pkg-config --cflags mxlib)
+MXLIB_LIBS = $(shell pkg-config --libs mxlib)
+CXXFLAGS += $(MXLIB_CFLAGS)
+LDLIBS += $(MXLIB_LIBS)
+
 ### default entropy test settings
 # seed
 s=1
@@ -46,22 +53,27 @@ coverage:
 
 ########################################################################
 ### Build and run Catch2 tests
-generated_tests: $(GEN_TEST_FILES)
+.PHONY: generated_tests do_catch2_test entropy_test do_entropy_test test_generator
+test_generator:
+	$(AT)python3 -m unittest -v test_generateTemplatedCatch2Tests.py
 
-$(GEN_TEST_FILES) :
+generated_tests: generated_tests/.stamp
+
+generated_tests/.stamp: generateTemplatedCatch2Tests.py catch2TestTemplate.jinja2 ../types/*.hpp ../types/schemas/*.fbs ../generated/binarySchemata.inc
 	$(AT)python3 generateTemplatedCatch2Tests.py
+	$(AT)touch $@
 
-catch2_tests: ../generated/binarySchemata.inc $(GEN_TEST_FILES) catch2_tests.cpp
-	$(AT)g++ -std=$(C_STD) $(CXXFLAGS) -I. -I./../types -I../../../flatlogs/include/ $(GEN_TEST_FILES) catch2_tests.cpp -o $@
+catch2_tests: ../generated/binarySchemata.inc generated_tests/.stamp $(wildcard $(GEN_TEST_FILES)) catch2_tests.cpp Makefile
+	$(AT)$(CXX) -std=$(C_STD) $(CPPFLAGS) $(CXXFLAGS) -I. -I./../types -I../../../flatlogs/include/ $(GEN_TEST_FILES) catch2_tests.cpp -o $@ $(LDFLAGS) $(LDLIBS)
 
 do_catch2_test: catch2_tests
 	$(AT)./catch2_tests
 
 ########################################################################
 ### Build and run Catch2 Entropy tests
-entropy_test: ../generated/binarySchemata.inc catch2_tests.cpp
+entropy_test: ../generated/binarySchemata.inc generated_tests/.stamp catch2_tests.cpp
 	$(AT)python3 generateEntropyTests.py -e $(e) -n $(n) -s $(s) -f $(f)
-	$(AT)g++ -std=$(C_STD) $(CXXFLAGS) -I. -I.. -I./../types -I../../../flatlogs/include/ -I./generated_tests gen_entropy_tests/generated_test_e$(e)_n$(n).cpp catch2_tests.cpp -o generated_entropy_test_e$(e)_n$(n)
+	$(AT)$(CXX) -std=$(C_STD) $(CPPFLAGS) $(CXXFLAGS) -I. -I.. -I./../types -I../../../flatlogs/include/ -I./generated_tests gen_entropy_tests/generated_test_e$(e)_n$(n).cpp catch2_tests.cpp -o generated_entropy_test_e$(e)_n$(n) $(LDFLAGS) $(LDLIBS)
 
 do_entropy_test: entropy_test
 	$(AT)./generated_entropy_test_e$(e)_n$(n) "Scenario: test_e$(e)_n$(n)"

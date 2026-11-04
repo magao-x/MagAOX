@@ -1,8 +1,9 @@
 #!/bin/env python3
 
-'''
-Generate Catch2 tests from template.
-See README.md for more details.
+'''Generate Catch2 serialization tests; see flatlogs.md for usage.
+
+Constructor parameters follow schema order unless an exact field name matches.
+Struct vectors and timestamps retain their component metadata for comparisons.
 '''
 
 import os
@@ -31,7 +32,21 @@ gNextVals = {
 }
 gIncrementingVals = False
 
-# check jinja2 is installed. install it if not
+# Inputs with semantic constraints that cannot be inferred from scalar types.
+gTestFixtures = {
+    "telem_pupilfit": {
+        "numPupils": "3",
+        "valid": "true",
+        "pupils": "{{3, 6, 4, 100, 10}, {6, 12, 8, 110, 10}, {9, 18, 12, 120, 10}}"
+    },
+    "telem_pupilfit_state": {
+        "setpoints": "{{3, 6, 4}, {6, 12, 8}, {9, 18, 12}}",
+        "requestedMode": "2",
+        "activeMode": "2"
+    }
+}
+
+# Check Jinja2 is installed; retain the existing installation fallback.
 try:
     import jinja2
 except ModuleNotFoundError:
@@ -39,13 +54,8 @@ except ModuleNotFoundError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", 'Jinja2'])
     import jinja2
 
-
-'''
-Get base type of log. This is needed for log types that inherit from a base type
-that specfies the messageT(...)
-'''
 def getBaseType(lines : list) -> str:
-    # use regex to find #include "<baseType>.hpp"
+    """Find the base log type supplying inherited message constructors."""
     baseType = ""
     for line in lines:
         match = re.search(r'^struct [a-z_]* : public [a-z_]*', line)
@@ -56,94 +66,42 @@ def getBaseType(lines : list) -> str:
     return baseType
 
 
-'''
-NOTE: This relies on name order in .fbs schema and .hpp files to be the same.
-'''
-def getSchemaFieldInfo(fname : str) -> tuple[str, tuple] :
-    schemaFolderPath = "./../types/schemas/"
-    schemaFolderPath = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), schemaFolderPath)
-    )
+def getSchemaFieldInfo(fname : str) -> tuple[str, tuple, dict]:
+    """Read root fields, nested tables, and qualified struct-vector metadata."""
+    schemaFilePath = pathlib.Path(__file__).parent / "../types/schemas" / f"{fname}.fbs"
+    if not schemaFilePath.is_file():
+        return "", tuple(), {}
 
-    schemaFilePath = os.path.join(schemaFolderPath, f"{fname}.fbs")
-    if not os.path.isfile(schemaFilePath):
-        return "", tuple()
-
-    schemaFile = open(schemaFilePath, "r")
-
-    schemaFieldInfo = []
-    subTables = dict() # dict where key is sub-table name, value is [(fieldname, type)...]
-    curSubTable = None
-    inTable = False
-    schemaTableName = ""
-    for line in schemaFile:
-        if "table" in line:
-            # check if `table <log_type>_fb`
-            match = re.search(r'^table [a-zA-Z_]*_fb', line)
-            if match != None:
-                line = line.strip().split()
-                tableIdx = line.index("table")
-                schemaTableName =  line[tableIdx + 1]
-            # otherwise it is a sub-table
-            else:
-                line = line.strip().split()
-                subNameIdx = line.index("table")
-                subName =  line[subNameIdx + 1]
-                subTables[subName] = []
-                curSubTable = subName # we are in a sub-table of the schema
-
-        if not inTable and "{" in line:
-            inTable = True
-            continue
-
-        if inTable:
-            line = line.strip()
-            if ("//" in line):
+    schema = schemaFilePath.read_text()
+    schema = re.sub(r"/\*.*?\*/|//[^\n]*", "", schema, flags=re.S)
+    root = re.search(r"\broot_type\s+(\w+)\s*;", schema)
+    schemaTableName = root[1] if root else ""
+    namespace = re.search(r"\bnamespace\s+([\w.]+)\s*;", schema)
+    prefix = namespace[1].replace(".", "::") + "::" if namespace else ""
+    tables = {}
+    structs = {}
+    for kind, name, body in re.findall(r"\b(table|struct)\s+(\w+)\s*\{([^}]*)\}", schema):
+        fields = []
+        for declaration in body.split(";"):
+            if "deprecated" in declaration:
                 continue
-
-            if ("}" in line):
-                inTable = False
-                curSubTable = None
-                continue
-
-            if ("deprecated" in line):
-                continue
-
-            if (line != ""):
-                fieldParts = line.strip().rstrip(";").split(":")
-                name = fieldParts[0]
-                fieldType = fieldParts[1].split()[0]
-
-                if curSubTable is not None:
-                    # add to subtable dict for now, will be added in later
-                    subTables[curSubTable].append((name, fieldType))
-                else:
-                    schemaFieldInfo.append((name, fieldType))
-                continue
-
-    if len(subTables) == 0:
-        return schemaTableName, tuple(schemaFieldInfo)
-
-
-    # go through sub tables and add them in
-    newSchemaFieldInfo = []
-    for field in schemaFieldInfo:
-        fieldType = field[1]
-        if fieldType in subTables.keys():
-               newSchemaFieldInfo.append({field[0] : subTables[fieldType]})
+            field = re.match(r"\s*(\w+)\s*:\s*([\w.]+|\[[\w.]+\])", declaration)
+            if field:
+                fields.append((field[1], field[2]))
+        if kind == "struct":
+            structs[name] = {"type": prefix + name, "members": fields}
         else:
-            newSchemaFieldInfo.append(field)
-    # print(newSchemaFieldInfo)
-    return schemaTableName, tuple(newSchemaFieldInfo)
+            tables[name] = fields
+
+    # Constructor parameters stored in nested tables retain their existing order.
+    schemaFieldInfo = []
+    for name, fieldType in tables.get(schemaTableName, []):
+        schemaFieldInfo.append({name: tables[fieldType]} if fieldType in tables else (name, fieldType))
+    return schemaTableName, tuple(schemaFieldInfo), structs
 
 
-'''
-Quick check that the types in .fbs correspond, mainly strings match to strings,
-and vectors to vectors.
-If they do not correspond, the behavior for comparing the fb values in the tests
-is undefined, and action beyond this generator will need to be taken.
-'''
 def typesCorrespond(fbsType : str, cType : str) -> bool:
+    """Check string and vector compatibility before using schema accessors."""
     if ("[" in fbsType) or ("vector" in cType):
         return ("[" in fbsType) and ("vector" in cType)
 
@@ -153,11 +111,8 @@ def typesCorrespond(fbsType : str, cType : str) -> bool:
     return True
 
 
-'''
-Check it is not a base log type.
-Must have eventCode and defaultLevel
-'''
 def isValidLogType(lines : list) -> bool:
+    """Identify concrete logs by their event code and default priority."""
     hasEventCode = False
     hasDefaultLevel = False
     for line in lines:
@@ -179,16 +134,16 @@ def isValidLogType(lines : list) -> bool:
     return (hasEventCode and hasDefaultLevel)
 
 def makeTestInfoDict(hppFname : str, baseTypesDict : dict) -> dict:
+    """Read a log header and build the context for the Catch2 template."""
     returnInfo = dict()
-    headerFile = open(hppFname,"r")
-    headerLines = headerFile.readlines()
+    with open(hppFname) as headerFile:
+        headerLines = headerFile.readlines()
 
     # add name of test/file/type to be generated
     fNameParts = hppFname.split("/")
     returnInfo["name"] = fNameParts[-1].strip().split(".")[0]
     CamelCase = "".join([word.capitalize() for word in returnInfo["name"].split("_")])
     returnInfo["nameCamelCase"] = CamelCase[0].lower() + CamelCase[1:]
-    # print(f"LOGNAME: {returnInfo["name"]}")
     returnInfo["genTestFname"] = f"{returnInfo['name']}_generated_tests.cpp"
     returnInfo["className"] = "C" + "".join([word.capitalize() for word in returnInfo["name"].split("_")])
     returnInfo["classVarName"] = "".join([word[0].lower() for word in returnInfo["name"].split("_")])
@@ -209,12 +164,12 @@ def makeTestInfoDict(hppFname : str, baseTypesDict : dict) -> dict:
     hasFbMethods = False
     messageStructIdxs = []
     for i in range(len(headerLines)):
-        if "messageT(" in headerLines[i]:
+        if re.match(r"^\s*(?:explicit\s+)?messageT\s*\(", headerLines[i]):
             messageStructIdxs.append(i)
         if fbMethodName in headerLines[i]:
             hasFbMethods = True
 
-    schemaTableName, schemaFieldInfo = getSchemaFieldInfo(returnInfo["name"])
+    schemaTableName, schemaFieldInfo, schemaStructs = getSchemaFieldInfo(returnInfo["name"])
     returnInfo["schemaTableName"] = schemaTableName
 
     # handle log types that inherit from base types
@@ -237,14 +192,12 @@ def makeTestInfoDict(hppFname : str, baseTypesDict : dict) -> dict:
                 endIndex = line.find("_fb")
                 returnInfo["schemaTableName"] = f"{line[startIndex:endIndex]}_fb"
 
-    returnInfo["messageTypes"] = getMessageFieldInfo(messageStructIdxs, headerLines, schemaFieldInfo)
+    returnInfo["messageTypes"] = getMessageFieldInfo(messageStructIdxs, headerLines, schemaFieldInfo, schemaStructs, returnInfo["name"])
 
     return returnInfo
 
-'''
-Parse out field type and name from string
-'''
 def getTypeAndName(fieldParts : list) -> tuple[str, str]:
+    """Extract a parameter type and name, dropping const and references."""
 
     typeIdxStart = 1 if (fieldParts[0] == "const") else 0
     fieldType = fieldParts[typeIdxStart]
@@ -266,10 +219,8 @@ def getTypeAndName(fieldParts : list) -> tuple[str, str]:
 
     return fieldType, name
 
-'''
-Checks if log type has a corresponding generated .h file in ./types/generated
-'''
 def hasGeneratedHFile(logName : str) -> bool:
+    """Check whether this log has a generated FlatBuffers header."""
     generatedFolderPath = "./../types/generated/"
     generatedFolderPath = os.path.abspath(
         os.path.join(os.path.dirname(__file__), generatedFolderPath)
@@ -282,6 +233,7 @@ def hasGeneratedHFile(logName : str) -> bool:
     return False
 
 def getIntSize(type : str) -> int:
+    """Return the bit width of a fixed-width integer type, or 32 for int."""
     intSizeBits = 32 # default size 32 bits
     if "_t" in type:
         typeParts = type.split("_t")
@@ -292,6 +244,7 @@ def getIntSize(type : str) -> int:
 
 
 def getRandInt(type : str) -> int:
+    """Choose an integer within the range of its C++ type."""
     unsigned = True if "uint" in type else False
 
     intSizeBits = getIntSize(type)
@@ -305,6 +258,7 @@ def getRandInt(type : str) -> int:
     return random.randint(min, max)
 
 def getIncrementingInt(type : str) -> int:
+    """Advance the deterministic input sequence for an integer type."""
     intSizeBits = getIntSize(type)
 
     max = (2 ** intSizeBits) - 1
@@ -338,6 +292,7 @@ def getIncrementingInt(type : str) -> int:
         return gNextVals["int32"]
 
 def getTestValFromType(fieldType : str, schemaFieldType = None) -> str:
+    """Produce a C++ scalar initializer, honoring boolean schema conversions."""
     if "bool" in fieldType or (schemaFieldType is not None and "bool" in schemaFieldType):
         return "1"
     elif "string" in fieldType or "char *" in fieldType:
@@ -346,7 +301,7 @@ def getTestValFromType(fieldType : str, schemaFieldType = None) -> str:
             return f'"{gNextVals["string"]}"'
         randString = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
         return f'"{randString}"'
-    elif "int" in fieldType:
+    elif re.fullmatch(r"(?:u?int(?:8|16|32|64)_t|int|unsigned int)", fieldType):
         if gIncrementingVals:
             return str(getIncrementingInt(fieldType))
         # need 'u' suffix for randomly generated uint64_t to avoid:
@@ -367,8 +322,17 @@ def getTestValFromType(fieldType : str, schemaFieldType = None) -> str:
 
 
 def makeTestVal(fieldDict : dict) -> str:
+    """Generate inputs shared by regular and entropy tests, with valid fixtures."""
+    if "fixture" in fieldDict:
+        return fieldDict["fixture"]
+    if fieldDict["type"] == "timespec":
+        return "{123, 456789}"
     if "vector" in fieldDict["type"]:
-        vals = [ getTestValFromType(fieldDict["vectorType"]) for i in range(10)]
+        if "structMembers" in fieldDict:
+            vals = ["{" + ", ".join(getTestValFromType(t) for _, t in fieldDict["structMembers"]) + "}"
+                    for i in range(10)]
+        else:
+            vals = [getTestValFromType(fieldDict["vectorType"]) for i in range(10)]
 
         # special case telem_pokecenter because vector follows specific format
         if fieldDict["name"] == "pokes" and "vector<float" in fieldDict["type"]:
@@ -381,8 +345,22 @@ def makeTestVal(fieldDict : dict) -> str:
 
     return getTestValFromType(fieldDict["type"])
 
-# returns tuple of schema field info, subtable name (none if no subtable)
+def makeFieldAssertions(field : dict, actual : str, expected : str) -> list[str]:
+    """Compare serialized components without requiring aggregate operator==."""
+    if "structMembers" in field:
+        return [f"REQUIRE({actual}.size() == {expected}.size());",
+                f"for(size_t i = 0; i < {expected}.size(); ++i)", "{"] + [
+                    f"    REQUIRE({actual}[i].{name}() == {expected}[i].{name}());"
+                    for name, _ in field["structMembers"]
+                ] + ["}"]
+    if "schemaMembers" in field:
+        return [f"REQUIRE({actual}.{name} == {expected}.{name});" for name, _ in field["schemaMembers"]]
+    if "char *" in field["type"]:
+        return [f"REQUIRE(strcmp({actual}, {expected}) == 0);"]
+    return [f"REQUIRE({actual} == {expected});"]
+
 def findMatchingSchemaField(schemaFieldInfo, fieldName):
+    """Find an exact field name in the root or a nested schema table."""
     for schemaField in schemaFieldInfo:
         if isinstance(schemaField, tuple) and schemaField[0] == fieldName:
                 return schemaField, None
@@ -396,6 +374,7 @@ def findMatchingSchemaField(schemaFieldInfo, fieldName):
     return None, None # no matching field in schema for given fieldName
 
 def setDefaultArgOfLastField(fieldsList, fieldParts):
+    """Record defaults and expand source_location into file and line fields."""
     # this is the default arg value for msgsFieldList[-1]
     fieldsList[-1]["defaultArg"] = " ".join(fieldParts).strip("=").strip()
 
@@ -429,27 +408,23 @@ def setDefaultArgOfLastField(fieldsList, fieldParts):
 
 
 
-'''
-make 2d array. each inner array contains dictionaries corresponding to
-the type(s) and name(s) of field(s) in a message:
-[ [ {type : x, name: y ...}, {name: type, ...} ], ... ]
-'''
-def getMessageFieldInfo(messageStructIdxs: list, lines : list, schemaFieldInfo : tuple):
+def getMessageFieldInfo(messageStructIdxs: list, lines : list, schemaFieldInfo : tuple, schemaStructs : dict, logName : str):
+    """Map each constructor parameter to schema fields and test inputs."""
     msgTypesList = []
-    subTableDictIndex = 0
-
-    # extract log field types and names
-    inMultilineComment = False
-    inDefaultArgDef = False
+    # Extract each overload independently.
     for i in range(len(messageStructIdxs)):
         structIdx = messageStructIdxs[i]
         msgsFieldsList = []
+        subTableDictIndex = 0
+        inMultilineComment = False
+        inDefaultArgDef = False
 
         closed = False
         fieldCount = 0
         while not closed and structIdx < len(lines):
 
             line = lines[structIdx]
+            constructor = re.search(r"\bmessageT\s*\(", line)
 
             # check if this is a closing line
             if ")" in line:
@@ -463,19 +438,19 @@ def getMessageFieldInfo(messageStructIdxs: list, lines : list, schemaFieldInfo :
                     closeParenCount = line.count(")")
                     # check if truly closed or not
                     if (closeParenCount > openParenCount) or \
-                       (closeParenCount == openParenCount and "messageT(" in line):
+                       (closeParenCount == openParenCount and constructor):
                         closed = True # parse the field, don't leave loop yet
                         line = line[:line.rfind(")")]
 
             if inMultilineComment:
                 if "*/" in line:
                     inMultilineComment = False
-                    structIdx += 1
+                structIdx += 1
                 continue
 
 
             # trim line to just get field info
-            indexStart = (line.find("messageT(") + len("messageT(")) if "messageT(" in line else 0
+            indexStart = constructor.end() if constructor else 0
 
             indexEnd = len(line)
             # adjust for comments. Note /* takes precedence over //
@@ -529,8 +504,20 @@ def getMessageFieldInfo(messageStructIdxs: list, lines : list, schemaFieldInfo :
                     vectorIdx = [i for i, e in enumerate(typeParts) if "std::vector" in e][0]
                     vectorType = typeParts[vectorIdx + 1].strip(">")
                     fieldDict["vectorType"] = vectorType
+                    if vectorType in schemaStructs:
+                        struct = schemaStructs[vectorType]
+                        fieldDict["vectorType"] = struct["type"]
+                        fieldDict["type"] = f"std::vector<{struct['type']}>"
+                        fieldDict["structMembers"] = struct["members"]
 
-                if len(schemaFieldInfo) != 0:
+                if fieldType == "timespec":
+                    # A timestamp occupies consecutive seconds/nanoseconds fields.
+                    fieldDict["schemaMembers"] = list(zip(
+                        ("tv_sec", "tv_nsec"),
+                        (schemaFieldInfo[fieldCount][0], schemaFieldInfo[fieldCount + 1][0])
+                    ))
+                    fieldCount += 2
+                elif len(schemaFieldInfo) != 0:
 
                     if isinstance(schemaFieldInfo[fieldCount], tuple):
                         fieldDict["schemaName"] = schemaFieldInfo[fieldCount][0]
@@ -565,6 +552,8 @@ def getMessageFieldInfo(messageStructIdxs: list, lines : list, schemaFieldInfo :
                         del fieldDict["schemaName"]
                         del fieldDict["schemaType"]
 
+                if name in gTestFixtures.get(logName, {}):
+                    fieldDict["fixture"] = gTestFixtures[logName][name]
                 fieldDict["testVal"] = makeTestVal(fieldDict)
 
                 # add field dict to list of fields
@@ -572,7 +561,7 @@ def getMessageFieldInfo(messageStructIdxs: list, lines : list, schemaFieldInfo :
 
                 # note we do this after the fieldDict has been appended to msgsFieldList.
                 # This is because the function setDefaultArgOfLastField() does some
-                # special casing to replace std::current_location with field and line
+                # special casing to replace std::source_location with file and line
                 # within the msgsFieldsList
                 if "=" in field:
                     setDefaultArgOfLastField(msgsFieldsList, field)
@@ -584,13 +573,14 @@ def getMessageFieldInfo(messageStructIdxs: list, lines : list, schemaFieldInfo :
     return msgTypesList
 
 def makeInheritedTypeInfoDict(typesFolderPath : str, baseName : str, logName : str) -> dict:
+    """Build a test context using the inherited message constructor."""
     returnInfo = dict()
 
     baseFilePath = os.path.join(typesFolderPath, f"{baseName}.hpp")
-    baseHFile = open(baseFilePath,"r")
+    with open(baseFilePath) as baseHFile:
+        baseHLines = baseHFile.readlines()
 
     # add name of test/file/type to be generated
-    # print(f"LOGNAME: {logName}")
     returnInfo["name"] = logName
     returnInfo["genTestFname"] = f"{returnInfo['name']}_generated_tests.cpp"
     returnInfo["className"] = "C" + "".join([word.capitalize() for word in returnInfo["name"].split("_")])
@@ -600,30 +590,30 @@ def makeInheritedTypeInfoDict(typesFolderPath : str, baseName : str, logName : s
     returnInfo["baseType"] = baseName
     returnInfo["hasGeneratedHfile"] = hasGeneratedHFile(logName)
 
-    baseHLines = baseHFile.readlines()
-
     # find where messageT structs are being made in base log file -> describes fields
     messageStructIdxs = []
     for i in range(len(baseHLines)):
-        if "messageT(" in baseHLines[i]:
+        if re.match(r"^\s*(?:explicit\s+)?messageT\s*\(", baseHLines[i]):
             messageStructIdxs.append(i)
 
-    schemaTableName, schemaFieldInfo = getSchemaFieldInfo(baseName)
+    schemaTableName, schemaFieldInfo, schemaStructs = getSchemaFieldInfo(baseName)
 
     returnInfo["schemaTableName"] = schemaTableName
-    msgFieldInfo = getMessageFieldInfo(messageStructIdxs, baseHLines, schemaFieldInfo)
+    msgFieldInfo = getMessageFieldInfo(messageStructIdxs, baseHLines, schemaFieldInfo, schemaStructs, logName)
 
     returnInfo["messageTypes"] = [[]] if "empty_log" in baseName else msgFieldInfo
 
     return returnInfo
 
 def versionAsNumber(major, minor):
+    """Encode a Python major/minor pair for version comparisons."""
     return (major * 1000 + minor)
 
 def main():
-    # check python version >= 3.9
-    if (versionAsNumber(sys.version_info[0], sys.version_info[1]) < versionAsNumber(3,9)):
-        print("Error: Python version must be >= 3.9")
+    """Parse generator options and render regular and inherited log tests."""
+    # The generator uses Python 3.12 f-string syntax.
+    if (versionAsNumber(sys.version_info[0], sys.version_info[1]) < versionAsNumber(3,12)):
+        print("Error: Python version must be >= 3.12")
         exit(0)
 
 
@@ -654,6 +644,7 @@ def main():
     env = jinja2.Environment(
         loader = jinja2.FileSystemLoader(searchpath=os.path.dirname(__file__))
     )
+    env.globals["makeFieldAssertions"] = makeFieldAssertions
     env.trim_blocks = True
     env.lstrip_blocks = True
 

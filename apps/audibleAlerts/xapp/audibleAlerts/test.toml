@@ -1,0 +1,526 @@
+default_voice = "en_GB-cori-high"
+
+[walkups]
+"jlong@flatironinstitute.org" = [ "seven_nation.wav" ]
+"robert.j.harris@durham.ac.uk" = [ "robert.mp3" ]
+"jkueny@arizona.edu" = [ "jay_walkup.mp3" ]
+"viktoria.kutnohorsky@durham.ac.uk" = [ "viktoria.mp3" ]
+"taras@strw.leidenuniv.nl" = [ "adam.mp3" ]
+"aweinberger@carnegiescience.edu" = [ "alycia.mp3" ]
+"tiffanytn@arizona.edu" = [ "tiffanyisastar.mp3" ]
+"parkertjohnson1@arizona.edu" = [ "parker.mp3" ]
+"lclose@as.arizona.edu" = [ "allstar.wav" ]
+"lapearce@umich.edu" = [ "skibidi.wav" ]
+"jrmales@arizona.edu" = [ "aenema.wav" ]
+"jrhom@arizona.edu" = [ "justin.wav" ]
+"jliberman@arizona.edu" = [ "lipgloss.wav", "sober.wav" ]
+"twitchell@arizona.edu" = [ "katie.wav" ]
+"tonucci@strw.leidenuniv.nl" = [ "elena.wav" ]
+"edenmcewen@arizona.edu" = [ "eden.wav" ]
+"haffert@strw.leidenuniv.nl" = [ "sebastiaan.wav" ]
+"mars@strw.leidenuniv.nl" = [ "matthijs.wav" ]
+"mileslucas@arizona.edu" = [ "miles.wav" ]
+
+[soundboard.NotJared]
+type = "play"
+file = "not_jared.wav"
+[soundboard.Battles]
+type = "play"
+file = "toughest_battles.wav"
+[soundboard.Standards]
+type = "play"
+file = "we_have_standards.wav"
+[soundboard.ChickenNugget]
+type = "speak"
+text = "Chicken nugget"
+[soundboard.WeProudlyPresent]
+type = "play"
+file = "bad_fox.wav"
+[soundboard.Proposals]
+type = "play"
+file = "lkca15.wav"
+[soundboard.ThemeSong]
+type = "play"
+file = "clown.wav"
+[soundboard.BeepBeep]
+type = "play"
+file = "honkhonk.wav"
+[soundboard.Diggy]
+type = "play"
+file = "diggy_short.wav"
+[soundboard.PleaseClap]
+type = "play"
+file = "please_clap.wav"
+[soundboard.VizzyAO]
+type = "play"
+file = "blue.wav"
+[soundboard.Donny]
+type = "play"
+file = "donny.mp3"
+[soundboard.IWant2Believe]
+type = "play"
+file = "imabeliever_short.mp3"
+[soundboard.LetsGo]
+type = "play"
+file = "mariostart.mp3"
+[soundboard.Shenanigans]
+type = "play"
+file = "panther.mp3"
+[soundboard.AngryTurbulence]
+type = "play"
+file = "batushka_clip.wav"
+
+[[random_utterances]]
+type = "speak"
+text = "P.I. is asleep. I'm the P.I. now."
+
+[[random_utterances]]
+type = "play"
+file = "toughest_battles.wav"
+
+[[random_utterances]]
+type = "speak"
+text = "Oh, that little guy? I wouldn't worry about that little guy"
+
+[[random_utterances]]
+type = "speak"
+text = "Chicken nugget"
+
+[[random_utterances]]
+type = "speak"
+text = "I am being so brave right now."
+
+[[random_utterances]]
+type = "speak"
+text = "I can not wait to be replaced by AI"
+
+[[random_utterances]]
+type = "speak"
+text = "having more things just means that more things can go right"
+
+[[random_utterances]]
+type = "speak"
+text = "do not over-click mouse, as this can cause computers to freeze."
+
+[[random_utterances]]
+type = "speak"
+text = "Veggie nugget"
+
+[[random_utterances]]
+type = "speak"
+text = "I write sophisticated algorithms, not tragedies"
+
+[[random_utterances]]
+type = "speak"
+text = "Yourch control to Major Tom."
+
+[[random_utterances]]
+type = "speak"
+text = "So, by the way, how does a pyramid wavefront sensor actually work?"
+
+[[random_utterances]]
+type = "speak"
+text = "We, at toilet duck, recommend toilet duck."
+
+[[random_utterances]]
+type = "speak"
+text = "Entregue todas sus empanadas al jefe."
+voice = "es_MX-claude-high"
+
+[[random_utterances]]
+type = "speak"
+text = "Wee at Mag-A.O.X., recommend Mag-A.O.X."
+
+[[random_utterances]]
+type = "play"
+file = "not_jared.wav"
+
+[[random_utterances]]
+type = "speak"
+text = "non è consentito il cappuccino dopo mezzogiorno"
+voice = "it_IT-riccardo-x_low"
+
+
+[[react]]
+indi_id = "fwfpm.filterName.cmc"
+
+[[react.transition]]
+value = "On"
+
+[[react.transition.actions]]
+type = "speak"
+text = "non è consentito il cappuccino dopo mezzogiorno"
+voice = "it_IT-riccardo-x_low"
+
+[[react.transition.actions]]
+type = "speak"
+text = "Mama pee ya, here we go again"
+
+[[react]]
+indi_id = "fwfpm.filterName.cmc2"
+
+[[react.transition]]
+value = "On"
+
+[[react.transition.actions]]
+type = "speak"
+text = "Mama pee ya, here we go again"
+
+[[react.transition.actions]]
+type = "speak"
+text = "non è consentito il cappuccino dopo mezzogiorno"
+voice = "larynx:lisa-glow_tts"
+
+[[react]]
+indi_id = "flipacq.presetName.in"
+
+[[react.transition]]
+value = "On"
+actions = [
+    { type = "speak", text = "All right Parker, you're up" },
+]
+
+[[react.transition]]
+value = "Off"
+actions = [
+    { type = "speak", text = "Hold on to your butts" },
+]
+
+[[react]]
+indi_id = "observers.obs_on.toggle"
+
+[[react.transition]]
+value = "On"
+actions = [
+    { type = "speak", text = "Saving data for {observers.current_observer.pronunciation}." },
+]
+
+[[react.transition]]
+value = "Off"
+actions = [
+    { type = "speak", text = "Data saving stopped." },
+]
+
+[[react]]
+indi_id = "camflowfs.shutter.toggle"
+
+[[react.transition]]
+value = "On"
+actions = [
+    { type = "speak", text = "yo fuss shutter shut" },
+]
+
+[[react.transition]]
+value = "Off"
+actions = [
+    { type = "speak", text = "yo fuss shutter open" },
+]
+
+[[react]]
+indi_id = "holoop.loop_state.toggle"
+
+[[react.transition]]
+value = "On"
+op = "eq"
+actions = [
+    { type = "speak", text = "High-order loop is closed." },
+    { type = "speak", text = "Closing high-order loop." },
+    { type = "speak", text = "Mag-A.O.X. System: Engage high-order loop." },
+    { type = "speak", text = "High-order loop engaged" },
+    { type = "speak", text = "Adaptive optics turned up to 11." },
+    { type = "speak", text = "Science in progress. Please stand by." },
+    { type = "speak", text = "Energize." },
+    { type = "speak", text = "Engage." },
+    { type = "speak", text = "Let's go." },
+    { type = "speak", text = "Ready to kick some ass." },
+    { type = "speak", text = "We are so back." },
+    { type = "speak", text = "I am doing so good right now." },
+    { type = "speak", text = "Ready to go Captain." },
+    { type = "play", file = "mariostart.mp3" },
+]
+
+[[react.transition]]
+value = "Off"
+op = "eq"
+actions = [
+    { type = "speak", text = "No more adaptive optics for you" },
+    { type = "speak", text = "Loop is open" },
+    { type = "speak", text = "The fun is over" },
+    { type = "speak", text = "It is so over." },
+    { type = "speak", text = "This is embarrassing" },
+]
+
+[[react]]
+indi_id = "tcsi.teldata.dome_stat"
+
+[[react.transition]]
+value = "-1"
+op = "eq"
+actions = [
+    { type = "play", file = "bad_fox.wav" },
+    { type = "play", file = "please_clap.wav" },
+]
+
+[[react]]
+indi_id = "tcsi.catalog.object"
+
+[[react.transition]]
+actions = [
+    { type = "speak", text = "Target updated." },
+    { type = "speak", text = "New target selected." },
+]
+
+[[react]]
+indi_id = "tcsi.environment.humidity"
+
+[[react.transition]]
+op = "between"
+low = "80"
+high = "100"
+actions = [
+    { type = "speak", text = "Humidity warning: {tcsi.environment.humidity} percent" },
+]
+
+[[react.transition]]
+op = "between"
+low = "70"
+high = "80"
+actions = [
+    { type = "speak", text = "Humidity at {tcsi.environment.humidity} percent" },
+]
+
+[[react]]
+indi_id = "stageadc1.fsm.state"
+
+[[react.transition]]
+value = "NOTHOMED"
+actions = [
+    { type = "speak", text = "stage A.D.C. 1 is not homed. the cat is grumpy." },
+]
+
+[[react]]
+indi_id = "stageadc2.fsm.state"
+
+[[react.transition]]
+value = "NOTHOMED"
+actions = [
+    { type = "speak", text = "stage A.D.C. 2 is not homed. the cat is grumpy." },
+]
+
+[[react]]
+indi_id = "stagek.fsm.state"
+
+[[react.transition]]
+value = "NOTHOMED"
+actions = [
+    { type = "speak", text = "stage K. is not homed. the cat is grumpy." },
+]
+
+[[react]]
+indi_id = "tcsi.environment.wind"
+
+[[react.transition]]
+value = "35.1"
+op = "gt"
+actions = [
+    { type = "speak", text = "The last wind measurement exceeded the shutdown threshold" },
+    { type = "play", file = "that_escalated.wav" },
+]
+
+[[react]]
+indi_id = "tcsi.seeing.dimm_fwhm"
+
+[[react.transition]]
+value = "1.25"
+op = "gt"
+actions = [
+    { type = "speak", text = "You know, this is the worst seeing I can remember!" },
+    { type = "speak", text = "Engage L.B.T. conditions mode" },
+    { type = "speak", text = "We have standards" },
+    { type = "speak", text = "I'm strongly in favor of low expectations." },
+    { type = "speak", text = "The seeing is never normally this bad. Maybe we should give up." },
+    { type = "speak", text = "You guys know this is hopeless, right?" },
+    { type = "speak", text = "Well, the seeing is shit. Smoke um if you got um" },
+    { type = "speak", text = "Are you still operating in these conditions?" },
+    { type = "speak", text = "We're going to need a bigger plot." },
+    { type = "play", file = "toughest_battles.wav" },
+]
+
+[[react.transition]]
+op = "between"
+low = "0.0"
+high = "0.4"
+actions = [
+    { type = "speak", text = "I'm chuffed to bits" },
+    { type = "speak", text = "Seeing is believing" },
+    { type = "speak", text = "That might be the lowest number I've seen on the dim" },
+]
+
+[[react]]
+indi_id = "tcsi.labMode.toggle"
+
+[[react.transition]]
+value = "On"
+actions = [
+    { type = "speak", text = "At least on the internal source I can not break anything!" },
+]
+
+[[react.transition]]
+value = "Off"
+actions = [
+    { type = "speak", text = "I do not think we are in Tucson anymore." },
+    { type = "speak", text = "", voice = "it_IT-paola-medium" },
+]
+
+[[react]]
+indi_id = "loloop.loop_state.toggle"
+
+[[react.transition]]
+value = "On"
+actions = [
+    { type = "speak", text = "Beep boop bop." },
+    { type = "speak", text = "Low fiss on" },
+    { type = "speak", text = "Hocus pocus low fiss" },
+]
+
+[[react.transition]]
+value = "Off"
+actions = [
+    { type = "speak", text = "I am so done with this." },
+    { type = "speak", text = "Low fiss off" },
+]
+
+[[react]]
+indi_id = "camvisx.current_exposure.remaining_pct"
+
+[[react.transition]]
+value = "90"
+op = "gt"
+
+[[react.transition.actions]]
+type = "speak"
+text = "Gaan met die banaan."
+voice = "nl_NL-alex-medium"
+
+[[react.transition.actions]]
+type = "speak"
+text = "De dood of de gladiolen."
+voice = "nl_NL-alex-medium"
+
+[[react.transition.actions]]
+type = "speak"
+text = "De kogel is door de kerk."
+voice = "nl_NL-alex-medium"
+
+[[react.transition.actions]]
+type = "speak"
+text = "Als de kat van huis is, dansen de muizen op tafel."
+voice = "nl_NL-alex-medium"
+
+[[react]]
+indi_id = "camvisx.current_exposure.remaining_pct"
+
+[[react.transition]]
+value = "0"
+op = "le"
+actions = [
+    { type = "speak", text = "Exposuring complete" },
+    { type = "speak", text = "Done visex ing" },
+    { type = "speak", text = "Sixty megapixels for you" },
+    { type = "play", file = "please_clap.wav" },
+]
+
+[[react]]
+indi_id = "tweeterSpeck.modulating.toggle"
+
+[[react.transition]]
+value = "On"
+
+[[react.transition.actions]]
+type = "speak"
+text = "sparkles mick yew in to the control room, paging sparkles mick yew in"
+
+[[react.transition.actions]]
+type = "speak"
+text = "twinkle twinkle"
+
+[[react.transition.actions]]
+type = "speak"
+text = "bling bling"
+
+[[react.transition.actions]]
+type = "speak"
+text = "You needed more speckles?"
+
+[[react]]
+indi_id = "labrules.info.loop-closed-above-2kHz"
+
+[[react.transition]]
+value = "On"
+
+[[react.transition.actions]]
+type = "play"
+file = "doc_brown_shit.wav"
+
+[[react.transition.actions]]
+type = "play"
+file = "top_gun_need.wav"
+
+[[react.transition.actions]]
+type = "play"
+file = "ricky_go_fast.wav"
+
+[[react.transition.actions]]
+type = "play"
+file = "pull_over.wav"
+
+[[react.transition.actions]]
+type = "speak"
+text = "the captain has turned on the seatbelt sign. please return to your seats"
+
+[[react.transition.actions]]
+type = "speak"
+text = "better keep an eye on gee pee you temperature"
+
+[[react.transition.actions]]
+type = "speak"
+text = "I'm worried we're gonna go plaid"
+
+[[react]]
+indi_id = "labrules.info.loop-closed-below-1kHz"
+
+[[react.transition]]
+value = "On"
+actions = [
+    { type = "play", file = "close_down.wav" },
+    { type = "play", file = "help_push.wav" },
+    { type = "play", file = "shit_man.wav" },
+    { type = "speak", text = "we don't even need gee pee yous for this" },
+    { type = "speak", text = "someone doesn't have enough photons" },
+    { type = "speak", text = "can anyone spare a photon or two?" },
+]
+
+[[react]]
+indi_id = "camsci1.synchro.toggle"
+
+[[react.transition]]
+value = "On"
+actions = [
+    { type = "speak", text = "Synchronized" },
+]
+
+[[react.transition]]
+value = "Off"
+actions = [
+    { type = "speak", text = "Free running" },
+]
+
+[[react]]
+indi_id = "pdu3.blower.state"
+
+[[react.transition]]
+value = "On"
+actions = [
+    { type = "play", file = "noonoo.mp3" },
+]
+

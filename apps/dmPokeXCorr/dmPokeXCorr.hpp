@@ -85,13 +85,16 @@ class dmPokeXCorr : public MagAOXApp<true>,
      *@{
      */
 
-    std::string m_zRespMFile;
+    std::string m_zRespMFile; ///< Unused.  The zonal response is read from the zrespM shmim.
+
+    float m_minXCorr{ 0.3 }; /**< Minimum normalized cross-correlation peak for a valid measurement.  Lower values are
+                                  rejected as no poke response.  <= 0 disables the check.  Default is 0.3. */
 
     ///@}
 
-    mx::improc::imageXCorrFFT<eigenImage<float>> m_xcorr;
+    mx::improc::imageXCorrFFT<eigenImage<float>> m_xcorr; ///< Cross-correlator holding the poke reference image.
 
-    mx::improc::milkImage<float> m_refIm;
+    mx::improc::milkImage<float> m_refIm; ///< Stream publishing the poke reference image built from zrespM.
 
   public:
     /// Default c'tor.
@@ -183,6 +186,59 @@ class dmPokeXCorr : public MagAOXApp<true>,
      */
     int analyzeSensor();
 
+    /// Convert a cross-correlation peak to a correlation coefficient
+    /** The cross-correlator normalizes both images to zero mean and unit variance, so the peak divided by the number of
+     * pixels is the correlation coefficient at the peak.
+     *
+     * \returns the normalized peak, or 0 if the poke image is empty
+     */
+    float normalizedPeak( float peak /**< [in] the cross-correlation peak */ );
+
+    /// Check whether a normalized cross-correlation peak indicates a poke response
+    /**
+     * \returns true if \p normPeak is at least m_minXCorr, or if m_minXCorr <= 0
+     * \returns false otherwise
+     */
+    bool peakValid( float normPeak /**< [in] the normalized cross-correlation peak */ ) const;
+
+    /// Cross-correlate the negated poke image with the reference
+    /** A sign-inverted poke response gives an in-range delta here.
+     *
+     * \returns 0 on success
+     * \returns -1 on error, which is logged
+     */
+    int xcorrInverted( float &deltaX, /**< [out] the x delta of the negated poke image, in pixels */
+                       float &deltaY, /**< [out] the y delta of the negated poke image, in pixels */
+                       float &peak    /**< [out] the cross-correlation peak of the negated poke image */
+    );
+
+    /// Save diagnostics for the current measurement
+    /** Adds the cross-correlation results to the header, then writes the base diagnostics and the reference image.
+     *
+     * \returns 0 on success
+     * \returns -1 on error, which is logged
+     */
+    int saveDiagnostics( std::string       &prefix,    /**< [out] the path and file name prefix of the files written */
+                         const std::string &reason,    /**< [in] why diagnostics are being saved */
+                         float              deltaX,    /**< [in] the measured x delta, in pixels */
+                         float              deltaY,    /**< [in] the measured y delta, in pixels */
+                         float              peak,      /**< [in] the cross-correlation peak */
+                         float              invDeltaX, /**< [in] the x delta of the negated poke image, in pixels */
+                         float              invDeltaY, /**< [in] the y delta of the negated poke image, in pixels */
+                         float              invPeak    /**< [in] the cross-correlation peak of the negated poke image */
+    );
+
+    /// Reject an out-of-range or low-correlation measurement
+    /** Checks the negated poke image to distinguish a sign inversion from a missing poke response, saves diagnostics,
+     * and logs an error with a hint to the operator.  The measurement is not published.
+     *
+     * \returns -1 so that the caller can stop measuring
+     */
+    int rejectMeasurement( float deltaX, /**< [in] the measured x delta, in pixels */
+                           float deltaY, /**< [in] the measured y delta, in pixels */
+                           float peak    /**< [in] the cross-correlation peak */
+    );
+
     ///@}
 
     /** \name INDI Interface
@@ -214,6 +270,17 @@ void dmPokeXCorr::setupConfig()
 
     SHMIMMONITORT_SETUP_CONFIG( zrespShmimMonitorT, config );
 
+    config.add( "xcorr.minPeak",
+                "",
+                "xcorr.minPeak",
+                argType::Required,
+                "xcorr",
+                "minPeak",
+                false,
+                "float",
+                "Minimum normalized cross-correlation peak for a valid measurement.  Lower values are rejected as no "
+                "poke response.  <= 0 disables the check.  Default 0.3." );
+
     TELEMETER_SETUP_CONFIG( config );
 }
 
@@ -222,6 +289,8 @@ int dmPokeXCorr::loadConfigImpl( mx::app::appConfigurator &_config )
     DMPOKEWFS_LOAD_CONFIG( _config );
 
     SHMIMMONITORT_LOAD_CONFIG( zrespShmimMonitorT, _config );
+
+    _config( m_minXCorr, "xcorr.minPeak" );
 
     TELEMETER_LOAD_CONFIG( _config );
 
@@ -389,12 +458,144 @@ int dmPokeXCorr::analyzeSensor()
     std::cerr.precision( 5 );
     std::cerr << "dmPokeXCorr::analyzeSensor: " << xs << " " << ys << "\n";
 
+    if( !measurementInRange( xs, ys ) || !peakValid( normalizedPeak( pk ) ) )
+    {
+        return rejectMeasurement( xs, ys, pk );
+    }
+
+    if( m_saveDiagnostics.exchange( false ) )
+    {
+        float       xi = 0, yi = 0, pki = 0;
+        std::string prefix;
+        if( xcorrInverted( xi, yi, pki ) == 0 && saveDiagnostics( prefix, "requested", xs, ys, pk, xi, yi, pki ) == 0 )
+        {
+            log<text_log>( "diagnostics saved to " + prefix + "_*.fits" );
+        }
+    }
+
     if( updateMeasurement( xs, ys ) < 0 )
     {
         return log<software_error, -1>( { __FILE__, __LINE__, "error from dmPokeWFS::updateMeasurement" } );
     }
 
     return 0;
+}
+
+float dmPokeXCorr::normalizedPeak( float peak )
+{
+    float npix = m_pokeImage().rows() * m_pokeImage().cols();
+
+    return ( npix > 0 ) ? peak / npix : 0;
+}
+
+bool dmPokeXCorr::peakValid( float normPeak ) const
+{
+    return ( m_minXCorr <= 0 || normPeak >= m_minXCorr );
+}
+
+int dmPokeXCorr::xcorrInverted( float &deltaX, float &deltaY, float &peak )
+{
+    eigenImage<float> inv = -m_pokeImage();
+
+    try
+    {
+        m_xcorr( deltaX, deltaY, peak, inv );
+    }
+    catch( const std::exception &e )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, std::string( "exception caught: \n" ) + e.what() } );
+    }
+
+    return 0;
+}
+
+int dmPokeXCorr::saveDiagnostics( std::string       &prefix,
+                                  const std::string &reason,
+                                  float              deltaX,
+                                  float              deltaY,
+                                  float              peak,
+                                  float              invDeltaX,
+                                  float              invDeltaY,
+                                  float              invPeak )
+{
+    mx::fits::fitsHeader<> head;
+    head.append( "REASON", reason, "why diagnostics were saved" );
+    head.append( "DELTAX", deltaX, "measured x delta [pix]" );
+    head.append( "DELTAY", deltaY, "measured y delta [pix]" );
+    head.append( "XCPEAK", peak, "cross-correlation peak" );
+    head.append( "XCNORM", normalizedPeak( peak ), "normalized cross-correlation peak" );
+    head.append( "MINXCORR", m_minXCorr, "minimum normalized peak" );
+    head.append( "INVDX", invDeltaX, "x delta of negated poke image [pix]" );
+    head.append( "INVDY", invDeltaY, "y delta of negated poke image [pix]" );
+    head.append( "INVPEAK", invPeak, "cross-correlation peak of negated poke image" );
+    head.append( "INVNORM", normalizedPeak( invPeak ), "normalized peak of negated poke image" );
+    uint64_t wfsCnt0 = ( shmimMonitorT::m_imageStream.md != nullptr ) ? shmimMonitorT::m_imageStream.md->cnt0 : 0;
+    head.append( "WFSCNT0", wfsCnt0, "WFS stream cnt0 at write" );
+
+    if( writeDiagnostics( prefix, head ) < 0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "error from writeDiagnostics" } );
+    }
+
+    mx::fits::fitsFile<float> ff;
+    eigenImage<float>         ref = m_xcorr.refIm();
+    if( !!ff.write( prefix + "_refIm.fits", ref, head ) )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "error writing " + prefix + "_refIm.fits" } );
+    }
+
+    return 0;
+}
+
+int dmPokeXCorr::rejectMeasurement( float deltaX, float deltaY, float peak )
+{
+    float xi = 0, yi = 0, pki = 0;
+    bool  invOK = ( xcorrInverted( xi, yi, pki ) == 0 );
+
+    float norm    = normalizedPeak( peak );
+    float invNorm = normalizedPeak( pki );
+
+    std::ostringstream msg;
+    msg << "measurement rejected: delta (" << deltaX << ", " << deltaY << "), normalized xcorr peak " << norm << ". ";
+
+    if( !measurementInRange( deltaX, deltaY ) )
+    {
+        msg << "Delta exceeds maxDelta " << m_maxDelta << " pix. ";
+    }
+
+    if( !peakValid( norm ) )
+    {
+        msg << "Peak is below minPeak " << m_minXCorr << ". ";
+    }
+
+    if( invOK && measurementInRange( xi, yi ) && peakValid( invNorm ) && invNorm > norm )
+    {
+        msg << "Inverted response confirmed: the negated poke image gives delta (" << xi << ", " << yi
+            << ") with normalized peak " << invNorm << ". Change the sign of poke_amp. ";
+    }
+    else if( invOK && !peakValid( norm ) && !peakValid( invNorm ) )
+    {
+        msg << "No poke response detected (negated peak " << invNorm << "); check that the DM is responding. ";
+    }
+    else if( invOK )
+    {
+        msg << "This is not a simple sign inversion (negated poke image gives delta (" << xi << ", " << yi
+            << ") with normalized peak " << invNorm << "). ";
+    }
+
+    std::string prefix;
+    if( saveDiagnostics( prefix, "rejected", deltaX, deltaY, peak, xi, yi, pki ) == 0 )
+    {
+        msg << "Measurement stopped; diagnostics written to " << prefix << "_*.fits";
+    }
+    else
+    {
+        msg << "Measurement stopped; diagnostics could not be written";
+    }
+
+    log<text_log>( msg.str(), logPrio::LOG_ERROR );
+
+    return -1;
 }
 
 int dmPokeXCorr::checkRecordTimes()

@@ -1,24 +1,26 @@
 #!/bin/bash
 
 #####################################################
-## MagAO-X RTC cpuset configuration
+## \file
+## \brief Configure RTC system and dedicated real-time cpusets.
 ##
 ## See https://linux.die.net/man/7/cpuset
 ##
 ## Run this as sudo at startup of the system
-## Then run rtc_procset after starting all loop processes
+## For a rename migration, stop instrument processes and run remove_cpusets first.
+## Applications and CACAO FPS settings place their threads in these sets.
 ##
 ####################################################
 
 source /etc/profile.d/cgroups1_cpuset_mountpoint.sh
-cpusetMount=$CGROUPS1_CPUSET_MOUNTPOINT
+cpusetMount="$CGROUPS1_CPUSET_MOUNTPOINT"
 
 # RTC w/ AMD Threadripper 64 core / 128 threads
 
 set -xeuo pipefail
 
-# we will use processors 0-31 and 64-95 as the hyperthread system cpus (32 cores, 64 threads),
-# so we disable processors 96-127. This leaves us 32-63 (32) as single thread r/t processors.
+# Use processors 0-29 and 64-93 for system tasks (30 cores, 60 threads).
+# Disable SMT siblings 94-127, leaving 30-63 as 34 single-thread R/T cores.
 
 #enable everything first just to start from a known state
 for cpu in {1..127}
@@ -26,21 +28,21 @@ do
    /bin/echo 1 > /sys/devices/system/cpu/cpu$cpu/online
 done
 
-# Disable processors 96-127, the hardware threads
-for cpu in {96..127}
+# Disable the SMT siblings of all dedicated real-time cores.
+for cpu in {94..127}
 do
    /bin/echo 0 > /sys/devices/system/cpu/cpu$cpu/online
 done
 
-cd $cpusetMount
+cd "$cpusetMount"
 
 #############################
 # The system cpuset
 #
 ############################
-mkdir -p $cpusetMount/system
-/bin/echo 0-31,64-95 > $cpusetMount/system/cpuset.cpus
-/bin/echo 0 > $cpusetMount/system/cpuset.mems
+mkdir -p "$cpusetMount/system"
+/bin/echo 0-29,64-93 > "$cpusetMount/system/cpuset.cpus"
+/bin/echo 0 > "$cpusetMount/system/cpuset.mems"
 
 # Now move all current tasks to system cpuset
 # Note that this moves pid=1 (init) so all new process created should live here.
@@ -60,197 +62,209 @@ echo 1 > system/cpuset.sched_load_balance
 ###############
 
 
+#spare30: dedicated development reserve; SMT sibling CPU94 is offline
+mkdir -p "$cpusetMount/spare30"
+/bin/echo 30 > "$cpusetMount/spare30/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/spare30/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/spare30/cpuset.mems"
+
+#spare31: dedicated development reserve; SMT sibling CPU95 is offline
+mkdir -p "$cpusetMount/spare31"
+/bin/echo 31 > "$cpusetMount/spare31/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/spare31/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/spare31/cpuset.mems"
+
 #camwfs_sw
-mkdir -p $cpusetMount/camwfs_sw
-/bin/echo 32 > $cpusetMount/camwfs_sw/cpuset.cpus
-/bin/echo 1 > $cpusetMount/camwfs_sw/cpuset.cpu_exclusive
-/bin/echo 0 > $cpusetMount/camwfs_sw/cpuset.mems
+mkdir -p "$cpusetMount/camwfs_sw"
+/bin/echo 32 > "$cpusetMount/camwfs_sw/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/camwfs_sw/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/camwfs_sw/cpuset.mems"
 
 #camwfs
-mkdir -p $cpusetMount/camwfs
-/bin/echo 33 > $cpusetMount/camwfs/cpuset.cpus
-/bin/echo 1 > $cpusetMount/camwfs/cpuset.cpu_exclusive
-/bin/echo 0 > $cpusetMount/camwfs/cpuset.mems
+mkdir -p "$cpusetMount/camwfs"
+/bin/echo 33 > "$cpusetMount/camwfs/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/camwfs/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/camwfs/cpuset.mems"
 
-#camwfs2
-mkdir -p $cpusetMount/camwfs2
-/bin/echo 34 > $cpusetMount/camwfs2/cpuset.cpus
-/bin/echo 1 > $cpusetMount/camwfs2/cpuset.cpu_exclusive
-/bin/echo 0 > $cpusetMount/camwfs2/cpuset.mems
+#camwfs_irq: EDT IRQ, separate core sharing camwfs L3
+mkdir -p "$cpusetMount/camwfs_irq"
+/bin/echo 34 > "$cpusetMount/camwfs_irq/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/camwfs_irq/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/camwfs_irq/cpuset.mems"
 
-#spare35
-mkdir -p $cpusetMount/spare35
-/bin/echo 35 > $cpusetMount/spare35/cpuset.cpus
-/bin/echo 1 > $cpusetMount/spare35/cpuset.cpu_exclusive
-/bin/echo 0 > $cpusetMount/spare35/cpuset.mems
+#aol1_modevalWFS-sw
+mkdir -p "$cpusetMount/aol1_modevalWFS-sw"
+/bin/echo 35 > "$cpusetMount/aol1_modevalWFS-sw/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/aol1_modevalWFS-sw/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/aol1_modevalWFS-sw/cpuset.mems"
 
-#spare36
-mkdir -p $cpusetMount/spare36
-/bin/echo 36 > $cpusetMount/spare36/cpuset.cpus
-/bin/echo 1 > $cpusetMount/spare36/cpuset.cpu_exclusive
-/bin/echo 0 > $cpusetMount/spare36/cpuset.mems
+#dmtweeter-recon
+mkdir -p "$cpusetMount/dmtweeter-recon"
+/bin/echo 36 > "$cpusetMount/dmtweeter-recon/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/dmtweeter-recon/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/dmtweeter-recon/cpuset.mems"
 
 #dm00comb (woofer)
-mkdir -p $cpusetMount/dm00comb
-/bin/echo 37 > $cpusetMount/dm00comb/cpuset.cpus
-/bin/echo 1 > $cpusetMount/dm00comb/cpuset.cpu_exclusive
-/bin/echo 0 > $cpusetMount/dm00comb/cpuset.mems
+mkdir -p "$cpusetMount/dm00comb"
+/bin/echo 37 > "$cpusetMount/dm00comb/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/dm00comb/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/dm00comb/cpuset.mems"
 
 #woofer
-mkdir -p $cpusetMount/woofer
-/bin/echo 38 > $cpusetMount/woofer/cpuset.cpus
-/bin/echo 1 > $cpusetMount/woofer/cpuset.cpu_exclusive
-/bin/echo 0 > $cpusetMount/woofer/cpuset.mems
+mkdir -p "$cpusetMount/woofer"
+/bin/echo 38 > "$cpusetMount/woofer/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/woofer/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/woofer/cpuset.mems"
 
 #dm01comb
-mkdir -p $cpusetMount/dm01comb
-/bin/echo 39 > $cpusetMount/dm01comb/cpuset.cpus
-/bin/echo 1 > $cpusetMount/dm01comb/cpuset.cpu_exclusive
-/bin/echo 0 > $cpusetMount/dm01comb/cpuset.mems
+mkdir -p "$cpusetMount/dm01comb"
+/bin/echo 39 > "$cpusetMount/dm01comb/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/dm01comb/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/dm01comb/cpuset.mems"
 
 #tweeter
-mkdir -p $cpusetMount/tweeter
-/bin/echo 40 > $cpusetMount/tweeter/cpuset.cpus
-/bin/echo 1 > $cpusetMount/tweeter/cpuset.cpu_exclusive
-/bin/echo 0 > $cpusetMount/tweeter/cpuset.mems
+mkdir -p "$cpusetMount/tweeter"
+/bin/echo 40 > "$cpusetMount/tweeter/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/tweeter/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/tweeter/cpuset.mems"
 
-#t2w offload process
-mkdir -p $cpusetMount/t2w
-/bin/echo 41 > $cpusetMount/t2w/cpuset.cpus
-/bin/echo 1 > $cpusetMount/t2w/cpuset.cpu_exclusive
-/bin/echo 0 > $cpusetMount/t2w/cpuset.mems
+#dmtweeter-synco: primary monitor and scheduler
+mkdir -p "$cpusetMount/dmtweeter-synco"
+/bin/echo 41 > "$cpusetMount/dmtweeter-synco/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/dmtweeter-synco/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/dmtweeter-synco/cpuset.mems"
 
-#spare42
-mkdir -p $cpusetMount/spare42
-/bin/echo 42 > $cpusetMount/spare42/cpuset.cpus
-/bin/echo 1 > $cpusetMount/spare42/cpuset.cpu_exclusive
-/bin/echo 0 > $cpusetMount/spare42/cpuset.mems
+#aol0_modevalDMf_mon-sw
+mkdir -p "$cpusetMount/aol0_modevalDMf_mon-sw"
+/bin/echo 42 > "$cpusetMount/aol0_modevalDMf_mon-sw/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/aol0_modevalDMf_mon-sw/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/aol0_modevalDMf_mon-sw/cpuset.mems"
 
-#spare43
-mkdir -p $cpusetMount/spare43
-/bin/echo 43 > $cpusetMount/spare43/cpuset.cpus
-/bin/echo 1 > $cpusetMount/spare43/cpuset.cpu_exclusive
-/bin/echo 0 > $cpusetMount/spare43/cpuset.mems
+#po4ao
+mkdir -p "$cpusetMount/po4ao"
+/bin/echo 43 > "$cpusetMount/po4ao/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/po4ao/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/po4ao/cpuset.mems"
 
-#spare44
-mkdir -p $cpusetMount/spare44
-/bin/echo 44 > $cpusetMount/spare44/cpuset.cpus
-/bin/echo 1 > $cpusetMount/spare44/cpuset.cpu_exclusive
-/bin/echo 0 > $cpusetMount/spare44/cpuset.mems
+#aol1_modevalDMf_mon-sw
+mkdir -p "$cpusetMount/aol1_modevalDMf_mon-sw"
+/bin/echo 44 > "$cpusetMount/aol1_modevalDMf_mon-sw/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/aol1_modevalDMf_mon-sw/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/aol1_modevalDMf_mon-sw/cpuset.mems"
 
 #acqu_mvm
-mkdir -p $cpusetMount/acqu_mvm
-/bin/echo 45 > $cpusetMount/acqu_mvm/cpuset.cpus
-/bin/echo 1 > $cpusetMount/acqu_mvm/cpuset.cpu_exclusive
-/bin/echo 0 > $cpusetMount/acqu_mvm/cpuset.mems
+mkdir -p "$cpusetMount/acqu_mvm"
+/bin/echo 45 > "$cpusetMount/acqu_mvm/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/acqu_mvm/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/acqu_mvm/cpuset.mems"
 
 #mfilt
-mkdir -p $cpusetMount/mfilt
-/bin/echo 46 > $cpusetMount/mfilt/cpuset.cpus
-/bin/echo 1 > $cpusetMount/mfilt/cpuset.cpu_exclusive
-/bin/echo 0 > $cpusetMount/mfilt/cpuset.mems
+mkdir -p "$cpusetMount/mfilt"
+/bin/echo 46 > "$cpusetMount/mfilt/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/mfilt/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/mfilt/cpuset.mems"
 
 #tweeterSpeck
-mkdir -p $cpusetMount/tweeterSpeck
-/bin/echo 47 > $cpusetMount/tweeterSpeck/cpuset.cpus
-/bin/echo 1 > $cpusetMount/tweeterSpeck/cpuset.cpu_exclusive
-/bin/echo 0 > $cpusetMount/tweeterSpeck/cpuset.mems
+mkdir -p "$cpusetMount/tweeterSpeck"
+/bin/echo 47 > "$cpusetMount/tweeterSpeck/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/tweeterSpeck/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/tweeterSpeck/cpuset.mems"
 
 #mlat
-mkdir -p $cpusetMount/mlat
-/bin/echo 48 > $cpusetMount/mlat/cpuset.cpus
-/bin/echo 1 > $cpusetMount/mlat/cpuset.cpu_exclusive
-/bin/echo 0 > $cpusetMount/mlat/cpuset.mems
+mkdir -p "$cpusetMount/mlat"
+/bin/echo 48 > "$cpusetMount/mlat/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/mlat/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/mlat/cpuset.mems"
 
-#RTmon
-mkdir -p $cpusetMount/RTmon
-/bin/echo 49 > $cpusetMount/RTmon/cpuset.cpus
-/bin/echo 1 > $cpusetMount/RTmon/cpuset.cpu_exclusive
-/bin/echo 0 > $cpusetMount/RTmon/cpuset.mems
+#RTmon: milk-shmimmon
+mkdir -p "$cpusetMount/RTmon"
+/bin/echo 49 > "$cpusetMount/RTmon/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/RTmon/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/RTmon/cpuset.mems"
 
-#spare50
-mkdir -p $cpusetMount/spare50
-/bin/echo 50 > $cpusetMount/spare50/cpuset.cpus
-/bin/echo 1 > $cpusetMount/spare50/cpuset.cpu_exclusive
-/bin/echo 0 > $cpusetMount/spare50/cpuset.mems
+#aol1_modevalWFS_cbuff
+mkdir -p "$cpusetMount/aol1_modevalWFS_cbuff"
+/bin/echo 50 > "$cpusetMount/aol1_modevalWFS_cbuff/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/aol1_modevalWFS_cbuff/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/aol1_modevalWFS_cbuff/cpuset.mems"
 
-#spare51
-mkdir -p $cpusetMount/spare51
-/bin/echo 51 > $cpusetMount/spare51/cpuset.cpus
-/bin/echo 1 > $cpusetMount/spare51/cpuset.cpu_exclusive
-/bin/echo 0 > $cpusetMount/spare51/cpuset.mems
+#dm01disp-sw
+mkdir -p "$cpusetMount/dm01disp-sw"
+/bin/echo 51 > "$cpusetMount/dm01disp-sw/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/dm01disp-sw/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/dm01disp-sw/cpuset.mems"
 
-#spare52
-mkdir -p $cpusetMount/spare52
-/bin/echo 52 > $cpusetMount/spare52/cpuset.cpus
-/bin/echo 1 > $cpusetMount/spare52/cpuset.cpu_exclusive
-/bin/echo 0 > $cpusetMount/spare52/cpuset.mems
+#dm01disp03-sw
+mkdir -p "$cpusetMount/dm01disp03-sw"
+/bin/echo 52 > "$cpusetMount/dm01disp03-sw/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/dm01disp03-sw/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/dm01disp03-sw/cpuset.mems"
 
-#spare53
-mkdir -p $cpusetMount/spare53
-/bin/echo 53 > $cpusetMount/spare53/cpuset.cpus
-/bin/echo 1 > $cpusetMount/spare53/cpuset.cpu_exclusive
-/bin/echo 0 > $cpusetMount/spare53/cpuset.mems
+#aol1_imWFS2-sw
+mkdir -p "$cpusetMount/aol1_imWFS2-sw"
+/bin/echo 53 > "$cpusetMount/aol1_imWFS2-sw/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/aol1_imWFS2-sw/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/aol1_imWFS2-sw/cpuset.mems"
 
 #camtip
-mkdir -p $cpusetMount/camtip
-/bin/echo 54 > $cpusetMount/camtip/cpuset.cpus
-/bin/echo 1 > $cpusetMount/camtip/cpuset.cpu_exclusive
-/bin/echo 0 > $cpusetMount/camtip/cpuset.mems
+mkdir -p "$cpusetMount/camtip"
+/bin/echo 54 > "$cpusetMount/camtip/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/camtip/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/camtip/cpuset.mems"
 
 #camtip_sw
-mkdir -p $cpusetMount/camtip_sw
-/bin/echo 55 > $cpusetMount/camtip_sw/cpuset.cpus
-/bin/echo 1 > $cpusetMount/camtip_sw/cpuset.cpu_exclusive
-/bin/echo 0 > $cpusetMount/camtip_sw/cpuset.mems
+mkdir -p "$cpusetMount/camtip_sw"
+/bin/echo 55 > "$cpusetMount/camtip_sw/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/camtip_sw/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/camtip_sw/cpuset.mems"
 
-#camacq
-mkdir -p $cpusetMount/camacq
-/bin/echo 56 > $cpusetMount/camacq/cpuset.cpus
-/bin/echo 1 > $cpusetMount/camacq/cpuset.cpu_exclusive
-/bin/echo 0 > $cpusetMount/camacq/cpuset.mems
+#spare56: available after camacq returns to the system pool
+mkdir -p "$cpusetMount/spare56"
+/bin/echo 56 > "$cpusetMount/spare56/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/spare56/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/spare56/cpuset.mems"
 
-#camacq_sw
-mkdir -p $cpusetMount/camacq_sw
-/bin/echo 57 > $cpusetMount/camacq_sw/cpuset.cpus
-/bin/echo 1 > $cpusetMount/camacq_sw/cpuset.cpu_exclusive
-/bin/echo 0 > $cpusetMount/camacq_sw/cpuset.mems
+#spare57: available after camacq-sw returns to the system pool
+mkdir -p "$cpusetMount/spare57"
+/bin/echo 57 > "$cpusetMount/spare57/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/spare57/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/spare57/cpuset.mems"
 
 #shmimTCP
-mkdir -p $cpusetMount/shmimTCP
-/bin/echo 58 > $cpusetMount/shmimTCP/cpuset.cpus
-/bin/echo 1 > $cpusetMount/shmimTCP/cpuset.cpu_exclusive
-/bin/echo 0 > $cpusetMount/shmimTCP/cpuset.mems
+mkdir -p "$cpusetMount/shmimTCP"
+/bin/echo 58 > "$cpusetMount/shmimTCP/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/shmimTCP/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/shmimTCP/cpuset.mems"
 
-#spare59
-mkdir -p $cpusetMount/spare59
-/bin/echo 59 > $cpusetMount/spare59/cpuset.cpus
-/bin/echo 1 > $cpusetMount/spare59/cpuset.cpu_exclusive
-/bin/echo 0 > $cpusetMount/spare59/cpuset.mems
+#acc000-cbuff
+mkdir -p "$cpusetMount/acc000-cbuff"
+/bin/echo 59 > "$cpusetMount/acc000-cbuff/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/acc000-cbuff/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/acc000-cbuff/cpuset.mems"
 
-#spare60
-mkdir -p $cpusetMount/spare60
-/bin/echo 60 > $cpusetMount/spare60/cpuset.cpus
-/bin/echo 1 > $cpusetMount/spare60/cpuset.cpu_exclusive
-/bin/echo 0 > $cpusetMount/spare60/cpuset.mems
+#dm00disp-sw
+mkdir -p "$cpusetMount/dm00disp-sw"
+/bin/echo 60 > "$cpusetMount/dm00disp-sw/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/dm00disp-sw/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/dm00disp-sw/cpuset.mems"
 
-#spare61
-mkdir -p $cpusetMount/spare61
-/bin/echo 61 > $cpusetMount/spare61/cpuset.cpus
-/bin/echo 1 > $cpusetMount/spare61/cpuset.cpu_exclusive
-/bin/echo 0 > $cpusetMount/spare61/cpuset.mems
+#nnReconstructor
+mkdir -p "$cpusetMount/nnReconstructor"
+/bin/echo 61 > "$cpusetMount/nnReconstructor/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/nnReconstructor/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/nnReconstructor/cpuset.mems"
 
-#spare62
-mkdir -p $cpusetMount/spare62
-/bin/echo 62 > $cpusetMount/spare62/cpuset.cpus
-/bin/echo 1 > $cpusetMount/spare62/cpuset.cpu_exclusive
-/bin/echo 0 > $cpusetMount/spare62/cpuset.mems
+#dm00disp03-sw
+mkdir -p "$cpusetMount/dm00disp03-sw"
+/bin/echo 62 > "$cpusetMount/dm00disp03-sw/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/dm00disp03-sw/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/dm00disp03-sw/cpuset.mems"
 
-#spare63
-mkdir -p $cpusetMount/spare63
-/bin/echo 63 > $cpusetMount/spare63/cpuset.cpus
-/bin/echo 1 > $cpusetMount/spare63/cpuset.cpu_exclusive
-/bin/echo 0 > $cpusetMount/spare63/cpuset.mems
+#acc000-sw
+mkdir -p "$cpusetMount/acc000-sw"
+/bin/echo 63 > "$cpusetMount/acc000-sw/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/acc000-sw/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/acc000-sw/cpuset.mems"
 
 
 echo "cpusets configured successfully"

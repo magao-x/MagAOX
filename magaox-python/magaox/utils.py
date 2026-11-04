@@ -13,7 +13,6 @@ __all__ = [
     'format_timestamp_for_filename',
     'get_current_semester',
     'semester_to_datetime_range',
-    'get_search_start_end_timestamps',
     'FunkyJSONDecoder',
 ]
 

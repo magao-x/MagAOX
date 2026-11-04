@@ -14,10 +14,16 @@ namespace xqt
 {
 
 /// Combo-box status widget that can fall back to FSM text.
+/** A named value deletion clears choices and staged edits while retaining the
+ * device FSM. Whole-device/FSM loss resets all observations; later properties
+ * recover the summary through their ordinary callbacks.
+ */
 class statusCombo : public xWidget
 {
     Q_OBJECT
 
+  protected:
+    /// Editing state used to preserve staged selections until submission or cancellation.
     enum editchanges
     {
         NOTEDITING,
@@ -25,19 +31,21 @@ class statusCombo : public xWidget
         STOPPED
     };
 
-  protected:
     /// Optional detailed control widget opened from this summary row.
     xWidget *m_ctrlWidget{ nullptr };
 
     /// INDI device name providing this status.
     std::string m_device;
+
     /// INDI property name used for the selectable value.
     std::string m_property;
+
     /// Optional INDI element name for direct-value properties.
     std::string m_element;
 
     /// Label shown to the left of the status field.
     std::string m_label;
+
     /// Units suffix shown in the label when provided.
     std::string m_units;
 
@@ -49,17 +57,25 @@ class statusCombo : public xWidget
 
     /// Latest FSM state received for the device.
     std::string m_fsmState;
+
     /// Latest selected value text received for the device.
     std::string m_value;
+
     /// Whether the device is explicitly reporting a parked state.
     bool m_parked{ false };
+
     /// Whether the value should be shown instead of the FSM state.
     bool m_showVal{ true };
 
     /// Tracks edit state for the combo box.
     int m_statusEditing{ STOPPED };
+
     /// Whether a sent selection is still waiting for the live state to confirm it.
     bool m_statusCommandPending{ false };
+
+    /// Last selection sent while waiting for the live property to confirm it.
+    std::string m_statusRequested;
+
     /// Timer that clears staged combo-box edits after inactivity.
     QTimer *m_statusEditTimer{ nullptr };
 
@@ -105,14 +121,17 @@ class statusCombo : public xWidget
     /// Reset the widget for a disconnected INDI connection.
     virtual void onDisconnect();
 
-    /// Handle a newly defined property using the same path as updates.
-    virtual void handleDefProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has changed*/ );
+    /// Replace observed capabilities or state before applying a property definition.
+    virtual void
+    handleDefProperty( const pcf::IndiProperty &ipRecv /**< [in] Received property definition or update.*/ );
 
     /// Handle deletion of an INDI property used by this widget.
-    virtual void handleDelProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has been deleted*/ );
+    virtual void handleDelProperty(
+        const pcf::IndiProperty &ipRecv /**< [in] Deleted property; an empty name means the whole device.*/ );
 
     /// Handle updates to the device FSM, parked state, or value property.
-    virtual void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has changed*/ );
+    virtual void
+    handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] Received property definition or update.*/ );
 
   public:
     /// Hide the control widget when this summary row becomes disabled.
@@ -127,7 +146,7 @@ class statusCombo : public xWidget
     void on_status_activated( int index /**< [in] combo-box index selected by the user */ );
 
     /// Send the selected value back to INDI.
-    void on_buttonGo_pressed();
+    virtual void on_buttonGo_pressed();
 
     /// Show the detailed control widget, if present.
     void on_buttonCtrl_pressed();
@@ -150,7 +169,7 @@ class statusCombo : public xWidget
     virtual void paintEvent( QPaintEvent *e /**< [in] Qt paint event being processed */ );
 
     /// Generated Qt UI backing this summary widget.
-    Ui::statusCombo ui;
+    Ui::statusCombo ui; ///< Generated UI facade for the summary selector.
 };
 
 statusCombo::statusCombo( QWidget *Parent, Qt::WindowFlags f ) : xWidget( Parent, f )
@@ -278,6 +297,7 @@ void statusCombo::onConnect()
 {
     m_valChanged           = true;
     m_statusCommandPending = false;
+    m_statusRequested.clear();
 }
 
 void statusCombo::onDisconnect()
@@ -289,6 +309,7 @@ void statusCombo::onDisconnect()
     m_valChanged           = false;
     m_statusEditing        = STOPPED;
     m_statusCommandPending = false;
+    m_statusRequested.clear();
 
     if( m_statusEditTimer )
     {
@@ -329,9 +350,21 @@ void statusCombo::handleDelProperty( const pcf::IndiProperty &ipRecv )
         return;
     }
 
-    if( ipRecv.getName() == "fsm" || ipRecv.getName() == m_property )
+    if( ipRecv.getName().empty() || ipRecv.getName() == "fsm" )
     {
         onDisconnect();
+    }
+    else if( ipRecv.getName() == m_property )
+    {
+        m_value.clear();
+        m_statusEditing        = STOPPED;
+        m_statusCommandPending = false;
+        m_statusRequested.clear();
+        m_statusEditTimer->stop();
+        ui.status->clear();
+        m_showVal    = shouldShowValue();
+        m_valChanged = true;
+        emit doUpdateGUI();
     }
 }
 
@@ -433,7 +466,8 @@ void statusCombo::handleSetProperty( const pcf::IndiProperty &ipRecv )
             {
                 m_statusEditing        = STOPPED;
                 m_statusCommandPending = false;
-                m_valChanged           = true;
+                m_statusRequested.clear();
+                m_valChanged = true;
             }
         }
     }
@@ -492,6 +526,7 @@ void statusCombo::on_status_activated( int index )
 
     m_statusEditing        = STARTED;
     m_statusCommandPending = false;
+    m_statusRequested.clear();
     emit statusEditTimerStart( 10000 );
     update();
 }
@@ -506,6 +541,16 @@ void statusCombo::on_buttonGo_pressed()
     }
 
     if( m_property == "" )
+    {
+        return;
+    }
+
+    if( selection == m_value )
+    {
+        return;
+    }
+
+    if( m_statusCommandPending && selection == m_statusRequested )
     {
         return;
     }
@@ -542,6 +587,7 @@ void statusCombo::on_buttonGo_pressed()
 
     m_statusEditing        = STARTED;
     m_statusCommandPending = true;
+    m_statusRequested      = selection;
     emit statusEditTimerStart( 10000 );
     ui.status->clearFocus();
     ui.buttonGo->clearFocus();
@@ -560,6 +606,7 @@ void statusCombo::statusEditTimerOut()
 {
     m_statusEditing        = STOPPED;
     m_statusCommandPending = false;
+    m_statusRequested.clear();
     ui.status->setCurrentIndex( -1 );
     ui.status->clearFocus();
     emit doUpdateGUI();

@@ -495,6 +495,8 @@ int hsfwCtrl::stop()
 
 int hsfwCtrl::moveTo( const double & filters )
 {
+   static size_t s_hsfwMoveSerial = 0;
+
    //Make sure we don't try anything while off.
    if( state() == stateCodes::POWEROFF ) return 0;
 
@@ -508,10 +510,19 @@ int hsfwCtrl::moveTo( const double & filters )
       }
    }
 
+   unsigned short hwTarget = static_cast<unsigned short>(ffilters + 0.5);
+
+   ++s_hsfwMoveSerial;
+   log<text_log>("hsfwCtrl::moveTo[" + std::to_string(s_hsfwMoveSerial)
+                 + "] requested=" + std::to_string(filters)
+                 + " normalized=" + std::to_string(ffilters)
+                 + " hwTarget=" + std::to_string(hwTarget)
+                 + " currentPos=" + std::to_string(m_pos));
+
    m_moving = 1;
    recordStage();
 
-   if( move_hsfw(m_wheel, (unsigned short) (ffilters + 0.5)) < 0)
+   if( move_hsfw(m_wheel, hwTarget) < 0)
    {
       if(powerState() != 1 || powerStateTarget() != 1) return -1; //about to get POWEROFF
       return log<software_error,-1>({__FILE__,__LINE__, "libhsfw error"});

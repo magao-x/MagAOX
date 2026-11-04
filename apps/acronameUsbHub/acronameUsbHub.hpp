@@ -1,14 +1,12 @@
 /** \file acronameUsbHub.hpp
-  * \brief The MagAO-X Acroname USB Hub controller.
-  *
-  * \author Jared R. Males (jaredmales@gmail.com)
-  *
-  * \ingroup acronameUsbHub_files
-  */
+ * \brief The MagAO-X Acroname USB Hub controller.
+ *
+ *
+ * \ingroup acronameUsbHub_files
+ */
 
 #ifndef acronameUsbHub_hpp
 #define acronameUsbHub_hpp
-
 
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
@@ -20,354 +18,374 @@ namespace MagAOX
 namespace app
 {
 
-
 /** \defgroup acronameUsbHub Acroname USB Hub Controller
-  * \brief Control of an Acroname USB 3.0 8-port hub
-  *
-  * <a href="../handbook/operating/software/apps/acronameUsbHub.html">Application Documentation</a>
-  *
-  * \ingroup apps
-  *
-  */
+ * \brief Control of an Acroname USB 3.0 8-port hub
+ *
+ * <a href="../handbook/operating/software/apps/acronameUsbHub.html">Application Documentation</a>
+ *
+ * \ingroup apps
+ *
+ */
 
 /** \defgroup acronameUsbHub_files Acroname USB Hub controller Files
-  * \ingroup acronameUsbHub
-  */
+ * \ingroup acronameUsbHub
+ */
 
 /** MagAO-X application to control an Acroname USB 3.0 8-port hub
-  *
-  * \todo add current, temperature, etc. monitoring
-  * \todo telemetry
-  *
-  * \ingroup acronameUsbHub
-  *
-  */
-class acronameUsbHub : public MagAOXApp<>, public dev::outletController<acronameUsbHub>
+ *
+ * \todo add current, temperature, etc. monitoring
+ *
+ * \ingroup acronameUsbHub
+ *
+ */
+class acronameUsbHub : public MagAOXApp<>,
+                       public dev::outletController<acronameUsbHub>,
+                       public dev::telemeter<acronameUsbHub>
 {
 
-protected:
-
-   /** \name configurable parameters
+  protected:
+    /** \name Configurable Parameters - Data
      *@{
      */
 
-   uint32_t m_serialNumber {0}; ///< The Acroname device serial number.
+    uint32_t m_serialNumber{ 0 }; ///< The Acroname device serial number.
 
-   ///@}
+    ///@}
 
+    aUSBHub3p m_hub; ///< BrainStem library handle
 
-   aUSBHub3p m_hub; ///< BrainStem library handle
+    bool m_connected{ false }; ///< Whether or not the hub is currently connected
 
-   bool m_connected {false}; ///< Whether or not the hub is currently connected
+    /// Allow the telemetry helper to dispatch this application's records.
+    friend class dev::telemeter<acronameUsbHub>;
 
-public:
+    /// The single telemetry helper owned by this application.
+    typedef dev::telemeter<acronameUsbHub> telemeterT;
 
-   ///Default c'tor
-   acronameUsbHub();
+  public:
+    /// Default c'tor
+    acronameUsbHub();
 
-   ///Destructor
-   ~acronameUsbHub() noexcept;
+    /// Destructor
+    ~acronameUsbHub() noexcept;
 
-   /// Setup the configuration system (called by MagAOXApp::setup())
-   virtual void setupConfig();
+    /// Setup the configuration system (called by MagAOXApp::setup())
+    virtual void setupConfig();
 
-   /// load the configuration system results (called by MagAOXApp::setup())
-   virtual void loadConfig();
+    /// load the configuration system results (called by MagAOXApp::setup())
+    virtual void loadConfig();
 
-   /// Startup functions
-   /** Sets up the INDI vars.
+    /// Load app and helper configuration, propagating invalid configuration.
+    int loadConfigImpl( mx::app::appConfigurator &config /**< [in] app configuration */ );
+
+    /// Check periodic deadlines for each telemetry type recorded by this app.
+    int checkRecordTimes();
+
+    /// Force an observed outlet-state snapshot for the telemetry scheduler.
+    int recordTelem( const telem_outlet *type /**< [in] unused type selector */ );
+
+    /// Startup functions
+    /** Sets up the INDI vars.
      *
      */
-   virtual int appStartup();
+    virtual int appStartup();
 
-   /// Implementation of the FSM for the Siglent SDG
-   virtual int appLogic();
+    /// Connect to the hub, acquire port state, and run telemetry scheduling
+    virtual int appLogic();
 
-   /// Implementation of the on-power-off FSM logic
-   virtual int onPowerOff();
+    /// Implementation of the on-power-off FSM logic
+    virtual int onPowerOff();
 
-   /// Implementation of the while-powered-off FSM
-   virtual int whilePowerOff();
+    /// Implementation of the while-powered-off FSM
+    virtual int whilePowerOff();
 
-   /// Do any needed shutdown tasks.  Currently nothing in this app.
-   virtual int appShutdown();
+    /// Shut down application telemetry.
+    virtual int appShutdown();
 
-   /// Get the state of the outlet from the device.
-   /** dev::outletController interface.
-     *
-     * \returns 0 on success.
-     * \returns -1 on error.
-     */
-   int updateOutletState( int outletNum /**< [in] the outlet number to update */);
-
-   /// Turn an outlet on.
-   /** dev::outletController interface.
-     *
-     * \returns 0 on success.
-     * \returns -1 on error.
-     */
-   int turnOutletOn( int outletNum /**< [in] the outlet number to turn on */);
-
-   /// Turn an outlet off.
-   /** dev::outletController interface.
+    /// Get the state of the outlet from the device.
+    /** dev::outletController interface.
      *
      * \returns 0 on success.
      * \returns -1 on error.
      */
-   int turnOutletOff( int outletNum /**< [in] the outlet number to turn off */);
+    int updateOutletState( int outletNum /**< [in] the outlet number to update */ );
 
+    /// Turn an outlet on.
+    /** dev::outletController interface.
+     *
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+    int turnOutletOn( int outletNum /**< [in] the outlet number to turn on */ );
 
+    /// Turn an outlet off.
+    /** dev::outletController interface.
+     *
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+    int turnOutletOff( int outletNum /**< [in] the outlet number to turn off */ );
 };
 
-inline
-acronameUsbHub::acronameUsbHub() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
+inline acronameUsbHub::acronameUsbHub() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
 {
-   m_powerMgtEnabled = false;
+    m_powerMgtEnabled = false;
 
-   setNumberOfOutlets(8);
-
-   return;
+    setNumberOfOutlets( 8 );
 }
 
-inline
-acronameUsbHub::~acronameUsbHub() noexcept
+inline acronameUsbHub::~acronameUsbHub() noexcept
 {
-   // Disconnect
+    // Disconnect
 
-   m_hub.disconnect();
+    m_hub.disconnect();
 
-   return;
+    return;
 }
 
-inline
-void acronameUsbHub::setupConfig()
+inline void acronameUsbHub::setupConfig()
 {
-   config.add("device.serialNumber", "", "device.serialNumber", argType::Required, "device", "serialNumber", false, "uint32", "The identifying serial number of the hub.");
+    config.add( "device.serialNumber",
+                "",
+                "device.serialNumber",
+                argType::Required,
+                "device",
+                "serialNumber",
+                false,
+                "uint32",
+                "The identifying serial number of the hub." );
 
-   dev::outletController<acronameUsbHub>::setupConfig(config);
+    dev::outletController<acronameUsbHub>::setupConfig( config );
+    TELEMETER_SETUP_CONFIG( config );
 }
 
-
-///\todo mxlib loadConfig needs to return int to propagate errors!
-
-inline
-void acronameUsbHub::loadConfig()
+inline void acronameUsbHub::loadConfig()
 {
-   config(m_serialNumber, "device.serialNumber");
-   dev::outletController<acronameUsbHub>::loadConfig(config);
+    if( loadConfigImpl( config ) < 0 )
+    {
+        log<text_log>( "Invalid outlet-controller configuration", logPrio::LOG_CRITICAL );
+        m_shutdown = true;
+    }
 }
 
-
-
-inline
-int acronameUsbHub::appStartup()
+inline int acronameUsbHub::loadConfigImpl( mx::app::appConfigurator &config )
 {
-
-   if(dev::outletController<acronameUsbHub>::setupINDI() < 0)
-   {
-      return log<text_log,-1>("Error setting up INDI for outlet control.", logPrio::LOG_CRITICAL);
-   }
-
-   state(stateCodes::NOTCONNECTED);
-
-   return 0;
-
+    config( m_serialNumber, "device.serialNumber" );
+    if( dev::outletController<acronameUsbHub>::loadConfig( config ) < 0 )
+        return -1;
+    TELEMETER_LOAD_CONFIG( config );
+    return 0;
 }
 
-inline
-int acronameUsbHub::appLogic()
+inline int acronameUsbHub::appStartup()
 {
-   if( state() == stateCodes::POWERON)
-   {
-      state(stateCodes::NOTCONNECTED);
-   }
 
-   if( state() == stateCodes::NOTCONNECTED )
-   {
+    if( dev::outletController<acronameUsbHub>::appStartup() < 0 )
+    {
+        return log<text_log, -1>( "Error setting up INDI for outlet control.", logPrio::LOG_CRITICAL );
+    }
 
-      if(m_connected)
-      {
-         m_hub.disconnect();
-         m_connected = false;
-      }
+    TELEMETER_APP_STARTUP;
+    state( stateCodes::NOTCONNECTED );
 
-      aErr err = aErrNone;
-
-      elevatedPrivileges ep(this);
-
-      //std::cerr << m_serialNumber << "\n";
-      //err = m_hub.discoverAndConnect(USB, m_serialNumber);
-      err = m_hub.connect(USB, m_serialNumber);
-      if (err != aErrNone)
-      {
-         if(!stateLogged())
-         {
-            log<text_log>("Failed to connect to usb hub", logPrio::LOG_ERROR);
-         }
-
-         m_connected = false;
-         return 0;
-      }
-      else
-      {
-         state(stateCodes::CONNECTED);
-
-         SystemClass sys;
-         sys.init(&m_hub,0);
-
-         uint8_t model;
-         sys.getModel(&model);
-         std::string modelName = aDefs_GetModelName(model);
-
-         uint32_t version;
-         sys.getVersion(&version);
-         char versionStr[256];
-         aVersion_ParseString(version, versionStr, sizeof(versionStr));
-
-         uint32_t serial;
-         sys.getSerialNumber(&serial);
-
-         log<text_log>("Connected to " + modelName + " #" + std::to_string(serial) + " w/fimrware version " + versionStr, logPrio::LOG_INFO);
-
-         m_connected = true;
-         state(stateCodes::READY);
-      }
-   }
-
-   if( state() == stateCodes::READY )
-   {
-      if(! m_hub.isConnected() )
-      {
-         m_hub.disconnect();
-         m_connected = false;
-         state(stateCodes::NOTCONNECTED);
-         return 0;
-      }
-
-
-      dev::outletController<acronameUsbHub>::updateOutletStates();
-
-      std::lock_guard<std::mutex> guard(m_indiMutex);  //Lock the mutex before doing INDI
-      dev::outletController<acronameUsbHub>::updateINDI();
-   }
-
-   return 0;
-
+    return 0;
 }
 
-inline
-int acronameUsbHub::onPowerOff()
+inline int acronameUsbHub::appLogic()
 {
-   if(m_connected)
-   {
-      m_hub.disconnect();
-      m_connected = false;
-   }
+    TELEMETER_APP_LOGIC;
+    if( state() == stateCodes::POWERON )
+    {
+        state( stateCodes::NOTCONNECTED );
+    }
 
-   for(size_t n=0;n<m_outletStates.size();++n)
-   {
-      m_outletStates[n] = OUTLET_STATE_OFF;
-   }
+    if( state() == stateCodes::NOTCONNECTED )
+    {
 
-   std::lock_guard<std::mutex> guard(m_indiMutex);  //Lock the mutex before doing INDI
-   dev::outletController<acronameUsbHub>::updateINDI(); //Update the outlets and channel states
+        if( m_connected )
+        {
+            m_hub.disconnect();
+            m_connected = false;
+        }
 
-   //Update INDI targets to off.
-   for(auto it = m_channels.begin(); it != m_channels.end(); ++it)
-   {
-      updateIfChanged( it->second.m_indiP_prop, "target", "Off");
-   }
+        aErr err = aErrNone;
 
+        elevatedPrivileges ep( this );
 
+        // std::cerr << m_serialNumber << "\n";
+        // err = m_hub.discoverAndConnect(USB, m_serialNumber);
+        err = m_hub.connect( USB, m_serialNumber );
+        if( err != aErrNone )
+        {
+            if( !stateLogged() )
+            {
+                log<text_log>( "Failed to connect to usb hub", logPrio::LOG_ERROR );
+            }
 
-   return 0;
+            m_connected = false;
+            return 0;
+        }
+        else
+        {
+            state( stateCodes::CONNECTED );
+
+            SystemClass sys;
+            sys.init( &m_hub, 0 );
+
+            uint8_t model;
+            sys.getModel( &model );
+            std::string modelName = aDefs_GetModelName( model );
+
+            uint32_t version;
+            sys.getVersion( &version );
+            char versionStr[256];
+            aVersion_ParseString( version, versionStr, sizeof( versionStr ) );
+
+            uint32_t serial;
+            sys.getSerialNumber( &serial );
+
+            log<text_log>( "Connected to " + modelName + " #" + std::to_string( serial ) + " w/fimrware version " +
+                               versionStr,
+                           logPrio::LOG_INFO );
+
+            m_connected = true;
+            state( stateCodes::READY );
+        }
+    }
+
+    if( state() == stateCodes::READY )
+    {
+        if( !m_hub.isConnected() )
+        {
+            m_hub.disconnect();
+            m_connected = false;
+            setAllOutletStates( OUTLET_STATE_UNKNOWN );
+            state( stateCodes::NOTCONNECTED );
+            return recordOutletStates();
+        }
+
+        dev::outletController<acronameUsbHub>::updateOutletStates();
+
+        std::lock_guard<std::mutex> guard( m_indiMutex ); // Lock the mutex before doing INDI
+        dev::outletController<acronameUsbHub>::updateINDI();
+        if( recordOutletStates() < 0 )
+            return -1;
+    }
+
+    return 0;
 }
 
-inline
-int acronameUsbHub::whilePowerOff()
+inline int acronameUsbHub::onPowerOff()
 {
-   return 0;
+    if( m_connected )
+    {
+        m_hub.disconnect();
+        m_connected = false;
+    }
+
+    setAllOutletStates( OUTLET_STATE_OFF );
+
+    std::lock_guard<std::mutex> guard( m_indiMutex );    // Lock the mutex before doing INDI
+    dev::outletController<acronameUsbHub>::updateINDI(); // Update the outlets and channel states
+
+    // Update INDI targets to off.
+    for( auto it = m_channels.begin(); it != m_channels.end(); ++it )
+    {
+        updateIfChanged( it->second.m_indiP_prop, "target", "Off" );
+    }
+
+    return recordOutletStates();
 }
 
-inline
-int acronameUsbHub::appShutdown()
+inline int acronameUsbHub::whilePowerOff()
 {
-   return 0;
+    TELEMETER_APP_LOGIC;
+    return 0;
 }
 
-inline
-int acronameUsbHub::updateOutletState( int outletNum )
+inline int acronameUsbHub::appShutdown()
 {
-   uint32_t state = 0;
-
-   aErr err = m_hub.usb.getPortState(outletNum, &state);
-
-   if(err != aErrNone)
-   {
-      if(err == aErrTimeout)
-      {
-         return log<software_error,-1>({__FILE__, __LINE__, "timeout enabling port"});
-      }
-      if(err == aErrConnection)
-      {
-         return log<software_error,-1>({__FILE__, __LINE__, "loss of connection detected when enabling port"});
-      }
-   }
-
-   if(state & 1)
-   {
-      m_outletStates[outletNum] = OUTLET_STATE_ON;
-   }
-   else
-   {
-      m_outletStates[outletNum] = OUTLET_STATE_OFF;
-   }
-
-   return 0;
+    TELEMETER_APP_SHUTDOWN;
+    return 0;
 }
 
-inline
-int acronameUsbHub::turnOutletOn( int outletNum )
+inline int acronameUsbHub::updateOutletState( int outletNum )
 {
-   aErr err = m_hub.usb.setPortEnable(outletNum);
+    uint32_t state = 0;
 
-   if(err != aErrNone)
-   {
-      if(err == aErrTimeout)
-      {
-         return log<software_error,-1>({__FILE__, __LINE__, "timeout enabling port"});
-      }
-      if(err == aErrConnection)
-      {
-         return log<software_error,-1>({__FILE__, __LINE__, "loss of connection detected when enabling port"});
-      }
-   }
+    aErr err = m_hub.usb.getPortState( outletNum, &state );
 
-   return 0;
+    if( err != aErrNone )
+    {
+        if( err == aErrTimeout )
+        {
+            return log<software_error, -1>( { __FILE__, __LINE__, "timeout enabling port" } );
+        }
+        if( err == aErrConnection )
+        {
+            return log<software_error, -1>( { __FILE__, __LINE__, "loss of connection detected when enabling port" } );
+        }
+    }
+
+    if( state & 1 )
+    {
+        setOutletState( outletNum, OUTLET_STATE_ON );
+    }
+    else
+    {
+        setOutletState( outletNum, OUTLET_STATE_OFF );
+    }
+
+    return 0;
 }
 
-inline
-int acronameUsbHub::turnOutletOff( int outletNum )
+inline int acronameUsbHub::turnOutletOn( int outletNum )
 {
-   aErr err = m_hub.usb.setPortDisable(outletNum);
+    aErr err = m_hub.usb.setPortEnable( outletNum );
 
-   if(err != aErrNone)
-   {
-      if(err == aErrTimeout)
-      {
-         return log<software_error,-1>({__FILE__, __LINE__, "timeout disabling port"});
-      }
-      if(err == aErrConnection)
-      {
-         return log<software_error,-1>({__FILE__, __LINE__, "loss of connection detected when disabling port"});
-      }
-   }
-   return 0;
+    if( err != aErrNone )
+    {
+        if( err == aErrTimeout )
+        {
+            return log<software_error, -1>( { __FILE__, __LINE__, "timeout enabling port" } );
+        }
+        if( err == aErrConnection )
+        {
+            return log<software_error, -1>( { __FILE__, __LINE__, "loss of connection detected when enabling port" } );
+        }
+    }
+
+    return 0;
 }
 
+inline int acronameUsbHub::turnOutletOff( int outletNum )
+{
+    aErr err = m_hub.usb.setPortDisable( outletNum );
 
+    if( err != aErrNone )
+    {
+        if( err == aErrTimeout )
+        {
+            return log<software_error, -1>( { __FILE__, __LINE__, "timeout disabling port" } );
+        }
+        if( err == aErrConnection )
+        {
+            return log<software_error, -1>( { __FILE__, __LINE__, "loss of connection detected when disabling port" } );
+        }
+    }
+    return 0;
+}
 
+inline int acronameUsbHub::checkRecordTimes()
+{
+    return telemeterT::checkRecordTimes( telem_outlet() );
+}
 
-}//namespace app
-} //namespace MagAOX
+inline int acronameUsbHub::recordTelem( const telem_outlet * )
+{
+    return recordOutletStates( true );
+}
+
+} // namespace app
+} // namespace MagAOX
 #endif

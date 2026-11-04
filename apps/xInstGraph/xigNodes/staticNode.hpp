@@ -14,16 +14,16 @@ class staticNode : public xigNode
 {
 
   protected:
-    std::set<std::string> m_inputsOn;  ///< inputs which are always on
-    std::set<std::string> m_inputsOff; ///< inputs which are always off
+    std::set<std::string> m_inputsOn;  ///< Input puts held on by configuration
+    std::set<std::string> m_inputsOff; ///< Input puts held off by configuration
 
-    std::set<std::string> m_outputsOn;  ///< outputs which are always on
-    std::set<std::string> m_outputsOff; ///< outputs which are always off
+    std::set<std::string> m_outputsOn;  ///< Output puts held on by configuration
+    std::set<std::string> m_outputsOff; ///< Output puts held off by configuration
 
   public:
     /// Only c'tor.  Must be constructed with node name and a parent graph.
-    staticNode( const std::string  &name,       /** [in] the name of this node*/
-                ingr::instGraphXML *parentGraph /** [in] the graph which this node belongs to*/
+    staticNode( const std::string  &name,       /**< [in] graph node name */
+                ingr::instGraphXML *parentGraph /**< [in] parent graph */
     );
 
     /// Get the always on inputs
@@ -63,30 +63,30 @@ class staticNode : public xigNode
     /// Toggle all puts off
     virtual void togglePutsOff();
 
-    /// Configure this node form an appConfigurator.
+    /// Configure this node from an appConfigurator.
     void loadConfig( mx::app::appConfigurator &config /**< [in] the loaded configuration */ );
 };
 
-staticNode::staticNode( const std::string &name, ingr::instGraphXML *parentGraph ) : xigNode( name, parentGraph )
+inline staticNode::staticNode( const std::string &name, ingr::instGraphXML *parentGraph ) : xigNode( name, parentGraph )
 {
 }
 
-const std::set<std::string> &staticNode::inputsOn() const
+inline const std::set<std::string> &staticNode::inputsOn() const
 {
     return m_inputsOn;
 }
 
-const std::set<std::string> &staticNode::inputsOff() const
+inline const std::set<std::string> &staticNode::inputsOff() const
 {
     return m_inputsOff;
 }
 
-const std::set<std::string> &staticNode::outputsOn() const
+inline const std::set<std::string> &staticNode::outputsOn() const
 {
     return m_outputsOn;
 }
 
-const std::set<std::string> &staticNode::outputsOff() const
+inline const std::set<std::string> &staticNode::outputsOff() const
 {
     return m_outputsOff;
 }

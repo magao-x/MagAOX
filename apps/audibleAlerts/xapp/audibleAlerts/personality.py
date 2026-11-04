@@ -1,40 +1,25 @@
 from dataclasses import dataclass
 from enum import Enum
 import os.path
-import purepyindi2
 import logging
+import pathlib
 from typing import Optional
-import xml.etree.ElementTree as ET
+import tomllib
+
+import purepyindi2
+
+from magaox.tts.core import PlaybackRequest, Recording, DynamicSpeech, Voice, load_voice
 
 log = logging.getLogger(__name__)
 
 DEFAULT_DEBOUNCE_SEC = 3
 
-class SpeechRequest:
-    pass
-
-class SSML(SpeechRequest):
-    def __init__(self, markup):
-        self.markup = markup
-    def __repr__(self):
-        return f"{self.__class__.__name__}({repr(self.markup)})"
-    def __eq__(self, other):
-        return getattr(other, 'markup', None) == self.markup
-
-class Recording(SpeechRequest):
-    def __init__(self, path):
-        self.path = path
-    def __repr__(self):
-        return f"{self.__class__.__name__}({repr(self.path)})"
-    def __eq__(self, other):
-        return getattr(other, 'path', None) == self.path
-
-
-def xml_to_speechrequest(elem, file_path):
-    if elem.tag == 'file':
-        return Recording(os.path.join(os.path.dirname(file_path), elem.attrib['name']))
-    else:
-        return SSML(ET.tostring(elem, 'utf-8').decode('utf8').strip())
+def action_dict_to_playback_request(action_dict):
+    print(f"{action_dict=}")
+    if action_dict['type'] == 'play':
+        return Recording(action_dict['file'])
+    elif action_dict['type'] == 'speak':
+        return DynamicSpeech(action_dict['text'], custom_voice_name=action_dict.get('voice'))
 
 class Operation(Enum):
     EQ = 'eq'
@@ -85,78 +70,66 @@ class Transition:
 @dataclass
 class Reaction:
     indi_id : str
-    transitions : dict[Transition, list[SpeechRequest]]
+    transitions : dict[Transition, list[PlaybackRequest]]
 
 @dataclass
 class Personality:
     reactions : list[Reaction]
-    default_voice : str
-    random_utterances : list[SpeechRequest]
-    soundboard : dict[str, SpeechRequest]
-    walkups : dict[str, list[SpeechRequest]]
+    default_voice : Voice
+    random_utterances : list[PlaybackRequest]
+    soundboard : dict[str, PlaybackRequest]
+    walkups : dict[str, list[PlaybackRequest]]
 
     @classmethod
-    def from_path(cls, file_path):
-        tree = ET.parse(file_path)
-        root = tree.getroot()
+    def from_path(cls, file_path: pathlib.Path):
         reactions = []
         random_utterances = []
         soundboard = {}
         default_voice = None
         walkups = {}
+        with file_path.open('rb') as fh:
+            root = tomllib.load(fh)
 
-        for el in root:
+        default_voice = load_voice(root['default_voice'])
+        for utterance in root['random_utterances']:
+            random_utterances.append(action_dict_to_playback_request(utterance))
+        for btn in root['soundboard']:
+            soundboard[btn] = action_dict_to_playback_request(root['soundboard'][btn])
+
+        for wup_email in root['walkups']:
+            email = wup_email.replace('.', '-dot-').replace('@', '-at-')
+            walkups[email] = []
+            for walkup_clip in root['walkups'][wup_email]:
+                walkups[email].append(Recording(walkup_clip))
+
+        
+
+        for react in root['react']:
+            indi_id = react['indi_id']
             transitions = {}
-            if el.tag == 'default-voice':
-                default_voice = el.attrib['name']
-                continue
-            elif el.tag == 'random-utterances':
-                for utterance in el:
-                    random_utterances.append(xml_to_speechrequest(utterance, file_path))
-                continue
-            elif el.tag == 'soundboard':
-                for btn in el:
-                    assert len(btn) == 1
-                    soundboard[btn.attrib['name']] = xml_to_speechrequest(btn[0], file_path)
-                continue
-            elif el.tag == 'walk-ups':
-                for wup in el:
-                    assert wup.tag == 'walk-up'
-                    email = wup.attrib['email'].replace('.', '-dot-').replace('@', '-at-')
-                    walkups[email] = []
-                    for utterance in wup:
-                        assert utterance.tag in ('speak', 'file')
-                        walkups[email].append(xml_to_speechrequest(utterance, file_path))
-                continue
-            assert el.tag == 'react-to'
-            indi_id = el.attrib['indi-id']
-            for transition in el:
-                assert transition.tag == 'transition'
-                if 'low' in transition.attrib:
-                    value = purepyindi2.parse_string_into_any_indi_value(transition.attrib['low'])
-                    value_2 = purepyindi2.parse_string_into_any_indi_value(transition.attrib['high'])
+            for transition in react['transition']:
+                if 'low' in transition:
+                    value = purepyindi2.parse_string_into_any_indi_value(transition['low'])
+                    value_2 = purepyindi2.parse_string_into_any_indi_value(transition['high'])
                     operation = Operation.BETWEEN
-                elif 'value' in transition.attrib:
-                    value = purepyindi2.parse_string_into_any_indi_value(transition.attrib['value'])
+                elif 'value' in transition:
+                    value = purepyindi2.parse_string_into_any_indi_value(transition['value'])
                     value_2 = None
-                    operation = purepyindi2.parse_string_into_enum(transition.attrib.get('op', 'eq'), Operation)
+                    operation = purepyindi2.parse_string_into_enum(transition.get('op', 'eq'), Operation)
                 else:
                     value = None
                     value_2 = None
                     operation = None
-                if 'debounce_sec' in transition.attrib:
-                    debounce_sec = float(transition.attrib['debounce_sec'])
-                else:
-                    debounce_sec = DEFAULT_DEBOUNCE_SEC
+                debounce_sec = DEFAULT_DEBOUNCE_SEC
                 trans = Transition(indi_id=indi_id, op=operation, value=value, value_2=value_2, debounce_sec=debounce_sec)
                 if trans in transitions:
                     raise RuntimeError(f"Multiply defined for {indi_id} {operation=} {value=}")
                 transitions[trans] = []
-                for utterance in transition:
-                    if utterance.tag not in ('speak', 'file'):
-                        log.warning(f"{transition}: {utterance} not 'speak' or 'file'?")
+                for action in transition['actions']:
+                    if action['type'] not in ('speak', 'file'):
+                        log.warning(f"{transition}: {action} type not 'speak' or 'file'?")
                         continue
-                    transitions[trans].append(xml_to_speechrequest(utterance, file_path))
+                    transitions[trans].append(action_dict_to_playback_request(action))
             reactions.append(Reaction(indi_id=indi_id, transitions=transitions))
         return cls(
             reactions=reactions,
@@ -168,4 +141,4 @@ class Personality:
 
 if __name__ == "__main__":
     import pprint
-    pprint.pprint(Personality.from_path('personalities/default.xml'), width=255)
+    pprint.pprint(Personality.from_path(pathlib.Path('test.toml')), width=255)

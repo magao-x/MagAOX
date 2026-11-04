@@ -30,3 +30,9 @@ dependencies = [
 [project.scripts]
 xtelemdb = "magaox.cli:XTELEMDB.main"
 xquicklook = "magaox.cli:XQUICKLOOK.main"
+xaudioclient = "magaox.tts.client:XAudioClient.run"
+
+[dependency-groups]
+tts = [
+    "piper-tts>=1.4.2",
+]

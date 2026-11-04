@@ -1,6 +1,5 @@
 /** \file streamWriterSizing_test.cpp
  * \brief Catch2 tests for streamWriter buffer sizing helpers.
- * \author Jared R. Males (jaredmales@gmail.com)
  *
  * \ingroup streamWriter_files
  */
@@ -13,12 +12,6 @@ using namespace MagAOX::app;
 
 namespace libXWCTest
 {
-
-/** \defgroup streamWriter_unit_test streamWriter Unit Tests
- * \brief Unit tests for the streamWriter application.
- *
- * \ingroup application_unit_test
- */
 
 /// Namespace for `streamWriter` unit tests.
 /** \ingroup streamWriter_unit_test
