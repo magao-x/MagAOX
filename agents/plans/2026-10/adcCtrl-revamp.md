@@ -692,3 +692,354 @@ All of this goes in `app.py` (R7a).
   Is that acceptable?
   - Answer:
     first bullet is acceptable. second bullet iss not: if `ctrl_mtx` is changed by hand, fallback should also be disabled. 
+
+
+## Knife-Edge Coronagraph Mode (planning, 2026-11-04)
+
+_Plan by Claude Opus 5.5 on `ktwitchell/adcCtrl-v2` (no new branch). Rev 1: 2026-11-04, initial draft. Rev 2: 2026-11-04, revised for the Round 1 answers. Main changes: two adjacent spots by default, the star position estimated from the spots themselves, and the set point persisted in config with a 24 h expiry. Rev 3: 2026-11-04, revised for the Round 2 answers. Main changes: a set-point file under `/home/xsup/adc_calibs/` instead of the config (dropped in Rev 4), a provisional `ke_gain` default of −0.62 derived from the DM-spot calibration, a guard so the edge margin cannot clip spot 3, and synthetic-only tests. Rev 4: 2026-11-04, revised for the Round 3 answers. The set-point file is dropped: there is one set point, starting at the config default and changed by capture or manual INDI entry, and it is not saved across restarts. Status: **all questions answered; plan ready. No code until the user says to start.**_
+
+### Prompt (verbatim, for the record)
+> time to add a new feature to the app. do not write any code - we're just planning for now. Review the current implementation of the app. The app is designed to work with a coronagraph that blocks the central PSF, but it is not designed to work with the knife-edge coronagraph, which blocks half the FOV. Review what a knife-edge coronagraph is before continuing. we will need to make a new state within the app that the user activates when the knife-edge coronagraph is being used. we will use the same method to extract the amount of dispersion, but instead of having pointing pairs we will only have a single satellite spot. this means we will have to drive the system towards a set point that is not a zero state, like we were before. write a plan to implement this idea into the current code, and ask any relevant quesitons. Include this prompt in the plan for documentation purposes as well.
+
+### Problem Statement
+adcCtrl assumes four satellite spots around a centrally blocked PSF. It controls on the pair offsets `[d0 − d2, d1 − d3]`, which are zero at zero dispersion. The knife-edge coronagraph blocks half the field, so no opposite pair survives. The app needs a mode that controls on what is left and drives it to a set point that is not zero:
+- normally **two adjacent spots** (Round 1, Q3);
+- **one spot** as the exception.
+
+### Background: the knife-edge coronagraph
+
+On MagAO-X, the knife-edge focal-plane mask is part of the phase-apodized pupil Lyot coronagraph (PAPLC).
+- **The mask.** A reflective, silver-coated D-shaped pickoff mirror with a sharp edge. It reflects everything on one side of the edge toward the low-order wavefront sensor and transmits the other half-plane to the science camera.
+- **The edge position.** It sits near the first Airy null (~1.1 λ/D) and can be moved to change the inner working angle (IWA). On MagAO-X the knife-edge motor is not absolutely encoded, so the IWA is not known in INDI (user, Q2).
+- **What the science camera sees.** A one-sided dark hole: the **top half** of the image is transmitted, and the edge orientation is fixed for the whole observation (user, Q2). The star is blocked, and there is a glint along the edge whose width varies with the edge position.
+
+**What this does to satellite spots.** The spot pattern is rotated clockwise by θ from "spot 0 straight up". Spot n then sits at position angle φ_n, measured from +x counter-clockwise:
+
+| spot | φ_n | visible for 0 < θ < 90° |
+|---|---|---|
+| 0 | 90° − θ | yes (upper right) |
+| 3 | 180° − θ | yes (upper left, just above the edge) |
+| 1 | −θ | no |
+| 2 | 270° − θ | no |
+
+Sparkles are usually at θ ≈ 15–20°, and DM spots are at 28°, so **spots 0 and 3** are the visible pair. A negative θ would make spots 0 and 1 the visible pair. Sparkles are never closer than 10 λ/D to the star (user, Q2).
+
+### Findings: how the current code breaks with a knife edge
+
+Line references are to `apps/adcCtrl/xapp/adcCtrl/app.py`.
+
+1. **Centering fails silently.** `crop_image` (`app.py:130`) centers on the centroid of pixels above 10% of the peak. With the star blocked, the brightest thing is a spot or the edge glint, so the "center" lands there and every later step uses the wrong origin. Nothing raises, so measure-only would publish confident garbage.
+2. **The radial-profile subtraction is biased.** `subtract_radial_profile` (`app.py:163`) averages over the full annulus. Half of it is now dark, so it under-subtracts the transmitted half.
+3. **The core mask is pointless.** The `mask_factor × separation` mask hides a core residual that is no longer there. What needs masking now is the blocked half and the glint.
+4. **The spot search runs on blocked spots.** `measure_spot_angles` (`app.py:403`) always cuts out four spots. The two in the blocked half return meaningless but finite angles, and the pair offsets mix them with real ones.
+5. **A non-zero set point is needed.** A difference of two spots cancels everything common to both:
+   - rigid rotation of the pattern (a tweeterSpeck angle error, or the configured DM-spot angle being off);
+   - static tilts shared by both spots.
+
+   Two **adjacent** spots also cancel rigid rotation. They do not share every static bias that an opposite pair does, though, and the half-plane processing and the edge glint treat the two spots differently. A single spot cancels nothing. In both cases the measured quantity `m` (§3) at zero dispersion is a static bias, so the loop drives `m → setpoint`, not `m → 0`. For two spots the set point should be small, and a large captured value is worth investigating.
+
+   *Note:* `moment_angle` measures the spot's real elongation, which points at the real star. An error in the assumed star position therefore does **not** bias the deviation; it only affects where the app searches and what it masks.
+6. **Sensitivity depends on the spot.** Counter-rotation disperses **vertically** on the science camera. A spot's tilt responds to the dispersion component perpendicular to its radial axis, which goes as cos φ_n. For θ = 15–20°:
+
+   | spot or combination | relative slope |
+   |---|---|
+   | spot 0 | sin θ ≈ 0.26–0.34: low, within 30° of vertical, so the app warns (Q11) |
+   | spot 3 | −cos θ ≈ −0.94 to −0.97: high |
+   | `d0 − d3` | sin θ + cos θ ≈ 1.22–1.28 |
+
+   For comparison, the standard-mode pair13 is 2 cos θ ≈ 1.9. The two-spot difference is about 30% more sensitive than spot 3 alone, and it cancels pattern rotation.
+7. **Co-rotation is not separable.** Adjacent spots also respond to horizontal dispersion (co-rotation), and one number cannot separate the two. The loop will counter-rotate to null `m`, and any co-rotation error is left as residual. This is an inherent limitation; it is documented, not fixed.
+8. **Spot 3 sits close to the edge.** It is r·sin θ above the star: 2.6 λ/D for r = 10, θ = 15°, and 5.1 λ/D for r = 15, θ = 20°. Its cutout (20 px ≈ 5.7 λ/D wide) will reach down to the edge, where the glint is. The glint is fainter ~r·cos θ ≈ 10 λ/D to the side of the star than right at it.
+   - The user does not expect the glint to matter as long as the spot is visible (R2-2), so it is not treated as a design risk.
+   - The bigger risk is the app's own mask. Spot 3's height above the edge is r·sin θ, not r, so too large a `ke_edge_margin` would zero part of the spot and bias its angle. §3 caps the margin.
+   - The mask is placed relative to the estimated star, not the physical edge. If the edge is moved far into the field, glint can sit above the mask line. This is a known, accepted limitation.
+
+Everything else carries over unchanged:
+- `moment_angle`, `wrap90`, `window_field`, and `speckle_cutout` with its radial band;
+- the batch and outlier logic, the integrator, `compute_step`, the step limit and `send_command`;
+- the camera, filter and wavelength handling, and the startup grace period.
+
+### Key Assumptions
+1. `moment_angle` stays frozen. Per-spot deviations are computed exactly as now: `wrap90(raw − expected_axes(θ)[n])`.
+2. Control stays counter-rotation only: a scalar step into `delta_1`, and `deltaADC1/2` stay absolute.
+3. The top half of the image is transmitted, with a horizontal edge (user, Q2). This is a constant, not a config field. If another camera ever differs, it can become a config field later.
+4. Standard mode is unchanged. All 31 existing tests must pass unmodified.
+5. Everything stays in `app.py`, and tests go in `apps/adcCtrl/test/test_adcCtrl.py`. Calibration of `ke_gain` is manual.
+6. All work is on `ktwitchell/adcCtrl-v2`.
+7. The knife-edge INDI property is ignored; the operator switches the mode (user, Q9).
+8. No knife-edge frames are available (R2-2), so all new tests use synthetic frames. The first on-instrument step (measure-only) is the real check of the star estimate and the edge margin.
+
+### Proposed Design
+
+#### 1. Mode switch (Q1: accepted)
+A new switch, `coronagraph` = `standard` / `knife_edge`, alongside the existing `state` switch.
+- It can only be changed while idle, like `camera`.
+- `idle`, `adcLoop`, `oneshot` and `measure-only` keep their meaning, and each cycle uses the pipeline for the current mode.
+- Switching mode does **not** reset `delta_1`. The set-point procedure in §5 depends on this.
+- On entering `knife_edge`, the app logs at INFO:
+  - if the set point has expired, or is still the config default (§5);
+  - if a selected spot is in the blocked half;
+  - if the spot selection has low sensitivity.
+
+  None of these block anything.
+
+#### 2. Estimating the star position (Q5)
+The star is blocked and moves between observations, and the app must run without re-alignment. So the star position is **estimated each cycle from the visible spots**.
+
+**Two adjacent spots (normal case).** This needs no knowledge of the pattern angle or the star.
+- Adjacent spots are equidistant from the star and 90° apart, so the star is the right-angle corner of an isosceles right triangle. If spot b is the counter-clockwise neighbour of spot a, with centroids `P_a` and `P_b`:
+  ```
+  c = (P_a + P_b)/2 + R90(P_b − P_a)/2      # R90: rotate 90° counter-clockwise
+  ```
+  - For spots 0 and 3, b = 3.
+  - The result is unique; there is no two-fold ambiguity, because which spot is the counter-clockwise one is known.
+- Side products, used as checks and published:
+  - the measured separation `r = |P_b − P_a| / √2`;
+  - the measured pattern angle θ.
+- Dispersion shifts the star and both spots by the same vector, so `c` follows the star's centroid. Both spots are stretched radially by the same factor, so the geometry still holds.
+
+**First frame, or after losing lock.** The spots have to be found before the star is known:
+1. High-pass the frame: subtract a smoothed copy, so the halo and the edge glint (a line, not a compact blob) are suppressed.
+2. List the bright compact local maxima.
+3. Take candidate pairs whose distance is `√2 · r_expected` (±10%), where `r_expected` comes from tweeterSpeck's separation or the configured DM separation, scaled to the filter. A pair is accepted only if its derived `c` lies below both spots and at least `0.7 r` from each candidate.
+4. Choose the brightest consistent pair.
+
+**After lock.** Each frame searches small boxes around the previous spot positions and recomputes `c`. The batch uses the median `c`. Lock is dropped if:
+- the camera, filter, spot source, spot selection or tweeterSpeck geometry changes;
+- the measured `r` is more than 10% from `r_expected`;
+- `c` jumps by more than a configurable distance.
+
+**One spot (exception).** There is no geometric solution, so `c = P − r_expected · û(θ)`, using tweeterSpeck's angle or the configured DM-spot angle. Finding that spot needs a seed:
+- the last two-spot lock, if there is one; otherwise
+- an optional rough per-camera hint, `ke_star_hint`, in pixels with a generous tolerance; otherwise
+- the brightest compact blob in the band.
+
+Single-spot mode is less robust, but using the spot angle and separation is accepted (R2-1).
+
+#### 3. Measurement pipeline (`measure_knife_edge`)
+Paralleling `measure_spot_angles`:
+1. Pad, place on the λ/D grid and median-subtract, as now.
+2. Estimate `c` (§2) and re-grid about it. `crop_image`'s centroid is not used.
+3. **Half-plane mask.** Keep rows above `c_y + margin`. Masked pixels are zeroed, so cutouts that reach the edge see zeros rather than glint.
+   - The configured `ke_edge_margin` defaults to 1.5 λ/D.
+   - **Margin guard.** The margin actually used is `min(ke_edge_margin, h_min − ke_spot_clearance)`, where `h_min` is the lowest selected spot's height above `c_y` and `ke_spot_clearance` defaults to 1.5 λ/D. The mask therefore never comes within 1.5 λ/D of a spot center. When the guard lowers the margin, the app logs at INFO once per lock. The margin actually used is published.
+   - Example: spot 3 at r = 10, θ = 15° is 2.6 λ/D above the star, so the margin used is 1.1 λ/D.
+4. **Half-plane radial profile (Q8: accepted).** Average only unmasked pixels in each radial bin, then subtract only in the unmasked region.
+5. Cut out only the selected spots, using `speckle_cutout` with the existing radial band.
+6. Run `moment_angle` and compute `d_n = wrap90(raw_n − expected_axes(θ)[n])`.
+7. Form the measured quantity:
+   - **two spots:** `m = d_a − d_b` (b = the counter-clockwise neighbour; for 0 and 3, `m = d0 − d3`);
+   - **one spot:** `m = d_a`.
+
+   The plain difference is used rather than a weighted one: only equal weights cancel rigid rotation.
+
+#### 4. Control law with a set point
+```
+residual = wrap90(m − setpoint)
+error    = ke_gain · residual
+step     = loop_sign · gain · error      # unchanged; step limit unchanged
+```
+- `ke_gain` is a scalar, separate from `ctrl_mtx` (Q7: accepted). It is calibrated by hand like today: counter-rotate by known offsets, fit the slope of `m`, invert.
+- **Sign convention.** `ke_gain` is scaled so the same `loop_sign` works in both modes. The operator should not have to flip `loop_sign` when changing mode. This means `ke_gain` takes whatever sign makes `error` match the standard-mode error for the same δ1 offset (R2-4).
+- **Default (R2-3).** A provisional `ke_gain = −0.62`, derived from the DM-spot calibration of 2026-10-25 (θ = 28°) and labelled as such in the config help:
+  1. `ctrl_mtx` was set as m00 = 1/S02 and m01 = 1/S13, where S is the fitted pair-offset slope versus δ1. So S02 = 1/−0.4156 ≈ −2.41 and S13 = 1/−0.24515 ≈ −4.08 deg/deg.
+  2. Each pair's slope splits evenly between its two spots: s0 ≈ S02/2 ≈ −1.20 and s3 ≈ −S13/2 ≈ +2.04 deg/deg. So `m = d0 − d3` has slope s0 − s3 ≈ −3.24 deg/deg.
+  3. The standard-mode error `m00·pair02 + m01·pair13` is about 2·δ1, because each term estimates δ1. To give the same error, and so the same loop behaviour with the same `loop_sign`, `ke_gain = 2/(s0 − s3) ≈ −0.62`.
+  - **Check.** The geometry model predicts S13/S02 = cot θ = 1.88 at θ = 28°. The measured ratio is 1.70, which corresponds to θ ≈ 30.5°. That is close enough to use for a placeholder.
+  - The default is valid only for spots 0 and 3, and only until `ke_gain` is calibrated.
+
+#### 5. The set point (Q6)
+**Capturing it:**
+1. In `standard` mode, close the loop until it converges at δ1*.
+2. Go idle, insert the knife edge, and switch `coronagraph` to `knife_edge`. δ1 stays at δ1*.
+3. Press `ke_capture_setpoint`. The app runs one batch (`n_avg` × `no_measurements`) and sets `setpoint = mean(m)`.
+4. Close the knife-edge loop.
+
+**Persistence (R3-1 to R3-3: no file).** There is one set point, with no file and no per-camera or per-filter entries.
+- **At startup** the set point is the config default, `ke_setpoint` (0 until a value is known). The app never writes the config.
+- **Manual entry.** The operator types a value into the INDI `ke_setpoint` property, for example a recent value when there is no time to recapture. It lasts until the app restarts.
+- **Capture.** `ke_capture_setpoint` sets the INDI value the same way. The app logs the value at INFO, with δ1, the camera, the filter and the spots, so the operator can copy it into the config default if they want to keep it.
+
+**Expiry (Q6).** The app records the time of the last capture or manual entry in memory. When it enters `knife_edge` mode, it logs at INFO if that time is more than `ke_setpoint_max_age_hr` (default 24) ago. If the set point is still the config default, it logs that the set point was not captured or entered in this session and its age is unknown. Nothing is blocked.
+
+#### 6. INDI properties (additions)
+| property | type | elements | notes |
+|---|---|---|---|
+| `coronagraph` | switch, one of many | `standard`, `knife_edge` | idle only |
+| `ke_spots` | switch, **any of many** | `spot0`…`spot3` | default from config, `spot0` + `spot3`. Valid selections are one spot, or two **adjacent** spots; any other selection is refused with a warning and the previous one kept. A spot in the blocked half or a low-sensitivity selection is warned about, not refused (Q4, Q11). |
+| `ke_setpoint` | number | `current`, `target` | deg; starts at the config default; settable by hand; not saved across restarts |
+| `ke_capture_setpoint` | switch | `request` | queued and run from `loop()`, like `reset_deltaADCs`; only in `knife_edge` mode |
+| `ke_gain` | number | `current`, `target` | scalar |
+| `measurement` | (extended) | `ke_m`, `ke_residual`, `star_x`, `star_y` (frame pixels), `ke_sep` (λ/D), `ke_angle` (deg), `ke_margin` (λ/D, the margin actually used) | `angle{n}`/`dev{n}` are filled only for the selected spots; the rest, and `pair02`/`pair13`, are 0 in `knife_edge` mode |
+
+The `adcctrl_cycle` telemetry gains:
+- `mode`, `ke_spots`, `setpoint`, `m` and `residual`;
+- the star estimate, and the measured separation and angle.
+
+#### 7. Config fields (additions)
+- `ke_spots: list[int] = [0, 3]`
+- `ke_gain: float = -0.62`: provisional, derived from the 2026-10-25 DM-spot calibration (§4, R2-3)
+- `ke_setpoint: float = 0.0` [deg], the startup default; `ke_setpoint_max_age_hr: float = 24.0`
+- `ke_edge_margin: float = 1.5` [λ/D], `ke_spot_clearance: float = 1.5` [λ/D] (the margin guard, §3)
+- `ke_min_sensitivity: float = 0.5` (warning threshold)
+- `ke_pair_tolerance: float = 0.1`, the fractional tolerance on `√2·r` when matching spots; `ke_max_star_jump` [λ/D]
+- `ke_star_hint`: optional, in `CameraConfig`, in pixels; used only to seed single-spot mode
+
+#### 8. Tests (planned)
+1. **Star estimate.**
+   - Synthetic half-plane frames with two adjacent elongated spots and the star blocked: the estimate is within 0.5 λ/D of the truth for several θ and r, with no angle given.
+   - A bright edge glint and noise in the blocked half do not capture the search.
+2. **Bootstrap.** The bootstrap finds the right pair among distractors, and a candidate pair with the wrong separation is rejected.
+3. **Deviations.** `measure_knife_edge` recovers the per-spot deviations within 0.5°, and `m` for one and two spots. A rigid pattern rotation leaves the two-spot `m` unchanged.
+4. **Half-plane radial profile and margin guard.**
+   - The half-plane radial profile removes a synthetic half-plane halo without biasing the spot angles.
+   - With spot 3 at r = 10 λ/D and θ = 15°, the default margin does not bias spot 3's angle by more than 0.5°.
+   - A too-large `ke_edge_margin` is capped by the guard, and the cap is logged once.
+5. **Set point.** The residual and error signs and the set-point subtraction are correct, including the wrap near ±90°. The same `loop_sign` converges in both modes on synthetic data.
+6. **Mode and spot selection.** `coronagraph` changes only while idle and leaves `delta_1` alone. `ke_spots` refuses invalid selections, and warns (does not refuse) for a blocked-half spot or low sensitivity.
+7. **Capture, manual entry and expiry.**
+   - The app starts with the config default.
+   - A capture sets the INDI value to the batch mean and logs it at INFO.
+   - A manual INDI entry sets the value and resets its age.
+   - Entering `knife_edge` mode gives one INFO log if the set point is older than the limit, or if it is still the config default.
+8. **Convergence.** On synthetic data, a δ1 offset is driven to the set point, not to zero.
+9. **Regression.** The existing 31 tests pass unchanged.
+
+#### 9. Implementation order (after Round 3)
+1. Pure functions, with tests 1–4: the star estimate and bootstrap, the half-plane mask and radial profile, `measure_knife_edge`.
+2. The mode switch, `ke_spots` and the other properties and config, with test 6.
+3. The control law, set-point capture, manual entry and expiry, with tests 5 and 7.
+4. Cycle dispatch and convergence, with test 8.
+5. On the instrument:
+   1. measure-only with the knife edge (check the star estimate and `ke_sep`);
+   2. capture the set point;
+   3. calibrate `ke_gain` by hand;
+   4. one-shot;
+   5. closed loop.
+
+All of it goes on `ktwitchell/adcCtrl-v2`. Commits follow AGENTS.md #19: functional changes with this plan, then docs. Nothing is pushed.
+
+### Questions for the User (Round 1, answered)
+
+**Q1. Mode vs. state.**
+- You said "a new state". I propose a separate `coronagraph` mode switch (standard / knife_edge) so idle / adcLoop / oneshot / measure-only all still work with the knife edge.
+- The alternative is a single new `state` element (e.g. `keLoop`). That would have no knife-edge measure-only or one-shot.
+- Which do you want?
+
+- Answer:
+  - new mode is fine
+
+**Q2. Knife-edge geometry on the science cameras.**
+- Which half of the camsci1/camsci2 image is transmitted (up / down / left / right)?
+- Is the edge orientation fixed?
+- The edge position (IWA) is adjustable. Is it set by a stage with an INDI property the app should read (device and property name), or is a config value good enough?
+- How wide is the edge glint, in λ/D?
+
+- Answer:
+  - the top half of the image is transmitted. The edge orientation is fixed throughout the entire observation. The IWA is not recorded in INDI because the motor that controls the knife-edge position is not absolutely encoded. The edge glint thus changes in width. However, the tweeterSpeck sparkles will never be closer in than 10 $\lambda/D$, so that is what you have to work with. 
+
+**Q3. Spots available.**
+- In knife-edge mode, are the spots from tweeterSpeck as a single sinusoid (one visible spot), the usual four-spot sparkle pattern (two visible, adjacent), or DM spots (two visible)?
+- When two adjacent spots are visible, their difference cancels pattern rotation and centering errors, as a pair does. By geometry, a sparkle pattern rotated 45° (spots at 45°/135° in the upper half) would give a difference that responds only to vertical dispersion.
+- Is a single spot a hard constraint, or should the plan include an optional two-adjacent-spot variant?
+
+- Answer:  there are almost two adjacent spots visible (DM or sparkle), because it is extremely rare that we ever use sparkles placed at 0°. Usually we keep sparkles at an offset of about 15-20° from the vertical y-axis. A single spot is thus not a hard constraint, and using two spots should be the norm, rather than the exception. 
+
+**Q4. Choosing the spot.**
+- Should the operator choose the spot (`ke_spot` switch), or should the app pick the spot deepest in the transmitted half with the best sensitivity (`|cos φ|`)?
+- If the operator chooses, should the app refuse a spot in the blocked half, or only warn?
+
+- Answer: the operator should choose, but see question 3 - we should default to using two spots. Only warn.
+
+**Q5. Star position.** The star is blocked, so its position can't be measured from the knife-edge image. Options:
+- (a) a configured pixel position per camera;
+- (b) a "capture star position" request run with the knife edge out;
+- (c) derived from the visible spot's position, using the known separation and angle. This needs no configuration, but it is only as good as the separation and angle;
+- (d) something MagAO-X already publishes (e.g. a LOWFS or camera property).
+
+Which is realistic? How stable is the star position on camsci with the knife edge in?
+
+- Answer: It's pretty difficult to ascertain the exact position of the star when the coronagraph is in. The pixel position will change from observation to observation, and we don't want to have to re-align the coronagraph for this app to work, since it's designed to work in the background. any ideas on this front are welcome, including ideas on how to estimate the star position even when the angle of the spot is unknown. 
+
+**Q6. Set point.**
+- Is the procedure in §4 (converge the four-spot loop, insert the knife edge, capture) practical on the instrument? Does the knife-edge insertion change anything else that would shift the spot (e.g. a pupil or Lyot stop change)?
+- Should the set point persist across app restarts (config value or file), or be re-captured each session?
+- How long do you expect a set point to stay valid?
+
+- Answer: the calibration procedure is practical in the lab and the insertion of the knife edge shouldn't affect the set point once it's been taken. The set point should persist in a config value. The set point should be valid for about 24 hours. beyond that, there should be a message in the log at the INFO level when the app is put into knife-edge mode to let the user know the setpoint has expired.
+
+**Q7. Control coefficient.**
+- Is a separate scalar `ke_gain`, hand-calibrated per spot, acceptable?
+- Is a default of 0, with closed loop and one-shot refused until it is set, the behaviour you want? The alternative is a nominal non-zero default, as with `ctrl_mtx`.
+
+- Answer: yes, a separate ke_gain is fine. There should be a nominal non-zero default, but I haven't run the calibration yet so I can't know what it is yet. 
+
+**Q8. Radial profile.** In knife-edge mode, should I subtract a half-plane radial profile, or skip radial subtraction? On-sky, the full-annulus subtraction helped. In the dark hole the halo is much fainter, so it may matter less.
+
+- Answer: a half-plane annulus subtraction is the best option.
+
+**Q9. Auto-detecting the knife edge.**
+- Is there an INDI property (e.g. a focal-plane-mask wheel element) that says the knife edge is in?
+- If so, should the app only warn when `coronagraph` disagrees with it (my recommendation), or switch modes automatically?
+
+- Answer:
+  - yes, there is an INDI property that indicates whether the knife-edge is inserted. No, you should not use it to automatically switch modes. The operator is capable of doing that, so you can ignore the indi property.  
+- 
+**Q10. Branch.** Implement on `ktwitchell/adcCtrl-v2` (still under verification), or on a new `ktwitchell/adcCtrl-knife-edge` branched from it?
+
+- Answer: there shouldn't be another branch. I don't know why you did that. it should run on the adcCtrl-v2 branch, and you should delete the one you created.
+  - *Agent note:* no branch was ever created. Q10 only proposed a name, and `git branch` shows no knife-edge branch, so there is nothing to delete. All work stays on `ktwitchell/adcCtrl-v2`, and new branches will not be proposed or created without asking first.
+
+**Q11. Sensitivity threshold.** Refuse closed loop when the spot is within 30° of vertical (`|cos φ| < 0.5`)? Or only warn?
+
+- Answer:warn
+
+### Questions for the User (Round 2, answered)
+*Raised by the Round 1 answers.*
+
+- **R2-1. Star estimate.** §2 estimates the star from the two visible spots: the right-angle corner of the isosceles right triangle they form. This needs no pattern angle and no alignment. Single-spot mode cannot do that, so it uses tweeterSpeck's angle (or the DM-spot angle) and separation, seeded from the last two-spot lock or an optional rough per-camera pixel hint. Is that acceptable? Or should single-spot mode just require a recent two-spot lock?
+  - Answer:
+    - using the spot angle and separation ais fine 
+
+- **R2-2. Spot 3 and the edge glint; sample frames.** At θ = 15° and r = 10 λ/D, spot 3 is only about 2.6 λ/D above the star, so its cutout reaches the edge. Could you save a few camsci frames with the knife edge in, to build the tests and tune `ke_edge_margin`? Ideally:
+  - sparkles at your usual separation and angle;
+  - DM spots only;
+  - two filters;
+  - a couple of knife-edge positions, if convenient.
+  
+  Where should I look for them?
+  - Answer:I can't access them right now. The glint is really not a big concern of mine. I think as long as the sparkle is visible, the edge margin will not ahave a huge effect on the quality of the mesasurement.
+
+- **R2-3. Provisional `ke_gain`.** Until you calibrate, I can derive a nominal value from the DM-spot calibration of 2026-10-25. Do you have the fitted slopes of pair02 and pair13 versus δ1, in degrees per degree? From them, each spot's slope is about half its pair's: for DM spots, `s0 ≈ S02/2` and `s3 ≈ −S13/2`. That gives `ke_gain ≈ 1/(s0 − s3)` for spots 0 and 3.
+
+  Or tell me how m00/m01 were computed from the slopes, and I'll back the slopes out of `[-0.4156, -0.24515]`. Otherwise I'll use a clearly labelled placeholder.
+  - Answer:m00 and m01 were computed by taking 1/m, where m is the slope of the pair offset line from the calibration sweep.
+
+- **R2-4. One `loop_sign` for both modes.** OK to define `ke_gain` so that the same `loop_sign` (currently negative) converges in both modes, so the operator never flips it when changing mode?
+  - Answer: yes, that is good.
+
+- **R2-5. Persisting the set point.** The app shouldn't edit `/opt/MagAOX/config/adcCtrl.conf` itself. Proposal: on capture, the app logs at INFO the exact lines to paste (`ke_setpoint`, `ke_setpoint_utc`, `ke_setpoint_spots`), and you add them to the config. Is that OK? Or would you rather the app write a small separate file, e.g. under `/home/xsup/adc_calibs/`, that it reads at startup?
+  - Answer: I would rather a separate file be written, that directory is fine.
+
+### Questions for the User (Round 3, answered)
+*Raised by the Round 2 answers.*
+
+- **R3-1. How the app finds the set-point file.**
+  - For the calibration sweep, you chose one FITS file per calibration, with the config pointing at the file. If the set point worked the same way, every capture would need a config edit, which is what R2-5 is meant to avoid.
+  - Proposal (§5): the app rewrites one current file, `ke_setpoint.json`, on each capture and reads it at startup. A timestamped copy of each capture is kept as history and never read. The config holds only the path to the current file.
+  - Is that OK? Or should set points follow the sweep's convention (one file per capture, chosen in the config), or be stored in the sweep's FITS files?
+  - Answer:ok forget the set-point file, you're overcomplicating it and it doesn't matter that much. no more set-point file, just the default value on startup and the operator can input the value manually if there's not time to run another calibration.
+
+- **R3-2. One set point, or one per camera, filter and spots?**
+  - The static bias in `m` probably depends on the filter, because the spot elongation depends on bandwidth. It may also depend on the camera.
+  - Proposal (§5): one entry per (camera, filter, spot selection). The app switches entries automatically when any of these changes, and logs at INFO when there is no entry for the current combination.
+  - The alternative is a single set point. It is simpler, but it would be wrong after a filter change until you recapture.
+  - Which do you want? If per entry, should a missing entry fall back to 0, as proposed, or to the most recent capture for the same camera and spots?
+  - Answer:one set point is fine, it will be changed manually if it needs to change.
+
+- **R3-3. Manual set point.** Should a set point typed into INDI be written to the file, with the timestamp "now", as proposed? Or should it apply only until the app restarts, so the file only ever holds captured values?
+  - Answer:forget the file
+
+### References
+- MagAO-X PAPLC knife-edge mask (reflective D-shaped mirror at ~1.1 λ/D, adjustable IWA): [arXiv:2607.08146](https://arxiv.org/pdf/2607.08146), [arXiv:2303.13719](https://arxiv.org/pdf/2303.13719)
+- Satellite-spot dispersion method: arXiv:2608.10307
