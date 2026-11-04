@@ -283,6 +283,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::updateSimulationINDI;
     using dmSyncopation::updateZeroTest;
     using dmSyncopation::waitUntil;
+    using dmSyncopation::ZeroClockFailure;
     using dmSyncopation::ZeroEvent;
     using dmSyncopation::ZeroOutcome;
     using dmSyncopation::ZeroStage;
@@ -6739,10 +6740,10 @@ struct ZeroClock
     static inline int64_t  releaseDelay{ 0 };  ///< Delay the observer's release capture without changing its endpoint.
     static inline int64_t  pendingReleaseAt{ 0 }; ///< Scheduled local observation of one delayed release record.
     static inline MagAOX::dmSyncoSimulation::Readiness pendingRelease; ///< Delayed fixture-owned release evidence.
-    static inline int64_t  validationDelay{ 0 }; ///< One-shot cost after the early wake, before validation completes.
-    static inline int64_t  injectionAt{ 0 };     ///< Absolute one-shot mutation during the bounded final wait.
-    static inline int      injection{ 0 };  ///< Selected final-window identity, cancellation, readiness or SDK fault.
-    static inline uint64_t injections{ 0 }; ///< Completed one-shot mutations, independently of timed sleeps.
+    static inline int64_t validationDelay{ 0 }; ///< One-shot cost after the early wake, before validation completes.
+    static inline int64_t injectionAt{ 0 };     ///< Absolute one-shot mutation during a bounded trial wait.
+    static inline int     injection{ 0 }; ///< Selected identity, cancellation, readiness, SDK or combined-source fault.
+    static inline uint64_t          injections{ 0 }; ///< Completed one-shot mutations, independently of timed sleeps.
     static inline CompletionStream *endpoint{ nullptr }; ///< Private endpoint used by an SDK or observer injection.
     static inline bool     observerRelease{ false }; ///< Route fake releases through the real observer in source tests.
     static inline uint64_t epochAtInjection{ 0 }; ///< Source generation immediately before the quiet-window mutation.
@@ -6862,6 +6863,14 @@ int64_t ZeroClock::now()
         else if( injection == 9 )
         {
             time += 20000;
+        }
+        else if( injection == 17 )
+        {
+            ++streams->images[1].md->cnt0;
+        }
+        else if( injection == 18 )
+        {
+            ++streams->images[1].md->inode;
         }
         else if( injection == 7 || injection == 8 || ( injection >= 10 && injection <= 16 ) )
         {
@@ -8452,7 +8461,7 @@ TEST_CASE( "coordinated zero status is independent of the cycle mutex", "[dmSync
         CHECK( app.m_indiP_zeroTest["mainObserved"].get<double>() == 80 );
         CHECK( app.m_indiP_zeroTest["elapsedSec"].get<double>() == Approx( 5 ) );
         CHECK( app.m_indiP_zeroTest["snapshotAgeSec"].get<double>() == Approx( 1 ) );
-        CHECK( app.m_indiP_zeroTest["labelVersion"].get<double>() == 8 );
+        CHECK( app.m_indiP_zeroTest["labelVersion"].get<double>() == 9 );
         CHECK( app.m_indiP_zeroTest["targetEndpoint"].get<double>() == 1 );
     }
 
@@ -8844,7 +8853,7 @@ TEST_CASE( "coordinated zero duration is selectable only while disabled", "[dmSy
     CHECK( app.m_indiP_zeroTest["durationSec"].get<double>() == 10 );
     CHECK( app.m_indiP_zeroTest["durationLimitSec"].get<double>() == 120 );
     CHECK( app.m_indiP_zeroTest["trial"].get<double>() == 0 );
-    CHECK( app.m_indiP_zeroTest["labelVersion"].get<double>() == 8 );
+    CHECK( app.m_indiP_zeroTest["labelVersion"].get<double>() == 9 );
     CHECK( app.m_indiP_zeroTest["targetEndpoint"].get<double>() == 1 );
 
     for( const auto value :
@@ -8989,6 +8998,10 @@ TEST_CASE( "counter publication trial expires while fresh clock captures remain 
         CHECK( app.m_zeroSnapshot.sequence > sequence );
         sequence = app.m_zeroSnapshot.sequence;
         CHECK( ZeroClock::posts.size() == posted );
+        const auto activeExcluded = uint64_t( std::min( index, 4 ) );
+        CHECK( app.m_zeroStats.clockExcludedCycles == activeExcluded );
+        CHECK( app.m_zeroStats.clockExcludedSlots == activeExcluded * 3 );
+        CHECK( app.m_zeroStats.auxiliaryOpportunities == 3 + activeExcluded * 3 );
 
         if( index < 5 )
         {
@@ -9006,11 +9019,27 @@ TEST_CASE( "counter publication trial expires while fresh clock captures remain 
     CHECK_FALSE( app.m_zeroSnapshot.requested );
     CHECK( app.m_zeroSnapshot.stats.startedNs == started );
     CHECK( app.m_zeroStats.posted == 3 );
+    CHECK( app.m_zeroStats.clockRejected == 5 );
+    std::vector<Harness::ZeroEvent> failures;
+    Harness::ZeroEvent              event;
+
+    while( app.m_zeroEvents.pop( event ) )
+    {
+        if( event.reason == Harness::ZeroOutcome::clockRejected )
+        {
+            failures.push_back( event );
+        }
+    }
+
+    REQUIRE( failures.size() == 5 );
+    CHECK_FALSE( failures.back().clock.active );
+    CHECK( failures.back().clock.excludedSlots == 0 );
     checkZeroPartition( app );
     // clang-format off
 #ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
     MagAOX::app::dmSyncopation::processZeroTestPrimary;
     MagAOX::app::dmSyncopation::publishZeroTestStatus;
+    MagAOX::app::dmSyncopation::zeroTestClockRejected;
 #endif
     // clang-format on
 }
@@ -9182,6 +9211,360 @@ TEST_CASE( "counter publication trial handles clock qualification failures", "[d
 #ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
     MagAOX::app::dmSyncopation::processZeroTestPrimary;
     MagAOX::app::synco::PublicationClock::sample;
+#endif
+    // clang-format on
+}
+
+/// Rejected clock pairs retain exact unsampled evidence and whole-cycle opportunity accounting.
+TEST_CASE( "counter publication trial accounts for rejected active clock cycles",
+           "[dmSyncopation][zeroTest][publication][clockRecovery]" )
+{
+    Streams streams;
+    Harness app;
+    ZeroClock::connect( app, streams, 4 );
+    app.properties();
+    app.localDriver( streams.directory );
+    REQUIRE( app.setupZeroTestINDI() == 0 );
+    app.m_zeroWakeAheadUs = 10;
+    const auto next       = ZeroClock::warm();
+    app.m_enabled         = true;
+    ZeroClock::primary( next );
+    REQUIRE( app.m_zeroStats.startedNs > 0 );
+    REQUIRE( app.m_zeroStats.posted == 3 );
+    const unsigned rejected = GENERATE( 1U, 2U );
+    const auto     epoch    = app.m_zeroPublicationClock.status().epoch;
+    const auto     posted   = ZeroClock::posts.size();
+    app.m_zeroEventStride   = 1024;
+
+    for( unsigned index = 1; index <= rejected; ++index )
+    {
+        ZeroClock::publicationClockDelay = 2000;
+        ZeroClock::primary( next + int64_t( index ) * 500000 );
+        CHECK( ZeroClock::posts.size() == posted );
+        CHECK( app.m_zeroStats.mainObserved == 1 );
+        CHECK( app.m_zeroStats.clockRejected == index );
+        CHECK( app.m_zeroStats.clockExcludedCycles == index );
+        CHECK( app.m_zeroStats.clockExcludedSlots == index * 3 );
+        CHECK( app.m_zeroStats.skipped == 0 );
+        CHECK( app.m_zeroPublicationClock.status().epoch == epoch );
+        CHECK( app.m_zeroClock.summary().cadence.state == MagAOX::dmSyncoSimulation::CadenceState::full );
+    }
+
+    std::vector<Harness::ZeroEvent> failures;
+    Harness::ZeroEvent              event;
+
+    while( app.m_zeroEvents.pop( event ) )
+    {
+        if( event.reason == Harness::ZeroOutcome::clockRejected )
+        {
+            failures.push_back( event );
+        }
+    }
+
+    REQUIRE( failures.size() == rejected );
+
+    for( const auto &failure : failures )
+    {
+        CHECK( failure.step == 0 );
+        CHECK( failure.stage == Harness::ZeroStage::clockQualification );
+        CHECK( failure.outcome == int( Harness::ZeroOutcome::clockRejected ) );
+        CHECK( failure.targetNs == 0 );
+        CHECK( failure.counterTargetNs == 0 );
+        CHECK( failure.sourceKey.inode == streams.images[0].md->inode );
+        CHECK( failure.sourceKey.counter == failure.primary );
+        CHECK( failure.clock.failure == Harness::ZeroClockFailure::wideBracket );
+        CHECK( failure.clock.active );
+        CHECK( failure.clock.excludedSlots == 3 );
+        CHECK( failure.clock.beforeNs > 0 );
+        CHECK( failure.clock.afterNs - failure.clock.beforeNs == 2100 );
+        CHECK( failure.clock.producerNs == 2000000000000000000LL + failure.clock.beforeNs + 50 );
+        CHECK( failure.clock.bracketLimitNs == 1000 );
+        CHECK( failure.clock.maxAgeNs == 4000000 );
+        CHECK( std::string( Harness::zeroTestActionName( failure ) ) == "clock_rejected" );
+        CHECK( std::string( Harness::zeroTestReasonName( failure.reason ) ) == "clock_rejected" );
+        CHECK( std::string( Harness::zeroTestStageName( failure.stage ) ) == "clock_qualification" );
+    }
+
+    app.publishZeroTestStatus( ZeroClock::time, true );
+    app.updateZeroTest( false );
+    CHECK( app.m_indiP_zeroTest["labelVersion"].get<double>() == 9 );
+    CHECK( app.m_indiP_zeroTest["mainCycles"].get<double>() == 1 + rejected );
+    CHECK( app.m_indiP_zeroTest["auxiliaryOpportunities"].get<double>() == ( 1 + rejected ) * 3 );
+    CHECK( app.m_indiP_zeroTest["clockExcludedCycles"].get<double>() == rejected );
+    CHECK( app.m_indiP_zeroTest["clockExcludedSlots"].get<double>() == rejected * 3 );
+    CHECK( app.m_zeroEvents.dropped() == 0 );
+
+    app.m_enabled = false;
+    auto settings = app.m_indiP_settings;
+    settings.add( pcf::IndiElement( "steps" ) );
+    settings["steps"] = 3.0;
+    REQUIRE( app.newCallBack_m_indiP_settings( settings ) == 0 );
+    app.updateZeroTest( false );
+    CHECK( app.m_requested == 3 );
+    CHECK( app.m_zeroStats.auxiliaryOpportunities == ( 1 + rejected ) * 3 );
+    CHECK( app.m_indiP_zeroTest["auxiliaryOpportunities"].get<double>() == ( 1 + rejected ) * 3 );
+    CHECK( app.m_indiP_zeroTest["mainCycles"].get<double>() == 1 + rejected );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::processZeroTestPrimary;
+    MagAOX::app::dmSyncopation::publishZeroTestStatus;
+    MagAOX::app::dmSyncopation::updateZeroTest;
+    MagAOX::app::dmSyncopation::zeroTestClockRejected;
+    MagAOX::app::dmSyncopation::newCallBack_m_indiP_settings;
+#endif
+    // clang-format on
+}
+
+/// Clock evidence distinguishes warmup exclusions and fault classes without authorizing auxiliary writes.
+TEST_CASE( "counter publication trial classifies clock rejection evidence",
+           "[dmSyncopation][zeroTest][publication][clockRecovery]" )
+{
+    Streams streams;
+    Harness app;
+    ZeroClock::connect( app, streams, 4 );
+    app.properties();
+    app.m_zeroWakeAheadUs = 10;
+    const auto next       = ZeroClock::warm();
+    auto       enable     = app.m_indiP_enable;
+    enable["toggle"]      = pcf::IndiElement::On;
+    REQUIRE( app.newCallBack_m_indiP_enable( enable ) == 0 );
+    bool                      active      = true;
+    Harness::ZeroClockFailure expected    = Harness::ZeroClockFailure::none;
+    int64_t                   publication = 0;
+
+    SECTION( "warmup wide capture has no active opportunities" )
+    {
+        active                           = false;
+        expected                         = Harness::ZeroClockFailure::wideBracket;
+        ZeroClock::publicationClockDelay = 2000;
+    }
+
+    SECTION( "malformed producer capture" )
+    {
+        expected = Harness::ZeroClockFailure::invalidCapture;
+    }
+
+    SECTION( "producer clock discontinuity" )
+    {
+        expected = Harness::ZeroClockFailure::discontinuity;
+    }
+
+    SECTION( "future producer publication" )
+    {
+        expected = Harness::ZeroClockFailure::futurePublication;
+    }
+
+    SECTION( "stale producer publication" )
+    {
+        expected = Harness::ZeroClockFailure::stalePublication;
+    }
+
+    int64_t observed = next;
+
+    if( active )
+    {
+        ZeroClock::primary( next );
+        REQUIRE( app.m_zeroStats.posted == 3 );
+        observed += 500000;
+
+        if( expected == Harness::ZeroClockFailure::invalidCapture )
+        {
+            app.m_publicationNow = +[]()
+            {
+                return int64_t( 0 );
+            };
+        }
+        else if( expected == Harness::ZeroClockFailure::discontinuity )
+        {
+            ZeroClock::publicationClockStep = 1000000;
+        }
+        else if( expected == Harness::ZeroClockFailure::futurePublication )
+        {
+            publication = observed + 100000;
+        }
+        else if( expected == Harness::ZeroClockFailure::stalePublication )
+        {
+            publication = observed - 5000000;
+        }
+    }
+    const auto posted = ZeroClock::posts.size();
+    ZeroClock::primary( observed, publication );
+    CHECK( ZeroClock::posts.size() == posted );
+    CHECK( app.m_zeroStats.clockRejected == 1 );
+    CHECK( app.m_zeroStats.clockExcludedCycles == ( active ? 1 : 0 ) );
+    CHECK( app.m_zeroStats.clockExcludedSlots == ( active ? 3 : 0 ) );
+
+    std::vector<Harness::ZeroEvent> failures;
+    Harness::ZeroEvent              event;
+
+    while( app.m_zeroEvents.pop( event ) )
+    {
+        if( event.reason == Harness::ZeroOutcome::clockRejected )
+        {
+            failures.push_back( event );
+        }
+    }
+
+    REQUIRE( failures.size() == 1 );
+    CHECK( failures[0].clock.failure == expected );
+    CHECK( failures[0].clock.active == active );
+    CHECK( failures[0].clock.excludedSlots == ( active ? 3 : 0 ) );
+    CHECK( failures[0].sourceKey.counter == streams.images[0].md->cnt0 );
+    CHECK( failures[0].sourceKey.sec == streams.images[0].md->writetime.tv_sec );
+    CHECK( failures[0].sourceKey.nsec == streams.images[0].md->writetime.tv_nsec );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::processZeroTestPrimary;
+    MagAOX::app::dmSyncopation::newCallBack_m_indiP_enable;
+    MagAOX::app::dmSyncopation::zeroTestClockRejected;
+#endif
+    // clang-format on
+}
+
+/// The next qualified cycle can wait for a current +1 output instead of rebasing to stale metadata twice.
+TEST_CASE( "counter publication trial recovers delayed main output after a rejected clock",
+           "[dmSyncopation][zeroTest][publication][clockRecovery]" )
+{
+    Streams streams;
+    Harness app;
+    ZeroClock::connect( app, streams, 4 );
+    app.m_zeroWakeAheadUs = 10;
+    app.m_zeroLateUs      = 2;
+    const auto next       = ZeroClock::warm();
+    app.m_enabled         = true;
+    ZeroClock::primary( next );
+    REQUIRE( app.m_zeroStats.posted == 3 );
+    ZeroClock::mainDelay             = 10000;
+    ZeroClock::publicationClockDelay = 2000;
+    ZeroClock::primary( next + 500000 );
+    REQUIRE( app.m_zeroStats.posted == 3 );
+    REQUIRE_FALSE( app.m_zeroHaveCombined );
+    ZeroClock::primary( next + 1000000 );
+    CHECK( app.m_zeroStats.mainRebaselined == 1 );
+    CHECK( app.m_zeroStats.mainMatched == 2 );
+    CHECK( app.m_zeroStats.mainUnmatched == 0 );
+    CHECK( app.m_zeroStats.posted == 6 );
+    CHECK( app.m_zeroStats.skipped == 0 );
+    REQUIRE( ZeroClock::posts.size() == 6 );
+
+    for( unsigned step = 1; step < 4; ++step )
+    {
+        const auto target = next + 1000000 + step * 125000;
+        CHECK( ZeroClock::posts[step + 2] >= target );
+        CHECK( ZeroClock::posts[step + 2] <= target + 2000 );
+    }
+
+    ZeroClock::primary( next + 1500000 );
+    CHECK( app.m_zeroStats.mainMatched == 3 );
+    CHECK( app.m_zeroStats.mainRebaselined == 1 );
+    CHECK( app.m_zeroStats.posted == 9 );
+    CHECK( app.m_zeroStats.clockExcludedCycles == 1 );
+    CHECK( app.m_zeroStats.clockExcludedSlots == 3 );
+    CHECK( app.m_zeroStats.mainUnmatched == 0 );
+    checkZeroPartition( app );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::processZeroTestPrimary;
+    MagAOX::app::dmSyncopation::zeroTestWait;
+#endif
+    // clang-format on
+}
+
+/// Reacquisition is bounded and does not accept counter jumps, replacement, cancellation or finite expiry.
+TEST_CASE( "counter publication main recovery preserves its guards",
+           "[dmSyncopation][zeroTest][publication][clockRecovery]" )
+{
+    Streams streams;
+    Harness app;
+    ZeroClock::connect( app, streams, 4 );
+    app.m_zeroWakeAheadUs = 10;
+    const auto next       = ZeroClock::warm();
+    app.m_enabled         = true;
+    ZeroClock::primary( next );
+    REQUIRE( app.m_zeroStats.posted == 3 );
+    ZeroClock::mainDelay             = 10000;
+    ZeroClock::publicationClockDelay = 2000;
+    ZeroClock::primary( next + 500000 );
+    REQUIRE_FALSE( app.m_zeroHaveCombined );
+    const auto posted   = ZeroClock::posts.size();
+    const auto recovery = next + 1000000;
+    const auto inode    = streams.images[1].md->inode;
+    auto       expected = Harness::ZeroOutcome::combinedUnclassified;
+
+    SECTION( "current output never arrives within the original main deadline" )
+    {
+        ZeroClock::mainDelay = 1000000;
+    }
+
+    SECTION( "a fresh first sample without a stale anchor remains ambiguous" )
+    {
+        ZeroClock::mainDelay = 0;
+    }
+
+    SECTION( "an additional counter update cannot be folded into one main" )
+    {
+        ZeroClock::injectionAt = recovery + 10000;
+        ZeroClock::injection   = 17;
+    }
+
+    SECTION( "combined source replacement revokes the private attachment" )
+    {
+        ZeroClock::injectionAt = recovery + 4000;
+        ZeroClock::injection   = 18;
+        expected               = Harness::ZeroOutcome::resourceUnavailable;
+    }
+
+    SECTION( "disable while awaiting current output cancels all slots" )
+    {
+        ZeroClock::cancel = true;
+        expected          = Harness::ZeroOutcome::cancelled;
+    }
+
+    SECTION( "a new main while awaiting the old output revokes this cycle" )
+    {
+        ZeroClock::earlyMain = true;
+        expected             = Harness::ZeroOutcome::primaryChanged;
+    }
+
+    SECTION( "finite expiry while waiting cannot authorize late recovery" )
+    {
+        app.m_zeroDurationSec = 0.001005;
+        expected              = Harness::ZeroOutcome::durationExpired;
+    }
+
+    SECTION( "an absolute-wait failure is retained" )
+    {
+        ZeroClock::waitError = EIO;
+        expected             = Harness::ZeroOutcome::waitError;
+    }
+
+    ZeroClock::primary( recovery );
+    streams.images[1].md->inode = inode;
+    CHECK( ZeroClock::posts.size() == posted );
+    CHECK( app.m_zeroStats.mainRebaselined == 0 );
+    CHECK( app.m_zeroStats.mainMatched == 1 );
+    CHECK( app.m_zeroStats.mainUnmatched == 1 );
+    CHECK( app.m_zeroStats.posted == 3 );
+    CHECK( app.m_zeroStats.skipped == 3 );
+    const auto events = zeroAuxiliaryEvents( app );
+    REQUIRE( events.size() == 6 );
+
+    for( size_t index = 3; index < events.size(); ++index )
+    {
+        CHECK( events[index].reason == expected );
+        CHECK( events[index].stage == Harness::ZeroStage::mainAcknowledgement );
+    }
+
+    if( expected == Harness::ZeroOutcome::combinedUnclassified )
+    {
+        CHECK( ZeroClock::time <= recovery + 55000 );
+    }
+    checkZeroPartition( app );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::processZeroTestPrimary;
+    MagAOX::app::dmSyncopation::zeroTestWait;
+    MagAOX::app::dmSyncopation::zeroTestResources;
 #endif
     // clang-format on
 }

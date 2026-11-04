@@ -601,6 +601,8 @@ inline const char *dmSyncopation::zeroTestReasonName( ZeroOutcome reason )
         return "ack_ambiguous";
     case ZeroOutcome::preparationLate:
         return "preparation_late";
+    case ZeroOutcome::clockRejected:
+        return "clock_rejected";
     }
     return "unknown";
 }
@@ -637,6 +639,8 @@ inline const char *dmSyncopation::zeroTestStageName( ZeroStage stage )
         return "validation";
     case ZeroStage::finalWait:
         return "final_wait";
+    case ZeroStage::clockQualification:
+        return "clock_qualification";
     }
     return "unknown";
 }
@@ -644,6 +648,11 @@ inline const char *dmSyncopation::zeroTestStageName( ZeroStage stage )
 inline const char *dmSyncopation::zeroTestActionName( const ZeroEvent &event )
 {
     const auto outcome = static_cast<ZeroOutcome>( event.outcome );
+
+    if( outcome == ZeroOutcome::clockRejected )
+    {
+        return "clock_rejected";
+    }
 
     if( event.step < 0 )
     {
@@ -733,18 +742,18 @@ inline void dmSyncopation::zeroTestEvent( int                           step,
     }
 
     const auto waitResult = reason == ZeroOutcome::waitError ? m_zeroWaitResult : 0;
-    ZeroEvent  event{ m_zeroTrial, m_zeroPrimary,
-                     step,        int( outcome ),
-                     reason,      stage,
-                     waitResult,  target,
-                     observed,    key,
-                     stagedNs,    0,
-                     0,           0,
-                     0,           {},
-                      {},          0,
-                     0,           0,
-                     0,           0,
-                      {} };
+    ZeroEvent  event;
+    event.trial      = m_zeroTrial;
+    event.primary    = m_zeroPrimary;
+    event.step       = step;
+    event.outcome    = int( outcome );
+    event.reason     = reason;
+    event.stage      = stage;
+    event.waitResult = waitResult;
+    event.targetNs   = target;
+    event.observedNs = observed;
+    event.key        = key;
+    event.stagedNs   = stagedNs;
 
     if( step > 0 && target > 0 )
     {
@@ -768,6 +777,71 @@ inline void dmSyncopation::zeroTestEvent( int                           step,
     {
         event.counterTargetNs    = target;
         event.counterTargetRawNs = m_zeroCounterTargetRawNs;
+    }
+    m_zeroEvents.push( event );
+}
+
+inline const char *dmSyncopation::zeroTestClockFailureName( ZeroClockFailure failure )
+{
+    switch( failure )
+    {
+    case ZeroClockFailure::none:
+        return "none";
+    case ZeroClockFailure::invalidCapture:
+        return "invalid_capture";
+    case ZeroClockFailure::wideBracket:
+        return "wide_bracket";
+    case ZeroClockFailure::discontinuity:
+        return "discontinuity";
+    case ZeroClockFailure::futurePublication:
+        return "future_publication";
+    case ZeroClockFailure::stalePublication:
+        return "stale_publication";
+    case ZeroClockFailure::invalidMapping:
+        return "invalid_mapping";
+    }
+    return "unknown";
+}
+
+inline void dmSyncopation::zeroTestClockRejected( ZeroClockFailure failure, int64_t observed )
+{
+    const auto &clock  = m_zeroPublicationClock.status();
+    const bool  active = m_zeroStats.startedNs > 0 && observed >= m_zeroStats.startedNs &&
+                        observed - m_zeroStats.startedNs < int64_t( m_zeroDurationSec * 1e9 );
+    const auto slots = active ? uint64_t( m_requested - 1 ) : 0;
+    ++m_zeroStats.clockRejected;
+    m_zeroStats.clockExcludedCycles += active ? 1 : 0;
+    m_zeroStats.clockExcludedSlots += slots;
+    m_zeroStats.auxiliaryOpportunities += slots;
+    m_zeroStats.active  = false;
+    m_zeroStats.warming = true;
+    m_reason            = "zero publication clock unqualified";
+
+    ZeroEvent event;
+    event.trial          = m_zeroTrial;
+    event.primary        = m_zeroPrimary;
+    event.outcome        = int( ZeroOutcome::clockRejected );
+    event.reason         = ZeroOutcome::clockRejected;
+    event.stage          = ZeroStage::clockQualification;
+    event.observedNs     = clock.monoAfterNs;
+    event.sourceKey      = m_zeroPrimaryPublication;
+    event.clockEpoch     = clock.epoch;
+    event.clockBracketNs = clock.bracketNs;
+    event.clockOffsetNs  = clock.offsetNs;
+    event.clock          = { failure,
+                             clock.monoBeforeNs,
+                             clock.externalNs,
+                             clock.monoAfterNs,
+                             clock.bracketLimitNs,
+                             clock.maxAgeNs,
+                             slots,
+                             active };
+    synco::GridTime raw;
+    uint64_t        period = 0;
+
+    if( m_zeroClock.frozenGrid( m_zeroPrimary, raw, period ) )
+    {
+        event.counterTargetRawNs = raw.ns;
     }
     m_zeroEvents.push( event );
 }
@@ -889,10 +963,30 @@ inline int dmSyncopation::processZeroTestPrimary( int64_t observed, int64_t rece
     {
         if( m_enabled )
         {
-            ++m_zeroStats.clockRejected;
-            m_zeroStats.active  = false;
-            m_zeroStats.warming = true;
-            m_reason            = "zero publication clock unqualified";
+            const auto &clock   = m_zeroPublicationClock.status();
+            auto        failure = ZeroClockFailure::invalidMapping;
+
+            if( !clockSample )
+            {
+                if( clockBefore <= 0 || clockExternal <= 0 || clockAfter < clockBefore )
+                {
+                    failure = ZeroClockFailure::invalidCapture;
+                }
+                else
+                {
+                    failure = clock.bracketNs > clock.bracketLimitNs ? ZeroClockFailure::wideBracket
+                                                                     : ZeroClockFailure::discontinuity;
+                }
+            }
+            else if( publication > clock.externalNs )
+            {
+                failure = ZeroClockFailure::futurePublication;
+            }
+            else if( clock.externalNs - publication > clock.maxAgeNs )
+            {
+                failure = ZeroClockFailure::stalePublication;
+            }
+            zeroTestClockRejected( failure, observed );
         }
         m_zeroHaveCombined = false;
         return 0;
@@ -1007,10 +1101,14 @@ inline int dmSyncopation::processZeroTestPrimary( int64_t observed, int64_t rece
 
     m_zeroStats.active = true;
     ++m_zeroStats.mainObserved;
+    m_zeroStats.auxiliaryOpportunities += uint64_t( m_requested - 1 );
     m_zeroCounterTargetRawNs = rawGrid.ns;
     m_zeroPublicationTiming.main( { metadata->inode, primary, stamp.tv_sec, stamp.tv_nsec }, rawGrid, periodQ32 );
     synco::ZeroTiming::Key main;
-    bool                   mainMatched = false;
+    bool                   mainMatched  = false;
+    const bool             recovering   = !m_zeroHaveCombined;
+    auto                   baseline     = m_zeroLastCombined;
+    bool                   haveBaseline = m_zeroHaveCombined;
     const auto             mainDeadline =
         std::min( observed + int64_t( m_outputTimeoutUs * 1000 ),
                   zeroTestPublicationTarget( synco::stepGrid( grid, periodQ32, 1, m_requested ).ns ) );
@@ -1019,19 +1117,50 @@ inline int dmSyncopation::processZeroTestPrimary( int64_t observed, int64_t rece
     {
         if( zeroTestCombined( main ) )
         {
-            if( m_zeroHaveCombined && main.inode == m_zeroLastCombined.inode &&
-                m_zeroLastCombined.counter != UINT64_MAX && main.counter == m_zeroLastCombined.counter + 1 &&
-                main.sec * 1000000000LL + main.nsec >= publication )
+            if( main.inode != m_zeroCombinedIdentity )
             {
-                mainMatched = true;
+                m_zeroWaitFailure = ZeroOutcome::resourceUnavailable;
                 break;
             }
+            const auto stampNs = simulationTimestamp( { time_t( main.sec ), long( main.nsec ) } );
 
-            if( !m_zeroHaveCombined || main.inode != m_zeroLastCombined.inode ||
-                ( main.counter != m_zeroLastCombined.counter &&
-                  ( m_zeroLastCombined.counter == UINT64_MAX || main.counter != m_zeroLastCombined.counter + 1 ) ) )
+            if( !haveBaseline )
+            {
+                // A fresh timestamp alone cannot identify its originating main. Retain the conservative skip.
+                if( stampNs >= publication )
+                {
+                    break;
+                }
+                baseline     = main;
+                haveBaseline = true;
+            }
+            else if( main.inode != baseline.inode ||
+                     ( main.counter == baseline.counter && !synco::ZeroTiming::equal( main, baseline ) ) )
             {
                 break;
+            }
+            else if( main.counter != baseline.counter )
+            {
+                if( baseline.counter == UINT64_MAX || main.counter != baseline.counter + 1 ||
+                    stampNs <= simulationTimestamp( { time_t( baseline.sec ), long( baseline.nsec ) } ) )
+                {
+                    break;
+                }
+
+                if( stampNs >= publication )
+                {
+                    if( m_now() > mainDeadline )
+                    {
+                        break;
+                    }
+                    mainMatched = true;
+                    break;
+                }
+
+                if( recovering )
+                {
+                    baseline = main;
+                }
             }
         }
 
@@ -1057,11 +1186,15 @@ inline int dmSyncopation::processZeroTestPrimary( int64_t observed, int64_t rece
             zeroTestSkip( step, reason, ZeroStage::mainAcknowledgement, target, rejectedAt, main );
         }
         m_zeroLastCombined = main;
-        m_zeroHaveCombined = synco::ZeroTiming::valid( main );
+        m_zeroHaveCombined =
+            synco::ZeroTiming::valid( main ) &&
+            ( !recovering || simulationTimestamp( { time_t( main.sec ), long( main.nsec ) } ) >= publication );
         return 0;
     }
     ++m_zeroStats.mainMatched;
+    m_zeroStats.mainRebaselined += recovering ? 1 : 0;
     m_zeroLastCombined           = main;
+    m_zeroHaveCombined           = true;
     bool        impactClassified = false;
     const auto &outputImage      = m_zeroCombined;
     const auto *trace            = outputImage.streamproctrace;
@@ -1455,6 +1588,8 @@ inline int dmSyncopation::setupZeroTestINDI()
                               "late",
                               "validationLate",
                               "clockRejected",
+                              "clockExcludedCycles",
+                              "clockExcludedSlots",
                               "preparationLate",
                               "readerMissing",
                               "primaryChanged",
@@ -1470,8 +1605,11 @@ inline int dmSyncopation::setupZeroTestINDI()
                               "readerDrops",
                               "eventsDropped",
                               "mainObserved",
+                              "mainCycles",
+                              "auxiliaryOpportunities",
                               "mainMatched",
                               "mainUnmatched",
+                              "mainRebaselined",
                               "mainImpactUnclassified",
                               "mainSdkMatched",
                               "mainSdkUnmatched",
@@ -1703,7 +1841,9 @@ inline void dmSyncopation::updateZeroTest( bool record )
         stats.startedNs
             ? std::max<int64_t>( 0, ( stats.stoppedNs ? stats.stoppedNs : snapshot.capturedNs ) - stats.startedNs )
             : 0;
-    const bool copied = snapshot.sequence != 0;
+    const bool copied                 = snapshot.sequence != 0;
+    const auto mainCycles             = stats.mainObserved + stats.clockExcludedCycles;
+    const auto auxiliaryOpportunities = stats.auxiliaryOpportunities;
 
     if( copied )
     {
@@ -1740,6 +1880,8 @@ inline void dmSyncopation::updateZeroTest( bool record )
                                               "late",
                                               "validationLate",
                                               "clockRejected",
+                                              "clockExcludedCycles",
+                                              "clockExcludedSlots",
                                               "preparationLate",
                                               "readerMissing",
                                               "primaryChanged",
@@ -1755,8 +1897,11 @@ inline void dmSyncopation::updateZeroTest( bool record )
                                               "readerDrops",
                                               "eventsDropped",
                                               "mainObserved",
+                                              "mainCycles",
+                                              "auxiliaryOpportunities",
                                               "mainMatched",
                                               "mainUnmatched",
+                                              "mainRebaselined",
                                               "mainImpactUnclassified",
                                               "mainSdkMatched",
                                               "mainSdkUnmatched",
@@ -1773,7 +1918,7 @@ inline void dmSyncopation::updateZeroTest( bool record )
                                               "sdkGaps",
                                               "sdkFailed" };
         const std::vector<double>      values{ 1,
-                                          8,
+                                          9,
                                           1,
                                           1,
                                           double( snapshot.trial ),
@@ -1805,6 +1950,8 @@ inline void dmSyncopation::updateZeroTest( bool record )
                                           double( stats.late ),
                                           double( stats.validationLate ),
                                           double( stats.clockRejected ),
+                                          double( stats.clockExcludedCycles ),
+                                          double( stats.clockExcludedSlots ),
                                           double( stats.preparationLate ),
                                           double( stats.readerMissing ),
                                           double( stats.primaryChanged ),
@@ -1820,8 +1967,11 @@ inline void dmSyncopation::updateZeroTest( bool record )
                                           double( stats.readerDrops ),
                                           double( snapshot.eventsDropped ),
                                           double( stats.mainObserved ),
+                                          double( mainCycles ),
+                                          double( auxiliaryOpportunities ),
                                           double( stats.mainMatched ),
                                           double( stats.mainUnmatched ),
+                                          double( stats.mainRebaselined ),
                                           double( stats.mainImpactUnclassified ),
                                           double( timing.matched ),
                                           double( timing.classified - std::min( timing.classified, timing.matched ) ),
@@ -1849,7 +1999,7 @@ inline void dmSyncopation::updateZeroTest( bool record )
         if( record )
         {
             std::ostringstream output;
-            output << "[zero_test] kind=summary labelVersion=8 targetEndpoint=1 idealPublisher=1 trial=" << trial
+            output << "[zero_test] kind=summary labelVersion=9 targetEndpoint=1 idealPublisher=1 trial=" << trial
                    << " requested=" << snapshot.requested << " snapshotSequence=" << snapshot.sequence
                    << " snapshotTimeNs=" << snapshot.capturedNs << " snapshotAgeSec=" << age
                    << " snapshotValid=" << valid << " eventsQueued=" << snapshot.eventsQueued
@@ -1859,8 +2009,9 @@ inline void dmSyncopation::updateZeroTest( bool record )
                    << " durationSec=" << snapshot.durationSec << " durationLimitSec=" << snapshot.durationLimitSec
                    << " publicationAdvanceUs=" << snapshot.publicationAdvanceUs << " lateUs=" << snapshot.lateUs
                    << " commitLeadUs=" << snapshot.commitLeadUs << " clockRejected=" << stats.clockRejected
-                   << " wakeAheadUs=" << snapshot.wakeAheadUs << " posted=" << stats.posted
-                   << " staged=" << stats.staged << " acknowledged=" << stats.acknowledged
+                   << " clockExcludedCycles=" << stats.clockExcludedCycles
+                   << " clockExcludedSlots=" << stats.clockExcludedSlots << " wakeAheadUs=" << snapshot.wakeAheadUs
+                   << " posted=" << stats.posted << " staged=" << stats.staged << " acknowledged=" << stats.acknowledged
                    << " unacknowledged=" << stats.unacknowledged << " skipped=" << stats.skipped
                    << " late=" << stats.late << " validationLate=" << stats.validationLate
                    << " preparationLate=" << stats.preparationLate << " readerMissing=" << stats.readerMissing
@@ -1870,8 +2021,9 @@ inline void dmSyncopation::updateZeroTest( bool record )
                    << " cancelled=" << stats.cancelled << " combinedUnclassified=" << stats.combinedUnclassified
                    << " resourceFaults=" << stats.resourceFaults << " readerInvalid=" << stats.readerInvalid
                    << " readerDrops=" << stats.readerDrops << " eventsDropped=" << snapshot.eventsDropped
-                   << " mainObserved=" << stats.mainObserved << " mainMatched=" << stats.mainMatched
-                   << " mainUnmatched=" << stats.mainUnmatched
+                   << " mainObserved=" << stats.mainObserved << " mainCycles=" << mainCycles
+                   << " auxiliaryOpportunities=" << auxiliaryOpportunities << " mainMatched=" << stats.mainMatched
+                   << " mainUnmatched=" << stats.mainUnmatched << " mainRebaselined=" << stats.mainRebaselined
                    << " mainImpactUnclassified=" << stats.mainImpactUnclassified << " mainSdkMatched=" << timing.matched
                    << " mainSdkUnmatched=" << timing.classified - std::min( timing.classified, timing.matched )
                    << " mainReaderMatched=" << timing.readerMatched << " mainTimingInvalid=" << timing.invalid
@@ -1909,7 +2061,7 @@ inline void dmSyncopation::updateZeroTest( bool record )
         for( unsigned step = 0; step < phase.interval.size(); ++step )
         {
             std::ostringstream output;
-            output << "[zero_test] kind=phase labelVersion=8 trial=" << trial << " toStep=" << step
+            output << "[zero_test] kind=phase labelVersion=9 trial=" << trial << " toStep=" << step
                    << " endpoint=combined_publication observed=" << phase.observed << " paired=" << phase.paired
                    << " phaseMatched=" << phase.phaseMatched << " invalid=" << phase.invalid
                    << " duplicates=" << phase.duplicates << " counterGaps=" << phase.counterGaps
@@ -1985,7 +2137,7 @@ inline void dmSyncopation::updateZeroPublication( const ZeroSnapshot &snapshot, 
     for( unsigned step = 0; step < p.interval.size(); ++step )
     {
         std::ostringstream output;
-        output << "[zero_test] kind=publication labelVersion=8 endpoint=cnt0_writetime_proxy trial=" << snapshot.trial
+        output << "[zero_test] kind=publication labelVersion=9 endpoint=cnt0_writetime_proxy trial=" << snapshot.trial
                << " toStep=" << step << " mainObserved=" << p.mainObserved
                << " auxiliaryObserved=" << p.auxiliaryObserved << " paired=" << p.paired
                << " sourceGaps=" << p.sourceGaps << " labelGaps=" << p.labelGaps << " invalid=" << p.invalid
@@ -2073,7 +2225,7 @@ inline void dmSyncopation::updateZeroPublication( const ZeroSnapshot &snapshot, 
     if( record )
     {
         std::ostringstream output;
-        output << "[zero_test] kind=clock labelVersion=8 trial=" << snapshot.trial << " clockId=" << CLOCK_ISIO
+        output << "[zero_test] kind=clock labelVersion=9 trial=" << snapshot.trial << " clockId=" << CLOCK_ISIO
                << " valid=" << c.valid << " epoch=" << c.epoch << " attempted=" << c.attempted
                << " qualified=" << c.qualified << " invalid=" << c.invalid << " wideBracket=" << c.wideBracket
                << " discontinuity=" << c.discontinuity << " mapped=" << c.mapped << " mapInvalid=" << c.mapInvalid
@@ -2106,7 +2258,7 @@ inline void dmSyncopation::drainZeroTestEvents( size_t limit )
     for( size_t index = 0; index < available && m_zeroEvents.pop( event ); ++index )
     {
         std::ostringstream output;
-        output << "[zero_test] kind=event labelVersion=8 trial=" << event.trial << " primary=" << event.primary
+        output << "[zero_test] kind=event labelVersion=9 trial=" << event.trial << " primary=" << event.primary
                << " step=" << event.step << " outcome=" << event.outcome << " action=" << zeroTestActionName( event )
                << " reason=" << zeroTestReasonName( event.reason ) << " stage=" << zeroTestStageName( event.stage )
                << " waitResult=" << event.waitResult << " targetNs=" << event.targetNs
@@ -2125,6 +2277,15 @@ inline void dmSyncopation::drainZeroTestEvents( size_t limit )
                << " auxiliaryCounter=" << event.auxiliaryKey.counter
                << " auxiliaryPublicationSec=" << event.auxiliaryKey.sec
                << " auxiliaryPublicationNsec=" << event.auxiliaryKey.nsec;
+
+        if( event.reason == ZeroOutcome::clockRejected )
+        {
+            output << " clockFailure=" << zeroTestClockFailureName( event.clock.failure )
+                   << " clockBeforeNs=" << event.clock.beforeNs << " clockProducerNs=" << event.clock.producerNs
+                   << " clockAfterNs=" << event.clock.afterNs << " clockBracketLimitNs=" << event.clock.bracketLimitNs
+                   << " clockMaxAgeNs=" << event.clock.maxAgeNs << " clockActive=" << event.clock.active
+                   << " clockExcludedSlots=" << event.clock.excludedSlots;
+        }
         if( telemeterT::telem<syncoZeroLog>( { output.str() } ) < 0 )
         {
             ++m_logicTiming.logFailed;

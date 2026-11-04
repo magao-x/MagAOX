@@ -13,8 +13,8 @@ RATE is effective total cadence, 4000, 6000 or 8000 Hz, with the main loop at 20
 SECONDS is the active-trial duration, default 120, integer 1 through 120.
 ADVANCE_US must be 0: downstream dmcomb compensation is not used for counter targets.
 WAKE_AHEAD_US is the expected startup validation lead, default 0, from 0 through 50 us.
-COMMIT_LEAD_US is the expected startup final guard/API lead, default 0, from 0 through 10 us.
-The app must report schema 8 or newer, targetEndpoint=1 (cnt0), and matching startup leads.
+COMMIT_LEAD_US is the expected startup guard-to-counter lead, default 0, from 0 through 10 us.
+The app must report schema 9 or newer, targetEndpoint=1 (cnt0), and matching startup leads.
 The app must already be running with zeroTest.enabled=true and enable=Off.
 The script sets steps and the app-enforced duration while disabled, then starts the trial.
 It never changes the main loop, camera, dmcomb, CPU placement or app config.
@@ -121,46 +121,46 @@ check_phase_preset()
     zero_phase_schema=$(read_property dmtweeter-synco.zero_test.labelVersion "$zero_file")
     zero_actual_endpoint=$(read_property dmtweeter-synco.zero_test.targetEndpoint "$zero_file")
     if ! awk -v schema="$zero_phase_schema" -v endpoint="$zero_actual_endpoint" \
-         'BEGIN { exit !(schema ~ /^[0-9]+$/ && schema >= 8 &&
+         'BEGIN { exit !(schema ~ /^[0-9]+$/ && schema >= 9 &&
                          endpoint ~ /^[0-9]+([.][0-9]+)?$/ && endpoint == 1) }'
     then
         setup_failure "$zero_phase counter-target endpoint" \
             "schema=$zero_phase_schema targetEndpoint=$zero_actual_endpoint" \
-            'schema>=8 and targetEndpoint=1 (cnt0)'
+            'schema>=9 and targetEndpoint=1 (cnt0)'
     fi
     zero_actual_advance=$(read_property dmtweeter-synco.zero_test.publicationAdvanceUs "$zero_file")
     zero_actual_late=$(read_property dmtweeter-synco.zero_test.lateUs "$zero_file")
     if ! awk -v schema="$zero_phase_schema" -v actual="$zero_actual_advance" \
              -v late="$zero_actual_late" -v expected="$zero_advance" \
          'BEGIN { number="^[0-9]+([.][0-9]+)?([eE][+-]?[0-9]+)?$";
-                  exit !(schema ~ /^[0-9]+$/ && schema >= 8 && expected == 0 &&
+                  exit !(schema ~ /^[0-9]+$/ && schema >= 9 && expected == 0 &&
                          actual ~ number && actual == 0 && late ~ number && late >= 0 && late <= 50) }'
     then
         setup_failure "$zero_phase publication-advance preset" \
             "schema=$zero_phase_schema advanceUs=$zero_actual_advance lateUs=$zero_actual_late" \
-            'advanceUs=0; schema>=8 and 0<=lateUs<=50'
+            'advanceUs=0; schema>=9 and 0<=lateUs<=50'
     fi
     local zero_actual_wake
     zero_actual_wake=$(read_property dmtweeter-synco.zero_test.wakeAheadUs "$zero_file")
     if ! awk -v schema="$zero_phase_schema" -v actual="$zero_actual_wake" -v expected="$zero_wake_ahead" \
          'BEGIN { number="^[0-9]+([.][0-9]+)?([eE][+-]?[0-9]+)?$";
-                  exit !(schema ~ /^[0-9]+$/ && schema >= 8 &&
+                  exit !(schema ~ /^[0-9]+$/ && schema >= 9 &&
                          actual ~ number && actual == expected && actual >= 0 && actual <= 50) }'
     then
         setup_failure "$zero_phase wake-ahead preset" \
             "schema=$zero_phase_schema wakeAheadUs=$zero_actual_wake" \
-            "wakeAheadUs=$zero_wake_ahead; schema>=8"
+            "wakeAheadUs=$zero_wake_ahead; schema>=9"
     fi
     local zero_actual_commit
     zero_actual_commit=$(read_property dmtweeter-synco.zero_test.commitLeadUs "$zero_file")
     if ! awk -v schema="$zero_phase_schema" -v actual="$zero_actual_commit" -v expected="$zero_commit_lead" \
          'BEGIN { number="^[0-9]+([.][0-9]+)?([eE][+-]?[0-9]+)?$";
-                  exit !(schema ~ /^[0-9]+$/ && schema >= 8 && actual ~ number &&
+                  exit !(schema ~ /^[0-9]+$/ && schema >= 9 && actual ~ number &&
                          actual == expected && actual >= 0 && actual <= 10) }'
     then
         setup_failure "$zero_phase commit-lead preset" \
             "schema=$zero_phase_schema commitLeadUs=$zero_actual_commit" \
-            "commitLeadUs=$zero_commit_lead; schema>=8"
+            "commitLeadUs=$zero_commit_lead; schema>=9"
     fi
 }
 
@@ -273,13 +273,13 @@ check_phase_preset "$zero_synco_before" before
 if ! awk -v schema="$zero_schema" -v valid="$zero_snapshot_valid" -v age="$zero_snapshot_age" \
          -v seq="$zero_snapshot_sequence" -v drops="$zero_drops_before" -v failed="$zero_log_failed_before" \
      'BEGIN { number="^[0-9]+([.][0-9]+)?([eE][+-]?[0-9]+)?$";
-              exit !(schema ~ /^[0-9]+$/ && schema >= 8 && valid == 1 &&
+              exit !(schema ~ /^[0-9]+$/ && schema >= 9 && valid == 1 &&
                      age ~ number && age >= 0 && age <= 2 && seq ~ /^[0-9]+$/ && seq > 0 &&
                      drops ~ /^[0-9]+$/ && failed ~ /^[0-9]+$/) }'
 then
     setup_failure 'zero_test progress snapshot' \
         "schema=$zero_schema valid=$zero_snapshot_valid age=$zero_snapshot_age sequence=$zero_snapshot_sequence" \
-        'schema>=8, valid=1, age<=2 seconds and a positive sequence'
+        'schema>=9, valid=1, age<=2 seconds and a positive sequence'
 fi
 [[ $zero_camera_sync == On ]] || setup_failure camwfs.synchro.toggle "$zero_camera_sync" On
 [[ $zero_latency == On ]] || setup_failure sysMonRTC.set_latency.toggle "$zero_latency" On

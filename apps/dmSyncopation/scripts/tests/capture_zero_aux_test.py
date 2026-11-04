@@ -57,12 +57,14 @@ late=${ZERO_TEST_LATE-5}
 wake_ahead=${ZERO_TEST_WAKE_AHEAD-0}
 commit_lead=${ZERO_TEST_COMMIT_LEAD-0}
 endpoint=${ZERO_TEST_TARGET_ENDPOINT-1}
+schema=${ZERO_TEST_SCHEMA-9}
 if [[ -f $ZERO_TEST_ROOT/set-calls ]]; then
     advance=${ZERO_TEST_CONFIGURED_ADVANCE-$advance}
     late=${ZERO_TEST_CONFIGURED_LATE-$late}
     wake_ahead=${ZERO_TEST_CONFIGURED_WAKE_AHEAD-$wake_ahead}
     commit_lead=${ZERO_TEST_CONFIGURED_COMMIT_LEAD-$commit_lead}
     endpoint=${ZERO_TEST_CONFIGURED_TARGET_ENDPOINT-$endpoint}
+    schema=${ZERO_TEST_CONFIGURED_SCHEMA-$schema}
 fi
 case $1 in
     dmtweeter-synco)
@@ -71,7 +73,7 @@ case $1 in
         printf "dmtweeter-synco.settings.durationSec=%s\n" "$duration"
         printf "dmtweeter-synco.zero_test.enabled=%s\n" "${ZERO_TEST_MODE-1}"
         printf "dmtweeter-synco.zero_test.idealPublisher=%s\n" "${ZERO_TEST_IDEAL-1}"
-        printf "dmtweeter-synco.zero_test.labelVersion=%s\n" "${ZERO_TEST_SCHEMA-8}"
+        printf "dmtweeter-synco.zero_test.labelVersion=%s\n" "$schema"
         printf "dmtweeter-synco.zero_test.publicationAdvanceUs=%s\n" "$advance"
         printf "dmtweeter-synco.zero_test.lateUs=%s\n" "$late"
         printf "dmtweeter-synco.zero_test.wakeAheadUs=%s\n" "$wake_ahead"
@@ -268,14 +270,27 @@ esac''',
         self.assertIn("commitLeadUs=0", metadata)
 
     def test_counter_target_rejects_all_previous_endpoint_schemas(self):
-        """Old schemas cannot silently repeat the downstream-compensated experiment."""
-        for schema in ["5", "6", "7"]:
+        """Older schemas lack current clock-rejection evidence and recovery accounting."""
+        for schema in ["5", "6", "7", "8"]:
             with self.subTest(schema=schema):
                 self.env["ZERO_TEST_SCHEMA"] = schema
                 code, _, stderr = self.run_capture("8000", "10")
                 self.assertEqual(code, 1)
                 self.assertEqual(self.set_calls(), [])
                 self.assertIn("before counter-target endpoint", stderr)
+
+    def test_schema_is_rechecked_before_enable(self):
+        """A stale schema-8 configured snapshot cannot bypass the recovery capability gate."""
+        self.env["ZERO_TEST_CONFIGURED_SCHEMA"] = "8"
+        code, _, stderr = self.run_capture("8000", "10")
+        self.assertEqual(code, 1)
+        self.assertEqual(
+            self.set_calls(),
+            ["-n dmtweeter-synco.settings.steps=4", "-n dmtweeter-synco.settings.durationSec=10"],
+        )
+        self.assertEqual((self.root / "enable").read_text(), "Off")
+        self.assertIn("configured counter-target endpoint", stderr)
+        self.assertIn("schema>=9", stderr)
 
     def test_counter_target_requires_explicit_endpoint_kind(self):
         """Schema capability alone cannot identify the target's meaning."""

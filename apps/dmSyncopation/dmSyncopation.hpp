@@ -294,7 +294,8 @@ class dmSyncopation : public MagAOXApp<true>,
         ackTimeout           = 15,
         publicationFailed    = 16,
         ackAmbiguous         = 17,
-        preparationLate      = 18
+        preparationLate      = 18,
+        clockRejected        = 19
     };
 
     /// Exact checkpoint where a trial observation was accepted or rejected.
@@ -313,7 +314,20 @@ class dmSyncopation : public MagAOXApp<true>,
         preparation,
         publicationGuard,
         validation,
-        finalWait
+        finalWait,
+        clockQualification
+    };
+
+    /// Exact reason a producer/local clock capture or publication mapping was rejected.
+    enum class ZeroClockFailure
+    {
+        none,
+        invalidCapture,
+        wideBracket,
+        discontinuity,
+        futurePublication,
+        stalePublication,
+        invalidMapping
     };
 
     /// Cycle-owned trial counters, published through a fixed-storage ordinary-thread snapshot.
@@ -328,6 +342,9 @@ class dmSyncopation : public MagAOXApp<true>,
         uint64_t preparationLate{ 0 }; ///< Zero-copy start or coherent completion was after its immutable target.
         uint64_t validationLate{ 0 };  ///< Subset of late skips: full validation did not finish before the target.
         uint64_t clockRejected{ 0 };   ///< Primary observations excluded by an unqualified publication-clock mapping.
+        uint64_t clockExcludedCycles{ 0 }; ///< Rejected-clock main observations within the started finite interval.
+        uint64_t clockExcludedSlots{ 0 };  ///< Auxiliary opportunities in those cycles, outside per-slot skip counts.
+        uint64_t auxiliaryOpportunities{ 0 }; ///< Active-cycle slots, frozen by counting before publication decisions.
         uint64_t primaryWriting{ 0 }, resourceUnavailable{ 0 }; ///< Primary write flag or missing trial resources.
         uint64_t cancelled{ 0 }, durationExpired{ 0 }, waitError{ 0 }; ///< Cancellation, finite expiry or wait failure.
         uint64_t invalidTarget{ 0 };        ///< Occurrences with no representable frozen target.
@@ -336,6 +353,7 @@ class dmSyncopation : public MagAOXApp<true>,
         uint64_t eventsSampledOut{ 0 }; ///< Healthy event rows deliberately omitted by the configured cycle stride.
         uint64_t readerInvalid{ 0 }, readerDrops{ 0 };                    ///< Readiness revocation/transport coverage.
         uint64_t mainObserved{ 0 }, mainMatched{ 0 }, mainUnmatched{ 0 }; ///< Genuine main association coverage.
+        uint64_t mainRebaselined{ 0 }; ///< Current main associations recovered through a local stale-to-fresh baseline.
         uint64_t mainImpactUnclassified{ 0 };    ///< Main acknowledgements lacking exact named-primary trace linkage.
         int64_t  startedNs{ 0 }, stoppedNs{ 0 }; ///< Active finite interval on CLOCK_MONOTONIC.
         bool     active{ false }, warming{ false }, finished{ false }; ///< Current finite-trial state.
@@ -401,6 +419,16 @@ class dmSyncopation : public MagAOXApp<true>,
         int64_t validatedNs{ 0 }; ///< Full validation completed here; must precede or equal the publication target.
     };
 
+    /// Rejected clock evidence retained before subsequent callbacks can overwrite the clock status.
+    struct ZeroClockEvidence
+    {
+        ZeroClockFailure failure{ ZeroClockFailure::none };   ///< Qualification or mapping rejection cause.
+        int64_t beforeNs{ 0 }, producerNs{ 0 }, afterNs{ 0 }; ///< Exact monotonic/producer/monotonic read bracket.
+        int64_t bracketLimitNs{ 0 }, maxAgeNs{ 0 }; ///< Capture and publication-age limits applied to this observation.
+        uint64_t excludedSlots{ 0 }; ///< Active auxiliary opportunities suppressed; zero while warming or expired.
+        bool     active{ false };    ///< Main observation belongs to the started finite active interval.
+    };
+
     /// One bounded hot-path observation, formatted only after the cycle lock is released.
     struct ZeroEvent
     {
@@ -421,6 +449,7 @@ class dmSyncopation : public MagAOXApp<true>,
         int64_t  clockOffsetNs{ 0 }, clockBracketNs{ 0 }; ///< Frozen producer-minus-local offset and uncertainty width.
         uint64_t clockEpoch{ 0 };                         ///< Mapping generation frozen for this cycle's targets.
         synco::ZeroTiming::Key sourceKey; ///< Main or auxiliary source publication, distinct from dmcomb output.
+        ZeroClockEvidence      clock;     ///< Populated only for an unsampled clock-rejection event.
     };
 
     ZeroStats m_zeroStats; ///< Finite-trial counters; no conditional shadow outcomes are mixed in.
@@ -903,6 +932,13 @@ class dmSyncopation : public MagAOXApp<true>,
                         int64_t stagedNs   = 0 /**< [in] Coherent passive-copy completion; zero if no copy occurred. */,
                         int64_t publicationBeginNs = 0 /**< [in] Final admission timestamp before the update API. */,
                         const synco::ZeroTiming::Key &auxiliaryKey = {} /**< [in] Coherent auxiliary publication. */ );
+
+    /// Retain every rejected clock capture and count active whole-cycle exclusions without publishing a command.
+    void zeroTestClockRejected( ZeroClockFailure failure /**< [in] Exact capture or mapping failure. */,
+                                int64_t observed /**< [in] Main callback observation time on CLOCK_MONOTONIC. */ );
+
+    /// Return the stable text label for a rejected clock capture or mapping.
+    static const char *zeroTestClockFailureName( ZeroClockFailure failure /**< [in] Rejection classification. */ );
 
     /// Count and emit exactly one auxiliary occurrence rejected before active publication.
     void zeroTestSkip( int         step /**< [in] Positive auxiliary step. */,

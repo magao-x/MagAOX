@@ -2173,3 +2173,137 @@ enabling; omitted commit lead means zero. Merge the revised preset into the
 working configuration and rebuild/restart dmSyncopation only. The new capture
 must establish source publication spacing and the small measured commit lead
 before tuning that value or extending the run. No agent operated the instrument.
+
+## 2026-11-04: counter-target short capture succeeds
+
+Analyzed `zero-aux-8000Hz-20261104T151038Z`, revision `64f38e56`. The helper
+finishes **10.000009231 s** with **20,000 main observations and 59,997 auxiliary
+publications, all acknowledged**. The only three skipped auxiliary slots belong
+to the first unmatched main combination. There are **zero timing, preparation,
+readiness, identity, clock or resource skips** after startup and no new event/log
+loss. Full-rate auxiliary raw target errors average about +0.076 us, with
+standard deviations 0.0357 / 0.0109 / 0.0110 us and maxima 4.882 / 0.229 /
+0.273 us for steps 1/2/3. The 4.882 us tail occurs after admission; the next
+slot retains its frozen grid rather than moving later.
+
+Main-boundary interval variation is about 1.95 us standard deviation, while the
+two auxiliary-to-auxiliary intervals have means 124.999867 and 125.000098 us and
+standard deviations 0.036496 and 0.013881 us. This separates genuine main
+publication excursions from auxiliary scheduling. The usual guard-to-writetime
+proxy cost is only about 25.5 ns, versus roughly 0.952 us to complete the API.
+Clock brackets can be 160 ns wide. Retain `commitLeadUs=0` and run the unchanged
+120-second preset before further tuning.
+
+Controller counters show no new delivery/admission failures, overload or SDK
+failure/timeout, and camera counters show no new frame/publication drops or
+gaps. All 19,999 classified main commands have reader/SDK matches; the 713
+timing-evidence invalidations and 56 SDK observation gaps are retained as
+coverage caveats. The operator confirms stable operation with modal gains still
+zero, while clarifying that intervening latency optimization has made the
+overall loop approximately 15 us faster (an operator estimate). dmcomb is now
+in mode 4 with a 5 us trigger delay, versus 10 us earlier, and jitter is lower.
+Treat this capture as the current optimized baseline: the cross-run improvement
+does not isolate synco's contribution. Keep this mode/delay and optimized loop
+configuration for the 120-second comparison. The
+[counter-publication plan](../2026-11/dm-syncopation-counter-publication-targets.md#2026-11-04-first-counter-target-capture)
+records the full timing table, source/proxy limitations and next capture command.
+
+## 2026-11-04: 120-second counter-target capture
+
+`zero-aux-8000Hz-20261104T153017Z` completes **120.000112717 s** with 240,000 main
+observations and **719,308 auxiliary posts, all acknowledged**, out of 720,000
+opportunities. The 692 skips comprise three startup skips and 689 lateness
+skips, giving 99.903889% auxiliary delivery and an observed total source rate
+of 7,994.226 Hz. The operator confirms stable operation, zero modal gains and
+the same optimized setup/workload, including dmcomb mode 4 / 5 us delay.
+
+The important new finding is concentration: **688 step-2 final-guard misses**
+occur only at active 114.588358-118.758360 s, all on odd primary counters, with
+targets in a 2.992 us phase band modulo 1 ms. Payload staging finished
+66.358-81.665 us early and full validation 7.916-9.236 us early. The final guard
+samples were 2.002-5.259 us late (median 2.582 us), beyond the 2 us allowance.
+This points to a periodic final-wait/guard disturbance, not a late publisher or
+slow preparation. Existing telemetry cannot distinguish IRQ/preemption,
+clock-read latency or guard work. One separate step-3 wake/validation miss
+occurs at active 69.871939 s.
+
+Steps 1 and 3 retain roughly +0.076 us mean target error and 0.011 us standard
+deviation. Step 2 grows to +0.0858 us mean, 0.1166 us deviation and 4.674 us
+maximum lateness during the affected phase band. The following slot keeps its
+original target. Source/clock exclusions and event/log/reader drops are zero.
+Successful stride-4 sampling misses the disturbed odd-counter parity, although
+all skips and full-rate populations remain available; do not infer timing tails
+from sampled successful rows alone.
+
+Controller counters show no new admission/execution failure, overload or timing
+loss; camera counters show no new frame gaps/drops. All 239,999 classified mains
+have reader/SDK matches. Diagnostic timing invalidations and SDK observation
+gaps remain separate coverage caveats. Keep `commitLeadUs=0` and the 2 us
+admission rule while localizing the periodic disturbance. The
+[counter-publication plan](../2026-11/dm-syncopation-counter-publication-targets.md#2026-11-04-120-second-capture-exposes-a-periodic-delay)
+records the detailed timing, phase concentration, sampling limitation and next
+measurement direction. No code or instrument setting changed in this analysis.
+
+## 2026-11-04: unchanged repeat exposes clock-gate recovery cost
+
+`zero-aux-8000Hz-20261104T155241Z` is an unchanged 120-second comparison,
+confirmed by the operator. It has **zero auxiliary lateness skips**, but **113
+whole main cycles fail the 1 us clock-bracket qualification limit**. The app
+then records 226 unmatched main combinations and 678 explicit auxiliary skips.
+Expected opportunities remain 720,000: 339 are excluded before slot bookkeeping
+and 678 explicitly skipped, leaving **718,983 publications (99.858750%)**.
+The final publication's acknowledgement wait ends at the finite cutoff, giving
+718,982 observed acknowledgements without a demonstrated publication failure.
+
+Disturbances now cluster around active 40.133-55.004 s, when the main grid phase
+crosses the earlier roughly 137 us modulo-1-ms region. All first recovery events
+are even main counters; the inferred preceding rejected-main phase overlaps
+the prior auxiliary miss band. This supports the same phase-related disturbance
+affecting a different execution stage, with the precise cause still unknown.
+Rejected clock pairs lack exact retained per-event timestamps.
+
+Recovery also has an avoidable conservative penalty: the first unmatched main
+samples the preceding main's old combined output, and the following main's
+current output then fails counter continuity against that stale baseline.
+A clock rejection therefore usually costs its own cycle plus two recovery
+cycles. Follow-up should evaluate waiting for the current main output when
+rebaselining, retain clock-reject evidence and count whole-cycle exclusions
+alongside per-slot skips. No clock bound or execution policy changes here.
+
+Qualified auxiliary target errors remain about +0.077 us mean, 0.013 us standard
+deviation, with maxima 0.444 / 0.340 / 0.321 us. No new controller admission or
+execution failure, overload, timing loss or camera frame gap/drop occurs.
+`commitLeadUs=0` remains appropriate. The
+[counter-publication plan](../2026-11/dm-syncopation-counter-publication-targets.md#2026-11-04-unchanged-repeat-moves-the-affected-stage)
+records the detailed comparison, recovery evidence, nominal-denominator
+accounting and timing limitations. No code or instrument setting was changed.
+
+## 2026-11-04: implement clock evidence and current-main recovery
+
+The user authorizes the follow-up. Schema 9 now records every requested-On
+clock rejection without healthy-event sampling, preserving exact local-before /
+producer / local-after timestamps, source identity, raw target when available,
+applied limits and named failure cause. Warmup/terminal diagnostics are separated
+from active `clockExcludedCycles` / `clockExcludedSlots`. Stored
+`auxiliaryOpportunities` includes clock-excluded active slots and survives later
+disabled step changes; `mainCycles` and `mainRebaselined` expose denominator and
+recovery coverage. Unobserved/incoherent upstream commands and callbacks still
+waiting for cadence acquisition are not reconstructed by these counters.
+
+When association has no trusted baseline, a coherent stale output can be used
+locally while waiting within the existing deadline for exactly one increment
+and a timestamp at or after the current main. The current output, rather than
+the preceding stale output, becomes the committed baseline. Fresh unproven
+outputs, counter jumps, replacement, timeout, cancellation, changed primary and
+expiry remain fail-closed. Post-read source identity/deadline checks preserve
+those bounds. Clock quality (1 us), preset admission grace (2 us), zero commit
+lead and actual reader-clearance requirements remain unchanged.
+
+Verification passes **141 app cases / 5,669,253 assertions**, **52 private helper
+tests**, a clean production app build, formatting, Bash syntax and diff checks.
+The helper refuses pre-schema-9 binaries before configuration and again before
+enable. The operator should rebuild/restart dmSyncopation only and repeat the
+unchanged 120-second test; no logdump/controller/configuration change is needed.
+The [counter-publication plan](../2026-11/dm-syncopation-counter-publication-targets.md#2026-11-04-clock-rejection-evidence-and-bounded-rebaselining)
+records the design, tests and next command. No agent operated the instrument;
+hardware validation of the updated recovery remains pending.
