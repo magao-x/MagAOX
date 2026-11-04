@@ -324,6 +324,13 @@ and expiry still veto the cycle. An already-fresh output with no trustworthy
 baseline retains the conservative one-cycle skip; its timestamp alone does not
 prove which command produced it. Exact reader clearance remains required.
 
+ImageStreamIO updates writetime before incrementing `cnt0`; a polling observer
+can therefore see a changed timestamp while the counter still names the prior
+output. Main association keeps waiting on the stable counter in that state.
+It neither accepts the new command nor replaces its baseline from the timestamp
+alone. If the counter never commits before the deadline, auxiliary commands
+remain skipped and the uncommitted metadata is not promoted to a trusted key.
+
 The primary timing evidence is `zero_publication` and `[zero_test]
 kind=publication endpoint=cnt0_writetime_proxy`. Its full-rate populations are
 independent of successful-event sampling and downstream acknowledgement:
