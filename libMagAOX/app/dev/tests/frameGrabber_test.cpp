@@ -42,20 +42,27 @@ Streams::Streams()
     char directory[] = "/tmp/framegrabber-test-XXXXXX";
     REQUIRE( mkdtemp( directory ) != nullptr );
     m_directory = directory;
+
     if( const char *previous = getenv( "MILK_SHM_DIR" ) )
     {
         m_hadPrevious = true;
         m_previous    = previous;
     }
+
     REQUIRE( setenv( "MILK_SHM_DIR", m_directory.c_str(), 1 ) == 0 );
 }
 
 Streams::~Streams()
 {
     if( m_hadPrevious )
+    {
         setenv( "MILK_SHM_DIR", m_previous.c_str(), 1 );
+    }
     else
+    {
         unsetenv( "MILK_SHM_DIR" );
+    }
+
     std::error_code error;
     std::filesystem::remove_all( m_directory, error );
 }
@@ -248,9 +255,13 @@ void Camera::stop()
         std::lock_guard<std::mutex> lock( m_mutex );
         m_stop = true;
     }
+
     m_condition.notify_all();
+
     if( m_worker.joinable() )
+    {
         m_worker.join();
+    }
 }
 
 void Camera::request( int target )
@@ -260,6 +271,7 @@ void Camera::request( int target )
         m_requested = target;
         m_reconfig  = true;
     }
+
     m_condition.notify_all();
 }
 
@@ -269,6 +281,7 @@ void Camera::release()
         std::lock_guard<std::mutex> lock( m_mutex );
         m_release = true;
     }
+
     m_condition.notify_all();
 }
 
@@ -282,11 +295,20 @@ bool Camera::wait( Predicate predicate )
 void Camera::pause( Pause point, std::unique_lock<std::mutex> &lock )
 {
     if( m_pauseAt != point )
+    {
         return;
+    }
+
     m_pauseAt = Pause::none;
     m_paused  = true;
     m_condition.notify_all();
-    if( !m_condition.wait_for( lock, 5s, [this] { return m_release || m_stop; } ) )
+
+    if( !m_condition.wait_for( lock,
+                               5s,
+                               [this]
+                               {
+                                   return m_release || m_stop;
+                               } ) )
     {
         m_timedOut = true;
         m_stop     = true;
@@ -300,11 +322,13 @@ int Camera::configureAcquisition()
     m_snapshots.push_back( target );
     m_condition.notify_all();
     pause( Pause::configure, lock );
+
     if( m_configFailures > 0 )
     {
         --m_configFailures;
         return -1;
     }
+
     m_applied.push_back( target );
     m_condition.notify_all();
     return 0;
@@ -322,11 +346,13 @@ int Camera::startAcquisition()
     std::lock_guard<std::mutex> lock( m_mutex );
     ++m_starts;
     m_condition.notify_all();
+
     if( m_startFailures > 0 )
     {
         --m_startFailures;
         return -1;
     }
+
     return 0;
 }
 
@@ -335,11 +361,18 @@ int Camera::acquireAndCheckValid()
     std::unique_lock<std::mutex> lock( m_mutex );
     ++m_acquisitions;
     m_condition.notify_all();
-    if( !m_condition.wait_for( lock, 5s, [this] { return m_stop || m_reconfig || m_power <= 0; } ) )
+
+    if( !m_condition.wait_for( lock,
+                               5s,
+                               [this]
+                               {
+                                   return m_stop || m_reconfig || m_power <= 0;
+                               } ) )
     {
         m_timedOut = true;
         m_stop     = true;
     }
+
     return 1;
 }
 
@@ -353,12 +386,14 @@ int Camera::reconfig()
 {
     std::unique_lock<std::mutex> lock( m_mutex );
     ++m_restarts;
+
     if( m_reconfigFailures > 0 )
     {
         --m_reconfigFailures;
         m_condition.notify_all();
         return -1;
     }
+
     m_selected = m_requested;
     m_condition.notify_all();
     pause( Pause::reconfig, lock );
@@ -375,8 +410,12 @@ stateCodes::stateCodeT Camera::state()
     std::unique_lock<std::mutex> lock( m_mutex );
     ++m_stateChecks;
     m_condition.notify_all();
+
     if( m_restarts > 0 )
+    {
         pause( Pause::ready, lock );
+    }
+
     return m_state;
 }
 
@@ -417,20 +456,31 @@ TEST_CASE( "frameGrabber preserves requests arriving during configuration", "[fr
     #endif
     // clang-format on
     Camera camera;
+
     SECTION( "during the derived configuration callback" )
     {
         camera.m_pauseAt = Camera::Pause::configure;
     }
+
     SECTION( "after configuration while preparing the latency buffers" )
     {
         camera.m_pauseAt = Camera::Pause::fps;
     }
+
     camera.start();
-    REQUIRE( camera.wait( [&] { return camera.m_paused; } ) );
+    REQUIRE( camera.wait(
+        [&]
+        {
+            return camera.m_paused;
+        } ) );
     camera.request( 2 );
     camera.request( 3 );
     camera.release();
-    REQUIRE( camera.wait( [&] { return camera.m_applied.size() >= 2 && camera.m_acquisitions >= 1; } ) );
+    REQUIRE( camera.wait(
+        [&]
+        {
+            return camera.m_applied.size() >= 2 && camera.m_acquisitions >= 1;
+        } ) );
     camera.stop();
     REQUIRE_FALSE( camera.m_timedOut );
     REQUIRE_FALSE( camera.m_exception );
@@ -451,20 +501,31 @@ TEST_CASE( "frameGrabber preserves requests around deferred mode selection", "[f
     // clang-format on
     Camera camera;
     camera.m_applyInReconfig = true;
+
     SECTION( "during cleanup after the mode snapshot" )
     {
         camera.m_pauseAt = Camera::Pause::reconfig;
     }
+
     SECTION( "after cleanup before the next configuration" )
     {
         camera.m_pauseAt = Camera::Pause::ready;
     }
+
     camera.request( 2 );
     camera.start();
-    REQUIRE( camera.wait( [&] { return camera.m_paused; } ) );
+    REQUIRE( camera.wait(
+        [&]
+        {
+            return camera.m_paused;
+        } ) );
     camera.request( 3 );
     camera.release();
-    REQUIRE( camera.wait( [&] { return camera.m_applied.size() >= 3 && camera.m_acquisitions >= 1; } ) );
+    REQUIRE( camera.wait(
+        [&]
+        {
+            return camera.m_applied.size() >= 3 && camera.m_acquisitions >= 1;
+        } ) );
     camera.stop();
     REQUIRE_FALSE( camera.m_timedOut );
     REQUIRE_FALSE( camera.m_exception );
@@ -486,25 +547,37 @@ TEST_CASE( "frameGrabber retries requests after configuration and acquisition-st
     Camera camera;
     camera.m_pauseAt          = Camera::Pause::configure;
     bool configurationFailure = false;
+
     SECTION( "configuration fails once" )
     {
         camera.m_configFailures = 1;
         configurationFailure    = true;
     }
+
     SECTION( "acquisition startup fails once" )
     {
         camera.m_startFailures = 1;
     }
+
     camera.start();
-    REQUIRE( camera.wait( [&] { return camera.m_paused; } ) );
+    REQUIRE( camera.wait(
+        [&]
+        {
+            return camera.m_paused;
+        } ) );
     camera.request( 2 );
     camera.release();
-    REQUIRE( camera.wait( [&] { return camera.m_snapshots.size() >= 2 && camera.m_acquisitions >= 1; } ) );
+    REQUIRE( camera.wait(
+        [&]
+        {
+            return camera.m_snapshots.size() >= 2 && camera.m_acquisitions >= 1;
+        } ) );
     camera.stop();
     REQUIRE_FALSE( camera.m_timedOut );
     REQUIRE_FALSE( camera.m_exception );
     REQUIRE( camera.m_snapshots == std::vector<int>{ 1, 2, 2 } );
     REQUIRE( camera.m_restarts == 1 );
+
     if( configurationFailure )
     {
         REQUIRE( camera.m_applied == std::vector<int>{ 2, 2 } );
@@ -517,7 +590,7 @@ TEST_CASE( "frameGrabber retries requests after configuration and acquisition-st
     }
 }
 
-/// Failed cleanup must leave a retry request until deferred camera settings are successfully selected.
+/// Retry failed cleanup before configuration until deferred camera settings are successfully selected.
 /** \ingroup frameGrabber_unit_test */
 TEST_CASE( "frameGrabber retries a failed reconfiguration cleanup", "[frameGrabber]" )
 {
@@ -532,13 +605,17 @@ TEST_CASE( "frameGrabber retries a failed reconfiguration cleanup", "[frameGrabb
     camera.request( 2 );
     camera.request( 3 );
     camera.start();
-    REQUIRE( camera.wait( [&] { return camera.m_applied.size() >= 3 && camera.m_acquisitions >= 1; } ) );
+    REQUIRE( camera.wait(
+        [&]
+        {
+            return camera.m_applied.size() >= 2 && camera.m_acquisitions >= 1;
+        } ) );
     camera.stop();
     REQUIRE_FALSE( camera.m_timedOut );
     REQUIRE_FALSE( camera.m_exception );
-    REQUIRE( camera.m_snapshots == std::vector<int>{ 1, 1, 3 } );
-    REQUIRE( camera.m_applied == std::vector<int>{ 1, 1, 3 } );
-    REQUIRE( camera.m_starts == 3 );
+    REQUIRE( camera.m_snapshots == std::vector<int>{ 1, 3 } );
+    REQUIRE( camera.m_applied == std::vector<int>{ 1, 3 } );
+    REQUIRE( camera.m_starts == 2 );
     REQUIRE( camera.m_restarts == 2 );
 }
 
@@ -555,9 +632,17 @@ TEST_CASE( "frameGrabber consumes queued requests and handles requests during ac
     camera.request( 2 );
     camera.request( 3 );
     camera.start();
-    REQUIRE( camera.wait( [&] { return camera.m_acquisitions >= 1; } ) );
+    REQUIRE( camera.wait(
+        [&]
+        {
+            return camera.m_acquisitions >= 1;
+        } ) );
     camera.request( 4 );
-    REQUIRE( camera.wait( [&] { return camera.m_acquisitions >= 2; } ) );
+    REQUIRE( camera.wait(
+        [&]
+        {
+            return camera.m_acquisitions >= 2;
+        } ) );
     camera.stop();
     REQUIRE_FALSE( camera.m_timedOut );
     REQUIRE_FALSE( camera.m_exception );
@@ -580,14 +665,34 @@ TEST_CASE( "frameGrabber retains requests while waiting for readiness and power"
     camera.m_power = 0;
     camera.request( 2 );
     camera.start();
-    REQUIRE( camera.wait( [&] { return camera.m_stateChecks > 0; } ) );
-    REQUIRE( camera.wait( [&] { return camera.m_snapshots.empty(); } ) );
+    REQUIRE( camera.wait(
+        [&]
+        {
+            return camera.m_stateChecks > 0;
+        } ) );
+    REQUIRE( camera.wait(
+        [&]
+        {
+            return camera.m_snapshots.empty();
+        } ) );
     camera.m_state = stateCodes::READY;
-    REQUIRE( camera.wait( [&] { return camera.m_powerChecks > 0; } ) );
-    REQUIRE( camera.wait( [&] { return camera.m_snapshots.empty(); } ) );
+    REQUIRE( camera.wait(
+        [&]
+        {
+            return camera.m_powerChecks > 0;
+        } ) );
+    REQUIRE( camera.wait(
+        [&]
+        {
+            return camera.m_snapshots.empty();
+        } ) );
     camera.request( 3 );
     camera.m_power = 1;
-    REQUIRE( camera.wait( [&] { return camera.m_acquisitions >= 1; } ) );
+    REQUIRE( camera.wait(
+        [&]
+        {
+            return camera.m_acquisitions >= 1;
+        } ) );
     camera.stop();
     REQUIRE_FALSE( camera.m_timedOut );
     REQUIRE_FALSE( camera.m_exception );

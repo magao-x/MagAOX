@@ -49,6 +49,7 @@ logMetaDetail logMemberAccessor( flatlogs::eventCodeT ec,
    }
 }*/
 
+/// Return the stable unavailable-value sentinel.
 const std::string &logMeta::unavailableValue()
 {
     static const std::string value = "NOT AVAILABLE";
@@ -56,6 +57,7 @@ const std::string &logMeta::unavailableValue()
     return value;
 }
 
+/// Verify a raw entry using its registered event schema.
 bool verifyLogEntry( flatlogs::eventCodeT ev, char *log )
 {
     if( log == nullptr )
@@ -64,7 +66,10 @@ bool verifyLogEntry( flatlogs::eventCodeT ev, char *log )
         return false;
     }
 
-    flatlogs::bufferPtrT logBuff( log, []( char * ) {} );
+    flatlogs::bufferPtrT logBuff( log,
+                                  []( char * )
+                                  {
+                                  } );
     flatlogs::msgLenT    len = flatlogs::logHeader::msgLen( log );
     bool                 verified{ false };
 
@@ -226,8 +231,20 @@ bool verifyLogEntry( flatlogs::eventCodeT ev, char *log )
     case eventCodes::TELEM_DMSPECK:
         verified = telem_dmspeck::verify( logBuff, len );
         break;
+    case eventCodes::TELEM_DMSYNCO:
+        verified = telem_dmsynco::verify( logBuff, len );
+        break;
+    case eventCodes::TELEM_DMTIMINGS:
+        verified = telem_dmtimings::verify( logBuff, len );
+        break;
     case eventCodes::TELEM_FGTIMINGS:
         verified = telem_fgtimings::verify( logBuff, len );
+        break;
+    case eventCodes::TELEM_FGSTAGE:
+        verified = telem_fgstage::verify( logBuff, len );
+        break;
+    case eventCodes::TELEM_FGTRACE:
+        verified = telem_fgtrace::verify( logBuff, len );
         break;
     case eventCodes::TELEM_DMMODES:
         verified = telem_dmmodes::verify( logBuff, len );
@@ -287,13 +304,16 @@ bool verifyLogEntry( flatlogs::eventCodeT ev, char *log )
     return verified;
 }
 
+/// Build the ordinary or hierarchical FITS keyword.
 std::string logMeta::fitsKeyword() const
 {
     std::string keyw;
+
     if( m_detail.hierarch )
     {
         // Add spaces to make sure hierarch is invoked
         keyw = m_spec.device + " " + m_spec.keyword;
+
         if( keyw.size() < 9 )
         {
             keyw += std::string( 9 - keyw.size(), ' ' );
@@ -307,40 +327,52 @@ std::string logMeta::fitsKeyword() const
     return keyw;
 }
 
+/// Initialize the metadata selection and formatting from a specification.
 logMeta::logMeta( const logMetaSpec &lms )
 {
     setLog( lms );
 }
 
+/// Return the selected telemetry device.
 const std::string &logMeta::device()
 {
     return m_spec.device;
 }
 
+/// Return the configured FITS keyword.
 const std::string &logMeta::keyword()
 {
     return m_spec.keyword;
 }
 
+/// Return the FITS header comment.
 const std::string &logMeta::comment()
 {
     return m_spec.comment;
 }
 
+/// Return the reason the most recent lookup was unavailable.
 const std::string &logMeta::unavailableReason() const
 {
     return m_unavailableReason;
 }
 
+/// Resolve the log member accessor and select default formatting.
 int logMeta::setLog( const logMetaSpec &lms )
 {
     m_spec   = lms;
     m_detail = logMemberAccessor( m_spec.eventCode, m_spec.member );
 
     if( m_spec.keyword == "" )
+    {
         m_spec.keyword = m_detail.keyword;
+    }
+
     if( m_spec.format == "" )
+    {
         m_spec.format = m_detail.format;
+    }
+
     if( m_spec.format == "" )
     {
         switch( m_detail.valType )
@@ -395,11 +427,14 @@ int logMeta::setLog( const logMetaSpec &lms )
     }
 
     if( m_spec.comment == "" )
+    {
         m_spec.comment = m_detail.comment;
+    }
 
     return 0;
 }
 
+/// Resolve the metadata value over an exposure interval.
 std::string logMeta::value( logMap<verboseT>          &lm,
                             const flatlogs::timespecX &stime,
                             const flatlogs::timespecX &atime,
@@ -423,6 +458,7 @@ std::string logMeta::value( logMap<verboseT>          &lm,
     }
 }
 
+/// Format a numeric state or continuous measurement for the requested interval.
 std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                   const flatlogs::timespecX &stime,
                                   const flatlogs::timespecX &atime,
@@ -437,6 +473,7 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
         case valTypes::Bool:
         {
             bool val;
+
             if( getLogStateVal( val,
                                 lm,
                                 m_spec.device,
@@ -447,13 +484,18 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                 &m_hint,
                                 maxGap,
                                 &m_unavailableReason ) != 0 )
+            {
                 return m_invalidValue;
+            }
+
             snprintf( str, sizeof( str ), m_spec.format.c_str(), val );
             return std::string( str );
         }
+
         case valTypes::Char:
         {
             char val;
+
             if( getLogStateVal( val,
                                 lm,
                                 m_spec.device,
@@ -467,12 +509,15 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
             {
                 return m_invalidValue;
             }
+
             snprintf( str, sizeof( str ), m_spec.format.c_str(), val );
             return std::string( str );
         }
+
         case valTypes::UChar:
         {
             unsigned char val;
+
             if( getLogStateVal( val,
                                 lm,
                                 m_spec.device,
@@ -483,13 +528,18 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                 &m_hint,
                                 maxGap,
                                 &m_unavailableReason ) != 0 )
+            {
                 return m_invalidValue;
+            }
+
             snprintf( str, sizeof( str ), m_spec.format.c_str(), val );
             return std::string( str );
         }
+
         case valTypes::Short:
         {
             short val;
+
             if( getLogStateVal( val,
                                 lm,
                                 m_spec.device,
@@ -500,13 +550,18 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                 &m_hint,
                                 maxGap,
                                 &m_unavailableReason ) != 0 )
+            {
                 return m_invalidValue;
+            }
+
             snprintf( str, sizeof( str ), m_spec.format.c_str(), val );
             return std::string( str );
         }
+
         case valTypes::UShort:
         {
             unsigned short val;
+
             if( getLogStateVal( val,
                                 lm,
                                 m_spec.device,
@@ -517,13 +572,18 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                 &m_hint,
                                 maxGap,
                                 &m_unavailableReason ) != 0 )
+            {
                 return m_invalidValue;
+            }
+
             snprintf( str, sizeof( str ), m_spec.format.c_str(), val );
             return std::string( str );
         }
+
         case valTypes::Int:
         {
             int val;
+
             if( getLogStateVal( val,
                                 lm,
                                 m_spec.device,
@@ -534,13 +594,18 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                 &m_hint,
                                 maxGap,
                                 &m_unavailableReason ) != 0 )
+            {
                 return m_invalidValue;
+            }
+
             snprintf( str, sizeof( str ), m_spec.format.c_str(), val );
             return std::string( str );
         }
+
         case valTypes::UInt:
         {
             unsigned int val;
+
             if( getLogStateVal( val,
                                 lm,
                                 m_spec.device,
@@ -551,13 +616,18 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                 &m_hint,
                                 maxGap,
                                 &m_unavailableReason ) != 0 )
+            {
                 return m_invalidValue;
+            }
+
             snprintf( str, sizeof( str ), m_spec.format.c_str(), val );
             return std::string( str );
         }
+
         case valTypes::Long:
         {
             long val;
+
             if( getLogStateVal( val,
                                 lm,
                                 m_spec.device,
@@ -568,13 +638,18 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                 &m_hint,
                                 maxGap,
                                 &m_unavailableReason ) != 0 )
+            {
                 return m_invalidValue;
+            }
+
             snprintf( str, sizeof( str ), m_spec.format.c_str(), val );
             return std::string( str );
         }
+
         case valTypes::ULong:
         {
             unsigned long val;
+
             if( getLogStateVal( val,
                                 lm,
                                 m_spec.device,
@@ -585,13 +660,18 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                 &m_hint,
                                 maxGap,
                                 &m_unavailableReason ) != 0 )
+            {
                 return m_invalidValue;
+            }
+
             snprintf( str, sizeof( str ), m_spec.format.c_str(), val );
             return std::string( str );
         }
+
         case valTypes::LongLong:
         {
             long long val;
+
             if( getLogStateVal( val,
                                 lm,
                                 m_spec.device,
@@ -602,13 +682,18 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                 &m_hint,
                                 maxGap,
                                 &m_unavailableReason ) != 0 )
+            {
                 return m_invalidValue;
+            }
+
             snprintf( str, sizeof( str ), m_spec.format.c_str(), val );
             return std::string( str );
         }
+
         case valTypes::ULongLong:
         {
             unsigned long long val;
+
             if( getLogStateVal( val,
                                 lm,
                                 m_spec.device,
@@ -619,13 +704,18 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                 &m_hint,
                                 maxGap,
                                 &m_unavailableReason ) != 0 )
+            {
                 return m_invalidValue;
+            }
+
             snprintf( str, sizeof( str ), m_spec.format.c_str(), val );
             return std::string( str );
         }
+
         case valTypes::Float:
         {
             float val;
+
             if( getLogStateVal( val,
                                 lm,
                                 m_spec.device,
@@ -636,13 +726,18 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                 &m_hint,
                                 maxGap,
                                 &m_unavailableReason ) != 0 )
+            {
                 return m_invalidValue;
+            }
+
             snprintf( str, sizeof( str ), m_spec.format.c_str(), val );
             return std::string( str );
         }
+
         case valTypes::Double:
         {
             double val;
+
             if( getLogStateVal( val,
                                 lm,
                                 m_spec.device,
@@ -653,13 +748,18 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                 &m_hint,
                                 maxGap,
                                 &m_unavailableReason ) != 0 )
+            {
                 return m_invalidValue;
+            }
+
             snprintf( str, sizeof( str ), m_spec.format.c_str(), val );
             return std::string( str );
         }
+
         case valTypes::Vector_Bool:
         {
             std::vector<bool> val;
+
             if( getLogStateVal( val,
                                 lm,
                                 m_spec.device,
@@ -670,10 +770,14 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                 &m_hint,
                                 maxGap,
                                 &m_unavailableReason ) != 0 )
+            {
                 return m_invalidValue;
+            }
 
             if( val.size() == 0 )
+            {
                 return "";
+            }
 
             std::string res;
 
@@ -689,9 +793,11 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
 
             return res;
         }
+
         case valTypes::Vector_Float:
         {
             std::vector<float> val;
+
             if( getLogStateVal( val,
                                 lm,
                                 m_spec.device,
@@ -702,10 +808,14 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                 &m_hint,
                                 maxGap,
                                 &m_unavailableReason ) != 0 )
+            {
                 return m_invalidValue;
+            }
 
             if( val.size() == 0 )
+            {
                 return "";
+            }
 
             std::string res;
 
@@ -721,6 +831,7 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
 
             return res;
         }
+
         default:
             return m_invalidValue;
         }
@@ -732,6 +843,7 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
         case valTypes::Bool:
         {
             bool val;
+
             if( getLogContVal( val,
                                lm,
                                m_spec.device,
@@ -742,13 +854,18 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                &m_hint,
                                maxGap,
                                &m_unavailableReason ) != 0 )
+            {
                 return m_invalidValue;
+            }
+
             snprintf( str, sizeof( str ), m_spec.format.c_str(), val );
             return std::string( str );
         }
+
         case valTypes::Char:
         {
             char val;
+
             if( getLogContVal( val,
                                lm,
                                m_spec.device,
@@ -759,13 +876,18 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                &m_hint,
                                maxGap,
                                &m_unavailableReason ) != 0 )
+            {
                 return m_invalidValue;
+            }
+
             snprintf( str, sizeof( str ), m_spec.format.c_str(), val );
             return std::string( str );
         }
+
         case valTypes::UChar:
         {
             unsigned char val;
+
             if( getLogContVal( val,
                                lm,
                                m_spec.device,
@@ -776,13 +898,18 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                &m_hint,
                                maxGap,
                                &m_unavailableReason ) != 0 )
+            {
                 return m_invalidValue;
+            }
+
             snprintf( str, sizeof( str ), m_spec.format.c_str(), val );
             return std::string( str );
         }
+
         case valTypes::Short:
         {
             short val;
+
             if( getLogContVal( val,
                                lm,
                                m_spec.device,
@@ -793,13 +920,18 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                &m_hint,
                                maxGap,
                                &m_unavailableReason ) != 0 )
+            {
                 return m_invalidValue;
+            }
+
             snprintf( str, sizeof( str ), m_spec.format.c_str(), val );
             return std::string( str );
         }
+
         case valTypes::UShort:
         {
             unsigned short val;
+
             if( getLogContVal( val,
                                lm,
                                m_spec.device,
@@ -810,13 +942,18 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                &m_hint,
                                maxGap,
                                &m_unavailableReason ) != 0 )
+            {
                 return m_invalidValue;
+            }
+
             snprintf( str, sizeof( str ), m_spec.format.c_str(), val );
             return std::string( str );
         }
+
         case valTypes::Int:
         {
             int val;
+
             if( getLogContVal( val,
                                lm,
                                m_spec.device,
@@ -827,13 +964,18 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                &m_hint,
                                maxGap,
                                &m_unavailableReason ) != 0 )
+            {
                 return m_invalidValue;
+            }
+
             snprintf( str, sizeof( str ), m_spec.format.c_str(), val );
             return std::string( str );
         }
+
         case valTypes::UInt:
         {
             unsigned int val;
+
             if( getLogContVal( val,
                                lm,
                                m_spec.device,
@@ -844,13 +986,18 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                &m_hint,
                                maxGap,
                                &m_unavailableReason ) != 0 )
+            {
                 return m_invalidValue;
+            }
+
             snprintf( str, sizeof( str ), m_spec.format.c_str(), val );
             return std::string( str );
         }
+
         case valTypes::Long:
         {
             long val;
+
             if( getLogContVal( val,
                                lm,
                                m_spec.device,
@@ -861,13 +1008,18 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                &m_hint,
                                maxGap,
                                &m_unavailableReason ) != 0 )
+            {
                 return m_invalidValue;
+            }
+
             snprintf( str, sizeof( str ), m_spec.format.c_str(), val );
             return std::string( str );
         }
+
         case valTypes::ULong:
         {
             unsigned long val;
+
             if( getLogContVal( val,
                                lm,
                                m_spec.device,
@@ -878,13 +1030,18 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                &m_hint,
                                maxGap,
                                &m_unavailableReason ) != 0 )
+            {
                 return m_invalidValue;
+            }
+
             snprintf( str, sizeof( str ), m_spec.format.c_str(), val );
             return std::string( str );
         }
+
         case valTypes::LongLong:
         {
             long long val;
+
             if( getLogContVal( val,
                                lm,
                                m_spec.device,
@@ -895,13 +1052,18 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                &m_hint,
                                maxGap,
                                &m_unavailableReason ) != 0 )
+            {
                 return m_invalidValue;
+            }
+
             snprintf( str, sizeof( str ), m_spec.format.c_str(), val );
             return std::string( str );
         }
+
         case valTypes::ULongLong:
         {
             unsigned long long val;
+
             if( getLogContVal( val,
                                lm,
                                m_spec.device,
@@ -912,13 +1074,18 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                &m_hint,
                                maxGap,
                                &m_unavailableReason ) != 0 )
+            {
                 return m_invalidValue;
+            }
+
             snprintf( str, sizeof( str ), m_spec.format.c_str(), val );
             return std::string( str );
         }
+
         case valTypes::Float:
         {
             float val;
+
             if( getLogContVal( val,
                                lm,
                                m_spec.device,
@@ -930,13 +1097,18 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                maxGap,
                                &m_unavailableReason,
                                m_detail.metaType == metaTypes::Continuous_Angle ) != 0 )
+            {
                 return m_invalidValue;
+            }
+
             snprintf( str, sizeof( str ), m_spec.format.c_str(), val );
             return std::string( str );
         }
+
         case valTypes::Double:
         {
             double val;
+
             if( getLogContVal( val,
                                lm,
                                m_spec.device,
@@ -948,10 +1120,14 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
                                maxGap,
                                &m_unavailableReason,
                                m_detail.metaType == metaTypes::Continuous_Angle ) != 0 )
+            {
                 return m_invalidValue;
+            }
+
             snprintf( str, sizeof( str ), m_spec.format.c_str(), val );
             return std::string( str );
         }
+
         default:
             return m_invalidValue;
         }
@@ -960,12 +1136,14 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
     return m_invalidValue;
 }
 
+/// Resolve a string-valued state over the requested interval.
 std::string logMeta::valueString( logMap<verboseT>          &lm,
                                   const flatlogs::timespecX &stime,
                                   const flatlogs::timespecX &atime,
                                   double                     maxGap )
 {
     std::string val;
+
     if( m_detail.metaType == metaTypes::State )
     {
         if( getLogStateVal( val,
@@ -991,14 +1169,17 @@ std::string logMeta::valueString( logMap<verboseT>          &lm,
     {
         std::cerr << "String type specified as something other than state\n";
     }
+
     return val;
 }
 
+/// Build a FITS card containing the unavailable-value sentinel.
 mx::fits::fitsHeaderCard<logMeta::verboseT> logMeta::unavailableCard() const
 {
     return mx::fits::fitsHeaderCard<verboseT>( fitsKeyword(), unavailableValue(), m_spec.comment );
 }
 
+/// Build the typed FITS card, retaining unavailable-data diagnostics.
 mx::fits::fitsHeaderCard<logMeta::verboseT>
 logMeta::card( logMap<verboseT> &lm, const flatlogs::timespecX &stime, const flatlogs::timespecX &atime, double maxGap )
 {

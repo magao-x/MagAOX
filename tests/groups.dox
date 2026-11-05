@@ -72,6 +72,51 @@ $ less tests/results/latest/run.log
  * \ingroup unit_test
  */
 
+/** \defgroup logdump_unit_test Logdump Unit Tests
+ * \brief Complete-record decoding, live partial appends, filtering, and log rotation tests.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup dmSyncopation_unit_test DM Syncopation Unit Tests
+ * \brief Deterministic scheduling, control and local shared-memory publication tests.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup dmPipelineTiming_unit_test Upstream AO Trace Timing Unit Tests
+ * \brief Ordered stage timing, excursion attribution and bounded observation tests.
+ * \ingroup app_dev_unit_tests
+ */
+
+/** \defgroup dmReaderTiming_unit_test DM Reader Protection Timing Unit Tests
+ * \brief Exact completion joins, observed reader lifetime and bounded collection quality.
+ * \ingroup app_dev_unit_tests
+ */
+
+/** \defgroup dmPipelineTelemetry_unit_test Upstream AO Timing Telemetry Unit Tests
+ * \brief Independent camera, upstream trace and legacy serialization tests.
+ * \ingroup logger_unit_test
+ */
+
+/** \defgroup alpaoCtrl_unit_test ALPAO Controller Unit Tests
+ * \brief Offline SDK endpoint, submission status and timing tests.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup bmcCtrl_unit_test BMC Controller Unit Tests
+ * \brief Offline SDK endpoint, submission status and timing tests.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup irisaoCtrl_unit_test IrisAO Controller Unit Tests
+ * \brief Offline submission timing and unavailable SDK status tests.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup pi335Ctrl_unit_test PI-335 Controller Unit Tests
+ * \brief Offline multi-axis transport, partial-write and timing tests.
+ * \ingroup application_unit_test
+ */
+
 /** \page page_test_coverage Test Coverage Report
  * \ingroup testing
 
@@ -129,9 +174,9 @@ report from their counters and then returns nonzero. An HTML report therefore do
  * \ingroup application_unit_test
  */
 
-/** \defgroup frameGrabber_unit_test Frame Grabber Unit Tests
- * \brief Offline worker tests for concurrent reconfiguration, retries, and power/readiness waits.
- * \ingroup app_unit_test
+/** \defgroup ocam2KCtrl_housekeeping_unit_test OCAM Housekeeping Unit Tests
+ * \brief Bounded serial-housekeeping suppression, recovery, and operator-status tests.
+ * \ingroup application_unit_test
  */
 
 /** \defgroup ocam2KCtrl_reconfig_unit_test OCAM Reconfiguration Unit Tests
@@ -179,9 +224,54 @@ report from their counters and then returns nonzero. An HTML report therefore do
  * \ingroup application_unit_test
  */
 
+/** \defgroup common_unit_test Common Library Unit Tests
+ * \brief Unit tests for shared low-level library helpers.
+ * \ingroup unit_test
+ */
+
+/** \defgroup spscQueue_unit_test Bounded SPSC Queue Unit Tests
+ * \brief Ownership, wrap and full-queue behavior of the shared diagnostic queue.
+ * \ingroup common_unit_test
+ */
+
+/** \defgroup latestSnapshot_unit_test Latest-State Snapshot Unit Tests
+ * \brief Ownership-safe state coalescing and concurrent snapshot publication.
+ * \ingroup common_unit_test
+ */
+
+/** \defgroup frameGrabberTiming_unit_test Framegrabber Timing Unit Tests
+ * \brief Paired timestamp collection and qualified stage decomposition.
+ * \ingroup app_dev_unit_tests
+ */
+
+/** \defgroup frameGrabber_unit_test Frame Grabber Unit Tests
+ * \brief Acquisition/publication ordering, concurrent reconfiguration, retries, and power/readiness waits.
+ * \ingroup app_dev_unit_tests
+ */
+
+/** \defgroup frameGrabberTelemetry_unit_test Framegrabber Stage Telemetry Unit Tests
+ * \brief Binary, text, metadata and validity of optional stage records.
+ * \ingroup logger_unit_test
+ */
+
+/** \defgroup frameGrabberTraceTelemetry_unit_test Framegrabber Excursion Trace Telemetry Unit Tests
+ * \brief Chronological neighbor records, exact endpoint clocks, metadata and malformed-record rejection.
+ * \ingroup logger_unit_test
+*/
+
 /** \defgroup streamWriter_unit_test streamWriter Unit Tests
  * \brief Offline configuration, encoding, recording lifecycle, and buffer ownership regressions.
  * \ingroup application_unit_test
+ */
+
+/** \defgroup dmSaturation_unit_test DM Saturation Payload Unit Tests
+ * \brief Lossless burst accumulation, validation, overflow and concurrent ownership tests.
+ * \ingroup app_dev_unit_tests
+ */
+
+/** \defgroup dmPipeline_integration_test DM Pipeline Integration Tests
+ * \brief Frozen command products, independent timing, reader release and ordered completion tests.
+ * \ingroup app_dev_unit_tests
  */
 
 /** \defgroup ocam2KCtrl_emgain_unit_test OCAM EM Gain Unit Tests
@@ -192,4 +282,9 @@ report from their counters and then returns nonzero. An HTML report therefore do
 /** \defgroup cameraSim_emgain_unit_test Camera Simulator EM Gain Unit Tests
  * \brief Offline simulated EM-gain disable behavior and generic shared interface compatibility.
  * \ingroup application_unit_test
+ */
+
+/** \defgroup dmSyncopationProducer_unit_test DM Syncopation Producer Unit Tests
+ * \brief Same-host tagged request, source ownership and private-snapshot acknowledgement tests.
+ * \ingroup app_dev_unit_tests
  */

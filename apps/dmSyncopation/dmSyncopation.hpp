@@ -1,0 +1,5274 @@
+/** \file dmSyncopation.hpp
+ * \brief Main-loop synchronized, persistent auxiliary DM command scheduler.
+ */
+#ifndef dmSyncopation_hpp
+#define dmSyncopation_hpp
+
+#include <atomic>
+#include <cstring>
+#include <limits>
+#include <memory>
+#include <mutex>
+#include <sstream>
+#include <sys/random.h>
+
+#include <mx/improc/milkImage.hpp>
+#include <mx/math/floatUtils.hpp>
+
+#include "../../libMagAOX/libMagAOX.hpp"
+#include "../../libMagAOX/app/dev/dmCombTiming.hpp"
+#include "../../libMagAOX/app/dev/dmPipelineTiming.hpp"
+#include "../../libMagAOX/app/dev/dmReaderTiming.hpp"
+#include "../../libMagAOX/app/dev/dmCompletion.hpp"
+#include "../../libMagAOX/app/dev/dmSyncopationProducer.hpp"
+#include "../../libMagAOX/app/dev/dmTiming.hpp"
+#include "../../libMagAOX/common/latestSnapshot.hpp"
+#include "../../magaox_git_version.h"
+#include "syncoSchedule.hpp"
+#include "syncoSimulation.hpp"
+#include "syncoZeroPhase.hpp"
+#include "syncoZeroTiming.hpp"
+#include "syncoPublicationClock.hpp"
+#include "syncoPublicationTiming.hpp"
+
+namespace MagAOX
+{
+namespace app
+{
+
+/// Existing text-log wire format with the timestamp required by dev::telemeter.
+struct syncoZeroLog : logger::text_log
+{
+    static inline timespec lastRecord{}; ///< Last ordinary-thread trial telemetry emission.
+};
+
+/// Configuration and INDI names for the independent combined-output observer.
+struct syncoCombinerT
+{
+    /// Return the combined-output monitor configuration section.
+    static std::string configSection();
+
+    /// Return the combined-output monitor INDI prefix.
+    static std::string indiPrefix();
+};
+
+inline std::string syncoCombinerT::configSection()
+{
+    return "combinerMonitor";
+}
+
+inline std::string syncoCombinerT::indiPrefix()
+{
+    return "comb";
+}
+
+/// Independent acquisition-timestamp observer, with its own ordinary-priority reader.
+struct syncoCameraT
+{
+    /// Return the camera stream monitor configuration section.
+    static std::string configSection();
+
+    /// Return the camera monitor INDI prefix.
+    static std::string indiPrefix();
+};
+
+inline std::string syncoCameraT::configSection()
+{
+    return "cameraMonitor";
+}
+
+inline std::string syncoCameraT::indiPrefix()
+{
+    return "cam";
+}
+
+/// Ordinary-priority observer of the controller's dedicated completion record.
+struct syncoCompletionT
+{
+    /// Return the optional completion-stream monitor configuration section.
+    static std::string configSection();
+
+    /// Return the completion monitor's INDI prefix.
+    static std::string indiPrefix();
+};
+
+inline std::string syncoCompletionT::configSection()
+{
+    return "completionMonitor";
+}
+
+inline std::string syncoCompletionT::indiPrefix()
+{
+    return "done";
+}
+
+/// Ordinary-priority observer of the controller's dedicated early reader-release record.
+struct syncoReaderReleaseT
+{
+    /// Return the optional reader-release-stream monitor configuration section.
+    static std::string configSection();
+
+    /// Return the reader-release monitor's INDI prefix.
+    static std::string indiPrefix();
+};
+
+inline std::string syncoReaderReleaseT::configSection()
+{
+    return "readerReleaseMonitor";
+}
+
+inline std::string syncoReaderReleaseT::indiPrefix()
+{
+    return "read_done";
+}
+
+/// Access metadata while retaining milkImage's existing passive/normal publication implementation.
+class syncoImage : public mx::improc::milkImage<float>
+{
+  public:
+    /// Get the attached ImageStreamIO handle; ownership stays with milkImage.
+    IMAGE *image();
+};
+
+inline IMAGE *syncoImage::image()
+{
+    return m_image;
+}
+
+/** \defgroup dmSyncopation DM Syncopation
+ * \brief Adds evenly spaced DM combinations between genuine main-loop publications.
+ * \ingroup apps
+ */
+
+/// One primary-monitor callback owns all timed copies and auxiliary counter publications.
+/** \ingroup dmSyncopation */
+class dmSyncopation : public MagAOXApp<true>,
+                      public dev::shmimMonitor<dmSyncopation>,
+                      public dev::shmimMonitor<dmSyncopation, syncoCombinerT>,
+                      public dev::shmimMonitor<dmSyncopation, syncoCameraT>,
+                      public dev::shmimMonitor<dmSyncopation, syncoCompletionT>,
+                      public dev::shmimMonitor<dmSyncopation, syncoReaderReleaseT>,
+                      public dev::telemeter<dmSyncopation>
+{
+    friend class dev::shmimMonitor<dmSyncopation>;
+    friend class dev::shmimMonitor<dmSyncopation, syncoCombinerT>;
+    friend class dev::shmimMonitor<dmSyncopation, syncoCameraT>;
+    friend class dev::shmimMonitor<dmSyncopation, syncoCompletionT>;
+    friend class dev::shmimMonitor<dmSyncopation, syncoReaderReleaseT>;
+    friend class dev::telemeter<dmSyncopation>;
+    friend class dmSyncopation_test;
+    using shmimMonitorT         = dev::shmimMonitor<dmSyncopation>;
+    using combinerMonitorT      = dev::shmimMonitor<dmSyncopation, syncoCombinerT>;
+    using cameraMonitorT        = dev::shmimMonitor<dmSyncopation, syncoCameraT>;
+    using completionMonitorT    = dev::shmimMonitor<dmSyncopation, syncoCompletionT>;
+    using readerReleaseMonitorT = dev::shmimMonitor<dmSyncopation, syncoReaderReleaseT>;
+    using telemeterT            = dev::telemeter<dmSyncopation>;
+
+  protected:
+    /// Fixed fault classes counted without formatting or logging in the timing callback.
+    enum class Fault
+    {
+        none,
+        primary,
+        resource,
+        output,
+        trigger,
+        count
+    };
+
+    /// Persistent stream handles and one-pass source staging, owned by the scheduler.
+    struct Mapping
+    {
+        std::unique_ptr<syncoImage> m_destination; ///< Existing numbered main channel.
+        std::unique_ptr<syncoImage> m_source;      ///< Persistent matching _aux image.
+        std::vector<float> m_cache; ///< Legacy source snapshot or production contribution committed to the destination.
+        std::vector<float> m_stage; ///< Frozen snapshot for one copy.
+        uint64_t           m_counter{ 0 };          ///< Last destination counter owned/accepted by this app.
+        ino_t              m_destinationInode{ 0 }; ///< File identity at attachment.
+        ino_t              m_sourceInode{ 0 };      ///< File identity at attachment.
+        IMAGE              m_ready{};               ///< Producer-owned tagged command commitment.
+        IMAGE              m_ack{};                 ///< Scheduler-owned private-snapshot acknowledgement.
+        uint64_t           m_accepted{ 0 }, m_missing{ 0 }, m_rejected{ 0 }; ///< Independent source admission totals.
+        uint64_t           m_readyCounter{ 0 }; ///< Last command notification examined for replay protection.
+        bool  m_inputAvailable{ true }; ///< Replacement blocks this producer until explicit resource reacquisition.
+        ino_t m_readyInode{ 0 }, m_ackInode{ 0 }; ///< Sidecar backing-file identities.
+    };
+
+    /// Coherent camera measurement cached by the cycle without waiting for the INDI input thread.
+    struct CameraReport
+    {
+        double  m_fps{ 0 };       ///< Measured acquisition frequency, Hz.
+        int64_t m_received{ 0 };  ///< Original monotonic receipt time, ns.
+        double  m_jitterUs{ -1 }; ///< Acquisition interval standard deviation, us.
+        double  m_minUs{ -1 };    ///< Minimum reported acquisition interval, us.
+        double  m_maxUs{ -1 };    ///< Maximum reported acquisition interval, us.
+    };
+
+    /// Per-clock camera progression baseline, owned only by the camera monitor.
+    struct CameraHistory
+    {
+        uint64_t counter{ 0 }; ///< Last coherently sampled camera counter.
+        int64_t  stamp{ -1 };  ///< Last valid external stamp; a negative value starts a new epoch.
+    };
+
+    /// Diagnostic context for one distinct primary observation; unavailable durations are -1 ns.
+    struct PrimaryTiming
+    {
+        uint64_t m_counter{ 0 };          ///< Primary counter associated with this observation.
+        int64_t  m_publication{ -1 };     ///< Interval between best-effort publication timestamps in their own clock.
+        int64_t  m_previousRuntime{ -1 }; ///< Previous callback body duration, including its cycle-lock wait.
+        int64_t  m_gap{ -1 };             ///< Previous callback body completion to this callback entry, monotonic ns.
+        int64_t  m_sampleDelay{ -1 };     ///< This callback entry to its primary metadata sample, monotonic ns.
+    };
+
+    /** \name Configuration - Data
+     * @{ */
+    std::vector<std::string> m_destinations{ "dm01disp07", "dm01disp08" }; ///< Ordered destination mapping.
+    std::string              m_combinedName{ "dm01disp" };                 ///< dmcomb output, observation only.
+    std::string              m_timingName; ///< Integer timing record; defaults to instance name plus _timing.
+    std::string              m_cameraDevice{ "camwfs" };      ///< Device publishing measured acquisition timing.
+    std::string              m_cameraProperty{ "fg_timing" }; ///< Measured camera timing property.
+    std::string              m_cameraElement{ "acq_fps" };    ///< Measured acquisition-rate element.
+    int                      m_requested{ 3 };                ///< Fixed requested count, including passive step 0.
+    int                      m_primarySemaphore{ 5 }; ///< Required reader semaphore; reject allocation fallback.
+    unsigned                 m_lockFrames{ 32 };  ///< Clean main observations before preparing the first active cycle.
+    unsigned                 m_failureLimit{ 3 }; ///< Consecutive original event failures before reacquisition.
+    unsigned m_rateFrames{ 32 };      ///< Cadence violation persistence and primary-rate qualification interval count.
+    double   m_nominalRate{ 2000 };   ///< Acquisition fallback, Hz.
+    double   m_maxCadence{ 6000 };    ///< Nominal sanity rating, Hz, including step 0.
+    double   m_rateTolerance{ 0.01 }; ///< Relative cadence-rating tolerance.
+    double   m_minRate{ 500 };        ///< Minimum accepted main rate, Hz.
+    double   m_maxRate{ 4000 };       ///< Maximum accepted main rate, Hz.
+    double   m_gain{ 0.1 };           ///< Per-event wait integrator gain.
+    double   m_maxAdvanceUs{ 20 };    ///< Absolute wait correction limit, us.
+    double   m_outputTimeoutUs{ 50 }; ///< Combination watchdog, separate from delivery allowance.
+    double   m_primaryCadenceWindow{ 2 };        ///< Independent primary diagnostics window in seconds; zero disables.
+    size_t   m_primaryCadenceMaxEvents{ 20000 }; ///< Queue and retained-event cap; zero disables diagnostics.
+    double   m_primaryExcursionUs{ 20 };         ///< Diagnostic interval excursion threshold around the window median.
+    bool     m_combinerDiagnostics{ true };      ///< Observe combined-output traces independently of scheduling.
+    bool     m_cameraDiagnostics{ true };        ///< Observe camera acquisition/publication independently of INDI FPS.
+    bool     m_pipelineDiagnostics{ true };      ///< Retain the primary's bounded upstream process trace.
+    bool     m_diagnosticsOnly{ false };         ///< Observe arbitrary primary metadata without attaching DM resources.
+    bool     m_simulationEnabled{ false };       ///< Startup-only shadow policy; live scheduling is prohibited.
+    bool     m_productionEnabled{ false };  ///< Continuous tagged-provider operation on the qualified counter grid.
+    double   m_productionReadyLeadUs{ 50 }; ///< Source completion cutoff ahead of each slot.
+    double   m_productionStep0LeadUs{ 20 }; ///< Passive-copy completion lead before the next predicted main.
+    uint64_t m_passiveCopied{ 0 }, m_passiveSkipped{ 0 }; ///< Completed and suppressed passive batches.
+    pcf::IndiProperty m_indiP_production;                 ///< Continuous-mode per-provider admission diagnostics.
+    bool              m_zeroTestEnabled{ false };  ///< Startup-only finite empirical coordinated zero-write trial.
+    std::string m_zeroTestChannel{ "dm01disp07" }; ///< Existing exclusive zero auxiliary; never created or cleared.
+    std::string m_zeroSdkStream{ "dmtweeter_sdk_done" }; ///< Optional exact native-entry/result observer.
+    double      m_zeroDurationSec{ 120 };      ///< Selected app-enforced active bound; writable only while disabled.
+    double      m_zeroDurationLimitSec{ 120 }; ///< Immutable startup ceiling for the selected active duration.
+    unsigned    m_zeroEventStride{ 4 };        ///< Healthy-cycle event stride; exceptions are always retained.
+    double      m_zeroLateUs{ 5 };             ///< Maximum lateness before an immutable auxiliary slot is skipped.
+    double m_zeroPublicationAdvanceUs{ 0 }; ///< Deprecated downstream advance; counter-publication trials require zero.
+    double m_zeroCommitLeadUs{ 0 };         ///< Guard-to-counter dispatch lead only; initially zero until measured.
+    double m_zeroWakeAheadUs{ 0 }; ///< Full validation starts this many us early; zero selects the legacy wait.
+    bool   m_simulationReaderReleaseReady{ false }; ///< Use timestamped actual-main read release in shadow decisions.
+    bool   m_simulationPipelineBackend{ false }; ///< Independently model preparation, SDK and post resources in shadow.
+    double m_simulationVirtualReaderUs{ 30 };    ///< Assumed auxiliary trigger-to-last-read duration, us; not measured.
+    double m_simulationBackendUs{ 155 };         ///< Legacy whole-backend occupancy; ignored by pipeline shadow.
+    double m_simulationPrepareUs{ 35 };          ///< Assumed serialized controller preparation duration, us.
+    double m_simulationSdkServiceUs{ 120 };      ///< Assumed SDK entry-to-worker-ready service duration, us.
+    double m_simulationPostUs{ 150 };            ///< Assumed independent ordered post-service duration, us.
+    unsigned      m_simulationWindow{ 32 };      ///< Bounded counter-normalized median phase window.
+    double        m_simulationCadenceWindowSec{ 10 }; ///< Requested counter/time cadence baseline, seconds.
+    double        m_simulationCadenceUpdateSec{ 1 };  ///< Minimum cadence refresh interval, seconds.
+    double        m_simulationPhaseGain{ 0.1 };       ///< Future-grid phase smoothing gain.
+    double        m_simulationPhaseSlewUs{ 1 };       ///< Maximum phase correction per newly planned cycle, us.
+    synco::Bounds m_bounds;                           ///< Explicit copy, observation and reader bounds, ns.
+    ///@}
+
+    std::mutex        m_cycleMutex; ///< Serializes lifecycle/configuration with a complete callback.
+    synco::Simulation m_simulation; ///< Fixed-storage shadow engine, serialized by the cycle mutex.
+    synco::Simulation m_zeroClock;  ///< Raw producer-clock cadence/phase estimator; never evaluates modeled admission.
+
+    /// Actual event outcomes and diagnostic causes; numeric values before schema 2 were less specific.
+    enum class ZeroOutcome : int
+    {
+        none                 = -1,
+        mainAcknowledged     = 0,
+        acknowledged         = 1,
+        late                 = 2,
+        readerMissing        = 3,
+        primaryChanged       = 4,
+        combinedUnclassified = 5,
+        resourceUnavailable  = 6,
+        cancelled            = 7,
+        started              = 8,
+        primaryWriting       = 9,
+        waitError            = 10,
+        unacknowledged       = 11,
+        durationExpired      = 12,
+        finished             = 13,
+        invalidTarget        = 14,
+        ackTimeout           = 15,
+        publicationFailed    = 16,
+        ackAmbiguous         = 17,
+        preparationLate      = 18,
+        clockRejected        = 19
+    };
+
+    /// Exact checkpoint where a trial observation was accepted or rejected.
+    enum class ZeroStage
+    {
+        lifecycle,
+        mainAcknowledgement,
+        wait,
+        deadline,
+        combined,
+        reader,
+        finalGuard,
+        postCopyGuard,
+        publication,
+        acknowledgement,
+        preparation,
+        publicationGuard,
+        validation,
+        finalWait,
+        clockQualification
+    };
+
+    /// Exact reason a producer/local clock capture or publication mapping was rejected.
+    enum class ZeroClockFailure
+    {
+        none,
+        invalidCapture,
+        wideBracket,
+        discontinuity,
+        futurePublication,
+        stalePublication,
+        invalidMapping
+    };
+
+    /// Cycle-owned trial counters, published through a fixed-storage ordinary-thread snapshot.
+    struct ZeroStats
+    {
+        uint64_t posted{ 0 }; ///< Active publication API attempts, including API failures; not proof of DM submission.
+        uint64_t staged{ 0 }; ///< Complete passive zero copies, including preparation overruns; no active publication.
+        uint64_t acknowledged{ 0 },
+            unacknowledged{ 0 }; ///< Posted attempts with or without exact combined acknowledgement.
+        uint64_t skipped{ 0 };   ///< Auxiliary occurrences rejected before the active publication API was called.
+        uint64_t late{ 0 }, readerMissing{ 0 }, primaryChanged{ 0 }; ///< Mutually exclusive per-slot skip reasons.
+        uint64_t preparationLate{ 0 }; ///< Zero-copy start or coherent completion was after its immutable target.
+        uint64_t validationLate{ 0 };  ///< Subset of late skips: full validation did not finish before the target.
+        uint64_t clockRejected{ 0 };   ///< Primary observations excluded by an unqualified publication-clock mapping.
+        uint64_t clockExcludedCycles{ 0 }; ///< Rejected-clock main observations within the started finite interval.
+        uint64_t clockExcludedSlots{ 0 };  ///< Auxiliary opportunities in those cycles, outside per-slot skip counts.
+        uint64_t auxiliaryOpportunities{ 0 }; ///< Active-cycle slots, frozen by counting before publication decisions.
+        uint64_t primaryWriting{ 0 }, resourceUnavailable{ 0 }; ///< Primary write flag or missing trial resources.
+        uint64_t cancelled{ 0 }, durationExpired{ 0 }, waitError{ 0 }; ///< Cancellation, finite expiry or wait failure.
+        uint64_t invalidTarget{ 0 };        ///< Occurrences with no representable frozen target.
+        uint64_t combinedUnclassified{ 0 }; ///< Skipped occurrences lacking an unambiguous combined identity.
+        uint64_t resourceFaults{ 0 };   ///< Trial-wide resource or ownership failures, separate from per-slot skips.
+        uint64_t eventsSampledOut{ 0 }; ///< Healthy event rows deliberately omitted by the configured cycle stride.
+        uint64_t readerInvalid{ 0 }, readerDrops{ 0 };                    ///< Readiness revocation/transport coverage.
+        uint64_t mainObserved{ 0 }, mainMatched{ 0 }, mainUnmatched{ 0 }; ///< Genuine main association coverage.
+        uint64_t mainRebaselined{ 0 }; ///< Current main associations recovered through a local stale-to-fresh baseline.
+        uint64_t mainImpactUnclassified{ 0 };    ///< Main acknowledgements lacking exact named-primary trace linkage.
+        int64_t  startedNs{ 0 }, stoppedNs{ 0 }; ///< Active finite interval on CLOCK_MONOTONIC.
+        bool     active{ false }, warming{ false }, finished{ false }; ///< Current finite-trial state.
+    };
+
+    /// Complete cycle-owned status; publication never waits for the ordinary consumer.
+    struct ZeroSnapshot
+    {
+        ZeroStats stats; ///< Counters and finite-trial state from one complete callback/control boundary.
+        synco::ZeroTiming::Summary        timing; ///< Exact timing joins from the same boundary.
+        synco::ZeroPhase::Summary         phase;  ///< Full-rate combined-publication intervals and relative-main phase.
+        synco::PublicationTiming::Summary publication; ///< Interleaved source-counter publication measurements.
+        synco::PublicationClock::Status   clock; ///< Producer/local clock mapping bounds and qualification coverage.
+        uint64_t sequence{ 0 }, trial{ 0 };      ///< Monotonic publication sequence and trial generation.
+        uint64_t eventsDropped{ 0 }, eventsQueued{ 0 }; ///< Event transport quality at publication.
+        int64_t  capturedNs{ 0 };                       ///< Same-host monotonic snapshot publication time.
+        double   targetHz{ 0 }, durationSec{ 0 };       ///< Frozen clock rate and selected active bound.
+        double   durationLimitSec{ 0 }; ///< Startup ceiling; changing the selected bound cannot raise this limit.
+        int      steps{ 0 };            ///< Requested total main-plus-auxiliary steps.
+        unsigned eventStride{ 1 };      ///< Healthy-cycle telemetry sampling; no command or timing-population sampling.
+        double   publicationAdvanceUs{ 0 }, lateUs{ 0 }; ///< Frozen differential target advance and admission grace.
+        double   wakeAheadUs{ 0 };  ///< Frozen early-validation lead; zero retains the legacy wait path.
+        double   commitLeadUs{ 0 }; ///< Final guard-to-counter lead, independent of dmcomb processing.
+        std::array<uint64_t, 32> providerAccepted{}, providerMissing{},
+            providerRejected{};                           ///< Independent source counts.
+        uint64_t passiveCopied{ 0 }, passiveSkipped{ 0 }; ///< Passive-batch outcomes.
+        bool     requested{ false };                      ///< Actual enable request at this cycle/control boundary.
+    };
+
+    /// Coarse ordinary-loop groups include both diagnostic calculation and their INDI I/O.
+    enum class LogicStage : size_t
+    {
+        primary,
+        combiner,
+        camera,
+        pipeline,
+        readers,
+        legacy,
+        status,
+        events,
+        telemetry,
+        count
+    };
+
+    /// Names shared by the coarse profiling property and its text summary.
+    static constexpr std::array<const char *, size_t( LogicStage::count )> logicStageNames{
+        "primary", "combiner", "camera", "pipeline", "readers", "legacy", "status", "events", "telemetry" };
+
+    /// Ordinary-thread service costs and explicit event throughput; no hot-path profiling.
+    struct LogicTiming
+    {
+        std::array<int64_t, size_t( LogicStage::count )> lastNs{}, maxNs{}; ///< Additive loop and lifetime group costs.
+        int64_t  previousNs{ 0 }, gapNs{ 0 }, maxGapNs{ 0 };                ///< Start-to-start ordinary-loop cadence.
+        int64_t  reportNs{ 0 }, maxReportNs{ 0 }; ///< Previous complete profile-publication cost and lifetime maximum.
+        uint64_t sequence{ 0 }, drained{ 0 },
+            drainedLast{ 0 };    ///< Service loops and popped event rows handed to logging.
+        uint64_t logFailed{ 0 }; ///< Zero-trial evidence records rejected by telemetry enqueue; not queue overflow.
+        size_t   queueHighWater{ 0 }; ///< Greatest observed zero-event queue depth before a drain chunk.
+    };
+
+    /// Distinct local monotonic checkpoints for early validation and the quiet final wait.
+    struct ZeroPublicationWait
+    {
+        int64_t wakeTargetNs{ 0 }; ///< Planned start of full validation before the publication target.
+        int64_t wokeNs{ 0 };      ///< First clock sample after the final timed wait, or entry when no sleep was needed.
+        int64_t validatedNs{ 0 }; ///< Full validation completed here; must precede or equal the publication target.
+    };
+
+    /// Rejected clock evidence retained before subsequent callbacks can overwrite the clock status.
+    struct ZeroClockEvidence
+    {
+        ZeroClockFailure failure{ ZeroClockFailure::none };   ///< Qualification or mapping rejection cause.
+        int64_t beforeNs{ 0 }, producerNs{ 0 }, afterNs{ 0 }; ///< Exact monotonic/producer/monotonic read bracket.
+        int64_t bracketLimitNs{ 0 }, maxAgeNs{ 0 }; ///< Capture and publication-age limits applied to this observation.
+        uint64_t excludedSlots{ 0 }; ///< Active auxiliary opportunities suppressed; zero while warming or expired.
+        bool     active{ false };    ///< Main observation belongs to the started finite active interval.
+    };
+
+    /// One bounded hot-path observation, formatted only after the cycle lock is released.
+    struct ZeroEvent
+    {
+        uint64_t    trial{ 0 }, primary{ 0 };      ///< Trial and genuine main identities.
+        int         step{ 0 }, outcome{ 0 };       ///< Zero is a main observation; positive values are auxiliary steps.
+        ZeroOutcome reason{ ZeroOutcome::none };   ///< Frozen cause; a posted acknowledgement failure remains posted.
+        ZeroStage   stage{ ZeroStage::lifecycle }; ///< Checkpoint which produced this outcome.
+        int         waitResult{ 0 };               ///< Exact absolute-wait error, only for a wait-error cause.
+        int64_t     targetNs{ 0 }, observedNs{ 0 }; ///< Frozen target and actual observation/publication time.
+        synco::ZeroTiming::Key key;                 ///< Exact combined command, or an empty key when unclassified.
+        int64_t stagedNs{ 0 }; ///< Coherent passive-copy completion, including overruns; zero if no copy occurred.
+        int64_t referenceTargetNs{ 0 }; ///< Desired counter point mapped to the local clock; equals counterTargetNs.
+        int64_t publicationDeadlineNs{ 0 }; ///< Last permissible guarded admission, including the configured grace.
+        int64_t publicationBeginNs{ 0 }, publicationEndNs{ 0 }; ///< Monotonic guard-to-update-return bracket.
+        synco::ZeroTiming::Key auxiliaryKey; ///< Exact auxiliary publication metadata, separate from combined key.
+        ZeroPublicationWait    wait;         ///< Frozen wake and validation checkpoints; zero for the legacy path.
+        int64_t  counterTargetNs{ 0 }, counterTargetRawNs{ 0 }; ///< Desired counter point in local and producer clocks.
+        int64_t  clockOffsetNs{ 0 }, clockBracketNs{ 0 }; ///< Frozen producer-minus-local offset and uncertainty width.
+        uint64_t clockEpoch{ 0 };                         ///< Mapping generation frozen for this cycle's targets.
+        synco::ZeroTiming::Key sourceKey; ///< Main or auxiliary source publication, distinct from dmcomb output.
+        ZeroClockEvidence      clock;     ///< Populated only for an unsampled clock-rejection event.
+    };
+
+    ZeroStats m_zeroStats; ///< Finite-trial counters; no conditional shadow outcomes are mixed in.
+    MagAOX::latestSnapshot<ZeroSnapshot>
+        m_zeroStatus; ///< Serialized cycle/control producer; ordinary app-loop consumer.
+    ZeroSnapshot
+        m_zeroPublished; ///< Producer-owned previous status, used only for publication cadence/change detection.
+    ZeroSnapshot m_zeroSnapshot; ///< Ordinary-thread last coherent status, retained when no newer value is pending.
+    LogicTiming  m_logicTiming;  ///< Ordinary app-loop profiling and event-drain accounting.
+    pcf::IndiProperty m_indiP_logicTiming;                    ///< Read-only coarse service costs and event throughput.
+    ZeroOutcome       m_zeroWaitFailure{ ZeroOutcome::none }; ///< Cause retained at the failing wait condition.
+    ZeroStage         m_zeroWaitStage{ ZeroStage::wait }; ///< Exact early-validation or final-wait failure checkpoint.
+    ZeroPublicationWait m_zeroPublicationWait;            ///< Current auxiliary occurrence's wake/validation evidence.
+    int64_t             m_zeroWaitObservedNs{ 0 }; ///< Exact rejecting sample or final guarded admission timestamp.
+    uint64_t            m_zeroValidatedSdkCounter{ 0 }; ///< SDK stream counter already checked before the final wait.
+    MagAOX::dmCompletion::Record
+            m_zeroReaderObserved;        ///< Reader-observer-owned source cursor for immediate revocation.
+    int64_t m_zeroReaderObservedNs{ 0 }; ///< Reader-observer-owned last accepted local observation time.
+    int     m_zeroWaitResult{ 0 };  ///< Most recent absolute-wait return code, retained without a post-hoc clock read.
+    synco::ZeroTiming m_zeroTiming; ///< Exact primary receipt and controller read-begin to native SDK-entry joins.
+    synco::ZeroPhase  m_zeroPhase;  ///< Bounded full-rate downstream evidence, independent of event-row sampling.
+    synco::PublicationClock  m_zeroPublicationClock;  ///< CLOCK_ISIO-to-monotonic conversion used only for waiting.
+    synco::PublicationTiming m_zeroPublicationTiming; ///< Main/auxiliary source publications, independently of dmcomb.
+    uint64_t m_zeroClockEpoch{ 0 };         ///< Mapping generation whose raw-source cadence fit is currently retained.
+    int64_t  m_zeroCounterTargetRawNs{ 0 }; ///< Current occurrence's desired counter point in the producer clock.
+    synco::ZeroTiming::Key m_zeroPrimaryPublication; ///< Coherent genuine main source publication for this callback.
+    MagAOX::spscQueue<ZeroEvent> m_zeroEvents;       ///< Primary monitor to ordinary telemetry handoff.
+    IMAGE m_zeroChannel{}, m_zeroCombined{}, m_zeroSdk{}; ///< Existing auxiliary/output/SDK mappings, never destroyed.
+    ino_t m_zeroChannelInode{ 0 }, m_zeroCombinedInode{ 0 }, m_zeroSdkInode{ 0 }; ///< Backing identities.
+    uint64_t m_zeroChannelIdentity{ 0 }, m_zeroCombinedIdentity{ 0 },
+        m_zeroPrimaryIdentity{ 0 };                                     ///< Frozen metadata IDs.
+    uint64_t m_zeroExpected{ 0 }, m_zeroPrimary{ 0 }, m_zeroTrial{ 0 }; ///< Own publications and distinct mains.
+    uint64_t m_zeroClockCounter{ 0 };     ///< Counter paired with the producer-clock interval baseline.
+    int64_t  m_zeroClockPublication{ 0 }; ///< Previous coherent primary publication, in its own clock only.
+    int64_t  m_zeroIdleSince{ 0 }, m_zeroNextAttach{ 0 }, m_zeroNextFileCheck{ 0 }; ///< Bounded attachment/idle checks.
+    int64_t  m_zeroArmedAt{ 0 }; ///< On-request deadline origin; warmup is independently limited to 30 seconds.
+    uint32_t m_zeroWidth{ 0 }, m_zeroHeight{ 0 }; ///< Frozen two-dimensional CPU-float geometry.
+    size_t   m_zeroBytes{ 0 };                    ///< Exact bounded all-zero copy length.
+    bool     m_zeroAttached{ false }, m_zeroIdle{ false }, m_zeroArmed{ false }; ///< Ownership/preflight/request state.
+    bool     m_zeroHaveCombined{ false }, m_zeroHaveRelease{ false },
+        m_zeroReaderFault{ false };                     ///< Exact readiness state.
+    synco::ZeroTiming::Key m_zeroLastCombined;          ///< Most recent classified or rebaselined combined identity.
+    MagAOX::dmSyncoSimulation::Readiness m_zeroRelease; ///< Latest coherently observed reader release.
+    uint64_t m_zeroReleaseEpoch{ 0 }, m_zeroReleaseDrops{ 0 }; ///< Accepted source generation and queue loss baseline.
+    pcf::IndiProperty m_indiP_zeroTest;        ///< Read-only actual trial state, counts and main timing coverage.
+    pcf::IndiProperty m_indiP_zeroPhase;       ///< Full-rate combined-publication phase/interval populations.
+    pcf::IndiProperty m_indiP_zeroPublication; ///< Interleaved counter-publication timing populations.
+    pcf::IndiProperty m_indiP_zeroClock;       ///< Clock mapping bounds, generations and qualification coverage.
+    MagAOX::spscQueue<MagAOX::dmSyncoSimulation::Readiness>
+        m_simulationReleaseQueue; ///< Release producer to cycle consumer; allocated before monitor startup.
+    std::atomic<uint64_t> m_simulationReleaseEpoch{ 1 }; ///< Attachment/reset/drop fence for queued release evidence.
+    uint64_t m_simulationReleaseSeenEpoch{ 1 }; ///< Cycle-owned source generation whose evidence can be accepted.
+    uint64_t m_simulationReleaseSeenDrops{ 0 }; ///< Cycle-owned transport loss already invalidated.
+    MagAOX::dmSyncoSimulation::Readiness m_simulationReleasePending; ///< One popped future observation held until R.
+    bool   m_simulationReleaseHavePending{ false }; ///< A future observation is owned by the cycle, not the queue.
+    size_t m_simulationReleaseQueued{ 0 }; ///< Ordinary-thread queue/lookahead count cached with the shadow snapshot.
+    MagAOX::dmSyncoSimulation::Summary     m_simulationSnapshot;    ///< Ordinary-thread cached telemetry/INDI snapshot.
+    MagAOX::dmSyncoSimulation::TraceStatus m_simulationTraceStatus; ///< Ordinary-thread cached overlap queue quality.
+    uint64_t m_simulationTraceLogFailed{ 0 }; ///< Drained overlap events lost after a telemetry emission failure.
+    MagAOX::dmSyncoSimulation::TraceStatus m_simulationMainWaitStatus; ///< Cached delayed-main provenance coverage.
+    uint64_t m_simulationMainWaitLogFailed{ 0 }; ///< Drained delayed-main records lost to detected telemetry failures.
+    MagAOX::dmSyncoSimulation::EstimatorStatus m_simulationEstimatorStatus; ///< Cached triggered estimator coverage.
+    uint64_t m_simulationEstimatorLogFailed{ 0 };  ///< Drained estimator samples lost to detected telemetry failures.
+    double   m_simulationReferenceFps{ 0 };        ///< Accepted camera rate identifying material rate-change epochs.
+    int64_t  m_simulationCameraTime{ 0 };          ///< Last camera report considered for a shadow rate change.
+    int64_t  m_simulationPublication{ 0 };         ///< Prior coherent primary writetime, in its own external clock.
+    uint64_t m_simulationCounter{ 0 };             ///< Primary counter paired with the publication baseline.
+    int64_t  m_simulationCombinedPublication{ 0 }; ///< Last accepted combined producer timestamp in its own clock.
+    int64_t  m_simulationCombinedStart{ 0 };       ///< Last accepted combiner trace start; rejects stale replay.
+    int64_t  m_simulationCombinedUpdate{ 0 };      ///< Last accepted combiner trace update; rejects stale replay.
+    uint64_t m_simulationCombinedCounter{ 0 };     ///< Counter paired with the accepted combined trace.
+    std::atomic<bool>    m_enabled{ false };       ///< Cancellation request, checked at bounded waits and publications.
+    std::mutex           m_cameraMutex; ///< Protects only the pending camera report, never a timed cycle or INDI I/O.
+    std::atomic<double>  m_cameraFps{ 0 };       ///< Latest validated pending acquisition frequency, Hz.
+    std::atomic<int64_t> m_cameraTime{ 0 };      ///< Original receipt time of the pending camera report.
+    double               m_cameraJitterUs{ -1 }; ///< Acquisition interval standard deviation, us; -1 when omitted.
+    double               m_cameraMinUs{ -1 };    ///< Minimum reported acquisition interval, us; -1 when omitted.
+    double               m_cameraMaxUs{ -1 };    ///< Maximum reported acquisition interval, us; -1 when omitted.
+    CameraReport         m_cameraReport;    ///< Cycle-owned snapshot; retained if the mailbox is briefly unavailable.
+    std::vector<Mapping> m_mappings;        ///< Open mappings, fixed while attached.
+    std::unique_ptr<syncoImage> m_combined; ///< Read-only combined-output attachment.
+    ino_t                       m_combinedInode{ 0 }; ///< Combined-output file identity.
+    IMAGE                       m_timing{};           ///< Owned timing publisher handle, never a DM input.
+    ino_t                       m_timingInode{ 0 };   ///< File identity of the published provider schedule.
+    synco::Record               m_record{};           ///< Current coherent provider schedule.
+    bool                        m_resources{ false }; ///< Mappings and timing stream are attached and validated.
+    int64_t                     m_nextAttach{ 0 }; ///< Bounded retry interval while unarmed resources are unavailable.
+    bool              m_trackingOutput{ false };   ///< A baseline is available to associate the next main combination.
+    bool              m_expectOutput{ false };     ///< Exactly one pending combination, or the initial baseline drain.
+    bool              m_primed{ false };           ///< The upcoming cycle has an on-time passive preparation.
+    int               m_scheduleState{ synco::invalid }; ///< Provider-facing acquisition/armed state.
+    const char       *m_reason{ "disabled" };            ///< Static health reason, formatted only by appLogic.
+    const char       *m_lastFaultReason{ "none" }; ///< Latched fault cause, retained while the current phase changes.
+    int64_t           m_lastFaultNs{ 0 };   ///< Monotonic timestamp of the latched synchronization/resource fault.
+    int64_t           m_faultInterval{ 0 }; ///< Latched interval at the latest interval fault; zero for other faults.
+    int64_t           m_faultPeriod{ 0 };   ///< Prediction used at the latest interval fault; zero for other faults.
+    PrimaryTiming     m_primaryTiming;      ///< Diagnostic context for the latest distinct primary observation.
+    dev::dmTiming     m_primaryCadence;     ///< Monitor-producer cadence events and ordinary-thread cached statistics.
+    dev::dmCombTiming m_combinerCadence;    ///< Combined-monitor handoff and ordinary-thread trace statistics.
+    dev::dmTiming     m_cameraCadence;      ///< Independent camera acquisition intervals; never paired to DM events.
+    dev::dmTiming
+        m_cameraPublicationCadence; ///< Independent camera writetime intervals from the same metadata snapshot.
+    dev::dmPipelineTiming m_pipelineCadence; ///< Best-effort upstream trace handoff and processing measurements.
+    dev::dmReaderTiming   m_readerTiming; ///< Independent shadow completion/reader-hold measurement; no control output.
+    dev::dmReaderTiming
+            m_readerReleaseTiming;          ///< Independent early-release populations, without a full-completion peer.
+    int64_t m_readerReleaseReceiptNs{ -1 }; ///< Genuine release-monitor receipt anchor.
+    int64_t m_completionReceiptNs{ -1 }; ///< Completion monitor's genuine receipt marker; negative for initial reads.
+    int64_t m_primaryReceiptNs{ -1 };    ///< Existing primary receipt timestamp reused by the pipeline handoff.
+    CameraHistory m_cameraAcquisitionHistory;     ///< Acquisition-clock progression checks.
+    CameraHistory m_cameraPublicationHistory;     ///< Publication-clock progression checks, independent of acquisition.
+    std::atomic<ino_t> m_primaryTraceInode{ 0 };  ///< Primary stream metadata identity, published by its monitor.
+    int64_t            m_combinerReceiptNs{ -1 }; ///< Combined-monitor-only receipt anchor; -1 for an initial callback.
+    PrimaryTiming      m_faultTiming;          ///< Same-event context latched with the latest primary interval fault.
+    int64_t m_previousPrimaryPublication{ 0 }; ///< Last consistency-checked positive primary publication timestamp, ns.
+    int64_t m_previousCallbackRuntime{ -1 };   ///< Duration of the previous invocation, including ignored duplicates.
+    int64_t m_previousCallbackEnd{ 0 };        ///< Previous body completion before cycle-lock release, monotonic ns.
+    std::array<uint64_t, size_t( Fault::count )> m_faultCounts{}; ///< Fixed per-cause fault totals.
+    bool     m_havePrimaryCounter{ false }; ///< Last-seen counter is initialized for the current primary attachment.
+    uint64_t m_primaryCounter{ 0 };         ///< Last seen primary counter, retained through reacquisition.
+    int64_t  m_lastPrimaryDelta{ 0 };       ///< Counter change at the latest distinct primary observation.
+    int64_t  m_lastPrimaryInterval{ 0 };    ///< Observed interval at the latest distinct primary event.
+    int64_t  m_lastOutputDelta{ 0 }; ///< Observed combined counter minus the last confirmed counter at an output fault.
+    uint64_t m_duplicatePosts{ 0 };  ///< Unchanged-counter callbacks ignored while draining queued notifications.
+    uint64_t m_consumed{ 0 };        ///< Last confirmed combined counter.
+    int64_t  m_lastMain{ 0 };        ///< Previous main callback timestamp, monotonic ns.
+    int64_t  m_previousPrimaryTime{ 0 };     ///< Last distinct observation, retained across phase reacquisition.
+    int64_t  m_rateWindowStart{ 0 };         ///< First timestamp of the candidate primary-rate window.
+    int64_t  m_rateWindowMin{ 0 };           ///< Shortest sequential interval in the candidate window.
+    int64_t  m_rateWindowMax{ 0 };           ///< Longest sequential interval in the candidate window.
+    unsigned m_rateWindowCount{ 0 };         ///< Number of coherent intervals accumulated for rate qualification.
+    int64_t  m_measuredPeriod{ 0 };          ///< Most recent qualified primary-window mean period, ns.
+    int64_t  m_period{ 500000 };             ///< Selected camera, qualified primary or configured period, ns.
+    const char *m_periodSource{ "nominal" }; ///< Current period reference, independent of primary phase.
+    int64_t     m_submission{ 0 };           ///< Actual last submission, or conservative main-publication upper bound.
+    int64_t     m_epoch{ 0 };                ///< Restart-unique timing record identity.
+    int64_t     m_generation{ 1 };           ///< Changes on invalidation/reacquisition.
+    unsigned    m_clean{ 0 };                ///< Consecutive clean primary observations.
+    unsigned    m_failures{ 0 };       ///< Original consecutive timing failures; dependent cancellations do not count.
+    unsigned    m_rateViolations{ 0 }; ///< Consecutive nominal rate incompatibilities.
+    int         m_feasible{ 0 };       ///< Reported maximum feasible count, never an automatic count selector.
+    uint64_t    m_delivered{ 0 };      ///< Confirmed later-step combinations.
+    uint64_t    m_mainDelivered{ 0 };  ///< Confirmed primary combinations, separate from extra updates.
+    uint64_t    m_reportedDelivered{ 0 }; ///< Receipt count at the previous slow status update.
+    int64_t     m_reportTime{ 0 };        ///< Monotonic reference for measured delivered cadence.
+    double      m_deliveredHz{ 0 };       ///< Main plus auxiliary confirmed cadence over the last status interval.
+    uint64_t    m_missed{ 0 };            ///< Original timing failures.
+    uint64_t    m_faults{ 0 };            ///< Synchronization/resource invalidations.
+    uint64_t    m_cached{ 0 };            ///< Source fallback uses, not deadline misses.
+    uint64_t    m_notStarted{ 0 };        ///< Step-0 copies suppressed before mutation.
+    uint64_t    m_copiedLate{ 0 };        ///< Step-0 copies completed after the effective cutoff.
+    int64_t     m_snapshotMax{ 0 };       ///< Observed maximum complete snapshot batch time.
+    int64_t     m_copyMax{ 0 };           ///< Observed maximum complete destination copy time.
+    std::array<int64_t, synco::maxSteps> m_advances{};    ///< Independent bounded wait integrators.
+    std::array<int64_t, synco::maxSteps> m_residuals{};   ///< Latest actual-minus-target timings, ns.
+    int64_t ( *m_now )(){ synco::monotonicNs };           ///< Local clock adapter for deterministic tests.
+    int64_t ( *m_publicationNow )(){ zeroTestStreamNow }; ///< Producer-clock adapter; never treated as local time.
+    int ( *m_wait )( const timespec * ){ nullptr }; ///< Optional absolute-wait adapter used by deterministic tests.
+    bool    m_copyStarted{ false }; ///< Per-call outcome, independent of historical maximum copy duration.
+    int64_t m_copyAttemptedAt{ 0 }; ///< Actual copy-attempt start, including safely rejected attempts.
+    int64_t m_copyCompleted{ 0 };   ///< Per-call completion timestamp for passive-copy classification.
+    int64_t m_step0Wake{ 0 };       ///< Latest passive-copy start lateness relative to the requested wake, ns.
+    int64_t m_step0WakeMax{ 0 };    ///< Maximum observed passive-copy wake/check lateness, ns.
+
+    pcf::IndiProperty m_indiP_enable;            ///< Enable request and acknowledged quiescence.
+    pcf::IndiProperty m_indiP_reacquire;         ///< Request fresh synchronization.
+    pcf::IndiProperty m_indiP_settings;          ///< Disabled-only essential numeric controls.
+    pcf::IndiProperty m_indiP_status;            ///< Compact rates/counts/outcome summary.
+    pcf::IndiProperty m_indiP_health;            ///< Schedule reason and stream identities.
+    pcf::IndiProperty m_indiP_camera;            ///< External camera FPS subscription.
+    pcf::IndiProperty m_indiP_simulation;        ///< Conditional grid, phase and collection-quality diagnostics.
+    pcf::IndiProperty m_indiP_simulationCadence; ///< Long-baseline cadence state, coverage and independent freshness.
+    pcf::IndiProperty
+        m_indiP_simulationReadiness;              ///< Signal-qualified main readiness and explicit virtual assumptions.
+    pcf::IndiProperty m_indiP_simulationPipeline; ///< Optional separate-resource assumptions and bounded-credit state.
+    pcf::IndiProperty m_indiP_simulationSteps;    ///< Per-step hypothetical outcomes; never actual deliveries.
+    pcf::IndiProperty m_indiP_simulationStatus;   ///< Shadow state and conditional-policy identification.
+    pcf::IndiProperty m_indiP_simulationTrace;    ///< Read-only overlap capture, drain and loss counters.
+    pcf::IndiProperty m_indiP_simulationMainWait; ///< Read-only delayed-main capture, drain and loss counters.
+    pcf::IndiProperty m_indiP_simulationEstimator; ///< Read-only estimator pre/post history coverage and losses.
+    pcf::IndiProperty m_indiP_primaryTiming; ///< Continuous observed primary publication/receipt statistics in seconds.
+    pcf::IndiProperty
+        m_indiP_primaryTimingQuality;       ///< Independent diagnostic coverage, validity and collection quality.
+    pcf::IndiProperty m_indiP_primaryPairs; ///< Ordered primary interval pairs and conditional compensation statistics.
+    pcf::IndiProperty m_indiP_combinerTiming;      ///< Combined cadence and best-effort trace durations, in seconds.
+    pcf::IndiProperty m_indiP_combinerQuality;     ///< Combined trace availability, identities and observation quality.
+    pcf::IndiProperty m_indiP_cameraTiming;        ///< Camera acquisition/receipt interval populations in seconds.
+    pcf::IndiProperty m_indiP_cameraQuality;       ///< Camera observation coverage, losses and discontinuities.
+    pcf::IndiProperty m_indiP_cameraPairs;         ///< Independent acquisition excursion ordering.
+    pcf::IndiProperty m_indiP_cameraWriteTiming;   ///< Independent camera publication and observer receipt intervals.
+    pcf::IndiProperty m_indiP_cameraWriteQuality;  ///< Camera publication coverage and metadata rejections.
+    pcf::IndiProperty m_indiP_cameraWritePairs;    ///< Camera publication excursion ordering around its own median.
+    pcf::IndiProperty m_indiP_pipelineQuality;     ///< Upstream chain population and qualification counters.
+    pcf::IndiProperty m_indiP_pipelineBoundary;    ///< Oldest-stage interval and primary publication-tail changes.
+    pcf::IndiProperty m_indiP_readerReleaseTiming; ///< Early reader-release statistics, in seconds.
+    pcf::IndiProperty m_indiP_readerReleaseQuality; ///< Early release matching and opportunistic SDK-result coverage.
+    pcf::IndiProperty m_indiP_readerTiming;  ///< Observed reader lifetime and notification statistics, in seconds.
+    pcf::IndiProperty m_indiP_readerQuality; ///< Matching, loss, lifecycle and lifetime extrema of the shadow test.
+    std::array<pcf::IndiProperty, MagAOX::dmPipelineTiming::maxStages> m_indiP_pipelineStages;
+    ///< Per-row process identity, ordinary timings and excursion-conditioned latency changes.
+
+  public:
+    /// Construct without publishing or enabling any DM command.
+    dmSyncopation();
+
+    /// Preserve the app's noexcept destruction contract; normal shutdown joins before releasing handles.
+    ~dmSyncopation() noexcept;
+
+    /// Register app and helper configuration.
+    void setupConfig();
+
+    /// Parse and validate configuration without opening shared memory.
+    int loadConfigImpl( mx::app::appConfigurator &config /**< [in] parsed app configuration */ );
+
+    /// Load configuration, requesting shutdown on invalid input.
+    void loadConfig();
+
+    /// Register INDI controls and start enabled observation monitors.
+    int appStartup();
+
+    /// Publish slow status/telemetry and invalidate silent schedules.
+    int appLogic();
+
+    /// Cancel, join the monitor and close handles while retaining commands.
+    int appShutdown();
+
+    /// Validate the primary reader assignment and attach persistent resources.
+    int allocate( const dev::shmimT &tag /**< [in] primary-monitor tag */ );
+
+    /// Execute one main cycle; never writes or posts to the primary input.
+    int processImage( void              *source /**< [in] unused primary pixel pointer */,
+                      const dev::shmimT &tag /**< [in] primary-monitor tag */ );
+
+    /// Observe monitor receipts and attachment epochs independently of scheduler/resource state.
+    void shmimMonitorTiming( const dev::shmimT     &tag /**< [in] Primary-monitor tag. */,
+                             dev::shmimMonitorEvent event /**< [in] Actual monitor lifecycle/receipt event. */ );
+
+    /// Accept the combined attachment without acquiring scheduler resources or copying pixels.
+    int allocate( const syncoCombinerT &tag /**< [in] Combined-output monitor tag. */ );
+
+    /// Capture combined metadata and producer trace, including optional shadow observations.
+    int processImage( void                 *source /**< [in] Unused combined pixel pointer. */,
+                      const syncoCombinerT &tag /**< [in] Combined-output monitor tag. */ );
+
+    /// Observe combined-monitor receipts and attachment epochs independently of scheduling.
+    void shmimMonitorTiming( const syncoCombinerT  &tag /**< [in] Combined-output monitor tag. */,
+                             dev::shmimMonitorEvent event /**< [in] Actual lifecycle/receipt event. */ );
+
+    /// Accept a camera attachment without accessing pixels or scheduler resources.
+    int allocate( const syncoCameraT &tag /**< [in] Camera monitor tag. */ );
+
+    /// Capture acquisition timestamp metadata independently of the timed cycle.
+    int processImage( void               *source /**< [in] Unused camera pixel pointer. */,
+                      const syncoCameraT &tag /**< [in] Camera monitor tag. */ );
+
+    /// Retain camera receipts, rejected observations and attachment epochs.
+    void shmimMonitorTiming( const syncoCameraT    &tag /**< [in] Camera monitor tag. */,
+                             dev::shmimMonitorEvent event /**< [in] Actual lifecycle/receipt event. */ );
+
+    /// Validate the dedicated completion record without acquiring any DM resources.
+    int allocate( const syncoCompletionT &tag /**< [in] Completion monitor tag. */ );
+
+    /// Capture a coherent controller completion into its independent bounded handoff.
+    int processImage( void                   *source /**< [in] Unused completion pixel pointer. */,
+                      const syncoCompletionT &tag /**< [in] Completion monitor tag. */ );
+
+    /// Retain completion attachment epochs and distinguish real notifications from initial data.
+    void shmimMonitorTiming( const syncoCompletionT &tag /**< [in] Completion monitor tag. */,
+                             dev::shmimMonitorEvent  event /**< [in] Actual lifecycle/receipt event. */ );
+
+    /// Validate the dedicated reader release record without acquiring any DM resources.
+    int allocate( const syncoReaderReleaseT &tag /**< [in] Reader release monitor tag. */ );
+
+    /// Capture a coherent controller reader release into its independent bounded handoff.
+    int processImage( void                      *source /**< [in] Unused reader release pixel pointer. */,
+                      const syncoReaderReleaseT &tag /**< [in] Reader release monitor tag. */ );
+
+    /// Retain reader release attachment epochs and distinguish real notifications from initial data.
+    void shmimMonitorTiming( const syncoReaderReleaseT &tag /**< [in] Reader release monitor tag. */,
+                             dev::shmimMonitorEvent     event /**< [in] Actual lifecycle/receipt event. */ );
+
+    /// Schedule aggregate telemetry outside the timed callback.
+    int checkRecordTimes();
+
+    /// Record one aggregate timing/feedback sample.
+    int recordTelem( const telem_dmsynco *record /**< [in] telemetry type tag */ );
+
+    /// Accept enable/disable, acknowledging disable only after the callback quiesces.
+    INDI_NEWCALLBACK_DECL( dmSyncopation, m_indiP_enable );
+
+    /// Request acquisition without clearing persistent contributions.
+    INDI_NEWCALLBACK_DECL( dmSyncopation, m_indiP_reacquire );
+
+    /// Validate an atomic disabled-only timing/count setting update.
+    INDI_NEWCALLBACK_DECL( dmSyncopation, m_indiP_settings );
+
+    /// Accept measured camera FPS and optional acquisition statistics as one coherent report.
+    INDI_SETCALLBACK_DECL( dmSyncopation, m_indiP_camera );
+
+  protected:
+    /// Configure/reset the shadow engine without opening or modifying any image.
+    bool configureSimulation( double seedRate = 0 /**< [in] New acquisition seed, Hz; zero retains the reference. */ );
+
+    /// Start a new shadow epoch on a material fresh camera-rate change, ignoring ordinary FPS measurement noise.
+    void updateSimulationCadence();
+
+    /// Begin a new shadow attachment epoch and clear external-clock metadata baselines.
+    void resetSimulation();
+
+    /// Drain fixed release evidence under the cycle mutex before evaluating deadlines, without backdating arrivals.
+    void drainSimulationRelease( int64_t now /**< [in] Latest observation time admissible to this evaluation. */ );
+
+    /// Normalize an external metadata timestamp without mixing it with the monotonic clock.
+    static int64_t simulationTimestamp( const timespec &stamp /**< [in] External timestamp; zero means invalid. */ );
+
+    /// Sample primary metadata and advance the shadow policy; never execute a scheduled copy.
+    void
+    readSimulationPrimary( int64_t callbackNs = 0 /**< [in] Monotonic callback entry; zero when unavailable. */,
+                           int64_t receiptNs  = 0 /**< [in] Monotonic semaphore receipt; zero when unavailable. */ );
+
+    /// Sample a linked combined-output trace for the shadow reader-hold model.
+    void
+    readSimulationCombined( int64_t callbackNs = 0 /**< [in] Monotonic callback entry; zero when unavailable. */,
+                            int64_t receiptNs  = 0 /**< [in] Monotonic semaphore receipt; zero when unavailable. */ );
+
+    /// Register read-only conditional simulation diagnostics.
+    int setupSimulationINDI();
+
+    /// Publish the ordinary-thread cached shadow snapshot outside the cycle mutex.
+    void updateSimulationINDI();
+
+    /// Capture local entry and best-effort primary metadata before acquiring the cycle mutex.
+    void readPrimaryCadence( int64_t observed /**< [in] Existing monotonic callback-entry timestamp. */ );
+
+    /// Register the independent read-only primary cadence properties.
+    int setupPrimaryCadenceINDI();
+
+    /// Publish the consumer-owned cadence cache without acquiring the cycle mutex.
+    void updatePrimaryCadenceINDI();
+
+    /// Publish ordered interval pairs independently of the scheduling period and timing bounds.
+    void updatePrimaryPairsINDI();
+
+    /// Register the independent read-only combined timing and quality properties.
+    int setupCombinerCadenceINDI();
+
+    /// Publish consumer-owned combined statistics without acquiring the cycle mutex.
+    void updateCombinerCadenceINDI();
+
+    /// Finish one camera timestamp observation without mixing acquisition and publication clock domains.
+    static void cameraStamp( dev::dmTiming  &collector /**< [in,out] Independent timestamp collector. */,
+                             const timespec &stamp /**< [in] External timestamp captured with the counter. */,
+                             uint64_t        counter /**< [in] Captured camera counter. */,
+                             int64_t         observed /**< [in] Existing local callback timestamp. */,
+                             bool            coherent /**< [in] Metadata passed the repeated-read bracket. */,
+                             CameraHistory  &history /**< [in,out] This timestamp's progression baseline. */ );
+
+    /// Register reusable independent cadence, quality and ordered-pair properties.
+    int setupCadenceINDI( const dev::dmTiming &collector /**< [in] Configured collector. */,
+                          pcf::IndiProperty   &timing /**< [out] Interval statistics. */,
+                          pcf::IndiProperty   &quality /**< [out] Coverage and collection counters. */,
+                          pcf::IndiProperty   &pairs /**< [out] Excursion pair statistics. */,
+                          const std::string   &prefix /**< [in] Property name prefix. */,
+                          const char          *stampPrefix /**< [in] External interval element prefix. */ );
+
+    /// Publish independent interval and collection-quality populations.
+    void updateCadenceINDI( const dev::dmTiming &collector /**< [in] Consumer-owned collector. */,
+                            pcf::IndiProperty   &timing /**< [in,out] Interval statistics. */,
+                            pcf::IndiProperty   &quality /**< [in,out] Collection quality. */,
+                            const char          *stampPrefix /**< [in] External interval element prefix. */ );
+
+    /// Publish an independent ordered interval-pair summary.
+    void updatePairsINDI( const dev::dmTiming &collector /**< [in] Consumer-owned collector. */,
+                          pcf::IndiProperty   &property /**< [in,out] Pair property. */ );
+
+    /// Register upstream trace rows and their independent quality summary.
+    int setupPipelineINDI();
+
+    /// Publish ordinary and excursion-conditioned upstream stage measurements.
+    void updatePipelineINDI();
+
+    /// Configure legacy joins only where their primary/combined sources are supplied.
+    void configureReaderTiming();
+
+    /// Keep the zero-test readiness worker independent of the disabled legacy join collector.
+    bool readerReleaseMonitorEnabled() const;
+
+    /// Register optional shadow reader-protection populations and matching quality.
+    int setupReaderTimingINDI();
+
+    /// Register one independent endpoint population and its quality counters.
+    int setupReaderTimingINDIFor( dev::dmReaderTiming &reader /**< [in] Endpoint collector. */,
+                                  pcf::IndiProperty   &timingProperty /**< [out] Seconds-valued populations. */,
+                                  pcf::IndiProperty   &qualityProperty /**< [out] Collection quality. */,
+                                  const std::string   &propertyPrefix /**< [in] Distinct endpoint label. */ );
+
+    /// Update one independent endpoint population outside the monitor callback.
+    void updateReaderTimingINDIFor( dev::dmReaderTiming &reader /**< [in] Endpoint collector. */,
+                                    pcf::IndiProperty   &timingProperty /**< [in,out] Seconds-valued populations. */,
+                                    pcf::IndiProperty   &qualityProperty /**< [in,out] Collection quality. */ );
+
+    /// Publish the consumer-owned completion comparison outside all monitor callbacks.
+    void updateReaderTimingINDI();
+
+    /// Execute one cycle while the caller holds the cycle mutex.
+    int processPrimary( int64_t observed /**< [in] callback entry time on the monotonic scheduling clock */ );
+
+    /// Configure the clock-only estimator without changing the shadow or live scheduler.
+    bool configureZeroTest();
+
+    /// Attach only existing trial streams and begin non-publishing zero/idle preflight.
+    bool openZeroTest();
+
+    /// Close only this app's zero-test mappings; never unlink or modify pixels.
+    void closeZeroTest();
+
+    /// Process a genuine main and its immutable coordinated auxiliary slots.
+    int processZeroTestPrimary( int64_t observed /**< [in] Primary callback time. */,
+                                int64_t receipt /**< [in] Genuine primary semaphore receipt, or negative. */ );
+
+    /// Verify the attached zero target and optionally its backing stream identities.
+    bool zeroTestResources( bool files /**< [in] Include bounded backing-file checks. */ );
+
+    /// Require IEEE positive/negative zero pixels without relying on fast-math comparisons.
+    bool zeroTestPixels() const;
+
+    /// Sample coherent combined metadata without claiming a reader semaphore.
+    bool zeroTestCombined( synco::ZeroTiming::Key &key /**< [out] Coherent combined identity. */ ) const;
+
+    /// Drain bounded independent reader-release evidence into the cycle-owned readiness state.
+    void drainZeroTestReader( int64_t now /**< [in] Latest monotonic observation. */ );
+
+    /// Check exact current-command reader clearance; this does not qualify SDK readiness.
+    bool zeroTestReady( const synco::ZeroTiming::Key &key /**< [in] Current combined command. */ ) const;
+
+    /// Observe the optional native SDK-result stream for exact main timing joins only.
+    void sampleZeroTestSdk( int64_t now /**< [in] Monotonic sample time. */ );
+
+    /// Wait to one immutable deadline while checking cancellation, main identity and readiness transport.
+    bool zeroTestWait(
+        int64_t  target /**< [in] Absolute monotonic target. */,
+        uint64_t primary /**< [in] Genuine main counter that must remain current. */,
+        int64_t *wokeNs = nullptr /**< [out] Optional immediate post-wait sample; no-sleep entry otherwise. */ );
+
+    /// Check only current ownership, cancellation and readiness/fault evidence without diagnostic accumulation.
+    ZeroOutcome zeroTestFinalGuard( uint64_t                      primary /**< [in] Genuine primary counter. */,
+                                    const synco::ZeroTiming::Key &key /**< [in] Prepared combined command. */,
+                                    uint64_t counter /**< [in] Frozen auxiliary counter before publication. */ );
+
+    /// Finish full checks early and wait without sleeping or diagnostic work through the final publication window.
+    bool zeroTestPublicationReady( int64_t  target /**< [in] Frozen monotonic publication target. */,
+                                   uint64_t primary /**< [in] Genuine primary counter. */,
+                                   const synco::ZeroTiming::Key &key /**< [in] Prepared combined command. */,
+                                   uint64_t counter /**< [in] Frozen auxiliary counter before publication. */ );
+
+    /// Place the final dispatch before a frozen counter target using only the configured pre-counter lead.
+    int64_t zeroTestPublicationTarget( int64_t reference /**< [in] Unadvanced monotonic slot. */ ) const;
+
+    /// Sample the ImageStreamIO producer clock without assuming a TAI/UTC offset.
+    static int64_t zeroTestStreamNow();
+
+    /// Map a frozen producer-clock main grid to local waiting time, retaining its exact fractional period.
+    bool zeroTestGrid( uint64_t         counter /**< [in] Genuine main cycle label. */,
+                       synco::GridTime &grid /**< [out] Frozen local monotonic main grid. */,
+                       uint64_t        &periodQ32 /**< [out] Frozen cadence, scaled nanoseconds. */,
+                       synco::GridTime *rawGrid = nullptr /**< [out] Optional frozen producer-clock main grid. */ );
+
+    /// Publish source-counter timing and clock-quality populations only from an ordinary-thread snapshot.
+    void updateZeroPublication( const ZeroSnapshot &snapshot /**< [in] Coherent cycle-owned state copy. */,
+                                bool record /**< [in] Include text telemetry alongside INDI updates. */ );
+
+    /// Record one actual outcome without allocation, logging or unbounded buffering.
+    void zeroTestEvent( int         step /**< [in] Zero for main; positive auxiliary slot. */,
+                        ZeroOutcome outcome /**< [in] Named actual outcome; numeric value retained in telemetry. */,
+                        ZeroStage   stage /**< [in] Exact checkpoint reporting the outcome. */,
+                        int64_t     target /**< [in] Immutable planned target. */,
+                        int64_t     observed /**< [in] Actual observation. */,
+                        const synco::ZeroTiming::Key &key = {} /**< [in] Exact combined identity, when known. */,
+                        ZeroOutcome reason = ZeroOutcome::none /**< [in] Frozen failure cause, when distinct. */,
+                        int64_t stagedNs   = 0 /**< [in] Coherent passive-copy completion; zero if no copy occurred. */,
+                        int64_t publicationBeginNs = 0 /**< [in] Final admission timestamp before the update API. */,
+                        const synco::ZeroTiming::Key &auxiliaryKey = {} /**< [in] Coherent auxiliary publication. */ );
+
+    /// Retain every rejected clock capture and count active whole-cycle exclusions without publishing a command.
+    void zeroTestClockRejected( ZeroClockFailure failure /**< [in] Exact capture or mapping failure. */,
+                                int64_t observed /**< [in] Main callback observation time on CLOCK_MONOTONIC. */ );
+
+    /// Return the stable text label for a rejected clock capture or mapping.
+    static const char *zeroTestClockFailureName( ZeroClockFailure failure /**< [in] Rejection classification. */ );
+
+    /// Count and emit exactly one auxiliary occurrence rejected before active publication.
+    void zeroTestSkip( int         step /**< [in] Positive auxiliary step. */,
+                       ZeroOutcome reason /**< [in] Cause captured at its rejecting condition. */,
+                       ZeroStage   stage /**< [in] Exact rejecting checkpoint. */,
+                       int64_t     target /**< [in] Frozen occurrence target. */,
+                       int64_t     observed /**< [in] Rejecting clock sample for lateness; otherwise reporting time. */,
+                       const synco::ZeroTiming::Key &key = {} /**< [in] Combined identity, when available. */,
+                       int64_t stagedNs = 0 /**< [in] Actual coherent-copy completion, including any overrun. */ );
+
+    /// Return the stable text label for an event reason without allocation.
+    static const char *zeroTestReasonName( ZeroOutcome reason /**< [in] Actual outcome or failure cause. */ );
+
+    /// Return the stable text label for the reporting checkpoint without allocation.
+    static const char *zeroTestStageName( ZeroStage stage /**< [in] Exact reporting checkpoint. */ );
+
+    /// Distinguish main/lifecycle, skipped and actively posted event populations.
+    static const char *zeroTestActionName( const ZeroEvent &event /**< [in] Captured actual outcome. */ );
+
+    /// Register read-only actual zero-test state and timing coverage.
+    int setupZeroTestINDI();
+
+    /// Publish one complete status while holding the cycle mutex; never allocates or waits for the consumer.
+    void publishZeroTestStatus( int64_t now /**< [in] Same-host monotonic capture time. */,
+                                bool    force = false /**< [in] Bypass the 100 ms publication cadence. */ );
+
+    /// Refresh status independently of callback lock availability, with serialized idle/expiry servicing.
+    void updateZeroTest( bool record = true /**< [in] Emit a text summary in addition to refreshing INDI. */ );
+
+    /// Format at most one bounded event chunk on the ordinary thread and account for its service cost.
+    void drainZeroTestEvents( size_t limit = 4096 /**< [in] Maximum retained event rows in this chunk. */ );
+
+    /// Add one coarse ordinary-loop service duration to the current loop and lifetime maximum.
+    void recordLogicStage( LogicStage stage /**< [in] Coarse calculation/I/O group. */,
+                           int64_t    began /**< [in] Same-host monotonic group start. */ );
+
+    /// Register coarse ordinary-loop service and event-throughput properties.
+    int setupLogicTimingINDI();
+
+    /// Publish completed coarse service costs and the preceding profile report's own publication cost.
+    void updateLogicTimingINDI();
+
+    /// Select the common qualified counter scheduler for finite or continuous operation.
+    bool zeroEngine() const;
+
+    /// Attach production mappings and tagged command sidecars before arming.
+    bool openProduction();
+
+    /// Close scheduler-owned sidecars without destroying persistent source pixels.
+    void closeProduction();
+
+    /// Publish immutable current-cycle cutoffs and the next passive slot.
+    void publishProductionSchedule( synco::GridTime grid /**< [in] Frozen local main grid. */,
+                                    uint64_t        periodQ32 /**< [in] Fractional main period. */,
+                                    uint64_t        primary /**< [in] Current genuine main counter. */ );
+
+    /// Select each eligible tagged input independently, retaining missed contributions.
+    bool productionSnapshot( const synco::Request &request /**< [in] Exact advertised slot. */,
+                             int64_t               now /**< [in] Same-host observation time. */ );
+
+    /// Copy every selected contribution passively within the qualified window.
+    bool productionCopy( uint64_t primary /**< [in] Main identity that must remain unchanged. */,
+                         int64_t  cutoff /**< [in] Hard whole-copy completion cutoff. */ );
+
+    /// Snapshot current-slot inputs before waiting for prior-reader clearance.
+    bool prepareProductionStep( int      step /**< [in] Positive current-cycle slot. */,
+                                int64_t  target /**< [in] Frozen local counter target. */,
+                                uint64_t primary /**< [in] Genuine main counter. */ );
+
+    /// Prepare the next step zero without publishing an auxiliary counter.
+    void productionStep0( synco::GridTime grid /**< [in] Frozen main grid. */,
+                          uint64_t        periodQ32 /**< [in] Fractional main period. */,
+                          uint64_t        primary /**< [in] Current genuine main counter. */ );
+
+    /// Register continuous-mode independent producer diagnostics.
+    int setupProductionINDI();
+
+    /// Refresh ordinary-thread production diagnostics from the coherent snapshot.
+    void updateProductionINDI();
+
+    /// Attach existing destinations/output and create only missing auxiliary/timing streams.
+    bool openResources();
+
+    /// Close this app's handles without destroying persistent DM/source images.
+    void closeResources();
+
+    /// Check shape/counter ownership, optionally including on-disk stream identity.
+    bool resourcesValid( bool files /**< [in] include bounded-cycle-start inode checks */ );
+
+    /// Refresh the coherent camera cache only when its short mailbox lock is immediately available.
+    void readCamera();
+
+    /// Sample publication and previous-callback diagnostics without changing scheduling or retrying metadata reads.
+    void readPrimaryTiming( int64_t  observed /**< [in] current callback's monotonic entry time */,
+                            uint64_t counter /**< [in] primary counter accepted by this observation */,
+                            bool     sequential /**< [in] counters advanced by exactly one */ );
+
+    /// Select a measured period without learning individual callback outliers as rate changes.
+    void updatePeriod( int64_t observed /**< [in] distinct primary observation time */,
+                       int64_t interval /**< [in] interval from the prior distinct observation, or zero */,
+                       bool    sequential /**< [in] whether primary counters progressed by exactly one */ );
+
+    /// Invalidate scheduling while retaining the last complete contributions.
+    void
+    invalidate( const char *reason /**< [in] static diagnostic reason */,
+                Fault       fault  = Fault::none /**< [in] synchronization/resource fault class, if any */,
+                bool resetFeedback = true /**< [in] reset learned waits for a changed synchronization contract */ );
+
+    /// Wait with bounded cancellation and primary-counter checkpoints.
+    bool waitUntil( int64_t target /**< [in] absolute monotonic target */ );
+
+    /// Confirm exactly one expected combined-output update before a bounded timeout.
+    bool consume();
+
+    /// Freeze all source contributions once, using prior complete cache on inconsistency.
+    bool snapshot();
+
+    /// Always copy every staged mapping and passively notify observers.
+    bool copyBatch( int64_t cutoff /**< [in] hard completion cutoff */ );
+
+    /// Prepare/trigger one later step or the next cycle's passive step 0.
+    bool executeStep( int     step /**< [in] zero for next passive preparation */,
+                      int64_t target /**< [in] desired publication/completion time */,
+                      int64_t cutoff /**< [in] hard copy/publication limit */ );
+
+    /// Count one original missed event and apply the consecutive-failure policy.
+    void missedStep();
+
+    /// Publish future cutoffs and targets or invalidate the provider record.
+    void publishSchedule( int64_t observed /**< [in] current main callback reference */,
+                          int     completed /**< [in] last frozen step; -1 before the cycle */ );
+
+    /// Resolve a stream inode, returning zero when absent.
+    static ino_t inode( const std::string &name /**< [in] ImageStreamIO stream name */ );
+
+    /// Reject nonfinite numeric input even in the repository's fast-math build.
+    static bool finite( double value /**< [in] numeric input */ );
+};
+
+inline dmSyncopation::dmSyncopation() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
+{
+    shmimMonitorT::m_smThreadPrio             = 30;
+    shmimMonitorT::m_smCpuset                 = "dmtweeter-synco";
+    shmimMonitorT::m_targetState              = stateCodes::READY;
+    combinerMonitorT::m_smThreadPrio          = 0;
+    combinerMonitorT::m_targetState           = stateCodes::READY;
+    combinerMonitorT::m_semaphoreNumber       = -1;
+    cameraMonitorT::m_smThreadPrio            = 0;
+    cameraMonitorT::m_targetState             = stateCodes::READY;
+    cameraMonitorT::m_semaphoreNumber         = -1;
+    cameraMonitorT::m_shmimName               = "camwfs";
+    completionMonitorT::m_smThreadPrio        = 0;
+    completionMonitorT::m_targetState         = stateCodes::READY;
+    completionMonitorT::m_semaphoreNumber     = -1;
+    completionMonitorT::m_getExistingFirst    = false;
+    readerReleaseMonitorT::m_smThreadPrio     = 0;
+    readerReleaseMonitorT::m_targetState      = stateCodes::READY;
+    readerReleaseMonitorT::m_semaphoreNumber  = -1;
+    readerReleaseMonitorT::m_getExistingFirst = false;
+}
+
+inline bool dmSyncopation::finite( double value )
+{
+    return mx::math::isFinite( value );
+}
+
+inline dmSyncopation::~dmSyncopation() noexcept
+{
+    closeZeroTest();
+}
+
+inline void dmSyncopation::setupConfig()
+{
+    SHMIMMONITOR_SETUP_CONFIG( config );
+    SHMIMMONITORT_SETUP_CONFIG( combinerMonitorT, config );
+    SHMIMMONITORT_SETUP_CONFIG( cameraMonitorT, config );
+    SHMIMMONITORT_SETUP_CONFIG( completionMonitorT, config );
+    completionMonitorT::m_shmimName.clear();
+    SHMIMMONITORT_SETUP_CONFIG( readerReleaseMonitorT, config );
+    readerReleaseMonitorT::m_shmimName.clear();
+    shmimMonitorT::m_shmimName  = "dmC";
+    cameraMonitorT::m_shmimName = "camwfs";
+    TELEMETER_SETUP_CONFIG( config );
+    const std::vector<std::pair<std::string, std::string>> keys = {
+        { "streams.destinations", "Ordered numbered DM destinations; sources append _aux; first triggers." },
+        { "streams.combined", "Combined output to observe." },
+        { "streams.timing", "Same-host signed-int64 schedule stream." },
+        { "tracking.cameraDevice", "Camera device publishing measured acquisition timing." },
+        { "tracking.cameraProperty", "Measured camera timing property." },
+        { "tracking.cameraElement", "Measured camera FPS element." },
+        { "scheduler.maxSubframes", "Fixed requested steps, including passive step zero (1-16)." },
+        { "scheduler.maxCadenceHz", "Nominal total cadence sanity rating, Hz." },
+        { "scheduler.keepoutUs", "Controller processing/last-reader bound, us." },
+        { "scheduler.guardUs", "Extra reserve beyond explicit delivery/reader bounds, us." },
+        { "scheduler.step0LeadUs", "Nominal step-zero completion lead, us." },
+        { "scheduler.deliveryUs", "Qualified maximum command delivery latency, us." },
+        { "scheduler.snapshotBudgetUs", "Whole-batch one-pass source snapshot budget, us." },
+        { "scheduler.copyBudgetUs", "Whole-batch destination copy budget, us." },
+        { "scheduler.visibilityUs", "Positive margin before earliest main publication, us." },
+        { "scheduler.preparationReserveUs", "Preparation target reserve before hard cutoff, us." },
+        { "scheduler.outputTimeoutUs", "Combined output watchdog, us." },
+        { "tracking.nominalMainRateHz", "Acquisition fallback main rate, Hz." },
+        { "tracking.minMainRateHz", "Minimum valid main rate, Hz." },
+        { "tracking.maxMainRateHz", "Maximum valid main rate, Hz." },
+        { "tracking.earlyMainUs", "Earliest next-main allowance, us." },
+        { "tracking.observationLagUs", "Qualified maximum publication-to-callback lag, us." },
+        { "tracking.lockFrames", "Clean main observations before priming." },
+        { "tracking.rateTolerance", "Relative nominal cadence tolerance." },
+        { "tracking.rateFrames", "Cadence violation persistence and primary-rate qualification interval count." },
+        { "tracking.primarySemaphore", "Required monitor reader index; fallback is rejected." },
+        { "recovery.consecutiveMisses", "Consecutive original missed steps before reacquisition." },
+        { "feedback.gain", "Independent per-step wait integrator gain (0-1)." },
+        { "feedback.maxAdvanceUs", "Maximum absolute wait correction, us." },
+        { "diagnostics.windowSec", "Independent timing window, seconds; zero disables collection." },
+        { "diagnostics.maxEvents", "Each timing observer's queue/window cap; zero disables collection." },
+        { "diagnostics.excursionUs",
+          "Camera/primary excursion threshold around each diagnostic median, us; zero disables classification." },
+        { "diagnostics.combiner", "Observe combined-stream cadence and producer trace independently of scheduling." },
+        { "diagnostics.camera", "Observe camera acquisition/publication intervals independently of camera INDI FPS." },
+        { "diagnostics.pipeline", "Observe the primary producer's bounded upstream processing trace." },
+        { "production.enabled", "Continuous tagged same-host producers on the qualified counter-publication grid." },
+        { "production.readyLeadUs", "Input-ready deadline lead before the counter target, us." },
+        { "production.step0LeadUs", "Passive step-zero copy completion lead before the main grid, us." },
+        { "production.lateUs", "Final counter-publication admission allowance, us; default6." },
+        { "production.wakeAheadUs", "Early full-validation lead, us; default10." },
+        { "zeroTest.enabled", "Finite coordinated all-zero auxiliary trial; mutually exclusive with simulation." },
+        { "zeroTest.channel", "Exclusive existing all-zero numbered auxiliary channel." },
+        { "zeroTest.durationSec",
+          "Startup active-duration ceiling, positive and at most120 seconds; selectable downward while Off." },
+        { "zeroTest.lateUs", "Maximum immutable auxiliary-slot lateness before skipping, us." },
+        { "zeroTest.publicationAdvanceUs",
+          "Deprecated downstream advance; must be zero for counter-publication targets." },
+        { "zeroTest.commitLeadUs", "Final guard-to-counter lead, us; zero until measured; excludes dmcomb delay." },
+        { "zeroTest.wakeAheadUs", "Full-validation lead and maximum final-spin window, us; zero retains legacy wait." },
+        { "zeroTest.eventStride", "Retain every Nth healthy cycle; 1..1024, default4; exceptions are never sampled." },
+        { "zeroTest.sdkStream", "Optional native SDK-result stream for exact main timing joins." },
+        { "simulation.enabled", "Observe a conditional fixed-grid policy without copying or triggering DM commands." },
+        { "simulation.readerReleaseReady", "Gate actual-main shadow reader clearance on exact observed release." },
+        { "simulation.pipelineBackend", "Model separate preparation, SDK and ordered post resources in shadow." },
+        { "simulation.virtualReaderUs", "Assumed total auxiliary trigger-to-last-read duration, us; not measured." },
+        { "simulation.backendUs", "Legacy whole-backend occupancy, us; ignored by pipeline shadow." },
+        { "simulation.prepareUs", "Assumed serialized preparation duration, us; pipeline shadow only." },
+        { "simulation.sdkServiceUs", "Assumed SDK entry-to-worker-ready duration, us; pipeline shadow only." },
+        { "simulation.postUs", "Assumed serialized post-service duration, us; pipeline shadow only." },
+        { "simulation.window", "Counter-normalized median phase sample count (4-256)." },
+        { "simulation.cadenceWindowSec", "Requested counter/time cadence baseline, seconds (default 10)." },
+        { "simulation.cadenceUpdateSec", "Minimum cadence refresh interval, seconds (default 1)." },
+        { "simulation.phaseGain", "Future unadvertised grid phase smoothing gain (0-1, excluding zero)." },
+        { "simulation.phaseSlewUs", "Maximum phase correction per newly planned cycle, us." },
+        { "diagnostics.only",
+          "Observe arbitrary primary metadata without attaching DM resources or enabling writes." } };
+    for( const auto &key : keys )
+    {
+        const auto dot = key.first.find( '.' );
+        config.add( key.first,
+                    "",
+                    key.first,
+                    argType::Required,
+                    key.first.substr( 0, dot ),
+                    key.first.substr( dot + 1 ),
+                    false,
+                    "value",
+                    key.second );
+    }
+}
+
+inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
+{
+    SHMIMMONITOR_LOAD_CONFIG( config );
+    SHMIMMONITORT_LOAD_CONFIG( combinerMonitorT, config );
+    SHMIMMONITORT_LOAD_CONFIG( cameraMonitorT, config );
+    SHMIMMONITORT_LOAD_CONFIG( completionMonitorT, config );
+    SHMIMMONITORT_LOAD_CONFIG( readerReleaseMonitorT, config );
+    TELEMETER_LOAD_CONFIG( config );
+    shmimMonitorT::m_getExistingFirst = false;
+    config( m_destinations, "streams.destinations" );
+    config( m_combinedName, "streams.combined" );
+    config( m_timingName, "streams.timing" );
+    config( m_cameraDevice, "tracking.cameraDevice" );
+    config( m_cameraProperty, "tracking.cameraProperty" );
+    config( m_cameraElement, "tracking.cameraElement" );
+    config( m_requested, "scheduler.maxSubframes" );
+    config( m_maxCadence, "scheduler.maxCadenceHz" );
+    config( m_nominalRate, "tracking.nominalMainRateHz" );
+    config( m_minRate, "tracking.minMainRateHz" );
+    config( m_maxRate, "tracking.maxMainRateHz" );
+    config( m_lockFrames, "tracking.lockFrames" );
+    config( m_rateTolerance, "tracking.rateTolerance" );
+    config( m_rateFrames, "tracking.rateFrames" );
+    config( m_primarySemaphore, "tracking.primarySemaphore" );
+    config( m_failureLimit, "recovery.consecutiveMisses" );
+    config( m_gain, "feedback.gain" );
+    config( m_maxAdvanceUs, "feedback.maxAdvanceUs" );
+    config( m_outputTimeoutUs, "scheduler.outputTimeoutUs" );
+    config( m_primaryCadenceWindow, "diagnostics.windowSec" );
+    config( m_primaryExcursionUs, "diagnostics.excursionUs" );
+    config( m_combinerDiagnostics, "diagnostics.combiner" );
+    config( m_cameraDiagnostics, "diagnostics.camera" );
+    config( m_pipelineDiagnostics, "diagnostics.pipeline" );
+    config( m_diagnosticsOnly, "diagnostics.only" );
+    config( m_simulationEnabled, "simulation.enabled" );
+    config( m_productionEnabled, "production.enabled" );
+    config( m_productionReadyLeadUs, "production.readyLeadUs" );
+    config( m_productionStep0LeadUs, "production.step0LeadUs" );
+    config( m_zeroTestEnabled, "zeroTest.enabled" );
+    config( m_zeroTestChannel, "zeroTest.channel" );
+    config( m_zeroDurationSec, "zeroTest.durationSec" );
+    m_zeroDurationLimitSec = m_zeroDurationSec;
+    config( m_zeroLateUs, "zeroTest.lateUs" );
+    config( m_zeroPublicationAdvanceUs, "zeroTest.publicationAdvanceUs" );
+    config( m_zeroCommitLeadUs, "zeroTest.commitLeadUs" );
+    config( m_zeroWakeAheadUs, "zeroTest.wakeAheadUs" );
+    config( m_zeroSdkStream, "zeroTest.sdkStream" );
+    config( m_zeroEventStride, "zeroTest.eventStride" );
+    config( m_simulationReaderReleaseReady, "simulation.readerReleaseReady" );
+    config( m_simulationPipelineBackend, "simulation.pipelineBackend" );
+    config( m_simulationVirtualReaderUs, "simulation.virtualReaderUs" );
+    config( m_simulationBackendUs, "simulation.backendUs" );
+    config( m_simulationPrepareUs, "simulation.prepareUs" );
+    config( m_simulationSdkServiceUs, "simulation.sdkServiceUs" );
+    config( m_simulationPostUs, "simulation.postUs" );
+    config( m_simulationWindow, "simulation.window" );
+    config( m_simulationCadenceWindowSec, "simulation.cadenceWindowSec" );
+    config( m_simulationCadenceUpdateSec, "simulation.cadenceUpdateSec" );
+    config( m_simulationPhaseGain, "simulation.phaseGain" );
+    config( m_simulationPhaseSlewUs, "simulation.phaseSlewUs" );
+
+    if( ( m_simulationReaderReleaseReady && ( !m_simulationEnabled || readerReleaseMonitorT::m_shmimName.empty() ) ) ||
+        ( m_simulationPipelineBackend && ( !m_simulationEnabled || !m_simulationReaderReleaseReady ) ) ||
+        !finite( m_simulationVirtualReaderUs ) || m_simulationVirtualReaderUs <= 0 ||
+        m_simulationVirtualReaderUs > 1000000 || !finite( m_simulationBackendUs ) || m_simulationBackendUs <= 0 ||
+        m_simulationBackendUs > 1000000 || !finite( m_simulationPrepareUs ) || m_simulationPrepareUs <= 0 ||
+        m_simulationPrepareUs > 1000000 || !finite( m_simulationSdkServiceUs ) || m_simulationSdkServiceUs <= 0 ||
+        m_simulationSdkServiceUs > 1000000 || !finite( m_simulationPostUs ) || m_simulationPostUs <= 0 ||
+        m_simulationPostUs > 1000000 ||
+        ( m_simulationEnabled && ( m_diagnosticsOnly || !m_combinerDiagnostics || m_primaryCadenceWindow <= 0 ) ) ||
+        m_simulationWindow < 4 || m_simulationWindow > 256 || !finite( m_simulationPhaseGain ) ||
+        m_simulationPhaseGain <= 0 || m_simulationPhaseGain > 1 || !finite( m_simulationPhaseSlewUs ) ||
+        m_simulationPhaseSlewUs < 0 || m_simulationPhaseSlewUs > 1000000 || !finite( m_simulationCadenceWindowSec ) ||
+        !finite( m_simulationCadenceUpdateSec ) || m_simulationCadenceUpdateSec < 0.01 ||
+        m_simulationCadenceUpdateSec > 60 || m_simulationCadenceWindowSec < m_simulationCadenceUpdateSec ||
+        m_simulationCadenceWindowSec > 1000 ||
+        m_simulationCadenceWindowSec >
+            ( MagAOX::dmSyncoSimulation::cadenceAnchorCapacity - 1 ) * m_simulationCadenceUpdateSec )
+    {
+        return -1;
+    }
+
+    if( zeroEngine() && finite( m_zeroPublicationAdvanceUs ) && m_zeroPublicationAdvanceUs != 0 )
+    {
+        log<software_error>( { "zeroTest.publicationAdvanceUs must be0 for the counter-publication target; use "
+                               "commitLeadUs only for measured guard-to-counter cost" } );
+        return -1;
+    }
+
+    if( m_zeroTestEnabled &&
+        ( m_simulationEnabled || m_diagnosticsOnly || m_requested < 2 || m_requested > 4 || m_zeroEventStride < 1 ||
+          m_zeroEventStride > 1024 || !finite( m_zeroDurationSec ) || m_zeroDurationSec <= 0 ||
+          m_zeroDurationSec > 120 || !finite( m_zeroLateUs ) || m_zeroLateUs < 0 || m_zeroLateUs > 50 ||
+          !finite( m_zeroPublicationAdvanceUs ) || m_zeroPublicationAdvanceUs != 0 || !finite( m_zeroCommitLeadUs ) ||
+          m_zeroCommitLeadUs < 0 || m_zeroCommitLeadUs > 10 || !finite( m_zeroWakeAheadUs ) || m_zeroWakeAheadUs < 0 ||
+          m_zeroWakeAheadUs > 50 || ( m_zeroWakeAheadUs > 0 && std::llround( m_zeroWakeAheadUs * 1000 ) <= 0 ) ||
+          readerReleaseMonitorT::m_shmimName.empty() || !m_combinerDiagnostics || m_primaryCadenceWindow <= 0 ||
+          m_zeroTestChannel.size() != 10 || m_zeroTestChannel.substr( 0, 8 ) != m_combinedName ||
+          m_zeroTestChannel.find_first_not_of( "0123456789", 8 ) != std::string::npos ||
+          m_zeroTestChannel == shmimMonitorT::m_shmimName ||
+          ( !m_zeroSdkStream.empty() && m_zeroSdkStream.find_first_of( "/\\ \t\n" ) != std::string::npos ) ) )
+    {
+        return -1;
+    }
+
+    if( m_productionEnabled )
+    {
+        m_zeroLateUs       = 6;
+        m_zeroWakeAheadUs  = 10;
+        m_zeroCommitLeadUs = m_zeroPublicationAdvanceUs = 0;
+        config( m_zeroLateUs, "production.lateUs" );
+        config( m_zeroWakeAheadUs, "production.wakeAheadUs" );
+        m_zeroTestChannel = m_destinations.empty() ? std::string{} : m_destinations.front();
+        if( m_zeroTestEnabled || m_simulationEnabled || m_diagnosticsOnly || m_requested < 1 || m_requested > 4 ||
+            readerReleaseMonitorT::m_shmimName.empty() || !m_combinerDiagnostics || m_primaryCadenceWindow <= 0 ||
+            !finite( m_productionReadyLeadUs ) || !finite( m_productionStep0LeadUs ) || m_productionStep0LeadUs <= 0 ||
+            m_productionStep0LeadUs >= m_productionReadyLeadUs || m_productionReadyLeadUs >= 100 ||
+            !finite( m_zeroLateUs ) || m_zeroLateUs < 0 || m_zeroLateUs > 50 || !finite( m_zeroWakeAheadUs ) ||
+            m_zeroWakeAheadUs <= 0 || m_zeroWakeAheadUs >= m_productionReadyLeadUs )
+        {
+            return -1;
+        }
+    }
+
+    if( m_diagnosticsOnly )
+    {
+        m_combinerDiagnostics = false;
+    }
+
+    int64_t cadenceEvents = m_primaryCadenceMaxEvents;
+    config( cadenceEvents, "diagnostics.maxEvents" );
+
+    if( !finite( m_primaryCadenceWindow ) || m_primaryCadenceWindow < 0 || m_primaryCadenceWindow >= 9e9 ||
+        !finite( m_primaryExcursionUs ) || m_primaryExcursionUs < 0 || m_primaryExcursionUs > 1000000 ||
+        cadenceEvents < 0 || uint64_t( cadenceEvents ) > std::numeric_limits<size_t>::max() )
+    {
+        return -1;
+    }
+
+    m_primaryCadenceMaxEvents = size_t( cadenceEvents );
+
+    if( ( !completionMonitorT::m_shmimName.empty() || !readerReleaseMonitorT::m_shmimName.empty() ) &&
+        !m_simulationEnabled && !zeroEngine() )
+    {
+        return -1;
+    }
+
+    if( ( m_simulationEnabled || zeroEngine() ) && m_primaryCadenceMaxEvents == 0 )
+    {
+        return -1;
+    }
+
+    const std::pair<const char *, int64_t synco::Bounds::*> bounds[] = {
+        { "scheduler.keepoutUs", &synco::Bounds::keepout },
+        { "scheduler.guardUs", &synco::Bounds::guard },
+        { "scheduler.deliveryUs", &synco::Bounds::delivery },
+        { "scheduler.step0LeadUs", &synco::Bounds::lead },
+        { "scheduler.snapshotBudgetUs", &synco::Bounds::snapshot },
+        { "scheduler.copyBudgetUs", &synco::Bounds::copy },
+        { "scheduler.visibilityUs", &synco::Bounds::visibility },
+        { "scheduler.preparationReserveUs", &synco::Bounds::reserve },
+        { "tracking.earlyMainUs", &synco::Bounds::early },
+        { "tracking.observationLagUs", &synco::Bounds::observation } };
+    for( const auto &entry : bounds )
+    {
+        double value = double( m_bounds.*entry.second ) / 1000;
+        config( value, entry.first );
+        if( !finite( value ) || value < 0 || value > 1000000 )
+        {
+            return -1;
+        }
+        m_bounds.*entry.second = int64_t( std::ceil( value * 1000 ) );
+    }
+
+    if( m_simulationPipelineBackend && int64_t( std::ceil( m_simulationVirtualReaderUs * 1000 ) ) <
+                                           m_bounds.delivery + int64_t( std::ceil( m_simulationPrepareUs * 1000 ) ) )
+    {
+        return -1;
+    }
+
+    if( m_timingName.empty() )
+    {
+        m_timingName = configName() + "_timing";
+    }
+    if( m_combinedName.size() != 8 || m_combinedName.substr( 0, 2 ) != "dm" || m_combinedName.substr( 4 ) != "disp" ||
+        m_combinedName.find_first_not_of( "0123456789", 2 ) != 4 ||
+        ( m_timingName.size() >= 8 && m_timingName.substr( 0, 2 ) == "dm" && m_timingName.substr( 4, 4 ) == "disp" ) )
+    {
+        return -1;
+    }
+    if( m_requested < 1 || m_requested > synco::maxSteps || m_destinations.empty() || m_destinations.size() > 32 ||
+        !finite( m_maxCadence ) || m_maxCadence <= 0 || !finite( m_nominalRate ) || !finite( m_minRate ) ||
+        !finite( m_maxRate ) || m_minRate < 1 || m_maxRate > 100000 || m_minRate > m_nominalRate ||
+        m_nominalRate > m_maxRate || !finite( m_rateTolerance ) || m_rateTolerance < 0 || m_rateTolerance > 1 ||
+        !finite( m_gain ) || m_gain < 0 || m_gain > 1 || !finite( m_maxAdvanceUs ) || m_maxAdvanceUs < 0 ||
+        m_maxAdvanceUs > 1000 || !finite( m_outputTimeoutUs ) || m_outputTimeoutUs <= 0 ||
+        m_outputTimeoutUs > 1000000 || !m_lockFrames || !m_failureLimit || !m_rateFrames || m_primarySemaphore < 0 ||
+        m_primarySemaphore == 9 || m_primarySemaphore >= SEMAPHORE_MAXVAL || m_bounds.copy == 0 ||
+        m_bounds.snapshot == 0 || m_bounds.visibility == 0 || m_bounds.reserve == 0 ||
+        ( !m_cameraDevice.empty() && ( m_cameraProperty.empty() || m_cameraElement.empty() ) ) ||
+        ( m_cameraDiagnostics && ( cameraMonitorT::m_shmimName.empty() ||
+                                   cameraMonitorT::m_shmimName.find_first_of( "/\\ \t\n" ) != std::string::npos ) ) )
+    {
+        return -1;
+    }
+    std::vector<std::string> names{ shmimMonitorT::m_shmimName, m_combinedName, m_timingName };
+
+    if( !completionMonitorT::m_shmimName.empty() )
+    {
+        names.push_back( completionMonitorT::m_shmimName );
+    }
+
+    if( !readerReleaseMonitorT::m_shmimName.empty() )
+    {
+        names.push_back( readerReleaseMonitorT::m_shmimName );
+    }
+    for( const auto &name : m_destinations )
+    {
+        if( name.size() != 10 || name.substr( 0, 2 ) != "dm" || name.substr( 4, 4 ) != "disp" ||
+            name.substr( 0, 8 ) != m_combinedName || name.find_first_not_of( "0123456789", 2 ) != 4 ||
+            name.find_first_not_of( "0123456789", 8 ) != std::string::npos )
+        {
+            return -1;
+        }
+        names.push_back( name );
+        names.push_back( name + "_aux" );
+    }
+    for( const auto &name : names )
+    {
+        if( name.empty() || name.find_first_of( "/\\ \t\n" ) != std::string::npos )
+        {
+            return -1;
+        }
+    }
+    std::sort( names.begin(), names.end() );
+    if( std::adjacent_find( names.begin(), names.end() ) != names.end() )
+    {
+        return -1;
+    }
+    m_period = int64_t( 1e9 / m_nominalRate );
+    shmimMonitorT::m_semaphoreNumber =
+        ( m_diagnosticsOnly || m_simulationEnabled || zeroEngine() ) ? -1 : m_primarySemaphore;
+    combinerMonitorT::m_shmimName             = m_combinedName;
+    combinerMonitorT::m_getExistingFirst      = false;
+    cameraMonitorT::m_getExistingFirst        = false;
+    completionMonitorT::m_getExistingFirst    = false;
+    readerReleaseMonitorT::m_getExistingFirst = false;
+    m_reason = m_simulationEnabled ? "simulation warming" : ( m_diagnosticsOnly ? "diagnostics only" : "disabled" );
+
+    if( ( m_simulationEnabled && !configureSimulation() ) || ( zeroEngine() && !configureZeroTest() ) )
+    {
+        return -1;
+    }
+
+    return 0;
+}
+
+inline void dmSyncopation::loadConfig()
+{
+    if( loadConfigImpl( config ) < 0 )
+    {
+        log<software_critical>( { __FILE__, __LINE__, "Invalid syncopation configuration" } );
+        m_shutdown = true;
+    }
+}
+
+inline ino_t dmSyncopation::inode( const std::string &name )
+{
+    char filename[PATH_MAX];
+    ImageStreamIO_filename( filename, sizeof( filename ), name.c_str() );
+    struct stat info{};
+    return stat( filename, &info ) == 0 ? info.st_ino : 0;
+}
+
+inline bool dmSyncopation::configureSimulation( double seedRate )
+{
+    const double rate =
+        seedRate > 0 ? seedRate : ( m_simulationReferenceFps > 0 ? m_simulationReferenceFps : m_nominalRate );
+    synco::Simulation::Config settings;
+    settings.bounds               = m_bounds;
+    settings.steps                = m_requested;
+    settings.readerReleaseReady   = m_simulationReaderReleaseReady;
+    settings.pipelineBackend      = m_simulationPipelineBackend;
+    settings.virtualReaderNs      = int64_t( std::ceil( m_simulationVirtualReaderUs * 1000 ) );
+    settings.backendNs            = int64_t( std::ceil( m_simulationBackendUs * 1000 ) );
+    settings.pipelinePrepareNs    = int64_t( std::ceil( m_simulationPrepareUs * 1000 ) );
+    settings.pipelineSdkServiceNs = int64_t( std::ceil( m_simulationSdkServiceUs * 1000 ) );
+    settings.pipelinePostNs       = int64_t( std::ceil( m_simulationPostUs * 1000 ) );
+    settings.window               = m_simulationWindow;
+    settings.nominalPeriod        = int64_t( std::llround( 1e9 / rate ) );
+    settings.cadenceWindowNs      = int64_t( std::llround( m_simulationCadenceWindowSec * 1e9 ) );
+    settings.cadenceUpdateNs      = int64_t( std::llround( m_simulationCadenceUpdateSec * 1e9 ) );
+    settings.minInterval          = int64_t( 1e9 / m_maxRate );
+    settings.maxInterval          = int64_t( std::ceil( 1e9 / m_minRate ) );
+    settings.phaseGain            = m_simulationPhaseGain;
+    settings.phaseSlew            = int64_t( std::ceil( m_simulationPhaseSlewUs * 1000 ) );
+    settings.timeout              = int64_t( std::ceil( 2e9 / m_minRate ) );
+    const double cadenceMinimum   = std::ceil( m_requested * 1e9 / ( m_maxCadence * ( 1 + m_rateTolerance ) ) );
+
+    if( !finite( cadenceMinimum ) || cadenceMinimum > 1e12 )
+    {
+        return false;
+    }
+
+    settings.cadenceMinPeriod = int64_t( cadenceMinimum );
+
+    if( !m_simulation.configure( settings ) )
+    {
+        return false;
+    }
+
+    m_simulationReleaseEpoch.fetch_add( 1, std::memory_order_acq_rel );
+
+    m_simulationPublication         = 0;
+    m_simulationCounter             = 0;
+    m_simulationCombinedPublication = m_simulationCombinedStart = m_simulationCombinedUpdate = 0;
+    m_simulationCombinedCounter                                                              = 0;
+    return true;
+}
+
+inline void dmSyncopation::updateSimulationCadence()
+{
+    const auto &report = m_cameraReport;
+    const auto  now    = m_now();
+
+    if( !m_simulationEnabled || report.m_received <= m_simulationCameraTime || report.m_received > now ||
+        now - report.m_received >= 5000000000LL || !finite( report.m_fps ) || report.m_fps < m_minRate ||
+        report.m_fps > m_maxRate )
+    {
+        return;
+    }
+
+    const double reference = m_simulationReferenceFps > 0 ? m_simulationReferenceFps : m_nominalRate;
+
+    if( std::abs( report.m_fps - reference ) > reference * m_rateTolerance )
+    {
+        if( !configureSimulation( report.m_fps ) )
+        {
+            return;
+        }
+
+        m_simulationReferenceFps = report.m_fps;
+    }
+    else if( m_simulationReferenceFps == 0 )
+    {
+        m_simulationReferenceFps = report.m_fps;
+    }
+
+    m_simulationCameraTime = report.m_received;
+}
+
+inline void dmSyncopation::readSimulationPrimary( int64_t callbackNs, int64_t receiptNs )
+{
+    MagAOX::dmSyncoSimulation::Observation context;
+    context.callbackNs    = callbackNs;
+    context.receiptNs     = receiptNs > 0 ? receiptNs : 0;
+    context.lockRequestNs = m_now();
+    std::lock_guard<std::mutex> lock( m_cycleMutex );
+    context.lockAcquiredNs = m_now();
+    drainSimulationRelease( context.lockAcquiredNs );
+    const volatile auto *metadata = shmimMonitorT::m_imageStream.md;
+
+    if( !metadata || metadata->write != 0 )
+    {
+        m_readerTiming.primary( {}, false );
+        m_readerReleaseTiming.primary( {}, false );
+        m_simulation.primary( 0, -1 );
+        return;
+    }
+
+    const uint64_t counter = metadata->cnt0;
+    const timespec stamp{ metadata->writetime.tv_sec, metadata->writetime.tv_nsec };
+    context.streamInode    = metadata->inode;
+    const int64_t observed = m_now();
+    std::atomic_thread_fence( std::memory_order_acquire );
+
+    if( metadata->write != 0 || metadata->cnt0 != counter || metadata->writetime.tv_sec != stamp.tv_sec ||
+        metadata->writetime.tv_nsec != stamp.tv_nsec )
+    {
+        m_readerTiming.primary( {}, false );
+        m_readerReleaseTiming.primary( {}, false );
+        m_simulation.primary( counter, -1 );
+        return;
+    }
+
+    const int64_t published      = simulationTimestamp( stamp );
+    const bool    sequential     = m_simulationCounter != UINT64_MAX && counter == m_simulationCounter + 1;
+    const int64_t interval       = sequential && published > m_simulationPublication && m_simulationPublication > 0
+                                       ? published - m_simulationPublication
+                                       : 0;
+    context.publicationNs        = published;
+    context.primaryPublicationNs = published;
+    m_readerTiming.primary( { { context.streamInode, counter, stamp.tv_sec, stamp.tv_nsec }, observed } );
+    m_readerReleaseTiming.primary( { { context.streamInode, counter, stamp.tv_sec, stamp.tv_nsec }, observed } );
+    m_simulation.primary( counter, observed, interval, context );
+
+    if( m_simulationPublication == 0 || counter != m_simulationCounter )
+    {
+        m_simulationPublication = published;
+        m_simulationCounter     = counter;
+    }
+}
+
+inline void dmSyncopation::resetSimulation()
+{
+    m_simulation.reset();
+    m_simulationReleaseEpoch.fetch_add( 1, std::memory_order_acq_rel );
+    m_simulationPublication         = 0;
+    m_simulationCounter             = 0;
+    m_simulationCombinedPublication = m_simulationCombinedStart = m_simulationCombinedUpdate = 0;
+    m_simulationCombinedCounter                                                              = 0;
+}
+
+inline void dmSyncopation::drainSimulationRelease( int64_t now )
+{
+    if( !m_simulationReaderReleaseReady )
+    {
+        return;
+    }
+
+    const auto synchronize = [this]()
+    {
+        const auto dropped = m_simulationReleaseQueue.dropped();
+
+        if( dropped != m_simulationReleaseSeenDrops )
+        {
+            m_simulation.releaseDrop( dropped - m_simulationReleaseSeenDrops );
+            m_simulationReleaseSeenDrops = dropped;
+            m_simulationReleaseEpoch.fetch_add( 1, std::memory_order_acq_rel );
+        }
+
+        const auto epoch = m_simulationReleaseEpoch.load( std::memory_order_acquire );
+
+        if( epoch != m_simulationReleaseSeenEpoch )
+        {
+            m_simulation.resetRelease();
+            m_simulationReleaseSeenEpoch   = epoch;
+            m_simulationReleaseHavePending = false;
+        }
+    };
+
+    synchronize();
+    const auto available = std::min( m_simulationReleaseQueue.queued() + size_t( m_simulationReleaseHavePending ),
+                                     MagAOX::dmSyncoSimulation::readinessDrainCapacity );
+    size_t     handled   = 0;
+
+    while( handled < available )
+    {
+        if( !m_simulationReleaseHavePending )
+        {
+            if( !m_simulationReleaseQueue.pop( m_simulationReleasePending ) )
+            {
+                break;
+            }
+
+            m_simulationReleaseHavePending = true;
+        }
+
+        if( m_simulationReleasePending.sourceEpoch != m_simulationReleaseSeenEpoch )
+        {
+            ++handled;
+            m_simulationReleaseHavePending = false;
+            continue;
+        }
+
+        if( m_simulationReleasePending.observedNs > now )
+        {
+            break;
+        }
+
+        ++handled;
+        m_simulation.release( m_simulationReleasePending );
+        m_simulationReleaseHavePending = false;
+    }
+
+    // A reset/loss racing this bounded drain must revoke even evidence already consumed above.
+    synchronize();
+}
+
+inline void dmSyncopation::readSimulationCombined( int64_t callbackNs, int64_t receiptNs )
+{
+    MagAOX::dmSyncoSimulation::Observation context;
+    context.callbackNs    = callbackNs;
+    context.receiptNs     = receiptNs > 0 ? receiptNs : 0;
+    context.lockRequestNs = m_now();
+    std::lock_guard<std::mutex> lock( m_cycleMutex );
+    context.lockAcquiredNs = m_now();
+    drainSimulationRelease( context.lockAcquiredNs );
+    const auto          &image    = combinerMonitorT::m_imageStream;
+    const volatile auto *metadata = image.md;
+
+    if( !metadata || metadata->write != 0 )
+    {
+        m_readerTiming.combined( {}, false );
+        m_readerReleaseTiming.combined( {}, false );
+        m_simulation.combined( 0, 0, m_now(), false );
+        return;
+    }
+
+    const uint64_t counter    = metadata->cnt0;
+    context.streamInode       = metadata->inode;
+    const auto           rows = metadata->NBproctrace;
+    const timespec       published{ metadata->writetime.tv_sec, metadata->writetime.tv_nsec };
+    const volatile auto *trace    = image.streamproctrace;
+    const bool           present  = trace && rows > 0;
+    const ino_t          expected = m_primaryTraceInode.load( std::memory_order_acquire );
+    const auto           input    = present ? trace[0].trigger_inode : 0;
+    const uint64_t       primary  = present ? trace[0].cnt0 : 0;
+    const auto           pid      = present ? trace[0].procwrite_PID : 0;
+    const timespec start{ present ? trace[0].ts_procstart.tv_sec : 0, present ? trace[0].ts_procstart.tv_nsec : 0 };
+    const timespec update{ present ? trace[0].ts_streamupdate.tv_sec : 0,
+                           present ? trace[0].ts_streamupdate.tv_nsec : 0 };
+    const int64_t observed = m_now();
+    std::atomic_thread_fence( std::memory_order_acquire );
+    bool coherent =
+        metadata->write == 0 && metadata->cnt0 == counter && metadata->NBproctrace == rows &&
+        metadata->writetime.tv_sec == published.tv_sec && metadata->writetime.tv_nsec == published.tv_nsec && present &&
+        expected != 0 && input == expected && pid > 0 && trace[0].trigger_inode == input && trace[0].cnt0 == primary &&
+        trace[0].procwrite_PID == pid && trace[0].ts_procstart.tv_sec == start.tv_sec &&
+        trace[0].ts_procstart.tv_nsec == start.tv_nsec && trace[0].ts_streamupdate.tv_sec == update.tv_sec &&
+        trace[0].ts_streamupdate.tv_nsec == update.tv_nsec;
+
+    const int64_t publicationNs = simulationTimestamp( published );
+    const int64_t startNs       = simulationTimestamp( start );
+    const int64_t updateNs      = simulationTimestamp( update );
+    const bool    repeated      = m_simulationCombinedPublication > 0 && counter == m_simulationCombinedCounter;
+    coherent                    = coherent && startNs > 0 && updateNs >= startNs && publicationNs >= updateNs &&
+               publicationNs - startNs <= int64_t( 2e9 / m_minRate ) &&
+               ( m_simulationCombinedPublication == 0 || repeated ||
+                 ( publicationNs > m_simulationCombinedPublication && startNs > m_simulationCombinedStart &&
+                   updateNs > m_simulationCombinedUpdate ) ) &&
+               ( primary != m_simulationCounter || m_simulationPublication == 0 || startNs >= m_simulationPublication );
+    context.triggerInode         = input;
+    context.publicationNs        = publicationNs;
+    context.primaryPublicationNs = primary == m_simulationCounter ? m_simulationPublication : 0;
+    context.startNs              = startNs;
+    context.updateNs             = updateNs;
+    m_readerTiming.combined( { { context.streamInode, counter, published.tv_sec, published.tv_nsec },
+                               uint64_t( input ),
+                               primary,
+                               startNs,
+                               observed,
+                               m_bounds.delivery + m_bounds.keepout + m_bounds.guard },
+                             coherent );
+    m_readerReleaseTiming.combined( { { context.streamInode, counter, published.tv_sec, published.tv_nsec },
+                                      uint64_t( input ),
+                                      primary,
+                                      startNs,
+                                      observed,
+                                      m_bounds.delivery + m_bounds.keepout + m_bounds.guard },
+                                    coherent );
+    m_simulation.combined( counter, primary, observed, coherent, context );
+
+    if( coherent && !repeated )
+    {
+        m_simulationCombinedPublication = publicationNs;
+        m_simulationCombinedStart       = startNs;
+        m_simulationCombinedUpdate      = updateNs;
+        m_simulationCombinedCounter     = counter;
+    }
+}
+
+inline int64_t dmSyncopation::simulationTimestamp( const timespec &stamp )
+{
+    if( stamp.tv_sec < 0 || stamp.tv_nsec < 0 || stamp.tv_nsec >= 1000000000 ||
+        stamp.tv_sec > ( INT64_MAX - stamp.tv_nsec ) / 1000000000 )
+    {
+        return 0;
+    }
+
+    return int64_t( stamp.tv_sec ) * 1000000000 + stamp.tv_nsec;
+}
+
+inline int dmSyncopation::setupSimulationINDI()
+{
+    if( !m_simulationEnabled )
+    {
+        return 0;
+    }
+
+    REG_INDI_NEWPROP_NOCB( m_indiP_simulation, "simulation", pcf::IndiProperty::Number );
+    m_indiP_simulation.setPerm( pcf::IndiProperty::ReadOnly );
+
+    for( const auto *name :
+         { "enabled",      "valid",      "feasible",     "session",        "sequence",    "periodUs",
+           "gridNs",       "phaseUs",    "phaseMinUs",   "phaseMaxUs",     "phaseCount",  "periodSamples",
+           "phaseSamples", "nextGridNs", "nextActiveNs", "earlyReserveUs", "duplicates",  "gaps",
+           "resets",       "invalid",    "excluded",     "outputGaps",     "associations" } )
+    {
+        m_indiP_simulation.add( pcf::IndiElement( name ) );
+    }
+
+    REG_INDI_NEWPROP_NOCB( m_indiP_simulationCadence, "simulation_cadence", pcf::IndiProperty::Number );
+    m_indiP_simulationCadence.setPerm( pcf::IndiProperty::ReadOnly );
+
+    for( const auto *name : { "state",
+                              "epoch",
+                              "periodNs",
+                              "spanSec",
+                              "cycles",
+                              "anchors",
+                              "updates",
+                              "rejected",
+                              "windowSec",
+                              "updateSec",
+                              "observationAgeSec",
+                              "refreshAgeSec" } )
+    {
+        m_indiP_simulationCadence.add( pcf::IndiElement( name ) );
+    }
+
+    REG_INDI_NEWPROP_NOCB( m_indiP_simulationSteps, "simulation_steps", pcf::IndiProperty::Number );
+    m_indiP_simulationSteps.setPerm( pcf::IndiProperty::ReadOnly );
+
+    for( int step = 0; step < synco::maxSteps; ++step )
+    {
+        for( const auto *suffix : { "Considered", "WouldRun", "Skipped", "Overlap" } )
+        {
+            m_indiP_simulationSteps.add( pcf::IndiElement( "step" + std::to_string( step ) + suffix ) );
+        }
+
+        if( m_simulationReaderReleaseReady )
+        {
+            for( const auto *suffix : { "ReleaseMissing", "ReleaseLate", "BackendBusy", "BackendWrap" } )
+            {
+                m_indiP_simulationSteps.add( pcf::IndiElement( "step" + std::to_string( step ) + suffix ) );
+            }
+        }
+
+        if( m_simulationPipelineBackend )
+        {
+            for( const auto *suffix : { "PreparationBusy", "CreditFull" } )
+            {
+                const auto name = "step" + std::to_string( step ) + suffix;
+                m_indiP_simulationSteps.add( pcf::IndiElement( name ) );
+                m_indiP_simulationSteps[name].setMin( 0 );
+                m_indiP_simulationSteps[name].setMax( std::numeric_limits<double>::max() );
+                m_indiP_simulationSteps[name].setStep( 1 );
+                m_indiP_simulationSteps[name].setFormat( "%g" );
+                m_indiP_simulationSteps[name] = 0.0;
+            }
+        }
+    }
+
+    if( m_simulationPipelineBackend )
+    {
+        REG_INDI_NEWPROP_NOCB( m_indiP_simulationPipeline, "simulation_pipeline", pcf::IndiProperty::Number );
+        m_indiP_simulationPipeline.setPerm( pcf::IndiProperty::ReadOnly );
+        m_indiP_simulationPipeline.setState( pcf::IndiProperty::Idle );
+
+        for( const auto *name : { "enabled",
+                                  "deliveryUs",
+                                  "prepareUs",
+                                  "readerUs",
+                                  "sdkServiceUs",
+                                  "postUs",
+                                  "capacity",
+                                  "inFlight",
+                                  "maximumInFlight",
+                                  "mainAdmitted",
+                                  "auxiliaryAdmitted",
+                                  "retired",
+                                  "discarded",
+                                  "mainSdkWaits",
+                                  "mainCreditMisses",
+                                  "resets",
+                                  "sdkReadyNs",
+                                  "postReadyNs",
+                                  "maxMainWaitUs",
+                                  "mainClearanceShortfallUs",
+                                  "sdkCycleFeasible",
+                                  "postCycleFeasible",
+                                  "creditCycleFeasible",
+                                  "mainProtectionFeasible" } )
+        {
+            m_indiP_simulationPipeline.add( pcf::IndiElement( name ) );
+            m_indiP_simulationPipeline[name].setMin( 0 );
+            m_indiP_simulationPipeline[name].setMax( std::numeric_limits<double>::max() );
+            m_indiP_simulationPipeline[name].setStep( 0 );
+            m_indiP_simulationPipeline[name].setFormat( "%g" );
+            m_indiP_simulationPipeline[name] = 0.0;
+        }
+
+        m_indiP_simulationPipeline["enabled"]      = 1.0;
+        m_indiP_simulationPipeline["deliveryUs"]   = m_bounds.delivery / 1000.0;
+        m_indiP_simulationPipeline["prepareUs"]    = m_simulationPrepareUs;
+        m_indiP_simulationPipeline["readerUs"]     = m_simulationVirtualReaderUs;
+        m_indiP_simulationPipeline["sdkServiceUs"] = m_simulationSdkServiceUs;
+        m_indiP_simulationPipeline["postUs"]       = m_simulationPostUs;
+        m_indiP_simulationPipeline["capacity"]     = 3.0;
+    }
+
+    if( m_simulationReaderReleaseReady )
+    {
+        REG_INDI_NEWPROP_NOCB( m_indiP_simulationReadiness, "simulation_readiness", pcf::IndiProperty::Number );
+        m_indiP_simulationReadiness.setPerm( pcf::IndiProperty::ReadOnly );
+
+        for( const auto *name :
+             { "enabled",        "virtualReaderUs", "backendUs",        "readerCycleFeasible", "backendCycleFeasible",
+               "observed",       "qualified",       "invalid",          "incoherent",          "duplicates",
+               "gaps",           "sourceResets",    "identityMismatch", "sdkFailed",           "queueDrops",
+               "queued",         "sourceEpoch",     "releaseSession",   "releaseEpoch",        "releaseSequence",
+               "releaseCounter", "releaseAgeSec" } )
+        {
+            m_indiP_simulationReadiness.add( pcf::IndiElement( name ) );
+        }
+    }
+
+    REG_INDI_NEWPROP_NOCB( m_indiP_simulationStatus, "simulation_status", pcf::IndiProperty::Text );
+    m_indiP_simulationStatus.setPerm( pcf::IndiProperty::ReadOnly );
+    m_indiP_simulationStatus.add( pcf::IndiElement( "state" ) );
+    m_indiP_simulationStatus.add( pcf::IndiElement( "policy" ) );
+
+    REG_INDI_NEWPROP_NOCB( m_indiP_simulationTrace, "simulation_trace", pcf::IndiProperty::Number );
+    m_indiP_simulationTrace.setPerm( pcf::IndiProperty::ReadOnly );
+
+    for( const auto *name : { "enabled", "detected", "drained", "dropped", "queued", "capacity", "logFailed" } )
+    {
+        m_indiP_simulationTrace.add( pcf::IndiElement( name ) );
+    }
+
+    REG_INDI_NEWPROP_NOCB( m_indiP_simulationMainWait, "simulation_main_wait_trace", pcf::IndiProperty::Number );
+    m_indiP_simulationMainWait.setPerm( pcf::IndiProperty::ReadOnly );
+    m_indiP_simulationMainWait.setState( pcf::IndiProperty::Idle );
+    m_simulationMainWaitStatus = m_simulation.mainWaitStatus();
+
+    for( const auto *name : { "enabled", "detected", "drained", "dropped", "queued", "capacity", "logFailed" } )
+    {
+        m_indiP_simulationMainWait.add( pcf::IndiElement( name ) );
+    }
+
+    REG_INDI_NEWPROP_NOCB( m_indiP_simulationEstimator, "simulation_estimator", pcf::IndiProperty::Number );
+    m_indiP_simulationEstimator.setPerm( pcf::IndiProperty::ReadOnly );
+
+    for( const auto *name : { "enabled",
+                              "observed",
+                              "triggers",
+                              "selected",
+                              "drained",
+                              "dropped",
+                              "queued",
+                              "capacity",
+                              "logFailed",
+                              "history",
+                              "historyCapacity",
+                              "postRemaining" } )
+    {
+        m_indiP_simulationEstimator.add( pcf::IndiElement( name ) );
+    }
+
+    return 0;
+}
+
+inline void dmSyncopation::updateSimulationINDI()
+{
+    if( !m_simulationEnabled )
+    {
+        return;
+    }
+
+    const auto &s     = m_simulationSnapshot;
+    const auto  state = s.valid && s.feasible ? INDI_OK : INDI_IDLE;
+    updateIfChanged( m_indiP_simulation,
+                     std::vector<std::string>{
+                         "enabled",      "valid",      "feasible",     "session",        "sequence",    "periodUs",
+                         "gridNs",       "phaseUs",    "phaseMinUs",   "phaseMaxUs",     "phaseCount",  "periodSamples",
+                         "phaseSamples", "nextGridNs", "nextActiveNs", "earlyReserveUs", "duplicates",  "gaps",
+                         "resets",       "invalid",    "excluded",     "outputGaps",     "associations" },
+                     std::vector<double>{ 1,
+                                          s.valid ? 1.0 : 0.0,
+                                          s.feasible ? 1.0 : 0.0,
+                                          double( s.session ),
+                                          double( s.sequence ),
+                                          ( s.cadence.periodQ32
+                                                ? double( s.cadence.periodQ32 ) / MagAOX::dmSyncoSimulation::periodScale
+                                                : double( s.periodNs ) ) /
+                                              1000.0,
+                                          double( s.gridNs ),
+                                          s.phaseNs / 1000.0,
+                                          s.phaseMinNs / 1000.0,
+                                          s.phaseMaxNs / 1000.0,
+                                          double( s.phaseCount ),
+                                          double( s.periodSamples ),
+                                          double( s.phaseSamples ),
+                                          double( s.nextGridNs ),
+                                          double( s.nextActiveNs ),
+                                          s.earlyReserveNs / 1000.0,
+                                          double( s.duplicates ),
+                                          double( s.gaps ),
+                                          double( s.resets ),
+                                          double( s.invalid ),
+                                          double( s.excluded ),
+                                          double( s.outputGaps ),
+                                          double( s.associations ) },
+                     state );
+    const auto &cadence = s.cadence;
+    updateIfChanged( m_indiP_simulationCadence,
+                     std::vector<std::string>{ "state",
+                                               "epoch",
+                                               "periodNs",
+                                               "spanSec",
+                                               "cycles",
+                                               "anchors",
+                                               "updates",
+                                               "rejected",
+                                               "windowSec",
+                                               "updateSec",
+                                               "observationAgeSec",
+                                               "refreshAgeSec" },
+                     std::vector<double>{ double( cadence.state ),
+                                          double( cadence.epoch ),
+                                          double( cadence.periodQ32 ) / MagAOX::dmSyncoSimulation::periodScale,
+                                          cadence.spanNs / 1e9,
+                                          double( cadence.cycles ),
+                                          double( cadence.anchors ),
+                                          double( cadence.updates ),
+                                          double( cadence.rejected ),
+                                          cadence.windowNs / 1e9,
+                                          cadence.updateNs / 1e9,
+                                          cadence.observationNs > 0 ? ( s.nowNs - cadence.observationNs ) / 1e9 : -1,
+                                          cadence.updatedNs > 0 ? ( s.nowNs - cadence.updatedNs ) / 1e9 : -1 },
+                     state );
+    std::vector<std::string> names;
+    std::vector<double>      values;
+
+    for( size_t step = 0; step < s.outcomes.size(); ++step )
+    {
+        const auto &outcome = s.outcomes[step];
+
+        for( const auto *suffix : { "Considered", "WouldRun", "Skipped", "Overlap" } )
+        {
+            names.push_back( "step" + std::to_string( step ) + suffix );
+        }
+
+        values.insert( values.end(),
+                       { double( outcome.considered ),
+                         double( outcome.wouldRun ),
+                         double( outcome.skipped ),
+                         double( outcome.overlap ) } );
+
+        if( m_simulationReaderReleaseReady )
+        {
+            for( const auto *suffix : { "ReleaseMissing", "ReleaseLate", "BackendBusy", "BackendWrap" } )
+            {
+                names.push_back( "step" + std::to_string( step ) + suffix );
+            }
+
+            values.insert( values.end(),
+                           { double( outcome.releaseMissing ),
+                             double( outcome.releaseLate ),
+                             double( outcome.backendBusy ),
+                             double( outcome.backendWrap ) } );
+        }
+
+        if( m_simulationPipelineBackend )
+        {
+            names.push_back( "step" + std::to_string( step ) + "PreparationBusy" );
+            names.push_back( "step" + std::to_string( step ) + "CreditFull" );
+            values.insert( values.end(), { double( outcome.preparationBusy ), double( outcome.creditFull ) } );
+        }
+    }
+
+    updateIfChanged( m_indiP_simulationSteps, names, values, state );
+
+    if( m_simulationReaderReleaseReady )
+    {
+        const auto &quality = s.readiness;
+        const auto &release = s.latestRelease;
+        updateIfChanged<double>(
+            m_indiP_simulationReadiness,
+            { "enabled",        "virtualReaderUs", "backendUs",        "readerCycleFeasible", "backendCycleFeasible",
+              "observed",       "qualified",       "invalid",          "incoherent",          "duplicates",
+              "gaps",           "sourceResets",    "identityMismatch", "sdkFailed",           "queueDrops",
+              "queued",         "sourceEpoch",     "releaseSession",   "releaseEpoch",        "releaseSequence",
+              "releaseCounter", "releaseAgeSec" },
+            { 1.0,
+              s.virtualReaderNs / 1000.0,
+              s.backendNs / 1000.0,
+              s.readerCycleFeasible ? 1.0 : 0.0,
+              s.backendCycleFeasible ? 1.0 : 0.0,
+              double( quality.observed ),
+              double( quality.qualified ),
+              double( quality.invalid ),
+              double( quality.incoherent ),
+              double( quality.duplicates ),
+              double( quality.gaps ),
+              double( quality.sourceResets ),
+              double( quality.identityMismatch ),
+              double( quality.sdkFailed ),
+              double( quality.queueDrops ),
+              double( m_simulationReleaseQueued ),
+              double( release.sourceEpoch ),
+              double( release.record.session ),
+              double( release.record.epoch ),
+              double( release.record.sequence ),
+              double( release.record.inputCounter ),
+              release.observedNs > 0 && s.nowNs >= release.observedNs ? ( s.nowNs - release.observedNs ) / 1e9 : -1.0 },
+            state );
+    }
+
+    if( m_simulationPipelineBackend )
+    {
+        const auto &pipeline = s.pipeline;
+        updateIfChanged<double>( m_indiP_simulationPipeline,
+                                 { "enabled",
+                                   "deliveryUs",
+                                   "prepareUs",
+                                   "readerUs",
+                                   "sdkServiceUs",
+                                   "postUs",
+                                   "capacity",
+                                   "inFlight",
+                                   "maximumInFlight",
+                                   "mainAdmitted",
+                                   "auxiliaryAdmitted",
+                                   "retired",
+                                   "discarded",
+                                   "mainSdkWaits",
+                                   "mainCreditMisses",
+                                   "resets",
+                                   "sdkReadyNs",
+                                   "postReadyNs",
+                                   "maxMainWaitUs",
+                                   "mainClearanceShortfallUs",
+                                   "sdkCycleFeasible",
+                                   "postCycleFeasible",
+                                   "creditCycleFeasible",
+                                   "mainProtectionFeasible" },
+                                 { pipeline.enabled ? 1.0 : 0.0,
+                                   m_bounds.delivery / 1000.0,
+                                   pipeline.prepareNs / 1000.0,
+                                   s.virtualReaderNs / 1000.0,
+                                   pipeline.sdkServiceNs / 1000.0,
+                                   pipeline.postNs / 1000.0,
+                                   double( pipeline.capacity ),
+                                   double( pipeline.inFlight ),
+                                   double( pipeline.maximumInFlight ),
+                                   double( pipeline.mainAdmitted ),
+                                   double( pipeline.auxiliaryAdmitted ),
+                                   double( pipeline.retired ),
+                                   double( pipeline.discarded ),
+                                   double( pipeline.mainSdkWaits ),
+                                   double( pipeline.mainCreditMisses ),
+                                   double( pipeline.resets ),
+                                   double( pipeline.sdkReadyNs ),
+                                   double( pipeline.postReadyNs ),
+                                   pipeline.maximumMainWaitNs / 1000.0,
+                                   pipeline.mainClearanceShortfallNs / 1000.0,
+                                   pipeline.sdkCycleFeasible ? 1.0 : 0.0,
+                                   pipeline.postCycleFeasible ? 1.0 : 0.0,
+                                   pipeline.creditCycleFeasible ? 1.0 : 0.0,
+                                   pipeline.mainProtectionFeasible ? 1.0 : 0.0 },
+                                 state );
+    }
+
+    std::string status = "warming or stale";
+
+    if( s.valid )
+    {
+        if( s.pipeline.enabled )
+        {
+            status = s.feasible ? "conditional pipeline grid ready"
+                                : "conditional pipeline; resource or main protection limited";
+        }
+        else if( s.feasible )
+        {
+            status = "conditional grid ready";
+        }
+        else
+        {
+            status = s.readerReleaseReady && s.readerCycleFeasible
+                         ? "conditional slots; backend bound limits full cycle"
+                         : "infeasible";
+        }
+    }
+
+    updateIfChanged( m_indiP_simulationStatus, "state", status );
+    updateIfChanged(
+        m_indiP_simulationStatus,
+        "policy",
+        std::string( s.pipeline.enabled
+                         ? "shadow pipeline; resources assumed; zero added main SDK wait; reserve undecided"
+                         : ( s.readerReleaseReady
+                                 ? "shadow release gate; virtual readers/backend assumed; reserve undecided"
+                                 : "shadow only; timing bounds assumed; reserve undecided" ) ) );
+    const auto &trace = m_simulationTraceStatus;
+    updateIfChanged(
+        m_indiP_simulationTrace,
+        std::vector<std::string>{ "enabled", "detected", "drained", "dropped", "queued", "capacity", "logFailed" },
+        std::vector<double>{ trace.enabled ? 1.0 : 0.0,
+                             double( trace.detected ),
+                             double( trace.drained ),
+                             double( trace.dropped ),
+                             double( trace.queued ),
+                             double( trace.capacity ),
+                             double( m_simulationTraceLogFailed ) } );
+    const auto &mainWait = m_simulationMainWaitStatus;
+    updateIfChanged(
+        m_indiP_simulationMainWait,
+        std::vector<std::string>{ "enabled", "detected", "drained", "dropped", "queued", "capacity", "logFailed" },
+        std::vector<double>{ mainWait.enabled ? 1.0 : 0.0,
+                             double( mainWait.detected ),
+                             double( mainWait.drained ),
+                             double( mainWait.dropped ),
+                             double( mainWait.queued ),
+                             double( mainWait.capacity ),
+                             double( m_simulationMainWaitLogFailed ) } );
+    const auto &estimator = m_simulationEstimatorStatus;
+    updateIfChanged( m_indiP_simulationEstimator,
+                     std::vector<std::string>{ "enabled",
+                                               "observed",
+                                               "triggers",
+                                               "selected",
+                                               "drained",
+                                               "dropped",
+                                               "queued",
+                                               "capacity",
+                                               "logFailed",
+                                               "history",
+                                               "historyCapacity",
+                                               "postRemaining" },
+                     std::vector<double>{ estimator.enabled ? 1.0 : 0.0,
+                                          double( estimator.observed ),
+                                          double( estimator.triggers ),
+                                          double( estimator.selected ),
+                                          double( estimator.drained ),
+                                          double( estimator.dropped ),
+                                          double( estimator.queued ),
+                                          double( estimator.capacity ),
+                                          double( m_simulationEstimatorLogFailed ),
+                                          double( estimator.history ),
+                                          double( estimator.historyCapacity ),
+                                          double( estimator.postRemaining ) } );
+}
+
+inline bool dmSyncopation::openResources()
+{
+    closeResources();
+    try
+    {
+        m_combined = std::make_unique<syncoImage>();
+        m_combined->open( m_combinedName );
+        m_combinedInode = inode( m_combinedName );
+        std::vector<ino_t> identities{ inode( shmimMonitorT::m_shmimName ), m_combinedInode };
+        const auto         width  = shmimMonitorT::m_width;
+        const auto         height = shmimMonitorT::m_height;
+        if( width == 0 || height == 0 || uint64_t( width ) * height > 1048576 ||
+            shmimMonitorT::m_dataType != _DATATYPE_FLOAT || shmimMonitorT::m_depth > 1 ||
+            shmimMonitorT::m_imageStream.md->naxis != 2 || shmimMonitorT::m_imageStream.md->location != -1 ||
+            m_combined->image()->md->naxis != 2 || m_combined->image()->md->location != -1 ||
+            m_combined->rows() != width || m_combined->cols() != height )
+        {
+            throw std::runtime_error( "resource attachment failed" );
+        }
+        for( const auto &name : m_destinations )
+        {
+            Mapping mapping;
+            mapping.m_destination = std::make_unique<syncoImage>();
+            mapping.m_source      = std::make_unique<syncoImage>();
+            mapping.m_destination->open( name );
+            mapping.m_destination->passive( true );
+            if( mapping.m_destination->rows() != width || mapping.m_destination->cols() != height ||
+                mapping.m_destination->image()->md->naxis != 2 || mapping.m_destination->image()->md->location != -1 )
+            {
+                throw std::runtime_error( "resource attachment failed" );
+            }
+            if( inode( name + "_aux" ) )
+            {
+                mapping.m_source->open( name + "_aux" );
+            }
+            else
+            {
+                // Seed once from a complete stable destination; never destroy/recreate an existing source.
+                const auto counter = mapping.m_destination->image()->md->cnt0;
+                if( mapping.m_destination->image()->md->write )
+                {
+                    throw std::runtime_error( "resource attachment failed" );
+                }
+                std::vector<float> seed( width * height );
+                std::memcpy( seed.data(), mapping.m_destination->data(), seed.size() * sizeof( float ) );
+                if( mapping.m_destination->image()->md->write || counter != mapping.m_destination->image()->md->cnt0 )
+                {
+                    throw std::runtime_error( "resource attachment failed" );
+                }
+                IMAGE    created{};
+                uint32_t sizes[]{ width, height };
+                // milkImage::create uses a three-axis circular buffer; controller auxiliary sources are plain 2D.
+                if( ImageStreamIO_createIm_gpu( &created,
+                                                ( name + "_aux" ).c_str(),
+                                                2,
+                                                sizes,
+                                                _DATATYPE_FLOAT,
+                                                -1,
+                                                1,
+                                                IMAGE_NB_SEMAPHORE,
+                                                0,
+                                                0,
+                                                0 ) != 0 )
+                {
+                    throw std::runtime_error( "resource attachment failed" );
+                }
+                ImageStreamIO_closeIm( &created );
+                mapping.m_source->open( name + "_aux" );
+                mapping.m_source->setWrite( true );
+                std::memcpy( mapping.m_source->data(), seed.data(), seed.size() * sizeof( float ) );
+                mapping.m_source->post();
+            }
+            if( mapping.m_source->rows() != width || mapping.m_source->cols() != height ||
+                mapping.m_source->image()->md->naxis != 2 || mapping.m_source->image()->md->location != -1 )
+            {
+                throw std::runtime_error( "resource attachment failed" );
+            }
+            mapping.m_counter          = mapping.m_destination->image()->md->cnt0;
+            mapping.m_destinationInode = inode( name );
+            mapping.m_sourceInode      = inode( name + "_aux" );
+            identities.push_back( mapping.m_destinationInode );
+            identities.push_back( mapping.m_sourceInode );
+            mapping.m_cache.resize( width * height );
+            mapping.m_stage.resize( width * height );
+            if( !m_productionEnabled )
+            {
+                const auto count = mapping.m_source->image()->md->cnt0;
+                if( mapping.m_source->image()->md->write )
+                {
+                    throw std::runtime_error( "resource attachment failed" );
+                }
+                std::memcpy(
+                    mapping.m_cache.data(), mapping.m_source->data(), mapping.m_cache.size() * sizeof( float ) );
+                if( mapping.m_source->image()->md->write || count != mapping.m_source->image()->md->cnt0 )
+                {
+                    throw std::runtime_error( "resource attachment failed" );
+                }
+            }
+            m_mappings.push_back( std::move( mapping ) );
+        }
+        if( inode( m_timingName ) )
+        {
+            if( ImageStreamIO_openIm( &m_timing, m_timingName.c_str() ) != 0 )
+            {
+                throw std::runtime_error( "resource attachment failed" );
+            }
+            if( m_timing.md->datatype != _DATATYPE_INT64 || m_timing.md->naxis != 1 || m_timing.md->location != -1 ||
+                m_timing.md->size[0] != synco::words )
+            {
+                throw std::runtime_error( "resource attachment failed" );
+            }
+        }
+        else
+        {
+            uint32_t size = synco::words;
+            if( ImageStreamIO_createIm_gpu(
+                    &m_timing, m_timingName.c_str(), 1, &size, _DATATYPE_INT64, -1, 1, IMAGE_NB_SEMAPHORE, 0, 0, 0 ) !=
+                0 )
+            {
+                throw std::runtime_error( "resource attachment failed" );
+            }
+        }
+        identities.push_back( inode( m_timingName ) );
+        m_timingInode = inode( m_timingName );
+        std::sort( identities.begin(), identities.end() );
+        if( identities.front() == 0 || std::adjacent_find( identities.begin(), identities.end() ) != identities.end() )
+        {
+            throw std::runtime_error( "resource attachment failed" );
+        }
+        m_consumed       = m_combined->image()->md->cnt0;
+        m_trackingOutput = false;
+        m_resources      = true;
+        publishSchedule( 0, -1 );
+        return true;
+    }
+    catch( ... )
+    {
+        closeResources();
+        return false;
+    }
+}
+
+inline void dmSyncopation::closeResources()
+{
+    m_resources                  = false;
+    m_previousPrimaryPublication = 0;
+    closeProduction();
+    m_mappings.clear();
+    m_combined.reset();
+    if( m_timing.md )
+    {
+        ImageStreamIO_closeIm( &m_timing );
+    }
+    m_timing = {};
+}
+
+inline bool dmSyncopation::resourcesValid( bool files )
+{
+    if( !m_resources || !m_combined || !m_combined->valid() || m_combined->image()->md->sem == 0 || !m_timing.md ||
+        m_timing.md->sem == 0 || m_timing.md->datatype != _DATATYPE_INT64 || m_timing.md->naxis != 1 ||
+        m_timing.md->size[0] != synco::words || m_timing.md->location != -1 ||
+        shmimMonitorT::m_imageStream.md->sem == 0 || m_combined->image()->md->naxis != 2 ||
+        m_combined->image()->md->location != -1 )
+    {
+        return false;
+    }
+    if( files && ( inode( m_combinedName ) != m_combinedInode || inode( m_timingName ) != m_timingInode ||
+                   inode( shmimMonitorT::m_shmimName ) != shmimMonitorT::m_inode ) )
+    {
+        return false;
+    }
+    for( size_t j = 0; j < m_mappings.size(); ++j )
+    {
+        const auto &mapping = m_mappings[j];
+        if( !mapping.m_destination->valid() || !mapping.m_source->valid() ||
+            mapping.m_destination->image()->md->naxis != 2 || mapping.m_destination->image()->md->location != -1 ||
+            mapping.m_source->image()->md->naxis != 2 || mapping.m_source->image()->md->location != -1 ||
+            mapping.m_destination->image()->md->cnt0 != mapping.m_counter ||
+            mapping.m_destination->image()->md->write || mapping.m_destination->image()->md->sem == 0 ||
+            mapping.m_source->image()->md->sem == 0 )
+        {
+            return false;
+        }
+        if( files && ( inode( m_destinations[j] ) != mapping.m_destinationInode ||
+                       inode( m_destinations[j] + "_aux" ) != mapping.m_sourceInode ) )
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+inline void dmSyncopation::readCamera()
+{
+    std::unique_lock<std::mutex> lock( m_cameraMutex, std::try_to_lock );
+    if( lock.owns_lock() )
+    {
+        m_cameraReport = { m_cameraFps.load(), m_cameraTime.load(), m_cameraJitterUs, m_cameraMinUs, m_cameraMaxUs };
+    }
+}
+
+inline void dmSyncopation::readPrimaryTiming( int64_t observed, uint64_t counter, bool sequential )
+{
+    const auto *metadata = shmimMonitorT::m_imageStream.md;
+    const bool  complete = !metadata->write && metadata->cnt0 == counter;
+    const auto  stamp    = metadata->writetime;
+    std::atomic_thread_fence( std::memory_order_acquire );
+    const int64_t sampled     = m_now();
+    int64_t       publication = 0;
+    if( complete && !metadata->write && metadata->cnt0 == counter && stamp.tv_sec >= 0 && stamp.tv_nsec >= 0 &&
+        stamp.tv_nsec < 1000000000 && stamp.tv_sec <= ( INT64_MAX - stamp.tv_nsec ) / 1000000000 )
+    {
+        publication = int64_t( stamp.tv_sec ) * 1000000000 + stamp.tv_nsec;
+    }
+    m_primaryTiming           = {};
+    m_primaryTiming.m_counter = counter;
+    if( sequential && ( !m_havePrimaryCounter || counter > m_primaryCounter ) && publication > 0 &&
+        m_previousPrimaryPublication > 0 && publication > m_previousPrimaryPublication )
+    {
+        m_primaryTiming.m_publication = publication - m_previousPrimaryPublication;
+    }
+    m_previousPrimaryPublication = publication;
+    if( m_previousCallbackEnd > 0 )
+    {
+        m_primaryTiming.m_previousRuntime = m_previousCallbackRuntime;
+        if( observed >= m_previousCallbackEnd )
+        {
+            m_primaryTiming.m_gap = observed - m_previousCallbackEnd;
+        }
+    }
+    if( sampled >= observed )
+    {
+        m_primaryTiming.m_sampleDelay = sampled - observed;
+    }
+}
+
+inline void dmSyncopation::updatePeriod( int64_t observed, int64_t interval, bool sequential )
+{
+    if( !sequential || interval < int64_t( 1e9 / m_maxRate ) || interval > int64_t( 1e9 / m_minRate ) )
+    {
+        m_rateWindowCount = 0;
+        if( !sequential )
+        {
+            m_measuredPeriod = 0;
+        }
+    }
+    else
+    {
+        const int64_t shortest = std::min( m_rateWindowMin, interval );
+        const int64_t longest  = std::max( m_rateWindowMax, interval );
+        if( !m_rateWindowCount || longest - shortest > 2 * m_bounds.early )
+        {
+            m_rateWindowStart = observed - interval;
+            m_rateWindowMin   = interval;
+            m_rateWindowMax   = interval;
+            m_rateWindowCount = 0;
+        }
+        else
+        {
+            m_rateWindowMin = shortest;
+            m_rateWindowMax = longest;
+        }
+        if( ++m_rateWindowCount >= m_rateFrames )
+        {
+            m_measuredPeriod  = ( observed - m_rateWindowStart ) / m_rateWindowCount;
+            m_rateWindowCount = 0;
+        }
+    }
+    readCamera();
+    const auto cameraTime    = m_cameraReport.m_received;
+    const auto cameraFps     = m_cameraReport.m_fps;
+    const auto referenceTime = m_now();
+    const bool camera = cameraTime > 0 && referenceTime >= cameraTime && referenceTime - cameraTime < 5000000000LL &&
+                        cameraFps >= m_minRate && cameraFps <= m_maxRate;
+    const char   *source = camera ? "camera acquisition" : ( m_measuredPeriod > 0 ? "primary window" : "nominal" );
+    const int64_t period =
+        camera ? int64_t( std::llround( 1e9 / cameraFps ) )
+               : ( m_measuredPeriod > 0 ? m_measuredPeriod : int64_t( std::llround( 1e9 / m_nominalRate ) ) );
+    if( std::strcmp( source, m_periodSource ) != 0 || period < m_period - m_bounds.early ||
+        period > m_period + m_bounds.early )
+    {
+        invalidate( m_enabled ? "period reference changed" : "disabled" );
+        m_lastMain       = 0;
+        m_trackingOutput = false;
+    }
+    m_period       = period;
+    m_periodSource = source;
+}
+
+inline void dmSyncopation::invalidate( const char *reason, Fault fault, bool resetFeedback )
+{
+    if( fault != Fault::none )
+    {
+        ++m_faults;
+        ++m_faultCounts[size_t( fault )];
+        m_lastFaultReason = reason;
+        m_lastFaultNs     = m_now();
+        m_faultInterval   = 0;
+        m_faultPeriod     = 0;
+        m_faultTiming     = {};
+        m_trackingOutput  = false;
+        m_lastMain        = 0;
+    }
+    m_reason        = reason;
+    m_scheduleState = synco::invalid;
+    m_clean         = 0;
+    m_primed        = false;
+    m_expectOutput  = false;
+    m_failures      = 0;
+    if( resetFeedback )
+    {
+        m_advances.fill( 0 );
+        // Start conservatively early; valid wake samples tune this toward actual wait/check latency.
+        m_advances[0] = int64_t( m_maxAdvanceUs * 1000 );
+    }
+    ++m_generation;
+    publishSchedule( 0, -1 );
+}
+
+inline bool dmSyncopation::waitUntil( int64_t target )
+{
+    while( m_enabled && !shutdown() )
+    {
+        if( shmimMonitorT::m_imageStream.md->cnt0 != m_primaryCounter )
+        {
+            invalidate( "primary changed during cycle", Fault::primary );
+            return false;
+        }
+        if( !resourcesValid( false ) )
+        {
+            invalidate( "resource changed during cycle", Fault::resource );
+            return false;
+        }
+        if( !m_expectOutput && m_combined->image()->md->cnt0 != m_consumed )
+        {
+            m_lastOutputDelta = int64_t( m_combined->image()->md->cnt0 ) - int64_t( m_consumed );
+            invalidate( "unexpected combination", Fault::output );
+            return false;
+        }
+        const int64_t now = m_now();
+        if( now >= target )
+        {
+            return true;
+        }
+        const auto wake  = synco::toTimespec( std::min( target, now + 10000 ) );
+        const int result = m_wait ? m_wait( &wake ) : clock_nanosleep( CLOCK_MONOTONIC, TIMER_ABSTIME, &wake, nullptr );
+        if( result != 0 && result != EINTR )
+        {
+            invalidate( "monotonic wait failed", Fault::resource );
+            return false;
+        }
+    }
+    return false;
+}
+
+inline bool dmSyncopation::consume()
+{
+    m_expectOutput         = true;
+    const int64_t deadline = m_now() + int64_t( m_outputTimeoutUs * 1000 );
+    while( m_now() <= deadline )
+    {
+        const auto counter = m_combined->image()->md->cnt0;
+        if( counter == m_consumed + 1 && !m_combined->image()->md->write )
+        {
+            m_consumed     = counter;
+            m_expectOutput = false;
+            return true;
+        }
+        if( counter != m_consumed && counter != m_consumed + 1 )
+        {
+            break;
+        }
+        if( !waitUntil( std::min( deadline, m_now() + 1000 ) ) )
+        {
+            return false;
+        }
+    }
+    m_lastOutputDelta = int64_t( m_combined->image()->md->cnt0 ) - int64_t( m_consumed );
+    invalidate( "missing/ambiguous combined output", Fault::output );
+    return false;
+}
+
+inline bool dmSyncopation::snapshot()
+{
+    const int64_t start = m_now();
+    for( auto &mapping : m_mappings )
+    {
+        auto      *metadata = mapping.m_source->image()->md;
+        const auto counter  = metadata->cnt0;
+        bool       complete = !metadata->write;
+        if( complete )
+        {
+            std::memcpy( mapping.m_stage.data(), mapping.m_source->data(), mapping.m_stage.size() * sizeof( float ) );
+            std::atomic_thread_fence( std::memory_order_acquire );
+            complete = !metadata->write && metadata->cnt0 == counter;
+        }
+        if( complete )
+        {
+            std::copy( mapping.m_stage.begin(), mapping.m_stage.end(), mapping.m_cache.begin() );
+        }
+        else
+        {
+            std::copy( mapping.m_cache.begin(), mapping.m_cache.end(), mapping.m_stage.begin() );
+            ++m_cached;
+        }
+    }
+    const int64_t elapsed = m_now() - start;
+    m_snapshotMax         = std::max( m_snapshotMax, elapsed );
+    if( elapsed > m_bounds.snapshot )
+    {
+        m_bounds.snapshot = elapsed + 1000;
+        invalidate( "snapshot budget exceeded; enlarged for reacquisition", Fault::none, false );
+        return false;
+    }
+    return true;
+}
+
+inline bool dmSyncopation::copyBatch( int64_t cutoff )
+{
+    m_copyStarted       = false;
+    m_copyCompleted     = 0;
+    const int64_t start = m_now();
+    m_copyAttemptedAt   = start;
+    if( start + m_bounds.copy > cutoff || !waitUntil( start ) || m_combined->image()->md->cnt0 != m_consumed )
+    {
+        return false;
+    }
+    m_copyStarted = true;
+    for( auto &mapping : m_mappings )
+    {
+        // Once a passive batch starts, finish it on an ordinary disable so retained
+        // destinations do not become a mixture of old and newly staged mappings.
+        if( shmimMonitorT::m_imageStream.md->cnt0 != m_primaryCounter )
+        {
+            invalidate( "main event during batch copy", Fault::primary );
+            return false;
+        }
+        mapping.m_destination->setWrite( true );
+        std::memcpy( mapping.m_destination->data(), mapping.m_stage.data(), mapping.m_stage.size() * sizeof( float ) );
+        mapping.m_destination->post(); // passive: stamps metadata and notifies viewers, preserves cnt0
+        m_copyCompleted = m_now();
+    }
+    const int64_t completed = m_now();
+    m_copyCompleted         = completed;
+    m_copyMax               = std::max( m_copyMax, completed - start );
+    if( !waitUntil( completed ) )
+    {
+        return false;
+    }
+    if( completed - start > m_bounds.copy )
+    {
+        m_bounds.copy = completed - start + 1000;
+        invalidate( "copy budget exceeded; enlarged for reacquisition", Fault::none, false );
+        return false;
+    }
+    if( completed > cutoff )
+    {
+        return false;
+    }
+    return true;
+}
+
+inline void dmSyncopation::missedStep()
+{
+    ++m_missed;
+    if( ++m_failures >= m_failureLimit )
+    {
+        invalidate( "consecutive missed timing events", Fault::none, false );
+    }
+}
+
+inline bool dmSyncopation::executeStep( int step, int64_t target, int64_t cutoff )
+{
+    const uint64_t faultsBefore = m_faults;
+    const int64_t  advanceLimit = int64_t( m_maxAdvanceUs * 1000 );
+    const int64_t  snapshotAt   = target - m_bounds.copy - advanceLimit - m_bounds.snapshot - m_bounds.reserve;
+    if( !waitUntil( snapshotAt ) || !snapshot() )
+    {
+        if( !m_enabled || m_faults != faultsBefore )
+        {
+            return false;
+        }
+        if( step == 0 )
+        {
+            ++m_notStarted;
+        }
+        missedStep();
+        return false;
+    }
+    publishSchedule( m_lastMain, step );
+    const int64_t hold         = m_submission + m_bounds.delivery + m_bounds.keepout + m_bounds.guard;
+    const int64_t desiredStart = target - m_bounds.copy;
+    const int64_t advance      = step == 0 ? m_advances[0] : advanceLimit;
+    // Step zero never trades its positive preparation reserve for a later planned start.
+    const int64_t copyAt = std::max( hold, desiredStart - advance );
+    if( copyAt + m_bounds.copy > cutoff )
+    {
+        if( !m_enabled || m_faults != faultsBefore )
+        {
+            return false;
+        }
+        if( step == 0 )
+        {
+            ++m_notStarted;
+        }
+        missedStep();
+        return false;
+    }
+    if( !waitUntil( copyAt ) )
+    {
+        return false;
+    }
+    const bool copied = copyBatch( cutoff );
+    if( step == 0 && m_enabled && m_faults == faultsBefore && copyAt == desiredStart - advance )
+    {
+        m_step0Wake    = std::max<int64_t>( 0, m_copyAttemptedAt - copyAt );
+        m_step0WakeMax = std::max( m_step0WakeMax, m_step0Wake );
+        // A rejected copy still supplies a valid wait observation, not a successful command sample.
+        m_advances[0] = std::clamp<int64_t>(
+            synco::feedback( advance, m_copyAttemptedAt - desiredStart, m_gain, advanceLimit, true ), 0, advanceLimit );
+    }
+    if( !copied )
+    {
+        if( !m_enabled || m_faults != faultsBefore )
+        {
+            return false;
+        }
+        if( step == 0 )
+        {
+            if( m_copyStarted && m_copyCompleted > cutoff )
+            {
+                ++m_copiedLate;
+            }
+            else if( !m_copyStarted )
+            {
+                ++m_notStarted;
+            }
+        }
+        missedStep();
+        return false;
+    }
+    int64_t actual = m_now();
+    if( step > 0 )
+    {
+        if( !waitUntil( target - m_advances[step] ) )
+        {
+            return false;
+        }
+        const int64_t latest = m_lastMain + m_period - m_bounds.early - m_bounds.observation;
+        if( m_now() + m_bounds.delivery + m_bounds.keepout + m_bounds.guard > latest || m_now() > cutoff ||
+            m_combined->image()->md->cnt0 != m_consumed )
+        {
+            missedStep();
+            return false;
+        }
+        auto &trigger = m_mappings.front();
+        if( !waitUntil( m_now() ) )
+        {
+            return false;
+        }
+        const uint64_t expected = trigger.m_counter + 1;
+        trigger.m_destination->passive( false );
+        trigger.m_destination->post();
+        trigger.m_destination->passive( true );
+        if( trigger.m_destination->image()->md->cnt0 != expected )
+        {
+            invalidate( "trigger destination counter changed unexpectedly", Fault::resource );
+            return false;
+        }
+        trigger.m_counter = expected;
+        actual            = m_now();
+        m_submission      = actual;
+        if( actual + m_bounds.delivery + m_bounds.keepout + m_bounds.guard > latest || actual > cutoff )
+        {
+            invalidate( "actual trigger outside safe window", Fault::trigger );
+            return false;
+        }
+        if( !consume() )
+        {
+            return false;
+        }
+        ++m_delivered;
+    }
+    m_residuals[step] = actual - target;
+    if( step > 0 )
+    {
+        m_advances[step] = synco::feedback( m_advances[step], m_residuals[step], m_gain, advanceLimit, true );
+    }
+    m_failures = 0;
+    return true;
+}
+
+inline void dmSyncopation::publishSchedule( int64_t observed, int completed )
+{
+    if( !m_timing.md || m_timing.md->datatype != _DATATYPE_INT64 || m_timing.md->naxis != 1 ||
+        m_timing.md->size[0] != synco::words || m_timing.md->location != -1 )
+    {
+        return;
+    }
+    m_record.fill( 0 );
+    m_record[synco::version]    = m_productionEnabled ? synco::productionVersion : synco::layoutVersion;
+    m_record[synco::epoch]      = m_epoch;
+    m_record[synco::generation] = m_generation;
+    m_record[synco::state]      = observed > 0 ? m_scheduleState : synco::invalid;
+    m_record[synco::steps]      = m_requested;
+    m_record[synco::period]     = m_period;
+    m_record[synco::reference]  = observed;
+    m_record[synco::expires]    = observed > 0 ? observed + 2 * m_period : 0;
+    m_record[synco::cycle]      = int64_t( m_primaryCounter );
+    for( int j = 0; observed > 0 && j < m_requested; ++j )
+    {
+        if( m_scheduleState == synco::acquiring && j > 0 )
+        {
+            continue;
+        }
+        int64_t target = j == 0 ? observed + m_period : observed + j * m_period / m_requested;
+        if( completed == 0 || ( j > 0 && j <= completed ) )
+        {
+            target += m_period;
+        }
+        const int64_t preparation = j == 0 ? synco::copyCutoff( target, m_bounds ) - m_bounds.reserve : target;
+        const int64_t cutoff =
+            preparation - m_bounds.copy - int64_t( m_maxAdvanceUs * 1000 ) - m_bounds.snapshot - m_bounds.reserve;
+        if( cutoff > m_now() )
+        {
+            m_record[synco::cutoffs + j] = cutoff;
+            m_record[synco::targets + j] = target;
+        }
+    }
+    m_timing.md->write = 1;
+    std::memcpy( m_timing.array.raw, m_record.data(), sizeof( m_record ) );
+    ImageStreamIO_UpdateIm( &m_timing );
+}
+
+inline int dmSyncopation::allocate( const dev::shmimT &tag )
+{
+    m_primaryTraceInode.store( shmimMonitorT::m_imageStream.md->inode, std::memory_order_release );
+    static_cast<void>( tag );
+
+    if( m_diagnosticsOnly )
+    {
+        return 0;
+    }
+
+    std::lock_guard<std::mutex> lock( m_cycleMutex );
+
+    if( m_simulationEnabled || zeroEngine() )
+    {
+        if( shmimMonitorT::m_semaphoreNumber == 9 )
+        {
+            if( shmimMonitorT::m_imageStream.semReadPID[9] == getpid() )
+            {
+                shmimMonitorT::m_imageStream.semReadPID[9] = 0;
+            }
+
+            return -1;
+        }
+
+        if( zeroEngine() )
+        {
+            m_enabled = false;
+            closeZeroTest();
+            ++m_generation;
+            configureZeroTest();
+        }
+        else
+        {
+            resetSimulation();
+        }
+        return 0;
+    }
+
+    if( shmimMonitorT::m_semaphoreNumber != m_primarySemaphore || m_primarySemaphore == 9 )
+    {
+        const int assigned = shmimMonitorT::m_semaphoreNumber;
+        if( assigned >= 0 && shmimMonitorT::m_imageStream.semReadPID[assigned] == getpid() )
+        {
+            shmimMonitorT::m_imageStream.semReadPID[assigned] = 0;
+        }
+        return -1;
+    }
+    invalidate( "acquiring resources" );
+    m_lastMain                   = 0;
+    m_primaryCounter             = shmimMonitorT::m_imageStream.md->cnt0;
+    m_havePrimaryCounter         = true;
+    m_previousPrimaryTime        = 0;
+    m_previousPrimaryPublication = 0;
+    m_previousCallbackRuntime    = -1;
+    m_previousCallbackEnd        = 0;
+    m_primaryTiming              = {};
+    m_rateWindowCount            = 0;
+    m_measuredPeriod             = 0;
+    openResources(); // Other streams may appear after the primary; callbacks retry while unarmed.
+    return 0;
+}
+
+inline int dmSyncopation::processImage( void *source, const dev::shmimT &tag )
+{
+    static_cast<void>( source );
+    static_cast<void>( tag );
+    const int64_t observed = m_now();
+    const int64_t receipt  = m_primaryReceiptNs;
+    readPrimaryCadence( observed );
+
+    if( m_pipelineCadence.enabled() )
+    {
+        m_pipelineCadence.observe( shmimMonitorT::m_imageStream, observed, m_primaryReceiptNs );
+    }
+
+    m_primaryReceiptNs = -1;
+
+    if( m_simulationEnabled )
+    {
+        readSimulationPrimary( observed, receipt );
+    }
+
+    if( m_diagnosticsOnly || m_simulationEnabled )
+    {
+        m_primaryCadence.markAt( MagAOX::dmTiming::Marker::finish, m_now() );
+        m_primaryCadence.outcome( MagAOX::dmTiming::Outcome::noSend );
+        m_primaryCadence.finishEvent();
+        return 0;
+    }
+
+    std::lock_guard<std::mutex> lock( m_cycleMutex );
+    const int     result    = zeroEngine() ? processZeroTestPrimary( observed, receipt ) : processPrimary( observed );
+    const int64_t completed = m_now();
+    if( m_productionEnabled )
+    {
+        const auto periodQ32 = m_zeroClock.summary().cadence.periodQ32;
+        if( periodQ32 )
+        {
+            m_period = int64_t( periodQ32 / MagAOX::dmSyncoSimulation::periodScale );
+        }
+        m_scheduleState = m_enabled ? ( m_zeroStats.active ? synco::armed : synco::acquiring ) : synco::invalid;
+        m_primed        = m_enabled && m_zeroStats.active;
+        m_feasible      = m_primed ? m_requested : 0;
+        m_mainDelivered = m_zeroStats.mainMatched;
+        m_delivered     = m_zeroStats.acknowledged;
+        m_missed        = m_zeroStats.skipped;
+        m_notStarted    = m_passiveSkipped;
+        m_periodSource  = "primary publication grid";
+    }
+    publishZeroTestStatus( completed );
+    m_previousCallbackRuntime = completed >= observed ? completed - observed : -1;
+    m_previousCallbackEnd     = completed;
+    m_primaryCadence.markAt( MagAOX::dmTiming::Marker::finish, completed );
+    m_primaryCadence.outcome( MagAOX::dmTiming::Outcome::noSend );
+    m_primaryCadence.finishEvent();
+    return result;
+}
+
+inline void dmSyncopation::shmimMonitorTiming( const dev::shmimT &tag, dev::shmimMonitorEvent event )
+{
+    static_cast<void>( tag );
+
+    if( event == dev::shmimMonitorEvent::connected || event == dev::shmimMonitorEvent::disconnected )
+    {
+        m_readerTiming.resetPrimary();
+        m_readerReleaseTiming.resetPrimary();
+    }
+
+    if( event == dev::shmimMonitorEvent::connected )
+    {
+        m_primaryTraceInode.store( shmimMonitorT::m_imageStream.md->inode, std::memory_order_release );
+    }
+
+    if( event == dev::shmimMonitorEvent::connected )
+    {
+        m_primaryReceiptNs = -1;
+        m_pipelineCadence.newSession();
+    }
+    else if( event == dev::shmimMonitorEvent::receipt )
+    {
+        m_primaryReceiptNs = ( m_primaryCadence.enabled() || m_pipelineCadence.enabled() ) ? m_now() : -1;
+    }
+    else if( event == dev::shmimMonitorEvent::initial )
+    {
+        m_primaryReceiptNs = -1;
+    }
+    else if( event == dev::shmimMonitorEvent::discarded )
+    {
+        m_pipelineCadence.rejected( m_primaryReceiptNs );
+        m_primaryReceiptNs = -1;
+    }
+
+    if( !m_primaryCadence.enabled() )
+    {
+        return;
+    }
+
+    if( event == dev::shmimMonitorEvent::connected )
+    {
+        m_primaryCadence.newSession();
+    }
+    else if( event == dev::shmimMonitorEvent::receipt || event == dev::shmimMonitorEvent::initial )
+    {
+        const bool receipt = event == dev::shmimMonitorEvent::receipt;
+        m_primaryCadence.beginEventAt( receipt, m_primaryReceiptNs );
+    }
+    else if( event == dev::shmimMonitorEvent::discarded )
+    {
+        m_primaryCadence.outcome( MagAOX::dmTiming::Outcome::rejected );
+        m_primaryCadence.finishEvent();
+    }
+}
+
+inline int dmSyncopation::allocate( const syncoCombinerT &tag )
+{
+    static_cast<void>( tag );
+
+    if( m_simulationEnabled )
+    {
+        std::lock_guard<std::mutex> lock( m_cycleMutex );
+        resetSimulation();
+    }
+
+    return 0;
+}
+
+inline int dmSyncopation::processImage( void *source, const syncoCombinerT &tag )
+{
+    static_cast<void>( source );
+    static_cast<void>( tag );
+    const int64_t callback = m_simulationEnabled ? m_now() : 0;
+
+    if( m_combinerCadence.enabled() )
+    {
+        m_combinerCadence.observe( combinerMonitorT::m_imageStream,
+                                   m_primaryTraceInode.load( std::memory_order_acquire ),
+                                   m_now(),
+                                   m_combinerReceiptNs );
+    }
+
+    if( m_simulationEnabled )
+    {
+        readSimulationCombined( callback, m_combinerReceiptNs );
+    }
+
+    m_combinerReceiptNs = -1;
+    return 0;
+}
+
+inline void dmSyncopation::shmimMonitorTiming( const syncoCombinerT &tag, dev::shmimMonitorEvent event )
+{
+    static_cast<void>( tag );
+
+    if( event == dev::shmimMonitorEvent::connected || event == dev::shmimMonitorEvent::disconnected )
+    {
+        m_readerTiming.resetCombined();
+        m_readerReleaseTiming.resetCombined();
+    }
+
+    if( !m_combinerCadence.enabled() )
+    {
+        return;
+    }
+
+    if( event == dev::shmimMonitorEvent::connected )
+    {
+        m_combinerReceiptNs = -1;
+        m_combinerCadence.newSession();
+    }
+    else if( event == dev::shmimMonitorEvent::receipt )
+    {
+        m_combinerReceiptNs = m_now();
+    }
+    else if( event == dev::shmimMonitorEvent::initial )
+    {
+        m_combinerReceiptNs = -1;
+    }
+    else if( event == dev::shmimMonitorEvent::discarded )
+    {
+        m_combinerCadence.rejected( m_combinerReceiptNs );
+        m_combinerReceiptNs = -1;
+    }
+}
+
+inline int dmSyncopation::allocate( const syncoCompletionT &tag )
+{
+    static_cast<void>( tag );
+    const auto &image = completionMonitorT::m_imageStream;
+
+    if( !image.md || image.md->datatype != _DATATYPE_UINT64 || image.md->naxis != 1 ||
+        image.md->size[0] != MagAOX::dmCompletion::words || image.md->location != -1 )
+    {
+        return log<software_error, -1>( { "Completion monitor requires a 16-word uint64 CPU stream" } );
+    }
+
+    return 0;
+}
+
+inline int dmSyncopation::processImage( void *source, const syncoCompletionT &tag )
+{
+    static_cast<void>( source );
+    static_cast<void>( tag );
+    MagAOX::dmReaderTiming::Completed event;
+    event.receiptNs      = m_completionReceiptNs;
+    const auto &image    = completionMonitorT::m_imageStream;
+    const bool  coherent = dev::dmCompletion::read( &image, event.record );
+    event.observedNs     = m_now();
+    if( !zeroEngine() )
+    {
+        m_readerTiming.completion( event, coherent && m_completionReceiptNs > 0 );
+    }
+    m_completionReceiptNs = -1;
+    return 0;
+}
+
+inline void dmSyncopation::shmimMonitorTiming( const syncoCompletionT &tag, dev::shmimMonitorEvent event )
+{
+    static_cast<void>( tag );
+
+    if( event == dev::shmimMonitorEvent::connected || event == dev::shmimMonitorEvent::disconnected )
+    {
+        m_completionReceiptNs = -1;
+        m_readerTiming.resetCompletion();
+    }
+    else if( event == dev::shmimMonitorEvent::receipt )
+    {
+        m_completionReceiptNs = m_now();
+    }
+    else if( event == dev::shmimMonitorEvent::initial )
+    {
+        m_completionReceiptNs = -1;
+    }
+    else if( event == dev::shmimMonitorEvent::discarded )
+    {
+        MagAOX::dmReaderTiming::Completed rejected;
+        rejected.observedNs = m_now();
+        if( !zeroEngine() )
+        {
+            m_readerTiming.completion( rejected, false );
+        }
+        m_completionReceiptNs = -1;
+    }
+}
+
+inline int dmSyncopation::allocate( const syncoReaderReleaseT &tag )
+{
+    static_cast<void>( tag );
+    const auto &image = readerReleaseMonitorT::m_imageStream;
+
+    if( !image.md || image.md->datatype != _DATATYPE_UINT64 || image.md->naxis != 1 ||
+        image.md->size[0] != MagAOX::dmCompletion::words || image.md->location != -1 )
+    {
+        return log<software_error, -1>( { "Reader-release monitor requires a 16-word uint64 CPU stream" } );
+    }
+
+    return 0;
+}
+
+inline int dmSyncopation::processImage( void *source, const syncoReaderReleaseT &tag )
+{
+    static_cast<void>( source );
+    static_cast<void>( tag );
+    MagAOX::dmReaderTiming::Completed event;
+    auto                              sourceEpoch = m_simulationReleaseEpoch.load( std::memory_order_acquire );
+    event.receiptNs                               = m_readerReleaseReceiptNs;
+    const auto &image                             = readerReleaseMonitorT::m_imageStream;
+    const bool  coherent                          = dev::dmCompletion::read( &image, event.record );
+    event.observedNs                              = m_now();
+
+    const auto &record = event.record;
+    const auto &prior  = m_zeroReaderObserved;
+    const bool  regressed =
+        prior.session && ( record.session < prior.session ||
+                           ( record.session == prior.session &&
+                             ( record.epoch < prior.epoch ||
+                               ( record.epoch == prior.epoch && ( record.sequence < prior.sequence ||
+                                                                  record.publisherPid != prior.publisherPid ) ) ) ) );
+    const bool changed =
+        prior.session &&
+        ( record.session != prior.session || record.epoch != prior.epoch || record.publisherPid != prior.publisherPid ||
+          !synco::ZeroTiming::equal( synco::ZeroTiming::key( record ), synco::ZeroTiming::key( prior ) ) );
+
+    if( zeroEngine() && m_zeroWakeAheadUs > 0 &&
+        ( !coherent || m_readerReleaseReceiptNs <= 0 || !MagAOX::dmCompletion::readersQualified( event.record ) ||
+          event.observedNs <= 0 || event.observedNs < m_zeroReaderObservedNs || record.finishedNs > event.observedNs ||
+          regressed || changed || !record.publisherPid ||
+          ( event.record.outcome != MagAOX::dmTiming::Outcome::unknown &&
+            event.record.outcome != MagAOX::dmTiming::Outcome::success ) ||
+          ( event.record.backendResult != MagAOX::dmCompletion::unavailableResult &&
+            event.record.backendResult != 0 ) ) )
+    {
+        // Revoke latched clearance immediately while the cycle is in its quiet final wait.
+        sourceEpoch = m_simulationReleaseEpoch.fetch_add( 1, std::memory_order_acq_rel ) + 1;
+    }
+
+    if( zeroEngine() && m_zeroWakeAheadUs > 0 && coherent && !regressed && event.observedNs > 0 &&
+        event.observedNs >= m_zeroReaderObservedNs && record.protocolVersion == MagAOX::dmCompletion::version &&
+        record.kind == MagAOX::dmCompletion::Kind::readers && record.session && record.epoch && record.sequence &&
+        record.publisherPid && record.finishedNs <= event.observedNs )
+    {
+        m_zeroReaderObserved   = record;
+        m_zeroReaderObservedNs = event.observedNs;
+    }
+    if( !zeroEngine() )
+    {
+        m_readerReleaseTiming.completion( event, coherent && m_readerReleaseReceiptNs > 0 );
+    }
+
+    if( m_simulationReaderReleaseReady || zeroEngine() )
+    {
+        m_simulationReleaseQueue.push(
+            { event.record, event.observedNs, sourceEpoch, coherent && m_readerReleaseReceiptNs > 0 } );
+    }
+
+    m_readerReleaseReceiptNs = -1;
+    return 0;
+}
+
+inline void dmSyncopation::shmimMonitorTiming( const syncoReaderReleaseT &tag, dev::shmimMonitorEvent event )
+{
+    static_cast<void>( tag );
+
+    if( event == dev::shmimMonitorEvent::connected || event == dev::shmimMonitorEvent::disconnected )
+    {
+        m_simulationReleaseEpoch.fetch_add( 1, std::memory_order_acq_rel );
+        m_readerReleaseReceiptNs = -1;
+        m_readerReleaseTiming.resetCompletion();
+        m_zeroReaderObserved   = {};
+        m_zeroReaderObservedNs = 0;
+    }
+    else if( event == dev::shmimMonitorEvent::receipt )
+    {
+        m_readerReleaseReceiptNs = m_now();
+    }
+    else if( event == dev::shmimMonitorEvent::initial )
+    {
+        m_readerReleaseReceiptNs = -1;
+    }
+    else if( event == dev::shmimMonitorEvent::discarded )
+    {
+        MagAOX::dmReaderTiming::Completed rejected;
+        rejected.observedNs = m_now();
+
+        if( zeroEngine() && m_zeroWakeAheadUs > 0 )
+        {
+            m_simulationReleaseEpoch.fetch_add( 1, std::memory_order_acq_rel );
+        }
+        if( m_simulationReaderReleaseReady || zeroEngine() )
+        {
+            m_simulationReleaseQueue.push( { rejected.record,
+                                             rejected.observedNs,
+                                             m_simulationReleaseEpoch.load( std::memory_order_acquire ),
+                                             false } );
+        }
+        if( !zeroEngine() )
+        {
+            m_readerReleaseTiming.completion( rejected, false );
+        }
+        m_readerReleaseReceiptNs = -1;
+    }
+}
+
+inline int dmSyncopation::allocate( const syncoCameraT &tag )
+{
+    static_cast<void>( tag );
+    return 0;
+}
+
+inline void dmSyncopation::cameraStamp( dev::dmTiming  &collector,
+                                        const timespec &stamp,
+                                        uint64_t        counter,
+                                        int64_t         observed,
+                                        bool            coherent,
+                                        CameraHistory  &history )
+{
+    if( !collector.enabled() )
+    {
+        return;
+    }
+
+    if( !collector.active() )
+    {
+        collector.beginEventAt( false, -1 );
+    }
+
+    collector.markAt( MagAOX::dmTiming::Marker::entry, observed );
+    bool valid = false;
+
+    if( coherent && stamp.tv_sec >= 0 && stamp.tv_nsec >= 0 && stamp.tv_nsec < 1000000000 &&
+        stamp.tv_sec <= ( std::numeric_limits<int64_t>::max() - stamp.tv_nsec ) / 1000000000 )
+    {
+        const int64_t timestamp = static_cast<int64_t>( stamp.tv_sec ) * 1000000000 + stamp.tv_nsec;
+
+        if( timestamp > 0 )
+        {
+            valid = history.stamp < 0 || counter != history.counter + 1 || timestamp > history.stamp;
+
+            if( valid )
+            {
+                collector.inputCounter( counter );
+                collector.inputPublication( timestamp );
+            }
+
+            history.counter = counter;
+            history.stamp   = timestamp;
+        }
+    }
+
+    collector.markAt( MagAOX::dmTiming::Marker::finish, observed );
+    collector.outcome( valid ? MagAOX::dmTiming::Outcome::noSend : MagAOX::dmTiming::Outcome::rejected );
+    collector.finishEvent();
+}
+
+inline int dmSyncopation::processImage( void *source, const syncoCameraT &tag )
+{
+    static_cast<void>( source );
+    static_cast<void>( tag );
+
+    if( !m_cameraCadence.enabled() && !m_cameraPublicationCadence.enabled() )
+    {
+        return 0;
+    }
+
+    const int64_t        observed = m_now();
+    const volatile auto *metadata = cameraMonitorT::m_imageStream.md;
+    uint64_t             counter  = 0;
+    timespec             acquisition{}, publication{};
+    bool                 coherent = false;
+
+    if( metadata && metadata->write == 0 )
+    {
+        counter     = metadata->cnt0;
+        acquisition = { metadata->atime.tv_sec, metadata->atime.tv_nsec };
+        publication = { metadata->writetime.tv_sec, metadata->writetime.tv_nsec };
+        std::atomic_thread_fence( std::memory_order_acquire );
+        coherent = metadata->write == 0 && counter == metadata->cnt0 && acquisition.tv_sec == metadata->atime.tv_sec &&
+                   acquisition.tv_nsec == metadata->atime.tv_nsec && publication.tv_sec == metadata->writetime.tv_sec &&
+                   publication.tv_nsec == metadata->writetime.tv_nsec;
+    }
+
+    cameraStamp( m_cameraCadence, acquisition, counter, observed, coherent, m_cameraAcquisitionHistory );
+    cameraStamp( m_cameraPublicationCadence, publication, counter, observed, coherent, m_cameraPublicationHistory );
+    return 0;
+}
+
+inline void dmSyncopation::shmimMonitorTiming( const syncoCameraT &tag, dev::shmimMonitorEvent event )
+{
+    static_cast<void>( tag );
+
+    if( !m_cameraCadence.enabled() && !m_cameraPublicationCadence.enabled() )
+    {
+        return;
+    }
+
+    if( event == dev::shmimMonitorEvent::connected )
+    {
+        m_cameraCadence.newSession();
+        m_cameraPublicationCadence.newSession();
+        m_cameraAcquisitionHistory = {};
+        m_cameraPublicationHistory = {};
+    }
+    else if( event == dev::shmimMonitorEvent::receipt || event == dev::shmimMonitorEvent::initial )
+    {
+        const bool    receipt  = event == dev::shmimMonitorEvent::receipt;
+        const int64_t received = receipt ? m_now() : -1;
+        m_cameraCadence.beginEventAt( receipt, received );
+        m_cameraPublicationCadence.beginEventAt( receipt, received );
+    }
+    else if( event == dev::shmimMonitorEvent::discarded )
+    {
+        for( auto *collector : { &m_cameraCadence, &m_cameraPublicationCadence } )
+        {
+            collector->outcome( MagAOX::dmTiming::Outcome::rejected );
+            collector->finishEvent();
+        }
+    }
+}
+
+inline void dmSyncopation::readPrimaryCadence( int64_t observed )
+{
+    if( !m_primaryCadence.enabled() )
+    {
+        return;
+    }
+
+    if( !m_primaryCadence.active() )
+    {
+        m_primaryCadence.beginEventAt( false, -1 );
+    }
+
+    m_primaryCadence.markAt( MagAOX::dmTiming::Marker::entry, observed );
+    const auto *metadata = shmimMonitorT::m_imageStream.md;
+
+    if( !m_primaryCadence.active() || !metadata || metadata->write != 0 )
+    {
+        return;
+    }
+
+    const uint64_t counter = metadata->cnt0;
+    const auto     stamp   = metadata->writetime;
+    std::atomic_thread_fence( std::memory_order_acquire );
+
+    // This bracket is an observed metadata sample, not atomic token/pixel/frame identity.
+    if( metadata->write == 0 && counter == metadata->cnt0 )
+    {
+        m_primaryCadence.inputCounter( counter );
+
+        if( stamp.tv_sec >= 0 && stamp.tv_nsec >= 0 && stamp.tv_nsec < 1000000000 &&
+            stamp.tv_sec <= ( std::numeric_limits<int64_t>::max() - stamp.tv_nsec ) / 1000000000 )
+        {
+            m_primaryCadence.inputPublication( static_cast<int64_t>( stamp.tv_sec ) * 1000000000 + stamp.tv_nsec );
+        }
+    }
+}
+
+inline int dmSyncopation::processPrimary( int64_t observed )
+{
+    if( !m_resources )
+    {
+        if( observed < m_nextAttach )
+        {
+            return 0;
+        }
+        m_nextAttach = observed + 1000000000;
+        if( !openResources() )
+        {
+            invalidate( "resources unavailable" );
+            return 0;
+        }
+    }
+    if( !resourcesValid( true ) )
+    {
+        invalidate( "resource replacement/external destination write", Fault::resource );
+        closeResources(); // Reattach and refresh caches, including a controller's cleared auxiliary values.
+        return 0;
+    }
+    const auto counter = shmimMonitorT::m_imageStream.md->cnt0;
+    if( m_havePrimaryCounter && counter == m_primaryCounter )
+    {
+        ++m_duplicatePosts;
+        return 0; // A queued semaphore token is not a new physical main event.
+    }
+    const bool sequential = !m_havePrimaryCounter || counter == m_primaryCounter + 1;
+    readPrimaryTiming( observed, counter, sequential );
+    m_lastPrimaryDelta    = m_havePrimaryCounter ? int64_t( counter ) - int64_t( m_primaryCounter ) : 0;
+    m_primaryCounter      = counter; // Adopt jumps/resets once; queued duplicates must not re-enter acquisition.
+    m_havePrimaryCounter  = true;
+    m_lastPrimaryInterval = m_previousPrimaryTime ? observed - m_previousPrimaryTime : 0;
+    m_previousPrimaryTime = observed;
+    updatePeriod( observed, m_lastPrimaryInterval, sequential );
+    if( !m_enabled )
+    {
+        m_lastMain       = 0;
+        m_consumed       = m_combined->image()->md->cnt0;
+        m_trackingOutput = false;
+        return 0;
+    }
+    const int64_t previous = m_lastMain;
+    if( !sequential )
+    {
+        invalidate( "primary counter jump/reset", Fault::primary );
+        return 0;
+    }
+    if( previous &&
+        ( observed <= previous || observed - previous < int64_t( 1e9 / m_maxRate ) ||
+          observed - previous > int64_t( 1e9 / m_minRate ) || observed < previous + m_period - m_bounds.early ||
+          observed > previous + m_period + m_bounds.early ) )
+    {
+        invalidate( "primary interval anomaly", Fault::primary );
+        m_faultInterval = observed - previous;
+        m_faultPeriod   = m_period;
+        m_faultTiming   = m_primaryTiming;
+        return 0;
+    }
+    m_lastMain   = observed;
+    m_submission = observed; // Conservative upper bound on the current main's publication.
+    if( !m_trackingOutput )
+    {
+        // The current main may already be combined, or still pending. Drain its qualified
+        // delivery window before choosing a baseline, so it cannot become the next main's acknowledgement.
+        m_expectOutput = true;
+        if( !waitUntil( observed + int64_t( std::max( m_outputTimeoutUs * 1000, double( m_bounds.delivery ) ) ) ) )
+        {
+            return 0;
+        }
+        if( m_combined->image()->md->write )
+        {
+            invalidate( "initial output baseline incomplete", Fault::output );
+            return 0;
+        }
+        m_consumed       = m_combined->image()->md->cnt0;
+        m_expectOutput   = false;
+        m_trackingOutput = true;
+        m_primed         = false;
+        return 0;
+    }
+    if( !consume() )
+    {
+        m_trackingOutput = false;
+        return 0;
+    }
+    ++m_mainDelivered;
+    ++m_clean;
+    m_feasible           = synco::maximumSteps( m_period, m_bounds );
+    const double nominal = 1e9 / m_period;
+    if( nominal * m_requested > m_maxCadence * ( 1 + m_rateTolerance ) )
+    {
+        ++m_rateViolations;
+    }
+    else
+    {
+        m_rateViolations = 0;
+    }
+    if( !synco::feasible( m_period, m_requested, m_bounds ) || m_rateViolations >= m_rateFrames )
+    {
+        invalidate( "requested count/cadence infeasible" );
+        return 0;
+    }
+    if( m_clean < m_lockFrames )
+    {
+        m_reason        = "acquiring main progression";
+        m_scheduleState = synco::acquiring;
+        publishSchedule( observed, -1 );
+        return 0;
+    }
+    const bool active = m_primed;
+    m_primed          = false;
+    m_scheduleState   = active ? synco::armed : synco::acquiring;
+    m_reason          = active ? "armed" : "preparing first step zero";
+    publishSchedule( observed, -1 );
+    if( active )
+    {
+        for( int j = 1; j < m_requested; ++j )
+        {
+            const int64_t target = observed + j * m_period / m_requested;
+            const int64_t latest = observed + m_period - m_bounds.early - m_bounds.observation - m_bounds.delivery -
+                                   m_bounds.keepout - m_bounds.guard;
+            executeStep( j, target, latest );
+            if( m_scheduleState == synco::invalid || !m_enabled )
+            {
+                return 0;
+            }
+        }
+    }
+    const int64_t cutoff = synco::copyCutoff( observed + m_period, m_bounds );
+    m_primed             = executeStep( 0, cutoff - m_bounds.reserve, cutoff );
+    return 0;
+}
+
+inline int dmSyncopation::setupPrimaryCadenceINDI()
+{
+    return setupCadenceINDI( m_primaryCadence,
+                             m_indiP_primaryTiming,
+                             m_indiP_primaryTimingQuality,
+                             m_indiP_primaryPairs,
+                             "primary",
+                             "publication_" );
+}
+
+inline void dmSyncopation::updatePrimaryCadenceINDI()
+{
+    updateCadenceINDI( m_primaryCadence, m_indiP_primaryTiming, m_indiP_primaryTimingQuality, "publication_" );
+    updatePrimaryPairsINDI();
+}
+
+inline void dmSyncopation::updatePrimaryPairsINDI()
+{
+    updatePairsINDI( m_primaryCadence, m_indiP_primaryPairs );
+}
+
+inline int dmSyncopation::setupCadenceINDI( const dev::dmTiming &collector,
+                                            pcf::IndiProperty   &timingProperty,
+                                            pcf::IndiProperty   &qualityProperty,
+                                            pcf::IndiProperty   &pairsProperty,
+                                            const std::string   &prefix,
+                                            const char          *stampPrefix )
+{
+    if( createROIndiNumber( timingProperty, prefix + "_timing" ) < 0 ||
+        createROIndiNumber( qualityProperty, prefix + "_timing_quality" ) < 0 ||
+        createROIndiNumber( pairsProperty, prefix + "_interval_pairs" ) < 0 )
+    {
+        return -1;
+    }
+
+    for( const auto *prefix : { stampPrefix, "receipt_" } )
+    {
+        for( const auto *field : { "fps", "mean", "jitter", "min", "max", "count", "span" } )
+        {
+            const std::string name = std::string( prefix ) + field;
+            timingProperty.add( pcf::IndiElement( name ) );
+            timingProperty[name] = std::string( field ) == "count" ? 0.0 : -1.0;
+        }
+    }
+
+    for( const auto *name : { "enabled",
+                              "valid",
+                              "window",
+                              "span",
+                              "age",
+                              "capacity",
+                              "queued",
+                              "session",
+                              "sequence",
+                              "events",
+                              "receipts",
+                              "synthetic",
+                              "rejected",
+                              "duplicates",
+                              "counterGaps",
+                              "invalid",
+                              "dropped" } )
+    {
+        qualityProperty.add( pcf::IndiElement( name ) );
+        qualityProperty[name] = 0.0;
+    }
+
+    qualityProperty["enabled"]  = collector.enabled() ? 1.0 : 0.0;
+    qualityProperty["window"]   = collector.summary().windowSec;
+    qualityProperty["capacity"] = double( collector.summary().capacity );
+    qualityProperty["age"]      = -1.0;
+
+    for( const auto *name : { "enabled", "median", "threshold", "intervals", "pairs" } )
+    {
+        pairsProperty.add( pcf::IndiElement( name ) );
+        pairsProperty[name] = 0.0;
+    }
+
+    for( const auto *prefix : { "afterLate_", "afterEarly_", "lateEarlySum_", "earlyLateSum_" } )
+    {
+        for( const auto *field : { "mean", "jitter", "min", "max", "count", "span" } )
+        {
+            const std::string name = std::string( prefix ) + field;
+            pairsProperty.add( pcf::IndiElement( name ) );
+            pairsProperty[name] = std::string( field ) == "count" ? 0.0 : -1.0;
+        }
+    }
+
+    const auto &pairs          = collector.summary().intervalPairs;
+    pairsProperty["enabled"]   = double( pairs.enabled );
+    pairsProperty["median"]    = -1.0;
+    pairsProperty["threshold"] = pairs.enabled ? pairs.threshold : -1.0;
+
+    if( registerIndiPropertyReadOnly( timingProperty ) < 0 )
+    {
+        return -1;
+    }
+
+    if( registerIndiPropertyReadOnly( qualityProperty ) < 0 )
+    {
+        return -1;
+    }
+
+    return registerIndiPropertyReadOnly( pairsProperty );
+}
+
+inline void dmSyncopation::updateCadenceINDI( const dev::dmTiming &collector,
+                                              pcf::IndiProperty   &timingProperty,
+                                              pcf::IndiProperty   &qualityProperty,
+                                              const char          *stampPrefix )
+{
+    const auto &summary = collector.summary();
+    const auto &publication =
+        summary.metrics[MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::publicationInterval )];
+    const auto &receipt = summary.metrics[MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::receiptInterval )];
+    const bool  valid   = publication.valid && receipt.valid;
+    const auto  state   = valid ? INDI_OK : INDI_IDLE;
+    std::vector<std::string> names;
+    std::vector<double>      values;
+
+    const std::pair<const char *, const MagAOX::dmTiming::Stats *> populations[] = { { stampPrefix, &publication },
+                                                                                     { "receipt_", &receipt } };
+
+    for( const auto &entry : populations )
+    {
+        const auto &metric = *entry.second;
+
+        for( const auto *field : { "fps", "mean", "jitter", "min", "max", "count", "span" } )
+        {
+            names.push_back( std::string( entry.first ) + field );
+        }
+
+        values.insert( values.end(),
+                       { metric.valid && metric.mean > 0 ? 1.0 / metric.mean : -1.0,
+                         metric.count ? metric.mean : -1.0,
+                         metric.valid ? metric.stddev : -1.0,
+                         metric.count ? metric.min : -1.0,
+                         metric.count ? metric.max : -1.0,
+                         double( metric.count ),
+                         metric.count ? metric.span : -1.0 } );
+    }
+
+    updateIfChanged( timingProperty, names, values, state );
+    const auto &quality = summary.total;
+    updateIfChanged<double>( qualityProperty,
+                             { "enabled",
+                               "valid",
+                               "window",
+                               "span",
+                               "age",
+                               "capacity",
+                               "queued",
+                               "session",
+                               "sequence",
+                               "events",
+                               "receipts",
+                               "synthetic",
+                               "rejected",
+                               "duplicates",
+                               "counterGaps",
+                               "invalid",
+                               "dropped" },
+                             { double( summary.enabled ),
+                               double( valid ),
+                               summary.windowSec,
+                               summary.span,
+                               summary.age,
+                               double( summary.capacity ),
+                               double( summary.queued ),
+                               double( summary.session ),
+                               double( summary.sequence ),
+                               double( quality.events ),
+                               double( quality.receipts ),
+                               double( quality.synthetic ),
+                               double( quality.rejected ),
+                               double( quality.duplicates ),
+                               double( quality.counterGaps ),
+                               double( quality.invalid ),
+                               double( quality.dropped ) },
+                             state );
+}
+
+inline void dmSyncopation::updatePairsINDI( const dev::dmTiming &collector, pcf::IndiProperty &property )
+{
+    const auto              &pairs = collector.summary().intervalPairs;
+    std::vector<std::string> names{ "enabled", "median", "threshold", "intervals", "pairs" };
+    std::vector<double>      values{ double( pairs.enabled ),
+                                pairs.intervals ? pairs.median : -1.0,
+                                pairs.enabled ? pairs.threshold : -1.0,
+                                double( pairs.intervals ),
+                                double( pairs.pairs ) };
+    const std::pair<const char *, const MagAOX::dmTiming::Stats *> populations[] = {
+        { "afterLate_", &pairs.afterLate },
+        { "afterEarly_", &pairs.afterEarly },
+        { "lateEarlySum_", &pairs.lateEarlySum },
+        { "earlyLateSum_", &pairs.earlyLateSum } };
+
+    for( const auto &entry : populations )
+    {
+        const auto &metric = *entry.second;
+
+        for( const auto *field : { "mean", "jitter", "min", "max", "count", "span" } )
+        {
+            names.push_back( std::string( entry.first ) + field );
+        }
+
+        values.insert( values.end(),
+                       { metric.count ? metric.mean : -1.0,
+                         metric.valid ? metric.stddev : -1.0,
+                         metric.count ? metric.min : -1.0,
+                         metric.count ? metric.max : -1.0,
+                         double( metric.count ),
+                         metric.count ? metric.span : -1.0 } );
+    }
+
+    updateIfChanged( property, names, values, pairs.pairs ? INDI_OK : INDI_IDLE );
+}
+
+inline int dmSyncopation::setupCombinerCadenceINDI()
+{
+    if( createROIndiNumber( m_indiP_combinerTiming, "combiner_timing" ) < 0 ||
+        createROIndiNumber( m_indiP_combinerQuality, "combiner_timing_quality" ) < 0 )
+    {
+        return -1;
+    }
+
+    for( size_t i = 0; i < size_t( MagAOX::dmCombTiming::Metric::count ); ++i )
+    {
+        const auto metric = static_cast<MagAOX::dmCombTiming::Metric>( i );
+
+        for( const auto *field : { "mean", "jitter", "min", "max", "count", "span" } )
+        {
+            const std::string name = std::string( MagAOX::dmCombTiming::metricName( metric ) ) + '_' + field;
+            m_indiP_combinerTiming.add( pcf::IndiElement( name ) );
+            m_indiP_combinerTiming[name] = std::string( field ) == "count" ? 0.0 : -1.0;
+        }
+    }
+
+    for( const auto *name : { "enabled",       "window",          "span",           "age",
+                              "capacity",      "queued",          "session",        "sequence",
+                              "writerPid",     "triggerInode",    "primaryCounter", "events",
+                              "receipts",      "synthetic",       "rejected",       "duplicates",
+                              "counterGaps",   "invalidMetadata", "missingTrace",   "invalidTrace",
+                              "repeatedStart", "unlinkedPrimary", "invalidPrimary", "repeatedPrimary",
+                              "dropped" } )
+    {
+        m_indiP_combinerQuality.add( pcf::IndiElement( name ) );
+        m_indiP_combinerQuality[name] = 0.0;
+    }
+
+    m_indiP_combinerQuality["enabled"]  = m_combinerCadence.enabled() ? 1.0 : 0.0;
+    m_indiP_combinerQuality["window"]   = m_combinerCadence.summary().windowSec;
+    m_indiP_combinerQuality["capacity"] = double( m_combinerCadence.summary().capacity );
+    m_indiP_combinerQuality["age"]      = -1.0;
+
+    if( registerIndiPropertyReadOnly( m_indiP_combinerTiming ) < 0 )
+    {
+        return -1;
+    }
+
+    return registerIndiPropertyReadOnly( m_indiP_combinerQuality );
+}
+
+inline void dmSyncopation::updateCombinerCadenceINDI()
+{
+    const auto              &summary = m_combinerCadence.summary();
+    std::vector<std::string> names;
+    std::vector<double>      values;
+    bool                     valid = false;
+
+    for( size_t i = 0; i < summary.metrics.size(); ++i )
+    {
+        const auto &metric       = summary.metrics[i];
+        valid                    = valid || metric.valid;
+        const std::string prefix = MagAOX::dmCombTiming::metricName( static_cast<MagAOX::dmCombTiming::Metric>( i ) );
+
+        for( const auto *field : { "mean", "jitter", "min", "max", "count", "span" } )
+        {
+            names.push_back( prefix + '_' + field );
+        }
+
+        values.insert( values.end(),
+                       { metric.count ? metric.mean : -1.0,
+                         metric.valid ? metric.stddev : -1.0,
+                         metric.count ? metric.min : -1.0,
+                         metric.count ? metric.max : -1.0,
+                         double( metric.count ),
+                         metric.count ? metric.span : -1.0 } );
+    }
+
+    const auto state = valid ? INDI_OK : INDI_IDLE;
+    updateIfChanged( m_indiP_combinerTiming, names, values, state );
+    const auto &quality = summary.total;
+    updateIfChanged<double>( m_indiP_combinerQuality,
+                             { "enabled",       "window",          "span",           "age",
+                               "capacity",      "queued",          "session",        "sequence",
+                               "writerPid",     "triggerInode",    "primaryCounter", "events",
+                               "receipts",      "synthetic",       "rejected",       "duplicates",
+                               "counterGaps",   "invalidMetadata", "missingTrace",   "invalidTrace",
+                               "repeatedStart", "unlinkedPrimary", "invalidPrimary", "repeatedPrimary",
+                               "dropped" },
+                             { summary.enabled ? 1.0 : 0.0,
+                               summary.windowSec,
+                               summary.span,
+                               summary.age,
+                               double( summary.capacity ),
+                               double( summary.queued ),
+                               double( summary.session ),
+                               double( summary.sequence ),
+                               double( summary.writerPid ),
+                               double( summary.triggerInode ),
+                               double( summary.primaryCounter ),
+                               double( quality.events ),
+                               double( quality.receipts ),
+                               double( quality.synthetic ),
+                               double( quality.rejected ),
+                               double( quality.duplicates ),
+                               double( quality.counterGaps ),
+                               double( quality.invalidMetadata ),
+                               double( quality.missingTrace ),
+                               double( quality.invalidTrace ),
+                               double( quality.repeatedStart ),
+                               double( quality.unlinkedPrimary ),
+                               double( quality.invalidPrimary ),
+                               double( quality.repeatedPrimary ),
+                               double( quality.dropped ) },
+                             state );
+}
+
+inline int dmSyncopation::setupPipelineINDI()
+{
+    if( createROIndiNumber( m_indiP_pipelineQuality, "pipeline_timing_quality" ) < 0 ||
+        createROIndiNumber( m_indiP_pipelineBoundary, "pipeline_boundary_timing" ) < 0 )
+    {
+        return -1;
+    }
+
+    for( const auto *name : { "enabled",         "window",       "span",         "age",
+                              "capacity",        "queued",       "session",      "sequence",
+                              "median",          "threshold",    "intervals",    "late",
+                              "early",           "stages",       "events",       "receipts",
+                              "synthetic",       "rejected",     "duplicates",   "counterGaps",
+                              "invalidMetadata", "missingTrace", "invalidTrace", "topologyChanges",
+                              "truncated",       "dropped" } )
+    {
+        m_indiP_pipelineQuality.add( pcf::IndiElement( name ) );
+        m_indiP_pipelineQuality[name] = 0.0;
+    }
+
+    for( const auto *prefix : { "sourceInterval_",
+                                "lateSourceInterval_",
+                                "earlySourceInterval_",
+                                "latePublicationChange_",
+                                "earlyPublicationChange_" } )
+    {
+        for( const auto *field : { "mean", "jitter", "min", "max", "count", "span" } )
+        {
+            const std::string name = std::string( prefix ) + field;
+            m_indiP_pipelineBoundary.add( pcf::IndiElement( name ) );
+            m_indiP_pipelineBoundary[name] = std::string( field ) == "count" ? 0.0 : -1.0;
+        }
+    }
+
+    if( registerIndiPropertyReadOnly( m_indiP_pipelineQuality ) < 0 ||
+        registerIndiPropertyReadOnly( m_indiP_pipelineBoundary ) < 0 )
+    {
+        return -1;
+    }
+
+    for( size_t i = 0; i < m_indiP_pipelineStages.size(); ++i )
+    {
+        auto &property = m_indiP_pipelineStages[i];
+
+        if( createROIndiNumber( property, "pipeline_stage" + std::to_string( i ) ) < 0 )
+        {
+            return -1;
+        }
+
+        for( const auto *name : { "present", "row", "writerPid", "inputInode" } )
+        {
+            property.add( pcf::IndiElement( name ) );
+            property[name] = 0.0;
+        }
+
+        property["row"] = double( i );
+
+        for( const auto *prefix : { "execution_",
+                                    "handoff_",
+                                    "lateExecution_",
+                                    "lateHandoff_",
+                                    "earlyExecution_",
+                                    "earlyHandoff_",
+                                    "lateExecutionChange_",
+                                    "lateHandoffChange_",
+                                    "earlyExecutionChange_",
+                                    "earlyHandoffChange_" } )
+        {
+            for( const auto *field : { "mean", "jitter", "min", "max", "count", "span" } )
+            {
+                const std::string name = std::string( prefix ) + field;
+                property.add( pcf::IndiElement( name ) );
+                property[name] = std::string( field ) == "count" ? 0.0 : -1.0;
+            }
+        }
+
+        if( registerIndiPropertyReadOnly( property ) < 0 )
+        {
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+inline void dmSyncopation::updatePipelineINDI()
+{
+    const auto &summary = m_pipelineCadence.summary();
+    const auto &quality = summary.total;
+    const auto  state   = summary.sourceInterval.count ? INDI_OK : INDI_IDLE;
+    updateIfChanged<double>( m_indiP_pipelineQuality,
+                             { "enabled",         "window",       "span",         "age",
+                               "capacity",        "queued",       "session",      "sequence",
+                               "median",          "threshold",    "intervals",    "late",
+                               "early",           "stages",       "events",       "receipts",
+                               "synthetic",       "rejected",     "duplicates",   "counterGaps",
+                               "invalidMetadata", "missingTrace", "invalidTrace", "topologyChanges",
+                               "truncated",       "dropped" },
+                             { double( summary.enabled ),
+                               summary.windowSec,
+                               summary.span,
+                               summary.age,
+                               double( summary.capacity ),
+                               double( summary.queued ),
+                               double( summary.session ),
+                               double( summary.sequence ),
+                               summary.intervals ? summary.median : -1.0,
+                               summary.threshold,
+                               double( summary.intervals ),
+                               double( summary.late ),
+                               double( summary.early ),
+                               double( summary.stageCount ),
+                               double( quality.events ),
+                               double( quality.receipts ),
+                               double( quality.synthetic ),
+                               double( quality.rejected ),
+                               double( quality.duplicates ),
+                               double( quality.counterGaps ),
+                               double( quality.invalidMetadata ),
+                               double( quality.missingTrace ),
+                               double( quality.invalidTrace ),
+                               double( quality.topologyChanges ),
+                               double( quality.truncated ),
+                               double( quality.dropped ) },
+                             state );
+
+    using Population = std::pair<const char *, const MagAOX::dmTiming::Stats *>;
+    auto append      = []( std::vector<std::string> &names, std::vector<double> &values, const Population &population )
+    {
+        const auto &metric = *population.second;
+
+        for( const auto *field : { "mean", "jitter", "min", "max", "count", "span" } )
+        {
+            names.push_back( std::string( population.first ) + field );
+        }
+
+        values.insert( values.end(),
+                       { metric.count ? metric.mean : -1.0,
+                         metric.valid ? metric.stddev : -1.0,
+                         metric.count ? metric.min : -1.0,
+                         metric.count ? metric.max : -1.0,
+                         double( metric.count ),
+                         metric.count ? metric.span : -1.0 } );
+    };
+    std::vector<std::string> boundaryNames;
+    std::vector<double>      boundaryValues;
+
+    for( const auto &population : { Population{ "sourceInterval_", &summary.sourceInterval },
+                                    Population{ "lateSourceInterval_", &summary.lateSourceInterval },
+                                    Population{ "earlySourceInterval_", &summary.earlySourceInterval },
+                                    Population{ "latePublicationChange_", &summary.latePublicationChange },
+                                    Population{ "earlyPublicationChange_", &summary.earlyPublicationChange } } )
+    {
+        append( boundaryNames, boundaryValues, population );
+    }
+
+    updateIfChanged( m_indiP_pipelineBoundary, boundaryNames, boundaryValues, state );
+
+    for( size_t i = 0; i < m_indiP_pipelineStages.size(); ++i )
+    {
+        const auto              &stage = summary.stages[i];
+        std::vector<std::string> names{ "present", "row", "writerPid", "inputInode" };
+        std::vector<double>      values{
+            i < summary.stageCount ? 1.0 : 0.0, double( i ), double( stage.pid ), double( stage.inputInode ) };
+
+        for( const auto &population : { Population{ "execution_", &stage.execution },
+                                        Population{ "handoff_", &stage.handoff },
+                                        Population{ "lateExecution_", &stage.lateExecution },
+                                        Population{ "lateHandoff_", &stage.lateHandoff },
+                                        Population{ "earlyExecution_", &stage.earlyExecution },
+                                        Population{ "earlyHandoff_", &stage.earlyHandoff },
+                                        Population{ "lateExecutionChange_", &stage.lateExecutionChange },
+                                        Population{ "lateHandoffChange_", &stage.lateHandoffChange },
+                                        Population{ "earlyExecutionChange_", &stage.earlyExecutionChange },
+                                        Population{ "earlyHandoffChange_", &stage.earlyHandoffChange } } )
+        {
+            append( names, values, population );
+        }
+
+        updateIfChanged( m_indiP_pipelineStages[i], names, values, stage.execution.count ? INDI_OK : INDI_IDLE );
+    }
+}
+
+inline void dmSyncopation::configureReaderTiming()
+{
+    m_readerTiming.configure( !zeroEngine() && !completionMonitorT::m_shmimName.empty() ? m_primaryCadenceWindow : 0,
+                              m_primaryCadenceMaxEvents );
+    m_readerReleaseTiming.configure(
+        !zeroEngine() && !readerReleaseMonitorT::m_shmimName.empty() ? m_primaryCadenceWindow : 0,
+        m_primaryCadenceMaxEvents,
+        MagAOX::dmCompletion::Kind::readers );
+}
+
+inline bool dmSyncopation::readerReleaseMonitorEnabled() const
+{
+    return !readerReleaseMonitorT::m_shmimName.empty() && ( zeroEngine() || m_readerReleaseTiming.enabled() );
+}
+
+inline int dmSyncopation::setupReaderTimingINDI()
+{
+    if( setupReaderTimingINDIFor( m_readerTiming, m_indiP_readerTiming, m_indiP_readerQuality, "reader" ) < 0 )
+    {
+        return -1;
+    }
+
+    return setupReaderTimingINDIFor(
+        m_readerReleaseTiming, m_indiP_readerReleaseTiming, m_indiP_readerReleaseQuality, "reader_release" );
+}
+
+inline void dmSyncopation::updateReaderTimingINDI()
+{
+    updateReaderTimingINDIFor( m_readerTiming, m_indiP_readerTiming, m_indiP_readerQuality );
+    updateReaderTimingINDIFor( m_readerReleaseTiming, m_indiP_readerReleaseTiming, m_indiP_readerReleaseQuality );
+}
+
+inline int dmSyncopation::setupReaderTimingINDIFor( dev::dmReaderTiming &reader,
+                                                    pcf::IndiProperty   &timingProperty,
+                                                    pcf::IndiProperty   &qualityProperty,
+                                                    const std::string   &propertyPrefix )
+{
+    if( !reader.enabled() && !zeroEngine() )
+    {
+        return 0;
+    }
+
+    if( createROIndiNumber( timingProperty, propertyPrefix + "_timing" ) < 0 ||
+        createROIndiNumber( qualityProperty, propertyPrefix + "_timing_quality" ) < 0 )
+    {
+        return -1;
+    }
+
+    for( size_t index = 0; index < size_t( MagAOX::dmReaderTiming::Metric::count ); ++index )
+    {
+        const std::string prefix = MagAOX::dmReaderTiming::metricName( MagAOX::dmReaderTiming::Metric( index ) );
+
+        for( const auto *field : { "mean", "jitter", "min", "max", "count", "span" } )
+        {
+            timingProperty.add( pcf::IndiElement( prefix + '_' + field ) );
+            timingProperty[prefix + '_' + field] = std::string( field ) == "count" ? 0.0 : -1.0;
+        }
+    }
+
+    for( const auto *name : { "enabled",
+                              "session",
+                              "sequence",
+                              "window",
+                              "capacity",
+                              "queued",
+                              "span",
+                              "age",
+                              "events",
+                              "primary",
+                              "combined",
+                              "completion",
+                              "matched",
+                              "busy",
+                              "unavailable",
+                              "error",
+                              "unqualified",
+                              "invalid",
+                              "incoherent",
+                              "duplicates",
+                              "sequenceGaps",
+                              "counterGaps",
+                              "sourceResets",
+                              "staleEpoch",
+                              "missingPrimary",
+                              "missingCombined",
+                              "identityMismatch",
+                              "evicted",
+                              "expired",
+                              "droppedPrimary",
+                              "droppedCombined",
+                              "droppedCompletion",
+                              "receiptUnavailable",
+                              "receiptInvalid",
+                              "firstEnriched",
+                              "maxRequiredUs",
+                              "maxObservedUs",
+                              "overBudget",
+                              "worstValid",
+                              "worstOffsetUs",
+                              "worstBudgetUs",
+                              "worstSlackUs",
+                              "pendingPrimary",
+                              "pendingCombined",
+                              "pendingCompletion" } )
+    {
+        qualityProperty.add( pcf::IndiElement( name ) );
+        qualityProperty[name] = 0.0;
+    }
+
+    if( reader.summary().kind == MagAOX::dmCompletion::Kind::readers )
+    {
+        for( const auto *name : { "sdkResults", "sdkSuccess", "sdkFailed" } )
+        {
+            qualityProperty.add( pcf::IndiElement( name ) );
+            qualityProperty[name] = 0.0;
+        }
+    }
+
+    qualityProperty["age"] = -1.0;
+
+    if( registerIndiPropertyReadOnly( timingProperty ) < 0 )
+    {
+        return -1;
+    }
+
+    return registerIndiPropertyReadOnly( qualityProperty );
+}
+
+inline void dmSyncopation::updateReaderTimingINDIFor( dev::dmReaderTiming &reader,
+                                                      pcf::IndiProperty   &timingProperty,
+                                                      pcf::IndiProperty   &qualityProperty )
+{
+    if( !reader.enabled() )
+    {
+        return;
+    }
+
+    const auto              &summary = reader.summary();
+    std::vector<std::string> names;
+    std::vector<double>      values;
+
+    for( size_t index = 0; index < summary.metrics.size(); ++index )
+    {
+        const auto       &stats  = summary.metrics[index];
+        const std::string prefix = MagAOX::dmReaderTiming::metricName( MagAOX::dmReaderTiming::Metric( index ) );
+
+        for( const auto *field : { "mean", "jitter", "min", "max", "count", "span" } )
+        {
+            names.push_back( prefix + '_' + field );
+        }
+
+        values.insert( values.end(),
+                       { stats.count ? stats.mean : -1.0,
+                         stats.valid ? stats.stddev : -1.0,
+                         stats.count ? stats.min : -1.0,
+                         stats.count ? stats.max : -1.0,
+                         double( stats.count ),
+                         stats.count ? stats.span : -1.0 } );
+    }
+
+    const auto state = summary.metrics[0].count ? INDI_OK : INDI_IDLE;
+    updateIfChanged( timingProperty, names, values, state );
+    const auto &quality = summary.total;
+    updateIfChanged<double>( qualityProperty,
+                             { "enabled",
+                               "session",
+                               "sequence",
+                               "window",
+                               "capacity",
+                               "queued",
+                               "span",
+                               "age",
+                               "events",
+                               "primary",
+                               "combined",
+                               "completion",
+                               "matched",
+                               "busy",
+                               "unavailable",
+                               "error",
+                               "unqualified",
+                               "invalid",
+                               "incoherent",
+                               "duplicates",
+                               "sequenceGaps",
+                               "counterGaps",
+                               "sourceResets",
+                               "staleEpoch",
+                               "missingPrimary",
+                               "missingCombined",
+                               "identityMismatch",
+                               "evicted",
+                               "expired",
+                               "droppedPrimary",
+                               "droppedCombined",
+                               "droppedCompletion",
+                               "receiptUnavailable",
+                               "receiptInvalid",
+                               "firstEnriched",
+                               "maxRequiredUs",
+                               "maxObservedUs",
+                               "overBudget",
+                               "worstValid",
+                               "worstOffsetUs",
+                               "worstBudgetUs",
+                               "worstSlackUs",
+                               "pendingPrimary",
+                               "pendingCombined",
+                               "pendingCompletion" },
+                             { summary.enabled ? 1.0 : 0.0,
+                               double( summary.session ),
+                               double( summary.sequence ),
+                               summary.windowSec,
+                               double( summary.capacity ),
+                               double( summary.queued ),
+                               summary.span,
+                               summary.age,
+                               double( quality.events ),
+                               double( quality.primary ),
+                               double( quality.combined ),
+                               double( quality.completion ),
+                               double( quality.matched ),
+                               double( quality.busy ),
+                               double( quality.unavailable ),
+                               double( quality.error ),
+                               double( quality.unqualified ),
+                               double( quality.invalid ),
+                               double( quality.incoherent ),
+                               double( quality.duplicates ),
+                               double( quality.sequenceGaps ),
+                               double( quality.counterGaps ),
+                               double( quality.sourceResets ),
+                               double( quality.staleEpoch ),
+                               double( quality.missingPrimary ),
+                               double( quality.missingCombined ),
+                               double( quality.identityMismatch ),
+                               double( quality.evicted ),
+                               double( quality.expired ),
+                               double( quality.droppedPrimary ),
+                               double( quality.droppedCombined ),
+                               double( quality.droppedCompletion ),
+                               double( quality.receiptUnavailable ),
+                               double( quality.receiptInvalid ),
+                               double( quality.firstEnriched ),
+                               summary.maxRequiredHoldNs * 1e-3,
+                               summary.maxObservedHoldNs * 1e-3,
+                               double( summary.overBudget ),
+                               summary.worstValid ? 1.0 : 0.0,
+                               summary.worstValid ? summary.worst.offsetNs * 1e-3 : -1.0,
+                               summary.worstValid ? summary.worst.combined.budgetNs * 1e-3 : -1.0,
+                               summary.worstValid ? summary.worst.slackNs * 1e-3 : -1.0,
+                               double( summary.pendingPrimary ),
+                               double( summary.pendingCombined ),
+                               double( summary.pendingCompletion ) },
+                             state );
+    if( summary.kind == MagAOX::dmCompletion::Kind::readers )
+    {
+        updateIfChanged<double>(
+            qualityProperty,
+            { "sdkResults", "sdkSuccess", "sdkFailed" },
+            { double( quality.sdkResults ), double( quality.sdkSuccess ), double( quality.sdkFailed ) },
+            state );
+    }
+}
+
+inline int dmSyncopation::appStartup()
+{
+    try
+    {
+        m_primaryCadence.configure( m_primaryCadenceWindow, m_primaryCadenceMaxEvents, m_primaryExcursionUs * 1e-6 );
+        m_combinerCadence.configure( m_combinerDiagnostics ? m_primaryCadenceWindow : 0, m_primaryCadenceMaxEvents );
+        m_cameraCadence.configure(
+            m_cameraDiagnostics ? m_primaryCadenceWindow : 0, m_primaryCadenceMaxEvents, m_primaryExcursionUs * 1e-6 );
+        m_cameraPublicationCadence.configure(
+            m_cameraDiagnostics ? m_primaryCadenceWindow : 0, m_primaryCadenceMaxEvents, m_primaryExcursionUs * 1e-6 );
+        m_pipelineCadence.configure( m_pipelineDiagnostics ? m_primaryCadenceWindow : 0,
+                                     m_primaryCadenceMaxEvents,
+                                     m_primaryExcursionUs * 1e-6 );
+        configureReaderTiming();
+        m_simulationReleaseQueue.configure(
+            ( m_simulationReaderReleaseReady || zeroEngine() ) ? m_primaryCadenceMaxEvents : 0 );
+        m_zeroEvents.configure( zeroEngine() ? m_primaryCadenceMaxEvents : 0 );
+    }
+    catch( const std::exception &error )
+    {
+        return log<software_error, -1>( { std::string( "Timing allocation: " ) + error.what() } );
+    }
+
+    if( setupProductionINDI() < 0 || setupLogicTimingINDI() < 0 || setupZeroTestINDI() < 0 ||
+        setupSimulationINDI() < 0 || setupPrimaryCadenceINDI() < 0 || setupCombinerCadenceINDI() < 0 ||
+        setupPipelineINDI() < 0 || setupReaderTimingINDI() < 0 ||
+        setupCadenceINDI( m_cameraCadence,
+                          m_indiP_cameraTiming,
+                          m_indiP_cameraQuality,
+                          m_indiP_cameraPairs,
+                          "camera",
+                          "acquisition_" ) < 0 ||
+        setupCadenceINDI( m_cameraPublicationCadence,
+                          m_indiP_cameraWriteTiming,
+                          m_indiP_cameraWriteQuality,
+                          m_indiP_cameraWritePairs,
+                          "camera_write",
+                          "publication_" ) < 0 )
+    {
+        return -1;
+    }
+
+    if( getrandom( &m_epoch, sizeof( m_epoch ), 0 ) != sizeof( m_epoch ) )
+    {
+        return -1;
+    }
+    m_epoch &= INT64_MAX;
+    if( m_epoch == 0 )
+    {
+        m_epoch = 1;
+    }
+    if( createStandardIndiToggleSw( m_indiP_enable, "enable" ) < 0 ||
+        registerIndiPropertyNew( m_indiP_enable, INDI_NEWCALLBACK( m_indiP_enable ) ) < 0 ||
+        createStandardIndiRequestSw( m_indiP_reacquire, "reacquire" ) < 0 ||
+        registerIndiPropertyNew( m_indiP_reacquire, INDI_NEWCALLBACK( m_indiP_reacquire ) ) < 0 )
+    {
+        return -1;
+    }
+    REG_INDI_NEWPROP( m_indiP_settings, "settings", pcf::IndiProperty::Number );
+    const std::vector<const char *> settingKeys =
+        m_productionEnabled
+            ? std::vector<const char *>{ "steps", "maxCadenceHz" }
+            : std::vector<const char *>{ "steps", "maxCadenceHz", "keepoutUs", "guardUs", "step0LeadUs" };
+    for( const auto &name : settingKeys )
+    {
+        m_indiP_settings.add( pcf::IndiElement( name ) );
+        m_indiP_settings[name].setMin( std::string( name ) == "steps" ? 1 : 0 );
+        m_indiP_settings[name].setMax( std::string( name ) == "steps" ? synco::maxSteps : 1000000 );
+        m_indiP_settings[name].setStep( std::string( name ) == "steps" ? 1 : 0 );
+        m_indiP_settings[name].setFormat( "%g" );
+    }
+    if( m_zeroTestEnabled )
+    {
+        m_indiP_settings.add( pcf::IndiElement( "durationSec" ) );
+        m_indiP_settings["durationSec"].setMin( 0 );
+        m_indiP_settings["durationSec"].setMax( m_zeroDurationLimitSec );
+        m_indiP_settings["durationSec"].setStep( 0 );
+        m_indiP_settings["durationSec"].setFormat( "%g" );
+        m_indiP_settings["durationSec"] = m_zeroDurationSec;
+    }
+    REG_INDI_NEWPROP_NOCB( m_indiP_status, "timing", pcf::IndiProperty::Number );
+    m_indiP_status.setPerm( pcf::IndiProperty::ReadOnly );
+    for( const auto &name : { "mainHz",
+                              "cameraHz",
+                              "plannedHz",
+                              "deliveredHz",
+                              "delivered",
+                              "requested",
+                              "active",
+                              "feasible",
+                              "missed",
+                              "faults",
+                              "cached",
+                              "notStarted",
+                              "copiedLate",
+                              "snapshotMaxUs",
+                              "copyMaxUs",
+                              "primaryFaults",
+                              "resourceFaults",
+                              "outputFaults",
+                              "triggerFaults",
+                              "duplicatePosts",
+                              "step0WakeUs",
+                              "step0WakeMaxUs",
+                              "step0AdvanceUs",
+                              "copyBudgetUs",
+                              "snapshotBudgetUs",
+                              "lastPrimaryDelta",
+                              "lastIntervalUs",
+                              "lastOutputDelta",
+                              "lastFaultAgeSec",
+                              "cameraJitterUs",
+                              "cameraMinUs",
+                              "cameraMaxUs",
+                              "cameraAgeSec",
+                              "primaryMeasuredHz",
+                              "faultIntervalUs",
+                              "faultPeriodUs",
+                              "faultResidualUs",
+                              "faultPrimaryCounter",
+                              "faultPublishUs",
+                              "faultPublishValid",
+                              "faultObserveExtraUs",
+                              "faultPrevCallbackUs",
+                              "faultCallbackGapUs",
+                              "faultEntryToCounterUs" } )
+    {
+        m_indiP_status.add( pcf::IndiElement( name ) );
+    }
+    REG_INDI_NEWPROP_NOCB( m_indiP_health, "health", pcf::IndiProperty::Text );
+    m_indiP_health.setPerm( pcf::IndiProperty::ReadOnly );
+    for( const auto &name :
+         { "reason", "lastFault", "periodSource", "primary", "combined", "timingStream", "mapping", "mode" } )
+    {
+        m_indiP_health.add( pcf::IndiElement( name ) );
+    }
+    if( !m_cameraDevice.empty() )
+    {
+        REG_INDI_SETPROP( m_indiP_camera, m_cameraDevice, m_cameraProperty );
+    }
+    state( stateCodes::READY );
+    TELEMETER_APP_STARTUP;
+    SHMIMMONITOR_APP_STARTUP;
+
+    if( m_combinerCadence.enabled() )
+    {
+        SHMIMMONITORT_APP_STARTUP( combinerMonitorT );
+    }
+
+    if( m_cameraCadence.enabled() || m_cameraPublicationCadence.enabled() )
+    {
+        SHMIMMONITORT_APP_STARTUP( cameraMonitorT );
+    }
+
+    if( readerReleaseMonitorEnabled() )
+    {
+        SHMIMMONITORT_APP_STARTUP( readerReleaseMonitorT );
+    }
+
+    if( !zeroEngine() && m_readerTiming.enabled() )
+    {
+        SHMIMMONITORT_APP_STARTUP( completionMonitorT );
+    }
+
+    return 0;
+}
+
+inline int dmSyncopation::appLogic()
+{
+    const auto loopBegan = m_now();
+    m_logicTiming.gapNs =
+        m_logicTiming.previousNs > 0 ? std::max<int64_t>( 0, loopBegan - m_logicTiming.previousNs ) : 0;
+    m_logicTiming.maxGapNs   = std::max( m_logicTiming.maxGapNs, m_logicTiming.gapNs );
+    m_logicTiming.previousNs = loopBegan;
+    ++m_logicTiming.sequence;
+    m_logicTiming.lastNs.fill( 0 );
+    m_logicTiming.drainedLast = 0;
+    auto began                = m_now();
+    updateZeroTest( false );
+    recordLogicStage( LogicStage::status, began );
+    drainZeroTestEvents();
+
+    began = m_now();
+    SHMIMMONITOR_APP_LOGIC;
+    m_primaryCadence.update( m_now() );
+    updatePrimaryCadenceINDI();
+    recordLogicStage( LogicStage::primary, began );
+    drainZeroTestEvents();
+
+    began = m_now();
+    m_combinerCadence.update( m_now() );
+    updateCombinerCadenceINDI();
+    recordLogicStage( LogicStage::combiner, began );
+    drainZeroTestEvents();
+
+    began = m_now();
+    m_cameraCadence.update( m_now() );
+    updateCadenceINDI( m_cameraCadence, m_indiP_cameraTiming, m_indiP_cameraQuality, "acquisition_" );
+    updatePairsINDI( m_cameraCadence, m_indiP_cameraPairs );
+    m_cameraPublicationCadence.update( m_now() );
+    updateCadenceINDI(
+        m_cameraPublicationCadence, m_indiP_cameraWriteTiming, m_indiP_cameraWriteQuality, "publication_" );
+    updatePairsINDI( m_cameraPublicationCadence, m_indiP_cameraWritePairs );
+    recordLogicStage( LogicStage::camera, began );
+    drainZeroTestEvents();
+
+    began = m_now();
+    m_pipelineCadence.update( m_now() );
+    updatePipelineINDI();
+    recordLogicStage( LogicStage::pipeline, began );
+    drainZeroTestEvents();
+
+    began = m_now();
+    if( !zeroEngine() )
+    {
+        m_readerTiming.update( m_now() );
+        m_readerReleaseTiming.update( m_now() );
+        updateReaderTimingINDI();
+    }
+
+    if( readerReleaseMonitorEnabled() )
+    {
+        SHMIMMONITORT_APP_LOGIC( readerReleaseMonitorT );
+        SHMIMMONITORT_UPDATE_INDI( readerReleaseMonitorT );
+    }
+
+    if( !zeroEngine() && m_readerTiming.enabled() )
+    {
+        SHMIMMONITORT_APP_LOGIC( completionMonitorT );
+        SHMIMMONITORT_UPDATE_INDI( completionMonitorT );
+    }
+
+    recordLogicStage( LogicStage::readers, began );
+    drainZeroTestEvents();
+    began = m_now();
+
+    if( m_combinerCadence.enabled() )
+    {
+        SHMIMMONITORT_APP_LOGIC( combinerMonitorT );
+        SHMIMMONITORT_UPDATE_INDI( combinerMonitorT );
+    }
+
+    recordLogicStage( LogicStage::combiner, began );
+    drainZeroTestEvents();
+    began = m_now();
+
+    if( m_cameraCadence.enabled() || m_cameraPublicationCadence.enabled() )
+    {
+        SHMIMMONITORT_APP_LOGIC( cameraMonitorT );
+        SHMIMMONITORT_UPDATE_INDI( cameraMonitorT );
+    }
+
+    recordLogicStage( LogicStage::camera, began );
+    drainZeroTestEvents();
+    began = m_now();
+    { //mutex scope
+        std::unique_lock<std::mutex> lock( m_cycleMutex, std::try_to_lock );
+        if( lock.owns_lock() )
+        {
+            readCamera();
+
+            if( m_simulationEnabled )
+            {
+                updateSimulationCadence();
+                const auto evaluatedAt = m_now();
+                drainSimulationRelease( evaluatedAt );
+                m_simulation.advance( evaluatedAt );
+                m_simulationSnapshot = m_simulation.summary();
+                m_simulationReleaseQueued =
+                    m_simulationReleaseQueue.queued() + size_t( m_simulationReleaseHavePending );
+                m_simulationTraceStatus     = m_simulation.traceStatus();
+                m_simulationEstimatorStatus = m_simulation.estimatorStatus();
+                m_simulationMainWaitStatus  = m_simulation.mainWaitStatus();
+                m_reason = m_simulationSnapshot.valid ? "simulation observing" : "simulation warming or stale";
+            }
+
+            if( m_productionEnabled && m_enabled && m_zeroClockCounter && m_previousCallbackEnd > 0 &&
+                m_now() - m_previousCallbackEnd > int64_t( 2e9 / m_minRate ) )
+            {
+                ++m_generation;
+                m_zeroStats.active  = false;
+                m_zeroStats.warming = true;
+                m_primed            = false;
+                m_scheduleState     = synco::acquiring;
+                configureZeroTest();
+                publishSchedule( 0, -1 );
+                m_reason = "production main timeout; reacquiring";
+            }
+            if( !zeroEngine() && m_enabled && m_lastMain && m_now() - m_lastMain > int64_t( 2e9 / m_minRate ) )
+            {
+                invalidate( "main timeout", Fault::primary );
+            }
+            const int64_t  now       = m_now();
+            const uint64_t delivered = m_mainDelivered + m_delivered;
+            if( m_reportTime && now > m_reportTime && delivered >= m_reportedDelivered )
+            {
+                m_deliveredHz = 1e9 * ( delivered - m_reportedDelivered ) / ( now - m_reportTime );
+            }
+            else
+            {
+                m_deliveredHz = 0;
+            }
+            m_reportTime                    = now;
+            m_reportedDelivered             = delivered;
+            const auto               status = m_scheduleState == synco::armed ? INDI_OK : INDI_IDLE;
+            std::vector<std::string> settingNames{ "steps", "maxCadenceHz", "keepoutUs", "guardUs", "step0LeadUs" };
+            std::vector<double>      settingValues{ double( m_requested ),
+                                               m_maxCadence,
+                                               m_bounds.keepout / 1000.0,
+                                               m_bounds.guard / 1000.0,
+                                               m_bounds.lead / 1000.0 };
+            if( m_productionEnabled )
+            {
+                settingNames.resize( 2 );
+                settingValues.resize( 2 );
+            }
+            const std::vector<std::string> names{ "mainHz",
+                                                  "cameraHz",
+                                                  "plannedHz",
+                                                  "deliveredHz",
+                                                  "delivered",
+                                                  "requested",
+                                                  "active",
+                                                  "feasible",
+                                                  "missed",
+                                                  "faults",
+                                                  "cached",
+                                                  "notStarted",
+                                                  "copiedLate",
+                                                  "snapshotMaxUs",
+                                                  "copyMaxUs",
+                                                  "primaryFaults",
+                                                  "resourceFaults",
+                                                  "outputFaults",
+                                                  "triggerFaults",
+                                                  "duplicatePosts",
+                                                  "step0WakeUs",
+                                                  "step0WakeMaxUs",
+                                                  "step0AdvanceUs",
+                                                  "copyBudgetUs",
+                                                  "snapshotBudgetUs",
+                                                  "lastPrimaryDelta",
+                                                  "lastIntervalUs",
+                                                  "lastOutputDelta",
+                                                  "lastFaultAgeSec",
+                                                  "cameraJitterUs",
+                                                  "cameraMinUs",
+                                                  "cameraMaxUs",
+                                                  "cameraAgeSec",
+                                                  "primaryMeasuredHz",
+                                                  "faultIntervalUs",
+                                                  "faultPeriodUs",
+                                                  "faultResidualUs",
+                                                  "faultPrimaryCounter",
+                                                  "faultPublishUs",
+                                                  "faultPublishValid",
+                                                  "faultObserveExtraUs",
+                                                  "faultPrevCallbackUs",
+                                                  "faultCallbackGapUs",
+                                                  "faultEntryToCounterUs" };
+            const std::vector<double>      values{
+                1e9 / m_period,
+                m_cameraReport.m_fps,
+                m_requested * 1e9 / m_period,
+                m_deliveredHz,
+                double( m_delivered ),
+                double( m_requested ),
+                m_primed ? double( m_requested ) : 0,
+                double( m_feasible ),
+                double( m_missed ),
+                double( m_faults ),
+                double( m_cached ),
+                double( m_notStarted ),
+                double( m_copiedLate ),
+                m_snapshotMax / 1000.0,
+                m_copyMax / 1000.0,
+                double( m_faultCounts[size_t( Fault::primary )] ),
+                double( m_faultCounts[size_t( Fault::resource )] ),
+                double( m_faultCounts[size_t( Fault::output )] ),
+                double( m_faultCounts[size_t( Fault::trigger )] ),
+                double( m_duplicatePosts ),
+                m_step0Wake / 1000.0,
+                m_step0WakeMax / 1000.0,
+                m_advances[0] / 1000.0,
+                m_bounds.copy / 1000.0,
+                m_bounds.snapshot / 1000.0,
+                double( m_lastPrimaryDelta ),
+                m_lastPrimaryInterval / 1000.0,
+                double( m_lastOutputDelta ),
+                m_lastFaultNs ? ( now - m_lastFaultNs ) / 1e9 : -1,
+                m_cameraReport.m_jitterUs,
+                m_cameraReport.m_minUs,
+                m_cameraReport.m_maxUs,
+                m_cameraReport.m_received > 0 ? ( now - m_cameraReport.m_received ) / 1e9 : -1,
+                m_measuredPeriod > 0 ? 1e9 / m_measuredPeriod : 0,
+                m_faultInterval / 1000.0,
+                m_faultPeriod / 1000.0,
+                m_faultPeriod ? ( m_faultInterval - m_faultPeriod ) / 1000.0 : 0,
+                double( m_faultTiming.m_counter ),
+                m_faultTiming.m_publication > 0 ? m_faultTiming.m_publication / 1000.0 : -1,
+                m_faultTiming.m_publication > 0 ? 1.0 : 0.0,
+                m_faultTiming.m_publication > 0
+                         ? ( double( m_faultInterval ) - double( m_faultTiming.m_publication ) ) / 1000.0
+                         : -1,
+                m_faultTiming.m_previousRuntime >= 0 ? m_faultTiming.m_previousRuntime / 1000.0 : -1,
+                m_faultTiming.m_gap >= 0 ? m_faultTiming.m_gap / 1000.0 : -1,
+                m_faultTiming.m_sampleDelay >= 0 ? m_faultTiming.m_sampleDelay / 1000.0 : -1 };
+            const std::string reason       = m_reason;
+            const std::string lastFault    = m_lastFaultReason;
+            const std::string periodSource = m_periodSource;
+            std::string       mappings;
+            for( const auto &name : m_destinations )
+            {
+                mappings += ( mappings.empty() ? "" : ", " ) + name + "_aux -> " + name;
+            }
+            lock.unlock(); // Never hold the cycle mutex across INDI driver I/O.
+            updateIfChanged( m_indiP_settings, settingNames, settingValues );
+            updateIfChanged( m_indiP_status, names, values, status );
+            updateIfChanged( m_indiP_health, "reason", reason );
+            updateIfChanged( m_indiP_health, "lastFault", lastFault );
+            updateIfChanged( m_indiP_health, "periodSource", periodSource );
+            updateIfChanged( m_indiP_health, "primary", shmimMonitorT::m_shmimName );
+            updateIfChanged( m_indiP_health, "combined", m_combinedName );
+            updateIfChanged( m_indiP_health, "timingStream", m_timingName );
+            updateIfChanged( m_indiP_health, "mapping", mappings );
+            const std::string mode =
+                m_productionEnabled ? "production providers"
+                : m_zeroTestEnabled
+                    ? "coordinated zero test"
+                    : ( m_simulationEnabled ? "shadow simulation"
+                                            : ( m_diagnosticsOnly ? "diagnostics only" : "scheduler" ) );
+            updateIfChanged( m_indiP_health, "mode", mode );
+            updateSimulationINDI();
+        }
+    }
+    recordLogicStage( LogicStage::legacy, began );
+    drainZeroTestEvents();
+    began = m_now();
+    updateZeroTest();
+    updateProductionINDI();
+    SHMIMMONITOR_UPDATE_INDI;
+    recordLogicStage( LogicStage::status, began );
+
+    began = m_now();
+
+    if( m_primaryCadence.enabled() || m_combinerCadence.enabled() || m_cameraCadence.enabled() ||
+        m_cameraPublicationCadence.enabled() || m_pipelineCadence.enabled() )
+    {
+        recordTelem( nullptr );
+    }
+
+    TELEMETER_APP_LOGIC;
+    recordLogicStage( LogicStage::telemetry, began );
+    drainZeroTestEvents();
+    began = m_now();
+    updateZeroTest( false );
+    recordLogicStage( LogicStage::status, began );
+    updateLogicTimingINDI();
+    return 0;
+}
+
+inline int dmSyncopation::appShutdown()
+{
+    m_enabled = false;
+    SHMIMMONITOR_APP_SHUTDOWN;
+
+    if( m_combinerCadence.enabled() )
+    {
+        SHMIMMONITORT_APP_SHUTDOWN( combinerMonitorT );
+    }
+
+    if( m_cameraCadence.enabled() || m_cameraPublicationCadence.enabled() )
+    {
+        SHMIMMONITORT_APP_SHUTDOWN( cameraMonitorT );
+    }
+
+    if( readerReleaseMonitorEnabled() )
+    {
+        SHMIMMONITORT_APP_SHUTDOWN( readerReleaseMonitorT );
+    }
+
+    if( !zeroEngine() && m_readerTiming.enabled() )
+    {
+        SHMIMMONITORT_APP_SHUTDOWN( completionMonitorT );
+    }
+
+    m_primaryTraceInode.store( 0, std::memory_order_release );
+    TELEMETER_APP_SHUTDOWN;
+    std::lock_guard<std::mutex> lock( m_cycleMutex );
+    invalidate( "shutdown" );
+    closeResources();
+    closeZeroTest();
+    m_zeroStats.active = m_zeroStats.warming = false;
+
+    if( m_zeroStats.startedNs && !m_zeroStats.stoppedNs )
+    {
+        m_zeroStats.stoppedNs = m_now();
+    }
+
+    publishZeroTestStatus( m_now(), true );
+    return 0;
+}
+
+inline int dmSyncopation::checkRecordTimes()
+{
+    return telemeterT::checkRecordTimes( telem_dmsynco() );
+}
+
+inline int dmSyncopation::recordTelem( const telem_dmsynco *record )
+{
+    static_cast<void>( record );
+    int                                   state     = synco::invalid;
+    int                                   count     = 0;
+    int64_t                               period    = 0;
+    uint64_t                              delivered = 0, missed = 0, faults = 0, cached = 0;
+    int64_t                               snapshot = 0, copy = 0;
+    std::array<int64_t, synco::maxSteps>  residualSnapshot{}, advanceSnapshot{};
+    bool                                  scheduleValid = false;
+    MagAOX::dmSyncoSimulation::TraceBatch trace;
+
+    { //mutex scope
+        std::unique_lock<std::mutex> lock( m_cycleMutex, std::try_to_lock );
+
+        if( lock.owns_lock() && m_simulationEnabled )
+        {
+            m_simulationSnapshot      = m_simulation.summary();
+            m_simulationReleaseQueued = m_simulationReleaseQueue.queued() + size_t( m_simulationReleaseHavePending );
+
+            while( trace.count < trace.events.size() && m_simulation.popOverlap( trace.events[trace.count] ) )
+            {
+                ++trace.count;
+            }
+
+            trace.status            = m_simulation.traceStatus();
+            trace.status.logFailed  = m_simulationTraceLogFailed;
+            m_simulationTraceStatus = trace.status;
+
+            while( trace.estimatorCount < trace.estimator.size() &&
+                   m_simulation.popEstimator( trace.estimator[trace.estimatorCount] ) )
+            {
+                ++trace.estimatorCount;
+            }
+
+            while( trace.mainWaitCount < trace.mainWait.size() &&
+                   m_simulation.popMainWait( trace.mainWait[trace.mainWaitCount] ) )
+            {
+                ++trace.mainWaitCount;
+            }
+
+            trace.mainWaitStatus           = m_simulation.mainWaitStatus();
+            trace.mainWaitStatus.logFailed = m_simulationMainWaitLogFailed;
+            m_simulationMainWaitStatus     = trace.mainWaitStatus;
+
+            trace.estimatorStatus           = m_simulation.estimatorStatus();
+            trace.estimatorStatus.logFailed = m_simulationEstimatorLogFailed;
+            m_simulationEstimatorStatus     = trace.estimatorStatus;
+        }
+
+        if( lock.owns_lock() && !m_diagnosticsOnly && !m_simulationEnabled && !zeroEngine() )
+        {
+            scheduleValid    = true;
+            state            = m_scheduleState;
+            count            = m_requested;
+            period           = m_period;
+            delivered        = m_delivered;
+            missed           = m_missed;
+            faults           = m_faults;
+            cached           = m_cached;
+            snapshot         = m_snapshotMax;
+            copy             = m_copyMax;
+            residualSnapshot = m_residuals;
+            advanceSnapshot  = m_advances;
+        }
+    }
+
+    if( !m_simulationEnabled && !scheduleValid && !m_primaryCadence.enabled() && !m_combinerCadence.enabled() &&
+        !m_cameraCadence.enabled() && !m_cameraPublicationCadence.enabled() && !m_pipelineCadence.enabled() )
+    {
+        return 0;
+    }
+
+    try
+    {
+        const std::vector<int64_t> residuals( residualSnapshot.begin(), residualSnapshot.begin() + count );
+        const std::vector<int64_t> advances( advanceSnapshot.begin(), advanceSnapshot.begin() + count );
+        telem_dmsynco::messageT    message( state,
+                                         count,
+                                         period,
+                                         delivered,
+                                         missed,
+                                         faults,
+                                         cached,
+                                         snapshot,
+                                         copy,
+                                         residuals,
+                                         advances,
+                                         m_primaryCadence.summary(),
+                                         scheduleValid,
+                                         m_combinerCadence.summary(),
+                                         m_cameraCadence.summary(),
+                                         m_pipelineCadence.summary(),
+                                         m_cameraPublicationCadence.summary(),
+                                         m_simulationSnapshot,
+                                         trace,
+                                         m_readerTiming.summary(),
+                                         m_readerReleaseTiming.summary() );
+
+        if( telem<telem_dmsynco>( message ) < 0 )
+        {
+            m_simulationTraceLogFailed += trace.count;
+            m_simulationEstimatorLogFailed += trace.estimatorCount;
+            m_simulationMainWaitLogFailed += trace.mainWaitCount;
+            return -1;
+        }
+    }
+    catch( ... )
+    {
+        m_simulationTraceLogFailed += trace.count;
+        m_simulationEstimatorLogFailed += trace.estimatorCount;
+        m_simulationMainWaitLogFailed += trace.mainWaitCount;
+        throw;
+    }
+
+    return 0;
+}
+
+INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_enable )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_enable, ipRecv );
+    if( ipRecv.getType() != pcf::IndiProperty::Switch || !ipRecv.find( "toggle" ) || ipRecv.getElements().size() != 1 )
+    {
+        return -1;
+    }
+    const bool enable = ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On;
+
+    if( enable && ( m_diagnosticsOnly || m_simulationEnabled ) )
+    {
+        return -1;
+    }
+
+    if( !enable )
+    {
+        m_enabled = false;
+    }
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_cycleMutex );
+        if( zeroEngine() )
+        {
+            if( !enable )
+            {
+                m_zeroArmed         = false;
+                m_zeroStats.active  = false;
+                m_zeroStats.warming = false;
+                if( !m_zeroStats.stoppedNs )
+                {
+                    m_zeroStats.stoppedNs = m_now();
+                }
+                m_reason = m_productionEnabled ? "production disabled" : "zero trial disabled";
+            }
+            else if( !m_enabled )
+            {
+                ++m_generation;
+                if( m_productionEnabled )
+                {
+                    m_reportTime        = 0;
+                    m_reportedDelivered = 0;
+                }
+                m_zeroStats         = {};
+                m_zeroStats.warming = true;
+                m_zeroArmedAt       = m_now();
+                m_zeroTiming.reset();
+                m_zeroPhase.reset();
+                m_zeroPublicationTiming.reset();
+                ++m_zeroTrial;
+                m_zeroArmed = true;
+                m_reason =
+                    m_productionEnabled ? "production clock/ownership warming" : "zero trial clock/ownership warming";
+            }
+        }
+        else if( !m_simulationEnabled )
+        {
+            invalidate( enable ? "acquiring" : "disabled" );
+        }
+        m_lastMain       = 0;
+        m_trackingOutput = false;
+        m_enabled        = enable;
+        if( m_productionEnabled )
+        {
+            m_primed        = false;
+            m_scheduleState = enable ? synco::acquiring : synco::invalid;
+            publishSchedule( 0, -1 );
+        }
+        publishZeroTestStatus( m_now(), true );
+    }
+    const bool actualEnable = m_enabled.load( std::memory_order_acquire );
+    updateSwitchIfChanged( m_indiP_enable,
+                           "toggle",
+                           actualEnable ? pcf::IndiElement::On : pcf::IndiElement::Off,
+                           actualEnable ? INDI_BUSY : INDI_IDLE );
+    return 0;
+}
+
+INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_reacquire )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_reacquire, ipRecv );
+    if( ipRecv.getType() != pcf::IndiProperty::Switch || !ipRecv.find( "request" ) || ipRecv.getElements().size() != 1 )
+    {
+        return -1;
+    }
+    if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On )
+    {
+        std::lock_guard<std::mutex> lock( m_cycleMutex );
+
+        if( zeroEngine() )
+        {
+            m_enabled = false;
+            closeZeroTest();
+            ++m_generation;
+            configureZeroTest();
+        }
+        else if( m_simulationEnabled )
+        {
+            resetSimulation();
+        }
+        else
+        {
+            invalidate( "reacquire requested" );
+        }
+        m_lastMain       = 0;
+        m_trackingOutput = false;
+        publishZeroTestStatus( m_now(), true );
+    }
+    updateSwitchIfChanged( m_indiP_reacquire, "request", pcf::IndiElement::Off, INDI_IDLE );
+    return 0;
+}
+
+INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_settings )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_settings, ipRecv );
+    if( ipRecv.getType() != pcf::IndiProperty::Number || ipRecv.getElements().empty() )
+    {
+        return -1;
+    }
+    std::unique_lock<std::mutex> lock( m_cycleMutex );
+    if( m_enabled )
+    {
+        return -1;
+    }
+    int    requested   = m_requested;
+    double cadence     = m_maxCadence;
+    double duration    = m_zeroDurationSec;
+    bool   reconfigure = false;
+    auto   bounds      = m_bounds;
+    for( const auto &element : ipRecv.getElements() )
+    {
+        const auto  &name  = element.first;
+        const double value = element.second.get<double>();
+        if( !finite( value ) || value < 0 || value > 1e6 )
+        {
+            return -1;
+        }
+        reconfigure = reconfigure || name != "durationSec";
+
+        if( name == "durationSec" )
+        {
+            if( !m_zeroTestEnabled || value <= 0 || value > m_zeroDurationLimitSec )
+            {
+                return -1;
+            }
+
+            duration = value;
+        }
+        else if( name == "steps" )
+        {
+            if( value < 1 || value > synco::maxSteps || value != std::floor( value ) )
+            {
+                return -1;
+            }
+            requested = int( value );
+        }
+        else if( name == "maxCadenceHz" )
+        {
+            if( value == 0 )
+            {
+                return -1;
+            }
+            cadence = value;
+        }
+        else if( m_productionEnabled )
+        {
+            return -1;
+        }
+        else if( name == "keepoutUs" )
+        {
+            bounds.keepout = int64_t( std::ceil( value * 1000 ) );
+        }
+        else if( name == "guardUs" )
+        {
+            bounds.guard = int64_t( std::ceil( value * 1000 ) );
+        }
+        else if( name == "step0LeadUs" )
+        {
+            bounds.lead = int64_t( std::ceil( value * 1000 ) );
+        }
+        else
+        {
+            return -1;
+        }
+    }
+    const int    previousRequested = m_requested;
+    const double previousCadence   = m_maxCadence;
+    const double previousDuration  = m_zeroDurationSec;
+    const auto   previousBounds    = m_bounds;
+    m_requested                    = requested;
+    m_maxCadence                   = cadence;
+    m_bounds                       = bounds;
+    m_zeroDurationSec              = duration;
+    if( zeroEngine() )
+    {
+        if( requested < ( m_productionEnabled ? 1 : 2 ) || requested > 4 || ( reconfigure && !configureZeroTest() ) )
+        {
+            m_requested       = previousRequested;
+            m_maxCadence      = previousCadence;
+            m_bounds          = previousBounds;
+            m_zeroDurationSec = previousDuration;
+            return -1;
+        }
+    }
+    else if( m_simulationEnabled )
+    {
+        if( !configureSimulation() )
+        {
+            m_requested       = previousRequested;
+            m_maxCadence      = previousCadence;
+            m_bounds          = previousBounds;
+            m_zeroDurationSec = previousDuration;
+            return -1;
+        }
+    }
+    else
+    {
+        invalidate( "disabled settings changed" );
+    }
+    publishZeroTestStatus( m_now(), true );
+    lock.unlock(); // Property I/O must not hold cycle ownership.
+
+    if( m_zeroTestEnabled && m_indiP_settings.find( "durationSec" ) )
+    {
+        updateIfChanged( m_indiP_settings, "durationSec", duration );
+    }
+
+    return 0;
+}
+
+INDI_SETCALLBACK_DEFN( dmSyncopation, m_indiP_camera )( const pcf::IndiProperty &ipRecv )
+{
+    if( ipRecv.getType() != pcf::IndiProperty::Number || m_cameraDevice.empty() ||
+        ipRecv.getDevice() != m_cameraDevice || ipRecv.getName() != m_cameraProperty ||
+        !ipRecv.find( m_cameraElement ) )
+    {
+        return -1;
+    }
+    double      values[]{ 0, -1, -1, -1 };
+    const char *names[]{ m_cameraElement.c_str(), "acq_jitter", "acq_min", "acq_max" };
+    for( size_t j = 0; j < 4; ++j )
+    {
+        if( !ipRecv.find( names[j] ) )
+        {
+            continue;
+        }
+        // IndiElement's numeric getter does not report failed or partial conversions.
+        std::istringstream input( ipRecv[names[j]].getValue() );
+        if( !( input >> values[j] ) || !( input >> std::ws ).eof() || !finite( values[j] ) ||
+            ( j == 0 ? ( values[j] <= 0 || values[j] > 100000 ) : ( values[j] < 0 || values[j] > 1000000 ) ) )
+        {
+            return -1;
+        }
+    }
+    if( values[2] >= 0 && values[3] >= 0 && values[2] > values[3] )
+    {
+        return -1;
+    }
+    std::lock_guard<std::mutex> lock( m_cameraMutex );
+    m_cameraFps      = values[0];
+    m_cameraTime     = m_now();
+    m_cameraJitterUs = values[1] >= 0 ? values[1] * 1e6 : -1;
+    m_cameraMinUs    = values[2] >= 0 ? values[2] * 1e6 : -1;
+    m_cameraMaxUs    = values[3] >= 0 ? values[3] * 1e6 : -1;
+    return 0;
+}
+
+} // namespace app
+} // namespace MagAOX
+
+#include "dmSyncopationProduction.hpp"
+#include "dmSyncopationZeroTest.hpp"
+#endif

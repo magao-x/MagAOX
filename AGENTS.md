@@ -141,3 +141,9 @@ Follow these code style and documentation rules exactly.
 - Summarize what changed.
 - List affected files.
 - Note any follow-up items or potential edge cases.
+
+26) Control-Flow Braces and Logical Spacing
+  - Always use explicit braces for `if`, `else`, `for`, `while`, and `do` bodies, including single-statement bodies.
+  - Use the existing Allman brace style; do not compress control bodies onto one line.
+  - Leave a blank line between setup statements and the following control block, and between a completed block and the next logical operation.
+  - Separate logical groups of declarations or operations with blank lines; keep closely related operations together.
