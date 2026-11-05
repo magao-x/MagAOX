@@ -389,7 +389,7 @@ int streamCircBuff::allocate( const dev::shmimT &dummy )
 {
     static_cast<void>( dummy );
 
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_stageMutex );
         m_staged.resize( shmimMonitorT::m_width * shmimMonitorT::m_height * shmimMonitorT::m_typeSize );
         m_stagedFresh = false;
@@ -407,7 +407,7 @@ int streamCircBuff::processImage( void *curr_src, const dev::shmimT &dummy )
 
     IMAGE &src = shmimMonitorT::m_imageStream;
 
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_stageMutex );
 
         size_t frameBytes = m_staged.size();
@@ -491,7 +491,7 @@ int streamCircBuff::configureAcquisition()
     std::unique_lock<std::mutex> lock( m_indiMutex );
 
     ///\todo potential but verrrrry unlikely bug: shmimMonitorT could change these before allocate sets the lock above.
-    ///Should use a local set of w/h instead.
+    /// Should use a local set of w/h instead.
     if( shmimMonitorT::m_width == 0 || shmimMonitorT::m_height == 0 )
     {
         // This means we haven't connected to the stream to accumulate. so wait.
