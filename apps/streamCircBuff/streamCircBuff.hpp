@@ -35,6 +35,10 @@ namespace app
  * that it keeps increasing when the source restarts.  A single-frame source frame which is rewritten during
  * the copy is dropped, and the number of such frames is logged.
  *
+ * The output keeps the source data type unless `circBuff.toFloat` is set, e.g. for modalPSDs, which reads
+ * float.  The source frame rate is measured from the source acquisition times and counters, and published
+ * as `fps.current`, so it can be used as the fps source of readers such as modalPSDs.
+ *
  * \ingroup streamCircBuff
  */
 class streamCircBuff : public MagAOXApp<true>,
