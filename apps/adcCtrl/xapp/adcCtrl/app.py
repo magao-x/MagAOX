@@ -822,6 +822,7 @@ class CameraConfig:
     """A science camera and the filter wheel in front of it."""
     shmim : str = xconf.field(help="Name of the camera device (and its shmim)")
     filter_wheel : str = xconf.field(help="INDI device name of the filter wheel used with this camera")
+    ke_star_hint : list[float] = xconf.field(default_factory=list, help="Optional rough star position [x, y] in frame pixels with the knife edge in; only seeds single-spot knife-edge mode")
 
 
 def _default_cameras():
@@ -874,6 +875,19 @@ class AdcCtrlConfig(BaseConfig):
     min_valid_fraction : float = xconf.field(default=0.5, help="Minimum fraction of valid measurements needed to act on a batch")
     camera_retry_sec : float = xconf.field(default=10.0, help="Interval between attempts to open the camera")
     startup_grace_sec : float = xconf.field(default=60.0, help="After startup, missing INDI devices and camera are logged at DEBUG only, while the INDI server comes up")
+    ke_spots : list[int] = xconf.field(default_factory=lambda: [0, 3], help="Knife-edge mode: spots measured at startup, one spot or two adjacent spots (0-3)")
+    ke_gain : float = xconf.field(default=-0.62, help="Knife-edge mode: initial scalar from m residual to dispersion error; provisional, derived from the 2026-10-25 DM-spot calibration for spots 0 and 3, scaled so the same loop_sign works in both modes")
+    ke_setpoint : float = xconf.field(default=0.0, help="Knife-edge mode: set point for m at startup [deg]")
+    ke_setpoint_max_age_hr : float = xconf.field(default=24.0, help="Knife-edge mode: a set point older than this is reported on entering the mode [hours]")
+    ke_edge_margin : float = xconf.field(default=1.5, help="Knife-edge mode: half-plane mask line above the estimated star [lambda/D]")
+    ke_spot_clearance : float = xconf.field(default=1.5, help="Knife-edge mode: the mask line is kept at least this far below each selected spot [lambda/D]")
+    ke_min_sensitivity : float = xconf.field(default=0.5, help="Knife-edge mode: a spot selection with a lower relative sensitivity is reported (not refused)")
+    ke_pair_tolerance : float = xconf.field(default=0.1, help="Knife-edge mode: fractional tolerance on spot spacing and separation when matching spots")
+    ke_brightness_ratio : float = xconf.field(default=3.0, help="Knife-edge mode: largest brightness ratio between two spots accepted as a pair")
+    ke_max_star_jump : float = xconf.field(default=3.0, help="Knife-edge mode: largest star move between frames before the spot lock is dropped [lambda/D]")
+    ke_track_box : float = xconf.field(default=3.0, help="Knife-edge mode: half-width of the box searched around each locked spot [lambda/D]")
+    ke_highpass : float = xconf.field(default=2.0, help="Knife-edge mode: sigma of the smoothed copy subtracted before the spot search [lambda/D]")
+    ke_hint_tolerance : float = xconf.field(default=5.0, help="Knife-edge mode: half-width of the box searched around a spot predicted from ke_star_hint [lambda/D]")
 
 
 class States(Enum):
@@ -894,6 +908,12 @@ STATE_ELEMENTS = {
 
 # INDI `loop_sign` switch element name -> multiplier applied to each step
 LOOP_SIGNS = {"positive": 1.0, "negative": -1.0}
+
+# INDI `coronagraph` switch element name -> True for knife-edge mode
+CORONAGRAPHS = {"standard": False, "knife_edge": True}
+
+# INDI `ke_spots` switch element names, by spot index
+KE_SPOT_ELEMENTS = [f"spot{n}" for n in range(4)]
 
 
 def requested_switch(new_message, names):
@@ -972,6 +992,17 @@ class adcCtrl(XDevice):
         # Sparkle separation [lambda/D] and pattern angle [deg] from tweeterSpeck
         self._sparkle_freq = 15.0
         self._sparkle_angle = 0.0
+        # Selected filter wheel element, None if no listed filter is selected
+        self._filter_name = None
+        # True in knife-edge mode, changed through the `coronagraph` switch (idle only)
+        self._knife_edge = False
+        # Knife-edge spot selection in measurement order (see ke_spot_order)
+        self._ke_order = ke_spot_order(self.config.ke_spots)
+        # Knife-edge scalar from m residual to dispersion error
+        self._ke_gain = float(self.config.ke_gain)
+        # Last knife-edge spot lock (KnifeEdgeLocation), and the context it is valid for
+        self._ke_lock = None
+        self._ke_lock_key = None
 
     def external_devices(self):
         """INDI devices this app reads from or writes to."""
@@ -1055,6 +1086,41 @@ class adcCtrl(XDevice):
                 _value=constants.SwitchState.ON if name == self.config.loop_sign else constants.SwitchState.OFF,
             ))
         self.add_property(sv, callback=self.handle_loop_sign)
+
+        sv = properties.SwitchVector(
+            name="coronagraph",
+            rule=constants.SwitchRule.ONE_OF_MANY,
+            perm=constants.PropertyPerm.READ_WRITE,
+        )
+        for name, knife_edge in CORONAGRAPHS.items():
+            sv.add_element(DefSwitch(
+                name=name,
+                _value=constants.SwitchState.ON if knife_edge == self._knife_edge else constants.SwitchState.OFF,
+            ))
+        self.add_property(sv, callback=self.handle_coronagraph)
+
+        sv = properties.SwitchVector(
+            name="ke_spots",
+            rule=constants.SwitchRule.ANY_OF_MANY,
+            perm=constants.PropertyPerm.READ_WRITE,
+        )
+        for n, name in enumerate(KE_SPOT_ELEMENTS):
+            sv.add_element(DefSwitch(
+                name=name,
+                _value=constants.SwitchState.ON if n in self._ke_order else constants.SwitchState.OFF,
+            ))
+        self.add_property(sv, callback=self.handle_ke_spots)
+
+        nv = properties.NumberVector(name="ke_gain")
+        nv.add_element(DefNumber(
+            name="current", label="Knife-edge gain", format="%.4f",
+            min=-100.0, max=100.0, step=0.0001, _value=self._ke_gain
+        ))
+        nv.add_element(DefNumber(
+            name="target", label="Knife-edge gain", format="%.4f",
+            min=-100.0, max=100.0, step=0.0001, _value=self._ke_gain
+        ))
+        self.add_property(nv, callback=self.handle_ke_gain)
 
         sv = properties.SwitchVector(
             name="satellite_spots",
@@ -1153,9 +1219,11 @@ class adcCtrl(XDevice):
         """Refresh the filter wavelength and sparkle geometry from other devices."""
         wheel = self.config.cameras[self._camera_name].filter_wheel
         wavelength = self.config.reference_wavelength
+        self._filter_name = None
         for name, filter_wavelength in self.config.filter_wavelengths.items():
             if self.ext(f"{wheel}.filterName.{name}") == constants.SwitchState.ON:
                 wavelength = filter_wavelength
+                self._filter_name = name
                 break
         self._normalized_wavelength = wavelength / self.config.reference_wavelength
 
@@ -1258,6 +1326,80 @@ class adcCtrl(XDevice):
             self._loop_sign = LOOP_SIGNS[target]
             self.log.info(f"loop sign set to {target}")
         self.update_property(existing_property)
+
+    def handle_coronagraph(self, existing_property, new_message):
+        """INDI callback for `coronagraph`: standard or knife-edge mode; idle only.
+
+        Changing mode leaves `delta_1` alone, so a set point can be captured
+        right after converging in standard mode.
+        """
+        target = requested_switch(new_message, CORONAGRAPHS)
+        if target is not None and CORONAGRAPHS[target] != self._knife_edge:
+            if self._state != States.IDLE:
+                self.log.warning("Coronagraph mode can only be changed while idle")
+            else:
+                for key in CORONAGRAPHS:
+                    existing_property[key] = constants.SwitchState.ON if key == target else constants.SwitchState.OFF
+                self._knife_edge = CORONAGRAPHS[target]
+                self._ke_lock = None
+                self.log.info(f"coronagraph mode set to {target}")
+                if self._knife_edge:
+                    self.check_indi_props()
+                    self.ke_mode_checks()
+        self.update_property(existing_property)
+
+    def handle_ke_spots(self, existing_property, new_message):
+        """INDI callback for `ke_spots`: the knife-edge spot selection.
+
+        One spot or two adjacent spots are accepted; anything else is refused
+        with a warning and the previous selection kept. A spot in the blocked
+        half or a low-sensitivity selection is only reported.
+        """
+        selected = set(self._ke_order)
+        for n, name in enumerate(KE_SPOT_ELEMENTS):
+            if name in new_message:
+                if new_message[name] == constants.SwitchState.ON:
+                    selected.add(n)
+                else:
+                    selected.discard(n)
+        try:
+            order = ke_spot_order(selected)
+        except ValueError as e:
+            self.log.warning(f"ke_spots selection refused ({e}), keeping spots {list(self._ke_order)}")
+        else:
+            if order != self._ke_order:
+                self._ke_order = order
+                self.log.info(f"knife-edge spots set to {list(order)}")
+                self.ke_selection_checks()
+        for n, name in enumerate(KE_SPOT_ELEMENTS):
+            existing_property[name] = constants.SwitchState.ON if n in self._ke_order else constants.SwitchState.OFF
+        self.update_property(existing_property)
+
+    def handle_ke_gain(self, existing_property, new_message):
+        """INDI callback for `ke_gain`."""
+        if "target" in new_message and new_message["target"] != existing_property["current"]:
+            existing_property["current"] = new_message["target"]
+            existing_property["target"] = new_message["target"]
+            self._ke_gain = float(new_message["target"])
+            self.log.info(f"knife-edge gain changed to {self._ke_gain}")
+        self.update_property(existing_property)
+
+    def ke_selection_checks(self):
+        """Report (at INFO, never refuse) selected spots in the blocked half or a low sensitivity."""
+        angle = self.spot_geometry().angle
+        blocked = ke_blocked_spots(self._ke_order, angle)
+        if blocked:
+            self.log.info(f"knife-edge spots {blocked} are in the blocked half for a pattern angle of {angle:.1f} deg")
+        sensitivity = ke_sensitivity(self._ke_order, angle)
+        if abs(sensitivity) < self.config.ke_min_sensitivity:
+            self.log.info(
+                f"knife-edge spots {list(self._ke_order)} have a low sensitivity ({sensitivity:.2f}, "
+                f"below {self.config.ke_min_sensitivity}) for a pattern angle of {angle:.1f} deg"
+            )
+
+    def ke_mode_checks(self):
+        """Checks reported on entering knife-edge mode."""
+        self.ke_selection_checks()
 
     def handle_reset(self, existing_property, new_message):
         """INDI callback for `reset_deltaADCs`: queue zeroing of the ADC offsets."""

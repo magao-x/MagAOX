@@ -859,3 +859,106 @@ def test_loop_sign_flips_command():
         steps.append(dev.delta_1)
     assert steps[0] != 0.0
     assert abs(steps[0] + steps[1]) < 1e-12
+
+
+# --------------------------------------------------------------------------
+# Knife-edge device behavior
+# --------------------------------------------------------------------------
+
+def ke_client(angle=17.0, **kwargs):
+    """adc_client with tweeterSpeck sparkles at `angle`, as used with the knife edge."""
+    client = adc_client(**kwargs)
+    dict.__setitem__(client, "tweeterSpeck.angle.current", angle)
+    return client
+
+
+def recording_device(name, **kwargs):
+    """make_device with a RecordingHandler attached to its logger; returns (device, handler)."""
+    dev = make_device(**kwargs)
+    dev.log = logging.getLogger(name)
+    dev.log.setLevel(logging.DEBUG)
+    dev.log.handlers = []
+    handler = RecordingHandler()
+    dev.log.addHandler(handler)
+    return dev, handler
+
+
+def messages(handler, level, text):
+    """Messages logged at `level` containing `text`."""
+    return [m for lvl, m in handler.records if lvl == level and text in m]
+
+
+def test_coronagraph_switch_only_when_idle_and_keeps_delta1():
+    """The coronagraph mode changes only while idle, and leaves delta_1 alone."""
+    dev = make_device(client=ke_client())
+    assert dev._knife_edge is False
+    assert dev.properties["coronagraph"]["standard"] == ON
+    dev.set_command(0.4, 0.0)
+    send(dev, "state", adcLoop=ON)
+    send(dev, "coronagraph", knife_edge=ON)
+    assert dev._knife_edge is False
+    send(dev, "state", idle=ON)
+    send(dev, "coronagraph", knife_edge=ON)
+    assert dev._knife_edge is True
+    assert dev.properties["coronagraph"]["knife_edge"] == ON
+    assert dev.properties["coronagraph"]["standard"] == OFF
+    assert dev.delta_1 == 0.4
+    send(dev, "coronagraph", standard=ON)
+    assert dev._knife_edge is False
+    assert dev.delta_1 == 0.4
+
+
+def test_ke_spots_refuses_invalid_selections():
+    """ke_spots accepts one spot or two adjacent spots, and refuses anything else keeping the previous selection."""
+    dev = make_device(client=ke_client())
+    assert dev._ke_order == (0, 3)
+    assert [dev.properties["ke_spots"][f"spot{n}"] for n in range(4)] == [ON, OFF, OFF, ON]
+
+    send(dev, "ke_spots", spot2=ON)  # 0, 2, 3
+    assert dev._ke_order == (0, 3)
+    assert dev.properties["ke_spots"]["spot2"] == OFF
+    send(dev, "ke_spots", spot0=OFF)  # 3
+    assert dev._ke_order == (3,)
+    send(dev, "ke_spots", spot1=ON)  # 1, 3: opposite
+    assert dev._ke_order == (3,)
+    send(dev, "ke_spots", spot3=OFF)  # nothing
+    assert dev._ke_order == (3,)
+    send(dev, "ke_spots", spot0=ON, spot1=ON, spot2=OFF, spot3=OFF)  # full vector: 0, 1
+    assert dev._ke_order == (1, 0)
+    assert [dev.properties["ke_spots"][f"spot{n}"] for n in range(4)] == [ON, ON, OFF, OFF]
+
+    try:
+        make_device(ke_spots=[0, 2])
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("opposite spots accepted in the config")
+
+
+def test_ke_spots_reports_but_accepts_blocked_and_low_sensitivity():
+    """A blocked-half spot or a low-sensitivity selection is reported at INFO, not refused."""
+    dev, handler = recording_device("adcCtrl-test-ke-spots", client=ke_client(angle=17.0))
+    send(dev, "ke_spots", spot3=OFF)  # spot 0 alone: sensitivity sin(17) = 0.29
+    assert dev._ke_order == (0,)
+    assert len(messages(handler, logging.INFO, "low sensitivity")) == 1
+    send(dev, "ke_spots", spot1=ON)  # spots 0 and 1: spot 1 is in the blocked half
+    assert dev._ke_order == (1, 0)
+    assert len(messages(handler, logging.INFO, "blocked half")) == 1
+    assert handler.count(logging.WARNING) == 0
+
+
+def test_entering_knife_edge_reports_selection():
+    """Entering knife-edge mode reports a blocked or low-sensitivity selection."""
+    dev, handler = recording_device("adcCtrl-test-ke-enter", client=ke_client(angle=17.0), ke_spots=[0])
+    send(dev, "coronagraph", knife_edge=ON)
+    assert len(messages(handler, logging.INFO, "low sensitivity")) == 1
+
+
+def test_ke_gain_default_and_handler():
+    """ke_gain defaults to the provisional -0.62 and can be changed through INDI."""
+    dev = make_device()
+    assert dev._ke_gain == -0.62
+    assert dev.properties["ke_gain"]["current"] == -0.62
+    send(dev, "ke_gain", target=-1.5)
+    assert dev._ke_gain == -1.5
+    assert dev.properties["ke_gain"]["current"] == -1.5

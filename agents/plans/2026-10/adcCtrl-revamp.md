@@ -1051,6 +1051,12 @@ Tests were run locally with the adc_sims venv (numpy, scipy, hcipy) and minimal 
 - **Locks are per spot.** Locked positions are stored by spot index, so changing the spot selection keeps the positions of spots that stay selected; a single-spot selection can be seeded from an earlier two-spot lock this way.
 - **Glint test.** The synthetic glint fades over 5 λ/D to the sides of the star. A glint that stays bright 14 λ/D to the side, level with spot 3, does capture spot 3's cutout even with the row medians. That matches the user's expectation (R2-2) and finding 8, but it is the case to watch on real frames.
 
+**Step 2: mode switch, spot selection, properties and config (§9.2).** Added the `coronagraph` switch (idle only; `delta_1` untouched), `ke_spots` (any of many; refused selections keep the previous one), `ke_gain`, all §7 config fields, and `ke_star_hint` in `CameraConfig`. Five new tests. Notes:
+- The spot search tuning added in step 1 is configurable too: `ke_brightness_ratio`, `ke_track_box`, `ke_highpass` and `ke_hint_tolerance`.
+- `ke_spots` can be changed in any state. A change takes effect at the next batch.
+- An invalid `ke_spots` in the config raises at startup, like `loop_sign`.
+- The current filter wheel element is now kept (`_filter_name`), for the capture log in step 3.
+
 ### References
 - MagAO-X PAPLC knife-edge mask (reflective D-shaped mirror at ~1.1 λ/D, adjustable IWA): [arXiv:2607.08146](https://arxiv.org/pdf/2607.08146), [arXiv:2303.13719](https://arxiv.org/pdf/2303.13719)
 - Satellite-spot dispersion method: arXiv:2608.10307
