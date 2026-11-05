@@ -49,7 +49,7 @@ deadline contract is still follow-up work.
 
 ## Discussion
 
-The DM is normally triggered by the AO loop, which is itself triggered by the WFS readout semaphore.  The WFS readout triggers the reconstruction, which triggers the filter, which triggers the command calculation.  At the end of this the command is written to shared memory channel dmC (symlink for dm01disp03 in MagAO-X).  That causes dmcomb to trigger a sum to dm01disp, and that sempahore then triggers the DM controller app to actually address the hardware.    
+The DM is normally triggered by the AO loop, which is itself triggered by the WFS readout semaphore.  The WFS readout triggers the reconstruction, which triggers the filter, which triggers the command calculation.  At the end of this the command is written to shared memory channel dmC (symlink for dm01disp03 in MagAO-X).  That causes dmcomb to trigger a sum to dm01disp, and that sempahore then triggers the DM controller app to actually address the hardware.
 
 We make use of "passive" writes, where we write to other channels, e.g. dm01disp05, without triggering.  Such commands are then summed with the loop command when the loop triggers.
 
@@ -67,11 +67,11 @@ where the step number is in terms of the 2kHz loop (i.e. 500 us), and the x deno
 
 This likely means a parallel set of "dmcomb" shared memory arrays, for some configurable number of the main dmcomb structure.  A command written to these arrays will be loaded onto the main dmcomb and then it will triggered at the set higher cadence.  We will need to assume that the provider writes early enough, it will be a requirement on the provider to do so but we will need a way to provide it with enough information to know how to do this.
 
-The loop must set the 0 of the cycle, so we need to track this.  For this new app "step 0" will not trigger, rather it will be a passive write which waits for the loop.  
+The loop must set the 0 of the cycle, so we need to track this.  For this new app "step 0" will not trigger, rather it will be a passive write which waits for the loop.
 
 The other (in this case 3) writes are triggered.  To optimize this process we should use integrator controllers on the sleep time as is done in milkzmq.
 
-There are a few dm poking apps under libMagAOX/app/dev.  
+There are a few dm poking apps under libMagAOX/app/dev.
 
 See /home/jrmales/Source/milk-xwcl/plugins/cacao-src/AOloopControl_DM/AOloopControl_DM_comb.c for the structure of the DM comb system.
 
@@ -87,9 +87,9 @@ The new syncopation app must provide:
 
 4. determination of the actual loop rate from the above, and publication of it on INDI
 
-5. a parallel set of dmcomb channels, configurable in number, with a mapping to the main dmcomb.  E.g. dm01disp06_aux_00, dm01disp06_aux_01 might correspond to the aux loop step 0 and 1 for chanel 6 of dm 1. 
+5. a parallel set of dmcomb channels, configurable in number, with a mapping to the main dmcomb.  E.g. dm01disp06_aux_00, dm01disp06_aux_01 might correspond to the aux loop step 0 and 1 for chanel 6 of dm 1.
 
-6. a passive write to the DM channels for step 0, which will complete just ahead of the loop trigger. 
+6. a passive write to the DM channels for step 0, which will complete just ahead of the loop trigger.
 
 7. A method to determine or configure the dealine for the above write.
 
@@ -99,13 +99,13 @@ The new syncopation app must provide:
 
 10. Integrator feedback self-tuning maintenance of sleep times to minimize timing jitter on the sub-frame triggers
 
-11. a method for communicating deadlines to provider applications for when their writes to the parallel channels must be complete by.  
+11. a method for communicating deadlines to provider applications for when their writes to the parallel channels must be complete by.
 
 12. detection of and recovery from loss of synchro, missed deadlines, etc.
 
 ## Tests and Metrics
 
-1. Test all configuration 
+1. Test all configuration
 
 2. Test all INDI interactions
 
