@@ -1,8 +1,6 @@
 /** \file dm.hpp
  * \brief The MagAO-X generic deformable mirror controller.
  *
- * \author Jared R. Males (jaredmales@gmail.com)
- *
  * \ingroup app_files
  */
 
@@ -12,9 +10,14 @@
 #include <mx/improc/eigenImage.hpp>
 #include <mx/improc/milkImage.hpp>
 #include <mx/ioutils/fits/fitsFile.hpp>
-#include <mx/sigproc/circularBuffer.hpp>
+#include <mx/math/floatUtils.hpp>
 
+#include "dmTiming.hpp"
+#include "dmCompletion.hpp"
+#include "dmSaturation.hpp"
 #include "shmimMonitor.hpp"
+#include "../../logger/types/telem_dmtimings.hpp"
+#include "../../logger/types/telem_fgtimings.hpp"
 
 namespace MagAOX
 {
@@ -23,18 +26,21 @@ namespace app
 namespace dev
 {
 
+/// Get the ImageStreamIO type code, or zero for an unsupported type.
 template <typename typeT>
 constexpr uint8_t ImageStreamTypeCode()
 {
     return 0;
 }
 
+/// Get the ImageStreamIO code for single-precision DM commands.
 template <>
 constexpr uint8_t ImageStreamTypeCode<float>()
 {
     return _DATATYPE_FLOAT;
 }
 
+/// Get the ImageStreamIO code for double-precision DM commands.
 template <>
 constexpr uint8_t ImageStreamTypeCode<double>()
 {
@@ -49,7 +55,7 @@ constexpr uint8_t ImageStreamTypeCode<double>()
  *
  * - Must be a dev::shmimMonitor<derivedT>
  *
- * - Must NOT call dev::shmimMonitor<derivedT>::setupConfog and dev::shmimMonitor<derivedT>::loadConfig.  These are
+ * - Must NOT call dev::shmimMonitor<derivedT>::setupConfig and dev::shmimMonitor<derivedT>::loadConfig.  These are
  *   handled by this class.
  *
  * - Must expose the following interface
@@ -71,7 +77,7 @@ constexpr uint8_t ImageStreamTypeCode<double>()
  *       typedef dev::dm<derivedT, realT> dmT;
  *   \endcode
  *
- * - Calls to this class's `setupConfig`, `loadConfig`, `appStartup`, `appLogic`, `appShutdown`, and `udpdateINDI`
+ * - Calls to this class's `setupConfig`, `loadConfig`, `appStartup`, `appLogic`, `appShutdown`, and `updateINDI`
  *   functions must be placed in the derived class's functions of the same name. For convenience the
  *   following macros are defined to provide error checking:
  *   \code
@@ -93,13 +99,13 @@ class dm
     typedef mx::verbose::vvv verboseT;
 
   protected:
-    /** \name Configurable Parameters
+    /** \name Configurable Parameters - Data
      * @{
      */
 
     std::string m_calibPath; ///< The path to this DM's calibration files.
     std::string m_flatPath;  ///< The path to this DM's flat files (usually the same as calibPath)
-    std::string m_testPath;  ///< The path to this DM's test files (default is calibPath/tests;
+    std::string m_testPath;  ///< The path to this DM's test files (default is calibPath/tests).
 
     std::string m_actMaskPath; ///< The file name of the actuator mask for this DM
 
@@ -121,6 +127,10 @@ class dm
     std::string m_shmimDelta; ///< The name of the shmim stream to write the desaturated delta command to.
     std::string m_shmimDiff;  ///< The name of the shmim stream to write the difference to.
 
+    std::string m_completionStreamName; ///< Optional shared reader-completion stream; empty disables publication.
+
+    std::string m_readerReleaseStreamName; ///< Optional last-channel-read signal, independent of backend success.
+
     uint32_t m_dmWidth{ 0 };  ///< The width of the images in the stream
     uint32_t m_dmHeight{ 0 }; ///< The height of the images in the stream
 
@@ -128,16 +138,16 @@ class dm
 
     float m_percThreshold{ 0.98 }; ///<  Threshold on percentage of frames an actuator is saturated over an interval.
 
-    float m_intervalSatThreshold{ 0.50 }; /**< Threshold on percentage of actuators which exceed
-                                               percThreshold in an interval.*/
+    /// Fraction of actuators exceeding percThreshold required to count an excessive-saturation interval.
+    float m_intervalSatThreshold{ 0.50 };
 
-    int m_intervalSatCountThreshold{ 10 }; /**< Threshold on number of consecutive intervals
-                                                the intervalSatThreshold is exceeded. */
+    /// Number of consecutive excessive-saturation intervals required before opening configured loops.
+    int m_intervalSatCountThreshold{ 10 };
 
     std::vector<std::string> m_satTriggerDevice; ///< Device(s) with a toggle switch to toggle on saturation trigger.
 
-    std::vector<std::string> m_satTriggerProperty; /**< Property with a toggle switch to toggle on saturation trigger,
-                                                        one per entry in satTriggerDevice.*/
+    /// Toggle-switch properties to clear after excessive saturation, paired with satTriggerDevice.
+    std::vector<std::string> m_satTriggerProperty;
 
     ///@}
 
@@ -146,6 +156,7 @@ class dm
 
     int m_numChannels{ 0 }; ///< The number of dmcomb channels found as part of allocation.
 
+    /// Owned mappings of the numbered main channels; auxiliary sources are opened only when clearing.
     std::vector<mx::improc::milkImage<realT> *> m_channels;
 
     std::map<std::string, std::string> m_flatCommands; ///< Map of flat file name to full path
@@ -157,10 +168,11 @@ class dm
     IMAGE m_flatImageStream;  ///< The ImageStreamIO shared memory buffer for the flat.
     bool  m_flatSet{ false }; ///< Flag indicating whether the flat command has been set.
 
+    /// Shared-memory actuator mask used to restrict loaded flat and test commands.
     mx::improc::milkImage<realT> m_actMask;
 
     std::map<std::string, std::string> m_testCommands; ///< Map of test file name to full path
-    std::string                        m_testCurrent;
+    std::string                        m_testCurrent;  ///< Name of the currently loaded test command.
 
     mx::improc::eigenImage<realT> m_testCommand;         ///< Data storage for the test command
     bool                          m_testLoaded{ false }; ///< Flag indicating whether a test command is loaded in memory
@@ -168,21 +180,21 @@ class dm
     IMAGE m_testImageStream;  ///< The ImageStreamIO shared memory buffer for the test.
     bool  m_testSet{ false }; ///< Flag indicating whether the test command has been set.
 
-    mx::improc::eigenImage<uint8_t> m_instSatMap; /**< The instantaneous saturation map, 0/1, set by the commandDM()
-                                    function of the derived class.*/
+    /// Instantaneous actuator saturation flags populated by derivedT::commandDM().
+    mx::improc::eigenImage<uint8_t> m_instSatMap;
 
-    mx::improc::eigenImage<uint16_t> m_accumSatMap; /**< The accumulated saturation map, which acccumulates for
-                                                     m_satAvgInt then is publised as a 0/1 image. */
+    /// Per-actuator saturation counts accumulated during m_satAvgInt milliseconds.
+    mx::improc::eigenImage<uint16_t> m_accumSatMap;
 
-    mx::improc::eigenImage<float> m_satPercMap; /**< Map of the percentage of time each actuator was
-                                                     saturated during the avg. interval.*/
+    /// Per-actuator fraction of saturated commands during the latest accumulation interval.
+    mx::improc::eigenImage<float> m_satPercMap;
 
     IMAGE m_satImageStream;     ///< The ImageStreamIO shared memory buffer for the sat map.
     IMAGE m_satPercImageStream; ///< The ImageStreamIO shared memory buffer for the sat percentage map.
 
-    int  m_overSatAct{ 0 };         // counter
-    int  m_intervalSatExceeds{ 0 }; // counter
-    bool m_intervalSatTrip{ 0 };    // flag to trip the loop opening
+    int  m_overSatAct{ 0 };         ///< Actuators exceeding the saturation percentage threshold in the latest interval.
+    int  m_intervalSatExceeds{ 0 }; ///< Consecutive accumulation intervals exceeding the saturation threshold.
+    bool m_intervalSatTrip{ 0 };    ///< Pending request to open configured loops after persistent saturation.
 
     mx::improc::milkImage<realT> m_outputShape; ///< The true output shape after saturation.
 
@@ -193,6 +205,22 @@ class dm
 
     mx::improc::eigenImage<realT> m_totalFlat;  ///< the total of all non-delta channels
     mx::improc::eigenImage<realT> m_totalDelta; ///< the total of all delta channels
+
+    mx::improc::eigenImage<realT> m_stagedDelta; ///< Private delta result retained until submission finalization.
+
+    mx::improc::eigenImage<realT> m_stagedDiff; ///< Private difference result calculated from the staged delta.
+
+    bool m_deltaStaged{ false }; ///< Current callback has unpublished private delta/difference products.
+
+    dev::dmSaturation m_pipelineSaturation; ///< Lossless pending saturation payload for asynchronous publication.
+
+    std::mutex m_pipelineSatMutex; ///< Protects pipeline saturation geometry and consumer window state.
+
+    mx::improc::eigenImage<uint64_t> m_pipelineSatWindow; ///< Saturation-thread-owned pipeline accumulation.
+
+    std::atomic<bool> m_pipelineSatEnabled{ false }; ///< Published after pipeline saturation storage is ready.
+
+    uint64_t m_pipelineSatGeneration{ 0 }; ///< Geometry/reset generation protected by m_pipelineSatMutex.
 
     mx::improc::milkImage<realT> m_outputDelta; ///< The true output delta command after saturation.
     mx::improc::milkImage<realT>
@@ -222,52 +250,40 @@ class dm
      */
     ~dm();
 
-    /// Get the
-    /**
-     * \returns the current value of
+    /** \name Configurable Parameters
+     * @{
      */
+
+    /// Get the calibration directory.
+    /** \returns the current value of m_calibPath */
     const std::string &calibPath() const;
 
-    /// Get the
-    /**
-     * \returns the current value of
-     */
+    /// Get the flat-command directory.
+    /** \returns the current value of m_flatPath */
     const std::string &flatPath() const;
 
-    /// Get the
-    /**
-     * \returns the current value of
-     */
+    /// Get the test-command directory.
+    /** \returns the current value of m_testPath */
     const std::string &testPath() const;
 
-    /// Get the
-    /**
-     * \returns the current value of
-     */
+    /// Get the default flat-command name.
+    /** \returns the current value of m_flatDefault */
     const std::string &flatDefault() const;
 
-    /// Get the
-    /**
-     * \returns the current value of
-     */
+    /// Get the default test-command name.
+    /** \returns the current value of m_testDefault */
     const std::string &testDefault() const;
 
-    /// Get the
-    /**
-     * \returns the current value of
-     */
+    /// Get the flat-command stream name.
+    /** \returns the current value of m_shmimFlat */
     const std::string &shmimFlat() const;
 
-    /// Get the
-    /**
-     * \returns the current value of
-     */
+    /// Get the test-command stream name.
+    /** \returns the current value of m_shmimTest */
     const std::string &shmimTest() const;
 
-    /// Get the
-    /**
-     * \returns the current value of
-     */
+    /// Get the saturation-map stream name.
+    /** \returns the current value of m_shmimSat */
     const std::string &shmimSat() const;
 
     /// Get the stream name for saturation percentage
@@ -288,16 +304,12 @@ class dm
      */
     int satThreadPrio() const;
 
-    /// Get the
-    /**
-     * \returns the current value of
-     */
+    /// Get the desaturated output-shape stream name.
+    /** \returns the current value of m_shmimShape */
     const std::string &shmimShape() const;
 
-    /// Get the
-    /**
-     * \returns the current value of
-     */
+    /// Get the desaturated delta-command stream name.
+    /** \returns the current value of m_shmimDelta */
     const std::string &shmimDelta() const;
 
     /// Get the DM Width
@@ -348,21 +360,31 @@ class dm
      */
     const std::vector<std::string> &satTriggerProperty() const;
 
+    /// Get the calibration directory relative to the application calibration root.
     const std::string &calibRelDir() const;
 
+    /// Get the discovered number of numbered main channels.
     int numChannels() const;
 
+    /// Get the instantaneous actuator saturation flags.
     const mx::improc::eigenImage<uint8_t> &instSatMap() const;
 
+    /// Get the accumulated actuator saturation counts.
     const mx::improc::eigenImage<uint16_t> &accumSatMap() const;
 
+    /// Get each actuator's saturation fraction over the accumulation interval.
     const mx::improc::eigenImage<float> &satPercMap() const;
 
+    /// Get the configured names of delta-command channels.
     const std::vector<std::string> &deltaChannels() const;
 
+    /// Get indices of channels treated as fixed rather than delta commands.
     const std::vector<size_t> &notDeltas() const;
 
+    /// Get the combined non-delta command calculated by makeDelta().
     const mx::improc::eigenImage<float> &totalFlat() const;
+
+    ///@}
 
     /// Setup the configuration system
     /**
@@ -446,8 +468,8 @@ class dm
     int whilePowerOff();
 
     /// Find the DM comb channels
-    /** Introspectively finds all dmXXdispYY channels, zeroes them, and raises the semapahore
-     * on the last to cause dmcomb to update.
+    /** Opens numbered main channels and classifies their delta-command membership.
+     * Auxiliary and other suffixed streams are excluded.
      */
     int findDMChannels();
 
@@ -456,11 +478,74 @@ class dm
      * \returns 0 on success
      * \returns -1 if incorrect size or data type in stream.
      */
-    int allocate( const dev::shmimT &sp );
+    int allocate( const dev::shmimT &sp /**< [in] Monitored stream tag. */ );
 
-    /// Called by shmimMonitor when a new DM command is available.  This is just a pass-through to
-    /// derivedT::commandDM(char*).
-    int processImage( void *curr_src, const dev::shmimT &sp );
+    /// Submit a monitored command, calculate delta products and publish timing/optional reader completion.
+    int processImage( void              *curr_src /**< [in] Current combined command pixels. */,
+                      const dev::shmimT &sp /**< [in] Monitored stream tag. */ );
+
+    /// Admit a callback without waiting on an already selected shared input; synchronous owners always admit.
+    bool admitCommand();
+
+    /// Return whether this callback requires private products until backend finalization.
+    bool deferredCommand() const;
+
+    /// Drain a pending submission and retain a prior processing error; synchronous owners need no join.
+    int finalizeCommand( int processingResult /**< [in] Earlier processing result, negative on failure. */ ) noexcept;
+
+    /// Release callback ownership after output, timing and completion finalization.
+    void retireCommand() noexcept;
+
+    /// Private products and fixed provenance owned by one asynchronous command until final publication.
+    struct PipelineCommand
+    {
+        MagAOX::dmTiming::Event       timing;     ///< Detached event; one stage owns mutations at a time.
+        MagAOX::dmCompletion::Record  completion; ///< Frozen input identity captured before any external reads.
+        mx::improc::eigenImage<realT> shape;      ///< Clipped shape belonging to this command.
+        mx::improc::eigenImage<realT> delta;      ///< Private delta awaiting successful submission.
+        mx::improc::eigenImage<realT> diff;       ///< Private difference awaiting successful submission.
+        std::vector<uint8_t>          saturation; ///< Per-command actuator-grid flags retained through finalization.
+        long                          saturatedCount{ 0 };  ///< Number of saturated mapped actuators.
+        bool                          deltaStaged{ false }; ///< Private delta and difference are ready for publication.
+        int                           preparedStatus{ 0 }; ///< Preparation result independent of the actual SDK result.
+        int64_t dispatchNs{ -1 }; ///< Monitor handoff boundary, or unavailable for an unsent command.
+    };
+
+    /// Allocate one job's private products while command owners are drained.
+    void allocatePipelineCommand( PipelineCommand &command /**< [out] Reusable command storage. */ );
+
+    /// Capture a genuine command's frozen identity and detach its receipt timing on the monitor.
+    /** A negative return rejects this source observation; it does not establish a backend fault. */
+    int capturePipelineCommand( PipelineCommand &command /**< [out] Exclusively leased command. */,
+                                void            *pixels /**< [in] Combined source selected by the monitor. */ );
+
+    /// Mark one exclusively owned job without modifying another thread's current event.
+    static void pipelineMark( PipelineCommand         &command /**< [in,out] Exclusively owned command. */,
+                              MagAOX::dmTiming::Marker marker /**< [in] Endpoint to capture. */ );
+
+    /// Stage channel-dependent products using the command's private clipped shape.
+    int stagePipelineCommand( PipelineCommand &command /**< [in,out] Monitor-owned command. */ );
+
+    /// Publish final external-read clearance from the monitor, retaining the original identity.
+    /** Source advancement withholds reader/full provenance without changing successful preparation status. */
+    void releasePipelineCommand( PipelineCommand &command /**< [in,out] Prepared command. */ );
+
+    /// Publish successful private products and frozen completion on the sole finalizer.
+    int finishPipelineCommand(
+        PipelineCommand          &command /**< [in,out] Fully prepared command with an SDK result. */,
+        MagAOX::dmTiming::Outcome outcome /**< [in] Actual SDK outcome or no-send. */,
+        int64_t                   backendResult /**< [in] Raw SDK return code, or unavailable. */,
+        int64_t                   sdkStartNs /**< [in] SDK entry, or -1 for an unsent command. */,
+        int64_t                   sdkEndNs /**< [in] Actual SDK return, or -1 for an unsent command. */,
+        bool                      submitted /**< [in] Actual successful SDK submission independent of publication. */,
+        int64_t                   sdkReadyNs = -1 /**< [in] Worker available before its next wait, or unavailable. */ );
+
+    /// Route monitor observations without writing the finalizer-owned timing queue or completion publisher.
+    void pipelineShmimMonitorTiming( const dev::shmimT &tag /**< [in] Main DM monitor tag. */,
+                                     shmimMonitorEvent  event /**< [in] Receipt/attachment observation. */ );
+
+    /// Discard an unadmitted receipt; the derived controller separately counts admission rejections.
+    void discardPipelineCommand();
 
     /// Calls derived()->initDM()
     /**
@@ -469,7 +554,7 @@ class dm
      */
     int baseInitDM();
 
-    /// Calls derived()->releaseDM() and then 0s all channels and the sat map.
+    /// Calls derived()->releaseDM() and then zeros main/auxiliary channels and the saturation map.
     /** This is called by the relevant INDI callback
      *
      * \returns 0 on success
@@ -524,7 +609,7 @@ class dm
      * and loads the command in the local memory.  Calls setTest if the test
      * is currently set.
      */
-    int loadTest( const std::string &target );
+    int loadTest( const std::string &target /**< [in] Name used to look up the test-command file. */ );
 
     /// Send the current test command to the DM
     /** Writes the command to the designated shmim.
@@ -542,9 +627,13 @@ class dm
      */
     int zeroTest();
 
-    /// Zero all channels
-    /**
-     * \returns 0 on sucess
+    /// Zero all numbered main channels and their existing, compatible `_aux` sources.
+    /** Missing auxiliary sources are normal. Incompatible sources are left unchanged
+     * and reported as errors after the main channels are cleared. This does not coordinate with writers;
+     * commands written after the clear are the writer's responsibility. Only the last
+     * main channel's semaphore is posted, unless nosem is true.
+     *
+     * \returns 0 on success
      * \returns \<0 on an error
      */
     int zeroAll( bool nosem = false /**< [in] [optional] if true then the semaphore
@@ -553,6 +642,18 @@ class dm
 
     /// Calculate the delta command from the output shape.
     int makeDelta();
+
+    /// Read channels into private preallocated delta products without publishing shared pixels or notifications.
+    int stageDelta();
+
+    /// Calculate private products using one command's clipped shape and monitor-owned summation scratch.
+    int stageDelta( Eigen::Ref<const mx::improc::eigenImage<realT>> shape /**< [in] Frozen clipped command shape. */,
+                    mx::improc::eigenImage<realT>                  &delta /**< [out] Preallocated private delta. */,
+                    mx::improc::eigenImage<realT>                  &diff /**< [out] Preallocated private difference. */,
+                    bool &staged /**< [out] Whether both private products are ready. */ );
+
+    /// Publish previously staged products after successful backend finalization, without rereading channels.
+    int publishDelta();
 
     /// Clear the saturation maps and zero the shared memory.
     /**
@@ -588,9 +689,9 @@ class dm
 
     pcf::IndiProperty m_indiP_flat; ///< Property used to set and report the current flat
 
-    pcf::IndiProperty m_indiP_init;
-    pcf::IndiProperty m_indiP_zero;
-    pcf::IndiProperty m_indiP_release;
+    pcf::IndiProperty m_indiP_init;    ///< Request to initialize the DM hardware.
+    pcf::IndiProperty m_indiP_zero;    ///< Request to send the hardware zero command.
+    pcf::IndiProperty m_indiP_release; ///< Request to release the DM hardware and clear commands.
 
     pcf::IndiProperty m_indiP_flats;     ///< INDI Selection switch containing the flat files.
     pcf::IndiProperty m_indiP_flatShmim; ///< Publish the shmim being used for the flat
@@ -600,7 +701,7 @@ class dm
     pcf::IndiProperty m_indiP_testShmim; ///< Publish the shmim being used for the test command
     pcf::IndiProperty m_indiP_setTest;   ///< INDI toggle switch to set the current test pattern.
 
-    pcf::IndiProperty m_indiP_zeroAll;
+    pcf::IndiProperty m_indiP_zeroAll; ///< Request to clear main channels and auxiliary command sources.
 
   public:
     /// The static callback function to be registered for initializing the DM.
@@ -620,10 +721,10 @@ class dm
      * \returns -1 on error.
      */
     int newCallBack_init( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with
-                                                                    the the new property request.*/
+                                                                    the new property request.*/
     );
 
-    /// The static callback function to be registered for initializing the DM.
+    /// Dispatch the request to zero the DM hardware.
     /**
      * \returns 0 on success.
      * \returns -1 on error.
@@ -631,7 +732,7 @@ class dm
     static int st_newCallBack_zero( void *app,                      /**< [in] a pointer to this, will be
                                                                               static_cast-ed to derivedT.*/
                                     const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with
-                                                                              the the new property request.*/
+                                                                              the new property request.*/
     );
 
     /// The callback called by the static version, to actually process the new request.
@@ -643,7 +744,7 @@ class dm
         const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the
         the new property request.*/ );
 
-    /// The static callback function to be registered for initializing the DM.
+    /// Dispatch the request to release the DM hardware and clear its commands.
     /**
      * \returns 0 on success.
      * \returns -1 on error.
@@ -651,7 +752,7 @@ class dm
     static int st_newCallBack_release( void *app,                      /**< [in] a pointer to this, will be
                                                                                  static_cast-ed to derivedT.*/
                                        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with
-                                                                                 the the new property request.*/
+                                                                                 the new property request.*/
     );
 
     /// The callback called by the static version, to actually process the new request.
@@ -680,16 +781,15 @@ class dm
      * \returns -1 on error.
      */
     int newCallBack_flats(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the new property request.*/ );
 
     /// The static callback function to be registered for setting the flat
     /**
      * \returns 0 on success.
      * \returns -1 on error.
      */
-    static int st_newCallBack_setFlat(
-        void                    *app,   ///< [in] a pointer to this, will be static_cast-ed to derivedT.
-        const pcf::IndiProperty &ipRecv ///< [in] the INDI property sent with the the new property request.
+    static int st_newCallBack_setFlat( void                    *app,   /**< [in] Pointer to this, cast to derivedT. */
+                                       const pcf::IndiProperty &ipRecv /**< [in] New INDI property request. */
     );
 
     /// The callback called by the static version, to actually process the new request.
@@ -698,16 +798,15 @@ class dm
      * \returns -1 on error.
      */
     int newCallBack_setFlat(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the new property request.*/ );
 
     /// The static callback function to be registered for selecting the test file
     /**
      * \returns 0 on success.
      * \returns -1 on error.
      */
-    static int st_newCallBack_tests(
-        void                    *app,   ///< [in] a pointer to this, will be static_cast-ed to derivedT.
-        const pcf::IndiProperty &ipRecv ///< [in] the INDI property sent with the the new property request.
+    static int st_newCallBack_tests( void                    *app,   /**< [in] Pointer to this, cast to derivedT. */
+                                     const pcf::IndiProperty &ipRecv /**< [in] New INDI property request. */
     );
 
     /// The callback called by the static version, to actually process the new request.
@@ -716,7 +815,7 @@ class dm
      * \returns -1 on error.
      */
     int newCallBack_tests(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the new property request.*/ );
 
     /// The static callback function to be registered for setting the test shape
     /**
@@ -726,7 +825,7 @@ class dm
     static int st_newCallBack_setTest( void *app,                      /**< [in] a pointer to this, will be
                                                                                  static_cast-ed to derivedT.*/
                                        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with
-                                                                                 the the new property request.*/
+                                                                                 the new property request.*/
     );
 
     /// The callback called by the static version, to actually process the new request.
@@ -743,9 +842,8 @@ class dm
      * \returns 0 on success.
      * \returns -1 on error.
      */
-    static int st_newCallBack_zeroAll(
-        void                    *app,   ///< [in] a pointer to this, will be static_cast-ed to derivedT.
-        const pcf::IndiProperty &ipRecv ///< [in] the INDI property sent with the the new property request.
+    static int st_newCallBack_zeroAll( void                    *app,   /**< [in] Pointer to this, cast to derivedT. */
+                                       const pcf::IndiProperty &ipRecv /**< [in] New INDI property request. */
     );
 
     /// The callback for the zeroAll toggle switch, called by the static version
@@ -754,7 +852,7 @@ class dm
      * \returns -1 on error.
      */
     int newCallBack_zeroAll(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the new property request.*/ );
 
     /// Update the INDI properties for this device controller
     /** You should call this once per main loop.
@@ -767,75 +865,902 @@ class dm
 
     ///@}
 
+  protected:
+    /** \name Timing - Data
+     * @{ */
+    double m_timingWindow{ 2.0 }; ///< Trailing timing window in seconds; zero disables capture.
+
+    size_t m_timingCapacity{ 20000 }; ///< Queue and consumer-window event cap; zero disables capture.
+
+    std::string m_timingDeliveryClockName{
+        "none" }; ///< Explicit input-producer clock; none preserves receipt-only capture.
+
+    MagAOX::dmTiming::PublicationClock m_timingDeliveryClock{
+        MagAOX::dmTiming::PublicationClock::none }; ///< Resolved producer clock for opt-in delivery measurements.
+
+    double m_timingDeliveryBracketUs{ 1 }; ///< Largest accepted producer-clock capture bracket, microseconds.
+
+    dev::dmTiming m_dmTiming; ///< Single-producer capture and consumer-owned timing statistics.
+
+    uint64_t m_timingLastRecord{ 0 }; ///< Summary sequence last emitted by this instance.
+
+    bool m_timingRecorded{ false }; ///< Whether this instance has emitted a summary yet.
+
+    pcf::IndiProperty m_indiP_dmTiming; ///< Receipt/send cadence and paired-latency statistics.
+
+    pcf::IndiProperty m_indiP_dmStages; ///< Named controller-stage statistics, in seconds.
+
+    pcf::IndiProperty m_indiP_dmTimingQuality; ///< Timing coverage and quality counters.
+
+    pcf::IndiProperty
+        m_indiP_dmTimingDelivery; ///< Selected producer clock and lifetime delivery-qualification coverage.
+
+    pcf::IndiProperty m_indiP_dmTimingState; ///< Endpoint/clock definitions and measurement availability.
+
+    /// @}
+
   public:
-    // clang-format off
-    #ifdef XWC_DMTIMINGS //clang-format on
+    /** \name Timing
+     * @{ */
 
-    typedef int32_t cbIndexT;
+    /// Resolve an explicitly selected input-producer clock without assuming that every stream uses CLOCK_ISIO.
+    static bool
+    parseDeliveryClock( const std::string                  &name /**< [in] none, isio, realtime or tai. */,
+                        MagAOX::dmTiming::PublicationClock &clock /**< [out] Resolved clock on success. */ );
 
-    /// Timing markers for total command processing, saturation posting, and saturation update intervals.
-    double m_t0{ 0 }, m_tf{ 0 }, m_tsat0{ 0 }, m_tsatf{ 0 };
+    /// Observe monitor events on the sole command producer thread.
+    void shmimMonitorTiming( const dev::shmimT &tag /**< [in] Main DM monitor tag. */,
+                             shmimMonitorEvent  event /**< [in] Receipt/attachment observation. */ );
 
-    /// Timing markers set by derived DM command implementations for actuator processing phases.
-    double m_tact0{ 0 }, m_tact1{ 0 }, m_tact2{ 0 }, m_tact3{ 0 }, m_tact4{ 0 };
+    /// Capture a controller phase marker without logging or allocating.
+    void dmTimingMark( MagAOX::dmTiming::Marker marker /**< [in] Controller endpoint to capture. */ );
 
-    /// Timing markers for delta-channel update processing.
-    double m_tdelta0 {0}, m_tdeltaf {0};
+    /// Record backend submission status without changing command handling.
+    void dmTimingOutcome( MagAOX::dmTiming::Outcome outcome /**< [in] Observed submission/callback result. */ );
 
-    /// Previous trigger semaphore arrival time, used to compute frame-to-frame spacing.
-    double m_t0Last{ 0 };
+    /// Retain the actual backend result for both timing and immutable reader-release diagnostics.
+    void dmBackendResult( MagAOX::dmTiming::Outcome outcome /**< [in] Actual backend submission outcome. */,
+                          int64_t result /**< [in] Raw backend return code; independent of callback failure. */ );
 
-    /// Circular buffer of total processImage latency samples.
-    mx::sigproc::circularBufferIndex<double, cbIndexT> m_piTimes;
+    /// Refresh the consumer-owned statistics outside the command thread.
+    void updateDMTimings();
 
-    /// Circular buffer of saturation semaphore post latency samples.
-    mx::sigproc::circularBufferIndex<double, cbIndexT> m_satSem;
+    /// Get the cached consumer-owned timing summary.
+    const MagAOX::dmTiming::Summary &dmTimingSummary() const;
 
-    /// Circular buffer of actuator processing latency samples.
-    mx::sigproc::circularBufferIndex<double, cbIndexT> m_actProc;
+    /// Record the cached detailed summary and valid compatible timing record.
+    int recordDMTimings( bool force = false /**< [in] Emit even when the summary is unchanged. */ );
 
-    /// Circular buffer of actuator command latency samples.
-    mx::sigproc::circularBufferIndex<double, cbIndexT> m_actCom;
+    /// @}
 
-    /// Circular buffer of saturation map update latency samples.
-    mx::sigproc::circularBufferIndex<double, cbIndexT> m_satUp;
+  protected:
+    /** \name Reader Completion - Data
+     * @{ */
 
-    /// Circular buffer of delta-channel update latency samples.
-    mx::sigproc::circularBufferIndex<double, cbIndexT> m_deltaUp;
+    dev::dmCompletion m_dmCompletion; ///< Command-thread completion publisher, independent of droppable telemetry.
 
-    /// Circular buffer of trigger semaphore frame-to-frame arrival deltas.
-    mx::sigproc::circularBufferIndex<double, cbIndexT> m_triggerDelta;
+    dev::dmCompletion
+        m_dmReaderRelease; ///< Last-read publisher with immutable identity and later SDK-result enrichment.
 
-    /// Storage for reporting total processImage latency samples.
-    std::vector<double> m_piTimesD;
+    bool m_completionReceipt{ false }; ///< The next callback follows a genuine semaphore receipt, not initial data.
 
-    /// Storage for reporting saturation semaphore post latency samples.
-    std::vector<double> m_satSemD;
+    MagAOX::dmTiming::Outcome m_completionOutcome{
+        MagAOX::dmTiming::Outcome::unknown }; ///< Backend result even when timing is disabled.
 
-    /// Storage for reporting actuator processing latency samples.
-    std::vector<double> m_actProcD;
+    int64_t m_completionBackendResult{ std::numeric_limits<int64_t>::min() }; ///< Raw result, or unavailable sentinel.
 
-    /// Storage for reporting actuator command latency samples.
-    std::vector<double> m_actComD;
+    pcf::IndiProperty m_indiP_dmCompletion; ///< Ordinary-thread latest completion state and diagnostic duration.
 
-    /// Storage for reporting saturation map update latency samples.
-    std::vector<double> m_satUpD;
+    pcf::IndiProperty m_indiP_dmCompletionStream; ///< Completion stream identity and software-only endpoint contract.
 
-    /// Storage for reporting delta-channel update latency samples.
-    std::vector<double> m_deltaUpD;
+    pcf::IndiProperty m_indiP_dmReaderRelease; ///< Latest last-read endpoint and independent SDK result.
 
-    /// Storage for reporting trigger semaphore frame-to-frame arrival deltas.
-    std::vector<double> m_triggerDeltaD;
+    pcf::IndiProperty m_indiP_dmReaderReleaseStream; ///< Separate reader-release stream identity and contract.
 
-    // clang-format off
-    #endif // clang-format on
+    /// @}
+
+  public:
+    /** \name Reader Completion
+     * @{ */
+
+    /// Register optional read-only completion properties without changing controller scheduling.
+    int setupDMCompletionINDI();
+
+    /// Publish a coherent latest completion snapshot outside the command thread.
+    void updateDMCompletionINDI();
+
+    /// @}
+
+  protected:
+    /// Register read-only timing statistics and endpoint/quality descriptions.
+    int setupDMTimingINDI();
+
+    /// Register the optional last-read endpoint and independent backend result properties.
+    int setupDMReaderReleaseINDI();
+
+    /// Refresh last-read diagnostics outside the command thread.
+    void updateDMReaderReleaseINDI();
 
   private:
-    derivedT &derived()
+    /// Retire every admitted callback and drain an unexpected exceptional exit before releasing its storage.
+    struct CommandRetirement
     {
-        return *static_cast<derivedT *>( this );
-    }
+        dm &m_owner; ///< Generic controller retaining the callback's owned buffers.
+
+        bool m_finalized{ false }; ///< The ordinary callback path has collected its backend result.
+
+        /// Retain the admitted controller until the callback leaves scope.
+        explicit CommandRetirement( dm &owner /**< [in] Admitted controller. */ ) noexcept;
+
+        /// Drain any unfinished backend operation, then release whole-callback ownership.
+        ~CommandRetirement() noexcept;
+    };
+
+    /// Emit timing records for owners with the standard telemetry interface.
+    template <class ownerT>
+    static auto timingRecord( ownerT                          &owner /**< [in] Concrete controller. */,
+                              const MagAOX::dmTiming::Summary &summary /**< [in] Coherent cached summary. */,
+                              int                              priority /**< [in] Preferred overload selector. */ )
+        -> decltype( owner.template telem<logger::telem_dmtimings>( { summary } ), int() );
+
+    /// Retain compatibility with software DM owners without a telemeter.
+    static int timingRecord( derivedT                        &owner /**< [in] Owner without telemetry support. */,
+                             const MagAOX::dmTiming::Summary &summary /**< [in] Unrecorded summary. */,
+                             long                             priority /**< [in] Fallback overload selector. */ );
+
+    /// Get the concrete controller used by the CRTP interface.
+    derivedT &derived();
 };
+
+template <class derivedT, typename realT>
+derivedT &dm<derivedT, realT>::derived()
+{
+    return *static_cast<derivedT *>( this );
+}
+
+template <class derivedT, typename realT>
+dm<derivedT, realT>::CommandRetirement::CommandRetirement( dm &owner ) noexcept : m_owner( owner )
+{
+}
+
+template <class derivedT, typename realT>
+dm<derivedT, realT>::CommandRetirement::~CommandRetirement() noexcept
+{
+    if( !m_finalized )
+    {
+        m_owner.derived().finalizeCommand( -1 );
+    }
+
+    m_owner.derived().retireCommand();
+}
+
+template <class derivedT, typename realT>
+bool dm<derivedT, realT>::admitCommand()
+{
+    return true;
+}
+
+template <class derivedT, typename realT>
+bool dm<derivedT, realT>::deferredCommand() const
+{
+    return false;
+}
+
+template <class derivedT, typename realT>
+int dm<derivedT, realT>::finalizeCommand( int processingResult ) noexcept
+{
+    return processingResult;
+}
+
+template <class derivedT, typename realT>
+void dm<derivedT, realT>::retireCommand() noexcept
+{
+}
+
+template <class derivedT, typename realT>
+void dm<derivedT, realT>::allocatePipelineCommand( PipelineCommand &command )
+{
+    command.shape.resize( m_dmWidth, m_dmHeight );
+    command.shape.setZero();
+    command.delta.resize( m_dmWidth, m_dmHeight );
+    command.diff.resize( m_dmWidth, m_dmHeight );
+    command.saturation.assign( size_t( m_dmWidth ) * m_dmHeight, 0 );
+    command.deltaStaged    = false;
+    command.preparedStatus = 0;
+    command.saturatedCount = 0;
+    command.dispatchNs     = -1;
+
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_pipelineSatMutex );
+
+        if( !m_pipelineSatEnabled.load( std::memory_order_relaxed ) || m_pipelineSatWindow.rows() != m_dmWidth ||
+            m_pipelineSatWindow.cols() != m_dmHeight )
+        {
+            m_pipelineSaturation.configure( command.saturation.size() );
+            m_pipelineSatWindow.resize( m_dmWidth, m_dmHeight );
+            m_pipelineSatWindow.setZero();
+            ++m_pipelineSatGeneration;
+            m_pipelineSatEnabled.store( true, std::memory_order_release );
+        }
+    }
+}
+
+template <class derivedT, typename realT>
+int dm<derivedT, realT>::capturePipelineCommand( PipelineCommand &command, void *pixels )
+{
+    const bool genuine     = m_completionReceipt;
+    m_completionReceipt    = false;
+    command.completion     = dev::dmCompletion::captureRecord( &derived().m_imageStream, genuine );
+    command.preparedStatus = 0;
+    command.deltaStaged    = false;
+    command.saturatedCount = 0;
+    command.dispatchNs     = -1;
+    m_dmReaderRelease.begin( &derived().m_imageStream, genuine );
+
+    if( !m_dmTiming.active() )
+    {
+        m_dmTiming.beginEvent( false );
+    }
+
+    m_dmTiming.mark( MagAOX::dmTiming::Marker::entry );
+    if( command.completion.inputInode != 0 && command.completion.inputCounter != 0 )
+    {
+        m_dmTiming.inputCounter( command.completion.inputCounter );
+    }
+
+    if( command.completion.publicationSec > 0 && command.completion.publicationNsec >= 0 &&
+        command.completion.publicationNsec < 1000000000 &&
+        command.completion.publicationSec <=
+            ( std::numeric_limits<int64_t>::max() - command.completion.publicationNsec ) / 1000000000 )
+    {
+        m_dmTiming.inputPublication( command.completion.publicationSec * 1000000000 +
+                                     command.completion.publicationNsec );
+    }
+
+    command.timing = m_dmTiming.detachEvent();
+
+    if( pixels == nullptr || command.completion.state != MagAOX::dmCompletion::State::busy )
+    {
+        command.preparedStatus = -1;
+        return -1;
+    }
+
+    if( m_dmReaderRelease.enabled() )
+    {
+        const auto &readers = m_dmReaderRelease.attempt();
+
+        if( readers.inputInode != command.completion.inputInode ||
+            readers.inputCounter != command.completion.inputCounter ||
+            readers.publicationSec != command.completion.publicationSec ||
+            readers.publicationNsec != command.completion.publicationNsec )
+        {
+            command.preparedStatus = -1;
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+template <class derivedT, typename realT>
+void dm<derivedT, realT>::pipelineMark( PipelineCommand &command, MagAOX::dmTiming::Marker marker )
+{
+    if( command.timing.sequence != 0 )
+    {
+        dev::dmTiming::markEvent( command.timing, marker, dev::dmTiming::monotonicNowNs() );
+    }
+}
+
+template <class derivedT, typename realT>
+int dm<derivedT, realT>::stagePipelineCommand( PipelineCommand &command )
+{
+    if( command.preparedStatus < 0 )
+    {
+        return command.preparedStatus;
+    }
+
+    pipelineMark( command, MagAOX::dmTiming::Marker::deltaStart );
+    pipelineMark( command, MagAOX::dmTiming::Marker::stagingStart );
+    command.preparedStatus = stageDelta( command.shape, command.delta, command.diff, command.deltaStaged );
+    pipelineMark( command, MagAOX::dmTiming::Marker::stagingEnd );
+    return command.preparedStatus;
+}
+
+template <class derivedT, typename realT>
+void dm<derivedT, realT>::releasePipelineCommand( PipelineCommand &command )
+{
+    const auto current  = dev::dmCompletion::captureRecord( &derived().m_imageStream, true );
+    const bool coherent = command.completion.state == MagAOX::dmCompletion::State::busy &&
+                          current.state == MagAOX::dmCompletion::State::busy &&
+                          current.inputInode == command.completion.inputInode &&
+                          current.inputCounter == command.completion.inputCounter &&
+                          current.publicationSec == command.completion.publicationSec &&
+                          current.publicationNsec == command.completion.publicationNsec;
+
+    if( !coherent )
+    {
+        // A newer input revokes provenance; it does not invalidate successful private preparation or SDK work.
+        command.completion.state = MagAOX::dmCompletion::State::unqualified;
+    }
+
+    m_dmReaderRelease.release( &derived().m_imageStream, command.preparedStatus, coherent );
+
+    if( m_dmReaderRelease.enabled() && !MagAOX::dmCompletion::readersQualified( m_dmReaderRelease.attempt() ) )
+    {
+        // The publisher performs another identity observation; keep either observation's loss nonfatal.
+        command.completion.state = MagAOX::dmCompletion::State::unqualified;
+    }
+
+    if( command.preparedStatus >= 0 )
+    {
+        if( m_dmReaderRelease.enabled() && command.timing.sequence != 0 )
+        {
+            dev::dmTiming::markEvent(
+                command.timing, MagAOX::dmTiming::Marker::readRelease, m_dmReaderRelease.attempt().finishedNs );
+        }
+        else
+        {
+            pipelineMark( command, MagAOX::dmTiming::Marker::readRelease );
+        }
+    }
+}
+
+template <class derivedT, typename realT>
+int dm<derivedT, realT>::finishPipelineCommand( PipelineCommand          &command,
+                                                MagAOX::dmTiming::Outcome outcome,
+                                                int64_t                   backendResult,
+                                                int64_t                   sdkStartNs,
+                                                int64_t                   sdkEndNs,
+                                                bool                      submitted,
+                                                int64_t                   sdkReadyNs )
+{
+    using MagAOX::dmTiming::Marker;
+    using MagAOX::dmTiming::Outcome;
+    int result = command.preparedStatus;
+
+    if( command.timing.sequence != 0 )
+    {
+        if( sdkStartNs > 0 && sdkEndNs >= sdkStartNs )
+        {
+            dev::dmTiming::importSdkEvent(
+                command.timing, sdkStartNs, sdkEndNs, outcome, command.dispatchNs, -1, -1, sdkReadyNs );
+        }
+        else
+        {
+            dev::dmTiming::outcomeEvent( command.timing, outcome );
+        }
+
+        command.timing.submitted = submitted;
+    }
+
+    if( outcome != Outcome::success )
+    {
+        result = -1;
+    }
+
+    if( result >= 0 )
+    {
+        try
+        {
+            pipelineMark( command, Marker::publicationStart );
+
+            if( command.deltaStaged )
+            {
+                m_outputDelta = command.delta;
+                m_outputDiff  = command.diff;
+            }
+
+            pipelineMark( command, Marker::publicationEnd );
+            pipelineMark( command, Marker::deltaEnd );
+
+            if( command.saturation.size() != size_t( m_instSatMap.size() ) ||
+                !m_pipelineSaturation.add( command.saturation.data(), command.saturation.size() ) )
+            {
+                result = -1;
+            }
+            else
+            {
+                std::copy( command.saturation.begin(), command.saturation.end(), m_instSatMap.data() );
+                pipelineMark( command, Marker::postStart );
+                result = sem_post( &m_satSemaphore );
+                pipelineMark( command, Marker::postEnd );
+            }
+        }
+        catch( const std::exception &error )
+        {
+            result = -1;
+            derivedT::template log<software_critical>( { std::string( "DM pipeline publication: " ) + error.what() } );
+        }
+        catch( ... )
+        {
+            result = -1;
+            derivedT::template log<software_critical>( { "unknown exception publishing DM pipeline command" } );
+        }
+    }
+
+    const auto callbackOutcome = result < 0 && outcome != Outcome::noSend ? Outcome::failed : outcome;
+
+    if( command.timing.sequence != 0 )
+    {
+        dev::dmTiming::outcomeEvent( command.timing, callbackOutcome );
+        command.timing.submitted = submitted;
+        pipelineMark( command, Marker::finish );
+    }
+
+    command.completion.backendResult = backendResult;
+    m_dmCompletion.publishCompleted( command.completion, result, callbackOutcome );
+
+    if( command.timing.sequence != 0 )
+    {
+        m_dmTiming.submitEvent( command.timing );
+    }
+
+    return result;
+}
+
+template <class derivedT, typename realT>
+void dm<derivedT, realT>::discardPipelineCommand()
+{
+    static_cast<void>( m_dmTiming.detachEvent() );
+    m_completionReceipt = false;
+}
+
+template <class derivedT, typename realT>
+void dm<derivedT, realT>::pipelineShmimMonitorTiming( const dev::shmimT &tag, shmimMonitorEvent event )
+{
+    static_cast<void>( tag );
+
+    if( event == shmimMonitorEvent::receipt || event == shmimMonitorEvent::initial )
+    {
+        discardPipelineCommand();
+        m_dmTiming.beginEvent( event == shmimMonitorEvent::receipt );
+        m_completionReceipt = event == shmimMonitorEvent::receipt;
+    }
+    else
+    {
+        discardPipelineCommand();
+
+        if( event == shmimMonitorEvent::connected )
+        {
+            m_dmTiming.newSession();
+        }
+
+        m_dmReaderRelease.reset();
+    }
+}
+
+template <class derivedT, typename realT>
+void dm<derivedT, realT>::shmimMonitorTiming( const dev::shmimT &tag, shmimMonitorEvent event )
+{
+    static_cast<void>( tag );
+
+    if( event == shmimMonitorEvent::connected )
+    {
+        m_dmTiming.newSession();
+        m_completionReceipt = false;
+        m_dmCompletion.reset();
+        m_dmReaderRelease.reset();
+    }
+    else if( event == shmimMonitorEvent::disconnected )
+    {
+        m_completionReceipt = false;
+        m_dmCompletion.reset();
+        m_dmReaderRelease.reset();
+    }
+    else if( event == shmimMonitorEvent::receipt || event == shmimMonitorEvent::initial )
+    {
+        m_dmTiming.beginEvent( event == shmimMonitorEvent::receipt );
+        m_completionReceipt = event == shmimMonitorEvent::receipt;
+    }
+    else if( event == shmimMonitorEvent::discarded )
+    {
+        m_dmTiming.outcome( MagAOX::dmTiming::Outcome::rejected );
+        m_dmTiming.finishEvent();
+        m_completionReceipt = false;
+        m_dmCompletion.reset();
+        m_dmReaderRelease.reset();
+    }
+}
+
+template <class derivedT, typename realT>
+void dm<derivedT, realT>::dmTimingMark( MagAOX::dmTiming::Marker marker )
+{
+    m_dmTiming.mark( marker );
+}
+
+template <class derivedT, typename realT>
+void dm<derivedT, realT>::dmTimingOutcome( MagAOX::dmTiming::Outcome outcome )
+{
+    m_completionOutcome = outcome;
+    m_dmTiming.outcome( outcome );
+}
+
+template <class derivedT, typename realT>
+void dm<derivedT, realT>::dmBackendResult( MagAOX::dmTiming::Outcome outcome, int64_t result )
+{
+    m_completionBackendResult = result;
+    dmTimingOutcome( outcome );
+}
+
+template <class derivedT, typename realT>
+int dm<derivedT, realT>::setupDMCompletionINDI()
+{
+    if( m_completionStreamName.empty() )
+    {
+        return setupDMReaderReleaseINDI();
+    }
+
+    m_indiP_dmCompletion = pcf::IndiProperty( pcf::IndiProperty::Number );
+    m_indiP_dmCompletion.setDevice( derived().configName() );
+    m_indiP_dmCompletion.setName( "dm_completion" );
+    m_indiP_dmCompletion.setPerm( pcf::IndiProperty::ReadOnly );
+    m_indiP_dmCompletion.setState( pcf::IndiProperty::Idle );
+
+    for( const auto *name : { "state",
+                              "session",
+                              "epoch",
+                              "sequence",
+                              "inputInode",
+                              "inputCounter",
+                              "processingUs",
+                              "ageSec",
+                              "outcome",
+                              "qualified" } )
+    {
+        m_indiP_dmCompletion.add( pcf::IndiElement( name ) );
+    }
+
+    if( derived().registerIndiPropertyReadOnly( m_indiP_dmCompletion ) < 0 )
+    {
+        return -1;
+    }
+
+    m_indiP_dmCompletionStream = pcf::IndiProperty( pcf::IndiProperty::Text );
+    m_indiP_dmCompletionStream.setDevice( derived().configName() );
+    m_indiP_dmCompletionStream.setName( "dm_completion_stream" );
+    m_indiP_dmCompletionStream.setPerm( pcf::IndiProperty::ReadOnly );
+    m_indiP_dmCompletionStream.setState( pcf::IndiProperty::Idle );
+    m_indiP_dmCompletionStream.add( pcf::IndiElement( "name" ) );
+    m_indiP_dmCompletionStream.add( pcf::IndiElement( "meaning" ) );
+    m_indiP_dmCompletionStream["name"] = m_completionStreamName;
+    m_indiP_dmCompletionStream["meaning"] =
+        std::string( "application channel reads finished; hardware settling is not measured" );
+
+    if( derived().registerIndiPropertyReadOnly( m_indiP_dmCompletionStream ) < 0 )
+    {
+        return -1;
+    }
+
+    return setupDMReaderReleaseINDI();
+}
+
+template <class derivedT, typename realT>
+void dm<derivedT, realT>::updateDMCompletionINDI()
+{
+    updateDMReaderReleaseINDI();
+
+    if( !m_dmCompletion.enabled() || !derived().m_indiDriver )
+    {
+        return;
+    }
+
+    const auto record    = m_dmCompletion.snapshot();
+    const auto now       = dmTiming::monotonicNowNs();
+    const bool qualified = MagAOX::dmCompletion::qualified( record );
+    indi::updateIfChanged<double>(
+        m_indiP_dmCompletion,
+        { "state",
+          "session",
+          "epoch",
+          "sequence",
+          "inputInode",
+          "inputCounter",
+          "processingUs",
+          "ageSec",
+          "outcome",
+          "qualified" },
+        { double( record.state ),
+          double( record.session ),
+          double( record.epoch ),
+          double( record.sequence ),
+          double( record.inputInode ),
+          double( record.inputCounter ),
+          record.startedNs > 0 && record.finishedNs >= record.startedNs
+              ? ( record.finishedNs - record.startedNs ) / 1000.0
+              : -1,
+          record.finishedNs > 0 && now >= record.finishedNs ? ( now - record.finishedNs ) / 1e9 : -1,
+          double( record.outcome ),
+          qualified ? 1.0 : 0.0 },
+        derived().m_indiDriver,
+        qualified ? pcf::IndiProperty::Ok : pcf::IndiProperty::Idle );
+}
+
+template <class derivedT, typename realT>
+int dm<derivedT, realT>::setupDMReaderReleaseINDI()
+{
+    if( m_readerReleaseStreamName.empty() )
+    {
+        return 0;
+    }
+
+    m_indiP_dmReaderRelease = pcf::IndiProperty( pcf::IndiProperty::Number );
+    m_indiP_dmReaderRelease.setDevice( derived().configName() );
+    m_indiP_dmReaderRelease.setName( "dm_reader_release" );
+    m_indiP_dmReaderRelease.setPerm( pcf::IndiProperty::ReadOnly );
+    m_indiP_dmReaderRelease.setState( pcf::IndiProperty::Idle );
+
+    for( const auto *name : { "state",
+                              "session",
+                              "epoch",
+                              "sequence",
+                              "inputInode",
+                              "inputCounter",
+                              "processingUs",
+                              "ageSec",
+                              "outcome",
+                              "backendResult",
+                              "qualified" } )
+    {
+        m_indiP_dmReaderRelease.add( pcf::IndiElement( name ) );
+    }
+
+    if( derived().registerIndiPropertyReadOnly( m_indiP_dmReaderRelease ) < 0 )
+    {
+        return -1;
+    }
+
+    m_indiP_dmReaderReleaseStream = pcf::IndiProperty( pcf::IndiProperty::Text );
+    m_indiP_dmReaderReleaseStream.setDevice( derived().configName() );
+    m_indiP_dmReaderReleaseStream.setName( "dm_reader_release_stream" );
+    m_indiP_dmReaderReleaseStream.setPerm( pcf::IndiProperty::ReadOnly );
+    m_indiP_dmReaderReleaseStream.setState( pcf::IndiProperty::Idle );
+    m_indiP_dmReaderReleaseStream.add( pcf::IndiElement( "name" ) );
+    m_indiP_dmReaderReleaseStream.add( pcf::IndiElement( "meaning" ) );
+    m_indiP_dmReaderReleaseStream["name"] = m_readerReleaseStreamName;
+    m_indiP_dmReaderReleaseStream["meaning"] =
+        std::string( "channel reads finished; SDK result independent; not backend readiness or mirror settling" );
+
+    return derived().registerIndiPropertyReadOnly( m_indiP_dmReaderReleaseStream );
+}
+
+template <class derivedT, typename realT>
+void dm<derivedT, realT>::updateDMReaderReleaseINDI()
+{
+    if( !m_dmReaderRelease.enabled() || !derived().m_indiDriver )
+    {
+        return;
+    }
+
+    const auto record   = m_dmReaderRelease.snapshot();
+    const auto now      = dmTiming::monotonicNowNs();
+    const bool released = MagAOX::dmCompletion::readersQualified( record );
+    indi::updateIfChanged<double>(
+        m_indiP_dmReaderRelease,
+        { "state",
+          "session",
+          "epoch",
+          "sequence",
+          "inputInode",
+          "inputCounter",
+          "processingUs",
+          "ageSec",
+          "outcome",
+          "backendResult",
+          "qualified" },
+        { double( record.state ),
+          double( record.session ),
+          double( record.epoch ),
+          double( record.sequence ),
+          double( record.inputInode ),
+          double( record.inputCounter ),
+          record.startedNs > 0 && record.finishedNs >= record.startedNs
+              ? ( record.finishedNs - record.startedNs ) / 1000.0
+              : -1,
+          record.finishedNs > 0 && now >= record.finishedNs ? ( now - record.finishedNs ) / 1e9 : -1,
+          double( record.outcome ),
+          double( record.backendResult ),
+          released ? 1.0 : 0.0 },
+        derived().m_indiDriver,
+        released ? pcf::IndiProperty::Ok : pcf::IndiProperty::Idle );
+}
+
+template <class derivedT, typename realT>
+bool dm<derivedT, realT>::parseDeliveryClock( const std::string &name, MagAOX::dmTiming::PublicationClock &clock )
+{
+    using Clock = MagAOX::dmTiming::PublicationClock;
+
+    if( name == "none" )
+    {
+        clock = Clock::none;
+    }
+    else if( name == "realtime" || ( name == "isio" && CLOCK_ISIO == CLOCK_REALTIME ) )
+    {
+        clock = Clock::realtime;
+    }
+#ifdef CLOCK_TAI
+    else if( name == "tai" || ( name == "isio" && CLOCK_ISIO == CLOCK_TAI ) )
+    {
+        clock = Clock::tai;
+    }
+#endif
+    else
+    {
+        return false;
+    }
+
+    return true;
+}
+
+template <class derivedT, typename realT>
+void dm<derivedT, realT>::updateDMTimings()
+{
+    m_dmTiming.update();
+}
+
+template <class derivedT, typename realT>
+const MagAOX::dmTiming::Summary &dm<derivedT, realT>::dmTimingSummary() const
+{
+    return m_dmTiming.summary();
+}
+
+template <class derivedT, typename realT>
+template <class ownerT>
+auto dm<derivedT, realT>::timingRecord( ownerT &owner, const MagAOX::dmTiming::Summary &summary, int priority )
+    -> decltype( owner.template telem<logger::telem_dmtimings>( { summary } ), int() )
+{
+    static_cast<void>( priority );
+    owner.template telem<logger::telem_dmtimings>( { summary } );
+
+    if( summary.fgValid )
+    {
+        const auto &a  = summary.metrics[MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::receiptInterval )];
+        const auto &w  = summary.metrics[MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::sendInterval )];
+        const auto &wa = summary.metrics[MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::receiptSend )];
+        owner.template telem<logger::telem_fgtimings>( { a.mean, a.stddev, w.mean, w.stddev, wa.mean, wa.stddev } );
+    }
+
+    return 0;
+}
+
+template <class derivedT, typename realT>
+int dm<derivedT, realT>::timingRecord( derivedT &owner, const MagAOX::dmTiming::Summary &summary, long priority )
+{
+    static_cast<void>( owner );
+    static_cast<void>( summary );
+    static_cast<void>( priority );
+    return 0;
+}
+
+template <class derivedT, typename realT>
+int dm<derivedT, realT>::recordDMTimings( bool force )
+{
+    const auto &summary = m_dmTiming.summary();
+
+    if( force || !m_timingRecorded || summary.sequence != m_timingLastRecord )
+    {
+        int rv = timingRecord( derived(), summary, 0 );
+
+        if( rv < 0 )
+        {
+            return rv;
+        }
+
+        m_timingLastRecord = summary.sequence;
+        m_timingRecorded   = true;
+    }
+
+    return 0;
+}
+
+template <class derivedT, typename realT>
+int dm<derivedT, realT>::setupDMTimingINDI()
+{
+    derived().createROIndiNumber( m_indiP_dmTiming, "dm_timing" );
+
+    for( const auto *name : { "receipt_fps",
+                              "receipt_min",
+                              "receipt_max",
+                              "receipt_jitter",
+                              "receipt_count",
+                              "send_fps",
+                              "send_min",
+                              "send_max",
+                              "send_jitter",
+                              "send_count",
+                              "receipt_send",
+                              "receipt_send_jitter",
+                              "receipt_send_min",
+                              "receipt_send_max",
+                              "receipt_send_count" } )
+    {
+        m_indiP_dmTiming.add( pcf::IndiElement( name ) );
+        m_indiP_dmTiming[name] = -1.0;
+    }
+
+    if( derived().registerIndiPropertyReadOnly( m_indiP_dmTiming ) < 0 )
+    {
+        return -1;
+    }
+
+    derived().createROIndiNumber( m_indiP_dmStages, "dm_timing_stages" );
+
+    for( size_t i = MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::dispatch );
+         i < MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::count );
+         ++i )
+    {
+        std::string name = MagAOX::dmTiming::metricName( static_cast<MagAOX::dmTiming::Metric>( i ) );
+
+        for( const auto *field : { "mean", "jitter", "min", "max", "count", "span" } )
+        {
+            std::string element = name + '_' + field;
+            m_indiP_dmStages.add( pcf::IndiElement( element ) );
+            m_indiP_dmStages[element] = -1.0;
+        }
+    }
+
+    if( derived().registerIndiPropertyReadOnly( m_indiP_dmStages ) < 0 )
+    {
+        return -1;
+    }
+
+    derived().createROIndiNumber( m_indiP_dmTimingQuality, "dm_timing_quality" );
+
+    for( const auto *name : { "window",  "span",      "age",      "capacity",   "queued",      "session", "sequence",
+                              "enabled", "valid",     "events",   "receipts",   "submitted",   "failed",  "partial",
+                              "noSend",  "synthetic", "rejected", "duplicates", "counterGaps", "invalid", "dropped" } )
+    {
+        m_indiP_dmTimingQuality.add( pcf::IndiElement( name ) );
+    }
+
+    if( derived().registerIndiPropertyReadOnly( m_indiP_dmTimingQuality ) < 0 )
+    {
+        return -1;
+    }
+
+    derived().createROIndiNumber( m_indiP_dmTimingDelivery, "dm_timing_delivery" );
+
+    for( const auto *name : { "enabled",
+                              "clock",
+                              "bracketUs",
+                              "attempted",
+                              "qualified",
+                              "unavailable",
+                              "invalid",
+                              "wideBracket",
+                              "clockDiscontinuity",
+                              "futurePublication",
+                              "identityRejected" } )
+    {
+        m_indiP_dmTimingDelivery.add( pcf::IndiElement( name ) );
+        m_indiP_dmTimingDelivery[name] = 0.0;
+    }
+
+    const auto &delivery                  = m_dmTiming.summary().delivery;
+    m_indiP_dmTimingDelivery["enabled"]   = delivery.enabled ? 1.0 : 0.0;
+    m_indiP_dmTimingDelivery["clock"]     = static_cast<double>( delivery.clock );
+    m_indiP_dmTimingDelivery["bracketUs"] = delivery.bracketLimitNs * 0.001;
+
+    if( derived().registerIndiPropertyReadOnly( m_indiP_dmTimingDelivery ) < 0 )
+    {
+        return -1;
+    }
+
+    derived().createROIndiText( m_indiP_dmTimingState, "dm_timing_state", "state" );
+    m_indiP_dmTimingState.add( pcf::IndiElement( "clock" ) );
+    m_indiP_dmTimingState.add( pcf::IndiElement( "receipt" ) );
+    m_indiP_dmTimingState.add( pcf::IndiElement( "send" ) );
+    m_indiP_dmTimingState.add( pcf::IndiElement( "deliveryClock" ) );
+    m_indiP_dmTimingState["state"]   = m_dmTiming.enabled() ? "warmingUp" : "disabled";
+    m_indiP_dmTimingState["clock"]   = "local: CLOCK_MONOTONIC; publicationInterval: stream writetime; seconds";
+    m_indiP_dmTimingState["receipt"] = "first timestamp after successful semaphore wait return";
+    m_indiP_dmTimingState["send"]    = "qualified backend submission return; not physical completion";
+    const auto clock                 = m_dmTiming.summary().delivery.clock;
+    m_indiP_dmTimingState["deliveryClock"] =
+        clock == MagAOX::dmTiming::PublicationClock::tai
+            ? "CLOCK_TAI"
+            : ( clock == MagAOX::dmTiming::PublicationClock::realtime ? "CLOCK_REALTIME" : "disabled" );
+    return derived().registerIndiPropertyReadOnly( m_indiP_dmTimingState );
+}
 
 template <class derivedT, typename realT>
 dm<derivedT, realT>::~dm()
@@ -1014,6 +1939,26 @@ const mx::improc::eigenImage<float> &dm<derivedT, realT>::totalFlat() const
 template <class derivedT, typename realT>
 int dm<derivedT, realT>::setupConfig( mx::app::appConfigurator &config )
 {
+    config.add( "dm.readerReleaseStream",
+                "",
+                "dm.readerReleaseStream",
+                argType::Required,
+                "dm",
+                "readerReleaseStream",
+                false,
+                "string",
+                "Optional last-channel-read stream; SDK result is independent; empty disables." );
+
+    config.add( "dm.completionStream",
+                "",
+                "dm.completionStream",
+                argType::Required,
+                "dm",
+                "completionStream",
+                false,
+                "string",
+                "Optional reader-completion stream with its own notification semaphores; empty disables." );
+
     config.add( "dm.calibPath",
                 "",
                 "dm.calibPath",
@@ -1077,6 +2022,44 @@ int dm<derivedT, realT>::setupConfig( mx::app::appConfigurator &config )
     // Overriding the shmimMonitor setup so that these all go in the dm section
     // Otherwise, would call shmimMonitor<dm<derivedT,realT>>::setupConfig();
     ///\todo shmimMonitor now has configSection so this isn't necessary.
+    config.add( "dm.latencyTime",
+                "",
+                "dm.latencyTime",
+                argType::Required,
+                "dm",
+                "latencyTime",
+                false,
+                "double",
+                "Trailing DM timing window in seconds; zero disables." );
+    config.add( "dm.latencySize",
+                "",
+                "dm.latencySize",
+                argType::Required,
+                "dm",
+                "latencySize",
+                false,
+                "size_t",
+                "Maximum queued and retained DM timing events; zero disables." );
+
+    config.add( "dm.deliveryClock",
+                "",
+                "dm.deliveryClock",
+                argType::Required,
+                "dm",
+                "deliveryClock",
+                false,
+                "string",
+                "Explicit input-producer clock for delivery diagnostics: none (default), isio, realtime or tai." );
+    config.add( "dm.deliveryBracketUs",
+                "",
+                "dm.deliveryBracketUs",
+                argType::Required,
+                "dm",
+                "deliveryBracketUs",
+                false,
+                "double",
+                "Maximum accepted delivery clock-capture bracket in microseconds; default 1." );
+
     config.add( "dm.threadPrio",
                 "",
                 "dm.threadPrio",
@@ -1294,6 +2277,7 @@ int dm<derivedT, realT>::loadConfig( mx::app::appConfigurator &config )
     config( m_flatPath, "dm.flatPath" );
 
     config( m_flatDefault, "dm.flatDefault" );
+
     if( m_flatDefault != "" )
     {
         m_flatDefault = mx::ioutils::pathStem( m_flatDefault ); // strip off path and extension if provided.
@@ -1305,6 +2289,7 @@ int dm<derivedT, realT>::loadConfig( mx::app::appConfigurator &config )
     config( m_testPath, "dm.testPath" );
 
     config( m_testDefault, "dm.testDefault" );
+
     if( m_testDefault != "" )
     {
         m_testDefault = mx::ioutils::pathStem( m_testDefault ); // strip off path and extension if provided.
@@ -1319,6 +2304,34 @@ int dm<derivedT, realT>::loadConfig( mx::app::appConfigurator &config )
     config( derived().m_smCpuset, "dm.cpuset" );
 
     config( derived().m_shmimName, "dm.shmimName" );
+    config( m_completionStreamName, "dm.completionStream" );
+    config( m_readerReleaseStreamName, "dm.readerReleaseStream" );
+
+    if( !m_completionStreamName.empty() && ( m_completionStreamName == derived().m_shmimName ||
+                                             m_completionStreamName.find_first_of( "/\\" ) != std::string::npos ) )
+    {
+        derivedT::template log<software_error>( { "invalid dm.completionStream" } );
+        return -1;
+    }
+
+    config( m_timingWindow, "dm.latencyTime" );
+    config( m_timingCapacity, "dm.latencySize" );
+    config( m_timingDeliveryClockName, "dm.deliveryClock" );
+    config( m_timingDeliveryBracketUs, "dm.deliveryBracketUs" );
+
+    if( !parseDeliveryClock( m_timingDeliveryClockName, m_timingDeliveryClock ) ||
+        !mx::math::isFinite( m_timingDeliveryBracketUs ) || m_timingDeliveryBracketUs < 0.001 ||
+        m_timingDeliveryBracketUs > 1000000 )
+    {
+        derivedT::template log<software_error>( { "invalid dm.deliveryClock or dm.deliveryBracketUs" } );
+        return -1;
+    }
+
+    if( !mx::math::isFinite( m_timingWindow ) || m_timingWindow < 0 || m_timingWindow >= 9e9 )
+    {
+        derivedT::template log<software_error>( { "invalid dm.latencyTime" } );
+        return -1;
+    }
 
     derived().m_getExistingFirst = true;
     // end of shmimmonitor overrides
@@ -1363,6 +2376,31 @@ int dm<derivedT, realT>::loadConfig( mx::app::appConfigurator &config )
         config.isSet( "dm.shmimShape" );
         config.isSet( "dm.shmimDelta" );
         config.isSet( "dm.deltaChannels" );
+    }
+
+    if( !m_readerReleaseStreamName.empty() )
+    {
+        const std::vector<std::string> reserved{ derived().m_shmimName,
+                                                 m_completionStreamName,
+                                                 m_shmimFlat,
+                                                 m_shmimTest,
+                                                 m_shmimSat,
+                                                 m_shmimSatPerc,
+                                                 m_shmimShape,
+                                                 m_shmimDelta,
+                                                 m_shmimDiff,
+                                                 derived().m_shmimName + "_actmask" };
+
+        if( m_readerReleaseStreamName.find_first_not_of(
+                "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-" ) != std::string::npos ||
+            std::find( reserved.begin(), reserved.end(), m_readerReleaseStreamName ) != reserved.end() ||
+            std::find( m_deltaChannels.begin(), m_deltaChannels.end(), m_readerReleaseStreamName ) !=
+                m_deltaChannels.end() ||
+            m_readerReleaseStreamName.starts_with( derived().m_shmimName ) )
+        {
+            derivedT::template log<software_error>( { "invalid or conflicting dm.readerReleaseStream" } );
+            return -1;
+        }
     }
 
     config( m_dmWidth, "dm.width" );
@@ -1435,6 +2473,42 @@ int dm<derivedT, realT>::loadConfig( mx::app::appConfigurator &config )
 template <class derivedT, typename realT>
 int dm<derivedT, realT>::appStartup()
 {
+    try
+    {
+        m_dmTiming.configure( m_timingWindow,
+                              m_timingCapacity,
+                              0,
+                              m_timingDeliveryClock,
+                              static_cast<int64_t>( m_timingDeliveryBracketUs * 1000 ) );
+    }
+    catch( const std::exception &error )
+    {
+        derivedT::template log<software_error>( { std::string( "DM timing allocation: " ) + error.what() } );
+        return -1;
+    }
+
+    if( setupDMTimingINDI() < 0 )
+    {
+        return -1;
+    }
+
+    if( m_dmCompletion.open( m_completionStreamName ) < 0 )
+    {
+        derivedT::template log<software_error>( { errno, "could not open DM completion stream" } );
+        return -1;
+    }
+
+    if( m_dmReaderRelease.open( m_readerReleaseStreamName, MagAOX::dmCompletion::Kind::readers ) < 0 )
+    {
+        derivedT::template log<software_error>( { errno, "could not open DM reader-release stream" } );
+        return -1;
+    }
+
+    if( setupDMCompletionINDI() < 0 )
+    {
+        return -1;
+    }
+
     if( m_dmDataType == 0 )
     {
         derivedT::template log<software_error>( { "unsupported DM data type" } );
@@ -1464,6 +2538,7 @@ int dm<derivedT, realT>::appStartup()
 
     // Register the setFlat INDI property
     derived().createStandardIndiToggleSw( m_indiP_setFlat, "flat_set" );
+
     if( derived().registerIndiPropertyNew( m_indiP_setFlat, st_newCallBack_setFlat ) < 0 )
     {
 #ifndef DM_TEST_NOLOG
@@ -1485,6 +2560,7 @@ int dm<derivedT, realT>::appStartup()
     m_indiP_testShmim.add( pcf::IndiElement( "channel" ) );
     m_indiP_testShmim["channel"] = m_shmimTest;
     derived().createStandardIndiToggleSw( m_indiP_setTest, "test_shmim" );
+
     if( derived().registerIndiPropertyReadOnly( m_indiP_testShmim ) < 0 )
     {
 #ifndef DM_TEST_NOLOG
@@ -1495,6 +2571,7 @@ int dm<derivedT, realT>::appStartup()
 
     // Register the setTest INDI property
     derived().createStandardIndiToggleSw( m_indiP_setTest, "test_set" );
+
     if( derived().registerIndiPropertyNew( m_indiP_setTest, st_newCallBack_setTest ) < 0 )
     {
 #ifndef DM_TEST_NOLOG
@@ -1505,6 +2582,7 @@ int dm<derivedT, realT>::appStartup()
 
     // Register the init INDI property
     derived().createStandardIndiRequestSw( m_indiP_init, "initDM" );
+
     if( derived().registerIndiPropertyNew( m_indiP_init, st_newCallBack_init ) < 0 )
     {
         // clang-format off
@@ -1532,12 +2610,14 @@ int dm<derivedT, realT>::appStartup()
 
     // Register the release INDI property
     derived().createStandardIndiRequestSw( m_indiP_release, "releaseDM" );
+
     if( derived().registerIndiPropertyNew( m_indiP_release, st_newCallBack_release ) < 0 )
     {
         return derivedT::template log<software_error, -1>( { "" } );
     }
 
     derived().createStandardIndiRequestSw( m_indiP_zeroAll, "zeroAll" );
+
     if( derived().registerIndiPropertyNew( m_indiP_zeroAll, st_newCallBack_zeroAll ) < 0 )
     {
 #ifndef DM_TEST_NOLOG
@@ -1599,58 +2679,8 @@ int dm<derivedT, realT>::appLogic()
         m_intervalSatTrip = false;
     }
 
-#ifdef XWC_DMTIMINGS
-    static uint64_t lastMono = 0;
-
-    if( m_piTimes.size() >= m_piTimes.maxEntries() && m_piTimes.maxEntries() > 0 &&
-        m_triggerDelta.size() >= m_triggerDelta.maxEntries() && m_triggerDelta.maxEntries() > 0 &&
-        m_piTimes.mono() != lastMono )
-    {
-        cbIndexT refEntry             = m_piTimes.earliest();
-        cbIndexT triggerDeltaRefEntry = m_triggerDelta.earliest();
-
-        m_piTimesD.resize( m_piTimes.maxEntries() );
-        m_satSemD.resize( m_satSem.maxEntries() );
-        m_actProcD.resize( m_actProc.maxEntries() );
-        m_actComD.resize( m_actCom.maxEntries() );
-        m_satUpD.resize( m_satUp.maxEntries() );
-        m_deltaUpD.resize( m_deltaUp.maxEntries() );
-        m_triggerDeltaD.resize( m_triggerDelta.maxEntries() );
-
-        for( size_t n = 0; n < m_piTimesD.size(); ++n )
-        {
-            m_piTimesD[n] = m_piTimes.at( refEntry, n );
-            m_satSemD[n]  = m_satSem.at( refEntry, n );
-            m_actProcD[n] = m_actProc.at( refEntry, n );
-            m_actComD[n]  = m_actCom.at( refEntry, n );
-            m_satUpD[n]   = m_satUp.at( refEntry, n );
-            m_deltaUpD[n] = m_deltaUp.at( refEntry, n );
-        }
-
-        for( size_t n = 0; n < m_triggerDeltaD.size(); ++n )
-        {
-            m_triggerDeltaD[n] = m_triggerDelta.at( triggerDeltaRefEntry, n );
-        }
-
-        std::cerr << "Act. Process:   " << mx::math::vectorMean( m_actProcD ) << " +/- "
-                  << sqrt( mx::math::vectorVariance( m_actProcD ) ) << "\n";
-        std::cerr << "Act. Command:   " << mx::math::vectorMean( m_actComD ) << " +/- "
-                  << sqrt( mx::math::vectorVariance( m_actComD ) ) << "\n";
-        std::cerr << "Sat. Update:    " << mx::math::vectorMean( m_satUpD ) << " +/- "
-                  << sqrt( mx::math::vectorVariance( m_satUpD ) ) << "\n";
-        std::cerr << "Delta Update:   " << mx::math::vectorMean( m_deltaUpD ) << " +/- "
-                  << sqrt( mx::math::vectorVariance( m_deltaUpD ) ) << "\n";
-        std::cerr << "Trig. Delta:    " << mx::math::vectorMean( m_triggerDeltaD ) << " +/- "
-                  << sqrt( mx::math::vectorVariance( m_triggerDeltaD ) ) << "\n";
-        std::cerr << "Tot. CommandDM: " << mx::math::vectorMean( m_piTimesD ) << " +/- "
-                  << sqrt( mx::math::vectorVariance( m_piTimesD ) ) << "\n";
-        std::cerr << "Sat. Semaphore: " << mx::math::vectorMean( m_satSemD ) << " +/- "
-                  << sqrt( mx::math::vectorVariance( m_satSemD ) ) << "\n";
-        std::cerr << "\n";
-
-        lastMono = m_piTimes.mono();
-    }
-#endif // XWC_DMTIMINGS
+    updateDMTimings();
+    recordDMTimings();
 
     return 0;
 }
@@ -1658,6 +2688,14 @@ int dm<derivedT, realT>::appLogic()
 template <class derivedT, typename realT>
 int dm<derivedT, realT>::appShutdown()
 {
+    if( m_dmCompletion.enabled() || m_dmReaderRelease.enabled() )
+    {
+        // Existing apps call DM shutdown before monitor shutdown; join its sole publisher before closing the stream.
+        static_cast<dev::shmimMonitor<derivedT> &>( derived() ).appShutdown();
+        m_dmCompletion.close();
+        m_dmReaderRelease.close();
+    }
+
     if( m_satThread.joinable() )
     {
         pthread_kill( m_satThread.native_handle(), SIGUSR1 );
@@ -1686,14 +2724,21 @@ int dm<derivedT, realT>::whilePowerOff()
 {
     checkFlats();
     checkTests();
+    updateDMTimings();
 
-    return 0;
+    if( recordDMTimings() < 0 )
+    {
+        return -1;
+    }
+
+    return updateINDI();
 }
 
 template <class derivedT, typename realT>
 int dm<derivedT, realT>::findDMChannels()
 {
     std::string milkShmimDir = mx::sys::getEnv( "MILK_SHM_DIR" );
+
     if( milkShmimDir == "" )
     {
         milkShmimDir = "/milk/shm";
@@ -1712,6 +2757,7 @@ int dm<derivedT, realT>::findDMChannels()
     }
 
     m_numChannels = -1;
+
     for( size_t n = 0; n < dmlist.size(); ++n )
     {
         char nstr[16];
@@ -1756,6 +2802,7 @@ int dm<derivedT, realT>::findDMChannels()
 
         std::cerr << "looking for " << sname << '\n';
         auto res = std::find( m_deltaChannels.begin(), m_deltaChannels.end(), sname );
+
         if( res == m_deltaChannels.end() )
         {
             std::cerr << "  not a delta\n";
@@ -1769,17 +2816,21 @@ int dm<derivedT, realT>::findDMChannels()
     }
 
     std::cerr << "not deltas: ";
+
     for( size_t n = 0; n < m_notDeltas.size(); ++n )
     {
         std::cerr << m_notDeltas[n] << ' ';
     }
+
     std::cerr << '\n';
 
     std::cerr << "deltas: ";
+
     for( size_t n = 0; n < m_deltas.size(); ++n )
     {
         std::cerr << m_deltas[n] << ' ';
     }
+
     std::cerr << '\n';
 
     return 0;
@@ -1788,6 +2839,17 @@ int dm<derivedT, realT>::findDMChannels()
 template <class derivedT, typename realT>
 int dm<derivedT, realT>::allocate( const dev::shmimT &sp )
 {
+    std::unique_lock<std::mutex> pipelineLock( m_pipelineSatMutex, std::defer_lock );
+
+    if( m_pipelineSatEnabled.load( std::memory_order_acquire ) )
+    {
+        pipelineLock.lock();
+        m_pipelineSaturation.configure( size_t( m_dmWidth ) * m_dmHeight );
+        m_pipelineSatWindow.resize( m_dmWidth, m_dmHeight );
+        m_pipelineSatWindow.setZero();
+        ++m_pipelineSatGeneration;
+    }
+
     static_cast<void>( sp ); // be unused
 
     int err = 0;
@@ -1870,16 +2932,9 @@ int dm<derivedT, realT>::allocate( const dev::shmimT &sp )
     m_totalDelta.resize( m_dmWidth, m_dmHeight );
     m_totalDelta.setZero();
 
-    // clang-format off
-    #ifdef XWC_DMTIMINGS
-    m_piTimes.maxEntries( 2000 );
-    m_satSem.maxEntries( 2000 );
-    m_actProc.maxEntries( 2000 );
-    m_actCom.maxEntries( 2000 );
-    m_satUp.maxEntries( 2000 );
-    m_deltaUp.maxEntries( 2000 );
-    m_triggerDelta.maxEntries( 2000 );
-    #endif // clang-format on
+    m_stagedDelta.resize( m_dmWidth, m_dmHeight );
+    m_stagedDiff.resize( m_dmWidth, m_dmHeight );
+    m_deltaStaged = false;
 
     return 0;
 }
@@ -1887,81 +2942,182 @@ int dm<derivedT, realT>::allocate( const dev::shmimT &sp )
 template <class derivedT, typename realT>
 int dm<derivedT, realT>::processImage( void *curr_src, const dev::shmimT &sp )
 {
-    static_cast<void>( sp ); // be unused
+    static_cast<void>( sp );
 
-    // clang-format off
-    #ifdef XWC_DMTIMINGS
-    m_t0 = mx::sys::get_curr_time();
-    #endif // clang-format on
-
-    int rv = derived().commandDM( curr_src );
-
-    if( rv < 0 )
+    if( !derived().admitCommand() )
     {
-        derivedT::template log<software_critical>( { errno, rv, "Error from commandDM" } );
-        return rv;
+        m_dmTiming.outcome( MagAOX::dmTiming::Outcome::rejected );
+        m_dmTiming.finishEvent();
+        m_completionReceipt = false;
+        m_dmCompletion.reset();
+        m_dmReaderRelease.reset();
+
+        return 0;
     }
 
-    // clang-format off
-    #ifdef XWC_DMTIMINGS
-    m_tdelta0 = mx::sys::get_curr_time();
-    #endif // clang-format on
+    CommandRetirement retirement( *this );
+    m_completionOutcome       = MagAOX::dmTiming::Outcome::unknown;
+    m_completionBackendResult = MagAOX::dmCompletion::unavailableResult;
+    m_deltaStaged             = false;
+    m_dmCompletion.begin( &derived().m_imageStream, m_completionReceipt );
+    m_dmReaderRelease.begin( &derived().m_imageStream, m_completionReceipt );
+    m_completionReceipt = false;
 
-    if( m_deltaChannels.size() > 0 )
+    if( !m_dmTiming.active() )
     {
-        rv = makeDelta();
+        m_dmTiming.beginEvent( false );
+    }
 
-        if( rv < 0 )
+    dmTimingMark( MagAOX::dmTiming::Marker::entry );
+
+    if( m_dmTiming.active() && derived().m_imageStream.md != nullptr && derived().m_imageStream.md->write == 0 )
+    {
+        const auto *metadata = derived().m_imageStream.md;
+        uint64_t    counter  = metadata->cnt0;
+        const auto  stamp    = metadata->writetime;
+        std::atomic_thread_fence( std::memory_order_acquire );
+
+        // Best-effort metadata observation; this does not establish atomic token/pixel identity.
+        if( metadata->write == 0 && counter == metadata->cnt0 )
         {
-            derivedT::template log<software_critical>( { errno, rv, "Error from makeDelta" } );
-            return rv;
+            m_dmTiming.inputCounter( counter );
+
+            if( stamp.tv_sec >= 0 && stamp.tv_nsec >= 0 && stamp.tv_nsec < 1000000000 &&
+                stamp.tv_sec <= ( std::numeric_limits<int64_t>::max() - stamp.tv_nsec ) / 1000000000 )
+            {
+                m_dmTiming.inputPublication( static_cast<int64_t>( stamp.tv_sec ) * 1000000000 + stamp.tv_nsec );
+            }
         }
     }
 
-    // clang-format off
-    #ifdef XWC_DMTIMINGS
-    m_tdeltaf = mx::sys::get_curr_time();
+    int  rv       = -1;
+    bool deferred = false;
 
-    m_tf = m_tdeltaf;
-    #endif // clang-format on
-
-    // clang-format off
-    #ifdef XWC_DMTIMINGS
-    m_tsat0 = mx::sys::get_curr_time();
-    #endif // clang-format on
-
-    // Tell the sat thread to get going
-    if( sem_post( &m_satSemaphore ) < 0 )
+    try
     {
-        derivedT::template log<software_critical>( { errno, 0, "Error posting to semaphore" } );
-        return -1;
+        rv       = derived().commandDM( curr_src );
+        deferred = derived().deferredCommand();
+
+        if( rv >= 0 )
+        {
+            if( !m_deltaChannels.empty() )
+            {
+                dmTimingMark( MagAOX::dmTiming::Marker::deltaStart );
+
+                if( deferred )
+                {
+                    dmTimingMark( MagAOX::dmTiming::Marker::stagingStart );
+                    rv = stageDelta();
+                    dmTimingMark( MagAOX::dmTiming::Marker::stagingEnd );
+                }
+                else
+                {
+                    rv = makeDelta();
+                    dmTimingMark( MagAOX::dmTiming::Marker::deltaEnd );
+                }
+            }
+            else if( !deferred )
+            {
+                // Preserve the synchronous processing-through-delta endpoint without delta work.
+                dmTimingMark( MagAOX::dmTiming::Marker::deltaEnd );
+            }
+        }
+    }
+    catch( const std::exception &error )
+    {
+        rv = -1;
+        derivedT::template log<software_critical>( { std::string( "DM command processing: " ) + error.what() } );
+    }
+    catch( ... )
+    {
+        rv = -1;
+        derivedT::template log<software_critical>( { "unknown exception processing DM command" } );
     }
 
-    // clang-format off
-    #ifdef XWC_DMTIMINGS // clang-format on
+    bool coherentIdentity = true;
 
-    m_tsatf = mx::sys::get_curr_time();
-
-    // Update the latency circ. buffs
-    if( m_piTimes.maxEntries() > 0 )
+    if( m_dmCompletion.enabled() && m_dmReaderRelease.enabled() )
     {
-        if( m_t0Last > 0 )
+        const auto &complete = m_dmCompletion.attempt();
+        const auto &readers  = m_dmReaderRelease.attempt();
+        coherentIdentity = complete.inputInode == readers.inputInode && complete.inputCounter == readers.inputCounter &&
+                           complete.publicationSec == readers.publicationSec &&
+                           complete.publicationNsec == readers.publicationNsec;
+    }
+
+    m_dmReaderRelease.release( &derived().m_imageStream, rv, coherentIdentity );
+
+    if( rv >= 0 )
+    {
+        if( m_dmReaderRelease.enabled() )
         {
-            m_triggerDelta.nextEntry( m_t0 - m_t0Last );
+            m_dmTiming.markAt( MagAOX::dmTiming::Marker::readRelease, m_dmReaderRelease.attempt().finishedNs );
+        }
+        else
+        {
+            dmTimingMark( MagAOX::dmTiming::Marker::readRelease );
+        }
+    }
+
+    // Finalization drains the backend even after command preparation or private staging failed.
+    const int processingResult = rv;
+    const int finalResult      = derived().finalizeCommand( processingResult );
+    retirement.m_finalized     = true;
+    rv                         = processingResult < 0 ? processingResult : finalResult;
+
+    // Freeze actual submission evidence before a later publication/post error changes callback status.
+    m_dmReaderRelease.submission( m_completionOutcome, m_completionBackendResult );
+
+    if( rv >= 0 && deferred )
+    {
+        try
+        {
+            dmTimingMark( MagAOX::dmTiming::Marker::publicationStart );
+            rv = publishDelta();
+            dmTimingMark( MagAOX::dmTiming::Marker::publicationEnd );
+        }
+        catch( const std::exception &error )
+        {
+            rv = -1;
+            dmTimingOutcome( MagAOX::dmTiming::Outcome::failed );
+            derivedT::template log<software_critical>( { std::string( "DM delta publication: " ) + error.what() } );
+        }
+        catch( ... )
+        {
+            rv = -1;
+            dmTimingOutcome( MagAOX::dmTiming::Outcome::failed );
+            derivedT::template log<software_critical>( { "unknown exception publishing DM delta" } );
         }
 
-        m_piTimes.nextEntry( m_tf - m_t0 );
-        m_satSem.nextEntry( m_tsatf - m_tsat0 );
-        m_actProc.nextEntry( m_tact1 - m_tact0 );
-        m_actCom.nextEntry( m_tact2 - m_tact1 );
-        m_satUp.nextEntry( m_tact4 - m_tact3 );
-        m_deltaUp.nextEntry( m_tdeltaf - m_tdelta0 );
-
-        m_t0Last = m_t0;
+        dmTimingMark( MagAOX::dmTiming::Marker::deltaEnd );
     }
 
-        // clang-format off
-    #endif // clang-format on
+    m_deltaStaged = false;
+
+    if( rv >= 0 )
+    {
+        dmTimingMark( MagAOX::dmTiming::Marker::postStart );
+        const int postResult = sem_post( &m_satSemaphore );
+        dmTimingMark( MagAOX::dmTiming::Marker::postEnd );
+
+        if( postResult < 0 )
+        {
+            rv = -1;
+            dmTimingOutcome( MagAOX::dmTiming::Outcome::failed );
+            derivedT::template log<software_critical>( { errno, 0, "Error posting to semaphore" } );
+        }
+    }
+
+    if( rv < 0 && m_completionOutcome != MagAOX::dmTiming::Outcome::partial )
+    {
+        dmTimingOutcome( MagAOX::dmTiming::Outcome::failed );
+        derivedT::template log<software_critical>( { errno, rv, "DM command callback failed" } );
+    }
+
+    dmTimingMark( MagAOX::dmTiming::Marker::finish );
+    m_dmTiming.finishEvent();
+
+    m_dmCompletion.finish( &derived().m_imageStream, rv, m_completionOutcome );
 
     return rv;
 }
@@ -1979,6 +3135,7 @@ int dm<derivedT, realT>::baseInitDM()
     derived().state( stateCodes::HOMING );
 
     int rv;
+
     if( ( rv = derived().initDM() ) < 0 )
     {
         derivedT::template log<software_critical>( { errno, rv, "Error from initDM" } );
@@ -1998,6 +3155,7 @@ int dm<derivedT, realT>::baseReleaseDM()
     }
 
     int rv;
+
     if( ( rv = derived().releaseDM() ) < 0 )
     {
         derivedT::template log<software_critical>( { errno, rv, "Error from releaseDM" } );
@@ -2031,6 +3189,7 @@ int dm<derivedT, realT>::checkFlats()
             derivedT::template log<software_error>(
                 { std::format( "error getting flat files: {}", mx::errorMessage( errc ) ) } );
         }
+
         gfn_logged = true;
         return -1;
     }
@@ -2066,6 +3225,7 @@ int dm<derivedT, realT>::checkFlats()
         for( size_t n = 0; n < tfs.size(); ++n )
         {
             std::filesystem::file_time_type lmt = std::filesystem::last_write_time( tfs[n] );
+
             if( lmt < tn )
             {
                 tfs.erase( tfs.begin() + n );
@@ -2080,14 +3240,20 @@ int dm<derivedT, realT>::checkFlats()
     }
 
     bool changed = false;
+
     for( size_t n = 0; n < tfs.size(); ++n )
     {
         auto ir =
             m_flatCommands.insert( std::pair<std::string, std::string>( mx::ioutils::pathStem( tfs[n] ), tfs[n] ) );
+
         if( ir.second == true )
+        {
             changed = true;
+        }
         else
+        {
             ir.first->second = tfs[n];
+        }
     }
 
     for( auto it = m_flatCommands.begin(); it != m_flatCommands.end(); ++it )
@@ -2313,6 +3479,7 @@ int dm<derivedT, realT>::setFlat( bool update )
         {
             derivedT::template log<text_log>( "error loading flat " + m_flatCurrent, logPrio::LOG_ERROR );
         }
+
         m_flatSet = flatSet;
     }
 
@@ -2443,6 +3610,7 @@ int dm<derivedT, realT>::zeroFlat()
     {
         derivedT::template log<software_error>( { "error from clearSat" } );
     }
+
     derived().state( stateCodes::READY );
 
     return 0;
@@ -2464,6 +3632,7 @@ int dm<derivedT, realT>::checkTests()
             derivedT::template log<software_error>(
                 { std::format( "error getting test files: {}", mx::errorMessage( errc ) ) } );
         }
+
         gfn_logged = true;
         return -1;
     }
@@ -2478,14 +3647,20 @@ int dm<derivedT, realT>::checkTests()
     }
 
     bool changed = false;
+
     for( size_t n = 0; n < tfs.size(); ++n )
     {
         auto ir =
             m_testCommands.insert( std::pair<std::string, std::string>( mx::ioutils::pathStem( tfs[n] ), tfs[n] ) );
+
         if( ir.second == true )
+        {
             changed = true;
+        }
         else
+        {
             ir.first->second = tfs[n];
+        }
     }
 
     for( auto it = m_testCommands.begin(); it != m_testCommands.end(); ++it )
@@ -2585,6 +3760,7 @@ int dm<derivedT, realT>::loadTest( const std::string &intarget )
     // load into memory.
     mx::fits::fitsFile<realT> ff;
     mx::error_t               errc = ff.read( m_testCommand, targetPath );
+
     if( errc != mx::error_t::noerror )
     {
         derivedT::template log<text_log>( std::format( "error reading test file {}: "
@@ -2631,10 +3807,14 @@ int dm<derivedT, realT>::loadTest( const std::string &intarget )
     }
 
     if( derived().m_indiDriver )
+    {
         derived().m_indiDriver->sendSetProperty( m_indiP_tests );
+    }
 
     if( m_testSet )
+    {
         setTest();
+    }
 
     return 0;
 }
@@ -2644,7 +3824,9 @@ int dm<derivedT, realT>::setTest()
 {
 
     if( m_shmimTest == "" )
+    {
         return 0;
+    }
 
     if( ImageStreamIO_openIm( &m_testImageStream, m_shmimTest.c_str() ) != 0 )
     {
@@ -2677,6 +3859,7 @@ int dm<derivedT, realT>::setTest()
         {
             derivedT::template log<text_log>( "error loading test " + m_testCurrent, logPrio::LOG_ERROR );
         }
+
         m_testSet = testSet;
     }
 
@@ -2734,7 +3917,9 @@ template <class derivedT, typename realT>
 int dm<derivedT, realT>::zeroTest()
 {
     if( m_shmimTest == "" )
+    {
         return 0;
+    }
 
     if( ImageStreamIO_openIm( &m_testImageStream, m_shmimTest.c_str() ) != 0 )
     {
@@ -2796,65 +3981,115 @@ int dm<derivedT, realT>::zeroAll( bool nosem )
         return 0;
     }
 
-    IMAGE imageStream;
+    int auxiliaryError = 0;
 
     for( int n = 0; n < m_numChannels; ++n )
     {
         char nstr[16];
         snprintf( nstr, sizeof( nstr ), "%02d", n );
-        std::string shmimN = derived().m_shmimName + nstr;
-
-        if( ImageStreamIO_openIm( &imageStream, shmimN.c_str() ) != 0 )
+        // Clear the persistent source before its destination; sources are not extra main channels.
+        for( const char *suffix : { "_aux", "" } )
         {
-            derivedT::template log<text_log>( "could not connect to channel " + shmimN, logPrio::LOG_WARNING );
-            continue;
-        }
+            bool        auxiliary = suffix[0] != '\0';
+            std::string shmimN    = derived().m_shmimName + nstr + suffix;
 
-        if( imageStream.md->size[0] != m_dmWidth )
-        {
+            if( auxiliary )
+            {
+                // Avoid ImageStreamIO's error output for normally absent auxiliary sources.
+                char filename[200];
+
+                if( ImageStreamIO_filename( filename, sizeof( filename ), shmimN.c_str() ) != IMAGESTREAMIO_SUCCESS )
+                {
+                    derivedT::template log<software_error>(
+                        { "could not construct auxiliary channel path " + shmimN } );
+                    auxiliaryError = -1;
+                    continue;
+                }
+
+                int fd = open( filename, O_RDWR );
+
+                if( fd < 0 )
+                {
+                    if( errno == ENOENT )
+                    {
+                        continue;
+                    }
+
+                    derivedT::template log<software_error>( { errno, "could not open auxiliary channel " + shmimN } );
+                    auxiliaryError = -1;
+                    continue;
+                }
+
+                close( fd );
+            }
+
+            IMAGE imageStream{};
+
+            if( ImageStreamIO_openIm( &imageStream, shmimN.c_str() ) != 0 )
+            {
+                derivedT::template log<text_log>( "could not connect to channel " + shmimN, logPrio::LOG_WARNING );
+
+                if( auxiliary )
+                {
+                    auxiliaryError = -1;
+                    continue;
+                }
+
+                continue;
+            }
+
+            if( imageStream.md->size[0] != m_dmWidth || imageStream.md->size[1] != m_dmHeight ||
+                ( auxiliary && ( imageStream.md->location != -1 || imageStream.md->naxis != 2 ||
+                                 imageStream.md->datatype != m_dmDataType ) ) )
+            {
+                ImageStreamIO_closeIm( &imageStream );
+                derivedT::template log<text_log>( "memory location, shape or data type mismatch between " + shmimN +
+                                                      " and configured DM",
+                                                  logPrio::LOG_ERROR );
+
+                if( auxiliary )
+                {
+                    auxiliaryError = -1;
+                    continue;
+                }
+
+                derived().updateSwitchIfChanged( m_indiP_zeroAll, "request", pcf::IndiElement::Off, INDI_IDLE );
+                return -1;
+            }
+
+            imageStream.md->write = 1;
+            memset( imageStream.array.raw, 0, m_dmWidth * m_dmHeight * sizeof( realT ) );
+
+            clock_gettime( CLOCK_REALTIME, &imageStream.md->writetime );
+            imageStream.md->atime = imageStream.md->writetime;
+            imageStream.md->cnt0++;
+            imageStream.md->write = 0;
+
+            if( !auxiliary && n == m_numChannels - 1 && !nosem )
+            {
+                ImageStreamIO_sempost( &imageStream, -1 );
+            }
+
             ImageStreamIO_closeIm( &imageStream );
-            derivedT::template log<text_log>( "width mismatch between " + shmimN + " and configured DM",
-                                              logPrio::LOG_ERROR );
-            derived().updateSwitchIfChanged( m_indiP_zeroAll, "request", pcf::IndiElement::Off, INDI_IDLE );
-            return -1;
         }
-
-        if( imageStream.md->size[1] != m_dmHeight )
-        {
-            ImageStreamIO_closeIm( &imageStream );
-            derivedT::template log<text_log>( "height mismatch between " + shmimN + " and configured DM",
-                                              logPrio::LOG_ERROR );
-            derived().updateSwitchIfChanged( m_indiP_zeroAll, "request", pcf::IndiElement::Off, INDI_IDLE );
-            return -1;
-        }
-
-        imageStream.md->write = 1;
-        memset( imageStream.array.raw, 0, m_dmWidth * m_dmHeight * sizeof( realT ) );
-
-        clock_gettime( CLOCK_REALTIME, &imageStream.md->writetime );
-
-        // Set the image acquisition timestamp
-        imageStream.md->atime = imageStream.md->writetime;
-
-        imageStream.md->cnt0++;
-        imageStream.md->write = 0;
-
-        // Raise the semaphore on last one.
-        if( n == m_numChannels - 1 && !nosem )
-        {
-            ImageStreamIO_sempost( &imageStream, -1 );
-        }
-
-        ImageStreamIO_closeIm( &imageStream );
     }
 
-    derivedT::template log<text_log>( "all channels zeroed", logPrio::LOG_NOTICE );
+    if( auxiliaryError == 0 )
+    {
+        derivedT::template log<text_log>( "all channels zeroed", logPrio::LOG_NOTICE );
+    }
+    else
+    {
+        derivedT::template log<text_log>( "main channels zeroed; not all auxiliary sources could be cleared",
+                                          logPrio::LOG_ERROR );
+    }
 
     derived().updateSwitchIfChanged( m_indiP_zeroAll, "request", pcf::IndiElement::Off, INDI_IDLE );
 
     // Also cleanup flat and test
     m_flatSet = false;
     derived().updateSwitchIfChanged( m_indiP_setFlat, "toggle", pcf::IndiElement::Off, pcf::IndiProperty::Idle );
+
     if( derived().state() == stateCodes::OPERATING )
     {
         derived().state( stateCodes::READY );
@@ -2865,13 +4100,14 @@ int dm<derivedT, realT>::zeroAll( bool nosem )
     derived().updateSwitchIfChanged( m_indiP_setTest, "toggle", pcf::IndiElement::Off, pcf::IndiProperty::Idle );
 
     int rv;
+
     if( ( rv = clearSat() ) < 0 )
     {
         derivedT::template log<software_error>( { errno, rv, "Error from clearSat" } );
         return rv;
     }
 
-    return 0;
+    return auxiliaryError;
 }
 
 template <class derivedT, typename realT>
@@ -2904,8 +4140,91 @@ int dm<derivedT, realT>::makeDelta()
 }
 
 template <class derivedT, typename realT>
+int dm<derivedT, realT>::stageDelta()
+{
+    return stageDelta( m_outputShape(), m_stagedDelta, m_stagedDiff, m_deltaStaged );
+}
+
+template <class derivedT, typename realT>
+int dm<derivedT, realT>::stageDelta( Eigen::Ref<const mx::improc::eigenImage<realT>> shape,
+                                     mx::improc::eigenImage<realT>                  &delta,
+                                     mx::improc::eigenImage<realT>                  &diff,
+                                     bool                                           &staged )
+{
+    staged = false;
+
+    if( m_notDeltas.empty() )
+    {
+        return 0;
+    }
+
+    if( m_deltas.empty() || delta.rows() != m_dmWidth || delta.cols() != m_dmHeight || diff.rows() != m_dmWidth ||
+        diff.cols() != m_dmHeight || m_totalFlat.rows() != m_dmWidth || m_totalFlat.cols() != m_dmHeight ||
+        m_totalDelta.rows() != m_dmWidth || m_totalDelta.cols() != m_dmHeight || shape.rows() != m_dmWidth ||
+        shape.cols() != m_dmHeight )
+    {
+        return -1;
+    }
+
+    for( const auto &indices : { &m_notDeltas, &m_deltas } )
+    {
+        for( const size_t index : *indices )
+        {
+            if( index >= m_channels.size() || m_channels[index] == nullptr ||
+                ( *m_channels[index] )().rows() != m_dmWidth || ( *m_channels[index] )().cols() != m_dmHeight )
+            {
+                return -1;
+            }
+        }
+    }
+
+    m_totalFlat = ( *m_channels[m_notDeltas[0]] )();
+
+    for( size_t n = 1; n < m_notDeltas.size(); ++n )
+    {
+        m_totalFlat += ( *m_channels[m_notDeltas[n]] )();
+    }
+
+    m_totalDelta = ( *m_channels[m_deltas[0]] )();
+
+    for( size_t n = 1; n < m_deltas.size(); ++n )
+    {
+        m_totalDelta += ( *m_channels[m_deltas[n]] )();
+    }
+
+    delta  = shape - m_totalFlat;
+    diff   = m_totalDelta - delta;
+    staged = true;
+
+    return 0;
+}
+
+template <class derivedT, typename realT>
+int dm<derivedT, realT>::publishDelta()
+{
+    if( m_deltaStaged )
+    {
+        m_outputDelta = m_stagedDelta;
+        m_outputDiff  = m_stagedDiff;
+        m_deltaStaged = false;
+    }
+
+    return 0;
+}
+
+template <class derivedT, typename realT>
 int dm<derivedT, realT>::clearSat()
 {
+    std::unique_lock<std::mutex> pipelineLock( m_pipelineSatMutex, std::defer_lock );
+
+    if( m_pipelineSatEnabled.load( std::memory_order_acquire ) )
+    {
+        pipelineLock.lock();
+        m_pipelineSaturation.clear();
+        m_pipelineSatWindow.setZero();
+        ++m_pipelineSatGeneration;
+    }
+
     if( m_shmimSat == "" || m_dmWidth == 0 || m_dmHeight == 0 )
     {
         return 0;
@@ -3035,33 +4354,63 @@ void dm<derivedT, realT>::satThreadExec()
     // This is the working memory for making the 1/0 mask out of m_accumSatMap
     mx::improc::eigenImage<uint8_t> satmap( m_dmWidth, m_dmHeight );
 
-    int    naccum    = 0;
-    double t_accumst = mx::sys::get_curr_time();
+    uint64_t naccum             = 0;
+    uint64_t pipelineGeneration = 0;
+    double   t_accumst          = mx::sys::get_curr_time();
 
     // This is the main image grabbing loop.
     while( !derived().shutdown() )
     {
         // Get timespec for sem_timedwait
         timespec ts;
+
         if( clock_gettime( CLOCK_REALTIME, &ts ) < 0 )
         {
             derivedT::template log<software_critical>( { errno, 0, "clock_gettime" } );
             return;
         }
+
         ts.tv_sec += 1;
 
         // Wait on semaphore
         if( sem_timedwait( &m_satSemaphore, &ts ) == 0 )
         {
-            // not a timeout -->accumulate
-            for( int rr = 0; rr < m_instSatMap.rows(); ++rr )
+            const bool                   pipeline = m_pipelineSatEnabled.load( std::memory_order_acquire );
+            std::unique_lock<std::mutex> pipelineLock( m_pipelineSatMutex, std::defer_lock );
+
+            if( pipeline )
             {
-                for( int cc = 0; cc < m_instSatMap.cols(); ++cc )
+                pipelineLock.lock();
+
+                if( pipelineGeneration != m_pipelineSatGeneration )
                 {
-                    m_accumSatMap( rr, cc ) += m_instSatMap( rr, cc );
+                    pipelineGeneration = m_pipelineSatGeneration;
+                    naccum             = 0;
+                    t_accumst          = mx::sys::get_curr_time();
                 }
+
+                const uint64_t samples =
+                    m_pipelineSaturation.drain( m_pipelineSatWindow.data(), size_t( m_pipelineSatWindow.size() ) );
+
+                if( samples == 0 )
+                {
+                    continue;
+                }
+
+                naccum += samples;
             }
-            ++naccum;
+            else
+            {
+                for( int rr = 0; rr < m_instSatMap.rows(); ++rr )
+                {
+                    for( int cc = 0; cc < m_instSatMap.cols(); ++cc )
+                    {
+                        m_accumSatMap( rr, cc ) += m_instSatMap( rr, cc );
+                    }
+                }
+
+                ++naccum;
+            }
 
             // If less than avg int --> go back and wait again
             if( mx::sys::get_curr_time( ts ) - t_accumst < m_satAvgInt / 1000.0 )
@@ -3071,16 +4420,21 @@ void dm<derivedT, realT>::satThreadExec()
 
             // If greater than avg int --> calc stats, write to streams.
             m_overSatAct = 0;
+
             for( int rr = 0; rr < m_instSatMap.rows(); ++rr )
             {
                 for( int cc = 0; cc < m_instSatMap.cols(); ++cc )
                 {
-                    m_satPercMap( rr, cc ) = m_accumSatMap( rr, cc ) / naccum;
+                    const uint64_t accumulated = pipeline ? m_pipelineSatWindow( rr, cc ) : m_accumSatMap( rr, cc );
+                    m_satPercMap( rr, cc ) =
+                        pipeline ? float( accumulated ) / float( naccum ) : m_accumSatMap( rr, cc ) / naccum;
+
                     if( m_satPercMap( rr, cc ) >= m_percThreshold )
                     {
                         ++m_overSatAct;
                     }
-                    satmap( rr, cc ) = ( m_accumSatMap( rr, cc ) > 0 ); // it's  1/0 map
+
+                    satmap( rr, cc ) = accumulated > 0;
                 }
             }
 
@@ -3139,6 +4493,12 @@ void dm<derivedT, realT>::satThreadExec()
             ImageStreamIO_sempost( &m_satPercImageStream, -1 );
 
             m_accumSatMap.setZero();
+
+            if( pipeline )
+            {
+                m_pipelineSatWindow.setZero();
+            }
+
             naccum    = 0;
             t_accumst = mx::sys::get_curr_time( ts );
         }
@@ -3205,6 +4565,143 @@ int dm<derivedT, realT>::updateINDI()
         return 0;
     }
 
+    updateDMCompletionINDI();
+
+    const auto &summary = m_dmTiming.summary();
+    auto        state   = summary.fgValid ? pcf::IndiProperty::Ok : pcf::IndiProperty::Idle;
+    const auto &a       = summary.metrics[MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::receiptInterval )];
+    const auto &w       = summary.metrics[MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::sendInterval )];
+    const auto &wa      = summary.metrics[MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::receiptSend )];
+    indi::updateIfChanged<double>( m_indiP_dmTiming,
+                                   { "receipt_fps",
+                                     "receipt_min",
+                                     "receipt_max",
+                                     "receipt_jitter",
+                                     "receipt_count",
+                                     "send_fps",
+                                     "send_min",
+                                     "send_max",
+                                     "send_jitter",
+                                     "send_count",
+                                     "receipt_send",
+                                     "receipt_send_jitter",
+                                     "receipt_send_min",
+                                     "receipt_send_max",
+                                     "receipt_send_count" },
+                                   { a.valid && a.mean > 0 ? 1.0 / a.mean : -1,
+                                     a.count ? a.min : -1,
+                                     a.count ? a.max : -1,
+                                     a.valid ? a.stddev : -1,
+                                     static_cast<double>( a.count ),
+                                     w.valid && w.mean > 0 ? 1.0 / w.mean : -1,
+                                     w.count ? w.min : -1,
+                                     w.count ? w.max : -1,
+                                     w.valid ? w.stddev : -1,
+                                     static_cast<double>( w.count ),
+                                     wa.count ? wa.mean : -1,
+                                     wa.valid ? wa.stddev : -1,
+                                     wa.count ? wa.min : -1,
+                                     wa.count ? wa.max : -1,
+                                     static_cast<double>( wa.count ) },
+                                   derived().m_indiDriver,
+                                   state );
+
+    std::vector<std::string> names;
+    std::vector<double>      values;
+
+    for( size_t i = MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::dispatch );
+         i < MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::count );
+         ++i )
+    {
+        std::string name   = MagAOX::dmTiming::metricName( static_cast<MagAOX::dmTiming::Metric>( i ) );
+        const auto &metric = summary.metrics[i];
+
+        for( const auto *field : { "mean", "jitter", "min", "max", "count", "span" } )
+        {
+            names.push_back( name + '_' + field );
+        }
+
+        values.insert( values.end(),
+                       { metric.count ? metric.mean : -1,
+                         metric.valid ? metric.stddev : -1,
+                         metric.count ? metric.min : -1,
+                         metric.count ? metric.max : -1,
+                         static_cast<double>( metric.count ),
+                         metric.count ? metric.span : -1 } );
+    }
+
+    indi::updateIfChanged<double>( m_indiP_dmStages, names, values, derived().m_indiDriver, state );
+
+    const auto &q = summary.total;
+    indi::updateIfChanged<double>( m_indiP_dmTimingQuality,
+                                   { "window",      "span",    "age",    "capacity",  "queued",   "session",
+                                     "sequence",    "enabled", "valid",  "events",    "receipts", "submitted",
+                                     "failed",      "partial", "noSend", "synthetic", "rejected", "duplicates",
+                                     "counterGaps", "invalid", "dropped" },
+                                   { summary.windowSec,
+                                     summary.span,
+                                     summary.age,
+                                     static_cast<double>( summary.capacity ),
+                                     static_cast<double>( summary.queued ),
+                                     static_cast<double>( summary.session ),
+                                     static_cast<double>( summary.sequence ),
+                                     static_cast<double>( summary.enabled ),
+                                     static_cast<double>( summary.fgValid ),
+                                     static_cast<double>( q.events ),
+                                     static_cast<double>( q.receipts ),
+                                     static_cast<double>( q.submitted ),
+                                     static_cast<double>( q.failed ),
+                                     static_cast<double>( q.partial ),
+                                     static_cast<double>( q.noSend ),
+                                     static_cast<double>( q.synthetic ),
+                                     static_cast<double>( q.rejected ),
+                                     static_cast<double>( q.duplicates ),
+                                     static_cast<double>( q.counterGaps ),
+                                     static_cast<double>( q.invalid ),
+                                     static_cast<double>( q.dropped ) },
+                                   derived().m_indiDriver,
+                                   state );
+
+    const auto &delivery = summary.delivery;
+    const auto &d        = delivery.total;
+    indi::updateIfChanged<double>( m_indiP_dmTimingDelivery,
+                                   { "enabled",
+                                     "clock",
+                                     "bracketUs",
+                                     "attempted",
+                                     "qualified",
+                                     "unavailable",
+                                     "invalid",
+                                     "wideBracket",
+                                     "clockDiscontinuity",
+                                     "futurePublication",
+                                     "identityRejected" },
+                                   { delivery.enabled ? 1.0 : 0.0,
+                                     static_cast<double>( delivery.clock ),
+                                     delivery.bracketLimitNs * 0.001,
+                                     static_cast<double>( d.attempted ),
+                                     static_cast<double>( d.qualified ),
+                                     static_cast<double>( d.unavailable ),
+                                     static_cast<double>( d.invalid ),
+                                     static_cast<double>( d.wideBracket ),
+                                     static_cast<double>( d.clockDiscontinuity ),
+                                     static_cast<double>( d.futurePublication ),
+                                     static_cast<double>( d.identityRejected ) },
+                                   derived().m_indiDriver,
+                                   delivery.enabled && d.qualified ? pcf::IndiProperty::Ok : pcf::IndiProperty::Idle );
+    const auto deliveryClock =
+        delivery.clock == MagAOX::dmTiming::PublicationClock::tai
+            ? "CLOCK_TAI"
+            : ( delivery.clock == MagAOX::dmTiming::PublicationClock::realtime ? "CLOCK_REALTIME" : "disabled" );
+    indi::updateIfChanged(
+        m_indiP_dmTimingState, "deliveryClock", std::string( deliveryClock ), derived().m_indiDriver );
+
+    const char *states[] = { "disabled", "warmingUp", "valid", "stale", "unavailable" };
+    indi::updateIfChanged( m_indiP_dmTimingState,
+                           "state",
+                           std::string( states[static_cast<size_t>( summary.state )] ),
+                           derived().m_indiDriver,
+                           state );
     return 0;
 }
 
@@ -3230,6 +4727,7 @@ int dm<derivedT, realT>::newCallBack_init( const pcf::IndiProperty &ipRecv )
     if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On )
     {
         int rv = baseInitDM();
+
         if( rv < 0 )
         {
             return derivedT::template log<software_error, -1>( { "error from initDM in INDI callback" } );
@@ -3254,12 +4752,15 @@ int dm<derivedT, realT>::newCallBack_zero( const pcf::IndiProperty &ipRecv )
     }
 
     if( !ipRecv.find( "request" ) )
+    {
         return 0;
+    }
 
     if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On )
     {
         return derived().zeroDM();
     }
+
     return 0;
 }
 
@@ -3278,12 +4779,15 @@ int dm<derivedT, realT>::newCallBack_release( const pcf::IndiProperty &ipRecv )
     }
 
     if( !ipRecv.find( "request" ) )
+    {
         return 0;
+    }
 
     if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On )
     {
         return baseReleaseDM();
     }
+
     return 0;
 }
 
@@ -3316,7 +4820,9 @@ int dm<derivedT, realT>::newCallBack_flats( const pcf::IndiProperty &ipRecv )
     for( auto i = m_flatCommands.begin(); i != m_flatCommands.end(); ++i )
     {
         if( !ipRecv.find( i->first ) )
+        {
             continue;
+        }
 
         if( ipRecv[i->first].getSwitchState() == pcf::IndiElement::On )
         {
@@ -3353,7 +4859,9 @@ int dm<derivedT, realT>::newCallBack_setFlat( const pcf::IndiProperty &ipRecv )
     }
 
     if( !ipRecv.find( "toggle" ) )
+    {
         return 0;
+    }
 
     if( ipRecv["toggle"] == pcf::IndiElement::On )
     {
@@ -3394,7 +4902,9 @@ int dm<derivedT, realT>::newCallBack_tests( const pcf::IndiProperty &ipRecv )
     for( auto i = m_testCommands.begin(); i != m_testCommands.end(); ++i )
     {
         if( !ipRecv.find( i->first ) )
+        {
             continue;
+        }
 
         if( ipRecv[i->first].getSwitchState() == pcf::IndiElement::On )
         {
@@ -3431,7 +4941,9 @@ int dm<derivedT, realT>::newCallBack_setTest( const pcf::IndiProperty &ipRecv )
     }
 
     if( !ipRecv.find( "toggle" ) )
+    {
         return 0;
+    }
 
     if( ipRecv["toggle"] == pcf::IndiElement::On )
     {
@@ -3458,7 +4970,9 @@ int dm<derivedT, realT>::newCallBack_zeroAll( const pcf::IndiProperty &ipRecv )
     }
 
     if( !ipRecv.find( "request" ) )
+    {
         return 0;
+    }
 
     if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On )
     {
@@ -3468,6 +4982,7 @@ int dm<derivedT, realT>::newCallBack_zeroAll( const pcf::IndiProperty &ipRecv )
         std::lock_guard<std::mutex> guard( derived().m_indiMutex );
         return zeroAll();
     }
+
     return 0;
 }
 
