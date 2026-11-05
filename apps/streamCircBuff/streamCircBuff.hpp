@@ -130,7 +130,6 @@ class streamCircBuff : public MagAOXApp<true>,
     INDI_SETCALLBACK_DECL( streamCircBuff, m_indiP_fpsSource );
 
   protected:
-
   public:
     /// Default c'tor.
     streamCircBuff();
