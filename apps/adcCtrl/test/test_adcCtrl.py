@@ -1022,3 +1022,98 @@ def test_ke_capture_sets_batch_mean():
     assert len(messages(handler, logging.INFO, "captured knife-edge set point")) == 1
     assert dev.properties["measurement"]["ke_m"] == dev._ke_setpoint
     assert dev.properties["measurement"]["angle1"] == 0.0
+
+
+class DispersionCamera(FakeCamera):
+    """Camera whose frames have vertical dispersion proportional to the device's delta_1 offset.
+
+    The dispersion is `scale * (delta_1 - delta_star)` reference lambda/D
+    across the band, plus a fixed horizontal (co-rotation) term
+    `horizontal`. `make` builds the frame from the dispersion.
+    """
+
+    def __init__(self, dev, make, delta_star=0.3, scale=1.0, horizontal=0.0):
+        super().__init__()
+        self.dev = dev
+        self.make = make
+        self.delta_star = delta_star
+        self.scale = scale
+        self.horizontal = horizontal
+
+    def dispersion(self, delta_1):
+        return (self.horizontal, self.scale * (delta_1 - self.delta_star))
+
+    def grab_stack(self, num_images, subtract_dark=True):
+        self.calls.append((num_images, subtract_dark))
+        return self.make(dispersion=self.dispersion(self.dev.delta_1))
+
+
+def test_ke_loop_converges_to_setpoint_not_zero():
+    """Closed loop in knife-edge mode drives delta_1 to where m equals the captured set point.
+
+    A fixed co-rotation term makes m non-zero at zero vertical dispersion,
+    so converging to m = 0 would land elsewhere. ke_gain follows the
+    documented rule, 2 / slope of m versus delta_1, and loop_sign stays
+    negative.
+    """
+    dev = make_device(client=ke_client(), gain=0.3)
+    camera = DispersionCamera(dev, make_ke_frame, horizontal=0.3)
+    geometry = ke_geometry()
+
+    deltas = np.array([-0.2, 0.3, 0.8])
+    ms = [measure_knife_edge(make_ke_frame(dispersion=camera.dispersion(d)), geometry, (0, 3), PIXEL_SCALE).m
+          for d in deltas]
+    slope = np.polyfit(deltas, ms, 1)[0]
+    assert abs(slope) > 1.0, slope
+
+    dev.camera = camera
+    send(dev, "ke_gain", target=2.0 / slope)
+    send(dev, "coronagraph", knife_edge=ON)
+    dev.set_command(camera.delta_star, 0.0)
+    send(dev, "ke_capture_setpoint", request=ON)
+    dev.loop()
+    setpoint = dev._ke_setpoint
+    zero_crossing = camera.delta_star - setpoint / slope
+    assert abs(zero_crossing - camera.delta_star) > 0.1, (setpoint, slope)
+
+    dev.set_command(camera.delta_star + 0.5, 0.0)
+    send(dev, "state", adcLoop=ON)
+    for _ in range(15):
+        dev.loop()
+    assert dev._state == States.CLOSED_LOOP
+    assert abs(dev.delta_1 - camera.delta_star) < 0.05, dev.delta_1
+    cycle = dev.telem_records[-1][1]
+    assert cycle["mode"] == "knife_edge" and cycle["ke_spots"] == [0, 3]
+    assert cycle["angles"][1] is None and abs(cycle["residual"]) < 0.2
+
+
+def test_same_loop_sign_converges_in_both_modes():
+    """With ctrl_mtx = 1/pair slopes and ke_gain = 2/m slope, negative loop_sign converges in both modes."""
+    geometry = ke_geometry()
+    std_geometry = SpotGeometry(15.0, 17.0, 20, 10.0, 5.0)
+    deltas = np.array([-0.2, 0.3, 0.8])
+    probe = DispersionCamera(None, None)
+    pairs = np.array([pair_offsets(measure_spot_angles(make_frame(angle=17.0, dispersion=probe.dispersion(d)),
+                                                       std_geometry, PIXEL_SCALE)[1]) for d in deltas])
+    slopes = [np.polyfit(deltas, pairs[:, i], 1)[0] for i in range(2)]
+    ms = [measure_knife_edge(make_ke_frame(dispersion=probe.dispersion(d)), geometry, (0, 3), PIXEL_SCALE).m
+          for d in deltas]
+    ke_slope = np.polyfit(deltas, ms, 1)[0]
+
+    # the provisional ke_gain rule from the pair slopes (plan R2-3): s0 = S02/2, s3 = -S13/2
+    provisional = 2.0 / (slopes[0] / 2 + slopes[1] / 2)
+    assert abs(provisional * ke_slope / 2.0 - 1.0) < 0.1, (provisional, 2.0 / ke_slope)
+
+    for knife_edge in [False, True]:
+        dev = make_device(client=ke_client(), gain=0.3, ctrl_mtx=[1.0 / slopes[0], 1.0 / slopes[1]],
+                          ke_gain=2.0 / ke_slope)
+        assert dev._loop_sign == -1.0
+        make = make_ke_frame if knife_edge else (lambda dispersion: make_frame(angle=17.0, dispersion=dispersion))
+        dev.camera = DispersionCamera(dev, make)
+        if knife_edge:
+            send(dev, "coronagraph", knife_edge=ON)
+        dev.set_command(0.8, 0.0)
+        send(dev, "state", adcLoop=ON)
+        for _ in range(15):
+            dev.loop()
+        assert abs(dev.delta_1 - 0.3) < 0.05, (knife_edge, dev.delta_1)

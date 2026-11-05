@@ -1063,6 +1063,12 @@ Tests were run locally with the adc_sims venv (numpy, scipy, hcipy) and minimal 
 - **Lock.** A failed frame drops the lock. A capped margin is logged once per lock.
 - `measurement` shows unselected spots as 0, and the knife-edge elements are 0 in standard mode. `ke_sep` is in λ/D at the observing wavelength, to compare with tweeterSpeck's separation.
 
+**Step 4: cycle dispatch and convergence (§9.4).** `measure_dispersion` uses `measure_knife_edge_batch` in knife-edge mode, so idle, adcLoop, oneshot and measure-only all work in both modes. The `adcctrl_cycle` telemetry gains `mode` and, in knife-edge mode, `ke_spots`, `setpoint`, `m`, `residual`, `star`, `separation`, `angle` and `margin`; unmeasured spot angles are `null`. Two new tests:
+- **Converges to the set point.** A fixed co-rotation term makes `m` non-zero at zero vertical dispersion. After a capture at δ1* and a +0.5° offset, the closed loop returns δ1 to δ1* within 0.05°, not to the point where `m = 0`.
+- **One `loop_sign`.** With `ctrl_mtx = [1/S02, 1/S13]` and `ke_gain = 2/S_m` from synthetic fits, negative `loop_sign` converges in both modes. The R2-3 rule, `ke_gain = 2/(S02/2 + S13/2)`, matches the directly fitted `2/S_m` to within 0.5% at θ = 17° and 28°, and S13/S02 follows cot θ (3.11 vs 3.27 at 17°; 1.82 vs 1.88 at 28°). The synthetic slopes are much larger than the instrument's, because the synthetic dispersion scale is arbitrary, so only the rule, not the value, is checked.
+
+All 51 tests pass locally (31 existing, unchanged; 20 new).
+
 ### References
 - MagAO-X PAPLC knife-edge mask (reflective D-shaped mirror at ~1.1 λ/D, adjustable IWA): [arXiv:2607.08146](https://arxiv.org/pdf/2607.08146), [arXiv:2303.13719](https://arxiv.org/pdf/2303.13719)
 - Satellite-spot dispersion method: arXiv:2608.10307

@@ -937,6 +937,11 @@ KE_MEASUREMENT_ELEMENTS = {
 }
 
 
+def finite_list(values):
+    """`values` as a list of floats, with None for non-finite entries (unmeasured knife-edge spots)."""
+    return [float(v) if np.isfinite(v) else None for v in values]
+
+
 def requested_switch(new_message, names):
     """Return the first of `names` switched ON in `new_message`, or None."""
     for name in names:
@@ -1637,8 +1642,11 @@ class adcCtrl(XDevice):
         """Measure dispersion over `no_measurements` images.
 
         Returns a dict of averaged results, or None if the batch was aborted or
-        had too few valid measurements.
+        had too few valid measurements. In knife-edge mode this is
+        measure_knife_edge_batch.
         """
+        if self._knife_edge:
+            return self.measure_knife_edge_batch()
         start_state = self._state
         geometry = self.spot_geometry()
         n_total = self._no_measurements
@@ -1858,20 +1866,39 @@ class adcCtrl(XDevice):
         step, accepted = compute_step(error, self._gain, self._loop_sign, self.config.step_limit_deg)
         self.properties["command"]["step"] = step
         self.update_property(self.properties["command"])
-        self.telem("adcctrl_cycle", {
+        record = {
             "state": state.name,
-            "angles": result["raw"].tolist(),
-            "deviations": result["dev"].tolist(),
+            "mode": "knife_edge" if self._knife_edge else "standard",
+            "angles": finite_list(result["raw"]),
+            "deviations": finite_list(result["dev"]),
             "pairs": result["pairs"].tolist(),
             "error": error,
             "step": step,
             "accepted": accepted,
             "n_valid": result["n_valid"],
             "n_total": result["n_total"],
-        })
+        }
+        if self._knife_edge:
+            record.update({
+                "ke_spots": list(self._ke_order),
+                "setpoint": result["setpoint"],
+                "m": result["m"],
+                "residual": result["residual"],
+                "star": [float(v) for v in result["star"]],
+                "separation": result["separation"],
+                "angle": result["angle"],
+                "margin": result["margin"],
+            })
+        self.telem("adcctrl_cycle", record)
 
         if state == States.MEASURE_ONLY:
-            self.log.info(f"measured error {error:.4f}, step {step:.4f} (measured, not sent)")
+            if self._knife_edge:
+                self.log.info(
+                    f"measured m {result['m']:.4f} (set point {result['setpoint']:.4f}), error {error:.4f}, "
+                    f"step {step:.4f} (measured, not sent)"
+                )
+            else:
+                self.log.info(f"measured error {error:.4f}, step {step:.4f} (measured, not sent)")
             self.set_status(last_command="measure-only")
             return
 
