@@ -37,7 +37,7 @@ Review AGENTS.md.  Do not alter any text above the "Agent Findings and Plan" bel
 # Agent Findings and Plan
 <!-- This section will be filled out by the agent -->
 
-*Status (2026-11-05): questions answered; functional change and unit test implemented (not yet built or run, which has to happen on the build machine). Documentation pass and `clang-format` still to do.*
+*Status (2026-11-05): functional change, unit test, and documentation pass committed on `ktwitchell/counter-offload`. Not yet built or run; that and `clang-format` have to happen on the build machine.*
 
 ## Task Summary
 <!-- The agent should summarize the task as they understand it -->
@@ -169,7 +169,7 @@ Findings from reading the code and data:
 **Remaining:**
 - **Build and test:** build, run the unit test, then the bench checks (Tests 2 and 3), all on the build machine.
 - **To confirm while building:** that `m_tweeterOffload() = m_tweeter` compiles against the mxlib `milkImage` API, which isn't available on this Mac.
-- **Documentation pass (§16) over the full `t2wOffloader.hpp`:** a separate commit, as planned in step 5 of the original plan.
+- **Documentation pass (§16):** done as a separate commit. It added `///` docs to all undocumented members and declarations in `t2wOffloader.hpp`, and switched the `processImage()` parameter docs to the inline `/**< */` style. `t2wOffloader.cpp` already had `\file`/`\brief` and no `\author`.
 - **`clang-format`:** a separate final commit, run on the build machine.
 
 **Commits (§22/§23)**, each a single line plus `Co-Authored-By`:
