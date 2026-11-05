@@ -2,8 +2,8 @@
 allall: all
 
 NEED_CUDA = no
-OTHER_HEADERS = ar_controller.hpp shadow_controller.hpp
-OTHER_OBJS = recursive_least_squares.o qrd_rls.o ar_controller.o utils.o shadow_controller.o
+OTHER_HEADERS = ar_controller.hpp shadow_controller.hpp causal_input.hpp
+OTHER_OBJS = recursive_least_squares.o qrd_rls.o ar_controller.o utils.o shadow_controller.o causal_input.o
 TARGET = loPredCtrlAcc
 # Opt-in shadow builds must rebuild all objects without finite-only/fast-math assumptions.
 # Use a clean build with: make DDSPC_SHADOW_BUILD=yes
