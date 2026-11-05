@@ -37,7 +37,7 @@ Review AGENTS.md.  Do not alter any text above the "Agent Findings and Plan" bel
 # Agent Findings and Plan
 <!-- This section will be filled out by the agent -->
 
-*Status (2026-11-04): plan proposed, waiting for user review. No code changes yet.*
+*Status (2026-11-05): questions answered; functional change and unit test implemented (not yet built or run, which has to happen on the build machine). Documentation pass and `clang-format` still to do.*
 
 ## Task Summary
 <!-- The agent should summarize the task as they understand it -->
@@ -69,7 +69,7 @@ Findings from reading the code and data:
 
 1. Only the **modal** path (`m_numModes > 0`) is in scope, because that is where the dummy adds lines. Zonal offloading (`m_numModes == 0`) is left unchanged and publishes nothing (see Q1).
 2. The published shape is the change in the offload during this update, in tweeter command units: `sum_p Δmodeval_p * tModesOrtho_p`. It is **not** the cumulative offload, and it is **not** negated (see Q2).
-3. `prevCommand` is captured where the dummy puts it: inside the update loop, *after* the `m_modevalDMf` override block. So the delta covers only the integrator update (gain + leak). Changes injected from outside through `aol0_modevalDMf` are not included (see Q4).
+3. ~~`prevCommand` is captured where the dummy puts it, after the `m_modevalDMf` override block.~~ Per Q4, the previous command is captured for all modes *before* the `m_modevalDMf` block. The delta therefore covers both the integrator update (gain + leak) and any `aol0_modevalDMf` resync, i.e. the full change the woofer makes.
 4. The tweeter shape is the ideal back-projection through the tweeter modes. It does **not** account for woofer `m_actLim` clipping, the woofer mask applied to `m_wModes`, or response-matrix fit error. These are second-order for the 8-20 low-order modes normally offloaded.
 5. **Interpretation of Requirement 4 ("faster than 8 kHz").** Offloads happen at ≤ 1 kHz, so the shmim updates once per offload. I read the requirement as: the counter shape must be computed and posted well within one 8 kHz period (125 µs) of the offload, so `counterOffload` can start in step with the woofer. The added work is at most `m_maxModes` (50) × 2500 px ≈ 125k multiply-adds plus a 10 kB copy. That should take a few µs, comfortably under budget (see Q5).
 6. The existing behaviour stays exactly the same. All woofer computations, the order of writes to `m_dmStream`/`m_modevalDM`, locks, telemetry, and INDI are untouched. The only additions are the per-mode delta, the tweeter sum, and the new shmim post.
@@ -80,7 +80,7 @@ Findings from reading the code and data:
 
 - **R1.** `t2wOffloader` creates a new shmim, the same size as the tweeter input shmim, holding the offload change projected onto the tweeter.
 - **R2.** Existing behaviour is unchanged: additions only, and nothing is reordered, removed, or changed in the woofer/modeval path.
-- **R3.** The implementation follows the dummy outline: `prevCommand`/`m_deltavalDM` inside the modal update loop, and `m_tweeter` accumulated next to the woofer mode sum.
+- **R3.** The implementation follows the dummy outline: a per-mode change `m_deltavalDM` (previous vs. new `m_modevalDM`), back-projected as `m_tweeter = sum_p m_deltavalDM(p) * m_tModesOrtho(p)`. Placement differs from the dummy as agreed in Q4/Q6 and the unit-test answer (see Implementation Plan).
 - **R4.** The new shmim is posted on every modal offload, within ≪125 µs of the woofer command.
 - **R5.** Edits are limited to `apps/t2wOffloader/` and follow AGENTS.md: Doxygen on new members, `m_` naming, no `\author` in touched files, full-file doc pass, `clang-format`.
 
@@ -121,6 +121,7 @@ Findings from reading the code and data:
    - **Purpose:** check that for a known `m_deltavalDM` and synthetic `m_tModesOrtho` (e.g. three orthonormal 4×4 modes), the computed tweeter shape equals `sum_p Δ_p * mode_p`, and that modes `≥ m_numModes` contribute nothing.
    - **Requirement:** to make this testable without shmims, the 2-line tweeter sum would need to go into a small protected method, e.g. `calcTweeterDelta()`. That is a slight structural deviation from the dummy, which puts it inline.
    - **Question:** do you want this test? If you'd rather keep the code exactly inline as in the dummy, I'll skip it and rely on test 2.
+     - Answer (2026-11-05): yes, use a helper and add the unit test. Implemented as `calcTweeterOffload()`. Its sections cover: the sum over modes, the `m_numModes` limit, the `m_maxModes` limit, zero modes, and that each call replaces rather than accumulates.
    - The test follows AGENTS.md §19/§20: per-`TEST_CASE` Doxygen, `T2WOFFLOADER_TEST_DOXYGEN_REF`, and removing `\author` from the test file header.
 2. **Build-machine check (you run it).** Build and `clang-format` on the build machine. Then run `t2wOffloader` in simulation or on the bench with offloading on and `numModes` about 10. Confirm:
    - the new shmim's `cnt0` increments once per woofer `cnt0` increment;
@@ -131,48 +132,66 @@ Findings from reading the code and data:
 ## Implementation Plan
 <!-- Here the agent documents its plan for the implementation -->
 
-**Branch.** I'll ask before creating a branch. The current branch is `ktwitchell/counter-offload`, which already follows §14, so I plan to work there.
+**Branch:** `ktwitchell/counter-offload` (existing; follows §14). No push.
 
-**All edits are in `apps/t2wOffloader/t2wOffloader.hpp`, plus the test file if test 1 is approved.**
+**Decisions from the answered questions:**
+- **Q1, Q7:** modal offloading only. Zonal mode, `zero()`, and offload toggle-on publish nothing.
+- **Q2:** publish `+Δ`, the offload as it appears on the tweeter. `counterOffload` (part 2) does the negation.
+- **Q3:** the shmim name is hard-coded as `aol{m_loopNumber}_tweeterOffload`, which is `aol0_tweeterOffload` in practice.
+- **Q4:** the previous command is saved for all modes before the `modevalDMf` block.
+- **Q5:** Requirement 4 means "posted well inside 125 µs of each offload".
+- **Q6:** post after the woofer `sempost`.
+- **Unit test:** use a helper method plus a Catch2 test.
 
-1. **Members** (next to `m_modeDeltaAmps` / `m_modevalDM`, each with `///` docs):
-   - `mx::improc::eigenImage<realT> m_deltavalDM;`: the change in each modal offload command during the latest update (1 × modes).
-   - `mx::improc::milkImage<realT> m_tweeterDelta;`: the new shmim with the latest offload change in tweeter space.
-   - Document the existing `m_tweeter` as "work buffer: latest offload change back-projected onto the tweeter".
-   - If Q3 = config: add `std::string m_tweeterDeltaShmim;` with its default name.
-2. **Config** (only if Q3 = config): `config.add("offload.counterShmim", ...)` in `setupConfig()` and `_config(...)` in `loadConfigImpl()`.
-3. **`allocate()`** (additions only):
-   - `m_deltavalDM.resize(m_tModesOrtho.planes(), 1); m_deltavalDM.setZero();`
-   - `m_tweeterDelta.create(<name>, m_width, m_height);`
-4. **`processImage()` modal branch** (additions only, following the dummy):
-   - In the `p < m_numModes && p < m_maxModes` loop, before the update: `realT prevCommand = m_modevalDM(p,0);`. After the update: `m_deltavalDM(p,0) = m_modevalDM(p,0) - prevCommand;`.
-   - Next to the woofer mode sum: `m_tweeter = m_deltavalDM(0,0) * m_tModesOrtho.image(0);`, and inside the existing `p = 1..` loop: `m_tweeter += m_deltavalDM(p,0) * m_tModesOrtho.image(p);`. This adds one line to an existing loop and doesn't change what the loop does to `m_woofer`.
-   - After the woofer `ImageStreamIO_sempost` (per Q6): `m_tweeterDelta.setWrite(); m_tweeterDelta() = m_tweeter; m_tweeterDelta.post();`. The exact copy idiom will be confirmed against the mxlib `milkImage` API on the build machine.
-5. **Documentation pass (§16)** over the whole file:
-   - add `///` briefs and inline `/**< [in] */` parameter docs to undocumented declarations (`setupConfig`, `loadConfig`, `allocate`, `zero`, `prepareModes`, config members, INDI and telemetry members);
-   - add a `\file`/`\brief` check on `t2wOffloader.cpp`;
-   - remove `\author` from the test file if it is touched.
-6. **Commits (§22/§23)**, each a single line plus `Co-Authored-By`:
-   1. functional change + this plan;
-   2. tests (if approved);
-   3. documentation pass;
-   4. `clang-format` (run on the build machine by you, or I commit after you report results).
+**As implemented in `apps/t2wOffloader/t2wOffloader.hpp`** (additions only):
 
-   No push.
+1. **Members.**
+   - Documented the previously unused `m_tweeter` as the back-projected offload change.
+   - Added `m_deltavalDM` (eigenImage, modes × 1). It holds the previous `m_modevalDM` values, then the change.
+   - Added `m_tweeterOffload` (milkImage): the new stream.
+2. **`calcTweeterOffload()`** (public, inline, defined after `prepareModes()`). It sets `m_tweeter` to zero, then adds `m_deltavalDM(p) * m_tModesOrtho.image(p)` for `p < m_numModes && p < m_maxModes && p < m_deltavalDM.rows()`. This is the dummy's two-line sum moved into a function so it can be tested.
+3. **`allocate()`.** After the existing `modevalDM`/`modevalDMf` setup, sizes and zeros `m_deltavalDM` to `m_tModesOrtho.planes()`. Creates `aol{m_loopNumber}_tweeterOffload` at the input (tweeter) shmim size.
+4. **`processImage()` modal branch.**
+   - Just before the `modevalDMf` block: copy every `m_modevalDM(p)` into `m_deltavalDM(p)`. That is at most 50 floats, about tens of ns.
+   - After the woofer `ImageStreamIO_sempost`, while still holding `m_shmimMutex` (so `zero()` cannot run in between):
+     - set `m_deltavalDM(p) = m_modevalDM(p) - m_deltavalDM(p)` for all modes;
+     - call `calcTweeterOffload()`;
+     - `m_tweeterOffload.setWrite(true)`, then `m_tweeterOffload() = m_tweeter`, then `post()`.
+   - **Differences from the dummy:**
+     - The delta and the tweeter sum are computed *after* the woofer is written rather than inside the existing loops. So none of the existing loops are edited, and the woofer timing gains only the snapshot copy.
+     - The previous command is a member snapshot instead of a `prevCommand` local (Q4).
+5. **Unit test, `tests/t2wOffloader_test.cpp`.**
+   - Added a `MagAOX::app::t2wOffloader_test` harness (the class the app already befriends), hidden from Doxygen with `\cond`. It has three orthonormal 4×4 modes, one of them spread over four pixels.
+   - Added a `TEST_CASE` for `calcTweeterOffload()` with a Doxygen block and `T2WOFFLOADER_TEST_DOXYGEN_REF`.
+   - Removed `\author` from the file header.
+   - The test was already listed in `tests/tests.list`.
+
+**Remaining:**
+- **Build and test:** build, run the unit test, then the bench checks (Tests 2 and 3), all on the build machine.
+- **To confirm while building:** that `m_tweeterOffload() = m_tweeter` compiles against the mxlib `milkImage` API, which isn't available on this Mac.
+- **Documentation pass (§16) over the full `t2wOffloader.hpp`:** a separate commit, as planned in step 5 of the original plan.
+- **`clang-format`:** a separate final commit, run on the build machine.
+
+**Commits (§22/§23)**, each a single line plus `Co-Authored-By`:
+1. functional change + unit test + this plan;
+2. documentation pass;
+3. `clang-format`.
 
 ## Follow-up and Edge Cases
 <!-- The agent should list any planned follow up and any edge cases that are not addressed -->
 
-- **Part 2:** the `counterOffload` app reads this shmim and writes a negated, time-stepped version to a tweeter channel at 8 kHz. Timing should be informed by the ~200 µs woofer-vs-tweeter t10 offset and the ~250 µs woofer rise.
-- **Not reflected in the counter shape:**
+- **Part 2:** the `counterOffload` app reads `aol0_tweeterOffload`, negates it, and writes it to a tweeter channel in time steps at 8 kHz. Timing should be based on the ~200 µs woofer-vs-tweeter t10 offset and the ~250 µs woofer rise. It can align on the shmim's `cnt0`/`atime`.
+- **Not reflected in the published shape (by design or agreement):**
   - woofer `m_actLim` clipping;
-  - woofer mask / response-matrix fit error;
-  - `modevalDMf` overrides (unless Q4 changes this);
-  - `zero()` and the woofer zeroing when the offload toggle is switched on;
-  - zonal mode.
-- **`numModes` change at runtime.** Lowering `numModes` leaves the high modes in `m_modevalDM` frozen rather than zeroing them; that is existing behaviour. The delta for those modes is not recomputed and must not be stale: `m_deltavalDM` entries `≥ m_numModes` are zeroed each update, and the tweeter sum only runs over `p < m_numModes` anyway.
+  - woofer mask and response-matrix fit error;
+  - `zero()` and the woofer zeroing at offload toggle-on (Q7);
+  - zonal mode (Q1).
+- **Woofer write timeout.** When `processImage()` returns early on the "timed out with write==1" path, `m_modevalDM` has already been updated and posted, but the woofer and the new shmim are not written. The next offload's change is measured from the updated `m_modevalDM`, so it undercounts the woofer step by the skipped update. This is rare, and it's existing behaviour that is left alone.
+- **`m_numModes` changed from INDI mid-update.** `m_numModes` is read by the woofer sum and again by `calcTweeterOffload()` without a lock. A change landing between the two could make one published shape cover a different set of modes from the woofer command. It lasts one offload only.
+- **Lowering `numModes`.** Modes above the new `numModes` keep their values in `m_modevalDM` (existing behaviour). Their change is computed but not summed, because the sum is limited to `p < m_numModes`.
 - **Existing issues noticed, not fixed here (R2):**
   - `m_loopNumber` is never loaded from config;
   - `m_typeSize`/`m_dataType` are used in `allocate()`/`memcpy` where `m_dmTypeSize`/`m_dmDataType` are probably meant;
   - the `"offload.loopNUmber"` typo in `setupConfig()`;
-  - `zero()` / `prepareModes()` are non-inline definitions in a header.
+  - `zero()`, `prepareModes()`, and the telemetry functions are non-inline definitions in a header;
+  - a configured `offload.numModes > offload.maxModes` is not clamped at startup (only the INDI path clamps it), so the existing zeroing loop could index past `m_modevalDM`.

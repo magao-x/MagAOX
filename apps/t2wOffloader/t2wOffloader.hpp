@@ -88,13 +88,22 @@ class t2wOffloader : public MagAOXApp<true>, public dev::shmimMonitor<t2wOffload
     ///@}
 
     mx::improc::eigenImage<realT> m_twRespM;
+    /// The latest modal offload change back-projected onto the tweeter, published to m_tweeterOffload.
     mx::improc::eigenImage<realT> m_tweeter;
     mx::improc::eigenImage<realT> m_woofer;
     mx::improc::eigenImage<realT> m_wooferDelta;
     mx::improc::eigenImage<realT> m_modeDeltaAmps;
 
+    /// Change in each modal offload command during the latest update, including any modevalDMf resync.
+    /** Holds the previous m_modevalDM values until the change is calculated after the woofer is written.
+     */
+    mx::improc::eigenImage<realT> m_deltavalDM;
+
     mx::improc::milkImage<realT> m_modevalDM;
     mx::improc::milkImage<realT> m_modevalDMf;
+
+    /// Stream aol<loop>_tweeterOffload publishing m_tweeter after each modal offload.
+    mx::improc::milkImage<realT> m_tweeterOffload;
 
     uint64_t m_lastDMf_cnt0{ 0 };
     uint64_t m_updatedDMf {0};
@@ -179,6 +188,11 @@ class t2wOffloader : public MagAOXApp<true>, public dev::shmimMonitor<t2wOffload
     int zero();
 
     int prepareModes();
+
+    /// Back-project the latest modal offload change onto the tweeter.
+    /** Sets m_tweeter to the sum of m_deltavalDM(p) * m_tModesOrtho.image(p) over the offloaded modes.
+     */
+    void calcTweeterOffload();
 
   protected:
     /** \name INDI Interface
@@ -611,6 +625,12 @@ inline int t2wOffloader::allocate( const dev::shmimT &dummy )
 
     m_lastDMf_cnt0 = m_modevalDMf.cnt0();
 
+    m_deltavalDM.resize( m_tModesOrtho.planes(), 1 );
+    m_deltavalDM.setZero();
+
+    m_tweeterOffload.create(
+        std::format( "aol{}_tweeterOffload", m_loopNumber ), shmimMonitorT::m_width, shmimMonitorT::m_height );
+
     ///\todo size checks here.
 
     return 0;
@@ -685,6 +705,12 @@ inline int t2wOffloader::processImage( void *curr_src, const dev::shmimT &dummy 
 
         m_modevalDM.setWrite( true );
 
+        // Save the commands the woofer currently has, before any modevalDMf resync, for the tweeter offload
+        for( int p = 0; p < m_deltavalDM.rows(); ++p )
+        {
+            m_deltavalDM( p, 0 ) = m_modevalDM( p, 0 );
+        }
+
         if( m_modevalDMf.cnt0() > m_lastDMf_cnt0 )
         {
             for( uint32_t p = 0; p < m_modevalDM.rows() && p < m_modevalDMf.rows(); ++p )
@@ -757,6 +783,18 @@ inline int t2wOffloader::processImage( void *curr_src, const dev::shmimT &dummy 
 
         m_dmStream.md->write = 0;
         ImageStreamIO_sempost( &m_dmStream, -1 );
+
+        // Publish the offload as it appears on the tweeter, after the woofer so its timing is unaffected
+        for( int p = 0; p < m_deltavalDM.rows(); ++p )
+        {
+            m_deltavalDM( p, 0 ) = m_modevalDM( p, 0 ) - m_deltavalDM( p, 0 );
+        }
+
+        calcTweeterOffload();
+
+        m_tweeterOffload.setWrite( true );
+        m_tweeterOffload() = m_tweeter;
+        m_tweeterOffload.post();
     }
 
     return 0;
@@ -882,6 +920,16 @@ int t2wOffloader::prepareModes()
             m_wModes.rows() * m_wModes.cols() * m_wModes.planes() * sizeof( float ) );
 
     return 0;
+}
+
+inline void t2wOffloader::calcTweeterOffload()
+{
+    m_tweeter.setZero();
+
+    for( uint32_t p = 0; p < m_numModes && p < m_maxModes && p < m_deltavalDM.rows(); ++p )
+    {
+        m_tweeter += m_deltavalDM( p, 0 ) * m_tModesOrtho.image( p );
+    }
 }
 
 INDI_NEWCALLBACK_DEFN( t2wOffloader, m_indiP_gain )( const pcf::IndiProperty &ipRecv )
