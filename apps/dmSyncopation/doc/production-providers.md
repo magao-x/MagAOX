@@ -203,6 +203,86 @@ scheduler; production uses exact reader-release readiness and its configured
 ready/passive-copy leads. The standard timing/health properties describe actual
 production state, rate and publications, rather than a hypothetical shadow rate.
 
+## Capture the running production setup
+
+Keep synco enabled and tweeterSpeck modulating with the settings being tested.
+Use this read-only block from anywhere inside the MagAOX checkout. It captures
+120 seconds of telemetry after the before-snapshots finish; the bounded
+before/after queries add to the total wall time. It saves the current synco and
+producer configuration, including preparation leads absent from INDI readbacks.
+
+The finite `capture-zero-aux-test.sh` helper controls a separate zero trial and
+must not be used for this running production capture.
+
+```bash
+(
+    prod_capture_dir="$HOME/tmp/synco-production-$(date -u +%Y%m%dT%H%M%SZ)"
+    mkdir -p "$prod_capture_dir" || exit 1
+    git rev-parse HEAD > "$prod_capture_dir/git.txt" || exit 1
+    prod_devices=(dmtweeter-synco dmtweeter camwfs tweeterSpeck)
+
+    prod_snapshot()
+    {
+        local prod_phase=$1 prod_device prod_status
+        date -u +%FT%T.%NZ > "$prod_capture_dir/indi-$prod_phase-start.utc"
+        for prod_device in "${prod_devices[@]}" holoop sysMonRTC.set_latency.toggle
+        do
+            if timeout -k 2s 8s getINDI "$prod_device" \
+                > "$prod_capture_dir/$prod_device-indi-$prod_phase.txt" \
+                2> "$prod_capture_dir/$prod_device-indi-$prod_phase.err"
+            then
+                prod_status=0
+            else
+                prod_status=$?
+            fi
+            printf '%s %s status=%s\n' "$prod_device" "$prod_phase" "$prod_status" \
+                >> "$prod_capture_dir/status.txt"
+        done
+        date -u +%FT%T.%NZ > "$prod_capture_dir/indi-$prod_phase-end.utc"
+    }
+
+    for prod_config in dmtweeter-synco tweeterSpeck
+    do
+        if [[ -r "/opt/MagAOX/config/$prod_config.conf" ]]
+        then
+            cp -- "/opt/MagAOX/config/$prod_config.conf" "$prod_capture_dir/" || exit 1
+        fi
+    done
+
+    prod_snapshot before
+    prod_capture_pids=()
+    date -u +%FT%T.%NZ > "$prod_capture_dir/collection-start.utc"
+    for prod_device in "${prod_devices[@]}"
+    do
+        timeout -k 5s -s INT 120s stdbuf -oL -eL logdump \
+            --dir=/opt/MagAOX/telem --ext=.bintel -f "$prod_device" \
+            > "$prod_capture_dir/$prod_device.txt" 2>&1 &
+        prod_capture_pids+=( "$!" )
+    done
+
+    for prod_pid in "${prod_capture_pids[@]}"
+    do
+        if wait "$prod_pid"
+        then
+            prod_status=0
+        else
+            prod_status=$?
+        fi
+        printf 'collector pid=%s status=%s\n' "$prod_pid" "$prod_status" \
+            >> "$prod_capture_dir/status.txt"
+    done
+    date -u +%FT%T.%NZ > "$prod_capture_dir/collection-end.utc"
+    prod_snapshot after
+    printf '%s\n' "$prod_capture_dir"
+)
+```
+
+The block waits only for its own four collector PIDs. A collector status of
+124 is the expected timeout at the end of collection; 137 indicates forced
+termination after the additional five-second grace. Nonzero INDI-query status
+indicates a failed or incomplete snapshot. Keep `status.txt` and error files
+with the capture, and share the printed directory path for analysis.
+
 All real instrument startup, enable/disable actions and nonzero qualification
 are performed by the operator. The zero trials establish transport capacity;
 changing patterned commands and the selected multi-producer configuration
