@@ -11,6 +11,7 @@
 #include <sys/syscall.h>
 
 #include <mx/improc/imageUtils.hpp>
+#include <mx/sigproc/circularBuffer.hpp>
 
 #include "../../ImageStreamIO/ImageStruct.hpp"
 #include <ImageStreamIO/ImageStreamIO.h>
