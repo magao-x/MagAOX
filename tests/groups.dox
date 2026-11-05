@@ -72,6 +72,11 @@ $ less tests/results/latest/run.log
  * \ingroup unit_test
  */
 
+/** \defgroup loPredCtrlAcc_unit_test loPredCtrlAcc Numerical Unit Tests
+ * \brief Independent offline DDSPC history, identification, and control-law tests.
+ * \ingroup application_unit_test
+ */
+
 /** \defgroup sysMonitor_unit_test sysMonitor Unit Tests
  * \brief Offline system diagnostic collectors, publication, and lifecycle tests.
  * \ingroup application_unit_test
