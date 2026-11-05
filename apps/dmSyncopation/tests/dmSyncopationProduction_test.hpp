@@ -33,6 +33,7 @@ class ProductionHarness : public Harness
     using dmSyncopation::m_productionEnabled;
     using dmSyncopation::m_productionReadyLeadUs;
     using dmSyncopation::m_productionStep0LeadUs;
+    using dmSyncopation::m_zeroTrial;
     using dmSyncopation::openProduction;
     using dmSyncopation::productionCopy;
     using dmSyncopation::productionSnapshot;
@@ -608,6 +609,83 @@ TEST_CASE( "production common scheduler continuously publishes tagged contributi
     MagAOX::app::dmSyncopation::processZeroTestPrimary;
     MagAOX::app::dmSyncopation::productionStep0;
     MagAOX::app::dmSyncopation::publishZeroTestStatus;
+#endif
+    // clang-format on
+}
+
+/// Qualified clock recovery refreshes health without restarting either continuous or finite scheduling.
+TEST_CASE( "qualified scheduler health recovers after a rejected publication clock",
+           "[dmSyncopation][production][zeroTest][clockRecovery]" )
+{
+    Streams            streams;
+    ProductionSidecars sidecars;
+    ProductionHarness  app;
+    const bool         production = GENERATE( false, true );
+    ZeroClock::connect( app, streams, 4 );
+    const auto next         = ZeroClock::warm();
+    app.m_productionEnabled = production;
+    app.m_zeroTestEnabled   = !production;
+    app.m_zeroLateUs        = 6;
+    app.m_zeroWakeAheadUs   = 10;
+    app.m_maxCadence        = 8000;
+
+    if( production )
+    {
+        REQUIRE( app.openProduction() );
+    }
+
+    app.m_enabled = true;
+    ZeroClock::primary( next );
+    REQUIRE( app.m_zeroStats.posted == 3 );
+    const auto started      = app.m_zeroStats.startedNs;
+    const auto trial        = app.m_zeroTrial;
+    const auto activeReason = production ? "production active" : "zero trial active";
+    CHECK( std::string( app.m_reason ) == activeReason );
+
+    ZeroClock::publicationClockDelay = 2000;
+    ZeroClock::primary( next + 500000 );
+    REQUIRE_FALSE( app.m_zeroStats.active );
+    REQUIRE( app.m_zeroStats.warming );
+    CHECK( std::string( app.m_reason ) ==
+           ( production ? "production publication clock unqualified" : "zero publication clock unqualified" ) );
+
+    ZeroClock::primary( next + 1000000 );
+    CHECK( app.m_zeroStats.active );
+    CHECK_FALSE( app.m_zeroStats.warming );
+    CHECK( std::string( app.m_reason ) == activeReason );
+    CHECK( app.m_zeroStats.startedNs == started );
+    CHECK( app.m_zeroTrial == trial );
+
+    // The combined output is already visible at callback entry, so recovery first establishes a new baseline.
+    CHECK( app.m_zeroStats.mainUnmatched == 1 );
+    CHECK( app.m_zeroStats.posted == 3 );
+    CHECK( app.m_zeroStats.skipped == 3 );
+    CHECK( app.m_zeroStats.clockExcludedCycles == 1 );
+
+    ZeroClock::primary( next + 1500000 );
+    CHECK( app.m_zeroStats.active );
+    CHECK( std::string( app.m_reason ) == activeReason );
+    CHECK( app.m_zeroStats.startedNs == started );
+    CHECK( app.m_zeroTrial == trial );
+    CHECK( app.m_zeroStats.mainMatched == 2 );
+    CHECK( app.m_zeroStats.mainUnmatched == 1 );
+    CHECK( app.m_zeroStats.posted == 6 );
+    CHECK( app.m_zeroStats.skipped == 3 );
+
+    unsigned           starts = 0;
+    Harness::ZeroEvent event;
+
+    while( app.m_zeroEvents.pop( event ) )
+    {
+        starts += event.outcome == int( Harness::ZeroOutcome::started );
+    }
+
+    CHECK( starts == 1 );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::processZeroTestPrimary;
+    MagAOX::app::dmSyncopation::zeroTestClockRejected;
 #endif
     // clang-format on
 }

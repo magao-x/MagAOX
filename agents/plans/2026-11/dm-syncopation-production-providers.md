@@ -558,3 +558,29 @@ Analysis artifacts are `/tmp/production0528-source-timing.json`,
 `/tmp/production0528-source-summary.json`, and
 `/tmp/production0528-camera-dm-analysis.json`. Only this engineering record was
 updated; runtime code and instrument settings were not changed by an agent.
+
+## 2026-11-04: prepare the branch for review against dev
+
+Fetch and merge current `origin/dev` (`5a45f1c7`) before the pull request. Its
+removal of obsolete self-monitor comments conflicts with this branch's adjacent
+out-of-class timing-hook definitions. Preserve the definitions and remove the
+obsolete comments; the resolved merge is `7fc90c43`.
+
+Correct the stale health text found in both production captures. Every
+qualified active cycle now refreshes the active reason, including recovery
+within an existing trial. The trial start time and lifecycle event remain
+unchanged. The new private-stream regression covers both finite and production
+modes, injects a rejected publication-clock capture, and verifies active health
+on recovery. Its immediate fake dmcomb requires one conservative baseline
+recovery cycle before auxiliary posting resumes; the test preserves and checks
+that existing behavior rather than weakening clock/output admission.
+
+The first regression run incorrectly expected posts during that baseline
+recovery cycle. All existing cases and the new health assertions passed, but
+both mode variants failed the new posting-count assertion. After correcting
+the fixture expectation and checking resumed posts on the following cycle,
+the rebuilt full scheduler suite passes **154 cases / 6,634,353 assertions**.
+Logs are `/tmp/dm-syncopation-pr-scheduler-final-build.log` and
+`/tmp/dm-syncopation-pr-scheduler-final-run.log`. clang-format verification and
+the working-tree whitespace check pass. The change affects status reporting;
+the qualified scheduling policy is retained.

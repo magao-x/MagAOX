@@ -1178,11 +1178,11 @@ inline int dmSyncopation::processZeroTestPrimary( int64_t observed, int64_t rece
     {
         m_zeroStats.startedNs = observed;
         m_zeroStats.active    = true;
-        m_reason              = m_productionEnabled ? "production active" : "zero trial active";
         zeroTestEvent( -1, ZeroOutcome::started, ZeroStage::lifecycle, grid.ns, observed );
     }
 
     m_zeroStats.active = true;
+    m_reason           = m_productionEnabled ? "production active" : "zero trial active";
     ++m_zeroStats.mainObserved;
     m_zeroStats.auxiliaryOpportunities += uint64_t( m_requested - 1 );
     m_zeroCounterTargetRawNs = rawGrid.ns;
