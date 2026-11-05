@@ -293,22 +293,40 @@ Review AGENTS.md.  Do not alter any text above the "Agent Findings and Plan" bel
 
 ## Task Summary
 
-Investigation and Phase 1 numerical implementation completed on 2026-11-05 on
+Investigation and Phase 1 numerical implementation were completed on 2026-11-05 on
 `ASTR-LT-428.local`, branch `parkertjohnson1/accel_ddspc`, based on
-`b9648ec958ebe3401dc20deaa240e84a60f25d41`. The user authorized Phase 1 only:
+`b9648ec958ebe3401dc20deaa240e84a60f25d41`. That implementation was authorized
+for Phase 1 only:
 mathematical correctness and independent offline tests. No application was
 started, instrument interrogated, physical command written, branch changed,
 commit created, or change pushed. The separate `~/source/MagAOX` worktree was
 not modified.
 
-**Current status:** the numerical core now has an explicit opt-in
-`HistoryMode::Causal` with corrected command indexing, origin-aligned
-accelerometer histories, complete-record warm-up, and independently supplied
-synthetic applied-command records. A separate reference helper implements the
-literal-lambda optimal law without added feedback. `HistoryMode::Legacy` remains
-the constructor default used by the unchanged application. Its original
-operational law and known history defects remain available for compatibility.
-The original `apps/loPredCtrl/` implementation is untouched.
+**Current status — Phase 2 application integration:** the user's subsequent
+instruction authorizes application/model management and INDI selection only,
+starting from committed Phase 1 HEAD `e184a2a48d5de02cfa59723387bfdc7d110d30c4`.
+`loPredCtrlAcc` now has an opt-in startup `parameters.shadow=true` path with
+independently owned standard and assisted causal RLS models, readiness-gated
+`ddspc_mode`, independent training requests, and prediction/validity diagnostics.
+The legacy operational controller remains the startup default and retains its
+historical law, histories, output dispatch, and limitations. Neither causal
+model has an output publisher. No native app, driver, or stream was started;
+no branch/history operation or separate-worktree modification was performed.
+
+The application input seam accepts explicitly verified or synthetic synchronized
+records. **It is deliberately not connected to live training:** no applied-DM
+readback or WFS exposure/command correspondence is established by the current
+app. The WFS-only shadow callback invalidates training rather than substituting
+its local command candidates or zeros. Live `acc000` ingestion remains deferred.
+Shadow execution skips accelerometer/output/telemetry helper startup and rejects
+all output acquisition/copy entrypoints. Mode selection cannot attach them.
+
+The existing `HistoryMode::Causal`, origin alignment, corrected QR invariant,
+and literal-lambda reference law are reused without numerical-core changes.
+`HistoryMode::Legacy` remains the constructor default. The original
+`apps/loPredCtrl/` implementation is untouched. Phase 2 details and reproducible
+validation appear below; these are offline integration results, not instrument
+or real-time results.
 
 Numerical tests reproduced both reported history defects before the corrections,
 verified conventional and QR RLS against independent batch least squares, and
@@ -320,7 +338,9 @@ below. These are numerical results, not live prediction or correction results.
 Original source line references in the investigation below refer to the
 pre-implementation revision above. The new Phase 1 contract and implementation
 record name the current functions explicitly; formatting and documentation
-changes shifted the old numerical-helper line numbers.
+changes shifted the old numerical-helper line numbers. Phase 2 app references
+use function names; the required full-file documentation/formatting pass also
+shifted application line numbers.
 
 The objective is a general DDSPC predictor with learned accelerometer coupling
 `D`, followed by the optimal controller specified above. Accelerometer decoding,
@@ -338,14 +358,15 @@ paths, not evidence that the present branch operates correctly on the instrument
 The RLS algebra is reusable; the history and integration contracts need correction
 and tests before treating either app as a verified reference.
 
-**Critical findings in the unchanged app/legacy path:** the accelerometer path reinterprets UINT16 payloads as
+**Critical findings retained in the legacy path:** the accelerometer path reinterprets UINT16 payloads as
 FLOAT, loses intermediate samples, cannot detect a stream that becomes stale
 after its first sample, and trains with accelerometer histories from the wrong
 prediction origin. A shared command-indexing defect affects multiple controlled
 modes. The quadratic controller contains accelerometer cross terms implicitly,
 but its applied law also includes scaled regularization and an extra feedback
 term. Training records calculated commands rather than confirmed applied
-commands. There is no explicit non-actuating mode.
+commands. The historical path had no explicit non-actuating mode; the new
+startup-only shadow path below supplies one without changing that path.
 
 The mathematical reference is [Haffert et al. (2021), Section 2,
 equations 3–15](https://arxiv.org/pdf/2103.07566). Its integral/incremental command
@@ -412,6 +433,21 @@ formula or a predetermined spectral line.
    `4e58786c9a4ac47266cbea6d8847e3a2663aa798`; that worktree has concurrent work.
    Its files were not changed, imported, or made build dependencies. Reconfirm
    the interface before integration.
+
+7. **Phase 2 execution and input boundary:** `parameters.shadow` is a startup-only
+   configuration, default false, with no runtime actuation-enable or execution
+   transition. Both causal models use `u_i` held on `[i,i+1)` and the Phase 1
+   newest-first ordering; the next hypothetical command is the last horizon
+   block. `ShadowRecord` validity assertions are an explicit caller contract,
+   not inferred hardware readback. Current application records in tests are
+   labeled synthetic; live applied-command/timing validity remains false.
+
+8. **Readiness means usable shadow diagnostics only.** It is not an acceptance
+   criterion for correction, stability, suppression, or real-time performance.
+   Selection does not change either learner's training request, coefficients,
+   histories, or output policy. An unselected learner can train independently.
+   Accelerometer loss stops the assisted history without rebuilding the standard
+   model; no automatic switch or physical correction is introduced.
 
 ## Requirements
 
@@ -483,14 +519,142 @@ formula or a predetermined spectral line.
   removes `D` columns rather than approximating the baseline by zeroing them.
   A supplementary zero-column experiment verifies numerical equivalence within
   FLOAT tolerance, not a replacement for the dimension-reduced baseline. The
-  planned runtime `ddspc_mode` property and simultaneous diagnostic model
-  management are deferred to live integration, as requested for Phase 1.
+  runtime `ddspc_mode` property and simultaneous diagnostic model management
+  were deferred in Phase 1 and are now implemented under Phase 2 authorization
+  through the independent shadow manager described next.
 
 - Causal save/load is explicitly rejected before file I/O: the existing legacy
   artifact format lacks sufficient layout/timing/scaling metadata. Dimensional
   and RLS-prior validation is added only to the Causal constructor. Existing
   operational gain, regularization, accumulation, serialization, and startup
   behavior are not silently changed.
+
+### Phase 2 implemented application/model contract
+
+- **Independent models:** new `shadow_controller.hpp/.cpp`,
+  `DDSPC::ShadowController::initialize()`, owns two separate
+  `PredictiveController(HistoryMode::Causal)` instances. Each owns independent
+  conventional and corrected-QR numerical state, histories, update counters,
+  excitation evidence, proposals, and frozen-origin forecast snapshots. The
+  configured `parameters.qrd` selects each model's update algorithm. Standard
+  has zero accelerometer dimensions, not zeroed assisted coefficients:
+
+  ```text
+  d = F*m
+  p_standard = (F+2*N-1)*m
+  p_assisted = p_standard+c*N_a
+  Theta_standard: d x p_standard; P_standard: p_standard x p_standard
+  Theta_assisted: d x p_assisted; P_assisted: p_assisted x p_assisted
+  internal training permutation [C B D A]; public coefficients [A B D C]
+  ```
+
+  Shared incoming observations do not imply shared fitted parameters or
+  covariance. Reset/pause of one manager model leaves the other unchanged.
+  `reset_model` in the app deliberately resets both, retaining their independent
+  training requests and current diagnostic selection.
+
+- **Input contract and failures:** `ShadowController::process()` checks explicit
+  WFS/applied/timing flags plus column shapes and finite values before updates.
+  Assisted additionally requires a finite, synchronized `c x 1` feature vector.
+  Missing acceleration breaks only assisted histories/forecasts. Unknown common
+  inputs break both; coefficients and requested training are retained, readiness
+  and segment evidence are cleared. Forward index gaps start fresh contiguous
+  local histories; duplicate/backward indices are rejected without a fabricated
+  sample. Restart/generation handling is not inferred from counters: a future
+  adapter must explicitly invalidate/reset at a producer generation change.
+  Rewarming and at least `max(p,shadow_min_updates)` new updates per segment are
+  required. No proposal, repeated accelerometer sample, or zero input fills gaps.
+  Numeric faults latch until explicit reset. `invalidate()` retains validity flags
+  only, not sample matrices.
+
+- **Readiness and training:** `ShadowController::step()` appends every valid record
+  independently of training selection. Both training flags start off. Adaptation
+  occurs once per matured complete example only while that model is enabled;
+  gamma is per actual update. Readiness requires complete causal histories,
+  sufficient segment updates, full empirical regressor rank, finite coefficients,
+  and a finite reference-law proposal. The rank test uses the last `p` actual
+  regressors, normalizes nonzero columns, and uses Eigen column-pivoted QR with
+  relative threshold `1e-5`; the RLS prior cannot supply excitation evidence.
+  Zero/fixed/unidentifiable command data cannot become ready just by waiting.
+  Pausing retains a ready fit while valid records and predictions continue.
+
+- **Prediction diagnostics:** at a ready origin, save canonical coefficients and
+  `[y_p;u_p;a_p]` before any future target is available. On horizon maturity,
+  `step()` scores that frozen model with the actual subsequent `u_f` from the
+  supplied record stream, before updating with the target. Per-model RMSE is
+  cumulative within the uninterrupted segment, over all `F*m` residual values;
+  `prediction_valid` indicates scored forecasts exist and distinguishes initial
+  zero RMSE from a measured error. This is a **conditional future-input prediction
+  score**, not an open-loop forecast with future inputs known in advance and not
+  an in-sample error recomputed with today's fit. It does not use later `a` values.
+
+- **Reference control law:** diagnostic proposals use the existing pure
+  `get_reference_controller(lambda)` with literal positive
+  `parameters.regularization`, then the last `m` rows times the causal state.
+  No scaled regularization, WFS feedback addition, exploration, or accumulator
+  is added. Proposals remain in the manager and are never appended as applied
+  commands or copied into the application's legacy command buffer. Legacy
+  `calculate_command()/update_controller()`, feedback, scaled lambda, and
+  optional integration retain the compatibility behavior documented in Phase 1.
+
+- **App integration:** `loPredCtrlAcc::configureShadow()` constructs the pair;
+  protected `processShadowRecord()` is the synchronized-record integration seam,
+  serialized by `m_shadowMutex`. It has no public live transport adapter yet.
+  `allocate(shmimT)` validates FLOAT, single-column WFS geometry and resets both
+  shadow histories/models without allocating legacy output buffers.
+  `processImage(shmimT)` can report finite WFS payload validity but always leaves
+  applied-command and timing validity false, invalidating both models. It never
+  trains from `m_newCommand` or `m_fullCommand`. These locally computed commands
+  still do not establish physical application, clipping, downstream integration,
+  ownership, or response delay. No operational behavior is altered to guess them.
+
+- **Output inhibition:** with `parameters.shadow=true`, config/startup/logic/
+  shutdown omit `frameGrabber` and legacy telemetry helper dispatch; startup
+  omits output semaphore initialization, and WFS processing returns before
+  clock rewriting, legacy command generation, signaling, or publication.
+  `configureAcquisition()/startAcquisition()/loadImageIntoStream()` reject;
+  `acquireAndCheckValid()` returns no frame. The legacy accelerator monitor is
+  never loaded/started/processed by shadow execution, regardless of
+  `accel_enabled`. `learn`, `learn_std`, `predict`, `integrate`, exploration,
+  legacy save, and legacy load requests reject in shadow execution. There is no
+  correction-enable property, diagnostic stream, or raw `acc000` adapter.
+
+- **INDI schema:** `setupShadowINDI()/updateShadowINDI()` register the properties
+  below. Selection publishes a complete one-of-many vector atomically through
+  the existing INDI utility. Callback validation rejects wrong device/property,
+  wrong type, unknown elements/states, no selection, and multiple selections.
+  A changed selection requires a ready, currently valid target model; an
+  idempotent request is allowed while warming. Rejected requests retain current
+  selection/training and publish Alert when the identity is valid. A selected
+  model becoming invalid stays selected but unready; selection is not an output
+  policy and no automatic fallback is guessed.
+
+  | Property | Elements/meaning |
+  | --- | --- |
+  | `ddspc_mode` | OneOfMany `standard`, `accel_assisted`; default standard; read-only during legacy execution |
+  | `ddspc_train` | AnyOfMany independent adaptation `standard`, `accel_assisted`; both initially off; read-only during legacy execution |
+  | `ddspc_shadow` | Read-only `toggle`, startup execution choice; cannot enable correction |
+  | `ddspc_standard`, `ddspc_accel_assisted` | Read-only numbers: `ready`, `training_enabled`, `training` (updated on latest record), `data_valid`, `prediction_valid`, `rmse`, lifetime `updates`, segment `predictions`/`samples`, `feature_rank`, `features` |
+  | `ddspc_data` | Read-only `wfs_valid`, `applied_valid`, `timing_valid`, `accel_valid` |
+  | `ddspc_status` | Read-only text `execution`, `output`, `selected`, `standard_reason`, `accel_assisted_reason` |
+
+  Legacy execution explicitly reports `execution=legacy`,
+  `output=legacy_compatibility`, and inactive causal-model reasons: a displayed
+  standard diagnostic selection does not claim that corrected standard DDSPC is
+  operating the instrument. Shadow reports `execution=shadow, output=inhibited`.
+  INDI state publication takes `m_indiMutex` then snapshots `m_shadowMutex`;
+  record processing takes only the model mutex. Reset releases its model lock
+  before taking the INDI lock. The manager itself requires caller serialization.
+
+- **Build and compatibility:** app `Makefile` links `shadow_controller.o` and
+  offers `DDSPC_SHADOW_BUILD=yes`, exporting `OPTIMIZE=-fno-fast-math` into the
+  recursive PCH build. A clean rebuild of app/numerical objects/PCH is required;
+  `configureShadow()` rejects a fast/finite-only compiled application. The normal
+  legacy build flags stay unchanged. Strict-build numerical objects are required
+  for all finite checks. Full app-header documentation, member naming, out-of-class
+  inline definitions, and formatting follow `AGENTS.md`; existing config/INDI
+  names and legacy calculation expressions are retained. No common base class,
+  ImageStreamIO interface, original `loPredCtrl`, or simulator source is changed.
 
 ### Existing histories and prediction layout
 
@@ -808,7 +972,7 @@ formula or a predetermined spectral line.
 
 ### Baseline, operating states, and configuration
 
-- Startup `accel_enabled=false` sets channels/history to zero and omits the
+- In the legacy path, startup `accel_enabled=false` sets channels/history to zero and omits the
   accelerometer monitor (`loPredCtrlAcc.hpp:368–414`), reducing the core to the
   legacy feature dimensions. This is the useful existing baseline entry point.
   The library constructor instead defaults to two channels and 20 samples
@@ -823,7 +987,7 @@ formula or a predetermined spectral line.
   covariance state; merely zeroing inputs in an augmented model is insufficient
   for a clean baseline.
 
-- Current fallback can delete/recreate the learner with zero accelerometer
+- The legacy fallback can delete/recreate the learner with zero accelerometer
   dimensions, losing its learned WFS/DM model, or disable the path without
   rebuilding its augmented dimensions (`loPredCtrlAcc.hpp:711–735`, called with
   different arguments at `457,524,542,878`). It also changes monitor lifecycle
@@ -842,16 +1006,17 @@ formula or a predetermined spectral line.
   response, regardless of how well `A` or `D` predicts disturbances; use recorded
   excited data or an operator-approved later experiment.
 
-- The current `predict=false` selects the copy/gain path, and `integrate=false`
+- In legacy execution, `predict=false` selects the copy/gain path, and `integrate=false`
   selects command replacement; neither prevents publication. Every WFS callback
-  posts the frameGrabber semaphore. `learn_std` enables prediction, training,
+  in that legacy path posts the frameGrabber semaphore. `learn_std` enables prediction, training,
   and exploration (`loPredCtrlAcc.hpp:1129–1162`). Non-actuating validation must
   use an explicit state that cannot open/write a physical correction endpoint;
-  a diagnostic output must have an unconnected name verified by the operator.
+  any later diagnostic stream would need an unconnected name verified by the
+  operator. Phase 2 creates no such stream.
 
 - Existing configuration covers mode/history/horizon, gamma, covariance, gain,
   regularization, accelerometer enable/history/normalization, and stream names
-  (`loPredCtrlAcc.hpp:337–365`). Existing INDI controls primarily cover learning,
+  (`loPredCtrlAcc.hpp:337–365`). Legacy INDI controls primarily cover learning,
   prediction, integration, exploration, save/load, and reset (`446–507`);
   accelerometer controls and many numerical parameters are config-only. Add
   validated configuration and appropriate INDI state/controls for calibration,
@@ -880,8 +1045,11 @@ formula or a predetermined spectral line.
 
 ## Questions and Points of Clarification
 
-Phase 1 was explicitly authorized and completed without resolving live instrument
-semantics. These decisions remain before operational integration;
+Phase 1 and Phase 2 shadow-only integration were explicitly authorized without
+resolving live instrument semantics. Startup-only shadow execution, separate
+learners, independent adaptation, and diagnostic-only INDI selection are now
+implemented under that authorization. These decisions remain before live or
+operational integration;
 recommendations are not assumptions about the deployed instrument.
 
 1. **Correction scope and command convention:** which WFS/modal input and output
@@ -893,10 +1061,10 @@ recommendations are not assumptions about the deployed instrument.
    explicit increment convention if the downstream route integrates.
 
 2. **Baseline and mathematical integration:** the inherited corrections and
-   literal reference law now exist as an opt-in offline path in `loPredCtrlAcc`,
-   while the app and `loPredCtrl` remain historical/operational references.
-   Approve how the corrected path should eventually replace/select alongside
-   the legacy path in the app. Recommend an explicit
+   literal reference law now exist in the opt-in shadow application path of
+   `loPredCtrlAcc`; legacy execution and `loPredCtrl` remain operational references.
+   Approve any future corrected actuation path separately from this diagnostic
+   selection. Recommend an explicit
    corrected baseline with `N_y=N,N_u=N-1`, literal positive lambda, and no
    undocumented added feedback in optimal-law mode. Decide whether legacy scaled
    regularization/feedback remains as a named compatibility mode. Any later
@@ -919,9 +1087,12 @@ recommendations are not assumptions about the deployed instrument.
 5. **Dropout and adaptation:** the requested runtime design retains separate
    standard and augmented models. Decide whether a sensor fault inhibits
    correction or deliberately selects an already ready baseline, and how each
-   model adapts while unselected. Recommend inhibition until timing and model
-   validity are proven; measure the cost of training both models.
-   Agree on model-readiness criteria, adaptation time, solve cadence, and maximum
+   model adapts while unselected for later live use. Phase 2 exposes separate
+   training flags and conservatively keeps selection on an invalid model with
+   readiness false; no actuation or automatic fallback occurs. Recommend
+   inhibition until timing and model validity are proven; measure the cost of
+   training both models. Review the Phase 2 empirical-rank/segment-update gates
+   before using them operationally. Agree on adaptation time, solve cadence, and maximum
    acceptable missed deadlines before commissioning.
 
 6. **Later simulator/DM experiment:** identify the approved correction additive
@@ -936,7 +1107,7 @@ recommendations are not assumptions about the deployed instrument.
 
 ### Phase 1 executed tests
 
-`apps/loPredCtrlAcc/tests/Makefile.offline` builds only the numerical sources,
+At the Phase 1 commit, `apps/loPredCtrlAcc/tests/Makefile.offline` built only the numerical sources,
 the repository Catch2 entrypoint, and the two new `ddspc_*_test.cpp` suites.
 No app startup or stream/hardware libraries are linked. On the inspected macOS
 host, `otool -L` reports only libc++ and libSystem. Dependencies are the installed
@@ -1019,6 +1190,73 @@ reference commands agree within the scaled FLOAT tolerance of 3e-5. A scalar
 compatibility trace checks the unchanged model-scaled operational law, exploration,
 and extra WFS feedback, and matches its WFS/DM identification to the corrected
 baseline once both use complete histories.
+
+### Phase 2 executed integration tests
+
+The same standalone target now also compiles `shadow_controller.cpp`,
+`ddspc_shadow_test.cpp`, `ddspc_app_test.cpp`, and the repository's real
+`IndiProperty.cpp`, `IndiElement.cpp`, and `TimeStamp.cpp`. No native MagAOX
+application base, INDI driver, ImageStreamIO, or hardware library is linked.
+`tests/app_test_support.hpp` substitutes only app/base lifecycle, logger,
+config/registration helpers, and semaphore operations; it includes the **real
+application header, callback macros, INDI objects, and INDI update utilities**.
+Lifecycle/semaphore counters and unchanged destination buffers verify inhibition.
+It cannot certify native thread scheduling or native helper integration.
+Bundled `IndiProperty.cpp` uses removed `std::ptr_fun/std::not1`, so that unchanged
+source alone compiles in C++14; the test/application/numerical sources use C++20.
+The existing INDI dangling `what()` pointer and deprecated adaptor warnings are
+reported, not modified as part of DDSPC work.
+
+Reproduce from the repository root:
+
+```sh
+make -C apps/loPredCtrlAcc -f tests/Makefile.offline -j3 check
+make -C apps/loPredCtrlAcc -f tests/Makefile.offline -j3 check \
+  BUILD_DIR=build/offline-phase2-sanitize \
+  CXXFLAGS='-std=c++20 -O1 -g -Wall -Wextra -fno-fast-math -fsanitize=address,undefined -fno-omit-frame-pointer'
+```
+
+Optimized suite: **47,451 assertions in 22 test cases passed**, including all 12
+unchanged Phase 1 cases. AddressSanitizer/UndefinedBehaviorSanitizer suite:
+**47,451 assertions in 22 test cases passed**, with no sanitizer findings.
+New coverage:
+
+- Seven manager cases: conventional and corrected QR independent training,
+  pause/reset and dimension independence; readiness-gated/idempotent/invalid-enum
+  selection without model mutation; exact standard-model equality with a separate
+  corrected `q_a=0` controller at every update; reference proposal equality;
+  acceleration-only loss, unknown applied inputs/timing, duplicates and gaps;
+  minimum updates and empirical excitation gates; frozen-origin errors for
+  `F=2,N=2` against separately reconstructed chronological states/actual future
+  inputs (absolute RMSE tolerance `1e-7`); NaN/Inf/shape rejection and invalid lambda.
+- Three actual-app-header cases: startup-only shadow configuration and skipped
+  helper lifecycle; all direct output methods guarded and destination unchanged;
+  no semaphore call or legacy command buffer/model allocation; no training on
+  WFS-only data; rejection of legacy actuation/training/exploration/persistence;
+  real INDI mode/train callbacks including malformed requests, independent partial
+  pause, both models ready with two-mode synthetic records, diagnostics, and reset;
+  absent `parameters.shadow` retains legacy lifecycle/config dispatch and rejects
+  causal selection/training. Lifecycle is doubled: these tests never start the
+  real legacy output path or open a native stream.
+- Known-plant `D` learning, independent batch RLS, causal history indexing, and
+  pure optimal-law tests remain unchanged and pass as Phase 1 regressions. The
+  new manager does not replace those independent mathematical oracles.
+
+A native application `-fsyntax-only` attempt, using installed Eigen/mxlib
+includes and the repo `flatlogs/include`, stops at missing generated
+`libMagAOX/logger/generated/logTypes.hpp` before validating the native app.
+The generated logger/PCH prerequisites and native Linux compile/link/helper
+lifecycle remain outstanding; no dependencies were downloaded or generated to
+pretend this was a deployment build. `otool -L` on the offline executable lists
+only libc++ and libSystem. No native application binary was run.
+
+All six touched/new C++ files receive clang-format 23.1.3 and its dry-run check.
+The sole style override, `SpacesInLineCommentPrefix.Minimum=0`, preserves the
+literal `{ //mutex scope` annotation required by `AGENTS.md`, where formatter
+23 defaults would insert a space. `git diff --check` and the protected-plan-prefix
+comparison pass. The initial HEAD/branch remain unchanged; build/log artifacts
+stay ignored. These static/offline checks do not establish stream ownership,
+actual command application, optical timing, or a real-time budget.
 
 ### Remaining test roadmap
 
@@ -1150,16 +1388,19 @@ where harness indirection hides them (`tests/testXWC.hpp`, `tests/groups.dox`,
 Follow existing app header-only patterns for app lifecycle code and retain
 out-of-class `.cpp` definitions for the established numerical helpers. Touched
 numerical headers/sources now have full-file documentation and formatting passes;
-the app lifecycle header remains untouched. Standalone numerical tests use the
+the app lifecycle header now receives the Phase 2 documentation/formatting pass.
+Standalone tests use the
 dedicated Makefile above rather than linking the application library through
 `Makefile.one`.
 
 ## Implementation Plan
 
-Each stage has a reviewable exit condition. Phase 1 (P1 below) is implemented and
-numerically tested under its explicit synthetic command/timing contract; live
-instrument decisions from P0 remain unresolved. Stop here as requested. P2–P5
-require subsequent authorization and are not part of this implementation.
+Each stage has a reviewable exit condition. P1 is complete numerically; the
+new user-authorized **Phase 2 is application/model/INDI shadow integration**, not
+the raw-ingestion phase previously labeled P2. P2 below records that delivered
+scope. Stop after Phase 2. Live adapters, multirate ingestion/replay, simulator
+validation, and any output connection require later authorization and resolution
+of the input/ownership decisions above.
 
 1. **P0 — Agree on the mathematical and telemetry contract.** Resolve the
    decisions above; record signal units, increment/absolute convention, frame
@@ -1182,30 +1423,33 @@ require subsequent authorization and are not part of this implementation.
    native app readiness, timestamped acquisition, and closed-loop stability are
    not part of that completion claim.
 
-3. **P2 — Implement the input contract and offline multirate replay.** Add typed
-   UINT16 decoding/calibration, bounded timestamped acquisition records, gap and
-   generation tracking, exposure/deadline alignment, and the one-vector feature
-   builder. Retain raw samples; compare phase-bin features over equal durations.
-   Reuse base-class interfaces/macros, tested recorder metadata patterns, and
-   existing numerical utilities. Add versioned preprocessing/model metadata and
-   reject incompatible restores. Exit: tests 6–8 and matched offline predictor
-   and closed-loop comparisons pass; representation and history duration are
-   selected from broadband results.
+3. **P2 — Complete within the explicit input contract: application integration,
+   independent models, and INDI shadow selection.** The causal numerical API is
+   integrated through `ShadowController` and `processShadowRecord()`, with
+   independently owned dimension-reduced standard and assisted learners,
+   independent training/error/readiness state, strict validation, frozen-origin
+   conditional scoring, reference proposals, and tested selection/reset behavior.
+   Startup-only shadow execution inhibits the full output helper lifecycle and
+   rejects legacy controls. Exit achieved for the offline synthetic input seam
+   and actual-app-header INDI/lifecycle tests. **Live training remains blocked by
+   absent applied-command/timing evidence**, deliberately leaving readiness false.
+   Native Linux compile/link and real-time behavior are not covered by this exit.
 
-4. **P3 — Integrate live collection and shadow operation with no correction
-   connection.** Add the requested `ddspc_mode` INDI selector, independent
-   standard/augmented model training and diagnostic predictions, per-model
-   readiness/error status, and separate collection/training/prediction/correction
-   controls. Require correction disabled during selection, reject unready models,
-   and report accelerometer health. Add robust frame/model handoff and the agreed
-   fallback. Keep file I/O, allocation, lifecycle changes, and routine logging
-   out of WFS processing. Publish diagnostic predictions/proposals only to an
-   unconnected stream. Benchmark RLS/solve cost; compute needed block products
-   directly and allocate only the selected learner if validated. Move expensive
-   updates to a bounded worker or reduce solve cadence only if measurements
-   justify the architectural change. Exit: native transport/state tests and
-   test 10 meet agreed timing/coverage limits; actual commands remain the
-   training inputs even when proposals differ.
+4. **P3 — Future: establish and connect verified live inputs, then multirate
+   accelerometry and replay.** First agree command semantics, readback source,
+   counter/generation and exposure timelines, and downstream output ownership;
+   implement/replay a WFS/applied-command adapter with recorded evidence before
+   setting its validity flags true. Then add typed UINT16 `acc000` decoding,
+   calibration, bounded timestamped retention, gap tracking and causal filtering/
+   representation comparison under separate approval. Feed verified records
+   through the existing manager seam; never its proposals. Version preprocessing
+   and model metadata. Keep output inhibited. Benchmark two-model RLS, `p x p`
+   empirical QR, horizon solves, frozen snapshots and lock duration; these
+   currently allocate and solve synchronously per accepted record and have no
+   demonstrated 2-kHz deadline. Choose bounded worker/solve/rank cadence only
+   from measurements, with tests for stale results and dropped work. Exit: native
+   Linux/PCH build and helper tests, replay/timing/coverage and broadband
+   held-out comparisons pass with documented representation and latency.
 
 5. **P4 — Validate against accelSim through public streams.** Begin with a
    local/isolated simulator configuration that has no DM channel. The user then
@@ -1239,7 +1483,8 @@ by `AGENTS.md`. This work does not switch branches, commit, or push.
 ## Follow-up and Edge Cases
 
 - **Phase 1 boundary:** corrected mathematics are available only through the
-  explicitly selected offline Causal path. The app still defaults to Legacy,
+  explicitly selected Causal path, now also used by the Phase 2 shadow manager.
+  The app still defaults to Legacy,
   including its known accelerometer decoding, timing, and applied-command
   limitations. The tests do not establish real exposure/actuation delay,
   increment-versus-absolute DM semantics, simultaneous sensor acquisition,
@@ -1247,8 +1492,10 @@ by `AGENTS.md`. This work does not switch branches, commit, or push.
   history is deliberately labeled and is not inferred instrument readback.
 
 - **Numerical/build limits:** the independent tests use `-fno-fast-math`.
-  `Make/common.mk` defaults to `-ffast-math`; review those flags before claiming
-  the same nonfinite-input checks in a native app build. Native Linux application
+  `Make/common.mk` defaults to `-ffast-math`; the new opt-in
+  `DDSPC_SHADOW_BUILD=yes` exports strict flags and a startup guard rejects
+  fast/finite-only application builds. Rebuild every numerical object and PCH;
+  do not reuse stale objects from a legacy build. Native Linux application
   linking, real-time scheduling, and instrument interfaces were not exercised.
   The tests establish FLOAT accuracy for the specified well-conditioned and
   zero-column examples, not arbitrary long, ill-conditioned, adaptive telemetry.
@@ -1326,12 +1573,36 @@ by `AGENTS.md`. This work does not switch branches, commit, or push.
   `ddspc_math_test.cpp` (independent numerical assertions);
   `apps/loPredCtrlAcc/tests/Makefile.offline` (standalone reproducible build);
   `tests/groups.dox` (application test group); and this planning record.
-  All original app/stream interfaces and `apps/loPredCtrl/` are unchanged.
+  These Phase 1 files are unchanged by Phase 2 except the expanded offline
+  Makefile; `apps/loPredCtrl/` and native stream interfaces remain untouched.
 
-- **Scope verification:** preserve the existing task text above this heading,
-  including the user's runtime mode-selection requirement. Phase 1 does not
-  implement that future INDI feature, live `acc000` ingestion, ImageStreamIO
-  changes, or physical DM correction. The separate `~/source/MagAOX` worktree
-  and Git history were not modified. Build products remain in ignored
-  `apps/loPredCtrlAcc/build/` directories. Formatting, optimized tests,
-  sanitizer tests, and `git diff --check` pass; no hardware actions were taken.
+- **Changed files for Phase 2:** `apps/loPredCtrlAcc/shadow_controller.hpp` and
+  `.cpp` (independent model manager, input contract, readiness and frozen-origin
+  diagnostics); `apps/loPredCtrlAcc/loPredCtrlAcc.hpp` (startup shadow integration,
+  lifecycle inhibition, INDI callbacks/diagnostics and full-file documentation/
+  formatting); app `Makefile` (link manager, strict-build option);
+  `tests/ddspc_shadow_test.cpp`, `tests/ddspc_app_test.cpp`,
+  `tests/app_test_support.hpp`, `tests/Makefile.offline`; and this plan.
+
+- **Remaining architectural limits:** the seam is serialized, synchronous, and
+  intentionally disconnected from unverified live data. Two learner states plus
+  two empirical regressor windows require quadratic storage; ready-record rank
+  QR costs cubic work in each `p`, in addition to RLS, horizon solves and bounded
+  `F+1` coefficient/state snapshots. Allocation and work are not real-time safe
+  by assertion. No wall-clock freshness timeout exists without an established
+  clock/input adapter, so do not treat the latest record's validity as continuing
+  sensor health after arrivals stop. Native INDI lifecycle, supported Linux
+  build/PCH, empirical-rank policy under real noisy/collinear data, saturation,
+  application delay and command ownership need validation before deployment.
+  Persistence, calibration changes, dynamic dimensions, hot execution-mode
+  transitions, output handoff and automatic fallback are intentionally absent.
+
+- **Scope verification:** the existing task text above `# Agent Findings and Plan`
+  is preserved byte-for-byte. Phase 2 implements INDI diagnostic mode selection
+  and independently trained shadow models only; no live `acc000` ingestion,
+  ImageStreamIO interface changes, simulator changes, or physical DM correction.
+  The separate worktree and Git history are untouched. Build products/logs remain
+  in ignored app `build/` directories. No native app/driver or instrument-facing
+  command was run. Stop after Phase 2; applied-command/timing/ownership decisions,
+  native Linux build, recorded/live adapter work and any correction remain next
+  steps, not implied approvals.
