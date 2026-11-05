@@ -265,20 +265,25 @@ inline int dmSyncopation::setupProductionINDI()
     {
         return 0;
     }
-    REG_INDI_NEWPROP_NOCB( m_indiP_production, "production", pcf::IndiProperty::Number );
-    m_indiP_production.setPerm( pcf::IndiProperty::ReadOnly );
-    m_indiP_production.setState( pcf::IndiProperty::Idle );
+    if( createROIndiNumber( m_indiP_production, "production" ) < 0 )
+    {
+        return -1;
+    }
     for( const auto *name : { "enabled", "passiveCopied", "passiveSkipped" } )
     {
         m_indiP_production.add( pcf::IndiElement( name ) );
+        m_indiP_production[name] = 0.0;
     }
     for( size_t j = 0; j < m_destinations.size(); ++j )
     {
         for( const auto *prefix : { "accepted", "missing", "rejected" } )
         {
-            m_indiP_production.add( pcf::IndiElement( std::string( prefix ) + std::to_string( j ) ) );
+            const auto name = std::string( prefix ) + std::to_string( j );
+            m_indiP_production.add( pcf::IndiElement( name ) );
+            m_indiP_production[name] = 0.0;
         }
     }
+    m_indiP_production["enabled"] = 1.0;
     return registerIndiPropertyReadOnly( m_indiP_production );
 }
 

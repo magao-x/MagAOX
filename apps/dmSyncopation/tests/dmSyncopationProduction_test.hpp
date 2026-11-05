@@ -29,6 +29,7 @@ class ProductionHarness : public Harness
   public:
     using dmSyncopation::closeProduction;
     using dmSyncopation::m_generation;
+    using dmSyncopation::m_indiP_production;
     using dmSyncopation::m_productionEnabled;
     using dmSyncopation::m_productionReadyLeadUs;
     using dmSyncopation::m_productionStep0LeadUs;
@@ -36,6 +37,8 @@ class ProductionHarness : public Harness
     using dmSyncopation::productionCopy;
     using dmSyncopation::productionSnapshot;
     using dmSyncopation::publishProductionSchedule;
+    using dmSyncopation::setupProductionINDI;
+    using MagAOXApp<true>::m_indiNewCallBacks;
 
     /// Attach only fixture streams and initialize the independent production mappings.
     void initialize();
@@ -196,6 +199,51 @@ int ProductionCycleClock::wait( const timespec *target )
     return result;
 }
 /// \endcond
+
+/// Production startup registers one complete definition in the INDI-enabled registry without driver threads.
+TEST_CASE( "production INDI startup registers one serializable definition", "[dmSyncopation][production][indi]" )
+{
+    ProductionHarness app;
+    const bool        enabled = GENERATE( false, true );
+    app.m_productionEnabled   = enabled;
+    REQUIRE( app.setupProductionINDI() == 0 );
+
+    if( enabled )
+    {
+        const auto &property = app.m_indiP_production;
+        const auto  key      = property.createUniqueKey();
+        REQUIRE( app.m_indiNewCallBacks.size() == 1 );
+        REQUIRE( app.m_indiNewCallBacks.count( key ) == 1 );
+        CHECK( app.m_indiNewCallBacks.at( key ).property == &property );
+        CHECK( app.m_indiNewCallBacks.at( key ).callBack == nullptr );
+        CHECK( property.getPerm() == pcf::IndiProperty::ReadOnly );
+        CHECK( property.getState() == pcf::IndiProperty::Idle );
+        CHECK( property.getElements().size() == 3 + 3 * app.m_destinations.size() );
+        CHECK( property["enabled"].get<double>() == 1.0 );
+
+        for( const auto &element : property.getElements() )
+        {
+            CHECK( mx::math::isFinite( element.second.get<double>() ) );
+        }
+
+        const auto xml =
+            pcf::IndiXmlParser( pcf::IndiMessage( pcf::IndiMessage::Define, property ), "1.7" ).createXmlString();
+        CHECK( xml.find( "<defNumberVector" ) != std::string::npos );
+        CHECK( xml.find( "name=\"production\"" ) != std::string::npos );
+        CHECK( xml.find( "name=\"accepted0\"" ) != std::string::npos );
+    }
+    else
+    {
+        CHECK( app.m_indiNewCallBacks.empty() );
+        CHECK( app.m_indiP_production.getElements().empty() );
+    }
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::setupProductionINDI;
+#endif
+    // clang-format on
+}
 
 /// Independent missing inputs retain only their own value while every selected mapping is copied passively.
 TEST_CASE( "production inputs have independent deadlines and passive copies", "[dmSyncopation][production]" )

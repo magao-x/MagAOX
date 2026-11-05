@@ -133,3 +133,33 @@ runtime admission failure. The subsequent full scheduler suite passes.
 No hardware actions or changes to instrument configuration are part of this
 work. Changing nonzero commands and the selected mapping/producer setup remain
 operator qualification work.
+
+## 2026-11-04: correct production INDI startup registration
+
+The first operator startup failed while inserting `dmtweeter-synco.production`.
+`setupProductionINDI()` used `REG_INDI_NEWPROP_NOCB`, which already registers
+the property, and then called `registerIndiPropertyReadOnly()` on the same
+property. The second insertion failed and aborted app startup. This was a
+production integration error; the prior offline tests did not exercise this
+property's startup registration.
+
+Create the read-only numeric property without registering it, populate all
+elements with initial numeric values, then register it once. The new regression
+runs the production property setup with INDI enabled but no driver or monitor
+threads. It verifies one registry entry, the property pointer and null callback,
+read-only/idle metadata, initialized elements and serializable definition XML.
+It also verifies that disabled production mode registers no property. No
+instrument or external INDI connection is involved.
+
+The normal app build also lacked a dependency on the new production header.
+Add that header and the shared producer helper to dmSyncopation's declared
+dependencies, and the producer helper to dmSpeckle's dependencies, so ordinary
+incremental builds pick up their changes. The corrected scheduler regression
+suite passes **153 cases / 6,514,054 assertions**; its log is
+`/tmp/dmSyncopation-production-indi-run.log`.
+The normal incremental dmSyncopation build recompiles and links successfully
+with the corrected dependency. Dry-run dependency checks also select a fresh
+compile for changes to the production header and the shared producer helper.
+Build and dependency logs are `/tmp/dmSyncopation-production-indi-app-build.log`,
+`/tmp/dmSyncopation-production-dependency-check.log`, and
+`/tmp/dmSpeckle-producer-dependency-check.log`. Formatting and diff checks pass.

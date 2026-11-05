@@ -1,9 +1,10 @@
 allall: all
 
 OTHER_HEADERS=syncoSchedule.hpp syncoCadence.hpp syncoSimulation.hpp syncoPipelineSimulation.hpp \
-              dmSyncopationZeroTest.hpp syncoZeroTiming.hpp \
+              dmSyncopationZeroTest.hpp dmSyncopationProduction.hpp syncoZeroTiming.hpp \
               ../../libMagAOX/common/dmSyncoSimulation.hpp \
               ../../libMagAOX/app/dmSyncopationTiming.hpp \
+              ../../libMagAOX/app/dev/dmSyncopationProducer.hpp \
               ../../libMagAOX/app/dev/dmTiming.hpp ../../libMagAOX/common/dmTiming.hpp \
               ../../libMagAOX/app/dev/dmCombTiming.hpp ../../libMagAOX/common/dmCombTiming.hpp \
               ../../libMagAOX/app/dev/dmCompletion.hpp ../../libMagAOX/common/dmCompletion.hpp \
