@@ -19,17 +19,23 @@ class streamCircBuff_test : public streamCircBuff
   public:
     using streamCircBuff::acquireAndCheckValid;
 
+    using streamCircBuff::fps;
+
     using streamCircBuff::frameGrabberRelayTiming;
 
     using streamCircBuff::loadImageIntoStream;
 
     using streamCircBuff::m_currImageTimestamp;
 
+    using streamCircBuff::m_fpsTol;
+
     using streamCircBuff::m_rewritten;
 
     using streamCircBuff::m_smSemaphore;
 
     using streamCircBuff::m_stagedFresh;
+
+    using streamCircBuff::m_toFloat;
 
     using streamCircBuff::processImage;
 
@@ -57,6 +63,13 @@ class streamCircBuff_test : public streamCircBuff
 
     /// Pointer to the start of a source frame.
     void *frame( size_t slot /**< [in] source frame index */ );
+
+    /// Stage single-frame source frames at a fixed acquisition interval.
+    void feed( uint64_t  count /**< [in] number of frames */,
+               uint64_t  step /**< [in] counter increment per staged frame, more than 1 for missed frames */,
+               double    interval /**< [in] acquisition interval between staged frames, in seconds */,
+               uint64_t &cnt0 /**< [in/out] counter of the next frame */,
+               double   &t /**< [in/out] acquisition time of the next frame, in seconds */ );
 };
 
 streamCircBuff_test::streamCircBuff_test()
@@ -110,6 +123,17 @@ int streamCircBuff_test::source( uint32_t depth )
 void *streamCircBuff_test::frame( size_t slot )
 {
     return m_pixels.data() + slot * c_width * c_height;
+}
+
+void streamCircBuff_test::feed( uint64_t count, uint64_t step, double interval, uint64_t &cnt0, double &t )
+{
+    for( uint64_t n = 0; n < count; ++n, cnt0 += step )
+    {
+        m_md.cnt0  = cnt0;
+        m_md.atime = { static_cast<time_t>( t ), static_cast<long>( ( t - static_cast<time_t>( t ) ) * 1e9 ) };
+        processImage( frame( 0 ), dev::shmimT() );
+        t += interval;
+    }
 }
 } // namespace app
 } // namespace MagAOX
@@ -291,6 +315,70 @@ TEST_CASE( "streamCircBuff relays a multi-frame source using its per-frame timin
     REQUIRE( app.frameGrabberRelayTiming( wt, cnt0 ) == 0 );
     REQUIRE( same( wt, { 13, 14 } ) );
     REQUIRE( cnt0 == 77 );
+}
+
+/// With toFloat the output is float and the source pixels are converted.
+/**
+ * \ingroup streamCircBuff_unit_test
+ */
+TEST_CASE( "streamCircBuff converts to float when configured", "[streamCircBuff]" )
+{
+    // clang-format off
+    #ifdef STREAMCIRCBUFF_TEST_DOXYGEN_REF
+    MagAOX::app::streamCircBuff::configureAcquisition;
+    MagAOX::app::streamCircBuff::loadImageIntoStream;
+    #endif
+    // clang-format on
+
+    streamCircBuff_test app;
+    app.m_toFloat = true;
+    REQUIRE( app.source( 1 ) == 0 );
+    REQUIRE( app.processImage( app.frame( 0 ), dev::shmimT() ) == 0 );
+    REQUIRE( app.acquireAndCheckValid() == 0 );
+
+    std::vector<float> out( 4 );
+    REQUIRE( app.loadImageIntoStream( out.data() ) == 0 );
+    REQUIRE( out == std::vector<float>{ 1, 2, 3, 4 } );
+}
+
+/// The measured source rate uses counters, so dropped frames do not bias it, and changes beyond the tolerance.
+/**
+ * \ingroup streamCircBuff_unit_test
+ */
+TEST_CASE( "streamCircBuff measures the source frame rate", "[streamCircBuff]" )
+{
+    // clang-format off
+    #ifdef STREAMCIRCBUFF_TEST_DOXYGEN_REF
+    MagAOX::app::streamCircBuff::measureFPS;
+    MagAOX::app::streamCircBuff::fps;
+    #endif
+    // clang-format on
+
+    streamCircBuff_test app;
+    REQUIRE( app.source( 1 ) == 0 );
+    double   t    = 100;
+    uint64_t cnt0 = 1;
+
+    // nothing until a full second has been seen
+    app.feed( 1000, 1, 5e-4, cnt0, t );
+    REQUIRE( app.fps() == 0 );
+
+    // a 2 kHz source with every other frame missed
+    app.feed( 1100, 2, 1e-3, cnt0, t );
+    REQUIRE( app.fps() == Approx( 2000 ).epsilon( 1e-3 ) );
+
+    // a change within the tolerance keeps the reported rate
+    app.feed( 2100, 1, 1. / 2010, cnt0, t );
+    REQUIRE( app.fps() == Approx( 2000 ).epsilon( 1e-3 ) );
+
+    // a change beyond the tolerance updates it, once a full second is at the new rate
+    app.feed( 2200, 1, 1e-3, cnt0, t );
+    REQUIRE( app.fps() == Approx( 1000 ).epsilon( 1e-3 ) );
+
+    // a counter restart restarts the measurement
+    cnt0 = 1;
+    app.feed( 700, 1, 2e-3, cnt0, t );
+    REQUIRE( app.fps() == Approx( 500 ).epsilon( 1e-3 ) );
 }
 
 } // namespace streamCircBuffTest

@@ -66,6 +66,16 @@ class streamCircBuff : public MagAOXApp<true>,
     typedef dev::telemeter<streamCircBuff> telemeterT;
 
   protected:
+    /** \name Configurable Parameters
+     *@{
+     */
+
+    bool m_toFloat{ false }; ///< Convert the output to float, for readers such as modalPSDs which require it.
+
+    float m_fpsTol{ 0.01 }; ///< Fractional change in the measured source frame rate needed to update fps.
+
+    ///@}
+
     sem_t m_smSemaphore{ 0 }; ///< Semaphore used to synchronize the fg thread and the sm thread.
 
     std::mutex
@@ -92,6 +102,16 @@ class streamCircBuff : public MagAOXApp<true>,
         0 }; ///< Number of source frames dropped because the source was rewritten during the copy.
 
     uint64_t m_rewrittenLogged{ 0 }; ///< Value of m_rewritten when last logged.
+
+    float ( *pixget )( void *, size_t ){ nullptr }; ///< Converts a staged source pixel to float when m_toFloat is set.
+
+    std::atomic<float> m_fps{ 0 }; ///< Measured source frame rate, 0 until the first measurement.
+
+    timespec m_fpsAtime{ 0, 0 }; ///< Source acquisition time at the start of the current rate measurement (sm thread).
+
+    uint64_t m_fpsCnt0{ 0 }; ///< Source frame counter at the start of the current rate measurement (sm thread).
+
+    pcf::IndiProperty m_indiP_fps; ///< The measured source frame rate, as fps.current.
 
   public:
     /// Default c'tor.
@@ -152,13 +172,21 @@ class streamCircBuff : public MagAOXApp<true>,
                       const dev::shmimT &dummy     /**< [in] tag to differentiate shmimMonitor parents. */
     );
 
+    /// Update the measured source frame rate with a staged frame
+    /** The rate is measured from the source acquisition times and counters over at least 1 second, so dropped
+     * frames do not bias it, and m_fps is only changed when the rate changes by more than m_fpsTol.
+     */
+    void measureFPS( const timespec &atime, /**< [in] source acquisition time of the frame */
+                     uint64_t        cnt0   /**< [in] source frame counter of the frame */
+    );
+
     /** \name dev::frameGrabber interface
      *
      * @{
      */
 
     /// Implementation of the framegrabber configureAcquisition interface
-    /** Sets the output size and data type to those of the source.
+    /** Sets the output size to that of the source, and the data type to that of the source or to float.
      *
      * \returns 0 on success
      * \returns -1 on error
@@ -166,13 +194,12 @@ class streamCircBuff : public MagAOXApp<true>,
     int configureAcquisition();
 
     /// Implementation of the framegrabber fps interface
-    /** Always 1, so the framegrabber latency statistics do not cover the source rate.
-     *
-     * \todo this needs to infer the stream fps and return it
+    /**
+     * \returns the measured source frame rate, or 0 before the first measurement
      */
     float fps()
     {
-        return 1.0;
+        return m_fps;
     }
 
     /// Implementation of the framegrabber startAcquisition interface
@@ -191,10 +218,11 @@ class streamCircBuff : public MagAOXApp<true>,
     int acquireAndCheckValid();
 
     /// Implementation of the framegrabber loadImageIntoStream interface
-    /** Copies the staged frame and sets the acquisition time, write time and counter to publish.
+    /** Copies the staged frame, converting it to float if configured, and sets the acquisition time, write time
+     * and counter to publish.
      *
      * \returns 0 on success
-     * \returns -1 if the stage no longer matches the output size, so the framegrabber reconfigures
+     * \returns -1 if the stage no longer matches the output size or type, so the framegrabber reconfigures
      */
     int loadImageIntoStream( void *dest /**< [out] the next frame of the output stream */ );
 
@@ -252,6 +280,26 @@ void streamCircBuff::setupConfig()
     FRAMEGRABBER_SETUP_CONFIG( config );
 
     TELEMETER_SETUP_CONFIG( config );
+
+    config.add( "circBuff.toFloat",
+                "",
+                "circBuff.toFloat",
+                argType::Required,
+                "circBuff",
+                "toFloat",
+                false,
+                "bool",
+                "Convert the output to float, e.g. for modalPSDs.  Default is false, keeping the source data type." );
+
+    config.add( "circBuff.fpsTol",
+                "",
+                "circBuff.fpsTol",
+                argType::Required,
+                "circBuff",
+                "fpsTol",
+                false,
+                "float",
+                "Fractional change in the measured source frame rate needed to update fps.  Default is 0.01." );
 }
 
 int streamCircBuff::loadConfigImpl( mx::app::appConfigurator &_config )
@@ -261,6 +309,9 @@ int streamCircBuff::loadConfigImpl( mx::app::appConfigurator &_config )
     FRAMEGRABBER_LOAD_CONFIG( _config );
 
     TELEMETER_LOAD_CONFIG( config );
+
+    _config( m_toFloat, "circBuff.toFloat" );
+    _config( m_fpsTol, "circBuff.fpsTol" );
 
     return 0;
 }
@@ -283,6 +334,10 @@ int streamCircBuff::appStartup()
     FRAMEGRABBER_APP_STARTUP;
 
     TELEMETER_APP_STARTUP;
+
+    CREATE_REG_INDI_RO_NUMBER( m_indiP_fps, "fps", "Source Frame Rate", "Circular Buffer" );
+    m_indiP_fps.add( pcf::IndiElement( "current" ) );
+    m_indiP_fps["current"] = 0;
 
     state( stateCodes::OPERATING );
 
@@ -312,6 +367,8 @@ int streamCircBuff::appLogic()
 
     FRAMEGRABBER_UPDATE_INDI;
 
+    updateIfChanged( m_indiP_fps, "current", m_fps.load() );
+
     return 0;
 }
 
@@ -332,6 +389,7 @@ int streamCircBuff::allocate( const dev::shmimT &dummy )
         std::lock_guard<std::mutex> lock( m_stageMutex );
         m_staged.resize( shmimMonitorT::m_width * shmimMonitorT::m_height * shmimMonitorT::m_typeSize );
         m_stagedFresh = false;
+        pixget        = getPixPointer<float>( shmimMonitorT::m_dataType );
     }
 
     m_reconfig = true;
@@ -383,6 +441,8 @@ int streamCircBuff::processImage( void *curr_src, const dev::shmimT &dummy )
         }
 
         m_stagedFresh = true;
+
+        measureFPS( m_stagedAtime, m_stagedCnt0 );
     }
 
     // Now tell the f.g. to get going
@@ -393,6 +453,33 @@ int streamCircBuff::processImage( void *curr_src, const dev::shmimT &dummy )
     }
 
     return 0;
+}
+
+void streamCircBuff::measureFPS( const timespec &atime, uint64_t cnt0 )
+{
+    double dt = ( atime.tv_sec - m_fpsAtime.tv_sec ) + ( atime.tv_nsec - m_fpsAtime.tv_nsec ) / 1e9;
+
+    if( m_fpsCnt0 == 0 || cnt0 <= m_fpsCnt0 || dt <= 0 )
+    {
+        // start a measurement, or restart it after a source restart
+        m_fpsAtime = atime;
+        m_fpsCnt0  = cnt0;
+        return;
+    }
+
+    if( dt < 1 )
+    {
+        return;
+    }
+
+    float fps = ( cnt0 - m_fpsCnt0 ) / dt;
+    if( std::fabs( fps - m_fps ) > m_fpsTol * fps )
+    {
+        m_fps = fps;
+    }
+
+    m_fpsAtime = atime;
+    m_fpsCnt0  = cnt0;
 }
 
 int streamCircBuff::configureAcquisition()
@@ -411,7 +498,7 @@ int streamCircBuff::configureAcquisition()
 
     frameGrabberT::m_width    = shmimMonitorT::m_width;
     frameGrabberT::m_height   = shmimMonitorT::m_height;
-    frameGrabberT::m_dataType = shmimMonitorT::m_dataType;
+    frameGrabberT::m_dataType = m_toFloat ? _DATATYPE_FLOAT : shmimMonitorT::m_dataType;
 
     return 0;
 }
@@ -447,12 +534,29 @@ int streamCircBuff::loadImageIntoStream( void *dest )
 {
     std::lock_guard<std::mutex> lock( m_stageMutex );
 
-    if( m_staged.size() != frameGrabberT::m_width * frameGrabberT::m_height * frameGrabberT::m_typeSize )
+    size_t npix = frameGrabberT::m_width * frameGrabberT::m_height;
+
+    if( m_staged.size() != npix * shmimMonitorT::m_typeSize )
     {
         return -1; // the source changed, so reconfigure
     }
 
-    memcpy( dest, m_staged.data(), m_staged.size() );
+    if( frameGrabberT::m_dataType == shmimMonitorT::m_dataType )
+    {
+        memcpy( dest, m_staged.data(), m_staged.size() );
+    }
+    else if( frameGrabberT::m_dataType == _DATATYPE_FLOAT && pixget != nullptr )
+    {
+        float *fdest = static_cast<float *>( dest );
+        for( size_t n = 0; n < npix; ++n )
+        {
+            fdest[n] = pixget( m_staged.data(), n );
+        }
+    }
+    else
+    {
+        return -1; // the source type changed, so reconfigure
+    }
 
     m_currImageTimestamp = m_stagedAtime;
     m_relayWritetime     = m_stagedWritetime;
