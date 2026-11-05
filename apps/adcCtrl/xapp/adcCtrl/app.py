@@ -31,6 +31,32 @@ error`` is added to the integrator ``delta_1`` unless it exceeds
 ``deltaADC1 = delta_1 + delta_2 + offset`` and
 ``deltaADC2 = delta_1 - delta_2 + offset``; ``delta_2`` stays 0.
 
+Knife-edge mode
+---------------
+With the knife-edge coronagraph the star and the lower half of the image are
+blocked, so no opposite pair survives. In knife-edge mode (``coronagraph`` =
+``knife_edge``) the app measures one spot, or normally two adjacent spots
+(``ke_spots``, default 0 and 3), and for each frame:
+
+1. estimates the star from the spots: for two spots, the right-angle corner
+   of the isosceles right triangle they form, so neither the star nor the
+   pattern angle needs to be known; for one spot, from the configured
+   separation and angle. Spots are tracked from frame to frame, and found
+   again (the bootstrap) when the lock is lost,
+2. zeroes everything below a mask line ``ke_edge_margin`` above the star,
+   lowered if needed to stay ``ke_spot_clearance`` below the selected spots,
+3. subtracts a half-plane radial profile and the row medians (the edge glint
+   runs along rows),
+4. measures the selected spots with ``moment_angle`` and forms
+   ``m = d_a - d_b`` (b the counter-clockwise neighbour of a) or ``m = d_a``.
+
+``m`` is not zero at zero dispersion, so the loop drives it to a set point:
+``error = ke_gain * wrap90(m - ke_setpoint)``, followed by the same step,
+step limit and integrator as the standard mode. ``ke_gain`` is scaled so the
+same ``loop_sign`` works in both modes. The set point starts at the config
+default and is changed by a capture or by hand; it is not saved across
+restarts.
+
 States
 ------
 idle          no camera reads, no commands
@@ -48,10 +74,16 @@ gain             number    loop gain
 offset           number    common offset added to both ADCs [deg]
 ctrl_mtx         number    m00, m01: pair offsets -> dispersion error
 loop_sign        switch    positive / negative feedback polarity (platform dependent)
+coronagraph      switch    standard / knife_edge; idle only
+ke_spots         switch    knife-edge spots: one, or two adjacent (any of spot0-spot3)
+ke_gain          number    knife-edge m residual -> dispersion error
+ke_setpoint      number    knife-edge set point for m [deg]; settable by hand
+ke_capture_setpoint switch request: set ke_setpoint to one batch's mean m (idle or measure-only)
 satellite_spots  switch    sparkles / dm_spots
 camera           switch    science camera (and its filter wheel); idle only
 reset_deltaADCs  switch    request: zero the ADC offsets
-measurement      number    (read-only) angles, deviations, pair offsets, error, n_valid, n_total
+measurement      number    (read-only) angles, deviations, pair offsets, error, n_valid, n_total;
+                           knife-edge m, residual, star position, separation, angle, mask margin
 command          number    (read-only) last step, total delta1
 status           text      (read-only) last command outcome and last error
 
@@ -64,6 +96,16 @@ Operator procedure
 3. Run oneshot to confirm the correction reduces the error. If it grows,
    flip loop_sign.
 4. Run adcLoop.
+
+Knife-edge procedure:
+
+1. In standard mode, close the loop until it converges.
+2. Go idle, insert the knife edge and set coronagraph to knife_edge (delta_1
+   is kept). Check the INFO log for spot-selection and set-point messages.
+3. Run measure-only and check the star position and ke_sep.
+4. Press ke_capture_setpoint, or enter a recent ke_setpoint by hand.
+5. Run oneshot, then adcLoop. Calibrate ke_gain by hand like ctrl_mtx: fit
+   the slope of m against known counter-rotation offsets and enter 2/slope.
 """
 
 import time
@@ -1699,6 +1741,7 @@ class adcCtrl(XDevice):
         knife-edge elements are 0 in standard mode.
         """
         def finite(value):
+            """`value` as a float, or 0.0 if it is not finite."""
             value = float(value)
             return value if np.isfinite(value) else 0.0
 
