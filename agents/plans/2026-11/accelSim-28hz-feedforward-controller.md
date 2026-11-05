@@ -174,6 +174,13 @@ Review AGENTS.md.  Do not alter any text above the "Agent Findings and Plan" bel
 
 # Agent Findings and Plan
 
+**Phase-one authorization:** the user has reviewed this investigation and
+authorized only the numerical raw-ADC acceleration-to-pointing estimator and
+offline tests/benchmark. The numerical design review and execution record at
+the end supersede the earlier implementation stop for that scope alone. No
+application, ImageStreamIO reader/writer, DM-helper extraction, INDI, or physical
+stream access is authorized or needed in this phase.
+
 Investigation date: 2026-11-05. Reviewed `AGENTS.md` and local source on
 `parkertjohnson1/accelSim`, HEAD `c786efca525bccbf29e5be6d628e202d81242ce3`
 (`Add accelSim tweeter disturbance injection`). This update is a proposal for
@@ -1014,3 +1021,192 @@ protected prefix matches the pre-edit snapshot byte-for-byte (SHA256
 `git diff --check` and a whitespace check of the untracked plan against that
 snapshot passed. No C++ files were touched, so clang-format does not apply.
 Stop here for user review; no commits, pushes, branch changes, or implementation.
+
+## Phase one: numerical design review and implementation record
+
+### Decisions resolved before implementation
+
+- Implement only `apps/accelFFCtrl/accelFFCtrlModel.hpp` and numerical validation
+  support. Leave the simulator and its mapping/publication unchanged. The core
+  depends on standard C++ and fixed-size Eigen, not the simulator or MagAO-X
+  runtime. Separate replay tests may read the unchanged model's truth for scoring.
+- Default target frequency is **28.5 Hz**, as requested for this implementation;
+  the simulator's default target remains 28 Hz. Replay tests must configure the
+  estimator to the scenario rather than silently changing that model.
+- Preserve the planned two-stage positive window. T is total approximate mean
+  memory, each stage has time constant T/2, and both stages filter **both** the
+  Gram matrix and data moments. Filtering only the data or treating the window
+  as ordinary single-exponential RLS would change the fitted amplitude/phase.
+  Use the newly updated first-stage value for the second stage in the same tick.
+  Compute `1-lambda` with `-expm1(-2*dt/T)` to avoid cancellation for short intervals.
+- Fit a nuisance DC plus cosine/sine per sensor channel. Return sensor-channel
+  peak acceleration amplitudes [m/s²] and phases relative to the latest sample
+  time, predicted acceleration at the requested target, and rotated physical
+  pointing [radians]. Exclude DC from vibration. Do not apply correction gain,
+  opposing DM sign, or any actuator/P2V limit in this estimator.
+- Require callers to supply ordered raw pairs, source generation/counter, sample
+  timestamp and current time as nonnegative integer nanoseconds in the **same
+  monotonic clock domain**. A numerical epoch of zero is valid; conversion of
+  real stream epoch stamps/missing metadata belongs to a future input adapter.
+  Consume each accepted unique record once; duplicates do not refresh freshness.
+  Gaps, rollback, generation changes, invalid codes, invalid or excessive time
+  intervals, and stale input latch a fault until reset/reconfigure. The core
+  cannot recover overwritten samples and does not fabricate them.
+- Use explicit `predict(now, target)` plus a configurable `predict(now)` horizon
+  measured from now. The carrier advances by `target - last_sample_time`, already
+  including age. Check sample freshness on prediction even when no new records
+  arrive. Initially use configurable 2-ms age/interval and 50-ms maximum forward
+  prediction bounds as numerical validity policies, not physical safety limits.
+  A bad prediction request returns an invalid, zero-valued result; an input fault
+  inhibits future valid results until reset. No clock, file, or stream is read.
+- The first sample uses the configured nominal interval for initial window
+  weight. Later updates use actual sample intervals; acceptable irregular timing
+  is supported rather than forcing uniform spacing or estimating time from the
+  counter. Reconfiguring frequency, memory, decoding, or rotation resets the fit.
+- Preserve `max(3/f0, 3*T)` warmup plus finite/positive/condition/residual checks
+  on a fixed 3x3 LDLT solve. This prevents startup numerical regularization from
+  manufacturing a ready result. All per-sample state and prediction storage are
+  fixed size; benchmark ingestion and prediction separately, including allocation
+  checks and the expected 8-kHz-input/2-kHz-query pattern.
+- Distinguish matched-frequency accuracy from detuned tracking. Validate the
+  actual fitted response rather than demanding zero phase at the wrong f0.
+  The `(f_actual/f0)^2` conversion bias is additional to window response. The
+  0.1-s memory is a tunable starting point, not a blanket 28–29-Hz suppression
+  guarantee. ADC sub-count accuracy likewise depends on noise/dither.
+- Measure unwanted-frequency transmission and noise-only output as estimates,
+  separately from hypothetical cancellation residuals. A bounded off-band
+  estimate does not establish the earlier full-controller 0.5-dB adjacent-band
+  correction gate; a causal estimate's phase can worsen a neighboring line if
+  subtracted. Report that limitation before future publication/control work.
+
+Implementation, test results, processing costs, and remaining limits are recorded
+below as this numerical phase progresses. No commit or push is permitted.
+
+### Validation-driven qualification of the original performance proposal
+
+The first raw-only replay exposed a material inconsistency in treating the
+earlier proposed **10-dB full-controller gate** as an unconditional estimator
+correctness assertion for every full-population seed/axis. Independent analytic
+and weighted-QR tests pass, but complete-model target-band SNR and the effective
+acceleration-to-pointing transfer differ from the isolated harmonic assumption.
+`accelerationFactor(f_m,L)` multiplies each stochastic mode by its own nominal
+frequency squared; its spectral tails at f0, plus sensor noise, do not become
+the physical pointing sum through multiplication by `-1/omega0²/L`.
+
+Characterization uses 12-s recordings, scores the common final 8 s after all
+tested warmups, and retains both axes/seeds 42, 123 and 701. At default T=0.1 s,
+isolated 28.5-Hz stochastic-mode replay gives **13.59–23.25 dB** of 27–30-Hz
+offline residual reduction; the unchanged 214-mode population, matched at 28 Hz,
+gives **0.49–11.23 dB**. Sweeping total memory to 0.3 and 0.8 s improves some
+full-population cases but worsens tracking in others; it does not establish a
+universal 10-dB result. Keep the planned 0.1-s default and expose memory rather
+than secretly selecting a different setting per seed or accessing model truth.
+
+The numerical regression now checks calibrated analytical accuracy and exact
+weighted-fit equivalence, strict input/freshness integrity, noise/off-band
+attenuation, positive target-band benefit for the explicitly tested recordings,
+and >10 dB for the qualified isolated/default-window replay. The earlier
+full-controller gate remains **unmet and outstanding**, not redefined as passed.
+At the default window, the separate off-band sweep also measures approximately
+0.765 dB amplification of a 25-Hz line if this estimate were naively subtracted;
+the estimator's unwanted-pointing transmission itself is below unity. This also
+leaves the proposed 0.5-dB adjacent-band controller gate unresolved. No physical
+writer or automatic correction is justified by the phase-one numerical pass.
+
+### Delivered numerical interface and scope
+
+- `apps/accelFFCtrl/accelFFCtrlModel.hpp`: fixed-size calibration/configuration,
+  `adcSample`, `prediction`, fault/readiness states and `harmonicEstimator`.
+  `consume(sample,now)` processes every unique ordered record; `predict(now,target)`
+  and `predict(now)` return timestamped/source-identified results. Input faults
+  latch until reset; invalid target requests clear their output without
+  destroying a valid fit. Prediction checks age without needing another sample.
+  All times are already mapped integer monotonic nanoseconds; no stream reader
+  or realtime-clock mapper is implemented. Nominal sample rate initializes the
+  first window weight and validates settings, while actual accepted intervals
+  drive the fit. Detecting deployment-level cadence changes is future adapter work.
+- `apps/accelFFCtrl/tests/accelFFCtrlModel_test.cpp`: independent analytic/raw-ADC
+  fixtures, a weighted batch-QR oracle (including the exact variable-interval
+  two-stage weights), frequency/noise/off-band characterization and integrity tests.
+- `apps/accelFFCtrl/tests/accelFFCtrlReplay_test.cpp`: separate offline recorder
+  and scorer using unchanged accelSim source. The core receives no `m_pointing`,
+  acceleration truth, model object or extra RNG advance. Both default and
+  nondefault ADC calibration are exercised by the analytic/replay suites.
+- `apps/accelFFCtrl/tests/accelFFCtrl_benchmark.cpp`: prepared fixtures, clocked
+  consumption/prediction and C++ allocation counting with mandatory Eigen
+  runtime malloc checking. Healthy processing, reset, invalid-input and stale
+  result paths are covered while allocation checking is active.
+- `apps/accelFFCtrl/README.md`, `tests/Makefile`, and repository test registration
+  in `tests/Makefile.one`, `tests/tests.list`, `tests/groups.dox`: standalone
+  numerical build/run instructions and application-unit-test grouping. No app
+  executable, production Makefile registration, INDI, DM utilities/refactor,
+  ImageStreamIO dependency, or physical writer was added.
+
+The implementation uses wrapped timestamp-based phase and one shared
+`sin/cos/expm1` update per accepted pair, rather than an oscillator recurrence.
+The measured cost leaves ample numerical headroom, and direct phase evaluation
+avoids recurrence normalization/drift machinery for this stage. Query-time
+trigonometry is also shared across the two axes. Configuration revalidation is
+cold; ordinary sample/query errors use status returns and cleared fixed records.
+
+### Final local validation
+
+| Check | Result |
+| --- | --- |
+| Standalone numerical/replay suite, C++20/O3/no fast-math | **10 cases / 3,335,597 assertions passed.** Includes all available-record ingestion, queried at 2 kHz; matched amplitude within 0.1% and phase within 0.001 rad for fine-calibration fixtures; exact weighted-QR comparison; noise, quantization, detuning, rotation, prediction, conditioning and clock/source faults. |
+| Existing unchanged accelSim model/synchronization/projection/DM numerical suites, O3/no fast-math | **34 cases / 236,598 assertions passed.** Compiled with `ACCELSIM_MODEL_ONLY`; no streams accessed. |
+| Combined new and existing suites, O1/debug, AddressSanitizer + UndefinedBehaviorSanitizer, halt-on-error | **44 cases / 3,572,195 assertions passed; no findings.** |
+| Existing Python PSD suite | **4 tests passed.** |
+| Default calibrated weak target with sensor noise, seeds 42/123/701 | Peak gain approximately 1.0028–1.0104, phase error approximately -0.08 to -0.43 degrees; relative RMS error 11.9–12.4%. The same undithered sub-count sinusoid produces zero codes after offset removal and cannot be recovered. |
+| White sensor noise, default quantizer | Estimated acceleration RMS / input sensor-noise RMS **0.03586**, approximately 28.9 dB attenuation in power ratio. No white-noise amplification was observed. |
+| Pure off-target tones, 11–3500 Hz, default target 28.5 Hz | Physical-pointing RMS transmission below 0.35 across the tested tones; below 0.061 at 54 Hz and above. No off-target estimate exceeds its input's physical pointing amplitude in these fixtures. Hypothetical subtraction remains subject to the 25-Hz caveat above. |
+| Full-model performance qualification | Default-window full-population 27–30-Hz offline reduction **0.49–11.23 dB**. The proposed universal 10-dB full-controller gate remains unmet. No physical suppression claim. |
+| Formatting/documentation/preservation | Four new C++ files clang-formatted; header declarations/parameters/members and each TEST_CASE documented; whitespace and protected-prefix/source-preservation checks completed. |
+
+Reproduction from the repository root:
+
+```sh
+make -C apps/accelFFCtrl/tests test
+make -C apps/accelFFCtrl/tests benchmark
+python -m unittest discover -s apps/accelSim/tests -p test_validate_psd.py
+```
+
+The standalone Makefile places binaries in `/tmp/accelFFCtrl-numerics`. Its
+README includes a sanitizer build command. The combined sanitizer run compiled
+both new test files, all three existing accelSim test files, and `tests/testMain.cpp`
+with `-DACCELSIM_MODEL_ONLY -fsanitize=address,undefined -fno-omit-frame-pointer`
+and the existing Eigen include path; filter `'[accelFFCtrl],[accelSim]'`.
+Compiler diagnostic flags were `-Wall -Wextra`; no new build diagnostics occurred.
+
+### Measured processing cost
+
+Unloaded local Darwin/arm64 workstation, O3/no fast-math; 800,000 prepared source
+pairs per pattern after 8,000 warmup pairs. Clock calls/resolution and loop
+overhead are included. These are numerical throughput measurements, not actual
+8-kHz waking/scheduling, input acquisition, stream/native publication, or DM
+application latency.
+
+| Input / query cadence | Mean consume | Mean predict | Mean complete work per source sample | Allocation result |
+| --- | --- | --- | --- | --- |
+| 8000 / 2000 Hz | 37.3 ns | 309.7 ns | **138.8 ns (0.139 us)** | Zero C++ new calls; Eigen malloc guard remained satisfied, including reset/fault paths. |
+| 8000 / 8000 Hz | 40.0 ns | 296.2 ns | **359.7 ns (0.360 us)** | Same zero-allocation result. |
+
+For the 8k/2k pattern, p99 consume/predict were 83/417 ns and observed maxima
+were 20.875/34.209 us. Individual short measurements are quantized by the clock;
+OS outliers and hardware/compiler differences prevent interpreting these as
+hard worst-case bounds. No real-time process or instrument benchmark was run.
+
+### Remaining limits and final boundary
+
+Frequency and memory still require tuning: half-Hz detuning at the default window
+has about 17.9-degree acceleration phase error plus the frequency-squared
+conversion bias. Input quantization/dither, stochastic innovation and finite
+target SNR bound reconstruction. The multi-mode and neighboring-line controller
+acceptance gates described above remain open. Real clock mapping, coherent stream
+recovery, rate supervision, software ownership/enable/zero publication, plant
+calibration and actual latency are deferred to later reviewed phases.
+
+The original task prefix above Agent Findings and Plan remains byte-for-byte
+unchanged. All five accelSim implementation/model/mapping/stream headers retain
+their pre-phase contents; other applications were not changed. No instrument or
+physical stream was accessed. The agent did not stage, commit, or push changes.

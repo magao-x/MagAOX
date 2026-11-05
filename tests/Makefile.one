@@ -52,6 +52,10 @@ else ifeq ($(notdir $(TESTNAME)),accelSimDM_test)
     # The runtime preflight requires IEEE nonfinite checks.
     CXXFLAGS += -fno-fast-math
     $(OBJNAME): $(PATHNAME)../accelSim.hpp $(PATHNAME)../accelSimModel.hpp $(PATHNAME)../accelSimDisturbance.hpp $(PATHNAME)../accelSimDM.hpp $(PATHNAME)../accelSimDMStream.hpp
+else ifneq ($(filter $(notdir $(TESTNAME)),accelFFCtrlModel_test accelFFCtrlReplay_test),)
+    # Physical units, window statistics and fault detection require ordinary IEEE arithmetic.
+    CXXFLAGS += -fno-fast-math
+    $(OBJNAME): $(PATHNAME)../accelFFCtrlModel.hpp $(PATHNAME)../../accelSim/accelSimModel.hpp
 else ifeq ($(notdir $(TESTNAME)),acronameUsbHub_test)
 	CPPFLAGS += -I$(TESTS_DIR)/../libs/BrainStem2
 else ifeq ($(notdir $(TESTNAME)),kcubeCtrl_test)

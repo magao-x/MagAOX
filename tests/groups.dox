@@ -159,6 +159,11 @@ report from their counters and then returns nonzero. An HTML report therefore do
  * \ingroup application_unit_test
  */
 
+/** \defgroup accelFFCtrl_unit_test Accelerometer Feedforward Numerical Unit Tests
+ * \brief Raw-ADC harmonic estimation, physical pointing prediction, timing validity and offline model replay.
+ * \ingroup application_unit_test
+ */
+
 /** \defgroup shmimIntegrator_unit_test ImageStreamIO Integrator Unit Tests
  * \brief Offline numerical, configuration, restart, and publication ownership regressions.
  * \ingroup application_unit_test

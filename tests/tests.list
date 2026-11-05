@@ -30,6 +30,8 @@
 ../apps/kcubeCtrl/tests/kcubeCtrl_test
 ../apps/virtualPDU/tests/virtualPDU_test
 ../apps/acronameUsbHub/tests/acronameUsbHub_test
+../apps/accelFFCtrl/tests/accelFFCtrlModel_test
+../apps/accelFFCtrl/tests/accelFFCtrlReplay_test
 ../apps/accelSim/tests/accelSim_test
 ../apps/accelSim/tests/accelSimDisturbance_test
 ../apps/adcTracker/tests/adcTracker_test
