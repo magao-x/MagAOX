@@ -226,7 +226,7 @@ TEST_CASE( "accelFFCtrl stream generation and timestamp discontinuities", "[acce
     REQUIRE( processor.diagnostics().m_state == inputState::disconnected );
     processor.attached();
     REQUIRE( processor.diagnostics().m_generation == 3 );
-    for( int fault = 0; fault < 6; ++fault )
+    for( int fault = 0; fault < 7; ++fault )
     {
         processor.attached();
         source.publish( 1, 1000000000 );
@@ -249,6 +249,8 @@ TEST_CASE( "accelFFCtrl stream generation and timestamp discontinuities", "[acce
             receipt += 3000000;
         if( fault == 5 )
             frame.m_adc[0] = 4096;
+        if( fault == 6 )
+            frame.m_written = sourceTime( receipt + 1 );
         drainAt( processor, source, receipt );
         REQUIRE( processor.diagnostics().m_invalid > 0 );
         REQUIRE( processor.diagnostics().m_prediction.m_pointing == std::array<double, 2>{ 0, 0 } );
@@ -261,6 +263,46 @@ TEST_CASE( "accelFFCtrl stream generation and timestamp discontinuities", "[acce
              0 );
     REQUIRE( processor.diagnostics().m_state == inputState::clockFault );
     REQUIRE( drainAt( processor, source, 2000175000 ) == 1 );
+}
+
+/** \brief Counter rollback above the consumed cursor still denotes a new generation after a bounded drain.
+ * \ingroup accelFFCtrl_unit_test
+ */
+TEST_CASE( "accelFFCtrl rollback within a pending batch tail", "[accelFFCtrl][input]" )
+{
+    inputProcessor processor( parameters{}, 2 );
+    retainedSource source( 8 );
+    processor.attached();
+    source.publish( 10, 1000000000 );
+    REQUIRE( drainAt( processor, source, 1000050000 ) == 1 );
+    for( uint64_t n = 11; n <= 16; ++n )
+        source.publish( n, 1000000000 + ( n - 10 ) * 125000 );
+    REQUIRE( drainAt( processor, source, 1000800000 ) == 2 );
+    REQUIRE( processor.diagnostics().m_counter == 12 );
+    source.publish( 15, 1001000000 );
+    REQUIRE( drainAt( processor, source, 1001050000 ) == 1 );
+    REQUIRE( processor.diagnostics().m_rollbacks == 1 );
+    REQUIRE( processor.diagnostics().m_generation == 2 );
+    REQUIRE( processor.diagnostics().m_counter == 15 );
+    REQUIRE( processor.diagnostics().m_processed == 4 );
+    REQUIRE( processor.diagnostics().m_dropped == 4 ); // The known, unconsumed tail belongs to the old generation.
+    processor.disconnected();
+    processor.attached();
+    REQUIRE( processor.diagnostics().m_counter == 0 );
+
+    // The initial cursor can precede a stable snapshot when the first copy races a publisher.
+    inputProcessor fresh;
+    retainedSource restarting( 8 );
+    fresh.attached();
+    restarting.publish( 10, 1000000000 );
+    restarting.m_race = true;
+    REQUIRE( drainAt( fresh, restarting, 1000050000 ) == 0 );
+    restarting.m_race = restarting.m_header.m_write = false;
+    restarting.publish( 1, 1000125000 );
+    REQUIRE( drainAt( fresh, restarting, 1000175000 ) == 1 );
+    REQUIRE( fresh.diagnostics().m_generation == 2 );
+    REQUIRE( fresh.diagnostics().m_rollbacks == 1 );
+    REQUIRE( fresh.diagnostics().m_processed == 1 );
 }
 
 /** \brief Every exposed calibration/control change is validated as a whole and applied with a fit-reset revision.

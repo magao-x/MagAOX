@@ -1,7 +1,7 @@
 # Standalone numerical/input validation; native-test additionally requires ImageStreamIO.
 CXX ?= c++
 CXXFLAGS ?= -O3
-override CXXFLAGS += -std=c++20 -fno-fast-math -Wall -Wextra
+override CXXFLAGS += -std=c++20 -fno-fast-math -Wall -Wextra -pthread
 EIGEN_CFLAGS ?= $(shell pkg-config --cflags eigen3)
 CPPFLAGS += $(EIGEN_CFLAGS) -D_GNU_SOURCE
 BUILD_DIR ?= /tmp/accelFFCtrl-numerics
@@ -16,7 +16,7 @@ NATIVE := $(BUILD_DIR)/accelFFCtrlStream_test
 ISIO_CFLAGS ?= $(shell pkg-config --cflags ImageStreamIO)
 ISIO_LIBS ?= $(shell pkg-config --libs ImageStreamIO)
 
-.PHONY: all test benchmark native-test
+.PHONY: all test benchmark native-test native-rate-test
 all: $(TEST) $(BENCHMARK) $(INPUT_BENCHMARK)
 
 $(BUILD_DIR):
@@ -42,7 +42,8 @@ $(NATIVE): accelFFCtrlStream_test.cpp ../accelFFCtrlStream.hpp $(INPUT) $(MODEL)
 	$(CXX) $(CPPFLAGS) $(ISIO_CFLAGS) $(CXXFLAGS) $< $(REPO_ROOT)/tests/testMain.cpp $(LDFLAGS) $(ISIO_LIBS) -o $@
 
 # A fresh process/namespace is mandatory: the native library can cache MILK_SHM_DIR.
-native-test: $(NATIVE)
-	@task_shm_dir=$$(mktemp -d /tmp/accelFFCtrl-native-XXXXXX); \
-	  MILK_SHM_DIR="$$task_shm_dir" $(NATIVE) '[accelFFCtrl-native]'; \
-	  task_status=$$?; rmdir "$$task_shm_dir"; exit $$task_status
+native-test native-rate-test: $(NATIVE)
+	@if [ "$@" = native-rate-test ] && [ "$$(uname -s)" != Linux ]; then echo 'native-rate-test requires Linux'; exit 1; fi
+	@task_shm_dir=$$(mktemp -d /tmp/accelFFCtrl-native-XXXXXX) || exit 1; \
+	  trap 'task_status=$$?; rmdir "$$task_shm_dir" || task_status=1; exit $$task_status' EXIT; \
+	  MILK_SHM_DIR="$$task_shm_dir" $(NATIVE) '$(if $(filter native-rate-test,$@),[accelFFCtrl-native-rate],[accelFFCtrl-native])'

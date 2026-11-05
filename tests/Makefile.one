@@ -61,6 +61,8 @@ else ifneq ($(filter $(notdir $(TESTNAME)),accelFFCtrlModel_test accelFFCtrlRepl
     endif
     ifneq ($(filter $(notdir $(TESTNAME)),accelFFCtrlStream_test accelFFCtrl_test),)
         CPPFLAGS += -D_GNU_SOURCE
+        CXXFLAGS += -pthread
+        LDLIBS += -lImageStreamIO
         $(OBJNAME): $(PATHNAME)../accelFFCtrlStream.hpp
     endif
     ifeq ($(notdir $(TESTNAME)),accelFFCtrl_test)

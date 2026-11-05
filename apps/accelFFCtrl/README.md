@@ -81,8 +81,10 @@ OS scheduling can exceed requested delays.
 
 Failed attachment retries once per second. The ordinary app loop checks backing
 inode/device at telemetry cadence; the owner closes/reopens replacement mappings,
-increments generation and resets. Counter rollback increments generation
-immediately. Gaps, bad samples/times, stale data, configuration and explicit
+increments generation and resets. Counter rollback is checked against the last
+stable snapshot, including any unconsumed batch tail, and increments generation
+immediately. Known unconsumed records are counted as dropped when a generation
+ends; records never observed before a restart cannot be counted. Gaps, bad samples/times, stale data, configuration and explicit
 resets clear/re-warm observation automatically. No old prediction is held ready;
 supervision also checks a snapshot's age before sending it to INDI.
 
@@ -137,7 +139,7 @@ Read-only `input` text reports stream name, exact decimal counter/generation,
   Invalid estimates are zero; zero alone does not imply readiness.
 - `input_fps`: accepted throughput over 250-ms monotonic windows, including loss;
   `acquisition_fps`: smoothed rate within consecutive valid acquisition times.
-- Lifetime `processed`, `dropped` (overwritten plus rejected), `invalid_frames`
+- Lifetime `processed`, `dropped` (overwritten, rejected, or known records abandoned on restart), `invalid_frames`
   (subset of dropped), `restarts`, `resets`, `counter_rollbacks`; `empty_polls`,
   `busy_polls`, `copy_races`; and `retention_frames`.
 - `sample_age_us`, `effective_horizon_us` (target minus sample),
@@ -151,7 +153,108 @@ fault, 5 stale, 6 numerical fault, 7 invalid request. Automatic reset can clear
 a fit fault before the next snapshot; counters and `last_event` retain evidence.
 Default warmup requires 0.3 s of valid consecutive acquisition coverage.
 
-## Build and a non-actuating exao2 test
+## Phase 3A: Linux build and private native validation
+
+This phase builds/tests only. It does not install binaries, launch the observer,
+attach to `acc000`, contact INDI, restart applications, or change exao2 settings.
+The commands below are for a human operator; agents must not execute on exao2.
+They can also be run on a configured non-instrument Linux development machine.
+
+Use the same GCC >=14 compiler and dependencies as the working MagAO-X checkout.
+The standalone test Makefile does not read `local/common.mk`; pass the same
+compiler explicitly. The example below uses `g++`; change `accff_cxx` to the
+actual configured compiler if necessary. Run from the checkout root, with the
+reviewed Phase 3A changes present. Stop at the first failing step and preserve
+its full output.
+
+For an uncommitted review, create a source patch on the workstation:
+`git diff --binary > /tmp/accelFFCtrl-phase3a.patch`. Have the operator copy it
+to exao2. In a matching Phase-2 source checkout on exao2, first run
+`git apply --check /tmp/accelFFCtrl-phase3a.patch`, then
+`git apply /tmp/accelFFCtrl-phase3a.patch`. Stop on conflicts; no merge or forced
+overwrite is needed. This applies source/test/documentation changes only, not
+operational configuration. The agent does not perform the remote copy/apply.
+
+```bash
+set -euo pipefail
+accff_cxx=g++
+accff_report=$(mktemp -d /tmp/accelFFCtrl-3a-report-XXXXXX)
+printf 'Report directory: %s\n' "$accff_report"
+uname -a | tee "$accff_report/platform.txt"
+git branch --show-current | tee "$accff_report/branch.txt"
+git rev-parse HEAD | tee "$accff_report/commit.txt"
+git status --short | tee "$accff_report/worktree.txt"
+"$accff_cxx" --version | tee "$accff_report/compiler.txt"
+getconf GNU_LIBC_VERSION | tee "$accff_report/glibc.txt"
+pkg-config --modversion mxlib eigen3 ImageStreamIO | tee "$accff_report/versions.txt"
+pkg-config --cflags --libs ImageStreamIO | tee "$accff_report/isio-flags.txt"
+pkg-config --variable=prefix ImageStreamIO | tee "$accff_report/isio-prefix.txt"
+
+make -C apps/accelFFCtrl CXX="$accff_cxx -H" 2>&1 | tee "$accff_report/app-build.txt"
+make -C tests -f Makefile.one CXX="$accff_cxx" \
+  t=../apps/accelFFCtrl/tests/accelFFCtrl_test 2>&1 | tee "$accff_report/app-test-build.txt"
+./apps/accelFFCtrl/tests/accelFFCtrl_test '[accelFFCtrl][app]' \
+  2>&1 | tee "$accff_report/app-test.txt"
+make -C apps/accelFFCtrl/tests CXX="$accff_cxx" \
+  BUILD_DIR="$accff_report/bin" test benchmark \
+  2>&1 | tee "$accff_report/numerics.txt"
+make -C apps/accelFFCtrl/tests CXX="$accff_cxx -H" \
+  BUILD_DIR="$accff_report/bin" native-test 2>&1 | tee "$accff_report/native.txt"
+make -C apps/accelFFCtrl/tests CXX="$accff_cxx" \
+  BUILD_DIR="$accff_report/bin" native-rate-test 2>&1 | tee "$accff_report/native-rate.txt"
+ldd ./apps/accelFFCtrl/accelFFCtrl | tee "$accff_report/app-libraries.txt"
+ldd "$accff_report/bin/accelFFCtrlStream_test" | tee "$accff_report/native-libraries.txt"
+```
+
+If `pkg-config` cannot locate ImageStreamIO, report that failure and the known
+installed header/library locations. Do not install an upstream replacement or
+assume a version from the source branch. The app uses the checkout's normal
+include/library search paths and explicitly links ImageStreamIO/pthreads;
+standalone native tests use `ImageStreamIO.pc`. Those must resolve to compatible
+headers and the same installed library. `ISIO_CFLAGS` / `ISIO_LIBS` can be supplied
+to the standalone Makefile when the actual installation lacks a `.pc` file, after
+its paths are established. Do not change shared make configuration for this test.
+
+`native-test` runs four deterministic cases in a newly created, verified private
+namespace, using only synthetic `accff-private-*` names. It checks 2-D and 3-D
+UINT16 pairs, depth one versus retention, 12,000 timestamped 8-kHz samples in
+four-frame batches across many wraps, both channels' amplitude/prediction,
+finite overrun and stale retained frames, bad metadata, reader-slot cleanup,
+and same-name unlink/recreation. It prints the library-written stream version
+and header structure sizes. The native APIs and fields match the repository's
+frameGrabber contract; installed ABI compatibility remains unverified until this
+build and runtime test pass on the target installation.
+
+`native-rate-test` is Linux-only and opt-in. It forks its own private synthetic
+producer for 40,000 additional samples over approximately five seconds, using
+absolute 125-us monotonic deadlines, actual realtime acquisition/write stamps,
+256-plane retention and 2-kHz queries. The parent must account for every record
+as processed or dropped and observe estimator readiness. It reports duration,
+loss, invalids, races, resets and rates. Catch assertions and ordinary scheduler
+latency are included: this is a transport/recovery test, not an RT priority or
+hard deadline benchmark. A passing case with drops establishes accounting;
+it does **not** establish lossless 8-kHz delivery. Save its full summary even
+when it passes. Producer restarts here affect synthetic images only.
+
+Report the directory contents above, especially the first compiler/linker error
+and preceding command on failure, all test totals, the native ABI line, the
+`Native 8k/2k` summary, and the ImageStreamIO paths from both `ldd` outputs.
+The `-H` builds record the actual selected headers; include their ImageStreamIO
+header paths and any precompiled-header indication in the report as well.
+Do not report a Linux pass based on the existing macOS syntax checks. Physical
+producer timestamp validity, real-host load and framework worker scheduling
+remain separate qualifications. In particular, `mcp3208Ctrl` timer-mode
+acquisition does not assign `m_currImageTimestamp` in this checkout; synchronized
+acquisition does. Confirm the actual producer/mode before future observation.
+ImageStreamIO's default `CLOCK_ISIO` may be TAI; the frameGrabber path explicitly
+publishes realtime acquisition/write stamps. The controller requires that
+contract and never substitutes creation time, TAI or receipt time for acquisition.
+
+## Later operator deployment (outside Phase 3A)
+
+The historical deployment procedure below is for a later approved observation
+run after Phase 3A passes. Its install, launch, INDI and producer-configuration
+steps are **not** part of the current build/private-validation task.
 
 First use a configured MagAO-X Linux development checkout with the normal
 compiler, mxlib/Eigen, libMagAOX, INDI and ImageStreamIO dependencies:

@@ -1418,3 +1418,158 @@ future high-rate recording/correction acceptance remains separately scoped.
 Earlier detuning, weak-signal quantization, neighboring-frequency rejection and
 stochastic replay limitations remain in force. No new suppression claim,
 physical calibration result, DDSPC implementation or DM correction is implied.
+
+## Phase 3A: Linux build readiness and native validation review
+
+### Scope, source identity and evidence boundary
+
+Started from clean `parkertjohnson1/accelSim` at `fb71d5cf` (committed Phase 2).
+Read AGENTS.md, the full application/helpers/tests, README and this engineering
+record. Reviewed frameGrabber/shmimMonitor, MagAOXApp lifecycle/thread/INDI helpers,
+the shared make rules, and the hardware mcp3208Ctrl acquisition timestamps.
+This phase authorizes isolated build/correctness fixes and private validation;
+it does not authorize actuation, simulator changes, instrument commands,
+application restarts or configuration changes on exao2. No merge/commit/push.
+
+The workstation is Darwin arm64, with no local Linux VM/container or installed
+ImageStreamIO package. It has mxlib 0.2.0 and Eigen 5.0.1. The previously
+downloaded upstream ImageStreamIO 2.00.00 sources/headers in `/tmp` are reference
+material, **not evidence of the version installed on exao2**. This checkout
+does not vendor/pin those headers; `setup/README.md` points to a separate setup
+repository. Installed header/library identity and ABI remain pending the
+human-operated Linux commands now provided in the README. Do not substitute an
+upstream download for that evidence.
+
+### Findings and isolated corrections
+
+| Finding | Resolution / evidence |
+| --- | --- |
+| App/thread/native test linkage relied on indirect dependency flags. `sem_clockwait` is in pthread on older supported glibc releases. | App explicitly links `-lImageStreamIO` and compiles/links with `-pthread`; native/full app test builds also specify pthread/ImageStreamIO dependencies. `_GNU_SOURCE` already exposes the glibc 2.30+ API. Existing monotonic fallback remains unchanged. |
+| Bounded ingestion compared a new counter only with the consumed cursor. After observing C=16 but consuming through 12, rollback to 15 went undetected and could mix an old batch tail into a new source generation. | Track the last stable snapshot counter separately; compare against the larger of it and the cursor, preserving the guard for a first copy that races before any stable snapshot exists. Rollback resets/rebinds at the newest publication. Count known unconsumed old-generation records as dropped on rollback/disconnection and clear the reported per-generation counter. Regression coverage includes both the bounded tail and an initial torn copy followed by restart. |
+| Temporal array pointer presence alone was insufficient to identify a retained temporal cube. | Native header checks `(imagetype & 0xF000F) == (CIRCULAR_BUFFER | ZAXIS_TEMPORAL)` for depth >1, matching the upstream array-allocation convention. 2-D/depth-one global metadata remains supported. Frame copies guard missing temporal arrays. |
+| A mapped read handle was implicitly copyable, and close cleared a reader slot even if its PID claim had changed. | Delete copy construction/assignment, release only this PID's slot, clear the local native descriptor after close. Native tests check ownership cleanup; no stream payload writes were added. |
+| A write timestamp later than actual post-copy receipt was accepted. | Reject future write stamps as invalid time, in addition to invalid/future acquisition stamps and write-before-acquisition. Tests cover it. This also exposes mixed realtime/TAI metadata rather than silently accepting a nonsensical producer delay. |
+| Native tests covered only five sequential publications and one reattachment. | Extend private native coverage to depth 256, repeated wraps, both raw channels, 2-D input, temporal flags, finite overrun, stale retained samples, reader claim cleanup and real same-name recreation. Add an explicit Linux-only paced producer test. |
+
+Changed files are limited to `apps/accelFFCtrl/Makefile`,
+`accelFFCtrlInput.hpp`, `accelFFCtrlStream.hpp`, `README.md`,
+`tests/Makefile`, `tests/accelFFCtrlInput_test.cpp`,
+`tests/accelFFCtrlStream_test.cpp`, repository `tests/Makefile.one`, and this plan.
+`accelFFCtrl.hpp`/main, numerical model and original analytic/replay tests are
+unchanged. All accelSim implementation/model/DM/mapping/stream headers are
+unchanged. No shared framework source was modified.
+
+### API, publication and timing review
+
+The native calls match the repository's use of ImageStreamIO:
+`ImageStreamIO_filename`, `openIm`, `getsemwaitindex`, `semflush`, `closeIm`;
+CPU location -1, `_DATATYPE_UINT16`, axes/size, `write`, `cnt0`, `cnt1`, and
+`cntarray`/`atimearray`/`writetimearray`. The reference native sizing function
+allocates temporal arrays only for the checked circular/temporal type. The
+consumer's four-byte pair offset equals two UINT16 codes per plane. A snapshot
+checks counters/geometry/write state before and after copying owned records;
+no queued pointer or semaphore count is treated as immutable sample history.
+
+`frameGrabber::fgThreadExec` creates a `2 x 1 x D` circular temporal image,
+copies data under `md.write`, sets realtime write/acquisition stamps, updates
+`cnt1` then increments `cnt0`, copies corresponding per-plane metadata, clears
+write and posts semaphores. Counter-relative indexing therefore handles wrap
+without assuming plane index equals `cnt0 % D`. Depth one is still intrinsically
+lossy; depth 256 gives finite 32-ms retention at 8 kHz, while the unchanged 2-ms
+freshness policy rejects older retained records. Restart loss accounting covers
+the known stable snapshot tail; unobserved records after that snapshot cannot
+be counted when counters reset. A restart event remains evidence of that gap.
+
+ImageStreamIO's header may select CLOCK_TAI for `CLOCK_ISIO`. That is not the
+controller's time contract: frameGrabber explicitly stamps CLOCK_REALTIME and
+the controller maps those stamps to local monotonic time. Creation time and
+generic native update defaults are not acquisition timestamps. The hardware
+synchronized path in this checkout sets `m_currImageTimestamp` before reading
+channels; the timer path does not assign it. Actual producer/mode/timestamp
+validity must be confirmed later; no hardware driver or receipt-time fallback
+was added. The private fixtures deliberately publish the frameGrabber realtime
+contract.
+
+Prediction has no acquisition-age/processing-delay double counting:
+`target = query_now + configured_horizon`, then the numerical core advances by
+`target - newest_acquisition`. The query clock is read after input processing,
+so completed readout/copy/ingestion age is already included. Producer write
+delay is diagnostic only; neither it nor service time is added to the horizon.
+Remaining solve time, a future publisher/actuator delay and hold behavior are
+not measured actuation latency in this non-actuating phase. Five-Hz INDI
+snapshots are diagnostic records with target timestamps, not commands to apply
+at INDI receipt. Numerical equations/defaults remain unchanged.
+
+INDI APIs/macros and callback signatures match MagAOXApp. Properties are defined
+before framework INDI startup. Callbacks validate/coalesce settings under a
+control mutex; the worker uses `try_lock`, owns the estimator/mapping, and
+publishes value snapshots. Stop/run atomics and joinable checks cover early
+startup failure, shutdown and destruction. The shared `threadStart` still uses
+its existing plain `pid_t` handoff and checks `pthread_setschedparam` failure
+with `rv < 0`, although that API returns positive error numbers. These are
+inherited framework limitations, not fixed by an app-specific replacement in
+this phase. Its success log is not evidence of actual RT policy/priority;
+worker scheduling and a separate shared-helper correction remain follow-ups.
+The private paced test does not exercise framework startup or RT scheduling.
+
+### Tests, instructions and remaining qualification
+
+- Local optimized standalone estimator/replay/input tests: **18 cases,
+  3,350,774 assertions passed**. The original numerical expectations are intact.
+- Local AddressSanitizer/UndefinedBehaviorSanitizer standalone tests: the same
+  **18 cases / 3,350,774 assertions passed**, with halt-on-error enabled and no reported findings.
+- Allocation-guarded input benchmark: 240,000 accepted samples, zero dropped,
+  zero C++ allocations and no Eigen allocation; observed mean 134.582 ns,
+  p99 500 ns, maximum 30.209 us. This excludes native I/O/syscalls/scheduling and
+  is not a Linux deadline claim. The existing numerical benchmark also passed.
+- A real full app make was attempted and remains blocked in local framework
+  dependencies (`timegm`, missing installed mxlib `mx/math/floatUtils.hpp`),
+  before the app compiles. No Linux linked build or native execution occurred.
+- Native test source passes local syntax checks against reference headers.
+  Its Linux-only test body was additionally type-checked in a temporary copy
+  with a POSIX `clock_nanosleep` declaration; no fake implementation was linked
+  or run. App/app-test GCC 15 syntax checks against real base/INDI/native headers
+  passed using the previous temporary missing-platform/mxlib declarations and
+  omitting unused aggregate device helpers. These limited checks are not Linux
+  compilation or installed ABI validation. No shims were added to the repo.
+- clang-format and whitespace checks pass; the README's operator shell block
+  passes `bash -n`. Preservation hashes verify the original numerical model,
+  original tests, simulator headers and plan prefix above Agent Findings.
+
+`native-test` now contains four deterministic native cases: original
+retained/type validation, 12,000-sample two-channel replay in four-sample batches,
+and 2-D input/recreation. The replay crosses many 256-plane wraps and validates
+the 50-us measurement age plus one-ms future horizon (1.05-ms total). It then
+withholds consumption for 300 publications, verifying exactly 44 overwritten
+and 240 stale-retained drops, with 16 recent samples accepted.
+The native tests print the library-written metadata version and header sizes.
+
+`native-rate-test` is a separate opt-in Linux case. It forks a private producer
+for 40,000 additional samples over about five seconds at 125-us absolute
+deadlines, samples real acquisition/write/receipt clocks, uses a 256-plane ring
+and 2-kHz prediction, accounts for all 40,001 records including the initial bind,
+and requires readiness to have been observed. It reports rates, losses, invalids,
+races and resets. A pass with loss validates accounting, not lossless throughput.
+The producer is reaped on normal exit or assertion unwinding; no existing app
+or instrument image is used. Both native targets create a fresh verified private
+namespace before starting the test process, and cleanup failure is no longer
+silently ignored. These native cases are **not yet executed**.
+
+README now distinguishes the current Phase 3A build/private tests from the
+historical later install/launch/INDI/producer-reconfiguration runbook. It gives
+exact human-operated commands for compiler/glibc/pkg-config identities, app
+and app-test builds, standalone tests/benchmarks, both native targets, header
+traces and `ldd` paths, with logs in a unique `/tmp` report directory. It points
+out that standalone tests do not inherit `local/common.mk`, that installed
+ImageStreamIO headers/libraries must agree across app and native builds, and
+that a missing `.pc` file requires actual installed paths rather than a guessed
+replacement library. No install, observer launch, INDI command, instrument
+configuration change or app restart belongs to those Phase 3A commands.
+
+Request the first failing compiler/linker command and full error context, test
+totals, native ABI line, `Native 8k/2k` summary, and selected header/PCH/library
+paths from the operator. Until those results arrive, Linux app linkage, installed
+ABI/metadata compatibility, native restart/wrap correctness and paced delivery
+remain unverified. Live `acc000` timing under RTC load, actual clock/calibration,
+timer-mode timestamp validity and worker RT policy remain later qualifications.
+No DM actuation, simulator disturbance change, merge, commit or push was made.

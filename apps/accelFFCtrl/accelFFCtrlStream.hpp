@@ -37,6 +37,12 @@ class adcStream
     /// Construct without accessing any stream.
     adcStream() = default;
 
+    /// A native mapping and reader slot have exactly one owner.
+    adcStream( const adcStream &other /**< [in] prohibited second owner */ ) = delete;
+
+    /// A native mapping and reader slot cannot be copied between owners.
+    adcStream &operator=( const adcStream &other /**< [in] prohibited second owner */ ) = delete;
+
     /// Release only the reader slot and mapping.
     ~adcStream();
 
@@ -49,7 +55,7 @@ class adcStream
     /// Copy one complete plane's codes/counter/timestamps into local storage, within attached bounds.
     inputFrame frame( size_t index /**< [in] temporal plane */ ) const;
 
-    /// Wait on a monotonic deadline, or use bounded relative polling on older platforms; drain at most 256 posts.
+    /// Wait on a monotonic deadline, or use bounded relative polling; drain at most 256 additional posts after a wake.
     bool wait( int64_t deadline /**< [in] absolute monotonic deadline [ns] */ );
 
     /// Return the attached backing inode for supervision, without filesystem access.
@@ -107,16 +113,18 @@ inline inputHeader adcStream::header() const
     const volatile auto *md = m_image.md;
     value.m_write           = md->write != 0;
     std::atomic_thread_fence( std::memory_order_seq_cst );
-    value.m_axes    = md->naxis;
-    value.m_width   = md->size[0];
-    value.m_height  = value.m_axes > 1 ? md->size[1] : 0;
-    value.m_depth   = value.m_axes == 3 ? md->size[2] : 1;
-    value.m_counter = md->cnt0;
-    value.m_index   = value.m_axes == 3 ? md->cnt1 : 0;
-    value.m_uint16  = md->datatype == _DATATYPE_UINT16;
-    value.m_cpu     = md->location == -1;
-    value.m_valid   = m_image.array.raw && value.m_depth == m_depth &&
-                      ( m_depth == 1 || ( m_image.cntarray && m_image.atimearray && m_image.writetimearray ) );
+    value.m_axes        = md->naxis;
+    value.m_width       = md->size[0];
+    value.m_height      = value.m_axes > 1 ? md->size[1] : 0;
+    value.m_depth       = value.m_axes == 3 ? md->size[2] : 1;
+    value.m_counter     = md->cnt0;
+    value.m_index       = value.m_axes == 3 ? md->cnt1 : 0;
+    value.m_uint16      = md->datatype == _DATATYPE_UINT16;
+    value.m_cpu         = md->location == -1;
+    const bool temporal = ( md->imagetype & 0xF000F ) == ( CIRCULAR_BUFFER | ZAXIS_TEMPORAL );
+    value.m_valid =
+        m_image.array.raw && value.m_depth == m_depth &&
+        ( m_depth == 1 || ( temporal && m_image.cntarray && m_image.atimearray && m_image.writetimearray ) );
     std::atomic_thread_fence( std::memory_order_seq_cst );
     value.m_write = value.m_write || md->write != 0;
     return value;
@@ -125,7 +133,8 @@ inline inputHeader adcStream::header() const
 inline inputFrame adcStream::frame( size_t index ) const
 {
     inputFrame value;
-    if( !m_open || index >= m_depth || !m_image.array.raw )
+    if( !m_open || index >= m_depth || !m_image.array.raw ||
+        ( m_depth > 1 && ( !m_image.cntarray || !m_image.atimearray || !m_image.writetimearray ) ) )
         return value;
     std::atomic_thread_fence( std::memory_order_seq_cst );
     std::memcpy( value.m_adc.data(),
@@ -195,7 +204,8 @@ inline void adcStream::close()
 {
     if( m_open )
     {
-        if( m_semaphore >= 0 && m_image.semReadPID && m_image.md && m_semaphore < m_image.md->sem )
+        if( m_semaphore >= 0 && m_image.semReadPID && m_image.md && m_semaphore < m_image.md->sem &&
+            m_image.semReadPID[m_semaphore] == getpid() )
             m_image.semReadPID[m_semaphore] = 0;
         ImageStreamIO_closeIm( &m_image );
     }
@@ -203,6 +213,7 @@ inline void adcStream::close()
     m_semaphore = -1;
     m_inode = m_device = 0;
     m_depth            = 0;
+    m_image            = {};
 }
 
 } // namespace accelFFCtrlDetail

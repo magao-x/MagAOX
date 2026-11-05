@@ -201,10 +201,11 @@ class inputProcessor
     std::vector<inputFrame> m_batch;     ///< Startup-allocated bounded local copy of retained source frames.
     inputClock              m_anchor;    ///< Fixed epoch translation until a source restart or detected clock step.
     int64_t  m_clockTolerance, m_lastTime{ -1 }; ///< Clock uncertainty/step allowance and last accepted acquisition.
-    double   m_period{ 0 };    ///< Smoothed accepted acquisition interval; never derived from semaphore count.
-    int64_t  m_rateTime{ -1 }; ///< Monotonic start of a 250-ms accepted-throughput reporting window.
-    uint64_t m_rateCount{ 0 }; ///< Accepted records in that window; fit resets do not hide lost throughput.
-    uint64_t m_cursor{ 0 };    ///< Last examined counter in this source generation.
+    double   m_period{ 0 };      ///< Smoothed accepted acquisition interval; never derived from semaphore count.
+    int64_t  m_rateTime{ -1 };   ///< Monotonic start of a 250-ms accepted-throughput reporting window.
+    uint64_t m_rateCount{ 0 };   ///< Accepted records in that window; fit resets do not hide lost throughput.
+    uint64_t m_cursor{ 0 };      ///< Last examined counter in this source generation.
+    uint64_t m_seenCounter{ 0 }; ///< Latest stable snapshot counter, including an unconsumed bounded-batch tail.
     bool     m_connected{ false }, m_bound{ false }, m_haveAnchor{ false }; ///< Source/counter/clock binding state.
 
     /// Clear the fit and estimates while preserving lifetime counters and source cursor.
@@ -292,20 +293,24 @@ inline void inputProcessor::reset()
 
 inline void inputProcessor::attached()
 {
+    if( m_bound && m_seenCounter > m_cursor )
+        m_stats.m_dropped += m_seenCounter - m_cursor;
     if( m_stats.m_generation )
         ++m_stats.m_restarts;
     ++m_stats.m_generation;
     m_connected = true;
     m_bound = m_haveAnchor = false;
-    m_cursor               = 0;
-    m_stats.m_rate         = 0;
-    m_rateTime             = -1;
-    m_rateCount            = 0;
+    m_cursor = m_seenCounter = m_stats.m_counter = 0;
+    m_stats.m_rate                               = 0;
+    m_rateTime                                   = -1;
+    m_rateCount                                  = 0;
     invalidate( inputState::waiting );
 }
 
 inline void inputProcessor::disconnected()
 {
+    if( m_bound && m_seenCounter > m_cursor )
+        m_stats.m_dropped += m_seenCounter - m_cursor;
     if( m_connected )
         invalidate( inputState::disconnected );
     m_connected = m_bound = m_haveAnchor = false;
@@ -344,7 +349,7 @@ size_t inputProcessor::drain( sourceT &source, clockT clockNow )
         ++m_stats.m_busy;
         return 0;
     }
-    if( m_bound && before.m_counter < m_cursor )
+    if( m_bound && before.m_counter < std::max( m_cursor, m_seenCounter ) )
     {
         ++m_stats.m_rollbacks;
         attached();
@@ -379,6 +384,7 @@ size_t inputProcessor::drain( sourceT &source, clockT clockNow )
         ++m_stats.m_races;
         return 0;
     }
+    m_seenCounter          = before.m_counter;
     const inputClock clock = clockNow();
     if( clock.m_real <= 0 || clock.m_mono < 0 || clock.m_uncertainty < 0 || clock.m_uncertainty > m_clockTolerance ||
         ( m_haveAnchor &&
@@ -407,7 +413,8 @@ size_t inputProcessor::drain( sourceT &source, clockT clockNow )
         m_cursor = m_stats.m_counter = frame.m_counter;
         int64_t acquired, written, mapped;
         if( !timeNs( frame.m_acquired, acquired ) || !timeNs( frame.m_written, written ) || written < acquired ||
-            !translate( acquired, mapped ) || mapped > clock.m_mono || ( m_lastTime >= 0 && mapped <= m_lastTime ) )
+            written > clock.m_real || !translate( acquired, mapped ) || mapped > clock.m_mono ||
+            ( m_lastTime >= 0 && mapped <= m_lastTime ) )
         {
             ++m_stats.m_dropped;
             ++m_stats.m_invalid;
