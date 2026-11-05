@@ -255,9 +255,13 @@ def adc_client(**kwargs):
 
 
 def make_device(client=None, camera=None, **config_overrides):
-    """Build an adcCtrl without starting INDI, logging files or the camera."""
+    """Build an adcCtrl without starting INDI, logging files or the camera.
+
+    ADC write pacing (`min_send_interval_sec`) is off unless overridden, so
+    each loop() call runs a cycle.
+    """
     dev = object.__new__(adcCtrl)
-    dev.config = AdcCtrlConfig(**config_overrides)
+    dev.config = AdcCtrlConfig(**{"min_send_interval_sec": 0.0, **config_overrides})
     dev.log = logging.getLogger("adcCtrl-test")
     dev.client = client if client is not None else adc_client()
     dev.properties = {}
@@ -877,6 +881,35 @@ def test_offset_and_reset_callbacks_do_not_block():
     dev.loop()
     assert ("adctrack.deltaADC1.target", 1.0) in client.writes
     assert dev.delta_1 == 0.0
+
+
+def test_adc_writes_and_cycles_are_paced():
+    """In closed loop, writes are at least min_send_interval_sec apart and no cycle starts before then.
+
+    adctrack echoes deltaADC current at once but moves the stages only at
+    its next tracking update, so frames taken sooner would show the old
+    position.
+    """
+    assert AdcCtrlConfig().min_send_interval_sec == 7.0
+    dev = make_device(camera=FakeCamera(make_frame(dispersion=(0.02, 0.0))), min_send_interval_sec=0.3)
+    send(dev, "state", adcLoop=ON)
+    dev.loop()
+    assert len(dev.client.adc_writes()) == 2 and len(dev.camera.calls) == 1
+    for _ in range(3):
+        dev.loop()
+    assert len(dev.client.adc_writes()) == 2 and len(dev.camera.calls) == 1
+    assert dev.properties["status"]["last_command"] == "waiting for ADC"
+
+    send(dev, "offset", target=0.5)  # a manual write waits its turn too
+    dev.loop()
+    assert len(dev.client.adc_writes()) == 2
+
+    time.sleep(0.35)
+    dev.loop()  # the queued offset goes out, then the cycle waits again
+    assert len(dev.client.adc_writes()) == 4 and len(dev.camera.calls) == 1
+    time.sleep(0.35)
+    dev.loop()
+    assert len(dev.client.adc_writes()) == 6 and len(dev.camera.calls) == 2
 
 
 def test_loop_sign_flips_command():

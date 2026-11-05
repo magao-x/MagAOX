@@ -1107,6 +1107,22 @@ All 51 tests pass locally (31 existing, unchanged; 20 new).
 - Tests: `test_ke_bottom_mask_turned_frame` (the dispersion response flips sign, the offset does not, and the star maps back), `test_ke_mask_switch_mirrors_spots_and_swaps_setpoints`, and `test_same_loop_sign_converges_in_both_modes` now also covers the bottom mask and checks its telemetry. Removing the negation makes the bottom-mask loop diverge (δ1 → 1.70 instead of 0.3), so the test catches it. The bottom-mask frame test uses dispersions of 0.1 λ/D: at 0.4 λ/D the response is visibly nonlinear (11.3° vs −13.4°).
 - All 53 tests pass locally (51 existing, 2 new); build-machine pytest still to do.
 
+### ADC Write Pacing (bug fix, 2026-11-05)
+
+**Symptom (user, on the instrument, both modes).** When adcCtrl writes to the ADCs too fast, commands are skipped. The loop takes the unchanged frames as the result of the move it thinks it made, keeps stepping, and then overshoots by a lot.
+
+**Cause.** adcTracker's `deltaADC1/2` callback sets `current` to the new target immediately (`apps/adcTracker/adcTracker.hpp`, `m_indiP_deltaADC1` callback). It only moves the stages at its next tracking update, at most every `tracking.updateInterval` (5 s in the deployed config). So `send_command`'s wait for `current` returned at once, the next cycle measured frames from before the move, and writes landing within one tracker interval were overwritten by the next. The extra steps piled up in `delta_1` without being seen and were all applied at once.
+
+**Fix (user asked for at most one command every 5 s; 7 s chosen with the user).**
+- New config `min_send_interval_sec = 7.0`: the 5 s tracker interval, plus about 1 s for the tracker loop and the stage move, plus margin.
+- `send_command` records the time of each write (`_last_send`). `send_wait()` is the time left until the interval has passed.
+- `loop()`: while `send_wait() > 0`, no cycle (any non-idle state) and no set point capture starts, so frames are always taken after the move. `status.last_command` shows "waiting for ADC".
+- `apply_pending()`: manual `offset` and `reset_deltaADCs` writes stay queued until the interval has passed.
+- The `send_command` wait is kept (it still catches a write adctrack did not accept), with a comment that it does not mean the stages moved.
+- Tests: `make_device` turns pacing off (`min_send_interval_sec = 0`) so the existing tests still run one cycle per `loop()`. `test_adc_writes_and_cycles_are_paced` uses 0.3 s; it fails if `_last_send` is never set. All 54 tests pass locally.
+
+**On the instrument.** Closed loop should now take one step per ≥7 s cycle (plus the measurement time) without overshooting. If adctrack's `tracking.updateInterval` changes, `min_send_interval_sec` must stay above it plus the move time.
+
 ### References
 - MagAO-X PAPLC knife-edge mask (reflective D-shaped mirror at ~1.1 λ/D, adjustable IWA): [arXiv:2607.08146](https://arxiv.org/pdf/2607.08146), [arXiv:2303.13719](https://arxiv.org/pdf/2303.13719)
 - Satellite-spot dispersion method: arXiv:2608.10307
