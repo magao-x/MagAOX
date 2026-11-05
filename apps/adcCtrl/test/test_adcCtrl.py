@@ -950,7 +950,7 @@ def test_ke_mask_switch_mirrors_spots_and_swaps_setpoints():
     assert dev.properties["coronagraph"]["knife_edge_top"] == OFF
     assert dev._ke_order == (0, 3) and dev.ke_spots() == (2, 1)
     assert [dev.properties["ke_spots"][f"spot{n}"] for n in range(4)] == [OFF, ON, ON, OFF]
-    assert dev._ke_setpoint == 0.0 and dev.properties["ke_setpoint"]["current"] == 0.0
+    assert dev._ke_setpoint == 2.35 and dev.properties["ke_setpoint"]["current"] == 2.35
 
     send(dev, "ke_setpoint", target=0.7)
     send(dev, "ke_spots", spot1=OFF)  # physical spot 2 alone
@@ -1168,7 +1168,8 @@ def test_same_loop_sign_converges_in_both_modes():
     }
     for mode, make in makes.items():
         dev = make_device(client=ke_client(), gain=0.3, ctrl_mtx=[1.0 / slopes[0], 1.0 / slopes[1]],
-                          ke_gain=2.0 / ke_slope, ke_setpoint_top=0.0)
+                          ke_gain=2.0 / ke_slope, ke_setpoint_top=0.0,
+                          ke_setpoint_bottom=0.0)
         assert dev._loop_sign == -1.0
         dev.camera = DispersionCamera(dev, make)
         send(dev, "coronagraph", **{mode: ON})

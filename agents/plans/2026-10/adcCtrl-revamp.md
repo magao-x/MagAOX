@@ -1103,7 +1103,7 @@ All 51 tests pass locally (31 existing, unchanged; 20 new).
 - `self._ke_order` stays in turned-frame labels, which are the top mask's physical spots, so the config `ke_spots` keeps its meaning. `ke_spots()` gives the physical spots for the INDI property, logs and telemetry.
 - `self._ke_mask` is the last selected mask; standard mode keeps it, so going standard → knife-edge on the same mask changes nothing. Changing mask (`set_ke_mask`) saves the current `(set point, time)` and restores the new mask's.
 - The batch's published `raw`/`dev` are re-indexed to physical spots, and the star is mapped back per frame before the median.
-- `ke_setpoint` config is replaced by `ke_setpoint_top = −1.2` and `ke_setpoint_bottom = 0`.
+- `ke_setpoint` config is replaced by `ke_setpoint_top = −1.2` and `ke_setpoint_bottom`. Its default, first 0, became **2.35** after the user measured the bottom-mask set point on the instrument (2026-11-05, with the bottom mask's negated `m`).
 - Tests: `test_ke_bottom_mask_turned_frame` (the dispersion response flips sign, the offset does not, and the star maps back), `test_ke_mask_switch_mirrors_spots_and_swaps_setpoints`, and `test_same_loop_sign_converges_in_both_modes` now also covers the bottom mask and checks its telemetry. Removing the negation makes the bottom-mask loop diverge (δ1 → 1.70 instead of 0.3), so the test catches it. The bottom-mask frame test uses dispersions of 0.1 λ/D: at 0.4 λ/D the response is visibly nonlinear (11.3° vs −13.4°).
 - All 53 tests pass locally (51 existing, 2 new); build-machine pytest still to do.
 

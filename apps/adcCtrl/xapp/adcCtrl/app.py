@@ -962,7 +962,7 @@ class AdcCtrlConfig(BaseConfig):
     ke_spots : list[int] = xconf.field(default_factory=lambda: [0, 3], help="Knife-edge mode: spots measured at startup with the top mask, one spot or two adjacent spots (0-3); the bottom mask uses the spots opposite these")
     ke_gain : float = xconf.field(default=-0.62, help="Knife-edge mode: initial scalar from m residual to dispersion error; provisional, derived from the 2026-10-25 DM-spot calibration for spots 0 and 3, scaled so the same loop_sign works in both modes")
     ke_setpoint_top : float = xconf.field(default=-1.2, help="Knife-edge mode: set point for m at startup with the top mask [deg]; measured on the instrument 2026-11-05")
-    ke_setpoint_bottom : float = xconf.field(default=0.0, help="Knife-edge mode: set point for m at startup with the bottom mask [deg]")
+    ke_setpoint_bottom : float = xconf.field(default=2.35, help="Knife-edge mode: set point for m at startup with the bottom mask [deg]; measured on the instrument 2026-11-05")
     ke_setpoint_max_age_hr : float = xconf.field(default=24.0, help="Knife-edge mode: a set point older than this is reported on entering the mode [hours]")
     ke_edge_margin : float = xconf.field(default=1.5, help="Knife-edge mode: half-plane mask line above the estimated star [lambda/D]")
     ke_spot_clearance : float = xconf.field(default=1.5, help="Knife-edge mode: the mask line is kept at least this far below each selected spot [lambda/D]")
