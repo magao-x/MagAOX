@@ -64,6 +64,7 @@ apps_rtcicc = \
 
 # Apps needed on RTC
 apps_rtc = \
+	accelFFCtrl \
 	alpaoCtrl \
 	ocam2KCtrl \
 	andorCtrl \
@@ -123,6 +124,7 @@ apps_sim = \
 	trippLitePDU
 
 all_buildable_apps = \
+	accelFFCtrl \
 	virtualPDU \
 	acronameUsbHub \
 	adcTracker \

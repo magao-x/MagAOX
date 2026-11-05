@@ -32,6 +32,9 @@
 ../apps/acronameUsbHub/tests/acronameUsbHub_test
 ../apps/accelFFCtrl/tests/accelFFCtrlModel_test
 ../apps/accelFFCtrl/tests/accelFFCtrlReplay_test
+../apps/accelFFCtrl/tests/accelFFCtrlInput_test
+../apps/accelFFCtrl/tests/accelFFCtrlStream_test
+../apps/accelFFCtrl/tests/accelFFCtrl_test
 ../apps/accelSim/tests/accelSim_test
 ../apps/accelSim/tests/accelSimDisturbance_test
 ../apps/adcTracker/tests/adcTracker_test

@@ -159,8 +159,8 @@ report from their counters and then returns nonzero. An HTML report therefore do
  * \ingroup application_unit_test
  */
 
-/** \defgroup accelFFCtrl_unit_test Accelerometer Feedforward Numerical Unit Tests
- * \brief Raw-ADC harmonic estimation, physical pointing prediction, timing validity and offline model replay.
+/** \defgroup accelFFCtrl_unit_test Accelerometer Feedforward Unit Tests
+ * \brief Raw-ADC estimation, retained-stream ingestion, observation controls, timing validity and offline replay.
  * \ingroup application_unit_test
  */
 

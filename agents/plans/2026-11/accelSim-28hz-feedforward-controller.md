@@ -174,6 +174,12 @@ Review AGENTS.md.  Do not alter any text above the "Agent Findings and Plan" bel
 
 # Agent Findings and Plan
 
+**Live observation phase:** the user has authorized the non-actuating MagAO-X
+application, live raw-stream ingestion, INDI configuration/diagnostics and tests.
+The phase-two record below supersedes the earlier numerical-only boundary for
+that scope. No DM reader/writer, calibration helper extraction or actuation is
+included. The committed numerical estimator and its existing tests stay unchanged.
+
 **Phase-one authorization:** the user has reviewed this investigation and
 authorized only the numerical raw-ADC acceleration-to-pointing estimator and
 offline tests/benchmark. The numerical design review and execution record at
@@ -1210,3 +1216,205 @@ The original task prefix above Agent Findings and Plan remains byte-for-byte
 unchanged. All five accelSim implementation/model/mapping/stream headers retain
 their pre-phase contents; other applications were not changed. No instrument or
 physical stream was accessed. The agent did not stage, commit, or push changes.
+
+## Phase two: live non-actuating application
+
+### Input API findings and decisions before implementation
+
+- Rechecked `dev::shmimMonitor::smThreadExec`, `dev::frameGrabber::fgThreadExec`,
+  native attachment/semaphore patterns and the upstream ImageStreamIO API.
+  The generic monitor delivers only the latest `cnt1` plane on each wake and
+  has a one-second timeout. It cannot supply a lossless 8-kHz sample history.
+  `ImageStreamIO_readBufferAt` provides a pointer, not a retained-frame lease;
+  semaphore posts are notifications, not a queue of immutable payloads.
+- **Depth one is intrinsically lossy for an asynchronous consumer.** If two
+  acquisitions complete before the consumer copies the first, the overwritten
+  pair is gone. A second consumer buffer, faster polling or counting semaphore
+  receipts cannot recover it. Do not describe depth-one operation as lossless.
+- Recommend a producer temporal ring of 256 frames (32 ms retention at 8 kHz),
+  configured by the operator through existing `framegrabber.circBuffLength` at
+  startup. This changes storage depth, not model evolution/synchronization.
+  Per-plane `cntarray`, `atimearray`, `writetimearray` must exist for depth >1.
+  The reader drains retained consecutive frames in order, verifies counters and
+  publication state around a bounded local copy, counts overwritten history and
+  resets/rewarms after discontinuities. Retention is finite and is not an
+  unconditional delivery guarantee. A true every-frame guarantee needs a
+  producer-supported acknowledged queue or equivalent transport; that is outside
+  this phase and must not be bolted onto the unchanged simulator silently.
+- Use one application-owned input/estimator worker, reusing MagAOXApp threadStart,
+  native existing-only attachment and semaphore claiming. Do not derive from the
+  latest-only monitor or change that shared helper. This supersedes the earlier
+  two-worker/SPSC proposal: there is no actuator publisher requiring isolation
+  now, and a single owner can drain, reset, predict, and check stale input on
+  bounded waits. No second payload queue or borrowed raw pointer is needed.
+- Worker performs only bounded snapshot/copy, timestamp translation, numerical
+  ingestion, and periodic prediction. Attachment/reconnection is a cold path;
+  backing-file identity probes and INDI/reporting stay in supervision. No stream
+  payload writes, creates, destroys, or output attachment. Reject DM-prefixed
+  input names before opening them.
+- Source acquisition stamps must be valid CLOCK_REALTIME values as published by
+  frameGrabber/accelSim. Map them using a sampled realtime/monotonic clock anchor,
+  check anchor uncertainty/clock steps and timestamp ordering, and pass actual
+  monotonic receipt time to the unchanged estimator. Old retained records that
+  exceed numerical freshness are counted/discarded rather than assigned fake
+  arrival times. Recovered recent frames are ingested once each. Prediction uses
+  actual now plus the requested horizon, counting measurement age once.
+- Reset/reconfigure and input restarts automatically clear/re-warm observation;
+  there is no enable, gain, or actuator state in this app. Keep lifetime loss,
+  rejected-frame, restart, reset and timing diagnostics even when a fit resets.
+  Use versioned coherent parameter requests applied by the worker; no INDI
+  callbacks mutate its live estimator. Publish snapshots at 5 Hz by default,
+  with prediction initially 2 kHz and source ingestion at every available frame.
+
+Reference: [upstream ImageStreamIO API](https://milk-org.github.io/milk-package/ImageStreamIO_8h.html).
+Its pointer/semaphore helpers do not establish a deployment-specific queue or
+memory-consistency guarantee. The deployed producer/library contract and native
+Linux load tests remain qualification inputs; local framework build limitations
+will be reported explicitly. No agent runs commands on instrument hosts.
+
+### Implemented architecture and boundaries
+
+Work started from branch `parkertjohnson1/accelSim`, HEAD `4e58786c`, with a clean
+working tree. The standalone numerical estimator and original numerical/replay
+test files remain byte-for-byte unchanged. No accelSim source, disturbance,
+calibration, RNG, publication, pacing or synchronization code changed. No agent
+opened an instrument stream or executed instrument/INDI commands, and no commit
+or push was made.
+
+| File | Implemented responsibility |
+| --- | --- |
+| `apps/accelFFCtrl/accelFFCtrl.hpp` | Normal `MagAOXApp<true>` lifecycle, `threadStart`, single input/prediction owner, nonblocking control/snapshot handoff, low-rate supervision/INDI. |
+| `apps/accelFFCtrl/accelFFCtrl.cpp` | Main entrypoint only. |
+| `apps/accelFFCtrl/accelFFCtrlInput.hpp` | Fixed parameter vocabulary/validation, raw owned frame records, bounded retained-ring drain, epoch translation, counter/generation/freshness faults, observation reset/recovery, throughput and timing diagnostics. No native I/O or simulator truth. |
+| `apps/accelFFCtrl/accelFFCtrlStream.hpp` | Existing-only native ADC mapping, type/geometry checks, reader semaphore, stable copy adapter, bounded monotonic waits and close. No payload publication/create/destroy API. |
+| `apps/accelFFCtrl/Makefile`, repository `Makefile` | Standard `magAOXApp.mk`, IEEE arithmetic, RTC/all-buildable registration. No service/autostart or existing runtime configuration change. |
+| `apps/accelFFCtrl/config/example.conf` | Non-actuating startup example, nominal 8-kHz input, 2-kHz queries, 5-Hz INDI, one-ms example future horizon. |
+| `apps/accelFFCtrl/tests/accelFFCtrlInput_test.cpp` | Deterministic retained transport/clock/control/recovery/loss-rate coverage without ImageStreamIO or app dependencies. |
+| `apps/accelFFCtrl/tests/accelFFCtrlStream_test.cpp` | Opt-in real ImageStreamIO reader tests, synthetic raw streams only in a verified private namespace; never an instrument/DM image. |
+| `apps/accelFFCtrl/tests/accelFFCtrl_test.cpp` | Offline full-framework config parsing, INDI handoff/reset, stale telemetry and backing-file identity supervision tests; no worker startup or stream access. |
+| `apps/accelFFCtrl/tests/accelFFCtrlInput_benchmark.cpp` | Allocation-guarded bounded ingestion/prediction benchmark with synthetic transport and clocks. Existing numerical benchmark is unchanged. |
+| `apps/accelFFCtrl/tests/Makefile`, `tests/Makefile.one`, `tests/tests.list`, `tests/groups.dox` | Standalone/input/native build targets, dependency registration and application-unit-test grouping. |
+| `apps/accelFFCtrl/README.md` | Architecture, buffer limitation, units/clocks, properties/status codes, build/test commands, operator-only source transfer/deployment/INDI runbook. |
+
+Numerical work remains single-owner. Callback requests are complete validated
+parameter candidates plus revision numbers. An owner `try_lock` applies the
+latest revision, resets the fit and acknowledges it through a value snapshot;
+callbacks never mutate the live estimator. Supervision may block on its own
+locks/INDI, while the worker only tries the handoff mutexes. Snapshot reporting is
+5 Hz by default; 2-kHz prediction does not decimate ingestion. No high-rate
+prediction stream was added. A future DDSPC owner can reuse the native/owned ADC
+records and time/identity validation without a dependency on the simulator or a
+DM sink; no speculative predictor abstraction was added to the per-sample path.
+
+Input attaches at the newest completed record and then walks retained history
+in order. A stable local batch uses actual post-copy receipt time for all
+age checks, with each frame's own acquisition stamp. Initial history before
+attachment is outside the observed counter interval. Batch capacity is allocated
+once (default 256); no borrowed shared-memory pointer is queued. Changed/torn
+copies leave the cursor unchanged. Exact overwritten gaps plus rejected frames
+increment lifetime dropped counts. Invalid frames are a separate subset. Old
+retained samples exceeding the default 2-ms age limit are discarded explicitly;
+32-ms retention is not permission to treat old samples as fresh.
+
+The source must supply CPU UINT16 `2 x 1 [x D]`, X/Y 12-bit codes and valid
+host CLOCK_REALTIME acquisition/write stamps. The deployed hardware producer's
+clock, ring arrays and frameGrabber-like publication order remain commissioning
+assumptions. A post-copy realtime/monotonic bracket establishes a fixed integer
+clock anchor. Excessive uncertainty/offset step inhibits and reanchors; bad,
+future, stale or nonmonotonic sample times reset/re-warm. This does not establish
+remote-host clock synchronization. Prediction uses `now + horizon`, and the
+unchanged numerical core advances from the latest acquisition stamp, counting
+age once. The forward bound still includes that age.
+
+The worker waits for source notifications or its next prediction deadline.
+glibc >=2.30 uses `sem_clockwait(CLOCK_MONOTONIC)`; fallback is nonblocking
+`sem_trywait` with bounded relative sleeps, avoiding a realtime timeout that can
+be prolonged by clock steps. Notification draining is bounded and never used as
+a sample count. Attachment/reconnection is cold work, retried at one-second
+intervals. Supervision probes source inode/device at telemetry cadence; only
+the owner closes/reopens mappings. Counter rollback/replacement attachment
+increments generation and clears the fit. Existing producers must safely
+unlink/recreate streams; truncating an attached mapping is not supported.
+
+Two implementation review corrections are recorded explicitly:
+
+- Acquisition timestamp rate and accepted throughput are distinct diagnostics.
+  `acquisition_fps` smooths valid consecutive timestamp intervals; `input_fps`
+  counts accepted samples over 250-ms monotonic windows, including gaps. Fit
+  resets do not erase throughput accounting. A deterministic depth-one test
+  deliberately loses alternate samples and reports approximately 4 kHz accepted
+  throughput from an 8-kHz producer, plus exact drop counts.
+- Generic `pcf::IndiElement::get<double>()` does not reliably report parse
+  failures. Scalar controls instead parse the entire raw text with conversion
+  status, reject nonfinite/trailing/malformed values, and validate the complete
+  candidate before acceptance. Startup scalar config uses the same parser.
+  This prevents a malformed ADC zero from silently becoming a legal zero.
+
+There is no actuation state, enable switch, correction gain, DM name/config,
+DM mapping extraction or output publication. Input names beginning `dm` are
+rejected before any native filename lookup/open. The app's purpose is continuous
+observation, with cleared invalid predictions and automatic re-warmup. This
+phase does not relax or implement any future actuator enable/ownership/zeroing
+requirements.
+
+### Phase-two validation and operational qualification
+
+The standalone command `make -C apps/accelFFCtrl/tests test benchmark` passed
+17 cases / **3,350,757 assertions**, preserving the original estimator/replay
+expectations. Seven new input cases exercise raw decoding/batched timestamps,
+one-frame loss versus retained recovery, finite/bounded overrun, busy/torn copies,
+counter rollback/generation, invalid/future/backwards/stale times, clock bracket
+bounds/steps, explicit reset/config changes, malformed controls and effective
+throughput under loss. The original four Python PSD validation tests also passed.
+
+The final combined AddressSanitizer/UndefinedBehaviorSanitizer executable passed
+**51 cases / 3,587,355 assertions** with halt-on-error enabled, including these
+17 cases and all 34 existing accelSim model/disturbance/DM numerical
+cases (236,598 assertions). It was built with `-DACCELSIM_MODEL_ONLY`, so DM
+regressions use local mock sinks and no native stream tests are compiled or
+executed. No sanitizer findings occurred. The binary used C++20 and
+`-O1 -g -fno-fast-math -fsanitize=address,undefined -fno-omit-frame-pointer`, the original
+three accelSim numerical test sources, the model/replay/input accelFFCtrl test
+sources, and the existing `tests/testMain.cpp`.
+
+On the local Apple Silicon workstation, the final allocation-guarded input
+benchmark measured mean **122.089 ns/sample**, p50 42 ns, p99 417 ns, maximum
+49.5 us across 240,000 synthetic samples, with **zero C++ new calls**, Eigen's
+allocation guard active, all records accepted and none dropped. Synthetic
+transport/clock callbacks exclude native mapping, actual clock syscalls,
+semaphore wake latency and scheduling. The unchanged numerical benchmark at
+8-kHz input / 2-kHz queries measured 138.644 ns/source sample including its
+measurement clocks; consume/predict p99 were 83/417 ns. These are workstation
+cost observations, not hard realtime bounds. At 8 kHz, the source period is
+125 us; the default query period is 500 us. Linux load testing must qualify
+delivery, acquisition age, latency distribution and CPU scheduling separately.
+
+Full `make -C apps/accelFFCtrl` and the full-framework app test build stop in
+existing local framework dependencies before compiling the application:
+`timegm` is unavailable under the configured macOS feature flags and installed
+mxlib lacks `mx/math/floatUtils.hpp`. Upstream ImageStreamIO 2.00.00 headers
+downloaded to `/tmp` pass native reader/test compilation, but its library cannot
+build on this Mac (`strerror_r` GNU/POSIX mismatch, unavailable `sem_timedwait`
+and process-shared semaphore support). Consequently native tests cannot link/run
+here. A limited GCC 15 syntax check of the new app and app tests against the real
+MagAOXApp/INDI/native headers passed using temporary local declarations for
+missing platform/mxlib APIs and excluding unused framework device helpers. No
+compatibility shims or dependency edits were added to the repository. This is
+not a full linked build, app test pass or native runtime qualification.
+
+The README gives exact commands for Linux standalone/native/full-app tests,
+source-archive transfer without commit/push, human-operated exao2 build/install,
+observation-only config, optional isolated INDI server on an unused port, and
+10-minute load/reset/restart observations. It reuses existing producer ring/rate
+configuration only with owner coordination, prohibits duplicate `acc000`
+producers, and never changes an existing DM injection setting. No startup
+management or production INDI configuration was modified. Operators must match
+producer ADC/frequency/lever/clock values and independently qualify raw-stream
+semantics; default 10-m geometry remains an assumption. Native/full-framework
+Linux tests and actual 8-kHz delivery/timing are outstanding deployment gates.
+INDI at 5 Hz is unsuitable for a 28-Hz residual PSD or correction-phase score;
+future high-rate recording/correction acceptance remains separately scoped.
+
+Earlier detuning, weak-signal quantization, neighboring-frequency rejection and
+stochastic replay limitations remain in force. No new suppression claim,
+physical calibration result, DDSPC implementation or DM correction is implied.
