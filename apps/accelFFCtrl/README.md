@@ -153,6 +153,55 @@ fault, 5 stale, 6 numerical fault, 7 invalid request. Automatic reset can clear
 a fit fault before the next snapshot; counters and `last_event` retain evidence.
 Default warmup requires 0.3 s of valid consecutive acquisition coverage.
 
+## GCC 14 / C++20 compatibility with older Eigen
+
+Older Eigen releases have a [C++20 array-comparison bug in LDLT](https://gitlab.com/libeigen/eigen/-/issues/2012).
+It was reproduced locally with unmodified Eigen 3.3.7 and GCC 15: instantiating
+the previous LDLT solve fails because a rewritten equality candidate does not
+return `bool`. The exact installed exao2 Eigen version is still to be reported;
+this is the failure family matching the reported LDLT comparison diagnostic.
+
+The estimator now uses fixed-size `Eigen::LLT<Matrix3d>`. Valid output already
+requires a positive-definite Gram matrix, which is the
+[LLT contract](https://libeigen.gitlab.io/eigen/docs-3.3/classEigen_1_1LLT.html).
+It solves the same `G2*C=Q2` equation with the same window, two right-hand sides,
+conditioning/residual thresholds, units and prediction times. Failed
+factorization is checked before `rcond()`, as required by LLT. Roundoff can
+differ; bit-identical coefficients are not promised. No system Eigen headers,
+repository-wide compiler settings or simulator/DM code are changed.
+
+After applying the reviewed fix to the matching source checkout, a human
+operator can run these commands from the checkout root on exao2. Set the compiler
+to the same GCC 14 executable used for the original build (`g++` here):
+
+```bash
+set -euo pipefail
+accff_cxx=g++
+"$accff_cxx" --version
+pkg-config --modversion eigen3
+make -C apps/accelFFCtrl CXX="$accff_cxx" -W accelFFCtrlModel.hpp
+accff_testbuild=$(mktemp -d /tmp/accelFFCtrl-eigen-fix-XXXXXX)
+make -C apps/accelFFCtrl/tests CXX="$accff_cxx" \
+  BUILD_DIR="$accff_testbuild" test benchmark
+ASAN_OPTIONS=halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
+  make -C apps/accelFFCtrl/tests CXX="$accff_cxx" \
+  BUILD_DIR="${accff_testbuild}-asan" test \
+  CXXFLAGS='-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer'
+```
+
+`-W` forces the app object to rebuild even if copied header timestamps were
+preserved. These commands build/test only; they do not install, launch an app,
+access INDI or open native streams. Preserve the full diagnostic if rebuilding
+fails, and report the Eigen/compiler versions and test totals.
+
+Local compatibility validation passed 18 offline cases / 3,359,793 assertions
+with both Eigen 3.3.7/GCC 15 and Eigen 5.0.1/Clang, plus their sanitizer checks.
+The combined current-Eigen sanitizer suite passed 52 cases / 3,596,391 assertions,
+including existing simulator numerical regressions with mock sinks. Both
+allocation-guarded benchmarks passed without allocations. See the engineering
+plan for compiler-specific test details and numerical parity results; this does
+not substitute for the GCC 14 Linux application rebuild above.
+
 ## Phase 3A: Linux build and private native validation
 
 This phase builds/tests only. It does not install binaries, launch the observer,
@@ -406,7 +455,7 @@ G1 = lambda*G1 + beta*u*u^T
 Q1 = lambda*Q1 + beta*u*[a_x,a_y]
 G2 = lambda*G2 + beta*G1              # newly updated first stages
 Q2 = lambda*Q2 + beta*Q1
-G2*C = Q2                           # fixed 3x3 LDLT, two right-hand sides
+G2*C = Q2                           # fixed 3x3 Cholesky LLT, two right-hand sides
 ```
 
 Each stage has time constant T/2. For uniform intervals, weights are proportional

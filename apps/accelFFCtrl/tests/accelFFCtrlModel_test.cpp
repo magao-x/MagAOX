@@ -208,63 +208,66 @@ TEST_CASE( "accelFFCtrl matched amplitude phase rotation and prediction", "[acce
         }
 }
 
-/** \brief Recursive window matches a separately weighted batch QR, including nonuniform acquisition intervals.
+/** \brief The positive-definite solve matches independent weighted QR at different memories and acquisition intervals.
  * \ingroup accelFFCtrl_unit_test
  */
 TEST_CASE( "accelFFCtrl irregular timestamps and weighted QR oracle", "[accelFFCtrl][numerical]" )
 {
-    const auto config = fineCalibration();
-    for( bool irregular : { false, true } )
-    {
-        harmonicEstimator   estimator( config );
-        constexpr size_t    count = 4000;
-        Eigen::MatrixXd     design( count, 3 ), acceleration( count, 2 );
-        std::vector<double> weight( count );
-        int64_t             time = epoch;
-        for( size_t n = 0; n < count; ++n )
+    for( double memory : { .02, .1 } )
+        for( bool irregular : { false, true } )
         {
-            const int64_t dt = irregular ? 100000 + ( n % 5 ) * 12500 : 125000;
-            if( n )
-                time += dt;
-            const double t = ( time - epoch ) * 1e-9;
-            const auto   value =
-                encode( config,
-                        time,
-                        n,
-                        { .0009 * std::cos( 2 * pi * 28.5 * t + .4 ) + .0002 * std::sin( 2 * pi * 54 * t ),
-                          .0006 * std::sin( 2 * pi * 28.5 * t ) + .0001 } );
-            REQUIRE( estimator.consume( value, time + 50000 ) );
-            design.row( n ) << 1, std::cos( 2 * pi * config.m_frequency * t ),
-                std::sin( 2 * pi * config.m_frequency * t );
+            auto config         = fineCalibration();
+            config.m_memoryTime = memory;
+            CAPTURE( memory, irregular );
+            harmonicEstimator   estimator( config );
+            constexpr size_t    count = 4000;
+            Eigen::MatrixXd     design( count, 3 ), acceleration( count, 2 );
+            std::vector<double> weight( count );
+            int64_t             time = epoch;
+            for( size_t n = 0; n < count; ++n )
+            {
+                const int64_t dt = irregular ? 100000 + ( n % 5 ) * 12500 : 125000;
+                if( n )
+                    time += dt;
+                const double t = ( time - epoch ) * 1e-9;
+                const auto   value =
+                    encode( config,
+                            time,
+                            n,
+                            { .0009 * std::cos( 2 * pi * 28.5 * t + .4 ) + .0002 * std::sin( 2 * pi * 54 * t ),
+                              .0006 * std::sin( 2 * pi * 28.5 * t ) + .0001 } );
+                REQUIRE( estimator.consume( value, time + 50000 ) );
+                design.row( n ) << 1, std::cos( 2 * pi * config.m_frequency * t ),
+                    std::sin( 2 * pi * config.m_frequency * t );
+                for( size_t axis = 0; axis < 2; ++axis )
+                    acceleration( n, axis ) = ( double( value.m_adc[axis] ) - config.m_zero[axis] ) *
+                                              config.m_voltsPerBit[axis] / config.m_sensitivity[axis];
+                weight[n] = -std::expm1( -2 * ( n ? dt * 1e-9 : 1 / config.m_sampleRate ) / config.m_memoryTime );
+            }
+            // The contribution of sample i is beta_i * sum(beta_i..beta_N) * product(lambda_(i+1)..lambda_N).
+            double sum = 0, product = 1;
+            for( size_t n = count; n-- > 0; )
+            {
+                sum += weight[n];
+                const double factor = std::sqrt( weight[n] * sum * product );
+                design.row( n ) *= factor;
+                acceleration.row( n ) *= factor;
+                product *= 1 - weight[n];
+            }
+            const Eigen::Matrix<double, 3, 2> coefficients = design.colPivHouseholderQr().solve( acceleration );
+            const auto                        result       = estimator.predict( time + 50000, time + 1200000 );
+            REQUIRE( result.m_state == estimatorState::ready );
             for( size_t axis = 0; axis < 2; ++axis )
-                acceleration( n, axis ) = ( double( value.m_adc[axis] ) - config.m_zero[axis] ) *
-                                          config.m_voltsPerBit[axis] / config.m_sensitivity[axis];
-            weight[n] = -std::expm1( -2 * ( n ? dt * 1e-9 : 1 / config.m_sampleRate ) / config.m_memoryTime );
+            {
+                REQUIRE( result.m_offset[axis] == Approx( coefficients( 0, axis ) ).margin( 1e-14 ) );
+                REQUIRE( result.m_amplitude[axis] ==
+                         Approx( std::hypot( coefficients( 1, axis ), coefficients( 2, axis ) ) ).epsilon( 1e-10 ) );
+                const double phase = 2 * pi * config.m_frequency * ( ( result.m_targetTimeNs - epoch ) * 1e-9 );
+                REQUIRE( result.m_acceleration[axis] == Approx( coefficients( 1, axis ) * std::cos( phase ) +
+                                                                coefficients( 2, axis ) * std::sin( phase ) )
+                                                            .margin( 1e-14 ) );
+            }
         }
-        // The contribution of sample i is beta_i * sum(beta_i..beta_N) * product(lambda_(i+1)..lambda_N).
-        double sum = 0, product = 1;
-        for( size_t n = count; n-- > 0; )
-        {
-            sum += weight[n];
-            const double factor = std::sqrt( weight[n] * sum * product );
-            design.row( n ) *= factor;
-            acceleration.row( n ) *= factor;
-            product *= 1 - weight[n];
-        }
-        const Eigen::Matrix<double, 3, 2> coefficients = design.colPivHouseholderQr().solve( acceleration );
-        const auto                        result       = estimator.predict( time + 50000, time + 1200000 );
-        REQUIRE( result.m_state == estimatorState::ready );
-        for( size_t axis = 0; axis < 2; ++axis )
-        {
-            REQUIRE( result.m_offset[axis] == Approx( coefficients( 0, axis ) ).margin( 1e-14 ) );
-            REQUIRE( result.m_amplitude[axis] ==
-                     Approx( std::hypot( coefficients( 1, axis ), coefficients( 2, axis ) ) ).epsilon( 1e-10 ) );
-            const double phase = 2 * pi * config.m_frequency * ( ( result.m_targetTimeNs - epoch ) * 1e-9 );
-            REQUIRE( result.m_acceleration[axis] ==
-                     Approx( coefficients( 1, axis ) * std::cos( phase ) + coefficients( 2, axis ) * std::sin( phase ) )
-                         .margin( 1e-14 ) );
-        }
-    }
 }
 
 /** \brief Every buffered sample contributes; duplicates cannot refresh a stopped source or conceal missing records.
@@ -419,12 +422,19 @@ TEST_CASE( "accelFFCtrl numerical faults and clock boundaries", "[accelFFCtrl][n
     REQUIRE_FALSE( estimator.consume( value, value.m_timeNs ) );
     REQUIRE( estimator.state() == estimatorState::numericalFault );
     REQUIRE( estimator.predict( value.m_timeNs ).m_amplitude == std::array<double, 2>{ 0, 0 } );
-    config              = fineCalibration();
-    config.m_memoryTime = 1e-9; // Only one regressor row survives: conditioning must inhibit, not invent a fit.
-    estimator.configure( config );
-    for( uint64_t n = 0; n < 1000; ++n )
-        REQUIRE( estimator.consume( encode( config, n * 125000, n, {} ), n * 125000 ) );
-    REQUIRE( estimator.predict( 999 * 125000 ).m_state == estimatorState::numericalFault );
+    // Rank-deficient and very short positive windows must inhibit without querying a failed LLT's rcond().
+    for( double memory : { 1e-9, 1e-4 } )
+    {
+        config              = fineCalibration();
+        config.m_memoryTime = memory;
+        estimator.configure( config );
+        for( uint64_t n = 0; n < 1000; ++n )
+            REQUIRE( estimator.consume( encode( config, n * 125000, n, {} ), n * 125000 ) );
+        const auto result = estimator.predict( 999 * 125000 );
+        REQUIRE( result.m_state == estimatorState::numericalFault );
+        REQUIRE( result.m_amplitude == std::array<double, 2>{ 0, 0 } );
+        REQUIRE( result.m_pointing == std::array<double, 2>{ 0, 0 } );
+    }
     config                = fineCalibration();
     config.m_predictionNs = 1;
     estimator.configure( config );

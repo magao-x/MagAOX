@@ -1573,3 +1573,106 @@ ABI/metadata compatibility, native restart/wrap correctness and paced delivery
 remain unverified. Live `acc000` timing under RTC load, actual clock/calibration,
 timer-mode timestamp validity and worker RT policy remain later qualifications.
 No DM actuation, simulator disturbance change, merge, commit or push was made.
+
+## GCC 14 / C++20 Eigen LDLT compatibility correction
+
+### Diagnosis and selected workaround
+
+The operator reported a GCC 14 exao2 build failure instantiating
+`Eigen::LDLT<Eigen::Matrix3d>` in `harmonicEstimator::predict`, with a rejected
+comparison in the installed `LDLT.h` near line 372. Work began from clean branch
+`parkertjohnson1/accelSim`, HEAD `a5cae31f`. The exact installed Eigen version/full
+diagnostic was requested but was not available during this local investigation.
+
+[Eigen issue 2012](https://gitlab.com/libeigen/eigen/-/issues/2012) describes the
+matching C++20 failure for Eigen 3.3.7/3.3.8, already observed with GCC 10.2.
+C++20 rewritten equality candidates interact with Eigen's older scalar/array
+overloads; the selected reversed comparison returns an expression instead of
+the required bool. This is not a data-dependent failure of the harmonic fit or
+a reason to lower the language standard for the repository.
+
+Downloaded the unmodified Eigen 3.3.7 release into `/tmp` and reproduced the
+failure locally using GCC 15, `-std=c++20 -fno-fast-math`, without permissive
+compiler flags. The original model fails at `LDLT.h:373` and `:381`, naming
+non-bool rewritten equality candidates. An LLT/solve/rcond probe compiles and
+runs with those same headers/compiler. The local system Eigen remains 5.0.1;
+no installed header or separate worktree was modified.
+
+The targeted source fix replaces the one fixed-size LDLT factorization with
+`Eigen::LLT<Eigen::Matrix3d>`. The accepted Gram matrix was already required to
+be strictly positive definite: LDLT success, positive sign, positive pivots and
+sufficient reciprocal conditioning were prerequisites for valid output.
+[Eigen LLT](https://libeigen.gitlab.io/eigen/docs-3.3/classEigen_1_1LLT.html) supplies
+that positive-definite Cholesky solve without instantiating the broken LDLT
+comparison path. It solves the same two-right-hand-side `G2*C=Q2` system; it
+does not change window statistics, raw decoding, units, oscillator phase,
+warmup, timestamps, horizon, coordinate transform or fault/cleared-output policy.
+
+LLT failure is checked **before** calling `rcond()`, because LLT's condition
+estimate requires a successful factorization. `info()!=Success` inhibits a
+non-positive-definite/rank-deficient fit. The existing finite/rcond threshold
+`1e-8`, coefficient finite checks and residual threshold `1e-10` are retained.
+No regularization, inverse, retuned tolerance or extra per-sample work is added.
+Roundoff-level coefficient changes are expected; this is mathematical/numerical
+equivalence within the tested tolerances, not a bitwise-identity guarantee.
+
+Changed files: `apps/accelFFCtrl/accelFFCtrlModel.hpp`,
+`apps/accelFFCtrl/tests/accelFFCtrlModel_test.cpp`, `apps/accelFFCtrl/README.md`,
+and this plan. No make/compiler configuration changes were needed. Earlier
+phase preservation statements describe their historical work; the user's new
+request explicitly authorizes this local solver/test compatibility correction.
+Simulator, DM, stream/INDI/application code and separate DDSPC worktree remain
+unchanged. All text above Agent Findings and Plan remains unchanged.
+
+### Regression, parity and allocation results
+
+Extended the independent weighted-batch QR oracle to test both 0.02-s and 0.1-s
+memories with uniform/irregular acquisitions. Existing amplitudes, phases,
+offsets and prediction accuracy tolerances are unchanged. Extended the numeric
+fault regression to cover rank-deficient and very short windows, verifying
+cleared numerical-fault output without querying a failed LLT condition estimate.
+
+- Unmodified Eigen 3.3.7 + GCC 15 / C++20 optimized standalone suite:
+  **18 cases / 3,359,793 assertions passed**. Allocation-guarded numerical and
+  input benchmarks also passed with zero C++/Eigen allocations.
+- System Eigen 5.0.1 + Apple Clang / C++20 optimized standalone suite:
+  **18 cases / 3,359,793 assertions passed**, with the same allocation results.
+- Current-Eigen AddressSanitizer/UndefinedBehaviorSanitizer combined executable:
+  **52 cases / 3,596,391 assertions passed**, halt-on-error enabled. This includes
+  all 34 existing accelSim model/disturbance/DM numerical cases compiled with
+  `ACCELSIM_MODEL_ONLY` (mock sinks; no native/physical stream access).
+- Old-Eigen AddressSanitizer/UndefinedBehaviorSanitizer standalone executable:
+  **18 cases / 3,359,793 assertions passed**, halt-on-error enabled. The local
+  GCC installation lacks libasan, so this sanitizer run used Apple Clang. Old
+  Eigen also refers to removed `std::result_of`; this Mac/libc++-only test run
+  enabled `_LIBCPP_ENABLE_CXX20_REMOVED_TYPE_TRAITS` in the command's CXXFLAGS.
+  That flag is not in the repository or the GNU/Linux rebuild instructions.
+  The normal GCC 15/C++20 old-Eigen proof requires no such compatibility flag.
+- Four existing Python PSD validation tests passed. No sanitizer findings.
+
+A separate temporary comparison loads the committed LDLT model under a renamed
+namespace beside the new LLT model, using current Eigen where both compile.
+It feeds identical analytic/noisy quantized ADC records to both over 72
+combinations: f=28/28.5/29 Hz, T=0.02/0.1/0.3/0.8 s, uniform/irregular intervals,
+and seeds 42/123/701. Across **514,614 ready prediction comparisons**, there
+were zero consume-status or estimator-state mismatches. Maximum absolute
+differences were acceleration/amplitude `5.42e-20 m/s^2`, wrapped phase
+`8.88e-16 rad`, pointing `2.07e-25 rad`, offset `1.82e-20 m/s^2`, and rcond
+`3.33e-16`. This comparison is an offline investigation artifact, not a
+second production solver or a simulator input path. It does not establish
+bitwise equivalence or behavior exactly on a floating-point threshold boundary.
+
+### Operator rebuild and remaining limit
+
+README now gives exact human-run commands using the installed Eigen and the
+same GCC 14 compiler as the failed build, forcing recompilation with
+`-W accelFFCtrlModel.hpp`, then fresh-directory numerical tests, benchmarks and
+ASan/UBSan tests. No install, service restart, observer launch, INDI command,
+instrument configuration change or system Eigen edit is part of those commands.
+
+A local full application make was attempted and remains blocked in pre-existing
+macOS framework dependencies (`timegm`, missing installed mxlib
+`mx/math/floatUtils.hpp`) before the app compiles. GCC 14/Linux application
+rebuild confirmation therefore remains with the operator; report the exact
+Eigen/compiler versions and full first diagnostic if another failure occurs.
+No instrument-facing commands, merge, commit or push were performed.

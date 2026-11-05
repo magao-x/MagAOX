@@ -305,10 +305,12 @@ inline prediction harmonicEstimator::predict( int64_t nowNs, int64_t targetNs )
         return fail( estimatorState::invalidRequest, false );
     if( m_lastTimeNs - m_firstTimeNs < m_warmupNs )
         return fail( estimatorState::warming );
-    const Eigen::LDLT<Eigen::Matrix3d> solver( m_gram[1] );
-    const double                       rcond = solver.rcond();
-    if( solver.info() != Eigen::Success || !solver.isPositive() || solver.vectorD().minCoeff() <= 0 ||
-        !std::isfinite( rcond ) || rcond < 1e-8 )
+    // The valid Gram matrix is positive definite; LLT avoids old Eigen's C++20 LDLT comparison overloads.
+    const Eigen::LLT<Eigen::Matrix3d> solver( m_gram[1] );
+    if( solver.info() != Eigen::Success )
+        return fail( estimatorState::numericalFault ); // LLT::rcond() requires a successful factorization.
+    const double rcond = solver.rcond();
+    if( !std::isfinite( rcond ) || rcond < 1e-8 )
         return fail( estimatorState::numericalFault );
     const Eigen::Matrix<double, 3, 2> coefficients = solver.solve( m_moments[1] );
     if( !coefficients.allFinite() ||
