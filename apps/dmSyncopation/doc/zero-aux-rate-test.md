@@ -53,6 +53,9 @@ The installed binary must expose `zero_test.labelVersion=9`,
 `zero_test.targetEndpoint=1` and `zero_test.idealPublisher=1`; an older
 coordinated-trial binary does not have the current progress/reporting interface.
 Only dmSyncopation needs rebuilding.
+The current change from 2 to 6 us admission allowance uses an existing startup
+setting. If the tested metadata-transition fix is already installed, no binary
+rebuild is needed for this change: update the configuration and restart synco.
 The 8 kHz option also requires the updated app's four-step support and capture
 script; the installed logdump and DM controller do not need rebuilding.
 Use the capture helper from the same updated checkout. After the duration and
@@ -150,22 +153,32 @@ are. The changed settings are:
 [zeroTest]
 publicationAdvanceUs=0
 commitLeadUs=0
-lateUs=2
+lateUs=6
 wakeAheadUs=10
 ```
 
 Restart dmSyncopation, leaving enable Off, then start with:
 
 ```bash
-bash apps/dmSyncopation/scripts/capture-zero-aux-test.sh 8000 10 0 10
+bash apps/dmSyncopation/scripts/capture-zero-aux-test.sh 8000 10 0 10 0 6
 ```
 
-The last two arguments verify zero downstream advance and a 10 us early wake;
-they do not change either startup setting. The optional fifth argument verifies
-`commitLeadUs` and defaults to zero. After reviewing the short capture,
-use `8000 120 0 10` for the
-long run. Only dmSyncopation needs rebuilding and restarting; no logdump or DM
-controller change is required.
+Arguments three through six verify zero downstream advance, a 10 us early
+wake, zero commit lead and a 6 us final admission allowance. They do not change
+those startup settings. The optional fifth argument defaults to zero; omitting
+the sixth preserves range-only checking, so supply it for this comparison.
+The helper records expected and actual admission allowances in the capture.
+After reviewing the short capture, use `8000 120 0 10 0 6` for the long run.
+Only synco needs restarting after the configuration edit; the already-tested
+app binary, logdump and DM controller need no change.
+
+The 6 us allowance covers the measured 2.001-5.026 us final-check delays with
+a small margin. It permits a late attempt at the same slot, rather than
+discarding the complete update. It does not delay the next target or permit
+replaying a slot after this allowance. Staging and full early validation still
+must finish by the original dispatch target. The allowance bounds the final
+admission check; preemption inside the publication API can still delay the
+actual counter update afterward.
 
 Each auxiliary counter target is the corresponding frozen main-publication
 grid point. `commitLeadUs` places the final dispatch slightly before that point
@@ -364,7 +377,7 @@ as a hardware IRQ timestamp. `late` at stage `validation` means the full checks
 missed their target, whereas `final_wait` reports a live veto during the quiet
 window and `publication_guard` reports the final deadline check. The
 `validationLate` summary counter is a **subset of `late`**, not another skip
-reason to add to the disjoint outcome totals. The existing 2 us admission grace
+reason to add to the disjoint outcome totals. The configured admission grace
 is not used to excuse validation that finishes after the target.
 
 The separate `zero_phase` INDI property and `[zero_test] kind=phase` text records
@@ -467,8 +480,9 @@ the primary semaphore.
 `T` is the command-ready deadline for this ideal test. Missing reader clearance
 by the deadline skips the slot. A copy that starts or finishes after `T` is
 `preparationLate`, separate from scheduler publication lateness. A completed
-command does not get prepared again at the publication wake. The existing
-`lateUs=5` remains the publication-admission grace after `T`.
+command does not get prepared again at the publication wake. `lateUs` supplies
+the publication-admission grace after `T`: 6 us in the current counter-target
+preset, or 5 us in the no-early-wake comparison.
 
 Expired targets are skipped, never replayed in a catch-up burst. Genuine main
 excursions can cancel conflicting slots without shifting committed targets to
@@ -545,7 +559,7 @@ skip reason to add to `skipped`.
 A late guard event retains the exact rejecting clock sample. A
 timestamp/residual after a successful publication is a completion stamp;
 it can exceed the configured `lateUs` even though the admission checkpoint
-occurred within that limit (5 us for the no-early-wake comparison, 2 us for the
+occurred within that limit (5 us for the no-early-wake comparison, 6 us for the
 counter-target preset).
 
 For example, `action=skipped reason=preparation_late stage=preparation` records a

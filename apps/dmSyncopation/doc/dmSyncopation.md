@@ -1,8 +1,24 @@
 # dmSyncopation user guide
 
-`dmSyncopation` copies auxiliary deformable-mirror contributions into existing dmcomb input channels at a fixed integer subdivision of the main AO-loop period. One instance serves one DM. The initial instance, `dmtweeter_synco`, requests three steps per main cycle: approximately 6 kHz total cadence when the main loop runs at 2 kHz.
+`dmSyncopation` copies auxiliary deformable-mirror contributions into existing dmcomb input channels at a fixed integer subdivision of the main AO-loop period. One instance serves one DM. The historical INDI instance name is `dmtweeter-synco`; its shared-memory stream names use underscores.
 
-The [engineering plan](../../../agents/plans/2026-10/dm-syncopation.md) records settled design decisions; the [debugging record](../../../agents/plans/2026-10/dm-syncopation-debugging.md) records operator trials and local fixes. The trials have not yet established sustained requested cadence, and the measured-acquisition reference changes described here need operator retesting. Initial timing values are starting budgets for qualification, not measured instrument bounds. All live instrument setup, INDI actions and timing measurements are performed by the operator.
+For the continuous, same-host tagged-provider path, start with the
+[production provider guide](production-providers.md). `production.enabled=true`
+uses the qualified counter-publication scheduler, independent producer
+deadlines, exact reader-release evidence and the shared CRTP producer helper.
+The finite constant-zero trials achieved every post-startup auxiliary slot in
+a 120-second 8 kHz run. Changing nonzero inputs and the selected multi-producer
+configuration still require operator qualification.
+
+Unless explicitly identified as production or read-only diagnostics, the
+provider, timing, keepout and acquisition sections below describe the older
+live scheduler selected when `production.enabled` is false. Its version-1
+persistent/latest-complete input contract is different from the production
+version-2 slot-tagged contract. The [engineering plan](../../../agents/plans/2026-10/dm-syncopation.md),
+[counter-publication record](../../../agents/plans/2026-11/dm-syncopation-counter-publication-targets.md)
+and [debugging record](../../../agents/plans/2026-10/dm-syncopation-debugging.md)
+retain design and qualification history. All live instrument setup, INDI
+actions and timing measurements are performed by the operator.
 
 ## Read-only schedule simulation
 
