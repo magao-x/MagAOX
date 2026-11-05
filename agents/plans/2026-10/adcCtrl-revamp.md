@@ -1057,6 +1057,12 @@ Tests were run locally with the adc_sims venv (numpy, scipy, hcipy) and minimal 
 - An invalid `ke_spots` in the config raises at startup, like `loop_sign`.
 - The current filter wheel element is now kept (`_filter_name`), for the capture log in step 3.
 
+**Step 3: control law, set point capture, manual entry and expiry (§9.3).** Added `ke_error`, the `ke_setpoint` and `ke_capture_setpoint` properties, `measure_knife_edge_batch` and `capture_setpoint`, and the knife-edge elements of `measurement`. Three new tests. Notes:
+- **Capture.** It is refused outside knife-edge mode, and in adcLoop or oneshot, where δ1 would move during the capture; idle and measure-only are allowed. It runs from `loop()` and does not write to adctrack.
+- **Star in a batch.** Each frame uses its own star estimate for masking and cutouts, and the batch publishes the median. The plan's "the batch uses the median c" would need two passes over the frames, and the deviations do not depend on the exact star position.
+- **Lock.** A failed frame drops the lock. A capped margin is logged once per lock.
+- `measurement` shows unselected spots as 0, and the knife-edge elements are 0 in standard mode. `ke_sep` is in λ/D at the observing wavelength, to compare with tweeterSpeck's separation.
+
 ### References
 - MagAO-X PAPLC knife-edge mask (reflective D-shaped mirror at ~1.1 λ/D, adjustable IWA): [arXiv:2607.08146](https://arxiv.org/pdf/2607.08146), [arXiv:2303.13719](https://arxiv.org/pdf/2303.13719)
 - Satellite-spot dispersion method: arXiv:2608.10307

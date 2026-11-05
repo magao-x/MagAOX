@@ -794,6 +794,16 @@ def measure_knife_edge(frame, geometry, order, pixel_scale, params=KnifeEdgePara
     return KnifeEdgeMeasurement(raw, dev, m, location, separation, margin, margin < params.edge_margin)
 
 
+def ke_error(m, setpoint, ke_gain):
+    """Knife-edge control law: return `(residual, error)`.
+
+    `residual = wrap90(m - setpoint)` and `error = ke_gain * residual`. The
+    error feeds compute_step exactly like the standard-mode error.
+    """
+    residual = float(wrap90(m - setpoint))
+    return residual, ke_gain * residual
+
+
 def inlier_mask(values, k=3.0):
     """Boolean mask of finite `values` within k robust sigma (1.4826 MAD) of the median."""
     values = np.asarray(values, dtype=float)
@@ -915,6 +925,17 @@ CORONAGRAPHS = {"standard": False, "knife_edge": True}
 # INDI `ke_spots` switch element names, by spot index
 KE_SPOT_ELEMENTS = [f"spot{n}" for n in range(4)]
 
+# Knife-edge elements of the `measurement` property -> key of the batch result
+KE_MEASUREMENT_ELEMENTS = {
+    "ke_m": "m",
+    "ke_residual": "residual",
+    "star_x": "star_x",
+    "star_y": "star_y",
+    "ke_sep": "separation",
+    "ke_angle": "angle",
+    "ke_margin": "margin",
+}
+
 
 def requested_switch(new_message, names):
     """Return the first of `names` switched ON in `new_message`, or None."""
@@ -1003,6 +1024,14 @@ class adcCtrl(XDevice):
         # Last knife-edge spot lock (KnifeEdgeLocation), and the context it is valid for
         self._ke_lock = None
         self._ke_lock_key = None
+        # True once a capped mask margin has been reported for the current lock
+        self._ke_margin_reported = False
+        # Knife-edge set point for m [deg], and the monotonic time it was captured or
+        # entered (None while it is still the config default; it is never saved)
+        self._ke_setpoint = float(self.config.ke_setpoint)
+        self._ke_setpoint_time = None
+        # Set point capture requested by `ke_capture_setpoint`, performed by loop()
+        self._pending_capture = False
 
     def external_devices(self):
         """INDI devices this app reads from or writes to."""
@@ -1122,6 +1151,25 @@ class adcCtrl(XDevice):
         ))
         self.add_property(nv, callback=self.handle_ke_gain)
 
+        nv = properties.NumberVector(name="ke_setpoint")
+        nv.add_element(DefNumber(
+            name="current", label="Knife-edge set point [deg]", format="%.4f",
+            min=-90.0, max=90.0, step=0.0001, _value=self._ke_setpoint
+        ))
+        nv.add_element(DefNumber(
+            name="target", label="Knife-edge set point [deg]", format="%.4f",
+            min=-90.0, max=90.0, step=0.0001, _value=self._ke_setpoint
+        ))
+        self.add_property(nv, callback=self.handle_ke_setpoint)
+
+        sv = properties.SwitchVector(
+            name="ke_capture_setpoint",
+            rule=constants.SwitchRule.ONE_OF_MANY,
+            perm=constants.PropertyPerm.READ_WRITE,
+        )
+        sv.add_element(DefSwitch(name="request", _value=constants.SwitchState.OFF))
+        self.add_property(sv, callback=self.handle_ke_capture)
+
         sv = properties.SwitchVector(
             name="satellite_spots",
             rule=constants.SwitchRule.ONE_OF_MANY,
@@ -1149,7 +1197,8 @@ class adcCtrl(XDevice):
         self.add_property(sv, callback=self.handle_reset)
 
         nv = properties.NumberVector(name="measurement", perm=constants.PropertyPerm.READ_ONLY)
-        for name in ["angle0", "angle1", "angle2", "angle3", "dev0", "dev1", "dev2", "dev3", "pair02", "pair13", "error"]:
+        for name in ["angle0", "angle1", "angle2", "angle3", "dev0", "dev1", "dev2", "dev3", "pair02", "pair13", "error",
+                     *KE_MEASUREMENT_ELEMENTS]:
             nv.add_element(DefNumber(name=name, label=name, format="%.3f", min=-1e6, max=1e6, step=0, _value=0.0))
         nv.add_element(DefNumber(name="n_valid", label="n_valid", format="%i", min=0, max=1000, step=1, _value=0))
         nv.add_element(DefNumber(name="n_total", label="n_total", format="%i", min=0, max=1000, step=1, _value=0))
@@ -1384,6 +1433,55 @@ class adcCtrl(XDevice):
             self.log.info(f"knife-edge gain changed to {self._ke_gain}")
         self.update_property(existing_property)
 
+    def handle_ke_setpoint(self, existing_property, new_message):
+        """INDI callback for `ke_setpoint`: enter the set point by hand (kept until restart)."""
+        if "target" in new_message:
+            self.set_ke_setpoint(float(new_message["target"]))
+            self.log.info(f"knife-edge set point entered: {self._ke_setpoint:.4f} deg")
+        else:
+            self.update_property(existing_property)
+
+    def handle_ke_capture(self, existing_property, new_message):
+        """INDI callback for `ke_capture_setpoint`: queue a set point capture for loop().
+
+        Refused outside knife-edge mode, and in adcLoop or oneshot, where
+        delta_1 would move during the capture.
+        """
+        if "request" in new_message and new_message["request"] == constants.SwitchState.ON:
+            if not self._knife_edge:
+                self.log.warning("set point capture refused: not in knife-edge mode")
+            elif self._state in (States.CLOSED_LOOP, States.ONESHOT):
+                self.log.warning("set point capture refused: go idle or measure-only first")
+            else:
+                self.log.info("knife-edge set point capture requested")
+                self._pending_capture = True
+        existing_property["request"] = constants.SwitchState.OFF
+        self.update_property(existing_property)
+
+    def set_ke_setpoint(self, value):
+        """Set the knife-edge set point [deg], restart its age, and show it in INDI."""
+        self._ke_setpoint = float(value)
+        self._ke_setpoint_time = time.monotonic()
+        prop = self.properties["ke_setpoint"]
+        prop["current"] = self._ke_setpoint
+        prop["target"] = self._ke_setpoint
+        self.update_property(prop)
+
+    def ke_setpoint_age_check(self):
+        """Report (at INFO) a set point that is the config default or older than ke_setpoint_max_age_hr."""
+        if self._ke_setpoint_time is None:
+            self.log.info(
+                f"knife-edge set point {self._ke_setpoint:.4f} deg is the config default, not captured or "
+                f"entered since startup; its age is unknown"
+            )
+            return
+        age_hr = (time.monotonic() - self._ke_setpoint_time) / 3600.0
+        if age_hr > self.config.ke_setpoint_max_age_hr:
+            self.log.info(
+                f"knife-edge set point {self._ke_setpoint:.4f} deg has expired: it is {age_hr:.1f} h old "
+                f"(limit {self.config.ke_setpoint_max_age_hr} h)"
+            )
+
     def ke_selection_checks(self):
         """Report (at INFO, never refuse) selected spots in the blocked half or a low sensitivity."""
         angle = self.spot_geometry().angle
@@ -1399,6 +1497,7 @@ class adcCtrl(XDevice):
 
     def ke_mode_checks(self):
         """Checks reported on entering knife-edge mode."""
+        self.ke_setpoint_age_check()
         self.ke_selection_checks()
 
     def handle_reset(self, existing_property, new_message):
@@ -1586,17 +1685,152 @@ class adcCtrl(XDevice):
         return result
 
     def publish_measurement(self, result):
-        """Show a measurement result in the measurement property and telemetry."""
+        """Show a measurement result in the measurement property.
+
+        Spots not measured (NaN, in knife-edge mode) are shown as 0. The
+        knife-edge elements are 0 in standard mode.
+        """
+        def finite(value):
+            value = float(value)
+            return value if np.isfinite(value) else 0.0
+
         prop = self.properties["measurement"]
         for n in range(4):
-            prop[f"angle{n}"] = float(result["raw"][n])
-            prop[f"dev{n}"] = float(result["dev"][n])
+            prop[f"angle{n}"] = finite(result["raw"][n])
+            prop[f"dev{n}"] = finite(result["dev"][n])
         prop["pair02"] = float(result["pairs"][0])
         prop["pair13"] = float(result["pairs"][1])
         prop["error"] = result["error"]
+        star = result.get("star", (0.0, 0.0))
+        values = {**result, "star_x": star[0], "star_y": star[1]}
+        for name, key in KE_MEASUREMENT_ELEMENTS.items():
+            prop[name] = finite(values.get(key, 0.0))
         prop["n_valid"] = result["n_valid"]
         prop["n_total"] = result["n_total"]
         self.update_property(prop)
+
+    def ke_params(self):
+        """Knife-edge search and mask tuning from the configuration."""
+        c = self.config
+        return KnifeEdgeParams(
+            edge_margin=c.ke_edge_margin,
+            spot_clearance=c.ke_spot_clearance,
+            pair_tolerance=c.ke_pair_tolerance,
+            max_star_jump=c.ke_max_star_jump,
+            track_box=c.ke_track_box,
+            highpass=c.ke_highpass,
+            hint_tolerance=c.ke_hint_tolerance,
+            brightness_ratio=c.ke_brightness_ratio,
+        )
+
+    def ke_lock_key(self):
+        """Context a knife-edge spot lock is valid for; the lock is dropped when it changes."""
+        return (self._camera_name, self._normalized_wavelength, self._use_sparkles,
+                self._sparkle_freq, self._sparkle_angle)
+
+    def ke_update_lock(self, location):
+        """Keep `location` as the spot lock, keeping positions of spots it does not include."""
+        if self._ke_lock is not None:
+            location = location._replace(positions={**self._ke_lock.positions, **location.positions})
+        self._ke_lock = location
+
+    def measure_knife_edge_batch(self):
+        """Measure the knife-edge quantity m over `no_measurements` images.
+
+        Returns a dict of averaged results (see measure_dispersion, plus m,
+        residual, setpoint and the star estimate), or None if the batch was
+        aborted or had too few valid measurements. Outliers are rejected on m.
+        """
+        start_state = self._state
+        geometry = self.spot_geometry()
+        order = self._ke_order
+        params = self.ke_params()
+        hint = self.config.cameras[self._camera_name].ke_star_hint or None
+        key = self.ke_lock_key()
+        if key != self._ke_lock_key:
+            self._ke_lock = None
+            self._ke_lock_key = key
+        n_total = self._no_measurements
+        measurements = []
+
+        for k in range(n_total):
+            if self._state != start_state:
+                self.log.info("state changed, measurement batch aborted")
+                return None
+            try:
+                frame = self.grab_frame()
+                meas = measure_knife_edge(
+                    frame, geometry, order, self.config.pixel_scale_lod, params, prev=self._ke_lock,
+                    star_hint=hint, pad=self.config.pad, radial_bin=self.config.radial_bin,
+                )
+                if not np.isfinite(meas.m):
+                    raise ValueError("non-finite knife-edge measurement")
+            except Exception as e:
+                self._ke_lock = None
+                self.log.warning(f"measurement {k + 1}/{n_total} failed: {e}")
+                continue
+            if meas.location.method != "tracked":
+                self._ke_margin_reported = False
+            if meas.margin_capped and not self._ke_margin_reported:
+                self._ke_margin_reported = True
+                self.log.info(
+                    f"knife-edge mask margin lowered to {meas.margin:.2f} l/D to stay "
+                    f"{self.config.ke_spot_clearance} l/D below the selected spots"
+                )
+            self.ke_update_lock(meas.location)
+            self.log.debug(f"knife-edge angles: {meas.raw}, deviations: {meas.dev}, m: {meas.m}, star: {meas.location.star}")
+            measurements.append(meas)
+
+        ms = np.array([meas.m for meas in measurements])
+        mask = inlier_mask(ms, self.config.outlier_k) if len(ms) else np.zeros(0, dtype=bool)
+        n_valid = int(np.sum(mask))
+        if n_total == 0 or n_valid / n_total < self.config.min_valid_fraction:
+            self.log.warning(f"only {n_valid}/{n_total} valid measurements")
+            return None
+
+        kept = [meas for meas, ok in zip(measurements, mask) if ok]
+        m = float(np.mean(ms[mask]))
+        residual, error = ke_error(m, self._ke_setpoint, self._ke_gain)
+        result = {
+            "raw": np.mean([meas.raw for meas in kept], axis=0),
+            "dev": np.mean([meas.dev for meas in kept], axis=0),
+            "pairs": np.zeros(2),
+            "error": error,
+            "n_valid": n_valid,
+            "n_total": n_total,
+            "m": m,
+            "residual": residual,
+            "setpoint": self._ke_setpoint,
+            "star": np.median([meas.location.star for meas in kept], axis=0),
+            "separation": float(np.median([meas.separation for meas in kept])) / self._normalized_wavelength,
+            "angle": float(np.median([meas.location.angle for meas in kept])),
+            "margin": float(np.median([meas.margin for meas in kept])),
+        }
+        self.publish_measurement(result)
+        return result
+
+    def capture_setpoint(self):
+        """Run one knife-edge batch and use its mean m as the set point."""
+        self._pending_capture = False
+        if not self._knife_edge:
+            self.log.warning("set point capture cancelled: not in knife-edge mode")
+            return
+        if self.camera is None and not self.retry_camera():
+            self.set_error("set point capture failed: camera unavailable")
+            return
+        self.check_indi_props()
+        result = self.measure_knife_edge_batch()
+        if result is None:
+            self.set_error("set point capture failed: no valid measurement")
+            return
+        self.set_ke_setpoint(result["m"])
+        self.log.info(
+            f"captured knife-edge set point {self._ke_setpoint:.4f} deg at delta_1 = {self.delta_1:.4f} deg "
+            f"(camera {self._camera_name}, filter {self._filter_name}, spots {list(self._ke_order)}, "
+            f"{result['n_valid']}/{result['n_total']} valid); set ke_setpoint = {self._ke_setpoint:.4f} in the "
+            f"config to keep it after a restart"
+        )
+        self.set_status(last_command="set point captured")
 
     def cycle_failed(self, message):
         """Record a failed cycle; drop to idle after too many in closed loop."""
@@ -1659,6 +1893,8 @@ class adcCtrl(XDevice):
         """
         try:
             self.apply_pending()
+            if self._pending_capture:
+                self.capture_setpoint()
             if self._state == States.IDLE:
                 if self.camera is None:
                     self.retry_camera()

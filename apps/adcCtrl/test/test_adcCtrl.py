@@ -962,3 +962,63 @@ def test_ke_gain_default_and_handler():
     send(dev, "ke_gain", target=-1.5)
     assert dev._ke_gain == -1.5
     assert dev.properties["ke_gain"]["current"] == -1.5
+
+
+def test_ke_error_wraps_residual():
+    """The set point is subtracted with a wrap at +-90 deg, then scaled by ke_gain."""
+    residual, error = app_module.ke_error(89.0, -89.0, 2.0)
+    assert abs(residual + 2.0) < 1e-12 and abs(error + 4.0) < 1e-12
+    residual, error = app_module.ke_error(0.5, 0.2, -0.62)
+    assert abs(residual - 0.3) < 1e-12 and abs(error + 0.186) < 1e-12
+
+
+def test_ke_setpoint_manual_entry_and_expiry():
+    """Entering knife-edge mode reports a config-default or expired set point; a manual entry restarts its age."""
+    dev, handler = recording_device("adcCtrl-test-ke-age", client=ke_client(), ke_setpoint=0.25)
+    assert dev._ke_setpoint == 0.25 and dev.properties["ke_setpoint"]["current"] == 0.25
+    send(dev, "coronagraph", knife_edge=ON)
+    assert len(messages(handler, logging.INFO, "config default")) == 1
+
+    send(dev, "ke_setpoint", target=0.4)
+    assert dev._ke_setpoint == 0.4
+    assert dev.properties["ke_setpoint"]["current"] == 0.4
+    send(dev, "coronagraph", standard=ON)
+    send(dev, "coronagraph", knife_edge=ON)
+    assert len(messages(handler, logging.INFO, "expired")) == 0
+    assert len(messages(handler, logging.INFO, "config default")) == 1
+
+    dev._ke_setpoint_time -= 25 * 3600
+    send(dev, "coronagraph", standard=ON)
+    send(dev, "coronagraph", knife_edge=ON)
+    assert len(messages(handler, logging.INFO, "expired")) == 1
+
+
+def test_ke_capture_sets_batch_mean():
+    """A capture runs one batch from loop() and sets the set point to its mean m; it is refused when not allowed."""
+    frame = make_ke_frame(dispersion=(0.0, 0.4))
+    dev, handler = recording_device("adcCtrl-test-ke-capture", client=ke_client(), camera=FakeCamera(frame))
+    dev._no_measurements = 3
+
+    send(dev, "ke_capture_setpoint", request=ON)  # standard mode
+    assert not dev._pending_capture
+    send(dev, "coronagraph", knife_edge=ON)
+    send(dev, "state", adcLoop=ON)
+    send(dev, "ke_capture_setpoint", request=ON)  # closed loop
+    assert not dev._pending_capture
+    assert len(messages(handler, logging.WARNING, "capture refused")) == 2
+    send(dev, "state", idle=ON)
+
+    send(dev, "ke_capture_setpoint", request=ON)
+    assert dev._pending_capture
+    assert dev.properties["ke_capture_setpoint"]["request"] == OFF
+    dev.loop()
+    expected = measure_knife_edge(frame, ke_geometry(), (0, 3), PIXEL_SCALE).m
+    assert abs(dev._ke_setpoint - expected) < 1e-6
+    assert abs(dev._ke_setpoint) > 0.2  # dispersion makes it clearly non-zero
+    assert dev.properties["ke_setpoint"]["current"] == dev._ke_setpoint
+    assert dev._ke_setpoint_time is not None
+    assert len(dev.camera.calls) == 3
+    assert dev.client.adc_writes() == []
+    assert len(messages(handler, logging.INFO, "captured knife-edge set point")) == 1
+    assert dev.properties["measurement"]["ke_m"] == dev._ke_setpoint
+    assert dev.properties["measurement"]["angle1"] == 0.0
