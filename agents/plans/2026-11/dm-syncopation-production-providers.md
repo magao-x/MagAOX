@@ -613,3 +613,24 @@ placement, dmcomb behavior, an 8 kHz sparkle setup, and the distinction between
 zero transport submission and actual destination clearing. CPU assignments and
 rates remain setup-specific. Retain the capture limitations and inter-capture
 overload observations above in the review description.
+
+## 2026-11-05: restore circular-buffer header compatibility after merge
+
+The first reported full build of merged dev (`45fc8a42`) fails in baslerCtrl:
+`mx::sigproc::circularBufferIndex` is undeclared. The framegrabber timing
+refactor removed `<mx/sigproc/circularBuffer.hpp>` after replacing its internal
+buffers, but baslerCtrl, psfFit and refRMS still receive those declarations
+through the shared app headers. modalFilter and modalPSDs include it directly.
+
+Restore the existing include in frameGrabber rather than change the three
+applications or their temperature/statistics behavior. The functional fix is
+one include line. clang-format verification and `git diff --check` pass.
+
+Reproduce the same missing-namespace failure with an ordinary refRMS build
+before the change, then successfully compile/link refRMS and psfFit afterward.
+Logs are `/tmp/framegrabber-include-refRMS-before.log`,
+`/tmp/framegrabber-include-refRMS-after.log` and
+`/tmp/framegrabber-include-psfFit-build.log`. The workstation lacks the Basler
+Pylon SDK, so a complete baslerCtrl build remains an operator-side check. The
+reported Pylon deprecated-copy warnings are distinct from the missing type.
+All validation is local to `mx11`, without instrument access.
