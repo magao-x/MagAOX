@@ -101,6 +101,42 @@ resource acquisition. The protocol does not provide live geometry migration.
 
 ## Configuration
 
+Rebuild/install `libMagAOX`, the DM controller, `dmSyncopation`, `dmSpeckle` and
+`logdump` from this revision before deployment. On the instrument, `teldump`
+is an alias for `logdump --dir=/opt/MagAOX/telem --ext=.bintel`, not a separate
+reader to build. Restart the affected applications through the normal operator
+procedure after installing their instance configurations.
+
+The tested 8 kHz setup uses the BMC controller's full
+[preparation / SDK / post pipeline](../../bmcCtrl/doc/sdk-worker.md#full-preparation--sdk--post-pipeline),
+with distinct isolated cores for the monitor, SDK worker, post worker, synco
+and release observer. Its controller configuration includes:
+
+```ini
+[sdk]
+workerEnabled=true
+threadPrio=55
+cpuset=spare56
+pipelineEnabled=true
+pipelineThreadPrio=30
+pipelineCpuset=spare31
+pipelineResultStream=dmtweeter_sdk_done
+
+[dm]
+completionStream=dmtweeter_done
+readerReleaseStream=dmtweeter_read_done
+```
+
+These cpuset names are assignments in the tested RTC configuration, not portable
+defaults. Select available dedicated cores and verify actual thread scheduling
+and affinity on another host. Configure synco's primary/combined streams for
+the real command path (`shmimMonitor.shmimName=dm01disp03` and
+`streams.combined=dm01disp` in this example). dmcomb must react to the auxiliary
+counter publications as well as the main writer. The tested configuration is
+mode 4 / DELAY with a 5 us delay; mode 3 waiting only on the primary stream will
+not provide the auxiliary combinations. RTC latency tuning was On in the
+instrument timing tests. Requalify rates on other hardware or scheduling setups.
+
 Merge the [production preset](../dmtweeter_synco_production.conf) into the working
 instance configuration. Preserve
 the actual primary/combined names, observer CPU placement and controller
@@ -110,7 +146,7 @@ if those sections remain in the file.
 ```ini
 [production]
 enabled=true
-readyLeadUs=50
+readyLeadUs=70
 step0LeadUs=20
 
 [zeroTest]
@@ -126,7 +162,7 @@ maxSubframes=4
 maxCadenceHz=8000
 
 [streams]
-destinations=dm01disp07,dm01disp08
+destinations=dm01disp07,dm01disp08,dm01disp09,dm01disp10
 timing=dmtweeter_synco_timing
 
 [readerReleaseMonitor]
@@ -136,13 +172,27 @@ cpuset=spare57
 ```
 
 The input-ready and passive-copy leads are preparation budgets, independent of
-the publication target. Measure complete snapshot/copy work for the configured
+the publication target. The tested four-channel setup uses 70/20 us, leaving
+50 us between the producer cutoff and passive-copy completion cutoff. The
+compiled input-ready default is 50 us; its 30 us preparation window was too
+short for this mapping. Measure complete snapshot/copy work for the configured
 geometry and number of mappings when qualifying a new setup.
 
 For managed dmSpeckle, configure its DM channel as the mapped auxiliary source
 and set the shared timing stream:
 
 ```ini
+[modulator]
+opMode=sparkle
+cpuset=tweeterSpeck
+
+[dm]
+channelName=dm01disp09_aux
+trigger=off
+frequency=8000
+dwell=1
+amp=0.01
+
 [syncopation]
 timingStream=dmtweeter_synco_timing
 writeLeadUs=50
@@ -152,7 +202,25 @@ The existing dmSpeckle channel/modulation configuration selects its source and
 waveform. Managed mode does not independently trigger a main channel. Its
 target-time waveform calculation remains in dmSpeckle; schedule validation,
 buffer ownership and tagged publication are handled by the CRTP helper.
-An empty timing-stream setting preserves legacy dmSpeckle operation.
+An empty timing-stream setting preserves legacy dmSpeckle operation. There is
+no `opMode=managed` setting: use `sparkle`, `arbcube` or `tiptilt` with a nonempty
+timing stream. The source must end in `_aux` and its corresponding destination
+must appear in synco's mapping list.
+
+For sparkle and arbitrary cubes, `frequency/dwell` is the plane-advance rate,
+independent of synco's slot rate. At 8000/dwell 1, a four-plane sparkle advances
+every nominal 125 us slot and repeats its full pattern at 2 kHz. At 2000/dwell 1,
+it typically repeats each plane across four 8 kHz slots. In `tiptilt` mode,
+`frequency` instead sets the physical vibration frequency of each axis.
+
+Start synco before the producer so the shared sources and protocol records
+exist. Both start disabled. After verifying the configuration and resource
+readbacks, the operator enables continuous scheduling and then modulation:
+
+```bash
+setINDI -s dmtweeter-synco.enable.toggle=On
+setINDI -s tweeterSpeck.modulating.toggle=On
+```
 
 The [vibration example](../../dmSpeckle/dmtweeter_vibration.conf) selects
 `dm01disp07_aux`, a 200 Hz quadrature tip/tilt waveform and a separate producer
@@ -160,6 +228,19 @@ cpuset. Use small, operator-approved amplitudes when qualifying changing inputs.
 Turning modulation off retains the contribution. A managed zero request queues
 a tagged zero command for a future valid slot; it does not write the source
 around an outstanding transport commitment.
+
+To remove that producer's contribution, stop modulation and request zero while
+leaving synco enabled so it can accept and copy the queued zero:
+
+```bash
+setINDI -s tweeterSpeck.modulating.toggle=Off
+setINDI -s tweeterSpeck.zero.request=On
+```
+
+Confirm that the numbered destination contains the zero contribution before
+disabling synco or stopping either application. A "zero submitted" log confirms
+transport submission, not destination application. Stopping either application
+alone does not remove the last copied contribution.
 
 ## Adding another producer application
 
@@ -174,6 +255,7 @@ In that one publishing thread:
 
 ```cpp
 synco::Request request;
+
 if( dmSyncopationProducerT::syncopationPoll( request, source ) == 1 )
 {
     // Compute the full contribution for request.targetNs into private pixels.
