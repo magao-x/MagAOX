@@ -423,8 +423,10 @@ class ocam2KCtrl : public MagAOXApp<>,
 
     /// Implementation of the framegrabber acquireAndCheckValid interface
     /** Calls edtCamera::pdvAcquire, then analyzes the OCAM generated framenumber for skips and corruption.
+     * Invalid acquisitions request recovery unless power is known to be off or switching off.
      *
      * \returns 0 on success
+     * \returns 1 for a rejected frame with recovery requested
      * \returns -1 on error
      */
     int acquireAndCheckValid();
@@ -2380,10 +2382,13 @@ inline int ocam2KCtrl::acquireAndCheckValid()
     {
         edtCamera<ocam2KCtrl>::pdvFinishAcquisition( false );
 
-        if( powerState() != 1 || powerStateTarget() != 1 )
+        // Only a known power-off skips recovery; an unknown target must not rerun configuration on a failed device.
+        if( powerState() == 0 || powerStateTarget() == 0 )
         {
             return -1;
         }
+
+        log<text_log>( "acquisition failed, requesting recovery", logPrio::LOG_ERROR );
 
         m_lastImageNumber = -1;
         requestAcquisitionRecovery();
@@ -2422,7 +2427,7 @@ inline int ocam2KCtrl::acquireAndCheckValid()
         }
         else // but if it's any bigger or < 0, it's probably garbage
         {
-            if( powerState() != 1 || powerStateTarget() != 1 )
+            if( powerState() == 0 || powerStateTarget() == 0 )
             {
                 return -1;
             }
