@@ -72,6 +72,11 @@ $ less tests/results/latest/run.log
  * \ingroup unit_test
  */
 
+/** \defgroup loPredCtrlAcc_unit_test loPredCtrlAcc Numerical Unit Tests
+ * \brief Independent offline DDSPC history, identification, and control-law tests.
+ * \ingroup application_unit_test
+ */
+
 /** \page page_test_coverage Test Coverage Report
  * \ingroup testing
 

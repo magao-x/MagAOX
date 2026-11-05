@@ -1,0 +1,32 @@
+# Standalone numerical tests: no MagAOX application, ImageStreamIO, or hardware libraries.
+# Run from apps/loPredCtrlAcc: make -f tests/Makefile.offline check
+APP_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/..)
+TEST_DIR := $(APP_DIR)/tests
+ROOT_DIR := $(abspath $(APP_DIR)/../..)
+BUILD_DIR ?= $(APP_DIR)/build/offline
+CXX = c++
+DEPENDENCY_INCLUDES := $(shell pkg-config --cflags-only-I eigen3 mxlib)
+CPPFLAGS += $(DEPENDENCY_INCLUDES) -DEIGEN_DONT_PARALLELIZE
+CXXFLAGS ?= -O2 -g
+CXXFLAGS += -std=c++20 -Wall -Wextra -fno-fast-math
+SOURCES := $(ROOT_DIR)/tests/testMain.cpp $(APP_DIR)/ar_controller.cpp \
+           $(APP_DIR)/recursive_least_squares.cpp $(APP_DIR)/qrd_rls.cpp $(APP_DIR)/utils.cpp \
+           $(wildcard $(TEST_DIR)/ddspc_*_test.cpp)
+OBJECTS := $(addprefix $(BUILD_DIR)/,$(notdir $(SOURCES:.cpp=.o)))
+VPATH := $(sort $(dir $(SOURCES)))
+TARGET := $(BUILD_DIR)/ddspc_offline_test
+
+.PHONY: all check
+all: $(TARGET)
+
+check: $(TARGET)
+	$(TARGET) --durations yes
+
+$(TARGET): $(OBJECTS)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) $^ $(LDLIBS) -o $@
+
+$(BUILD_DIR)/%.o: %.cpp
+	@mkdir -p $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -MMD -MP -c $< -o $@
+
+-include $(OBJECTS:.o=.d)
