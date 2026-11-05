@@ -584,3 +584,32 @@ Logs are `/tmp/dm-syncopation-pr-scheduler-final-build.log` and
 `/tmp/dm-syncopation-pr-scheduler-final-run.log`. clang-format verification and
 the working-tree whitespace check pass. The change affects status reporting;
 the qualified scheduling policy is retained.
+
+The standard test list omitted six implemented suites: pipeline timing,
+pipeline integration, saturation accumulation, the producer helper, pipeline
+telemetry and the pipeline simulator. Register them in their existing library,
+logger and application groups. All 26 newly added C++ test files on this branch
+are now included in the standard test list.
+
+Fresh optimized builds/runs of the producer, dmSpeckle, mock-SDK BMC controller,
+monitor timing, pipeline timing/integration, saturation, pipeline telemetry,
+pipeline simulation, synco telemetry and logdump suites pass **140 cases /
+11,987 assertions** in total. Together with the scheduler this readiness run
+covers **294 cases / 6,646,340 assertions**. The C++ build/run manifest is
+`/tmp/dm-syncopation-pr-results.json`; scheduler logs are listed above. All
+builds are serialized, and the tests use workstation-local private streams or
+software SDK stubs without instrument access.
+
+Python helper suites pass **56 finite-trial capture tests**, **31 camera-capture
+tests** and **22 EDT-probe tests**. Logs are
+`/tmp/dm-syncopation-pr-capture-tests.log`,
+`/tmp/pr-scope-camera-capture-test.log` and
+`/tmp/pr-scope-edt-probes-test.log`. Normal builds of dmSyncopation, dmSpeckle
+and logdump also pass; their logs are in the C++ manifest.
+
+For deployment, update the production preset and guide to the measured four
+destinations and 70/20 us leads. Document required rebuilds, BMC worker/post
+placement, dmcomb behavior, an 8 kHz sparkle setup, and the distinction between
+zero transport submission and actual destination clearing. CPU assignments and
+rates remain setup-specific. Retain the capture limitations and inter-capture
+overload observations above in the review description.
