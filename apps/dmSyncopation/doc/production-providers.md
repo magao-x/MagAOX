@@ -116,10 +116,10 @@ and release observer. Its controller configuration includes:
 [sdk]
 workerEnabled=true
 threadPrio=55
-cpuset=spare56
+cpuset=dmtweeter-sdk
 pipelineEnabled=true
 pipelineThreadPrio=30
-pipelineCpuset=spare31
+pipelineCpuset=dmtweeter-post
 pipelineResultStream=dmtweeter_sdk_done
 
 [dm]
@@ -127,9 +127,11 @@ completionStream=dmtweeter_done
 readerReleaseStream=dmtweeter_read_done
 ```
 
-These cpuset names are assignments in the tested RTC configuration, not portable
-defaults. Select available dedicated cores and verify actual thread scheduling
-and affinity on another host. Configure synco's primary/combined streams for
+These cpuset names are the current RTC assignments, not portable defaults.
+They place the SDK and post workers (CPU42/44) in the tweeter monitor's L3
+domain; the 8 kHz tests used CPU56/31 for those workers. The release observer
+remains on CPU57. Select available dedicated cores and verify actual thread
+scheduling and affinity on another host. Configure synco's primary/combined streams for
 the real command path (`shmimMonitor.shmimName=dm01disp03` and
 `streams.combined=dm01disp` in this example). dmcomb must react to the auxiliary
 counter publications as well as the main writer. The tested configuration is
@@ -168,7 +170,7 @@ timing=dmtweeter_synco_timing
 [readerReleaseMonitor]
 shmimName=dmtweeter_read_done
 threadPrio=30
-cpuset=spare57
+cpuset=dmtweeter-synco-release
 ```
 
 The input-ready and passive-copy leads are preparation budgets, independent of
