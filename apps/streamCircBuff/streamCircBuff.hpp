@@ -76,7 +76,13 @@ class streamCircBuff : public MagAOXApp<true>,
 
     bool m_toFloat{ false }; ///< Convert the output to float, for readers such as modalPSDs which require it.
 
-    float m_fpsTol{ 0.01 }; ///< Fractional change in the measured source frame rate needed to update fps.
+    std::string m_fpsDevice; ///< Device providing the frame rate.  If empty, the source frame rate is measured.
+
+    std::string m_fpsProperty{ "fps" }; ///< Property providing the frame rate.
+
+    std::string m_fpsElement{ "current" }; ///< Element providing the frame rate.
+
+    float m_fpsTol{ 0.01 }; ///< Fractional change in the frame rate needed to update fps.
 
     ///@}
 
@@ -109,13 +115,20 @@ class streamCircBuff : public MagAOXApp<true>,
 
     float ( *pixget )( void *, size_t ){ nullptr }; ///< Converts a staged source pixel to float when m_toFloat is set.
 
-    std::atomic<float> m_fps{ 0 }; ///< Measured source frame rate, 0 until the first measurement.
+    std::atomic<float> m_fps{ 0 }; ///< Source frame rate, from the fps device or measured, 0 until known.
 
     timespec m_fpsAtime{ 0, 0 }; ///< Source acquisition time at the start of the current rate measurement (sm thread).
 
     uint64_t m_fpsCnt0{ 0 }; ///< Source frame counter at the start of the current rate measurement (sm thread).
 
-    pcf::IndiProperty m_indiP_fps; ///< The measured source frame rate, as fps.current.
+    pcf::IndiProperty m_indiP_fps; ///< The source frame rate, as fps.current.
+
+    pcf::IndiProperty m_indiP_fpsSource; ///< The frame rate property of the fps device.
+
+  public:
+    INDI_SETCALLBACK_DECL( streamCircBuff, m_indiP_fpsSource );
+
+  protected:
 
   public:
     /// Default c'tor.
@@ -199,7 +212,7 @@ class streamCircBuff : public MagAOXApp<true>,
 
     /// Implementation of the framegrabber fps interface
     /**
-     * \returns the measured source frame rate, or 0 before the first measurement
+     * \returns the source frame rate, from the fps device or measured, or 0 before it is known
      */
     float fps()
     {
@@ -295,6 +308,36 @@ void streamCircBuff::setupConfig()
                 "bool",
                 "Convert the output to float, e.g. for modalPSDs.  Default is false, keeping the source data type." );
 
+    config.add( "circBuff.fpsDevice",
+                "",
+                "circBuff.fpsDevice",
+                argType::Required,
+                "circBuff",
+                "fpsDevice",
+                false,
+                "string",
+                "Device providing the frame rate.  If not set, the source frame rate is measured." );
+
+    config.add( "circBuff.fpsProperty",
+                "",
+                "circBuff.fpsProperty",
+                argType::Required,
+                "circBuff",
+                "fpsProperty",
+                false,
+                "string",
+                "Property providing the frame rate.  Default is 'fps'." );
+
+    config.add( "circBuff.fpsElement",
+                "",
+                "circBuff.fpsElement",
+                argType::Required,
+                "circBuff",
+                "fpsElement",
+                false,
+                "string",
+                "Element providing the frame rate.  Default is 'current'." );
+
     config.add( "circBuff.fpsTol",
                 "",
                 "circBuff.fpsTol",
@@ -303,7 +346,7 @@ void streamCircBuff::setupConfig()
                 "fpsTol",
                 false,
                 "float",
-                "Fractional change in the measured source frame rate needed to update fps.  Default is 0.01." );
+                "Fractional change in the frame rate needed to update fps.  Default is 0.01." );
 }
 
 int streamCircBuff::loadConfigImpl( mx::app::appConfigurator &_config )
@@ -315,6 +358,9 @@ int streamCircBuff::loadConfigImpl( mx::app::appConfigurator &_config )
     TELEMETER_LOAD_CONFIG( config );
 
     _config( m_toFloat, "circBuff.toFloat" );
+    _config( m_fpsDevice, "circBuff.fpsDevice" );
+    _config( m_fpsProperty, "circBuff.fpsProperty" );
+    _config( m_fpsElement, "circBuff.fpsElement" );
     _config( m_fpsTol, "circBuff.fpsTol" );
 
     return 0;
@@ -342,6 +388,11 @@ int streamCircBuff::appStartup()
     CREATE_REG_INDI_RO_NUMBER( m_indiP_fps, "fps", "Source Frame Rate", "Circular Buffer" );
     m_indiP_fps.add( pcf::IndiElement( "current" ) );
     m_indiP_fps["current"] = 0;
+
+    if( m_fpsDevice != "" )
+    {
+        REG_INDI_SETPROP( m_indiP_fpsSource, m_fpsDevice, m_fpsProperty );
+    }
 
     state( stateCodes::OPERATING );
 
@@ -446,7 +497,10 @@ int streamCircBuff::processImage( void *curr_src, const dev::shmimT &dummy )
 
         m_stagedFresh = true;
 
-        measureFPS( m_stagedAtime, m_stagedCnt0 );
+        if( m_fpsDevice == "" )
+        {
+            measureFPS( m_stagedAtime, m_stagedCnt0 );
+        }
     }
 
     // Now tell the f.g. to get going
@@ -586,6 +640,25 @@ int streamCircBuff::frameGrabberRelayTiming( timespec &writetime, uint64_t &cnt0
     }
 
     cnt0 = m_relayCnt0 + m_cnt0Offset;
+
+    return 0;
+}
+
+INDI_SETCALLBACK_DEFN( streamCircBuff, m_indiP_fpsSource )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_fpsSource, ipRecv );
+
+    if( ipRecv.find( m_fpsElement ) != true ) // this isn't valid
+    {
+        return 0;
+    }
+
+    float fps = ipRecv[m_fpsElement].get<float>();
+
+    if( std::fabs( fps - m_fps ) > m_fpsTol * fps )
+    {
+        m_fps = fps;
+    }
 
     return 0;
 }

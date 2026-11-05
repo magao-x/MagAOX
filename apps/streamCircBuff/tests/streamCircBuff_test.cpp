@@ -27,7 +27,11 @@ class streamCircBuff_test : public streamCircBuff
 
     using streamCircBuff::m_currImageTimestamp;
 
+    using streamCircBuff::m_fpsDevice;
+
     using streamCircBuff::m_fpsTol;
+
+    using streamCircBuff::m_indiP_fpsSource;
 
     using streamCircBuff::m_rewritten;
 
@@ -379,6 +383,53 @@ TEST_CASE( "streamCircBuff measures the source frame rate", "[streamCircBuff]" )
     cnt0 = 1;
     app.feed( 700, 1, 2e-3, cnt0, t );
     REQUIRE( app.fps() == Approx( 500 ).epsilon( 1e-3 ) );
+}
+
+/// With an fps device the frame rate follows its property within the tolerance, and is not measured.
+/**
+ * \ingroup streamCircBuff_unit_test
+ */
+TEST_CASE( "streamCircBuff reports the frame rate of an fps device", "[streamCircBuff]" )
+{
+    // clang-format off
+    #ifdef STREAMCIRCBUFF_TEST_DOXYGEN_REF
+    MagAOX::app::streamCircBuff::setCallBack_m_indiP_fpsSource;
+    MagAOX::app::streamCircBuff::processImage;
+    #endif
+    // clang-format on
+
+    streamCircBuff_test app;
+    app.m_fpsDevice = "camwfs";
+    app.m_indiP_fpsSource.setDevice( "camwfs" );
+    app.m_indiP_fpsSource.setName( "fps" );
+    REQUIRE( app.source( 1 ) == 0 );
+
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
+    ip.setDevice( "camwfs" );
+    ip.setName( "fps" );
+    ip.add( pcf::IndiElement( "current" ) );
+
+    ip["current"] = 2000;
+    REQUIRE( app.setCallBack_m_indiP_fpsSource( ip ) == 0 );
+    REQUIRE( app.fps() == 2000 );
+
+    ip["current"] = 2010;
+    REQUIRE( app.setCallBack_m_indiP_fpsSource( ip ) == 0 );
+    REQUIRE( app.fps() == 2000 );
+
+    ip["current"] = 1000;
+    REQUIRE( app.setCallBack_m_indiP_fpsSource( ip ) == 0 );
+    REQUIRE( app.fps() == 1000 );
+
+    // frames at another rate are not measured
+    double   t    = 100;
+    uint64_t cnt0 = 1;
+    app.feed( 1500, 1, 2e-3, cnt0, t );
+    REQUIRE( app.fps() == 1000 );
+
+    pcf::IndiProperty wrong( ip );
+    wrong.setName( "other" );
+    REQUIRE( app.setCallBack_m_indiP_fpsSource( wrong ) == -1 );
 }
 
 } // namespace streamCircBuffTest
