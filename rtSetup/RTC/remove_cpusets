@@ -21,6 +21,7 @@ LEGACY_NAMES = {
     "acqu_mvm", "mfilt", "tweeterSpeck", "mlat", "RTmon", "spare50", "spare51",
     "spare52", "spare53", "camtip", "camtip_sw", "camacq", "camacq_sw",
     "shmimTCP", "spare59", "spare60", "spare61", "spare62", "spare63",
+    "spare57",
 }
 
 

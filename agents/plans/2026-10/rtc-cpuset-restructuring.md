@@ -11,6 +11,9 @@ the migration worked on the first attempt and the system is running closed
 loop. Detailed runtime placement readback and timing comparison remain open.
 Two additional spare cores on CPU30/31
 expand the RT pool to 34 physical cores; further growth is deferred.
+The 2026-11-05 second migration below reduces `system` to 24 cores, places the
+BMC SDK/post workers in the tweeter monitor's L3 domain and adds an
+`aol1_imWFS2_cbuff` core. It awaits operator deployment.
 
 ## Objective and scope
 
@@ -541,6 +544,69 @@ by an agent. The operator reports successful deployment and a closed-loop
 restart; detailed thread/IRQ readback and the post-migration timing comparison
 remain follow-up steps.
 
+## Second migration: 24-core system pool and tweeter pipeline locality
+
+Requested by the operator 2026-11-05 on `jrmales/rtc-cpusets-24core`, based on
+`dev` at `d6af5164`. Since the first migration, the 8 kHz tweeter pipeline added
+three dedicated threads on reserves in three L3 domains: the BMC SDK worker on
+`spare56` (CPU56, domain7, FIFO55), the ordered post worker on `spare31`
+(CPU31, domain3, FIFO30) and synco's reader-release observer on `spare57`
+(CPU57, domain7, FIFO30). The tweeter monitor (CPU40) and synco (CPU41) are in
+domain5. Non-real-time readers are also moving to circular buffers, which need
+their own cores.
+
+The target partition is:
+
+| Role | Logical CPUs | Physical cores / online threads |
+| --- | --- | --- |
+| System tasks and ordinary IRQs | `0-23,64-87` | 24 / 48 |
+| Dedicated real-time sets | `24-63` | 40 / 40 |
+| Offline SMT siblings | `88-127` | 40 offline logical CPUs |
+
+This gives 88 online logical CPUs. L3 domain3 (CPUs24-31) becomes entirely
+real-time, restoring complete cache-domain separation from `system`.
+
+| CPU | Old cpuset | New cpuset | Reason |
+| --- | --- | --- | --- |
+| 24 | Part of `system` | `aol0_modevalDMf_mon-sw` | Recorder moved from CPU42, off the loop's L3 domain |
+| 25 | Part of `system` | `aol1_modevalDMf_mon-sw` | Recorder moved from CPU44, off the loop's L3 domain |
+| 26 | Part of `system` | `aol1_imWFS2_cbuff` | New circular-buffer SM/FG core |
+| 27-29 | Part of `system` | `spare27`-`spare29` | Reserves |
+| 30, 31 | `spare30`, `spare31` (post worker) | Unchanged names | Reserves |
+| 42 | `aol0_modevalDMf_mon-sw` | `dmtweeter-sdk` | SDK worker shares L3 with the monitor it receives every command from |
+| 44 | `aol1_modevalDMf_mon-sw` | `dmtweeter-post` | Post worker shares L3 with the SDK worker and monitor |
+| 56 | `spare56` (SDK worker) | Unchanged name | Reserve |
+| 57 | `spare57` (release observer) | `dmtweeter-synco-release` | Rename only; no free domain5 core |
+
+Domain5 is then tweeter monitor, synco, SDK worker, PO4AO, post worker,
+`acqu_mvm`, `mfilt` and `tweeterSpeck`. Moving the two recorders out also
+removes their bulk copies from the loop's L3. The release observer stays on
+CPU57: production uses `simulation.readerReleaseReady=false`, so it does not
+gate delivery. `dm01comb` (CPU39) remains in domain4, so the
+synco → combiner → monitor handoffs still cross L3 domains; moving the combiner
+would require displacing a loop or camera thread and is deferred.
+
+Ordinary IRQ affinity becomes `0-23,64-87` and the irqbalance exclusions
+`24-63,88-127`. `remove_cpusets` adds `spare57` to its retired names; all other
+current names come from the sibling `make_cpusets`. Because the two recorder
+sets keep their names but change CPUs, use the full remove/recreate procedure
+above rather than rerunning `make_cpusets`.
+
+Config repository changes (`onsky`): `dmtweeter.conf` (`sdk.cpuset`,
+`sdk.pipelineCpuset`), `dmtweeter-synco.conf` (`readerReleaseMonitor.cpuset`)
+and `aol1_imWFS2_cbuff.conf` (SM and FG cpusets). The recorder configs already
+name their sets. Repository example synco configs and the production-provider
+guide name the new sets; historical test records keep their tested placements.
+
+Local validation: 40 exclusive sets cover CPUs24-63 exactly once, each with
+`cpus`, `cpu_exclusive` and `mems`; shell syntax and the ten cleanup tests
+pass. All 55 cpuset references from RTC process-list configs and CACAO setup
+files resolve except two pre-existing ones outside this change:
+`acc000.conf` `[framegrabber] cpuset=acqu` and CACAO `ncpc` `dm02comb`.
+After deployment, verify system `0-23,64-87`, offline `88-127`, the
+`sdk_worker`/`sdk_pipeline` `allowedCpus` readbacks (42/44) and compare
+tweeter pipeline timing against the 8 kHz baseline.
+
 ## Implementation dependencies and sequence
 
 1. **Complete the operator inventory.** Record deployed/uncommitted configs,
@@ -647,6 +713,10 @@ independent of the RTC rollout.
   attempt and the system is up with a closed AO loop. This records deployment
   and restart success; no new per-thread/IRQ affinity output, loop gain or
   post-migration timing capture was supplied with the report.
+- 2026-11-05: Operator requested a 24-core system pool, an
+  `aol1_imWFS2_cbuff` core and tweeter-local placement of the pipeline
+  threads on `spare31`/`spare56`. Implemented the second migration above;
+  locally validated. No instrument operations performed.
 - Operator additions: Remaining missing/legacy configs are outside this migration.
 - Target allocation review: First migration approved through operator annotations
   and CPU41/54/55 corrections, plus the CPU30/31 expansion; further growth deferred.
