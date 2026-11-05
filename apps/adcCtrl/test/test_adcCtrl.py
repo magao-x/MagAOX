@@ -37,6 +37,9 @@ from xapp.adcCtrl.app import (
     expected_axes,
     inlier_mask,
     ke_blocked_spots,
+    ke_orient_frame,
+    ke_orient_point,
+    ke_orient_spots,
     ke_sensitivity,
     ke_spot_order,
     ke_star_from_pair,
@@ -165,20 +168,22 @@ def to_pixels(frame, point):
 
 
 def make_ke_frame(separation=15.0, angle=17.0, center=(2.0, -3.0), edge=1.1, glint_amp=0.0, halo_amp=0.0,
-                  noise=0.0, seed=0, **kwargs):
+                  noise=0.0, seed=0, mask="top", **kwargs):
     """A make_frame frame behind a knife edge.
 
-    Everything below a horizontal edge `edge` lambda/D above the star is
-    blocked. Optional: a smooth halo, a glint line along the edge (fading
-    over ~5 lambda/D to the sides of the star), and noise over the whole
-    frame.
+    With the top mask, everything below a horizontal edge `edge` lambda/D
+    above the star is blocked; the bottom mask is the mirror image, blocking
+    everything above an edge `edge` below the star. Optional: a smooth halo,
+    a glint line along the edge (fading over ~5 lambda/D to the sides of the
+    star), and noise over the whole frame.
     """
     frame = make_frame(separation=separation, angle=angle, center=center, **kwargs)
     xx, yy = frame_coords(frame)
     if halo_amp:
         frame += halo_amp * np.exp(-np.hypot(xx - center[0], yy - center[1]) / 8.0)
-    edge_y = center[1] + edge
-    frame *= yy > edge_y
+    up = 1.0 if mask == "top" else -1.0
+    edge_y = center[1] + up * edge
+    frame *= up * (yy - edge_y) > 0
     if glint_amp:
         frame += glint_amp * np.exp(-((yy - edge_y) ** 2) / (2 * 0.3**2) - (xx - center[0]) ** 2 / (2 * 5.0**2))
     if noise > 0:
@@ -561,6 +566,32 @@ def test_ke_half_plane_profile_removes_halo():
     assert np.all(np.abs(halo.dev[[0, 3]] - clean.dev[[0, 3]]) < 0.5), (halo.dev, clean.dev)
 
 
+def test_ke_bottom_mask_turned_frame():
+    """A bottom-mask frame, turned by 180 deg, is measured like a top-mask frame with the dispersion reversed.
+
+    The bottom mask sees physical spots 2 and 1, which are spots 0 and 3 of
+    the turned frame. The dispersion-driven change in their m is the
+    negative of the top mask's; the fixed offset at zero dispersion is not
+    (hence a set point per mask). The star maps back to its frame position.
+    """
+    assert ke_orient_spots(ke_spot_order([1, 2]), "bottom") == (0, 3)
+    assert ke_orient_spots((0, 3), "top") == (0, 3)
+    center = (2.0, -3.0)
+    ms = {}
+    for dispersion in [(0.0, 0.0), (0.0, 0.1), (0.1, -0.1)]:
+        top = measure_knife_edge(make_ke_frame(dispersion=dispersion), ke_geometry(), (0, 3), PIXEL_SCALE)
+        frame = make_ke_frame(dispersion=dispersion, mask="bottom")
+        bottom = measure_knife_edge(ke_orient_frame(frame, "bottom"), ke_geometry(), (0, 3), PIXEL_SCALE)
+        ms[dispersion] = (top.m, bottom.m)
+        star = ke_orient_point(bottom.location.star, frame.shape, "bottom")
+        assert np.hypot(*(np.array(star) - to_pixels(frame, center))) * PIXEL_SCALE < 0.5, star
+    top0, bottom0 = ms[(0.0, 0.0)]
+    for dispersion in [(0.0, 0.1), (0.1, -0.1)]:
+        top_change, bottom_change = ms[dispersion][0] - top0, ms[dispersion][1] - bottom0
+        assert abs(top_change) > 1.0, top_change
+        assert abs(bottom_change + top_change) < 0.1 * abs(top_change), (dispersion, top_change, bottom_change)
+
+
 def test_ke_margin_guard_keeps_clear_of_spot():
     """Spot 3 at 10 l/D, 15 deg sits 2.6 l/D above the star: the margin is capped and spot 3 is unbiased."""
     frame = make_ke_frame(separation=10.0, angle=15.0)
@@ -896,17 +927,42 @@ def test_coronagraph_switch_only_when_idle_and_keeps_delta1():
     assert dev.properties["coronagraph"]["standard"] == ON
     dev.set_command(0.4, 0.0)
     send(dev, "state", adcLoop=ON)
-    send(dev, "coronagraph", knife_edge=ON)
+    send(dev, "coronagraph", knife_edge_top=ON)
     assert dev._knife_edge is False
     send(dev, "state", idle=ON)
-    send(dev, "coronagraph", knife_edge=ON)
+    send(dev, "coronagraph", knife_edge_top=ON)
     assert dev._knife_edge is True
-    assert dev.properties["coronagraph"]["knife_edge"] == ON
+    assert dev.properties["coronagraph"]["knife_edge_top"] == ON
     assert dev.properties["coronagraph"]["standard"] == OFF
     assert dev.delta_1 == 0.4
     send(dev, "coronagraph", standard=ON)
     assert dev._knife_edge is False
     assert dev.delta_1 == 0.4
+
+
+def test_ke_mask_switch_mirrors_spots_and_swaps_setpoints():
+    """Changing knife-edge mask mirrors the physical spot selection and swaps in that mask's set point."""
+    dev = make_device(client=ke_client())
+    assert dev._ke_setpoint == -1.2 and dev.properties["ke_setpoint"]["current"] == -1.2
+    send(dev, "coronagraph", knife_edge_bottom=ON)
+    assert dev._knife_edge and dev._ke_mask == "bottom"
+    assert dev.properties["coronagraph"]["knife_edge_bottom"] == ON
+    assert dev.properties["coronagraph"]["knife_edge_top"] == OFF
+    assert dev._ke_order == (0, 3) and dev.ke_spots() == (2, 1)
+    assert [dev.properties["ke_spots"][f"spot{n}"] for n in range(4)] == [OFF, ON, ON, OFF]
+    assert dev._ke_setpoint == 0.0 and dev.properties["ke_setpoint"]["current"] == 0.0
+
+    send(dev, "ke_setpoint", target=0.7)
+    send(dev, "ke_spots", spot1=OFF)  # physical spot 2 alone
+    assert dev.ke_spots() == (2,) and dev._ke_order == (0,)
+    send(dev, "coronagraph", standard=ON)
+    assert dev._ke_setpoint == 0.7  # standard mode keeps the last mask
+    send(dev, "coronagraph", knife_edge_top=ON)
+    assert dev._ke_setpoint == -1.2 and dev._ke_setpoint_time is None
+    assert [dev.properties["ke_spots"][f"spot{n}"] for n in range(4)] == [ON, OFF, OFF, OFF]
+    send(dev, "coronagraph", knife_edge_bottom=ON)
+    assert dev._ke_setpoint == 0.7 and dev._ke_setpoint_time is not None
+    assert dev.properties["ke_setpoint"]["current"] == 0.7
 
 
 def test_ke_spots_refuses_invalid_selections():
@@ -951,7 +1007,7 @@ def test_ke_spots_reports_but_accepts_blocked_and_low_sensitivity():
 def test_entering_knife_edge_reports_selection():
     """Entering knife-edge mode reports a blocked or low-sensitivity selection."""
     dev, handler = recording_device("adcCtrl-test-ke-enter", client=ke_client(angle=17.0), ke_spots=[0])
-    send(dev, "coronagraph", knife_edge=ON)
+    send(dev, "coronagraph", knife_edge_top=ON)
     assert len(messages(handler, logging.INFO, "low sensitivity")) == 1
 
 
@@ -975,22 +1031,22 @@ def test_ke_error_wraps_residual():
 
 def test_ke_setpoint_manual_entry_and_expiry():
     """Entering knife-edge mode reports a config-default or expired set point; a manual entry restarts its age."""
-    dev, handler = recording_device("adcCtrl-test-ke-age", client=ke_client(), ke_setpoint=0.25)
+    dev, handler = recording_device("adcCtrl-test-ke-age", client=ke_client(), ke_setpoint_top=0.25)
     assert dev._ke_setpoint == 0.25 and dev.properties["ke_setpoint"]["current"] == 0.25
-    send(dev, "coronagraph", knife_edge=ON)
+    send(dev, "coronagraph", knife_edge_top=ON)
     assert len(messages(handler, logging.INFO, "config default")) == 1
 
     send(dev, "ke_setpoint", target=0.4)
     assert dev._ke_setpoint == 0.4
     assert dev.properties["ke_setpoint"]["current"] == 0.4
     send(dev, "coronagraph", standard=ON)
-    send(dev, "coronagraph", knife_edge=ON)
+    send(dev, "coronagraph", knife_edge_top=ON)
     assert len(messages(handler, logging.INFO, "expired")) == 0
     assert len(messages(handler, logging.INFO, "config default")) == 1
 
     dev._ke_setpoint_time -= 25 * 3600
     send(dev, "coronagraph", standard=ON)
-    send(dev, "coronagraph", knife_edge=ON)
+    send(dev, "coronagraph", knife_edge_top=ON)
     assert len(messages(handler, logging.INFO, "expired")) == 1
 
 
@@ -1002,7 +1058,7 @@ def test_ke_capture_sets_batch_mean():
 
     send(dev, "ke_capture_setpoint", request=ON)  # standard mode
     assert not dev._pending_capture
-    send(dev, "coronagraph", knife_edge=ON)
+    send(dev, "coronagraph", knife_edge_top=ON)
     send(dev, "state", adcLoop=ON)
     send(dev, "ke_capture_setpoint", request=ON)  # closed loop
     assert not dev._pending_capture
@@ -1069,7 +1125,7 @@ def test_ke_loop_converges_to_setpoint_not_zero():
 
     dev.camera = camera
     send(dev, "ke_gain", target=2.0 / slope)
-    send(dev, "coronagraph", knife_edge=ON)
+    send(dev, "coronagraph", knife_edge_top=ON)
     dev.set_command(camera.delta_star, 0.0)
     send(dev, "ke_capture_setpoint", request=ON)
     dev.loop()
@@ -1084,12 +1140,12 @@ def test_ke_loop_converges_to_setpoint_not_zero():
     assert dev._state == States.CLOSED_LOOP
     assert abs(dev.delta_1 - camera.delta_star) < 0.05, dev.delta_1
     cycle = dev.telem_records[-1][1]
-    assert cycle["mode"] == "knife_edge" and cycle["ke_spots"] == [0, 3]
+    assert cycle["mode"] == "knife_edge_top" and cycle["ke_spots"] == [0, 3]
     assert cycle["angles"][1] is None and abs(cycle["residual"]) < 0.2
 
 
 def test_same_loop_sign_converges_in_both_modes():
-    """With ctrl_mtx = 1/pair slopes and ke_gain = 2/m slope, negative loop_sign converges in both modes."""
+    """With ctrl_mtx = 1/pair slopes and ke_gain = 2/m slope, negative loop_sign converges in standard mode and with both masks."""
     geometry = ke_geometry()
     std_geometry = SpotGeometry(15.0, 17.0, 20, 10.0, 5.0)
     deltas = np.array([-0.2, 0.3, 0.8])
@@ -1105,16 +1161,26 @@ def test_same_loop_sign_converges_in_both_modes():
     provisional = 2.0 / (slopes[0] / 2 + slopes[1] / 2)
     assert abs(provisional * ke_slope / 2.0 - 1.0) < 0.1, (provisional, 2.0 / ke_slope)
 
-    for knife_edge in [False, True]:
+    makes = {
+        "standard": lambda dispersion: make_frame(angle=17.0, dispersion=dispersion),
+        "knife_edge_top": make_ke_frame,
+        "knife_edge_bottom": lambda dispersion: make_ke_frame(dispersion=dispersion, mask="bottom"),
+    }
+    for mode, make in makes.items():
         dev = make_device(client=ke_client(), gain=0.3, ctrl_mtx=[1.0 / slopes[0], 1.0 / slopes[1]],
-                          ke_gain=2.0 / ke_slope)
+                          ke_gain=2.0 / ke_slope, ke_setpoint_top=0.0)
         assert dev._loop_sign == -1.0
-        make = make_ke_frame if knife_edge else (lambda dispersion: make_frame(angle=17.0, dispersion=dispersion))
         dev.camera = DispersionCamera(dev, make)
-        if knife_edge:
-            send(dev, "coronagraph", knife_edge=ON)
+        send(dev, "coronagraph", **{mode: ON})
         dev.set_command(0.8, 0.0)
         send(dev, "state", adcLoop=ON)
         for _ in range(15):
             dev.loop()
-        assert abs(dev.delta_1 - 0.3) < 0.05, (knife_edge, dev.delta_1)
+        assert abs(dev.delta_1 - 0.3) < 0.05, (mode, dev.delta_1)
+
+    # the bottom mask publishes physical spots and the star in frame pixels
+    cycle = dev.telem_records[-1][1]
+    assert cycle["mode"] == "knife_edge_bottom" and cycle["ke_spots"] == [2, 1]
+    assert cycle["angles"][0] is None and cycle["angles"][2] is not None
+    frame = make_ke_frame(mask="bottom")
+    assert np.hypot(*(np.array(cycle["star"]) - to_pixels(frame, (2.0, -3.0)))) * PIXEL_SCALE < 0.5

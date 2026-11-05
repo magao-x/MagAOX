@@ -33,10 +33,16 @@ error`` is added to the integrator ``delta_1`` unless it exceeds
 
 Knife-edge mode
 ---------------
-With the knife-edge coronagraph the star and the lower half of the image are
-blocked, so no opposite pair survives. In knife-edge mode (``coronagraph`` =
-``knife_edge``) the app measures one spot, or normally two adjacent spots
-(``ke_spots``, default 0 and 3), and for each frame:
+With the knife-edge coronagraph the star and half of the image are blocked,
+so no opposite pair survives. There is one mask of each parity:
+``knife_edge_top`` transmits the upper half and ``knife_edge_bottom`` the
+lower half. Frames from the bottom mask are turned by 180 degrees first, so
+both masks use the same measurement. Turning the frame also reverses the
+dispersion, so the bottom mask's ``m`` is negated (``d_b - d_a``); both masks
+then use the same ``ke_gain``, ``loop_sign`` and calibration procedure. In
+knife-edge mode the app measures one spot, or normally two adjacent spots
+(``ke_spots``, default 0 and 3 with the top mask and the opposite spots, 2
+and 1, with the bottom mask), and for each frame:
 
 1. estimates the star from the spots: for two spots, the right-angle corner
    of the isosceles right triangle they form, so neither the star nor the
@@ -53,9 +59,9 @@ blocked, so no opposite pair survives. In knife-edge mode (``coronagraph`` =
 ``m`` is not zero at zero dispersion, so the loop drives it to a set point:
 ``error = ke_gain * wrap90(m - ke_setpoint)``, followed by the same step,
 step limit and integrator as the standard mode. ``ke_gain`` is scaled so the
-same ``loop_sign`` works in both modes. The set point starts at the config
-default and is changed by a capture or by hand; it is not saved across
-restarts.
+same ``loop_sign`` works in both modes. Each mask has its own set point,
+which starts at the config default and is changed by a capture or by hand;
+it is not saved across restarts.
 
 States
 ------
@@ -74,10 +80,11 @@ gain             number    loop gain
 offset           number    common offset added to both ADCs [deg]
 ctrl_mtx         number    m00, m01: pair offsets -> dispersion error
 loop_sign        switch    positive / negative feedback polarity (platform dependent)
-coronagraph      switch    standard / knife_edge; idle only
-ke_spots         switch    knife-edge spots: one, or two adjacent (any of spot0-spot3)
-ke_gain          number    knife-edge m residual -> dispersion error
-ke_setpoint      number    knife-edge set point for m [deg]; settable by hand
+coronagraph      switch    standard / knife_edge_top / knife_edge_bottom; idle only
+ke_spots         switch    knife-edge spots: one, or two adjacent (any of spot0-spot3); mirrored
+                           when the mask changes
+ke_gain          number    knife-edge m residual -> dispersion error (both masks)
+ke_setpoint      number    current mask's knife-edge set point for m [deg]; settable by hand
 ke_capture_setpoint switch request: set ke_setpoint to one batch's mean m (idle or measure-only)
 satellite_spots  switch    sparkles / dm_spots
 camera           switch    science camera (and its filter wheel); idle only
@@ -100,8 +107,9 @@ Operator procedure
 Knife-edge procedure:
 
 1. In standard mode, close the loop until it converges.
-2. Go idle, insert the knife edge and set coronagraph to knife_edge (delta_1
-   is kept). Check the INFO log for spot-selection and set-point messages.
+2. Go idle, insert the knife edge and set coronagraph to knife_edge_top or
+   knife_edge_bottom to match the mask (delta_1 is kept). Check the INFO log
+   for spot-selection and set-point messages.
 3. Run measure-only and check the star position and ke_sep.
 4. Press ke_capture_setpoint, or enter a recent ke_setpoint by hand.
 5. Run oneshot, then adcLoop. Calibrate ke_gain by hand like ctrl_mtx: fit
@@ -481,11 +489,14 @@ def measure_spot_angles(frame, geometry, pixel_scale, pad=50, mask_factor=0.7, r
 # --------------------------------------------------------------------------
 # Knife-edge coronagraph mode
 #
-# The knife edge blocks the star and the lower half of the science camera
-# image, so only the spots in the upper (+y, increasing row) half are seen.
-# The star position is estimated from the visible spots each frame, and the
-# loop controls on one spot's deviation, or the difference of two adjacent
-# spots' deviations, relative to a captured set point.
+# The knife edge blocks the star and half of the science camera image. There
+# is one mask of each parity: "top" transmits the upper (+y, increasing row)
+# half, "bottom" the lower half. Frames from the bottom mask are turned by 180
+# degrees first (ke_orient_frame), so the functions below always see the
+# transmitted half on top. The star position is estimated from the visible
+# spots each frame, and the loop controls on one spot's deviation, or the
+# difference of two adjacent spots' deviations, relative to a captured set
+# point.
 # --------------------------------------------------------------------------
 
 class KnifeEdgeParams(NamedTuple):
@@ -562,6 +573,27 @@ def ke_sensitivity(order, angle):
 def ke_blocked_spots(order, angle):
     """Spots of `order` that fall in the blocked (lower) half for pattern angle `angle`."""
     return [n for n in order if np.sin(np.radians(spot_position_angle(n, angle))) <= 0]
+
+
+def ke_orient_frame(frame, mask):
+    """`frame` turned so the transmitted half is up: rotated by 180 degrees for the bottom mask.
+
+    A spot's elongation axis does not change under a 180 degree rotation, so
+    deviations measured in the turned frame are the physical spots' deviations.
+    """
+    return np.asarray(frame)[::-1, ::-1] if mask == "bottom" else frame
+
+
+def ke_orient_point(point, shape, mask):
+    """Map a point (x, y) between frame pixels and the turned frame of ke_orient_frame (either way)."""
+    if mask != "bottom":
+        return point
+    return (shape[1] - 1 - point[0], shape[0] - 1 - point[1])
+
+
+def ke_orient_spots(spots, mask):
+    """Map spot indices between physical spots and the turned frame (either way): n -> n + 2 for the bottom mask."""
+    return tuple((n + 2) % 4 if mask == "bottom" else n for n in spots)
 
 
 def ke_star_from_pair(p_a, p_b):
@@ -927,9 +959,10 @@ class AdcCtrlConfig(BaseConfig):
     min_valid_fraction : float = xconf.field(default=0.5, help="Minimum fraction of valid measurements needed to act on a batch")
     camera_retry_sec : float = xconf.field(default=10.0, help="Interval between attempts to open the camera")
     startup_grace_sec : float = xconf.field(default=60.0, help="After startup, missing INDI devices and camera are logged at DEBUG only, while the INDI server comes up")
-    ke_spots : list[int] = xconf.field(default_factory=lambda: [0, 3], help="Knife-edge mode: spots measured at startup, one spot or two adjacent spots (0-3)")
+    ke_spots : list[int] = xconf.field(default_factory=lambda: [0, 3], help="Knife-edge mode: spots measured at startup with the top mask, one spot or two adjacent spots (0-3); the bottom mask uses the spots opposite these")
     ke_gain : float = xconf.field(default=-0.62, help="Knife-edge mode: initial scalar from m residual to dispersion error; provisional, derived from the 2026-10-25 DM-spot calibration for spots 0 and 3, scaled so the same loop_sign works in both modes")
-    ke_setpoint : float = xconf.field(default=0.0, help="Knife-edge mode: set point for m at startup [deg]")
+    ke_setpoint_top : float = xconf.field(default=-1.2, help="Knife-edge mode: set point for m at startup with the top mask [deg]; measured on the instrument 2026-11-05")
+    ke_setpoint_bottom : float = xconf.field(default=0.0, help="Knife-edge mode: set point for m at startup with the bottom mask [deg]")
     ke_setpoint_max_age_hr : float = xconf.field(default=24.0, help="Knife-edge mode: a set point older than this is reported on entering the mode [hours]")
     ke_edge_margin : float = xconf.field(default=1.5, help="Knife-edge mode: half-plane mask line above the estimated star [lambda/D]")
     ke_spot_clearance : float = xconf.field(default=1.5, help="Knife-edge mode: the mask line is kept at least this far below each selected spot [lambda/D]")
@@ -961,8 +994,8 @@ STATE_ELEMENTS = {
 # INDI `loop_sign` switch element name -> multiplier applied to each step
 LOOP_SIGNS = {"positive": 1.0, "negative": -1.0}
 
-# INDI `coronagraph` switch element name -> True for knife-edge mode
-CORONAGRAPHS = {"standard": False, "knife_edge": True}
+# INDI `coronagraph` switch element name -> knife-edge mask (transmitted half), None for standard mode
+CORONAGRAPHS = {"standard": None, "knife_edge_top": "top", "knife_edge_bottom": "bottom"}
 
 # INDI `ke_spots` switch element names, by spot index
 KE_SPOT_ELEMENTS = [f"spot{n}" for n in range(4)]
@@ -1064,7 +1097,10 @@ class adcCtrl(XDevice):
         self._filter_name = None
         # True in knife-edge mode, changed through the `coronagraph` switch (idle only)
         self._knife_edge = False
-        # Knife-edge spot selection in measurement order (see ke_spot_order)
+        # Last selected knife-edge mask, "top" or "bottom"; its spots and set point stay current in standard mode
+        self._ke_mask = "top"
+        # Knife-edge spot selection in measurement order (see ke_spot_order), as spot
+        # indices in the turned frame (ke_orient_frame), i.e. the top mask's physical spots
         self._ke_order = ke_spot_order(self.config.ke_spots)
         # Knife-edge scalar from m residual to dispersion error
         self._ke_gain = float(self.config.ke_gain)
@@ -1073,10 +1109,15 @@ class adcCtrl(XDevice):
         self._ke_lock_key = None
         # True once a capped mask margin has been reported for the current lock
         self._ke_margin_reported = False
-        # Knife-edge set point for m [deg], and the monotonic time it was captured or
-        # entered (None while it is still the config default; it is never saved)
-        self._ke_setpoint = float(self.config.ke_setpoint)
+        # Knife-edge set point for m [deg] for the current mask, and the monotonic time it
+        # was captured or entered (None while it is still the config default; it is never saved)
+        self._ke_setpoint = float(self.config.ke_setpoint_top)
         self._ke_setpoint_time = None
+        # (set point, time) kept for each mask while the other mask is selected
+        self._ke_saved_setpoints = {
+            "top": (self._ke_setpoint, None),
+            "bottom": (float(self.config.ke_setpoint_bottom), None),
+        }
         # Set point capture requested by `ke_capture_setpoint`, performed by loop()
         self._pending_capture = False
 
@@ -1168,10 +1209,10 @@ class adcCtrl(XDevice):
             rule=constants.SwitchRule.ONE_OF_MANY,
             perm=constants.PropertyPerm.READ_WRITE,
         )
-        for name, knife_edge in CORONAGRAPHS.items():
+        for name in CORONAGRAPHS:
             sv.add_element(DefSwitch(
                 name=name,
-                _value=constants.SwitchState.ON if knife_edge == self._knife_edge else constants.SwitchState.OFF,
+                _value=constants.SwitchState.ON if name == self.coronagraph_name() else constants.SwitchState.OFF,
             ))
         self.add_property(sv, callback=self.handle_coronagraph)
 
@@ -1183,7 +1224,7 @@ class adcCtrl(XDevice):
         for n, name in enumerate(KE_SPOT_ELEMENTS):
             sv.add_element(DefSwitch(
                 name=name,
-                _value=constants.SwitchState.ON if n in self._ke_order else constants.SwitchState.OFF,
+                _value=constants.SwitchState.ON if n in self.ke_spots() else constants.SwitchState.OFF,
             ))
         self.add_property(sv, callback=self.handle_ke_spots)
 
@@ -1423,35 +1464,64 @@ class adcCtrl(XDevice):
             self.log.info(f"loop sign set to {target}")
         self.update_property(existing_property)
 
+    def coronagraph_name(self):
+        """Current `coronagraph` switch element: standard, knife_edge_top or knife_edge_bottom."""
+        return f"knife_edge_{self._ke_mask}" if self._knife_edge else "standard"
+
+    def ke_spots(self):
+        """Selected knife-edge spots as physical spot indices, in measurement order."""
+        return ke_orient_spots(self._ke_order, self._ke_mask)
+
     def handle_coronagraph(self, existing_property, new_message):
-        """INDI callback for `coronagraph`: standard or knife-edge mode; idle only.
+        """INDI callback for `coronagraph`: standard mode or a knife-edge mask; idle only.
 
         Changing mode leaves `delta_1` alone, so a set point can be captured
-        right after converging in standard mode.
+        right after converging in standard mode. Changing mask keeps the
+        measured spots' positions relative to the transmitted half, so the
+        physical selection is mirrored (`[0, 3]` <-> `[2, 1]`), and swaps in
+        the new mask's set point.
         """
         target = requested_switch(new_message, CORONAGRAPHS)
-        if target is not None and CORONAGRAPHS[target] != self._knife_edge:
+        if target is not None and target != self.coronagraph_name():
             if self._state != States.IDLE:
                 self.log.warning("Coronagraph mode can only be changed while idle")
             else:
                 for key in CORONAGRAPHS:
                     existing_property[key] = constants.SwitchState.ON if key == target else constants.SwitchState.OFF
-                self._knife_edge = CORONAGRAPHS[target]
+                mask = CORONAGRAPHS[target]
+                self._knife_edge = mask is not None
                 self._ke_lock = None
                 self.log.info(f"coronagraph mode set to {target}")
+                if mask is not None and mask != self._ke_mask:
+                    self.set_ke_mask(mask)
                 if self._knife_edge:
                     self.check_indi_props()
                     self.ke_mode_checks()
         self.update_property(existing_property)
 
+    def set_ke_mask(self, mask):
+        """Select knife-edge mask `mask`: show its physical spots and swap in its set point."""
+        self._ke_saved_setpoints[self._ke_mask] = (self._ke_setpoint, self._ke_setpoint_time)
+        self._ke_mask = mask
+        self._ke_setpoint, self._ke_setpoint_time = self._ke_saved_setpoints[mask]
+        prop = self.properties["ke_setpoint"]
+        prop["current"] = self._ke_setpoint
+        prop["target"] = self._ke_setpoint
+        self.update_property(prop)
+        prop = self.properties["ke_spots"]
+        for n, name in enumerate(KE_SPOT_ELEMENTS):
+            prop[name] = constants.SwitchState.ON if n in self.ke_spots() else constants.SwitchState.OFF
+        self.update_property(prop)
+        self.log.info(f"knife-edge mask {mask}: spots {list(self.ke_spots())}, set point {self._ke_setpoint:.4f} deg")
+
     def handle_ke_spots(self, existing_property, new_message):
-        """INDI callback for `ke_spots`: the knife-edge spot selection.
+        """INDI callback for `ke_spots`: the knife-edge spot selection (physical spots).
 
         One spot or two adjacent spots are accepted; anything else is refused
         with a warning and the previous selection kept. A spot in the blocked
         half or a low-sensitivity selection is only reported.
         """
-        selected = set(self._ke_order)
+        selected = set(self.ke_spots())
         for n, name in enumerate(KE_SPOT_ELEMENTS):
             if name in new_message:
                 if new_message[name] == constants.SwitchState.ON:
@@ -1459,16 +1529,16 @@ class adcCtrl(XDevice):
                 else:
                     selected.discard(n)
         try:
-            order = ke_spot_order(selected)
+            order = ke_orient_spots(ke_spot_order(selected), self._ke_mask)
         except ValueError as e:
-            self.log.warning(f"ke_spots selection refused ({e}), keeping spots {list(self._ke_order)}")
+            self.log.warning(f"ke_spots selection refused ({e}), keeping spots {list(self.ke_spots())}")
         else:
             if order != self._ke_order:
                 self._ke_order = order
-                self.log.info(f"knife-edge spots set to {list(order)}")
+                self.log.info(f"knife-edge spots set to {list(self.ke_spots())}")
                 self.ke_selection_checks()
         for n, name in enumerate(KE_SPOT_ELEMENTS):
-            existing_property[name] = constants.SwitchState.ON if n in self._ke_order else constants.SwitchState.OFF
+            existing_property[name] = constants.SwitchState.ON if n in self.ke_spots() else constants.SwitchState.OFF
         self.update_property(existing_property)
 
     def handle_ke_gain(self, existing_property, new_message):
@@ -1481,7 +1551,7 @@ class adcCtrl(XDevice):
         self.update_property(existing_property)
 
     def handle_ke_setpoint(self, existing_property, new_message):
-        """INDI callback for `ke_setpoint`: enter the set point by hand (kept until restart)."""
+        """INDI callback for `ke_setpoint`: enter the current mask's set point by hand (kept until restart)."""
         if "target" in new_message:
             self.set_ke_setpoint(float(new_message["target"]))
             self.log.info(f"knife-edge set point entered: {self._ke_setpoint:.4f} deg")
@@ -1506,7 +1576,7 @@ class adcCtrl(XDevice):
         self.update_property(existing_property)
 
     def set_ke_setpoint(self, value):
-        """Set the knife-edge set point [deg], restart its age, and show it in INDI."""
+        """Set the current mask's knife-edge set point [deg], restart its age, and show it in INDI."""
         self._ke_setpoint = float(value)
         self._ke_setpoint_time = time.monotonic()
         prop = self.properties["ke_setpoint"]
@@ -1518,14 +1588,14 @@ class adcCtrl(XDevice):
         """Report (at INFO) a set point that is the config default or older than ke_setpoint_max_age_hr."""
         if self._ke_setpoint_time is None:
             self.log.info(
-                f"knife-edge set point {self._ke_setpoint:.4f} deg is the config default, not captured or "
+                f"knife-edge set point {self._ke_setpoint:.4f} deg ({self._ke_mask} mask) is the config default, not captured or "
                 f"entered since startup; its age is unknown"
             )
             return
         age_hr = (time.monotonic() - self._ke_setpoint_time) / 3600.0
         if age_hr > self.config.ke_setpoint_max_age_hr:
             self.log.info(
-                f"knife-edge set point {self._ke_setpoint:.4f} deg has expired: it is {age_hr:.1f} h old "
+                f"knife-edge set point {self._ke_setpoint:.4f} deg ({self._ke_mask} mask) has expired: it is {age_hr:.1f} h old "
                 f"(limit {self.config.ke_setpoint_max_age_hr} h)"
             )
 
@@ -1534,11 +1604,14 @@ class adcCtrl(XDevice):
         angle = self.spot_geometry().angle
         blocked = ke_blocked_spots(self._ke_order, angle)
         if blocked:
-            self.log.info(f"knife-edge spots {blocked} are in the blocked half for a pattern angle of {angle:.1f} deg")
+            self.log.info(
+                f"knife-edge spots {list(ke_orient_spots(blocked, self._ke_mask))} are in the blocked half of the "
+                f"{self._ke_mask} mask for a pattern angle of {angle:.1f} deg"
+            )
         sensitivity = ke_sensitivity(self._ke_order, angle)
         if abs(sensitivity) < self.config.ke_min_sensitivity:
             self.log.info(
-                f"knife-edge spots {list(self._ke_order)} have a low sensitivity ({sensitivity:.2f}, "
+                f"knife-edge spots {list(self.ke_spots())} have a low sensitivity ({sensitivity:.2f}, "
                 f"below {self.config.ke_min_sensitivity}) for a pattern angle of {angle:.1f} deg"
             )
 
@@ -1777,7 +1850,7 @@ class adcCtrl(XDevice):
     def ke_lock_key(self):
         """Context a knife-edge spot lock is valid for; the lock is dropped when it changes."""
         return (self._camera_name, self._normalized_wavelength, self._use_sparkles,
-                self._sparkle_freq, self._sparkle_angle)
+                self._sparkle_freq, self._sparkle_angle, self._ke_mask)
 
     def ke_update_lock(self, location):
         """Keep `location` as the spot lock, keeping positions of spots it does not include."""
@@ -1791,11 +1864,16 @@ class adcCtrl(XDevice):
         Returns a dict of averaged results (see measure_dispersion, plus m,
         residual, setpoint and the star estimate), or None if the batch was
         aborted or had too few valid measurements. Outliers are rejected on m.
+        Frames are measured turned (ke_orient_frame), and the spot lock is kept
+        in the turned frame; the published angles, deviations and star are
+        mapped back to physical spots and frame pixels. For the bottom mask m
+        is negated (see below).
         """
         start_state = self._state
         geometry = self.spot_geometry()
         order = self._ke_order
         params = self.ke_params()
+        mask = self._ke_mask
         hint = self.config.cameras[self._camera_name].ke_star_hint or None
         key = self.ke_lock_key()
         if key != self._ke_lock_key:
@@ -1803,16 +1881,18 @@ class adcCtrl(XDevice):
             self._ke_lock_key = key
         n_total = self._no_measurements
         measurements = []
+        stars = []
 
         for k in range(n_total):
             if self._state != start_state:
                 self.log.info("state changed, measurement batch aborted")
                 return None
             try:
-                frame = self.grab_frame()
+                frame = np.asarray(self.grab_frame())
                 meas = measure_knife_edge(
-                    frame, geometry, order, self.config.pixel_scale_lod, params, prev=self._ke_lock,
-                    star_hint=hint, pad=self.config.pad, radial_bin=self.config.radial_bin,
+                    ke_orient_frame(frame, mask), geometry, order, self.config.pixel_scale_lod, params,
+                    prev=self._ke_lock, star_hint=hint and ke_orient_point(hint, frame.shape, mask),
+                    pad=self.config.pad, radial_bin=self.config.radial_bin,
                 )
                 if not np.isfinite(meas.m):
                     raise ValueError("non-finite knife-edge measurement")
@@ -1831,20 +1911,26 @@ class adcCtrl(XDevice):
             self.ke_update_lock(meas.location)
             self.log.debug(f"knife-edge angles: {meas.raw}, deviations: {meas.dev}, m: {meas.m}, star: {meas.location.star}")
             measurements.append(meas)
+            stars.append(ke_orient_point(meas.location.star, frame.shape, mask))
 
-        ms = np.array([meas.m for meas in measurements])
-        mask = inlier_mask(ms, self.config.outlier_k) if len(ms) else np.zeros(0, dtype=bool)
-        n_valid = int(np.sum(mask))
+        # Turning the frame also reverses the dispersion, so the bottom mask's m is
+        # negated (d_b - d_a) to keep one ke_gain, loop_sign and calibration procedure
+        sign = -1.0 if mask == "bottom" else 1.0
+        ms = sign * np.array([meas.m for meas in measurements])
+        inliers = inlier_mask(ms, self.config.outlier_k) if len(ms) else np.zeros(0, dtype=bool)
+        n_valid = int(np.sum(inliers))
         if n_total == 0 or n_valid / n_total < self.config.min_valid_fraction:
             self.log.warning(f"only {n_valid}/{n_total} valid measurements")
             return None
 
-        kept = [meas for meas, ok in zip(measurements, mask) if ok]
-        m = float(np.mean(ms[mask]))
+        kept = [meas for meas, ok in zip(measurements, inliers) if ok]
+        m = float(np.mean(ms[inliers]))
         residual, error = ke_error(m, self._ke_setpoint, self._ke_gain)
+        # Physical spot n is spot (n + 2) % 4 of the turned frame for the bottom mask
+        physical = list(ke_orient_spots(range(4), mask))
         result = {
-            "raw": np.mean([meas.raw for meas in kept], axis=0),
-            "dev": np.mean([meas.dev for meas in kept], axis=0),
+            "raw": np.mean([meas.raw for meas in kept], axis=0)[physical],
+            "dev": np.mean([meas.dev for meas in kept], axis=0)[physical],
             "pairs": np.zeros(2),
             "error": error,
             "n_valid": n_valid,
@@ -1852,7 +1938,7 @@ class adcCtrl(XDevice):
             "m": m,
             "residual": residual,
             "setpoint": self._ke_setpoint,
-            "star": np.median([meas.location.star for meas in kept], axis=0),
+            "star": np.median([star for star, ok in zip(stars, inliers) if ok], axis=0),
             "separation": float(np.median([meas.separation for meas in kept])) / self._normalized_wavelength,
             "angle": float(np.median([meas.location.angle for meas in kept])),
             "margin": float(np.median([meas.margin for meas in kept])),
@@ -1877,8 +1963,9 @@ class adcCtrl(XDevice):
         self.set_ke_setpoint(result["m"])
         self.log.info(
             f"captured knife-edge set point {self._ke_setpoint:.4f} deg at delta_1 = {self.delta_1:.4f} deg "
-            f"(camera {self._camera_name}, filter {self._filter_name}, spots {list(self._ke_order)}, "
-            f"{result['n_valid']}/{result['n_total']} valid); set ke_setpoint = {self._ke_setpoint:.4f} in the "
+            f"({self._ke_mask} mask, camera {self._camera_name}, filter {self._filter_name}, spots "
+            f"{list(self.ke_spots())}, {result['n_valid']}/{result['n_total']} valid); set "
+            f"ke_setpoint_{self._ke_mask} = {self._ke_setpoint:.4f} in the "
             f"config to keep it after a restart"
         )
         self.set_status(last_command="set point captured")
@@ -1911,7 +1998,7 @@ class adcCtrl(XDevice):
         self.update_property(self.properties["command"])
         record = {
             "state": state.name,
-            "mode": "knife_edge" if self._knife_edge else "standard",
+            "mode": self.coronagraph_name(),
             "angles": finite_list(result["raw"]),
             "deviations": finite_list(result["dev"]),
             "pairs": result["pairs"].tolist(),
@@ -1923,7 +2010,7 @@ class adcCtrl(XDevice):
         }
         if self._knife_edge:
             record.update({
-                "ke_spots": list(self._ke_order),
+                "ke_spots": list(self.ke_spots()),
                 "setpoint": result["setpoint"],
                 "m": result["m"],
                 "residual": result["residual"],
