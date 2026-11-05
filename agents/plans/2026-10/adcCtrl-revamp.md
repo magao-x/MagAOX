@@ -696,7 +696,7 @@ All of this goes in `app.py` (R7a).
 
 ## Knife-Edge Coronagraph Mode (planning, 2026-11-04)
 
-_Plan by Claude Opus 5.5 on `ktwitchell/adcCtrl-v2` (no new branch). Rev 1: 2026-11-04, initial draft. Rev 2: 2026-11-04, revised for the Round 1 answers. Main changes: two adjacent spots by default, the star position estimated from the spots themselves, and the set point persisted in config with a 24 h expiry. Rev 3: 2026-11-04, revised for the Round 2 answers. Main changes: a set-point file under `/home/xsup/adc_calibs/` instead of the config (dropped in Rev 4), a provisional `ke_gain` default of −0.62 derived from the DM-spot calibration, a guard so the edge margin cannot clip spot 3, and synthetic-only tests. Rev 4: 2026-11-04, revised for the Round 3 answers. The set-point file is dropped: there is one set point, starting at the config default and changed by capture or manual INDI entry, and it is not saved across restarts. Status: **implemented 2026-11-04 (§9 steps 1–4, see the Implementation Log); build-machine pytest passed 2026-11-05; on-instrument steps (§9.5) pending.**_
+_Plan by Claude Opus 5.5 on `ktwitchell/adcCtrl-v2` (no new branch). Rev 1: 2026-11-04, initial draft. Rev 2: 2026-11-04, revised for the Round 1 answers. Main changes: two adjacent spots by default, the star position estimated from the spots themselves, and the set point persisted in config with a 24 h expiry. Rev 3: 2026-11-04, revised for the Round 2 answers. Main changes: a set-point file under `/home/xsup/adc_calibs/` instead of the config (dropped in Rev 4), a provisional `ke_gain` default of −0.62 derived from the DM-spot calibration, a guard so the edge margin cannot clip spot 3, and synthetic-only tests. Rev 4: 2026-11-04, revised for the Round 3 answers. The set-point file is dropped: there is one set point, starting at the config default and changed by capture or manual INDI entry, and it is not saved across restarts. Status: **implemented 2026-11-04 (§9 steps 1–4, see the Implementation Log); build-machine pytest passed 2026-11-05; on-instrument steps (§9.5) in progress. Rev 5: 2026-11-05, the mask parity design (see "On-Instrument Results and Mask Parity"); not yet implemented.**_
 
 ### Prompt (verbatim, for the record)
 > time to add a new feature to the app. do not write any code - we're just planning for now. Review the current implementation of the app. The app is designed to work with a coronagraph that blocks the central PSF, but it is not designed to work with the knife-edge coronagraph, which blocks half the FOV. Review what a knife-edge coronagraph is before continuing. we will need to make a new state within the app that the user activates when the knife-edge coronagraph is being used. we will use the same method to extract the amount of dispersion, but instead of having pointing pairs we will only have a single satellite spot. this means we will have to drive the system towards a set point that is not a zero state, like we were before. write a plan to implement this idea into the current code, and ask any relevant quesitons. Include this prompt in the plan for documentation purposes as well.
@@ -1070,6 +1070,32 @@ Tests were run locally with the adc_sims venv (numpy, scipy, hcipy) and minimal 
 All 51 tests pass locally (31 existing, unchanged; 20 new).
 
 **Build machine (2026-11-05).** `python -m pytest apps/adcCtrl/test -v` on the MagAO-X machine, with the real `xconf`, `purepyindi2` and `magaox`: all 51 tests pass. The on-instrument steps (§9.5) are next.
+
+### On-Instrument Results and Mask Parity (Rev 5 design, 2026-11-05)
+
+**§9.5 results so far (reported by the user).**
+1. **Transmitted half:** it depends on which knife-edge mask is inserted. There is one mask of each parity (top half transmitted, bottom half transmitted), so the app must handle both. The current code assumes the top (+y, increasing row) half only.
+2. **Star estimate:** consistent and correct.
+3. **Set point:** nearly constant around **−1.2°** at a good ADC position. This was on the mask the current code supports, so the top-half mask is assumed.
+4. **`ke_gain` calibration, one-shot and closed loop:** in progress.
+
+**Decisions (user, 2026-11-05).** The parity is picked with an INDI switch, not read from the FPM wheel. The default spots for the bottom mask are the mirror of `[0, 3]`, i.e. `[2, 1]`. Each mask has its own set-point default.
+
+**Design.**
+- **Switch.** `coronagraph` = `standard` / `knife_edge_top` / `knife_edge_bottom`, still idle only. `knife_edge` is renamed to `knife_edge_top`. `CORONAGRAPHS` maps each element to `None`, `"top"` or `"bottom"`.
+- **180° rotation.** For the bottom mask, each frame is rotated by 180° (`frame[::-1, ::-1]`) and the selected spots are relabelled `n → (n + 2) % 4` before the existing pipeline runs. The bottom-mask image then looks exactly like a top-mask image, so `locate_knife_edge_spots`, the masking and `measure_knife_edge` stay the same. A spot's elongation axis does not change under a 180° rotation, so `d_n`, `m` and the control sign are unchanged. Only the star position is mapped back to frame pixels (`x → nx − 1 − x`, `y → ny − 1 − y`), and `ke_star_hint` is mapped in.
+- **Spots.** `ke_spots` always shows the physical spots. Switching between the two masks mirrors the selection (`n → (n + 2) % 4`), so `[0, 3]` on the top mask becomes `[2, 1]` on the bottom. The config `ke_spots` stays the top-mask selection. The blocked-half and sensitivity checks use the relabelled spots.
+- **Set point.** Config `ke_setpoint` is replaced by `ke_setpoint_top` (default −1.2) and `ke_setpoint_bottom` (default 0, until measured). The app keeps one in-memory set point per mask. Switching masks restores that mask's last value (captured, entered or default), and `ke_setpoint` shows the current mask's value. Expiry and the "still the config default" check work per mask. Nothing is saved across restarts, as in Rev 4.
+- **`ke_gain`.** One value for both masks. After the rotation, the mirrored pair has the same geometry, so the gain should carry over. Confirm on the instrument with the bottom mask.
+- **Lock.** The lock key gains the parity, so a lock is never reused across masks.
+- **Telemetry.** `mode` becomes `standard`, `knife_edge_top` or `knife_edge_bottom`.
+- **Tests.**
+  - A bottom-mask frame is a top-mask frame rotated by 180° (`make_ke_frame(...)[::-1, ::-1]`) and gives the same `m`, with the star mapped back.
+  - The switch mirrors `ke_spots` and swaps set points.
+  - Closed loop converges with the bottom mask using the same `loop_sign` and `ke_gain`.
+  - The existing knife-edge tests switch to `knife_edge_top`.
+
+**On-instrument follow-up.** With the bottom mask: measure-only (star estimate), capture its set point (it then goes in `ke_setpoint_bottom`), and check that the same `ke_gain` and `loop_sign` converge.
 
 ### References
 - MagAO-X PAPLC knife-edge mask (reflective D-shaped mirror at ~1.1 λ/D, adjustable IWA): [arXiv:2607.08146](https://arxiv.org/pdf/2607.08146), [arXiv:2303.13719](https://arxiv.org/pdf/2303.13719)
