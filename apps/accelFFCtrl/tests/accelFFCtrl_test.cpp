@@ -63,23 +63,25 @@ pcf::IndiProperty scalarRequest( const std::string &name /**< [in] numerical pro
  */
 TEST_CASE( "accelFFCtrl application configuration", "[accelFFCtrl][app]" )
 {
-    observerApp app;
-    app.setupConfig();
-    std::string example;
-    for( const char *path : { "apps/accelFFCtrl/config/example.conf",
-                              "../apps/accelFFCtrl/config/example.conf",
-                              "../config/example.conf" } )
-        if( std::filesystem::exists( path ) )
-            example = path;
-    REQUIRE_FALSE( example.empty() );
-    app.config.readConfig( example );
-    REQUIRE( app.loadConfigImpl( app.config ) == 0 );
-    REQUIRE( app.m_inputName == "acc000" );
-    REQUIRE( app.m_requested.m_predictionNs == 1000000 );
-    REQUIRE( app.m_requested.m_zero == std::array<double, 2>{ 2048, 2048 } );
-    REQUIRE( app.m_requested.m_voltsPerBit[0] == .0083799 );
-    REQUIRE( app.m_requested.m_sensitivity[1] == 1.02 );
-    REQUIRE( app.m_loopPause == 200000000 );
+    { // Release the framework singleton before constructing the invalid-configuration fixtures.
+        observerApp app;
+        app.setupConfig();
+        std::string example;
+        for( const char *path : { "apps/accelFFCtrl/config/example.conf",
+                                  "../apps/accelFFCtrl/config/example.conf",
+                                  "../config/example.conf" } )
+            if( std::filesystem::exists( path ) )
+                example = path;
+        REQUIRE_FALSE( example.empty() );
+        app.config.readConfig( example );
+        REQUIRE( app.loadConfigImpl( app.config ) == 0 );
+        REQUIRE( app.m_inputName == "acc000" );
+        REQUIRE( app.m_requested.m_predictionNs == 1000000 );
+        REQUIRE( app.m_requested.m_zero == std::array<double, 2>{ 2048, 2048 } );
+        REQUIRE( app.m_requested.m_voltsPerBit[0] == .0083799 );
+        REQUIRE( app.m_requested.m_sensitivity[1] == 1.02 );
+        REQUIRE( app.m_loopPause == 200000000 );
+    }
     for( const std::string text : { "[input]\nshmimName=dm01disp00\n",
                                     "[input]\nmaxBatch=0\n",
                                     "[input]\nmaxAge_us=0\n",
