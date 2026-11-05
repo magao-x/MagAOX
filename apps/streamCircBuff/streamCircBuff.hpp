@@ -36,8 +36,9 @@ namespace app
  * the copy is dropped, and the number of such frames is logged.
  *
  * The output keeps the source data type unless `circBuff.toFloat` is set, e.g. for modalPSDs, which reads
- * float.  The source frame rate is measured from the source acquisition times and counters, and published
- * as `fps.current`, so it can be used as the fps source of readers such as modalPSDs.
+ * float.  The frame rate is read from the `circBuff.fpsDevice` property if one is configured, and otherwise
+ * measured from the source acquisition times and counters.  It changes only by more than `circBuff.fpsTol`,
+ * and is published as `fps.current`, so it can be used as the fps source of readers such as modalPSDs.
  *
  * \ingroup streamCircBuff
  */
@@ -189,7 +190,7 @@ class streamCircBuff : public MagAOXApp<true>,
                       const dev::shmimT &dummy     /**< [in] tag to differentiate shmimMonitor parents. */
     );
 
-    /// Update the measured source frame rate with a staged frame
+    /// Update the measured source frame rate with a staged frame, when no fps device is configured
     /** The rate is measured from the source acquisition times and counters over at least 1 second, so dropped
      * frames do not bias it, and m_fps is only changed when the rate changes by more than m_fpsTol.
      */
