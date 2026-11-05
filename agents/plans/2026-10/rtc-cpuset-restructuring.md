@@ -580,9 +580,11 @@ real-time, restoring complete cache-domain separation from `system`.
 
 Domain5 is then tweeter monitor, synco, SDK worker, PO4AO, post worker,
 `acqu_mvm`, `mfilt` and `tweeterSpeck`. Moving the two recorders out also
-removes their bulk copies from the loop's L3. The release observer stays on
-CPU57: production uses `simulation.readerReleaseReady=false`, so it does not
-gate delivery. `dm01comb` (CPU39) remains in domain4, so the
+removes their bulk copies from the loop's L3. The release observer keeps a
+dedicated core on CPU57: production mode requires it and uses its records to
+grant and revoke write clearance (`simulation.readerReleaseReady` applies only
+to simulation). The operator chose to keep it there rather than displace
+`tweeterSpeck` from domain5. `dm01comb` (CPU39) remains in domain4, so the
 synco → combiner → monitor handoffs still cross L3 domains; moving the combiner
 would require displacing a loop or camera thread and is deferred.
 
