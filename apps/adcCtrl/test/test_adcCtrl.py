@@ -27,6 +27,7 @@ sys.path.insert(0, str(app_root))
 import xapp.adcCtrl.app as app_module
 from xapp.adcCtrl.app import (
     AdcCtrlConfig,
+    KnifeEdgeParams,
     SpotGeometry,
     States,
     adcCtrl,
@@ -34,6 +35,12 @@ from xapp.adcCtrl.app import (
     crop_image,
     expected_axes,
     inlier_mask,
+    ke_blocked_spots,
+    ke_sensitivity,
+    ke_spot_order,
+    ke_star_from_pair,
+    locate_knife_edge_spots,
+    measure_knife_edge,
     measure_spot_angles,
     moment_angle,
     pair_offsets,
@@ -103,12 +110,14 @@ def make_frame(
     spot_amp=60.0,
     noise=0.0,
     seed=0,
+    center=(0.0, 0.0),
 ):
     """Broadband PSF core plus four satellite spots, in camera pixels.
 
     `separation` is in lambda/D at the observing wavelength and `angle` rotates
     the spot pattern clockwise, matching speckle_cutout. `dispersion` is the
-    core shift (x, y) in reference lambda/D across the full band.
+    core shift (x, y) in reference lambda/D across the full band. `center` is
+    the star position (x, y) in reference lambda/D from the frame center.
     """
     ny = nx = size
     x = (np.arange(nx) - (nx - 1) / 2) * PIXEL_SCALE
@@ -122,7 +131,7 @@ def make_frame(
     for frac in fractions:
         lam = wavelength * (1 + bandwidth * frac)
         s = lam / lam_ref
-        cx, cy = dispersion[0] * frac, dispersion[1] * frac
+        cx, cy = center[0] + dispersion[0] * frac, center[1] + dispersion[1] * frac
         sigma = 0.45 * s
         frame += core_amp * np.exp(-((xx - cx) ** 2 + (yy - cy) ** 2) / (2 * sigma**2))
         for p in polar:
@@ -138,6 +147,50 @@ def make_frame(
 
 def sparkle_geometry(separation=15.0, angle=0.0, normalized_wavelength=1.0):
     return SpotGeometry(separation * normalized_wavelength, angle, 20, 20.0)
+
+
+def frame_coords(frame):
+    """Reference lambda/D coordinates (xx, yy) of a make_frame frame, origin at the frame center."""
+    ny, nx = frame.shape
+    x = (np.arange(nx) - (nx - 1) / 2) * PIXEL_SCALE
+    y = (np.arange(ny) - (ny - 1) / 2) * PIXEL_SCALE
+    return np.meshgrid(x, y)
+
+
+def to_pixels(frame, point):
+    """Frame pixel (x, y) of a point given in reference lambda/D from the frame center."""
+    ny, nx = frame.shape
+    return point[0] / PIXEL_SCALE + (nx - 1) / 2, point[1] / PIXEL_SCALE + (ny - 1) / 2
+
+
+def make_ke_frame(separation=15.0, angle=17.0, center=(2.0, -3.0), edge=1.1, glint_amp=0.0, halo_amp=0.0,
+                  noise=0.0, seed=0, **kwargs):
+    """A make_frame frame behind a knife edge.
+
+    Everything below a horizontal edge `edge` lambda/D above the star is
+    blocked. Optional: a smooth halo, a glint line along the edge (fading
+    over ~5 lambda/D to the sides of the star), and noise over the whole
+    frame.
+    """
+    frame = make_frame(separation=separation, angle=angle, center=center, **kwargs)
+    xx, yy = frame_coords(frame)
+    if halo_amp:
+        frame += halo_amp * np.exp(-np.hypot(xx - center[0], yy - center[1]) / 8.0)
+    edge_y = center[1] + edge
+    frame *= yy > edge_y
+    if glint_amp:
+        frame += glint_amp * np.exp(-((yy - edge_y) ** 2) / (2 * 0.3**2) - (xx - center[0]) ** 2 / (2 * 5.0**2))
+    if noise > 0:
+        frame += np.random.default_rng(seed).normal(0, noise, frame.shape)
+    return frame
+
+
+def ke_geometry(separation=15.0, angle=17.0):
+    """Sparkle search geometry with the default config's window and search sizes."""
+    config = AdcCtrlConfig()
+    return SpotGeometry(
+        separation, angle, config.sparkle_window_size, config.sparkle_search_extent, config.sparkle_search_halfwidth,
+    )
 
 
 # --------------------------------------------------------------------------
@@ -359,6 +412,167 @@ def test_pair_offsets_linear_in_dispersion():
     assert abs(slope) > 1.0
     assert r2 > 0.99, r2
     assert np.sign(pair02[0]) == -np.sign(pair02[-1])
+
+
+# --------------------------------------------------------------------------
+# Knife-edge algorithm
+# --------------------------------------------------------------------------
+
+def test_ke_spot_selection_geometry():
+    """Spot selections are ordered b counter-clockwise of a; opposite pairs are refused."""
+    assert ke_spot_order([0, 3]) == (0, 3)
+    assert ke_spot_order([3, 0]) == (0, 3)
+    assert ke_spot_order([0, 1]) == (1, 0)
+    assert ke_spot_order([2]) == (2,)
+    for bad in [[0, 2], [1, 3], [0, 1, 2], [], [4]]:
+        try:
+            ke_spot_order(bad)
+        except ValueError:
+            continue
+        raise AssertionError(bad)
+    # sparkles at 15-20 deg: spots 0 and 3 visible, spot 0 alone has low sensitivity
+    assert ke_blocked_spots((0, 3), 17.0) == []
+    assert ke_blocked_spots((1, 0), 17.0) == [1]
+    assert abs(ke_sensitivity((0,), 15.0) - np.sin(np.radians(15.0))) < 1e-12
+    assert abs(ke_sensitivity((0, 3), 15.0) - (np.sin(np.radians(15.0)) + np.cos(np.radians(15.0)))) < 1e-12
+    # star at the right-angle corner
+    star, sep = ke_star_from_pair([3.0, 10.0], [-10.0, 3.0])
+    np.testing.assert_allclose(star, [0.0, 0.0], atol=1e-12)
+    assert abs(sep - np.hypot(3.0, 10.0)) < 1e-12
+
+
+def test_ke_star_estimate_needs_no_angle():
+    """The two-spot star estimate is within 0.5 l/D for several angles and separations, with no angle given."""
+    for separation, angle, spots in [(10.0, 15.0, [0, 3]), (15.0, 20.0, [0, 3]), (12.0, 28.0, [0, 3]),
+                                     (15.0, -20.0, [0, 1])]:
+        center = (2.0, -3.0)
+        frame = make_ke_frame(separation=separation, angle=angle, center=center)
+        result = measure_knife_edge(frame, ke_geometry(separation, angle=0.0), ke_spot_order(spots), PIXEL_SCALE)
+        star = np.array(result.location.star)
+        error = np.hypot(*(star - to_pixels(frame, center))) * PIXEL_SCALE
+        assert error < 0.5, (separation, angle, error)
+        assert abs(result.separation - separation) < 0.3, (separation, result.separation)
+        assert abs(result.location.angle - angle) < 1.0, (angle, result.location.angle)
+
+
+def test_ke_dm_spots():
+    """DM spots at 47 l/D and 28 deg (i band) are found, with the star and deviations recovered."""
+    config = AdcCtrlConfig()
+    nwl = 762e-9 / 656e-9
+    center = (3.0, -20.0)
+    frame = make_ke_frame(size=480, separation=47.0, angle=28.0, wavelength=762e-9, center=center)
+    geometry = SpotGeometry(
+        47.0 * nwl, 28.0, config.dm_window_size, config.dm_search_extent, config.dm_search_halfwidth,
+    )
+    result = measure_knife_edge(frame, geometry, (0, 3), PIXEL_SCALE)
+    assert np.hypot(*(np.array(result.location.star) - to_pixels(frame, center))) * PIXEL_SCALE < 0.5
+    assert np.all(np.abs(result.dev[[0, 3]]) < 1.0), result.dev
+
+
+def test_ke_glint_and_noise_do_not_capture_search():
+    """A bright edge glint and noise in the blocked half do not capture the spot search."""
+    center = (2.0, -3.0)
+    frame = make_ke_frame(center=center, glint_amp=200.0, noise=1.0)
+    result = measure_knife_edge(frame, ke_geometry(), ke_spot_order([0, 3]), PIXEL_SCALE)
+    star = np.array(result.location.star)
+    assert np.hypot(*(star - to_pixels(frame, center))) * PIXEL_SCALE < 0.5
+    assert np.all(np.abs(result.dev[[0, 3]]) < 1.0), result.dev
+
+
+def test_ke_bootstrap_rejects_distractors_and_wrong_separation():
+    """The bootstrap finds the right pair among brighter blobs, and finds no pair at the wrong separation.
+
+    The blob at (0, 32) is at the right spacing from spot 0 but much
+    brighter, so it is rejected by the brightness ratio.
+    """
+    center = (2.0, -3.0)
+    frame = make_ke_frame(center=center)
+    xx, yy = frame_coords(frame)
+    for bx, by in [(-28.0, 28.0), (22.0, 2.0), (0.0, 32.0)]:
+        frame += 150.0 * np.exp(-((xx - bx) ** 2 + (yy - by) ** 2) / (2 * 0.45**2))
+    geometry = ke_geometry()
+    result = measure_knife_edge(frame, geometry, (0, 3), PIXEL_SCALE)
+    assert np.hypot(*(np.array(result.location.star) - to_pixels(frame, center))) * PIXEL_SCALE < 0.5
+    assert result.location.method == "bootstrap"
+
+    try:
+        locate_knife_edge_spots(
+            make_ke_frame(center=center), (0, 3), 1.5 * 15.0 / PIXEL_SCALE, 17.0, PIXEL_SCALE, KnifeEdgeParams(),
+            refine_half=10,
+        )
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("a pair was found at 1.5x the separation")
+
+
+def test_ke_tracking_follows_star():
+    """After a lock, spots are tracked from the previous frame; a large jump falls back to the bootstrap."""
+    geometry = ke_geometry()
+    first = measure_knife_edge(make_ke_frame(center=(2.0, -3.0)), geometry, (0, 3), PIXEL_SCALE)
+    moved = make_ke_frame(center=(2.5, -2.6))
+    second = measure_knife_edge(moved, geometry, (0, 3), PIXEL_SCALE, prev=first.location)
+    assert second.location.method == "tracked"
+    assert np.hypot(*(np.array(second.location.star) - to_pixels(moved, (2.5, -2.6)))) * PIXEL_SCALE < 0.5
+    far = make_ke_frame(center=(-8.0, 4.0))
+    third = measure_knife_edge(far, geometry, (0, 3), PIXEL_SCALE, prev=first.location)
+    assert third.location.method == "bootstrap"
+    assert np.hypot(*(np.array(third.location.star) - to_pixels(far, (-8.0, 4.0)))) * PIXEL_SCALE < 0.5
+
+
+def test_ke_deviations_one_and_two_spots():
+    """Undispersed spots give deviations within 0.5 deg; rigid pattern rotation leaves two-spot m unchanged."""
+    frame = make_ke_frame(angle=20.0)
+    two = measure_knife_edge(frame, ke_geometry(angle=20.0), (0, 3), PIXEL_SCALE)
+    assert np.all(np.abs(two.dev[[0, 3]]) < 0.5), two.dev
+    assert np.all(np.isnan(two.dev[[1, 2]]))
+    assert abs(two.m - (two.dev[0] - two.dev[3])) < 1e-12
+
+    for spot in [0, 3]:
+        one = measure_knife_edge(frame, ke_geometry(angle=20.0), (spot,), PIXEL_SCALE)
+        assert abs(one.m) < 0.5, (spot, one.m)
+        assert abs(one.m - two.dev[spot]) < 0.3
+
+    # a 3 deg error in the configured angle (e.g. tweeterSpeck) cancels in the two-spot m only
+    two_off = measure_knife_edge(frame, ke_geometry(angle=17.0), (0, 3), PIXEL_SCALE)
+    one_off = measure_knife_edge(frame, ke_geometry(angle=17.0), (3,), PIXEL_SCALE)
+    assert abs(two_off.m - two.m) < 0.3, (two_off.m, two.m)
+    assert abs(abs(one_off.m) - 3.0) < 0.5, one_off.m
+
+
+def test_ke_single_spot_seeded_by_star_hint():
+    """One spot is found from a rough star hint even when a brighter blob is elsewhere."""
+    center = (2.0, -3.0)
+    frame = make_ke_frame(center=center)
+    xx, yy = frame_coords(frame)
+    frame += 150.0 * np.exp(-((xx + 25.0) ** 2 + (yy - 25.0) ** 2) / (2 * 0.45**2))
+    hint = to_pixels(frame, (center[0] + 3.0, center[1] - 2.0))
+    result = measure_knife_edge(frame, ke_geometry(), (3,), PIXEL_SCALE, star_hint=hint)
+    assert result.location.method == "hint"
+    assert abs(result.m) < 0.5
+    assert np.hypot(*(np.array(result.location.star) - to_pixels(frame, center))) * PIXEL_SCALE < 0.5
+
+
+def test_ke_half_plane_profile_removes_halo():
+    """A half-plane halo is removed without biasing the spot angles by more than 0.5 deg."""
+    clean = measure_knife_edge(make_ke_frame(), ke_geometry(), (0, 3), PIXEL_SCALE)
+    halo = measure_knife_edge(make_ke_frame(halo_amp=20.0), ke_geometry(), (0, 3), PIXEL_SCALE)
+    assert np.all(np.abs(halo.dev[[0, 3]] - clean.dev[[0, 3]]) < 0.5), (halo.dev, clean.dev)
+
+
+def test_ke_margin_guard_keeps_clear_of_spot():
+    """Spot 3 at 10 l/D, 15 deg sits 2.6 l/D above the star: the margin is capped and spot 3 is unbiased."""
+    frame = make_ke_frame(separation=10.0, angle=15.0)
+    geometry = ke_geometry(separation=10.0, angle=15.0)
+    height = 10.0 * np.sin(np.radians(15.0))
+    for edge_margin in [1.5, 5.0]:
+        result = measure_knife_edge(frame, geometry, (0, 3), PIXEL_SCALE, KnifeEdgeParams(edge_margin=edge_margin))
+        assert result.margin_capped
+        assert abs(result.margin - (height - 1.5)) < 0.3, result.margin
+        assert abs(result.dev[3]) < 0.5, result.dev
+    wide = measure_knife_edge(make_ke_frame(separation=15.0, angle=20.0), ke_geometry(angle=20.0), (0, 3),
+                              PIXEL_SCALE)
+    assert not wide.margin_capped and wide.margin == 1.5
 
 
 # --------------------------------------------------------------------------

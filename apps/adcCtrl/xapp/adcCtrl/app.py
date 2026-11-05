@@ -436,6 +436,364 @@ def measure_spot_angles(frame, geometry, pixel_scale, pad=50, mask_factor=0.7, r
     return raw, deviations
 
 
+# --------------------------------------------------------------------------
+# Knife-edge coronagraph mode
+#
+# The knife edge blocks the star and the lower half of the science camera
+# image, so only the spots in the upper (+y, increasing row) half are seen.
+# The star position is estimated from the visible spots each frame, and the
+# loop controls on one spot's deviation, or the difference of two adjacent
+# spots' deviations, relative to a captured set point.
+# --------------------------------------------------------------------------
+
+class KnifeEdgeParams(NamedTuple):
+    """Tuning of the knife-edge spot search and masking, all in reference lambda/D."""
+    edge_margin: float = 1.5  # half-plane mask line above the estimated star
+    spot_clearance: float = 1.5  # minimum distance kept between the mask line and a selected spot center
+    pair_tolerance: float = 0.1  # fractional tolerance on spot spacing and separation when matching spots
+    max_star_jump: float = 3.0  # largest star move between frames before the lock is dropped
+    track_box: float = 3.0  # half-width of the box searched around each locked spot position
+    highpass: float = 2.0  # sigma of the smoothed copy subtracted before the spot search
+    hint_tolerance: float = 5.0  # half-width of the box searched around a spot predicted from the star hint
+    brightness_ratio: float = 3.0  # largest brightness ratio between two spots accepted as a pair
+
+
+class KnifeEdgeLocation(NamedTuple):
+    """Spot and star positions found in one knife-edge frame, in frame pixels (x = column, y = row)."""
+    positions: dict  # spot index -> (x, y) centroid
+    star: tuple  # (x, y) estimated star position
+    separation_px: float  # spot distance from the star [pixels]
+    angle: float  # clockwise rotation of the spot pattern [deg]
+    method: str  # "bootstrap", "tracked" or "hint"
+
+
+class KnifeEdgeMeasurement(NamedTuple):
+    """Result of measure_knife_edge for one frame."""
+    raw: np.ndarray  # moment_angle results [deg], NaN for unselected spots
+    dev: np.ndarray  # deviations from the nominal radial axes [deg], NaN for unselected spots
+    m: float  # measured quantity: d_a - d_b for two spots, d_a for one [deg]
+    location: KnifeEdgeLocation  # where the spots and star were found
+    separation: float  # spot distance from the star [reference lambda/D]
+    margin: float  # half-plane mask line actually used, above the star [reference lambda/D]
+    margin_capped: bool  # True if the margin was lowered to keep clear of a selected spot
+
+
+def spot_position_angle(spot, angle):
+    """Position angle [deg, from +x counter-clockwise] of spot 0-3 in a pattern rotated clockwise by `angle`."""
+    return 90.0 - angle - 90.0 * spot
+
+
+def ke_spot_order(spots):
+    """Validate a knife-edge spot selection and return it in measurement order.
+
+    A selection is one spot, or two adjacent spots. For two spots the result
+    is `(a, b)` with b the counter-clockwise neighbour of a, so that
+    `m = d_a - d_b`; for spots 0 and 3 this is `(0, 3)`. Raises ValueError for
+    any other selection.
+    """
+    spots = sorted(set(int(s) for s in spots))
+    if any(s not in range(4) for s in spots):
+        raise ValueError(f"spot indices must be 0-3, got {spots}")
+    if len(spots) == 1:
+        return (spots[0],)
+    if len(spots) == 2:
+        i, j = spots
+        if (i - 1) % 4 == j:
+            return (i, j)
+        if (j - 1) % 4 == i:
+            return (j, i)
+        raise ValueError(f"spots {i} and {j} are opposite, not adjacent")
+    raise ValueError(f"select one spot or two adjacent spots, got {spots}")
+
+
+def ke_sensitivity(order, angle):
+    """Relative response of `m` to vertical (counter-rotation) dispersion.
+
+    A spot's tilt responds as cos of its position angle, so this is
+    `cos(phi_a) - cos(phi_b)` for two spots and `cos(phi_a)` for one. The
+    standard-mode pair13 is `2 cos(angle)` on the same scale.
+    """
+    cosines = [np.cos(np.radians(spot_position_angle(n, angle))) for n in order]
+    return float(cosines[0] - cosines[1]) if len(order) == 2 else float(cosines[0])
+
+
+def ke_blocked_spots(order, angle):
+    """Spots of `order` that fall in the blocked (lower) half for pattern angle `angle`."""
+    return [n for n in order if np.sin(np.radians(spot_position_angle(n, angle))) <= 0]
+
+
+def ke_star_from_pair(p_a, p_b):
+    """Star position from two adjacent spots, b counter-clockwise of a.
+
+    The spots are equidistant from the star and 90 degrees apart, so the star
+    is the right-angle corner of the isosceles right triangle they form.
+    Returns `(star, separation)`.
+    """
+    p_a = np.asarray(p_a, dtype=float)
+    p_b = np.asarray(p_b, dtype=float)
+    d = p_b - p_a
+    star = (p_a + p_b) / 2 + np.array([-d[1], d[0]]) / 2
+    return star, float(np.hypot(*d) / np.sqrt(2))
+
+
+def ke_pattern_angle(spot, position, star):
+    """Clockwise pattern rotation [deg, in (-180, 180]] implied by spot `spot` at `position`."""
+    phi = np.degrees(np.arctan2(position[1] - star[1], position[0] - star[0]))
+    angle = 90.0 - 90.0 * spot - phi
+    return float(-((-angle + 180.0) % 360.0 - 180.0))
+
+
+def ke_highpass(frame, spot_sigma_px, highpass_px):
+    """High-pass the frame for the spot search.
+
+    A difference of Gaussians keeps spot-sized features and removes the
+    smooth halo. Each row's median is then subtracted: the knife edge is
+    horizontal, so its glint is a line along rows, while a spot covers only a
+    small part of a row.
+    """
+    image = ndimage.gaussian_filter(frame, spot_sigma_px) - ndimage.gaussian_filter(frame, highpass_px)
+    return image - np.median(image, axis=1, keepdims=True)
+
+
+def ke_refine(image, x, y, half):
+    """Centroid of the positive part of `image` in a box of half-width `half` pixels around (x, y)."""
+    ny, nx = image.shape
+    x0, x1 = max(0, int(round(x)) - half), min(nx, int(round(x)) + half + 1)
+    y0, y1 = max(0, int(round(y)) - half), min(ny, int(round(y)) + half + 1)
+    box = np.maximum(image[y0:y1, x0:x1], 0.0)
+    total = np.sum(box)
+    if total <= 0:
+        return float(x), float(y)
+    yy, xx = np.mgrid[y0:y1, x0:x1]
+    return float(np.sum(xx * box) / total), float(np.sum(yy * box) / total)
+
+
+def ke_box_peak(image, x, y, half):
+    """Pixel (x, y) of the maximum of `image` in a box of half-width `half` around (x, y), or None."""
+    ny, nx = image.shape
+    x0, x1 = max(0, int(round(x - half))), min(nx, int(round(x + half)) + 1)
+    y0, y1 = max(0, int(round(y - half))), min(ny, int(round(y + half)) + 1)
+    if x1 <= x0 or y1 <= y0:
+        return None
+    box = image[y0:y1, x0:x1]
+    iy, ix = np.unravel_index(np.argmax(box), box.shape)
+    if box[iy, ix] <= 0:
+        return None
+    return float(x0 + ix), float(y0 + iy)
+
+
+def ke_candidates(image, min_distance_px, refine_half, n_max=12):
+    """Up to `n_max` brightest local maxima of `image`, as refined (x, y, peak) tuples."""
+    size = 2 * int(round(min_distance_px)) + 1
+    peaks = (image == ndimage.maximum_filter(image, size=size)) & (image > 0)
+    ys, xs = np.nonzero(peaks)
+    order = np.argsort(image[ys, xs])[::-1][:n_max]
+    return [(*ke_refine(image, xs[k], ys[k], refine_half), float(image[ys[k], xs[k]])) for k in order]
+
+
+def locate_knife_edge_spots(frame, order, separation_px, angle, pixel_scale, params, refine_half,
+                            prev=None, star_hint=None):
+    """Find the selected spots and estimate the star in a knife-edge frame.
+
+    Two spots: the star is the right-angle corner of the triangle they form
+    (`ke_star_from_pair`), so neither the star nor the pattern angle needs to
+    be known. One spot: the star is placed `separation_px` from the spot
+    along its nominal direction for pattern angle `angle`.
+
+    The spots are first looked for around their positions in `prev` (a
+    KnifeEdgeLocation, possibly from another selection). If that fails, or
+    the star moves more than `params.max_star_jump`, they are found again
+    (the bootstrap):
+
+    - two spots: the brightest pair of local maxima with the expected
+      spacing, similar brightness, and the star below both;
+    - one spot: from `star_hint` (frame pixels) if given; else as part of a
+      pair with either neighbour, found as above. A pair of adjacent spots
+      fits either labelling, so the one whose pattern angle is closest to
+      `angle` is used. Else the brightest local maximum.
+
+    Raises ValueError if no consistent spots are found.
+    """
+    hp_img = ke_highpass(frame, 0.5 / pixel_scale, params.highpass / pixel_scale)
+    tol = params.pair_tolerance
+    max_jump_px = params.max_star_jump / pixel_scale
+
+    def locked(positions, order):
+        """(star, separation, angle) from refined spot positions, or None if inconsistent."""
+        if len(order) == 2:
+            p_a, p_b = positions[order[0]], positions[order[1]]
+            star, sep = ke_star_from_pair(p_a, p_b)
+            if abs(sep - separation_px) > tol * separation_px:
+                return None
+            if star[1] >= min(p_a[1], p_b[1]):
+                return None
+            spot_angle = ke_pattern_angle(order[0], p_a, star)
+        else:
+            phi = np.radians(spot_position_angle(order[0], angle))
+            p = positions[order[0]]
+            star = np.array([p[0] - separation_px * np.cos(phi), p[1] - separation_px * np.sin(phi)])
+            sep, spot_angle = separation_px, angle
+        return star, sep, spot_angle
+
+    def result(positions, method, order=order):
+        """KnifeEdgeLocation for `order` from refined spot positions, or None if inconsistent."""
+        found = locked(positions, order)
+        if found is None:
+            return None
+        star, sep, spot_angle = found
+        if method == "tracked" and np.hypot(*(star - np.asarray(prev.star))) > max_jump_px:
+            return None
+        return KnifeEdgeLocation(dict(positions), (float(star[0]), float(star[1])), sep, spot_angle, method)
+
+    # 1. track from the previous frame
+    if prev is not None and all(n in prev.positions for n in order):
+        positions = {}
+        for n in order:
+            peak = ke_box_peak(hp_img, *prev.positions[n], params.track_box / pixel_scale)
+            if peak is None:
+                break
+            positions[n] = ke_refine(hp_img, *peak, refine_half)
+        else:
+            found = result(positions, "tracked")
+            if found is not None:
+                return found
+
+    candidates = ke_candidates(hp_img, refine_half, refine_half)
+
+    def best_pair(pair):
+        """(location, score) of the brightest consistent candidate pair for spots `pair`, or (None, -inf)."""
+        spacing = np.sqrt(2) * separation_px
+        best, best_score = None, -np.inf
+        for i in range(len(candidates)):
+            for j in range(i + 1, len(candidates)):
+                p, q = candidates[i], candidates[j]
+                if abs(np.hypot(p[0] - q[0], p[1] - q[1]) - spacing) > tol * spacing:
+                    continue
+                if max(p[2], q[2]) > params.brightness_ratio * min(p[2], q[2]):
+                    continue
+                for p_a, p_b in ((p, q), (q, p)):
+                    found = result({pair[0]: p_a[:2], pair[1]: p_b[:2]}, "bootstrap", order=pair)
+                    if found is not None and p[2] + q[2] > best_score:
+                        best, best_score = found, p[2] + q[2]
+        return best, best_score
+
+    # 2. two spots: brightest consistent pair of local maxima
+    if len(order) == 2:
+        best, _ = best_pair(order)
+        if best is None:
+            raise ValueError("no pair of spots with the expected spacing found")
+        return best
+
+    # 3. one spot: seed from the star hint, else identify it in a pair, else take the brightest blob
+    n = order[0]
+    if star_hint is not None and len(star_hint) == 2:
+        phi = np.radians(spot_position_angle(n, angle))
+        guess = (star_hint[0] + separation_px * np.cos(phi), star_hint[1] + separation_px * np.sin(phi))
+        peak = ke_box_peak(hp_img, *guess, params.hint_tolerance / pixel_scale)
+        if peak is not None:
+            found = result({n: ke_refine(hp_img, *peak, refine_half)}, "hint")
+            if found is not None:
+                return found
+    pairs = [best_pair((n, (n - 1) % 4))[0], best_pair(((n + 1) % 4, n))[0]]
+    pairs = [location for location in pairs if location is not None]
+    if pairs:
+        pair_location = min(pairs, key=lambda location: abs((location.angle - angle + 180.0) % 360.0 - 180.0))
+        found = result(pair_location.positions, "bootstrap")
+        if found is not None:
+            return found
+    if not candidates:
+        raise ValueError("no spot found")
+    return result({n: candidates[0][:2]}, "bootstrap")
+
+
+def subtract_half_plane_profile(image, keep, bin_size):
+    """Subtract the radial profile averaged over the `keep` pixels only, and zero the rest.
+
+    The radius is measured from the grid origin (the estimated star).
+    """
+    r = np.hypot(image.grid.x, image.grid.y)
+    index = (r / bin_size).astype(int)
+    n_bins = int(index.max()) + 1
+    sums = np.bincount(index[keep], weights=np.asarray(image)[keep], minlength=n_bins)
+    counts = np.bincount(index[keep], minlength=n_bins)
+    good = counts > 0
+    if not np.any(good):
+        return image * keep
+    centers = (np.arange(n_bins) + 0.5) * bin_size
+    profile = np.interp(r, centers[good], sums[good] / counts[good])
+    return (image - profile) * keep
+
+
+def subtract_row_medians(image, keep):
+    """Subtract from each row the median of its `keep` pixels, and zero the rest.
+
+    This removes what is left of the edge glint, a line along rows, before
+    the spot cutouts.
+    """
+    shaped = np.asarray(image).reshape(image.grid.shape)
+    keep_shaped = np.asarray(keep).reshape(image.grid.shape)
+    masked = np.where(keep_shaped, shaped, np.nan)
+    rows = keep_shaped.any(axis=1)
+    medians = np.zeros(shaped.shape[0])
+    medians[rows] = np.nanmedian(masked[rows], axis=1)
+    return hp.Field(((shaped - medians[:, None]) * keep_shaped).ravel(), image.grid)
+
+
+def measure_knife_edge(frame, geometry, order, pixel_scale, params=KnifeEdgeParams(), prev=None,
+                       star_hint=None, pad=50, radial_bin=5 * 6.0 / 21.0):
+    """Measure the selected spots' elongation axes in one knife-edge frame.
+
+    Paralleling measure_spot_angles: the frame is median subtracted, the star
+    is estimated from the spots (locate_knife_edge_spots), everything below
+    the half-plane mask line is zeroed, a half-plane radial profile and the
+    row medians are subtracted, and the selected spots are cut out and measured with
+    moment_angle. `order` comes from ke_spot_order. Deviations use the
+    configured pattern angle `geometry.angle`, as in the standard mode.
+    """
+    frame = np.asarray(frame, dtype=float)
+    if frame.ndim != 2:
+        raise ValueError(f"expected a 2D frame, got shape {frame.shape}")
+    frame = frame - np.median(frame)
+
+    location = locate_knife_edge_spots(
+        frame, order, geometry.separation / pixel_scale, geometry.angle, pixel_scale, params,
+        refine_half=geometry.window_size // 2, prev=prev, star_hint=star_hint,
+    )
+
+    img = np.pad(frame, pad_width=pad, mode="constant", constant_values=0)
+    ny, nx = img.shape
+    grid = hp.make_pupil_grid([nx, ny], [nx * pixel_scale, ny * pixel_scale])
+    star = np.array([
+        (location.star[0] + pad - (nx - 1) / 2) * pixel_scale,
+        (location.star[1] + pad - (ny - 1) / 2) * pixel_scale,
+    ])
+    field = hp.Field(img.ravel(), grid.shifted(-star))
+
+    # Half-plane mask, kept clear of the selected spots
+    heights = [(location.positions[n][1] - location.star[1]) * pixel_scale for n in order]
+    margin = min(params.edge_margin, min(heights) - params.spot_clearance)
+    inside = np.zeros((ny, nx), dtype=bool)
+    inside[pad:ny - pad, pad:nx - pad] = True
+    keep = np.asarray(field.grid.y > margin) & inside.ravel()
+
+    field = subtract_half_plane_profile(field, keep, radial_bin)
+    field = subtract_row_medians(field, keep)
+    field = np.maximum(field, 0.0)
+
+    separation = location.separation_px * pixel_scale
+    raw = np.full(4, np.nan)
+    for n in order:
+        cutout = speckle_cutout(
+            field, n, location.angle, separation, geometry.window_size, geometry.search_extent,
+            geometry.search_halfwidth,
+        )
+        raw[n] = moment_angle(cutout)
+
+    dev = wrap90(raw - expected_axes(geometry.angle))
+    m = float(dev[order[0]] - dev[order[1]]) if len(order) == 2 else float(dev[order[0]])
+    return KnifeEdgeMeasurement(raw, dev, m, location, separation, margin, margin < params.edge_margin)
+
+
 def inlier_mask(values, k=3.0):
     """Boolean mask of finite `values` within k robust sigma (1.4826 MAD) of the median."""
     values = np.asarray(values, dtype=float)

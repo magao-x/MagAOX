@@ -1040,6 +1040,17 @@ Which is realistic? How stable is the star position on camsci with the knife edg
 - **R3-3. Manual set point.** Should a set point typed into INDI be written to the file, with the timestamp "now", as proposed? Or should it apply only until the app restarts, so the file only ever holds captured values?
   - Answer:forget the file
 
+### Implementation Log (knife-edge mode)
+
+Tests were run locally with the adc_sims venv (numpy, scipy, hcipy) and minimal stand-ins for `xconf`, `purepyindi2` and `magaox`, called by a small runner instead of pytest. They still need `python -m pytest apps/adcCtrl/test -v` on the MagAO-X machine.
+
+**Step 1: pure functions (§9.1).** Added `KnifeEdgeParams`, `ke_spot_order`, `ke_sensitivity`, `ke_blocked_spots`, `ke_star_from_pair`, `locate_knife_edge_spots`, `subtract_half_plane_profile`, `subtract_row_medians` and `measure_knife_edge`. Ten new tests; the 31 existing tests pass unchanged. Changes from the design, all found with the synthetic tests:
+- **Row medians.** The high-passed search image and the masked field both have each row's median subtracted. The edge is horizontal, so a glint along it is a row of equal local maxima, which would otherwise pass the pair test. The medians use only pixels inside the frame, not the zero padding.
+- **Brightness ratio.** A candidate pair is accepted only if the two spots are within `brightness_ratio` (default 3) of each other. A bright blob at the right spacing from a spot was otherwise picked over the real pair.
+- **Single-spot bootstrap.** With no lock and no hint, the spot is first identified as part of a pair with either neighbour. Without this, the brightest blob was often the other visible spot, labelled with the wrong index. A pair of adjacent spots fits two labellings, 90° apart, so the one whose pattern angle is closest to the configured angle is used. The brightest blob is only the last fallback.
+- **Locks are per spot.** Locked positions are stored by spot index, so changing the spot selection keeps the positions of spots that stay selected; a single-spot selection can be seeded from an earlier two-spot lock this way.
+- **Glint test.** The synthetic glint fades over 5 λ/D to the sides of the star. A glint that stays bright 14 λ/D to the side, level with spot 3, does capture spot 3's cutout even with the row medians. That matches the user's expectation (R2-2) and finding 8, but it is the case to watch on real frames.
+
 ### References
 - MagAO-X PAPLC knife-edge mask (reflective D-shaped mirror at ~1.1 λ/D, adjustable IWA): [arXiv:2607.08146](https://arxiv.org/pdf/2607.08146), [arXiv:2303.13719](https://arxiv.org/pdf/2303.13719)
 - Satellite-spot dispersion method: arXiv:2608.10307
