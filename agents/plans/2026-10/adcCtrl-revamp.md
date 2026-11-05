@@ -1123,6 +1123,29 @@ All 51 tests pass locally (31 existing, unchanged; 20 new).
 
 **On the instrument.** Closed loop should now take one step per ≥7 s cycle (plus the measurement time) without overshooting. If adctrack's `tracking.updateInterval` changes, `min_send_interval_sec` must stay above it plus the move time.
 
+**Follow-up (2026-11-05): moves still dropped.** With the 7 s spacing the loop waited, but commands were still skipped. User's checks:
+1. adctrack logs "set deltaADC1 to …" for every write.
+2. The stage drivers log many "UCommand not allowed in MOVING state" errors.
+3. The skips do not depend on step size.
+4. A typical move takes about 2 s.
+
+The stages are Newport SMC100 controllers (`apps/smc100ccCtrl`). Error "U" means a `PA` move was refused because the stage was still moving. The driver logs the refusal and drops the move. adctrack resends both targets on every tracking update, so a dropped move lands one or more updates (5 s each) later, which a fixed wait cannot cover. adctrack only sends on its update, 5 s apart, and moves take about 2 s, so something else is also moving the stages, or some moves take much longer. Not yet identified.
+
+**Fix, adcCtrl only (user: no changes outside `apps/adcCtrl`).**
+- `min_send_interval_sec` raised to 10 s (user).
+- New config fields: `adc_stage_devices = ["stageadc1", "stageadc2"]` (also added to `external_devices`), `stage_tolerance_deg = 0.05` and `stage_move_timeout_sec = 30`.
+- Before each write, `send_command` reads adctrack's current `deltaADC1/2` and the stages' `position.current`. After a write with tracking on, it stores the expected move size for each stage, `|target − previous|`. Nothing is stored if any value is unavailable or both moves are below the tolerance.
+- `stages_settled()` is true once each stage has moved by its expected size, within `stage_tolerance_deg`. Only the size is compared, because adctrack's lookup sign is unknown to adcCtrl. Moves are wrapped at ±180°. After `stage_move_timeout_sec` from the write, it logs a WARNING with the moved and expected sizes and goes on.
+- `adc_busy()` = `send_wait() > 0` or the stages have not settled. It gates cycles, captures and the queued manual writes in `loop()` and `apply_pending()`.
+- Limits:
+  - Tracking drift during the wait counts against the tolerance; it is small over tens of seconds.
+  - A stage already in the middle of a tracking move at the time of the write gives an offset starting position.
+  - The stage `INDI_BUSY` state is not read, because the purepyindi2 client API for property state was not checked; the position alone is used.
+- Tests:
+  - `test_cycle_waits_for_stages_to_move`: holds until both stages move, including through 0°/360°.
+  - `test_stage_move_timeout_goes_on_with_warning`.
+  - Both fail if `adc_busy` ignores the stages. All 56 tests pass locally.
+
 ### References
 - MagAO-X PAPLC knife-edge mask (reflective D-shaped mirror at ~1.1 λ/D, adjustable IWA): [arXiv:2607.08146](https://arxiv.org/pdf/2607.08146), [arXiv:2303.13719](https://arxiv.org/pdf/2303.13719)
 - Satellite-spot dispersion method: arXiv:2608.10307

@@ -890,7 +890,7 @@ def test_adc_writes_and_cycles_are_paced():
     its next tracking update, so frames taken sooner would show the old
     position.
     """
-    assert AdcCtrlConfig().min_send_interval_sec == 7.0
+    assert AdcCtrlConfig().min_send_interval_sec == 10.0
     dev = make_device(camera=FakeCamera(make_frame(dispersion=(0.02, 0.0))), min_send_interval_sec=0.3)
     send(dev, "state", adcLoop=ON)
     dev.loop()
@@ -910,6 +910,51 @@ def test_adc_writes_and_cycles_are_paced():
     time.sleep(0.35)
     dev.loop()
     assert len(dev.client.adc_writes()) == 6 and len(dev.camera.calls) == 2
+
+
+def test_cycle_waits_for_stages_to_move():
+    """After a write, no cycle starts until both stages have moved by the commanded change.
+
+    The stage controllers reject a move while still moving, so adctrack's
+    move can land at a later tracking update. The size of the move is
+    compared, whatever adctrack's lookup sign.
+    """
+    client = adc_client()
+    dict.update(client, {"stageadc1.position.current": 100.0, "stageadc2.position.current": 359.99})
+    frame = make_frame(dispersion=(0.02, 0.0))
+    dev = make_device(client=client, camera=FakeCamera(frame), stage_tolerance_deg=0.001)
+    send(dev, "state", adcLoop=ON)
+    dev.loop()
+    step = dev.delta_1
+    assert abs(step) > 0.002 and len(dev.camera.calls) == 1
+    for _ in range(3):
+        dev.loop()
+    assert len(dev.camera.calls) == 1  # move rejected or not yet made
+    assert dev.properties["status"]["last_command"] == "waiting for ADC"
+
+    dict.__setitem__(client, "stageadc1.position.current", 100.0 - step)
+    dev.loop()
+    assert len(dev.camera.calls) == 1  # stage 2 has not moved yet
+    dict.__setitem__(client, "stageadc2.position.current", (359.99 - step) % 360.0)  # may wrap through 0
+    dev.loop()
+    assert len(dev.camera.calls) == 2
+
+
+def test_stage_move_timeout_goes_on_with_warning():
+    """If the stages never make the move, the next cycle starts after stage_move_timeout_sec with a warning."""
+    client = adc_client()
+    dict.update(client, {"stageadc1.position.current": 100.0, "stageadc2.position.current": 200.0})
+    dev, handler = recording_device("adcCtrl-test-stage-timeout", client=client,
+                                    camera=FakeCamera(make_frame(dispersion=(0.02, 0.0))),
+                                    stage_tolerance_deg=0.001, stage_move_timeout_sec=0.2)
+    send(dev, "state", adcLoop=ON)
+    dev.loop()
+    dev.loop()
+    assert len(dev.camera.calls) == 1
+    time.sleep(0.25)
+    dev.loop()
+    assert len(dev.camera.calls) == 2
+    assert len(messages(handler, logging.WARNING, "going on")) == 1
 
 
 def test_loop_sign_flips_command():

@@ -32,10 +32,13 @@ error`` is added to the integrator ``delta_1`` unless it exceeds
 ``deltaADC2 = delta_1 - delta_2 + offset``; ``delta_2`` stays 0.
 
 adctrack accepts a new offset at once but only moves the stages at its next
-tracking update (``tracking.updateInterval``, 5 s), so writes are spaced at
-least ``min_send_interval_sec`` (7 s) apart, and a cycle starts only that long
-after the last write. Without this the loop measured frames from before the
-move and kept adding steps, then overshot.
+tracking update (``tracking.updateInterval``, 5 s), and the stage controllers
+reject a move while still moving, so a move can land several updates late.
+Writes are therefore spaced at least ``min_send_interval_sec`` (10 s) apart,
+and a cycle starts only that long after the last write and once the stages
+(``adc_stage_devices``) have moved by the commanded change, or after
+``stage_move_timeout_sec``. Without this the loop measured frames from
+before the move and kept adding steps, then overshot.
 
 Knife-edge mode
 ---------------
@@ -429,6 +432,11 @@ def moment_angle(
 def wrap90(angle_deg):
     """Wrap an axis angle (degrees, 180-degree periodic) into [-90, 90)."""
     return (np.asarray(angle_deg, dtype=float) + 90.0) % 180.0 - 90.0
+
+
+def wrap180(angle_deg):
+    """Wrap a direction angle (degrees, 360-degree periodic) into [-180, 180)."""
+    return (float(angle_deg) + 180.0) % 360.0 - 180.0
 
 
 def expected_axes(grating_angle):
@@ -959,7 +967,10 @@ class AdcCtrlConfig(BaseConfig):
     loop_sign : str = xconf.field(default="negative", help="Initial feedback polarity, 'positive' or 'negative'; negative converges with the default ctrl_mtx")
     step_limit_deg : float = xconf.field(default=0.7, help="Steps with |step| at or above this [deg] are rejected")
     send_timeout_sec : float = xconf.field(default=30.0, help="Time to wait for adctrack to accept a commanded offset")
-    min_send_interval_sec : float = xconf.field(default=7.0, help="Minimum time between ADC writes, and from a write to the next measurement [s]; must exceed adctrack's tracking.updateInterval (5 s) plus the stage move")
+    min_send_interval_sec : float = xconf.field(default=10.0, help="Minimum time between ADC writes, and from a write to the next measurement [s]; must exceed adctrack's tracking.updateInterval (5 s) plus the stage move")
+    adc_stage_devices : list[str] = xconf.field(default_factory=lambda: ["stageadc1", "stageadc2"], help="INDI devices of the ADC 1 and ADC 2 rotation stages that adctrack drives, read to confirm each move")
+    stage_tolerance_deg : float = xconf.field(default=0.05, help="Tolerance on a stage's move matching the commanded offset change [deg]")
+    stage_move_timeout_sec : float = xconf.field(default=30.0, help="Time after an ADC write to wait for the stages to make the move before warning and going on [s]")
     send_tolerance_deg : float = xconf.field(default=0.05, help="Tolerance for a commanded offset to count as reached [deg]")
     max_consecutive_failures : int = xconf.field(default=5, help="Failed closed-loop cycles in a row before dropping to idle")
     outlier_k : float = xconf.field(default=3.0, help="Outlier rejection threshold in robust sigma")
@@ -1094,6 +1105,9 @@ class adcCtrl(XDevice):
         self._pending_send = False
         # monotonic time of the last ADC write, None before the first; paces writes and cycles
         self._last_send = None
+        # (stage positions before the last write, expected move sizes) until the stages are
+        # seen to make that move (stages_settled); None when there is nothing to wait for
+        self._stage_check = None
         # Integrated ADC offsets [deg]; delta_2 is currently always 0
         self.delta_1 = 0.0
         self.delta_2 = 0.0
@@ -1133,7 +1147,7 @@ class adcCtrl(XDevice):
     def external_devices(self):
         """INDI devices this app reads from or writes to."""
         wheels = [cam.filter_wheel for cam in self.config.cameras.values()]
-        return [self.config.adc_device, self.config.speckle_device] + wheels
+        return [self.config.adc_device, self.config.speckle_device] + list(self.config.adc_stage_devices) + wheels
 
     def create_properties(self):
         """Create all INDI properties."""
@@ -1701,6 +1715,9 @@ class adcCtrl(XDevice):
         dev = self.config.adc_device
         target_1 = self.delta_1 + self.delta_2 + self._offset
         target_2 = self.delta_1 - self.delta_2 + self._offset
+        previous = [self.ext(f"{dev}.deltaADC1.current"), self.ext(f"{dev}.deltaADC2.current")]
+        starts = [self.ext(f"{stage}.position.current") for stage in self.config.adc_stage_devices]
+        self._stage_check = None
         try:
             self.client[f"{dev}.deltaADC1.target"] = target_1
             self.client[f"{dev}.deltaADC2.target"] = target_2
@@ -1715,10 +1732,14 @@ class adcCtrl(XDevice):
         # adctrack sets deltaADC1/2.current as soon as it accepts the target, and
         # only moves the stages at its next tracking update (every
         # tracking.updateInterval). So this confirms the write was accepted, not
-        # that the stages have moved; send_wait() paces the next cycle for that.
+        # that the stages have moved; adc_busy() holds the next cycle for that.
         if self.ext(f"{dev}.tracking.toggle") != constants.SwitchState.ON:
             self.log.debug(f"{dev} tracking is off: deltaADC1/2 written but the stages will not move")
             return True
+        if None not in previous + starts:
+            expected = [abs(target_1 - previous[0]), abs(target_2 - previous[1])]
+            if max(expected) >= self.config.stage_tolerance_deg:
+                self._stage_check = (starts, expected)
 
         tolerance = self.config.send_tolerance_deg
         deadline = time.monotonic() + self.config.send_timeout_sec
@@ -1739,6 +1760,37 @@ class adcCtrl(XDevice):
             return 0.0
         return max(0.0, self.config.min_send_interval_sec - (time.monotonic() - self._last_send))
 
+    def stages_settled(self):
+        """True once the stages have made the last written move, or it timed out or cannot be checked.
+
+        A stage counts as moved when its position has changed by the
+        commanded offset change, within `stage_tolerance_deg` (the sign
+        depends on adctrack's lookup sign, so only the size is compared). The
+        stage controllers reject a move while still moving, and adctrack then
+        resends it at a later tracking update, so this can take several
+        updates.
+        """
+        if self._stage_check is None:
+            return True
+        starts, expected = self._stage_check
+        positions = [self.ext(f"{stage}.position.current") for stage in self.config.adc_stage_devices]
+        moved = [None if p is None else abs(wrap180(p - s)) for p, s in zip(positions, starts)]
+        if all(m is not None and abs(m - e) < self.config.stage_tolerance_deg for m, e in zip(moved, expected)):
+            self._stage_check = None
+            return True
+        if time.monotonic() - self._last_send > self.config.stage_move_timeout_sec:
+            self.log.warning(
+                f"ADC stages {list(self.config.adc_stage_devices)} moved {moved} deg, not the commanded "
+                f"{[round(e, 4) for e in expected]} deg, within {self.config.stage_move_timeout_sec} s; going on"
+            )
+            self._stage_check = None
+            return True
+        return False
+
+    def adc_busy(self):
+        """True while the last ADC write may not have reached the stages: no write or cycle should start."""
+        return self.send_wait() > 0 or not self.stages_settled()
+
     def adc_available(self):
         """True if the ADC tracker's offset properties are visible."""
         dev = self.config.adc_device
@@ -1753,7 +1805,7 @@ class adcCtrl(XDevice):
         """Perform ADC writes requested by callbacks or at startup."""
         if not (self._pending_reset or self._pending_send):
             return
-        if not self.adc_available() or self.send_wait() > 0:
+        if not self.adc_available() or self.adc_busy():
             return
         if self._pending_reset:
             self.set_command(0, 0)
@@ -2066,13 +2118,14 @@ class adcCtrl(XDevice):
         """Main loop body: apply queued ADC writes, then run a cycle unless idle.
 
         A cycle or set point capture starts only `min_send_interval_sec` after
-        the last ADC write, so its frames are taken after the stages moved, and
-        writes are never closer together than that. Never raises; errors are logged and counted as failed cycles. A one-shot
+        the last ADC write, and once the stages have made that move
+        (stages_settled), so its frames are taken after the move; writes are
+        never closer together than that. Never raises; errors are logged and counted as failed cycles. A one-shot
         always ends in idle, whether or not its cycle succeeded.
         """
         try:
             self.apply_pending()
-            if (self._pending_capture or self._state != States.IDLE) and self.send_wait() > 0:
+            if (self._pending_capture or self._state != States.IDLE) and self.adc_busy():
                 # the last ADC write may not have reached the stages yet
                 if self.properties["status"]["last_command"] != "waiting for ADC":
                     self.set_status(last_command="waiting for ADC")
