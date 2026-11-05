@@ -417,6 +417,60 @@ esac''',
                 self.assertEqual(self.set_calls(), [])
                 self.assertIn("before publication-advance preset", stderr)
 
+    def test_late_publication_allowance_matches_and_records_startup_preset(self):
+        """An explicit sixth argument verifies the allowance without changing startup configuration."""
+        self.env.update(ZERO_TEST_LATE="6e0", ZERO_TEST_WAKE_AHEAD="10")
+        code, _, stderr = self.run_capture("8000", "10", "0", "10", "0", "6.0")
+        self.assertEqual(code, 0, stderr)
+        metadata = (self.capture_dir() / "test.txt").read_text()
+        self.assertIn("expectedLateUs=6.0\n", metadata)
+        self.assertIn("lateUsBefore=6e0\n", metadata)
+        self.assertIn("lateUsConfigured=6e0\n", metadata)
+        self.assertIn("lateUs=6e0\n", metadata)
+        self.assertEqual(
+            self.set_calls(),
+            ["-n dmtweeter-synco.settings.steps=4", "-n dmtweeter-synco.settings.durationSec=10",
+             "-s dmtweeter-synco.enable.toggle=On", "-s dmtweeter-synco.enable.toggle=Off"],
+        )
+
+    def test_late_publication_allowance_mismatch_never_configures_or_enables(self):
+        """A prior two-microsecond preset cannot be mistaken for the requested six-microsecond trial."""
+        self.env.update(ZERO_TEST_LATE="2", ZERO_TEST_WAKE_AHEAD="10")
+        code, _, stderr = self.run_capture("8000", "10", "0", "10", "0", "6")
+        self.assertEqual(code, 1)
+        self.assertEqual(self.set_calls(), [])
+        self.assertIn('before late-publication allowance actual="2"; expected="lateUs=6"', stderr)
+        metadata = (self.capture_dir() / "test.txt").read_text()
+        self.assertIn("expectedLateUs=6\n", metadata)
+        self.assertIn("lateUsBefore=2\n", metadata)
+
+    def test_late_publication_allowance_is_rechecked_before_enable(self):
+        """A changed configured allowance prevents On after disabled settings have been sent."""
+        self.env.update(ZERO_TEST_LATE="6", ZERO_TEST_CONFIGURED_LATE="2", ZERO_TEST_WAKE_AHEAD="10")
+        code, _, stderr = self.run_capture("8000", "10", "0", "10", "0", "6")
+        self.assertEqual(code, 1)
+        self.assertEqual(
+            self.set_calls(),
+            ["-n dmtweeter-synco.settings.steps=4", "-n dmtweeter-synco.settings.durationSec=10"],
+        )
+        self.assertIn('configured late-publication allowance actual="2"; expected="lateUs=6"', stderr)
+        metadata = (self.capture_dir() / "test.txt").read_text()
+        self.assertIn("lateUsBefore=6\n", metadata)
+        self.assertIn("lateUsConfigured=2\n", metadata)
+        self.assertIn("lateUs=2\n", metadata)
+        self.assertEqual((self.root / "enable").read_text(), "Off")
+
+    def test_omitted_late_publication_allowance_preserves_range_only_check(self):
+        """Existing commands keep accepting a valid configured allowance and now record it."""
+        self.env["ZERO_TEST_LATE"] = "6"
+        code, _, stderr = self.run_capture("8000", "10")
+        self.assertEqual(code, 0, stderr)
+        metadata = (self.capture_dir() / "test.txt").read_text()
+        self.assertNotIn("expectedLateUs=", metadata)
+        self.assertIn("lateUsBefore=6\n", metadata)
+        self.assertIn("lateUsConfigured=6\n", metadata)
+        self.assertIn("lateUs=6\n", metadata)
+
     def test_preset_is_checked_again_before_enable(self):
         """A changed startup advance cannot reintroduce the wrong endpoint policy."""
         self.env["ZERO_TEST_CONFIGURED_ADVANCE"] = "5"
@@ -716,7 +770,14 @@ esac''',
                      ("8000", "10", "0", "-1"), ("8000", "10", "0", "51"),
                      ("8000", "10", "0", "nan"), ("8000", "10", "0", "10", "extra"),
                      ("8000", "10", "0", "10", "-1"), ("8000", "10", "0", "10", "11"),
-                     ("8000", "10", "0", "10", "nan"), ("8000", "10", "0", "10", "0", "extra")]:
+                     ("8000", "10", "0", "10", "nan"),
+                     ("8000", "10", "0", "10", "0", "extra"),
+                     ("8000", "10", "0", "10", "0", "-1"),
+                     ("8000", "10", "0", "10", "0", "51"),
+                     ("8000", "10", "0", "10", "0", "nan"),
+                     ("8000", "10", "0", "10", "0", "inf"),
+                     ("8000", "10", "0", "10", "0", ""),
+                     ("8000", "10", "0", "10", "0", "6", "extra")]:
             with self.subTest(args=args):
                 code, _, _ = self.run_capture(*args)
                 self.assertEqual(code, 2)

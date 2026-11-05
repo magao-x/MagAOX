@@ -1,5 +1,14 @@
 # Task Description
 
+## 2026-11-04 production integration
+
+The [production provider plan](../2026-11/dm-syncopation-production-providers.md)
+records the continuous implementation, independent same-host input contract,
+shared CRTP producer helper and dmSpeckle migration. It supersedes older
+provider/deadline execution descriptions below for opt-in production mode;
+the legacy path remains available. Nonzero instrument qualification is
+operator-only.
+
 ## 2026-11-03 current target: source counter publications
 
 The latest clarification targets the interleaved main and auxiliary `cnt0++`

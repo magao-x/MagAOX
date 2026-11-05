@@ -34,19 +34,24 @@ class dmSpeckleHarness : public dmSpeckle
     using dmSpeckle::fillTipTilt;
     using dmSpeckle::m_amp;
     using dmSpeckle::m_dmChannelName;
+    using dmSpeckle::m_dwell;
     using dmSpeckle::m_frequency;
     using dmSpeckle::m_height;
     using dmSpeckle::m_imageStream;
+    using dmSpeckle::m_indiP_modulating;
     using dmSpeckle::m_indiP_trigger;
+    using dmSpeckle::m_indiP_zero;
     using dmSpeckle::m_modulating;
+    using dmSpeckle::m_opened;
     using dmSpeckle::m_opMode;
+    using dmSpeckle::m_shapes;
     using dmSpeckle::m_syncopationTiming;
+    using dmSpeckle::m_syncopationZeroRequested;
     using dmSpeckle::m_trigger;
     using dmSpeckle::m_typeSize;
     using dmSpeckle::m_width;
     using dmSpeckle::m_writeLeadUs;
-    using dmSpeckle::publishSyncopation;
-    using dmSpeckle::readSyncopationRecord;
+    using dmSpeckle::prepareSyncopationCommand;
     using dmSpeckle::validateSyncopationConfig;
 };
 /// \endcond
@@ -151,76 +156,136 @@ TEST_CASE( "dmSpeckle tiptilt uses target time rather than frame index", "[dmSpe
     REQUIRE( image[0] == Approx( 0 ) );
 }
 
-/// Reject in-progress or incompatible timing records and leave a source untouched after its cutoff.
+/// Build target-labelled cube samples independently of request cadence, including dwell.
 /** \ingroup dmSpeckle_unit_test */
-TEST_CASE( "dmSpeckle obeys record publication and expired writer cutoffs", "[dmSpeckle]" )
+TEST_CASE( "dmSpeckle provider builds the sample for its advertised target", "[dmSpeckle]" )
 {
     // clang-format off
     #ifdef DMSPECKLE_TEST_DOXYGEN_REF
-    dmSpeckle::readSyncopationRecord(IMAGE(), synco::Record());
-    dmSpeckle::publishSyncopation(nullptr, 0);
+    dmSpeckle::prepareSyncopationCommand(mx::improc::eigenImage<float>(), 0, false);
     #endif
     // clang-format on
-    IMAGE_METADATA metadata{};
-    IMAGE          timing{};
-    synco::Record  original{}, read{};
-    original[synco::version] = synco::layoutVersion;
-    timing.md                = &metadata;
-    timing.array.raw         = original.data();
-    metadata.datatype        = _DATATYPE_INT64;
-    metadata.nelement        = synco::words;
-    metadata.cnt0            = 4;
-    REQUIRE( dmSpeckleHarness::readSyncopationRecord( timing, read ) );
-    REQUIRE( read == original );
-    metadata.write = 1;
-    REQUIRE_FALSE( dmSpeckleHarness::readSyncopationRecord( timing, read ) );
-    metadata.write    = 0;
-    metadata.nelement = 1;
-    REQUIRE_FALSE( dmSpeckleHarness::readSyncopationRecord( timing, read ) );
+    dmSpeckleHarness app;
+    app.m_width = app.m_height = 2;
+    app.m_frequency            = 2000;
+    app.m_dwell                = 2;
+    app.m_shapes.resize( 2, 2, 4 );
 
+    for( int plane = 0; plane < 4; ++plane )
+    {
+        app.m_shapes.image( plane ).setConstant( float( plane + 1 ) );
+    }
+
+    mx::improc::eigenImage<float> command( 2, 2 );
+
+    for( int mode : { SPARKLE, ARBCUBE } )
+    {
+        app.m_opMode = mode;
+        REQUIRE( app.prepareSyncopationCommand( command, 125000, false ) == 0 );
+        REQUIRE( command.minCoeff() == 1 );
+        REQUIRE( command.maxCoeff() == 1 );
+        REQUIRE( app.prepareSyncopationCommand( command, 2125000, false ) == 0 );
+        REQUIRE( command.minCoeff() == 3 );
+        REQUIRE( command.maxCoeff() == 3 );
+        REQUIRE( app.prepareSyncopationCommand( command, 4125000, false ) == 0 );
+        REQUIRE( command.minCoeff() == 1 );
+    }
+
+    app.m_opMode    = TIPTILT;
+    app.m_frequency = 200;
+    app.m_amp       = 0.1;
+    REQUIRE( app.prepareSyncopationCommand( command, 0, false ) == 0 );
+    REQUIRE( command( 0, 0 ) == Approx( -0.1 ) );
+    REQUIRE( command( 1, 0 ) == Approx( 0.1 ) );
+    REQUIRE( app.prepareSyncopationCommand( command, 1250000, false ) == 0 );
+    REQUIRE( command( 0, 0 ) == Approx( -0.1 ) );
+    REQUIRE( command( 1, 0 ) == Approx( -0.1 ) );
+
+    REQUIRE( app.prepareSyncopationCommand( command, 1250000, true ) == 0 );
+    REQUIRE( command.isZero() );
+}
+
+/// Queue explicit zero through the helper transport without overwriting its outstanding source.
+/** \ingroup dmSpeckle_unit_test */
+TEST_CASE( "dmSpeckle managed zero leaves immutable source pixels alone", "[dmSpeckle]" )
+{
+    // clang-format off
+    #ifdef DMSPECKLE_TEST_DOXYGEN_REF
+    dmSpeckle::newCallBack_m_indiP_zero(pcf::IndiProperty());
+    dmSpeckle::newCallBack_m_indiP_modulating(pcf::IndiProperty());
+    #endif
+    // clang-format on
     dmSpeckleHarness app;
     IMAGE_METADATA   source{};
-    float            pixel      = 0.3;
+    float            pixel  = 0.3;
+    app.m_syncopationTiming = "local_test_schedule";
+    app.m_dmChannelName     = "dm01disp07_aux";
+    app.m_width = app.m_height  = 1;
+    app.m_typeSize              = sizeof( float );
     app.m_imageStream.md        = &source;
     app.m_imageStream.array.raw = &pixel;
+    app.m_opened                = true;
     source.cnt0                 = 12;
-    REQUIRE_FALSE( app.publishSyncopation( nullptr, 0 ) );
+    app.m_indiP_zero.setName( "zero" );
+    pcf::IndiProperty request;
+    request.setName( "zero" );
+    request.add( pcf::IndiElement( "request" ) );
+    request["request"] = pcf::IndiElement::On;
+
+    REQUIRE( app.newCallBack_m_indiP_zero( request ) == 0 );
+    REQUIRE( app.m_syncopationZeroRequested );
     REQUIRE( pixel == Approx( 0.3 ) );
     REQUIRE( source.cnt0 == 12 );
     REQUIRE( source.write == 0 );
+
+    app.m_syncopationZeroRequested = false;
+    app.m_modulating               = true;
+    REQUIRE( app.newCallBack_m_indiP_zero( request ) == 0 );
+    REQUIRE_FALSE( app.m_syncopationZeroRequested );
+    REQUIRE( pixel == Approx( 0.3 ) );
+
+    app.m_modulating               = false;
+    app.m_syncopationZeroRequested = true;
+    app.m_indiP_modulating.setName( "modulating" );
+    pcf::IndiProperty modulating;
+    modulating.setName( "modulating" );
+    modulating.add( pcf::IndiElement( "toggle" ) );
+    modulating["toggle"] = pcf::IndiElement::On;
+    REQUIRE( app.newCallBack_m_indiP_modulating( modulating ) == 0 );
+    REQUIRE( app.m_modulating );
+    REQUIRE_FALSE( app.m_syncopationZeroRequested );
 }
 
-/// Verify normal auxiliary publication changes only the attached source and never enables legacy triggering.
+/// Preserve direct legacy zero while rejecting a managed producer's independent trigger request.
 /** \ingroup dmSpeckle_unit_test */
-TEST_CASE( "dmSpeckle managed publication updates only the source", "[dmSpeckle]" )
+TEST_CASE( "dmSpeckle preserves legacy zero and isolates managed triggers", "[dmSpeckle]" )
 {
     // clang-format off
     #ifdef DMSPECKLE_TEST_DOXYGEN_REF
-    dmSpeckle::publishSyncopation(nullptr, 0);
+    dmSpeckle::newCallBack_m_indiP_zero(pcf::IndiProperty());
     dmSpeckle::newCallBack_m_indiP_trigger(pcf::IndiProperty());
     #endif
     // clang-format on
     dmSpeckleHarness app;
     IMAGE_METADATA   source{};
-    float            sourcePixel = 0.3, command = -0.2;
+    float            pixel = 0.3;
     app.m_width = app.m_height  = 1;
     app.m_typeSize              = sizeof( float );
     app.m_imageStream.md        = &source;
-    app.m_imageStream.array.raw = &sourcePixel;
+    app.m_imageStream.array.raw = &pixel;
+    app.m_opened                = true;
     source.shared               = 1;
     source.cnt0                 = 12;
-#ifdef IMAGESTRUCT_WRITEHISTORY
-    std::array<FRAMEWRITEMD, IMAGESTRUCT_FRAMEWRITEMDSIZE> history{};
-    app.m_imageStream.writehist = history.data();
-#endif
-    app.m_modulating = true;
-    REQUIRE( app.publishSyncopation( &command, synco::monotonicNs() + 1000000000 ) );
-    REQUIRE( sourcePixel == Approx( command ) );
+    app.m_indiP_zero.setName( "zero" );
+    pcf::IndiProperty zero;
+    zero.setName( "zero" );
+    zero.add( pcf::IndiElement( "request" ) );
+    zero["request"] = pcf::IndiElement::On;
+    REQUIRE( app.newCallBack_m_indiP_zero( zero ) == 0 );
+    REQUIRE( pixel == 0 );
     REQUIRE( source.cnt0 == 13 );
     REQUIRE( source.write == 0 );
-    app.m_modulating = false;
-    REQUIRE_FALSE( app.publishSyncopation( &command, synco::monotonicNs() + 1000000000 ) );
-    REQUIRE( source.cnt0 == 13 );
+    REQUIRE_FALSE( app.m_syncopationZeroRequested );
 
     app.m_syncopationTiming = "local_test_schedule";
     app.m_dmChannelName     = "dm01disp07_aux";

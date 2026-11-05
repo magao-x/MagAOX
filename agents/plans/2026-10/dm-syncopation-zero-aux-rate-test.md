@@ -2363,3 +2363,101 @@ bounds remain unchanged. Rebuild/restart dmSyncopation only and repeat the same
 band remains open. The
 [counter-publication plan](../2026-11/dm-syncopation-counter-publication-targets.md#2026-11-04-correct-the-writetime-before-counter-transition)
 records the correction and verification. No agent operated the instrument.
+
+## 2026-11-04: unchanged capture confirms the transition fix
+
+`zero-aux-8000Hz-20261104T205907Z`, revision `7bc639db`, completes the unchanged
+120-second test. There are **240,000 main observations, 239,999 matched mains
+and only one startup-unmatched main**; the metadata-triggered three-cycle
+cascades are absent. There are no clock exclusions, so clock recovery is not
+exercised in this run (the preceding capture exercised it successfully).
+
+**720,000 auxiliary opportunities = 719,367 publications + 633 skips**, giving
+99.912083% publication delivery and a total source rate of 7,994.724842 Hz.
+One final posted command's acknowledgement wait ends at finite expiry, leaving
+719,366 observed acknowledgements. The skipped population is three startup
+slots plus **630 step-2 final-guard lateness skips**.
+
+Those 630 misses occur only at active 112.987366-117.496370 s, on odd main
+counters, at target phase 136.705-140.484 us modulo 1 ms. Validation and staging
+finished early; final guard samples are 2.001-5.026 us late (median 2.601 us).
+The same absolute phase occurred on even counters in the preceding capture,
+strengthening the periodic-interference hypothesis rather than fixed frame
+parity. The source of the delay remains unidentified.
+
+No new controller admission/execution failure or camera frame-loss total is
+reported. All classified main SDK/reader joins match; diagnostic observation
+exclusions remain separate. Healthy stride-4 sampling aliases the disturbed
+parity, so use full-rate populations and complete skip evidence for timing
+tails. No event/log/reader drops occur.
+
+The [counter-publication plan](../2026-11/dm-syncopation-counter-publication-targets.md#2026-11-04-unchanged-capture-verifies-metadata-transition-correction)
+records full timing/counter comparison and recommends a focused IRQ/softirq and
+scheduling trace aligned to the monotonic guard times. Keep the current
+configuration and 2 us admission rule. No runtime or instrument setting changed
+in this analysis, and no agent operated the instrument.
+
+## 2026-11-04: allow the measured late admissions
+
+The user accepts publication at the observed few-microsecond delay. The current
+counter-target preset now sets **`zeroTest.lateUs=6`**, covering the last run's
+2.001-5.026 us final-check lateness with a small margin. Existing runtime code
+already supports that setting; production C++ and its general defaults are
+unchanged. Update the working instance setting and restart synco; no app binary
+rebuild is needed if the metadata-transition fix is already installed.
+
+Only final admission is relaxed. Staging and complete early validation retain
+their original deadlines, subsequent targets remain frozen, and source,
+reader-clearance, clock-quality, cancellation and expiry checks remain active.
+The limit applies to admission, not a guaranteed exact counter-store time.
+
+The capture helper accepts an optional sixth expected `lateUs` argument,
+verifies it both before configuration and before enable, and records actual
+readbacks. The next unchanged-setup comparison command is:
+
+```bash
+bash apps/dmSyncopation/scripts/capture-zero-aux-test.sh 8000 120 0 10 0 6
+```
+
+The [counter-publication plan](../2026-11/dm-syncopation-counter-publication-targets.md#2026-11-04-permit-measured-late-publication-within-6-us)
+records this decision and the regression/helper verification. No instrument
+commands were run by an agent.
+
+Verification passes **145 app cases / 6,391,029 assertions**, **56 private
+helper tests**, formatting, Bash syntax and diff checks. The observed-size delay
+is accepted under 6 us and rejected under 2 us, delays beyond 6 us remain
+rejected, future targets remain fixed, and late full validation is still
+rejected. Helper tests verify the expected allowance before any enable request.
+
+## 2026-11-04: 6 us capture records complete post-startup delivery
+
+`zero-aux-8000Hz-20261104T215358Z` confirms `lateUs=6` in before, configured and
+after readbacks, using the existing `7bc639db` binary and otherwise unchanged
+setup. The older helper metadata omits the expected-allowance fields, but the
+actual configuration is unambiguous.
+
+**720,000 opportunities = 719,997 publications + 3 startup skips**. All 719,997
+publications are acknowledged, with zero timing, readiness, preparation, clock
+or other operational skips. Publication delivery is 99.999583%; observed total
+source rate is 7,999.967726 Hz over 120.000109111 s. All 239,999 classified mains
+have exact SDK/reader matches, with only the initial main unmatched.
+
+Full-rate publication-error maxima are 2.464 / 0.321 / 4.807 us for steps 1/2/3.
+The periodic band now coincides with step 3 around active 78-81 s and appears
+in accepted publication timing. Successful stride-4 sampling omits the affected
+parity, so no exact count of accepted final checks beyond 2 us can be recovered;
+the raw publication-error maximum is not the admission-error maximum. Full-rate
+admission-error statistics would resolve that distinction in a future test.
+
+Fully active controller receipt means are 124.9991-125.0008 us, with standard
+deviations 2.337-3.604 us versus up to 21.798 us in the previous 2 us run.
+Missing-slot tails are absent. There are no new controller admission/execution
+failures or camera frame gaps/drops. Main timing prefixes remain comparable,
+without a directly isolated main SDK-wait population. Camera timestamp mapping
+has 75 new wide-bracket exclusions, which remain distinct from lost frames.
+Event/log/reader queue losses are zero.
+
+The [counter-publication plan](../2026-11/dm-syncopation-counter-publication-targets.md#2026-11-04-6-us-capture-delivers-every-post-startup-slot)
+records the complete timing, sampling and controller/camera comparison. Retain
+the current 6 us finite-trial preset. No code, instrument configuration or
+hardware was changed by an agent during this analysis.

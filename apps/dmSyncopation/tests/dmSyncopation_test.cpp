@@ -6749,6 +6749,7 @@ struct ZeroClock
     static inline MagAOX::dmSyncoSimulation::Readiness pendingRelease; ///< Delayed fixture-owned release evidence.
     static inline int64_t validationDelay{ 0 }; ///< One-shot cost after the early wake, before validation completes.
     static inline int64_t injectionAt{ 0 };     ///< Absolute one-shot mutation during a bounded trial wait.
+    static inline int64_t injectionDelayNs{ 20000 }; ///< One-shot final-wait preemption cost for delay injection.
     static inline int     injection{ 0 }; ///< Selected identity, cancellation, readiness, SDK or combined-source fault.
     static inline uint64_t          injections{ 0 }; ///< Completed one-shot mutations, independently of timed sleeps.
     static inline CompletionStream *endpoint{ nullptr }; ///< Private endpoint used by an SDK or observer injection.
@@ -6898,7 +6899,7 @@ int64_t ZeroClock::now()
         }
         else if( injection == 9 )
         {
-            time += 20000;
+            time += injectionDelayNs;
         }
         else if( injection == 17 )
         {
@@ -7106,6 +7107,7 @@ void ZeroClock::connect( Harness &scheduler, Streams &images, int steps )
     pendingRelease                  = {};
     validationDelay                 = 0;
     injectionAt = injection = 0;
+    injectionDelayNs        = 20000;
     injections              = 0;
     endpoint                = nullptr;
     observerRelease         = false;
@@ -7197,7 +7199,9 @@ void checkZeroPartition( const Harness &app /**< [in] Completed private trial ca
 }
 
 /// Drain only auxiliary outcomes, excluding genuine-main and trial lifecycle events.
-std::vector<Harness::ZeroEvent> zeroAuxiliaryEvents( Harness &app /**< [in,out] Private trial event queue. */ )
+std::vector<Harness::ZeroEvent>
+zeroAuxiliaryEvents( Harness &app /**< [in,out] Private trial event queue. */,
+                     size_t   drained = 0 /**< [in] Auxiliary outcomes consumed by preceding drains. */ )
 {
     std::vector<Harness::ZeroEvent> events;
     Harness::ZeroEvent              event;
@@ -7210,7 +7214,7 @@ std::vector<Harness::ZeroEvent> zeroAuxiliaryEvents( Harness &app /**< [in,out] 
         }
     }
 
-    CHECK( events.size() == app.m_zeroStats.posted + app.m_zeroStats.skipped );
+    CHECK( events.size() + drained == app.m_zeroStats.posted + app.m_zeroStats.skipped );
     return events;
 }
 /// \endcond
@@ -7525,6 +7529,131 @@ TEST_CASE( "coordinated zero final wait retains the absolute publication cutoff"
 #ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
     MagAOX::app::dmSyncopation::processZeroTestPrimary;
     MagAOX::app::dmSyncopation::zeroTestFinalGuard;
+#endif
+    // clang-format on
+}
+
+/// A finite larger admission allowance accepts a measured-size final delay without moving later targets.
+TEST_CASE( "coordinated zero trial accepts bounded late publication without retiming",
+           "[dmSyncopation][zeroTest][earlyWait][lateAllowance]" )
+{
+    Streams streams;
+    Harness app;
+    ZeroClock::connect( app, streams, 4 );
+    const double  allowanceUs = GENERATE( 2.0, 6.0 );
+    const int64_t delayedNs   = GENERATE( int64_t( 5026 ), int64_t( 7000 ) );
+    const bool    accepted    = allowanceUs == 6 && delayedNs == 5026;
+    app.m_zeroLateUs          = allowanceUs;
+    app.m_zeroWakeAheadUs     = 10;
+    const auto      next      = ZeroClock::warm();
+    synco::GridTime grid;
+    uint64_t        period = 0;
+    REQUIRE( app.zeroTestGrid( streams.images[0].md->cnt0 + 1, grid, period ) );
+    const auto second           = synco::stepGrid( grid, period, 2, 4 ).ns;
+    ZeroClock::injectionAt      = second - 500;
+    ZeroClock::injection        = 9;
+    ZeroClock::injectionDelayNs = delayedNs + 500;
+    app.m_enabled               = true;
+    ZeroClock::primary( next );
+    CHECK( ZeroClock::injections == 1 );
+    CHECK( app.m_zeroStats.staged == 3 );
+    CHECK( app.m_zeroStats.posted == ( accepted ? 3 : 2 ) );
+    CHECK( app.m_zeroStats.skipped == ( accepted ? 0 : 1 ) );
+    CHECK( app.m_zeroStats.validationLate == 0 );
+    CHECK( app.m_zeroStats.preparationLate == 0 );
+    const auto events = zeroAuxiliaryEvents( app );
+    REQUIRE( events.size() == 3 );
+    const auto &delayed = events[1];
+    CHECK( delayed.targetNs == second );
+    CHECK( delayed.counterTargetNs == second );
+    CHECK( delayed.publicationDeadlineNs == second + int64_t( allowanceUs * 1000 ) );
+    CHECK( delayed.stagedNs > 0 );
+    CHECK( delayed.stagedNs < second - 500 );
+    CHECK( delayed.wait.validatedNs > 0 );
+    CHECK( delayed.wait.validatedNs < second - 500 );
+
+    if( accepted )
+    {
+        CHECK( delayed.outcome == int( Harness::ZeroOutcome::acknowledged ) );
+        CHECK( delayed.publicationBeginNs >= second + delayedNs );
+        CHECK( delayed.publicationBeginNs <= second + 6000 );
+        CHECK( delayed.publicationEndNs >= delayed.publicationBeginNs );
+    }
+    else
+    {
+        CHECK( delayed.reason == Harness::ZeroOutcome::late );
+        CHECK( delayed.stage == Harness::ZeroStage::publicationGuard );
+        CHECK( delayed.observedNs >= second + delayedNs );
+        CHECK( delayed.observedNs > delayed.publicationDeadlineNs );
+        CHECK( delayed.publicationBeginNs == 0 );
+        CHECK( delayed.publicationEndNs == 0 );
+    }
+
+    const auto third = synco::stepGrid( grid, period, 3, 4 ).ns;
+    CHECK( events[2].outcome == int( Harness::ZeroOutcome::acknowledged ) );
+    CHECK( events[2].targetNs == third );
+    CHECK( events[2].publicationBeginNs >= third );
+    CHECK( events[2].publicationBeginNs <= third + 2000 );
+    ZeroClock::primary( next + 500000 );
+    const auto following = zeroAuxiliaryEvents( app, events.size() );
+    REQUIRE( following.size() == 3 );
+
+    for( unsigned step = 1; step < 4; ++step )
+    {
+        const auto target = next + 500000 + step * 125000;
+        CHECK( following[step - 1].outcome == int( Harness::ZeroOutcome::acknowledged ) );
+        CHECK( following[step - 1].targetNs == target );
+        CHECK( following[step - 1].publicationBeginNs >= target );
+        CHECK( following[step - 1].publicationBeginNs <= target + 2000 );
+    }
+    CHECK( app.m_zeroStats.posted == ( accepted ? 6 : 5 ) );
+    CHECK( app.m_zeroStats.skipped == ( accepted ? 0 : 1 ) );
+    checkZeroPartition( app );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::processZeroTestPrimary;
+    MagAOX::app::dmSyncopation::zeroTestPublicationReady;
+    MagAOX::app::dmSyncopation::zeroTestFinalGuard;
+#endif
+    // clang-format on
+}
+
+/// The post-target admission grace never excuses full validation completing after its original deadline.
+TEST_CASE( "coordinated zero late allowance preserves the early validation deadline",
+           "[dmSyncopation][zeroTest][earlyWait][lateAllowance]" )
+{
+    Streams streams;
+    Harness app;
+    ZeroClock::connect( app, streams, 4 );
+    app.m_zeroLateUs           = 6;
+    app.m_zeroWakeAheadUs      = 10;
+    const auto next            = ZeroClock::warm();
+    ZeroClock::validationDelay = 15000;
+    app.m_enabled              = true;
+    ZeroClock::primary( next );
+    CHECK( app.m_zeroStats.posted == 2 );
+    CHECK( app.m_zeroStats.skipped == 1 );
+    CHECK( app.m_zeroStats.late == 1 );
+    CHECK( app.m_zeroStats.validationLate == 1 );
+    const auto events = zeroAuxiliaryEvents( app );
+    REQUIRE( events.size() == 3 );
+    CHECK( events[0].reason == Harness::ZeroOutcome::late );
+    CHECK( events[0].stage == Harness::ZeroStage::validation );
+    CHECK( events[0].wait.validatedNs > events[0].targetNs );
+    CHECK( events[0].wait.validatedNs <= events[0].publicationDeadlineNs );
+    CHECK( events[0].publicationBeginNs == 0 );
+    CHECK( events[0].publicationEndNs == 0 );
+
+    for( unsigned step = 2; step < 4; ++step )
+    {
+        CHECK( events[step - 1].outcome == int( Harness::ZeroOutcome::acknowledged ) );
+        CHECK( events[step - 1].targetNs == next + step * 125000 );
+    }
+    checkZeroPartition( app );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::zeroTestPublicationReady;
+    MagAOX::app::dmSyncopation::zeroTestSkip;
 #endif
     // clang-format on
 }
@@ -10432,6 +10561,8 @@ TEST_CASE( "coordinated zero trial telemetry preserves the text wire protocol", 
 #endif
     // clang-format on
 }
+
+#include "dmSyncopationProduction_test.hpp"
 
 } // namespace dmSyncopationTest
 } // namespace libXWCTest

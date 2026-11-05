@@ -7,13 +7,15 @@ set -o pipefail
 usage()
 {
     cat <<'HELP'
-Usage: capture-zero-aux-test.sh RATE [SECONDS [ADVANCE_US [WAKE_AHEAD_US [COMMIT_LEAD_US]]]]
+Usage: capture-zero-aux-test.sh RATE [SECONDS [ADVANCE_US [WAKE_AHEAD_US [COMMIT_LEAD_US [LATE_US]]]]]
 
 RATE is effective total cadence, 4000, 6000 or 8000 Hz, with the main loop at 2000 Hz.
 SECONDS is the active-trial duration, default 120, integer 1 through 120.
 ADVANCE_US must be 0: downstream dmcomb compensation is not used for counter targets.
 WAKE_AHEAD_US is the expected startup validation lead, default 0, from 0 through 50 us.
 COMMIT_LEAD_US is the expected startup guard-to-counter lead, default 0, from 0 through 10 us.
+LATE_US optionally verifies the startup late-publication allowance, from 0 through 50 us.
+Omitting LATE_US accepts and records any valid configured allowance.
 The app must report schema 9 or newer, targetEndpoint=1 (cnt0), and matching startup leads.
 The app must already be running with zeroTest.enabled=true and enable=Off.
 The script sets steps and the app-enforced duration while disabled, then starts the trial.
@@ -29,7 +31,7 @@ then
     usage
     exit 0
 fi
-if (( $# < 1 || $# > 5 ))
+if (( $# < 1 || $# > 6 ))
 then
     usage >&2
     exit 2
@@ -39,6 +41,8 @@ zero_seconds=${2:-120}
 zero_advance=${3:-0}
 zero_wake_ahead=${4:-0}
 zero_commit_lead=${5:-0}
+zero_expected_late=${6-}
+zero_check_late=$(( $# == 6 ))
 if [[ $zero_rate != 4000 && $zero_rate != 6000 && $zero_rate != 8000 ]]
 then
     printf 'RATE must be effective total cadence 4000, 6000 or 8000\n' >&2
@@ -77,6 +81,12 @@ then
     printf 'WAKE_AHEAD_US must be numeric microseconds from 0 through 50\n' >&2
     exit 2
 fi
+if (( zero_check_late )) && ! awk -v late="$zero_expected_late" \
+     'BEGIN { exit !(late ~ /^[0-9]+([.][0-9]+)?$/ && late >= 0 && late <= 50) }'
+then
+    printf 'LATE_US must be numeric microseconds from 0 through 50\n' >&2
+    exit 2
+fi
 
 zero_capture_dir="$HOME/tmp/zero-aux-${zero_rate}Hz-$(date -u +%Y%m%dT%H%M%SZ)"
 mkdir -p "$zero_capture_dir" || exit 1
@@ -85,6 +95,10 @@ git -C "$zero_script_dir/../../.." rev-parse HEAD > "$zero_capture_dir/git.txt" 
 printf 'effectiveRate=%s\nsteps=%s\nactiveSeconds=%s\nmainRate=2000\ntargetEndpoint=cnt0\npublicationAdvanceUs=%s\nwakeAheadUs=%s\ncommitLeadUs=%s\n' \
     "$zero_rate" "$zero_steps" "$zero_seconds" "$zero_advance" "$zero_wake_ahead" "$zero_commit_lead" \
     > "$zero_capture_dir/test.txt"
+if (( zero_check_late ))
+then
+    printf 'expectedLateUs=%s\n' "$zero_expected_late" >> "$zero_capture_dir/test.txt"
+fi
 zero_collectors=()
 zero_devices=()
 zero_started=0
@@ -130,6 +144,11 @@ check_phase_preset()
     fi
     zero_actual_advance=$(read_property dmtweeter-synco.zero_test.publicationAdvanceUs "$zero_file")
     zero_actual_late=$(read_property dmtweeter-synco.zero_test.lateUs "$zero_file")
+    case $zero_phase in
+        before) printf 'lateUsBefore=%s\n' "$zero_actual_late" >> "$zero_capture_dir/test.txt" ;;
+        configured) printf 'lateUsConfigured=%s\nlateUs=%s\n' "$zero_actual_late" "$zero_actual_late" \
+                        >> "$zero_capture_dir/test.txt" ;;
+    esac
     if ! awk -v schema="$zero_phase_schema" -v actual="$zero_actual_advance" \
              -v late="$zero_actual_late" -v expected="$zero_advance" \
          'BEGIN { number="^[0-9]+([.][0-9]+)?([eE][+-]?[0-9]+)?$";
@@ -139,6 +158,12 @@ check_phase_preset()
         setup_failure "$zero_phase publication-advance preset" \
             "schema=$zero_phase_schema advanceUs=$zero_actual_advance lateUs=$zero_actual_late" \
             'advanceUs=0; schema>=9 and 0<=lateUs<=50'
+    fi
+    if (( zero_check_late )) && ! awk -v actual="$zero_actual_late" -v expected="$zero_expected_late" \
+         'BEGIN { number="^[0-9]+([.][0-9]+)?([eE][+-]?[0-9]+)?$";
+                  exit !(actual ~ number && actual >= 0 && actual <= 50 && actual == expected) }'
+    then
+        setup_failure "$zero_phase late-publication allowance" "$zero_actual_late" "lateUs=$zero_expected_late"
     fi
     local zero_actual_wake
     zero_actual_wake=$(read_property dmtweeter-synco.zero_test.wakeAheadUs "$zero_file")

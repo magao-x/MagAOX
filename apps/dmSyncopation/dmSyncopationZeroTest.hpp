@@ -57,6 +57,10 @@ inline void dmSyncopation::closeZeroTest()
         }
         *image = {};
     }
+    if( m_productionEnabled )
+    {
+        publishSchedule( 0, -1 );
+    }
     m_zeroAttached = m_zeroIdle = m_zeroHaveCombined = false;
     m_zeroIdleSince                                  = 0;
     m_zeroHaveRelease                                = false;
@@ -110,7 +114,7 @@ inline bool dmSyncopation::openZeroTest()
     m_zeroPrimaryIdentity  = primary->inode;
     m_zeroAttached         = true;
 
-    if( !zeroTestResources( true ) || !zeroTestPixels() )
+    if( !zeroTestResources( true ) || ( !m_productionEnabled && !zeroTestPixels() ) )
     {
         closeZeroTest();
         return false;
@@ -165,6 +169,32 @@ inline bool dmSyncopation::zeroTestResources( bool files )
         return false;
     }
 
+    if( m_productionEnabled )
+    {
+        if( !m_resources || m_mappings.size() != m_destinations.size() || !m_timing.md ||
+            ( files && inode( m_timingName ) != m_timingInode ) )
+        {
+            return false;
+        }
+        for( size_t j = 0; j < m_mappings.size(); ++j )
+        {
+            auto &mapping = m_mappings[j];
+            if( files && ( inode( m_destinations[j] + "_aux" ) != mapping.m_sourceInode ||
+                           inode( m_destinations[j] + "_aux_ready" ) != mapping.m_readyInode ||
+                           inode( m_destinations[j] + "_aux_ack" ) != mapping.m_ackInode ) )
+            {
+                mapping.m_inputAvailable = false;
+            }
+            const auto *destination = mapping.m_destination->image()->md;
+            if( !destination || destination->naxis != 2 || destination->datatype != _DATATYPE_FLOAT ||
+                destination->location != -1 || destination->size[0] != m_zeroWidth ||
+                destination->size[1] != m_zeroHeight || destination->write || destination->cnt0 != mapping.m_counter ||
+                ( files && inode( m_destinations[j] ) != mapping.m_destinationInode ) )
+            {
+                return false;
+            }
+        }
+    }
     return !files ||
            ( inode( m_zeroTestChannel ) == m_zeroChannelInode && inode( m_combinedName ) == m_zeroCombinedInode &&
              inode( shmimMonitorT::m_shmimName ) == shmimMonitorT::m_inode );
@@ -349,7 +379,8 @@ inline bool dmSyncopation::zeroTestWait( int64_t target, uint64_t primary, int64
             m_zeroWaitFailure = ZeroOutcome::resourceUnavailable;
             return false;
         }
-        if( m_zeroStats.startedNs && now - m_zeroStats.startedNs >= int64_t( m_zeroDurationSec * 1e9 ) )
+        if( !m_productionEnabled && m_zeroStats.startedNs &&
+            now - m_zeroStats.startedNs >= int64_t( m_zeroDurationSec * 1e9 ) )
         {
             m_zeroWaitFailure = ZeroOutcome::durationExpired;
             return false;
@@ -394,6 +425,18 @@ dmSyncopation::zeroTestFinalGuard( uint64_t primary, const synco::ZeroTiming::Ke
         counter != m_zeroExpected || counter == UINT64_MAX )
     {
         return ZeroOutcome::resourceUnavailable;
+    }
+
+    if( m_productionEnabled )
+    {
+        for( const auto &mapping : m_mappings )
+        {
+            const auto *destination = mapping.m_destination->image()->md;
+            if( !destination || destination->write || destination->cnt0 != mapping.m_counter )
+            {
+                return ZeroOutcome::resourceUnavailable;
+            }
+        }
     }
 
     if( input->write )
@@ -528,7 +571,8 @@ inline bool dmSyncopation::zeroTestPublicationReady( int64_t                    
             return false;
         }
 
-        if( m_zeroStats.startedNs && now - m_zeroStats.startedNs >= int64_t( m_zeroDurationSec * 1e9 ) )
+        if( !m_productionEnabled && m_zeroStats.startedNs &&
+            now - m_zeroStats.startedNs >= int64_t( m_zeroDurationSec * 1e9 ) )
         {
             m_zeroWaitFailure    = ZeroOutcome::durationExpired;
             m_zeroWaitObservedNs = now;
@@ -543,7 +587,8 @@ inline bool dmSyncopation::zeroTestPublicationReady( int64_t                    
     m_zeroWaitStage      = ZeroStage::publicationGuard;
     m_zeroWaitObservedNs = m_now();
 
-    if( m_zeroStats.startedNs && m_zeroWaitObservedNs - m_zeroStats.startedNs >= int64_t( m_zeroDurationSec * 1e9 ) )
+    if( !m_productionEnabled && m_zeroStats.startedNs &&
+        m_zeroWaitObservedNs - m_zeroStats.startedNs >= int64_t( m_zeroDurationSec * 1e9 ) )
     {
         m_zeroWaitFailure = ZeroOutcome::durationExpired;
         return false;
@@ -805,9 +850,10 @@ inline const char *dmSyncopation::zeroTestClockFailureName( ZeroClockFailure fai
 
 inline void dmSyncopation::zeroTestClockRejected( ZeroClockFailure failure, int64_t observed )
 {
-    const auto &clock  = m_zeroPublicationClock.status();
-    const bool  active = m_zeroStats.startedNs > 0 && observed >= m_zeroStats.startedNs &&
-                        observed - m_zeroStats.startedNs < int64_t( m_zeroDurationSec * 1e9 );
+    const auto &clock = m_zeroPublicationClock.status();
+    const bool  active =
+        m_zeroStats.startedNs > 0 && observed >= m_zeroStats.startedNs &&
+        ( m_productionEnabled || observed - m_zeroStats.startedNs < int64_t( m_zeroDurationSec * 1e9 ) );
     const auto slots = active ? uint64_t( m_requested - 1 ) : 0;
     ++m_zeroStats.clockRejected;
     m_zeroStats.clockExcludedCycles += active ? 1 : 0;
@@ -815,7 +861,7 @@ inline void dmSyncopation::zeroTestClockRejected( ZeroClockFailure failure, int6
     m_zeroStats.auxiliaryOpportunities += slots;
     m_zeroStats.active  = false;
     m_zeroStats.warming = true;
-    m_reason            = "zero publication clock unqualified";
+    m_reason = m_productionEnabled ? "production publication clock unqualified" : "zero publication clock unqualified";
 
     ZeroEvent event;
     event.trial          = m_zeroTrial;
@@ -925,6 +971,11 @@ inline int dmSyncopation::processZeroTestPrimary( int64_t observed, int64_t rece
     if( m_zeroClockCounter && ( m_zeroClockCounter == UINT64_MAX || primary != m_zeroClockCounter + 1 ) )
     {
         m_zeroClock.reset();
+        if( m_productionEnabled )
+        {
+            ++m_generation;
+            publishSchedule( 0, -1 );
+        }
         m_zeroHaveCombined = false;
         m_zeroHaveRelease  = false;
         m_zeroStats.active = false;
@@ -934,6 +985,11 @@ inline int dmSyncopation::processZeroTestPrimary( int64_t observed, int64_t rece
     if( publication <= 0 )
     {
         m_zeroClock.reset();
+        if( m_productionEnabled )
+        {
+            ++m_generation;
+            publishSchedule( 0, -1 );
+        }
         m_zeroHaveCombined = false;
         return 0;
     }
@@ -949,7 +1005,12 @@ inline int dmSyncopation::processZeroTestPrimary( int64_t observed, int64_t rece
         ( m_zeroClockPublication > 0 && publication <= m_zeroClockPublication ) )
     {
         m_zeroClock.reset();
-        m_zeroClockEpoch   = m_zeroPublicationClock.status().epoch;
+        m_zeroClockEpoch = m_zeroPublicationClock.status().epoch;
+        if( m_productionEnabled )
+        {
+            ++m_generation;
+            publishSchedule( 0, -1 );
+        }
         m_zeroHaveCombined = false;
         m_zeroHaveRelease  = false;
         m_zeroStats.active = false;
@@ -997,23 +1058,28 @@ inline int dmSyncopation::processZeroTestPrimary( int64_t observed, int64_t rece
     if( !m_zeroAttached && observed >= m_zeroNextAttach )
     {
         m_zeroNextAttach = observed + 1000000000;
-        openZeroTest();
+        if( !m_productionEnabled || openProduction() )
+        {
+            openZeroTest();
+        }
     }
 
     if( !m_zeroAttached )
     {
-        m_reason = "zero channel unavailable or nonzero";
+        m_reason = m_productionEnabled ? "production resources unavailable" : "zero channel unavailable or nonzero";
         return 0;
     }
 
-    if( !zeroTestResources( observed >= m_zeroNextFileCheck ) || ( !m_zeroIdle && !zeroTestPixels() ) )
+    if( !zeroTestResources( observed >= m_zeroNextFileCheck ) ||
+        ( !m_productionEnabled && !m_zeroIdle && !zeroTestPixels() ) )
     {
         ++m_zeroStats.resourceFaults;
         m_enabled             = false;
         m_zeroStats.active    = false;
         m_zeroStats.warming   = false;
         m_zeroStats.stoppedNs = m_now();
-        m_reason              = "zero trial resource/ownership changed";
+        m_reason =
+            m_productionEnabled ? "production resource/ownership changed" : "zero trial resource/ownership changed";
         closeZeroTest();
         return 0;
     }
@@ -1034,10 +1100,21 @@ inline int dmSyncopation::processZeroTestPrimary( int64_t observed, int64_t rece
     uint64_t        periodQ32  = 0;
     const bool      clockReady = zeroTestGrid( primary, grid, periodQ32, &rawGrid );
     const auto      period     = periodQ32 / MagAOX::dmSyncoSimulation::periodScale;
-    const bool      rateReady  = period && std::abs( 1e9 / double( period ) - 2000.0 ) <= 2000 * m_rateTolerance;
+    const bool      rateReady =
+        period &&
+        ( m_productionEnabled ? double( m_requested ) * 1e9 / double( period ) <= m_maxCadence * ( 1 + m_rateTolerance )
+                              : std::abs( 1e9 / double( period ) - 2000.0 ) <= 2000 * m_rateTolerance );
+    if( m_productionEnabled && clockReady && m_enabled )
+    {
+        publishProductionSchedule( grid, periodQ32, primary );
+    }
 
     if( !m_enabled )
     {
+        if( m_productionEnabled )
+        {
+            publishSchedule( 0, -1 );
+        }
         m_zeroArmed        = false;
         m_zeroStats.active = m_zeroStats.warming = false;
         zeroTestCombined( m_zeroLastCombined );
@@ -1047,6 +1124,11 @@ inline int dmSyncopation::processZeroTestPrimary( int64_t observed, int64_t rece
 
     if( !m_zeroArmed )
     {
+        if( m_productionEnabled )
+        {
+            m_reportTime        = 0;
+            m_reportedDelivered = 0;
+        }
         m_zeroStats = {};
         m_zeroTiming.reset();
         m_zeroPhase.reset();
@@ -1072,7 +1154,8 @@ inline int dmSyncopation::processZeroTestPrimary( int64_t observed, int64_t rece
         return 0;
     }
 
-    if( m_zeroStats.startedNs && observed - m_zeroStats.startedNs >= int64_t( m_zeroDurationSec * 1e9 ) )
+    if( !m_productionEnabled && m_zeroStats.startedNs &&
+        observed - m_zeroStats.startedNs >= int64_t( m_zeroDurationSec * 1e9 ) )
     {
         m_enabled          = false;
         m_zeroStats.active = m_zeroStats.warming = false;
@@ -1085,7 +1168,7 @@ inline int dmSyncopation::processZeroTestPrimary( int64_t observed, int64_t rece
 
     if( m_zeroStats.warming )
     {
-        m_reason = "zero trial clock/ownership warming";
+        m_reason = m_productionEnabled ? "production clock/ownership warming" : "zero trial clock/ownership warming";
         zeroTestCombined( m_zeroLastCombined );
         m_zeroHaveCombined = synco::ZeroTiming::valid( m_zeroLastCombined );
         return 0;
@@ -1095,7 +1178,7 @@ inline int dmSyncopation::processZeroTestPrimary( int64_t observed, int64_t rece
     {
         m_zeroStats.startedNs = observed;
         m_zeroStats.active    = true;
-        m_reason              = "zero trial active";
+        m_reason              = m_productionEnabled ? "production active" : "zero trial active";
         zeroTestEvent( -1, ZeroOutcome::started, ZeroStage::lifecycle, grid.ns, observed );
     }
 
@@ -1243,7 +1326,12 @@ inline int dmSyncopation::processZeroTestPrimary( int64_t observed, int64_t rece
         m_zeroCounterTargetRawNs = synco::stepGrid( rawGrid, periodQ32, step, m_requested ).ns;
         const auto target = zeroTestPublicationTarget( synco::stepGrid( grid, periodQ32, step, m_requested ).ns );
         synco::ZeroTiming::Key combined;
-        int64_t                stagedNs = 0;
+        if( m_productionEnabled && !prepareProductionStep( step, target, primary ) )
+        {
+            zeroTestSkip( step, m_zeroWaitFailure, ZeroStage::preparation, target, m_now(), m_zeroLastCombined );
+            continue;
+        }
+        int64_t stagedNs = 0;
 
         if( !target )
         {
@@ -1328,10 +1416,21 @@ inline int dmSyncopation::processZeroTestPrimary( int64_t observed, int64_t rece
                 step, ZeroOutcome::preparationLate, ZeroStage::preparation, target, preparationStart, preparedKey );
             continue;
         }
-        m_zeroChannel.md->write = 1;
-        std::memset( m_zeroChannel.array.F, 0, m_zeroBytes );
-        std::atomic_thread_fence( std::memory_order_release );
-        m_zeroChannel.md->write = 0;
+        if( m_productionEnabled )
+        {
+            if( !productionCopy( primary, target - int64_t( m_zeroWakeAheadUs * 1000 ) ) )
+            {
+                zeroTestSkip( step, m_zeroWaitFailure, ZeroStage::preparation, target, m_now(), preparedKey );
+                continue;
+            }
+        }
+        else
+        {
+            m_zeroChannel.md->write = 1;
+            std::memset( m_zeroChannel.array.F, 0, m_zeroBytes );
+            std::atomic_thread_fence( std::memory_order_release );
+            m_zeroChannel.md->write = 0;
+        }
         ++m_zeroStats.staged;
         stagedNs = m_now();
 
@@ -1433,6 +1532,10 @@ inline int dmSyncopation::processZeroTestPrimary( int64_t observed, int64_t rece
         m_zeroChannel.md->write = 1;
         const auto published    = ImageStreamIO_UpdateIm( &m_zeroChannel );
         ++m_zeroExpected;
+        if( m_productionEnabled && !m_mappings.empty() )
+        {
+            m_mappings.front().m_counter = m_zeroExpected;
+        }
         const auto             postedAt = m_now();
         synco::ZeroTiming::Key auxiliaryKey;
 
@@ -1543,12 +1646,16 @@ inline int dmSyncopation::processZeroTestPrimary( int64_t observed, int64_t rece
                            auxiliaryKey );
         }
     }
+    if( m_productionEnabled )
+    {
+        productionStep0( grid, periodQ32, primary );
+    }
     return 0;
 }
 
 inline int dmSyncopation::setupZeroTestINDI()
 {
-    if( !m_zeroTestEnabled )
+    if( !zeroEngine() )
     {
         return 0;
     }
@@ -1733,13 +1840,13 @@ inline int dmSyncopation::setupZeroTestINDI()
 
 inline void dmSyncopation::publishZeroTestStatus( int64_t now, bool force )
 {
-    if( !m_zeroTestEnabled || now <= 0 )
+    if( !zeroEngine() || now <= 0 )
     {
         return;
     }
 
-    const bool activeExpired =
-        m_zeroStats.startedNs > 0 && now - m_zeroStats.startedNs >= int64_t( m_zeroDurationSec * 1e9 );
+    const bool activeExpired = !m_productionEnabled && m_zeroStats.startedNs > 0 &&
+                               now - m_zeroStats.startedNs >= int64_t( m_zeroDurationSec * 1e9 );
     const bool warmExpired = !m_zeroStats.startedNs && m_zeroArmedAt > 0 && now - m_zeroArmedAt >= 30000000000LL;
 
     if( m_enabled && ( activeExpired || warmExpired ) )
@@ -1774,7 +1881,7 @@ inline void dmSyncopation::publishZeroTestStatus( int64_t now, bool force )
     snapshot.eventsQueued  = m_zeroEvents.queued();
     snapshot.capturedNs    = now;
     snapshot.targetHz      = period ? double( m_requested ) * 1e9 * MagAOX::dmSyncoSimulation::periodScale / period : 0;
-    snapshot.durationSec   = m_zeroDurationSec;
+    snapshot.durationSec   = m_productionEnabled ? 0 : m_zeroDurationSec;
     snapshot.durationLimitSec     = m_zeroDurationLimitSec;
     snapshot.steps                = m_requested;
     snapshot.eventStride          = m_zeroEventStride;
@@ -1783,13 +1890,21 @@ inline void dmSyncopation::publishZeroTestStatus( int64_t now, bool force )
     snapshot.lateUs               = m_zeroLateUs;
     snapshot.wakeAheadUs          = m_zeroWakeAheadUs;
     snapshot.requested            = requested;
+    snapshot.passiveCopied        = m_passiveCopied;
+    snapshot.passiveSkipped       = m_passiveSkipped;
+    for( size_t j = 0; j < m_mappings.size() && j < 32; ++j )
+    {
+        snapshot.providerAccepted[j] = m_mappings[j].m_accepted;
+        snapshot.providerMissing[j]  = m_mappings[j].m_missing;
+        snapshot.providerRejected[j] = m_mappings[j].m_rejected;
+    }
     m_zeroStatus.publish( snapshot );
     m_zeroPublished = snapshot;
 }
 
 inline void dmSyncopation::updateZeroTest( bool record )
 {
-    if( !m_zeroTestEnabled )
+    if( !zeroEngine() )
     {
         return;
     }
@@ -1816,7 +1931,7 @@ inline void dmSyncopation::updateZeroTest( bool record )
                 m_reason                                 = "zero trial warmup timed out";
             }
 
-            if( m_zeroStats.startedNs && m_enabled &&
+            if( !m_productionEnabled && m_zeroStats.startedNs && m_enabled &&
                 now - m_zeroStats.startedNs >= int64_t( m_zeroDurationSec * 1e9 ) )
             {
                 m_enabled          = false;
@@ -2248,7 +2363,7 @@ inline void dmSyncopation::updateZeroPublication( const ZeroSnapshot &snapshot, 
 
 inline void dmSyncopation::drainZeroTestEvents( size_t limit )
 {
-    if( !m_zeroTestEnabled )
+    if( !zeroEngine() )
     {
         return;
     }

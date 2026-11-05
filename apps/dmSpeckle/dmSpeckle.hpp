@@ -20,7 +20,7 @@
 
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
-#include "../../libMagAOX/app/dmSyncopationTiming.hpp"
+#include "../../libMagAOX/app/dev/dmSyncopationProducer.hpp"
 
 /** \defgroup dmSpeckle
  * \brief The DM speckle maker app
@@ -52,13 +52,15 @@ namespace app
 /**
  * \ingroup dmSpeckle
  */
-class dmSpeckle : public MagAOXApp<true>, public dev::telemeter<dmSpeckle>
+class dmSpeckle : public MagAOXApp<true>, public dev::telemeter<dmSpeckle>, public dev::dmSyncopationProducer<dmSpeckle>
 {
 
-    typedef float                     realT;
-    typedef dev::telemeter<dmSpeckle> telemeterT;
+    typedef float                                 realT;
+    typedef dev::telemeter<dmSpeckle>             telemeterT;
+    typedef dev::dmSyncopationProducer<dmSpeckle> dmSyncopationProducerT;
 
     friend class dev::telemeter<dmSpeckle>;
+    friend class dev::dmSyncopationProducer<dmSpeckle>;
     friend class dmSpeckle_test;
 
   protected:
@@ -98,10 +100,6 @@ class dmSpeckle : public MagAOXApp<true>, public dev::telemeter<dmSpeckle>
 
     std::string m_fileName; ///< Input cube for arbitrary-cube modulation.
 
-    std::string m_syncopationTiming; ///< Nonempty timing stream selects auxiliary-provider operation.
-
-    double m_writeLeadUs{ 50 }; ///< Advance before a provider snapshot cutoff, in microseconds.
-
     ///@}
 
     mx::improc::eigenCube<realT> m_shapes; ///< Prepared legacy shapes or arbitrary provider cube.
@@ -125,14 +123,15 @@ class dmSpeckle : public MagAOXApp<true>, public dev::telemeter<dmSpeckle>
 
     std::atomic<bool> m_restartSp{ false }; ///< Regenerates shapes after an INDI parameter change.
 
+    std::atomic<bool> m_syncopationZeroRequested{
+        false }; ///< Queue an explicit tagged zero without mutating owned pixels.
+
   public:
     /// Default c'tor.
     dmSpeckle();
 
     /// D'tor, declared and defined for noexcept.
-    ~dmSpeckle() noexcept
-    {
-    }
+    ~dmSpeckle() noexcept;
 
     /// Register legacy modulation and optional provider configuration.
     virtual void setupConfig();
@@ -180,13 +179,11 @@ class dmSpeckle : public MagAOXApp<true>, public dev::telemeter<dmSpeckle>
                              realT    frequency, /**< [in] Actual vibration frequency in Hz. */
                              int64_t  targetNs /**< [in] CLOCK_MONOTONIC command target time. */ );
 
-    /// Read one coherent same-host provider schedule using normal stream publication metadata.
-    static bool readSyncopationRecord( const IMAGE   &stream, /**< [in] Attached timing image. */
-                                       synco::Record &record /**< [out] Stable timing record. */ );
-
-    /// Publish a prepared auxiliary source if its cutoff has not passed.
-    bool publishSyncopation( const realT *pixels, /**< [in] Prepared full source command. */
-                             int64_t      cutoffNs /**< [in] Absolute monotonic snapshot cutoff. */ );
+    /// Generate a full provider payload for its advertised target or an explicit zero request.
+    int prepareSyncopationCommand(
+        mx::improc::eigenImage<realT> &command /**< [out] Preallocated full source command. */,
+        int64_t                        targetNs /**< [in] Same-host monotonic target of the selected slot. */,
+        bool zero /**< [in] Build an explicitly requested zero rather than a modulation sample. */ );
 
     /// Follow scheduler cutoffs without independently triggering a main DM channel.
     void syncopationThreadExec();
@@ -298,27 +295,12 @@ dmSpeckle::dmSpeckle() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
     return;
 }
 
+inline dmSpeckle::~dmSpeckle() noexcept = default;
+
 void dmSpeckle::setupConfig()
 {
     TELEMETER_SETUP_CONFIG( config );
-    config.add( "syncopation.timingStream",
-                "",
-                "syncopation.timingStream",
-                argType::Required,
-                "syncopation",
-                "timingStream",
-                false,
-                "string",
-                "Optional same-host dmSyncopation schedule; requires an _aux output channel." );
-    config.add( "syncopation.writeLeadUs",
-                "",
-                "syncopation.writeLeadUs",
-                argType::Required,
-                "syncopation",
-                "writeLeadUs",
-                false,
-                "double",
-                "Provider write advance before the snapshot cutoff, in microseconds (default 50)." );
+    DMSYNCOPATIONPRODUCER_SETUP_CONFIG( config );
     config.add( "dm.channelName",
                 "",
                 "dm.channelName",
@@ -473,8 +455,7 @@ void dmSpeckle::setupConfig()
 int dmSpeckle::loadConfigImpl( mx::app::appConfigurator &_config )
 {
     _config( m_dmChannelName, "dm.channelName" );
-    _config( m_syncopationTiming, "syncopation.timingStream" );
-    _config( m_writeLeadUs, "syncopation.writeLeadUs" );
+    DMSYNCOPATIONPRODUCER_LOAD_CONFIG( _config );
 
     m_dmName = m_dmChannelName;
     _config( m_dmName, "dm.name" );
@@ -571,158 +552,94 @@ void dmSpeckle::fillTipTilt(
     }
 }
 
-bool dmSpeckle::readSyncopationRecord( const IMAGE &stream, synco::Record &record )
+int dmSpeckle::prepareSyncopationCommand( mx::improc::eigenImage<realT> &command, int64_t targetNs, bool zero )
 {
-    if( stream.md->datatype != _DATATYPE_INT64 || stream.md->nelement != synco::words || stream.md->write )
+    if( zero )
     {
-        return false;
+        command.setZero();
+        return 0;
     }
-    uint64_t before = stream.md->cnt0;
-    std::atomic_thread_fence( std::memory_order_acquire );
-    memcpy( record.data(), stream.array.raw, sizeof( record ) );
-    std::atomic_thread_fence( std::memory_order_acquire );
-    return !stream.md->write && before == stream.md->cnt0;
-}
 
-bool dmSpeckle::publishSyncopation( const realT *pixels, int64_t cutoffNs )
-{
-    std::lock_guard<std::mutex> lock( m_indiMutex );
-    if( !m_modulating || synco::monotonicNs() >= cutoffNs )
+    if( m_opMode == TIPTILT )
     {
-        return false;
+        fillTipTilt( command.data(), m_width, m_height, m_amp, m_frequency, targetNs );
+        return 0;
     }
-    m_imageStream.md->write = 1;
-    memcpy( m_imageStream.array.raw, pixels, m_width * m_height * m_typeSize );
-    ImageStreamIO_UpdateIm( &m_imageStream );
-    return true;
+
+    if( m_shapes.planes() == 0 || m_restartSp )
+    {
+        m_restartSp = false;
+
+        if( generateSpeckles() < 0 )
+        {
+            return -1;
+        }
+    }
+
+    if( m_shapes.planes() == 0 )
+    {
+        return -1;
+    }
+
+    long double index =
+        std::floor( static_cast<long double>( targetNs ) * m_frequency / ( 1e9L * std::max( 1U, m_dwell ) ) );
+    int plane = static_cast<int>( std::fmod( index, m_shapes.planes() ) );
+    command   = m_shapes.image( plane );
+    return 0;
 }
 
 void dmSpeckle::syncopationThreadExec()
 {
-    IMAGE                         timing{};
-    bool                          timingOpened = false;
-    int                           semaphore    = -1;
-    int64_t                       lastEpoch = 0, lastGeneration = 0, lastTarget = -1, lastValid = 0;
     mx::improc::eigenImage<realT> command( m_width, m_height );
 
     while( !m_shutdown )
     {
-        if( !timingOpened )
+        if( !m_modulating && !m_syncopationZeroRequested )
         {
-            if( ImageStreamIO_openIm( &timing, m_syncopationTiming.c_str() ) != 0 )
-            {
-                mx::sys::milliSleep( 10 );
-                continue;
-            }
-            semaphore = ImageStreamIO_getsemwaitindex( &timing, 6 );
-            if( timing.md->datatype != _DATATYPE_INT64 || timing.md->nelement != synco::words || semaphore < 0 )
-            {
-                if( semaphore >= 0 )
-                    timing.semReadPID[semaphore] = 0;
-                ImageStreamIO_closeIm( &timing );
-                mx::sys::milliSleep( 10 );
-                continue;
-            }
-            timingOpened = true;
-            lastTarget   = -1;
-            lastValid    = synco::monotonicNs();
-        }
-
-        synco::Record record{};
-        int64_t       now   = synco::monotonicNs();
-        bool          valid = readSyncopationRecord( timing, record ) && synco::validRecord( record, now );
-        if( valid )
-            lastValid = now;
-        if( valid && m_modulating )
-        {
-            int step = synco::nextStep( record, now );
-            if( step >= 0 )
-            {
-                int64_t target    = record[synco::targets + step];
-                int64_t cutoff    = record[synco::cutoffs + step];
-                bool    newTarget = record[synco::epoch] != lastEpoch || record[synco::generation] != lastGeneration ||
-                                 target != lastTarget;
-                if( newTarget )
-                {
-                    realT  amplitude, frequency;
-                    double advance;
-                    { // mutex scope
-                        std::lock_guard<std::mutex> lock( m_indiMutex );
-                        amplitude = m_amp;
-                        frequency = m_frequency;
-                        advance   = m_writeLeadUs;
-                    }
-                    if( m_opMode == TIPTILT )
-                    {
-                        fillTipTilt( command.data(), m_width, m_height, amplitude, frequency, target );
-                    }
-                    else
-                    {
-                        if( m_shapes.planes() == 0 || m_restartSp )
-                        {
-                            m_restartSp = false;
-                            if( generateSpeckles() < 0 )
-                            {
-                                m_modulating = false;
-                                continue;
-                            }
-                        }
-                        long double index = std::floor( static_cast<long double>( target ) * frequency /
-                                                        ( 1e9L * std::max( 1U, m_dwell ) ) );
-                        int         plane = static_cast<int>( std::fmod( index, m_shapes.planes() ) );
-                        command           = m_shapes.image( plane );
-                    }
-
-                    int64_t writeTime = cutoff - static_cast<int64_t>( advance * 1e3 );
-                    if( writeTime > now )
-                    {
-                        timespec ts{ writeTime / 1000000000, writeTime % 1000000000 };
-                        int      rv;
-                        do
-                        {
-                            rv = clock_nanosleep( CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, nullptr );
-                        } while( rv == EINTR && !m_shutdown && m_modulating );
-                    }
-                    synco::Record current{};
-                    now = synco::monotonicNs();
-                    if( !m_shutdown && m_modulating && readSyncopationRecord( timing, current ) &&
-                        synco::validRecord( current, now ) && current[synco::epoch] == record[synco::epoch] &&
-                        current[synco::generation] == record[synco::generation] &&
-                        current[synco::cutoffs + step] == cutoff && current[synco::targets + step] == target )
-                    {
-                        publishSyncopation( command.data(), cutoff );
-                    }
-                    lastEpoch      = record[synco::epoch];
-                    lastGeneration = record[synco::generation];
-                    lastTarget     = target;
-                    continue;
-                }
-            }
-        }
-        else if( ( record[synco::expires] > 0 && now >= record[synco::expires] ) || now - lastValid > 1000000000 ||
-                 timing.md->sem == 0 )
-        {
-            timing.semReadPID[semaphore] = 0;
-            ImageStreamIO_closeIm( &timing );
-            timingOpened = false;
+            mx::sys::milliSleep( 1 );
             continue;
         }
 
-        timespec timeout;
-        clock_gettime( CLOCK_REALTIME, &timeout );
-        timeout.tv_nsec += 1000000;
-        if( timeout.tv_nsec >= 1000000000 )
+        synco::Request request{};
+        const int      pollResult = dmSyncopationProducerT::syncopationPoll( request, m_imageStream );
+
+        if( pollResult < 0 )
         {
-            ++timeout.tv_sec;
-            timeout.tv_nsec -= 1000000000;
+            mx::sys::milliSleep( 100 );
+            continue;
         }
-        sem_timedwait( timing.semptr[semaphore], &timeout );
+
+        if( pollResult == 0 )
+        {
+            mx::sys::nanoSleep( 10000 );
+            continue;
+        }
+
+        { //mutex scope
+            std::lock_guard<std::mutex> lock( m_indiMutex );
+
+            if( m_shutdown || ( !m_modulating && !m_syncopationZeroRequested ) )
+            {
+                continue;
+            }
+
+            const bool zero = !m_modulating && m_syncopationZeroRequested;
+
+            if( prepareSyncopationCommand( command, request.targetNs, zero ) < 0 )
+            {
+                m_modulating = false;
+                continue;
+            }
+
+            if( dmSyncopationProducerT::syncopationPublish( command.data(), request, m_imageStream ) && zero )
+            {
+                m_syncopationZeroRequested = false;
+                log<text_log>( "zero submitted for syncopation" );
+            }
+        }
     }
-    if( timingOpened )
-    {
-        timing.semReadPID[semaphore] = 0;
-        ImageStreamIO_closeIm( &timing );
-    }
+
+    dmSyncopationProducerT::syncopationClose();
 }
 
 int dmSpeckle::appStartup()
@@ -938,6 +855,7 @@ int dmSpeckle::appShutdown()
         ImageStreamIO_closeIm( &m_imageStream );
         m_opened = false;
     }
+    DMSYNCOPATIONPRODUCER_APP_SHUTDOWN;
     TELEMETER_APP_SHUTDOWN;
 
     return 0;
@@ -1106,7 +1024,9 @@ inline void dmSpeckle::modThreadExec()
 
             unsigned dwelled = 0;
             if( m_dwell == 0 )
+            {
                 m_dwell = 1;
+            }
 
             float triggerDelay = m_triggerDelay / 1e6;
 
@@ -1136,7 +1056,9 @@ inline void dmSpeckle::modThreadExec()
                             double dt = ( 1e8 ) * ( triggerDelay -
                                                     ( t1 - t0 ) ); // This is 0.1 times remaining time, but in nanosecs
                             if( dt <= 0 )
+                            {
                                 break;
+                            }
                             mx::sys::nanoSleep( dt );
                             t1 = mx::sys::get_curr_time();
                         }
@@ -1149,8 +1071,10 @@ inline void dmSpeckle::modThreadExec()
 
                         // Check for why we timed out
                         if( errno == EINTR )
+                        {
                             break; // This indicates signal interrupted us, time to restart or shutdown, loop will exit
                                    // normally if flags set.
+                        }
 
                         // ETIMEDOUT just means we should wait more.
                         // Otherwise, report an error.
@@ -1197,7 +1121,9 @@ inline void dmSpeckle::modThreadExec()
 
                     ++idx;
                     if( idx >= m_shapes.planes() )
+                    {
                         idx = 0;
+                    }
 
                     if( !m_trigger )
                     {
@@ -1212,7 +1138,9 @@ inline void dmSpeckle::modThreadExec()
                 }
             }
             if( m_restartSp )
+            {
                 continue;
+            }
 
             recordDmSpeck( true );
             log<text_log>( "stopped modulating", logPrio::LOG_NOTICE );
@@ -1226,7 +1154,9 @@ inline void dmSpeckle::modThreadExec()
             m_imageStream.md->writetime = currtime;
 
             if( !m_trigger )
+            {
                 m_imageStream.md->cnt0++;
+            }
 
             m_imageStream.md->write = 0;
             ImageStreamIO_sempost( &m_imageStream, -1 );
@@ -1245,7 +1175,9 @@ INDI_NEWCALLBACK_DEFN( dmSpeckle, m_indiP_trigger )
     }
 
     if( !ipRecv.find( "toggle" ) )
+    {
         return 0;
+    }
 
     if( !m_syncopationTiming.empty() && ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On )
     {
@@ -1420,7 +1352,9 @@ INDI_NEWCALLBACK_DEFN( dmSpeckle, m_indiP_cross )
     }
 
     if( !ipRecv.find( "toggle" ) )
+    {
         return 0;
+    }
 
     std::unique_lock<std::mutex> lock( m_indiMutex );
 
@@ -1552,7 +1486,9 @@ INDI_NEWCALLBACK_DEFN( dmSpeckle, m_indiP_modulating )
     }
 
     if( !ipRecv.find( "toggle" ) )
+    {
         return 0;
+    }
 
     std::unique_lock<std::mutex> lock( m_indiMutex );
 
@@ -1564,7 +1500,8 @@ INDI_NEWCALLBACK_DEFN( dmSpeckle, m_indiP_modulating )
 
     if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On )
     {
-        m_modulating = true;
+        m_syncopationZeroRequested = false;
+        m_modulating               = true;
         indi::updateSwitchIfChanged( m_indiP_modulating, "toggle", pcf::IndiElement::On, m_indiDriver, INDI_OK );
     }
 
@@ -1588,7 +1525,9 @@ INDI_NEWCALLBACK_DEFN( dmSpeckle, m_indiP_zero )
     }
 
     if( !ipRecv.find( "request" ) )
+    {
         return 0;
+    }
 
     if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On )
     {
@@ -1596,24 +1535,22 @@ INDI_NEWCALLBACK_DEFN( dmSpeckle, m_indiP_zero )
         {
             return -1;
         }
-        m_imageStream.md->write = 1;
+        if( !m_syncopationTiming.empty() )
+        {
+            m_syncopationZeroRequested = true;
+            log<text_log>( "zero queued for syncopation" );
+            return 0;
+        }
 
+        m_imageStream.md->write = 1;
         memset( m_imageStream.array.raw, 0, m_width * m_height * m_typeSize );
         timespec currtime;
         clock_gettime( CLOCK_REALTIME, &currtime );
         m_imageStream.md->atime     = currtime;
         m_imageStream.md->writetime = currtime;
-
-        if( !m_syncopationTiming.empty() )
-        {
-            ImageStreamIO_UpdateIm( &m_imageStream );
-        }
-        else
-        {
-            m_imageStream.md->cnt0++;
-            m_imageStream.md->write = 0;
-            ImageStreamIO_sempost( &m_imageStream, -1 );
-        }
+        m_imageStream.md->cnt0++;
+        m_imageStream.md->write = 0;
+        ImageStreamIO_sempost( &m_imageStream, -1 );
         log<text_log>( "zeroed" );
     }
 

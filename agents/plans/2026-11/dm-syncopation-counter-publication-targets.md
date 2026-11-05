@@ -739,3 +739,335 @@ dmSyncopation only and repeat the unchanged 120-second command above. The
 periodic final-guard delay still needs separate IRQ/scheduling investigation.
 The hardware capture does not qualify this correction, and no agent operated
 the instrument.
+
+## 2026-11-04: unchanged capture verifies metadata-transition correction
+
+`zero-aux-8000Hz-20261104T205907Z` records revision `7bc639db`, with no external
+changes reported by the operator. Schema 9, the 120-second interval, four total
+steps, zero commit lead, 10 us early wake, 2 us admission allowance and the
+optimized mode-4 / 5 us dmcomb setup remain unchanged. All helper operations
+and 125 progress polls succeed; collectors stop intentionally after normal app
+completion at **120.000002379 s**.
+
+The metadata-transition failure sequences are absent:
+
+| Outcome | Previous 202704Z | Current 205907Z |
+| --- | ---: | ---: |
+| Genuine main cycles | 240,000 | 240,000 |
+| Matched mains | 239,410 | 239,999 |
+| Unmatched mains | 589 | 1 startup |
+| Auxiliary publications | 717,480 | 719,367 |
+| Auxiliary acknowledgements observed | 717,479 | 719,366 |
+| Explicit auxiliary skips | 2,517 | 633 |
+| Clock-excluded auxiliary slots | 3 | 0 |
+
+The current opportunity partition is exactly **720,000 = 719,367 posted + 633
+skipped**. Publication delivery is **99.912083%** and total observed source rate
+is **7,994.724842 Hz**. The final step-3 acknowledgement is again truncated by
+finite expiry: its target is 3.155 us before cutoff and API return 2.190 us
+before cutoff. It is a posted command without completed acknowledgement
+observation, not an acknowledgement timeout or demonstrated delivery failure.
+
+The one unmatched main produces three startup skips. All other main
+associations succeed, with no three-cycle metadata cascades. The code does not
+count how many intermediate timestamp-only states it waited through, so this
+capture establishes clean association outcomes rather than a transient-read
+frequency. There are no clock rejections/exclusions; `mainRebaselined=0` is
+expected because that recovery path was not exercised in this run. The prior
+202704Z capture independently exercised one successful clock recovery.
+
+### The remaining skips repeat the same absolute phase
+
+All **630** timing skips are step 2 at `publication_guard`, on **odd** primary
+counters. They occur only at active **112.987366-117.496370 s**, a 4.509-second
+band. Counts by second 112-117 are **4 / 210 / 283 / 105 / 26 / 2**.
+
+Their target phase is **136.705-140.484 us modulo 1 ms**; 629 of 630 targets are
+below 140 us, with median phase 137.595 us and p99 139.272 us. Rejection samples
+are **2.001-5.026 us late**, median 2.601 us, p99 4.344 us. Validation finished
+**7.924-9.686 us early** and staging **71.610-80.672 us early**. No preparation,
+validation, readiness, identity, resource or wait failures occur.
+
+The main grid phase modulo 500 us drifts from approximately 270.227 us near
+startup to 392.680 us near completion; its +250 us slot sweeps through the
+suspicious phase near the end. The previous 202704Z capture hit this phase on
+even main counters, while 153017Z and this run hit it on odd counters. Repeating
+the same absolute phase with opposite frame parity strengthens the periodic
+phase-interference interpretation; it is not an invariant odd/even-frame
+processing defect. No particular IRQ, scheduler action or clock operation has
+yet been identified.
+
+Full-rate auxiliary raw publication error, in microseconds:
+
+| Step | Mean error | Standard deviation | Maximum lateness |
+| --- | ---: | ---: | ---: |
+| Auxiliary 1 | +0.092635 | 0.025839 | 2.615 |
+| Auxiliary 2 | +0.101664 | 0.111701 | 4.149 |
+| Auxiliary 3 | +0.092891 | 0.025780 | 2.017 |
+
+Source measurement has zero invalid evidence, source gaps, source faults or
+timing exclusions. Maximum active clock bracket is 441 ns; sampled median is
+50 ns. Derived guard-to-writetime proxy cost is about 42 ns. Keep the commit
+lead at zero; this small cost does not explain the microsecond-scale periodic
+delay and remains below the clock-bracket precision.
+
+Successful stride-4 events again retain only primary counters modulo 4 equal
+to zero, while the skipped cycles are odd. Sampled successful maxima of
+0.316 / 0.748 / 0.317 us understate the full-rate tails above. All skipped rows
+and full-rate populations remain available. Sampling accounts exactly for
+**959,365 healthy outcomes = 239,999 retained + 719,366 intentionally omitted**,
+plus 636 exceptional/lifecycle rows, totaling 240,635 rows. There are no
+event/log/reader queue drops; queue high-water is 2,298 of 20,000 and final
+records show it drained.
+
+### Controller/camera comparison and next measurement
+
+Controller snapshots add 998,730 receipts/submissions and 998,729 completions,
+admissions and retirements across independently read properties, with no new
+rejection/coalescing, overload, cancellation/supersession, preparation/post
+failure, SDK failure/timeout, no-send or timing gap/drop. Fully active receipt
+intervals span 91.413-256.925 us; windows containing skips show elevated spread
+without accompanying controller admission failures.
+
+All **239,999 classified mains** have SDK and reader matches. Main
+observer-to-SDK mean/maximum is 29.273 / 40.577 us; reader-start-to-SDK is
+16.039 / 25.528 us; native main SDK service is 103.824 / 106.872 us. Diagnostic
+coverage caveats remain 9,157 invalid timing observations, 1,032 SDK-observation
+gaps and 84 wide brackets in the controller's separate delivery collector.
+These measurements still do not isolate added main SDK queue wait.
+
+Camera snapshots add 280,788 frames, four excursion traces and 13 housekeeping
+controls without new frame/counter gap, rejection, failure, drop or control/
+trace loss. Active acquisition interval standard deviations are
+0.239-1.600 us and publication deviations 1.028-2.242 us. Four approximately
+20-24 us retained excursions overlap serial activity, matching the earlier
+camera pattern rather than identifying the separate synco phase disturbance.
+
+The next useful measurement is a focused IRQ/softirq and scheduling trace on
+the synco timing CPU, aligned to the existing monotonic final-guard evidence.
+Preserve the current configuration and 2 us admission rule during that
+measurement. No runtime or instrument configuration is changed by this
+analysis, and no agent operated the instrument.
+
+## 2026-11-04: permit measured late publication within 6 us
+
+The user accepts the measured few-microsecond publication delay and authorizes
+publishing those slots rather than skipping them. The 205907Z final-guard
+rejection samples are 2.001-5.026 us late, median 2.601 us and p99 4.344 us.
+Increase the **finite counter-target preset** from `zeroTest.lateUs=2` to **6**,
+covering that observed maximum with a small margin. This does not change the
+app's general default or any ordinary/shadow scheduler setting.
+
+The existing runtime already implements this configurable admission bound.
+No production C++ change or new binary is required. The current deployed
+metadata-transition correction must remain installed; edit only the startup
+setting in the working instance configuration and restart synco:
+
+```ini
+[zeroTest]
+lateUs=6
+```
+
+The frozen counter targets, zero commit lead, 10 us early wake and fixed next
+slot remain unchanged. Payload staging and full validation still must complete
+by the original target. Source identity, reader clearance, cancellation,
+finite expiry and the 1 us clock-bracket check remain active. Only the final
+admission sample may occur up to 6 us after its dispatch target. A delay beyond
+that allowance still skips the slot, with no catch-up or shifted future target.
+
+This is an admission limit, not a hard bound on the physical counter-store
+timestamp. Typical guard-to-writetime proxy cost is about 42 ns in the latest
+capture, but post-check preemption can make actual publication later. Continue
+to measure raw target error, downstream receipt intervals, classified main
+prefixes and controller admission/execution coverage in the finite trial; the
+existing evidence does not isolate main SDK queue wait.
+
+The helper gains an optional **sixth** argument for expected `lateUs`. When
+provided, it verifies that value in both before/configured readbacks before
+enable, and records expected/actual allowances in `test.txt`. Omitting it keeps
+the existing valid-range check for backward compatibility. Schema remains 9.
+The updated preset and next comparison command are:
+
+```bash
+bash apps/dmSyncopation/scripts/capture-zero-aux-test.sh 8000 120 0 10 0 6
+```
+
+No camera, DM controller, dmcomb, CPU/IRQ or other workload change is part of
+this comparison. Workstation verification passes **145 app cases / 6,391,029
+assertions** and **56 private fake-service helper tests**, plus formatting,
+Bash syntax and diff checks. The new cases compare 2 and 6 us allowances under
+an approximately 5.026 us final-wait delay, reject a delay beyond 6 us, verify
+the next slot/cycle targets are unchanged, and retain the original early
+validation deadline even when its completion falls within the admission grace.
+Private helper tests cover expected-6 acceptance, before/configured mismatch
+against 2, omitted-argument compatibility and malformed arguments. Production
+C++ is unchanged; no production rebuild is needed. No agent operated the
+instrument.
+
+## 2026-11-04: 6 us capture delivers every post-startup slot
+
+`zero-aux-8000Hz-20261104T215358Z` uses the existing `7bc639db` app binary.
+`zero_test.lateUs=6` is confirmed in the **before, configured and after**
+snapshots; other setup is unchanged as reported by the operator. The older
+helper metadata lacks the new expected-allowance fields, but the configuration
+readbacks establish the actual allowance. All control/read operations and 124
+progress polls succeed, with intentional collector shutdown after normal app
+completion at **120.000109111 s**.
+
+| Outcome | 2 us run 205907Z | 6 us run 215358Z |
+| --- | ---: | ---: |
+| Main cycles / auxiliary opportunities | 240,000 / 720,000 | 240,000 / 720,000 |
+| Matched mains / startup-unmatched mains | 239,999 / 1 | 239,999 / 1 |
+| Auxiliary publications | 719,367 | **719,997** |
+| Acknowledgements observed | 719,366 | **719,997** |
+| Timing skips | 630 | **0** |
+| Startup skips | 3 | 3 |
+| Clock exclusions | 0 | 0 |
+
+Every auxiliary opportunity after the initial unmatched main is published and
+acknowledged. The partition is **720,000 = 719,997 posted + 3 startup skips**,
+with no late, validation, preparation, readiness, identity, resource, wait or
+clock exclusion. Publication delivery is **99.999583%** and observed total
+source rate is **7,999.967726 Hz**. All 239,999 classified mains have exact SDK
+and reader matches. There is no metadata-transition cascade.
+
+Full-rate auxiliary raw publication errors, in microseconds:
+
+| Step | Mean error | Standard deviation | Maximum lateness |
+| --- | ---: | ---: | ---: |
+| Auxiliary 1 | +0.088761 | 0.022893 | 2.464 |
+| Auxiliary 2 | +0.088952 | 0.022300 | 0.321 |
+| Auxiliary 3 | +0.107150 | 0.197445 | 4.807 |
+
+### Disturbance evidence and the sampling limit
+
+The main-grid phase modulo 500 us moves from approximately 190.930 to
+299.099 us. Opposite-parity step-3 targets sweep roughly 65.930-174.099 us
+modulo 1 ms, crossing the previously identified approximately 137 us band
+around active 78-81 s. Cumulative full-rate step-3 timing spread grows around
+76.8-81.9 s, consistent with that passage. All slots are delivered.
+
+Do not equate the 4.807 us maximum raw publication error with an observed
+4.807 us final admission delay. Successful stride-4 sampling retains only
+primary counters modulo 4 equal to zero, omitting the disturbed parity. Kept
+admission errors are 30-140 ns, with no accepted check beyond 2 us. The full-rate
+guard-to-writetime proxy maximum is 4.303 us; these marginal maxima and variances
+do not reveal the same-event decomposition or exactly how many commands the
+former 2 us rule would reject.
+
+Incremental full-rate means do establish delay in the accepted population:
+mean publication error minus mean guard-to-writetime cost grows from the usual
+approximately 0.051 us to approximately 0.802 us in the interval ending
+21:55:35.816 UTC. A full-rate admission-error population or a count of accepted
+checks above the former cutoff would remove the remaining diagnostic blind
+spot without logging every successful command. This outcome establishes
+post-startup delivery under the 6 us preset, not a same-instant counterfactual
+replay under 2 us. Raw source timing has zero invalid evidence, source gaps/
+faults or timing exclusions, and clock qualification rejects nothing.
+
+### Downstream timing and coverage
+
+Fully active controller receipt-interval means are **124.9991-125.0008 us**, with
+standard deviations **2.337-3.604 us** and maximum **158.810 us**. The preceding
+2 us run reached 21.798 us standard deviation and 256.925 us maximum with
+omitted slots. The large missing-slot tails are absent in this capture.
+
+No new controller rejection/coalescing, overload, cancellation/supersession,
+preparation/post failure, SDK failure/timeout, no-send or timing gap/drop totals
+are observed. Snapshot completed/admitted/retired counts increase by 997,342;
+independently read timing counters differ by one. Main observer-to-SDK
+mean/maximum is 29.152 / 40.146 us versus 29.273 / 40.577 us previously, and
+reader-start-to-SDK is 15.988 / 22.974 us versus 16.039 / 25.528 us. Native main
+SDK service is 103.871 / 105.429 us. These comparable prefixes do not isolate
+main SDK queue wait or prove zero added main wait.
+
+One aggregate SDK-worker service tail reaches 126.499 us, with native SDK
+maximum 121.370 us and no accompanying admission failure. Do not describe this
+run as a hard sub-125-us service bound.
+
+Camera snapshots add 276,778 frames, eight retained excursion traces and 13
+housekeeping controls without new failed/rejected frames, frame/counter gaps,
+drops or trace/control failures. Active acquisition interval standard deviations
+are 0.204-0.779 us, publication deviations 1.052-2.800 us. The camera records 75
+new wide-bracket mapping exclusions around active 56-61 s: timestamp coverage
+exclusions, not dropped frames. Eight approximately 20-25 us retained excursions
+overlap serial activity. This comparison does not establish that the 6 us
+allowance caused the camera exclusions.
+
+Event/log/reader queue-drop counts remain zero. Sampling reconciles
+**959,996 healthy outcomes = 240,000 retained + 719,996 intentionally omitted**,
+plus six lifecycle/exception rows, totaling 240,006 drained rows. Queue
+high-water is 2,005 of 20,000. Main timing evidence retains 9,167 invalid
+observations and 570 SDK-observation gaps as diagnostic exclusions.
+
+Retain the 6 us finite-trial preset and unchanged targets/readiness guards.
+No production runtime change is indicated by this capture. Exact admission-tail
+statistics and IRQ/scheduling correlation remain follow-up measurements.
+No agent operated the instrument.
+
+## 2026-11-04: production inputs are same-host and independent
+
+The operator confirms that production providers run on the same host and
+produce independent contributions. No cross-host transport or clock protocol
+is in scope. These decisions describe the production integration; the finite
+zero test does not yet implement tagged arbitrary-provider admission.
+
+Evaluate each producer independently for each advertised slot. An on-time,
+coherent command for the current slot replaces that producer's contribution.
+A missing, incomplete, invalid or late command leaves only that producer's
+last applied contribution in place. Other producers' eligible commands proceed.
+A missed step does not invalidate a valid command for a later step, and a late
+command for an old slot must not be adopted silently by a later slot.
+
+Always copy every mapping's selected new or retained contribution. There is no
+pixel comparison or successful no-copy branch. Producer input misses alone do
+not veto the scheduled auxiliary trigger. Shared reader-clearance, primary and
+combined identity, destination integrity, clock, cancellation and timing guards
+still apply to the whole operation and can suppress a trigger for every
+producer. Step 0 remains passive; genuine main commands are never gated by
+provider readiness.
+
+Retained contributions persist until replaced, including by an explicitly
+submitted zero. Stopping a producer does not remove its contribution. Tagged
+input/buffer ownership and initialization of the retained value remain
+implementation work. Fallback uses the last complete contribution committed to
+the destination, rather than an unaccepted source image; physical consumption
+is a separate observation.
+The 6 us final admission allowance does not extend any provider input cutoff.
+
+### Passive step 0 uses the same ready-copy operation
+
+The operator clarifies that step 0 copies ready contributions just like an
+active step, after prior-reader clearance and within its before-main copy
+window, but preserves destination counters. The genuine main triggers dmcomb.
+A producer miss retains only that producer's prior committed contribution.
+No per-producer physical-consumption acknowledgement or transactional rollback
+is required merely because the copy is passive. The earlier suggestion to
+require main-consumption confirmation before retaining a step-0 copy overstated
+the production requirements.
+
+Nonzero qualification must still verify complete copies in the allowed window.
+The previous command's read_done clears old readers; it does not block a new,
+unexpectedly early main while a copy is in progress. Checking counters after
+the copy can detect that overlap but cannot undo it. This remains a copy-window
+constraint for passive and active preparation, rather than a special step-0
+publisher handshake. After a completed passive copy, suppressing a later
+auxiliary trigger alone does not restore the prior destination pixels; report
+copy completion separately from trigger/consumption outcomes.
+
+## 2026-11-04: continuous production providers implemented
+
+The [production integration plan](dm-syncopation-production-providers.md)
+records the implementation and offline verification. Opt-in production mode
+uses the same qualified counter grid, reader-release gate and final publication
+wait as the finite zero trial. It adds independent tagged same-host source
+admission and passive step-0 copies, with no finite active-duration limit.
+The older scheduler and finite trial remain separately selectable.
+
+`dev::dmSyncopationProducer<derivedT>` handles coherent v2 schedules, exact slot
+commitments and single-source buffer ownership. Its transport acknowledgement
+releases the buffer after a private snapshot or discard, without waiting for
+physical DM consumption. dmSpeckle is the first adapted application. Changing
+commands and the selected producer/mapping workload still need operator-run
+instrument qualification; the constant-zero captures remain the measured
+transport-capacity evidence.

@@ -1,0 +1,567 @@
+/** \file dmSyncopationProduction_test.hpp
+ * \brief Private-stream production admission, independent fallback and passive-copy regressions.
+ * \ingroup dmSyncopation_unit_test
+ */
+#ifndef dmSyncopationProduction_test_hpp
+#define dmSyncopationProduction_test_hpp
+
+// Included inside the existing dmSyncopation test namespace after its private-stream harness.
+
+/// \cond PRODUCTION_TEST_HARNESS
+/// Deterministic local clock for direct production snapshot/copy tests.
+struct ProductionClock
+{
+    static inline int64_t time{ 1000000000 }; ///< Private monotonic time, unrelated to instrument clocks.
+
+    /// Advance one bounded bookkeeping interval without waiting on the operating system.
+    static int64_t now();
+};
+
+int64_t ProductionClock::now()
+{
+    time += 100;
+    return time;
+}
+
+/// Expose production operations without starting app or observer threads.
+class ProductionHarness : public Harness
+{
+  public:
+    using dmSyncopation::closeProduction;
+    using dmSyncopation::m_generation;
+    using dmSyncopation::m_productionEnabled;
+    using dmSyncopation::m_productionReadyLeadUs;
+    using dmSyncopation::m_productionStep0LeadUs;
+    using dmSyncopation::openProduction;
+    using dmSyncopation::productionCopy;
+    using dmSyncopation::productionSnapshot;
+    using dmSyncopation::publishProductionSchedule;
+
+    /// Attach only fixture streams and initialize the independent production mappings.
+    void initialize();
+};
+
+void ProductionHarness::initialize()
+{
+    ProductionClock::time = 1000000000;
+    m_now                 = ProductionClock::now;
+    attachPrimaryOnly();
+    m_productionEnabled = true;
+    m_zeroTestChannel   = m_destinations.front();
+    m_requested         = 4;
+    m_enabled           = true;
+    REQUIRE( openProduction() );
+    REQUIRE( m_mappings.size() == 2 );
+}
+
+/// Destroy only fixed test-owned generated streams after the app closes its attachments.
+struct ProductionSidecars
+{
+    /// Remove the private fixture's production sources and metadata, never instrument streams.
+    ~ProductionSidecars();
+};
+
+ProductionSidecars::~ProductionSidecars()
+{
+    for( const char *name : { "dm97disp07_aux_ready",
+                              "dm97disp07_aux_ack",
+                              "dm97disp08_aux_ready",
+                              "dm97disp08_aux_ack",
+                              "dm97disp07_aux",
+                              "dm97disp08_aux",
+                              "synco_test_timing" } )
+    {
+        IMAGE image{};
+
+        if( ImageStreamIO_openIm( &image, name ) == 0 )
+        {
+            // Imported handles leave used=0; this fixture explicitly owns these private files.
+            image.used = 1;
+            ImageStreamIO_destroyIm( &image );
+        }
+    }
+}
+
+/// Make one immutable slot well ahead of this fixture's clock.
+synco::Request productionRequest( const ProductionHarness &app /**< [in] Private scheduler identity. */,
+                                  int                      step /**< [in] Passive zero or active subdivision. */,
+                                  int64_t                  target /**< [in] Absolute private-clock target. */ )
+{
+    return { app.m_epoch, app.m_generation, 42, step, target, target - 50000 };
+}
+
+/// Publish one complete fixture-owned source and its exact producer commitment.
+synco::CommitRecord productionCommand( ProductionHarness    &app /**< [in,out] Private mappings. */,
+                                       size_t                mapping /**< [in] Independent fixture producer index. */,
+                                       const synco::Request &request /**< [in] Immutable advertised slot. */,
+                                       float                 value /**< [in] Uniform command value. */,
+                                       int64_t sequence = 1 /**< [in] Positive private producer sequence. */ )
+{
+    auto &source     = *app.m_mappings[mapping].m_source->image();
+    source.md->write = 1;
+    std::fill_n( source.array.F, 9, value );
+    REQUIRE( ImageStreamIO_UpdateIm( &source ) == 0 );
+    synco::CommitRecord command{};
+    command[synco::cmdVersion]        = synco::productionVersion;
+    command[synco::cmdEpoch]          = request.epoch;
+    command[synco::cmdGeneration]     = request.generation;
+    command[synco::cmdCycle]          = request.cycle;
+    command[synco::cmdStep]           = request.step;
+    command[synco::cmdTarget]         = request.targetNs;
+    command[synco::cmdCutoff]         = request.cutoffNs;
+    command[synco::cmdPayloadCounter] = int64_t( source.md->cnt0 );
+    command[synco::cmdReadyNs]        = request.cutoffNs - 1000;
+    command[synco::cmdSession]        = 7;
+    command[synco::cmdSequence]       = sequence;
+    command[synco::cmdPublisher]      = int64_t( getpid() );
+    command[synco::cmdPayloadInode]   = int64_t( source.md->inode );
+    auto &ready                       = app.m_mappings[mapping].m_ready;
+    REQUIRE( ready.md != nullptr );
+    ready.md->write = 1;
+    std::memcpy( ready.array.raw, command.data(), sizeof( command ) );
+    REQUIRE( ImageStreamIO_UpdateIm( &ready ) == 0 );
+    return command;
+}
+
+/// Read the private consumer echo without touching any semaphore or external service.
+synco::AckRecord productionAck( const ProductionHarness &app /**< [in] Private scheduler. */,
+                                size_t                   mapping /**< [in] Independent producer index. */ )
+{
+    synco::AckRecord result{};
+    const auto      &image = app.m_mappings[mapping].m_ack;
+    REQUIRE( image.md != nullptr );
+    REQUIRE( image.md->write == 0 );
+    std::memcpy( result.data(), image.array.raw, sizeof( result ) );
+    return result;
+}
+/// Advance the private controller clock while emulating one cooperative changing producer.
+struct ProductionCycleClock
+{
+    static inline ProductionHarness  *app{ nullptr };  ///< Unstarted production app on private fixture streams.
+    static inline synco::CommitRecord pending{};       ///< Exact single outstanding source publication.
+    static inline int64_t             lastTarget{ 0 }; ///< Last submitted target, independent of notifications.
+    static inline int64_t             sequence{ 0 }; ///< Cooperative fake producer's monotonically increasing sequence.
+
+    /// Publish each earliest future request only after the consumer releases the preceding payload.
+    static void produce();
+
+    /// Forward a private time read and publish newly advertised fixture-only commands.
+    static int64_t now();
+
+    /// Forward a private absolute wait while preserving fake combiner and reader-release behavior.
+    static int wait( const timespec *target /**< [in] Absolute private monotonic wake. */ );
+};
+
+void ProductionCycleClock::produce()
+{
+    if( !app || !app->m_resources )
+    {
+        return;
+    }
+
+    if( pending[synco::cmdSequence] && !synco::acknowledges( productionAck( *app, 0 ), pending ) )
+    {
+        return;
+    }
+
+    const auto step = synco::nextProductionStep( app->m_record, ZeroClock::time );
+
+    if( step < 0 )
+    {
+        return;
+    }
+
+    const auto request = synco::request( app->m_record, step );
+
+    if( request.targetNs == lastTarget )
+    {
+        return;
+    }
+
+    pending    = productionCommand( *app, 0, request, step == 0 ? 20.0F : 10.0F + step, ++sequence );
+    lastTarget = request.targetNs;
+}
+
+int64_t ProductionCycleClock::now()
+{
+    const auto now = ZeroClock::now();
+    produce();
+    return now;
+}
+
+int ProductionCycleClock::wait( const timespec *target )
+{
+    const auto result = ZeroClock::wait( target );
+    produce();
+    return result;
+}
+/// \endcond
+
+/// Independent missing inputs retain only their own value while every selected mapping is copied passively.
+TEST_CASE( "production inputs have independent deadlines and passive copies", "[dmSyncopation][production]" )
+{
+    Streams            streams;
+    ProductionSidecars sidecars;
+    ProductionHarness  app;
+    app.initialize();
+    const auto first      = productionRequest( app, 0, ProductionClock::time + 125000 );
+    const auto commandA   = productionCommand( app, 0, first, 10 );
+    ProductionClock::time = first.cutoffNs;
+    const auto counterA   = streams.images[2].md->cnt0;
+    const auto counterB   = streams.images[3].md->cnt0;
+    REQUIRE( app.productionSnapshot( first, ProductionClock::time ) );
+    CHECK( app.m_mappings[0].m_stage.front() == 10 );
+    CHECK( app.m_mappings[1].m_stage.front() == 3 );
+    CHECK( app.m_mappings[0].m_cache.front() == 2 );
+    CHECK( app.m_mappings[0].m_accepted == 1 );
+    CHECK( app.m_mappings[1].m_missing == 1 );
+    const auto acknowledged = productionAck( app, 0 );
+    CHECK( synco::acknowledges( acknowledged, commandA ) );
+    CHECK( acknowledged[synco::ackStatus] == synco::copied );
+    REQUIRE( app.productionCopy( streams.images[0].md->cnt0, first.targetNs - 20000 ) );
+
+    for( size_t pixel = 0; pixel < 9; ++pixel )
+    {
+        CHECK( streams.images[2].array.F[pixel] == 10 );
+        CHECK( streams.images[3].array.F[pixel] == 3 );
+    }
+
+    CHECK( streams.images[2].md->cnt0 == counterA );
+    CHECK( streams.images[3].md->cnt0 == counterB );
+    CHECK( app.m_mappings[0].m_cache.front() == 10 );
+
+    const auto second     = productionRequest( app, 1, first.targetNs + 125000 );
+    const auto commandB   = productionCommand( app, 1, second, 30 );
+    ProductionClock::time = second.cutoffNs;
+    REQUIRE( app.productionSnapshot( second, ProductionClock::time ) );
+    REQUIRE( app.productionCopy( streams.images[0].md->cnt0, second.targetNs - 10000 ) );
+    CHECK( app.m_mappings[0].m_missing == 1 );
+    CHECK( app.m_mappings[1].m_accepted == 1 );
+    CHECK( synco::acknowledges( productionAck( app, 1 ), commandB ) );
+    CHECK( streams.images[2].array.F[0] == 10 );
+    CHECK( streams.images[3].array.F[0] == 30 );
+    CHECK( streams.images[2].md->cnt0 == counterA );
+    CHECK( streams.images[3].md->cnt0 == counterB );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::productionSnapshot;
+    MagAOX::app::dmSyncopation::productionCopy;
+#endif
+    // clang-format on
+}
+
+/// Production startup is opt-in, needs release evidence and rejects conflicting modes or impossible preparation leads.
+TEST_CASE( "production startup validates mode and preparation settings", "[dmSyncopation][production][config]" )
+{
+    ProductionHarness app;
+    app.setupConfig();
+    const int  fault      = GENERATE( 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 );
+    char       path[]     = "/tmp/dm-synco-production-config-XXXXXX";
+    const auto descriptor = mkstemp( path );
+    REQUIRE( descriptor >= 0 );
+    close( descriptor );
+
+    {
+        std::ofstream config( path );
+        config << "[shmimMonitor]\nshmimName=dm97disp03\n"
+               << "[streams]\ncombined=dm97disp\ntiming=synco_test_timing\n"
+               << "destinations=dm97disp07,dm97disp08\n"
+               << "[scheduler]\nmaxSubframes="
+               << ( fault == 8   ? 5
+                    : fault == 9 ? 1
+                                 : 4 )
+               << "\nmaxCadenceHz=8000\n"
+               << "[readerReleaseMonitor]\nshmimName=" << ( fault == 3 ? "" : "dmtweeter_read_done" ) << "\n"
+               << "[production]\nenabled=true\nreadyLeadUs="
+               << ( fault == 4   ? 20
+                    : fault == 7 ? 100
+                                 : 50 )
+               << "\nstep0LeadUs=" << ( fault == 5 ? 60 : 20 ) << "\nwakeAheadUs=" << ( fault == 6 ? 50 : 10 )
+               << "\nlateUs=6\n"
+               << "[zeroTest]\nenabled=" << ( fault == 1 ? "true" : "false" ) << "\nchannel=dm97disp07\n"
+               << "[simulation]\nenabled=" << ( fault == 2 ? "true" : "false" )
+               << "\nreaderReleaseReady=false\npipelineBackend=false\n";
+    }
+
+    app.config.readConfig( path );
+    std::remove( path );
+    const auto result = app.loadConfigImpl( app.config );
+    CAPTURE( fault );
+
+    if( fault == 0 || fault == 9 )
+    {
+        CHECK( result == 0 );
+        CHECK( app.m_productionEnabled );
+        CHECK_FALSE( app.m_zeroTestEnabled );
+        CHECK_FALSE( app.m_simulationEnabled );
+        CHECK( app.m_zeroLateUs == 6 );
+        CHECK( app.m_zeroWakeAheadUs == 10 );
+        CHECK( app.m_productionReadyLeadUs == 50 );
+        CHECK( app.m_productionStep0LeadUs == 20 );
+        CHECK( app.m_requested == ( fault == 9 ? 1 : 4 ) );
+        CHECK( app.m_maxCadence == 8000 );
+    }
+    else
+    {
+        CHECK( result < 0 );
+    }
+
+    CHECK_FALSE( app.m_enabled );
+    CHECK_FALSE( app.m_resources );
+    CHECK_FALSE( app.m_zeroAttached );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::setupConfig;
+    MagAOX::app::dmSyncopation::loadConfigImpl;
+#endif
+    // clang-format on
+}
+
+/// A malformed future commitment is discarded so it cannot hold that producer's single buffer indefinitely.
+TEST_CASE( "production discards malformed future commands without blocking independent updates",
+           "[dmSyncopation][production]" )
+{
+    Streams            streams;
+    ProductionSidecars sidecars;
+    ProductionHarness  app;
+    app.initialize();
+    const auto current         = productionRequest( app, 1, ProductionClock::time + 125000 );
+    auto       future          = productionRequest( app, 2, current.targetNs + 125000 );
+    auto       command         = productionCommand( app, 0, future, 10 );
+    command[synco::cmdVersion] = -1;
+    auto &ready                = app.m_mappings[0].m_ready;
+    ready.md->write            = 1;
+    std::memcpy( ready.array.raw, command.data(), sizeof( command ) );
+    REQUIRE( ImageStreamIO_UpdateIm( &ready ) == 0 );
+    productionCommand( app, 1, current, 30 );
+    ProductionClock::time = current.cutoffNs;
+    REQUIRE( app.productionSnapshot( current, ProductionClock::time ) );
+    const auto acknowledgement = productionAck( app, 0 );
+    CHECK( synco::acknowledges( acknowledgement, command ) );
+    CHECK( acknowledgement[synco::ackStatus] == synco::discarded );
+    CHECK( app.m_mappings[0].m_rejected == 1 );
+    CHECK( app.m_mappings[0].m_stage.front() == 2 );
+    CHECK( app.m_mappings[1].m_stage.front() == 30 );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::productionSnapshot;
+#endif
+    // clang-format on
+}
+
+/// Malformed metadata is rejected before reading pixels or command words from an incompatible view.
+TEST_CASE( "production malformed input metadata is isolated to its mapping", "[dmSyncopation][production]" )
+{
+    Streams            streams;
+    ProductionSidecars sidecars;
+    ProductionHarness  app;
+    app.initialize();
+    const auto request = productionRequest( app, 1, ProductionClock::time + 125000 );
+    productionCommand( app, 0, request, 10 );
+    productionCommand( app, 1, request, 30 );
+    const int  fault    = GENERATE( 0, 1, 2 );
+    auto      *metadata = fault == 2 ? app.m_mappings[0].m_source->image()->md : app.m_mappings[0].m_ready.md;
+    const auto datatype = metadata->datatype;
+    const auto count    = metadata->size[0];
+
+    if( fault == 0 )
+    {
+        metadata->datatype = _DATATYPE_FLOAT;
+    }
+    else
+    {
+        --metadata->size[0];
+    }
+
+    ProductionClock::time = request.cutoffNs;
+    const bool captured   = app.productionSnapshot( request, ProductionClock::time );
+    metadata->datatype    = datatype;
+    metadata->size[0]     = count;
+    REQUIRE( captured );
+    CHECK( app.m_mappings[0].m_accepted == 0 );
+    CHECK( app.m_mappings[0].m_rejected == 1 );
+    CHECK( app.m_mappings[0].m_stage.front() == 2 );
+    CHECK( app.m_mappings[1].m_accepted == 1 );
+    CHECK( app.m_mappings[1].m_stage.front() == 30 );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::productionSnapshot;
+#endif
+    // clang-format on
+}
+
+/// Stale, late, incoherent or nonfinite commands do not replace retained values or block independent inputs.
+TEST_CASE( "production rejects bad inputs independently and does not replay old slots", "[dmSyncopation][production]" )
+{
+    Streams            streams;
+    ProductionSidecars sidecars;
+    ProductionHarness  app;
+    app.initialize();
+    const int fault = GENERATE( 0, 1, 2, 3, 4, 5 );
+    CAPTURE( fault );
+    auto       request = productionRequest( app, 1, ProductionClock::time + 125000 );
+    auto       invalid = productionCommand( app, 0, request, 10 );
+    const auto valid   = productionCommand( app, 1, request, 30 );
+
+    if( fault == 0 )
+    {
+        --invalid[synco::cmdCycle];
+    }
+    else if( fault == 1 )
+    {
+        invalid[synco::cmdReadyNs] = request.cutoffNs + 1;
+    }
+    else if( fault == 2 )
+    {
+        ++invalid[synco::cmdPayloadCounter];
+    }
+    else if( fault == 3 )
+    {
+        volatile uint32_t injected = 0x7fc00000U;
+        const uint32_t    bits     = injected;
+        std::memcpy( app.m_mappings[0].m_source->data(), &bits, sizeof( bits ) );
+        CHECK( mx::math::isNan( app.m_mappings[0].m_source->data()[0] ) );
+    }
+    else if( fault == 4 )
+    {
+        app.m_mappings[0].m_source->image()->md->write = 1;
+    }
+    else if( fault == 5 )
+    {
+        ++invalid[synco::cmdGeneration];
+    }
+
+    auto &ready     = app.m_mappings[0].m_ready;
+    ready.md->write = 1;
+    std::memcpy( ready.array.raw, invalid.data(), sizeof( invalid ) );
+    REQUIRE( ImageStreamIO_UpdateIm( &ready ) == 0 );
+    ProductionClock::time = request.cutoffNs + 100;
+    REQUIRE( app.productionSnapshot( request, ProductionClock::time ) );
+    REQUIRE( app.productionCopy( streams.images[0].md->cnt0, request.targetNs - 10000 ) );
+    CHECK( streams.images[2].array.F[0] == 2 );
+    CHECK( streams.images[3].array.F[0] == 30 );
+    CHECK( app.m_mappings[0].m_accepted == 0 );
+    CHECK( app.m_mappings[1].m_accepted == 1 );
+    CHECK( synco::acknowledges( productionAck( app, 1 ), valid ) );
+    app.m_mappings[0].m_source->image()->md->write = 0;
+
+    request.targetNs += 125000;
+    request.cutoffNs += 125000;
+    request.step          = 2;
+    ProductionClock::time = request.cutoffNs;
+    const auto fresh      = productionCommand( app, 0, request, 11, 2 );
+    REQUIRE( app.productionSnapshot( request, ProductionClock::time ) );
+    REQUIRE( app.productionCopy( streams.images[0].md->cnt0, request.targetNs - 10000 ) );
+    CHECK( streams.images[2].array.F[0] == 11 );
+    CHECK( streams.images[3].array.F[0] == 30 );
+    CHECK( synco::acknowledges( productionAck( app, 0 ), fresh ) );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::productionSnapshot;
+    MagAOX::app::dmSyncopation::productionCopy;
+#endif
+    // clang-format on
+}
+
+/// A shared copy veto keeps accepted source snapshots separate from destination retention.
+TEST_CASE( "production copy safety never turns a private snapshot into an applied contribution",
+           "[dmSyncopation][production]" )
+{
+    Streams            streams;
+    ProductionSidecars sidecars;
+    ProductionHarness  app;
+    app.initialize();
+    const auto request = productionRequest( app, 0, ProductionClock::time + 125000 );
+    productionCommand( app, 0, request, 10 );
+    ProductionClock::time = request.cutoffNs;
+    REQUIRE( app.productionSnapshot( request, ProductionClock::time ) );
+    const auto primary = streams.images[0].md->cnt0;
+    ++streams.images[0].md->cnt0;
+    CHECK_FALSE( app.productionCopy( primary, request.targetNs - 20000 ) );
+    CHECK( streams.images[2].array.F[0] == 2 );
+    CHECK( app.m_mappings[0].m_cache.front() == 2 );
+    CHECK( app.m_mappings[0].m_stage.front() == 10 );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::productionCopy;
+#endif
+    // clang-format on
+}
+
+/// The shared engine consumes nonzero tagged inputs, prepares step zero and does not inherit finite-trial expiry.
+TEST_CASE( "production common scheduler continuously publishes tagged contributions",
+           "[dmSyncopation][production][integration]" )
+{
+    Streams            streams;
+    ProductionSidecars sidecars;
+    ProductionHarness  app;
+    const int          steps = GENERATE( 1, 4 );
+    CAPTURE( steps );
+    ZeroClock::connect( app, streams, steps );
+    const auto next         = ZeroClock::warm();
+    app.m_productionEnabled = true;
+    app.m_zeroTestEnabled   = false;
+    app.m_zeroLateUs        = 6;
+    app.m_zeroWakeAheadUs   = 10;
+    app.m_maxCadence        = 8000;
+    REQUIRE( app.openProduction() );
+    const auto          initialReady = app.m_mappings[1].m_ready.md;
+    synco::CommitRecord initialB{};
+    std::memcpy( initialB.data(), app.m_mappings[1].m_ready.array.raw, sizeof( initialB ) );
+    CAPTURE( initialReady->cnt0,
+             initialB[synco::cmdVersion],
+             app.m_mappings[1].m_inputAvailable,
+             app.m_mappings[1].m_source->image()->md->size[0],
+             app.m_mappings[1].m_source->image()->md->size[1] );
+    ProductionCycleClock::app        = &app;
+    ProductionCycleClock::pending    = {};
+    ProductionCycleClock::lastTarget = 0;
+    ProductionCycleClock::sequence   = 0;
+    app.m_now                        = ProductionCycleClock::now;
+    app.m_wait                       = ProductionCycleClock::wait;
+    const auto primaryBefore         = streams.images[0].md->cnt0;
+    const auto counterBefore         = streams.images[2].md->cnt0;
+    app.m_enabled                    = true;
+    ZeroClock::primary( next );
+    REQUIRE( app.m_zeroStats.posted == uint64_t( steps - 1 ) );
+    CHECK( app.m_zeroStats.acknowledged == uint64_t( steps - 1 ) );
+    CHECK( app.m_zeroStats.skipped == 0 );
+    CHECK( app.m_mappings[0].m_accepted == uint64_t( steps ) );
+    CAPTURE( app.m_mappings[1].m_rejected );
+    CHECK( app.m_mappings[1].m_inputAvailable );
+    CHECK( app.m_mappings[1].m_missing == uint64_t( steps ) );
+    CHECK( streams.images[2].array.F[0] == 20 );
+    CHECK( streams.images[3].array.F[0] == 3 );
+    CHECK( streams.images[2].md->cnt0 == counterBefore + uint64_t( steps - 1 ) );
+    CHECK( streams.images[0].md->cnt0 == primaryBefore + 1 );
+    CHECK( app.m_enabled );
+    CHECK_FALSE( app.m_zeroStats.finished );
+
+    // Production ignores a finite trial duration both inside the timed cycle and in wall-clock status expiry.
+    app.m_zeroDurationSec = 0.000001;
+    ZeroClock::primary( next + 500000 );
+    CHECK( app.m_zeroStats.posted == uint64_t( 2 * ( steps - 1 ) ) );
+    CHECK( app.m_zeroStats.acknowledged == uint64_t( 2 * ( steps - 1 ) ) );
+    CHECK( app.m_zeroStats.skipped == 0 );
+    CHECK( app.m_enabled );
+    app.publishZeroTestStatus( app.m_zeroStats.startedNs + 121000000000LL, true );
+    CHECK( app.m_enabled );
+    CHECK_FALSE( app.m_zeroStats.finished );
+    ProductionCycleClock::app = nullptr;
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::processZeroTestPrimary;
+    MagAOX::app::dmSyncopation::productionStep0;
+    MagAOX::app::dmSyncopation::publishZeroTestStatus;
+#endif
+    // clang-format on
+}
+
+#endif

@@ -283,3 +283,8 @@ report from their counters and then returns nonzero. An HTML report therefore do
  * \brief Offline simulated EM-gain disable behavior and generic shared interface compatibility.
  * \ingroup application_unit_test
  */
+
+/** \defgroup dmSyncopationProducer_unit_test DM Syncopation Producer Unit Tests
+ * \brief Same-host tagged request, source ownership and private-snapshot acknowledgement tests.
+ * \ingroup app_dev_unit_tests
+ */
