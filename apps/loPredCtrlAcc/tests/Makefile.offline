@@ -12,7 +12,7 @@ CXXFLAGS ?= -O2 -g
 CXXFLAGS += -std=c++20 -Wall -Wextra -fno-fast-math
 SOURCES := $(ROOT_DIR)/tests/testMain.cpp $(APP_DIR)/ar_controller.cpp \
            $(APP_DIR)/recursive_least_squares.cpp $(APP_DIR)/qrd_rls.cpp $(APP_DIR)/utils.cpp \
-           $(APP_DIR)/shadow_controller.cpp \
+           $(APP_DIR)/shadow_controller.cpp $(APP_DIR)/causal_input.cpp \
            $(ROOT_DIR)/INDI/libcommon/IndiProperty.cpp $(ROOT_DIR)/INDI/libcommon/IndiElement.cpp \
            $(ROOT_DIR)/INDI/libcommon/TimeStamp.cpp \
            $(wildcard $(TEST_DIR)/ddspc_*_test.cpp)

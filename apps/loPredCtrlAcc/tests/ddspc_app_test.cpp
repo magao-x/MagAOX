@@ -5,6 +5,7 @@
 #include "../../../tests/testXWC.hpp"
 #include "app_test_support.hpp"
 #include "../loPredCtrlAcc.hpp"
+#include "causal_input_test_data.hpp"
 
 #include <random>
 
@@ -14,6 +15,8 @@ namespace MagAOX::app
 class loPredCtrlAcc_test : public loPredCtrlAcc
 {
   public:
+    using loPredCtrlAcc::configureShadowInputs;
+    using loPredCtrlAcc::expireShadowInputs;
     using loPredCtrlAcc::m_indiP_ddspcAssisted;
     using loPredCtrlAcc::m_indiP_ddspcData;
     using loPredCtrlAcc::m_indiP_ddspcMode;
@@ -22,7 +25,9 @@ class loPredCtrlAcc_test : public loPredCtrlAcc
     using loPredCtrlAcc::m_indiP_ddspcStatus;
     using loPredCtrlAcc::m_indiP_ddspcTrain;
     using loPredCtrlAcc::m_shadowController;
+    using loPredCtrlAcc::processShadowApplied;
     using loPredCtrlAcc::processShadowRecord;
+    using loPredCtrlAcc::processShadowWfs;
 
     /// Configure a small synthetic model without creating any native app resources.
     void configure( bool shadow /**< [in] Startup mode. */ );
@@ -325,7 +330,144 @@ TEST_CASE( "Application legacy compatibility is the startup default", "[loPredCt
     auto train = switch_request( app.m_indiP_ddspcTrain, "standard" );
     REQUIRE( app.newCallBack_m_indiP_ddspcTrain( train ) == -1 );
     REQUIRE_FALSE( app.processShadowRecord( synthetic_app_record( 0 ) ) );
+    REQUIRE( app.configureShadowInputs( input_config() ) == -1 );
     app.requireLegacy();
+    REQUIRE( app.appShutdown() == 0 );
+}
+/** \brief Timed synthetic inputs train both real app models like manually aligned histories without output.
+ * \ingroup loPredCtrlAcc_unit_test
+ */
+TEST_CASE( "Application timed input integration remains non-actuating", "[loPredCtrlAcc][app][input]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::loPredCtrlAcc::configureShadowInputs();
+    MagAOX::app::loPredCtrlAcc::processShadowWfs();
+    MagAOX::app::loPredCtrlAcc::processShadowApplied();
+    MagAOX::app::loPredCtrlAcc::expireShadowInputs();
+#endif
+    // clang-format on
+    MagAOX::app::loPredCtrlAcc_test app;
+    app.configure( true );
+    REQUIRE( app.appStartup() == 0 );
+    const auto config = input_config();
+    REQUIRE( app.configureShadowInputs( config ) == 0 );
+    DDSPC::ShadowConfig settings;
+    settings.m_modes         = 2;
+    settings.m_history       = 2;
+    settings.m_future        = 2;
+    settings.m_accelChannels = 1;
+    settings.m_accelHistory  = 2;
+    settings.m_minUpdates    = 16;
+    settings.m_lambda        = 0.4f;
+    DDSPC::ShadowController oracle( settings );
+    auto                    training = app.m_indiP_ddspcTrain;
+    for( const char *name : { "standard", "accel_assisted" } )
+        training[name].setSwitchState( pcf::IndiElement::On );
+    REQUIRE( app.newCallBack_m_indiP_ddspcTrain( training ) == 0 );
+    for( auto mode : { DDSPC::ShadowMode::Standard, DDSPC::ShadowMode::AccelAssisted } )
+        oracle.training( mode, true );
+    auto wfs = input_wfs( config, 0 );
+    REQUIRE( app.processShadowWfs( wfs, wfs.m_decisionNs ) );
+    auto command = input_command( config, 0 );
+    for( std::uint64_t i = 0; i < 80; ++i )
+    {
+        wfs = input_wfs( config, i + 1 );
+        REQUIRE( app.processShadowWfs( wfs, wfs.m_decisionNs ) );
+        command = input_command( config, i );
+        REQUIRE( app.processShadowApplied( command, command.m_stamp.m_receivedNs ) );
+        DDSPC::ShadowRecord truth;
+        truth.m_index          = 100 + i;
+        truth.m_residual       = input_wfs( config, i ).m_residual;
+        truth.m_appliedCommand = input_command( config, i ).m_applied;
+        truth.m_acceleration   = input_wfs( config, i ).m_acceleration;
+        truth.m_wfsValid = truth.m_appliedValid = truth.m_timingValid = truth.m_accelValid = true;
+        REQUIRE( oracle.process( truth ) );
+        for( auto mode : { DDSPC::ShadowMode::Standard, DDSPC::ShadowMode::AccelAssisted } )
+            REQUIRE( app.m_shadowController->prediction_matrix( mode ) == oracle.prediction_matrix( mode ) );
+    }
+    REQUIRE( app.appLogic() == 0 );
+    REQUIRE( app.m_indiP_ddspcStandard["ready"].get<double>() == 1 );
+    REQUIRE( app.m_indiP_ddspcAssisted["ready"].get<double>() == 1 );
+    REQUIRE( app.m_indiP_ddspcStatus["input_reason"].get<std::string>() == "paired_input_records" );
+    REQUIRE( app.m_indiP_ddspcStatus["input_provenance"].get<std::string>() == "synthetic_applied" );
+    auto assisted = switch_request( app.m_indiP_ddspcMode, "accel_assisted" );
+    REQUIRE( app.newCallBack_m_indiP_ddspcMode( assisted ) == 0 );
+    REQUIRE_FALSE( app.processShadowRecord( synthetic_app_record( 800 ) ) ); // No mixing the Phase 2 and timed seams.
+    REQUIRE_FALSE( app.expireShadowInputs( command.m_stamp.m_receivedNs + config.m_maxAgeNs + config.m_periodNs ) );
+    REQUIRE( app.appLogic() == 0 );
+    REQUIRE( app.m_indiP_ddspcStatus["input_reason"].get<std::string>() == "stale_input_evidence" );
+    REQUIRE( app.m_indiP_ddspcStandard["ready"].get<double>() == 0 );
+    REQUIRE( app.m_indiP_ddspcAssisted["ready"].get<double>() == 0 );
+    REQUIRE( app.m_indiP_ddspcMode["accel_assisted"].getSwitchState() == pcf::IndiElement::On );
+    for( auto mode : { DDSPC::ShadowMode::Standard, DDSPC::ShadowMode::AccelAssisted } )
+    {
+        REQUIRE( app.m_shadowController->prediction_matrix( mode ) == oracle.prediction_matrix( mode ) );
+        REQUIRE( app.m_shadowController->status( mode ).m_trainingEnabled );
+        REQUIRE( app.m_shadowController->status( mode ).m_samples == 0 );
+    }
+    auto changedConfig = config;
+    ++changedConfig.m_layout;
+    ++changedConfig.m_clockEpoch;
+    REQUIRE( app.configureShadowInputs( changedConfig ) == 0 );
+    for( auto mode : { DDSPC::ShadowMode::Standard, DDSPC::ShadowMode::AccelAssisted } )
+    {
+        REQUIRE( app.m_shadowController->prediction_matrix( mode ).isZero() );
+        REQUIRE( app.m_shadowController->status( mode ).m_updates == 0 );
+        REQUIRE( app.m_shadowController->status( mode ).m_trainingEnabled );
+    }
+    REQUIRE( app.m_shadowController->selected() == DDSPC::ShadowMode::AccelAssisted );
+    app.requireInhibited();
+    REQUIRE( app.appShutdown() == 0 );
+    app.requireInhibited();
+}
+
+/** \brief Raw WFS data, driver-prepared commands, and unverified timing cannot arm live training.
+ * \ingroup loPredCtrlAcc_unit_test
+ */
+TEST_CASE( "Application live input gates stay closed without application and exposure evidence",
+           "[loPredCtrlAcc][app][input]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::loPredCtrlAcc::configureShadowInputs();
+    MagAOX::app::loPredCtrlAcc::processShadowWfs();
+    MagAOX::app::loPredCtrlAcc::processShadowApplied();
+    MagAOX::app::loPredCtrlAcc::allocate();
+    MagAOX::app::loPredCtrlAcc::processImage();
+#endif
+    // clang-format on
+    MagAOX::app::loPredCtrlAcc_test app;
+    app.configure( true );
+    REQUIRE( app.appStartup() == 0 );
+    auto config = input_config();
+    auto wfs    = input_wfs( config, 0 );
+    REQUIRE_FALSE( app.processShadowWfs( wfs, wfs.m_decisionNs ) );
+    config.m_timingVerified = false;
+    REQUIRE( app.configureShadowInputs( config ) == 0 );
+    REQUIRE_FALSE( app.processShadowWfs( wfs, wfs.m_decisionNs ) );
+    REQUIRE( app.appLogic() == 0 );
+    REQUIRE( app.m_indiP_ddspcStatus["input_reason"].get<std::string>() == "unverified_input_contract" );
+    config.m_timingVerified = true;
+    REQUIRE( app.configureShadowInputs( config ) == 0 );
+    REQUIRE( app.processShadowWfs( wfs, wfs.m_decisionNs ) );
+    wfs = input_wfs( config, 1 );
+    REQUIRE( app.processShadowWfs( wfs, wfs.m_decisionNs ) );
+    auto command       = input_command( config, 0 );
+    command.m_evidence = DDSPC::InputEvidence::DriverPrepared;
+    REQUIRE_FALSE( app.processShadowApplied( command, command.m_stamp.m_receivedNs ) );
+    REQUIRE( app.appLogic() == 0 );
+    REQUIRE( app.m_indiP_ddspcStatus["input_reason"].get<std::string>() == "command_application_unverified" );
+    app.unverifiedWfs(); // Native allocation/callback cannot reuse a synthetic or previously established session.
+    REQUIRE_FALSE(
+        app.processShadowApplied( input_command( config, 1 ), command.m_stamp.m_receivedNs + config.m_periodNs ) );
+    REQUIRE( app.appLogic() == 0 );
+    REQUIRE( app.m_indiP_ddspcStatus["input_reason"].get<std::string>() == "unverified_input_contract" );
+    REQUIRE( app.m_indiP_ddspcData["applied_valid"].get<double>() == 0 );
+    REQUIRE( app.m_indiP_ddspcData["timing_valid"].get<double>() == 0 );
+    REQUIRE( app.m_indiP_ddspcStandard["updates"].get<double>() == 0 );
+    REQUIRE( app.m_indiP_ddspcAssisted["updates"].get<double>() == 0 );
+    app.requireInhibited();
     REQUIRE( app.appShutdown() == 0 );
 }
 } // namespace libXWCTest::loPredCtrlAccTest

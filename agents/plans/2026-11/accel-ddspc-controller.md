@@ -293,6 +293,31 @@ Review AGENTS.md.  Do not alter any text above the "Agent Findings and Plan" bel
 
 ## Task Summary
 
+**Phase 3 status (2026-11-05): independently testable causal input integration is
+implemented; live training remains gated.** Work began from clean committed
+Phase 2 HEAD `fa0e51c5f097a289278c6274ebdd0aef70cd32ce` on
+`parkertjohnson1/accel_ddspc`, host `ASTR-LT-428.local` (not an instrument host).
+The new `CausalInputBuilder` accepts explicit WFS exposures and confirmed held
+applied-input intervals, checks identity/clock/availability/coverage, and emits
+one shared chronological record to the two existing independent learners.
+Application integration is through protected, serialized timing APIs, with INDI
+input-reason and provenance diagnostics. All live source, application and
+exposure assertions remain unset: no endpoint or physical timing is guessed.
+
+The repository identifies useful **candidate** telemetry, not the active
+instrument route: WFS input is configurable, camera DMA timestamps are not
+specified exposure boundaries, `_shape` is posted before SDK submission, and
+`dmRecon` replaces source timing when projecting `_delta` into modes. Thus no
+new live monitor/reader is attached. A native WFS-only callback disarms any timing
+session and keeps applied/timing validity false. This satisfies the user's
+fallback scope when verified telemetry is unavailable; it is not a claim that
+live applied-DM history or 2-kHz operation has been achieved.
+
+No `acc000` acquisition, ImageStreamIO interface, simulator worktree, physical
+output, instrument command or Git history was changed. Legacy execution,
+independent models, selection and the Phase 1 law remain intact. Stop after
+Phase 3; requirements for a verified live adapter remain listed below.
+
 Investigation and Phase 1 numerical implementation were completed on 2026-11-05 on
 `ASTR-LT-428.local`, branch `parkertjohnson1/accel_ddspc`, based on
 `b9648ec958ebe3401dc20deaa240e84a60f25d41`. That implementation was authorized
@@ -302,7 +327,7 @@ started, instrument interrogated, physical command written, branch changed,
 commit created, or change pushed. The separate `~/source/MagAOX` worktree was
 not modified.
 
-**Current status — Phase 2 application integration:** the user's subsequent
+**Completed Phase 2 application integration (historical record):** the user's subsequent
 instruction authorizes application/model management and INDI selection only,
 starting from committed Phase 1 HEAD `e184a2a48d5de02cfa59723387bfdc7d110d30c4`.
 `loPredCtrlAcc` now has an opt-in startup `parameters.shadow=true` path with
@@ -325,7 +350,7 @@ The existing `HistoryMode::Causal`, origin alignment, corrected QR invariant,
 and literal-lambda reference law are reused without numerical-core changes.
 `HistoryMode::Legacy` remains the constructor default. The original
 `apps/loPredCtrl/` implementation is untouched. Phase 2 details and reproducible
-validation appear below; these are offline integration results, not instrument
+validation appear below, followed by Phase 3 results; these are offline integration results, not instrument
 or real-time results.
 
 Numerical tests reproduced both reported history defects before the corrections,
@@ -449,15 +474,46 @@ formula or a predetermined spectral line.
    Accelerometer loss stops the assisted history without rebuilding the standard
    model; no automatic switch or physical correction is introduced.
 
+9. **Phase 3 exposure/input convention:** `y_i` is the residual from physical
+   half-open exposure `[s_i,e_i)`, captured and available by its immutable decision
+   deadline `d_i`. Let `L` be an independently established applied-input to optical
+   response lag. `u_i` is the calibrated absolute modal input proven constant
+   over `[s_(i+1)-L,e_(i+1)-L)`, expanded for WFS/clock/lag uncertainty. Both
+   learners still use `u_i` for the next residual, newest-first histories and the
+   same `F`-frame prediction horizon. No WFS differencing or additional integrator
+   is introduced. Actual live units/sign/order/channel inclusion and latency
+   remain unknown; the implementation does not set them from stream names.
+
+10. **Assembly is delayed shadow/replay work:** to confirm `u_i`, the builder
+    waits for the following exposure and a closed held-input certificate. It
+    subsequently emits `(y_i,u_i,a_i)` in origin order, never appending the
+    already observed `y_(i+1)` early to the manager. Phase 1 excludes current
+    `u_i` from the origin prediction state, and its target maturation uses only
+    previously emitted records, preserving virtual causal identification despite
+    this additional processing delay. Origin features are frozen at `d_i`; later
+    features cannot repair them. This API is not a next-frame correction path.
+
+11. **Provenance and clock trust are explicit:** all times are signed integer
+    nanoseconds in one externally established monotonic clock epoch. Producer
+    `atime`/`writetime`, mapped availability, local receipt, exposure boundaries,
+    request time and physical effective interval are distinct quantities. The
+    builder does not infer offsets, application/settling delays or exposure time.
+    Boundary uncertainty must conservatively include clock mapping, exposure and
+    response-lag calibration error. An estimated latency without an established
+    bound is insufficient for `m_timingVerified=true`. Every test trace is
+    synthetic, including tests that simulate an externally verified certificate.
+    A provenance enum/flag is a caller assertion, not physical authentication.
+
 ## Requirements
 
 ### Phase 1 implemented numerical contract
 
-- `apps/loPredCtrlAcc/ar_controller.hpp` adds `HistoryMode` as an optional final
+- At the Phase 1 commit, `apps/loPredCtrlAcc/ar_controller.hpp` added `HistoryMode` as an optional final
   constructor argument. Default construction and all existing app call sites
   select `Legacy`; no live mode selector or ImageStreamIO interface is changed.
   `Causal` must be selected explicitly by offline callers. The app lifecycle
-  header and its physical output behavior are unchanged.
+  header and its physical output behavior were unchanged by Phase 1. Phase 2
+  subsequently connected Causal only to the explicit shadow path.
 
 - `PredictiveController::append_sample(index, measurement, applied_command,
   acceleration)` accepts exactly one already synchronized, finite record per
@@ -655,6 +711,150 @@ formula or a predetermined spectral line.
   inline definitions, and formatting follow `AGENTS.md`; existing config/INDI
   names and legacy calculation expressions are retained. No common base class,
   ImageStreamIO interface, original `loPredCtrl`, or simulator source is changed.
+
+### Phase 3 telemetry investigation: established facts and missing evidence
+
+| Source/path | What the inspected code establishes | What it does not establish |
+| --- | --- | --- |
+| `loPredCtrlAcc::loadConfigImpl()`, `loPredCtrl::loadConfig()` and `dev::shmimMonitor::setupConfig()/loadConfig()` (`shmimMonitor.hpp:373–386`) | Input comes from `shmimMonitor.shmimName`; its default is the application config name. `parameters.fpsSource=camwfs` is only a nominal rate subscription. | No deployed DDSPC config, active stream name, WFS coordinate/calibration contract, or downstream output ownership is present in this checkout. `camwfs` must not be assumed to be the modal input. |
+| `wooferTweeterRecon::loadConfigImpl()` (`apps/wooferTweeterRecon/wooferTweeterRecon.hpp:435–445`) | Defaults include `aol1_modevalWFS`, `aol0_modevalDMf_mon` and `aol1_modevalDMf_mon`. These identify plausible modal products. | These are defaults of another app, not proof of the DDSPC input route, deployed loop number, exposure identity or units. |
+| `dev::shmimMonitor::smThreadExec()` (`shmimMonitor.hpp:638–779,805–827`) | Exposes `m_imageStream`, `m_inode`, shape/type, latest `cnt1` slot and pointer callback. Reconnect detects inode/file changes on timeout and calls allocation again. | It does not produce an immutable counter/timestamp/payload snapshot, deduplicate `cnt0`, drain all slots, map clocks, or determine exposures. Semaphore posts can repeat a latest frame. Inode alone is not a persistent generation token. |
+| `dev::frameGrabber::fgThreadExec()` (`frameGrabber.hpp:1008–1047`) | Copies producer-selected `m_currImageTimestamp` into `atime`, records `CLOCK_REALTIME` publication time, increments publication `cnt0`, selects slot `cnt1`, and writes per-slot arrays for cubes. | `cnt1` is a slot, `cnt0` is publication identity, and `atime` is producer-defined. Neither timestamp nor counter implies exposure boundaries or DM application. A future adapter must copy/verify metadata and payload consistently and recover retained frames where possible. |
+| `edtCamera::pdvAcquire()` (`edtCamera.hpp:549–560`), `ocam2KCtrl::acquireAndCheckValid()/loadImageIntoStream()/frameGrabberPostPublish()` (`ocam2KCtrl.hpp:1592–1655,1658,1716–1743`) | Camera acquisition uses `pdv_wait_last_image_timed()` DMA timestamps. Raw camera frame numbers detect missed/corrupt images. The optional `framegrabber.syncShmimName` (default output name + `_sync`) copies raw publication timestamps/counters to a 1x1 UINT8 sync product. | The code does not identify DMA timestamp as exposure start/end/center or give measured delay to modal reconstruction. Camera hardware frame number is not automatically the modal stream's `cnt0`; sync is publication metadata, not exposure or application proof. |
+| `pwfsSlopeCalc::acquireAndCheckValid()` (`pwfsSlopeCalc.hpp:556–575`), `nnReconstructor::processImage()` (`nnReconstructor.hpp:697–705`), both legacy DDSPC WFS callbacks | These processing paths stamp output acquisition time with local `CLOCK_REALTIME` processing/arrival time. | Upstream exposure timing cannot be recovered simply by treating modal `atime` as camera exposure time. The active upstream pipeline is unconfirmed. |
+| `alpaoCtrl::commandDM()` (`alpaoCtrl.hpp:417–505`) and `bmcCtrl::commandDM()` (`bmcCtrl.hpp:452–530`) | Apply actuator mapping/scaling and clipping (ALPAO also removes mean); write/post `m_outputShape` **before** `asdkSend()`/`BMCSetArray()`. BMC errors can occur after shape publication. | `_shape` is a prepared/desaturated drive shape, not a post-success application acknowledgment, command-ID-linked hold interval, or measured surface/settling time. A shape publication alone cannot set applied validity. |
+| `dev::dm::loadConfig()/processImage()/makeDelta()` (`dm.hpp:1343–1353,1888–1923,2877–2905`) | Defaults `_shape`, `_delta`, `_diff`; after successful `commandDM`, `_delta=outputShape-totalFlat`, `_diff=totalDelta-outputDelta`, with channel reads at calculation time. | No original command counter, hardware effective timestamp, exposure correspondence, atomic combiner/channel snapshot or physical readback certificate is supplied. Other-loop channels, flats, saturation and disturbance inclusion require an explicit projection contract. |
+| `dmRecon::loadConfigImpl()/processImage(dmCommandShmimT)/loadImageIntoStream()` (`dmRecon.hpp:432–460,1008–1082,1258–1264`) | Defaults `dmNNdisp_delta`, `dmNNdisp_actmask`, `aolN_CMmodesDM`, and output `aolN_modevalDMf`/`_mon`. Uses a masked modal pseudoinverse; sets output acquisition timestamp to **processing time**. | A plausible desaturated modal-command candidate, not a preserved WFS/driver application timeline. No stable cross-stream snapshot or physical hold proof is added by the projection. |
+| `pi335Ctrl::getPos()/appLogic()/recordPI335()` (`pi335Ctrl.hpp:541–621,1342–1362,1613–1634`) | `POS?` queries exist, with sequential axis polling/sleeps in READY and position/setpoint telemetry. | No WFS-rate per-command application certificate. Polling/status timestamps and setpoint-tolerant INDI display cannot be treated as synchronized applied-modal history during OPERATING. |
+
+The installed mxlib `improc/milkImage.hpp::post()` also stamps acquisition time
+from publication time rather than preserving upstream exposure or SDK identity.
+This dependency observation is local to this host, not a guarantee of the deployed
+mxlib version. No driver, producer, shared-memory stream, or instrument command
+was run during the investigation. No active telemetry endpoint was queried. The conventional local
+`/opt/MagAOX/config` directory is absent on this workstation, so it supplies no
+additional deployment evidence.
+
+**Physical-application limit:** a successful SDK call would at most establish
+that a particular drive request was accepted according to that SDK's contract.
+It does not itself measure physical surface application or optical settling.
+Current `_shape` publication occurs even earlier. Obtaining verified input needs
+an independently justified source/recorder for the post-limit combined drive,
+original identity, success/hold/drop behavior and effective-time bounds, plus a
+validated modal projection. A publication-plus-estimated-delay alternative must
+remain explicitly labeled and separately approved; the implemented builder
+rejects Requested, DriverPrepared, DriverAccepted and Unverified evidence.
+
+### Phase 3 implemented causal record builder and application seam
+
+- **Types and ownership:** new `causal_input.hpp/.cpp` implements
+  `CausalInputBuilder`, `InputConfig`, `InputStamp`, `TimedWfsRecord`,
+  `AppliedInputRecord`, `PairedInputRecord`, and `InputBuildResult`. It has no
+  ImageStreamIO, SDK, INDI driver, clock read, stream name, output sink or hardware
+  access. Caller serialization is required. Two bounded owning deques deep-copy
+  immutable matrices and metadata; there is no pointer to a mutable producer
+  frame. `m_capacity` bounds each queue; overflow clears pending evidence and
+  reports a common discontinuity rather than overwriting old samples.
+
+- **Evidence contract:** constructor validates numerical timing/dimensions.
+  Every operation checks established timing and modal mapping, nonzero source
+  generation/clock/layout IDs, consistent snapshot flags, shape and finite data,
+  and explicit `SyntheticApplied` or `VerifiedApplied` session provenance.
+  Command records must match that provenance exactly; switching evidence classes
+  requires a newly established session. The positive verified branch is tested
+  with synthetic certificates simulating an external assertion, not hardware.
+  Nothing in native configuration or INDI sets these verification flags or
+  fabricates such certificates. `input_evidence()` labels synthetic data plainly.
+
+- **Physical chronology:** `push_wfs()` requires nonempty exposures of the
+  configured duration, monotonic deadlines and availability, receipt no later
+  than the origin deadline, and finalization no earlier than that deadline.
+  Publication/receipt cannot precede the latest possible exposure end. Consecutive
+  WFS counters must correspond to expected physical spacing within configured
+  jitter. This detects a skipped physical tick even if published `cnt0` merely
+  advances by one. `push_command()` requires a nonempty closed held-input interval,
+  nonnegative request time at/before effective start, and confirmation available
+  only after the latest possible interval end. Requested time is retained only
+  for validation/diagnostics; it never determines matching or shifts a request
+  forward by an assumed delay.
+
+- **Alignment and uncertainty:** `drain()` matches the next exposure's expanded
+  response-aligned interval
+  `[s_(i+1)-L-epsilon_w, e_(i+1)-L+epsilon_w)` against the certified command's
+  shrunken interval `[start+epsilon_u,end-epsilon_u)`. A **single** confirmed
+  constant value must cover the entire exposure. It never interpolates or
+  averages two commands, chooses the nearest timestamp, pairs equal counters
+  across streams, or assumes equal stream rates. Uncertain boundaries, transitions
+  within exposure, or missing coverage reject the pair and break both histories.
+  Multiple exposures may use the same long, explicitly confirmed hold interval.
+  This conservative implementation also breaks on gaps between command
+  certificates, even if they fall outside a WFS exposure; it does not infer holds.
+
+- **Latency eligibility:** before pairing, the earliest response-aligned input
+  window must occur no earlier than `d_i+m_minCommandDelayNs`. This is a necessary
+  lead-time condition only, not permission for correction or a measured live
+  delay budget. Longer pipelines that leave the next `u_i` already committed
+  report `UnsupportedLatency` (`latency_requires_committed_input_prefix`), rather
+  than silently reindex commands or change the verified control law. Supporting
+  a committed input prefix, exposure-weighted multiple inputs or fractional
+  latency models requires separately derived/tested prediction/control changes.
+  Neither live `L` nor this lead time is known; tests use declared synthetic
+  50-us response lag and 100-us minimum lead time with 150-us request-to-effective
+  latency at 2-kHz cadence. There is no frequency-specific assumption.
+
+- **Record and audit:** after confirmation, emit `(y_i,u_i,a_i)` with original WFS
+  counter as external index, flags for the verified common input contract, and
+  origin/next-target/command metadata, source provenance, frozen deadline and
+  response-aligned interval. The original WFS and command counters remain
+  independent. `ShadowController::process()` receives that same record once and
+  owns the separate standard/assisted histories and fits. The new tests compare
+  both fits against manually assembled histories rather than taking the builder
+  as their oracle. No calculated controller proposal appears in input history.
+  Optional accelerometer features are already-built API inputs only; they must
+  have finite correct shape and acquisition/availability before the frozen
+  origin deadline. Late/absent features disable assistance for that record while
+  preserving the identical WFS/applied input for standard. No raw ingestion or
+  resampling is implemented.
+
+- **Discontinuities and silence:** out-of-order/duplicate source counters,
+  overlapping intervals, backward timestamps, ambiguous snapshots, identity
+  changes, malformed payloads, missing coverage and overflows reject and clear
+  pending records. Counter/physical timing gaps clear histories but can accept a
+  fresh anchor without compressing omitted time steps. Per-source high-water
+  metadata persists through `invalidate()` to reject replay. A different stream
+  generation/clock/layout requires a newly constructed session; clock reversal
+  latches until then. `advance(nowNs)` checks pending and latest source age during
+  silence; an adapter must schedule ticks in the established clock. Fresh events
+  can rewarm after a stale-data break; no missing sample is synthesized. Partial
+  records from a drain operation that subsequently faults are discarded together,
+  not returned across the fault boundary.
+
+- **Application integration:** `loPredCtrlAcc::configureShadowInputs()` establishes
+  the explicit source/timing session only in shadow execution, checking mode and
+  optional-feature dimensions. It resets both independent fits for any new
+  contract (units/timing/layout may have changed), retaining their training flags
+  and selection, then invalidates histories. `processShadowWfs()`,
+  `processShadowApplied()` and `expireShadowInputs()` serialize through the
+  existing model mutex. `consumeShadowInputs()` invalidates both models before
+  consuming any returned records when a common discontinuity is reported.
+  `processShadowRecord()` remains the Phase 2 pre-synchronized test seam only
+  while no timing builder exists, preventing mixed seams. Native WFS allocation
+  disarms the timing session even on invalid geometry; the WFS-only raw callback
+  also disarms/inhibits, preserving false applied/timing flags. Operator reset
+  clears pending records while retaining source high-water protection; shutdown
+  releases the builder. The actual raw callback still cannot supply a valid
+  record, and no applied-input monitor is added.
+
+- **Diagnostics and compatibility:** `ddspc_status` adds read-only `input_reason`
+  and `input_provenance`, including `unverified_input_contract`, waiting,
+  paired-input, stale, ambiguity and restart reasons, plus `synthetic_applied`
+  versus `externally_verified_applied`. These describe the caller's input contract,
+  not a physical validation performed by this app. Default native execution has
+  no configured timing builder. Existing independent training/mode selection,
+  output inhibition, legacy default, legacy calculation and stream interfaces
+  remain unchanged. A new source contract resets shadow fits explicitly; ordinary
+  data gaps retain coefficients while clearing readiness/segment histories.
+  New builder objects link through the app and standalone test Makefiles.
 
 ### Existing histories and prediction layout
 
@@ -1045,7 +1245,35 @@ formula or a predetermined spectral line.
 
 ## Questions and Points of Clarification
 
-Phase 1 and Phase 2 shadow-only integration were explicitly authorized without
+**Phase 3 missing requirements before any live adapter can set validity:**
+
+- Identify the deployed DDSPC WFS/modal stream, upstream producer chain, residual
+  calibration/order, hardware-frame to publication-counter correspondence,
+  exposure start/end weighting, and timing of the origin deadline. Supply
+  configuration/recorded metadata; candidate names above are not selections.
+- Identify accepted/applied input telemetry with original command identity,
+  post-limit/combiner values, drop/hold/failure behavior, effective/settling time
+  bounds, included channels and calibrated projection into the WFS modal basis.
+  SDK preparation/publication/success alone is not physical application proof.
+  Decide separately whether a labeled accepted-command-plus-delay approximation
+  is scientifically acceptable if direct verification remains unavailable.
+- Establish camera/driver/receiver clock relationships and clock-jump handling,
+  latency/uncertainty and jitter bounds, verified generations, exposure duration,
+  replay retention and freshness thresholds. Decide whether the conservative
+  single-held-input exposure model applies or requires a richer sampled plant.
+- If the next input is committed by the pipeline, derive the fixed prefix and
+  optimization horizon before using a reference proposal for correction. No
+  command-offset guess or nominal 2-kHz ratio resolves this automatically.
+- Provide a supported Linux build/PCH environment and independent recorded traces
+  for native snapshot/retention, callback/race, throughput and timeout validation.
+  A future adapter must schedule `expireShadowInputs()` ticks; this phase does
+  not equate replay time with the current workstation clock or add a live timer.
+
+These are integration/scientific decisions, not a request for the agent to query
+or manipulate the instrument. All necessary independent components above were
+implemented without waiting for unavailable live evidence.
+
+Phases 1–3 offline/shadow component work was explicitly authorized without
 resolving live instrument semantics. Startup-only shadow execution, separate
 learners, independent adaptation, and diagnostic-only INDI selection are now
 implemented under that authorization. These decisions remain before live or
@@ -1258,14 +1486,81 @@ comparison pass. The initial HEAD/branch remain unchanged; build/log artifacts
 stay ignored. These static/offline checks do not establish stream ownership,
 actual command application, optical timing, or a real-time budget.
 
+### Phase 3 executed causal integration tests
+
+`tests/ddspc_input_test.cpp` and `tests/causal_input_test_data.hpp` provide
+explicitly synthetic 2-kHz exposures, separate WFS/command counters, delayed
+closed hold certificates, and clipped actual inputs distinct from requests.
+The same standalone target additionally builds `causal_input.cpp`. Eleven new
+builder cases and two additional real-app-header cases exercise:
+
+- Exact `u_i -> y_(i+1)` physical exposure mapping with nonzero response/delivery
+  delays, original source metadata/provenance and every multichannel
+  `F=2,N=3,N_a=2` training-history block across 28 records. A separately assembled
+  chronological oracle checks the entire regressor/target, not just a selected
+  coefficient or a one-mode example.
+- Rejection of Requested, DriverPrepared, DriverAccepted, mismatched provenance,
+  unverified timing/mapping, wrong effective interval, wrong generation/clock/
+  layout, unstable snapshot flag, malformed/nonfinite data, duplicate/overlapping
+  certificates, frame/certificate gaps, publication-count-continuous physical
+  tick skips, impossible/future/late timestamps, stale/missing input, clock
+  reversal latch and explicit new-generation reconstruction.
+- Within-exposure transitions, uncertainty at a boundary, insufficient lead time
+  and multi-frame response lag; positive bounded jitter/uncertainty with complete
+  hold coverage; independent queue overflow and multi-record drain from an
+  explicit long hold; reversed cross-source processing order; exact integer
+  nanoseconds above `2^53`, and signed overflow boundary validation.
+- Both conventional and corrected QR managers match separately fed, manually
+  aligned standard and assisted fits exactly at every step for 60 records. A
+  feature arriving after origin 30's deadline affects only assisted validity,
+  without changing common WFS/DM histories or enabling hindsight repair.
+- Actual app header/callback seam: 80 paired synthetic records match both manual
+  fits at every update, become ready with adaptation enabled through real INDI
+  requests, allow existing readiness-gated selection, and expire both histories
+  during silence while retaining coefficients/training/selection. A changed
+  layout/clock contract explicitly resets both fits while preserving training
+  and selection. Synthetic provenance is visible in INDI. No output helper or
+  semaphore is invoked and no destination/legacy command buffer is written.
+  Unconfigured/unverified sessions and driver-prepared commands reject; a raw
+  WFS allocation/callback cannot reuse an established synthetic timing session.
+  Legacy execution rejects the new timing interface and retains its lifecycle.
+
+Reproduce from the repository root:
+
+```sh
+make -C apps/loPredCtrlAcc -f tests/Makefile.offline -j3 check
+make -C apps/loPredCtrlAcc -f tests/Makefile.offline -j3 check \
+  BUILD_DIR=build/offline-phase3-sanitize \
+  CXXFLAGS='-std=c++20 -O1 -g -Wall -Wextra -fno-fast-math -fsanitize=address,undefined -fno-omit-frame-pointer'
+```
+
+Optimized and AddressSanitizer/UndefinedBehaviorSanitizer builds each passed
+**49,836 assertions in 35 test cases**, including all Phase 1/2 regression cases,
+with no sanitizer findings. Build logs remain in ignored app `build/` directories.
+These traces exercise the declared input contract; they are not records from the
+instrument and do not establish actual latency, physical command acceptance,
+exposure timing, prediction improvement, or a native 2-kHz budget.
+
+The six touched/new C++ files receive a full documentation pass and clang-format
+23.1.3 using the previously documented comment-prefix override for exact mutex
+annotations; its dry-run/`--Werror` and `git diff --check` pass. A native
+`-fsyntax-only` attempt using installed Eigen/mxlib and repo flatlogs include paths
+still stops at missing `libMagAOX/logger/generated/logTypes.hpp`, before validating
+the native app. Native Linux/PCH compile/link, source snapshots and transport are
+unverified; the actual-app-header tests use stream-free lifecycle doubles.
+`otool -L` on the offline binary lists only libc++ and libSystem. No native app
+was started, dependency installed, logger header generated or physical stream
+opened. The protected plan prefix, original branch and initial HEAD are unchanged.
+
 ### Remaining test roadmap
 
 The older `testRLS.cpp` and `testPredCtrl.cpp` are retained as historical demos;
 they are not substitutes for the new assertion-based numerical tests. The broader
 roadmap below remains applicable: its numerical history/RLS/control/baseline cases
 and the numerical applied-command portions are now exercised, while decoding,
-timestamped multirate transport, native app states, and physical correction remain
-unimplemented and unvalidated.
+native timestamped/multirate transport and physical correction remain
+unimplemented/unvalidated. Phase 3's explicit timing components and app-header
+states are tested independently of native transport/helper lifecycle.
 
 1. **History/layout and delayed-label oracle.** Use uniquely numbered frames,
    modes, and channels to assert every element of `y_p,u_p,a_p,u_f,y_f` at a
@@ -1395,12 +1690,12 @@ dedicated Makefile above rather than linking the application library through
 
 ## Implementation Plan
 
-Each stage has a reviewable exit condition. P1 is complete numerically; the
-new user-authorized **Phase 2 is application/model/INDI shadow integration**, not
-the raw-ingestion phase previously labeled P2. P2 below records that delivered
-scope. Stop after Phase 2. Live adapters, multirate ingestion/replay, simulator
-validation, and any output connection require later authorization and resolution
-of the input/ownership decisions above.
+Each stage has a reviewable exit condition. Phases 1/2 are committed by the
+user. The new **Phase 3 authorization is causal WFS/applied-input integration**,
+with independently testable components only where live verification is missing;
+it explicitly excludes `acc000` acquisition. P3 below records this delivered
+scope. Stop after Phase 3. Native transport, live input evidence, multirate
+acquisition and all correction work remain future tasks with their own gates.
 
 1. **P0 — Agree on the mathematical and telemetry contract.** Resolve the
    decisions above; record signal units, increment/absolute convention, frame
@@ -1435,23 +1730,30 @@ of the input/ownership decisions above.
    absent applied-command/timing evidence**, deliberately leaving readiness false.
    Native Linux compile/link and real-time behavior are not covered by this exit.
 
-4. **P3 — Future: establish and connect verified live inputs, then multirate
-   accelerometry and replay.** First agree command semantics, readback source,
-   counter/generation and exposure timelines, and downstream output ownership;
-   implement/replay a WFS/applied-command adapter with recorded evidence before
-   setting its validity flags true. Then add typed UINT16 `acc000` decoding,
-   calibration, bounded timestamped retention, gap tracking and causal filtering/
-   representation comparison under separate approval. Feed verified records
-   through the existing manager seam; never its proposals. Version preprocessing
-   and model metadata. Keep output inhibited. Benchmark two-model RLS, `p x p`
-   empirical QR, horizon solves, frozen snapshots and lock duration; these
-   currently allocate and solve synchronously per accepted record and have no
-   demonstrated 2-kHz deadline. Choose bounded worker/solve/rank cadence only
-   from measurements, with tests for stale results and dropped work. Exit: native
-   Linux/PCH build and helper tests, replay/timing/coverage and broadband
-   held-out comparisons pass with documented representation and latency.
+4. **P3 — Complete for independently testable components; live integration
+   gated.** Source review identifies configured WFS input and candidate DM paths
+   but cannot prove deployed endpoint, exposure correspondence or physical
+   application. Implemented bounded immutable exposure/held-input pairing,
+   explicit clock/generation/calibration/provenance, latency/uncertainty/coverage
+   gates, original-counter audit, stale/gap/restart handling, shared records into
+   both independent models, protected application integration and INDI input
+   diagnostics. Deterministic chronology/manual-history tests and non-actuating
+   application tests pass. The native WFS-only callback stays unverified; no
+   command monitor or guessed source is connected. Exit achieved only for the
+   synthetic/external-assertion component contract. Live evidence, producer
+   snapshot/retention adapter and real-time behavior remain unresolved.
 
-5. **P4 — Validate against accelSim through public streams.** Begin with a
+5. **P4 — Future verified transport, multirate acquisition/replay, and accelSim
+   validation through public streams.** First supply the missing WFS/applied-input
+   evidence and supported native build, then implement the stable snapshot,
+   retained-frame and established-clock adapter. Verify it against independent
+   recordings before asserting flags. Under separate approval add typed raw
+   UINT16 accelerometer ingestion/calibration, bounded retention, causal feature
+   construction and broadband representation comparison. Benchmark the builder,
+   model/QR/solve work, lock duration and native transport at target dimensions;
+   introduce bounded workers/cadence changes only with evidence and tests.
+   No physical correction connection is part of those steps. Begin simulator
+   validation with a
    local/isolated simulator configuration that has no DM channel. The user then
    supplies recorded or operator-run optical WFS/DM traces from independently
    approved disturbance injection. Freeze appropriate training/evaluation
@@ -1589,20 +1891,52 @@ by `AGENTS.md`. This work does not switch branches, commit, or push.
   two empirical regressor windows require quadratic storage; ready-record rank
   QR costs cubic work in each `p`, in addition to RLS, horizon solves and bounded
   `F+1` coefficient/state snapshots. Allocation and work are not real-time safe
-  by assertion. No wall-clock freshness timeout exists without an established
-  clock/input adapter, so do not treat the latest record's validity as continuing
-  sensor health after arrivals stop. Native INDI lifecycle, supported Linux
-  build/PCH, empirical-rank policy under real noisy/collinear data, saturation,
+  by assertion. Phase 3 adds explicit established-clock
+  `advance()/expireShadowInputs()` timeout APIs; no live clock adapter or timer is
+  armed. A future adapter must schedule ticks; latest-record validity alone is
+  not continuing sensor health after arrivals stop. Native INDI lifecycle,
+  supported Linux build/PCH, empirical-rank policy under real noisy/collinear data, saturation,
   application delay and command ownership need validation before deployment.
   Persistence, calibration changes, dynamic dimensions, hot execution-mode
   transitions, output handoff and automatic fallback are intentionally absent.
 
+- **Phase 3 changed files:** `apps/loPredCtrlAcc/causal_input.hpp` and `.cpp`
+  (source/timing contract, bounded pairing, audit/provenance and rejection);
+  `apps/loPredCtrlAcc/loPredCtrlAcc.hpp` (protected timing session APIs, common
+  model invalidation, INDI input diagnostics and native-source gates);
+  app `Makefile` and `tests/Makefile.offline` (link/build input builder);
+  `tests/causal_input_test_data.hpp` and `tests/ddspc_input_test.cpp` (independent
+  synthetic timing/history tests); `tests/ddspc_app_test.cpp` (real-header timing,
+  lifecycle/INDI and non-actuation tests); and this plan.
+
+- **Phase 3 limitations and next evidence:** no trustworthy active WFS/applied-DM
+  timing source was established, so only the independent component seam is
+  connected. An actual reader needs immutable ImageStreamIO snapshot validation,
+  original source frame correspondence, retained-frame recovery and explicit
+  generation/clock/layout management. Counters and per-interval certificates
+  need completeness proof from the recorder, not a boolean assertion guessed
+  from `_shape` or `_modevalDMf`. Physical settling/readback remains a distinct
+  uncertainty beyond SDK acceptance. New sessions must be independently
+  established and must not reuse identities to hide a reset or replay. The
+  constructor checks supplied IDs; it does not authenticate external sources.
+  Audit records are returned by the builder for replay/recording; the app consumes
+  them but adds no production audit logger/file transport in this phase.
+
+- **Supported timing boundary:** the current one-vector-per-frame model accepts
+  only one constant held-input certificate covering a full response-aligned
+  exposure, with admissible lead time. It rejects multiple commands in an
+  exposure and horizons requiring a fixed pipeline prefix. Do not replace this
+  with an undocumented average, nearest frame, interpolation, offset, or proposed
+  command. Derive any richer model and its control law separately. Memory is
+  bounded by record count but deques/matrices/results allocate, and models/solves
+  remain synchronous under the model lock; no real-time claim is made.
+
 - **Scope verification:** the existing task text above `# Agent Findings and Plan`
-  is preserved byte-for-byte. Phase 2 implements INDI diagnostic mode selection
-  and independently trained shadow models only; no live `acc000` ingestion,
+  is preserved byte-for-byte. Phase 3 adds causal input components and explicit
+  shadow integration only; no live `acc000` ingestion,
   ImageStreamIO interface changes, simulator changes, or physical DM correction.
   The separate worktree and Git history are untouched. Build products/logs remain
   in ignored app `build/` directories. No native app/driver or instrument-facing
-  command was run. Stop after Phase 2; applied-command/timing/ownership decisions,
+  command was run. Stop after Phase 3; applied-command/timing/ownership decisions,
   native Linux build, recorded/live adapter work and any correction remain next
   steps, not implied approvals.
