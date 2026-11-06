@@ -74,6 +74,7 @@ Follow these code style and documentation rules exactly.
 13) Scoped Block Comments
   - For any `{}` block used only to control lock/mutex lifetime, annotate the opening brace as:
     - `{ //mutex scope`
+  - clang-format rewrites this as `{ // mutex scope` and cannot be configured not to, so restore `{ //mutex scope` after running clang-format.
 
 14) Branch Naming (MagAOX)
   - Feature branches must be namespaced by the active username.

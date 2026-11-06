@@ -713,8 +713,9 @@ int wooferTweeterRecon::processImage( void *curr_src, const wooferModesShmimT & 
             m_wooferVals[next].vals[n] = reinterpret_cast<float *>( curr_src )[n];
         }
 
-        m_wooferVals[next].t = wooferModesSMT::m_imageStream.md->atime.tv_sec +
-                               wooferModesSMT::m_imageStream.md->atime.tv_nsec / 1e9 + m_wooferOffset;
+        const timespec atime = wooferModesSMT::currAtime();
+
+        m_wooferVals[next].t             = atime.tv_sec + atime.tv_nsec / 1e9 + m_wooferOffset;
         m_wooferVals[next].reconstructed = false;
 
         m_lastWooferVal = next;
@@ -769,8 +770,9 @@ int wooferTweeterRecon::processImage( void *curr_src, const tweeterModesShmimT &
         m_tweeterVals[next].vals[n] = reinterpret_cast<float *>( curr_src )[n];
     }
 
-    m_tweeterVals[next].t = tweeterModesSMT::m_imageStream.md->atime.tv_sec +
-                            tweeterModesSMT::m_imageStream.md->atime.tv_nsec / 1e9 + m_tweeterOffset;
+    const timespec atime = tweeterModesSMT::currAtime();
+
+    m_tweeterVals[next].t             = atime.tv_sec + atime.tv_nsec / 1e9 + m_tweeterOffset;
     m_tweeterVals[next].reconstructed = false;
 
     m_lastTweeterVal = next;
@@ -839,8 +841,9 @@ int wooferTweeterRecon::processImage( void *curr_src, const wfsModesShmimT & )
         m_wfsVals[next].vals[n] = reinterpret_cast<float *>( curr_src )[n];
     }
 
-    m_wfsVals[next].t = wfsModesSMT::m_imageStream.md->writetime.tv_sec +
-                        wfsModesSMT::m_imageStream.md->writetime.tv_nsec / 1e9 - m_invFps + m_wfsOffset;
+    const timespec writetime = wfsModesSMT::currWritetime();
+
+    m_wfsVals[next].t             = writetime.tv_sec + writetime.tv_nsec / 1e9 - m_invFps + m_wfsOffset;
     m_wfsVals[next].reconstructed = false;
 
     m_lastWfsVal = next;

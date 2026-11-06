@@ -158,6 +158,9 @@ class shmimMonitor
 
     IMAGE m_imageStream{}; ///< The ImageStreamIO shared memory buffer; detached until opened.
 
+    /// Slot (`cnt1`) of the frame most recently passed to `processImage`; 0 for single-frame streams.
+    uint64_t m_currImage{ 0 };
+
     ino_t m_inode{ 0 }; ///< The inode of the image stream file
 
   public:
@@ -181,6 +184,28 @@ class shmimMonitor
 
     /// Get the attached stream's element size in bytes.
     const size_t &typeSize() const;
+
+    /// @}
+
+    /** \name Current Frame
+     * Identify the frame most recently passed to `processImage`, from the monitor thread.
+     * For a circular-buffer stream (`CIRCULAR_BUFFER | ZAXIS_TEMPORAL`), such as one published by frameGrabber,
+     * these use the frame's own per-frame array entries, which stay with its slot when newer frames are published.
+     * Otherwise they use the stream metadata, which describes the most recent publication.
+     * @{
+     */
+
+    /// Get the slot (`cnt1`) of the current frame.
+    uint64_t currImage() const;
+
+    /// Get the acquisition time of the current frame.
+    timespec currAtime() const;
+
+    /// Get the write time of the current frame.
+    timespec currWritetime() const;
+
+    /// Get the frame counter (`cnt0`) of the current frame.
+    uint64_t currCnt0() const;
 
     /// @}
 
@@ -324,6 +349,9 @@ class shmimMonitor
 
     /// Get the concrete owner of this CRTP monitor.
     derivedT &derived();
+
+    /// Check whether the current frame's timing comes from the per-frame arrays.
+    bool currFromArrays() const;
 };
 
 inline std::string shmimT::configSection()
@@ -393,6 +421,53 @@ template <class derivedT, class specificT>
 const size_t &shmimMonitor<derivedT, specificT>::typeSize() const
 {
     return m_typeSize;
+}
+
+template <class derivedT, class specificT>
+bool shmimMonitor<derivedT, specificT>::currFromArrays() const
+{
+    // ImageStreamIO maps the per-frame arrays only for this image type, and does not clear them on close.
+    return m_depth > 1 && m_currImage < m_depth &&
+           ( m_imageStream.md->imagetype & 0xF000F ) == ( CIRCULAR_BUFFER | ZAXIS_TEMPORAL );
+}
+
+template <class derivedT, class specificT>
+uint64_t shmimMonitor<derivedT, specificT>::currImage() const
+{
+    return m_currImage;
+}
+
+template <class derivedT, class specificT>
+timespec shmimMonitor<derivedT, specificT>::currAtime() const
+{
+    if( currFromArrays() )
+    {
+        return m_imageStream.atimearray[m_currImage];
+    }
+
+    return m_imageStream.md->atime;
+}
+
+template <class derivedT, class specificT>
+timespec shmimMonitor<derivedT, specificT>::currWritetime() const
+{
+    if( currFromArrays() )
+    {
+        return m_imageStream.writetimearray[m_currImage];
+    }
+
+    return m_imageStream.md->writetime;
+}
+
+template <class derivedT, class specificT>
+uint64_t shmimMonitor<derivedT, specificT>::currCnt0() const
+{
+    if( currFromArrays() )
+    {
+        return m_imageStream.cntarray[m_currImage];
+    }
+
+    return m_imageStream.md->cnt0;
 }
 
 template <class derivedT, class specificT>
@@ -791,6 +866,7 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
             }
 
             char *curr_src = (char *)m_imageStream.array.raw + curr_image * m_width * m_height * m_typeSize;
+            m_currImage    = curr_image;
 
             timingHook( derived(), shmimMonitorEvent::initial, 0 );
 
@@ -859,6 +935,7 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
                 }
 
                 char *curr_src = (char *)m_imageStream.array.raw + curr_image * m_width * m_height * m_typeSize;
+                m_currImage    = curr_image;
 
                 if( derived().processImage( curr_src, specificT() ) < 0 )
                 {

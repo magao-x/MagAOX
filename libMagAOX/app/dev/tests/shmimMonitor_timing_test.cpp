@@ -1,5 +1,5 @@
 /** \file shmimMonitor_timing_test.cpp
- * \brief Offline semaphore and lifecycle coverage for optional monitor timing hooks.
+ * \brief Offline semaphore and lifecycle coverage for optional monitor timing hooks and current-frame timing.
  */
 #include "../../../../tests/testXWC.hpp"
 #include "../../MagAOXApp.hpp"
@@ -72,6 +72,20 @@ sharedDirectory &streamDirectory()
     return directory;
 }
 
+/// Current-frame accessor results observed inside one processImage callback.
+struct seenFrame
+{
+    uint64_t m_image{ 0 }; ///< Result of currImage().
+
+    timespec m_atime{}; ///< Result of currAtime().
+
+    timespec m_writetime{}; ///< Result of currWritetime().
+
+    uint64_t m_cnt0{ 0 }; ///< Result of currCnt0().
+
+    ptrdiff_t m_offset{ -1 }; ///< Byte offset of the callback's pixels from the start of the stream data.
+};
+
 /// Minimal offline monitor owner with an optionally absent timing observer.
 template <bool withHook>
 class monitorHarness : public dev::shmimMonitor<monitorHarness<withHook>>
@@ -90,6 +104,8 @@ class monitorHarness : public dev::shmimMonitor<monitorHarness<withHook>>
     std::vector<int> m_observations; ///< Hook IDs and callback marker in execution order.
 
     bool m_pendingReceipt{ false }; ///< Worker-local receipt precedes the next callback.
+
+    seenFrame m_seen; ///< Current-frame accessor results from the latest callback.
 
   public:
     std::atomic<bool> m_shutdown{ false }; ///< Normal monitor exit condition, without signals.
@@ -140,6 +156,9 @@ class monitorHarness : public dev::shmimMonitor<monitorHarness<withHook>>
 
     /// Copy observations while the worker is running.
     std::vector<int> observations() const;
+
+    /// Copy the current-frame accessor results from the latest callback.
+    seenFrame seen() const;
 };
 
 template <bool withHook>
@@ -173,14 +192,18 @@ int monitorHarness<withHook>::allocate( const dev::shmimT &specific )
 template <bool withHook>
 int monitorHarness<withHook>::processImage( void *pixels, const dev::shmimT &specific )
 {
-    static_cast<void>( pixels );
     static_cast<void>( specific );
     m_receiptCallbacks.fetch_add( m_pendingReceipt );
     m_pendingReceipt = false;
     m_callbacks.fetch_add( 1 );
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_mutex );
         m_observations.push_back( 100 );
+        m_seen = { monitorT::currImage(),
+                   monitorT::currAtime(),
+                   monitorT::currWritetime(),
+                   monitorT::currCnt0(),
+                   static_cast<char *>( pixels ) - static_cast<char *>( monitorT::m_imageStream.array.raw ) };
     }
 
     m_changed.notify_all();
@@ -212,7 +235,7 @@ void monitorHarness<withHook>::shmimMonitorTiming( const dev::shmimT &specific, 
         m_pendingReceipt = false;
     }
 
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_mutex );
         m_observations.push_back( static_cast<int>( event ) );
     }
@@ -262,6 +285,13 @@ std::vector<int> monitorHarness<withHook>::observations() const
     return m_observations;
 }
 
+template <bool withHook>
+seenFrame monitorHarness<withHook>::seen() const
+{
+    std::lock_guard<std::mutex> lock( m_mutex );
+    return m_seen;
+}
+
 /// Own one private workstation stream and stop its monitor before unmapping it.
 template <bool withHook>
 struct streamFixture
@@ -273,25 +303,46 @@ struct streamFixture
     monitorHarness<withHook> m_monitor; ///< Real monitor worker, without an app or instrument process.
 
     /// Create a private four-by-four float stream and start its monitor.
-    explicit streamFixture( bool initial /**< [in] Enable the initial existing-image callback. */,
-                            int  allocateResult = 0 /**< [in] Controller allocation result for this attachment. */ );
+    explicit streamFixture( bool     initial /**< [in] Enable the initial existing-image callback. */,
+                            int      allocateResult = 0 /**< [in] Controller allocation result for this attachment. */,
+                            uint32_t depth          = 0 /**< [in] Number of frames; 0 creates a single-frame image. */,
+                            uint64_t imagetype = 0 /**< [in] ImageStreamIO image type for a multi-frame stream. */ );
 
     /// Join the worker before destroying and unmapping its input stream.
     ~streamFixture();
 
     /// Publish exactly one token to the real monitor semaphore.
     void publish();
+
+    /// Publish one frame in a slot, with separate per-frame and metadata timing.
+    /** The metadata timing simulates a newer frame published after the semaphore post. */
+    void publishSlot( uint64_t slot /**< [in] Slot (`cnt1`) of the frame. */,
+                      uint64_t cnt0 /**< [in] Per-frame counter for the slot. */,
+                      timespec atime /**< [in] Per-frame acquisition time for the slot. */,
+                      timespec writetime /**< [in] Per-frame write time for the slot. */,
+                      uint64_t mdCnt0 /**< [in] Metadata counter. */,
+                      timespec mdAtime /**< [in] Metadata acquisition time. */,
+                      timespec mdWritetime /**< [in] Metadata write time. */ );
 };
 
 template <bool withHook>
-streamFixture<withHook>::streamFixture( bool initial, int allocateResult )
+streamFixture<withHook>::streamFixture( bool initial, int allocateResult, uint32_t depth, uint64_t imagetype )
 {
     static_cast<void>( streamDirectory() );
     static unsigned sequence = 0;
     m_name                   = "timing" + std::to_string( getpid() ) + "x" + std::to_string( ++sequence );
-    uint32_t size[3]         = { 4, 4, 0 };
-    REQUIRE( ImageStreamIO_createIm_gpu( &m_image, m_name.c_str(), 2, size, _DATATYPE_FLOAT, -1, 1, 10, 0, 0, 0 ) ==
-             0 );
+    uint32_t size[3]         = { 4, 4, depth };
+    REQUIRE( ImageStreamIO_createIm_gpu( &m_image,
+                                         m_name.c_str(),
+                                         depth > 0 ? 3 : 2,
+                                         size,
+                                         _DATATYPE_FLOAT,
+                                         -1,
+                                         1,
+                                         10,
+                                         0,
+                                         depth > 0 ? imagetype : 0,
+                                         0 ) == 0 );
     m_monitor.m_allocateResult.store( allocateResult );
     m_monitor.start( m_name, initial );
 }
@@ -309,6 +360,29 @@ template <bool withHook>
 void streamFixture<withHook>::publish()
 {
     ++m_image.md[0].cnt0;
+    REQUIRE( ImageStreamIO_sempost( &m_image, -1 ) == 0 );
+}
+
+template <bool withHook>
+void streamFixture<withHook>::publishSlot( uint64_t slot,
+                                           uint64_t cnt0,
+                                           timespec atime,
+                                           timespec writetime,
+                                           uint64_t mdCnt0,
+                                           timespec mdAtime,
+                                           timespec mdWritetime )
+{
+    if( m_image.cntarray != nullptr )
+    {
+        m_image.cntarray[slot]       = cnt0;
+        m_image.atimearray[slot]     = atime;
+        m_image.writetimearray[slot] = writetime;
+    }
+
+    m_image.md[0].cnt1      = slot;
+    m_image.md[0].cnt0      = mdCnt0;
+    m_image.md[0].atime     = mdAtime;
+    m_image.md[0].writetime = mdWritetime;
     REQUIRE( ImageStreamIO_sempost( &m_image, -1 ) == 0 );
 }
 
@@ -496,6 +570,71 @@ TEST_CASE( "Monitor timing reports disconnection after the last callback", "[dev
 #ifdef XWCTEST_DOX_REF
     MagAOX::app::dev::shmimMonitor::smThreadExec;
     MagAOX::app::dev::shmimMonitor::timingHook;
+#endif
+    // clang-format on
+}
+
+/** \brief Current-frame timing follows the processed slot of a circular buffer, not newer metadata.
+ * \ingroup shmimMonitor_timing_tests
+ */
+TEST_CASE( "Monitor current-frame timing follows the processed circular-buffer slot", "[dev::shmimMonitor][timing]" )
+{
+    const timespec atime{ 100, 1 };
+    const timespec writetime{ 100, 2 };
+    const timespec newerAtime{ 200, 1 };
+    const timespec newerWritetime{ 200, 2 };
+
+    SECTION( "Circular buffers use the per-frame arrays" )
+    {
+        streamFixture<true> fixture( false, 0, 4, CIRCULAR_BUFFER | ZAXIS_TEMPORAL );
+        REQUIRE( fixture.m_image.cntarray != nullptr );
+        REQUIRE( fixture.m_monitor.wait( static_cast<int>( shmimMonitorEvent::connected ), 1 ) );
+        fixture.publishSlot( 2, 7, atime, writetime, 8, newerAtime, newerWritetime );
+        REQUIRE( fixture.m_monitor.wait( 100, 1 ) );
+        const auto seen = fixture.m_monitor.seen();
+        CHECK( seen.m_image == 2 );
+        CHECK( seen.m_offset == static_cast<ptrdiff_t>( 2 * 4 * 4 * sizeof( float ) ) );
+        CHECK( seen.m_cnt0 == 7 );
+        CHECK( seen.m_atime.tv_sec == atime.tv_sec );
+        CHECK( seen.m_atime.tv_nsec == atime.tv_nsec );
+        CHECK( seen.m_writetime.tv_sec == writetime.tv_sec );
+        CHECK( seen.m_writetime.tv_nsec == writetime.tv_nsec );
+    }
+
+    SECTION( "Multi-frame streams without per-frame arrays use the metadata" )
+    {
+        streamFixture<true> fixture( false, 0, 4, 0 );
+        REQUIRE( fixture.m_monitor.wait( static_cast<int>( shmimMonitorEvent::connected ), 1 ) );
+        fixture.publishSlot( 2, 7, atime, writetime, 8, newerAtime, newerWritetime );
+        REQUIRE( fixture.m_monitor.wait( 100, 1 ) );
+        const auto seen = fixture.m_monitor.seen();
+        CHECK( seen.m_image == 2 );
+        CHECK( seen.m_cnt0 == 8 );
+        CHECK( seen.m_atime.tv_sec == newerAtime.tv_sec );
+        CHECK( seen.m_writetime.tv_sec == newerWritetime.tv_sec );
+    }
+
+    SECTION( "Single-frame streams use the metadata" )
+    {
+        streamFixture<true> fixture( false );
+        REQUIRE( fixture.m_monitor.wait( static_cast<int>( shmimMonitorEvent::connected ), 1 ) );
+        fixture.publishSlot( 0, 7, atime, writetime, 8, newerAtime, newerWritetime );
+        REQUIRE( fixture.m_monitor.wait( 100, 1 ) );
+        const auto seen = fixture.m_monitor.seen();
+        CHECK( seen.m_image == 0 );
+        CHECK( seen.m_offset == 0 );
+        CHECK( seen.m_cnt0 == 8 );
+        CHECK( seen.m_atime.tv_nsec == newerAtime.tv_nsec );
+        CHECK( seen.m_writetime.tv_nsec == newerWritetime.tv_nsec );
+    }
+
+    // clang-format off
+#ifdef XWCTEST_DOX_REF
+    MagAOX::app::dev::shmimMonitor::smThreadExec;
+    MagAOX::app::dev::shmimMonitor::currImage;
+    MagAOX::app::dev::shmimMonitor::currAtime;
+    MagAOX::app::dev::shmimMonitor::currWritetime;
+    MagAOX::app::dev::shmimMonitor::currCnt0;
 #endif
     // clang-format on
 }
