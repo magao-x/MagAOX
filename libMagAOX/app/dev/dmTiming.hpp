@@ -49,6 +49,8 @@ class dmTiming
 
     bool m_enabled{ false }; ///< Immutable while producer/consumer threads are running.
 
+    bool m_stages{ false }; ///< Capture detailed markers in addition to the compatible fgtimes endpoints.
+
     int64_t m_windowNs{ 0 }; ///< Configured consumer window duration.
 
     double m_excursionSec{ 0 }; ///< Immutable positive ordered-interval threshold; zero disables that analysis.
@@ -123,16 +125,23 @@ class dmTiming
     static int64_t monotonicNowNs();
 
     /// Allocate handoff storage and reset all state while producer and consumer are stopped.
-    void
-    configure( double windowSec /**< [in] Positive elapsed-time window; zero disables. */,
-               size_t capacity /**< [in] Maximum queued and retained events; zero disables. */,
-               double excursionSec = 0 /**< [in] Positive publication excursion threshold; zero disables pairs. */,
-               MagAOX::dmTiming::PublicationClock publicationClock = MagAOX::dmTiming::PublicationClock::none
-               /**< [in] Explicit producer-clock contract; none disables delivery measurement. */,
-               int64_t maxBracketNs = 1000 /**< [in] Maximum receipt-clock capture uncertainty, in nanoseconds. */ );
+    void configure( double windowSec /**< [in] Positive elapsed-time window; zero disables. */,
+                    size_t capacity /**< [in] Maximum queued and retained events; zero disables. */,
+                    double excursionSec = 0 /**< [in] Positive publication excursion threshold; zero disables pairs. */,
+                    MagAOX::dmTiming::PublicationClock publicationClock = MagAOX::dmTiming::PublicationClock::none
+                    /**< [in] Explicit producer-clock contract; none disables delivery measurement. */,
+                    int64_t maxBracketNs = 1000 /**< [in] Maximum receipt-clock capture uncertainty, in nanoseconds. */,
+                    bool    stageTiming = true /**< [in] Capture detailed diagnostics; false retains only fgtimes. */ );
+
+    /// Return whether an event captures this endpoint, before reading its clock.
+    static bool captures( const MagAOX::dmTiming::Event &event /**< [in] Exclusively owned event. */,
+                          MagAOX::dmTiming::Marker       marker /**< [in] Requested endpoint. */ );
 
     /// Return whether collection was configured with nonzero storage and duration.
     bool enabled() const;
+
+    /// Return whether detailed timing was selected in the stopped-thread configuration.
+    bool stagesEnabled() const;
 
     /// Return whether the producer owns an unfinished event.
     bool active() const;
@@ -238,14 +247,16 @@ inline void dmTiming::configure( double                             windowSec,
                                  size_t                             capacity,
                                  double                             excursionSec,
                                  MagAOX::dmTiming::PublicationClock publicationClock,
-                                 int64_t                            maxBracketNs )
+                                 int64_t                            maxBracketNs,
+                                 bool                               stageTiming )
 {
     static_assert( std::atomic<uint64_t>::is_always_lock_free, "DM timing handoff requires lock-free positions" );
 
     m_enabled      = mx::math::isFinite( windowSec ) && windowSec > 0 && windowSec < 9e9 && capacity > 0;
     m_windowNs     = m_enabled ? static_cast<int64_t>( windowSec * 1e9 ) : 0;
     m_enabled      = m_enabled && m_windowNs > 0;
-    m_excursionSec = m_enabled && mx::math::isFinite( excursionSec ) && excursionSec > 0 ? excursionSec : 0;
+    m_stages       = stageTiming;
+    m_excursionSec = m_enabled && m_stages && mx::math::isFinite( excursionSec ) && excursionSec > 0 ? excursionSec : 0;
 
     m_queue.configure( m_enabled ? capacity : 0 );
     m_intervalScratch.clear();
@@ -262,11 +273,12 @@ inline void dmTiming::configure( double                             windowSec,
     m_active        = false;
 
     m_window.clear();
-    m_summary           = {};
-    m_summary.windowSec = m_enabled ? windowSec : 0;
-    m_summary.capacity  = m_queue.capacity();
-    m_summary.enabled   = m_enabled;
-    m_summary.session   = 1;
+    m_summary               = {};
+    m_summary.windowSec     = m_enabled ? windowSec : 0;
+    m_summary.capacity      = m_queue.capacity();
+    m_summary.enabled       = m_enabled;
+    m_summary.stagesEnabled = m_stages;
+    m_summary.session       = 1;
     m_summary.state = m_enabled ? MagAOX::dmTiming::Availability::warmingUp : MagAOX::dmTiming::Availability::disabled;
     m_summary.intervalPairs.enabled   = m_excursionSec > 0;
     m_summary.intervalPairs.threshold = m_excursionSec;
@@ -278,10 +290,10 @@ inline void dmTiming::configure( double                             windowSec,
     supportedClock = supportedClock || publicationClock == PublicationClock::tai;
 #endif
 
-    m_publicationClock                = m_enabled && maxBracketNs > 0 && maxBracketNs <= 1000000000 && supportedClock
-                                            ? publicationClock
-                                            : PublicationClock::none;
-    m_deliveryBracketLimitNs          = m_publicationClock != PublicationClock::none ? maxBracketNs : 0;
+    m_publicationClock       = m_enabled && m_stages && maxBracketNs > 0 && maxBracketNs <= 1000000000 && supportedClock
+                                   ? publicationClock
+                                   : PublicationClock::none;
+    m_deliveryBracketLimitNs = m_publicationClock != PublicationClock::none ? maxBracketNs : 0;
     m_summary.delivery.enabled        = m_publicationClock != PublicationClock::none;
     m_summary.delivery.clock          = m_publicationClock;
     m_summary.delivery.bracketLimitNs = m_deliveryBracketLimitNs;
@@ -299,6 +311,11 @@ inline void dmTiming::configure( double                             windowSec,
 inline bool dmTiming::enabled() const
 {
     return m_enabled;
+}
+
+inline bool dmTiming::stagesEnabled() const
+{
+    return m_stages;
 }
 
 inline bool dmTiming::active() const
@@ -358,6 +375,7 @@ inline void dmTiming::beginEventAt( bool hasReceipt, int64_t receiptNs )
     m_event.sequence         = ++m_eventSequence;
     m_event.session          = m_session.load( std::memory_order_relaxed );
     m_event.synthetic        = !hasReceipt;
+    m_event.stagesEnabled    = m_stages;
     m_event.publicationClock = m_publicationClock;
     m_active                 = true;
 
@@ -381,7 +399,7 @@ dmTiming::beginEventClockAt( bool hasReceipt, int64_t receiptNs, int64_t receipt
 
 inline void dmTiming::mark( MagAOX::dmTiming::Marker marker )
 {
-    if( m_active )
+    if( m_active && captures( m_event, marker ) )
     {
         markAt( marker, monotonicNowNs() );
     }
@@ -395,11 +413,17 @@ inline void dmTiming::markAt( MagAOX::dmTiming::Marker marker, int64_t ns )
     }
 }
 
+inline bool dmTiming::captures( const MagAOX::dmTiming::Event &event, MagAOX::dmTiming::Marker marker )
+{
+    using MagAOX::dmTiming::Marker;
+    return event.stagesEnabled || marker == Marker::receipt || marker == Marker::sdkEnd;
+}
+
 inline void dmTiming::markEvent( MagAOX::dmTiming::Event &event, MagAOX::dmTiming::Marker marker, int64_t ns )
 {
     using namespace MagAOX::dmTiming;
 
-    if( markerIndex( marker ) >= markerIndex( Marker::count ) )
+    if( markerIndex( marker ) >= markerIndex( Marker::count ) || !captures( event, marker ) )
     {
         return;
     }
@@ -451,6 +475,26 @@ inline void dmTiming::importSdkEvent( MagAOX::dmTiming::Event  &event,
                                       int64_t                   readyNs )
 {
     using namespace MagAOX::dmTiming;
+
+    if( result == Outcome::success )
+    {
+        event.submitted = true;
+    }
+
+    if( event.outcome != Outcome::failed && event.outcome != Outcome::partial && event.outcome != Outcome::rejected )
+    {
+        outcomeEvent( event, result );
+    }
+
+    if( !event.stagesEnabled )
+    {
+        // The worker already captured its SDK endpoints for command completion and timeout handling.
+        const auto receipt = markerIndex( Marker::receipt );
+        const bool valid   = startNs >= 0 && endNs >= startNs &&
+                           ( !( event.valid & ( 1u << receipt ) ) || startNs >= event.markers[receipt] );
+        markEvent( event, Marker::sdkEnd, valid ? endNs : -1 );
+        return;
+    }
 
     const auto endpoint = [&event]( Marker marker )
     {
@@ -528,16 +572,6 @@ inline void dmTiming::importSdkEvent( MagAOX::dmTiming::Event  &event,
         {
             store( Marker::sdkReady, readyNs );
         }
-    }
-
-    if( result == Outcome::success )
-    {
-        event.submitted = true;
-    }
-
-    if( event.outcome != Outcome::failed && event.outcome != Outcome::partial && event.outcome != Outcome::rejected )
-    {
-        outcomeEvent( event, result );
     }
 }
 
@@ -1007,6 +1041,11 @@ inline void dmTiming::calculate( int64_t nowNs )
         else if( event.outcome == Outcome::unknown )
         {
             previousSend = -1;
+        }
+
+        if( !m_stages )
+        {
+            continue;
         }
 
         if( previousEvent && event.sequence == previousEvent->sequence + 1 && event.session == previousEvent->session &&

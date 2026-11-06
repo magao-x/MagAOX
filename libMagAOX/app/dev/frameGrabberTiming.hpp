@@ -1008,23 +1008,26 @@ inline void frameGrabberTiming::calculate( int64_t nowNs )
                 ( publication - acquisition ) * 1e-9, event.anchorNs, event.anchorNs );
         }
 
-        for( size_t index = metricIndex( Metric::wait ); index < metricIndex( Metric::count ); ++index )
+        if( m_stages )
         {
-            int64_t value = 0;
-
-            if( duration( event, static_cast<Metric>( index ), value ) )
+            for( size_t index = metricIndex( Metric::wait ); index < metricIndex( Metric::count ); ++index )
             {
-                raw[index].add( value * 1e-9, event.anchorNs, event.anchorNs );
+                int64_t value = 0;
+
+                if( duration( event, static_cast<Metric>( index ), value ) )
+                {
+                    raw[index].add( value * 1e-9, event.anchorNs, event.anchorNs );
+                }
             }
-        }
 
-        const int64_t overlap =
-            serialOverlap( endpoint( event, Marker::waitEnter ), endpoint( event, Marker::writeStampDone ) );
+            const int64_t overlap =
+                serialOverlap( endpoint( event, Marker::waitEnter ), endpoint( event, Marker::writeStampDone ) );
 
-        if( overlap >= 0 )
-        {
-            raw[metricIndex( Metric::serialOverlap )].add( overlap * 1e-9, event.anchorNs, event.anchorNs );
-            m_summary.serialOverlaps += overlap > 0;
+            if( overlap >= 0 )
+            {
+                raw[metricIndex( Metric::serialOverlap )].add( overlap * 1e-9, event.anchorNs, event.anchorNs );
+                m_summary.serialOverlaps += overlap > 0;
+            }
         }
 
         if( published )
@@ -1053,7 +1056,7 @@ inline void frameGrabberTiming::calculate( int64_t nowNs )
             previousPublished = &event;
         }
 
-        if( previous && consecutive( *previous, event ) )
+        if( m_stages && previous && consecutive( *previous, event ) )
         {
             const int64_t returned    = endpoint( event, Marker::waitReturn );
             const int64_t priorReturn = endpoint( *previous, Marker::waitReturn );
@@ -1105,79 +1108,83 @@ inline void frameGrabberTiming::calculate( int64_t nowNs )
 
     previous = nullptr;
 
-    for( const auto &event : m_window )
+    if( m_stages )
     {
-        if( event.anchorNs > nowNs )
+        for( const auto &event : m_window )
         {
-            continue;
-        }
-
-        if( previous && consecutive( *previous, event ) )
-        {
-            const int64_t a = endpoint( *previous, Marker::writeStampDone );
-            const int64_t b = endpoint( event, Marker::writeStampDone );
-
-            if( a >= 0 && b > a )
+            if( event.anchorNs > nowNs )
             {
-                int64_t    firstBracket = 0, nextBracket = 0;
-                const bool qualified = !previous->invalidMarkers && !event.invalidMarkers &&
-                                       timestamp( previous->writetime ) > 0 && timestamp( event.writetime ) > 0 &&
-                                       m_bracketNs > 0 && duration( *previous, Metric::writeBracket, firstBracket ) &&
-                                       duration( event, Metric::writeBracket, nextBracket ) &&
-                                       firstBracket <= m_bracketNs && nextBracket <= m_bracketNs;
+                continue;
+            }
 
-                if( !qualified )
-                {
-                    ++m_summary.ambiguous;
-                }
-                else
-                {
-                    ++m_summary.qualified;
-                    const double residual = ( b - a ) * 1e-9 - m_summary.median;
-                    const bool   isLate   = m_summary.threshold > 0 && residual > m_summary.threshold;
-                    const bool   isEarly  = m_summary.threshold > 0 && residual < -m_summary.threshold;
-                    m_summary.late += isLate;
-                    m_summary.early += isEarly;
+            if( previous && consecutive( *previous, event ) )
+            {
+                const int64_t a = endpoint( *previous, Marker::writeStampDone );
+                const int64_t b = endpoint( event, Marker::writeStampDone );
 
-                    if( isLate || isEarly )
+                if( a >= 0 && b > a )
+                {
+                    int64_t    firstBracket = 0, nextBracket = 0;
+                    const bool qualified = !previous->invalidMarkers && !event.invalidMarkers &&
+                                           timestamp( previous->writetime ) > 0 && timestamp( event.writetime ) > 0 &&
+                                           m_bracketNs > 0 &&
+                                           duration( *previous, Metric::writeBracket, firstBracket ) &&
+                                           duration( event, Metric::writeBracket, nextBracket ) &&
+                                           firstBracket <= m_bracketNs && nextBracket <= m_bracketNs;
+
+                    if( !qualified )
                     {
-                        auto &writePopulation = isLate ? lateWrite : earlyWrite;
-                        writePopulation.add( ( b - a ) * 1e-9, previous->anchorNs, event.anchorNs );
-                        const int64_t returned    = endpoint( event, Marker::waitReturn );
-                        const int64_t priorReturn = endpoint( *previous, Marker::waitReturn );
-
-                        if( priorReturn >= 0 && returned > priorReturn )
-                        {
-                            auto &returnPopulation = isLate ? lateReturn : earlyReturn;
-                            returnPopulation.add(
-                                ( returned - priorReturn ) * 1e-9, previous->anchorNs, event.anchorNs );
-                        }
-
-                        const int64_t entered = endpoint( event, Marker::waitEnter );
-
-                        if( entered >= a )
-                        {
-                            auto &tailPopulation = isLate ? lateTail : earlyTail;
-                            tailPopulation.add( ( entered - a ) * 1e-9, previous->anchorNs, event.anchorNs );
-                        }
+                        ++m_summary.ambiguous;
                     }
-
-                    for( size_t index = metricIndex( Metric::wait ); index < metricIndex( Metric::count ); ++index )
+                    else
                     {
-                        int64_t first = 0, second = 0;
+                        ++m_summary.qualified;
+                        const double residual = ( b - a ) * 1e-9 - m_summary.median;
+                        const bool   isLate   = m_summary.threshold > 0 && residual > m_summary.threshold;
+                        const bool   isEarly  = m_summary.threshold > 0 && residual < -m_summary.threshold;
+                        m_summary.late += isLate;
+                        m_summary.early += isEarly;
 
-                        if( ( isLate || isEarly ) && duration( *previous, static_cast<Metric>( index ), first ) &&
-                            duration( event, static_cast<Metric>( index ), second ) )
+                        if( isLate || isEarly )
                         {
-                            auto &population = isLate ? late[index] : early[index];
-                            population.add( ( second - first ) * 1e-9, previous->anchorNs, event.anchorNs );
+                            auto &writePopulation = isLate ? lateWrite : earlyWrite;
+                            writePopulation.add( ( b - a ) * 1e-9, previous->anchorNs, event.anchorNs );
+                            const int64_t returned    = endpoint( event, Marker::waitReturn );
+                            const int64_t priorReturn = endpoint( *previous, Marker::waitReturn );
+
+                            if( priorReturn >= 0 && returned > priorReturn )
+                            {
+                                auto &returnPopulation = isLate ? lateReturn : earlyReturn;
+                                returnPopulation.add(
+                                    ( returned - priorReturn ) * 1e-9, previous->anchorNs, event.anchorNs );
+                            }
+
+                            const int64_t entered = endpoint( event, Marker::waitEnter );
+
+                            if( entered >= a )
+                            {
+                                auto &tailPopulation = isLate ? lateTail : earlyTail;
+                                tailPopulation.add( ( entered - a ) * 1e-9, previous->anchorNs, event.anchorNs );
+                            }
+                        }
+
+                        for( size_t index = metricIndex( Metric::wait ); index < metricIndex( Metric::count ); ++index )
+                        {
+                            int64_t first = 0, second = 0;
+
+                            if( ( isLate || isEarly ) && duration( *previous, static_cast<Metric>( index ), first ) &&
+                                duration( event, static_cast<Metric>( index ), second ) )
+                            {
+                                auto &population = isLate ? late[index] : early[index];
+                                population.add( ( second - first ) * 1e-9, previous->anchorNs, event.anchorNs );
+                            }
                         }
                     }
                 }
             }
-        }
 
-        previous = &event;
+            previous = &event;
+        }
     }
 
     for( size_t index = 0; index < count; ++index )

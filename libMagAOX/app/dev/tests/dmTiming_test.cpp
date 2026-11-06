@@ -1904,5 +1904,85 @@ TEST_CASE( "DM delivery clock capture is opt in and preserves errno", "[dev::dmT
     // clang-format on
 }
 
+/// Basic capture avoids stage and delivery clocks while preserving all three compatible populations.
+/** \ingroup dmTiming_tests */
+TEST_CASE( "DM fgtimes-only mode preserves cadence without detailed capture", "[dev::dmTiming]" )
+{
+    Collector basic, detailed;
+    basic.configure( 2, 20, 20e-6, PublicationClock::realtime, 1000, false );
+    detailed.configure( 2, 20 );
+    CHECK_FALSE( basic.summary().stagesEnabled );
+    CHECK_FALSE( basic.summary().delivery.enabled );
+    CHECK_FALSE( basic.summary().intervalPairs.enabled );
+    const auto reads = dmTimingClockReads.load();
+    basic.beginEvent( true );
+    CHECK( dmTimingClockReads.load() == reads + 1 );
+
+    for( size_t i = 0; i < markerIndex( Marker::count ); ++i )
+    {
+        auto marker = static_cast<Marker>( i );
+
+        if( marker != Marker::receipt && marker != Marker::sdkEnd )
+        {
+            basic.mark( marker );
+        }
+    }
+
+    CHECK( dmTimingClockReads.load() == reads + 1 );
+    basic.mark( Marker::sdkEnd );
+    CHECK( dmTimingClockReads.load() == reads + 2 );
+    auto detached = basic.detachEvent();
+    CHECK_FALSE( detached.stagesEnabled );
+    CHECK_FALSE( Collector::captures( detached, Marker::finish ) );
+    CHECK( Collector::captures( detached, Marker::sdkEnd ) );
+
+    basic.configure( 2, 20, 0, PublicationClock::none, 1000, false );
+
+    for( unsigned i = 0; i < 5; ++i )
+    {
+        const int64_t receipt = 1000000 + i * 125000;
+
+        for( auto *collector : { &basic, &detailed } )
+        {
+            collector->beginEventAt( true, receipt );
+            collector->markAt( Marker::entry, receipt + 1 );
+            collector->inputCounter( i );
+            collector->inputPublication( receipt + 1 );
+            auto event = collector->detachEvent();
+            Collector::importSdkEvent( event, receipt + 10, receipt + 20, i == 1 ? Outcome::failed : Outcome::success );
+            Collector::markEvent( event, Marker::finish, receipt + 30 );
+            collector->submitEvent( event );
+        }
+    }
+
+    basic.update( 2000000 );
+    detailed.update( 2000000 );
+    REQUIRE( basic.summary().fgValid );
+
+    for( const auto metric : { Metric::receiptInterval, Metric::sendInterval, Metric::receiptSend } )
+    {
+        const auto &a = basic.summary().metrics[metricIndex( metric )];
+        const auto &b = detailed.summary().metrics[metricIndex( metric )];
+        CHECK( a.count == b.count );
+        CHECK( a.mean == b.mean );
+        CHECK( a.stddev == b.stddev );
+    }
+
+    for( size_t i = metricIndex( Metric::dispatch ); i < metricIndex( Metric::count ); ++i )
+    {
+        CHECK( basic.summary().metrics[i].count == 0 );
+    }
+
+    // clang-format off
+#ifdef DM_TIMING_TEST_DOXYGEN_REF
+    MagAOX::app::dev::dmTiming::configure;
+    MagAOX::app::dev::dmTiming::mark;
+    MagAOX::app::dev::dmTiming::captures;
+    MagAOX::app::dev::dmTiming::importSdkEvent;
+    MagAOX::app::dev::dmTiming::calculate;
+#endif
+    // clang-format on
+}
+
 } // namespace dmTimingTests
 } // namespace libXWCTest

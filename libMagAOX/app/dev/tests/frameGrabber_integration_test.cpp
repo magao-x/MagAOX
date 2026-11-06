@@ -97,6 +97,10 @@ struct Camera : MagAOX::app::MagAOXApp<false>, MagAOX::app::dev::frameGrabber<Ca
 
     int64_t timeoutDelayNs{ 0 }; ///< Additional first-frame timeout-query time, before frame validation.
 
+    size_t stageCalls{ 0 }; ///< Detailed summary records emitted by the ordinary thread.
+
+    size_t fgCalls{ 0 }; ///< Compatible fgtimes records emitted by the ordinary thread.
+
     size_t traceCalls{ 0 }; ///< Individual records handed to the ordinary-thread telemetry stub.
 
     bool failTraceLog{ false }; ///< Inject an ordinary telemetry wrapper failure.
@@ -320,7 +324,15 @@ void Camera::run()
 template <typename telT>
 int Camera::telem( const typename telT::messageT &message )
 {
-    if constexpr( std::is_same_v<telT, MagAOX::logger::telem_fgtrace> )
+    if constexpr( std::is_same_v<telT, MagAOX::logger::telem_fgstage> )
+    {
+        ++stageCalls;
+    }
+    else if constexpr( std::is_same_v<telT, MagAOX::logger::telem_fgtimings> )
+    {
+        ++fgCalls;
+    }
+    else if constexpr( std::is_same_v<telT, MagAOX::logger::telem_fgtrace> )
     {
         ++traceCalls;
         const auto *record = MagAOX::logger::GetTelem_fgtrace_fb( message.builder.GetBufferPointer() );
@@ -440,10 +452,19 @@ TEST_CASE( "Framegrabber stage disablement leaves only existing write clocks", "
     CHECK( summary.total.published == 3 );
     CHECK( summary.metrics[metricIndex( Metric::acquisitionInterval )].count == 2 );
     CHECK( summary.metrics[metricIndex( Metric::conversion )].count == 0 );
+    REQUIRE( camera.recordFGTimings( true ) == 0 );
+    REQUIRE( camera.recordFGStageTimings( true ) == 0 );
+    REQUIRE( camera.recordFGTraceTimings() == 0 );
+    CHECK( camera.fgCalls == 1 );
+    CHECK( camera.stageCalls == 0 );
+    CHECK( camera.traceCalls == 0 );
 
     // clang-format off
 #ifdef FRAMEGRABBER_TEST_DOXYGEN_REF
     MagAOX::app::dev::frameGrabber<Camera>::frameGrabberTimingMark;
+    MagAOX::app::dev::frameGrabber<Camera>::recordFGTimings;
+    MagAOX::app::dev::frameGrabber<Camera>::recordFGStageTimings;
+    MagAOX::app::dev::frameGrabber<Camera>::recordFGTraceTimings;
 #endif
     // clang-format on
 }

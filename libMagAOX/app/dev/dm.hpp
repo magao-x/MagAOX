@@ -872,6 +872,8 @@ class dm
 
     size_t m_timingCapacity{ 20000 }; ///< Queue and consumer-window event cap; zero disables capture.
 
+    bool m_stageTiming{ false }; ///< Opt in to detailed stage, delivery, and quality timing diagnostics.
+
     std::string m_timingDeliveryClockName{
         "none" }; ///< Explicit input-producer clock; none preserves receipt-only capture.
 
@@ -1103,13 +1105,13 @@ int dm<derivedT, realT>::capturePipelineCommand( PipelineCommand &command, void 
     }
 
     m_dmTiming.mark( MagAOX::dmTiming::Marker::entry );
-    if( command.completion.inputInode != 0 && command.completion.inputCounter != 0 )
+    if( m_dmTiming.stagesEnabled() && command.completion.inputInode != 0 && command.completion.inputCounter != 0 )
     {
         m_dmTiming.inputCounter( command.completion.inputCounter );
     }
 
-    if( command.completion.publicationSec > 0 && command.completion.publicationNsec >= 0 &&
-        command.completion.publicationNsec < 1000000000 &&
+    if( m_dmTiming.stagesEnabled() && command.completion.publicationSec > 0 &&
+        command.completion.publicationNsec >= 0 && command.completion.publicationNsec < 1000000000 &&
         command.completion.publicationSec <=
             ( std::numeric_limits<int64_t>::max() - command.completion.publicationNsec ) / 1000000000 )
     {
@@ -1145,7 +1147,7 @@ int dm<derivedT, realT>::capturePipelineCommand( PipelineCommand &command, void 
 template <class derivedT, typename realT>
 void dm<derivedT, realT>::pipelineMark( PipelineCommand &command, MagAOX::dmTiming::Marker marker )
 {
-    if( command.timing.sequence != 0 )
+    if( command.timing.sequence != 0 && dev::dmTiming::captures( command.timing, marker ) )
     {
         dev::dmTiming::markEvent( command.timing, marker, dev::dmTiming::monotonicNowNs() );
     }
@@ -1609,7 +1611,10 @@ auto dm<derivedT, realT>::timingRecord( ownerT &owner, const MagAOX::dmTiming::S
     -> decltype( owner.template telem<logger::telem_dmtimings>( { summary } ), int() )
 {
     static_cast<void>( priority );
-    owner.template telem<logger::telem_dmtimings>( { summary } );
+    if( summary.stagesEnabled )
+    {
+        owner.template telem<logger::telem_dmtimings>( { summary } );
+    }
 
     if( summary.fgValid )
     {
@@ -1680,6 +1685,11 @@ int dm<derivedT, realT>::setupDMTimingINDI()
     if( derived().registerIndiPropertyReadOnly( m_indiP_dmTiming ) < 0 )
     {
         return -1;
+    }
+
+    if( !m_dmTiming.summary().stagesEnabled )
+    {
+        return 0;
     }
 
     derived().createROIndiNumber( m_indiP_dmStages, "dm_timing_stages" );
@@ -2041,6 +2051,16 @@ int dm<derivedT, realT>::setupConfig( mx::app::appConfigurator &config )
                 "size_t",
                 "Maximum queued and retained DM timing events; zero disables." );
 
+    config.add( "dm.stageTiming",
+                "",
+                "dm.stageTiming",
+                argType::Required,
+                "dm",
+                "stageTiming",
+                false,
+                "bool",
+                "Collect and report detailed DM timing diagnostics; default false retains only fgtimes." );
+
     config.add( "dm.deliveryClock",
                 "",
                 "dm.deliveryClock",
@@ -2316,6 +2336,7 @@ int dm<derivedT, realT>::loadConfig( mx::app::appConfigurator &config )
 
     config( m_timingWindow, "dm.latencyTime" );
     config( m_timingCapacity, "dm.latencySize" );
+    config( m_stageTiming, "dm.stageTiming" );
     config( m_timingDeliveryClockName, "dm.deliveryClock" );
     config( m_timingDeliveryBracketUs, "dm.deliveryBracketUs" );
 
@@ -2479,7 +2500,8 @@ int dm<derivedT, realT>::appStartup()
                               m_timingCapacity,
                               0,
                               m_timingDeliveryClock,
-                              static_cast<int64_t>( m_timingDeliveryBracketUs * 1000 ) );
+                              static_cast<int64_t>( m_timingDeliveryBracketUs * 1000 ),
+                              m_stageTiming );
     }
     catch( const std::exception &error )
     {
@@ -2970,7 +2992,8 @@ int dm<derivedT, realT>::processImage( void *curr_src, const dev::shmimT &sp )
 
     dmTimingMark( MagAOX::dmTiming::Marker::entry );
 
-    if( m_dmTiming.active() && derived().m_imageStream.md != nullptr && derived().m_imageStream.md->write == 0 )
+    if( m_dmTiming.active() && m_dmTiming.stagesEnabled() && derived().m_imageStream.md != nullptr &&
+        derived().m_imageStream.md->write == 0 )
     {
         const auto *metadata = derived().m_imageStream.md;
         uint64_t    counter  = metadata->cnt0;
@@ -4605,6 +4628,11 @@ int dm<derivedT, realT>::updateINDI()
                                      static_cast<double>( wa.count ) },
                                    derived().m_indiDriver,
                                    state );
+
+    if( !summary.stagesEnabled )
+    {
+        return 0;
+    }
 
     std::vector<std::string> names;
     std::vector<double>      values;

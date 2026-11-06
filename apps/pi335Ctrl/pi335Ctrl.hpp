@@ -306,6 +306,9 @@ class pi335Ctrl : public MagAOXApp<true>,
     /// Record the common cached DM timing summary on a forced telemetry request.
     int recordTelem( const telem_dmtimings *telem /**< [in] Telemetry type selector. */ );
 
+    /// Record compatible timing when its maximum telemetry interval expires.
+    int recordTelem( const telem_fgtimings *telem /**< [in] Telemetry type selector. */ );
+
     /// Record changed PI positions and servo values, or force the current values.
     int recordPI335( bool force = false /**< [in] Whether unchanged values must also be recorded. */ );
 
@@ -1855,7 +1858,12 @@ INDI_NEWCALLBACK_DEFN( pi335Ctrl, m_indiP_pos3 )
 
 int pi335Ctrl::checkRecordTimes()
 {
-    return telemeterT::checkRecordTimes( telem_pi335(), telem_dmtimings() );
+    if( m_dmTiming.stagesEnabled() )
+    {
+        return telemeterT::checkRecordTimes( telem_pi335(), telem_dmtimings() );
+    }
+
+    return telemeterT::checkRecordTimes( telem_pi335(), telem_fgtimings() );
 }
 
 int pi335Ctrl::recordTelem( const telem_pi335 * )
@@ -1864,6 +1872,11 @@ int pi335Ctrl::recordTelem( const telem_pi335 * )
 }
 
 int pi335Ctrl::recordTelem( const telem_dmtimings * )
+{
+    return dmT::recordDMTimings( true );
+}
+
+int pi335Ctrl::recordTelem( const telem_fgtimings * )
 {
     return dmT::recordDMTimings( true );
 }

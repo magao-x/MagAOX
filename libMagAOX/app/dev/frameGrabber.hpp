@@ -351,7 +351,7 @@ class frameGrabber
     int recordFGTimings( bool force = false /**< [in] Emit even when cached values are unchanged. */ );
 
     /// Record optional stage timing and qualification from the consumer cache.
-    int recordFGStageTimings( bool force = false /**< [in] Emit a forced disabled/stale snapshot as well. */ );
+    int recordFGStageTimings( bool force = false /**< [in] Request a report; detailed capture must be enabled. */ );
 
     /// Emit each completed excursion context once, outside the acquisition thread.
     int recordFGTraceTimings();
@@ -687,73 +687,76 @@ int frameGrabber<derivedT>::appStartup()
         return -1;
     }
 
-    derived().createROIndiNumber( m_indiP_stageTiming, "fg_stage_timing" );
-    for( size_t i = 0; i < static_cast<size_t>( MagAOX::fgTiming::Metric::count ); ++i )
+    if( m_fgTiming.stagesEnabled() )
     {
-        const std::string name = MagAOX::fgTiming::metricName( static_cast<MagAOX::fgTiming::Metric>( i ) );
-
-        for( const auto &prefix : { "", "lateChange_", "earlyChange_" } )
+        derived().createROIndiNumber( m_indiP_stageTiming, "fg_stage_timing" );
+        for( size_t i = 0; i < static_cast<size_t>( MagAOX::fgTiming::Metric::count ); ++i )
         {
-            for( const auto &suffix : { "_count", "_valid", "_mean", "_stddev", "_min", "_max" } )
+            const std::string name = MagAOX::fgTiming::metricName( static_cast<MagAOX::fgTiming::Metric>( i ) );
+
+            for( const auto &prefix : { "", "lateChange_", "earlyChange_" } )
             {
-                m_indiP_stageTiming.add( pcf::IndiElement( std::string( prefix ) + name + suffix ) );
+                for( const auto &suffix : { "_count", "_valid", "_mean", "_stddev", "_min", "_max" } )
+                {
+                    m_indiP_stageTiming.add( pcf::IndiElement( std::string( prefix ) + name + suffix ) );
+                }
             }
         }
-    }
 
-    for( const auto &name : { "serial",
-                              "lateWaitReturnInterval",
-                              "earlyWaitReturnInterval",
-                              "lateWriteEndpointInterval",
-                              "earlyWriteEndpointInterval",
-                              "latePreviousTail",
-                              "earlyPreviousTail" } )
-    {
-        for( const auto &suffix : { "count", "valid", "mean", "stddev", "min", "max" } )
+        for( const auto &name : { "serial",
+                                  "lateWaitReturnInterval",
+                                  "earlyWaitReturnInterval",
+                                  "lateWriteEndpointInterval",
+                                  "earlyWriteEndpointInterval",
+                                  "latePreviousTail",
+                                  "earlyPreviousTail" } )
         {
-            m_indiP_stageTiming.add( pcf::IndiElement( std::string( name ) + "_" + suffix ) );
+            for( const auto &suffix : { "count", "valid", "mean", "stddev", "min", "max" } )
+            {
+                m_indiP_stageTiming.add( pcf::IndiElement( std::string( name ) + "_" + suffix ) );
+            }
         }
-    }
 
-    derived().createROIndiNumber( m_indiP_timingQuality, "fg_timing_quality" );
-    for( const auto &name : { "enabled",        "stagesEnabled", "valid",       "state",
-                              "session",        "sequence",      "windowSec",   "spanSec",
-                              "ageSec",         "capacity",      "queued",      "controlQueued",
-                              "qualified",      "ambiguous",     "medianSec",   "bracketLimitSec",
-                              "serialOverlaps", "streamInode",   "lastFrame",   "lastCounter",
-                              "mode",           "binX",          "binY",        "intervals",
-                              "late",           "early",         "thresholdSec" } )
-    {
-        m_indiP_timingQuality.add( pcf::IndiElement( name ) );
-    }
+        derived().createROIndiNumber( m_indiP_timingQuality, "fg_timing_quality" );
+        for( const auto &name : { "enabled",        "stagesEnabled", "valid",       "state",
+                                  "session",        "sequence",      "windowSec",   "spanSec",
+                                  "ageSec",         "capacity",      "queued",      "controlQueued",
+                                  "qualified",      "ambiguous",     "medianSec",   "bracketLimitSec",
+                                  "serialOverlaps", "streamInode",   "lastFrame",   "lastCounter",
+                                  "mode",           "binX",          "binY",        "intervals",
+                                  "late",           "early",         "thresholdSec" } )
+        {
+            m_indiP_timingQuality.add( pcf::IndiElement( name ) );
+        }
 
-    for( const auto &name : MagAOX::fgTiming::counterNames() )
-    {
-        m_indiP_timingQuality.add( pcf::IndiElement( std::string( "total_" ) + name ) );
-        m_indiP_timingQuality.add( pcf::IndiElement( std::string( "delta_" ) + name ) );
-    }
+        for( const auto &name : MagAOX::fgTiming::counterNames() )
+        {
+            m_indiP_timingQuality.add( pcf::IndiElement( std::string( "total_" ) + name ) );
+            m_indiP_timingQuality.add( pcf::IndiElement( std::string( "delta_" ) + name ) );
+        }
 
-    for( const auto &name : { "traceEnabled",
-                              "traceCapacity",
-                              "traceReady",
-                              "tracePending",
-                              "traceDetected",
-                              "traceRecorded",
-                              "traceDropped",
-                              "traceIncomplete",
-                              "traceUnclassified",
-                              "traceDiscontinuities",
-                              "traceEventDropped",
-                              "traceControlDropped",
-                              "traceLogFailed" } )
-    {
-        m_indiP_timingQuality.add( pcf::IndiElement( name ) );
-    }
+        for( const auto &name : { "traceEnabled",
+                                  "traceCapacity",
+                                  "traceReady",
+                                  "tracePending",
+                                  "traceDetected",
+                                  "traceRecorded",
+                                  "traceDropped",
+                                  "traceIncomplete",
+                                  "traceUnclassified",
+                                  "traceDiscontinuities",
+                                  "traceEventDropped",
+                                  "traceControlDropped",
+                                  "traceLogFailed" } )
+        {
+            m_indiP_timingQuality.add( pcf::IndiElement( name ) );
+        }
 
-    if( derived().registerIndiPropertyReadOnly( m_indiP_stageTiming ) < 0 ||
-        derived().registerIndiPropertyReadOnly( m_indiP_timingQuality ) < 0 )
-    {
-        return -1;
+        if( derived().registerIndiPropertyReadOnly( m_indiP_stageTiming ) < 0 ||
+            derived().registerIndiPropertyReadOnly( m_indiP_timingQuality ) < 0 )
+        {
+            return -1;
+        }
     }
 
     // Start the f.g. thread
@@ -1344,6 +1347,11 @@ int frameGrabber<derivedT>::updateINDI()
         { fpsa, m_mina, m_maxa, sqrt( m_vara ), fpsw, m_minw, m_maxw, sqrt( m_varw ), m_mnwa, sqrt( m_varwa ) },
         derived().m_indiDriver );
 
+    if( !m_fgTiming.stagesEnabled() )
+    {
+        return 0;
+    }
+
     const auto              &summary = m_fgTiming.summary();
     std::vector<std::string> names;
     std::vector<double>      values;
@@ -1480,7 +1488,9 @@ void frameGrabber<derivedT>::frameGrabberSerialTiming( int64_t enteredNs, int64_
 template <class derivedT>
 int frameGrabber<derivedT>::recordFGStageTimings( bool force )
 {
-    if( m_fgTiming.stagesEnabled() || force )
+    static_cast<void>( force );
+
+    if( m_fgTiming.stagesEnabled() )
     {
         derived().template telem<telem_fgstage>( { m_fgTiming.summary() } );
     }

@@ -207,6 +207,9 @@ class alpaoCtrl : public MagAOXApp<true>,
     /// Record the common cached DM timing summary on a forced telemetry request.
     int recordTelem( const telem_dmtimings *telem /**< [in] Telemetry type selector. */ );
 
+    /// Record compatible timing when its maximum telemetry interval expires.
+    int recordTelem( const telem_fgtimings *telem /**< [in] Telemetry type selector. */ );
+
     ///@}
 };
 
@@ -763,10 +766,20 @@ int alpaoCtrl::get_actuator_mapping() // const char * serial, int nbAct, int * a
 
 int alpaoCtrl::checkRecordTimes()
 {
-    return telemeterT::checkRecordTimes( telem_dmtimings() );
+    if( m_dmTiming.stagesEnabled() )
+    {
+        return telemeterT::checkRecordTimes( telem_dmtimings() );
+    }
+
+    return telemeterT::checkRecordTimes( telem_fgtimings() );
 }
 
 int alpaoCtrl::recordTelem( const telem_dmtimings * )
+{
+    return dmT::recordDMTimings( true );
+}
+
+int alpaoCtrl::recordTelem( const telem_fgtimings * )
 {
     return dmT::recordDMTimings( true );
 }

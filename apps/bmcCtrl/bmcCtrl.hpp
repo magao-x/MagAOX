@@ -572,6 +572,9 @@ class bmcCtrl : public MagAOXApp<true>,
     /// Record the common cached DM timing summary on a forced telemetry request.
     int recordTelem( const telem_dmtimings *telem /**< [in] Telemetry type selector. */ );
 
+    /// Record compatible timing when its maximum telemetry interval expires.
+    int recordTelem( const telem_fgtimings *telem /**< [in] Telemetry type selector. */ );
+
     ///@}
 };
 
@@ -1841,9 +1844,9 @@ int bmcCtrl::finalizeCommand( int processingResult ) noexcept
         return processingResult;
     }
 
-    const auto waitStart = dev::dmTiming::monotonicNowNs();
+    const auto waitStart = m_dmTiming.enabled() && m_dmTiming.stagesEnabled() ? dev::dmTiming::monotonicNowNs() : -1;
     const auto result    = waitSdk( m_commandJob );
-    const auto waitEnd   = dev::dmTiming::monotonicNowNs();
+    const auto waitEnd   = m_dmTiming.enabled() && m_dmTiming.stagesEnabled() ? dev::dmTiming::monotonicNowNs() : -1;
     m_commandJob         = 0;
     const auto outcome =
         result.result == NO_ERR ? MagAOX::dmTiming::Outcome::success : MagAOX::dmTiming::Outcome::failed;
@@ -2100,10 +2103,20 @@ void bmcCtrl::updateSdkWorkerINDI()
 
 int bmcCtrl::checkRecordTimes()
 {
-    return telemeterT::checkRecordTimes( telem_dmtimings() );
+    if( m_dmTiming.stagesEnabled() )
+    {
+        return telemeterT::checkRecordTimes( telem_dmtimings() );
+    }
+
+    return telemeterT::checkRecordTimes( telem_fgtimings() );
 }
 
 int bmcCtrl::recordTelem( const telem_dmtimings * )
+{
+    return dmT::recordDMTimings( true );
+}
+
+int bmcCtrl::recordTelem( const telem_fgtimings * )
 {
     return dmT::recordDMTimings( true );
 }
