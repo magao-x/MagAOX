@@ -2,6 +2,7 @@
 # No native MagAOX application, ImageStreamIO, driver, or hardware library is linked.
 # Run from apps/loPredCtrlAcc: make -f tests/Makefile.offline check
 APP_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/..)
+.DEFAULT_GOAL := all
 TEST_DIR := $(APP_DIR)/tests
 ROOT_DIR := $(abspath $(APP_DIR)/../..)
 BUILD_DIR ?= $(APP_DIR)/build/offline
@@ -15,6 +16,7 @@ SOURCES := $(ROOT_DIR)/tests/testMain.cpp $(APP_DIR)/ar_controller.cpp \
            $(APP_DIR)/recursive_least_squares.cpp $(APP_DIR)/qrd_rls.cpp $(APP_DIR)/utils.cpp \
            $(APP_DIR)/shadow_controller.cpp $(APP_DIR)/causal_input.cpp \
            $(TEST_DIR)/comparison.cpp \
+           $(TEST_DIR)/phase6_adapter.cpp \
            $(ROOT_DIR)/INDI/libcommon/IndiProperty.cpp $(ROOT_DIR)/INDI/libcommon/IndiElement.cpp \
            $(ROOT_DIR)/INDI/libcommon/TimeStamp.cpp \
            $(wildcard $(TEST_DIR)/ddspc_*_test.cpp)
@@ -30,6 +32,21 @@ ADAPTER_SOURCES := $(wildcard $(TEST_DIR)/legacy_*_adapter.cpp)
 OBJECTS += $(addprefix $(BUILD_DIR)/,$(notdir $(ADAPTER_SOURCES:.cpp=.o))) $(LEGACY_OBJECTS)
 VPATH += $(TEST_DIR)
 CPPFLAGS += -I$(LEGACY_ROOT)
+PHASE6_ROOT := $(abspath $(BUILD_DIR))/phase6
+PHASE6_STAMP := $(PHASE6_ROOT)/snapshot.stamp
+PHASE6_NAMES := ar_controller recursive_least_squares qrd_rls utils shadow_controller
+PHASE6_OBJECTS := $(addprefix $(BUILD_DIR)/phase6_,$(addsuffix .o,$(PHASE6_NAMES)))
+OBJECTS += $(PHASE6_OBJECTS)
+CPPFLAGS += -I$(abspath $(BUILD_DIR))
+
+$(PHASE6_STAMP): $(TEST_DIR)/prepare_phase6.py
+	python3 $(TEST_DIR)/prepare_phase6.py --output $(PHASE6_ROOT)
+
+$(BUILD_DIR)/phase6_adapter.o: $(PHASE6_STAMP)
+
+$(PHASE6_OBJECTS): $(BUILD_DIR)/phase6_%.o: $(PHASE6_STAMP)
+	@mkdir -p $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -DDDSPC=DDSPCPhase6 -MMD -MP -c $(PHASE6_ROOT)/$*.cpp -o $@
 
 .PHONY: all check check-build-tool verify-legacy check-legacy-fast check-demos
 all: $(TARGET)

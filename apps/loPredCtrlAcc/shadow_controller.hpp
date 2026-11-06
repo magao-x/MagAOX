@@ -166,12 +166,24 @@ class ShadowController
     {
         /// Solely owned causal learner and histories.
         std::unique_ptr<PredictiveController> m_controller;
+        /// Fixed scratch belongs only to this causal learner.
+        std::unique_ptr<CausalWorkspace> m_workspace;
         /// Public status snapshot.
         ShadowStatus m_status;
         /// Last p regressor rows used to assess excitation independently of the prior.
         Matrix m_features;
         /// Diagnostic next input, never appended or published.
         Matrix m_proposal;
+        /// Fixed forecast scoring and normalized rank workspaces.
+        Matrix m_context, m_error, m_scaled;
+        /// Empty standard-model sensor argument; both sides of the selection remain lvalues.
+        Matrix m_emptyAcceleration;
+        /// Reused factorization; the numerical rank rule and threshold are unchanged.
+        std::unique_ptr<Eigen::ColPivHouseholderQR<Matrix>> m_rankQR;
+        /// Cached rank is reusable only if every feature-window coefficient is bit-identical.
+        bool m_rankDirty{ true };
+        /// Gain/coefficients are reusable only until the next adaptation, reset or history break.
+        bool m_gainCurrent{ false };
         /// Bounded horizon-plus-one origin snapshots.
         std::vector<Forecast> m_forecasts;
         /// Matured rows in the current excitation window.
@@ -212,7 +224,8 @@ class ShadowController
                      bool   assisted /**< [in] Include accelerometer columns. */ );
 
     /// Break histories/forecasts and excitation evidence while retaining learned coefficients and training requests.
-    void break_history( Model &model /**< [in,out] Model with missing or discontinuous input. */ );
+    void break_history( Model &model /**< [in,out] Model with missing or discontinuous input. */,
+                        bool   resetBuffers = true /**< [in] False when a full reset already cleared histories. */ );
 
     /// Process one model's complete record, score old forecasts, and optionally adapt.
     void step( Model              &model /**< [in,out] Independent model state. */,
@@ -260,6 +273,20 @@ class ShadowController
 
     /// Return a diagnostic next input only for a ready model; no history/output mutation is performed.
     Matrix proposal( ShadowMode mode /**< [in] Independent model to inspect. */ ) const;
+
+    /// Evaluate the latest ready validation snapshot without adaptation, rank work or allocation.
+    /** Caller serializes access and supplies a causally synchronized canonical state. Readiness refers to the
+     * latest completed validation/evidence window, not a hypothetical future window. Training may be paused
+     * deliberately; status().m_updates identifies the fit version. Frame age is diagnostic only,
+     * not a physical availability/deadline assertion. No application or publication route uses this API.
+     * A false result must be ignored; correctly shaped nonaliasing output is zeroed on failure.
+     */
+    bool
+    predict_cached( ShadowMode    mode /**< [in] Independent diagnostic model. */,
+                    std::uint64_t decisionIndex /**< [in] State origin, no earlier than the validation snapshot. */,
+                    std::uint64_t maxAgeFrames /**< [in] Explicit snapshot age; zero requires the latest record. */,
+                    const Matrix &state /**< [in] Finite [y_p;u_p;a_p], already synchronized. */,
+                    Matrix       &output /**< [out] Pre-sized mode-by-one buffer, disjoint from state. */ ) const;
 };
 
 } // namespace DDSPC

@@ -11,10 +11,12 @@ SOURCES := $(TEST_DIR)/benchmark.cpp $(APP_DIR)/ar_controller.cpp $(APP_DIR)/rec
 OBJECTS := $(addprefix $(BUILD_DIR)/,$(notdir $(SOURCES:.cpp=.o)))
 VPATH := $(sort $(dir $(SOURCES)))
 TARGET := $(BUILD_DIR)/ddspc_benchmark
-.PHONY: all check
+.PHONY: all check check-allocations
 all: $(TARGET)
 check: $(TARGET)
 	$(TARGET)
+check-allocations: $(TARGET)
+	$(TARGET) --check-allocations
 $(TARGET): $(OBJECTS)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) $^ $(LDLIBS) -o $@
 $(BUILD_DIR)/%.o: %.cpp $(TEST_DIR)/allocation_probe.hpp

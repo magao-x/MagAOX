@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <new>
 #include <random>
 #include <vector>
@@ -99,11 +100,100 @@ bool probe_valid()
     DDSPCBenchmark::enabled = false;
     return DDSPCBenchmark::eigenRequests == 1 && DDSPCBenchmark::cppRequests == 1;
 }
+
+/// Assert the critical-path allocation contract, including cold history, reacquisition and prediction failures.
+bool check_allocations()
+{
+    for( int modes : { 2, 10 } )
+        for( bool qrd : { false, true } )
+            for( float gamma : { 1.f, .99f } )
+            {
+                DDSPC::ShadowConfig cfg;
+                cfg.m_modes  = modes;
+                cfg.m_useQrd = qrd;
+                cfg.m_gamma  = gamma;
+                cfg.m_prior  = .1f;
+                cfg.m_lambda = .3f;
+                DDSPC::ShadowController pair( cfg );
+                pair.training( DDSPC::ShadowMode::Standard, true );
+                pair.training( DDSPC::ShadowMode::AccelAssisted, true );
+                DDSPC::ShadowRecord record;
+                record.m_residual       = Matrix::Zero( modes, 1 );
+                record.m_appliedCommand = record.m_residual;
+                record.m_acceleration   = Matrix::Zero( 2, 1 );
+                record.m_wfsValid = record.m_appliedValid = record.m_timingValid = record.m_accelValid = true;
+                std::mt19937 rng( 801 );
+                Matrix       state = Matrix::Ones( 9 * modes + 40, 1 ), output = Matrix::Zero( modes, 1 );
+                DDSPCBenchmark::eigenRequests = DDSPCBenchmark::cppRequests = 0;
+                for( int i = 0; i < 768; ++i )
+                {
+                    for( auto *v : { &record.m_residual, &record.m_appliedCommand, &record.m_acceleration } )
+                        for( int j = 0; j < v->size(); ++j )
+                            ( *v )( j ) = ( int( rng() % 2001 ) - 1000 ) / 1000.f;
+                    record.m_index = i;
+                    record.m_accelValid =
+                        i != 300; // Missing sensor history and common timing loss must retain storage.
+                    record.m_timingValid             = i != 310;
+                    const bool noTrainingAllocations = qrd || gamma == 1;
+                    if( noTrainingAllocations )
+                        Eigen::internal::set_is_malloc_allowed( false );
+                    DDSPCBenchmark::enabled = true;
+                    const bool accepted     = pair.process( record );
+                    DDSPCBenchmark::enabled = false;
+                    Eigen::internal::set_is_malloc_allowed( true );
+                    if( accepted != record.m_timingValid )
+                        return false;
+                }
+                const auto trainingAllocations = DDSPCBenchmark::eigenRequests;
+                if( DDSPCBenchmark::cppRequests || ( ( qrd || gamma == 1 ) && trainingAllocations ) )
+                    return false;
+                if( !pair.status( DDSPC::ShadowMode::AccelAssisted ).m_ready )
+                    return false;
+                DDSPCBenchmark::eigenRequests = DDSPCBenchmark::cppRequests = 0;
+                Eigen::internal::set_is_malloc_allowed( false );
+                DDSPCBenchmark::enabled = true;
+                bool valid = pair.predict_cached( DDSPC::ShadowMode::AccelAssisted, 767, 0, state, output );
+                valid      = valid && !pair.predict_cached( DDSPC::ShadowMode::AccelAssisted, 766, 1, state, output );
+                valid      = valid && !pair.predict_cached( DDSPC::ShadowMode::AccelAssisted, 768, 0, state, output );
+                state( 0 ) = std::numeric_limits<float>::quiet_NaN();
+                valid      = valid && !pair.predict_cached( DDSPC::ShadowMode::AccelAssisted, 767, 0, state, output );
+                DDSPCBenchmark::enabled = false;
+                Eigen::internal::set_is_malloc_allowed( true );
+                if( !valid || DDSPCBenchmark::eigenRequests || DDSPCBenchmark::cppRequests )
+                    return false;
+                std::cout << "Allocation contract modes=" << modes << " qrd=" << qrd << " gamma=" << gamma
+                          << " training_Eigen_requests=" << trainingAllocations << " prediction_requests=0\n";
+                pair.training( DDSPC::ShadowMode::Standard, false );
+                pair.training( DDSPC::ShadowMode::AccelAssisted, false );
+                record.m_index                = 768;
+                DDSPCBenchmark::eigenRequests = DDSPCBenchmark::cppRequests = 0;
+                Eigen::internal::set_is_malloc_allowed( false );
+                DDSPCBenchmark::enabled = true;
+                const bool paused       = pair.process( record );
+                DDSPCBenchmark::enabled = false;
+                Eigen::internal::set_is_malloc_allowed( true );
+                if( !paused || DDSPCBenchmark::eigenRequests || DDSPCBenchmark::cppRequests )
+                    return false;
+                Eigen::internal::set_is_malloc_allowed( false );
+                DDSPCBenchmark::enabled = true;
+                pair.reset( DDSPC::ShadowMode::Standard );
+                pair.reset( DDSPC::ShadowMode::AccelAssisted );
+                DDSPCBenchmark::enabled = false;
+                Eigen::internal::set_is_malloc_allowed( true );
+                if( DDSPCBenchmark::eigenRequests || DDSPCBenchmark::cppRequests ||
+                    pair.status( DDSPC::ShadowMode::Standard ).m_ready ||
+                    pair.status( DDSPC::ShadowMode::AccelAssisted ).m_ready )
+                    return false;
+            }
+    return true;
+}
 } // namespace
 
 /// Run synthetic component workloads; optional argument changes sample count, never an instrument endpoint.
 int main( int argc /**< [in] Argument count. */, char **argv /**< [in] Optional positive timed sample count. */ )
 {
+    if( argc == 2 && std::string( argv[1] ) == "--check-allocations" )
+        return probe_valid() && check_allocations() ? 0 : 4;
     const int iterations = argc == 2 ? std::stoi( argv[1] ) : 2000;
     if( iterations < 100 || iterations > 100000 || !probe_valid() )
         return 2;
@@ -147,7 +237,8 @@ int main( int argc /**< [in] Argument count. */, char **argv /**< [in] Optional 
                      } );
             for( auto *model : { &standard, &assisted } )
             {
-                const bool acc = model == &assisted;
+                const bool acc       = model == &assisted;
+                const auto fixedSeed = rng; // New workspace measurements must not advance the original traces.
                 measure( ( prefix + ( acc ? "assisted_step_identify_reference" : "standard_step_identify_reference" ) )
                              .c_str(),
                          iterations,
@@ -194,6 +285,53 @@ int main( int argc /**< [in] Argument count. */, char **argv /**< [in] Optional 
                              qr.setThreshold( cfg.m_rankTolerance );
                              sink = qr.rank();
                          } );
+                Matrix                             scaled = featureWindow;
+                Eigen::ColPivHouseholderQR<Matrix> reusableRank( features, features );
+                measure( ( component + "rank_fixed_only" ).c_str(),
+                         iterations,
+                         [&]( int )
+                         {
+                             scaled = featureWindow;
+                             for( int j = 0; j < scaled.cols(); ++j )
+                             {
+                                 const auto norm = scaled.col( j ).norm();
+                                 if( norm > 0 )
+                                     scaled.col( j ) /= norm;
+                             }
+                             reusableRank.compute( scaled );
+                             reusableRank.setThreshold( cfg.m_rankTolerance );
+                             sink = reusableRank.rank();
+                         } );
+                DDSPC::PredictiveController fixed(
+                    modes, 5, 3, 0, 1, .3f, .1f, acc ? 2 : 0, acc ? 20 : 0, DDSPC::HistoryMode::Causal );
+                fixed.use_qrd    = qrd;
+                auto   workspace = fixed.make_workspace();
+                auto   fixedRng  = fixedSeed;
+                Matrix fy = Matrix::Zero( modes, 1 ), fu = fy, fa = Matrix::Zero( 2, 1 ), empty;
+                measure( ( component + "fixed_step_identify_reference" ).c_str(),
+                         iterations,
+                         [&]( int i )
+                         {
+                             for( auto *v : { &fy, &fu, &fa } )
+                                 for( int j = 0; j < v->size(); ++j )
+                                     ( *v )( j ) = ( int( fixedRng() % 2001 ) - 1000 ) / 1000.f;
+                             fixed.append_sample( i, fy, fu, acc ? fa : empty );
+                             if( fixed.prepare_training( *workspace ) )
+                                 fixed.update_system( *workspace );
+                             if( i > 30 )
+                                 sink = fixed.get_reference_controller( *workspace, .3f ).sum();
+                         } );
+                measure( ( component + "reference_fixed_only" ).c_str(),
+                         iterations,
+                         [&]( int ) { sink = fixed.get_reference_controller( *workspace, .3f ).sum(); } );
+                measure( ( component + "history_fixed_only" ).c_str(),
+                         iterations,
+                         [&]( int )
+                         {
+                             if( !fixed.prepare_training( *workspace ) )
+                                 std::abort();
+                             sink = workspace->regressor().sum() + workspace->target().sum();
+                         } );
             }
             DDSPC::ShadowController pair( cfg );
             pair.training( DDSPC::ShadowMode::Standard, true );
@@ -220,6 +358,35 @@ int main( int argc /**< [in] Argument count. */, char **argv /**< [in] Optional 
                 return 3;
             }
             std::cerr << prefix << "features=" << s.m_features << ',' << b.m_features << " ready=1,1\n";
+            for( bool assistedMode : { false, true } )
+            {
+                const auto mode      = assistedMode ? DDSPC::ShadowMode::AccelAssisted : DDSPC::ShadowMode::Standard;
+                Matrix     canonical = Matrix::Ones( pair.status( mode ).m_features - 3 * modes, 1 ),
+                           output    = Matrix::Zero( modes, 1 );
+                measure( ( prefix + ( assistedMode ? "assisted_cached_predict" : "standard_cached_predict" ) ).c_str(),
+                         iterations,
+                         [&]( int )
+                         {
+                             if( !pair.predict_cached( mode, record.m_index, 0, canonical, output ) )
+                                 std::abort();
+                             sink = output.sum();
+                         } );
+            }
+            pair.training( DDSPC::ShadowMode::Standard, false );
+            pair.training( DDSPC::ShadowMode::AccelAssisted, false );
+            const auto frozenOrigin = record.m_index + 1;
+            auto       frozenRng    = rng;
+            measure( ( prefix + "managed_pair_frozen" ).c_str(),
+                     iterations,
+                     [&]( int i )
+                     {
+                         record.m_index = frozenOrigin + i;
+                         for( auto *v : { &record.m_residual, &record.m_appliedCommand, &record.m_acceleration } )
+                             for( int j = 0; j < v->size(); ++j )
+                                 ( *v )( j ) = ( int( frozenRng() % 2001 ) - 1000 ) / 1000.f;
+                         if( !pair.process( record ) )
+                             std::abort();
+                     } );
             using namespace libXWCTest::loPredCtrlAccTest;
             auto inputCfg            = input_config();
             inputCfg.m_modes         = modes;

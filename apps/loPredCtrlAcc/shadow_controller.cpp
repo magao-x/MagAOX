@@ -5,6 +5,7 @@
 #include "shadow_controller.hpp"
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <limits>
 #include <stdexcept>
 
@@ -57,9 +58,21 @@ void ShadowController::initialize( Model &item, bool assisted )
                                                                           assisted ? m_config.m_accelHistory : 0,
                                                                           HistoryMode::Causal );
     fresh.m_controller->use_qrd = m_config.m_useQrd;
-    fresh.m_status.m_features   = fresh.m_controller->get_prediction_matrix().cols();
-    fresh.m_features            = Matrix::Zero( fresh.m_status.m_features, fresh.m_status.m_features );
+    fresh.m_workspace           = fresh.m_controller->make_workspace();
+    fresh.m_status.m_features   = fresh.m_controller->prediction_matrix_view().cols();
+    const int p = fresh.m_status.m_features, d = m_config.m_future * m_config.m_modes;
+    fresh.m_features = Matrix::Zero( fresh.m_status.m_features, fresh.m_status.m_features );
+    fresh.m_context  = Matrix::Zero( p, 1 );
+    fresh.m_error    = Matrix::Zero( d, 1 );
+    fresh.m_scaled   = Matrix::Zero( p, p );
+    fresh.m_rankQR   = std::make_unique<Eigen::ColPivHouseholderQR<Matrix>>( p, p );
+    fresh.m_proposal = Matrix::Zero( m_config.m_modes, 1 );
     fresh.m_forecasts.resize( m_config.m_future + 1 );
+    for( auto &forecast : fresh.m_forecasts )
+    {
+        forecast.m_theta = Matrix::Zero( d, p );
+        forecast.m_state = Matrix::Zero( p - d, 1 );
+    }
     item = std::move( fresh );
 }
 
@@ -81,9 +94,10 @@ const ShadowController::Model &ShadowController::model( ShadowMode mode ) const
     throw std::invalid_argument( "Unknown shadow DDSPC mode" );
 }
 
-void ShadowController::break_history( Model &item )
+void ShadowController::break_history( Model &item, bool resetBuffers )
 {
-    item.m_controller->reset_buffers();
+    if( resetBuffers )
+        item.m_controller->reset_buffers();
     const bool enabled              = item.m_status.m_trainingEnabled;
     const auto updates              = item.m_status.m_updates;
     const int  features             = item.m_status.m_features;
@@ -94,8 +108,10 @@ void ShadowController::break_history( Model &item )
     item.m_status.m_reason          = item.m_fault ? ShadowReason::NumericalFault : ShadowReason::InvalidData;
     item.m_featureRows = item.m_segmentUpdates = item.m_errorValues = 0;
     item.m_squaredError                                             = 0;
-    item.m_proposal.resize( 0, 0 );
+    item.m_proposal.setZero();
     item.m_features.setZero();
+    item.m_rankDirty   = true;
+    item.m_gainCurrent = false;
     for( auto &forecast : item.m_forecasts )
         forecast.m_valid = false;
 }
@@ -159,33 +175,41 @@ void ShadowController::step( Model &item, const ShadowRecord &record, bool assis
     try
     {
         const auto index = state.m_samples;
-        item.m_controller->append_sample(
-            index, record.m_residual, record.m_appliedCommand, assisted ? record.m_acceleration : Matrix() );
+        item.m_controller->append_sample( index,
+                                          record.m_residual,
+                                          record.m_appliedCommand,
+                                          assisted ? record.m_acceleration : item.m_emptyAcceleration );
         ++state.m_samples;
-        Matrix     phi, target;
-        const bool mature = item.m_controller->get_training_example( phi, target );
+        auto         &workspace = *item.m_workspace;
+        const bool    mature    = item.m_controller->prepare_training( workspace );
+        const Matrix &phi = workspace.regressor(), &target = workspace.target();
         if( mature )
         {
             auto &origin = item.m_forecasts[( index - m_config.m_future ) % item.m_forecasts.size()];
             if( origin.m_valid )
             {
-                Matrix context( origin.m_theta.cols(), 1 );
-                context << origin.m_state, phi.topRows( m_config.m_future * m_config.m_modes );
-                const Matrix error = origin.m_theta * context - target;
-                if( !error.allFinite() )
+                item.m_context << origin.m_state, phi.topRows( m_config.m_future * m_config.m_modes );
+                item.m_error.noalias() = origin.m_theta * item.m_context;
+                item.m_error -= target;
+                if( !item.m_error.allFinite() )
                     throw std::runtime_error( "Nonfinite shadow forecast" );
-                item.m_squaredError += error.cast<double>().squaredNorm();
-                item.m_errorValues += error.size();
+                item.m_squaredError += item.m_error.cast<double>().squaredNorm();
+                item.m_errorValues += item.m_error.size();
                 state.m_rmse = std::sqrt( item.m_squaredError / item.m_errorValues );
                 ++state.m_predictions;
                 state.m_predictionValid = true;
             }
-            item.m_features.row( item.m_featureRows % state.m_features ) = phi.transpose();
+            const auto row = item.m_featureRows % state.m_features;
+            for( int j = 0; !item.m_rankDirty && j < state.m_features; ++j )
+                if( std::memcmp( &item.m_features( row, j ), &phi( j ), sizeof( realT ) ) != 0 )
+                    item.m_rankDirty = true;
+            item.m_features.row( row ) = phi.transpose();
             ++item.m_featureRows;
             if( state.m_trainingEnabled )
             {
-                item.m_controller->update_system();
-                if( !item.m_controller->get_prediction_matrix().allFinite() )
+                item.m_gainCurrent = false;
+                item.m_controller->update_system( workspace );
+                if( !item.m_controller->prediction_matrix_view().allFinite() )
                     throw std::runtime_error( "Nonfinite shadow identification" );
                 ++state.m_updates;
                 ++item.m_segmentUpdates;
@@ -199,24 +223,32 @@ void ShadowController::step( Model &item, const ShadowRecord &record, bool assis
             state.m_reason = ShadowReason::Untrained;
             if( item.m_segmentUpdates >= std::max<std::uint64_t>( state.m_features, m_config.m_minUpdates ) )
             {
-                Matrix scaled = item.m_features;
-                for( int j = 0; j < scaled.cols(); ++j )
+                if( item.m_rankDirty )
                 {
-                    const realT norm = scaled.col( j ).norm();
-                    if( norm > 0 )
-                        scaled.col( j ) /= norm;
+                    item.m_scaled = item.m_features;
+                    for( int j = 0; j < item.m_scaled.cols(); ++j )
+                    {
+                        const realT norm = item.m_scaled.col( j ).norm();
+                        if( norm > 0 )
+                            item.m_scaled.col( j ) /= norm;
+                    }
+                    item.m_rankQR->compute( item.m_scaled );
+                    item.m_rankQR->setThreshold( m_config.m_rankTolerance );
+                    state.m_rank     = item.m_rankQR->rank();
+                    item.m_rankDirty = false;
                 }
-                Eigen::ColPivHouseholderQR<Matrix> qr( scaled );
-                qr.setThreshold( m_config.m_rankTolerance );
-                state.m_rank   = qr.rank();
                 state.m_reason = ShadowReason::Unexcited;
                 if( state.m_rank == state.m_features )
                 {
-                    const Matrix theta = item.m_controller->get_reference_prediction_matrix();
-                    if( !theta.allFinite() )
-                        throw std::runtime_error( "Nonfinite shadow model" );
-                    const Matrix gain = item.m_controller->get_reference_controller( m_config.m_lambda );
-                    item.m_proposal   = gain.bottomRows( m_config.m_modes ) * item.m_controller->get_prediction_state();
+                    if( !item.m_gainCurrent )
+                    {
+                        item.m_controller->get_reference_controller( workspace, m_config.m_lambda );
+                        item.m_gainCurrent = true;
+                    }
+                    else
+                        item.m_controller->prepare_prediction_state( workspace );
+                    const Matrix &gain        = workspace.gain();
+                    item.m_proposal.noalias() = gain.bottomRows( m_config.m_modes ) * workspace.state();
                     if( !item.m_proposal.allFinite() )
                         throw std::runtime_error( "Nonfinite shadow proposal" );
                     state.m_ready  = true;
@@ -228,8 +260,8 @@ void ShadowController::step( Model &item, const ShadowRecord &record, bool assis
         next.m_valid = state.m_ready;
         if( next.m_valid )
         {
-            next.m_theta = item.m_controller->get_reference_prediction_matrix();
-            next.m_state = item.m_controller->get_prediction_state();
+            next.m_theta = workspace.theta();
+            next.m_state = workspace.state();
         }
     }
     catch( const std::exception & )
@@ -247,9 +279,12 @@ void ShadowController::training( ShadowMode mode, bool enabled )
 
 void ShadowController::reset( ShadowMode mode )
 {
-    const bool enabled = model( mode ).m_status.m_trainingEnabled;
-    initialize( model( mode ), mode == ShadowMode::AccelAssisted );
-    model( mode ).m_status.m_trainingEnabled = enabled;
+    auto &item = model( mode );
+    item.m_controller->reset();
+    item.m_fault = false;
+    break_history( item, false );
+    item.m_status.m_updates = 0;
+    item.m_status.m_reason  = ShadowReason::AwaitingRecord;
 }
 
 bool ShadowController::select( ShadowMode mode )
@@ -283,6 +318,32 @@ Matrix ShadowController::prediction_matrix( ShadowMode mode )
 Matrix ShadowController::proposal( ShadowMode mode ) const
 {
     return model( mode ).m_status.m_ready ? model( mode ).m_proposal : Matrix();
+}
+
+bool ShadowController::predict_cached( ShadowMode    mode,
+                                       std::uint64_t decisionIndex,
+                                       std::uint64_t maxAgeFrames,
+                                       const Matrix &state,
+                                       Matrix       &output ) const
+{
+    if( output.rows() != m_config.m_modes || output.cols() != 1 || output.data() == state.data() )
+        return false;
+    output.setZero();
+    if( mode != ShadowMode::Standard && mode != ShadowMode::AccelAssisted )
+        return false;
+    const auto &item = model( mode );
+    if( !m_haveIndex || !item.m_status.m_ready || !item.m_status.m_dataValid || item.m_fault ||
+        decisionIndex == std::numeric_limits<std::uint64_t>::max() || decisionIndex < m_lastIndex ||
+        decisionIndex - m_lastIndex > maxAgeFrames || state.rows() != item.m_workspace->gain().cols() ||
+        state.cols() != 1 || !state.allFinite() )
+        return false;
+    output.noalias() = item.m_workspace->gain().bottomRows( m_config.m_modes ) * state;
+    if( !output.allFinite() )
+    {
+        output.setZero();
+        return false;
+    }
+    return true;
 }
 
 } // namespace DDSPC

@@ -293,6 +293,29 @@ Review AGENTS.md.  Do not alter any text above the "Agent Findings and Plan" bel
 
 ## Task Summary
 
+**Phase 7 offline performance optimization (2026-11-05): causal model workspaces
+and a lightweight cached-prediction seam are implemented; ten-mode synchronous
+training still does not safely fit a 500-us frame.** Starting clean HEAD is
+`352446f83737573023870096d2a5388859afcd3e`; Phases 1–6 are committed by the user.
+The host was checked before work: `ASTR-LT-428.local`, personal macOS arm64.
+Original `loPredCtrl`, application configuration/defaults, operational control
+law, Phase 6 Givens kernels and publication routes remain unchanged. Both new
+models remain strictly non-actuating. No thread, native transport, production
+flag, instrument command, separate worktree, commit or deployment is introduced.
+
+The strict Clang and GCC replays match the independently compiled committed
+Phase 6 manager exactly: coefficients, proposals, readiness/status and frozen-
+origin RMSE, for both learners, two/ten modes and gamma=1/0.99. Zero-tolerance
+regressions remain intact. Preallocation removes observed Eigen/C++ allocations
+from the managed gamma=1 benchmark and cached prediction, while preserving the
+same rank rule and per-record evidence. Classical forgetting RLS retains one
+Eigen temporary per update to preserve rounding. The builder still allocates.
+The two-mode managed pair improves from 50.375/58.500 to 40.000/49.083 us median
+(RLS/QR); ten-mode medians are 500.917/566.292 us with many deadline misses.
+Native Linux build/runtime qualification, verified applied-command provenance
+and physical timing remain blockers. Full evidence and proposed worker design
+follow. **Stop after Phase 7; instrument integration needs explicit approval.**
+
 **Phase 6 compatibility/build-tool review (2026-11-05): the two strict GCC QR
 regressions are resolved without changing test tolerances or the original app.**
 Starting HEAD is `cb88e09406cfc9806331390b7156bb000fdda8e6`; the working tree was
@@ -511,6 +534,16 @@ formula or a predetermined spectral line.
 
 ## Key Assumptions
 
+**Phase 7 qualification:** observations are instrumented workstation measurements,
+not worst-case execution or native Linux verification. Original benchmark
+configuration is unchanged (N=5, F=3, Ha=20, channels=2, gamma=1, prior=.1,
+lambda=.3, 512 warmup + 2,000 timed frames); both strict learners and gamma=.99
+are also covered by exact trace/allocation tests. A prepared causal example and
+all workspaces have one serialized owner. Cached prediction readiness refers to
+the last completed validation window; its explicit frame-age limit cannot prove
+physical availability, exposure alignment or wall-clock freshness. The fit may
+be intentionally frozen. No production caller uses the new cached API.
+
 **Phase 6 qualification:** compiler-dependent bit preservation is established
 only for the measured compiler/Eigen/flag combinations, not every future compiler
 or target. GNU/Darwin AArch64 is not GNU/Linux verification. Explicit matching of
@@ -650,6 +683,109 @@ independent learners and non-actuation protections remain unchanged.
     libraries/hardware. Preserve the original as the operational reference.
 
 ## Requirements
+
+### Phase 7 implemented bounded-storage numerical path
+
+Existing Legacy APIs and arithmetic remain available. The new opt-in causal
+workspaces are owned by each independent `ShadowController::Model`; no workspace
+or learner state is shared between standard and assisted models.
+
+- `ar_controller.hpp/.cpp`: `CausalWorkspace`, created only through
+  `PredictiveController::make_workspace()`, preallocates phi/target/state,
+  canonical theta, C/known blocks, Hessian/RHS/gain, LDLT and RLS outer-product
+  workspaces. `prepare_training()` assembles one mature example;
+  `update_system(CausalWorkspace&)` checks owner, current head and reset epoch
+  and rejects stale/duplicate examples. A causal-only epoch is appended after
+  preexisting members; operational member offsets and order are preserved.
+  `get_training_example()` fills causal history directly into existing buffers;
+  the internal [C B D A] regressor order and all indices remain Phase 6-equivalent.
+  `get_prediction_state(Matrix&)` fills pre-sized [y_p;u_p;a_p] directly.
+- `get_reference_controller(CausalWorkspace&,lambda)` uses the unchanged full
+  `(C^T C+lambda I)K=-C^T[A B D]` LDLT solve, finite/positive checks and newest-first
+  action row. No single-action RHS reassociation, literal penalty change or
+  Legacy scaled-regularization/integrator change is made. `prediction_matrix_view()`
+  allows serialized finite checking without copying theta. Value-returning
+  compatibility APIs remain and may allocate.
+- `recursive_least_squares.cpp::update_preallocated()` uses fixed normalization,
+  weight and covariance outer products with the original update association.
+  Gamma=1 has an exact identity-scaling specialization. Gamma!=1 deliberately
+  retains `(_inverse_gamma*x).transpose()*P`: storing a pre-scaled vector changed
+  rounding and failed the existing exact standalone/managed baseline test. That
+  candidate was rejected, without changing any tolerance. The retained Eigen
+  expression still requests one temporary per adapting learner update.
+- `qrd_rls.cpp::update_preallocated()` reuses the existing A/R/solve storage and
+  fixed outer-product scratch. Phase 6's two compile-time/non-inline Givens
+  kernels and exact structural zeros are untouched. Fixed scratch prevents input
+  and rank-one temporary allocations without replacing rotations or solves.
+- `shadow_controller.cpp::initialize()/step()/break_history()/reset()` allocate
+  all rank, error/context, proposal and F+1 frozen-forecast buffers up front.
+  A persistent empty standard sensor argument avoids the conditional-expression
+  sensor copy. No forecast is scored with newly fitted coefficients: frozen
+  theta/state are copied into existing origin buffers. Missing data, discontinuity,
+  fault and explicit reset retain storage while invalidating evidence/proposals.
+  Training pause can reuse a gain only while coefficients and lambda are unchanged;
+  fresh state and rank evidence are still processed each record.
+
+### Phase 7 rank and readiness preservation
+
+`ShadowController::step()` still column-normalizes the same p-by-p empirical
+feature window and uses `ColPivHouseholderQR<Matrix>` with the identical threshold
+and update cadence. The decomposition and scaled matrix are reused. Rank is
+cached only when each newly overwritten row is **bit-identical** to its previous
+contents (per-coefficient `memcmp`, since rows are strided); every actual window
+change recomputes the original rule. History loss/reset invalidates the cache.
+Tests cover repeated low-rank windows, resumed excitation, gaps, and near-collinear
+features on both sides of the configured threshold. No lower-frequency checks,
+prior-based rank substitution or relaxed thresholds are introduced.
+
+Preallocation reduces measured ten-mode rank medians from 141.375/295.917 us to
+130.416/278.209 us for standard/assisted in the RLS-profile component fixtures.
+These fixtures use the same normalized matrices; independent QR-profile repeats
+are similar. The cubic factorization remains dominant. Incremental downdates,
+Gram/Cholesky tests, alternate decompositions or reduced validation frequency
+would change numerical/policy behavior near threshold; none is substituted.
+A fixed-size cache has no benefit on generic changing windows. Rank validation
+alone still dominates frozen-training frames.
+
+### Phase 7 offline prediction seam and proposed scheduling
+
+`ShadowController::predict_cached()` is a caller-serialized, non-actuating
+matrix-vector diagnostic using the cached full reference gain and a supplied
+finite, causally synchronized canonical state. It validates readiness, dimensions,
+nonaliasing output, origin order, explicit maximum validation-snapshot age and
+reserved/invalid indices; correctly shaped output is cleared on failure. It
+performs no training, rank factorization or solve. `status().m_updates` identifies
+fit version; `m_lastIndex` identifies the latest completed validation record.
+This API is **not a concurrent snapshot** or a live callback route. Future-state
+readiness beyond that completed evidence window is not asserted. Tests verify
+latest-frame equality to the managed proposal, stale/future limits, invalid
+state/index, gap invalidation and no adaptation.
+
+Recommended architecture, **not implemented**, for a separately approved phase:
+
+1. Keep acquisition/state assembly bounded and preallocated; certify WFS/applied
+   input alignment first. Publish identical immutable common records to both
+   learners with stream epochs, exposure/availability metadata and sequence IDs.
+2. Consider one exclusive worker per independent learner, or prove an approved
+   target can sustain the entire pair on one worker. This laptop's pair exceeds
+   500 us, so moving it onto one serial worker only moves the overload. No silent
+   frame skipping or lower-rate fitting is permitted; changing fit cadence also
+   requires an explicit forgetting-factor and identification contract.
+3. Use bounded fanout queues/pools with a common acceptance/discontinuity policy.
+   Queue overflow, missed inputs or restart must invalidate/reacquire the affected
+   segment with explicit telemetry. Do not relabel delayed examples as current.
+   Both models must keep identical WFS/applied-input identities. Prove queue
+   occupancy/latency bounds and shutdown/ownership behavior offline before threading.
+4. Publish immutable/versioned gain+fit+readiness snapshots with configuration
+   and stream epoch, fit version, last trained example/target, last validated
+   evidence record, physical availability time and finite checks. Use bounded
+   double/triple buffers or an equivalent race-tested ownership scheme, not a
+   partially updated shared Eigen matrix or unbounded shared-pointer allocation.
+5. The prediction consumer must reject stale, wrong-epoch, incomplete or invalid
+   snapshots and unavailable state. An invalid shadow diagnostic cannot select a
+   new actuation route. Legacy selection/output remains under existing control;
+   no automatic correction-enable or fallback write is introduced. Native Linux
+   scheduling, actual sustained load and target p99.9/max measurements remain gates.
 
 ### Phase 1 implemented numerical contract
 
@@ -1835,6 +1971,28 @@ a benchmark.
 
 ## Questions and Points of Clarification
 
+**Phase 7 next-phase decisions/blockers:**
+
+- Approve an isolated native Linux validation environment and supported compiler/
+  Eigen profiles. Both real native app build profiles remain unverified; the
+  Python orchestration tests cannot qualify a Linux build or real-time execution.
+- Approve a bounded-worker/snapshot design and its age/overflow/missed-deadline
+  policy before adding concurrency. The ten-mode synchronous pair misses the
+  frame budget even after allocation removal; one serial worker is insufficient
+  on this measured platform. Independent workers need common-record identity and
+  bounded coherent handoff tests. No threading is introduced in Phase 7.
+- Decide whether future classical forgetting-RLS allocation removal may change
+  expression rounding, or requires a compiler/Eigen-specific exact evaluator.
+  The current choice retains strict equivalence and one temporary per update.
+- Provide independently verified physical WFS exposure/availability timing,
+  applied-DM provenance/latency and sensor clock/availability mapping through an
+  approved commissioning process. Retrospective input certificates and callback
+  order still do not establish a current physically available prediction state.
+- Resolve the already documented GNU native fast-math nonfinite fault before
+  commissioning. Production flags and exact tests remain unchanged.
+- Instrument integration is outside this authorization and requires explicit
+  user approval; no physical streams/services were accessed during this phase.
+
 **Phase 6 decisions/blockers before non-actuating live shadow testing:**
 
 - Provide an approved isolated Linux development environment and supported
@@ -1979,6 +2137,132 @@ recommendations are not assumptions about the deployed instrument.
    source review does not establish deployment performance.
 
 ## Tests
+
+### Phase 7 executed optimization validation
+
+Environment remains macOS 26.3.2 arm64, Apple Clang 21.0.0 and Homebrew GCC
+15.2.0, Eigen pkg-config 5.0.1/header macros 3.5.0, mxlib 0.2.0. Numerical tests
+use `-O2 -fno-fast-math`; benchmarks `-O3 -fno-fast-math`; sanitizers use `-O1`
+with address/undefined sanitizers and frame pointers. All execution is standalone
+numerical/stream-free testing. No native app or instrument service is run.
+
+`tests/prepare_phase6.py` materializes the actual ten committed numerical/manager
+files from `352446f83737573023870096d2a5388859afcd3e` using local Git objects.
+`phase6_adapter.cpp` and `phase6_replay.hpp` independently compile those sources
+under `DDSPCPhase6`; this is not an oracle reimplementation. The normal offline
+Makefile now builds that baseline alongside the untouched historical Legacy
+oracle. `ddspc_performance_test.cpp` adds four default cases:
+
+- Exact Phase 6/7 traces for **5,760 records** (720 each, modes=2/10, RLS/QR,
+  gamma=1/.99), including constant windows, training pause/resume, independent
+  reset, sensor loss, bad timing, frame gaps and readiness-gated selection.
+  Coefficients and proposals require zero-tolerance equality; RMSE is exact and
+  every discrete status/count/rank/reason matches. Maximum observed proposal and
+  RMSE difference is **zero**, under both strict compilers.
+- Near-collinearity at epsilon=0, 1e-7, 1e-5, 2e-5, 1e-3 requires exactly matching
+  pivoted-QR rank/readiness/reason at every frame, for both learner types.
+- Workspace owner/head/reset-epoch checks reject stale or duplicate examples;
+  Legacy cannot allocate/use causal scratch. History resets with equal heads
+  cannot replay a prepared example from another segment.
+- Cached proposal equality, readiness/age/dimension/invalid-value gates,
+  reserved index and gap invalidation, with no adaptation/output publication.
+
+Strict Clang/GCC full suites pass **333,616 assertions / 50 cases**. Existing
+historical exact replay, accelerometer-disabled equivalence, model independence,
+causal-input/restart/latency, numerical/KKT/batch identification and non-actuating
+application tests remain unweakened. Native Linux is unavailable/unverified;
+original `loPredCtrl` still matches all 15 files of the pinned historical tree.
+
+| Final check | Phase 7 result |
+| --- | --- |
+| Full strict Clang and GCC | Each **333,616 assertions / 50 cases pass**, exact Phase 6/7 traces and historical Legacy tests. |
+| Full Clang ASan+UBSan | **333,616 / 50 pass**, no findings. |
+| Hidden strict historical drift, Clang/GCC | Each **55,298 / 1 pass**; classic/QR command and fit differences all zero, original/restored exact. |
+| Hidden strict tiny Givens rotation, Clang/GCC | Each **1 assertion / 1 case pass**. |
+| Clang Legacy `-O3 -ffast-math` | **186,615 / 9 pass**. |
+| Clang Legacy fast + ASan/UBSan, `-O1` | **186,615 / 9 pass**, no findings. |
+| GCC Legacy `-O3 -ffast-math` | **8/9 pass**, **182,253/182,254 assertions pass**; unchanged historical QR nonfinite fit at t=31, outputs original/clone still exactly match at failure. Failure retained and production flags unchanged. |
+| Native helper orchestration | **7 Python tests pass** in each full check; mocked build results do not verify a native build. |
+| Allocation contracts, normal and ASan/UBSan | All eight profiles pass, including cached invalid/stale state, pause and reset. |
+| Full benchmark | **92 workloads x 2,000 records**; both models ready, original 48 preserved. |
+| ASan/UBSan benchmark | **92 workloads x 100 records**, no findings. Timings are diagnostic only. |
+| Documentation/scope/format | Protected plan prefix and 15-file Legacy tree unchanged; changed C++ passes clang-format; Python syntax and `git diff --check` pass. |
+
+Detailed execution logs are retained under ignored `apps/loPredCtrlAcc/build/`
+as `phase7-final-{clang,gcc,sanitize,clang-fast,gcc-fast,clang-fast-sanitize}.log`,
+`phase7-final-offline{,-phase7-gcc}-{drift,tiny}.log`,
+`phase7-final-allocations{,-sanitize}.log` and benchmark logs/CSVs. Existing
+bundled INDI/mxlib deprecation and temporary-address compiler warnings remain
+outside scope. The previously documented initialized-VLA demonstration and GNU
+fast-math limitations are not repaired by this performance phase. Numerical
+tests, allocation counters, raw timings and compiler-profile results are kept
+distinct; none establishes Linux link or hardware timing correctness.
+
+The separate `--check-allocations` benchmark mode runs eight profiles (modes=2/10,
+RLS/QR, gamma=1/.99), 768 records each including cold/reacquisition histories,
+missing inputs, cached success/failure, training pause and explicit resets. Eigen
+no-malloc assertions and both observed request counters are enforced. Gamma=1
+RLS and both QR profiles request **zero** heap allocations through full managed
+processing; every cached prediction, paused-training record and reset also
+requests zero. Classical gamma=.99 training requests **1,466 Eigen allocations
+per 768-record two-model fixture**, one per actual mature learner update; C++ new
+is zero. The deliberate original scaling expression and exact rounding explain
+this retained exception. Arbitrary exceptions/OS allocation are not certified.
+
+#### Phase 7 before/after performance evidence
+
+Versioned raw captures: `apps/loPredCtrlAcc/tests/results/phase7-before.csv`
+(48 original rows) and `phase7-after.csv` (92 rows), plus environment/scope in
+`results/README.md`. Before uses the unmodified committed Phase 6 executable
+built before editing; after uses optimized working source. Every original
+configuration, seed and full-workload record sequence is retained. Additions use
+copied/separate RNGs. Both measured pairs reach readiness. 512 warmup + 2,000
+measured records per row; quantile definition/probes remain the original ones.
+After timing runs follow builds, without deliberately concurrent compilation.
+No CPU affinity/frequency/background-load control was applied; the baseline has
+substantial scheduler tails, so tail differences cannot establish causation or
+a worst-case bound. CSV also includes p99.9 and deadline misses for every row.
+
+| Managed pair, us | Median before → after | p95 | p99 | Maximum | Eigen requests/frame |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 2 modes, RLS | 50.375 → 40.000 | 56.875 → 43.208 | 79.000 → 49.875 | 2799.500 → 92.042 | 106 → 0 |
+| 2 modes, QR | 58.500 → 49.083 | 64.833 → 52.458 | 87.708 → 60.541 | 269.834 → 96.542 | 98 → 0 |
+| 10 modes, RLS | 582.042 → 500.917 | 768.792 → 547.792 | 3369.000 → 569.375 | 9303.250 → 587.375 | 105.960 → 0 |
+| 10 modes, QR | 681.667 → 566.292 | 997.458 → 593.042 | 4692.830 → 612.291 | 33855.900 → 665.875 | 97.960 → 0 |
+
+Ten-mode pair deadline misses: **1,094/2,000 RLS; 2,000/2,000 QR**; two-mode pairs
+have zero in the final capture. Builder+pair medians are 40.209/49.250 us (two
+modes), 504.958/567.416 us (ten); ten-mode maxima 1755.960/2442.210 us and misses
+1,364/2,000 and 2,000/2,000. The builder still makes six Eigen requests plus one
+C++ new (312 observed bytes) per record. Its performance/tails are measured but
+its implementation is unchanged. Whole acquisition/assembly is not allocation-free.
+
+The allocation-free core rows include history, adaptation and full reference
+solve, excluding readiness rank; they use identical records to the old core:
+
+| Fixed core, us | Median | p95 | p99 | Maximum | Eigen/C++ requests |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 2-mode standard, RLS | 1.500 | 1.584 | 1.916 | 11.916 | 0 / 0 |
+| 2-mode assisted, RLS | 4.083 | 4.416 | 5.125 | 26.875 | 0 / 0 |
+| 2-mode standard, QR | 2.875 | 2.958 | 3.208 | 14.083 | 0 / 0 |
+| 2-mode assisted, QR | 11.625 | 11.875 | 14.584 | 24.500 | 0 / 0 |
+| 10-mode standard, RLS | 29.959 | 34.083 | 44.042 | 119.166 | 0 / 0 |
+| 10-mode assisted, RLS | 42.125 | 45.125 | 53.958 | 108.875 | 0 / 0 |
+| 10-mode standard, QR | 55.208 | 59.208 | 65.792 | 157.709 | 0 / 0 |
+| 10-mode assisted, QR | 86.459 | 92.667 | 101.375 | 144.917 | 0 / 0 |
+
+Standard/assisted reference-workspace medians are 22.042/29.416 us at ten modes;
+fixed-history medians .084/.125 us in the RLS profile. Original value-returning
+reference/history APIs remain measured and retain allocations. Preallocated
+rank-only medians are 130.416/278.209 us; QR-profile assisted rank has a 2419.330-us
+scheduler tail, so even isolated rank work has no execution bound here. Frozen-
+training pairs still have ten-mode medians 423.708/418.875 us and maxima
+610.000/607.708 us: stopping adaptation does not remove empirical rank work.
+Cached prediction alone ranges .041–.167 us median, .042–.250 us p99 and at most
+5.875 us, with zero Eigen/C++ requests. Very small values are timer-resolution
+sensitive and exclude canonical-state construction and concurrent handoff.
+The full raw before/after CSVs preserve every component's p95/p99/max/counts;
+components are independent fixtures, not an exactly additive whole-path profile.
 
 ### Phase 1 executed tests
 
@@ -2609,13 +2893,16 @@ dedicated Makefile above rather than linking the application library through
 
 ## Implementation Plan
 
-Each stage has a reviewable exit condition. The user has committed Phases 1–5.
-The current **Phase 6 is native build-tool review, GCC compatibility diagnosis,
-minimal numerical corrections and optimization preparation**; it supersedes the
-old future P6 acquisition label. Strict compatibility is restored; actual Linux
-verification, GNU fast-math policy and physical data evidence remain open. Stop
-after Phase 6. Real-time architectural changes, live acquisition, deployment and
-new actuation require further approval.
+Each stage has a reviewable exit condition. The user has committed Phases 1–6.
+The current **Phase 7 is offline performance/allocation optimization with exact
+numerical compatibility**. Fixed workspaces, unchanged rank/readiness logic and
+an offline cached-prediction seam are implemented and tested. A threaded worker
+architecture is recommended, not implemented. Actual Linux qualification, GNU
+fast-math policy and physical timing/applied-input evidence remain open. Stop
+after Phase 7. The next separately approved stage must qualify native Linux,
+bounded ownership/fanout/versioned snapshots and overflow/age policies offline
+before any approved non-actuating instrument integration. Live acquisition,
+deployment and new actuation require further approval.
 
 1. **P0 — Agree on the mathematical and telemetry contract.** Resolve the
    decisions above; record signal units, increment/absolute convention, frame
@@ -2738,6 +3025,29 @@ then documentation-only changes and separate formatting-only cleanup as required
 by `AGENTS.md`. This work does not switch branches, commit, or push.
 
 ## Follow-up and Edge Cases
+
+- **Phase 7 changed files:** causal workspace/history/reference path in
+  `ar_controller.hpp/.cpp`; opt-in fixed-scratch learner methods in
+  `recursive_least_squares.hpp/.cpp` and `qrd_rls.hpp/.cpp`; independent model
+  workspace/rank/gain/prediction/reset management in `shadow_controller.hpp/.cpp`;
+  `tests/Makefile.offline`, `Makefile.benchmark`, `benchmark.cpp`, `README.md`;
+  new `prepare_phase6.py`, `phase6_replay.hpp`, `phase6_adapter.cpp`,
+  `ddspc_performance_test.cpp`, `results/README.md`, `results/phase7-before.csv`,
+  `results/phase7-after.csv`; this plan below its protected heading. Original
+  `loPredCtrl`, native Makefiles, `loPredCtrlAcc.hpp`, production configuration,
+  library transports, Phase 6 Givens kernels and separate worktrees are untouched.
+- **Phase 7 remaining bounds:** generic classical forgetting-RLS temporary,
+  unchanged builder allocations, cubic rank validation, output-copy convenience
+  APIs, arbitrary fault/exception construction, app/INDI/Legacy lock contention,
+  platform scheduling, physical timing and native Linux compiler/link evidence.
+  Zero measured allocation requests do not bound OS/libc/peak heap or deadlines.
+- **Phase 7 next priorities:** Linux compile/strict and fast-profile qualification;
+  approve and offline-test common bounded fanout/immutable snapshot ownership;
+  measure sustained target throughput and age/overflow behavior; preallocate
+  causal-builder outputs; resolve physical applied-input and sensor timing evidence.
+  Any model cadence, rank method or floating-point reassociation change needs
+  explicit numerical/readiness validation. Do not weaken gates to report 2-kHz
+  readiness. No instrument integration is authorized; stop after Phase 7.
 
 - **Phase 6 changed files:** `apps/loPredCtrlAcc/qrd_rls.hpp/.cpp` only in the
   operational numerical implementation; `tests/legacy_replay.hpp`,

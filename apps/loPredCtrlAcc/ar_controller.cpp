@@ -12,6 +12,45 @@
 namespace DDSPC
 {
 
+CausalWorkspace::CausalWorkspace( int outputs, int features, int stateFeatures )
+{
+    if( outputs < 1 || stateFeatures < 1 || features != outputs + stateFeatures )
+        throw std::invalid_argument( "Invalid causal workspace dimensions" );
+    m_phi    = Matrix::Zero( features, 1 );
+    m_target = Matrix::Zero( outputs, 1 );
+    m_state  = Matrix::Zero( stateFeatures, 1 );
+    m_theta  = Matrix::Zero( outputs, features );
+    m_c = m_hessian = Matrix::Zero( outputs, outputs );
+    m_known = m_rhs = m_gain = Matrix::Zero( outputs, stateFeatures );
+    m_hessian.setIdentity();
+    m_solver.compute( m_hessian );
+    m_hessian.setZero();
+    m_normalization    = Matrix::Zero( 1, 1 );
+    m_weightUpdate     = Matrix::Zero( outputs, features );
+    m_covarianceUpdate = Matrix::Zero( features, features );
+}
+
+const Matrix &CausalWorkspace::regressor() const
+{
+    return m_phi;
+}
+const Matrix &CausalWorkspace::target() const
+{
+    return m_target;
+}
+const Matrix &CausalWorkspace::theta() const
+{
+    return m_theta;
+}
+const Matrix &CausalWorkspace::state() const
+{
+    return m_state;
+}
+const Matrix &CausalWorkspace::gain() const
+{
+    return m_gain;
+}
+
 Matrix reference_controller( const Matrix &A, const Matrix &B, const Matrix &D, const Matrix &C, realT lambda )
 {
     if( C.rows() <= 0 || C.cols() <= 0 || A.rows() != C.rows() || B.rows() != C.rows() || D.rows() != C.rows() ||
@@ -165,6 +204,8 @@ void PredictiveController::reset()
 
 void PredictiveController::reset_buffers()
 {
+    if( m_historyMode == HistoryMode::Causal )
+        ++m_historyEpoch;
     m_lastTrainingHead = 0;
     m_measurementHead  = 0;
     m_measurementBuffer.resize( m_bufferSize, m_numModes );
@@ -392,6 +433,36 @@ bool PredictiveController::get_training_example( Matrix &regressor, Matrix &targ
     {
         return false;
     }
+    if( m_historyMode == HistoryMode::Causal )
+    {
+        regressor.resize( m_numFeatures, 1 );
+        target.resize( m_numPredictors, 1 );
+        int offset = 0;
+        for( int j = 0; j < m_numFuture + m_numHistory - 1; ++j )
+        {
+            regressor.middleRows( offset, m_numModes ) =
+                m_commandBuffer.row( ( m_commandHead - j - 2 ) & ( m_bufferSize - 1 ) ).transpose();
+            offset += m_numModes;
+        }
+        if( m_numAccelFeatures )
+            for( int j = 0; j < m_numAccelHistory; ++j )
+            {
+                regressor.middleRows( offset, m_numAccelChannels ) =
+                    m_accelBuffer.row( ( m_accelHead - m_numFuture - j - 1 ) & ( m_bufferSize - 1 ) ).transpose();
+                offset += m_numAccelChannels;
+            }
+        for( int j = 0; j < m_numHistory; ++j )
+        {
+            regressor.middleRows( offset, m_numModes ) =
+                m_measurementBuffer.row( ( m_measurementHead - m_numFuture - j - 1 ) & ( m_bufferSize - 1 ) )
+                    .transpose();
+            offset += m_numModes;
+        }
+        for( int j = 0; j < m_numFuture; ++j )
+            target.middleRows( j * m_numModes, m_numModes ) =
+                m_measurementBuffer.row( ( m_measurementHead - j - 1 ) & ( m_bufferSize - 1 ) ).transpose();
+        return true;
+    }
     Matrix future_cmd       = get_command_future( 1 );
     Matrix past_cmd         = get_command_past();
     Matrix past_accel       = get_accelerometer_past( m_historyMode == HistoryMode::Causal ? m_numFuture : 0 );
@@ -422,6 +493,115 @@ Matrix PredictiveController::get_prediction_state()
     }
     state.bottomRows( m_numAccelFeatures ) = get_accelerometer_past();
     return state;
+}
+
+void PredictiveController::get_prediction_state( Matrix &state ) const
+{
+    const int accelHistory = m_numAccelFeatures ? m_numAccelHistory : 0;
+    if( m_historyMode != HistoryMode::Causal || state.rows() != m_numStateFeatures || state.cols() != 1 ||
+        m_measurementHead < static_cast<std::uint64_t>( std::max( m_numHistory, accelHistory ) ) )
+        throw std::logic_error( "Invalid or incomplete fixed causal state" );
+    int offset = 0;
+    for( int j = 0; j < m_numHistory; ++j )
+    {
+        state.middleRows( offset, m_numModes ) =
+            m_measurementBuffer.row( ( m_measurementHead - j - 1 ) & ( m_bufferSize - 1 ) ).transpose();
+        offset += m_numModes;
+    }
+    for( int j = 0; j < m_numHistory - 1; ++j )
+    {
+        state.middleRows( offset, m_numModes ) =
+            m_commandBuffer.row( ( m_commandHead - j - 2 ) & ( m_bufferSize - 1 ) ).transpose();
+        offset += m_numModes;
+    }
+    if( m_numAccelFeatures )
+        for( int j = 0; j < m_numAccelHistory; ++j )
+        {
+            state.middleRows( offset, m_numAccelChannels ) =
+                m_accelBuffer.row( ( m_accelHead - j - 1 ) & ( m_bufferSize - 1 ) ).transpose();
+            offset += m_numAccelChannels;
+        }
+}
+
+std::unique_ptr<CausalWorkspace> PredictiveController::make_workspace() const
+{
+    if( m_historyMode != HistoryMode::Causal )
+        throw std::logic_error( "Fixed workspaces are causal only" );
+    auto result =
+        std::unique_ptr<CausalWorkspace>( new CausalWorkspace( m_numPredictors, m_numFeatures, m_numStateFeatures ) );
+    m_rls->xtP.resize( 1, m_numFeatures );
+    result->m_owner = this;
+    return result;
+}
+
+bool PredictiveController::prepare_training( CausalWorkspace &workspace )
+{
+    if( m_historyMode != HistoryMode::Causal || workspace.m_owner != this )
+        throw std::invalid_argument( "Causal workspace owner mismatch" );
+    workspace.m_trainingValid = get_training_example( workspace.m_phi, workspace.m_target );
+    workspace.m_head          = m_measurementHead;
+    workspace.m_epoch         = m_historyEpoch;
+    return workspace.m_trainingValid;
+}
+
+bool PredictiveController::update_system( CausalWorkspace &workspace )
+{
+    if( m_historyMode != HistoryMode::Causal || workspace.m_owner != this || !workspace.m_trainingValid ||
+        workspace.m_head != m_measurementHead || workspace.m_epoch != m_historyEpoch )
+        throw std::invalid_argument( "Stale or incomplete causal training example" );
+    if( m_lastTrainingHead == m_measurementHead )
+        return false;
+    if( use_qrd )
+        m_qrdRls->update_preallocated( workspace.m_phi, workspace.m_target, workspace.m_weightUpdate );
+    else
+        m_rls->update_preallocated( workspace.m_phi,
+                                    workspace.m_target,
+                                    workspace.m_normalization,
+                                    workspace.m_weightUpdate,
+                                    workspace.m_covarianceUpdate );
+    m_lastTrainingHead = m_measurementHead;
+    return true;
+}
+
+const Matrix &PredictiveController::prediction_matrix_view() const
+{
+    return use_qrd ? m_qrdRls->prediction_matrix : m_rls->prediction_matrix;
+}
+
+const Matrix &PredictiveController::get_reference_controller( CausalWorkspace &workspace, realT lambda )
+{
+    if( m_historyMode != HistoryMode::Causal || workspace.m_owner != this || !std::isfinite( lambda ) || lambda <= 0 )
+        throw std::invalid_argument( "Invalid fixed causal reference solve" );
+    const Matrix &internal = prediction_matrix_view();
+    if( !internal.allFinite() )
+        throw std::runtime_error( "Nonfinite causal model" );
+    const int a = m_numHistory * m_numModes;
+    const int b = ( m_numHistory - 1 ) * m_numModes;
+    workspace.m_theta << internal.rightCols( a ), internal.middleCols( m_numCorrelations, b ),
+        internal.middleCols( m_numCorrelations + b, m_numAccelFeatures ), internal.leftCols( m_numCorrelations );
+    workspace.m_c                 = workspace.m_theta.rightCols( m_numCorrelations );
+    workspace.m_known             = workspace.m_theta.leftCols( m_numStateFeatures );
+    workspace.m_hessian.noalias() = workspace.m_c.transpose() * workspace.m_c;
+    workspace.m_hessian.diagonal().array() += lambda;
+    workspace.m_rhs.noalias() = -workspace.m_c.transpose() * workspace.m_known;
+    if( !workspace.m_hessian.allFinite() || !workspace.m_rhs.allFinite() )
+        throw std::runtime_error( "Causal reference products overflowed" );
+    workspace.m_solver.compute( workspace.m_hessian );
+    if( workspace.m_solver.info() != Eigen::Success || !workspace.m_solver.isPositive() ||
+        workspace.m_solver.vectorD().minCoeff() <= 0 )
+        throw std::runtime_error( "Causal reference factorization failed" );
+    workspace.m_gain = workspace.m_solver.solve( workspace.m_rhs );
+    if( workspace.m_solver.info() != Eigen::Success || !workspace.m_gain.allFinite() )
+        throw std::runtime_error( "Causal reference solve failed" );
+    prepare_prediction_state( workspace );
+    return workspace.m_gain;
+}
+
+void PredictiveController::prepare_prediction_state( CausalWorkspace &workspace ) const
+{
+    if( m_historyMode != HistoryMode::Causal || workspace.m_owner != this )
+        throw std::invalid_argument( "Causal prediction workspace owner mismatch" );
+    get_prediction_state( workspace.m_state );
 }
 
 Matrix PredictiveController::get_prediction_matrix()

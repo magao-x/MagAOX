@@ -6,6 +6,7 @@
 #define PCARC_HPP
 
 #include <cstdint>
+#include <memory>
 #include <Eigen/Dense>
 
 #include "utils.hpp"
@@ -20,6 +21,57 @@ enum class HistoryMode
 {
     Legacy, ///< Preserve app indexing, startup, scaled regularization, and added feedback, including known defects.
     Causal  ///< Require complete indexed offline records and use the separate reference controller.
+};
+
+class PredictiveController;
+
+/// Caller-owned fixed-shape storage for causal identification and the unchanged reference solve.
+/** Allocate through PredictiveController::make_workspace() before processing records. The controller must
+ * outlive this workspace. Access is serialized by the caller; this is not a concurrent coefficient snapshot.
+ */
+class CausalWorkspace
+{
+    friend class PredictiveController;
+
+    /// Controller identity; a prepared training example belongs to one owner and record head.
+    const PredictiveController *m_owner{ nullptr };
+    /// Record head of the prepared example.
+    std::uint64_t m_head{ 0 };
+    /// History-reset epoch disambiguates equal record heads from different segments.
+    std::uint64_t m_epoch{ 0 };
+    /// Prepared example is mature and has not been replaced by another record.
+    bool m_trainingValid{ false };
+    /// Internal feature column and future-WFS target.
+    Matrix m_phi, m_target;
+    /// Canonical state, prediction matrix and contiguous control blocks.
+    Matrix m_state, m_theta, m_c, m_known;
+    /// Regularized normal matrix, right-hand side and full newest-first reference gain.
+    Matrix m_hessian, m_rhs, m_gain;
+    /// Reusable factorization with the same LDLT solve as reference_controller().
+    Eigen::LDLT<Matrix> m_solver;
+    /// Scalar normalization and the two learner rank-one update workspaces.
+    Matrix m_normalization, m_weightUpdate, m_covarianceUpdate;
+
+    /// Allocate fixed-size numerical scratch; ordinary callers use make_workspace().
+    CausalWorkspace( int outputs /**< [in] F*m target rows. */,
+                     int features /**< [in] Full internal regressor rows. */,
+                     int stateFeatures /**< [in] Canonical state rows, features-outputs. */ );
+
+  public:
+    /// Inspect the prepared internal [u_f;u_p;a_p;y_p] regressor without copying.
+    const Matrix &regressor() const;
+
+    /// Inspect the prepared future-WFS target without copying.
+    const Matrix &target() const;
+
+    /// Inspect the most recently copied canonical [A B D C] coefficients.
+    const Matrix &theta() const;
+
+    /// Inspect the most recently constructed canonical state.
+    const Matrix &state() const;
+
+    /// Inspect the most recently solved full reference gain; validity is managed by the caller.
+    const Matrix &gain() const;
 };
 
 /// Return the full optimal gain mapping [y_p;u_p;a_p] to newest-first future commands.
@@ -173,6 +225,29 @@ class PredictiveController
     /// Calculate the full reference gain without changing the operational controller.
     Matrix get_reference_controller( realT lambda /**< [in] Positive literal command penalty. */ );
 
+    /// Allocate scratch only for the causal path, leaving Legacy storage and arithmetic unchanged.
+    std::unique_ptr<CausalWorkspace> make_workspace() const;
+
+    /// Prepare a matured example once in fixed storage, recording its owner and decision head.
+    bool prepare_training( CausalWorkspace &workspace /**< [in,out] Scratch created by this controller. */ );
+
+    /// Learn the prepared current example once, using fixed scratch and the same RLS equations.
+    bool update_system( CausalWorkspace &workspace /**< [in,out] Current, mature example from prepare_training(). */ );
+
+    /// Read selected coefficients without copying; caller must serialize mutations and preserve owner lifetime.
+    const Matrix &prediction_matrix_view() const;
+
+    /// Copy canonical coefficients and state into owned fixed buffers and solve the full reference law.
+    const Matrix &get_reference_controller( CausalWorkspace &workspace /**< [in,out] Fixed numerical scratch. */,
+                                            realT            lambda /**< [in] Positive literal command penalty. */ );
+
+    /// Fill a pre-sized canonical state without temporary history vectors; causal only.
+    void get_prediction_state( Matrix &state /**< [out] Already sized state-feature-by-one column. */ ) const;
+
+    /// Refresh only the current state when an unchanged model version can reuse its reference gain.
+    void
+    prepare_prediction_state( CausalWorkspace &workspace /**< [in,out] Scratch owned by this controller. */ ) const;
+
     /// Reset weights, legacy gains, and histories.
     void reset();
 
@@ -243,6 +318,10 @@ class PredictiveController
 
     /// Restore the legacy artifact format; Causal artifacts are unsupported and rejected.
     void load_state( const std::string &filename /**< [in] Legacy artifact basename. */ );
+
+  private:
+    /// Causal reset identity; appended after existing data to preserve their layout.
+    std::uint64_t m_historyEpoch{ 0 };
 };
 
 } // namespace DDSPC

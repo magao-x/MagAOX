@@ -113,6 +113,11 @@ class QRDRecursiveLeastSquares
     /// Update from matrix columns with one information factor shared by all outputs.
     void update( Matrix *x /**< [in] Regressor column. */, Matrix *y /**< [in] Target column. */ );
 
+    /// Update with the same rotations/solves using preallocated causal rank-one scratch.
+    void update_preallocated( Matrix &x /**< [in] Finite regressor; mutable type only for retained solve interfaces. */,
+                              const Matrix &y /**< [in] Finite target. */,
+                              Matrix       &weightUpdate /**< [in,out] Output-by-feature scratch. */ );
+
     /// Reset weights and restore the initial information factor.
     void reset();
 
