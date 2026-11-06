@@ -293,6 +293,30 @@ Review AGENTS.md.  Do not alter any text above the "Agent Findings and Plan" bel
 
 ## Task Summary
 
+**Phase 10 offline vibration suppression (2026-11-06): a causal closed-loop
+numerical study now compares no control, a labeled future-truth oracle, Legacy
+core, standard causal and accelerometer-assisted causal DDSPC.** Starting clean
+HEAD is committed Phase 9 `e80c92851303585e055b7ecaff285f908c5be981`, branch
+`parkertjohnson1/accel_ddspc`; host was verified as personal workstation
+`ASTR-LT-428.local`, never `exao*`. All new implementation is under offline tests;
+original `loPredCtrl`, application/production execution, Legacy defaults, control
+laws, rank checks and compiler flags are unchanged. No instrument, physical DM,
+stream, service, separate worktree, commit/push/merge or deployment occurs.
+
+The study reuses actual Phase 9 bounded workers/snapshots through deterministic
+virtual service and preserves actual synthetic applied-input histories for both
+causal models. It has 26 cases per learner (52/260 controller rows per compiler),
+including independent negative controls and faults. QR assistance improves the
+coherent broadband and mixed-frequency cases; unrelated sensors provide no
+meaningful gain. Conventional RLS failures and all invalid/held/unstable residuals
+remain in the results. Finite/rank readiness is demonstrably not a closed-loop
+stability certificate. Six scientific PNG/PDF comparisons, complete metrics,
+configuration and source/trace hashes are in `tests/results/phase10*`.
+
+Stop after Phase 10 validation. Results are simulated, not on-sky. Recovery after
+reset/long sensor gaps, estimator stability, calibration, physical provenance and
+native scheduling qualification remain blockers; the next phase needs approval.
+
 **Phase 9 offline throughput investigation (2026-11-06): the dominant GCC
 slowdown was the benchmark allocation probe, not a demonstrated production
 estimator deficit.** Starting clean HEAD is committed Phase 8
@@ -584,6 +608,24 @@ formula or a predetermined spectral line.
 
 ## Key Assumptions
 
+**Phase 10 synthetic coordinate/timing contract:** two modes are arbitrary
+synthetic tip/tilt, with explicitly defined SU/DU units, positive additive
+`G=[[1,.08],[-.05,.9]]`, DM response `x_(i+1)=.1*x_i+.9*u_i`, and y_i=d_i+G*x_i.
+Commands are absolute; nominal effect is one 500-us frame later. Extra command
+transport, gain changes, exposure-origin WFS delivery delay, sample timestamp
+jitter and publication delays are explicit experiment parameters, not callback-
+order timing inferences or instrument calibration. WFS is a point sample, not a
+validated finite exposure integral. The normalized acceleration follows present
+force and state before integrating the next position; only the oracle reads
+future disturbance truth.
+
+All controllers share exogenous realization, noise, timing and initial calibration
+inputs. Closed-loop histories differ because their commands differ. Standard
+still uses WFS plus actual applied-DM history; assistance adds sensor history.
+Legacy retains requested-command history, scaled cost and optional feedback
+(gain explicitly zero here), with application accumulation absent from the
+synthetic wrapper. Neither physical units nor optical-to-DM mapping is inferred.
+
 **Phase 9 measurement scope:** inclusive wall and thread CPU timers are opt-in
 (`training_profile.hpp`) and disappear in normal builds. The serial manual-service
 profile isolates compute from worker scheduling; the paced benchmark measures
@@ -770,6 +812,34 @@ independent learners and non-actuation protections remain unchanged.
     libraries/hardware. Preserve the original as the operational reference.
 
 ## Requirements
+
+### Phase 10 closed-loop numerical experiment
+
+- `tests/vibration.hpp/.cpp` provides a causal source/plant, timestamp/sample
+  validation, independent canonical state builder, bounded command limiter,
+  actual held-input recording and five separate trajectories. It reuses
+  `OfflineAsyncShadow::{submit_record,manual_step,predict,reset}` and the existing
+  Legacy calculation/identification/control APIs; no production route is added.
+- m=2, N=5, F=3, Ha=5: standard Theta is 6x24, assisted 6x34; A=6x10, B=6x8,
+  D=6x0/6x10, C=6x6. Canonical states are 18/28 rows and nearest actions are the
+  existing gain's bottom two rows. Literal lambda=.02, prior=.001, gamma=.9995,
+  rank threshold=1e-5. Both RLS methods retain their mathematics and guards.
+- `vibration_main.cpp` declares all scenarios and exports full source, residual,
+  request/applied command, validity, version/age/rank, coefficient norm and sample
+  timing/provenance traces. It uses virtual manual worker service, not measured
+  real-time threads. Public controls and production defaults are untouched.
+- `vibration_report.py` exports pooled RMS/variance, line-band PSD suppression,
+  origin-frozen conditional prediction errors, readiness/availability, command
+  amplitudes/latency, convergence and coherence/latency sweeps. All residuals are
+  scored, including invalid holds and poor behavior; only prediction-error counts
+  require valid forecasts. Future inputs are used solely in post-hoc diagnostics.
+- Invalid/stale predictions hold the prior request without new probes. Pending
+  earlier accepted commands may still arrive. Missing/stale accelerometer data
+  cannot be passed as a fabricated valid feature. Source/measurement/sample times
+  remain explicit; no instrument state or simulator pointing truth is consumed.
+- No gain, horizon, rank tolerance or penalty is retuned to conceal negative
+  cases. Learner-dependent closed-loop failures and recovery deadlock under
+  insufficient excitation are reported as limitations.
 
 ### Phase 9 profiling and bounded throughput experiment
 
@@ -2178,6 +2248,23 @@ a benchmark.
 
 ## Questions and Points of Clarification
 
+**Phase 10 decisions for a separately approved next phase:**
+
+1. Prioritize an offline study of conventional RLS closed-loop conditioning/
+   stability and a reviewed recovery/neutral fallback policy. Rank-ready finite
+   coefficients can amplify this plant; holding stale commands can preserve bias.
+2. Decide how reacquisition can obtain persistent excitation after reset or long
+   sensor gaps without treating invalid predictions as commands. This experiment
+   deliberately does not bypass readiness or probe while invalid.
+3. Before observation-only application integration, establish real WFS exposure,
+   mode/units/sign, applied setpoint identity, DM response versus requested input,
+   sensor transfer/availability and clock/latency mapping, plus queue/CPU/lock
+   ownership. Synthetic SU/DU and virtual timing are not calibration evidence.
+4. Preserve the separate GNU production fast QR failure and Linux qualification
+   gates. QR suppression in one synthetic plant does not authorize live actuation.
+5. Approve the next scope explicitly. Phase 10 contains no production integration,
+   shared-memory writes, live ingestion, instrument activity or correction route.
+
 **Phase 9 decisions before production integration:**
 
 1. Approve a separate Linux qualification/integration phase and identify an
@@ -2381,6 +2468,44 @@ recommendations are not assumptions about the deployed instrument.
    source review does not establish deployment performance.
 
 ## Tests
+
+### Phase 10 plant, causality, suppression and safety checks
+
+Final strict Clang **1,592,619 / 61** and GCC **1,592,311 / 61** pass;
+ASan/UBSan **1,595,100 / 61** and TSan **1,266,371 / 11** pass without reported
+findings. Clang Legacy fast **186,615 / 9** passes; GNU default fast retains its
+historical **1/9** finite-bit failure at QR record 31. Both compilers complete all
+52 simulation cases. Source/trace hashes and exact observations are preserved;
+threaded assertion counts vary with observed publications.
+
+Primary QR broadband RMS: standard **0.072507 SU**, assisted **0.047970 SU**
+(Clang); **0.072432 / 0.047838 SU** (GNU). Across three coherent seeds assistance
+reduces QR RMS by about **34–35%**. Clang broadband line suppression is
+**35.58 / 30.81 dB** at 28/56 Hz versus no control, an additional **8.59 / 4.79 dB**
+over standard. Mixed-frequency QR RMS is **0.04620 / 0.03642 SU** standard/assisted.
+An unrelated sensor gives **0.07262 SU**, essentially no gain over standard.
+Conventional assisted RLS can grow coefficient norm to **27,006** and RMS to
+**1.1405 SU** in the same broadband source; this failure is retained, not fixed
+or obscured by QR figures. It remains an offline conditioning/stability question.
+
+Four new default cases in `ddspc_vibration_test.cpp` cover independent acceleration
+integration, delayed/gain-changed perfect-oracle inversion, exact repeated-run
+identity, identical calibration across controllers, source-prefix invariance when
+future truth is changed, malformed/future/out-of-order timestamps, strict limits,
+zero gain, wrong sign, missing features, reset, actual queue overflow and stale/
+delayed snapshots. Both learner variants are exercised. A fixed coherent QR
+broadband positive control requires a learned D and lower actual WFS residual
+energy than standard. All Phase 7–9 committed-source and original Legacy exact
+comparisons remain unchanged. `vibration_report.py --self-test` checks Parseval,
+line integration, positive 20-dB suppression and independent/coherent controls.
+
+Full compiler/sanitizer counts and all 52-case outcomes are recorded in
+`apps/loPredCtrlAcc/tests/results/phase10.md`. The report includes both RLS and QR,
+three broadband seeds, all fault samples, six standalone plots and full trace
+hashes. Existing default-fast GNU QR failure is retained separately; it is not
+confused with strict conventional-RLS poor suppression. No numerical tolerance
+or readiness condition is weakened. Simulation timing is virtual; Phase 9
+wall-clock/CPU results remain the available throughput evidence.
 
 ### Phase 9 reproducible evidence and exact references
 
@@ -3313,6 +3438,16 @@ dedicated Makefile above rather than linking the application library through
 
 ## Implementation Plan
 
+The current **Phase 10 is an offline suppression study**, starting from committed
+Phases 1–9. Its exit artifacts are the deterministic simulation, unchanged-law
+regressions/safety tests, full two-learner experiment table and six scientific
+plots. It does not integrate the prototype into the application. The next work
+should resolve RLS stability and invalid-state recovery offline, then separately
+review verified observation-only source/timing and native scheduling. Request
+explicit approval before any next phase; no correction routing is authorized.
+
+The Phase 9 and earlier roadmaps below remain historical engineering context.
+
 Each stage has a reviewable exit condition. The user has committed Phases 1–8.
 The current **Phase 9 is offline throughput qualification only**: corrected
 benchmark instrumentation, compile-out phase profiles, exact committed-reference
@@ -3453,6 +3588,23 @@ then documentation-only changes and separate formatting-only cleanup as required
 by `AGENTS.md`. This work does not switch branches, commit, or push.
 
 ## Follow-up and Edge Cases
+
+- **Phase 10 files:** new `tests/vibration.hpp/.cpp`, `vibration_main.cpp`,
+  `vibration_report.py`, `ddspc_vibration_test.cpp`, `Makefile.vibration`; existing
+  offline Makefile source list and tests README; `tests/results/phase10*` metrics,
+  manifests, report and six PNG/PDF plots; this plan. No production source changes.
+- **Observed limits:** coherent QR benefit is conditional, not universal. RLS can
+  perform poorly despite rank/finite readiness. Invalid holds can prevent renewed
+  excitation and leave a non-neutral command. Independent overflow does not
+  manufacture observability or input authority; recovery needs a separate design.
+- **Interpretation:** nominal calibration is synthetic and Legacy costs/history
+  differ by design. The idealized oracle is not a constrained optimum. Delayed
+  nominal proposals are intentionally uncompensated, not a new delay-aware law.
+  No-control/oracle omit the small evaluation probe used with valid learned-model
+  proposals. All of these differences are disclosed in the Phase 10 evidence.
+- **Stop gate:** no live sensor/DM stream, instrument host or production worker
+  integration. Obtain approval for the next offline robustness or observation-only
+  phase after reviewing unresolved physical timing, numerical and scheduling gates.
 
 - **Phase 9 changed files:** compile-out profiling in `shadow_controller.cpp`,
   `recursive_least_squares.cpp`, `qrd_rls.cpp` and new `training_profile.hpp`;

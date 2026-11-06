@@ -15,7 +15,7 @@ CXXFLAGS += -std=c++20 -Wall -Wextra -fno-fast-math
 SOURCES := $(ROOT_DIR)/tests/testMain.cpp $(APP_DIR)/ar_controller.cpp \
            $(APP_DIR)/recursive_least_squares.cpp $(APP_DIR)/qrd_rls.cpp $(APP_DIR)/utils.cpp \
            $(APP_DIR)/shadow_controller.cpp $(APP_DIR)/causal_input.cpp \
-           $(TEST_DIR)/comparison.cpp \
+           $(TEST_DIR)/comparison.cpp $(TEST_DIR)/vibration.cpp \
            $(TEST_DIR)/phase6_adapter.cpp \
            $(TEST_DIR)/phase7_adapter.cpp $(TEST_DIR)/async_shadow.cpp \
            $(ROOT_DIR)/INDI/libcommon/IndiProperty.cpp $(ROOT_DIR)/INDI/libcommon/IndiElement.cpp \
