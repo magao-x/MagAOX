@@ -115,6 +115,73 @@ aligned C++ allocation, peak live heap, and OS/library allocation are not measur
 This proves hot-path allocation and is not an allocation-free certification.
 The probe is force-included only in the separate benchmark build.
 
+## Phase 10 closed-loop vibration study
+
+All commands below execute a numerical host-memory simulation. They do not link
+the application, INDI, ImageStreamIO or a device library. Full findings, synthetic
+units/timing, favorable and unfavorable results, plots and limitations are in
+[Phase 10 evidence](results/phase10.md). Legacy/production source is unchanged.
+
+```sh
+make -C apps/loPredCtrlAcc -f tests/Makefile.vibration -j2 \
+  BUILD_DIR=build/vibration-clang CXX=clang++
+apps/loPredCtrlAcc/build/vibration-clang/ddspc_vibration \
+  apps/loPredCtrlAcc/build/phase10-clang
+make -C apps/loPredCtrlAcc -f tests/Makefile.vibration -j2 \
+  BUILD_DIR=build/vibration-gcc CXX=g++
+apps/loPredCtrlAcc/build/vibration-gcc/ddspc_vibration \
+  apps/loPredCtrlAcc/build/phase10-gcc
+python apps/loPredCtrlAcc/tests/vibration_report.py --self-test
+python apps/loPredCtrlAcc/tests/vibration_report.py \
+  apps/loPredCtrlAcc/build/phase10-clang apps/loPredCtrlAcc/build/phase10-report
+```
+
+`python` needs NumPy, SciPy and Matplotlib (tested here using the existing
+`/opt/anaconda3/bin/python`, 2.3.5/1.16.3/3.10.6). It uses a writable temporary
+Matplotlib cache and exports six standalone PNG/PDF plots, metrics, exact declared
+configuration and source/raw-trace hashes. `--skip-plots` produces metrics and
+manifests only, useful for a second compiler. The runner's optional final argument
+selects a named scenario, or `quick` for a short two-case smoke run; quick output
+is not the full plot/report dataset. GNU on this Mac is named `g++-15`.
+
+The full matrix is 26 scenarios per learner, 52 total, each with five independent
+trajectories: no control, perfect future-truth oracle, Legacy core, standard
+causal and assisted causal. Each has 2,400 common calibration plus 8,000 control
+frames at virtual 2 kHz. Names without a suffix use conventional RLS; `_qr`
+variants use the existing corrected QR path. Pure 28/56 Hz, both peaks,
+broadband/noisy/weak-coherence inputs, delays/jitter, missing data, gain/sign and
+latency mismatch, clipping, zero gain, reset, queue saturation and publication
+delay are retained, including unstable outcomes. The new tests run both learners
+without changing any existing regression or readiness tolerance:
+
+```sh
+make -C apps/loPredCtrlAcc -f tests/Makefile.offline -j2 check
+apps/loPredCtrlAcc/build/offline/ddspc_offline_test '[vibration]'
+```
+
+Use the existing full strict GCC/Clang and sanitizer commands above/below;
+ThreadSanitizer filter `'[async],[phase9],[vibration]'` includes the new tests.
+All Phase 7–9 committed-source tests remain. The historical GNU default-fast QR
+failure remains separate and visible; production flags are not changed.
+
+The synthetic plant uses absolute held modal input after clipping/transport,
+with an additive positive DM-to-WFS matrix and one-frame response. Standard keeps
+actual applied-DM history; assistance adds normalized sensor history. Calibration
+and noise are identical across controllers, while closed-loop residual/command
+histories necessarily differ. Legacy retains its scaled cost and requested-command
+history; the simulator does not emulate unknown production accumulation/calibration.
+Only the explicitly labeled oracle reads future disturbance truth. Post-hoc
+prediction scores condition on actual future inputs after the run; these never
+enter controller features. Faults reuse actual Phase 9 bounded queues, generation,
+snapshot/readiness and evidence-age checks under virtual manual scheduling.
+
+Invalid/stale models hold the previous request without new feedback or probing.
+Recovery can fail for lack of excitation, and rank-ready finite models can still
+amplify disturbances. QR results show sensor benefit in the coherent plant;
+RLS failures are retained in the convergence plot and metrics. Neither virtual
+suppression nor Phase 9 Mac throughput establishes physical or real-time readiness.
+**Stop after offline Phase 10 validation; the next phase requires approval.**
+
 ## Phase 9 training profiles and sustained offline workers
 
 The Phase 9 investigation corrects a **benchmark-only allocation probe** that

@@ -1,0 +1,1574 @@
+{
+  "rls": {
+    "max_rms_difference": 1.2341571400856906,
+    "max_availability_difference": 1.0,
+    "rows": [
+      {
+        "scenario": "28hz",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "28hz",
+        "controller": 1,
+        "rms_difference": 1.0477636119832212e-11,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "28hz",
+        "controller": 2,
+        "rms_difference": 0.00014166499163623808,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "28hz",
+        "controller": 3,
+        "rms_difference": 0.03724666089915571,
+        "availability_difference": 0.0017142857142856682
+      },
+      {
+        "scenario": "28hz",
+        "controller": 4,
+        "rms_difference": 0.034376502084971464,
+        "availability_difference": 0.0004285714285714448
+      },
+      {
+        "scenario": "56hz",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "56hz",
+        "controller": 1,
+        "rms_difference": 1.5673731409981961e-10,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "56hz",
+        "controller": 2,
+        "rms_difference": 2.0508314024281216e-05,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "56hz",
+        "controller": 3,
+        "rms_difference": 7.435452720615937e-05,
+        "availability_difference": 0.0008571428571428896
+      },
+      {
+        "scenario": "56hz",
+        "controller": 4,
+        "rms_difference": 0.012716707355575584,
+        "availability_difference": 0.00014285714285711126
+      },
+      {
+        "scenario": "mixed",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "mixed",
+        "controller": 1,
+        "rms_difference": 8.36109063928614e-11,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "mixed",
+        "controller": 2,
+        "rms_difference": 2.4772294046765397e-06,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "mixed",
+        "controller": 3,
+        "rms_difference": 0.38248816551800086,
+        "availability_difference": 0.11785714285714288
+      },
+      {
+        "scenario": "mixed",
+        "controller": 4,
+        "rms_difference": 0.01865658054253984,
+        "availability_difference": 0.00014285714285711126
+      },
+      {
+        "scenario": "broadband",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "broadband",
+        "controller": 1,
+        "rms_difference": 1.6603281596805353e-10,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "broadband",
+        "controller": 2,
+        "rms_difference": 0.0006511825704221402,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "broadband",
+        "controller": 3,
+        "rms_difference": 7.629157555681665e-05,
+        "availability_difference": 0.0004285714285714448
+      },
+      {
+        "scenario": "broadband",
+        "controller": 4,
+        "rms_difference": 1.2341571400856906,
+        "availability_difference": 0.36585714285714277
+      },
+      {
+        "scenario": "accel_noise",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "accel_noise",
+        "controller": 1,
+        "rms_difference": 1.6603281596805353e-10,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "accel_noise",
+        "controller": 2,
+        "rms_difference": 0.0006511825704221402,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "accel_noise",
+        "controller": 3,
+        "rms_difference": 7.629157555681665e-05,
+        "availability_difference": 0.0004285714285714448
+      },
+      {
+        "scenario": "accel_noise",
+        "controller": 4,
+        "rms_difference": 0.11245950834641638,
+        "availability_difference": 0.00014285714285722229
+      },
+      {
+        "scenario": "coherence_0",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "coherence_0",
+        "controller": 1,
+        "rms_difference": 1.6603281596805353e-10,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "coherence_0",
+        "controller": 2,
+        "rms_difference": 0.0006511825704221402,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "coherence_0",
+        "controller": 3,
+        "rms_difference": 7.629157555681665e-05,
+        "availability_difference": 0.0004285714285714448
+      },
+      {
+        "scenario": "coherence_0",
+        "controller": 4,
+        "rms_difference": 0.12390921504167274,
+        "availability_difference": 0.10557142857142854
+      },
+      {
+        "scenario": "coherence_1",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "coherence_1",
+        "controller": 1,
+        "rms_difference": 1.6603281596805353e-10,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "coherence_1",
+        "controller": 2,
+        "rms_difference": 0.0006511825704221402,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "coherence_1",
+        "controller": 3,
+        "rms_difference": 7.629157555681665e-05,
+        "availability_difference": 0.0004285714285714448
+      },
+      {
+        "scenario": "coherence_1",
+        "controller": 4,
+        "rms_difference": 0.21655482609210408,
+        "availability_difference": 0.395
+      },
+      {
+        "scenario": "coherence_2",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "coherence_2",
+        "controller": 1,
+        "rms_difference": 1.6603281596805353e-10,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "coherence_2",
+        "controller": 2,
+        "rms_difference": 0.0006511825704221402,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "coherence_2",
+        "controller": 3,
+        "rms_difference": 7.629157555681665e-05,
+        "availability_difference": 0.0004285714285714448
+      },
+      {
+        "scenario": "coherence_2",
+        "controller": 4,
+        "rms_difference": 0.07575641602934735,
+        "availability_difference": 0.00014285714285711126
+      },
+      {
+        "scenario": "coherence_3",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "coherence_3",
+        "controller": 1,
+        "rms_difference": 1.6603281596805353e-10,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "coherence_3",
+        "controller": 2,
+        "rms_difference": 0.0006511825704221402,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "coherence_3",
+        "controller": 3,
+        "rms_difference": 7.629157555681665e-05,
+        "availability_difference": 0.0004285714285714448
+      },
+      {
+        "scenario": "coherence_3",
+        "controller": 4,
+        "rms_difference": 0.036957630519908635,
+        "availability_difference": 0.00014285714285722229
+      },
+      {
+        "scenario": "delay_jitter",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "delay_jitter",
+        "controller": 1,
+        "rms_difference": 1.6603281596805353e-10,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "delay_jitter",
+        "controller": 2,
+        "rms_difference": 0.018348930582192335,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "delay_jitter",
+        "controller": 3,
+        "rms_difference": 4.070948240841865e-05,
+        "availability_difference": 0.0010000000000000009
+      },
+      {
+        "scenario": "delay_jitter",
+        "controller": 4,
+        "rms_difference": 0.15518020141666644,
+        "availability_difference": 0.5045714285714287
+      },
+      {
+        "scenario": "missing",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "missing",
+        "controller": 1,
+        "rms_difference": 1.6603281596805353e-10,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "missing",
+        "controller": 2,
+        "rms_difference": 0.0006511825704221402,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "missing",
+        "controller": 3,
+        "rms_difference": 7.629157555681665e-05,
+        "availability_difference": 0.0004285714285714448
+      },
+      {
+        "scenario": "missing",
+        "controller": 4,
+        "rms_difference": 0.011478122681149006,
+        "availability_difference": 0.0010000000000000009
+      },
+      {
+        "scenario": "latency_1",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "latency_1",
+        "controller": 1,
+        "rms_difference": 1.6603281596805353e-10,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "latency_1",
+        "controller": 2,
+        "rms_difference": 0.5114457693999253,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "latency_1",
+        "controller": 3,
+        "rms_difference": 6.938129612037158e-05,
+        "availability_difference": 0.0004285714285714448
+      },
+      {
+        "scenario": "latency_1",
+        "controller": 4,
+        "rms_difference": 0.016006872710106146,
+        "availability_difference": 0.14142857142857135
+      },
+      {
+        "scenario": "latency_2",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "latency_2",
+        "controller": 1,
+        "rms_difference": 1.6603281596805353e-10,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "latency_2",
+        "controller": 2,
+        "rms_difference": 0.011826574866862782,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "latency_2",
+        "controller": 3,
+        "rms_difference": 0.00021030969970306512,
+        "availability_difference": 0.0014285714285714457
+      },
+      {
+        "scenario": "latency_2",
+        "controller": 4,
+        "rms_difference": 0.3845888121191998,
+        "availability_difference": 0.052999999999999936
+      },
+      {
+        "scenario": "latency_3",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "latency_3",
+        "controller": 1,
+        "rms_difference": 1.6603281596805353e-10,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "latency_3",
+        "controller": 2,
+        "rms_difference": 0.06217852810765023,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "latency_3",
+        "controller": 3,
+        "rms_difference": 0.0001666568443455252,
+        "availability_difference": 0.0008571428571428896
+      },
+      {
+        "scenario": "latency_3",
+        "controller": 4,
+        "rms_difference": 0.0418257927232748,
+        "availability_difference": 0.0007142857142857784
+      },
+      {
+        "scenario": "gain_low",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "gain_low",
+        "controller": 1,
+        "rms_difference": 2.5894543453919283e-11,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "gain_low",
+        "controller": 2,
+        "rms_difference": 0.0010249605719411803,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "gain_low",
+        "controller": 3,
+        "rms_difference": 0.01052356482819615,
+        "availability_difference": 0.0007142857142856673
+      },
+      {
+        "scenario": "gain_low",
+        "controller": 4,
+        "rms_difference": 0.27226931973436874,
+        "availability_difference": 0.18928571428571428
+      },
+      {
+        "scenario": "gain_high",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "gain_high",
+        "controller": 1,
+        "rms_difference": 3.818467070315634e-11,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "gain_high",
+        "controller": 2,
+        "rms_difference": 1.543707590000165e-05,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "gain_high",
+        "controller": 3,
+        "rms_difference": 9.026013229347651e-05,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "gain_high",
+        "controller": 4,
+        "rms_difference": 0.9905612884546635,
+        "availability_difference": 0.8748571428571429
+      },
+      {
+        "scenario": "wrong_sign",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "wrong_sign",
+        "controller": 1,
+        "rms_difference": 1.6603281596805353e-10,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "wrong_sign",
+        "controller": 2,
+        "rms_difference": 0.03951671247657418,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "wrong_sign",
+        "controller": 3,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "wrong_sign",
+        "controller": 4,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "zero_gain",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "zero_gain",
+        "controller": 1,
+        "rms_difference": 1.6603281596805353e-10,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "zero_gain",
+        "controller": 2,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "zero_gain",
+        "controller": 3,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "zero_gain",
+        "controller": 4,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "command_limit",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "command_limit",
+        "controller": 1,
+        "rms_difference": 1.2955411188286803e-09,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "command_limit",
+        "controller": 2,
+        "rms_difference": 0.09132790316356576,
+        "availability_difference": 1.0
+      },
+      {
+        "scenario": "command_limit",
+        "controller": 3,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "command_limit",
+        "controller": 4,
+        "rms_difference": 0.13689317853108518,
+        "availability_difference": 0.998
+      },
+      {
+        "scenario": "publication_1",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "publication_1",
+        "controller": 1,
+        "rms_difference": 1.6603281596805353e-10,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "publication_1",
+        "controller": 2,
+        "rms_difference": 0.0006511825704221402,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "publication_1",
+        "controller": 3,
+        "rms_difference": 7.629157555681665e-05,
+        "availability_difference": 0.0004285714285714448
+      },
+      {
+        "scenario": "publication_1",
+        "controller": 4,
+        "rms_difference": 1.2341571400856906,
+        "availability_difference": 0.36585714285714277
+      },
+      {
+        "scenario": "publication_3",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "publication_3",
+        "controller": 1,
+        "rms_difference": 1.6603281596805353e-10,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "publication_3",
+        "controller": 2,
+        "rms_difference": 0.0006511825704221402,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "publication_3",
+        "controller": 3,
+        "rms_difference": 3.334394547283015e-05,
+        "availability_difference": 0.0004285714285714448
+      },
+      {
+        "scenario": "publication_3",
+        "controller": 4,
+        "rms_difference": 0.145770992220694,
+        "availability_difference": 0.0012857142857143344
+      },
+      {
+        "scenario": "publication_6",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "publication_6",
+        "controller": 1,
+        "rms_difference": 1.6603281596805353e-10,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "publication_6",
+        "controller": 2,
+        "rms_difference": 0.0006511825704221402,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "publication_6",
+        "controller": 3,
+        "rms_difference": 4.1056920085935644e-09,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "publication_6",
+        "controller": 4,
+        "rms_difference": 4.1056920085935644e-09,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "reset",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "reset",
+        "controller": 1,
+        "rms_difference": 1.6603281596805353e-10,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "reset",
+        "controller": 2,
+        "rms_difference": 0.0001461212122887412,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "reset",
+        "controller": 3,
+        "rms_difference": 0.00011929143329458824,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "reset",
+        "controller": 4,
+        "rms_difference": 0.10468326539924044,
+        "availability_difference": 0.0010000000000000009
+      },
+      {
+        "scenario": "overflow",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "overflow",
+        "controller": 1,
+        "rms_difference": 1.6603281596805353e-10,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "overflow",
+        "controller": 2,
+        "rms_difference": 0.0006511825704221402,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "overflow",
+        "controller": 3,
+        "rms_difference": 4.5648175359236376e-05,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "overflow",
+        "controller": 4,
+        "rms_difference": 0.17673415743123244,
+        "availability_difference": 0.0010000000000000009
+      },
+      {
+        "scenario": "broadband_seed200",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "broadband_seed200",
+        "controller": 1,
+        "rms_difference": 4.4465684606587175e-11,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "broadband_seed200",
+        "controller": 2,
+        "rms_difference": 6.0146697996532605e-05,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "broadband_seed200",
+        "controller": 3,
+        "rms_difference": 0.03907359065488274,
+        "availability_difference": 0.001571428571428557
+      },
+      {
+        "scenario": "broadband_seed200",
+        "controller": 4,
+        "rms_difference": 0.05118708528618021,
+        "availability_difference": 0.0010000000000000009
+      },
+      {
+        "scenario": "broadband_seed300",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "broadband_seed300",
+        "controller": 1,
+        "rms_difference": 3.1294527386149795e-10,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "broadband_seed300",
+        "controller": 2,
+        "rms_difference": 2.8190254527313274e-05,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "broadband_seed300",
+        "controller": 3,
+        "rms_difference": 0.02589284167570119,
+        "availability_difference": 0.0014285714285714457
+      },
+      {
+        "scenario": "broadband_seed300",
+        "controller": 4,
+        "rms_difference": 0.08417649753715906,
+        "availability_difference": 0.0007142857142856673
+      }
+    ]
+  },
+  "qr": {
+    "max_rms_difference": 0.5269939947191786,
+    "max_availability_difference": 0.0024285714285713356,
+    "rows": [
+      {
+        "scenario": "broadband_qr",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "broadband_qr",
+        "controller": 1,
+        "rms_difference": 1.6603281596805353e-10,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "broadband_qr",
+        "controller": 2,
+        "rms_difference": 0.14995492517494394,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "broadband_qr",
+        "controller": 3,
+        "rms_difference": 7.51485252889067e-05,
+        "availability_difference": 0.0010000000000000009
+      },
+      {
+        "scenario": "broadband_qr",
+        "controller": 4,
+        "rms_difference": 0.0001315115966263533,
+        "availability_difference": 0.0010000000000000009
+      },
+      {
+        "scenario": "28hz_qr",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "28hz_qr",
+        "controller": 1,
+        "rms_difference": 1.0477636119832212e-11,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "28hz_qr",
+        "controller": 2,
+        "rms_difference": 0.02058896433364643,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "28hz_qr",
+        "controller": 3,
+        "rms_difference": 1.0691897108727755e-05,
+        "availability_difference": 0.00028571428571433355
+      },
+      {
+        "scenario": "28hz_qr",
+        "controller": 4,
+        "rms_difference": 2.6907446553856018e-05,
+        "availability_difference": 0.00014285714285722229
+      },
+      {
+        "scenario": "56hz_qr",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "56hz_qr",
+        "controller": 1,
+        "rms_difference": 1.5673731409981961e-10,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "56hz_qr",
+        "controller": 2,
+        "rms_difference": 0.0004052600560088826,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "56hz_qr",
+        "controller": 3,
+        "rms_difference": 1.7247728789242245e-05,
+        "availability_difference": 0.0008571428571427786
+      },
+      {
+        "scenario": "56hz_qr",
+        "controller": 4,
+        "rms_difference": 2.312879655955169e-05,
+        "availability_difference": 0.00014285714285711126
+      },
+      {
+        "scenario": "mixed_qr",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "mixed_qr",
+        "controller": 1,
+        "rms_difference": 8.36109063928614e-11,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "mixed_qr",
+        "controller": 2,
+        "rms_difference": 0.13254160406758098,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "mixed_qr",
+        "controller": 3,
+        "rms_difference": 0.00019613015194965,
+        "availability_difference": 0.0010000000000000009
+      },
+      {
+        "scenario": "mixed_qr",
+        "controller": 4,
+        "rms_difference": 1.1420169023133864e-05,
+        "availability_difference": 0.0004285714285714448
+      },
+      {
+        "scenario": "accel_noise_qr",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "accel_noise_qr",
+        "controller": 1,
+        "rms_difference": 1.6603281596805353e-10,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "accel_noise_qr",
+        "controller": 2,
+        "rms_difference": 0.14995492517494394,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "accel_noise_qr",
+        "controller": 3,
+        "rms_difference": 7.51485252889067e-05,
+        "availability_difference": 0.0010000000000000009
+      },
+      {
+        "scenario": "accel_noise_qr",
+        "controller": 4,
+        "rms_difference": 2.312338100718403e-07,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "coherence_0_qr",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "coherence_0_qr",
+        "controller": 1,
+        "rms_difference": 1.6603281596805353e-10,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "coherence_0_qr",
+        "controller": 2,
+        "rms_difference": 0.14995492517494394,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "coherence_0_qr",
+        "controller": 3,
+        "rms_difference": 7.51485252889067e-05,
+        "availability_difference": 0.0010000000000000009
+      },
+      {
+        "scenario": "coherence_0_qr",
+        "controller": 4,
+        "rms_difference": 7.261982174026904e-05,
+        "availability_difference": 0.0011428571428571122
+      },
+      {
+        "scenario": "coherence_1_qr",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "coherence_1_qr",
+        "controller": 1,
+        "rms_difference": 1.6603281596805353e-10,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "coherence_1_qr",
+        "controller": 2,
+        "rms_difference": 0.14995492517494394,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "coherence_1_qr",
+        "controller": 3,
+        "rms_difference": 7.51485252889067e-05,
+        "availability_difference": 0.0010000000000000009
+      },
+      {
+        "scenario": "coherence_1_qr",
+        "controller": 4,
+        "rms_difference": 2.8669194374553175e-05,
+        "availability_difference": 0.00014285714285722229
+      },
+      {
+        "scenario": "coherence_2_qr",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "coherence_2_qr",
+        "controller": 1,
+        "rms_difference": 1.6603281596805353e-10,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "coherence_2_qr",
+        "controller": 2,
+        "rms_difference": 0.14995492517494394,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "coherence_2_qr",
+        "controller": 3,
+        "rms_difference": 7.51485252889067e-05,
+        "availability_difference": 0.0010000000000000009
+      },
+      {
+        "scenario": "coherence_2_qr",
+        "controller": 4,
+        "rms_difference": 4.52782012298758e-06,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "coherence_3_qr",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "coherence_3_qr",
+        "controller": 1,
+        "rms_difference": 1.6603281596805353e-10,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "coherence_3_qr",
+        "controller": 2,
+        "rms_difference": 0.14995492517494394,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "coherence_3_qr",
+        "controller": 3,
+        "rms_difference": 7.51485252889067e-05,
+        "availability_difference": 0.0010000000000000009
+      },
+      {
+        "scenario": "coherence_3_qr",
+        "controller": 4,
+        "rms_difference": 1.36916675802512e-07,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "delay_jitter_qr",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "delay_jitter_qr",
+        "controller": 1,
+        "rms_difference": 1.6603281596805353e-10,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "delay_jitter_qr",
+        "controller": 2,
+        "rms_difference": 0.5038282558909954,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "delay_jitter_qr",
+        "controller": 3,
+        "rms_difference": 4.046587796863177e-05,
+        "availability_difference": 0.001571428571428557
+      },
+      {
+        "scenario": "delay_jitter_qr",
+        "controller": 4,
+        "rms_difference": 7.655529546229944e-05,
+        "availability_difference": 0.0005714285714285561
+      },
+      {
+        "scenario": "missing_qr",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "missing_qr",
+        "controller": 1,
+        "rms_difference": 1.6603281596805353e-10,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "missing_qr",
+        "controller": 2,
+        "rms_difference": 0.14995492517494394,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "missing_qr",
+        "controller": 3,
+        "rms_difference": 7.51485252889067e-05,
+        "availability_difference": 0.0010000000000000009
+      },
+      {
+        "scenario": "missing_qr",
+        "controller": 4,
+        "rms_difference": 1.2690946060711639e-07,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "latency_1_qr",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "latency_1_qr",
+        "controller": 1,
+        "rms_difference": 1.6603281596805353e-10,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "latency_1_qr",
+        "controller": 2,
+        "rms_difference": 0.4430288056633168,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "latency_1_qr",
+        "controller": 3,
+        "rms_difference": 8.936445152252226e-05,
+        "availability_difference": 0.00014285714285711126
+      },
+      {
+        "scenario": "latency_1_qr",
+        "controller": 4,
+        "rms_difference": 0.00010740270991010936,
+        "availability_difference": 0.00014285714285711126
+      },
+      {
+        "scenario": "latency_2_qr",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "latency_2_qr",
+        "controller": 1,
+        "rms_difference": 1.6603281596805353e-10,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "latency_2_qr",
+        "controller": 2,
+        "rms_difference": 0.25082176935910183,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "latency_2_qr",
+        "controller": 3,
+        "rms_difference": 0.0002505340459321992,
+        "availability_difference": 0.0007142857142857784
+      },
+      {
+        "scenario": "latency_2_qr",
+        "controller": 4,
+        "rms_difference": 6.404320188108104e-05,
+        "availability_difference": 0.0004285714285714448
+      },
+      {
+        "scenario": "latency_3_qr",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "latency_3_qr",
+        "controller": 1,
+        "rms_difference": 1.6603281596805353e-10,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "latency_3_qr",
+        "controller": 2,
+        "rms_difference": 0.043236626250013344,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "latency_3_qr",
+        "controller": 3,
+        "rms_difference": 0.00012399450396588518,
+        "availability_difference": 0.0010000000000000009
+      },
+      {
+        "scenario": "latency_3_qr",
+        "controller": 4,
+        "rms_difference": 3.237257907787172e-05,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "gain_low_qr",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "gain_low_qr",
+        "controller": 1,
+        "rms_difference": 2.5894543453919283e-11,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "gain_low_qr",
+        "controller": 2,
+        "rms_difference": 0.2893878996845303,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "gain_low_qr",
+        "controller": 3,
+        "rms_difference": 0.0006970367226921542,
+        "availability_difference": 0.00028571428571433355
+      },
+      {
+        "scenario": "gain_low_qr",
+        "controller": 4,
+        "rms_difference": 0.00010179075679472155,
+        "availability_difference": 0.0024285714285713356
+      },
+      {
+        "scenario": "gain_high_qr",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "gain_high_qr",
+        "controller": 1,
+        "rms_difference": 3.818467070315634e-11,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "gain_high_qr",
+        "controller": 2,
+        "rms_difference": 0.5269939947191786,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "gain_high_qr",
+        "controller": 3,
+        "rms_difference": 1.7442072297882416e-05,
+        "availability_difference": 0.0004285714285714448
+      },
+      {
+        "scenario": "gain_high_qr",
+        "controller": 4,
+        "rms_difference": 2.3197045763423407e-08,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "wrong_sign_qr",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "wrong_sign_qr",
+        "controller": 1,
+        "rms_difference": 1.6603281596805353e-10,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "wrong_sign_qr",
+        "controller": 2,
+        "rms_difference": 0.05602820090981442,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "wrong_sign_qr",
+        "controller": 3,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "wrong_sign_qr",
+        "controller": 4,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "zero_gain_qr",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "zero_gain_qr",
+        "controller": 1,
+        "rms_difference": 1.6603281596805353e-10,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "zero_gain_qr",
+        "controller": 2,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "zero_gain_qr",
+        "controller": 3,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "zero_gain_qr",
+        "controller": 4,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "command_limit_qr",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "command_limit_qr",
+        "controller": 1,
+        "rms_difference": 1.2955411188286803e-09,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "command_limit_qr",
+        "controller": 2,
+        "rms_difference": 0.06830283175958729,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "command_limit_qr",
+        "controller": 3,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "command_limit_qr",
+        "controller": 4,
+        "rms_difference": 7.331457663184437e-11,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "publication_1_qr",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "publication_1_qr",
+        "controller": 1,
+        "rms_difference": 1.6603281596805353e-10,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "publication_1_qr",
+        "controller": 2,
+        "rms_difference": 0.14995492517494394,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "publication_1_qr",
+        "controller": 3,
+        "rms_difference": 7.51485252889067e-05,
+        "availability_difference": 0.0010000000000000009
+      },
+      {
+        "scenario": "publication_1_qr",
+        "controller": 4,
+        "rms_difference": 0.0001315115966263533,
+        "availability_difference": 0.0010000000000000009
+      },
+      {
+        "scenario": "publication_3_qr",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "publication_3_qr",
+        "controller": 1,
+        "rms_difference": 1.6603281596805353e-10,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "publication_3_qr",
+        "controller": 2,
+        "rms_difference": 0.14995492517494394,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "publication_3_qr",
+        "controller": 3,
+        "rms_difference": 5.058408148501947e-05,
+        "availability_difference": 0.0004285714285714448
+      },
+      {
+        "scenario": "publication_3_qr",
+        "controller": 4,
+        "rms_difference": 5.7336905008587014e-08,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "publication_6_qr",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "publication_6_qr",
+        "controller": 1,
+        "rms_difference": 1.6603281596805353e-10,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "publication_6_qr",
+        "controller": 2,
+        "rms_difference": 0.14995492517494394,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "publication_6_qr",
+        "controller": 3,
+        "rms_difference": 4.1056920085935644e-09,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "publication_6_qr",
+        "controller": 4,
+        "rms_difference": 4.1056920085935644e-09,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "reset_qr",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "reset_qr",
+        "controller": 1,
+        "rms_difference": 1.6603281596805353e-10,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "reset_qr",
+        "controller": 2,
+        "rms_difference": 0.05767005259967528,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "reset_qr",
+        "controller": 3,
+        "rms_difference": 2.932009593131779e-05,
+        "availability_difference": 0.0004285714285713893
+      },
+      {
+        "scenario": "reset_qr",
+        "controller": 4,
+        "rms_difference": 2.01399123711532e-07,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "overflow_qr",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "overflow_qr",
+        "controller": 1,
+        "rms_difference": 1.6603281596805353e-10,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "overflow_qr",
+        "controller": 2,
+        "rms_difference": 0.14995492517494394,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "overflow_qr",
+        "controller": 3,
+        "rms_difference": 0.00015906873124149623,
+        "availability_difference": 0.0004285714285714448
+      },
+      {
+        "scenario": "overflow_qr",
+        "controller": 4,
+        "rms_difference": 1.312236902473174e-07,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "broadband_seed200_qr",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "broadband_seed200_qr",
+        "controller": 1,
+        "rms_difference": 4.4465684606587175e-11,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "broadband_seed200_qr",
+        "controller": 2,
+        "rms_difference": 0.2481653351244369,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "broadband_seed200_qr",
+        "controller": 3,
+        "rms_difference": 8.621477640649577e-06,
+        "availability_difference": 0.00028571428571433355
+      },
+      {
+        "scenario": "broadband_seed200_qr",
+        "controller": 4,
+        "rms_difference": 3.088080791080472e-08,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "broadband_seed300_qr",
+        "controller": 0,
+        "rms_difference": 0.0,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "broadband_seed300_qr",
+        "controller": 1,
+        "rms_difference": 3.1294527386149795e-10,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "broadband_seed300_qr",
+        "controller": 2,
+        "rms_difference": 0.08915922613380836,
+        "availability_difference": 0.0
+      },
+      {
+        "scenario": "broadband_seed300_qr",
+        "controller": 3,
+        "rms_difference": 7.21020227199276e-05,
+        "availability_difference": 0.0005714285714285561
+      },
+      {
+        "scenario": "broadband_seed300_qr",
+        "controller": 4,
+        "rms_difference": 0.00011004670621625467,
+        "availability_difference": 0.00014285714285711126
+      }
+    ]
+  }
+}
