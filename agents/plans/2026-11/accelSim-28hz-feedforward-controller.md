@@ -3482,3 +3482,172 @@ Changed files: new offline `accelFFCtrlShadow.hpp` and `INTEGRATION.md`; new app
 `validate_linux.sh` (test source list); root `tests/Makefile.one` and `tests/tests.list`;
 both app READMEs and this plan. Existing runtime helpers/numerics, calibration
 inputs, production configs and separate DDSPC worktree remain unchanged.
+
+## Phase 12: recorded-telemetry calibration and timing qualification (2026-11-06)
+
+### Scope, inventory and assumptions
+
+Starting revision `89bd483e` on `parkertjohnson1/accelSim` was clean. This phase
+adds workstation-only file analysis/replay; no instrument, application, stream,
+configuration, deployment or git publication operation was performed. Runtime
+controller/simulator sources and calibration inputs remain unchanged. The complete
+report is [RECORDED_TELEMETRY.md](../../../apps/accelFFCtrl/offline/RECORDED_TELEMETRY.md).
+
+The local repository/ignored scratch inventory contains nine FITS, twelve CSV and
+two NPZ calibration/derived-operator files, but no XRIF, binary telemetry/log,
+HDF5 or simultaneous measured ADC/WFS sequence. Prior `/tmp/accelFFCtrl-*` outputs
+are synthetic. Earlier aggregate live 4/8-kHz drop/reset summaries cannot identify
+WFS coherence, optical registration or physical phase. No remote host was searched.
+This is not a claim about recordings elsewhere on the user's workstation.
+
+Source review establishes the five-word XRIF timing record in `streamWriter`:
+counter, acquisition sec/nsec, publication sec/nsec. The writer can replace absent
+acquisition time with its own realtime clock and absent write time with acquisition
+time. Consequently XRIF acquisition trust needs producer/recorder provenance.
+`utils/xrif2fits` retains those integer fields in per-frame metadata exports; cube
+images or filenames alone are insufficient. There is no locally installed Python
+XRIF decoder or actual WFS image sequence here. Raw WFS images need the real
+reference/reconstructor/indices/units before they can be treated as TT.
+
+WFS frame-center, publication, `camwfs_sync` receipt, simulator phase reference
+and controller query clocks are not interchangeable. The existing
+`wooferTweeterRecon` write-time-minus-period and DM-acquisition-plus-offset
+conventions are source facts, not measured offsets to copy. The new manifest
+requires explicit ADC and WFS units/axes/AO state, trusted acquisition/exposure
+center, independent clock offset/drift/anchor/uncertainty and common-domain identity.
+Unknown clocks block phase inference; signals are never shifted to maximize fit.
+
+### New isolated architecture
+
+- `tests/qualify_telemetry.py` consumes exact-integer numeric ADC/WFS CSVs plus a
+  provenance manifest. It rejects malformed/nonfinite/invalid time data, splits
+  gaps/generations, checks cadence/loss, and uses antialiased rational resampling
+  only for spectral scoring. Eight two-second nonoverlapping Hann blocks are
+  required. PSD/CSD use `conj(X)*Y`; H and phase are masked below coherence 0.8 or
+  the independent-block null threshold. Input cross-coherence/condition ratio
+  expose correlated-axis identifiability limits. This is paired apparent H,
+  not a coupled two-input or automatically open-loop physical calibration.
+- `tests/accelFFCtrlTelemetry_replay.cpp` uses unchanged production
+  `inputProcessor`, `harmonicEstimator` and Phase 11 `shadowCommand` with owned
+  depth-one file snapshots. Each query sees only records received by that time.
+  No resampled/WFS/future/truth measurement enters the estimator. Default gap
+  tolerance is explicitly false; gain remains zero unless an offline manifest
+  explicitly requests otherwise. No native or application interface is included.
+- The first half fits passive complex H at 28/56 Hz; fixed H maps actual
+  estimator target-time acceleration quadratures to WFS units in the held-out
+  second half. This can absorb mechanical/AO transfer, and therefore does not
+  validate the assumed lever arm or physical pointing frame. Raw pointing is
+  logged separately. Query+horizon is preserved exactly; age is counted once.
+- Scores use common held-out query coverage and actual targets, with WFS
+  interpolation only between adjacent trusted centers. Missing WFS records are
+  excluded. Uniform-ready chunks alone support prediction coherence; unavailable
+  blocks are not compressed into a uniform record. WFS interpolation and finite
+  real exposure are separate error sources. The 2-kHz interpolation amplitude
+  error can approach 0.39% at 56 Hz.
+- Shadow CSVs preserve acquisition/query/target/source, reset epoch, numerical
+  validity/fault, raw pointing, absolute coefficients, clipping and input loss/
+  reset counters. Integer origin registration permits exact epoch reconstruction.
+  Invalid/stale/disabled commands are zero, with no command hold. Actual recorded
+  queries can be supplied; assumed archive receipt/query schedules remain labelled
+  replay assumptions, not live availability. Blocking output stays offline.
+- An optional analytic-fixture counterfactual explicitly uses gain 0.5 and the
+  existing synthetic `dmResponse`; it never enters a production command path.
+
+### Synthetic quantitative results
+
+All results below are synthetic, not measured MagAO-X calibration. The 60-s fixture
+uses 8-kHz ADC/2-kHz WFS/query, 28/56-Hz analytic disturbances, memory 0.1 s,
+lever 10 m, ADC 2048/0.0083799/1.02, ADC noise SD 0.002 m/s² and WFS noise SD
+2e-9 rad. WFS gains 1.2/0.8, passive delay 1 ms and timestamp correction +700 us
+are explicit known choices. These differ from the earlier stochastic accelSim
+sensor-PSD/full-214-mode study and must not be presented as improved performance
+on that study. Every generated file carries synthetic provenance.
+
+| Band / axis | Coherence | H magnitude [rad/(m/s²)] | Phase [deg] | Referenced delay [ms] |
+| --- | ---: | ---: | ---: | ---: |
+| 28 / X | 0.9999991 | 3.877633e-6 | 169.87514 | 1.004450 |
+| 28 / Y | 0.9999973 | 2.583473e-6 | 169.86993 | 1.004967 |
+| 56 / X | 0.9999994 | 9.685313e-7 | 159.85226 | 0.999392 |
+| 56 / Y | 0.9999984 | 6.453941e-7 | 159.83191 | 1.000402 |
+
+Delay is recovered within 5 us. The reported stationary-Gaussian Welch interval
+approximations exclude quantization/resampling/clock/model bias and are not formal
+coverage guarantees for deterministic lines or physical delay. Referenced phase
+delay remains ambiguous by integer carrier periods and is absent without a known
+signed reference. Strong sensor cross-coherence cannot identify independent axes.
+
+At 1.75-ms query horizon, 57,939 held-out scores per axis yield RMSE
+4.05655e-9/3.45236e-9 rad, NRMSE **2.2218/3.5527%**, correlation
+0.999801/0.999561 and bias -8.8144e-12/+1.7654e-12 rad. At 28 Hz amplitude errors
+are -0.3032/-0.2881% and phase errors +0.01389/+0.04411 degree; at 56 Hz they are
+-5.4577/-5.4465% and -0.21746/-0.20284 degree. Existing independent-bank leakage,
+ADC quantization and WFS interpolation contribute; high coherence does not prove
+gain accuracy. Whole-record readiness is **99.4992%**, zero drops and one initial
+attachment reset. Sample age is 100 us, so sample-to-target horizon is **1.85 ms**.
+
+| Horizon [ms] | X / Y NRMSE |
+| --- | ---: |
+| 0 | 2.2903% / 3.6701% |
+| 0.5 | 2.2930% / 3.6740% |
+| 1 | 2.2903% / 3.6702% |
+| 1.75 | 2.2218% / 3.5527% |
+| 3 | 2.2271% / 3.5812% |
+| 5 | 2.1055% / 3.4069% |
+| 10 | 1.9327% / 3.1401% |
+
+The synthetic grid minimum at 10 ms is not a physical DM delay or an operating
+recommendation. Harmonic-bank leakage rotates with target phase; the earlier
+1.75-ms cancellation compensation includes a synthetic plant and command hold,
+whereas this forecast score compares fixed target times. **No physical horizon
+is qualified or recommended by Phase 12.**
+
+Bounded ±2/±10-us acquisition-tag jitter keeps readiness near 99.5%, with no
+drops/additional resets, and NRMSE 2.2219/3.5528% and 2.2224/3.5537%. Applying an
+incorrect ±1-ms WFS comparison offset instead produces about **21–25% NRMSE**,
+with 10.08/20.16 degrees of phase shift per millisecond at 28/56 Hz. These are
+synthetic sensitivity tests, not live timestamp-jitter qualification.
+
+The explicit counterfactual uses identity C, K=diag(1e6), gain 0.5, coefficient
+bounds 1/1 and a chosen 1-ms/300-Hz response at 2 kHz with diagonal response
+1.2e-6/0.8e-6 WFS rad/coefficient. Simulated variance reduction is **72.31/70.91%**;
+RMS changes 1.82644e-7→9.61099e-8 rad and 9.72056e-8→5.24290e-8 rad. This is
+neither measured suppression nor a substituted physical calibration. Default
+gain-zero proposals remain exactly zero. Synthetic-response metadata and the
+nonzero counterfactual are separate files.
+
+### Verification, reproduction and remaining gates
+
+Eleven new deterministic analysis/integrated-replay tests cover known spectra,
+phase/delay, antialiasing/fractional registration, exact ns, malformed/unknown clocks,
+low-coherence refusal through the complete pipeline, target-based horizon selection,
+WFS holes, ADC units and default/clipped/drop/restart/invalid/stale shadow behavior.
+The report gives workstation commands, the real-data manifest command and schema,
+all assumptions and output CSV/plot names. Artifacts are under
+`/tmp/accelFFCtrl-phase12-*`; no generated measurement is added as a real fixture.
+
+Existing regression results: **33 C++ controller cases / 3,440,635 assertions**;
+**67 combined simulator/controller ASan+UBSan cases / 3,677,233 assertions**;
+**32 controller Python + four simulator PSD tests**. The new file replay passes
+sanitizer integration cases and a 40-s full analysis. Existing allocation-guarded
+benchmarks remain allocation-free with unchanged checksums. The previous **76-run
+60-s cancellation study** passes again; **all 18 original binary/summary artifacts
+are byte-identical**. No assertion is weakened. Formatting/syntax and preservation
+checks apply to the final changed files. Native app/INDI/ImageStreamIO validation
+has not been performed on macOS.
+
+Physical boundaries remain separate: (1) passive accelerometer→WFS response,
+(2) current WFS→DM calibration, (3) optical correction sign, and (4) actual DM
+delay/bandwidth. Archived pupil B/K is conditional geometry only and supplies none
+of the missing WFS/sensor registration/dynamics. Passive telemetry cannot measure
+DM correction sign/response without separate physical response evidence. Real
+paired telemetry with trusted acquisition/center/clock data and AO/POL/command
+context, current optical calibration, measured response, bounded capture/overhead
+and native Linux validation remain prerequisites. Observation-only defaults and
+depth one are unchanged. No live writer, DM attachment, instrument access,
+configuration change, staging, commit, push, merge or deployment occurred.
+
+Changed files: new `tests/qualify_telemetry.py`, `test_qualify_telemetry.py`,
+`accelFFCtrlTelemetry_replay.cpp`, `offline/RECORDED_TELEMETRY.md` under accelFFCtrl;
+its test `Makefile`, `offline/INTEGRATION.md`, both application READMEs and this
+plan. Production sources/configuration, existing models, archived calibration
+inputs and the separate DDSPC worktree are untouched.

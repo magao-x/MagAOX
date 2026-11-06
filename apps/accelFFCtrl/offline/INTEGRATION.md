@@ -308,3 +308,13 @@ invalid/stale input, reset and reattachment. All evidence labels are synthetic.
 The archived-pupil fixture separately passes signed modal examples and retains
 unchanged FITS hashes. AO-only versus shadow-only trajectories match exactly.
 Detailed final test counts and sanitizer results are recorded in the engineering plan.
+
+## Phase 12 follow-up: passive telemetry qualification
+
+[RECORDED_TELEMETRY.md](RECORDED_TELEMETRY.md) documents the local recording
+inventory, exact file/clock schema, paired PSD/CSD/coherence/transfer analysis,
+held-out replay through the existing predictor/shadow path and synthetic results.
+No simultaneous real ADC/WFS recording was found. The archived pupil calibration
+above still does not establish sensor/WFS registration, physical correction sign
+or dynamic DM response. The new analysis does not qualify a physical horizon or
+change the Linux/native and observation-only gates in this report.

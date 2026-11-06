@@ -1324,3 +1324,49 @@ Linux/native requirements. All current runtime sources/configurations, depth-one
 operation, observation-only behavior and default-disabled gap policy remain
 unchanged. No instrument connection, real DM command, deployment or application
 restart was performed. A live writer requires a separate explicit approval.
+
+## Phase 12: recorded-telemetry analysis (2026-11-06)
+
+The [Phase 12 report](offline/RECORDED_TELEMETRY.md) inventories local data and
+documents a file-only PSD/CSD/coherence/transfer pipeline, clock registration,
+held-out forecast evaluation and shadow replay. No simultaneous real accelerometer
+and WFS recording was found; all current results are synthetic. The script does
+not decode XRIF or derive calibrated TT from arbitrary WFS camera pixels.
+
+`tests/qualify_telemetry.py` requires provenance, exact integer acquisition/write/
+receipt counters/times, independent clock registration and WFS exposure-center,
+units/channel/AO-state metadata. It antialiases only for spectral analysis and
+never fills missing measurements into the predictor. Training and test halves
+are separate. Low coherence rejects transfer qualification; correlated sensor
+axes cannot establish an independent two-input mapping. The new standalone
+`tests/accelFFCtrlTelemetry_replay.cpp` uses production input/estimation numerics
+and the Phase 11 host-memory shadow component. No application or stream API is
+included, and gain remains zero by default.
+
+```bash
+make -C apps/accelFFCtrl/tests BUILD_DIR=/tmp/accelFFCtrl-phase12 telemetry-test PYTHON=python
+MPLCONFIGDIR=/tmp/accelFFCtrl-phase12-mpl python apps/accelFFCtrl/tests/qualify_telemetry.py \
+  --synthetic 60 --replay /tmp/accelFFCtrl-phase12/accelFFCtrlTelemetry_replay \
+  --synthetic-counterfactual --output /tmp/accelFFCtrl-phase12-study
+# A reviewed manifest plus locally exported and registered real CSVs, when available:
+python apps/accelFFCtrl/tests/qualify_telemetry.py --manifest /local/recording/manifest.json \
+  --replay /tmp/accelFFCtrl-phase12/accelFFCtrlTelemetry_replay --output /tmp/accelFFCtrl-recorded-report
+```
+
+Use an existing scientific Python environment (`python` is Anaconda here).
+The 60-s analytic 28/56-Hz fixture recovers its imposed 1-ms passive delay within
+5 us. At 1.75-ms forecast horizon, calibrated WFS NRMSE is 2.22/3.55%; sample age
+100 us means actual sample-to-target extrapolation is 1.85 ms. A 1-ms timestamp
+error increases NRMSE to about 21–25%. These high-SNR, fitted-transfer results
+are different from the earlier stochastic/full-population pointing study.
+The stationary fixture's grid minimum occurs at 10 ms; it is not a physical DM
+optimum and does not justify changing the existing horizon. A separate explicit
+gain-0.5 synthetic-response counterfactual gives 72.31/70.91% simulated variance
+reduction. Default proposals remain zero; no measured suppression is claimed.
+
+Eleven new analysis/replay tests pass, along with existing C++/Python regressions
+and sanitizers. Native Linux validation, real simultaneous telemetry and clock/
+exposure provenance, current WFS/DM registration/sign and measured response remain
+blockers. No production source/configuration, default gap policy or depth-one
+operation changed. The report gives all assumptions, quantitative tables and
+reproduction requirements.

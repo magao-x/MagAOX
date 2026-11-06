@@ -693,3 +693,10 @@ assigned simulator disturbance channel, not a proposed shared correction channel
 The controller's shadow prototype uses host memory/files only. Simulator runtime,
 RNG, synchronization, configuration and DM behavior are unchanged; no running
 instrument was accessed or modified.
+
+The subsequent [Phase 12 telemetry report](../accelFFCtrl/offline/RECORDED_TELEMETRY.md)
+adds file-only passive calibration/timing analysis and replay through the existing
+controller. No real simultaneous ADC/WFS recording was available. Its analytic
+28/56-Hz fixtures are explicitly synthetic and separate from `accelSim`'s existing
+disturbance model; no simulator generation, synchronization or configuration was
+changed. Their forecast/simulated-suppression results are not instrument measurements.

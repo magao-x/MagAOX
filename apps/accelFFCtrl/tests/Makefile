@@ -15,6 +15,7 @@ INPUT_BENCHMARK := $(BUILD_DIR)/accelFFCtrlInput_benchmark
 NATIVE := $(BUILD_DIR)/accelFFCtrlStream_test
 CANCELLATION := $(BUILD_DIR)/accelFFCtrlCancellation_export
 AO := $(BUILD_DIR)/accelFFCtrlAO_export
+TELEMETRY := $(BUILD_DIR)/accelFFCtrlTelemetry_replay
 ISIO_CFLAGS ?= $(shell pkg-config --cflags ImageStreamIO)
 ISIO_LIBS ?= $(shell pkg-config --libs ImageStreamIO)
 
@@ -22,7 +23,7 @@ PYTHON ?= python3
 VALIDATION_DIR ?= /tmp/accelFFCtrl-validation
 VALIDATION_SECONDS ?= 60
 
-.PHONY: all test benchmark native-test native-rate-test validation validation-test gap-validation cancellation-validation shadow-tools
+.PHONY: all test benchmark native-test native-rate-test validation validation-test gap-validation cancellation-validation shadow-tools telemetry-tools telemetry-test
 all: $(TEST) $(BENCHMARK) $(INPUT_BENCHMARK)
 
 $(BUILD_DIR):
@@ -50,7 +51,7 @@ validation: $(TEST) validation-test
 	MPLCONFIGDIR='$(VALIDATION_DIR)/.matplotlib' $(PYTHON) validate_predictions.py '$(VALIDATION_DIR)'
 
 validation-test:
-	$(PYTHON) -m unittest -v test_validate_predictions.py test_validate_gaps.py test_analyze_timestamps.py test_validate_cancellation.py test_validate_shadow.py
+	$(PYTHON) -m unittest -v test_validate_predictions.py test_validate_gaps.py test_analyze_timestamps.py test_validate_cancellation.py test_validate_shadow.py test_qualify_telemetry.py
 
 gap-validation: $(TEST) validation-test
 	ACCELFFCTRL_VALIDATION_DIR='$(VALIDATION_DIR)' $(TEST) '[accelFFCtrl-jitter]'
@@ -68,6 +69,14 @@ $(AO): accelFFCtrlAO_export.cpp accelFFCtrlAO_test.hpp accelFFCtrlCancellation_t
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $< $(LDFLAGS) -o $@
 
 shadow-tools: $(AO) $(CANCELLATION)
+
+$(TELEMETRY): accelFFCtrlTelemetry_replay.cpp ../offline/accelFFCtrlShadow.hpp ../offline/accelFFCtrlCancellation.hpp $(INPUT) $(MODEL) | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $< $(LDFLAGS) -o $@
+
+telemetry-tools: $(TELEMETRY)
+
+telemetry-test: $(TELEMETRY)
+	ACCELFFCTRL_TELEMETRY_REPLAY='$(abspath $(TELEMETRY))' $(PYTHON) -m unittest -v test_qualify_telemetry.py
 
 $(NATIVE): accelFFCtrlStream_test.cpp ../accelFFCtrlStream.hpp $(INPUT) $(MODEL) $(REPO_ROOT)/tests/testMain.cpp | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(ISIO_CFLAGS) $(CXXFLAGS) $< $(REPO_ROOT)/tests/testMain.cpp $(LDFLAGS) $(ISIO_LIBS) -o $@
