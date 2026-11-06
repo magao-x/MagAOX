@@ -1,5 +1,7 @@
 /** \file dmSyncopationProduction.hpp
  * \brief Continuous independent same-host producer admission on the qualified counter-publication scheduler.
+ *
+ * Production preparation uses configured budgets. Measured durations remain diagnostics and never retune admission.
  */
 #ifndef dmSyncopation_dmSyncopationProduction_hpp
 #define dmSyncopation_dmSyncopationProduction_hpp
@@ -210,7 +212,8 @@ inline bool dmSyncopation::productionCopy( uint64_t primary, int64_t cutoff )
         std::copy( mapping.m_stage.begin(), mapping.m_stage.end(), mapping.m_cache.begin() );
     }
     const auto finished = m_now();
-    m_copyMax           = std::max( m_copyMax, finished - started );
+    // Keep excursions visible without changing the configured admission budget for later slots.
+    m_copyMax = std::max( m_copyMax, finished - started );
     if( finished > cutoff || input->write || input->cnt0 != primary )
     {
         m_zeroWaitFailure = ZeroOutcome::preparationLate;

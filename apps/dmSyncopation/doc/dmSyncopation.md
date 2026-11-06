@@ -324,8 +324,8 @@ The complete [dmtweeter_synco.conf example](../dmtweeter_synco.conf) contains th
 | `scheduler.guardUs` | 20 | Reserve beyond explicit delivery/reader bounds. |
 | `scheduler.step0LeadUs` | 20 | Nominal step-0 completion lead. |
 | `scheduler.deliveryUs` | 20 | Submission-to-controller delivery allowance. |
-| `scheduler.snapshotBudgetUs` | 10 | Whole-batch one-pass snapshot budget. |
-| `scheduler.copyBudgetUs` | 10 | Whole-batch destination copy/publication budget. |
+| `scheduler.snapshotBudgetUs` | 10 | Whole-batch one-pass snapshot budget for the older scheduler. Production retains the configured value for reporting; elapsed snapshot time reduces its remaining copy window directly. |
+| `scheduler.copyBudgetUs` | 10 | Whole-batch destination copy/publication budget; fixed in production, adaptive in the older scheduler. The production example explicitly reserves 30 us. |
 | `scheduler.visibilityUs` | 1 | Positive margin before the earliest plausible main publication. |
 | `scheduler.preparationReserveUs` | 2 | Preparation target's positive reserve before the hard cutoff. |
 | `scheduler.outputTimeoutUs` | 50 | Combined-output watchdog, separate from the delivery/reader hold. |
@@ -377,7 +377,9 @@ Measured camera reports are eligible while their accepted-reply age is less than
 
 `fg_timing.acq_jitter`, `acq_min` and `acq_max` are acquisition-interval statistics in seconds. The inspected camwfs configuration uses a roughly two-second window; INDI readbacks convert these values to microseconds. They describe local camera acquisition, not downstream AO processing, DM publication jitter, callback wake latency or qualified worst-case limits. A valid FPS-only packet is accepted and missing optional statistics become -1. Malformed numeric data, trailing junk, a present optional statistic that is nonfinite/negative/out of range, or a supplied minimum greater than its supplied maximum rejects the whole packet without refreshing the last valid camera report; old statistics are not paired with a new FPS. This reference change does not relax immediate keepout/early-main checks or turn an observation gap into permission to stretch the cycle.
 
-Numeric values must be finite and within the accepted range. Main destinations must be unique numbered channels of the expected geometry/type; source, output and timing roles cannot alias. Invalid configuration or incompatible resources prevent operation. Unavailable secondary resources are retried once per second while unarmed. If a complete snapshot or destination-copy batch exceeds its runtime budget, the budget grows to the observed duration plus 1 us, the schedule is invalidated, and acquisition/feasibility validation repeat while preserving learned wait corrections. This enlarges the planning window conservatively; a quiet running maximum still does not prove a bound.
+Numeric values must be finite and within the accepted range. Main destinations must be unique numbered channels of the expected geometry/type; source, output and timing roles cannot alias. Invalid configuration or incompatible resources prevent operation. Unavailable secondary resources are retried once per second while unarmed. In the older non-production scheduler, if a complete snapshot or destination-copy batch exceeds its runtime budget, the budget grows to the observed duration plus 1 us, the schedule is invalidated, and acquisition/feasibility validation repeat while preserving learned wait corrections. This enlarges the planning window conservatively; a quiet running maximum still does not prove a bound.
+
+Production keeps its configured budgets fixed and reports observed maxima separately. A late copy still fails its actual completion cutoff and suppresses that auxiliary trigger, without enlarging the reservation for later slots. See the [production provider guide](production-providers.md) for tuning and passive-write semantics.
 
 ## INDI interface
 
@@ -647,7 +649,7 @@ The `timing` summary includes:
 | `cached` | Fallbacks due to an incomplete/racing snapshot; unchanged sources are not counted as misses. |
 | `notStarted`, `copiedLate` | Step-0 preparation suppressed before copying or finished after the effective cutoff. |
 | `snapshotMaxUs`, `copyMaxUs` | Observed maxima for complete snapshot and destination-copy batches. |
-| `copyBudgetUs`, `snapshotBudgetUs` | Current runtime planning budgets, including enlargement after an overrun; distinct from observed maxima. |
+| `copyBudgetUs`, `snapshotBudgetUs` | Configured budgets in production; runtime planning budgets, including enlargement after an overrun, in the older scheduler. Distinct from observed maxima; production does not use the snapshot budget as an admission guard. |
 | `primaryFaults`, `resourceFaults`, `outputFaults`, `triggerFaults` | Cumulative synchronization/resource faults split by cause; ordinary missed-step/budget reacquisition does not increment these fault totals. |
 | `duplicatePosts` | Unchanged-primary-counter callbacks ignored while draining queued notifications. |
 | `step0WakeUs`, `step0WakeMaxUs` | Latest/maximum nonnegative copy-attempt lateness relative to the requested copy wake, including checks before the attempt. Only valid, unclamped step-0 wait samples update these values. |

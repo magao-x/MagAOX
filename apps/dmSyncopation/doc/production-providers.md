@@ -162,6 +162,7 @@ pipelineBackend=false
 [scheduler]
 maxSubframes=4
 maxCadenceHz=8000
+copyBudgetUs=30
 
 [streams]
 destinations=dm01disp07,dm01disp08,dm01disp09,dm01disp10
@@ -179,6 +180,27 @@ the publication target. The tested four-channel setup uses 70/20 us, leaving
 compiled input-ready default is 50 us; its 30 us preparation window was too
 short for this mapping. Measure complete snapshot/copy work for the configured
 geometry and number of mappings when qualifying a new setup.
+
+`scheduler.copyBudgetUs` is the fixed whole-batch copy reservation in production
+mode. It includes destination copies, passive stream notifications and retained
+cache updates. Before starting a batch, synco requires that this reservation
+fit before the slot's hard completion cutoff. It still checks actual completion
+against that cutoff and suppresses the auxiliary trigger when the copy is late.
+A completed passive write cannot be undone; the configured budget must be tuned
+for the mapping, geometry and workload.
+
+The example reserves 30 us, a starting value based on the earlier successful
+four-channel runs (about 27 us maximum copy time). This is not a new instrument
+qualification. An omitted `scheduler.copyBudgetUs` retains the compiled 10 us
+default. Configuration changes require restarting synco.
+
+`timing.copyMaxUs` and `timing.snapshotMaxUs` continue to report measured lifetime
+maxima, including excursions. They do not change `timing.copyBudgetUs` or
+`timing.snapshotBudgetUs` in production mode. The production path does not use
+the snapshot budget as an admission guard: time actually spent snapshotting
+reduces the remaining copy window. A transient overrun can skip its current
+slot without enlarging the reservation and suppressing later slots. The older
+non-production scheduler retains its existing adaptive-budget behavior.
 
 For managed dmSpeckle, configure its DM channel as the mapped auxiliary source
 and set the shared timing stream:
