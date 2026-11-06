@@ -38,6 +38,7 @@ class accelFFCtrl : public MagAOXApp<true>
     std::string m_inputName{ "acc000" }, m_inputPath, m_cpuset; ///< Startup-only source/path and worker CPU placement.
     int         m_priority{ 2 };   ///< Normal MagAO-X scheduling priority; use zero for unprivileged tests.
     unsigned    m_maxBatch{ 256 }; ///< Preallocated retained-frame copy bound per owner iteration.
+    bool        m_allowSingleFrameGap{ false }; ///< Startup opt-in; default reader resets after every counter gap.
     double      m_predictionFps{ 2000 }, m_telemetryFps{ 5 },
         m_clockToleranceUs{ 1000 };   ///< Startup prediction/report/clock policy.
     std::thread m_thread;             ///< Joined before runtime and property members are destroyed.
@@ -128,6 +129,7 @@ inline void accelFFCtrl::setupConfig()
     add( "threadPrio", "int", "Input/estimator worker priority, default 2." );
     add( "cpuset", "string", "Worker cpuset, empty by default." );
     add( "maxBatch", "unsigned", "Bounded startup copy capacity, default 256." );
+    add( "allowSingleFrameGap", "bool", "Retain mature fits across qualified single-frame gaps; default false." );
     add(
         "sampleRate", "double", "Nominal ADC Hz for numerical initialization; actual intervals come from timestamps." );
     add( "predictionFps", "double", "Prediction query cadence, default 2000 Hz." );
@@ -156,6 +158,13 @@ inline int accelFFCtrl::loadConfigImpl( mx::app::appConfigurator &configuration 
     configuration( maximum, "input.maxPrediction_ms" );
     try
     {
+        if( configuration.isSet( "input.allowSingleFrameGap" ) )
+        {
+            std::string value;
+            configuration( value, "input.allowSingleFrameGap" );
+            if( !singleFrameGapSetting( m_allowSingleFrameGap, value ) )
+                throw std::invalid_argument( "allowSingleFrameGap requires true/false or 1/0" );
+        }
         if( !inputNameValid( m_inputName ) || m_priority < 0 || m_priority > 99 || m_maxBatch == 0 ||
             m_maxBatch > 65536 || !std::isfinite( m_predictionFps ) || m_predictionFps < 1 || m_predictionFps > 10000 ||
             !std::isfinite( m_telemetryFps ) || m_telemetryFps < .1 || m_telemetryFps > 20 ||
@@ -177,8 +186,9 @@ inline int accelFFCtrl::loadConfigImpl( mx::app::appConfigurator &configuration 
                 throw std::invalid_argument( "invalid numerical control" );
         }
         harmonicEstimator validate( m_requested );
-        m_loopPause         = static_cast<unsigned long>( 1e9 / m_telemetryFps );
-        m_snapshot.m_config = m_requested;
+        m_loopPause                      = static_cast<unsigned long>( 1e9 / m_telemetryFps );
+        m_snapshot.m_config              = m_requested;
+        m_snapshot.m_allowSingleFrameGap = m_allowSingleFrameGap;
     }
     catch( const std::exception &error )
     {
@@ -254,7 +264,11 @@ inline int accelFFCtrl::setupProperties()
                               "producer_delay_us",
                               "service_us",
                               "applied_revision",
-                              "acquisition_fps" } )
+                              "acquisition_fps",
+                              "gap_enabled",
+                              "admitted_gaps",
+                              "rejected_gaps",
+                              "full_resets" } )
         m_indiP_diagnostics.add( pcf::IndiElement( name ) );
     if( createROIndiText( m_indiP_input, "input", "stream", "ADC input", "Diagnostics" ) < 0 ||
         registerIndiPropertyReadOnly( m_indiP_input ) < 0 )
@@ -274,7 +288,7 @@ inline int accelFFCtrl::appStartup()
     if( ImageStreamIO_filename( path, sizeof( path ), m_inputName.c_str() ) != 0 )
         return -1;
     m_inputPath = path;
-    m_runtime.emplace( m_requested, m_maxBatch, std::llround( m_clockToleranceUs * 1e3 ) );
+    m_runtime.emplace( m_requested, m_maxBatch, std::llround( m_clockToleranceUs * 1e3 ), m_allowSingleFrameGap );
     state( stateCodes::OPERATING );
     if( threadStart( m_thread,
                      m_threadInit,
@@ -471,7 +485,7 @@ inline int accelFFCtrl::appLogic()
     m_indiP_reset.setState( resetPending ? INDI_BUSY : INDI_OK );
     constexpr double                       toMas = 206264806.24709636, toDegrees = 57.29577951308232;
     const auto                            &p = snapshot.m_prediction;
-    const std::array<double, 27>           values{ p.m_pointing[0] * toMas,
+    const std::array<double, 31>           values{ p.m_pointing[0] * toMas,
                                                    p.m_pointing[1] * toMas,
                                                    p.m_amplitude[0],
                                                    p.m_amplitude[1],
@@ -497,8 +511,12 @@ inline int accelFFCtrl::appLogic()
                                                    snapshot.m_writeDelayUs,
                                                    snapshot.m_serviceUs,
                                                    double( snapshot.m_revision ),
-                                                   snapshot.m_sampleRate };
-    constexpr std::array<const char *, 27> names{ "tip_x_mas",
+                                                   snapshot.m_sampleRate,
+                                                   double( snapshot.m_allowSingleFrameGap ),
+                                                   double( snapshot.m_admittedGaps ),
+                                                   double( snapshot.m_rejectedGaps ),
+                                                   double( snapshot.m_resets ) };
+    constexpr std::array<const char *, 31> names{ "tip_x_mas",
                                                   "tilt_y_mas",
                                                   "amplitude_x_ms2",
                                                   "amplitude_y_ms2",
@@ -524,7 +542,11 @@ inline int accelFFCtrl::appLogic()
                                                   "producer_delay_us",
                                                   "service_us",
                                                   "applied_revision",
-                                                  "acquisition_fps" };
+                                                  "acquisition_fps",
+                                                  "gap_enabled",
+                                                  "admitted_gaps",
+                                                  "rejected_gaps",
+                                                  "full_resets" };
     for( size_t n = 0; n < names.size(); ++n )
         m_indiP_diagnostics[names[n]] = values[n];
     const bool fault    = snapshot.m_state != inputState::streaming && snapshot.m_state != inputState::waiting &&

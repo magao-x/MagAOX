@@ -72,6 +72,7 @@ struct schedule
     int64_t  m_start{ 0 };           ///< First blackout; zero uses one interval, preserving the original study.
     unsigned m_cluster{ 1 };         ///< Number of blackouts separated by 1 ms at each interval boundary.
     bool     m_readerOnly{ false };  ///< Keep prediction deadlines running while ingestion alone is delayed.
+    unsigned m_stampJitterPercent{ 0 }; ///< Bounded timestamp-tag error; stochastic physical truth stays on its grid.
 };
 
 /// Return elapsed ns within a periodic blackout cluster, or -1 before its first event.
@@ -123,6 +124,7 @@ void replay( const std::filesystem::path    &directory /**< [in] output director
         accepted.open( directory / ( name + "_accepted.bin" ), std::ios::binary );
     events << "time_ns,dropped,resets\n";
     bool       queryPending = false;
+    uint64_t   gapEvents    = 0;
     size_t     ready = 0, scheduledReady = 0, scheduled = 0;
     int64_t    firstReady = -1;
     const auto drain      = [&]( int64_t now )
@@ -131,7 +133,10 @@ void replay( const std::filesystem::path    &directory /**< [in] output director
         processor.drain( input, [now] { return inputClock{ epoch + now, now, 0 }; } );
         const auto &d = processor.diagnostics();
         if( d.m_dropped != before.m_dropped )
+        {
+            ++gapEvents;
             events << now << ',' << d.m_dropped - before.m_dropped << ',' << d.m_resets << '\n';
+        }
         if( extended && d.m_processed > before.m_processed )
             writeRow<2>( accepted, { double( input.m_header.m_counter - 1 ), double( now ) } );
     };
@@ -151,7 +156,13 @@ void replay( const std::filesystem::path    &directory /**< [in] output director
                 firstReady = now;
             REQUIRE( p.m_targetTimeNs == now + horizon );
             REQUIRE( ( p.m_targetTimeNs - base ) % samplePeriod == 0 );
-            if( !s.m_readerOnly )
+            if( s.m_stampJitterPercent )
+            {
+                const int64_t tagError =
+                    ( int64_t( ( p.m_sequence - 1 ) % 3 ) - 1 ) * samplePeriod * s.m_stampJitterPercent / 100;
+                REQUIRE( now - p.m_sampleTimeNs == samplePeriod - tagError );
+            }
+            else if( !s.m_readerOnly )
                 REQUIRE( now - p.m_sampleTimeNs == samplePeriod );
             else
                 REQUIRE( now - p.m_sampleTimeNs <= config.m_maxAgeNs );
@@ -210,7 +221,8 @@ void replay( const std::filesystem::path    &directory /**< [in] output director
         }
         // Producer completes at acquisition+25 us; the normal worker runs at acquisition+50 us.
         input.m_header.m_counter = n + 1;
-        input.m_frame            = { recording[n].m_adc, stamp( now ), stamp( now + 25000 ), n + 1 };
+        const int64_t tagError   = ( int64_t( n % 3 ) - 1 ) * samplePeriod * s.m_stampJitterPercent / 100;
+        input.m_frame            = { recording[n].m_adc, stamp( now + tagError ), stamp( now + 25000 ), n + 1 };
         if( !s.m_queryOnly && !blocked( s, elapsed + 50000 ) )
             drain( now + 50000 );
     }
@@ -259,7 +271,10 @@ void replay( const std::filesystem::path    &directory /**< [in] output director
         uint64_t retained = 0;
         if constexpr( requires { processor.retained(); } )
             retained = processor.retained();
-        manifest << ',' << retained;
+        manifest << ',' << retained << ',' << gapEvents - retained;
+        if constexpr( std::is_same_v<processorT, inputProcessor> ||
+                      std::is_same_v<processorT, gapValidation::productionObserver> )
+            REQUIRE( d.m_rejectedGaps == gapEvents - retained );
     }
     manifest << '\n';
 }
@@ -435,17 +450,22 @@ TEST_CASE( "accelFFCtrl offline acquisition-rate and bounded-gap study", "[.][ac
 #endif
         metadata.close();
         REQUIRE( metadata.good() );
-        const std::array<schedule, 11> schedules{ { { "ideal", 0, 0 },
-                                                    { "delay_period_1s", 1000000000, samplePeriod },
-                                                    { "block250us_1s", 1000000000, 250000 },
-                                                    { "block500us_1s", 1000000000, 500000 },
-                                                    { "block1ms_1s", 1000000000, 1000000 },
-                                                    { "loss1_1s", 1000000000, 2 * samplePeriod },
-                                                    { "loss1_4Hz", 250000000, 2 * samplePeriod, false, 1000000000 },
-                                                    { "cluster3_5s", 5000000000, 2 * samplePeriod, false, 0, 3 },
-                                                    { "block2ms_5s", 5000000000, 2000000 },
-                                                    { "reader3ms_5s", 5000000000, 3000000, false, 0, 1, true },
-                                                    { "startup_loss100ms", 100000000, 2 * samplePeriod } } };
+        const std::array<schedule, 15> schedules{
+            { { "ideal", 0, 0 },
+              { "delay_period_1s", 1000000000, samplePeriod },
+              { "block250us_1s", 1000000000, 250000 },
+              { "block500us_1s", 1000000000, 500000 },
+              { "block1ms_1s", 1000000000, 1000000 },
+              { "loss1_1s", 1000000000, 2 * samplePeriod },
+              { "loss1_4Hz", 250000000, 2 * samplePeriod, false, 1000000000 },
+              { "cluster3_5s", 5000000000, 2 * samplePeriod, false, 0, 3 },
+              { "block2ms_5s", 5000000000, 2000000 },
+              { "reader3ms_5s", 5000000000, 3000000, false, 0, 1, true },
+              { "startup_loss100ms", 100000000, 2 * samplePeriod },
+              { "stamp_jitter2pct_ideal", 0, 0, false, 0, 1, false, 2 },
+              { "stamp_jitter10pct_ideal", 0, 0, false, 0, 1, false, 10 },
+              { "stamp_jitter2pct_loss1", 1000000000, 2 * samplePeriod, false, 0, 1, false, 2 },
+              { "stamp_jitter10pct_loss1", 1000000000, 2 * samplePeriod, false, 0, 1, false, 10 } } };
         for( bool full : { false, true } )
         {
             const std::string population = full ? "full214" : "single28";
@@ -463,22 +483,27 @@ TEST_CASE( "accelFFCtrl offline acquisition-rate and bounded-gap study", "[.][ac
             sim::model model;
             model.configure( config, modes );
             const auto recording = record( directory, population, model, modes, count, padding, samplePeriod );
-            for( const std::string policy : { "reset", "gap1", "gap7" } )
+            for( const std::string policy : { "reset", "gap1", "gap7", "optional" } )
             {
                 const auto output = directory / policy;
                 std::filesystem::create_directories( output );
                 std::ofstream manifest( output / ( population + "_runs.csv" ) );
                 manifest << "population,scenario,horizon_ns,published,processed,dropped,resets,scheduled,scheduled_"
-                            "ready,first_ready_ns,file,retained\n";
+                            "ready,first_ready_ns,file,retained,rejected\n";
                 for( const auto &s : schedules )
                 {
+                    if( s.m_stampJitterPercent && ( policy == "gap1" || policy == "gap7" ) )
+                        continue; // Historical prototypes also reject ordinary cadence jitter; keep their tests intact.
                     if( policy == "reset" )
                         replay( output, population, recording, count, s, 1000000, manifest, samplePeriod, true );
                     else if( policy == "gap1" )
                         replay<gapValidation::observer<1>>(
                             output, population, recording, count, s, 1000000, manifest, samplePeriod, true );
-                    else
+                    else if( policy == "gap7" )
                         replay<gapValidation::observer<7>>(
+                            output, population, recording, count, s, 1000000, manifest, samplePeriod, true );
+                    else
+                        replay<gapValidation::productionObserver>(
                             output, population, recording, count, s, 1000000, manifest, samplePeriod, true );
                 }
                 manifest.close();

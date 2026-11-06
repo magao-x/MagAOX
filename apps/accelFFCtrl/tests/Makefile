@@ -8,7 +8,7 @@ BUILD_DIR ?= /tmp/accelFFCtrl-numerics
 REPO_ROOT := ../../..
 MODEL := ../accelFFCtrlModel.hpp
 INPUT := ../accelFFCtrlInput.hpp
-SOURCES := accelFFCtrlModel_test.cpp accelFFCtrlReplay_test.cpp accelFFCtrlInput_test.cpp accelFFCtrlValidation_test.cpp accelFFCtrlGap_test.cpp $(REPO_ROOT)/tests/testMain.cpp
+SOURCES := accelFFCtrlModel_test.cpp accelFFCtrlReplay_test.cpp accelFFCtrlInput_test.cpp accelFFCtrlValidation_test.cpp accelFFCtrlGap_test.cpp accelFFCtrlJitter_test.cpp $(REPO_ROOT)/tests/testMain.cpp
 TEST := $(BUILD_DIR)/accelFFCtrl_test
 BENCHMARK := $(BUILD_DIR)/accelFFCtrl_benchmark
 INPUT_BENCHMARK := $(BUILD_DIR)/accelFFCtrlInput_benchmark
@@ -51,6 +51,7 @@ validation-test:
 	$(PYTHON) -m unittest -v test_validate_predictions.py test_validate_gaps.py
 
 gap-validation: $(TEST) validation-test
+	ACCELFFCTRL_VALIDATION_DIR='$(VALIDATION_DIR)' $(TEST) '[accelFFCtrl-jitter]'
 	ACCELFFCTRL_VALIDATION_DIR='$(VALIDATION_DIR)' ACCELFFCTRL_VALIDATION_SECONDS='$(VALIDATION_SECONDS)' $(TEST) '[accelFFCtrl-gap-export]'
 	MPLCONFIGDIR='$(VALIDATION_DIR)/.matplotlib' $(PYTHON) validate_gaps.py '$(VALIDATION_DIR)'
 

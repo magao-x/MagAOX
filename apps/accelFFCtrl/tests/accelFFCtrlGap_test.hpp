@@ -16,6 +16,26 @@ namespace gapValidation
 {
 using namespace MagAOX::app::accelFFCtrlDetail;
 
+/// Select the production opt-in for the same offline replay interface as the historical prototypes.
+class productionObserver : public inputProcessor
+{
+  public:
+    /// Prepare the actual production reader with only its single-frame option enabled.
+    explicit productionObserver( const parameters &config /**< [in] common numerical configuration */ );
+
+    /// Expose the production admission count to the shared offline scorer.
+    uint64_t retained() const;
+};
+
+inline productionObserver::productionObserver( const parameters &config ) : inputProcessor( config, 256, 1000000, true )
+{
+}
+
+inline uint64_t productionObserver::retained() const
+{
+    return diagnostics().m_admittedGaps;
+}
+
 /// Immutable owned depth-one snapshot; this experiment has no native stream API.
 struct snapshot
 {

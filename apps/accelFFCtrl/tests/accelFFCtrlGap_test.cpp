@@ -55,10 +55,10 @@ void fixture::publish( uint64_t counter, int64_t mono )
 }
 
 /// Feed half a second, with actual 2-kHz queries, to require the original warmup before any retained gap.
-template <unsigned limit>
-void warm( observer<limit> &app /**< [in,out] offline observer */,
-           fixture         &source /**< [in,out] analytic source */,
-           int              rate /**< [in] acquisition rate [Hz] */ )
+template <typename observerT>
+void warm( observerT &app /**< [in,out] offline observer */,
+           fixture   &source /**< [in,out] analytic source */,
+           int        rate /**< [in] acquisition rate [Hz] */ )
 {
     const int64_t period = 1000000000 / rate;
     app.attached();
@@ -77,12 +77,12 @@ void warm( observer<limit> &app /**< [in,out] offline observer */,
 }
 
 /// Verify bounded loss uses real elapsed time and retains cosine phase, without bypassing numerical checks.
-template <unsigned limit>
+template <unsigned limit, typename observerT = observer<limit>>
 void gapProbe( int rate /**< [in] acquisition rate [Hz] */, unsigned missing /**< [in] overwritten frames */ )
 {
-    const auto      config = settings( rate );
-    observer<limit> app( config );
-    fixture         source;
+    const auto config = settings( rate );
+    observerT  app( config );
+    fixture    source;
     warm( app, source, rate );
     const auto    before = app.diagnostics();
     const int64_t period = 1000000000 / rate, acquired = origin + 500000000 + ( missing + 1 ) * period;
@@ -130,6 +130,7 @@ TEST_CASE( "accelFFCtrl offline bounded-gap phase and admission", "[accelFFCtrl]
         {
             gapValidation::gapProbe<1>( rate, missing );
             gapValidation::gapProbe<7>( rate, missing );
+            gapValidation::gapProbe<1, gapValidation::productionObserver>( rate, missing );
         }
 }
 
@@ -162,56 +163,62 @@ TEST_CASE( "accelFFCtrl offline gap policy rejects integrity faults", "[accelFFC
                                          "backward_gap",
                                          "geometry" } )
         {
-            observer<7> app( settings( rate ) );
-            fixture     source;
-            warm( app, source, rate );
-            const auto    before = app.diagnostics();
-            const int64_t period = 1000000000 / rate, acquired = origin + 500000000 + period;
-            source.publish( rate / 2 + 2, acquired );
-            if( fault == "backward" )
-                source.m_source.m_frame.m_acquired = timestamp( acquired - 2 * period );
-            if( fault == "forward" )
-                source.m_source.m_frame.m_acquired = timestamp( acquired + period );
-            if( fault == "rollback" || fault == "restart" )
-                source.m_source.m_header.m_counter = source.m_source.m_frame.m_counter = 1;
-            if( fault == "restart" )
-                app.attached();
-            if( fault == "adc" )
-                source.m_source.m_frame.m_adc[0] = 4096;
-            if( fault == "zero" )
-                source.m_source.m_frame.m_acquired = {};
-            if( fault == "future" )
-                source.m_source.m_frame.m_acquired = timestamp( acquired + 5000000 );
-            if( fault == "write" )
-                source.m_source.m_frame.m_written = timestamp( acquired - 1 );
-            if( fault == "clock" )
-                source.m_clock.m_real += 2000000;
-            if( fault == "stale" )
+            const auto exercise = [rate, &fault]( auto &app )
             {
-                source.m_clock.m_real += 3000000;
-                source.m_clock.m_mono += 3000000;
-            }
-            if( fault == "bracket" )
-                source.m_clock.m_uncertainty = 1000001;
-            if( fault == "geometry" )
-                source.m_source.m_header.m_uint16 = false;
-            if( fault == "gap_time" || fault == "backward_gap" )
-            {
-                ++source.m_source.m_header.m_counter;
-                ++source.m_source.m_frame.m_counter;
-                if( fault == "backward_gap" )
+                fixture source;
+                warm( app, source, rate );
+                const auto    before = app.diagnostics();
+                const int64_t period = 1000000000 / rate, acquired = origin + 500000000 + period;
+                source.publish( rate / 2 + 2, acquired );
+                if( fault == "backward" )
                     source.m_source.m_frame.m_acquired = timestamp( acquired - 2 * period );
-            }
-            app.drain( source.m_source, [&source] { return source.m_clock; } );
-            REQUIRE( app.diagnostics().m_prediction.m_state != estimatorState::ready );
-            app.predict( source.m_clock.m_mono );
-            CAPTURE( rate, fault );
-            const auto after = app.diagnostics();
-            REQUIRE( after.m_resets > before.m_resets );
-            REQUIRE( after.m_prediction.m_state != estimatorState::ready );
-            REQUIRE( after.m_prediction.m_acceleration == std::array<double, 2>{ 0, 0 } );
-            REQUIRE( after.m_prediction.m_pointing == std::array<double, 2>{ 0, 0 } );
-            REQUIRE( app.retained() == 0 );
+                if( fault == "forward" )
+                    source.m_source.m_frame.m_acquired = timestamp( acquired + period );
+                if( fault == "rollback" || fault == "restart" )
+                    source.m_source.m_header.m_counter = source.m_source.m_frame.m_counter = 1;
+                if( fault == "restart" )
+                    app.attached();
+                if( fault == "adc" )
+                    source.m_source.m_frame.m_adc[0] = 4096;
+                if( fault == "zero" )
+                    source.m_source.m_frame.m_acquired = {};
+                if( fault == "future" )
+                    source.m_source.m_frame.m_acquired = timestamp( acquired + 5000000 );
+                if( fault == "write" )
+                    source.m_source.m_frame.m_written = timestamp( acquired - 1 );
+                if( fault == "clock" )
+                    source.m_clock.m_real += 2000000;
+                if( fault == "stale" )
+                {
+                    source.m_clock.m_real += 3000000;
+                    source.m_clock.m_mono += 3000000;
+                }
+                if( fault == "bracket" )
+                    source.m_clock.m_uncertainty = 1000001;
+                if( fault == "geometry" )
+                    source.m_source.m_header.m_uint16 = false;
+                if( fault == "gap_time" || fault == "backward_gap" )
+                {
+                    ++source.m_source.m_header.m_counter;
+                    ++source.m_source.m_frame.m_counter;
+                    if( fault == "backward_gap" )
+                        source.m_source.m_frame.m_acquired = timestamp( acquired - 2 * period );
+                }
+                app.drain( source.m_source, [&source] { return source.m_clock; } );
+                REQUIRE( app.diagnostics().m_prediction.m_state != estimatorState::ready );
+                app.predict( source.m_clock.m_mono );
+                CAPTURE( rate, fault );
+                const auto after = app.diagnostics();
+                REQUIRE( after.m_resets > before.m_resets );
+                REQUIRE( after.m_prediction.m_state != estimatorState::ready );
+                REQUIRE( after.m_prediction.m_acceleration == std::array<double, 2>{ 0, 0 } );
+                REQUIRE( after.m_prediction.m_pointing == std::array<double, 2>{ 0, 0 } );
+                REQUIRE( app.retained() == 0 );
+            };
+            observer<7> prototype( settings( rate ) );
+            exercise( prototype );
+            productionObserver production( settings( rate ) );
+            exercise( production );
         }
 }
 
@@ -263,6 +270,95 @@ TEST_CASE( "accelFFCtrl offline gap density rate and freshness bounds", "[accelF
     auto invalid      = settings( 8000 );
     invalid.m_zero[0] = std::numeric_limits<double>::quiet_NaN();
     REQUIRE_THROWS_AS( observer<1>( invalid ), std::invalid_argument );
+}
+
+/** \brief Production opt-in retains physical identity, rejects dense gaps, and preserves configuration cold starts.
+ * \ingroup accelFFCtrl_unit_test
+ */
+TEST_CASE( "accelFFCtrl production single-gap lifecycle and accounting", "[accelFFCtrl][gap]" )
+{
+    // clang-format off
+#ifdef ACCELFFCTRL_TEST_DOXYGEN_REF
+    MagAOX::app::accelFFCtrlDetail::inputProcessor::drain;
+    MagAOX::app::accelFFCtrlDetail::inputProcessor::configure;
+    MagAOX::app::accelFFCtrlDetail::singleFrameGapSetting;
+#endif
+    // clang-format on
+    using namespace gapValidation;
+    bool flag = false;
+    REQUIRE( singleFrameGapSetting( flag, "true" ) );
+    REQUIRE( flag );
+    for( const std::string text : { "yes", "truse", "2", "", "TRUE" } )
+    {
+        REQUIRE_FALSE( singleFrameGapSetting( flag, text ) );
+        REQUIRE( flag );
+    }
+    REQUIRE( singleFrameGapSetting( flag, "false" ) );
+    REQUIRE_FALSE( flag );
+    REQUIRE( singleFrameGapSetting( flag, "1" ) );
+    REQUIRE( flag );
+    REQUIRE( singleFrameGapSetting( flag, "0" ) );
+    REQUIRE_FALSE( flag );
+    for( int rate : { 8000, 4000 } )
+    {
+        const auto     config = settings( rate );
+        inputProcessor defaults( config );
+        REQUIRE_FALSE( defaults.diagnostics().m_allowSingleFrameGap );
+        productionObserver app( config );
+        fixture            source;
+        warm( app, source, rate );
+        REQUIRE( app.diagnostics().m_allowSingleFrameGap );
+        const int64_t period = 1000000000 / rate;
+        for( int gap = 1; gap <= 3; ++gap )
+        {
+            source.publish( rate / 2 + 1 + 2 * gap, origin + 500000000 + 2 * gap * period );
+            app.drain( source.m_source, [&source] { return source.m_clock; } );
+            REQUIRE( app.diagnostics().m_prediction.m_state != estimatorState::ready );
+            app.predict( source.m_clock.m_mono );
+            const auto &d = app.diagnostics();
+            REQUIRE( d.m_dropped == uint64_t( gap ) );
+            REQUIRE( d.m_admittedGaps == 1 );
+            REQUIRE( d.m_rejectedGaps == uint64_t( gap - 1 ) );
+            REQUIRE( d.m_resets == uint64_t( gap ) );
+            REQUIRE( ( d.m_prediction.m_state == estimatorState::ready ) == ( gap == 1 ) );
+            REQUIRE( d.m_prediction.m_sequence == source.m_source.m_frame.m_counter );
+            if( gap == 1 )
+                REQUIRE( d.m_sampleRate == Approx( rate ).epsilon( 1e-10 ) );
+        }
+        const auto before = app.diagnostics();
+        app.configure( config, 37 );
+        REQUIRE( app.diagnostics().m_resets == before.m_resets + 1 );
+        REQUIRE( app.diagnostics().m_admittedGaps == 1 );
+        REQUIRE( app.diagnostics().m_rejectedGaps == 2 );
+        REQUIRE( app.diagnostics().m_allowSingleFrameGap );
+        REQUIRE( app.diagnostics().m_prediction.m_state != estimatorState::ready );
+
+        // A stale interval cannot be hidden merely because no prediction query ran during the delay.
+        productionObserver delayed( config );
+        warm( delayed, source, rate );
+        source.publish( rate / 2 + 3, origin + 500000000 + 2 * period );
+        source.m_clock.m_real += 2000000 - period - 50000;
+        source.m_clock.m_mono += 2000000 - period - 50000;
+        delayed.drain( source.m_source, [&source] { return source.m_clock; } );
+        delayed.predict( source.m_clock.m_mono );
+        REQUIRE( delayed.diagnostics().m_admittedGaps == 0 );
+        REQUIRE( delayed.diagnostics().m_rejectedGaps == 1 );
+        REQUIRE( delayed.diagnostics().m_invalid == 0 );
+        REQUIRE( delayed.diagnostics().m_processed == uint64_t( rate / 2 + 2 ) );
+        REQUIRE( delayed.diagnostics().m_prediction.m_state != estimatorState::ready );
+
+        // Nominal rate is not a substitute for timestamps; a wrong value rejects gap retention only.
+        productionObserver wrongRate( settings( rate == 8000 ? 4000 : 8000 ) );
+        warm( wrongRate, source, rate );
+        REQUIRE( wrongRate.diagnostics().m_prediction.m_amplitude[0] == Approx( .001 ).margin( 1e-6 ) );
+        source.publish( rate / 2 + 3, origin + 500000000 + 2 * period );
+        wrongRate.drain( source.m_source, [&source] { return source.m_clock; } );
+        wrongRate.predict( source.m_clock.m_mono );
+        REQUIRE( wrongRate.diagnostics().m_admittedGaps == 0 );
+        REQUIRE( wrongRate.diagnostics().m_rejectedGaps == 1 );
+        REQUIRE( wrongRate.diagnostics().m_invalid == 0 );
+        REQUIRE( wrongRate.diagnostics().m_prediction.m_state != estimatorState::ready );
+    }
 }
 } // namespace accelFFCtrlTest
 } // namespace libXWCTest

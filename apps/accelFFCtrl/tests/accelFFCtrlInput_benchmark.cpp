@@ -88,34 +88,51 @@ int main()
                                 { ( stamp + 10000 ) / 1000000000, ( stamp + 10000 ) % 1000000000 },
                                 n + 1 };
     }
-    inputProcessor processor;
-    processor.attached();
-    costSource source;
-    Eigen::internal::set_is_malloc_allowed( false );
-    tracking        = true;
-    double checksum = 0;
-    for( size_t n = 0; n < count; ++n )
+    for( bool allowGap : { false, true } )
     {
-        const auto    start = std::chrono::steady_clock::now();
-        const int64_t now   = 1000050000 + int64_t( n ) * 125000;
-        source.m_frame      = prepared[n];
-        processor.drain( source, [now] { return inputClock{ epoch + now, now, 10 }; } );
-        if( n % 4 == 0 )
+        inputProcessor processor( parameters{}, 256, 1000000, allowGap );
+        std::fill( costs.begin(), costs.end(), 0. );
+        allocations = 0;
+        processor.attached();
+        costSource source;
+        Eigen::internal::set_is_malloc_allowed( false );
+        tracking        = true;
+        double checksum = 0;
+        for( size_t n = 0; n < count; ++n )
         {
-            processor.predict( now );
-            checksum += processor.diagnostics().m_prediction.m_pointing[0];
+            if( allowGap && n && n % 8000 == 0 )
+                continue;
+            const auto    start = std::chrono::steady_clock::now();
+            const int64_t now   = 1000050000 + int64_t( n ) * 125000;
+            source.m_frame      = prepared[n];
+            processor.drain( source, [now] { return inputClock{ epoch + now, now, 10 }; } );
+            if( n % 4 == 0 )
+            {
+                processor.predict( now );
+                checksum += processor.diagnostics().m_prediction.m_pointing[0];
+            }
+            costs[n] = std::chrono::duration<double, std::nano>( std::chrono::steady_clock::now() - start ).count();
         }
-        costs[n] = std::chrono::duration<double, std::nano>( std::chrono::steady_clock::now() - start ).count();
+        tracking = false;
+        Eigen::internal::set_is_malloc_allowed( true );
+        double sum = 0;
+        for( double cost : costs )
+            sum += cost;
+        std::sort( costs.begin(), costs.end() );
+        std::cout << ( allowGap ? "Single-gap enabled, one loss/s: " : "Default lossless: " )
+                  << "Input runtime (synthetic source/clocks, 8k/2k): mean " << sum / count << " ns, p50 "
+                  << costs[count / 2] << " ns, p99 " << costs[99 * count / 100] << " ns, max " << costs.back()
+                  << " ns; new calls=" << allocations << ", accepted=" << processor.diagnostics().m_processed
+                  << ", dropped=" << processor.diagnostics().m_dropped << ", checksum=" << checksum << '\n';
+        if( !allowGap )
+        {
+            if( allocations || processor.diagnostics().m_processed != count || processor.diagnostics().m_dropped )
+                return 1;
+        }
+        else if( allocations || processor.diagnostics().m_processed != count - 29 ||
+                 processor.diagnostics().m_dropped != 29 || processor.diagnostics().m_admittedGaps != 29 ||
+                 processor.diagnostics().m_rejectedGaps || processor.diagnostics().m_resets != 1 )
+            return 1;
     }
-    tracking = false;
-    Eigen::internal::set_is_malloc_allowed( true );
-    double sum = 0;
-    for( double cost : costs )
-        sum += cost;
-    std::sort( costs.begin(), costs.end() );
-    std::cout << "Input runtime (synthetic source/clocks, 8k/2k): mean " << sum / count << " ns, p50 "
-              << costs[count / 2] << " ns, p99 " << costs[99 * count / 100] << " ns, max " << costs.back()
-              << " ns; new calls=" << allocations << ", accepted=" << processor.diagnostics().m_processed
-              << ", dropped=" << processor.diagnostics().m_dropped << ", checksum=" << checksum << '\n';
-    return allocations || processor.diagnostics().m_processed != count || processor.diagnostics().m_dropped ? 1 : 0;
+    return 0;
 }

@@ -88,6 +88,8 @@ def analyze(root, plots=True):
         identity = dict(rate=rate, population=population, scenario=scenario, policy=policy)
         produced = data[:, 5] == 1
         health.append(dict(**identity, **values, dropped=run.dropped, resets=run.resets, retained=run.retained,
+            rejected=getattr(run,"rejected",len(events)-run.retained),
+            gap_acceptance_pct=100*run.retained/len(events) if len(events) else np.nan,
             published=run.published, dropped_per_s=run.dropped/(run.published/rate),
             overrun_events=len(events), overrun_events_per_s=len(events)/(run.published/rate),
             first_ready_ms=(run.first_ready_ns-BASE)*1e-6 if run.first_ready_ns >= 0 else np.nan,
@@ -101,11 +103,12 @@ def analyze(root, plots=True):
         current = data[nominal]
         reference = runs[rate, population, scenario, "reset"][2]
         reference = reference[reference[:, 0] >= 0]
-        ideal = runs[rate, population, "ideal", "reset"][2]
+        ideal_scenario = scenario.replace("_loss1","_ideal") if scenario.startswith("stamp_jitter") else "ideal"
+        ideal = runs[rate, population, ideal_scenario, "reset"][2]
         ideal = ideal[ideal[:, 0] >= 0]
         np.testing.assert_array_equal(current[:, 1], reference[:, 1])
         np.testing.assert_array_equal(current[:, 1], ideal[:, 1])
-        if scenario == "ideal":
+        if scenario == "ideal" or scenario.endswith("pct_ideal"):
             np.testing.assert_array_equal(current, reference)  # Prototype has exactly the same lossless numerics.
         accepted_path = directory / f"{run.file}_accepted.bin"
         reset_path = directory.parent / "reset" / f"{run.file}_accepted.bin"
@@ -128,7 +131,7 @@ def analyze(root, plots=True):
                     gap_phase_change_deg=incremental["phase_error_deg"],
                     delta_from_ideal_rmse=np.sqrt(np.mean(delta**2)) if len(delta) else np.nan))
         # Independently inspect at most 12 actually retained gaps, at receipt and 50 ms later.
-        if policy != "reset" and len(events):
+        if policy != "reset" and len(events) and not scenario.startswith("stamp_jitter"):
             retained_events = events[events.resets.diff().fillna(events.resets-1) == 0].head(12)
             accepted = np.fromfile(directory / f"{run.file}_accepted.bin", dtype="<f8").reshape(-1, 2)
             accepted_indices = accepted[:, 0].astype(np.int64)
@@ -167,12 +170,13 @@ def analyze(root, plots=True):
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
+        policies = [p for p in ("reset","gap1","gap7","optional") if any(k[3] == p for k in runs)]
         for rate in (8000, 4000):
             for population in ("single28", "full214"):
                 fig, axes = plt.subplots(3, 2, figsize=(13, 8), sharex="col")
                 truth = np.memmap(root / str(rate) / f"{population}_truth.bin", dtype="<f8", mode="r").reshape(-1,13)
                 for column, scenario in enumerate(("loss1_4Hz", "cluster3_5s")):
-                    for policy in ("reset", "gap1", "gap7"):
+                    for policy in policies:
                         _, _, data = runs[rate, population, scenario, policy]
                         data = data[data[:, 0] >= 0]
                         t = (data[:, 1]-BASE)*1e-9
@@ -203,10 +207,11 @@ def analyze(root, plots=True):
                 subset = health[(health.rate == rate) & (health.population == population)]
                 scenarios = list(subset.scenario.unique())
                 x = np.arange(len(scenarios))
-                for i, policy in enumerate(("reset", "gap1", "gap7")):
-                    values = subset[subset.policy == policy].set_index("scenario").loc[scenarios]
-                    ax.bar(x + (i-1)*.25, values.scored_availability_pct, .25, label=policy)
-                ax.set(xticks=x, xticklabels=scenarios, ylabel="ready %, 4–60 s", title=f"{rate} Hz")
+                width = .8/len(policies)
+                for i, policy in enumerate(policies):
+                    values = subset[subset.policy == policy].set_index("scenario").reindex(scenarios)
+                    ax.bar(x + (i-(len(policies)-1)/2)*width, values.scored_availability_pct, width, label=policy)
+                ax.set(xticks=x, xticklabels=scenarios, ylabel="ready %, after 4 s", title=f"{rate} Hz")
                 ax.tick_params(axis="x", labelrotation=25)
                 ax.legend()
             fig.tight_layout()

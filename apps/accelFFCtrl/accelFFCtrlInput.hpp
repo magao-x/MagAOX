@@ -136,6 +136,16 @@ inline bool inputNameValid( const std::string &name /**< [in] proposed stream na
     return true;
 }
 
+/// Parse the startup opt-in explicitly; malformed text preserves the previous value.
+inline bool singleFrameGapSetting( bool              &enabled /**< [in,out] accepted startup choice */,
+                                   const std::string &text /**< [in] true/false or 1/0 */ )
+{
+    if( text != "true" && text != "false" && text != "1" && text != "0" )
+        return false;
+    enabled = text == "true" || text == "1";
+    return true;
+}
+
 /// Snapshot of native metadata; equality checks publication identity, geometry and write state.
 struct inputHeader
 {
@@ -161,7 +171,7 @@ struct inputClock
     int64_t m_real{ 0 }, m_mono{ 0 }, m_uncertainty{ 0 }; ///< Epoch ns, midpoint monotonic ns and half-bracket span.
 };
 
-/// Input health codes are independent of fit warmup/readiness; lastEvent retains the latest inhibition/reset cause.
+/// Input health codes are independent of fit warmup/readiness; lastEvent retains the latest reset or observed overrun.
 enum class inputState
 {
     disconnected,
@@ -181,11 +191,13 @@ struct inputDiagnostics
     prediction m_prediction; ///< Cleared unless the latest numerical query is valid.
     parameters m_config;     ///< Settings actually applied by the owner.
     inputState m_state{ inputState::disconnected },
-        m_lastEvent{ inputState::disconnected }; ///< Current and last reset reason.
+        m_lastEvent{ inputState::disconnected }; ///< Current status and most recent reset/overrun event.
     uint64_t m_revision{ 0 }, m_generation{ 0 }; ///< Applied control revision and source identity generation.
     uint64_t m_processed{ 0 }, m_dropped{ 0 },
         m_invalid{ 0 }; ///< Lifetime accepted, lost/discarded and invalid records.
     uint64_t m_restarts{ 0 }, m_resets{ 0 }, m_rollbacks{ 0 }; ///< Lifetime source/fit discontinuity counters.
+    uint64_t m_admittedGaps{ 0 }, m_rejectedGaps{ 0 }; ///< Observed counter gaps retained or given a full reset.
+    bool     m_allowSingleFrameGap{ false };           ///< Startup-only opt-in; false preserves reset-on-loss behavior.
     uint64_t m_duplicates{ 0 }, m_busy{ 0 }, m_races{ 0 }; ///< Empty polls, busy writes and rejected snapshot attempts.
     uint64_t m_counter{ 0 }; ///< Last examined source publication; may differ from last accepted prediction identity.
     uint32_t m_depth{ 0 };   ///< Retention depth; one explicitly means overwritten samples cannot be recovered.
@@ -194,6 +206,9 @@ struct inputDiagnostics
 };
 
 /// Single-owner runtime: bounded source snapshots, strict time mapping and unchanged numerical estimator.
+/** Opt-in retention uses private accepted ordinals only after physical counter/clock validation.
+ * Public predictions retain physical counter identity; a retained gap requires a new prediction query.
+ */
 class inputProcessor
 {
     harmonicEstimator       m_estimator; ///< Sole numerical owner; no simulator access.
@@ -206,6 +221,8 @@ class inputProcessor
     uint64_t m_rateCount{ 0 };   ///< Accepted records in that window; fit resets do not hide lost throughput.
     uint64_t m_cursor{ 0 };      ///< Last examined counter in this source generation.
     uint64_t m_seenCounter{ 0 }; ///< Latest stable snapshot counter, including an unconsumed bounded-batch tail.
+    uint64_t m_sequence{ 0 }, m_lastCounter{ 0 }; ///< Optional kernel ordinal and last accepted physical counter.
+    int64_t  m_lastGap{ -1 }; ///< Acquisition time of the last admitted gap; cleared by every full reset.
     bool     m_connected{ false }, m_bound{ false }, m_haveAnchor{ false }; ///< Source/counter/clock binding state.
 
     /// Clear the fit and estimates while preserving lifetime counters and source cursor.
@@ -214,11 +231,17 @@ class inputProcessor
     /// Convert a validated source epoch timestamp into the anchored monotonic domain without overflow.
     bool translate( int64_t real /**< [in] realtime ns */, int64_t &mono /**< [out] mapped monotonic ns */ ) const;
 
+    /// Admit only a mature, fresh, isolated single-frame gap with consistent physical timing at depth one.
+    bool singleGapValid( uint64_t counter /**< [in] new physical counter */,
+                         int64_t  mapped /**< [in] new acquisition ns */,
+                         int64_t  now /**< [in] actual receipt ns */ ) const;
+
   public:
     /// Validate settings and allocate only the fixed maximum batch at startup.
     inputProcessor( const parameters &config         = parameters{} /**< [in] numerical settings */,
                     size_t            capacity       = 256 /**< [in] bounded copy capacity */,
-                    int64_t           clockTolerance = 1000000 /**< [in] maximum clock uncertainty/step [ns] */ );
+                    int64_t           clockTolerance = 1000000 /**< [in] maximum clock uncertainty/step [ns] */,
+                    bool allowSingleFrameGap = false /**< [in] retain qualified single gaps; disabled by default */ );
 
     /// Validate a timespec and convert to epoch nanoseconds, rejecting absent or overflowing timestamps.
     static bool timeNs( const timespec &value /**< [in] timestamp */, int64_t &result /**< [out] nanoseconds */ );
@@ -248,13 +271,17 @@ class inputProcessor
     const inputDiagnostics &diagnostics() const;
 };
 
-inline inputProcessor::inputProcessor( const parameters &config, size_t capacity, int64_t clockTolerance )
+inline inputProcessor::inputProcessor( const parameters &config,
+                                       size_t            capacity,
+                                       int64_t           clockTolerance,
+                                       bool              allowSingleFrameGap )
     : m_estimator( config ), m_clockTolerance( clockTolerance )
 {
     if( capacity == 0 || capacity > 65536 || clockTolerance <= 0 )
         throw std::invalid_argument( "invalid input batch/clock settings" );
     m_batch.resize( capacity );
-    m_stats.m_config = config;
+    m_stats.m_config              = config;
+    m_stats.m_allowSingleFrameGap = allowSingleFrameGap;
 }
 
 inline bool inputProcessor::timeNs( const timespec &value, int64_t &result )
@@ -275,6 +302,8 @@ inline void inputProcessor::invalidate( inputState reason )
     m_stats.m_ageUs                 = -1;
     m_stats.m_horizonUs             = 0;
     m_lastTime                      = -1;
+    m_sequence = m_lastCounter = 0;
+    m_lastGap                  = -1;
     ++m_stats.m_resets;
 }
 
@@ -328,6 +357,19 @@ inline bool inputProcessor::translate( int64_t real, int64_t &mono ) const
         return false;
     mono = m_anchor.m_mono + delta;
     return mono >= 0;
+}
+
+inline bool inputProcessor::singleGapValid( uint64_t counter, int64_t mapped, int64_t now ) const
+{
+    if( m_stats.m_depth != 1 || m_lastTime < 0 || counter <= m_lastCounter || counter - m_lastCounter != 2 ||
+        m_estimator.state() != estimatorState::ready || m_stats.m_prediction.m_state != estimatorState::ready ||
+        now - m_lastTime > m_stats.m_config.m_maxAgeNs || now - mapped > m_stats.m_config.m_maxAgeNs )
+        return false;
+    const int64_t elapsed = mapped - m_lastTime;
+    const double  period  = 1e9 / m_stats.m_config.m_sampleRate;
+    return elapsed > 0 && elapsed <= 1000000 && elapsed <= m_stats.m_config.m_maxIntervalNs &&
+           std::abs( elapsed - 2 * period ) <= .05 * period &&
+           ( m_lastGap < 0 || mapped - m_lastGap >= std::llround( m_stats.m_config.m_memoryTime * 1e9 ) );
 }
 
 template <typename sourceT, typename clockT>
@@ -402,10 +444,16 @@ size_t inputProcessor::drain( sourceT &source, clockT clockNow )
         m_anchor     = clock;
         m_haveAnchor = true;
     }
-    if( first > m_cursor + 1 )
+    const uint64_t missing    = first - m_cursor - 1;
+    bool           pendingGap = missing && m_stats.m_allowSingleFrameGap;
+    if( missing )
     {
-        m_stats.m_dropped += first - m_cursor - 1;
-        invalidate( inputState::overrun );
+        m_stats.m_dropped += missing;
+        if( !pendingGap )
+        {
+            ++m_stats.m_rejectedGaps;
+            invalidate( inputState::overrun );
+        }
     }
     for( size_t n = 0; n < count; ++n )
     {
@@ -416,16 +464,35 @@ size_t inputProcessor::drain( sourceT &source, clockT clockNow )
             written > clock.m_real || !translate( acquired, mapped ) || mapped > clock.m_mono ||
             ( m_lastTime >= 0 && mapped <= m_lastTime ) )
         {
+            if( pendingGap )
+            {
+                ++m_stats.m_rejectedGaps;
+                pendingGap = false;
+            }
             ++m_stats.m_dropped;
             ++m_stats.m_invalid;
             invalidate( inputState::invalidTime );
             continue;
         }
+        bool admitted = false;
+        if( pendingGap )
+        {
+            admitted = missing == 1 && frame.m_adc[0] <= 4095 && frame.m_adc[1] <= 4095 &&
+                       singleGapValid( frame.m_counter, mapped, clock.m_mono );
+            if( !admitted )
+            {
+                ++m_stats.m_rejectedGaps;
+                invalidate( inputState::overrun );
+            }
+            pendingGap = false;
+        }
         if( m_estimator.state() != estimatorState::warming && m_estimator.state() != estimatorState::ready )
             invalidate( m_estimator.state() == estimatorState::stale ? inputState::stale : inputState::numerical );
-        if( !m_estimator.consume( adcSample{ frame.m_adc, mapped, frame.m_counter, m_stats.m_generation },
-                                  clock.m_mono ) )
+        const uint64_t sequence = m_stats.m_allowSingleFrameGap ? m_sequence + 1 : frame.m_counter;
+        if( !m_estimator.consume( adcSample{ frame.m_adc, mapped, sequence, m_stats.m_generation }, clock.m_mono ) )
         {
+            if( admitted )
+                ++m_stats.m_rejectedGaps;
             const auto reason =
                 m_estimator.state() == estimatorState::stale ? inputState::stale : inputState::numerical;
             ++m_stats.m_dropped;
@@ -433,13 +500,24 @@ size_t inputProcessor::drain( sourceT &source, clockT clockNow )
             invalidate( reason );
             continue;
         }
+        m_sequence = sequence;
+        if( admitted )
+        {
+            ++m_stats.m_admittedGaps;
+            m_lastGap            = mapped;
+            m_stats.m_lastEvent  = inputState::overrun;
+            m_stats.m_prediction = {}; // Re-solve before publishing any post-gap prediction.
+            m_stats.m_ageUs      = -1;
+            m_stats.m_horizonUs  = 0;
+        }
         if( m_lastTime >= 0 )
         {
-            const double period  = mapped - m_lastTime;
+            const double period  = admitted ? ( mapped - m_lastTime ) / 2. : mapped - m_lastTime;
             m_period             = m_period > 0 ? .01 * period + .99 * m_period : period;
             m_stats.m_sampleRate = 1e9 / m_period;
         }
         m_lastTime             = mapped;
+        m_lastCounter          = frame.m_counter;
         m_stats.m_writeDelayUs = ( written - acquired ) * 1e-3;
         m_stats.m_state        = inputState::streaming;
         ++m_stats.m_processed;
@@ -459,6 +537,8 @@ inline void inputProcessor::predict( int64_t now )
         m_rateTime     = now;
     }
     m_stats.m_prediction = m_estimator.predict( now );
+    if( m_stats.m_allowSingleFrameGap )
+        m_stats.m_prediction.m_sequence = m_lastCounter; // Public identity always remains the physical counter.
     if( m_lastTime >= 0 )
         m_stats.m_ageUs = ( now - m_lastTime ) * 1e-3;
     if( m_stats.m_prediction.m_state == estimatorState::stale && m_connected )

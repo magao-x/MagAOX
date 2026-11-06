@@ -34,7 +34,8 @@ without advancing the cursor.
 **A one-frame circular buffer cannot guarantee every-frame consumption.** Once
 a pair is overwritten, semaphore counts or a consumer-side queue cannot restore
 it. Depth-one input is supported for diagnosis; gaps are counted and reset the
-fit. It is never silently treated as lossless.
+fit by default. The optional single-frame policy below can preserve mature
+history without recovering or concealing the missing sample.
 
 For a frameGrabber producer, the operator can use its existing startup setting
 `framegrabber.circBuffLength=256`: 32 ms retention at 8 kHz with per-plane
@@ -85,7 +86,8 @@ increments generation and resets. Counter rollback is checked against the last
 stable snapshot, including any unconsumed batch tail, and increments generation
 immediately. Known unconsumed records are counted as dropped when a generation
 ends; records never observed before a restart cannot be counted. Gaps, bad samples/times, stale data, configuration and explicit
-resets clear/re-warm observation automatically. No old prediction is held ready;
+resets clear/re-warm observation automatically. The default resets on every gap;
+the startup opt-in below is the sole qualified-gap exception. No old prediction is held ready;
 supervision also checks a snapshot's age before sending it to INDI.
 
 Steady processing uses fixed numerical state and startup-allocated batch storage,
@@ -96,6 +98,10 @@ unlink/recreate semantics need Linux qualification; concurrent truncation of an
 attached mapping is not a supported restart protocol.
 
 ## Configuration and INDI
+
+`input.allowSingleFrameGap` is a startup-only option, default `false`. It accepts
+only `true`, `false`, `1` or `0`; malformed text fails configuration. It is not
+an INDI switch. Existing configuration files remain valid without this key.
 
 [config/example.conf](config/example.conf) is observation-only. `[parameters]`
 keys have same-named INDI properties with `current` (owner-applied) and `target`
@@ -145,6 +151,11 @@ Read-only `input` text reports stream name, exact decimal counter/generation,
 - `sample_age_us`, `effective_horizon_us` (target minus sample),
   `producer_delay_us` (write minus acquisition), `service_us` (last prediction
   iteration's work excluding wait), and `applied_revision`.
+- `gap_enabled`, `admitted_gaps`, `rejected_gaps`, `full_resets`: startup policy,
+  retained counter-gap events, counter-gap events that required a full reset,
+  and an alias of the existing `resets` counter. Rejections include gaps while
+  the option is disabled. Full resets also include attachment/configuration and
+  non-gap faults. An admitted gap can leave `last_event=overrun` with a ready fit.
 
 `stream_state` / `last_event`: 0 disconnected, 1 waiting, 2 streaming,
 3 incompatible, 4 overrun, 5 invalid time, 6 clock fault, 7 stale, 8 numerical.
@@ -748,6 +759,123 @@ cadence guard against recorded acquisition jitter before deployment: the 5%
 prototype bound can conservatively reject real irregular/phase-slewed input.
 The prototype is not a production architecture or an actuation qualification;
 its two-estimator validation scaffolding should not be copied into the live loop.
+
+## Optional production single-frame policy (2026-11-06)
+
+The current application implements `input.allowSingleFrameGap=false` by default.
+The preceding gap-study section describes the historical offline prototypes;
+the live application uses one numerical owner and includes none of their
+two-estimator validation scaffolding. No DM path or new actuator control exists.
+
+For a separately reviewed observation-test configuration, the opt-in is:
+
+```ini
+[input]
+allowSingleFrameGap=true
+sampleRate=4000
+[parameters]
+frequency=28
+prediction_horizon=1
+```
+
+Use `sampleRate=8000` for an 8-kHz source. This snippet is not applied to any
+configuration by the validation tools; omitting the opt-in retains the default.
+
+When enabled, the reader may retain a mature fit across **exactly one** missing
+publication at depth one. It requires successful prior numerical readiness,
+ordered physical counters/timestamps in the same generation, current and prior
+sample freshness, elapsed acquisition time <=1 ms and <=`maxInterval`, and at
+least one memory time since another admitted gap. The cadence guard is
+`abs(dt - 2e9/sampleRate) <= 0.05e9/sampleRate`. Actual acquisition times still
+drive phase and window weights. No missing sample is filled in. ADC, stream,
+clock, conditioning, freshness and horizon checks remain active.
+
+The cadence guard applies only to gap retention. Valid ordinary jittered samples
+are consumed normally. If the guard fails, the fit resets and the fresh record
+is consumed from cold; it is not discarded merely for missing the cadence guard.
+Timestamp/data faults still inhibit and discard invalid records. Dropped counts
+remain physical source loss/rejection counts. Kernel ordinals are private;
+published prediction identities remain physical source counters. An admitted
+gap clears the cached result until the next successful query, preserving the
+original cold-start coverage while avoiding publication of a pre-gap result.
+
+The strict guard **can reject retention during normal phase slewing**. The
+simulator permits a default 5% correction per interval; over two intervals this
+can exceed the guard's 5%-of-one-period tolerance. Deterministic analytic tests
+using actual irregular acquisition times found:
+
+| Synthetic profile | Admitted / 48 warm single-gap probes, at each rate |
+| --- | ---: |
+| Uniform | 48 |
+| Bounded three-phase jitter, ±2% of period | 48 |
+| Bounded three-phase jitter, ±10% of period | 0 |
+| Bounded phase slew, 2% per interval | 48 |
+| Bounded phase slew, 5% per interval | 6 |
+
+No valid records were discarded in these tests. Maximum retained analytic gain
+error was 0.00361%, phase error 0.00191° (fine ADC calibration isolates timing).
+These are synthetic qualifications, not a measured live timestamp distribution.
+The supplied live 4-kHz result—602 s, 2,407,458 processed, zero drops and zero
+additional resets—is consistent with reliable observation at that rate, but
+contains no per-frame timing information and does not exercise gap admission.
+No representative live timestamp recording was found in the repository or the
+local accelFFCtrl validation artifact directories searched.
+
+The extended 60-s study replays both single/full populations at 8/4 kHz through
+the disabled and optional production paths, preserving the historical prototype
+comparisons. With one loss/s, production availability improves **69.95% to
+99.45%**, with 59 losses still counted, one initial full reset, and 59 admitted
+gaps. Full-population optional NRMSE X/Y is **43.16%/49.21% at 8 kHz** and
+**46.96%/57.69% at 4 kHz**, matching the offline prototype. Default reset recovery
+is 300.375/300.250 ms; admission permits readiness at the first post-gap query.
+Dense clusters and stale/integrity faults retain full reset behavior.
+
+Additional stochastic cases inject bounded **timestamp-tag error** into the
+unchanged nominal-grid recording. Their truth remains on its physical nominal
+grid; these measure timestamp uncertainty, not a re-simulation at irregular
+times. ±2% tag error admits all 59 isolated gaps; ±10% admits none and falls back
+to 69.95% availability. All valid samples remain consumed. Separate analytic
+tests above evaluate true irregular sampling at the correct target time.
+
+Run the existing `gap-validation` command from the prior section to produce
+208 replay summaries plus `timestamp_guard.csv`. Reports include the actual
+`optional` production policy and rejected-gap/acceptance counts. The default
+path matches all 92 archived prediction/history/truth binaries byte-for-byte;
+an independent pre-change-reader comparison passed 66,002 exact prediction/status
+checks, including fault and restart paths. Numerical and source model headers,
+native stream code and configuration files are unchanged.
+
+Before claiming live qualification, a human-provided recording must contain each
+accepted stable-copy record's physical counter, generation/mapping identity,
+two UINT16 codes, exact acquisition/write realtime ns, actual receipt monotonic
+ns, and paired realtime/monotonic clock anchors with uncertainty. Include
+nominal-rate/estimator settings and intervals covering steady operation,
+phase slewing, losses, restarts and relevant producer skipped/late diagnostics.
+Also retain rejected stable-copy candidates with validation/reset reasons. Exact
+prediction replay additionally needs per-query now/target/sample ns, state,
+physical sequence and predicted values; without those, qualify only timestamp
+intervals rather than actual live prediction accuracy.
+Aggregate counts or 5-Hz INDI snapshots cannot establish the guard distribution.
+Capture overhead must be characterized; no instrument capture is performed here.
+
+The core is ready for review and a controlled **observation-only** test after
+Linux application/configuration tests pass. Keep the default disabled; the
+successful lossless 4-kHz run does not require a policy change. A human can use
+the following on a configured **non-instrument Linux development host** first:
+
+```bash
+make -C apps/accelFFCtrl CXX=g++ -W accelFFCtrlInput.hpp
+make -C tests -f Makefile.one t=../apps/accelFFCtrl/tests/accelFFCtrl_test.cpp
+apps/accelFFCtrl/tests/accelFFCtrl_test '[accelFFCtrl][app]'
+make -C apps/accelFFCtrl/tests CXX=g++ test benchmark native-test
+```
+
+The full application tests could not compile locally because of existing macOS
+`timegm` / installed mxlib `mx/math/floatUtils.hpp` dependencies. They include
+new config/INDI assertions for the option and counters, but are not counted as
+passing local tests. Local synthetic/sanitizer results do not replace that Linux
+check or live jitter qualification. No system dependencies, instrument settings,
+production configuration files, deployment, commit or push were changed.
 
 ## Limitations
 

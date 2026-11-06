@@ -20,6 +20,7 @@ struct observerApp : MagAOX::app::accelFFCtrl
 {
     using accelFFCtrl::applyRequested;
     using accelFFCtrl::config;
+    using accelFFCtrl::m_allowSingleFrameGap;
     using accelFFCtrl::m_configName;
     using accelFFCtrl::m_device;
     using accelFFCtrl::m_indiP_diagnostics;
@@ -81,11 +82,15 @@ TEST_CASE( "accelFFCtrl application configuration", "[accelFFCtrl][app]" )
         REQUIRE( app.m_requested.m_voltsPerBit[0] == .0083799 );
         REQUIRE( app.m_requested.m_sensitivity[1] == 1.02 );
         REQUIRE( app.m_loopPause == 200000000 );
+        REQUIRE_FALSE( app.m_allowSingleFrameGap );
+        REQUIRE_FALSE( app.m_snapshot.m_allowSingleFrameGap );
     }
     for( const std::string text : { "[input]\nshmimName=dm01disp00\n",
                                     "[input]\nmaxBatch=0\n",
                                     "[input]\nmaxAge_us=0\n",
                                     "[input]\nmaxInterval_us=20000\n",
+                                    "[input]\nallowSingleFrameGap=truse\n",
+                                    "[input]\nallowSingleFrameGap=2\n",
                                     "[parameters]\nfrequency=0\n",
                                     "[parameters]\nprediction_horizon=51\n",
                                     "[parameters]\nadc_sensitivity_x=0\n",
@@ -111,6 +116,47 @@ TEST_CASE( "accelFFCtrl application configuration", "[accelFFCtrl][app]" )
     MagAOX::app::accelFFCtrl::loadConfigImpl;
 #endif
     // clang-format on
+}
+
+/** \brief The new startup opt-in and read-only gap diagnostics require no stream or INDI connection.
+ * \ingroup accelFFCtrl_unit_test
+ */
+TEST_CASE( "accelFFCtrl optional single-gap configuration and diagnostics", "[accelFFCtrl][app]" )
+{
+    // clang-format off
+#ifdef ACCELFFCTRL_TEST_DOXYGEN_REF
+    MagAOX::app::accelFFCtrl::loadConfigImpl;
+    MagAOX::app::accelFFCtrl::setupProperties;
+    MagAOX::app::accelFFCtrl::appLogic;
+#endif
+    // clang-format on
+    observerApp app;
+    app.setupConfig();
+    char      path[] = "/tmp/accelFFCtrl-gap-config-XXXXXX";
+    const int fd     = mkstemp( path );
+    REQUIRE( fd >= 0 );
+    close( fd );
+    {
+        std::ofstream file( path );
+        file << "[input]\nallowSingleFrameGap=true\n";
+    }
+    app.config.readConfig( path );
+    unlink( path );
+    REQUIRE( app.loadConfigImpl( app.config ) == 0 );
+    REQUIRE( app.m_allowSingleFrameGap );
+    app.m_runtime.emplace( app.m_requested, 256, 1000000, app.m_allowSingleFrameGap );
+    REQUIRE( app.m_runtime->diagnostics().m_allowSingleFrameGap );
+    REQUIRE( app.setupProperties() == 0 );
+    app.m_snapshot                = app.m_runtime->diagnostics();
+    app.m_snapshot.m_admittedGaps = 3;
+    app.m_snapshot.m_rejectedGaps = 2;
+    app.m_snapshot.m_resets       = 7;
+    REQUIRE( app.appLogic() == 0 );
+    REQUIRE( app.m_indiP_diagnostics["gap_enabled"].get<double>() == 1 );
+    REQUIRE( app.m_indiP_diagnostics["admitted_gaps"].get<double>() == 3 );
+    REQUIRE( app.m_indiP_diagnostics["rejected_gaps"].get<double>() == 2 );
+    REQUIRE( app.m_indiP_diagnostics["full_resets"].get<double>() == 7 );
+    REQUIRE( app.m_indiP_diagnostics["resets"].get<double>() == 7 );
 }
 
 /** \brief INDI changes remain pending until the numerical owner applies one coherent revision; invalid edits preserve
