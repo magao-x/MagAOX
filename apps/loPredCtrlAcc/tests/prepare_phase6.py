@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[3]
 NAMES = ("ar_controller", "recursive_least_squares", "qrd_rls", "utils", "shadow_controller")
 
 
-def main():
+def main(label="Phase 6"):
     """Read pinned local Git objects without a checkout, network access or source modifications."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", required=True, type=Path)
@@ -25,7 +25,7 @@ def main():
             if not target.exists() or target.read_bytes() != data:
                 target.write_bytes(data)
     (args.output / "snapshot.stamp").write_text(REFERENCE + "\n")
-    print(f"Phase 6 numerical oracle: {REFERENCE}")
+    print(f"{label} numerical oracle: {REFERENCE}")
 
 
 if __name__ == "__main__":
