@@ -7,7 +7,7 @@
 ## See https://linux.die.net/man/7/cpuset
 ##
 ## Run this as sudo at startup of the system
-## For a rename migration, stop instrument processes and run remove_cpusets first.
+## Before changing names or CPU assignments, stop instrument processes and run remove_cpusets.
 ## Applications and CACAO FPS settings place their threads in these sets.
 ##
 ####################################################
@@ -167,7 +167,7 @@ mkdir -p "$cpusetMount/tweeter"
 /bin/echo 1 > "$cpusetMount/tweeter/cpuset.cpu_exclusive"
 /bin/echo 0 > "$cpusetMount/tweeter/cpuset.mems"
 
-# L3 domain 5 (CPUs 40-47): tweeter controller pipeline, synco and modulator, with the loop.
+# L3 domain 5 (CPUs 40-47): tweeter monitor/post, synco and modulator, with the loop.
 
 #dmtweeter-synco: primary monitor and scheduler
 mkdir -p "$cpusetMount/dmtweeter-synco"
@@ -175,11 +175,11 @@ mkdir -p "$cpusetMount/dmtweeter-synco"
 /bin/echo 1 > "$cpusetMount/dmtweeter-synco/cpuset.cpu_exclusive"
 /bin/echo 0 > "$cpusetMount/dmtweeter-synco/cpuset.mems"
 
-#dmtweeter-sdk: BMC SDK worker, sharing L3 with the tweeter monitor
-mkdir -p "$cpusetMount/dmtweeter-sdk"
-/bin/echo 42 > "$cpusetMount/dmtweeter-sdk/cpuset.cpus"
-/bin/echo 1 > "$cpusetMount/dmtweeter-sdk/cpuset.cpu_exclusive"
-/bin/echo 0 > "$cpusetMount/dmtweeter-sdk/cpuset.mems"
+#spare42: development reserve; keep the BMC SDK worker outside the MVM's L3 domain
+mkdir -p "$cpusetMount/spare42"
+/bin/echo 42 > "$cpusetMount/spare42/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/spare42/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/spare42/cpuset.mems"
 
 #po4ao
 mkdir -p "$cpusetMount/po4ao"
@@ -259,11 +259,11 @@ mkdir -p "$cpusetMount/camtip_sw"
 /bin/echo 1 > "$cpusetMount/camtip_sw/cpuset.cpu_exclusive"
 /bin/echo 0 > "$cpusetMount/camtip_sw/cpuset.mems"
 
-#spare56: dedicated development reserve
-mkdir -p "$cpusetMount/spare56"
-/bin/echo 56 > "$cpusetMount/spare56/cpuset.cpus"
-/bin/echo 1 > "$cpusetMount/spare56/cpuset.cpu_exclusive"
-/bin/echo 0 > "$cpusetMount/spare56/cpuset.mems"
+#dmtweeter-sdk: BMC SDK worker, outside the MVM's L3 domain
+mkdir -p "$cpusetMount/dmtweeter-sdk"
+/bin/echo 56 > "$cpusetMount/dmtweeter-sdk/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/dmtweeter-sdk/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/dmtweeter-sdk/cpuset.mems"
 
 #dmtweeter-synco-release: synco reader-release observer
 mkdir -p "$cpusetMount/dmtweeter-synco-release"

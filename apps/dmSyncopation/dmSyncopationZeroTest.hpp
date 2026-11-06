@@ -289,7 +289,10 @@ inline void dmSyncopation::drainZeroTestReader( int64_t now )
             }
             continue;
         }
-        m_zeroTiming.reader( record, true );
+        if( detailedTimingEnabled() )
+        {
+            m_zeroTiming.reader( record, true );
+        }
 
         if( ( record.outcome != MagAOX::dmTiming::Outcome::unknown &&
               record.outcome != MagAOX::dmTiming::Outcome::success ) ||
@@ -324,7 +327,10 @@ inline void dmSyncopation::sampleZeroTestSdk( int64_t now )
     }
     MagAOX::dmCompletion::Record record;
     const bool                   coherent = dev::dmCompletion::read( &m_zeroSdk, record );
-    m_zeroTiming.sdk( record, std::max( now, m_now() ), coherent );
+    if( detailedTimingEnabled() )
+    {
+        m_zeroTiming.sdk( record, std::max( now, m_now() ), coherent );
+    }
 
     if( coherent && record.kind == MagAOX::dmCompletion::Kind::sdk &&
         ( record.state == MagAOX::dmCompletion::State::error ||
@@ -779,6 +785,11 @@ inline void dmSyncopation::zeroTestEvent( int                           step,
                                           int64_t                       publicationBeginNs,
                                           const synco::ZeroTiming::Key &auxiliaryKey )
 {
+    if( !detailedTimingEnabled() )
+    {
+        return;
+    }
+
     if( ( outcome == ZeroOutcome::mainAcknowledged || outcome == ZeroOutcome::acknowledged ) &&
         reason == ZeroOutcome::none && m_zeroEventStride > 1 && m_zeroStats.mainObserved % m_zeroEventStride != 0 )
     {
@@ -862,6 +873,11 @@ inline void dmSyncopation::zeroTestClockRejected( ZeroClockFailure failure, int6
     m_zeroStats.active  = false;
     m_zeroStats.warming = true;
     m_reason = m_productionEnabled ? "production publication clock unqualified" : "zero publication clock unqualified";
+
+    if( !detailedTimingEnabled() )
+    {
+        return;
+    }
 
     ZeroEvent event;
     event.trial          = m_zeroTrial;
@@ -1134,7 +1150,7 @@ inline int dmSyncopation::processZeroTestPrimary( int64_t observed, int64_t rece
         m_zeroPhase.reset();
         m_zeroPublicationTiming.reset();
 
-        if( m_zeroHaveRelease )
+        if( m_zeroHaveRelease && detailedTimingEnabled() )
         {
             m_zeroTiming.reader( m_zeroRelease.record );
         }
@@ -1186,7 +1202,10 @@ inline int dmSyncopation::processZeroTestPrimary( int64_t observed, int64_t rece
     ++m_zeroStats.mainObserved;
     m_zeroStats.auxiliaryOpportunities += uint64_t( m_requested - 1 );
     m_zeroCounterTargetRawNs = rawGrid.ns;
-    m_zeroPublicationTiming.main( { metadata->inode, primary, stamp.tv_sec, stamp.tv_nsec }, rawGrid, periodQ32 );
+    if( detailedTimingEnabled() )
+    {
+        m_zeroPublicationTiming.main( { metadata->inode, primary, stamp.tv_sec, stamp.tv_nsec }, rawGrid, periodQ32 );
+    }
     synco::ZeroTiming::Key main;
     bool                   mainMatched  = false;
     const bool             recovering   = !m_zeroHaveCombined;
@@ -1279,46 +1298,50 @@ inline int dmSyncopation::processZeroTestPrimary( int64_t observed, int64_t rece
     }
     ++m_zeroStats.mainMatched;
     m_zeroStats.mainRebaselined += recovering ? 1 : 0;
-    m_zeroLastCombined           = main;
-    m_zeroHaveCombined           = true;
-    bool        impactClassified = false;
-    const auto &outputImage      = m_zeroCombined;
-    const auto *trace            = outputImage.streamproctrace;
+    m_zeroLastCombined = main;
+    m_zeroHaveCombined = true;
+    if( detailedTimingEnabled() )
+    {
+        bool        impactClassified = false;
+        const auto &outputImage      = m_zeroCombined;
+        const auto *trace            = outputImage.streamproctrace;
 
-    if( receipt > 0 && trace && outputImage.md->NBproctrace > 0 && !outputImage.md->write )
-    {
-        const auto     rows          = outputImage.md->NBproctrace;
-        const auto     trigger       = trace[0].trigger_inode;
-        const auto     tracedCounter = trace[0].cnt0;
-        const auto     pid           = trace[0].procwrite_PID;
-        const timespec start{ trace[0].ts_procstart.tv_sec, trace[0].ts_procstart.tv_nsec };
-        const timespec updated{ trace[0].ts_streamupdate.tv_sec, trace[0].ts_streamupdate.tv_nsec };
-        const auto     startNs  = simulationTimestamp( start );
-        const auto     updateNs = simulationTimestamp( updated );
-        const timespec combinedStamp{ time_t( main.sec ), long( main.nsec ) };
-        const auto     combinedNs = simulationTimestamp( combinedStamp );
-        std::atomic_thread_fence( std::memory_order_acquire );
-        synco::ZeroTiming::Key verified;
-        impactClassified =
-            trigger == metadata->inode && tracedCounter == primary && pid > 0 && publication > 0 && startNs > 0 &&
-            updateNs > 0 && startNs >= publication && updateNs >= startNs && combinedNs >= updateNs &&
-            zeroTestCombined( verified ) && synco::ZeroTiming::equal( main, verified ) &&
-            outputImage.md->NBproctrace == rows && trace[0].trigger_inode == trigger &&
-            trace[0].cnt0 == tracedCounter && trace[0].procwrite_PID == pid &&
-            trace[0].ts_procstart.tv_sec == start.tv_sec && trace[0].ts_procstart.tv_nsec == start.tv_nsec &&
-            trace[0].ts_streamupdate.tv_sec == updated.tv_sec && trace[0].ts_streamupdate.tv_nsec == updated.tv_nsec;
-    }
+        if( receipt > 0 && trace && outputImage.md->NBproctrace > 0 && !outputImage.md->write )
+        {
+            const auto     rows          = outputImage.md->NBproctrace;
+            const auto     trigger       = trace[0].trigger_inode;
+            const auto     tracedCounter = trace[0].cnt0;
+            const auto     pid           = trace[0].procwrite_PID;
+            const timespec start{ trace[0].ts_procstart.tv_sec, trace[0].ts_procstart.tv_nsec };
+            const timespec updated{ trace[0].ts_streamupdate.tv_sec, trace[0].ts_streamupdate.tv_nsec };
+            const auto     startNs  = simulationTimestamp( start );
+            const auto     updateNs = simulationTimestamp( updated );
+            const timespec combinedStamp{ time_t( main.sec ), long( main.nsec ) };
+            const auto     combinedNs = simulationTimestamp( combinedStamp );
+            std::atomic_thread_fence( std::memory_order_acquire );
+            synco::ZeroTiming::Key verified;
+            impactClassified = trigger == metadata->inode && tracedCounter == primary && pid > 0 && publication > 0 &&
+                               startNs > 0 && updateNs > 0 && startNs >= publication && updateNs >= startNs &&
+                               combinedNs >= updateNs && zeroTestCombined( verified ) &&
+                               synco::ZeroTiming::equal( main, verified ) && outputImage.md->NBproctrace == rows &&
+                               trace[0].trigger_inode == trigger && trace[0].cnt0 == tracedCounter &&
+                               trace[0].procwrite_PID == pid && trace[0].ts_procstart.tv_sec == start.tv_sec &&
+                               trace[0].ts_procstart.tv_nsec == start.tv_nsec &&
+                               trace[0].ts_streamupdate.tv_sec == updated.tv_sec &&
+                               trace[0].ts_streamupdate.tv_nsec == updated.tv_nsec;
+        }
 
-    if( impactClassified )
-    {
-        m_zeroTiming.main( main, primary, receipt );
+        if( impactClassified )
+        {
+            m_zeroTiming.main( main, primary, receipt );
+        }
+        else
+        {
+            ++m_zeroStats.mainImpactUnclassified;
+        }
+        zeroTestEvent( 0, ZeroOutcome::mainAcknowledged, ZeroStage::mainAcknowledgement, grid.ns, observed, main );
+        m_zeroPhase.observe( primary, 0, m_requested, main, grid.ns, periodQ32 );
     }
-    else
-    {
-        ++m_zeroStats.mainImpactUnclassified;
-    }
-    zeroTestEvent( 0, ZeroOutcome::mainAcknowledged, ZeroStage::mainAcknowledgement, grid.ns, observed, main );
-    m_zeroPhase.observe( primary, 0, m_requested, main, grid.ns, periodQ32 );
 
     for( int step = 1; step < m_requested; ++step )
     {
@@ -1539,7 +1562,8 @@ inline int dmSyncopation::processZeroTestPrimary( int64_t observed, int64_t rece
         const auto             postedAt = m_now();
         synco::ZeroTiming::Key auxiliaryKey;
 
-        if( published == 0 && m_zeroChannel.md->cnt0 == m_zeroExpected && !m_zeroChannel.md->write )
+        if( detailedTimingEnabled() && published == 0 && m_zeroChannel.md->cnt0 == m_zeroExpected &&
+            !m_zeroChannel.md->write )
         {
             const auto *auxiliary = m_zeroChannel.md;
             auxiliaryKey          = {
@@ -1555,7 +1579,7 @@ inline int dmSyncopation::processZeroTestPrimary( int64_t observed, int64_t rece
         }
         ++m_zeroStats.posted;
 
-        if( published == 0 )
+        if( detailedTimingEnabled() && published == 0 )
         {
             m_zeroPublicationTiming.auxiliary( step,
                                                auxiliaryKey,
@@ -1619,7 +1643,10 @@ inline int dmSyncopation::processZeroTestPrimary( int64_t observed, int64_t rece
         {
             ++m_zeroStats.acknowledged;
             m_zeroLastCombined = combined;
-            m_zeroPhase.observe( primary, step, m_requested, combined, grid.ns, periodQ32, auxiliaryKey );
+            if( detailedTimingEnabled() )
+            {
+                m_zeroPhase.observe( primary, step, m_requested, combined, grid.ns, periodQ32, auxiliaryKey );
+            }
             zeroTestEvent( step,
                            ZeroOutcome::acknowledged,
                            ZeroStage::acknowledgement,
@@ -1666,6 +1693,7 @@ inline int dmSyncopation::setupZeroTestINDI()
     }
 
     for( const auto *name : { "enabled",
+                              "diagnosticsEnabled",
                               "labelVersion",
                               "targetEndpoint",
                               "idealPublisher",
@@ -1739,13 +1767,16 @@ inline int dmSyncopation::setupZeroTestINDI()
         m_indiP_zeroTest.add( pcf::IndiElement( name ) );
         m_indiP_zeroTest[name] = 0.0;
     }
+    m_indiP_zeroTest["diagnosticsEnabled"] = detailedTimingEnabled() ? 1.0 : 0.0;
+
     if( registerIndiPropertyReadOnly( m_indiP_zeroTest ) < 0 ||
         createROIndiNumber( m_indiP_zeroPhase, "zero_phase" ) < 0 )
     {
         return -1;
     }
 
-    for( const auto *name : { "observed",
+    for( const auto *name : { "enabled",
+                              "observed",
                               "paired",
                               "phaseMatched",
                               "invalid",
@@ -1771,6 +1802,8 @@ inline int dmSyncopation::setupZeroTestINDI()
             }
         }
     }
+    m_indiP_zeroPhase["enabled"] = detailedTimingEnabled() ? 1.0 : 0.0;
+
     if( registerIndiPropertyReadOnly( m_indiP_zeroPhase ) < 0 ||
         createROIndiNumber( m_indiP_zeroPublication, "zero_publication" ) < 0 ||
         createROIndiNumber( m_indiP_zeroClock, "zero_clock" ) < 0 )
@@ -1778,7 +1811,8 @@ inline int dmSyncopation::setupZeroTestINDI()
         return -1;
     }
 
-    for( const auto *name : { "mainObserved",
+    for( const auto *name : { "enabled",
+                              "mainObserved",
                               "auxiliaryObserved",
                               "paired",
                               "phaseMatched",
@@ -1833,6 +1867,8 @@ inline int dmSyncopation::setupZeroTestINDI()
         m_indiP_zeroClock.add( pcf::IndiElement( name ) );
         m_indiP_zeroClock[name] = 0.0;
     }
+    m_indiP_zeroPublication["enabled"] = detailedTimingEnabled() ? 1.0 : 0.0;
+
     return registerIndiPropertyReadOnly( m_indiP_zeroPublication ) < 0
                ? -1
                : registerIndiPropertyReadOnly( m_indiP_zeroClock );
@@ -1870,10 +1906,13 @@ inline void dmSyncopation::publishZeroTestStatus( int64_t now, bool force )
 
     const auto   period = m_zeroClock.summary().cadence.periodQ32;
     ZeroSnapshot snapshot;
-    snapshot.stats         = m_zeroStats;
-    snapshot.timing        = m_zeroTiming.summary();
-    snapshot.phase         = m_zeroPhase.summary();
-    snapshot.publication   = m_zeroPublicationTiming.summary();
+    snapshot.stats = m_zeroStats;
+    if( detailedTimingEnabled() )
+    {
+        snapshot.timing      = m_zeroTiming.summary();
+        snapshot.phase       = m_zeroPhase.summary();
+        snapshot.publication = m_zeroPublicationTiming.summary();
+    }
     snapshot.clock         = m_zeroPublicationClock.status();
     snapshot.sequence      = m_zeroPublished.sequence + 1;
     snapshot.trial         = m_zeroTrial;
@@ -2118,12 +2157,13 @@ inline void dmSyncopation::updateZeroTest( bool record )
         {
             std::ostringstream output;
             output << "[zero_test] kind=summary labelVersion=9 targetEndpoint=1 idealPublisher=1 trial=" << trial
-                   << " requested=" << snapshot.requested << " snapshotSequence=" << snapshot.sequence
-                   << " snapshotTimeNs=" << snapshot.capturedNs << " snapshotAgeSec=" << age
-                   << " snapshotValid=" << valid << " eventsQueued=" << snapshot.eventsQueued
-                   << " eventStride=" << snapshot.eventStride << " eventsSampledOut=" << stats.eventsSampledOut
-                   << " active=" << stats.active << " warming=" << stats.warming << " finished=" << stats.finished
-                   << " steps=" << steps << " targetHz=" << targetHz << " elapsedSec=" << elapsed * 1e-9
+                   << " diagnosticsEnabled=" << detailedTimingEnabled() << " requested=" << snapshot.requested
+                   << " snapshotSequence=" << snapshot.sequence << " snapshotTimeNs=" << snapshot.capturedNs
+                   << " snapshotAgeSec=" << age << " snapshotValid=" << valid
+                   << " eventsQueued=" << snapshot.eventsQueued << " eventStride=" << snapshot.eventStride
+                   << " eventsSampledOut=" << stats.eventsSampledOut << " active=" << stats.active
+                   << " warming=" << stats.warming << " finished=" << stats.finished << " steps=" << steps
+                   << " targetHz=" << targetHz << " elapsedSec=" << elapsed * 1e-9
                    << " durationSec=" << snapshot.durationSec << " durationLimitSec=" << snapshot.durationLimitSec
                    << " publicationAdvanceUs=" << snapshot.publicationAdvanceUs << " lateUs=" << snapshot.lateUs
                    << " commitLeadUs=" << snapshot.commitLeadUs << " clockRejected=" << stats.clockRejected
@@ -2156,145 +2196,152 @@ inline void dmSyncopation::updateZeroTest( bool record )
             telemeterT::telem<syncoZeroLog>( { output.str() } );
         }
 
-        const auto              &phase = snapshot.phase;
-        std::vector<std::string> phaseNames{ "observed",
-                                             "paired",
-                                             "phaseMatched",
-                                             "invalid",
-                                             "duplicates",
-                                             "counterGaps",
-                                             "labelGaps",
-                                             "phaseExcluded",
-                                             "transportExcluded" };
-        std::vector<double>      phaseValues{ double( phase.observed ),
-                                         double( phase.paired ),
-                                         double( phase.phaseMatched ),
-                                         double( phase.invalid ),
-                                         double( phase.duplicates ),
-                                         double( phase.counterGaps ),
-                                         double( phase.labelGaps ),
-                                         double( phase.phaseExcluded ),
-                                         double( phase.transportExcluded ) };
-
-        for( unsigned step = 0; step < phase.interval.size(); ++step )
+        if( detailedTimingEnabled() )
         {
-            std::ostringstream output;
-            output << "[zero_test] kind=phase labelVersion=9 trial=" << trial << " toStep=" << step
-                   << " endpoint=combined_publication observed=" << phase.observed << " paired=" << phase.paired
-                   << " phaseMatched=" << phase.phaseMatched << " invalid=" << phase.invalid
-                   << " duplicates=" << phase.duplicates << " counterGaps=" << phase.counterGaps
-                   << " labelGaps=" << phase.labelGaps << " phaseExcluded=" << phase.phaseExcluded
-                   << " transportExcluded=" << phase.transportExcluded;
-            const std::array<std::pair<const char *, const synco::ZeroTiming::Stats *>, 4> populations{
-                { { "interval", &phase.interval[step] },
-                  { "intervalError", &phase.intervalError[step] },
-                  { "phaseError", &phase.phaseError[step] },
-                  { "transport", &phase.transport[step] } } };
+            const auto              &phase = snapshot.phase;
+            std::vector<std::string> phaseNames{ "observed",
+                                                 "paired",
+                                                 "phaseMatched",
+                                                 "invalid",
+                                                 "duplicates",
+                                                 "counterGaps",
+                                                 "labelGaps",
+                                                 "phaseExcluded",
+                                                 "transportExcluded" };
+            std::vector<double>      phaseValues{ double( phase.observed ),
+                                             double( phase.paired ),
+                                             double( phase.phaseMatched ),
+                                             double( phase.invalid ),
+                                             double( phase.duplicates ),
+                                             double( phase.counterGaps ),
+                                             double( phase.labelGaps ),
+                                             double( phase.phaseExcluded ),
+                                             double( phase.transportExcluded ) };
 
-            for( const auto &population : populations )
+            for( unsigned step = 0; step < phase.interval.size(); ++step )
             {
-                const auto       &value = *population.second;
-                const auto        rms = value.count ? std::sqrt( std::max( 0.0, value.m2 / value.count ) ) * 1e-3 : -1;
-                const std::string prefix = std::string( population.first ) + std::to_string( step );
-                phaseNames.insert(
-                    phaseNames.end(),
-                    { prefix + "Count", prefix + "MeanUs", prefix + "RmsUs", prefix + "MinUs", prefix + "MaxUs" } );
-                phaseValues.insert( phaseValues.end(),
-                                    { double( value.count ),
-                                      value.meanNs * 1e-3,
-                                      rms,
-                                      value.count ? value.minNs * 1e-3 : -1,
-                                      value.count ? value.maxNs * 1e-3 : -1 } );
-                output << ' ' << population.first << "Count=" << value.count << ' ' << population.first
-                       << "MeanUs=" << value.meanNs * 1e-3 << ' ' << population.first << "RmsUs=" << rms << ' '
-                       << population.first << "MinUs=" << ( value.count ? value.minNs * 1e-3 : -1 ) << ' '
-                       << population.first << "MaxUs=" << ( value.count ? value.maxNs * 1e-3 : -1 );
-            }
+                std::ostringstream output;
+                output << "[zero_test] kind=phase labelVersion=9 trial=" << trial << " toStep=" << step
+                       << " endpoint=combined_publication observed=" << phase.observed << " paired=" << phase.paired
+                       << " phaseMatched=" << phase.phaseMatched << " invalid=" << phase.invalid
+                       << " duplicates=" << phase.duplicates << " counterGaps=" << phase.counterGaps
+                       << " labelGaps=" << phase.labelGaps << " phaseExcluded=" << phase.phaseExcluded
+                       << " transportExcluded=" << phase.transportExcluded;
+                const std::array<std::pair<const char *, const synco::ZeroTiming::Stats *>, 4> populations{
+                    { { "interval", &phase.interval[step] },
+                      { "intervalError", &phase.intervalError[step] },
+                      { "phaseError", &phase.phaseError[step] },
+                      { "transport", &phase.transport[step] } } };
 
-            if( record && step < unsigned( steps ) )
-            {
-                if( telemeterT::telem<syncoZeroLog>( { output.str() } ) < 0 )
+                for( const auto &population : populations )
                 {
-                    ++m_logicTiming.logFailed;
+                    const auto &value = *population.second;
+                    const auto  rms   = value.count ? std::sqrt( std::max( 0.0, value.m2 / value.count ) ) * 1e-3 : -1;
+                    const std::string prefix = std::string( population.first ) + std::to_string( step );
+                    phaseNames.insert(
+                        phaseNames.end(),
+                        { prefix + "Count", prefix + "MeanUs", prefix + "RmsUs", prefix + "MinUs", prefix + "MaxUs" } );
+                    phaseValues.insert( phaseValues.end(),
+                                        { double( value.count ),
+                                          value.meanNs * 1e-3,
+                                          rms,
+                                          value.count ? value.minNs * 1e-3 : -1,
+                                          value.count ? value.maxNs * 1e-3 : -1 } );
+                    output << ' ' << population.first << "Count=" << value.count << ' ' << population.first
+                           << "MeanUs=" << value.meanNs * 1e-3 << ' ' << population.first << "RmsUs=" << rms << ' '
+                           << population.first << "MinUs=" << ( value.count ? value.minNs * 1e-3 : -1 ) << ' '
+                           << population.first << "MaxUs=" << ( value.count ? value.maxNs * 1e-3 : -1 );
+                }
+
+                if( record && step < unsigned( steps ) )
+                {
+                    if( telemeterT::telem<syncoZeroLog>( { output.str() } ) < 0 )
+                    {
+                        ++m_logicTiming.logFailed;
+                    }
                 }
             }
+            updateIfChanged( m_indiP_zeroPhase, phaseNames, phaseValues, stats.active ? INDI_BUSY : INDI_IDLE );
         }
-        updateIfChanged( m_indiP_zeroPhase, phaseNames, phaseValues, stats.active ? INDI_BUSY : INDI_IDLE );
         updateZeroPublication( snapshot, record );
     }
 }
 
 inline void dmSyncopation::updateZeroPublication( const ZeroSnapshot &snapshot, bool record )
 {
-    const auto              &p     = snapshot.publication;
-    const auto              &c     = snapshot.clock;
-    const auto               state = snapshot.stats.active ? INDI_BUSY : INDI_IDLE;
-    std::vector<std::string> names{ "mainObserved",
-                                    "auxiliaryObserved",
-                                    "paired",
-                                    "phaseMatched",
-                                    "sourceGaps",
-                                    "labelGaps",
-                                    "invalid",
-                                    "duplicates",
-                                    "timingExcluded",
-                                    "maxBracketUs",
-                                    "sourceFault" };
-    std::vector<double>      values{ double( p.mainObserved ),
-                                double( p.auxiliaryObserved ),
-                                double( p.paired ),
-                                double( p.phaseMatched ),
-                                double( p.sourceGaps ),
-                                double( p.labelGaps ),
-                                double( p.invalid ),
-                                double( p.duplicates ),
-                                double( p.timingExcluded ),
-                                p.maxBracketNs * 1e-3,
-                                p.sourceFault ? 1.0 : 0.0 };
+    const auto &c     = snapshot.clock;
+    const auto  state = snapshot.stats.active ? INDI_BUSY : INDI_IDLE;
 
-    for( unsigned step = 0; step < p.interval.size(); ++step )
+    if( detailedTimingEnabled() )
     {
-        std::ostringstream output;
-        output << "[zero_test] kind=publication labelVersion=9 endpoint=cnt0_writetime_proxy trial=" << snapshot.trial
-               << " toStep=" << step << " mainObserved=" << p.mainObserved
-               << " auxiliaryObserved=" << p.auxiliaryObserved << " paired=" << p.paired
-               << " sourceGaps=" << p.sourceGaps << " labelGaps=" << p.labelGaps << " invalid=" << p.invalid
-               << " duplicates=" << p.duplicates << " timingExcluded=" << p.timingExcluded
-               << " sourceFault=" << p.sourceFault << " maxBracketUs=" << p.maxBracketNs * 1e-3;
-        const std::array<std::pair<const char *, const synco::ZeroTiming::Stats *>, 6> populations{
-            { { "interval", &p.interval[step] },
-              { "intervalError", &p.intervalError[step] },
-              { "phaseError", &p.phaseError[step] },
-              { "publicationError", &p.publicationError[step] },
-              { "preCounterLead", &p.preCounterLead[step] },
-              { "apiCost", &p.apiCost[step] } } };
+        const auto              &p = snapshot.publication;
+        std::vector<std::string> names{ "mainObserved",
+                                        "auxiliaryObserved",
+                                        "paired",
+                                        "phaseMatched",
+                                        "sourceGaps",
+                                        "labelGaps",
+                                        "invalid",
+                                        "duplicates",
+                                        "timingExcluded",
+                                        "maxBracketUs",
+                                        "sourceFault" };
+        std::vector<double>      values{ double( p.mainObserved ),
+                                    double( p.auxiliaryObserved ),
+                                    double( p.paired ),
+                                    double( p.phaseMatched ),
+                                    double( p.sourceGaps ),
+                                    double( p.labelGaps ),
+                                    double( p.invalid ),
+                                    double( p.duplicates ),
+                                    double( p.timingExcluded ),
+                                    p.maxBracketNs * 1e-3,
+                                    p.sourceFault ? 1.0 : 0.0 };
 
-        for( const auto &population : populations )
+        for( unsigned step = 0; step < p.interval.size(); ++step )
         {
-            const auto  &v      = *population.second;
-            const double rms    = v.count ? std::sqrt( std::max( 0.0, v.m2 / v.count ) ) * 1e-3 : -1;
-            const auto   prefix = std::string( population.first ) + std::to_string( step );
-            names.insert(
-                names.end(),
-                { prefix + "Count", prefix + "MeanUs", prefix + "RmsUs", prefix + "MinUs", prefix + "MaxUs" } );
-            values.insert( values.end(),
-                           { double( v.count ),
-                             v.meanNs * 1e-3,
-                             rms,
-                             v.count ? v.minNs * 1e-3 : -1,
-                             v.count ? v.maxNs * 1e-3 : -1 } );
-            output << ' ' << population.first << "Count=" << v.count << ' ' << population.first
-                   << "MeanUs=" << v.meanNs * 1e-3 << ' ' << population.first << "RmsUs=" << rms << ' '
-                   << population.first << "MinUs=" << ( v.count ? v.minNs * 1e-3 : -1 ) << ' ' << population.first
-                   << "MaxUs=" << ( v.count ? v.maxNs * 1e-3 : -1 );
-        }
+            std::ostringstream output;
+            output << "[zero_test] kind=publication labelVersion=9 endpoint=cnt0_writetime_proxy trial="
+                   << snapshot.trial << " toStep=" << step << " mainObserved=" << p.mainObserved
+                   << " auxiliaryObserved=" << p.auxiliaryObserved << " paired=" << p.paired
+                   << " sourceGaps=" << p.sourceGaps << " labelGaps=" << p.labelGaps << " invalid=" << p.invalid
+                   << " duplicates=" << p.duplicates << " timingExcluded=" << p.timingExcluded
+                   << " sourceFault=" << p.sourceFault << " maxBracketUs=" << p.maxBracketNs * 1e-3;
+            const std::array<std::pair<const char *, const synco::ZeroTiming::Stats *>, 6> populations{
+                { { "interval", &p.interval[step] },
+                  { "intervalError", &p.intervalError[step] },
+                  { "phaseError", &p.phaseError[step] },
+                  { "publicationError", &p.publicationError[step] },
+                  { "preCounterLead", &p.preCounterLead[step] },
+                  { "apiCost", &p.apiCost[step] } } };
 
-        if( record && step < unsigned( snapshot.steps ) && telemeterT::telem<syncoZeroLog>( { output.str() } ) < 0 )
-        {
-            ++m_logicTiming.logFailed;
+            for( const auto &population : populations )
+            {
+                const auto  &v      = *population.second;
+                const double rms    = v.count ? std::sqrt( std::max( 0.0, v.m2 / v.count ) ) * 1e-3 : -1;
+                const auto   prefix = std::string( population.first ) + std::to_string( step );
+                names.insert(
+                    names.end(),
+                    { prefix + "Count", prefix + "MeanUs", prefix + "RmsUs", prefix + "MinUs", prefix + "MaxUs" } );
+                values.insert( values.end(),
+                               { double( v.count ),
+                                 v.meanNs * 1e-3,
+                                 rms,
+                                 v.count ? v.minNs * 1e-3 : -1,
+                                 v.count ? v.maxNs * 1e-3 : -1 } );
+                output << ' ' << population.first << "Count=" << v.count << ' ' << population.first
+                       << "MeanUs=" << v.meanNs * 1e-3 << ' ' << population.first << "RmsUs=" << rms << ' '
+                       << population.first << "MinUs=" << ( v.count ? v.minNs * 1e-3 : -1 ) << ' ' << population.first
+                       << "MaxUs=" << ( v.count ? v.maxNs * 1e-3 : -1 );
+            }
+
+            if( record && step < unsigned( snapshot.steps ) && telemeterT::telem<syncoZeroLog>( { output.str() } ) < 0 )
+            {
+                ++m_logicTiming.logFailed;
+            }
         }
+        updateIfChanged( m_indiP_zeroPublication, names, values, state );
     }
-    updateIfChanged( m_indiP_zeroPublication, names, values, state );
 
     const std::vector<std::string> clockNames{ "clockId",
                                                "valid",
@@ -2363,7 +2410,7 @@ inline void dmSyncopation::updateZeroPublication( const ZeroSnapshot &snapshot, 
 
 inline void dmSyncopation::drainZeroTestEvents( size_t limit )
 {
-    if( !zeroEngine() )
+    if( !zeroEngine() || !detailedTimingEnabled() )
     {
         return;
     }
@@ -2418,6 +2465,11 @@ inline void dmSyncopation::drainZeroTestEvents( size_t limit )
 
 inline void dmSyncopation::recordLogicStage( LogicStage stage, int64_t began )
 {
+    if( !detailedTimingEnabled() )
+    {
+        return;
+    }
+
     const auto ended = m_now();
     const auto index = size_t( stage );
     m_logicTiming.lastNs[index] += std::max<int64_t>( 0, ended - began );
@@ -2431,7 +2483,8 @@ inline int dmSyncopation::setupLogicTimingINDI()
         return -1;
     }
 
-    for( const auto *name : { "sequence",
+    for( const auto *name : { "enabled",
+                              "sequence",
                               "loopGapUs",
                               "loopGapMaxUs",
                               "reportPublicationUs",
@@ -2457,11 +2510,18 @@ inline int dmSyncopation::setupLogicTimingINDI()
         }
     }
 
+    m_indiP_logicTiming["enabled"] = detailedTimingEnabled() ? 1.0 : 0.0;
+
     return registerIndiPropertyReadOnly( m_indiP_logicTiming );
 }
 
 inline void dmSyncopation::updateLogicTimingINDI()
 {
+    if( !detailedTimingEnabled() )
+    {
+        return;
+    }
+
     const auto               began = m_now();
     std::vector<std::string> names{ "sequence",
                                     "loopGapUs",
