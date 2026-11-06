@@ -120,6 +120,21 @@ void replay( const std::filesystem::path    &directory /**< [in] output director
     std::ofstream     output( directory / ( name + ".bin" ), std::ios::binary );
     std::ofstream     events( directory / ( name + "_events.csv" ) );
     std::ofstream     accepted;
+    std::ofstream     frames, queries;
+    // Small opt-in timing fixtures reuse the exact production replay; historical binary outputs are unchanged.
+    const std::string timingScenario = s.m_name;
+    const bool        timingTrace = std::getenv( "ACCELFFCTRL_TIMING_TRACE" ) && extended && population == "single28" &&
+                                    ( timingScenario == "loss1_1s" || timingScenario == "stamp_jitter2pct_loss1" ||
+                                      timingScenario == "stamp_jitter10pct_loss1" ) &&
+                                    ( directory.filename() == "reset" || directory.filename() == "optional" );
+    if( timingTrace )
+    {
+        frames.open( directory / ( name + "_frames.csv" ) );
+        queries.open( directory / ( name + "_queries.csv" ) );
+        frames << "generation,counter,acquired_ns,written_ns,receipt_mono_ns,clock_real_ns,clock_mono_ns,"
+                  "clock_uncertainty_ns,depth,accepted,adc_x,adc_y\n";
+        queries << "query_ns,target_ns,sample_ns,ready,processed,dropped,resets,admitted_gaps,rejected_gaps\n";
+    }
     if( extended )
         accepted.open( directory / ( name + "_accepted.bin" ), std::ios::binary );
     events << "time_ns,dropped,resets\n";
@@ -139,6 +154,15 @@ void replay( const std::filesystem::path    &directory /**< [in] output director
         }
         if( extended && d.m_processed > before.m_processed )
             writeRow<2>( accepted, { double( input.m_header.m_counter - 1 ), double( now ) } );
+        if( timingTrace && d.m_counter != before.m_counter )
+        {
+            int64_t acquired, written;
+            REQUIRE( inputProcessor::timeNs( input.m_frame.m_acquired, acquired ) );
+            REQUIRE( inputProcessor::timeNs( input.m_frame.m_written, written ) );
+            frames << d.m_generation << ',' << input.m_frame.m_counter << ',' << acquired << ',' << written << ','
+                   << now << ',' << epoch + now << ',' << now << ",0,1," << ( d.m_processed > before.m_processed )
+                   << ',' << input.m_frame.m_adc[0] << ',' << input.m_frame.m_adc[1] << '\n';
+        }
     };
     const auto query = [&]( int64_t now, bool nominal, bool produced )
     {
@@ -147,6 +171,10 @@ void replay( const std::filesystem::path    &directory /**< [in] output director
         const auto &d     = processor.diagnostics();
         const auto &p     = d.m_prediction;
         const bool  valid = produced && p.m_state == estimatorState::ready;
+        if( timingTrace && nominal )
+            queries << now << ',' << now + horizon << ',' << p.m_sampleTimeNs << ',' << valid << ',' << d.m_processed
+                    << ',' << d.m_dropped << ',' << d.m_resets << ',' << d.m_admittedGaps << ',' << d.m_rejectedGaps
+                    << '\n';
         scheduled += nominal;
         scheduledReady += nominal && valid;
         ready += valid;
@@ -262,6 +290,13 @@ void replay( const std::filesystem::path    &directory /**< [in] output director
     {
         accepted.close();
         REQUIRE( accepted.good() );
+    }
+    if( timingTrace )
+    {
+        frames.close();
+        queries.close();
+        REQUIRE( frames.good() );
+        REQUIRE( queries.good() );
     }
     manifest << population << ',' << s.m_name << ',' << horizon << ',' << count << ',' << d.m_processed << ','
              << d.m_dropped << ',' << d.m_resets << ',' << scheduled << ',' << scheduledReady << ',' << firstReady

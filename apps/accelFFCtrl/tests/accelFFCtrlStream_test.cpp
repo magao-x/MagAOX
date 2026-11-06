@@ -319,98 +319,254 @@ TEST_CASE( "accelFFCtrl native two dimensional input and restart", "[.][accelFFC
     REQUIRE( processor.diagnostics().m_invalid == 1 );
 }
 
+/** \brief Both production policies see identical depth-one native records, gaps and integrity faults at 4/8 kHz.
+ * \ingroup accelFFCtrl_unit_test
+ */
+TEST_CASE( "accelFFCtrl native depth-one optional-gap qualification", "[.][accelFFCtrl-native]" )
+{
+    // clang-format off
+#ifdef ACCELFFCTRL_TEST_DOXYGEN_REF
+    MagAOX::app::accelFFCtrlDetail::adcStream::frame;
+    MagAOX::app::accelFFCtrlDetail::inputProcessor::drain;
+    MagAOX::app::accelFFCtrlDetail::inputProcessor::predict;
+#endif
+    // clang-format on
+    constexpr int64_t epoch = 1700000000000000000;
+    for( int rate : { 4000, 8000 } )
+        for( uint32_t axes : { 2, 3 } )
+            for( const std::string fault :
+                 { "single", "cluster", "busy", "delay", "invalid", "stale", "silence", "rollback", "restart" } )
+            {
+                CAPTURE( rate, axes, fault );
+                const int64_t period = 1000000000 / rate;
+                parameters    config;
+                config.m_sampleRate   = rate;
+                config.m_frequency    = 28;
+                config.m_predictionNs = 1000000;
+                config.m_voltsPerBit.fill( 1e-6 );
+                config.m_sensitivity.fill( 1 );
+                nativeInput    producer( 1, axes );
+                adcStream      reader;
+                inputProcessor strict( config ), optional( config, 256, 1000000, true );
+                REQUIRE( reader.open( producer.m_name ) );
+                strict.attached();
+                optional.attached();
+                uint64_t counter  = 0;
+                int64_t  acquired = 1000000000 - period;
+                auto     publish  = [&]
+                {
+                    acquired += period;
+                    const double phase = 6.28318530717958647692 * 28 * ( acquired - 1000000000 ) * 1e-9;
+                    producer.publish( ++counter,
+                                      epoch + acquired,
+                                      { uint16_t( 2048 + std::round( 1000 * std::cos( phase ) ) ),
+                                        uint16_t( 2048 + std::round( 700 * std::sin( phase ) ) ) } );
+                };
+                auto drain = [&]( int64_t now )
+                {
+                    const inputClock clock{ epoch + now, now, 10 };
+                    REQUIRE( strict.drain( reader, [clock] { return clock; } ) == 1 );
+                    REQUIRE( optional.drain( reader, [clock] { return clock; } ) == 1 );
+                };
+                for( int n = 0; n < rate / 2; ++n )
+                {
+                    publish();
+                    drain( acquired + 50000 );
+                    if( n % ( rate / 2000 ) == 0 || n == rate / 2 - 1 )
+                    {
+                        strict.predict( acquired + 50000 );
+                        optional.predict( acquired + 50000 );
+                    }
+                }
+                REQUIRE( strict.diagnostics().m_prediction.m_state == estimatorState::ready );
+                REQUIRE( optional.diagnostics().m_prediction.m_state == estimatorState::ready );
+                const uint64_t warm = counter;
+                if( fault == "restart" )
+                {
+                    const auto inode = reader.inode();
+                    producer.restart();
+                    reader.close();
+                    strict.disconnected();
+                    optional.disconnected();
+                    REQUIRE( reader.open( producer.m_name ) );
+                    REQUIRE( reader.inode() != inode );
+                    strict.attached();
+                    optional.attached();
+                    counter = 0;
+                }
+                if( fault == "rollback" )
+                    counter = 0;
+                const unsigned lost = fault == "cluster" || fault == "delay" ? 3
+                                      : fault == "single" || fault == "busy" ? 1
+                                                                             : 0;
+                for( unsigned n = 0; n <= lost; ++n )
+                    publish();
+                int64_t now = acquired + 50000;
+                if( fault == "busy" )
+                {
+                    producer.m_image.md->write = 1;
+                    const inputClock clock{ epoch + now, now, 10 };
+                    REQUIRE( strict.drain( reader, [clock] { return clock; } ) == 0 );
+                    REQUIRE( optional.drain( reader, [clock] { return clock; } ) == 0 );
+                    REQUIRE( optional.diagnostics().m_resets == 1 );
+                    REQUIRE( optional.diagnostics().m_busy == 1 );
+                    producer.m_image.md->write = 0;
+                }
+                if( fault == "invalid" )
+                    producer.m_image.md->atime = {};
+                if( fault == "stale" )
+                    now += 3000000;
+                if( fault != "silence" )
+                    drain( now );
+                else
+                    now += 3000000;
+                strict.predict( now );
+                optional.predict( now );
+                const auto &a = strict.diagnostics(), &b = optional.diagnostics();
+                const bool  admit = fault == "single" || fault == "busy";
+                REQUIRE( b.m_admittedGaps == uint64_t( admit ) );
+                REQUIRE( a.m_admittedGaps == 0 );
+                REQUIRE( ( b.m_prediction.m_state == estimatorState::ready ) == admit );
+                REQUIRE( a.m_prediction.m_state != estimatorState::ready );
+                REQUIRE( a.m_dropped == b.m_dropped );
+                REQUIRE( b.m_dropped == lost + unsigned( fault == "invalid" || fault == "stale" ) );
+                REQUIRE( b.m_rejectedGaps == uint64_t( lost > 0 && !admit ) );
+                REQUIRE( a.m_rejectedGaps == uint64_t( lost > 0 ) );
+                const uint64_t fullResets = fault == "restart" ? 3 : fault == "silence" ? 1 : 2;
+                REQUIRE( a.m_resets == fullResets );
+                REQUIRE( b.m_resets == ( admit ? 1 : fullResets ) );
+                REQUIRE( b.m_invalid == uint64_t( fault == "invalid" || fault == "stale" ) );
+                REQUIRE( b.m_rollbacks == uint64_t( fault == "rollback" ) );
+                REQUIRE( b.m_restarts == uint64_t( fault == "rollback" || fault == "restart" ) );
+                if( fault != "rollback" && fault != "restart" && fault != "silence" )
+                    REQUIRE( b.m_processed + b.m_dropped == warm + lost + 1 );
+                if( admit )
+                {
+                    const auto &p = b.m_prediction;
+                    REQUIRE( p.m_sequence == counter );
+                    REQUIRE( p.m_sampleTimeNs == acquired );
+                    REQUIRE( p.m_targetTimeNs == now + 1000000 );
+                    REQUIRE( now - p.m_sampleTimeNs <= config.m_maxAgeNs );
+                    const double phase = 6.28318530717958647692 * 28 * ( p.m_targetTimeNs - 1000000000 ) * 1e-9;
+                    REQUIRE( p.m_acceleration[0] == Approx( .001 * std::cos( phase ) ).margin( 2e-7 ) );
+                    REQUIRE( p.m_acceleration[1] == Approx( .0007 * std::sin( phase ) ).margin( 2e-7 ) );
+                }
+            }
+}
+
 #ifdef __linux__
 /** \brief A separately paced process exercises native semaphore wakes, wrap, acquisition age, prediction and loss
  * accounting.
  * \ingroup accelFFCtrl_unit_test
  */
-TEST_CASE( "accelFFCtrl private native 8k paced input", "[.][accelFFCtrl-native-rate]" )
+TEST_CASE( "accelFFCtrl private native 4k and 8k paced input", "[.][accelFFCtrl-native-rate]" )
 {
-    constexpr uint64_t frames = 40001;
-    nativeInput        producer( 256 );
-    producer.m_liveTime = true;
-    adcStream  reader;
-    parameters config;
-    config.m_voltsPerBit  = { 1e-6, 1e-6 };
-    config.m_sensitivity  = { 1, 1 };
-    config.m_predictionNs = 1000000;
-    inputProcessor processor( config );
-    REQUIRE( reader.open( producer.m_name ) );
-    processor.attached();
-    const auto start = nativeClock();
-    REQUIRE( start.m_mono > 0 );
-    producer.publish( 1, start.m_real, { 2048, 2048 } );
-    REQUIRE( processor.drain( reader, nativeClock ) == 1 );
-    nativeChild child;
-    child.m_pid = fork();
-    REQUIRE( child.m_pid >= 0 );
-    if( child.m_pid == 0 )
-    {
-        auto clock = nativeClock();
-        if( clock.m_mono <= 0 )
-            _exit( 2 );
-        int64_t deadline = clock.m_mono;
-        for( uint64_t n = 2; n <= frames; ++n )
-        {
-            deadline += 125000;
-            const timespec target{ deadline / 1000000000, deadline % 1000000000 };
-            int            result;
-            do
+    for( int rate : { 4000, 8000 } )
+        for( uint32_t depth : { 1, 256 } )
+            for( bool allowGap : { false, true } )
             {
-                result = clock_nanosleep( CLOCK_MONOTONIC, TIMER_ABSTIME, &target, nullptr );
-            } while( result == EINTR );
-            if( result )
-                _exit( 3 );
-            clock = nativeClock();
-            if( clock.m_real <= 0 )
-                _exit( 4 );
-            const double phase = 6.28318530717958647692 * 28.5 * ( ( clock.m_real - start.m_real ) * 1e-9 );
-            producer.publish( n,
-                              clock.m_real,
-                              { uint16_t( 2048 + std::round( 1000 * std::cos( phase ) ) ),
-                                uint16_t( 2048 + std::round( 700 * std::sin( phase ) ) ) } );
-        }
-        _exit( 0 ); // Do not destroy the parent's private fixture/mapping in the producer process.
-    }
-    int     status         = 0;
-    int64_t nextPrediction = start.m_mono;
-    bool    ready          = false;
-    while( true )
-    {
-        processor.drain( reader, nativeClock );
-        const auto clock = nativeClock();
-        REQUIRE( clock.m_mono > 0 );
-        REQUIRE( clock.m_mono - start.m_mono < 15000000000 );
-        if( clock.m_mono >= nextPrediction )
-        {
-            processor.predict( clock.m_mono );
-            ready          = ready || processor.diagnostics().m_prediction.m_state == estimatorState::ready;
-            nextPrediction = clock.m_mono + 500000;
-        }
-        const pid_t done = waitpid( child.m_pid, &status, WNOHANG );
-        if( done == child.m_pid )
-        {
-            child.m_pid = -1;
-            break;
-        }
-        REQUIRE( ( done == 0 || ( done < 0 && errno == EINTR ) ) );
-        REQUIRE( reader.wait( nextPrediction ) );
-    }
-    // Consume the bounded tail after the producer has stopped, without inventing fresh receipt times.
-    for( unsigned n = 0; n < 4 && processor.diagnostics().m_counter != frames; ++n )
-        processor.drain( reader, nativeClock );
-    const auto  &stats   = processor.diagnostics();
-    const double seconds = ( nativeClock().m_mono - start.m_mono ) * 1e-9;
-    std::cout << "Native 8k/2k: duration=" << seconds << " s, processed=" << stats.m_processed
-              << ", dropped=" << stats.m_dropped << ", invalid=" << stats.m_invalid << ", copy_races=" << stats.m_races
-              << ", resets=" << stats.m_resets << ", input_fps=" << stats.m_rate
-              << ", acquisition_fps=" << stats.m_sampleRate << ", ready_seen=" << ready << '\n';
-    REQUIRE( WIFEXITED( status ) );
-    REQUIRE( WEXITSTATUS( status ) == 0 );
-    REQUIRE( reader.header().m_counter == frames );
-    REQUIRE( stats.m_counter == frames );
-    REQUIRE( stats.m_processed + stats.m_dropped == frames );
-    REQUIRE( ready );
+                CAPTURE( rate, depth, allowGap );
+                const uint64_t frames = 5 * rate + 1;
+                nativeInput    producer( depth );
+                producer.m_liveTime = true;
+                adcStream  reader;
+                parameters config;
+                config.m_voltsPerBit  = { 1e-6, 1e-6 };
+                config.m_sensitivity  = { 1, 1 };
+                config.m_predictionNs = 1000000;
+                config.m_sampleRate   = rate;
+                inputProcessor processor( config, 256, 1000000, allowGap );
+                REQUIRE( reader.open( producer.m_name ) );
+                processor.attached();
+                const auto start = nativeClock();
+                REQUIRE( start.m_mono > 0 );
+                producer.publish( 1, start.m_real, { 2048, 2048 } );
+                REQUIRE( processor.drain( reader, nativeClock ) == 1 );
+                nativeChild child;
+                child.m_pid = fork();
+                REQUIRE( child.m_pid >= 0 );
+                if( child.m_pid == 0 )
+                {
+                    auto clock = nativeClock();
+                    if( clock.m_mono <= 0 )
+                        _exit( 2 );
+                    int64_t deadline = clock.m_mono;
+                    for( uint64_t n = 2; n <= frames; ++n )
+                    {
+                        deadline += 1000000000 / rate;
+                        const timespec target{ deadline / 1000000000, deadline % 1000000000 };
+                        int            result;
+                        do
+                        {
+                            result = clock_nanosleep( CLOCK_MONOTONIC, TIMER_ABSTIME, &target, nullptr );
+                        } while( result == EINTR );
+                        if( result )
+                            _exit( 3 );
+                        clock = nativeClock();
+                        if( clock.m_real <= 0 )
+                            _exit( 4 );
+                        const double phase = 6.28318530717958647692 * 28.5 * ( ( clock.m_real - start.m_real ) * 1e-9 );
+                        producer.publish( n,
+                                          clock.m_real,
+                                          { uint16_t( 2048 + std::round( 1000 * std::cos( phase ) ) ),
+                                            uint16_t( 2048 + std::round( 700 * std::sin( phase ) ) ) } );
+                    }
+                    _exit( 0 ); // Do not destroy the parent's private fixture/mapping in the producer process.
+                }
+                int      status         = 0;
+                int64_t  nextPrediction = start.m_mono;
+                bool     ready          = false;
+                uint64_t queries = 0, valid = 0;
+                int64_t  serviceTotal = 0, serviceMax = 0;
+                while( true )
+                {
+                    const auto workStart = nativeClock();
+                    processor.drain( reader, nativeClock );
+                    const auto clock = nativeClock();
+                    REQUIRE( clock.m_mono > 0 );
+                    REQUIRE( clock.m_mono - start.m_mono < 15000000000 );
+                    if( clock.m_mono >= nextPrediction )
+                    {
+                        processor.predict( clock.m_mono );
+                        ready = ready || processor.diagnostics().m_prediction.m_state == estimatorState::ready;
+                        ++queries;
+                        valid += processor.diagnostics().m_prediction.m_state == estimatorState::ready;
+                        nextPrediction = clock.m_mono + 500000;
+                    }
+                    const auto workNs = nativeClock().m_mono - workStart.m_mono;
+                    serviceTotal += workNs;
+                    serviceMax       = std::max( serviceMax, workNs );
+                    const pid_t done = waitpid( child.m_pid, &status, WNOHANG );
+                    if( done == child.m_pid )
+                    {
+                        child.m_pid = -1;
+                        break;
+                    }
+                    REQUIRE( ( done == 0 || ( done < 0 && errno == EINTR ) ) );
+                    REQUIRE( reader.wait( nextPrediction ) );
+                }
+                // Consume the bounded tail after the producer has stopped, without inventing fresh receipt times.
+                for( unsigned n = 0; n < 4 && processor.diagnostics().m_counter != frames; ++n )
+                    processor.drain( reader, nativeClock );
+                const auto  &stats   = processor.diagnostics();
+                const double seconds = ( nativeClock().m_mono - start.m_mono ) * 1e-9;
+                std::cout << "Native " << rate << "/2k, depth=" << depth << ", optional=" << allowGap
+                          << ": duration=" << seconds << " s, processed=" << stats.m_processed
+                          << ", dropped=" << stats.m_dropped << ", invalid=" << stats.m_invalid
+                          << ", copy_races=" << stats.m_races << ", resets=" << stats.m_resets
+                          << ", input_fps=" << stats.m_rate << ", acquisition_fps=" << stats.m_sampleRate
+                          << ", ready_seen=" << ready << ", admitted=" << stats.m_admittedGaps
+                          << ", rejected=" << stats.m_rejectedGaps << ", executed_queries=" << queries
+                          << ", ready_queries=" << valid
+                          << ", executed_query_availability_pct=" << 100. * valid / queries
+                          << ", service_total_ns=" << serviceTotal << ", service_max_ns=" << serviceMax << '\n';
+                REQUIRE( WIFEXITED( status ) );
+                REQUIRE( WEXITSTATUS( status ) == 0 );
+                REQUIRE( reader.header().m_counter == frames );
+                REQUIRE( stats.m_counter == frames );
+                REQUIRE( stats.m_processed + stats.m_dropped == frames );
+                REQUIRE( ready );
+            }
 }
 #endif
 

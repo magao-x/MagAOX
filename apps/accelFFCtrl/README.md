@@ -228,7 +228,9 @@ reviewed Phase 3A changes present. Stop at the first failing step and preserve
 its full output.
 
 For an uncommitted review, create a source patch on the workstation:
-`git diff --binary > /tmp/accelFFCtrl-phase3a.patch`. Have the operator copy it
+`git diff --binary > /tmp/accelFFCtrl-phase3a.patch`. This excludes untracked
+files: include any new test/scripts separately with their original relative paths.
+Have the operator copy the reviewed source material
 to exao2. In a matching Phase-2 source checkout on exao2, first run
 `git apply --check /tmp/accelFFCtrl-phase3a.patch`, then
 `git apply /tmp/accelFFCtrl-phase3a.patch`. Stop on conflicts; no merge or forced
@@ -275,26 +277,32 @@ headers and the same installed library. `ISIO_CFLAGS` / `ISIO_LIBS` can be suppl
 to the standalone Makefile when the actual installation lacks a `.pc` file, after
 its paths are established. Do not change shared make configuration for this test.
 
-`native-test` runs four deterministic cases in a newly created, verified private
+`native-test` runs five deterministic cases in a newly created, verified private
 namespace, using only synthetic `accff-private-*` names. It checks 2-D and 3-D
 UINT16 pairs, depth one versus retention, 12,000 timestamped 8-kHz samples in
 four-frame batches across many wraps, both channels' amplitude/prediction,
 finite overrun and stale retained frames, bad metadata, reader-slot cleanup,
-and same-name unlink/recreation. It prints the library-written stream version
+and same-name unlink/recreation. The fifth case exercises depth-one 4/8-kHz
+inputs through both production policies on identical frozen native records:
+single/clustered loss, writer busy, reader delay, invalid/stale stamps, silence,
+rollback and replacement, with accounting and prediction-time assertions. It prints the library-written stream version
 and header structure sizes. The native APIs and fields match the repository's
 frameGrabber contract; installed ABI compatibility remains unverified until this
 build and runtime test pass on the target installation.
 
-`native-rate-test` is Linux-only and opt-in. It forks its own private synthetic
-producer for 40,000 additional samples over approximately five seconds, using
-absolute 125-us monotonic deadlines, actual realtime acquisition/write stamps,
-256-plane retention and 2-kHz queries. The parent must account for every record
-as processed or dropped and observe estimator readiness. It reports duration,
-loss, invalids, races, resets and rates. Catch assertions and ordinary scheduler
-latency are included: this is a transport/recovery test, not an RT priority or
-hard deadline benchmark. A passing case with drops establishes accounting;
-it does **not** establish lossless 8-kHz delivery. Save its full summary even
-when it passes. Producer restarts here affect synthetic images only.
+`native-rate-test` is Linux-only and opt-in. It now runs eight private paced
+fixtures: 4/8 kHz, depth one/256, and default/optional policies, five seconds each
+(about 40 s total). Each forks its own synthetic producer, with absolute
+monotonic deadlines, actual realtime acquisition/write stamps and nominal 2-kHz
+queries. All published records must be accounted as processed or dropped, and
+readiness must be observed. Output reports loss, invalids, races, full resets,
+admitted/rejected gaps, executed-query availability and service work times.
+These independent paced runs do not see identical scheduling; use deterministic
+replays for paired policy comparisons. Executed-query availability excludes
+missed query deadlines and is not wall-time availability. Catch assertions,
+normal scheduling and service clock probes add overhead; this is not a hard
+real-time or losslessness claim. The depth-256 fixture is historical transport
+coverage only; it changes no producer configuration.
 
 Report the directory contents above, especially the first compiler/linker error
 and preceding command on failure, all test totals, the native ABI line, the
@@ -907,3 +915,167 @@ production configuration files, deployment, commit or push were changed.
 - Real accelerometer calibration, lever arm, physical registration, and eventual
   application latency remain external commissioning inputs. No physical DM
   correction or native live-stream timing has been tested on this workstation.
+## Linux test preparation and timestamp recording (2026-11-06)
+
+This phase changes tests, analysis tools and documentation only. Production
+headers, configurations, simulator disturbance/synchronization and numerical
+estimator remain unchanged. Depth one and `input.allowSingleFrameGap=false`
+remain the operational defaults. No Linux runtime, VM/container tool or installed
+ImageStreamIO library was found on the local macOS workstation. **Complete Linux
+application builds, framework configuration/INDI tests, native tests and native
+sanitizers remain unexecuted.** A macOS syntax check against cached upstream native headers is not Linux
+validation. No representative live per-frame recordings were found locally.
+
+### Reproducible build/private validation
+
+On a configured **non-instrument Linux development host** with the same compiler,
+mxlib/Eigen/ImageStreamIO installation and MagAO-X dependency versions as the
+intended system, from the reviewed checkout root:
+
+```bash
+CXX=g++ PYTHON=python3 VALIDATION_SECONDS=60 \
+  bash apps/accelFFCtrl/tests/validate_linux.sh /tmp/accelFFCtrl-linux-report
+```
+
+Choose a new report directory for each run and use the actual GCC 14 executable
+and Python environment. The script refuses macOS and known instrument hostnames.
+It builds both complete apps, runs the controller's framework configuration/INDI
+tests without startup, numerical tests, both native targets, paired replay,
+Python tests and numerical/native ASan+UBSan checks. It records exact commands,
+compiler/glibc/pkg-config versions, header selection, linked libraries, source
+revision/diff/untracked paths/hashes and test output. It never installs, launches
+an application, contacts INDI or attaches an operational stream. Native fixtures
+use the Makefile's fresh verified private namespace and synthetic names only.
+Stop on the first failure and return the complete report; do not replace system
+Eigen/ImageStreamIO or change shared compiler flags to make it pass.
+
+### Recording contract for a future human-operated test
+
+`acc000` is a UINT16 `(2,1)` or `(2,1,1)` latest-only image. A recorder must use
+the same before/after write/counter/geometry consistency checks as
+`adcStream`/`inputProcessor`. Copy codes and associated metadata into owned memory;
+never queue borrowed stream pointers. At depth one use global `cnt0`, `atime`,
+`writetime`; `cnt1` remains zero. Semaphore posts do not preserve overwritten
+frames. A sidecar may miss different records than the controller: its gaps are
+observer losses, not automatically controller losses. Do not flush/wait on a
+semaphore claimed by the running application. The library can return an existing
+slot for the same PID; an independent recorder needs its own process/slot.
+
+The timing analyzer consumes integer-only CSV. One frame row is a stable copied
+candidate, with `accepted=1` only if the controller actually consumed that record;
+keep rejected candidates with `accepted=0`. Required columns are:
+
+```text
+generation,counter,acquired_ns,written_ns,receipt_mono_ns,clock_real_ns,clock_mono_ns,clock_uncertainty_ns,depth,accepted
+```
+
+All times/counters are exact decimal integers. `_ns` epochs must not pass through
+floating-point seconds. Acquisition/write stamps are CLOCK_REALTIME; receipt is
+the post-copy bracket's CLOCK_MONOTONIC midpoint, matching `clock_mono_ns`.
+`clock_real_ns` and half-bracket `clock_uncertainty_ns` must be those actually used
+by the controller. Preserve raw `acquired_sec,acquired_nsec,written_sec,written_nsec`
+for malformed timespecs; the analyzer checks these optional fields too. Also
+retain `adc_x,adc_y` (optional analyzer columns, mandatory for numerical replay),
+mapping device/inode and creation identity, observed header counters/write state,
+copy-race/busy events, exact validation/reset reasons and logger-overflow counts.
+Keep nonnumeric metadata/reasons in a manifest or a separate event file.
+
+Timing-query CSV requires `query_ns,target_ns,sample_ns,ready`; optional lifetime
+columns `processed,dropped,resets,admitted_gaps,rejected_gaps` and `service_ns`
+produce diagnostic summaries. Include unexecuted deadlines as `ready=0` to measure
+scheduled availability. For full live replay also retain actual query execution,
+fit/input states, source generation/counter, parameter revision, reset events and
+predicted acceleration/pointing/amplitude/phase in a joined prediction record.
+Record initial and final diagnostics explicitly: the last query may precede the
+last consumed record. Split files across controller process runs/host reboots.
+
+For `camwfs_sync`, capture the same stable metadata/clock/generation columns in
+a separate file without ADC columns. Here `accepted` means a validated recorder
+reference copy, rather than accelerometer-controller consumption. In this checkout,
+`ocam2KCtrl::frameGrabberPostPublish` mirrors the parent camera's acquisition,
+write and frame counter into a 1x1x1 UINT8 notification stream and then posts it.
+Its write stamp is the parent's stamp, not the later sync-post time. Confirm the
+actual producer/version and clock contract; a different producer cannot be
+assumed equivalent. `accelSim::waitSync` feeds the observed counter and its own
+monotonic semaphore-receipt time to `syncTiming`/`phaseClock::reference`; it does
+not phase-lock directly to WFS `atime`. Exact synchronization reconstruction
+therefore also needs simulator reference-arrival/counter, deadline, phase target,
+applied slew, skipped ticks/discontinuities and timing/configuration revisions.
+An external recorder cannot recover those internal events from stream stamps.
+Model ticks can be skipped without a publication: `cnt0` is not model time.
+
+The capture design should use preallocated bounded records and an asynchronous
+writer; never add CSV/file I/O to the controller worker. Measure recording
+overhead and report recorder loss separately. No instrument recorder or new
+production telemetry path was implemented in this phase. Five-Hz diagnostics and
+the successful 602-s zero-loss 4-kHz aggregate do not replace this recording.
+
+### Offline timing analysis and paired replay
+
+The new [analyze_timestamps.py](tests/analyze_timestamps.py) writes `summary.json`,
+per-frame `frames.csv`, and optional timing plots. It measures cadence error,
+counter-normalized period drift, clock-offset changes, acquisition/write/receipt
+latencies, observed counter gaps/rollback/generation changes, and necessary
+single-gap timing eligibility. It checks query freshness and
+`target=query+horizon`; ready timing violations make its CLI fail. WFS alignment
+is relative to the latest valid **observed** WFS receipt/acquisition, not the
+simulator's unrecorded reference arrival. The analyzer does not reconstruct fit
+maturity, numerical conditioning or the one-memory-time gap-spacing rule and
+does not label timing eligibility as actual admission. Observed missing counts
+are lower bounds from that recorder; actual controller loss comes from its
+lifetime diagnostics.
+
+```bash
+python3 apps/accelFFCtrl/tests/analyze_timestamps.py /path/to/frames.csv \
+  --sample-rate 4000 --queries /path/to/queries.csv --wfs /path/to/wfs.csv \
+  --output /tmp/accelFFCtrl-timing-report --plots
+```
+
+Pass the actual `--max-age-ns`, `--max-interval-ns`, `--clock-tolerance-ns`,
+`--horizon-ns` and `--max-prediction-ns` if different from the existing defaults.
+WFS timing defaults to 2 kHz (`--wfs-rate` selects the actual reference rate);
+acquisition phase alignment requires
+both streams' acquisition stamps to obey the verified same-host realtime contract.
+The manifest must include both rates, clock domains, image geometry/ABI, all
+estimator/ADC controls, sync settings, source identity, versions and capture loss.
+
+The existing end-to-end exporter now optionally writes timing CSV fixtures for
+the actual default/optional production paths (single28, both rates, one loss/s,
+uniform and ±2%/±10% timestamp-tag error). Enable with
+`ACCELFFCTRL_TIMING_TRACE=1` before the existing `gap-validation` command; all
+binary numerical schemas remain unchanged. The Linux runner analyzes these
+automatically. These are synthetic replay fixtures, not instrument recordings.
+
+The refreshed 60-s, 208-replay study reproduces 69.95% default / 99.45% optional
+availability with one loss/s: 59 dropped in both, default 60 resets/59 rejected,
+optional one reset/59 admitted. Full-mode optional NRMSE X/Y remains
+43.159%/49.212% (8 kHz), 46.961%/57.694% (4 kHz). Synthetic traced cadence-error RMS is 3.535/7.070 us (8/4 kHz) for ±2% tags
+and 17.677/35.352 us for ±10% tags; these are injected errors, not live jitter.
+The earlier accuracy/recovery tables still apply. All 124 archived default prediction/history/truth binaries
+(including the expanded timestamp scenarios) are byte-identical.
+
+Local checks: 23 controller cases, 57 combined ASan/UBSan cases, 208 replay
+comparisons and 18 Python tests pass. The allocation-guarded benchmark now feeds
+identical one-loss/s sequences to both policies at both rates, with zero C++/Eigen
+allocations. Approximate means per source opportunity: default/optional 104/126 ns
+at 8 kHz, 158/200 ns at 4 kHz; p99 <=458 ns. Default resets spend more time warming;
+the existing cost fixture uses 28.5 Hz. These exclude native mapping/waits/clock calls, INDI, capture I/O and scheduling,
+and are not Linux latency guarantees.
+
+### Remaining steps before observation-only deployment
+
+1. Review the source and run the Linux script with the intended installed ABI;
+   return every test summary, all eight paced summaries, selected header/library
+   paths and first error if any. Resolve failures before proceeding.
+2. Confirm the actual `acc000`/WFS producers, depth-one layouts and timestamp clock
+   semantics. Match startup `input.sampleRate` to the actual 4000/8000-Hz source;
+   a mismatch conservatively rejects gap retention. Review/qualify the capture design and its overhead on a development
+   host. Obtain representative per-frame traces through a separately authorized
+   human-operated observation, including steady operation, phase slewing and loss.
+3. Analyze those traces and reconcile controller versus recorder loss, reset and
+   readiness events. Keep conservative reset fallback; do not broaden the guard
+   from synthetic results alone.
+4. With those results reviewed, obtain approval for human installation/launch and
+   a bounded observation-only comparison. Retain the default false configuration
+   and depth one; any opt-in must be an explicit test-specific choice. No DM path
+   exists in this controller. No deployment or activation was performed here.

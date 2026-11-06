@@ -2649,3 +2649,254 @@ The production gap and jitter cases are also registered in `tests/tests.list`;
 their scoped `tests/Makefile.one` entries retain IEEE/nonfinite behavior with
 `-fno-fast-math` and track the input/prototype headers. These two test-build files
 are additional changes in this phase; other applications' rules are unchanged.
+
+## Linux observation-test preparation and timestamp audit (2026-11-06)
+
+### Scope and evidence boundary
+
+Starting revision `dd3792fc` on `parkertjohnson1/accelSim` includes the previous
+optional single-frame implementation. This phase modifies only tests, offline
+tools and documentation. Production app/input/model/native-reader headers,
+configuration files, all simulator files, and DM behavior remain unchanged.
+No instrument host, tunnel, INDI command, operational stream, deployment,
+application restart, commit, push or merge was accessed/performed.
+
+The workstation is Darwin/arm64. No docker/podman/colima/limactl/orb/multipass/qemu
+runtime executable or local Linux environment was found; `ImageStreamIO.pc` and
+its native library are unavailable. Existing cached upstream ImageStreamIO
+headers permit a macOS syntax-only check of the deterministic native source,
+but do not supply an installed Linux ABI or compile the Linux-only paced branch.
+Complete Linux app builds (both accelFFCtrl and accelSim), framework app tests,
+native ImageStreamIO execution and native sanitizer results remain **pending**.
+They must not be inferred from numerical/macOS tests.
+
+Only prior synthetic accelFFCtrl validation recordings were found in the local
+source/artifact paths searched. No representative instrument per-frame trace
+was available. The user-reported 602-s 4-kHz run (2,407,458 processed, zero drops,
+zero additional resets) remains aggregate evidence of successful default
+observation, not timestamp-jitter or optional-gap qualification.
+
+### Source-grounded recording requirements
+
+- `accelFFCtrlStream.hpp::adcStream::{header,frame}` and
+  `accelFFCtrlInput.hpp::inputProcessor::drain` define the stable owned-copy and
+  metadata/clock validation boundary. At depth one the relevant timestamps and
+  counter are global `md->{atime,writetime,cnt0}`, even for a 3-D depth-one cube.
+  `cnt1` is zero. Keep before/after geometry/write/counter checks, original two
+  UINT16 codes and rejected/busy/racing attempts. Notification counts cannot
+  recover overwritten data.
+- A sidecar's missing counter observations can differ from the controller's
+  actual dropped records. Log controller acceptance and lifetime diagnostics
+  at the input owner if exact controller reconstruction is required. A separate
+  recorder process must claim its own semaphore, never drain a live consumer's
+  slot. The cached ImageStreamIO implementation first searches for an existing
+  same-PID slot; the new deterministic native test consequently uses one owned
+  mapping for both serialized policy replays, rather than two same-PID owners.
+- `libMagAOX/app/dev/frameGrabber.hpp` records CLOCK_REALTIME acquisition/write
+  stamps, increments publication `cnt0`, clears write, then posts. The write
+  stamp precedes final commit/post; publication visibility is bounded by copy
+  validation/receipt, not precisely timestamped by that field.
+- In `apps/ocam2KCtrl/ocam2KCtrl.hpp::frameGrabberPostPublish`, the sync-only
+  1x1x1 UINT8 image mirrors the parent camera's counter/acquisition/write stamps,
+  clears write and posts. It does not sample a separate sync-post timestamp.
+  Confirm this is the actual `camwfs_sync` producer/version before interpreting
+  a recording. An independent clock/TAI/default-library stamp is unsupported.
+- `apps/accelSim/accelSim.hpp::{waitSync,syncTiming}` use the observed WFS counter
+  and the simulator's own monotonic semaphore-receipt time as a phase reference.
+  WFS acquisition timestamps alone do not reconstruct those reference arrivals.
+  Exact sync replay also needs source generation/counter, actual simulator
+  reference arrival, frozen deadline, phase target/applied slew and skipped
+  ticks/discontinuities/configuration. Simulator acquisition is stamped before
+  model advancement; skipped model ticks need not increment publication count.
+  Neither acquisition wall time nor `cnt0/rate` is an exact live model-tick oracle.
+
+README now specifies integer-only frame/query CSV schemas plus the larger
+manifest/event contract: mapping device/inode/creation identity, raw timespec
+parts for malformed stamps, clock anchors and uncertainty actually used, ADC
+codes/calibration, nominal rates and all estimator/sync controls/revisions,
+validation/reset reasons, logger overflow, query execution/state/source identity
+and predicted values. Initial/final counters and process/boot boundaries are
+explicit. Five-Hz snapshots cannot substitute for per-frame/query events.
+
+No instrument recorder or production logging hook is added. A future recorder
+needs preallocated bounded records and an asynchronous writer, independently
+measured capture loss/overhead and development-host qualification. Per-sample
+file/CSV I/O must remain outside the real-time worker. Stream-only observer data
+can characterize source timing but cannot prove exact controller or simulator
+internal event ordering.
+
+### Offline timestamp-analysis implementation
+
+New `apps/accelFFCtrl/tests/analyze_timestamps.py` reads local CSVs only. It parses
+integer epoch nanoseconds/counters directly, rejects malformed/float fields and
+decreasing receipt clocks, checks optional ADC/raw-timespec fields, and writes
+per-frame `frames.csv`, `summary.json` and optional `timing.png`.
+
+Cadence error is `(a_i-a_previous)/(cnt_i-cnt_previous)-P` on valid ordered pairs.
+The drift slope is fitted on centered integer counter/time differences within
+source generations/rollback segments; reported ppm is `(slope/P-1)*1e6`.
+Distributions include RMS error, standard deviation, p50/p99, acquisition age,
+write-minus-acquisition and receipt-minus-mapped-write latency. Clock-offset
+changes are available per record and in plots. Missing publications are an
+observed lower bound; rollback, duplicate and generation counts remain separate.
+
+For gaps, the tool reports only necessary timing eligibility: depth one,
+counter +2, monotonic valid acquisition/write/clock/ADC metadata, both previous
+and new acquisition freshness, elapsed <=min(1ms,maxInterval), and the existing
+`abs(dt-2P)<=.05P` guard. It deliberately does not claim actual admission without
+estimator maturity/latest-query state, gap spacing, numerical conditioning and
+complete reset history. Rejected candidates clear its conservative prior context.
+Observed admission/rejection/reset totals come from logged lifetime counters,
+not inferred timing eligibility.
+
+Queries are checked at their actual requested target: `target=query+horizon`,
+age `query-sample`, effective horizon `target-sample`. Ready rows exceeding
+freshness/target bounds are counted and cause the CLI to fail. Unexecuted query
+deadlines must be logged unavailable for scheduled-availability accounting.
+Optional WFS input reports alignment relative to the latest valid observed
+receipt/acquisition under the verified realtime contract, not an unrecorded
+simulator wake/reference time. The WFS rate defaults to 2 kHz; `--wfs-rate` selects another documented reference rate.
+The report includes WFS cadence/drift separately from observer-relative phase.
+
+Seven new deterministic Python tests cover exact one-ns epoch preservation,
+CSV rejection, both-rate cadence boundaries, clustered loss, restart/rollback,
+stale previous samples, bad clocks/ADC/raw timestamps, drift, horizon-age
+accounting and observed WFS alignment. They do not simulate instrument data.
+
+Synthetic traced cadence-error RMS (counter-normalized per publication) is zero
+for uniform acquisition; ±2% timestamp tags give 3.535 us at 8 kHz / 7.070 us at 4 kHz,
+and ±10% tags give 17.677 us / 35.352 us. All five mature gaps pass necessary timing
+eligibility at ±2%; none at ±10%. These are injected timestamp-tag errors, not
+measured scheduler jitter. The CLI passed the valid exported trace and correctly
+returned failure for a deliberately stale ready query.
+
+### Native qualification prepared, not executed
+
+`accelFFCtrlStream_test.cpp` retains the original deterministic native assertions
+and adds a fifth case with 36 rate/geometry/fault combinations: 4/8 kHz, 2-D/3-D
+depth one, single and clustered missing publications, writer busy, delayed reader,
+invalid/stale acquisition, prediction during silence, counter rollback and
+same-name replacement. Both policies read identical frozen native publications;
+assertions verify drops, admitted/rejected gaps, full resets, generation changes,
+physical prediction identity and analytic acceleration at the actual target.
+
+The existing opt-in Linux paced test now covers eight five-second combinations:
+4/8 kHz, depth one/256 and default/optional. Private producer/consumer processes
+exercise native metadata/semaphores and natural scheduling/races. Each must
+account for all publications as processed/dropped and observe readiness.
+Summaries add admission/rejection, executed-query availability and service work
+times. Runs have independent scheduler realizations and are not paired numerical
+comparisons. Executed-query availability excludes unexecuted deadlines; the
+deterministic replay provides scheduled availability. Catch/clock-probe overhead
+and ordinary scheduling preclude a hard real-time or lossless-delivery claim.
+Historical depth-256 fixtures change no operational circular-buffer setting.
+
+New `tests/validate_linux.sh` (under the app directory) builds both full apps with
+header tracing and forced app translation-unit rebuilds; runs framework config/
+INDI handoff/default tests without app startup, numerical/allocation tests, both
+native targets, replay/Python and numerical/native ASan+UBSan checks. It records
+exact commands, platform/compiler/glibc/dependency/linked-library paths, source
+revision/diff/untracked paths/hashes and outputs. It refuses non-Linux and known
+instrument hostnames. No install or app launch command is present. The local
+non-Linux refusal and `bash -n` checks pass. This is a reproducible pending Linux
+qualification procedure, not evidence of a Linux pass.
+
+On a configured non-instrument Linux host, with the reviewed source and actual
+MagAO-X GCC 14/dependency installation:
+
+```bash
+CXX=g++ PYTHON=python3 VALIDATION_SECONDS=60 \
+  bash apps/accelFFCtrl/tests/validate_linux.sh /tmp/accelFFCtrl-linux-report
+```
+
+Use a fresh report directory and return the full report, especially first failure,
+all eight paced summaries, header/linked-library paths and test totals. Missing
+`.pc`/headers/dependencies require investigation of the actual installation,
+not replacement of shared system libraries. A source patch alone excludes
+untracked files; copy any new scripts/tests with their reviewed relative paths.
+
+### Refreshed replay, timing, regression and cost results
+
+The existing `accelFFCtrlValidation_test.cpp` exporter/scorer still provides the
+same 208 paired production/prototype replays and independent simulator truth.
+No duplicate estimator/model/replay implementation was introduced. Optional
+`ACCELFFCTRL_TIMING_TRACE=1` adds integer CSV fixtures for reset/optional paths,
+single28, both rates, one loss/s and uniform/±2%/±10% timestamp-tag error. Binary
+schemas remain unchanged. CSV I/O is offline only and excluded from cost results.
+
+- Repeated 60-s export: **230,903,647 assertions**, all 208 scoring comparisons
+  passed. All **124** archived expanded default prediction/history/truth binaries
+  are byte-identical (including the prior 92-file subset and newer tag cases).
+- At either rate/population with one missing frame/s: both policies count 59
+  drops; default 60 full resets, 59 rejected, 69.95% availability; optional one
+  full reset, 59 admitted, zero rejected, 99.45% availability. Recovery and other
+  scheduling/phase tables in the preceding section are reproduced unchanged.
+- Optional single28 NRMSE X/Y: 15.6315%/17.7792% at 8 kHz,
+  14.2644%/16.1678% at 4 kHz. Full214 target-component NRMSE:
+  43.1590%/49.2123% at 8 kHz, 46.9608%/57.6937% at 4 kHz. Accuracy is scored at
+  the actual target, includes sensor/ADC/model interference, and is not a live
+  hardware-correction claim. Default/optional masks differ; paired same-mask
+  scores remain in the CSV alongside all-ready scores.
+- Six-second traced export: **23,443,947 assertions passed**, including under
+  ASan/UBSan. Analyzer audits at both rates check five lost frames each, no
+  timing-fault candidates or invalid ready queries, and uniform/±2% eligible
+  gaps versus ±10% ineligible gaps. Actual production admission matches that
+  classification in these already-mature isolated cases. Uniform ready sample
+  ages are exactly 125/250 us and effective horizons 1125/1250 us at 8/4 kHz:
+  measurement age is included once. Cold start still costs 300 ms; optional
+  six-second availability is 94.95%, versus 99.45% over 60 s.
+- Current ordinary controller suite: **23 cases / 3,438,630 assertions passed**.
+  Combined simulator/controller ASan/UBSan: **57 cases / 3,675,228 assertions**.
+  New trace-export branches also pass standalone sanitizers; no findings.
+  **18 Python tests** pass (14 controller scoring/timing plus four simulator PSD).
+- Allocation-guarded benchmark now uses identical 30-s one-loss/s inputs for
+  both policies at both rates, preserving its lossless case. Zero C++/Eigen
+  allocations; 29 drops per policy, default 30 resets versus optional 1 with 29
+  admitted. Workstation mean service per source opportunity: default/optional
+  ~104/126 ns (8 kHz), ~158/200 ns (4 kHz), p99 <=458 ns. Default spends more time
+  warming; query/source ratio doubles at 4 kHz; the existing cost fixture uses f0=28.5 Hz. These exclude native waits/mapping,
+  actual clock syscalls, INDI/capture I/O and scheduling, and establish no Linux
+  latency guarantee.
+
+Reproduce the local offline work from the checkout root:
+
+```bash
+make -C apps/accelFFCtrl/tests BUILD_DIR=/tmp/accelFFCtrl-linuxprep-build test benchmark
+make -C apps/accelFFCtrl/tests BUILD_DIR=/tmp/accelFFCtrl-linuxprep-build \
+  PYTHON=python3 VALIDATION_DIR=/tmp/accelFFCtrl-linuxprep-60s VALIDATION_SECONDS=60 gap-validation
+ACCELFFCTRL_TIMING_TRACE=1 ACCELFFCTRL_VALIDATION_DIR=/tmp/accelFFCtrl-linuxprep-timing \
+  ACCELFFCTRL_VALIDATION_SECONDS=6 /tmp/accelFFCtrl-linuxprep-build/accelFFCtrl_test '[accelFFCtrl-gap-export]'
+python3 apps/accelFFCtrl/tests/analyze_timestamps.py \
+  /tmp/accelFFCtrl-linuxprep-timing/8000/optional/single28_loss1_1s_1000000_frames.csv \
+  --queries /tmp/accelFFCtrl-linuxprep-timing/8000/optional/single28_loss1_1s_1000000_queries.csv \
+  --sample-rate 8000 --output /tmp/accelFFCtrl-timing-report --plots
+make -C apps/accelFFCtrl/tests PYTHON=python3 validation-test
+python3 -m unittest discover -s apps/accelSim/tests -p test_validate_psd.py -v
+```
+
+Use an existing Python environment with the documented scientific packages.
+Actual local executable was Anaconda `python`; no dependencies were installed.
+The previous combined sanitizer command still applies with gap/jitter sources;
+the Linux script contains its complete updated source list. Standalone trace
+sanitizer builds use the same existing Makefile ASan/UBSan flags, then run the
+above hidden exporter with halt-on-error enabled. Logs/artifacts are under
+`/tmp/accelFFCtrl-linuxprep-*`; full accuracy/availability/fit CSVs and recovery
+plots are in `...-60s/report`, timing audits/plots in `...-timing/timing-report`.
+
+### Remaining deployment gates and changed files
+
+The optional core remains suitable for a controlled observation-only comparison
+conditional on Linux full-app/config/native validation. Timestamp qualification
+remains synthetic. Before deployment: run/review the Linux report; verify actual
+producer clocks/ABI/depth and matching startup `input.sampleRate`; qualify the capture design/overhead on a development
+host; obtain human-recorded representative timing and reconcile source/controller/
+logger loss and reset/readiness histories; then request explicit authorization
+for human deployment and a bounded observation-only opt-in. Keep the unchanged
+default false, depth one and conservative guard. The successful lossless 4-kHz
+default run is not a reason to enable tolerance or broaden the guard.
+
+Changed files: `apps/accelFFCtrl/tests/{Makefile,accelFFCtrlStream_test.cpp,
+accelFFCtrlValidation_test.cpp,accelFFCtrlInput_benchmark.cpp}`; new
+`analyze_timestamps.py`, `test_analyze_timestamps.py`, `validate_linux.sh` in that
+directory; `apps/accelFFCtrl/README.md`; this plan. No production file or
+configuration changed. Text above Agent Findings and Plan remains unchanged.

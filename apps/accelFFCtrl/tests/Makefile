@@ -48,7 +48,7 @@ validation: $(TEST) validation-test
 	MPLCONFIGDIR='$(VALIDATION_DIR)/.matplotlib' $(PYTHON) validate_predictions.py '$(VALIDATION_DIR)'
 
 validation-test:
-	$(PYTHON) -m unittest -v test_validate_predictions.py test_validate_gaps.py
+	$(PYTHON) -m unittest -v test_validate_predictions.py test_validate_gaps.py test_analyze_timestamps.py
 
 gap-validation: $(TEST) validation-test
 	ACCELFFCTRL_VALIDATION_DIR='$(VALIDATION_DIR)' $(TEST) '[accelFFCtrl-jitter]'
