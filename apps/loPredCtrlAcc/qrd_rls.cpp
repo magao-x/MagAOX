@@ -242,6 +242,28 @@ void QRDRecursiveLeastSquares::save_state( const std::string &filename )
     */
 }
 
+void QRDRecursiveLeastSquares::update_preallocated( Matrix &x, const Matrix &y, Matrix &weightUpdate )
+{
+    if( !m_enforceTriangular || x.rows() != _num_features || x.cols() != 1 || y.rows() != _num_predictors ||
+        y.cols() != 1 || weightUpdate.rows() != _num_predictors || weightUpdate.cols() != _num_features ||
+        !x.allFinite() || !y.allFinite() )
+        throw std::invalid_argument( "Invalid preallocated causal QR update" );
+    err = y;
+    R_ *= _lambda;
+    A_.topRows( _num_features ) = R_;
+    A_.row( _num_features )     = x.transpose();
+    apply_givens();
+    R_                          = A_.topRows( _num_features );
+    prediction_output.noalias() = prediction_matrix * x;
+    err -= prediction_output;
+    z.setZero();
+    g.setZero();
+    solve_Rt( x, z );
+    solve_R( z, g );
+    weightUpdate.noalias() = err * g.transpose();
+    prediction_matrix += weightUpdate;
+}
+
 void QRDRecursiveLeastSquares::load_state( const std::string &filename )
 {
     std::cout << filename << std::endl;

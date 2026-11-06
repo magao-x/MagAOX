@@ -93,7 +93,9 @@ The benchmark covers two and ten modes, N=5, F=3, two sensor channels and Ha=20,
 both RLS methods, isolated core work, the managed pair, and synchronized builder
 with/without both models. It warms 512 records and times 2,000 more by default.
 Phase 6 adds isolated history, reference-law and normalized pivoted-QR rank
-workloads, bringing the CSV to 48 rows. Rank-only cases use frozen independent
+workloads (the original 48 rows). Phase 7 retains those configurations and RNG
+sequences and adds 44 rows for fixed workspaces, cached prediction and a paused
+training pair, bringing the CSV to 92 rows. Rank-only cases use frozen independent
 seeded matrices; they do not change the original full-workload input sequences.
 They identify component costs without pretending to measure all pivot/conditioning
 patterns. Every measured pair must reach readiness. CSV reports p50/p95/p99/p99.9/max and
@@ -112,6 +114,92 @@ Reported C++ bytes exclude Eigen allocation sizes; C malloc outside Eigen,
 aligned C++ allocation, peak live heap, and OS/library allocation are not measured.
 This proves hot-path allocation and is not an allocation-free certification.
 The probe is force-included only in the separate benchmark build.
+
+## Phase 7 performance and allocation checks
+
+The causal manager now owns fixed history, learner, LDLT, rank-QR, forecast and
+proposal workspaces. It prepares each training example once. The reference law,
+newest-first horizon, normalized pivoted-QR rank threshold and every-record
+readiness policy remain unchanged. Rank is reused only when the entire empirical
+window is bit-identical; gain is reused only without coefficient updates, resets
+or history breaks. Original Legacy APIs, arithmetic, default selection and output
+routing are preserved. No threads, live adapters or publication routes were added.
+
+`predict_cached()` is an offline, caller-serialized diagnostic API with pre-sized
+state/output and explicit validation-snapshot frame-age gates. It does no fitting,
+rank check or reference solve. Readiness belongs to the latest completed evidence
+window; frame age is not a physical timestamp or deadline guarantee. It cannot be
+called concurrently with the manager. An asynchronous handoff still needs coherent
+versioned snapshots, verified state timing, overflow handling and bounded ownership.
+
+```sh
+make -C apps/loPredCtrlAcc -f tests/Makefile.benchmark check-allocations
+make -C apps/loPredCtrlAcc -f tests/Makefile.offline -j3 \
+  BUILD_DIR=build/offline-phase7-gcc CXX=g++-15 check
+```
+
+The allocation contract exercises cold history, 768 records, missing sensor/common
+timing, reacquisition, invalid/stale cached queries, paused training and explicit
+model resets at two/ten modes with both learners and gamma=1/0.99. Eigen's no-malloc
+guard and both request counters require zero allocations for cached prediction,
+paused training, resets, QR adaptation and classical RLS at gamma=1. Forgetting
+classical RLS retains **one Eigen temporary per adapting model per record**: the
+original `(_inverse_gamma*x).transpose()*P` expression must remain intact for exact
+rounding. Pre-scaling a reusable vector caused a real exact-regression failure;
+that change was rejected. Probe coverage limits above still apply.
+
+`prepare_phase6.py` compiles the actual committed Phase 6 sources at
+`352446f83737573023870096d2a5388859afcd3e` under a separate namespace, using local Git
+objects without checking out a branch. Four new default cases compare the optimized
+manager against that independent implementation, including 5,760 interrupted
+records across two/ten modes, both learners and gamma=1/0.99, constant windows,
+training pauses, independent reset, mode selection, sensor loss and frame gaps.
+They require exact coefficients/proposals/RMSE and identical readiness/status.
+Near-threshold excitation, stale workspace epochs and cached prediction gates have
+separate tests. Strict Clang/GCC report zero maximum proposal and RMSE differences.
+The original bit-exact historical tests and Phase 6 Givens specialization remain.
+
+Final Phase 7 validation: strict Clang, strict GCC and Clang ASan/UBSan each pass
+**333,616 assertions / 50 cases**; Clang fast Legacy and fast Legacy with
+ASan/UBSan each pass **186,615 / 9**. Clang/GCC hidden historical drift reports
+zero command/fit differences (**55,298 / 1** each); strict tiny-rotation probes
+also pass. Seven Python build-tool tests pass. Normal/sanitized allocation
+contracts and the sanitized **92-row x 100-record** benchmark pass without
+findings. GNU default fast Legacy deliberately still fails **1/9 cases**, the
+unchanged historical nonfinite QR fit at t=31 (**182,253/182,254 assertions pass**).
+No tolerance or production flag was changed to hide that failure.
+
+Full benchmark evidence and environment notes are in [results](results/README.md).
+This Mac run uses 512 warmup + 2,000 timed records, strict Clang, Eigen and allocation
+instrumentation. Latencies in microseconds are **before → after**:
+
+| Managed training pair | Median | p95 | p99 | Maximum | Eigen requests/record |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 2 modes, RLS | 50.375 → 40.000 | 56.875 → 43.208 | 79.000 → 49.875 | 2799.500 → 92.042 | 106 → 0 |
+| 2 modes, QR | 58.500 → 49.083 | 64.833 → 52.458 | 87.708 → 60.541 | 269.834 → 96.542 | 98 → 0 |
+| 10 modes, RLS | 582.042 → 500.917 | 768.792 → 547.792 | 3369.000 → 569.375 | 9303.250 → 587.375 | 105.960 → 0 |
+| 10 modes, QR | 681.667 → 566.292 | 997.458 → 593.042 | 4692.830 → 612.291 | 33855.900 → 665.875 | 97.960 → 0 |
+
+Ten-mode training misses 1,094/2,000 (RLS) and 2,000/2,000 (QR) whole-frame budgets;
+the two-mode pair has no misses in this run. Ten-mode frozen training still has
+423.708/418.875-us medians and 610.000/607.708-us maxima: rank validation remains
+expensive. Cached prediction alone has 0.041–0.167-us medians, zero allocations and
+a measured maximum of 5.875 us. Timing resolution affects these small measurements;
+canonical-state construction, transport and any future snapshot handoff are excluded.
+Different scheduling/load between runs prevents attributing tail reductions solely
+to the changes. Neither run is a real-time guarantee.
+
+Priorities before eventual 2-kHz integration: verify the native Linux profiles and
+target compiler/Eigen first; design bounded common-record fanout to independently
+owned learners and versioned immutable prediction snapshots; measure sustained
+throughput, age, overflow and deadline behavior under Linux load; preallocate the
+still-allocating causal builder/result batch. One serial worker cannot absorb this
+ten-mode pair at 2 kHz. Queue overflow or stale/invalid snapshots must invalidate
+shadow diagnostics and break/reacquire history, never route a new DM command.
+Neither training decimation nor another rank method is equivalent without further
+numerical/readiness review. Verified applied-command provenance and physical WFS/
+accelerometer timing are still absent. **Stop after Phase 7; instrument integration
+requires further user approval.**
 
 For a real Linux compile/link check, first provision the normal MagAO-X build
 dependencies on an approved non-instrument development host. The existing
