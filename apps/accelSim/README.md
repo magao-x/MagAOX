@@ -662,3 +662,22 @@ undeclared). No Linux stream, INDI runtime, or ten-minute performance result is
 claimed. The real deployment configuration and raw-ADC DDSPC consumer are absent
 from this checkout, so final downstream substitution still requires those inputs.
 See the planning document for exact results and remaining coverage.
+
+## Offline controller/DM cancellation validation
+
+The accelFFCtrl [offline cancellation study](../accelFFCtrl/README.md#offline-feed-forward-dm-cancellation-2026-11-06)
+uses the unchanged `accelSimModel.hpp` model to record isolated 28-Hz, 56-Hz and
+combined modes, then feeds only raw UINT16 measurements into the production
+controller numerics. Synthetic TT calibration, delayed DM response and residual
+WFS calculations are separate offline test components; they do not invoke
+`dmInjection`, open a DM stream or modify this application's disturbance,
+synchronization, calibration or DM behavior. The independently labelled oracle
+uses truth only as a perfect-prediction baseline.
+
+For the documented 60-s noisy/quantized realization, gain 1 reduces physical
+pointing variance by 94.9–95.3% (28 Hz), 88.8–91.5% (56 Hz), and 94.2–94.9% (both).
+These are simulated results with an explicitly synthetic 300-Hz/ 1-ms DM plant
+and unity WFS coupling. The study models source-noise and command holding and
+preserves startup/reset/inhibition intervals. It is not an on-instrument test,
+physical DM calibration, AO-loop interaction test or deployment authorization.
+See the controller README for commands, PSDs, gain sweeps, fault cases and limits.

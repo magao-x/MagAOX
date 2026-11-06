@@ -2900,3 +2900,339 @@ accelFFCtrlValidation_test.cpp,accelFFCtrlInput_benchmark.cpp}`; new
 `analyze_timestamps.py`, `test_analyze_timestamps.py`, `validate_linux.sh` in that
 directory; `apps/accelFFCtrl/README.md`; this plan. No production file or
 configuration changed. Text above Agent Findings and Plan remains unchanged.
+
+## Offline feed-forward DM cancellation (2026-11-06)
+
+### Authorization, source review and architectural boundary
+
+Starting revision `027949bb`, branch `parkertjohnson1/accelSim`, was clean. The
+user authorized an entirely offline correction component and causal simulation,
+with zero default gain and no production integration. All existing production
+source/configurations remain unchanged, including simulator model/RNG behavior,
+DM injection, observer numerics, timing and the default-disabled gap policy.
+No Linux environment, instrument access, stream writes, DM commands, deployment,
+commit, push or merge are involved. The new code is not included by the live app.
+All earlier text above Agent Findings and Plan remains unchanged.
+
+Reviewed interfaces and conventions:
+
+- `accelFFCtrlModel.hpp::{prediction,harmonicEstimator}`: pointing is rotated
+  physical disturbance in radians, not a correction. Sensor acceleration is
+  `(ADC-zero)*voltsPerBit/sensitivity` [m/s²]. Harmonic inversion is
+  `-R*a/(omega²*L)`. Amplitude is peak acceleration; phase is at the acquisition
+  timestamp. Prediction target is explicit and includes acquisition age once.
+- `accelFFCtrlInput.hpp::inputProcessor`: full production counter/clock/ADC and
+  freshness validation, numerical reset and optional gap handling. Reused
+  unchanged in all raw-only causal study replays; no alternative fitting kernel.
+- `accelSimModel.hpp::{model,adcCounts,accelerationFactor}`: record physical
+  source truth and noisy quantized ADC once, with independent future truth
+  padding. Only raw pairs are extracted into the input replay's argument.
+  Independent scoring/oracle code can read truth; no truth field is accessible
+  through the production input processor or the correction component.
+- `accelSimDisturbance.hpp::tipTiltProjection`: existing weighted column-scaled
+  QR solves `B*K=0.5e6*[x,y]`, mapping physical radians into surface-micron mode
+  coefficients. This applies reflection once; no extra diameter/gain/reflection
+  factor belongs in command synthesis. The synthetic fixture reuses its
+  `response()` and recovers K in the supplied B basis; it does not fit a new
+  physical calibration or load deployed FITS.
+- `apps/dmMode/dmMode.hpp::sendCommand`: complete surface image is the sum of
+  modal amplitudes times calibration planes. `apps/hoPredCtrl/hoPredCtrl.hpp`
+  loads mapping/calibration and writes a complete shaped contribution.
+  `libMagAOX/app/dev/dm.hpp` consumes the combined stream and delegates hardware
+  commands. A future correction is a complete additive contribution, not an
+  accumulated increment or a replacement for AO/flat ownership.
+- The existing `agents/plans/2026-10/accelSim-dm-injection.md` records user-supplied
+  additive combiner behavior: changed summed channel counters, AveMode=0,
+  DClevel=0, trigger mode 4/delay 10 us. This is historical supplied evidence, not
+  a measured dynamic response or independently available deployed combiner code.
+  Exclusive ownership, AO combination and physical channel behavior remain a
+  future integration gate. `loPredCtrlAcc` remains absent in this checkout;
+  the present `loPredCtrl`/`hoPredCtrl` sources do not provide a calibrated
+  acceleration-to-pointing cancellation plant that could substitute here.
+
+No common-library/projector extraction is needed for this isolated test phase.
+`apps/accelFFCtrl/offline/accelFFCtrlCancellation.hpp` depends only on the
+numerical prediction API and Eigen. It contains no ImageStreamIO, FITS, INDI,
+clock, application lifecycle or publication interface. Existing single-band
+production observation is unchanged; only the offline dual-frequency harness
+instantiates two independent readers/estimators.
+
+### Equations, explicit synthetic calibration and validity
+
+For query time t and common target t+h:
+
+```text
+theta_sum(t+h) = sum of coherent ready predicted physical bands [rad]
+u_FF(t) = -g*K*theta_sum(t+h)                       [modal coefficient]
+surface(t) = B*u_FF(t)                             [surface micron]
+residual(t) = theta_disturbance(t) + A_true*x_DM(t)  [rad]
+```
+
+The opposing correction sign follows the already-negative acceleration-to-angle
+inversion. With identity registration, correction is therefore proportional to
+positive estimated acceleration. The new tests verify the signs, coordinate
+rotation, reflection scale and complete residual rather than introducing a
+hardware sign convention. No telescope/WFS registration or physical DM gain is
+assumed from this synthetic example.
+
+Synthetic calibration is deliberately explicit: eight equally spaced azimuths
+at pupil radius `6.5/(2*sqrt(2))` m, unit weights, and two modes
+`B0=(4/D)*(cos(phi)*x+sin(phi)*y)`,
+`B1=(4/D)*(-sin(phi)*x+cos(phi)*y)`, with D=6.5 m and phi=30 deg.
+The discrete quadrature gives each mode one micron surface RMS at coefficient
+one and zero cross product. The existing projector yields
+`K=(D*1e6/8)*R(-phi)`; nominal synthetic `A=K^-1` [rad/coefficient].
+These are synthetic quadrature locations, not physical actuators or approved
+on-instrument constants. True-plant errors multiply A by a gain and output-axis
+rotation; the wrong-sign case uses -A. No real calibration file is opened.
+
+`correctionParameters` defaults gain and modal bounds to zero; explicit mapping
+is required. It configures gain 0..1, horizon, max age/target and per-mode absolute
+coefficient bounds. The baseline bound 0.1 is nonbinding; bound 0.001 exercises
+clipping. A common limiting scalar preserves proposed modal direction. These
+are user-requested **offline experiment controls**, not hardware protection or
+reintroduction of removed accelSim actuator/P2V limits.
+
+`feedForward::propose` is stateless and returns a fresh zero on disabled/invalid
+input. All bands must be ready, finite and fresh, with matching acquisition,
+source generation/counter and target exactly equal to query+h. Empty input,
+nonfinite calibration/control/data, bad bounds, future/stale acquisition or
+inconsistent targets/identities cannot silently retain a prior command. Full
+multi-band output is inhibited if any configured band is unavailable.
+
+Synthetic DM dynamics at dt=125 us with integer pure delay d are:
+
+```text
+a = exp(-2*pi*bandwidth*dt)
+x[n] = a*x[n-1] + (1-a)*u[n-d-1]   (bandwidth > 0)
+x[n] = u[n-d]                      (explicit ideal bandwidth=0 case)
+```
+
+This is exact first-order evolution under the preceding ZOH input interval.
+A finite-bandwidth plant has no response at the instant of a new input before
+an interval elapses. Delay must be divisible by dt; histories are bounded to
+one million steps at construction. Reset clears only this simulated history.
+A nonfinite plant input clears simulated state and throws. Commands are held
+between 2-kHz queries. Nominal delay 1 ms/bandwidth 300 Hz are chosen simulation
+parameters, not measured MagAO-X transfer functions. The new component uses
+fixed-size arithmetic and a startup-allocated delay line, with no per-step I/O.
+
+An inhibited proposal is a zero at the plant input. Previously issued commands
+can still emerge through real-model delay or settle naturally; they are not
+retroactively erased. This separates software inhibition from physical settling.
+No inverse plant or adaptive gain is applied. A longer prediction horizon can
+anticipate phase but does not automatically compensate plant attenuation.
+
+### Causal experiments and scoring
+
+The standalone exporter uses 8-kHz acquisition and 2-kHz queries, depth-one
+owned snapshots and original production input/numerics. Query precedes current
+sample consumption; the newest ready acquisition is 125 us old. Horizon1 ms means
+an effective sample-to-target interval1.125 ms. Targets are on the exact 125-us
+truth grid; there is no rounding, interpolation or extra sample-age addition.
+The raw replay takes a separate vector of two UINT16 codes, with no truth
+members. Its only inputs are those codes, known calibration and ordered times.
+
+Recordings use existing model seed 42/modeSeed 123, lever 10 m, per-mode/axis
+acceleration RMS 0.002 m/s², pole 0.99999, WFS couplings 1, ADC 2048/0.0083799/1.02 and
+noise PSD 1e-8. Cases are isolated 28, isolated 56 and both together; no214-mode
+claim is made in this phase. Independent coherent analytic cases use the same
+acceleration/ADC conversion with volts-per-bit1e-5 and noise 0 to isolate
+mathematics from coarse quantization. Existing producer defaults are never edited.
+
+Every source is generated once (with 200 future samples for independent scoring),
+then reused across gain/plant conditions. No controller call advances a model/RNG.
+Raw-only predictions are cached by input fault/policy and horizon, not gain or
+plant. The separately named oracle substitutes exact truth at the target in
+`evaluate` only; it never enters the production readers. Oracle gain curves use
+linear scaling of that plant effect below nonbinding bounds. They are an explicitly
+noncausal perfect-prediction baseline, not an implementable controller.
+
+76 runs cover 0..1 gain in0.1 steps; both single frequencies and dual bands;
+perfect prediction; horizons0,1,1.75 ms; pure delay 1,5,20 ms; bandwidth 0,50,300 Hz;
+wrong sign; +20% calibration gain;15-degree rotation error; nominal/tenfold/zero
+sensor PSD; one omitted ADC frame/s; three-frame clusters; bad ADC 4096;10-ms
+input silence; explicit reset/generation reattachment; and a tight modal bound. Input-fault
+queries continue on schedule. Dropped counts and all invalid proposal zeros
+are checked, and all observed source frames must be processed or accounted lost.
+
+The 60-s study scores every 8-kHz residual sample from 4s onward, including inhibited
+intervals. Availability covers all 120,000 scheduled queries including cold start.
+The simulated WFS is an ideal zero-exposure linear TT observation at 8 kHz with
+unity coupling. It is not a model of real2-kHz WFS integration/readout or AO
+feedback. Before/after RMS retain bias; variance reduction uses mean-subtracted
+variance. Peak complex phasors use the same complete scoring interval; residual
+amplitude/phase and opposing correction amplitude/phase are separate quantities.
+Prediction error is computed only on ready query targets against exact future
+truth, with availability also reported so censored errors are not mistaken for
+continuous correction. PSDs use Welch8-s Hann windows, exact 28/56-Hz bins and
+an additional ±1-Hz integrated band metric. No unavailable records are compressed
+into a fake uniform time series.
+
+### Quantitative results: nominal gain 1, horizon/delay 1 ms, bandwidth 300 Hz
+
+| Source | Before RMS X/Y [mas] | Residual RMS X/Y [mas] | Variance reduction X/Y | Carrier-bin PSD suppression X/Y [dB] |
+| --- | ---: | ---: | ---: | ---: |
+| 28 Hz | 1.31778 / 1.19992 | 0.28479 / 0.27031 | 95.3295% / 94.9253% | 16.370 / 16.666 at 28 |
+| 56 Hz | 0.44531 / 0.28239 | 0.12955 / 0.09463 | 91.5362% / 88.7692% | 11.467 / 10.997 at 56 |
+| 28+56 Hz | 1.29912 / 1.17524 | 0.29396 / 0.28209 | 94.8803% / 94.2388% | 16.695 / 16.766 at 28;11.066 / 11.073 at 56 |
+
+Integrated ±1-Hz suppression is 15.028/14.956dB (single 28),11.165/10.497dB
+(single 56),15.349/15.127dB at 28 and10.817/10.753dB at 56 for dual bands.
+Finite-record AR RMS differs from ensemble RMS; no realization rescaling occurs.
+
+| Source | Target prediction RMSE X/Y [mas] | NRMSE X/Y | Opposing phase error X/Y | Opposing amplitude error X/Y |
+| --- | ---: | ---: | ---: | ---: |
+| 28 Hz | 0.20593 / 0.21338 | 15.6268% / 17.7829% | -8.223 / -7.703 deg | -0.286% / -0.865% |
+| 56 Hz | 0.05325 / 0.05453 | 11.9571% / 19.3089% | -15.895 / -14.948 deg | -2.008% / -2.459% |
+| Dual,28 component | 0.21655 / 0.21271 combined | 16.6690% / 18.0997% combined | -8.236 / -7.804 deg | -1.248% /+2.564% |
+| Dual,56 component |same combined |same combined | -16.617 / -16.173 deg | -8.309% / -5.571% |
+
+Corresponding residual amplitude ratios are 0.1432/0.1340 (28),0.2745/0.2581 (56),
+0.1433/0.1402 (dual 28),0.2889/0.2790 (dual 56). Residual phase relative to truth is
+84.748/82.456 deg,77.898/77.106 deg,80.896/96.612 deg and65.160/70.513 deg,
+respectively. These phasors are finite-record projections; phases near nulls
+should not be interpreted as calibrated instrument timing.
+
+Dual-band correction modal RMS is 0.005691/0.003830 coefficient, peaks
+0.016424/0.012244; maximum absolute surface at the eight synthetic test points is 0.025205 um. Single28
+surface peak0.022424 um; single 56 peak0.007330 um. The0.1 baseline coefficient
+bounds never engage. A0.001 bound engages117,135 queries and reduces dual-band
+variance by only25.91/24.66%, quantifying the imposed nonlinear clipping.
+
+### Perfect prediction, compensation and robustness
+
+At nominal 1-ms horizon the oracle achieves98.116/98.119% variance reduction
+(single 28),92.669/92.668% (single 56),97.720/97.600% (dual). Thus nominal 56-Hz
+residual is substantially plant/ZOH phase error, rather than just prediction
+noise. With1.75-ms horizon, causal reductions become97.539/96.831%,
+98.558/96.285%, 97.197/96.696%; oracle reductions become99.993%, 99.952%,
+99.990%. Both bands share the target; no frequency-dependent inverse plant is
+inserted. The analytic single-tone cases track their oracle closely. Analytic
+dual-band NRMSE remains about 1.4% due to leakage between independent fits;
+changing to a joint multi-harmonic fit is outside this phase.
+
+Gains0..1 are finite/bounded and zero gain reproduces disturbance exactly.
+Gain1 is best among that discrete grid for the nominal source/plant in both
+axes; this is not a recommended physical setting. For dual bands:
+
+| Perturbation | Variance reduction X/Y |
+| --- | ---: |
+| Reversed correction sign | -290.26% / -289.68% (amplification) |
+| Actual delay 5 ms, horizon 1 ms | 21.18% / 17.61% |
+| Actual delay 20 ms, horizon 1 ms | -257.94% / -250.77% |
+| Bandwidth50 Hz | 67.19% / 65.96% |
+| Plant gain+20% | 90.41% / 89.63% |
+| Output rotation error15 deg | 90.30% / 88.45% |
+| Sensor PSD 1e-7 (tenfold) | 81.39% / 79.22% |
+| Noise0, unchanged coarse ADC | 76.81% / 64.79% |
+| Ideal delayed DM, bandwidth 0 | 96.99% / 96.47% |
+| Horizon0, nominal plant | 85.49% / 84.35% |
+
+Removing noise can worsen sub-count quantized estimation because dither changes;
+this is not an instruction to change physical noise/calibration. Real DM
+resonances, hysteresis and feedback from DM into accelerometers are unmodelled.
+This is feed-forward into a stable prescribed plant, not a demonstrated real
+closed-loop stability margin. Wrong signs/latencies amplify variance while
+remaining finite; gain bounds alone do not establish useful cancellation.
+
+| Input event | Drops | Full resets per reader | Admitted/rejected gaps | Prediction availability | Variance reduction X/Y |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Ideal | 0 | 1 | 0/0 | 99.4992% | 94.88% / 94.24% |
+| One ADC loss/s, default | 59 | 60 | 0/59 | 69.9992% | 66.12% / 65.99% |
+| One ADC loss/s, optional | 59 | 1 | 59/0 | 99.4992% | 94.88% / 94.24% |
+| Three consecutive losses every 5s, either policy | 33 | 12 | 0/11 | 93.9992% | 89.22% / 88.61% |
+| One invalid ADC frame | 1 | 2 | 0/0 | 98.9992% | 94.16% / 92.38% |
+| Input silence10 ms | 80 | 2 | 0/1 | 98.9850% | 94.15% / 92.32% |
+| Explicit reset | 0 | 2 | 0/0 | 98.9983% | 94.16% / 92.38% |
+| Generation reattachment | 0 | 3 | 0/0 | 98.9983% | 94.16% / 92.38% |
+
+Cold start remains 300 ms. Here only ADC ingestion is omitted while prediction
+deadlines keep running: availability consequently differs from the preceding
+69.95/99.45% study that also missed query deadlines. Every disabled/inhibited
+proposal is explicitly zero; traces and scoring verify this even after a prior
+nonzero proposal. The physical response may continue through delay/decay as
+expected. The production default gap policy was not changed.
+
+### Tests, artifacts and reproduction
+
+- Controller suite:28 cases / 3,440,057 assertions passed, including five new
+  cancellation cases. New tests cover analytic K/surface units, sign/gain,
+  default zero gain, invalid controls/mapping, common limits, empty/mismatched/
+  nonfinite/stale prediction inhibition, zero after a prior command, delay/step
+  response and steady-state complex first-order transfer at 28/56 Hz. The
+  perfect-prediction ideal-plant sinusoidal residual agrees with the analytical
+  formula averaged over the four command-hold phases at gains 0,0.5,1. A causal
+  two-tone raw-ADC test exercises startup and explicit reset through both real
+  production readers and achieves residual variance ratio<0.02.
+- Combined simulator/controller ASan+UBSan: 62 cases / 3,676,655 assertions passed;
+  simulator DM tests use existing mock sinks only. The independent 76-run 8-s
+  exporter also passes sanitizers and its Python numerical/PSD cross-checks.
+- Python: 17 controller scoring/timing tests plus four simulator PSD tests pass.
+  Three new scoring cases verify signed sinusoidal gain/phase, exact carrier and
+  integrated PSD dB conventions and absence-of-mode labelling.
+- The full 76-run 60-s study and all selected raw binary/RMS/phase/PSD cross-checks
+  pass. Existing 208 gap replays pass again using 6-s recordings; all 124 archived
+  default prediction/history/truth binaries remain byte-identical. The normal
+  numerical/input allocation benchmarks pass with their original checksums,
+  zero C++/Eigen allocations and accurate default/optional loss accounting.
+- Root application-test registration compiles the new test object with scoped
+  `-fno-fast-math`. No original assertion is weakened. Existing Linux app/native
+  validation remains pending; no instrument or native-stream test is run here.
+
+From the checkout root (use the available existing scientific Python environment;
+locally this was Anaconda `python`, with Apple Clang 21/Eigen 5.0.1/libc++ 210106):
+
+```bash
+make -C apps/accelFFCtrl/tests BUILD_DIR=/tmp/accelFFCtrl-cancellation-build test benchmark
+make -C apps/accelFFCtrl/tests BUILD_DIR=/tmp/accelFFCtrl-cancellation-build \
+  PYTHON=python3 VALIDATION_DIR=/tmp/accelFFCtrl-cancellation-final-60s \
+  VALIDATION_SECONDS=60 cancellation-validation
+make -C apps/accelFFCtrl/tests PYTHON=python3 validation-test
+python3 -m unittest discover -s apps/accelSim/tests -p test_validate_psd.py -v
+ASAN_OPTIONS=halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
+  make -C apps/accelFFCtrl/tests BUILD_DIR=/tmp/accelFFCtrl-cancellation-asan \
+  CXXFLAGS='-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer' test
+make -C apps/accelFFCtrl/tests BUILD_DIR=/tmp/accelFFCtrl-cancellation-asan \
+  CXXFLAGS='-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer' \
+  /tmp/accelFFCtrl-cancellation-asan/accelFFCtrlCancellation_export
+ASAN_OPTIONS=halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
+  /tmp/accelFFCtrl-cancellation-asan/accelFFCtrlCancellation_export /tmp/accelFFCtrl-cancellation-asan-smoke 8
+python3 apps/accelFFCtrl/tests/validate_cancellation.py /tmp/accelFFCtrl-cancellation-asan-smoke --no-plots
+```
+
+The previous combined sanitizer command applies with the new cancellation source;
+`tests/validate_linux.sh` under the app now includes it in its explicit combined
+source list. Nothing in that script was run on Linux/instrument hardware here.
+Export duration is 8..600 s (smoke 8), score starts 4 s. Artifacts include metadata,
+`summary.csv`, selected uniform 8-kHz float64 trace binaries, `report/metrics.csv`,
+`spectral_suppression.csv`, per-axis PSD CSVs, original/residual/command/readiness
+PNGs and `gain_sweep.png`. Large generated artifacts remain under `/tmp`, not git.
+
+### Limitations, integration gates and changed files
+
+The offline causal controller successfully suppresses both isolated frequencies
+and their combination under the explicit synthetic plant. This establishes no
+physical DM calibration, on-instrument suppression, native Linux timing or AO
+stability result. Full 214-mode correction, clock-jitter cancellation, WFS
+integration/readout, actual driver/combiner dynamics and robust automatic gain/
+band selection are not qualified. The current common-horizon two-bank fit also
+has measurable cross-band leakage. No physical constants should be inferred
+from the chosen 300-Hz/1-ms synthetic transfer function.
+
+Before production integration, review this result and approve a separate design
+phase. That phase needs approved full-image B/K calibration with measured
+sensor/pupil/DM/WFS registration/sign/units, measured source-age/combiner/driver/
+WFS transfer timing, existing AO-loop interaction analysis, exclusive additive
+channel ownership, validated Linux/native operation and explicit enabled/fault/
+disable/shutdown behavior. No publication path, live gain control or new
+hardware limit is supplied in this phase. Default observer behavior remains
+observation-only and gap tolerance remains disabled.
+
+Changed files: new `apps/accelFFCtrl/offline/accelFFCtrlCancellation.hpp`; new
+`tests/accelFFCtrlCancellation_test.hpp`, `_test.cpp`, `_export.cpp`,
+`validate_cancellation.py`, `test_validate_cancellation.py` under the app;
+app test `Makefile` and `validate_linux.sh`; root `tests/Makefile.one` and
+`tests/tests.list`; both app READMEs; this plan. Runtime source, existing
+numerical/source model headers, configuration files and the separate DDSPC
+worktree remain untouched. No staging, commits, pushes or deployment occurred.

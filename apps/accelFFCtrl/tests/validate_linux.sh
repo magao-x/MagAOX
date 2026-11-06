@@ -81,7 +81,7 @@ accff_sources=(
     apps/accelFFCtrl/tests/accelFFCtrlModel_test.cpp apps/accelFFCtrl/tests/accelFFCtrlReplay_test.cpp
     apps/accelFFCtrl/tests/accelFFCtrlInput_test.cpp apps/accelFFCtrl/tests/accelFFCtrlValidation_test.cpp
     apps/accelFFCtrl/tests/accelFFCtrlGap_test.cpp apps/accelFFCtrl/tests/accelFFCtrlJitter_test.cpp
-    tests/testMain.cpp
+    apps/accelFFCtrl/tests/accelFFCtrlCancellation_test.cpp tests/testMain.cpp
 )
 read -r -a accff_eigen_flags <<< "$(pkg-config --cflags eigen3)"
 run sanitizer-build "$accff_cxx" -std=c++20 -O1 -g -fno-fast-math -Wall -Wextra -pthread \
