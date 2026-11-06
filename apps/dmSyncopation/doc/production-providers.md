@@ -116,10 +116,10 @@ and release observer. Its controller configuration includes:
 [sdk]
 workerEnabled=true
 threadPrio=55
-cpuset=dmtweeter-sdk
+cpuset=spare56
 pipelineEnabled=true
 pipelineThreadPrio=30
-pipelineCpuset=dmtweeter-post
+pipelineCpuset=spare31
 pipelineResultStream=dmtweeter_sdk_done
 
 [dm]
@@ -127,11 +127,17 @@ completionStream=dmtweeter_done
 readerReleaseStream=dmtweeter_read_done
 ```
 
-These cpuset names are the current RTC assignments, not portable defaults.
-They place the SDK and post workers (CPU42/44) in the tweeter monitor's L3
-domain; the 8 kHz tests used CPU56/31 for those workers. The release observer
-remains on CPU57. Select available dedicated cores and verify actual thread
-scheduling and affinity on another host. Configure synco's primary/combined streams for
+These cpuset names select the tested RTC worker placement, not portable defaults.
+The SDK and post workers use CPU56/31, outside the L3 domain shared by the
+tweeter monitor and MVM host on CPU40/45. Moving the workers to
+`dmtweeter-sdk`/`dmtweeter-post` on CPU42/44 caused enable-dependent MVM slowdown
+and excess controller jitter; the operator reported recovery after restoring
+CPU56/31 on 2026-11-06. This identifies a placement regression without proving
+the precise cache or memory-system mechanism. See the
+[investigation record](../../../agents/plans/2026-11/dm-syncopation-minimal-diagnostics.md#successful-placement-comparison).
+The release observer remains on CPU57. Reserve CPU56/31 for these workers in
+this setup; verify availability, actual thread scheduling and affinity on
+another host. Configure synco's primary/combined streams for
 the real command path (`shmimMonitor.shmimName=dm01disp03` and
 `streams.combined=dm01disp` in this example). dmcomb must react to the auxiliary
 counter publications as well as the main writer. The tested configuration is

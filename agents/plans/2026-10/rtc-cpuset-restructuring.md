@@ -546,6 +546,15 @@ remain follow-up steps.
 
 ## Second migration: 24-core system pool and tweeter pipeline locality
 
+**2026-11-06 follow-up:** The SDK/post move to CPU42/44 below caused
+enable-dependent MVM slowdown and excess DM timing jitter at four-step synco.
+The operator reports recovery after restoring SDK `spare56` and post
+`spare31`. Retain those controller assignments for the tested 8 kHz setup;
+the existing reserve cpusets support this without recreating the CPU map.
+The CPU42/44 proposal below records the migration history, not the currently
+qualified worker placement. See the
+[successful comparison](../2026-11/dm-syncopation-minimal-diagnostics.md#successful-placement-comparison).
+
 Requested by the operator 2026-11-05 on `jrmales/rtc-cpusets-24core`, based on
 `dev` at `d6af5164`. Since the first migration, the 8 kHz tweeter pipeline added
 three dedicated threads on reserves in three L3 domains: the BMC SDK worker on
