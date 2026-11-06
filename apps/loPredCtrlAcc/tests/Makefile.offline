@@ -17,6 +17,7 @@ SOURCES := $(ROOT_DIR)/tests/testMain.cpp $(APP_DIR)/ar_controller.cpp \
            $(APP_DIR)/shadow_controller.cpp $(APP_DIR)/causal_input.cpp \
            $(TEST_DIR)/comparison.cpp \
            $(TEST_DIR)/phase6_adapter.cpp \
+           $(TEST_DIR)/phase7_adapter.cpp $(TEST_DIR)/async_shadow.cpp \
            $(ROOT_DIR)/INDI/libcommon/IndiProperty.cpp $(ROOT_DIR)/INDI/libcommon/IndiElement.cpp \
            $(ROOT_DIR)/INDI/libcommon/TimeStamp.cpp \
            $(wildcard $(TEST_DIR)/ddspc_*_test.cpp)
@@ -38,6 +39,22 @@ PHASE6_NAMES := ar_controller recursive_least_squares qrd_rls utils shadow_contr
 PHASE6_OBJECTS := $(addprefix $(BUILD_DIR)/phase6_,$(addsuffix .o,$(PHASE6_NAMES)))
 OBJECTS += $(PHASE6_OBJECTS)
 CPPFLAGS += -I$(abspath $(BUILD_DIR))
+LDLIBS += -pthread
+# Keep historical numerical-object flags while compiling the new POSIX thread users with their required flag.
+$(BUILD_DIR)/async_shadow.o $(BUILD_DIR)/ddspc_async_test.o: CPPFLAGS += -pthread
+PHASE7_ROOT := $(abspath $(BUILD_DIR))/phase7
+PHASE7_STAMP := $(PHASE7_ROOT)/snapshot.stamp
+PHASE7_OBJECTS := $(addprefix $(BUILD_DIR)/phase7_,$(addsuffix .o,$(PHASE6_NAMES)))
+OBJECTS += $(PHASE7_OBJECTS)
+
+$(PHASE7_STAMP): $(TEST_DIR)/prepare_phase7.py $(TEST_DIR)/prepare_phase6.py
+	python3 $(TEST_DIR)/prepare_phase7.py --output $(PHASE7_ROOT)
+
+$(BUILD_DIR)/phase7_adapter.o: $(PHASE7_STAMP)
+
+$(PHASE7_OBJECTS): $(BUILD_DIR)/phase7_%.o: $(PHASE7_STAMP)
+	@mkdir -p $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -DDDSPC=DDSPCPhase7 -MMD -MP -c $(PHASE7_ROOT)/$*.cpp -o $@
 
 $(PHASE6_STAMP): $(TEST_DIR)/prepare_phase6.py
 	python3 $(TEST_DIR)/prepare_phase6.py --output $(PHASE6_ROOT)

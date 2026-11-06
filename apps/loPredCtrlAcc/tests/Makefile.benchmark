@@ -6,7 +6,7 @@ CXX = c++
 CPPFLAGS += $(shell pkg-config --cflags-only-I eigen3 mxlib) -DEIGEN_DONT_PARALLELIZE -include $(TEST_DIR)/allocation_probe.hpp
 CXXFLAGS ?= -O3 -g
 CXXFLAGS += -std=c++20 -Wall -Wextra -fno-fast-math
-SOURCES := $(TEST_DIR)/benchmark.cpp $(APP_DIR)/ar_controller.cpp $(APP_DIR)/recursive_least_squares.cpp \
+SOURCES := $(TEST_DIR)/benchmark.cpp $(TEST_DIR)/allocation_new.cpp $(APP_DIR)/ar_controller.cpp $(APP_DIR)/recursive_least_squares.cpp \
            $(APP_DIR)/qrd_rls.cpp $(APP_DIR)/utils.cpp $(APP_DIR)/shadow_controller.cpp $(APP_DIR)/causal_input.cpp
 OBJECTS := $(addprefix $(BUILD_DIR)/,$(notdir $(SOURCES:.cpp=.o)))
 VPATH := $(sort $(dir $(SOURCES)))

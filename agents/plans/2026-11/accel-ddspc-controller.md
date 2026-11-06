@@ -293,6 +293,32 @@ Review AGENTS.md.  Do not alter any text above the "Agent Findings and Plan" bel
 
 ## Task Summary
 
+**Phase 8 offline asynchronous prototype (2026-11-06): independently owned workers,
+bounded common-record fanout and coherent pinned snapshots are implemented; no
+production integration is performed.** Starting clean HEAD is committed Phase 7
+`6ae20f859ce308d1d5734154a7c3e5c280a7efb4`. Host was checked before work:
+`ASTR-LT-428.local`, personal macOS arm64, never an `exao*` host. The original
+`loPredCtrl`, Legacy default, controller arithmetic, INDI, production loop,
+configuration and output paths remain unchanged. A friend declaration permits
+the offline worker to deep-copy only its own manager state. New code is built
+only by offline test/benchmark Makefiles. No instrument command, physical stream,
+separate worktree, commit, merge, push, deployment or actuator operation occurs.
+
+The reproduced synchronous medians remain 39.666/48.750 us (two modes) and
+504.000/572.042 us (ten modes), RLS/QR. The isolated Clang paced prototype moves
+training/rank/solve work off the frontend: maximum observed full frontend time is
+49.333 us across 16 normal/stress scenarios, with zero observed allocation
+requests and frame deadline misses. It preserves exact Phase 7 coefficients,
+proposals, readiness and frozen-origin diagnostics on matching ordered versions.
+**GCC on this Mac does not sustain ten-mode worker throughput:** normal standard
+p99 training is 1.196–1.265 ms; common overflow repeatedly invalidates both lanes,
+and assistance has zero valid predictions in those normal runs. Its frontend
+continues without waiting (maximum 80 us). The architecture isolates execution
+latency but cannot manufacture training capacity. Linux compilation/runtime and
+physical timing/provenance remain unverified; GNU fast-math QR remains unresolved.
+Stop after this offline prototype. Production asynchronous integration needs
+explicit approval and must not bypass those qualification/data gates.
+
 **Phase 7 offline performance optimization (2026-11-05): causal model workspaces
 and a lightweight cached-prediction seam are implemented; ten-mode synchronous
 training still does not safely fit a 500-us frame.** Starting clean HEAD is
@@ -534,6 +560,25 @@ formula or a predetermined spectral line.
 
 ## Key Assumptions
 
+**Phase 8 scope and clocks:** all WFS, held applied-command and sensor data are
+explicitly synthetic. `u_i` is held over [i,i+1), beginning at the WFS exposure
+end; its availability is supplied separately. This is not evidence that physical
+DM application follows a callback or that zero synthetic latency exists on sky.
+Sensor sample time and availability must precede the declared decision/input
+availability; maximum sample age defaults to 500 us. All times share one monotonic
+clock domain even across source restarts. The frontend supplies a truly causal
+canonical state; numeric timestamps cannot independently certify physical inputs.
+
+One serialized frontend owns submission/reset/prediction/diagnostic reads; one
+exclusive worker owns each learner. The bounded snapshot protocol supports one
+frontend reader, with no concurrent frontend calls. Startup/shutdown, coordinator
+pacing/draining, synchronous oracle preparation and result formatting are outside
+frame execution. These short macOS observations do not establish Linux WCET,
+scheduling/affinity, transport, Legacy/INDI contention or physical latency.
+Readiness belongs to the coherent snapshot's evidence window/version, not future
+unseen data. A reader may finish a pinned version while a newer version is being
+published; generation/reset and age checks still apply.
+
 **Phase 7 qualification:** observations are instrumented workstation measurements,
 not worst-case execution or native Linux verification. Original benchmark
 configuration is unchanged (N=5, F=3, Ha=20, channels=2, gamma=1, prior=.1,
@@ -683,6 +728,99 @@ independent learners and non-actuation protections remain unchanged.
     libraries/hardware. Preserve the original as the operational reference.
 
 ## Requirements
+
+### Phase 8 offline architecture and ownership
+
+`tests/async_shadow.hpp/.cpp` defines `OfflineAsyncShadow`, `OfflineTrainingWorker`,
+`OfflineRecord`, versioned `OfflineSnapshot`/`OfflineModelInfo`, and bounded
+telemetry. The app does not construct or link the prototype. Each worker privately
+owns a separate existing `ShadowController`, training only its standard or
+assisted model. The dormant half copies histories but never fits/checks rank;
+its bounded extra memory/work is included in benchmarks. This reuse preserves
+`ShadowController::step()` readiness, QR/RLS, reference law and frozen-origin
+forecast arithmetic without a new numerical implementation. Standard has no
+accelerometer columns and is not made by zeroing an assisted fit.
+
+```mermaid
+flowchart LR
+    P["Offline frontend: validated state, no waits"] -->|"identical timestamped records"| S["bounded standard SPSC"]
+    P -->|"identical timestamped records"| A["bounded assisted SPSC"]
+    S --> WS["standard owner: RLS/QR + rank + reference"]
+    A --> WA["assisted owner: RLS/QR + rank + reference"]
+    WS --> SS["three owned snapshot slots"]
+    WA --> SA["three owned snapshot slots"]
+    SS -->|"pin once, age/validity, K*x, release"| P
+    SA -->|"pin once, age/validity, K*x, release"| P
+```
+
+- **Fanout:** `submit()` checks payload shape/finite/validity, exposure/applied
+  hold timing, availability, source epoch, sequence and sample age/availability.
+  It checks both queues before accepting, deep-copies into preallocated slots,
+  and release-publishes each head. Only the consumer advances its tail, after
+  processing/copying the entry; in-flight entries occupy capacity. Frontend
+  operations never wait for worker progress or grow a container.
+- **Discontinuities:** a common gap, malformed/missing timing or source restart
+  immediately increments both lane generations. A source incarnation may restart
+  sequence IDs but may not roll back the common monotonic clock. Bad/late/stale
+  acceleration invalidates assistance alone. A full queue drops the newest record
+  from both lanes, increments both generations and counts common overflow apart
+  from invalid input. Workers discard old queued prefixes, retain fitted weights
+  on history breaks and reacquire complete histories/training/excitation. They do
+  not substitute proposals or calculated commands for applied-input records.
+- **Reset:** frontend `reset()` invalidates one lane immediately and publishes its
+  full-reset incarnation as the generation it belongs to. `step()` defers when
+  it observes a reset ticket ahead of generation publication. This prevents a
+  newly reset fit from consuming old queued records during the two-store control
+  transition; multiple unserviced resets cannot cancel. Only its owner resets
+  coefficients/history, and no old publication becomes valid under the new epoch.
+- **Publication:** three fixed slots contain canonical theta, the full reference
+  gain, origin state/proposal and coherent status, fit/publication/reset/source
+  versions and timing. `publish()` claims only a free nonpublished slot. A reader
+  tries one atomic pin and revalidates the index; a writer cannot reuse a pinned
+  slot. Complete payload release/acquire precedes all reading. No seqlock retry,
+  unbounded allocation, mutex, condition wait or shared mutable learner appears
+  in prediction. Atomics are required to be natively lock-free. This bounds
+  application operations, not target hardware/cache/OS worst-case latency.
+- **Prediction:** `predict()` gates epoch/reset/fault, readiness, source/sequence,
+  timing, finite canonical state/output and maximum evidence age. Late publication
+  cannot refresh the evidence timestamp. A failed valid-shape/nonaliasing output
+  is zeroed and must be ignored. Selection is diagnostic only; no output publisher,
+  correction-enable or automatic Legacy write/fallback route is present.
+- **Lifecycle/metrics:** `start()/stop()` create/join threads outside prediction;
+  worker polling may sleep. `manual_step()` provides deterministic clock/service
+  ordering without threads and cannot share a running consumer. Fixed trace
+  buffers drop/count excess telemetry. Traces may be inspected only after stop
+  or in serialized manual mode. Queued work left at stop is explicitly counted.
+
+Existing `CausalInputBuilder` is not a concurrent fixed-storage queue and remains
+unchanged. Native WFS/applied/sensor/INDI callbacks may be multiple producers;
+a reviewed aggregation/control owner is required before connecting this single-
+frontend design. Configuration is immutable; rebuilding/replacing a prototype
+requires quiescence outside prediction. No common-library primitive is introduced.
+
+The common fanout policy couples availability: a slow assisted queue can interrupt
+standard training even when standard has space. This preserves admitted-record
+identity and explicit barriers; it is not a claim that both workers fit identical
+subsets before a barrier. Moving work to two threads does not cure sustained
+throughput overload. A per-lane drop/segment policy, multiple readers, independent
+learner types/cadences, buffer reclamation changes or production wiring need a
+separate design/qualification review. No readiness/rank threshold, solve penalty,
+Givens kernel, integration or floating-point association was changed.
+
+### Phase 8 synchronous blocking review
+
+`ShadowController::process()/step()` still perform full history assembly,
+identification, normalized p-by-p pivoted rank QR, reference solve, finite checks,
+forecast copies and scoring. Configuration fixes dimensions but not an OS/WCET
+bound; classical forgetting RLS and the existing input builder may allocate.
+`loPredCtrlAcc.hpp::processShadowRecord()/processShadowWfs()/processShadowApplied()/`
+`expireShadowInputs()/consumeShadowInputs()` execute current builder/model work
+under `m_shadowMutex`; INDI diagnostics/reset also use model/INDI locks. Builder
+batch allocation, control/diagnostic contention, deferred state/file work, native
+transport, scheduling/page faults and existing Legacy output handoff add costs.
+None of those operational paths is changed by Phase 8. The prototype's fixed
+state builders and queues consume declared synthetic records; they do not make
+unverified native training functional. See Phase 4's existing concurrency risks.
 
 ### Phase 7 implemented bounded-storage numerical path
 
@@ -1971,6 +2109,27 @@ a benchmark.
 
 ## Questions and Points of Clarification
 
+**Phase 8 decisions/blockers before any production asynchronous integration:**
+
+- Supply/approve an isolated non-instrument Linux environment and supported
+  compiler/Eigen/build profiles. Neither native app profile nor Linux worker
+  execution is qualified here; GCC/macOS exposes a major ten-mode throughput
+  blocker despite exact numerical tests passing.
+- Agree on sustained per-worker capacity, CPU budgets and snapshot age. A queue
+  cannot compensate for persistent overload; lowering fit/rank cadence changes
+  the established identification/readiness contract and is not implemented.
+- Review common-drop versus per-lane availability. Current fanout is bounded and
+  preserves admitted common records, but either slow lane invalidates both.
+  Do not silently relax history/excitation protections for higher availability.
+- Establish verified WFS exposure/availability and applied-DM provenance/hold
+  timing, calibrated sensor clock/sample availability/reduction and actual state
+  availability. The new timestamps are declared synthetic contracts only.
+- Resolve GNU production fast-math QR behavior and native build issues without
+  hiding failures. The strict worker prototype does not change production flags.
+- Approve production asynchronous integration explicitly only after the offline/
+  Linux/data gates are reviewed. No application integration or new actuation is
+  authorized or performed in Phase 8.
+
 **Phase 7 next-phase decisions/blockers:**
 
 - Approve an isolated native Linux validation environment and supported compiler/
@@ -2137,6 +2296,136 @@ recommendations are not assumptions about the deployed instrument.
    source review does not establish deployment performance.
 
 ## Tests
+
+### Phase 8 numerical, concurrency and producer/consumer validation
+
+Reproduction and full evidence: `apps/loPredCtrlAcc/tests/results/phase8.md`,
+`phase8-synchronous.csv`, `phase8-async-clang.csv` and `phase8-async-gcc.csv`.
+`tests/README.md` contains architecture and slot-state diagrams; the evidence
+file provides exact native Linux/GCC/Clang/ASan/TSan/offline build commands.
+Native Linux/runtime tools were unavailable (Docker/Podman/Colima/Lima/QEMU/
+Multipass absent); no production host was contacted. All execution is macOS
+arm64, Clang 21 or GNU 15.2, Eigen header macros 3.5.0, strict math.
+
+Final checks (threaded assertion totals vary with observed publications):
+
+| Check | Phase 8 result |
+| --- | --- |
+| Strict Clang | 823,820 assertions / 55 cases pass. |
+| Strict GCC | 822,490 / 55 pass, exact matching-version behavior. |
+| Clang ASan + UBSan | 826,215 / 55 pass, no findings. |
+| ThreadSanitizer | 390,496 assertions / 1 generated concurrent case across two/ten modes and RLS/QR; no reported races. |
+| Clang Legacy fast | 186,615 / 9 pass. |
+| GNU Legacy default fast | Existing 1/9 case failure retained: 182,253/182,254 assertions pass; historical nonfinite QR fit at t=31. |
+| Python mocked build-helper tests | Seven pass per full check; not Linux compilation evidence. |
+| Paced scenarios | Clang/GCC each 16 x 2,000 measured frames; ASan/UBSan 16 x 100, no findings. |
+| Shared original allocation probe/contract | All eight Phase 7 allocation profiles pass after extraction; scope limits unchanged. |
+| Preservation/style | Protected plan prefix and original 15-file Legacy source tree unchanged; Python syntax, changed C++ clang-format and diff whitespace checks pass. |
+
+Logs are retained under ignored `apps/loPredCtrlAcc/build/phase8-*`; complete
+benchmark captures/environment notes are versioned in `tests/results/phase8.md`
+and CSVs. New source/test targets use pthread support without changing historical
+numerical-object or production flags. GNU throughput/fast-math failures remain
+visible; neither is waived to pass an acceptance gate.
+
+The initial full Phase 7 regression reproduction passes **333,616 assertions /
+50 cases**. The original 92-row benchmark is reproduced with 512 warmup + 2,000
+records; its original dimensions, flags, seeds and distributions are retained.
+Synchronous managed-pair medians are 39.666/48.750 us (two modes) and
+504.000/572.042 us (ten), RLS/QR; ten-mode misses 1,391/2,000 and 2,000/2,000.
+All original Legacy, causal-input, numerical, reference, QR and model tests remain.
+
+`prepare_phase7.py` reuses the local Git-object extractor (only the display label
+is generalized in `prepare_phase6.py`) to build the actual committed Phase 7
+sources under `DDSPCPhase7`. `phase7_adapter.cpp`/`phase7_replay.hpp` reuses the existing pure
+replay interface. No checkout, fetch or oracle reimplementation occurs.
+`ddspc_async_test.cpp` adds five default cases:
+
+1. **4,800 exact ordered records:** two/ten modes, RLS/QR, gamma=1/.99, bad timing,
+   missing sensor, frame gap and independent reset. Canonical coefficients,
+   proposals, RMSE, every readiness/status/rank/count and fit version equal the
+   committed Phase 7 oracle with zero tolerance. Manual service uses explicit
+   synthetic completion times; stale/old publications are rejected.
+2. **Bounded fanout:** a stopped assisted consumer fills capacity while standard
+   drains. The next input is rejected from both, both snapshots invalidate
+   immediately, old prefixes are discarded and uninterrupted evidence reacquires.
+   Independent full reset, restart/sequence rollback and unavailable input checks
+   preserve safety gates without changing the other model's full-reset state.
+3. **Age/version:** a retained gain predicts the current canonical state exactly
+   for its original version. Maximum difference from the newest fit is
+   **0.0352369**, attributable to controlled publication lag, not changed math.
+   Old evidence, wrong epoch, future ordering, invalid/aliased state and reset
+   cannot yield valid predictions. Late publication does not refresh evidence age.
+4. **Actual threads:** two/ten modes and both learners, 512 records/profile,
+   rapid snapshot reuse and repeated/backlogged independent resets. Every observed
+   complete snapshot is checked against its exact committed source version;
+   worker processing+discard counts account for all accepted records. Assertions
+   vary with observed publication count; no numerical tolerance is relaxed.
+5. **Physical-time distinctions in synthetic data:** samples arriving late,
+   samples older than the configured bound, future samples and future/unavailable
+   applied inputs are rejected for the appropriate lane(s), independent of call
+   order. A sensor failure can leave the ready standard model valid.
+
+`Makefile.async` builds only numerical/test sources with strict math and pthread
+support. `async_benchmark.cpp` executes 16 paced scenarios (32 model rows), modes
+2/10, RLS/QR, rates 4/8 kHz, normal and fault-injected; both workers run together.
+The producer creates two/four individually timestamped sensor events per 500-us
+frame and selects the latest causal sample. It is not a live transport or a
+separately scheduled 8-kHz hardware reader. Each profile has 512 warmup + 2,000
+measured frames, N=5, F=3, channels=2, Ha=20, gamma=1, prior=.1, lambda=.3.
+The complete raw CSVs retain median/p95/p99/p99.9/max for query, frontend, arrival
+jitter, training, publication, record-to-publication and observed model age, plus
+queue depth/overflow/discards/pending work, staleness/readiness/availability,
+sequence lag, frame misses, allocations and current-fit proposal differences.
+
+In the Clang capture, the maximum complete frontend time across all profiles is
+**49.333 us**, with zero observed execution/absolute scheduled misses and zero
+Eigen/C++ requests in frontend and worker timed scopes. Two-mode normal snapshots
+are available for 2,000/2,000 queries; ten-mode standard is 2,000/2,000, assistance
+1,998–1,999/2,000 because rank/readiness protections remain active. Eight-kHz
+normal query medians are .125–.375 us, p99 .291–.625 us and maxima 32.042 us;
+other profiles include a 48.042-us isolated query scheduler tail. Ten-mode workers
+still have large rank/fit tails; raw component timings and age/availability must
+be read together. Model age limit is 2 ms, not a physical stability certificate.
+
+Stress injects 8/16-ms worker stalls, 90-us producer jitter, capacity eight instead
+of 32, missing sensor/common timing, gaps, independent resets and stream restart.
+Clang captures have 24–25 common queue overflows and five stale rejections per
+model; ten-mode valid counts fall to 1,334–1,335 standard and 1,024–1,027 assisted
+of 2,000. All over-age/invalidated outputs are rejected while producer execution
+continues. Observed metadata age can reach ~17 ms in rejected old snapshots; this
+is not a valid served prediction. Common counters include warmup; processed
+training cohorts include reacquisition. Worker poll/control delay is included in
+end-to-end publication delay, not the isolated manager.process training timer.
+
+**GNU portability failure:** the same Mac/GNU strict experiment has ten-mode
+normal standard-worker p99 1.196–1.265 ms. Normal runs overflow 16–18 times and
+produce only 11–12 valid standard queries and **zero assisted queries** per 2,000.
+The larger assisted evidence window is repeatedly invalidated before becoming
+ready, so its small training quantiles are mostly warming/fitting costs and must
+not be reported as ready full-rank performance. Frontend maximum remains 80 us,
+with zero observed frame misses/allocations. Two workers isolate prediction but
+do not fix inadequate sustained capacity. Do not increase queue length or weaken
+rank/cadence/age policy to claim readiness. Exact GCC numerical tests still pass.
+This is Mac/GNU evidence, not a native Linux result or a diagnosed Linux compiler
+failure; target qualification is mandatory.
+
+Normal benchmark current-fit proposal differences reflect publication lag;
+stress differences also include retained weights from differently processed
+prefixes and reset timing. Matched-version unit tests distinguish those effects
+from algorithmic regression. The measured scalar proposals never enter synthetic
+applied-command generation, a DM history or an output publisher.
+
+The ordinary C++ new instrumentation is factored unchanged into
+`tests/allocation_new.cpp` and shared by both benchmarks. Counters are thread-local;
+Eigen's shared runtime no-malloc flag is not toggled concurrently. Requests cover
+Eigen permission checks/ordinary new only, excluding arbitrary libc/aligned/OS
+allocation, Eigen byte totals and peak memory. Startup, lifecycle joins/drains and
+formatting are outside frame execution. Classical gamma=.99 RLS keeps its exact
+one-temporary worker update; prediction/snapshot storage is fixed. No native
+transport, INDI/Legacy contention, sensor calibration or production deadline is
+qualified by these tests. Full tables and final compiler/sanitizer execution
+results are retained in the evidence file.
 
 ### Phase 7 executed optimization validation
 
@@ -2893,16 +3182,16 @@ dedicated Makefile above rather than linking the application library through
 
 ## Implementation Plan
 
-Each stage has a reviewable exit condition. The user has committed Phases 1–6.
-The current **Phase 7 is offline performance/allocation optimization with exact
-numerical compatibility**. Fixed workspaces, unchanged rank/readiness logic and
-an offline cached-prediction seam are implemented and tested. A threaded worker
-architecture is recommended, not implemented. Actual Linux qualification, GNU
-fast-math policy and physical timing/applied-input evidence remain open. Stop
-after Phase 7. The next separately approved stage must qualify native Linux,
-bounded ownership/fanout/versioned snapshots and overflow/age policies offline
-before any approved non-actuating instrument integration. Live acquisition,
-deployment and new actuation require further approval.
+Each stage has a reviewable exit condition. The user has committed Phases 1–7.
+The current **Phase 8 is an offline independent-worker/snapshot prototype**.
+Its bounded fanout, versioned pinned publication, immediate reset/discontinuity
+invalidation, age/fault/readiness checks and producer/consumer tests are isolated
+from the production application. Exact math is preserved, but GNU/macOS ten-mode
+training capacity and native Linux/physical timing remain blockers. Stop after
+this prototype. A separately approved next phase must qualify Linux builds,
+races, sustained per-worker load and data availability, then review existing
+app lock/transport integration. No production asynchronous execution, acquisition,
+deployment or new actuation is implemented or authorized by this phase.
 
 1. **P0 — Agree on the mathematical and telemetry contract.** Resolve the
    decisions above; record signal units, increment/absolute convention, frame
@@ -3025,6 +3314,32 @@ then documentation-only changes and separate formatting-only cleanup as required
 by `AGENTS.md`. This work does not switch branches, commit, or push.
 
 ## Follow-up and Edge Cases
+
+- **Phase 8 files:** `apps/loPredCtrlAcc/shadow_controller.hpp` adds the offline
+  friend only. Tests add `async_shadow.hpp/.cpp`, `async_test_data.hpp`,
+  `ddspc_async_test.cpp`, `async_benchmark.cpp`, `Makefile.async`,
+  `allocation_new.cpp`, `phase7_replay.hpp`, `phase7_adapter.cpp`,
+  `prepare_phase7.py`. Existing `Makefile.offline`, `Makefile.benchmark`,
+  `benchmark.cpp`, `prepare_phase6.py`, `README.md`, `results/README.md` are updated;
+  new results `phase8.md`, `phase8-synchronous.csv`, `phase8-async-clang.csv`,
+  `phase8-async-gcc.csv` retain evidence. This plan changes only below its protected
+  heading. Original `loPredCtrl`, numerical core implementations, native app
+  execution/defaults, common libraries, production configurations and separate
+  worktrees remain untouched.
+- **Phase 8 limitations:** one frontend reader, bounded application operations
+  rather than hardware WCET, declared synthetic physical timing, no raw stream
+  adapter, common-overflow availability coupling, extra dormant-manager memory,
+  large cubic rank cost, worker polling/scheduling delay, model-age/availability
+  tradeoff and classical forgetting-RLS temporary. Producer/consumer ownership
+  and pinned snapshots require re-review if adding readers, config changes or
+  publication consumers. Buffer/trace memory remains fixed after startup.
+- **Priority next steps:** qualify both native Linux builds and strict numerical/
+  race/paced workloads; diagnose supported-target/compiler worker throughput;
+  approve capacity/age/common-overflow policies; establish physical input timing
+  and applied-command provenance; review a non-actuating production integration
+  design with existing locks and real transports. Keep Legacy default, existing
+  math and failure gates. No training/rank decimation or new actuation is approved.
+  Stop after the offline Phase 8 prototype; production integration needs approval.
 
 - **Phase 7 changed files:** causal workspace/history/reference path in
   `ar_controller.hpp/.cpp`; opt-in fixed-scratch learner methods in

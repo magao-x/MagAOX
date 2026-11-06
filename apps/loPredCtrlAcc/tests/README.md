@@ -115,6 +115,146 @@ aligned C++ allocation, peak live heap, and OS/library allocation are not measur
 This proves hot-path allocation and is not an allocation-free certification.
 The probe is force-included only in the separate benchmark build.
 
+## Phase 8 experimental offline workers
+
+Phase 8 adds an isolated prototype under `tests/async_shadow.hpp/.cpp`; the native
+app does not compile or call it. Legacy defaults, operational mathematics, INDI,
+output routing and production configuration are unchanged. The only production
+header change is a narrowly scoped friend declaration so the offline worker can
+deep-copy its own numerical state. It never exposes a learner to the frontend.
+Phase 7 and earlier stop notes below describe those historical phases.
+
+```mermaid
+flowchart LR
+    F["Offline frontend: causal state + timestamp validation"] -->|"same records: sequence, epoch, times"| QS["bounded SPSC: standard"]
+    F -->|"same records"| QA["bounded SPSC: assisted"]
+    QS --> WS["standard worker owns its learner"]
+    QA --> WA["assisted worker owns its learner"]
+    WS --> SS["3 preallocated snapshot slots"]
+    WA --> SA["3 preallocated snapshot slots"]
+    SS -->|"pin once, validate age, K*x, release"| F
+    SA -->|"pin once, validate age, K*x, release"| F
+    F -.->|"generation/reset mailbox"| WS
+    F -.->|"generation/reset mailbox"| WA
+```
+
+Each worker owns a separate Phase 7 `ShadowController`, with training enabled only
+for its chosen model. Its unused half never fits or checks rank; the bounded
+extra startup memory/history-copy work is included in measurements. This reuses
+the exact established readiness, RLS/QR, reference and frozen-origin diagnostics
+instead of duplicating those algorithms. Standard still has no sensor columns.
+
+The frontend is one serialized producer/reader. It deep-copies a validated record
+into both fixed SPSC queues only if both have room. Capacity includes in-flight
+records; the consumer releases a slot only after processing/copying it. Overflow
+drops the newest record from both queues and immediately increments both lane
+generations. Workers discard invalidated queued prefixes and reacquire complete
+histories/excitation while retaining learned coefficients, as with a history break.
+Malformed/common timing, sequence gaps and source restarts invalidate both lanes;
+bad/late/stale sensor data invalidate assistance alone. Full reset also clears
+weights, on its owning worker. The full-reset mailbox identifies its generation;
+a worker seeing the reset ticket before generation publication defers service,
+so pre-reset queued records cannot contaminate the newly reset fit. Multiple
+unserviced resets cannot cancel each other.
+
+Snapshots include canonical coefficients, full reference gain, origin state and
+proposal, exact status/RMSE, fit version, publication serial, source epoch, lane
+generation/reset incarnation, evidence time, input availability and publication
+preparation time. A release/acquire publication index exposes complete slots.
+The writer claims only an unpinned, nonpublished slot; the reader tries one CAS
+pin and rechecks the index. The writer cannot reuse a pinned slot. A busy/raced
+pin returns unavailable without spinning, waiting or allocating.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Free
+    Free --> Writing: writer CAS 0 to -1, nonpublished slot
+    Writing --> Free: finish payload, release ownership and publish index
+    Free --> Reading: reader CAS 0 to 1, validate published index
+    Reading --> Free: release after prediction/copy
+```
+
+`predict()` rejects unready, faulted, wrong-epoch, invalidated, nonfinite,
+time-inconsistent or stale data. Age is **now minus evidence origin**, so late
+publication cannot make old training appear fresh. A correctly shaped output is
+zeroed on rejection. No prediction is a DM command and no fallback write exists.
+The API assumes the caller supplies an actually synchronized canonical state;
+timestamps cannot independently prove a physical command was applied.
+
+`OfflineRecord` explicitly distinguishes exposure start/end, the synthetic
+`u_i` hold's start/availability, sensor sample/availability, and common input
+availability. The declared offline contract is `u_i` held over `[i,i+1)` beginning
+at the WFS origin. This is an explicitly synthetic applied input, not a verified
+instrument latency convention. Sensor age defaults to at most one 500-us period;
+the sample must precede the origin and be available with the record. Source
+incarnations may reset sequence numbers but all timestamps must remain in one
+monotonic clock domain.
+
+Run the separate benchmark (no application or device libraries):
+
+```sh
+make -C apps/loPredCtrlAcc -f tests/Makefile.async -j2
+apps/loPredCtrlAcc/build/async/ddspc_async_benchmark 2000 \
+  > apps/loPredCtrlAcc/build/phase8-async.csv \
+  2> apps/loPredCtrlAcc/build/phase8-async-environment.log
+```
+
+It runs 16 paced scenarios (32 model rows): two/ten modes, RLS/QR, 4/8-kHz sensor
+events, normal/stress. Each uses 512 warmup plus 2,000 timed 2-kHz frames, N=5,
+F=3, Ha=20, two channels, gamma=1, prior=.1, lambda=.3. Sensor events have individual
+timestamps; two/four samples are generated per frame and the latest causal sample
+is selected. This simulates event timing in the producer, not an independently
+scheduled live sensor transport or antialias/calibration pipeline.
+
+The producer's `sleep_until()` pacing is outside measured execution. The timed
+frame includes sample generation, causal state construction, fanout, both snapshot
+queries and numeric comparison. No wait occurs in submit/predict. Stress uses
+8/16-ms worker stalls, 90-us producer jitter, capacity eight instead of 32, a
+WFS sequence gap, bad common timing, missing acceleration, independent resets
+and source restart. Current-fit synchronous proposals are precomputed before
+threads start. A delayed fit naturally gives another proposal; stress differences
+also include discarded training prefixes/reset timing and are not algorithm drift.
+
+CSV reports p50/p95/p99/p99.9/max for query, full frontend execution, scheduling
+lateness, training, publication copying/handoff, record-to-publication and model
+age; availability/stale/busy/unready/invalidated counts; queue occupancy, common
+overflows, rejected inputs and discarded prefixes; model sequence lag, pending
+work, trace drops; execution and absolute scheduled deadline misses; frontend/
+worker allocation requests and current-fit proposal differences. Rejection counts
+listed separately do not exhaust all unavailable causes (e.g. cold state/time
+order). Training cohorts are processed records after warmup, including reacquisition;
+unprocessed/discarded records are counted separately. Queue/drop counters include
+warmup. Worker-only polling/control work appears in end-to-end delay, not the
+isolated `manager.process()` training timer. Shutdown drain/join is outside frame
+timing. All trace buffers are bounded and excess telemetry is counted/dropped.
+
+The shared `allocation_new.cpp` preserves the original allocation probe for both
+benchmarks. Counters are thread-local: frontend and worker requests are measured
+separately. The threaded benchmark does **not** toggle Eigen's shared no-malloc
+flag concurrently. The scope/coverage limitations described above still apply;
+OS scheduling, faults, thread/runtime startup and arbitrary libc allocation are
+not certified. Classical forgetting RLS retains its Phase 7 worker-side temporary;
+prediction/publication memory is fixed.
+
+Five new default tests use the actual committed Phase 7 implementation at
+`6ae20f859ce308d1d5734154a7c3e5c280a7efb4`, extracted through `prepare_phase7.py` and
+compiled under a separate namespace. Ordered manual service compares 4,800 records
+at two/ten modes, both learners, gamma=1/.99 with exact theta, proposals, RMSE,
+rank/readiness/status and reset/gap behavior. Other tests exercise saturation,
+invalidated prefixes, independent resets, source restarts, stale/invalid queries,
+sensor/applied availability and actual threaded snapshot reuse with backlogged,
+repeated resets. Threaded assertion totals vary with observed publications.
+The delayed-publication fixture reports zero difference against the same fit,
+and a maximum 0.0352369 difference against the newest fit, explicitly separating
+version lag from changed arithmetic. Existing numerical tolerances stay intact.
+
+Benchmark tables, sanitizer/compiler results and platform limitations are in
+[Phase 8 evidence](results/phase8.md) and the engineering plan. Native Linux is
+unavailable here; macOS measurements do not establish Linux real-time readiness.
+Use the exact offline qualification commands in that evidence document on an
+approved non-instrument Linux host. **Stop after this prototype; integrating
+workers into the production application requires explicit user approval.**
+
 ## Phase 7 performance and allocation checks
 
 The causal manager now owns fixed history, learner, LDLT, rank-QR, forecast and

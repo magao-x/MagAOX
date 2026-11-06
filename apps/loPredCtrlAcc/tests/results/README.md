@@ -1,5 +1,9 @@
 # Phase 7 offline benchmark evidence
 
+See [Phase 8](phase8.md) for the subsequent independent-worker prototype,
+reproduced synchronous baseline, paced publication/queue benchmarks and Linux
+qualification commands. The Phase 7 captures below remain unchanged.
+
 [Before](phase7-before.csv): unchanged Phase 6 source at
 `352446f83737573023870096d2a5388859afcd3e`, 48 workloads.
 [After](phase7-after.csv): Phase 7 working source, 92 workloads including all

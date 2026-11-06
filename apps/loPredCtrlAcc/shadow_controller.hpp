@@ -149,6 +149,9 @@ struct ShadowStatus
  */
 class ShadowController
 {
+    /// Offline-only worker copies owned numerical state into bounded snapshots; no application route is added.
+    friend class OfflineTrainingWorker;
+
   private:
     /// Parameters and state frozen at an origin, scored only after its target horizon matures.
     struct Forecast
