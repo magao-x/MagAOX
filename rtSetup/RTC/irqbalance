@@ -34,8 +34,8 @@
 # CPU list excluded from ordinary IRQ balancing. Device-specific routing
 # remains in move_irqs, with selected IRQs protected by irqbalance_policyscript.
 #
-# Dedicated physical cores 30-63 and their offline SMT siblings 94-127.
-IRQBALANCE_BANNED_CPULIST=30-63,94-127
+# Dedicated physical cores 24-63 and their offline SMT siblings 88-127.
+IRQBALANCE_BANNED_CPULIST=24-63,88-127
 
 #
 # IRQBALANCE_ARGS
