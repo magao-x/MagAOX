@@ -164,6 +164,10 @@ maxSubframes=4
 maxCadenceHz=8000
 copyBudgetUs=30
 
+[diagnostics]
+windowSec=0
+maxEvents=20000
+
 [streams]
 destinations=dm01disp07,dm01disp08,dm01disp09,dm01disp10
 timing=dmtweeter_synco_timing
@@ -201,6 +205,40 @@ the snapshot budget as an admission guard: time actually spent snapshotting
 reduces the remaining copy window. A transient overrun can skip its current
 slot without enlarging the reservation and suppressing later slots. The older
 non-production scheduler retains its existing adaptive-budget behavior.
+
+Production defaults to minimal diagnostics when `diagnostics.windowSec` is
+omitted or zero. This disables independent primary, combined, camera and
+pipeline timing collection, optional observer threads, per-event telemetry,
+phase/publication statistics, main SDK/reader diagnostic associations and
+app-logic profiling. It retains the publication-clock qualification, exact
+combined/read-done matching, required reader-release queue, scheduling and
+copy-cutoff checks, provider results, timing maxima, health and aggregate
+`zero_test`/`zero_clock` readbacks. Turning diagnostics off does not relax
+readiness or safety checks. The operational primary monitor and
+`readerReleaseMonitor` worker continue running; they are separate from the
+optional timing observers.
+
+Keep `diagnostics.maxEvents` positive: production also uses this capacity for
+the required reader-release queue, so zero is rejected even in minimal mode.
+The preset retains 20000 entries. Do not disable the controller's operational
+completion or reader-release streams to reduce diagnostic overhead.
+
+For a detailed investigation, set `diagnostics.windowSec=2` and restart synco
+through the normal operator procedure. The existing `diagnostics.combiner`,
+`diagnostics.camera` and `diagnostics.pipeline` switches select their optional
+observers when the window is positive; their defaults are true. Restore a zero
+window and restart after the capture when minimal production operation is
+desired. These settings do not change diagnostic capture in the camera, DM
+controller or other applications.
+
+After restarting, verify `zero_test.diagnosticsEnabled`, `zero_phase.enabled`,
+`zero_publication.enabled` and `logic_timing.enabled` are all zero for minimal
+mode. The primary, camera, combiner and pipeline timing-quality properties also
+report `enabled=0`. These values describe collection, not scheduler readiness:
+`zero_clock`, scheduler counters and health still update during operation.
+Likewise, `reader_release_timing_quality.enabled=0` means its diagnostic
+aggregation is off; it does not mean the required reader-release worker or
+exact readiness checks are off. These mode indicators are fixed at startup.
 
 For managed dmSpeckle, configure its DM channel as the mapped auxiliary source
 and set the shared timing stream:
@@ -299,9 +337,10 @@ private storage while a source commitment remains outstanding.
 The read-only `production` INDI property reports passive copies/skips and
 `accepted0`, `missing0`, `rejected0`, and corresponding indices in configured
 destination order. Accepted counts mean private snapshots; they are separate
-from destination-copy completion and DM delivery. Existing shared scheduler
-and controller telemetry remains the evidence for actual publications,
-acknowledgements, reader clearance and backend execution.
+from destination-copy completion and DM delivery. Shared scheduler counters
+remain available in minimal mode. Detailed per-event associations require a
+positive diagnostic window, and controller telemetry provides the independent
+evidence for backend execution.
 
 In production mode, `settings` exposes only `steps` and `maxCadenceHz`, editable
 while disabled. The older keepout/guard/step-0 settings belong to the legacy
@@ -316,6 +355,11 @@ Use this read-only block from anywhere inside the MagAOX checkout. It captures
 120 seconds of telemetry after the before-snapshots finish; the bounded
 before/after queries add to the total wall time. It saves the current synco and
 producer configuration, including preparation leads absent from INDI readbacks.
+
+With the default minimal diagnostics, this captures aggregate counters, clock
+qualification and health; it does not supply per-slot events or optional timing
+populations. Select a positive `diagnostics.windowSec` and restart synco before
+the run if those details are needed. The capture block does not change modes.
 
 The finite `capture-zero-aux-test.sh` helper controls a separate zero trial and
 must not be used for this running production capture.

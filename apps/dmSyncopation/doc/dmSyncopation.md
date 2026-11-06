@@ -10,6 +10,19 @@ The finite constant-zero trials achieved every post-startup auxiliary slot in
 a 120-second 8 kHz run. Changing nonzero inputs and the selected multi-producer
 configuration still require operator qualification.
 
+Production defaults to minimal diagnostics (`diagnostics.windowSec=0`): the
+required publication clock, reader-release readiness, scheduler guards and
+aggregate status remain active, while optional timing observers and per-event
+capture are disabled. Set `diagnostics.windowSec=2` and restart for detailed
+diagnostics. Keep `diagnostics.maxEvents` positive because it also sizes the
+required production reader-release queue. See the
+[production configuration](production-providers.md#configuration) for details.
+In minimal mode, `zero_test.diagnosticsEnabled`, `zero_phase.enabled`,
+`zero_publication.enabled` and `logic_timing.enabled` report zero. Diagnostic
+quality `enabled` fields describe collectors, not operational workers: the
+primary monitor and reader-release worker remain active, including when
+`reader_release_timing_quality.enabled=0`.
+
 Unless explicitly identified as production or read-only diagnostics, the
 provider, timing, keepout and acquisition sections below describe the older
 live scheduler selected when `production.enabled` is false. Its version-1
@@ -356,12 +369,12 @@ The complete [dmtweeter_synco.conf example](../dmtweeter_synco.conf) contains th
 | `simulation.cadenceUpdateSec` | 1 | Minimum time between cadence refreshes, 0.01–60 seconds. The first measured estimate requires this much primary history. |
 | `simulation.phaseGain` | 0.1 | Positive simulation phase correction gain, at most 1; affects only a future uncommitted cycle. |
 | `simulation.phaseSlewUs` | 1 | Maximum simulation phase correction per future cycle. Nonnegative and at most one quarter of the shortest accepted primary interval (62.5 us with the default maximum primary rate). Does not change any physical timing reserve. |
-| `diagnostics.windowSec` | 2 | Elapsed-time window for all independent observers; zero disables collection. |
-| `diagnostics.maxEvents` | 20000 | Queue and retained-event cap for each observer; zero disables collection. Storage is allocated before the monitors start. |
+| `diagnostics.windowSec` | 0 in production; otherwise 2 | Elapsed-time window for independent timing observers. Zero selects minimal production diagnostics, disabling optional observers, per-event capture, phase/publication statistics and app-logic profiling while retaining operational clocks, readiness and aggregate status. A positive window enables detailed capture. Restart required. |
+| `diagnostics.maxEvents` | 20000 | Queue and retained-event cap for each observer, allocated before monitors start. Also sizes the required production reader-release queue, so production requires a positive value even when `windowSec=0`. Outside production, zero disables independent timing collection where permitted by the selected mode. |
 | `diagnostics.excursionUs` | 20 | Camera acquisition/publication and primary excursion threshold around each diagnostic window median, in microseconds; zero disables pair/conditional classification. Ordinary trace timing remains enabled. Independent of scheduler timing bounds. |
-| `diagnostics.combiner` | true | Start an independent combined-output observer for cadence and process-trace timing. Scheduling can remain disabled. |
-| `diagnostics.camera` | true | Start an independent metadata-only camera observer for separate acquisition and publication timestamp intervals. |
-| `diagnostics.pipeline` | true | Capture up to ten existing upstream process-trace rows at primary observation. |
+| `diagnostics.combiner` | true | With a positive diagnostic window, start an independent combined-output observer for cadence and process-trace timing. Scheduling can remain disabled. Production readiness does not depend on this optional observer. |
+| `diagnostics.camera` | true | With a positive diagnostic window, start an independent metadata-only camera observer for separate acquisition and publication timestamp intervals. |
+| `diagnostics.pipeline` | true | With a positive diagnostic window, capture up to ten existing upstream process-trace rows at primary observation. |
 | `diagnostics.only` | false | Observe the configured primary without attaching scheduler DM resources or creating a timing stream. Forces combined monitoring off, selects an available primary semaphore automatically, and rejects scheduler enable requests. |
 | `cameraMonitor.shmimName` | `camwfs` | Camera image whose `atime` and `writetime` intervals are analyzed separately. Independent of the `tracking.cameraDevice` INDI subscription. Semaphore selection is automatic by default. |
 | `cameraMonitor.threadPrio` | 0 | Camera metadata observer scheduling priority; zero uses ordinary scheduling. |
