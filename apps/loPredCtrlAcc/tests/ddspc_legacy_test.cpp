@@ -5,6 +5,8 @@
 #include "../../../tests/testXWC.hpp"
 #include "legacy_replay.hpp"
 #include <cstring>
+#include <cstdint>
+#include <limits>
 #include <random>
 #include <filesystem>
 #include <cstdlib>
@@ -55,6 +57,21 @@ bool same_bits( const ReplayMatrix &a /**< [in] Original. */, const ReplayMatrix
            ( a.size() == 0 || std::memcmp( a.data(), b.data(), a.size() * sizeof( float ) ) == 0 );
 }
 
+/// Inspect exponent bits so the test oracle still detects NaNs/Infs under finite-only compilation.
+bool finite_bits( const ReplayMatrix &values /**< [in] Numerical state to inspect. */ )
+{
+    static_assert( sizeof( float ) == sizeof( std::uint32_t ) );
+    static_assert( std::numeric_limits<float>::is_iec559 );
+    for( Eigen::Index i = 0; i < values.size(); ++i )
+    {
+        std::uint32_t bits;
+        std::memcpy( &bits, values.data() + i, sizeof( bits ) );
+        if( ( bits & 0x7f800000u ) == 0x7f800000u )
+            return false;
+    }
+    return true;
+}
+
 /// Require exact public history and coefficient equality, independent of internal buffer capacities.
 void require_snapshot( const LegacySnapshot &a /**< [in] Original state. */,
                        const LegacySnapshot &b /**< [in] Current state. */ )
@@ -94,6 +111,38 @@ std::map<std::string, std::string> replay_config( bool qrd /**< [in] RLS algorit
 }
 } //namespace
 /// \endcond
+
+/// The test oracle must detect injected IEEE infinities/NaNs even when fast-math assumes finite arithmetic.
+/** \ingroup loPredCtrlAcc_unit_test */
+TEST_CASE( "Legacy finite-state oracle survives finite-only compiler flags", "[loPredCtrlAcc][legacy]" )
+{
+    ReplayMatrix values = ReplayMatrix::Zero( 2, 1 );
+    REQUIRE( finite_bits( values ) );
+    for( std::uint32_t bits : { 0x7f800000u, 0xff800000u, 0x7fc00000u } )
+    {
+        std::memcpy( values.data(), &bits, sizeof( bits ) );
+        REQUIRE_FALSE( finite_bits( values ) );
+    }
+    values.setZero();
+    REQUIRE( finite_bits( values ) );
+}
+
+/// Isolate the historical reciprocal-overflow failure; run explicitly to inspect compiler/FP-mode behavior.
+/** \ingroup loPredCtrlAcc_unit_test */
+TEST_CASE( "Historical tiny Givens rotations must remain finite", "[.legacy-tiny-rotation]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    DDSPC::QRDRecursiveLeastSquares::apply_givens();
+#endif
+    // clang-format on
+    auto         old       = original_qr( 3, 4, 1, 1 );
+    ReplayMatrix workspace = ReplayMatrix::Zero( 5, 4 );
+    workspace.row( 0 ) << 1.e-40f, .123f, -.578f, -.578f;
+    workspace.row( 1 ) << -2.e-40f, .456f, .382f, .382f;
+    const auto result = old->rotate( workspace );
+    REQUIRE( finite_bits( result ) );
+}
 
 /// Quantify compiler-dependent drift separately; the default exact regression requirements are retained.
 /** \ingroup loPredCtrlAcc_unit_test */
@@ -323,15 +372,20 @@ TEST_CASE( "Original and current legacy app outputs match with explicit configur
             const auto a = original->frame( y, publish ), b = restored->frame( y, publish ),
                        c = current->frame( y, publish );
             REQUIRE( a.m_output.allFinite() );
+            REQUIRE( finite_bits( a.m_output ) );
             REQUIRE( same_bits( a.m_candidate, b.m_candidate ) );
             REQUIRE( same_bits( a.m_candidate, c.m_candidate ) );
             REQUIRE( same_bits( a.m_output, b.m_output ) );
+            INFO( "Historical output=" << std::hexfloat << a.m_output.transpose()
+                                       << " clone output=" << c.m_output.transpose() << " max absolute difference="
+                                       << ( a.m_output - c.m_output ).cwiseAbs().maxCoeff() );
             REQUIRE( same_bits( a.m_output, c.m_output ) );
             REQUIRE( same_bits( a.m_published, b.m_published ) );
             REQUIRE( same_bits( a.m_published, c.m_published ) );
             REQUIRE( same_bits( a.m_output.bottomRows( 2 ), y.bottomRows( 2 ) ) );
             require_snapshot( a.m_model, b.m_model );
             require_snapshot( a.m_model, c.m_model );
+            REQUIRE( finite_bits( a.m_model.m_theta ) );
             if( !publish && t > 0 && t < 80 && !same_bits( a.m_candidate, a.m_published.topRows( 2 ) ) )
             {
                 REQUIRE( same_bits( a.m_model.m_currentU.topRows( 2 ), a.m_candidate ) );

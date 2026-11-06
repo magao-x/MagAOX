@@ -87,8 +87,8 @@ void QRDRecursiveLeastSquares::givens( realT a, realT b, realT &c, realT &s )
 // ------------------------------------------------------------
 // Apply Givens to zero last row
 // ------------------------------------------------------------
-EIGEN_STRONG_INLINE
-void QRDRecursiveLeastSquares::apply_givens()
+template <bool enforceTriangular>
+EIGEN_DONT_INLINE void QRDRecursiveLeastSquares::apply_givens_impl()
 {
     int N = _num_features;
 
@@ -125,13 +125,23 @@ void QRDRecursiveLeastSquares::apply_givens()
                 A_( i - 1, k ) = c * r1 - s * r2;
                 A_( i, k )     = s * r1 + c * r2;
             }
-            if( m_enforceTriangular )
+            if constexpr( enforceTriangular )
             {
                 // A rounding remnant can trigger a spurious later rotation beside unexcited columns.
                 A_( i, j ) = 0;
             }
         }
     }
+}
+
+void QRDRecursiveLeastSquares::apply_givens()
+{
+    // An inner runtime zeroing branch changes GCC 15/AArch64 complex-vector contraction order even when false.
+    // Separate, non-inlined specializations retain the original Legacy loop and the causal invariant.
+    if( m_enforceTriangular )
+        apply_givens_impl<true>();
+    else
+        apply_givens_impl<false>();
 }
 
 // ------------------------------------------------------------

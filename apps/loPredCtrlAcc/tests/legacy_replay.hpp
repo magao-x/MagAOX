@@ -15,6 +15,74 @@ namespace libXWCTest::loPredCtrlAccTest
 {
 using ReplayMatrix = Eigen::MatrixXf;
 
+/// Internal QR state exposed by the historical learner's public fields, without private-member rewriting.
+struct LegacyQrSnapshot
+{
+    ReplayMatrix m_factor, m_augmented, m_gain, m_theta; ///< Factor, eliminated workspace, gain and weights.
+};
+
+/// Direct historical QR seam, independent of controller histories and command calculations.
+class LegacyQr
+{
+  public:
+    /// Release the independently owned historical learner.
+    virtual ~LegacyQr() = default;
+
+    /// Apply only the historical adjacent-row Givens elimination.
+    virtual ReplayMatrix rotate( const ReplayMatrix &workspace /**< [in] Augmented (p+1)-by-p matrix. */ ) = 0;
+
+    /// Learn one explicit regressor/target pair and copy the public numerical state.
+    virtual LegacyQrSnapshot update( ReplayMatrix x /**< [in] Feature column. */,
+                                     ReplayMatrix y /**< [in] Target column. */ ) = 0;
+};
+
+/// Adapter instantiated only where the actual pinned historical namespace is visible.
+template <class Qr>
+class LegacyQrAdapter : public LegacyQr
+{
+    Qr m_model; ///< Solely owned unmodified historical learner.
+
+  public:
+    /// Forward the original fixed dimensions and initialization.
+    LegacyQrAdapter( int   outputs /**< [in] Target rows. */,
+                     int   features /**< [in] Regressor rows. */,
+                     float gamma /**< [in] Forgetting factor. */,
+                     float prior /**< [in] Prior information strength. */ );
+
+    /// Rotate a common explicit workspace.
+    ReplayMatrix rotate( const ReplayMatrix &workspace /**< [in] Augmented matrix. */ ) override;
+
+    /// Forward an observation and return all relevant post-update state.
+    LegacyQrSnapshot update( ReplayMatrix x /**< [in] Regressor. */, ReplayMatrix y /**< [in] Target. */ ) override;
+};
+
+template <class Qr>
+LegacyQrAdapter<Qr>::LegacyQrAdapter( int outputs, int features, float gamma, float prior )
+    : m_model( outputs, features, gamma, prior )
+{
+}
+
+template <class Qr>
+ReplayMatrix LegacyQrAdapter<Qr>::rotate( const ReplayMatrix &workspace )
+{
+    m_model.A_ = workspace;
+    m_model.apply_givens();
+    return m_model.A_;
+}
+
+template <class Qr>
+LegacyQrSnapshot LegacyQrAdapter<Qr>::update( ReplayMatrix x, ReplayMatrix y )
+{
+    m_model.update( &x, &y );
+    return { m_model.R_, m_model.A_, m_model.g, m_model.prediction_matrix };
+}
+
+/// Construct the actual pinned historical QR learner, with separate symbols from production code.
+std::unique_ptr<LegacyQr> original_qr( int   outputs /**< [in] Target rows. */,
+                                       int   features /**< [in] Regressor rows. */,
+                                       float gamma /**< [in] Forgetting factor. */,
+                                       float prior /**< [in] Information strength. */ );
+
 /// Identical numerical inputs for historical, restored, and accelerometer-disabled legacy models.
 struct LegacySettings
 {

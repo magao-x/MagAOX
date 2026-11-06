@@ -34,6 +34,10 @@ class QRDRecursiveLeastSquares
     /// Preserve exact structural zeros after Givens elimination when explicitly enabled.
     bool m_enforceTriangular;
 
+    /// Keep Legacy rotation arithmetic independent of the causal structural-zero branch.
+    template <bool enforceTriangular /**< [in] Apply the causal structural-zero rule. */>
+    void apply_givens_impl();
+
   public:
     /// Regression column count.
     int _num_features;
@@ -93,7 +97,7 @@ class QRDRecursiveLeastSquares
                  realT &c /**< [out] Cosine. */,
                  realT &s /**< [out] Signed sine. */ );
 
-    /// Triangularize the augmented workspace with adjacent-row rotations.
+    /// Dispatch once to Legacy or causal adjacent-row rotations, preserving each arithmetic path.
     void apply_givens();
 
     /// Forward solve R^T z=x using the information factor.

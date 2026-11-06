@@ -14,6 +14,7 @@ make -C apps/loPredCtrlAcc -f tests/Makefile.offline -j3 \
   BUILD_DIR=build/offline-sanitize \
   CXXFLAGS='-std=c++20 -O1 -g -Wall -Wextra -fno-fast-math -fsanitize=address,undefined -fno-omit-frame-pointer' check
 apps/loPredCtrlAcc/build/offline/ddspc_offline_test '[.legacy-drift]'
+apps/loPredCtrlAcc/build/offline/ddspc_offline_test '[.legacy-tiny-rotation]'
 ```
 
 `prepare_legacy.py` verifies all 15 original `loPredCtrl` source files against the
@@ -21,9 +22,46 @@ pinned historical Git tree before building its independent replay. No branch
 checkout, network fetch, commit or instrument command occurs. Preserve the
 default bit-exact assertions. The optional drift diagnostic **does not accept**
 clone drift: it measures it separately while requiring the original/restored
-pair to agree. GCC 15 on Darwin fails two exact QR replay cases; that failure
-remains visible, including with `-ffp-contract=off`. Classic RLS remains exact.
+pair to agree. Phase 5's two strict GCC QR failures are corrected by dispatching
+to separate compile-time Legacy/causal Givens kernels. The exact tests remain
+unchanged; direct factor/gain/weight and single-rotation comparisons were added.
+On GCC 15.2 AArch64, an inner runtime structural-zero branch changed the complex
+loop vectorizer's operand/contraction order even when false. Keeping that branch
+out of the Legacy loop restores the historical arithmetic. `-ffp-contract=off`
+alone did not fix the old kernel; disabling loop vectorization did. No global
+floating-point flags, Legacy indexing, cost, feedback or defaults were changed.
+
+The GNU `-O3 -ffast-math` application replay still exposes an existing historical
+QR failure: tiny rounding remnants cause reciprocal overflow in Givens rotations
+and nonfinite learned coefficients. An exponent-bit oracle now detects this even
+when `allFinite()` is optimized away by finite-only assumptions. Exact comparison
+assertions remain. `-fno-reciprocal-math` makes the GNU fast suite pass in a separate
+experiment; it is **not** added to production defaults. Original `loPredCtrl`
+is unchanged. This issue and the native Linux build remain commissioning blockers.
 Use a new `BUILD_DIR` when changing compilers or flags.
+
+The hidden tiny-rotation case passes with the tested strict compilers and Clang
+fast build, and deliberately fails the finite assertion with GNU default fast
+flags. The test-only GNU workaround can be reproduced with:
+
+```sh
+make -C apps/loPredCtrlAcc -f tests/Makefile.offline -j3 \
+  BUILD_DIR=build/offline-gcc-norecip CXX=g++-15 \
+  LEGACY_FAST_FLAGS='-O3 -g -std=c++20 -Wall -Wextra -ffast-math -fno-reciprocal-math' check-legacy-fast
+```
+
+`g++-15` names this workstation's GNU compiler; use the approved compiler on the
+development host. This command neither changes native build defaults nor runs
+the native application.
+
+`check` also runs seven Python build-tool tests. Their compiler/Git/make steps
+are mocked; they verify orchestration and never establish native compilation.
+Only the generated metadata-copy wrapper is actually executed in those tests.
+Run them separately with:
+
+```sh
+make -C apps/loPredCtrlAcc -f tests/Makefile.offline check-build-tool
+```
 
 `comparison.cpp` uses the accelerometer-disabled clone's Legacy path (covered by
 the pinned-source Clang replay) and generates deterministic two-mode plant trajectories with a
@@ -54,7 +92,11 @@ apps/loPredCtrlAcc/build/benchmark/ddspc_benchmark 2000 \
 The benchmark covers two and ten modes, N=5, F=3, two sensor channels and Ha=20,
 both RLS methods, isolated core work, the managed pair, and synchronized builder
 with/without both models. It warms 512 records and times 2,000 more by default.
-Every measured pair must reach readiness. CSV reports p50/p95/p99/p99.9/max and
+Phase 6 adds isolated history, reference-law and normalized pivoted-QR rank
+workloads, bringing the CSV to 48 rows. Rank-only cases use frozen independent
+seeded matrices; they do not change the original full-workload input sequences.
+They identify component costs without pretending to measure all pivot/conditioning
+patterns. Every measured pair must reach readiness. CSV reports p50/p95/p99/p99.9/max and
 counts records exceeding a **whole-frame** 500-us budget. Timings include
 benchmark input assignment/generation where present and the allocation probe;
 builder workloads use pre-generated immutable records. They exclude native
@@ -78,22 +120,28 @@ container runtime is available on the present Mac. Then run:
 
 ```sh
 python3 apps/loPredCtrlAcc/tests/native_linux_build.py \
-  --build-root /tmp/ddspc-native-phase5 --cxx g++ --jobs 2
+  --build-root /tmp/ddspc-native-phase6 --cxx g++ --jobs 2
 ```
 
 The new output directory must not exist. The script rejects macOS and `exao*`
-hosts, copies versioned/nonignored working source files into two new snapshots,
-and builds the real libraries, generated logger headers, PCH and app binary in
-each. Legacy explicitly uses the normal `-ffast-math` optimization default; shadow rebuilds everything
-with `OPTIMIZE=-fno-fast-math`. The real Git-header generator reads the original
-source metadata with optional index writes disabled; it may write only the
-staged output header. Compiler details, source hashes, command logs and linked
-binary hashes remain in the output directory. Ignored local build overrides,
-SDKs and Git submodule contents are not provisioned; inspect logs and provide
-dependencies instead of replacing real headers with test doubles. The script
+hosts and output directories inside the source tree. It freezes versioned/nonignored
+working source bytes once and copies that immutable snapshot into both profile trees.
+It builds the real libraries, generated logger headers, PCH and app binary in
+each. Legacy explicitly uses the normal `-ffast-math` default; shadow rebuilds everything
+with `OPTIMIZE=-fno-fast-math`. The real Git-header generator captures original
+source metadata once with optional index writes disabled; the profile wrappers
+only copy that frozen header to confined staged paths. Both profiles therefore
+use the same source and metadata even if the working tree changes during a build.
+Compiler details, source/header hashes, command logs and linked binary hashes
+remain in the output directory. Failure is recorded per profile and does not
+skip the other attempt; a successful make without a binary is a failure.
+Ignored local overrides and SDKs are not provisioned; source symlinks and Git
+submodules require an explicit staging rule and are rejected. Inspect logs and
+provide real dependencies instead of replacing real headers with test doubles. The script
 does not install or execute the app, contact a host or change services. Its
-Linux build path is **not yet validated**; the macOS refusal path and Python
-syntax were checked. Native Linux compatibility remains a blocker until both
+Linux build path is **not yet validated**; seven offline orchestration/guard tests
+pass, including source edits between profiles, injected failure, missing binaries,
+and metadata confinement. Native Linux compatibility remains a blocker until both
 real builds complete and their logs are reviewed.
 
 The historical `testRLS` demos also run with `check-demos DEMO_NAMES=testRLS`.

@@ -293,6 +293,44 @@ Review AGENTS.md.  Do not alter any text above the "Agent Findings and Plan" bel
 
 ## Task Summary
 
+**Phase 6 compatibility/build-tool review (2026-11-05): the two strict GCC QR
+regressions are resolved without changing test tolerances or the original app.**
+Starting HEAD is `cb88e09406cfc9806331390b7156bb000fdda8e6`; the working tree was
+clean, and the user has committed Phases 1–5. Host remains `ASTR-LT-428.local`,
+macOS 26.3.2 arm64, Apple Clang 21 and Homebrew GCC 15.2.0. The correction moves
+the optional structural-zero choice outside the Givens loop into two compile-time,
+non-inlined specializations. Legacy retains the original loop arithmetic; Causal
+retains exact elimination zeros. Direct historical factor/gain/weight comparisons
+and the existing 48-configuration/application replay pass bit-for-bit under
+strict GCC, Clang and the tested contraction-off profile. The full strict suite
+now passes **236,589 assertions / 46 cases**, also under Clang ASan+UBSan.
+The hidden GCC drift replay now reports **zero command/coefficient drift**.
+
+**A separate historical fast-math fault remains visible.** With GNU
+`-O3 -ffast-math`, the application replay learns nonfinite coefficients at t=31
+in the original and matching clone. Finite-only optimization hid this from the
+old `allFinite()` check. An added exponent-bit oracle exposes it; all original
+exact assertions remain. GCC computes tiny Givens ratios using `1/r`, which can
+overflow even when the separate ratios are finite. A tiny-rotation reproduction
+and the `-fno-reciprocal-math` experiment isolate this issue. That experimental
+flag makes the GNU fast suite pass but **is not added to production defaults**.
+The existing Legacy algorithm and its known defects are preserved.
+
+**Neither native Linux build is verified.** No isolated Linux environment or
+runtime was available, so the build helper rejects this Mac before compilation;
+no remote/instrument host was contacted. The helper now freezes common source
+and Git metadata once, confines output outside the working tree, records each
+profile's failure independently and still attempts the other profile. Seven
+mocked orchestration/guard tests pass; these are not Linux compilation evidence.
+The real logger/PCH/library/app link still needs the supported Linux environment.
+
+Phase 6 also adds isolated rank, reference-solve and history measurements to the
+benchmark. Rank QR is the dominant measured cost; detailed results/recommendations
+follow. No major real-time architecture, native input adapter, production flag,
+configuration, INDI control, actuator route or separate worktree was changed.
+Legacy remains default and both independent new models remain non-actuating.
+Stop after Phase 6; native build and live-data/timing requirements remain open.
+
 **Phase 5 offline build/validation work (2026-11-05): comparisons and benchmarks
 are implemented; native Linux compilation remains unverified and blocks the
 phase exit.** The working tree already contained the uncommitted Phase 4 review
@@ -472,6 +510,15 @@ accelerometer regressors; it does not require an acceleration-to-displacement
 formula or a predetermined spectral line.
 
 ## Key Assumptions
+
+**Phase 6 qualification:** compiler-dependent bit preservation is established
+only for the measured compiler/Eigen/flag combinations, not every future compiler
+or target. GNU/Darwin AArch64 is not GNU/Linux verification. Explicit matching of
+configuration and defined initial state is still required; Phase 4's preexisting
+clone-default, high-mode-ring and loaded-gain/reset differences remain unchanged.
+`standard` in shadow execution is the corrected independent model, not a rename
+of the operational Legacy controller. No physical timing or applied-command
+assumption is inferred from passing offline tests.
 
 **Phase 5 assumptions and scope:** synthetic `u_i` is an absolute modal input
 actually held for the transition to `y_(i+1)` by the numerical plant. No stream
@@ -1125,6 +1172,166 @@ app tree cannot certify an identical historical executable or real-time behavior
 The stream-free tests deliberately do not start these native worker threads.
 Native Linux/PCH build and deployment traces remain required for that evidence.
 
+### Phase 6 exact GCC diagnosis, minimal correction and build review
+
+**Strict QR root cause.** This is a compiler-dependent arithmetic regression in
+the accelerometer-disabled clone, not a different regressor, origin, RLS formula,
+Eigen matrix dimension or update cadence. The failing example can be reduced to
+`QRDRecursiveLeastSquares::apply_givens()` alone. In the Phase 5 source the inner
+`if (m_enforceTriangular)` is false for Legacy, but its presence changes GCC 15.2
+AArch64's loop-vectorized complex multiplication in the fourth unrolled column.
+`-fopt-info-vec-optimized` identifies this loop (8-byte vectors); assembly shows
+`FCMLA` operand commutation. For the lower rotated value `s*r1+c*r2`, the two
+instruction sequences round different products first:
+
+```text
+historical:       fma(c, r2, rounded_float(s*r1))
+old clone:        fma(s, r1, rounded_float(c*r2))
+```
+
+With upper/lower first-column entries `.731f,-.27f`, and fourth-column entries
+`-.578f,.382f`, the historical result is `0x1.43bc22p-3` and the old clone gives
+`0x1.43bc24p-3`, one ULP apart. The same explicit feature/target stream first
+changes R at t=4, before a coefficient difference. The retained Legacy
+elimination remnants can amplify such rounding differences across later updates;
+the prior full replay reached command error 0.000216633 and coefficient error
+0.0323329. Original versus restored source remains exact throughout.
+
+The direct pre-fix probe is exact at `-O0` and with
+`-fno-tree-loop-vectorize`/`-fno-tree-vectorize`, but not with
+`-fno-tree-slp-vectorize`. `-ffp-contract=off` alone still differs, and its
+assembly still contains `FCMLA`. This distinguishes compiler loop-vectorization
+from Eigen's packet arithmetic and scalar contraction alone. Source/public-field
+comparisons and identical hand-built regressors exclude the causal-history fixes
+as the cause of these two strict failures. No claim of universal bit identity
+across architectures or compiler upgrades is made.
+
+**Implemented correction:** `qrd_rls.hpp/.cpp` adds private
+`apply_givens_impl<enforceTriangular>()`; public `apply_givens()` dispatches once.
+`if constexpr` removes the structural-zero operation entirely from the false
+specialization, and `EIGEN_DONT_INLINE` keeps the two loops separate under the
+available compilers. The original loop order, unrolling, arithmetic, forgetting,
+solves and update equations are unchanged. The true specialization retains the
+Phase 1 exact-zero invariant. Default constructor flag remains false; app Legacy
+selection, histories, scaled penalty/inverse and extra feedback are unchanged.
+There is no global no-vectorization/FP-contract workaround or change to the
+original `apps/loPredCtrl` source. Numerical tests validate the causal branch
+against the independent batch/reference oracles as before.
+
+`tests/ddspc_qr_compatibility_test.cpp` executes the actual pinned historical QR
+learner via an added public-field adapter in `legacy_replay.hpp` and
+`legacy_original_adapter.cpp`. It compares a single rotation and 1,536 explicit
+updates over p=4/10, gamma=1/.97, prior=1/.02, including sparse startup and dense
+regressors. R, the augmented workspace, gain and weights must match every float
+bit. Linking the Phase 5 QR object into the new tests makes **both cases fail**;
+the corrected object passes them. The existing controller/application exact
+assertions remain intact. The hidden drift diagnostic again measures all 48
+configurations and now returns zero drift.
+
+**Separate GNU fast-math fault.** The old application finite checks can be
+optimized away under `-ffinite-math-only`, so an exact match alone does not prove
+a useful finite controller. `ddspc_legacy_test.cpp::finite_bits()` inspects IEEE
+exponent bits, with an injected infinity/NaN self-test, and adds checks without
+removing the original assertions. The original and clone QR application replay
+both have nonfinite coefficients at t=31 under GCC `-O3 -ffast-math`; before the
+new oracle, differing integrated NaN payloads eventually caused a bit mismatch
+at t=126. This is not a meaningful finite command-error tolerance issue.
+
+The historical loop keeps tiny below-diagonal elimination remnants. A subsequent
+Givens rotation can see a nonzero subnormal norm. Assembly of the unmodified
+original shows `hypotf`, then `1/r`, then multiplication by `a`/`b`, rather than
+two separate ratios. A reciprocal can overflow even though `a/r` and `b/r` are
+bounded. The hidden `.legacy-tiny-rotation` case uses `1e-40f,-2e-40f` to isolate
+this fault in the actual historical kernel. Strict compilation and a separate
+GNU `-ffast-math -fno-reciprocal-math` build keep that case finite; the latter
+also restores the full GNU fast regression suite. Production flags are not
+changed, and Legacy is not silently switched to causal zeroing. Decide the
+supported native compiler/flag policy with target evidence before commissioning
+QR. Clang's ordinary fast replay passes with the stronger oracle; this does not
+prove arbitrary tiny-input robustness or validate the target Linux toolchain.
+
+**Native build helper review/changes.** `native_linux_build.py` previously copied
+working files separately for each profile and regenerated live Git metadata;
+source edits during a long first build could give the second different inputs.
+A failure also stopped before the second attempt. It now materializes one source
+snapshot and one real Git-version header, records their hashes, and copies those
+frozen inputs to separate Legacy/shadow trees. Output inside the original source
+tree is refused. Symlinks/submodules require an explicit staging rule rather than
+being silently omitted. Metadata wrappers only copy the captured real header to
+confined staged output paths. Each profile has its own failure/status/log; a
+failure does not skip the other attempt, and a zero make exit without a binary
+cannot become a successful link record. App build remains serial around phony
+Git-header generation; prerequisite/profile flags are separate and unchanged:
+Legacy `-ffast-math`, shadow `-fno-fast-math` from fresh objects/PCH. No application
+install/run target or instrument command is used.
+
+`native_linux_build_test.py` has seven offline tests covering host/output guards,
+source changes between profiles, per-profile failure propagation, missing
+binaries, symlink refusal and real metadata-wrapper confinement. Compiler/Git/make
+steps are mocked and marker files are not executables; only the pure file-copy
+wrapper actually runs. `Makefile.offline::check-build-tool` is now part of
+`check`. Native helper execution on the actual Mac refuses before building.
+Neither the Legacy nor strict shadow Linux compile/link path was executed.
+Installed dependencies, generated logger headers, real base interfaces, SDK/PCH
+ABI and Linux flag behavior remain unverified; no stub was substituted for them.
+
+### Phase 6 preparation for bounded real-time execution
+
+`benchmark.cpp` adds isolated `*_rank_only`, `*_reference_only` and
+`*_history_only` rows for each model/dimension/learner profile. The rank workload
+uses the exact column normalization/pivoted QR operations from
+`ShadowController::step()`, with frozen independent seeded matrices; it does not
+advance the original full-workload random sequence. This is a component-cost
+comparison, not a profile of every numerical pivot pattern. Whole-workload
+readiness, history, allocation probes and strict-math flags remain enforced.
+
+Dominant sources and prioritized **future** changes (none implemented here):
+
+1. **Preallocate and eliminate duplicate assembly/copies in the causal path.**
+   Reserve model phi/target/context/error/scaled-feature/gain and forecast-matrix
+   storage at configuration time. `ShadowController::step()` gets a training
+   example and `PredictiveController::update_system()` builds it again; pass the
+   already validated, indexed example through a dedicated causal API instead.
+   Avoid copying the whole theta for finite checks and repeated canonical views
+   when ownership permits. Preallocate RLS `_x`, product workspaces and QR factors;
+   `RecursiveLeastSquares::update()` creates input/product temporaries. Reuse
+   forecast buffers while preserving each origin's **frozen** coefficients/state;
+   using the newest weights for old forecasts would violate causality. Use a
+   caller-owned bounded builder-result batch instead of per-result vector growth
+   (`CausalInputBuilder`/`InputResult`), preserving backlog/drop/restart semantics.
+   Verify these changes with actual allocation tracing and steady-state Eigen
+   no-malloc checks, plus the existing batch and exact Legacy regressions.
+2. **Bound the rank/readiness work.** `ShadowController::step()` copies and
+   column-normalizes a p-by-p empirical feature window, then constructs a fresh
+   `ColPivHouseholderQR` for each model on each mature frame. It is cubic and is
+   the dominant measured cost at p=120/160. Reuse QR/scaled-matrix workspaces;
+   evaluate a numerically tested incremental window factorization or an explicitly
+   approved, versioned rank cadence. A prior covariance/information factor is not
+   empirical excitation evidence and must not replace the rank gate. Changing
+   cadence changes readiness policy; do not silently keep a stale ready flag.
+3. **Keep bounded acquisition/record assembly separate from heavy adaptation.**
+   Evaluate a bounded worker with exclusive ownership of independent learners,
+   immutable coherent input records and versioned fit/status snapshots. Define
+   queue capacity, latency, lock order, overflow/history invalidation and shutdown
+   before implementation. Do not drop or relabel samples to make training appear
+   current. Both models still require identical common WFS/applied-input records.
+   No worker/thread/cadence change is implemented in Phase 6.
+4. **Optimize the new reference solve under its numerical contract.** Reuse
+   factorizations/gain only for an unchanged model version and literal lambda.
+   Computing a single action RHS instead of a full gain can reduce work, but
+   changes floating-point association and requires batch-cost/KKT/reference
+   verification. Preserve newest-first horizon selection and fixed delayed-input
+   prefixes. Leave the operational Legacy inverse, scaled lambda and added
+   feedback untouched. Do not enable fast/finite-only math for shadow validity.
+5. **Measure the full target path before selecting dimensions/cadence.** Run the
+   supported Linux compiler/Eigen matrix, transport/capture and INDI/lock path
+   under realistic load; record p99.9/max/deadline misses, total allocation bytes
+   and peak heap. Current probes count Eigen requests and ordinary C++ new,
+   not total system allocation or peak memory. A two-mode median below 500 us is
+   not a bound, and the ten-mode synchronous pair already exceeds that entire
+   frame period. Any lower-rate identification needs an explicit forgetting and
+   model-version convention; it is not a free optimization of 2-kHz adaptation.
+
 ### Phase 5 build portability, timing and computational findings
 
 **Build evidence and isolation.** `tests/Makefile.offline` now force-includes
@@ -1628,7 +1835,25 @@ a benchmark.
 
 ## Questions and Points of Clarification
 
-**Phase 5 blockers/decisions before live testing:**
+**Phase 6 decisions/blockers before non-actuating live shadow testing:**
+
+- Provide an approved isolated Linux development environment and supported
+  compiler/Eigen/dependency versions. Neither real profile has been linked here;
+  orchestration tests and GNU/Darwin results do not establish native Linux ABI.
+- Decide the Legacy QR compiler/flag policy after reproducing on that target.
+  The strict drift is fixed; GNU fast reciprocal overflow is not fixed by
+  default. `-fno-reciprocal-math` is an observed test-only workaround, not an
+  authorized production change. Keep existing source/defaults until reviewed.
+- Approve the next optimization scope/budget explicitly. Rank/solve cadence,
+  bounded worker ownership, queue overflow and readiness-version policies need
+  decisions and numerical/causal tests before implementation.
+- Supply verified WFS/exposure lineage, actual delivered combined-input mapping,
+  clock/latency bounds and independently recorded traces. The native WFS-only
+  callback still disarms unverified timing; no live applied-command or typed
+  `acc000` adapter exists. Linux build success alone cannot open those gates.
+  No live/instrument integration is authorized by Phase 6.
+
+**Historical Phase 5 blockers/decisions (see Phase 6 updates):**
 
 - Supply an approved non-instrument Linux environment with real MagAO-X/mxlib,
   logger, ImageStreamIO, INDI and library dependencies. Run/review both fresh
@@ -2162,6 +2387,90 @@ apps/loPredCtrlAcc/build/benchmark/ddspc_benchmark 2000 \
   2> apps/loPredCtrlAcc/build/phase5-benchmark-environment.log
 ```
 
+### Phase 6 executed validation and remaining failures
+
+Environment: `ASTR-LT-428.local`, macOS 26.3.2 arm64; Apple Clang 21.0.0 and
+Homebrew GCC 15.2.0_1 (compiler reports 15.2.0); Eigen pkg-config 5.0.1 / header
+macros 3.5.0, mxlib 0.2.0. Tests use standalone `Makefile.offline`, without native
+ImageStreamIO/driver/application execution. No Linux/runtime/approved development
+host was available; both real profile links remain **not attempted/unverified**.
+
+| Check | Phase 6 result |
+| --- | --- |
+| Full strict Clang | **236,589 assertions / 46 cases pass**, including history, causal-input, model independence, selection, non-actuation, batch RLS/reference law and synthetic comparisons. |
+| Full strict GCC | **236,589 / 46 pass**; both Phase 5 exact QR failures resolved. |
+| GCC full `-ffp-contract=off` | **236,589 / 46 pass** after the kernel correction. |
+| Clang full ASan+UBSan | **236,589 / 46 pass**, no findings. |
+| Clang Legacy `-O3 -ffast-math` | **186,615 / 9 pass**, including direct QR and exponent-bit validity checks. |
+| Clang Legacy fast + ASan/UBSan (`-O1`) | **186,615 / 9 pass**, no findings. |
+| GCC Legacy `-O3 -ffast-math` | **8/9 cases pass; 1 fails**: historical QR fit nonfinite at t=31. 182,253/182,254 assertions pass. Failure preserved; tests/production flags are not relaxed. |
+| GCC Legacy fast + explicit `-fno-reciprocal-math` experiment | **186,615 / 9 pass**, without changing production defaults. |
+| New direct QR tests, pre-fix object | Both cases fail; first explicit-update factor mismatch at t=4, p=4, gamma=1, prior=1. This reproduces the defect without history/controller code. |
+| Hidden GCC full drift replay | **55,298 / 1 pass**; classic and QR command/fit drift now exactly zero, original/restored exact. |
+| Explicit hidden tiny historical rotation | Strict Clang/GCC and Clang fast pass; GNU default fast fails the bit-based finite assertion; GNU no-reciprocal experiment passes. It intentionally remains a selectable failing probe for the unsupported fast corner case. |
+| Native helper orchestration/guards | **7 Python tests pass**, included in `check`; all compiler/Git/make results mocked, with actual metadata file-copy confinement tested. Actual Mac run refuses before native build. |
+| Original/current `testRLS` demos | Normal and ASan/UBSan smoke runs exit 0 (four runs); no assertions in these demonstrations. |
+| Full `check-demos` | Still fails compiling original `testPredCtrl.cpp` initialized VLA under Clang C++20. Original/current demo issue remains documented; neither is the native application build or independent numerical oracle. |
+| Extended benchmark | **48 rows x 2,000 timed records**, 512 warmup; all measured pairs ready. ASan/UBSan benchmark: **48 rows x 100 records**, no findings. |
+
+The new finite oracle is independently checked with injected IEEE infinity/NaN
+bits. No C++ exact-comparison assertion or numerical tolerance was removed or
+weakened. Default Catch selection excludes the explicitly hidden drift and
+small-rotation diagnostics; report their separate runs as such. Fast suites do
+not replace strict nonfinite-input/causal validity tests. Python orchestration
+fixture success does not establish compiler or Linux link success.
+
+Representative final **instrumented, non-real-time laptop** timings (us):
+
+| Workload / modes | p50 | p99 | max | >500 us / 2000 | Eigen requests / record |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Builder + pair, classic / 2 | 47.292 | 96.584 | 1985.75 | 3 | 111.975 |
+| Builder + pair, QR / 2 | 55.209 | 71.667 | 203.708 | 0 | 103.975 |
+| Builder + pair, classic / 10 | 560.583 | 747.083 | 2275.92 | 2000 | 112 |
+| Builder + pair, QR / 10 | 617.167 | 795.083 | 981.5 | 2000 | 104 |
+| Standard rank only / 10 | 137.959 | 163.708 | 342.208 | 0 | 8 |
+| Assisted rank only / 10 | 288.5 | 325.083 | 433 | 0 | 8 |
+| Standard reference only / 10 | 27 | 36.333 | 173.25 | 0 | 12 |
+| Assisted reference only / 10 | 39.584 | 52.084 | 189.417 | 0 | 13 |
+
+The whole pair also makes one C++ new request (312 bytes) in the builder per
+record. Isolated history construction requests five/six Eigen allocations and
+has median 0.166–0.333 us; rank-only requests eight; reference-only requests
+12/13. These are permission-check/request counts, not complete allocator tracing
+or Eigen byte/peak-heap measurements. Rank-window inputs are separate frozen
+matrices, so component medians are not an exact additive attribution of the
+whole evolving pair. They nevertheless isolate the cubic rank checks as much
+more costly than history or reference solves at p=120/160.
+
+The final two-mode classic pair has three >500-us scheduler tails, despite its
+47-us median. Ten-mode pairs miss all 2,000 frame budgets. An earlier concurrent
+compile-load run (`phase6-benchmark-loaded.csv`) was slower still (ten-mode
+classic median 1,065 us); the final run follows those builds rather than running
+alongside them. Neither run pins CPU, controls frequency/scheduling, includes
+native transport/locks, or establishes target worst-case execution. No real-time
+optimization claim is made. The reviewed allocation/bounded-worker/rank-cadence
+recommendations remain proposals requiring the user's next-phase approval.
+
+Reproduction commands in `tests/README.md` remain current. Additional examples
+from `apps/loPredCtrlAcc` (use separate build directories for each flag/compiler):
+
+```sh
+make -f tests/Makefile.offline -j3 BUILD_DIR=build/offline-phase6-gcc CXX=g++-15 check
+build/offline-phase6-gcc/ddspc_offline_test '[.legacy-drift]'
+build/offline-phase6-gcc/ddspc_offline_test '[.legacy-tiny-rotation]'
+make -f tests/Makefile.offline -j3 BUILD_DIR=build/offline-phase6-gcc CXX=g++-15 check-legacy-fast
+make -f tests/Makefile.offline -j3 BUILD_DIR=build/offline-phase6-gcc-norecip CXX=g++-15 \
+  LEGACY_FAST_FLAGS='-O3 -g -std=c++20 -Wall -Wextra -ffast-math -fno-reciprocal-math' check-legacy-fast
+```
+
+The GNU default-fast failure is expected and preserved in `phase6-gcc-fast.log`;
+its tiny probe is in `phase6-gcc-fast-tiny.log`. Strict/Clang/sanitizer/drift/native
+helper/benchmark evidence is under `apps/loPredCtrlAcc/build/phase6-*` (ignored).
+The before-fix variant uses the QR implementation from Phase 5 HEAD
+`cb88e09406cfc9806331390b7156bb000fdda8e6`; new direct tests are versioned, while
+assembly/optimization reports and temporary diagnostic binaries stay in the
+ignored `build/phase6-probe` directory. No artifacts are installed or deployed.
+
 ### Remaining test roadmap
 
 The older `testRLS.cpp` and `testPredCtrl.cpp` are retained as historical demos;
@@ -2300,13 +2609,13 @@ dedicated Makefile above rather than linking the application library through
 
 ## Implementation Plan
 
-Each stage has a reviewable exit condition. Phases 1–3 are committed by the
-user; Phase 4 review changes were already present and uncommitted. The current
-**Phase 5 is offline build portability, timing analysis, comparison and
-benchmarking**, superseding the old planned acquisition scope. Stop after this
-Phase 5 work; native Linux build and GNU QR compatibility remain blockers to its
-exit. Live acquisition, operational changes, deployment and new actuation remain
-outside this authorization.
+Each stage has a reviewable exit condition. The user has committed Phases 1–5.
+The current **Phase 6 is native build-tool review, GCC compatibility diagnosis,
+minimal numerical corrections and optimization preparation**; it supersedes the
+old future P6 acquisition label. Strict compatibility is restored; actual Linux
+verification, GNU fast-math policy and physical data evidence remain open. Stop
+after Phase 6. Real-time architectural changes, live acquisition, deployment and
+new actuation require further approval.
 
 1. **P0 — Agree on the mathematical and telemetry contract.** Resolve the
    decisions above; record signal units, increment/absolute convention, frame
@@ -2377,7 +2686,19 @@ outside this authorization.
    physical timing evidence. Do not mark complete or proceed to live training
    solely because deterministic mathematics tests pass.
 
-7. **P6 — Future verified transport, multirate acquisition/replay, and accelSim
+7. **P6 — Local compatibility/build review complete; external native verification pending.**
+   Identify the exact vectorization/contraction difference, separate Legacy and
+   causal kernels without weakening tests, and verify direct historical QR state
+   plus complete offline/causal/app/sanitizer suites. Retain the independent
+   historical fast reciprocal-overflow failure and demonstrate the isolated
+   flag experiment. Harden and test immutable native build orchestration;
+   report unavailable Linux rather than substituting doubles. Isolate dominant
+   component costs and propose bounded preallocation/scheduling changes only.
+   Remaining gate: real native profiles and approved target QR flag policy,
+   followed by the existing physical timing/input-evidence requirements. Stop;
+   do not implement the optimization or live transport in this phase.
+
+8. **P7 — Future verified transport, multirate acquisition/replay, and accelSim
    validation through public streams.** First supply the missing WFS/applied-input
    evidence and supported native build, then implement the stable snapshot,
    retained-frame and established-clock adapter. Verify it against independent
@@ -2397,7 +2718,7 @@ outside this authorization.
    demonstrates valid synchronization and predictive improvement on held-out
    measured WFS data, with documented model conditioning and latency.
 
-8. **P7 — Add the approved correction route and commission through the operator.**
+9. **P8 — Add the approved correction route and commission through the operator.**
    Only after numerical, offline closed-loop, and live non-actuating gates,
    connect the agreed calibrated modal-to-DM route to a separately approved
    additive correction channel. Validate mapping, sign, gain, publication and
@@ -2418,6 +2739,22 @@ by `AGENTS.md`. This work does not switch branches, commit, or push.
 
 ## Follow-up and Edge Cases
 
+- **Phase 6 changed files:** `apps/loPredCtrlAcc/qrd_rls.hpp/.cpp` only in the
+  operational numerical implementation; `tests/legacy_replay.hpp`,
+  `legacy_original_adapter.cpp`, `ddspc_legacy_test.cpp`, new
+  `ddspc_qr_compatibility_test.cpp`, `native_linux_build.py`, new
+  `native_linux_build_test.py`, `Makefile.offline`, `benchmark.cpp`, `README.md`
+  and this plan. Original `loPredCtrl`, `loPredCtrlAcc.hpp`, shared base classes,
+  production config/default flags, ImageStreamIO/DM interfaces and the separate
+  worktree are untouched. All original exact comparison assertions remain;
+  added checks strengthen finite-state detection and isolate the QR kernel.
+- **Phase 6 boundaries:** no native application execution, physical stream
+  open/create/write, service access, host contact, deployment, branch switch,
+  commit, merge or push. Source and native-metadata snapshots are built only in
+  new external directories if the host guard passes. Current host refuses the
+  build; no actual native Linux result is claimed. Future optimization proposals
+  are not implemented. Stop after Phase 6.
+
 - **Phase 5 changed files:** new `apps/loPredCtrlAcc/tests/comparison.hpp`,
   `comparison.cpp`, `ddspc_comparison_test.cpp`, `allocation_probe.hpp`,
   `benchmark.cpp`, `Makefile.benchmark`, `legacy_platform.hpp`,
@@ -2428,7 +2765,7 @@ by `AGENTS.md`. This work does not switch branches, commit, or push.
   override; Python syntax, native host guards, original-source pin verification
   and `git diff --check` are checked. Nothing above Agent Findings and Plan is
   changed.
-- **Phase 5 exit remains open:** no Linux environment was supplied, native app
+- **Historical Phase 5 exit record:** no Linux environment was supplied, native app
   compile/link is not demonstrated, and two GNU exact QR replay tests fail.
   Preserve these failures as compatibility evidence; do not label the entire
   validation green or infer production compatibility from stream-free doubles.

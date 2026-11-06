@@ -21,6 +21,43 @@ def run(arguments, directory, environment, log):
     subprocess.run(arguments, cwd=directory, env=environment, stdout=log, stderr=subprocess.STDOUT, check=True)
 
 
+def stage_sources(paths, snapshot):
+    """Freeze working source bytes once, rejecting symlinks/submodules rather than silently omitting them."""
+    hashes = {}
+    snapshot.mkdir()
+    for name in sorted(set(paths)):
+        if not name:
+            continue
+        source = ROOT / name
+        if source.is_symlink() or source.is_dir():
+            raise RuntimeError(f"Source symlinks and Git submodules need an explicit staging rule: {name}")
+        if not source.exists():
+            continue  # Preserve working-tree deletions.
+        target = snapshot / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+        hashes[name] = hashlib.sha256(target.read_bytes()).hexdigest()
+    return hashes
+
+
+def write_wrapper(stage, version):
+    """Serve frozen real Git metadata, confining all generated headers to this disposable stage."""
+    stage, version = stage.resolve(), version.resolve()
+    tools = stage / "build-tools"
+    tools.mkdir()
+    wrapper = tools / "gengithead.sh"
+    wrapper.write_text(
+        "#!/usr/bin/env python3\nimport pathlib, shutil, sys\n"
+        f"stage = pathlib.Path({str(stage)!r})\nversion = pathlib.Path({str(version)!r})\n"
+        "output = pathlib.Path(sys.argv[2]).resolve()\n"
+        "if sys.argv[3] != 'MAGAOX': raise SystemExit('Unsupported Git metadata prefix')\n"
+        "if not output.is_relative_to(stage): raise SystemExit('Generated header escaped build stage')\n"
+        "shutil.copyfile(version, output)\n"
+    )
+    wrapper.chmod(0o755)
+    return tools
+
+
 def main():
     """Guard the host, stage current source bytes, and build separate Legacy and strict-shadow profiles."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -32,6 +69,9 @@ def main():
         raise SystemExit("Requires a non-instrument Linux development environment; nothing was built")
     if not 1 <= args.jobs <= 64:
         raise SystemExit("--jobs must be in [1,64]")
+    destination = args.build_root.resolve()
+    if destination == ROOT or destination.is_relative_to(ROOT):
+        raise SystemExit("--build-root must be outside the source tree")
     compiler = shutil.which(args.cxx)
     generator = shutil.which("gengithead.sh")
     if not compiler or not generator:
@@ -40,63 +80,51 @@ def main():
     paths = subprocess.check_output(
         ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"], cwd=ROOT, env=environment
     ).decode().split("\0")
-    destination = args.build_root.resolve()
     destination.mkdir(parents=True, exist_ok=False)
+    snapshot = destination / "source"
+    hashes = stage_sources(paths, snapshot)
     manifest = {
         "host": socket.gethostname(), "platform": platform.platform(),
         "compiler": subprocess.check_output([compiler, "--version"]).decode(),
         "head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT).decode().strip(),
-        "source": str(ROOT), "files": {}, "profiles": {},
+        "source": str(ROOT), "files": hashes, "profiles": {},
     }
+    version = destination / "source_git_version.h"
+    with (destination / "prepare.log").open("wb") as log:
+        run([generator, str(ROOT), str(version), "MAGAOX"], ROOT, environment, log)
+    manifest["git_header_sha256"] = hashlib.sha256(version.read_bytes()).hexdigest()
+    failed = False
     for profile in ("legacy", "shadow"):
         stage = destination / profile
-        stage.mkdir()
-        for name in sorted(set(paths)):
-            if not name:
-                continue
-            source = ROOT / name
-            if source.is_dir() or not source.exists():
-                continue  # Deleted working files remain deleted; Git submodules require separate provisioning.
-            if source.is_symlink():
-                raise RuntimeError(f"Review source symlink before staging: {name}")
-            target = stage / name
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source, target)
-            manifest["files"][name] = hashlib.sha256(target.read_bytes()).hexdigest()
-        # Preserve real source metadata while keeping all generated headers inside the disposable stage.
-        # The original generator only reads Git; optional Git index refresh locks are disabled.
-        tools = stage / "build-tools"
-        tools.mkdir()
-        wrapper = tools / "gengithead.sh"
-        wrapper.write_text(
-            "#!/usr/bin/env python3\nimport os, pathlib, subprocess, sys\n"
-            f"root = pathlib.Path({str(ROOT)!r})\nstage = pathlib.Path({str(stage)!r})\n"
-            "output = pathlib.Path(sys.argv[2]).resolve()\n"
-            "if not output.is_relative_to(stage): raise SystemExit('Generated header escaped build stage')\n"
-            f"subprocess.run([{generator!r}, str(root), str(output), sys.argv[3]], cwd=root, check=True)\n"
-        )
-        wrapper.chmod(0o755)
+        shutil.copytree(snapshot, stage)
+        tools = write_wrapper(stage, version)
         build_environment = dict(environment, PATH=str(tools) + os.pathsep + environment["PATH"])
         optimization = "-fno-fast-math" if profile == "shadow" else "-ffast-math"
         common = [f"CXX={compiler}", "EDT=false", "NEED_CUDA=no", f"OPTIMIZE={optimization}"]
-        manifest["profiles"][profile] = {"make_variables": common, "linked": False}
+        result = {"make_variables": common, "linked": False, "status": "building"}
+        manifest["profiles"][profile] = result
         (destination / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-        with (destination / f"{profile}.log").open("wb") as log:
-            for directory in ("INDI/liblilxml", "INDI/libcommon"):
-                run(["make", "-C", directory, f"-j{args.jobs}", *common, "all"], stage, build_environment, log)
-            run(["make", f"-j{args.jobs}", *common, "libs_all"], stage, build_environment, log)
-            shadow = ["DDSPC_SHADOW_BUILD=yes"] if profile == "shadow" else []
-            # The existing app makefile's phony Git-header generation is not an object dependency;
-            # keep that final make serial so it cannot race the compile reading the generated header.
-            run(["make", "-C", "apps/loPredCtrlAcc", "-j1", *common, *shadow, "all"],
-                stage, build_environment, log)
-        binary = stage / "apps/loPredCtrlAcc/loPredCtrlAcc"
-        if not binary.is_file():
-            raise RuntimeError("Native link did not create loPredCtrlAcc")
-        manifest["profiles"][profile]["linked"] = True
-        manifest["profiles"][profile]["binary_sha256"] = hashlib.sha256(binary.read_bytes()).hexdigest()
+        try:
+            with (destination / f"{profile}.log").open("wb") as log:
+                for directory in ("INDI/liblilxml", "INDI/libcommon"):
+                    run(["make", "-C", directory, f"-j{args.jobs}", *common, "all"], stage, build_environment, log)
+                run(["make", f"-j{args.jobs}", *common, "libs_all"], stage, build_environment, log)
+                shadow = ["DDSPC_SHADOW_BUILD=yes"] if profile == "shadow" else []
+                # Serialize phony Git-header generation and the object compilation that reads it.
+                run(["make", "-C", "apps/loPredCtrlAcc", "-j1", *common, *shadow, "all"],
+                    stage, build_environment, log)
+            binary = stage / "apps/loPredCtrlAcc/loPredCtrlAcc"
+            if not binary.is_file():
+                raise RuntimeError("Native link did not create loPredCtrlAcc")
+            result.update(linked=True, status="linked", binary_sha256=hashlib.sha256(binary.read_bytes()).hexdigest())
+            print(f"Linked {profile}: {binary}; application was not executed or installed")
+        except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
+            failed = True
+            result.update(status="failed", error=str(error))
+            print(f"Build failed for {profile}; see {destination / (profile + '.log')}")
         (destination / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-        print(f"Linked {profile}: {binary}; application was not executed or installed")
+    if failed:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
