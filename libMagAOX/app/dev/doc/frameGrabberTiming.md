@@ -46,7 +46,21 @@ allocated before acquisition starts; FPS changes advance the timing session
 without reallocating timing queues in the worker.
 
 With `stageTiming=false`, paired collection can remain enabled. Additional
-stage-marker clock reads and the control-event handoff are disabled.
+stage-marker clock reads and the control-event handoff are disabled. Normal
+operation reports only `[fgtimes]` and its existing `fg_timing` INDI statistics;
+`[fgstage]` is suppressed even for forced periodic telemetry. The detailed
+`fg_stage_timing` and `fg_timing_quality` properties are registered and updated
+only when stage timing is enabled.
+
+To return an existing diagnostic camera configuration to normal operation, set
+both values below and restart the camera app. A nonzero trace capacity still
+requires stage timing; leaving it enabled is a configuration error.
+
+```ini
+[framegrabber]
+stageTiming=false
+stageTraceMax=0
+```
 
 ## Endpoints and clocks
 

@@ -10,6 +10,16 @@ Publication intervals use integer differences of input-stream `writetime` values
 in the stream's own clock, which can be TAI or REALTIME. No external timestamp is
 subtracted from a local monotonic timestamp.
 
+Normal application operation collects and reports only the three compatible
+`[fgtimes]` populations: receipt interval, successful SDK-return interval, and
+receipt-to-successful-return latency. The existing `dm_timing` INDI property
+reports those same populations. Set `[dm] stageTiming=true` and restart to opt in
+to the additional measurements described below. Stage markers, publication
+analysis, delivery-clock brackets, `[dmtimings]` records and detailed timing INDI
+properties are omitted in normal mode, including forced periodic telemetry.
+SDK timestamps required by worker deadlines and reader/completion protocol
+signals remain active independently of profiling.
+
 ## Endpoints and metrics
 
 ```text
@@ -100,6 +110,7 @@ output can explicitly select the producer clock:
 
 ```ini
 [dm]
+stageTiming=true
 deliveryClock=isio
 deliveryBracketUs=1
 ```
@@ -186,12 +197,17 @@ Add these keys to the controller configuration and restart to apply changes:
 [dm]
 latencyTime=2
 latencySize=20000
+stageTiming=false
 ```
 
 `dm.latencyTime` selects the trailing elapsed-time window in seconds.
 `dm.latencySize` caps both queued events and retained window events. These are the
 defaults; either value set to zero disables collection. There is no runtime INDI
 setting for them. Timing is available without `XWC_DMTIMINGS`.
+`dm.stageTiming` defaults to false and controls both detailed capture and reporting.
+A configured `deliveryClock` is inactive while stage timing is false; it does not
+add clock reads. The low-level collector retains its historical detailed default
+for existing direct callers; `dev::dm` explicitly supplies the application mode.
 
 The command path captures fixed-size events and attempts a bounded handoff. A
 full queue drops/counts the timing event while command processing continues.
@@ -219,6 +235,10 @@ Duplicate/counter-gap observations are counted. Initial callbacks can contribute
 processing/send measurements, with no fabricated receipt or paired `W-A`.
 
 ## Read-only INDI properties
+
+Only `dm_timing` is registered in normal mode. The other timing properties below
+are registered and updated only with `dm.stageTiming=true`. Operational completion,
+reader-release, worker and pipeline status properties remain available as configured.
 
 Properties belong to the controller's configured device. Unavailable durations
 and FPS are **-1**; counts are zero when empty. Mean/extrema/span can be available
