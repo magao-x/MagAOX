@@ -546,13 +546,14 @@ remain follow-up steps.
 
 ## Second migration: 24-core system pool and tweeter pipeline locality
 
-**2026-11-06 follow-up:** The SDK/post move to CPU42/44 below caused
+**2026-11-06 follow-up:** The SDK move to CPU42 below caused
 enable-dependent MVM slowdown and excess DM timing jitter at four-step synco.
-The operator reports recovery after restoring SDK `spare56` and post
-`spare31`. Retain those controller assignments for the tested 8 kHz setup;
-the existing reserve cpusets support this without recreating the CPU map.
-The CPU42/44 proposal below records the migration history, not the currently
-qualified worker placement. See the
+The operator first reported recovery after restoring SDK `spare56` and post
+`spare31`, then isolated the effect to the SDK worker. Changing post placement
+between CPU31/44 made no observed difference. Retain SDK `spare56`; post can
+remain `dmtweeter-post`. The existing cpusets support this without recreating
+the CPU map. The SDK CPU42 proposal below records the migration history, not
+the currently qualified SDK placement. See the
 [successful comparison](../2026-11/dm-syncopation-minimal-diagnostics.md#successful-placement-comparison).
 
 Requested by the operator 2026-11-05 on `jrmales/rtc-cpusets-24core`, based on

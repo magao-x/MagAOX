@@ -155,13 +155,14 @@ which cache, memory or driver mechanism is responsible.
 ## Successful placement comparison
 
 The operator performed the requested worker-placement comparison and reports
-"this fixed it" on 2026-11-06. Treat SDK CPU56 / post CPU31 as the working
-placement and the recent CPU42/44 assignment as a placement regression. The
+"this fixed it" on 2026-11-06. SDK CPU56 / post CPU31 restored working timing
+after the recent CPU42/44 assignment. The
 reported recovery, together with the earlier normal one-step and slow four-step
 comparison, strongly implicates interference associated with the added DM
 workload in the MVM host's CPU/cache group. It does not establish L3 contention
-specifically, quantify DRAM bandwidth, or separate the SDK and post workers'
-individual contributions. No numerical post-fix capture was supplied, so do
+specifically or quantify DRAM bandwidth. This initial paired move did not
+separate the SDK and post workers' individual contributions. No numerical
+post-fix enabled capture was supplied, so do
 not invent a restored jitter value or claim a specific improvement factor.
 
 Update the production configuration guide, reader-test placement comment and
@@ -169,10 +170,39 @@ cpuset migration record to preserve this result. The executable CPU map already
 provides `spare56` and `spare31`; no cpuset recreation is required. The separate
 workstation `/opt/MagAOX/config` checkout on `onsky` still requests
 `dmtweeter-sdk` and `dmtweeter-post` in `dmtweeter.conf`; its persistent config
-record must also retain the operator's working assignments. That checkout and
+record must retain the working SDK assignment identified below. That checkout and
 all deployed configuration are unchanged by this documentation update.
 
 Retain minimal diagnostics and the fixed 30 us copy budget. No further scheduler
 or timing-margin change is warranted by the successful placement result.
 Documentation links and `git diff --check` were verified; no application tests
 were rerun for these documentation/comment-only changes.
+
+## SDK placement isolated
+
+The operator subsequently reports that `sdk.cpuset` determines the timing
+recovery, while changing `sdk.pipelineCpuset` between the tested placements
+makes no observed difference. Correct the earlier paired-move recommendation:
+keep SDK `spare56` (CPU56); post can remain `dmtweeter-post` (CPU44). CPU31
+remains an alternative tested post placement, not a required part of this fix.
+This is a result for the tested workload, not a general claim that post
+placement can never affect performance.
+
+With synco disabled in both cases, the operator reports controller `wma`
+changing from approximately 119 us +/- 0.4 us to 120 us +/- 0.4 us when the
+SDK uses CPU42. They explicitly confirm CPU42, sharing L3 with MVM CPU45,
+rather than direct placement on `acqu_mvm` itself. The figures show about a
+1 us mean latency increase without an increase in the reported standard
+deviation. At the normal 2 kHz command rate this is a small mean penalty;
+combined with the enabled comparison, it supports load-dependent interference
+associated with SDK placement. It still does not prove the cache, memory or
+driver mechanism.
+
+`wma` includes controller preparation, dispatch/worker waiting and native SDK
+work through return. It is not SDK occupancy; dividing 120 us by the 125 us
+enabled period would not establish SDK utilization. The unchanged off-state
+latency deviation also does not measure enabled-state cadence jitter.
+
+The production guide and placement comment now retain SDK CPU56 while allowing
+post CPU44. The separate config-repository correction is only
+`[sdk] cpuset=spare56`; its existing `pipelineCpuset=dmtweeter-post` can remain.

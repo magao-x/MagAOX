@@ -119,7 +119,7 @@ threadPrio=55
 cpuset=spare56
 pipelineEnabled=true
 pipelineThreadPrio=30
-pipelineCpuset=spare31
+pipelineCpuset=dmtweeter-post
 pipelineResultStream=dmtweeter_sdk_done
 
 [dm]
@@ -128,14 +128,16 @@ readerReleaseStream=dmtweeter_read_done
 ```
 
 These cpuset names select the tested RTC worker placement, not portable defaults.
-The SDK and post workers use CPU56/31, outside the L3 domain shared by the
-tweeter monitor and MVM host on CPU40/45. Moving the workers to
-`dmtweeter-sdk`/`dmtweeter-post` on CPU42/44 caused enable-dependent MVM slowdown
-and excess controller jitter; the operator reported recovery after restoring
-CPU56/31 on 2026-11-06. This identifies a placement regression without proving
-the precise cache or memory-system mechanism. See the
+The SDK worker uses CPU56, outside the L3 domain shared by the tweeter monitor
+and MVM host on CPU40/45. Moving the SDK worker to `dmtweeter-sdk` on CPU42
+caused enable-dependent MVM slowdown and excess controller jitter. The operator
+first reported recovery after restoring SDK/post CPU56/31 on 2026-11-06, then
+isolated the effect to the SDK placement: changing post placement between
+CPU31/44 made no observed difference. The post worker can therefore remain on
+`dmtweeter-post` (CPU44), as above. This identifies an SDK placement regression
+without proving the precise cache or memory-system mechanism. See the
 [investigation record](../../../agents/plans/2026-11/dm-syncopation-minimal-diagnostics.md#successful-placement-comparison).
-The release observer remains on CPU57. Reserve CPU56/31 for these workers in
+The release observer remains on CPU57. Reserve CPU56 for the SDK worker in
 this setup; verify availability, actual thread scheduling and affinity on
 another host. Configure synco's primary/combined streams for
 the real command path (`shmimMonitor.shmimName=dm01disp03` and
