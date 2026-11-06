@@ -11,15 +11,24 @@
 /// Deterministic local clock for direct production snapshot/copy tests.
 struct ProductionClock
 {
-    static inline int64_t time{ 1000000000 }; ///< Private monotonic time, unrelated to instrument clocks.
+    static inline int64_t  time{ 1000000000 }; ///< Private monotonic time, unrelated to instrument clocks.
+    static inline unsigned delayRead{ 0 };     ///< Countdown to one delayed clock read, zero when disarmed.
+    static inline int64_t  delayNs{ 0 };       ///< One-shot simulated elapsed work on the selected read.
 
-    /// Advance one bounded bookkeeping interval without waiting on the operating system.
+    /// Advance private bookkeeping work and inject the selected one-shot delay without an operating-system wait.
     static int64_t now();
 };
 
 int64_t ProductionClock::now()
 {
     time += 100;
+
+    if( delayRead && --delayRead == 0 )
+    {
+        time += delayNs;
+        delayNs = 0;
+    }
+
     return time;
 }
 
@@ -30,9 +39,11 @@ class ProductionHarness : public Harness
     using dmSyncopation::closeProduction;
     using dmSyncopation::m_generation;
     using dmSyncopation::m_indiP_production;
+    using dmSyncopation::m_passiveCopied;
     using dmSyncopation::m_productionEnabled;
     using dmSyncopation::m_productionReadyLeadUs;
     using dmSyncopation::m_productionStep0LeadUs;
+    using dmSyncopation::m_snapshotMax;
     using dmSyncopation::m_zeroTrial;
     using dmSyncopation::openProduction;
     using dmSyncopation::productionCopy;
@@ -47,8 +58,10 @@ class ProductionHarness : public Harness
 
 void ProductionHarness::initialize()
 {
-    ProductionClock::time = 1000000000;
-    m_now                 = ProductionClock::now;
+    ProductionClock::time      = 1000000000;
+    ProductionClock::delayRead = 0;
+    ProductionClock::delayNs   = 0;
+    m_now                      = ProductionClock::now;
     attachPrimaryOnly();
     m_productionEnabled = true;
     m_zeroTestChannel   = m_destinations.front();
@@ -145,6 +158,7 @@ struct ProductionCycleClock
     static inline synco::CommitRecord pending{};       ///< Exact single outstanding source publication.
     static inline int64_t             lastTarget{ 0 }; ///< Last submitted target, independent of notifications.
     static inline int64_t             sequence{ 0 }; ///< Cooperative fake producer's monotonically increasing sequence.
+    static inline int64_t copyDelayNs{ 0 }; ///< One-shot overrun after the first slot's destination copy completes.
 
     /// Publish each earliest future request only after the consumer releases the preceding payload.
     static void produce();
@@ -188,6 +202,12 @@ void ProductionCycleClock::produce()
 
 int64_t ProductionCycleClock::now()
 {
+    if( copyDelayNs && app && !app->m_mappings.empty() && app->m_mappings.front().m_cache.front() == 11.0F )
+    {
+        ZeroClock::time += copyDelayNs;
+        copyDelayNs = 0;
+    }
+
     const auto now = ZeroClock::now();
     produce();
     return now;
@@ -320,7 +340,7 @@ TEST_CASE( "production startup validates mode and preparation settings", "[dmSyn
                << ( fault == 8   ? 5
                     : fault == 9 ? 1
                                  : 4 )
-               << "\nmaxCadenceHz=8000\n"
+               << "\nmaxCadenceHz=8000\ncopyBudgetUs=30\nsnapshotBudgetUs=10\n"
                << "[readerReleaseMonitor]\nshmimName=" << ( fault == 3 ? "" : "dmtweeter_read_done" ) << "\n"
                << "[production]\nenabled=true\nreadyLeadUs="
                << ( fault == 4   ? 20
@@ -350,6 +370,8 @@ TEST_CASE( "production startup validates mode and preparation settings", "[dmSyn
         CHECK( app.m_productionStep0LeadUs == 20 );
         CHECK( app.m_requested == ( fault == 9 ? 1 : 4 ) );
         CHECK( app.m_maxCadence == 8000 );
+        CHECK( app.m_bounds.copy == 30000 );
+        CHECK( app.m_bounds.snapshot == 10000 );
     }
     else
     {
@@ -543,6 +565,153 @@ TEST_CASE( "production copy safety never turns a private snapshot into an applie
     // clang-format on
 }
 
+/// A configured copy allowance still vetoes a batch before any destination metadata or pixels change.
+TEST_CASE( "production fixed copy budget retains the pre-copy fit guard", "[dmSyncopation][production][budget]" )
+{
+    Streams            streams;
+    ProductionSidecars sidecars;
+    ProductionHarness  app;
+    app.initialize();
+    app.m_bounds.copy  = 30000;
+    const auto request = productionRequest( app, 1, ProductionClock::time + 125000 );
+    productionCommand( app, 0, request, 10 );
+    productionCommand( app, 1, request, 30 );
+    ProductionClock::time = request.cutoffNs;
+    REQUIRE( app.productionSnapshot( request, ProductionClock::time ) );
+    const auto stampA   = streams.images[2].md->writetime;
+    const auto stampB   = streams.images[3].md->writetime;
+    const auto counterA = streams.images[2].md->cnt0;
+    const auto counterB = streams.images[3].md->cnt0;
+
+    CHECK_FALSE( app.productionCopy( streams.images[0].md->cnt0, ProductionClock::time + 20000 ) );
+    CHECK( app.m_zeroWaitFailure == Harness::ZeroOutcome::preparationLate );
+    CHECK( app.m_bounds.copy == 30000 );
+    CHECK( app.m_copyMax == 0 );
+    CHECK( app.m_mappings[0].m_cache.front() == 2 );
+    CHECK( app.m_mappings[1].m_cache.front() == 3 );
+    CHECK( streams.images[2].md->cnt0 == counterA );
+    CHECK( streams.images[3].md->cnt0 == counterB );
+    CHECK( streams.images[2].md->write == 0 );
+    CHECK( streams.images[3].md->write == 0 );
+    CHECK( streams.images[2].md->writetime.tv_sec == stampA.tv_sec );
+    CHECK( streams.images[2].md->writetime.tv_nsec == stampA.tv_nsec );
+    CHECK( streams.images[3].md->writetime.tv_sec == stampB.tv_sec );
+    CHECK( streams.images[3].md->writetime.tv_nsec == stampB.tv_nsec );
+
+    for( size_t pixel = 0; pixel < 9; ++pixel )
+    {
+        CHECK( streams.images[2].array.F[pixel] == 2 );
+        CHECK( streams.images[3].array.F[pixel] == 3 );
+    }
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::productionCopy;
+#endif
+    // clang-format on
+}
+
+/// A slow private snapshot updates its observed maximum without changing the configured allowance or later admission.
+TEST_CASE( "production snapshot excursions preserve the configured budget", "[dmSyncopation][production][budget]" )
+{
+    Streams            streams;
+    ProductionSidecars sidecars;
+    ProductionHarness  app;
+    app.initialize();
+    app.m_bounds.snapshot = 10000;
+    const auto request    = productionRequest( app, 1, ProductionClock::time + 125000 );
+    productionCommand( app, 0, request, 10 );
+    ProductionClock::time      = request.cutoffNs;
+    ProductionClock::delayRead = 2;
+    ProductionClock::delayNs   = 90000;
+
+    REQUIRE( app.productionSnapshot( request, ProductionClock::time ) );
+    CHECK( ProductionClock::delayRead == 0 );
+    CHECK( app.m_snapshotMax == 90100 );
+    CHECK( app.m_bounds.snapshot == 10000 );
+
+    const auto next = productionRequest( app, 2, request.targetNs + 125000 );
+    productionCommand( app, 0, next, 11, 2 );
+    ProductionClock::time = next.cutoffNs;
+    REQUIRE( app.productionSnapshot( next, ProductionClock::time ) );
+    REQUIRE( app.productionCopy( streams.images[0].md->cnt0, next.targetNs - 10000 ) );
+    CHECK( app.m_snapshotMax == 90100 );
+    CHECK( app.m_bounds.snapshot == 10000 );
+    CHECK( streams.images[2].array.F[0] == 11 );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::productionSnapshot;
+    MagAOX::app::dmSyncopation::productionCopy;
+#endif
+    // clang-format on
+}
+
+/// A real copy overrun suppresses its trigger while later slots and passive copies recover with the fixed allowance.
+TEST_CASE( "production copy overruns do not latch later slots off", "[dmSyncopation][production][budget][integration]" )
+{
+    Streams            streams;
+    ProductionSidecars sidecars;
+    ProductionHarness  app;
+    ZeroClock::connect( app, streams, 4 );
+    const auto next             = ZeroClock::warm();
+    app.m_productionEnabled     = true;
+    app.m_zeroTestEnabled       = false;
+    app.m_productionReadyLeadUs = 70;
+    app.m_productionStep0LeadUs = 20;
+    app.m_zeroLateUs            = 6;
+    app.m_zeroWakeAheadUs       = 10;
+    app.m_maxCadence            = 8000;
+    app.m_bounds.copy           = 30000;
+    REQUIRE( app.openProduction() );
+    ProductionCycleClock::app         = &app;
+    ProductionCycleClock::pending     = {};
+    ProductionCycleClock::lastTarget  = 0;
+    ProductionCycleClock::sequence    = 0;
+    ProductionCycleClock::copyDelayNs = 90000;
+    app.m_now                         = ProductionCycleClock::now;
+    app.m_wait                        = ProductionCycleClock::wait;
+    const auto counterBefore          = streams.images[2].md->cnt0;
+    app.m_enabled                     = true;
+
+    ZeroClock::primary( next );
+    CHECK( ProductionCycleClock::copyDelayNs == 0 );
+    CHECK( app.m_copyMax >= 90000 );
+    CHECK( app.m_bounds.copy == 30000 );
+    CHECK( app.m_zeroStats.preparationLate == 1 );
+    CHECK( app.m_zeroStats.skipped == 1 );
+    CHECK( app.m_zeroStats.posted == 2 );
+    CHECK( app.m_zeroStats.acknowledged == 2 );
+    CHECK( app.m_passiveCopied == 1 );
+    CHECK( streams.images[2].md->cnt0 == counterBefore + 2 );
+    REQUIRE( ZeroClock::posts.size() == 2 );
+    CHECK( ZeroClock::posts[0] >= next + 250000 );
+    CHECK( ZeroClock::posts[0] <= next + 256000 );
+    CHECK( ZeroClock::posts[1] >= next + 375000 );
+    CHECK( ZeroClock::posts[1] <= next + 381000 );
+    const auto copyMaximum = app.m_copyMax;
+
+    ZeroClock::primary( next + 500000 );
+    CHECK( app.m_copyMax == copyMaximum );
+    CHECK( app.m_bounds.copy == 30000 );
+    CHECK( app.m_zeroStats.preparationLate == 1 );
+    CHECK( app.m_zeroStats.skipped == 1 );
+    CHECK( app.m_zeroStats.posted == 5 );
+    CHECK( app.m_zeroStats.acknowledged == 5 );
+    CHECK( app.m_passiveCopied == 2 );
+    CHECK( streams.images[2].md->cnt0 == counterBefore + 5 );
+    CHECK( app.m_enabled );
+    ProductionCycleClock::app = nullptr;
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::processZeroTestPrimary;
+    MagAOX::app::dmSyncopation::productionCopy;
+    MagAOX::app::dmSyncopation::productionStep0;
+#endif
+    // clang-format on
+}
+
 /// The shared engine consumes nonzero tagged inputs, prepares step zero and does not inherit finite-trial expiry.
 TEST_CASE( "production common scheduler continuously publishes tagged contributions",
            "[dmSyncopation][production][integration]" )
@@ -568,15 +737,16 @@ TEST_CASE( "production common scheduler continuously publishes tagged contributi
              app.m_mappings[1].m_inputAvailable,
              app.m_mappings[1].m_source->image()->md->size[0],
              app.m_mappings[1].m_source->image()->md->size[1] );
-    ProductionCycleClock::app        = &app;
-    ProductionCycleClock::pending    = {};
-    ProductionCycleClock::lastTarget = 0;
-    ProductionCycleClock::sequence   = 0;
-    app.m_now                        = ProductionCycleClock::now;
-    app.m_wait                       = ProductionCycleClock::wait;
-    const auto primaryBefore         = streams.images[0].md->cnt0;
-    const auto counterBefore         = streams.images[2].md->cnt0;
-    app.m_enabled                    = true;
+    ProductionCycleClock::app         = &app;
+    ProductionCycleClock::pending     = {};
+    ProductionCycleClock::lastTarget  = 0;
+    ProductionCycleClock::sequence    = 0;
+    ProductionCycleClock::copyDelayNs = 0;
+    app.m_now                         = ProductionCycleClock::now;
+    app.m_wait                        = ProductionCycleClock::wait;
+    const auto primaryBefore          = streams.images[0].md->cnt0;
+    const auto counterBefore          = streams.images[2].md->cnt0;
+    app.m_enabled                     = true;
     ZeroClock::primary( next );
     REQUIRE( app.m_zeroStats.posted == uint64_t( steps - 1 ) );
     CHECK( app.m_zeroStats.acknowledged == uint64_t( steps - 1 ) );

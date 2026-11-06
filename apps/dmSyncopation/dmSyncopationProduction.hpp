@@ -184,10 +184,6 @@ inline bool dmSyncopation::productionSnapshot( const synco::Request &request, in
     }
     const auto elapsed = m_now() - started;
     m_snapshotMax      = std::max( m_snapshotMax, elapsed );
-    if( elapsed > m_bounds.snapshot )
-    {
-        m_bounds.snapshot = elapsed + 1000;
-    }
     return true;
 }
 
@@ -215,10 +211,6 @@ inline bool dmSyncopation::productionCopy( uint64_t primary, int64_t cutoff )
     }
     const auto finished = m_now();
     m_copyMax           = std::max( m_copyMax, finished - started );
-    if( finished - started > m_bounds.copy )
-    {
-        m_bounds.copy = finished - started + 1000;
-    }
     if( finished > cutoff || input->write || input->cnt0 != primary )
     {
         m_zeroWaitFailure = ZeroOutcome::preparationLate;
