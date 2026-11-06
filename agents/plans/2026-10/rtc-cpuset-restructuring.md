@@ -11,9 +11,12 @@ the migration worked on the first attempt and the system is running closed
 loop. Detailed runtime placement readback and timing comparison remain open.
 Two additional spare cores on CPU30/31
 expand the RT pool to 34 physical cores; further growth is deferred.
-The 2026-11-05 second migration below reduces `system` to 24 cores, places the
-BMC SDK/post workers in the tweeter monitor's L3 domain and adds an
-`aol1_imWFS2_cbuff` core. It awaits operator deployment.
+The 2026-11-05 second migration below reduced `system` to 24 cores, placed the
+BMC SDK/post workers in the tweeter monitor's L3 domain and added an
+`aol1_imWFS2_cbuff` core. Following an operator timing comparison, the
+2026-11-06 SDK migration below restores SDK CPU56 under `dmtweeter-sdk`, makes
+CPU42 `spare42` and retains post CPU44. The updated scripts await operator
+deployment; the CPU56 placement itself was tested using its old `spare56` name.
 
 ## Objective and scope
 
@@ -550,9 +553,10 @@ remain follow-up steps.
 enable-dependent MVM slowdown and excess DM timing jitter at four-step synco.
 The operator first reported recovery after restoring SDK `spare56` and post
 `spare31`, then isolated the effect to the SDK worker. Changing post placement
-between CPU31/44 made no observed difference. Retain SDK `spare56`; post can
-remain `dmtweeter-post`. The existing cpusets support this without recreating
-the CPU map. The SDK CPU42 proposal below records the migration history, not
+between CPU31/44 made no observed difference. The initial timing fix used SDK
+`spare56`; the subsequent named migration below assigns `dmtweeter-sdk` to
+that same CPU56. Post remains `dmtweeter-post`. The SDK CPU42 proposal below
+records the migration history, not
 the currently qualified SDK placement. See the
 [successful comparison](../2026-11/dm-syncopation-minimal-diagnostics.md#successful-placement-comparison).
 
@@ -616,8 +620,78 @@ pass. All 55 cpuset references from RTC process-list configs and CACAO setup
 files resolve except two pre-existing ones outside this change:
 `acc000.conf` `[framegrabber] cpuset=acqu` and CACAO `ncpc` `dm02comb`.
 After deployment, verify system `0-23,64-87`, offline `88-127`, the
-`sdk_worker`/`sdk_pipeline` `allowedCpus` readbacks (42/44) and compare
+SDK/post thread affinity lists (CPU42/44 for that migration), with both
+`sdk_worker`/`sdk_pipeline` `allowedCpus` counts equal to 1, and compare
 tweeter pipeline timing against the 8 kHz baseline.
+
+## SDK placement migration: CPU56 and spare42
+
+Requested by the operator on 2026-11-06: "then we need to edit the make_cpusets
+script and rename things." This follows the isolated SDK placement result in
+the [timing investigation](../2026-11/dm-syncopation-minimal-diagnostics.md#sdk-placement-isolated).
+Implementation and its documentation are on `jrmales/dm-syncopation`.
+
+| CPU | Previous cpuset | Updated cpuset | Purpose |
+| --- | --- | --- | --- |
+| 42 | `dmtweeter-sdk` | `spare42` | Reserve in the MVM's L3 domain |
+| 56 | `spare56` | `dmtweeter-sdk` | Tested SDK placement outside the MVM's L3 domain |
+
+Keep post `dmtweeter-post` on CPU44, synco on CPU41 and release on CPU57.
+System/IRQ masks, the 40 exclusive CPUs24--63, offline siblings88--127,
+memory-node assignments and all other cpuset names remain unchanged.
+The ICC map is independent and retains its own `spare56`.
+
+`remove_cpusets` now retains `spare56` in its legacy allowlist. This permits
+cleanup after the new setup script no longer declares that name. The retained
+`dmtweeter-sdk` name is already recognized, so its old CPU42 group is removed
+normally. Recreating the map is required: running the new setup over existing
+exclusive SDK42/spare56 groups would conflict with the new spare42/SDK56 groups.
+
+The separate workstation config repository already uses
+`[sdk] cpuset=dmtweeter-sdk` and `pipelineCpuset=dmtweeter-post`; no edit is
+needed there. An instrument config changed to `spare56` for the timing test
+must return to `dmtweeter-sdk` when the new map is installed. Before that
+migration, `dmtweeter-sdk` still means CPU42: do not switch the application back
+early. Likewise, do not restart it with `spare56` after that name is retired.
+
+Operator deployment, from one updated MagAOX checkout:
+
+1. Stop instrument workloads using the normal shutdown procedure. The cleanup
+   helper refuses occupied or unrecognized groups and does not move tasks.
+2. Preview and apply removal of the empty real-time groups:
+
+   ```bash
+   sudo python3 rtSetup/RTC/remove_cpusets --dry-run
+   sudo python3 rtSetup/RTC/remove_cpusets --apply
+   ```
+
+3. Recreate the map and update any temporary controller affinity setting before
+   restarting applications:
+
+   ```bash
+   sudo bash rtSetup/RTC/make_cpusets
+   ```
+
+   ```ini
+   [sdk]
+   cpuset=dmtweeter-sdk
+   pipelineCpuset=dmtweeter-post
+   ```
+
+4. Verify the SDK/post threads' `Cpus_allowed_list` in `/proc/<tid>/status`
+   reads 56/44 respectively, retaining their existing priorities 55/30. The
+   `sdk_worker.allowedCpus` and `sdk_pipeline.allowedCpus` properties are CPU
+   counts, so each should read 1. Confirm the SDK and reserve cpuset CPU files
+   read 56/42 respectively, then compare MVM timing and controller fgtimes with
+   the successful test.
+
+Local verification passes: shell syntax, 40 exclusive singleton sets covering
+CPUs24--63 exactly once, unchanged system/memory masks, and all 11 cleanup tests
+using temporary files and mocked removals. The rename regression covers both
+the old SDK42 group and retired `spare56`; the allowlist test independently
+checks that the retired name survives removal from the setup script. These
+are shell/Python changes, so C++ clang-format does not apply. No agent executes
+the deployment commands, changes cgroups, or restarts an instrument process.
 
 ## Implementation dependencies and sequence
 

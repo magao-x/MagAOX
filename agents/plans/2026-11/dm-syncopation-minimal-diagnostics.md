@@ -206,3 +206,19 @@ latency deviation also does not measure enabled-state cadence jitter.
 The production guide and placement comment now retain SDK CPU56 while allowing
 post CPU44. The separate config-repository correction is only
 `[sdk] cpuset=spare56`; its existing `pipelineCpuset=dmtweeter-post` can remain.
+
+## Permanent cpuset naming
+
+The operator subsequently requests updating the RTC setup script and names.
+The [SDK placement migration](../2026-10/rtc-cpuset-restructuring.md#sdk-placement-migration-cpu56-and-spare42)
+keeps the tested CPU56 placement under the permanent name `dmtweeter-sdk`,
+retires `spare56`, and names CPU42 `spare42`. Post remains `dmtweeter-post` on
+CPU44. This supersedes the temporary `cpuset=spare56` recommendation above
+only after the operator rebuilds the CPU map: the old `dmtweeter-sdk` group
+still selects CPU42 until then.
+
+The local config repository already uses the permanent names, so no config
+edit is required there. The operator's temporary instrument setting must be
+updated together with the map. The cleanup helper recognizes retired
+`spare56`. Application scheduling logic and timing parameters are unchanged;
+the new CPU assignments take effect when the operator rebuilds the map.
