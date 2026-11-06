@@ -11,12 +11,16 @@ SOURCES := $(TEST_DIR)/benchmark.cpp $(TEST_DIR)/allocation_new.cpp $(APP_DIR)/a
 OBJECTS := $(addprefix $(BUILD_DIR)/,$(notdir $(SOURCES:.cpp=.o)))
 VPATH := $(sort $(dir $(SOURCES)))
 TARGET := $(BUILD_DIR)/ddspc_benchmark
-.PHONY: all check check-allocations
+.PHONY: all check check-allocations check-probe
 all: $(TARGET)
 check: $(TARGET)
 	$(TARGET)
 check-allocations: $(TARGET)
 	$(TARGET) --check-allocations
+check-probe: $(BUILD_DIR)/probe_test
+	python3 $(TEST_DIR)/probe_test.py $(BUILD_DIR)/probe_test
+$(BUILD_DIR)/probe_test: $(BUILD_DIR)/probe_test.o $(BUILD_DIR)/allocation_new.o
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) $^ $(LDLIBS) -o $@
 $(TARGET): $(OBJECTS)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) $^ $(LDLIBS) -o $@
 $(BUILD_DIR)/%.o: %.cpp $(TEST_DIR)/allocation_probe.hpp

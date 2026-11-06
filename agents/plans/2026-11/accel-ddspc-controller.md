@@ -293,6 +293,30 @@ Review AGENTS.md.  Do not alter any text above the "Agent Findings and Plan" bel
 
 ## Task Summary
 
+**Phase 9 offline throughput investigation (2026-11-06): the dominant GCC
+slowdown was the benchmark allocation probe, not a demonstrated production
+estimator deficit.** Starting clean HEAD is committed Phase 8
+`bbe9ffc0365b8f246371de5af2b8b015a3f01183`; host was verified as personal workstation
+`ASTR-LT-428.local`, macOS 26.3.2 arm64. GCC retained runtime `strstr` searches in
+the probe's generic Eigen-assert wrapper; Clang folded them away. A test-only
+constexpr classifier retaining native ordinary assertions removes that overhead.
+No estimator operation, rank cadence/threshold, readiness gate, production flag,
+Legacy default or production execution changes. The original on-sky `loPredCtrl`
+is unchanged. No instrument, service, physical stream, separate worktree,
+commit/push/merge, deployment or actuation occurs.
+
+Opt-in wall/thread-CPU phase profiling, exact committed Phase 8 replays, a native
+assertion control and explicit probe-abort tests distinguish instrumentation from
+algorithm changes. An independently bounded overflow policy is implemented only
+in the offline prototype; **Common remains the default**. Per-lane admission
+masks and contiguous-segment metadata make divergent histories explicit.
+Full results, before/after and sustained tables are in
+`apps/loPredCtrlAcc/tests/results/phase9.md`; commands are in `tests/README.md`.
+The Phase 8 GCC throughput conclusion below is historical and superseded by the
+Phase 9 probe investigation; its raw evidence is retained. Native Linux,
+production fast-math QR and physical input provenance remain separate blockers.
+Stop after offline Phase 9 validation; production integration requires approval.
+
 **Phase 8 offline asynchronous prototype (2026-11-06): independently owned workers,
 bounded common-record fanout and coherent pinned snapshots are implemented; no
 production integration is performed.** Starting clean HEAD is committed Phase 7
@@ -560,6 +584,24 @@ formula or a predetermined spectral line.
 
 ## Key Assumptions
 
+**Phase 9 measurement scope:** inclusive wall and thread CPU timers are opt-in
+(`training_profile.hpp`) and disappear in normal builds. The serial manual-service
+profile isolates compute from worker scheduling; the paced benchmark measures
+concurrent actual threads without RT priority, affinity or memory locking. CPU
+usage includes polling/warmup/drain and is a percentage of one core. These Mac
+measurements establish neither Linux scheduling bounds nor physical timing.
+Instrumented historical QR traces may differ from native assertions due to
+compiler code generation; those differences are measured explicitly, while all
+strict committed-reference numerical tolerances remain unchanged.
+
+**Independent overflow contract:** the same validated source records are offered
+to both lanes; independent acceptance can create different fitted histories.
+`submit_record()` returns the precise two-bit admission mask and snapshots carry
+`m_segmentFirstSequence`. Common timing/provenance faults, gaps and restarts still
+invalidate both. Only queue capacity rejection is isolated. Learned weights on
+history breaks and full-reset behavior are unchanged. No fabricated input is
+inserted, and no promise of equal fitted datasets is made after rejection.
+
 **Phase 8 scope and clocks:** all WFS, held applied-command and sensor data are
 explicitly synthetic. `u_i` is held over [i,i+1), beginning at the WFS exposure
 end; its availability is supplied separately. This is not evidence that physical
@@ -728,6 +770,33 @@ independent learners and non-actuation protections remain unchanged.
     libraries/hardware. Preserve the original as the operational reference.
 
 ## Requirements
+
+### Phase 9 profiling and bounded throughput experiment
+
+- `shadow_controller.cpp::process/step`,
+  `recursive_least_squares.cpp::update_preallocated` and
+  `qrd_rls.cpp::update_preallocated` contain compile-out profiling scopes only;
+  Phase 6 Givens kernels, exact estimator arithmetic and rank policy are intact.
+- `tests/training_benchmark.cpp` profiles histories, weights/covariance, QR
+  factor/solve, normalized pivoted-QR rank, reference solves, diagnostics, snapshot
+  and queue phases. Thread CPU tracks wall compute; no hardware-cache explanation
+  is asserted without counters. Reference/rank allocation-probe code generation
+  explains the principal GCC penalty.
+- `tests/allocation_probe.hpp` classifies assertion literals at compile time and
+  preserves ordinary native assertions. `probe_test.cpp/.py` verifies detection,
+  single evaluation and both failure guards under Clang/GCC. Raw numerical traces
+  compare the old probe, corrected probe and native-assertion diagnostic separately.
+- `tests/async_shadow.hpp/.cpp` add explicit `OfflineOverflowPolicy`, per-lane
+  admissions/overflow counters, segment origin and worker CPU/wall telemetry.
+  Common remains default. Independent invalidates only the saturated lane;
+  ownership, bounded slots, generation barriers, age and readiness remain intact.
+- `tests/async_benchmark.cpp` retains all original 16 profiles and seeds; adds
+  bounded-duration/filter/no-oracle options and an isolated assisted-stall
+  scenario. Sustained no-oracle captures explicitly report NaN comparison and
+  `reference_enabled=0`. Synthetic accelerometer/applied records remain offline.
+- Independent QR/covariance state is never shared to reduce cost: dimensions and
+  potentially accepted history differ. No reduced rank cadence/threshold,
+  estimator rewrite or production optimization is justified by the probe result.
 
 ### Phase 8 offline architecture and ownership
 
@@ -2109,6 +2178,22 @@ a benchmark.
 
 ## Questions and Points of Clarification
 
+**Phase 9 decisions before production integration:**
+
+1. Approve a separate Linux qualification/integration phase and identify an
+   isolated non-instrument Linux development system. Native app link, strict
+   GCC/Clang tests, production-flag replay and sustained load/tails are unverified.
+2. Review whether production should retain common overflow or adopt the tested
+   independent policy. Independent keeps a healthy model available but necessarily
+   allows different admitted training sets; monitoring must expose that fact.
+3. Resolve the historical GNU production fast-math QR nonfinite failure without
+   silently changing production compiler policy or hiding its regression.
+4. Approve source clock/provenance, actual applied-DM identity, WFS exposure and
+   sensor timing contracts and the production single-frontend/lock ownership.
+   Neither callback order nor synthetic applied inputs establish physical timing.
+5. No production asynchronous wiring, live accelerometer ingestion, service
+   change, host access or correction routing is authorized in Phase 9.
+
 **Phase 8 decisions/blockers before any production asynchronous integration:**
 
 - Supply/approve an isolated non-instrument Linux environment and supported
@@ -2296,6 +2381,52 @@ recommendations are not assumptions about the deployed instrument.
    source review does not establish deployment performance.
 
 ## Tests
+
+### Phase 9 reproducible evidence and exact references
+
+Final current-source checks: strict Clang **1,173,990 / 57** and GCC
+**1,173,125 / 57** pass; Clang ASan/UBSan **1,177,364 / 57**, TSan async/Phase 9
+**846,639 / 7**, no reported findings. Instrumented independent ASan all-16
+scenarios x 100 frames and TSan assisted-stall case pass. Clang fast and GNU
+no-reciprocal diagnostic pass **186,615 / 9**; GNU default fast retains exactly
+**1/9** historical nonfinite failure at record 31. Hidden rotation/drift and
+allocation/probe guards retain their expectations. Threaded totals vary with
+publication scheduling; no tolerance is relaxed.
+
+The full original 16 short scenarios were captured before/after under both
+compilers and after under independent overflow. Four additional representative
+ten-mode runs each measure **120,000 frames / 60 seconds** (RLS/QR, 4/8 kHz,
+normal/stall/stress). Normal GNU assisted training p99 is **373 us RLS / 417 us
+QR**, zero overflows, **99.969% / 99.920%** availability. All sustained frontends
+have zero execution-budget misses/allocation requests; maximum execution is
+**124 us**. Fault runs retain six/four absolute scheduled-deadline misses and
+stale/unready rejection. Normal worker maxima exceed 1 ms; these are bounded
+asynchronous observations, not RT guarantees. Independent isolated short stall
+preserves **2,000/2,000** standard predictions versus **1,849/2,000** common-policy.
+Native Linux remains unavailable and unverified.
+
+`apps/loPredCtrlAcc/tests/results/phase9.md` records raw CSV/trace-summary links,
+component CPU/wall profiles, original-probe versus corrected paced comparisons,
+normal/stress independent-policy scenarios and representative 60-second runs.
+The strict Clang/GCC, ASan/UBSan and TSan suites preserve all existing assertions;
+all numerical comparisons and thresholds remain unchanged. `prepare_phase8.py`
+extracts the actual committed math and asynchronous sources at
+`bbe9ffc0365b8f246371de5af2b8b015a3f01183` under separate symbols without checkout.
+
+`ddspc_phase9_test.cpp` adds eight 640-record ordered replays across two/ten modes,
+RLS/QR and gamma=1/.99. It compares full coefficients, gain, state, proposal,
+RMSE, readiness, versions, generation/reset/publication identities, failure/gap/
+reset/common saturation behavior and three staleness thresholds with zero
+numerical tolerance. Two additional learner variants test independent assisted
+saturation against the standard's complete committed replay and assistance's
+actual sparse admitted replay. Malformed applied-input availability still
+invalidates both. Historical Phase 6/7/original/restored Legacy tests remain.
+
+The corrected probe matches a native-assertion diagnostic byte-for-byte across
+6,496 snapshots. The old wrapper perturbs GCC QR coefficients by at most
+3.58820e-5 and proposals by 4.27365e-5 on this diagnostic data; RLS bytes match.
+These are documented observer effects, not relaxed regression bounds. GNU
+fast-math failure remains visible. Native Linux tests are not claimed.
 
 ### Phase 8 numerical, concurrency and producer/consumer validation
 
@@ -3182,8 +3313,16 @@ dedicated Makefile above rather than linking the application library through
 
 ## Implementation Plan
 
-Each stage has a reviewable exit condition. The user has committed Phases 1–7.
-The current **Phase 8 is an offline independent-worker/snapshot prototype**.
+Each stage has a reviewable exit condition. The user has committed Phases 1–8.
+The current **Phase 9 is offline throughput qualification only**: corrected
+benchmark instrumentation, compile-out phase profiles, exact committed-reference
+checks and opt-in per-lane overflow isolation. See the Phase 9 evidence tables
+for measured scope. No production integration is implemented. Native Linux,
+physical provenance, GNU fast QR and integration policy remain gates. Stop after
+Phase 9 validation and obtain approval before production work.
+
+The following Phase 8 roadmap text is retained as historical context.
+Phase 8 was an offline independent-worker/snapshot prototype.
 Its bounded fanout, versioned pinned publication, immediate reset/discontinuity
 invalidation, age/fault/readiness checks and producer/consumer tests are isolated
 from the production application. Exact math is preserved, but GNU/macOS ten-mode
@@ -3314,6 +3453,26 @@ then documentation-only changes and separate formatting-only cleanup as required
 by `AGENTS.md`. This work does not switch branches, commit, or push.
 
 ## Follow-up and Edge Cases
+
+- **Phase 9 changed files:** compile-out profiling in `shadow_controller.cpp`,
+  `recursive_least_squares.cpp`, `qrd_rls.cpp` and new `training_profile.hpp`;
+  test-only probe, worker/paced benchmark, three Makefiles and fixture extractor;
+  new `training_benchmark.cpp`, `rank_probe.cpp`, `native_assert_probe.hpp`,
+  `probe_test.cpp/.py`, `compare_profile_traces.py`, `prepare_phase8.py` and
+  `ddspc_phase9_test.cpp`; README, Phase 9 result captures and this plan. No
+  production controller/app/INDI/configuration/output file changes.
+- **Measurements:** old GCC low median under overflow largely measures warmup,
+  not ready rank/reference work; use matched serial profiles plus actual valid
+  prediction counts. New frontend counters remain zero; worker-only forgetting
+  RLS temporary allocation is a separate outstanding bounded-latency risk.
+- **Independent overflow:** healthy and recovering lanes have different segments;
+  inspect masks, counters, generations and source identities. Common gaps remain
+  common faults. Full resets reject old publications immediately. Single-frontend
+  API ownership remains required; no multi-producer claim is made.
+- **Remaining gates:** Linux strict/production compilation, GNU fast QR resolution,
+  scheduling/load/tail and queue-age policy review, transport/Legacy contention,
+  WFS/exposure/applied-DM/sensor clock/provenance validation. No Mac benchmark can
+  qualify these. Stop after Phase 9; request approval before production integration.
 
 - **Phase 8 files:** `apps/loPredCtrlAcc/shadow_controller.hpp` adds the offline
   friend only. Tests add `async_shadow.hpp/.cpp`, `async_test_data.hpp`,

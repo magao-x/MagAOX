@@ -115,6 +115,94 @@ aligned C++ allocation, peak live heap, and OS/library allocation are not measur
 This proves hot-path allocation and is not an allocation-free certification.
 The probe is force-included only in the separate benchmark build.
 
+## Phase 9 training profiles and sustained offline workers
+
+The Phase 9 investigation corrects a **benchmark-only allocation probe** that
+retained runtime assertion-string searches under GCC. It does not change the
+estimator mathematics or production execution. Historical GCC timing and QR
+observer effects, raw measurements, numerical checks and remaining blockers are
+recorded in [Phase 9 evidence](results/phase9.md). Phase 8's instrumented GCC
+throughput diagnosis below is superseded by that investigation; original captures
+are retained. Native Linux performance remains unverified.
+
+The probe still counts Eigen allocator checks and C++ requests and preserves
+failed assertions. Check its classification, single evaluation and abort guards:
+
+```sh
+make -C apps/loPredCtrlAcc -f tests/Makefile.benchmark \
+  BUILD_DIR=build/probe-gcc CXX=g++ check-probe
+make -C apps/loPredCtrlAcc -f tests/Makefile.benchmark \
+  BUILD_DIR=build/probe-clang CXX=clang++ check-probe
+```
+
+Build the normal paced benchmark separately for each compiler; default strict
+math, original source configurations and the common overflow policy are retained:
+
+```sh
+make -C apps/loPredCtrlAcc -f tests/Makefile.async \
+  BUILD_DIR=build/async-gcc CXX=g++
+make -C apps/loPredCtrlAcc -f tests/Makefile.async \
+  BUILD_DIR=build/async-clang CXX=clang++
+apps/loPredCtrlAcc/build/async-gcc/ddspc_async_benchmark 2000 > gcc-paced.csv
+apps/loPredCtrlAcc/build/async-clang/ddspc_async_benchmark 2000 > clang-paced.csv
+apps/loPredCtrlAcc/build/async-gcc/ddspc_async_benchmark 2000 \
+  --overflow independent > gcc-independent.csv
+apps/loPredCtrlAcc/build/async-gcc/ddspc_async_benchmark --seconds 60 \
+  --modes 10 --learner qr --sensor-hz 8000 --scenario normal \
+  --overflow independent --no-reference > gcc-60s.csv
+```
+
+On Linux run **both** compiler binaries through the full matrix and representative
+60-second/load-tested cases, outside compilation workloads. Use `--learner rls|qr`,
+`--modes 2|10`, `--sensor-hz 4000|8000`, `--scenario normal|stress|assisted_stall`
+and `--overflow common|independent`; omit filters for all original 16 scenarios.
+Seconds are bounded to 1–120. `--no-reference` omits precomputing synchronous
+proposals and reports `max_sync_proposal_difference=nan, reference_enabled=0`; it does not assert
+numerical equality. Default runs keep that comparison. Quantiles include p50,
+p95, p99, p99.9 and max. CSV appends per-lane admission/overflow and whole-worker
+CPU/wall counters; unsupported utilization is NaN. Queue depth, trace loss,
+record/publication age, availability, allocations and both execution/absolute
+deadline misses must be inspected, not just median latency.
+
+For independent overflow, call `submit_record()` and inspect **each** admission
+bit. The old `submit()` returns false when either lane rejects, even when the
+healthy lane accepted. Only queue overflow is isolated: malformed common
+timestamps/provenance/gaps still invalidate both. Snapshot
+`m_segmentFirstSequence` identifies the current contiguous evidence segment;
+distinct accepted histories must not be labeled identical. Default common policy
+and all age/reset/generation/readiness protections remain unchanged.
+
+For inclusive CPU versus wall component profiles, run the deterministic manual
+service executable (no worker scheduling delays):
+
+```sh
+make -C apps/loPredCtrlAcc -f tests/Makefile.async PROFILE=yes \
+  BENCH_SOURCE=training_benchmark.cpp BUILD_DIR=build/profile-gcc CXX=g++
+apps/loPredCtrlAcc/build/profile-gcc/ddspc_async_benchmark 300 trace.bin > profile.csv
+make -C apps/loPredCtrlAcc -f tests/Makefile.async PROFILE=yes \
+  BENCH_SOURCE=training_benchmark.cpp BUILD_DIR=build/profile-native CXX=g++ \
+  ALLOCATION_PROBE="$PWD/apps/loPredCtrlAcc/tests/native_assert_probe.hpp"
+apps/loPredCtrlAcc/build/profile-native/ddspc_async_benchmark 300 native.bin > native.csv
+python3 apps/loPredCtrlAcc/tests/compare_profile_traces.py \
+  trace.bin native.bin --require-exact
+```
+
+Profile hooks are absent from ordinary builds. Timers add overhead; inclusive
+phase sums double count nested intervals. Native-assertion override is a diagnostic
+control with counters disabled, never allocation evidence. `rank_probe.cpp` can
+also be selected with `BENCH_SOURCE=rank_probe.cpp` in a separate build directory.
+Preserve compiler-specific zero-tolerance references and inspect the raw trace
+comparison when investigating instrumentation effects.
+
+`Makefile.offline` now also extracts the committed Phase 8 implementation under
+independent symbols and tests exact records, reset/age/gap/overflow semantics and
+per-lane admitted-record replays. Run the strict GCC/Clang, ASan/UBSan and TSan
+commands elsewhere in this README (TSan filter `'[async],[phase9]'`). The existing
+GNU fast-math nonfinite failure remains visible; do not change production flags
+or remove its assertion. Provisioned native Linux application checks still use
+`native_linux_build.py` below. **Stop after offline validation. Production
+asynchronous integration requires explicit approval.**
+
 ## Phase 8 experimental offline workers
 
 Phase 8 adds an isolated prototype under `tests/async_shadow.hpp/.cpp`; the native

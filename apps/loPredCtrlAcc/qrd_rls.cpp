@@ -3,6 +3,7 @@
  */
 
 #include "qrd_rls.hpp"
+#include "training_profile.hpp"
 #include <string>
 #include <stdexcept>
 #include <fstream>
@@ -248,18 +249,25 @@ void QRDRecursiveLeastSquares::update_preallocated( Matrix &x, const Matrix &y, 
         y.cols() != 1 || weightUpdate.rows() != _num_predictors || weightUpdate.cols() != _num_features ||
         !x.allFinite() || !y.allFinite() )
         throw std::invalid_argument( "Invalid preallocated causal QR update" );
+    DDSPC_PROFILE_BEGIN( QrFactor, factorWork );
     err = y;
     R_ *= _lambda;
     A_.topRows( _num_features ) = R_;
     A_.row( _num_features )     = x.transpose();
     apply_givens();
-    R_                          = A_.topRows( _num_features );
+    R_ = A_.topRows( _num_features );
+    DDSPC_PROFILE_END( factorWork );
+    DDSPC_PROFILE_BEGIN( Weights, predictionWork );
     prediction_output.noalias() = prediction_matrix * x;
     err -= prediction_output;
+    DDSPC_PROFILE_END( predictionWork );
+    DDSPC_PROFILE_BEGIN( QrSolve, solveWork );
     z.setZero();
     g.setZero();
     solve_Rt( x, z );
     solve_R( z, g );
+    DDSPC_PROFILE_END( solveWork );
+    DDSPC_PROFILE_SCOPE( Weights );
     weightUpdate.noalias() = err * g.transpose();
     prediction_matrix += weightUpdate;
 }
