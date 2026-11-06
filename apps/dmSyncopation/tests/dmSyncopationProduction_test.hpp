@@ -37,6 +37,8 @@ class ProductionHarness : public Harness
 {
   public:
     using dmSyncopation::closeProduction;
+    using dmSyncopation::configureDiagnostics;
+    using dmSyncopation::detailedTimingEnabled;
     using dmSyncopation::m_generation;
     using dmSyncopation::m_indiP_production;
     using dmSyncopation::m_passiveCopied;
@@ -325,7 +327,7 @@ TEST_CASE( "production startup validates mode and preparation settings", "[dmSyn
 {
     ProductionHarness app;
     app.setupConfig();
-    const int  fault      = GENERATE( 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 );
+    const int  fault      = GENERATE( 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 );
     char       path[]     = "/tmp/dm-synco-production-config-XXXXXX";
     const auto descriptor = mkstemp( path );
     REQUIRE( descriptor >= 0 );
@@ -341,8 +343,9 @@ TEST_CASE( "production startup validates mode and preparation settings", "[dmSyn
                     : fault == 9 ? 1
                                  : 4 )
                << "\nmaxCadenceHz=8000\ncopyBudgetUs=30\nsnapshotBudgetUs=10\n"
-               << "[readerReleaseMonitor]\nshmimName=" << ( fault == 3 ? "" : "dmtweeter_read_done" ) << "\n"
-               << "[production]\nenabled=true\nreadyLeadUs="
+               << "[readerReleaseMonitor]\nshmimName=" << ( fault == 3 || fault == 13 ? "" : "dmtweeter_read_done" )
+               << "\n"
+               << "[production]\nenabled=" << ( fault == 13 ? "false" : "true" ) << "\nreadyLeadUs="
                << ( fault == 4   ? 20
                     : fault == 7 ? 100
                                  : 50 )
@@ -351,6 +354,13 @@ TEST_CASE( "production startup validates mode and preparation settings", "[dmSyn
                << "[zeroTest]\nenabled=" << ( fault == 1 ? "true" : "false" ) << "\nchannel=dm97disp07\n"
                << "[simulation]\nenabled=" << ( fault == 2 ? "true" : "false" )
                << "\nreaderReleaseReady=false\npipelineBackend=false\n";
+
+        if( fault >= 10 && fault <= 12 )
+        {
+            config << "[diagnostics]\nwindowSec=" << ( fault == 10 ? 2 : 0 )
+                   << "\ncombiner=" << ( fault == 11 ? "false" : "true" )
+                   << "\nmaxEvents=" << ( fault == 12 ? 0 : 20000 ) << '\n';
+        }
     }
 
     app.config.readConfig( path );
@@ -358,20 +368,41 @@ TEST_CASE( "production startup validates mode and preparation settings", "[dmSyn
     const auto result = app.loadConfigImpl( app.config );
     CAPTURE( fault );
 
-    if( fault == 0 || fault == 9 )
+    if( fault == 0 || fault == 9 || fault == 10 || fault == 11 || fault == 13 )
     {
         CHECK( result == 0 );
-        CHECK( app.m_productionEnabled );
+        CHECK( app.m_productionEnabled == ( fault != 13 ) );
         CHECK_FALSE( app.m_zeroTestEnabled );
         CHECK_FALSE( app.m_simulationEnabled );
-        CHECK( app.m_zeroLateUs == 6 );
-        CHECK( app.m_zeroWakeAheadUs == 10 );
+        CHECK( app.m_zeroLateUs == ( fault == 13 ? 5 : 6 ) );
+        CHECK( app.m_zeroWakeAheadUs == ( fault == 13 ? 0 : 10 ) );
         CHECK( app.m_productionReadyLeadUs == 50 );
         CHECK( app.m_productionStep0LeadUs == 20 );
         CHECK( app.m_requested == ( fault == 9 ? 1 : 4 ) );
         CHECK( app.m_maxCadence == 8000 );
         CHECK( app.m_bounds.copy == 30000 );
         CHECK( app.m_bounds.snapshot == 10000 );
+        CHECK( app.m_primaryCadenceWindow == ( fault == 10 || fault == 13 ? 2 : 0 ) );
+        app.configureDiagnostics();
+        CHECK( app.detailedTimingEnabled() == ( fault == 10 || fault == 13 ) );
+
+        if( app.m_productionEnabled )
+        {
+            CHECK( app.readerReleaseMonitorEnabled() );
+            CHECK( app.m_simulationReleaseQueue.capacity() > 0 );
+        }
+
+        if( !app.detailedTimingEnabled() )
+        {
+            CHECK_FALSE( app.m_primaryCadence.enabled() );
+            CHECK_FALSE( app.m_combinerCadence.enabled() );
+            CHECK_FALSE( app.m_cameraCadence.enabled() );
+            CHECK_FALSE( app.m_cameraPublicationCadence.enabled() );
+            CHECK_FALSE( app.m_pipelineCadence.enabled() );
+            CHECK_FALSE( app.m_readerTiming.enabled() );
+            CHECK_FALSE( app.m_readerReleaseTiming.enabled() );
+            CHECK( app.m_zeroEvents.capacity() == 0 );
+        }
     }
     else
     {
@@ -386,6 +417,9 @@ TEST_CASE( "production startup validates mode and preparation settings", "[dmSyn
 #ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
     MagAOX::app::dmSyncopation::setupConfig;
     MagAOX::app::dmSyncopation::loadConfigImpl;
+    MagAOX::app::dmSyncopation::configureDiagnostics;
+    MagAOX::app::dmSyncopation::detailedTimingEnabled;
+    MagAOX::app::dmSyncopation::readerReleaseMonitorEnabled;
 #endif
     // clang-format on
 }
@@ -712,16 +746,21 @@ TEST_CASE( "production copy overruns do not latch later slots off", "[dmSyncopat
     // clang-format on
 }
 
-/// The shared engine consumes nonzero tagged inputs, prepares step zero and does not inherit finite-trial expiry.
+/// Both diagnostic modes preserve real receipt handling, tagged deliveries, passive preparation and continuous
+/// lifetime.
 TEST_CASE( "production common scheduler continuously publishes tagged contributions",
            "[dmSyncopation][production][integration]" )
 {
     Streams            streams;
     ProductionSidecars sidecars;
     ProductionHarness  app;
-    const int          steps = GENERATE( 1, 4 );
-    CAPTURE( steps );
+    const int          steps    = GENERATE( 1, 4 );
+    const bool         detailed = GENERATE( false, true );
+    CAPTURE( steps, detailed );
     ZeroClock::connect( app, streams, steps );
+    app.m_primaryCadenceWindow    = detailed ? 2 : 0;
+    app.m_primaryCadenceMaxEvents = 256;
+    app.configureDiagnostics();
     const auto next         = ZeroClock::warm();
     app.m_productionEnabled = true;
     app.m_zeroTestEnabled   = false;
@@ -747,7 +786,9 @@ TEST_CASE( "production common scheduler continuously publishes tagged contributi
     const auto primaryBefore          = streams.images[0].md->cnt0;
     const auto counterBefore          = streams.images[2].md->cnt0;
     app.m_enabled                     = true;
+    // ZeroClock uses the actual receipt hook followed by processImage, including when every collector is disabled.
     ZeroClock::primary( next );
+    CHECK( app.m_primaryCadence.enabled() == detailed );
     REQUIRE( app.m_zeroStats.posted == uint64_t( steps - 1 ) );
     CHECK( app.m_zeroStats.acknowledged == uint64_t( steps - 1 ) );
     CHECK( app.m_zeroStats.skipped == 0 );
@@ -772,6 +813,23 @@ TEST_CASE( "production common scheduler continuously publishes tagged contributi
     app.publishZeroTestStatus( app.m_zeroStats.startedNs + 121000000000LL, true );
     CHECK( app.m_enabled );
     CHECK_FALSE( app.m_zeroStats.finished );
+
+    if( detailed )
+    {
+        CHECK( app.m_zeroEvents.queued() > 0 );
+        CHECK( app.m_zeroPhase.summary().observed > 0 );
+        CHECK( app.m_zeroPublicationTiming.summary().mainObserved > 0 );
+    }
+    else
+    {
+        CHECK( app.m_zeroEvents.queued() == 0 );
+        CHECK( app.m_zeroEvents.dropped() == 0 );
+        CHECK( app.m_zeroPhase.summary().observed == 0 );
+        CHECK( app.m_zeroPublicationTiming.summary().mainObserved == 0 );
+        CHECK( app.m_zeroPublicationTiming.summary().auxiliaryObserved == 0 );
+        CHECK( app.m_zeroTiming.summary().classified == 0 );
+    }
+
     ProductionCycleClock::app = nullptr;
 
     // clang-format off
@@ -779,6 +837,94 @@ TEST_CASE( "production common scheduler continuously publishes tagged contributi
     MagAOX::app::dmSyncopation::processZeroTestPrimary;
     MagAOX::app::dmSyncopation::productionStep0;
     MagAOX::app::dmSyncopation::publishZeroTestStatus;
+    MagAOX::app::dmSyncopation::configureDiagnostics;
+    MagAOX::app::dmSyncopation::shmimMonitorTiming;
+    MagAOX::app::dmSyncopation::processImage;
+#endif
+    // clang-format on
+}
+
+/// Minimal diagnostics retain reader-release, final SDK-failure and publication-clock safety guards.
+TEST_CASE( "minimal production diagnostics preserve safety rejections",
+           "[dmSyncopation][production][integration][minimalDiagnostics]" )
+{
+    Streams            streams;
+    CompletionStream   sdk;
+    ProductionSidecars sidecars;
+    ProductionHarness  app;
+    const int          fault = GENERATE( 0, 1, 2 );
+    CAPTURE( fault );
+    ZeroClock::connect( app, streams, 4 );
+    app.m_primaryCadenceWindow = 0;
+    app.configureDiagnostics();
+    const auto next         = ZeroClock::warm();
+    app.m_productionEnabled = true;
+    app.m_zeroTestEnabled   = false;
+    app.m_zeroLateUs        = 6;
+    app.m_zeroWakeAheadUs   = 10;
+    app.m_maxCadence        = 8000;
+    REQUIRE( app.openProduction() );
+    app.m_enabled = true;
+    ZeroClock::primary( next );
+    REQUIRE( app.m_zeroStats.posted == 3 );
+    REQUIRE( app.m_zeroStats.skipped == 0 );
+    const auto observed = next + 500000;
+
+    if( fault == 0 )
+    {
+        ZeroClock::release = false;
+    }
+    else if( fault == 1 )
+    {
+        auto record = readerCompletion( streams.images[1], ZeroClock::sequence, observed - 2000, observed - 1000 );
+        record.kind = MagAOX::dmCompletion::Kind::sdk;
+        record.backendResult = 0;
+        sdk.store( record );
+        REQUIRE( ImageStreamIO_openIm( &app.m_zeroSdk, "synco_reader_done" ) == 0 );
+        synco::GridTime grid;
+        uint64_t        period = 0;
+        REQUIRE( app.zeroTestGrid( streams.images[0].md->cnt0 + 1, grid, period ) );
+        ZeroClock::endpoint    = &sdk;
+        ZeroClock::injection   = 6;
+        ZeroClock::injectionAt = synco::stepGrid( grid, period, 1, 4 ).ns - 3000;
+    }
+    else
+    {
+        ZeroClock::publicationClockDelay = 2000;
+    }
+
+    const auto posted = ZeroClock::posts.size();
+    ZeroClock::primary( observed );
+    CHECK( ZeroClock::posts.size() == posted );
+    CHECK( app.m_zeroStats.posted == 3 );
+
+    if( fault == 2 )
+    {
+        CHECK( app.m_zeroStats.clockRejected == 1 );
+        CHECK( app.m_zeroStats.clockExcludedCycles == 1 );
+        CHECK( app.m_zeroStats.clockExcludedSlots == 3 );
+        CHECK( app.m_zeroStats.warming );
+    }
+    else
+    {
+        CHECK( app.m_zeroStats.readerMissing == 3 );
+        CHECK( app.m_zeroStats.skipped == 3 );
+        CHECK( ZeroClock::injections == ( fault == 1 ? 1 : 0 ) );
+    }
+
+    CHECK( app.m_zeroEvents.queued() == 0 );
+    CHECK( app.m_zeroTiming.summary().classified == 0 );
+    CHECK( app.m_zeroPhase.summary().observed == 0 );
+    CHECK( app.m_zeroPublicationTiming.summary().mainObserved == 0 );
+    CHECK( app.m_zeroPublicationTiming.summary().auxiliaryObserved == 0 );
+    checkZeroPartition( app );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::configureDiagnostics;
+    MagAOX::app::dmSyncopation::processZeroTestPrimary;
+    MagAOX::app::dmSyncopation::zeroTestFinalGuard;
+    MagAOX::app::dmSyncopation::zeroTestClockRejected;
 #endif
     // clang-format on
 }
