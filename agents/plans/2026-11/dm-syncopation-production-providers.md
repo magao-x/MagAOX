@@ -634,3 +634,133 @@ Logs are `/tmp/framegrabber-include-refRMS-before.log`,
 Pylon SDK, so a complete baslerCtrl build remains an operator-side check. The
 reported Pylon deprecated-copy warnings are distinct from the missing type.
 All validation is local to `mx11`, without instrument access.
+
+## 2026-11-05: post-merge timing issue and verified 5 us dmcomb delay
+
+After merging, rebuilding and restarting, the operator reports a dmtweeter
+`fgtimes` acquisition interval of approximately 252 us with roughly 150 us
+jitter while synco is enabled. With synco disabled, the corrected baseline is
+500 us with 20 us jitter. The reported enabled mean is about 3.97 kHz; the
+disabled baseline remains 2 kHz but has elevated jitter.
+
+The supplied readback confirms RTC latency On, four requested steps and an
+8 kHz cadence cap. Synco is inactive in that snapshot (`active=0`,
+`deliveredHz=0`); its cumulative missed/not-started counts do not establish the
+failure cause or a current skip fraction. The readback does not support the
+initial hypotheses of latency mode Off or a two-step configuration.
+
+The operator initially attributes the issue to dmcomb's trigger delay,
+reporting an improvement after changing a setting believed to be 5 us to
+10 us. Further operator testing identifies the problematic setting as
+**50 us**, ten times the intended 5 us. The initial delay value was not
+captured in the supplied INDI snapshot.
+DELAY mode 4 uses a requested `nanosleep` between counter checks; the requested
+delay does not establish the actual polling period or a monotonic relationship
+with output jitter.
+
+With the delay restored to 10 us and synco enabled, the operator reports
+`acq = 1.25e-4 +/- 6.2e-6` s: 125 us mean with 6.2 us RMS interval jitter.
+This confirms a restored 8 kHz mean controller receipt cadence and substantially
+reduced jitter.
+
+The operator then confirms dmcomb at 5 us and reports
+`acq = 1.25e-4 +/- 3.7e-6` s with synco enabled: 125 us mean and 3.7 us RMS
+interval jitter, close to the prior roughly 3.2--3.6 us qualification range.
+The subsequent identification of the 50 us setting resolves the apparent
+day-to-day regression as an unintended polling-delay setting. The verified
+5 us measurement is consistent with the preceding baseline.
+
+The current working setting is again 5 us (`0.000005` s); the problematic
+50 us setting is `0.000050` s. Mean cadence and reported jitter are back near
+the preceding baseline. No application code or instrument configuration was
+changed by the agent; the operator performed the instrument checks and delay
+changes.
+
+## 2026-11-05: timing-overhead audit before the fgtimes-only change
+
+The operator asks how much measurement remains in the loop, particularly in
+ocam2KCtrl and bmcCtrl. Live readbacks confirm:
+
+| Property | Reported value |
+| --- | ---: |
+| `camwfs.fg_timing_quality.enabled` | 1 |
+| `camwfs.fg_timing_quality.stagesEnabled` | 1 |
+| `camwfs.fg_timing_quality.traceEnabled` | 1 |
+| `camwfs.fg_timing_quality.traceCapacity` | 16 |
+| `dmtweeter.dm_timing_quality.enabled` | 1 |
+| `dmtweeter.dm_timing_delivery.enabled` | 1 |
+
+All six values also match the preceding successful capture
+`synco-production-20261105T052815Z`. These diagnostics are still active, although
+their enable state is not a newly observed difference from that capture.
+
+Source inspection identifies the following application capture work:
+
+- The normal successful OCAM path performs 13 additional monotonic clock reads
+  per frame with stage timing enabled: one at event begin, six EDT markers,
+  and six framegrabber markers. Event begin and EDT both capture wait entry.
+  Existing SDK acquisition timestamps and the stream's realtime write timestamp
+  are separate. At 2 kHz this is about 26,000 diagnostic clock reads per second.
+- With configured reader release, a successful full BMC pipeline command has
+  17 collector clock reads across its monitor and post stages, plus two for
+  enabled delivery-clock bracketing. At 8 kHz those 19 reads amount to about
+  152,000 per second across the two threads. This excludes SDK worker,
+  timeout, input-identity and reader/completion protocol timestamps.
+- Capture includes fixed event initialization/copies, marker ordering checks
+  and a bounded queue handoff. History, statistics, excursion classification,
+  trace construction, INDI formatting and telemetry emission run on ordinary
+  app paths. Trace capacity 16 bounds retained contexts; it does not limit
+  camera stage timestamp collection to 16 frames.
+- These operation counts do not measure current instrument latency or CPU
+  cost. The older workstation capture benchmark predates the complete current
+  pipeline and delivery path; it does not establish their overhead.
+
+At the time of this audit, a first operator-applied reduction that retains basic
+`fgtimes` is:
+
+```ini
+# camwfs.conf
+[framegrabber]
+stageTiming=false
+stageTraceMax=0
+```
+
+```ini
+# dmtweeter.conf
+[dm]
+deliveryClock=none
+```
+
+These settings require application restarts. Both camera settings must change
+together: a positive trace capacity requires stage timing. Basic camera paired
+timestamps and event handoff remain. BMC delivery bracketing loses its two
+extra reads, while the common DM collector still records processing stages.
+At this point there is no independent DM stage-timing switch; `dm.latencyTime=0`
+disables the whole collector, including compatible DM `fgtimes`. A separate
+cadence-only mode would allow further reduction while retaining rate monitoring.
+
+Keep SDK/pipeline behavior and reader-release signals unchanged in an overhead
+comparison: they serve command ownership, timeout handling and synco readiness,
+independently of timing summaries. No application code or instrument setting
+was changed during this audit. Only this engineering record was updated.
+
+## 2026-11-05: follow-up fgtimes-only normal operation
+
+Following the audit, the operator requests that normal camera and DM operation
+collect and report only compatible `fgtimes`. That change is implemented on the
+separate `jrmales/fgtimes-only` branch:
+
+- [6eb3ec0b](https://github.com/magao-x/MagAOX/commit/6eb3ec0b68e1a72c3d4a5b0cc80dc2d5d9ad7b68)
+  adds the normal mode, regression tests and its execution record.
+- [baf736ad](https://github.com/magao-x/MagAOX/commit/baf736ade019cdb4cf67ea6196a2da1062d68fbe)
+  documents normal operation and the detailed diagnostic opt-in.
+
+With that implementation, use camera `[framegrabber] stageTiming=false` together
+with `stageTraceMax=0`, and DM `[dm] stageTiming=false` (the new DM default).
+Detailed stage, trace and delivery measurements become opt-in. Required SDK,
+reader-release and completion clocks/signals remain independent of profiling.
+All 149 software test cases pass (4239 assertions).
+
+Applying the new mode requires rebuilding/installing and operator-controlled
+application restarts. The instrument measurements above precede that deployment;
+no post-change instrument latency or jitter measurement has been supplied.
