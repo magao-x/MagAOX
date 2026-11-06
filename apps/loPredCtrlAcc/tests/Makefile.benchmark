@@ -1,0 +1,23 @@
+# Standalone strict-math benchmark. No native app, INDI, ImageStreamIO, or device library is linked.
+APP_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/..)
+TEST_DIR := $(APP_DIR)/tests
+BUILD_DIR ?= $(APP_DIR)/build/benchmark
+CXX = c++
+CPPFLAGS += $(shell pkg-config --cflags-only-I eigen3 mxlib) -DEIGEN_DONT_PARALLELIZE -include $(TEST_DIR)/allocation_probe.hpp
+CXXFLAGS ?= -O3 -g
+CXXFLAGS += -std=c++20 -Wall -Wextra -fno-fast-math
+SOURCES := $(TEST_DIR)/benchmark.cpp $(APP_DIR)/ar_controller.cpp $(APP_DIR)/recursive_least_squares.cpp \
+           $(APP_DIR)/qrd_rls.cpp $(APP_DIR)/utils.cpp $(APP_DIR)/shadow_controller.cpp $(APP_DIR)/causal_input.cpp
+OBJECTS := $(addprefix $(BUILD_DIR)/,$(notdir $(SOURCES:.cpp=.o)))
+VPATH := $(sort $(dir $(SOURCES)))
+TARGET := $(BUILD_DIR)/ddspc_benchmark
+.PHONY: all check
+all: $(TARGET)
+check: $(TARGET)
+	$(TARGET)
+$(TARGET): $(OBJECTS)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) $^ $(LDLIBS) -o $@
+$(BUILD_DIR)/%.o: %.cpp $(TEST_DIR)/allocation_probe.hpp
+	@mkdir -p $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -MMD -MP -c $< -o $@
+-include $(OBJECTS:.o=.d)

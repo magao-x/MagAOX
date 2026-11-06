@@ -293,7 +293,78 @@ Review AGENTS.md.  Do not alter any text above the "Agent Findings and Plan" bel
 
 ## Task Summary
 
-**Phase 3 status (2026-11-05): independently testable causal input integration is
+**Phase 5 offline build/validation work (2026-11-05): comparisons and benchmarks
+are implemented; native Linux compilation remains unverified and blocks the
+phase exit.** The working tree already contained the uncommitted Phase 4 review
+and tests; these were retained. HEAD/branch remain unchanged. This session runs on
+`ASTR-LT-428.local`, macOS 26.3.2 arm64, with Apple Clang 21 and Homebrew GCC
+15.2.0. No Linux VM/container/runtime or approved development host was available.
+No production application, dependency, original `loPredCtrl`, interface, service,
+DM path, or separate worktree was modified or executed.
+
+New deterministic comparisons fit three formulations on identical synthetic
+applied histories and then freeze their parameters. Informative broadband and
+multitone sensors improve one-step held-out RMSE from **0.286633 to 0.00596977**;
+zero-coupling and unrelated-sensor controls show no fabricated benefit. At F=3,
+independent future disturbance innovations remain unpredictable. Separate frozen-fit
+numerical feedback comparisons explicitly retain different control costs and
+synthetic clipping/holds; these are not on-sky suppression estimates.
+
+The benchmark establishes a scaling problem in synchronous shadow processing:
+with N=5,F=3,c=2,Ha=20, the synchronized builder plus model pair has median
+**46.6/54.7 us for two modes**, but **553.7/619.2 us for ten modes**
+(classic/QR). All 2,000 ten-mode records exceed the whole-frame 500-us budget in
+this run. Hot-path allocations remain. This is an instrumented laptop benchmark,
+not a target Linux deadline guarantee or permission to relax timing gates.
+
+**Compatibility qualification:** Clang strict/sanitized suites pass
+229,669 assertions / 43 cases; fast legacy suites pass 179,695 / 6. GCC builds the
+stream-free application harness and all numerical sources, but two historical
+bit-exact QR regressions fail. A separate diagnostic measures maximum clone
+command drift **0.000216633** and coefficient drift **0.0323329** over the matched
+48-configuration replay; original versus restored remains exact. Classic RLS is
+exact. `-ffp-contract=off` does not restore all exact checks. The assertions and
+operational QR implementation were not weakened or changed. Phase 4's exact
+results below refer to its Apple Clang environment, not a universal compiler
+compatibility claim.
+
+`tests/native_linux_build.py` prepares two independent fresh source builds of the
+real headers, logger generation, PCH, libraries and binary, preserving default
+Legacy flags and separately rebuilding the strict shadow profile. It rejects
+non-Linux and instrument hosts, never runs/installs the app, and records manifests
+and logs. Its Linux build path is pending an approved environment. A local real-header
+syntax attempt still stops at missing generated `logger/generated/logTypes.hpp`;
+the test doubles are not a native compilation substitute. Stop before any live
+integration/testing; remaining decisions and exact reproduction commands follow.
+
+**Phase 4 compatibility review (2026-11-05): the original `apps/loPredCtrl/`
+implementation is preserved byte-for-byte.** Starting HEAD is
+`078a3932aa4a339cf873fff0eeb149e40cf08f34`, on the same feature branch and
+`ASTR-LT-428.local`. Git identifies the unaugmented working lineage at
+`f59d68be7311fb2d3138ef2a4ce269d091ee49e7`, including the earlier explicit
+on-sky update. Its complete 15-file app tree equals both restored `loPredCtrl`
+at HEAD and the working files. The new tests compile that Git snapshot separately
+from the restored app and current accelerometer-disabled Legacy clone, rather
+than substituting a reimplementation of the historical algorithm.
+
+With matched configuration and defined initial state, 9,216 numerical frames
+and 384 actual-app-header callbacks match **bit-for-bit** in calculated commands,
+mock publications, histories and learned matrices, under strict and legacy
+fast-math builds. The original path and both production controller sources are
+untouched in Phase 4. New shadow selection cannot publish or change legacy
+commands; rejected selection/training requests are included in the replay.
+
+**The clone is not an unconditional replacement for the original app.** Existing
+pre-Phase-1 changes include different app QR/copy defaults, larger history rings
+(which change extreme-mode modulo aliasing), and feedback reconstruction on reset
+after loading a different gain. Tests characterize these differences explicitly;
+they are behavior differences, not floating-point drift. Thus the earlier broad
+“unchanged legacy” wording applies to the preserved original and matched ordinary
+replays, not every clone configuration/state transition. No defaults, timing gate,
+control law, synchronization algorithm or runtime behavior is changed in this
+review. Live accelerometer work remained deferred when Phase 4 ended.
+
+**Completed Phase 3 status (2026-11-05): independently testable causal input integration is
 implemented; live training remains gated.** Work began from clean committed
 Phase 2 HEAD `fa0e51c5f097a289278c6274ebdd0aef70cd32ce` on
 `parkertjohnson1/accel_ddspc`, host `ASTR-LT-428.local` (not an instrument host).
@@ -402,6 +473,17 @@ formula or a predetermined spectral line.
 
 ## Key Assumptions
 
+**Phase 5 assumptions and scope:** synthetic `u_i` is an absolute modal input
+actually held for the transition to `y_(i+1)` by the numerical plant. No stream
+counter, publication, callback, requested increment, SDK return or nominal rate
+establishes that convention physically. Evaluation sensor samples are available
+at the decision origin by construction, not by a measured instrument clock
+mapping. Approximately 8 kHz / 2 kHz implies nominal 125-us / 500-us periods;
+phase, jitter, per-channel skew, timestamp meaning and usable decision budget are
+unknown until independently measured. All Phase 5 source additions are offline
+test/build tools. Original operational defaults, reference law, INDI gates,
+independent learners and non-actuation protections remain unchanged.
+
 1. **Prediction origin:** define decision index `i` after WFS residual `y_i` is
    available. Nominally, command `u_i`, issued at that decision, affects `y_(i+1)`.
    Real exposure and actuation delays must replace this nominal convention once
@@ -503,6 +585,22 @@ formula or a predetermined spectral line.
     bound is insufficient for `m_timingVerified=true`. Every test trace is
     synthetic, including tests that simulate an externally verified certificate.
     A provenance enum/flag is a caller assertion, not physical authentication.
+
+12. **Original versus corrected baseline:** `apps/loPredCtrl/` is the preserved
+    historical standard DDSPC application. `loPredCtrlAcc` with shadow off and
+    acceleration off uses the copied Legacy law; `ddspc_mode=standard` in shadow
+    execution selects the separate corrected Causal standard learner. These are
+    distinct comparisons. “Standard shadow” is not a renamed/replacement on-sky
+    controller, and its literal-lambda law must not overwrite the historical law.
+
+13. **Evidence scope:** Git proves source identity and documents on-sky intent,
+    while the user supplies the premise that the original worked on sky. It does
+    not identify an actual deployed binary/configuration/session. The replay uses
+    the same local compiler/Eigen/flags for all variants, mocked native bases,
+    known initial output zero and finite informative traces. It proves data-path
+    equality under those conditions, not historical binary identity, thread
+    scheduling, physical application or closed-loop behavior under changed
+    libraries/hardware. Preserve the original as the operational reference.
 
 ## Requirements
 
@@ -855,6 +953,291 @@ rejects Requested, DriverPrepared, DriverAccepted and Unverified evidence.
   remain unchanged. A new source contract resets shadow fits explicitly; ordinary
   data gaps retain coefficients while clearing readiness/segment histories.
   New builder objects link through the app and standalone test Makefiles.
+
+### Phase 4 historical identity and compatibility findings
+
+**Pinned source and provenance.** `f59d68be7311fb2d3138ef2a4ce269d091ee49e7`
+(by syhaffert, author date 2026-05-22, rebased commit date 2026-05-24) is the
+latest unaugmented `add_lopredctrl` source restored by
+`54b6fa0bec701d09fdc61c212deeda683400fe33` (2026-05-25, “Revert loPredCtrl back
+to original version from add_lopredctrl”). Earlier ancestry includes
+`e5686991780f713867941c0f5029df57ee84d0e3` (author date 2026-04-10, “small
+updates for on-sky usage”) and `9cccca4c26439c81de07b8af0a3a2985ee618dac`
+(author date 2026-04-20, QR RLS addition). Rebased commit dates are not evidence
+that acceleration was present in the original tree: inspect source and ancestry,
+not date ordering alone. The first acceleration edits and copied-app history
+are separate from this unaugmented reference.
+
+The app directory tree object is exactly
+`d37d0a7e416204b4ab844fb8caf1ba83e0ebff4a` at `f59d68be` and current HEAD.
+`git diff f59d68be HEAD -- apps/loPredCtrl` is empty. New
+`tests/prepare_legacy.py` verifies both tree IDs and every one of the 15 working
+files against the pinned Git blobs on each check, without fetching, switching
+branches or editing source. Snapshot compilation occurs only in ignored build
+fixtures, with namespace/class renaming and guarded offline base/version includes.
+No historical arithmetic, history construction, or app callback body is rewritten.
+The exact deployed on-sky binary/configuration remains unknown, rather than being
+inferred from an “on-sky” commit message.
+
+| Area | Original `loPredCtrl` and restored current app | `loPredCtrlAcc` Legacy with acceleration disabled | Corrected shadow models |
+| --- | --- | --- | --- |
+| WFS processing | `loPredCtrl.hpp::processImage(shmimT)` (`499–639`) reads first `m` FLOAT modes directly; no differencing or timestamp-based history alignment. `calculate_command()` alone appends measurements. | Same operational sequence and residual values on the matched trace; shadow/input-builder branches return before legacy work only when startup shadow is explicitly enabled. | Explicit Causal records, contiguous data/warm-up/validity requirements; both models receive the same common record. |
+| Command history | `ar_controller.cpp::calculate_command()` (`243–279`) appends the calculated **delta/candidate**, before app accumulation and publication; no applied-command reader. | Same candidate history. Larger copied ring capacity is a genuine compatibility limit at extreme mode counts. No applied telemetry is silently substituted. | Explicit supplied input, Phase 3 builder presently specifies absolute held modal input; this is not automatically the legacy incremental command convention. |
+| Indexing | Newest-first rows; original `get_command_future(1)` skips `m` rows, retaining the multimode indexing defect (`137–156`). | Legacy keeps the row skip, including its defect; matched ordinary histories are exact. | Causal skips one frame independent of mode count. This intentional mathematical correction is not applied to the on-sky implementation. |
+| Identification | Conventional and legacy QR RLS update once when `learn` is set, after generating/publishing the request; zero-filled startup histories have no app readiness gate. | Conventional algebra unchanged; QR structural-zero correction defaults **off** for Legacy. Exact coefficients through resets/regularization changes in the replay. | Independent standard/assisted fits; corrected QR invariant, complete-history/readiness gates and one update per matured record. |
+| Operational gain | `update_controller()` (`223–240`) forms `H=Theta^T Theta`, uses `lambda_effective=maxCoeff(C^T C)*configured_regularization`, explicit inverse, and takes the last `m` rows of the horizon gain. | Same scaled inverse-based law, not the new literal-lambda helper. | Separate LDLT reference law with literal positive lambda. |
+| Feedback/integration | `calculate_command()` uses `(controller+integrator)*[u_p;y_p]+noise`; the matrix named `integrator` adds fixed current-WFS feedback. App `is_integrating` separately accumulates the output buffer. Clipping remains disabled by `if(false)`. | Same feedback/accumulation expressions. Reset after loading a different feedback gain is a preexisting clone difference, described below. | No added feedback, exploration or accumulation in reference proposals; no proposal becomes a training command or physical output. |
+| Generation/publication | `processImage()` sets `m_updated`, posts the output semaphore, then updates learner/gain. `loadImageIntoStream()` (`690–697`) copies the shared full buffer and clears `m_updated`. | Same behavior when shadow is off, with extra guards that inhibit output only in shadow execution. Test publication sinks are host matrices, not streams. | Startup skips the output helper/semaphore; direct output methods reject. Mode changes cannot start a publisher. |
+| Defaults/config/INDI | App gain=0, lambda=100, gamma=1, information prior=1, modes=1, N=5, F=3; prediction/learning/integration off, own output true, **app QR true**. Native names include learn/learn_std/predict/integrate/reset/save/load/exploration/filename/fps. | Same main dimensions/gains, but app QR=false and copy gain=1 if `parameters.gain` is absent. `copy_gain` is declared but reads `parameters.gain` instead. Acceleration and shadow default off. New selector/training properties are read-only/rejected in legacy execution. | Startup-only shadow opt-in; diagnostic selector defaults standard, independent training initially off; no correction-enable property. |
+
+**Confirmed clone differences (not introduced by Phases 1–3):**
+
+1. `539f2bb52e7ea167255bebe6b66dc8dc82254027` (2026-05-26) changed the clone's
+   app QR default true -> false, introduced `m_copygainCtrl=1`, used it in the
+   nonpredictive output path, and loaded it from `parameters.gain` even though
+   `parameters.copy_gain` was declared. With gain and qrd explicitly set to the
+   same values the replay is exact. Without those keys the member-default
+   characterization gives original output `0` versus clone output `0.25` for a
+   `0.25` residual; this test does not certify a missing-required-key configuration
+   as deployable. Both numerical classes still default `use_qrd=false`; distinguish
+   library default from the original app's true default.
+2. The old ring is `next_power(2*(N+F))`; the copied ring is
+   `next_power(2*(N+F+N_a+1))`, even when acceleration is disabled. This is already
+   present before Phase 1. Ordinary retained windows match exactly. With
+   `m=17,N=5,F=2`, old/new capacities 16/32 change how the inherited `skip=m`
+   alias wraps: after commands `100..147`, original/restored future history reads
+   `146` but clone reads `130`. No tolerance can equate these histories. This
+   case is characterized without training or actuation, not silently fixed.
+3. The clone already rebuilt its feedback matrix in `reset()` by the copied-app
+   creation (`4a14b17d`; the preceding acceleration/rebase edits supply its
+   lineage), while original reset leaves the existing feedback matrix intact.
+   This behavior exists at pre-Phase-1 `b9648ec9`. A same-dimension artifact with
+   stored gain `-0.5` loaded into models constructed at `+0.125` initially produces
+   `+0.125*y` in all variants. After reset, original/restored still produce
+   `+0.125*y`, clone produces `-0.5*y`. A temporary-artifact regression proves it.
+   No persistence/reset behavior is modified in this review. Other dimensional
+   artifact migration and legacy persistence defects are outside the equivalence
+   claim; ordinary resets with unchanged gain match bit-for-bit.
+
+Original library/app files, `loPredCtrlAcc` production sources and helpers, all
+Phase 1–3 code, base interfaces and build flags are unchanged in Phase 4. This
+review adds tests/build support and updates this plan only. Source identity of
+`loPredCtrl` is stronger than saying the copied legacy mode is universally equal.
+
+### Phase 4 original synchronization and timing reuse
+
+Let `k` count calls to **`calculate_command()`**, not hardware or WFS publication
+counters. At original `processImage()` entry a local `CLOCK_REALTIME` arrival
+stamp is assigned to the output timestamp. There is no input `cnt0/cnt1` matching,
+no exposure interval, no input timestamp copied into histories, no DM readback,
+no command application acknowledgment, and no measured/configured latency in the
+numerical class. The generic monitor hands over the latest payload on semaphore
+wake. Dropped frames can compress history time and repeated payloads can advance
+it again; the numerical model cannot detect either from the values alone.
+
+The exact original ordering is:
+
+1. Handle deferred reset/load/save and exploration-stage changes; read `y_k`.
+2. If prediction is enabled, append `y_k`, form current `[v_(k-1)..; y_k..]`,
+   calculate candidate `v_k` with the previously learned gain plus feedback/noise,
+   and append that candidate to the model's command ring.
+3. If prediction is disabled, generate copy/gain output; **neither model history
+   advances**. The general app frame counter still advances at the end.
+4. Replace or accumulate `v_k` into full output and copy uncontrolled input modes
+   through. Set `m_updated` and post the frameGrabber semaphore unconditionally.
+5. If learning is enabled, build the legacy regressor from its current histories,
+   update RLS, and recompute the operational gain for the next command call.
+   Learning with prediction disabled can repeatedly update from frozen histories.
+6. The independent frameGrabber thread may copy the latest full buffer before or
+   after learning; there is no per-command immutable handoff. Multiple callbacks
+   can overwrite the buffer before a copy. The regression's skipped mock copies
+   demonstrate that the ring records candidates even when publication holds an
+   older value. That is a software-order observation, not a hardware drop test.
+
+For F future steps and N WFS history steps after command call k:
+
+```text
+Y_future = [y_k, ..., y_(k-F+1)]
+Y_past   = [y_(k-F), ..., y_(k-F-N+1)]
+V_future(skip=1) = [v_(k-m), ..., v_(k-m-(F-2))]    # F-1 blocks, old multimode skip
+V_past   = [v_(k-F), ..., v_(k-F-N+1)]            # N blocks
+phi      = [V_future; V_past; Y_past]
+```
+
+For `m=1`, the first F command blocks become `[v_(k-1),...,v_(k-F)]`: the intended
+one-step convention is that `v_i` influences `y_(i+1)`, with nominal origin
+`i=k-F`. The current `v_k` is excluded from that target. For `m>1,F>1`, the old
+skip can omit and duplicate frames; for example `m=2,F=3` selects
+`[v_(k-2),v_(k-3)]` then starts past commands at `v_(k-3)`. For F=1 the skipped
+future vector is empty and that particular defect does not arise. These facts
+are preserved independently of whether a specific on-sky configuration suffered
+from them. In integrating operation `v_i` is an increment, while the published
+full command is accumulated; it is not interchangeable with a measured absolute
+DM shape or the absolute-input Phase 3 certificate.
+
+**Recommendation: reuse the software clock and capture point, not an unproven
+physical guarantee.** There is no mathematical need to invent a second WFS
+scheduler. A future shared, read-only capture adapter can freeze the original
+WFS callback identity/order and the corresponding calculated delta, accumulated
+request and eventual publication/acceptance identity, without changing its
+control law. Both shadow learners should consume the same immutable records and
+origin deadlines. For requested-command compatibility studies, a clearly labeled
+legacy software-order replay is appropriate; the new regressions supply that
+reference. It must not be described as measured applied-command history.
+
+If later evidence establishes one publication/accepted command per WFS step,
+fixed latency, command units and no unknown clipping/hold/drop, that ordinal
+convention can drive a shared shadow adapter with a validated delay map; an
+independently paced WFS/DM timestamp matcher would not be necessary just for
+those two signals. Accelerometer features still need causal availability at the
+same origin. If commands are coalesced or latency varies, actual publication/
+acceptance metadata and a richer timing model remain necessary. Physical surface
+readback is distinct from a validated delivered-drive convention; decide the
+scientific input contract explicitly. Phase 3's full held-interval certificate is
+one conservative supported contract, **not a requirement of the original DDSPC
+algorithm**. No such gate is relaxed or alternate live adapter implemented here.
+
+The corrected Causal command indexing and literal-lambda/no-feedback law differ
+intentionally from the original even if callback timing is reused. Preserve
+both named comparisons: original legacy working controller, and corrected
+standard versus assisted shadows on identical declared inputs. Do not call the
+latter a bit-identical replacement for the former.
+
+### Phase 4 interference and execution review
+
+| State/resource | Ownership and possible interference |
+| --- | --- |
+| Original `apps/loPredCtrl` | No new model/selector/data-builder references at all; directory unchanged. It is the safest preserved source reference for operator-run baseline work. |
+| Legacy `m_controller` versus `m_shadowController`/`m_shadowInputs` | Separate owned objects and buffers. Default `shadow=false, accel_enabled=false` allocates only the legacy model; timing/model processing APIs reject in that execution. No coefficient, history or output-buffer alias with the new models. |
+| New INDI mode/training requests | Read-only and rejected in legacy execution, including forced callback requests in replay. Shadow execution never starts or uses the output helper. Selection/training do not change legacy gain, integration, exploration, model or published buffer. |
+| WFS producer versus frameGrabber | Shared legacy full-command buffer, `m_updated` and arrival timestamp have no complete immutable/mutex handoff; coalescing/races predate the new models. This review does not fix them or claim physical publication equivalence under concurrent scheduling. |
+| Existing INDI flags/reset/save/load | Legacy flags are written under the INDI mutex and read by WFS processing without a complete synchronization protocol; deferred state/file work remains in the WFS callback. These are inherited risks, not new model buffers. |
+| `m_indiMutex`/`m_shadowMutex` | New diagnostics share the existing INDI lock, then take the model lock for a snapshot. Model record processing uses the model lock only. Reset releases its model lock before taking INDI. Legacy WFS does not take the shadow lock. New diagnostics can still add CPU/INDI contention; source separation does not prove identical native latency. |
+| Accelerometer monitor | No live monitor is started for disabled acceleration or for shadow execution. Enabling the historical legacy accelerometer path is outside standard compatibility; its fallback can rebuild state across threads and its decoding/timing limits remain. New selection cannot enable that config-only path. |
+| External endpoints/dependencies | Running two operational apps against an aliased configured output could interfere independently of model isolation. No native app/stream is opened in tests. Current generic base/OS/dependency builds are not historical binaries; deployment/configuration still determines ownership and timing. |
+
+`git diff b9648ec9 HEAD -- apps/loPredCtrl libMagAOX Make/common.mk` is empty:
+Phases 1–3 did not change the original application, generic bases or common flags.
+Compared with May `f59d68be`, the repository's unrelated dev merges include
+frameGrabber atomic reconfiguration handling, MagAOXApp updates and a DEBUG flag
+addition; shmimMonitor changes here remove old comments only. Thus a byte-identical
+app tree cannot certify an identical historical executable or real-time behavior.
+The stream-free tests deliberately do not start these native worker threads.
+Native Linux/PCH build and deployment traces remain required for that evidence.
+
+### Phase 5 build portability, timing and computational findings
+
+**Build evidence and isolation.** `tests/Makefile.offline` now force-includes
+`tests/legacy_platform.hpp`, which supplies only the historical BSD `uint` alias
+on Darwin. GCC otherwise fails compiling the unmodified historical header; Linux
+is unaffected by this alias. The original 15-file tree remains verified against
+`f59d68be7311fb2d3138ef2a4ce269d091ee49e7`. All current numerical sources and the
+actual `loPredCtrlAcc.hpp` body compile with GCC 15.2 in the stream-free harness.
+This validates compiler syntax for that harness, not native base interfaces,
+PCH ABI, SDK dependencies or Linux linking. GCC warns about existing
+initializer-list pairs in shadow property setup (possible dangling-reference
+warning); Clang/ASan/UBSan do not report a lifetime violation. No production
+rewrite was made on the strength of that warning.
+
+`tests/native_linux_build.py::main()` stages current versioned/nonignored source
+bytes and records SHA-256 manifests. Each profile starts without ignored object,
+PCH, logger or local override artifacts. It builds only prerequisite libraries
+and `loPredCtrlAcc`, never `loPredCtrl` or a service, and never executes the
+linked app. The real Git-header generator reads original metadata with
+`GIT_OPTIONAL_LOCKS=0`; generated files stay in the build stage. Shadow's
+`OPTIMIZE=-fno-fast-math` is passed to prerequisite builds as well as the app,
+preventing reuse of a fast-math PCH. Linux host guards and Python syntax pass
+locally; the actual Linux build commands remain unexecuted. Existing development
+container examples are `.github/workflows/build-coverage.yml` and
+`buildability-test.yml`; those workflows also install/deploy elsewhere and were
+not invoked. Do not use their service/install steps for this task. No Linux
+compiler compatibility fix to production code can be claimed without real
+build output. The initialized VLA in both historical `testPredCtrl` demos is a
+separate existing demonstration portability failure, left unchanged.
+
+**Physical timeline, not callback order.** Preserve distinct identities/times:
+
+| Event | Required interpretation/evidence | Inspected source and current limit |
+| --- | --- | --- |
+| WFS exposure `[s_i,e_i]` | Residual is an exposure-integrated optical measurement, with exposure duration/rolling or global readout semantics and uncertainty. | `edtCamera::pdvAcquire()` and `ocam2KCtrl` provide DMA/camera counters, not established exposure boundaries. Camera sync copies publication metadata. |
+| Modal residual available `w_i`, copied locally `r_i`, decision frozen `d_i` | Require `w_i <= r_i <= d_i` in a verified common clock, original camera/exposure lineage and calibration. | `frameGrabber::fgThreadExec()` writes producer-defined `atime`, local REALTIME `writetime`, publication `cnt0`, slot `cnt1`; reconstruction and DDSPC callbacks can restamp arrival time. `loPredCtrlAcc.hpp::processImage(shmimT)` does so at lines 1641–1642. |
+| Calculated/requested `v_i`, published output `p_i` | Requested incremental/absolute semantics and original request identity must be explicit; publication can be skipped/overwritten. | Legacy `calculate_command()` records a candidate before app accumulation/publication and before asynchronous frameGrabber delivery; it is not a delivered-input history. Phase 4 replay demonstrates this distinction. |
+| Prepared drive, SDK accepted request, effective physical input | Track combined channels, mapping, clipping, hold/drop/rejection, SDK success and bounded physical onset/settling separately. | `alpaoCtrl::commandDM()` posts shape at 473 before `asdkSend` at 480; `bmcCtrl` posts at 502 before `BMCSetArray` at 509. `dev::dm::makeDelta()` and `dmRecon` lose request/exposure lineage and do not measure physical application. |
+| Sensor acquisition `t_k`, publication `b_k`, receipt `r_k` | Both acquisition and availability must precede the frozen feature cutoff, with clock epoch, skew, calibration and drop/restart evidence. | The old float-map/latest-sample clone callback is not a typed UINT16 or causal adapter. No live sensor path was added. `mcp3008Ctrl::acquireAndCheckValid()` (334–365) intends sequential channel reads after a software clock trigger; its nominal rate property does not lock conversion phase to WFS. It supplies no per-channel exposure/ADC timestamp here. |
+
+The sequential MCP3008 code is an additional source-level warning against
+assuming simultaneous channels or equating `fpsSource` subscription with physical
+synchronization. It was inspected, not compiled, run or modified, and it is not
+proof of the `accelSim` producer's clock. Previous simulator encoding findings
+below remain a separate producer contract; no simulator internals or worktree
+were used for the new comparisons.
+
+For the Phase 3 held-input contract, require the confirmed constant input
+interval to cover the **whole** response-shifted next exposure
+`[s_(i+1)-tau-u_y, e_(i+1)-tau+u_y]`, while shrinking its certified bounds by input
+timing uncertainty. Features use only acquisition/availability at or before
+`d_i`. Actual input may be learned later; it must never be replaced by a
+calculated proposal. Closed hold certificates intentionally delay shadow
+assembly past the origin; this builder is not an online correction scheduler.
+The deterministic fixture's 50-us response lag, 100-us minimum delivery delay,
+200-us exposure and 500-us period are **synthetic assumptions only**. If actual
+latency leaves part of the next exposure already fixed, future control needs a
+known delayed-input prefix or another validated discretization. If a command
+changes within an exposure or DM response is not a pure delay, a piecewise or
+response-weighted input model is required; callback reordering, a widened
+tolerance, or selecting the nearest telemetry timestamp cannot repair that.
+
+At nominal 8 kHz, four conversions per WFS period do not establish alignment.
+A future downsampling/feature study must compare a causally available sample,
+causal antialias filtering/averaging with measured group delay, and multiple
+ordered samples. Include only the samples available by `d_i`; preserve drop and
+channel-skew evidence. Estimate sensor-to-optical lead/response with independent
+WFS observations and recorded driver/input events over broadband/multiple
+frequencies, without using simulator pointing state. None of those transport,
+filtering, calibration or physical-latency changes is implemented in Phase 5.
+
+**Comparisons and allocation/latency measurement.**
+`tests/comparison.cpp::compare_models()` generates portable seeded innovations
+plus 37/83/211-Hz components, a stable coupled two-mode ARX plant, clipped/held
+actual inputs, independent process noise, and separate sensor negative controls.
+It uses N=2, Ha=3, F=1/3, identical 1,800 training records and mature update counts,
+then freezes fits for 600 evaluation samples. The accelerometer-disabled clone Legacy path is used (Clang-pinned replay above).
+Legacy gain=0 and an unsolved gain
+matrix let its exploration interface record the common applied sequence exactly;
+a precondition checks this. Corrected models append the very same actual input.
+Conditional scoring uses an independent newest-first history oracle at each
+origin and actual future inputs only as an explicitly offline conditioning
+variable. It does not update on held-out labels. Frozen numerical feedback uses
+the same exogenous evaluation realization, resets internal histories, and applies
+clipping/holds before corrected history construction. Legacy still internally
+records proposals during feedback; its known delivery mismatch is not repaired.
+App accumulation is outside this numerical comparison. Legacy's scaled penalty
+and inverse are retained; corrected/assisted use literal lambda=0.3 and the
+nearest block of the Phase 1 reference law. Those distinct costs are disclosed,
+not tuned to equal command effort or presented as operational equivalence.
+
+`tests/benchmark.cpp::measure()` warms 512 records and measures 2,000, reporting
+p50/p95/p99/p99.9/max, whole-frame 500-us overruns, Eigen allocation permission
+checks and separate ordinary C++ allocation counts/bytes. `allocation_probe.hpp`
+is force-included only in `Makefile.benchmark`; assertions still execute and a
+known allocation self-check must pass. Counts include Eigen's direct-malloc
+request path, not just C++ new, but are not system allocator calls/bytes or peak
+live heap. Timing includes probe and fixture work; end-to-end builder runs use
+pre-generated immutable records. Both models must reach readiness. No external
+streams, INDI or native app are linked. At N=5,F=3,c=2,Ha=20, dimensions are
+`(p_standard,p_assisted,d)=(24,64,6)` for m=2 and `(120,160,30)` for m=10.
+
+The managed pair recomputes normalized empirical feature-window rank with a
+p-by-p pivoted QR, solves the reference law and snapshots forecast matrices
+inside `ShadowController::step()` (`shadow_controller.cpp:169–234`) for each
+mature valid record. This explains why pair cost greatly exceeds two bare RLS
+updates. Per-record allocations and cubic rank work preclude a claim of bounded
+real-time execution. Consider a bounded worker with immutable model snapshots,
+preallocated workspaces and separately specified rank/solve/diagnostic cadences,
+then remeasure on the intended Linux target under load. These scheduling and
+readiness-policy changes require a separate implementation/review; none was
+made in Phase 5. Do not weaken provenance/readiness or enable actuation to meet
+a benchmark.
 
 ### Existing histories and prediction layout
 
@@ -1245,6 +1628,45 @@ rejects Requested, DriverPrepared, DriverAccepted and Unverified evidence.
 
 ## Questions and Points of Clarification
 
+**Phase 5 blockers/decisions before live testing:**
+
+- Supply an approved non-instrument Linux environment with real MagAO-X/mxlib,
+  logger, ImageStreamIO, INDI and library dependencies. Run/review both fresh
+  native build profiles; no Linux compilation success is claimed from this Mac.
+- Decide whether clone QR compatibility must be bit-exact on the supported GNU
+  compiler. Investigate the observed drift under that exact compiler/Eigen/flags
+  before any clone replacement. Retain the original implementation as the
+  operational baseline; do not silently insert the corrected QR algorithm or
+  accept the measured coefficient drift as an approved tolerance.
+- Provide the actual stream/configuration lineage, exposure/ADC timing meaning,
+  delivered combined-drive identity, absolute/increment projection, clock mapping,
+  latency bounds and operator-recorded traces. Decide whether a delayed or
+  exposure-weighted plant/input representation is needed; no physical values
+  were measured here.
+- Agree target mode/history dimensions, latency budget, tail/deadline acceptance
+  and a bounded adaptation/diagnostic execution design. The ten-mode synchronous
+  pair already exceeds the whole 2-kHz frame budget on this laptop.
+- Approve any future sensor representation/calibration and live non-actuating
+  adapter only after those gates. New actuation, production changes and deployment
+  remain outside this work. No permission to use an instrument host was inferred.
+
+**Phase 4 recommendations/decisions before further implementation:**
+
+- Keep `apps/loPredCtrl` and its historical law intact. Use the original as the
+  operational source reference; identify the deployed binary/configuration if
+  stronger on-sky equivalence is required. Do not silently repair its indexing,
+  lambda, startup, accumulation or threading behavior during accelerometer work.
+- If `loPredCtrlAcc` must be interchangeable rather than a matched experimental
+  clone, separately decide its QR/copy defaults, ignored `copy_gain`, ring-alias
+  edge cases and loaded-gain reset behavior. This review exposes those differences
+  without choosing a new operational behavior. Explicit matched configuration
+  avoids the default differences; it does not erase the other edge cases.
+- Agree whether shadow training uses original requested increments under a
+  validated software-order convention or verified delivered/absolute commands.
+  A common WFS capture point is preferable to duplicate scheduling, but the two
+  semantics must not be conflated. Retain existing input safety gates until that
+  scientific/timing contract is established.
+
 **Phase 3 missing requirements before any live adapter can set validity:**
 
 - Identify the deployed DDSPC WFS/modal stream, upstream producer chain, residual
@@ -1552,6 +1974,194 @@ unverified; the actual-app-header tests use stream-free lifecycle doubles.
 was started, dependency installed, logger header generated or physical stream
 opened. The protected plan prefix, original branch and initial HEAD are unchanged.
 
+### Phase 4 historical regression tests
+
+New `tests/prepare_legacy.py`, `legacy_replay.hpp`,
+`legacy_{original,restored,current}_adapter.cpp` and `ddspc_legacy_test.cpp`
+execute pinned historical numerical/app source, verified working-tree restored
+source, and current Legacy source with zero accelerometer dimensions. They use
+separate C++ namespaces/classes and the existing stream-free app/base/semaphore
+fixture. The historical source bytes are not formatted or algorithmically
+rewritten; only test compilation names and environment include guards differ.
+No private-member macro rewriting or arithmetic oracle substitutes for running
+that source. Doxygen references preserve links through the harness.
+
+Six regression cases cover:
+
+1. **9,216 numerical frames:** 48 combinations of `m={1,2}`, `N={1,5}`,
+   `F={1,2,3}`, conventional/legacy QR RLS, gamma `{1,0.97}`, 192 records each,
+   repeated ring wrap, regularization switching, full reset and buffer-only reset.
+   During the zero-gain/unsolved-controller phase, the exploration interface
+   inserts the exact prescribed synthetic DM trace. Later predictive operation
+   is compared as well. Every output, all seven public history/coefficient
+   snapshots and weights are checked by float-bit comparison (`memcmp`), not an
+   adjustable tolerance. **Maximum observed matched-trace difference: zero.**
+2. Explicit old/new high-mode ring alias characterization (`m=17,N=5,F=2`),
+   original/restored equality and clone history difference retained as a tested
+   compatibility limit rather than hidden by a tolerance.
+3. **384 real-app-header callbacks:** matched gain, lambda, prior, history, qrd,
+   disabled acceleration and default legacy execution, two controlled plus two
+   passthrough modes. Prediction, exploration/learning, integration, deferred
+   reset, pause/resume and skipped mock publications use actual callbacks/copy
+   methods. Rejected standard/assisted selection and training requests leave all
+   outputs unchanged. Candidate, full output, last mock publication, histories
+   and fits are bit-identical throughout. The test initializes the otherwise
+   undefined output buffer to the same known zero and warms histories before
+   solving; these are declared test preconditions, not production behavior fixes.
+4. Missing-key member-default characterization and `copy_gain` loading behavior.
+   The test fixture does not impose native required-key validation, so it does
+   not call a missing-parameter deployment configuration supported.
+5. History freezes when prediction is disabled, despite continuing copy/gain
+   publication. A skipped-copy schedule also proves candidates can enter command
+   history without a matching publication. Neither result claims a physical DM
+   observation.
+6. Same-dimension legacy persistence to an owned temporary directory, followed by
+   a changed-gain reset: original/restored `+0.125` versus clone `-0.5`, with all
+   implementations left unchanged. This is not a general serialization/migration
+   certification.
+
+Reproduce from repository root:
+
+```sh
+make -C apps/loPredCtrlAcc -f tests/Makefile.offline -j3 check
+make -C apps/loPredCtrlAcc -f tests/Makefile.offline -j3 check \
+  BUILD_DIR=build/offline-phase4-sanitize \
+  CXXFLAGS='-std=c++20 -O1 -g -Wall -Wextra -fno-fast-math -fsanitize=address,undefined -fno-omit-frame-pointer'
+make -C apps/loPredCtrlAcc -f tests/Makefile.offline -j2 check-legacy-fast
+make -C apps/loPredCtrlAcc -f tests/Makefile.offline -j2 check-legacy-fast \
+  BUILD_DIR=build/offline-phase4-sanitize \
+  LEGACY_FAST_FLAGS='-O1 -g -std=c++20 -Wall -Wextra -ffast-math -fsanitize=address,undefined -fno-omit-frame-pointer'
+```
+
+The complete strict offline suite passes **229,531 assertions in 41 test cases**,
+including all 35 Phase 1–3 cases. The fast-math target deliberately runs only the
+legacy cases, since the causal finite-value gates require strict math: it passes
+**179,695 assertions in 6 cases** under `-O3 -ffast-math`, matching native legacy
+optimization policy. The full strict ASan/UBSan build also passes **229,531
+assertions in 41 cases**; the legacy fast-math ASan/UBSan build passes **179,695
+assertions in 6 cases**, with no sanitizer findings in either run.
+All variants are built with the same installed Apple Clang/Eigen for each run;
+bitwise equality is scoped to those builds and traces, not different compilers,
+Eigen releases, unsupported configurations or uninitialized/racing executions.
+
+The existing numerical **demo** programs are also attempted, separately from
+assertion tests. `check-demos DEMO_NAMES=testRLS` runs original and current RLS
+demos normally and under ASan/UBSan; all four executions exit zero. Full
+`check-demos` attempts expose an existing portability failure in both original
+and current `testPredCtrl.cpp`: `realT x[num_steps]={0.0}` initializes a variable
+length array, rejected by this host's C++20 Clang. No source/fixture arithmetic
+is patched to force it to run. These demos have no assertions, and the current
+accelerometer-default demo is not a standard-DDSPC equivalence test anyway.
+Logs and any generated demo outputs remain under ignored build directories.
+
+```sh
+make -C apps/loPredCtrlAcc -f tests/Makefile.offline -j3 check-demos DEMO_NAMES=testRLS
+make -C apps/loPredCtrlAcc -f tests/Makefile.offline -j3 check-demos DEMO_NAMES=testRLS \
+  BUILD_DIR=build/offline-phase4-sanitize \
+  CXXFLAGS='-std=c++20 -O1 -g -Wall -Wextra -fno-fast-math -fsanitize=address,undefined -fno-omit-frame-pointer'
+# Full demonstration build attempt (known initialized-VLA portability failure on this host):
+make -C apps/loPredCtrlAcc -f tests/Makefile.offline -j3 check-demos
+```
+
+Native application/link/runtime validation remains blocked by the previously
+recorded generated logger/PCH prerequisites and unsupported host environment;
+no instrument action is attempted to fill that gap. Existing bundled INDI
+warnings are not modified. All new C++ files receive documentation and
+clang-format using the established exact-comment-spacing override. Git source
+identity, protected plan prefix, unchanged HEAD/branch and `git diff --check`
+are checked at completion. No production C++ or configuration file is modified.
+
+### Phase 5 executed offline tests and measurements
+
+Environment: macOS 26.3.2 arm64, Apple Clang 21.0.0, Homebrew GCC 15.2.0_1;
+Eigen pkg-config 5.0.1 (header version macros print 3.5.0), mxlib 0.2.0.
+No CPU affinity, real-time scheduler, target Linux measurements, native app run,
+stream access or instrument communication was involved.
+
+| Check | Result |
+| --- | --- |
+| Clang full strict suite | **229,669 assertions / 43 cases pass**, including 12 scenario/horizon/RLS comparisons and repeatability. |
+| Clang full ASan+UBSan suite | Same **229,669 / 43 pass**, no sanitizer findings. |
+| Clang Legacy `-O3 -ffast-math` | **179,695 / 6 pass**; production flags/law remain unchanged. |
+| Clang Legacy fast-math with ASan+UBSan (`-O1`) | Same **179,695 / 6 pass**, no findings. |
+| Clang hidden compiler-drift diagnostic | **55,298 / 1 pass**; maximum original/restored/clone output and fit difference zero for both RLS methods. |
+| GCC full strict suite | **41/43 cases pass; two exact legacy QR regression cases fail** (91,239/91,241 assertions pass). No production behavior change or assertion tolerance was introduced. |
+| GCC non-legacy selection `~[legacy]` | **105,272 / 38 pass**; this Catch selection also includes the hidden drift diagnostic. Corrected mathematics, causal records, new comparisons, shadow and app isolation pass. |
+| GCC drift diagnostic | **55,298 / 1 pass** as a diagnostic: classic exact; QR clone maximum absolute command difference 0.000216633 (1,451 differing records), fit coefficient difference 0.0323329 (3,573 fits); original/restored exact. This does not pass/replace the exact clone-compatibility acceptance tests. |
+| GCC `-ffp-contract=off` full suite | The same two exact QR cases still fail (41/43 cases pass); disabling contraction alone is not a demonstrated fix. |
+| Original/current `testRLS` demos | Four smoke runs exit 0: normal and ASan+UBSan; no assertions in those demonstrations. |
+| Full `check-demos` | Still fails compiling original initialized VLA in `testPredCtrl.cpp`; both original/current versions contain the issue. Left unchanged; new deterministic comparison is independent of this demo. |
+| Benchmark | 24 workload rows, 2,000 timed records each, all pairs ready; CSV and environment captured. Separate ASan+UBSan run with 100 timed records per workload completes without findings. |
+| Real-header macOS syntax attempt | Stops at missing generated `logger/generated/logTypes.hpp`; not a successful native app compile. |
+| Native build helper | Python syntax and both host guards pass (actual Darwin and simulated instrument hostname rejected before any build). Linux compile/link path pending environment. |
+
+The historical bit-check failures arise only in comparing the clone under this
+GCC experiment; the original/restored pair is exact. The optional diagnostic
+runs the full 48 matched configurations without stopping on clone drift, while
+requiring finite models and exact original/restored results. Its source is
+`ddspc_legacy_test.cpp` and it leaves the original exact tests intact. A specific
+root cause, Linux reproduction and acceptable operational tolerance have not
+been established. Do not generalize Clang compatibility evidence to GNU/Linux.
+
+Classic RLS representative numerical results (QR differs in the last shown
+figures, with identical qualitative outcomes):
+
+| F / scenario | Held-out prediction RMSE Legacy / standard / assisted | Frozen numerical feedback residual RMS Legacy / standard / assisted |
+| --- | --- | --- |
+| 1, informative sensor | 0.286633 / 0.286633 / **0.00596977** | 0.288287 / 0.289549 / **0.144193** |
+| 1, zero coupling | 0.00596657 / 0.00596657 / 0.00597431 | 0.00603483 / 0.00605907 / 0.00605627 |
+| 1, unrelated sensor | 0.286633 / 0.286633 / 0.287295 | 0.288287 / 0.289549 / 0.289469 |
+| 3, informative sensor | 0.405571 / 0.293841 / **0.238611** | 0.289812 / 0.289636 / **0.143372** |
+| 3, zero coupling | 0.284608 / 0.00612032 / 0.00612886 | 0.0060612 / 0.00606178 / 0.00606018 |
+| 3, unrelated sensor | 0.405571 / 0.293841 / 0.293885 | 0.289812 / 0.289636 / 0.289596 |
+
+In F=1 informative feedback, synthetic applied-command RMS is respectively
+0.098314 / 0.0727824 / 0.262306. Greater assisted effort and different penalties
+matter; residual improvement is not a matched-effort or physical performance
+claim. D-block norm is 0.66894 with useful coupling, 0.00119007 in the D=0 control
+and 0.0632672 with unrelated sensors. A finite D estimate alone is not evidence
+of usefulness; frozen negative-control prediction is essential. Legacy's F=3
+multichannel regression defect explains its incorrect conditional input indexing;
+future random sensor innovations explain the remaining assisted F=3 error.
+
+Representative **instrumented** latency, microseconds per record (the whole
+frame budget is 500 us, not an allowance for each component):
+
+| Workload / modes | p50 | p99 | max | >500 us / 2000 | Eigen requests + C++ new per record |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Legacy classic core / 2 | 3.375 | 3.625 | 6.125 | 0 | 34 + 0 |
+| Standard classic core / 2 | 2.667 | 2.875 | 8.000 | 0 | 24 + 0 |
+| Assisted classic core / 2 | 6.042 | 7.458 | 19.250 | 0 | 27 + 0 |
+| Builder + pair, classic / 2 | 46.625 | 55.875 | 198.875 | 0 | 111.975 + 1 |
+| Builder + pair, QR / 2 | 54.708 | 61.917 | 189.208 | 0 | 103.975 + 1 |
+| Legacy classic core / 10 | 43.750 | 54.125 | 81.791 | 0 | 34 + 0 |
+| Standard classic core / 10 | 38.834 | 50.125 | 191.667 | 0 | 24 + 0 |
+| Assisted classic core / 10 | 57.667 | 76.792 | 249.959 | 0 | 27 + 0 |
+| Builder + pair, classic / 10 | **553.667** | 605.042 | 736.292 | **2000** | 112 + 1 |
+| Builder + pair, QR / 10 | **619.167** | 671.750 | 811.792 | **2000** | 104 + 1 |
+
+Builder-only medians are 0.167–0.208 us, with six Eigen requests and one C++ new
+request (312 C++ bytes) per record. These byte counts omit Eigen matrix storage;
+this is not a total-heap/peak-memory report. Managed-pair medians without builder
+are 47.542/56.375 us (m=2) and 555.083/616.458 us (m=10), classic/QR. An earlier
+run of the same small pair had occasional >500-us scheduler tails (up to
+1,541.83 us for the classic pair), so the final run's zero small-case overruns
+does not certify worst-case timing. The hot path performs many allocations and
+remains unsuitable for a bounded real-time claim. Benchmark execution under
+sanitizers checks correctness only; its times are not used for performance.
+
+Reproduction is in `apps/loPredCtrlAcc/tests/README.md`, including strict,
+sanitizer, fast, compiler-drift and native build commands. Logs and CSV files
+are ignored artifacts under `apps/loPredCtrlAcc/build/phase5-*`; the numerical
+and benchmark source is retained in the engineering change. Main benchmark:
+
+```sh
+make -C apps/loPredCtrlAcc -f tests/Makefile.benchmark -j3
+apps/loPredCtrlAcc/build/benchmark/ddspc_benchmark 2000 \
+  > apps/loPredCtrlAcc/build/phase5-benchmark.csv \
+  2> apps/loPredCtrlAcc/build/phase5-benchmark-environment.log
+```
+
 ### Remaining test roadmap
 
 The older `testRLS.cpp` and `testPredCtrl.cpp` are retained as historical demos;
@@ -1690,12 +2300,13 @@ dedicated Makefile above rather than linking the application library through
 
 ## Implementation Plan
 
-Each stage has a reviewable exit condition. Phases 1/2 are committed by the
-user. The new **Phase 3 authorization is causal WFS/applied-input integration**,
-with independently testable components only where live verification is missing;
-it explicitly excludes `acc000` acquisition. P3 below records this delivered
-scope. Stop after Phase 3. Native transport, live input evidence, multirate
-acquisition and all correction work remain future tasks with their own gates.
+Each stage has a reviewable exit condition. Phases 1–3 are committed by the
+user; Phase 4 review changes were already present and uncommitted. The current
+**Phase 5 is offline build portability, timing analysis, comparison and
+benchmarking**, superseding the old planned acquisition scope. Stop after this
+Phase 5 work; native Linux build and GNU QR compatibility remain blockers to its
+exit. Live acquisition, operational changes, deployment and new actuation remain
+outside this authorization.
 
 1. **P0 — Agree on the mathematical and telemetry contract.** Resolve the
    decisions above; record signal units, increment/absolute convention, frame
@@ -1743,7 +2354,30 @@ acquisition and all correction work remain future tasks with their own gates.
    synthetic/external-assertion component contract. Live evidence, producer
    snapshot/retention adapter and real-time behavior remain unresolved.
 
-5. **P4 — Future verified transport, multirate acquisition/replay, and accelSim
+5. **P4 — Complete: preserve and audit the original, then compare the clone.**
+   Pin and verify the full original source tree from Git; execute its numerical
+   and application code independently alongside restored original and current
+   Legacy paths. Confirm exact matched-trace outputs and selector isolation;
+   characterize preexisting defaults/ring/reset differences, software-order
+   synchronization and inherited shared-state risks. Reuse original timing only
+   under an explicit requested/delivered input convention; do not weaken Phase 3
+   evidence gates. Exit: original source unchanged, deterministic regressions
+   and sanitizer checks complete, differences and limitations recorded. No
+   production behavior or physical output is changed.
+
+6. **P5 — Offline components implemented; native build/compatibility exit pending.**
+   Add matched deterministic comparisons, negative controls and repeatability;
+   benchmark real numerical/builder/manager code and hot-path allocation requests.
+   Preserve the original app and all production behavior. Add fresh isolated
+   Linux build profiles and run all available offline/sanitizer checks. Completed
+   locally: comparisons, timing/source review, allocation/latency measurements,
+   Clang suites and GCC numerical/harness compilation. Pending: execute real
+   Linux compile/link with supported dependencies, investigate the two exact GNU
+   clone-QR failures on the supported target, and agree bounded execution and
+   physical timing evidence. Do not mark complete or proceed to live training
+   solely because deterministic mathematics tests pass.
+
+7. **P6 — Future verified transport, multirate acquisition/replay, and accelSim
    validation through public streams.** First supply the missing WFS/applied-input
    evidence and supported native build, then implement the stable snapshot,
    retained-frame and established-clock adapter. Verify it against independent
@@ -1763,7 +2397,7 @@ acquisition and all correction work remain future tasks with their own gates.
    demonstrates valid synchronization and predictive improvement on held-out
    measured WFS data, with documented model conditioning and latency.
 
-6. **P5 — Add the approved correction route and commission through the operator.**
+8. **P7 — Add the approved correction route and commission through the operator.**
    Only after numerical, offline closed-loop, and live non-actuating gates,
    connect the agreed calibrated modal-to-DM route to a separately approved
    additive correction channel. Validate mapping, sign, gain, publication and
@@ -1783,6 +2417,26 @@ then documentation-only changes and separate formatting-only cleanup as required
 by `AGENTS.md`. This work does not switch branches, commit, or push.
 
 ## Follow-up and Edge Cases
+
+- **Phase 5 changed files:** new `apps/loPredCtrlAcc/tests/comparison.hpp`,
+  `comparison.cpp`, `ddspc_comparison_test.cpp`, `allocation_probe.hpp`,
+  `benchmark.cpp`, `Makefile.benchmark`, `legacy_platform.hpp`,
+  `native_linux_build.py` and `README.md`; updates to the already-dirty
+  `tests/Makefile.offline`, `ddspc_legacy_test.cpp` and this plan. Other Phase 4
+  replay adapters/fixtures already in the working tree are retained. All C++
+  touched in this phase was clang-formatted using the existing comment-prefix
+  override; Python syntax, native host guards, original-source pin verification
+  and `git diff --check` are checked. Nothing above Agent Findings and Plan is
+  changed.
+- **Phase 5 exit remains open:** no Linux environment was supplied, native app
+  compile/link is not demonstrated, and two GNU exact QR replay tests fail.
+  Preserve these failures as compatibility evidence; do not label the entire
+  validation green or infer production compatibility from stream-free doubles.
+  A full exact-compatibility decision needs supported Linux compiler/flags/Eigen
+  and independent deployment traces. No live testing, deployment, new actuation,
+  physical stream access, instrument command, branch change, commit, merge or
+  push occurred. Both new models remain strictly non-actuating and Legacy is
+  still the startup default.
 
 - **Phase 1 boundary:** corrected mathematics are available only through the
   explicitly selected Causal path, now also used by the Phase 2 shadow manager.
@@ -1931,12 +2585,35 @@ by `AGENTS.md`. This work does not switch branches, commit, or push.
   bounded by record count but deques/matrices/results allocate, and models/solves
   remain synchronous under the model lock; no real-time claim is made.
 
-- **Scope verification:** the existing task text above `# Agent Findings and Plan`
-  is preserved byte-for-byte. Phase 3 adds causal input components and explicit
-  shadow integration only; no live `acc000` ingestion,
-  ImageStreamIO interface changes, simulator changes, or physical DM correction.
-  The separate worktree and Git history are untouched. Build products/logs remain
-  in ignored app `build/` directories. No native app/driver or instrument-facing
-  command was run. Stop after Phase 3; applied-command/timing/ownership decisions,
-  native Linux build, recorded/live adapter work and any correction remain next
-  steps, not implied approvals.
+- **Phase 4 changed files:** only `apps/loPredCtrlAcc/tests/Makefile.offline`,
+  new `tests/prepare_legacy.py`, `tests/legacy_replay.hpp`,
+  `tests/legacy_original_adapter.cpp`, `tests/legacy_restored_adapter.cpp`,
+  `tests/legacy_current_adapter.cpp`, `tests/ddspc_legacy_test.cpp`, and this
+  engineering plan. Original/current production controller, app, RLS, timing,
+  generic bases and operational configuration are untouched.
+
+- **Compatibility conclusion:** original `loPredCtrl` is preserved exactly in
+  source. The clone preserves the operational algorithm and exact outputs for
+  the matched tested traces, but is not universally source/default/state-machine
+  equivalent. Do not silently fix historical quirks or use the new reference law
+  as the working legacy law. Keep known output initialization, startup zero-model,
+  prediction/learning coupling, serialization and publication races visible as
+  inherited limitations. No tests require an undefined initial value or a data
+  race to be reproducible.
+
+- **Timing recommendation:** a shared original WFS callback/order capture is a
+  sensible future foundation for both shadows; actual input semantics and
+  applied/publication latency remain a separate contract. Requested increments,
+  accumulated requests, accepted drives and physical surface histories are
+  different observations. Do not force a separate clock solely because the
+  shadow learners are independent, and do not label ordinal candidate history
+  physically verified just because the original controller worked on sky.
+  Native callback/worker contention and operator deployment traces are needed
+  before certifying unchanged real-time publication.
+
+- **Scope verification:** the task text above `# Agent Findings and Plan` is
+  preserved byte-for-byte. Phase 4 changes tests/build support and this plan only;
+  it does not change either controller law, original timing, legacy defaults,
+  input safety gates, live `acc000` ingestion, ImageStreamIO interfaces, simulator
+  worktrees, native streams or physical correction. No instrument-facing command,
+  branch switch, commit, merge or push was performed during that Phase 4 review.

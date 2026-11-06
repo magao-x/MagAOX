@@ -8,23 +8,70 @@ BUILD_DIR ?= $(APP_DIR)/build/offline
 CXX = c++
 DEPENDENCY_INCLUDES := $(shell pkg-config --cflags-only-I eigen3 mxlib)
 CPPFLAGS += $(DEPENDENCY_INCLUDES) -DEIGEN_DONT_PARALLELIZE
+CPPFLAGS += -include $(TEST_DIR)/legacy_platform.hpp
 CXXFLAGS ?= -O2 -g
 CXXFLAGS += -std=c++20 -Wall -Wextra -fno-fast-math
 SOURCES := $(ROOT_DIR)/tests/testMain.cpp $(APP_DIR)/ar_controller.cpp \
            $(APP_DIR)/recursive_least_squares.cpp $(APP_DIR)/qrd_rls.cpp $(APP_DIR)/utils.cpp \
            $(APP_DIR)/shadow_controller.cpp $(APP_DIR)/causal_input.cpp \
+           $(TEST_DIR)/comparison.cpp \
            $(ROOT_DIR)/INDI/libcommon/IndiProperty.cpp $(ROOT_DIR)/INDI/libcommon/IndiElement.cpp \
            $(ROOT_DIR)/INDI/libcommon/TimeStamp.cpp \
            $(wildcard $(TEST_DIR)/ddspc_*_test.cpp)
 OBJECTS := $(addprefix $(BUILD_DIR)/,$(notdir $(SOURCES:.cpp=.o)))
 VPATH := $(sort $(dir $(SOURCES)))
 TARGET := $(BUILD_DIR)/ddspc_offline_test
+LEGACY_ROOT := $(abspath $(BUILD_DIR))/historical
+LEGACY_STAMP := $(LEGACY_ROOT)/snapshot.stamp
+LEGACY_NAMES := ar_controller recursive_least_squares qrd_rls utils
+LEGACY_OBJECTS := $(addprefix $(BUILD_DIR)/original_,$(addsuffix .o,$(LEGACY_NAMES))) \
+                  $(addprefix $(BUILD_DIR)/restored_,$(addsuffix .o,$(LEGACY_NAMES)))
+ADAPTER_SOURCES := $(wildcard $(TEST_DIR)/legacy_*_adapter.cpp)
+OBJECTS += $(addprefix $(BUILD_DIR)/,$(notdir $(ADAPTER_SOURCES:.cpp=.o))) $(LEGACY_OBJECTS)
+VPATH += $(TEST_DIR)
+CPPFLAGS += -I$(LEGACY_ROOT)
 
-.PHONY: all check
+.PHONY: all check verify-legacy check-legacy-fast check-demos
 all: $(TARGET)
 
-check: $(TARGET)
+check: verify-legacy $(TARGET)
 	$(TARGET) --durations yes
+
+verify-legacy:
+	python3 $(TEST_DIR)/prepare_legacy.py
+
+$(LEGACY_STAMP): $(TEST_DIR)/prepare_legacy.py
+	python3 $(TEST_DIR)/prepare_legacy.py --output $(LEGACY_ROOT)
+
+$(BUILD_DIR)/legacy_original_adapter.o $(BUILD_DIR)/legacy_restored_adapter.o: $(LEGACY_STAMP)
+
+$(addprefix $(BUILD_DIR)/original_,$(addsuffix .o,$(LEGACY_NAMES))): $(BUILD_DIR)/original_%.o: $(LEGACY_STAMP)
+	@mkdir -p $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -DDDSPC=DDSPCOriginal -MMD -MP -c $(LEGACY_ROOT)/original/apps/loPredCtrl/$*.cpp -o $@
+
+$(addprefix $(BUILD_DIR)/restored_,$(addsuffix .o,$(LEGACY_NAMES))): $(BUILD_DIR)/restored_%.o: $(LEGACY_STAMP)
+	@mkdir -p $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -DDDSPC=DDSPCRestored -MMD -MP -c $(ROOT_DIR)/apps/loPredCtrl/$*.cpp -o $@
+
+# Match native legacy fast-math flags without running strict causal/nonfinite-input suites under those flags.
+LEGACY_FAST_FLAGS ?= -O3 -g -std=c++20 -Wall -Wextra -ffast-math
+check-legacy-fast:
+	$(MAKE) -f $(TEST_DIR)/Makefile.offline BUILD_DIR=$(abspath $(BUILD_DIR))/legacy-fast \
+	  CXXFLAGS='$(LEGACY_FAST_FLAGS)' \
+	  SOURCES='$(ROOT_DIR)/tests/testMain.cpp $(APP_DIR)/ar_controller.cpp $(APP_DIR)/recursive_least_squares.cpp $(APP_DIR)/qrd_rls.cpp $(APP_DIR)/utils.cpp $(APP_DIR)/shadow_controller.cpp $(APP_DIR)/causal_input.cpp $(ROOT_DIR)/INDI/libcommon/IndiProperty.cpp $(ROOT_DIR)/INDI/libcommon/IndiElement.cpp $(ROOT_DIR)/INDI/libcommon/TimeStamp.cpp $(TEST_DIR)/ddspc_legacy_test.cpp' check
+
+# Historical demonstration programs contain no assertions; run them as separate, explicitly labeled smoke checks.
+DEMO_NAMES ?= testRLS testPredCtrl
+DEMO_ORIGINAL := $(addprefix $(BUILD_DIR)/demo_original_,$(DEMO_NAMES))
+DEMO_CURRENT := $(addprefix $(BUILD_DIR)/demo_current_,$(DEMO_NAMES))
+check-demos: verify-legacy $(DEMO_ORIGINAL) $(DEMO_CURRENT)
+	python3 $(TEST_DIR)/prepare_legacy.py --demo-dir $(abspath $(BUILD_DIR)) $(addprefix --demo-name ,$(DEMO_NAMES))
+
+$(DEMO_ORIGINAL): $(BUILD_DIR)/demo_original_%: $(LEGACY_STAMP) $(filter $(BUILD_DIR)/original_%,$(LEGACY_OBJECTS))
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -DDDSPC=DDSPCOriginal $(LEGACY_ROOT)/original/apps/loPredCtrl/$*.cpp $(filter %.o,$^) $(LDFLAGS) $(LDLIBS) -o $@
+
+$(DEMO_CURRENT): $(BUILD_DIR)/demo_current_%: $(BUILD_DIR)/ar_controller.o $(BUILD_DIR)/recursive_least_squares.o $(BUILD_DIR)/qrd_rls.o $(BUILD_DIR)/utils.o
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(APP_DIR)/$*.cpp $^ $(LDFLAGS) $(LDLIBS) -o $@
 
 $(TARGET): $(OBJECTS)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) $^ $(LDLIBS) -o $@
