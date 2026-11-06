@@ -8,7 +8,7 @@ BUILD_DIR ?= /tmp/accelFFCtrl-numerics
 REPO_ROOT := ../../..
 MODEL := ../accelFFCtrlModel.hpp
 INPUT := ../accelFFCtrlInput.hpp
-SOURCES := accelFFCtrlModel_test.cpp accelFFCtrlReplay_test.cpp accelFFCtrlInput_test.cpp $(REPO_ROOT)/tests/testMain.cpp
+SOURCES := accelFFCtrlModel_test.cpp accelFFCtrlReplay_test.cpp accelFFCtrlInput_test.cpp accelFFCtrlValidation_test.cpp $(REPO_ROOT)/tests/testMain.cpp
 TEST := $(BUILD_DIR)/accelFFCtrl_test
 BENCHMARK := $(BUILD_DIR)/accelFFCtrl_benchmark
 INPUT_BENCHMARK := $(BUILD_DIR)/accelFFCtrlInput_benchmark
@@ -16,7 +16,11 @@ NATIVE := $(BUILD_DIR)/accelFFCtrlStream_test
 ISIO_CFLAGS ?= $(shell pkg-config --cflags ImageStreamIO)
 ISIO_LIBS ?= $(shell pkg-config --libs ImageStreamIO)
 
-.PHONY: all test benchmark native-test native-rate-test
+PYTHON ?= python3
+VALIDATION_DIR ?= /tmp/accelFFCtrl-validation
+VALIDATION_SECONDS ?= 60
+
+.PHONY: all test benchmark native-test native-rate-test validation validation-test
 all: $(TEST) $(BENCHMARK) $(INPUT_BENCHMARK)
 
 $(BUILD_DIR):
@@ -37,6 +41,14 @@ test: $(TEST)
 benchmark: $(BENCHMARK) $(INPUT_BENCHMARK)
 	$(BENCHMARK)
 	$(INPUT_BENCHMARK)
+
+# Entirely offline: no native reader, INDI, application launch or shared-memory access.
+validation: $(TEST) validation-test
+	ACCELFFCTRL_VALIDATION_DIR='$(VALIDATION_DIR)' ACCELFFCTRL_VALIDATION_SECONDS='$(VALIDATION_SECONDS)' $(TEST) '[accelFFCtrl-validation-export]'
+	MPLCONFIGDIR='$(VALIDATION_DIR)/.matplotlib' $(PYTHON) validate_predictions.py '$(VALIDATION_DIR)'
+
+validation-test:
+	$(PYTHON) -m unittest -v test_validate_predictions.py
 
 $(NATIVE): accelFFCtrlStream_test.cpp ../accelFFCtrlStream.hpp $(INPUT) $(MODEL) $(REPO_ROOT)/tests/testMain.cpp | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(ISIO_CFLAGS) $(CXXFLAGS) $< $(REPO_ROOT)/tests/testMain.cpp $(LDFLAGS) $(ISIO_LIBS) -o $@

@@ -565,6 +565,89 @@ wake/scheduler costs.
   was added to the repository. The Linux build/native/app tests above remain
   prerequisites for deployment.
 
+## Offline end-to-end validation (2026-11-05)
+
+The opt-in study uses the unchanged simulator and production `inputProcessor`
+with a synthetic depth-one source. It opens no shared-memory stream or INDI
+connection. Truth is recorded first; the observer receives only UINT16 pairs,
+publication counters and acquisition/write/receipt timestamps. The full-population
+28-Hz truth comes from that recording's actual mode state, not a separately
+seeded single-mode simulation. Existing analytic/replay/input tests are retained.
+
+From the checkout root, select an existing Python environment containing NumPy,
+SciPy, pandas and Matplotlib, then run:
+
+```bash
+accff_python=python3
+make -C apps/accelFFCtrl/tests PYTHON="$accff_python" validation \
+  VALIDATION_SECONDS=60 VALIDATION_DIR=/tmp/accelFFCtrl-validation-60s
+make -C apps/accelFFCtrl/tests test benchmark
+"$accff_python" -m unittest discover -s apps/accelSim/tests -p test_validate_psd.py -v
+```
+
+`validation` first runs four independent Python scoring/window-oracle tests,
+then the hidden Catch export case and analysis. A six-second smoke study can
+use `VALIDATION_SECONDS=6` and a different directory. Output includes the actual
+mode specifications, compiler/STL metadata, float64 truth/prediction recordings,
+and `report/accuracy.csv`, `availability.csv`, `calibration.csv`,
+`recovery_study.csv`, 500-Hz trace CSVs, full-resolution 2-kHz Welch PSD CSVs and
+PNG prediction/residual/PSD/horizon/availability plots. Binary column definitions
+are in `tests/validate_predictions.py`. To repeat just the analysis:
+
+```bash
+MPLCONFIGDIR=/tmp/accelFFCtrl-validation-60s/.matplotlib \
+  "$accff_python" apps/accelFFCtrl/tests/validate_predictions.py \
+  /tmp/accelFFCtrl-validation-60s
+```
+
+The 60-second study uses 8 kHz, seeds 42/123, 10 m, noise PSD `1e-8`, ADC
+zero 2048, `0.0083799` V/count, sensitivity 1.02, estimator 28 Hz, 0.1-s memory,
+zero rotation and a 1-ms query horizon. The common scoring interval is 4–60 s.
+The query phase makes sample age exactly 125 us: the effective horizon is
+**1.125 ms**, and truth is selected nine input samples ahead. Targets must lie
+exactly on the truth grid; no interpolation, rounding or extra latency is added.
+
+| Recording / axis | Target acceleration RMSE [m/s²] | Target pointing RMSE [mas] | NRMSE | Correlation |
+| --- | ---: | ---: | ---: | ---: |
+| Single 28 Hz / X | 0.0003090 | 0.2059 | 15.63% | 0.98782 |
+| Single 28 Hz / Y | 0.0003202 | 0.2134 | 17.78% | 0.98422 |
+| Full 214 modes / X | 0.0009306 | 0.6202 | 43.18% | 0.91798 |
+| Full 214 modes / Y | 0.0009655 | 0.6434 | 49.20% | 0.89291 |
+
+NRMSE is RMSE/RMS of the reference, retaining its mean. At the exact 28-Hz Welch
+bin, gain error / phase error is -0.247% / -0.640° and -0.654% / -0.311° for
+single-mode X/Y, and +1.010% / -1.691° and -1.221% / -0.941° for full-population
+X/Y. The CSV also reports finite-record least-squares peak amplitude/phase;
+these are different statistics for a stochastic envelope. Full-population
+27–30-Hz target-component residual reductions are 10.04/9.35 dB. Comparing
+against **all** physical pointing gives 1.913/1.550 mas RMSE: this observer
+estimates a narrowband component, and the other modes remain in that reference.
+
+Across the entire 60 s, nominal prediction-slot availability is 99.499% with
+lossless ingestion, 93.990% when one sample is overwritten every 5 s, 69.950%
+with one loss per second, and 0% with one loss every 100 ms. A 2-ms worker block
+every 5 s loses 15 samples per event and gives 93.963% availability. A 125-us
+block every second loses no samples and produces bit-identical predictions to
+the ideal case. Incorrectly reading only at 2 kHz loses about 75% of frames and
+never becomes ready; the app instead ingests on source wakes independently of
+query cadence. One missed sample costs **300.375 ms** from overrun detection to
+the first ready query. Resets/warmup remain unchanged.
+
+The separate batch-QR recovery investigation finds that a 20-ms history already
+has reciprocal condition number 0.0285, but full-population prediction NRMSE is
+586%/544% at the sampled recovery epochs. Shorter windows can be numerically
+solvable while rejecting interference poorly. Retaining a mature window across
+one omitted record was well conditioned in these limited offline probes;
+qualifying such a bounded-gap policy is a future task, not an implemented fix.
+Keep the current cold-start gate. See the engineering plan's end-to-end section
+for complete scheduling counts, biases, horizon sweeps, recovery results,
+sanitizer commands and limitations.
+
+This supports longer **observation-only** evaluation with attention to actual
+dropped/reset/ready counters. It does not qualify native Linux scheduling,
+sensor calibration, general gap recovery or physical correction. These offline
+commands make no deployment or configuration changes.
+
 ## Limitations
 
 - A sub-count sinusoid can vanish without noise/dither. Temporal estimation

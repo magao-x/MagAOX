@@ -1676,3 +1676,303 @@ macOS framework dependencies (`timegm`, missing installed mxlib
 rebuild confirmation therefore remains with the operator; report the exact
 Eigen/compiler versions and full first diagnostic if another failure occurs.
 No instrument-facing commands, merge, commit or push were performed.
+
+## Offline end-to-end prediction validation (2026-11-05)
+
+### Scope and reproducible experiment
+
+Added `apps/accelFFCtrl/tests/accelFFCtrlValidation_test.cpp` (opt-in hidden
+export case), `validate_predictions.py`, `test_validate_predictions.py`, and
+standalone Makefile targets `validation` / `validation-test`. README documents
+commands and results. Existing replay/model/input/native tests are retained;
+they already cover analytic amplitudes/phases, calibration, noise, detuning,
+timestamp faults, ring ordering, rollback/restart, stale input and configuration.
+No production header, simulator step/RNG/synchronization, configuration, DM
+publication, reset rule or readiness gate changed. No instrument was accessed.
+
+The experiment generates each source recording once with the unchanged model:
+8 kHz; simulation seed 42; mode seed 123; lever 10 m; sensor noise PSD `1e-8`;
+ADC zero 2048, volts/count `0.0083799`, sensitivity `1.02`. It compares one
+28-Hz stochastic mode (`accelRms=.002`, `r=.99999`, unit coupling) and the full
+214-mode population. Both use f0=28 Hz, T=0.1 s, rotation=0, configured horizon
+1 ms. Additional lossless replays sweep horizons 0/0.5/1/2/5/10/20 ms. Source
+records include 162 future samples; controller replay does not advance the model
+or RNG. No simulator truth enters the production ingestion or numerical API.
+
+The full-population 28-Hz truth is extracted read-only from that model's actual
+mode histories after each step. A separate single-mode realization with the
+same seed is **not** the same component: changing the population changes RNG
+consumption. Clean full acceleration excludes sensor noise; full physical
+pointing excludes WFS coupling. Truth is used only by the offline scorer.
+
+Production `inputProcessor::drain/predict` consumes a coherent synthetic
+depth-one source: acquisition at `base+n*125000` ns, completed publication
+25 us later, normal worker drain 50 us later. Predictions occur every 500 us,
+125 us after an acquisition grid boundary, before that boundary's publication.
+Thus the newest available sample is 125 us old. Queries use their actual receipt
+clock; realtime and monotonic clocks have an exact fixed synthetic offset.
+Blackouts suppress the worker, never producer steps/publications. Missed nominal
+query deadlines count as unavailable; a late coalesced query is recorded
+separately and does not add a scheduled slot to the denominator. A final drain
+accounts for the known tail, including its overrun event in the query-only case.
+
+Scoring uses the common 4–60 s interval (112,000 lossless 2-kHz predictions per
+axis). RMSE is `sqrt(mean((prediction-truth)^2))`; NRMSE divides by
+`sqrt(mean(truth^2))`, not peak or standard deviation. Bias is mean(pred-truth);
+correlation is Pearson's coefficient. Invalid predictions are masked, not scored
+as zero. Availability includes all scheduled slots, including blocked queries.
+Recovery statistics censor episodes interrupted by another loss.
+
+### Timing, units and amplitude conventions
+
+`a=(code-2048)*0.0083799/1.02` m/s². One count is
+`0.008215588235294117 m/s²`; maximum rounding error is half a count. Across both
+recordings/axes, measured quantization RMS is 0.002370–0.002372 m/s²; no ADC rail
+clipping occurs. Sensor-noise RMS is 0.006317–0.006330 m/s², consistent with
+`sqrt(PSD*8000/2)=0.00632456`. Noise supplies dither for the sub-count target;
+the existing undithered weak-tone test correctly shows it can disappear.
+
+`theta=-a_hat/((2*pi*28)^2*10)` radians, then rotation (zero here).
+The negative sign is the harmonic acceleration/pointing relation, not a
+correction sign. Convert to mas with `180*3600*1000/pi`; do not apply gravity,
+reflection or DM factors. The simulator target obeys this identity to
+`3.31e-24 rad`; the exporter checks the same relation for predictions. Full
+pointing uses each mode's own frequency; applying the 28-Hz inverse to the
+entire acceleration population would be incorrect.
+
+Target time is `query_now+1 ms`, and phase advance is `target-latest_acquisition`.
+Here this is **1.125 ms = nine samples**. The scorer requires an exact integer
+truth-grid timestamp and rejects any fractional/off-grid/out-of-range target.
+Unit tests distinguish the correct index 9 from the incorrect index 8. There is
+no extra processing/window latency in the target; measurement age is included
+once. Publication delay is exactly 25 us in this model. Existing replay tests
+use the explicit target API (sample+1 ms with a 100-us query age); that separate
+experiment is valid and was not silently reinterpreted as query+1 ms.
+
+`prediction.m_amplitude` is peak sensor acceleration; `m_phase` is the cosine
+phase at the newest acquisition. Export checks reconstruct the target value
+from those fields and `omega*(target-sample)`. A pure sinusoid has peak/RMS
+ratio sqrt(2). A stochastic AR mode has a changing envelope/phase: finite-record
+coherent projection, Welch transfer and instantaneous envelope are distinct.
+
+### Sixty-second accuracy results
+
+Errors below reference the actual **28-Hz component**, including for the full
+population. Acceleration and pointing NRMSE/correlation coincide because that
+component has the same scalar harmonic inverse as the estimator.
+
+| Population / axis | Acceleration RMSE [m/s²] | Pointing RMSE [mas] | NRMSE | Correlation | Acceleration bias [m/s²] | Pointing bias [mas] |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Single / X | 0.000309011 | 0.205932 | 15.6267% | 0.987821 | +1.406e-7 | -9.368e-5 |
+| Single / Y | 0.000320195 | 0.213385 | 17.7829% | 0.984220 | -1.034e-6 | +6.891e-4 |
+| Full / X | 0.000930590 | 0.620165 | 43.1750% | 0.917982 | -1.929e-6 | +0.001286 |
+| Full / Y | 0.000965499 | 0.643430 | 49.1985% | 0.892906 | +8.490e-7 | -0.000566 |
+
+Two explicitly labeled 28-Hz amplitude/phase statistics are exported:
+
+| Population / axis | Coherent peak-amplitude error | Coherent phase error | Welch gain error at 28 Hz | Welch phase at 28 Hz |
+| --- | ---: | ---: | ---: | ---: |
+| Single / X | +0.176% | -0.348° | -0.247% | -0.640° |
+| Single / Y | -0.401% | +0.178° | -0.654% | -0.311° |
+| Full / X | +3.041% | -2.915° | +1.010% | -1.691° |
+| Full / Y | +0.503% | +6.120° | -1.221% | -0.941° |
+
+Coherent values come from independent `[1,cos(omega*t_target),sin(omega*t_target)]`
+least squares across the full scoring interval. Positive phase means prediction
+leads truth. The full-Y coherent truth amplitude is only 0.000505 m/s² despite
+0.001962 m/s² RMS: envelope cancellation makes its finite-record phase more
+sensitive. Welch uses 8-s Hann segments, 50% overlap, constant detrending and
+the exact 28-Hz bin (0.125-Hz resolution); transfer is `S_truth,pred/S_truth,truth`.
+The 27–30-Hz component residual reductions are single X/Y 19.15/17.76 dB and
+full X/Y 10.04/9.35 dB. This does not establish a universal 10-dB correction gate.
+
+Comparing with **all modes** instead gives full pointing RMSE 1.9125/1.5503 mas,
+NRMSE 83.71%/81.43%, correlation 0.5608/0.5996. Full acceleration RMSE is
+0.039385/0.039146 m/s², NRMSE 99.90%/99.94%: the narrowband predictor is not a
+broadband acceleration estimator. These statistics distinguish residual other
+modes from errors of the intended component. Other modes' stochastic tails
+near 28 Hz also contaminate the observed band and explain some additional
+full-population component error; not all nearby power belongs to the 28-Hz mode.
+
+| Horizon beyond query [ms] | Single NRMSE X/Y | Full NRMSE X/Y |
+| ---: | ---: | ---: |
+| 0 | 15.58% / 17.73% | 43.16% / 49.17% |
+| 1 | 15.63% / 17.78% | 43.18% / 49.20% |
+| 5 | 15.77% / 17.95% | 43.09% / 49.11% |
+| 10 | 15.96% / 18.15% | 42.99% / 48.96% |
+| 20 | 16.53% / 18.78% | 43.44% / 49.47% |
+
+The actual sample-to-target horizon adds 0.125 ms to each row. Small
+non-monotonic full-population changes reflect interference/envelope evolution;
+they do not justify retuning latency to minimize this finite record's error.
+Unknown future stochastic innovations cannot be predicted exactly.
+
+### Depth-one overruns and recovery
+
+The following counts apply to **each** population: 480,000 produced records,
+120,000 nominal prediction slots. Resets include the initial attachment.
+Blackouts start at each period boundary after t=0 and exclude the t=60 boundary.
+
+| Worker condition | Overrun events / rate [1/s] | Dropped | Resets | Availability, all 60 s | Availability, 4–60 s | Recovery after detection |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Ideal 8-kHz ingestion | 0 / 0 | 0 | 1 | 99.4992% | 100% | Initial ready at 300.625 ms |
+| 125-us block every 1 s | 0 / 0 | 0 | 1 | 99.4992% | 100% | No overrun; predictions bit-identical to ideal |
+| 250-us block every 5 s (one loss) | 11 / 0.1833 | 11 | 12 | 93.9900% | 94.0973% | 300.375 ms |
+| 250-us block every 1 s (one loss) | 59 / 0.9833 | 59 | 60 | 69.9500% | 69.9500% | 300.375 ms |
+| 250-us block every 100 ms | 599 / 9.9833 | 599 | 600 | 0% | 0% | All episodes interrupted before warmup |
+| 2-ms block every 5 s | 11 / 0.1833 | 165 | 12 | 93.9625% | 94.0679% | 300.125 ms |
+| Incorrect query-only 2-kHz ingestion | 120,000 / 2000 | 359,999 | 120,001 | 0% | 0% | Never ready |
+
+The real app ingests on source wakes independently of the query cadence; the
+last row is a negative control, not the deployed architecture. Fifteen frames
+are overwritten per 2-ms block. No malformed/stale records or source restarts
+are injected in this study; those are covered by existing input/native cases.
+All accounting checks `processed+dropped=published`. Recovery differences of
+fractions of a millisecond reflect query/sample phases and coverage rounding.
+Initial warmup uses `ceil(max(3/f0,3*T)*1e9)`; floating-point rounding plus the
+2-kHz query grid makes first readiness 300.625 ms in this schedule.
+
+During the first 0.5 s after recovery from a single loss every 5 s, component
+NRMSE X/Y is single 14.88%/19.45% and full 40.29%/50.44%; with losses every
+second it is single 15.39%/18.18% and full 42.43%/48.87%. Availability and
+accuracy are reported separately; scoring only valid predictions must not hide
+the 30%-per-second availability penalty of the strict reset policy.
+
+### Warmup investigation and recommendation only
+
+Added an independent batch-QR oracle for the exact two-stage window. For a
+uniform interval, weight of lag j is `b²*(j+1)*(1-b)^j`, with
+`b=-expm1(-2/(8000*T))`. For variable b, sample j at endpoint k has weight
+`b_j*product(lambda_[j+1:k])*sum(b_[j:k])`. A new unit test compares batch QR
+to independently accumulated recursive moments, with and without a missing
+acquisition and with an unrelated 120-Hz component. It does not call or alter
+the production estimator's reset/readiness logic.
+
+Cold-start probes use the raw samples following the overwritten sample at each
+of 59 one-second epochs; each age below is one prediction per epoch, not a
+continuous availability result. Targets remain newest acquisition+1.125 ms.
+
+| Fresh history [ms] | Gram reciprocal condition | Single NRMSE X/Y | Full NRMSE X/Y |
+| ---: | ---: | ---: | ---: |
+| 5 | 0.000116 | 1411% / 1921% | 29008% / 39870% |
+| 20 | 0.02848 | 49.86% / 55.28% | 586.02% / 543.85% |
+| 50 | 0.33182 | 45.54% / 30.25% | 114.43% / 111.62% |
+| 100 | 0.41280 | 17.31% / 21.19% | 51.04% / 66.08% |
+| 150 | 0.48768 | 13.95% / 20.37% | 44.60% / 73.97% |
+| 300 | 0.48407 | 21.22% / 19.92% | 41.58% / 39.23% |
+
+All these probes are SPD with reciprocal condition above the production 1e-8
+threshold; maximum normal-equation relative residual is below 3e-13. Thus
+**300 ms is not a hard floating-point stability requirement**. Short windows
+nevertheless strongly admit sensor noise, ADC noise and other modes. At
+100 ms the cascaded window has accumulated only about 59.4% of its steady-state
+mass; at 300 ms about 98.3%. Conditioning alone does not qualify accuracy or
+envelope stability, and these sparse, correlated probes do not define a safe
+universal shortened gate. Do not reduce cold-start warmup based on this study.
+
+A separate hypothetical candidate retains one second of mature history across
+exactly one omitted acquisition, uses the true 250-us acquisition interval
+at the next sample, and compares batch fits with an uninterrupted oracle. It
+probes 0/1/10/50/100/300 ms after receipt of the post-gap sample. Gram reciprocal
+condition remains >=0.48368; normal residuals remain below 4e-15. Immediately
+after the gap, maximum acceleration difference from the uninterrupted fit is
+1.00e-6/5.86e-7 m/s² (single X/Y) and 1.47e-6/1.77e-6 (full X/Y). Across all
+probe ages the maximum changes are 5.46e-5 (single) and 6.88e-5 (full) m/s².
+This favors investigating preservation of an already-qualified window for a
+strictly bounded isolated gap, rather than forcing another cold start. It is
+**not** production support or general proof of safe gap handling. Future work
+must qualify burst/repeated loss, arbitrary gap phases/lengths, noise/detuning,
+clock/identity faults, stale data, ADC faults and supported memory/frequency
+settings; counter ordering/loss telemetry and invalidation for real integrity
+faults must remain explicit. No missing sample may be fabricated. Current
+production reset/warmup behavior remains unchanged.
+
+### Commands, verification and limits
+
+Run entirely on a workstation from the repository root, using an existing Python
+environment with NumPy/SciPy/pandas/Matplotlib (set `accff_python` accordingly):
+
+```bash
+accff_python=python3
+make -C apps/accelFFCtrl/tests PYTHON="$accff_python" validation \
+  BUILD_DIR=/tmp/accelFFCtrl-validation-build \
+  VALIDATION_DIR=/tmp/accelFFCtrl-validation-60s VALIDATION_SECONDS=60
+make -C apps/accelFFCtrl/tests BUILD_DIR=/tmp/accelFFCtrl-validation-build test benchmark
+"$accff_python" -m unittest discover -s apps/accelSim/tests -p test_validate_psd.py -v
+ASAN_OPTIONS=halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
+  make -C apps/accelFFCtrl/tests BUILD_DIR=/tmp/accelFFCtrl-validation-asan test \
+  CXXFLAGS='-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer'
+ASAN_OPTIONS=halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
+  ACCELFFCTRL_VALIDATION_DIR=/tmp/accelFFCtrl-validation-asan-smoke \
+  ACCELFFCTRL_VALIDATION_SECONDS=6 \
+  /tmp/accelFFCtrl-validation-asan/accelFFCtrl_test '[accelFFCtrl-validation-export]'
+```
+
+For the combined hardware-free simulator/controller sanitizer run:
+
+```bash
+c++ -std=c++20 -O1 -g -fno-fast-math -Wall -Wextra -pthread \
+  -fsanitize=address,undefined -fno-omit-frame-pointer -DACCELSIM_MODEL_ONLY \
+  $(pkg-config --cflags eigen3) \
+  apps/accelSim/tests/accelSim_test.cpp \
+  apps/accelSim/tests/accelSimDisturbance_test.cpp \
+  apps/accelSim/tests/accelSimDM_test.cpp \
+  apps/accelFFCtrl/tests/accelFFCtrlModel_test.cpp \
+  apps/accelFFCtrl/tests/accelFFCtrlReplay_test.cpp \
+  apps/accelFFCtrl/tests/accelFFCtrlInput_test.cpp \
+  apps/accelFFCtrl/tests/accelFFCtrlValidation_test.cpp tests/testMain.cpp \
+  -o /tmp/accelFFCtrl-validation-combined-asan
+ASAN_OPTIONS=halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
+  /tmp/accelFFCtrl-validation-combined-asan
+```
+
+Local environment: Apple Clang 21, libc++ 210106, Eigen 5.0.1; NumPy 2.3.5,
+SciPy 1.16.3, pandas 2.3.3. Actual mode specs, compiler/STL identity and Python
+versions are exported; C++ random distributions need not produce identical
+realizations across standard libraries. Seeds alone do not establish identity
+with a running instrument trajectory. Numerical results above belong to this
+exported realization and supplied parameters, not measured exao2 performance.
+
+- Optimized existing controller suite: 18 cases / 3,359,793 assertions passed;
+  the same suite passed under ASan/UBSan.
+- New 60-s exporter: 1 case / 29,464,003 assertions passed, including exact
+  target/phase/inverse checks and analytical loss/reset accounting for each
+  schedule. Four new Python tests and four existing PSD tests passed.
+- Combined simulator/controller ASan/UBSan: 52 cases / 3,596,391 assertions
+  passed. The six-second exporter under the same sanitizers passed 1 case /
+  2,872,567 assertions. No sanitizer findings; halt-on-error enabled. Simulator
+  DM numerical cases use mock sinks only and access no physical/native stream.
+- Both allocation-guarded benchmarks passed with zero C++/Eigen allocations.
+  Synthetic input runtime averaged 114 ns/source opportunity, p99 417 ns;
+  these workstation timings exclude native mapping, semaphore/clock syscalls,
+  filesystem, INDI and scheduling. They are not real-time latency guarantees.
+- Existing unrelated-tone tests (f0=28.5 Hz) give acceleration RMS gains <=0.454
+  across 11–3500 Hz tested, and <=0.01696 for tested frequencies >=54 Hz.
+  White-noise output/input RMS ratio is 0.03586. These check rejection without
+  claiming exact isolation of other modes' tails at the target frequency.
+- Raw binaries and reports are under `/tmp/accelFFCtrl-validation-60s` locally;
+  no large generated artifacts are added to the repository. Trace CSVs thin to
+  500 Hz for viewing; PSDs use the complete uniform 2-kHz lossless output.
+  Gapped predictions are never concatenated into a fake uniform PSD. Full-mode
+  truth sampled at 2 kHz can alias broadband AR tails; the PSD is explicitly the
+  output-cadence comparison, not a reconstructed 8-kHz sensor spectrum.
+
+No new production correctness bug was found. Strict single-frame-loss reset is
+the principal availability limitation. The new analysis initially mislabeled
+ns-to-ms values as microseconds during its smoke review; it was corrected before
+the reported study and now has an explicit 125-us/1125-us regression assertion.
+Timing/ordering in the synthetic source is coherent by construction. This
+workstation cannot execute native Linux ImageStreamIO/app tests; semaphore
+ordering/races, real 8-kHz worker scheduling, independent clocks, physical
+calibration and simulator scheduling deviations are not qualified by this
+offline study. Existing native restart/ordering cases are retained unchanged.
+
+The numerical path supports a longer **observation-only** run, conditional on
+recording actual dropped/reset/ready/age diagnostics and interpreting unavailable
+intervals explicitly. Five-Hz INDI snapshots cannot validate high-rate phase/PSD;
+a later human-collected timestamped raw/prediction recording would be needed
+for that comparison. Recommend retaining current behavior, reviewing full-mode
+interference, and qualifying the isolated-gap candidate offline before any
+recovery-policy change. This is not authorization or evidence for DM correction.
+No deployment, native stream access, configuration change, commit or push was
+performed. Text above Agent Findings and Plan remains unchanged.
