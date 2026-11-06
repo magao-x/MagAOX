@@ -159,6 +159,41 @@ int main( int argc /**< [in] Argument count. */, char **argv /**< [in] Optional 
                              if( i > 30 )
                                  sink = model->get_reference_controller( .3f ).sum();
                          } );
+                const std::string component = prefix + ( acc ? "assisted_" : "standard_" );
+                measure( ( component + "reference_only" ).c_str(),
+                         iterations,
+                         [&]( int ) { sink = model->get_reference_controller( .3f ).sum(); } );
+                measure( ( component + "history_only" ).c_str(),
+                         iterations,
+                         [&]( int )
+                         {
+                             Matrix phi, target;
+                             if( !model->get_training_example( phi, target ) )
+                                 std::abort();
+                             sink = phi.sum() + target.sum();
+                         } );
+                const int    features = ( 3 + 2 * 5 - 1 ) * modes + ( acc ? 2 * 20 : 0 );
+                Matrix       featureWindow( features, features );
+                std::mt19937 windowRng( 1080 + features ); // Preserve the original full-workload input sequence.
+                for( int j = 0; j < featureWindow.size(); ++j )
+                    featureWindow.data()[j] = ( int( windowRng() % 2001 ) - 1000 ) / 1000.f;
+                // Isolate exactly the normalization + rank operations in ShadowController::step().
+                // Frozen seeded windows measure component cost, not every possible pivot/conditioning pattern.
+                measure( ( component + "rank_only" ).c_str(),
+                         iterations,
+                         [&]( int )
+                         {
+                             Matrix scaled = featureWindow;
+                             for( int j = 0; j < scaled.cols(); ++j )
+                             {
+                                 const auto norm = scaled.col( j ).norm();
+                                 if( norm > 0 )
+                                     scaled.col( j ) /= norm;
+                             }
+                             Eigen::ColPivHouseholderQR<Matrix> qr( scaled );
+                             qr.setThreshold( cfg.m_rankTolerance );
+                             sink = qr.rank();
+                         } );
             }
             DDSPC::ShadowController pair( cfg );
             pair.training( DDSPC::ShadowMode::Standard, true );

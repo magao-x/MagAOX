@@ -11,6 +11,12 @@
 /// \cond LEGACY_TEST_SUPPORT
 namespace libXWCTest::loPredCtrlAccTest
 {
+std::unique_ptr<LegacyQr> original_qr( int outputs, int features, float gamma, float prior )
+{
+    return std::make_unique<LegacyQrAdapter<DDSPCOriginal::QRDRecursiveLeastSquares>>(
+        outputs, features, gamma, prior );
+}
+
 std::unique_ptr<LegacyModel> original_model( const LegacySettings &settings )
 {
     return std::make_unique<LegacyModelAdapter<DDSPCOriginal::PredictiveController>>( settings );

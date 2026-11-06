@@ -31,11 +31,14 @@ OBJECTS += $(addprefix $(BUILD_DIR)/,$(notdir $(ADAPTER_SOURCES:.cpp=.o))) $(LEG
 VPATH += $(TEST_DIR)
 CPPFLAGS += -I$(LEGACY_ROOT)
 
-.PHONY: all check verify-legacy check-legacy-fast check-demos
+.PHONY: all check check-build-tool verify-legacy check-legacy-fast check-demos
 all: $(TARGET)
 
-check: verify-legacy $(TARGET)
+check: check-build-tool verify-legacy $(TARGET)
 	$(TARGET) --durations yes
+
+check-build-tool:
+	python3 -m unittest discover -s $(TEST_DIR) -p native_linux_build_test.py
 
 verify-legacy:
 	python3 $(TEST_DIR)/prepare_legacy.py
@@ -58,7 +61,7 @@ LEGACY_FAST_FLAGS ?= -O3 -g -std=c++20 -Wall -Wextra -ffast-math
 check-legacy-fast:
 	$(MAKE) -f $(TEST_DIR)/Makefile.offline BUILD_DIR=$(abspath $(BUILD_DIR))/legacy-fast \
 	  CXXFLAGS='$(LEGACY_FAST_FLAGS)' \
-	  SOURCES='$(ROOT_DIR)/tests/testMain.cpp $(APP_DIR)/ar_controller.cpp $(APP_DIR)/recursive_least_squares.cpp $(APP_DIR)/qrd_rls.cpp $(APP_DIR)/utils.cpp $(APP_DIR)/shadow_controller.cpp $(APP_DIR)/causal_input.cpp $(ROOT_DIR)/INDI/libcommon/IndiProperty.cpp $(ROOT_DIR)/INDI/libcommon/IndiElement.cpp $(ROOT_DIR)/INDI/libcommon/TimeStamp.cpp $(TEST_DIR)/ddspc_legacy_test.cpp' check
+	  SOURCES='$(ROOT_DIR)/tests/testMain.cpp $(APP_DIR)/ar_controller.cpp $(APP_DIR)/recursive_least_squares.cpp $(APP_DIR)/qrd_rls.cpp $(APP_DIR)/utils.cpp $(APP_DIR)/shadow_controller.cpp $(APP_DIR)/causal_input.cpp $(ROOT_DIR)/INDI/libcommon/IndiProperty.cpp $(ROOT_DIR)/INDI/libcommon/IndiElement.cpp $(ROOT_DIR)/INDI/libcommon/TimeStamp.cpp $(TEST_DIR)/ddspc_legacy_test.cpp $(TEST_DIR)/ddspc_qr_compatibility_test.cpp' check
 
 # Historical demonstration programs contain no assertions; run them as separate, explicitly labeled smoke checks.
 DEMO_NAMES ?= testRLS testPredCtrl
