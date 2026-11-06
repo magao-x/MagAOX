@@ -1,0 +1,618 @@
+[
+  {
+    "name": "gcc-strict",
+    "compiler": "g++-15",
+    "flags": "-O3 -g -std=c++20 -Wall -Wextra -fno-fast-math",
+    "rows": [
+      {
+        "exponent": "-140",
+        "r": "1.60448674165e-42",
+        "original_c": "0.447161585093",
+        "original_s": "0.894323170185",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "-130",
+        "r": "1.64280384686e-39",
+        "original_c": "0.447213441133",
+        "original_s": "0.894426882267",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "-126",
+        "r": "2.6284853142e-38",
+        "original_c": "0.447213590145",
+        "original_s": "0.89442718029",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "-100",
+        "r": "1.76394663476e-30",
+        "original_c": "0.447213590145",
+        "original_s": "0.89442718029",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "-10",
+        "r": "0.00218366016634",
+        "original_c": "0.447213590145",
+        "original_s": "0.89442718029",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "0",
+        "r": "2.23606801033",
+        "original_c": "0.447213590145",
+        "original_s": "0.89442718029",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "100",
+        "r": "2.83455295545e+30",
+        "original_c": "0.447213590145",
+        "original_s": "0.89442718029",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "120",
+        "r": "2.97224419981e+36",
+        "original_c": "0.447213590145",
+        "original_s": "0.89442718029",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      }
+    ],
+    "summary": "compiler=15.2.0 original_tiny_rotation_finite=1 wide_tiny_rotation_finite=1 scoped_tiny_rotation_finite=1"
+  },
+  {
+    "name": "gcc-fast",
+    "compiler": "g++-15",
+    "flags": "-O3 -g -std=c++20 -Wall -Wextra -ffast-math",
+    "rows": [
+      {
+        "exponent": "-140",
+        "r": "1.60448674165e-42",
+        "original_c": "inf",
+        "original_s": "inf",
+        "original_finite": "0",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "-130",
+        "r": "1.64280384686e-39",
+        "original_c": "inf",
+        "original_s": "inf",
+        "original_finite": "0",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "-126",
+        "r": "2.6284853142e-38",
+        "original_c": "0.447213590145",
+        "original_s": "0.89442718029",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "-100",
+        "r": "1.76394663476e-30",
+        "original_c": "0.447213590145",
+        "original_s": "0.89442718029",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "-10",
+        "r": "0.00218366016634",
+        "original_c": "0.447213590145",
+        "original_s": "0.89442718029",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "0",
+        "r": "2.23606801033",
+        "original_c": "0.447213590145",
+        "original_s": "0.89442718029",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "100",
+        "r": "2.83455295545e+30",
+        "original_c": "0.447213590145",
+        "original_s": "0.89442718029",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "120",
+        "r": "2.97224419981e+36",
+        "original_c": "0.447213590145",
+        "original_s": "0.89442718029",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      }
+    ],
+    "summary": "compiler=15.2.0 original_tiny_rotation_finite=0 wide_tiny_rotation_finite=1 scoped_tiny_rotation_finite=1"
+  },
+  {
+    "name": "gcc-norecip",
+    "compiler": "g++-15",
+    "flags": "-O3 -g -std=c++20 -Wall -Wextra -ffast-math -fno-reciprocal-math",
+    "rows": [
+      {
+        "exponent": "-140",
+        "r": "1.60448674165e-42",
+        "original_c": "0.447161585093",
+        "original_s": "0.894323170185",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "-130",
+        "r": "1.64280384686e-39",
+        "original_c": "0.447213441133",
+        "original_s": "0.894426882267",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "-126",
+        "r": "2.6284853142e-38",
+        "original_c": "0.447213590145",
+        "original_s": "0.89442718029",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "-100",
+        "r": "1.76394663476e-30",
+        "original_c": "0.447213590145",
+        "original_s": "0.89442718029",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "-10",
+        "r": "0.00218366016634",
+        "original_c": "0.447213590145",
+        "original_s": "0.89442718029",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "0",
+        "r": "2.23606801033",
+        "original_c": "0.447213590145",
+        "original_s": "0.89442718029",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "100",
+        "r": "2.83455295545e+30",
+        "original_c": "0.447213590145",
+        "original_s": "0.89442718029",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "120",
+        "r": "2.97224419981e+36",
+        "original_c": "0.447213590145",
+        "original_s": "0.89442718029",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      }
+    ],
+    "summary": "compiler=15.2.0 original_tiny_rotation_finite=1 wide_tiny_rotation_finite=1 scoped_tiny_rotation_finite=1"
+  },
+  {
+    "name": "gcc-noassoc",
+    "compiler": "g++-15",
+    "flags": "-O3 -g -std=c++20 -Wall -Wextra -ffast-math -fno-associative-math",
+    "rows": [
+      {
+        "exponent": "-140",
+        "r": "1.60448674165e-42",
+        "original_c": "inf",
+        "original_s": "inf",
+        "original_finite": "0",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "-130",
+        "r": "1.64280384686e-39",
+        "original_c": "inf",
+        "original_s": "inf",
+        "original_finite": "0",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "-126",
+        "r": "2.6284853142e-38",
+        "original_c": "0.447213590145",
+        "original_s": "0.89442718029",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "-100",
+        "r": "1.76394663476e-30",
+        "original_c": "0.447213590145",
+        "original_s": "0.89442718029",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "-10",
+        "r": "0.00218366016634",
+        "original_c": "0.447213590145",
+        "original_s": "0.89442718029",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "0",
+        "r": "2.23606801033",
+        "original_c": "0.447213590145",
+        "original_s": "0.89442718029",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "100",
+        "r": "2.83455295545e+30",
+        "original_c": "0.447213590145",
+        "original_s": "0.89442718029",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "120",
+        "r": "2.97224419981e+36",
+        "original_c": "0.447213590145",
+        "original_s": "0.89442718029",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      }
+    ],
+    "summary": "compiler=15.2.0 original_tiny_rotation_finite=0 wide_tiny_rotation_finite=1 scoped_tiny_rotation_finite=1"
+  },
+  {
+    "name": "gcc-nofinite",
+    "compiler": "g++-15",
+    "flags": "-O3 -g -std=c++20 -Wall -Wextra -ffast-math -fno-finite-math-only",
+    "rows": [
+      {
+        "exponent": "-140",
+        "r": "1.60448674165e-42",
+        "original_c": "inf",
+        "original_s": "inf",
+        "original_finite": "0",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "-130",
+        "r": "1.64280384686e-39",
+        "original_c": "inf",
+        "original_s": "inf",
+        "original_finite": "0",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "-126",
+        "r": "2.6284853142e-38",
+        "original_c": "0.447213590145",
+        "original_s": "0.89442718029",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "-100",
+        "r": "1.76394663476e-30",
+        "original_c": "0.447213590145",
+        "original_s": "0.89442718029",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "-10",
+        "r": "0.00218366016634",
+        "original_c": "0.447213590145",
+        "original_s": "0.89442718029",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "0",
+        "r": "2.23606801033",
+        "original_c": "0.447213590145",
+        "original_s": "0.89442718029",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "100",
+        "r": "2.83455295545e+30",
+        "original_c": "0.447213590145",
+        "original_s": "0.89442718029",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "120",
+        "r": "2.97224419981e+36",
+        "original_c": "0.447213590145",
+        "original_s": "0.89442718029",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      }
+    ],
+    "summary": "compiler=15.2.0 original_tiny_rotation_finite=0 wide_tiny_rotation_finite=1 scoped_tiny_rotation_finite=1"
+  },
+  {
+    "name": "gcc-nounsafe",
+    "compiler": "g++-15",
+    "flags": "-O3 -g -std=c++20 -Wall -Wextra -ffast-math -fno-unsafe-math-optimizations",
+    "rows": [
+      {
+        "exponent": "-140",
+        "r": "1.60448674165e-42",
+        "original_c": "0.447161585093",
+        "original_s": "0.894323170185",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "-130",
+        "r": "1.64280384686e-39",
+        "original_c": "0.447213441133",
+        "original_s": "0.894426882267",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "-126",
+        "r": "2.6284853142e-38",
+        "original_c": "0.447213590145",
+        "original_s": "0.89442718029",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "-100",
+        "r": "1.76394663476e-30",
+        "original_c": "0.447213590145",
+        "original_s": "0.89442718029",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "-10",
+        "r": "0.00218366016634",
+        "original_c": "0.447213590145",
+        "original_s": "0.89442718029",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "0",
+        "r": "2.23606801033",
+        "original_c": "0.447213590145",
+        "original_s": "0.89442718029",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "100",
+        "r": "2.83455295545e+30",
+        "original_c": "0.447213590145",
+        "original_s": "0.89442718029",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "120",
+        "r": "2.97224419981e+36",
+        "original_c": "0.447213590145",
+        "original_s": "0.89442718029",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      }
+    ],
+    "summary": "compiler=15.2.0 original_tiny_rotation_finite=1 wide_tiny_rotation_finite=1 scoped_tiny_rotation_finite=1"
+  },
+  {
+    "name": "clang-fast",
+    "compiler": "clang++",
+    "flags": "-O3 -g -std=c++20 -Wall -Wextra -ffast-math",
+    "rows": [
+      {
+        "exponent": "-140",
+        "r": "1.60448674165e-42",
+        "original_c": "0.447161585093",
+        "original_s": "0.894323170185",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "-130",
+        "r": "1.64280384686e-39",
+        "original_c": "0.447213441133",
+        "original_s": "0.894426882267",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "-126",
+        "r": "2.6284853142e-38",
+        "original_c": "0.447213590145",
+        "original_s": "0.89442718029",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "-100",
+        "r": "1.76394663476e-30",
+        "original_c": "0.447213590145",
+        "original_s": "0.89442718029",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "-10",
+        "r": "0.00218366016634",
+        "original_c": "0.447213590145",
+        "original_s": "0.89442718029",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "0",
+        "r": "2.23606801033",
+        "original_c": "0.447213590145",
+        "original_s": "0.89442718029",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "100",
+        "r": "2.83455295545e+30",
+        "original_c": "0.447213590145",
+        "original_s": "0.89442718029",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      },
+      {
+        "exponent": "120",
+        "r": "2.97224419981e+36",
+        "original_c": "0.447213590145",
+        "original_s": "0.89442718029",
+        "original_finite": "1",
+        "wide_finite": "1",
+        "scoped_finite": "1",
+        "wide_unit_error": "2.39476030117e-08"
+      }
+    ],
+    "summary": "compiler=Apple LLVM 21.0.0 (clang-2100.0.123.102) original_tiny_rotation_finite=1 wide_tiny_rotation_finite=1 scoped_tiny_rotation_finite=1"
+  }
+]

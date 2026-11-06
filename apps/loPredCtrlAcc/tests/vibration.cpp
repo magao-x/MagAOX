@@ -2,6 +2,7 @@
  * \brief Causal synthetic modal plant and existing Legacy/reference/worker controllers, without application linkage.
  */
 #include "vibration.hpp"
+#include "stability.hpp"
 #include <algorithm>
 #include <cmath>
 #include <deque>
@@ -72,8 +73,9 @@ Matrix state( const VibrationConfig             &c /**< [in] Dimensions. */,
 /// Preserve origin coefficients until post-hoc scoring with actual future inputs, never using an optimal future input.
 struct Forecast
 {
-    Matrix m_base, m_c;    ///< Theta_known * state and C frozen at the actual decision.
-    int    m_origin{ -1 }; ///< WFS origin; target sequence is [origin+F,...,origin+1].
+    Matrix        m_base, m_c;    ///< Theta_known * state and C frozen at the actual decision.
+    int           m_origin{ -1 }; ///< WFS origin; target sequence is [origin+F,...,origin+1].
+    std::uint64_t m_epoch{ 0 };   ///< Supervisor episode prevents validation across resets.
 };
 } //namespace
 
@@ -172,6 +174,23 @@ VibrationSource vibration_source( const VibrationConfig &c )
 
 VibrationResult vibration_run( const VibrationConfig &c, const VibrationSource &s )
 {
+    const bool unchanged =
+        !c.m_stability || ( !c.m_stability->m_neutralReturn && ( !c.m_stability->m_symmetricRls || c.m_qrd ) );
+    if( unchanged && !c.m_freezeFrames )
+    {
+        auto reference = committed_vibration_run( c, s );
+        for( int model = 0; model < 5; ++model )
+            for( std::size_t i = 0; i < reference.m_frames[model].size(); ++i )
+            {
+                auto &f    = reference.m_frames[model][i];
+                f.m_action = int(
+                    i < std::size_t( c.m_train )
+                        ? SimAction::Calibration
+                        : ( model == 0 ? SimAction::Neutral : ( f.m_valid ? SimAction::Model : SimAction::Hold ) ) );
+                f.m_correctionAccepted = i >= std::size_t( c.m_train ) && model > 0 && f.m_valid;
+            }
+        return reference;
+    }
     validate( c );
     const int n = c.m_train + c.m_evaluate;
     for( const auto *series : { &s.m_disturbance, &s.m_acceleration, &s.m_wfsNoise, &s.m_exploration } )
@@ -211,7 +230,7 @@ VibrationResult vibration_run( const VibrationConfig &c, const VibrationSource &
         frames.resize( n );
         std::vector<Forecast> forecasts( n );
         // No device/app types are constructed. Workers are deterministic manual consumers, not OS threads.
-        OfflineAsyncShadow   worker( cfg, c.m_capacity, 0, 1500000, OfflineOverflowPolicy::Independent );
+        StabilityWorker      worker( cfg, c.m_capacity, c.m_stability && c.m_stability->m_symmetricRls && !c.m_qrd );
         PredictiveController legacy( 2, c.m_history, c.m_future, 0, c.m_gamma, c.m_lambda, c.m_prior, 0, 0 );
         legacy.use_qrd                          = c.m_qrd;
         const auto                     selected = controller == 4 ? ShadowMode::AccelAssisted : ShadowMode::Standard;
@@ -221,6 +240,13 @@ VibrationResult vibration_run( const VibrationConfig &c, const VibrationSource &
         Matrix                         dm = Matrix::Zero( 2, 1 ), held = dm;
         int                            received = -1, submitted = -1, legacyReceived = -1;
         std::uint64_t                  legacyUpdates = 0;
+        const StabilityPolicy          defaultPolicy;
+        const auto                    &policy = c.m_stability ? *c.m_stability : defaultPolicy;
+        const bool         recoveryEnabled    = controller >= 3 && policy.m_neutralReturn && c.m_controlGain != 0;
+        RecoverySupervisor recovery(
+            c, ( c.m_future + 2 * c.m_history - 1 ) * 2 + ( controller == 4 ? c.m_accelHistory * 2 : 0 ), policy );
+        std::size_t   matured      = 0;
+        std::uint64_t historyEpoch = 0;
         for( int k = 0; k < n; ++k )
         {
             auto        &f   = frames[k];
@@ -236,7 +262,27 @@ VibrationResult vibration_run( const VibrationConfig &c, const VibrationSource &
                 worker.reset( selected );
                 legacy.reset();
                 legacyUpdates = 0;
+                ++historyEpoch;
             }
+            if( recoveryEnabled )
+                while( matured < std::size_t( k ) )
+                {
+                    const auto &past = forecasts[matured];
+                    if( past.m_origin >= 0 && past.m_origin + c.m_future > received )
+                        break;
+                    if( past.m_origin >= 0 && past.m_epoch == historyEpoch )
+                    {
+                        Matrix u( 2 * c.m_future, 1 ), y( 2 * c.m_future, 1 );
+                        for( int j = 0; j < c.m_future; ++j )
+                        {
+                            u.middleRows( 2 * j, 2 ) = frames[past.m_origin + c.m_future - j - 1].m_applied;
+                            y.middleRows( 2 * j, 2 ) = frames[past.m_origin + c.m_future - j].m_measured;
+                        }
+                        recovery.observe( ( past.m_base + past.m_c * u - y ).squaredNorm() / ( 2 * c.m_future ),
+                                          matured < std::size_t( c.m_train ) );
+                    }
+                    ++matured;
+                }
             const bool stall   = k >= c.m_stallFrame && k < c.m_stallFrame + c.m_stallFrames;
             const auto service = [&]()
             {
@@ -275,6 +321,7 @@ VibrationResult vibration_run( const VibrationConfig &c, const VibrationSource &
                 if( f.m_valid && worker.read_snapshot( selected, snapshot ) )
                 {
                     forecasts[k].m_origin = received;
+                    forecasts[k].m_epoch  = historyEpoch;
                     forecasts[k].m_base   = snapshot.m_theta.leftCols( x.rows() ) * x;
                     forecasts[k].m_c      = snapshot.m_theta.rightCols( 2 * c.m_future );
                     f.m_thetaNorm         = snapshot.m_theta.norm();
@@ -349,12 +396,54 @@ VibrationResult vibration_run( const VibrationConfig &c, const VibrationSource &
                 if( !f.m_valid && !( f.m_requested.array() == held.array() ).all() )
                     ++result.m_invalidChanges[controller];
             }
-            f.m_requested           = bounded( f.m_requested, c.m_limit );
+            f.m_requested    = bounded( f.m_requested, c.m_limit );
+            SimAction action = k < c.m_train ? SimAction::Calibration
+                                             : ( controller == 0 ? SimAction::Neutral
+                                                                 : ( f.m_valid ? SimAction::Model : SimAction::Hold ) );
+            if( recoveryEnabled && k >= c.m_train )
+            {
+                bool features = received >= std::max( c.m_history, c.m_accelHistory ) - 1;
+                if( controller == 4 && features )
+                    for( int j = 0; j < c.m_accelHistory; ++j )
+                        features = features && s.m_sensorIndex[received - j] >= 0;
+                const bool healthy = features && worker.read_snapshot( selected, snapshot ) &&
+                                     snapshot.m_info.m_measurementNs <= now &&
+                                     now - snapshot.m_info.m_measurementNs <= c.m_maxAgeNs &&
+                                     now - vibration_time( received ) <= c.m_maxAgeNs;
+                // Retain Phase 10's rounded exploration intermediate before combining it with feedback.
+                const Matrix feedback =
+                    ( c.m_controlGain * ( proposal + ( .005f * s.m_exploration[k] ).eval() ) ).eval();
+                f.m_requested = bounded( recovery.command( f.m_valid,
+                                                           healthy,
+                                                           feedback,
+                                                           held,
+                                                           bounded( .3f * s.m_exploration[k], c.m_limit ),
+                                                           c.m_limit,
+                                                           action ),
+                                         c.m_limit );
+                if( recovery.take_reset() )
+                {
+                    worker.reset( selected );
+                    ++historyEpoch;
+                }
+            }
+            if( recoveryEnabled && k < c.m_train )
+                recovery.calibrate( f.m_requested );
+            f.m_action   = int( action );
+            f.m_recovery = int( recovery.state() );
+            if( action == SimAction::Model && !f.m_valid )
+                ++result.m_invalidChanges[controller];
+            f.m_correctionAccepted  = action == SimAction::Model && f.m_valid;
+            f.m_confidenceBound     = recovery.threshold();
+            f.m_slewX               = recovery.step_bound()( 0 );
+            f.m_slewY               = recovery.step_bound()( 1 );
             f.m_newCommand          = ( f.m_requested.array() != held.array() ).any();
             held                    = f.m_requested;
             const int appliedSource = k - ( k < c.m_train ? 0 : c.m_dmExtraFrames );
             f.m_applied = appliedSource >= 0 ? frames[appliedSource].m_requested : Matrix::Zero( 2, 1 ).eval();
-            dm          = c.m_dmPole * dm + ( 1 - c.m_dmPole ) * f.m_applied;
+            if( k >= c.m_freezeFrame && k < c.m_freezeFrame + c.m_freezeFrames )
+                f.m_applied = k ? frames[k - 1].m_applied : Matrix::Zero( 2, 1 ).eval();
+            dm = c.m_dmPole * dm + ( 1 - c.m_dmPole ) * f.m_applied;
             if( controller >= 3 )
             {
                 while( submitted < received )

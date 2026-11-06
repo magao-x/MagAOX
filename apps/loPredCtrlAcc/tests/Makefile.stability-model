@@ -1,0 +1,21 @@
+# Include after defining BUILD_DIR, SOURCES/OBJECTS and TEST_DIR; candidate is independently named and test-only.
+SYMMETRIC_ROOT := $(abspath $(BUILD_DIR))/symmetric
+SYMMETRIC_STAMP := $(SYMMETRIC_ROOT)/snapshot.stamp
+SYMMETRIC_NAMES := ar_controller recursive_least_squares qrd_rls utils shadow_controller
+OBJECTS += $(addprefix $(BUILD_DIR)/symmetric_,$(addsuffix .o,$(SYMMETRIC_NAMES))) $(BUILD_DIR)/symmetric_async_shadow.o
+OBJECTS += $(BUILD_DIR)/phase10_loop.o
+
+$(SYMMETRIC_STAMP): $(TEST_DIR)/prepare_stability.py
+	python3 $(TEST_DIR)/prepare_stability.py --output $(SYMMETRIC_ROOT)
+$(BUILD_DIR)/stability.o: $(SYMMETRIC_STAMP)
+$(BUILD_DIR)/ddspc_stability_test.o: $(SYMMETRIC_STAMP)
+CPPFLAGS += -I$(abspath $(BUILD_DIR))
+$(addprefix $(BUILD_DIR)/symmetric_,$(addsuffix .o,$(SYMMETRIC_NAMES))): $(BUILD_DIR)/symmetric_%.o: $(SYMMETRIC_STAMP)
+	@mkdir -p $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -DDDSPC=DDSPCSymmetric -MMD -MP -c $(SYMMETRIC_ROOT)/$*.cpp -o $@
+$(BUILD_DIR)/symmetric_async_shadow.o: $(SYMMETRIC_STAMP)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -pthread -DDDSPC=DDSPCSymmetric -MMD -MP -c $(SYMMETRIC_ROOT)/tests/async_shadow.cpp -o $@
+$(BUILD_DIR)/phase10_loop.o: $(SYMMETRIC_STAMP)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -I$(TEST_DIR) -Dvibration_run=committed_vibration_run \
+	  -Dvibration_source=committed_vibration_source -Dvibration_time=committed_vibration_time \
+	  -MMD -MP -c $(SYMMETRIC_ROOT)/phase10_loop.cpp -o $@

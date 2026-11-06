@@ -292,6 +292,31 @@ Review AGENTS.md.  Do not alter any text above the "Agent Findings and Plan" bel
 # Agent Findings and Plan
 
 ## Task Summary
+**Phase 11 stability/recovery (2026-11-06): conventional float RLS loses
+covariance validity before feedback; held commands can prevent rank recovery.**
+Starting committed Phase 10 is `2fcf61a108c8f3d9c3d237a053f4e0634f0f4e6f`,
+branch `parkertjohnson1/accel_ddspc`, verified personal Mac `ASTR-LT-428.local`.
+Only offline tests/documentation change. Original `loPredCtrl`, production sources,
+Legacy defaults, original QR/RLS, rank gates, flags and output paths are unchanged.
+No instrument/SSH, shared memory, physical commands, service, separate worktree,
+commit/push/merge, production integration or deployment. No Linux is available.
+
+Independent identical-record replay identifies covariance asymmetry/indefiniteness
+during calibration. An isolated symmetry candidate brings assisted broadband
+RMS 1.14049 → .04797 SU, 28/56-Hz suppression 16.23/12.66 → 35.58/30.81 dB.
+Finite simulation retraining recovers 20/20 transient event trajectories per
+compiler, versus 14 originally unrecovered. **Global acceptance fails:** it
+unnecessarily resets an intact-queue short-stall QR model, worsening assisted RMS
+.05203 → .09135. No recovery policy is recommended for production adoption.
+
+GNU fast QR is traced to shared float reciprocal overflow in Givens normalization;
+local division/wider-normalization experiments avoid it. Production code/flags
+remain unchanged and the known default GNU-fast finite failure remains visible.
+Strict Clang/GCC, ASan/UBSan and targeted TSan pass. Evidence and seven scientific
+PNG/PDF plots: [Phase 11 report](../../../apps/loPredCtrlAcc/tests/results/phase11.md).
+Stop after Phase 11. Recommend separately approved offline selective recovery and
+numerical-portability qualification; earlier phase records below are historical.
+
 
 **Phase 10 offline vibration suppression (2026-11-06): a causal closed-loop
 numerical study now compares no control, a labeled future-truth oracle, Legacy
@@ -607,6 +632,21 @@ accelerometer regressors; it does not require an acceleration-to-displacement
 formula or a predetermined spectral line.
 
 ## Key Assumptions
+**Phase 11:** retain Phase 10 SU/DU plant, causal timing, RNGs and 2400-frame
+calibration. Standard uses WFS plus actual synthetic applied commands; assistance
+adds sensor histories. Replays use identical recorded regressors to separate
+estimation roundoff from feedback. Only the labeled oracle sees future truth.
+Recovery confidence scores origin-frozen forecasts only after targets/actual
+inputs arrive; reset epochs reject pending old evidence. Finite independent
+probes are explicit simulation calibration actions, never invalid-model commands
+or instrument excitation. Fresh publication differs from rank readiness.
+
+Confidence uses an explicitly experimental .99 initial-calibration error quantile,
+with full feature-count (24/34) validation/fade-in windows. Slew is learned from
+actual bounded calibration increments, and total probes cannot exceed 2400 frames.
+These policies are not stability certificates. Covariance symmetry does not prove
+SPD for arbitrary conditioning; no Mac experiment qualifies Linux/physical timing.
+
 
 **Phase 10 synthetic coordinate/timing contract:** two modes are arbitrary
 synthetic tip/tilt, with explicitly defined SU/DU units, positive additive
@@ -812,6 +852,48 @@ independent learners and non-actuation protections remain unchanged.
     libraries/hardware. Preserve the original as the operational reference.
 
 ## Requirements
+### Phase 11 implemented offline numerical and recovery experiment
+
+- `tests/prepare_stability.py` pins Phase 10 and creates an independent
+  `DDSPCSymmetric` backend with exactly one extra causal covariance operation:
+  `P=(.5*(P+P.transpose())).eval()`. Original numerical sources remain unchanged.
+  `Makefile.stability-model` also compiles the verbatim pinned Phase 10 loop;
+  default `vibration_run()` delegates to it. Custom fast-test subsets exclude
+  simulation objects so their standalone Legacy linkage remains intact.
+- `tests/rls_diagnostics.cpp` reconstructs actual WFS/applied/sensor histories and
+  compares original/symmetric/Joseph float, double recursion and QR to independent
+  weighted LS. Eigenvalues, asymmetry, condition, denominator and coefficient
+  errors are diagnostic-only. No rank frequency/threshold is changed.
+- `tests/stability.cpp::StabilityWorker` owns independent original/candidate
+  workers and preserves all identities, age/reset/overflow/readiness and invalid
+  mode protections. `RecoverySupervisor` has Tracking/Neutral/Waiting/Training/
+  Ramping/Disabled states, calibrated slew/common authority, matured confidence,
+  finite probe budget and validation before re-entry. Zero gain disables recovery;
+  permanently stale publication authorizes neither probes nor model corrections.
+- An explicit fourth simulator CLI argument selects baseline/symmetric/recovery
+  variants and extends 52 original cases to 64: freeze of actual applied input,
+  intact-queue short stall, prior=.1, gamma=1/.999 and lambda=.2, per learner.
+  No calculated/requested command substitutes for an applied record.
+
+**Root causes:** default assisted covariance is indefinite by sampled frame 480
+(GCC 580), before calibration ends 2400. Forgetting amplifies antisymmetric roundoff
+in subtractive covariance updates; correlated features/P0=1000 increase cancellation.
+Rank/finite readiness does not check SPD or physical closed-loop stability. The
+same numerical failure occurs on successful QR histories. Larger prior/less
+forgetting postpone but do not eliminate it. Separately, constant held/clipped
+commands make history columns dependent and can deadlock recovery. Neutral alone
+does not restore persistent excitation. These independent failures are retained.
+
+**GNU:** `fast_math_probe.cpp` plus disassembly isolates `a/h,-b/h` optimized to
+shared `1.f/h` and multiplies. A tiny nonzero h can overflow its reciprocal while
+both intended ratios are finite. Local no-reciprocal/wider normalization avoids
+the failure; no-associative/no-finite-only controls do not. Production flags and
+kernel are unchanged; whole-kernel normal-input/Linux qualification remains.
+
+**Acceptance:** combined recovery overreacts to a short stale worker with intact
+history and worsens successful QR. Lower variance than no control is insufficient
+for adoption. Preserve the failed case and exact historical tests.
+
 
 ### Phase 10 closed-loop numerical experiment
 
@@ -2247,6 +2329,22 @@ a benchmark.
   artifacts; reject incompatible models with correction disabled.
 
 ## Questions and Points of Clarification
+**Phase 11 decisions before further work:**
+
+1. Approve another offline phase distinguishing recoverable stale publication
+   with intact queued history from true reset/discontinuity/rank collapse. The
+   current combined policy fails the no-worse-successful-QR criterion.
+2. Review long-duration/larger-mode/conditioning qualification of symmetry versus
+   square-root/double alternatives. This remains an independent offline candidate.
+3. Review recovery authority separately: finite synthetic probes demonstrate the
+   excitation deadlock; they do not authorize instrument probing or re-entry.
+   Bad initial calibration can contaminate empirical confidence.
+4. Approve a separate narrow GNU local-division/wider-normalization portability
+   experiment, preserving normal-input regressions and original fast failures.
+5. Linux scheduling/build, WFS exposure/applied-DM identity, modal units/signs,
+   clocks/latency, sensor transfer and production ownership remain unresolved.
+   Phase 11 authorizes no observation-only or actuating integration.
+
 
 **Phase 10 decisions for a separately approved next phase:**
 
@@ -2468,6 +2566,38 @@ recommendations are not assumptions about the deployed instrument.
    source review does not establish deployment performance.
 
 ## Tests
+### Phase 11 executed numerical, stability and recovery checks
+
+- Strict Clang: 66 cases/1,766,353 assertions; strict GCC: 66/1,765,794;
+  ASan+UBSan: 66/1,768,508, all pass. Targeted TSan actual threaded snapshot reuse
+  plus virtual stability: 6/564,263 pass (concurrent assertion counts vary).
+  Existing Phase 7–10 tests/tolerances remain unchanged.
+- Frozen pre-change Phase 10 matches 2,704,000 original payload rows per compiler,
+  byte-for-byte. Symmetry-only QR matches all 32 QR cases/1,664,000 rows per compiler.
+- Clang has four complete 64-case matrices plus two 10-case ablations (1380
+  controller rows); GCC has complete baseline/symmetric/combined (960 rows).
+  Combined has 0/20 unrecovered transient events versus original 14/20, but worsens
+  successful QR. All positive candidate deltas and original failing cases remain.
+- Identical-record replay includes gamma/prior sensitivities, QR-source and
+  unrelated-sensor controls. Clang assisted broadband final weighted-LS error:
+  original=21.0515, symmetric=3.67e-5, Joseph=1.05e-4, QR=1.99e-5, double=2.47e-11.
+  Matching original source coefficient-norm differences are zero.
+- New tests cover covariance symmetry/SPD on full calibration, weighted LS, pinned
+  default/QR equivalence, causal prefix invariance, amplitude/slew/provenance,
+  reset/dropout/overflow/stale/freeze, zero gain, zero confidence and invalid modes.
+  An initial **new** 100x improvement assertion at shortened 1200-frame calibration
+  failed on GCC/sanitizer; it now evaluates the actual Phase 10 2400 frames with
+  unchanged .01 ratio and early eigenvalue checks. Transient evidence/initial
+  failure summaries remain. No existing tolerance or scenario was removed.
+- Original GNU fast suite remains 8/9 pass, known finite failure at QR callback 31;
+  Clang fast and diagnostic GNU fast/no-reciprocal both 9/9 (186,615 assertions).
+  Tiny probes fail at exponents -140/-130 under GNU fast; local division/wider
+  experiments and no-reciprocal/no-unsafe controls avoid it without threshold hacks.
+- `tests/results/phase11*` stores complete metrics/configs, source/binary/data
+  hashes, validation, replays, flags/disassembly and seven PNG/PDF plots.
+  README documents commands; full raw logs are ignored under `build/phase11-*`.
+  No Linux/runtime/performance qualification is claimed.
+
 
 ### Phase 10 plant, causality, suppression and safety checks
 
@@ -3437,6 +3567,25 @@ dedicated Makefile above rather than linking the application library through
 `Makefile.one`.
 
 ## Implementation Plan
+The current **Phase 11 is complete as an offline investigation**, with independent
+root-cause replays, covariance candidate, finite recovery experiments, GNU
+operation-level diagnosis and documented failed global acceptance. It does not
+qualify a general robust controller. Earlier roadmaps below remain historical.
+
+Next steps require separate approval:
+
+1. Retain the short-stall negative control and design recovery from observable
+   generation/queue/provenance states. Avoid resetting intact history that can
+   resume; require no worse successful QR cases on both compilers.
+2. Expand long-run/modal/noise/scaling/latency tests against weighted-LS and QR/
+   square-root references, including budget exhaustion. Qualify allocations and
+   worker capacity separately: covariance `.eval()` adds a training temporary.
+3. Qualify a narrow GNU normalization fix offline with unchanged normal-input
+   behavior and tiny/zero/nonfinite regressions; preserve production flags.
+4. Only later review native Linux and verified observation-only source/ownership
+   contracts. No physical excitation, DM routing, production integration or
+   instrument activity is authorized. Stop after Phase 11 and obtain approval.
+
 
 The current **Phase 10 is an offline suppression study**, starting from committed
 Phases 1–9. Its exit artifacts are the deterministic simulation, unchanged-law
@@ -3588,6 +3737,27 @@ then documentation-only changes and separate formatting-only cleanup as required
 by `AGENTS.md`. This work does not switch branches, commit, or push.
 
 ## Follow-up and Edge Cases
+- **Phase 11 files:** new offline `stability.hpp/.cpp`, `ddspc_stability_test.cpp`,
+  `rls_diagnostics.cpp`, `fast_math_probe.cpp`, `prepare_stability.py`,
+  `run_phase11.py`, `phase11_report.py`, `Makefile.stability`,
+  `Makefile.stability-model`; existing vibration driver/header/runner, two test
+  Makefiles, README, this plan and `tests/results/phase11*`. No production source.
+- **Failed acceptance:** combined recovery improves long transients but worsens
+  short-stall QR. The experimental feedback preserves Phase 10's materialized exploration
+  intermediate; restoring it removed 27 small extra GCC QR regressions. Both
+  compilers retain two short-stall regressions. No new tolerance was added.
+  Default and symmetry-only QR remain byte-exact.
+- **Numerical limits:** symmetry is not universal SPD; empirical confidence is
+  not stability. Compare estimators on identical records and unchanged paths
+  against pinned references; changed closed-loop actions change training data.
+- **Recovery limits:** neutral-only may remain rank deficient; actual applied
+  freeze/clipping differs from requested history. Probe authority is finite and
+  simulation-only; permanent stale evidence/zero gain cannot enable probing.
+- **Outstanding gates:** narrow GNU source/rounding qualification, native Linux
+  FMA/denormal/sanitizer/runtime and sustained scheduling, physical WFS/applied-DM/
+  sensor timing/calibration, production ownership and any recovery authority.
+  No on-sky claim, stream/service, new actuation or next phase is authorized.
+
 
 - **Phase 10 files:** new `tests/vibration.hpp/.cpp`, `vibration_main.cpp`,
   `vibration_report.py`, `ddspc_vibration_test.cpp`, `Makefile.vibration`; existing

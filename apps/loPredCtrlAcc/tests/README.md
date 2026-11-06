@@ -115,6 +115,96 @@ aligned C++ allocation, peak live heap, and OS/library allocation are not measur
 This proves hot-path allocation and is not an allocation-free certification.
 The probe is force-included only in the separate benchmark build.
 
+## Phase 11 offline stability and recovery
+
+See [Phase 11 evidence](results/phase11.md) for covariance replay, the complete
+unfavorable cases, recovery timelines, acceptance limits and GNU disassembly.
+Only offline test drivers change. The application, original estimators, Legacy
+defaults and production flags remain untouched. These are simulated results in
+synthetic units, with no Linux or instrument qualification.
+
+`prepare_stability.py` pins Phase 10 commit
+`2fcf61a108c8f3d9c3d237a053f4e0634f0f4e6f`, creates a separately named estimator
+candidate, and appends `P=(P+P.transpose())/2` after its causal covariance update.
+Original RLS/QR remain reference paths. The unchanged simulation path delegates
+to a separately compiled verbatim Phase 10 loop. The new optional fourth CLI
+argument enables 64 scenarios (32 per learner), without changing the original
+52-case CLI. Primary strategies are `baseline`, `symmetric`, `recover` and
+`symmetric_recover`; `neutral` and `guard` are explicitly limited ablations.
+
+```sh
+make -C apps/loPredCtrlAcc -f tests/Makefile.vibration -j2 \
+  BUILD_DIR=build/phase11-vibration CXX=clang++
+python3 apps/loPredCtrlAcc/tests/run_phase11.py \
+  --binary apps/loPredCtrlAcc/build/phase11-vibration/ddspc_vibration \
+  --output apps/loPredCtrlAcc/build/phase11-final-clang
+make -C apps/loPredCtrlAcc -f tests/Makefile.vibration -j2 \
+  BUILD_DIR=build/phase11-vibration-gcc CXX=g++-15
+python3 apps/loPredCtrlAcc/tests/run_phase11.py \
+  --binary apps/loPredCtrlAcc/build/phase11-vibration-gcc/ddspc_vibration \
+  --output apps/loPredCtrlAcc/build/phase11-final-gcc \
+  --strategies baseline symmetric symmetric_recover
+make -C apps/loPredCtrlAcc -f tests/Makefile.stability -j2 \
+  BUILD_DIR=build/phase11-diagnostics CXX=clang++
+apps/loPredCtrlAcc/build/phase11-diagnostics/rls_diagnostics \
+  apps/loPredCtrlAcc/build/phase11-final-clang/baseline/broadband.csv 4 \
+  > apps/loPredCtrlAcc/build/phase11-replay-broadband-m4-gbase-pbase.csv
+make -C apps/loPredCtrlAcc -f tests/Makefile.offline -j2 check
+```
+
+The replay accepts `TRACE MODEL [GAMMA [PRIOR]]` (models 3=standard, 4=assisted).
+It compares original float RLS, covariance symmetrization, Joseph-form covariance,
+double recursion and QR to independently accumulated double weighted least
+squares, using **identical actual recorded applied inputs**. Changing gamma/prior
+does not reproduce the original model and is labeled accordingly. Repeat with
+`mixed.csv 3`, `28hz.csv 4`, `coherence_0.csv 4`, `broadband_qr.csv 4`, and broadband
+gamma=1/.999 or prior=.1 for the documented sensitivity study. Default replay
+checks the next-frame source coefficient norm exactly; it does not claim a
+full coefficient byte comparison from CSV norms.
+
+The full report generator requires the two raw trace matrices, diagnostic CSV
+above, and the original **pre-change Phase 10** 52-case captures in
+`build/phase11-before-{clang,gcc}`. These were captured using frozen committed
+executables before changes. They are hashed in the report; do not replace them
+with candidate output to obtain a passing reference check. The standalone unit
+tests independently compile the pinned original loop and need no retained CSVs.
+
+```sh
+python apps/loPredCtrlAcc/tests/vibration_report.py --self-test
+python apps/loPredCtrlAcc/tests/phase11_report.py \
+  --clang apps/loPredCtrlAcc/build/phase11-final-clang \
+  --gcc apps/loPredCtrlAcc/build/phase11-final-gcc \
+  --build apps/loPredCtrlAcc/build --output apps/loPredCtrlAcc/tests/results
+make -C apps/loPredCtrlAcc -f tests/Makefile.stability -j2 \
+  PROGRAM=fast_math_probe BUILD_DIR=build/phase11-fast-gcc-fast CXX=g++-15 \
+  CXXFLAGS='-O3 -g -std=c++20 -Wall -Wextra -ffast-math'
+apps/loPredCtrlAcc/build/phase11-fast-gcc-fast/fast_math_probe
+```
+
+Repeat the **probe only** with strict `-fno-fast-math`, fast-math plus
+`-fno-reciprocal-math`, `-fno-associative-math`, `-fno-finite-math-only` or
+`-fno-unsafe-math-optimizations`, using separate build directories. It prints
+expected failure evidence rather than returning failure for the original tiny
+kernel. IEEE bit inspection bypasses finite-only optimizer assumptions. Local
+no-reciprocal and double-normalization functions are experiments, not production
+fixes. Keep running the existing `check-legacy-fast`: GNU's known failure must
+remain visible. Do not use these experimental flags for production.
+
+Use the full strict Clang/GCC and ASan/UBSan commands elsewhere in this README;
+the new `[stability]` cases join the unchanged Phase 7–10 cases. For TSan, run
+`'[async][threaded],[stability]'` on the thread-sanitized executable: the first
+filter exercises actual concurrent snapshot reuse; virtual recovery cases use
+manual service and make no new concurrency qualification claim.
+
+Recovery actions are explicitly classified as hold, validated model, initial
+calibration, neutral return or bounded retraining probe. Calibration-derived slew
+limits, empirical matured-error confidence, finite probe budget and rank-sized
+validation are **offline policies**, with no new production authority. Invalid
+predictions never source a correction; neutral/probe actions have independent
+provenance. Some variants worsen successful cases; consult the acceptance table
+before considering adoption. No global stability or universal recovery is claimed.
+Stop after Phase 11; another development phase requires approval.
+
 ## Phase 10 closed-loop vibration study
 
 All commands below execute a numerical host-memory simulation. They do not link

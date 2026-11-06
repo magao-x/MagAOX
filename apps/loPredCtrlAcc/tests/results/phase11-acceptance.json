@@ -1,0 +1,6814 @@
+{
+  "exact_references": {
+    "clang": {
+      "original_rows_byte_exact": 2704000,
+      "unchanged_qr_rows_byte_exact": 1664000
+    },
+    "gcc": {
+      "original_rows_byte_exact": 2704000,
+      "unchanged_qr_rows_byte_exact": 1664000
+    }
+  },
+  "comparisons": [
+    {
+      "compiler": "clang",
+      "strategy": "guard",
+      "scenario": "broadband",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "guard",
+      "scenario": "broadband",
+      "model": 4,
+      "rms_difference": -0.5461606602888484,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "guard",
+      "scenario": "mixed",
+      "model": 3,
+      "rms_difference": -0.19907007273963298,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "guard",
+      "scenario": "mixed",
+      "model": 4,
+      "rms_difference": 0.17672842145722162,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "guard",
+      "scenario": "reset_qr",
+      "model": 3,
+      "rms_difference": -0.04286352261798998,
+      "baseline_success": false,
+      "recovery_failure": 1,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "guard",
+      "scenario": "reset_qr",
+      "model": 4,
+      "rms_difference": -0.051350465176408844,
+      "baseline_success": false,
+      "recovery_failure": 1,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "guard",
+      "scenario": "missing_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "guard",
+      "scenario": "missing_qr",
+      "model": 4,
+      "rms_difference": -0.08565161517388281,
+      "baseline_success": false,
+      "recovery_failure": 1,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "guard",
+      "scenario": "overflow_qr",
+      "model": 3,
+      "rms_difference": -0.15095456034037624,
+      "baseline_success": false,
+      "recovery_failure": 1,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "guard",
+      "scenario": "overflow_qr",
+      "model": 4,
+      "rms_difference": -0.14176235329686732,
+      "baseline_success": false,
+      "recovery_failure": 1,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "guard",
+      "scenario": "stale_transient_qr",
+      "model": 3,
+      "rms_difference": 0.37585898750547986,
+      "baseline_success": true,
+      "recovery_failure": 1,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "guard",
+      "scenario": "stale_transient_qr",
+      "model": 4,
+      "rms_difference": 0.39744585978920977,
+      "baseline_success": true,
+      "recovery_failure": 1,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "guard",
+      "scenario": "excitation_loss_qr",
+      "model": 3,
+      "rms_difference": -0.5126934927169454,
+      "baseline_success": false,
+      "recovery_failure": 1,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "guard",
+      "scenario": "excitation_loss_qr",
+      "model": 4,
+      "rms_difference": -0.31052902693980255,
+      "baseline_success": false,
+      "recovery_failure": 1,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "guard",
+      "scenario": "wrong_sign_qr",
+      "model": 3,
+      "rms_difference": -3.3417568846209997,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "guard",
+      "scenario": "wrong_sign_qr",
+      "model": 4,
+      "rms_difference": -3.3417568846209997,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "guard",
+      "scenario": "command_limit_qr",
+      "model": 3,
+      "rms_difference": -0.041138519672778484,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "guard",
+      "scenario": "command_limit_qr",
+      "model": 4,
+      "rms_difference": -0.15242572878875066,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "guard",
+      "scenario": "publication_6_qr",
+      "model": 3,
+      "rms_difference": -0.022835920548856747,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "guard",
+      "scenario": "publication_6_qr",
+      "model": 4,
+      "rms_difference": -0.022835920548856747,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "neutral",
+      "scenario": "broadband",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "neutral",
+      "scenario": "broadband",
+      "model": 4,
+      "rms_difference": -0.645221863768398,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "neutral",
+      "scenario": "mixed",
+      "model": 3,
+      "rms_difference": -0.3081516188921145,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "neutral",
+      "scenario": "mixed",
+      "model": 4,
+      "rms_difference": -0.005469794828347314,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "neutral",
+      "scenario": "reset_qr",
+      "model": 3,
+      "rms_difference": -0.04286352261798998,
+      "baseline_success": false,
+      "recovery_failure": 1,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "neutral",
+      "scenario": "reset_qr",
+      "model": 4,
+      "rms_difference": -0.051350465176408844,
+      "baseline_success": false,
+      "recovery_failure": 1,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "neutral",
+      "scenario": "missing_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "neutral",
+      "scenario": "missing_qr",
+      "model": 4,
+      "rms_difference": -0.08565161517388281,
+      "baseline_success": false,
+      "recovery_failure": 1,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "neutral",
+      "scenario": "overflow_qr",
+      "model": 3,
+      "rms_difference": -0.15095456034037624,
+      "baseline_success": false,
+      "recovery_failure": 1,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "neutral",
+      "scenario": "overflow_qr",
+      "model": 4,
+      "rms_difference": -0.14176235329686732,
+      "baseline_success": false,
+      "recovery_failure": 1,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "neutral",
+      "scenario": "stale_transient_qr",
+      "model": 3,
+      "rms_difference": 0.37585898750547986,
+      "baseline_success": true,
+      "recovery_failure": 1,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "neutral",
+      "scenario": "stale_transient_qr",
+      "model": 4,
+      "rms_difference": 0.39744585978920977,
+      "baseline_success": true,
+      "recovery_failure": 1,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "neutral",
+      "scenario": "excitation_loss_qr",
+      "model": 3,
+      "rms_difference": -0.5126934927169454,
+      "baseline_success": false,
+      "recovery_failure": 1,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "neutral",
+      "scenario": "excitation_loss_qr",
+      "model": 4,
+      "rms_difference": -0.31052902693980255,
+      "baseline_success": false,
+      "recovery_failure": 1,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "neutral",
+      "scenario": "wrong_sign_qr",
+      "model": 3,
+      "rms_difference": -3.3417568846209997,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "neutral",
+      "scenario": "wrong_sign_qr",
+      "model": 4,
+      "rms_difference": -3.3417568846209997,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "neutral",
+      "scenario": "command_limit_qr",
+      "model": 3,
+      "rms_difference": -0.041138519672778484,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "neutral",
+      "scenario": "command_limit_qr",
+      "model": 4,
+      "rms_difference": -0.15242572878875066,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "neutral",
+      "scenario": "publication_6_qr",
+      "model": 3,
+      "rms_difference": -0.022835920548856747,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "neutral",
+      "scenario": "publication_6_qr",
+      "model": 4,
+      "rms_difference": -0.022835920548856747,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "28hz",
+      "model": 3,
+      "rms_difference": -0.001185658543903595,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "28hz",
+      "model": 4,
+      "rms_difference": 0.003967897204043919,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "56hz",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "56hz",
+      "model": 4,
+      "rms_difference": 0.008154905033992355,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "mixed",
+      "model": 3,
+      "rms_difference": -0.3438865999046838,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "mixed",
+      "model": 4,
+      "rms_difference": 0.018372805267358808,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "broadband",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "broadband",
+      "model": 4,
+      "rms_difference": -0.9623925254768888,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "accel_noise",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "accel_noise",
+      "model": 4,
+      "rms_difference": -1.197296234366078,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "coherence_0",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "coherence_0",
+      "model": 4,
+      "rms_difference": -0.9670115740418344,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "coherence_1",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "coherence_1",
+      "model": 4,
+      "rms_difference": -0.9115765698770644,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "coherence_2",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "coherence_2",
+      "model": 4,
+      "rms_difference": -1.1001923416090382,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "coherence_3",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "coherence_3",
+      "model": 4,
+      "rms_difference": -1.2399867561786704,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "delay_jitter",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "delay_jitter",
+      "model": 4,
+      "rms_difference": -0.8953459819160733,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "missing",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "missing",
+      "model": 4,
+      "rms_difference": -0.5064312544822509,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "latency_1",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "latency_1",
+      "model": 4,
+      "rms_difference": -0.6693604148723009,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "latency_2",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "latency_2",
+      "model": 4,
+      "rms_difference": -1.249776161860878,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "latency_3",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "latency_3",
+      "model": 4,
+      "rms_difference": -0.8728830329635116,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "gain_low",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "gain_low",
+      "model": 4,
+      "rms_difference": -0.8031254950404064,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "gain_high",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "gain_high",
+      "model": 4,
+      "rms_difference": -2.1308647550490516,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "wrong_sign",
+      "model": 3,
+      "rms_difference": -3.834070569079691,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "wrong_sign",
+      "model": 4,
+      "rms_difference": -3.7816296338512307,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "zero_gain",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "zero_gain",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "command_limit",
+      "model": 3,
+      "rms_difference": -0.15086859925022306,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "command_limit",
+      "model": 4,
+      "rms_difference": -0.1523946905601894,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "publication_1",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "publication_1",
+      "model": 4,
+      "rms_difference": -0.9623925254768888,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "publication_3",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "publication_3",
+      "model": 4,
+      "rms_difference": -0.9114440199066874,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "publication_6",
+      "model": 3,
+      "rms_difference": -0.022835920548856747,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "publication_6",
+      "model": 4,
+      "rms_difference": -0.022835920548856747,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "reset",
+      "model": 3,
+      "rms_difference": -0.3900874994317793,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "reset",
+      "model": 4,
+      "rms_difference": -0.5698767029557102,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "overflow",
+      "model": 3,
+      "rms_difference": -0.4924727021103601,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "overflow",
+      "model": 4,
+      "rms_difference": -0.7429986862905553,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "broadband_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "broadband_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "excitation_loss",
+      "model": 3,
+      "rms_difference": -0.8405071226375457,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "excitation_loss",
+      "model": 4,
+      "rms_difference": -0.6602413041875178,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "stale_transient",
+      "model": 3,
+      "rms_difference": 0.02824770160607383,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "stale_transient",
+      "model": 4,
+      "rms_difference": -1.0956136561115397,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "prior_strong",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "prior_strong",
+      "model": 4,
+      "rms_difference": 0.00842271915120621,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "forgetting_none",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "forgetting_none",
+      "model": 4,
+      "rms_difference": -0.18379738085079494,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "forgetting_more",
+      "model": 3,
+      "rms_difference": -0.3052536176631149,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "forgetting_more",
+      "model": 4,
+      "rms_difference": -1.2666797884639784,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "lambda_high",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "lambda_high",
+      "model": 4,
+      "rms_difference": -0.8630622134510142,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "broadband_seed200",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "broadband_seed200",
+      "model": 4,
+      "rms_difference": -1.0012056207168365,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "broadband_seed300",
+      "model": 3,
+      "rms_difference": -0.0256581185875856,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "broadband_seed300",
+      "model": 4,
+      "rms_difference": -0.9124291358433628,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "28hz_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "28hz_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "56hz_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "56hz_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "mixed_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "mixed_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "accel_noise_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "accel_noise_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "coherence_0_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "coherence_0_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "coherence_1_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "coherence_1_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "coherence_2_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "coherence_2_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "coherence_3_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "coherence_3_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "delay_jitter_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "delay_jitter_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "missing_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "missing_qr",
+      "model": 4,
+      "rms_difference": -0.440910139523619,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "latency_1_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "latency_1_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "latency_2_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "latency_2_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "latency_3_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "latency_3_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "gain_low_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "gain_low_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "gain_high_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "gain_high_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "wrong_sign_qr",
+      "model": 3,
+      "rms_difference": -3.8349575137195564,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "wrong_sign_qr",
+      "model": 4,
+      "rms_difference": -3.875013592265813,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "zero_gain_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "zero_gain_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "command_limit_qr",
+      "model": 3,
+      "rms_difference": -0.15084247107618948,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "command_limit_qr",
+      "model": 4,
+      "rms_difference": -0.15242572878875066,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "publication_1_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "publication_1_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "publication_3_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "publication_3_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "publication_6_qr",
+      "model": 3,
+      "rms_difference": -0.022835920548856747,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "publication_6_qr",
+      "model": 4,
+      "rms_difference": -0.022835920548856747,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "reset_qr",
+      "model": 3,
+      "rms_difference": -0.38994377406413394,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "reset_qr",
+      "model": 4,
+      "rms_difference": -0.40793753197903954,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "overflow_qr",
+      "model": 3,
+      "rms_difference": -0.4932603162519966,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "overflow_qr",
+      "model": 4,
+      "rms_difference": -0.4952531903980763,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "excitation_loss_qr",
+      "model": 3,
+      "rms_difference": -0.8386867148160344,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "excitation_loss_qr",
+      "model": 4,
+      "rms_difference": -0.6524472886809249,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "stale_transient_qr",
+      "model": 3,
+      "rms_difference": 0.028616469723922747,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "stale_transient_qr",
+      "model": 4,
+      "rms_difference": 0.03931661514680584,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "prior_strong_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "prior_strong_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "forgetting_none_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "forgetting_none_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "forgetting_more_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "forgetting_more_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "lambda_high_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "lambda_high_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "broadband_seed200_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "broadband_seed200_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "broadband_seed300_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "recover",
+      "scenario": "broadband_seed300_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "28hz",
+      "model": 3,
+      "rms_difference": -0.028229787385471834,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "28hz",
+      "model": 4,
+      "rms_difference": -0.0343489404593378,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "56hz",
+      "model": 3,
+      "rms_difference": -9.896567312699112e-06,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "56hz",
+      "model": 4,
+      "rms_difference": -0.012778528261402862,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "mixed",
+      "model": 3,
+      "rms_difference": -0.3825179908989343,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "mixed",
+      "model": 4,
+      "rms_difference": -0.027213429789160005,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "broadband",
+      "model": 3,
+      "rms_difference": -0.001005814868718008,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "broadband",
+      "model": 4,
+      "rms_difference": -1.0925148818144637,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "accel_noise",
+      "model": 3,
+      "rms_difference": -0.001005814868718008,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "accel_noise",
+      "model": 4,
+      "rms_difference": -1.3344086218710427,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "coherence_0",
+      "model": 3,
+      "rms_difference": -0.001005814868718008,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "coherence_0",
+      "model": 4,
+      "rms_difference": -1.0774494741347318,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "coherence_1",
+      "model": 3,
+      "rms_difference": -0.001005814868718008,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "coherence_1",
+      "model": 4,
+      "rms_difference": -1.0252125508079952,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "coherence_2",
+      "model": 3,
+      "rms_difference": -0.001005814868718008,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "coherence_2",
+      "model": 4,
+      "rms_difference": -1.2051112209484,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "coherence_3",
+      "model": 3,
+      "rms_difference": -0.001005814868718008,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "coherence_3",
+      "model": 4,
+      "rms_difference": -1.3393095903119199,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "delay_jitter",
+      "model": 3,
+      "rms_difference": 0.0001592499993087193,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "delay_jitter",
+      "model": 4,
+      "rms_difference": -0.9701983866399961,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "missing",
+      "model": 3,
+      "rms_difference": -0.001005814868718008,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "missing",
+      "model": 4,
+      "rms_difference": -0.14365533803097208,
+      "baseline_success": false,
+      "recovery_failure": 1,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "latency_1",
+      "model": 3,
+      "rms_difference": -0.0009087824985965498,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "latency_1",
+      "model": 4,
+      "rms_difference": -0.7645817068872689,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "latency_2",
+      "model": 3,
+      "rms_difference": 0.0003870324640538325,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "latency_2",
+      "model": 4,
+      "rms_difference": -1.3372103724369637,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "latency_3",
+      "model": 3,
+      "rms_difference": 0.00018311998036091293,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "latency_3",
+      "model": 4,
+      "rms_difference": -0.9439416303671764,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "gain_low",
+      "model": 3,
+      "rms_difference": -0.005221261112859879,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "gain_low",
+      "model": 4,
+      "rms_difference": -0.9054294579064401,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "gain_high",
+      "model": 3,
+      "rms_difference": -0.00039576505883634483,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "gain_high",
+      "model": 4,
+      "rms_difference": -2.2372731026259873,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "wrong_sign",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "wrong_sign",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "zero_gain",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "zero_gain",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "command_limit",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "command_limit",
+      "model": 4,
+      "rms_difference": -0.01412009717006868,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "publication_1",
+      "model": 3,
+      "rms_difference": -0.001005814868718008,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "publication_1",
+      "model": 4,
+      "rms_difference": -1.0925148818144637,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "publication_3",
+      "model": 3,
+      "rms_difference": -0.000649655971290547,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "publication_3",
+      "model": 4,
+      "rms_difference": -1.0523310303873818,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "publication_6",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "publication_6",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "reset",
+      "model": 3,
+      "rms_difference": -4.06606521941022e-05,
+      "baseline_success": false,
+      "recovery_failure": 1,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "reset",
+      "model": 4,
+      "rms_difference": -0.2436442794250896,
+      "baseline_success": false,
+      "recovery_failure": 1,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "overflow",
+      "model": 3,
+      "rms_difference": 0.0005359360809016334,
+      "baseline_success": false,
+      "recovery_failure": 1,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "overflow",
+      "model": 4,
+      "rms_difference": -0.31691852095587225,
+      "baseline_success": false,
+      "recovery_failure": 1,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "broadband_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "broadband_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "excitation_loss",
+      "model": 3,
+      "rms_difference": -0.0013219526547648686,
+      "baseline_success": false,
+      "recovery_failure": 1,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "excitation_loss",
+      "model": 4,
+      "rms_difference": -0.08834351479529867,
+      "baseline_success": false,
+      "recovery_failure": 1,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "stale_transient",
+      "model": 3,
+      "rms_difference": -0.0006743059093413939,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "stale_transient",
+      "model": 4,
+      "rms_difference": -1.2069523767883683,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "prior_strong",
+      "model": 3,
+      "rms_difference": -1.3272376254161444e-05,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "prior_strong",
+      "model": 4,
+      "rms_difference": -0.036721532643433946,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "forgetting_none",
+      "model": 3,
+      "rms_difference": 7.129596319524478e-05,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "forgetting_none",
+      "model": 4,
+      "rms_difference": -0.2901489441744997,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "forgetting_more",
+      "model": 3,
+      "rms_difference": -0.2957925730617796,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "forgetting_more",
+      "model": 4,
+      "rms_difference": -1.3864627749053131,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "lambda_high",
+      "model": 3,
+      "rms_difference": -0.0008567999003979976,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "lambda_high",
+      "model": 4,
+      "rms_difference": -0.9524942473895677,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "broadband_seed200",
+      "model": 3,
+      "rms_difference": -0.0011091807615706134,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "broadband_seed200",
+      "model": 4,
+      "rms_difference": -1.1203795170095687,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "broadband_seed300",
+      "model": 3,
+      "rms_difference": -0.04616228672788848,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "broadband_seed300",
+      "model": 4,
+      "rms_difference": -1.0513281499390936,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "28hz_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "28hz_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "56hz_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "56hz_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "mixed_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "mixed_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "accel_noise_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "accel_noise_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "coherence_0_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "coherence_0_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "coherence_1_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "coherence_1_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "coherence_2_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "coherence_2_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "coherence_3_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "coherence_3_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "delay_jitter_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "delay_jitter_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "missing_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "missing_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 1,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "latency_1_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "latency_1_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "latency_2_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "latency_2_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "latency_3_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "latency_3_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "gain_low_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "gain_low_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "gain_high_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "gain_high_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "wrong_sign_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "wrong_sign_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "zero_gain_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "zero_gain_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "command_limit_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "command_limit_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "publication_1_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "publication_1_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "publication_3_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "publication_3_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "publication_6_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "publication_6_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "reset_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 1,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "reset_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 1,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "overflow_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 1,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "overflow_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 1,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "excitation_loss_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 1,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "excitation_loss_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 1,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "stale_transient_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "stale_transient_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "prior_strong_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "prior_strong_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "forgetting_none_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "forgetting_none_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "forgetting_more_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "forgetting_more_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "lambda_high_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "lambda_high_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "broadband_seed200_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "broadband_seed200_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "broadband_seed300_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric",
+      "scenario": "broadband_seed300_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "28hz",
+      "model": 3,
+      "rms_difference": -0.028229787385471834,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "28hz",
+      "model": 4,
+      "rms_difference": -0.0343489404593378,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "56hz",
+      "model": 3,
+      "rms_difference": -9.896567312699112e-06,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "56hz",
+      "model": 4,
+      "rms_difference": -0.012778528261402862,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "mixed",
+      "model": 3,
+      "rms_difference": -0.3825179908989343,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "mixed",
+      "model": 4,
+      "rms_difference": -0.027213429789160005,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "broadband",
+      "model": 3,
+      "rms_difference": -0.001005814868718008,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "broadband",
+      "model": 4,
+      "rms_difference": -1.0925148818144637,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "accel_noise",
+      "model": 3,
+      "rms_difference": -0.001005814868718008,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "accel_noise",
+      "model": 4,
+      "rms_difference": -1.3344086218710427,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "coherence_0",
+      "model": 3,
+      "rms_difference": -0.001005814868718008,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "coherence_0",
+      "model": 4,
+      "rms_difference": -1.0774494741347318,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "coherence_1",
+      "model": 3,
+      "rms_difference": -0.001005814868718008,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "coherence_1",
+      "model": 4,
+      "rms_difference": -1.0252125508079952,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "coherence_2",
+      "model": 3,
+      "rms_difference": -0.001005814868718008,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "coherence_2",
+      "model": 4,
+      "rms_difference": -1.2051112209484,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "coherence_3",
+      "model": 3,
+      "rms_difference": -0.001005814868718008,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "coherence_3",
+      "model": 4,
+      "rms_difference": -1.3393095903119199,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "delay_jitter",
+      "model": 3,
+      "rms_difference": 0.0001592499993087193,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "delay_jitter",
+      "model": 4,
+      "rms_difference": -0.9701983866399961,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "missing",
+      "model": 3,
+      "rms_difference": -0.001005814868718008,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "missing",
+      "model": 4,
+      "rms_difference": -0.5846586700537567,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "latency_1",
+      "model": 3,
+      "rms_difference": -0.0009087824985965498,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "latency_1",
+      "model": 4,
+      "rms_difference": -0.7645817068872689,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "latency_2",
+      "model": 3,
+      "rms_difference": 0.0003870324640538325,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "latency_2",
+      "model": 4,
+      "rms_difference": -1.3372103724369637,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "latency_3",
+      "model": 3,
+      "rms_difference": 0.00018311998036091293,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "latency_3",
+      "model": 4,
+      "rms_difference": -0.9439416303671764,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "gain_low",
+      "model": 3,
+      "rms_difference": -0.005221261112859879,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "gain_low",
+      "model": 4,
+      "rms_difference": -0.9054294579064401,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "gain_high",
+      "model": 3,
+      "rms_difference": -0.00039576505883634483,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "gain_high",
+      "model": 4,
+      "rms_difference": -2.2372731026259873,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "wrong_sign",
+      "model": 3,
+      "rms_difference": -3.835275415424433,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "wrong_sign",
+      "model": 4,
+      "rms_difference": -3.8755512479754293,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "zero_gain",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "zero_gain",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "command_limit",
+      "model": 3,
+      "rms_difference": -0.15084543654642496,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "command_limit",
+      "model": 4,
+      "rms_difference": -0.1665483317992406,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "publication_1",
+      "model": 3,
+      "rms_difference": -0.001005814868718008,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "publication_1",
+      "model": 4,
+      "rms_difference": -1.0925148818144637,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "publication_3",
+      "model": 3,
+      "rms_difference": -0.000649655971290547,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "publication_3",
+      "model": 4,
+      "rms_difference": -1.0523310303873818,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "publication_6",
+      "model": 3,
+      "rms_difference": -0.022835920548856747,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "publication_6",
+      "model": 4,
+      "rms_difference": -0.022835920548856747,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "reset",
+      "model": 3,
+      "rms_difference": -0.39004622924919263,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "reset",
+      "model": 4,
+      "rms_difference": -0.6515159903859511,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "overflow",
+      "model": 3,
+      "rms_difference": -0.49279818886435944,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "overflow",
+      "model": 4,
+      "rms_difference": -0.8122757559388863,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "broadband_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "broadband_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "excitation_loss",
+      "model": 3,
+      "rms_difference": -0.8403673654952455,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "excitation_loss",
+      "model": 4,
+      "rms_difference": -0.7408046658341445,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "stale_transient",
+      "model": 3,
+      "rms_difference": 0.028049039897079978,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "stale_transient",
+      "model": 4,
+      "rms_difference": -1.167815633676576,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "prior_strong",
+      "model": 3,
+      "rms_difference": -1.3272376254161444e-05,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "prior_strong",
+      "model": 4,
+      "rms_difference": -0.036721532643433946,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "forgetting_none",
+      "model": 3,
+      "rms_difference": 7.129596319524478e-05,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "forgetting_none",
+      "model": 4,
+      "rms_difference": -0.2901489441744997,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "forgetting_more",
+      "model": 3,
+      "rms_difference": -0.2957925730617796,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "forgetting_more",
+      "model": 4,
+      "rms_difference": -1.3864627749053131,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "lambda_high",
+      "model": 3,
+      "rms_difference": -0.0008567999003979976,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "lambda_high",
+      "model": 4,
+      "rms_difference": -0.9524942473895677,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "broadband_seed200",
+      "model": 3,
+      "rms_difference": -0.0011091807615706134,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "broadband_seed200",
+      "model": 4,
+      "rms_difference": -1.1203795170095687,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "broadband_seed300",
+      "model": 3,
+      "rms_difference": -0.04616228672788848,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "broadband_seed300",
+      "model": 4,
+      "rms_difference": -1.0513281499390936,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "28hz_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "28hz_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "56hz_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "56hz_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "mixed_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "mixed_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "accel_noise_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "accel_noise_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "coherence_0_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "coherence_0_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "coherence_1_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "coherence_1_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "coherence_2_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "coherence_2_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "coherence_3_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "coherence_3_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "delay_jitter_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "delay_jitter_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "missing_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "missing_qr",
+      "model": 4,
+      "rms_difference": -0.440910139523619,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "latency_1_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "latency_1_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "latency_2_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "latency_2_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "latency_3_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "latency_3_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "gain_low_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "gain_low_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "gain_high_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "gain_high_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "wrong_sign_qr",
+      "model": 3,
+      "rms_difference": -3.8349575137195564,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "wrong_sign_qr",
+      "model": 4,
+      "rms_difference": -3.875013592265813,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "zero_gain_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "zero_gain_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "command_limit_qr",
+      "model": 3,
+      "rms_difference": -0.15084247107618948,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "command_limit_qr",
+      "model": 4,
+      "rms_difference": -0.15242572878875066,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "publication_1_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "publication_1_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "publication_3_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "publication_3_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "publication_6_qr",
+      "model": 3,
+      "rms_difference": -0.022835920548856747,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "publication_6_qr",
+      "model": 4,
+      "rms_difference": -0.022835920548856747,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "reset_qr",
+      "model": 3,
+      "rms_difference": -0.38994377406413394,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "reset_qr",
+      "model": 4,
+      "rms_difference": -0.40793753197903954,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "overflow_qr",
+      "model": 3,
+      "rms_difference": -0.4932603162519966,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "overflow_qr",
+      "model": 4,
+      "rms_difference": -0.4952531903980763,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "excitation_loss_qr",
+      "model": 3,
+      "rms_difference": -0.8386867148160344,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "excitation_loss_qr",
+      "model": 4,
+      "rms_difference": -0.6524472886809249,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "stale_transient_qr",
+      "model": 3,
+      "rms_difference": 0.028616469723922747,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "stale_transient_qr",
+      "model": 4,
+      "rms_difference": 0.03931661514680584,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "prior_strong_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "prior_strong_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "forgetting_none_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "forgetting_none_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "forgetting_more_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "forgetting_more_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "lambda_high_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "lambda_high_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "broadband_seed200_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "broadband_seed200_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "broadband_seed300_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "clang",
+      "strategy": "symmetric_recover",
+      "scenario": "broadband_seed300_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "28hz",
+      "model": 3,
+      "rms_difference": -0.06546429979872517,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "28hz",
+      "model": 4,
+      "rms_difference": 4.587175891908324e-05,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "56hz",
+      "model": 3,
+      "rms_difference": 8.098685682618456e-05,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "56hz",
+      "model": 4,
+      "rms_difference": -5.357295860886069e-05,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "mixed",
+      "model": 3,
+      "rms_difference": -2.8780760977023534e-06,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "mixed",
+      "model": 4,
+      "rms_difference": -0.04575163072434179,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "broadband",
+      "model": 3,
+      "rms_difference": -0.0009137028674462977,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "broadband",
+      "model": 4,
+      "rms_difference": -2.3266799746668987,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "accel_noise",
+      "model": 3,
+      "rms_difference": -0.0009137028674462977,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "accel_noise",
+      "model": 4,
+      "rms_difference": -1.446874680909705,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "coherence_0",
+      "model": 3,
+      "rms_difference": -0.0009137028674462977,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "coherence_0",
+      "model": 4,
+      "rms_difference": -0.9536631196675549,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "coherence_1",
+      "model": 3,
+      "rms_difference": -0.0009137028674462977,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "coherence_1",
+      "model": 4,
+      "rms_difference": -0.8083902121398207,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "coherence_2",
+      "model": 3,
+      "rms_difference": -0.0009137028674462977,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "coherence_2",
+      "model": 4,
+      "rms_difference": -1.1293990323996732,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "coherence_3",
+      "model": 3,
+      "rms_difference": -0.0009137028674462977,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "coherence_3",
+      "model": 4,
+      "rms_difference": -1.3024237924570239,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "delay_jitter",
+      "model": 3,
+      "rms_difference": -0.0002131821053377725,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "delay_jitter",
+      "model": 4,
+      "rms_difference": -0.8148415491236103,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "missing",
+      "model": 3,
+      "rms_difference": -0.0009137028674462977,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "missing",
+      "model": 4,
+      "rms_difference": -0.13217058283589056,
+      "baseline_success": false,
+      "recovery_failure": 1,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "latency_1",
+      "model": 3,
+      "rms_difference": -0.0008075359497349138,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "latency_1",
+      "model": 4,
+      "rms_difference": -0.7805267381710962,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "latency_2",
+      "model": 3,
+      "rms_difference": -4.846070033817651e-05,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "latency_2",
+      "model": 4,
+      "rms_difference": -0.9527408033918973,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "latency_3",
+      "model": 3,
+      "rms_difference": 9.021493360378274e-06,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "latency_3",
+      "model": 4,
+      "rms_difference": -0.9857103185900502,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "gain_low",
+      "model": 3,
+      "rms_difference": -0.015814350526386023,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "gain_low",
+      "model": 4,
+      "rms_difference": -0.6331599944246853,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "gain_high",
+      "model": 3,
+      "rms_difference": -0.0002982618912899526,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "gain_high",
+      "model": 4,
+      "rms_difference": -1.2465646010620524,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "wrong_sign",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "wrong_sign",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "zero_gain",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "zero_gain",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "command_limit",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "command_limit",
+      "model": 4,
+      "rms_difference": 0.12277308182024549,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "publication_1",
+      "model": 3,
+      "rms_difference": -0.0009137028674462977,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "publication_1",
+      "model": 4,
+      "rms_difference": -2.3266799746668987,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "publication_3",
+      "model": 3,
+      "rms_difference": -0.0009217900642817939,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "publication_3",
+      "model": 4,
+      "rms_difference": -0.9067739093250985,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "publication_6",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "publication_6",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "reset",
+      "model": 3,
+      "rms_difference": 7.862969408234388e-05,
+      "baseline_success": false,
+      "recovery_failure": 1,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "reset",
+      "model": 4,
+      "rms_difference": -0.13890419461081327,
+      "baseline_success": false,
+      "recovery_failure": 1,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "overflow",
+      "model": 3,
+      "rms_difference": 0.0005816275098858847,
+      "baseline_success": false,
+      "recovery_failure": 1,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "overflow",
+      "model": 4,
+      "rms_difference": -0.14007497801693536,
+      "baseline_success": false,
+      "recovery_failure": 1,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "broadband_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "broadband_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "excitation_loss",
+      "model": 3,
+      "rms_difference": -0.00107675264524687,
+      "baseline_success": false,
+      "recovery_failure": 1,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "excitation_loss",
+      "model": 4,
+      "rms_difference": -0.04757255983996522,
+      "baseline_success": false,
+      "recovery_failure": 1,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "stale_transient",
+      "model": 3,
+      "rms_difference": -0.000691675706587111,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "stale_transient",
+      "model": 4,
+      "rms_difference": -0.9962695339246674,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "prior_strong",
+      "model": 3,
+      "rms_difference": -2.7172279387643883e-06,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "prior_strong",
+      "model": 4,
+      "rms_difference": -0.0029353662432635985,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "forgetting_none",
+      "model": 3,
+      "rms_difference": 6.3323395223705e-05,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "forgetting_none",
+      "model": 4,
+      "rms_difference": -0.33274935556901764,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "forgetting_more",
+      "model": 3,
+      "rms_difference": -0.983846586507478,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "forgetting_more",
+      "model": 4,
+      "rms_difference": -1.6305905757398464,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "lambda_high",
+      "model": 3,
+      "rms_difference": -0.001084011328461143,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "lambda_high",
+      "model": 4,
+      "rms_difference": -0.6848696841492503,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "broadband_seed200",
+      "model": 3,
+      "rms_difference": -0.03978039276666662,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "broadband_seed200",
+      "model": 4,
+      "rms_difference": -1.171566458280468,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "broadband_seed300",
+      "model": 3,
+      "rms_difference": -0.07193599439899998,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "broadband_seed300",
+      "model": 4,
+      "rms_difference": -0.9670445696843961,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "28hz_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "28hz_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "56hz_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "56hz_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "mixed_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "mixed_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "accel_noise_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "accel_noise_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "coherence_0_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "coherence_0_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "coherence_1_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "coherence_1_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "coherence_2_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "coherence_2_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "coherence_3_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "coherence_3_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "delay_jitter_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "delay_jitter_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "missing_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "missing_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 1,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "latency_1_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "latency_1_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "latency_2_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "latency_2_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "latency_3_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "latency_3_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "gain_low_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "gain_low_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "gain_high_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "gain_high_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "wrong_sign_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "wrong_sign_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "zero_gain_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "zero_gain_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "command_limit_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "command_limit_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "publication_1_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "publication_1_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "publication_3_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "publication_3_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "publication_6_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "publication_6_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "reset_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 1,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "reset_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 1,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "overflow_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 1,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "overflow_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 1,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "excitation_loss_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 1,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "excitation_loss_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 1,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "stale_transient_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "stale_transient_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "prior_strong_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "prior_strong_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "forgetting_none_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "forgetting_none_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "forgetting_more_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "forgetting_more_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "lambda_high_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "lambda_high_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "broadband_seed200_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "broadband_seed200_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "broadband_seed300_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric",
+      "scenario": "broadband_seed300_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "28hz",
+      "model": 3,
+      "rms_difference": -0.06546429979872517,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "28hz",
+      "model": 4,
+      "rms_difference": 4.587175891908324e-05,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "56hz",
+      "model": 3,
+      "rms_difference": 8.098685682618456e-05,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "56hz",
+      "model": 4,
+      "rms_difference": -5.357295860886069e-05,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "mixed",
+      "model": 3,
+      "rms_difference": -2.8780760977023534e-06,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "mixed",
+      "model": 4,
+      "rms_difference": -0.04575163072434179,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "broadband",
+      "model": 3,
+      "rms_difference": -0.0009137028674462977,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "broadband",
+      "model": 4,
+      "rms_difference": -2.3266799746668987,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "accel_noise",
+      "model": 3,
+      "rms_difference": -0.0009137028674462977,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "accel_noise",
+      "model": 4,
+      "rms_difference": -1.446874680909705,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "coherence_0",
+      "model": 3,
+      "rms_difference": -0.0009137028674462977,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "coherence_0",
+      "model": 4,
+      "rms_difference": -0.9536631196675549,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "coherence_1",
+      "model": 3,
+      "rms_difference": -0.0009137028674462977,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "coherence_1",
+      "model": 4,
+      "rms_difference": -0.8083902121398207,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "coherence_2",
+      "model": 3,
+      "rms_difference": -0.0009137028674462977,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "coherence_2",
+      "model": 4,
+      "rms_difference": -1.1293990323996732,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "coherence_3",
+      "model": 3,
+      "rms_difference": -0.0009137028674462977,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "coherence_3",
+      "model": 4,
+      "rms_difference": -1.3024237924570239,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "delay_jitter",
+      "model": 3,
+      "rms_difference": -0.0002131821053377725,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "delay_jitter",
+      "model": 4,
+      "rms_difference": -0.8148415491236103,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "missing",
+      "model": 3,
+      "rms_difference": -0.0009137028674462977,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "missing",
+      "model": 4,
+      "rms_difference": -0.5731768241712979,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "latency_1",
+      "model": 3,
+      "rms_difference": -0.0008075359497349138,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "latency_1",
+      "model": 4,
+      "rms_difference": -0.7805267381710962,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "latency_2",
+      "model": 3,
+      "rms_difference": -4.846070033817651e-05,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "latency_2",
+      "model": 4,
+      "rms_difference": -0.9527408033918973,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "latency_3",
+      "model": 3,
+      "rms_difference": 9.021493360378274e-06,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "latency_3",
+      "model": 4,
+      "rms_difference": -0.9857103185900502,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "gain_low",
+      "model": 3,
+      "rms_difference": -0.015814350526386023,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "gain_low",
+      "model": 4,
+      "rms_difference": -0.6331599944246853,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "gain_high",
+      "model": 3,
+      "rms_difference": -0.0002982618912899526,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "gain_high",
+      "model": 4,
+      "rms_difference": -1.2465646010620524,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "wrong_sign",
+      "model": 3,
+      "rms_difference": -3.836211857831137,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "wrong_sign",
+      "model": 4,
+      "rms_difference": -3.874889604569926,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "zero_gain",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "zero_gain",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "command_limit",
+      "model": 3,
+      "rms_difference": -0.15084466697686932,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "command_limit",
+      "model": 4,
+      "rms_difference": -0.029653124331399494,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "publication_1",
+      "model": 3,
+      "rms_difference": -0.0009137028674462977,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "publication_1",
+      "model": 4,
+      "rms_difference": -2.3266799746668987,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "publication_3",
+      "model": 3,
+      "rms_difference": -0.0009217900642817939,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "publication_3",
+      "model": 4,
+      "rms_difference": -0.9067739093250985,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "publication_6",
+      "model": 3,
+      "rms_difference": -0.02283591644316474,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "publication_6",
+      "model": 4,
+      "rms_difference": -0.02283591644316474,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "reset",
+      "model": 3,
+      "rms_difference": -0.3899251105172722,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "reset",
+      "model": 4,
+      "rms_difference": -0.5466660175485725,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "overflow",
+      "model": 3,
+      "rms_difference": -0.49275235076605284,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "overflow",
+      "model": 4,
+      "rms_difference": -0.6354086657638577,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "broadband_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "broadband_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "excitation_loss",
+      "model": 3,
+      "rms_difference": -0.8396767509113585,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "excitation_loss",
+      "model": 4,
+      "rms_difference": -0.6997495395473768,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "stale_transient",
+      "model": 3,
+      "rms_difference": 0.027953356961411324,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "stale_transient",
+      "model": 4,
+      "rms_difference": -0.9571402232051117,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "prior_strong",
+      "model": 3,
+      "rms_difference": -2.7172279387643883e-06,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "prior_strong",
+      "model": 4,
+      "rms_difference": -0.0029353662432635985,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "forgetting_none",
+      "model": 3,
+      "rms_difference": 6.3323395223705e-05,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "forgetting_none",
+      "model": 4,
+      "rms_difference": -0.33274935556901764,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "forgetting_more",
+      "model": 3,
+      "rms_difference": -0.983846586507478,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "forgetting_more",
+      "model": 4,
+      "rms_difference": -1.6305905757398464,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "lambda_high",
+      "model": 3,
+      "rms_difference": -0.001084011328461143,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "lambda_high",
+      "model": 4,
+      "rms_difference": -0.6848696841492503,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "broadband_seed200",
+      "model": 3,
+      "rms_difference": -0.03978039276666662,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "broadband_seed200",
+      "model": 4,
+      "rms_difference": -1.171566458280468,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "broadband_seed300",
+      "model": 3,
+      "rms_difference": -0.07193599439899998,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "broadband_seed300",
+      "model": 4,
+      "rms_difference": -0.9670445696843961,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "28hz_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "28hz_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "56hz_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "56hz_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "mixed_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "mixed_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "accel_noise_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "accel_noise_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "coherence_0_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "coherence_0_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "coherence_1_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "coherence_1_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "coherence_2_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "coherence_2_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "coherence_3_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "coherence_3_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "delay_jitter_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "delay_jitter_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "missing_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "missing_qr",
+      "model": 4,
+      "rms_difference": -0.44096416665734967,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "latency_1_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "latency_1_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "latency_2_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "latency_2_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "latency_3_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "latency_3_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "gain_low_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "gain_low_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "gain_high_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "gain_high_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "wrong_sign_qr",
+      "model": 3,
+      "rms_difference": -3.835101840510989,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "wrong_sign_qr",
+      "model": 4,
+      "rms_difference": -3.8752346425225177,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "zero_gain_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "zero_gain_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "command_limit_qr",
+      "model": 3,
+      "rms_difference": -0.15084466625198856,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "command_limit_qr",
+      "model": 4,
+      "rms_difference": -0.15242575111641732,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "publication_1_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "publication_1_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "publication_3_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "publication_3_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "publication_6_qr",
+      "model": 3,
+      "rms_difference": -0.02283591644316474,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "publication_6_qr",
+      "model": 4,
+      "rms_difference": -0.02283591644316474,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "reset_qr",
+      "model": 3,
+      "rms_difference": -0.38998687438973934,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "reset_qr",
+      "model": 4,
+      "rms_difference": -0.4079143960009012,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "overflow_qr",
+      "model": 3,
+      "rms_difference": -0.4931704819459387,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "overflow_qr",
+      "model": 4,
+      "rms_difference": -0.4952533004591004,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "excitation_loss_qr",
+      "model": 3,
+      "rms_difference": -0.8391733965610202,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "excitation_loss_qr",
+      "model": 4,
+      "rms_difference": -0.652466172356655,
+      "baseline_success": false,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 1
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "stale_transient_qr",
+      "model": 3,
+      "rms_difference": 0.028497839609201422,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "stale_transient_qr",
+      "model": 4,
+      "rms_difference": 0.03926455274384949,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "prior_strong_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "prior_strong_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "forgetting_none_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "forgetting_none_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "forgetting_more_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "forgetting_more_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "lambda_high_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "lambda_high_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "broadband_seed200_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "broadband_seed200_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "broadband_seed300_qr",
+      "model": 3,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    },
+    {
+      "compiler": "gcc",
+      "strategy": "symmetric_recover",
+      "scenario": "broadband_seed300_qr",
+      "model": 4,
+      "rms_difference": 0.0,
+      "baseline_success": true,
+      "recovery_failure": 0,
+      "baseline_recovery_failure": 0
+    }
+  ]
+}

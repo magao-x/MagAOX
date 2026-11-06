@@ -1,0 +1,98 @@
+{
+  "clang-tests": {
+    "sha256": "b96838cb5eb83d8ab41e225837d06fa3cec6a4861316dd2d17750ad6252a3a04",
+    "passed": [
+      "1766353",
+      "66"
+    ],
+    "tail": "000 s: Shadow DDSPC models are independently owned and trained\n0.000 s: Shadow selection is readiness-gated and preserves both models\n0.001 s: Managed standard DDSPC equals the corrected standalone baseline\n0.000 s: Shadow validity and gaps never fabricate applied inputs\n0.000 s: Shadow readiness requires training and data excitation\n0.000 s: Shadow diagnostics freeze model parameters at the prediction origin\n0.000 s: Shadow numerical validity checks precede both RLS updates\n0.141 s: Symmetric covariance candidate restores the RLS invariant on identical calibration data\n0.045 s: Phase 11 preserves the committed Phase 10 default and QR baseline exactly\n0.054 s: Phase 11 preserves the committed Phase 10 default and QR baseline exactly\n0.394 s: Offline recovery rejects stale models and handles reset dropout overflow and lost excitation\n0.451 s: Offline recovery rejects stale models and handles reset dropout overflow and lost excitation\n0.139 s: Recovery and symmetric RLS preserve future-prefix invariance\n0.000 s: Recovery confidence handles exact zero errors without weakening its gate\n0.152 s: Synthetic acceleration and perfect-prediction DM obey their declared equations\n0.190 s: Synthetic acceleration and perfect-prediction DM obey their declared equations\n0.156 s: Closed-loop DDSPC receives no future truth and shares common calibration\n0.175 s: Closed-loop DDSPC receives no future truth and shares common calibration\n0.318 s: Closed-loop faults hold commands without bypassing model validity\n0.368 s: Closed-loop faults hold commands without bypassing model validity\n0.642 s: Coherent synthetic acceleration improves QR closed-loop residuals\n===============================================================================\nAll tests passed (1766353 assertions in 66 test cases)\n\n"
+  },
+  "gcc-tests": {
+    "sha256": "2ad9b0e79c872e112d29058ff369240386e7cae7e2f7111996eb829ebf90cd9e",
+    "passed": [
+      "1765794",
+      "66"
+    ],
+    "tail": "000 s: Shadow DDSPC models are independently owned and trained\n0.000 s: Shadow selection is readiness-gated and preserves both models\n0.000 s: Managed standard DDSPC equals the corrected standalone baseline\n0.000 s: Shadow validity and gaps never fabricate applied inputs\n0.000 s: Shadow readiness requires training and data excitation\n0.000 s: Shadow diagnostics freeze model parameters at the prediction origin\n0.000 s: Shadow numerical validity checks precede both RLS updates\n0.125 s: Symmetric covariance candidate restores the RLS invariant on identical calibration data\n0.042 s: Phase 11 preserves the committed Phase 10 default and QR baseline exactly\n0.048 s: Phase 11 preserves the committed Phase 10 default and QR baseline exactly\n0.334 s: Offline recovery rejects stale models and handles reset dropout overflow and lost excitation\n0.398 s: Offline recovery rejects stale models and handles reset dropout overflow and lost excitation\n0.154 s: Recovery and symmetric RLS preserve future-prefix invariance\n0.000 s: Recovery confidence handles exact zero errors without weakening its gate\n0.126 s: Synthetic acceleration and perfect-prediction DM obey their declared equations\n0.155 s: Synthetic acceleration and perfect-prediction DM obey their declared equations\n0.121 s: Closed-loop DDSPC receives no future truth and shares common calibration\n0.153 s: Closed-loop DDSPC receives no future truth and shares common calibration\n0.265 s: Closed-loop faults hold commands without bypassing model validity\n0.333 s: Closed-loop faults hold commands without bypassing model validity\n0.556 s: Coherent synthetic acceleration improves QR closed-loop residuals\n===============================================================================\nAll tests passed (1765794 assertions in 66 test cases)\n\n"
+  },
+  "asan-tests": {
+    "sha256": "7908858a2226bdcf84a73598035504a95f11c3b66d8f349a7cac3bf4168ccc98",
+    "passed": [
+      "1768508",
+      "66"
+    ],
+    "tail": "01 s: Shadow DDSPC models are independently owned and trained\n0.001 s: Shadow selection is readiness-gated and preserves both models\n0.004 s: Managed standard DDSPC equals the corrected standalone baseline\n0.001 s: Shadow validity and gaps never fabricate applied inputs\n0.001 s: Shadow readiness requires training and data excitation\n0.004 s: Shadow diagnostics freeze model parameters at the prediction origin\n0.001 s: Shadow numerical validity checks precede both RLS updates\n1.591 s: Symmetric covariance candidate restores the RLS invariant on identical calibration data\n0.502 s: Phase 11 preserves the committed Phase 10 default and QR baseline exactly\n0.860 s: Phase 11 preserves the committed Phase 10 default and QR baseline exactly\n4.533 s: Offline recovery rejects stale models and handles reset dropout overflow and lost excitation\n7.251 s: Offline recovery rejects stale models and handles reset dropout overflow and lost excitation\n1.722 s: Recovery and symmetric RLS preserve future-prefix invariance\n0.001 s: Recovery confidence handles exact zero errors without weakening its gate\n1.638 s: Synthetic acceleration and perfect-prediction DM obey their declared equations\n2.839 s: Synthetic acceleration and perfect-prediction DM obey their declared equations\n1.596 s: Closed-loop DDSPC receives no future truth and shares common calibration\n2.813 s: Closed-loop DDSPC receives no future truth and shares common calibration\n3.437 s: Closed-loop faults hold commands without bypassing model validity\n6.211 s: Closed-loop faults hold commands without bypassing model validity\n10.070 s: Coherent synthetic acceleration improves QR closed-loop residuals\n===============================================================================\nAll tests passed (1768508 assertions in 66 test cases)\n\n"
+  },
+  "tsan-tests": {
+    "sha256": "19b8012f4fc0256ed7876b3a86650b20dc03149659b663af0a34b5496750f024",
+    "passed": [
+      "564263",
+      "6"
+    ],
+    "tail": "Filters: [async][threaded],[stability]\n0.158 s: Offline threaded snapshots remain coherent under rapid buffer reuse\n0.137 s: Offline threaded snapshots remain coherent under rapid buffer reuse\n0.330 s: Offline threaded snapshots remain coherent under rapid buffer reuse\n0.423 s: Offline threaded snapshots remain coherent under rapid buffer reuse\n5.417 s: Symmetric covariance candidate restores the RLS invariant on identical calibration data\n1.713 s: Phase 11 preserves the committed Phase 10 default and QR baseline exactly\n2.212 s: Phase 11 preserves the committed Phase 10 default and QR baseline exactly\n17.341 s: Offline recovery rejects stale models and handles reset dropout overflow and lost excitation\n20.011 s: Offline recovery rejects stale models and handles reset dropout overflow and lost excitation\n6.414 s: Recovery and symmetric RLS preserve future-prefix invariance\n0.002 s: Recovery confidence handles exact zero errors without weakening its gate\n===============================================================================\nAll tests passed (564263 assertions in 6 test cases)\n\n"
+  },
+  "legacy-fast-clang": {
+    "sha256": "1bd791f3afa9862e7622485c305deaf20dbd5069753340f62c485e8968e5cd7e",
+    "passed": [
+      "186615",
+      "9"
+    ],
+    "tail": "\nCovariance 1\nGamma 0.99\nOwn shmim 1\nnum modes 2\nHistory 5\nFuture 2\nUse QRD 1\nAccel enabled 0\nAccel channels 0\nAccel history 0\nDone reading config Impl.\nm_modevalWidth: 2\nm_modevalHeight: 1\n0.000 s: Legacy clone defaults differ from the restored on-sky app\nGain -0.25\nRegularization 100\nCovariance 1\nGamma 0.99\nnum modes 2\nHistory 5\nFuture 2\nUse QRD 0\nDone reading config Impl.\nm_modevalWidth: 2\nm_modevalHeight: 1\nHOWDY elapsed us: 0.00020825 us\nGain -0.25\nRegularization 100\nCovariance 1\nGamma 0.99\nnum modes 2\nHistory 5\nFuture 2\nUse QRD 0\nDone reading config Impl.\nm_modevalWidth: 2\nm_modevalHeight: 1\nHOWDY elapsed us: 0.000198 us\nGain -0.25\nCopy Gain -0.25\nRegularization 100\nCovariance 1\nGamma 0.99\nOwn shmim 1\nnum modes 2\nHistory 5\nFuture 2\nUse QRD 0\nAccel enabled 0\nAccel channels 0\nAccel history 0\nDone reading config Impl.\nm_modevalWidth: 2\nm_modevalHeight: 1\nHOWDY elapsed us: 0.00019775 us\n0.000 s: Legacy timing is callback ordered and independent of publication acknowledgement\n/var/folders/qn/j1lxbr0s7lqbvg2dvhkp7kjc0000gp/T/ddspc-legacy-review-3203739499/same-dimension-state.qrd_rls\n/var/folders/qn/j1lxbr0s7lqbvg2dvhkp7kjc0000gp/T/ddspc-legacy-review-3203739499/same-dimension-state.qrd_rls\n/var/folders/qn/j1lxbr0s7lqbvg2dvhkp7kjc0000gp/T/ddspc-legacy-review-3203739499/same-dimension-state.qrd_rls\n/var/folders/qn/j1lxbr0s7lqbvg2dvhkp7kjc0000gp/T/ddspc-legacy-review-3203739499/same-dimension-state.qrd_rls\n0.035 s: Legacy gain restored from disk has an explicit reset compatibility difference\n0.000 s: Legacy Givens rotation is bit exact with the historical kernel\n0.004 s: Legacy QR identification is bit exact without controller history code\n===============================================================================\nAll tests passed (186615 assertions in 9 test cases)\n\n"
+  },
+  "legacy-fast-gcc": {
+    "sha256": "f7bc7e9dd35d153dc4eb070e3668e1cede53dcd4e805beec3f80e60ffff75583",
+    "passed": null,
+    "tail": "\nAccel channels 0\nAccel history 0\nDone reading config Impl.\nm_modevalWidth: 2\nm_modevalHeight: 1\n0.000 s: Legacy clone defaults differ from the restored on-sky app\nGain -0.25\nRegularization 100\nCovariance 1\nGamma 0.99\nnum modes 2\nHistory 5\nFuture 2\nUse QRD 0\nDone reading config Impl.\nm_modevalWidth: 2\nm_modevalHeight: 1\nHOWDY elapsed us: 0 us\nGain -0.25\nRegularization 100\nCovariance 1\nGamma 0.99\nnum modes 2\nHistory 5\nFuture 2\nUse QRD 0\nDone reading config Impl.\nm_modevalWidth: 2\nm_modevalHeight: 1\nHOWDY elapsed us: 0.00025 us\nGain -0.25\nCopy Gain -0.25\nRegularization 100\nCovariance 1\nGamma 0.99\nOwn shmim 1\nnum modes 2\nHistory 5\nFuture 2\nUse QRD 0\nAccel enabled 0\nAccel channels 0\nAccel history 0\nDone reading config Impl.\nm_modevalWidth: 2\nm_modevalHeight: 1\nHOWDY elapsed us: 0.00025 us\n0.000 s: Legacy timing is callback ordered and independent of publication acknowledgement\n/var/folders/qn/j1lxbr0s7lqbvg2dvhkp7kjc0000gp/T/ddspc-legacy-review-3218905128/same-dimension-state.qrd_rls\n/var/folders/qn/j1lxbr0s7lqbvg2dvhkp7kjc0000gp/T/ddspc-legacy-review-3218905128/same-dimension-state.qrd_rls\n/var/folders/qn/j1lxbr0s7lqbvg2dvhkp7kjc0000gp/T/ddspc-legacy-review-3218905128/same-dimension-state.qrd_rls\n/var/folders/qn/j1lxbr0s7lqbvg2dvhkp7kjc0000gp/T/ddspc-legacy-review-3218905128/same-dimension-state.qrd_rls\n0.014 s: Legacy gain restored from disk has an explicit reset compatibility difference\n0.000 s: Legacy Givens rotation is bit exact with the historical kernel\n0.003 s: Legacy QR identification is bit exact without controller history code\n===============================================================================\ntest cases:      9 |      8 passed | 1 failed\nassertions: 182254 | 182253 passed | 1 failed\n\nmake[1]: *** [check] Error 1\nmake: *** [check-legacy-fast] Error 2\n"
+  },
+  "initial-clang": {
+    "sha256": "f174a27e747597a9562f25b24bb15335c4f1c818a5fba32e6e8125c421ad83ad",
+    "failures": [],
+    "tail": "refix invariance\n0.000 s: Recovery confidence handles exact zero errors without weakening its gate\n0.150 s: Synthetic acceleration and perfect-prediction DM obey their declared equations\n0.183 s: Synthetic acceleration and perfect-prediction DM obey their declared equations\n0.153 s: Closed-loop DDSPC receives no future truth and shares common calibration\n0.186 s: Closed-loop DDSPC receives no future truth and shares common calibration\n0.319 s: Closed-loop faults hold commands without bypassing model validity\n0.406 s: Closed-loop faults hold commands without bypassing model validity\n0.711 s: Coherent synthetic acceleration improves QR closed-loop residuals\n===============================================================================\nAll tests passed (1763742 assertions in 66 test cases)\n\n"
+  },
+  "initial-gcc": {
+    "sha256": "1c4f51045ee41dbe63f00d5dbc0a1a100bd8cc49a8170012123f3690e0d520c8",
+    "failures": [
+      "  0.0009434813 < 0.0006899849"
+    ],
+    "tail": "rors without weakening its gate\n0.122 s: Synthetic acceleration and perfect-prediction DM obey their declared equations\n0.153 s: Synthetic acceleration and perfect-prediction DM obey their declared equations\n0.120 s: Closed-loop DDSPC receives no future truth and shares common calibration\n0.151 s: Closed-loop DDSPC receives no future truth and shares common calibration\n0.258 s: Closed-loop faults hold commands without bypassing model validity\n0.329 s: Closed-loop faults hold commands without bypassing model validity\n0.548 s: Coherent synthetic acceleration improves QR closed-loop residuals\n===============================================================================\ntest cases:      66 |      65 passed | 1 failed\nassertions: 1764060 | 1764059 passed | 1 failed\n\nmake: *** [check] Error 1\n"
+  },
+  "initial-asan": {
+    "sha256": "40f71a7c0271210d642600d4eb5e849612e25b9d11cc72459846c328b3391a03",
+    "failures": [
+      "  0.0009426624 < 0.0009336102"
+    ],
+    "tail": "ors without weakening its gate\n1.640 s: Synthetic acceleration and perfect-prediction DM obey their declared equations\n2.860 s: Synthetic acceleration and perfect-prediction DM obey their declared equations\n1.598 s: Closed-loop DDSPC receives no future truth and shares common calibration\n2.805 s: Closed-loop DDSPC receives no future truth and shares common calibration\n3.443 s: Closed-loop faults hold commands without bypassing model validity\n6.220 s: Closed-loop faults hold commands without bypassing model validity\n10.046 s: Coherent synthetic acceleration improves QR closed-loop residuals\n===============================================================================\ntest cases:      66 |      65 passed | 1 failed\nassertions: 1767318 | 1767317 passed | 1 failed\n\nmake: *** [check] Error 1\n"
+  },
+  "initial-tsan": {
+    "sha256": "6b03f94b4683421539b4df1020952fead348bafbeed4a32e8a9c8dfe734538cf",
+    "failures": [
+      "  0.0009426624 < 0.0009336102"
+    ],
+    "tail": "variance candidate restores the RLS invariant on identical\ncalibration data\n-------------------------------------------------------------------------------\n/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/tests/ddspc_stability_test.cpp:102\n...............................................................................\n\n/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/tests/ddspc_stability_test.cpp:148: FAILED:\n  REQUIRE( ( candidate.prediction_matrix.cast<double>() - exact ).norm() < .01 * ( original.prediction_matrix.cast<double>() - exact ).norm() )\nwith expansion:\n  0.0009426624 < 0.0009336102\n\n===============================================================================\ntest cases:      6 |      5 passed | 1 failed\nassertions: 560569 | 560568 passed | 1 failed\n\n"
+  },
+  "versions": {
+    "clang++ --version": "Apple clang version 21.0.0 (clang-2100.0.123.102)\nTarget: arm64-apple-darwin25.3.0\nThread model: posix\nInstalledDir: /Library/Developer/CommandLineTools/usr/bin\n",
+    "g++-15 --version": "g++-15 (Homebrew GCC 15.2.0_1) 15.2.0\nCopyright (C) 2025 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n\n",
+    "pkg-config --modversion eigen3 mxlib": "5.0.1\n0.2.0\n",
+    "sw_vers": "ProductName:\t\tmacOS\nProductVersion:\t\t26.3.2\nBuildVersion:\t\t25D2150\n"
+  },
+  "head": "2fcf61a108c8f3d9c3d237a053f4e0634f0f4e6f",
+  "branch": "parkertjohnson1/accel_ddspc",
+  "unchanged_production": true,
+  "legacy-norecip-gcc": {
+    "sha256": "976faf5f24874208b641c1a9f511cd02ac5b9718326da5533ddcc9b635fa5d54",
+    "passed": [
+      "186615",
+      "9"
+    ],
+    "tail": "s: 0.00025 us\n0.000 s: Legacy timing is callback ordered and independent of publication acknowledgement\n/var/folders/qn/j1lxbr0s7lqbvg2dvhkp7kjc0000gp/T/ddspc-legacy-review-3443482/same-dimension-state.qrd_rls\n/var/folders/qn/j1lxbr0s7lqbvg2dvhkp7kjc0000gp/T/ddspc-legacy-review-3443482/same-dimension-state.qrd_rls\n/var/folders/qn/j1lxbr0s7lqbvg2dvhkp7kjc0000gp/T/ddspc-legacy-review-3443482/same-dimension-state.qrd_rls\n/var/folders/qn/j1lxbr0s7lqbvg2dvhkp7kjc0000gp/T/ddspc-legacy-review-3443482/same-dimension-state.qrd_rls\n0.024 s: Legacy gain restored from disk has an explicit reset compatibility difference\n0.000 s: Legacy Givens rotation is bit exact with the historical kernel\n0.003 s: Legacy QR identification is bit exact without controller history code\n===============================================================================\nAll tests passed (186615 assertions in 9 test cases)\n\n"
+  },
+  "syntax_check": "All three new Python scripts parse successfully using compile(source, filename, exec), without writing bytecode caches. Optional py_compile initially could not write the default macOS cache; no system permission was changed.",
+  "final_scope": {
+    "changed_files": 59,
+    "production_files_changed": false,
+    "protected_plan_prefix_changed": false,
+    "branch_unchanged": true,
+    "commits_created": false
+  }
+}

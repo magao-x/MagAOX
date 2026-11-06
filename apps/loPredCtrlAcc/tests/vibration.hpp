@@ -9,6 +9,7 @@
 
 namespace libXWCTest::loPredCtrlAccTest
 {
+struct StabilityPolicy;
 /// Immutable experiment settings; none are instrument calibration or operational defaults.
 struct VibrationConfig
 {
@@ -25,6 +26,8 @@ struct VibrationConfig
     int m_missingFrame{ -1 }, m_missingFrames{ 0 };       ///< Missing source samples, starting at absolute frame.
     std::uint64_t m_jitterNs{ 0 }, m_maxAgeNs{ 2000000 }; ///< Sensor timestamp/availability jitter; evidence age gate.
     std::size_t   m_capacity{ 32 };                       ///< Bounded actual prototype queues.
+    const StabilityPolicy *m_stability{ nullptr }; ///< Caller-owned policy, alive for the run; null preserves Phase 10.
+    int m_freezeFrame{ -1 }, m_freezeFrames{ 0 };  ///< Explicit temporary hold of the simulated applied input only.
 };
 
 /// One common immutable source realization, generated without consulting controller state.
@@ -45,8 +48,11 @@ struct VibrationFrame
     double        m_predictionSquared{ 0 };      ///< Post-hoc conditional forecast error, never a decision feature.
     int           m_predictionCount{ 0 };        ///< Number of scalar forecast targets scored at this decision.
     double        m_thetaNorm{ 0 },
-        m_dNorm{ 0 }; ///< Actual origin snapshot coefficient magnitudes, for convergence diagnostics.
-    int m_rank{ 0 };  ///< Existing normalized readiness rank; no substitute closed-loop stability test.
+        m_dNorm{ 0 };   ///< Actual origin snapshot coefficient magnitudes, for convergence diagnostics.
+    int    m_rank{ 0 }; ///< Existing normalized readiness rank; no substitute closed-loop stability test.
+    int    m_action{ 0 }, m_recovery{ 0 }; ///< Explicit SimAction/SimRecovery values for offline provenance.
+    bool   m_correctionAccepted{ false };  ///< A fresh model, rather than a recovery action, supplied the request.
+    double m_confidenceBound{ 0 }, m_slewX{ 0 }, m_slewY{ 0 }; ///< Calibrated bounds; never instrument calibration.
 };
 
 /// Complete finite result; no real-time or physical performance claim follows from virtual worker service.
@@ -65,5 +71,8 @@ VibrationSource vibration_source( const VibrationConfig &config /**< [in] Explic
 /// Replay identical exogenous data through five separate numerical plants/controllers.
 VibrationResult vibration_run( const VibrationConfig &config /**< [in] Experiment parameters. */,
                                const VibrationSource &source /**< [in] Shared immutable realization. */ );
+/// Execute the verbatim committed Phase 10 loop, linked under a distinct symbol as the compatibility default.
+VibrationResult committed_vibration_run( const VibrationConfig &config /**< [in] Original settings. */,
+                                         const VibrationSource &source /**< [in] Identical source. */ );
 } // namespace libXWCTest::loPredCtrlAccTest
 #endif
