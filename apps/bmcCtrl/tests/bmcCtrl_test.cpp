@@ -876,6 +876,8 @@ TEST_CASE( "BMC worker overlaps private staging and joins actual SDK result", "[
     using namespace MagAOX::app;
     using namespace MagAOX::dmTiming;
     bmcCtrl_test app;
+    const bool   stages = GENERATE( false, true );
+    app.m_dmTiming.configure( 2, 32, 0, PublicationClock::none, 1000, stages );
     app.enableWorker();
     bmcTimingTest::block = true;
     float command[]{ 0.25f, 2.0f };
@@ -902,7 +904,7 @@ TEST_CASE( "BMC worker overlaps private staging and joins actual SDK result", "[
     app.m_dmTiming.update();
     REQUIRE( app.dmTimingSummary().total.submitted == 1 );
     REQUIRE( app.dmTimingSummary().total.invalid == 0 );
-    REQUIRE( app.dmTimingSummary().metrics[metricIndex( Metric::sdk )].count == 1 );
+    REQUIRE( app.dmTimingSummary().metrics[metricIndex( Metric::sdk )].count == ( stages ? 1 : 0 ) );
     REQUIRE( app.dmTimingSummary().metrics[metricIndex( Metric::sdkTail )].count == 0 );
     REQUIRE( app.dmTimingSummary().metrics[metricIndex( Metric::sdkService )].count == 0 );
     app.retireCommand();
@@ -1563,6 +1565,59 @@ TEST_CASE( "BMC pipeline overlaps preparation SDK and ordered post with frozen i
     REQUIRE(
         app.dmTimingSummary().metrics[MagAOX::dmTiming::metricIndex( MagAOX::dmTiming::Metric::saturation )].count ==
         2 );
+}
+
+/// Basic timing preserves SDK sequencing, reader release and successful product publication in the full pipeline.
+/** \ingroup bmcCtrl_unit_test */
+TEST_CASE( "BMC basic timing leaves the full pipeline operational", "[bmcCtrl][pipeline][timing]" )
+{
+    using namespace MagAOX::app;
+    using namespace MagAOX::dmTiming;
+    using namespace MagAOX::dmCompletion;
+    bmcCtrl_test app;
+    app.m_dmTiming.configure( 60, 32, 0, PublicationClock::realtime, 1000, false );
+    app.enablePipeline();
+    bmcTimingTest::ReturnGuard guard;
+    app.pixels()[0] = 0.25;
+    app.pixels()[1] = 2;
+
+    for( unsigned i = 1; i <= 3; ++i )
+    {
+        REQUIRE( app.pipelineInput( i ) == 0 );
+        app.waitRetired( i );
+        CHECK( readersQualified( app.m_dmReaderRelease.snapshot() ) );
+        CHECK( app.m_dmReaderRelease.snapshot().inputCounter == i );
+        CHECK( qualified( app.m_dmCompletion.snapshot() ) );
+        CHECK( app.m_dmCompletion.snapshot().inputCounter == i );
+        CHECK( sdkQualified( app.m_pipelineResult.snapshot() ) );
+        const auto sdk = app.waitPipelineSdkReady( i );
+        CHECK( sdk[2] >= sdk[1] );
+    }
+
+    CHECK( app.pipelineCounts() == std::array<uint64_t, 6>{ 3, 3, 0, 0, 0, 0 } );
+    CHECK( app.delta( 0 ) == Approx( 0.15 ) );
+    CHECK( app.delta( 1 ) == Approx( 0.8 ) );
+    CHECK( bmcTimingTest::maximumActive == 1 );
+    app.m_dmTiming.update();
+    const auto &summary = app.dmTimingSummary();
+    REQUIRE( summary.fgValid );
+    CHECK_FALSE( summary.stagesEnabled );
+    CHECK_FALSE( summary.delivery.enabled );
+    CHECK( summary.total.submitted == 3 );
+    CHECK( summary.total.invalid == 0 );
+
+    for( size_t i = metricIndex( Metric::dispatch ); i < metricIndex( Metric::count ); ++i )
+    {
+        CHECK( summary.metrics[i].count == 0 );
+    }
+
+    // clang-format off
+#ifdef BMCCTRL_TEST_DOXYGEN_REF
+    MagAOX::app::bmcCtrl::processPipeline(nullptr);
+    MagAOX::app::bmcCtrl::pipelineThreadExec();
+    MagAOX::app::dev::dm<MagAOX::app::bmcCtrl, float>::pipelineMark;
+#endif
+    // clang-format on
 }
 
 /// Saturation consumes immutable vectors only in post, while preparation subintervals partition the original timer.

@@ -85,6 +85,7 @@ struct Controller : MagAOX::app::MagAOXApp<false>,
     using dmT::m_indiP_dmTimingDelivery;
     using dmT::m_indiP_dmTimingQuality;
     using dmT::m_indiP_dmTimingState;
+    using dmT::m_stageTiming;
     using dmT::m_timingCapacity;
     using dmT::m_timingDeliveryBracketUs;
     using dmT::m_timingDeliveryClock;
@@ -103,7 +104,7 @@ struct Controller : MagAOX::app::MagAOXApp<false>,
     std::vector<uint8_t>              m_compatible;      ///< Most recent compatible FlatBuffer payload.
 
     /// Initialize isolated software timing and semaphore state.
-    Controller();
+    explicit Controller( bool stages = true /**< [in] Opt in to detailed fixture diagnostics. */ );
 
     /// Destroy the local semaphore after all callbacks have completed.
     ~Controller() noexcept;
@@ -134,14 +135,14 @@ struct Controller : MagAOX::app::MagAOXApp<false>,
     int telem( const typename logT::messageT &message /**< [in] Serialized consumer summary. */ );
 };
 
-Controller::Controller() : MagAOXApp( "test", false )
+Controller::Controller( bool stages ) : MagAOXApp( "test", false )
 {
     m_configName  = "dm-timing-test";
     m_calibDir    = "/tmp/dm-timing-test";
     m_flatPath    = "/tmp";
     m_testPath    = "/tmp";
     m_imageStream = {};
-    m_dmTiming.configure( 2, 20 );
+    m_dmTiming.configure( 2, 20, 0, PublicationClock::none, 1000, stages );
 
     if( sem_init( &m_satSemaphore, 0, 0 ) != 0 )
     {
@@ -451,13 +452,16 @@ TEST_CASE( "DM timing configuration is runtime controlled", "[dev::dmTimingInteg
     mx::app::appConfigurator config;
     REQUIRE( app.dmT::setupConfig( config ) == 0 );
     REQUIRE( app.m_timingWindow == 2 );
+    CHECK_FALSE( app.m_stageTiming );
     REQUIRE( app.m_timingCapacity == 20000 );
     const std::string path = "/tmp/dm-timing-config-" + std::to_string( getpid() ) + ".conf";
-    mx::app::writeConfigFile( path, { "dm", "dm" }, { "latencyTime", "latencySize" }, { "0", "12" } );
+    mx::app::writeConfigFile(
+        path, { "dm", "dm", "dm" }, { "latencyTime", "latencySize", "stageTiming" }, { "0", "12", "true" } );
     config.readConfig( path );
     REQUIRE( app.dmT::loadConfig( config ) == 0 );
     CHECK( app.m_timingWindow == 0 );
     CHECK( app.m_timingCapacity == 12 );
+    CHECK( app.m_stageTiming );
     unlink( path.c_str() );
 }
 
@@ -680,6 +684,48 @@ TEST_CASE( "DM delivery statistics reach INDI without a producer clock assumptio
 
     // clang-format off
 #ifdef DM_TIMING_INTEGRATION_TEST_DOXYGEN_REF
+    MagAOX::app::dev::dm<Controller, float>::setupDMTimingINDI();
+    MagAOX::app::dev::dm<Controller, float>::updateINDI();
+#endif
+    // clang-format on
+}
+
+/// Ordinary operation emits only compatible telemetry and defines only its basic timing property.
+/** \ingroup dmTimingIntegration_tests */
+TEST_CASE( "DM basic timing reports only fgtimes", "[dev::dmTimingIntegration]" )
+{
+    Controller app( false );
+    Driver     driver;
+    REQUIRE( app.setupDMTimingINDI() == 0 );
+    CHECK( app.m_indiP_dmStages.getNumElements() == 0 );
+    CHECK( app.m_indiP_dmTimingQuality.getNumElements() == 0 );
+    CHECK( app.m_indiP_dmTimingDelivery.getNumElements() == 0 );
+    app.m_indiDriver = &driver;
+
+    for( unsigned i = 0; i < 3; ++i )
+    {
+        app.shmimMonitorTiming( {}, MagAOX::app::dev::shmimMonitorEvent::receipt );
+        REQUIRE( app.processImage( nullptr, {} ) == 0 );
+    }
+
+    app.updateDMTimings();
+    CHECK_FALSE( app.dmTimingSummary().stagesEnabled );
+    REQUIRE( app.dmTimingSummary().fgValid );
+    REQUIRE( app.recordDMTimings() == 0 );
+    REQUIRE( app.recordDMTimings( true ) == 0 );
+    REQUIRE( app.m_records.size() == 2 );
+    CHECK( app.m_records == std::vector<flatlogs::eventCodeT>{ compatibleCode, compatibleCode } );
+    REQUIRE( app.dmT::updateINDI() == 0 );
+    REQUIRE_FALSE( driver.m_messages.empty() );
+
+    for( const auto &property : driver.m_messages )
+    {
+        CHECK( property.getName() == "dm_timing" );
+    }
+
+    // clang-format off
+#ifdef DM_TIMING_INTEGRATION_TEST_DOXYGEN_REF
+    MagAOX::app::dev::dm<Controller, float>::recordDMTimings( true );
     MagAOX::app::dev::dm<Controller, float>::setupDMTimingINDI();
     MagAOX::app::dev::dm<Controller, float>::updateINDI();
 #endif

@@ -194,6 +194,7 @@ struct Event
     bool    synthetic{ false };          ///< No successful semaphore wait preceded this event.
     bool    submitted{ false };          ///< SDK/transport success was explicitly qualified.
     Outcome outcome{ Outcome::unknown }; ///< Callback result independent of submission success.
+    bool    stagesEnabled{ true };       ///< Capture mode carried with detached pipeline events.
 
     std::array<int64_t, static_cast<size_t>( Marker::count )> markers{};  ///< Monotonic nanoseconds.
     uint32_t                                                  valid{ 0 }; ///< Bit mask of available endpoints.
@@ -217,6 +218,7 @@ struct Summary
     bool         enabled{ false };                ///< Collection is configured and preallocated.
     bool         fgValid{ false };                ///< All three populations required by telem_fgtimings are valid.
     Availability state{ Availability::disabled }; ///< Explicit compatible-summary availability.
+    bool         stagesEnabled{ false };          ///< Detailed capture and reporting were explicitly enabled.
 
     std::array<Stats, static_cast<size_t>( Metric::count )> metrics{}; ///< Independent metric populations.
 

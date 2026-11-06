@@ -2682,7 +2682,13 @@ INDI_SETCALLBACK_DEFN( ocam2KCtrl, m_indiP_syncFreq )( const pcf::IndiProperty &
 
 inline int ocam2KCtrl::checkRecordTimes()
 {
-    return telemeter<ocam2KCtrl>::checkRecordTimes( ocam_temps(), telem_stdcam(), telem_fgtimings(), telem_fgstage() );
+    if( frameGrabberTimingEnabled() )
+    {
+        return telemeter<ocam2KCtrl>::checkRecordTimes(
+            ocam_temps(), telem_stdcam(), telem_fgtimings(), telem_fgstage() );
+    }
+
+    return telemeter<ocam2KCtrl>::checkRecordTimes( ocam_temps(), telem_stdcam(), telem_fgtimings() );
 }
 
 inline int ocam2KCtrl::recordTelem( const ocam_temps * )

@@ -21,6 +21,13 @@ result before admitting another command. Saturation and delta/difference
 products are committed only on success. Channel changes after reader release
 cannot change the captured vector or private delta products.
 
+Normal timing collection uses only `[fgtimes]` and the basic `dm_timing`
+property. Set `[dm] stageTiming=true` to collect and report detailed profiling,
+including worker-wait brackets; delivery measurement additionally requires an
+explicit `deliveryClock`. SDK start/return/readiness and dispatch timestamps
+needed for deadlines, plus reader-release and completion signals, remain active
+with profiling disabled. See [DM timing](../../../libMagAOX/app/dev/doc/dmTiming.md).
+
 ## Configuration
 
 Worker mode is disabled by default and requires a restart to change. Add these
