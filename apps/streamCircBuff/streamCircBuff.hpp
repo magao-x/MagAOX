@@ -33,7 +33,9 @@ namespace app
  * type with the source acquisition time, write time and frame counter.  Readers of the circular buffer
  * therefore see the same timing as readers of the source.  The published counter is offset if needed so
  * that it keeps increasing when the source restarts.  A single-frame source frame which is rewritten during
- * the copy is dropped, and the number of such frames is logged.
+ * the copy is dropped, and the number of such frames is logged.  Each frame's timing is also kept in the
+ * per-frame arrays, so a reader using dev::shmimMonitor gets the timing of the frame it is processing from
+ * `currAtime()`, `currWritetime()` and `currCnt0()`, even after newer frames are published.
  *
  * The output keeps the source data type unless `circBuff.toFloat` is set, e.g. for modalPSDs, which reads
  * float.  The frame rate is read from the `circBuff.fpsDevice` property if one is configured, and otherwise
