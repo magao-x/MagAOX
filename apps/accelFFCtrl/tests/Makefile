@@ -8,12 +8,13 @@ BUILD_DIR ?= /tmp/accelFFCtrl-numerics
 REPO_ROOT := ../../..
 MODEL := ../accelFFCtrlModel.hpp
 INPUT := ../accelFFCtrlInput.hpp
-SOURCES := accelFFCtrlModel_test.cpp accelFFCtrlReplay_test.cpp accelFFCtrlInput_test.cpp accelFFCtrlValidation_test.cpp accelFFCtrlGap_test.cpp accelFFCtrlJitter_test.cpp accelFFCtrlCancellation_test.cpp $(REPO_ROOT)/tests/testMain.cpp
+SOURCES := accelFFCtrlModel_test.cpp accelFFCtrlReplay_test.cpp accelFFCtrlInput_test.cpp accelFFCtrlValidation_test.cpp accelFFCtrlGap_test.cpp accelFFCtrlJitter_test.cpp accelFFCtrlCancellation_test.cpp accelFFCtrlShadow_test.cpp $(REPO_ROOT)/tests/testMain.cpp
 TEST := $(BUILD_DIR)/accelFFCtrl_test
 BENCHMARK := $(BUILD_DIR)/accelFFCtrl_benchmark
 INPUT_BENCHMARK := $(BUILD_DIR)/accelFFCtrlInput_benchmark
 NATIVE := $(BUILD_DIR)/accelFFCtrlStream_test
 CANCELLATION := $(BUILD_DIR)/accelFFCtrlCancellation_export
+AO := $(BUILD_DIR)/accelFFCtrlAO_export
 ISIO_CFLAGS ?= $(shell pkg-config --cflags ImageStreamIO)
 ISIO_LIBS ?= $(shell pkg-config --libs ImageStreamIO)
 
@@ -21,13 +22,13 @@ PYTHON ?= python3
 VALIDATION_DIR ?= /tmp/accelFFCtrl-validation
 VALIDATION_SECONDS ?= 60
 
-.PHONY: all test benchmark native-test native-rate-test validation validation-test gap-validation cancellation-validation
+.PHONY: all test benchmark native-test native-rate-test validation validation-test gap-validation cancellation-validation shadow-tools
 all: $(TEST) $(BENCHMARK) $(INPUT_BENCHMARK)
 
 $(BUILD_DIR):
 	mkdir -p $@
 
-$(TEST): $(SOURCES) accelFFCtrlGap_test.hpp accelFFCtrlCancellation_test.hpp ../offline/accelFFCtrlCancellation.hpp $(MODEL) $(INPUT) ../../accelSim/accelSimModel.hpp ../../accelSim/accelSimDisturbance.hpp $(REPO_ROOT)/tests/testXWC.hpp | $(BUILD_DIR)
+$(TEST): $(SOURCES) accelFFCtrlGap_test.hpp accelFFCtrlCancellation_test.hpp accelFFCtrlAO_test.hpp ../offline/accelFFCtrlCancellation.hpp ../offline/accelFFCtrlShadow.hpp $(MODEL) $(INPUT) ../../accelSim/accelSimModel.hpp ../../accelSim/accelSimDisturbance.hpp $(REPO_ROOT)/tests/testXWC.hpp | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(SOURCES) $(LDFLAGS) -o $@
 
 $(BENCHMARK): accelFFCtrl_benchmark.cpp $(MODEL) | $(BUILD_DIR)
@@ -49,19 +50,24 @@ validation: $(TEST) validation-test
 	MPLCONFIGDIR='$(VALIDATION_DIR)/.matplotlib' $(PYTHON) validate_predictions.py '$(VALIDATION_DIR)'
 
 validation-test:
-	$(PYTHON) -m unittest -v test_validate_predictions.py test_validate_gaps.py test_analyze_timestamps.py test_validate_cancellation.py
+	$(PYTHON) -m unittest -v test_validate_predictions.py test_validate_gaps.py test_analyze_timestamps.py test_validate_cancellation.py test_validate_shadow.py
 
 gap-validation: $(TEST) validation-test
 	ACCELFFCTRL_VALIDATION_DIR='$(VALIDATION_DIR)' $(TEST) '[accelFFCtrl-jitter]'
 	ACCELFFCTRL_VALIDATION_DIR='$(VALIDATION_DIR)' ACCELFFCTRL_VALIDATION_SECONDS='$(VALIDATION_SECONDS)' $(TEST) '[accelFFCtrl-gap-export]'
 	MPLCONFIGDIR='$(VALIDATION_DIR)/.matplotlib' $(PYTHON) validate_gaps.py '$(VALIDATION_DIR)'
 
-$(CANCELLATION): accelFFCtrlCancellation_export.cpp accelFFCtrlCancellation_test.hpp ../offline/accelFFCtrlCancellation.hpp $(MODEL) $(INPUT) ../../accelSim/accelSimDisturbance.hpp ../../accelSim/accelSimModel.hpp | $(BUILD_DIR)
+$(CANCELLATION): accelFFCtrlCancellation_export.cpp accelFFCtrlCancellation_test.hpp accelFFCtrlAO_test.hpp ../offline/accelFFCtrlCancellation.hpp ../offline/accelFFCtrlShadow.hpp $(MODEL) $(INPUT) ../../accelSim/accelSimDisturbance.hpp ../../accelSim/accelSimModel.hpp | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $< $(LDFLAGS) -o $@
 
 cancellation-validation: $(CANCELLATION)
 	$(CANCELLATION) '$(VALIDATION_DIR)' '$(VALIDATION_SECONDS)'
 	MPLCONFIGDIR='$(VALIDATION_DIR)/.matplotlib' $(PYTHON) validate_cancellation.py '$(VALIDATION_DIR)'
+
+$(AO): accelFFCtrlAO_export.cpp accelFFCtrlAO_test.hpp accelFFCtrlCancellation_test.hpp ../offline/accelFFCtrlCancellation.hpp $(MODEL) ../../accelSim/accelSimDisturbance.hpp ../../accelSim/accelSimModel.hpp | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $< $(LDFLAGS) -o $@
+
+shadow-tools: $(AO) $(CANCELLATION)
 
 $(NATIVE): accelFFCtrlStream_test.cpp ../accelFFCtrlStream.hpp $(INPUT) $(MODEL) $(REPO_ROOT)/tests/testMain.cpp | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(ISIO_CFLAGS) $(CXXFLAGS) $< $(REPO_ROOT)/tests/testMain.cpp $(LDFLAGS) $(ISIO_LIBS) -o $@

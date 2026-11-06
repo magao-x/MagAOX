@@ -3236,3 +3236,249 @@ app test `Makefile` and `validate_linux.sh`; root `tests/Makefile.one` and
 `tests/tests.list`; both app READMEs; this plan. Runtime source, existing
 numerical/source model headers, configuration files and the separate DDSPC
 worktree remain untouched. No staging, commits, pushes or deployment occurred.
+
+## DM integration preparation and shadow validation (2026-11-06)
+
+### Scope and evidence
+
+Starting revision `5e227a47` on `parkertjohnson1/accelSim` was clean. The user
+approved integration **preparation**, an isolated host-memory shadow prototype,
+AO interaction studies and an observation-only protocol. No live writer, instrument
+connection, configuration change, application restart or deployment is authorized.
+All work ran on the macOS workstation. Runtime app/source/model/configuration
+files remain byte-identical; default depth one and `allowSingleFrameGap=false`
+are preserved. No commit, push, merge or staging was performed.
+
+The detailed source inventory, calibration specification and proposed human-run
+validation protocol are in
+[the integration report](../../../apps/accelFFCtrl/offline/INTEGRATION.md).
+It distinguishes code facts, historical owner guidance, local archived basis
+validation and unmeasured physical transfer functions. This phase does not alter
+or supersede the earlier record of the simulator's assigned disturbance channel.
+
+### Source-grounded decisions
+
+- The tweeter/DM01 is the supported candidate because the existing TT basis,
+  `accelSim::prepareDM`, `dmMode` and BMC driver surface command path provide an
+  established numerical convention. This is not measured bandwidth/headroom
+  qualification versus the woofer. No new correction channel is assigned;
+  `dm01disp10` belongs to the historical simulator experiment and must not be
+  assumed available for correction.
+- `dmMode::sendCommand` and `hoPredCtrl::send_dm_command` replace full channel
+  contributions and increment writer-local counters. The eventual FF contribution
+  is `B*u_FF`, not a time increment or an overwrite of AO/flat. `dm::makeDelta`
+  computes output relative to non-delta contributions and a requested/applied
+  difference; `deltaChannels` classification is not incremental write semantics.
+- Existing code routes the combined surface through `dm::processImage` to
+  `bmcCtrl::commandDM`, where address/volume/actuator conversion and clipping
+  occur. No voltage or driver gain belongs in the angular/modal proposer.
+  Woofer/TCS offloading and TTM modulation have different roles/calibrations;
+  their gains and masks are not pointing calibration constants.
+- Prior owner evidence supplies the combiner's changed-summed-counter behavior,
+  AveMode=0/DClevel=0/trigger mode 4/delay 10 us. No deployed combiner implementation,
+  current settings or dynamic latency were observed here. Existing publication
+  counters and time fields are not hardware delivery acknowledgements.
+- `accelSimDMStream` assigns ADC acquisition time before active UpdateIm;
+  `dmMode` does not assign acquisition/target time in its direct write path.
+  Neither defines scheduled physical application at a prediction target. The
+  installed library's final timestamp behavior and combiner/driver sequence
+  correspondence require Linux/native and optical qualification.
+- `wooferTweeterRecon` names `aol1_modevalWFS`, `aol1_modevalDMf_mon` and
+  `aol0_modevalDMf_mon`. Its WFS `writetime-1/fps+offset` versus DM `atime+offset`
+  demonstrates explicit timing assumptions, not a measured delay to reuse.
+  A WFS modal coefficient is not automatically radians or pupil X/Y.
+- The physical chain requires calibrated ADC response, effective mechanical
+  acceleration-to-angle transfer, reported-frame-to-DM/WFS registration and sign,
+  current B/mask/modal order/units, measured DM/WFS response, total timing and AO
+  state/headroom. `Q(omega)` and `J(omega)` in WFS units would give
+  `u_FF=-g*J^+*Q*theta_pred`; alternatively validated static C/K plus a measured
+  dynamic model can be used. No missing Q/J/C, physical delay or bandwidth is
+  replaced with synthetic data. Estimator rotation already applied to pointing
+  must not be applied twice.
+
+### Locally available archived calibration
+
+The archived FITS pair and mask exist under `scratch/accelSim_dm_calib`, with
+unchanged SHA-256 identities matching the earlier owner-provided record:
+
+```text
+CMmodesDM.00.fits a5bb41b535fe46cb225c17f1086dbf9ac190cf3bd451379e9551ffb77383daf9
+dmmask.fits      0970dab118bcdb73236ae045da93c550288a4d632b70b2748903272f2aa166f8
+```
+
+Read-only Astropy/NumPy reanalysis uses the **previously owner-defined DM-pupil**
+coordinates: center 24.5, D=6.5 m over 48 pitches, +X column/+Y row. Weighted SVD of
+`B*K=.5e6*[x,y]` agrees with the archived C++ projector columns and yields:
+
+```text
+K = [[-798911.75116813, -315942.59493194],
+     [ 318826.69049347, -792420.64908820]] coefficient/radian
+relative fit residuals = [8.468786589e-8, 8.634744717e-8]
+masked mode RMS = [0.999999926912, 0.999999991558] surface micron
+```
+
+No normalization, piston removal, output masking or offloader mask substitution
+occurs. The six signed/mixed-angle examples pass a new C++ shadow fixture (32
+assertions), also under sanitizers. This establishes numerical pupil mapping
+only: accelerometer/telescope/WFS registration, optical sign, dynamic transfer
+and current operational calibration identity remain unmeasured. The fixture is
+labelled `archivedPupilOnly`; it never enters the synthetic cancellation runs or
+an actual command path. Scratch files are local archived evidence, not guaranteed
+current versioned instrument calibration.
+
+### Prototype and test design
+
+New `offline/accelFFCtrlShadow.hpp::shadowCommand` composes explicitly supplied
+C (reported pointing radians to DM-pupil radians) and K (modal coefficients/rad)
+and delegates to the unchanged offline `feedForward`. It accepts the existing
+`prediction` interface and has no stream, file, clock, application or actuator
+API. Gain and bounds default zero. A zero-bound validity checker reuses the
+existing numerical validation even at zero proposal gain, so observation records
+retain qualified predicted/mapped angles without emitting a command.
+
+Every record contains exact integer query/acquisition/input-target/requested-target
+times, source generation/counter, log ordinal, reset epoch, input revision and
+calibration identity/evidence, along with numerical validity, faults, limiting
+scalar and absolute modal coefficients. Invalid, stale or nonfinite input gives
+zero; no previous proposal is reused. All configured bands must share source/time
+identity. A source/query rollback or generation change latches inhibition until
+reset; counter-to-acquisition inconsistencies latch too. Reset requires a newer
+acquisition and advances an epoch separately from configuration revision. The
+study's reset/restart keeps actual input revision 0. Source counter advances of
+four between 2-kHz queries on 8-kHz input are normal, not a drop detector; the
+unchanged input processor retains drop accounting and warmup authority.
+
+The old cancellation exporter optionally writes shadow records/manifests only
+when `ACCELFFCTRL_SHADOW_DIR` is supplied. Every modal/state result must match
+the original proposer. Diagnostics preserve forecast horizon rather than adding
+sample age twice. Blocking file output is entirely offline; it is not a proposed
+real-time logger or live-app hook. Physical qualification is never inferred from
+`active`, `prediction_valid` or a provenance ID.
+
+Five new ordinary C++ cases cover coordinate rotations/reflections, actual modal
+order/scale, repeated absolute commands, zero gain, limits, invalid/nonfinite/stale
+input, target mismatch, query/source/sample ordering, reset/reattachment barriers
+and a synthetic AO integrator's analytical DC dynamics/back-calculation. One
+additional hidden case validates the locally generated archived-pupil fixture.
+Doxygen-only references retain real shadow API links through the test fixtures.
+
+### AO interaction results and limits
+
+The new standalone `accelFFCtrlAO_export` consumes the **recorded causal** dual-band
+commands from the previous cancellation study. It reuses the existing synthetic
+`dmResponse` and a separate test-only AO integrator driven by the previous WFS
+sample. It does not replace or model the actual CACAO kernel. All gains, one-query
+WFS latency, 1/3-ms plant delays, 300-Hz bandwidth and 0.03/0.003 modal headroom
+proxies are explicit synthetic choices. No physical values are inferred.
+
+For a compatible unsaturated linear AO loop, `r=S*(d+P*u_FF)` with
+`S=(I+P*C_AO)^-1`; an integrator does not inherently double-correct exact FF.
+Duplicate FF writers, incorrect POL accounting, saturation, unknown latency and
+modal cross coupling can instead produce adverse interaction. Real reconstruction
+must include all actually applied contributions and response/exposure timing.
+
+All 15 60-s interaction cases passed their numerical/recording audits. The
+AO-only and shadow-only runs match **every full-rate AO command and residual**
+by direct comparison; fingerprints and independently read 2-kHz traces agree too.
+The shadow-only file contains nonzero proposed diagnostic commands but applies
+none. Existing production app sources/configurations remain unchanged; actual
+Linux logging/scheduling overhead is not qualified by this offline equality.
+
+| Synthetic case | Variance reduction X/Y | Diagnostic consequence |
+| --- | ---: | --- |
+| AO 0.1 only / shadow only | 25.47% / 23.14% | Exactly identical trajectories. |
+| FF only | 94.88% / 94.24% | Matches original recorded cancellation. |
+| AO 0.1 + FF | 95.75% / 95.09% | Compatible residual feedback helps in this prescribed plant. |
+| AO 0.3 only / + FF | 86.79% / 85.66%; 99.07% / 98.89% | Not measured live gains. |
+| Duplicate FF | 20.17% / 17.22% | 34 saturated queries. |
+| Wrong sign | -190.69% / -198.65% | Amplification. |
+| Incorrect incremental FF | -1873.94% / -1993.77% | 105121 saturated queries. |
+| Tight total headroom | 17.15% / 4.68% | 118092 saturated queries; individual FF bounds do not cover total. |
+| Illustrative back-calculation | 62.97% / 60.66% | Candidate integrator peak 0.06025→0.00719 coefficient. |
+| Additional actual delay 3 ms | -1611.13% / -2332.86% | Clipped poor trajectories. |
+| AO gain 0.8 | -1606.50% / -1997.33% | Clipped output is not a stability margin. |
+
+FF disable and AO reset halfway through the record expose settling/state changes.
+Full-rate RMS scores include all intervals after 4 s; diagnostic PSDs use uniformly
+sampled 2-kHz WFS outputs. There is no real WFS exposure, resonance, actuator/flat
+clipping model or DM-to-accelerometer feedback. These sensitivity cases neither
+establish closed-loop stability nor recommend a physical gain or anti-windup rule.
+
+### Validation record and reproduction
+
+- Normal controller suite: **33 cases / 3,440,635 assertions passed**.
+- Combined simulator/controller ASan+UBSan: **67 cases / 3,677,233 assertions**,
+  no findings; simulator DM tests use existing mock sinks. Archived fixture:
+  **32 assertions** under normal and sanitizer builds.
+- Updated 8-s cancellation+shadow and 15-case AO exporters pass ASan/UBSan and
+  independent Python audits. No nonfinite/invalid nonzero proposal is accepted.
+- Python: **21 controller tests plus four simulator PSD tests passed**. Four new
+  cases check integer times/counters above 2^53, strict target/freshness/inhibition,
+  common clipping, calibrated reflection/order and bad pupil geometry.
+- The previous **76-run 60-s cancellation study** passed again. All **18 original
+  cancellation binary/summary artifacts** remain byte-identical with shadow
+  logging. **22 logs / 2,640,000 records** cover disabled gain, ordinary operation,
+  isolated loss, invalid/stale input and reset/reattachment; evidence is synthetic.
+- The existing **208 gap replays** pass using 6-s recordings; all **420 archived
+  default/gap prediction/history/truth binaries** remain identical. Original numerical
+  and input allocation benchmarks pass, with unchanged checksums and no C++/Eigen
+  allocations. This does not measure the new offline file logger's RT suitability.
+- Root application-test build registers/compiles the new shadow tests with scoped
+  `-fno-fast-math`. No original assertion is weakened. Formatting, Python syntax,
+  shell syntax and `git diff --check` pass. Main runtime sources/configurations,
+  the original specification prefix and archived FITS inputs are preserved.
+
+The integration report and app README contain complete normal replay commands.
+Use the existing scientific Python environment; Astropy is optional and required
+only for archived-FITS analysis. Local tooling is Apple Clang 21/Eigen 5.0.1,
+libc++ 210106 and Anaconda Python. No dependencies were installed. Sanitizer
+reproduction for the new standalone tools:
+
+```bash
+make -C apps/accelFFCtrl/tests BUILD_DIR=/tmp/accelFFCtrl-shadow-asan \
+  CXXFLAGS='-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer' shadow-tools
+ASAN_OPTIONS=halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
+  ACCELFFCTRL_SHADOW_DIR=/tmp/accelFFCtrl-shadow-asan-final/logs \
+  /tmp/accelFFCtrl-shadow-asan/accelFFCtrlCancellation_export /tmp/accelFFCtrl-shadow-asan-final/cancellation 8
+ASAN_OPTIONS=halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
+  /tmp/accelFFCtrl-shadow-asan/accelFFCtrlAO_export \
+  /tmp/accelFFCtrl-shadow-asan-final/cancellation/ar_2_gain10.bin /tmp/accelFFCtrl-shadow-asan-final/ao
+python3 apps/accelFFCtrl/tests/validate_shadow.py --shadow-directory /tmp/accelFFCtrl-shadow-asan-final/logs \
+  --ao-directory /tmp/accelFFCtrl-shadow-asan-final/ao --output /tmp/accelFFCtrl-shadow-asan-final/report --no-plots
+```
+
+The existing combined sanitizer source list now includes `accelFFCtrlShadow_test.cpp`
+(in the Linux runner too). The report gives the optional archived fixture commands;
+its absence must not be silently replaced with synthetic “real” calibration.
+Artifacts stay under `/tmp/accelFFCtrl-shadow-*`, including integer CSV logs,
+provenance manifests, archived calibration JSON/examples, exact trajectory checks,
+AO metrics and `ao/interactions.png`. Prior study plots/PSDs remain reproducible.
+
+### Future observation-only gates and stop point
+
+The report specifies future human authorization, matching Linux/compiler/library
+builds, private native ADC validation, a coherent approved calibration bundle,
+bounded capture/overhead qualification, accelerometer/WFS/AO/clock/source telemetry,
+shadow logging and timestamp-aware PSD/transfer comparison. Required numerical
+criteria are zero invalid/stale/disabled nonzero proposals, preserved horizons,
+complete provenance/loss/reset accounting and unchanged AO output. Physical
+coherence/phase/gain uncertainty, timing-error and total-headroom budgets must be
+set by the owner; absent values fail physical qualification rather than receiving
+invented thresholds. Current input depth one and default-disabled gap policy must
+remain unchanged throughout observation.
+
+No representative local live prediction/WFS/command timing record was available;
+the earlier 602-s zero-loss 4-kHz aggregate does not qualify registration or phase.
+Linux full-app/native validation remains outstanding. Current B/K is conditional
+on archived DM-pupil geometry; the accelerometer/telescope/WFS chain, actual DM
+response and AO transfer/headroom are blockers before real commands. A dedicated
+correction channel and applied-zero/fault/crash-cleanup contract are also unassigned.
+No live writer, output attachment or enabled gain was added to the application.
+
+Changed files: new offline `accelFFCtrlShadow.hpp` and `INTEGRATION.md`; new app
+`tests/accelFFCtrlShadow_test.cpp`, `accelFFCtrlAO_test.hpp`, `accelFFCtrlAO_export.cpp`,
+`validate_shadow.py`, `test_validate_shadow.py`; app test `Makefile`,
+`accelFFCtrlCancellation_export.cpp` (optional diagnostic logging only),
+`validate_linux.sh` (test source list); root `tests/Makefile.one` and `tests/tests.list`;
+both app READMEs and this plan. Existing runtime helpers/numerics, calibration
+inputs, production configs and separate DDSPC worktree remain unchanged.

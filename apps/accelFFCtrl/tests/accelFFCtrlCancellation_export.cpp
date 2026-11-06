@@ -4,12 +4,14 @@
  */
 #include "accelFFCtrlCancellation_test.hpp"
 #include "accelFFCtrlGap_test.hpp"
+#include "../offline/accelFFCtrlShadow.hpp"
 
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <map>
+#include <optional>
 #include <tuple>
 
 using namespace libXWCTest::accelFFCtrlTest;
@@ -172,6 +174,33 @@ void evaluate( const std::filesystem::path    &directory /**< [in] local artifac
     std::ofstream     trace;
     if( run.m_trace )
         trace.open( directory / ( name + ".bin" ), std::ios::binary );
+    std::optional<shadowCommand> shadow;
+    std::ofstream                shadowLog;
+    if( const char *path = std::getenv( "ACCELFFCTRL_SHADOW_DIR" );
+        path && ( run.m_trace || run.m_name == "gain0" || run.m_fault != "none" ) && !run.m_oracle )
+    {
+        const std::filesystem::path output = path;
+        std::filesystem::create_directories( output );
+        shadow.emplace( Eigen::Matrix2d::Identity(), cal.m_mapping, 1, shadowCalibration::synthetic, c );
+        shadowLog.open( output / ( name + ".csv" ) );
+        shadowLog << std::setprecision( 17 )
+                  << "record,epoch,input_revision,calibration_id,evidence,query_ns,sample_ns,prediction_target_ns,"
+                     "requested_target_ns,"
+                     "source_counter,source_generation,state,fault,prediction_valid,scale,theta_x_rad,theta_y_rad,dm_x_"
+                     "rad,dm_y_rad,"
+                     "mode0,mode1\n";
+        std::ofstream manifest( output / ( name + ".txt" ) );
+        manifest << std::setprecision( 17 )
+                 << "fixture=synthetic_pupil8\nregistration=explicit_identity_synthetic_only\n"
+                 << "semantics=absolute_complete_modal_contribution\ngain=" << c.m_gain
+                 << "\nhorizon_ns=" << c.m_horizonNs << "\nmax_age_ns=" << c.m_maxAgeNs
+                 << "\nmax_prediction_ns=" << c.m_maxPredictionNs << "\nbounds=" << c.m_maxModal[0] << ","
+                 << c.m_maxModal[1] << "\nK=\n"
+                 << cal.m_mapping << '\n';
+        manifest.close();
+        if( !manifest.good() )
+            throw std::runtime_error( "failed shadow provenance export" );
+    }
     std::array<double, 2>  held{}, target{}, error{};
     correction             proposal;
     std::array<moments, 2> before, after, effect;
@@ -202,7 +231,22 @@ void evaluate( const std::filesystem::path    &directory /**< [in] local artifac
                     target[axis] += p[band].m_pointing[axis];
             }
             proposal = controller.propose( std::span<const prediction>( p.data(), used ), now );
-            held     = proposal.m_modal; // Every query replaces the contribution, including explicit inhibited zeros.
+            if( shadow )
+            {
+                if( n == 40000 && ( run.m_fault == "reset" || run.m_fault == "restart" ) )
+                    shadow->reset( now, 0 ); // These source resets preserve the input configuration revision.
+                const auto r = shadow->propose( std::span<const prediction>( p.data(), used ), now );
+                if( r.m_proposal.m_modal != proposal.m_modal || r.m_proposal.m_state != proposal.m_state )
+                    throw std::runtime_error( "shadow logging changed a cancellation proposal" );
+                shadowLog << r.m_record << ',' << r.m_epoch << ',' << r.m_inputRevision << ',' << r.m_calibrationId
+                          << ',' << int( r.m_evidence ) << ',' << r.m_queryNs << ',' << r.m_sampleNs << ','
+                          << r.m_predictionTargetNs << ',' << r.m_requestedTargetNs << ',' << r.m_sourceCounter << ','
+                          << r.m_sourceGeneration << ',' << int( r.m_proposal.m_state ) << ',' << int( r.m_fault )
+                          << ',' << r.m_validPrediction << ',' << r.m_proposal.m_scale << ',' << r.m_pointing[0] << ','
+                          << r.m_pointing[1] << ',' << r.m_dmPointing[0] << ',' << r.m_dmPointing[1] << ','
+                          << r.m_proposal.m_modal[0] << ',' << r.m_proposal.m_modal[1] << '\n';
+            }
+            held = proposal.m_modal; // Every query replaces the contribution, including explicit inhibited zeros.
             if( !valid && run.m_gain > 0 && proposal.m_state != correctionState::inhibited )
                 throw std::runtime_error( "unavailable predictor generated a correction" );
             ready += valid;
@@ -299,6 +343,12 @@ void evaluate( const std::filesystem::path    &directory /**< [in] local artifac
         trace.close();
         if( !trace.good() )
             throw std::runtime_error( "failed cancellation trace export" );
+    }
+    if( shadow )
+    {
+        shadowLog.close();
+        if( !shadowLog.good() )
+            throw std::runtime_error( "failed shadow record export" );
     }
 }
 } // namespace

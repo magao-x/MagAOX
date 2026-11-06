@@ -36,6 +36,7 @@
 ../apps/accelFFCtrl/tests/accelFFCtrlGap_test
 ../apps/accelFFCtrl/tests/accelFFCtrlJitter_test
 ../apps/accelFFCtrl/tests/accelFFCtrlCancellation_test
+../apps/accelFFCtrl/tests/accelFFCtrlShadow_test
 ../apps/accelFFCtrl/tests/accelFFCtrlStream_test
 ../apps/accelFFCtrl/tests/accelFFCtrl_test
 ../apps/accelSim/tests/accelSim_test

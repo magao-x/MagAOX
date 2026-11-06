@@ -1252,3 +1252,75 @@ combination/gain/trigger behavior, exclusive writer ownership and fault/zero
 semantics. The historical additive combiner contract is not a measured dynamic
 plant. No physical suppression or real-system stability claim follows from these
 results. Production integration requires a separate reviewed and approved phase.
+
+## DM integration preparation and shadow commands (2026-11-06)
+
+The detailed [integration report](offline/INTEGRATION.md) records the actual DM
+code paths, calibration/evidence inventory, timestamp/sequence conventions,
+synthetic AO-interaction results and future observation-only pass/fail protocol.
+The tweeter is the source-supported candidate; no correction channel is assigned.
+The earlier simulator assignment of channel 10 does not authorize correction to
+share that channel. Full channel contributions replace their previous values;
+`dm.deltaChannels` does not mean incremental writes.
+
+New [offline/accelFFCtrlShadow.hpp](offline/accelFFCtrlShadow.hpp) wraps the existing
+numerical proposer. Callers supply separate pointing-to-DM-pupil coordinate and
+modal maps, a provenance identity and an explicit synthetic/archived-pupil-only
+label. Gain and bounds default to zero. It returns host-memory absolute modal
+records with exact query/acquisition/prediction/requested-target times, source
+counter/generation, reset epoch, input revision, numerical validity and status.
+A zero-bound numerical audit still records qualified prediction angles with gain
+zero. This is not an enable or optical calibration certificate. It has no stream,
+clock, file, channel or publication interface and is not included by the live app.
+
+All invalid/stale/nonfinite proposals are zero. Generation changes, source-counter
+rollback, inconsistent acquisition identity and query rollback latch inhibition
+until reset. A reset requires a newer acquisition; it does not reuse a cached
+ready proposal. Query-to-query counter advances of four are normal at 8/2 kHz and
+are not treated as input loss. All configured prediction targets remain exactly
+query plus the existing horizon. Reset epochs and actual configuration revisions
+are separate; the unchanged study configuration retains revision zero.
+
+The local archived TT pair/dmmask are available read-only. Their conditional
+DM-pupil K agrees with the prior C++ projector and has relative fit errors about
+8.5e-8; the new opt-in signed/order/scaling fixture passes. It is labelled
+`archivedPupilOnly`: accelerometer-to-telescope/WFS registration, optical sign and
+measured dynamic response remain missing. Synthetic 30-degree calibration,
+1-ms delay and 300-Hz plant values are never substituted for those measurements.
+
+The prior 76-run 60-s study is rerun with optional diagnostic logging. Twenty-two
+logs cover 2,640,000 queries, including zero gain, losses, invalid/stale input and
+reset/reattachment. Every shadow coefficient/state is checked against the original
+proposer. Existing cancellation results remain unchanged. Logging is blocking
+**offline** I/O; no real-time recorder or live-app hook was added.
+
+A separate replay uses the recorded causal dual-band commands with the existing
+synthetic DM response and a test-only AO integrator. AO-only versus shadow-only
+AO commands/residuals match at every 8-kHz step. Illustrative AO gain 0.1 plus FF
+reduces variance by 95.75/95.09%, versus 25.47/23.14% for AO alone. Duplicate FF
+reduces only 20.17/17.22%; incorrect incremental semantics amplify variance by
+1874–1994% and saturate the imposed modal headroom proxy. Extra delay and large
+loop gain also produce poor clipped trajectories. These are sensitivity tests,
+not measured AO settings, a hardware saturation model or closed-loop stability
+qualification. The report explains POL/double-counting and offloader risks.
+
+To reproduce on the workstation, using the existing scientific Python environment:
+
+```bash
+make -C apps/accelFFCtrl/tests BUILD_DIR=/tmp/accelFFCtrl-shadow-build test benchmark shadow-tools
+ACCELFFCTRL_SHADOW_DIR=/tmp/accelFFCtrl-shadow-final-60s/logs \
+  /tmp/accelFFCtrl-shadow-build/accelFFCtrlCancellation_export /tmp/accelFFCtrl-shadow-final-60s/cancellation 60
+python3 apps/accelFFCtrl/tests/validate_cancellation.py /tmp/accelFFCtrl-shadow-final-60s/cancellation
+python3 apps/accelFFCtrl/tests/validate_shadow.py --shadow-directory /tmp/accelFFCtrl-shadow-final-60s/logs \
+  --output /tmp/accelFFCtrl-shadow-final-60s/report
+/tmp/accelFFCtrl-shadow-build/accelFFCtrlAO_export \
+  /tmp/accelFFCtrl-shadow-final-60s/cancellation/ar_2_gain10.bin /tmp/accelFFCtrl-shadow-final-60s/ao
+python3 apps/accelFFCtrl/tests/validate_shadow.py --ao-directory /tmp/accelFFCtrl-shadow-final-60s/ao \
+  --output /tmp/accelFFCtrl-shadow-final-60s/ao/report
+```
+
+The report includes the optional archived-FITS/C++ fixture commands and future
+Linux/native requirements. All current runtime sources/configurations, depth-one
+operation, observation-only behavior and default-disabled gap policy remain
+unchanged. No instrument connection, real DM command, deployment or application
+restart was performed. A live writer requires a separate explicit approval.

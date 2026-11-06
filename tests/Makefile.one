@@ -52,18 +52,18 @@ else ifeq ($(notdir $(TESTNAME)),accelSimDM_test)
     # The runtime preflight requires IEEE nonfinite checks.
     CXXFLAGS += -fno-fast-math
     $(OBJNAME): $(PATHNAME)../accelSim.hpp $(PATHNAME)../accelSimModel.hpp $(PATHNAME)../accelSimDisturbance.hpp $(PATHNAME)../accelSimDM.hpp $(PATHNAME)../accelSimDMStream.hpp
-else ifneq ($(filter $(notdir $(TESTNAME)),accelFFCtrlModel_test accelFFCtrlReplay_test accelFFCtrlInput_test accelFFCtrlGap_test accelFFCtrlJitter_test accelFFCtrlCancellation_test accelFFCtrlStream_test accelFFCtrl_test),)
+else ifneq ($(filter $(notdir $(TESTNAME)),accelFFCtrlModel_test accelFFCtrlReplay_test accelFFCtrlInput_test accelFFCtrlGap_test accelFFCtrlJitter_test accelFFCtrlCancellation_test accelFFCtrlShadow_test accelFFCtrlStream_test accelFFCtrl_test),)
     # Physical units, window statistics and fault detection require ordinary IEEE arithmetic.
     CXXFLAGS += -fno-fast-math
     $(OBJNAME): $(PATHNAME)../accelFFCtrlModel.hpp $(PATHNAME)../../accelSim/accelSimModel.hpp
-    ifneq ($(filter $(notdir $(TESTNAME)),accelFFCtrlInput_test accelFFCtrlGap_test accelFFCtrlJitter_test accelFFCtrlCancellation_test accelFFCtrlStream_test accelFFCtrl_test),)
+    ifneq ($(filter $(notdir $(TESTNAME)),accelFFCtrlInput_test accelFFCtrlGap_test accelFFCtrlJitter_test accelFFCtrlCancellation_test accelFFCtrlShadow_test accelFFCtrlStream_test accelFFCtrl_test),)
         $(OBJNAME): $(PATHNAME)../accelFFCtrlInput.hpp
     endif
     ifneq ($(filter $(notdir $(TESTNAME)),accelFFCtrlGap_test accelFFCtrlJitter_test),)
         $(OBJNAME): $(PATHNAME)accelFFCtrlGap_test.hpp
     endif
-    ifeq ($(notdir $(TESTNAME)),accelFFCtrlCancellation_test)
-        $(OBJNAME): $(PATHNAME)accelFFCtrlCancellation_test.hpp $(PATHNAME)accelFFCtrlGap_test.hpp $(PATHNAME)../offline/accelFFCtrlCancellation.hpp $(PATHNAME)../../accelSim/accelSimDisturbance.hpp
+    ifneq ($(filter $(notdir $(TESTNAME)),accelFFCtrlCancellation_test accelFFCtrlShadow_test),)
+        $(OBJNAME): $(PATHNAME)accelFFCtrlCancellation_test.hpp $(PATHNAME)accelFFCtrlAO_test.hpp $(PATHNAME)accelFFCtrlGap_test.hpp $(PATHNAME)../offline/accelFFCtrlCancellation.hpp $(PATHNAME)../offline/accelFFCtrlShadow.hpp $(PATHNAME)../../accelSim/accelSimDisturbance.hpp
     endif
     ifneq ($(filter $(notdir $(TESTNAME)),accelFFCtrlStream_test accelFFCtrl_test),)
         CPPFLAGS += -D_GNU_SOURCE

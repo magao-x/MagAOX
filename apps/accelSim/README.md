@@ -681,3 +681,15 @@ and unity WFS coupling. The study models source-noise and command holding and
 preserves startup/reset/inhibition intervals. It is not an on-instrument test,
 physical DM calibration, AO-loop interaction test or deployment authorization.
 See the controller README for commands, PSDs, gain sweeps, fault cases and limits.
+
+## Offline DM integration preparation
+
+The [shadow integration report](../accelFFCtrl/offline/INTEGRATION.md) reviews the
+existing simulator's DM-pupil projection, active-publication source and additive
+channel conventions without invoking them. Locally archived TT FITS/mask copies
+support a read-only conditional pupil calibration; they do not establish the
+accelerometer/WFS registration or DM timing. Channel 10 remains the historically
+assigned simulator disturbance channel, not a proposed shared correction channel.
+The controller's shadow prototype uses host memory/files only. Simulator runtime,
+RNG, synchronization, configuration and DM behavior are unchanged; no running
+instrument was accessed or modified.
