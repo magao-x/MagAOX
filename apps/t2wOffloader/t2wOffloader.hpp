@@ -129,7 +129,7 @@ class t2wOffloader : public MagAOXApp<true>, public dev::shmimMonitor<t2wOffload
 
     float m_effFPS{ 0 }; ///< Effective offload rate, m_fps / m_navg.
 
-    IMAGE    m_dmStream; ///< The woofer DM channel stream, opened in allocate().
+    IMAGE    m_dmStream;      ///< The woofer DM channel stream, opened in allocate().
     uint32_t m_dmWidth{ 0 };  ///< The width of the image
     uint32_t m_dmHeight{ 0 }; ///< The height of the image.
 
@@ -566,9 +566,9 @@ inline int t2wOffloader::appLogic()
 
     SHMIMMONITOR_UPDATE_INDI;
 
-    if(lastUpdateDMf != m_updatedDMf)
+    if( lastUpdateDMf != m_updatedDMf )
     {
-        std::cerr << std::format("DMf updated {} times\n", m_updatedDMf - lastUpdateDMf);
+        std::cerr << std::format( "DMf updated {} times\n", m_updatedDMf - lastUpdateDMf );
         lastUpdateDMf = m_updatedDMf;
     }
 
@@ -750,7 +750,7 @@ inline int t2wOffloader::processImage( void *curr_src, const dev::shmimT &dummy 
         {
             for( uint32_t p = 0; p < m_modevalDM.rows() && p < m_modevalDMf.rows(); ++p )
             {
-                m_modevalDM( p, 0 ) = m_modevalDMf(p,0);
+                m_modevalDM( p, 0 ) = m_modevalDMf( p, 0 );
             }
 
             ++m_updatedDMf;

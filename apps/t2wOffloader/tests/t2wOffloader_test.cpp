@@ -76,7 +76,7 @@ namespace t2wOffloaderTest
  */
 TEST_CASE( "t2wOffloader placeholder harness instantiates the app", "[t2wOffloader]" )
 {
-    // clang-format off
+// clang-format off
     #ifdef T2WOFFLOADER_TEST_DOXYGEN_REF
     t2wOffloader();
     #endif
@@ -97,7 +97,7 @@ TEST_CASE( "t2wOffloader placeholder harness instantiates the app", "[t2wOffload
  */
 TEST_CASE( "t2wOffloader back-projects the offload change onto the tweeter", "[t2wOffloader]" )
 {
-    // clang-format off
+// clang-format off
     #ifdef T2WOFFLOADER_TEST_DOXYGEN_REF
     t2wOffloader::calcTweeterOffload;
     #endif
