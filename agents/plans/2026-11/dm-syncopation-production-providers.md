@@ -764,3 +764,320 @@ All 149 software test cases pass (4239 assertions).
 Applying the new mode requires rebuilding/installing and operator-controlled
 application restarts. The instrument measurements above precede that deployment;
 no post-change instrument latency or jitter measurement has been supplied.
+
+The parallel readback analysis below was recorded before this checkout
+incorporated the preceding polling-delay findings and the updated CPU map.
+Preserve both records; a causal statement from one observation must not be
+applied to a later instrument state without checking its settings.
+
+## 2026-11-05: reported timing regression after a full restart
+
+After building merged dev and restarting all software, the operator reports
+that enabling synco produces a controller acquisition interval near 200 us,
+rather than 125 us, with approximately ten times the jitter. A cpuset
+reconfiguration may have occurred. An interval near 200 us means approximately
+5 kHz controller receipts; it does not by itself locate missing scheduled
+slots or establish the effective primary rate.
+
+Read-only comparison of tested `8972958b` with current `d6af5164` finds no BMC
+worker/pipeline or syncopation scheduling-policy change. The relevant runtime
+changes are the active-health text correction and restored circular-buffer
+include. The synced configuration still selects production mode, four steps,
+an 8 kHz cap and 70/20 us preparation leads.
+
+Two deployment checks precede changing timing margins:
+
+- `sysMonitor::m_setLatency` initializes false, and restarting it releases the
+  CPU DMA-latency handle. Verify `sysMonRTC.set_latency.toggle` again; all
+  successful qualification runs had it On.
+- Config commit `ff63d2f` renames the SDK, post and release-observer sets to
+  `dmtweeter-sdk`, `dmtweeter-post` and `dmtweeter-synco-release`. The workstation's
+  tracked RTC setup script still defines the former `spare56`, `spare31` and
+  `spare57` names. This is a local source/config consistency flag, not evidence
+  of the live RTC map. The tested physical placements were SDK56, post31,
+  release57, controller40 and scheduler41.
+
+Missing BMC worker sets normally fail startup rather than silently falling back
+to ordinary scheduling. Valid sets assigned to the wrong/shared cores, or
+changed after startup, remain possible. BMC INDI scheduling diagnostics are
+startup observations; `allowedCpus=1` is a mask size, not a CPU ID. Actual live
+affinities are needed after reconfiguration. Also verify the restarted camera's
+2 kHz/synchronization-On state and dmcomb's live mode-4 / 5 us configuration.
+
+Request bounded operator readbacks of latency state, BMC worker/pipeline
+diagnostics, synco timing and live thread scheduling before choosing a change.
+If needed, compare later counter snapshots to distinguish reduced auxiliary
+posting from controller-side overload/coalescing. No root cause is established
+yet. No runtime code, configuration or instrument state was changed by an
+agent; this record is the only edited file.
+
+The operator's next readbacks confirm latency tuning On and acquisition near
+2 kHz. SDK scheduling is FIFO55 on CPU42 and post scheduling is FIFO30 on CPU44;
+controller40, scheduler41 and release-observer57 remain as before. The operator
+intentionally moved the workers into the same CPU group. The recorded topology
+places CPUs40--47 in one L3 domain, so this achieves the intended locality.
+Whether the reassigned cores are also occupied by other work is not established.
+The tracked older map assigns 42/44 to the two modevalDMf streamWriter instances;
+both remain configured, making live occupancy a concrete next check.
+
+Worker coalescing and pipeline overload totals are zero, with no worker fault,
+failure, timeout, post failure or preparation failure. A rejected total of one
+and reader-unqualified total of 501 are cumulative and cannot be timed from
+this snapshot. Camera timing remains steady. Synco instead reports copy maximum
+55.986 us / budget 56.986 us and snapshot maximum 28.163 us / budget 29.163 us,
+with large skip totals.
+
+The copy budget alone now exceeds the passive preparation window:
+`readyLeadUs - step0LeadUs = 70 - 20 = 50 us`. Future passive copies therefore
+fail the fit guard even if their typical cost subsequently falls. Active
+auxiliary preparation has 60 us gross between the 70 us input cutoff and the
+10 us early-validation cutoff, leaving at most 3.014 us for actual snapshot,
+reader waiting and checks after reserving the copy budget. The snapshot budget
+is not directly summed into the production fit guard, and its independent
+maximum must not be treated as a paired duration.
+
+These learned bounds only increase to observed elapsed time plus 1 us. They
+survive disable/re-enable and reacquire; a new synco process resets them. Thus
+one transient slow copy can leave persistent admission suppression. This
+explains a concrete gating mechanism without identifying the origin of the
+slow measurement or classifying every skipped auxiliary slot. Obtain skip
+reasons and actual CPU occupancy before changing placement or margins. The
+snapshot's active=0 and deliveredHz=0 may reflect disable/warmup, so request
+enable/health readback rather than interpreting it as the enabled rate.
+Also, notStarted is lifetime passiveSkipped while missed belongs to the current
+enable trial; these two totals do not form a single interval population.
+
+The operator confirms synco was disabled before these readbacks. The CPU42/44
+snapshot contains the SDK/post threads and kernel workers, with no other user
+process shown; it does not establish kernel/IRQ activity or prove sharing is
+absent at other instants. The completed enable trial reports 407,097 matched
+mains and 592,007 posted/acknowledged auxiliaries over 203.568998956 s, giving
+approximately 4,907.94 acknowledged combinations per second, consistent with
+the reported interval near 200 us.
+
+Of 629,293 auxiliary skips, **629,258 (99.9944%) are preparationLate**. There
+are eight publication-late skips, seventeen reader-missing skips, nine
+combined-unclassified skips and one cancellation. The 38 clock-excluded cycles
+account for another 114 opportunities outside that skip population. This
+classifies the dominant loss as preparation/admission suppression rather than
+demonstrated SDK overload; a high learned budget can preserve that suppression
+after the original slowdown has ended.
+
+Main SDK/reader matches are both zero, with every matched main impact
+unclassified. The exact main-impact trace link has also been lost relative to
+the successful captures. It requires a coherent proctrace row naming the
+primary inode/counter. This diagnostic link is separate from auxiliary reader
+readiness, which uses the exact combined/read-done key, so its absence does not
+explain the preparation-late skips. Inspect dmcomb's live delay/name binding
+for later comparisons without changing it to primary-only trigger mode 3.
+
+The next requested operator comparison restarts only synco on the current
+cores, then re-enables it and takes initial and ten-second readbacks. This
+resets learned bounds while retaining BMC, dmcomb, workload and placement, so
+it can distinguish a persistent latched budget from renewed slow preparation.
+No outcome is assumed until that test is reported.
+
+The next attachment, `ad71033c-da60-45b1-9429-468bf5be32bc/Pasted text.txt`,
+reports a fresh trial 1 with synco already enabled before the first readback.
+Both timing snapshots show copy maximum 54.953 us / budget 55.953 us and
+snapshot maximum 26.270 us / budget 27.270 us, unchanged between observations.
+The lower counters and trial reset support a new process/session, but the first
+snapshot already represents approximately 73 seconds of valid scheduling.
+These are not observations of the initial enable boundary.
+
+Between the two timing snapshots, auxiliary posts increase by 27,479, auxiliary
+skips by 52,168 and passive skips by 26,549. The auxiliary counts reconcile to
+`27,479 + 52,168 = 3 * 26,549`; only 34.501% of auxiliary slots run while the
+corresponding counted passive cycles are skipped. At a 2 kHz main rate this
+implies approximately 4,070 Hz total, agreeing with the two reported delivered
+rates of 4,071 and 4,069 Hz. Those different readbacks are not a common timestamp
+with the later zero-test summary.
+
+That summary reports 90.22800386 s elapsed, 180,369 matched mains, 187,687
+auxiliaries posted/acknowledged and 353,423 skips. Of those skips, 353,420
+(99.99915%) are preparation-late; the other three are combined-unclassified.
+Publication-late and reader-missing totals are zero. The 86 excluded clock
+cycles add 258 opportunities separately. The whole-summary combined rate is
+approximately 4,079 Hz; it is not the instantaneous delivery-rate window.
+
+Restarting therefore reproduces an excessive budget before the first sample;
+the result is not simply retention of the old process's maximum. It still does
+not distinguish a repeated startup excursion from later slow copies. The next
+proposed controlled comparison restores SDK56 and post31 if those cores remain
+available, holding scheduler41, release57, workload and margins fixed, then
+restarts the affected workers and synco. Ask availability before choosing that
+comparison; no live CPU-map changes have been made by an agent.
+
+On the operator's direction to consult the current RTC script, refresh
+`origin/dev` to `b0cc83f1` (RTC cpuset PR445). The earlier workstation checkout
+was stale. The current map defines SDK42 as `dmtweeter-sdk`, post44 as
+`dmtweeter-post`, release57 as `dmtweeter-synco-release`, and moves the two
+modevalDMf streamWriters to 24/25. Withdraw the earlier potential 42/44
+streamWriter-overlap concern for this map. CPU31 (`spare31`) and CPU56
+(`spare56`) remain dedicated development reserves, with no consumers found in
+the synced config. They are available for the proposed comparison according
+to the committed map and configuration.
+
+The controlled configuration alternative is `sdk.cpuset=spare56` and
+`sdk.pipelineCpuset=spare31` in dmtweeter.conf, preserving both priorities,
+all other placements and the scheduling margins. The operator opens the loop
+before restarting the DM controller, then restarts synco to reset its learned
+bounds and repeats the rate/budget measurements. No source rebuild or cpuset
+reconstruction is needed for that comparison.
+
+The refreshed dev also contains the separately merged circular-buffer timing
+and fgtimes-only work (PR442/443). The earlier runtime comparison was against
+the older `d6af5164` checkout, not this newly fetched tip. That earlier audit
+does not exclude changes in those additional commits as a possible factor.
+The preparation-skip classification above is established directly by operator
+readbacks and remains valid. No instrument actions or config edits were made
+by an agent.
+
+After the operator updates the actual checkout to `b0cc83f1`, recheck the newer
+timing code as well as the CPU map. The production implementation is unchanged.
+The fgtimes-only path retains the same receipt, successful native SDK-return
+and receipt-to-return populations in seconds; SDK, completion and read-done
+operational timestamps remain independent of optional detailed capture. The
+new monitor current-frame helpers are not used by synco. No concrete removed
+readiness signal or scheduling-policy regression is identified in that review.
+
+The newly incorporated upstream record above identifies an unintended 50 us
+dmcomb polling delay and records recovery to 125 us mean / 3.7 us RMS with
+5 us restored. That is more direct evidence than the CPU-placement hypothesis
+for the run described there. Confirm the live value is `0.000005` s before
+choosing a CPU rollback for any later recurrence. Do not assume that an earlier
+online correction survived a subsequent dmcomb restart.
+
+### Heap abort and concurrent INDI XML formatting, November 5 Phoenix / November 6 UTC
+
+The next unresponsive instance is an exited process, not a demonstrated lock
+stall. The operator's tmux reports `corrupted size vs. prev_size in fastbins`
+followed by `Aborted (core dumped)`. PID 833377 started at 05:49:04 UTC and
+systemd records SIGABRT at 05:57:18 UTC, roughly eight minutes later.
+`coredumpctl info` reports `Storage: none`; only crash metadata was retained.
+Request an operator-run GDB attachment while synco remains disabled to preserve
+the next all-thread backtrace and core. No agent starts or controls the app on
+RTC. Keep CPU placement, dmcomb delay and timing margins unchanged during this
+diagnosis.
+
+Read-only audits find no concrete double-close, out-of-bounds queue access or
+mixed-layout explanation in the scheduler/monitor ownership paths. They do
+identify a separate, reproducible heap-corruption defect in the common INDI
+outgoing-message formatter. `IndiXmlParser::createSafeXmlString()` calls
+`entityXML()` in lilxml, which reallocates and frees a process-global `malbuf`.
+Property definitions on the INDI thread and updates on the app thread format
+XML before taking the output-write mutex. Concurrent calls therefore race over
+that allocation even when their input strings and properties are independent.
+The synco mapping text contains `->`, exercising entity escaping, while plain
+property names exercise the path that frees the prior buffer.
+
+A workstation-only four-thread reproduction using the actual parser and
+lilxml sources immediately produces an AddressSanitizer double-free. One
+thread reallocates in `entityXML` while another frees its buffer on the
+plain-string path. This establishes a defect consistent with the instrument
+allocator failure, but it does not prove the exact instrument abort originated
+there without its stack. The reproduction and original report are in
+`/tmp/synco-xml-race/reproduce.cpp` and `result.txt` on the workstation.
+
+Replace only the outgoing escaping helper with a per-call `std::string`.
+Preserve the five substitutions (`&`, `<`, `>`, apostrophe and quote), literal
+double escaping, ordinary bytes and the former C-string termination behavior.
+No shared buffer or global serialization lock remains in that helper. The
+same four-thread ASan reproduction completes four million calls with zero
+output mismatches after the change; leak scanning is disabled because this
+workstation execution environment rejects LeakSanitizer's thread inspection.
+Regression coverage adds independent concurrent Define/Set message formatting
+and explicit escaping/termination cases to the existing INDI suite.
+
+This change does not make all of lilxml reentrant: serializing an already
+parsed XML tree still uses lilxml's legacy shared-buffer routines. Normal
+outgoing property definitions and updates use the corrected helper. Also,
+unlocked source copying in `IndiProperty`/`IndiElement` merits a separate review;
+the immutable-input reproduction does not depend on that behavior.
+
+Validation on the workstation: the INDI suite passes 3 cases / 13 assertions
+both normally and with the actual parser/lilxml sources instrumented by ASan.
+The four-million-call standalone reproduction also passes ASan without output
+mismatches. The isolated scheduler suite passes all 154 cases / 6,634,353
+assertions after relinking the corrected INDI library. The latter run disables
+only leak scanning and a separately observed, pre-existing flatlogs
+`new-delete-type-mismatch`: `logHeader::createLog` allocates multiple bytes with
+raw `operator new` but the default `shared_ptr<char>` deleter uses scalar sized
+delete. Its initial ASan report is retained in
+`/tmp/synco-heap-asan/run.log`; no other address errors appear in the completed
+run. That suppression is not used for the isolated XML reproduction or INDI
+suite. These tests do not replace an instrument backtrace or sustained disabled
+startup check after deployment.
+
+## 2026-11-06: enabled production suppresses every auxiliary copy
+
+The operator confirms the live dmcomb delay is 5 us and initially reports
+approximately 200 us controller receipt intervals with tenfold increased jitter
+when synco is enabled. The subsequent attachment
+`129f9325-786a-4da2-b328-33e0ac5a98aa/Pasted text.txt` captures the later state in
+which toggling enable appears to have no effect on DM timing. Analysis is local
+on workstation `mx11`; no agent queries or controls the instrument.
+
+Both synco snapshots actually report enable On, production mode, active trial
+6, warming zero, a valid progress snapshot and health `production active`.
+They show an unchanged 87.685 us copy maximum and 88.685 us copy budget. With
+the locally configured 70 us ready lead, 20 us passive lead and the reported
+10 us auxiliary wake lead, only 50 us gross is available for passive preparation
+and 60 us for auxiliary preparation. The copy budget alone exceeds both
+windows; snapshot and reader-check costs further reduce available time. The
+live configuration file was not included in this attachment, so the 70/20 us
+leads refer to the existing local configuration and preceding qualification.
+
+The two coherent zero-test summaries cover 12.239574693 s within the same trial:
+
+| Counter | First | Second | Increase |
+| --- | ---: | ---: | ---: |
+| Main observed | 99,659 | 124,134 | 24,475 |
+| Main matched | 99,658 | 124,133 | 24,475 |
+| Auxiliary posted / acknowledged | 0 / 0 | 0 / 0 | 0 / 0 |
+| Auxiliary skipped | 298,977 | 372,402 | 73,425 |
+| Preparation late | 298,974 | 372,399 | 73,425 |
+| Clock-excluded cycles | 3 | 5 | 2 |
+
+Thus every one of the three auxiliary slots per observed main is skipped,
+and every new skip is preparation-late. The two additional excluded clock
+cycles account for six opportunities separately. Reader-missing, publication-
+late, resource-fault and cancellation counters remain zero. Separately sampled
+production properties show no passive copies and 24,475 additional passive
+skips. Do not treat the ordinary timing, production and zero-test properties
+as one atomic snapshot; their update times differ.
+
+The later controller snapshot reports 1,999.826 Hz receipts, or approximately
+500.043 us mean, with 3.815 us receipt jitter. RTC latency remains On. SDK
+worker fault, failures and timeouts are zero; the pipeline queue and in-flight
+count are zero at that sample. Nonzero coalescing/overload totals are cumulative
+and cannot be assigned to this interval from a single controller snapshot.
+The current absence of auxiliary posts is established on the synco side.
+
+Source inspection confirms that `productionCopy()` keeps a monotonically
+increasing elapsed-time budget and rejects a copy before starting when it
+cannot fit before the cutoff. Enable toggles and reacquisition preserve this
+budget. A new process reloads the configured initial budget (10 us by default),
+but earlier restart tests already show that an excessive bound can recur.
+Restarting only synco is a controlled reset/recovery check, not a demonstrated
+permanent remedy; preserve placement, dmcomb delay and preparation settings
+for that comparison and capture the budget before enable and immediately after.
+
+The reported `active=4`, `feasible=4` and `production active` do not validate
+copy feasibility: production sets these from enable/clock state and requested
+count. Also, `copiedLate=0` is not updated by the production copy path. These
+diagnostics conceal the complete preparation suppression. Missing producer
+commands are not themselves the cause: the scheduler is designed to copy the
+retained contribution and continue producing auxiliary triggers.
+
+This establishes the present suppression mechanism, not the cause or time of
+the original 87.685 us excursion. The measured batch includes passive stream
+semaphore posts, cache copies and scheduling interruptions, not only pixel
+copying. The existing preparation-late reason also conflates budget rejection,
+completed-copy overrun and some primary-state changes. Any further diagnosis
+should distinguish those paths and capture the elapsed copy that raises the
+bound; simply reducing the bound would discard an observed safety cost.
+
+Only this engineering record was appended. No runtime code, configuration,
+timing margin or instrument state was changed, and no new tests were needed
+for this readback/source analysis.

@@ -1,7 +1,6 @@
-/// IndiXmlParser.cpp
-///
-/// @author Paul Grenz
-///
+/** \file IndiXmlParser.cpp
+ * \brief Parse INDI XML messages and serialize property publications.
+ */
 ////////////////////////////////////////////////////////////////////////////////
 
 #include <stdexcept>
@@ -117,13 +116,40 @@ IndiXmlParser::IndiXmlParser( const IndiMessage &imSend,
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-/// createSafeXmlString
-/// This takes any string and replaces the '&', '<', '>', '\', and '"'
-/// with its equivalent XML entity: &amp; &lt; &gt; &apos; and &quot;
+/// Escape XML-sensitive characters in a private string, retaining C-string termination semantics.
 
 string IndiXmlParser::createSafeXmlString( const string &szText )
 {
-  return ::entityXML( (char*)( szText.c_str() ) );
+    string escaped;
+    escaped.reserve( szText.size() );
+
+    // entityXML uses a process-global buffer; concurrent INDI publications must not share it.
+    for( const char *character = szText.c_str(); *character != '\0'; ++character )
+    {
+        switch( *character )
+        {
+        case '&':
+            escaped += "&amp;";
+            break;
+        case '<':
+            escaped += "&lt;";
+            break;
+        case '>':
+            escaped += "&gt;";
+            break;
+        case '\'':
+            escaped += "&apos;";
+            break;
+        case '"':
+            escaped += "&quot;";
+            break;
+        default:
+            escaped += *character;
+            break;
+        }
+    }
+
+    return escaped;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
