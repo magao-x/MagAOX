@@ -1,0 +1,22 @@
+{
+  "mixed_qr": {
+    "request_x": 0.0,
+    "request_y": 0.0,
+    "yx": 0.0,
+    "yy": 0.0,
+    "theta_norm": 0.0,
+    "valid": 0.0,
+    "version": 0.0,
+    "rank": 0.0
+  },
+  "delay_jitter_qr": {
+    "request_x": 0.0,
+    "request_y": 0.0,
+    "yx": 0.0,
+    "yy": 0.0,
+    "theta_norm": 0.0,
+    "valid": 0.0,
+    "version": 0.0,
+    "rank": 0.0
+  }
+}

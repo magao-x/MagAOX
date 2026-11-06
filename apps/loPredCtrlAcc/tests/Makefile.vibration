@@ -1,15 +1,17 @@
 # Strict offline modal simulation only. No application, INDI, ImageStreamIO or device library is linked.
 APP_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/..)
+.DEFAULT_GOAL := all
 TEST_DIR := $(APP_DIR)/tests
 BUILD_DIR ?= $(APP_DIR)/build/vibration
 CXX = c++
 CPPFLAGS += $(shell pkg-config --cflags-only-I eigen3 mxlib) -DEIGEN_DONT_PARALLELIZE
 CXXFLAGS ?= -O3 -g
 CXXFLAGS += -std=c++20 -Wall -Wextra -fno-fast-math
-SOURCES := $(TEST_DIR)/vibration_main.cpp $(TEST_DIR)/vibration.cpp $(TEST_DIR)/async_shadow.cpp \
+SOURCES := $(TEST_DIR)/vibration_main.cpp $(TEST_DIR)/vibration.cpp $(TEST_DIR)/stability.cpp $(TEST_DIR)/async_shadow.cpp \
            $(APP_DIR)/ar_controller.cpp $(APP_DIR)/recursive_least_squares.cpp $(APP_DIR)/qrd_rls.cpp \
            $(APP_DIR)/utils.cpp $(APP_DIR)/shadow_controller.cpp
 OBJECTS := $(addprefix $(BUILD_DIR)/,$(notdir $(SOURCES:.cpp=.o)))
+include $(TEST_DIR)/Makefile.stability-model
 VPATH := $(sort $(dir $(SOURCES)))
 TARGET := $(BUILD_DIR)/ddspc_vibration
 .PHONY: all

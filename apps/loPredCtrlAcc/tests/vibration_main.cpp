@@ -2,6 +2,7 @@
  * \brief Export deterministic host-memory closed-loop experiments; no native application/stream linkage.
  */
 #include "vibration.hpp"
+#include "stability.hpp"
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -12,7 +13,7 @@ namespace
 {
 using namespace libXWCTest::loPredCtrlAccTest;
 /// Define positive, negative and timing controls before inspecting outcomes; identical seeds within every case.
-std::vector<VibrationConfig> scenarios()
+std::vector<VibrationConfig> scenarios( bool extra /**< [in] Add Phase 11 sensitivity/temporary-fault cases. */ )
 {
     std::vector<VibrationConfig> cases;
     VibrationConfig              c;
@@ -69,6 +70,25 @@ std::vector<VibrationConfig> scenarios()
              x.m_stallFrames = 32;
          } );
     add( "broadband_qr", []( auto &x ) { x.m_qrd = true; } );
+    if( extra )
+    {
+        add( "excitation_loss",
+             []( auto &x )
+             {
+                 x.m_freezeFrame  = x.m_train + x.m_evaluate / 2;
+                 x.m_freezeFrames = 100;
+             } );
+        add( "stale_transient",
+             []( auto &x )
+             {
+                 x.m_stallFrame  = x.m_train + x.m_evaluate / 2;
+                 x.m_stallFrames = 16;
+             } );
+        add( "prior_strong", []( auto &x ) { x.m_prior = .1; } );
+        add( "forgetting_none", []( auto &x ) { x.m_gamma = 1; } );
+        add( "forgetting_more", []( auto &x ) { x.m_gamma = .999; } );
+        add( "lambda_high", []( auto &x ) { x.m_lambda = .2; } );
+    }
     for( unsigned seed : { 200, 300 } )
         add( "broadband_seed" + std::to_string( seed ), [seed]( auto &x ) { x.m_seed = seed; } );
     const auto original = cases;
@@ -85,9 +105,21 @@ std::vector<VibrationConfig> scenarios()
 
 /// Write finite trace/configuration artifacts to a caller-selected offline directory only.
 int main( int    argc /**< [in] Argument count. */,
-          char **argv /**< [in] Output directory, optional case name or quick. */ )
+          char **argv /**< [in] Output directory, optional case/all/quick and research strategy. */ )
 {
-    if( argc < 2 || argc > 3 )
+    if( argc < 2 || argc > 4 )
+        return 2;
+    const std::string strategy = argc == 4 ? argv[3] : "baseline";
+    StabilityPolicy   policy;
+    if( strategy == "symmetric" || strategy == "symmetric_recover" )
+        policy.m_symmetricRls = true;
+    if( strategy == "neutral" || strategy == "guard" || strategy == "recover" || strategy == "symmetric_recover" )
+        policy.m_neutralReturn = true;
+    if( strategy == "guard" || strategy == "recover" || strategy == "symmetric_recover" )
+        policy.m_confidence = true;
+    if( strategy == "recover" || strategy == "symmetric_recover" )
+        policy.m_retrain = true;
+    if( strategy != "baseline" && !policy.m_symmetricRls && !policy.m_neutralReturn )
         return 2;
     const std::filesystem::path root( argv[1] );
     std::filesystem::create_directories( root );
@@ -96,19 +128,21 @@ int main( int    argc /**< [in] Argument count. */,
               "noise,wfs_noise,lambda,prior,"
               "gamma,dm_pole,dm_scale,control_gain,limit,dm_extra_frames,wfs_delay_frames,sensor_delay_frames,"
               "publication_frames,jitter_ns,max_age_ns,capacity,missing_frame,missing_frames,reset_frame,stall_frame,"
-              "stall_frames\n";
+              "stall_frames,strategy,freeze_frame,freeze_frames\n";
     bool ran = false;
-    for( auto c : scenarios() )
+    for( auto c : scenarios( argc == 4 ) )
     {
-        if( argc == 3 && std::string( argv[2] ) != "quick" && c.m_name != argv[2] )
+        if( argc >= 3 && std::string( argv[2] ) != "all" && std::string( argv[2] ) != "quick" && c.m_name != argv[2] )
             continue;
-        if( argc == 3 && std::string( argv[2] ) == "quick" )
+        if( argc >= 3 && std::string( argv[2] ) == "quick" )
         {
             c.m_train    = 600;
             c.m_evaluate = 1200;
             if( c.m_name != "mixed" && c.m_name != "broadband" )
                 continue;
         }
+        if( strategy != "baseline" )
+            c.m_stability = &policy;
         const auto s = vibration_source( c );
         const auto r = vibration_run( c, s );
         config << std::setprecision( 12 ) << c.m_name << ',' << c.m_seed << ',' << c.m_train << ',' << c.m_evaluate
@@ -118,13 +152,15 @@ int main( int    argc /**< [in] Argument count. */,
                << ',' << c.m_dmScale << ',' << c.m_controlGain << ',' << c.m_limit << ',' << c.m_dmExtraFrames << ','
                << c.m_wfsDelayFrames << ',' << c.m_sensorDelayFrames << ',' << c.m_publicationFrames << ','
                << c.m_jitterNs << ',' << c.m_maxAgeNs << ',' << c.m_capacity << ',' << c.m_missingFrame << ','
-               << c.m_missingFrames << ',' << c.m_resetFrame << ',' << c.m_stallFrame << ',' << c.m_stallFrames << '\n';
+               << c.m_missingFrames << ',' << c.m_resetFrame << ',' << c.m_stallFrame << ',' << c.m_stallFrames << ','
+               << strategy << ',' << c.m_freezeFrame << ',' << c.m_freezeFrames << '\n';
         std::ofstream file( root / ( c.m_name + ".csv" ) );
         file << std::setprecision( 10 )
              << "controller,frame,dx,dy,ax,ay,rx,ry,yx,yy,request_x,request_y,applied_x,"
                 "applied_y,valid,ready,new_command,version,age_ns,model_sequence,origin,reason,prediction_squared,"
                 "prediction_count,overflows,invalid_changes,theta_norm,d_norm,rank,sensor_index,sensor_time_ns,"
-                "sensor_available_ns,wfs_available_ns\n";
+                "sensor_available_ns,wfs_available_ns,action,recovery,correction_accepted,confidence_bound,slew_x,slew_"
+                "y\n";
         for( int model = 0; model < 5; ++model )
             for( std::size_t k = 0; k < r.m_frames[model].size(); ++k )
             {
@@ -143,7 +179,9 @@ int main( int    argc /**< [in] Argument count. */,
                      << f.m_predictionSquared << ',' << f.m_predictionCount << ',' << r.m_overflows[model] << ','
                      << r.m_invalidChanges[model] << ',' << f.m_thetaNorm << ',' << f.m_dNorm << ',' << f.m_rank << ','
                      << a << ',' << ( a >= 0 ? s.m_sensorNs[a] : 0 ) << ',' << ( a >= 0 ? s.m_sensorAvailableNs[a] : 0 )
-                     << ',' << s.m_availableNs[k] << '\n';
+                     << ',' << s.m_availableNs[k] << ',' << f.m_action << ',' << f.m_recovery << ','
+                     << f.m_correctionAccepted << ',' << f.m_confidenceBound << ',' << f.m_slewX << ',' << f.m_slewY
+                     << '\n';
             }
         if( !file || !config )
             throw std::runtime_error( "Cannot write offline experiment artifacts" );
