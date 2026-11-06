@@ -1976,3 +1976,388 @@ interference, and qualifying the isolated-gap candidate offline before any
 recovery-policy change. This is not authorization or evidence for DM correction.
 No deployment, native stream access, configuration change, commit or push was
 performed. Text above Agent Findings and Plan remains unchanged.
+
+## Offline bounded-gap investigation and 8/4-kHz comparison (2026-11-05)
+
+### Authorization and evidence boundary
+
+This phase permits investigation and an isolated offline prototype only.
+Production `accelFFCtrlInput.hpp`, `accelFFCtrlModel.hpp`, the application/native
+reader, simulator, configurations and all DM paths are unchanged. Depth remains
+one. Earlier retention recommendations are historical, not an instruction to
+change this phase's producer storage. No instrument host/INDI was accessed and
+no deployment, commit, push or merge was performed. Production adoption requires
+separate user approval after reviewing these results.
+
+The user supplied one live observation: at 8 kHz, with accelSim on CPU30 and
+accelFFCtrl on CPU29, 2,241 drops and 2,202 resets occurred over 602 s. This gives
+3.7226 drops/s and 3.6578 resets/s. The drop count is 0.04653% of **nominal**
+8-kHz opportunities; actual published-counter totals were not supplied. Mean
+time per reset is 0.27339 s, shorter than the 0.3-s warmup, but the distribution
+and overlap of reset intervals are unknown. Actual readiness cannot be inferred
+by summing warmups. Counts alone do not prove that each reset was a single-frame
+overrun or identify the operating-system cause. The separate live 4-kHz
+experiment is running; no result was supplied or assumed.
+
+### Exact production loss/reset trace
+
+`apps/accelFFCtrl/accelFFCtrlInput.hpp` owns lifetime counters and the fit:
+
+| Path / API | `dropped` effect | Reset effect |
+| --- | --- | --- |
+| `drain`: first retained counter exceeds cursor+1 | Add the missing publications | `invalidate(overrun)` once per observed gap, even one lost frame |
+| `drain`: malformed/absent timestamp, write-before-acquisition, write-after-receipt, mapped future time, non-monotonic accepted time | Add one; increment `invalid` | Clear immediately with `invalidTime` |
+| `drain`: `harmonicEstimator::consume` rejects ADC >4095, stale input, time/interval/sequence or numerical failure | Add one; increment `invalid` | Clear immediately; reason is stale or numerical |
+| `attached` / `disconnected`: known stable snapshot has an unconsumed tail | Add seenCounter-cursor | Attach always resets; disconnect resets only if connected |
+| `drain`: counter rollback below max(cursor,seenCounter) | Count known abandoned tail through `attached` | Increment generation/restarts and reset |
+| `drain`: incompatible geometry/type/location/temporal metadata | No direct addition | Reset on entry into incompatible state |
+| `drain`: invalid clock bracket, uncertainty, offset step or rollback | No direct addition; cursor is not advanced | Reset on entry into clockFault, discard anchor; later overwrites can add drops |
+| `predict`: acquisition older than maxAge | No direct addition | Inhibit/latch stale immediately; reset is counted when subsequent ingestion clears the fault |
+| `predict`: failed/ill-conditioned numerical fit | No direct addition | Inhibit/latch numerical fault; subsequent ingestion clears it |
+| Accepted configuration revision or operator reset | No addition by itself | Reset even with no lost sample |
+| Application mapping replacement/wait failure/shutdown | Known abandoned tail only | `disconnected`; successful reopen also calls `attached` |
+
+All counted resets pass through `inputProcessor::invalidate`. A multi-frame
+overrun need not produce one reset per missing frame; invalid records or other
+causes can produce resets without counter-gap loss. A stale query itself does
+not increment the reset counter. Repeated incompatible/clock-fault polls are
+guarded against resetting on every identical fault poll. Initial attachment
+starts at the latest publication and does not count unknown pre-attachment
+history. Producer-side skipped nominal ticks are also different from lost
+publications: `accelSim::acquireAndCheckValid` calls `model::advance(skipped)`,
+but frameGrabber increments `cnt0` only for actual publications.
+
+Busy writes increment `busy`; inconsistent counter/metadata copies increment
+`races`; no new counter increments `duplicates`. These paths do not immediately
+increment drops/resets. They defer reading, so a later coherent snapshot can
+reveal an overrun. Long reader delays with a continuing producer usually yield
+a fresh latest sample plus a counter gap; silence can instead yield staleness.
+The strict reader resets before consuming a post-gap record. Consequently it
+forgets previous acquisition-order history at that boundary; a retaining policy
+must explicitly check the previous timestamp across the gap as this prototype does.
+
+`accelFFCtrlStream.hpp::frame` copies the two UINT16 codes and global counter /
+acquisition / write stamps at depth one. `header` brackets native write state,
+geometry and counters around the copy. `wait` uses monotonic semaphore deadlines
+on modern glibc and bounds additional semaphore draining at 256 posts; the
+fallback uses trywait and requested sleeps up to 20 us. Posts are notifications,
+not retained payloads. At depth one, two completed publications before copying
+mean overwritten history regardless of semaphore count. `maxBatch` only caps
+how many retained planes can be copied; `count=min(counter-first+1,maxBatch)`
+is at most one here. Increasing it cannot recover overwritten frames or make
+the reader wait to form a batch.
+
+`accelFFCtrl.hpp::worker` drains on source wakes and prediction deadlines,
+queries at 2 kHz, and coalesces missed prediction deadlines. It does not ingest
+only at 2 kHz. Supervision handles filesystem identity and 5-Hz INDI outside
+the worker; control/snapshot locks use try-lock in the worker. Affinity to
+different CPUs does not guarantee sub-125-us wake/copy latency. Scheduler,
+interrupt, copy-race, semaphore-backlog and producer timing effects are possible
+contributors, not confirmed causes from the supplied aggregate counts. To
+distinguish them later, use a human-collected offline trace of physical counters,
+acquisition/write/receipt times and existing invalid/last_event/busy/races/age
+diagnostics, together with simulator skipped/late/discontinuity diagnostics.
+Five-Hz INDI alone cannot reconstruct per-frame scheduling.
+
+### Offline prototype and numerical admission policy
+
+Added test-only `tests/accelFFCtrlGap_test.hpp` and `accelFFCtrlGap_test.cpp`.
+The application does not include the helper and has no runtime switch for it.
+The helper's first `inputProcessor` is the unchanged production validator.
+Every owned source pair and clock is validated there. A private query retrieves
+the exact mapped acquisition timestamp even during the validator's warmup.
+Only then does a separate unchanged `harmonicEstimator` consume original ADC
+codes and that timestamp. Its consecutive sequence is an **accepted-record
+ordinal**, while physical publication counters/generations and all loss counts
+remain separately audited. No sample or timestamp is filled in or fabricated.
+
+The production validator still resets internally on every gap; its reset counts
+are not presented as experimental fit resets. The second numerical owner may
+retain mature history only when all these conditions hold:
+
+- Same source generation, strictly increasing physical counter and acquisition
+  time; the validator accepted the current record and its only reset cause is
+  one overrun (not an ADC, timestamp, clock or source fault).
+- Kernel was already ready. The original `max(3/f,3*T)` cold-start coverage,
+  LLT/condition/residual checks, maxInterval, maxAge and target bounds are unchanged.
+- `gap1`: at most one missing frame. `gap7`: an exploratory allowance of seven,
+  still bounded by acquisition elapsed time <=1 ms. Therefore gap7 can admit
+  at most seven missing samples at 8 kHz, three at 4 kHz.
+- For physical counter increment d, `abs(dt-d*nominalPeriod) <= 0.05*nominalPeriod`.
+  This is a deliberately strict **offline** cadence/identity consistency guard.
+- At least T=0.1 s since the previous retained gap. A dense second gap resets;
+  repeated gaps during cold start continue to restart the original warmup.
+
+Any other validator reset, rejected record, stale/numerical kernel state or
+cadence mismatch clears the experimental fit/output. Fault tests check
+inhibition immediately after ingestion, before another query. The next accepted
+fresh record starts cold. Production data/clock checks are reused, not weakened.
+
+Actual elapsed acquisition time drives the original cascades:
+`beta=1-exp(-2*dt/T)`, then the original Gram/data recurrences. Carrier phase
+advances by `omega*dt`; prediction advances from the newest acquisition to the
+actual target. Renumbering accepted records is not a fixed-rate time surrogate.
+This is essential: a missing sample changes elapsed time even though the next
+accepted ordinal is consecutive. No simulator state/model/RNG enters this path.
+
+This two-owner validation scaffold is intentionally an offline experiment, not
+the recommended live implementation. A future approved production change should
+integrate explicit bounded-gap admission with the existing owner/validator and
+retain physical counters in public diagnostics, avoiding a second fit/query on
+every input record.
+
+### Study construction and units
+
+Extended the existing deterministic exporter, preserving the original validation
+case and all assertions. Recording/truth export and scheduler replay are shared.
+There are 132 replays: two rates, two populations, three policies, 11 schedules.
+Each 60-s source recording is generated **once**, with 162 future samples. At
+8/4 kHz there are 480,000/240,000 publications; all runs have 120,000 nominal
+2-kHz query slots. ADC/physical settings remain seed42/modeSeed123, noise PSD
+1e-8, zero2048, volts/count0.0083799, sensitivity1.02, lever10m, f0=28Hz,
+T=0.1s, zero rotation, query+1ms prediction. Full truth's actual 28-Hz mode is
+extracted from that same recording; full pointing is a separate reference.
+
+Mode specs including **per-sample** pole radii are identical at both rates.
+Halving the rate doubles the physical pole-decay time and changes the stochastic
+trajectory/realized signal RMS even with the same seed. Sensor-noise RMS is
+sqrt(PSD*fs/2), so it changes from 0.0063246 to 0.0044721 m/s²; quantization
+step remains 0.008215588 m/s²/count. Thus this is the literal same-parameter
+comparison requested, not a controlled comparison of identical continuous
+disturbance histories. Holding physical damping fixed would require a separate
+pole-radius transformation, which is not applied here.
+
+Publication and normal receipt delays remain 25/50 us. Queries use actual now,
+with normal latest-sample ages 125/250 us. Effective horizons are exactly
+1.125/1.250 ms (nine/five truth samples). Reader-only delays can increase sample
+age up to the existing 2-ms freshness boundary; every ready target still equals
+query+1ms. Integer grid checks prohibit silently flooring targets. Acceleration
+and pointing remain related by the same negative harmonic inverse; peak/RMS and
+coherent-phase conventions remain as in the preceding section.
+
+`validate_gaps.py` reuses the existing scorer. It verifies identical accepted
+physical sample indices **and receipt times** between policies, and bit-identical
+lossless predictions. Accuracy uses nominal slots after 4 s, reports each
+policy's own valid mask **and** a common production-valid mask, and compares
+each result with lossless output at the same timestamps. Invalid slots are not
+zeros. Coherent amplitude/phase fits use actual target times even across holes;
+gapped samples are never concatenated into a uniform PSD. Availability counts
+every nominal slot, including blocked worker deadlines. A late coalesced query
+can mark recovery but does not add another nominal deadline.
+
+### Accuracy and phase results
+
+The following errors reference the actual 28-Hz component. First table is the
+lossless baseline; all three policies give bit-identical predictions there.
+
+| Rate / population | Acceleration RMSE X/Y [m/s²] | Pointing RMSE X/Y [mas] | NRMSE X/Y | Correlation X/Y |
+| --- | ---: | ---: | ---: | ---: |
+| 8 kHz / single | 0.0003090 / 0.0003202 | 0.20593 / 0.21338 | 15.627% / 17.783% | 0.98782 / 0.98422 |
+| 8 kHz / full | 0.0009306 / 0.0009655 | 0.62017 / 0.64343 | 43.175% / 49.199% | 0.91798 / 0.89291 |
+| 4 kHz / single | 0.0002931 / 0.0002951 | 0.19532 / 0.19667 | 14.271% / 16.160% | 0.98982 / 0.98702 |
+| 4 kHz / full | 0.0006663 / 0.0007542 | 0.44406 / 0.50261 | 47.040% / 57.661% | 0.89920 / 0.86680 |
+
+With one physical frame lost every second, `gap1` gives:
+
+| Rate / population | Pointing RMSE X/Y [mas] | NRMSE X/Y | Coherent target peak-amplitude error X/Y | Coherent target phase error X/Y |
+| --- | ---: | ---: | ---: | ---: |
+| 8 kHz / single | 0.20602 / 0.21334 | 15.632% / 17.779% | +0.178% / -0.387% | -0.343° / +0.189° |
+| 8 kHz / full | 0.62002 / 0.64363 | 43.159% / 49.212% | +3.037% / +0.516% | -2.913° / +6.133° |
+| 4 kHz / single | 0.19525 / 0.19678 | 14.264% / 16.168% | -0.002% / -0.571% | -1.221° / -0.298° |
+| 4 kHz / full | 0.44337 / 0.50293 | 46.961% / 57.694% | +2.835% / -5.673% | -3.418° / +16.336° |
+
+These absolute coherent phase errors include the original stochastic envelope,
+interference and finite-record cancellation; they are not gap-induced biases.
+Against lossless output **on the same valid timestamps**, additional coherent
+gain/phase changes from one loss/s are:
+
+| Rate / population | Gain change X/Y | Phase change X/Y |
+| --- | ---: | ---: |
+| 8 kHz / single | +0.0011% / +0.0157% | +0.0039° / +0.0121° |
+| 8 kHz / full | -0.0042% / +0.0497% | +0.0017° / +0.0366° |
+| 4 kHz / single | +0.0151% / -0.0392% | -0.0098° / +0.0334° |
+| 4 kHz / full | +0.0003% / -0.0735% | -0.0639° / +0.0544° |
+
+On the common production-ready mask, full-population NRMSE is production
+43.244%/48.820% versus gap1 43.204%/48.765% at 8 kHz, and production
+46.835%/57.320% versus gap1 46.783%/57.237% at 4 kHz. Thus the availability
+gain is not obtained by scoring unavailable production intervals as zeros.
+CSV includes signed bias, correlation and delta-from-ideal RMSE for every case.
+
+For the 4-Hz-loss schedule after maturity, gap1 full-component NRMSE remains
+43.126%/49.220% at 8 kHz and 46.919%/57.812% at 4 kHz. Production has no ready
+slots after the 4-s settling cut, so its paired accuracy is explicitly undefined.
+For exploratory gap7 with a 1-ms blackout each second, full NRMSE is
+43.346%/49.288% at 8 kHz and 46.970%/58.374% at 4 kHz. These limited results
+do not justify deploying the larger-burst allowance.
+
+### Scheduling, drop accounting and recovery
+
+Results below apply equally to single/full populations. All availability values
+include the initial cold start over the full 60 s; reset counts include initial
+attachment. Policy B is gap1, C is exploratory gap7. Periodic blackouts begin
+after one period, except the 4-Hz schedule begins at t=1 s so it tests loss after
+maturity. That is a simulation assumption, not the observed live loss pattern.
+
+| Condition | Lost frames 8/4 kHz | Production resets 8/4 kHz | Gap1 resets 8/4 kHz | Production availability 8/4 kHz | Gap1 availability 8/4 kHz | Gap7 availability 8/4 kHz |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Ideal | 0 / 0 | 1 / 1 | 1 / 1 | 99.499% / 99.499% | 99.499% / 99.499% | 99.499% / 99.499% |
+| Block one acquisition period every second | 0 / 0 | 1 / 1 | 1 / 1 | 99.499% / 99.499% | 99.499% / 99.499% | 99.499% / 99.499% |
+| Block 250 us every second | 59 / 0 | 60 / 1 | 1 / 1 | 69.950% / 99.499% | 99.450% / 99.499% | 99.450% / 99.499% |
+| Block 500 us every second | 177 / 59 | 60 / 60 | 60 / 1 | 69.950% / 69.950% | 69.950% / 99.450% | 99.450% / 99.450% |
+| Block 1 ms every second | 413 / 177 | 60 / 60 | 60 / 60 | 69.901% / 69.901% | 69.901% / 69.901% | 99.401% / 99.401% |
+| One frame lost every second (2-period blackout) | 59 / 59 | 60 / 60 | 1 / 1 | 69.950% / 69.950% | 99.450% / 99.450% | 99.450% / 99.450% |
+| One frame lost at 4 Hz, starting t=1 s | 236 / 236 | 237 / 237 | 1 / 1 | 1.166% / 1.166% | 99.303% / 99.303% | 99.303% / 99.303% |
+| Three one-frame losses spaced 1 ms, every 5 s | 33 / 33 | 34 / 34 | 23 / 23 | 93.953% / 93.953% | 93.963% / 93.963% | 93.963% / 93.963% |
+| Block 2 ms every 5 s | 165 / 77 | 12 / 12 | 12 / 12 | 93.963% / 93.963% | 93.963% / 93.963% | 93.963% / 93.963% |
+| Delay reader 3 ms every 5 s; keep queries running | 253 / 121 | 12 / 12 | 12 / 12 | 93.981% / 93.981% | 93.981% / 93.981% | 93.981% / 93.981% |
+| One-frame losses every 100 ms from startup | 599 / 599 | 600 / 600 | 600 / 600 | 0% / 0% | 0% / 0% | 0% / 0% |
+
+Divide dropped counts by 60 for rates (e.g. one-loss/s schedule 0.9833 drops/s,
+4-Hz schedule 3.9333 drops/s over the complete recording). The prototype never
+hides physical loss: all policies have identical source-loss counts and accepted
+record histories. Every replay asserts processed+dropped=published, zero invalid
+records for these valid-data scheduling studies, and the analytically expected
+loss count. Raw frame losses are unchanged by preserving a numerical fit.
+
+Single-loss production recovery is 300.375 ms at 8 kHz and 300.250 ms at 4 kHz
+from overrun detection to first ready query. Gap1 is ready at the first post-gap
+query (0-ms measured recovery from receipt), while any blocked deadlines remain
+unavailable. At one loss/s, post-settling availability is 69.95% production
+versus 99.95% gap1; at 4-Hz loss it is 0% versus 99.8%. Dense clusters admit
+their first isolated gap but reset on the second and third; the final recovery
+still costs about 300 ms. Interrupted warmups are censored. The CSV's mean
+recovery across both retained (0 ms) and reset events must not be mistaken for
+a shorter cold-start gate.
+
+The reader-only delay deliberately calls `predict` during input silence. All
+three policies produce 22 stale queries per recording, all inhibited, zero
+fault-state queries for otherwise valid records, and no ready sample older than
+2 ms. Maximum ready effective horizon becomes 2.750 ms at 8 kHz / 3.000 ms at
+4 kHz because sample age is included. Worker-wide blocked deadlines instead
+record no produced prediction; they are unavailable, not fresh zero estimates.
+
+### Coefficient uncertainty, residuals and safety tests
+
+`validate_gaps.py::fit_quality` reuses the independent batch-QR oracle and
+computes an investigation-only white-noise covariance proxy:
+`Cov(C)=sigma² G^-1 (sum(w_i² u_i u_i^T)) G^-1`, where
+`sigma²=PSD*fs/2+ADCstep²/12`. It reports coefficient-derived peak-amplitude
+and phase standard errors plus weighted input-fit residual RMS. Colored mode
+contamination and stochastic model error are excluded from this covariance;
+it is not a calibrated confidence bound or a new admission threshold.
+
+Probes use at most 12 actually retained events per schedule, at receipt and
+50 ms later, with one second of accepted history. Probes following another
+reset are excluded. Against the same uninterrupted history, gap1 increases the
+amplitude standard-error proxy by at most 0.266% at 8 kHz and 0.526% at 4 kHz;
+weighted residual ratios across populations lie in 0.9990–1.0024 at 8 kHz and
+0.9963–1.0076 at 4 kHz. Gram reciprocal conditions stay >=0.4842 in these batch
+probes and normal-equation relative residuals below 3.1e-15. Exploratory gap7
+can increase the amplitude-error proxy about 7.24% (8 kHz) / 3.13% (4 kHz).
+This further favors restricting an initial production proposal to single frames.
+
+Phase uncertainty can be very large when the estimated harmonic amplitude
+approaches a null (up to 328° in a full-population proxy probe). This is an
+existing signal-identifiability limitation; a finite well-conditioned fit alone
+does not certify useful physical phase or correction. Retention does not solve
+it. The linearized phase standard error is itself unreliable near zero amplitude
+and must not be interpreted as a calibrated confidence interval. The small
+**incremental** gap phase changes above do not imply uniformly
+small absolute phase error in the noisy full population.
+
+New ordinary tests cover one/two/three/seven/eight consecutive missing frames
+at both rates and both gap caps, actual target-time/phase reconstruction,
+unmodified cold start, dense repeated gaps, ADC >4095, NaN configuration,
+absent/future/backwards timestamps, bad write ordering, counter/time mismatch,
+backwards time across a gap, counter rollback, explicit producer generation
+restart, wrong datatype, realtime clock step, excessive bracket uncertainty,
+stale receipt, input silence and wrong nominal-rate assumptions. Every injected
+integrity fault inhibits and clears numerical output; no faulted prediction
+remains ready. Wrong cadence
+assumptions cannot accumulate a ready fit in this deliberately strict prototype.
+The production estimator itself correctly uses timestamps after its initial
+weight; a wrong nominal rate is not inherently a fixed-rate phase error there.
+
+The prototype cadence check is intentionally conservative. Actual accelSim
+timestamps are sampled from realtime at acquisition, and synchronization/scheduler
+behavior can make valid intervals irregular or skip nominal numerical ticks
+without counter gaps. The fixed 5%-of-period guard may therefore cause additional
+live resets. It must be qualified against an offline recording of real timestamp
+jitter before production adoption, not silently relaxed. Supported memory/frequency
+ranges, long-duration/different-seed behavior, burst distributions and remote
+clock/calibration assumptions also need further qualification.
+
+### Reproduction, regressions and recommendation
+
+All commands are workstation-only and create artifacts under `/tmp`. Select an
+existing Python environment with NumPy/SciPy/pandas/Matplotlib; local runs used
+Apple Clang21/libc++210106/Eigen5.0.1 and Python package versions exported into
+`report/analysis_versions.json`. Actual mode specs/compiler/STL metadata accompany
+the raw binaries; standard-library RNG distribution differences preclude assuming
+bit-identical trajectories from seeds alone on exao2.
+
+```bash
+accff_python=python3
+make -C apps/accelFFCtrl/tests BUILD_DIR=/tmp/accelFFCtrl-gap-build \
+  PYTHON="$accff_python" VALIDATION_DIR=/tmp/accelFFCtrl-gap-60s \
+  VALIDATION_SECONDS=60 gap-validation
+make -C apps/accelFFCtrl/tests BUILD_DIR=/tmp/accelFFCtrl-gap-build test benchmark
+"$accff_python" -m unittest discover -s apps/accelSim/tests -p test_validate_psd.py -v
+ASAN_OPTIONS=halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
+  make -C apps/accelFFCtrl/tests BUILD_DIR=/tmp/accelFFCtrl-gap-final-asan test \
+  CXXFLAGS='-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer'
+ASAN_OPTIONS=halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
+  ACCELFFCTRL_VALIDATION_DIR=/tmp/accelFFCtrl-gap-asan-smoke \
+  ACCELFFCTRL_VALIDATION_SECONDS=6 \
+  /tmp/accelFFCtrl-gap-final-asan/accelFFCtrl_test '[accelFFCtrl-gap-export]'
+MPLCONFIGDIR=/tmp/accelFFCtrl-gap-60s/.matplotlib \
+  "$accff_python" apps/accelFFCtrl/tests/validate_gaps.py /tmp/accelFFCtrl-gap-60s
+```
+
+The preceding section's combined simulator/controller sanitizer command also
+applies, adding `apps/accelFFCtrl/tests/accelFFCtrlGap_test.cpp` to its sources.
+No full app/INDI/native stream launch is part of these commands. Local macOS
+cannot qualify native Linux scheduling or ImageStreamIO concurrency; existing
+native tests remain unchanged. Original assertions were preserved.
+
+- Ordinary controller regression: 21 cases / 3,403,380 assertions passed,
+  including the original 18 cases and three new gap-policy cases; ASan/UBSan
+  passed the same suite. Both allocation-guarded production benchmarks passed.
+- Combined hardware-free simulator/controller ASan/UBSan: 55 cases /
+  3,639,978 assertions passed, including simulator DM numerical cases with mock
+  sinks only. No sanitizer findings; halt-on-error enabled.
+- Full 60-s gap exporter: 1 case / 148,400,155 assertions passed. Dedicated
+  ASan/UBSan six-second gap export: 1 case / 14,528,351 assertions passed.
+- Seven Python scoring/oracle tests plus four existing simulator PSD tests passed.
+- Original six-second exporter: 1 case / 2,872,567 assertions passed, with every
+  binary truth/prediction record bit-identical to the prior-phase export after
+  extracting the shared helper. The original replay/model/input assertions remain.
+- Generated CSVs/plots/binaries are local `/tmp/accelFFCtrl-gap-60s` artifacts,
+  not repository additions. `accuracy.csv` distinguishes own/common valid masks
+  and incremental phase/gain; `availability.csv` includes rates, resets, retained
+  events, stale/fault/blocked counts and recovery; `fit_quality.csv` gives the
+  independent uncertainty/residual probes. Plots show before/after pointing,
+  residuals, readiness during isolated/clustered loss and per-rate availability.
+
+Recommendation: approve a **separate, reviewed observation-only production
+implementation limited initially to one missing frame**, preserving physical
+loss telemetry, mature-history admission, real elapsed time, freshness, full
+cold-start warmup and all non-gap fault resets. The offline results justify
+that next implementation; they do not justify deployment, larger gap caps,
+automatic cold-start shortening or DM correction. First qualify cadence/jitter
+admission using a human-provided timestamped recording and review the pending
+live 4-kHz experiment once its results are supplied. Keeping the nominal rate
+at 4 kHz improves modeled scheduling headroom but is not proven to improve
+full-population normalized prediction accuracy or the unknown live loss pattern.
+Production remains unchanged pending that explicit approval. Text above Agent
+Findings and Plan remains unchanged.
+
+Files changed in this phase: `apps/accelFFCtrl/tests/Makefile`,
+`accelFFCtrlValidation_test.cpp`, `validate_predictions.py`, new
+`accelFFCtrlGap_test.hpp`, `accelFFCtrlGap_test.cpp`, `validate_gaps.py`,
+`test_validate_gaps.py` (all under that tests directory),
+`apps/accelFFCtrl/README.md`, and this plan. No other application is modified.
+The future DDSPC interface must still see physical counters, actual timestamps
+and gaps. Accepted ordinals are private to this harmonic experiment; they must
+not silently turn lossy measurements into a purported uniform DDSPC history.

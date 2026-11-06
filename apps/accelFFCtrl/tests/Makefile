@@ -8,7 +8,7 @@ BUILD_DIR ?= /tmp/accelFFCtrl-numerics
 REPO_ROOT := ../../..
 MODEL := ../accelFFCtrlModel.hpp
 INPUT := ../accelFFCtrlInput.hpp
-SOURCES := accelFFCtrlModel_test.cpp accelFFCtrlReplay_test.cpp accelFFCtrlInput_test.cpp accelFFCtrlValidation_test.cpp $(REPO_ROOT)/tests/testMain.cpp
+SOURCES := accelFFCtrlModel_test.cpp accelFFCtrlReplay_test.cpp accelFFCtrlInput_test.cpp accelFFCtrlValidation_test.cpp accelFFCtrlGap_test.cpp $(REPO_ROOT)/tests/testMain.cpp
 TEST := $(BUILD_DIR)/accelFFCtrl_test
 BENCHMARK := $(BUILD_DIR)/accelFFCtrl_benchmark
 INPUT_BENCHMARK := $(BUILD_DIR)/accelFFCtrlInput_benchmark
@@ -20,13 +20,13 @@ PYTHON ?= python3
 VALIDATION_DIR ?= /tmp/accelFFCtrl-validation
 VALIDATION_SECONDS ?= 60
 
-.PHONY: all test benchmark native-test native-rate-test validation validation-test
+.PHONY: all test benchmark native-test native-rate-test validation validation-test gap-validation
 all: $(TEST) $(BENCHMARK) $(INPUT_BENCHMARK)
 
 $(BUILD_DIR):
 	mkdir -p $@
 
-$(TEST): $(SOURCES) $(MODEL) $(INPUT) ../../accelSim/accelSimModel.hpp $(REPO_ROOT)/tests/testXWC.hpp | $(BUILD_DIR)
+$(TEST): $(SOURCES) accelFFCtrlGap_test.hpp $(MODEL) $(INPUT) ../../accelSim/accelSimModel.hpp $(REPO_ROOT)/tests/testXWC.hpp | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(SOURCES) $(LDFLAGS) -o $@
 
 $(BENCHMARK): accelFFCtrl_benchmark.cpp $(MODEL) | $(BUILD_DIR)
@@ -48,7 +48,11 @@ validation: $(TEST) validation-test
 	MPLCONFIGDIR='$(VALIDATION_DIR)/.matplotlib' $(PYTHON) validate_predictions.py '$(VALIDATION_DIR)'
 
 validation-test:
-	$(PYTHON) -m unittest -v test_validate_predictions.py
+	$(PYTHON) -m unittest -v test_validate_predictions.py test_validate_gaps.py
+
+gap-validation: $(TEST) validation-test
+	ACCELFFCTRL_VALIDATION_DIR='$(VALIDATION_DIR)' ACCELFFCTRL_VALIDATION_SECONDS='$(VALIDATION_SECONDS)' $(TEST) '[accelFFCtrl-gap-export]'
+	MPLCONFIGDIR='$(VALIDATION_DIR)/.matplotlib' $(PYTHON) validate_gaps.py '$(VALIDATION_DIR)'
 
 $(NATIVE): accelFFCtrlStream_test.cpp ../accelFFCtrlStream.hpp $(INPUT) $(MODEL) $(REPO_ROOT)/tests/testMain.cpp | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(ISIO_CFLAGS) $(CXXFLAGS) $< $(REPO_ROOT)/tests/testMain.cpp $(LDFLAGS) $(ISIO_LIBS) -o $@

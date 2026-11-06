@@ -28,12 +28,12 @@ RAD_TO_MAS = 180 * 3600 * 1000 / np.pi
 SETTLE = 4
 
 
-def truth_indices(target_ns, count):
+def truth_indices(target_ns, count, period=PERIOD):
     """Require exact acquisition-grid targets; never silently floor or shift truth."""
     ns = np.asarray(target_ns)
-    if np.any(ns != np.rint(ns)) or np.any((ns - BASE) % PERIOD):
+    if np.any(ns != np.rint(ns)) or np.any((ns - BASE) % period):
         raise ValueError("target is not exactly on the acquisition grid")
-    indices = ((ns - BASE) / PERIOD).astype(np.int64)
+    indices = ((ns - BASE) / period).astype(np.int64)
     if np.any(indices < 0) or np.any(indices >= count):
         raise ValueError("target outside truth recording")
     return indices
@@ -107,7 +107,7 @@ def timing_us(data):
     return (data[valid, 1] - data[valid, 2]) * 1e-3, (data[valid, 3] - data[valid, 2]) * 1e-3
 
 
-def weighted_fit(times, acceleration, target):
+def weighted_fit(times, acceleration, target, sample_rate=8000):
     """Independent batch QR oracle for the two-stage 0.1-s window, including irregular intervals.
 
     This analysis can examine short histories that production correctly refuses
@@ -117,7 +117,7 @@ def weighted_fit(times, acceleration, target):
     b**2 * (k-j+1) * l**(k-j).
     """
     times = np.asarray(times)
-    dt = np.r_[1 / 8000, np.diff(times)]
+    dt = np.r_[1 / sample_rate, np.diff(times)]
     if np.any(dt <= 0):
         raise ValueError("batch acquisitions must be strictly ordered")
     beta = -np.expm1(-2 * dt / .1)
