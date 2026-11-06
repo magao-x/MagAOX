@@ -46,6 +46,22 @@ PHASE7_ROOT := $(abspath $(BUILD_DIR))/phase7
 PHASE7_STAMP := $(PHASE7_ROOT)/snapshot.stamp
 PHASE7_OBJECTS := $(addprefix $(BUILD_DIR)/phase7_,$(addsuffix .o,$(PHASE6_NAMES)))
 OBJECTS += $(PHASE7_OBJECTS)
+PHASE8_ROOT := $(abspath $(BUILD_DIR))/phase8
+PHASE8_STAMP := $(PHASE8_ROOT)/snapshot.stamp
+PHASE8_OBJECTS := $(addprefix $(BUILD_DIR)/phase8_,$(addsuffix .o,$(PHASE6_NAMES)))
+OBJECTS += $(PHASE8_OBJECTS) $(BUILD_DIR)/phase8_async_shadow.o
+
+$(PHASE8_STAMP): $(TEST_DIR)/prepare_phase8.py $(TEST_DIR)/prepare_phase6.py
+	python3 $(TEST_DIR)/prepare_phase8.py --output $(PHASE8_ROOT)
+
+$(BUILD_DIR)/ddspc_phase9_test.o: $(PHASE8_STAMP)
+
+$(PHASE8_OBJECTS): $(BUILD_DIR)/phase8_%.o: $(PHASE8_STAMP)
+	@mkdir -p $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -DDDSPC=DDSPCPhase8 -MMD -MP -c $(PHASE8_ROOT)/$*.cpp -o $@
+
+$(BUILD_DIR)/phase8_async_shadow.o: $(PHASE8_STAMP)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -pthread -DDDSPC=DDSPCPhase8 -MMD -MP -c $(PHASE8_ROOT)/tests/async_shadow.cpp -o $@
 
 $(PHASE7_STAMP): $(TEST_DIR)/prepare_phase7.py $(TEST_DIR)/prepare_phase6.py
 	python3 $(TEST_DIR)/prepare_phase7.py --output $(PHASE7_ROOT)

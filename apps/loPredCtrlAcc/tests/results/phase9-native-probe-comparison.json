@@ -1,0 +1,77 @@
+{
+  "byte_exact": true,
+  "profiles": {
+    "m2_rls_0": {
+      "records": 812,
+      "changed_bytes": 0,
+      "max_theta": 0,
+      "max_gain": 0,
+      "max_state": 0,
+      "max_proposal": 0,
+      "max_rmse": 0
+    },
+    "m2_rls_1": {
+      "records": 812,
+      "changed_bytes": 0,
+      "max_theta": 0,
+      "max_gain": 0,
+      "max_state": 0,
+      "max_proposal": 0,
+      "max_rmse": 0
+    },
+    "m2_qr_0": {
+      "records": 812,
+      "changed_bytes": 0,
+      "max_theta": 0,
+      "max_gain": 0,
+      "max_state": 0,
+      "max_proposal": 0,
+      "max_rmse": 0
+    },
+    "m2_qr_1": {
+      "records": 812,
+      "changed_bytes": 0,
+      "max_theta": 0,
+      "max_gain": 0,
+      "max_state": 0,
+      "max_proposal": 0,
+      "max_rmse": 0
+    },
+    "m10_rls_0": {
+      "records": 812,
+      "changed_bytes": 0,
+      "max_theta": 0,
+      "max_gain": 0,
+      "max_state": 0,
+      "max_proposal": 0,
+      "max_rmse": 0
+    },
+    "m10_rls_1": {
+      "records": 812,
+      "changed_bytes": 0,
+      "max_theta": 0,
+      "max_gain": 0,
+      "max_state": 0,
+      "max_proposal": 0,
+      "max_rmse": 0
+    },
+    "m10_qr_0": {
+      "records": 812,
+      "changed_bytes": 0,
+      "max_theta": 0,
+      "max_gain": 0,
+      "max_state": 0,
+      "max_proposal": 0,
+      "max_rmse": 0
+    },
+    "m10_qr_1": {
+      "records": 812,
+      "changed_bytes": 0,
+      "max_theta": 0,
+      "max_gain": 0,
+      "max_state": 0,
+      "max_proposal": 0,
+      "max_rmse": 0
+    }
+  }
+}

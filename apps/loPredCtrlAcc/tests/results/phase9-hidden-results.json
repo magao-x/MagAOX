@@ -1,0 +1,27 @@
+[
+  {
+    "case": "strict-clang",
+    "tiny_rotation_exit": 0,
+    "expected_failure_preserved": false
+  },
+  {
+    "case": "strict-gcc",
+    "tiny_rotation_exit": 0,
+    "expected_failure_preserved": false
+  },
+  {
+    "case": "fast-clang",
+    "tiny_rotation_exit": 0,
+    "expected_failure_preserved": false
+  },
+  {
+    "case": "fast-gcc",
+    "tiny_rotation_exit": 1,
+    "expected_failure_preserved": true
+  },
+  {
+    "case": "fast-gcc-norecip",
+    "tiny_rotation_exit": 0,
+    "expected_failure_preserved": false
+  }
+]

@@ -2,10 +2,12 @@
  * \brief Offline SPSC training fanout and bounded pinned snapshots with explicit invalidation and age gates.
  */
 #include "async_shadow.hpp"
+#include "../training_profile.hpp"
 #include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <ctime>
 #include <limits>
 #include <stdexcept>
 #include <thread>
@@ -91,7 +93,10 @@ class OfflineTrainingWorker
     alignas( 64 ) std::atomic<std::uint64_t> m_tail{
         0 }; ///< Consumer release cursor; in-flight entry remains occupied.
     std::atomic<std::uint64_t> m_generation{ 1 }, m_reset{ 0 },
-        m_stallUntil{ 0 }; ///< Frontend invalidation/control mailbox.
+        m_stallUntil{ 0 };                                              ///< Frontend invalidation/control mailbox.
+    std::uint64_t              m_segmentFirstSequence{ 0 };             ///< Consumer-owned source segment.
+    std::uint64_t              m_accepted{ 0 }, m_overflowDrops{ 0 };   ///< Sole frontend admission counters.
+    std::atomic<std::uint64_t> m_threadCpuNs{ 0 }, m_threadWallNs{ 0 }; ///< Whole worker lifetime clocks at shutdown.
     std::uint64_t m_seenGeneration{ 1 }, m_seenReset{ 0 }, m_publications{ 0 }; ///< Consumer-only acknowledged state.
     std::array<std::unique_ptr<PublicationSlot>, 3> m_slots;           ///< At most writer, published, and pinned slots.
     std::atomic<int>                                m_published{ -1 }; ///< Release-published complete slot index.
@@ -150,6 +155,7 @@ int OfflineTrainingWorker::pin()
 
 bool OfflineTrainingWorker::publish( const Envelope &entry, std::uint64_t completionNs )
 {
+    DDSPC_PROFILE_SCOPE( Snapshot );
     const int current = m_published.load( std::memory_order_acquire );
     for( int i = 0; i < 3; ++i )
     {
@@ -158,18 +164,19 @@ bool OfflineTrainingWorker::publish( const Envelope &entry, std::uint64_t comple
         int expected = 0;
         if( !m_slots[i]->m_owner.compare_exchange_strong( expected, -1, std::memory_order_acq_rel ) )
             continue;
-        auto       &s            = m_slots[i]->m_snapshot;
-        const auto &item         = m_manager.model( m_mode );
-        s.m_info.m_status        = item.m_status;
-        s.m_info.m_generation    = entry.m_generation;
-        s.m_info.m_reset         = m_seenReset;
-        s.m_info.m_publication   = ++m_publications;
-        s.m_info.m_version       = item.m_status.m_updates;
-        s.m_info.m_sequence      = entry.m_record.m_data.m_index;
-        s.m_info.m_streamEpoch   = entry.m_record.m_streamEpoch;
-        s.m_info.m_measurementNs = entry.m_record.m_measurementNs;
-        s.m_info.m_availableNs   = entry.m_record.m_availableNs;
-        const auto &internal     = item.m_controller->prediction_matrix_view();
+        auto       &s                   = m_slots[i]->m_snapshot;
+        const auto &item                = m_manager.model( m_mode );
+        s.m_info.m_status               = item.m_status;
+        s.m_info.m_generation           = entry.m_generation;
+        s.m_info.m_reset                = m_seenReset;
+        s.m_info.m_publication          = ++m_publications;
+        s.m_info.m_version              = item.m_status.m_updates;
+        s.m_info.m_sequence             = entry.m_record.m_data.m_index;
+        s.m_info.m_streamEpoch          = entry.m_record.m_streamEpoch;
+        s.m_info.m_measurementNs        = entry.m_record.m_measurementNs;
+        s.m_info.m_availableNs          = entry.m_record.m_availableNs;
+        s.m_info.m_segmentFirstSequence = m_segmentFirstSequence;
+        const auto &internal            = item.m_controller->prediction_matrix_view();
         const int   a = m_config.m_modes * m_config.m_history, b = m_config.m_modes * ( m_config.m_history - 1 );
         const int   d = m_config.m_modes * m_config.m_future,
                     c = m_mode == ShadowMode::AccelAssisted ? m_config.m_accelChannels * m_config.m_accelHistory : 0;
@@ -197,6 +204,7 @@ bool OfflineTrainingWorker::publish( const Envelope &entry, std::uint64_t comple
 
 bool OfflineTrainingWorker::step( std::uint64_t completionNs )
 {
+    DDSPC_PROFILE_BEGIN( Queue, queueWork );
     const auto generation = m_generation.load( std::memory_order_acquire ),
                reset      = m_reset.load( std::memory_order_acquire );
     if( reset > generation )
@@ -228,6 +236,7 @@ bool OfflineTrainingWorker::step( std::uint64_t completionNs )
         return true;
     }
     OfflineWorkerEvent event;
+    DDSPC_PROFILE_END( queueWork );
     event.m_sequence      = entry.m_record.m_data.m_index;
     event.m_measurementNs = entry.m_record.m_measurementNs;
     event.m_queueWaitNs   = now >= entry.m_record.m_availableNs ? now - entry.m_record.m_availableNs : 0;
@@ -240,6 +249,10 @@ bool OfflineTrainingWorker::step( std::uint64_t completionNs )
     const auto end     = offline_now_ns();
     event.m_trainingNs = end - begin;
     const auto status  = m_manager.status( m_mode );
+    if( status.m_samples == 1 )
+        m_segmentFirstSequence = event.m_sequence;
+    if( !status.m_samples )
+        m_segmentFirstSequence = 0;
     if( status.m_reason == ShadowReason::NumericalFault )
         m_fault.store( true, std::memory_order_release );
     event.m_version = status.m_updates;
@@ -272,20 +285,26 @@ struct OfflineAsyncShadow::Impl
     std::uint64_t     m_streamEpoch{ 0 }, m_lastSequence{ 0 }, m_lastTime{ 0 }, m_drops{ 0 },
         m_overflows{ 0 }; ///< Frontend sequencing/counters.
 
+    OfflineOverflowPolicy m_policy; ///< Immutable admission policy.
+
     /// Allocate workers outside frame execution.
-    Impl( const ShadowConfig &cfg /**< [in] Dimensions. */,
-          std::size_t         capacity /**< [in] Queue bound. */,
-          std::size_t         traces /**< [in] Trace bound. */,
-          std::uint64_t       sensorMaxAgeNs /**< [in] Sample freshness bound. */ );
+    Impl( const ShadowConfig   &cfg /**< [in] Dimensions. */,
+          std::size_t           capacity /**< [in] Queue bound. */,
+          std::size_t           traces /**< [in] Trace bound. */,
+          std::uint64_t         sensorMaxAgeNs /**< [in] Sample freshness bound. */,
+          OfflineOverflowPolicy policy /**< [in] Admission policy. */ );
     /// Invalidate both lane generations immediately, leaving queued prefixes for their consumers to discard.
     void invalidate();
 };
-OfflineAsyncShadow::Impl::Impl( const ShadowConfig &cfg,
-                                std::size_t         capacity,
-                                std::size_t         traces,
-                                std::uint64_t       sensorMaxAgeNs )
-    : m_config( cfg ), m_sensorMaxAgeNs( sensorMaxAgeNs )
+OfflineAsyncShadow::Impl::Impl( const ShadowConfig   &cfg,
+                                std::size_t           capacity,
+                                std::size_t           traces,
+                                std::uint64_t         sensorMaxAgeNs,
+                                OfflineOverflowPolicy policy )
+    : m_config( cfg ), m_sensorMaxAgeNs( sensorMaxAgeNs ), m_policy( policy )
 {
+    if( policy != OfflineOverflowPolicy::Common && policy != OfflineOverflowPolicy::Independent )
+        throw std::invalid_argument( "Unknown offline overflow policy" );
     if( !capacity )
         throw std::invalid_argument( "Offline queue capacity must be positive" );
     m_workers[0] = std::make_unique<OfflineTrainingWorker>( cfg, ShadowMode::Standard, capacity, traces );
@@ -296,11 +315,12 @@ void OfflineAsyncShadow::Impl::invalidate()
     for( auto &w : m_workers )
         w->m_generation.fetch_add( 1, std::memory_order_release );
 }
-OfflineAsyncShadow::OfflineAsyncShadow( const ShadowConfig &cfg,
-                                        std::size_t         capacity,
-                                        std::size_t         traces,
-                                        std::uint64_t       sensorMaxAgeNs )
-    : m_impl( std::make_unique<Impl>( cfg, capacity, traces, sensorMaxAgeNs ) )
+OfflineAsyncShadow::OfflineAsyncShadow( const ShadowConfig   &cfg,
+                                        std::size_t           capacity,
+                                        std::size_t           traces,
+                                        std::uint64_t         sensorMaxAgeNs,
+                                        OfflineOverflowPolicy policy )
+    : m_impl( std::make_unique<Impl>( cfg, capacity, traces, sensorMaxAgeNs, policy ) )
 {
 }
 OfflineAsyncShadow::~OfflineAsyncShadow()
@@ -319,9 +339,18 @@ void OfflineAsyncShadow::start()
             m_impl->m_threads[i] = std::thread(
                 [this, i]
                 {
+                    timespec   cpuStart{}, cpuEnd{};
+                    const bool cpuSupported = clock_gettime( CLOCK_THREAD_CPUTIME_ID, &cpuStart ) == 0;
+                    const auto wallStart    = offline_now_ns();
                     while( m_impl->m_running.load( std::memory_order_acquire ) )
                         if( !m_impl->m_workers[i]->step( 0 ) )
                             std::this_thread::sleep_for( std::chrono::microseconds( 25 ) );
+                    auto &worker = *m_impl->m_workers[i];
+                    worker.m_threadWallNs.store( offline_now_ns() - wallStart );
+                    if( cpuSupported && clock_gettime( CLOCK_THREAD_CPUTIME_ID, &cpuEnd ) == 0 )
+                        worker.m_threadCpuNs.store(
+                            ( std::uint64_t( cpuEnd.tv_sec ) * 1000000000 + cpuEnd.tv_nsec ) -
+                            ( std::uint64_t( cpuStart.tv_sec ) * 1000000000 + cpuStart.tv_nsec ) );
                 } );
     }
     catch( ... )
@@ -341,6 +370,12 @@ void OfflineAsyncShadow::stop()
 
 bool OfflineAsyncShadow::submit( const OfflineRecord &record, std::uint64_t nowNs )
 {
+    const auto accepted = submit_record( record, nowNs );
+    return accepted.m_standard && accepted.m_assisted;
+}
+OfflineAdmission OfflineAsyncShadow::submit_record( const OfflineRecord &record, std::uint64_t nowNs )
+{
+    DDSPC_PROFILE_SCOPE( Queue );
     const auto &r   = record.m_data;
     const auto &cfg = m_impl->m_config;
     const bool  common =
@@ -357,7 +392,7 @@ bool OfflineAsyncShadow::submit( const OfflineRecord &record, std::uint64_t nowN
     {
         m_impl->invalidate();
         ++m_impl->m_drops;
-        return false;
+        return {};
     }
     if( m_impl->m_haveRecord &&
         ( record.m_streamEpoch != m_impl->m_streamEpoch || r.m_index != m_impl->m_lastSequence + 1 ) )
@@ -373,17 +408,37 @@ bool OfflineAsyncShadow::submit( const OfflineRecord &record, std::uint64_t nowN
                         record.m_measurementNs - record.m_accelNs <= m_impl->m_sensorMaxAgeNs;
     if( !sensor )
         m_impl->m_workers[1]->m_generation.fetch_add( 1, std::memory_order_release );
-    for( auto &w : m_impl->m_workers )
-        if( w->m_head.load( std::memory_order_relaxed ) - w->m_tail.load( std::memory_order_acquire ) >=
-            w->m_queue.size() )
+    std::array<bool, 2> space{};
+    for( std::size_t lane = 0; lane < 2; ++lane )
+    {
+        const auto &w = m_impl->m_workers[lane];
+        space[lane]   = w->m_head.load( std::memory_order_relaxed ) - w->m_tail.load( std::memory_order_acquire ) <
+                        w->m_queue.size();
+    }
+    if( !space[0] || !space[1] )
+    {
+        ++m_impl->m_drops;
+        ++m_impl->m_overflows;
+        if( m_impl->m_policy == OfflineOverflowPolicy::Common )
         {
             m_impl->invalidate();
-            ++m_impl->m_drops;
-            ++m_impl->m_overflows;
-            return false;
+            for( auto &worker : m_impl->m_workers )
+                ++worker->m_overflowDrops;
+            return {};
         }
-    for( auto &w : m_impl->m_workers )
+        for( std::size_t lane = 0; lane < 2; ++lane )
+            if( !space[lane] )
+            {
+                m_impl->m_workers[lane]->m_generation.fetch_add( 1, std::memory_order_release );
+                ++m_impl->m_workers[lane]->m_overflowDrops;
+            }
+    }
+    for( std::size_t lane = 0; lane < 2; ++lane )
     {
+        if( !space[lane] )
+            continue;
+        auto &w = m_impl->m_workers[lane];
+        ++w->m_accepted;
         const auto head              = w->m_head.load( std::memory_order_relaxed );
         auto      &entry             = w->m_queue[head % w->m_queue.size()];
         entry.m_generation           = w->m_generation.load( std::memory_order_relaxed );
@@ -410,7 +465,7 @@ bool OfflineAsyncShadow::submit( const OfflineRecord &record, std::uint64_t nowN
         w->m_highWater.store( std::max( depth, w->m_highWater.load( std::memory_order_relaxed ) ),
                               std::memory_order_relaxed );
     }
-    return true;
+    return { space[0], space[1] };
 }
 void OfflineAsyncShadow::reset( ShadowMode mode )
 {
@@ -518,7 +573,11 @@ OfflineWorkerStats OfflineAsyncShadow::stats( ShadowMode mode ) const
              w.m_publishMisses.load(),
              w.m_head.load() - w.m_tail.load(),
              w.m_highWater.load(),
-             w.m_traceDrops.load() };
+             w.m_traceDrops.load(),
+             w.m_accepted,
+             w.m_overflowDrops,
+             w.m_threadCpuNs.load(),
+             w.m_threadWallNs.load() };
 }
 const std::vector<OfflineWorkerEvent> &OfflineAsyncShadow::events( ShadowMode mode ) const
 {

@@ -2,6 +2,7 @@
  * \brief Unchanged operational RLS arithmetic and an opt-in fixed-scratch causal update.
  */
 #include "recursive_least_squares.hpp"
+#include "training_profile.hpp"
 #include <string>
 #include <stdexcept>
 #include <fstream>
@@ -98,9 +99,12 @@ void RecursiveLeastSquares::update_preallocated(
         weightUpdate.cols() != _num_features || covarianceUpdate.rows() != _num_features ||
         covarianceUpdate.cols() != _num_features || !x.allFinite() || !y.allFinite() )
         throw std::invalid_argument( "Invalid preallocated RLS update" );
+    DDSPC_PROFILE_BEGIN( Weights, predictionWork );
     err                         = y;
     prediction_output.noalias() = prediction_matrix * x;
     err -= prediction_output;
+    DDSPC_PROFILE_END( predictionWork );
+    DDSPC_PROFILE_BEGIN( Covariance, gainWork );
     if( _inverse_gamma == realT( 1 ) )
         xtP.noalias() = x.transpose() * inverse_covariance;
     else
@@ -109,8 +113,12 @@ void RecursiveLeastSquares::update_preallocated(
     const realT cn          = 1 + normalization( 0, 0 );
     K                       = xtP;
     K /= cn;
+    DDSPC_PROFILE_END( gainWork );
+    DDSPC_PROFILE_BEGIN( Weights, weightsWork );
     weightUpdate.noalias() = err * K;
     prediction_matrix += weightUpdate;
+    DDSPC_PROFILE_END( weightsWork );
+    DDSPC_PROFILE_SCOPE( Covariance );
     inverse_covariance *= _inverse_gamma;
     covarianceUpdate.noalias() = K.transpose() * xtP;
     inverse_covariance -= covarianceUpdate;

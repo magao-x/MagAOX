@@ -40,11 +40,12 @@ struct OfflineModelInfo
     std::uint64_t m_publication{ 0 }; ///< Monotonic publication identity independent of RLS updates.
     std::uint64_t m_version{ 0 };     ///< RLS update count since full reset.
     std::uint64_t m_sequence{ 0 }; ///< Last completed validation record, also the newest trained target when adapting.
-    std::uint64_t m_streamEpoch{ 0 };   ///< Source incarnation.
-    std::uint64_t m_measurementNs{ 0 }; ///< Evidence origin; model age is measured from this time.
-    std::uint64_t m_availableNs{ 0 };   ///< Input availability time, independent of processing order.
-    std::uint64_t m_publishedNs{ 0 };   ///< Time sampled after copying, just before release-publication.
-    ShadowStatus  m_status;             ///< Exact owning model diagnostics for this version/window.
+    std::uint64_t m_streamEpoch{ 0 };          ///< Source incarnation.
+    std::uint64_t m_measurementNs{ 0 };        ///< Evidence origin; model age is measured from this time.
+    std::uint64_t m_availableNs{ 0 };          ///< Input availability time, independent of processing order.
+    std::uint64_t m_publishedNs{ 0 };          ///< Time sampled after copying, just before release-publication.
+    std::uint64_t m_segmentFirstSequence{ 0 }; ///< First actual record in this model's current contiguous segment.
+    ShadowStatus  m_status;                    ///< Exact owning model diagnostics for this version/window.
 };
 
 /// Fixed matrices owned by one publication slot or one diagnostic reader; no references into a learner.
@@ -91,11 +92,28 @@ struct OfflineWorkerEvent
     std::size_t   m_eigenRequests{ 0 }, m_cppRequests{ 0 }; ///< Populated only in allocation-instrumented builds.
 };
 
-/// Atomic counter snapshot; queue depth includes the record currently owned by its consumer.
+/// Worker atomics plus sole-frontend admission counters; in-flight entries occupy queue capacity.
 struct OfflineWorkerStats
 {
     std::uint64_t m_processed{ 0 }, m_discarded{ 0 }, m_publishMisses{ 0 }; ///< Work and invalidated-prefix counts.
     std::uint64_t m_depth{ 0 }, m_highWater{ 0 }, m_traceDrops{ 0 };        ///< Bounded queue/telemetry occupancy.
+    std::uint64_t m_accepted{ 0 }, m_overflows{ 0 }; ///< Per-lane accepted records and overflow rejections.
+    std::uint64_t m_threadCpuNs{ 0 },
+        m_threadWallNs{ 0 }; ///< Whole worker lifetime including polling, sampled at stop.
+};
+
+/// Common is the compatibility default; independent is an explicit offline experiment.
+enum class OfflineOverflowPolicy
+{
+    Common,
+    Independent
+};
+
+/// Exact per-model admission mask; malformed common data rejects both.
+struct OfflineAdmission
+{
+    bool m_standard{ false }; ///< Source record was enqueued for standard DDSPC.
+    bool m_assisted{ false }; ///< Same source record was enqueued for assistance.
 };
 
 /// Two independent learners with SPSC fanout and three pinned publication slots per lane.
@@ -110,10 +128,12 @@ class OfflineAsyncShadow
 
   public:
     /// Allocate a bounded offline prototype; training starts enabled independently in both workers.
-    OfflineAsyncShadow( const ShadowConfig &config /**< [in] Immutable numerical configuration. */,
-                        std::size_t         capacity = 32 /**< [in] Records per queue, including in-flight work. */,
-                        std::size_t   traceCapacity = 4096 /**< [in] Events per worker; excess telemetry is dropped. */,
-                        std::uint64_t sensorMaxAgeNs = 500000 /**< [in] Maximum sample age at the WFS origin. */ );
+    OfflineAsyncShadow(
+        const ShadowConfig   &config /**< [in] Immutable numerical configuration. */,
+        std::size_t           capacity       = 32 /**< [in] Records per queue, including in-flight work. */,
+        std::size_t           traceCapacity  = 4096 /**< [in] Events per worker; excess telemetry is dropped. */,
+        std::uint64_t         sensorMaxAgeNs = 500000 /**< [in] Maximum sample age at the WFS origin. */,
+        OfflineOverflowPolicy policy         = OfflineOverflowPolicy::Common /**< [in] Experimental drop policy. */ );
 
     /// Stop and join workers outside the prediction path.
     ~OfflineAsyncShadow();
@@ -124,9 +144,13 @@ class OfflineAsyncShadow
     /// Stop and join; queued work may remain and is reported, never silently relabeled as processed.
     void stop();
 
-    /// Accept into both queues or drop from both; invalid timing/gaps/overflow invalidate old generations.
+    /// Return true when both accepted; independent policy may partially admit on false. Prefer submit_record().
     bool submit( const OfflineRecord &record /**< [in] Immutable explicitly timed input. */,
                  std::uint64_t        nowNs /**< [in] Ingress availability check, same monotonic clock. */ );
+
+    /// Admit explicitly per lane; independent overflow invalidates only that lane, never fabricating a missing record.
+    OfflineAdmission submit_record( const OfflineRecord &record /**< [in] Same declared source data for both lanes. */,
+                                    std::uint64_t        nowNs /**< [in] Monotonic availability check. */ );
 
     /// Request an immediate snapshot invalidation and a worker-owned full reset of one model.
     void reset( ShadowMode mode /**< [in] Model to reset without touching the other learner. */ );
@@ -154,7 +178,7 @@ class OfflineAsyncShadow
     bool read_snapshot( ShadowMode       mode /**< [in] Model. */,
                         OfflineSnapshot &destination /**< [out] Already allocated diagnostic snapshot. */ );
 
-    /// Read atomic counters without accessing learner state.
+    /// Read atomic worker and sole-frontend admission counters without accessing learner state.
     OfflineWorkerStats stats( ShadowMode mode /**< [in] Worker. */ ) const;
 
     /// Read bounded worker traces only after stop(), or in manual mode with no service in progress.
@@ -163,10 +187,10 @@ class OfflineAsyncShadow
     /// Return the used prefix of the fixed trace storage; same ownership restriction as events().
     std::size_t event_count( ShadowMode mode /**< [in] Worker. */ ) const;
 
-    /// Read frontend-owned common ingress drop count.
+    /// Read frontend-owned rejected-input events; independent overflow can reject only one lane.
     std::uint64_t drops() const;
 
-    /// Return common queue-overflow drops, excluding invalid input rejection.
+    /// Return queue-overflow events for either policy, excluding invalid input rejection.
     std::uint64_t overflows() const;
 };
 } // namespace DDSPC

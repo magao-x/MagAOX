@@ -8,6 +8,8 @@
 #include <cstdlib>
 #include <iomanip>
 #include <iostream>
+#include <limits>
+#include <string>
 #include <thread>
 
 namespace
@@ -59,26 +61,29 @@ void quantiles( std::vector<double> values /**< [in] Microsecond samples, copied
 }
 
 /// Run one complete paced producer/two-worker experiment; precomputed synchronous output is outside timing.
-bool run( int  modes /**< [in] Controlled modes. */,
-          bool qrd /**< [in] Learner. */,
-          int  sensorHz /**< [in] Synthetic rate. */,
-          bool stress /**< [in] Fault injection. */,
-          int  samples /**< [in] Measured producer frames. */ )
+bool run( int                   modes /**< [in] Controlled modes. */,
+          bool                  qrd /**< [in] Learner. */,
+          int                   sensorHz /**< [in] Sensor rate. */,
+          const std::string    &scenario /**< [in] normal, stress or assisted_stall. */,
+          int                   samples /**< [in] Frames. */,
+          OfflineOverflowPolicy policy /**< [in] Queue policy. */,
+          bool                  withReference /**< [in] Synchronous comparison. */ )
 {
+    const bool   stress = scenario == "stress", stalled = scenario == "assisted_stall";
     ShadowConfig cfg;
     cfg.m_modes                              = modes;
     cfg.m_useQrd                             = qrd;
     cfg.m_prior                              = .1f;
     cfg.m_lambda                             = .3f;
     const int                          total = warm + samples;
-    std::vector<std::array<Matrix, 2>> reference( total );
+    std::vector<std::array<Matrix, 2>> reference( withReference ? total : 0 );
     ShadowController                   synchronous( cfg );
     synchronous.training( ShadowMode::Standard, true );
     synchronous.training( ShadowMode::AccelAssisted, true );
     AsyncTestInputs oracleInput( sensorHz, 1000000000 );
     OfflineRecord   record( cfg );
     std::uint64_t   lastEpoch = 1;
-    for( int i = 0; i < total; ++i )
+    for( int i = 0; withReference && i < total; ++i )
     {
         oracleInput.next( i, record );
         inject( i, samples, stress, record );
@@ -101,7 +106,7 @@ bool run( int  modes /**< [in] Controlled modes. */,
         }
     }
     // All payloads, histories and telemetry are fixed before the two worker threads are created.
-    OfflineAsyncShadow                                   async( cfg, stress ? 8 : 32, total );
+    OfflineAsyncShadow async( cfg, ( stress || stalled ) ? 8 : 32, total, 500000, policy );
     std::array<std::unique_ptr<PredictiveController>, 2> history;
     std::array<Matrix, 2>                                states, outputs;
     std::array<std::uint64_t, 2>                         counts{};
@@ -132,9 +137,10 @@ bool run( int  modes /**< [in] Controlled modes. */,
         const auto begin                                            = offline_now_ns();
         input.next( i, record );
         inject( i, samples, stress, record );
-        if( stress && i == warm + samples / 4 )
+        if( ( stress || stalled ) && i == warm + samples / 4 )
         {
-            async.stall_until( ShadowMode::Standard, begin + 8000000 );
+            if( stress )
+                async.stall_until( ShadowMode::Standard, begin + 8000000 );
             async.stall_until( ShadowMode::AccelAssisted, begin + 16000000 );
         }
         if( stress && i == warm + samples / 2 )
@@ -172,7 +178,7 @@ bool run( int  modes /**< [in] Controlled modes. */,
         previousSequence = record.m_data.m_index;
         previousEpoch    = record.m_streamEpoch;
         previousValid    = common;
-        async.submit( record, offline_now_ns() );
+        async.submit_record( record, offline_now_ns() );
         FrameTiming timing;
         timing.m_lateUs = double( begin - scheduled ) / 1000;
         for( int lane = 0; lane < 2; ++lane )
@@ -196,7 +202,7 @@ bool run( int  modes /**< [in] Controlled modes. */,
             if( result.m_model.m_streamEpoch == record.m_streamEpoch &&
                 result.m_model.m_sequence <= record.m_data.m_index )
                 timing.m_lag[lane] = record.m_data.m_index - result.m_model.m_sequence;
-            if( valid )
+            if( valid && withReference )
                 timing.m_delta[lane] = ( outputs[lane] - reference[i][lane] ).cwiseAbs().maxCoeff();
         }
         const auto end          = offline_now_ns();
@@ -251,8 +257,8 @@ bool run( int  modes /**< [in] Controlled modes. */,
             workerCpp += e.m_cppRequests;
         }
         const auto stats = async.stats( mode );
-        std::cout << modes << ',' << ( qrd ? "qr" : "rls" ) << ',' << sensorHz << ','
-                  << ( stress ? "stress" : "normal" ) << ',' << ( lane ? "assisted" : "standard" ) << ',' << samples;
+        std::cout << modes << ',' << ( qrd ? "qr" : "rls" ) << ',' << sensorHz << ',' << scenario << ','
+                  << ( lane ? "assisted" : "standard" ) << ',' << samples;
         quantiles( prediction );
         quantiles( execution );
         quantiles( lateness );
@@ -265,7 +271,13 @@ bool run( int  modes /**< [in] Controlled modes. */,
                   << async.drops() - async.overflows() << ',' << stats.m_discarded << ',' << stats.m_depth << ','
                   << stats.m_publishMisses << ',' << stats.m_traceDrops << ',' << maxLag << ',' << executionMiss << ','
                   << deadlineMiss << ',' << eigenRequests << ',' << cppRequests << ',' << workerEigen << ','
-                  << workerCpp << ',' << maxDelta << ',' << input.sensor_events() << '\n';
+                  << workerCpp << ',' << ( withReference ? maxDelta : std::numeric_limits<double>::quiet_NaN() ) << ','
+                  << input.sensor_events() << ','
+                  << ( policy == OfflineOverflowPolicy::Common ? "common" : "independent" ) << ',' << stats.m_accepted
+                  << ',' << stats.m_overflows << ',' << stats.m_threadCpuNs << ',' << stats.m_threadWallNs << ','
+                  << ( stats.m_threadCpuNs && stats.m_threadWallNs ? 100. * stats.m_threadCpuNs / stats.m_threadWallNs
+                                                                   : std::numeric_limits<double>::quiet_NaN() )
+                  << ',' << withReference << '\n';
     }
     return eigenRequests == 0 && cppRequests == 0;
 }
@@ -274,8 +286,51 @@ bool run( int  modes /**< [in] Controlled modes. */,
 /// Run offline paced scenarios; no hostname, device, application or stream is contacted.
 int main( int argc /**< [in] Argument count. */, char **argv /**< [in] Optional sample count, at least 100. */ )
 {
-    const int samples = argc == 2 ? std::stoi( argv[1] ) : 2000;
-    if( samples < 100 || samples > 10000 )
+    int         samples = 2000, selectedModes = 0, selectedRate = 0;
+    std::string selectedLearner = "all", selectedScenario = "all";
+    auto        policy        = OfflineOverflowPolicy::Common;
+    bool        withReference = true;
+    for( int i = 1; i < argc; ++i )
+    {
+        const std::string arg = argv[i];
+        if( arg == "--no-reference" )
+        {
+            withReference = false;
+            continue;
+        }
+        if( arg.rfind( "--", 0 ) != 0 )
+        {
+            samples = std::stoi( arg );
+            continue;
+        }
+        if( i + 1 == argc )
+            return 2;
+        const std::string value = argv[++i];
+        if( arg == "--seconds" )
+        {
+            const int seconds = std::stoi( value );
+            if( seconds < 1 || seconds > 120 )
+                return 2;
+            samples = seconds * 2000;
+        }
+        else if( arg == "--modes" )
+            selectedModes = std::stoi( value );
+        else if( arg == "--sensor-hz" )
+            selectedRate = std::stoi( value );
+        else if( arg == "--learner" )
+            selectedLearner = value;
+        else if( arg == "--scenario" )
+            selectedScenario = value;
+        else if( arg == "--overflow" && ( value == "common" || value == "independent" ) )
+            policy = value == "common" ? OfflineOverflowPolicy::Common : OfflineOverflowPolicy::Independent;
+        else
+            return 2;
+    }
+    if( samples < 100 || samples > 240000 || ( selectedModes && selectedModes != 2 && selectedModes != 10 ) ||
+        ( selectedRate && selectedRate != 4000 && selectedRate != 8000 ) ||
+        ( selectedLearner != "all" && selectedLearner != "rls" && selectedLearner != "qr" ) ||
+        ( selectedScenario != "all" && selectedScenario != "normal" && selectedScenario != "stress" &&
+          selectedScenario != "assisted_stall" ) )
         return 2;
     // Preserve the allocation instrumentation self-test before claiming any zero-allocation measurements.
     DDSPCBenchmark::enabled       = true;
@@ -298,11 +353,24 @@ int main( int argc /**< [in] Argument count. */, char **argv /**< [in] Optional 
     std::cout
         << ",trained_n,valid,stale,busy,unready,invalidated,queue_high,drops,queue_overflows,invalid_inputs,discarded,"
            "pending,publish_misses,trace_drops,max_sequence_lag,execution_misses,absolute_deadline_misses,frontend_"
-           "eigen,frontend_cpp,worker_eigen,worker_cpp,max_sync_proposal_difference,sensor_events\n";
+           "eigen,frontend_cpp,worker_eigen,worker_cpp,max_sync_proposal_difference,sensor_events,overflow_policy,lane_"
+           "accepted,lane_overflows,thread_cpu_ns,thread_wall_ns,worker_cpu_percent,reference_enabled\n";
     for( int modes : { 2, 10 } )
         for( bool qrd : { false, true } )
             for( int rate : { 4000, 8000 } )
-                for( bool stress : { false, true } )
-                    if( !run( modes, qrd, rate, stress, samples ) )
+                for( const std::string scenario : { "normal", "stress", "assisted_stall" } )
+                {
+                    if( selectedModes && modes != selectedModes )
+                        continue;
+                    if( selectedRate && rate != selectedRate )
+                        continue;
+                    if( selectedLearner != "all" && selectedLearner != ( qrd ? "qr" : "rls" ) )
+                        continue;
+                    if( selectedScenario == "all" ? scenario == "assisted_stall" : selectedScenario != scenario )
+                        continue;
+                    if( !run( modes, qrd, rate, scenario, samples, policy, withReference ) )
                         return 4;
+                    std::cerr << "completed " << modes << ',' << qrd << ',' << rate << ',' << scenario << ',' << samples
+                              << '\n';
+                }
 }

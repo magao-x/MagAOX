@@ -3,17 +3,22 @@ APP_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/..)
 TEST_DIR := $(APP_DIR)/tests
 BUILD_DIR ?= $(APP_DIR)/build/async
 CXX = c++
+ALLOCATION_PROBE ?= $(TEST_DIR)/allocation_probe.hpp
+BENCH_SOURCE ?= async_benchmark.cpp
 CPPFLAGS += $(shell pkg-config --cflags-only-I eigen3 mxlib) -DEIGEN_DONT_PARALLELIZE \
-            -DDDSPC_OFFLINE_ALLOCATION_PROBE -pthread -include $(TEST_DIR)/allocation_probe.hpp
+            -DDDSPC_OFFLINE_ALLOCATION_PROBE -pthread -include $(ALLOCATION_PROBE)
+ifeq ($(PROFILE),yes)
+CPPFLAGS += -DDDSPC_TRAINING_PROFILE
+endif
 CXXFLAGS ?= -O3 -g
 CXXFLAGS += -std=c++20 -Wall -Wextra -fno-fast-math
 LDLIBS += -pthread
-SOURCES := $(TEST_DIR)/async_benchmark.cpp $(TEST_DIR)/async_shadow.cpp $(TEST_DIR)/allocation_new.cpp \
+SOURCES := $(TEST_DIR)/$(BENCH_SOURCE) $(TEST_DIR)/async_shadow.cpp $(TEST_DIR)/allocation_new.cpp \
            $(APP_DIR)/ar_controller.cpp $(APP_DIR)/recursive_least_squares.cpp $(APP_DIR)/qrd_rls.cpp \
            $(APP_DIR)/utils.cpp $(APP_DIR)/shadow_controller.cpp
 OBJECTS := $(addprefix $(BUILD_DIR)/,$(notdir $(SOURCES:.cpp=.o)))
 VPATH := $(sort $(dir $(SOURCES)))
-TARGET := $(BUILD_DIR)/ddspc_async_benchmark
+TARGET ?= $(BUILD_DIR)/ddspc_async_benchmark
 .PHONY: all check
 all: $(TARGET)
 check: $(TARGET)

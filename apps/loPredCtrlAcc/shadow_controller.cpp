@@ -3,6 +3,7 @@
  */
 
 #include "shadow_controller.hpp"
+#include "training_profile.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -130,6 +131,7 @@ void ShadowController::invalidate( const ShadowRecord &flags )
 
 bool ShadowController::process( const ShadowRecord &record )
 {
+    DDSPC_PROFILE_SCOPE( Processing );
     ShadowRecord flags;
     flags.m_wfsValid     = record.m_wfsValid && record.m_residual.rows() == m_config.m_modes &&
                            record.m_residual.cols() == 1 && record.m_residual.allFinite();
@@ -174,20 +176,23 @@ void ShadowController::step( Model &item, const ShadowRecord &record, bool assis
         return;
     try
     {
+        DDSPC_PROFILE_BEGIN( History, historyWork );
         const auto index = state.m_samples;
         item.m_controller->append_sample( index,
                                           record.m_residual,
                                           record.m_appliedCommand,
                                           assisted ? record.m_acceleration : item.m_emptyAcceleration );
         ++state.m_samples;
-        auto         &workspace = *item.m_workspace;
-        const bool    mature    = item.m_controller->prepare_training( workspace );
+        auto      &workspace = *item.m_workspace;
+        const bool mature    = item.m_controller->prepare_training( workspace );
+        DDSPC_PROFILE_END( historyWork );
         const Matrix &phi = workspace.regressor(), &target = workspace.target();
         if( mature )
         {
             auto &origin = item.m_forecasts[( index - m_config.m_future ) % item.m_forecasts.size()];
             if( origin.m_valid )
             {
+                DDSPC_PROFILE_SCOPE( Diagnostics );
                 item.m_context << origin.m_state, phi.topRows( m_config.m_future * m_config.m_modes );
                 item.m_error.noalias() = origin.m_theta * item.m_context;
                 item.m_error -= target;
@@ -225,6 +230,7 @@ void ShadowController::step( Model &item, const ShadowRecord &record, bool assis
             {
                 if( item.m_rankDirty )
                 {
+                    DDSPC_PROFILE_SCOPE( Rank );
                     item.m_scaled = item.m_features;
                     for( int j = 0; j < item.m_scaled.cols(); ++j )
                     {
@@ -242,6 +248,7 @@ void ShadowController::step( Model &item, const ShadowRecord &record, bool assis
                 {
                     if( !item.m_gainCurrent )
                     {
+                        DDSPC_PROFILE_SCOPE( Reference );
                         item.m_controller->get_reference_controller( workspace, m_config.m_lambda );
                         item.m_gainCurrent = true;
                     }
@@ -260,6 +267,7 @@ void ShadowController::step( Model &item, const ShadowRecord &record, bool assis
         next.m_valid = state.m_ready;
         if( next.m_valid )
         {
+            DDSPC_PROFILE_SCOPE( Diagnostics );
             next.m_theta = workspace.theta();
             next.m_state = workspace.state();
         }
