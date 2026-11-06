@@ -15,8 +15,10 @@ The 2026-11-05 second migration below reduced `system` to 24 cores, placed the
 BMC SDK/post workers in the tweeter monitor's L3 domain and added an
 `aol1_imWFS2_cbuff` core. Following an operator timing comparison, the
 2026-11-06 SDK migration below restores SDK CPU56 under `dmtweeter-sdk`, makes
-CPU42 `spare42` and retains post CPU44. The updated scripts await operator
-deployment; the CPU56 placement itself was tested using its old `spare56` name.
+CPU42 `spare42` and retains post CPU44. The operator subsequently reports a
+successful full restart with enabled synco at 8 kHz, jitter below 4 us with
+normal variation, and no need to shut down other processes. The CPU56 placement
+was first tested using its old `spare56` name.
 
 ## Objective and scope
 
@@ -692,6 +694,11 @@ the old SDK42 group and retired `spare56`; the allowlist test independently
 checks that the retired name survives removal from the setup script. These
 are shell/Python changes, so C++ clang-format does not apply. No agent executes
 the deployment commands, changes cgroups, or restarts an instrument process.
+
+Operator follow-up on 2026-11-06: "full restart, enabled and running at 8 kHz.
+Jitter is < 4e-6 (with usual variation). Haven't had to shut anything down."
+This is the reported post-migration timing result; the operator requests a PR.
+No new raw timing capture or thread-affinity readback accompanies this report.
 
 ## Implementation dependencies and sequence
 

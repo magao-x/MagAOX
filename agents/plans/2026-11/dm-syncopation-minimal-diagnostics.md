@@ -222,3 +222,17 @@ edit is required there. The operator's temporary instrument setting must be
 updated together with the map. The cleanup helper recognizes retired
 `spare56`. Application scheduling logic and timing parameters are unchanged;
 the new CPU assignments take effect when the operator rebuilds the map.
+
+## Full restart validation
+
+On 2026-11-06, the operator reports a full restart with synco enabled and
+running at 8 kHz, jitter below `4e-6` seconds (4 us) with the usual variation,
+and no need to shut down other processes. They request a PR after this result.
+This validates the combined deployed configuration after restart: fixed
+preparation budgets, minimal diagnostics and the SDK on CPU56. The separate
+earlier tests identify SDK placement as the effective jitter correction;
+disabling diagnostics alone did not resolve it.
+
+The reported jitter is an operational observation, not a measured worst-case
+bound. No additional raw capture accompanies this report. No instrument action
+was performed by the agent during this validation or PR preparation.
