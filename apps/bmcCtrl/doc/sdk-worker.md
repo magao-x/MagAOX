@@ -38,18 +38,23 @@ dedicated worker core:
 [sdk]
 workerEnabled=true
 threadPrio=55
-cpuset=spare56
+cpuset=dmtweeter-sdk
 
 [dm]
 completionStream=dmtweeter_done
 readerReleaseStream=dmtweeter_read_done
 ```
 
-`spare56` is an example, not an assignment. Confirm its availability and use a
-different physical core from the existing command monitor (`tweeter`, CPU40
-in the current RTC layout). The requested priority above matches the monitor's
-FIFO55 on a separate core. `sdk.threadPrio` defaults to 0 (ordinary scheduling)
-and `sdk.cpuset` defaults to empty (inherited affinity). Verify the actual
+The updated [RTC map](../../../rtSetup/RTC/make_cpusets) assigns `dmtweeter-sdk`
+to CPU56, separate from the command monitor (`tweeter`, CPU40) and the MVM host's
+L3 domain. Rebuild the cpuset layout through the normal operator procedure
+before selecting this name: the previous map assigns `dmtweeter-sdk` to CPU42.
+Then replace any temporary `cpuset=spare56` setting with `cpuset=dmtweeter-sdk`;
+the updated map retires `spare56` and reserves CPU42 as `spare42`.
+Confirm actual affinity before starting the timing comparison. On other hosts,
+select an available dedicated physical core. The requested priority above
+matches the monitor's FIFO55 on a separate core. `sdk.threadPrio` defaults to 0
+(ordinary scheduling) and `sdk.cpuset` defaults to empty (inherited affinity). Verify the actual
 scheduling policy, priority and affinity before comparing timing.
 
 `sdk.timeoutSec` defaults to **1 second** and must be finite and positive.
@@ -70,6 +75,9 @@ The standard `th-sdk` property identifies the worker thread and requested
 priority. `sdk_worker` exposes whether a callback is active, admission is closed,
 or a fault is latched, plus completed, failed, rejected and coalesced counts.
 It also reports verified numeric `policy`, `priority` and `allowedCpus` readbacks.
+`allowedCpus` is the number of allowed CPUs. Read actual thread affinity from
+`Cpus_allowed_list` in `/proc/<tid>/status`; the selected cpuset's `cpuset.cpus`
+gives its configured CPU list.
 `activeAgeSec` reports outstanding normal-command age and `timeouts` counts
 deadline violations once per job.
 Rejected receipts include duplicate counters and receipts while admission is

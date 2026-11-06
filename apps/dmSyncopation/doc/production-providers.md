@@ -116,7 +116,7 @@ and release observer. Its controller configuration includes:
 [sdk]
 workerEnabled=true
 threadPrio=55
-cpuset=spare56
+cpuset=dmtweeter-sdk
 pipelineEnabled=true
 pipelineThreadPrio=30
 pipelineCpuset=dmtweeter-post
@@ -129,11 +129,13 @@ readerReleaseStream=dmtweeter_read_done
 
 These cpuset names select the tested RTC worker placement, not portable defaults.
 The SDK worker uses CPU56, outside the L3 domain shared by the tweeter monitor
-and MVM host on CPU40/45. Moving the SDK worker to `dmtweeter-sdk` on CPU42
-caused enable-dependent MVM slowdown and excess controller jitter. The operator
-first reported recovery after restoring SDK/post CPU56/31 on 2026-11-06, then
-isolated the effect to the SDK placement: changing post placement between
-CPU31/44 made no observed difference. The post worker can therefore remain on
+and MVM host on CPU40/45. Moving the SDK worker to the previous map's
+`dmtweeter-sdk` on CPU42 caused enable-dependent MVM slowdown and excess
+controller jitter. The operator first reported recovery after restoring
+SDK/post CPU56/31 (then named
+`spare56`/`spare31`) on 2026-11-06, then isolated the effect to the SDK placement:
+changing post placement between CPU31/44 made no observed difference.
+The post worker can therefore remain on
 `dmtweeter-post` (CPU44), as above. This identifies an SDK placement regression
 without proving the precise cache or memory-system mechanism. See the
 [investigation record](../../../agents/plans/2026-11/dm-syncopation-minimal-diagnostics.md#successful-placement-comparison).
@@ -146,6 +148,16 @@ counter publications as well as the main writer. The tested configuration is
 mode 4 / DELAY with a 5 us delay; mode 3 waiting only on the primary stream will
 not provide the auxiliary combinations. RTC latency tuning was On in the
 instrument timing tests. Requalify rates on other hardware or scheduling setups.
+
+For the RTC name migration, first rebuild the cpuset layout from the updated
+[`make_cpusets`](../../../rtSetup/RTC/make_cpusets), using the normal operator
+stop/remove/recreate procedure. The updated map assigns `dmtweeter-sdk` to
+CPU56, reserves CPU42 as `spare42`, and retires `spare56`. Then set the SDK
+worker's `cpuset=dmtweeter-sdk`, replacing any temporary `cpuset=spare56`, and
+restart the controller through the normal operator procedure. An existing old
+map still resolves `dmtweeter-sdk` to CPU42; changing the configuration alone
+does not move it to CPU56. Verify the worker's actual affinity after restart.
+The post worker remains on `dmtweeter-post` / CPU44.
 
 Merge the [production preset](../dmtweeter_synco_production.conf) into the working
 instance configuration. Preserve
