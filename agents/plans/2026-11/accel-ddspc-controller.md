@@ -292,6 +292,209 @@ Review AGENTS.md.  Do not alter any text above the "Agent Findings and Plan" bel
 # Agent Findings and Plan
 
 ## Task Summary
+
+**Manual exao2 handoff (2026-11-06):** preparation only, no remote access or
+instrument/application execution. Native review confirms that shadow output is
+inhibited at startup, lifecycle, callbacks and publication entrypoints. However,
+live learning is **not ready**: the shadow accelerometer monitor is disabled,
+the legacy reader assumes FLOAT rather than UINT16 ADC, and raw WFS callbacks
+invalidate both models because exposure/applied-input contracts are absent.
+No configuration or training switch fills those missing adapters. On-sky modal
+sign/map, actual applied-input provenance, physical delay and runtime integration
+state remain unverified; do not import synthetic calibration or callback order.
+
+Added a `DDSPC_SHADOW_ONLY=yes` commissioning build that refuses false/missing
+shadow configuration before helper loading/startup and selects strict shadow
+flags. The Linux staging helper builds this guarded profile with explicit C++20;
+it still rejects exao hosts, and its actual native link remains unverified on
+this Mac. Original controller/default operation are retained. The proven
+copy_gain loading defect has an explicit compatibility path:
+`legacy_copy_gain_compat=false` honors copy_gain, while default true retains the
+old gain-based bypass exactly; missing copy_gain retains its prior fallback.
+
+[EXAO2_TESTING.md](../../../apps/loPredCtrlAcc/EXAO2_TESTING.md) and its example
+provide dependencies, isolated build/private config commands, operator-only
+stream inspection and WFS-attachment startup, INDI expectations, shutdown and
+criteria for later prediction-only shadow work. Current native expected status
+is `shadow/inhibited`, unverified input, no updates/valid predictions. There is
+no actuation procedure or new ADC/applied-command/timing adapter. The next
+required evidence is operator-provided stream/runtime/timing/calibration data,
+followed by reviewed adapters into the existing causal builder and native build
+qualification; no further optimization or simulation sweep is authorized here.
+
+Validation: both strict73-case suites, Clang ASan/UBSan73 cases, both separately
+compiled guarded app binaries7 cases each, eight native-build orchestration
+tests, example-config safety test and both31-case local focused Python suites pass.
+Clang's nine historical fast-math Legacy cases also pass separately.
+New tests verify two-mode copy outputs/compatibility, startup refusal, invalid raw
+inputs, zero output dispatch, and finite two-feature QR proposals at15/3/2 settings
+with the mathematical norm bound. Actual UINT16 samples remain refused rather
+than misread/certified. Finite proposals on bounded synthetic test inputs do not
+constitute physical command limits. No Legacy numerical tolerance is weakened.
+Scope and remaining blockers are recorded in
+[handoff validation](../../../apps/loPredCtrlAcc/tests/results/exao2_handoff.json).
+
+**Operational-parameter correspondence audit (2026-11-06):** the earlier
+headless comparison is not an operational replay. Legacy `gain=.3` is added
+current-WFS feedback, not predictive-output scaling; regularization100 multiplies
+`maxCoeff(CᵀC)`, rather than being the causal reference lambda; QR covariance1e-5
+initializes information rho (P0=1e5I), and gamma1 disables forgetting. The clone
+declares `copy_gain` but loads it from `parameters.gain`; the original has no
+separate copy gain. Production behavior is characterized without a fix.
+
+New offline-only fixture/runner/law adapter reproduce history15/F3/two modes/QR/
+gamma1/rho1e-5/scaled100/additive .3 algebra on corrected causal applied-command
+histories. The pinned original controller verifies the adapter algebra. It is a
+**conditional baseline, not exact on-sky equivalence**: deployed revision,
+runtime integration/learning/prediction states, signed modal calibration and
+exposure/command timing remain unknown. Future3 includes targets at .5/1/1.5ms
+and covers the verified two-frame synthetic DM delay; no delay is changed.
+
+Eight archived seeds, both ADC amplitudes, identical raw ADC0/1, probe/noise,
+0–4s calibration and12–16s scoring are replayed without tuning. High-signal mean
+prediction RMS improves .058531→.037369 with assistance, but closed-loop RMS
+changes only1.404857→1.404581 versus no-control1.003210. The retained positive
+synthetic plant makes the added positive feedback amplify both lines (~−2.93/
+−2.68dB suppression). All traces are bounded, zero saturation, maximum command
+1.528781/4. Tiny paired high-signal RMS gains (+.01878% Clang/+.02085% GCC) do
+not establish useful suppression or diagnose an on-sky controller failure.
+
+Both strict69-case suites, Clang ASan/UBSan69 cases and both30-case focused
+simulation suites pass; no existing exact tolerance/readiness gate is changed. Standard seed307 is unready
+at calibration end (63/64); diagnostic export is explicitly opt-in and never
+authorizes correction, with later native readiness checks preserved. Original
+Legacy histories remain unchanged: their two-mode control prefix duplicates a
+past calculated command, so identical matrix shapes do not mean identical model
+inputs. Full audit, paired metrics, plots, commands and unverified settings:
+[operational baseline report](../../../apps/loPredCtrlAcc/tests/results/operational_baseline.md).
+Only tests/build support/docs change; no production app, original controller,
+other worktree, instrument access, commit or push.
+
+**Eight independent vibration realizations (2026-11-06):** fixed4s QR fits and
+12–16s evaluation for no control, independent standard, H5 and H1. Seeds
+101/211/307/401/503/601/701/809 vary stationary initial states/phases, innovations
+and sensor noise; probe/WFS noise seeds are independently assigned per trial and
+paired across controllers. Actual ADC0/1 only; frequencies, encoding, plant,
+histories, γ/ρ/λ, timing and readiness are unchanged. No per-seed tuning.
+
+No reproducible total-RMS advantage: at100× H5/H1 each win1/8 and mean improvement
+is−13.68%/−5.98%; bootstrap mean intervals[−21.93,−4.36]%/[−7.68,−3.83]%. Reference
+means+.25%/+.05%, wins4/8 each, intervals include zero. Broadband high-signal
+noise improves8/8 but vibration rejection deteriorates. Reference H5 has a small
+consistent56Hz gain, not an overall closed-loop benefit. No assisted configuration
+is recommended over standard for integration. Recommend one data-only next test:
+balanced independent-phase calibration with whole new realizations held out.
+[Report and complete paired evidence](../../../apps/loPredCtrlAcc/tests/results/independent_realizations.md).
+
+GCC replays the same recorded Clang source bank, not a second ensemble. Means/
+winning counts agree; pure compiler/feedback differences are much smaller than
+seed variation.26 focused tests per compiler and both unchanged66-case strict
+suites pass. No production/Legacy/controller law/other-worktree changes or commits.
+
+**Calibration/history/prior generalization (2026-11-06):** six assisted settings
+and three independent standard baselines, no controller redesign. Training
+windows3–4s/2–4s/0–4s isolate duration from recency. Validation4.5–6.5s chooses
+settings before final12–16s samples are generated; all final scores are retained.
+WFS6, DM5, horizon3, actual decoded ADC0/1, γ=.9995, λ=.02 and gates stay fixed.
+Only ADC history5/3/1 and existing initial informationρ=.001/.01 vary.
+
+Longer fitting improves high-SNR assisted final prediction27.20% Clang/31.64% GCC
+versus1s. Nevertheless the validation-selected4s/H1 loses to standard in final
+high-SNR residual RMS by.88%/2.61%. Existing4s/H5 wins total RMS3.29% on Clang
+but loses3.51% on the GCC realization, with worse28/56Hz suppression in both.
+Do not claim consistent accelerometer vibration suppression from these results.
+The prior adjustment has negligible effect. H3's favorable final observation is
+not used to reselect a model. Full rank and better conditioning do not guarantee
+held-out performance. [Report and plots](../../../apps/loPredCtrlAcc/tests/results/calibration_generalization.md).
+
+21 focused tests per compiler and both unchanged66-case strict suites pass.
+Only test tooling/experiment configuration and documentation change; QR/RLS,
+reference law, Legacy/default, production, other-worktree sources and hardware
+remain untouched. No commit/push or native-runtime qualification.
+
+**Fixed-fit ADC0/1 prediction audit (2026-11-06):** no timing/indexing bug or
+justified controller correction found. Actual frozen native QR matrices are
+exported read-only and scored on identical no-control WFS/consumed-command/ADC
+records. At100×, assisted calibration k+2 RMS improves .052765→.046127, but
+held-out RMS worsens .100793→.111269; closed-loop .108533→.117588 remains worse.
+Loss is concentrated at28Hz, before control. Peak ADC/WFS coherence is≈1 with
+the expected171.81°/163.62° phase; it is not missing sensor/phase information.
+Finite-calibration generalization and cross-axis phase/amplitude overfitting are
+supported mechanisms. A separate causal earlier/later statistical information
+probe gives4.53%/3.52% high-SNR forecast gain (Clang/GCC), not a new controller
+or a demonstrated fixed-controller improvement. No timing alternative is forced.
+[Detailed comparison and plots](../../../apps/loPredCtrlAcc/tests/results/prediction_information.md).
+
+18 focused cases and both unchanged66-case strict suites pass. No production,
+Legacy/default, reference-law, QR learner, other-worktree, stream, hardware,
+commit/push or architecture changes. Earlier records below remain historical.
+
+**Channels 0/1 and late suppression follow-up (2026-11-06):** existing headless
+source/plant/controller loop is preserved. Focused diagnostics reproduce .660365
+→ .642741 (2.67%) reference and .660552 → .579243 (12.31%) 100× adaptive assistance
+benefits but show large late deterioration. The learned DM C block drifts from
+the known two-frame plant; independent double weighted LS reproduces that drift,
+while rank and conditional fit error stay acceptable. Evidence supports weak
+independent excitation / closed-loop identification bias, not a QR, command-index,
+sign or delay bug. No justified mathematical correction or new recovery framework
+was introduced. The existing training pause supplies an explicit optional
+calibrated-fit contrast: RMS .108602/.109891 reference and .108533/.117588 100×
+(standard/assisted). **Assistance is worse by 1.19% / 8.34% there**, despite much
+better sustained suppression by both controllers. Do not claim general benefit.
+
+Channels0/1 are verified actual UINT16 simulated X/Y acceleration, decoded and
+causally averaged; they are not angular modes or verified on-sky sensor axes. A
+small optional `sim_shmim.py` reuses ImageStreamIO/magaox.Image for fresh private
+simulation transport with separate disturbance/correction and consumed-input
+certificates. Native transport/full applications cannot run on this Mac and are
+not claimed verified; 14 mock/headless tests and both unchanged 66-case strict
+suites pass. No production source, default, other-worktree source, hardware,
+service, commit or push changes. Earlier sections below are historical.
+[Focused findings, plots, test commands and remaining native adapters](../../../apps/loPredCtrlAcc/tests/results/channel01_validation.md).
+
+**Simulation-only cross-repository connection (2026-11-06):** actual accelSim
+numerical physics/UINT16 ADC, actual aoSim DM-delay/WFS method bodies, and existing
+causal QR DDSPC now form a closed headless modal loop. This Mac lacks the native
+Python/shmim dependencies, so no application-level runtime or shmim integration
+is claimed. The smallest new array interface and driver are test-only in this
+worktree; `~/source/MagAOX` remains read-only, including its pre-existing work.
+
+One command: `python apps/loPredCtrlAcc/tests/simulation_demo.py --magaox-repo ~/source/MagAOX`.
+Reference producer amplitudes give .66036 → .64274 normalized RMS (2.67% gain);
+an explicit 100× source-amplitude case gives .66055 → .57924 (12.31%). ADC settings
+remain unchanged. GCC also improves (2.66% / 12.77%) on its own source realization.
+These are not a reproduction of the prior 21.17% unquantized/one-frame result.
+Full time series show suppression weakening late in the run; no sustained
+stability or real-time readiness claim is made. Whole-record metrics are retained.
+
+Independent injection/correction channels are consumed by aoSim's existing delay
+method and sum in its existing WFS method. DDSPC sees only ADC, measured WFS and
+confirmed consumed correction input, never source pointing. Six connection tests
+and both unchanged 66-case strict suites pass. No production/controller source,
+Legacy default, stream, service, hardware, commit/push or deployment changes.
+[Connection findings, results and exact remaining app wiring](../../../apps/loPredCtrlAcc/tests/results/simulation_connection.md)
+record the qualified headless scope. Earlier notes below remain historical.
+
+
+**Minimal offline suppression demonstration (2026-11-06, user refocus):** reuse
+existing `mixed_qr` simulation and general causal DDSPC, without new recovery or
+numerical frameworks. One command, `python apps/loPredCtrlAcc/tests/vibration_demo.py`,
+builds/runs the unchanged strict QR harness and reports no predictive control,
+independent standard WFS/applied-DM history, and accelerometer-assisted history.
+All receive identical 28/56-Hz disturbance/noise/calibration and synthetic plant.
+Assistance improves residual RMS .04621 → .03642 SU (**21.17%**) and variance
+**37.86%** relative to standard; 28/56-Hz suppression is 30.97/27.82 dB standard,
+33.67/34.54 dB assisted. These are simulated results, not on-sky performance.
+
+`~/source/MagAOX/apps/accelSim` and modal `apps/aoSim` were inspected read-only;
+accelSim is not inside this repository. Its stochastic multi-mode/ADC waveform
+is not claimed equivalent to the normalized deterministic two-line demo. The
+other worktree's pre-existing work is untouched. No app, service, stream, hardware,
+production code, Legacy behavior, commit/push or cross-repository integration changes.
+See [focused results and integration notes](../../../apps/loPredCtrlAcc/tests/results/minimal_vibration_demo.md)
+and the generated time-series/PSD PNG/PDF artifacts. Earlier robustness records
+remain historical; they do not block demonstrating this existing QR result.
+
 **Phase 11 stability/recovery (2026-11-06): conventional float RLS loses
 covariance validity before feedback; held commands can prevent rank recovery.**
 Starting committed Phase 10 is `2fcf61a108c8f3d9c3d237a053f4e0634f0f4e6f`,
@@ -632,6 +835,61 @@ accelerometer regressors; it does not require an acceleration-to-displacement
 formula or a predetermined spectral line.
 
 ## Key Assumptions
+
+**Independent-realization statistics:** the independent unit is one seeded full
+vibration trial, not frames, axes, amplitudes or compiler replays. Eight trials
+per amplitude, not16/32 pooled observations. Initial phases are audited from
+plant-only first250ms; only encoded/decoded ADC0/1 enter models. Configured units
+are fixed, with no per-trial realized-amplitude normalization. Bootstrap intervals
+are exploratory20,000 paired-trial resamples at n8. Broadband is5–1000Hz excluding
+±2Hz line bands; better broadband RMS is not better28/56Hz suppression. Compiler
+replays share raw source arrays and Python noise/probe draws; exact closed-loop
+cross-compiler equality is not assumed or claimed.
+
+**Duration experiment:** all fits have the same calibration end and common
+synthetic excitation0–4s; each updates only on fully contained examples in its
+declared window. Training-start/end are optional offline flags, not operational
+changes. H1 means one four-raw-sample averaged ADC pair, not an ideal or a single
+new raw sample; only D lag count changes. Selection uses pooled validation MSE
+across reference/100× amplitudes, never final scores. The source is generated
+first only through validation, then extended after choices are locked. γ=.9995
+retains approximately1s effective memory; QR's decaying initial prior is distinct
+from control penaltyλ. Compiler libraries generate different source realizations,
+so between-compiler RMS differences do not establish numerical regressions.
+
+**Fixed-fit forecast audit:** k+2 (1ms) is the actuation horizon; zero-future
+forecasts use only causal known state. Actual future consumed commands are used
+solely to remove their effects from post-hoc scoring targets, never as forecast
+inputs. Actual ADC0/1 are decoded in the bridge, not replaced with ideal signals.
+Whole-window partial R² is descriptive; the independent earlier/later information
+probe is a statistical test, not a trained/ready actuating model. High narrowband
+coherence does not establish incremental information beyond WFS history. Source
+parameters stay fixed while finite-record envelopes/relative phases evolve.
+
+**Channel01 follow-up:** same-source ADC0/1 are simultaneous synthetic X/Y
+accelerations with frequency-squared weighting and noise, not calibrated WFS tip/
+tilt. Real MCP3208 indices0/1 select those physical ADC inputs, but sensor mounting,
+calibration and sequential-read skew remain unverified. WFS2kHz/ADC8kHz and the
+two-frame correction delay remain explicit virtual conventions. Four raw pairs
+are decoded before averaging, ending125us before the WFS decision; no ideal
+acceleration enters either model. Batch truth/plant C are post-hoc diagnostics
+only. `--training-end 2400` deliberately holds coefficients while current evidence
+is revalidated; reported snapshot age measures validation age, not update age.
+Native ImageStreamIO transport is unavailable locally; fake transport equivalence
+does not establish its ABI or real-time behavior. Do not infer callback timing
+as exposure/application timing or treat the negative assistance result as success.
+
+**Cross-repository headless contract:** source 8 kHz / WFS 2 kHz are explicit
+virtual clocks, not measured runtime cadence. Four raw X/Y ADC pairs available
+before each origin are causally averaged; latest same-sample pointing drives a
+separate held modal disturbance input at 2 kHz. Both DM branches reuse actual
+`aoSim.update_dm()`; its `lag=0` test configuration plus decision ordering gives
+two decision-to-WFS frames. Consumed channel input and delayed optical DM state
+are separate telemetry. This is synthetic consumed-input provenance, not hardware
+readback. Source-derived fixed units/active ADC parameters do not use future
+trace statistics or give DDSPC generator pointing. Reference 1× and explicit 100×
+amplitudes are separate comparable-controller experiments, not instrument settings.
+
 **Phase 11:** retain Phase 10 SU/DU plant, causal timing, RNGs and 2400-frame
 calibration. Standard uses WFS plus actual synthetic applied commands; assistance
 adds sensor histories. Replays use identical recorded regressors to separate
@@ -852,6 +1110,156 @@ independent learners and non-actuation protections remain unchanged.
     libraries/hardware. Preserve the original as the operational reference.
 
 ## Requirements
+
+### Independent realization comparison: implemented offline only
+
+- `simulation_demo.py::{source,simulate}` accepts optional source/probe/WFS seeds,
+  preserving defaults42/100/303. Existing actual accelSim initial-state/innovation
+  seeding is reused; no waveform, calibration value or timing convention changes.
+- `independent_realizations.py` fixes8 seeds and H5/H1 configurations before data,
+  uses0–4s training/7992 updates, and evaluates12–16s. No-controller outputs remain
+  simulated and no native application/stream is opened. Common calibration WFS
+  and full disturbance traces must match across every paired controller run.
+- Actual raw ADC/pointing/unit arrays are recorded once with source hashes and
+  initial-phase audits. GCC reuses this bank; it cannot silently substitute a
+  different standard-library realization. No ideal acceleration enters DDSPC.
+- Per-case metrics include common held-out k+2 error, separate tip/tilt/combined
+  RMS, line suppression, explicit broadband RMS, maximum commands/saturation,
+  readiness and availability. All holds/limited frames stay in scores. All seeds
+  and unfavorable cases are retained; no subgroup/parameter selection follows.
+- Statistical output includes paired percentage/absolute differences, means,
+  medians, sample SD, wins/ties and95% bootstrap intervals for means. Resampling
+  is over complete trials. Whole4–16s RMS bins and individual final PSDs are saved.
+- High-signal H5 held-out prediction worsens15.66% on average despite4.95% average
+  calibration gain. Full rank/ADC coherence do not establish a usable independent
+  forecast. H5/H1 broadband gains9.80%/1.72% coexist with line/total RMS losses.
+
+### Small calibration generalization experiment: implemented
+
+- `calibration_generalization.py` declares exactly six assisted configurations:
+ 1/2/4s with H5/ρ=.001; at4s H3, H1 and H5/ρ=.01. Three standard duration fits
+  train independently. Protocol and selection are saved before final generation.
+- Optional test make flags configure the existing bridge/manager. Native state
+  construction follows `m_accelHistory`; diagnostic `ddspc_sim_model_features()`
+  provides exact snapshot dimensions. `prediction_information::{states,forecast}`
+  infer requested D history, preserving default H5. No QR math is changed.
+- `tests/async_shadow.cpp` gates only existing training enable using optional
+  start/end indices. Complete examples in windows3–4s/2–4s/0–4s give1992/3992/7992
+  actual updates. Paused fits continue current-data readiness/publication checks.
+- Held-out forecasts use identical common no-control WFS and actual past commands;
+  closed-loop metrics include all holds. Actual request/consumption and two-frame
+  optical delay agree exactly; no scored clipping, bounds remain±4.
+- Native calibration rank is full for28/38/34/30 features. At100× Clang,4s
+  weighted scaled design condition is129.8 standard,324.9 H5,291.7 H3,139.9 H1.
+  ADC/WFS column cosines reach.940/.952 Clang/GCC. All coefficient/block norms and
+  maxima are recorded. H1's better conditioning does not yield consistent benefit.
+- Existing QRρ=.01 versus.001 leaves only1.84e−4 versus1.84e−5 initial information
+  after7992 updates. Final residual differences are a few1e−6 and unfavorable;
+  λ=.02 never changes. Effective weighted count≈1963 limits4s information retention.
+
+### Fixed-fit prediction audit: implemented offline only
+
+- `sim_bridge.cpp::ddspc_sim_copy_model()` copies actual coherent ready canonical
+  theta/gain/version. Exact buffer sizes and readiness are checked. Optional
+  `simulation_demo.py::simulate(calibration_model=...)` collects it after2399,
+  without changing a correction or training rule. Original paths are preserved.
+- `prediction_information.py::{states,forecast}` score identical common states
+  at horizons1/2/3 and both models on each closed-loop sequence. Forecast k+2
+  is the primary control target; command history is actual aoSim consumption.
+- `peak_coherence()` measures all actual ADC/WFS channel pairs and phase.
+  Expected phase incorporates negative acceleration, two-frame plant delay and
+ 187.5us boxcar offset relative to latest source sample. High-SNR phases agree;
+  no supported causal timing/feature change is applied.
+- High-SNR calibration model has38 vs28 features and column-scaled condition304
+  vs120 (Clang). Independent double weighted fits reproduce the native poor
+  held-out forecast within1e−6 RMS. Numerical roundoff does not explain the gap.
+- `line_generalization()` measures actual source phasors and fitted response:
+  the28Hz Y/X amplitude ratio changes .419→1.357 and phase−85.3°→−53.2°. Learned
+  cross-axis relationships fitted to calibration do not persist; assisted28Hz
+  held-out forecast-error power .009302 vs standard .006755 dominates its small
+ 56Hz benefit. This supports finite-record generalization error, without proving
+  one unique statistical bias mechanism.
+- `conditional_information()` supplies descriptive partial R² and one guarded
+  earlier→later information split. High-SNR ADC adds predictive information on
+  that split but it is not exploited by the original frozen QR fit. These
+  diagnostics never actuate or bypass rank/readiness; no new controller variant,
+  parameter sweep or recovery framework is added.
+
+### Channel01 follow-up: implemented, test-only
+
+- `sim_bridge.cpp::ddspc_sim_query()` now returns diagnostic fit RMSE, coefficient/
+  gain norms and plant-C error alongside existing snapshot identity. No diagnostic
+  changes a correction. `ddspc_sim_source_audit()` exposes the last noisy sample
+  only for encoder/order tests; the controller/simulation does not use it.
+- `simulation_diagnose.py::{batch_reference,summarize,rms_plot}` reproduces both
+  policies/amplitudes, audits exact consumed-command regressors, plots complete
+  RMS histories, and retains unfavorable results. .9995 forgetting leaves1.8294%
+  of rich calibration after8000 updates; the independent control probe drops60×.
+  At100× adaptive C error grows .0181→.8785 standard and .0184→.8484 assisted.
+  Independent double LS agrees within2.3e−6. Full rank alone does not guarantee
+  a causal DM response estimate under feedback.
+- `Makefile.sim TRAINING_END=2400` enables four guarded **offline** worker lines
+  calling existing `ShadowController::training(false)` after calibration. Default
+  adaptive behavior, reference law, production worker/control loop and numerical
+  thresholds remain unchanged. Every record still undergoes validation/publication.
+- `simulation_demo.py --accel-channels 0 1` explicitly accepts only the intended
+  generated raw pair. No tip/tilt assumption or ideal-sensor replacement. Default
+  transport stays memory; optional `--transport shmim` uses `sim_shmim.py` with
+  fresh simulation names, strict geometry/dtypes, counter/busy/inode checks,
+  source/time tags and separately read consumed correction certificates. Native
+  execution is unavailable; packet/ownership/read semantics are contract-tested.
+- Requested==consumed exactly and delayed corrective state[k+2]==consumed[k]
+  exactly in every reported trajectory. No clipping (peak≤3.37 vs±4); optical
+  sign/delay pass independent impulse/cancellation tests. Source statistics are
+  configured once; finite-record amplitude variation does not explain the drift.
+
+### Implemented minimal headless accelSim / aoSim connection
+
+- `tests/sim_bridge.cpp`, built only by new `Makefile.sim`, includes the actual
+  other-repository `accelSimModel.hpp`; retain its reference 28/56-Hz stochastic
+  modes, ADC/noise and same-sample pointing. No duplicated source or app instance.
+- `tests/simulation_demo.py` loads only the verbatim numerical `aoSim.update_dm()`
+  and `update_wfs()` methods with memory image boundaries; skip XDevice setup,
+  image creation and the unrelated sine. Disturbance and correction have separate
+  histories and add in the real WFS sum. There is no stream/device selector.
+- Array-only native controller queries accept WFS/ADC metadata; admission follows
+  actual simulator channel consumption. Shapes, sequence/timestamps and gates
+  are checked. Native decode receives source ADC parameters; standard is independent
+  of sensor words. Existing independent QR workers/snapshots/reference law are reused.
+- Test history is 6 (five past inputs) to retain the additional delayed-plant
+  contribution; horizon 3 and sensor history 5. Preliminary history 5 results are
+  retained separately, including weaker cases. No rank threshold, production
+  default or control law changed. No new recovery framework is introduced.
+- Existing names: accelSim `acc000` 2×1 UINT16, code default 6 kHz/selectable 8 kHz;
+  optional 50×50 FLOAT micron disturbance is not a modal vector. aoSim defaults
+  `aoSim_dm/wfs/disturbance`, modal NumPy (2,1) FLOAT32, independent sine/logical
+  dt=.01, lag=1. loPredCtrlAcc WFS/output names are configured; shadow has no live
+  ADC/applied-time adapter or output route. Full app glue remains explicit future work.
+
+
+### Minimal offline demonstration delivery
+
+- `tests/vibration_demo.py` is a thin build/run/plot wrapper around unchanged
+  `Makefile.vibration`, `mixed_qr` and `vibration_report.py` metrics. It reports
+  three trajectories; auxiliary Legacy/oracle references computed by the existing
+  runner do not enter their decisions or reported results. No recovery is selected.
+- Causal WFS at 2 kHz, sensor feature created 125 us before origin/available 1 us
+  later, actual bounded command driving the next DM state, independent models,
+  original rank/age gates and reference law remain unchanged. The source is one
+  synchronized feature per WFS frame, not a complete 8-kHz/UINT16 simulation.
+- Wrapper checks common source/calibration, bounds, causal evidence and invalid
+  holds. An independent applied-input plant reconstruction confirms WFS residuals
+  include the corrections. Original source and production defaults are untouched.
+- Read-only separate-repository findings: accelSim outputs X/Y UINT16 in `acc000`,
+  range 0–4095, default 6 kHz/configurable 8 kHz; 14 prominent plus 200 weak AR(2)
+  modes, including 28/56 Hz. ADC inverse is `(counts-zero)*voltsPerBit/sensitivity`
+  with active producer parameters. Its optional post-publish DM disturbance uses
+  unattenuated same-sample pointing; no WFS stream is produced by accelSim itself.
+- `aoSim` has modal `aoSim_dm/wfs/disturbance`, but its disturbance is independent
+  of accelSim, its logical timestep is .01 s, and lag=1's read-before-roll buffer
+  delays a command read at k until WFS k+2. These are integration requirements,
+  not an already working 2-kHz correlated connection.
+
 ### Phase 11 implemented offline numerical and recovery experiment
 
 - `tests/prepare_stability.py` pins Phase 10 and creates an independent
@@ -2329,6 +2737,23 @@ a benchmark.
   artifacts; reject incompatible models with correction disabled.
 
 ## Questions and Points of Clarification
+
+**Current follow-up needs no additional permission to finish offline:** use ADC
+indices0/1 as explicitly requested. On-sky sensor registration/calibration and
+clock/read skew are unknown and not queried. Native private-shmim execution needs
+an already provisioned non-instrument development runtime; none is installed here.
+The optional static-plant calibration-only experiment is not an operational
+adaptation policy. Additional sustained accelerometer benefit remains unproven;
+do not change production learning behavior or tune away unfavorable evidence.
+
+**Next application connection decisions (not blockers to the completed headless prototype):**
+Choose an isolated runtime with actual ImageStreamIO/magaox/INDI Python dependencies
+and explicitly local simulation stream names. Decide the same-sample packet/counter
+contract and 2-kHz versus 8-kHz disturbance delivery; preserve ADC configuration,
+consumed-input acknowledgement and known lag. Any local output owner must be
+simulation-only and must not bypass existing production shadow inhibition or
+change Legacy defaults. The current result does not authorize hardware routing.
+
 **Phase 11 decisions before further work:**
 
 1. Approve another offline phase distinguishing recoverable stale publication
@@ -2566,6 +2991,114 @@ recommendations are not assumptions about the deployed instrument.
    source review does not establish deployment performance.
 
 ## Tests
+
+### Independent realization validation
+
+- Eight actual source hashes/phases are distinct. Same-seed replay and default
+  seed equivalence pass. No ADC rails or command saturation; peak command3.701
+  versus±4. Clang prediction availability97.66–99.38%; all holds remain scored.
+- Five new tests plus prior21 pass under Clang/GCC. Tests verify physical source
+  and phase replay, paired seed defaults, noise not changing disturbance, analytic
+  broadband power, sample SD/paired bootstrap and non-pooled/missing-trial handling.
+  Both unchanged66-case strict suites pass with historical exact tests untouched.
+- GCC input-bank SHA matches Clang. Maximum calibration theta/gain differences
+ 1.92e−4/1.86e−4; common-input forecast-RMS difference≤2.10e−6; closed-loop RMS
+  difference≤2.80e−4 and availability counts differ by≤11/8000 frames. No claim
+  of exact cross-compiler trajectories; mean improvement differences≤.043pp and
+  winning counts unchanged. Existing numerical tolerances are not weakened.
+- `python apps/loPredCtrlAcc/tests/independent_realizations.py` reproduces the
+  primary ensemble; GNU repeat reuses its bank. Full per-seed metrics, covariance/
+  fit diagnostics, bootstrap data, phase/input/compiler manifests and PNG/PDF
+  time/PSD/paired figures are linked from the focused report. No new sanitizer/
+  fast-math investigation or native Linux/real-time qualification.
+
+### Calibration generalization executed validation
+
+- `python apps/loPredCtrlAcc/tests/calibration_generalization.py` reproduces
+  protocol, validation choices, all final candidates, conditioning and RMS/PSD
+  plots. GCC repeat follows the same candidate/selection protocol independently.
+- Both choose4s standard/H5 existing assisted/H1 selected assisted. Final high-SNR
+  standard/H5/H1 residuals .058191/.056278/.058702 Clang,
+  .060530/.062653/.062107 GCC. H5 improves total RMS on one realization while
+  losing at both peaks, and fails to outperform standard on the other realization.
+  Reference-noise selected gains−.05%/+.17% are not a consistent advantage.
+- Validation-prefix traces and all coefficients/gains are exact in final-length
+  replay, with unchanged selection bytes. Default100×10400-frame standard/
+  assisted traces reproduce all28 stored columns at12-significant-digit precision.
+- Three new native/selection tests plus prior18 pass under both compilers; strict
+  suites66 cases each pass with exact Legacy/causal requirements untouched.
+  No new sanitizer/fast-math investigation; previous findings remain documented.
+
+### Fixed-fit information audit validation
+
+- One command `python apps/loPredCtrlAcc/tests/prediction_information.py` reproduces
+  native fixed snapshots, three trajectories at reference/100×, open-loop forecasts,
+  coherence/phase, conditional-information and spectral/time-history artifacts.
+  GNU repeat uses `--cxx g++-15` and a separate output folder.
+- Clang open-loop k+2 RMS .100793/.101428 reference and .100793/.111269100×;
+  GCC .064593/.064561 and .064593/.069106 (standard/assisted). Closed-loop outputs
+  exactly reproduce the previous fixed-fit metrics; high-SNR assistance remains
+  worse. No artificial timing variant is presented as a correction.
+- Four new Python tests verify cold/wrong-size export refusal, copied native
+  commands/reference law, two-frame counterfactual/history indexing, and ADC
+  quantized-sinusoid phase convention. Together18 focused cases pass per compiler.
+- Unchanged strict suites:66 cases, Clang1,766,593/GCC1,764,508 assertions in this
+  run; concurrency assertion counts depend on scheduling. Exact tests and their
+  tolerances are unchanged. No sanitizer/fast-math work is added this iteration.
+
+### Channel01 follow-up executed validation
+
+- Apple Clang21.0.0/GCC15.2.0 on arm64 macOS: adaptive reference/100× results
+  reproduce previous values; optional calibrated-fit contrasts and independent
+  double LS, actual consumed commands and two-frame optical response retained in
+  `results/channel01_validation/{comparison.csv,diagnosis.json,rms_vs_time.png}`.
+  GNU repeat is saved separately; each compiler's cases share exact source arrays.
+- 14 connection/adapter cases pass using each compiler's library. Tests verify
+  actual noisy producer ADC rounding/order/half-LSB bound, raw0 feature isolation,
+  causal windows/identity, common calibration and independent standard behavior,
+  impulse/sign, future-data isolation, held invalid corrections, paused-fit but
+  fresh validation, exact memory/mock-shmim full-trace equality, private creation,
+  timestamp/counter packets, busy publications, replacements and owned cleanup.
+- Unchanged strict suites: Clang66 cases/1,766,161 assertions; GCC66/1,764,361.
+  No tolerances, normal flags or baseline paths changed. Sanitizers/fast-math are
+  not rerun in this focused turn; earlier failures remain documented. Native
+  ImageStreamIO/Linux and complete native applications remain unverified.
+- `python apps/loPredCtrlAcc/tests/simulation_diagnose.py --run` reproduces the
+  experiment; full commands/results and source references are in the focused report.
+
+### Cross-repository connection validation
+
+Six new `simulation_demo_test.py` cases pass on Clang/GCC: actual impulse delay
+versus consumed input, opposite-sign channel cancellation, calibrated ADC inverse/
+shape/timing/order checks, deterministic quantized source, standard independence
+from invalid sensor words, and future-prefix invariance. Repeated Clang source,
+ADC and complete raw-trace hashes match. Calibration WFS/commands and complete
+injected disturbance states are identical across all three trajectories.
+
+Existing strict full suites pass unchanged: Clang 66 cases/1,766,144 assertions;
+GCC 66/1,765,262 (concurrent observation counts can vary). Controller, original
+Legacy and harness sources remain unchanged. Reference and scaled experiments
+report all held/unready rows, PSD/RMS/variance, availability and first/last-second
+RMS; full-interval plots expose weakening late suppression. Six-case means are
+not universal stability or real-time guarantees. Historical GNU fast-math remains
+separate and production flags are unchanged. Native/shmim/Linux runtime is unverified.
+
+
+### Minimal demonstration executed validation
+
+The one-command strict Clang run reports no-control RMS .58807, standard .04621,
+assisted .03642 SU; variance reductions versus no-control 99.38%/99.62%. Standard
+and assisted suppression at 28/56 Hz is 30.97/27.82 and33.67/34.54 dB. Strict GCC
+repeats the same experiment and also improves RMS by 20.86%. Compiler-specific
+floating trajectories are reported separately without modifying old tolerances.
+
+The wrapper runs existing analytic spectral controls, checks source/calibration
+identity and timestamp/sequence/age gates, and independently reconstructs plant
+residuals from actual applied commands (Clang max error 1.56e-7 SU). WFS time-series
+and PSD plots, exact metrics and source/binary/raw-trace hashes are written under
+`tests/results/minimal_vibration_demo/`. Focused existing `[vibration]` regressions
+are used; no C++ controller/harness source or numerical tolerance is changed.
+
 ### Phase 11 executed numerical, stability and recovery checks
 
 - Strict Clang: 66 cases/1,766,353 assertions; strict GCC: 66/1,765,794;
@@ -3567,6 +4100,81 @@ dedicated Makefile above rather than linking the application library through
 `Makefile.one`.
 
 ## Implementation Plan
+
+**The fixed eight-realization comparison is complete.** Retain standard as the
+simulation reference; do not promote H5/H1 based on isolated gains or secondary
+noise reduction. Next, if separately scoped, test a calibration-only change:
+balanced complete causal examples from independent phase episodes using existing
+QR and unchanged γ/λ/histories. Hold out entire new seeds, rather than selecting
+from this ensemble. Ensure forgetting does not erase all but the last episode.
+No new learner, controller architecture, live integration or operational routing
+change is implemented or justified by this phase.
+
+**Current six-candidate experiment is complete offline.** Do not reselect H3 from
+final results or broaden the sweep to force benefit. The next scientifically
+useful step, separately scoped, is independent phase/seed validation of this
+same small candidate set with a fresh holdout. Longer calibration helps the
+assisted fit, but neither conditioning nor one favorable RMS realization proves
+additional vibration suppression. No production/app or instrument integration
+is justified by this experiment; no architecture or learner change is made.
+
+**Current prediction-information audit is complete:** retain all unfavorable
+fixed-fit cases. Do not shift ADC/WFS timing without a demonstrated error. The
+immediate limit is the fixed calibration's held-out disturbance forecast, with
+cross-axis/modal relationships insufficiently covered by this short realization;
+production controller law, readiness and default are not implicated as a fix.
+If separately authorized, the next scoped experiment is more independent
+calibration coverage with untouched controller structure and independently scored
+holdouts. The statistical information probe is not a new deployable controller.
+No simulation infrastructure expansion or production integration is performed.
+
+**Current scoped follow-up is complete offline:** retain default adaptive output
+and unfavorable tail; use the optional calibrated-fit experiment to distinguish
+identification drift from plant timing. Do not introduce another controller or
+recovery framework. Next, run the implemented `--transport shmim` command on an
+isolated existing MagAO-X development runtime and verify its real layout/packet
+behavior against memory transport. This Mac executes no actual shared memory.
+
+Minimum remaining full-app work: simulation-only same-sample two-modal source/tag
+publication in `accelSim::frameGrabberPostPublish()` (its optional50×50 physical
+surface is incompatible); configurable private separate disturbance/correction
+channels and consumed/optical-state/WFS tags in native `aoSim`, disabling its own
+sine; read-only rawADC0/1 and validated WFS/consumed adapters to loPredCtrlAcc's
+existing shadow seam, with only a simulation-owned proposal sink. No native
+three-app launch command exists yet. Exact implemented transport commands and
+schemas are in `tests/results/channel01_validation.md`; do not enable physical
+paths or modify Legacy/default routing. Sustained *additional* ADC benefit remains
+an open result, not a prerequisite to falsifying/testing the transport.
+
+**Current deliverable is the tested headless source/plant/controller interface**,
+using the user's permitted minimum-connection fallback. Full application runtime
+cannot be exercised with this Mac's missing dependencies. The exact next steps
+are: add a same-sample simulation-only producer transport, distinct local aoSim
+DM channels plus consumed-input/time records, native ADC/WFS/applied adapters,
+and one explicitly local fresh-proposal output owner. Preserve the tested query/
+consume/train ordering, data provenance, separate optical state and known delay.
+Do not connect 50×50 surface images directly to modal vectors or replace an applied
+record with a requested command. Re-run impulse/sign and the three-case report
+through actual shmim only in an isolated runtime. No production or hardware
+integration is performed here; no further recovery/numerical framework is added.
+
+
+**Current focus is the completed minimal suppression demo**, not another recovery
+framework. The user explicitly authorized this scoped refocus. The next useful
+work, separately authorized, is local simulation plumbing: decode/timestamp acc000,
+provide a same-realization plant disturbance, establish aoSim's actual consumed
+command/timing contract, and add a simulation-only correction sink feeding WFS
+residual generation. Reuse the existing causal input/prediction seams. Do not
+connect a 50x50 actuator image directly to a modal-vector input, infer physical
+latency from callback order, or let the controller read generator pointing truth.
+
+No integration is implemented here. Existing production shadow mode inhibits
+output and raw callbacks lack validated applied/timing adapters. Preserve Legacy
+and physical routes; rerun the same three-case report after future local wiring.
+Detailed source findings and minimum changes are in the focused demonstration
+notes. Earlier Phase11 recommendations below are historical, not additional scope
+for this demonstration.
+
 The current **Phase 11 is complete as an offline investigation**, with independent
 root-cause replays, covariance candidate, finite recovery experiments, GNU
 operation-level diagnosis and documented failed global acceptance. It does not
@@ -3737,6 +4345,83 @@ then documentation-only changes and separate formatting-only cleanup as required
 by `AGENTS.md`. This work does not switch branches, commit, or push.
 
 ## Follow-up and Edge Cases
+
+- **Current files:** optional seed arguments in test `simulation_demo.py`; new
+  `independent_realizations.py` / `_test.py`, report and artifacts; tests README,
+  prior report follow-up link and this plan. C++ QR/RLS/control implementations,
+  physical output paths, Legacy/default and separate worktree remain untouched.
+- **Limits:** eight pseudorandom realizations of this two-line synthetic model;
+  amplitudes/compiler replays are dependent repeats. Bootstrap bounds are not
+  broad physical performance guarantees and multiple metrics are exploratory.
+  Reference H5 improves56Hz slightly8/8, but neither configuration establishes a
+  primary total-RMS advantage. No favorable subgroup rule is established; no
+  retuning, commits, pushes, production modifications or instrument access.
+
+- **Current files:** test-only `Makefile.sim`, `sim_bridge.cpp`, `async_shadow.cpp`,
+  `simulation_demo.py`, `prediction_information.py`; new generalization runner/
+  tests, focused report/artifacts; README, prior report follow-up link and plan.
+- **Limits:** single seed per compiler/library-dependent realization, sparse
+  narrowband calibration and a nonrepresentative validation/final relationship.
+  Only declared amplitude cases/ADC0/1; no hardware calibration or native/runtime
+  timing established. No final-score reselection, rank/age weakening, physical
+  commands, other-worktree edit, commit or push. Existing pending artifacts stay.
+
+- **Fixed-fit audit files:** test-only snapshot export in `sim_bridge.cpp`,
+  optional calibration snapshot dictionary in `simulation_demo.py`; new
+  `prediction_information.py`, `prediction_information_test.py`, focused report
+  and PNG/PDF/metrics/model/manifests; README, channel01 follow-up link and plan.
+- **Limits:** only the declared two-line realizations/amplitudes; high ADC/WFS
+  coherence is not conditional information or a stability guarantee. Better
+  in-sample prediction is not a successful controller. Conditioning/phase analyses
+  are post-hoc; no truth signal enters commands. Native runtime/Linux and actual
+  sensor registration remain unverified. No production or other-worktree changes.
+
+- **Channel01 files:** diagnostics/training-option changes in test-only
+  `sim_bridge.cpp`, `Makefile.sim`, `simulation_demo.py`, `simulation_demo_test.py`,
+  four guarded lines in `tests/async_shadow.cpp`; new `simulation_diagnose.py`,
+  `sim_shmim.py`, `sim_shmim_test.py`, focused report/artifacts; updated connection
+  report, tests README and this plan. Preserve all earlier pending files.
+- **Limits:** calibrated-fit assistance is slightly worse, not an achieved general
+  performance gain. Low ADC SNR affects reference usefulness; high amplitude
+  alone does not resolve feedback identification. Only the two-frequency setup
+  and existing histories are studied. No broad robustness work or new recovery.
+- **Transport:** same-process optional real images are not native app integration.
+  Fake-runtime tests do not prove ImageStreamIO ABI/semantics; private namespaces,
+  geometry, clocks, tags and cleanup need a real development-host check. Sensor
+  and WFS physical registration/exposure remain unknown. Legacy/production and
+  other-repo `accelFFCtrl` work stay untouched. No commits/pushes.
+
+- **This connection's files:** new test-only `Makefile.sim`, `sim_bridge.cpp`,
+  `simulation_demo.py`, `simulation_demo_test.py`; `results/simulation_connection.md`
+  and generated metrics/manifests/PNG/PDF, tests README and this plan. Earlier
+  minimal-demo pending files are preserved. No other-repository source changed.
+- **Limits:** headless method reuse is not native application execution. Virtual
+  timing, decimated modal injection and consumed input are explicit; physical
+  mirror readback, CCD integration, 8-kHz DM delivery and 2-kHz scheduling are not
+  verified. Late suppression weakens; all data remain in average/tail results.
+- **ADC/source:** reference signal is small relative to ADC resolution; explicit
+ 100× case is a positive-control amplitude, never production calibration. Compiler
+  source realizations differ; each controller comparison shares one fixed source.
+- **Remaining integration:** runtime dependencies, same-sample transport tags,
+  actual image layout/counter/clock mapping, simulator input acknowledgements and
+  strictly local output ownership. Legacy/default, production configurations,
+  physical routes, instrument access and deployment remain untouched.
+
+
+- **Minimal demonstration files:** new `tests/vibration_demo.py`,
+  `tests/results/minimal_vibration_demo.md` and generated demo PNG/PDF/metrics/
+  manifests; tests README and this plan. No controller, existing harness,
+  original `loPredCtrl` or separate `MagAOX` source is modified.
+- **Limits:** one declared two-line realization in synthetic units; same-signal
+  correlation is not full accelSim stochastic/ADC equivalence. Quantization,
+  clipping and the full high-frequency population must be tested at integration.
+  Pure-line off-peak MSC from the inherited metric is not peak coherence.
+- **Next connection:** correlate actual accelSim source with simulated plant,
+  decode X/Y and preserve clocks/counters, certify consumed controllable commands,
+  and add only an owned local simulation correction output. Real-time scheduling,
+  native stream behavior and physical calibration remain unverified. No instrument,
+  production change, cross-repository implementation, commit or push occurs.
+
 - **Phase 11 files:** new offline `stability.hpp/.cpp`, `ddspc_stability_test.cpp`,
   `rls_diagnostics.cpp`, `fast_math_probe.cpp`, `prepare_stability.py`,
   `run_phase11.py`, `phase11_report.py`, `Makefile.stability`,

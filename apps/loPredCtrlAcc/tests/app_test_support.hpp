@@ -19,6 +19,7 @@
 #define MAGAOX_CURRENT_SHA1 "offline-test"
 #define MAGAOX_REPO_MODIFIED 0
 #define _DATATYPE_FLOAT 9
+#define _DATATYPE_UINT16 3 // ImageStruct.h value; the fixture does not link ImageStreamIO.
 
 /// \cond TEST_SUPPORT
 namespace mx::app

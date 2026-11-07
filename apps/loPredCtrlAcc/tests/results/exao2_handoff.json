@@ -1,0 +1,137 @@
+{
+  "date": "2026-11-06",
+  "host": "ASTR-LT-428.local",
+  "platform": "macOS-26.3.2-arm64-arm-64bit-Mach-O",
+  "branch": "parkertjohnson1/accel_ddspc",
+  "head": "8b91ab756f04a60e05693af057104a249c7e9bc4",
+  "status": "NOT_READY_FOR_LIVE_ASSISTED_SHADOW_PREDICTION",
+  "supported_next_manual_test": "Guarded native build qualification and WFS attachment/output inhibition only, conditional on operator verification.",
+  "native_linux_build": {
+    "linked": false,
+    "environment_available": false,
+    "attempt": "python3 tests/native_linux_build.py on macOS",
+    "result": "Requires a non-instrument Linux development environment; nothing was built",
+    "log": "apps/loPredCtrlAcc/build/handoff-native.log"
+  },
+  "compilers": {
+    "c++": "Apple clang version 21.0.0 (clang-2100.0.123.102)\nTarget: arm64-apple-darwin25.3.0\nThread model: posix\nInstalledDir: /Library/Developer/CommandLineTools/usr/bin\n",
+    "g++-15": "g++-15 (Homebrew GCC 15.2.0_1) 15.2.0\nCopyright (C) 2025 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n\n"
+  },
+  "tests": {
+    "clang": {
+      "cases": 73,
+      "passed": true,
+      "log": "apps/loPredCtrlAcc/build/handoff-clang.log",
+      "log_sha256": "b283dde6753cace002e638e0e73700608471182b2b44d0f9210987bd0529491e"
+    },
+    "gcc": {
+      "cases": 73,
+      "passed": true,
+      "log": "apps/loPredCtrlAcc/build/handoff-gcc.log",
+      "log_sha256": "9dba7e684b411b0609dfd3ef356aa7aed0320469e80b59f712ce4e959ead74e2"
+    },
+    "sanitize": {
+      "cases": 73,
+      "passed": true,
+      "log": "apps/loPredCtrlAcc/build/handoff-sanitize.log",
+      "log_sha256": "0ec3d9f3fe6d80497e752290f81ca09babb206e786ee08e7b50ddcea40a89d1b"
+    },
+    "shadow-only-clang": {
+      "cases": 7,
+      "passed": true,
+      "log": "apps/loPredCtrlAcc/build/handoff-shadow-only-clang.log",
+      "log_sha256": "4e232693f5f435aef0580a1b1ea3c42dc21501fb44336c8de21bd4059d91eaf6"
+    },
+    "shadow-only-gcc": {
+      "cases": 7,
+      "passed": true,
+      "log": "apps/loPredCtrlAcc/build/handoff-shadow-only-gcc.log",
+      "log_sha256": "d70dca168f58d1cdeb07cd3a50ad7fb8fe44dd4a3c60ca9e64d104586414b0cf"
+    },
+    "legacy-fast-clang": {
+      "cases": 9,
+      "passed": true,
+      "log": "apps/loPredCtrlAcc/build/handoff-legacy-fast-clang.log",
+      "log_sha256": "b59180dff2f6df384e2509d84fd2fa7f3f96185a0c6656646a9793e6fb672cb3"
+    },
+    "build-tests": {
+      "cases": 8,
+      "passed": true,
+      "log": "apps/loPredCtrlAcc/build/handoff-build-tests.log",
+      "log_sha256": "7c5a44e496d8d6f05325ebc036ff802ad9b05a278b53d566b05fbd3bc738b00e"
+    },
+    "python": {
+      "cases": 31,
+      "passed": true,
+      "log": "apps/loPredCtrlAcc/build/handoff-python.log",
+      "log_sha256": "7549aabea4d6a8f4f739344d0e905507c928921339cb4dab262377509a99ba67"
+    },
+    "python-gcc": {
+      "cases": 31,
+      "passed": true,
+      "log": "apps/loPredCtrlAcc/build/handoff-python-gcc.log",
+      "log_sha256": "3cee321e6fb4a6db4b41be308bff377f0c35148a86193e400195599b1698e827"
+    }
+  },
+  "verified": {
+    "original_legacy_files_identical": 15,
+    "normal_legacy_default_preserved": true,
+    "explicit_copy_gain_fix_has_default_compatibility": true,
+    "guard_refuses_missing_or_false_shadow": true,
+    "guard_survives_explicit_make_compiler_flags": true,
+    "shadow_output_helpers_never_started": true,
+    "invalid_native_input_does_not_train": true,
+    "native_uint16_input_not_decoded_or_certified": true,
+    "independent_two_feature_qr_models_tested": true,
+    "synthetic_proposals_finite_and_reference_norm_bounded": true,
+    "native_global_proposal_amplitude_limit": false,
+    "protected_plan_prefix_unchanged": true
+  },
+  "blockers": [
+    "Native UINT16 ADC0/1 decoder, stable snapshots and timestamped feature builder are absent.",
+    "Verified applied-command reader/provenance, calibrated modal sign/layout and absolute-versus-incremental semantics are absent.",
+    "WFS exposure/ADC/DM clock mapping, measured physical response latency and silence-expiry integration are unverified.",
+    "Native Linux compile/link, host reader-slot isolation and scheduling/load qualification are unverified."
+  ],
+  "safety": {
+    "instrument_access": false,
+    "native_app_executed": false,
+    "real_dm_commands": false,
+    "production_config_changes": false,
+    "other_repository_changes": false,
+    "new_optimization_or_ensemble": false,
+    "commit": false,
+    "push": false
+  },
+  "changed_files": [
+    "apps/loPredCtrlAcc/loPredCtrlAcc.hpp",
+    "apps/loPredCtrlAcc/Makefile",
+    "apps/loPredCtrlAcc/EXAO2_TESTING.md",
+    "apps/loPredCtrlAcc/examples/loPredCtrlAcc-shadow.conf.example",
+    "apps/loPredCtrlAcc/tests/Makefile.offline",
+    "apps/loPredCtrlAcc/tests/README.md",
+    "apps/loPredCtrlAcc/tests/app_test_support.hpp",
+    "apps/loPredCtrlAcc/tests/ddspc_app_test.cpp",
+    "apps/loPredCtrlAcc/tests/ddspc_handoff_test.cpp",
+    "apps/loPredCtrlAcc/tests/handoff_config_test.py",
+    "apps/loPredCtrlAcc/tests/native_linux_build.py",
+    "apps/loPredCtrlAcc/tests/native_linux_build_test.py",
+    "agents/plans/2026-11/accel-ddspc-controller.md",
+    "apps/loPredCtrlAcc/tests/results/exao2_handoff.json"
+  ],
+  "source_sha256": {
+    "apps/loPredCtrlAcc/loPredCtrlAcc.hpp": "39d16a7cc2c80c0d76520f50342c9daa059dedce2ce7426f6069784b6360d94a",
+    "apps/loPredCtrlAcc/Makefile": "27527784c0b1755a9692cff35706b67d1f96433335fc230de8f32c21182d006f",
+    "apps/loPredCtrlAcc/EXAO2_TESTING.md": "a7f465e69eb87ec0485b075a49643c69a3122b2714fbfbe0bdcc313047ae2f78",
+    "apps/loPredCtrlAcc/examples/loPredCtrlAcc-shadow.conf.example": "173e93a3c798a4e0ca7332681c599b475fcd7d842349e717a05f22dc3397c77b",
+    "apps/loPredCtrlAcc/tests/Makefile.offline": "223844dbe6818c32486b719dab237b20eb26ff8d8deee44e12dbfb7703315e38",
+    "apps/loPredCtrlAcc/tests/README.md": "a7e52c0bd91bc31e7f24243604b4914d59c4eb1729d6821c547469d618eb77c0",
+    "apps/loPredCtrlAcc/tests/app_test_support.hpp": "bb2bae4c32e451a7dd118810ddd1170650fcbe3160d2cc97dadbeafa24d0682b",
+    "apps/loPredCtrlAcc/tests/ddspc_app_test.cpp": "533cc654cc0724033993f221fbc80523a749c881d4fad846ba684934149fbae1",
+    "apps/loPredCtrlAcc/tests/ddspc_handoff_test.cpp": "c9fdd415df77b974862bb582ab6244d70ed8ac64751448d6139794919278495b",
+    "apps/loPredCtrlAcc/tests/handoff_config_test.py": "b835bb0503490aed3151eceb10263c1e6b3e0820b42c26379ca3517172d4c4b9",
+    "apps/loPredCtrlAcc/tests/native_linux_build.py": "41c5245f4f374081ed202bc44a3155ecd21e1c88a523adcceaecf3835114ffe5",
+    "apps/loPredCtrlAcc/tests/native_linux_build_test.py": "d799ee6a858257df6ddd46b15c9cb7aa3969459d2b1e71747e87c0e68024d96a",
+    "agents/plans/2026-11/accel-ddspc-controller.md": "d68322142590d8b2194ea176f513af1a768642bfd1006483ffd7c531604d1579"
+  }
+}

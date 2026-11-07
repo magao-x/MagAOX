@@ -1,0 +1,25 @@
+{
+  "compiler": "g++-15 (Homebrew GCC 15.2.0_1) 15.2.0\nCopyright (C) 2025 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n\n",
+  "canonical_bank_sha256": "55077bc4a2434f4c48a9fe0cbeadc27f7da331ac0849797194bd6aec28214a5e",
+  "source_sha256": {
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/tests/independent_realizations.py": "a10c768a88affa222471ee254673d418dcd24d719209d5189cbb8a3d17a3cb33",
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/tests/simulation_demo.py": "397ffcd0abb027221fe277372d3582cd2a13b65b9c7ba23788b106c299fda29c",
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/tests/calibration_generalization.py": "2781672a494426f3d13f59b0ae193cc969e789a83847e39eb09adbfd71803a8a",
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/tests/prediction_information.py": "21838666dabd8328f7ef66afdae9ee1eef0b0c6985e591afa9c53e9b0fb132b5",
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/tests/sim_bridge.cpp": "a656c5f0dd55ca94c57f21f5c96e08c5dc1a32516bc05411af49504eaa5792e3",
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/tests/async_shadow.cpp": "d8a359b343971eb5ba07bc9c3758a4da8b4240bf6e4900d2de93735a87e86697",
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/tests/Makefile.sim": "21cecbf5a04a290197ed236ffac03ca8102de4ebfb3f6ee593e4e4345c41c2b0",
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/ar_controller.cpp": "5b26311fac738f63ebdd809cd5f44692e161ac1a14e42550baaa9341bf3d14b2",
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/qrd_rls.cpp": "7f4f7f4870b6556f9b0dd2dcfcfd60444cfd316f65a69d95d30be297795b19e2",
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/shadow_controller.cpp": "b77c997599174f4bc537b45dcb2eb4ea78c28c45d3f8aa69c2f9c9e75c1681ff",
+    "/Users/parkerjohnson/source/MagAOX/apps/accelSim/accelSimModel.hpp": "eec564586ff65670dab72f921a2dd5ba68512090e1dd8805baddae4fe30df5fb",
+    "/Users/parkerjohnson/source/MagAOX/apps/aoSim/xapp/aoSim/__init__.py": "61907a5dd5462000c121bfb28c5376ede830d8f251e2091c36179fb7cd593628"
+  },
+  "binary_sha256": {
+    "5": "700a9df9f39497b95a1c6698f3a7e1e53c3699aefd20fda0c8c03bfe567e2233",
+    "1": "e29249c75234149788a894987aed6803aa4fbba7f442921edf948ad915911e1b"
+  },
+  "trials_per_amplitude": 8,
+  "row_count": 64,
+  "new_controller_or_tuning": false
+}

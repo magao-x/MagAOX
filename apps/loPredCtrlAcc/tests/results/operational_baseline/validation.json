@@ -1,0 +1,53 @@
+{
+  "strict_clang_cases": 69,
+  "strict_gcc_cases": 69,
+  "asan_ubsan_cases": 69,
+  "python_clang_cases": 30,
+  "python_gcc_cases": 30,
+  "experimental_cases_per_compiler": 48,
+  "independent_seeds": 8,
+  "paired_amplitude_cases": 2,
+  "calibration_frames": [
+    0,
+    8000
+  ],
+  "evaluation_frames": [
+    24000,
+    32000
+  ],
+  "all_traces_finite": true,
+  "command_saturation": false,
+  "adc_rails": false,
+  "identical_raw_source_recordings": true,
+  "no_control_matches_archived_exactly": true,
+  "calibration_wfs_paired_exactly": true,
+  "disturbance_traces_paired_exactly": true,
+  "consumed_commands_verified": true,
+  "two_frame_response_verified": true,
+  "strict_readiness_gates_preserved": true,
+  "calibration_unready": [
+    {
+      "seed": "307",
+      "scale": "1",
+      "controller": "standard"
+    },
+    {
+      "seed": "307",
+      "scale": "100",
+      "controller": "standard"
+    }
+  ],
+  "production_paths_unchanged": [
+    "apps/loPredCtrl",
+    "apps/loPredCtrlAcc/loPredCtrlAcc.hpp",
+    "apps/loPredCtrlAcc/ar_controller.cpp",
+    "apps/loPredCtrlAcc/qrd_rls.cpp",
+    "apps/loPredCtrlAcc/shadow_controller.cpp",
+    "apps/loPredCtrlAcc/causal_input.cpp"
+  ],
+  "protected_plan_prefix_unchanged": true,
+  "instrument_access": false,
+  "shared_memory_writes": false,
+  "runtime_integration_state_verified": false,
+  "operational_equivalence_established": false
+}

@@ -245,6 +245,14 @@ bool OfflineTrainingWorker::step( std::uint64_t completionNs )
     DDSPCBenchmark::enabled                                     = true;
 #endif
     const auto begin = offline_now_ns();
+#ifdef DDSPC_SIM_TRAINING_END
+    // Test-only controlled experiment: existing training control, with fresh per-record validity/publication.
+    bool training = entry.m_record.m_data.m_index < DDSPC_SIM_TRAINING_END;
+    #ifdef DDSPC_SIM_TRAINING_START
+    training = training && entry.m_record.m_data.m_index >= DDSPC_SIM_TRAINING_START;
+    #endif
+    m_manager.training( m_mode, training );
+#endif
     m_manager.process( entry.m_record.m_data );
     const auto end     = offline_now_ns();
     event.m_trainingNs = end - begin;

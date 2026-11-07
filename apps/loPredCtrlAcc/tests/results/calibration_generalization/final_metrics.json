@@ -1,0 +1,204 @@
+{
+  "1": {
+    "d1_h5_p001_standard": {
+      "prediction_h2_rms": 0.062382062562595764,
+      "residual_rms": 0.06167016689993662,
+      "variance_reduction": 0.9913689801402542,
+      "availability": 0.991125,
+      "ready_fraction": 0.991125,
+      "peak_command": 1.618819145469211,
+      "limit_fraction": 0.0,
+      "suppression_28_db": 27.253992883990197,
+      "suppression_56_db": 17.23052243904016
+    },
+    "d1_h5_p001_assisted": {
+      "prediction_h2_rms": 0.062158815782832263,
+      "residual_rms": 0.06120735457240694,
+      "variance_reduction": 0.9914981410125835,
+      "availability": 0.99,
+      "ready_fraction": 0.99,
+      "peak_command": 1.6248409588226242,
+      "limit_fraction": 0.0,
+      "suppression_28_db": 27.539822194981912,
+      "suppression_56_db": 17.27481033824987
+    },
+    "d2_h5_p001_standard": {
+      "prediction_h2_rms": 0.05636955135589008,
+      "residual_rms": 0.05831443717827624,
+      "variance_reduction": 0.992282721899749,
+      "availability": 0.991125,
+      "ready_fraction": 0.991125,
+      "peak_command": 1.6656712710280874,
+      "limit_fraction": 0.0,
+      "suppression_28_db": 31.680583449405493,
+      "suppression_56_db": 17.63740925084084
+    },
+    "d2_h5_p001_assisted": {
+      "prediction_h2_rms": 0.056248004596390684,
+      "residual_rms": 0.058557602031647116,
+      "variance_reduction": 0.9922182345968183,
+      "availability": 0.988625,
+      "ready_fraction": 0.988625,
+      "peak_command": 1.6620129739972456,
+      "limit_fraction": 0.0,
+      "suppression_28_db": 31.22804211009102,
+      "suppression_56_db": 18.347286173460745
+    },
+    "d4_h5_p001_standard": {
+      "prediction_h2_rms": 0.05648748923985024,
+      "residual_rms": 0.05819262565732157,
+      "variance_reduction": 0.9923148966479509,
+      "availability": 0.990625,
+      "ready_fraction": 0.990625,
+      "peak_command": 1.6744334007563846,
+      "limit_fraction": 0.0,
+      "suppression_28_db": 32.788781524403205,
+      "suppression_56_db": 17.6438010837541
+    },
+    "d4_h5_p001_assisted": {
+      "prediction_h2_rms": 0.05634031387080533,
+      "residual_rms": 0.05846870922033021,
+      "variance_reduction": 0.9922418027086278,
+      "availability": 0.988625,
+      "ready_fraction": 0.988625,
+      "peak_command": 1.6684856547289706,
+      "limit_fraction": 0.0,
+      "suppression_28_db": 31.98098120017631,
+      "suppression_56_db": 18.658096505098975
+    },
+    "d4_h3_p001_assisted": {
+      "prediction_h2_rms": 0.05641336025979975,
+      "residual_rms": 0.05824520683700655,
+      "variance_reduction": 0.9923010258604588,
+      "availability": 0.988875,
+      "ready_fraction": 0.988875,
+      "peak_command": 1.6748250492113148,
+      "limit_fraction": 0.0,
+      "suppression_28_db": 32.62385167082933,
+      "suppression_56_db": 18.06498632576749
+    },
+    "d4_h1_p001_assisted": {
+      "prediction_h2_rms": 0.05649146374702522,
+      "residual_rms": 0.058221000229414045,
+      "variance_reduction": 0.992307459838722,
+      "availability": 0.99025,
+      "ready_fraction": 0.99025,
+      "peak_command": 1.6679221141778533,
+      "limit_fraction": 0.0,
+      "suppression_28_db": 32.87049377424361,
+      "suppression_56_db": 17.635212092722377
+    },
+    "d4_h5_p010_assisted": {
+      "prediction_h2_rms": 0.056340045777064064,
+      "residual_rms": 0.05846019530823469,
+      "variance_reduction": 0.9922440681839845,
+      "availability": 0.988625,
+      "ready_fraction": 0.988625,
+      "peak_command": 1.668494738457631,
+      "limit_fraction": 0.0,
+      "suppression_28_db": 31.989409276582084,
+      "suppression_56_db": 18.65676594594016
+    }
+  },
+  "100": {
+    "d1_h5_p001_standard": {
+      "prediction_h2_rms": 0.06238220086640969,
+      "residual_rms": 0.06167005479414623,
+      "variance_reduction": 0.9913690115358936,
+      "availability": 0.991125,
+      "ready_fraction": 0.991125,
+      "peak_command": 1.6188177130350756,
+      "limit_fraction": 0.0,
+      "suppression_28_db": 27.254057472641172,
+      "suppression_56_db": 17.230568654731584
+    },
+    "d1_h5_p001_assisted": {
+      "prediction_h2_rms": 0.07513763744429693,
+      "residual_rms": 0.07521452391249178,
+      "variance_reduction": 0.9871614552647762,
+      "availability": 0.987625,
+      "ready_fraction": 0.987625,
+      "peak_command": 1.5855724959355273,
+      "limit_fraction": 0.0,
+      "suppression_28_db": 22.673179919094274,
+      "suppression_56_db": 7.836781247361585
+    },
+    "d2_h5_p001_standard": {
+      "prediction_h2_rms": 0.05636954592127427,
+      "residual_rms": 0.05831441599835867,
+      "variance_reduction": 0.9922827275205566,
+      "availability": 0.991125,
+      "ready_fraction": 0.991125,
+      "peak_command": 1.6656735419602522,
+      "limit_fraction": 0.0,
+      "suppression_28_db": 31.68064483502706,
+      "suppression_56_db": 17.63723067656591
+    },
+    "d2_h5_p001_assisted": {
+      "prediction_h2_rms": 0.054841606485487464,
+      "residual_rms": 0.05644649629102553,
+      "variance_reduction": 0.9927691862269566,
+      "availability": 0.99225,
+      "ready_fraction": 0.99225,
+      "peak_command": 1.6413917570035967,
+      "limit_fraction": 0.0,
+      "suppression_28_db": 30.580900399687685,
+      "suppression_56_db": 13.426892485106578
+    },
+    "d4_h5_p001_standard": {
+      "prediction_h2_rms": 0.05648751913829324,
+      "residual_rms": 0.05819134433657141,
+      "variance_reduction": 0.9923152350559877,
+      "availability": 0.99075,
+      "ready_fraction": 0.99075,
+      "peak_command": 1.6744330513822052,
+      "limit_fraction": 0.0,
+      "suppression_28_db": 32.788565150029974,
+      "suppression_56_db": 17.644160092668095
+    },
+    "d4_h5_p001_assisted": {
+      "prediction_h2_rms": 0.05470138481797646,
+      "residual_rms": 0.05627785558220551,
+      "variance_reduction": 0.9928123383341608,
+      "availability": 0.989375,
+      "ready_fraction": 0.989375,
+      "peak_command": 1.6533097208056338,
+      "limit_fraction": 0.0,
+      "suppression_28_db": 31.566231162395862,
+      "suppression_56_db": 14.287283544094587
+    },
+    "d4_h3_p001_assisted": {
+      "prediction_h2_rms": 0.05460222419987605,
+      "residual_rms": 0.056119251999969755,
+      "variance_reduction": 0.9928527766294715,
+      "availability": 0.99,
+      "ready_fraction": 0.99,
+      "peak_command": 1.652358528640197,
+      "limit_fraction": 0.0,
+      "suppression_28_db": 31.61294707998183,
+      "suppression_56_db": 14.756171528260493
+    },
+    "d4_h1_p001_assisted": {
+      "prediction_h2_rms": 0.05634719092827333,
+      "residual_rms": 0.05870207164500832,
+      "variance_reduction": 0.992179774537607,
+      "availability": 0.99075,
+      "ready_fraction": 0.99075,
+      "peak_command": 1.6681472229490222,
+      "limit_fraction": 0.0,
+      "suppression_28_db": 32.326834368008804,
+      "suppression_56_db": 16.42934594175329
+    },
+    "d4_h5_p010_assisted": {
+      "prediction_h2_rms": 0.054701670822595284,
+      "residual_rms": 0.056283568993031725,
+      "variance_reduction": 0.9928108925032052,
+      "availability": 0.989125,
+      "ready_fraction": 0.989125,
+      "peak_command": 1.6533125157990678,
+      "limit_fraction": 0.0,
+      "suppression_28_db": 31.551032005849873,
+      "suppression_56_db": 14.290394812922493
+    }
+  }
+}

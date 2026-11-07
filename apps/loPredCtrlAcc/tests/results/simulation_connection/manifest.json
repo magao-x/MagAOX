@@ -1,0 +1,67 @@
+{
+  "transport": "headless memory images, not shmim/application runtime",
+  "config": [
+    {
+      "source_scale": 1.0,
+      "wfs_unit_arcsec": 0.001332844025045489,
+      "accel_unit": 0.002,
+      "adc_zero": 2048.0,
+      "volts_per_count": 0.0083799,
+      "sensitivity": 1.02,
+      "rail_samples": 0,
+      "adc_sha256": "b0ae1e77916cba2757a80e058679cfbda35eea7d00fc9f205b6d54ca75b31ba0",
+      "pointing_sha256": "e3b8c9f0a66fd2e351b8506a244c0fc6571b4a6a7cabb6b94461e53b61eee8eb",
+      "trace_sha256": "7636bb2f6cf2754bc3faf86f68c79e89d11394952c733c1e5a5c2afd26767a0b"
+    },
+    {
+      "source_scale": 100.0,
+      "wfs_unit_arcsec": 0.13328440250454893,
+      "accel_unit": 0.2,
+      "adc_zero": 2048.0,
+      "volts_per_count": 0.0083799,
+      "sensitivity": 1.02,
+      "rail_samples": 0,
+      "adc_sha256": "0097b50f7c72463307cfa665517cdd5eca4d9aea2755cf05d30b66105e646066",
+      "pointing_sha256": "9afa28ecdfff50f8becae7305914b18b0ff0f648bf8f9644e607899e66442a89",
+      "trace_sha256": "9215c10b94c91756201b58a79e79f2d26386057cae8abbc61983dd7a85061b21"
+    }
+  ],
+  "compiler": "Apple clang version 21.0.0 (clang-2100.0.123.102)\nTarget: arm64-apple-darwin25.3.0\nThread model: posix\nInstalledDir: /Library/Developer/CommandLineTools/usr/bin\n",
+  "source_sha256": {
+    "/Users/parkerjohnson/source/MagAOX/apps/accelSim/accelSimModel.hpp": "eec564586ff65670dab72f921a2dd5ba68512090e1dd8805baddae4fe30df5fb",
+    "/Users/parkerjohnson/source/MagAOX/apps/aoSim/xapp/aoSim/__init__.py": "61907a5dd5462000c121bfb28c5376ede830d8f251e2091c36179fb7cd593628",
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/tests/sim_bridge.cpp": "67f0aea05ba3082ab5674c1bcc9a858f5738024b9079d5d36896ea1ad21ad48e",
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/tests/simulation_demo.py": "47eebb112023e17f35da7e1be570bbd7a299aafde293bc7147563cc1a0f224c1",
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/tests/Makefile.sim": "d3b63eacf83135397db967e13930ff191f9a524fa40113959f60af14daa07a8a",
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/tests/async_shadow.cpp": "0de5f5913fa00a5bd98ec5e176cfe87ff47e524d867ce8951ca0a65e599ae84c",
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/ar_controller.cpp": "5b26311fac738f63ebdd809cd5f44692e161ac1a14e42550baaa9341bf3d14b2",
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/qrd_rls.cpp": "7f4f7f4870b6556f9b0dd2dcfcfd60444cfd316f65a69d95d30be297795b19e2",
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/shadow_controller.cpp": "b77c997599174f4bc537b45dcb2eb4ea78c28c45d3f8aa69c2f9c9e75c1681ff"
+  },
+  "binary_sha256": "154ea07a06f032441115e399676852183e3b117fe019052d2ad000d691ccc74b",
+  "runtime_modules": {
+    "ImageStreamIOWrap": false,
+    "magaox": false,
+    "purepyindi2": false,
+    "xconf": false
+  },
+  "adc_hz": 8000,
+  "wfs_hz": 2000,
+  "train": 2400,
+  "evaluate": 8000,
+  "aosim_lag": 0,
+  "history": 6,
+  "future": 3,
+  "accel_history": 5,
+  "noise_fraction": 0.03,
+  "source_seed": 42,
+  "calibration_seed": 100,
+  "wfs_noise_seed": 303,
+  "decision_to_wfs_delay_frames": 2,
+  "sensor_window_ns": [
+    -500000,
+    -125000
+  ],
+  "sensor_publication_delay_ns": 1000,
+  "amplitude_scales": "Reference producer mode amplitudes multiplied explicitly; ADC defaults unchanged"
+}

@@ -114,6 +114,9 @@ class loPredCtrlAcc : public MagAOXApp<true>,
     /// Legacy residual-copy gain when predictive correction is disabled.
     realT m_copygainCtrl{ 1.0 };
 
+    /// Preserve historical loading of copy gain from gain; opt out to honor an explicit copy_gain key.
+    bool m_legacyCopyGainCompat{ true };
+
     /// Legacy scaled penalty or literal positive shadow reference-law lambda.
     realT m_regularizationCtrl{ 100.0 };
 
@@ -606,7 +609,7 @@ inline void loPredCtrlAcc::setupConfig()
                 "gain",
                 false,
                 "float",
-                "The initial feedback gain." );
+                "Legacy additive current-WFS feedback gain; unused by the shadow reference law." );
     config.add( "parameters.copy_gain",
                 "",
                 "parameters.copy_gain",
@@ -615,7 +618,16 @@ inline void loPredCtrlAcc::setupConfig()
                 "copy_gain",
                 false,
                 "float",
-                "The initial feedback gain." );
+                "Legacy prediction-off residual-copy gain; requires legacy_copy_gain_compat=false." );
+    config.add( "parameters.legacy_copy_gain_compat",
+                "",
+                "parameters.legacy_copy_gain_compat",
+                argType::Optional,
+                "parameters",
+                "legacy_copy_gain_compat",
+                false,
+                "bool",
+                "Default true retains historical copy_gain loading from gain; false honors copy_gain." );
     config.add( "parameters.regularization",
                 "",
                 "parameters.regularization",
@@ -624,7 +636,7 @@ inline void loPredCtrlAcc::setupConfig()
                 "regularization",
                 false,
                 "float",
-                "The regularization parameter." );
+                "Legacy scaled control penalty; literal positive lambda for the shadow reference law." );
     config.add( "parameters.gamma",
                 "",
                 "parameters.gamma",
@@ -642,7 +654,7 @@ inline void loPredCtrlAcc::setupConfig()
                 "covariance",
                 false,
                 "float",
-                "The initial covariance." );
+                "Initial information rho; P0=I/rho and QR R0=sqrt(rho)I." );
 
     config.add( "parameters.num_modes",
                 "",
@@ -707,7 +719,7 @@ inline void loPredCtrlAcc::setupConfig()
                 "accel_enabled",
                 false,
                 "bool",
-                "Enable the legacy accelerometer monitor; shadow execution uses explicit synchronized records." );
+                "Enable the legacy FLOAT accelerometer monitor, not a UINT16 acc000 decoder; inactive in shadow." );
     config.add( "parameters.accel_channels",
                 "",
                 "parameters.accel_channels",
@@ -766,9 +778,16 @@ inline void loPredCtrlAcc::setupConfig()
 
 inline int loPredCtrlAcc::loadConfigImpl( mx::app::appConfigurator &_config )
 {
-    shmimMonitorT::loadConfig( _config );
-
     _config( m_shadowMode, "parameters.shadow" );
+#ifdef DDSPC_SHADOW_ONLY
+    if( !m_shadowMode )
+    {
+        m_shutdown = true;
+        return log<software_error, -1>(
+            { __FILE__, __LINE__, "Shadow-only build requires parameters.shadow=true; legacy output is forbidden." } );
+    }
+#endif
+    shmimMonitorT::loadConfig( _config );
     _config( m_shadowMinUpdates, "parameters.shadow_min_updates" );
 
     _config( m_accelEnabled, "parameters.accel_enabled" );
@@ -784,7 +803,10 @@ inline int loPredCtrlAcc::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_fpsSource, "parameters.fpsSource" );
 
     _config( m_gainCtrl, "parameters.gain" );
+    _config( m_legacyCopyGainCompat, "parameters.legacy_copy_gain_compat" );
     _config( m_copygainCtrl, "parameters.gain" );
+    if( !m_legacyCopyGainCompat )
+        _config( m_copygainCtrl, "parameters.copy_gain" );
     _config( m_regularizationCtrl, "parameters.regularization" );
     _config( m_gammaCtrl, "parameters.gamma" );
     _config( m_covarianceCtrl, "parameters.covariance" );
@@ -1200,8 +1222,16 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc, m_indiP_ddspcTrain )( const pcf::In
 
 inline int loPredCtrlAcc::appStartup()
 {
+#ifdef DDSPC_SHADOW_ONLY
+    if( !m_shadowMode )
+        return log<software_error, -1>( { __FILE__, __LINE__, "Shadow-only build refuses legacy startup." } );
+#endif
     if( m_shadowMode && configureShadow() < 0 )
         return -1;
+    if( m_shadowMode )
+        log<text_log>( "Shadow output inhibited. Native WFS callbacks are observation-only; UINT16 accelerometer, "
+                       "applied-command and exposure-timing adapters are unavailable. Live models remain invalid.",
+                       logPrio::LOG_WARNING );
     if( shmimMonitorT::appStartup() < 0 )
     {
         return log<software_error, -1>( { __FILE__, __LINE__ } );

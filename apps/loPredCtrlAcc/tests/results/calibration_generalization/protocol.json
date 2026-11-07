@@ -1,0 +1,103 @@
+{
+  "candidates": [
+    {
+      "name": "d1_h5_p001",
+      "seconds": 1,
+      "history": 5,
+      "prior": 0.001,
+      "mode": 3
+    },
+    {
+      "name": "d1_h5_p001",
+      "seconds": 1,
+      "history": 5,
+      "prior": 0.001,
+      "mode": 4
+    },
+    {
+      "name": "d2_h5_p001",
+      "seconds": 2,
+      "history": 5,
+      "prior": 0.001,
+      "mode": 3
+    },
+    {
+      "name": "d2_h5_p001",
+      "seconds": 2,
+      "history": 5,
+      "prior": 0.001,
+      "mode": 4
+    },
+    {
+      "name": "d4_h5_p001",
+      "seconds": 4,
+      "history": 5,
+      "prior": 0.001,
+      "mode": 3
+    },
+    {
+      "name": "d4_h5_p001",
+      "seconds": 4,
+      "history": 5,
+      "prior": 0.001,
+      "mode": 4
+    },
+    {
+      "name": "d4_h3_p001",
+      "seconds": 4,
+      "history": 3,
+      "prior": 0.001,
+      "mode": 4
+    },
+    {
+      "name": "d4_h1_p001",
+      "seconds": 4,
+      "history": 1,
+      "prior": 0.001,
+      "mode": 4
+    },
+    {
+      "name": "d4_h5_p010",
+      "seconds": 4,
+      "history": 5,
+      "prior": 0.01,
+      "mode": 4
+    }
+  ],
+  "source_amplitudes": [
+    1,
+    100
+  ],
+  "adc_channels": [
+    0,
+    1
+  ],
+  "common_excitation_and_control_start_frame": 8000,
+  "validation_frames": [
+    9000,
+    13000
+  ],
+  "final_frames": [
+    24000,
+    32000
+  ],
+  "calibration_windows": {
+    "1": [
+      6000,
+      8000
+    ],
+    "2": [
+      4000,
+      8000
+    ],
+    "4": [
+      0,
+      8000
+    ]
+  },
+  "selection": "Minimum pooled validation two-frame forecast RMS across both amplitudes; lexical ID breaks ties",
+  "rank_tolerance": 1e-05,
+  "gamma": 0.9995,
+  "command_penalty": 0.02,
+  "note": "All cases receive identical 0..4s excitation. Training windows end at4s; all fitted examples lie within their window."
+}

@@ -16,7 +16,7 @@ SOURCES := $(ROOT_DIR)/tests/testMain.cpp $(APP_DIR)/ar_controller.cpp \
            $(APP_DIR)/recursive_least_squares.cpp $(APP_DIR)/qrd_rls.cpp $(APP_DIR)/utils.cpp \
            $(APP_DIR)/shadow_controller.cpp $(APP_DIR)/causal_input.cpp \
            $(TEST_DIR)/comparison.cpp $(TEST_DIR)/vibration.cpp $(TEST_DIR)/stability.cpp \
-           $(TEST_DIR)/phase6_adapter.cpp \
+           $(TEST_DIR)/phase6_adapter.cpp $(TEST_DIR)/operational_law.cpp \
            $(TEST_DIR)/phase7_adapter.cpp $(TEST_DIR)/async_shadow.cpp \
            $(ROOT_DIR)/INDI/libcommon/IndiProperty.cpp $(ROOT_DIR)/INDI/libcommon/IndiElement.cpp \
            $(ROOT_DIR)/INDI/libcommon/TimeStamp.cpp \
@@ -84,11 +84,24 @@ $(PHASE6_OBJECTS): $(BUILD_DIR)/phase6_%.o: $(PHASE6_STAMP)
 	@mkdir -p $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -DDDSPC=DDSPCPhase6 -MMD -MP -c $(PHASE6_ROOT)/$*.cpp -o $@
 
-.PHONY: all check check-build-tool verify-legacy check-legacy-fast check-demos
+.PHONY: all check check-shadow-only check-build-tool verify-legacy check-legacy-fast check-demos
 all: $(TARGET)
 
 check: check-build-tool verify-legacy $(TARGET)
 	$(TARGET) --durations yes
+
+# Exercise the real header with the commissioning guard compiled into every translation unit.
+# This separate binary uses the same stream-free lifecycle doubles; it is never a native app launch.
+SHADOW_TEST_SOURCES := $(ROOT_DIR)/tests/testMain.cpp $(APP_DIR)/ar_controller.cpp \
+                      $(APP_DIR)/recursive_least_squares.cpp $(APP_DIR)/qrd_rls.cpp $(APP_DIR)/utils.cpp \
+                      $(APP_DIR)/shadow_controller.cpp $(APP_DIR)/causal_input.cpp \
+                      $(ROOT_DIR)/INDI/libcommon/IndiProperty.cpp $(ROOT_DIR)/INDI/libcommon/IndiElement.cpp \
+                      $(ROOT_DIR)/INDI/libcommon/TimeStamp.cpp $(TEST_DIR)/ddspc_app_test.cpp
+check-shadow-only:
+	$(MAKE) -f $(TEST_DIR)/Makefile.offline BUILD_DIR=$(abspath $(BUILD_DIR))/shadow-only CXX=$(CXX) \
+	  CXXFLAGS='$(CXXFLAGS) -DDDSPC_SHADOW_ONLY' SOURCES='$(SHADOW_TEST_SOURCES)' \
+	  $(abspath $(BUILD_DIR))/shadow-only/ddspc_offline_test
+	$(abspath $(BUILD_DIR))/shadow-only/ddspc_offline_test '[loPredCtrlAcc][app]~[legacy]'
 
 check-build-tool:
 	python3 -m unittest discover -s $(TEST_DIR) -p native_linux_build_test.py

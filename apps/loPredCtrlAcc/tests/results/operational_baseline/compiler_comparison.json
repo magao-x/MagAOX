@@ -1,0 +1,11 @@
+{
+  "residual_rms": 0.00021113599540312222,
+  "prediction_h2_rms": 1.3576774152909699e-06,
+  "availability": 0.001375000000000015,
+  "peak_command": 0.005885120705785063,
+  "suppression_28_db": 0.0009482574064718641,
+  "suppression_56_db": 0.006087315538825244,
+  "max_calibration_theta_difference": 0.00015980005264282227,
+  "max_calibration_gain_difference": 1.5724217519164085e-06,
+  "matched_source_bank": true
+}

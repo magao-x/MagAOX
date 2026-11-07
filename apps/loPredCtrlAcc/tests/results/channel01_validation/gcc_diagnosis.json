@@ -1,0 +1,259 @@
+{
+  "adaptive_1": {
+    "0": {
+      "first_scored_second_rms": 0.9262147984339224,
+      "last_second_rms": 1.1470470786958455,
+      "request_consumed_max_error": 0.0,
+      "two_frame_response_max_error": 0.0,
+      "peak_command": 0.0,
+      "limit_fraction": 0.0,
+      "first_version": 0,
+      "last_version": 0,
+      "last_evidence_sequence": 0
+    },
+    "3": {
+      "first_scored_second_rms": 0.11201467908850246,
+      "last_second_rms": 1.1587394293822526,
+      "request_consumed_max_error": 0.0,
+      "two_frame_response_max_error": 0.0,
+      "peak_command": 1.78644258793,
+      "limit_fraction": 0.0,
+      "first_version": 2392,
+      "last_version": 10391,
+      "last_evidence_sequence": 10398,
+      "weighted_ls": [
+        {
+          "frame": 2399,
+          "native_control_error": 0.0225828010589,
+          "batch_control_error": 0.022582836282547262,
+          "normalized_design_condition": 100.56261133213246,
+          "rank": 28,
+          "fit_rmse": 0.0581137677895
+        },
+        {
+          "frame": 5400,
+          "native_control_error": 0.299078017473,
+          "batch_control_error": 0.2990795000261736,
+          "normalized_design_condition": 118.76753020228851,
+          "rank": 28,
+          "fit_rmse": 0.0559017307481
+        },
+        {
+          "frame": 10399,
+          "native_control_error": 0.877935707569,
+          "batch_control_error": 0.8779365324723646,
+          "normalized_design_condition": 193.5836542821923,
+          "rank": 28,
+          "fit_rmse": 0.0535512351367
+        }
+      ]
+    },
+    "4": {
+      "first_scored_second_rms": 0.11210177082393882,
+      "last_second_rms": 1.1249973536523759,
+      "request_consumed_max_error": 0.0,
+      "two_frame_response_max_error": 0.0,
+      "peak_command": 1.79047890783,
+      "limit_fraction": 0.0,
+      "first_version": 2392,
+      "last_version": 10391,
+      "last_evidence_sequence": 10398,
+      "weighted_ls": [
+        {
+          "frame": 2399,
+          "native_control_error": 0.022504741326,
+          "batch_control_error": 0.022504905093416305,
+          "normalized_design_condition": 109.88535637926341,
+          "rank": 38,
+          "fit_rmse": 0.0589855429497
+        },
+        {
+          "frame": 5400,
+          "native_control_error": 0.297572284937,
+          "batch_control_error": 0.2975726220412716,
+          "normalized_design_condition": 126.52983611810843,
+          "rank": 38,
+          "fit_rmse": 0.0563513723805
+        },
+        {
+          "frame": 10399,
+          "native_control_error": 0.876413762569,
+          "batch_control_error": 0.8764138036570764,
+          "normalized_design_condition": 204.9509728182187,
+          "rank": 38,
+          "fit_rmse": 0.053750694356
+        }
+      ]
+    }
+  },
+  "adaptive_100": {
+    "0": {
+      "first_scored_second_rms": 0.926214798844821,
+      "last_second_rms": 1.147047078663334,
+      "request_consumed_max_error": 0.0,
+      "two_frame_response_max_error": 0.0,
+      "peak_command": 0.0,
+      "limit_fraction": 0.0,
+      "first_version": 0,
+      "last_version": 0,
+      "last_evidence_sequence": 0
+    },
+    "3": {
+      "first_scored_second_rms": 0.11196724877514333,
+      "last_second_rms": 1.146573160236945,
+      "request_consumed_max_error": 0.0,
+      "two_frame_response_max_error": 0.0,
+      "peak_command": 1.78633732149,
+      "limit_fraction": 0.0,
+      "first_version": 2392,
+      "last_version": 10391,
+      "last_evidence_sequence": 10398,
+      "weighted_ls": [
+        {
+          "frame": 2399,
+          "native_control_error": 0.0225827544928,
+          "batch_control_error": 0.022582815701361194,
+          "normalized_design_condition": 100.56262144745199,
+          "rank": 28,
+          "fit_rmse": 0.0581137580471
+        },
+        {
+          "frame": 5400,
+          "native_control_error": 0.298876494169,
+          "batch_control_error": 0.29887758521940944,
+          "normalized_design_condition": 118.76293119672697,
+          "rank": 28,
+          "fit_rmse": 0.0558938248814
+        },
+        {
+          "frame": 10399,
+          "native_control_error": 0.876801848412,
+          "batch_control_error": 0.8768060442773986,
+          "normalized_design_condition": 184.2525828830094,
+          "rank": 28,
+          "fit_rmse": 0.0535312081464
+        }
+      ]
+    },
+    "4": {
+      "first_scored_second_rms": 0.10214673902915335,
+      "last_second_rms": 1.0132760885777001,
+      "request_consumed_max_error": 0.0,
+      "two_frame_response_max_error": 0.0,
+      "peak_command": 1.76735942788,
+      "limit_fraction": 0.0,
+      "first_version": 2392,
+      "last_version": 10391,
+      "last_evidence_sequence": 10398,
+      "weighted_ls": [
+        {
+          "frame": 2399,
+          "native_control_error": 0.0189491827041,
+          "batch_control_error": 0.01894896733724022,
+          "normalized_design_condition": 239.3591728141126,
+          "rank": 38,
+          "fit_rmse": 0.0506592505169
+        },
+        {
+          "frame": 5400,
+          "native_control_error": 0.233237713575,
+          "batch_control_error": 0.23323851072404977,
+          "normalized_design_condition": 277.52946611128436,
+          "rank": 38,
+          "fit_rmse": 0.0504129637188
+        },
+        {
+          "frame": 10399,
+          "native_control_error": 0.834447205067,
+          "batch_control_error": 0.834450770765361,
+          "normalized_design_condition": 339.75342937600215,
+          "rank": 38,
+          "fit_rmse": 0.0491329638667
+        }
+      ]
+    }
+  },
+  "calibrated_1": {
+    "0": {
+      "first_scored_second_rms": 0.9262147984339224,
+      "last_second_rms": 1.1470470786958455,
+      "request_consumed_max_error": 0.0,
+      "two_frame_response_max_error": 0.0,
+      "peak_command": 0.0,
+      "limit_fraction": 0.0,
+      "first_version": 0,
+      "last_version": 0,
+      "last_evidence_sequence": 0
+    },
+    "3": {
+      "first_scored_second_rms": 0.07255545559741236,
+      "last_second_rms": 0.0699731965151642,
+      "request_consumed_max_error": 0.0,
+      "two_frame_response_max_error": 0.0,
+      "peak_command": 2.64503731965,
+      "limit_fraction": 0.0,
+      "first_version": 2392,
+      "last_version": 2392,
+      "last_evidence_sequence": 10398
+    },
+    "4": {
+      "first_scored_second_rms": 0.07261336329835172,
+      "last_second_rms": 0.07111601617060065,
+      "request_consumed_max_error": 0.0,
+      "two_frame_response_max_error": 0.0,
+      "peak_command": 2.64625943053,
+      "limit_fraction": 0.0,
+      "first_version": 2392,
+      "last_version": 2392,
+      "last_evidence_sequence": 10398
+    }
+  },
+  "calibrated_100": {
+    "0": {
+      "first_scored_second_rms": 0.926214798844821,
+      "last_second_rms": 1.147047078663334,
+      "request_consumed_max_error": 0.0,
+      "two_frame_response_max_error": 0.0,
+      "peak_command": 0.0,
+      "limit_fraction": 0.0,
+      "first_version": 0,
+      "last_version": 0,
+      "last_evidence_sequence": 0
+    },
+    "3": {
+      "first_scored_second_rms": 0.07255515621851154,
+      "last_second_rms": 0.06965268913365501,
+      "request_consumed_max_error": 0.0,
+      "two_frame_response_max_error": 0.0,
+      "peak_command": 2.64503510462,
+      "limit_fraction": 0.0,
+      "first_version": 2392,
+      "last_version": 2392,
+      "last_evidence_sequence": 10398
+    },
+    "4": {
+      "first_scored_second_rms": 0.07915924374117408,
+      "last_second_rms": 0.0694799523884388,
+      "request_consumed_max_error": 0.0,
+      "two_frame_response_max_error": 0.0,
+      "peak_command": 2.65726800828,
+      "limit_fraction": 0.0,
+      "first_version": 2392,
+      "last_version": 2392,
+      "last_evidence_sequence": 10398
+    }
+  },
+  "independent_probe_control": {
+    "3": {
+      "2399": 0.022582754492759705,
+      "5400": 0.0845397487282753,
+      "10399": 0.10609503835439682
+    },
+    "4": {
+      "2399": 0.018949182704091072,
+      "5400": 0.06531185656785965,
+      "10399": 0.0869498923420906
+    }
+  },
+  "calibration_weight_after_8000_updates": 0.018293904772926296
+}

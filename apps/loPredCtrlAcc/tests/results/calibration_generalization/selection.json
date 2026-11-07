@@ -1,0 +1,18 @@
+{
+  "scores": {
+    "d1_h5_p001_standard": 0.0658969743410835,
+    "d1_h5_p001_assisted": 0.07840477566695969,
+    "d2_h5_p001_standard": 0.0579758260714009,
+    "d2_h5_p001_assisted": 0.060499986854375645,
+    "d4_h5_p001_standard": 0.057809451146612637,
+    "d4_h5_p001_assisted": 0.059676432248951757,
+    "d4_h3_p001_assisted": 0.059390313177866284,
+    "d4_h1_p001_assisted": 0.058932774758796796,
+    "d4_h5_p010_assisted": 0.059677163180877645
+  },
+  "choices": {
+    "standard": "d4_h5_p001_standard",
+    "existing_assisted": "d4_h5_p001_assisted",
+    "selected_assisted": "d4_h1_p001_assisted"
+  }
+}

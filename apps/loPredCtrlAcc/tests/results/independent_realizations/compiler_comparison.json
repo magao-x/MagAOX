@@ -1,0 +1,16 @@
+{
+  "source_bank_sha256": "55077bc4a2434f4c48a9fe0cbeadc27f7da331ac0849797194bd6aec28214a5e",
+  "metric_max_absolute_difference": {
+    "residual_rms": 0.0002796030236977415,
+    "prediction_h2_rms": 2.0901603565437465e-06,
+    "broadband_rms": 0.0003680486153843643,
+    "suppression_28_db": 0.01968148686404092,
+    "suppression_56_db": 0.09267902891029323
+  },
+  "max_availability_frame_count_difference": 11,
+  "calibration_payload_max_absolute_difference": {
+    "theta": 0.0001916252076625824,
+    "gain": 0.0001861192286014557
+  },
+  "max_paired_rms_improvement_difference_pp": 0.22553878612708722
+}

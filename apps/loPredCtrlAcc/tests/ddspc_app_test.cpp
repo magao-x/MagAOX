@@ -32,6 +32,9 @@ class loPredCtrlAcc_test : public loPredCtrlAcc
     /// Configure a small synthetic model without creating any native app resources.
     void configure( bool shadow /**< [in] Startup mode. */ );
 
+    /// Return the real loader result, including refusal by a shadow-only commissioning build.
+    int configureMode( bool shadow /**< [in] Requested startup mode. */ );
+
     /// Check that all output-owning helper entrypoints remained unused.
     void requireInhibited();
 
@@ -46,9 +49,17 @@ class loPredCtrlAcc_test : public loPredCtrlAcc
 
     /// Verify default compatibility mode retains its existing helper lifecycle dispatch.
     void requireLegacy();
+
+    /// Exercise invalid raw WFS and unsupported ADC inputs without output or fabricated training records.
+    void rejectRawInputs();
 };
 
 inline void loPredCtrlAcc_test::configure( bool shadow /**< [in] Startup mode. */ )
+{
+    REQUIRE( configureMode( shadow ) == 0 );
+}
+
+inline int loPredCtrlAcc_test::configureMode( bool shadow /**< [in] Requested startup mode. */ )
 {
     DdspcTestSemaphore::m_calls = 0;
     config.m_values             = { { "parameters.shadow", shadow ? "1" : "0" },
@@ -64,7 +75,7 @@ inline void loPredCtrlAcc_test::configure( bool shadow /**< [in] Startup mode. *
     if( !shadow )
         config.m_values.erase( "parameters.shadow" );
     setupConfig();
-    REQUIRE( loadConfigImpl( config ) == 0 );
+    return loadConfigImpl( config );
 }
 
 inline void loPredCtrlAcc_test::requireInhibited()
@@ -144,10 +155,85 @@ inline void loPredCtrlAcc_test::requireLegacy()
     REQUIRE( accelShmimMonitorT::m_starts == 1 );
     REQUIRE( m_isIntegrating );
 }
+
+inline void loPredCtrlAcc_test::rejectRawInputs()
+{
+    unverifiedWfs();
+    float residual[2] = { 1, 2 };
+    for( const auto fault : { 0, 1, 2, 3 } )
+    {
+        residual[0] = fault == 1 ? std::numeric_limits<float>::quiet_NaN() : 1;
+        residual[1] = fault == 2 ? std::numeric_limits<float>::infinity() : 2;
+        REQUIRE( processImage( fault == 3 ? nullptr : residual, dev::shmimT{} ) == 0 );
+        REQUIRE( m_shadowController->validity().m_wfsValid == ( fault == 0 ) );
+        for( auto mode : { DDSPC::ShadowMode::Standard, DDSPC::ShadowMode::AccelAssisted } )
+        {
+            const auto status = m_shadowController->status( mode );
+            REQUIRE_FALSE( status.m_ready );
+            REQUIRE_FALSE( status.m_predictionValid );
+            REQUIRE( status.m_updates == 0 );
+            REQUIRE( m_shadowController->proposal( mode ).size() == 0 );
+        }
+        float output[2] = { 37, 41 };
+        REQUIRE( loadImageIntoStream( output ) == -1 );
+        REQUIRE( output[0] == 37 );
+        REQUIRE( output[1] == 41 );
+    }
+    std::uint16_t counts[2]        = { 2048, 2049 };
+    accelShmimMonitorT::m_width    = 2;
+    accelShmimMonitorT::m_height   = 1;
+    accelShmimMonitorT::m_dataType = _DATATYPE_UINT16;
+    REQUIRE( allocate( accelShmimT{} ) == -1 );
+    REQUIRE( processImage( counts, accelShmimT{} ) == 0 ); // Ignored, never reinterpreted as FLOAT or certified.
+    REQUIRE_FALSE( m_shadowController->validity().m_accelValid );
+    requireInhibited();
+}
 } // namespace MagAOX::app
 
 namespace libXWCTest::loPredCtrlAccTest
 {
+/** \brief A commissioning binary refuses default/legacy execution before any helper can load or start. */
+TEST_CASE( "Shadow-only commissioning build rejects legacy mode", "[loPredCtrlAcc][app][shadow][handoff]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::loPredCtrlAcc::loadConfigImpl;
+    MagAOX::app::loPredCtrlAcc::appStartup;
+#endif
+    // clang-format on
+    MagAOX::app::loPredCtrlAcc_test refused;
+#ifdef DDSPC_SHADOW_ONLY
+    REQUIRE( refused.configureMode( false ) == -1 );
+    REQUIRE( refused.appStartup() == -1 );
+    refused.requireInhibited();
+#else
+    REQUIRE( refused.configureMode( false ) == 0 ); // Normal build keeps the original default.
+#endif
+    MagAOX::app::loPredCtrlAcc_test allowed;
+    allowed.configure( true );
+    REQUIRE( allowed.appStartup() == 0 );
+    allowed.requireInhibited();
+    REQUIRE( allowed.appShutdown() == 0 );
+}
+
+/** \brief Invalid raw inputs cannot train, produce valid proposals, touch output, or fake UINT16 ADC decoding. */
+TEST_CASE( "Shadow handoff keeps unverified and invalid native telemetry gated",
+           "[loPredCtrlAcc][app][shadow][handoff]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::loPredCtrlAcc::allocate;
+    MagAOX::app::loPredCtrlAcc::processImage;
+    MagAOX::app::loPredCtrlAcc::loadImageIntoStream;
+#endif
+    // clang-format on
+    MagAOX::app::loPredCtrlAcc_test app;
+    app.configure( true );
+    REQUIRE( app.appStartup() == 0 );
+    app.rejectRawInputs();
+    REQUIRE( app.appShutdown() == 0 );
+}
+
 namespace
 {
 /// Build a one-element INDI request retaining actual device/property identity.
@@ -309,7 +395,7 @@ TEST_CASE( "Application INDI selection and independent training remain shadow on
 /** \brief Startup defaults retain legacy lifecycle dispatch and cannot enable causal output through INDI.
  * \ingroup loPredCtrlAcc_unit_test
  */
-TEST_CASE( "Application legacy compatibility is the startup default", "[loPredCtrlAcc][app][shadow]" )
+TEST_CASE( "Application legacy compatibility is the startup default", "[loPredCtrlAcc][app][shadow][legacy]" )
 {
     // clang-format off
 #ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
@@ -467,6 +553,68 @@ TEST_CASE( "Application live input gates stay closed without application and exp
     REQUIRE( app.m_indiP_ddspcData["timing_valid"].get<double>() == 0 );
     REQUIRE( app.m_indiP_ddspcStandard["updates"].get<double>() == 0 );
     REQUIRE( app.m_indiP_ddspcAssisted["updates"].get<double>() == 0 );
+    app.requireInhibited();
+    REQUIRE( app.appShutdown() == 0 );
+}
+/** \brief The supplied profile trains finite two-channel QR shadow models on explicit synthetic records without output.
+ */
+TEST_CASE( "Handoff operational dimensions train finite shadow-only proposals offline",
+           "[loPredCtrlAcc][app][shadow][handoff]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::loPredCtrlAcc::configureShadow;
+    MagAOX::app::loPredCtrlAcc::processShadowRecord;
+#endif
+    // clang-format on
+    MagAOX::app::loPredCtrlAcc_test app;
+    app.configure( true );
+    for( auto entry : { std::make_pair( "parameters.history", "15" ),
+                        { "parameters.future", "3" },
+                        { "parameters.num_modes", "2" },
+                        { "parameters.accel_channels", "2" },
+                        { "parameters.accel_history", "5" },
+                        { "parameters.gain", "0.3" },
+                        { "parameters.copy_gain", "1.0" },
+                        { "parameters.legacy_copy_gain_compat", "0" },
+                        { "parameters.regularization", "100" },
+                        { "parameters.gamma", "1" },
+                        { "parameters.covariance", "1e-5" },
+                        { "parameters.qrd", "1" } } )
+        app.config.m_values[entry.first] = entry.second;
+    REQUIRE( app.loadConfigImpl( app.config ) == 0 );
+    REQUIRE( app.appStartup() == 0 );
+    auto training = app.m_indiP_ddspcTrain;
+    training["standard"].setSwitchState( pcf::IndiElement::On );
+    training["accel_assisted"].setSwitchState( pcf::IndiElement::On );
+    REQUIRE( app.newCallBack_m_indiP_ddspcTrain( training ) == 0 );
+    for( std::uint64_t i = 0; i < 240; ++i )
+    {
+        auto record = synthetic_app_record( i );
+        record.m_acceleration.resize( 2, 1 );
+        std::mt19937 random( 5109 + i );
+        for( int channel = 0; channel < 2; ++channel )
+            record.m_acceleration( channel ) = float( int( random() % 2001 ) - 1000 ) / 1000;
+        REQUIRE( app.processShadowRecord( record ) ); // Explicitly synthetic, not a raw/native telemetry adapter.
+        for( auto mode : { DDSPC::ShadowMode::Standard, DDSPC::ShadowMode::AccelAssisted } )
+            if( app.m_shadowController->status( mode ).m_ready )
+            {
+                const auto proposal = app.m_shadowController->proposal( mode );
+                const auto theta    = app.m_shadowController->prediction_matrix( mode );
+                const auto states   = theta.cols() - 6;
+                REQUIRE( proposal.allFinite() );
+                // ||(C^TC+lambda I)^-1 C^T||_2 <= 1/(2 sqrt(lambda)); every synthetic state entry is <=1.
+                const auto bound = .05f * theta.leftCols( states ).norm() * std::sqrt( float( states ) );
+                REQUIRE( proposal.norm() <= bound + 1e-5f );
+            }
+    }
+    for( auto mode : { DDSPC::ShadowMode::Standard, DDSPC::ShadowMode::AccelAssisted } )
+    {
+        const auto status = app.m_shadowController->status( mode );
+        REQUIRE( status.m_ready );
+        REQUIRE( status.m_trainingEnabled );
+        REQUIRE( status.m_features == ( mode == DDSPC::ShadowMode::Standard ? 64 : 74 ) );
+    }
     app.requireInhibited();
     REQUIRE( app.appShutdown() == 0 );
 }

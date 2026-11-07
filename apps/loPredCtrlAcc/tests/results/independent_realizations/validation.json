@@ -1,0 +1,53 @@
+{
+  "experiment_checks": {
+    "clang": {
+      "all_source_hashes_current": true,
+      "rows": 64,
+      "paired_rows": 32,
+      "independent_trials_per_amplitude": 8,
+      "all_calibration_ranks_full": true,
+      "all_fits_7992_updates": true,
+      "command_saturation_frames": 0,
+      "min_prediction_availability": 0.976625,
+      "max_prediction_availability": 0.99375,
+      "peak_command": 3.700761142484246
+    },
+    "gcc": {
+      "all_source_hashes_current": true,
+      "rows": 64,
+      "paired_rows": 32,
+      "independent_trials_per_amplitude": 8,
+      "all_calibration_ranks_full": true,
+      "all_fits_7992_updates": true,
+      "command_saturation_frames": 0,
+      "min_prediction_availability": 0.97725,
+      "max_prediction_availability": 0.9935,
+      "peak_command": 3.700747950115238
+    }
+  },
+  "tests": {
+    "independent-tests-clang.log": {
+      "result": "Ran 26 tests",
+      "sha256": "ceb8b7e511ba5125b94d176f93d40a4fe54602fc2046dad14d0784d3e30c9248"
+    },
+    "independent-tests-gcc.log": {
+      "result": "Ran 26 tests",
+      "sha256": "4b47d547a6efca81b6104119e397fb1b63eb5fdb2db03a4b91b5398518d8d1d5"
+    },
+    "independent-strict-clang.log": {
+      "result": "1765594 assertions in 66 test cases",
+      "sha256": "e2c40a9c60df42a964e44e6c20fb1499a165a68d9b7c8a2df1369fcc5ba52241"
+    },
+    "independent-strict-gcc.log": {
+      "result": "1764671 assertions in 66 test cases",
+      "sha256": "8d6783dd402871bcef4231da02d56121410304f17473c3a6f7b8f96c6d782277"
+    }
+  },
+  "source_realizations_distinct": true,
+  "matched_source_bank": true,
+  "protected_plan_prefix_unchanged": true,
+  "production_sources_unchanged": true,
+  "native_runtime_executed": false,
+  "sanitizers_rerun": false,
+  "test_source_sha256": "fc494d6c604453774a76a1c2c8a37e8d4c06d706aca632e12a456a4ea493fae4"
+}

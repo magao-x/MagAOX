@@ -84,9 +84,14 @@ class NativeBuildTest(unittest.TestCase):
         for profile, flag in (("legacy", "-ffast-math"), ("shadow", "-fno-fast-math")):
             result = manifest["profiles"][profile]
             self.assertTrue(result["linked"])
+            self.assertIn("CXXSTD=-std=c++20", result["make_variables"])
             self.assertIn("OPTIMIZE=" + flag, result["make_variables"])
             self.assertEqual((self.output / profile / "sample.cpp").read_text(), "original source\n")
         self.assertTrue(any("DDSPC_SHADOW_BUILD=yes" in command for command in self.commands))
+        app_commands = [command for command in self.commands if "apps/loPredCtrlAcc" in command]
+        self.assertEqual(sum("DDSPC_SHADOW_ONLY=yes" in command for command in app_commands), 1)
+        self.assertTrue(manifest["profiles"]["shadow"]["shadow_only"])
+        self.assertFalse(manifest["profiles"]["legacy"]["shadow_only"])
 
     def test_failure_does_not_skip_other_profile(self):
         """A failed Legacy build must remain failed while the independent shadow attempt still runs."""
@@ -98,6 +103,26 @@ class NativeBuildTest(unittest.TestCase):
         self.assertFalse(manifest["profiles"]["legacy"]["linked"])
         self.assertEqual(manifest["profiles"]["legacy"]["status"], "failed")
         self.assertTrue(manifest["profiles"]["shadow"]["linked"])
+
+    def test_shadow_only_make_guard_survives_explicit_compiler_flags(self):
+        """Evaluate the real app Makefile with a harmless include stub, never invoking a compiler/native target."""
+        root = self.base / "make-fixture"
+        app = root / "apps/loPredCtrlAcc"
+        app.mkdir(parents=True)
+        (root / "Make").mkdir()
+        actual = Path(__file__).resolve().parents[1] / "Makefile"
+        (app / "Makefile").write_bytes(actual.read_bytes())
+        (root / "Make/magAOXApp.mk").write_text(
+            ".PHONY: probe\nprobe:\n\t@printf '%s\\n' '$(CXXFLAGS)' '$(OPTIMIZE)'\n")
+        for mode in ("no", "yes"):
+            result = subprocess.run(["make", "--no-print-directory", "-s", "-C", str(app),
+                                     "CXXFLAGS=-O0", "DDSPC_SHADOW_ONLY="+mode, "probe"],
+                                    check=True, capture_output=True, text=True)
+            flags, optimization = result.stdout.splitlines()
+            self.assertEqual("-DDDSPC_SHADOW_ONLY" in flags, mode == "yes")
+            self.assertIn("-O0", flags)
+            if mode == "yes":
+                self.assertEqual(optimization, "-fno-fast-math")
 
     def test_successful_make_without_binary_is_failure(self):
         """A masked make failure or missing link artifact must never produce a successful manifest."""
