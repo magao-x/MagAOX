@@ -25,14 +25,14 @@ All three received INDI conditions must hold:
 - `<dm.device>.fsm.state` is exactly `OPERATING`.
 - `<loop.device>.loop_state.toggle` is `On`.
 
-Unknown, malformed, negative or expired observations disable collection. The
-monitor requests current properties every `state.pollSec` (default 1 second),
-and expires each response after `state.timeoutSec` (default 5 seconds). INDI
-does not provide this app with direct source-deletion/disconnection callbacks,
-so disconnect detection is bounded by this receipt-age timeout and application
-logic cadence. An off/on transition invalidates queued observations even when
-it occurs between polling scans. Reopening collection establishes fresh stream
-baselines and starts an empty statistics window.
+The monitor uses INDI publish/subscribe with no application-level property
+polling or state-age expiry. Each condition is initially unknown; unknown,
+malformed or negative observations disable collection. A received affirmative
+state remains valid until a later update changes it. INDI silence alone does
+not change the gate. An off/on transition invalidates queued observations even
+when it occurs between stream polling scans. Reopening collection establishes
+fresh stream baselines and starts an empty statistics window. Camera/SDK
+timestamp freshness checks and statistics-window expiry remain in effect.
 
 `monitor.maxFPS` defaults to **3600 Hz**. Its reciprocal is a strict maximum
 latency, approximately **277.778 us** at the default. Actual adjacent camera
@@ -116,7 +116,9 @@ telemetry. Do not sum overlapping rolling windows as independent samples.
 | `monitor.clockMaxAgeMs` | 100 | Largest mapped camera timestamp age |
 | `camera.quantizationUs` | 1 | Additional camera truncation uncertainty |
 | `monitor.threadPrio` / `monitor.cpuset` | 0 / empty | Optional worker scheduling/placement |
-| `state.pollSec` / `state.timeoutSec` | 1 / 5 | Refresh cadence and maximum state receipt age |
+
+The former `state.pollSec` and `state.timeoutSec` settings have been removed;
+remove the old `[state]` section when updating an existing instance.
 
 Increase capacity for higher configured rates, longer windows or slow application
 logic; loss remains explicitly counted rather than silently downsampling.
