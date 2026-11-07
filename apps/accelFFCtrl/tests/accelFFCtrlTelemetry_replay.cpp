@@ -1,9 +1,10 @@
 /** \file accelFFCtrlTelemetry_replay.cpp
- * \brief File-only recorded-ADC replay through production input validation, prediction and offline shadow proposals.
+ * \brief File-only ADC replay with unchanged estimation, optional earlier-fit phase calibration and shadow proposals.
  * \ingroup accelFFCtrl_files
  */
 #include "../accelFFCtrlInput.hpp"
 #include "../offline/accelFFCtrlShadow.hpp"
+#include "accelFFCtrlPhase_test.hpp"
 
 #include <fstream>
 #include <iomanip>
@@ -13,6 +14,8 @@
 
 using namespace MagAOX::app::accelFFCtrlDetail;
 using namespace MagAOX::app::accelFFCtrlOffline;
+using libXWCTest::accelFFCtrlTest::calibrated;
+using libXWCTest::accelFFCtrlTest::phaseCalibration;
 
 /// \cond ACCELFFCTRL_TELEMETRY_FIXTURE
 namespace
@@ -69,16 +72,18 @@ timespec stamp( int64_t ns /**< [in] common-domain ns */ )
 {
     return { time_t( ns / 1000000000 ), long( ns % 1000000000 ) };
 }
+
 } // namespace
 /// \endcond
 
 /// Replay only files: parameters, ADC rows, query times, and the output diagnostic CSV.
-int main( int argc /**< [in] argument count */, char **argv /**< [in] params.txt adc.csv queries.csv proposals.csv */ )
+int main( int    argc /**< [in] argument count */,
+          char **argv /**< [in] params.txt adc.csv queries.csv proposals.csv [phase-calibration.txt] */ )
 try
 {
-    if( argc != 5 )
+    if( argc != 5 && argc != 6 )
         throw std::invalid_argument(
-            "usage: accelFFCtrlTelemetry_replay params.txt adc.csv queries.csv proposals.csv" );
+            "usage: accelFFCtrlTelemetry_replay params.txt adc.csv queries.csv proposals.csv [phase-calibration.txt]" );
     std::ifstream        settings( argv[1] ), data( argv[2] ), queries( argv[3] );
     std::ofstream        output( argv[4] );
     parameters           config;
@@ -108,6 +113,37 @@ try
             throw std::invalid_argument( "missing replay frequency" );
         config.m_frequency = frequency;
         inputs.emplace_back( std::make_unique<inputProcessor>( config, 256, 1000000, false ) );
+    }
+    std::vector<phaseCalibration> calibration;
+    if( argc == 6 )
+    {
+        // This optional file mode is expressly count-normalized, never an SI or physical DM calibration.
+        if( bands != 2 || config.m_zero != std::array<double, 2>{ 0, 0 } ||
+            config.m_voltsPerBit != std::array<double, 2>{ 1, 1 } ||
+            config.m_sensitivity != std::array<double, 2>{ 1, 1 } || config.m_leverArm != 1 ||
+            config.m_rotationDegrees != 0 )
+            throw std::invalid_argument( "phase calibration requires the declared count-normalized basis" );
+        std::ifstream phaseFile( argv[5] );
+        std::string   version;
+        int64_t       horizon;
+        if( !( phaseFile >> version >> horizon ) || version != "accelFFCtrl-count-phase-v1" ||
+            horizon != config.m_predictionNs )
+            throw std::invalid_argument( "invalid phase calibration basis/horizon" );
+        calibration.resize( bands );
+        for( size_t band = 0; band < bands; ++band )
+        {
+            double frequency;
+            phaseFile >> frequency >> calibration[band].m_axis;
+            for( size_t row = 0; row < 2; ++row )
+                for( size_t col = 0; col < 2; ++col )
+                    phaseFile >> calibration[band].m_weights( row, col );
+            if( !phaseFile || frequency != frequencies[band] || calibration[band].m_axis != band ||
+                !calibration[band].m_weights.allFinite() )
+                throw std::invalid_argument( "invalid phase calibration frequency/axis/weights" );
+        }
+        std::string extra;
+        if( phaseFile >> extra )
+            throw std::invalid_argument( "extra phase calibration field" );
     }
     std::unique_ptr<dmResponse> plant;
     int64_t                     plantPeriod = 0, delay = 0;
@@ -147,6 +183,7 @@ try
     int64_t                 lastQuery = -1, lastReceipt = -1;
     int64_t                 now;
     std::vector<prediction> predictions( bands );
+    std::vector<prediction> mappedPredictions( bands );
     while( queries >> now )
     {
         if( now < 0 || now <= lastQuery || ( plant && lastQuery >= 0 && now - lastQuery != plantPeriod ) )
@@ -182,7 +219,10 @@ try
             inputs[band]->predict( now );
             predictions[band] = inputs[band]->diagnostics().m_prediction;
         }
-        const auto record = shadow.propose( predictions, now );
+        if( !calibration.empty() )
+            for( size_t band = 0; band < bands; ++band )
+                mappedPredictions[band] = calibrated( predictions[band], frequencies[band], calibration[band] );
+        const auto record = shadow.propose( calibration.empty() ? predictions : mappedPredictions, now );
         const auto effect = plant ? plant->step( record.m_proposal.m_modal ) : std::array<double, 2>{};
         output << now << ',' << record.m_sampleNs << ',' << record.m_requestedTargetNs << ',' << record.m_sourceCounter
                << ',' << record.m_sourceGeneration << ',' << record.m_epoch << ',' << record.m_validPrediction << ','

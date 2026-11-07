@@ -16,6 +16,8 @@ NATIVE := $(BUILD_DIR)/accelFFCtrlStream_test
 CANCELLATION := $(BUILD_DIR)/accelFFCtrlCancellation_export
 AO := $(BUILD_DIR)/accelFFCtrlAO_export
 TELEMETRY := $(BUILD_DIR)/accelFFCtrlTelemetry_replay
+RESPONSE := $(BUILD_DIR)/accelFFCtrlResponse_replay
+CLOSED_LOOP := $(BUILD_DIR)/accelFFCtrlClosedLoop_export
 ISIO_CFLAGS ?= $(shell pkg-config --cflags ImageStreamIO)
 ISIO_LIBS ?= $(shell pkg-config --libs ImageStreamIO)
 
@@ -23,7 +25,7 @@ PYTHON ?= python3
 VALIDATION_DIR ?= /tmp/accelFFCtrl-validation
 VALIDATION_SECONDS ?= 60
 
-.PHONY: all test benchmark native-test native-rate-test validation validation-test gap-validation cancellation-validation shadow-tools telemetry-tools telemetry-test
+.PHONY: all test benchmark native-test native-rate-test validation validation-test gap-validation cancellation-validation shadow-tools telemetry-tools telemetry-test response-tools closed-loop-tools
 all: $(TEST) $(BENCHMARK) $(INPUT_BENCHMARK)
 
 $(BUILD_DIR):
@@ -51,7 +53,7 @@ validation: $(TEST) validation-test
 	MPLCONFIGDIR='$(VALIDATION_DIR)/.matplotlib' $(PYTHON) validate_predictions.py '$(VALIDATION_DIR)'
 
 validation-test:
-	$(PYTHON) -m unittest -v test_validate_predictions.py test_validate_gaps.py test_analyze_timestamps.py test_validate_cancellation.py test_validate_shadow.py test_qualify_telemetry.py
+	$(PYTHON) -m unittest -v test_validate_predictions.py test_validate_gaps.py test_analyze_timestamps.py test_validate_cancellation.py test_validate_shadow.py test_qualify_telemetry.py test_inspect_reduced_telemetry.py test_analyze_timed_telemetry.py test_validate_real_harmonic.py test_validate_phase_calibration.py test_validate_recorded_response.py test_validate_closed_loop.py
 
 gap-validation: $(TEST) validation-test
 	ACCELFFCTRL_VALIDATION_DIR='$(VALIDATION_DIR)' $(TEST) '[accelFFCtrl-jitter]'
@@ -70,10 +72,20 @@ $(AO): accelFFCtrlAO_export.cpp accelFFCtrlAO_test.hpp accelFFCtrlCancellation_t
 
 shadow-tools: $(AO) $(CANCELLATION)
 
-$(TELEMETRY): accelFFCtrlTelemetry_replay.cpp ../offline/accelFFCtrlShadow.hpp ../offline/accelFFCtrlCancellation.hpp $(INPUT) $(MODEL) | $(BUILD_DIR)
+$(TELEMETRY): accelFFCtrlTelemetry_replay.cpp accelFFCtrlPhase_test.hpp ../offline/accelFFCtrlShadow.hpp ../offline/accelFFCtrlCancellation.hpp $(INPUT) $(MODEL) | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $< $(LDFLAGS) -o $@
 
 telemetry-tools: $(TELEMETRY)
+
+$(RESPONSE): accelFFCtrlResponse_replay.cpp ../offline/accelFFCtrlShadow.hpp ../offline/accelFFCtrlCancellation.hpp $(MODEL) | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $< $(LDFLAGS) -o $@
+
+response-tools: $(RESPONSE)
+
+$(CLOSED_LOOP): accelFFCtrlClosedLoop_export.cpp accelFFCtrlAO_test.hpp accelFFCtrlPhase_test.hpp accelFFCtrlCancellation_test.hpp ../offline/accelFFCtrlShadow.hpp ../offline/accelFFCtrlCancellation.hpp $(MODEL) ../../accelSim/accelSimModel.hpp | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $< $(LDFLAGS) -o $@
+
+closed-loop-tools: $(CLOSED_LOOP)
 
 telemetry-test: $(TELEMETRY)
 	ACCELFFCTRL_TELEMETRY_REPLAY='$(abspath $(TELEMETRY))' $(PYTHON) -m unittest -v test_qualify_telemetry.py

@@ -225,7 +225,7 @@ def synthetic_fixture(directory, seconds=60):
 
 
 def replay(executable, manifest, acc, origin, output, horizon):
-    """Run the actual C++ inputProcessor/shadow path with only acquisitions received by each query."""
+    """Replay only available acquisitions; an optional earlier-fit quadrature map stays inside the file-only C++ tool."""
     root = Path(output); root.mkdir(parents=True, exist_ok=True)
     relative = acc.copy()
     for field in ("acquired_ns", "written_ns", "receipt_ns"):
@@ -255,7 +255,18 @@ def replay(executable, manifest, acc, origin, output, horizon):
         values += [plant["period_ns"], plant["delay_ns"], plant["bandwidth_hz"], *np.asarray(plant["mapping"]).ravel()]
     params = root/f"parameters_{horizon}.txt"; params.write_text(" ".join(map(str, values))+"\n")
     path = root/f"predictions_{horizon}.csv"
-    subprocess.run([str(executable), str(params), str(root/"normalized_adc.csv"), str(root/"queries.csv"), str(path)], check=True)
+    command = [str(executable), str(params), str(root / "normalized_adc.csv"), str(root / "queries.csv"), str(path)]
+    if "phase_calibration" in manifest:
+        coefficients = np.asarray(manifest["phase_calibration"], dtype=float)
+        if coefficients.shape != (4, 2) or not np.all(np.isfinite(coefficients)) or len(e["frequencies_hz"]) != 2:
+            raise ValueError("expected finite paired-band 4x2 phase calibration")
+        phase = root / "phase-calibration.txt"
+        lines = ["accelFFCtrl-count-phase-v1", str(horizon)]
+        for band, frequency in enumerate(e["frequencies_hz"]):
+            lines.append(" ".join(map(str, [frequency, band, *coefficients[2 * band : 2 * band + 2].T.ravel()])))
+        phase.write_text("\n".join(lines) + "\n")
+        command.append(str(phase))
+    subprocess.run(command, check=True)
     d = pd.read_csv(path, dtype={k: "int64" for k in ("query_ns", "sample_ns", "target_ns")})
     valid = d.valid.to_numpy().astype(bool)
     if not np.all(np.isfinite(d.to_numpy())) or not np.all(d.valid.isin([0, 1])):

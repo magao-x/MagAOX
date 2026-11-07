@@ -1370,3 +1370,190 @@ exposure provenance, current WFS/DM registration/sign and measured response rema
 blockers. No production source/configuration, default gap policy or depth-one
 operation changed. The report gives all assumptions, quantitative tables and
 reproduction requirements.
+
+## Phase 13: real April 2025 telemetry inspection
+
+The [Phase 13 report](offline/PHASE13_INSPECTION.md) documents the real local
+75-file, eight-channel ADC and 251-file WFS tip/tilt dataset. All array/manifest
+counts and shapes match; original data remain unchanged. Filename/chunk spacing
+suggests roughly 2 kHz recorded-frame density, not verified 8-kHz acquisition.
+Channels 0–2 carry most raw ADC variation. Conditional 2-kHz spectra show features
+near 28–29 and 56 Hz in those channels and WFS tip/tilt.
+
+Per-frame acquisition/write times and counters were omitted by the reduction.
+No synchronized phase, coherence, physical calibration or prediction score is
+claimed. The report identifies the first-saved-acquisition-field naming convention,
+its provenance/fallback limitations, and exact original-XRIF timing export steps
+for an authorized human. `tests/inspect_reduced_telemetry.py` provides reproducible
+read-only inventory and sample-domain PSDs without generating frame timestamps.
+Production code/configuration and controller defaults are unchanged.
+
+### Original-timestamp continuation
+
+The recovered timing arrays now validate every archive start and provide a
+301.450678596-s recorded-time overlap. The [timed Phase 13 report](offline/PHASE13_TIMED_ANALYSIS.md)
+describes acquisition-clock alignment, timestamp jitter, PSD/coherence/phase and
+chronological WFS-only versus accelerometer-assisted prediction. The short ADC
+median interval (0.491948 ms) coexists with a 0.500000055-ms mean because longer
+intervals compensate shorter ones; the data's acquisition-field rate remains 2 kHz.
+
+At two WFS frames ahead (about 1 ms), the later held-out interval shows **2.15% tip
+and 3.94% tilt RMS-error improvement** from adding ADC channels 0–2 to a simple
+WFS-history ridge predictor. Coherence is strongest for channels 0/2 near 28.75 Hz
+and channel 1 near 55.75 Hz. These are conditional recorded-clock results, not
+physical exposure-center phase calibration, measured DM suppression or validation
+of the production harmonic pointing estimator. The report also retains the
+28-Hz case where short-horizon persistence beats the broadband-loss predictor.
+
+```bash
+OPENBLAS_NUM_THREADS=1 MPLCONFIGDIR=/tmp/accelFFCtrl-phase13-timed-mpl \
+  python apps/accelFFCtrl/tests/analyze_timed_telemetry.py \
+  "$HOME/data/phase13_20250415_083000_083500" --output /tmp/accelFFCtrl-phase13-timed
+```
+
+No original input, controller, configuration or default gap/observation behavior
+is changed. Clock/exposure/availability semantics and physical calibration still
+require independent evidence before interpreting absolute phase or real-time lead.
+
+### Existing harmonic-controller replay
+
+The [real harmonic replay report](offline/REAL_HARMONIC_REPLAY.md) now evaluates
+the unchanged C++ `inputProcessor`, `harmonicEstimator` and file-only shadow path
+on original ADC0/1 acquisition records. It compares direct, swapped and full real
+coordinate maps using earlier training/validation only, at fixed query + **1 ms**
+targets. ADC counts and WFS units are not assigned invented physical calibration.
+
+On 299,980 later queries, WFS-only RMS error is **0.009927/0.011913** and the
+Phase 13 three-channel regression is **0.009713/0.011441** (tip/tilt, recorded
+modal units). The current shared-map harmonic path gives **0.013934/0.018263**,
+with essentially **0 dB** band-error reduction at 28–29 and 56 Hz. Readiness is
+100%, with no dropped frames or additional resets. An explicitly separate
+diagnostic using existing causal quadratures and earlier-fitted phase calibration
+gives 8.22/6.79 dB and 1.86/4.55 dB band-error reductions. That diagnostic is not
+the current correction map and does not generate proposals.
+
+The first demonstrated blocker to useful simulation-level cancellation is
+frequency-dependent sensor-to-WFS phase calibration. Normalized shadow proposals
+pass sign, exact target-time, zero-gain, invalid-inhibition and numerical-bound
+checks, but are not physically calibrated DM commands. Default gain remains
+zero; a separate gain-one manifest is labeled counterfactual. Clock comparability,
+zero availability latency and zero WFS exposure-center offset are assumptions,
+not measurements. Production controller and configuration defaults are unchanged.
+
+```bash
+make -C apps/accelFFCtrl/tests BUILD_DIR=/tmp/accelFFCtrl-harmonic-real telemetry-tools
+OPENBLAS_NUM_THREADS=1 MPLCONFIGDIR=/tmp/accelFFCtrl-harmonic-real-mpl \
+  python apps/accelFFCtrl/tests/validate_real_harmonic.py \
+  "$HOME/data/phase13_20250415_083000_083500" \
+  --replay /tmp/accelFFCtrl-harmonic-real/accelFFCtrlTelemetry_replay \
+  --output /tmp/accelFFCtrl-harmonic-real-study
+```
+
+The report lists figures, CSVs, all assumptions, remaining physical calibration
+gates and regression/sanitizer commands. No telescope or DM stream is accessed.
+
+### Frequency-dependent phase calibration (offline only)
+
+The [phase-calibrated replay report](offline/PHASE_CALIBRATED_REPLAY.md) implements
+the next minimal calibration: eight earlier-fit cosine/sine coefficients applied
+to existing harmonic predictions, independently at 28.6511 and 55.8186 Hz. ADC0/1
+are the exclusive sensor inputs. The numerical estimator and production app are
+unchanged; an optional file-only replay argument transforms output coordinates
+before the existing shadow safeguards.
+
+With the initial 120 seconds frozen for calibration and the later 150 seconds
+held out, calibrated RMS is **0.013174/0.017298**, a **5.46%/5.29%** improvement
+over the original real map. Band-error reductions are **8.20/6.79 dB at 28 Hz**
+and **1.86/4.55 dB at 56 Hz** (tip/tilt). All later portions and three forward-only
+splits improve, although 56-Hz tip suppression remains modest. The WFS-history
+baselines remain better at broadband prediction. Default gain is zero; the
+separately labeled gain-one normalized proposals pass sign, bounds, inhibition
+and exact 1-ms timing checks. No physical DM calibration is claimed.
+
+```bash
+make -C apps/accelFFCtrl/tests BUILD_DIR=/tmp/accelFFCtrl-phase13-phase telemetry-tools
+OPENBLAS_NUM_THREADS=1 MPLCONFIGDIR=/tmp/accelFFCtrl-phase13-phase-mpl \
+  python apps/accelFFCtrl/tests/validate_phase_calibration.py \
+  "$HOME/data/phase13_20250415_083000_083500" \
+  --replay /tmp/accelFFCtrl-phase13-phase/accelFFCtrlTelemetry_replay \
+  --output /tmp/accelFFCtrl-phase13-phase-study
+```
+
+This supports normalized synthetic-response correction testing. Clock/exposure/
+availability semantics, physical units, WFS-to-DM mapping/sign, AO interaction and
+native Linux qualification remain separate gates. The report identifies the
+minimum optional per-band production support; none is enabled or implemented in
+the live application. Full checks pass 49 controller Python plus four simulator
+PSD tests, including the controller Python suite against the sanitized replay,
+and 67 numerical/mock C++ sanitizer cases.
+
+### Recorded predictions through a simulated DM response
+
+The [recorded-response report](offline/RECORDED_DM_RESPONSE.md) applies the frozen
+ADC0/1 phase calibration through the existing bounded shadow proposer and
+`dmResponse`, using verified `aoSim` conventions: absolute contributions,
+positive WFS addition and `lag+1` delay steps. Gain 1 is selected from 0/0.5/1
+on training data only. At approximately 1-ms delay, harmonic correction reduces
+held-out broadband RMS by **5.45%/5.32%**, with **8.20/6.79 dB at 28 Hz** and
+**1.86/4.55 dB at 56 Hz**. WFS-only and regression-assisted corrections are better
+in this additive comparison.
+
+Total outside-band WFS power rises **0.80%/1.04%**, and some neighboring bands
+amplify more: the weak 20–27-Hz tip band rises from RMS 0.000496 to 0.000878.
+This is useful normalized simulation, not noise-neutral or physical feedback
+qualification. The recorded AO loop does not react to added commands. The report
+includes timing/sign/bandwidth sensitivity, local power changes and remaining
+requirements for real integration. No production behavior is changed.
+
+```bash
+make -C apps/accelFFCtrl/tests BUILD_DIR=/tmp/accelFFCtrl-recorded-response \
+  telemetry-tools response-tools
+OPENBLAS_NUM_THREADS=1 MPLCONFIGDIR=/tmp/accelFFCtrl-recorded-response-mpl \
+  python apps/accelFFCtrl/tests/validate_recorded_response.py \
+  "$HOME/data/phase13_20250415_083000_083500" \
+  --replay /tmp/accelFFCtrl-recorded-response/accelFFCtrlTelemetry_replay \
+  --response /tmp/accelFFCtrl-recorded-response/accelFFCtrlResponse_replay \
+  --output /tmp/accelFFCtrl-recorded-response-study
+```
+
+This runs only numerical file tools. Full checks pass 55 controller Python plus
+four simulator PSD tests, the controller suite with sanitized file tools, and
+67 existing C++ numerical/mock sanitizer cases. `aoSim` numerical-method parity
+uses host-memory fixtures without importing its application or stream APIs.
+
+### Genuine numerical feedback validation
+
+The [closed-loop report](offline/CLOSED_LOOP_VALIDATION.md) connects actual
+`accelSim` UINT16 generation, the unchanged harmonic estimator and shared phase
+calibration, existing shadow correction, the existing synthetic AO integrator,
+and the verified two-frame DM delay. Subsequent WFS measurements include previous
+corrections and drive subsequent AO commands. No new controller is introduced.
+
+The current paired calibration **does not consistently qualify** on independent
+simulated X/Y axes. Across three seeds in dual-mode and 214-mode simulations,
+28-Hz tip improves 6.57–16.79 dB relative to WFS-only feedback, but 56-Hz tip
+worsens in every run. Tilt RMS worsens in three runs (up to 11.91%), and
+outside-band power increases. No gains/topology were changed to obtain a pass.
+Simulation-specific coefficients are fitted only before 20 s; real telemetry
+coefficients cannot be transferred directly to the simulator's physical units.
+
+The feedback/disable checks pass: direct FF clears after two frames, and the
+continuing AO state recovers to WFS-only within 61.5–69 ms without a reset.
+The G=0.8 stress case is linearly unstable despite command bounds. The report
+distinguishes nominal stability, saturation, amplification and partial suppression.
+
+```bash
+make -C apps/accelFFCtrl/tests BUILD_DIR=/tmp/accelFFCtrl-closed-loop \
+  closed-loop-tools telemetry-tools response-tools
+OPENBLAS_NUM_THREADS=1 MPLCONFIGDIR=/tmp/accelFFCtrl-closed-loop-mpl \
+  python apps/accelFFCtrl/tests/validate_closed_loop.py \
+  --executable /tmp/accelFFCtrl-closed-loop/accelFFCtrlClosedLoop_export \
+  --output /tmp/accelFFCtrl-closed-loop-study --seconds 60
+```
+
+All 61 controller Python plus four simulator PSD tests pass, including the
+controller suite with sanitized file tools, and 67 existing C++ numerical/mock
+sanitizer cases. Production behavior, instrument streams and configurations are
+unchanged. The next calibration investigation needs to address both independent
+sensor axes at each carrier and neighboring-band amplification before real DM
+integration is considered.

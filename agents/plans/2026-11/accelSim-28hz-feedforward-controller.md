@@ -3651,3 +3651,692 @@ Changed files: new `tests/qualify_telemetry.py`, `test_qualify_telemetry.py`,
 its test `Makefile`, `offline/INTEGRATION.md`, both application READMEs and this
 plan. Production sources/configuration, existing models, archived calibration
 inputs and the separate DDSPC worktree are untouched.
+
+## Phase 13: real April 15, 2025 telemetry inspection (2026-11-06)
+
+### Scope and evidence
+
+Starting revision `79d927f4` was clean on `parkertjohnson1/accelSim`. The user
+supplied the real telescope reduction at
+`~/data/phase13_20250415_083000_083500/`. This supersedes Phase 12's absence of
+local real data, without changing its historical results. This phase inspects
+structure, archive labels and sample-domain auto-spectra only. No physical
+cross-sensor phase/coherence, transfer or prediction-performance claim is made.
+No instrument connection, application launch, production source/configuration
+change, native stream, DM command, deployment or git publication was used.
+
+The concise findings and exact original-timing export procedure are in
+[PHASE13_INSPECTION.md](../../../apps/accelFFCtrl/offline/PHASE13_INSPECTION.md).
+Every one of the **329 original files** has unchanged before/after SHA-256.
+Metadata/manifests are read-only inputs; all diagnostics stay under
+`/tmp/accelFFCtrl-phase13`. No data/timing/calibration sidecar was added to the
+received dataset and no file-derived per-frame timestamps were manufactured.
+
+### Verified inventory, order and coverage limits
+
+- `acc000`: **75 files × (8192,8) UINT16 = 614,400 frames**.
+- `wfs_tiptilt`: **251 files × (2402,2) FLOAT32 = 602,902 frames**. Source stream
+  names are `aol1_modevalWFS`; user/metadata confirm mode 0 tip and mode 1 tilt.
+- All file lists, manifest shapes/dtypes and total counts agree; ordering is
+  monotonic/lexical with no duplicate/missing/extra arrays. Values are finite.
+  Only three JSON metadata files accompany the NPYs: no original XRIF, per-frame
+  timing, counters, receipt/query history or physical calibration is present.
+- Encoded first/last archive labels are **08:29:56.737200135–08:34:59.841201682**
+  for ADC, and **08:29:58.895666422–08:34:59.145846484** for WFS, on 2025-04-15 UTC.
+  These are labels, not reconstructed first-to-last acquisition coverage.
+- ADC chunks are separated by about **4.096 s**, WFS by **1.201 s**. Prior-chunk
+  row counts divided by first-to-last label spans imply aggregate recorded-frame
+  densities **1999.999990 / 1999.998801 frames/s**. This supports a conditional
+  2-kHz display axis, not verified acquisition cadence, losslessness or 8-kHz data.
+  Higher-rate acquisition with skipped/selected rows cannot yet be excluded.
+- At an assumed 2 kHz the row counts represent 307.200/301.451 s; selected full
+  files include labels before the nominal 08:30–08:35 window. Exact cropping,
+  simultaneous coverage, missing samples, clock drift and per-frame jitter need
+  original timing. Archive-label interval deviations are not sample jitter.
+  Floating manifest epoch labels lose up to about 119 ns; parse the original
+  nine filename nanosecond digits for bookkeeping, without adding frame semantics.
+
+### Naming semantics and required export
+
+Current `streamWriter::doEncode` and the available pre-observation source
+`aa86fac3fabf9c60cf703bf15212450a9a790e2a` (2025-03-16) name archives using the
+first saved frame's **acquisition field**, selected by
+`m_timingCircBuff+saveStart*5+1`. This is source evidence, not proof of the actual
+recording binary/version or genuine sensor acquisition timing. The same sources
+replace zero acquisition times with recorder realtime, and missing write time
+with acquisition time. Neither field is automatically a WFS exposure center.
+
+Export both streams' original concatenated XRIF timing blocks as unfiltered
+UINT64 `(n_frames,5)` arrays: counter, acquisition sec/nsec and write sec/nsec.
+Retain original source filename and zero-based frame index, header geometry,
+versions/hashes/reduction provenance and row-for-row association to the received
+arrays. Zero/bad time rows and source counters must remain untouched for audit.
+Original archives are absent here; an authorized human must either copy them to
+a workstation or export sidecars wherever they reside (possibly `exao1`). No
+agent command on a telescope host is allowed or was attempted.
+
+The report gives two source-grounded extraction methods: the existing two-read
+`fixr.XrifReader` pattern from `quicklook/pack.py`, or `xrif2fits -N --metaOnly`
+for **one archive per fresh output directory**. Its native flags/dependencies
+were not executed/qualified here. Avoid cube/summary modes or repeated metadata
+output paths that lose frame rows. Preserve the five integer fields, not floating
+epoch seconds. Producer/recorder timestamps/hosts, WFS exposure/normalization/AO
+state, raw channel wiring/calibration and clock synchronization evidence remain
+required; timing records alone cannot undo a recorder timestamp substitution.
+
+### Supported raw signal findings
+
+New `tests/inspect_reduced_telemetry.py` validates each array/manifest and computes
+file-local complete Hann periodograms, never joining archive boundaries. It
+reports cycles per received frame and explicitly conditional Hz/PSD axes for the
+requested `--display-rate-hz`. No calibration constants are applied. Four tests
+cover exact labels, PSD power/unit conversion, independent file spectra, inventory
+integrity, ordering and byte preservation/unqualified timing/output exclusion.
+
+ADC raw means/stds are approximately **662.670/11.927, 665.528/12.511,
+663.399/5.864 counts** for channels 0–2. Channels 3–7 have ranges 0–11 or smaller
+and fluctuation RMS only 0.107–0.567 counts. Channels **0–2** are signal candidates;
+this does not identify physical axes or prove what low-valued channels represent.
+WFS fluctuation RMS is **0.0141503/0.0186174 recorded modal units**, not angular
+calibration. Do not apply the simulator's ADC constants or lever arm to this data.
+
+Under the explicitly conditional **2000 recorded frames/s** interpretation:
+
+| Channel | Near-28-Hz peak | Near-56-Hz peak | Local peak/sideband contrast, 28 / 56 |
+| --- | ---: | ---: | ---: |
+| ADC 0 | 28.564 Hz | 55.908 Hz | 17.34 / 14.71 dB |
+| ADC 1 | 28.564 Hz | 55.908 Hz | 5.71 / 14.73 dB |
+| ADC 2 | 28.564 Hz | 55.908 Hz | 17.48 / 11.87 dB |
+| WFS tip | 28.310 Hz | 55.787 Hz | 19.47 / 6.86 dB |
+| WFS tilt | 28.310 Hz | 55.787 Hz | 18.43 / 10.12 dB |
+
+ADC/WFS frequency bins are 0.244141/0.832639 Hz. Peaks are bin locations,
+not precise line estimates; local contrast is descriptive, not significance,
+coherence or calibrated SNR. Shared bands motivate further analysis but establish
+no causal prediction, relative phase or optical correction sign.
+
+### Tests, blockers and stop point
+
+The four new inspection cases pass. Full Python checks pass **36 controller
+tests plus four simulator PSD tests**, with the Phase 12 C++ file-replay fixtures
+enabled on synthetic temporary data. A fresh combined ASan/UBSan numerical build
+passes **67 simulator/controller cases / 3,677,233 assertions**, without findings.
+Only model/mock simulator tests run; no real stream/app/instrument was opened.
+Commands and CSV/plot outputs are in the report. Source/input preservation,
+syntax and whitespace checks apply to the final patch. Native Linux/ImageStreamIO
+qualification remains outstanding; it is not implied by these workstation tests.
+
+Next: obtain original per-frame timing and reduction/producer provenance; audit
+all internal/boundary counters/times and clock registration; establish WFS centers,
+ADC axes/units and WFS modal normalization/loop context. Then prepare the strict
+Phase 12 CSV manifest for an explicitly causal offline replay. This eight-channel
+recording cannot directly enter the current two-channel native reader; selecting
+an offline pair needs physical justification. Missing historic controller receipt/
+query times allow only a declared counterfactual replay schedule, not live timing
+qualification. No production reader change is made or authorized here.
+
+Changed files: new `tests/inspect_reduced_telemetry.py`,
+`test_inspect_reduced_telemetry.py`, and `offline/PHASE13_INSPECTION.md` under
+accelFFCtrl; its test Makefile registers the new Python tests; this plan and a
+README link document the phase. Existing production/model/calibration files and
+observation-only/default-gap/depth-one behavior remain unchanged. No commits,
+pushes, merges or deployment occurred.
+
+## Phase 13 continuation: recovered original timing and real prediction (2026-11-06)
+
+### Scope and association
+
+The user supplied original `acc000_timings.npy` (614400,5) and
+`wfs_tiptilt_timings.npy` (602902,5), UINT64 counter/acquisition/write fields.
+All previous uncommitted inspection work is preserved. This continuation adds
+only offline test/analysis helpers and documentation; no production controller,
+configuration, stream, instrument or DM path is changed or accessed.
+
+All array/timing counts, nanosecond components and ordered source counters pass.
+There are zero counter gaps and strictly increasing acquisitions. All **326
+archive starts exactly match** their first timing row. This verifies these
+exports' filename convention as the first saved acquisition field. Original
+XRIF/reducer provenance is still needed to independently recheck every within-file
+payload/time pairing; no row ordering or timestamp was fabricated.
+
+The exact recorded-field overlap is **2025-04-15 08:29:58.895666422 through
+08:35:00.346345018 UTC**, or **301,450,678,596 ns**. Both streams have 602,902
+rows within it, without implying one-to-one simultaneity. Analysis is cropped
+to the requested 08:30–08:35 interval. Integer ns are preserved until subtracting
+the common epoch; source searches/deadlines remain integer. The original metadata's
+filename-only description is stale and left untouched. All **331 input files**
+have identical before/after SHA-256. Dataset files are opened read-only.
+
+### Timing interpretation
+
+The ADC mean interval is **500000.055 ns**, median **491948 ns**, SD **16665 ns**;
+WFS mean is **500000.296 ns**, median **499983 ns**, SD **4402 ns**. Average
+recorded-field rates are 1999.999780 and 1999.998815 Hz. About 67% of ADC intervals
+average 489.772 us while the longer remainder average 520.770 us; adjacent
+intervals anticorrelate at -0.441. The shorter median is compensated rather than
+indicating faster acquisition. Minimum/maximum ADC intervals are 383.935/661.718 us,
+WFS 406.477/636.260 us; no observed interval exceeds 1 ms.
+
+Nominal counter/time fitted deviations are approximately 0.053/0.593 ppm. These
+may include pacing and/or clocks, and do not independently calibrate host-clock
+offset or drift. Both streams have **write=acquisition on every row**, providing
+no independent readout/publication/consumer latency. The recorded separation
+between held-out WFS queries and latest prior ADC acquisition is median 81.995 us,
+not measured live application latency. No signal-derived clock shift is applied.
+
+### Recorded-clock spectra and informative channels
+
+New `tests/analyze_timed_telemetry.py` reuses Phase 13 filename/hash helpers and
+the Phase 12 Welch/CSD implementation. Only spectra use interpolation onto a 2-kHz
+grid; actual monotonic acquisition fields anchor both streams, and holes above
+1 ms are rejected. Four-second nonoverlapping Hann blocks resolve 0.25-Hz bins.
+Earlier training WFS spectra choose the bins 28.75 and 55.75 Hz in predefined
+27–30/54–58 bands; later test spectra do not tune models.
+
+Held-out coherence (tip/tilt) is:
+
+| ADC channel | 28.75 Hz | 55.75 Hz |
+| --- | ---: | ---: |
+| 0 | 0.9665 / 0.9520 | 0.8225 / 0.7412 |
+| 1 | 0.3183 / 0.3102 | 0.8700 / 0.9418 |
+| 2 | 0.9498 / 0.9541 | 0.7027 / 0.5309 |
+
+Channels 0/2 are the strong 28-Hz candidates; channel 1 is strongest near 56 Hz.
+This is pairwise information, not physical registration or independent sensor
+contributions. Selected apparent WFS/ADC CSD phases are +95.96 degrees (ADC0/tip
+28.75), +50.69 (ADC2/tilt 28.75), -58.51/+87.28 (ADC1/tip/tilt 55.75). These
+include unknown exposure/clock/loop responses. A 1-ms time-label offset changes
+phase magnitude by 10.35/20.07 degrees. No absolute optical phase, propagation
+delay, physical pointing scale or DM correction sign is qualified.
+
+### Chronological causal statistical comparison
+
+A simple standardized ridge AR/ARX uses 64 current/past frames of both WFS modes,
+with/without three ADC channels at 64 past 0.5-ms deadlines. ADC values are picked
+by integer last-at-or-before searches, never two-sided interpolation. Features
+contain no future values, test-derived normalization or simulator truth. Initial
+fit is 08:30–08:32; ridge selection uses 08:32–08:32:30, followed by pre-test refit
+only. Training/validation/refit are thinned fourfold, while all **299,980** held-out
+queries at 08:32:30–08:35 are scored. Future targets crossing partitions are
+excluded. Tests explicitly check late targets do not change selected strengths.
+
+The task forecasts next WFS frames, not an invented exact actuation time. At two
+frames ahead the measured-field horizon is median **0.999986 ms**, with 1st–99th
+percentile 0.990729–1.008983 ms. Target times are scoring labels, never features.
+Availability at acquisition/write fields and clock comparability are idealized
+assumptions. True exposure center, processing and consumer receipt remain unknown.
+
+| Two-frame raw modal-unit RMS error | Tip | Tilt |
+| --- | ---: | ---: |
+| Persistence | 0.012257 | 0.015097 |
+| WFS-only AR | 0.009948 | 0.011938 |
+| ADC-only FIR | 0.012561 | 0.015302 |
+| WFS+ADC ARX | 0.009734 | 0.011467 |
+| Improvement over WFS-only | **2.152%** | **3.943%** |
+
+Thirty five-second paired test blocks give conditional bootstrap 95% improvement
+intervals **2.033–2.277% / 3.695–4.199%**, excluding timing/systematic/retraining
+uncertainty and broader nonstationarity. Withholding the latest 2 ms of ADC and
+refitting retains **2.011/3.664%** improvement. At expected horizons 0.5/2/5/10 ms,
+improvements are 1.04/2.18%, 3.46/6.56%, 4.34/7.07%, 2.94/3.73% (tip/tilt).
+Different prediction tasks do not identify a physical optimum DM horizon.
+
+Post-prediction band-error improvements over WFS-only are 5.06/8.04% at 27–30 Hz
+and 1.30/12.58% at 54–58 Hz. However, two-frame 28-Hz persistence errors
+0.000825/0.000622 beat ARX 0.001389/0.001129. The global broadband fit is not
+band-optimal; high coherence does not guarantee full disturbance observability,
+optimal prediction or safe cancellation. ADC-only is also worse than WFS-only
+for broadband error. These are prototype ARX results, not production harmonic
+pointing estimator or physical DM results.
+
+### Validation and remaining gates
+
+Five new deterministic cases cover exact file/time pairing and invalid timing,
+skew/compensation, future-data exclusion with epoch translation, known predictive
+innovations/chronological selection, and irregular-time phase plus clock-offset
+sensitivity. Existing/new Python suites pass **41 controller + four simulator PSD
+tests**; the unchanged numerical/mock ASan/UBSan suite passes **67 cases /
+3,677,233 assertions**. No native or actual instrument app is run. Source/input
+preservation and syntax/format checks apply to the final files.
+
+The full [timed report](../../../apps/accelFFCtrl/offline/PHASE13_TIMED_ANALYSIS.md)
+gives commands, all assumptions, data/clock boundaries and results. Diagnostics
+remain under `/tmp/accelFFCtrl-phase13-timed`: exact acquisition/query/target rows,
+train/test spectra/coherence/phase, raw/band forecast errors, bootstrap intervals,
+selected ridge values, timing metrics and five plots. Physical clock/exposure
+registration, actual data availability, ADC axes/sensitivity, WFS normalization/
+AO context and native Linux checks remain missing. Later work should compare a
+band-specific model against persistence and the existing harmonic estimator after
+calibration, without assuming exogenous disturbance, DM sign or loop stability.
+
+Changed files in this continuation: new `tests/analyze_timed_telemetry.py`,
+`test_analyze_timed_telemetry.py`, `offline/PHASE13_TIMED_ANALYSIS.md`; test Makefile
+registration; appended README, inspection-report follow-up and this plan. Previous
+uncommitted files, original data and production code/configuration/defaults are
+preserved. No telescope access, DM command, commit, push, merge or deployment.
+
+## Phase 13: existing harmonic controller and normalized correction replay (2026-11-06)
+
+### Scope and reuse
+
+Completed the requested real-data comparison without changing production sources
+or adding a predictor framework. New `tests/validate_real_harmonic.py` calls the
+existing Phase 12 C++ file replay, which uses production `inputProcessor` and
+`harmonicEstimator` plus the existing offline `shadowCommand`. It reuses Phase
+13 timestamp readers/regression features and Phase 12 replay/inhibition checks.
+Original counters, frame order, acquisition stamps and ADC0/1 values enter the
+C++ estimator at the recorded 2-kHz rate. No future samples, resampled predictor
+input or held-out WFS values enter harmonic prediction/calibration. Two-bank
+composition is an existing offline capability, not a new live app feature.
+
+The first 120 seconds fit direct, swapped or full real origin-preserving 2x2
+maps. The next 30 seconds select map/frequency choice, followed by refitting on
+pre-test data only. The last 150 seconds supply 299,980 common held-out queries.
+Target-label interpolation brackets cannot cross calibration boundaries. The
+two predeclared frequency choices are configured 28.5/56 Hz or ADC-only earlier
+spectral peaks 28.6510714/55.8186193 Hz. No held-out phase, time-offset, window
+or carrier tuning was performed. A real full map is a generous numerical
+registration candidate; it is not measured sensor geometry.
+
+### Timing, units and shadow semantics
+
+Exact integer target = query + 1,000,000 ns; the unchanged estimator includes
+sample age once in its prediction phase. All models use these same targets,
+so the re-fitted Phase 13 baselines differ slightly from the historical next-two-
+frame task. Queries are original WFS acquisition fields. ADC/WFS availability at
+those fields, comparable clocks and WFS exposure-center offset zero are explicit
+unverified assumptions. Frozen-calibration ADC delays of 0.5/1 ms retain 100%
+held-out validity and do not materially change the poor harmonic result.
+
+No real ADC sensitivity, lever arm or angular/modal/DM conversion is invented.
+Unit-valued arithmetic normalizers give `-harmonic_counts/omega^2`, not radians;
+an earlier-fitted numerical map produces recorded WFS units. A regression test
+verifies this is a linear rescaling of the unchanged numerical kernel. Normalized
+shadow contributions divide by pre-test WFS SD 0.01433603/0.01892305 and use a
+virtual identity WFS response. They are absolute replacement contributions with
+an outer negative sign, default gain zero, separate counterfactual gain one and
+explicit bounds +/-3 training WFS SD. These are numerical comparison bounds,
+not DM safety limits or physical calibration.
+
+The selected shared-map proposals have maxima 0.02149/0.24188 normalized units,
+zero clipping, one initial reset-barrier inhibition and no invalid held-out
+predictions. Gain-zero and invalid outputs are exactly zero; target alignment,
+sign and common-scalar bounds are asserted against the actual C++ shadow output.
+The replay consumes 606,506 frames through its last query, with zero drops and
+one initial attachment reset. All 331 original dataset files remain unchanged.
+
+### Quantitative result and decision
+
+| Held-out method | Raw RMS tip / tilt | 27-30 Hz error reduction dB | 54-58 Hz error reduction dB |
+| --- | ---: | ---: | ---: |
+| WFS-only AR | 0.009927 / 0.011913 | 9.94 / 9.00 | 11.05 / 14.38 |
+| Phase 13 ARX, ADC0/1/2 | 0.009713 / 0.011441 | 10.40 / 9.73 | 11.16 / 15.55 |
+| ARX, ADC0/1 only | 0.009741 / 0.011546 | 10.31 / 9.46 | 11.16 / 15.29 |
+| Current harmonic 28-Hz bank | 0.013913 / 0.018265 | 0.17 / 0.17 | -0.01 / 0.00 |
+| Current harmonic 56-Hz bank | 0.013893 / 0.017921 | 0.00 / 0.03 | 0.20 / 1.27 |
+| Current two-bank shared map | 0.013934 / 0.018263 | 0.01 / -0.03 | -0.00 / 0.03 |
+| Phase-calibration diagnostic ONLY | 0.013174 / 0.017299 | 8.22 / 6.79 | 1.86 / 4.55 |
+
+Error reduction means observed/error band power in dB, not measured physical
+suppression. The shared-map NRMSE is 99.998/99.950%, with correlations
+0.0071/0.0357. Its apparent 100% readiness does not establish useful prediction.
+
+The separately labeled diagnostic fits earlier WFS data to the existing causal
+target quadratures (ADC0 lower-band and ADC1 upper-band). It adds no prediction
+filter, does not modify the C++ estimator and emits no shadow proposals. It
+demonstrates retained predictive information that the current real static map
+cannot adequately exploit. This supports frequency-dependent sensor-to-WFS
+phase calibration as the first demonstrated blocker. Finite memory/bandwidth,
+multimode contamination, changing coupling and existing AO dynamics remain
+possible additional limitations; the diagnostic is not a production solution.
+
+Go for normalized simulation of the current path's failure/sign/timing; no-go
+for claiming useful simultaneous 28/56-Hz cancellation from the current map.
+The smallest next experiment is explicit offline calibration of existing
+harmonic quadratures followed by the same held-out test and synthetic response.
+Any production integration needs separate authorization. Exposure/clock/receipt
+semantics, sensor physical axes/scale, WFS normalization, WFS-to-DM map, optical
+correction sign, measured response and AO interaction remain independent gates.
+
+### Verification and artifacts
+
+New four-case `test_validate_real_harmonic.py` covers mapping/sign, exact label
+partitions, actual-C++ units/clipping/zero-gain/horizon/future-data exclusion and
+static-versus-phase calibration. Full regressions pass 45 controller Python +
+four simulator PSD tests. C++ numerical/mock ASan/UBSan passes 67 cases /
+3,677,233 assertions; the ASan/UBSan replay passes the new four-case Python suite.
+No native Linux application/stream test was performed.
+
+The [real harmonic replay report](../../../apps/accelFFCtrl/offline/REAL_HARMONIC_REPLAY.md)
+contains equations, all assumptions, full comparisons, commands and the go/no-go
+assessment. `/tmp/accelFFCtrl-harmonic-real-study/` contains target-time plots,
+residual PSDs, normalized shadow series, maps/selection losses, latency checks,
+metrics, exact timestamps and input hashes. Changed files for this continuation:
+the new driver, four-case tests and report; Makefile test registration; appended
+README, timed-report follow-up and this plan. Previous uncommitted work is
+preserved. No production source/configuration, default gap/gain behavior,
+original data, instrument, shared-memory stream, commit or push was touched.
+
+## Phase 13: minimal offline phase/amplitude calibration (2026-11-06)
+
+### Implementation decision
+
+Implemented the previously proposed calibration without changing the harmonic
+estimator, production input processor, live app or configuration. The estimator
+already reports peak amplitude and phase at the newest acquisition; existing
+target phase is `psi = phi + omega*(target-sample)`. The minimal mapping uses
+ADC0 at the lower carrier and ADC1 at the upper carrier, with two coefficients
+(cosine/sine) per WFS output per band: eight coefficients total. Its basis is
+`z_f = -A_f/omega_f^2 * [cos(psi_f),sin(psi_f)]`; `WFS_pred=sum B_f*z_f`.
+This is equivalent to independent complex gains `b_cos-i*b_sin`, with an
+additional negative inverse-omega-squared factor relative to raw count phasors.
+No new predictor architecture or extra model/sample advancement is introduced.
+
+The optional calibration lives only in the C++ file replay and is applied after
+unchanged estimation, before the existing host-memory shadow component. It
+preserves source/counter/state/target identity and changes only output
+coordinates. Raw harmonic exports remain identical. A versioned optional file
+rejects incompatible basis, carrier, horizon, channel or nonfinite coefficients.
+Legacy invocation remains unchanged and exactly matches the retained earlier
+executable in the deterministic parity fixture. Production headers/defaults are
+untouched; no live calibration loader or DM publisher is added.
+
+### Strict training and generalization
+
+All calculations, including the regression comparator, use ADC0/1 exclusively.
+The initial 08:30–08:32 interval supplies ADC-only carrier selection
+(28.6510714/55.8186193 Hz) and the eight least-squares coefficients. Fits reject
+rank loss/nonfinite input and do not include an intercept. No later WFS label
+selects or refits the main calibration. The last calibration-label right bracket
+is 1744705919999736817 ns, below the 08:32 boundary. The final 08:32:30–08:35
+interval again contains 299,980 common held-out queries.
+
+All models get the same total initial 120-second training interval. Baseline
+ridge selection uses an internal 90/30-second split, then refits on 120 seconds;
+this deliberately differs from the historical 150-second refit/three-ADC case.
+The existing real map uses its previously selected direct registration without
+phase. Original ADC order/counters/timestamps, 0.1-s estimator memory, original
+jitter and exact query+1-ms targets are preserved. WFS values are only labels
+for harmonic calibration/scoring; WFS-history baselines use causal rolling past
+WFS as before. Recorded receipt/clock/exposure assumptions remain unverified.
+
+The main frozen fit is scored in all later portions: 120–150, 150–210, 210–270
+and 270–300 s. Independent forward-only fits use 0–120→120–180,
+60–180→180–240 and 120–240→240–300 s, with carrier settings fixed from the
+initial 120 s. All folds are reported and cannot influence the main fit. This
+is within-record chronological testing, not an independent observing night.
+
+### Results and safeguards
+
+| Held-out method | RMS tip / tilt | 27-30 Hz error reduction dB | 54-58 Hz error reduction dB |
+| --- | ---: | ---: | ---: |
+| WFS-only AR | 0.009902 / 0.011903 | 10.35 / 9.24 | 11.04 / 14.45 |
+| WFS+ADC0/1 ARX | 0.009774 / 0.011583 | 10.14 / 8.87 | 10.30 / 14.15 |
+| Original real-map harmonic | 0.013934 / 0.018265 | 0.01 / -0.02 | -0.00 / 0.02 |
+| Phase-calibrated harmonic | **0.013174 / 0.017298** | **8.20 / 6.79** | **1.86 / 4.55** |
+
+Total RMS improvement over the original harmonic map is **5.46/5.29%**, with
+conditional paired five-second bootstrap intervals **4.68–6.29/4.38–6.16%**
+(30 blocks, 4000 draws). This excludes physical timing/retraining/systematic
+uncertainty. Frozen chronological portions retain 28-Hz reductions of
+7.17–9.93 dB tip / 5.88–8.15 dB tilt after the main test boundary. Forward fits
+retain 6.78–9.27/4.85–7.48 dB at 28 Hz and 0.98–1.85/3.55–3.83 dB at 56 Hz.
+The harmonic model improves consistently but is still worse than WFS-history
+baselines in total RMS; 56-Hz tip improvement remains modest. Error-power
+reductions are ideal target-time subtraction, not physical DM suppression.
+
+Calibrated proposals pass through the actual existing C++ shadow safeguards.
+Units are recorded WFS output divided by earlier-only WFS SD
+0.01434487/0.01884375; virtual identity response and +/-3 training-SD numerical
+bounds are explicit. Gain defaults to zero. Separate gain-one proposals reach
+maxima 2.4542/2.7389 SD with zero clipping. Invalid/disabled outputs are zero;
+freshness, exact 1-ms target, negative contribution sign and common-scalar bound
+are independently audited. There are zero drops, one initial attachment/reset
+barrier, no further resets and 100% held-out availability. All 331 input files
+remain unchanged.
+
+### Verification and minimum future production change
+
+Four new deterministic tests exercise earlier-only independent gain/phase,
+actual-C++ calibrated arithmetic and future-data exclusion, raw/legacy parity,
+clipping and zero-gain behavior, rollback/restart/invalid/stale/warmup inhibition,
+and bad calibration files. Full checks pass **49 controller Python + four
+simulator PSD tests**, including all 49 controller tests against the ASan/UBSan
+replay. The unchanged combined C++ numerical/mock sanitizer suite passes
+**67 cases / 3,677,233 assertions**. No native application/stream test is claimed.
+
+Ready for normalized offline synthetic DM-response testing, including imperfect
+latency/bandwidth and feedback interaction. Minimum future live support is an
+optional versioned per-band output calibration with exact channel/basis/carrier/
+units/provenance, reset/invalid semantics and calibration diagnostics. Simultaneous
+28/56-Hz support needs two existing estimator instances instead of the live
+app's current single carrier. This is not implemented in the live controller.
+Physical clock/exposure/availability registration, WFS/ADC units, WFS-to-DM map,
+physical sign/response and Linux/native qualification remain separate gates.
+
+The [calibrated replay report](../../../apps/accelFFCtrl/offline/PHASE_CALIBRATED_REPLAY.md)
+contains equations, all assumptions, coefficients, chronological tables, commands,
+artifacts and limits. Products are in `/tmp/accelFFCtrl-phase13-phase-study/`.
+Changed files: new phase driver/tests/report; optional C++ replay and Python
+serializer; small two-channel/plotting extensions in earlier analysis scripts;
+test Makefile; appended README, prior replay report and this plan. No production
+behavior, instrument access, real DM command, shared-memory write, commit or push.
+
+## Phase 13: normalized recorded-data DM-response replay (2026-11-06)
+
+### Scope and verified simulation conventions
+
+Added a file-only bridge around existing `shadowCommand` and `dmResponse`, and
+an analysis driver reusing the preceding training-only phase calibration and
+existing AR/ARX baselines. No new predictor/controller, production change or
+physical DM mapping is introduced. ADC0/1 remain the exclusive sensor inputs.
+An optional response export in the preceding analysis preserves exact query,
+acquisition/target/counter/validity data and evaluates the existing baseline
+models on training rows for gain selection as well as later held-out rows.
+
+`aoSim.update_dm()` consumes the history head before enqueuing the current
+absolute command: delay is `lag+1` iterations. `update_wfs()` adds disturbance
+and DM state. Therefore a negative contribution and two-step delay reproduce
+`lag=1`. Actual methods are exercised on host-memory float32 fixtures, without
+application imports, setup or shared memory. The app's default numerical
+`_dt=0.01 s` is not the study cadence: this replay explicitly uses actual
+approximately 2-kHz query times, so two steps are approximately 1 ms.
+The optional existing finite-bandwidth plant retains its previous-interval
+update and is explicitly nominal-step/synthetic. No accelSim model/RNG or
+simulation truth is advanced or substituted for recorded WFS/physical calibration.
+
+Residuals are **recorded WFS + modeled DM effect**. Original WFS predictors and
+accelerometers do not react to that effect; no integrator is connected to the
+recorded residual. This is additive counterfactual simulation, not a genuine
+feedback plant or demonstrated live WFS-only superiority. Separate ideal
+target-time addition quantifies response effects; nearly identical harmonic
+band errors show that nominal prediction residual dominates the modeled delay.
+
+### Training, timing and quantitative results
+
+The first 120 s fit calibration/carriers as before. WFS baselines use an internal
+90/30-s ridge split and refit on 120 s. Gains 0, 0.5 and 1 are evaluated on that
+training interval only through the nominal plant. Select lowest mean squared
+NRMSE, allowing at most 1% per-axis RMS increase and 5% aggregate outside-band
+power increase. These are numerical study criteria, not hardware limits.
+Gain 1 is selected for all methods and stays frozen through every sensitivity.
+Calibration/gain fitting is in-sample; held-out scoring remains 299,980 queries
+at 08:32:30–08:35, with no held-out tuning.
+
+| Nominal correction | RMS tip / tilt | 27-30 Hz reduction dB | 54-58 Hz reduction dB | Outside-band power change |
+| --- | ---: | ---: | ---: | ---: |
+| None | 0.013950 / 0.018291 | 0 / 0 | 0 / 0 | 0 / 0 |
+| WFS-only | 0.010016 / 0.012135 | 10.34 / 9.15 | 11.00 / 13.68 | -45.08% / -53.10% |
+| Calibrated harmonic | 0.013190 / 0.017318 | 8.20 / 6.79 | 1.86 / 4.55 | +0.80% / +1.04% |
+| WFS+ADC0/1 regression | 0.009886 / 0.011816 | 10.13 / 8.79 | 10.27 / 13.44 | -45.91% / -55.12% |
+
+Harmonic broadband RMS decreases 5.45/5.32%, but it does not outperform WFS-only
+or regression correction. Its finite-window narrowband prediction leaves both
+target-band error and unrepresented broadband components. Aggregate outside-band
+growth is small but not locally neutral: 20–27-Hz tip power rises 213.33%
+(RMS 0.000496→0.000878), and 30–54-Hz tip/tilt power rises 5.69/9.63%, excluding
+target-band boundary bins consistently with the aggregate outside mask. The
+selected gain is not changed after observing those held-out results. Local
+spectral acceptance is a remaining requirement; these data do not identify
+out-of-band WFS power specifically as detector noise.
+
+Actual acquisition/order/integer timestamps remain unchanged; target is exactly
+query+1 ms, including sample age once. Two-iteration actual response time minus
+requested target has median -4 ns, 1st–99th percentiles -9.502/+9.123 us, extrema
+-92.658/+134.721 us over the full trace. Comparable clocks, acquisition-field
+availability and zero exposure offset remain unverified assumptions. Frozen
+harmonic reference-label mismatch +/-0.5/1 ms retains 7.21–8.21/6.28–6.67 dB at
+28 Hz and 1.58–1.80/3.59–4.42 dB at 56 Hz. This is mismatch sensitivity, not
+physical latency identification. One/three-step delays and a synthetic 300-Hz
+pole remain useful; wrong sign amplifies instead, with negative band suppression.
+
+### Safeguards, tests and recommendation
+
+Normalized virtual mapping uses training WFS SD and +/-3-SD common-scalar bounds.
+It is not a physical DM calibration. Harmonic maxima remain 2.4542/2.7389 SD,
+zero clipping and one initial inhibited snapshot. Existing default zero gain,
+gap/reset behavior, source/time validity and freshness checks are preserved.
+The shim never accumulates or reuses an invalid proposal. Delayed plant state
+may contain a previously valid command, distinguished from stale prediction reuse.
+
+Six new tests cover actual aoSim numerical parity, analytic sinusoidal sign/
+delay/cancellation and future exclusion, bounds/integrity/zero gain, causal pole
+response, training gain guards and analytically known outside-band amplification.
+Reference mutation leaves commands/effects unchanged, confirming no feedback.
+All **55 controller Python + four simulator PSD tests** pass; all 55 controller
+tests also pass with ASan/UBSan file tools. Existing combined C++ numerical/mock
+sanitizer suite passes **67 cases / 3,677,233 assertions**. Full native aoSim/
+Linux application tests are not claimed; application dependencies are unavailable.
+
+Useful normalized suppression supports continued offline response/feedback
+interaction testing. It does not justify real correction yet: local spectral
+criteria, independent observing conditions, clock/exposure/availability, sensor/
+WFS units, WFS-to-DM sign/registration and measured response remain. A genuine
+feedback test needs a plant whose measured signals change with the commands;
+unchanged recorded closed-loop WFS cannot serve as that plant.
+
+The [recorded-response report](../../../apps/accelFFCtrl/offline/RECORDED_DM_RESPONSE.md)
+provides commands, exact assumptions, gain/sensitivity/outside-band tables,
+plots and source provenance. Outputs are under
+`/tmp/accelFFCtrl-recorded-response-study/`. Changed files: new response C++
+shim, Python driver/tests and report; optional earlier-replay export; Makefile;
+README, calibration-report follow-up and this plan. All original dataset bytes
+and previous uncommitted work are preserved. No production controller/config
+change, telescope access, real DM command, shared-memory write, commit or push.
+
+## Phase 13: genuine numerical closed-loop validation (2026-11-06)
+
+### Existing architecture, now with real feedback
+
+Connected the existing numerical components rather than introducing a controller:
+`accelSimDetail::model` produces actual two-channel ADC codes and WFS-coupled
+disturbance; `harmonicEstimator` decodes every ordered raw sample; the existing
+paired quadrature map and `shadowCommand` generate FF; `syntheticIntegrator`
+receives the previous **corrected** WFS; `dmResponse` applies the combined command
+with the already verified aoSim lag=1/two-frame delay. The harmonic branch itself
+remains ADC-only; WFS enters the existing parallel AO path and earlier calibration.
+
+At 8-kHz acquisition/2-kHz control, queries precede current ADC arrival by
+construction. Latest-sample age is exactly 125 us, target query+1 ms, and DM delay
+is two 0.5-ms control frames. Feedback uses previous WFS, adding one measurement
+frame to its own path. Its recurrence is `u_AO[k]=u_AO[k-1]-G*S^-1*y[k-1]`,
+`u=clip(u_AO+u_FF)`, `y=d+S*u[k-2]`. This is genuine feedback, not unchanged
+recorded WFS plus a proposed command. Every trajectory independently verifies
+those equations and source/target ordering.
+
+Prepared source fixtures contain exact original simulator ADC integers and WFS
+disturbance radians. Casting the validated integer codes back to UINT16 preserves
+actual rounding/quantization/decoding. Model/RNG is advanced once per source;
+all control cases share identical forcing. Static mode WFS coupling is applied
+once, and no dynamic AO loop exists inside the source generator. DM-to-structure
+mechanical coupling, detector noise and exposure averaging are not invented.
+
+### Calibration and fixed validation protocol
+
+Real recorded count/modal coefficients cannot be loaded into SI simulation.
+The existing eight-coefficient paired topology is retained, with physical basis
+`-A/(omega^2*lever)` and simulation-only output radians. Coefficients are fitted
+with the same least-squares helper on ready training pairs strictly before 20 s,
+then frozen. Control starts at 20 s; scoring is 30–60 s. Source parameters are
+8000 Hz, lever 10 m, ADC 2048/0.0083799/1.02, noise PSD 1e-8, mode seed 123.
+Two-mode 28.5/56-Hz and unchanged 214-mode populations each use source seeds
+42/123/701. Full-population carriers are source-defined 28/56 Hz. There is no
+held-out frequency/gain/window/topology tuning.
+
+Important limitation was identified before scoring: real-data mapping uses
+ADC0 at the lower frequency and ADC1 at 56 Hz, but the simulator has independent
+X/Y histories at each frequency. It cannot guarantee prediction of the other
+axis from one sensor per carrier. We preserve that topology and report its
+failures rather than add correlations or coefficients to make this test pass.
+
+Fixed cases: no correction, WFS-only existing integrator (G=0.1), harmonic-only
+open-loop diagnostic, WFS+FF (g=1), exact disabled-shadow parity, FF off at 45 s,
+wrong sign, matched G=0.3 WFS/FF sensitivity and G=0.8 stress. Commands use
+training WFS SD as a virtual modal basis and common +/-3-SD bounds. No physical
+DM calibration or additional anti-windup is introduced.
+
+### Mixed suppression, qualification failure
+
+| Population / seed | WFS-only RMS tip / tilt [mas] | WFS+FF RMS tip / tilt [mas] | Incremental 28-Hz dB tip / tilt | Incremental 56-Hz dB tip / tilt |
+| --- | ---: | ---: | ---: | ---: |
+| Dual / 42 | 0.8818 / 1.1756 | 0.5072 / 0.9966 | 16.29 / 0.85 | -0.73 / 18.51 |
+| Dual / 123 | 0.8409 / 0.9441 | 0.5248 / 1.0275 | 16.79 / -1.46 | -3.75 / 13.09 |
+| Dual / 701 | 0.6049 / 0.6929 | 0.3245 / 0.6539 | 14.02 / -0.62 | -3.67 / 15.64 |
+| Full / 42 | 1.5213 / 1.4362 | 0.9416 / 1.4886 | 7.66 / -0.52 | -0.50 / 1.18 |
+| Full / 123 | 1.2581 / 1.0234 | 0.8050 / 1.1453 | 10.48 / -1.89 | -0.46 / 1.01 |
+| Full / 701 | 1.0958 / 1.3062 | 0.8158 / 1.2060 | 6.57 / 0.75 | -0.63 / 0.89 |
+
+Primary FF improves tip RMS 25.6–46.4%, but tilt RMS worsens 8.83%, 3.65% and
+11.91% in three cases. Unobserved cross-axis regions often amplify. Relative to
+WFS-only, outside-region power rises 18–168% tip and 1–53% tilt. Seed-42 outside
+RMS changes 0.0689/0.0707→0.1087/0.0876 mas (dual) and
+0.5357/0.5103→0.5831/0.5155 mas (full). Full 54–58-Hz regions include the existing
+54/58-Hz modes; exact 56-Hz tilt bins improve 4.82–6.78 dB while whole-region
+gains remain 0.89–1.18 dB. Both diagnostics are retained, not selected afterward.
+
+Combined clipping ranges 0–10.72% of nominal held-out samples, with FF peaks
+2.45–3.00 SD. Failures also occur in dual/123 and full/123 with zero held-out
+combined clipping; changing bounds alone cannot solve the coverage problem.
+Neighboring 20–27-Hz tip power rises 140%/444% for seed-42 dual/full sources.
+Current calibration therefore fails consistent two-axis/outside-band qualification,
+even though there is useful partial suppression and stable nominal linear poles.
+
+### Stability, disable, regressions and recommendation
+
+Unsaturated zero-leak feedback has polynomial `z^3-z^2+G`: pole radius is
+0.86695/0.81271/1.07805 at G=0.1/0.3/0.8. The high-gain case is explicitly
+unstable, saturates 55–72% of scored queries and reaches 8–31 SD internally;
+finite bounded applied commands do not establish stability. G=0.3 sensitivity
+also retains failures relative to its matched WFS-only baseline. Exogenous FF
+does not change the homogeneous linear poles; mechanical sensor/DM coupling is
+outside this model.
+
+FF off produces zero new contributions immediately, with its delayed direct
+effect gone after two frames/1 ms. AO state is not reset and naturally converges
+to the WFS-only trajectory in 61.5–69 ms at 1e-8 training-SD tolerance; all cases
+match after one second. Disabled-shadow parity is exact. This verifies real
+feedback-state recovery, not merely deleting a term from an unchanged recording.
+
+Six new deterministic tests cover feedback reaction/delay, ADC and training
+identity, future-forcing exclusion, disable/parity, instability versus saturation,
+and incompatible calibration rejection. All **61 controller Python + four
+simulator PSD tests** pass, including the full controller suite with ASan/UBSan
+file tools. Existing combined C++ numerical/mock sanitizer tests pass **67 cases /
+3,677,233 assertions**. Sharing phase arithmetic preserves all columns of 4000
+phase-enabled old/new replay rows exactly. No production source/default changes
+or native Linux/application validation are claimed.
+
+The [closed-loop report](../../../apps/accelFFCtrl/offline/CLOSED_LOOP_VALIDATION.md)
+contains commands, exact loop equations, all seeds/controls, RMS evolution,
+spectral/command/saturation plots and limits. Outputs are in
+`/tmp/accelFFCtrl-closed-loop-study/`. Changes are test-only source generation/
+feedback/export/analysis, a shared phase helper extracted from the prior replay,
+Makefile, README and report/plan follow-ups. Earlier uncommitted work is preserved.
+
+**No-go for general correction with the retained paired map.** Next offline
+calibration work should address both independent sensor axes at each carrier
+using quadratures already available from the existing estimator, or establish
+an appropriate physical correlated-axis source model. Neither change is made
+to rescue this validation. Neighboring-band, headroom and physical plant/timing/
+WFS-to-DM qualification remain. No telescope access, real DM command, production
+shared-memory/configuration change, commit or push occurred.
