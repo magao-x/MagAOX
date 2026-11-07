@@ -72,7 +72,7 @@ else ifneq ($(filter $(notdir $(TESTNAME)),accelFFCtrlModel_test accelFFCtrlRepl
         $(OBJNAME): $(PATHNAME)../accelFFCtrlStream.hpp
     endif
     ifeq ($(notdir $(TESTNAME)),accelFFCtrl_test)
-        $(OBJNAME): $(PATHNAME)../accelFFCtrl.hpp
+        $(OBJNAME): $(PATHNAME)../accelFFCtrl.hpp $(PATHNAME)../accelFFCtrlShadowMonitor.hpp
     endif
 else ifeq ($(notdir $(TESTNAME)),acronameUsbHub_test)
 	CPPFLAGS += -I$(TESTS_DIR)/../libs/BrainStem2

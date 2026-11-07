@@ -2,8 +2,10 @@
 
 `accelFFCtrl` continuously reads raw accelerometer pairs, runs the existing
 `accelFFCtrlDetail::harmonicEstimator`, and exposes predicted physical pointing
-through diagnostic INDI properties. It has no DM publisher, correction enable,
-gain, or actuator stream attachment. Input names beginning with `dm` are rejected
+through diagnostic INDI properties. Optional, disabled-by-default WFS metadata
+and file-only model-coordinate proposals are described in
+[EXAO2_TESTING.md](EXAO2_TESTING.md). It has no DM publisher, actuator enable or
+actuator stream attachment. Input names beginning with `dm` are rejected
 before a native open. Starting or stopping this application does not change a DM.
 
 The engineering record is
@@ -37,9 +39,9 @@ it. Depth-one input is supported for diagnosis; gaps are counted and reset the
 fit by default. The optional single-frame policy below can preserve mature
 history without recovering or concealing the missing sample.
 
-For a frameGrabber producer, the operator can use its existing startup setting
-`framegrabber.circBuffLength=256`: 32 ms retention at 8 kHz with per-plane
-timestamps/counters. No producer code or synchronization change is needed.
+The reader also supports historical retained-ring tests: depth 256 gives
+32 ms retention at 8 kHz with per-plane timestamps/counters. **The initial test
+keeps the existing depth-one configuration; do not reconfigure the producer.**
 The reader examines retained records in acquisition order in bounded batches.
 Finite retention still permits overrun. A strict every-frame guarantee needs a
 producer-supported acknowledged queue or equivalent transport in a later phase.
@@ -318,103 +320,68 @@ ImageStreamIO's default `CLOCK_ISIO` may be TAI; the frameGrabber path explicitl
 publishes realtime acquisition/write stamps. The controller requires that
 contract and never substitutes creation time, TAI or receipt time for acquisition.
 
-## Later operator deployment (outside Phase 3A)
+## Initial operator shadow test
 
-The historical deployment procedure below is for a later approved observation
-run after Phase 3A passes. Its install, launch, INDI and producer-configuration
-steps are **not** part of the current build/private-validation task.
+Use [EXAO2_TESTING.md](EXAO2_TESTING.md) and the separate
+[private configuration template](config/exao2-shadow-example.conf) for the current
+human-operated test. They supersede the historical installation/producer-retention
+procedure. Build and run from the reviewed checkout with a unique app name and
+private configuration; no installation, production configuration replacement,
+producer restart or buffer-depth change is required. Native Linux application,
+framework and ImageStreamIO tests must pass first. Agents never execute on an
+instrument host or through its INDI tunnel.
 
-First use a configured MagAO-X Linux development checkout with the normal
-compiler, mxlib/Eigen, libMagAOX, INDI and ImageStreamIO dependencies:
+`shadow.enabled=false` and `shadow.gain=0` are defaults. Enabling shadow requires
+an operator-verified existing WFS timing stream and a new absolute `.csv` path.
+The app loop samples bracketed WFS counter/acquisition/write metadata without
+claiming or flushing a WFS reader semaphore or accessing WFS pixels. The ADC
+worker and estimator are unchanged. Replaced backing files and observed
+counter/time rollback invalidate the WFS snapshot and trigger reattachment.
+The 5-Hz CSV is an operational snapshot log, not per-frame WFS or 2-kHz
+prediction telemetry; it cannot measure vibration PSD or WFS frame losses.
 
-```sh
-make -C apps/accelFFCtrl
-make -C apps/accelFFCtrl/tests test benchmark native-test
-make -C tests -f Makefile.one t=../apps/accelFFCtrl/tests/accelFFCtrl_test
-./apps/accelFFCtrl/tests/accelFFCtrl_test '[accelFFCtrl][app]'
-```
+Read-only INDI `output` identifies mode, uncalibrated basis, exact WFS metadata,
+log path and `dm_output=unavailable`. `shadow` reports enable/gain, WFS age and
+validity, proposal validity, opposing unit-gain model values, gain-scaled values
+and constant `dm_output_enabled=0`. Shadow controls are startup-only. The CSV
+records exact integer source counters, attachment generations, applied revision,
+ADC sample and prediction target monotonic times, recording realtime/monotonic
+times, WFS original realtime stamps, all applied numerical parameters and
+inhibition state. A post-copy clock gates freshness and the remaining target
+interval; an expired target never produces a valid proposal. Controlled shutdown
+appends a zero, invalid final record. File errors stop the observer.
 
-`native-test` launches a fresh process in an empty
-`/tmp/accelFFCtrl-native-XXXXXX` namespace, creating only synthetic
-`accff-private-*` streams. Its hidden tag must be selected explicitly; never
-point it at the instrument namespace. Full app tests do not start a worker or
-open streams.
+Proposals are new absolute `-gain * predicted_pointing` values in **uncalibrated
+model radians**. Missing/stale/invalid WFS metadata, stale or nonfinite ADC
+predictions, pending resets/configuration and invalid/expired target times
+inhibit them to zero. Gain-zero records remain zero; unit-gain values are clearly
+labeled counterfactual diagnostics. There is no calibrated modal conversion,
+command accumulation, actuator amplitude limit or DM publisher in this app.
+The existing offline paired phase calibration and 56-Hz bank are not loaded by
+the native app. The latest [closed-loop validation](offline/CLOSED_LOOP_VALIDATION.md)
+does not qualify general two-axis correction. Initial shadow testing qualifies
+transport and diagnostics, not physical correction performance or exposure-center
+phase. WFS clock and exposure semantics remain operator verification items.
 
-These deployment commands are for a **human operator**. Per
-[AGENTS.md](../../AGENTS.md), an agent must not execute on exao2 or through an
-instrument INDI tunnel. Pass the Linux build/native tests and review the source
-diff first. To transfer the reviewed working tree without a commit/push, on the
-workstation from the checkout root:
+### Current shadow-readiness verification
 
-```sh
-git ls-files -z --cached --others --exclude-standard -- Makefile apps/accelFFCtrl \
-  tests/Makefile.one tests/groups.dox tests/tests.list \
-  agents/plans/2026-11/accelSim-28hz-feedforward-controller.md \
-  | tar --null -czf /tmp/accelFFCtrl-live-source.tgz -T -
-scp /tmp/accelFFCtrl-live-source.tgz exao2:/tmp/
-```
+Local macOS checks passed **37 controller C++ cases / 3,440,712 assertions**,
+**71 combined controller/simulator ASan+UBSan cases / 3,677,310 assertions**,
+**61 controller Python tests**, and **four simulator PSD tests**. Four new
+file-only cases cover default opt-in/gain, model sign, invalid/stale/pending/
+expired-target inhibition, exclusive CSV ownership, exact integer timestamps
+and shutdown zeros. The existing allocation-guarded benchmarks still allocate
+nothing per sample. This review did not rerun the 60-second optimization study.
 
-The file list excludes ignored build products, so workstation binaries/objects
-are not transferred. On exao2, verify the checkout/path and preserve local changes before extracting.
-These commands assume `/opt/MagAOX/source/MagAOX`:
-
-```sh
-cd /opt/MagAOX/source/MagAOX
-git branch --show-current
-git status --short
-tar -tzf /tmp/accelFFCtrl-live-source.tgz
-tar -xzf /tmp/accelFFCtrl-live-source.tgz
-make -C apps/accelFFCtrl
-make -C apps/accelFFCtrl install
-sudo install -m 0644 apps/accelFFCtrl/config/example.conf \
-  /opt/MagAOX/config/accelFFCtrl-observe.conf
-```
-
-Confirm the **one existing** `acc000` producer publishes UINT16 X/Y pairs, valid
-host realtime acquisition stamps, the intended rate, and matching calibration.
-Set observer ADC/lever/frequency values accordingly. For an 8-kHz simulator test,
-the operator can use existing `sim.fps=8000` and
-`framegrabber.circBuffLength=256` settings on that producer, and
-`parameters.frequency=28` on the observer. Do not start a second `acc000`
-producer. Changing retention requires an owner-coordinated producer restart;
-the observer never requests it. With depth one, record loss/warmup failures as
-the expected transport limitation. This app does not arm or change the
-simulator's separate DM injection.
-
-In a dedicated operator terminal:
-
-```sh
-/opt/MagAOX/bin/accelFFCtrl -n accelFFCtrl-observe \
-  -c /opt/MagAOX/config/accelFFCtrl-observe.conf
-```
-
-For an isolated INDI connection, choose an unused port (7625 here) and a new
-symlink. Do not attach a second xindidriver to an already managed FIFO or restart
-the production INDI server. In a second operator terminal:
-
-```sh
-ln -s /opt/MagAOX/bin/xindidriver /tmp/accelFFCtrl-observe
-indiserver -p 7625 /tmp/accelFFCtrl-observe
-```
-
-In a third operator terminal:
-
-```sh
-getINDI -h localhost -p 7625 'accelFFCtrl-observe.input.*'
-getINDI -h localhost -p 7625 'accelFFCtrl-observe.diagnostics.*'
-setINDI -h localhost -p 7625 'accelFFCtrl-observe.estimator_reset.request=On'
-```
-
-Observe at least ten minutes under representative load. Record throughput,
-acquisition rate, drops/invalids, races, resets, age, producer delay and service
-time. A qualified retained-ring run should approach 8-kHz accepted throughput,
-become ready after warmup, and remain fresh without gaps. Depth one cannot
-establish every-frame consumption. Change frequency/memory through `.target`
-and confirm owner-applied acknowledgement, cleared estimates, and warmup. Have
-the producer owner exercise a controlled pause/restart only when appropriate;
-confirm stale status, new generation and warmup. Stop the observer with Ctrl-C,
-stop its isolated indiserver, and remove the temporary symlink. Existing
-applications retain ownership of the ADC producer and all actuator streams.
+The native stream test source passes a macOS syntax check against cached
+ImageStreamIO headers (with macOS semaphore deprecation warnings), which does
+not validate installed Linux ABI or semaphore behavior. The full app build
+fails first in existing framework `timegm` and missing mxlib
+`mx/math/floatUtils.hpp` dependencies. Linux application/configuration/INDI and
+native runtime tests are pending; the handoff gives their exact commands.
+The numerical model/input processor, existing configuration and simulator/AO
+sources are unchanged. Full reproduction and review findings are appended to
+the engineering plan.
 
 ## Numerical input, units, and timing
 

@@ -8,7 +8,7 @@ BUILD_DIR ?= /tmp/accelFFCtrl-numerics
 REPO_ROOT := ../../..
 MODEL := ../accelFFCtrlModel.hpp
 INPUT := ../accelFFCtrlInput.hpp
-SOURCES := accelFFCtrlModel_test.cpp accelFFCtrlReplay_test.cpp accelFFCtrlInput_test.cpp accelFFCtrlValidation_test.cpp accelFFCtrlGap_test.cpp accelFFCtrlJitter_test.cpp accelFFCtrlCancellation_test.cpp accelFFCtrlShadow_test.cpp $(REPO_ROOT)/tests/testMain.cpp
+SOURCES := accelFFCtrlModel_test.cpp accelFFCtrlReplay_test.cpp accelFFCtrlInput_test.cpp accelFFCtrlValidation_test.cpp accelFFCtrlGap_test.cpp accelFFCtrlJitter_test.cpp accelFFCtrlCancellation_test.cpp accelFFCtrlShadow_test.cpp accelFFCtrlShadowMonitor_test.cpp $(REPO_ROOT)/tests/testMain.cpp
 TEST := $(BUILD_DIR)/accelFFCtrl_test
 BENCHMARK := $(BUILD_DIR)/accelFFCtrl_benchmark
 INPUT_BENCHMARK := $(BUILD_DIR)/accelFFCtrlInput_benchmark
@@ -31,7 +31,7 @@ all: $(TEST) $(BENCHMARK) $(INPUT_BENCHMARK)
 $(BUILD_DIR):
 	mkdir -p $@
 
-$(TEST): $(SOURCES) accelFFCtrlGap_test.hpp accelFFCtrlCancellation_test.hpp accelFFCtrlAO_test.hpp ../offline/accelFFCtrlCancellation.hpp ../offline/accelFFCtrlShadow.hpp $(MODEL) $(INPUT) ../../accelSim/accelSimModel.hpp ../../accelSim/accelSimDisturbance.hpp $(REPO_ROOT)/tests/testXWC.hpp | $(BUILD_DIR)
+$(TEST): $(SOURCES) accelFFCtrlGap_test.hpp accelFFCtrlCancellation_test.hpp accelFFCtrlAO_test.hpp ../offline/accelFFCtrlCancellation.hpp ../offline/accelFFCtrlShadow.hpp ../accelFFCtrlShadowMonitor.hpp $(MODEL) $(INPUT) ../../accelSim/accelSimModel.hpp ../../accelSim/accelSimDisturbance.hpp $(REPO_ROOT)/tests/testXWC.hpp | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(SOURCES) $(LDFLAGS) -o $@
 
 $(BENCHMARK): accelFFCtrl_benchmark.cpp $(MODEL) | $(BUILD_DIR)

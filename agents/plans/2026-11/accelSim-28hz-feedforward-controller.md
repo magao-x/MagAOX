@@ -4340,3 +4340,168 @@ an appropriate physical correlated-axis source model. Neither change is made
 to rescue this validation. Neighboring-band, headroom and physical plant/timing/
 WFS-to-DM qualification remain. No telescope access, real DM command, production
 shared-memory/configuration change, commit or push occurred.
+
+
+## Initial exao2 shadow-test readiness review (2026-11-06)
+
+### Scope and code-grounded findings
+
+Prepared a human-operated transport/timing test, not deployment or actuation.
+The latest `offline/CLOSED_LOOP_VALIDATION.md` remains a no-go for general
+paired two-axis correction: useful 28-Hz tip suppression does not remove the
+56-Hz/cross-axis and neighboring-band failures. No new optimization, calibration
+topology, second carrier, hardware constant or DM writer is introduced here.
+
+Reviewed `accelFFCtrl.hpp` lifecycle, INDI configuration and worker ownership;
+`accelFFCtrlInput.hpp` counter/timestamp/reset/freshness path;
+`accelFFCtrlStream.hpp` ImageStreamIO attachment/bracketing; and
+`accelFFCtrlModel.hpp` ADC units and `target = query + horizon` prediction.
+The input is exactly CPU UINT16 `(2,1)` or `(2,1,D)`, ADC indices 0/1, positive
+polarity. The historical eight-channel telescope recording cannot be attached
+by this app. Clock translation is the existing fixed realtime/monotonic anchor;
+phase includes acquisition age once. The estimator remains single-carrier and
+does not load the offline frequency-dependent phase/WFS calibration.
+
+Verified the producer contract in `libMagAOX/app/dev/frameGrabber.hpp`: write
+flag, payload, realtime writetime, producer-supplied acquisition time, global
+counter/index, optional temporal-plane metadata, clear write, semaphore post.
+`camwfs_sync` is a repository timing example, not evidence of a currently
+available/correctly timestamped exao2 stream. WFS acquisition versus exposure
+center and cross-host clock semantics still require operator confirmation.
+
+Reviewed native `dmMode.hpp::sendCommand` modal synthesis and explicit
+ImageStreamIO payload-copy/counter/post sequence. None of that writer, DM
+mapping or AO command interface is called by the observer. Existing INDI macros,
+framework logger, threadStart/join and xindidriver basename/FIFO conventions are
+retained. The numerical offline `shadowCommand` requires explicit calibration
+maps/provenance; it is deliberately not wired into the native app using an
+invented identity DM calibration. Native shadow diagnostics are instead
+explicit opposing model-coordinate values, never modal coefficients.
+
+### Minimal optional shadow diagnostics
+
+Added `accelFFCtrlShadowMonitor.hpp` with disabled-by-default settings, gain
+zero, immutable snapshot validity evaluation and exclusive mode-0600 CSV
+ownership. `shadow.enabled` is a startup opt-in; it requires a separate,
+non-DM WFS timing source and a new absolute `.csv` filename. Gain [0,1] is a
+file diagnostic scale, not hardware protection. There are no new arbitrary
+actuator/P2V limits. Real ADC/lever/rotation/WFS-to-DM calibration remains absent.
+
+The ordinary app loop optionally attaches WFS metadata using the existing
+ImageStreamIO wrapper with semaphore claiming/flushing disabled. It never
+interprets WFS pixels, modifies the AO state or publishes any image. The native
+library still uses its ordinary writable input mapping; metadata-only describes
+the consumer code, not an OS read-only mmap guarantee. Backing inode/device
+replacement, observed counter rollback, changed duplicate acquisition stamps
+or backwards time invalidate WFS diagnostics and cause reattachment, separately
+from the unmodified ADC estimator. Metadata sampling at 5 Hz cannot enumerate
+WFS losses or measure its vibration spectrum.
+
+Every proposal is freshly evaluated as `-gain * predicted_pointing` in
+**uncalibrated model radians**. Invalid/nonfinite, stale, future-source,
+pending-reset/configuration and past-target estimates produce zero. Missing or
+stale WFS metadata independently inhibits proposals. After WFS copy/attachment,
+a fresh bracketed clock gates validity and records timing so attachment latency
+cannot reuse an already expired target. The native prediction horizon itself is
+unchanged. No logging or INDI operations enter the ADC worker. App-loop file
+flushes can block that ordinary loop; the worker retains its existing try-lock
+behavior. This file is not a real-time command transport.
+
+Read-only `output` reports mode, uncalibrated basis, WFS identities/stamps,
+log path and `dm_output=unavailable`. Read-only `shadow` reports model proposals,
+unit-gain counterfactuals, WFS age/validity and constant `dm_output_enabled=0`.
+The CSV preserves integer source counters/generations/revision, ADC sample,
+prediction query/target, recording clocks/uncertainty, WFS original stamps,
+drop/reset/event/service/horizon diagnostics and all applied numerical settings.
+Controlled shutdown appends a zero invalid record; existing files/symlinks are
+never overwritten. The initial procedure retains gain zero, default gap policy
+false and existing depth one. These diagnostics do not establish optical sign,
+exposure-center phase or calibrated correction performance.
+
+### Validation and reproduction
+
+On this macOS workstation:
+
+- Standalone controller C++: **37 cases / 3,440,712 assertions passed**.
+- Combined numerical controller/simulator with mock sinks under ASan+UBSan:
+  **71 cases / 3,677,310 assertions passed**, no sanitizer errors.
+- **61 controller Python and four simulator PSD tests passed**, including
+  existing file-only telemetry, phase/response and short closed-loop regressions.
+  The existing compiled file tools match the unchanged numerical sources.
+- Four new C++ cases / 77 assertions exercise defaults, sign/gain, integrity
+  inhibition, exclusive CSV/symlink handling, exact counters and shutdown zeros.
+- Allocation-guarded benchmarks pass: 8-kHz/2-kHz harmonic work about 0.144 us
+  per source sample; synthetic input processing about 0.126 us at 8 kHz and
+  0.201 us at 4 kHz. No per-sample allocations. These workstation timings exclude
+  native transport, OS scheduling and shadow CSV and are not an exao2 deadline
+  or zero-loss claim.
+- Expanded native test source syntax-checks against locally cached ImageStreamIO
+  headers; macOS warns that `sem_getvalue` is deprecated. **No Linux native
+  runtime test was performed.** Added fixtures check metadata-only depth-one/
+  retained input, busy publication, restart, float payload non-interference and
+  unchanged WFS reader ownership/post counts.
+- Added framework configuration assertions for old/default config, the new
+  disabled template, valid startup opt-in and invalid shadow settings, plus RO
+  unavailable-output checks. **These framework tests remain Linux-pending.**
+- Full `make -C apps/accelFFCtrl` stops in existing framework dependencies:
+  undeclared `timegm` and absent installed mxlib `mx/math/floatUtils.hpp`, before
+  compiling the application. Do not infer Linux compile success from pure tests.
+- `git diff --check` and shell syntax checks pass. Model/input/simulator/AO
+  sources and the existing `config/example.conf` remain unchanged.
+
+Core commands (checkout root):
+
+```bash
+make -C apps/accelFFCtrl/tests BUILD_DIR=/tmp/accelFFCtrl-deployment-readiness test benchmark
+OPENBLAS_NUM_THREADS=1 \
+  ACCELFFCTRL_CLOSED_LOOP=/tmp/accelFFCtrl-closed-loop/accelFFCtrlClosedLoop_export \
+  ACCELFFCTRL_TELEMETRY_REPLAY=/tmp/accelFFCtrl-closed-loop/accelFFCtrlTelemetry_replay \
+  ACCELFFCTRL_RESPONSE_REPLAY=/tmp/accelFFCtrl-closed-loop/accelFFCtrlResponse_replay \
+  make -C apps/accelFFCtrl/tests validation-test PYTHON=python
+python -m unittest discover -s apps/accelSim/tests -p test_validate_psd.py -v
+```
+
+Build the three file tools with `closed-loop-tools telemetry-tools response-tools`
+if the prior-phase binaries are unavailable. Combined sanitizer reproduction:
+
+```bash
+make -C apps/accelFFCtrl/tests \
+  BUILD_DIR=/tmp/accelFFCtrl-deployment-readiness-asan \
+  /tmp/accelFFCtrl-deployment-readiness-asan/accelFFCtrl_test \
+  CXXFLAGS='-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer' \
+  CPPFLAGS="$(pkg-config --cflags eigen3) -D_GNU_SOURCE -DACCELSIM_MODEL_ONLY" \
+  SOURCES='accelFFCtrlModel_test.cpp accelFFCtrlReplay_test.cpp accelFFCtrlInput_test.cpp accelFFCtrlValidation_test.cpp accelFFCtrlGap_test.cpp accelFFCtrlJitter_test.cpp accelFFCtrlCancellation_test.cpp accelFFCtrlShadow_test.cpp accelFFCtrlShadowMonitor_test.cpp ../../accelSim/tests/accelSim_test.cpp ../../accelSim/tests/accelSimDisturbance_test.cpp ../../accelSim/tests/accelSimDM_test.cpp ../../../tests/testMain.cpp'
+ASAN_OPTIONS=halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
+  /tmp/accelFFCtrl-deployment-readiness-asan/accelFFCtrl_test '[accelFFCtrl],[accelSim]'
+```
+
+### Operator handoff and remaining blockers
+
+New `apps/accelFFCtrl/EXAO2_TESTING.md` provides prerequisites, explicit manual
+Linux app/framework/private-native/sanitizer commands, configuration-only
+validation, unique-name foreground startup, isolated INDI port/driver checks,
+telemetry expectations, controlled shutdown and pass/fail/return-data criteria.
+The separate `config/exao2-shadow-example.conf` is a disabled private template,
+not a production configuration change; WFS name and log path are deliberately
+empty. Simulator constants are labeled, and actual producer rate/geometry/
+calibration/clock semantics must be verified, not assumed from historical tests.
+The README's old install/production-config/buffer-256 startup recipe is replaced
+with this no-install, unchanged-depth-one handoff.
+
+Native application/INDI and private ImageStreamIO tests must pass first with
+matching site headers/library. `validate_linux.sh` still refuses instrument
+hostnames; its new sanitizer source list includes the shadow monitor tests, but
+the user should run the handoff's selected manual commands on exao2. No agent
+instrument execution is allowed. Framework writable paths, unique identity,
+WFS timestamp semantics and physical sensor constants remain unresolved site
+checks. Initial 10-minute observation is justified only after these checks;
+it cannot authorize a DM connection or claim vibration suppression. No host
+connection, instrument command, install, producer restart, configuration
+replacement, physical DM write, commit or push was performed.
+
+Affected files: native `accelFFCtrl.hpp`, `accelFFCtrlStream.hpp`, new
+`accelFFCtrlShadowMonitor.hpp`; app/test Makefiles and `tests/Makefile.one`;
+new shadow-monitor unit tests, application/native test extensions and Linux
+sanitizer source registration; private example, `EXAO2_TESTING.md`, README and
+this engineering record. Existing algorithms and default gap behavior remain
+unchanged.

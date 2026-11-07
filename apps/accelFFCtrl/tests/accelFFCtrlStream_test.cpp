@@ -27,6 +27,7 @@ class nativeInput
 {
     bool     m_created{ false }; ///< Destruction is permitted only after this fixture created the image.
     uint32_t m_depth, m_axes;    ///< Original fixture geometry, reused only for a controlled private restart.
+    uint8_t  m_datatype;         ///< Fixture payload allocation type; metadata monitoring must not interpret it.
 
     /// Verify the private namespace and create this fixture's synthetic image.
     void create();
@@ -38,7 +39,8 @@ class nativeInput
 
     /// Create a small temporal raw-pair ring; MILK_SHM_DIR must already select an empty private directory.
     explicit nativeInput( uint32_t depth /**< [in] retained pair count */,
-                          uint32_t axes = 3 /**< [in] temporal cube or depth-one two-dimensional image */ );
+                          uint32_t axes     = 3 /**< [in] temporal cube or depth-one two-dimensional image */,
+                          uint8_t  datatype = _DATATYPE_UINT16 /**< [in] native allocation type */ );
 
     /// Destroy only this fixture's private synthetic image.
     ~nativeInput();
@@ -52,7 +54,8 @@ class nativeInput
                   std::array<uint16_t, 2> codes /**< [in] raw pair */ );
 };
 
-nativeInput::nativeInput( uint32_t depth, uint32_t axes ) : m_depth( depth ), m_axes( axes )
+nativeInput::nativeInput( uint32_t depth, uint32_t axes, uint8_t datatype )
+    : m_depth( depth ), m_axes( axes ), m_datatype( datatype )
 {
     static unsigned serial = 0;
     m_name                 = "accff-private-" + std::to_string( getpid() ) + "-" + std::to_string( ++serial );
@@ -77,7 +80,7 @@ void nativeInput::create()
                                          m_name.c_str(),
                                          m_axes,
                                          size,
-                                         _DATATYPE_UINT16,
+                                         m_datatype,
                                          -1,
                                          1,
                                          IMAGE_NB_SEMAPHORE,
@@ -157,6 +160,55 @@ nativeChild::~nativeChild()
 }
 #endif
 /// \endcond
+
+/** \brief WFS metadata monitoring never claims/flushed semaphores or reads/changes the payload, including float images.
+ * \ingroup accelFFCtrl_unit_test
+ */
+TEST_CASE( "accelFFCtrl private metadata-only WFS attachment", "[.][accelFFCtrl-native]" )
+{
+    constexpr int64_t epoch = 1700000000000000000;
+    for( uint32_t depth : { 1, 8 } )
+    {
+        nativeInput producer( depth );
+        producer.publish( 1, epoch, { 123, 456 } );
+        const auto owner = producer.m_image.semReadPID[5];
+        int        posts = 0, after = 0;
+        REQUIRE( sem_getvalue( producer.m_image.semptr[5], &posts ) == 0 );
+        adcStream reader;
+        REQUIRE( reader.open( producer.m_name, false ) );
+        REQUIRE( producer.m_image.semReadPID[5] == owner );
+        inputFrame frame;
+        REQUIRE( reader.timing( frame ) );
+        REQUIRE( frame.m_counter == 1 );
+        REQUIRE( frame.m_acquired.tv_sec == epoch / 1000000000 );
+        REQUIRE( frame.m_adc == std::array<uint16_t, 2>{} );
+        REQUIRE( producer.m_image.array.UI16[0] == 123 );
+        producer.m_image.md->write = 1;
+        REQUIRE_FALSE( reader.timing( frame ) );
+        producer.m_image.md->write = 0;
+        REQUIRE( sem_getvalue( producer.m_image.semptr[5], &after ) == 0 );
+        REQUIRE( after == posts );
+        reader.close();
+        REQUIRE( producer.m_image.semReadPID[5] == owner );
+        producer.restart();
+        REQUIRE( reader.open( producer.m_name, false ) );
+        REQUIRE_FALSE( reader.timing( frame ) );
+        producer.publish( 1, epoch + 1000000, { 111, 222 } );
+        REQUIRE( reader.timing( frame ) );
+        REQUIRE( frame.m_acquired.tv_nsec == 1000000 );
+    }
+    nativeInput camera( 1, 2, _DATATYPE_FLOAT );
+    camera.m_image.array.F[0]    = 1.25f;
+    camera.m_image.md->cnt0      = 1;
+    camera.m_image.md->atime     = { epoch / 1000000000, 0 };
+    camera.m_image.md->writetime = { epoch / 1000000000, 10000 };
+    adcStream  reader;
+    inputFrame frame;
+    REQUIRE( reader.open( camera.m_name, false ) );
+    REQUIRE( reader.timing( frame ) );
+    REQUIRE_FALSE( reader.header().m_uint16 );
+    REQUIRE( camera.m_image.array.F[0] == 1.25f );
+}
 
 /** \brief Native reader copies all retained pairs and leaves producer payload/metadata intact, including depth-one
  * loss.

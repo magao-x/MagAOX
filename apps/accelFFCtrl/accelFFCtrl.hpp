@@ -17,6 +17,7 @@
 #include "../../libMagAOX/libMagAOX.hpp"
 #include "../../magaox_git_version.h"
 #include "accelFFCtrlStream.hpp"
+#include "accelFFCtrlShadowMonitor.hpp"
 
 namespace MagAOX
 {
@@ -47,12 +48,25 @@ class accelFFCtrl : public MagAOXApp<true>
     std::atomic<bool> m_run{ false }, m_stop{ false }, m_failed{ false },
         m_invalidate{ false };                         ///< Lifecycle/probe handoff.
     std::atomic<uint64_t> m_inode{ 0 }, m_device{ 0 }; ///< Mapping identity for supervision; zero means disconnected.
-    pcf::IndiProperty     m_indiP_thread, m_indiP_reset, m_indiP_diagnostics,
+    accelFFCtrlDetail::shadowSettings m_shadow;        ///< Optional startup-only diagnostic mode; no actuator controls.
+    accelFFCtrlDetail::adcStream m_wfsStream; ///< App-thread-owned metadata-only WFS attachment; no reader semaphore.
+    accelFFCtrlDetail::wfsTiming m_wfsTiming; ///< Latest observed WFS metadata, independent of the estimator.
+    accelFFCtrlDetail::shadowLog m_shadowLog; ///< Exclusive regular file, written only at app/INDI cadence.
+    std::string                  m_wfsPath;   ///< Backing path used only for WFS attachment supervision.
+    int64_t  m_wfsRetry{ 0 }, m_lastWfsTime{ 0 };         ///< Reattach deadline and last stable acquisition timestamp.
+    uint64_t m_lastWfsCounter{ 0 }, m_wfsGeneration{ 0 }; ///< Observed metadata continuity and attachment epoch.
+    pcf::IndiProperty m_indiP_thread, m_indiP_reset, m_indiP_diagnostics,
         m_indiP_input;                                    ///< Thread/reset/read-only status.
+    pcf::IndiProperty m_indiP_shadow, m_indiP_output;     ///< Read-only diagnostics and explicit unavailable DM output.
     std::array<pcf::IndiProperty, 11> m_indiP_parameters; ///< Standard current/target numeric controls.
 
     /// Define controls/status separately from starting the input worker, for tests.
     int setupProperties();
+
+    /// Supervise WFS metadata and emit optional file-only proposals without touching the ADC owner or AO state.
+    int updateShadow( const accelFFCtrlDetail::inputDiagnostics &snapshot /**< [in] owner snapshot */,
+                      const accelFFCtrlDetail::inputClock       &clock /**< [in] current bracketed clocks */,
+                      bool pending /**< [in] estimator control revision awaits application */ );
 
     /// Apply the newest coherent request without blocking the worker on callbacks.
     void applyRequested();
@@ -138,6 +152,14 @@ inline void accelFFCtrl::setupConfig()
     add( "maxAge_us", "double", "Maximum retained acquisition age, default 2000 us." );
     add( "maxInterval_us", "double", "Maximum consecutive acquisition interval, default 2000 us." );
     add( "maxPrediction_ms", "double", "Numerical forward prediction bound, default 50 ms." );
+    const auto shadow = [this]( const std::string &key, const std::string &type, const std::string &description )
+    { config.add( "shadow." + key, "", "shadow." + key, argType::Required, "shadow", key, false, type, description ); };
+    shadow( "enabled", "bool", "Explicit file-only shadow opt-in, default false. No DM output exists." );
+    shadow( "wfsShmimName", "string", "Operator-verified existing WFS timing stream; required only in shadow mode." );
+    shadow( "logFile", "string", "New absolute .csv diagnostic file; existing files and symlinks are rejected." );
+    shadow(
+        "gain", "double", "File-only opposing model-coordinate gain in [0,1], default zero; not a DM calibration." );
+    shadow( "maxWfsAge_us", "double", "WFS metadata freshness bound, default 2000 us; not exposure-center alignment." );
 }
 
 inline int accelFFCtrl::loadConfigImpl( mx::app::appConfigurator &configuration )
@@ -186,6 +208,19 @@ inline int accelFFCtrl::loadConfigImpl( mx::app::appConfigurator &configuration 
                 throw std::invalid_argument( "invalid numerical control" );
         }
         harmonicEstimator validate( m_requested );
+        if( configuration.isSet( "shadow.enabled" ) )
+        {
+            std::string enabled;
+            configuration( enabled, "shadow.enabled" );
+            if( !singleFrameGapSetting( m_shadow.m_enabled, enabled ) )
+                throw std::invalid_argument( "shadow.enabled requires true/false or 1/0" );
+        }
+        configuration( m_shadow.m_wfsName, "shadow.wfsShmimName" );
+        configuration( m_shadow.m_logFile, "shadow.logFile" );
+        configuration( m_shadow.m_gain, "shadow.gain" );
+        configuration( m_shadow.m_maxWfsAgeUs, "shadow.maxWfsAge_us" );
+        if( !m_shadow.valid() || ( m_shadow.m_enabled && m_shadow.m_wfsName == m_inputName ) )
+            throw std::invalid_argument( "invalid file-only shadow settings" );
         m_loopPause                      = static_cast<unsigned long>( 1e9 / m_telemetryFps );
         m_snapshot.m_config              = m_requested;
         m_snapshot.m_allowSingleFrameGap = m_allowSingleFrameGap;
@@ -277,6 +312,42 @@ inline int accelFFCtrl::setupProperties()
         m_indiP_input.add( pcf::IndiElement( name ) );
     m_indiP_input["stream"] = m_inputName;
     m_indiP_input["mode"]   = "observation only";
+    if( createROIndiText( m_indiP_output, "output", "mode", "Non-actuating output", "Diagnostics" ) < 0 ||
+        registerIndiPropertyReadOnly( m_indiP_output ) < 0 )
+        return -1;
+    for( const char *name : { "dm_output",
+                              "basis",
+                              "wfs_stream",
+                              "wfs_counter",
+                              "wfs_generation",
+                              "wfs_acquisition_realtime_ns",
+                              "wfs_write_realtime_ns",
+                              "log_file" } )
+        m_indiP_output.add( pcf::IndiElement( name ) );
+    m_indiP_output["mode"]       = m_shadow.m_enabled ? "shadow file only" : "observation only";
+    m_indiP_output["dm_output"]  = "unavailable";
+    m_indiP_output["basis"]      = "uncalibrated model pointing; no WFS-to-DM mapping";
+    m_indiP_output["wfs_stream"] = m_shadow.m_wfsName;
+    m_indiP_output["log_file"]   = m_shadow.m_logFile;
+    CREATE_REG_INDI_RO_NUMBER( m_indiP_shadow, "shadow", "File-only model diagnostics", "Diagnostics" );
+    for( const char *name : { "enabled",
+                              "gain",
+                              "valid",
+                              "wfs_valid",
+                              "wfs_age_us",
+                              "unit_gain_tip_model_rad",
+                              "unit_gain_tilt_model_rad",
+                              "proposed_tip_model_rad",
+                              "proposed_tilt_model_rad",
+                              "dm_output_enabled" } )
+    {
+        m_indiP_shadow.add( pcf::IndiElement( name ) );
+        m_indiP_shadow[name] = 0.;
+    }
+    m_indiP_shadow["enabled"]    = double( m_shadow.m_enabled );
+    m_indiP_shadow["gain"]       = m_shadow.m_gain;
+    m_indiP_shadow["wfs_age_us"] = -1.;
+    m_indiP_shadow.setState( m_shadow.m_enabled ? INDI_BUSY : INDI_IDLE );
     return 0;
 }
 
@@ -288,6 +359,15 @@ inline int accelFFCtrl::appStartup()
     if( ImageStreamIO_filename( path, sizeof( path ), m_inputName.c_str() ) != 0 )
         return -1;
     m_inputPath = path;
+    if( m_shadow.m_enabled )
+    {
+        if( ImageStreamIO_filename( path, sizeof( path ), m_shadow.m_wfsName.c_str() ) != 0 ||
+            !m_shadowLog.open( m_shadow.m_logFile ) )
+            return log<software_error, -1>( { __FILE__, __LINE__, "cannot create exclusive shadow CSV" } );
+        m_wfsPath = path;
+        log<text_log>( "Shadow diagnostics enabled: model-coordinate file only; DM output unavailable",
+                       logPrio::LOG_NOTICE );
+    }
     m_runtime.emplace( m_requested, m_maxBatch, std::llround( m_clockToleranceUs * 1e3 ), m_allowSingleFrameGap );
     state( stateCodes::OPERATING );
     if( threadStart( m_thread,
@@ -471,6 +551,8 @@ inline int accelFFCtrl::appLogic()
     }
     std::lock_guard<std::mutex> guard( m_controlMutex );
     const bool                  pending = snapshot.m_revision != m_revision;
+    if( updateShadow( snapshot, clock, pending || clock.m_uncertainty > m_clockToleranceUs * 1e3 ) < 0 )
+        return -1;
     for( size_t n = 0; n < parameterNames.size(); ++n )
     {
         auto &property      = m_indiP_parameters[n];
@@ -564,6 +646,8 @@ inline int accelFFCtrl::appLogic()
         m_indiDriver->sendSetProperty( m_indiP_reset );
         m_indiDriver->sendSetProperty( m_indiP_diagnostics );
         m_indiDriver->sendSetProperty( m_indiP_input );
+        m_indiDriver->sendSetProperty( m_indiP_shadow );
+        m_indiDriver->sendSetProperty( m_indiP_output );
     }
     return 0;
 }
@@ -574,6 +658,92 @@ inline int accelFFCtrl::appShutdown()
     m_run  = true;
     if( m_thread.joinable() )
         m_thread.join();
+    if( m_shadow.m_enabled )
+    {
+        accelFFCtrlDetail::inputClock clock;
+        readClock( clock );
+        auto status = accelFFCtrlDetail::evaluateShadow( m_shadow, m_snapshot, clock, m_wfsTiming, true );
+        m_shadowLog.write( m_snapshot, clock, m_wfsTiming, status, true );
+        m_shadowLog.close();
+    }
+    m_wfsStream.close();
+    return 0;
+}
+
+inline int accelFFCtrl::updateShadow( const accelFFCtrlDetail::inputDiagnostics &snapshot,
+                                      const accelFFCtrlDetail::inputClock       &clock,
+                                      bool                                       pending )
+{
+    using namespace accelFFCtrlDetail;
+    m_wfsTiming              = {};
+    m_wfsTiming.m_generation = m_wfsGeneration;
+    if( m_shadow.m_enabled )
+    {
+        if( m_wfsStream.inode() )
+        {
+            struct stat backing;
+            if( stat( m_wfsPath.c_str(), &backing ) != 0 || backing.st_ino != m_wfsStream.inode() ||
+                backing.st_dev != m_wfsStream.device() )
+            {
+                m_wfsStream.close();
+                m_lastWfsCounter = 0;
+                m_lastWfsTime    = 0;
+            }
+        }
+        if( !m_wfsStream.inode() && clock.m_mono >= m_wfsRetry )
+        {
+            m_wfsRetry = clock.m_mono + 1000000000;
+            if( m_wfsStream.open( m_shadow.m_wfsName, false ) )
+                m_wfsTiming.m_generation = ++m_wfsGeneration;
+        }
+        inputFrame frame;
+        if( m_wfsStream.timing( frame ) )
+        {
+            m_wfsTiming.m_counter = frame.m_counter;
+            m_wfsTiming.m_valid   = inputProcessor::timeNs( frame.m_acquired, m_wfsTiming.m_acquired ) &&
+                                    inputProcessor::timeNs( frame.m_written, m_wfsTiming.m_written );
+            const bool continuity =
+                !m_lastWfsCounter ||
+                ( frame.m_counter >= m_lastWfsCounter && m_wfsTiming.m_acquired >= m_lastWfsTime &&
+                  ( frame.m_counter == m_lastWfsCounter ? m_wfsTiming.m_acquired == m_lastWfsTime
+                                                        : m_wfsTiming.m_acquired > m_lastWfsTime ) );
+            if( !continuity || !m_wfsTiming.m_valid )
+            {
+                m_wfsTiming.m_valid = false;
+                m_wfsStream.close();
+                m_lastWfsCounter = 0;
+                m_lastWfsTime    = 0;
+            }
+            else
+            {
+                m_lastWfsCounter = frame.m_counter;
+                m_lastWfsTime    = m_wfsTiming.m_acquired;
+            }
+        }
+    }
+    // WFS attachment/copy can take time. Gate and record against a fresh post-copy clock, not the earlier probe.
+    inputClock recorded = clock;
+    if( m_shadow.m_enabled && !readClock( recorded ) )
+        recorded = {};
+    const auto status = evaluateShadow(
+        m_shadow, snapshot, recorded, m_wfsTiming, pending || recorded.m_uncertainty > m_clockToleranceUs * 1e3 );
+    m_indiP_shadow["enabled"]                  = double( m_shadow.m_enabled );
+    m_indiP_shadow["gain"]                     = m_shadow.m_gain;
+    m_indiP_shadow["valid"]                    = double( status.m_valid );
+    m_indiP_shadow["wfs_valid"]                = double( status.m_wfsValid );
+    m_indiP_shadow["wfs_age_us"]               = status.m_wfsAgeUs;
+    m_indiP_shadow["unit_gain_tip_model_rad"]  = status.m_unitGain[0];
+    m_indiP_shadow["unit_gain_tilt_model_rad"] = status.m_unitGain[1];
+    m_indiP_shadow["proposed_tip_model_rad"]   = status.m_proposed[0];
+    m_indiP_shadow["proposed_tilt_model_rad"]  = status.m_proposed[1];
+    m_indiP_shadow["dm_output_enabled"]        = 0.;
+    m_indiP_shadow.setState( !m_shadow.m_enabled ? INDI_IDLE : status.m_valid ? INDI_OK : INDI_ALERT );
+    m_indiP_output["wfs_counter"]                 = std::to_string( m_wfsTiming.m_counter );
+    m_indiP_output["wfs_generation"]              = std::to_string( m_wfsTiming.m_generation );
+    m_indiP_output["wfs_acquisition_realtime_ns"] = std::to_string( m_wfsTiming.m_acquired );
+    m_indiP_output["wfs_write_realtime_ns"]       = std::to_string( m_wfsTiming.m_written );
+    if( m_shadow.m_enabled && !m_shadowLog.write( snapshot, recorded, m_wfsTiming, status ) )
+        return log<software_error, -1>( { __FILE__, __LINE__, "shadow CSV write failed" } );
     return 0;
 }
 

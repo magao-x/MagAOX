@@ -24,8 +24,10 @@ struct observerApp : MagAOX::app::accelFFCtrl
     using accelFFCtrl::m_configName;
     using accelFFCtrl::m_device;
     using accelFFCtrl::m_indiP_diagnostics;
+    using accelFFCtrl::m_indiP_output;
     using accelFFCtrl::m_indiP_parameters;
     using accelFFCtrl::m_indiP_reset;
+    using accelFFCtrl::m_indiP_shadow;
     using accelFFCtrl::m_inode;
     using accelFFCtrl::m_inputName;
     using accelFFCtrl::m_inputPath;
@@ -34,6 +36,7 @@ struct observerApp : MagAOX::app::accelFFCtrl
     using accelFFCtrl::m_requested;
     using accelFFCtrl::m_revision;
     using accelFFCtrl::m_runtime;
+    using accelFFCtrl::m_shadow;
     using accelFFCtrl::m_snapshot;
     using accelFFCtrl::setupProperties;
 
@@ -84,6 +87,14 @@ TEST_CASE( "accelFFCtrl application configuration", "[accelFFCtrl][app]" )
         REQUIRE( app.m_loopPause == 200000000 );
         REQUIRE_FALSE( app.m_allowSingleFrameGap );
         REQUIRE_FALSE( app.m_snapshot.m_allowSingleFrameGap );
+        REQUIRE_FALSE( app.m_shadow.m_enabled );
+        REQUIRE( app.m_shadow.m_gain == 0 );
+        const auto shadowExample = std::filesystem::path( example ).parent_path() / "exao2-shadow-example.conf";
+        REQUIRE( std::filesystem::exists( shadowExample ) );
+        app.config.readConfig( shadowExample.string() );
+        REQUIRE( app.loadConfigImpl( app.config ) == 0 );
+        REQUIRE_FALSE( app.m_shadow.m_enabled );
+        REQUIRE( app.m_shadow.m_gain == 0 );
     }
     for( const std::string text : { "[input]\nshmimName=dm01disp00\n",
                                     "[input]\nmaxBatch=0\n",
@@ -94,7 +105,14 @@ TEST_CASE( "accelFFCtrl application configuration", "[accelFFCtrl][app]" )
                                     "[parameters]\nfrequency=0\n",
                                     "[parameters]\nprediction_horizon=51\n",
                                     "[parameters]\nadc_sensitivity_x=0\n",
-                                    "[parameters]\nadc_zero_x=nan\n" } )
+                                    "[parameters]\nadc_zero_x=nan\n",
+                                    "[shadow]\nenabled=truse\n",
+                                    "[shadow]\nenabled=true\n",
+                                    "[shadow]\ngain=-0.1\n",
+                                    "[shadow]\ngain=1.1\n",
+                                    "[shadow]\nenabled=true\nwfsShmimName=dm01disp00\nlogFile=/tmp/test.csv\n",
+                                    "[shadow]\nenabled=true\nwfsShmimName=acc000\nlogFile=/tmp/test.csv\n",
+                                    "[shadow]\nenabled=true\nwfsShmimName=fixture-wfs\nlogFile=relative.csv\n" } )
     {
         char      path[] = "/tmp/accelFFCtrl-config-XXXXXX";
         const int fd     = mkstemp( path );
@@ -114,6 +132,37 @@ TEST_CASE( "accelFFCtrl application configuration", "[accelFFCtrl][app]" )
 #ifdef ACCELFFCTRL_TEST_DOXYGEN_REF
     MagAOX::app::accelFFCtrl::setupConfig;
     MagAOX::app::accelFFCtrl::loadConfigImpl;
+#endif
+    // clang-format on
+}
+
+/** \brief Shadow startup configuration registers read-only model diagnostics without opening files or streams.
+ * \ingroup accelFFCtrl_unit_test
+ */
+TEST_CASE( "accelFFCtrl shadow configuration without startup", "[accelFFCtrl][app]" )
+{
+    observerApp app;
+    app.setupConfig();
+    char      path[] = "/tmp/accelFFCtrl-shadow-config-XXXXXX";
+    const int fd     = mkstemp( path );
+    REQUIRE( fd >= 0 );
+    close( fd );
+    {
+        std::ofstream file( path );
+        file << "[shadow]\nenabled=true\nwfsShmimName=fixture-wfs\nlogFile=/tmp/fixture-shadow.csv\ngain=0\n";
+    }
+    app.config.readConfig( path );
+    unlink( path );
+    REQUIRE( app.loadConfigImpl( app.config ) == 0 );
+    REQUIRE( app.m_shadow.m_enabled );
+    REQUIRE( app.m_shadow.m_gain == 0 );
+    REQUIRE( app.setupProperties() == 0 );
+    REQUIRE( app.m_indiP_output["mode"].get<std::string>() == "shadow file only" );
+    REQUIRE( app.m_indiP_output["dm_output"].get<std::string>() == "unavailable" );
+    // clang-format off
+#ifdef ACCELFFCTRL_TEST_DOXYGEN_REF
+    MagAOX::app::accelFFCtrl::loadConfigImpl;
+    MagAOX::app::accelFFCtrl::setupProperties;
 #endif
     // clang-format on
 }
@@ -157,6 +206,9 @@ TEST_CASE( "accelFFCtrl optional single-gap configuration and diagnostics", "[ac
     REQUIRE( app.m_indiP_diagnostics["rejected_gaps"].get<double>() == 2 );
     REQUIRE( app.m_indiP_diagnostics["full_resets"].get<double>() == 7 );
     REQUIRE( app.m_indiP_diagnostics["resets"].get<double>() == 7 );
+    REQUIRE( app.m_indiP_output["dm_output"].get<std::string>() == "unavailable" );
+    REQUIRE( app.m_indiP_shadow["enabled"].get<double>() == 0 );
+    REQUIRE( app.m_indiP_shadow["dm_output_enabled"].get<double>() == 0 );
 }
 
 /** \brief INDI changes remain pending until the numerical owner applies one coherent revision; invalid edits preserve

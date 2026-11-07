@@ -46,14 +46,19 @@ class adcStream
     /// Release only the reader slot and mapping.
     ~adcStream();
 
-    /// Attach a validated ADC-named existing stream and claim a reader semaphore; never creates an image.
-    bool open( const std::string &name /**< [in] non-DM input name */ );
+    /// Attach an existing non-DM stream, optionally claiming an ADC reader semaphore; never creates an image.
+    bool
+    open( const std::string &name /**< [in] non-DM input name */,
+          bool readerSemaphore = true /**< [in] false for metadata-only supervision, with no reader-slot writes */ );
 
     /// Return a bracketed metadata snapshot; native publication conventions are required.
     inputHeader header() const;
 
     /// Copy one complete plane's codes/counter/timestamps into local storage, within attached bounds.
     inputFrame frame( size_t index /**< [in] temporal plane */ ) const;
+
+    /// Copy only the latest counter/timestamps with a write/counter bracket; never interprets or accesses WFS pixels.
+    bool timing( inputFrame &value /**< [out] metadata-only owned snapshot */ ) const;
 
     /// Wait on a monotonic deadline, or use bounded relative polling; drain at most 256 additional posts after a wake.
     bool wait( int64_t deadline /**< [in] absolute monotonic deadline [ns] */ );
@@ -73,7 +78,7 @@ inline adcStream::~adcStream()
     close();
 }
 
-inline bool adcStream::open( const std::string &name )
+inline bool adcStream::open( const std::string &name, bool readerSemaphore )
 {
     close();
     if( !inputNameValid( name ) )
@@ -86,22 +91,53 @@ inline bool adcStream::open( const std::string &name )
         return false;
     m_open = true;
     if( stat( path, &after ) != 0 || before.st_dev != after.st_dev || before.st_ino != after.st_ino || !m_image.md ||
-        !m_image.semptr || !m_image.semReadPID || m_image.md->sem == 0 )
+        ( readerSemaphore && ( !m_image.semptr || !m_image.semReadPID || m_image.md->sem == 0 ) ) )
     {
         close();
         return false;
     }
-    m_depth     = m_image.md->naxis == 3 ? m_image.md->size[2] : 1;
-    m_semaphore = ImageStreamIO_getsemwaitindex( &m_image, 5 );
-    if( m_semaphore < 0 || m_semaphore >= m_image.md->sem || !m_image.semptr[m_semaphore] ||
-        m_image.semptr[m_semaphore] == SEM_FAILED )
+    m_depth = m_image.md->naxis == 3 ? m_image.md->size[2] : 1;
+    if( readerSemaphore )
     {
-        close();
-        return false;
+        m_semaphore = ImageStreamIO_getsemwaitindex( &m_image, 5 );
+        if( m_semaphore < 0 || m_semaphore >= m_image.md->sem || !m_image.semptr[m_semaphore] ||
+            m_image.semptr[m_semaphore] == SEM_FAILED )
+        {
+            close();
+            return false;
+        }
+        ImageStreamIO_semflush( &m_image, m_semaphore );
     }
     m_inode  = before.st_ino;
     m_device = before.st_dev;
-    ImageStreamIO_semflush( &m_image, m_semaphore );
+    return true;
+}
+
+inline bool adcStream::timing( inputFrame &value ) const
+{
+    value            = {};
+    const auto first = header();
+    if( !first.m_valid || !first.m_cpu || first.m_write || !first.m_counter || first.m_axes < 1 || first.m_axes > 3 ||
+        !first.m_depth || first.m_index >= first.m_depth )
+        return false;
+    if( m_depth > 1 )
+    {
+        value.m_counter  = m_image.cntarray[first.m_index];
+        value.m_acquired = m_image.atimearray[first.m_index];
+        value.m_written  = m_image.writetimearray[first.m_index];
+    }
+    else
+    {
+        value.m_counter  = m_image.md->cnt0;
+        value.m_acquired = m_image.md->atime;
+        value.m_written  = m_image.md->writetime;
+    }
+    std::atomic_thread_fence( std::memory_order_seq_cst );
+    if( first != header() || value.m_counter != first.m_counter )
+    {
+        value = {};
+        return false;
+    }
     return true;
 }
 
