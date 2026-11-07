@@ -1,7 +1,7 @@
 
 allall: all
 
-OTHER_HEADERS=bmcPipeline.hpp
+OTHER_HEADERS=bmcPipeline.hpp ../../libMagAOX/app/dev/dmSdkTimingStream.hpp
 TARGET=bmcCtrl
 
 BMC_PATH=/opt/Boston\ Micromachines

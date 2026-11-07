@@ -334,6 +334,40 @@ const char *BMCVersionString()
 #undef BMCCTRL_TEST_PIPELINE_VECTOR
 #undef BMCCTRL_TEST_PIPELINE_CAPTURE
 
+namespace bmcTimingTest
+{
+/// Close an independent metadata reader even when a test assertion unwinds.
+class TimingReader
+{
+    IMAGE m_image{}; ///< Reader attachment; never destroys the publisher's stream.
+
+  public:
+    /// Attach to a named test-owned stream without using its semaphore slots.
+    explicit TimingReader( const char *name /**< [in] Existing local stream name. */ );
+
+    /// Release the reader mapping and local ImageStreamIO allocation.
+    ~TimingReader();
+
+    /// Access test metadata for coherent reads and deliberate fault injection.
+    IMAGE *image();
+};
+
+TimingReader::TimingReader( const char *name )
+{
+    REQUIRE( ImageStreamIO_openIm( &m_image, name ) == 0 );
+}
+
+TimingReader::~TimingReader()
+{
+    ImageStreamIO_closeIm( &m_image );
+}
+
+IMAGE *TimingReader::image()
+{
+    return &m_image;
+}
+} // namespace bmcTimingTest
+
 namespace MagAOX
 {
 namespace app
@@ -355,6 +389,7 @@ class bmcCtrl_test : public bmcCtrl
     using bmcCtrl::m_sdkCpuset;
     using bmcCtrl::m_sdkTimeouts;
     using bmcCtrl::m_sdkTimeoutSec;
+    using bmcCtrl::startPipelineWorker;
     using bmcCtrl::startSdkWorker;
     using bmcCtrl::verifySdkThread;
     using MagAOXApp<true>::config;
@@ -378,6 +413,9 @@ class bmcCtrl_test : public bmcCtrl
     using bmcCtrl::m_rejectedInputs;
     using bmcCtrl::m_sdkFailures;
     using bmcCtrl::m_sdkFault;
+    using bmcCtrl::m_sdkStartTimeFailures;
+    using bmcCtrl::m_sdkStartTimeStream;
+    using bmcCtrl::m_sdkStartTimeStreamName;
     using bmcCtrl::m_sdkThread;
     using bmcCtrl::m_sdkThreadPrio;
     using bmcCtrl::m_sdkWorkerEnabled;
@@ -589,6 +627,7 @@ void bmcCtrl_test::enablePipeline()
     REQUIRE( m_dmCompletion.open( "bmc_pipeline_full" ) == 0 );
     REQUIRE( m_dmReaderRelease.open( "bmc_pipeline_read", MagAOX::dmCompletion::Kind::readers ) == 0 );
     REQUIRE( m_pipelineResult.open( "bmc_pipeline_sdk", MagAOX::dmCompletion::Kind::sdk ) == 0 );
+    REQUIRE( m_sdkStartTimeStream.open( m_sdkStartTimeStreamName ) == 0 );
     m_pipelineThreadInit = false;
     m_pipelineConfigured = true;
     m_pipelineStop       = false;
@@ -1856,7 +1895,9 @@ TEST_CASE( "BMC pipeline late post failure drains a running SDK and cancels late
     #endif
     // clang-format on
     MagAOX::app::bmcCtrl_test app;
+    app.m_sdkStartTimeStreamName = "bmc_pipeline_start_post_failure";
     app.enablePipeline();
+    bmcTimingTest::TimingReader timing( "bmc_pipeline_start_post_failure" );
     bmcTimingTest::block = bmcTimingTest::perCall = true;
     bmcTimingTest::heldPost                       = 1;
     bmcTimingTest::ReturnGuard guard;
@@ -1886,6 +1927,9 @@ TEST_CASE( "BMC pipeline late post failure drains a running SDK and cancels late
     REQUIRE( app.dmTimingSummary().total.submitted == 2 );
     REQUIRE( app.dmTimingSummary().total.failed == 2 );
     REQUIRE( app.dmTimingSummary().total.noSend == 1 );
+    MagAOX::app::dev::dmSdkTimingStream::Snapshot timestamp;
+    REQUIRE( MagAOX::app::dev::dmSdkTimingStream::read( timing.image(), timestamp ) );
+    REQUIRE( timestamp.counter == 2 );
 }
 
 /// Disconnect invalidates queued old-source commands while a running SDK retains its frozen identity.
@@ -2295,6 +2339,223 @@ TEST_CASE( "BMC worker initial diagnostic definitions are complete valid INDI XM
 
     REQUIRE( app.m_indiP_pipeline["enabled"].get<double>() == 1 );
     REQUIRE( app.m_indiP_pipeline["capacity"].get<double>() == 3 );
+}
+
+/// A dedicated SDK metadata stream never posts notifications and gives each restart a new inode.
+/** \ingroup bmcCtrl_unit_test */
+TEST_CASE( "BMC SDK timestamp stream owns only recognized names and qualified metadata", "[bmcCtrl][sdkStart]" )
+{
+    using MagAOX::app::dev::dmSdkTimingStream;
+    MagAOX::app::bmcCtrl_test app;
+    dmSdkTimingStream         publisher;
+    REQUIRE( publisher.open( "" ) == 0 );
+    REQUIRE_FALSE( publisher.enabled() );
+    REQUIRE( publisher.publish( 0 ) );
+    REQUIRE( publisher.open( "../unsafe" ) < 0 );
+    REQUIRE( publisher.open( "bmc_timing_shape" ) < 0 );
+    REQUIRE( app.shapeCounter() == 0 );
+    REQUIRE( publisher.open( "bmc_sdk_timestamp" ) == 0 );
+    bmcTimingTest::TimingReader reader( "bmc_sdk_timestamp" );
+    REQUIRE( dmSdkTimingStream::compatible( reader.image() ) );
+    REQUIRE( reader.image()->md->sem == 0 );
+    dmSdkTimingStream::Snapshot timestamp;
+    REQUIRE_FALSE( dmSdkTimingStream::read( reader.image(), timestamp ) );
+    dmSdkTimingStream collision;
+    REQUIRE( collision.open( "bmc_sdk_timestamp" ) < 0 );
+    std::array<unsigned char, sizeof( sem_t )> loggingSemaphore{};
+    std::memcpy( loggingSemaphore.data(), reader.image()->semlog, loggingSemaphore.size() );
+    const auto entry = MagAOX::app::dev::dmTiming::monotonicNowNs() - 1000;
+    REQUIRE( publisher.publish( entry ) );
+    REQUIRE( dmSdkTimingStream::read( reader.image(), timestamp ) );
+    REQUIRE( timestamp.counter == 1 );
+    REQUIRE( timestamp.startNs == entry );
+    REQUIRE( timestamp.publishedNs >= entry );
+    REQUIRE( std::memcmp( loggingSemaphore.data(), reader.image()->semlog, loggingSemaphore.size() ) == 0 );
+    const auto firstInode     = timestamp.inode;
+    reader.image()->md->write = 1;
+    REQUIRE_FALSE( dmSdkTimingStream::read( reader.image(), timestamp ) );
+    reader.image()->md->write         = 0;
+    reader.image()->md->atime.tv_nsec = 1000000000;
+    REQUIRE_FALSE( dmSdkTimingStream::read( reader.image(), timestamp ) );
+    REQUIRE_FALSE( publisher.publish( -1 ) );
+    publisher.close();
+    REQUIRE( publisher.open( "bmc_sdk_timestamp" ) == 0 );
+    bmcTimingTest::TimingReader restarted( "bmc_sdk_timestamp" );
+    REQUIRE( restarted.image()->md->inode != firstInode );
+    REQUIRE( restarted.image()->md->cnt0 == 0 );
+    REQUIRE_FALSE( dmSdkTimingStream::read( restarted.image(), timestamp ) );
+    REQUIRE( publisher.publish( entry ) );
+    REQUIRE( dmSdkTimingStream::read( restarted.image(), timestamp ) );
+    REQUIRE( timestamp.counter == 1 );
+    REQUIRE( timestamp.inode != firstInode );
+
+    // clang-format off
+    #ifdef BMCCTRL_TEST_DOXYGEN_REF
+    MagAOX::app::dev::dmSdkTimingStream::open;
+    MagAOX::app::dev::dmSdkTimingStream::publish;
+    MagAOX::app::dev::dmSdkTimingStream::read;
+    MagAOX::app::dev::dmSdkTimingStream::close;
+    #endif
+    // clang-format on
+}
+
+/// Concurrent metadata updates retain the timestamp-counter association without any semaphore operations.
+/** \ingroup bmcCtrl_unit_test */
+TEST_CASE( "BMC SDK timestamp snapshots reject torn publications", "[bmcCtrl][sdkStart]" )
+{
+    using MagAOX::app::dev::dmSdkTimingStream;
+    MagAOX::app::bmcCtrl_test app;
+    dmSdkTimingStream         publisher;
+    REQUIRE( publisher.open( "bmc_sdk_timestamp_concurrent" ) == 0 );
+    bmcTimingTest::TimingReader reader( "bmc_sdk_timestamp_concurrent" );
+    const auto                  base = MagAOX::app::dev::dmTiming::monotonicNowNs() - 1000000000;
+    std::atomic<bool>           done{ false };
+    auto                        observations = std::async( std::launch::async,
+                                    [&reader, &done, base]()
+                                    {
+                                        bool valid = true;
+
+                                        do
+                                        {
+                                            dmSdkTimingStream::Snapshot timestamp;
+
+                                            if( dmSdkTimingStream::read( reader.image(), timestamp ) )
+                                            {
+                                                valid =
+                                                    valid && timestamp.startNs == base + int64_t( timestamp.counter );
+                                            }
+                                        } while( !done.load() );
+
+                                        return valid;
+                                    } );
+    bool                        published    = true;
+
+    for( int64_t index = 1; index <= 10000; ++index )
+    {
+        published = publisher.publish( base + index ) && published;
+    }
+
+    done = true;
+    REQUIRE( observations.get() );
+    REQUIRE( published );
+    dmSdkTimingStream::Snapshot timestamp;
+    REQUIRE( dmSdkTimingStream::read( reader.image(), timestamp ) );
+    REQUIRE( timestamp.counter == 10000 );
+    REQUIRE( timestamp.startNs == base + 10000 );
+
+    // clang-format off
+    #ifdef BMCCTRL_TEST_DOXYGEN_REF
+    MagAOX::app::dev::dmSdkTimingStream::publish;
+    MagAOX::app::dev::dmSdkTimingStream::read;
+    #endif
+    // clang-format on
+}
+
+/// Post-only publication retains SDK entry with profiling disabled and diagnostic failure cannot fault native work.
+/** \ingroup bmcCtrl_unit_test */
+TEST_CASE( "BMC pipeline publishes original SDK entry only after post processing", "[bmcCtrl][pipeline][sdkStart]" )
+{
+    using namespace MagAOX::app;
+    bmcCtrl_test app;
+    app.m_sdkStartTimeStreamName = "bmc_pipeline_start";
+    app.m_dmTiming.configure( 0, 0 );
+    app.enablePipeline();
+    bmcTimingTest::TimingReader reader( "bmc_pipeline_start" );
+    bmcTimingTest::heldPost = 1;
+    bmcTimingTest::ReturnGuard guard;
+    REQUIRE( app.pipelineInput( 1 ) == 0 );
+    bmcTimingTest::waitPost();
+    const auto sdk = app.waitPipelineSdkReady( 1 );
+    REQUIRE( bmcTimingTest::calls == 1 );
+    REQUIRE( reader.image()->md->cnt0 == 0 );
+    dev::dmSdkTimingStream::Snapshot timestamp;
+    REQUIRE_FALSE( dev::dmSdkTimingStream::read( reader.image(), timestamp ) );
+    bmcTimingTest::permitReturn();
+    app.waitRetired( 1 );
+    REQUIRE( dev::dmSdkTimingStream::read( reader.image(), timestamp ) );
+    REQUIRE( timestamp.counter == 1 );
+    REQUIRE( timestamp.startNs == sdk[0] );
+    REQUIRE( timestamp.publishedNs >= sdk[2] );
+    REQUIRE( app.m_sdkStartTimeFailures == 0 );
+    __atomic_store_n( &reader.image()->md->cnt0, UINT64_MAX, __ATOMIC_RELEASE );
+    REQUIRE( app.pipelineInput( 2 ) == 0 );
+    app.waitRetired( 2 );
+    REQUIRE( bmcTimingTest::calls == 2 );
+    REQUIRE( app.m_sdkStartTimeFailures == 1 );
+    REQUIRE_FALSE( app.m_sdkFault );
+    REQUIRE_FALSE( app.m_admissionClosed );
+
+    // clang-format off
+    #ifdef BMCCTRL_TEST_DOXYGEN_REF
+    MagAOX::app::bmcCtrl::pipelineThreadExec;
+    MagAOX::app::dev::dmSdkTimingStream::publish;
+    #endif
+    // clang-format on
+}
+
+/// Failed native calls are excluded even though the post owner receives their original timestamps.
+/** \ingroup bmcCtrl_unit_test */
+TEST_CASE( "BMC pipeline excludes failed native SDK entries", "[bmcCtrl][pipeline][sdkStart]" )
+{
+    MagAOX::app::bmcCtrl_test app;
+    app.m_sdkStartTimeStreamName = "bmc_pipeline_start_failed";
+    app.enablePipeline();
+    bmcTimingTest::TimingReader reader( "bmc_pipeline_start_failed" );
+    bmcTimingTest::result = 7;
+    REQUIRE( app.pipelineInput( 1 ) == 0 );
+    app.waitRetired( 1 );
+    REQUIRE( bmcTimingTest::calls == 1 );
+    REQUIRE( reader.image()->md->cnt0 == 0 );
+    REQUIRE( app.m_sdkStartTimeFailures == 0 );
+
+    // clang-format off
+    #ifdef BMCCTRL_TEST_DOXYGEN_REF
+    MagAOX::app::bmcCtrl::pipelineThreadExec;
+    #endif
+    // clang-format on
+}
+
+/// SDK entry publication requires an explicitly enabled pipeline and a distinct dedicated stream name.
+/** \ingroup bmcCtrl_unit_test */
+TEST_CASE( "BMC validates post-only timestamp configuration", "[bmcCtrl][config][sdkStart]" )
+{
+    MagAOX::app::bmcCtrl_test app;
+    app.setupConfig();
+    app.m_sdkStartTimeStreamName = "bmc_sdk_start_config";
+    REQUIRE( app.loadConfigImpl( app.config ) < 0 );
+    app.m_sdkWorkerEnabled = true;
+    REQUIRE( app.loadConfigImpl( app.config ) < 0 );
+    app.m_pipelineEnabled = true;
+    REQUIRE( app.loadConfigImpl( app.config ) == 0 );
+    app.m_sdkStartTimeStreamName = "../unsafe";
+    REQUIRE( app.loadConfigImpl( app.config ) < 0 );
+
+    // clang-format off
+    #ifdef BMCCTRL_TEST_DOXYGEN_REF
+    MagAOX::app::bmcCtrl::loadConfigImpl;
+    #endif
+    // clang-format on
+}
+
+/// An unavailable optional stream reports diagnostics without preventing the post worker from starting.
+/** \ingroup bmcCtrl_unit_test */
+TEST_CASE( "BMC optional timestamp collision does not prevent pipeline startup", "[bmcCtrl][pipeline][sdkStart]" )
+{
+    MagAOX::app::bmcCtrl_test app;
+    app.m_pipelineEnabled        = true;
+    app.m_sdkStartTimeStreamName = "bmc_timing_shape";
+    REQUIRE( app.startPipelineWorker() == 0 );
+    REQUIRE_FALSE( app.m_sdkStartTimeStream.enabled() );
+    REQUIRE( app.m_sdkStartTimeFailures == 1 );
+    REQUIRE_FALSE( app.m_sdkFault );
+    REQUIRE( app.shapeCounter() == 0 );
+    REQUIRE( bmcTimingTest::calls == 0 );
+
+    // clang-format off
+    #ifdef BMCCTRL_TEST_DOXYGEN_REF
+    MagAOX::app::bmcCtrl::startPipelineWorker;
+    #endif
+    // clang-format on
 }
 
 } // namespace bmcCtrlTest

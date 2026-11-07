@@ -65,6 +65,11 @@
 ../apps/dmSyncopation/tests/syncoSimulation_test
 ../apps/dmSyncopation/tests/syncoPipelineSimulation_test
 ../apps/dmSyncopation/tests/syncoZeroTiming_test
+../apps/loopTimingMonitor/tests/loopTiming_test
+../apps/loopTimingMonitor/tests/loopTimingGate_test
+../apps/loopTimingMonitor/tests/loopTimingStream_test
+../apps/loopTimingMonitor/tests/loopTimingMonitor_test
+../apps/loopTimingMonitor/tests/loopTimingMonitor_integration_test
 ../apps/filterWheelCtrl/tests/filterWheelCtrl_test
 ../apps/flipperCtrl/tests/flipperCtrl_test
 ../apps/flipperCtrl/tests/flipperCtrl_entrypoint_test

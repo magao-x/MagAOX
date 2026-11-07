@@ -82,6 +82,11 @@ $ less tests/results/latest/run.log
  * \ingroup application_unit_test
  */
 
+/** \defgroup loopTimingMonitor_unit_test Loop Timing Monitor Unit Tests
+ * \brief Offline timestamp association, polling, operating gates and persistent fgtimes telemetry.
+ * \ingroup application_unit_test
+ */
+
 /** \defgroup dmPipelineTiming_unit_test Upstream AO Trace Timing Unit Tests
  * \brief Ordered stage timing, excursion attribution and bounded observation tests.
  * \ingroup app_dev_unit_tests

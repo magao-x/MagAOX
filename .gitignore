@@ -106,6 +106,7 @@ apps/koolanceCtrl/koolanceCtrl
 
 #l
 apps/loPredCtrl/loPredCtrl
+apps/loopTimingMonitor/loopTimingMonitor
 
 #m
 apps/mcp3008Ctrl/mcp3008Ctrl
