@@ -1,0 +1,162 @@
+{
+  "environment": "ASTR-LT-428.local, arm64 macOS",
+  "compiler_clang": "Apple clang version 21.0.0 (clang-2100.0.123.102)\nTarget: arm64-apple-darwin25.3.0\nThread model: posix\nInstalledDir: /Library/Developer/CommandLineTools/usr/bin\n",
+  "compiler_gcc": "g++-15 (Homebrew GCC 15.2.0_1) 15.2.0\nCopyright (C) 2025 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n\n",
+  "tests": {
+    "connection_clang": {
+      "result": "Ran 14 tests",
+      "log_sha256": "95b0c75e95484023ddff4cf390bd2bc3398877a5564bdc0a3db11a9ed2a541d5"
+    },
+    "connection_gcc": {
+      "result": "Ran 14 tests",
+      "log_sha256": "87278c743f7e5fb09d8995c1d6ec4454e12bc6e7da235fa0adc5509fc716cb1a"
+    },
+    "strict_clang": {
+      "result": "1766161 assertions in 66 test cases",
+      "log_sha256": "f498b47b05ba7f0fd3f65784e7368bf0e2a1ec1c4ad1316b0ec262845c68d0da"
+    },
+    "strict_gcc": {
+      "result": "1764361 assertions in 66 test cases",
+      "log_sha256": "2e0dfff1e7d78140922240fa221236fa7474181230f9495f88127dabd312169b"
+    }
+  },
+  "adaptive_sequence_preservation": {
+    "clang": {
+      "1": {
+        "rows": 31200,
+        "identical_columns": [
+          "controller",
+          "frame",
+          "yx",
+          "yy",
+          "rx",
+          "ry",
+          "request_x",
+          "request_y",
+          "applied_x",
+          "applied_y",
+          "dm_x",
+          "dm_y",
+          "disturbance_x",
+          "disturbance_y",
+          "valid",
+          "ready",
+          "rank",
+          "version",
+          "model_sequence",
+          "age_ns",
+          "ax",
+          "ay",
+          "time_ns",
+          "first_sensor_ns"
+        ],
+        "max_absolute_difference": 0,
+        "prior_trace_sha256": "7636bb2f6cf2754bc3faf86f68c79e89d11394952c733c1e5a5c2afd26767a0b",
+        "current_trace_sha256": "82d8d3c1ab4aa5aa207b783ff610aaec880a06de1bccf93d6fca29b4b81375b7"
+      },
+      "100": {
+        "rows": 31200,
+        "identical_columns": [
+          "controller",
+          "frame",
+          "yx",
+          "yy",
+          "rx",
+          "ry",
+          "request_x",
+          "request_y",
+          "applied_x",
+          "applied_y",
+          "dm_x",
+          "dm_y",
+          "disturbance_x",
+          "disturbance_y",
+          "valid",
+          "ready",
+          "rank",
+          "version",
+          "model_sequence",
+          "age_ns",
+          "ax",
+          "ay",
+          "time_ns",
+          "first_sensor_ns"
+        ],
+        "max_absolute_difference": 0,
+        "prior_trace_sha256": "9215c10b94c91756201b58a79e79f2d26386057cae8abbc61983dd7a85061b21",
+        "current_trace_sha256": "971d8b2fd606d0744617bcb02a1e59fb7656cb1c65b6fa88a48753352d23d80c"
+      }
+    },
+    "gcc": {
+      "1": {
+        "rows": 31200,
+        "identical_columns": [
+          "controller",
+          "frame",
+          "yx",
+          "yy",
+          "rx",
+          "ry",
+          "request_x",
+          "request_y",
+          "applied_x",
+          "applied_y",
+          "dm_x",
+          "dm_y",
+          "disturbance_x",
+          "disturbance_y",
+          "valid",
+          "ready",
+          "rank",
+          "version",
+          "model_sequence",
+          "age_ns",
+          "ax",
+          "ay",
+          "time_ns",
+          "first_sensor_ns"
+        ],
+        "max_absolute_difference": 0,
+        "prior_trace_sha256": "2263a5ba4dd3aef9235c4e20bbea84d513efa9f858209ef3005c26d8bdd8dc77",
+        "current_trace_sha256": "54bd50610ee1975d01a5573a92ec53894caed16483b2470fb5e9d6aafe2e5420"
+      },
+      "100": {
+        "rows": 31200,
+        "identical_columns": [
+          "controller",
+          "frame",
+          "yx",
+          "yy",
+          "rx",
+          "ry",
+          "request_x",
+          "request_y",
+          "applied_x",
+          "applied_y",
+          "dm_x",
+          "dm_y",
+          "disturbance_x",
+          "disturbance_y",
+          "valid",
+          "ready",
+          "rank",
+          "version",
+          "model_sequence",
+          "age_ns",
+          "ax",
+          "ay",
+          "time_ns",
+          "first_sensor_ns"
+        ],
+        "max_absolute_difference": 0,
+        "prior_trace_sha256": "803a9807d9649ab1f68948ad505fe46ca696ebc567d75c518c85f332e44faf31",
+        "current_trace_sha256": "8fe0ffa3473483f890d3ffce4a5d54a0c2a1914321f0e968cd9d58d1f0e518ae"
+      }
+    }
+  },
+  "plan_prefix_preserved": true,
+  "production_sources_unchanged": true,
+  "native_shmim_executed": false,
+  "native_linux_executed": false,
+  "diagnostics_source_sha256": "ac8913dd0993ed1184c64ab87806e05dc2cfd3848c4957bd3c3030cc362f23a4"
+}

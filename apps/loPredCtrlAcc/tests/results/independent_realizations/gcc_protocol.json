@@ -1,0 +1,59 @@
+{
+  "seeds": [
+    101,
+    211,
+    307,
+    401,
+    503,
+    601,
+    701,
+    809
+  ],
+  "source_scales": [
+    1,
+    100
+  ],
+  "adc_channels": [
+    0,
+    1
+  ],
+  "calibration_frames": [
+    0,
+    8000
+  ],
+  "evaluation_frames": [
+    24000,
+    32000
+  ],
+  "controllers": {
+    "no_control": [
+      0,
+      0
+    ],
+    "standard": [
+      3,
+      5
+    ],
+    "assisted_h5": [
+      4,
+      5
+    ],
+    "assisted_h1": [
+      4,
+      1
+    ]
+  },
+  "forgetting": 0.9995,
+  "prior": 0.001,
+  "control_penalty": 0.02,
+  "wfs_history": 6,
+  "command_history": 5,
+  "horizon": 3,
+  "correction_delay_frames": 2,
+  "calibration_seed": "10000+vibration_seed",
+  "wfs_seed": "20000+vibration_seed",
+  "broadband": "5..1000Hz excluding\u00b12Hz around28/56",
+  "bootstrap_replicates": 20000,
+  "bootstrap_seed": 20261106,
+  "note": "Eight trial units, paired within seed; amplitudes and compiler replays are not independent trials."
+}

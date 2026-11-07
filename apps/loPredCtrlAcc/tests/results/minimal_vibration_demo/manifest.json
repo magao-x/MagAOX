@@ -1,0 +1,75 @@
+{
+  "head": "8b91ab756f04a60e05693af057104a249c7e9bc4",
+  "host": "ASTR-LT-428.local",
+  "compiler": "Apple clang version 21.0.0 (clang-2100.0.123.102)\nTarget: arm64-apple-darwin25.3.0\nThread model: posix\nInstalledDir: /Library/Developer/CommandLineTools/usr/bin\n",
+  "config": {
+    "scenario": "mixed_qr",
+    "seed": "100",
+    "train": "2400",
+    "evaluate": "8000",
+    "history": "5",
+    "future": "3",
+    "accel_history": "5",
+    "peak28": "1",
+    "peak56": "1",
+    "broadband": "0",
+    "qrd": "1",
+    "coherence": "1",
+    "accel_noise": "0.03",
+    "wfs_noise": "0.03",
+    "lambda": "0.02",
+    "prior": "0.001",
+    "gamma": "0.9995",
+    "dm_pole": "0.1",
+    "dm_scale": "1",
+    "control_gain": "1",
+    "limit": "4",
+    "dm_extra_frames": "0",
+    "wfs_delay_frames": "0",
+    "sensor_delay_frames": "0",
+    "publication_frames": "0",
+    "jitter_ns": "0",
+    "max_age_ns": "2000000",
+    "capacity": "32",
+    "missing_frame": "-1",
+    "missing_frames": "0",
+    "reset_frame": "-1",
+    "stall_frame": "-1",
+    "stall_frames": "0",
+    "strategy": "baseline",
+    "freeze_frame": "-1",
+    "freeze_frames": "0"
+  },
+  "causal_and_plant_checks": {
+    "0": {
+      "max_plant_reconstruction_error": 9.626662733630553e-08,
+      "float_replay_bound": 6.246974407196045e-06
+    },
+    "3": {
+      "max_plant_reconstruction_error": 1.5236364268866875e-07,
+      "float_replay_bound": 6.246974407196045e-06
+    },
+    "4": {
+      "max_plant_reconstruction_error": 1.5570697532393298e-07,
+      "float_replay_bound": 6.246974407196045e-06
+    }
+  },
+  "trace_sha256": "4684e7dc98ccdef9172b45b9ae60308cf38a9ab396dfc3156bbe28d4f4415b5e",
+  "binary_sha256": "629b945b0beebe5394946eb02591b5f4518b50a2cfe7fa96b5100ec2f0f2134d",
+  "source_sha256": {
+    "ar_controller.cpp": "5b26311fac738f63ebdd809cd5f44692e161ac1a14e42550baaa9341bf3d14b2",
+    "recursive_least_squares.cpp": "e7d206d363735b71d9942c7b7f655fe867452e8fe6e4caf405b77fb9fd042a18",
+    "qrd_rls.cpp": "7f4f7f4870b6556f9b0dd2dcfcfd60444cfd316f65a69d95d30be297795b19e2",
+    "shadow_controller.cpp": "b77c997599174f4bc537b45dcb2eb4ea78c28c45d3f8aa69c2f9c9e75c1681ff",
+    "tests/vibration.cpp": "8e0f0361f6371904955236fbf5141e4932cf26c4cf9f7419cedc327646a10aee",
+    "tests/vibration.hpp": "d48710a06063e424fc1a1c757195e46a35f060f9ede77a547bff2f13f295bb6e",
+    "tests/vibration_main.cpp": "f6095d531464259aecc405aaeba002fd74ddbb33edb261f294c55fa32ee1109d",
+    "tests/vibration_report.py": "7236948488a83c37f6646443b2945ed3cb3c82606f9ad07858de79ece23a80bc",
+    "tests/vibration_demo.py": "14a2ee5b1f5f2d91a29a439047c61ea929a9f984d79dd6a5e786ea4b48223c4d",
+    "tests/Makefile.vibration": "5cb325dbd8dac246a491ac93441dddd63e2246f77baebbc4ef038170d5a15851"
+  },
+  "numpy": "2.3.5",
+  "matplotlib": "3.10.6",
+  "assisted_rms_reduction_vs_standard": 0.2117392864857348,
+  "assisted_variance_reduction_vs_standard": 0.3786487424707605
+}

@@ -5,6 +5,249 @@ requires instrument access, running the native application, or mounting DM strea
 The numerical executables link Eigen and the existing mxlib headers; application
 tests use stream-free lifecycle doubles and real INDI property objects.
 
+For the **manual exao2 handoff**, read [EXAO2_TESTING.md](../EXAO2_TESTING.md)
+and the [attachment-only example](../examples/loPredCtrlAcc-shadow.conf.example).
+**Live accelerometer-assisted prediction is blocked**: native shadow has no
+UINT16 ADC decoder, applied-command reader or exposure/clock adapter. WFS
+callbacks invalidate models rather than invent those records. The guide is a
+conditional native-build/WFS-attachment procedure, not a DM enable procedure.
+
+`DDSPC_SHADOW_ONLY=yes` adds a compile-time guard refusing missing/false shadow
+configuration before helpers start and implies a strict shadow build. The Linux
+build helper now stages this guarded profile and explicitly selects C++20;
+actual Linux linking remains unverified here. Normal builds keep Legacy as the
+default. The explicit optional `legacy_copy_gain_compat=false` fixes loading of
+`copy_gain`; default true preserves existing Legacy output and old config behavior.
+
+```sh
+make -C apps/loPredCtrlAcc -f tests/Makefile.offline check
+make -C apps/loPredCtrlAcc -f tests/Makefile.offline -j2 check-shadow-only
+python3 -m unittest discover -s apps/loPredCtrlAcc/tests -p handoff_config_test.py -v
+```
+
+The current handoff adds four cases to the prior69: exact opt-in/default copy
+loading and two-mode bypass output; compiled startup refusal; invalid WFS and
+unsupported ADC input inhibition; and finite two-feature QR proposals at the
+provided15/3 dimensions under the reference-law norm bound. Both strict compiler
+suites and Clang ASan/UBSan pass73 cases; the separate guarded application
+binaries pass7 cases per compiler. Eight build-orchestration tests and the
+example-config test pass. The full31-case focused Python simulation/config suite
+also passes with both local compiler libraries. Clang's nine historical fast-math
+Legacy cases pass separately. No new ensemble experiment or
+controller optimization was run. [Validation](results/exao2_handoff.json) records
+the exact scope, hashes and native-build limitation.
+
+For the **operational-parameter correspondence audit and paired baseline**, run:
+
+```sh
+python apps/loPredCtrlAcc/tests/operational_baseline.py
+```
+
+[Parameter meanings, results and operational limits](results/operational_baseline.md)
+explain why the earlier short-history headless run is not an operational replay.
+This offline-only profile uses WFS15, F3, two modes, QR, gamma1, information
+prior1e-5, and a test-only adapter for Legacy's scaled regularization100 plus
+additive .3 current-WFS feedback. `copy_gain` is inactive in prediction; its
+existing clone loading discrepancy is characterized without a production fix.
+The new law is opt-in via `LEGACY_LAW=1`; original numerical/production paths
+and old simulation defaults are unchanged. Optional offline build flags are
+`WFS_HISTORY`, `QR_GAMMA`, `CONTROL_PENALTY`, `FEEDBACK_GAIN`, alongside the prior
+calibration/ADC-history/information-prior flags. Use separate build directories
+for different flags, since Make does not track command-line flag changes.
+
+The eight previously recorded source realizations, ADC0/1 encoding, calibration
+0–4s, evaluation12–16s, synthetic positive plant and two-frame delay are preserved.
+Future3 is a three-target horizon, not a three-frame DM delay. The excerpt omits
+integration/runtime state and signed modal calibration; absolute commands and
+integration off are labeled assumptions. Historical calculated-command indexing
+is not copied into the corrected causal learner. No exact on-sky equivalence is
+claimed. Diagnostic export of an unready fit is explicit opt-in and does not
+bypass native correction gates.
+
+After rebuilding the existing test libraries for the additional read-only history
+metadata ABI, add `operational_baseline_test` to the focused command below:
+**30 focused tests per compiler**, including native15-sample dimensions, law
+exports, two-frame poles and rejected unready corrections. The **69-case strict
+suite** adds three regressions covering actual pinned Legacy algebra, the
+distinction between scaled/literal penalties and the real clone config loader.
+Clang ASan/UBSan also passes the full69-case suite.
+The provided INI is an offline fixture only; no operational configuration is read.
+
+For the **eight independent-realization fixed-policy comparison**, run:
+
+```sh
+python apps/loPredCtrlAcc/tests/independent_realizations.py
+```
+
+Eight predefined source seeds vary initial phases/innovations. Each uses the same
+four-second calibration and12–16s evaluation for no control, standard, H5 and H1.
+Reference/100× cases retain the existing noise/encoding/plant/timing parameters.
+No per-seed tuning. A recorded actual ADC0/1/pointing source bank allows GCC to
+replay precisely the Clang inputs, separating compiler effects from seed variation.
+[Results, paired statistics, intervals and time/PSD plots](results/independent_realizations.md)
+show no reproducible total-RMS advantage: each assisted model wins1/8 high-signal
+trials and worsens mean RMS. Secondary broadband/56-Hz gains do not remove the
+vibration-line tradeoffs. No assisted configuration is recommended for integration.
+
+Optional source/probe/WFS seeds in `simulation_demo.py` preserve previous defaults.
+Five new tests verify seeded phase replay, unchanged default traces, spectral
+integration and per-realization paired statistics. After the existing libraries
+are built, all26 focused cases run with:
+
+```sh
+PYTHONPATH=apps/loPredCtrlAcc/tests python -m unittest \
+  simulation_demo_test sim_shmim_test prediction_information_test \
+  calibration_generalization_test independent_realizations_test -v
+```
+
+The linked report gives the matched-input GNU repeat. Bootstrap intervals resample
+whole independent trials, not WFS frames; compiler/amplitude replays are not new
+independent samples. No controller architecture, algorithm, operational path or
+production configuration changes.
+
+For the **small calibration/history/prior generalization comparison**, run:
+
+```sh
+python apps/loPredCtrlAcc/tests/calibration_generalization.py
+```
+
+This compares1/2/4-second fits ending at the same4-second point, H5/H3/H1 ADC
+histories, and one existing initial-information adjustmentρ=.001→.01. WFS/DM
+history, QR mathematics, timing, forgetting, control penalty and limits remain
+unchanged. It uses actual decoded ADC0/1. Validation4.5–6.5s locks choices before
+final12–16s samples are generated; all final results are retained without
+reselection. [Protocol, tables, conditioning and RMS/PSD plots](results/calibration_generalization.md)
+show improved generalization with longer calibration, but no consistent selected
+accelerometer advantage. The selected H1 model fails to beat standard on the
+later high-SNR closed-loop test; favorable unselected cases are not promoted.
+
+Six test-only libraries use isolated end-aligned build names. Optional make flags
+`TRAINING_START/END`, `ACCEL_HISTORY`, `QR_PRIOR` affect the offline simulation
+configuration only; no learner/production path changes. Three additional tests
+verify shortened-history native gains/dimensions, bit-exact independent standard
+behavior, and pooled validation-only selection. After the experiment builds:
+
+```sh
+python -m unittest discover -s apps/loPredCtrlAcc/tests -p calibration_generalization_test.py -v
+```
+
+The prior18 cases below and these3 total21 focused cases per compiler. The linked
+report supplies the GNU repeat and complete file/safety record. No native runtime,
+instrument connection, physical DM command or production configuration is needed.
+
+For the **fixed-fit ADC0/1 information, timing and prediction audit**, run:
+
+```sh
+python apps/loPredCtrlAcc/tests/prediction_information.py
+```
+
+This reuses the existing source/plant/frozen native QR controllers and exports
+actual ready calibration snapshots for post-hoc scoring. It compares forecasts
+on identical no-control and closed-loop state records, measures actual decoded
+ADC/WFS peak coherence and phase, and plots prediction/residual RMS and peak PSDs.
+No coefficient, controller law, alignment, default or simulation architecture is
+changed. [Results and interpretation](results/prediction_information.md) identify
+the main loss before control: calibration prediction improves with high-SNR ADC,
+but held-out 28-Hz prediction worsens. Measurable conditional sensor information
+does not imply that the current fixed fit exploits it successfully. No supported
+timing fix or closed-loop improvement is claimed.
+
+Four additional tests cover snapshot export, native gain/command agreement,
+counterfactual forecast targets and measured phase. The information command builds
+the fixed-fit library; also build the adaptive bridge for the prior connection tests:
+
+```sh
+make -C apps/loPredCtrlAcc -f tests/Makefile.sim BUILD_DIR=build/simulation-c++
+PYTHONPATH=apps/loPredCtrlAcc/tests python -m unittest \
+  simulation_demo_test sim_shmim_test prediction_information_test -v
+```
+
+This totals18 cases. The linked report gives the GNU repeat and preserves the
+unfavorable results. The small earlier/later statistical information probe in
+that report never produces commands or bypasses controller readiness gates.
+
+For the **intended ADC channels 0/1 and late-suppression investigation**, run:
+
+```sh
+python apps/loPredCtrlAcc/tests/simulation_diagnose.py --run
+```
+
+This reproduces both unchanged adaptive training and an explicitly labeled
+calibration-only fit, using the same source/plant/controller implementations.
+It adds residual RMS versus time, a double-precision weighted-LS audit, consumed
+command/delay checks and a single existing-probe contrast. No new controller law
+or recovery framework is introduced. Channels 0/1 are the actual generated noisy
+UINT16 X/Y acceleration words, **not angular tip/tilt or verified physical sensor
+registration**. No ideal acceleration enters DDSPC.
+
+[Results, all plots and exact development-host transport commands](results/channel01_validation.md)
+document the important negative result: calibrated fitting substantially reduces
+late degradation, but assistance is slightly worse than standard in that comparison.
+Default adaptive behavior and the earlier unfavorable cases are preserved.
+`--training-end 2400` is an optional test-only build using existing training controls;
+current rank, validity and snapshot evidence checks continue. The unchanged
+coefficient version and fresh validation sequence are recorded separately.
+
+`simulation_demo.py --transport shmim` optionally uses `sim_shmim.py` with existing
+ImageStreamIO/magaox.Image interfaces and fresh create-only `ddspc_sim_*` images.
+It keeps injection/correction separate and feeds back actual consumed correction.
+The same-process native transport **has not run on this Mac**; required runtime
+modules are absent. No dependencies are installed. Its packet/ownership/busy/read
+contracts and exact full-trace equivalence are tested with a fake runtime.
+This is not yet native three-application integration or real-time qualification.
+
+For the **cross-repository headless accelSim / aoSim / DDSPC connection**, run:
+
+```sh
+python apps/loPredCtrlAcc/tests/simulation_demo.py --magaox-repo ~/source/MagAOX
+```
+
+This compiles the actual other repository's `accelSimModel.hpp`, reuses the
+unchanged `aoSim.update_dm()/update_wfs()` numerical methods, and closes three
+local modal trajectories with the existing causal QR models. ADC and disturbance
+come from the same producer sample; only ADC/WFS/consumed correction inputs enter
+DDSPC. It writes results under `tests/results/simulation_connection/`.
+The default reference-amplitude and explicit 100× cases retain the producer's
+ADC settings; `--source-scales 1` runs only the reference case.
+
+**The default uses memory-backed image boundaries, not application/shmim runtime.**
+The required MagAO-X Python runtime dependencies are unavailable on this Mac.
+[Interface findings, measured results and exact remaining application work](results/simulation_connection.md)
+state the scope and timing. No native app, device stream or other-worktree edit
+is involved. `--cxx g++-15 --output apps/loPredCtrlAcc/build/simulation-gcc-results`
+captures a separate GNU repeat. After the diagnosis command builds adaptive and
+calibrated libraries, run the 14 connection/adapter tests with:
+
+```sh
+python -m unittest discover -s apps/loPredCtrlAcc/tests -p '*sim*test.py' -v
+```
+
+For a different library/repository, tests accept `DDSPC_SIM_LIB`,
+`DDSPC_SIM_FIXED_LIB` and `MAGAOX_REPO` (exact GNU commands are in the linked report).
+The new test library cannot attach a stream or select a physical output device.
+No new recovery policy, production flag or controller-law change is made.
+
+For the minimal three-case **28 + 56 Hz vibration suppression demonstration**, run
+this one command from the repository root:
+
+```sh
+python apps/loPredCtrlAcc/tests/vibration_demo.py
+```
+
+It builds/runs the existing strict QR harness, verifies causal inputs and the
+applied-command plant response, and writes WFS time-series/PSD PNG/PDF plots,
+metrics and a manifest to `tests/results/minimal_vibration_demo/`. It compares
+no predictive control, independent standard WFS/DM-history DDSPC, and assisted
+DDSPC. No new recovery policy or production change is involved. `python` needs
+NumPy/SciPy/Matplotlib; C++ dependencies are the same as the existing harness.
+Use `--cxx g++-15 --output apps/loPredCtrlAcc/build/minimal-vibration-gcc-results`
+for a separate GNU capture on this Mac.
+
+[Results and separate-repository accelSim inspection](results/minimal_vibration_demo.md)
+document the measured benefit, synthetic assumptions, and minimum later local
+simulation-stream connection. `accelSim` lives in `~/source/MagAOX`; the demo is
+self-contained and does not run it, touch its worktree, or write any DM stream.
+
 From the repository root:
 
 ```sh

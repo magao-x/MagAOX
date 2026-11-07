@@ -1,0 +1,35 @@
+{
+  "compiler": "Apple clang version 21.0.0 (clang-2100.0.123.102)\nTarget: arm64-apple-darwin25.3.0\nThread model: posix\nInstalledDir: /Library/Developer/CommandLineTools/usr/bin\n",
+  "binary_sha256": "c3c717cceae1c9020a214d8424d119e88bbdb88ee8fc31175fbbf80f3b6509b1",
+  "source_sha256": {
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/tests/operational_baseline.py": "6b6ea949e3264f9082bbd2c1198d6bd1e227d83a25550dfd10a4a021eacc3e68",
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/tests/operational_parameters.ini": "436b7bf1bdc9c5b56cb1fc97bb8e806bf4dc4ae1b99250951a7604f7dcdb11d7",
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/tests/operational_law.cpp": "2fd1af48d60167dc32028c7ce46b3e6f83ba3e7960370334df7a4b7f71c68f15",
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/tests/operational_law.hpp": "b7fe758d626b1cc63807016f0d9949ba9e4b26b2da593fddc899a622f1a417ec",
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/tests/simulation_demo.py": "24ae6dc31f8d4e383e317fc36c691cb99344f749183411d560cae621c82fe83a",
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/tests/sim_bridge.cpp": "86c6de34de3009d530c39480156b31a8396b7ef0b5be687b097dd98a6800b567",
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/tests/Makefile.sim": "789c97757f9e54467d0480c91fd462970b22f1da097c3fbfcd14423d5050239c",
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/tests/async_shadow.cpp": "d8a359b343971eb5ba07bc9c3758a4da8b4240bf6e4900d2de93735a87e86697",
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/tests/prediction_information.py": "4777ba6aa27e18b1c929b4a7033662208f202feb62149f87bd56fdae36020e5a",
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/tests/calibration_generalization.py": "9b0c76bff5185dbb19639b00595aa5007357b7ef337e3207c191fe83dd552be9",
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/tests/independent_realizations.py": "a53a7f0cdefcbb5a16588b7a40bf26104eb08b8794d3ce832492e68b7ab507e1",
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/ar_controller.cpp": "5b26311fac738f63ebdd809cd5f44692e161ac1a14e42550baaa9341bf3d14b2",
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/qrd_rls.cpp": "7f4f7f4870b6556f9b0dd2dcfcfd60444cfd316f65a69d95d30be297795b19e2",
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/shadow_controller.cpp": "b77c997599174f4bc537b45dcb2eb4ea78c28c45d3f8aa69c2f9c9e75c1681ff",
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/loPredCtrlAcc.hpp": "a1d68aee876036043c7a168f6a9e112e516a0870dbae5aff0c7aa7321fa2529a",
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrl/loPredCtrl.hpp": "4034b2852d2ce7a6981a70600e4c9b92103d3bd5d5c1a6ab9a76b1f01b13330b",
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrl/ar_controller.cpp": "5d8e6feab5b26f4244a5d460e9a1e1825da5d808387d84fa694d4d3946402843"
+  },
+  "input_bank_sha256": "55077bc4a2434f4c48a9fe0cbeadc27f7da331ac0849797194bd6aec28214a5e",
+  "recorded_source_arrays_match_previous": true,
+  "operational_binary_or_config_file_accessed": false,
+  "runtime_integrating_state_known": false,
+  "actual_operational_fidelity_verified": false,
+  "post_run_comment_only_edits": {
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/tests/sim_bridge.cpp": {
+      "tested_source_sha256": "86c6de34de3009d530c39480156b31a8396b7ef0b5be687b097dd98a6800b567",
+      "current_source_sha256": "a905fea407eeb0eae09d20a22fa24ea2ea18c8ea13a11f2e5c95090f09739f37",
+      "description": "Three documentation-only comments clarified offline law use and unready scoring; executable statements unchanged."
+    }
+  }
+}

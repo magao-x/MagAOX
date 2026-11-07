@@ -1,0 +1,398 @@
+{
+  "1": {
+    "assisted_h5": {
+      "residual_rms_improvement_percent": {
+        "n": 8,
+        "mean": 0.2511611095800226,
+        "median": -0.04580325387026907,
+        "sample_std": 1.3780067795794397,
+        "wins": 4,
+        "ties": 0,
+        "mean_ci95_percentile": [
+          -0.5097276975803428,
+          1.2247209913420236
+        ]
+      },
+      "tip_rms_improvement_percent": {
+        "n": 8,
+        "mean": -0.07786028796397948,
+        "median": 0.01353910318090401,
+        "sample_std": 2.6907401034537695,
+        "wins": 4,
+        "ties": 0,
+        "mean_ci95_percentile": [
+          -1.8128396501180033,
+          1.6200419664672598
+        ]
+      },
+      "tilt_rms_improvement_percent": {
+        "n": 8,
+        "mean": 0.2978481938478286,
+        "median": 0.38196639015472544,
+        "sample_std": 0.8212272467074827,
+        "wins": 5,
+        "ties": 0,
+        "mean_ci95_percentile": [
+          -0.21485140556690152,
+          0.8368677122191706
+        ]
+      },
+      "prediction_h2_rms_improvement_percent": {
+        "n": 8,
+        "mean": 0.5219609405084715,
+        "median": 0.29378818808604157,
+        "sample_std": 1.478765889955823,
+        "wins": 5,
+        "ties": 0,
+        "mean_ci95_percentile": [
+          -0.28418976908228394,
+          1.6014415158930595
+        ]
+      },
+      "broadband_rms_improvement_percent": {
+        "n": 8,
+        "mean": 0.22420964650892994,
+        "median": 0.15707006841025328,
+        "sample_std": 0.8315688545425411,
+        "wins": 5,
+        "ties": 0,
+        "mean_ci95_percentile": [
+          -0.26224629202407784,
+          0.8178535556443809
+        ]
+      },
+      "line_28_advantage_db": {
+        "n": 8,
+        "mean": 0.05264833980912087,
+        "median": -0.02318318961525634,
+        "sample_std": 0.2872198757419896,
+        "wins": 2,
+        "ties": 0,
+        "mean_ci95_percentile": [
+          -0.0822693111947772,
+          0.26534790821119936
+        ]
+      },
+      "line_56_advantage_db": {
+        "n": 8,
+        "mean": 0.2941547401749802,
+        "median": 0.1956324033940149,
+        "sample_std": 0.27909016886578214,
+        "wins": 8,
+        "ties": 0,
+        "mean_ci95_percentile": [
+          0.13229621777210254,
+          0.48639629934436446
+        ]
+      },
+      "residual_rms_difference": {
+        "n": 8,
+        "mean": 0.0002450880787253605,
+        "median": -8.774792841356738e-05,
+        "sample_std": 0.0011170030665818157,
+        "wins": 4,
+        "ties": 0,
+        "mean_ci95_percentile": [
+          -0.0004049538202627826,
+          0.001018617985954937
+        ]
+      }
+    },
+    "assisted_h1": {
+      "residual_rms_improvement_percent": {
+        "n": 8,
+        "mean": 0.050617590854373784,
+        "median": -0.052490362380358535,
+        "sample_std": 0.5377447218573923,
+        "wins": 4,
+        "ties": 0,
+        "mean_ci95_percentile": [
+          -0.2761835424998306,
+          0.4152241289260479
+        ]
+      },
+      "tip_rms_improvement_percent": {
+        "n": 8,
+        "mean": -0.03367159437682038,
+        "median": -0.16438703627144058,
+        "sample_std": 0.5112378262688492,
+        "wins": 2,
+        "ties": 0,
+        "mean_ci95_percentile": [
+          -0.32073350443356935,
+          0.33106365066893906
+        ]
+      },
+      "tilt_rms_improvement_percent": {
+        "n": 8,
+        "mean": 0.11647274545615177,
+        "median": -0.008817833685703658,
+        "sample_std": 0.724293890164991,
+        "wins": 4,
+        "ties": 0,
+        "mean_ci95_percentile": [
+          -0.34839194490253744,
+          0.5772394297991714
+        ]
+      },
+      "prediction_h2_rms_improvement_percent": {
+        "n": 8,
+        "mean": 0.12374660066043208,
+        "median": -0.012058056114366833,
+        "sample_std": 0.36993861740859457,
+        "wins": 4,
+        "ties": 0,
+        "mean_ci95_percentile": [
+          -0.08805237149997726,
+          0.3842666075820629
+        ]
+      },
+      "broadband_rms_improvement_percent": {
+        "n": 8,
+        "mean": -0.18196611779020266,
+        "median": -0.12864057366749337,
+        "sample_std": 0.5663041256617836,
+        "wins": 3,
+        "ties": 0,
+        "mean_ci95_percentile": [
+          -0.5503533101202107,
+          0.1814337321768139
+        ]
+      },
+      "line_28_advantage_db": {
+        "n": 8,
+        "mean": 0.021527288474647133,
+        "median": -0.009163516787095816,
+        "sample_std": 0.09460885060780824,
+        "wins": 2,
+        "ties": 0,
+        "mean_ci95_percentile": [
+          -0.022283925337607258,
+          0.09007615812497645
+        ]
+      },
+      "line_56_advantage_db": {
+        "n": 8,
+        "mean": 0.04813028988563106,
+        "median": 0.04397655777614595,
+        "sample_std": 0.1609047039645605,
+        "wins": 6,
+        "ties": 0,
+        "mean_ci95_percentile": [
+          -0.052853779003789736,
+          0.15781550012078716
+        ]
+      },
+      "residual_rms_difference": {
+        "n": 8,
+        "mean": -9.026329143430045e-06,
+        "median": -6.819821823925848e-05,
+        "sample_std": 0.0004944180814245537,
+        "wins": 4,
+        "ties": 0,
+        "mean_ci95_percentile": [
+          -0.0003333822182262287,
+          0.00030507735130059317
+        ]
+      }
+    }
+  },
+  "100": {
+    "assisted_h5": {
+      "residual_rms_improvement_percent": {
+        "n": 8,
+        "mean": -13.679198744946092,
+        "median": -14.820234295122791,
+        "sample_std": 13.731455885253316,
+        "wins": 1,
+        "ties": 0,
+        "mean_ci95_percentile": [
+          -21.928691424697373,
+          -4.361893888690985
+        ]
+      },
+      "tip_rms_improvement_percent": {
+        "n": 8,
+        "mean": -14.163063531539699,
+        "median": -14.552428466337542,
+        "sample_std": 18.21806805978203,
+        "wins": 2,
+        "ties": 0,
+        "mean_ci95_percentile": [
+          -25.75540500890857,
+          -2.2149245444097714
+        ]
+      },
+      "tilt_rms_improvement_percent": {
+        "n": 8,
+        "mean": -13.264394015133556,
+        "median": -7.941754733247974,
+        "sample_std": 18.24167303544963,
+        "wins": 1,
+        "ties": 0,
+        "mean_ci95_percentile": [
+          -25.679508483263344,
+          -2.526208444793114
+        ]
+      },
+      "prediction_h2_rms_improvement_percent": {
+        "n": 8,
+        "mean": -15.660649481249681,
+        "median": -13.571537390185206,
+        "sample_std": 13.88045005613137,
+        "wins": 1,
+        "ties": 0,
+        "mean_ci95_percentile": [
+          -24.82574049072271,
+          -7.05304190636933
+        ]
+      },
+      "broadband_rms_improvement_percent": {
+        "n": 8,
+        "mean": 9.799020060125422,
+        "median": 9.710701367200308,
+        "sample_std": 3.1067038877200424,
+        "wins": 8,
+        "ties": 0,
+        "mean_ci95_percentile": [
+          7.747030087922163,
+          11.754538403540009
+        ]
+      },
+      "line_28_advantage_db": {
+        "n": 8,
+        "mean": -2.27854718893758,
+        "median": -2.5422244515070034,
+        "sample_std": 1.574796239663886,
+        "wins": 1,
+        "ties": 0,
+        "mean_ci95_percentile": [
+          -3.1270250975225675,
+          -1.1495520201074374
+        ]
+      },
+      "line_56_advantage_db": {
+        "n": 8,
+        "mean": -0.1906003977119961,
+        "median": -0.7352740757750302,
+        "sample_std": 2.9572760831507057,
+        "wins": 3,
+        "ties": 0,
+        "mean_ci95_percentile": [
+          -2.0303889503635535,
+          1.734762800731474
+        ]
+      },
+      "residual_rms_difference": {
+        "n": 8,
+        "mean": -0.011778393242856636,
+        "median": -0.012165889982963973,
+        "sample_std": 0.014654241600118568,
+        "wins": 1,
+        "ties": 0,
+        "mean_ci95_percentile": [
+          -0.020838125836506995,
+          -0.0019837073082861066
+        ]
+      }
+    },
+    "assisted_h1": {
+      "residual_rms_improvement_percent": {
+        "n": 8,
+        "mean": -5.983099232942052,
+        "median": -6.066243561760332,
+        "sample_std": 3.0171726864307202,
+        "wins": 1,
+        "ties": 0,
+        "mean_ci95_percentile": [
+          -7.679551197570949,
+          -3.8262436985910755
+        ]
+      },
+      "tip_rms_improvement_percent": {
+        "n": 8,
+        "mean": -4.927813108729678,
+        "median": -6.234234487006852,
+        "sample_std": 7.851261233296071,
+        "wins": 2,
+        "ties": 0,
+        "mean_ci95_percentile": [
+          -9.691842752082358,
+          0.26058348807313036
+        ]
+      },
+      "tilt_rms_improvement_percent": {
+        "n": 8,
+        "mean": -7.104570001173871,
+        "median": -4.947752388105031,
+        "sample_std": 5.232339659580885,
+        "wins": 0,
+        "ties": 0,
+        "mean_ci95_percentile": [
+          -10.599536051719427,
+          -3.99656354309216
+        ]
+      },
+      "prediction_h2_rms_improvement_percent": {
+        "n": 8,
+        "mean": -5.535673551057149,
+        "median": -5.5815236420769025,
+        "sample_std": 2.835579444348115,
+        "wins": 0,
+        "ties": 0,
+        "mean_ci95_percentile": [
+          -7.2870366581801616,
+          -3.6264761842973114
+        ]
+      },
+      "broadband_rms_improvement_percent": {
+        "n": 8,
+        "mean": 1.7152663082210087,
+        "median": 1.3674375177030462,
+        "sample_std": 1.3487506660322202,
+        "wins": 8,
+        "ties": 0,
+        "mean_ci95_percentile": [
+          0.9475440123590293,
+          2.6874100562063847
+        ]
+      },
+      "line_28_advantage_db": {
+        "n": 8,
+        "mean": -0.6305976010980876,
+        "median": -0.7257465545496888,
+        "sample_std": 0.8386837901202617,
+        "wins": 2,
+        "ties": 0,
+        "mean_ci95_percentile": [
+          -1.1418131466946915,
+          -0.06292035843242345
+        ]
+      },
+      "line_56_advantage_db": {
+        "n": 8,
+        "mean": -2.5713212420683913,
+        "median": -2.5299210555502443,
+        "sample_std": 1.48229342579167,
+        "wins": 0,
+        "ties": 0,
+        "mean_ci95_percentile": [
+          -3.5951543052788675,
+          -1.6975688477443913
+        ]
+      },
+      "residual_rms_difference": {
+        "n": 8,
+        "mean": -0.005117620405519898,
+        "median": -0.00471039325308166,
+        "sample_std": 0.0032548779618482354,
+        "wins": 1,
+        "ties": 0,
+        "mean_ci95_percentile": [
+          -0.007176608629016393,
+          -0.002969044960129935
+        ]
+      }
+    }
+  }
+}

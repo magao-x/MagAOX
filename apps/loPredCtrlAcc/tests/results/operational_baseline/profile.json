@@ -1,0 +1,51 @@
+{
+  "parameters": {
+    "gain": 0.3,
+    "copy_gain": 1.0,
+    "regularization": 100.0,
+    "gamma": 1.0,
+    "covariance": 1e-05,
+    "history": 15,
+    "future": 3,
+    "num_modes": 2,
+    "fpsSource": "camwfs",
+    "own_shmim": true,
+    "qrd": true
+  },
+  "source": "User excerpt; deployed revision/runtime INDI state not verified",
+  "history_convention": "Corrected causal records, not Legacy calculated-delta/indexing semantics",
+  "control_law": "Legacy maxCoeff(C^T C)*100 scaled inverse, plus .3*current_WFS",
+  "predicting": true,
+  "learning": "0..4s only; frozen afterward",
+  "integrating": false,
+  "copy_gain": "Inactive in predictive mode; checked-out clone loads it from parameters.gain",
+  "plant": "Unchanged synthetic y=d+delayed_absolute_u; real modal calibration/sign unknown",
+  "seeds": [
+    101,
+    211,
+    307,
+    401,
+    503,
+    601,
+    701,
+    809
+  ],
+  "source_scales": [
+    1,
+    100
+  ],
+  "adc_channels": [
+    0,
+    1
+  ],
+  "adc_history": 5,
+  "calibration_frames": [
+    0,
+    8000
+  ],
+  "evaluation_frames": [
+    24000,
+    32000
+  ],
+  "no_operational_fidelity_claim": true
+}

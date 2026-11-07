@@ -59,7 +59,7 @@ def write_wrapper(stage, version):
 
 
 def main():
-    """Guard the host, stage current source bytes, and build separate Legacy and strict-shadow profiles."""
+    """Guard the host, stage current source bytes, and build separate Legacy and strict shadow-only profiles."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--build-root", required=True, type=Path, help="New output directory; must not exist")
     parser.add_argument("--cxx", default="g++")
@@ -100,7 +100,7 @@ def main():
         tools = write_wrapper(stage, version)
         build_environment = dict(environment, PATH=str(tools) + os.pathsep + environment["PATH"])
         optimization = "-fno-fast-math" if profile == "shadow" else "-ffast-math"
-        common = [f"CXX={compiler}", "EDT=false", "NEED_CUDA=no", f"OPTIMIZE={optimization}"]
+        common = [f"CXX={compiler}", "CXXSTD=-std=c++20", "EDT=false", "NEED_CUDA=no", f"OPTIMIZE={optimization}"]
         result = {"make_variables": common, "linked": False, "status": "building"}
         manifest["profiles"][profile] = result
         (destination / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
@@ -109,14 +109,15 @@ def main():
                 for directory in ("INDI/liblilxml", "INDI/libcommon"):
                     run(["make", "-C", directory, f"-j{args.jobs}", *common, "all"], stage, build_environment, log)
                 run(["make", f"-j{args.jobs}", *common, "libs_all"], stage, build_environment, log)
-                shadow = ["DDSPC_SHADOW_BUILD=yes"] if profile == "shadow" else []
+                shadow = ["DDSPC_SHADOW_BUILD=yes", "DDSPC_SHADOW_ONLY=yes"] if profile == "shadow" else []
                 # Serialize phony Git-header generation and the object compilation that reads it.
                 run(["make", "-C", "apps/loPredCtrlAcc", "-j1", *common, *shadow, "all"],
                     stage, build_environment, log)
             binary = stage / "apps/loPredCtrlAcc/loPredCtrlAcc"
             if not binary.is_file():
                 raise RuntimeError("Native link did not create loPredCtrlAcc")
-            result.update(linked=True, status="linked", binary_sha256=hashlib.sha256(binary.read_bytes()).hexdigest())
+            result.update(linked=True, status="linked", shadow_only=profile == "shadow",
+                          binary_sha256=hashlib.sha256(binary.read_bytes()).hexdigest())
             print(f"Linked {profile}: {binary}; application was not executed or installed")
         except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
             failed = True

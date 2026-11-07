@@ -1,0 +1,52 @@
+# Headless cross-repository numerical connection only; never link a native application or device/shmim library.
+APP_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/..)
+TEST_DIR := $(APP_DIR)/tests
+MAGAOX_REPO ?= $(HOME)/source/MagAOX
+BUILD_DIR ?= $(APP_DIR)/build/simulation
+CXX = c++
+CPPFLAGS += $(shell pkg-config --cflags-only-I eigen3 mxlib) -DEIGEN_DONT_PARALLELIZE
+CPPFLAGS += -I$(MAGAOX_REPO)/apps/accelSim
+ifneq ($(TRAINING_END),)
+CPPFLAGS += -DDDSPC_SIM_TRAINING_END=$(TRAINING_END)
+endif
+ifneq ($(TRAINING_START),)
+CPPFLAGS += -DDDSPC_SIM_TRAINING_START=$(TRAINING_START)
+endif
+ifneq ($(ACCEL_HISTORY),)
+CPPFLAGS += -DDDSPC_SIM_ACCEL_HISTORY=$(ACCEL_HISTORY)
+endif
+ifneq ($(QR_PRIOR),)
+CPPFLAGS += -DDDSPC_SIM_QR_PRIOR=$(QR_PRIOR)
+endif
+ifneq ($(WFS_HISTORY),)
+CPPFLAGS += -DDDSPC_SIM_WFS_HISTORY=$(WFS_HISTORY)
+endif
+ifneq ($(QR_GAMMA),)
+CPPFLAGS += -DDDSPC_SIM_QR_GAMMA=$(QR_GAMMA)
+endif
+ifneq ($(CONTROL_PENALTY),)
+CPPFLAGS += -DDDSPC_SIM_CONTROL_PENALTY=$(CONTROL_PENALTY)
+endif
+ifneq ($(LEGACY_LAW),)
+CPPFLAGS += -DDDSPC_SIM_LEGACY_LAW=$(LEGACY_LAW)
+endif
+ifneq ($(FEEDBACK_GAIN),)
+CPPFLAGS += -DDDSPC_SIM_FEEDBACK_GAIN=$(FEEDBACK_GAIN)
+endif
+CXXFLAGS ?= -O3 -g
+CXXFLAGS += -std=c++20 -Wall -Wextra -fno-fast-math -fPIC
+SOURCES := $(TEST_DIR)/sim_bridge.cpp $(TEST_DIR)/async_shadow.cpp $(APP_DIR)/ar_controller.cpp \
+           $(APP_DIR)/recursive_least_squares.cpp $(APP_DIR)/qrd_rls.cpp $(APP_DIR)/utils.cpp $(APP_DIR)/shadow_controller.cpp \
+           $(TEST_DIR)/operational_law.cpp
+OBJECTS := $(addprefix $(BUILD_DIR)/,$(notdir $(SOURCES:.cpp=.o)))
+VPATH := $(sort $(dir $(SOURCES)))
+SHARED_FLAG := $(if $(filter Darwin,$(shell uname -s)),-dynamiclib,-shared)
+TARGET := $(BUILD_DIR)/libddspc_sim.so
+.PHONY: all
+all: $(TARGET)
+$(TARGET): $(OBJECTS)
+	$(CXX) $(CXXFLAGS) $(SHARED_FLAG) $(LDFLAGS) $^ -pthread -o $@
+$(BUILD_DIR)/%.o: %.cpp
+	@mkdir -p $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -MMD -MP -c $< -o $@
+-include $(OBJECTS:.o=.d)

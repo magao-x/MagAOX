@@ -1,0 +1,11 @@
+{
+  "clang": {
+    "result": "417999 assertions in 4 test cases",
+    "log_sha256": "a26695f6ab7be7594f3796b2ad09a9384b43cf9bc0cae2cede985f5f5c290907"
+  },
+  "gcc": {
+    "result": "418013 assertions in 4 test cases",
+    "log_sha256": "db9bf973ede74fa2ca2f94698ae2049e4fad2090dd87453b9a4d50ebc2090bf2"
+  },
+  "demo_checks": "Both compiler runs passed common-input, timing, bounded command and independent applied-plant checks."
+}

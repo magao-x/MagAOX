@@ -1,0 +1,9 @@
+{
+  "clang": "All 28 stored columns match for standard and assisted, 100x source, at original 12-significant-digit trace precision",
+  "gcc": "All 28 stored columns match for standard and assisted, 100x source, at original 12-significant-digit trace precision",
+  "reference_trace_sha256": {
+    "clang": "8f86707e0842a4279b3366eebcbf773a6b98f1f4fa2a9bcaa25293c214c0af1f",
+    "gcc": "ce4f4047453ad835d79f3be549fc2b6436fcb44bd599a1930c072499b4ebff53"
+  },
+  "stored_trace_significant_digits": 12
+}

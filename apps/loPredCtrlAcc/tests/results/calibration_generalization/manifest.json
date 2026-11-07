@@ -1,0 +1,32 @@
+{
+  "compiler": "Apple clang version 21.0.0 (clang-2100.0.123.102)\nTarget: arm64-apple-darwin25.3.0\nThread model: posix\nInstalledDir: /Library/Developer/CommandLineTools/usr/bin\n",
+  "source_sha256": {
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/tests/calibration_generalization.py": "2781672a494426f3d13f59b0ae193cc969e789a83847e39eb09adbfd71803a8a",
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/tests/sim_bridge.cpp": "a656c5f0dd55ca94c57f21f5c96e08c5dc1a32516bc05411af49504eaa5792e3",
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/tests/Makefile.sim": "21cecbf5a04a290197ed236ffac03ca8102de4ebfb3f6ee593e4e4345c41c2b0",
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/tests/async_shadow.cpp": "d8a359b343971eb5ba07bc9c3758a4da8b4240bf6e4900d2de93735a87e86697",
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/tests/simulation_demo.py": "f386edd19f1afa1297eca9ef90a792f07be99323122939ca6851981b732a090f",
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/tests/prediction_information.py": "21838666dabd8328f7ef66afdae9ee1eef0b0c6985e591afa9c53e9b0fb132b5",
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/qrd_rls.cpp": "7f4f7f4870b6556f9b0dd2dcfcfd60444cfd316f65a69d95d30be297795b19e2",
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/ar_controller.cpp": "5b26311fac738f63ebdd809cd5f44692e161ac1a14e42550baaa9341bf3d14b2",
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/shadow_controller.cpp": "b77c997599174f4bc537b45dcb2eb4ea78c28c45d3f8aa69c2f9c9e75c1681ff",
+    "/Users/parkerjohnson/source/MagAOX/apps/accelSim/accelSimModel.hpp": "eec564586ff65670dab72f921a2dd5ba68512090e1dd8805baddae4fe30df5fb",
+    "/Users/parkerjohnson/source/MagAOX/apps/aoSim/xapp/aoSim/__init__.py": "61907a5dd5462000c121bfb28c5376ede830d8f251e2091c36179fb7cd593628"
+  },
+  "binaries": {
+    "d1_h5_p001": "67b0b42dba1326a526ef1c2d7aeec505dd868e3766271b80e8734432ba346d6b",
+    "d2_h5_p001": "77c2c6fa6c1d7ea9f856dc72f59a98bbb4491d4ad662f6527f740d836b58cfb9",
+    "d4_h5_p001": "47fa120b98c09f064b20f0729db4d323f5ef2610a65757e199157dad9b0562fc",
+    "d4_h3_p001": "6d85d028f85665e184ed6598652bbfd24c5112a94fe3654d85ef39ff55e6fed3",
+    "d4_h1_p001": "39c19721b8d69f54e9c192ac23a9824f47b781c9e306f309ebd7fdd1c489b331",
+    "d4_h5_p010": "b5327a8e0d3fc24361ffd2f837436bfd0856e0c40e639099cd78ccdeb4a7e405"
+  },
+  "selection_sha256": "9889d1e0ce6d37bfc19a89c8616b679f13fc3c4453cf94f3b460aa6ecef4901b",
+  "validation_prefixes_exact": true,
+  "coefficients_unchanged_in_final": true,
+  "final_generated_after_selection": true,
+  "final_no_control_rms": {
+    "1": 0.6638094619686962,
+    "100": 0.6638094626345477
+  }
+}

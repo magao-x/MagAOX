@@ -1,0 +1,29 @@
+{
+  "compiler": "g++-15 (Homebrew GCC 15.2.0_1) 15.2.0\nCopyright (C) 2025 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n\n",
+  "binary_sha256": "d92f581318b1d6172b75121d52a9f767c41237d6dc1f165fc9cb554e6f20b4bf",
+  "source_sha256": {
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/tests/prediction_information.py": "209a343713fa84444c5942a1c2615cd7c52a149a646429641bc5e737a2da930e",
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/tests/simulation_demo.py": "ad6f09b8c3a687e40baf8fb4bba62c3cb76493a277557a97fa29492627c39bda",
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/tests/sim_bridge.cpp": "61b47a5d687da943685945666f00f0fd005892393c80518ddfeb7c5549e1dbf5",
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/tests/async_shadow.cpp": "18c2a18d3c888351a42885d0e9f1c57559f6eaba8b8213e74d8518ffe5120bd0",
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/ar_controller.cpp": "5b26311fac738f63ebdd809cd5f44692e161ac1a14e42550baaa9341bf3d14b2",
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/qrd_rls.cpp": "7f4f7f4870b6556f9b0dd2dcfcfd60444cfd316f65a69d95d30be297795b19e2",
+    "/Users/parkerjohnson/source/MagAOX-DDSPC/apps/loPredCtrlAcc/shadow_controller.cpp": "b77c997599174f4bc537b45dcb2eb4ea78c28c45d3f8aa69c2f9c9e75c1681ff",
+    "/Users/parkerjohnson/source/MagAOX/apps/accelSim/accelSimModel.hpp": "eec564586ff65670dab72f921a2dd5ba68512090e1dd8805baddae4fe30df5fb",
+    "/Users/parkerjohnson/source/MagAOX/apps/aoSim/xapp/aoSim/__init__.py": "61907a5dd5462000c121bfb28c5376ede830d8f251e2091c36179fb7cd593628"
+  },
+  "adc_channels": [
+    0,
+    1
+  ],
+  "training_end": 2400,
+  "score_start": 3400,
+  "frame_count": 10400,
+  "prediction_horizons": [
+    1,
+    2,
+    3
+  ],
+  "correction_effect_frames": 2,
+  "timing": "ADC frame k: four samples before decision; injection visible in WFS k+2"
+}

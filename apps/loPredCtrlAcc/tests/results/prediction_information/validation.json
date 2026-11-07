@@ -1,0 +1,34 @@
+{
+  "tests": {
+    "prediction-connection-tests.log": {
+      "result": "Ran 14 tests",
+      "sha256": "573b5d0f73fc520b77fdaf5e63e1d1b4bbb8e1dfcb96600d2b4dd2b6947b1a5a"
+    },
+    "prediction-information-tests.log": {
+      "result": "Ran 4 tests",
+      "sha256": "d911bd71cd769ccbb09fcf314f1cf0dca2c45f44c1d487c15bcf7bb985fa5699"
+    },
+    "prediction-all-tests-gcc.log": {
+      "result": "Ran 18 tests",
+      "sha256": "0c0f3f726a0481bd16ef6b94924113cc6a96be2cd2688dde01da908512c7052c"
+    },
+    "prediction-strict-clang.log": {
+      "result": "1766593 assertions in 66 test cases",
+      "sha256": "57c82ff8d5e59b9547cc7c644f982cb5ecbcb3eeebc924a168856ef34cd12426"
+    },
+    "prediction-strict-gcc.log": {
+      "result": "1764508 assertions in 66 test cases",
+      "sha256": "1c6d46220030d69fe69d36335e8277dc0de6ecefc2b247475e60731f35585629"
+    }
+  },
+  "fixed_fit_metric_preservation": {
+    "clang": "All previous fixed-fit residual metrics exactly reproduced",
+    "gcc": "All previous fixed-fit residual metrics exactly reproduced"
+  },
+  "production_sources_unchanged": true,
+  "plan_prefix_preserved": true,
+  "test_source_sha256": "0b241453df20953f19972cd7d30dd1221f8ce0632dad9900438789348e4b3ac5",
+  "native_runtime_executed": false,
+  "sanitizer_rerun": false,
+  "controller_correction_implemented": false
+}

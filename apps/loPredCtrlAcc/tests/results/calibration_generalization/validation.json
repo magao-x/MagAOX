@@ -1,0 +1,58 @@
+{
+  "tests": {
+    "calibration-generalization-tests.log": {
+      "result": "Ran 3 tests",
+      "sha256": "92613c3055bf036ae68798c61731e642550031da64f23b95e8472fee01f577a7"
+    },
+    "calibration-generalization-tests-gcc.log": {
+      "result": "Ran 3 tests",
+      "sha256": "f363d1930491a2be563dec8e33a484fafbec2c78545bfc5651362e77c8e33949"
+    },
+    "generalization-default-clang-tests.log": {
+      "result": "Ran 18 tests",
+      "sha256": "8020e9ed94fb1a98b88751565f32521d4cf050b7b4d1f318660da90a25445f70"
+    },
+    "generalization-default-gcc-tests.log": {
+      "result": "Ran 18 tests",
+      "sha256": "a2cfcb3f932178a1afcc927f2faafe22136358d030f75264f1b5a87da3f5fb3f"
+    },
+    "generalization-strict-clang.log": {
+      "result": "1765003 assertions in 66 test cases",
+      "sha256": "d37041e332841624fcd2f48e135975364abc29fe1f915ec0f60bb6038084211c"
+    },
+    "generalization-strict-gcc.log": {
+      "result": "1765716 assertions in 66 test cases",
+      "sha256": "26d916d70f36e9d5ef0bf7d16f765a0e263c05a6191193aca5e196b9c6794ecc"
+    }
+  },
+  "experiment_checks": {
+    "clang": {
+      "native_update_counts": [
+        1992,
+        3992,
+        7992
+      ],
+      "calibration_ranks_full": true,
+      "selection_hash_verified": true,
+      "all_source_hashes_current": true,
+      "all_36_rows_retained": true
+    },
+    "gcc": {
+      "native_update_counts": [
+        1992,
+        3992,
+        7992
+      ],
+      "calibration_ranks_full": true,
+      "selection_hash_verified": true,
+      "all_source_hashes_current": true,
+      "all_36_rows_retained": true
+    }
+  },
+  "production_sources_unchanged": true,
+  "protected_plan_prefix_preserved": true,
+  "native_runtime_executed": false,
+  "real_dm_commands": false,
+  "sanitizer_rerun": false,
+  "test_source_sha256": "aa1d8183e1a55b403ae6a500c165724c8a2841d1de9631124e889efab24630df"
+}
