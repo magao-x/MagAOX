@@ -249,7 +249,6 @@ WorkerHarness::WorkerHarness( const std::string &camera, const std::string &sdk 
     m_capacity             = 512;
     m_clockBracketUs       = 100;
     m_cameraQuantizationUs = 0;
-    m_stateTimeoutSec      = 30;
     m_queue.configure( m_capacity );
     REQUIRE( m_monitor.configure( m_maxFPS, m_windowSec, m_capacity ) );
 }

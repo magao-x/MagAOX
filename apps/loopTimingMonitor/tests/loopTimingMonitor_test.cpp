@@ -20,12 +20,12 @@ class Harness : public MagAOX::app::loopTimingMonitor
     using loopTimingMonitor::m_capacity;
     using loopTimingMonitor::m_captureEpoch;
     using loopTimingMonitor::m_dmDevice;
+    using loopTimingMonitor::m_gateEnabled;
     using loopTimingMonitor::m_gateGeneration;
     using loopTimingMonitor::m_lastRecord;
     using loopTimingMonitor::m_loopDevice;
     using loopTimingMonitor::m_maxFPS;
     using loopTimingMonitor::m_monitor;
-    using loopTimingMonitor::m_stateTimeoutSec;
     using loopTimingMonitor::m_streamsReady;
     using loopTimingMonitor::m_summarySerial;
     using loopTimingMonitor::monotonicNow;
@@ -52,7 +52,7 @@ class Harness : public MagAOX::app::loopTimingMonitor
                   int64_t  stampNs /**< [in] Monotonic endpoint. */ );
 
     /// Queue a continuous 300 us cadence with known 100 us camera-to-SDK latency.
-    void population();
+    void population( int64_t baseNs = 0 /**< [in] Monotonic origin; zero selects a recent real timestamp. */ );
 };
 
 Harness::Harness()
@@ -107,9 +107,9 @@ void Harness::enqueue( bool camera, uint64_t counter, int64_t stampNs )
     REQUIRE( m_queue.push( event ) );
 }
 
-void Harness::population()
+void Harness::population( int64_t baseNs )
 {
-    const auto base = monotonicNow() - 10000000;
+    const auto base = baseNs ? baseNs : monotonicNow() - 10000000;
     enqueue( false, 1, base - 200000 );
 
     for( uint64_t frame = 0; frame < 7; ++frame )
@@ -120,7 +120,7 @@ void Harness::population()
 }
 /// \endcond
 
-/** Verify default and configurable limits reject nonfinite/invalid values under production compiler flags.
+/** \brief Verify default and configurable limits reject nonfinite/invalid values under production compiler flags.
  * \ingroup loopTimingMonitor_unit_test
  */
 TEST_CASE( "loop timing configuration validates FPS and device identities", "[loopTimingMonitor]" )
@@ -172,7 +172,7 @@ TEST_CASE( "loop timing configuration validates FPS and device identities", "[lo
     // clang-format on
 }
 
-/** Verify all prerequisites are observed and configured names route exact properties.
+/** \brief Verify all prerequisites are observed and configured names route exact properties.
  * \ingroup loopTimingMonitor_unit_test
  */
 TEST_CASE( "loop timing accepts only configured operating devices and loop on", "[loopTimingMonitor]" )
@@ -211,11 +211,6 @@ TEST_CASE( "loop timing accepts only configured operating devices and loop on", 
         REQUIRE( app.setCallBack_source( malformed ) == 0 );
     }
 
-    SECTION( "state expires" )
-    {
-        app.m_stateTimeoutSec = 0;
-    }
-
     CHECK_FALSE( app.timingValues( values ) );
     const auto recorded = app.m_lastRecord;
     REQUIRE( app.recordTimings( true ) == 0 );
@@ -232,7 +227,40 @@ TEST_CASE( "loop timing accepts only configured operating devices and loop on", 
     // clang-format on
 }
 
-/** Verify gate/attachment epochs reject observations already queued before a transition.
+/** \brief Retain unchanged subscriptions while independently expiring old timing samples.
+ * \ingroup loopTimingMonitor_unit_test
+ */
+TEST_CASE( "loop timing retains subscribed states without refresh traffic", "[loopTimingMonitor]" )
+{
+    Harness app;
+    app.enable();
+    const auto generation = app.m_gateGeneration.load();
+    const auto now        = app.monotonicNow();
+    app.population();
+    app.consume( now );
+    REQUIRE( app.m_monitor.summary().latency.count > 0 );
+
+    const auto later = now + 3600000000000;
+    app.consume( later );
+    CHECK( app.m_gateEnabled.load() );
+    CHECK( app.m_gateGeneration.load() == generation );
+    CHECK( app.m_monitor.summary().latency.count == 0 );
+
+    app.population( later + 10000000 );
+    app.consume( later + 20000000 );
+    CHECK( app.m_gateEnabled.load() );
+    CHECK( app.m_gateGeneration.load() == generation );
+    CHECK( app.m_monitor.summary().latency.count > 0 );
+
+    // clang-format off
+#ifdef LOOPTIMINGMONITOR_TEST_DOXYGEN_REF
+    MagAOX::app::loopTimingMonitor::setCallBack_source;
+    MagAOX::app::loopTimingMonitor::consume;
+#endif
+    // clang-format on
+}
+
+/** \brief Verify gate/attachment epochs reject observations already queued before a transition.
  * \ingroup loopTimingMonitor_unit_test
  */
 TEST_CASE( "loop timing cannot reuse queued data after gate or source transitions", "[loopTimingMonitor]" )
@@ -265,7 +293,7 @@ TEST_CASE( "loop timing cannot reuse queued data after gate or source transition
     // clang-format on
 }
 
-/** Verify exactly the existing persistent fgtimes fields represent the three documented populations.
+/** \brief Verify exactly the existing persistent fgtimes fields represent the three documented populations.
  * \ingroup loopTimingMonitor_unit_test
  */
 TEST_CASE( "loop timing serializes camera cadence SDK cadence and latency as fgtimes", "[loopTimingMonitor]" )

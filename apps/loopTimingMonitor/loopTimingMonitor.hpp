@@ -71,10 +71,6 @@ class loopTimingMonitor : public MagAOXApp<>, public dev::telemeter<loopTimingMo
 
     double m_cameraQuantizationUs{ 1 }; ///< Camera timestamp truncation uncertainty, ordinary EDT default.
 
-    double m_statePollSec{ 1 }; ///< Interval between read-only INDI source refreshes.
-
-    double m_stateTimeoutSec{ 5 }; ///< Maximum age of each source-state observation.
-
     int m_threadPrio{ 0 }; ///< Optional polling-worker scheduling priority.
 
     std::string m_cpuset; ///< Optional polling-worker CPU set.
@@ -93,9 +89,9 @@ class loopTimingMonitor : public MagAOXApp<>, public dev::telemeter<loopTimingMo
         int64_t  rawNs{ 0 };      ///< Original camera clock stamp for cadence without mapping noise.
     };
 
-    std::mutex m_gateMutex; ///< Serializes INDI state updates and gate expiry.
+    std::mutex m_gateMutex; ///< Serializes INDI state updates and gate publication.
 
-    loopTiming::Gate m_gate; ///< Last known states and receipt ages, protected by m_gateMutex.
+    loopTiming::Gate m_gate; ///< Last received source states, protected by m_gateMutex.
 
     std::atomic<uint64_t> m_gateGeneration{ 0 }; ///< Published gate generation for the polling worker.
 
@@ -132,8 +128,6 @@ class loopTimingMonitor : public MagAOXApp<>, public dev::telemeter<loopTimingMo
     uint64_t m_summarySerial{ 0 }; ///< Ordinary-thread statistics publication sequence.
 
     uint64_t m_lastRecord{ 0 }; ///< Summary sequence last written to fgtimes.
-
-    int64_t m_lastStatePoll{ 0 }; ///< Monotonic time of the previous INDI refresh request.
 
     std::thread m_thread; ///< Sole owner of both attached streams and clock mapper.
 
@@ -174,7 +168,7 @@ class loopTimingMonitor : public MagAOXApp<>, public dev::telemeter<loopTimingMo
     /// Register subscriptions/output properties and start the polling owner.
     int appStartup() override;
 
-    /// Refresh gate evidence, consume observations and publish statistics/telemetry.
+    /// Consume observations and publish statistics/telemetry under the subscribed source states.
     int appLogic() override;
 
     /// Stop polling and the telemetry helper without touching source devices.
@@ -197,8 +191,8 @@ class loopTimingMonitor : public MagAOXApp<>, public dev::telemeter<loopTimingMo
     /// Read the host monotonic clock, returning zero on failure.
     static int64_t monotonicNow();
 
-    /// Expire source evidence and publish a coherent gate generation while holding m_gateMutex.
-    bool refreshGate( int64_t nowNs /**< [in] Current monotonic time. */ );
+    /// Publish the subscribed gate state and generation while holding m_gateMutex.
+    bool publishGate();
 
     /// Consume at most one captured queue population and update its trailing statistics.
     void consume( int64_t nowNs /**< [in] Current monotonic evaluation time. */ );
@@ -273,8 +267,6 @@ inline void loopTimingMonitor::setupConfig()
     add( "monitor.clockMaxAgeMs", "monitor", "clockMaxAgeMs", "real", "Maximum mapped timestamp age; default 100 ms." );
     add( "monitor.threadPrio", "monitor", "threadPrio", "integer", "Polling thread priority 0-99; default 0." );
     add( "monitor.cpuset", "monitor", "cpuset", "string", "Optional polling thread CPU set." );
-    add( "state.pollSec", "state", "pollSec", "real", "INDI state refresh interval; default 1 second." );
-    add( "state.timeoutSec", "state", "timeoutSec", "real", "State observation timeout; default 5 seconds." );
     TELEMETER_SETUP_CONFIG( config );
 }
 
@@ -295,8 +287,6 @@ inline int loopTimingMonitor::loadConfigImpl( mx::app::appConfigurator &config )
     config( m_clockMaxAgeMs, "monitor.clockMaxAgeMs" );
     config( m_threadPrio, "monitor.threadPrio" );
     config( m_cpuset, "monitor.cpuset" );
-    config( m_statePollSec, "state.pollSec" );
-    config( m_stateTimeoutSec, "state.timeoutSec" );
 
     const auto bounded = []( double value, double low, double high )
     {
@@ -308,9 +298,8 @@ inline int loopTimingMonitor::loadConfigImpl( mx::app::appConfigurator &config )
         ( m_cameraClock != "realtime" && m_cameraClock != "tai" ) || !bounded( m_maxFPS, 1, 1000000 ) ||
         !bounded( m_pollSleepUs, 0, 1000000 ) || !bounded( m_windowSec, 0.001, 3600 ) || m_capacity < 4 ||
         m_capacity > 10000000 || !bounded( m_clockBracketUs, 0.001, 1000000 ) ||
-        !bounded( m_clockMaxAgeMs, 0.001, 1000 ) || !bounded( m_cameraQuantizationUs, 0, 1000 ) ||
-        !bounded( m_statePollSec, 0.1, 3600 ) || !bounded( m_stateTimeoutSec, m_statePollSec * 2, 86400 ) ||
-        m_threadPrio < 0 || m_threadPrio > 99 )
+        !bounded( m_clockMaxAgeMs, 0.001, 1000 ) || !bounded( m_cameraQuantizationUs, 0, 1000 ) || m_threadPrio < 0 ||
+        m_threadPrio > 99 )
     {
         return log<software_error, -1>( { "invalid loop timing configuration" } );
     }
@@ -429,9 +418,9 @@ inline int64_t loopTimingMonitor::monotonicNow()
     return clock_gettime( CLOCK_MONOTONIC, &stamp ) == 0 ? int64_t( stamp.tv_sec ) * 1000000000 + stamp.tv_nsec : 0;
 }
 
-inline bool loopTimingMonitor::refreshGate( int64_t nowNs )
+inline bool loopTimingMonitor::publishGate()
 {
-    const bool enabled = m_gate.enabled( nowNs, int64_t( m_stateTimeoutSec * 1e9 ) );
+    const bool enabled = m_gate.enabled();
     m_gateEnabled.store( enabled, std::memory_order_release );
     m_gateGeneration.store( m_gate.generation(), std::memory_order_release );
     return enabled;
@@ -468,10 +457,8 @@ inline int loopTimingMonitor::setCallBack_source( const pcf::IndiProperty &prope
 
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_gateMutex );
-        const auto                  now = monotonicNow();
-        refreshGate( now );
-        m_gate.update( source, value, now );
-        refreshGate( now );
+        m_gate.update( source, value );
+        publishGate();
     }
 
     return 0;
@@ -484,7 +471,7 @@ inline void loopTimingMonitor::consume( int64_t nowNs )
 
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_gateMutex );
-        enabled    = refreshGate( nowNs );
+        enabled    = publishGate();
         generation = m_gate.generation();
     }
 
@@ -533,7 +520,7 @@ inline bool loopTimingMonitor::timingValuesLocked( std::array<double, 6> &values
     const auto  now     = monotonicNow();
     const auto &summary = m_monitor.summary();
 
-    if( !refreshGate( now ) || m_summaryGate != m_gate.generation() ||
+    if( !publishGate() || m_summaryGate != m_gate.generation() ||
         m_summaryEpoch != m_captureEpoch.load( std::memory_order_acquire ) || !m_streamsReady.load() ||
         !summary.cameraIntervals.valid || !summary.sdkIntervals.valid || !summary.latency.valid ||
         summary.newestNs <= 0 || now < summary.newestNs || now - summary.newestNs >= int64_t( m_windowSec * 1e9 ) )
@@ -557,20 +544,12 @@ inline int loopTimingMonitor::appLogic()
         return -1;
     }
 
-    const auto now = monotonicNow();
-
-    if( m_indiDriver && now - m_lastStatePoll >= int64_t( m_statePollSec * 1e9 ) )
-    {
-        sendGetPropertySetList( true );
-        m_lastStatePoll = now;
-    }
-
-    consume( now );
+    consume( monotonicNow() );
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_gateMutex );
         const auto                 &summary = m_monitor.summary();
         std::array<double, 6>       values{};
-        const bool                  enabled   = refreshGate( monotonicNow() );
+        const bool                  enabled   = publishGate();
         const bool                  connected = m_streamsReady.load();
         const bool                  active    = enabled && connected;
         const bool current = active && m_summaryGate == m_gate.generation() && m_summaryEpoch == m_captureEpoch.load();

@@ -1,5 +1,5 @@
 /** \file loopTimingGate.hpp
- * \brief Fresh remote-state qualification for loop timing observations.
+ * \brief Subscription-state qualification for loop timing observations.
  */
 #ifndef loopTimingMonitor_loopTimingGate_hpp
 #define loopTimingMonitor_loopTimingGate_hpp
@@ -15,9 +15,11 @@ namespace app
 namespace loopTiming
 {
 
-/// Require fresh affirmative camera, DM and loop states without hiding intervening transitions.
-/** The caller serializes updates and expiry. Generation changes invalidate
- * queued observations even when an off/on transition occurs between polls.
+/// Require affirmative camera, DM and loop states without hiding intervening transitions.
+/** Received states remain valid until another subscription update, explicit
+ * invalidation or reset. The caller serializes mutable access. Generation
+ * changes invalidate queued observations even when an off/on transition occurs
+ * between polls.
  */
 class Gate
 {
@@ -30,17 +32,15 @@ class Gate
         loop
     };
 
-    /// Record an affirmative or negative remote state at its local receipt time.
-    void update( Source  source /**< [in] Camera, DM or loop subscription. */,
-                 bool    value /**< [in] Whether the received state satisfies its prerequisite. */,
-                 int64_t nowNs /**< [in] Positive monotonic receipt timestamp. */ );
+    /// Retain an affirmative or negative remote state until explicitly changed or invalidated.
+    void update( Source source /**< [in] Camera, DM or loop subscription. */,
+                 bool   value /**< [in] Whether the received state satisfies its prerequisite. */ );
 
-    /// Revoke a subscription after missing or malformed state information.
+    /// Revoke a subscription after explicitly detected missing or malformed state information.
     void invalidate( Source source /**< [in] Subscription whose state is no longer known. */ );
 
-    /// Expire old or regressing observations and return whether all prerequisites hold.
-    bool enabled( int64_t nowNs /**< [in] Current positive monotonic time. */,
-                  int64_t timeoutNs /**< [in] Strict positive maximum receipt age. */ );
+    /// Return whether all last known subscription states satisfy their prerequisites.
+    bool enabled() const;
 
     /// Return the transition generation for tagging and rejecting queued observations.
     uint64_t generation() const;
@@ -49,14 +49,12 @@ class Gate
     void reset();
 
   private:
-    /// One locally timestamped subscription, independent of its last boolean value.
+    /// One retained subscription state, including whether any usable update has been received.
     struct State
     {
-        bool known{ false }; ///< A well-formed state has been received and has not expired.
+        bool known{ false }; ///< A state has been received and has not been explicitly invalidated.
 
         bool value{ false }; ///< The most recent state satisfies its prerequisite.
-
-        int64_t receivedNs{ 0 }; ///< Local monotonic receipt time, never a remote clock.
     };
 
     std::array<State, 3> m_states{}; ///< Caller-serialized camera, DM and loop observations.
@@ -77,7 +75,7 @@ inline void Gate::advance()
     }
 }
 
-inline void Gate::update( Source source, bool value, int64_t nowNs )
+inline void Gate::update( Source source, bool value )
 {
     const auto index = static_cast<size_t>( source );
 
@@ -88,18 +86,12 @@ inline void Gate::update( Source source, bool value, int64_t nowNs )
 
     auto &state = m_states[index];
 
-    if( nowNs <= 0 || ( state.known && nowNs < state.receivedNs ) )
-    {
-        invalidate( source );
-        return;
-    }
-
     if( !state.known || state.value != value )
     {
         advance();
     }
 
-    state = { true, value, nowNs };
+    state = { true, value };
 }
 
 inline void Gate::invalidate( Source source )
@@ -115,19 +107,12 @@ inline void Gate::invalidate( Source source )
     advance();
 }
 
-inline bool Gate::enabled( int64_t nowNs, int64_t timeoutNs )
+inline bool Gate::enabled() const
 {
     bool ready = true;
 
-    for( auto &state : m_states )
+    for( const auto &state : m_states )
     {
-        if( state.known &&
-            ( nowNs <= 0 || timeoutNs <= 0 || nowNs < state.receivedNs || nowNs - state.receivedNs >= timeoutNs ) )
-        {
-            state = {};
-            advance();
-        }
-
         ready = ready && state.known && state.value;
     }
 

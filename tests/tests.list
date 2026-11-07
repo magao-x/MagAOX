@@ -69,6 +69,7 @@
 ../apps/loopTimingMonitor/tests/loopTimingGate_test
 ../apps/loopTimingMonitor/tests/loopTimingStream_test
 ../apps/loopTimingMonitor/tests/loopTimingMonitor_test
+../apps/loopTimingMonitor/tests/loopTimingMonitor_subscription_test
 ../apps/loopTimingMonitor/tests/loopTimingMonitor_integration_test
 ../apps/filterWheelCtrl/tests/filterWheelCtrl_test
 ../apps/flipperCtrl/tests/flipperCtrl_test

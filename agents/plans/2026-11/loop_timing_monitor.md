@@ -114,6 +114,9 @@ unambiguous temporal association.
 - Collection requires configurable camera and DM devices to report
   `fsm.state=OPERATING`, and a configurable loop device to report
   `loop_state.toggle=On`. Defaults are `camwfs`, `dmtweeter`, and `holoop`.
+  Use passive INDI subscriptions: each source is initially unknown, and the
+  last received state remains valid until an update changes it. State has no
+  receipt-age expiry; camera/SDK timestamps and retained samples still do.
 
 ## Requirements
 
@@ -153,13 +156,23 @@ The user approved implementation and resolved the planning questions:
    cadence, and paired latency, each with mean and sample deviation in seconds.
    Existing DM timing already reuses this record for documented endpoint pairs.
 4. Camera and DM must both be OPERATING and the loop must be on. Device names
-   are independently configurable. Unknown/malformed/stale state closes the gate.
+   are independently configurable. Unknown/malformed/negative state closes the
+   gate. The user subsequently specified pure INDI publish/subscribe: assume
+   the last received state until it changes, without periodic property requests
+   or receipt-age expiry.
 
-Use a periodic INDI get-properties refresh and configurable receipt-age timeout
-because the existing wrapper does not forward source deletion/disconnection to
-application callbacks. A gate-generation change clears queued/pending samples
-and retained statistics; reopening requires fresh stream baselines. This avoids
-mixing pre-close observations into a later operating interval.
+**Superseded design:** the initial implementation used periodic INDI
+get-properties requests and a configurable receipt-age timeout because the
+wrapper does not forward source deletion/disconnection to application callbacks.
+The user explicitly replaced that policy with passive subscriptions. Normal
+base-class subscription establishment/recovery remains; the monitor adds no
+periodic refresh. The obsolete `state.pollSec` and `state.timeoutSec` configuration
+keys are removed at the user's request; there is only one deployment. Remove its
+old `[state]` configuration section when updating. INDI silence alone does not
+close the gate.
+A gate-generation change clears queued/pending samples and retained statistics;
+reopening requires fresh stream baselines. Camera/SDK timestamp freshness,
+clock-mapping age limits and statistics-window expiry remain unchanged.
 
 No outstanding clarification blocks implementation. The app follows the existing
 header-only pattern with out-of-class definitions.
@@ -181,7 +194,7 @@ ImageStreamIO fixtures under a temporary `MILK_SHM_DIR`.
 | Ordering and ambiguity | Timestamp regressions with advancing counters, zero/multiple SDK events per camera interval, missing commands, boundary equality and uncertainty overlapping a boundary. Extra indistinguishable commands and latency aliasing are documented limitations, not falsely claimed detectable errors. |
 | Clock mapping | Known offset, wide/failed brackets, stale mapping, clock step, wrong declared domain, second rollover and integer range checks. Include the known camera timestamp quantization in uncertainty. Regress existing synco clock tests if the helper is generalized. |
 | Statistics and state | Known sample mean and n-1 deviation; empty/singleton populations, expiry, stopped sources, restart epochs, and capacity limits. Mean may exist for one sample; standard deviation must remain unavailable. |
-| Operating gate | Configurable device subscriptions, exact FSM/switch semantics, unknown/malformed/stale state, each condition independently false, recovery, rapid Off/On, and rejection of queued samples from prior gate generations. |
+| Operating gate | Configurable device subscriptions, exact FSM/switch semantics, initially unknown/malformed/negative state, each condition independently false, affirmative state retained without age expiry, no periodic property requests, recovery, rapid Off/On, and rejection of queued samples from prior gate generations. |
 | Persistent telemetry | Exact six-field fgtimes mapping and units, sample deviations, normal/forced recording, no stale or gate-disabled emission, and no records before all populations are valid. |
 | Lifecycle/configuration | Missing stream at startup, incompatible stream, same-name recreation/new inode, collision with another publisher, bounded shutdown during retry/sleep, invalid sleep/window/capacity/latency settings and optional scheduling errors. |
 
@@ -241,7 +254,9 @@ software tests alone cannot establish production timing impact.
   Makefile and documented example configuration. Suggested settings are camera
   and SDK stream names, camera clock, `pollSleepUs`, thread priority/cpuset,
   `windowSec`, bounded capacity, `maxFPS` (default 3600), clock-bracket/age
-  limits, device names, and state refresh/timeout settings.
+  limits and device names. Register passive INDI subscriptions for the operating
+  gate; do not add periodic state refresh or receipt-age expiry. Remove
+  the obsolete `state.pollSec` and `state.timeoutSec` keys entirely.
 - A dedicated worker attaches directly with ImageStreamIO and reads metadata
   only. Baseline existing counters on attachment; do not count an old image as
   a new event. Check file/inode replacement periodically, with slower retry
@@ -335,12 +350,13 @@ software tests alone cannot establish production timing impact.
 - Added optional `sdk.startTimeStream` publication exclusively in the BMC ordered
   post worker. Existing SDK capture/dispatch and command outcomes are unchanged;
   optional diagnostic failures are nonfatal. The stream is disabled by default.
-- Source-state refresh defaults to one second with a five-second timeout. Unknown,
-  stale or non-operating sources close the gate. Gate transitions and capture
-  discontinuities reject queued old-generation samples and clear the window.
-- Review fixed coherent gate/INDI publication, expiry before same-state refresh,
-  actual requested scheduling-policy verification, failed ImageStreamIO attach
-  cleanup, and polling-side counter-regression quality reporting.
+- The initial source-state design used one-second refreshes and a five-second
+  timeout. **Superseded by the passive INDI subscription update below.** Gate
+  transitions and capture discontinuities reject queued old-generation samples
+  and clear the window.
+- Initial review fixed coherent gate/INDI publication, expiry before same-state
+  refresh, actual requested scheduling-policy verification, failed ImageStreamIO
+  attach cleanup, and polling-side counter-regression quality reporting.
 - Extracted the existing clock mapper into a shared header with a compatibility
   alias for dmSyncopation. Added build dependencies and test registration.
 - Ran clang-format on touched C++ sources and restored mutex-scope annotations.
@@ -364,6 +380,41 @@ Tests use `make -C tests -f Makefile.one t=<test-source>`; affected header consu
 were explicitly rebuilt. No instrument commands were issued. The BMC vendor SDK
 is absent from this workstation, so production BMC linking and operator timing
 qualification remain follow-up work. No test failure remains unresolved.
+
+### Passive INDI subscription update (2026-11-06)
+
+- Source audit confirmed that the monitor's forced `sendGetPropertySetList(true)`
+  calls sent real requests once per second. Indiserver deduplicates its snooping
+  list, but forwards every request and distributes the source's definition replies
+  to interested clients/drivers. Repeated matching definitions can keep wildcard
+  `getINDI` queries alive by resetting their response timeout.
+- The user requested pure publish/subscribe and last-received-state semantics.
+  Remove application-level refreshes and gate receipt-age expiry. Initially
+  unknown, malformed or negative source states close the gate; affirmative states
+  remain valid until subsequent updates change them. Rapid Off/On transitions
+  still invalidate queued observations and establish a fresh measurement epoch.
+- The user confirmed that there is only one deployment and requested removal
+  of `state.pollSec` and `state.timeoutSec` entirely, including the example's
+  `[state]` section. Remove these keys from the deployed configuration on update.
+  Stream polling, timestamp freshness, clock mapping and trailing-window expiry
+  are unchanged.
+- Verification for this update: the app builds and links; gate tests pass
+  51 assertions / 5 cases; app tests pass 283 assertions / 5 cases; worker
+  integration tests pass 50 assertions / 2 cases; the new private-driver
+  subscription regression passes 30 assertions / 1 case. Total: 414 assertions
+  across 13 cases. The subscription test observes three initial requests and
+  no further requests after resolution across repeated real appLogic calls;
+  an Off callback still closes collection. The synthetic-hour test confirms
+  that source states persist while timing samples expire and later samples
+  can be collected without another state update.
+- Ran clang-format on changed C++ files and restored mutex-scope comments.
+  Whitespace and independent source review pass. Tests use only workstation-local
+  private resources; no instrument commands were issued. The verification table
+  above records the original implementation. The Syncopation extension below
+  remains a separate, unimplemented design.
+- Files for this update: `loopTimingMonitor.hpp`, `loopTimingGate.hpp`,
+  `loopTimingMonitor.conf`, `README.md`, gate/app/worker tests, new
+  `loopTimingMonitor_subscription_test.cpp`, `tests/tests.list`, and this plan.
 
 ### Affected files
 
@@ -408,3 +459,133 @@ qualification remain follow-up work. No test failure remains unresolved.
 - Deployment configuration, CPU isolation changes and real-instrument
   validation remain operator actions. No hardware commands are part of agent
   implementation or tests.
+
+
+## Syncopation step-0 extension (2026-11-06)
+
+Status: **design under review; this extension is not implemented yet**. The user
+reports the deployed instance as `holoop-time`, at commit `56cf3fc0`, and requests
+that only synco step 0 contribute to loop timing; auxiliary DM writes are ignored.
+The user confirmed **production providers** as the intended four-step mode.
+The supplied snapshot has a 500.001 us camera period, 166.921 us latency mean,
+3.004 us sample deviation and 3998 accepted samples over roughly two seconds.
+Its quality counters are cumulative, not necessarily losses in that last window.
+
+### Current behavior with four steps
+
+The current matcher requires exactly one SDK start per adjacent-camera interval.
+Four-step operation normally presents multiple candidates, increments ambiguous
+counts and stops admitting new latency samples. Previously accepted samples can
+remain valid until they expire from the two-second window; source gaps can clear
+that window earlier. Persistent fgtimes stops once the populations no longer
+qualify. This affects the monitor only, not controller/scheduler operation.
+This is not guaranteed rejection of all auxiliary traffic: an interval containing
+only one auxiliary candidate can still pass the current temporal test if the
+main is absent and that candidate lies within the configured latency bound.
+The deployed monitor therefore cannot guarantee step-0-only statistics during
+syncopation.
+
+A position-based filter is unsafe. At a 500 us camera period, four evenly spaced
+commands would be 125 us apart. Illustratively extending the observed 166.921 us
+step-0 offset gives 166.921, 291.921, 416.921 and 541.921 us. The preceding cycle's
+step 3 would then be only 41.921 us after the next camera timestamp. These are
+association examples, not predictions of measured synco SDK timing. Neither
+“first SDK after camera” nor an SDK counter modulo four identifies step 0.
+
+### Existing evidence to reuse
+
+- `bmcCtrl::PipelineJob::identity` already freezes the combined-stream inode,
+  publication counter and raw writetime seconds/nanoseconds. It is validated
+  around vector conversion and remains available with `result.startNs` in the
+  ordered post worker. No new capture is needed on the SDK critical path.
+- The shared production/zero-test engine identifies a genuine main combined
+  acknowledgement and applies its additional primary-trace qualification before
+  calling `m_zeroTiming.main(...)` in `processZeroTestPrimary()`.
+- This positive main qualification requires valid named-primary combiner trace
+  linkage and advancing process timestamps (`MeasureTiming`). The ordinary loop
+  monitor did not require either. Missing qualification must have an explicit
+  unavailable reason; the extension must not alter dmcomb configuration itself.
+- `synco::ZeroTiming` already joins this exact combined key to native SDK-result
+  records. Reuse its key/qualification principles rather than infer identity
+  from independent counters or arrival order.
+- The advertised `_timing` stream contains future schedules, and provider
+  `_ready`/`_ack` records describe payload preparation/copy disposition. They do
+  not establish that an SDK submission occurred for that step.
+- Existing ZeroEvent log transport is sampled (`eventStride` defaults to four)
+  and cannot be used as a complete online label source.
+- The combiner's `trigger_inode` is a configured trace link in DELAY mode;
+  auxiliary outputs can carry that same named-primary link. Live trace matching
+  alone is insufficient, and reading it later in DM post-processing can observe
+  a different command.
+
+### Recommended implementation
+
+1. Preserve the current v1 SDK timestamp stream and standalone monitor behavior.
+   Add an optional versioned diagnostic stream carrying the original SDK-start
+   time and frozen combined identity, published only from BMC post-processing.
+   Include publisher incarnation and an explicit record sequence.
+2. Export only positively qualified main/step-0 identities from the existing
+   synco classification point, with scheduler incarnation/generation and primary
+   cycle identity. Capture a fixed-size record into a bounded queue before any
+   sampled logging. Publish from ordinary diagnostic processing; do not add work
+   in the scheduler's quiet final-publication window.
+3. Retain a bounded sequenced history in both diagnostic transports. At the
+   reported 2 kHz camera rate, four steps nominally produce 8 kHz SDK events,
+   but post-processing may publish several in a burst. A latest-only word or a
+   requested 10 us poll sleep cannot guarantee their recovery. Reuse one small
+   shared record-ring utility for these two transports, with coherent slots,
+   explicit overruns, and no semaphore operations.
+4. The monitor joins SDK records and qualified-main labels by all four combined
+   identity fields, independent of arrival order. Only positive matches enter
+   camera pairing. Unmatched/expired records are excluded as unclassified;
+   absence of a label is not proof that a command was auxiliary.
+5. Preserve raw SDK transport loss accounting before filtering. Feed matched
+   mains using their primary-cycle continuity, not the original all-SDK counters
+   (e.g. 1, 5, 9), which the existing matcher would incorrectly flag as gaps.
+   Restore event order before advancing the filtered population.
+6. Continue reporting the existing fgtimes schema: camera cadence, **step-0 SDK
+   cadence**, and camera-to-step-0 latency. Auxiliary writes contribute to none
+   of those latency/SDK-cadence populations. Keep `monitor.maxFPS=3600` as a
+   camera-rate limit; do not multiply it by four. Size full-rate capture separately.
+7. Add configurable synco device/diagnostic stream names. When configured, use
+   the last received INDI source state and diagnostic publisher generations to
+   distinguish supported active syncopation from disabled operation. Subscribe
+   passively without periodic property requests or INDI receipt-age expiry.
+   Clear queued associations and statistics across enable/disable, mode,
+   step-count, clock and publisher changes. Unknown
+   state or missing labels must disable qualification rather than fall back to
+   treating arbitrary SDK writes as step 0. Initially, a configured step-0 filter
+   also remains unavailable while synco is disabled: the existing classification
+   hook emits no main labels then. An automatic return to ordinary monitoring
+   would need a separate drain/watermark handover because previously admitted
+   auxiliaries can complete after synco acknowledges Off; Off alone is not proof
+   that the SDK path is free of auxiliary commands.
+8. Keep legacy non-synco instances/configurations working unchanged. Implement
+   the new filter for the user-confirmed production-providers mode. The shared
+   main-classification hook also covers coordinated zero tests, but legacy
+   scheduling lacks this hook and is explicitly unsupported by the new filter.
+
+### Extension verification
+
+- Four-step synthetic traffic with known step-0 latency and step 3 crossing the
+  next camera timestamp: only step 0 contributes, with camera-rate SDK cadence.
+- Skipped/cancelled auxiliary steps do not shift classification. A missing or
+  failed main is omitted and never replaced by a nearby auxiliary SDK event.
+- Labels arriving before/after SDK records, burst publication, clock uncertainty,
+  duplicates, source restarts and wrong/partially matching identities.
+- Ring overwrite, producer queue loss, missing main labels and bounded join
+  expiry: count the loss and reject affected associations without inventing data.
+- Transitions from one to four steps and back, rapid enable/disable, malformed
+  state and unsupported modes clear the measurement epoch and suppress forced
+  telemetry. Unchanged affirmative INDI state does not expire with age; diagnostic
+  records still obey their continuity, freshness and join-expiry checks.
+- `eventStride` and text logging configuration do not affect label completeness.
+- No new SDK-path clock reads or semaphore synchronization; disabled diagnostic
+  configuration preserves existing behavior. Operator qualification remains
+  necessary for indirect cache/load and scheduler effects.
+
+Expected extension touch points: shared record transport/key helpers; the BMC
+post publisher and tests; synco qualified-main export and tests; monitor joining,
+configuration, state handling, tests and docs. This design retains the existing
+camera-to-main temporal association assumption; it does not introduce a true
+camera-frame ID through the complete AO pipeline.
