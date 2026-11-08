@@ -119,7 +119,7 @@ inline void nnReconstructor::updateReconstructorControls()
         if( m_switchPhase == "idle" )
             m_switchError = error.what();
     }
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_resultMutex );
         quiescent = !m_enabled && !m_enableReadback && !m_disabling && !m_loading && !m_inferencing && !m_publishing;
         active    = m_enabled && m_enableReadback && !m_activeModel.empty() && m_fault.empty();
@@ -231,7 +231,7 @@ inline void nnReconstructor::updateReconstructorControls()
     {
         m_switchError = error.what();
         if( m_switchPhase == "loading" || m_switchPhase == "preparing_nn" )
-        { // mutex scope
+        { //mutex scope
             std::lock_guard<std::mutex> lock( m_resultMutex );
             m_cancelLoad = true; // A timed-out operation never installs and activates a late candidate.
         }

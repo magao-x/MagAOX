@@ -30,6 +30,7 @@ enum class shmimMonitorState
     connected
 };
 
+/// Primary monitor tag for configuration and INDI naming.
 struct shmimT
 {
     /// Configuration section for the primary input stream.
@@ -244,7 +245,7 @@ class shmimMonitor
      *
      * @{
      */
-    bool m_restart{ false }; ///< Flag indicating tha the shared memory should be reinitialized.
+    bool m_restart{ false }; ///< Flag indicating that the shared memory should be reinitialized.
 
     // static shmimMonitor *m_selfMonitor; ///< Static pointer to this (set in constructor).  Used for getting out of
     // the static SIGSEGV handler.

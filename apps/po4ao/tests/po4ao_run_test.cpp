@@ -144,6 +144,11 @@ TEST_CASE("Production PO4AO worker parks only after verified consumption", "[po4
 /** \brief Duplicate verified targets recheck consumption without repeating either utility. */
 TEST_CASE("Production PO4AO duplicate Stop does not recalibrate", "[po4ao][runWorker]")
 {
+    // clang-format off
+#ifdef PO4AO_TEST_DOXYGEN_REF
+    MagAOX::app::po4ao::runWorker;
+#endif
+    // clang-format on
     po4aoRunHarness::po4ao app;
     app.runWorker(false);
     app.m_routeIO.events.clear();

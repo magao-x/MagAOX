@@ -3,7 +3,7 @@
 For the short operator procedure, see [Collect with another ND filter](QUICKSTART.md).
 
 Collect four padded PWFS pupils with the exact applied 50x50 tweeter commands.
-The app starts idle. Prepare a bank once, select it through INDI, and reuse it
+The app starts idle in READY with no input semaphore wait. Prepare a bank once, select it through INDI, and reuse it
 for separate ND collections without editing the config or restarting the app.
 The operator still changes `fwtelsim`. The collector automatically checks its
 named position, `flipwfsf`, and the camwfs frame rate and E.M. gain before Start
@@ -191,3 +191,16 @@ NaN/Inf validation remains effective. The full Linux app build, live stream
 integration, latency, and framerate remain unverified; no deployment or hardware
 operation was performed. ND sequencing and camera-setting changes are outside
 this patch.
+
+## Input attachment lifecycle
+
+Start requests OPERATING and allows five seconds for source/channel attachment and fresh
+observing readbacks before starting the existing session preflight. Stop cancels a pending
+Start. Draining and terminal sessions return to READY and release the input mapping/reader
+slot. A new Start waits for detachment; an unexpected reconnect during an active session
+still aborts the partial run. A successful READY request is asynchronous and can take the
+monitor's existing timeout to settle.
+
+CPU session/observation regressions and the shared monitor-loop fixture pass locally.
+Real ImageStreamIO producer and collector app-level acceptance remain required on an
+isolated Linux host; see the [acceptance plan](../../agents/plans/2026-11/shmimMonitor-idle-apps.md).

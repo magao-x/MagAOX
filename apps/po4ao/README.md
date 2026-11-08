@@ -41,8 +41,8 @@ configuration is maintained separately.
   per-mode absolute limit. This modal limit does not represent actuator clipping.
 - Shutdown stops the monitor and workers, publishes zeros, and releases resources.
 
-Neither INDI control switch closes or opens the independently managed CACAO loop.
-Follow normal instrument procedures for routing, calibration, and loop operation.
+Policy Enable/Disable and Reset do not control the independently managed CACAO loop.
+Whole-app routing below requires the loop already open; closure remains operator-managed.
 
 ## Models and history
 
@@ -99,8 +99,9 @@ from the last emitted command (`effective_controller`, `effective_id`). Controll
 are `unknown`, `integrator`, `po4ao` or the existing source-gap `pass-through`.
 `control_request`/`control_applied` and `reset_request`/`reset_applied` are decimal
 sequence/generation strings. A control/reset request remains Busy until its
-selected state has produced an output frame. Duplicate input notifications do
-not acknowledge requests. Reload stays Busy through pending activation; a load
+selected state has produced an output frame while running. When fully stopped and detached,
+non-real-time app logic applies model/reset/control changes without requiring frames; this
+acknowledges preparation, not active output. Duplicate input notifications do not acknowledge requests. Reload stays Busy through pending activation; a load
 failure stays Alert with `reload_error` until another explicit reload.
 
 `collection_status` is read-only text with `state`, `requested_generation`,
@@ -158,3 +159,33 @@ make -f Makefile.one t=../apps/po4ao/tests/po4ao_test.cpp
 The suite does not substitute for compiling the full app against CUDA/TensorRT
 and running the operator's fake-stream/lab acceptance test. Publication to GitHub
 does not install a binary, replace the live config, or restart the application.
+
+## Whole-app Start/Stop and idle telemetry
+
+`run_enable.toggle` controls the whole app independently of policy `control_enable`.
+Stop reserves the actual NN/CACAO writer, switches downstream to `aol1_modevalWFS`,
+applies `default`, restores that writer and verifies advancing mfilt consumption before
+requesting READY and waiting for detachment. Start first establishes fresh output,
+then performs the corresponding switch to `po4ao_output` and verifies consumption after
+calibration restarts. The policy remains selected. Managed learning stays paused until
+an explicit learning request. The optional trainer is not needed for native routing.
+
+`run_status` exposes `phase`, actual/unknown `route`, `error`, `owner` and `verified`.
+Startup remains OPERATING with an unverified route because downstream may already use
+this output. A routing request requires an already-open HOWFS loop, the inspected milk
+utilities, output channel `po4ao_output` and the updated `nnReconstructor` device. A
+90-second worker deadline bounds the procedure. Utility exit alone never establishes
+completion. Failed Stop keeps PO4AO available if downstream may depend on it. Repeating
+a verified target rechecks consumption without repeating calibration. Do not issue
+competing manual routing/writer commands during an operation.
+
+The periodic INFO latency line is now `TELEM_PO4AO` typed telemetry via `dev::telemeter`.
+INDI `runtime_stats` remains available. Records contain callback percentiles, sample count,
+sequence and monotonic sample time, fresh/mixed-window flags, exact uint64 counters,
+model identity, backend and deadline. Empty windows have zero samples; idle windows are
+marked stale. Mixed windows identify their newest included sample. Sorting and serialization
+run outside the frame callback. These are callback timings, not end-to-end latency.
+
+The [engineering plan](../../agents/plans/2026-11/shmimMonitor-idle-apps.md) records utility
+source hashes, failure recovery, local tests and required isolated-host/operator acceptance.
+The local fake-ABI routing tests do not establish installed milk ABI or deployment readiness.

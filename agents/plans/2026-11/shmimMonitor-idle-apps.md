@@ -106,48 +106,52 @@ Schema tests require the normal logger `flatlogcodes`/`flatc` generation step fi
 
 ## Affected files
 
-The following is the implementation inventory; generated artifacts and local test/build dependencies are not committed:
+The following is the implementation inventory; generated artifacts and local build dependencies are not committed:
 
+- `agents/plans/2026-11/shmimMonitor-idle-apps.md`
+- `apps/dlDataCollection/README.md`
 - `apps/dlDataCollection/dlDataCollection.hpp`
+- `apps/nnReconstructor/README.md`
 - `apps/nnReconstructor/nnReconstructor.hpp`
 - `apps/nnReconstructor/reconstructorControls.hpp`
 - `apps/nnReconstructor/tests/Makefile`
 - `apps/nnReconstructor/tests/nnReconstructor_test.cpp`
 - `apps/nnReconstructor/tests/nnTestSupport.hpp`
 - `apps/po4ao/Makefile`
+- `apps/po4ao/README.md`
 - `apps/po4ao/po4ao.hpp`
+- `apps/po4ao/po4aoRouteIO.cpp`
+- `apps/po4ao/po4aoRouteIO.hpp`
+- `apps/po4ao/po4aoRouting.hpp`
+- `apps/po4ao/po4aoStatistics.hpp`
 - `apps/po4ao/po4ao_control.hpp`
 - `apps/po4ao/po4ao_impl.hpp`
+- `apps/po4ao/po4ao_run.hpp`
 - `apps/po4ao/tests/Makefile`
+- `apps/po4ao/tests/po4aoRouteTestAbi.hpp`
 - `apps/po4ao/tests/po4ao_control_test.cpp`
+- `apps/po4ao/tests/po4ao_lifecycle_test.cpp`
+- `apps/po4ao/tests/po4ao_route_io_test.cpp`
+- `apps/po4ao/tests/po4ao_run_test.cpp`
+- `apps/po4ao/tests/po4ao_telemetry_test.cpp`
 - `apps/po4aoTrainer/tests/test_review_regressions.py`
 - `apps/po4aoTrainer/xapp/po4aoTrainer/supervisor.py`
 - `apps/po4aoTrainer/xapp/po4aoTrainer/switching.py`
+- `gui/widgets/learningCtrl/README.md`
 - `gui/widgets/learningCtrl/learningCtrl.hpp`
 - `gui/widgets/learningCtrl/learningCtrl.ui`
 - `gui/widgets/learningCtrl/tests/learningCtrl_test.cpp`
 - `libMagAOX/Makefile`
 - `libMagAOX/app/MagAOXApp.hpp`
 - `libMagAOX/app/dev/shmimMonitor.hpp`
-- `libMagAOX/app/tests/MagAOXApp_test.cpp`
-- `libMagAOX/logger/logCodes.dat`
-- `libMagAOX/logger/logMeta.cpp`
-- `libMagAOX/logger/types/telem.cpp`
-- `tests/groups.dox`
-- `agents/plans/2026-11/shmimMonitor-idle-apps.md`
-- `apps/po4ao/po4aoRouteIO.cpp`
-- `apps/po4ao/po4aoRouteIO.hpp`
-- `apps/po4ao/po4aoRouting.hpp`
-- `apps/po4ao/po4aoStatistics.hpp`
-- `apps/po4ao/po4ao_run.hpp`
-- `apps/po4ao/tests/po4aoRouteTestAbi.hpp`
-- `apps/po4ao/tests/po4ao_lifecycle_test.cpp`
-- `apps/po4ao/tests/po4ao_route_io_test.cpp`
-- `apps/po4ao/tests/po4ao_run_test.cpp`
-- `apps/po4ao/tests/po4ao_telemetry_test.cpp`
 - `libMagAOX/app/dev/tests/.gitignore`
 - `libMagAOX/app/dev/tests/Makefile.lifecycle`
 - `libMagAOX/app/dev/tests/shmimMonitor_lifecycle_test.cpp`
-- `libMagAOX/app/dev/tests/stubs/`
+- `libMagAOX/app/dev/tests/stubs/ImageStreamIO/ImageStreamIO.h`
+- `libMagAOX/app/tests/MagAOXApp_test.cpp`
+- `libMagAOX/logger/logCodes.dat`
+- `libMagAOX/logger/logMeta.cpp`
 - `libMagAOX/logger/types/schemas/telem_po4ao.fbs`
+- `libMagAOX/logger/types/telem.cpp`
 - `libMagAOX/logger/types/telem_po4ao.hpp`
+- `tests/groups.dox`

@@ -811,7 +811,7 @@ inline nnReconstructor::~nnReconstructor() noexcept
 
 inline void nnReconstructor::fail( const std::string &reason )
 {
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_resultMutex );
         m_fault   = reason;
         m_enabled = false;
@@ -1137,7 +1137,7 @@ inline int nnReconstructor::appLogic()
 
 inline int nnReconstructor::appShutdown()
 {
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_resultMutex );
         m_stopping    = true;
         m_enabled     = false;
@@ -1179,7 +1179,7 @@ inline int nnReconstructor::allocate( const dev::shmimT &dummy )
                          shmimMonitorT::m_imageStream.array.raw && size_t( pup_offset1_x ) + crop <= width &&
                          size_t( pup_offset2_x ) + crop <= width && size_t( pup_offset1_y ) + crop <= height &&
                          size_t( pup_offset2_y ) + crop <= height;
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_resultMutex );
         m_updated     = false;
         m_sourceReady = valid && m_enabled;
@@ -1200,7 +1200,7 @@ inline int nnReconstructor::allocate( const dev::shmimT &dummy )
 inline int nnReconstructor::processImage( void *curr_src, const dev::shmimT &dummy )
 {
     static_cast<void>( dummy );
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_resultMutex );
         if( m_stopping || !m_enabled || m_loading || !m_fault.empty() || !m_sourceReady )
             return 0;
@@ -1223,7 +1223,7 @@ inline int nnReconstructor::processImage( void *curr_src, const dev::shmimT &dum
         if( clock_gettime( CLOCK_REALTIME, &timestamp ) != 0 )
             throw std::runtime_error( "clock_gettime failed" );
         infer( curr_src );
-        { // mutex scope
+        { //mutex scope
             std::lock_guard<std::mutex> lock( m_resultMutex );
             if( !m_stopping && m_enabled && m_fault.empty() )
             {
@@ -1241,7 +1241,7 @@ inline int nnReconstructor::processImage( void *curr_src, const dev::shmimT &dum
     {
         fail( "unknown inference failure" );
     }
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_resultMutex );
         m_inferencing = false;
     }
@@ -1424,7 +1424,7 @@ inline int nnReconstructor::loadImageIntoStream( void *dest )
 inline int nnReconstructor::frameGrabberPostPublish( IMAGE *imageStream )
 {
     static_cast<void>( imageStream );
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_resultMutex );
         m_publishing = false;
         if( m_publishZero )
@@ -1450,7 +1450,7 @@ inline void nnReconstructor::updateControls()
 {
     bool        launch = false, finished = false, activate = false, release = false;
     std::string name;
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_resultMutex );
         finished = !m_loading;
         if( !m_stopping && !m_loading && !m_inferencing && !m_publishing && !m_gpuReleasing &&
@@ -1518,7 +1518,7 @@ inline void nnReconstructor::updateControls()
                     {
                         fail( "unknown model loading failure" );
                     }
-                    { // mutex scope
+                    { //mutex scope
                         std::lock_guard<std::mutex> lock( m_resultMutex );
                         m_loading = false;
                         m_enabling = false;
@@ -1537,7 +1537,7 @@ inline void nnReconstructor::updateControls()
     bool                                 enabled, resident;
     pcf::IndiProperty::PropertyStateType status;
     std::string                          phase, requested, loaded, active, error;
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_resultMutex );
         if( !m_fault.empty() && !m_inferencing && !m_publishing && !m_disabling )
         {
@@ -1585,7 +1585,7 @@ INDI_NEWCALLBACK_DEFN( nnReconstructor, m_indiP_enable )( const pcf::IndiPropert
     if( !m_routingOwner.empty() ) return -1;
     const auto                  value = ipRecv["toggle"].getSwitchState();
     if( value != pcf::IndiElement::On && value != pcf::IndiElement::Off )
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_resultMutex );
         m_requestError = "enable requires On or Off";
         return -1;
@@ -1602,7 +1602,7 @@ INDI_NEWCALLBACK_DEFN( nnReconstructor, m_indiP_enable )( const pcf::IndiPropert
 
 inline int nnReconstructor::requestEnabled( bool on, bool prepareOnly )
 {
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_resultMutex );
         if( m_stopping || ( on && ( m_loading || m_disabling || m_gpuReleasing || !m_fault.empty() || ( !m_enabled && !shmimMonitorT::monitorIdle() ) ) ) )
         {

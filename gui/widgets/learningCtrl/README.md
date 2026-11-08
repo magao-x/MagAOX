@@ -4,7 +4,7 @@
 
 Defaults are `po4ao`, `po4aoTrainer`, and `nnReconstructor`. This single launcher replaces `learningCtrlGUI`.
 The C++ runtime is subscribed independently of the optional trainer. Without a ready
-trainer, native inference controls remain available; Start/Pause, saved-pair controls,
+trainer, native inference and whole-app Start/Stop controls remain available; learning Start/Pause, saved-pair controls,
 and numeric training settings are unavailable.
 NN controls independently subscribe to the configured NN device and remain available
 without either PO4AO app. The panel has nnReconstructor and PO4AO section titles. An existing live training notebook needs no package migration.
@@ -26,11 +26,11 @@ needs no separate Busy edge.
 
 NN commands always target `nnReconstructor`; managed PO4AO commands target the optional trainer:
 
-- The NN catalog comes from the NN device's `model` definition. Labels are displayed; element identifiers are sent only when Set reconstructor is pressed. A selected value is not claimed to be active. Requested/loaded/active NN filenames are available on the reconstructor status tooltip. The backend performs the agreed disable/load/enable sequence; selecting an already loaded disabled model only requires re-enabling it. Selecting the already active model is a no-op. NN-to-NN replacement leaves CACAO/modulation unchanged.
+- The NN catalog comes from the NN device's `model` definition. Labels are displayed; element identifiers are sent only when Set reconstructor is pressed. A selected value is not claimed to be active. Requested/host-prepared/GPU-resident/active NN model state are available on the reconstructor status tooltip. The backend performs the agreed disable/load/enable sequence; selecting an already loaded disabled model only requires re-enabling it. Selecting the already active model is a no-op. NN-to-NN replacement leaves CACAO/modulation unchanged.
 - Switch to CACAO / Switch to CNN sends a destination and expected source from observed state; it ignores the staged engine. Unknown/conflict/transition state disables that request. Learning, recollection and loop state never gate reconstruction controls.
 - Confirmed stopped writers, including a quiescent NN fault, expose Switch to CACAO and selected-model Set reconstructor as recovery actions. A fault alone is not successful activation or proof that output has stopped.
 - Link modulation sends a preference to the NN app. The checkbox reflects readback; it issues no modulation motion itself.
-- Enable/Disable PO4AO and Start/Pause/Resume learning labels follow the companion's effective state. A retained policy ID alone never implies PO4AO output is active. Disable's pause behavior, Reset's termination, and recollection noise/resume sequencing belong to the companion/runtime.
+- Enable/Disable policy and Start/Pause/Resume learning labels follow the companion's effective state. A retained policy ID alone never implies PO4AO output is active. Disable's pause behavior, Reset's termination, and recollection noise/resume sequencing belong to the companion/runtime.
 - Disable remains available during publication/recollection when PO4AO is observed enabled, using the backend's superseding pause path. Enable stays serialized. A persistent pending Reset blocks ordinary training actions while leaving Reset available to retry. Collection displays frames/target beside its state.
 - Device/property-scoped request latches prevent repeated clicks before acknowledgement.
   Busy is followed by Ok or Alert after the backend has updated its result state.
@@ -87,7 +87,7 @@ Every accepted request must publish Busy before work and then Ok/Alert after act
 
 `progress.iteration` is a read-only number. `training_config.error` carries validation errors; `training_config.pending_reset` is empty or the pending configuration revision requiring Reset, distinct from an unfinished runtime Reset. Missing readbacks are not filled with presumed success. A connected INDI transport is distinguished from a ready companion through the heartbeat; unchanged controller/model values are not treated as disconnection.
 
-Neither interface implements notebook ownership, leases or locks. It does not change the operator's responsibility for loop state or notebook/app use.
+Neither interface implements notebook ownership or external-client leases. Native PO4AO routing reserves NN/CACAO controls within the two C++ apps. It does not change the operator's responsibility for loop state or notebook/app use.
 
 ## Build and verification
 
@@ -110,3 +110,11 @@ or recollecting, collection frame progress, heartbeat expiry and fresh recovery.
 Native-only regressions cover no trainer definitions, enable/disable/recollection,
 Reset with control On/Off, late trainer arrival/departure, independent heartbeat
 expiry, process restart, native permissions and unresolved cross-device requests.
+
+Whole-app **Start PO4AO / Stop PO4AO** sends native `run_enable` requests and displays
+`run_status` progress, route and failure details. It is separate from **Enable policy /
+Disable policy**. Policy selection is retained while stopped; Set/Save policy remain
+available with the trainer. Recollection and learning require the app running, and Start
+never resumes learning automatically. Routing itself requires the updated NN app to
+preserve writer ownership, even when the optional trainer is absent. The NN tooltip
+separates the retained host model from GPU residency and active output.

@@ -131,12 +131,12 @@ namespace libXWCTest::appTest
 class Monitor : public MagAOX::app::dev::shmimMonitor<Monitor>
 {
   public:
-    std::atomic<bool> m_shutdown{false};
-    std::atomic<int> m_state{0},m_frames{0},m_allocations{0};
-    std::function<int()> m_allocate;
-    std::thread m_thread,m_producer;
-    std::atomic<bool> m_producing{true};
-    std::string m_semName;
+    std::atomic<bool> m_shutdown{false}; ///< Signal the production monitor to exit.
+    std::atomic<int> m_state{0},m_frames{0},m_allocations{0}; ///< FSM and observed callback counts.
+    std::function<int()> m_allocate; ///< Optional allocation failure/cancellation injection.
+    std::thread m_thread,m_producer; ///< Owned monitor and synthetic producer threads.
+    std::atomic<bool> m_producing{true}; ///< Producer exit request.
+    std::string m_semName; ///< Unique process-local named semaphore.
     /// Set up an isolated producer with a unique named POSIX semaphore.
     Monitor();
     /// Stop both threads before destroying the test mapping/semaphore.
@@ -144,13 +144,13 @@ class Monitor : public MagAOX::app::dev::shmimMonitor<Monitor>
     /// Return atomic fixture FSM state.
     int state() {return m_state.load();}
     /// Apply the FSM state used by the actual monitor.
-    void state(int state) {m_state=state;}
+    void state(int state /**< [in] Desired FSM state. */) {m_state=state;}
     /// Read the fixture shutdown flag.
     int shutdown() {return m_shutdown.load();}
     /// Observe allocation and optionally inject cancellation/failure.
-    int allocate(const MagAOX::app::dev::shmimT &) {++m_allocations;return m_allocate ? m_allocate() : 0;}
+    int allocate(const MagAOX::app::dev::shmimT & /**< [in] Primary monitor tag. */) {++m_allocations;return m_allocate ? m_allocate() : 0;}
     /// Count admitted frames.
-    int processImage(void *,const MagAOX::app::dev::shmimT &) {++m_frames;return 0;}
+    int processImage(void * /**< [in] Synthetic frame. */,const MagAOX::app::dev::shmimT & /**< [in] Monitor tag. */) {++m_frames;return 0;}
     /// Discard test logs without starting the application logging system.
     template<class T,int value=0> static int log(Message,int=0) {return value;}
     /// Start the actual monitor implementation.
@@ -179,7 +179,7 @@ Monitor::~Monitor()
     sem_close(boundary::semaphores[5]);sem_unlink(m_semName.c_str());std::filesystem::remove(boundary::path);
 }
 /// Wait boundedly for a test observation.
-bool await(const std::function<bool()> &ready)
+bool await(const std::function<bool()> &ready /**< [in] Completion predicate. */)
 {
     const auto end=std::chrono::steady_clock::now()+std::chrono::seconds(3);
     while(!ready() && std::chrono::steady_clock::now()<end)std::this_thread::sleep_for(std::chrono::milliseconds(2));
@@ -190,6 +190,12 @@ bool await(const std::function<bool()> &ready)
 /** \brief Continued producer notifications do not cause waits after READY cleanup; resume reacquires the reader. */
 TEST_CASE("Monitor READY releases the reader and stops wait calls", "[shmimMonitor][lifecycle]")
 {
+    // clang-format off
+#ifdef SHMIMMONITOR_TEST_DOXYGEN_REF
+    MagAOX::app::dev::shmimMonitor<Monitor>::monitorState;
+    MagAOX::app::dev::shmimMonitor<Monitor>::smThreadExec;
+#endif
+    // clang-format on
     Monitor app;app.run();
     REQUIRE(app.monitorIdle());
     REQUIRE(boundary::waits==0);

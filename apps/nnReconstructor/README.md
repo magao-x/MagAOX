@@ -41,12 +41,12 @@ contain the full filenames. In cursesINDI, use `p` on the desired element to req
 `t` on `enable.toggle` to request activation/deactivation. Loading the already-selected model
 is the explicit reload operation. It does not activate reconstruction.
 
-Read `model_status.requested`, `.loaded`, `.active`, `.status` and `.error` to distinguish the
+Read `model_status.requested`, `.loaded`, `.resident`, `.active`, `.status` and `.error` to distinguish the
 request from completion. `active` names the model that published in the current enabled run;
 it is not a guarantee of ongoing source frames, downstream consumption or a closed loop. Use the
 existing monitor properties to inspect stream connection state. Properties report Busy during
 transitions and Alert on failures/rejected requests. The enable readback stays On during ordinary
-disable until the zero publication completes. An enabled-but-waiting state is not successful inference.
+disable until zero publication, monitor detachment and owned GPU-resource cleanup complete. An enabled-but-waiting state is not successful inference.
 
 `startEnabled=true` preserves automatic startup. `false` starts passively: it performs no inference
 or unsolicited zero publication. Automatic startup must only be used with the existing exclusive-writer
@@ -61,7 +61,7 @@ and **Switch to CACAO / Switch to CNN**. These compound requests run in `appLogi
 outside the inference workers:
 
 - `nn_activate.model`: a catalog element ID. Disable and wait for zero publication,
-  load if needed, stop CACAO if necessary, then enable and wait for an NN result.
+  validate/load if needed, prepare GPU resources, stop CACAO if necessary, then enable and wait for an NN result.
   Selecting the active model is a no-op. NN-to-NN replacement leaves modulation alone.
 - `reconstructor.target/expected`: `nn` or `cacao`, plus observed `nn`, `cacao`, or
   `stopped`. A stale expected source is rejected. Switching to CACAO waits for NN
@@ -105,12 +105,15 @@ writers without checking or changing the loop; it can remain closed.
 
 - **Disable:** close new-inference admission and discard unclaimed results. An admitted inference
   may finish, but its result is discarded. An already-claimed publication may finish. The publisher
-  then writes exactly one zero vector and acknowledges Off after its post-publication hook. The
-  stream remains externally owned; repeating Off after completion does not publish another zero.
+  then writes exactly one zero vector. After its acknowledgement and monitor detachment, the
+  app releases its owned TensorRT objects and CUDA inference buffers before acknowledging Off.
+  The stream remains externally owned; repeating Off after completion does not publish another zero.
 - **Select:** allowed only when disabled and both workers are quiescent. A background loader creates
-  and validates the candidate while keeping the previous engine available. Failure keeps the previous
-  `loaded` model, records the requested filename and leaves a fault. Success never activates it.
-- **Enable:** requires a validated WFS attachment, no unfinished transition and no latched fault.
+  and validates the candidate, then releases its temporary GPU objects and retains the serialized
+  model on the host. Failure keeps the previous host-prepared `loaded` model, records the requested
+  filename and leaves a fault. Success never activates it.
+- **Enable:** requires no unfinished transition or latched fault. It recreates inference resources
+  from retained validated bytes, enters OPERATING and validates a new WFS attachment.
   The first monitor callback anchors the source counter; a later changed counter admits inference.
   This deliberately waits across a fresh frame boundary rather than replaying a pending result.
 - **WFS reconnect:** reuse fixed buffers, invalidate unclaimed results and wait across a fresh frame
@@ -212,3 +215,20 @@ CPU-only publication tests:
 ```sh
 python -m unittest discover -s apps/nnReconstructor/model_testing -p test_export_catalog_engine.py
 ```
+
+## Idle lifecycle and PO4AO reservation
+
+READY releases the input mapping and semaphore reader slot. Reattachment and cleanup
+are asynchronous; rapid Enable waits for completed Disable. `loaded` denotes retained
+host bytes, `resident` denotes installed GPU inference resources, and `active` denotes
+published inference. Re-enable uses those retained bytes even if the original file has
+changed. Owned resources are released without `cudaDeviceReset`; CUDA context overhead
+can remain, so this does not promise zero process VRAM.
+
+Native PO4AO Start/Stop uses `routing_hold.owner/action` (`hold` or `release`).
+`routing_status` reports owner, source, phase, instance and advancing sequence. A held
+reservation rejects other native enable/model/handover/modulation requests. Release
+restores the captured NN/CACAO writer using the existing handover without changing
+modulation. The reservation remains held after an unresolved routing failure; operator
+recovery must first settle queued utility/FIFO actions. It does not interlock external
+manual commands. See the [implementation and acceptance plan](../../agents/plans/2026-11/shmimMonitor-idle-apps.md).

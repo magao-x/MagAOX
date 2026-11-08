@@ -424,16 +424,18 @@ class MagAOXApp : public application
     class elevatedPrivileges
     {
       private:
-        MagAOXApp *m_app;
-        bool m_elevated{ false };
+        MagAOXApp *m_app; ///< Application whose effective user ID is temporarily changed.
+        bool m_elevated{ false }; ///< Whether this scope currently holds elevated privileges.
 
       public:
-        explicit elevatedPrivileges( MagAOXApp *app )
+        /// Elevate the owning application until this scope is restored or destroyed.
+        explicit elevatedPrivileges( MagAOXApp *app /**< [in] Owning application. */ )
         {
             m_app = app;
             elevate();
         }
 
+        /// Acquire elevated privileges once for this scope.
         void elevate()
         {
             if( m_elevated )
@@ -445,6 +447,7 @@ class MagAOXApp : public application
             m_elevated = true;
         }
 
+        /// Restore the application's real user ID when elevated.
         void restore()
         {
             if( !m_elevated )
@@ -456,6 +459,7 @@ class MagAOXApp : public application
             m_elevated = false;
         }
 
+        /// Restore privileges on every scope exit.
         ~elevatedPrivileges()
         {
             restore();
