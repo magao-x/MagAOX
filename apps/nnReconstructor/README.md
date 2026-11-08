@@ -226,9 +226,12 @@ changed. Owned resources are released without `cudaDeviceReset`; CUDA context ov
 can remain, so this does not promise zero process VRAM.
 
 Native PO4AO Start/Stop uses `routing_hold.owner/action` (`hold` or `release`).
-`routing_status` reports owner, source, phase, instance and advancing sequence. A held
+`routing_status` reports owner, source, phase, instance, advancing sequence and
+`released_owner` (the last token whose captured writer was verifiably restored). A held
 reservation rejects other native enable/model/handover/modulation requests. Release
 restores the captured NN/CACAO writer using the existing handover without changing
 modulation. The reservation remains held after an unresolved routing failure; operator
-recovery must first settle queued utility/FIFO actions. It does not interlock external
+recovery must first settle queued utility/FIFO actions, then release the same retained
+token and verify phase `released` with matching `released_owner`. PO4AO rejects retry
+until this acknowledgement is fresh and from the original NN instance. It does not interlock external
 manual commands. See the [implementation and acceptance plan](../../agents/plans/2026-11/shmimMonitor-idle-apps.md).

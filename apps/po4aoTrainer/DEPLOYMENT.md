@@ -1,5 +1,7 @@
 # PO4AO deployment: existing notebook, then managed training
 
+**For the combined idle-lifecycle/native-routing update, use the [current acceptance and PR plan](../../agents/plans/2026-11/shmimMonitor-idle-acceptance.md).** The incremental install shortcuts below describe earlier updates. In particular, their claims that native apps or dlDataCollection need no update, and their manual-only routing instructions, do not apply to the combined candidate. Its current `dev` conflicts must be resolved before qualification.
+
 ## Update an existing installation: parameters and saved models
 
 This update requires **po4aoTrainer on exao2 and po4aoGUI in the IOC container**.

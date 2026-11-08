@@ -118,3 +118,7 @@ available with the trainer. Recollection and learning require the app running, a
 never resumes learning automatically. Routing itself requires the updated NN app to
 preserve writer ownership, even when the optional trainer is absent. The NN tooltip
 separates the retained host model from GPU residency and active output.
+
+Start/Stop is unavailable during a visible reset or reload. A raced native rejection
+publishes Alert and clears the request latch; timeout alone still leaves the operation
+unknown. Routing failure retains the operation identity for explicit operator recovery.

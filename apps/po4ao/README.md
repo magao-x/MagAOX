@@ -164,7 +164,8 @@ does not install a binary, replace the live config, or restart the application.
 
 `run_enable.toggle` controls the whole app independently of policy `control_enable`.
 Stop reserves the actual NN/CACAO writer, switches downstream to `aol1_modevalWFS`,
-applies `default`, restores that writer and verifies advancing mfilt consumption before
+applies `default`, awaits its marker and a newly running CACAO writer, restores the
+reserved writer and verifies advancing mfilt consumption before
 requesting READY and waiting for detachment. Start first establishes fresh output,
 then performs the corresponding switch to `po4ao_output` and verifies consumption after
 calibration restarts. The policy remains selected. Managed learning stays paused until
@@ -178,6 +179,16 @@ utilities, output channel `po4ao_output` and the updated `nnReconstructor` devic
 completion. Failed Stop keeps PO4AO available if downstream may depend on it. Repeating
 a verified target rechecks consumption without repeating calibration. Do not issue
 competing manual routing/writer commands during an operation.
+
+Rejected requests publish Alert; accepted requests publish Busy before completion.
+The GUI gates visible reset/reload conflicts and still receives an explicit rejection
+if a conflict races the click. Failure retains the operation token and recovery snapshot.
+A retry requires a fresh NN `routing_status.released_owner` matching that token from
+the same NN instance. A marker alone cannot complete calibration: the adapter awaits
+a new verified WFS writer PID/start-tick identity before releasing the reservation.
+After a timeout, first settle outstanding utility/FIFO work independently, then restore
+the writer with the matching `routing_hold` token. Do not bypass this by issuing a new
+token or blindly restarting an app. The engineering plan below gives the recovery steps.
 
 The periodic INFO latency line is now `TELEM_PO4AO` typed telemetry via `dev::telemeter`.
 INDI `runtime_stats` remains available. Records contain callback percentiles, sample count,
