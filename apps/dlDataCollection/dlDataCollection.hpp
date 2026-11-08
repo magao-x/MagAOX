@@ -305,8 +305,11 @@ class dlDataCollection : public MagAOXApp<true>, public dev::shmimMonitor<dlData
 };
 
 inline dlDataCollection::dlDataCollection()
-    : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED ),
-      m_session( [this]( const float *command ) { return publish( command ); } )
+    : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED ), m_session(
+                                                                  [this]( const float *command )
+                                                                  {
+                                                                      return publish( command );
+                                                                  } )
 {
 }
 
@@ -365,14 +368,18 @@ inline int dlDataCollection::loadConfigImpl( mx::app::appConfigurator &cfg )
         !( m_frameTimeout > 0 ) || m_frameTimeout > 3600 || m_bank.empty() || m_output.empty() ||
         m_channel.size() != 10 || m_channel.substr( 0, 8 ) != "dm01disp" || m_channel[8] < '0' || m_channel[8] > '9' ||
         m_channel[9] < '0' || m_channel[9] > '9' )
+    {
         return log<software_error, -1>( { __FILE__, __LINE__, "Invalid collection configuration" } );
+    }
     return 0;
 }
 
 inline void dlDataCollection::loadConfig()
 {
     if( loadConfigImpl( config ) < 0 )
+    {
         m_shutdown = true;
+    }
 }
 
 inline dlCollection::Settings dlDataCollection::settings()
@@ -409,12 +416,16 @@ inline int dlDataCollection::appStartup()
         createStandardIndiText( m_indiP_output, "output" ) < 0 || createStandardIndiText( m_indiP_bank, "bank" ) < 0 ||
         createROIndiText( m_indiP_collection, "collection", "phase" ) < 0 ||
         createROIndiText( m_indiP_observation, "observation", "nd" ) < 0 )
+    {
         return -1;
+    }
     m_indiP_observation.add( pcf::IndiElement( "flipwfsf" ) );
     m_indiP_observation.add( pcf::IndiElement( "camwfs_fps" ) );
     m_indiP_observation.add( pcf::IndiElement( "camwfs_emgain" ) );
     for( const auto *name : { "directory", "error", "saved", "written", "duplicates", "torn", "samples_per_second" } )
+    {
         m_indiP_collection.add( pcf::IndiElement( name ) );
+    }
     m_indiP_output["current"] = m_output;
     m_indiP_output["target"]  = m_output;
     m_indiP_bank["current"]   = m_bank;
@@ -426,10 +437,14 @@ inline int dlDataCollection::appStartup()
         registerIndiPropertyNew( m_indiP_bank, INDI_NEWCALLBACK( m_indiP_bank ) ) < 0 ||
         registerIndiPropertyReadOnly( m_indiP_collection ) < 0 ||
         registerIndiPropertyReadOnly( m_indiP_observation ) < 0 )
+    {
         return -1;
+    }
     if( threadStart(
             m_ioThread, m_ioThreadInit, m_ioThreadID, m_indiP_ioThread, 0, "", "collection-io", this, ioStart ) < 0 )
+    {
         return -1;
+    }
     SHMIMMONITOR_APP_STARTUP;
     state( stateCodes::READY );
     return 0;
@@ -439,7 +454,9 @@ inline void dlDataCollection::ioStart( dlDataCollection *app )
 {
     app->m_ioThreadID = syscall( SYS_gettid );
     while( app->m_ioThreadInit && !app->shutdown() )
+    {
         std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+    }
     app->m_session.ioLoop();
 }
 
@@ -459,8 +476,10 @@ inline int dlDataCollection::appLogic()
         try
         {
             if( m_startPending || !m_session.canStart() )
+            {
                 throw std::runtime_error( "collection is busy or retains failed-run buffers" );
-            { // mutex scope
+            }
+            { //mutex scope
                 std::lock_guard<std::mutex> lock( m_indiMutex );
                 m_connected                = false;
                 m_nd.m_received            = {};
@@ -495,11 +514,15 @@ inline int dlDataCollection::appLogic()
     }
     const double elapsed = std::chrono::duration<double>( std::chrono::steady_clock::now() - m_started ).count();
     if( m_finishedElapsed < 0 && ( p.m_phase == "complete" || p.m_phase == "cancelled" || p.m_phase == "failed" ) )
+    {
         m_finishedElapsed = elapsed;
+    }
     const double                duration = m_finishedElapsed < 0 ? elapsed : m_finishedElapsed;
     std::lock_guard<std::mutex> lock( m_indiMutex );
     if( p.m_phase == "idle" || p.m_phase == "complete" || p.m_phase == "cancelled" || p.m_phase == "failed" )
+    {
         m_observationActive = false;
+    }
     SHMIMMONITOR_UPDATE_INDI;
     const auto status = m_startPending                                      ? pcf::IndiProperty::Busy
                         : ( !p.m_error.empty() || !m_controlError.empty() ) ? pcf::IndiProperty::Alert
@@ -558,28 +581,42 @@ inline void dlDataCollection::checkObservation()
         m_session.abort( "fwtelsim, flipwfsf or camwfs settings changed or have invalid/stale readback" );
     }
     if( !m_startPending )
+    {
         return;
+    }
     try
     {
         if( !valid )
         {
             if( checked < m_observationDeadline )
+            {
                 return;
+            }
             std::string missing;
             if( !m_nd.valid( checked ) )
+            {
                 missing += " fwtelsim.filterName/fsm";
+            }
             if( !m_flipwfsf.valid( checked ) )
+            {
                 missing += " flipwfsf.presetName/fsm";
+            }
             if( !m_fps.valid( checked ) )
+            {
                 missing += " camwfs.fps.current";
+            }
             if( !m_emgain.valid( checked ) )
+            {
                 missing += " camwfs.emgain.current";
+            }
             throw std::runtime_error( "no fresh settled readback:" + missing );
         }
         if( !m_connected.load() )
         {
             if( checked < m_observationDeadline )
+            {
                 return;
+            }
             throw std::runtime_error( "source/channel attachment timed out" );
         }
         auto s = settings();
@@ -589,14 +626,18 @@ inline void dlDataCollection::checkObservation()
         m_runFPS             = m_fps.m_value;
         m_runEMGain          = m_emgain.m_value;
         m_observationChanged = false;
-        { // mutex scope
+        { //mutex scope
             std::lock_guard<std::mutex> streamLock( m_streamMutex );
             checkCommandStream( true );
         }
         if( m_stopRequested.load() )
+        {
             throw std::runtime_error( "collection start cancelled" );
+        }
         if( !m_session.start( s ) )
+        {
             throw std::runtime_error( "collection is busy or retains failed-run buffers" );
+        }
         m_observationActive = true;
         m_started           = checked;
         m_finishedElapsed   = -1;
@@ -617,10 +658,14 @@ inline int dlDataCollection::appShutdown()
     SHMIMMONITOR_APP_SHUTDOWN;
     m_session.shutdown();
     if( m_ioThread.joinable() )
+    {
         m_ioThread.join();
+    }
     std::lock_guard<std::mutex> lock( m_streamMutex );
     if( m_commandOpened )
+    {
         ImageStreamIO_closeIm( &m_commandStream );
+    }
     m_commandOpened = false;
     m_connected     = false;
     return 0;
@@ -632,14 +677,18 @@ inline int dlDataCollection::allocate( const dev::shmimT &dummy )
     m_connected      = false;
     const auto phase = m_session.progress().m_phase;
     if( phase != "idle" && phase != "complete" && phase != "cancelled" && phase != "failed" )
+    {
         m_session.abort( "source stream reconnected; partial run aborted" );
+    }
     try
     {
         if( shmimMonitorT::m_dataType != _DATATYPE_FLOAT || shmimMonitorT::m_imageStream.md[0].naxis != 2 ||
             shmimMonitorT::m_imageStream.md[0].location != -1 || !shmimMonitorT::m_imageStream.array.raw )
+        {
             throw std::runtime_error( "WFS stream must be a CPU-backed 2D float32 image" );
+        }
         dlCollection::Settings s;
-        { // mutex scope
+        { //mutex scope
             std::lock_guard<std::mutex> lock( m_indiMutex );
             m_sourceSize = { shmimMonitorT::m_height, shmimMonitorT::m_width };
             s            = settings();
@@ -647,30 +696,46 @@ inline int dlDataCollection::allocate( const dev::shmimT &dummy )
         dlCollection::validate( s );
         std::lock_guard<std::mutex> lock( m_streamMutex );
         if( m_commandOpened )
+        {
             ImageStreamIO_closeIm( &m_commandStream );
+        }
         m_commandOpened = false;
         m_commandOwned  = false;
         if( ImageStreamIO_openIm( &m_commandStream, m_channel.c_str() ) != 0 )
+        {
             throw std::runtime_error( "cannot attach command channel" );
+        }
         m_commandOpened = true;
         if( !m_commandStream.md || !m_commandStream.array.raw || !m_commandStream.semptr )
+        {
             throw std::runtime_error( "invalid command channel mapping" );
+        }
         const auto &md = m_commandStream.md[0];
         if( md.naxis != 2 || md.size[0] != 50 || md.size[1] != 50 || md.datatype != _DATATYPE_FLOAT ||
             md.location != -1 || md.shared != 1 || md.nelement != 2500 || md.imdatamemsize != 10000 ||
             md.sem < SEMAPHORE_MAXVAL )
+        {
             throw std::runtime_error( "command channel must be a semaphore-backed 50x50 float32 image" );
+        }
         for( uint16_t i = 0; i < md.sem; ++i )
+        {
             if( !m_commandStream.semptr[i] )
+            {
                 throw std::runtime_error( "command channel semaphore is not attached" );
+            }
+        }
         m_commandSemaphores = md.sem;
         char filename[4096];
         if( ImageStreamIO_filename( filename, sizeof( filename ), m_channel.c_str() ) != 0 )
+        {
             throw std::runtime_error( "cannot resolve command channel filename" );
+        }
         m_commandFilename = filename;
         struct stat info;
         if( ::stat( filename, &info ) != 0 )
+        {
             throw std::runtime_error( "cannot identify command channel" );
+        }
         m_commandInode   = info.st_ino;
         m_commandCounter = md.cnt0;
         m_connected      = m_startPending.load();
@@ -678,7 +743,7 @@ inline int dlDataCollection::allocate( const dev::shmimT &dummy )
     }
     catch( const std::exception &e )
     {
-        { // mutex scope
+        { //mutex scope
             std::lock_guard<std::mutex> lock( m_indiMutex );
             m_controlError = e.what();
             m_startPending = false;
@@ -707,15 +772,23 @@ inline void dlDataCollection::checkCommandStream( bool newRun )
     if( newRun )
     {
         if( m_commandOwned )
+        {
             throw std::runtime_error( "previous command channel ownership has not been released" );
+        }
         const uint64_t counter = md.cnt0;
         std::atomic_thread_fence( std::memory_order_acquire );
         for( size_t i = 0; i < 2500; ++i )
+        {
             if( !dlCollection::finite( m_commandStream.array.F[i] ) || m_commandStream.array.F[i] != 0.F )
+            {
                 throw std::runtime_error( "dedicated command channel is not zero" );
+            }
+        }
         std::atomic_thread_fence( std::memory_order_acquire );
         if( md.write || md.cnt0 != counter )
+        {
             throw std::runtime_error( "command channel changed during Start preflight" );
+        }
         m_commandCounter = counter;
     }
 }
@@ -724,30 +797,48 @@ inline uint64_t dlDataCollection::publish( const float *command )
 {
     std::lock_guard<std::mutex> lock( m_streamMutex );
     if( command && m_observationChanged.load() )
+    {
         throw std::runtime_error( "observing configuration changed during collection" );
+    }
     if( !command && !m_commandOwned )
+    {
         return 0;
+    }
     checkCommandStream();
     volatile auto &md = m_commandStream.md[0];
     if( command && !m_commandOwned )
+    {
         for( size_t i = 0; i < 2500; ++i )
+        {
             if( !dlCollection::finite( m_commandStream.array.F[i] ) || m_commandStream.array.F[i] != 0.F )
+            {
                 throw std::runtime_error( "dedicated command channel is not zero" );
+            }
+        }
+    }
     md.write = 1;
     std::atomic_thread_fence( std::memory_order_seq_cst );
     if( command )
+    {
         std::memcpy( m_commandStream.array.raw, command, 2500 * sizeof( float ) );
+    }
     else
+    {
         std::memset( m_commandStream.array.raw, 0, 2500 * sizeof( float ) );
+    }
     std::atomic_thread_fence( std::memory_order_release );
     md.cnt0          = m_commandCounter + 1;
     m_commandCounter = md.cnt0;
     md.write         = 0;
     m_commandOwned   = command != nullptr;
     if( ImageStreamIO_sempost( &m_commandStream, -1 ) != 0 )
+    {
         throw std::runtime_error( "command notification failed" );
+    }
     if( !command )
+    {
         return 0; // Source may already be detached during timeout/shutdown.
+    }
     const volatile auto &source = shmimMonitorT::m_imageStream.md[0];
     return source.cnt0;
 }
@@ -755,15 +846,21 @@ inline uint64_t dlDataCollection::publish( const float *command )
 inline bool dlDataCollection::snapshotStable( uint64_t counter )
 {
     if( m_observationChanged.load() )
+    {
         return false;
+    }
     const volatile auto &md = shmimMonitorT::m_imageStream.md[0];
     std::atomic_thread_fence( std::memory_order_acquire );
     if( md.write || md.cnt0 != counter )
+    {
         return false;
+    }
     std::lock_guard<std::mutex> lock( m_streamMutex );
     checkCommandStream();
     if( !m_commandOwned )
+    {
         throw std::runtime_error( "held command ownership was lost" );
+    }
     return true;
 }
 
@@ -771,15 +868,24 @@ inline int dlDataCollection::processImage( void *src, const dev::shmimT &dummy )
 {
     static_cast<void>( dummy );
     if( m_observationChanged.load() )
+    {
         return 0;
+    }
     const volatile auto &md = shmimMonitorT::m_imageStream.md[0];
     if( md.write )
+    {
         return 0;
+    }
     const uint64_t counter = md.cnt0;
     const uint64_t time    = md.atime.tv_sec > 0 ? uint64_t( md.atime.tv_sec ) * 1000000000ULL + md.atime.tv_nsec : 0;
     std::atomic_thread_fence( std::memory_order_acquire );
-    m_session.onFrame(
-        counter, time, static_cast<const float *>( src ), [this, counter] { return snapshotStable( counter ); } );
+    m_session.onFrame( counter,
+                       time,
+                       static_cast<const float *>( src ),
+                       [this, counter]
+                       {
+                           return snapshotStable( counter );
+                       } );
     return 0;
 }
 
@@ -788,10 +894,14 @@ dlDataCollection::textRequest( const pcf::IndiProperty &request, pcf::IndiProper
 {
     std::lock_guard<std::mutex> lock( m_indiMutex );
     if( !m_session.canStart() || m_startRequested.load() || m_startPending || !request.find( "target" ) )
+    {
         return -1;
+    }
     const auto target = request["target"].get<std::string>();
     if( target.empty() || target.find_first_of( "\r\n" ) != std::string::npos )
+    {
         return -1;
+    }
     value = target;
     updateIfChanged( property, "target", value );
     updateIfChanged( property, "current", value );
@@ -802,7 +912,9 @@ INDI_NEWCALLBACK_DEFN( dlDataCollection, m_indiP_start )( const pcf::IndiPropert
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_start, ipRecv );
     if( ipRecv.find( "request" ) && ipRecv["request"].getSwitchState() == pcf::IndiElement::On )
+    {
         m_startRequested = true;
+    }
     return 0;
 }
 
@@ -810,7 +922,9 @@ INDI_NEWCALLBACK_DEFN( dlDataCollection, m_indiP_stop )( const pcf::IndiProperty
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_stop, ipRecv );
     if( ipRecv.find( "request" ) && ipRecv["request"].getSwitchState() == pcf::IndiElement::On )
+    {
         m_stopRequested = true;
+    }
     return 0;
 }
 
@@ -832,7 +946,9 @@ INDI_SETCALLBACK_DEFN( dlDataCollection, m_indiP_nd )( const pcf::IndiProperty &
     std::lock_guard<std::mutex> lock( m_indiMutex );
     m_nd.update( ipRecv );
     if( m_observationActive && m_nd.m_value != m_runND )
+    {
         m_observationChanged = true;
+    }
     return 0;
 }
 
@@ -842,9 +958,13 @@ INDI_SETCALLBACK_DEFN( dlDataCollection, m_indiP_flipwfsf )( const pcf::IndiProp
     std::lock_guard<std::mutex> lock( m_indiMutex );
     m_flipwfsf.update( ipRecv );
     if( m_flipwfsf.m_value != "in" && m_flipwfsf.m_value != "out" )
+    {
         m_flipwfsf.m_value.clear();
+    }
     if( m_observationActive && m_flipwfsf.m_value != m_runFlipwfsf )
+    {
         m_observationChanged = true;
+    }
     return 0;
 }
 
@@ -854,7 +974,9 @@ INDI_SETCALLBACK_DEFN( dlDataCollection, m_indiP_ndState )( const pcf::IndiPrope
     std::lock_guard<std::mutex> lock( m_indiMutex );
     m_nd.updateState( ipRecv );
     if( m_observationActive && !m_nd.valid( std::chrono::steady_clock::now() ) )
+    {
         m_observationChanged = true;
+    }
     return 0;
 }
 
@@ -864,7 +986,9 @@ INDI_SETCALLBACK_DEFN( dlDataCollection, m_indiP_flipwfsfState )( const pcf::Ind
     std::lock_guard<std::mutex> lock( m_indiMutex );
     m_flipwfsf.updateState( ipRecv );
     if( m_observationActive && !m_flipwfsf.valid( std::chrono::steady_clock::now() ) )
+    {
         m_observationChanged = true;
+    }
     return 0;
 }
 
@@ -874,7 +998,9 @@ INDI_SETCALLBACK_DEFN( dlDataCollection, m_indiP_fps )( const pcf::IndiProperty 
     std::lock_guard<std::mutex> lock( m_indiMutex );
     m_fps.update( ipRecv );
     if( m_observationActive && m_fps.m_value != m_runFPS )
+    {
         m_observationChanged = true;
+    }
     return 0;
 }
 
@@ -884,7 +1010,9 @@ INDI_SETCALLBACK_DEFN( dlDataCollection, m_indiP_emgain )( const pcf::IndiProper
     std::lock_guard<std::mutex> lock( m_indiMutex );
     m_emgain.update( ipRecv );
     if( m_observationActive && m_emgain.m_value != m_runEMGain )
+    {
         m_observationChanged = true;
+    }
     return 0;
 }
 

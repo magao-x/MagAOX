@@ -70,11 +70,17 @@ struct HostBufferDeleter
 inline void HostBufferDeleter::operator()( float *pointer ) const
 {
     if( pointer == nullptr )
+    {
         return;
+    }
     if( pinned )
+    {
         cudaFreeHost( pointer );
+    }
     else
+    {
         delete[] pointer;
+    }
 }
 
 /// Validated CPU-linear or TensorRT policy and its tensor contract.
@@ -104,7 +110,9 @@ struct EngineBundle
 inline EngineBundle::~EngineBundle()
 {
     if( graphExec != nullptr )
+    {
         cudaGraphExecDestroy( graphExec );
+    }
     delete context;
     delete engine;
     delete runtime;
@@ -281,7 +289,7 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>, public de
     Po4aoRouteIO       m_routeIO;                ///< Installed command/readback boundary, owned by the routing worker.
     Po4aoRouteSnapshot m_runSnapshot;            ///< Pre-request routing identity retained after failure.
     std::thread        m_runThread;              ///< Non-real-time routing operation, joined on shutdown.
-    std::mutex m_callbackMutex; ///< Serializes callback work, attachment allocation and stopped-model changes.
+    std::mutex         m_callbackMutex; ///< Serializes callback work, attachment allocation and stopped-model changes.
     std::atomic<bool>  m_runCancel{ false }, m_runAdmission{ true }; ///< Shutdown cancellation and callback admission.
     std::atomic<uint64_t> m_outputSequence{ 0 }; ///< Completed output publications for fresh-start verification.
     bool m_runPending{ false }, m_runBusy{ false }, m_runTarget{ true }, m_runRunning{ true }, m_runVerified{ false },

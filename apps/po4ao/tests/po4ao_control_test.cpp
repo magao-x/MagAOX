@@ -52,7 +52,9 @@ inline void ImageStreamIO_sempost( IMAGE *image /**< [in] Published in-memory im
 {
     static_cast<void>( index );
     if( image->posted )
+    {
         image->posted();
+    }
 }
 /// Model identity needed by the production admission logic; inference itself is an SDK double.
 struct EngineBundle
@@ -93,7 +95,7 @@ class po4ao
     size_t             m_explorationNoiseRows{ 1 }, m_explorationNoiseCols{ 2 }; ///< Exploration table dimensions.
     EngineBundle       m_model;                                                  ///< Retained model identity fixture.
     EngineBundle      *m_activeEngine{ &m_model }; ///< Policy selected by the frame callback.
-    std::mutex m_callbackMutex; ///< App callback and allocation ownership boundary.
+    std::mutex         m_callbackMutex;            ///< App callback and allocation ownership boundary.
     std::atomic<bool>  m_useNeuralNetwork{ true },
         m_replayShutdown{ false }; ///< Policy eligibility and publisher shutdown flags.
     std::atomic<uint64_t> m_controlRequest{ 3 }, m_appliedControl{ 0 },
@@ -218,9 +220,13 @@ inline bool po4ao::runInference( const float *observation )
 inline int po4ao::sendOutput()
 {
     if( m_duringOutput )
+    {
         m_duringOutput();
+    }
     if( m_failOutput )
+    {
         return -1;
+    }
     m_emitted.push_back( { m_output[0], m_output[1], m_output[2] } );
     return 0;
 }
@@ -288,8 +294,12 @@ TEST_CASE( "PO4AO production recollection preserves learned control and emitted 
     REQUIRE( app.m_warmupStream.md[0].cnt0 == app.m_warmupMetadataStream.md[0].cnt0 );
     const auto *replay = static_cast<float *>( app.m_warmupStream.array.raw );
     for( size_t index = 0; index < 4; ++index )
+    {
         for( size_t mode = 0; mode < 3; ++mode )
+        {
             REQUIRE( replay[12 + index * 3 + mode] == app.m_emitted[3 - index][mode] );
+        }
+    }
     REQUIRE( app.frame( 14 ) == 0 );
     REQUIRE( app.m_emitted.back()[1] == Approx( -1.F ) ); // Exploration ended, policy remains active.
 }
@@ -381,7 +391,10 @@ TEST_CASE( "PO4AO production acknowledges only emitted control and reset", "[po4
 #endif
     // clang-format on
     po4aoControlHarness::po4ao app;
-    app.m_duringOutput = [&app]() { app.m_controlRequest.store( 4 ); };
+    app.m_duringOutput = [&app]()
+    {
+        app.m_controlRequest.store( 4 );
+    };
     REQUIRE( app.frame( 1 ) == 0 );
     REQUIRE( app.m_appliedControl.load() == 3 );
     REQUIRE( app.m_controlRequest.load() == 4 );
@@ -413,7 +426,9 @@ TEST_CASE( "PO4AO production publication backlog interrupts collection", "[po4ao
     app.m_warmupEpisodes = 3;
     app.m_warmupRecollectRequest.store( 1 );
     for( uint64_t frame = 1; frame <= 6; ++frame )
+    {
         REQUIRE( app.frame( frame ) == 0 );
+    }
     REQUIRE( app.m_replayDrops.load() == 1 );
     REQUIRE( WarmupCollection::phase( app.m_collection.token() ) == CollectionPhase::interrupted );
     app.drain();
@@ -434,7 +449,10 @@ TEST_CASE( "PO4AO production invalidates a raced frozen snapshot", "[po4ao][cont
     // clang-format on
     po4aoControlHarness::po4ao app;
     app.m_warmupRecollectRequest.store( 1 );
-    app.m_warmupStream.posted = [&app]() { app.m_collection.interrupt( 1 ); };
+    app.m_warmupStream.posted = [&app]()
+    {
+        app.m_collection.interrupt( 1 );
+    };
     for( uint64_t frame = 1; frame <= 4; ++frame )
     {
         REQUIRE( app.frame( frame ) == 0 );
@@ -458,7 +476,9 @@ TEST_CASE( "PO4AO production starts another fixed-policy collection", "[po4ao][c
     po4aoControlHarness::po4ao app;
     app.m_warmupRecollectRequest.store( 1 );
     for( uint64_t frame = 1; frame <= 4; ++frame )
+    {
         REQUIRE( app.frame( frame ) == 0 );
+    }
     app.drain();
     REQUIRE( WarmupCollection::phase( app.m_collection.token() ) == CollectionPhase::ready );
     REQUIRE( app.frame( 5 ) == 0 );
@@ -471,7 +491,9 @@ TEST_CASE( "PO4AO production starts another fixed-policy collection", "[po4ao][c
     REQUIRE( app.m_observationHistory->size() == 2 );
     REQUIRE( app.m_emitted.back()[1] == Approx( 1.F ) );
     for( uint64_t frame = 7; frame <= 9; ++frame )
+    {
         REQUIRE( app.frame( frame ) == 0 );
+    }
     app.drain();
     REQUIRE( WarmupCollection::generation( app.m_collection.token() ) == 2 );
     REQUIRE( WarmupCollection::phase( app.m_collection.token() ) == CollectionPhase::ready );

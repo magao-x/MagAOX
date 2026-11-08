@@ -48,7 +48,9 @@ inline bool failClock = false;
 inline int nnTestClock( clockid_t clock /**< [in] Requested clock. */, timespec *value /**< [out] Timestamp. */ )
 {
     if( nnTest::failClock )
+    {
         return -1;
+    }
     return ::clock_gettime( clock, value );
 }
 #define clock_gettime nnTestClock
@@ -64,7 +66,9 @@ inline int cudaMalloc( void **pointer /**< [out] Fake device allocation. */,
                        size_t bytes /**< [in] Allocation size. */ )
 {
     if( ++nnTest::allocation == nnTest::failAllocation )
+    {
         return 1;
+    }
     *pointer = std::malloc( bytes );
     ++nnTest::liveAllocations;
     return *pointer ? 0 : 1;
@@ -86,7 +90,9 @@ inline int cudaMemcpy( void       *dest /**< [out] Destination. */,
                        int         kind /**< [in] Unused transfer direction. */ )
 {
     if( ++nnTest::copies == nnTest::failCopy )
+    {
         return 1;
+    }
     std::memcpy( dest, src, size );
     return 0;
 }
@@ -167,23 +173,35 @@ struct IExecutionContext
 inline bool IExecutionContext::executeV2( void *const *buffers )
 {
     if( nnTest::duringExecute )
+    {
         nnTest::duringExecute();
+    }
     if( nnTest::executeFailure )
+    {
         return false;
+    }
     for( size_t i = 0; i < m_tensors.size(); ++i )
     {
         auto  &t = m_tensors[i];
         size_t n = 1;
         for( int d = 0; d < t.dims.nbDims; ++d )
+        {
             n *= t.dims.d[d];
+        }
         if( t.role == TensorIOMode::kOUTPUT )
+        {
             for( size_t j = 0; j < n; ++j )
+            {
                 static_cast<float *>( buffers[i] )[j] = nnTest::result;
+            }
+        }
         else
         {
             nnTest::uploaded.resize( n );
             for( size_t j = 0; j < n; ++j )
+            {
                 nnTest::uploaded[j] = static_cast<float *>( buffers[i] )[j];
+            }
         }
     }
     return true;
@@ -249,7 +267,12 @@ struct ICudaEngine
 };
 inline const Tensor &ICudaEngine::get( const char *name ) const
 {
-    return *std::find_if( m_tensors.begin(), m_tensors.end(), [name]( auto &t ) { return t.name == name; } );
+    return *std::find_if( m_tensors.begin(),
+                          m_tensors.end(),
+                          [name]( auto &t )
+                          {
+                              return t.name == name;
+                          } );
 }
 
 /// Fake TensorRT runtime with a controllable deserialization boundary.
@@ -270,13 +293,19 @@ struct IRuntime
                                         size_t      size /**< [in] Byte count. */ )
     {
         if( nnTest::duringDeserialize )
+        {
             nnTest::duringDeserialize();
+        }
         const auto found = serializedTensors.find( std::string( static_cast<const char *>( data ), size ) );
         if( nnTest::engineFailure || ( found != serializedTensors.end() && found->second.empty() ) )
+        {
             return nullptr;
+        }
         auto *engine = new ICudaEngine;
         if( found != serializedTensors.end() )
+        {
             engine->m_tensors = found->second;
+        }
         return engine;
     }
 };
@@ -332,9 +361,13 @@ struct IndiElement
     T get() const
     {
         if constexpr( std::is_same_v<T, std::string> )
+        {
             return text;
+        }
         else
+        {
             return value;
+        }
     }
     SwitchStateType getSwitchState() const
     {
@@ -572,7 +605,7 @@ struct MagAOXApp
     {
         return "nnReconstructor";
     }
-    int m_state = stateCodes::READY; ///< App FSM value; no monitor acknowledgement is simulated.
+    int  m_state = stateCodes::READY; ///< App FSM value; no monitor acknowledgement is simulated.
     void state( int value /**< [in] Requested app state. */ )
     {
         m_state = value;
@@ -604,7 +637,9 @@ struct MagAOXApp
     {
         p.setName( name );
         for( auto &id : ids )
+        {
             p.add( pcf::IndiElement( id ) );
+        }
         return 0;
     }
     void createStandardIndiToggleSw( pcf::IndiProperty &p, const std::string &name )
@@ -652,7 +687,7 @@ class shmimMonitor
     Metadata md;
     IMAGE    m_imageStream{ &md, { nullptr } };
     bool     m_getExistingFirst = false;
-    int appShutdown()
+    int      appShutdown()
     {
         return 0;
     }

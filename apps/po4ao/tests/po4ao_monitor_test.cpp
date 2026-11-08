@@ -188,7 +188,9 @@ inline int ImageStreamIO_openIm( IMAGE *image, const char * )
     image->array.raw  = boundary::pixels;
     ++boundary::opens;
     if( boundary::afterOpen )
+    {
         boundary::afterOpen();
+    }
     return 0;
 }
 inline int ImageStreamIO_closeIm( IMAGE *image )
@@ -200,7 +202,9 @@ inline int ImageStreamIO_closeIm( IMAGE *image )
 inline int ImageStreamIO_getsemwaitindex( IMAGE *, int slot )
 {
     if( boundary::noReader )
+    {
         return -1;
+    }
     boundary::readers[slot] = getpid();
     return slot;
 }
@@ -231,9 +235,13 @@ inline int countedWait( sem_t *sem, const timespec *until )
     for( ;; )
     {
         if( sem_trywait( sem ) == 0 )
+        {
             return 0;
+        }
         if( errno != EAGAIN )
+        {
             return -1;
+        }
         timespec now{};
         clock_gettime( CLOCK_REALTIME, &now );
         if( now.tv_sec > until->tv_sec || ( now.tv_sec == until->tv_sec && now.tv_nsec >= until->tv_nsec ) )
@@ -303,7 +311,11 @@ class Monitor : public MagAOX::app::dev::shmimMonitor<Monitor>
     /// Start the actual monitor implementation.
     void run()
     {
-        m_thread = std::thread( [this] { smThreadExec(); } );
+        m_thread = std::thread(
+            [this]
+            {
+                smThreadExec();
+            } );
     }
 };
 Monitor::Monitor()
@@ -316,9 +328,13 @@ Monitor::Monitor()
     sem_unlink( m_semName.c_str() );
     auto *sem = sem_open( m_semName.c_str(), O_CREAT | O_EXCL, 0600, 0 );
     if( sem == SEM_FAILED )
+    {
         throw std::runtime_error( "Cannot create private test semaphore" );
+    }
     for( auto &p : boundary::semaphores )
+    {
         p = sem;
+    }
     boundary::path = "/tmp/smtest-" + std::to_string( getpid() ) + ".im.shm";
     std::ofstream( boundary::path ) << "mapping boundary";
     m_shmimName    = "private-monitor-test";
@@ -338,9 +354,13 @@ Monitor::~Monitor()
     m_shutdown  = true;
     m_producing = false;
     if( m_thread.joinable() )
+    {
         m_thread.join();
+    }
     if( m_producer.joinable() )
+    {
         m_producer.join();
+    }
     sem_close( boundary::semaphores[5] );
     sem_unlink( m_semName.c_str() );
     std::filesystem::remove( boundary::path );
@@ -350,7 +370,9 @@ bool await( const std::function<bool()> &ready /**< [in] Completion predicate. *
 {
     const auto end = std::chrono::steady_clock::now() + std::chrono::seconds( 3 );
     while( !ready() && std::chrono::steady_clock::now() < end )
+    {
         std::this_thread::sleep_for( std::chrono::milliseconds( 2 ) );
+    }
     return ready();
 }
 /// \endcond
@@ -370,9 +392,17 @@ TEST_CASE( "Monitor READY releases the reader and stops wait calls", "[shmimMoni
     {
         const auto frames = app.m_frames.load();
         app.state( MagAOX::app::stateCodes::OPERATING );
-        REQUIRE( await( [&] { return app.m_frames > frames + 2; } ) );
+        REQUIRE( await(
+            [&]
+            {
+                return app.m_frames > frames + 2;
+            } ) );
         app.state( MagAOX::app::stateCodes::READY );
-        REQUIRE( await( [&] { return boundary::closes == static_cast<unsigned>( cycle + 1 ); } ) );
+        REQUIRE( await(
+            [&]
+            {
+                return boundary::closes == static_cast<unsigned>( cycle + 1 );
+            } ) );
         const auto waits        = boundary::waits.load();
         const auto parkedFrames = app.m_frames.load();
         REQUIRE( boundary::readers[5] == 0 );

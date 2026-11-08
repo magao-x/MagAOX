@@ -28,7 +28,6 @@ class nnReconstructor_test : public nnReconstructor
     /// Submit Enable without waiting for the asynchronous loader.
     int queueEnable();
 
-
     /// Exercise the app-local PO4AO writer reservation callback.
     int hold( const std::string &owner /**< [in] Operation token. */,
               const std::string &action /**< [in] hold or release. */ );
@@ -168,7 +167,9 @@ inline nnReconstructor_test::nnReconstructor_test()
     pup_offset1_x = pup_offset1_y = 0;
     pup_offset2_x = pup_offset2_y = 2;
     for( size_t i = 0; i < m_frame.size(); ++i )
+    {
         m_frame[i] = i;
+    }
     shmimMonitorT::m_imageStream.array.raw = m_frame.data();
 }
 
@@ -181,9 +182,13 @@ inline void nnReconstructor_test::prepare( bool enabled, bool discover )
     std::ofstream( engineDirs + "/first.trt" ) << "first";
     std::ofstream( engineDirs + "/second.trt" ) << "second";
     if( !discover )
+    {
         std::ofstream( engineDirs + "/missing.trt" ) << "missing";
+    }
     if( appStartup() < 0 )
+    {
         throw std::runtime_error( "startup rejected" );
+    }
     allocate( dev::shmimT{} );
     configureAcquisition();
 }
@@ -285,7 +290,9 @@ inline int nnReconstructor_test::enable( bool value )
     if( result == 0 && value )
     {
         if( !waitLoad() )
+        {
             throw std::runtime_error( "activation worker timed out" );
+        }
         allocate( dev::shmimT{} ); // Model the new attachment after the worker requests OPERATING.
     }
     return result;
@@ -484,7 +491,11 @@ TEST_CASE( "publication snapshot survives a concurrent inference", "[nnReconstru
     REQUIRE( app.claim() );
     const auto time = app.timestamp();
     nnTest::result  = 2;
-    std::thread producer( [&] { app.frame(); } );
+    std::thread producer(
+        [&]
+        {
+            app.frame();
+        } );
     producer.join();
     REQUIRE( app.copy() == std::vector<float>{ 1, 1, 1 } );
     REQUIRE( app.timestamp().tv_sec == time.tv_sec );
@@ -535,9 +546,13 @@ TEST_CASE( "failed inference never queues a result", "[nnReconstructor]" )
         nnReconstructor_test app;
         app.prepare();
         if( failure < 2 )
+        {
             nnTest::failCopy = failure + 1;
+        }
         if( failure == 2 )
+        {
             nnTest::executeFailure = true;
+        }
         app.frame();
         REQUIRE_FALSE( app.pending() );
         REQUIRE_FALSE( app.fault().empty() );
@@ -608,14 +623,18 @@ TEST_CASE( "loading failures unwind every owned resource", "[nnReconstructor]" )
         {
             nnReconstructor_test app;
             if( failure == 0 )
+            {
                 REQUIRE_THROWS( app.load_engine( "no-such-engine.trt" ) );
+            }
             else
             {
                 nnTest::runtimeFailure = failure == 1;
                 nnTest::engineFailure  = failure == 2;
                 nnTest::contextFailure = failure == 3;
                 if( failure > 3 )
+                {
                     nnTest::failAllocation = failure - 3;
+                }
                 REQUIRE_THROWS( app.prepare() );
             }
             app.appShutdown();
@@ -642,17 +661,29 @@ TEST_CASE( "incompatible engine contracts fail before inference", "[nnReconstruc
         nnReconstructor_test app;
         auto                &t = nvinfer1::tensors[0];
         if( failure == 0 )
+        {
             t.dims.d[0] = 2;
+        }
         if( failure == 1 )
+        {
             t.dims.d[2] = -1;
+        }
         if( failure == 2 )
+        {
             t.type = nvinfer1::DataType::kHALF;
+        }
         if( failure == 3 )
+        {
             t.format = nvinfer1::TensorFormat::kOTHER;
+        }
         if( failure == 4 )
+        {
             t.dims.nbDims = 2;
+        }
         if( failure == 5 )
+        {
             t.location = nvinfer1::TensorLocation::kHOST;
+        }
         REQUIRE_THROWS( app.prepare() );
     }
 }
@@ -671,10 +702,16 @@ TEST_CASE( "preprocessing retains its exact tensor values", "[nnReconstructor]" 
     app.frame();
     std::vector<float> expected( 144, 0 );
     for( int pupil = 0; pupil < 4; ++pupil )
+    {
         for( int x = 0; x < 2; ++x )
+        {
             for( int y = 0; y < 2; ++y )
+            {
                 expected[pupil * 36 + ( x + 2 ) * 6 + y + 2] =
                     2 * ( ( pupil / 2 ) * 2 + y + ( ( pupil % 2 ) * 2 + x ) * 4 );
+            }
+        }
+    }
     REQUIRE( nnTest::uploaded == expected );
 }
 
@@ -690,7 +727,11 @@ TEST_CASE( "shutdown wakes an idle publisher", "[nnReconstructor]" )
 
     nnReconstructor_test app;
     app.prepare();
-    auto waiter = std::async( std::launch::async, [&] { return app.claim(); } );
+    auto waiter = std::async( std::launch::async,
+                              [&]
+                              {
+                                  return app.claim();
+                              } );
     app.appShutdown();
     REQUIRE( waiter.wait_for( std::chrono::milliseconds( 200 ) ) == std::future_status::ready );
     REQUIRE_FALSE( waiter.get() );
@@ -715,10 +756,14 @@ TEST_CASE( "concurrent handoff stress", "[nnReconstructor]" )
             while( !done || app.pending() )
             {
                 if( !app.claim() )
+                {
                     continue;
+                }
                 const auto values = app.copy();
                 if( values[0] != values[1] || values[1] != values[2] )
+                {
                     ++mixed;
+                }
                 ++publications;
                 app.complete();
             }
@@ -790,10 +835,18 @@ TEST_CASE( "disable waits for admitted inference and discards its late result", 
         entered.set_value();
         gate.wait();
     };
-    auto producer = std::async( std::launch::async, [&] { app.frame(); } );
+    auto producer = std::async( std::launch::async,
+                                [&]
+                                {
+                                    app.frame();
+                                } );
     entered.get_future().wait();
     const int  disabled     = app.enable( false );
-    auto       publisher    = std::async( std::launch::async, [&] { return app.claim(); } );
+    auto       publisher    = std::async( std::launch::async,
+                                          [&]
+                                          {
+                                     return app.claim();
+                                          } );
     const auto before       = publisher.wait_for( std::chrono::milliseconds( 20 ) );
     const bool acknowledged = app.acknowledged();
     release.set_value();
@@ -972,9 +1025,13 @@ TEST_CASE( "output identity and location failures do not acknowledge a zero", "[
         app.prepare();
         REQUIRE( app.enable( false ) == 0 );
         if( replaced )
+        {
             app.replaceOutput();
+        }
         else
+        {
             app.badOutput();
+        }
         REQUIRE_FALSE( app.claim() );
         REQUIRE( app.acknowledged() );
         REQUIRE( app.disabling() );
@@ -1052,7 +1109,11 @@ TEST_CASE( "shutdown cancels a background replacement without freeing live resou
     REQUIRE( app.select( 1 ) == 0 );
     app.control();
     entered.get_future().wait();
-    auto       shutdown = std::async( std::launch::async, [&] { app.appShutdown(); } );
+    auto       shutdown = std::async( std::launch::async,
+                                      [&]
+                                      {
+                                    app.appShutdown();
+                                      } );
     const auto before   = shutdown.wait_for( std::chrono::milliseconds( 20 ) );
     release.set_value();
     shutdown.get();
@@ -1097,16 +1158,23 @@ TEST_CASE( "auxiliary inputs and FP16 I/O are rejected", "[nnReconstructor]" )
     // clang-format on
 
     for( int failure = 0; failure < 3; ++failure )
+    {
         for( bool replacement : { false, true } )
         {
             {
                 nnReconstructor_test app;
                 if( replacement )
+                {
                     app.prepare( false );
+                }
                 if( failure == 0 )
+                {
                     nvinfer1::tensors.push_back( { "extra", nvinfer1::TensorIOMode::kINPUT, { 2, { 1, 4 } } } );
+                }
                 else
+                {
                     nvinfer1::tensors[failure - 1].type = nvinfer1::DataType::kHALF;
+                }
                 if( replacement )
                 {
                     REQUIRE( app.select( 1 ) == 0 );
@@ -1117,7 +1185,9 @@ TEST_CASE( "auxiliary inputs and FP16 I/O are rejected", "[nnReconstructor]" )
                     REQUIRE( app.enable( true ) == -1 );
                 }
                 else
+                {
                     REQUIRE_THROWS( app.prepare() );
+                }
                 app.appShutdown();
                 app.appShutdown();
             }
@@ -1126,6 +1196,7 @@ TEST_CASE( "auxiliary inputs and FP16 I/O are rejected", "[nnReconstructor]" )
             REQUIRE( nnTest::engines == 0 );
             REQUIRE( nnTest::contexts == 0 );
         }
+    }
 }
 
 /** \brief An inference failure while disabling must release admission and still complete the requested zero. */
@@ -1149,7 +1220,11 @@ TEST_CASE( "inference failure cannot strand a disable transition", "[nnReconstru
         gate.wait();
     };
     nnTest::executeFailure = true;
-    auto producer          = std::async( std::launch::async, [&] { app.frame(); } );
+    auto producer          = std::async( std::launch::async,
+                                         [&]
+                                         {
+                                    app.frame();
+                                         } );
     entered.get_future().wait();
     const int result = app.enable( false );
     release.set_value();
@@ -1238,7 +1313,9 @@ TEST_CASE( "startup discovers compatible engines without an explicit list", "[nn
                                                                                 { "empty.trt", "" },
                                                                                 { "notes.txt", "valid" },
                                                                                 { "upload.trt.partial", "valid" } } )
+        {
             std::ofstream( ".build/catalog/" + name ) << contents;
+        }
         std::filesystem::create_directory( ".build/catalog/directory.trt" );
         app.prepare( false, true );
         REQUIRE( app.models() == std::vector<std::string>{ "first.trt", "a.plan", "second.trt", "z.engine" } );
@@ -1372,7 +1449,9 @@ TEST_CASE( "Native handover failures leave NN disabled", "[nnReconstructor][inde
         {
             app.switchStep();
             if( app.switchPhase() == "preparing_nn" )
+            {
                 REQUIRE( app.waitLoad() );
+            }
         }
         REQUIRE( app.switchPhase() == "stopping_cacao" );
         app.expireSwitch();
@@ -1387,7 +1466,9 @@ TEST_CASE( "Native handover failures leave NN disabled", "[nnReconstructor][inde
         {
             app.switchStep();
             if( app.switchPhase() == "preparing_nn" )
+            {
                 REQUIRE( app.waitLoad() );
+            }
         }
         REQUIRE( app.switchPhase() == "error" );
     }
@@ -1424,7 +1505,9 @@ TEST_CASE( "Native linked handover uses current modulation readbacks", "[nnRecon
     {
         app.switchStep();
         if( app.switchPhase() == "preparing_nn" )
+        {
             REQUIRE( app.waitLoad() );
+        }
     }
     REQUIRE( app.switchPhase() == "modulation" );
     REQUIRE_FALSE( app.acknowledged() );
@@ -1490,7 +1573,9 @@ TEST_CASE( "Late CACAO start retains the handover barrier", "[nnReconstructor][i
     {
         app.switchStep();
         if( app.switchPhase() == "preparing_nn" )
+        {
             REQUIRE( app.waitLoad() );
+        }
     }
     REQUIRE( app.switchPhase() == "starting_cacao" );
     app.expireSwitch();
@@ -1635,7 +1720,9 @@ TEST_CASE( "Routing reservation preserves NN ownership across CACAO restarts", "
     {
         app.switchStep();
         if( app.switchPhase() == "preparing_nn" )
+        {
             REQUIRE( app.waitLoad() );
+        }
     }
     REQUIRE( app.switchPhase() == "starting_nn" );
     REQUIRE_FALSE( nnTest::cacaoRunning );

@@ -10,13 +10,17 @@
 inline void po4ao::makeIntegratorCommand( const float *observation )
 {
     for( int mode = 0; mode < m_nModesControlled; ++mode )
+    {
         m_output[mode] = m_integratorGain * observation[mode];
+    }
 }
 
 inline int po4ao::invalidateReplay( IMAGE &stream, bool opened, IMAGE &metadataStream, bool metadataOpened )
 {
     if( !opened || !metadataOpened )
+    {
         return -1;
+    }
     stream.md[0].write         = 1;
     metadataStream.md[0].write = 1;
     memset( metadataStream.array.raw, 0, 4 * sizeof( uint32_t ) );
@@ -40,7 +44,9 @@ inline int po4ao::publishReplay( IMAGE   &stream,
                                  uint64_t modelId )
 {
     if( !opened || !metadataOpened || !m_publishObservations || !m_publishCommands )
+    {
         return -1;
+    }
     const size_t valid         = std::min( m_publishObservations->size(), m_publishCommands->size() );
     const size_t planeSize     = static_cast<size_t>( m_nModes ) * m_replayBufferSize;
     stream.md[0].write         = 1;
@@ -127,7 +133,9 @@ inline void po4ao::replayPublisherLoop()
         {
             publicationLock.unlock();
             if( m_replayShutdown.load( std::memory_order_acquire ) )
+            {
                 break;
+            }
             std::unique_lock<std::mutex> lock( m_replayMutex );
             m_replayCondition.wait_for( lock,
                                         std::chrono::milliseconds( 100 ),
@@ -163,7 +171,9 @@ inline void po4ao::replayPublisherLoop()
             previousEpisode         = 0;
         }
         if( episode.episode != previousEpisode + 1 )
+        {
             m_collection.interrupt( episode.generation );
+        }
         previousEpisode = episode.episode;
         for( size_t frame = 0; frame < episode.count; ++frame )
         {
@@ -176,7 +186,9 @@ inline void po4ao::replayPublisherLoop()
                            m_replayMetadataOpened,
                            episode.episode,
                            episode.modelId ) < 0 )
+        {
             m_collection.interrupt( episode.generation );
+        }
         if( episode.episode == m_warmupEpisodes &&
             m_collection.token() ==
                 ( ( episode.generation << 3 ) | static_cast<uint64_t>( CollectionPhase::publishing ) ) )
@@ -215,7 +227,9 @@ inline int po4ao::processImage( void *curr_src, const dev::shmimT &dummy )
     static_cast<void>( dummy );
     std::lock_guard<std::mutex> callbackLock( m_callbackMutex );
     if( !m_runAdmission.load( std::memory_order_acquire ) )
+    {
         return 0;
+    }
     const auto started       = std::chrono::steady_clock::now();
     auto       recordLatency = [this, started]()
     {
@@ -230,10 +244,14 @@ inline int po4ao::processImage( void *curr_src, const dev::shmimT &dummy )
                 .count();
         m_runtimeSamples.record( latency, model, backend, static_cast<uint64_t>( time ) );
         if( latency > m_latencyDeadlineUs )
+        {
             m_deadlineMisses.fetch_add( 1, std::memory_order_relaxed );
+        }
     };
     if( curr_src == nullptr || !m_inputState || !m_output || !m_outputOpened )
+    {
         return -1;
+    }
 
     const uint64_t sourceCounter = shmimMonitorT::m_imageStream.md[0].cnt0;
     // Queued notifications can refer to the same latest image after a processing stall.
@@ -246,7 +264,9 @@ inline int po4ao::processImage( void *curr_src, const dev::shmimT &dummy )
     activatePendingEngine();
     const uint64_t resetGeneration = m_modelResetRequest.exchange( 0, std::memory_order_acq_rel );
     if( resetGeneration != 0 )
+    {
         resetActiveModel( resetGeneration );
+    }
     // Keep one request snapshot throughout this frame; later requests await the next output.
     const uint64_t control         = m_controlRequest.load( std::memory_order_acquire );
     const bool     enabled         = ( control & 1 ) != 0;
@@ -254,7 +274,9 @@ inline int po4ao::processImage( void *curr_src, const dev::shmimT &dummy )
     const auto    *observation     = static_cast<const float *>( curr_src );
     const bool     consecutive = sourceCounterIsConsecutive( sourceCounter, m_lastInputCounter, m_haveInputCounter );
     if( m_haveInputCounter && sourceCounter > m_lastInputCounter + 1 )
+    {
         m_missedFrames.fetch_add( sourceCounter - m_lastInputCounter - 1, std::memory_order_relaxed );
+    }
     m_lastInputCounter = sourceCounter;
     m_haveInputCounter = true;
 
@@ -265,7 +287,9 @@ inline int po4ao::processImage( void *curr_src, const dev::shmimT &dummy )
         m_episodeBuffers[static_cast<size_t>( m_activeEpisodeSlot )].reset();
     }
     else
+    {
         m_observationHistory->add( observation );
+    }
 
     const bool inferenceReady = consecutive && enabled && m_activeEngine != nullptr &&
                                 m_activeEngine->generation == modelGeneration &&
@@ -276,10 +300,12 @@ inline int po4ao::processImage( void *curr_src, const dev::shmimT &dummy )
     const uint64_t recollectRequest    = m_warmupRecollectRequest.load( std::memory_order_acquire );
     const uint64_t recollectGeneration = recollectRequest > m_activeCollectionGeneration ? recollectRequest : 0;
     if( recollectGeneration != 0 || ( m_initialWarmupPending && enabled ) )
+    {
         beginWarmupCollection( recollectGeneration != 0 ? recollectGeneration : m_activeCollectionGeneration,
                                control,
                                expectedModel,
                                modelGeneration );
+    }
     m_collection.validate( control, expectedModel, modelGeneration, consecutive );
 
     bool inferenceOk = inferenceReady && runInference( observation );
@@ -289,7 +315,9 @@ inline int po4ao::processImage( void *curr_src, const dev::shmimT &dummy )
         m_collection.interrupt( m_activeCollectionGeneration );
     }
     if( !inferenceOk )
+    {
         makeIntegratorCommand( observation );
+    }
 
     const bool exploring = WarmupCollection::phase( m_collection.token() ) == CollectionPhase::collecting;
     if( exploring && !m_explorationNoise.empty() )
@@ -337,7 +365,9 @@ inline int po4ao::processImage( void *curr_src, const dev::shmimT &dummy )
     m_effectiveController.store( effectiveController, std::memory_order_release );
     m_appliedControl.store( control, std::memory_order_release );
     if( resetGeneration != 0 )
+    {
         m_appliedReset.store( resetGeneration, std::memory_order_release );
+    }
     m_collection.emitted();
     if( consecutive )
     {
@@ -352,11 +382,15 @@ inline int po4ao::processImage( void *curr_src, const dev::shmimT &dummy )
                 m_collection.interrupt( m_activeCollectionGeneration );
             }
             else if( episode.count == episode.capacity )
+            {
                 finishEpisode();
+            }
         }
     }
     if( WarmupCollection::phase( m_collection.token() ) == CollectionPhase::interrupted )
+    {
         m_replayCondition.notify_one();
+    }
     recordLatency();
     return 0;
 }

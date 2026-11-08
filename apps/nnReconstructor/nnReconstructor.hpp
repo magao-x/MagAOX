@@ -59,7 +59,9 @@ class Logger : public ILogger
 inline void Logger::log( Severity severity, const char *msg ) noexcept
 {
     if( severity <= Severity::kWARNING )
+    {
         std::cout << msg << std::endl;
+    }
 }
 
 namespace MagAOX
@@ -554,8 +556,12 @@ inline std::string nnReconstructor::modelId( size_t index ) const
 {
     std::string id = "model" + std::to_string( index ) + "_" + m_models[index];
     for( char &character : id )
+    {
         if( !std::isalnum( static_cast<unsigned char>( character ) ) && character != '_' )
+        {
             character = '_';
+        }
+    }
     return id;
 }
 
@@ -563,14 +569,20 @@ inline std::vector<char> nnReconstructor::readEngineFile( const std::string &fil
 {
     std::ifstream file( filename, std::ios::binary | std::ios::ate );
     if( !file )
+    {
         throw std::runtime_error( "cannot open engine: " + filename );
+    }
     const auto size = file.tellg();
     if( size <= 0 || static_cast<uintmax_t>( size ) > std::numeric_limits<size_t>::max() )
+    {
         throw std::runtime_error( "invalid engine file size: " + filename );
+    }
     std::vector<char> data( static_cast<size_t>( size ) );
     file.seekg( 0 );
     if( !file.read( data.data(), size ) )
+    {
         throw std::runtime_error( "incomplete engine read: " + filename );
+    }
     return data;
 }
 
@@ -583,10 +595,14 @@ inline void nnReconstructor::create_engine_context()
 {
     runtime = createInferRuntime( logger );
     if( !runtime )
+    {
         throw std::runtime_error( "createInferRuntime failed" );
+    }
     engine = runtime->deserializeCudaEngine( engineData.data(), engineData.size() );
     if( !engine )
+    {
         throw std::runtime_error( "engine deserialization failed" );
+    }
     const auto indices    = validateEngine( engine, outputSize );
     const int  imageIndex = indices[0], outputIndex = indices[1];
     inputC = Npup;
@@ -594,7 +610,9 @@ inline void nnReconstructor::create_engine_context()
     inputSize       = Npup * pixels_per_quadrant;
     context         = engine->createExecutionContext();
     if( !context )
+    {
         throw std::runtime_error( "createExecutionContext failed" );
+    }
     prepare_engine_memory();
     m_bindings[imageIndex]  = d_input;
     m_bindings[outputIndex] = d_output;
@@ -610,7 +628,9 @@ inline std::array<int, 2> nnReconstructor::validateEngine( ICudaEngine *candidat
 {
     constexpr int count = 2;
     if( candidate->getNbIOTensors() != count )
+    {
         throw std::runtime_error( "unexpected engine I/O count" );
+    }
     int imageIndex = -1, outputIndex = -1;
     for( int i = 0; i < count; ++i )
     {
@@ -618,21 +638,29 @@ inline std::array<int, 2> nnReconstructor::validateEngine( ICudaEngine *candidat
         if( !name || candidate->getTensorDataType( name ) != DataType::kFLOAT ||
             candidate->getTensorFormat( name ) != TensorFormat::kLINEAR ||
             candidate->getTensorLocation( name ) != TensorLocation::kDEVICE )
+        {
             throw std::runtime_error( "unsupported engine I/O dtype, layout or location" );
+        }
         const auto dims   = candidate->getTensorShape( name );
         size_t     volume = 1;
         if( dims.nbDims < 1 )
+        {
             throw std::runtime_error( "invalid tensor rank" );
+        }
         for( int d = 0; d < dims.nbDims; ++d )
         {
             if( dims.d[d] <= 0 || volume > size_t( std::numeric_limits<int>::max() ) / dims.d[d] )
+            {
                 throw std::runtime_error( "dynamic, empty or oversized tensor" );
+            }
             volume *= dims.d[d];
         }
         if( candidate->getTensorIOMode( name ) == TensorIOMode::kOUTPUT )
         {
             if( outputIndex >= 0 || dims.nbDims != 2 || dims.d[0] != 1 )
+            {
                 throw std::runtime_error( "expected one batch-one modal output" );
+            }
             outputIndex = i;
             outputs     = dims.d[1];
         }
@@ -640,14 +668,20 @@ inline std::array<int, 2> nnReconstructor::validateEngine( ICudaEngine *candidat
         {
             if( imageIndex >= 0 || dims.d[0] != 1 || dims.d[1] != Npup || dims.d[2] != m_pupPix ||
                 dims.d[3] != m_pupPix )
+            {
                 throw std::runtime_error( "engine image shape does not match configured padded pupils" );
+            }
             imageIndex = i;
         }
         else
+        {
             throw std::runtime_error( "unsupported engine tensor role or shape" );
+        }
     }
     if( imageIndex < 0 || outputIndex < 0 )
+    {
         throw std::runtime_error( "missing required engine tensor" );
+    }
     return { imageIndex, outputIndex };
 }
 
@@ -660,7 +694,9 @@ inline void nnReconstructor::discoverModels()
     {
         const auto extension = entry.path().extension().string();
         if( entry.is_regular_file() && ( extension == ".trt" || extension == ".engine" || extension == ".plan" ) )
+        {
             discovered.push_back( entry.path().filename().string() );
+        }
     }
     std::sort( discovered.begin(), discovered.end() );
     candidates.insert( candidates.end(), discovered.begin(), discovered.end() );
@@ -669,21 +705,29 @@ inline void nnReconstructor::discoverModels()
     for( const auto &name : candidates )
     {
         if( std::find( checked.begin(), checked.end(), name ) != checked.end() )
+        {
             continue;
+        }
         checked.push_back( name );
         try
         {
             auto                         data = readEngineFile( engineDirs + "/" + name );
             std::unique_ptr<ICudaEngine> candidate( runtime->deserializeCudaEngine( data.data(), data.size() ) );
             if( !candidate )
+            {
                 throw std::runtime_error( "engine deserialization failed" );
+            }
             uint32_t outputs = 0;
             validateEngine( candidate.get(), outputs );
             if( outputs != outputSize )
+            {
                 throw std::runtime_error( "modal count differs from startup model" );
+            }
             std::unique_ptr<IExecutionContext> candidateContext( candidate->createExecutionContext() );
             if( !candidateContext )
+            {
                 throw std::runtime_error( "createExecutionContext failed" );
+            }
             m_models.push_back( name );
         }
         catch( const std::exception &error )
@@ -698,21 +742,31 @@ inline void nnReconstructor::replaceModel( const std::string &name, bool activat
     auto                      data = activate ? engineData : readEngineFile( engineDirs + "/" + name );
     std::unique_ptr<IRuntime> nextRuntime( createInferRuntime( logger ) );
     if( !nextRuntime )
+    {
         throw std::runtime_error( "createInferRuntime failed" );
+    }
     std::unique_ptr<ICudaEngine> nextEngine( nextRuntime->deserializeCudaEngine( data.data(), data.size() ) );
     if( !nextEngine )
+    {
         throw std::runtime_error( "engine deserialization failed" );
+    }
     uint32_t   outputs = 0;
     const auto indices = validateEngine( nextEngine.get(), outputs );
     if( outputs != outputSize )
+    {
         throw std::runtime_error( "replacement must preserve the configured modal count" );
+    }
     std::unique_ptr<IExecutionContext> nextContext( nextEngine->createExecutionContext() );
     if( !nextContext )
+    {
         throw std::runtime_error( "createExecutionContext failed" );
+    }
     auto freeDevice = []( float *pointer )
     {
         if( pointer )
+        {
             cudaFree( pointer );
+        }
     };
     std::unique_ptr<float, decltype( freeDevice )> nextInput( nullptr, freeDevice ), nextOutput( nullptr, freeDevice );
     if( activate )
@@ -725,14 +779,18 @@ inline void nnReconstructor::replaceModel( const std::string &name, bool activat
                    "restore output" );
         nextOutput.reset( pointer );
     }
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_resultMutex );
         if( m_stopping || m_cancelLoad ||
             std::chrono::duration<double>( std::chrono::steady_clock::now() - m_transitionStart ).count() >
                 m_transitionTimeout )
+        {
             throw std::runtime_error( "model load cancelled or timed out before installation" );
+        }
         if( m_gpuResident )
+        {
             throw std::runtime_error( "model preparation requires released GPU resources" );
+        }
         if( activate )
         {
             runtime  = nextRuntime.release();
@@ -762,7 +820,9 @@ inline void nnReconstructor::releaseInference()
     for( auto **pointer : { &d_input, &d_output } )
     {
         if( *pointer )
+        {
             checkCuda( cudaFree( *pointer ), "release inference buffer" );
+        }
         *pointer = nullptr;
     }
     m_bindings.fill( nullptr );
@@ -771,7 +831,9 @@ inline void nnReconstructor::releaseInference()
 inline void nnReconstructor::checkCuda( cudaError_t result, const char *operation )
 {
     if( result != cudaSuccess )
+    {
         throw std::runtime_error( std::string( operation ) + ": " + cudaGetErrorString( result ) );
+    }
 }
 
 inline void nnReconstructor::prepare_engine_memory()
@@ -788,8 +850,12 @@ inline void nnReconstructor::prepare_engine_memory()
 inline void nnReconstructor::cleanup_engine_memory()
 {
     for( auto pointer : { d_input, d_output } )
+    {
         if( pointer && cudaFree( pointer ) != cudaSuccess )
+        {
             log<software_error>( { "cudaFree failed during cleanup" } );
+        }
+    }
     d_input = d_output = nullptr;
     m_bindings.fill( nullptr );
 }
@@ -817,7 +883,7 @@ inline nnReconstructor::~nnReconstructor() noexcept
 
 inline void nnReconstructor::fail( const std::string &reason )
 {
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_resultMutex );
         m_fault       = reason;
         m_enabled     = false;
@@ -942,6 +1008,7 @@ inline void nnReconstructor::setupConfig()
                 "Vertical offset to the top left of the furthest set op PWFS pupils." );
 
     for( const auto *name : { "fpsName", "fpsFifo", "writerProcessMatch", "modulationDevice" } )
+    {
         config.add( std::string( "recon." ) + name,
                     "",
                     std::string( "recon." ) + name,
@@ -951,6 +1018,7 @@ inline void nnReconstructor::setupConfig()
                     false,
                     "string",
                     "Optional NN/CACAO handover configuration." );
+    }
 
     config.add( "parameters.models",
                 "",
@@ -999,7 +1067,9 @@ inline int nnReconstructor::loadConfigImpl( mx::app::appConfigurator &_config )
         m_cacaoWriter.m_name.find_first_not_of( "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-." ) !=
             std::string::npos ||
         m_cacaoWriter.m_fifo.empty() || m_cacaoWriter.m_processMatch.empty() || m_modDevice.empty() )
+    {
         return log<software_error, -1>( { "invalid recon writer/modulation configuration" } );
+    }
 
     _config( engineDirs, "parameters.engineDirs" );
     _config( engineName, "parameters.engineName" );
@@ -1018,13 +1088,21 @@ inline int nnReconstructor::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_startEnabled, "parameters.startEnabled" );
     _config( m_transitionTimeout, "parameters.transitionTimeout" );
     if( engineName.empty() || !isFinite( m_transitionTimeout ) || m_transitionTimeout <= 0 )
+    {
         return log<software_error, -1>( { "engineName and a positive finite transitionTimeout are required" } );
+    }
     if( std::find( m_models.begin(), m_models.end(), engineName ) == m_models.end() )
+    {
         m_models.insert( m_models.begin(), engineName );
+    }
     for( size_t i = 0; i < m_models.size(); ++i )
+    {
         if( m_models[i].empty() ||
             std::find( m_models.begin(), m_models.begin() + i, m_models[i] ) != m_models.begin() + i )
+        {
             return log<software_error, -1>( { "model filenames must be nonempty and unique" } );
+        }
+    }
 
     TELEMETER_LOAD_CONFIG( _config );
 
@@ -1047,7 +1125,9 @@ inline int nnReconstructor::loadConfigImpl( mx::app::appConfigurator &_config )
 
     if( m_pupPix <= 2 * zeroPad || m_pupPix > 23170 || !isFinite( imageNorm ) || pup_offset1_x < 0 ||
         pup_offset1_y < 0 || pup_offset2_x < 0 || pup_offset2_y < 0 )
+    {
         return log<software_error, -1>( { "invalid pupil crop or image normalization" } );
+    }
     pixels_per_quadrant = m_pupPix * m_pupPix;
     return 0;
 }
@@ -1055,7 +1135,9 @@ inline int nnReconstructor::loadConfigImpl( mx::app::appConfigurator &_config )
 inline void nnReconstructor::loadConfig()
 {
     if( loadConfigImpl( config ) < 0 )
+    {
         m_shutdown = true;
+    }
 }
 
 inline int nnReconstructor::appStartup()
@@ -1086,20 +1168,32 @@ inline int nnReconstructor::appStartup()
         }
         std::vector<std::string> ids;
         for( size_t i = 0; i < m_models.size(); ++i )
+        {
             ids.push_back( modelId( i ) );
+        }
         if( createStandardIndiSelectionSw( m_indiP_model, "model", ids, m_models ) < 0 ||
             registerIndiPropertyNew( m_indiP_model, INDI_NEWCALLBACK( m_indiP_model ) ) < 0 )
+        {
             throw std::runtime_error( "cannot register model selection" );
+        }
         createStandardIndiToggleSw( m_indiP_enable, "enable" );
         if( registerIndiPropertyNew( m_indiP_enable, INDI_NEWCALLBACK( m_indiP_enable ) ) < 0 )
+        {
             throw std::runtime_error( "cannot register enable control" );
+        }
         createROIndiText( m_indiP_modelStatus, "model_status", "requested" );
         for( const char *element : { "loaded", "resident", "active", "status", "error" } )
+        {
             m_indiP_modelStatus.add( pcf::IndiElement( element ) );
+        }
         if( registerIndiPropertyReadOnly( m_indiP_modelStatus ) < 0 )
+        {
             throw std::runtime_error( "cannot register model status" );
+        }
         if( setupReconstructorControls() < 0 )
+        {
             throw std::runtime_error( "cannot register reconstructor controls" );
+        }
         updateControls();
         // The base startup macros return on failure; the destructor also unwinds partial startup.
         m_fgStarted = true;
@@ -1142,7 +1236,7 @@ inline int nnReconstructor::appLogic()
 
 inline int nnReconstructor::appShutdown()
 {
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_resultMutex );
         m_stopping    = true;
         m_enabled     = false;
@@ -1167,7 +1261,9 @@ inline int nnReconstructor::appShutdown()
         m_telemStarted = false;
     }
     if( m_modelThread.joinable() )
+    {
         m_modelThread.join();
+    }
     cleanup_engine_context();
     cleanup_engine_memory();
     cleanup_host_memory();
@@ -1184,31 +1280,39 @@ inline int nnReconstructor::allocate( const dev::shmimT &dummy )
                          shmimMonitorT::m_imageStream.array.raw && size_t( pup_offset1_x ) + crop <= width &&
                          size_t( pup_offset2_x ) + crop <= width && size_t( pup_offset1_y ) + crop <= height &&
                          size_t( pup_offset2_y ) + crop <= height;
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_resultMutex );
         m_updated     = false;
         m_sourceReady = valid && m_enabled;
         if( m_sourceReady && m_gpuResident )
+        {
             m_enableReadback = true;
+        }
         if( m_hadSource )
+        {
             m_waitForFreshFrame = true;
+        }
         m_hadSource  = true;
         m_pwfsWidth  = width;
         m_pwfsHeight = height;
     }
     // Buffers belong to the loaded engine, not to a WFS attachment.
     if( !valid )
+    {
         fail( "incompatible WFS stream or crop; reconnect a valid stream and reload before resuming" );
+    }
     return 0;
 }
 
 inline int nnReconstructor::processImage( void *curr_src, const dev::shmimT &dummy )
 {
     static_cast<void>( dummy );
-    { // mutex scope
+    { //mutex scope
         std::unique_lock<std::mutex> lock( m_resultMutex );
         if( m_stopping || !m_enabled || m_loading || !m_fault.empty() )
+        {
             return 0;
+        }
         if( !m_sourceReady )
         {
             // A quick Enable can reuse an attachment that upstream has not closed yet.
@@ -1225,7 +1329,9 @@ inline int nnReconstructor::processImage( void *curr_src, const dev::shmimT &dum
             return 0;
         }
         if( m_requireNewCounter && counter == m_resumeCounter )
+        {
             return 0;
+        }
         m_requireNewCounter = false;
         m_inferencing       = true;
     }
@@ -1233,9 +1339,11 @@ inline int nnReconstructor::processImage( void *curr_src, const dev::shmimT &dum
     try
     {
         if( clock_gettime( CLOCK_REALTIME, &timestamp ) != 0 )
+        {
             throw std::runtime_error( "clock_gettime failed" );
+        }
         infer( curr_src );
-        { // mutex scope
+        { //mutex scope
             std::lock_guard<std::mutex> lock( m_resultMutex );
             if( !m_stopping && m_enabled && m_fault.empty() )
             {
@@ -1253,7 +1361,7 @@ inline int nnReconstructor::processImage( void *curr_src, const dev::shmimT &dum
     {
         fail( "unknown inference failure" );
     }
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_resultMutex );
         m_inferencing = false;
     }
@@ -1301,15 +1409,21 @@ inline void nnReconstructor::infer( void *curr_src )
 
     // Keep synchronous execution; tensor roles determine the binding slots.
     if( !context->executeV2( m_bindings.data() ) )
+    {
         throw std::runtime_error( "executeV2 failed" );
+    }
 
     // Copy output data back to host
     checkCuda( cudaMemcpy( modeval.data(), d_output, outputSize * sizeof( float ), cudaMemcpyDeviceToHost ),
                "cudaMemcpy" );
 
     for( uint32_t i = 0; i < outputSize; ++i )
+    {
         if( !isFinite( modeval.data()[i] ) )
+        {
             throw std::runtime_error( "non-finite modal output" );
+        }
+    }
 }
 
 inline int nnReconstructor::configureAcquisition()
@@ -1393,16 +1507,25 @@ inline int nnReconstructor::acquireAndCheckValid()
     std::unique_lock<std::mutex> lock( m_resultMutex );
     m_resultReady.wait_for( lock,
                             std::chrono::seconds( 1 ),
-                            [this] { return m_stopping || m_updated || ( m_zeroPending && !m_inferencing ); } );
+                            [this]
+                            {
+                                return m_stopping || m_updated || ( m_zeroPending && !m_inferencing );
+                            } );
     if( m_stopping )
+    {
         return 1;
+    }
     lock.unlock();
     const bool outputValid = verifyOutput();
     lock.lock();
     if( !outputValid )
+    {
         return -1;
+    }
     if( m_stopping )
+    {
         return 1;
+    }
     m_publishZero = m_zeroPending && !m_inferencing;
     if( m_publishZero )
     {
@@ -1418,7 +1541,9 @@ inline int nnReconstructor::acquireAndCheckValid()
     else
     {
         if( !m_enabled || m_loading || !m_fault.empty() || !m_updated )
+        {
             return 1;
+        }
         std::copy( m_pendingModes.begin(), m_pendingModes.end(), m_publishModes.begin() );
         frameGrabberT::m_currImageTimestamp = m_pendingTime;
     }
@@ -1436,7 +1561,7 @@ inline int nnReconstructor::loadImageIntoStream( void *dest )
 inline int nnReconstructor::frameGrabberPostPublish( IMAGE *imageStream )
 {
     static_cast<void>( imageStream );
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_resultMutex );
         m_publishing = false;
         if( m_publishZero )
@@ -1445,9 +1570,13 @@ inline int nnReconstructor::frameGrabberPostPublish( IMAGE *imageStream )
             m_activeModel.clear();
         }
         else if( m_enabled && m_fault.empty() )
+        {
             m_activeModel = m_loadedModel;
+        }
         else
+        {
             m_activeModel.clear();
+        }
     }
     m_resultReady.notify_all();
     return 0;
@@ -1462,7 +1591,7 @@ inline void nnReconstructor::updateControls()
 {
     bool        launch = false, finished = false, activate = false, release = false;
     std::string name;
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_resultMutex );
         // Only the app thread changes the upstream FSM; workers change admission under this lock.
         state( m_enabled ? stateCodes::OPERATING : stateCodes::READY );
@@ -1485,12 +1614,16 @@ inline void nnReconstructor::updateControls()
         {
             m_cancelLoad = m_loading;
             if( m_fault.empty() )
+            {
                 m_fault = m_loading ? "load incomplete: worker must finish, then reload explicitly"
                                     : "disable incomplete: zero publication not acknowledged";
+            }
         }
     }
     if( ( finished || launch ) && m_modelThread.joinable() )
+    {
         m_modelThread.join();
+    }
     if( release )
     {
         try
@@ -1531,7 +1664,7 @@ inline void nnReconstructor::updateControls()
                     {
                         fail( "unknown model loading failure" );
                     }
-                    { // mutex scope
+                    { //mutex scope
                         std::lock_guard<std::mutex> lock( m_resultMutex );
                         m_loading  = false;
                         m_enabling = false;
@@ -1550,7 +1683,7 @@ inline void nnReconstructor::updateControls()
     bool                                 enabled, resident;
     pcf::IndiProperty::PropertyStateType status;
     std::string                          phase, requested, loaded, active, error;
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_resultMutex );
         if( !m_fault.empty() && !m_inferencing && !m_publishing && !m_disabling )
         {
@@ -1577,10 +1710,12 @@ inline void nnReconstructor::updateControls()
     std::lock_guard<std::mutex> indiLock( m_indiMutex );
     updateSwitchIfChanged( m_indiP_enable, "toggle", enabled ? pcf::IndiElement::On : pcf::IndiElement::Off, status );
     for( size_t i = 0; i < m_models.size(); ++i )
+    {
         updateSwitchIfChanged( m_indiP_model,
                                modelId( i ),
                                m_models[i] == requested ? pcf::IndiElement::On : pcf::IndiElement::Off,
                                status );
+    }
     updateIfChanged( m_indiP_modelStatus, "requested", requested, status );
     updateIfChanged( m_indiP_modelStatus, "loaded", loaded, status );
     updateIfChanged( m_indiP_modelStatus, "resident", resident ? std::string( "yes" ) : std::string( "no" ), status );
@@ -1593,13 +1728,17 @@ INDI_NEWCALLBACK_DEFN( nnReconstructor, m_indiP_enable )( const pcf::IndiPropert
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_enable, ipRecv );
     if( !ipRecv.find( "toggle" ) )
+    {
         return 0;
+    }
     std::lock_guard<std::mutex> indiLock( m_indiMutex );
     if( !m_routingOwner.empty() )
+    {
         return -1;
+    }
     const auto value = ipRecv["toggle"].getSwitchState();
     if( value != pcf::IndiElement::On && value != pcf::IndiElement::Off )
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_resultMutex );
         m_requestError = "enable requires On or Off";
         return -1;
@@ -1607,7 +1746,9 @@ INDI_NEWCALLBACK_DEFN( nnReconstructor, m_indiP_enable )( const pcf::IndiPropert
     if( m_switchPhase != "idle" && m_switchPhase != "error" )
     {
         if( value == pcf::IndiElement::On )
+        {
             return -1;
+        }
         m_switchError = "Handover cancelled by an explicit disable";
         reconstructorPhase( m_cacaoStartPending ? "awaiting_cacao" : "error" );
     }
@@ -1616,7 +1757,7 @@ INDI_NEWCALLBACK_DEFN( nnReconstructor, m_indiP_enable )( const pcf::IndiPropert
 
 inline int nnReconstructor::requestEnabled( bool on, bool prepareOnly )
 {
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_resultMutex );
         if( m_stopping || ( on && ( m_loading || m_disabling || m_gpuReleasing || !m_fault.empty() ) ) )
         {
@@ -1651,13 +1792,15 @@ inline int nnReconstructor::requestEnabled( bool on, bool prepareOnly )
             const bool needsZero = m_enabled || m_enableReadback;
             m_enabled            = false;
             if( m_enabling )
+            {
                 m_cancelLoad = true;
+            }
             m_sourceReady      = false;
             m_zeroAcknowledged = !needsZero;
-                m_disabling       = true;
-            m_zeroPending     = needsZero;
-            m_transitionStart = std::chrono::steady_clock::now();
-            m_updated         = false;
+            m_disabling        = true;
+            m_zeroPending      = needsZero;
+            m_transitionStart  = std::chrono::steady_clock::now();
+            m_updated          = false;
         }
     }
     m_resultReady.notify_all();
@@ -1669,7 +1812,9 @@ INDI_NEWCALLBACK_DEFN( nnReconstructor, m_indiP_model )( const pcf::IndiProperty
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_model, ipRecv );
     std::lock_guard<std::mutex> indiLock( m_indiMutex );
     if( !m_routingOwner.empty() || ( m_switchPhase != "idle" && m_switchPhase != "error" ) )
+    {
         return -1;
+    }
     return requestModel( ipRecv );
 }
 
@@ -1685,15 +1830,21 @@ inline int nnReconstructor::requestModel( const pcf::IndiProperty &ipRecv )
             return -1;
         }
         if( element.second.getSwitchState() != pcf::IndiElement::On )
+        {
             continue;
+        }
         if( selected >= 0 )
         {
             m_requestError = "select exactly one model";
             return -1;
         }
         for( size_t i = 0; i < m_models.size(); ++i )
+        {
             if( element.first == modelId( i ) )
+            {
                 selected = i;
+            }
+        }
     }
     if( selected < 0 )
     {

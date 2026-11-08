@@ -36,7 +36,9 @@ struct RouteIO
     {
         events.push_back( "default" );
         if( failCalibration )
+        {
             throw std::runtime_error( "CACAO calibration restart not acknowledged" );
+        }
     }
     /// Provide or withhold actual-consumption acknowledgement.
     void verifyConsumption( const std::string & /**< [in] Input. */,
@@ -50,7 +52,7 @@ struct po4ao : MagAOXApp<true>, dev::shmimMonitor<po4ao>
     std::string           m_outputChannel{ "po4ao_output" }; ///< Fixed instrument route under test.
     Po4aoRouteSnapshot    m_runSnapshot;
     std::thread           m_runThread;
-    std::mutex m_callbackMutex; ///< App callback and allocation ownership boundary.
+    std::mutex            m_callbackMutex; ///< App callback and allocation ownership boundary.
     std::atomic<bool>     m_runCancel{ false }, m_runAdmission{ true };
     std::atomic<uint64_t> m_outputSequence{ 0 };
     bool m_runPending{ false }, m_runBusy{ false }, m_runTarget{ true }, m_runRunning{ true }, m_runVerified{ false },
@@ -109,20 +111,26 @@ void RouteIO::verifyConsumption( const std::string &, Po4aoRouteBackend::Deadlin
 {
     events.push_back( "verify" );
     if( failVerify )
+    {
         throw std::runtime_error( "stalled consumer" );
+    }
 }
 po4ao::po4ao() : MagAOXApp<true>( 0, 0 )
 {
     state( stateCodes::OPERATING );
     m_indiP_run.add( pcf::IndiElement( "toggle", pcf::IndiElement::On ) );
     for( const auto *element : { "phase", "route", "error", "owner", "verified" } )
+    {
         m_indiP_runStatus.add( pcf::IndiElement( element ) );
+    }
 }
 po4ao::~po4ao()
 {
     m_runCancel = true;
     if( m_runThread.joinable() )
+    {
         m_runThread.join();
+    }
 }
 int po4ao::sendNewProperty( const pcf::IndiProperty &p )
 {
@@ -130,7 +138,9 @@ int po4ao::sendNewProperty( const pcf::IndiProperty &p )
     m_nnRoutingOwner = p["action"].get<std::string>() == "hold" ? m_runOwner : "";
     m_nnRoutingPhase = m_nnRoutingOwner.empty() ? "released" : "held";
     if( m_nnRoutingOwner.empty() )
+    {
         m_nnReleasedOwner = m_runOwner;
+    }
     m_nnRoutingSource = "nn";
     m_nnObserved      = std::chrono::steady_clock::now();
     return 0;
@@ -170,16 +180,20 @@ TEST_CASE( "Production PO4AO worker parks only after verified consumption", "[po
 /** \brief Stop drains app work without requiring a monitor mapping-closed acknowledgement. */
 TEST_CASE( "PO4AO Stop waits for the active callback", "[po4ao][runWorker]" )
 {
-    po4aoRunHarness::po4ao app;
+    po4aoRunHarness::po4ao       app;
     std::unique_lock<std::mutex> callbackLock( app.m_callbackMutex );
-    auto worker = std::async( std::launch::async, [&] { app.runWorker( false ); } );
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds( 2 );
+    auto                         worker   = std::async( std::launch::async,
+                                                        [&]
+                                                        {
+                                  app.runWorker( false );
+                                                        } );
+    const auto                   deadline = std::chrono::steady_clock::now() + std::chrono::seconds( 2 );
     while( app.m_runAdmission.load() && std::chrono::steady_clock::now() < deadline )
     {
         std::this_thread::yield();
     }
     const bool admissionClosed = !app.m_runAdmission.load();
-    const bool waiting = worker.wait_for( std::chrono::milliseconds( 20 ) ) == std::future_status::timeout;
+    const bool waiting         = worker.wait_for( std::chrono::milliseconds( 20 ) ) == std::future_status::timeout;
     callbackLock.unlock();
     worker.get();
     REQUIRE( admissionClosed );
@@ -312,9 +326,13 @@ TEST_CASE( "Run retry requires matching completed recovery", "[po4ao][runWorker]
     MagAOX::app::MagAOXApp<true>::Driver driver;
     app.m_indiDriver = &driver;
     if( app.m_nnInstance != app.m_reservedInstance )
+    {
         REQUIRE_THROWS( app.writerHeld( true ) );
+    }
     else
+    {
         REQUIRE( app.writerHeld( true ) == recovered );
+    }
     REQUIRE( ( app.newCallBack_m_indiP_run( request ) == 0 ) == recovered );
     REQUIRE( app.m_runPending == recovered );
     if( recovered )
@@ -323,7 +341,9 @@ TEST_CASE( "Run retry requires matching completed recovery", "[po4ao][runWorker]
         REQUIRE( driver.m_published.back().getState() == INDI_BUSY );
     }
     else
+    {
         REQUIRE( app.m_runOwner == "retained-token" );
+    }
     // clang-format off
 #ifdef PO4AO_TEST_DOXYGEN_REF
     MagAOX::app::po4ao::writerHeld;
