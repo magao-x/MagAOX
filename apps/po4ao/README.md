@@ -99,7 +99,7 @@ from the last emitted command (`effective_controller`, `effective_id`). Controll
 are `unknown`, `integrator`, `po4ao` or the existing source-gap `pass-through`.
 `control_request`/`control_applied` and `reset_request`/`reset_applied` are decimal
 sequence/generation strings. A control/reset request remains Busy until its
-selected state has produced an output frame while running. When fully stopped and detached,
+selected state has produced an output frame while running. When stopped with app callback work drained,
 non-real-time app logic applies model/reset/control changes without requiring frames; this
 acknowledges preparation, not active output. Duplicate input notifications do not acknowledge requests. Reload stays Busy through pending activation; a load
 failure stays Alert with `reload_error` until another explicit reload.
@@ -166,7 +166,8 @@ does not install a binary, replace the live config, or restart the application.
 Stop reserves the actual NN/CACAO writer, switches downstream to `aol1_modevalWFS`,
 applies `default`, awaits its marker and a newly running CACAO writer, restores the
 reserved writer and verifies advancing mfilt consumption before
-requesting READY and waiting for detachment. Start first establishes fresh output,
+draining app callback work and requesting READY. Mapping closure follows upstream asynchronously;
+Stopped is not a mapping-closed acknowledgement. Start first establishes fresh output,
 then performs the corresponding switch to `po4ao_output` and verifies consumption after
 calibration restarts. The policy remains selected. Managed learning stays paused until
 an explicit learning request. The optional trainer is not needed for native routing.

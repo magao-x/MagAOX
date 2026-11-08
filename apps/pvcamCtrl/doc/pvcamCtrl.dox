@@ -31,9 +31,11 @@
  *   camera;
  * - again every `retryInterval` seconds while no camera appears.
  *
- * A camera that looks healthy is never reset unless its port was seen down during the preceding power-off.  If the
- * configured port stays up, or comes back up, while this camera's power is off, the port belongs to another camera:
- * pvcamCtrl logs a CRITICAL message and disables hotplug until restarted, then connects normally.
+ * A camera that looks healthy is never reset: a power cycle always leaves the camera stale, missing, or unresponsive.
+ * After a power-off, nothing is reset unless the configured port was seen down while this camera's power was off.  If
+ * the port stays up, it belongs to another camera: pvcamCtrl logs a CRITICAL message and disables hotplug until
+ * restarted, then connects normally.  The port coming back up before the power-on is reported is normal, since the
+ * PDU switches power before its INDI update arrives.
  *
  * Removing a camera that is open crashes the kernel.  pvcamCtrl closes its camera and uninitializes PVCAM before
  * a hotplug, and all pvcamCtrl instances share the lock file `<sysPath>/pvcamCtrl_pcie.lock`, which serializes

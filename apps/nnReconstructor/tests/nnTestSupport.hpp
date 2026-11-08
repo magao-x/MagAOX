@@ -572,8 +572,15 @@ struct MagAOXApp
     {
         return "nnReconstructor";
     }
-    void state( int )
+    int m_state = stateCodes::READY; ///< App FSM value; no monitor acknowledgement is simulated.
+    void state( int value /**< [in] Requested app state. */ )
     {
+        m_state = value;
+    }
+    /// Read the requested app state.
+    int state() const
+    {
+        return m_state;
     }
     template <class T, int R = 0>
     int log( logMessage, int = 0 )
@@ -645,18 +652,6 @@ class shmimMonitor
     Metadata md;
     IMAGE    m_imageStream{ &md, { nullptr } };
     bool     m_getExistingFirst = false;
-    /// Fixture attachment state; real semaphore ownership is tested separately.
-    bool m_idle = true;
-    /// Apply a state request to the fixture monitor.
-    void monitorState( int value /**< [in] Requested FSM state. */ )
-    {
-        m_idle = value != stateCodes::OPERATING;
-    }
-    /// Report fixture detachment.
-    bool monitorIdle() const
-    {
-        return m_idle;
-    }
     int appShutdown()
     {
         return 0;

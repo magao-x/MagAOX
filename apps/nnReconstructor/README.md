@@ -46,7 +46,7 @@ request from completion. `active` names the model that published in the current 
 it is not a guarantee of ongoing source frames, downstream consumption or a closed loop. Use the
 existing monitor properties to inspect stream connection state. Properties report Busy during
 transitions and Alert on failures/rejected requests. The enable readback stays On during ordinary
-disable until zero publication, monitor detachment and owned GPU-resource cleanup complete. An enabled-but-waiting state is not successful inference.
+disable until zero publication, in-flight work and owned GPU-resource cleanup complete. An enabled-but-waiting state is not successful inference.
 
 `startEnabled=true` preserves automatic startup. `false` starts passively: it performs no inference
 or unsolicited zero publication. Automatic startup must only be used with the existing exclusive-writer
@@ -105,7 +105,7 @@ writers without checking or changing the loop; it can remain closed.
 
 - **Disable:** close new-inference admission and discard unclaimed results. An admitted inference
   may finish, but its result is discarded. An already-claimed publication may finish. The publisher
-  then writes exactly one zero vector. After its acknowledgement and monitor detachment, the
+  then writes exactly one zero vector. After its acknowledgement and in-flight work completion, the
   app releases its owned TensorRT objects and CUDA inference buffers before acknowledging Off.
   The stream remains externally owned; repeating Off after completion does not publish another zero.
 - **Select:** allowed only when disabled and both workers are quiescent. A background loader creates
@@ -219,7 +219,7 @@ python -m unittest discover -s apps/nnReconstructor/model_testing -p test_export
 ## Idle lifecycle and PO4AO reservation
 
 READY releases the input mapping and semaphore reader slot. Reattachment and cleanup
-are asynchronous; rapid Enable waits for completed Disable. `loaded` denotes retained
+are asynchronous; rapid Enable waits for completed Disable, which acknowledges app work and GPU cleanup, not mapping closure. A retained attachment is revalidated before fresh-frame admission. `loaded` denotes retained
 host bytes, `resident` denotes installed GPU inference resources, and `active` denotes
 published inference. Re-enable uses those retained bytes even if the original file has
 changed. Owned resources are released without `cudaDeviceReset`; CUDA context overhead

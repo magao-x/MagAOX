@@ -1,4 +1,4 @@
-/** \file magAOXApp.hpp
+/** \file MagAOXApp.hpp
  *  \brief The basic MagAO-X Application
  *  \ingroup app_files
  */
@@ -10,7 +10,6 @@
 #include <sys/stat.h>
 #include <sys/syscall.h>
 
-#include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <fstream>
@@ -83,9 +82,10 @@ namespace XWCTEST_NAMESPACE
  * Through various optional CRTP base classes, many different standard functionalities can be included.
  * The following figure illustrates the facilities provided by a typical app.
  *
- * \image html xwcapp.png "Block diagram of a typical XWCApp. Note that ImageStreamIO (ISIO) is not included by default,
- * but there are several ways to interface with 'image streams' provided in XWCTk.  Many different hardware device
- * interfaces are similarly provided."
+ * \image html xwcapp.png "Block diagram of a typical XWCApp."
+ *
+ * Note that ImageStreamIO (ISIO) is not included by default, but there are several ways to interface with 'image
+ * streams' provided in XWCTk.  Many different hardware device interfaces are similarly provided.
  *
  * The following figure illustrates the logic of the XWCApp finite state machine (FSM).
  *
@@ -95,8 +95,7 @@ namespace XWCTEST_NAMESPACE
  * Many XWCApps can be connected across many computers.  Inter-process communication can be conducted with
  * INDI or ISIO.
  *
- * \image html xwcapps_connections.png "Connecting XWCApps across several machines, controlling various hardware"
- * width=1200
+ * \image html xwcapps_connections.png "XWCApp network connections." width=1200
  *
  * XWCApps are designed to be part of control loops. In the following diagram a camera at the focal plane of a
  * coronagraph is used as the wavefront sensor.  An XWCApp reads out the images and publishes them to shared memory with
@@ -104,6 +103,13 @@ namespace XWCTEST_NAMESPACE
  * the deformable mirror controller sends the resultant command to the hardware device.
  *
  * \image html xwcapp_loops.png "XWCApps controlling hardware in a control loop." width=1200
+ */
+
+/** \page page_app_docs Adding an Application
+ *
+ * \subpage page_module_appadd
+ *
+ *
  */
 
 /// The base-class for XWCTk applications.
@@ -424,18 +430,16 @@ class MagAOXApp : public application
     class elevatedPrivileges
     {
       private:
-        MagAOXApp *m_app; ///< Application whose effective user ID is temporarily changed.
-        bool m_elevated{ false }; ///< Whether this scope currently holds elevated privileges.
+        MagAOXApp *m_app;
+        bool m_elevated{ false };
 
       public:
-        /// Elevate the owning application until this scope is restored or destroyed.
-        explicit elevatedPrivileges( MagAOXApp *app /**< [in] Owning application. */ )
+        explicit elevatedPrivileges( MagAOXApp *app )
         {
             m_app = app;
             elevate();
         }
 
-        /// Acquire elevated privileges once for this scope.
         void elevate()
         {
             if( m_elevated )
@@ -447,7 +451,6 @@ class MagAOXApp : public application
             m_elevated = true;
         }
 
-        /// Restore the application's real user ID when elevated.
         void restore()
         {
             if( !m_elevated )
@@ -459,7 +462,6 @@ class MagAOXApp : public application
             m_elevated = false;
         }
 
-        /// Restore privileges on every scope exit.
         ~elevatedPrivileges()
         {
             restore();
@@ -546,8 +548,11 @@ class MagAOXApp : public application
       * where `impl` is the derived class, and `mThreadStart` and `myThreadExec` are members
       * of `impl`.
       *
-      * \returns 0 on success
-      * \returns -1 on error
+      * A scheduler-policy failure is logged using the returned pthread error code. The worker still starts
+      * with its inherited scheduling policy, preserving the existing startup behavior.
+      *
+      * \returns 0 when thread initialization completes, even if setting the requested scheduler failed.
+      * \returns -1 on a thread, PID or cpuset initialization error.
       */
     template <class thisPtr, class Function>
     int threadStart( std::thread &thrd,           /**< [out] The thread object to start executing */
@@ -570,13 +575,16 @@ class MagAOXApp : public application
      * @{
      */
   private:
-    std::atomic<stateCodes::stateCodeT> m_state{ stateCodes::UNINITIALIZED }; ///< FSM state shared with device workers; use state().
+    stateCodes::stateCodeT m_state{ stateCodes::UNINITIALIZED }; /**< The application's state.  Never ever set this
+                                                                      directly, use state(const stateCodeT & s).*/
 
-    std::atomic<bool> m_stateAlert{ false }; ///< Latched FSM alert, cleared only by user acknowledgement.
+    bool m_stateAlert{ false }; // Flag to control whether the FSM is in an alert state.  Once set, only user
+                                // acknowledgement can change this.
 
     bool m_gitAlert{ false }; // Flag set if there is a git modified warning to alert on.
 
-    std::atomic<int> m_stateLogged{ 0 }; ///< Count observations since the last transition; use stateLogged().
+    int m_stateLogged{ 0 }; /**< Counter and flag for use to log errors just once.
+                                 Never ever access directly, use stateLogged().*/
 
   public:
     /// Get the current state code
@@ -593,9 +601,6 @@ class MagAOXApp : public application
     void state( const stateCodes::stateCodeT &s, ///< [in] The new application state
                 bool stateAlert = false          ///< [in] [optional] flag to set the alert state of the FSM property.
     );
-
-    /// Publish the current FSM status without issuing another state transition.
-    void updateState();
 
     /// Get the value of the state alert flag
     /**
@@ -2091,7 +2096,7 @@ int MagAOXApp<_useINDI>::execute() // virtual
 
         // This is purely to make sure INDI is up to date in case
         // mutex was locked on last attempt.
-        updateState();
+        state( state() );
 
         // Pause loop unless shutdown is set
         if( m_shutdown == 0 )
@@ -2171,9 +2176,7 @@ void MagAOXApp<_useINDI>::logMessage( bufferPtrT &b )
 
     if( logHeader::logLevel( b ) < logPrio::LOG_ERROR )
     {
-        if( !m_stateAlert.exchange( true ) )
-            log<text_log>( "FSM alert set", logPrio::LOG_WARNING );
-        updateState(); // A log alert must not restore a state superseded by another worker.
+        state( m_state, true ); // For anything worse than error, we set the FSM state to alert
     }
 
     if( _useINDI && m_indiDriver )
@@ -2567,9 +2570,14 @@ int MagAOXApp<_useINDI>::threadStart( std::thread &thrd,
     // Now set the RT priority.
 
     if( thrdPrio < 0 )
+    {
         thrdPrio = 0;
+    }
+
     if( thrdPrio > 99 )
+    {
         thrdPrio = 99;
+    }
 
     sched_param sp;
     sp.sched_priority = thrdPrio;
@@ -2580,21 +2588,23 @@ int MagAOXApp<_useINDI>::threadStart( std::thread &thrd,
         // Get the maximum privileges available
         elevatedPrivileges elPriv( this );
 
-        // We set return value based on result from sched_setscheduler
-        // But we make sure to restore privileges no matter what happens.
-        errno = 0;
+        // pthread_setschedparam returns its error code directly; privilege restoration may change errno.
         if( thrdPrio > 0 )
+        {
             rv = pthread_setschedparam( thrd.native_handle(), MAGAOX_RT_SCHED_POLICY, &sp );
+        }
         else
+        {
             rv = pthread_setschedparam( thrd.native_handle(), SCHED_OTHER, &sp );
+        }
     }
 
-    if( rv < 0 )
+    if( rv != 0 )
     {
         log<software_error>(
             { __FILE__,
               __LINE__,
-              errno,
+              rv,
               "Setting " + thrdName + " thread scheduler priority to " + std::to_string( thrdPrio ) + " failed." } );
     }
     else
@@ -2609,7 +2619,9 @@ int MagAOXApp<_useINDI>::threadStart( std::thread &thrd,
         {
             mx::sys::milliSleep( 100 );
             if( tpid != 0 )
+            {
                 break;
+            }
         }
     }
 
@@ -2676,9 +2688,8 @@ stateCodes::stateCodeT MagAOXApp<_useINDI>::state()
 template <bool _useINDI>
 void MagAOXApp<_useINDI>::state( const stateCodes::stateCodeT &s, bool stateAlert )
 {
-    const auto previous = m_state.exchange(s);
-    // Only log anything if it's a change.
-    if( previous != s )
+    // Only log anything if it's a change
+    if( m_state != s )
     {
         logPrioT lvl = logPrio::LOG_INFO;
         if( s == stateCodes::ERROR )
@@ -2686,29 +2697,25 @@ void MagAOXApp<_useINDI>::state( const stateCodes::stateCodeT &s, bool stateAler
         if( s == stateCodes::FAILURE )
             lvl = logPrio::LOG_CRITICAL;
 
-        log<state_change>( { previous, s }, lvl );
+        log<state_change>( { m_state, s }, lvl );
+
+        m_state = s;
         m_stateLogged = 0;
     }
 
-    if( stateAlert && !m_stateAlert.exchange(true) )
+    if( m_stateAlert != stateAlert && stateAlert == true )
     {
+        m_stateAlert = stateAlert;
         log<text_log>( "FSM alert set", logPrio::LOG_WARNING );
     }
 
-    updateState();
-}
-
-template <bool _useINDI>
-void MagAOXApp<_useINDI>::updateState()
-{
-    // Check to make sure INDI is up to date.
+    // Check to make sure INDI is up to date
     std::unique_lock<std::mutex> lock( m_indiMutex,
                                        std::try_to_lock ); // Lock the mutex before conducting INDI communications.
 
     // Note this is called every execute loop to make sure we update eventually
     if( lock.owns_lock() )
     {
-        const auto current = m_state.load();
         ///\todo move this to a function in stateCodes
         pcf::IndiProperty::PropertyStateType stst = INDI_IDLE;
 
@@ -2719,20 +2726,20 @@ void MagAOXApp<_useINDI>::updateState()
         }
         else
         {
-            if( current == stateCodes::READY )
+            if( m_state == stateCodes::READY )
                 stst = INDI_OK;
-            else if( current == stateCodes::OPERATING || current == stateCodes::HOMING ||
-                     current == stateCodes::CONFIGURING )
+            else if( m_state == stateCodes::OPERATING || m_state == stateCodes::HOMING ||
+                     m_state == stateCodes::CONFIGURING )
                 stst = INDI_BUSY;
-            else if( current < stateCodes::NODEVICE )
+            else if( m_state < stateCodes::NODEVICE )
                 stst = INDI_ALERT;
-            else if( current <= stateCodes::LOGGEDIN )
+            else if( m_state <= stateCodes::LOGGEDIN )
                 stst = INDI_IDLE;
-            else if( current == stateCodes::NOTHOMED || current == stateCodes::SHUTDOWN )
+            else if( m_state == stateCodes::NOTHOMED || m_state == stateCodes::SHUTDOWN )
                 stst = INDI_IDLE;
         }
 
-        updateIfChanged( m_indiP_state, "state", stateCodes::codeText( current ), stst );
+        updateIfChanged( m_indiP_state, "state", stateCodes::codeText( m_state ), stst );
     }
 }
 
@@ -2751,7 +2758,16 @@ bool MagAOXApp<_useINDI>::gitAlert()
 template <bool _useINDI>
 int MagAOXApp<_useINDI>::stateLogged()
 {
-    return m_stateLogged.fetch_add(1);
+    if( m_stateLogged > 0 )
+    {
+        ++m_stateLogged;
+        return m_stateLogged - 1;
+    }
+    else
+    {
+        m_stateLogged = 1;
+        return 0;
+    }
 }
 
 template <bool _useINDI>

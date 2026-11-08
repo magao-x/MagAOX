@@ -60,6 +60,8 @@ telem_psfacq             20066    telem_psfacq
 telem_pokecenter         20067    telem_pokecenter
 telem_pokeloop           20068    telem_pokeloop
 telem_observer           20070    telem_observer
+telem_pupilfit           20071    telem_pupilfit
+telem_pupilfit_state     20072    telem_pupilfit_state
 
 telem_rhusb              20100    telem_rhusb
 
@@ -78,9 +80,13 @@ telem_chrony_status      20860    telem_chrony_status
 telem_chrony_stats       20861    telem_chrony_stats
 
 telem_dmspeck            20890    telem_dmspeck
+telem_dmsynco            20891    telem_dmsynco
+telem_dmtimings          20892    telem_dmtimings
 
 telem_fgtimings          20905    telem_fgtimings
-telem_po4ao             20906    telem_po4ao
+telem_fgstage            20906    telem_fgstage
+telem_fgtrace            20907    telem_fgtrace
+telem_po4ao              20908    telem_po4ao
 
 telem_dmmodes            20910    telem_dmmodes
 

@@ -746,8 +746,6 @@ inline void nnReconstructor::replaceModel( const std::string &name, bool activat
             m_gpuResident          = true;
             m_enabled              = !m_prepareOnly;
             m_sourceReady          = false;
-            if( m_enabled )
-                shmimMonitorT::monitorState( stateCodes::OPERATING );
         }
         engineData.swap( data );
         m_loadedModel = name; // Validated host model; residency has its own readback.
@@ -825,7 +823,6 @@ inline void nnReconstructor::fail( const std::string &reason )
         m_enabled     = false;
         m_updated     = false;
         m_sourceReady = false;
-        shmimMonitorT::monitorState( stateCodes::READY );
     }
     m_resultReady.notify_all();
     log<software_error>( { reason } );
@@ -1119,7 +1116,7 @@ inline int nnReconstructor::appStartup()
         return -1;
     }
 
-    shmimMonitorT::monitorState( m_startEnabled ? stateCodes::OPERATING : stateCodes::READY );
+    state( m_startEnabled ? stateCodes::OPERATING : stateCodes::READY );
     return 0;
 }
 
@@ -1209,9 +1206,16 @@ inline int nnReconstructor::processImage( void *curr_src, const dev::shmimT &dum
 {
     static_cast<void>( dummy );
     { // mutex scope
-        std::lock_guard<std::mutex> lock( m_resultMutex );
-        if( m_stopping || !m_enabled || m_loading || !m_fault.empty() || !m_sourceReady )
+        std::unique_lock<std::mutex> lock( m_resultMutex );
+        if( m_stopping || !m_enabled || m_loading || !m_fault.empty() )
             return 0;
+        if( !m_sourceReady )
+        {
+            // A quick Enable can reuse an attachment that upstream has not closed yet.
+            // Validate it on the monitor thread and leave fresh-frame admission to the next callback.
+            lock.unlock();
+            return allocate( dummy );
+        }
         const uint64_t counter = shmimMonitorT::m_imageStream.md[0].cnt0;
         if( m_waitForFreshFrame )
         {
@@ -1460,9 +1464,10 @@ inline void nnReconstructor::updateControls()
     std::string name;
     { // mutex scope
         std::lock_guard<std::mutex> lock( m_resultMutex );
+        // Only the app thread changes the upstream FSM; workers change admission under this lock.
+        state( m_enabled ? stateCodes::OPERATING : stateCodes::READY );
         finished = !m_loading;
         if( !m_stopping && !m_loading && !m_inferencing && !m_publishing && !m_gpuReleasing &&
-            shmimMonitorT::monitorIdle() &&
             ( ( m_disabling && m_zeroAcknowledged ) || ( !m_fault.empty() && m_gpuResident ) ) )
         {
             release = m_gpuReleasing = true;
@@ -1613,8 +1618,7 @@ inline int nnReconstructor::requestEnabled( bool on, bool prepareOnly )
 {
     { // mutex scope
         std::lock_guard<std::mutex> lock( m_resultMutex );
-        if( m_stopping || ( on && ( m_loading || m_disabling || m_gpuReleasing || !m_fault.empty() ||
-                                    ( !m_enabled && !shmimMonitorT::monitorIdle() ) ) ) )
+        if( m_stopping || ( on && ( m_loading || m_disabling || m_gpuReleasing || !m_fault.empty() ) ) )
         {
             m_requestError = "enable rejected: shutdown, transition, source validation or fault recovery pending";
             return -1;
@@ -1627,7 +1631,6 @@ inline int nnReconstructor::requestEnabled( bool on, bool prepareOnly )
                 m_enabled           = true;
                 m_sourceReady       = false;
                 m_waitForFreshFrame = true;
-                shmimMonitorT::monitorState( stateCodes::OPERATING );
             }
         }
         else if( on && !m_enabled )
@@ -1651,8 +1654,7 @@ inline int nnReconstructor::requestEnabled( bool on, bool prepareOnly )
                 m_cancelLoad = true;
             m_sourceReady      = false;
             m_zeroAcknowledged = !needsZero;
-            shmimMonitorT::monitorState( stateCodes::READY );
-            m_disabling       = true;
+                m_disabling       = true;
             m_zeroPending     = needsZero;
             m_transitionStart = std::chrono::steady_clock::now();
             m_updated         = false;

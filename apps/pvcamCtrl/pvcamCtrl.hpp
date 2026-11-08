@@ -174,7 +174,7 @@ class pvcamCtrl : public MagAOXApp<true>,
 
     bool m_hotplugPending{ false }; ///< Set on power-off, since the camera must be re-enumerated after power returns.
 
-    bool m_portSeenDown{ false }; ///< Whether the port was most recently observed down during this power-off.
+    bool m_portSeenDown{ false }; ///< Whether the port has been observed down since the last power-off.
 
     double m_lastHotplug{ 0 }; ///< Time of the last hotplug attempt, for rate limiting retries.
 
@@ -480,9 +480,9 @@ class pvcamCtrl : public MagAOXApp<true>,
      */
 
     /// Re-enumerate the camera on the PCIe bus, if needed, before connecting.
-    /** Hotplugs after a power-off, or when the camera below the port is missing, unresponsive, or stale.  A camera
-     * that looks healthy after a power-off is only hotplugged if its port was seen down while power was off, which
-     * guards against a misconfigured port belonging to another camera.  Retries are rate limited by
+    /** Hotplugs when the camera below the port is missing, unresponsive, or stale, as after a power cycle.  A healthy
+     * camera is never reset.  After a power-off, nothing is done unless the port was seen down while power was off,
+     * which guards against a misconfigured port belonging to another camera.  Retries are rate limited by
      * m_pcieRetryInterval.
      *
      * \returns 0 if connect() should proceed
@@ -500,7 +500,7 @@ class pvcamCtrl : public MagAOXApp<true>,
      */
     int hotplugCamera();
 
-    /// Check the PCIe port while power is off, disabling hotplug if it is not this camera's port.
+    /// Check the PCIe port while power is off, recording when it is seen down.
     void checkPortDown();
 
     /// Log a PCIe diagnostic unless it repeats the previous one.
@@ -1435,13 +1435,14 @@ int pvcamCtrl::connect()
 
         int16_t handle = -1;
 
-        // Open to check its serial number.  Failure is expected when another pvcamCtrl instance has this camera open.
+        // Open to check its serial number.  Failure is expected when another pvcamCtrl instance has this camera open,
+        // or for a stale camera.
         if( !pl_cam_open( camName, &handle, OPEN_EXCLUSIVE ) )
         {
             if( firstAttempt() )
             {
                 log<text_log>( std::string( "could not open " ) + camName +
-                                   ", probably in use by another application: " +
+                                   ", in use by another application or not responding: " +
                                    pvcamErrMessage( "pl_cam_open", pl_error_code(), "" ),
                                logPrio::LOG_INFO );
             }
@@ -1932,22 +1933,21 @@ int pvcamCtrl::pcieLogic()
         return 0;
     }
 
+    if( m_hotplugPending && !m_portSeenDown )
+    {
+        m_pcieDisabled = true;
+        log<text_log>( "PCIe port " + m_pcie.port() +
+                           " stayed up while camera power was off, so it is not this camera's port.  "
+                           "PCIe hotplug disabled.",
+                       logPrio::LOG_CRITICAL );
+        return 0;
+    }
+
+    // A power cycle leaves the camera stale, so a healthy camera was not power cycled and must not be reset.
     if( camera == pcieCamera::healthy )
     {
-        if( !m_hotplugPending )
-        {
-            return 0;
-        }
-
-        if( !m_portSeenDown )
-        {
-            m_pcieDisabled = true;
-            log<text_log>( "PCIe port " + m_pcie.port() +
-                               " stayed up while camera power was off, so it is not this camera's port.  "
-                               "PCIe hotplug disabled.",
-                           logPrio::LOG_CRITICAL );
-            return 0;
-        }
+        m_hotplugPending = false;
+        return 0;
     }
 
     if( mx::sys::get_curr_time() - m_lastHotplug < m_pcieRetryInterval )
@@ -2017,7 +2017,9 @@ int pvcamCtrl::hotplugCamera()
 
 void pvcamCtrl::checkPortDown()
 {
-    if( !m_pcie.enabled() || m_pcieDisabled )
+    // Once seen down, the port may come back up before the power-on is reported, since the PDU switches power
+    // before its INDI update arrives.
+    if( !m_pcie.enabled() || m_pcieDisabled || m_portSeenDown )
     {
         return;
     }
@@ -2035,14 +2037,6 @@ void pvcamCtrl::checkPortDown()
     else if( down == 1 )
     {
         m_portSeenDown = true;
-    }
-    else if( m_portSeenDown )
-    {
-        m_pcieDisabled = true;
-        log<text_log>( "PCIe port " + m_pcie.port() +
-                           " came up while camera power was off, so it is not this camera's port.  "
-                           "PCIe hotplug disabled.",
-                       logPrio::LOG_CRITICAL );
     }
 }
 

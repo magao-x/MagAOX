@@ -79,8 +79,6 @@ inline void po4ao::runWorker( bool start )
     };
     backend.freshOutput = [this]( auto until )
     {
-        if( shmimMonitorT::monitorIdle() )
-            shmimMonitorT::monitorState( stateCodes::OPERATING );
         const auto previous = m_outputSequence.load();
         waitRun( [this, previous] { return m_outputSequence.load() > previous + 1; }, until );
     };
@@ -123,8 +121,9 @@ inline void po4ao::runWorker( bool start )
     backend.park = [this]( auto until )
     {
         m_runAdmission.store( false );
-        shmimMonitorT::monitorState( stateCodes::READY );
-        waitRun( [this] { return shmimMonitorT::monitorIdle(); }, until );
+        // Drain app work; upstream READY closes its mapping asynchronously.
+        waitRun( [this] { return m_callbackMutex.try_lock(); }, until );
+        std::unique_lock<std::mutex> callbackLock( m_callbackMutex, std::adopt_lock );
         m_collection.interrupt( m_activeCollectionGeneration );
         m_replayCondition.notify_one();
     };
@@ -137,8 +136,6 @@ inline void po4ao::runWorker( bool start )
             if( m_runSnapshot.route != target )
                 throw std::runtime_error( "Route changed since the previous request" );
             m_routeIO.verifyConsumption( target, deadline );
-            if( !start && !shmimMonitorT::monitorIdle() )
-                throw std::runtime_error( "Monitor has not detached" );
             runPhase( start ? "running" : "stopped" );
         }
         else
@@ -210,6 +207,7 @@ inline void po4ao::updateRunControl()
         }
     }
     std::lock_guard<std::mutex> lock( m_indiMutex );
+    state( m_runAdmission.load() ? stateCodes::OPERATING : stateCodes::READY );
     const auto                  error  = m_runRequestError.empty() ? m_runError
                                          : m_runError.empty()      ? m_runRequestError
                                                                    : m_runError + "; " + m_runRequestError;

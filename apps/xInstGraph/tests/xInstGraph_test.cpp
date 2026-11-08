@@ -15,7 +15,6 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
-#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -318,19 +317,11 @@ pcf::IndiProperty powerProperty( const std::string &state /**< [in] power state 
 void writeConfig( const std::filesystem::path &path,      /**< [in] config file path */
                   const std::filesystem::path &output,    /**< [in] output graph path */
                   bool                         connected, /**< [in] whether to configure linked puts */
-                  std::optional<bool>          clobber,   /**< [in] explicit clobber setting, if any */
                   const std::string           &pwrKey = "testpwr.test" /**< [in] power property key */ )
 {
     std::vector<std::string> sections{ "graph", "graph" };
     std::vector<std::string> keys{ "file", "outputPath" };
     std::vector<std::string> values{ "instgraph_test.drawio", output.string() };
-
-    if( clobber.has_value() )
-    {
-        sections.push_back( "graph" );
-        keys.push_back( "clobberOutput" );
-        values.push_back( *clobber ? "true" : "false" );
-    }
 
     if( connected )
     {
@@ -375,17 +366,12 @@ void loadFixture( xInstGraph                  &app, /**< [in,out] app to configu
 }
 
 /// Write graph options followed by node and unrelated configuration sections.
-void writeNodeSections( const std::filesystem::path &path,     /**< [in] config file path */
-                        const std::filesystem::path &output,   /**< [in] output graph path */
-                        const std::string           &sections, /**< [in] section text after graph options */
-                        bool                         clobber = false /**< [in] permit an existing output */ )
+void writeNodeSections( const std::filesystem::path &path,   /**< [in] config file path */
+                        const std::filesystem::path &output, /**< [in] output graph path */
+                        const std::string           &sections /**< [in] section text after graph options */ )
 {
     std::ofstream out( path );
     out << "[graph]\nfile=instgraph_test.drawio\noutputPath=" << output.string() << '\n';
-    if( clobber )
-    {
-        out << "clobberOutput=true\n";
-    }
     out << sections;
 }
 
@@ -540,8 +526,7 @@ TEST_CASE( "xInstGraph rejects unsupported node types", "[xInstGraph]" )
             std::ofstream existing( output );
             existing << "pre-existing output";
         }
-        writeNodeSections(
-            temp.root / "config" / "instgraph_test.conf", output, "[staticNode]\ntype=" + type + "\n", true );
+        writeNodeSections( temp.root / "config" / "instgraph_test.conf", output, "[staticNode]\ntype=" + type + "\n" );
 
         xInstGraph app;
         loadFixture( app, temp.root );
@@ -692,7 +677,7 @@ TEST_CASE( "xInstGraph publishes an initial graph", "[xInstGraph]" )
     auto               input  = temp.root / "config" / "instgraph_test.drawio";
     auto               output = temp.root / "output.drawio";
     writeXML( input, false );
-    writeConfig( temp.root / "config" / "instgraph_test.conf", output, false, std::nullopt );
+    writeConfig( temp.root / "config" / "instgraph_test.conf", output, false );
     const std::string source = readFile( input );
 
     xInstGraph app;
@@ -738,7 +723,7 @@ TEST_CASE( "xInstGraph publishes hidden puts and links", "[xInstGraph]" )
     auto               input  = temp.root / "config" / "instgraph_test.drawio";
     auto               output = temp.root / "output.drawio";
     writeXML( input, true );
-    writeConfig( temp.root / "config" / "instgraph_test.conf", output, true, std::nullopt );
+    writeConfig( temp.root / "config" / "instgraph_test.conf", output, true );
 
     xInstGraph app;
     loadFixture( app, temp.root );
@@ -761,7 +746,7 @@ TEST_CASE( "xInstGraph publishes hidden puts and links", "[xInstGraph]" )
     REQUIRE( app.appShutdown() == 0 );
 }
 
-/// Verify clobber requires an explicit option and only an owned output is removed.
+/// Verify a pre-existing output is replaced and only an owned output is removed.
 /** \ingroup xInstGraph_unit_test
  */
 TEST_CASE( "xInstGraph controls output replacement and cleanup", "[xInstGraph]" )
@@ -784,29 +769,9 @@ TEST_CASE( "xInstGraph controls output replacement and cleanup", "[xInstGraph]" 
         old << "previous output";
     }
 
-    SECTION( "existing output is preserved by default" )
+    SECTION( "an existing regular output is replaced" )
     {
-        writeConfig( temp.root / "config" / "instgraph_test.conf", output, false, std::nullopt );
-        xInstGraph app;
-        loadFixture( app, temp.root );
-        REQUIRE( app.shutdown() != 0 );
-        REQUIRE( app.appShutdown() == 0 );
-        REQUIRE( readFile( output ) == "previous output" );
-    }
-
-    SECTION( "explicit false also preserves an existing output" )
-    {
-        writeConfig( temp.root / "config" / "instgraph_test.conf", output, false, false );
-        xInstGraph app;
-        loadFixture( app, temp.root );
-        REQUIRE( app.shutdown() != 0 );
-        REQUIRE( app.appShutdown() == 0 );
-        REQUIRE( readFile( output ) == "previous output" );
-    }
-
-    SECTION( "explicit true replaces an existing regular output" )
-    {
-        writeConfig( temp.root / "config" / "instgraph_test.conf", output, false, true );
+        writeConfig( temp.root / "config" / "instgraph_test.conf", output, false );
         xInstGraph app;
         loadFixture( app, temp.root );
         REQUIRE( app.shutdown() == 0 );
@@ -820,7 +785,7 @@ TEST_CASE( "xInstGraph controls output replacement and cleanup", "[xInstGraph]" 
 
     SECTION( "a later replacement is not removed at shutdown" )
     {
-        writeConfig( temp.root / "config" / "instgraph_test.conf", output, false, true );
+        writeConfig( temp.root / "config" / "instgraph_test.conf", output, false );
         xInstGraph app;
         loadFixture( app, temp.root );
         REQUIRE( app.appStartup() == 0 );
@@ -850,16 +815,9 @@ TEST_CASE( "xInstGraph rejects input output aliases", "[xInstGraph]" )
     auto               input  = temp.root / "config" / "instgraph_test.drawio";
     auto               output = temp.root / "alias.drawio";
     writeXML( input, false );
-    const std::string   source  = readFile( input );
-    std::optional<bool> clobber = true;
+    const std::string source = readFile( input );
 
-    SECTION( "exact input path with default policy" )
-    {
-        output  = input;
-        clobber = std::nullopt;
-    }
-
-    SECTION( "exact input path with clobber enabled" )
+    SECTION( "exact input path" )
     {
         output = input;
     }
@@ -879,7 +837,7 @@ TEST_CASE( "xInstGraph rejects input output aliases", "[xInstGraph]" )
         std::filesystem::create_hard_link( input, output );
     }
 
-    writeConfig( temp.root / "config" / "instgraph_test.conf", output, false, clobber );
+    writeConfig( temp.root / "config" / "instgraph_test.conf", output, false );
     xInstGraph app;
     loadFixture( app, temp.root );
     REQUIRE( app.shutdown() != 0 );
@@ -887,7 +845,7 @@ TEST_CASE( "xInstGraph rejects input output aliases", "[xInstGraph]" )
     REQUIRE( readFile( input ) == source );
 }
 
-/// Verify clobber rejects a symlink and a failed startup preserves the prior output.
+/// Verify a symlink output is rejected and a failed startup preserves the prior output.
 /** \ingroup xInstGraph_unit_test
  */
 TEST_CASE( "xInstGraph preserves outputs before publication", "[xInstGraph]" )
@@ -904,7 +862,7 @@ TEST_CASE( "xInstGraph preserves outputs before publication", "[xInstGraph]" )
     auto               output = temp.root / "output.drawio";
     writeXML( input, false );
 
-    SECTION( "symlink destination is rejected even with clobber" )
+    SECTION( "symlink destination is rejected" )
     {
         auto other = temp.root / "other.drawio";
         {
@@ -912,7 +870,7 @@ TEST_CASE( "xInstGraph preserves outputs before publication", "[xInstGraph]" )
             old << "other file";
         }
         std::filesystem::create_symlink( other, output );
-        writeConfig( temp.root / "config" / "instgraph_test.conf", output, false, true );
+        writeConfig( temp.root / "config" / "instgraph_test.conf", output, false );
         xInstGraph app;
         loadFixture( app, temp.root );
         REQUIRE( app.shutdown() != 0 );
@@ -927,7 +885,7 @@ TEST_CASE( "xInstGraph preserves outputs before publication", "[xInstGraph]" )
             std::ofstream old( output );
             old << "previous output";
         }
-        writeConfig( temp.root / "config" / "instgraph_test.conf", output, false, true, "invalid-key" );
+        writeConfig( temp.root / "config" / "instgraph_test.conf", output, false, "invalid-key" );
         xInstGraph app;
         loadFixture( app, temp.root );
         REQUIRE( app.shutdown() == 0 );
@@ -996,6 +954,74 @@ TEST_CASE( "xInstGraph publishes one complete callback snapshot", "[xInstGraph]"
     REQUIRE( readFile( output ).find( "value=\"OFF\"" ) != std::string::npos );
     REQUIRE( app.appShutdown() == 0 );
     REQUIRE_FALSE( std::filesystem::exists( output ) );
+}
+
+/// Updates that leave the published display unchanged do not replace the output file.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "xInstGraph skips publication of unchanged state", "[xInstGraph]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    MagAOX::app::xInstGraph::igHandleSetProperty( pcf::IndiProperty() );
+    MagAOX::app::xInstGraph::appLogic();
+    #endif
+    // clang-format on
+
+    temporaryDirectory temp;
+    auto               input  = temp.root / "config" / "instgraph_test.drawio";
+    auto               output = temp.root / "output.drawio";
+    writePowerXML( input );
+    writePowerConfig( temp.root / "config" / "instgraph_test.conf", output );
+
+    xInstGraph app;
+    loadFixture( app, temp.root );
+    REQUIRE( app.shutdown() == 0 );
+    REQUIRE( app.appStartup() == 0 );
+
+    REQUIRE( app.igHandleSetProperty( powerProperty( "On" ) ) == 0 );
+    const std::string published = readFile( output );
+    REQUIRE( published.find( "value=\"ON\"" ) != std::string::npos );
+
+    struct stat beforeInfo;
+    REQUIRE( ::stat( output.c_str(), &beforeInfo ) == 0 );
+
+    // Repeating the same state changes nothing observable, so nothing is staged or renamed.
+    app.observeRename = true;
+    app.previousAtRename.clear();
+    for( int repeat = 0; repeat < 3; ++repeat )
+    {
+        REQUIRE( app.igHandleSetProperty( powerProperty( "On" ) ) == 0 );
+    }
+
+    struct stat afterInfo;
+    REQUIRE( ::stat( output.c_str(), &afterInfo ) == 0 );
+    REQUIRE( afterInfo.st_ino == beforeInfo.st_ino );
+    REQUIRE( afterInfo.st_mtime == beforeInfo.st_mtime );
+    REQUIRE( app.previousAtRename.empty() );
+    REQUIRE_FALSE( app.hasStage() );
+    REQUIRE( readFile( output ) == published );
+    for( const auto &entry : std::filesystem::directory_iterator( temp.root ) )
+    {
+        REQUIRE( entry.path().filename().string().find( ".xInstGraph-" ) == std::string::npos );
+    }
+
+    // A state the display does show is still published.
+    REQUIRE( app.igHandleSetProperty( powerProperty( "Off" ) ) == 0 );
+    REQUIRE( app.previousAtRename == published );
+    const std::string republished = readFile( output );
+    REQUIRE( republished.find( "value=\"OFF\"" ) != std::string::npos );
+
+    struct stat republishedInfo;
+    REQUIRE( ::stat( output.c_str(), &republishedInfo ) == 0 );
+    REQUIRE( republishedInfo.st_ino != beforeInfo.st_ino );
+
+    app.previousAtRename.clear();
+    REQUIRE( app.igHandleSetProperty( powerProperty( "Off" ) ) == 0 );
+    REQUIRE( app.previousAtRename.empty() );
+    REQUIRE( readFile( output ) == republished );
+    REQUIRE( app.appLogic() == 0 );
+    REQUIRE( app.appShutdown() == 0 );
 }
 
 /// One INDI property update reaches every node subscribed to its key.

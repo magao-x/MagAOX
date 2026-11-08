@@ -14,13 +14,12 @@ The final scope decision supersedes the original gain-restoration proposal: “c
 
 Use `shmimMonitor`'s existing READY/OPERATING gate, following `shmimIntegrator`. There is no independent monitor pause flag, condition variable or subscription framework.
 
-- Monitor admission and FSM requests share a short mutex. The idle acknowledgement becomes true only after mapping/semaphore ownership and callbacks are released. RAII cleanup covers cancellation after opening, failed allocation, missing semaphore, stat failures and normal detachment. Frame-loop gating reads the atomic application FSM without adding a per-frame lock.
-- A supporting `MagAOXApp` correction makes FSM state/alert/log-count access atomic. Periodic INDI publication and asynchronous log alerts now refresh status without reissuing a potentially stale state transition. Otherwise `state(state())` could undo a concurrent READY request. This is the additional common lifecycle change needed by the worker transitions, not a new pause mechanism.
-- NN disabled startup and completed Disable settle in READY. Enable recreates GPU resources from retained validated engine bytes, requests attachment, validates it and admits fresh frames. Disable closes inference admission, drains in-flight work, acknowledges its final zero, waits for monitor detachment, and then destroys owned TensorRT context/engine/runtime and CUDA buffers outside the callback. No `cudaDeviceReset`. CPU output buffers remain available for final publication. A cancelled/late loader cannot reinstall resources.
+- Integration decision (2026-11-08): the user explicitly approved “Yes—use upstream READY behavior” for NN Disable, PO4AO whole-app Stop and collector Stop/completion. `shmimMonitor.hpp`, `MagAOXApp.hpp` and the shared FSM tests now match `dev` exactly. The previous strict mapping-closed acknowledgement, attachment cancellation changes and atomic FSM changes are removed. App workers communicate intent to appLogic, which requests READY/OPERATING on the app thread.
+- NN disabled startup and completed Disable settle in READY. Enable recreates GPU resources from retained validated engine bytes, requests attachment, validates it and admits fresh frames. Disable closes inference admission, drains in-flight work, acknowledges its final zero, and then destroys owned TensorRT context/engine/runtime and CUDA buffers outside the callback. No `cudaDeviceReset`. CPU output buffers remain available for final publication. A cancelled/late loader cannot reinstall resources.
 - `model_status.loaded` identifies the host-prepared model, `resident` reports GPU residency, and `active` still requires published inference. Compound NN/CACAO activation prepares GPU resources before stopping a usable CACAO writer. Failure does not silently substitute a writer.
 - Collector startup is READY. Start queues a bounded five-second attachment/observing-readback stage before the existing session preflight; Stop cancels it. Terminal/draining session phases park the input monitor. An unexpected reconnect during an active session still aborts the partial run. Existing bank, metadata and output-ownership checks remain in place.
 
-READY is asynchronous. A stopped producer can delay cleanup until the existing semaphore timeout, and the idle outer loop can delay reattachment. No fixed sleep is treated as acknowledgement. Rapid reactivation waits for actual detach completion.
+READY is asynchronous. A stopped producer can delay cleanup until the existing semaphore timeout, and the idle outer loop can delay reattachment. No fixed sleep is treated as acknowledgement. Completion acknowledges drained app work and a READY request, not mapping closure. Rapid READY/OPERATING transitions can be coalesced by upstream; attachment cancellation and missing-source cleanup retain upstream behavior. NN revalidates a retained attachment on its monitor thread and still requires a fresh frame. Collector rapid restart can time out waiting for a new attachment; retry after upstream cleanup. Do not infer detachment from an Off/Stopped readback.
 
 ## Whole-app PO4AO routing
 
@@ -38,7 +37,7 @@ Start sequence:
 6. Restore the actual pre-request NN/CACAO writer using its existing handover and first-result checks. The reservation does not alter the operator's modulation preference or request modulation changes.
 7. Observe fresh output again after restarts and advancing mfilt consumption on that exact stream inode. Acknowledge Running.
 
-Stop follows the same reservation/switch/calibration/writer-verification sequence with `aol1_modevalWFS`. Only after downstream consumption is verified does it close callback admission, request READY, wait for monitor detachment and acknowledge Stopped. It interrupts an unfinished warmup collection after callback quiescence. Already completed saved policies are retained.
+Stop follows the same reservation/switch/calibration/writer-verification sequence with `aol1_modevalWFS`. Only after downstream consumption is verified does it close callback admission, drain active callback work, request READY through appLogic and acknowledge Stopped. It interrupts an unfinished warmup collection after callback quiescence. Already completed saved policies are retained.
 
 The app does not open or close the loop. Calibration's existing procedure opens it, hence the preflight requirement that the operator already has it open. Loop closure remains an operator action.
 
@@ -68,9 +67,11 @@ Read-only inspection on 2026-11-08 established:
 
 PO4AO now uses `dev::telemeter` and the TELEMETER lifecycle conventions. The previous periodic INFO latency summary is removed; INDI `runtime_stats` is preserved.
 
-Event `TELEM_PO4AO` (20906) records callback p50/p95/p99/max in microseconds, valid sample count, sequence and monotonic sample time, freshness and mixed-controller-window flags, exact uint64 cumulative missed-frame/deadline/inference/replay counters, deadline, model ID and backend (0 fallback, 1 CPU, 2 TensorRT). It is callback timing, not end-to-end optical/control latency. Empty windows carry zero samples; sub-microsecond samples are valid zeros; idle windows are marked stale; transition windows are marked mixed and identify the newest included sample. The fixed atomic sample ring is filled by the callback; allocation, sorting and serialization run outside it.
+Event `TELEM_PO4AO` (20908) records callback p50/p95/p99/max in microseconds, valid sample count, sequence and monotonic sample time, freshness and mixed-controller-window flags, exact uint64 cumulative missed-frame/deadline/inference/replay counters, deadline, model ID and backend (0 fallback, 1 CPU, 2 TensorRT). It is callback timing, not end-to-end optical/control latency. Empty windows carry zero samples; sub-microsecond samples are valid zeros; idle windows are marked stale; transition windows are marked mixed and identify the newest included sample. The fixed atomic sample ring is filled by the callback; allocation, sorting and serialization run outside it.
 
 ## Workstation evidence and reproduction
+
+Historical pre-integration evidence (the current integration evidence below supersedes shared-monitor/FSM claims):
 
 Baseline tests were run before edits: NN 545 assertions/33 cases and CACAO writer 25/2; PO4AO 259/27. The final local checks include:
 
@@ -92,7 +93,7 @@ make -C apps/nnReconstructor/tests asan
 make -C apps/po4ao/tests test routing
 make -C apps/po4ao/tests telemetry FLATBUFFERS_CFLAGS=-I/opt/homebrew/include
 make -C apps/po4ao/tests asan
-make -C libMagAOX/app/dev/tests -f Makefile.lifecycle test
+make -C apps/po4ao/tests monitor
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=apps/po4aoTrainer:magaox-python /tmp/po4ao-dev/bin/python -m pytest -p no:cacheprovider -q apps/po4aoTrainer/tests
 ```
 
@@ -158,7 +159,7 @@ Follow-up operator acceptance must additionally verify rejection acknowledgement
 
 ## Remaining acceptance gates
 
-See the [operator acceptance and PR integration plan](shmimMonitor-idle-acceptance.md) for the ordered procedure. A fresh local merge check against `dev` at `16138ab7b5b90bae028fb09aeb2c73e3f391844a` found seven conflict paths and an event-code collision (`20906` is already `telem_fgstage` upstream). Resolve these before freezing the instrument candidate. The requested features and workstation tests do not establish readiness against current `dev`. PR #418 is already included by ancestry and can be updated after integration/qualification.
+See the [operator acceptance and PR integration plan](shmimMonitor-idle-acceptance.md) for the ordered procedure. Integration against `dev` at `16138ab7b5b90bae028fb09aeb2c73e3f391844a` resolves seven conflict paths; upstream owns event 20906 (`telem_fgstage`) and 20907 (`telem_fgtrace`), so PO4AO uses 20908. The workstation tests do not establish instrument readiness. PR #418 is already included by ancestry and can be updated after integration/qualification.
 
 1. On an isolated non-instrument Linux host, build libMagAOX and all affected C++ apps against the installed-version milk/ImageStreamIO/CUDA/TensorRT dependencies. Run the normal MagAOXApp regression suite. Verify telemetry logger registration/accessors and decode a real emitted TELEM_PO4AO record, including idle and model transitions.
 2. With a real ImageStreamIO synthetic producer, exercise missing-source startup, cancellation during attachment/allocation, producer stalls, rapid Stop/Start and stream replacement. Check reader slots and actual wait/wakeup counts after READY while the producer continues. Validate collector pending Start/Stop and observe that idle sampling stops. The workstation mapping double alone does not close this gate.
@@ -204,16 +205,37 @@ The following is the implementation inventory; generated artifacts and local bui
 - `gui/widgets/learningCtrl/learningCtrl.ui`
 - `gui/widgets/learningCtrl/tests/learningCtrl_test.cpp`
 - `libMagAOX/Makefile`
-- `libMagAOX/app/MagAOXApp.hpp`
-- `libMagAOX/app/dev/shmimMonitor.hpp`
-- `libMagAOX/app/dev/tests/.gitignore`
-- `libMagAOX/app/dev/tests/Makefile.lifecycle`
-- `libMagAOX/app/dev/tests/shmimMonitor_lifecycle_test.cpp`
-- `libMagAOX/app/dev/tests/stubs/ImageStreamIO/ImageStreamIO.h`
-- `libMagAOX/app/tests/MagAOXApp_test.cpp`
 - `libMagAOX/logger/logCodes.dat`
 - `libMagAOX/logger/logMeta.cpp`
 - `libMagAOX/logger/types/schemas/telem_po4ao.fbs`
 - `libMagAOX/logger/types/telem.cpp`
 - `libMagAOX/logger/types/telem_po4ao.hpp`
 - `tests/groups.dox`
+
+## Current dev integration decision (2026-11-08)
+
+The prior review changes were committed as `ef8fbfeb` (functional fixes and evidence) and `24f8c265` (operator documentation). The merge uses current fetched `origin/dev` at `16138ab7b5b90bae028fb09aeb2c73e3f391844a`. PR #418 head `4ff2634124a5a6fcf428e22ce2807dc31b21b823` is already an ancestor; its implementation is preserved without replaying commits.
+
+Conflict resolutions:
+
+- `gui/lib/multiIndiPublisher.hpp` and `libMagAOX/app/dev/shmimMonitor.hpp`: exact upstream. The automatically merged `MagAOXApp.hpp` and shared FSM tests were also restored to exact upstream.
+- Logger Makefile, code registry and metadata switch: retain all upstream entries and register PO4AO at unused 20908. These are necessary to build and decode the explicitly requested typed telemetry, not changes to shared monitor behavior.
+- `tests/Makefile.one`: retain upstream rules and the collector-only crypto linkage / finite-value test flags. `tests/groups.dox`: retain upstream groups and app/GUI test groups, remove the custom shared lifecycle group.
+
+NN uses its existing result lock and in-flight flags for GPU ownership. PO4AO uses one app-local callback mutex to serialize allocation, callback work, Stop draining and stopped-model preparation. Stop waits boundedly for that app work; it does not wait for mapping closure. Idle model work uses a try-lock, and telemetry aggregation runs after releasing the callback lock. No common lifecycle framework is introduced.
+
+The remaining changes outside the owned apps are the requested GUI; essential telemetry schema/type/registration; build/test registration and documentation; and pre-existing PO4AO notebooks. `Makefile` adds only trainer/GUI build registration. No shared runtime lifecycle or generic GUI publisher behavior differs from dev. The normal-monitor regression is moved under `apps/po4ao/tests` and compiles the unchanged upstream monitor with a synthetic producer, real POSIX semaphore and mapping double. Its assertions cover ordinary READY detachment and absence of subsequent waits, not guaranteed attachment cancellation or rapid transition acknowledgements.
+
+No push, PR update, instrument access or deployment is part of this integration. Remaining gates are the full target Linux/dependency build, real ImageStreamIO tests, real GPU ownership/release tests and operator-run internal-source acceptance before on-sky qualification.
+
+Post-integration workstation evidence:
+
+- NN: 624 assertions / 38 cases, including retained-attachment revalidation and fresh-frame gating; CACAO writer 29 / 3 plus the header-isolation build regression. NN built with ASan/UBSan.
+- PO4AO: 434 / 36 with ASan/UBSan, including a blocked active callback that Stop must drain. Native fake-ABI routing adapter: 24 / 6. Normal upstream monitor with synthetic producer: 19 / 1, including three READY/restart cycles and no subsequent waits while parked. This fixture is not real ImageStreamIO ABI validation or a performance measurement.
+- Qt GUI: 440 assertions / 28 cases, offscreen with no socket connection. Local INDI support archives were compiled as C++14 (their existing deprecated function adapters do not compile as C++20); no INDI sources changed.
+- Collector CPU session/observation suite: 216 / 16 with ASan/UBSan. The app adapter still needs its real target build and streams.
+- Logger outputs regenerated using the repository flatlogcodes tool and local flatc; schema round trip 76 / 1 with ASan/UBSan. Registry check confirms all upstream entries are preserved and codes are unique.
+- Shared monitor, MagAOXApp, shared FSM tests and multiIndiPublisher compare byte-for-byte with origin/dev. No instrumentation or asynchronous FSM changes are merged into those files.
+- The full native Linux/milk/CUDA build and real GPU/stream tests remain unrun on this macOS workstation. Trainer/Python suites were not rerun during this integration; their files and magaox-python have no new integration changes. Prior results above are historical evidence only.
+
+Formatting uses current dev's clang-format configuration. App-only control-flow/format cleanup is kept in a separate final commit; no shared upstream formatting cleanup is included.

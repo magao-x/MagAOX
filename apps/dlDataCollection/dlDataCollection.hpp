@@ -431,7 +431,7 @@ inline int dlDataCollection::appStartup()
             m_ioThread, m_ioThreadInit, m_ioThreadID, m_indiP_ioThread, 0, "", "collection-io", this, ioStart ) < 0 )
         return -1;
     SHMIMMONITOR_APP_STARTUP;
-    shmimMonitorT::monitorState( stateCodes::READY );
+    state( stateCodes::READY );
     return 0;
 }
 
@@ -452,13 +452,13 @@ inline int dlDataCollection::appLogic()
         m_startPending = false;
         m_session.abort();
         m_connected = false;
-        shmimMonitorT::monitorState( stateCodes::READY );
+        state( stateCodes::READY );
     }
     if( m_startRequested.exchange( false ) && !stop )
     {
         try
         {
-            if( m_startPending || !m_session.canStart() || !shmimMonitorT::monitorIdle() )
+            if( m_startPending || !m_session.canStart() )
                 throw std::runtime_error( "collection is busy or retains failed-run buffers" );
             { // mutex scope
                 std::lock_guard<std::mutex> lock( m_indiMutex );
@@ -471,7 +471,7 @@ inline int dlDataCollection::appLogic()
                 m_emgain.m_received        = {};
             }
             m_startPending = true;
-            shmimMonitorT::monitorState( stateCodes::OPERATING );
+            state( stateCodes::OPERATING );
             m_observationDeadline = std::chrono::steady_clock::now() + std::chrono::seconds( 5 );
             m_observationPoll     = {};
             std::lock_guard<std::mutex> lock( m_indiMutex );
@@ -491,7 +491,7 @@ inline int dlDataCollection::appLogic()
                              p.m_phase == "cancelled" || p.m_phase == "failed" ) )
     {
         m_connected = false;
-        shmimMonitorT::monitorState( stateCodes::READY );
+        state( stateCodes::READY );
     }
     const double elapsed = std::chrono::duration<double>( std::chrono::steady_clock::now() - m_started ).count();
     if( m_finishedElapsed < 0 && ( p.m_phase == "complete" || p.m_phase == "cancelled" || p.m_phase == "failed" ) )
@@ -683,7 +683,7 @@ inline int dlDataCollection::allocate( const dev::shmimT &dummy )
             m_controlError = e.what();
             m_startPending = false;
         }
-        shmimMonitorT::monitorState( stateCodes::READY );
+        // appLogic requests READY after observing the failed attachment.
         return log<software_error>( { __FILE__, __LINE__, e.what() } );
     }
 }

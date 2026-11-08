@@ -70,6 +70,7 @@ apps/dmPokeCenter/dmPokeCenter
 apps/dmPokeXCorr/dmPokeXCorr
 apps/dmRecon/dmRecon
 apps/dmSpeckle/dmSpeckle
+apps/dmSyncopation/dmSyncopation
 
 #f
 apps/filterWheelCtrl/filterWheelCtrl
@@ -217,6 +218,7 @@ tests/singleTest
 tests/testMagAOX
 tests/testMagAOXsetuid
 tests/test_stderr.txt
+tests/results/
 
 
 #Devel stuff in flatlogs

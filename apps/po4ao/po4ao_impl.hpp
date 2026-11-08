@@ -1048,7 +1048,7 @@ inline int po4ao::appStartup()
         m_replayThread.join();
         return log<software_error, -1>( { __FILE__, __LINE__ } );
     }
-    shmimMonitorT::monitorState( stateCodes::OPERATING );
+    state( stateCodes::OPERATING );
     return 0;
 }
 
@@ -1204,16 +1204,19 @@ inline int po4ao::appLogic()
     updateRunControl();
     std::unique_lock<std::mutex> lock( m_indiMutex );
     SHMIMMONITOR_UPDATE_INDI;
-    if( !m_runBusy && !m_runRunning && shmimMonitorT::monitorIdle() )
-    {
-        activatePendingEngine();
-        const auto reset = m_modelResetRequest.exchange( 0 );
-        if( reset )
+    { //mutex scope
+        std::unique_lock<std::mutex> callbackLock( m_callbackMutex, std::try_to_lock );
+        if( !m_runBusy && !m_runRunning && !m_runAdmission.load() && callbackLock.owns_lock() )
         {
-            resetActiveModel( reset );
-            m_appliedReset.store( reset );
+            activatePendingEngine();
+            const auto reset = m_modelResetRequest.exchange( 0 );
+            if( reset )
+            {
+                resetActiveModel( reset );
+                m_appliedReset.store( reset );
+            }
+            m_appliedControl.store( m_controlRequest.load() );
         }
-        m_appliedControl.store( m_controlRequest.load() );
     }
     updateControlStatus();
     updateRuntimeStatistics();
@@ -1259,6 +1262,7 @@ inline int po4ao::appShutdown()
 
 inline int po4ao::allocate( const dev::shmimT &dummy )
 {
+    std::lock_guard<std::mutex> callbackLock( m_callbackMutex );
     static_cast<void>( dummy );
     if( shmimMonitorT::m_dataType != _DATATYPE_FLOAT ||
         static_cast<uint64_t>( shmimMonitorT::m_width ) * shmimMonitorT::m_height != static_cast<uint64_t>( m_nModes ) )

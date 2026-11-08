@@ -197,10 +197,10 @@ this patch.
 Start requests OPERATING and allows five seconds for source/channel attachment and fresh
 observing readbacks before starting the existing session preflight. Stop cancels a pending
 Start. Draining and terminal sessions return to READY and release the input mapping/reader
-slot. A new Start waits for detachment; an unexpected reconnect during an active session
-still aborts the partial run. A successful READY request is asynchronous and can take the
-monitor's existing timeout to settle.
+slot asynchronously. Stop/completion does not acknowledge mapping closure. A rapid Start can
+time out waiting for reattachment if upstream coalesces READY/OPERATING; retry after cleanup.
+An unexpected reconnect during an active session still aborts the partial run.
 
-CPU session/observation regressions and the shared monitor-loop fixture pass locally.
+CPU session/observation regressions and the app-local upstream monitor-loop fixture pass locally.
 Real ImageStreamIO producer and collector app-level acceptance remain required on an
 isolated Linux host; see the [acceptance plan](../../agents/plans/2026-11/shmimMonitor-idle-apps.md).

@@ -28,8 +28,6 @@ class nnReconstructor_test : public nnReconstructor
     /// Submit Enable without waiting for the asynchronous loader.
     int queueEnable();
 
-    /// Override the fake monitor completion acknowledgement.
-    void monitorDetached( bool detached /**< [in] Simulated completion of attachment cleanup. */ );
 
     /// Exercise the app-local PO4AO writer reservation callback.
     int hold( const std::string &owner /**< [in] Operation token. */,
@@ -203,11 +201,6 @@ inline int nnReconstructor_test::queueEnable()
 {
     return requestEnabled( true );
 }
-inline void nnReconstructor_test::monitorDetached( bool detached )
-{
-    shmimMonitorT::m_idle = detached;
-}
-
 inline int nnReconstructor_test::hold( const std::string &owner, const std::string &action )
 {
     pcf::IndiProperty request( pcf::IndiProperty::Text );
@@ -1517,23 +1510,21 @@ TEST_CASE( "Late CACAO start retains the handover barrier", "[nnReconstructor][i
     // clang-format on
 }
 
-/** \brief Disable releases owned GPU objects only after zero publication and monitor completion. */
+/** \brief Disable releases owned GPU objects only after zero publication and app work completion. */
 TEST_CASE( "NN GPU ownership follows completed disable", "[nnReconstructor][gpuOwnership]" )
 {
     nnReconstructor_test app;
     app.prepare();
     REQUIRE( nnTest::liveAllocations == 2 );
     REQUIRE( app.enable( false ) == 0 );
-    app.monitorDetached( false );
     app.control();
     REQUIRE( nnTest::liveAllocations == 2 );
     REQUIRE( app.claim() );
     REQUIRE( app.copy() == std::vector<float>( 3, 0 ) );
-    app.complete();
     REQUIRE( app.disabling() );
     REQUIRE( app.enable( true ) < 0 );
     REQUIRE( nnTest::liveAllocations == 2 );
-    app.monitorDetached( true );
+    app.complete();
     app.control();
     REQUIRE_FALSE( app.disabling() );
     REQUIRE_FALSE( app.acknowledged() );
@@ -1550,6 +1541,35 @@ TEST_CASE( "NN GPU ownership follows completed disable", "[nnReconstructor][gpuO
 #ifdef NNRECONSTRUCTOR_TEST_DOXYGEN_REF
     MagAOX::app::nnReconstructor::releaseInference;
     MagAOX::app::nnReconstructor::requestEnabled;
+#endif
+    // clang-format on
+}
+
+/** \brief A retained upstream mapping can be validated on Enable without another allocate callback. */
+TEST_CASE( "NN rapid Enable validates the retained source and requires a fresh frame", "[nnReconstructor][lifecycle]" )
+{
+    nnReconstructor_test app;
+    app.prepare();
+    REQUIRE( app.enable( false ) == 0 );
+    REQUIRE( app.claim() );
+    app.copy();
+    app.complete();
+    REQUIRE_FALSE( app.disabling() );
+    REQUIRE( app.queueEnable() == 0 );
+    REQUIRE( app.waitLoad() );
+    REQUIRE_FALSE( app.acknowledged() );
+    app.rawFrame(); // Revalidate the current attachment; no upstream allocate notification.
+    REQUIRE( app.acknowledged() );
+    REQUIRE_FALSE( app.pending() );
+    app.rawFrame(); // Establish the resume counter.
+    app.rawFrame(); // The same counter must not be inferred.
+    REQUIRE_FALSE( app.pending() );
+    app.frame();
+    REQUIRE( app.pending() );
+    // clang-format off
+#ifdef NNRECONSTRUCTOR_TEST_DOXYGEN_REF
+    MagAOX::app::nnReconstructor::processImage;
+    MagAOX::app::nnReconstructor::allocate;
 #endif
     // clang-format on
 }

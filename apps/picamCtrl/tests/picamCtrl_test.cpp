@@ -1,5 +1,5 @@
 /** \file picamCtrl_test.cpp
- * \brief Offline regression tests for picamCtrl temperature limits and request rejection.
+ * \brief Offline regression tests for picamCtrl temperature limits and EM-gain temperature protection.
  * \ingroup picamCtrl_unit_test
  */
 
@@ -39,6 +39,36 @@ struct Fake
 
     /// Parameter write calls.
     unsigned m_writes{ 0 };
+
+    /// Sensor temperature returned by the SDK.
+    piflt m_temperature{ -55 };
+
+    /// Sensor temperature status returned by the SDK.
+    piint m_temperatureStatus{ PicamSensorTemperatureStatus_Locked };
+
+    /// Result of reading sensor temperature.
+    PicamError m_temperatureError{ PicamError_None };
+
+    /// Result of reading sensor temperature status.
+    PicamError m_temperatureStatusError{ PicamError_None };
+
+    /// Last temperature setpoint written to the SDK.
+    piflt m_temperatureTarget{ -55 };
+
+    /// Last EM gain written to the SDK.
+    piint m_gain{ 1 };
+
+    /// Number of online EM-gain commands.
+    unsigned m_gainWrites{ 0 };
+
+    /// Result of an online EM-gain command.
+    PicamError m_gainError{ PicamError_None };
+
+    /// ROI descriptor returned while configuring acquisition.
+    PicamRoi m_roi{ 0, 2, 1, 0, 2, 1 };
+
+    /// Exposure constraints borrowed by acquisition configuration.
+    PicamRangeConstraint m_exposureRange{};
 };
 
 /// Current test's offline camera state.
@@ -65,6 +95,19 @@ struct Fixture : outletHarness::Controller<MagAOX::app::picamCtrl>
     using MagAOX::app::dev::stdCamera<MagAOX::app::picamCtrl>::m_startupTemp;
     using MagAOX::app::dev::stdCamera<MagAOX::app::picamCtrl>::m_configMinTemp;
     using MagAOX::app::dev::stdCamera<MagAOX::app::picamCtrl>::m_configMaxTemp;
+    using MagAOX::app::dev::stdCamera<MagAOX::app::picamCtrl>::m_emGainRequiresTemp;
+    using MagAOX::app::dev::stdCamera<MagAOX::app::picamCtrl>::m_emGainTemp;
+    using MagAOX::app::dev::stdCamera<MagAOX::app::picamCtrl>::m_emGainTempMode;
+    using MagAOX::app::dev::stdCamera<MagAOX::app::picamCtrl>::m_emGainMaxTemp;
+    using MagAOX::app::dev::stdCamera<MagAOX::app::picamCtrl>::m_ccdTempValid;
+    using MagAOX::app::dev::stdCamera<MagAOX::app::picamCtrl>::m_indiP_emGainTempReady;
+    using MagAOX::app::dev::stdCamera<MagAOX::app::picamCtrl>::m_indiP_emGain;
+    using MagAOX::app::dev::stdCamera<MagAOX::app::picamCtrl>::m_indiP_emGainOff;
+    using MagAOX::app::dev::stdCamera<MagAOX::app::picamCtrl>::m_emGain;
+    using MagAOX::app::dev::stdCamera<MagAOX::app::picamCtrl>::m_emGainSet;
+    using MagAOX::app::dev::stdCamera<MagAOX::app::picamCtrl>::m_readoutSpeedName;
+    using MagAOX::app::dev::stdCamera<MagAOX::app::picamCtrl>::m_tempControlOnTarget;
+    using MagAOX::app::dev::stdCamera<MagAOX::app::picamCtrl>::m_tempControlStatusStr;
     using MagAOX::app::dev::frameGrabber<MagAOX::app::picamCtrl>::m_reconfig;
     using MagAOX::app::MagAOXApp<true>::m_powerState;
     using MagAOX::app::MagAOXApp<true>::m_powerTargetState;
@@ -74,6 +117,9 @@ struct Fixture : outletHarness::Controller<MagAOX::app::picamCtrl>
 
     /// Send a temperature request through the production stdCamera callback.
     int request( float target /**< [in] Requested temperature, in C. */ );
+
+    /// Send an EM-gain request through the production stdCamera callback.
+    int requestGain( float target /**< [in] Requested EM gain. */ );
 };
 
 Fixture::Fixture()
@@ -97,6 +143,14 @@ int Fixture::request( float target )
     received.add( pcf::IndiElement( "target" ) );
     received["target"].set( target );
     return newCallBack_temp( received );
+}
+
+int Fixture::requestGain( float target )
+{
+    pcf::IndiProperty received( pcf::IndiProperty::Number, m_indiP_emGain.getDevice(), m_indiP_emGain.getName() );
+    received.add( pcf::IndiElement( "target" ) );
+    received["target"].set( target );
+    return newCallBack_emgain( received );
 }
 } // namespace picamHarness
 /// \endcond
@@ -382,6 +436,298 @@ TEST_CASE( "picamCtrl validates temperature before connection and acquisition", 
         REQUIRE( f.m_camera_timestamp == 5 );
     }
 }
+/// Deferred temperature changes require a fresh locked poll after acquisition applies the new target.
+/** \ingroup picamCtrl_unit_test */
+TEST_CASE( "picamCtrl does not reuse temperature lock across deferred reconfiguration", "[picamCtrl]" )
+{
+    // clang-format off
+    #ifdef PICAMCTRL_TEST_DOXYGEN_REF
+    picamCtrl::getTemps(); picamCtrl::configureAcquisition(); picamCtrl::setEMGain();
+    dev::stdCamera<picamCtrl>::newCallBack_temp(); dev::stdCamera<picamCtrl>::newCallBack_emgain();
+    #endif
+    // clang-format on
+    Fixture f;
+    REQUIRE( f.connect() == 0 );
+    f.m_emGainRequiresTemp = true;
+    f.m_emGainTemp         = -30;
+    REQUIRE( static_cast<dev::stdCamera<picamCtrl> &>( f ).appStartup() == 0 );
+    f.state( stateCodes::OPERATING );
+    REQUIRE( f.configureAcquisition() == 0 );
+    f.m_reconfig = false;
+    REQUIRE( f.getTemps() == 0 );
+    REQUIRE( f.m_tempControlOnTarget );
+    REQUIRE( f.request( -30 ) == 0 );
+    REQUIRE( f.m_reconfig );
+    REQUIRE_FALSE( f.m_tempControlOnTarget );
+    REQUIRE( f.getTemps() == 0 );
+    REQUIRE_FALSE( f.m_tempControlOnTarget );
+    REQUIRE( f.m_tempControlStatusStr == "UNLOCKED" );
+    REQUIRE( g_fake.m_temperatureTarget == -55 );
+    REQUIRE( f.requestGain( 100 ) == -1 );
+    REQUIRE( g_fake.m_gainWrites == 0 );
+
+    SECTION( "configuration discards any previous lock and waits for a new poll" )
+    {
+        // Also exercise configuration entered with stale lock from an earlier poll.
+        f.m_tempControlOnTarget  = true;
+        f.m_tempControlStatusStr = "LOCKED";
+        REQUIRE( f.configureAcquisition() == 0 );
+        REQUIRE( g_fake.m_temperatureTarget == -30 );
+        REQUIRE_FALSE( f.m_tempControlOnTarget );
+        REQUIRE( f.m_tempControlStatusStr == "UNLOCKED" );
+        f.m_reconfig = false; // The worker has consumed the configuration request.
+        REQUIRE( f.requestGain( 100 ) == -1 );
+        REQUIRE( g_fake.m_gainWrites == 0 );
+        g_fake.m_temperature = -30;
+        REQUIRE( f.getTemps() == 0 );
+        REQUIRE( f.m_tempControlOnTarget );
+        REQUIRE( f.m_tempControlStatusStr == "LOCKED" );
+        REQUIRE( f.requestGain( 100 ) == 0 );
+        REQUIRE( g_fake.m_gainWrites == 1 );
+        REQUIRE( g_fake.m_gain == 100 );
+    }
+    SECTION( "faulted and unknown status remain visible while configuration is pending" )
+    {
+        g_fake.m_temperatureStatus = PicamSensorTemperatureStatus_Faulted;
+        REQUIRE( f.getTemps() == 0 );
+        REQUIRE_FALSE( f.m_tempControlOnTarget );
+        REQUIRE( f.m_tempControlStatusStr == "FAULTED" );
+        g_fake.m_temperatureStatus = -1;
+        REQUIRE( f.getTemps() == 0 );
+        REQUIRE_FALSE( f.m_tempControlOnTarget );
+        REQUIRE( f.m_tempControlStatusStr == "UNKNOWN" );
+    }
+    SECTION( "a pending temperature remains protected after the worker consumes its request" )
+    {
+        REQUIRE( f.configureAcquisition() == 0 );
+        REQUIRE( g_fake.m_temperatureTarget == -30 );
+        REQUIRE( f.request( -20 ) == 0 );
+        f.m_reconfig         = false; // Request consumption precedes applying the new temperature.
+        g_fake.m_temperature = -30;
+        REQUIRE( f.getTemps() == 0 );
+        REQUIRE_FALSE( f.m_tempControlOnTarget );
+        REQUIRE( f.m_tempControlStatusStr == "UNLOCKED" );
+        REQUIRE( f.requestGain( 100 ) == -1 );
+        REQUIRE( g_fake.m_gainWrites == 0 );
+        REQUIRE( f.configureAcquisition() == 0 );
+        REQUIRE( g_fake.m_temperatureTarget == -20 );
+        REQUIRE( f.requestGain( 100 ) == -1 );
+        g_fake.m_temperature = -20;
+        REQUIRE( f.getTemps() == 0 );
+        REQUIRE( f.m_tempControlOnTarget );
+        REQUIRE( f.requestGain( 100 ) == -1 );
+        REQUIRE( g_fake.m_gainWrites == 0 );
+        REQUIRE( f.request( -30 ) == 0 );
+        REQUIRE( f.configureAcquisition() == 0 );
+        f.m_reconfig         = false;
+        g_fake.m_temperature = -30;
+        REQUIRE( f.getTemps() == 0 );
+        REQUIRE( f.m_tempControlOnTarget );
+        REQUIRE( f.requestGain( 100 ) == 0 );
+        REQUIRE( g_fake.m_gainWrites == 1 );
+    }
+    SECTION( "disabled protection retains the SDK lock during reconfiguration" )
+    {
+        f.m_emGainRequiresTemp = false;
+        REQUIRE( f.getTemps() == 0 );
+        REQUIRE( f.m_tempControlOnTarget );
+        REQUIRE( f.m_tempControlStatusStr == "LOCKED" );
+    }
+}
+/// The off request applies unity regardless of temperature lock and reports SDK errors.
+/** \ingroup picamCtrl_unit_test */
+TEST_CASE( "picamCtrl standard EM-gain-off request selects unity", "[picamCtrl]" )
+{
+    // clang-format off
+    #ifdef PICAMCTRL_TEST_DOXYGEN_REF
+    picamCtrl::setEMGainOff(); picamCtrl::setEMGain();
+    dev::stdCamera<picamCtrl>::newCallBack_emgain_off();
+    #endif
+    // clang-format on
+    Fixture f;
+    REQUIRE( f.connect() == 0 );
+    REQUIRE( static_cast<dev::stdCamera<picamCtrl> &>( f ).appStartup() == 0 );
+    f.state( stateCodes::OPERATING );
+    f.m_emGainRequiresTemp  = true;
+    f.m_tempControlOnTarget = false;
+    f.m_emGain              = 100;
+    f.m_emGainSet           = 100;
+    pcf::IndiProperty request( pcf::IndiProperty::Switch, f.m_indiP_emGainOff.getDevice(), "emgain_off" );
+    request.add( pcf::IndiElement( "request", pcf::IndiElement::On ) );
+
+    SECTION( "electron-multiplying amplifier receives unity for each request" )
+    {
+        for( unsigned repeat = 1; repeat <= 2; ++repeat )
+        {
+            REQUIRE( f.newCallBack_stdCamera( request ) == 0 );
+            REQUIRE( g_fake.m_gainWrites == repeat );
+            REQUIRE( g_fake.m_gain == 1 );
+            REQUIRE( f.m_emGain == 1 );
+            REQUIRE( f.m_emGainSet == 1 );
+            REQUIRE( f.m_indiP_emGain["target"].get<float>() == 1 );
+            REQUIRE( f.m_indiP_emGainOff["request"].getSwitchState() == pcf::IndiElement::Off );
+            REQUIRE( f.m_indiP_emGainOff.getState() == INDI_IDLE );
+        }
+    }
+    SECTION( "conventional amplifier needs no EM-gain SDK command" )
+    {
+        f.m_readoutSpeedName = "ccd_01MHz";
+        REQUIRE( f.newCallBack_stdCamera( request ) == 0 );
+        REQUIRE( g_fake.m_gainWrites == 0 );
+        REQUIRE( f.m_emGain == 1 );
+        REQUIRE( f.m_emGainSet == 1 );
+        REQUIRE( f.m_indiP_emGainOff.getState() == INDI_IDLE );
+    }
+    SECTION( "SDK failure is visible and does not claim the measured gain changed" )
+    {
+        g_fake.m_gainError = PicamError_InvalidParameterValue;
+        REQUIRE( f.newCallBack_stdCamera( request ) == -1 );
+        REQUIRE( g_fake.m_gainWrites == 1 );
+        REQUIRE( f.m_emGain == 100 );
+        REQUIRE( f.m_emGainSet == 1 );
+        REQUIRE( f.m_indiP_emGainOff["request"].getSwitchState() == pcf::IndiElement::Off );
+        REQUIRE( f.m_indiP_emGainOff.getState() == INDI_ALERT );
+    }
+}
+/// Maximum-temperature protection accepts cold unlocked readings only after the requested target is applied.
+/** \ingroup picamCtrl_unit_test */
+TEST_CASE( "picamCtrl maximum-temperature gain guard requires fresh applied-target readings", "[picamCtrl]" )
+{
+    // clang-format off
+    #ifdef PICAMCTRL_TEST_DOXYGEN_REF
+    picamCtrl::getTemps(); picamCtrl::configureAcquisition(); picamCtrl::connect();
+    picamCtrl::powerOnDefaults(); picamCtrl::setTempSetPt();
+    dev::stdCamera<picamCtrl>::newCallBack_emgain();
+    #endif
+    // clang-format on
+    Fixture f;
+    REQUIRE( f.connect() == 0 );
+    f.m_emGainRequiresTemp = true;
+    f.m_emGainTempMode     = "maxTemp";
+    f.m_emGainTemp         = -55;
+    f.m_emGainMaxTemp      = -45;
+    REQUIRE( static_cast<dev::stdCamera<picamCtrl> &>( f ).appStartup() == 0 );
+    f.state( stateCodes::OPERATING );
+    g_fake.m_temperatureStatus = PicamSensorTemperatureStatus_Unlocked;
+    g_fake.m_temperature       = -46;
+    REQUIRE( f.requestGain( 100 ) == -1 );
+    REQUIRE( f.getTemps() == 0 );
+    REQUIRE_FALSE( f.m_ccdTempValid );
+    REQUIRE( f.requestGain( 100 ) == -1 );
+    REQUIRE( g_fake.m_gainWrites == 0 );
+    REQUIRE( f.configureAcquisition() == 0 );
+    REQUIRE_FALSE( f.m_ccdTempValid );
+    REQUIRE( f.m_indiP_emGainTempReady["toggle"].getSwitchState() == pcf::IndiElement::Off );
+    REQUIRE( f.requestGain( 100 ) == -1 );
+    f.m_reconfig = true; // An unrelated queued reconfiguration does not stale a completed temperature poll.
+    REQUIRE( f.getTemps() == 0 );
+    REQUIRE( f.m_ccdTempValid );
+    REQUIRE_FALSE( f.m_tempControlOnTarget );
+    REQUIRE( f.m_tempControlStatusStr == "UNLOCKED" );
+    REQUIRE( f.m_indiP_emGainTempReady["toggle"].getSwitchState() == pcf::IndiElement::On );
+    REQUIRE( f.requestGain( 100 ) == 0 );
+    REQUIRE( g_fake.m_gainWrites == 1 );
+
+    SECTION( "the ceiling is inclusive and warmer readings block new gain commands" )
+    {
+        g_fake.m_temperature = -45;
+        REQUIRE( f.getTemps() == 0 );
+        REQUIRE( f.requestGain( 100 ) == 0 );
+        g_fake.m_temperature = -44.9;
+        REQUIRE( f.getTemps() == 0 );
+        REQUIRE( f.m_ccdTempValid );
+        REQUIRE( f.m_indiP_emGainTempReady["toggle"].getSwitchState() == pcf::IndiElement::Off );
+        REQUIRE( f.requestGain( 100 ) == -1 );
+        REQUIRE( g_fake.m_gainWrites == 2 );
+    }
+    SECTION( "invalid measurements and fault statuses discard prior cold readings" )
+    {
+        for( double temperature : { -999.0,
+                                    std::numeric_limits<double>::quiet_NaN(),
+                                    std::numeric_limits<double>::infinity(),
+                                    -std::numeric_limits<double>::infinity() } )
+        {
+            g_fake.m_temperature = temperature;
+            REQUIRE( f.getTemps() == 0 );
+            REQUIRE_FALSE( f.m_ccdTempValid );
+            REQUIRE( f.requestGain( 100 ) == -1 );
+        }
+        g_fake.m_temperature = -46;
+        for( piint status : { static_cast<piint>( PicamSensorTemperatureStatus_Faulted ), -1 } )
+        {
+            g_fake.m_temperatureStatus = status;
+            REQUIRE( f.getTemps() == 0 );
+            REQUIRE_FALSE( f.m_ccdTempValid );
+            REQUIRE( f.requestGain( 100 ) == -1 );
+        }
+        REQUIRE( g_fake.m_gainWrites == 1 );
+    }
+    SECTION( "failed temperature or status reads invalidate the last complete poll" )
+    {
+        for( bool failStatus : { false, true } )
+        {
+            f.state( stateCodes::OPERATING );
+            g_fake.m_temperatureError       = PicamError_None;
+            g_fake.m_temperatureStatusError = PicamError_None;
+            REQUIRE( f.getTemps() == 0 );
+            REQUIRE( f.m_ccdTempValid );
+            ( failStatus ? g_fake.m_temperatureStatusError : g_fake.m_temperatureError ) =
+                PicamError_InvalidParameterValue;
+            REQUIRE( f.getTemps() == -1 );
+            REQUIRE_FALSE( f.m_ccdTempValid );
+            REQUIRE( f.m_indiP_emGainTempReady["toggle"].getSwitchState() == pcf::IndiElement::Off );
+            f.state( stateCodes::OPERATING ); // Validity itself must prevent reuse after state recovery.
+            REQUIRE( f.requestGain( 100 ) == -1 );
+        }
+        REQUIRE( g_fake.m_gainWrites == 1 );
+    }
+    SECTION( "a deferred target and subsequent configuration each require a new applied-target reading" )
+    {
+        REQUIRE( f.request( -50 ) == 0 );
+        f.m_emGainTemp = -50;
+        f.m_reconfig   = false;
+        REQUIRE( f.getTemps() == 0 );
+        REQUIRE_FALSE( f.m_ccdTempValid );
+        REQUIRE( f.requestGain( 100 ) == -1 );
+        REQUIRE( f.configureAcquisition() == 0 );
+        REQUIRE( g_fake.m_temperatureTarget == -50 );
+        REQUIRE_FALSE( f.m_ccdTempValid );
+        REQUIRE( f.requestGain( 100 ) == -1 );
+        REQUIRE( f.getTemps() == 0 );
+        REQUIRE( f.requestGain( 100 ) == 0 );
+        REQUIRE( f.configureAcquisition() == 0 );
+        REQUIRE_FALSE( f.m_ccdTempValid );
+        REQUIRE( f.requestGain( 100 ) == -1 );
+        REQUIRE( f.getTemps() == 0 );
+        REQUIRE( f.requestGain( 100 ) == 0 );
+    }
+    SECTION( "repeated complete cold polls do not publish transient permission loss" )
+    {
+        f.messages();
+        REQUIRE( f.getTemps() == 0 );
+        REQUIRE( f.getTemps() == 0 );
+        REQUIRE( f.m_indiP_emGainTempReady["toggle"].getSwitchState() == pcf::IndiElement::On );
+        for( const auto &message : f.messages() )
+            REQUIRE( message.getProperty().getName() != "emgain_temp_ready" );
+    }
+    SECTION( "power defaults and reconnect cannot reuse the previous cold reading" )
+    {
+        REQUIRE( f.powerOnDefaults() == 0 );
+        REQUIRE_FALSE( f.m_ccdTempValid );
+        REQUIRE( f.getTemps() == 0 );
+        REQUIRE_FALSE( f.m_ccdTempValid );
+        REQUIRE( f.requestGain( 100 ) == -1 );
+        REQUIRE( f.configureAcquisition() == 0 );
+        REQUIRE( f.getTemps() == 0 );
+        REQUIRE( f.m_ccdTempValid );
+        REQUIRE( f.connect() == 0 );
+        f.state( stateCodes::OPERATING );
+        REQUIRE_FALSE( f.m_ccdTempValid );
+        REQUIRE( f.getTemps() == 0 );
+        REQUIRE_FALSE( f.m_ccdTempValid );
+        REQUIRE( f.requestGain( 100 ) == -1 );
+    }
+}
 } // namespace picamCtrlTest
 } // namespace libXWCTest
 
@@ -389,7 +735,8 @@ TEST_CASE( "picamCtrl validates temperature before connection and acquisition", 
 extern "C"
 {
     /// Offline SDK double.
-    PicamError PicamAdvanced_GetCameraModel( PicamHandle camera, PicamHandle *model )
+    PicamError PicamAdvanced_GetCameraModel( PicamHandle  camera /**< [in] Camera handle. */,
+                                             PicamHandle *model /**< [out] Camera model handle. */ )
     {
         static_cast<void>( camera );
         static_cast<void>( model );
@@ -399,21 +746,26 @@ extern "C"
     }
 
     /// Offline SDK double.
-    PicamError PicamAdvanced_GetParameterRangeConstraints( PicamHandle                  camera_or_accessory,
-                                                           PicamParameter               parameter,
-                                                           const PicamRangeConstraint **constraint_array,
-                                                           piint                       *constraint_count )
+    PicamError PicamAdvanced_GetParameterRangeConstraints(
+        PicamHandle                  camera_or_accessory /**< [in] Camera or accessory handle. */,
+        PicamParameter               parameter /**< [in] Parameter to access. */,
+        const PicamRangeConstraint **constraint_array /**< [out] SDK range constraints. */,
+        piint                       *constraint_count /**< [out] Number of range constraints. */ )
     {
         static_cast<void>( camera_or_accessory );
         static_cast<void>( parameter );
         static_cast<void>( constraint_array );
         static_cast<void>( constraint_count );
         ++picamHarness::g_fake.m_calls;
+        picamHarness::g_fake.m_exposureRange.maximum = 1000;
+        *constraint_array                            = &picamHarness::g_fake.m_exposureRange;
+        *constraint_count                            = 1;
         return PicamError_None;
     }
 
     /// Offline SDK double.
-    PicamError PicamAdvanced_OpenCameraDevice( const PicamCameraID *id, PicamHandle *device )
+    PicamError PicamAdvanced_OpenCameraDevice( const PicamCameraID *id /**< [in] Camera identifier. */,
+                                               PicamHandle         *device /**< [out] Camera device handle. */ )
     {
         static_cast<void>( id );
         static_cast<void>( device );
@@ -423,7 +775,9 @@ extern "C"
     }
 
     /// Offline SDK double.
-    PicamError PicamAdvanced_SetAcquisitionBuffer( PicamHandle device, const PicamAcquisitionBuffer *buffer )
+    PicamError PicamAdvanced_SetAcquisitionBuffer(
+        PicamHandle                   device /**< [in] Camera device handle. */,
+        const PicamAcquisitionBuffer *buffer /**< [in] Acquisition storage descriptor. */ )
     {
         static_cast<void>( device );
         static_cast<void>( buffer );
@@ -432,7 +786,9 @@ extern "C"
     }
 
     /// Offline SDK double.
-    PicamError Picam_CanReadParameter( PicamHandle camera_or_accessory, PicamParameter parameter, pibln *readable )
+    PicamError Picam_CanReadParameter( PicamHandle    camera_or_accessory /**< [in] Camera or accessory handle. */,
+                                       PicamParameter parameter /**< [in] Parameter to access. */,
+                                       pibln         *readable /**< [out] Whether direct reading is supported. */ )
     {
         static_cast<void>( camera_or_accessory );
         static_cast<void>( parameter );
@@ -443,10 +799,11 @@ extern "C"
     }
 
     /// Offline SDK double.
-    PicamError Picam_CanSetParameterFloatingPointValue( PicamHandle    camera_or_accessory,
-                                                        PicamParameter parameter,
-                                                        piflt          value,
-                                                        pibln         *settable )
+    PicamError
+    Picam_CanSetParameterFloatingPointValue( PicamHandle camera_or_accessory /**< [in] Camera or accessory handle. */,
+                                             PicamParameter parameter /**< [in] Parameter to access. */,
+                                             piflt          value /**< [in] Parameter value. */,
+                                             pibln *settable /**< [out] Whether the candidate value is valid. */ )
     {
         static_cast<void>( camera_or_accessory );
         static_cast<void>( parameter );
@@ -461,8 +818,9 @@ extern "C"
     }
 
     /// Offline SDK double.
-    PicamError
-    Picam_CanSetParameterOnline( PicamHandle camera_or_accessory, PicamParameter parameter, pibln *onlineable )
+    PicamError Picam_CanSetParameterOnline( PicamHandle    camera_or_accessory /**< [in] Camera or accessory handle. */,
+                                            PicamParameter parameter /**< [in] Parameter to access. */,
+                                            pibln *onlineable /**< [out] Whether online changes are supported. */ )
     {
         static_cast<void>( camera_or_accessory );
         static_cast<void>( parameter );
@@ -472,7 +830,7 @@ extern "C"
     }
 
     /// Offline SDK double.
-    PicamError Picam_CloseCamera( PicamHandle camera )
+    PicamError Picam_CloseCamera( PicamHandle camera /**< [in] Camera handle. */ )
     {
         static_cast<void>( camera );
         ++picamHarness::g_fake.m_calls;
@@ -480,19 +838,22 @@ extern "C"
     }
 
     /// Offline SDK double.
-    PicamError Picam_CommitParameters( PicamHandle            camera_or_accessory,
-                                       const PicamParameter **failed_parameter_array,
-                                       piint                 *failed_parameter_count )
+    PicamError Picam_CommitParameters(
+        PicamHandle            camera_or_accessory /**< [in] Camera or accessory handle. */,
+        const PicamParameter **failed_parameter_array /**< [out] SDK array of parameters that failed to commit. */,
+        piint                 *failed_parameter_count /**< [out] Number of failed parameters. */ )
     {
         static_cast<void>( camera_or_accessory );
         static_cast<void>( failed_parameter_array );
         static_cast<void>( failed_parameter_count );
         ++picamHarness::g_fake.m_calls;
+        *failed_parameter_array = nullptr;
+        *failed_parameter_count = 0;
         return PicamError_None;
     }
 
     /// Offline SDK double.
-    PicamError Picam_DestroyCameraIDs( const PicamCameraID *id_array )
+    PicamError Picam_DestroyCameraIDs( const PicamCameraID *id_array /**< [in] SDK camera identifiers. */ )
     {
         static_cast<void>( id_array );
         ++picamHarness::g_fake.m_calls;
@@ -501,7 +862,8 @@ extern "C"
     }
 
     /// Offline SDK double.
-    PicamError Picam_DestroyParameters( const PicamParameter *parameter_array )
+    PicamError Picam_DestroyParameters(
+        const PicamParameter *parameter_array /**< [in] SDK-owned parameter identifiers to release. */ )
     {
         static_cast<void>( parameter_array );
         ++picamHarness::g_fake.m_calls;
@@ -509,7 +871,8 @@ extern "C"
     }
 
     /// Offline SDK double.
-    PicamError Picam_DestroyRangeConstraints( const PicamRangeConstraint *constraint_array )
+    PicamError
+    Picam_DestroyRangeConstraints( const PicamRangeConstraint *constraint_array /**< [in] SDK range constraints. */ )
     {
         static_cast<void>( constraint_array );
         ++picamHarness::g_fake.m_calls;
@@ -519,7 +882,7 @@ extern "C"
     }
 
     /// Offline SDK double.
-    PicamError Picam_DestroyRois( const PicamRois *rois )
+    PicamError Picam_DestroyRois( const PicamRois *rois /**< [in] ROI descriptors. */ )
     {
         static_cast<void>( rois );
         ++picamHarness::g_fake.m_calls;
@@ -527,7 +890,7 @@ extern "C"
     }
 
     /// Offline SDK double.
-    PicamError Picam_DestroyString( const pichar *s )
+    PicamError Picam_DestroyString( const pichar *s /**< [in] SDK enumeration description. */ )
     {
         static_cast<void>( s );
         ++picamHarness::g_fake.m_calls;
@@ -535,7 +898,9 @@ extern "C"
     }
 
     /// Offline SDK double.
-    PicamError Picam_DoesParameterExist( PicamHandle camera_or_accessory, PicamParameter parameter, pibln *exists )
+    PicamError Picam_DoesParameterExist( PicamHandle    camera_or_accessory /**< [in] Camera or accessory handle. */,
+                                         PicamParameter parameter /**< [in] Parameter to access. */,
+                                         pibln         *exists /**< [out] Whether the parameter is available. */ )
     {
         static_cast<void>( camera_or_accessory );
         static_cast<void>( parameter );
@@ -546,7 +911,8 @@ extern "C"
     }
 
     /// Offline SDK double.
-    PicamError Picam_GetAvailableCameraIDs( const PicamCameraID **id_array, piint *id_count )
+    PicamError Picam_GetAvailableCameraIDs( const PicamCameraID **id_array /**< [out] SDK camera identifiers. */,
+                                            piint                *id_count /**< [out] Number of camera identifiers. */ )
     {
         static_cast<void>( id_array );
         static_cast<void>( id_count );
@@ -558,7 +924,9 @@ extern "C"
     }
 
     /// Offline SDK double.
-    PicamError Picam_GetEnumerationString( PicamEnumeratedType type, piint value, const pichar **s )
+    PicamError Picam_GetEnumerationString( PicamEnumeratedType type /**< [in] Enumeration type. */,
+                                           piint               value /**< [in] Parameter value. */,
+                                           const pichar      **s /**< [out] SDK enumeration description. */ )
     {
         static_cast<void>( type );
         static_cast<void>( value );
@@ -570,40 +938,63 @@ extern "C"
 
     /// Offline SDK double.
     PicamError
-    Picam_GetParameterFloatingPointValue( PicamHandle camera_or_accessory, PicamParameter parameter, piflt *value )
+    Picam_GetParameterFloatingPointValue( PicamHandle    camera_or_accessory /**< [in] Camera or accessory handle. */,
+                                          PicamParameter parameter /**< [in] Parameter to access. */,
+                                          piflt         *value /**< [out] Parameter value. */ )
     {
         static_cast<void>( camera_or_accessory );
         static_cast<void>( parameter );
         static_cast<void>( value );
         ++picamHarness::g_fake.m_calls;
+        if( parameter == PicamParameter_SensorTemperatureReading &&
+            picamHarness::g_fake.m_temperatureError != PicamError_None )
+            return picamHarness::g_fake.m_temperatureError;
+        *value = parameter == PicamParameter_SensorTemperatureReading ? picamHarness::g_fake.m_temperature : 1;
         return PicamError_None;
     }
 
     /// Offline SDK double.
-    PicamError Picam_GetParameterIntegerValue( PicamHandle camera_or_accessory, PicamParameter parameter, piint *value )
+    PicamError Picam_GetParameterIntegerValue( PicamHandle camera_or_accessory /**< [in] Camera or accessory handle. */,
+                                               PicamParameter parameter /**< [in] Parameter to access. */,
+                                               piint         *value /**< [out] Parameter value. */ )
     {
         static_cast<void>( camera_or_accessory );
         static_cast<void>( parameter );
         static_cast<void>( value );
         ++picamHarness::g_fake.m_calls;
+        *value = 1;
+        if( parameter == PicamParameter_SensorTemperatureStatus )
+        {
+            if( picamHarness::g_fake.m_temperatureStatusError != PicamError_None )
+                return picamHarness::g_fake.m_temperatureStatusError;
+            *value = picamHarness::g_fake.m_temperatureStatus;
+        }
+        else if( parameter == PicamParameter_ReadoutControlMode )
+            *value = PicamReadoutControlMode_FrameTransfer;
+        else if( parameter == PicamParameter_AdcEMGain )
+            *value = picamHarness::g_fake.m_gain;
         return PicamError_None;
     }
 
     /// Offline SDK double.
-    PicamError Picam_GetParameterLargeIntegerValue( PicamHandle camera, PicamParameter parameter, pi64s *value )
+    PicamError Picam_GetParameterLargeIntegerValue( PicamHandle    camera /**< [in] Camera handle. */,
+                                                    PicamParameter parameter /**< [in] Parameter to access. */,
+                                                    pi64s         *value /**< [out] Parameter value. */ )
     {
         static_cast<void>( camera );
         static_cast<void>( parameter );
         static_cast<void>( value );
         ++picamHarness::g_fake.m_calls;
+        *value = 1;
         return PicamError_None;
     }
 
     /// Offline SDK double.
-    PicamError Picam_GetParameterRangeConstraint( PicamHandle                  camera_or_accessory,
-                                                  PicamParameter               parameter,
-                                                  PicamConstraintCategory      category,
-                                                  const PicamRangeConstraint **constraint )
+    PicamError
+    Picam_GetParameterRangeConstraint( PicamHandle    camera_or_accessory /**< [in] Camera or accessory handle. */,
+                                       PicamParameter parameter /**< [in] Parameter to access. */,
+                                       PicamConstraintCategory      category /**< [in] Constraint category to query. */,
+                                       const PicamRangeConstraint **constraint /**< [out] Allocated required range. */ )
     {
         static_cast<void>( camera_or_accessory );
         static_cast<void>( parameter );
@@ -618,12 +1009,16 @@ extern "C"
     }
 
     /// Offline SDK double.
-    PicamError Picam_GetParameterRoisValue( PicamHandle camera, PicamParameter parameter, const PicamRois **value )
+    PicamError Picam_GetParameterRoisValue( PicamHandle       camera /**< [in] Camera handle. */,
+                                            PicamParameter    parameter /**< [in] Parameter to access. */,
+                                            const PicamRois **value /**< [out] Parameter value. */ )
     {
         static_cast<void>( camera );
         static_cast<void>( parameter );
         static_cast<void>( value );
         ++picamHarness::g_fake.m_calls;
+        static PicamRois rois{ &picamHarness::g_fake.m_roi, 1 };
+        *value = &rois;
         return PicamError_None;
     }
 
@@ -635,7 +1030,8 @@ extern "C"
     }
 
     /// Offline SDK double.
-    PicamError Picam_IsAcquisitionRunning( PicamHandle camera, pibln *running )
+    PicamError Picam_IsAcquisitionRunning( PicamHandle camera /**< [in] Camera handle. */,
+                                           pibln      *running /**< [out] Whether acquisition is running. */ )
     {
         static_cast<void>( camera );
         static_cast<void>( running );
@@ -645,18 +1041,24 @@ extern "C"
 
     /// Offline SDK double.
     PicamError
-    Picam_SetParameterFloatingPointValue( PicamHandle camera_or_accessory, PicamParameter parameter, piflt value )
+    Picam_SetParameterFloatingPointValue( PicamHandle    camera_or_accessory /**< [in] Camera or accessory handle. */,
+                                          PicamParameter parameter /**< [in] Parameter to access. */,
+                                          piflt          value /**< [in] Parameter value. */ )
     {
         static_cast<void>( camera_or_accessory );
         static_cast<void>( parameter );
         static_cast<void>( value );
         ++picamHarness::g_fake.m_calls;
         ++picamHarness::g_fake.m_writes;
+        if( parameter == PicamParameter_SensorTemperatureSetPoint )
+            picamHarness::g_fake.m_temperatureTarget = value;
         return PicamError_None;
     }
 
     /// Offline SDK double.
-    PicamError Picam_SetParameterFloatingPointValueOnline( PicamHandle camera, PicamParameter parameter, piflt value )
+    PicamError Picam_SetParameterFloatingPointValueOnline( PicamHandle    camera /**< [in] Camera handle. */,
+                                                           PicamParameter parameter /**< [in] Parameter to access. */,
+                                                           piflt          value /**< [in] Parameter value. */ )
     {
         static_cast<void>( camera );
         static_cast<void>( parameter );
@@ -666,7 +1068,9 @@ extern "C"
     }
 
     /// Offline SDK double.
-    PicamError Picam_SetParameterIntegerValue( PicamHandle camera_or_accessory, PicamParameter parameter, piint value )
+    PicamError Picam_SetParameterIntegerValue( PicamHandle camera_or_accessory /**< [in] Camera or accessory handle. */,
+                                               PicamParameter parameter /**< [in] Parameter to access. */,
+                                               piint          value /**< [in] Parameter value. */ )
     {
         static_cast<void>( camera_or_accessory );
         static_cast<void>( parameter );
@@ -676,7 +1080,28 @@ extern "C"
     }
 
     /// Offline SDK double.
-    PicamError Picam_SetParameterIntegerValueOnline( PicamHandle camera, PicamParameter parameter, piint value )
+    PicamError Picam_SetParameterIntegerValueOnline( PicamHandle    camera /**< [in] Camera handle. */,
+                                                     PicamParameter parameter /**< [in] Parameter to access. */,
+                                                     piint          value /**< [in] Parameter value. */ )
+    {
+        static_cast<void>( camera );
+        static_cast<void>( parameter );
+        static_cast<void>( value );
+        ++picamHarness::g_fake.m_calls;
+        if( parameter == PicamParameter_AdcEMGain )
+        {
+            ++picamHarness::g_fake.m_gainWrites;
+            if( picamHarness::g_fake.m_gainError != PicamError_None )
+                return picamHarness::g_fake.m_gainError;
+            picamHarness::g_fake.m_gain = value;
+        }
+        return PicamError_None;
+    }
+
+    /// Offline SDK double.
+    PicamError Picam_SetParameterLargeIntegerValue( PicamHandle    camera /**< [in] Camera handle. */,
+                                                    PicamParameter parameter /**< [in] Parameter to access. */,
+                                                    pi64s          value /**< [in] Parameter value. */ )
     {
         static_cast<void>( camera );
         static_cast<void>( parameter );
@@ -686,7 +1111,9 @@ extern "C"
     }
 
     /// Offline SDK double.
-    PicamError Picam_SetParameterLargeIntegerValue( PicamHandle camera, PicamParameter parameter, pi64s value )
+    PicamError Picam_SetParameterRoisValue( PicamHandle      camera /**< [in] Camera handle. */,
+                                            PicamParameter   parameter /**< [in] Parameter to access. */,
+                                            const PicamRois *value /**< [in] Parameter value. */ )
     {
         static_cast<void>( camera );
         static_cast<void>( parameter );
@@ -696,17 +1123,7 @@ extern "C"
     }
 
     /// Offline SDK double.
-    PicamError Picam_SetParameterRoisValue( PicamHandle camera, PicamParameter parameter, const PicamRois *value )
-    {
-        static_cast<void>( camera );
-        static_cast<void>( parameter );
-        static_cast<void>( value );
-        ++picamHarness::g_fake.m_calls;
-        return PicamError_None;
-    }
-
-    /// Offline SDK double.
-    PicamError Picam_StartAcquisition( PicamHandle camera )
+    PicamError Picam_StartAcquisition( PicamHandle camera /**< [in] Camera handle. */ )
     {
         static_cast<void>( camera );
         ++picamHarness::g_fake.m_calls;
@@ -714,7 +1131,7 @@ extern "C"
     }
 
     /// Offline SDK double.
-    PicamError Picam_StopAcquisition( PicamHandle camera )
+    PicamError Picam_StopAcquisition( PicamHandle camera /**< [in] Camera handle. */ )
     {
         static_cast<void>( camera );
         ++picamHarness::g_fake.m_calls;
@@ -729,10 +1146,10 @@ extern "C"
     }
 
     /// Offline SDK double.
-    PicamError Picam_WaitForAcquisitionUpdate( PicamHandle             camera,
-                                               piint                   readout_time_out,
-                                               PicamAvailableData     *available,
-                                               PicamAcquisitionStatus *status )
+    PicamError Picam_WaitForAcquisitionUpdate( PicamHandle         camera /**< [in] Camera handle. */,
+                                               piint               readout_time_out /**< [in] Acquisition timeout. */,
+                                               PicamAvailableData *available /**< [out] Available readout data. */,
+                                               PicamAcquisitionStatus *status /**< [out] Acquisition status. */ )
     {
         static_cast<void>( camera );
         static_cast<void>( readout_time_out );

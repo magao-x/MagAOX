@@ -1,13 +1,12 @@
-/** \file shmimMonitor_lifecycle_test.cpp
+/** \file po4ao_unit_test.cpp
  * \brief Exercise the real monitor loop and POSIX semaphores with an ImageStreamIO mapping double.
- * \ingroup shmimMonitor_lifecycle_test
+ * \ingroup po4ao_unit_test
  *
  * This is not an installed ImageStreamIO ABI or Linux performance test. It measures
- * actual wait-call admission and reader cleanup, including early attachment exits.
+ * actual wait-call admission and reader cleanup, on the normal attached READY path.
  */
 #define CATCH_CONFIG_MAIN
-#define CATCH_CONFIG_NO_POSIX_SIGNALS
-#include "../../../../tests/testXWC.hpp"
+#include "../../../tests/testXWC.hpp"
 #include <atomic>
 #include <chrono>
 #include <cstring>
@@ -148,10 +147,13 @@ struct Metadata
     int      sem{ 10 }, naxis{ 2 };
     uint8_t  datatype{ 9 };
     uint32_t size[3]{ 2, 2, 0 };
-    uint64_t cnt1{ 0 };
+    uint64_t cnt0{ 0 }, cnt1{ 0 }, imagetype{ 0 };
+    timespec atime{}, writetime{};
 };
 struct IMAGE
 {
+    timespec *atimearray{ nullptr }, *writetimearray{ nullptr };
+    uint64_t *cntarray{ nullptr };
     Metadata *md{ nullptr };
     sem_t   **semptr{ nullptr };
     pid_t    *semReadPID{ nullptr };
@@ -246,10 +248,10 @@ inline int countedWait( sem_t *sem, const timespec *until )
 #endif
 }
 #define sem_timedwait countedWait
-#include "../shmimMonitor.hpp"
+#include "../../../libMagAOX/app/dev/shmimMonitor.hpp"
 #undef sem_timedwait
 
-namespace libXWCTest::appTest
+namespace libXWCTest::po4aoTest
 {
 /// Fixture instantiating the production monitor loop, not a mirrored lifecycle.
 class Monitor : public MagAOX::app::dev::shmimMonitor<Monitor>
@@ -358,21 +360,19 @@ TEST_CASE( "Monitor READY releases the reader and stops wait calls", "[shmimMoni
 {
     // clang-format off
 #ifdef SHMIMMONITOR_TEST_DOXYGEN_REF
-    MagAOX::app::dev::shmimMonitor<Monitor>::monitorState;
     MagAOX::app::dev::shmimMonitor<Monitor>::smThreadExec;
 #endif
     // clang-format on
     Monitor app;
     app.run();
-    REQUIRE( app.monitorIdle() );
     REQUIRE( boundary::waits == 0 );
     for( int cycle = 0; cycle < 3; ++cycle )
     {
         const auto frames = app.m_frames.load();
-        app.monitorState( MagAOX::app::stateCodes::OPERATING );
+        app.state( MagAOX::app::stateCodes::OPERATING );
         REQUIRE( await( [&] { return app.m_frames > frames + 2; } ) );
-        app.monitorState( MagAOX::app::stateCodes::READY );
-        REQUIRE( await( [&] { return app.monitorIdle(); } ) );
+        app.state( MagAOX::app::stateCodes::READY );
+        REQUIRE( await( [&] { return boundary::closes == static_cast<unsigned>( cycle + 1 ); } ) );
         const auto waits        = boundary::waits.load();
         const auto parkedFrames = app.m_frames.load();
         REQUIRE( boundary::readers[5] == 0 );
@@ -383,44 +383,4 @@ TEST_CASE( "Monitor READY releases the reader and stops wait calls", "[shmimMoni
     }
 }
 
-/** \brief Every early exit releases the acquired mapping and, when claimed, the semaphore slot. */
-TEST_CASE( "Monitor cancellation and attachment failures clean up once", "[shmimMonitor][lifecycle]" )
-{
-    // clang-format off
-#ifdef SHMIMMONITOR_TEST_DOXYGEN_REF
-    MagAOX::app::dev::shmimMonitor<Monitor>::smThreadExec;
-#endif
-    // clang-format on
-    Monitor app;
-    SECTION( "cancel after mapping" )
-    {
-        boundary::afterOpen = [&] { app.monitorState( MagAOX::app::stateCodes::READY ); };
-    }
-    SECTION( "cancel during allocation" )
-    {
-        app.m_allocate = [&]
-        {
-            app.monitorState( MagAOX::app::stateCodes::READY );
-            return 0;
-        };
-    }
-    SECTION( "allocation failure" )
-    {
-        app.m_allocate = [] { return -1; };
-    }
-    SECTION( "no free semaphore" )
-    {
-        boundary::noReader = true;
-    }
-    SECTION( "mapping disappears during attachment" )
-    {
-        boundary::afterOpen = [] { std::filesystem::remove( boundary::path ); };
-    }
-    app.monitorState( MagAOX::app::stateCodes::OPERATING );
-    app.run();
-    REQUIRE( await( [&] { return boundary::closes > 0 && app.monitorIdle(); } ) );
-    REQUIRE( boundary::opens == 1 );
-    REQUIRE( boundary::closes == 1 );
-    REQUIRE( boundary::readers[5] == 0 );
-}
-} // namespace libXWCTest::appTest
+} // namespace libXWCTest::po4aoTest

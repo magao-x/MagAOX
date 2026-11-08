@@ -29,3 +29,11 @@ telemetry: .build/po4ao_telemetry_test
 routing: .build/po4ao_route_io_test
 	./.build/po4ao_route_io_test
 .PHONY: routing
+
+# Unchanged upstream monitor with real POSIX semaphores and a mapping boundary double.
+.build/po4ao_monitor_test: po4ao_monitor_test.cpp ../../../libMagAOX/app/dev/shmimMonitor.hpp stubs/ImageStreamIO/ImageStreamIO.h
+	mkdir -p .build
+	$(CXX) $(CXXFLAGS) -Istubs -I../../../libMagAOX/app $< -o $@
+monitor: .build/po4ao_monitor_test
+	./.build/po4ao_monitor_test
+.PHONY: monitor

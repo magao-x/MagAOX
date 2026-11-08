@@ -93,6 +93,7 @@ class po4ao
     size_t             m_explorationNoiseRows{ 1 }, m_explorationNoiseCols{ 2 }; ///< Exploration table dimensions.
     EngineBundle       m_model;                                                  ///< Retained model identity fixture.
     EngineBundle      *m_activeEngine{ &m_model }; ///< Policy selected by the frame callback.
+    std::mutex m_callbackMutex; ///< App callback and allocation ownership boundary.
     std::atomic<bool>  m_useNeuralNetwork{ true },
         m_replayShutdown{ false }; ///< Policy eligibility and publisher shutdown flags.
     std::atomic<uint64_t> m_controlRequest{ 3 }, m_appliedControl{ 0 },

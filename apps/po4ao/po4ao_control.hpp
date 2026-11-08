@@ -213,6 +213,7 @@ inline void po4ao::beginWarmupCollection( uint64_t generation, uint64_t control,
 inline int po4ao::processImage( void *curr_src, const dev::shmimT &dummy )
 {
     static_cast<void>( dummy );
+    std::lock_guard<std::mutex> callbackLock( m_callbackMutex );
     if( !m_runAdmission.load( std::memory_order_acquire ) )
         return 0;
     const auto started       = std::chrono::steady_clock::now();

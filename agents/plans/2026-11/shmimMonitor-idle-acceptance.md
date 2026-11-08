@@ -4,25 +4,13 @@ Prepared 2026-11-08. This is an operator-run test plan, not a deployment approva
 
 ## Current release gate
 
-Do not qualify the current checkout as the final candidate yet. It contains uncommitted review fixes and is not reconciled with current `dev`.
+The review fixes are committed, and the dedicated feature branch integrates `dev` at `16138ab7b5b90bae028fb09aeb2c73e3f391844a`. See the [integration record](shmimMonitor-idle-apps.md#current-dev-integration-decision-2026-11-08) for conflict resolutions and workstation evidence. PR #418 is already included by ancestry. Nothing has been pushed or deployed by this integration.
 
-A disposable local merge check included the entire working diff and untracked evidence on `d9d37b2c2825974a50de89f995b721e32fec3702`. The check fetched `dev` from GitHub at `16138ab7b5b90bae028fb09aeb2c73e3f391844a` and found seven conflict paths:
-
-- `gui/lib/multiIndiPublisher.hpp`
-- `libMagAOX/Makefile`
-- `libMagAOX/app/dev/shmimMonitor.hpp`
-- `libMagAOX/logger/logCodes.dat`
-- `libMagAOX/logger/logMeta.cpp`
-- `tests/Makefile.one`
-- `tests/groups.dox`
-
-The monitor conflict includes new upstream observational events and existing lifecycle changes; retain both and verify their ordering through attachment, discarded frames, cancellation and disconnection. The telemetry conflict is semantic: our `TELEM_PO4AO` uses 20906, already allocated on current `dev` to `telem_fgstage` (20907 is also occupied). Select an actually unused event code during integration, regenerate the logger outputs, retain all upstream registrations, and test encoding/decoding. Do not resolve these conflicts by choosing one whole side. Also inspect automatically merged `MagAOXApp.hpp` and telemetry code; a textual merge is not a functional check.
-
-This inspection did not merge, rebase, commit or push the working branch. Temporary merge evidence is in `/var/folders/jm/rz0ltx9x05z9rjmd9g3fn_3w0000gn/T/po4ao-dev-compat-06i05kfi/metadata.json` and `merge-tree.txt`. Only the temporary repository contains its snapshot commit. Recheck the remote tip before final integration.
+The user approved unchanged upstream READY behavior. NN Disable, whole-app PO4AO Stop and collector Stop/completion acknowledge app work completion and an asynchronous READY request. They do not acknowledge that the mapping has closed. Observe reader release and absence of semaphore waits separately during qualification. The shared monitor, base app and generic GUI publisher match dev; PO4AO telemetry uses new code 20908 without changing upstream codes 20906/20907.
 
 ## 1. Freeze and validate a candidate off instrument
 
-1. Commit the reviewed fixes with their engineering record on the feature branch; preserve unrelated work. Integrate current `dev`, resolve the conflicts above, and preserve PR #418 plus GUI, saved pairs, independent controls and collector improvements. Do not use `nnreconstructor-speedups`.
+1. Freeze the integrated feature-branch commit and check for newer dev changes before final qualification. Preserve PR #418 plus GUI, saved pairs, independent controls and collector improvements. Do not use `nnreconstructor-speedups`.
 2. Build libMagAOX and regenerated logger definitions, all affected native apps, log readers and the GUI against the actual intended Linux/milk/ImageStreamIO/CUDA/TensorRT versions. Include relevant common-app and upstream monitor-event tests, not only these app fixtures. Rerun the app, GUI, trainer, collector and telemetry suites after integration.
 3. Run a real ImageStreamIO synthetic producer in an isolated environment. Exercise missing-source startup, attachment cancellation, rapid stop/start, stalled producer and stream recreation. Observe actual semaphore reader ownership and monitor-thread waits while the producer continues. CPU reduction alone is not proof of detachment.
 4. On an isolated GPU host, test repeated NN Disable/Enable, invalid engine and load failure, disable during load/inference, final zero and no late residency. Verify owned resources are released; a retained CUDA context may still use VRAM. Decode real PO4AO telemetry, including idle and model-transition windows.
@@ -56,12 +44,12 @@ Start with the optional trainer stopped so native routing is tested independentl
 
 | Test | Action | Required result |
 | --- | --- | --- |
-| NN lifecycle | With a safe operator-managed output arrangement, Enable, then Disable NN while WFS frames continue; repeat Enable | Off only after in-flight work and final zero finish, input detaches, `resident` clears, `loaded` stays; Enable recreates resources and waits for fresh inference |
+| NN lifecycle | With a safe operator-managed output arrangement, Enable, then Disable NN while WFS frames continue; repeat Enable | Off only after in-flight work, final zero and owned GPU cleanup finish; READY requested, `resident` clears, `loaded` stays; independently verify eventual input detachment; Enable recreates resources and waits for fresh inference |
 | NN/CACAO handover | Use compound Switch to CNN / Switch to CACAO, then selected-model Set reconstructor | Exactly one actual writer after completion; no simultaneous NN/CACAO publication; requested/loaded/resident/active states agree with observations |
-| PO4AO Stop | Pause learning; note selected policy and actual writer; press Stop PO4AO | Busy then stopped/verified; route is `aol1_modevalWFS`; actual mfilt input inode/counters prove consumption; prior writer restored; only then READY and input detachment |
+| PO4AO Stop | Pause learning; note selected policy and actual writer; press Stop PO4AO | Busy then stopped/verified; route is `aol1_modevalWFS`; actual mfilt input inode/counters prove consumption; prior writer restored; only then app work drains and READY is requested; independently verify eventual input detachment |
 | PO4AO Start | Press Start PO4AO | Fresh PO4AO output exists before routing; calibration-driven new writer is observed before NN restoration; mfilt consumes `po4ao_output`; running/verified only after completion |
 | Both writer owners | Repeat Start/Stop with CACAO initially owning the reconstruction output, then NN initially owning it | Each request restores its own captured writer; modulation preference is preserved by routing; no writer overlap |
-| Policy versus app | Toggle Enable/Disable policy separately, then Stop/Start the app | Policy toggle selects policy/fallback, without claiming whole-app detachment; app Stop detaches but retains policy selection; Start never resumes learning |
+| Policy versus app | Toggle Enable/Disable policy separately, then Stop/Start the app | Policy toggle selects policy/fallback, without claiming whole-app detachment; app Stop requests READY and retains policy selection; Start never resumes learning |
 | Acknowledgements | Check visible reset/reload gates and normal Busy → terminal progression | No permanently disabled button after an explicit rejection; unresolved timeout remains unknown and is not automatically retried |
 | Idle cost | Leave source frames running with NN disabled, PO4AO stopped and collector idle | Their input reader slots are released and monitor threads no longer wake on each source frame; record rate/counter and thread-wait evidence, not CPU usage alone |
 

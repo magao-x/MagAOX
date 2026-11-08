@@ -7,6 +7,7 @@
 #include "../po4aoRouting.hpp"
 #include "../po4ao_utils.hpp"
 #include <condition_variable>
+#include <future>
 
 /// \cond TEST_HARNESS
 namespace po4aoRunHarness
@@ -49,6 +50,7 @@ struct po4ao : MagAOXApp<true>, dev::shmimMonitor<po4ao>
     std::string           m_outputChannel{ "po4ao_output" }; ///< Fixed instrument route under test.
     Po4aoRouteSnapshot    m_runSnapshot;
     std::thread           m_runThread;
+    std::mutex m_callbackMutex; ///< App callback and allocation ownership boundary.
     std::atomic<bool>     m_runCancel{ false }, m_runAdmission{ true };
     std::atomic<uint64_t> m_outputSequence{ 0 };
     bool m_runPending{ false }, m_runBusy{ false }, m_runTarget{ true }, m_runRunning{ true }, m_runVerified{ false },
@@ -111,7 +113,7 @@ void RouteIO::verifyConsumption( const std::string &, Po4aoRouteBackend::Deadlin
 }
 po4ao::po4ao() : MagAOXApp<true>( 0, 0 )
 {
-    monitorState( stateCodes::OPERATING );
+    state( stateCodes::OPERATING );
     m_indiP_run.add( pcf::IndiElement( "toggle", pcf::IndiElement::On ) );
     for( const auto *element : { "phase", "route", "error", "owner", "verified" } )
         m_indiP_runStatus.add( pcf::IndiElement( element ) );
@@ -145,14 +147,15 @@ TEST_CASE( "Production PO4AO worker parks only after verified consumption", "[po
     po4aoRunHarness::po4ao app;
     app.m_routeIO.failVerify = true;
     app.runWorker( false );
-    REQUIRE_FALSE( app.monitorIdle() );
+    REQUIRE( app.state() == MagAOX::app::stateCodes::OPERATING );
     REQUIRE( app.m_runAdmission.load() );
     REQUIRE( app.m_runPhase == "failed" );
     REQUIRE_FALSE( app.m_runVerified );
     REQUIRE( app.m_runError.find( "stalled consumer" ) != std::string::npos );
     app.m_routeIO.failVerify = false;
     app.runWorker( false );
-    REQUIRE( app.monitorIdle() );
+    app.updateRunControl();
+    REQUIRE( app.state() == MagAOX::app::stateCodes::READY );
     REQUIRE_FALSE( app.m_runAdmission.load() );
     REQUIRE( app.m_runPhase == "stopped" );
     REQUIRE( app.m_runVerified );
@@ -160,6 +163,34 @@ TEST_CASE( "Production PO4AO worker parks only after verified consumption", "[po
     // clang-format off
 #ifdef PO4AO_TEST_DOXYGEN_REF
     MagAOX::app::po4ao::runWorker;
+#endif
+    // clang-format on
+}
+
+/** \brief Stop drains app work without requiring a monitor mapping-closed acknowledgement. */
+TEST_CASE( "PO4AO Stop waits for the active callback", "[po4ao][runWorker]" )
+{
+    po4aoRunHarness::po4ao app;
+    std::unique_lock<std::mutex> callbackLock( app.m_callbackMutex );
+    auto worker = std::async( std::launch::async, [&] { app.runWorker( false ); } );
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds( 2 );
+    while( app.m_runAdmission.load() && std::chrono::steady_clock::now() < deadline )
+    {
+        std::this_thread::yield();
+    }
+    const bool admissionClosed = !app.m_runAdmission.load();
+    const bool waiting = worker.wait_for( std::chrono::milliseconds( 20 ) ) == std::future_status::timeout;
+    callbackLock.unlock();
+    worker.get();
+    REQUIRE( admissionClosed );
+    REQUIRE( waiting );
+    REQUIRE( app.m_runVerified );
+    app.updateRunControl();
+    REQUIRE( app.state() == MagAOX::app::stateCodes::READY );
+    // clang-format off
+#ifdef PO4AO_TEST_DOXYGEN_REF
+    MagAOX::app::po4ao::runWorker;
+    MagAOX::app::po4ao::updateRunControl;
 #endif
     // clang-format on
 }
@@ -310,7 +341,7 @@ TEST_CASE( "Run worker does not release or park after incomplete calibration", "
     REQUIRE( app.m_runPhase == "failed" );
     REQUIRE( app.m_nnRoutingPhase == "held" );
     REQUIRE( app.m_nnRoutingOwner == app.m_runOwner );
-    REQUIRE_FALSE( app.monitorIdle() );
+    REQUIRE( app.state() == MagAOX::app::stateCodes::OPERATING );
     REQUIRE_FALSE( app.m_runVerified );
     REQUIRE( app.m_routeIO.events == std::vector<std::string>{ "capture", "hold", "switch", "default" } );
     pcf::IndiProperty request( pcf::IndiProperty::Switch );
