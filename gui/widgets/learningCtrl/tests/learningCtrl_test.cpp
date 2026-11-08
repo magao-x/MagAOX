@@ -1049,31 +1049,32 @@ TEST_CASE( "Save the compact panel preview", "[.preview]" )
 }
 
 /** \brief Whole-app Start/Stop sends native explicit targets without the optional trainer. */
-TEST_CASE("Whole-app PO4AO controls are independent of policy selection", "[learningCtrl]")
+TEST_CASE( "Whole-app PO4AO controls are independent of policy selection", "[learningCtrl]" )
 {
-    Fixture f(false);
-    f.runtime(true);
-    f.define(runtimeSwitch("run_enable",true));
-    f.define(text("po4ao","run_status",{{"phase","running"},{"route","po4ao_output"},{"error",""}}));
-    REQUIRE(f.control<QPushButton>("buttonRunPO4AO")->isEnabled());
-    REQUIRE(f.control<QPushButton>("buttonRunPO4AO")->text() == "Stop PO4AO");
+    Fixture f( false );
+    f.runtime( true );
+    f.define( runtimeSwitch( "run_enable", true ) );
+    f.define( text( "po4ao", "run_status", { { "phase", "running" }, { "route", "po4ao_output" }, { "error", "" } } ) );
+    REQUIRE( f.control<QPushButton>( "buttonRunPO4AO" )->isEnabled() );
+    REQUIRE( f.control<QPushButton>( "buttonRunPO4AO" )->text() == "Stop PO4AO" );
     f.m_widget.on_buttonRunPO4AO_clicked();
-    REQUIRE(f.m_publisher.m_commands.back().getDevice() == "po4ao");
-    REQUIRE(f.m_publisher.m_commands.back().getName() == "run_enable");
-    REQUIRE(f.m_publisher.m_commands.back()["toggle"].getSwitchState() == pcf::IndiElement::Off);
-    f.m_publisher.handleSetProperty(runtimeSwitch("run_enable",true,pcf::IndiProperty::Busy));
-    f.m_publisher.handleSetProperty(text("po4ao","run_status",{{"phase","switching_input"}}));
+    REQUIRE( f.m_publisher.m_commands.back().getDevice() == "po4ao" );
+    REQUIRE( f.m_publisher.m_commands.back().getName() == "run_enable" );
+    REQUIRE( f.m_publisher.m_commands.back()["toggle"].getSwitchState() == pcf::IndiElement::Off );
+    f.m_publisher.handleSetProperty( runtimeSwitch( "run_enable", true, pcf::IndiProperty::Busy ) );
+    f.m_publisher.handleSetProperty( text( "po4ao", "run_status", { { "phase", "switching_input" } } ) );
     drain();
-    REQUIRE_FALSE(f.control<QPushButton>("buttonRunPO4AO")->isEnabled());
-    REQUIRE_FALSE(f.control<QPushButton>("buttonPO4AO")->isEnabled());
-    REQUIRE_FALSE(f.control<QPushButton>("buttonWarmup")->isEnabled());
-    f.m_publisher.handleSetProperty(runtimeSwitch("run_enable",false));
-    f.m_publisher.handleSetProperty(text("po4ao","run_status",{{"phase","stopped"},{"route","aol1_modevalWFS"}}));
+    REQUIRE_FALSE( f.control<QPushButton>( "buttonRunPO4AO" )->isEnabled() );
+    REQUIRE_FALSE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
+    REQUIRE_FALSE( f.control<QPushButton>( "buttonWarmup" )->isEnabled() );
+    f.m_publisher.handleSetProperty( runtimeSwitch( "run_enable", false ) );
+    f.m_publisher.handleSetProperty(
+        text( "po4ao", "run_status", { { "phase", "stopped" }, { "route", "aol1_modevalWFS" } } ) );
     drain();
-    REQUIRE(f.control<QPushButton>("buttonRunPO4AO")->text() == "Start PO4AO");
-    REQUIRE(f.control<QPushButton>("buttonPO4AO")->text() == "Disable policy");
-    REQUIRE(f.control<QPushButton>("buttonPO4AO")->isEnabled());
-    REQUIRE_FALSE(f.control<QPushButton>("buttonWarmup")->isEnabled());
+    REQUIRE( f.control<QPushButton>( "buttonRunPO4AO" )->text() == "Start PO4AO" );
+    REQUIRE( f.control<QPushButton>( "buttonPO4AO" )->text() == "Disable policy" );
+    REQUIRE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
+    REQUIRE_FALSE( f.control<QPushButton>( "buttonWarmup" )->isEnabled() );
 }
 
 } // namespace learningCtrlGUITest

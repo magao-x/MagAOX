@@ -260,10 +260,10 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>, public de
 
     uint64_t m_statusSequence{ 0 }; ///< App-logic heartbeat independent of unchanged control values.
 
-    Po4aoSamples m_runtimeSamples; ///< Coherent fixed-size callback telemetry window.
-    uint64_t m_lastTelemSequence{0}; ///< Last sequence actually written to telemetry.
+    Po4aoSamples m_runtimeSamples;         ///< Coherent fixed-size callback telemetry window.
+    uint64_t     m_lastTelemSequence{ 0 }; ///< Last sequence actually written to telemetry.
 
-    std::atomic<uint64_t>                               m_missedFrames{ 0 }; ///< Source counter discontinuities.
+    std::atomic<uint64_t> m_missedFrames{ 0 };                     ///< Source counter discontinuities.
     std::atomic<uint64_t> m_deadlineMisses{ 0 };                   ///< Callbacks exceeding the configured deadline.
     std::atomic<uint64_t> m_inferenceFailures{ 0 };                ///< Inference or result-validation failures.
     std::atomic<uint64_t> m_replayDrops{ 0 };                      ///< Episodes dropped because the publisher lagged.
@@ -277,21 +277,24 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>, public de
     pcf::IndiProperty                     m_indiP_controlToggle;   ///< Select learned control or proportional fallback.
     pcf::IndiProperty                     m_indiP_recollectWarmup; ///< Fresh warm-up collection request.
     pcf::IndiProperty                     m_indiP_runtimeStats;    ///< Latency and failure counters.
-    pcf::IndiProperty m_indiP_collectionStatus; ///< Collection identity, progress and publication completion.
-    Po4aoRouteIO m_routeIO; ///< Installed command/readback boundary, owned by the routing worker.
-    Po4aoRouteSnapshot m_runSnapshot; ///< Pre-request routing identity retained after failure.
-    std::thread m_runThread; ///< Non-real-time routing operation, joined on shutdown.
-    std::atomic<bool> m_runCancel{false}, m_runAdmission{true}; ///< Shutdown cancellation and callback admission.
-    std::atomic<uint64_t> m_outputSequence{0}; ///< Completed output publications for fresh-start verification.
-    bool m_runPending{false}, m_runBusy{false}, m_runTarget{true}, m_runRunning{true}, m_runVerified{false}, m_runCheckOnly{false}; ///< INDI-mutex-owned run intent and completion.
-    uint64_t m_runSequence{0}; ///< Unique operation number within this runtime.
-    std::string m_runPhase{"unverified"}, m_runRoute{"unknown"}, m_runError, m_runOwner; ///< Routing progress and actual input.
-    std::string m_nnDevice{"nnReconstructor"}, m_nnRoutingOwner, m_nnRoutingSource, m_nnRoutingPhase, m_nnInstance, m_nnSequence, m_reservedInstance; ///< Independent NN reservation readbacks.
-    std::chrono::steady_clock::time_point m_nnObserved{}; ///< Latest NN routing readback.
+    pcf::IndiProperty  m_indiP_collectionStatus; ///< Collection identity, progress and publication completion.
+    Po4aoRouteIO       m_routeIO;                ///< Installed command/readback boundary, owned by the routing worker.
+    Po4aoRouteSnapshot m_runSnapshot;            ///< Pre-request routing identity retained after failure.
+    std::thread        m_runThread;              ///< Non-real-time routing operation, joined on shutdown.
+    std::atomic<bool>  m_runCancel{ false }, m_runAdmission{ true }; ///< Shutdown cancellation and callback admission.
+    std::atomic<uint64_t> m_outputSequence{ 0 }; ///< Completed output publications for fresh-start verification.
+    bool m_runPending{ false }, m_runBusy{ false }, m_runTarget{ true }, m_runRunning{ true }, m_runVerified{ false },
+        m_runCheckOnly{ false };    ///< INDI-mutex-owned run intent and completion.
+    uint64_t    m_runSequence{ 0 }; ///< Unique operation number within this runtime.
+    std::string m_runPhase{ "unverified" }, m_runRoute{ "unknown" }, m_runError,
+        m_runOwner; ///< Routing progress and actual input.
+    std::string m_nnDevice{ "nnReconstructor" }, m_nnRoutingOwner, m_nnRoutingSource, m_nnRoutingPhase, m_nnInstance,
+        m_nnSequence, m_reservedInstance;                                ///< Independent NN reservation readbacks.
+    std::chrono::steady_clock::time_point m_nnObserved{};                ///< Latest NN routing readback.
     pcf::IndiProperty m_indiP_run, m_indiP_runStatus, m_indiP_nnRouting; ///< Native run control and writer reservation.
 
-    pcf::IndiProperty m_indiP_modelStatus;      ///< Active model ID and reload state.
-                                                ///@}
+    pcf::IndiProperty m_indiP_modelStatus; ///< Active model ID and reload state.
+                                           ///@}
 
   public:
     /** \name Configuration
@@ -439,26 +442,26 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>, public de
     ///@}
 
     /// Queue an explicit whole-app Start/Stop target independently of policy selection.
-    INDI_NEWCALLBACK_DECL(po4ao, m_indiP_run);
+    INDI_NEWCALLBACK_DECL( po4ao, m_indiP_run );
 
     /// Observe the independent NN writer reservation.
-    INDI_SETCALLBACK_DECL(po4ao, m_indiP_nnRouting);
+    INDI_SETCALLBACK_DECL( po4ao, m_indiP_nnRouting );
 
     /// Publish routing progress under the INDI mutex.
-    void runPhase(const std::string &phase /**< [in] Current operation stage. */);
+    void runPhase( const std::string &phase /**< [in] Current operation stage. */ );
 
     /// Wait outside locks for completion, cancellation or deadline.
-    void waitRun(const std::function<bool()> &ready /**< [in] Completion predicate. */,
-                 Po4aoRouteBackend::Deadline deadline /**< [in] Operation deadline. */);
+    void waitRun( const std::function<bool()> &ready /**< [in] Completion predicate. */,
+                  Po4aoRouteBackend::Deadline  deadline /**< [in] Operation deadline. */ );
 
     /// Request a reservation or restore the reserved writer.
-    void requestWriterHold(const std::string &action /**< [in] hold or release. */);
+    void requestWriterHold( const std::string &action /**< [in] hold or release. */ );
 
     /// Check a fresh NN routing reservation readback.
-    bool writerHeld(bool released /**< [in] Check restoration instead of reservation. */);
+    bool writerHeld( bool released /**< [in] Check restoration instead of reservation. */ );
 
     /// Run one serialized routing operation outside real-time callbacks.
-    void runWorker(bool start /**< [in] Explicit requested target. */);
+    void runWorker( bool start /**< [in] Explicit requested target. */ );
 
     /// Launch queued work and publish actual run status.
     void updateRunControl();

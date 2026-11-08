@@ -2171,7 +2171,7 @@ void MagAOXApp<_useINDI>::logMessage( bufferPtrT &b )
 
     if( logHeader::logLevel( b ) < logPrio::LOG_ERROR )
     {
-        if(!m_stateAlert.exchange(true))
+        if( !m_stateAlert.exchange( true ) )
             log<text_log>( "FSM alert set", logPrio::LOG_WARNING );
         updateState(); // A log alert must not restore a state superseded by another worker.
     }

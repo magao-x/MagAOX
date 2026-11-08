@@ -565,7 +565,7 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
     while( derived().shutdown() == 0 )
     {
         bool admitted = false;
-        { //mutex scope
+        { // mutex scope
             std::lock_guard<std::mutex> lock( m_smLifecycleMutex );
             if( derived().state() == m_targetState && !m_shmimName.empty() )
             {

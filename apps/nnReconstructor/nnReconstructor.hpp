@@ -234,7 +234,7 @@ class nnReconstructor : public MagAOXApp<true>,
     bool m_gpuReleasing{ false }; ///< Non-real-time cleanup excludes activation and loading.
 
     bool m_prepareOnly{ false }; ///< Stage GPU resources before the compound writer handover.
-    bool m_enabling{ false }; ///< Loader is preparing the retained model for activation.
+    bool m_enabling{ false };    ///< Loader is preparing the retained model for activation.
 
     bool m_loading{ false }; ///< A queued or running model replacement blocks inference.
 
@@ -288,7 +288,7 @@ class nnReconstructor : public MagAOXApp<true>,
 
     pcf::IndiProperty m_indiP_routingHold, m_indiP_routingStatus; ///< PO4AO writer reservation request and readback.
 
-    std::string m_routingOwner, m_routingSource, m_routingPhase{"idle"}; ///< Serialized routing reservation.
+    std::string m_routingOwner, m_routingSource, m_routingPhase{ "idle" }; ///< Serialized routing reservation.
 
     std::string m_switchInstance; ///< Process-lifetime identity for invalidating cached GUI state.
 
@@ -707,7 +707,11 @@ inline void nnReconstructor::replaceModel( const std::string &name, bool activat
     std::unique_ptr<IExecutionContext> nextContext( nextEngine->createExecutionContext() );
     if( !nextContext )
         throw std::runtime_error( "createExecutionContext failed" );
-    auto freeDevice = []( float *pointer ) { if( pointer ) cudaFree( pointer ); };
+    auto freeDevice = []( float *pointer )
+    {
+        if( pointer )
+            cudaFree( pointer );
+    };
     std::unique_ptr<float, decltype( freeDevice )> nextInput( nullptr, freeDevice ), nextOutput( nullptr, freeDevice );
     if( activate )
     {
@@ -715,10 +719,11 @@ inline void nnReconstructor::replaceModel( const std::string &name, bool activat
         checkCuda( cudaMalloc( reinterpret_cast<void **>( &pointer ), inputSize * sizeof( float ) ), "restore input" );
         nextInput.reset( pointer );
         pointer = nullptr;
-        checkCuda( cudaMalloc( reinterpret_cast<void **>( &pointer ), outputSize * sizeof( float ) ), "restore output" );
+        checkCuda( cudaMalloc( reinterpret_cast<void **>( &pointer ), outputSize * sizeof( float ) ),
+                   "restore output" );
         nextOutput.reset( pointer );
     }
-    { //mutex scope
+    { // mutex scope
         std::lock_guard<std::mutex> lock( m_resultMutex );
         if( m_stopping || m_cancelLoad ||
             std::chrono::duration<double>( std::chrono::steady_clock::now() - m_transitionStart ).count() >
@@ -728,23 +733,24 @@ inline void nnReconstructor::replaceModel( const std::string &name, bool activat
             throw std::runtime_error( "model preparation requires released GPU resources" );
         if( activate )
         {
-            runtime = nextRuntime.release();
-            engine = nextEngine.release();
-            context = nextContext.release();
-            d_input = nextInput.release();
+            runtime  = nextRuntime.release();
+            engine   = nextEngine.release();
+            context  = nextContext.release();
+            d_input  = nextInput.release();
             d_output = nextOutput.release();
             m_bindings.fill( nullptr );
             m_bindings[indices[0]] = d_input;
             m_bindings[indices[1]] = d_output;
-            m_gpuResident = true;
-            m_enabled = !m_prepareOnly;
-            m_sourceReady = false;
-            if( m_enabled ) shmimMonitorT::monitorState( stateCodes::OPERATING );
+            m_gpuResident          = true;
+            m_enabled              = !m_prepareOnly;
+            m_sourceReady          = false;
+            if( m_enabled )
+                shmimMonitorT::monitorState( stateCodes::OPERATING );
         }
         engineData.swap( data );
         m_loadedModel = name; // Validated host model; residency has its own readback.
         m_activeModel.clear();
-        m_updated = false;
+        m_updated           = false;
         m_waitForFreshFrame = true;
         m_fault.clear();
     }
@@ -811,11 +817,11 @@ inline nnReconstructor::~nnReconstructor() noexcept
 
 inline void nnReconstructor::fail( const std::string &reason )
 {
-    { //mutex scope
+    { // mutex scope
         std::lock_guard<std::mutex> lock( m_resultMutex );
-        m_fault   = reason;
-        m_enabled = false;
-        m_updated = false;
+        m_fault       = reason;
+        m_enabled     = false;
+        m_updated     = false;
         m_sourceReady = false;
         shmimMonitorT::monitorState( stateCodes::READY );
     }
@@ -1137,7 +1143,7 @@ inline int nnReconstructor::appLogic()
 
 inline int nnReconstructor::appShutdown()
 {
-    { //mutex scope
+    { // mutex scope
         std::lock_guard<std::mutex> lock( m_resultMutex );
         m_stopping    = true;
         m_enabled     = false;
@@ -1179,7 +1185,7 @@ inline int nnReconstructor::allocate( const dev::shmimT &dummy )
                          shmimMonitorT::m_imageStream.array.raw && size_t( pup_offset1_x ) + crop <= width &&
                          size_t( pup_offset2_x ) + crop <= width && size_t( pup_offset1_y ) + crop <= height &&
                          size_t( pup_offset2_y ) + crop <= height;
-    { //mutex scope
+    { // mutex scope
         std::lock_guard<std::mutex> lock( m_resultMutex );
         m_updated     = false;
         m_sourceReady = valid && m_enabled;
@@ -1200,7 +1206,7 @@ inline int nnReconstructor::allocate( const dev::shmimT &dummy )
 inline int nnReconstructor::processImage( void *curr_src, const dev::shmimT &dummy )
 {
     static_cast<void>( dummy );
-    { //mutex scope
+    { // mutex scope
         std::lock_guard<std::mutex> lock( m_resultMutex );
         if( m_stopping || !m_enabled || m_loading || !m_fault.empty() || !m_sourceReady )
             return 0;
@@ -1223,7 +1229,7 @@ inline int nnReconstructor::processImage( void *curr_src, const dev::shmimT &dum
         if( clock_gettime( CLOCK_REALTIME, &timestamp ) != 0 )
             throw std::runtime_error( "clock_gettime failed" );
         infer( curr_src );
-        { //mutex scope
+        { // mutex scope
             std::lock_guard<std::mutex> lock( m_resultMutex );
             if( !m_stopping && m_enabled && m_fault.empty() )
             {
@@ -1241,7 +1247,7 @@ inline int nnReconstructor::processImage( void *curr_src, const dev::shmimT &dum
     {
         fail( "unknown inference failure" );
     }
-    { //mutex scope
+    { // mutex scope
         std::lock_guard<std::mutex> lock( m_resultMutex );
         m_inferencing = false;
     }
@@ -1424,7 +1430,7 @@ inline int nnReconstructor::loadImageIntoStream( void *dest )
 inline int nnReconstructor::frameGrabberPostPublish( IMAGE *imageStream )
 {
     static_cast<void>( imageStream );
-    { //mutex scope
+    { // mutex scope
         std::lock_guard<std::mutex> lock( m_resultMutex );
         m_publishing = false;
         if( m_publishZero )
@@ -1450,7 +1456,7 @@ inline void nnReconstructor::updateControls()
 {
     bool        launch = false, finished = false, activate = false, release = false;
     std::string name;
-    { //mutex scope
+    { // mutex scope
         std::lock_guard<std::mutex> lock( m_resultMutex );
         finished = !m_loading;
         if( !m_stopping && !m_loading && !m_inferencing && !m_publishing && !m_gpuReleasing &&
@@ -1487,7 +1493,7 @@ inline void nnReconstructor::updateControls()
             m_gpuResident = false;
             if( m_disabling && m_zeroAcknowledged )
             {
-                m_disabling = false;
+                m_disabling      = false;
                 m_enableReadback = false;
                 m_activeModel.clear();
             }
@@ -1518,9 +1524,9 @@ inline void nnReconstructor::updateControls()
                     {
                         fail( "unknown model loading failure" );
                     }
-                    { //mutex scope
+                    { // mutex scope
                         std::lock_guard<std::mutex> lock( m_resultMutex );
-                        m_loading = false;
+                        m_loading  = false;
                         m_enabling = false;
                     }
                     m_resultReady.notify_all();
@@ -1530,14 +1536,14 @@ inline void nnReconstructor::updateControls()
         {
             fail( error.what() );
             std::lock_guard<std::mutex> lock( m_resultMutex );
-            m_loading = false;
+            m_loading  = false;
             m_enabling = false;
         }
     }
     bool                                 enabled, resident;
     pcf::IndiProperty::PropertyStateType status;
     std::string                          phase, requested, loaded, active, error;
-    { //mutex scope
+    { // mutex scope
         std::lock_guard<std::mutex> lock( m_resultMutex );
         if( !m_fault.empty() && !m_inferencing && !m_publishing && !m_disabling )
         {
@@ -1582,10 +1588,11 @@ INDI_NEWCALLBACK_DEFN( nnReconstructor, m_indiP_enable )( const pcf::IndiPropert
     if( !ipRecv.find( "toggle" ) )
         return 0;
     std::lock_guard<std::mutex> indiLock( m_indiMutex );
-    if( !m_routingOwner.empty() ) return -1;
-    const auto                  value = ipRecv["toggle"].getSwitchState();
+    if( !m_routingOwner.empty() )
+        return -1;
+    const auto value = ipRecv["toggle"].getSwitchState();
     if( value != pcf::IndiElement::On && value != pcf::IndiElement::Off )
-    { //mutex scope
+    { // mutex scope
         std::lock_guard<std::mutex> lock( m_resultMutex );
         m_requestError = "enable requires On or Off";
         return -1;
@@ -1602,9 +1609,10 @@ INDI_NEWCALLBACK_DEFN( nnReconstructor, m_indiP_enable )( const pcf::IndiPropert
 
 inline int nnReconstructor::requestEnabled( bool on, bool prepareOnly )
 {
-    { //mutex scope
+    { // mutex scope
         std::lock_guard<std::mutex> lock( m_resultMutex );
-        if( m_stopping || ( on && ( m_loading || m_disabling || m_gpuReleasing || !m_fault.empty() || ( !m_enabled && !shmimMonitorT::monitorIdle() ) ) ) )
+        if( m_stopping || ( on && ( m_loading || m_disabling || m_gpuReleasing || !m_fault.empty() ||
+                                    ( !m_enabled && !shmimMonitorT::monitorIdle() ) ) ) )
         {
             m_requestError = "enable rejected: shutdown, transition, source validation or fault recovery pending";
             return -1;
@@ -1614,8 +1622,8 @@ inline int nnReconstructor::requestEnabled( bool on, bool prepareOnly )
         {
             if( !prepareOnly )
             {
-                m_enabled = true;
-                m_sourceReady = false;
+                m_enabled           = true;
+                m_sourceReady       = false;
                 m_waitForFreshFrame = true;
                 shmimMonitorT::monitorState( stateCodes::OPERATING );
             }
@@ -1624,8 +1632,8 @@ inline int nnReconstructor::requestEnabled( bool on, bool prepareOnly )
         {
             m_prepareOnly = prepareOnly;
             m_enabling = m_loading = m_loadPending = true;
-            m_cancelLoad = false;
-            m_transitionStart = std::chrono::steady_clock::now();
+            m_cancelLoad                           = false;
+            m_transitionStart                      = std::chrono::steady_clock::now();
             m_activeModel.clear();
         }
         else if( !on && m_disabling && !m_zeroAcknowledged && !m_zeroPending && !m_publishing && !m_inferencing )
@@ -1636,15 +1644,16 @@ inline int nnReconstructor::requestEnabled( bool on, bool prepareOnly )
         else if( !on && !m_disabling && ( m_enabled || m_enableReadback || m_enabling || m_gpuResident ) )
         {
             const bool needsZero = m_enabled || m_enableReadback;
-            m_enabled   = false;
-            if( m_enabling ) m_cancelLoad = true;
-            m_sourceReady = false;
+            m_enabled            = false;
+            if( m_enabling )
+                m_cancelLoad = true;
+            m_sourceReady      = false;
             m_zeroAcknowledged = !needsZero;
             shmimMonitorT::monitorState( stateCodes::READY );
-            m_disabling = true;
-            m_zeroPending = needsZero;
-            m_transitionStart           = std::chrono::steady_clock::now();
-            m_updated                   = false;
+            m_disabling       = true;
+            m_zeroPending     = needsZero;
+            m_transitionStart = std::chrono::steady_clock::now();
+            m_updated         = false;
         }
     }
     m_resultReady.notify_all();
@@ -1655,7 +1664,7 @@ INDI_NEWCALLBACK_DEFN( nnReconstructor, m_indiP_model )( const pcf::IndiProperty
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_model, ipRecv );
     std::lock_guard<std::mutex> indiLock( m_indiMutex );
-    if( !m_routingOwner.empty() || (m_switchPhase != "idle" && m_switchPhase != "error") )
+    if( !m_routingOwner.empty() || ( m_switchPhase != "idle" && m_switchPhase != "error" ) )
         return -1;
     return requestModel( ipRecv );
 }
@@ -1687,7 +1696,8 @@ inline int nnReconstructor::requestModel( const pcf::IndiProperty &ipRecv )
         m_requestError = "select exactly one model";
         return -1;
     }
-    if( m_stopping || m_enabled || m_disabling || m_loading || m_gpuReleasing || m_gpuResident || m_publishing || m_inferencing )
+    if( m_stopping || m_enabled || m_disabling || m_loading || m_gpuReleasing || m_gpuResident || m_publishing ||
+        m_inferencing )
     {
         m_requestError = "model load requires completed disable and quiescent workers";
         return -1;

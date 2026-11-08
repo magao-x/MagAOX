@@ -676,7 +676,7 @@ inline void po4ao::modelLoaderLoop()
 {
     while( !m_loaderShutdown.load( std::memory_order_acquire ) )
     {
-        { //mutex scope
+        { // mutex scope
             std::unique_lock<std::mutex> lock( m_loaderMutex );
             m_loaderCondition.wait( lock,
                                     [this]()
@@ -708,7 +708,7 @@ inline void po4ao::modelLoaderLoop()
             candidate.reset();
         if( candidate == nullptr )
         {
-            { //mutex scope
+            { // mutex scope
                 std::lock_guard<std::mutex> lock( m_reloadErrorMutex );
                 m_reloadError = error;
             }
@@ -950,8 +950,9 @@ inline int po4ao::sendOutput()
     memcpy( m_outputStream.array.raw, m_output.get(), static_cast<size_t>( m_nModes ) * sizeof( float ) );
     ++m_outputStream.md[0].cnt0;
     m_outputStream.md[0].write = 0;
-    if(ImageStreamIO_sempost( &m_outputStream, -1 ) != 0) return -1;
-    m_outputSequence.fetch_add(1,std::memory_order_release);
+    if( ImageStreamIO_sempost( &m_outputStream, -1 ) != 0 )
+        return -1;
+    m_outputSequence.fetch_add( 1, std::memory_order_release );
     return 0;
 }
 
@@ -985,12 +986,15 @@ inline int po4ao::appStartup()
     m_controlRequest.store( 2 | static_cast<uint64_t>( m_controlEnabledConfig ), std::memory_order_release );
     m_lastStatsUpdate = std::chrono::steady_clock::now();
 
-    createStandardIndiToggleSw(m_indiP_run,"run_enable");
-    if(registerIndiPropertyNew(m_indiP_run,INDI_NEWCALLBACK(m_indiP_run)) < 0) return -1;
-    createROIndiText(m_indiP_runStatus,"run_status","phase");
-    for(const auto *element : {"route", "error", "owner", "verified"}) m_indiP_runStatus.add(pcf::IndiElement(element));
-    if(registerIndiPropertyReadOnly(m_indiP_runStatus) < 0) return -1;
-    REG_INDI_SETPROP(m_indiP_nnRouting,m_nnDevice,"routing_status");
+    createStandardIndiToggleSw( m_indiP_run, "run_enable" );
+    if( registerIndiPropertyNew( m_indiP_run, INDI_NEWCALLBACK( m_indiP_run ) ) < 0 )
+        return -1;
+    createROIndiText( m_indiP_runStatus, "run_status", "phase" );
+    for( const auto *element : { "route", "error", "owner", "verified" } )
+        m_indiP_runStatus.add( pcf::IndiElement( element ) );
+    if( registerIndiPropertyReadOnly( m_indiP_runStatus ) < 0 )
+        return -1;
+    REG_INDI_SETPROP( m_indiP_nnRouting, m_nnDevice, "routing_status" );
     createStandardIndiToggleSw( m_indiP_reloadToggle, "reload_engine" );
     registerIndiPropertyNew( m_indiP_reloadToggle, INDI_NEWCALLBACK( m_indiP_reloadToggle ) );
     createStandardIndiToggleSw( m_indiP_resetModel, "reset_model" );
@@ -1055,7 +1059,7 @@ inline void po4ao::updateRuntimeStatistics()
         return;
     m_lastStatsUpdate = now;
 
-    const auto statistics = m_runtimeSamples.snapshot(m_lastTelemSequence);
+    const auto   statistics = m_runtimeSamples.snapshot( m_lastTelemSequence );
     const double p50 = statistics.p50, p95 = statistics.p95, p99 = statistics.p99, maximum = statistics.maximum;
     updateIfChanged( m_indiP_runtimeStats, "p50_us", p50 );
     updateIfChanged( m_indiP_runtimeStats, "p95_us", p95 );
@@ -1073,7 +1077,7 @@ inline void po4ao::updateRuntimeStatistics()
     updateIfChanged(
         m_indiP_runtimeStats, "replay_drops", static_cast<double>( m_replayDrops.load( std::memory_order_relaxed ) ) );
 
-    recordTelem( static_cast<const telem_po4ao *>(nullptr) );
+    recordTelem( static_cast<const telem_po4ao *>( nullptr ) );
 }
 
 inline int po4ao::checkRecordTimes()
@@ -1083,12 +1087,25 @@ inline int po4ao::checkRecordTimes()
 
 inline int po4ao::recordTelem( const telem_po4ao * )
 {
-    const auto s = m_runtimeSamples.snapshot(m_lastTelemSequence);
-    const int result = telemeterT::template telem<telem_po4ao>(
-        {s.p50, s.p95, s.p99, s.maximum, s.count, s.sequence, s.lastTimeNs, s.fresh, s.mixed,
-         m_missedFrames.load(), m_deadlineMisses.load(), m_inferenceFailures.load(), m_replayDrops.load(),
-         m_latencyDeadlineUs, s.model, s.backend} );
-    if( result >= 0 ) m_lastTelemSequence = s.sequence;
+    const auto s      = m_runtimeSamples.snapshot( m_lastTelemSequence );
+    const int  result = telemeterT::template telem<telem_po4ao>( { s.p50,
+                                                                   s.p95,
+                                                                   s.p99,
+                                                                   s.maximum,
+                                                                   s.count,
+                                                                   s.sequence,
+                                                                   s.lastTimeNs,
+                                                                   s.fresh,
+                                                                   s.mixed,
+                                                                   m_missedFrames.load(),
+                                                                   m_deadlineMisses.load(),
+                                                                   m_inferenceFailures.load(),
+                                                                   m_replayDrops.load(),
+                                                                   m_latencyDeadlineUs,
+                                                                   s.model,
+                                                                   s.backend } );
+    if( result >= 0 )
+        m_lastTelemSequence = s.sequence;
     return result;
 }
 
@@ -1116,14 +1133,15 @@ inline void po4ao::updateControlStatus()
     static const std::array<std::string, 5> phases{ "idle", "collecting", "publishing", "ready", "interrupted" };
     const uint64_t                          active = m_activeModelId.load( std::memory_order_acquire );
     std::string                             reloadError;
-    { //mutex scope
+    { // mutex scope
         std::lock_guard<std::mutex> errorLock( m_reloadErrorMutex );
         reloadError = m_reloadError;
     }
     // Keep lifetime, request generations and heartbeat in one observed property update.
     updateIfChanged<std::string>(
         m_indiP_modelStatus,
-        { "run_phase", "active_id",
+        { "run_phase",
+          "active_id",
           "active_backend",
           "effective_controller",
           "effective_id",
@@ -1136,7 +1154,8 @@ inline void po4ao::updateControlStatus()
           "control_applied",
           "reset_request",
           "reset_applied" },
-        { m_runPhase, modelText( active ),
+        { m_runPhase,
+          modelText( active ),
           active == 0 ? "fallback" : ( m_activeCpuInference.load( std::memory_order_acquire ) ? "cpu" : "tensorrt" ),
           controllers[static_cast<size_t>( m_effectiveController.load( std::memory_order_acquire ) )],
           modelText( m_effectiveModelId.load( std::memory_order_acquire ) ),
@@ -1185,12 +1204,16 @@ inline int po4ao::appLogic()
     updateRunControl();
     std::unique_lock<std::mutex> lock( m_indiMutex );
     SHMIMMONITOR_UPDATE_INDI;
-    if(!m_runBusy && !m_runRunning && shmimMonitorT::monitorIdle())
+    if( !m_runBusy && !m_runRunning && shmimMonitorT::monitorIdle() )
     {
         activatePendingEngine();
-        const auto reset = m_modelResetRequest.exchange(0);
-        if(reset) { resetActiveModel(reset); m_appliedReset.store(reset); }
-        m_appliedControl.store(m_controlRequest.load());
+        const auto reset = m_modelResetRequest.exchange( 0 );
+        if( reset )
+        {
+            resetActiveModel( reset );
+            m_appliedReset.store( reset );
+        }
+        m_appliedControl.store( m_controlRequest.load() );
     }
     updateControlStatus();
     updateRuntimeStatistics();
@@ -1200,9 +1223,10 @@ inline int po4ao::appLogic()
 
 inline int po4ao::appShutdown()
 {
-    m_runCancel.store(true);
-    m_routeIO.m_cancelled.store(true);
-    if(m_runThread.joinable()) m_runThread.join();
+    m_runCancel.store( true );
+    m_routeIO.m_cancelled.store( true );
+    if( m_runThread.joinable() )
+        m_runThread.join();
     // Always release worker/model resources, even when the monitor reports a shutdown error.
     const int monitorStatus = shmimMonitorT::appShutdown();
     m_controlRequest.fetch_and( ~uint64_t{ 1 }, std::memory_order_acq_rel );
@@ -1310,7 +1334,8 @@ inline int po4ao::allocate( const dev::shmimT &dummy )
 INDI_NEWCALLBACK_DEFN( po4ao, m_indiP_reloadToggle )( const pcf::IndiProperty &ipRecv )
 {
     std::lock_guard<std::mutex> indiLock( m_indiMutex );
-    if(m_runBusy) return -1;
+    if( m_runBusy )
+        return -1;
     if( ipRecv.getName() != m_indiP_reloadToggle.getName() || !ipRecv.find( "toggle" ) )
         return log<software_error, -1>( { __FILE__, __LINE__, "invalid reload property" } );
     if( ipRecv["toggle"].getSwitchState() != pcf::IndiElement::On )
@@ -1319,7 +1344,7 @@ INDI_NEWCALLBACK_DEFN( po4ao, m_indiP_reloadToggle )( const pcf::IndiProperty &i
     if( ( expected != 0 && expected != 3 ) ||
         !m_reloadStatus.compare_exchange_strong( expected, 1, std::memory_order_acq_rel ) )
         return 0;
-    { //mutex scope
+    { // mutex scope
         std::lock_guard<std::mutex> errorLock( m_reloadErrorMutex );
         m_reloadError.clear();
     }
@@ -1333,7 +1358,8 @@ INDI_NEWCALLBACK_DEFN( po4ao, m_indiP_reloadToggle )( const pcf::IndiProperty &i
 INDI_NEWCALLBACK_DEFN( po4ao, m_indiP_resetModel )( const pcf::IndiProperty &ipRecv )
 {
     std::lock_guard<std::mutex> indiLock( m_indiMutex );
-    if(m_runBusy) return -1;
+    if( m_runBusy )
+        return -1;
     if( ipRecv.getName() != m_indiP_resetModel.getName() || !ipRecv.find( "toggle" ) )
         return log<software_error, -1>( { __FILE__, __LINE__, "invalid model-reset property" } );
     if( ipRecv["toggle"].getSwitchState() != pcf::IndiElement::On )
@@ -1349,7 +1375,8 @@ INDI_NEWCALLBACK_DEFN( po4ao, m_indiP_resetModel )( const pcf::IndiProperty &ipR
 INDI_NEWCALLBACK_DEFN( po4ao, m_indiP_controlToggle )( const pcf::IndiProperty &ipRecv )
 {
     std::lock_guard<std::mutex> indiLock( m_indiMutex );
-    if(m_runBusy) return -1;
+    if( m_runBusy )
+        return -1;
     if( ipRecv.getName() != m_indiP_controlToggle.getName() )
         return log<software_error, -1>( { __FILE__, __LINE__, "invalid control property" } );
     if( !ipRecv.find( "toggle" ) || ( ipRecv["toggle"].getSwitchState() != pcf::IndiElement::On &&
@@ -1374,13 +1401,14 @@ INDI_NEWCALLBACK_DEFN( po4ao, m_indiP_controlToggle )( const pcf::IndiProperty &
 INDI_NEWCALLBACK_DEFN( po4ao, m_indiP_recollectWarmup )( const pcf::IndiProperty &ipRecv )
 {
     std::lock_guard<std::mutex> indiLock( m_indiMutex );
-    if(m_runBusy || !m_runRunning) return -1;
+    if( m_runBusy || !m_runRunning )
+        return -1;
     if( ipRecv.getName() != m_indiP_recollectWarmup.getName() || !ipRecv.find( "toggle" ) )
         return log<software_error, -1>( { __FILE__, __LINE__, "invalid warm-up recollection property" } );
     if( ipRecv["toggle"].getSwitchState() != pcf::IndiElement::On )
         return 0;
 
-    { //mutex scope
+    { // mutex scope
         std::lock_guard<std::mutex> publicationLock( m_publicationMutex );
         const uint64_t              generation = m_collectionGeneration.fetch_add( 1, std::memory_order_acq_rel ) + 1;
         invalidateReplay( m_replayStream, m_replayOpened, m_replayMetadataStream, m_replayMetadataOpened );

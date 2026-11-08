@@ -439,11 +439,12 @@ inline void learningCtrl::syncPolicies()
 
 inline void learningCtrl::updateTrainingControls( bool ready )
 {
-    const auto phase = status( "training_phase" );
-    const auto runPhase = value(m_runtimeDevice,"run_status","phase");
-    const bool routeQuiet = runPhase.empty() || runPhase == "unverified" || runPhase == "running" || runPhase == "stopped";
-    const bool idle  = ready && routeQuiet && m_routePending.empty() && ( phase == "idle" || phase == "error" ) &&
-                       !busy( { "po4ao_enable", "reset", "recollect", "learning", "set_policy" } );
+    const auto phase    = status( "training_phase" );
+    const auto runPhase = value( m_runtimeDevice, "run_status", "phase" );
+    const bool routeQuiet =
+        runPhase.empty() || runPhase == "unverified" || runPhase == "running" || runPhase == "stopped";
+    const bool idle = ready && routeQuiet && m_routePending.empty() && ( phase == "idle" || phase == "error" ) &&
+                      !busy( { "po4ao_enable", "reset", "recollect", "learning", "set_policy" } );
     m_ui.comboPolicy->setEnabled( ready && m_ui.comboPolicy->count() > 0 );
     m_ui.comboPolicy->setToolTip( m_ui.comboPolicy->currentText() );
     m_ui.buttonSetPolicy->setEnabled( idle && m_ui.comboPolicy->currentIndex() >= 0 &&
@@ -823,17 +824,18 @@ inline void learningCtrl::updateGUI()
                                                                                 ? "Unknown"
                                                                                 : nnStatus( "modulation" ) ) );
 
-    const auto runPhase = value(m_runtimeDevice,"run_status","phase");
-    const auto runProperty = m_properties.find(m_runtimeDevice+".run_enable");
-    const bool appRunning = runProperty != m_properties.end() && runProperty->second.find("toggle") &&
-                         runProperty->second["toggle"].getSwitchState() == pcf::IndiElement::On;
-    m_ui.buttonRunPO4AO->setText(appRunning ? "Stop PO4AO" : "Start PO4AO");
-    m_ui.buttonRunPO4AO->setEnabled(m_connected && m_runtimeAge.isValid() && m_runtimeAge.elapsed() < 5000 &&
-        !m_runtimeInstance.empty() &&
-        commandAvailable("run_enable",pcf::IndiProperty::Switch,{"toggle"},m_runtimeDevice) &&
-        (runPhase == "unverified" || runPhase == "running" || runPhase == "stopped" || runPhase == "failed"));
-    m_ui.labelRunPO4AO->setText(QString::fromStdString(runPhase + " | " + value(m_runtimeDevice,"run_status","route")));
-    m_ui.labelRunPO4AO->setToolTip(QString::fromStdString(value(m_runtimeDevice,"run_status","error")));
+    const auto runPhase    = value( m_runtimeDevice, "run_status", "phase" );
+    const auto runProperty = m_properties.find( m_runtimeDevice + ".run_enable" );
+    const bool appRunning  = runProperty != m_properties.end() && runProperty->second.find( "toggle" ) &&
+                             runProperty->second["toggle"].getSwitchState() == pcf::IndiElement::On;
+    m_ui.buttonRunPO4AO->setText( appRunning ? "Stop PO4AO" : "Start PO4AO" );
+    m_ui.buttonRunPO4AO->setEnabled(
+        m_connected && m_runtimeAge.isValid() && m_runtimeAge.elapsed() < 5000 && !m_runtimeInstance.empty() &&
+        commandAvailable( "run_enable", pcf::IndiProperty::Switch, { "toggle" }, m_runtimeDevice ) &&
+        ( runPhase == "unverified" || runPhase == "running" || runPhase == "stopped" || runPhase == "failed" ) );
+    m_ui.labelRunPO4AO->setText(
+        QString::fromStdString( runPhase + " | " + value( m_runtimeDevice, "run_status", "route" ) ) );
+    m_ui.labelRunPO4AO->setToolTip( QString::fromStdString( value( m_runtimeDevice, "run_status", "error" ) ) );
     updateTrainingControls( ready );
     if( !ready )
     {
@@ -841,8 +843,9 @@ inline void learningCtrl::updateGUI()
         return;
     }
 
-    const bool routeQuiet = runPhase.empty() || runPhase == "unverified" || runPhase == "running" || runPhase == "stopped";
-    const bool runAvailable = runPhase.empty() || runPhase == "unverified" || runPhase == "running";
+    const bool routeQuiet =
+        runPhase.empty() || runPhase == "unverified" || runPhase == "running" || runPhase == "stopped";
+    const bool runAvailable    = runPhase.empty() || runPhase == "unverified" || runPhase == "running";
     const bool runtimePending  = !m_routePending.empty() || !routeQuiet;
     const auto controller      = ready ? status( "controller" ) : std::string( "unknown" );
     const bool enabled         = controller == "po4ao" || controller == "fallback";
@@ -907,11 +910,12 @@ inline void learningCtrl::updateGUI()
 
 inline void learningCtrl::updateRuntimeGUI()
 {
-    const auto fsm            = value( m_runtimeDevice, "fsm", "state" );
-    const bool fresh          = m_runtimeAge.isValid() && m_runtimeAge.elapsed() < 5000;
-    const auto runPhase = value(m_runtimeDevice,"run_status","phase");
-    const bool routeQuiet = runPhase.empty() || runPhase == "unverified" || runPhase == "running" || runPhase == "stopped";
-    const bool runAvailable = runPhase.empty() || runPhase == "unverified" || runPhase == "running";
+    const auto fsm      = value( m_runtimeDevice, "fsm", "state" );
+    const bool fresh    = m_runtimeAge.isValid() && m_runtimeAge.elapsed() < 5000;
+    const auto runPhase = value( m_runtimeDevice, "run_status", "phase" );
+    const bool routeQuiet =
+        runPhase.empty() || runPhase == "unverified" || runPhase == "running" || runPhase == "stopped";
+    const bool runAvailable   = runPhase.empty() || runPhase == "unverified" || runPhase == "running";
     const bool trainerPending = !m_routePending.empty() || !routeQuiet;
     const bool ready = m_connected && fresh && !m_runtimeInstance.empty() &&
                        m_defined.count( m_runtimeDevice + ".model_status" ) && ( fsm == "READY" || fsm == "OPERATING" );
@@ -1032,9 +1036,11 @@ inline void learningCtrl::on_buttonPO4AO_clicked()
 inline void learningCtrl::on_buttonRunPO4AO_clicked()
 {
     updateGUI();
-    if(!m_ui.buttonRunPO4AO->isEnabled()) return;
-    const bool running = m_properties.at(m_runtimeDevice+".run_enable")["toggle"].getSwitchState() == pcf::IndiElement::On;
-    submitSwitch("run_enable","toggle",!running,m_runtimeDevice);
+    if( !m_ui.buttonRunPO4AO->isEnabled() )
+        return;
+    const bool running =
+        m_properties.at( m_runtimeDevice + ".run_enable" )["toggle"].getSwitchState() == pcf::IndiElement::On;
+    submitSwitch( "run_enable", "toggle", !running, m_runtimeDevice );
 }
 
 inline void learningCtrl::on_buttonReset_clicked()

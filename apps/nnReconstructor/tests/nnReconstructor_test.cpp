@@ -32,7 +32,8 @@ class nnReconstructor_test : public nnReconstructor
     void monitorDetached( bool detached /**< [in] Simulated completion of attachment cleanup. */ );
 
     /// Exercise the app-local PO4AO writer reservation callback.
-    int hold(const std::string &owner /**< [in] Operation token. */, const std::string &action /**< [in] hold or release. */);
+    int hold( const std::string &owner /**< [in] Operation token. */,
+              const std::string &action /**< [in] hold or release. */ );
 
     /// Read the reservation phase published by the production app.
     std::string holdPhase() const;
@@ -204,15 +205,15 @@ inline void nnReconstructor_test::monitorDetached( bool detached )
     shmimMonitorT::m_idle = detached;
 }
 
-inline int nnReconstructor_test::hold(const std::string &owner, const std::string &action)
+inline int nnReconstructor_test::hold( const std::string &owner, const std::string &action )
 {
-    pcf::IndiProperty request(pcf::IndiProperty::Text);
-    request.setName("routing_hold");
-    request.add(pcf::IndiElement("owner"));
-    request.add(pcf::IndiElement("action"));
-    request["owner"] = owner;
+    pcf::IndiProperty request( pcf::IndiProperty::Text );
+    request.setName( "routing_hold" );
+    request.add( pcf::IndiElement( "owner" ) );
+    request.add( pcf::IndiElement( "action" ) );
+    request["owner"]  = owner;
     request["action"] = action;
-    return newCallBack_m_indiP_routingHold(request);
+    return newCallBack_m_indiP_routingHold( request );
 }
 inline std::string nnReconstructor_test::holdPhase() const
 {
@@ -282,7 +283,8 @@ inline int nnReconstructor_test::enable( bool value )
     const int result = newCallBack_m_indiP_enable( p );
     if( result == 0 && value )
     {
-        if( !waitLoad() ) throw std::runtime_error( "activation worker timed out" );
+        if( !waitLoad() )
+            throw std::runtime_error( "activation worker timed out" );
         allocate( dev::shmimT{} ); // Model the new attachment after the worker requests OPERATING.
     }
     return result;
@@ -1368,7 +1370,8 @@ TEST_CASE( "Native handover failures leave NN disabled", "[nnReconstructor][inde
         for( int i = 0; i < 5; ++i )
         {
             app.switchStep();
-            if( app.switchPhase() == "preparing_nn" ) REQUIRE( app.waitLoad() );
+            if( app.switchPhase() == "preparing_nn" )
+                REQUIRE( app.waitLoad() );
         }
         REQUIRE( app.switchPhase() == "stopping_cacao" );
         app.expireSwitch();
@@ -1382,7 +1385,8 @@ TEST_CASE( "Native handover failures leave NN disabled", "[nnReconstructor][inde
         for( int i = 0; i < 5; ++i )
         {
             app.switchStep();
-            if( app.switchPhase() == "preparing_nn" ) REQUIRE( app.waitLoad() );
+            if( app.switchPhase() == "preparing_nn" )
+                REQUIRE( app.waitLoad() );
         }
         REQUIRE( app.switchPhase() == "error" );
     }
@@ -1415,10 +1419,11 @@ TEST_CASE( "Native linked handover uses current modulation readbacks", "[nnRecon
     const bool toNN      = GENERATE( true, false );
     nnTest::cacaoRunning = toNN;
     REQUIRE( app.switchTo( toNN ? "nn" : "cacao", toNN ? "cacao" : "stopped" ) == 0 );
-    for( int i = 0; i < (toNN ? 6 : 4); ++i )
+    for( int i = 0; i < ( toNN ? 6 : 4 ); ++i )
     {
         app.switchStep();
-        if( app.switchPhase() == "preparing_nn" ) REQUIRE( app.waitLoad() );
+        if( app.switchPhase() == "preparing_nn" )
+            REQUIRE( app.waitLoad() );
     }
     REQUIRE( app.switchPhase() == "modulation" );
     REQUIRE_FALSE( app.acknowledged() );
@@ -1483,7 +1488,8 @@ TEST_CASE( "Late CACAO start retains the handover barrier", "[nnReconstructor][i
     for( int i = 0; i < 4; ++i )
     {
         app.switchStep();
-        if( app.switchPhase() == "preparing_nn" ) REQUIRE( app.waitLoad() );
+        if( app.switchPhase() == "preparing_nn" )
+            REQUIRE( app.waitLoad() );
     }
     REQUIRE( app.switchPhase() == "starting_cacao" );
     app.expireSwitch();
@@ -1503,7 +1509,6 @@ TEST_CASE( "Late CACAO start retains the handover barrier", "[nnReconstructor][i
     // clang-format on
 }
 
-
 /** \brief Disable releases owned GPU objects only after zero publication and monitor completion. */
 TEST_CASE( "NN GPU ownership follows completed disable", "[nnReconstructor][gpuOwnership]" )
 {
@@ -1515,7 +1520,7 @@ TEST_CASE( "NN GPU ownership follows completed disable", "[nnReconstructor][gpuO
     app.control();
     REQUIRE( nnTest::liveAllocations == 2 );
     REQUIRE( app.claim() );
-    REQUIRE( app.copy() == std::vector<float>(3, 0) );
+    REQUIRE( app.copy() == std::vector<float>( 3, 0 ) );
     app.complete();
     REQUIRE( app.disabling() );
     REQUIRE( app.enable( true ) < 0 );
@@ -1529,7 +1534,7 @@ TEST_CASE( "NN GPU ownership follows completed disable", "[nnReconstructor][gpuO
     REQUIRE( nnTest::engines == 0 );
     REQUIRE( nnTest::runtimes == 0 );
     REQUIRE( app.loaded() == "first.trt" );
-    std::filesystem::remove(".build/catalog/first.trt");
+    std::filesystem::remove( ".build/catalog/first.trt" );
     REQUIRE( app.enable( true ) == 0 ); // Enable uses retained bytes, not a replacement on disk.
     REQUIRE( nnTest::liveAllocations == 2 );
     REQUIRE( app.acknowledged() );
@@ -1545,23 +1550,27 @@ TEST_CASE( "NN GPU ownership follows completed disable", "[nnReconstructor][gpuO
 TEST_CASE( "NN late activation cannot recreate disabled GPU resources", "[nnReconstructor][gpuOwnership]" )
 {
     nnReconstructor_test app;
-    app.prepare(false);
+    app.prepare( false );
     std::promise<void> entered, release;
-    auto gate = release.get_future().share();
-    nnTest::duringDeserialize = [&] { entered.set_value(); gate.wait(); };
+    auto               gate   = release.get_future().share();
+    nnTest::duringDeserialize = [&]
+    {
+        entered.set_value();
+        gate.wait();
+    };
     REQUIRE( app.queueEnable() == 0 );
     app.control();
     entered.get_future().wait();
-    const auto result = app.enable(false);
+    const auto result = app.enable( false );
     release.set_value(); // Always unblock before any assertion can unwind the fixture.
-    REQUIRE(result == 0);
-    REQUIRE(app.waitLoad());
+    REQUIRE( result == 0 );
+    REQUIRE( app.waitLoad() );
     app.control();
-    REQUIRE_FALSE(app.acknowledged());
-    REQUIRE(nnTest::liveAllocations == 0);
-    REQUIRE(nnTest::contexts == 0);
-    REQUIRE(nnTest::engines == 0);
-    REQUIRE(nnTest::runtimes == 0);
+    REQUIRE_FALSE( app.acknowledged() );
+    REQUIRE( nnTest::liveAllocations == 0 );
+    REQUIRE( nnTest::contexts == 0 );
+    REQUIRE( nnTest::engines == 0 );
+    REQUIRE( nnTest::runtimes == 0 );
     // clang-format off
 #ifdef NNRECONSTRUCTOR_TEST_DOXYGEN_REF
     MagAOX::app::nnReconstructor::replaceModel;
@@ -1570,40 +1579,48 @@ TEST_CASE( "NN late activation cannot recreate disabled GPU resources", "[nnReco
 }
 
 /** \brief PO4AO owns an exclusive writer reservation until the original writer is restored. */
-TEST_CASE("Routing reservation preserves NN ownership across CACAO restarts", "[nnReconstructor][routing]")
+TEST_CASE( "Routing reservation preserves NN ownership across CACAO restarts", "[nnReconstructor][routing]" )
 {
     nnReconstructor_test app;
     app.prepare();
     app.frame();
-    REQUIRE(app.claim());
-    app.copy(); app.complete();
+    REQUIRE( app.claim() );
+    app.copy();
+    app.complete();
     app.linkModulation();
-    REQUIRE(app.hold("po4ao-1","hold") == 0);
-    REQUIRE(app.enable(true) < 0);
-    REQUIRE(app.activate(1) < 0);
-    REQUIRE(app.select(1) < 0);
-    REQUIRE(app.hold("other","release") < 0);
-    REQUIRE(app.hold("po4ao-1","release") < 0);
-    REQUIRE(app.claim());
-    REQUIRE(app.copy() == std::vector<float>(3,0));
-    app.complete(); app.switchStep();
-    REQUIRE(app.holdPhase() == "held");
-    REQUIRE(nnTest::liveAllocations == 0);
+    REQUIRE( app.hold( "po4ao-1", "hold" ) == 0 );
+    REQUIRE( app.enable( true ) < 0 );
+    REQUIRE( app.activate( 1 ) < 0 );
+    REQUIRE( app.select( 1 ) < 0 );
+    REQUIRE( app.hold( "other", "release" ) < 0 );
+    REQUIRE( app.hold( "po4ao-1", "release" ) < 0 );
+    REQUIRE( app.claim() );
+    REQUIRE( app.copy() == std::vector<float>( 3, 0 ) );
+    app.complete();
+    app.switchStep();
+    REQUIRE( app.holdPhase() == "held" );
+    REQUIRE( nnTest::liveAllocations == 0 );
     nnTest::cacaoRunning = true; // The calibration utility has restarted its writer.
-    REQUIRE(app.hold("po4ao-1","release") == 0);
-    for(int i=0;i<10 && app.switchPhase() != "starting_nn";++i)
+    REQUIRE( app.hold( "po4ao-1", "release" ) == 0 );
+    for( int i = 0; i < 10 && app.switchPhase() != "starting_nn"; ++i )
     {
         app.switchStep();
-        if(app.switchPhase() == "preparing_nn") REQUIRE(app.waitLoad());
+        if( app.switchPhase() == "preparing_nn" )
+            REQUIRE( app.waitLoad() );
     }
-    REQUIRE(app.switchPhase() == "starting_nn");
-    REQUIRE_FALSE(nnTest::cacaoRunning);
-    REQUIRE(app.enable(true) < 0); // Reservation still covers first-result acknowledgement.
-    app.reconnect(); app.frame(); app.frame();
-    REQUIRE(app.claim()); app.copy(); app.complete(); app.switchStep();
-    REQUIRE(app.holdPhase() == "released");
-    REQUIRE(app.acknowledged());
-    REQUIRE(app.m_sent.empty());
+    REQUIRE( app.switchPhase() == "starting_nn" );
+    REQUIRE_FALSE( nnTest::cacaoRunning );
+    REQUIRE( app.enable( true ) < 0 ); // Reservation still covers first-result acknowledgement.
+    app.reconnect();
+    app.frame();
+    app.frame();
+    REQUIRE( app.claim() );
+    app.copy();
+    app.complete();
+    app.switchStep();
+    REQUIRE( app.holdPhase() == "released" );
+    REQUIRE( app.acknowledged() );
+    REQUIRE( app.m_sent.empty() );
     // clang-format off
 #ifdef NNRECONSTRUCTOR_TEST_DOXYGEN_REF
     MagAOX::app::nnReconstructor::newCallBack_m_indiP_routingHold;
@@ -1613,21 +1630,21 @@ TEST_CASE("Routing reservation preserves NN ownership across CACAO restarts", "[
 }
 
 /** \brief A CACAO reservation does not introduce NN output or change the selected host model. */
-TEST_CASE("Routing reservation preserves CACAO ownership", "[nnReconstructor][routing]")
+TEST_CASE( "Routing reservation preserves CACAO ownership", "[nnReconstructor][routing]" )
 {
     nnReconstructor_test app;
-    app.prepare(false);
+    app.prepare( false );
     nnTest::cacaoRunning = true;
-    REQUIRE(app.hold("po4ao-2","hold") == 0);
+    REQUIRE( app.hold( "po4ao-2", "hold" ) == 0 );
     app.switchStep();
-    REQUIRE(app.holdPhase() == "held");
-    REQUIRE_FALSE(app.claim());
-    REQUIRE(app.hold("po4ao-2","release") == 0);
+    REQUIRE( app.holdPhase() == "held" );
+    REQUIRE_FALSE( app.claim() );
+    REQUIRE( app.hold( "po4ao-2", "release" ) == 0 );
     app.switchStep();
-    REQUIRE(app.holdPhase() == "released");
-    REQUIRE(app.loaded() == "first.trt");
-    REQUIRE(nnTest::liveAllocations == 0);
-    REQUIRE(nnTest::cacaoCommands.empty());
+    REQUIRE( app.holdPhase() == "released" );
+    REQUIRE( app.loaded() == "first.trt" );
+    REQUIRE( nnTest::liveAllocations == 0 );
+    REQUIRE( nnTest::cacaoCommands.empty() );
 }
 
 } // namespace libXWCTest::nnReconstructorTest

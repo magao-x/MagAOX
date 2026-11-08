@@ -213,7 +213,8 @@ inline void po4ao::beginWarmupCollection( uint64_t generation, uint64_t control,
 inline int po4ao::processImage( void *curr_src, const dev::shmimT &dummy )
 {
     static_cast<void>( dummy );
-    if(!m_runAdmission.load(std::memory_order_acquire)) return 0;
+    if( !m_runAdmission.load( std::memory_order_acquire ) )
+        return 0;
     const auto started       = std::chrono::steady_clock::now();
     auto       recordLatency = [this, started]()
     {
@@ -221,11 +222,12 @@ inline int po4ao::processImage( void *curr_src, const dev::shmimT &dummy )
             std::chrono::duration_cast<std::chrono::microseconds>( std::chrono::steady_clock::now() - started );
         const uint32_t latency =
             static_cast<uint32_t>( std::min<int64_t>( elapsed.count(), std::numeric_limits<uint32_t>::max() ) );
-        const auto model = m_effectiveModelId.load( std::memory_order_acquire );
+        const auto     model   = m_effectiveModelId.load( std::memory_order_acquire );
         const uint32_t backend = m_effectiveBackend.load( std::memory_order_acquire );
-        const auto time = std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::steady_clock::now().time_since_epoch()).count();
-        m_runtimeSamples.record( latency, model, backend, static_cast<uint64_t>(time) );
+        const auto     time =
+            std::chrono::duration_cast<std::chrono::nanoseconds>( std::chrono::steady_clock::now().time_since_epoch() )
+                .count();
+        m_runtimeSamples.record( latency, model, backend, static_cast<uint64_t>( time ) );
         if( latency > m_latencyDeadlineUs )
             m_deadlineMisses.fetch_add( 1, std::memory_order_relaxed );
     };
@@ -329,7 +331,8 @@ inline int po4ao::processImage( void *curr_src, const dev::shmimT &dummy )
 
     const uint64_t emittedModel = inferenceOk ? expectedModel : 0;
     m_effectiveModelId.store( emittedModel, std::memory_order_release );
-    m_effectiveBackend.store( emittedModel == 0 ? 0 : (!m_activeEngine->linearWeights.empty() ? 1 : 2), std::memory_order_release );
+    m_effectiveBackend.store( emittedModel == 0 ? 0 : ( !m_activeEngine->linearWeights.empty() ? 1 : 2 ),
+                              std::memory_order_release );
     m_effectiveController.store( effectiveController, std::memory_order_release );
     m_appliedControl.store( control, std::memory_order_release );
     if( resetGeneration != 0 )

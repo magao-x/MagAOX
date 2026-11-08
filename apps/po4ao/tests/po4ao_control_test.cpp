@@ -57,9 +57,9 @@ inline void ImageStreamIO_sempost( IMAGE *image /**< [in] Published in-memory im
 /// Model identity needed by the production admission logic; inference itself is an SDK double.
 struct EngineBundle
 {
-    uint64_t generation{ 1 }, modelId{ 42 };
-    int      historyLength{ 2 };
-    std::vector<float> linearWeights{1}; ///< Test policy uses the CPU boundary.
+    uint64_t           generation{ 1 }, modelId{ 42 };
+    int                historyLength{ 2 };
+    std::vector<float> linearWeights{ 1 }; ///< Test policy uses the CPU boundary.
 };
 /// Boundary fixture declaring the state used by the included production method definitions.
 /** Model loading and device output are doubles; collection, frame processing, queue
@@ -118,15 +118,14 @@ class po4ao
     IMAGE                   m_replayStream, m_replayMetadataStream, m_warmupStream,
         m_warmupMetadataStream; ///< In-memory rolling/frozen replay and metadata images.
     bool m_outputOpened{ true }, m_replayOpened{ true },
-        m_replayMetadataOpened{ true };                                   ///< Output and rolling replay availability.
-    bool m_warmupOpened{ true }, m_warmupMetadataOpened{ true };          ///< Frozen replay availability.
-    std::atomic<bool> m_runAdmission{true}; ///< Whole-app callback admission.
-    std::atomic<uint32_t> m_effectiveBackend{0}; ///< Backend of the emitted command.
-    MagAOX::app::Po4aoSamples m_runtimeSamples; ///< Production telemetry sample ring.
-    std::atomic<uint64_t> m_deadlineMisses{ 0 },
-        m_missedFrames{ 0 };                                               ///< Latency and source-gap statistics.
-    std::atomic<uint64_t> m_inferenceFailures{ 0 }, m_replayDrops{ 0 };    ///< Inference and queue failure statistics.
-    bool                  m_failInference{ false }, m_failOutput{ false }; ///< Injected SDK/output failures.
+        m_replayMetadataOpened{ true }; ///< Output and rolling replay availability.
+    bool                      m_warmupOpened{ true }, m_warmupMetadataOpened{ true }; ///< Frozen replay availability.
+    std::atomic<bool>         m_runAdmission{ true };                                 ///< Whole-app callback admission.
+    std::atomic<uint32_t>     m_effectiveBackend{ 0 };                      ///< Backend of the emitted command.
+    MagAOX::app::Po4aoSamples m_runtimeSamples;                             ///< Production telemetry sample ring.
+    std::atomic<uint64_t>     m_deadlineMisses{ 0 }, m_missedFrames{ 0 };   ///< Latency and source-gap statistics.
+    std::atomic<uint64_t>     m_inferenceFailures{ 0 }, m_replayDrops{ 0 }; ///< Inference and queue failure statistics.
+    bool                      m_failInference{ false }, m_failOutput{ false }; ///< Injected SDK/output failures.
     std::vector<std::array<float, 3>> m_emitted; ///< Successfully emitted commands captured at the output boundary.
     std::function<void()> m_duringOutput;        ///< Request injection during actual output acknowledgement boundary.
 

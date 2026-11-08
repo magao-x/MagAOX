@@ -435,11 +435,16 @@ TEST_CASE( "Configuring MagAOXApp", "[app::MagAOXApp]" )
         app.updateState();
         REQUIRE( app.state() == MagAOX::app::stateCodes::READY );
         REQUIRE( app.stateLogged() == 2 ); // Refresh does not reset transition bookkeeping.
-        std::thread refresh([&app]{for(int i=0;i<10000;++i) app.updateState();});
-        app.state(MagAOX::app::stateCodes::OPERATING);
-        app.state(MagAOX::app::stateCodes::READY);
+        std::thread refresh(
+            [&app]
+            {
+                for( int i = 0; i < 10000; ++i )
+                    app.updateState();
+            } );
+        app.state( MagAOX::app::stateCodes::OPERATING );
+        app.state( MagAOX::app::stateCodes::READY );
         refresh.join();
-        REQUIRE(app.state() == MagAOX::app::stateCodes::READY);
+        REQUIRE( app.state() == MagAOX::app::stateCodes::READY );
 
         app.setAlert();
         REQUIRE( app.stateAlert() == true );

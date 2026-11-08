@@ -460,9 +460,9 @@ inline int dlDataCollection::appLogic()
         {
             if( m_startPending || !m_session.canStart() || !shmimMonitorT::monitorIdle() )
                 throw std::runtime_error( "collection is busy or retains failed-run buffers" );
-            { //mutex scope
+            { // mutex scope
                 std::lock_guard<std::mutex> lock( m_indiMutex );
-                m_connected = false;
+                m_connected                = false;
                 m_nd.m_received            = {};
                 m_flipwfsf.m_received      = {};
                 m_nd.m_stateReceived       = {};
@@ -470,25 +470,25 @@ inline int dlDataCollection::appLogic()
                 m_fps.m_received           = {};
                 m_emgain.m_received        = {};
             }
-            m_startPending        = true;
+            m_startPending = true;
             shmimMonitorT::monitorState( stateCodes::OPERATING );
             m_observationDeadline = std::chrono::steady_clock::now() + std::chrono::seconds( 5 );
             m_observationPoll     = {};
-            std::lock_guard<std::mutex> lock(m_indiMutex);
+            std::lock_guard<std::mutex> lock( m_indiMutex );
             m_controlError.clear();
         }
         catch( const std::exception &e )
         {
-            std::lock_guard<std::mutex> lock(m_indiMutex);
+            std::lock_guard<std::mutex> lock( m_indiMutex );
             m_controlError = e.what();
             log<software_error>( { __FILE__, __LINE__, e.what() } );
         }
     }
     checkObservation();
     m_session.checkTimeout();
-    const auto   p       = m_session.progress();
+    const auto p = m_session.progress();
     if( !m_startPending && ( p.m_phase == "idle" || p.m_phase == "draining" || p.m_phase == "complete" ||
-                            p.m_phase == "cancelled" || p.m_phase == "failed" ) )
+                             p.m_phase == "cancelled" || p.m_phase == "failed" ) )
     {
         m_connected = false;
         shmimMonitorT::monitorState( stateCodes::READY );
@@ -578,7 +578,8 @@ inline void dlDataCollection::checkObservation()
         }
         if( !m_connected.load() )
         {
-            if( checked < m_observationDeadline ) return;
+            if( checked < m_observationDeadline )
+                return;
             throw std::runtime_error( "source/channel attachment timed out" );
         }
         auto s = settings();
@@ -588,7 +589,7 @@ inline void dlDataCollection::checkObservation()
         m_runFPS             = m_fps.m_value;
         m_runEMGain          = m_emgain.m_value;
         m_observationChanged = false;
-        { //mutex scope
+        { // mutex scope
             std::lock_guard<std::mutex> streamLock( m_streamMutex );
             checkCommandStream( true );
         }
@@ -638,7 +639,7 @@ inline int dlDataCollection::allocate( const dev::shmimT &dummy )
             shmimMonitorT::m_imageStream.md[0].location != -1 || !shmimMonitorT::m_imageStream.array.raw )
             throw std::runtime_error( "WFS stream must be a CPU-backed 2D float32 image" );
         dlCollection::Settings s;
-        { //mutex scope
+        { // mutex scope
             std::lock_guard<std::mutex> lock( m_indiMutex );
             m_sourceSize = { shmimMonitorT::m_height, shmimMonitorT::m_width };
             s            = settings();
@@ -677,7 +678,7 @@ inline int dlDataCollection::allocate( const dev::shmimT &dummy )
     }
     catch( const std::exception &e )
     {
-        { //mutex scope
+        { // mutex scope
             std::lock_guard<std::mutex> lock( m_indiMutex );
             m_controlError = e.what();
             m_startPending = false;

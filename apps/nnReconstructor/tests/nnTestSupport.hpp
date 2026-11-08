@@ -317,7 +317,9 @@ struct IndiElement
     SwitchStateType sw    = Off;
     /// Match text request construction at the INDI boundary.
     IndiElement( std::string n /**< [in] Element name. */, const std::string &value /**< [in] Text value. */ )
-        : name(std::move(n)), text(value) {}
+        : name( std::move( n ) ), text( value )
+    {
+    }
     /// Match numeric request construction at the INDI boundary.
     IndiElement( std::string n /**< [in] Element name. */, double value /**< [in] Numeric value. */ )
         : name( std::move( n ) ), value( value )
@@ -638,10 +640,16 @@ class shmimMonitor
     /// Fixture attachment state; real semaphore ownership is tested separately.
     bool m_idle = true;
     /// Apply a state request to the fixture monitor.
-    void monitorState( int value /**< [in] Requested FSM state. */ ) { m_idle = value != stateCodes::OPERATING; }
+    void monitorState( int value /**< [in] Requested FSM state. */ )
+    {
+        m_idle = value != stateCodes::OPERATING;
+    }
     /// Report fixture detachment.
-    bool monitorIdle() const { return m_idle; }
-    int      appShutdown()
+    bool monitorIdle() const
+    {
+        return m_idle;
+    }
+    int appShutdown()
     {
         return 0;
     }
