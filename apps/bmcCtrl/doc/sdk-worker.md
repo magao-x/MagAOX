@@ -335,3 +335,43 @@ REALTIME `atime`. The independent monitor must perform a qualified clock mapping
 and supply the temporal association assumptions. Post-processing can delay
 visibility, and its extra work can delay pipeline credit retirement; this
 diagnostic does not promise zero indirect scheduling impact.
+
+## Optional SDK provenance history
+
+`sdk.timingEventStream` is empty by default. A distinct name such as
+`dmtweeter_sdk_events` enables a bounded, versioned history for exact joins to
+dmSyncopation's qualified main-command labels. Both `sdk.workerEnabled=true` and
+`sdk.pipelineEnabled=true` are required. `sdk.timingEventCapacity` defaults to
+32768 records and accepts values from 4 through 1048576. These settings require a
+restart. The existing `sdk.startTimeStream` protocol remains independent and may
+be enabled at the same time.
+
+Each SDK event contains the original monotonic SDK-entry timestamp and the
+command's frozen combined-stream identity: inode, publication counter, and raw
+publication writetime seconds and nanoseconds. The combined writetime is an
+identity component, not a replacement for SDK entry or a clock-converted
+endpoint. Events use a separate increasing producer sequence; a failed
+publication consumes its sequence so downstream readers can detect missing
+events. This sequence restarts only with a new writer incarnation.
+
+The ordered post owner publishes after existing finalization and before credit
+retirement. Successful native calls remain represented after timeout or later
+post failure; failed calls, administrative calls, and cancelled unsent work
+produce no event. Publishing adds no SDK-thread work, clock read, semaphore
+operation, allocation, or retry loop. With the option disabled, post processing
+only checks whether the optional publisher is enabled. Detailed DM timing may
+remain disabled.
+
+The shared history uses zero semaphores, exclusive writer ownership, and a new
+inode on restart. An incompatible name collision is left untouched. Consumers
+poll retained records, detect overwrite or producer-sequence gaps, and reattach
+on incarnation changes. Capacity limits retained history; it does not queue or
+delay mirror commands. At 8000 successful submissions per second, the default
+capacity retains about four seconds.
+
+An opening failure logs a startup diagnostic and leaves mirror control
+operational. Runtime failures increment `sdk_pipeline.timingEventFailures`
+without faulting the controller; `sdk_pipeline.timingEventEnabled` reports
+publisher availability. Counter exhaustion stops further diagnostic records
+without wrapping. There are no per-command failure logs. As with the v1
+timestamp stream, post work can indirectly delay pipeline credit retirement.
