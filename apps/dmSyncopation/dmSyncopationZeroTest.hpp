@@ -13,6 +13,7 @@ namespace app
 
 inline bool dmSyncopation::configureZeroTest()
 {
+    m_mainTiming.reset();
     synco::Simulation::Config settings;
     settings.clockOnly       = true;
     settings.steps           = m_requested;
@@ -1312,6 +1313,13 @@ inline int dmSyncopation::processZeroTestPrimary( int64_t observed, int64_t rece
     if( impactClassified )
     {
         m_zeroTiming.main( main, primary, receipt );
+        if( !m_mainTimingName.empty() && m_mainTimingSchedulerGeneration == uint64_t( m_generation ) )
+        {
+            m_mainTiming.capture( { main.inode, main.counter, main.sec, main.nsec },
+                                  metadata->inode,
+                                  primary,
+                                  m_mainTimingCaptureGeneration );
+        }
     }
     else
     {
@@ -1858,6 +1866,7 @@ inline void dmSyncopation::publishZeroTestStatus( int64_t now, bool force )
         m_reason = activeExpired ? "zero trial finished" : "zero trial warmup timed out";
     }
 
+    synchronizeMainTiming();
     const bool requested = m_enabled.load( std::memory_order_acquire );
 
     if( !force && m_zeroPublished.capturedNs > 0 && now >= m_zeroPublished.capturedNs &&

@@ -435,24 +435,41 @@ inline int bmcCtrl::setupSdkDiagnostics()
         m_indiP_pipeline.setPerm( pcf::IndiProperty::ReadOnly );
         m_indiP_pipeline.setState( pcf::IndiProperty::Idle );
 
-        for( const auto *name : { "enabled",          "capacity",          "inFlight",
-                                  "queued",           "sdkActive",         "postActive",
-                                  "admitted",         "retired",           "overloaded",
-                                  "cancelled",        "postFailures",      "superseded",
-                                  "vectorRejected",   "readerUnqualified", "preparationFailures",
-                                  "policy",           "priority",          "allowedCpus",
-                                  "startTimeEnabled", "startTimeFailures" } )
+        for( const auto *name : { "enabled",
+                                  "capacity",
+                                  "inFlight",
+                                  "queued",
+                                  "sdkActive",
+                                  "postActive",
+                                  "admitted",
+                                  "retired",
+                                  "overloaded",
+                                  "cancelled",
+                                  "postFailures",
+                                  "superseded",
+                                  "vectorRejected",
+                                  "readerUnqualified",
+                                  "preparationFailures",
+                                  "policy",
+                                  "priority",
+                                  "allowedCpus",
+                                  "startTimeEnabled",
+                                  "startTimeFailures",
+                                  "timingEventEnabled",
+                                  "timingEventFailures" } )
         {
             indi::addNumberElement( m_indiP_pipeline, name, -1.0, std::numeric_limits<double>::max(), 0.0, "%g" );
         }
 
-        m_indiP_pipeline["enabled"]           = 1.0;
-        m_indiP_pipeline["capacity"]          = double( pipelineCapacity );
-        m_indiP_pipeline["policy"]            = double( m_pipelinePolicy );
-        m_indiP_pipeline["priority"]          = double( m_pipelineActualPrio );
-        m_indiP_pipeline["allowedCpus"]       = double( m_pipelineAllowedCpus );
-        m_indiP_pipeline["startTimeEnabled"]  = m_sdkStartTimeStream.enabled() ? 1.0 : 0.0;
-        m_indiP_pipeline["startTimeFailures"] = double( m_sdkStartTimeFailures.load( std::memory_order_relaxed ) );
+        m_indiP_pipeline["enabled"]             = 1.0;
+        m_indiP_pipeline["capacity"]            = double( pipelineCapacity );
+        m_indiP_pipeline["policy"]              = double( m_pipelinePolicy );
+        m_indiP_pipeline["priority"]            = double( m_pipelineActualPrio );
+        m_indiP_pipeline["allowedCpus"]         = double( m_pipelineAllowedCpus );
+        m_indiP_pipeline["startTimeEnabled"]    = m_sdkStartTimeStream.enabled() ? 1.0 : 0.0;
+        m_indiP_pipeline["startTimeFailures"]   = double( m_sdkStartTimeFailures.load( std::memory_order_relaxed ) );
+        m_indiP_pipeline["timingEventEnabled"]  = m_sdkTimingEventStream.enabled() ? 1.0 : 0.0;
+        m_indiP_pipeline["timingEventFailures"] = double( m_sdkTimingEventFailures.load( std::memory_order_relaxed ) );
 
         if( registerIndiPropertyReadOnly( m_indiP_pipeline ) < 0 )
         {
@@ -479,6 +496,14 @@ inline int bmcCtrl::startPipelineWorker()
     {
         m_sdkStartTimeFailures.fetch_add( 1, std::memory_order_relaxed );
         log<software_error>( { errno, "opening optional SDK-start timestamp stream; continuing without it" } );
+    }
+
+    m_sdkTimingEventSequence = 0;
+
+    if( m_sdkTimingEventStream.open( m_sdkTimingEventStreamName, m_sdkTimingEventCapacity ) < 0 )
+    {
+        m_sdkTimingEventFailures.fetch_add( 1, std::memory_order_relaxed );
+        log<software_error>( { errno, "opening optional SDK timing-event stream; continuing without it" } );
     }
 
     m_pipelineStop       = false;
@@ -534,6 +559,7 @@ inline void bmcCtrl::stopPipelineWorker() noexcept
     }
 
     m_sdkStartTimeStream.close();
+    m_sdkTimingEventStream.close();
 }
 
 inline void bmcCtrl::pipelineThreadStart( bmcCtrl *app )
@@ -644,6 +670,31 @@ inline void bmcCtrl::pipelineThreadExec() noexcept
         if( successful && !m_sdkStartTimeStream.publish( job.result.startNs ) )
         {
             m_sdkStartTimeFailures.fetch_add( 1, std::memory_order_relaxed );
+        }
+
+        if( successful && m_sdkTimingEventStream.enabled() )
+        {
+            MagAOX::dmTimingEvents::Record event;
+            event.kind    = MagAOX::dmTimingEvents::Kind::sdk;
+            event.key     = { job.identity.inputInode,
+                              job.identity.inputCounter,
+                              job.identity.publicationSec,
+                              job.identity.publicationNsec };
+            event.startNs = job.result.startNs;
+
+            if( m_sdkTimingEventSequence == UINT64_MAX )
+            {
+                m_sdkTimingEventFailures.fetch_add( 1, std::memory_order_relaxed );
+            }
+            else
+            {
+                event.sequence = ++m_sdkTimingEventSequence;
+
+                if( !m_sdkTimingEventStream.publish( event ) )
+                {
+                    m_sdkTimingEventFailures.fetch_add( 1, std::memory_order_relaxed );
+                }
+            }
         }
 
         { //mutex scope

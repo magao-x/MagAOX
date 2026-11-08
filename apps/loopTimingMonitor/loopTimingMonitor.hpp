@@ -19,6 +19,8 @@
 #include "loopTiming.hpp"
 #include "loopTimingGate.hpp"
 #include "loopTimingStream.hpp"
+#include "loopTimingSynco.hpp"
+#include "../../libMagAOX/app/dev/dmTimingEventStream.hpp"
 
 namespace MagAOX
 {
@@ -55,6 +57,12 @@ class loopTimingMonitor : public MagAOXApp<>, public dev::telemeter<loopTimingMo
 
     std::string m_loopDevice{ "holoop" }; ///< Owner of the loop_state.toggle subscription.
 
+    std::string m_syncoDevice; ///< Optional production synco device; empty selects standalone timing.
+
+    std::string m_mainStream; ///< Qualified main/mode event history supplied by the configured synco.
+
+    std::string m_sdkEventStream; ///< Post-only SDK command-identity event history for automatic synco mode.
+
     std::string m_cameraClock{ "realtime" }; ///< Explicit external clock used by camera atime.
 
     double m_maxFPS{ 3600 }; ///< Declared fastest frame rate; its reciprocal limits accepted latency.
@@ -79,14 +87,17 @@ class loopTimingMonitor : public MagAOXApp<>, public dev::telemeter<loopTimingMo
     /// One immutable observation; generations prevent joining data across invalidation.
     struct Observation
     {
-        bool     camera{ false }; ///< Select the camera timestamp source, otherwise SDK entry.
-        uint64_t gate{ 0 };       ///< Operating-state generation at capture.
-        uint64_t epoch{ 0 };      ///< Stream/clock/queue continuity generation at capture.
-        uint64_t counter{ 0 };    ///< Source publication counter.
-        int64_t  stampNs{ 0 };    ///< Endpoint in the host MONOTONIC clock.
-        int64_t  lowerNs{ 0 };    ///< Earliest camera endpoint allowed by clock uncertainty.
-        int64_t  upperNs{ 0 };    ///< Latest camera endpoint including truncation uncertainty.
-        int64_t  rawNs{ 0 };      ///< Original camera clock stamp for cadence without mapping noise.
+        bool                   camera{ false };  ///< Select the camera timestamp source, otherwise SDK entry.
+        bool                   tagged{ false };  ///< This observation carries a native or main/mode diagnostic record.
+        uint64_t               incarnation{ 0 }; ///< Diagnostic publisher inode when tagged.
+        dmTimingEvents::Record event;            ///< Immutable provenance record when tagged.
+        uint64_t               gate{ 0 };        ///< Operating-state generation at capture.
+        uint64_t               epoch{ 0 };       ///< Stream/clock/queue continuity generation at capture.
+        uint64_t               counter{ 0 };     ///< Source publication counter.
+        int64_t                stampNs{ 0 };     ///< Endpoint in the host MONOTONIC clock.
+        int64_t                lowerNs{ 0 };     ///< Earliest camera endpoint allowed by clock uncertainty.
+        int64_t                upperNs{ 0 };     ///< Latest camera endpoint including truncation uncertainty.
+        int64_t                rawNs{ 0 };       ///< Original camera clock stamp for cadence without mapping noise.
     };
 
     std::mutex m_gateMutex; ///< Serializes INDI state updates and gate publication.
@@ -105,6 +116,8 @@ class loopTimingMonitor : public MagAOXApp<>, public dev::telemeter<loopTimingMo
 
     std::atomic<uint64_t> m_cameraMissed{ 0 }; ///< Publications overwritten before camera polling.
 
+    std::atomic<uint64_t> m_mainMissed{ 0 }; ///< Main/mode transport records overwritten before polling.
+
     std::atomic<uint64_t> m_sdkMissed{ 0 }; ///< Publications overwritten before SDK polling.
 
     std::atomic<uint64_t> m_counterRegressions{ 0 }; ///< Source counter resets/wraps detected before handoff.
@@ -120,6 +133,16 @@ class loopTimingMonitor : public MagAOXApp<>, public dev::telemeter<loopTimingMo
     spscQueue<Observation> m_queue; ///< Fixed-capacity handoff from polling to ordinary app logic.
 
     loopTiming::Monitor m_monitor; ///< Consumer-owned pairing and statistics.
+
+    loopTiming::Synco m_synco; ///< Ordinary-consumer exact main/SDK join in automatic mode.
+
+    uint64_t m_summarySyncoEpoch{ 0 }; ///< Join epoch represented by retained timing populations.
+
+    uint64_t m_syncoStateGeneration{ 0 }; ///< Changes on actual received synco state transitions, under m_gateMutex.
+
+    bool m_syncoStateKnown{ false }; ///< A well-formed synco enable subscription has been received.
+
+    bool m_syncoEnabled{ false }; ///< Last received enable state; diagnostic records retain command mode identity.
 
     uint64_t m_summaryGate{ 0 }; ///< Gate generation represented by retained statistics.
 
@@ -142,6 +165,8 @@ class loopTimingMonitor : public MagAOXApp<>, public dev::telemeter<loopTimingMo
     pcf::IndiProperty m_indiP_dm; ///< DM FSM subscription storage.
 
     pcf::IndiProperty m_indiP_loop; ///< Loop toggle subscription storage.
+
+    pcf::IndiProperty m_indiP_synco; ///< Optional passive enable-state subscription.
 
     pcf::IndiProperty m_indiP_timing; ///< Read-only mean/deviation, count and freshness.
 
@@ -197,6 +222,9 @@ class loopTimingMonitor : public MagAOXApp<>, public dev::telemeter<loopTimingMo
     /// Consume at most one captured queue population and update its trailing statistics.
     void consume( int64_t nowNs /**< [in] Current monotonic evaluation time. */ );
 
+    /// Invalidate timing populations when a command-identity join enters another epoch.
+    void syncJoinEpoch();
+
     /// Copy all six fgtimes values only when current evidence still qualifies the summary.
     bool timingValues( std::array<double, 6> &values /**< [out] Cadence/cadence/latency mean-deviation pairs. */ );
 
@@ -251,6 +279,18 @@ inline void loopTimingMonitor::setupConfig()
     add( "dm.shmimName", "dm", "shmimName", "string", "Post-processing SDK timestamp stream." );
     add( "dm.device", "dm", "device", "string", "DM FSM device; default dmtweeter." );
     add( "loop.device", "loop", "device", "string", "Device with loop_state.toggle; default holoop." );
+    add(
+        "synco.device", "synco", "device", "string", "Optional production synco device for automatic mode switching." );
+    add( "synco.mainStream",
+         "synco",
+         "mainStream",
+         "string",
+         "Qualified main/mode event history; required with synco.device." );
+    add( "synco.sdkStream",
+         "synco",
+         "sdkStream",
+         "string",
+         "BMC post-only SDK event history; required with synco.device." );
     add( "monitor.maxFPS",
          "monitor",
          "maxFPS",
@@ -279,6 +319,9 @@ inline int loopTimingMonitor::loadConfigImpl( mx::app::appConfigurator &config )
     config( m_sdkStream, "dm.shmimName" );
     config( m_dmDevice, "dm.device" );
     config( m_loopDevice, "loop.device" );
+    config( m_syncoDevice, "synco.device" );
+    config( m_mainStream, "synco.mainStream" );
+    config( m_sdkEventStream, "synco.sdkStream" );
     config( m_maxFPS, "monitor.maxFPS" );
     config( m_pollSleepUs, "monitor.pollSleepUs" );
     config( m_windowSec, "monitor.windowSec" );
@@ -293,7 +336,12 @@ inline int loopTimingMonitor::loadConfigImpl( mx::app::appConfigurator &config )
         return mx::math::isFinite( value ) && value >= low && value <= high;
     };
 
-    if( m_cameraStream.empty() || m_sdkStream.empty() || m_cameraStream == m_sdkStream || m_cameraDevice.empty() ||
+    const bool automatic = !m_syncoDevice.empty();
+
+    if( automatic != !m_mainStream.empty() || automatic != !m_sdkEventStream.empty() ||
+        ( automatic && ( m_mainStream == m_sdkEventStream || m_mainStream == m_cameraStream ||
+                         m_sdkEventStream == m_cameraStream ) ) ||
+        m_cameraStream.empty() || m_sdkStream.empty() || m_cameraStream == m_sdkStream || m_cameraDevice.empty() ||
         m_dmDevice.empty() || m_loopDevice.empty() || m_cameraDevice == m_dmDevice ||
         ( m_cameraClock != "realtime" && m_cameraClock != "tai" ) || !bounded( m_maxFPS, 1, 1000000 ) ||
         !bounded( m_pollSleepUs, 0, 1000000 ) || !bounded( m_windowSec, 0.001, 3600 ) || m_capacity < 4 ||
@@ -331,10 +379,17 @@ inline int loopTimingMonitor::appStartup()
     }
 
     m_queue.configure( m_capacity );
+    m_synco.configure( m_capacity, int64_t( m_windowSec * 1e9 ) );
 
     if( registerIndiPropertySet( m_indiP_camera, m_cameraDevice, "fsm", st_setCallBack_source ) < 0 ||
         registerIndiPropertySet( m_indiP_dm, m_dmDevice, "fsm", st_setCallBack_source ) < 0 ||
         registerIndiPropertySet( m_indiP_loop, m_loopDevice, "loop_state", st_setCallBack_source ) < 0 )
+    {
+        return -1;
+    }
+
+    if( !m_syncoDevice.empty() &&
+        registerIndiPropertySet( m_indiP_synco, m_syncoDevice, "enable", st_setCallBack_source ) < 0 )
     {
         return -1;
     }
@@ -359,7 +414,13 @@ inline int loopTimingMonitor::appStartup()
                               "counterRegressions",
                               "overflow",
                               "epoch",
-                              "gateGeneration" } )
+                              "gateGeneration",
+                              "modeGeneration",
+                              "mainMissed",
+                              "joinInvalid",
+                              "joinUnmatched",
+                              "joinOverflow",
+                              "joinDuplicates" } )
     {
         indi::addNumberElement( m_indiP_quality, name, 0.0, std::numeric_limits<double>::max(), 0.0, "%g" );
     }
@@ -367,8 +428,12 @@ inline int loopTimingMonitor::appStartup()
     createROIndiText( m_indiP_status, "loop_timing_state", "state" );
     indi::addTextElement( m_indiP_status, "endpoints" );
     indi::addTextElement( m_indiP_status, "cameraClock" );
-    m_indiP_status["state"]       = "waiting";
-    m_indiP_status["endpoints"]   = m_sdkStream + ".atime - " + m_cameraStream + ".atime (clock mapped)";
+    indi::addTextElement( m_indiP_status, "mode" );
+    m_indiP_status["mode"]  = m_syncoDevice.empty() ? "standalone" : "unknown";
+    m_indiP_status["state"] = "waiting";
+    m_indiP_status["endpoints"] =
+        ( m_syncoDevice.empty() ? m_sdkStream + ".atime" : m_sdkEventStream + ".startNs (qualified main)" ) + " - " +
+        m_cameraStream + ".atime (clock mapped)";
     m_indiP_status["cameraClock"] = m_cameraClock;
 
     if( registerIndiPropertyReadOnly( m_indiP_timing ) < 0 || registerIndiPropertyReadOnly( m_indiP_quality ) < 0 ||
@@ -420,9 +485,9 @@ inline int64_t loopTimingMonitor::monotonicNow()
 
 inline bool loopTimingMonitor::publishGate()
 {
-    const bool enabled = m_gate.enabled();
+    const bool enabled = m_gate.enabled() && ( m_syncoDevice.empty() || m_syncoStateKnown );
     m_gateEnabled.store( enabled, std::memory_order_release );
-    m_gateGeneration.store( m_gate.generation(), std::memory_order_release );
+    m_gateGeneration.store( m_gate.generation() + m_syncoStateGeneration, std::memory_order_release );
     return enabled;
 }
 
@@ -433,6 +498,25 @@ inline int loopTimingMonitor::st_setCallBack_source( void *app, const pcf::IndiP
 
 inline int loopTimingMonitor::setCallBack_source( const pcf::IndiProperty &property )
 {
+    if( !m_syncoDevice.empty() && property.getDevice() == m_syncoDevice && property.getName() == "enable" )
+    {
+        const bool known = property.getType() == pcf::IndiProperty::Switch && property.find( "toggle" ) &&
+                           ( property["toggle"].getSwitchState() == pcf::IndiElement::On ||
+                             property["toggle"].getSwitchState() == pcf::IndiElement::Off );
+        const bool                  enabled = known && property["toggle"].getSwitchState() == pcf::IndiElement::On;
+        std::lock_guard<std::mutex> lock( m_gateMutex );
+
+        if( known != m_syncoStateKnown || ( known && enabled != m_syncoEnabled ) )
+        {
+            ++m_syncoStateGeneration;
+        }
+
+        m_syncoStateKnown = known;
+        m_syncoEnabled    = enabled;
+        publishGate();
+        return 0;
+    }
+
     loopTiming::Gate::Source source;
     bool                     value = false;
 
@@ -472,7 +556,7 @@ inline void loopTimingMonitor::consume( int64_t nowNs )
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_gateMutex );
         enabled    = publishGate();
-        generation = m_gate.generation();
+        generation = m_gateGeneration.load( std::memory_order_relaxed );
     }
 
     const auto epoch = m_captureEpoch.load( std::memory_order_acquire );
@@ -480,8 +564,10 @@ inline void loopTimingMonitor::consume( int64_t nowNs )
     if( !enabled || generation != m_summaryGate || epoch != m_summaryEpoch )
     {
         m_monitor.reset();
-        m_summaryGate  = generation;
-        m_summaryEpoch = epoch;
+        m_synco.reset();
+        m_summarySyncoEpoch = m_synco.epoch();
+        m_summaryGate       = generation;
+        m_summaryEpoch      = epoch;
     }
 
     Observation observation;
@@ -494,7 +580,21 @@ inline void loopTimingMonitor::consume( int64_t nowNs )
             continue;
         }
 
-        if( observation.camera )
+        if( observation.tagged )
+        {
+            m_synco.observe( observation.event, observation.incarnation, nowNs );
+            syncJoinEpoch();
+            loopTiming::Synco::Match match;
+
+            while( m_synco.pop( match, nowNs ) )
+            {
+                syncJoinEpoch();
+                m_monitor.sdk( match.counter, match.startNs );
+            }
+
+            syncJoinEpoch();
+        }
+        else if( observation.camera )
         {
             m_monitor.camera(
                 observation.counter, observation.stampNs, observation.lowerNs, observation.upperNs, observation.rawNs );
@@ -505,8 +605,30 @@ inline void loopTimingMonitor::consume( int64_t nowNs )
         }
     }
 
+    if( !m_syncoDevice.empty() )
+    {
+        loopTiming::Synco::Match match;
+
+        while( m_synco.pop( match, nowNs ) )
+        {
+            syncJoinEpoch();
+            m_monitor.sdk( match.counter, match.startNs );
+        }
+
+        syncJoinEpoch();
+    }
+
     m_monitor.update( nowNs );
     ++m_summarySerial;
+}
+
+inline void loopTimingMonitor::syncJoinEpoch()
+{
+    if( m_summarySyncoEpoch != m_synco.epoch() )
+    {
+        m_monitor.reset();
+        m_summarySyncoEpoch = m_synco.epoch();
+    }
 }
 
 inline bool loopTimingMonitor::timingValues( std::array<double, 6> &values )
@@ -520,7 +642,9 @@ inline bool loopTimingMonitor::timingValuesLocked( std::array<double, 6> &values
     const auto  now     = monotonicNow();
     const auto &summary = m_monitor.summary();
 
-    if( !publishGate() || m_summaryGate != m_gate.generation() ||
+    if( ( !m_syncoDevice.empty() &&
+          ( !m_synco.known() || m_synco.enabled() != m_syncoEnabled || m_summarySyncoEpoch != m_synco.epoch() ) ) ||
+        !publishGate() || m_summaryGate != m_gateGeneration.load( std::memory_order_relaxed ) ||
         m_summaryEpoch != m_captureEpoch.load( std::memory_order_acquire ) || !m_streamsReady.load() ||
         !summary.cameraIntervals.valid || !summary.sdkIntervals.valid || !summary.latency.valid ||
         summary.newestNs <= 0 || now < summary.newestNs || now - summary.newestNs >= int64_t( m_windowSec * 1e9 ) )
@@ -552,15 +676,26 @@ inline int loopTimingMonitor::appLogic()
         const bool                  enabled   = publishGate();
         const bool                  connected = m_streamsReady.load();
         const bool                  active    = enabled && connected;
-        const bool current = active && m_summaryGate == m_gate.generation() && m_summaryEpoch == m_captureEpoch.load();
-        const bool valid   = current && timingValuesLocked( values );
-        const std::string availability = !enabled                                ? "gated"
-                                         : !connected                            ? "disconnected"
-                                         : valid                                 ? "valid"
-                                         : current && summary.age >= m_windowSec ? "stale"
-                                                                                 : "warming";
+        const bool current = active && m_summaryGate == m_gateGeneration.load( std::memory_order_relaxed ) &&
+                             m_summaryEpoch == m_captureEpoch.load();
+        const bool        valid        = current && timingValuesLocked( values );
+        const std::string availability = !enabled                                     ? "gated"
+                                         : !connected                                 ? "disconnected"
+                                         : !m_syncoDevice.empty() && !m_synco.known() ? "waitingMode"
+                                         : !m_syncoDevice.empty() && m_synco.enabled() != m_syncoEnabled
+                                             ? "modeMismatch"
+                                         : valid                                                     ? "valid"
+                                         : current && summary.age >= m_windowSec                     ? "stale"
+                                         : !m_syncoDevice.empty() && summary.sdkIntervals.count == 0 ? "waitingMain"
+                                                                                                     : "warming";
         state( active ? stateCodes::OPERATING : stateCodes::READY );
         updateIfChanged( m_indiP_status, "state", availability );
+        updateIfChanged( m_indiP_status,
+                         "mode",
+                         std::string( m_syncoDevice.empty() ? "standalone"
+                                      : !m_synco.known()    ? "unknown"
+                                      : m_synco.enabled()   ? "step0"
+                                                            : "ordinary" ) );
         updateIfChanged( m_indiP_timing,
                          std::vector<std::string>{ "mean",
                                                    "stddev",
@@ -582,7 +717,8 @@ inline int loopTimingMonitor::appLogic()
                                               current ? summary.latency.span : 0,
                                               current ? summary.age : -1,
                                               double( valid ) } );
-        const auto &quality = summary.quality;
+        const auto &quality     = summary.quality;
+        const auto &joinQuality = m_synco.quality();
         updateIfChanged( m_indiP_quality,
                          std::vector<std::string>{ "cameraMissed",
                                                    "sdkMissed",
@@ -594,9 +730,15 @@ inline int loopTimingMonitor::appLogic()
                                                    "counterRegressions",
                                                    "overflow",
                                                    "epoch",
-                                                   "gateGeneration" },
+                                                   "gateGeneration",
+                                                   "modeGeneration",
+                                                   "mainMissed",
+                                                   "joinInvalid",
+                                                   "joinUnmatched",
+                                                   "joinOverflow",
+                                                   "joinDuplicates" },
                          std::vector<double>{ double( m_cameraMissed.load() ),
-                                              double( m_sdkMissed.load() ),
+                                              double( m_sdkMissed.load() + joinQuality.sdkMissed ),
                                               double( quality.invalid + m_invalidSnapshots.load() ),
                                               double( quality.ambiguous ),
                                               double( quality.unmatched ),
@@ -605,7 +747,13 @@ inline int loopTimingMonitor::appLogic()
                                               double( quality.counterRegressions + m_counterRegressions.load() ),
                                               double( quality.overflow ),
                                               double( m_summaryEpoch ),
-                                              double( m_summaryGate ) } );
+                                              double( m_summaryGate ),
+                                              double( m_synco.generation() ),
+                                              double( m_mainMissed.load() + joinQuality.mainMissed ),
+                                              double( joinQuality.invalid ),
+                                              double( joinQuality.unmatched ),
+                                              double( joinQuality.overflow ),
+                                              double( joinQuality.duplicates ) } );
     }
 
     recordTimings();
@@ -656,9 +804,12 @@ inline void loopTimingMonitor::sleepFor( int64_t ns )
 
 inline void loopTimingMonitor::threadExec() noexcept
 {
-    loopTiming::Stream       camera;
-    loopTiming::Stream       sdk;
-    timing::PublicationClock clock;
+    loopTiming::Stream               camera;
+    loopTiming::Stream               sdk;
+    dev::dmTimingEventStream::Reader sdkEvents;
+    dev::dmTimingEventStream::Reader mainEvents;
+    const bool                       automatic = !m_syncoDevice.empty();
+    timing::PublicationClock         clock;
     clock.configure( int64_t( m_clockBracketUs * 1000 ), 1000, int64_t( m_clockMaxAgeMs * 1000000 ) );
     clockid_t externalClock = CLOCK_REALTIME;
 
@@ -672,6 +823,15 @@ inline void loopTimingMonitor::threadExec() noexcept
     uint64_t generation = 0;
     int64_t  nextAttach = 0;
     bool     wasEnabled = false;
+
+    const auto closeSources = [&]()
+    {
+        camera.close();
+        sdk.close();
+        sdkEvents.close();
+        mainEvents.close();
+        clock.reset();
+    };
 
     try
     {
@@ -689,9 +849,7 @@ inline void loopTimingMonitor::threadExec() noexcept
 
             if( currentGeneration != generation || enabled != wasEnabled )
             {
-                camera.close();
-                sdk.close();
-                clock.reset();
+                closeSources();
                 m_captureEpoch.fetch_add( 1, std::memory_order_release );
                 m_streamsReady = false;
                 generation     = currentGeneration;
@@ -707,14 +865,14 @@ inline void loopTimingMonitor::threadExec() noexcept
 
             if( now >= nextAttach )
             {
-                const bool replaced =
-                    ( camera.isOpen() && !camera.checkIdentity() ) || ( sdk.isOpen() && !sdk.checkIdentity() );
+                const bool replaced = ( camera.isOpen() && !camera.checkIdentity() ) ||
+                                      ( sdk.isOpen() && !sdk.checkIdentity() ) ||
+                                      ( sdkEvents.isOpen() && !sdkEvents.checkIdentity() ) ||
+                                      ( mainEvents.isOpen() && !mainEvents.checkIdentity() );
 
                 if( replaced )
                 {
-                    camera.close();
-                    sdk.close();
-                    clock.reset();
+                    closeSources();
                     m_captureEpoch.fetch_add( 1, std::memory_order_release );
                 }
 
@@ -723,13 +881,26 @@ inline void loopTimingMonitor::threadExec() noexcept
                     camera.open( m_cameraStream );
                 }
 
-                if( !sdk.isOpen() )
+                if( automatic )
+                {
+                    if( !sdkEvents.isOpen() )
+                    {
+                        sdkEvents.open( m_sdkEventStream );
+                    }
+
+                    if( !mainEvents.isOpen() )
+                    {
+                        mainEvents.open( m_mainStream );
+                    }
+                }
+                else if( !sdk.isOpen() )
                 {
                     sdk.open( m_sdkStream, true );
                 }
 
-                m_streamsReady = camera.isOpen() && sdk.isOpen();
-                nextAttach     = now + 100000000;
+                m_streamsReady =
+                    camera.isOpen() && ( automatic ? sdkEvents.isOpen() && mainEvents.isOpen() : sdk.isOpen() );
+                nextAttach = now + 100000000;
             }
 
             if( !m_streamsReady.load() )
@@ -740,7 +911,7 @@ inline void loopTimingMonitor::threadExec() noexcept
 
             bool reset = false;
 
-            for( int source = 0; source < 2; ++source )
+            for( int source = 0; source < ( automatic ? 1 : 2 ); ++source )
             {
                 loopTiming::Stream::Snapshot snapshot;
                 const auto                   result = source == 0 ? camera.poll( snapshot ) : sdk.poll( snapshot );
@@ -805,11 +976,58 @@ inline void loopTimingMonitor::threadExec() noexcept
                 }
             }
 
+            if( automatic && !reset )
+            {
+                for( unsigned source = 0; source < 2 && !reset; ++source )
+                {
+                    auto &reader = source == 0 ? sdkEvents : mainEvents;
+
+                    // Bound each history drain so a burst never starves the latest camera metadata.
+                    for( unsigned count = 0; count < 64; ++count )
+                    {
+                        dmTimingEvents::Record record;
+                        const auto             result = reader.poll( record );
+                        using Result                  = dev::dmTimingEventStream::Result;
+
+                        if( result == Result::unchanged || result == Result::busy )
+                        {
+                            break;
+                        }
+
+                        if( result == Result::gap )
+                        {
+                            ( source == 0 ? m_sdkMissed : m_mainMissed ).fetch_add( reader.missed() );
+                            reset = true;
+                            break;
+                        }
+
+                        if( result != Result::updated ||
+                            ( source == 0 ) != ( record.kind == dmTimingEvents::Kind::sdk ) )
+                        {
+                            ++m_invalidSnapshots;
+                            reset = true;
+                            break;
+                        }
+
+                        Observation observation;
+                        observation.tagged      = true;
+                        observation.incarnation = reader.inode();
+                        observation.event       = record;
+                        observation.gate        = generation;
+                        observation.epoch       = m_captureEpoch.load( std::memory_order_relaxed );
+
+                        if( !m_queue.push( observation ) )
+                        {
+                            reset = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
             if( reset )
             {
-                camera.close();
-                sdk.close();
-                clock.reset();
+                closeSources();
                 m_captureEpoch.fetch_add( 1, std::memory_order_release );
                 m_streamsReady = false;
                 nextAttach     = 0;

@@ -2,6 +2,8 @@ allall: all
 
 OTHER_HEADERS=syncoSchedule.hpp syncoCadence.hpp syncoSimulation.hpp syncoPipelineSimulation.hpp \
               syncoPublicationClock.hpp ../../libMagAOX/common/publicationClock.hpp \
+              syncoMainTiming.hpp ../../libMagAOX/common/dmTimingEvents.hpp \
+              ../../libMagAOX/app/dev/dmTimingEventStream.hpp \
               dmSyncopationZeroTest.hpp dmSyncopationProduction.hpp syncoZeroTiming.hpp \
               ../../libMagAOX/common/dmSyncoSimulation.hpp \
               ../../libMagAOX/app/dmSyncopationTiming.hpp \

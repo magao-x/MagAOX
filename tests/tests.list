@@ -11,6 +11,7 @@
 ../libMagAOX/app/dev/tests/frameGrabberTiming_test
 ../libMagAOX/app/dev/tests/frameGrabber_integration_test
 ../libMagAOX/app/dev/tests/dmTiming_test
+../libMagAOX/app/dev/tests/dmTimingEventStream_test
 ../libMagAOX/app/dev/tests/dmCombTiming_test
 ../libMagAOX/app/dev/tests/dmTiming_integration_test
 ../libMagAOX/app/dev/tests/dmCompletion_test
@@ -65,12 +66,15 @@
 ../apps/dmSyncopation/tests/syncoSimulation_test
 ../apps/dmSyncopation/tests/syncoPipelineSimulation_test
 ../apps/dmSyncopation/tests/syncoZeroTiming_test
+../apps/dmSyncopation/tests/syncoMainTiming_test
 ../apps/loopTimingMonitor/tests/loopTiming_test
 ../apps/loopTimingMonitor/tests/loopTimingGate_test
+../apps/loopTimingMonitor/tests/loopTimingSynco_test
 ../apps/loopTimingMonitor/tests/loopTimingStream_test
 ../apps/loopTimingMonitor/tests/loopTimingMonitor_test
 ../apps/loopTimingMonitor/tests/loopTimingMonitor_subscription_test
 ../apps/loopTimingMonitor/tests/loopTimingMonitor_integration_test
+../apps/loopTimingMonitor/tests/loopTimingMonitor_synco_test
 ../apps/filterWheelCtrl/tests/filterWheelCtrl_test
 ../apps/flipperCtrl/tests/flipperCtrl_test
 ../apps/flipperCtrl/tests/flipperCtrl_entrypoint_test

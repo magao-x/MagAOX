@@ -418,6 +418,11 @@ class bmcCtrl_test : public bmcCtrl
     using bmcCtrl::m_sdkStartTimeStreamName;
     using bmcCtrl::m_sdkThread;
     using bmcCtrl::m_sdkThreadPrio;
+    using bmcCtrl::m_sdkTimingEventCapacity;
+    using bmcCtrl::m_sdkTimingEventFailures;
+    using bmcCtrl::m_sdkTimingEventSequence;
+    using bmcCtrl::m_sdkTimingEventStream;
+    using bmcCtrl::m_sdkTimingEventStreamName;
     using bmcCtrl::m_sdkWorkerEnabled;
     using bmcCtrl::m_stagedSat;
     using bmcCtrl::stopSdkWorker;
@@ -628,6 +633,8 @@ void bmcCtrl_test::enablePipeline()
     REQUIRE( m_dmReaderRelease.open( "bmc_pipeline_read", MagAOX::dmCompletion::Kind::readers ) == 0 );
     REQUIRE( m_pipelineResult.open( "bmc_pipeline_sdk", MagAOX::dmCompletion::Kind::sdk ) == 0 );
     REQUIRE( m_sdkStartTimeStream.open( m_sdkStartTimeStreamName ) == 0 );
+    m_sdkTimingEventSequence = 0;
+    REQUIRE( m_sdkTimingEventStream.open( m_sdkTimingEventStreamName, m_sdkTimingEventCapacity ) == 0 );
     m_pipelineThreadInit = false;
     m_pipelineConfigured = true;
     m_pipelineStop       = false;
@@ -1895,9 +1902,12 @@ TEST_CASE( "BMC pipeline late post failure drains a running SDK and cancels late
     #endif
     // clang-format on
     MagAOX::app::bmcCtrl_test app;
-    app.m_sdkStartTimeStreamName = "bmc_pipeline_start_post_failure";
+    app.m_sdkStartTimeStreamName   = "bmc_pipeline_start_post_failure";
+    app.m_sdkTimingEventStreamName = "bmc_pipeline_event_post_failure";
     app.enablePipeline();
-    bmcTimingTest::TimingReader timing( "bmc_pipeline_start_post_failure" );
+    bmcTimingTest::TimingReader                   timing( "bmc_pipeline_start_post_failure" );
+    MagAOX::app::dev::dmTimingEventStream::Reader events;
+    REQUIRE( events.open( "bmc_pipeline_event_post_failure" ) == 0 );
     bmcTimingTest::block = bmcTimingTest::perCall = true;
     bmcTimingTest::heldPost                       = 1;
     bmcTimingTest::ReturnGuard guard;
@@ -1930,6 +1940,16 @@ TEST_CASE( "BMC pipeline late post failure drains a running SDK and cancels late
     MagAOX::app::dev::dmSdkTimingStream::Snapshot timestamp;
     REQUIRE( MagAOX::app::dev::dmSdkTimingStream::read( timing.image(), timestamp ) );
     REQUIRE( timestamp.counter == 2 );
+    MagAOX::dmTimingEvents::Record event;
+    REQUIRE( events.poll( event ) == MagAOX::app::dev::dmTimingEventStream::Result::updated );
+    REQUIRE( event.key.counter == 1 );
+    REQUIRE( event.sequence == 1 );
+    REQUIRE( events.poll( event ) == MagAOX::app::dev::dmTimingEventStream::Result::updated );
+    REQUIRE( event.key.counter == 2 );
+    REQUIRE( event.sequence == 2 );
+    REQUIRE( event.startNs == timestamp.startNs );
+    REQUIRE( events.poll( event ) == MagAOX::app::dev::dmTimingEventStream::Result::unchanged );
+    REQUIRE( app.m_sdkTimingEventFailures == 0 );
 }
 
 /// Disconnect invalidates queued old-source commands while a running SDK retains its frozen identity.
@@ -2554,6 +2574,274 @@ TEST_CASE( "BMC optional timestamp collision does not prevent pipeline startup",
     // clang-format off
     #ifdef BMCCTRL_TEST_DOXYGEN_REF
     MagAOX::app::bmcCtrl::startPipelineWorker;
+    #endif
+    // clang-format on
+}
+
+/** \brief Post provenance retains the frozen identity and original SDK entry with detailed timing disabled.
+ * \ingroup bmcCtrl_unit_test
+ */
+TEST_CASE( "BMC pipeline publishes frozen SDK provenance only after post processing", "[bmcCtrl][pipeline][sdkEvent]" )
+{
+    using namespace MagAOX::app;
+    bmcCtrl_test app;
+    app.m_sdkStartTimeStreamName   = "bmc_pipeline_event_v1";
+    app.m_sdkTimingEventStreamName = "bmc_pipeline_event_frozen";
+    app.m_sdkTimingEventCapacity   = 16;
+    app.m_dmTiming.configure( 0, 0 );
+    app.enablePipeline();
+    dev::dmTimingEventStream::Reader events;
+    REQUIRE( events.open( "bmc_pipeline_event_frozen" ) == 0 );
+    bmcTimingTest::TimingReader timing( "bmc_pipeline_event_v1" );
+    bmcTimingTest::heldPost = 1;
+    bmcTimingTest::ReturnGuard guard;
+    REQUIRE( app.pipelineInput( 1 ) == 0 );
+    bmcTimingTest::waitPost();
+    const auto sdk      = app.waitPipelineSdkReady( 1 );
+    const auto identity = app.m_pipelineResult.snapshot();
+    REQUIRE( identity.inputCounter == 1 );
+    MagAOX::dmTimingEvents::Record event;
+    REQUIRE( events.poll( event ) == dev::dmTimingEventStream::Result::unchanged );
+    REQUIRE( timing.image()->md->cnt0 == 0 );
+    app.prepareInput( 2 );
+    bmcTimingTest::permitReturn();
+    app.waitRetired( 1 );
+    REQUIRE( events.poll( event ) == dev::dmTimingEventStream::Result::updated );
+    REQUIRE( event.kind == MagAOX::dmTimingEvents::Kind::sdk );
+    REQUIRE( event.key.inode == identity.inputInode );
+    REQUIRE( event.key.counter == identity.inputCounter );
+    REQUIRE( event.key.sec == identity.publicationSec );
+    REQUIRE( event.key.nsec == identity.publicationNsec );
+    REQUIRE( event.sequence == 1 );
+    REQUIRE( event.startNs == sdk[0] );
+    REQUIRE( event.generation == 0 );
+    REQUIRE( event.primaryInode == 0 );
+    REQUIRE( event.primaryCounter == 0 );
+    REQUIRE( event.steps == 0 );
+    REQUIRE_FALSE( event.enabled );
+    REQUIRE( app.m_sdkTimingEventSequence == 1 );
+    REQUIRE( app.m_sdkTimingEventFailures == 0 );
+    dev::dmSdkTimingStream::Snapshot timestamp;
+    REQUIRE( dev::dmSdkTimingStream::read( timing.image(), timestamp ) );
+    REQUIRE( timestamp.counter == 1 );
+    REQUIRE( timestamp.startNs == event.startNs );
+    REQUIRE( bmcTimingTest::calls == 1 );
+
+    // clang-format off
+    #ifdef BMCCTRL_TEST_DOXYGEN_REF
+    MagAOX::app::bmcCtrl::pipelineThreadExec;
+    MagAOX::app::dev::dmTimingEventStream::publish;
+    #endif
+    // clang-format on
+}
+
+/** \brief A rejected diagnostic record and exhausted sequence cannot fault or suppress native SDK work.
+ * \ingroup bmcCtrl_unit_test
+ */
+TEST_CASE( "BMC SDK provenance publication failures remain diagnostic", "[bmcCtrl][pipeline][sdkEvent]" )
+{
+    using namespace MagAOX::app;
+    bmcCtrl_test app;
+    app.m_sdkStartTimeStreamName   = "bmc_pipeline_event_failure_v1";
+    app.m_sdkTimingEventStreamName = "bmc_pipeline_event_failure";
+    app.enablePipeline();
+    dev::dmTimingEventStream::Reader events;
+    REQUIRE( events.open( "bmc_pipeline_event_failure" ) == 0 );
+    bmcTimingTest::TimingReader timing( "bmc_pipeline_event_failure_v1" );
+    REQUIRE( app.pipelineInput( 1 ) == 0 );
+    app.waitRetired( 1 );
+    MagAOX::dmTimingEvents::Record event;
+    REQUIRE( events.poll( event ) == dev::dmTimingEventStream::Result::updated );
+    REQUIRE( event.sequence == 1 );
+
+    // Inject an already consumed logical sequence while the post owner is idle.
+    app.m_sdkTimingEventSequence = 0;
+    REQUIRE( app.pipelineInput( 2 ) == 0 );
+    app.waitRetired( 2 );
+    REQUIRE( app.m_sdkTimingEventSequence == 1 );
+    REQUIRE( app.m_sdkTimingEventFailures == 1 );
+    REQUIRE( events.poll( event ) == dev::dmTimingEventStream::Result::unchanged );
+    REQUIRE( app.pipelineInput( 3 ) == 0 );
+    app.waitRetired( 3 );
+    REQUIRE( events.poll( event ) == dev::dmTimingEventStream::Result::updated );
+    REQUIRE( event.key.counter == 3 );
+    REQUIRE( event.sequence == 2 );
+    app.m_sdkTimingEventSequence = UINT64_MAX;
+    REQUIRE( app.pipelineInput( 4 ) == 0 );
+    app.waitRetired( 4 );
+    REQUIRE( events.poll( event ) == dev::dmTimingEventStream::Result::unchanged );
+    REQUIRE( app.m_sdkTimingEventSequence == UINT64_MAX );
+    REQUIRE( app.m_sdkTimingEventFailures == 2 );
+    REQUIRE( bmcTimingTest::calls == 4 );
+    REQUIRE_FALSE( app.m_sdkFault );
+    REQUIRE_FALSE( app.m_admissionClosed );
+    dev::dmSdkTimingStream::Snapshot timestamp;
+    REQUIRE( dev::dmSdkTimingStream::read( timing.image(), timestamp ) );
+    REQUIRE( timestamp.counter == 4 );
+    REQUIRE( app.m_sdkStartTimeFailures == 0 );
+
+    // clang-format off
+    #ifdef BMCCTRL_TEST_DOXYGEN_REF
+    MagAOX::app::bmcCtrl::pipelineThreadExec;
+    #endif
+    // clang-format on
+}
+
+/** \brief A stalled consumer can later recover each successful SDK event retained in the bounded history.
+ * \ingroup bmcCtrl_unit_test
+ */
+TEST_CASE( "BMC SDK provenance retains a burst until consumed", "[bmcCtrl][pipeline][sdkEvent]" )
+{
+    using namespace MagAOX::app;
+    bmcCtrl_test app;
+    app.m_sdkTimingEventStreamName = "bmc_pipeline_event_burst";
+    app.m_sdkTimingEventCapacity   = 16;
+    app.enablePipeline();
+    dev::dmTimingEventStream::Reader events;
+    REQUIRE( events.open( "bmc_pipeline_event_burst" ) == 0 );
+
+    for( uint64_t counter = 1; counter <= 12; ++counter )
+    {
+        REQUIRE( app.pipelineInput( counter ) == 0 );
+        app.waitRetired( counter );
+    }
+
+    MagAOX::dmTimingEvents::Record event;
+    int64_t                        previousStart = 0;
+
+    for( uint64_t counter = 1; counter <= 12; ++counter )
+    {
+        REQUIRE( events.poll( event ) == dev::dmTimingEventStream::Result::updated );
+        REQUIRE( event.key.counter == counter );
+        REQUIRE( event.sequence == counter );
+        REQUIRE( event.startNs > previousStart );
+        previousStart = event.startNs;
+    }
+
+    REQUIRE( events.poll( event ) == dev::dmTimingEventStream::Result::unchanged );
+    REQUIRE( bmcTimingTest::calls == 12 );
+    REQUIRE( app.m_sdkTimingEventFailures == 0 );
+    REQUIRE_FALSE( app.m_sdkStartTimeStream.enabled() );
+    REQUIRE( app.m_sdkStartTimeFailures == 0 );
+
+    // clang-format off
+    #ifdef BMCCTRL_TEST_DOXYGEN_REF
+    MagAOX::app::bmcCtrl::pipelineThreadExec;
+    #endif
+    // clang-format on
+}
+
+/** \brief Native failure and a disabled publisher produce no SDK provenance or diagnostic fault.
+ * \ingroup bmcCtrl_unit_test
+ */
+TEST_CASE( "BMC SDK provenance excludes failed calls and stays optional", "[bmcCtrl][pipeline][sdkEvent]" )
+{
+    using namespace MagAOX::app;
+    bmcCtrl_test app;
+    const bool   enabled = GENERATE( false, true );
+
+    if( enabled )
+    {
+        app.m_sdkTimingEventStreamName = "bmc_pipeline_event_failed";
+    }
+
+    app.enablePipeline();
+    dev::dmTimingEventStream::Reader events;
+
+    if( enabled )
+    {
+        REQUIRE( events.open( "bmc_pipeline_event_failed" ) == 0 );
+        bmcTimingTest::result = 7;
+    }
+
+    REQUIRE( app.pipelineInput( 1 ) == 0 );
+    app.waitRetired( 1 );
+    REQUIRE( bmcTimingTest::calls == 1 );
+    REQUIRE( app.m_sdkTimingEventSequence == 0 );
+    REQUIRE( app.m_sdkTimingEventFailures == 0 );
+    REQUIRE( app.m_sdkTimingEventStream.enabled() == enabled );
+
+    if( enabled )
+    {
+        MagAOX::dmTimingEvents::Record event;
+        REQUIRE( events.poll( event ) == dev::dmTimingEventStream::Result::unchanged );
+        REQUIRE( app.m_sdkFault );
+    }
+    else
+    {
+        REQUIRE_FALSE( app.m_sdkFault );
+    }
+
+    // clang-format off
+    #ifdef BMCCTRL_TEST_DOXYGEN_REF
+    MagAOX::app::bmcCtrl::pipelineThreadExec;
+    #endif
+    // clang-format on
+}
+
+/** \brief SDK provenance requires pipeline ownership, a distinct stream, and bounded history capacity.
+ * \ingroup bmcCtrl_unit_test
+ */
+TEST_CASE( "BMC validates post-only SDK provenance configuration", "[bmcCtrl][config][sdkEvent]" )
+{
+    using namespace MagAOX::app;
+    bmcCtrl_test app;
+    app.setupConfig();
+    REQUIRE( app.m_sdkTimingEventStreamName.empty() );
+    REQUIRE( app.m_sdkTimingEventCapacity == 32768 );
+    app.m_sdkTimingEventStreamName = "bmc_sdk_event_config";
+    REQUIRE( app.loadConfigImpl( app.config ) < 0 );
+    app.m_sdkWorkerEnabled = true;
+    REQUIRE( app.loadConfigImpl( app.config ) < 0 );
+    app.m_pipelineEnabled = true;
+    REQUIRE( app.loadConfigImpl( app.config ) == 0 );
+    app.m_sdkTimingEventCapacity = dev::dmTimingEventStream::minCapacity - 1;
+    REQUIRE( app.loadConfigImpl( app.config ) < 0 );
+    app.m_sdkTimingEventCapacity = dev::dmTimingEventStream::minCapacity;
+    REQUIRE( app.loadConfigImpl( app.config ) == 0 );
+    app.m_sdkTimingEventCapacity = dev::dmTimingEventStream::maxCapacity;
+    REQUIRE( app.loadConfigImpl( app.config ) == 0 );
+    app.m_sdkTimingEventCapacity = dev::dmTimingEventStream::maxCapacity + 1;
+    REQUIRE( app.loadConfigImpl( app.config ) < 0 );
+    app.m_sdkTimingEventCapacity   = 32768;
+    app.m_sdkTimingEventStreamName = "../unsafe";
+    REQUIRE( app.loadConfigImpl( app.config ) < 0 );
+    app.m_sdkTimingEventStreamName = "bmc_sdk_event_config";
+    app.m_sdkStartTimeStreamName   = "bmc_sdk_event_config";
+    REQUIRE( app.loadConfigImpl( app.config ) < 0 );
+    app.m_sdkStartTimeStreamName.clear();
+    app.m_pipelineResultStream = "bmc_sdk_event_config";
+    REQUIRE( app.loadConfigImpl( app.config ) < 0 );
+
+    // clang-format off
+    #ifdef BMCCTRL_TEST_DOXYGEN_REF
+    MagAOX::app::bmcCtrl::loadConfigImpl;
+    #endif
+    // clang-format on
+}
+
+/** \brief An incompatible existing image disables SDK provenance without changing control or its pixels.
+ * \ingroup bmcCtrl_unit_test
+ */
+TEST_CASE( "BMC optional SDK provenance collision does not prevent startup", "[bmcCtrl][pipeline][sdkEvent]" )
+{
+    MagAOX::app::bmcCtrl_test app;
+    app.m_pipelineEnabled          = true;
+    app.m_sdkTimingEventStreamName = "bmc_timing_shape";
+    REQUIRE( app.startPipelineWorker() == 0 );
+    REQUIRE_FALSE( app.m_sdkTimingEventStream.enabled() );
+    REQUIRE( app.m_sdkTimingEventFailures == 1 );
+    REQUIRE_FALSE( app.m_sdkFault );
+    REQUIRE( app.shapeCounter() == 0 );
+    REQUIRE( bmcTimingTest::calls == 0 );
+    REQUIRE( app.setupSdkDiagnostics() == 0 );
+    REQUIRE( app.m_indiP_pipeline["timingEventEnabled"].get<double>() == 0 );
+    REQUIRE( app.m_indiP_pipeline["timingEventFailures"].get<double>() == 1 );
+
+    // clang-format off
+    #ifdef BMCCTRL_TEST_DOXYGEN_REF
+    MagAOX::app::bmcCtrl::startPipelineWorker;
+    MagAOX::app::bmcCtrl::setupSdkDiagnostics;
     #endif
     // clang-format on
 }

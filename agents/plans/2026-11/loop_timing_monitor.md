@@ -463,17 +463,21 @@ qualification remain follow-up work. No test failure remains unresolved.
 
 ## Syncopation step-0 extension (2026-11-06)
 
-Status: **design under review; this extension is not implemented yet**. The user
+Status: **implemented and verified offline** (2026-11-07). The user
 reports the deployed instance as `holoop-time`, at commit `56cf3fc0`, and requests
 that only synco step 0 contribute to loop timing; auxiliary DM writes are ignored.
 The user confirmed **production providers** as the intended four-step mode.
+On 2026-11-07 the user additionally required automatic switching between ordinary
+and step-0-only timing when synco's enable state changes, without restarting or
+reconfiguring the monitor. The disabled-unavailable policy originally proposed
+for this extension is superseded by the both-mode classification design below.
 The supplied snapshot has a 500.001 us camera period, 166.921 us latency mean,
 3.004 us sample deviation and 3998 accepted samples over roughly two seconds.
 Its quality counters are cumulative, not necessarily losses in that last window.
 
-### Current behavior with four steps
+### Behavior before the extension with four steps
 
-The current matcher requires exactly one SDK start per adjacent-camera interval.
+The standalone matcher requires exactly one SDK start per adjacent-camera interval.
 Four-step operation normally presents multiple candidates, increments ambiguous
 counts and stops admitting new latency samples. Previously accepted samples can
 remain valid until they expire from the two-second window; source gaps can clear
@@ -518,17 +522,19 @@ association examples, not predictions of measured synco SDK timing. Neither
   alone is insufficient, and reading it later in DM post-processing can observe
   a different command.
 
-### Recommended implementation
+### Implemented design
 
 1. Preserve the current v1 SDK timestamp stream and standalone monitor behavior.
    Add an optional versioned diagnostic stream carrying the original SDK-start
    time and frozen combined identity, published only from BMC post-processing.
    Include publisher incarnation and an explicit record sequence.
-2. Export only positively qualified main/step-0 identities from the existing
-   synco classification point, with scheduler incarnation/generation and primary
-   cycle identity. Capture a fixed-size record into a bounded queue before any
-   sampled logging. Publish from ordinary diagnostic processing; do not add work
-   in the scheduler's quiet final-publication window.
+2. Export positively qualified main identities in both enabled and disabled
+   production-provider operation. Each record includes scheduler incarnation,
+   mode generation, effective enabled state and primary cycle identity. Reuse
+   the existing active main/step-0 qualification and extract its read-only part
+   for passive observation while disabled. Capture a fixed-size record into a
+   bounded queue before any sampled logging. Publish from ordinary diagnostic
+   processing; do not add work in the scheduler's quiet final-publication window.
 3. Retain a bounded sequenced history in both diagnostic transports. At the
    reported 2 kHz camera rate, four steps nominally produce 8 kHz SDK events,
    but post-processing may publish several in a burst. A latest-only word or a
@@ -536,9 +542,13 @@ association examples, not predictions of measured synco SDK timing. Neither
    shared record-ring utility for these two transports, with coherent slots,
    explicit overruns, and no semaphore operations.
 4. The monitor joins SDK records and qualified-main labels by all four combined
-   identity fields, independent of arrival order. Only positive matches enter
-   camera pairing. Unmatched/expired records are excluded as unclassified;
-   absence of a label is not proof that a command was auxiliary.
+   identity fields, independent of arrival order. In automatically managed mode,
+   retain this exact join both when synco is enabled and when disabled. Only
+   positive main matches enter camera pairing. Disabled operation still reports
+   ordinary one-main-per-camera timing, but an unlabelled SDK write is never
+   admitted merely because the last enable notification was Off. Unmatched or
+   expired records are excluded as unclassified; absence of a label is not proof
+   that a command was auxiliary.
 5. Preserve raw SDK transport loss accounting before filtering. Feed matched
    mains using their primary-cycle continuity, not the original all-SDK counters
    (e.g. 1, 5, 9), which the existing matcher would incorrectly flag as gaps.
@@ -547,23 +557,74 @@ association examples, not predictions of measured synco SDK timing. Neither
    cadence**, and camera-to-step-0 latency. Auxiliary writes contribute to none
    of those latency/SDK-cadence populations. Keep `monitor.maxFPS=3600` as a
    camera-rate limit; do not multiply it by four. Size full-rate capture separately.
-7. Add configurable synco device/diagnostic stream names. When configured, use
-   the last received INDI source state and diagnostic publisher generations to
-   distinguish supported active syncopation from disabled operation. Subscribe
-   passively without periodic property requests or INDI receipt-age expiry.
-   Clear queued associations and statistics across enable/disable, mode,
-   step-count, clock and publisher changes. Unknown
-   state or missing labels must disable qualification rather than fall back to
-   treating arbitrary SDK writes as step 0. Initially, a configured step-0 filter
-   also remains unavailable while synco is disabled: the existing classification
-   hook emits no main labels then. An automatic return to ordinary monitoring
-   would need a separate drain/watermark handover because previously admitted
-   auxiliaries can complete after synco acknowledges Off; Off alone is not proof
-   that the SDK path is free of auxiliary commands.
+7. Add configurable synco device/diagnostic stream names and switch modes
+   automatically: disabled selects ordinary main timing; enabled selects
+   step-0-only timing. Subscribe to INDI passively without periodic property
+   requests or receipt-age expiry. Ordered diagnostic mode generations and
+   per-main effective-mode labels establish which measurement epoch each command
+   belongs to; notification arrival time must not classify a command. Clear
+   queued associations and statistics across actual enable/disable, mode,
+   step-count, clock and publisher changes. Repeated unchanged notifications do
+   not restart collection. Use a brief warming/transition state while new-mode
+   main identities and camera/SDK baselines are acquired, then resume without
+   operator action. Unknown or conflicting mode evidence, missing labels, record
+   loss or unsupported modes suppress qualification until coherent evidence
+   returns; never fall back to admitting arbitrary SDK writes.
 8. Keep legacy non-synco instances/configurations working unchanged. Implement
    the new filter for the user-confirmed production-providers mode. The shared
    main-classification hook also covers coordinated zero tests, but legacy
    scheduling lacks this hook and is explicitly unsupported by the new filter.
+
+### Automatic enable/disable switching
+
+The production `enable` callback sets `m_enabled=false` before taking
+`m_cycleMutex`, then acknowledges Off after the current scheduler callback
+quiesces. This prevents subsequent scheduler publications but does not drain
+already published auxiliary triggers through dmcomb or BMC. In particular, the
+auxiliary-acknowledgement wait aborts on disable, so a pending auxiliary can
+produce a later combined counter than the one visible at Off. Neither the INDI
+Off arrival time nor a snapshot of the combined counter at that instant is a
+safe cutoff. Similarly, On notification delivery can lag the first auxiliary.
+
+Continue exporting positive main classifications in both modes instead of
+trying to admit all SDK writes after a timed grace period. A delayed auxiliary
+SDK result cannot match a main identity regardless of when enable updates,
+main labels or SDK records arrive. Epoch changes discard old-mode matches and
+avoid mixed statistics; measurement can briefly warm after an edge, but returns
+automatically when sufficient valid new-mode samples exist.
+
+Use a consistent diagnostic mode generation for both edges and internal disables;
+the current schedule generation alone is insufficient because Off paths do not
+all advance it. Freeze the mode generation with the observed primary identity
+and reject qualification that crosses a transition. Never assign a late SDK
+record the mode observed at its publication or receipt time.
+
+The existing disabled branch returns before main qualification. Extract the
+primary/combined progression checks and `impactClassified` validation
+into reusable read-only helpers, then use them from both paths. Do not simply
+remove that early return: active waits currently require `m_enabled`, and the
+active path also starts trials and prepares/publishes auxiliary commands. The
+passive classifier must:
+
+- Observe only primary and combined stream identities/trace using nonwaiting
+  snapshots. Retain a bounded prior-primary history so a later callback can
+  qualify the preceding main. Skip uncertain samples; introduce no new waits,
+  sleeps, clocks, allocations, logging or stream publications in the callback.
+  A mode-generation change invalidates pending passive classification.
+- Require no provider-ready records, auxiliary copy/read-release permissions,
+  valid multi-step schedule or SDK-result observer to classify an ordinary main.
+- Perform no destination writes, auxiliary publications or trial-state updates.
+- Retain conservative first-frame rebaselining, counter-gap rejection and trace
+  qualification; a named-primary trace alone still does not establish a main.
+- Cover startup while disabled, explicit toggles and internally triggered
+  disables/restarts; mode records and main records share ordered generations.
+
+Without synco configured, the existing standalone monitor remains available.
+With automatic synco integration configured, both modes require the synco main
+classification source. A stopped or unqualified classification source makes
+timing unavailable until it recovers, even if the last INDI enable value is Off.
+This changes no instrument state and requires no additional BMC changes beyond
+the already planned post-processing command-identity publisher.
 
 ### Extension verification
 
@@ -579,13 +640,124 @@ association examples, not predictions of measured synco SDK timing. Neither
   state and unsupported modes clear the measurement epoch and suppress forced
   telemetry. Unchanged affirmative INDI state does not expire with age; diagnostic
   records still obey their continuity, freshness and join-expiry checks.
+- Startup with synco Off automatically produces ordinary timing; On switches
+  to step-0-only timing and Off returns to ordinary timing without restarting.
+- Delayed/reordered INDI notifications, labels and SDK records cannot relabel
+  pre-transition commands. Include disable after auxiliary publication but before
+  combiner acknowledgement, auxiliary SDK return after Off, On arriving after
+  auxiliary SDK events, and rapid Off/On with the same final boolean value.
+- Passive main classification works without ready providers or an armed
+  multi-step schedule, never performs auxiliary writes and retains rejection of
+  uncertain main identities. Repeated unchanged state produces no resets or
+  getProperties traffic. Loss/restart of classification recovers automatically.
 - `eventStride` and text logging configuration do not affect label completeness.
 - No new SDK-path clock reads or semaphore synchronization; disabled diagnostic
   configuration preserves existing behavior. Operator qualification remains
   necessary for indirect cache/load and scheduler effects.
 
-Expected extension touch points: shared record transport/key helpers; the BMC
-post publisher and tests; synco qualified-main export and tests; monitor joining,
+Extension touch points: shared record transport/key helpers; the BMC post
+publisher and tests; synco qualified-main export and tests; monitor joining,
 configuration, state handling, tests and docs. This design retains the existing
 camera-to-main temporal association assumption; it does not introduce a true
 camera-frame ID through the complete AO pipeline.
+
+### Extension execution notes (2026-11-07)
+
+- Implemented the approved automatic both-mode classification. The enabled
+  callback captures a fixed-size record with a bounded nonblocking queue push at
+  the already-qualified main hook. Disabled observation uses nonwaiting metadata
+  and trace snapshots. Neither path adds clocks, allocation, waits, logging,
+  semaphores or shared-stream publication. Unconfigured diagnostic branches
+  return before additional capture work. Ordinary app logic manages diagnostic
+  attachment, publishes history records and reports queue/publication health.
+- Added `libMagAOX/common/dmTimingEvents.hpp` and
+  `libMagAOX/app/dev/dmTimingEventStream.hpp`: one validated record contract and
+  reusable, versioned, zero-semaphore history for both publishers. Coherent
+  atomic slots have contiguous transport sequences; separate producer sequences
+  reveal records lost before transport. Recreated publishers get fresh inodes.
+- BMC emits successful native SDK starts with the existing frozen four-field
+  combined identity from the ordered post worker. Existing v1 timestamp output
+  remains unchanged. Publisher failures are counted without faulting the DM.
+- Added `apps/dmSyncopation/syncoMainTiming.hpp` for mode generations, capture
+  queuing and passive main observation. Classification does not depend on sampled
+  event logging. An independent read-only combined attachment supports disabled
+  operation without ready providers or active auxiliary scheduling. Filesystem
+  attach/check/retire operations run outside the cycle mutex.
+- Added `apps/loopTimingMonitor/loopTimingSynco.hpp` for bounded exact joining
+  with ordered SDK watermarks, delayed-label handling, duplicate/conflict checks,
+  expiry and explicit loss accounting. Only qualified mains enter camera pairing
+  in either mode; their primary counters establish SDK cadence continuity.
+- The monitor passively subscribes to synco enable once. Actual INDI and diagnostic
+  generation changes reset statistics; unchanged notifications do not. Telemetry
+  requires the current received enable state and diagnostic mode to agree.
+  Status includes mode, mode generation and join quality, with `waitingMode`,
+  `modeMismatch` and `waitingMain` availability reasons. Stopped classification
+  expires normally and never enables raw-SDK fallback.
+- Updated application Makefiles, test registration, example configurations and
+  deployment documentation. All three applications must be rebuilt; automatic
+  mode requires both publishers plus all three monitor `[synco]` settings.
+- Final review checked disabled transitions against the actual counter-driven
+  dmcomb implementation: a late auxiliary computation can acquire a newer primary
+  trace counter at publication. Its process-start must therefore be at or after
+  that primary publication, in addition to exact one-output progression from a
+  pre-primary baseline. An auxiliary-only computation begun earlier is rejected.
+  A first response that coalesces the new main and last auxiliary is a main
+  response under this all-current-input combiner contract. Trace linkage alone
+  remains insufficient. Regression coverage explicitly distinguishes both cases.
+
+Offline validation on workstation `mx11` (no instrument actions):
+
+- Shared event transport: 225 assertions / 11 cases.
+- Full BMC mock SDK suite: 1857 assertions / 43 cases. The proprietary SDK is
+  absent on this workstation, so a production BMC binary was not linked.
+- Full dmSyncopation suite: 6,694,622 assertions / 156 cases; dedicated main
+  timing helper: 139 assertions / 7 cases after the final review regressions.
+- Pure monitor join: 136 assertions / 4 cases, including the four-step example
+  with step 3 crossing into the next camera interval.
+- Automatic monitor worker using private shared streams: 1108 assertions / 2
+  cases, including Off/On/Off, delayed auxiliary SDK events, source recreation,
+  history overwrite and recovery. Five consecutive runs passed.
+- Existing monitor application tests: 294 assertions / 5 cases; standalone worker
+  integration: 50 assertions / 2 cases. Passive INDI subscription test: 73
+  assertions / 1 generated case covering standalone and automatic configuration.
+- Both `loopTimingMonitor` and `dmSyncopation` applications build and link.
+  Changed C++ files pass clang-format (with required mutex-comment restoration),
+  file-header checks and `git diff --check`. Original task text is preserved.
+
+Remaining deployment qualification: operator updates/restarts the three instances
+and checks coverage, source trace/MeasureTiming configuration, history capacity
+and timing impact on the RTC. Small added CPU/cache work is not zero impact; no
+hardware benchmark was run. The existing camera-to-main temporal association
+still lacks an end-to-end camera frame ID and retains its whole-period aliasing
+limitation. A non-counter-driven combiner or additional external channel writers
+requires separate classification qualification.
+
+### Extension affected files
+
+- `agents/plans/2026-11/loop_timing_monitor.md`
+- `apps/bmcCtrl/Makefile`
+- `apps/bmcCtrl/bmcCtrl.hpp`
+- `apps/bmcCtrl/bmcPipeline.hpp`
+- `apps/bmcCtrl/doc/sdk-worker.md`
+- `apps/bmcCtrl/tests/bmcCtrl_test.cpp`
+- `apps/dmSyncopation/Makefile`
+- `apps/dmSyncopation/dmSyncopation.hpp`
+- `apps/dmSyncopation/dmSyncopationZeroTest.hpp`
+- `apps/dmSyncopation/dmtweeter_synco_production.conf`
+- `apps/dmSyncopation/doc/dmSyncopation.md`
+- `apps/dmSyncopation/syncoMainTiming.hpp`
+- `apps/dmSyncopation/tests/dmSyncopation_test.cpp`
+- `apps/dmSyncopation/tests/syncoMainTiming_test.cpp`
+- `apps/loopTimingMonitor/Makefile`
+- `apps/loopTimingMonitor/README.md`
+- `apps/loopTimingMonitor/loopTimingMonitor.conf`
+- `apps/loopTimingMonitor/loopTimingMonitor.hpp`
+- `apps/loopTimingMonitor/loopTimingSynco.hpp`
+- `apps/loopTimingMonitor/tests/loopTimingMonitor_subscription_test.cpp`
+- `apps/loopTimingMonitor/tests/loopTimingMonitor_synco_test.cpp`
+- `apps/loopTimingMonitor/tests/loopTimingMonitor_test.cpp`
+- `apps/loopTimingMonitor/tests/loopTimingSynco_test.cpp`
+- `libMagAOX/app/dev/dmTimingEventStream.hpp`
+- `libMagAOX/app/dev/tests/dmTimingEventStream_test.cpp`
+- `libMagAOX/common/dmTimingEvents.hpp`
+- `tests/tests.list`

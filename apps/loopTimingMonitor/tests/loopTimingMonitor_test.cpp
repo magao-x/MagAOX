@@ -24,10 +24,13 @@ class Harness : public MagAOX::app::loopTimingMonitor
     using loopTimingMonitor::m_gateGeneration;
     using loopTimingMonitor::m_lastRecord;
     using loopTimingMonitor::m_loopDevice;
+    using loopTimingMonitor::m_mainStream;
     using loopTimingMonitor::m_maxFPS;
     using loopTimingMonitor::m_monitor;
+    using loopTimingMonitor::m_sdkEventStream;
     using loopTimingMonitor::m_streamsReady;
     using loopTimingMonitor::m_summarySerial;
+    using loopTimingMonitor::m_syncoDevice;
     using loopTimingMonitor::monotonicNow;
     using loopTimingMonitor::recordTimings;
     using loopTimingMonitor::timingValues;
@@ -162,6 +165,25 @@ TEST_CASE( "loop timing configuration validates FPS and device identities", "[lo
     SECTION( "duplicate FSM device" )
     {
         app.m_dmDevice = app.m_cameraDevice;
+        CHECK( app.validate() < 0 );
+    }
+
+    SECTION( "automatic mode requires all source names" )
+    {
+        app.m_syncoDevice = "synco";
+        CHECK( app.validate() < 0 );
+        app.m_mainStream = "mainEvents";
+        CHECK( app.validate() < 0 );
+        app.m_sdkEventStream = "sdkEvents";
+        CHECK( app.validate() == 0 );
+        app.m_sdkEventStream = app.m_mainStream;
+        CHECK( app.validate() < 0 );
+    }
+
+    SECTION( "event streams require a synco device" )
+    {
+        app.m_mainStream     = "mainEvents";
+        app.m_sdkEventStream = "sdkEvents";
         CHECK( app.validate() < 0 );
     }
 

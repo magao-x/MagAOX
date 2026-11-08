@@ -148,11 +148,14 @@ void SubscriptionDriver::clear()
 /// Run the real passive monitor lifecycle with isolated names and a local serialization-only driver.
 class SubscriptionHarness : public MagAOX::app::loopTimingMonitor
 {
+    size_t m_expectedSubscriptions{ 3 }; ///< Three source states plus optional passive synco enable.
+
   public:
     using MagAOXApp<true>::sendGetPropertySetList;
 
     /// Configure telemetry, nonexistent streams and FIFO names before any application thread starts.
-    explicit SubscriptionHarness( const std::string &directory /**< [in] Existing private fixture directory. */ );
+    explicit SubscriptionHarness( const std::string &directory /**< [in] Existing private fixture directory. */,
+                                  bool automatic = false /**< [in] Add the production synco enable subscription. */ );
 
     /// Stop the polling and telemetry owners before member/base destruction.
     ~SubscriptionHarness() noexcept;
@@ -164,14 +167,17 @@ class SubscriptionHarness : public MagAOX::app::loopTimingMonitor
     void source( const std::string &device /**< [in] One configured local device name. */,
                  bool               affirmative /**< [in] OPERATING or On when true; READY or Off otherwise. */ );
 
-    /// Check that all three registrations remain present and resolved after normal retries.
+    /// Check that the configured registrations remain present and resolved after normal retries.
     bool subscriptionsResolved();
 
     /// Return the operating-state gate published by the real source callbacks.
     bool gateEnabled() const;
+
+    /// Return the generation that changes only when received state changes or becomes invalid.
+    uint64_t gateGeneration() const;
 };
 
-SubscriptionHarness::SubscriptionHarness( const std::string &directory )
+SubscriptionHarness::SubscriptionHarness( const std::string &directory, bool automatic )
 {
     m_configName   = "loop-timing-subscription-test";
     m_cameraDevice = "local-camera";
@@ -181,6 +187,15 @@ SubscriptionHarness::SubscriptionHarness( const std::string &directory )
     m_sdkStream    = "uncreated-local-sdk";
     m_threadPrio   = 0;
     m_cpuset.clear();
+
+    if( automatic )
+    {
+        m_syncoDevice           = "local-synco";
+        m_mainStream            = "uncreated-local-main-events";
+        m_sdkEventStream        = "uncreated-local-sdk-events";
+        m_expectedSubscriptions = 4;
+    }
+
     setupConfig();
     REQUIRE( loadConfigImpl( config ) == 0 );
     m_tel.logPath( directory );
@@ -211,13 +226,15 @@ SubscriptionDriver &SubscriptionHarness::driver()
 
 void SubscriptionHarness::source( const std::string &device, bool affirmative )
 {
-    const bool        loop = device == m_loopDevice;
-    pcf::IndiProperty property( loop ? pcf::IndiProperty::Switch : pcf::IndiProperty::Text );
+    const bool        loop   = device == m_loopDevice;
+    const bool        synco  = !m_syncoDevice.empty() && device == m_syncoDevice;
+    const bool        toggle = loop || synco;
+    pcf::IndiProperty property( toggle ? pcf::IndiProperty::Switch : pcf::IndiProperty::Text );
     property.setDevice( device );
-    property.setName( loop ? "loop_state" : "fsm" );
-    property.add( pcf::IndiElement( loop ? "toggle" : "state" ) );
+    property.setName( loop ? "loop_state" : synco ? "enable" : "fsm" );
+    property.add( pcf::IndiElement( toggle ? "toggle" : "state" ) );
 
-    if( loop )
+    if( toggle )
     {
         property["toggle"].setSwitchState( affirmative ? pcf::IndiElement::On : pcf::IndiElement::Off );
     }
@@ -233,7 +250,7 @@ bool SubscriptionHarness::subscriptionsResolved()
 {
     std::lock_guard<std::mutex> lock( m_indiCallBackMutex );
 
-    if( m_indiSetCallBacks.size() != 3 )
+    if( m_indiSetCallBacks.size() != m_expectedSubscriptions )
     {
         return false;
     }
@@ -254,6 +271,11 @@ bool SubscriptionHarness::gateEnabled() const
 {
     return m_gateEnabled.load();
 }
+
+uint64_t SubscriptionHarness::gateGeneration() const
+{
+    return m_gateGeneration.load();
+}
 /// \endcond
 
 /** \brief Resolve real subscription registrations once, then retain callback updates without app-level polling.
@@ -262,22 +284,51 @@ bool SubscriptionHarness::gateEnabled() const
 TEST_CASE( "loop timing keeps resolved INDI subscriptions without periodic getProperties",
            "[loopTimingMonitor][subscriptions]" )
 {
+    const bool automatic = GENERATE( false, true );
+    CAPTURE( automatic );
     SubscriptionDirectory directory;
-    SubscriptionHarness   app( directory.path() );
+    SubscriptionHarness   app( directory.path(), automatic );
     REQUIRE( app.appStartup() == 0 );
     app.driver().clear();
     app.sendGetPropertySetList( false );
-    REQUIRE( app.driver().requests() == 3 );
+    REQUIRE( app.driver().requests() == ( automatic ? 4 : 3 ) );
     app.source( "local-camera", true );
     app.source( "local-dm", true );
     app.source( "local-loop", true );
+
+    if( automatic )
+    {
+        REQUIRE_FALSE( app.gateEnabled() );
+        app.source( "local-synco", false );
+    }
+
     app.sendGetPropertySetList( false );
     REQUIRE( app.subscriptionsResolved() );
     REQUIRE( app.gateEnabled() );
     app.driver().clear();
+    const auto generation = app.gateGeneration();
 
     for( unsigned iteration = 0; iteration < 3; ++iteration )
     {
+        if( automatic )
+        {
+            app.source( "local-synco", false );
+        }
+
+        REQUIRE( app.appLogic() == 0 );
+        app.sendGetPropertySetList( false );
+        CHECK( app.driver().requests() == 0 );
+        CHECK( app.subscriptionsResolved() );
+        CHECK( app.gateEnabled() );
+        CHECK( app.gateGeneration() == generation );
+    }
+
+    if( automatic )
+    {
+        app.source( "local-synco", true );
+        CHECK( app.gateGeneration() == generation + 1 );
+        app.source( "local-synco", true );
+        CHECK( app.gateGeneration() == generation + 1 );
         REQUIRE( app.appLogic() == 0 );
         app.sendGetPropertySetList( false );
         CHECK( app.driver().requests() == 0 );
