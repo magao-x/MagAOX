@@ -4,6 +4,7 @@
  */
 #include "../../../tests/testXWC.hpp"
 #include "../po4ao_utils.hpp"
+#include "../po4aoStatistics.hpp"
 #include <array>
 #include <chrono>
 #include <condition_variable>
@@ -58,6 +59,7 @@ struct EngineBundle
 {
     uint64_t generation{ 1 }, modelId{ 42 };
     int      historyLength{ 2 };
+    std::vector<float> linearWeights{1}; ///< Test policy uses the CPU boundary.
 };
 /// Boundary fixture declaring the state used by the included production method definitions.
 /** Model loading and device output are doubles; collection, frame processing, queue
@@ -118,8 +120,10 @@ class po4ao
     bool m_outputOpened{ true }, m_replayOpened{ true },
         m_replayMetadataOpened{ true };                                   ///< Output and rolling replay availability.
     bool m_warmupOpened{ true }, m_warmupMetadataOpened{ true };          ///< Frozen replay availability.
-    std::array<std::atomic<uint32_t>, c_latencySamples> m_latencySamples; ///< Production callback latency samples.
-    std::atomic<uint64_t>                               m_latencyCount{ 0 }, m_deadlineMisses{ 0 },
+    std::atomic<bool> m_runAdmission{true}; ///< Whole-app callback admission.
+    std::atomic<uint32_t> m_effectiveBackend{0}; ///< Backend of the emitted command.
+    MagAOX::app::Po4aoSamples m_runtimeSamples; ///< Production telemetry sample ring.
+    std::atomic<uint64_t> m_deadlineMisses{ 0 },
         m_missedFrames{ 0 };                                               ///< Latency and source-gap statistics.
     std::atomic<uint64_t> m_inferenceFailures{ 0 }, m_replayDrops{ 0 };    ///< Inference and queue failure statistics.
     bool                  m_failInference{ false }, m_failOutput{ false }; ///< Injected SDK/output failures.
@@ -189,8 +193,6 @@ inline po4ao::po4ao()
         m_episodeBuffers[slot].configure( m_iterationsPerEpisode, m_nModes );
         m_episodeStates[slot].store( slot == 0 ? 1 : 0 );
     }
-    for( auto &latency : m_latencySamples )
-        latency.store( 0 );
     const float previous[]{ 2.F, -2.F, 99.F };
     m_observationHistory->add( previous );
     m_commandHistory->add( previous );

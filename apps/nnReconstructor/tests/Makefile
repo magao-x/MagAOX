@@ -11,7 +11,7 @@ all: test
 test: .build/nnReconstructor_test .build/cacaoWriter_test
 	./.build/nnReconstructor_test
 	./.build/cacaoWriter_test
-	CXX='$(CXX)' python3 test_cacao_writer_build.py
+	env -u MAKEFLAGS -u MFLAGS CXX='$(CXX)' python3 test_cacao_writer_build.py
 .build/nnReconstructor_optimized_test: nnReconstructor_test.cpp nnTestSupport.hpp ../nnReconstructor.hpp ../reconstructorControls.hpp ../cacaoWriter.hpp cacaoWriter_test.hpp
 	mkdir -p .build
 	$(CXX) $(CXXFLAGS) -O3 -ffast-math -DNNRECONSTRUCTOR_TEST -DCATCH_CONFIG_NO_POSIX_SIGNALS $< -o $@

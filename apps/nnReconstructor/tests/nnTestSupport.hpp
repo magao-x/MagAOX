@@ -315,6 +315,9 @@ struct IndiElement
     std::string     name, text;
     float           value = 0;
     SwitchStateType sw    = Off;
+    /// Match text request construction at the INDI boundary.
+    IndiElement( std::string n /**< [in] Element name. */, const std::string &value /**< [in] Text value. */ )
+        : name(std::move(n)), text(value) {}
     /// Match numeric request construction at the INDI boundary.
     IndiElement( std::string n /**< [in] Element name. */, double value /**< [in] Numeric value. */ )
         : name( std::move( n ) ), value( value )
@@ -497,7 +500,7 @@ constexpr int Required = 0;
 }
 namespace stateCodes
 {
-constexpr int OPERATING = 1;
+constexpr int READY = 0, OPERATING = 1;
 }
 /// Small contiguous image double; preprocessing indexing is separately checked against an oracle.
 template <class T>
@@ -632,6 +635,12 @@ class shmimMonitor
     Metadata md;
     IMAGE    m_imageStream{ &md, { nullptr } };
     bool     m_getExistingFirst = false;
+    /// Fixture attachment state; real semaphore ownership is tested separately.
+    bool m_idle = true;
+    /// Apply a state request to the fixture monitor.
+    void monitorState( int value /**< [in] Requested FSM state. */ ) { m_idle = value != stateCodes::OPERATING; }
+    /// Report fixture detachment.
+    bool monitorIdle() const { return m_idle; }
     int      appShutdown()
     {
         return 0;

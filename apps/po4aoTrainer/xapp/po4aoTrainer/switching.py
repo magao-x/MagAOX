@@ -75,6 +75,7 @@ class Runtime:
             or len(state["active_id"]) != 16
         ):
             raise ConnectionError("Runtime status is not fully initialized")
+        state["run_phase"] = vector["run_phase"] if "run_phase" in vector else "unverified"
         return state
 
     def request_control(self, enabled):

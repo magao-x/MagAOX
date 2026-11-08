@@ -26,7 +26,7 @@ namespace app
  */
 
 /// Instrument adapter for the CPU-only collection state machine.
-/** The monitor remains OPERATING while the separate collection phase is idle.
+/** The monitor uses READY while idle and attaches in OPERATING for a pending or active run.
  * Start is explicit; construction, stream attachment and bank preparation send no command.
  * \ingroup dlDataCollection
  */
@@ -431,7 +431,7 @@ inline int dlDataCollection::appStartup()
             m_ioThread, m_ioThreadInit, m_ioThreadID, m_indiP_ioThread, 0, "", "collection-io", this, ioStart ) < 0 )
         return -1;
     SHMIMMONITOR_APP_STARTUP;
-    state( stateCodes::OPERATING );
+    shmimMonitorT::monitorState( stateCodes::READY );
     return 0;
 }
 
@@ -451,17 +451,18 @@ inline int dlDataCollection::appLogic()
     {
         m_startPending = false;
         m_session.abort();
+        m_connected = false;
+        shmimMonitorT::monitorState( stateCodes::READY );
     }
     if( m_startRequested.exchange( false ) && !stop )
     {
         try
         {
-            if( m_startPending || !m_session.canStart() )
+            if( m_startPending || !m_session.canStart() || !shmimMonitorT::monitorIdle() )
                 throw std::runtime_error( "collection is busy or retains failed-run buffers" );
             { //mutex scope
                 std::lock_guard<std::mutex> lock( m_indiMutex );
-                if( !m_connected.load() )
-                    throw std::runtime_error( "source/channel not attached" );
+                m_connected = false;
                 m_nd.m_received            = {};
                 m_flipwfsf.m_received      = {};
                 m_nd.m_stateReceived       = {};
@@ -470,12 +471,15 @@ inline int dlDataCollection::appLogic()
                 m_emgain.m_received        = {};
             }
             m_startPending        = true;
+            shmimMonitorT::monitorState( stateCodes::OPERATING );
             m_observationDeadline = std::chrono::steady_clock::now() + std::chrono::seconds( 5 );
             m_observationPoll     = {};
+            std::lock_guard<std::mutex> lock(m_indiMutex);
             m_controlError.clear();
         }
         catch( const std::exception &e )
         {
+            std::lock_guard<std::mutex> lock(m_indiMutex);
             m_controlError = e.what();
             log<software_error>( { __FILE__, __LINE__, e.what() } );
         }
@@ -483,6 +487,12 @@ inline int dlDataCollection::appLogic()
     checkObservation();
     m_session.checkTimeout();
     const auto   p       = m_session.progress();
+    if( !m_startPending && ( p.m_phase == "idle" || p.m_phase == "draining" || p.m_phase == "complete" ||
+                            p.m_phase == "cancelled" || p.m_phase == "failed" ) )
+    {
+        m_connected = false;
+        shmimMonitorT::monitorState( stateCodes::READY );
+    }
     const double elapsed = std::chrono::duration<double>( std::chrono::steady_clock::now() - m_started ).count();
     if( m_finishedElapsed < 0 && ( p.m_phase == "complete" || p.m_phase == "cancelled" || p.m_phase == "failed" ) )
         m_finishedElapsed = elapsed;
@@ -567,7 +577,10 @@ inline void dlDataCollection::checkObservation()
             throw std::runtime_error( "no fresh settled readback:" + missing );
         }
         if( !m_connected.load() )
-            throw std::runtime_error( "source/channel detached while checking observations" );
+        {
+            if( checked < m_observationDeadline ) return;
+            throw std::runtime_error( "source/channel attachment timed out" );
+        }
         auto s = settings();
         s.m_context += dlCollection::observationContext( m_nd, m_flipwfsf, m_fps, m_emgain );
         m_runND              = m_nd.m_value;
@@ -579,6 +592,8 @@ inline void dlDataCollection::checkObservation()
             std::lock_guard<std::mutex> streamLock( m_streamMutex );
             checkCommandStream( true );
         }
+        if( m_stopRequested.load() )
+            throw std::runtime_error( "collection start cancelled" );
         if( !m_session.start( s ) )
             throw std::runtime_error( "collection is busy or retains failed-run buffers" );
         m_observationActive = true;
@@ -657,12 +672,18 @@ inline int dlDataCollection::allocate( const dev::shmimT &dummy )
             throw std::runtime_error( "cannot identify command channel" );
         m_commandInode   = info.st_ino;
         m_commandCounter = md.cnt0;
-        m_connected      = true;
+        m_connected      = m_startPending.load();
         return 0;
     }
     catch( const std::exception &e )
     {
-        return log<software_error, -1>( { __FILE__, __LINE__, e.what() } );
+        { //mutex scope
+            std::lock_guard<std::mutex> lock( m_indiMutex );
+            m_controlError = e.what();
+            m_startPending = false;
+        }
+        shmimMonitorT::monitorState( stateCodes::READY );
+        return log<software_error>( { __FILE__, __LINE__, e.what() } );
     }
 }
 

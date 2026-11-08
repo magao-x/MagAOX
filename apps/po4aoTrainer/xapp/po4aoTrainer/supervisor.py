@@ -65,6 +65,7 @@ class Supervisor:
             None  # In-memory (persisted candidate, exact runtime ticket) binding.
         )
         self.last_control = None
+        self.last_run_available = True
         self.foreign_model = ""
         self.worker = None
         self.preparing_worker = None
@@ -268,6 +269,8 @@ class Supervisor:
                     raise RuntimeError(
                         "Runtime identity/reset changed; waiting for reconciliation"
                     )
+                if (command == "recollect" or (command == "learning" and values.get("run"))) and observed.get("run_phase", "unverified") not in ("running", "unverified"):
+                    raise RuntimeError("Start PO4AO before collecting or starting learning")
                 if command == "learning" and values.get("run") and self.foreign_model:
                     raise RuntimeError(
                         "External policy is not part of this managed session; restore an eligible policy or Reset"
@@ -776,6 +779,17 @@ class Supervisor:
                 "running",
                 "waiting",
             )
+            run_available = observed.get("run_phase", "unverified") in (
+                "running", "unverified"
+            )
+            if not run_available:
+                # Cancel work crossing the routing boundary once. A new Set policy
+                # while stopped must remain usable and must not resume learning.
+                if self.last_run_available:
+                    operation["cancel"].set()
+                if active_worker:
+                    self.worker.send({"run": False})
+            self.last_run_available = run_available
             if (
                 self.last_control is not None
                 and control != self.last_control

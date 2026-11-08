@@ -30,6 +30,8 @@
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 #include "po4ao_utils.hpp"
+#include "po4aoStatistics.hpp"
+#include "po4aoRouteIO.hpp"
 
 /** \defgroup po4ao PO4AO
  * \brief Real-time modal policy control with asynchronous model loading and replay publication.
@@ -116,12 +118,16 @@ namespace app
 /// Apply a modal policy upstream of mfilt while publishing complete replay snapshots.
 /** \ingroup po4ao
  */
-class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>
+class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>, public dev::telemeter<po4ao>
 {
     // Give the test harness access.
     friend class po4ao_test;
 
     friend class dev::shmimMonitor<po4ao>;
+    friend class dev::telemeter<po4ao>;
+
+    /// Structured runtime telemetry owner.
+    typedef dev::telemeter<po4ao> telemeterT;
 
     /// The monitored modal-input base type.
     typedef dev::shmimMonitor<po4ao> shmimMonitorT;
@@ -197,6 +203,7 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>
     std::atomic<uint64_t> m_appliedReset{ 1 };   ///< Model-reset generation acknowledged after command publication.
     std::atomic<int>      m_effectiveController{
         0 }; ///< Last emitted controller: unknown, integrator, policy, or pass-through.
+    std::atomic<uint32_t> m_effectiveBackend{ 0 }; ///< Backend used for the last emitted command.
     std::atomic<uint64_t> m_effectiveModelId{ 0 }; ///< Policy used for the last emitted command, zero for fallback.
     bool                  m_initialWarmupPending{ true }; ///< Start initial exploration on the first enabled frame.
     WarmupCollection      m_collection; ///< Collection lifecycle, independent of policy history and selection.
@@ -253,9 +260,9 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>
 
     uint64_t m_statusSequence{ 0 }; ///< App-logic heartbeat independent of unchanged control values.
 
-    static constexpr size_t                             c_latencySamples = 1024; ///< Callback-latency ring length.
-    std::array<std::atomic<uint32_t>, c_latencySamples> m_latencySamples;        ///< Recent callback durations.
-    std::atomic<uint64_t>                               m_latencyCount{ 0 }; ///< Number of recorded callback durations.
+    Po4aoSamples m_runtimeSamples; ///< Coherent fixed-size callback telemetry window.
+    uint64_t m_lastTelemSequence{0}; ///< Last sequence actually written to telemetry.
+
     std::atomic<uint64_t>                               m_missedFrames{ 0 }; ///< Source counter discontinuities.
     std::atomic<uint64_t> m_deadlineMisses{ 0 };                   ///< Callbacks exceeding the configured deadline.
     std::atomic<uint64_t> m_inferenceFailures{ 0 };                ///< Inference or result-validation failures.
@@ -271,6 +278,18 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>
     pcf::IndiProperty                     m_indiP_recollectWarmup; ///< Fresh warm-up collection request.
     pcf::IndiProperty                     m_indiP_runtimeStats;    ///< Latency and failure counters.
     pcf::IndiProperty m_indiP_collectionStatus; ///< Collection identity, progress and publication completion.
+    Po4aoRouteIO m_routeIO; ///< Installed command/readback boundary, owned by the routing worker.
+    Po4aoRouteSnapshot m_runSnapshot; ///< Pre-request routing identity retained after failure.
+    std::thread m_runThread; ///< Non-real-time routing operation, joined on shutdown.
+    std::atomic<bool> m_runCancel{false}, m_runAdmission{true}; ///< Shutdown cancellation and callback admission.
+    std::atomic<uint64_t> m_outputSequence{0}; ///< Completed output publications for fresh-start verification.
+    bool m_runPending{false}, m_runBusy{false}, m_runTarget{true}, m_runRunning{true}, m_runVerified{false}, m_runCheckOnly{false}; ///< INDI-mutex-owned run intent and completion.
+    uint64_t m_runSequence{0}; ///< Unique operation number within this runtime.
+    std::string m_runPhase{"unverified"}, m_runRoute{"unknown"}, m_runError, m_runOwner; ///< Routing progress and actual input.
+    std::string m_nnDevice{"nnReconstructor"}, m_nnRoutingOwner, m_nnRoutingSource, m_nnRoutingPhase, m_nnInstance, m_nnSequence, m_reservedInstance; ///< Independent NN reservation readbacks.
+    std::chrono::steady_clock::time_point m_nnObserved{}; ///< Latest NN routing readback.
+    pcf::IndiProperty m_indiP_run, m_indiP_runStatus, m_indiP_nnRouting; ///< Native run control and writer reservation.
+
     pcf::IndiProperty m_indiP_modelStatus;      ///< Active model ID and reload state.
                                                 ///@}
 
@@ -387,7 +406,13 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>
     /// Publish frame acknowledgements, effective controller, model and collection state.
     void updateControlStatus();
 
-    /// Publish latency percentiles and failure counters to INDI and the log.
+    /// Check the structured telemetry recording interval.
+    int checkRecordTimes();
+
+    /// Record a fresh coherent snapshot of callback statistics.
+    int recordTelem( const telem_po4ao *record /**< [in] Telemetry dispatch tag. */ );
+
+    /// Publish latency percentiles and failure counters to INDI and telemetry.
     void updateRuntimeStatistics();
 
     /// Open and validate command and replay streams.
@@ -412,6 +437,31 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>
     /// Invalidate replay snapshots and request a fresh exploratory warm-up.
     INDI_NEWCALLBACK_DECL( po4ao, m_indiP_recollectWarmup );
     ///@}
+
+    /// Queue an explicit whole-app Start/Stop target independently of policy selection.
+    INDI_NEWCALLBACK_DECL(po4ao, m_indiP_run);
+
+    /// Observe the independent NN writer reservation.
+    INDI_SETCALLBACK_DECL(po4ao, m_indiP_nnRouting);
+
+    /// Publish routing progress under the INDI mutex.
+    void runPhase(const std::string &phase /**< [in] Current operation stage. */);
+
+    /// Wait outside locks for completion, cancellation or deadline.
+    void waitRun(const std::function<bool()> &ready /**< [in] Completion predicate. */,
+                 Po4aoRouteBackend::Deadline deadline /**< [in] Operation deadline. */);
+
+    /// Request a reservation or restore the reserved writer.
+    void requestWriterHold(const std::string &action /**< [in] hold or release. */);
+
+    /// Check a fresh NN routing reservation readback.
+    bool writerHeld(bool released /**< [in] Check restoration instead of reservation. */);
+
+    /// Run one serialized routing operation outside real-time callbacks.
+    void runWorker(bool start /**< [in] Explicit requested target. */);
+
+    /// Launch queued work and publish actual run status.
+    void updateRunControl();
 
     /// Allocate fixed-size controller state after the monitored stream opens.
     int allocate( const dev::shmimT &dummy /**< [in] Tag identifying the monitored input. */ );

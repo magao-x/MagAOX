@@ -23,6 +23,13 @@ inline int nnReconstructor::setupReconstructorControls()
     REG_INDI_SETPROP( m_indiP_modState, m_modDevice, "modState" );
     REG_INDI_SETPROP( m_indiP_modFrequency, m_modDevice, "modFrequency" );
     REG_INDI_SETPROP( m_indiP_modRadius, m_modDevice, "modRadius" );
+    createROIndiText( m_indiP_routingHold, "routing_hold", "owner" );
+    m_indiP_routingHold.add( pcf::IndiElement("action") );
+    m_indiP_routingHold.setPerm(pcf::IndiProperty::ReadWrite);
+    createROIndiText( m_indiP_routingStatus, "routing_status", "owner" );
+    for(const auto *element : {"source", "phase", "instance", "sequence"}) m_indiP_routingStatus.add(pcf::IndiElement(element));
+    if(registerIndiPropertyNew(m_indiP_routingHold, INDI_NEWCALLBACK(m_indiP_routingHold)) < 0 ||
+       registerIndiPropertyReadOnly(m_indiP_routingStatus) < 0) return -1;
     m_switchInstance = std::to_string( std::chrono::system_clock::now().time_since_epoch().count() );
     return 0;
 }
@@ -98,7 +105,7 @@ inline void nnReconstructor::updateReconstructorControls()
 {
     std::lock_guard<std::mutex> indiLock( m_indiMutex );
     const auto                  now   = std::chrono::steady_clock::now();
-    bool                        cacao = false, writerKnown = false, quiescent, active, loading;
+    bool                        cacao = false, writerKnown = false, quiescent, active, loading, resident;
     std::string                 loaded, requested, fault;
     try
     {
@@ -117,6 +124,7 @@ inline void nnReconstructor::updateReconstructorControls()
         quiescent = !m_enabled && !m_enableReadback && !m_disabling && !m_loading && !m_inferencing && !m_publishing;
         active    = m_enabled && m_enableReadback && !m_activeModel.empty() && m_fault.empty();
         loading   = m_loading;
+        resident  = m_gpuResident;
         loaded    = m_loadedModel;
         requested = m_requestedModel;
         fault     = m_fault;
@@ -177,13 +185,25 @@ inline void nnReconstructor::updateReconstructorControls()
         {
             if( cacao && m_switchSource != "cacao" )
                 throw std::runtime_error( "CACAO writer changed during NN operation" );
-            if( m_switchTarget == "nn" && cacao )
+            if( m_switchTarget == "nn" && !resident )
+            {
+                if( requestEnabled( true, true ) < 0 )
+                    throw std::runtime_error( "NN preparation rejected" );
+                reconstructorPhase( "preparing_nn" );
+            }
+            else if( m_switchTarget == "nn" && cacao )
             {
                 m_cacaoWriter.command( false );
                 reconstructorPhase( "stopping_cacao" );
             }
             else
                 prepareModulation();
+        }
+        else if( m_switchPhase == "preparing_nn" && !loading )
+        {
+            if( !fault.empty() || !resident )
+                throw std::runtime_error( "NN GPU preparation failed: " + fault );
+            reconstructorPhase( "handover" );
         }
         else if( m_switchPhase == "stopping_cacao" && writerKnown && !cacao && quiescent )
             prepareModulation();
@@ -210,13 +230,27 @@ inline void nnReconstructor::updateReconstructorControls()
     catch( const std::exception &error )
     {
         m_switchError = error.what();
-        if( m_switchPhase == "loading" )
+        if( m_switchPhase == "loading" || m_switchPhase == "preparing_nn" )
         { // mutex scope
             std::lock_guard<std::mutex> lock( m_resultMutex );
             m_cancelLoad = true; // A timed-out operation never installs and activates a late candidate.
         }
+        if( !active && resident ) requestEnabled( false );
         reconstructorPhase( m_cacaoStartPending ? "awaiting_cacao" : "error" );
     }
+    if(m_routingPhase == "pausing" && quiescent) m_routingPhase = "held";
+    if(m_routingPhase == "restoring" && m_switchPhase == "idle" && m_reconstructor == m_routingSource)
+    {
+        m_routingPhase = "released";
+        m_routingOwner.clear();
+    }
+    if(m_routingPhase == "restoring" && m_switchPhase == "error") m_routingPhase = "error";
+    const auto routingState = m_routingPhase == "error" ? INDI_ALERT : INDI_OK;
+    updateIfChanged(m_indiP_routingStatus, "owner", m_routingOwner, routingState);
+    updateIfChanged(m_indiP_routingStatus, "source", m_routingSource, routingState);
+    updateIfChanged(m_indiP_routingStatus, "phase", m_routingPhase, routingState);
+    updateIfChanged(m_indiP_routingStatus, "instance", m_switchInstance, routingState);
+    updateIfChanged(m_indiP_routingStatus, "sequence", std::to_string(m_switchSequence), routingState);
     if( std::chrono::duration<double>( now - m_modQuery ).count() >= 1 )
     {
         m_modQuery = now;
@@ -258,6 +292,7 @@ INDI_NEWCALLBACK_DEFN( nnReconstructor, m_indiP_nnActivate )( const pcf::IndiPro
     if( !property.find( "model" ) )
         return -1;
     std::lock_guard<std::mutex> lock( m_indiMutex );
+    if( !m_routingOwner.empty() ) return -1;
     int                         model = -2;
     for( size_t i = 0; i < m_models.size(); ++i )
         if( property["model"].get<std::string>() == modelId( i ) )
@@ -275,6 +310,7 @@ INDI_NEWCALLBACK_DEFN( nnReconstructor, m_indiP_reconstructor )( const pcf::Indi
     if( !property.find( "target" ) || !property.find( "expected" ) || property["expected"].get<std::string>().empty() )
         return -1;
     std::lock_guard<std::mutex> lock( m_indiMutex );
+    if( !m_routingOwner.empty() ) return -1;
     const int                   result =
         requestReconstructor( property["target"].get<std::string>(), property["expected"].get<std::string>(), -1 );
     if( result == 0 || m_switchPhase == "error" )
@@ -294,6 +330,7 @@ INDI_NEWCALLBACK_DEFN( nnReconstructor, m_indiP_linkModulation )( const pcf::Ind
     if( value != pcf::IndiElement::On && value != pcf::IndiElement::Off )
         return -1;
     std::lock_guard<std::mutex> lock( m_indiMutex );
+    if( !m_routingOwner.empty() ) return -1;
     updateSwitchIfChanged( m_indiP_linkModulation, "toggle", value, INDI_BUSY );
     m_linkModulation = value == pcf::IndiElement::On;
     return 0;
@@ -336,4 +373,45 @@ INDI_SETCALLBACK_DEFN( nnReconstructor, m_indiP_modRadius )( const pcf::IndiProp
     observeModulation( property, 2 );
     return 0;
 }
+INDI_NEWCALLBACK_DEFN( nnReconstructor, m_indiP_routingHold )( const pcf::IndiProperty &property )
+{
+    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_routingHold, property);
+    if(!property.find("owner") || !property.find("action")) return -1;
+    const auto owner = property["owner"].get<std::string>();
+    const auto action = property["action"].get<std::string>();
+    if(owner.empty() || owner.size() > 128) return -1;
+    std::lock_guard<std::mutex> lock(m_indiMutex);
+    if(action == "hold")
+    {
+        if(!m_routingOwner.empty()) return m_routingOwner == owner && m_routingPhase == "held" ? 0 : -1;
+        if(m_switchPhase != "idle") return -1;
+        bool active, quiet;
+        { //mutex scope
+            std::lock_guard<std::mutex> resultLock(m_resultMutex);
+            active = m_enabled && m_enableReadback && !m_activeModel.empty() && m_fault.empty();
+            quiet = !m_enabled && !m_loading && !m_disabling && !m_gpuReleasing && !m_inferencing && !m_publishing;
+        }
+        try
+        {
+            const bool cacao = m_cacaoWriter.running();
+            if((active && cacao) || (!active && !quiet) || (!active && !cacao)) return -1;
+            m_routingSource = active ? "nn" : "cacao";
+            if(requestEnabled(false) < 0) return -1;
+            m_routingOwner = owner;
+            m_routingPhase = "pausing";
+        }
+        catch(const std::exception &) { return -1; }
+    }
+    else if(action == "release" && m_routingOwner == owner &&
+            (m_routingPhase == "held" || m_routingPhase == "error"))
+    {
+        // Standard handover verifies CACAO has stopped before re-admitting NN.
+        if(requestReconstructor(m_routingSource, "", -1) < 0) return -1;
+        m_switchLinked = false; // Restore writer ownership without changing the operator's modulation.
+        m_routingPhase = "restoring";
+    }
+    else return -1;
+    return 0;
+}
+
 #endif

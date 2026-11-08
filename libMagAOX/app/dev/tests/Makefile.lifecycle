@@ -1,0 +1,12 @@
+# Real monitor loop, real named POSIX semaphore, test-only ImageStreamIO mapping.
+CXX = clang++
+CXXFLAGS = -std=c++20 -pthread -O1
+all: test
+.build/shmimMonitor_lifecycle_test: shmimMonitor_lifecycle_test.cpp ../shmimMonitor.hpp stubs/ImageStreamIO/ImageStreamIO.h
+	mkdir -p .build
+	$(CXX) $(CXXFLAGS) -Istubs -I../.. $< -o $@
+test: .build/shmimMonitor_lifecycle_test
+	./.build/shmimMonitor_lifecycle_test
+clean:
+	rm -f .build/shmimMonitor_lifecycle_test
+.PHONY: all test clean

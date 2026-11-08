@@ -80,6 +80,7 @@ telem_chrony_stats       20861    telem_chrony_stats
 telem_dmspeck            20890    telem_dmspeck
 
 telem_fgtimings          20905    telem_fgtimings
+telem_po4ao             20906    telem_po4ao
 
 telem_dmmodes            20910    telem_dmmodes
 

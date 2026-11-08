@@ -1,6 +1,5 @@
 /** \file magAOXApp.hpp
  *  \brief The basic MagAO-X Application
- *  \author Jared R. Males (jaredmales@gmail.com)
  *  \ingroup app_files
  */
 
@@ -11,6 +10,7 @@
 #include <sys/stat.h>
 #include <sys/syscall.h>
 
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <fstream>
@@ -566,16 +566,13 @@ class MagAOXApp : public application
      * @{
      */
   private:
-    stateCodes::stateCodeT m_state{ stateCodes::UNINITIALIZED }; /**< The application's state.  Never ever set this
-                                                                      directly, use state(const stateCodeT & s).*/
+    std::atomic<stateCodes::stateCodeT> m_state{ stateCodes::UNINITIALIZED }; ///< FSM state shared with device workers; use state().
 
-    bool m_stateAlert{ false }; // Flag to control whether the FSM is in an alert state.  Once set, only user
-                                // acknowledgement can change this.
+    std::atomic<bool> m_stateAlert{ false }; ///< Latched FSM alert, cleared only by user acknowledgement.
 
     bool m_gitAlert{ false }; // Flag set if there is a git modified warning to alert on.
 
-    int m_stateLogged{ 0 }; /**< Counter and flag for use to log errors just once.
-                                 Never ever access directly, use stateLogged().*/
+    std::atomic<int> m_stateLogged{ 0 }; ///< Count observations since the last transition; use stateLogged().
 
   public:
     /// Get the current state code
@@ -592,6 +589,9 @@ class MagAOXApp : public application
     void state( const stateCodes::stateCodeT &s, ///< [in] The new application state
                 bool stateAlert = false          ///< [in] [optional] flag to set the alert state of the FSM property.
     );
+
+    /// Publish the current FSM status without issuing another state transition.
+    void updateState();
 
     /// Get the value of the state alert flag
     /**
@@ -2087,7 +2087,7 @@ int MagAOXApp<_useINDI>::execute() // virtual
 
         // This is purely to make sure INDI is up to date in case
         // mutex was locked on last attempt.
-        state( state() );
+        updateState();
 
         // Pause loop unless shutdown is set
         if( m_shutdown == 0 )
@@ -2167,7 +2167,9 @@ void MagAOXApp<_useINDI>::logMessage( bufferPtrT &b )
 
     if( logHeader::logLevel( b ) < logPrio::LOG_ERROR )
     {
-        state( m_state, true ); // For anything worse than error, we set the FSM state to alert
+        if(!m_stateAlert.exchange(true))
+            log<text_log>( "FSM alert set", logPrio::LOG_WARNING );
+        updateState(); // A log alert must not restore a state superseded by another worker.
     }
 
     if( _useINDI && m_indiDriver )
@@ -2670,8 +2672,9 @@ stateCodes::stateCodeT MagAOXApp<_useINDI>::state()
 template <bool _useINDI>
 void MagAOXApp<_useINDI>::state( const stateCodes::stateCodeT &s, bool stateAlert )
 {
-    // Only log anything if it's a change
-    if( m_state != s )
+    const auto previous = m_state.exchange(s);
+    // Only log anything if it's a change.
+    if( previous != s )
     {
         logPrioT lvl = logPrio::LOG_INFO;
         if( s == stateCodes::ERROR )
@@ -2679,25 +2682,29 @@ void MagAOXApp<_useINDI>::state( const stateCodes::stateCodeT &s, bool stateAler
         if( s == stateCodes::FAILURE )
             lvl = logPrio::LOG_CRITICAL;
 
-        log<state_change>( { m_state, s }, lvl );
-
-        m_state = s;
+        log<state_change>( { previous, s }, lvl );
         m_stateLogged = 0;
     }
 
-    if( m_stateAlert != stateAlert && stateAlert == true )
+    if( stateAlert && !m_stateAlert.exchange(true) )
     {
-        m_stateAlert = stateAlert;
         log<text_log>( "FSM alert set", logPrio::LOG_WARNING );
     }
 
-    // Check to make sure INDI is up to date
+    updateState();
+}
+
+template <bool _useINDI>
+void MagAOXApp<_useINDI>::updateState()
+{
+    // Check to make sure INDI is up to date.
     std::unique_lock<std::mutex> lock( m_indiMutex,
                                        std::try_to_lock ); // Lock the mutex before conducting INDI communications.
 
     // Note this is called every execute loop to make sure we update eventually
     if( lock.owns_lock() )
     {
+        const auto current = m_state.load();
         ///\todo move this to a function in stateCodes
         pcf::IndiProperty::PropertyStateType stst = INDI_IDLE;
 
@@ -2708,20 +2715,20 @@ void MagAOXApp<_useINDI>::state( const stateCodes::stateCodeT &s, bool stateAler
         }
         else
         {
-            if( m_state == stateCodes::READY )
+            if( current == stateCodes::READY )
                 stst = INDI_OK;
-            else if( m_state == stateCodes::OPERATING || m_state == stateCodes::HOMING ||
-                     m_state == stateCodes::CONFIGURING )
+            else if( current == stateCodes::OPERATING || current == stateCodes::HOMING ||
+                     current == stateCodes::CONFIGURING )
                 stst = INDI_BUSY;
-            else if( m_state < stateCodes::NODEVICE )
+            else if( current < stateCodes::NODEVICE )
                 stst = INDI_ALERT;
-            else if( m_state <= stateCodes::LOGGEDIN )
+            else if( current <= stateCodes::LOGGEDIN )
                 stst = INDI_IDLE;
-            else if( m_state == stateCodes::NOTHOMED || m_state == stateCodes::SHUTDOWN )
+            else if( current == stateCodes::NOTHOMED || current == stateCodes::SHUTDOWN )
                 stst = INDI_IDLE;
         }
 
-        updateIfChanged( m_indiP_state, "state", stateCodes::codeText( m_state ), stst );
+        updateIfChanged( m_indiP_state, "state", stateCodes::codeText( current ), stst );
     }
 }
 
@@ -2740,16 +2747,7 @@ bool MagAOXApp<_useINDI>::gitAlert()
 template <bool _useINDI>
 int MagAOXApp<_useINDI>::stateLogged()
 {
-    if( m_stateLogged > 0 )
-    {
-        ++m_stateLogged;
-        return m_stateLogged - 1;
-    }
-    else
-    {
-        m_stateLogged = 1;
-        return 0;
-    }
+    return m_stateLogged.fetch_add(1);
 }
 
 template <bool _useINDI>

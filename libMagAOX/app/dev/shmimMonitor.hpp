@@ -1,7 +1,6 @@
 /** \file shmimMonitor.hpp
  * \brief The MagAO-X generic shared memory monitor.
  *
- * \author Jared R. Males (jaredmales@gmail.com)
  *
  * \ingroup app_files
  */
@@ -11,6 +10,9 @@
 
 #include "../../ImageStreamIO/ImageStruct.hpp"
 #include <ImageStreamIO/ImageStreamIO.h>
+#include <atomic>
+#include <memory>
+#include <mutex>
 
 #include "../../libMagAOX/common/paths.hpp"
 
@@ -30,11 +32,13 @@ enum class shmimMonitorState
 
 struct shmimT
 {
+    /// Configuration section for the primary input stream.
     static std::string configSection()
     {
         return "shmimMonitor";
     };
 
+    /// INDI property prefix for the primary input stream.
     static std::string indiPrefix()
     {
         return "sm";
@@ -127,9 +131,13 @@ class shmimMonitor
     bool m_getExistingFirst{ false }; ///< If set to true by derivedT, any existing image will be grabbed and sent to
                                       ///< processImage before waiting on the semaphore.
 
-    stateCodes::stateCodeT m_targetState{ stateCodes::OPERATING };
+    stateCodes::stateCodeT m_targetState{ stateCodes::OPERATING }; ///< FSM state which permits frame monitoring.
 
-    shmimMonitorState m_smState{ shmimMonitorState::init };
+    shmimMonitorState m_smState{ shmimMonitorState::init }; ///< Monitor-owned attachment state.
+
+    std::mutex m_smLifecycleMutex; ///< Serializes FSM requests with admission of an attachment cycle.
+
+    std::atomic<bool> m_smIdle{ true }; ///< True only outside attachment, allocation and frame callbacks.
 
     int m_semaphoreNumber{ 5 }; ///< The image structure semaphore index.
 
@@ -145,16 +153,22 @@ class shmimMonitor
     ino_t m_inode{ 0 }; ///< The inode of the image stream file
 
   public:
+    /// Get the configured stream name.
     const std::string &shmimName() const;
 
+    /// Get the attached image width.
     const uint32_t &width() const;
 
+    /// Get the attached image height.
     const uint32_t &height() const;
 
+    /// Get the attached image depth.
     const uint32_t &depth() const;
 
+    /// Get the attached pixel type.
     const uint8_t &dataType() const;
 
+    /// Get the attached pixel size in bytes.
     const size_t &typeSize() const;
 
     /// Setup the configuration system
@@ -213,6 +227,15 @@ class shmimMonitor
       * \returns -1 on error, which is logged.
       */
     int appShutdown();
+
+    /// Request an application FSM state without racing attachment admission.
+    void monitorState( stateCodes::stateCodeT value /**< [in] Application state, normally READY or OPERATING. */ );
+
+    /// Check that the monitor owns no mapping, semaphore or active callback.
+    bool monitorIdle() const;
+
+    /// Read the application's atomic FSM gate without adding a callback lock.
+    bool monitorOperating();
 
   protected:
     /** \name SIGSEGV & SIGBUS signal handling
@@ -286,6 +309,7 @@ class shmimMonitor
     ///@}
 
   private:
+    /// Access the owning application through CRTP.
     derivedT &derived()
     {
         return *static_cast<derivedT *>( this );
@@ -508,6 +532,25 @@ void shmimMonitor<derivedT, specificT>::smThreadStart( shmimMonitor *s )
 }
 
 template <class derivedT, class specificT>
+void shmimMonitor<derivedT, specificT>::monitorState( stateCodes::stateCodeT value )
+{
+    std::lock_guard<std::mutex> lock( m_smLifecycleMutex );
+    derived().state( value );
+}
+
+template <class derivedT, class specificT>
+bool shmimMonitor<derivedT, specificT>::monitorIdle() const
+{
+    return m_smIdle.load( std::memory_order_acquire );
+}
+
+template <class derivedT, class specificT>
+bool shmimMonitor<derivedT, specificT>::monitorOperating()
+{
+    return derived().state() == m_targetState;
+}
+
+template <class derivedT, class specificT>
 void shmimMonitor<derivedT, specificT>::smThreadExec()
 {
     m_smThreadID = syscall( SYS_gettid );
@@ -518,25 +561,37 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
         sleep( 1 );
     }
 
-    bool opened = false;
-
-    // bool semgot = false;
-
-    std::cerr << m_shmimName <<  " smThreadExec\n";
-
     while( derived().shutdown() == 0 )
     {
-        m_smState = shmimMonitorState::init;
-
-        while( ( derived().state() != m_targetState || m_shmimName == "" ) && !derived().shutdown() && !m_restart )
+        bool admitted = false;
+        { //mutex scope
+            std::lock_guard<std::mutex> lock( m_smLifecycleMutex );
+            if( derived().state() == m_targetState && !m_shmimName.empty() )
+            {
+                m_smIdle.store( false, std::memory_order_release );
+                admitted = true;
+            }
+        }
+        if( !admitted )
         {
             sleep( 1 );
+            continue;
         }
 
-        if( derived().shutdown() )
+        bool opened = false, claimed = false;
+        auto cleanup = [&]( shmimMonitor * )
         {
-            return;
-        }
+            if( opened )
+            {
+                if( claimed )
+                    m_imageStream.semReadPID[m_semaphoreNumber] = 0;
+                ImageStreamIO_closeIm( &m_imageStream );
+            }
+            m_smState = shmimMonitorState::init;
+            m_smIdle.store( true, std::memory_order_release );
+        };
+        std::unique_ptr<shmimMonitor, decltype( cleanup )> attachment( this, cleanup );
+        m_smState = shmimMonitorState::init;
 
         /* Initialize ImageStreamIO
          */
@@ -545,7 +600,7 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
         m_restart = false; // Set this up front, since we're about to restart.
 
         int logged = 0;
-        while( !opened && !derived().m_shutdown && !m_restart && derived().state() == m_targetState )
+        while( !opened && !derived().m_shutdown && !m_restart && monitorOperating() )
         {
             // b/c ImageStreamIO prints every single time, and latest version don't support stopping it yet, and that
             // isn't thread-safe-able anyway we do our own checks.  This is the same code in ImageStreamIO_openIm...
@@ -595,7 +650,6 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
                               errno,
                               "Could not get inode for " + m_shmimName +
                                   ". Source process will need to be restarted." } );
-                        ImageStreamIO_closeIm( &m_imageStream );
                         return;
                     }
 
@@ -613,21 +667,13 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
             continue;
         }
 
-        if( derived().state() != m_targetState )
+        if( !monitorOperating() )
         {
             continue;
         }
 
         if( derived().m_shutdown )
-        {
-            if( !opened )
-            {
-                return;
-            }
-
-            ImageStreamIO_closeIm( &m_imageStream );
             return;
-        }
 
         m_semaphoreNumber =
             ImageStreamIO_getsemwaitindex( &m_imageStream, m_semaphoreNumber ); // ask for semaphore we had before
@@ -641,6 +687,7 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
             return;
         }
 
+        claimed = true;
         ImageStreamIO_semflush( &m_imageStream, m_semaphoreNumber );
 
         sem_t *sem = m_imageStream.semptr[m_semaphoreNumber]; ///< The semaphore to monitor for new image data
@@ -683,7 +730,7 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
         uint64_t curr_image; // The current cnt1 index
 
         // If true, we always get the existing image without waiting on the semaphore.
-        if( m_getExistingFirst && !m_restart && derived().shutdown() == 0 )
+        if( m_getExistingFirst && !m_restart && derived().shutdown() == 0 && monitorOperating() )
         {
             if( m_imageStream.md[0].size[2] > 0 ) ///\todo change to naxis?
             {
@@ -727,7 +774,7 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
         }
 
         // This is the main image grabbing loop.
-        while( derived().shutdown() == 0 && !m_restart && derived().state() == m_targetState )
+        while( derived().shutdown() == 0 && !m_restart && monitorOperating() )
         {
 
             timespec ts;
@@ -775,7 +822,7 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
                     break; // exit the nearest while loop and get the new image setup.
                 }
 
-                if( derived().shutdown() != 0 || m_restart || derived().state() != m_targetState )
+                if( derived().shutdown() != 0 || m_restart || !monitorOperating() )
                 {
                     break; // Check for exit signals
                 }
@@ -817,44 +864,21 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
                 close( SM_fd );
 
                 // Check if the inode changed
-                struct stat buffer;
+                struct stat buffer{};
                 int         rv = stat( SM_fname, &buffer );
                 if( rv != 0 )
                 {
                     m_restart = true;
                 }
 
-                if( buffer.st_ino != m_inode )
+                if( rv == 0 && buffer.st_ino != m_inode )
                 {
                     m_restart = true;
                 }
             }
         }
 
-        //*******
-        // call derived().cleanup()
-        //*******
-
-        // opened == true if we can get to this
-        if( m_semaphoreNumber >= 0 )
-            m_imageStream.semReadPID[m_semaphoreNumber] = 0; // release semaphore
-        ImageStreamIO_closeIm( &m_imageStream );
-        opened = false;
-
-    } // outer loop, will exit if m_shutdown==true
-
-    // derivedT::template log<software_error>({__FILE__,__LINE__, std::to_string(m_smThreadID) + " " +
-    // std::to_string(derived().shutdown() == 0)});
-
-    //*******
-    // call derived().cleanup()
-    //*******
-
-    if( opened )
-    {
-        ImageStreamIO_closeIm( &m_imageStream );
-        opened = false;
-    }
+    } // Attachment cleanup also covers cancellation and allocation failures.
 }
 
 template <class derivedT, class specificT>
