@@ -18,6 +18,7 @@ struct RouteIO
     std::vector<std::string> events; ///< Ordered boundary calls.
 
     std::string current{ "aol1_modevalWFS" }; ///< Simulated downstream route.
+    bool        failCalibration{ false };     ///< Withhold acknowledgement of queued writer restart.
     bool        failVerify{ false };          ///< Inject a consumption failure.
     /// Capture the current route and a test calibration identity.
     Po4aoRouteSnapshot capture();
@@ -33,6 +34,8 @@ struct RouteIO
     void applyDefault( Po4aoRouteBackend::Deadline /**< [in] Deadline. */ )
     {
         events.push_back( "default" );
+        if( failCalibration )
+            throw std::runtime_error( "CACAO calibration restart not acknowledged" );
     }
     /// Provide or withhold actual-consumption acknowledgement.
     void verifyConsumption( const std::string & /**< [in] Input. */,
@@ -51,9 +54,10 @@ struct po4ao : MagAOXApp<true>, dev::shmimMonitor<po4ao>
     bool m_runPending{ false }, m_runBusy{ false }, m_runTarget{ true }, m_runRunning{ true }, m_runVerified{ false },
         m_runCheckOnly{ false };
     uint64_t    m_runSequence{ 0 }, m_activeCollectionGeneration{ 1 };
-    std::string m_runPhase{ "unverified" }, m_runRoute{ "unknown" }, m_runError, m_runOwner{ "test-1" };
-    std::string m_nnDevice{ "nn" }, m_nnRoutingOwner, m_nnRoutingSource, m_nnRoutingPhase, m_nnInstance{ "nn-1" },
-        m_nnSequence{ "1" }, m_reservedInstance;
+    std::string m_runPhase{ "unverified" }, m_runRoute{ "unknown" }, m_runError, m_runRequestError,
+        m_runOwner{ "test-1" };
+    std::string m_nnDevice{ "nn" }, m_nnRoutingOwner, m_nnReleasedOwner, m_nnRoutingSource, m_nnRoutingPhase,
+        m_nnInstance{ "nn-1" }, m_nnSequence{ "1" }, m_reservedInstance;
     std::string                           m_runtimeInstance{ "test" };
     std::chrono::steady_clock::time_point m_nnObserved{ std::chrono::steady_clock::now() };
     pcf::IndiProperty                     m_indiP_run, m_indiP_runStatus, m_indiP_nnRouting;
@@ -76,6 +80,10 @@ struct po4ao : MagAOXApp<true>, dev::shmimMonitor<po4ao>
     void requestWriterHold( const std::string &action /**< [in] Action. */ );
     /// Read reservation completion.
     bool writerHeld( bool released /**< [in] Restore acknowledgement. */ );
+    /// Check completed restoration under the INDI lock.
+    bool reservationReleased() const;
+    /// Publish a request rejection.
+    int rejectRun( const std::string &reason /**< [in] Rejection reason. */ );
     /// Execute the production worker.
     void runWorker( bool start /**< [in] Target. */ );
     /// Launch and report queued work.
@@ -104,6 +112,9 @@ void RouteIO::verifyConsumption( const std::string &, Po4aoRouteBackend::Deadlin
 po4ao::po4ao() : MagAOXApp<true>( 0, 0 )
 {
     monitorState( stateCodes::OPERATING );
+    m_indiP_run.add( pcf::IndiElement( "toggle", pcf::IndiElement::On ) );
+    for( const auto *element : { "phase", "route", "error", "owner", "verified" } )
+        m_indiP_runStatus.add( pcf::IndiElement( element ) );
 }
 po4ao::~po4ao()
 {
@@ -114,8 +125,10 @@ po4ao::~po4ao()
 int po4ao::sendNewProperty( const pcf::IndiProperty &p )
 {
     m_routeIO.events.push_back( p["action"].get<std::string>() );
-    m_nnRoutingOwner  = p["action"].get<std::string>() == "hold" ? m_runOwner : "";
-    m_nnRoutingPhase  = m_nnRoutingOwner.empty() ? "released" : "held";
+    m_nnRoutingOwner = p["action"].get<std::string>() == "hold" ? m_runOwner : "";
+    m_nnRoutingPhase = m_nnRoutingOwner.empty() ? "released" : "held";
+    if( m_nnRoutingOwner.empty() )
+        m_nnReleasedOwner = m_runOwner;
     m_nnRoutingSource = "nn";
     m_nnObserved      = std::chrono::steady_clock::now();
     return 0;
@@ -170,5 +183,147 @@ TEST_CASE( "Production PO4AO duplicate Stop does not recalibrate", "[po4ao][runW
     app.runWorker( false );
     REQUIRE( app.m_runPhase == "failed" );
     REQUIRE_FALSE( app.m_runVerified );
+}
+/** \brief A rejected native request must terminate the GUI acknowledgement wait. */
+TEST_CASE( "Run conflict rejection publishes Alert", "[po4ao][reviewRegression]" )
+{
+    po4aoRunHarness::po4ao               app;
+    MagAOX::app::MagAOXApp<true>::Driver driver;
+    app.m_indiDriver = &driver;
+    SECTION( "reset" )
+    {
+        app.m_modelResetRequest = 2;
+    }
+    SECTION( "loading" )
+    {
+        app.m_reloadStatus = 1;
+    }
+    SECTION( "pending activation" )
+    {
+        app.m_reloadStatus = 2;
+    }
+    pcf::IndiProperty request( pcf::IndiProperty::Switch );
+    request.add( pcf::IndiElement( "toggle", pcf::IndiElement::Off ) );
+    REQUIRE( app.newCallBack_m_indiP_run( request ) < 0 );
+    REQUIRE( app.m_indiP_run.getState() == INDI_ALERT );
+    REQUIRE_FALSE( app.m_runPending );
+    REQUIRE( app.m_runPhase == "unverified" );
+    REQUIRE( app.newCallBack_m_indiP_run( request ) < 0 );
+    REQUIRE( driver.m_published.size() == 2 );
+    REQUIRE( driver.m_published[0].getState() == INDI_ALERT );
+    REQUIRE( driver.m_published[1].getState() == INDI_ALERT );
+    // clang-format off
+#ifdef PO4AO_TEST_DOXYGEN_REF
+    MagAOX::app::po4ao::newCallBack_m_indiP_run;
+#endif
+    // clang-format on
+}
+
+/** \brief Retrying a partial operation must preserve the token, instance and recovery snapshot. */
+TEST_CASE( "Run retry retains unresolved reservation", "[po4ao][reviewRegression]" )
+{
+    po4aoRunHarness::po4ao app;
+    app.m_runPhase = "failed";
+    app.m_runError = "calibration incomplete";
+    app.m_runOwner = app.m_nnRoutingOwner = "unresolved-owner";
+    app.m_reservedInstance                = app.m_nnInstance;
+    app.m_nnRoutingPhase                  = "held";
+    app.m_runSnapshot                     = { "po4ao_output", "previous", "nn" };
+    pcf::IndiProperty request( pcf::IndiProperty::Switch );
+    request.add( pcf::IndiElement( "toggle", pcf::IndiElement::Off ) );
+    REQUIRE( app.newCallBack_m_indiP_run( request ) < 0 );
+    REQUIRE( app.m_runOwner == "unresolved-owner" );
+    REQUIRE( app.m_reservedInstance == app.m_nnInstance );
+    REQUIRE( app.m_runSnapshot.route == "po4ao_output" );
+    REQUIRE( app.m_runSnapshot.calibration == "previous" );
+    REQUIRE( app.m_runSnapshot.writer == "nn" );
+    REQUIRE( app.m_runError == "calibration incomplete" );
+    REQUIRE( app.m_indiP_runStatus["error"].get<std::string>().find( "calibration incomplete" ) != std::string::npos );
+    REQUIRE_FALSE( app.m_runPending );
+    // clang-format off
+#ifdef PO4AO_TEST_DOXYGEN_REF
+    MagAOX::app::po4ao::newCallBack_m_indiP_run;
+#endif
+    // clang-format on
+}
+/** \brief Only a fresh exact-token release from the same NN instance permits a new routing operation. */
+TEST_CASE( "Run retry requires matching completed recovery", "[po4ao][runWorker]" )
+{
+    po4aoRunHarness::po4ao app;
+    app.m_runPhase         = "failed";
+    app.m_runOwner         = "retained-token";
+    app.m_reservedInstance = app.m_nnInstance;
+    app.m_nnRoutingPhase   = "released";
+    app.m_nnReleasedOwner  = app.m_runOwner;
+    bool recovered         = false;
+    SECTION( "matching recovery" )
+    {
+        recovered = true;
+    }
+    SECTION( "wrong token" )
+    {
+        app.m_nnReleasedOwner = "earlier-token";
+    }
+    SECTION( "stale recovery" )
+    {
+        app.m_nnObserved -= std::chrono::seconds( 6 );
+    }
+    SECTION( "NN restarted" )
+    {
+        app.m_nnInstance = "new-instance";
+    }
+    SECTION( "restoration still running" )
+    {
+        app.m_nnRoutingPhase = "restoring";
+    }
+    pcf::IndiProperty request( pcf::IndiProperty::Switch );
+    request.add( pcf::IndiElement( "toggle", pcf::IndiElement::Off ) );
+    MagAOX::app::MagAOXApp<true>::Driver driver;
+    app.m_indiDriver = &driver;
+    if( app.m_nnInstance != app.m_reservedInstance )
+        REQUIRE_THROWS( app.writerHeld( true ) );
+    else
+        REQUIRE( app.writerHeld( true ) == recovered );
+    REQUIRE( ( app.newCallBack_m_indiP_run( request ) == 0 ) == recovered );
+    REQUIRE( app.m_runPending == recovered );
+    if( recovered )
+    {
+        REQUIRE( app.m_runOwner != "retained-token" );
+        REQUIRE( driver.m_published.back().getState() == INDI_BUSY );
+    }
+    else
+        REQUIRE( app.m_runOwner == "retained-token" );
+    // clang-format off
+#ifdef PO4AO_TEST_DOXYGEN_REF
+    MagAOX::app::po4ao::writerHeld;
+    MagAOX::app::po4ao::newCallBack_m_indiP_run;
+#endif
+    // clang-format on
+}
+
+/** \brief Missing calibration restart acknowledgement retains the reservation and available PO4AO output. */
+TEST_CASE( "Run worker does not release or park after incomplete calibration", "[po4ao][runWorker]" )
+{
+    po4aoRunHarness::po4ao app;
+    app.m_routeIO.failCalibration = true;
+    app.runWorker( false );
+    REQUIRE( app.m_runPhase == "failed" );
+    REQUIRE( app.m_nnRoutingPhase == "held" );
+    REQUIRE( app.m_nnRoutingOwner == app.m_runOwner );
+    REQUIRE_FALSE( app.monitorIdle() );
+    REQUIRE_FALSE( app.m_runVerified );
+    REQUIRE( app.m_routeIO.events == std::vector<std::string>{ "capture", "hold", "switch", "default" } );
+    pcf::IndiProperty request( pcf::IndiProperty::Switch );
+    request.add( pcf::IndiElement( "toggle", pcf::IndiElement::Off ) );
+    const auto owner = app.m_runOwner;
+    REQUIRE( app.newCallBack_m_indiP_run( request ) < 0 );
+    REQUIRE( app.m_runOwner == owner );
+    REQUIRE( app.m_runSnapshot.writer == "nn" );
+    // clang-format off
+#ifdef PO4AO_TEST_DOXYGEN_REF
+    MagAOX::app::po4ao::runWorker;
+    MagAOX::app::po4ao::newCallBack_m_indiP_run;
+#endif
+    // clang-format on
 }
 } // namespace libXWCTest::po4aoTest

@@ -42,8 +42,26 @@ inline bool po4ao::writerHeld( bool released )
         throw std::runtime_error( "NN restarted during the routing reservation" );
     if( m_nnRoutingPhase == "error" )
         throw std::runtime_error( "NN routing reservation requires recovery" );
-    return released ? ( m_nnRoutingOwner.empty() && m_nnRoutingPhase == "released" )
-                    : ( m_nnRoutingOwner == m_runOwner && m_nnRoutingPhase == "held" );
+    return released ? reservationReleased() : ( m_nnRoutingOwner == m_runOwner && m_nnRoutingPhase == "held" );
+}
+
+inline bool po4ao::reservationReleased() const
+{
+    return !m_reservedInstance.empty() && m_nnInstance == m_reservedInstance &&
+           std::chrono::duration<double>( std::chrono::steady_clock::now() - m_nnObserved ).count() <= 5 &&
+           m_nnRoutingOwner.empty() && m_nnRoutingPhase == "released" && m_nnReleasedOwner == m_runOwner;
+}
+
+inline int po4ao::rejectRun( const std::string &reason )
+{
+    m_runRequestError = reason;
+    // Every rejected request needs an acknowledgement, including repeated identical requests.
+    m_indiP_run["toggle"].setSwitchState( m_runRunning ? pcf::IndiElement::On : pcf::IndiElement::Off );
+    m_indiP_run.setState( INDI_ALERT );
+    updateIfChanged( m_indiP_runStatus, "error", m_runError.empty() ? reason : m_runError + "; " + reason, INDI_ALERT );
+    if( m_indiDriver )
+        m_indiDriver->sendSetProperty( m_indiP_run );
+    return -1;
 }
 
 inline void po4ao::runWorker( bool start )
@@ -192,39 +210,51 @@ inline void po4ao::updateRunControl()
         }
     }
     std::lock_guard<std::mutex> lock( m_indiMutex );
-    const auto                  status = m_runBusy ? INDI_BUSY : !m_runError.empty() ? INDI_ALERT : INDI_OK;
+    const auto                  error  = m_runRequestError.empty() ? m_runError
+                                         : m_runError.empty()      ? m_runRequestError
+                                                                   : m_runError + "; " + m_runRequestError;
+    const auto                  status = m_runBusy ? INDI_BUSY : !error.empty() ? INDI_ALERT : INDI_OK;
     updateSwitchIfChanged( m_indiP_run, "toggle", m_runRunning ? pcf::IndiElement::On : pcf::IndiElement::Off, status );
     updateIfChanged( m_indiP_runStatus, "phase", m_runPhase, status );
     updateIfChanged( m_indiP_runStatus, "route", m_runRoute, status );
-    updateIfChanged( m_indiP_runStatus, "error", m_runError, status );
+    updateIfChanged( m_indiP_runStatus, "error", error, status );
     updateIfChanged( m_indiP_runStatus, "owner", m_runOwner, status );
     updateIfChanged( m_indiP_runStatus, "verified", std::string( m_runVerified ? "yes" : "no" ), status );
     // Unchanged routing readbacks also need current NN process status during a long command.
-    if( m_indiDriver && m_runBusy )
+    if( m_indiDriver && ( m_runBusy || !m_reservedInstance.empty() ) )
         m_indiDriver->sendGetProperties( m_indiP_nnRouting );
 }
 
 INDI_NEWCALLBACK_DEFN( po4ao, m_indiP_run )( const pcf::IndiProperty &property )
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_run, property );
+    std::lock_guard<std::mutex> lock( m_indiMutex );
     if( !property.find( "toggle" ) )
-        return -1;
+        return rejectRun( "Missing Start/Stop target" );
     const auto value = property["toggle"].getSwitchState();
     if( value != pcf::IndiElement::On && value != pcf::IndiElement::Off )
-        return -1;
-    const bool                  start = value == pcf::IndiElement::On;
-    std::lock_guard<std::mutex> lock( m_indiMutex );
+        return rejectRun( "Invalid Start/Stop target" );
+    const bool start = value == pcf::IndiElement::On;
     if( m_runBusy || m_runCancel.load() || m_modelResetRequest.load() != 0 || m_reloadStatus.load() == 1 ||
         m_reloadStatus.load() == 2 )
-        return -1;
+        return rejectRun( "Start/Stop conflicts with an active operation or shutdown" );
+    if( !m_reservedInstance.empty() && !reservationReleased() )
+        return rejectRun( "Previous routing reservation requires verified operator recovery" );
+    if( !m_nnRoutingOwner.empty() )
+        return rejectRun( "NN has an active routing reservation" );
     m_runCheckOnly = m_runVerified && m_runRunning == start;
     m_runTarget    = start;
     m_runError.clear();
+    m_runRequestError.clear();
     m_runPhase    = "queued";
     m_runVerified = false;
     m_reservedInstance.clear();
     m_runOwner = m_runtimeInstance + "-" + std::to_string( ++m_runSequence );
     m_runBusy = m_runPending = true;
+    // Publish admission before the worker can finish; clients expect Busy followed by Ok/Alert.
+    m_indiP_run.setState( INDI_BUSY );
+    if( m_indiDriver )
+        m_indiDriver->sendSetProperty( m_indiP_run );
     return 0;
 }
 
@@ -234,6 +264,8 @@ INDI_SETCALLBACK_DEFN( po4ao, m_indiP_nnRouting )( const pcf::IndiProperty &prop
     std::lock_guard<std::mutex> lock( m_indiMutex );
     if( property.find( "owner" ) )
         m_nnRoutingOwner = property["owner"].get<std::string>();
+    if( property.find( "released_owner" ) )
+        m_nnReleasedOwner = property["released_owner"].get<std::string>();
     if( property.find( "source" ) )
         m_nnRoutingSource = property["source"].get<std::string>();
     if( property.find( "phase" ) )

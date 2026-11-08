@@ -31,11 +31,13 @@ namespace
 #ifdef PO4AO_ROUTE_TEST
 constexpr const char *root               = ".build/routing/root";
 constexpr const char *shm                = ".build/routing/shm/";
+constexpr const char *proc               = ".build/routing/proc";
 constexpr const char *switchUtility      = ".build/routing/root/switch.sh";
 constexpr const char *calibrationUtility = ".build/routing/root/calibrate.sh";
 #else
 constexpr const char *root               = "/opt/MagAOX/cacao/tweeter-vispyr/tweeter-vispyr-rootdir";
 constexpr const char *shm                = "/milk/shm/";
+constexpr const char *proc               = "/proc";
 constexpr const char *switchUtility      = "/usr/local/bin/howfs_mfilt_switch";
 constexpr const char *calibrationUtility = "/usr/local/milk/bin/cacao-calib-apply";
 #endif
@@ -156,6 +158,10 @@ void command( const char                 *executable /**< [in] Verified absolute
 }
 } // namespace
 
+Po4aoRouteIO::Po4aoRouteIO() : m_writer( shm, proc )
+{
+}
+
 std::string Po4aoRouteIO::route() const
 {
     const auto target = std::filesystem::canonical( std::string( shm ) + "aol1_mfiltINPUT.im.shm" );
@@ -175,6 +181,7 @@ Po4aoRouteSnapshot Po4aoRouteIO::capture()
     result.route        = route();
     result.calibration  = line( std::string( shm ) + "aol1_calib_source.txt" );
     m_beforeCalibration = line( std::string( shm ) + "aol1_calib_loaded.txt" );
+    m_beforeWriter      = m_writer.runningIdentity();
     if( !std::filesystem::is_directory( std::string( root ) + "/../tweeter-vispyr-calibs/default" ) )
         throw std::runtime_error( "Default calibration is unavailable" );
     return result;
@@ -185,6 +192,9 @@ void Po4aoRouteIO::switchInput( const std::string &target, Po4aoRouteBackend::De
     if( target != "aol1_modevalWFS" && target != "po4ao_output" )
         throw std::runtime_error( "Invalid routing input" );
     requireOpenLoop();
+    // The worker now holds NN's reservation. A writer change between preflight and
+    // that hold must not be mistaken for the calibration-driven restart below.
+    m_beforeWriter = m_writer.runningIdentity();
     command( switchUtility, target.c_str(), deadline, m_cancelled );
     if( route() != target )
         throw std::runtime_error( "Input switch readback mismatch" );
@@ -197,6 +207,24 @@ void Po4aoRouteIO::applyDefault( Po4aoRouteBackend::Deadline deadline )
     while( line( std::string( shm ) + "aol1_calib_loaded.txt" ) == m_beforeCalibration ||
            std::filesystem::canonical( line( std::string( shm ) + "aol1_calib_source.txt" ) ) != expected )
         waitStep( deadline, m_cancelled );
+    // The inspected utility queues one WFS runstart before writing its marker. Await that
+    // new process, not an old still-running process or a stopped writer with work queued.
+    for( ;; )
+    {
+        if( m_cancelled.load() || std::chrono::steady_clock::now() >= deadline )
+            throw std::runtime_error( "CACAO calibration restart not acknowledged" );
+        try
+        {
+            const auto identity = m_writer.runningIdentity();
+            if( !identity.empty() && identity != m_beforeWriter )
+                break;
+        }
+        catch( const std::exception & )
+        {
+            // Transient/incomplete FPS or process evidence cannot acknowledge a restart.
+        }
+        std::this_thread::sleep_for( std::chrono::milliseconds( 20 ) );
+    }
     requireOpenLoop();
 }
 

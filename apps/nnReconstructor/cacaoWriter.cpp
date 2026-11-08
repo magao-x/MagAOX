@@ -13,7 +13,9 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#ifdef NNRECONSTRUCTOR_TEST
+#ifdef PO4AO_ROUTE_TEST
+    #include "../po4ao/tests/po4aoRouteTestAbi.hpp"
+#elif defined( NNRECONSTRUCTOR_TEST )
     #include "tests/cacaoWriterTestAbi.hpp"
 #else
 extern "C"
@@ -77,9 +79,15 @@ bool cacaoWriter::running()
                           std::to_string( md.runpidstarttime.tv_nsec );
     if( identity == m_identity && ticks != m_startTicks )
         throw std::runtime_error( "CACAO RUN PID was reused" );
-    m_identity   = identity;
-    m_startTicks = ticks;
+    m_identity        = identity;
+    m_startTicks      = ticks;
+    m_processIdentity = std::to_string( md.runpid ) + ":" + ticks;
     return true;
+}
+
+std::string cacaoWriter::runningIdentity()
+{
+    return running() ? m_processIdentity : std::string{};
 }
 
 void cacaoWriter::command( bool enabled )

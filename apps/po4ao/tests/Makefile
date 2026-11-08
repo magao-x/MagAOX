@@ -24,8 +24,8 @@ telemetry: .build/po4ao_telemetry_test
 	./.build/po4ao_telemetry_test
 .PHONY: telemetry
 
-.build/po4ao_route_io_test: po4ao_route_io_test.cpp po4aoRouteTestAbi.hpp ../po4aoRouteIO.cpp ../po4aoRouteIO.hpp ../po4aoRouting.hpp .build/catch_main.o
-	$(CXX) $(CXXFLAGS) -DPO4AO_ROUTE_TEST po4ao_route_io_test.cpp ../po4aoRouteIO.cpp .build/catch_main.o -o $@
+.build/po4ao_route_io_test: po4ao_route_io_test.cpp po4aoRouteTestAbi.hpp ../po4aoRouteIO.cpp ../po4aoRouteIO.hpp ../po4aoRouting.hpp ../../nnReconstructor/cacaoWriter.cpp ../../nnReconstructor/cacaoWriter.hpp .build/catch_main.o
+	$(CXX) $(CXXFLAGS) -DPO4AO_ROUTE_TEST po4ao_route_io_test.cpp ../po4aoRouteIO.cpp ../../nnReconstructor/cacaoWriter.cpp .build/catch_main.o -o $@
 routing: .build/po4ao_route_io_test
 	./.build/po4ao_route_io_test
 .PHONY: routing

@@ -287,10 +287,12 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>, public de
         m_runCheckOnly{ false };    ///< INDI-mutex-owned run intent and completion.
     uint64_t    m_runSequence{ 0 }; ///< Unique operation number within this runtime.
     std::string m_runPhase{ "unverified" }, m_runRoute{ "unknown" }, m_runError,
-        m_runOwner; ///< Routing progress and actual input.
+        m_runOwner;                ///< Routing progress and actual input.
+    std::string m_runRequestError; ///< Rejection diagnostic kept separate from the retained operation failure.
     std::string m_nnDevice{ "nnReconstructor" }, m_nnRoutingOwner, m_nnRoutingSource, m_nnRoutingPhase, m_nnInstance,
-        m_nnSequence, m_reservedInstance;                                ///< Independent NN reservation readbacks.
-    std::chrono::steady_clock::time_point m_nnObserved{};                ///< Latest NN routing readback.
+        m_nnSequence, m_reservedInstance;                    ///< Independent NN reservation readbacks.
+    std::string                           m_nnReleasedOwner; ///< Last token whose writer restoration NN acknowledged.
+    std::chrono::steady_clock::time_point m_nnObserved{};    ///< Latest NN routing readback.
     pcf::IndiProperty m_indiP_run, m_indiP_runStatus, m_indiP_nnRouting; ///< Native run control and writer reservation.
 
     pcf::IndiProperty m_indiP_modelStatus; ///< Active model ID and reload state.
@@ -459,6 +461,12 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>, public de
 
     /// Check a fresh NN routing reservation readback.
     bool writerHeld( bool released /**< [in] Check restoration instead of reservation. */ );
+
+    /// Check exact-token restoration under the caller's INDI lock.
+    bool reservationReleased() const;
+
+    /// Acknowledge a rejected request without changing operation state; caller holds the INDI lock.
+    int rejectRun( const std::string &reason /**< [in] Request rejection reason. */ );
 
     /// Run one serialized routing operation outside real-time callbacks.
     void runWorker( bool start /**< [in] Explicit requested target. */ );

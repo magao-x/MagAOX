@@ -6,7 +6,7 @@ Date: 2026-11-08. Status: implementation and workstation verification; isolated 
 
 Implementation branch: `rlandman/po4ao-idle-lifecycle`, created directly from verified `rlandman/nn-po4ao-gui` commit `a84232b938f359fdebb2973b6a1e367e0343002a`, in `/Users/ricolandman/.codex/worktrees/po4ao-idle-lifecycle/MagAOX`. The combined checkout and its existing GUI, saved policy pairs, NN/PO4AO controls and collector improvements are preserved. Only this planning document was copied from the review checkout; no NN implementation was copied, merged or cherry-picked from `nnreconstructor-speedups`.
 
-All implementation, builds and tests run on the workstation. The user separately authorized read-only exao2 source/readback inspection; no instrument control utility, INDI command, tunnel, installation, build or agent runtime was executed there. Instrument acceptance below is operator-run.
+All implementation, builds and tests run on the workstation. The earlier implementation used separately authorized read-only exao2 source/readback inspection. That authorization does not apply to this review: no instrument SSH, INDI connection/tunnel, control utility, deployment or hardware operation is permitted. This review recovered the earlier source evidence from a local session record only. Instrument acceptance below is operator-run.
 
 The final scope decision supersedes the original gain-restoration proposal: “complete routing, do not do anything with gains/leakage, also no note”. There is no gain/leakage snapshot, restoration, verification wait or GUI reminder. Existing utility side effects are unchanged. No hogainctrl interlock or changes outside the user's apps for instrument controls were added.
 
@@ -33,8 +33,8 @@ Start sequence:
 1. Read current route/calibration and require an already operator-open HOWFS loop.
 2. Attach and observe fresh PO4AO output before changing the downstream input.
 3. Reserve NN/CACAO writer ownership through NN's native INDI reservation.
-4. Run `howfs_mfilt_switch po4ao_output` in the verified HOWFS directory.
-5. Run `cacao-calib-apply default`, check its fresh completion marker and resolved calibration identity.
+4. With NN reserved, capture the current verified WFS writer process identity, then run `howfs_mfilt_switch po4ao_output` in the verified HOWFS directory.
+5. Run `cacao-calib-apply default`, check its fresh completion marker and resolved calibration identity, and await a verified running WFS writer with a different PID/Linux-start-tick identity captured after reservation and before the first utility. A stopped writer, the old process, or changed FPS metadata alone cannot complete this stage.
 6. Restore the actual pre-request NN/CACAO writer using its existing handover and first-result checks. The reservation does not alter the operator's modulation preference or request modulation changes.
 7. Observe fresh output again after restarts and advancing mfilt consumption on that exact stream inode. Acknowledge Running.
 
@@ -42,13 +42,15 @@ Stop follows the same reservation/switch/calibration/writer-verification sequenc
 
 The app does not open or close the loop. Calibration's existing procedure opens it, hence the preflight requirement that the operator already has it open. Loop closure remains an operator action.
 
-NN exposes `routing_hold` text elements `owner` and `action` (`hold`/`release`) with `routing_status` owner/source/phase/instance/sequence readbacks. It rejects competing native Enable/model/handover/modulation controls while held. Hold snapshots the verified actual writer; it acknowledges held only after NN is fully disabled when needed. Calibration restarts CACAO even when NN was active, so release uses the standard handover to stop CACAO before enabling NN. No external gain-control interlock is implied.
+NN exposes `routing_hold` text elements `owner` and `action` (`hold`/`release`) with `routing_status` owner/source/phase/instance/sequence/released_owner readbacks. It rejects competing native Enable/model/handover/modulation controls while held. Hold snapshots the verified actual writer; it acknowledges held only after NN is fully disabled when needed. Calibration restarts CACAO even when NN was active, so release uses the standard handover to stop CACAO before enabling NN. No external gain-control interlock is implied.
 
 Failure behavior:
 
 - Failed Stop never parks the monitor while the downstream route may depend on PO4AO. Report actual or unknown route, failed stage, error and unverified status.
 - Commands use fixed executable/argument pairs and the required working directory. Timeout/cancellation kills and reaps the utility process group. FIFO requests already queued can still complete; do not automatically roll back or release an unresolved writer reservation.
-- Preserve the operation token and NN reservation for operator recovery. After independently settling outstanding utility/FIFO actions and verifying ownership, the operator can release the matching token through NN and retry the explicit target. Do not clear another operation's reservation or blindly restart an app to conceal it.
+- Preserve the operation token, captured route/calibration/writer and reserved NN instance after failure. New Start/Stop requests receive Alert without replacing this evidence until a fresh `released_owner` equal to that exact token arrives from the same NN instance, with phase `released` and no current owner. A stale release, a different token, a restarted NN or restoration still in progress cannot unblock retry.
+- Operator recovery: keep downstream supplied and stop competing commands; independently settle all outstanding utility/FIFO work and check actual routing/writer state. If NN holds the matching token, submit `routing_hold` with that retained `owner` and `action=release`, then verify completed restoration. If hold delivery was uncertain and NN has no owner, first settle pending delivery, acquire `hold` using the *same retained token*, wait for `held`, then release it after the same external checks. Do not issue a new token to bypass recovery. A different NN instance/owner requires independent reconciliation; automatic retry remains blocked. Do not blindly restart either app to hide a reservation.
+- Every rejected run request publishes Alert, including repeated identical rejection. Accepted requests publish Busy before launching the worker. Rejection diagnostics are separate from the retained operation error. Visible reset/reload conflicts gate the GUI; raced conflicts are acknowledged by the app. The existing unknown-on-timeout latch is unchanged.
 - A repeated verified target checks route and consumption without reapplying either utility. A changed or stale route fails verification.
 - The reservation serializes controls in these apps; it cannot prevent a separate manual instrument command. Operators must not issue competing routing/writer commands during the procedure.
 
@@ -96,7 +98,67 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=apps/po4aoTrainer:magaox-python /tmp/po4ao-
 
 Schema tests require the normal logger `flatlogcodes`/`flatc` generation step first. The workstation Qt build uses `learningCtrl_test.pro`, Qt6 and locally compiled INDI libcommon/liblilxml archives. The existing collector test uses its real CPU session and observation sources with local INDI/OpenSSL dependencies. Detailed current assertion counts are in the completion report; tests do not establish instrument deployment success.
 
+## Independent review follow-up (2026-11-08)
+
+Starting checkout was clean on `rlandman/po4ao-idle-lifecycle` at reviewed HEAD `d9d37b2c`, with no subsequent changes. Comparison baseline remains `a84232b938f359fdebb2973b6a1e367e0343002a`. No implementation from `nnreconstructor-speedups` was accessed or used.
+
+1. **Accept: silent Start/Stop rejection.** The production callback returned -1 during reset/reload without an INDI acknowledgement. The GUI allowed those clicks. `MagAOXApp::handleNewProperty` discards callback return values, and the GUI waits for Busy then Ok or Alert. Those generic conventions already existed at the baseline; this new run-control integration failed to honor them. Before the fix, the native regression failed all three conflict sections and the Qt regression failed both visible-conflict sections. Reusing explicit Busy/Alert publication and existing GUI acknowledgement is smaller than changing generic timeout semantics. Repeated Alert publication is deliberate: change-only publication could silently discard the next identical rejection.
+2. **Accept: lost recovery identity.** The new run callback replaced the token/NN instance on every retry, even after a held reservation and partial utility failure. The prior plan promised retained identity but code did not enforce it. The pre-fix regression demonstrably accepted this retry. The corrected guard retains token/snapshot/error and uses one additive NN readback (`released_owner`) to associate completed writer restoration with the exact token. This uses the existing reservation/handover; it adds no second recovery controller or automatic release. Tests cover unresolved hold, wrong/stale release, NN restart, restoration in progress, successful matching recovery and missing calibration acknowledgement.
+3. **Accept the missing boundary check; no claim of observed hardware dual-writing.** The independent NN probe demonstrates a possible boundary sequence, not installed behavior. The [locally recovered utility snapshots](shmimMonitor-idle-apps-evidence/README.md) have SHA-256 hashes matching the earlier inspected copies. The calibration script queues WFS runstart, sleeps, and writes the marker without awaiting execution. The input-switch script does not start this writer. Therefore a marker does not establish that the queued WFS start has settled. The old adapter regression returned successfully with a new marker and no restart. The fix awaits a different verified PID/start-tick identity before NN release; FPS identity/timestamp changes alone cannot satisfy it. The baseline identity is refreshed after NN reservation, immediately before the first utility, so an intervening native handover cannot be mistaken for the calibration restart. A new regression reproduced this edge before that adjustment. Existing NN handover then stops that writer before resuming NN. A timeout retains the reservation and leaves PO4AO available. The completion argument assumes the inspected single WFS restart and no competing external writer commands; installed dependencies/hooks still require operator verification.
+
+The review probes were inspected as fault demonstrations, not copied as acceptance tests. New tests assert corrected behavior. An initial too-short adapter deadline produced an uninformative timeout pass; the retained regression uses a two-second deadline and exact restart-error assertion, and failed on the pre-fix adapter because no exception was thrown. Test harness initialization was also corrected to include the actual run property elements before testing explicit publications.
+
+No gain/leakage behavior, policy selection, learning resume behavior, trainer control framework or shared GUI timeout semantics changed. Existing READY/OPERATING, GPU release and telemetry implementation is preserved.
+
+### Follow-up validation
+
+Final post-format runs on the workstation:
+
+| Suite actually run for this follow-up | Result | Boundary |
+| --- | --- | --- |
+| PO4AO production-method/unit tests | 430 assertions / 35 cases passed | ASan + UBSan; SDK/INDI/monitor doubles |
+| Production routing adapter | 24 assertions / 6 cases passed | ASan + UBSan; private fake executables, FPS and Linux-process records |
+| NN production-method/unit tests | 614 assertions / 37 cases passed | ASan + UBSan; SDK/INDI/monitor doubles |
+| Production CACAO helper | 29 assertions / 3 cases passed | ASan + UBSan; private FPS/proc/FIFO fixtures |
+| CACAO build isolation regression | 1 unittest passed | Conflicting local header fixtures |
+| Qt learningCtrl | 440 assertions / 28 cases passed | Offscreen Qt6; socket-free publisher |
+
+Both app suites and adapter/helper were built with `-fsanitize=address,undefined -fno-omit-frame-pointer`. All touched C++ files passed the repository clang-format configuration and `git diff --check`. Qt emitted the existing font/offscreen and local macOS archive-version/override warnings, without test failures. The final run commands were `make -C apps/po4ao/tests` with `test routing` and sanitizer CXXFLAGS, `make -C apps/nnReconstructor/tests` with `test` and sanitizer CXXFLAGS, and the existing `/tmp/magaox-idle-gui` build followed by `QT_QPA_PLATFORM=offscreen ./learningCtrl_test`.
+
+The earlier trainer, collector, monitor and telemetry results above are historical and were not rerun for these routing-boundary changes. Tests use private paths and explicitly fake utilities/SDK/ABI boundaries. No new real ImageStreamIO, GPU or instrument validation was performed. The result is ready for isolated Linux/GPU validation, not operator acceptance or production deployment.
+
+Follow-up operator acceptance must additionally verify rejection acknowledgement during a reset/reload race; retained token and snapshot after failure; stale/wrong-token and restarted-NN recovery refusal; matching-token restoration; and delayed CACAO restart before NN release. First inject those failures in an isolated replica. Confirm no dual writer and no premature PO4AO detachment using actual readbacks; the workstation tests do not establish either on hardware.
+
+### Files changed by this review follow-up
+
+- `agents/plans/2026-11/shmimMonitor-idle-apps.md`
+- `apps/nnReconstructor/README.md`
+- `apps/nnReconstructor/cacaoWriter.cpp`
+- `apps/nnReconstructor/cacaoWriter.hpp`
+- `apps/nnReconstructor/nnReconstructor.hpp`
+- `apps/nnReconstructor/reconstructorControls.hpp`
+- `apps/nnReconstructor/tests/cacaoWriter_test.cpp`
+- `apps/nnReconstructor/tests/nnReconstructor_test.cpp`
+- `apps/nnReconstructor/tests/nnTestSupport.hpp`
+- `apps/po4ao/README.md`
+- `apps/po4ao/po4ao.hpp`
+- `apps/po4ao/po4aoRouteIO.cpp`
+- `apps/po4ao/po4aoRouteIO.hpp`
+- `apps/po4ao/po4ao_run.hpp`
+- `apps/po4ao/tests/Makefile`
+- `apps/po4ao/tests/po4aoRouteTestAbi.hpp`
+- `apps/po4ao/tests/po4ao_route_io_test.cpp`
+- `apps/po4ao/tests/po4ao_run_test.cpp`
+- `gui/widgets/learningCtrl/README.md`
+- `gui/widgets/learningCtrl/learningCtrl.hpp`
+- `gui/widgets/learningCtrl/tests/learningCtrl_test.cpp`
+- `agents/plans/2026-11/shmimMonitor-idle-apps-evidence/README.md`
+- `agents/plans/2026-11/shmimMonitor-idle-apps-evidence/cacao-calib-apply.source.txt`
+- `agents/plans/2026-11/shmimMonitor-idle-apps-evidence/howfs_mfilt_switch.source.txt`
+
 ## Remaining acceptance gates
+
+See the [operator acceptance and PR integration plan](shmimMonitor-idle-acceptance.md) for the ordered procedure. A fresh local merge check against `dev` at `16138ab7b5b90bae028fb09aeb2c73e3f391844a` found seven conflict paths and an event-code collision (`20906` is already `telem_fgstage` upstream). Resolve these before freezing the instrument candidate. The requested features and workstation tests do not establish readiness against current `dev`. PR #418 is already included by ancestry and can be updated after integration/qualification.
 
 1. On an isolated non-instrument Linux host, build libMagAOX and all affected C++ apps against the installed-version milk/ImageStreamIO/CUDA/TensorRT dependencies. Run the normal MagAOXApp regression suite. Verify telemetry logger registration/accessors and decode a real emitted TELEM_PO4AO record, including idle and model transitions.
 2. With a real ImageStreamIO synthetic producer, exercise missing-source startup, cancellation during attachment/allocation, producer stalls, rapid Stop/Start and stream replacement. Check reader slots and actual wait/wakeup counts after READY while the producer continues. Validate collector pending Start/Stop and observe that idle sampling stops. The workstation mapping double alone does not close this gate.

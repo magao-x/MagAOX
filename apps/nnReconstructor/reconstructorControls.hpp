@@ -27,7 +27,7 @@ inline int nnReconstructor::setupReconstructorControls()
     m_indiP_routingHold.add( pcf::IndiElement( "action" ) );
     m_indiP_routingHold.setPerm( pcf::IndiProperty::ReadWrite );
     createROIndiText( m_indiP_routingStatus, "routing_status", "owner" );
-    for( const auto *element : { "source", "phase", "instance", "sequence" } )
+    for( const auto *element : { "source", "phase", "instance", "sequence", "released_owner" } )
         m_indiP_routingStatus.add( pcf::IndiElement( element ) );
     if( registerIndiPropertyNew( m_indiP_routingHold, INDI_NEWCALLBACK( m_indiP_routingHold ) ) < 0 ||
         registerIndiPropertyReadOnly( m_indiP_routingStatus ) < 0 )
@@ -245,13 +245,15 @@ inline void nnReconstructor::updateReconstructorControls()
         m_routingPhase = "held";
     if( m_routingPhase == "restoring" && m_switchPhase == "idle" && m_reconstructor == m_routingSource )
     {
-        m_routingPhase = "released";
+        m_routingPhase         = "released";
+        m_routingReleasedOwner = m_routingOwner;
         m_routingOwner.clear();
     }
     if( m_routingPhase == "restoring" && m_switchPhase == "error" )
         m_routingPhase = "error";
     const auto routingState = m_routingPhase == "error" ? INDI_ALERT : INDI_OK;
     updateIfChanged( m_indiP_routingStatus, "owner", m_routingOwner, routingState );
+    updateIfChanged( m_indiP_routingStatus, "released_owner", m_routingReleasedOwner, routingState );
     updateIfChanged( m_indiP_routingStatus, "source", m_routingSource, routingState );
     updateIfChanged( m_indiP_routingStatus, "phase", m_routingPhase, routingState );
     updateIfChanged( m_indiP_routingStatus, "instance", m_switchInstance, routingState );

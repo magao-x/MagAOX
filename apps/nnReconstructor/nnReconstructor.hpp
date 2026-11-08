@@ -290,6 +290,8 @@ class nnReconstructor : public MagAOXApp<true>,
 
     std::string m_routingOwner, m_routingSource, m_routingPhase{ "idle" }; ///< Serialized routing reservation.
 
+    std::string m_routingReleasedOwner; ///< Last reservation whose original writer was verifiably restored.
+
     std::string m_switchInstance; ///< Process-lifetime identity for invalidating cached GUI state.
 
     std::chrono::steady_clock::time_point m_switchStarted{}, m_modQuery{}; ///< Phase deadline and query throttle.

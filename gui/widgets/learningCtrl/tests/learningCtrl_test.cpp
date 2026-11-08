@@ -1077,6 +1077,47 @@ TEST_CASE( "Whole-app PO4AO controls are independent of policy selection", "[lea
     REQUIRE_FALSE( f.control<QPushButton>( "buttonWarmup" )->isEnabled() );
 }
 
+/** \brief Visible model transitions gate routing, and a raced rejection clears the request latch. */
+TEST_CASE( "Run controls handle model conflicts and rejection", "[learningCtrl][reviewRegression]" )
+{
+    Fixture f( false );
+    f.runtime( true );
+    f.define( runtimeSwitch( "run_enable", true ) );
+    f.define( text( "po4ao", "run_status", { { "phase", "running" }, { "route", "po4ao_output" }, { "error", "" } } ) );
+    SECTION( "visible reset" )
+    {
+        f.define( runtimeSwitch( "reset_model", true, pcf::IndiProperty::Busy ) );
+        REQUIRE_FALSE( f.control<QPushButton>( "buttonRunPO4AO" )->isEnabled() );
+    }
+    SECTION( "visible reload" )
+    {
+        f.define( runtimeSwitch( "reload_engine", true, pcf::IndiProperty::Busy ) );
+        REQUIRE_FALSE( f.control<QPushButton>( "buttonRunPO4AO" )->isEnabled() );
+    }
+    SECTION( "reset generation still pending" )
+    {
+        f.m_publisher.handleSetProperty(
+            text( "po4ao", "model_status", { { "reset_request", "2" }, { "reset_applied", "1" } } ) );
+        drain();
+        REQUIRE_FALSE( f.control<QPushButton>( "buttonRunPO4AO" )->isEnabled() );
+    }
+    SECTION( "reload awaits frame activation" )
+    {
+        f.m_publisher.handleSetProperty( text( "po4ao", "model_status", { { "reload", "ready" } } ) );
+        drain();
+        REQUIRE_FALSE( f.control<QPushButton>( "buttonRunPO4AO" )->isEnabled() );
+    }
+    SECTION( "conflict arrives after click" )
+    {
+        REQUIRE( f.control<QPushButton>( "buttonRunPO4AO" )->isEnabled() );
+        f.m_widget.on_buttonRunPO4AO_clicked();
+        REQUIRE_FALSE( f.control<QPushButton>( "buttonRunPO4AO" )->isEnabled() );
+        f.m_publisher.handleSetProperty( runtimeSwitch( "run_enable", true, pcf::IndiProperty::Alert ) );
+        drain();
+        REQUIRE( f.control<QPushButton>( "buttonRunPO4AO" )->isEnabled() );
+    }
+}
+
 } // namespace learningCtrlGUITest
 } // namespace libXWCTest
 

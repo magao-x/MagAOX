@@ -5,15 +5,19 @@
 #define po4aoRouteTestAbi_hpp
 #include <cstdint>
 #include <sys/types.h>
-constexpr uint32_t FPTYPE_ONOFF                = 0x8000;
-constexpr uint64_t FPFLAG_ONOFF                = 1;
-constexpr int      PROCESSINFO_LOOPSTAT_ACTIVE = 1;
+#include <ctime>
+constexpr uint32_t FUNCTION_PARAMETER_STRUCT_STATUS_CMDRUN = 1;
+constexpr uint32_t FPTYPE_ONOFF                            = 0x8000;
+constexpr uint64_t FPFLAG_ONOFF                            = 1;
+constexpr int      PROCESSINFO_LOOPSTAT_ACTIVE             = 1;
 /// Test metadata containing fields read by the real adapter.
 struct FUNCTION_PARAMETER_STRUCT_MD
 {
-    char  name[80]{};      ///< FPS identity.
-    long  NBparamMAX{ 0 }; ///< Parameter count.
-    pid_t runpid{ 0 };     ///< Owner process.
+    char     name[80]{};        ///< FPS identity.
+    long     NBparamMAX{ 0 };   ///< Parameter count.
+    pid_t    runpid{ 0 };       ///< Owner process.
+    timespec runpidstarttime{}; ///< FPS start timestamp.
+    uint32_t status{ 0 };       ///< RUN request status.
 };
 /// Test parameter record, deliberately not claiming installed binary layout compatibility.
 struct FUNCTION_PARAMETER

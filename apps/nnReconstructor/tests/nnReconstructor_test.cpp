@@ -38,6 +38,9 @@ class nnReconstructor_test : public nnReconstructor
     /// Read the reservation phase published by the production app.
     std::string holdPhase() const;
 
+    /// Read the exact completed reservation token from the published status.
+    std::string releasedOwner() const;
+
     /// Send an explicit writer handover request.
     int switchTo( const std::string &target, /**< [in] Desired writer. */
                   const std::string &expected /**< [in] Observed source. */ );
@@ -215,6 +218,11 @@ inline int nnReconstructor_test::hold( const std::string &owner, const std::stri
     request["action"] = action;
     return newCallBack_m_indiP_routingHold( request );
 }
+inline std::string nnReconstructor_test::releasedOwner() const
+{
+    return m_indiP_routingStatus["released_owner"].get<std::string>();
+}
+
 inline std::string nnReconstructor_test::holdPhase() const
 {
     return m_routingPhase;
@@ -1599,6 +1607,7 @@ TEST_CASE( "Routing reservation preserves NN ownership across CACAO restarts", "
     app.complete();
     app.switchStep();
     REQUIRE( app.holdPhase() == "held" );
+    REQUIRE( app.releasedOwner().empty() );
     REQUIRE( nnTest::liveAllocations == 0 );
     nnTest::cacaoRunning = true; // The calibration utility has restarted its writer.
     REQUIRE( app.hold( "po4ao-1", "release" ) == 0 );
@@ -1619,6 +1628,7 @@ TEST_CASE( "Routing reservation preserves NN ownership across CACAO restarts", "
     app.complete();
     app.switchStep();
     REQUIRE( app.holdPhase() == "released" );
+    REQUIRE( app.releasedOwner() == "po4ao-1" );
     REQUIRE( app.acknowledged() );
     REQUIRE( app.m_sent.empty() );
     // clang-format off
@@ -1638,10 +1648,12 @@ TEST_CASE( "Routing reservation preserves CACAO ownership", "[nnReconstructor][r
     REQUIRE( app.hold( "po4ao-2", "hold" ) == 0 );
     app.switchStep();
     REQUIRE( app.holdPhase() == "held" );
+    REQUIRE( app.releasedOwner().empty() );
     REQUIRE_FALSE( app.claim() );
     REQUIRE( app.hold( "po4ao-2", "release" ) == 0 );
     app.switchStep();
     REQUIRE( app.holdPhase() == "released" );
+    REQUIRE( app.releasedOwner() == "po4ao-2" );
     REQUIRE( app.loaded() == "first.trt" );
     REQUIRE( nnTest::liveAllocations == 0 );
     REQUIRE( nnTest::cacaoCommands.empty() );

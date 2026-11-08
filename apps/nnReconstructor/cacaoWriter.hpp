@@ -27,6 +27,9 @@ class cacaoWriter
     /// Return verified RUN state, throwing when the metadata or process identity is unavailable.
     bool running();
 
+    /// Return verified PID/start-tick identity, or empty only for a confirmed stopped writer.
+    std::string runningIdentity();
+
     /// Deliver a single nonblocking request; the caller must observe completion separately.
     void command( bool enabled /**< [in] Start rather than stop the configured writer. */ );
 
@@ -38,6 +41,8 @@ class cacaoWriter
     std::string m_identity; ///< FPS file, RUN PID and start timestamp from the previous observation.
 
     std::string m_startTicks; ///< Linux process start time paired with that FPS identity.
+
+    std::string m_processIdentity; ///< PID and Linux start ticks; metadata changes alone are not a new process.
 };
 
 } // namespace MagAOX::app

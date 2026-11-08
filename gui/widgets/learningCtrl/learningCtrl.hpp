@@ -831,6 +831,11 @@ inline void learningCtrl::updateGUI()
     m_ui.buttonRunPO4AO->setText( appRunning ? "Stop PO4AO" : "Start PO4AO" );
     m_ui.buttonRunPO4AO->setEnabled(
         m_connected && m_runtimeAge.isValid() && m_runtimeAge.elapsed() < 5000 && !m_runtimeInstance.empty() &&
+        !busy( { "reset_model", "reload_engine" }, m_runtimeDevice ) &&
+        value( m_runtimeDevice, "model_status", "reset_request" ) ==
+            value( m_runtimeDevice, "model_status", "reset_applied" ) &&
+        value( m_runtimeDevice, "model_status", "reload" ) != "loading" &&
+        value( m_runtimeDevice, "model_status", "reload" ) != "ready" &&
         commandAvailable( "run_enable", pcf::IndiProperty::Switch, { "toggle" }, m_runtimeDevice ) &&
         ( runPhase == "unverified" || runPhase == "running" || runPhase == "stopped" || runPhase == "failed" ) );
     m_ui.labelRunPO4AO->setText(

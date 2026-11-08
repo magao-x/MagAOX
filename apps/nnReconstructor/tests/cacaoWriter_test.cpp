@@ -56,6 +56,24 @@ void WriterFixture::save( const std::string &ticks )
 }
 /// \endcond
 
+/** \brief A new FPS timestamp alone cannot acknowledge a new writer process. */
+TEST_CASE( "CACAO process identity distinguishes actual restart evidence", "[nnReconstructor][cacaoWriter]" )
+{
+    WriterFixture f;
+    const auto    original = f.m_writer.runningIdentity();
+    REQUIRE_FALSE( original.empty() );
+    f.m_metadata.runpidstarttime.tv_sec = 1;
+    f.save();
+    REQUIRE( f.m_writer.runningIdentity() == original );
+    f.m_metadata.runpidstarttime.tv_sec = 2;
+    f.save( "456" );
+    REQUIRE( f.m_writer.runningIdentity() != original );
+    f.m_metadata.runpid = 0;
+    f.m_metadata.status = 0;
+    f.save();
+    REQUIRE( f.m_writer.runningIdentity().empty() );
+}
+
 /** \brief RUN state requires complete FPS metadata and matching process identity. */
 TEST_CASE( "CACAO writer verifies metadata and process lifetime", "[nnReconstructor][cacaoWriter]" )
 {

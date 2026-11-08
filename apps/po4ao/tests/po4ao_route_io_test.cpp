@@ -9,6 +9,7 @@
 #include <cstring>
 #include <fstream>
 #include <thread>
+#include <future>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -22,6 +23,30 @@ void record( const std::string &path /**< [in] Private test path. */, const T &v
     std::ofstream output( path, std::ios::binary );
     output.write( reinterpret_cast<const char *>( &value ), sizeof( value ) );
 }
+/// Publish a private FPS record and Linux-format process identity; no instrument paths are used.
+void writerRecord( bool running /**< [in] Whether the fake writer is running. */,
+                   long generation         = 1 /**< [in] Fake process start ticks. */,
+                   long metadataGeneration = 1 /**< [in] Independent FPS start timestamp. */ )
+{
+    FUNCTION_PARAMETER_STRUCT_MD md{};
+    std::strcpy( md.name, "wfs2cmodeval-1" );
+    md.NBparamMAX             = 1;
+    md.runpid                 = running ? getpid() : 0;
+    md.runpidstarttime.tv_sec = metadataGeneration;
+    const auto proc           = std::string( ".build/routing/proc/" ) + std::to_string( getpid() );
+    std::filesystem::create_directories( proc );
+    std::ofstream process( proc + "/stat" );
+    process << getpid() << " (fake writer) S";
+    for( int field = 4; field < 22; ++field )
+        process << " 0";
+    process << " " << generation << " 0\n";
+    std::ofstream( proc + "/cmdline" ) << "milk-wfs2cmodeval-1";
+    const std::string path = ".build/routing/shm/wfs2cmodeval-1.fps.shm";
+    std::ofstream     fps( path, std::ios::binary );
+    fps.write( reinterpret_cast<const char *>( &md ), sizeof( md ) );
+    FUNCTION_PARAMETER payload{};
+    fps.write( reinterpret_cast<const char *>( &payload ), sizeof( payload ) );
+}
 /// Build a private fake HOWFS loop; test compilation replaces every installed executable/path.
 void fixture()
 {
@@ -29,6 +54,7 @@ void fixture()
     fs::remove_all( ".build/routing" );
     fs::create_directories( ".build/routing/root" );
     fs::create_directories( ".build/routing/shm" );
+    writerRecord( false );
     fs::create_directories( ".build/routing/tweeter-vispyr-calibs/default" );
     for( const auto *name : { "aol1_modevalWFS", "po4ao_output" } )
         std::ofstream( ".build/routing/shm/" + std::string( name ) + ".im.shm" ) << "source";
@@ -66,6 +92,7 @@ TEST_CASE( "Routing adapter executes private utilities and verifies calibration"
     REQUIRE( io.capture().route == "aol1_modevalWFS" );
     io.switchInput( "po4ao_output", deadline );
     REQUIRE( io.route() == "po4ao_output" );
+    writerRecord( true );
     REQUIRE_NOTHROW( io.applyDefault( deadline ) );
     REQUIRE_THROWS( io.switchInput( "not-a-route", deadline ) );
     io.m_cancelled.store( true );
@@ -164,5 +191,64 @@ TEST_CASE( "Routing adapter refuses incompatible readbacks", "[po4ao][routingIO]
         REQUIRE_THROWS( io.verifyConsumption( "aol1_modevalWFS",
                                               std::chrono::steady_clock::now() + std::chrono::milliseconds( 60 ) ) );
     }
+}
+/** \brief A calibration marker cannot release NN while the queued writer start remains unobserved. */
+TEST_CASE( "Calibration marker alone cannot complete restart", "[po4ao][reviewRegression]" )
+{
+    fixture();
+    MagAOX::app::Po4aoRouteIO io;
+    SECTION( "stopped with queued work" )
+    {
+        io.capture();
+    }
+    SECTION( "old process still running" )
+    {
+        writerRecord( true );
+        io.capture();
+    }
+    SECTION( "writer started between preflight and reservation" )
+    {
+        io.capture();
+        writerRecord( true );
+        io.switchInput( "po4ao_output", std::chrono::steady_clock::now() + std::chrono::seconds( 2 ) );
+    }
+    SECTION( "metadata changed without a new process" )
+    {
+        writerRecord( true );
+        io.capture();
+        writerRecord( true, 1, 2 );
+    }
+    REQUIRE_THROWS_WITH( io.applyDefault( std::chrono::steady_clock::now() + std::chrono::seconds( 2 ) ),
+                         "CACAO calibration restart not acknowledged" );
+}
+/** \brief A delayed new writer must be observed before the adapter can return for NN restoration. */
+TEST_CASE( "Calibration waits for a fresh writer process", "[po4ao][routingIO]" )
+{
+    fixture();
+    writerRecord( true );
+    MagAOX::app::Po4aoRouteIO io;
+    io.capture();
+    // The old writer has stopped, but the queued start has not executed.
+    writerRecord( false );
+    const auto  deadline  = std::chrono::steady_clock::now() + std::chrono::seconds( 3 );
+    auto        completed = std::async( std::launch::async, [&] { io.applyDefault( deadline ); } );
+    std::string marker;
+    do
+    {
+        std::ifstream( ".build/routing/shm/aol1_calib_loaded.txt" ) >> marker;
+        if( marker == "after" )
+            break;
+        std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+    } while( std::chrono::steady_clock::now() < deadline );
+    REQUIRE( marker == "after" );
+    REQUIRE( completed.wait_for( std::chrono::milliseconds( 60 ) ) == std::future_status::timeout );
+    writerRecord( true, 2, 2 );
+    REQUIRE_NOTHROW( completed.get() );
+    // clang-format off
+#ifdef PO4AO_TEST_DOXYGEN_REF
+    MagAOX::app::Po4aoRouteIO::applyDefault;
+    MagAOX::app::cacaoWriter::runningIdentity;
+#endif
+    // clang-format on
 }
 } // namespace libXWCTest::po4aoTest

@@ -539,6 +539,14 @@ struct MagAOXApp
     /// Socket-free discovery boundary; no instrument connection is opened.
     struct Driver
     {
+        std::vector<pcf::IndiProperty> m_published; ///< Socket-free property acknowledgements.
+
+        /// Record every publication, including repeated rejection acknowledgements.
+        void sendSetProperty( const pcf::IndiProperty &property /**< [in] Published vector. */ )
+        {
+            m_published.push_back( property );
+        }
+
         /// Ignore read-only discovery requests in the CPU fixture.
         void sendGetProperties( const pcf::IndiProperty &property /**< [in] Requested vector. */ )
         {
