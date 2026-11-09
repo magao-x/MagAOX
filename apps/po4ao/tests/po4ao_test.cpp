@@ -1,7 +1,7 @@
 /** \file po4ao_test.cpp
  * \brief Core PO4AO model, callback, routing worker and telemetry sampling regressions.
  *
- * \ingroup po4ao_files
+ * \ingroup po4ao_unit_test
  */
 #include "../../../tests/testXWC.hpp"
 #include "../po4ao_utils.hpp"
@@ -466,18 +466,18 @@ struct shmimT
 /// Shared-memory metadata fields used by the production publication functions.
 struct Metadata
 {
-    uint64_t cnt0{ 0 }, cnt1{ 0 }, cnt2{ 0 };
-    int      write{ 0 };
+    uint64_t cnt0{ 0 }, cnt1{ 0 }, cnt2{ 0 }; ///< Publication, episode and effective-model counters.
+    int      write{ 0 }; ///< In-progress publication marker.
 };
 /// In-memory image boundary with enough space for the small replay fixture.
 struct IMAGE
 {
-    Metadata              md[1];
-    std::array<float, 64> storage{};
+    Metadata              md[1]; ///< Metadata owned by this synthetic image.
+    std::array<float, 64> storage{}; ///< Small replay storage used by the production callback.
     struct
     {
-        void *raw{ nullptr };
-    } array;
+        void *raw{ nullptr }; ///< Address of the owning image storage.
+    } array; ///< ImageStreamIO-compatible data view.
     std::function<void()> posted; ///< Optional boundary fault injected after publication.
 
     /// Bind the image to its own CPU storage.
@@ -500,8 +500,8 @@ inline void ImageStreamIO_sempost( IMAGE *image /**< [in] Published in-memory im
 /// Model identity needed by the production admission logic; inference itself is an SDK double.
 struct EngineBundle
 {
-    uint64_t           generation{ 1 }, modelId{ 42 };
-    int                historyLength{ 2 };
+    uint64_t           generation{ 1 }, modelId{ 42 }; ///< Accepted reload and effective-policy identities.
+    int                historyLength{ 2 }; ///< Temporal input width of the fixture policy.
     std::vector<float> linearWeights{ 1 }; ///< Test policy uses the CPU boundary.
 };
 /// Boundary fixture declaring the state used by the included production method definitions.
@@ -511,11 +511,12 @@ struct EngineBundle
 class po4ao
 {
   public:
+    /// Monitor storage supplied without a live stream or monitor thread.
     struct shmimMonitorT
     {
-        static inline IMAGE m_imageStream;
+        static inline IMAGE m_imageStream; ///< In-memory source image shared by callback tests.
     };
-    static constexpr size_t c_episodeSlots = 3, c_latencySamples = 16;
+    static constexpr size_t c_episodeSlots = 3, c_latencySamples = 16; ///< Bounded fixture capacities.
     int                     m_nModes{ 3 }, m_nModesControlled{ 2 },
         m_replayBufferSize{ 4 }; ///< Fixture stream width and retained replay capacity.
     uint32_t m_warmupEpisodes{ 2 }, m_iterationsPerEpisode{ 2 },
@@ -1104,26 +1105,26 @@ struct RouteIO
 struct po4ao : MagAOXApp<true>, dev::shmimMonitor<po4ao>
 {
     using shmimMonitorT = dev::shmimMonitor<po4ao>;
-    RouteIO               m_routeIO;
+    RouteIO               m_routeIO; ///< Fake utility boundary observed by the production worker.
     std::string           m_outputChannel{ "po4ao_output" }; ///< Fixed instrument route under test.
-    Po4aoRouteSnapshot    m_runSnapshot;
-    std::thread           m_runThread;
+    Po4aoRouteSnapshot    m_runSnapshot; ///< Identity retained across routing failure and recovery.
+    std::thread           m_runThread; ///< Owned production worker, joined before fixture destruction.
     std::mutex            m_callbackMutex; ///< App callback and allocation ownership boundary.
-    std::atomic<bool>     m_runCancel{ false }, m_runAdmission{ true };
-    std::atomic<uint64_t> m_outputSequence{ 0 };
+    std::atomic<bool>     m_runCancel{ false }, m_runAdmission{ true }; ///< Shutdown and callback admission.
+    std::atomic<uint64_t> m_outputSequence{ 0 }; ///< Output progress observed while routing.
     bool m_runPending{ false }, m_runBusy{ false }, m_runTarget{ true }, m_runRunning{ true }, m_runVerified{ false },
-        m_runCheckOnly{ false };
-    uint64_t    m_runSequence{ 0 }, m_activeCollectionGeneration{ 1 };
+        m_runCheckOnly{ false }; ///< Requested, executing and verified routing state.
+    uint64_t    m_runSequence{ 0 }, m_activeCollectionGeneration{ 1 }; ///< Routing and replay generations.
     std::string m_runPhase{ "unverified" }, m_runRoute{ "unknown" }, m_runError, m_runRequestError,
-        m_runOwner{ "test-1" };
+        m_runOwner{ "test-1" }; ///< Published route status and stable reservation token.
     std::string m_nnDevice{ "nn" }, m_nnRoutingOwner, m_nnReleasedOwner, m_nnRoutingSource, m_nnRoutingPhase,
-        m_nnInstance{ "nn-1" }, m_nnSequence{ "1" }, m_reservedInstance;
-    std::string                           m_runtimeInstance{ "test" };
-    std::chrono::steady_clock::time_point m_nnObserved{ std::chrono::steady_clock::now() };
-    pcf::IndiProperty                     m_indiP_run, m_indiP_runStatus, m_indiP_nnRouting;
-    std::atomic<int>                      m_reloadStatus{ 0 };
-    WarmupCollection                      m_collection;
-    std::condition_variable               m_replayCondition;
+        m_nnInstance{ "nn-1" }, m_nnSequence{ "1" }, m_reservedInstance; ///< Observed NN reservation identity.
+    std::string                           m_runtimeInstance{ "test" }; ///< Synthetic runtime process identity.
+    std::chrono::steady_clock::time_point m_nnObserved{ std::chrono::steady_clock::now() }; ///< Readback freshness.
+    pcf::IndiProperty                     m_indiP_run, m_indiP_runStatus, m_indiP_nnRouting; ///< Offline properties.
+    std::atomic<int>                      m_reloadStatus{ 0 }; ///< Model-loading admission boundary.
+    WarmupCollection                      m_collection; ///< Production warmup invalidated on detachment.
+    std::condition_variable               m_replayCondition; ///< Wakeup used when routing interrupts collection.
     /// Initialize a running fixture with no instrument connection.
     po4ao();
     /// Join any production worker launched by a request.
