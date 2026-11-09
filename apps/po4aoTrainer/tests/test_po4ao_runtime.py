@@ -13,13 +13,14 @@ from pathlib import Path
 
 import numpy as np
 
+from xapp.po4aoTrainer.library import engine_id
+
 from xapp.po4aoTrainer.po4ao_runtime import (
     CPU_LINEAR_ARTIFACT_MAGIC,
     cached_replay_snapshot,
     configure_compute_resources,
     LINEAR_POLICY_MAGIC,
     LINEAR_POLICY_VERSION,
-    _engine_id,
     _parse_cpu_list,
     _trtexec_command,
     _write_linear_policy,
@@ -367,7 +368,7 @@ class LinearPolicySidecarTest(unittest.TestCase):
             )
             with open(engine_path, "rb") as artifact:
                 self.assertEqual(artifact.read(8), CPU_LINEAR_ARTIFACT_MAGIC)
-            self.assertEqual(model_id, _engine_id(engine_path))
+            self.assertEqual(model_id, engine_id(engine_path))
             self.assertTrue(os.path.isfile(engine_path + ".linear"))
 
 

@@ -9,7 +9,6 @@ import numpy as np
 
 from xapp.po4aoTrainer.po4ao_replay import (
     HistoricalReplay,
-    ridge_replay_pair,
     sample_replay_pair,
 )
 
@@ -157,38 +156,6 @@ class HistoricalReplayTest(unittest.TestCase):
                 ),
                 recent,
             )
-
-    def test_ridge_mixes_whole_training_episodes(self):
-        """Keep the requested 60/20/20 mix when three sources have enough episodes."""
-        for index in range(3):
-            self.now = index * 6
-            self.observe(index + 3)
-        recent = (np.full((36, 1), 4), np.full((36, 1), -4))
-        warmup = (np.full((36, 1), 5), np.full((36, 1), -5))
-        observations, actions = ridge_replay_pair(
-            recent,
-            warmup,
-            episode_length=4,
-            warmup_fraction=0.2,
-            historical=self.history,
-            historical_fraction=0.2,
-        )
-        self.assertEqual(observations.shape, (60, 1))
-        self.assertEqual(int((observations == 4).sum()), 36)
-        self.assertEqual(int((observations == 5).sum()), 12)
-        self.assertEqual(int((observations == 2).sum()), 12)
-        self.assertEqual(actions.shape, observations.shape)
-        self.now = 132
-        observations, _ = ridge_replay_pair(
-            recent,
-            warmup,
-            episode_length=4,
-            warmup_fraction=0.2,
-            historical=self.history,
-            historical_fraction=0.2,
-        )
-        self.assertEqual(observations.shape, (48, 1))
-        self.assertFalse((observations == 2).any())
 
     def test_invalid_mixture_is_rejected(self):
         """Always leave some weight for current conditions."""

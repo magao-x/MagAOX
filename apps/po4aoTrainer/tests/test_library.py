@@ -16,9 +16,8 @@ import torch
 
 from test_supervisor import config, FakeRuntime, finish
 from test_training import inputs, make_session
-from xapp.po4aoTrainer.artifacts import engine_id
 from xapp.po4aoTrainer.configuration import load_training, revision, apply_hot
-from xapp.po4aoTrainer.library import PolicyLibrary
+from xapp.po4aoTrainer.library import PolicyLibrary, engine_id
 from xapp.po4aoTrainer.po4ao_runtime import save_training_snapshot
 from xapp.po4aoTrainer.supervisor import Supervisor
 from xapp.po4aoTrainer.training import TrainingSession
@@ -563,3 +562,14 @@ def test_catalog_skips_incomplete_manifests(tmp_path):
         json.dumps(dict(format_version=1, id="incomplete"))
     )
     assert library.catalog() == {}
+
+
+@pytest.mark.parametrize(
+    "payload, expected",
+    [(b"", "cbf29ce484222325"), (b"hello", "a430d84680aabd0b")],
+)
+def test_engine_id_keeps_fnv1a_identity(tmp_path, payload, expected):
+    """Keep fixed FNV-1a vectors independent of the shared writer/reader helper."""
+    path = tmp_path / "policy.trt"
+    path.write_bytes(payload)
+    assert engine_id(path) == expected

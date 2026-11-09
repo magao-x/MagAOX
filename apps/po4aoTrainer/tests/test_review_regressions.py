@@ -20,7 +20,7 @@ from test_supervisor import config, finish
 from xapp.po4aoTrainer.switching import Runtime
 from xapp.po4aoTrainer.supervisor import Supervisor
 from xapp.po4aoTrainer.configuration import load_training, revision
-from xapp.po4aoTrainer.artifacts import engine_id, verify_candidate
+from xapp.po4aoTrainer.library import engine_id, verify_candidate
 from xapp.po4aoTrainer.process import atomic_json
 from xapp.po4aoTrainer.training import TrainingSession
 from xapp.po4aoTrainer.po4ao_runtime import ReplaySnapshot, save_training_snapshot
@@ -478,7 +478,7 @@ def test_silent_device_expires_but_unchanged_fresh_definitions_renew_it(monkeypa
     rig = Rig()
     clock = [time.monotonic()]
     monkeypatch.setattr(
-        "xapp.po4aoTrainer.observations.time.monotonic", lambda: clock[0]
+        "xapp.po4aoTrainer.switching.time.monotonic", lambda: clock[0]
     )
     clock[0] += 6
     with pytest.raises(ConnectionError):
@@ -496,7 +496,7 @@ def test_runtime_heartbeat_detects_stalled_applogic_despite_fresh_definitions(
     rig = Rig()
     clock = [time.monotonic()]
     monkeypatch.setattr(
-        "xapp.po4aoTrainer.observations.time.monotonic", lambda: clock[0]
+        "xapp.po4aoTrainer.switching.time.monotonic", lambda: clock[0]
     )
     clock[0] += 6
     rig.runtime.observations.refresh()

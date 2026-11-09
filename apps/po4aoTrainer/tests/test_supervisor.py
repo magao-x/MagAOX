@@ -5,6 +5,8 @@
 
 import json
 import logging
+import subprocess
+import sys
 import threading
 import time
 from copy import deepcopy
@@ -24,7 +26,7 @@ from xapp.po4aoTrainer.configuration import (
 )
 from xapp.po4aoTrainer.supervisor import Supervisor
 from xapp.po4aoTrainer.switching import Runtime
-from xapp.po4aoTrainer.artifacts import engine_id, verify_candidate
+from xapp.po4aoTrainer.library import engine_id, verify_candidate
 from xapp.po4aoTrainer.app import po4aoTrainer, TrainerConfig
 
 
@@ -568,3 +570,30 @@ def test_live_parameter_and_catalog_indi_contract(config):
     finally:
         app.teardown()
         app._telem_file = SimpleNamespace(close=lambda: None)
+
+
+def test_supervisor_and_notebook_import_boundaries():
+    """Check fresh-process imports without inheriting this test runner's torch imports."""
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            """
+import sys
+from xapp.po4aoTrainer.app import main
+from xapp.po4aoTrainer import supervisor, worker
+assert "torch" not in sys.modules
+assert "matplotlib" not in sys.modules
+assert "ImageStreamIOWrap" not in sys.modules
+from xapp.po4aoTrainer.training import TrainingSession
+from xapp.po4aoTrainer.po4ao_runtime import ReplaySnapshot, publish_tensorrt_engine
+from xapp.po4aoTrainer.observer import save_diagnostics, load_diagnostics
+from xapp.po4aoTrainer import po4ao_diagnostics
+import torch
+assert not torch.cuda.is_initialized()
+assert "ImageStreamIOWrap" not in sys.modules
+""",
+        ],
+        check=True,
+        timeout=30,
+    )

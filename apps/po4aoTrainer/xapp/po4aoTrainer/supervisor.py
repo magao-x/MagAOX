@@ -20,7 +20,7 @@ from .configuration import (
     revision,
     validate_training,
 )
-from .library import FILES, PolicyLibrary
+from .library import FILES, PolicyLibrary, verify_candidate
 from .process import Worker, atomic_json
 
 
@@ -303,14 +303,11 @@ class Supervisor:
                 raise RuntimeError(domain + " operation is already in progress")
             if busy and supersede:
                 operation["cancel"].set()
-                self.events.extend(
-                    []
-                    if operation["command"] == "publish"
-                    else [(operation["command"], "Alert", "Superseded by " + command)]
-                )
+                if operation["command"] != "publish":
+                    self.events.append(
+                        (operation["command"], "Alert", "Superseded by " + command)
+                    )
             if command == "reset":
-                if operation["command"] == "reset":
-                    raise RuntimeError("Reset is already in progress")
                 operation["cancel"].set()
                 self.record = dict(
                     generation=uuid.uuid4().hex,
@@ -327,10 +324,12 @@ class Supervisor:
                 self.foreign_model = ""
                 self.status["learning"] = "resetting"
                 atomic_json(self.record_path, self.record)
-                self.status["retained_policy"] = ""
-                self.status["selected_policy"] = ""
-                self.status["warmup_required"] = "no"
-                self.status["initialization_required"] = "no"
+                self.status.update(
+                    retained_policy="",
+                    selected_policy="",
+                    warmup_required="no",
+                    initialization_required="no",
+                )
             cancel = threading.Event()
             operation.update(cancel=cancel, command=command, values=dict(values))
             self.status[domain + "_phase"] = {
@@ -598,8 +597,6 @@ class Supervisor:
 
     def publish(self, directory, generation, cancel, issued=None):
         """Commit a verified bundle; retain unresolved loads separately from eligible policies."""
-        from .artifacts import verify_candidate
-
         candidate, model_id = verify_candidate(directory, self.root, generation)
         with self.lock:
             if (

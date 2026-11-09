@@ -12,6 +12,8 @@ import time
 
 import numpy as np
 
+from .library import engine_id
+
 LINEAR_POLICY_MAGIC = b"PO4AOLIN"
 LINEAR_POLICY_VERSION = 1
 CPU_LINEAR_ARTIFACT_MAGIC = b"PO4AOCPU"
@@ -207,17 +209,6 @@ def configure_compute_resources(inference_device, training_device, build_device)
         "system_cpus": sorted(assigned_cpus) if assigned_cpus is not None else None,
         "torch_cpu_threads": torch.get_num_threads(),
     }
-
-
-def _engine_id(path):
-    """Return the same 64-bit FNV-1a model ID used by the C++ app."""
-    value = 14695981039346656037
-    with open(path, "rb") as engine:
-        for chunk in iter(lambda: engine.read(1024 * 1024), b""):
-            for byte in chunk:
-                value ^= byte
-                value = (value * 1099511628211) & 0xFFFFFFFFFFFFFFFF
-    return f"{value:016x}"
 
 
 def cached_replay_snapshot(image, metadata_image, previous=None, *, attempts=5):
@@ -440,7 +431,7 @@ def publish_tensorrt_engine(
                     "linear_local policy does not expose the expected output weights"
                 ) from error
             _write_cpu_linear_artifact(candidate_path, weights)
-            model_id = _engine_id(candidate_path)
+            model_id = engine_id(candidate_path)
             _write_linear_policy(linear_candidate, weights, model_id)
             os.replace(linear_candidate, linear_path)
         else:
@@ -458,7 +449,7 @@ def publish_tensorrt_engine(
                 raise RuntimeError(
                     "TensorRT reported success without creating an engine"
                 )
-            model_id = _engine_id(candidate_path)
+            model_id = engine_id(candidate_path)
             linear_path.unlink(missing_ok=True)
         os.replace(candidate_path, engine_path)
         model_metadata.update(

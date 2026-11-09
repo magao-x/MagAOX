@@ -4,7 +4,10 @@
 
 import torch
 from torch import nn
-from xapp.po4aoTrainer.po4ao_models import ModalLocallyConnected, ModalNormalizer
+from xapp.po4aoTrainer.po4ao_nonlinear_models import (
+    ModalLocallyConnected,
+    ModalNormalizer,
+)
 
 
 class ConvDynamics(nn.Module):
