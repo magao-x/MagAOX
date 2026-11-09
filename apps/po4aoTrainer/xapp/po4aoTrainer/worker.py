@@ -201,6 +201,7 @@ def run(directory):
         from .configuration import apply_hot, revision
         from .po4ao_runtime import configure_compute_resources, cached_replay_snapshot
         from .observer import save_diagnostics
+        from .po4ao_diagnostics import append_metrics
 
         config = launch["config"]
         c = config["compute"]
@@ -281,8 +282,7 @@ def run(directory):
                 continue
             record["source_revision"] = launch.get("source_revision", "unrecorded")
             record["replay_seconds"] = replay_seconds
-            with (directory / "metrics.jsonl").open("a") as metrics:
-                metrics.write(json.dumps(record, allow_nan=False) + "\n")
+            append_metrics(directory / "metrics.jsonl", record)
             if record["publication_status"] != "ready":
                 save_diagnostics(session, directory / "diagnostics")
                 continue
@@ -321,8 +321,7 @@ def run(directory):
                     time.sleep(0.1)
                 if build is None:
                     record["publication_status"] = "export cancelled"
-                    with (directory / "metrics.jsonl").open("a") as metrics:
-                        metrics.write(json.dumps(record, allow_nan=False) + "\n")
+                    append_metrics(directory / "metrics.jsonl", record)
                     save_diagnostics(session, directory / "diagnostics")
                     continue
                 code = build.wait()
@@ -345,8 +344,7 @@ def run(directory):
             model_id = control.pop("candidate_id", "")
             if model_id:
                 session.stage_publication(model_id)
-                with (directory / "metrics.jsonl").open("a") as metrics:
-                    metrics.write(json.dumps(record, allow_nan=False) + "\n")
+                append_metrics(directory / "metrics.jsonl", record)
                 while control.get("candidate_outcome_path") != str(candidate):
                     pump()
                     state("paused" if not control["run"] else "waiting")
@@ -364,8 +362,7 @@ def run(directory):
                 record["publication_outcome"] = "rejected"
             record["activation_seconds"] = time.monotonic() - activation_start
             # JSONL is append-only: later records for the same session/iteration replace the earlier status.
-            with (directory / "metrics.jsonl").open("a") as metrics:
-                metrics.write(json.dumps(record, allow_nan=False) + "\n")
+            append_metrics(directory / "metrics.jsonl", record)
             save_diagnostics(session, directory / "diagnostics")
             control.pop("candidate_path", None)
     except Exception as error:

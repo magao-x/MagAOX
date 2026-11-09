@@ -1,4 +1,4 @@
-/** \file po4ao_unit_test.cpp
+/** \file po4ao_monitor_test.cpp
  * \brief Exercise the real monitor loop and POSIX semaphores with an ImageStreamIO mapping double.
  * \ingroup po4ao_unit_test
  *
@@ -172,8 +172,6 @@ inline sem_t                *semaphores[10]{};
 inline pid_t                 readers[10]{};
 inline float                 pixels[4]{};
 inline std::string           path;
-inline std::function<void()> afterOpen;
-inline bool                  noReader = false;
 } // namespace boundary
 inline int ImageStreamIO_filename( char *out, size_t count, const char * )
 {
@@ -187,10 +185,6 @@ inline int ImageStreamIO_openIm( IMAGE *image, const char * )
     image->semReadPID = boundary::readers;
     image->array.raw  = boundary::pixels;
     ++boundary::opens;
-    if( boundary::afterOpen )
-    {
-        boundary::afterOpen();
-    }
     return 0;
 }
 inline int ImageStreamIO_closeIm( IMAGE *image )
@@ -201,10 +195,6 @@ inline int ImageStreamIO_closeIm( IMAGE *image )
 }
 inline int ImageStreamIO_getsemwaitindex( IMAGE *, int slot )
 {
-    if( boundary::noReader )
-    {
-        return -1;
-    }
     boundary::readers[slot] = getpid();
     return slot;
 }
@@ -265,12 +255,11 @@ namespace libXWCTest::po4aoTest
 class Monitor : public MagAOX::app::dev::shmimMonitor<Monitor>
 {
   public:
-    std::atomic<bool>    m_shutdown{ false };                             ///< Signal the production monitor to exit.
-    std::atomic<int>     m_state{ 0 }, m_frames{ 0 }, m_allocations{ 0 }; ///< FSM and observed callback counts.
-    std::function<int()> m_allocate;           ///< Optional allocation failure/cancellation injection.
-    std::thread          m_thread, m_producer; ///< Owned monitor and synthetic producer threads.
-    std::atomic<bool>    m_producing{ true };  ///< Producer exit request.
-    std::string          m_semName;            ///< Unique process-local named semaphore.
+    std::atomic<bool> m_shutdown{ false };                             ///< Signal the production monitor to exit.
+    std::atomic<int>  m_state{ 0 }, m_frames{ 0 }, m_allocations{ 0 }; ///< FSM and observed callback counts.
+    std::thread       m_thread, m_producer; ///< Owned monitor and synthetic producer threads.
+    std::atomic<bool> m_producing{ true };  ///< Producer exit request.
+    std::string       m_semName;            ///< Unique process-local named semaphore.
     /// Set up an isolated producer with a unique named POSIX semaphore.
     Monitor();
     /// Stop both threads before destroying the test mapping/semaphore.
@@ -290,11 +279,11 @@ class Monitor : public MagAOX::app::dev::shmimMonitor<Monitor>
     {
         return m_shutdown.load();
     }
-    /// Observe allocation and optionally inject cancellation/failure.
+    /// Count monitor allocation callbacks.
     int allocate( const MagAOX::app::dev::shmimT & /**< [in] Primary monitor tag. */ )
     {
         ++m_allocations;
-        return m_allocate ? m_allocate() : 0;
+        return 0;
     }
     /// Count admitted frames.
     int processImage( void * /**< [in] Synthetic frame. */, const MagAOX::app::dev::shmimT & /**< [in] Monitor tag. */ )
@@ -321,8 +310,6 @@ class Monitor : public MagAOX::app::dev::shmimMonitor<Monitor>
 Monitor::Monitor()
 {
     boundary::waits = boundary::opens = boundary::closes = 0;
-    boundary::afterOpen                                  = {};
-    boundary::noReader                                   = false;
     std::fill( std::begin( boundary::readers ), std::end( boundary::readers ), 0 );
     m_semName = "/smtest-" + std::to_string( getpid() );
     sem_unlink( m_semName.c_str() );
