@@ -19,6 +19,23 @@ No personal source checkout is a production dependency. See the
 [execution record](../../agents/plans/2026-11/nn-po4ao-implementation.md) for provenance
 and the checks actually performed.
 
+## Implementation layout
+
+`library.py` owns bundle validation, engine identity and saved-pair storage;
+`switching.py` owns fresh INDI observations and completion-aware runtime requests.
+The nonlinear model primitives live with their models in `po4ao_nonlinear_models.py`.
+`supervisor.py` remains free of torch/model imports; numerical work and engine builds
+stay in the owned worker and its export child. The unused inherited ridge replay
+mixer is omitted; nonlinear replay sampling and the diagnostics/plotting API remain.
+The documented `TrainingSession`, runtime snapshot/export and observer APIs, including
+the development/watch notebook imports below, are unchanged.
+
+Persistent training state means the live worker's in-memory models, Adam state,
+normalization and references. Saved pairs initialize a fresh session; recovery JSON
+tracks eligibility and pending operations. Neither provides optimizer checkpointing
+or automatic training restoration after a supervisor restart. Bundle manifests,
+NPZ state keys, tensor-only export weights and engine-ID semantics are unchanged.
+
 ## Controls and ownership
 
 The coordinated behaviors below describe the optional managed trainer. In notebook
@@ -221,12 +238,16 @@ local subprocesses. They cover numerical parity, persistent optimization, config
 boundaries, worker/export cancellation, reset eligibility, request acknowledgements
 and native/managed PO4AO operation ordering. Native NN handover tests live in
 `apps/nnReconstructor/tests`. The notebook example's cells are executable locally.
+The module cleanup also loaded saved bundles, NPZ snapshots, export state dictionaries
+and recovery JSON written by the pre-cleanup implementation, and checked the built
+wheel's entry point/API imports and both notebooks with synthetic CPU data.
 GPU execution and live instrument behavior are separate acceptance checks.
 
 `source_manifest.json` records the original numerical helpers from `PO4AO_2026` revision
 `b9076dd7aaf00ff7cd4f7f644e8f40dc1ff10a4f`. Previously authorized read-only inspection
-matched all six helper hashes and confirmed unchanged numerical expressions in the
-instrument notebook; details and notebook hash are in the execution record.
+matched the six helper hashes; the cleanup rechecked all seven manifest entries,
+including the pinned notebook. These identify original source provenance, not hashes
+to enforce on refactored application modules.
 `tests/fixtures/notebook_iteration.npz` retains source hash, seeds and library versions
 in its adjacent JSON. The CPU comparison uses `rtol=1e-5`, `atol=1e-7`; pause/resume
 also compares exact CPU outputs, and direct/recorded plots compare rendered pixels.
