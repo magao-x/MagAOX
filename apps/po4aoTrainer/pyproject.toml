@@ -24,4 +24,4 @@ include = ["xapp*"]
 testpaths = ["tests"]
 
 [tool.setuptools.data-files]
-"share/po4aoTrainer" = ["configs/po4aoTrainer.conf", "configs/po4ao_training.conf", "source_manifest.json"]
+"share/po4aoTrainer" = ["configs/po4aoTrainer.conf", "configs/po4ao_training.conf"]

@@ -1,8 +1,8 @@
-/** \file learningCtrl.hpp
+/** \file po4ao.hpp
  * \brief PO4AO inference and optional managed training through the shared INDI publisher.
  */
-#ifndef learningCtrl_hpp
-#define learningCtrl_hpp
+#ifndef po4ao_hpp
+#define po4ao_hpp
 
 #include <cmath>
 #include <map>
@@ -14,7 +14,7 @@
 #include <QSignalBlocker>
 #include <QTimer>
 
-#include "ui_learningCtrl.h"
+#include "ui_po4ao.h"
 #include "../xWidgets/xWidget.hpp"
 
 namespace xqt
@@ -26,7 +26,7 @@ namespace xqt
  * controls remain available and Python training stays entirely with the notebook.
  * No loop state or training state gates reconstruction controls.
  */
-class learningCtrl : public xWidget
+class po4ao : public xWidget
 {
     Q_OBJECT
 
@@ -81,7 +81,7 @@ class learningCtrl : public xWidget
 
   public:
     /// Construct one panel for C++ inference and an optional companion.
-    explicit learningCtrl( const std::string &device,                  /**< [in] Companion device name. */
+    explicit po4ao( const std::string &device,                  /**< [in] Companion device name. */
                            QWidget           *parent        = nullptr, /**< [in] Optional Qt parent. */
                            const std::string &runtimeDevice = "po4ao", /**< [in] C++ PO4AO device. */
                            const std::string &nnDevice      = "nnReconstructor" /**< [in] Independent NN device. */ );
@@ -143,7 +143,7 @@ class learningCtrl : public xWidget
     void acknowledgementTimeout();
 
   private:
-    Ui::learningCtrl m_ui; ///< Qt Designer layout, using standard MagAO-X controls.
+    Ui::po4ao m_ui; ///< Qt Designer layout, using standard MagAO-X controls.
 
     /// Determine whether the optional trainer is live and controls this C++ device.
     bool trainerReady() const;
@@ -212,7 +212,7 @@ class learningCtrl : public xWidget
                        const std::string &device = "" /**< [in] Destination; empty selects trainer. */ );
 };
 
-inline learningCtrl::learningCtrl( const std::string &device,
+inline po4ao::po4ao( const std::string &device,
                                    QWidget           *parent,
                                    const std::string &runtimeDevice,
                                    const std::string &nnDevice )
@@ -224,11 +224,11 @@ inline learningCtrl::learningCtrl( const std::string &device,
     for( auto *label : { m_ui.labelCommandRegularization, m_ui.labelDeltaRegularization, m_ui.labelLearningRate } )
         label->setMinimumHeight( 2 * label->fontMetrics().height() );
     m_statusTimer.setInterval( 500 );
-    connect( &m_statusTimer, &QTimer::timeout, this, &learningCtrl::updateGUI );
+    connect( &m_statusTimer, &QTimer::timeout, this, &po4ao::updateGUI );
     m_statusTimer.start();
     m_ackTimer.setSingleShot( true );
     m_ackTimer.setInterval( 10000 );
-    connect( &m_ackTimer, &QTimer::timeout, this, &learningCtrl::acknowledgementTimeout );
+    connect( &m_ackTimer, &QTimer::timeout, this, &po4ao::acknowledgementTimeout );
     connect(
         m_ui.comboEngine, QOverload<int>::of( &QComboBox::currentIndexChanged ), this, [this]( int ) { updateGUI(); } );
     connect( m_ui.comboPolicy,
@@ -251,7 +251,7 @@ inline learningCtrl::learningCtrl( const std::string &device,
     updateGUI();
 }
 
-inline void learningCtrl::subscribe()
+inline void po4ao::subscribe()
 {
     if( m_parent == nullptr )
         return;
@@ -292,13 +292,13 @@ inline void learningCtrl::subscribe()
             m_parent->addSubscriberProperty( this, m_nnDevice, name );
 }
 
-inline void learningCtrl::onConnect()
+inline void po4ao::onConnect()
 {
     m_connected = true;
     updateGUI();
 }
 
-inline void learningCtrl::onDisconnect()
+inline void po4ao::onDisconnect()
 {
     m_connected = false;
     m_policySelection.clear();
@@ -324,7 +324,7 @@ inline void learningCtrl::onDisconnect()
 }
 
 inline std::string
-learningCtrl::value( const std::string &device, const std::string &name, const std::string &element ) const
+po4ao::value( const std::string &device, const std::string &name, const std::string &element ) const
 {
     const auto found = m_properties.find( device + "." + name );
     if( found == m_properties.end() || !found->second.find( element ) )
@@ -332,7 +332,7 @@ learningCtrl::value( const std::string &device, const std::string &name, const s
     return found->second[element].get();
 }
 
-inline QString learningCtrl::stateLabel( const std::string &state )
+inline QString po4ao::stateLabel( const std::string &state )
 {
     if( state.empty() )
         return "Unknown";
@@ -349,12 +349,12 @@ inline QString learningCtrl::stateLabel( const std::string &state )
     return label;
 }
 
-inline std::string learningCtrl::status( const std::string &element ) const
+inline std::string po4ao::status( const std::string &element ) const
 {
     return value( m_device, "status", element );
 }
 
-inline bool learningCtrl::commandAvailable( const std::string                  &name,
+inline bool po4ao::commandAvailable( const std::string                  &name,
                                             pcf::IndiProperty::Type             type,
                                             std::initializer_list<const char *> elements,
                                             const std::string                  &device,
@@ -372,7 +372,7 @@ inline bool learningCtrl::commandAvailable( const std::string                  &
     return true;
 }
 
-inline bool learningCtrl::busy( std::initializer_list<const char *> names, const std::string &device ) const
+inline bool po4ao::busy( std::initializer_list<const char *> names, const std::string &device ) const
 {
     for( const auto *name : names )
     {
@@ -385,19 +385,19 @@ inline bool learningCtrl::busy( std::initializer_list<const char *> names, const
     return false;
 }
 
-inline std::string learningCtrl::nnStatus( const std::string &element ) const
+inline std::string po4ao::nnStatus( const std::string &element ) const
 {
     return value( m_nnDevice, "reconstruction_status", element );
 }
 
-inline bool learningCtrl::nnReady() const
+inline bool po4ao::nnReady() const
 {
     const auto fsm = value( m_nnDevice, "fsm", "state" );
     return m_connected && m_nnAge.isValid() && m_nnAge.elapsed() < 5000 && !m_nnInstance.empty() &&
            m_defined.count( m_nnDevice + ".reconstruction_status" ) && ( fsm == "READY" || fsm == "OPERATING" );
 }
 
-inline void learningCtrl::syncModels()
+inline void po4ao::syncModels()
 {
     QSignalBlocker blocker( m_ui.comboEngine );
     const auto     selected = m_ui.comboEngine->currentData().toString();
@@ -418,7 +418,7 @@ inline void learningCtrl::syncModels()
     m_ui.comboEngine->setCurrentIndex( previous ); // A redefinition never silently selects a different engine.
 }
 
-inline void learningCtrl::syncPolicies()
+inline void po4ao::syncPolicies()
 {
     QSignalBlocker blocker( m_ui.comboPolicy );
     const auto     selected = m_policySelection;
@@ -437,7 +437,7 @@ inline void learningCtrl::syncPolicies()
     m_ui.comboPolicy->setCurrentIndex( m_ui.comboPolicy->findData( selected ) );
 }
 
-inline void learningCtrl::updateTrainingControls( bool ready )
+inline void po4ao::updateTrainingControls( bool ready )
 {
     const auto phase    = status( "training_phase" );
     const auto runPhase = value( m_runtimeDevice, "run_status", "phase" );
@@ -485,7 +485,7 @@ inline void learningCtrl::updateTrainingControls( bool ready )
     }
 }
 
-inline void learningCtrl::submitParameter( const std::string &name, statusLineEdit *entry )
+inline void po4ao::submitParameter( const std::string &name, statusLineEdit *entry )
 {
     if( !entry->isEnabled() || !trainerReady() )
         return;
@@ -503,7 +503,7 @@ inline void learningCtrl::submitParameter( const std::string &name, statusLineEd
     submit( property );
 }
 
-inline void learningCtrl::on_buttonSetPolicy_clicked()
+inline void po4ao::on_buttonSetPolicy_clicked()
 {
     if( !m_ui.buttonSetPolicy->isEnabled() )
         return;
@@ -512,7 +512,7 @@ inline void learningCtrl::on_buttonSetPolicy_clicked()
     submit( property );
 }
 
-inline void learningCtrl::on_buttonSavePolicy_clicked()
+inline void po4ao::on_buttonSavePolicy_clicked()
 {
     if( !m_ui.buttonSavePolicy->isEnabled() )
         return;
@@ -526,7 +526,7 @@ inline void learningCtrl::on_buttonSavePolicy_clicked()
     submit( property );
 }
 
-inline void learningCtrl::acknowledge( const pcf::IndiProperty &property )
+inline void po4ao::acknowledge( const pcf::IndiProperty &property )
 {
     const auto resetKey = m_runtimeDevice + ".reset_model";
     if( m_nativeResetPending && property.getDevice() == m_runtimeDevice )
@@ -579,7 +579,7 @@ inline void learningCtrl::acknowledge( const pcf::IndiProperty &property )
         m_ackTimer.stop();
 }
 
-inline void learningCtrl::updateRoute( bool managed )
+inline void po4ao::updateRoute( bool managed )
 {
     if( managed != m_managed )
     {
@@ -616,7 +616,7 @@ inline void learningCtrl::updateRoute( bool managed )
     }
 }
 
-inline bool learningCtrl::trainerReady() const
+inline bool po4ao::trainerReady() const
 {
     const auto fsm = value( m_device, "fsm", "state" );
     return m_connected && m_heartbeatAge.isValid() && m_heartbeatAge.elapsed() < 5000 &&
@@ -624,7 +624,7 @@ inline bool learningCtrl::trainerReady() const
            value( m_device, "devices", "po4ao" ) == m_runtimeDevice;
 }
 
-inline void learningCtrl::observeHeartbeat( const pcf::IndiProperty &property )
+inline void po4ao::observeHeartbeat( const pcf::IndiProperty &property )
 {
     if( property.getDevice() == m_nnDevice && property.getName() == "reconstruction_status" )
     {
@@ -680,7 +680,7 @@ inline void learningCtrl::observeHeartbeat( const pcf::IndiProperty &property )
     m_haveHeartbeat = true;
 }
 
-inline void learningCtrl::handleDefProperty( const pcf::IndiProperty &property )
+inline void po4ao::handleDefProperty( const pcf::IndiProperty &property )
 {
     if( property.getDevice() != m_device && property.getDevice() != m_nnDevice &&
         property.getDevice() != m_runtimeDevice )
@@ -695,7 +695,7 @@ inline void learningCtrl::handleDefProperty( const pcf::IndiProperty &property )
     updateGUI();
 }
 
-inline void learningCtrl::handleSetProperty( const pcf::IndiProperty &property )
+inline void po4ao::handleSetProperty( const pcf::IndiProperty &property )
 {
     if( property.getDevice() != m_device && property.getDevice() != m_nnDevice &&
         property.getDevice() != m_runtimeDevice )
@@ -723,7 +723,7 @@ inline void learningCtrl::handleSetProperty( const pcf::IndiProperty &property )
     updateGUI();
 }
 
-inline void learningCtrl::handleDelProperty( const pcf::IndiProperty &property )
+inline void po4ao::handleDelProperty( const pcf::IndiProperty &property )
 {
     if( property.getDevice() != m_device && property.getDevice() != m_nnDevice &&
         property.getDevice() != m_runtimeDevice )
@@ -779,7 +779,7 @@ inline void learningCtrl::handleDelProperty( const pcf::IndiProperty &property )
     updateGUI();
 }
 
-inline void learningCtrl::updateGUI()
+inline void po4ao::updateGUI()
 {
     const bool fresh = m_heartbeatAge.isValid() && m_heartbeatAge.elapsed() < 5000;
     const bool ready = trainerReady();
@@ -913,7 +913,7 @@ inline void learningCtrl::updateGUI()
     m_ui.labelStatus->setToolTip( QString::fromStdString( message ) );
 }
 
-inline void learningCtrl::updateRuntimeGUI()
+inline void po4ao::updateRuntimeGUI()
 {
     const auto fsm      = value( m_runtimeDevice, "fsm", "state" );
     const bool fresh    = m_runtimeAge.isValid() && m_runtimeAge.elapsed() < 5000;
@@ -978,7 +978,7 @@ inline void learningCtrl::updateRuntimeGUI()
     m_ui.labelStatus->setToolTip( m_ui.labelStatus->text() );
 }
 
-inline void learningCtrl::submit( const pcf::IndiProperty &property )
+inline void po4ao::submit( const pcf::IndiProperty &property )
 {
     m_pending[property.createUniqueKey()] = false;
     m_message                             = "Awaiting acknowledgement";
@@ -989,14 +989,14 @@ inline void learningCtrl::submit( const pcf::IndiProperty &property )
 }
 
 inline void
-learningCtrl::submitSwitch( const std::string &name, const std::string &element, bool on, const std::string &device )
+po4ao::submitSwitch( const std::string &name, const std::string &element, bool on, const std::string &device )
 {
     pcf::IndiProperty property( pcf::IndiProperty::Switch, device.empty() ? m_device : device, name );
     property.add( pcf::IndiElement( element, on ? pcf::IndiElement::On : pcf::IndiElement::Off ) );
     submit( property );
 }
 
-inline void learningCtrl::on_buttonEnableNN_clicked()
+inline void po4ao::on_buttonEnableNN_clicked()
 {
     updateGUI();
     if( !m_ui.buttonEnableNN->isEnabled() )
@@ -1006,7 +1006,7 @@ inline void learningCtrl::on_buttonEnableNN_clicked()
     submit( property );
 }
 
-inline void learningCtrl::on_buttonReconstructor_clicked()
+inline void po4ao::on_buttonReconstructor_clicked()
 {
     updateGUI();
     if( !m_ui.buttonReconstructor->isEnabled() )
@@ -1017,13 +1017,13 @@ inline void learningCtrl::on_buttonReconstructor_clicked()
     submit( property );
 }
 
-inline void learningCtrl::on_checkModulation_clicked( bool checked )
+inline void po4ao::on_checkModulation_clicked( bool checked )
 {
     if( m_ui.checkModulation->isEnabled() )
         submitSwitch( "link_modulation", "toggle", checked, m_nnDevice );
 }
 
-inline void learningCtrl::on_buttonPO4AO_clicked()
+inline void po4ao::on_buttonPO4AO_clicked()
 {
     updateGUI();
     if( !m_ui.buttonPO4AO->isEnabled() )
@@ -1038,7 +1038,7 @@ inline void learningCtrl::on_buttonPO4AO_clicked()
                       m_runtimeDevice );
 }
 
-inline void learningCtrl::on_buttonRunPO4AO_clicked()
+inline void po4ao::on_buttonRunPO4AO_clicked()
 {
     updateGUI();
     if( !m_ui.buttonRunPO4AO->isEnabled() )
@@ -1048,7 +1048,7 @@ inline void learningCtrl::on_buttonRunPO4AO_clicked()
     submitSwitch( "run_enable", "toggle", !running, m_runtimeDevice );
 }
 
-inline void learningCtrl::on_buttonReset_clicked()
+inline void po4ao::on_buttonReset_clicked()
 {
     updateGUI();
     if( !m_ui.buttonReset->isEnabled() )
@@ -1069,7 +1069,7 @@ inline void learningCtrl::on_buttonReset_clicked()
     }
 }
 
-inline void learningCtrl::on_buttonWarmup_clicked()
+inline void po4ao::on_buttonWarmup_clicked()
 {
     updateGUI();
     if( !m_ui.buttonWarmup->isEnabled() )
@@ -1080,7 +1080,7 @@ inline void learningCtrl::on_buttonWarmup_clicked()
         submitSwitch( "recollect_warmup", "toggle", true, m_runtimeDevice );
 }
 
-inline void learningCtrl::on_buttonLearning_clicked()
+inline void po4ao::on_buttonLearning_clicked()
 {
     updateGUI();
     if( !m_ui.buttonLearning->isEnabled() )
@@ -1092,12 +1092,12 @@ inline void learningCtrl::on_buttonLearning_clicked()
     submit( property );
 }
 
-inline void learningCtrl::acknowledgementTimeout()
+inline void po4ao::acknowledgementTimeout()
 {
     m_message = "No acknowledgement; operation state is unknown. Check device status.";
     updateGUI(); // Keep the request latched. A timeout is not permission to resend it.
 }
 
 } // namespace xqt
-#include "moc_learningCtrl.cpp"
+#include "moc_po4ao.cpp"
 #endif

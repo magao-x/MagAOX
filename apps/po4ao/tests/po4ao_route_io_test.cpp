@@ -3,7 +3,7 @@
  * \ingroup po4ao_unit_test
  */
 #include "../../../tests/testXWC.hpp"
-#include "../po4aoRouteIO.hpp"
+#include "../po4aoRouting.hpp"
 #include "po4aoRouteTestAbi.hpp"
 #include <filesystem>
 #include <cstring>

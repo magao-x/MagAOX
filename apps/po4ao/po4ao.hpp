@@ -30,8 +30,7 @@
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 #include "po4ao_utils.hpp"
-#include "po4aoStatistics.hpp"
-#include "po4aoRouteIO.hpp"
+#include "po4aoRouting.hpp"
 
 /** \defgroup po4ao PO4AO
  * \brief Real-time modal policy control with asynchronous model loading and replay publication.

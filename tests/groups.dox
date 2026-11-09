@@ -309,7 +309,7 @@ report from their counters and then returns nonzero. An HTML report therefore do
  * \ingroup application_unit_test
  */
 
-/** \defgroup learningCtrlGUI_unit_test Learning Control GUI Unit Tests
+/** \defgroup po4aoGUI_unit_test PO4AO GUI Unit Tests
  * \brief Offline state, request, reconnect and layout tests for the shared NN/PO4AO panel.
  * \ingroup application_unit_test
  */

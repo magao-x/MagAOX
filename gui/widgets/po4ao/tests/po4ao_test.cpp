@@ -1,6 +1,6 @@
-/** \file learningCtrl_test.cpp
+/** \file po4ao_test.cpp
  * \brief Offline shared-GUI commands, acknowledgements, lifecycle and layout tests.
- * \ingroup learningCtrlGUI_unit_test
+ * \ingroup po4aoGUI_unit_test
  */
 #define CATCH_CONFIG_RUNNER
 #include "../../../../tests/testXWC.hpp"
@@ -11,11 +11,11 @@
 #include <QThread>
 
 #include "../../../lib/tests/offlineIndiPublisher.hpp"
-#include "../learningCtrl.hpp"
+#include "../po4ao.hpp"
 
 namespace libXWCTest
 {
-namespace learningCtrlGUITest
+namespace po4aoGUITest
 {
 /// \cond TEST_HARNESS
 using Publisher = guiTest::OfflinePublisher;
@@ -40,7 +40,7 @@ struct Fixture
 {
     Publisher m_publisher; ///< Real dispatcher using a socket-free transport.
 
-    xqt::learningCtrl m_widget{ "trainer", nullptr, "po4ao", "nn_test" }; ///< Production widget under test.
+    xqt::po4ao m_widget{ "trainer", nullptr, "po4ao", "nn_test" }; ///< Production widget under test.
 
     /// Connect and define representative independent control domains.
     explicit Fixture( bool companion = true /**< [in] Define the optional trainer on startup. */ );
@@ -295,7 +295,7 @@ void Fixture::complete( const std::string &name )
 /// \endcond
 
 /** \brief Catalog selection stays local and Enable sends the catalog identifier exactly once. */
-TEST_CASE( "NN selection is staged until Enable", "[learningCtrl]" )
+TEST_CASE( "NN selection is staged until Enable", "[po4ao]" )
 {
     Fixture f;
     auto   *combo = f.control<QComboBox>( "comboEngine" );
@@ -323,13 +323,13 @@ TEST_CASE( "NN selection is staged until Enable", "[learningCtrl]" )
     REQUIRE( combo->currentData().toString() == "engine1" );
     // clang-format off
 #ifdef LEARNINGCTRL_TEST_DOXYGEN_REF
-    xqt::learningCtrl::on_buttonEnableNN_clicked;
+    xqt::po4ao::on_buttonEnableNN_clicked;
 #endif
     // clang-format on
 }
 
 /** \brief Reconstructor requests specify the confirmed source and target, never the staged engine. */
-TEST_CASE( "Reconstructor handover uses an explicit target", "[learningCtrl]" )
+TEST_CASE( "Reconstructor handover uses an explicit target", "[po4ao]" )
 {
     Fixture f;
     f.control<QComboBox>( "comboEngine" )->setCurrentIndex( 1 );
@@ -348,7 +348,7 @@ TEST_CASE( "Reconstructor handover uses an explicit target", "[learningCtrl]" )
 }
 
 /** \brief PO4AO and learning action labels follow readback rather than the request or retained ID. */
-TEST_CASE( "Learning and PO4AO labels follow acknowledgements", "[learningCtrl]" )
+TEST_CASE( "Learning and PO4AO labels follow acknowledgements", "[po4ao]" )
 {
     Fixture f;
     auto   *po = f.control<QPushButton>( "buttonPO4AO" );
@@ -374,7 +374,7 @@ TEST_CASE( "Learning and PO4AO labels follow acknowledgements", "[learningCtrl]"
 }
 
 /** \brief Each domain sends requests only to its own backend. */
-TEST_CASE( "Modulation and PO4AO requests use independent backends", "[learningCtrl]" )
+TEST_CASE( "Modulation and PO4AO requests use independent backends", "[po4ao]" )
 {
     Fixture f;
     f.m_widget.on_checkModulation_clicked( true );
@@ -390,7 +390,7 @@ TEST_CASE( "Modulation and PO4AO requests use independent backends", "[learningC
 }
 
 /** \brief Unknown/conflicting reconstructor evidence is not interpreted as CACAO active. */
-TEST_CASE( "Unknown controller state does not guess actions", "[learningCtrl]" )
+TEST_CASE( "Unknown controller state does not guess actions", "[po4ao]" )
 {
     Fixture f;
     for( const auto *source : { "unknown", "conflict", "transition" } )
@@ -406,7 +406,7 @@ TEST_CASE( "Unknown controller state does not guess actions", "[learningCtrl]" )
 }
 
 /** \brief Sparse updates preserve selection; deletion removes capabilities until valid redefinition. */
-TEST_CASE( "Catalog and device lifecycle preserve staged selection safely", "[learningCtrl]" )
+TEST_CASE( "Catalog and device lifecycle preserve staged selection safely", "[po4ao]" )
 {
     Fixture f;
     auto   *combo = f.control<QComboBox>( "comboEngine" );
@@ -430,7 +430,7 @@ TEST_CASE( "Catalog and device lifecycle preserve staged selection safely", "[le
 }
 
 /** \brief Optional trainer mapping changes and deletion cannot change NN subscriptions. */
-TEST_CASE( "NN controls are independent of trainer discovery", "[learningCtrl][independentNN]" )
+TEST_CASE( "NN controls are independent of trainer discovery", "[po4ao][independentNN]" )
 {
     Fixture f( false );
     f.nn();
@@ -460,7 +460,7 @@ TEST_CASE( "NN controls are independent of trainer discovery", "[learningCtrl][i
 }
 
 /** \brief An NN restart invalidates NN controls without invalidating an available trainer. */
-TEST_CASE( "Independent NN restart requires fresh capabilities", "[learningCtrl][independentNN]" )
+TEST_CASE( "Independent NN restart requires fresh capabilities", "[po4ao][independentNN]" )
 {
     Fixture f;
     f.m_publisher.handleSetProperty(
@@ -472,14 +472,14 @@ TEST_CASE( "Independent NN restart requires fresh capabilities", "[learningCtrl]
     REQUIRE( f.m_publisher.m_commands.empty() );
     // clang-format off
 #ifdef LEARNINGCTRL_TEST_DOXYGEN_REF
-    xqt::learningCtrl::observeHeartbeat;
-    xqt::learningCtrl::handleDelProperty;
+    xqt::po4ao::observeHeartbeat;
+    xqt::po4ao::handleDelProperty;
 #endif
     // clang-format on
 }
 
 /** \brief Reconnection discards request state and never replays commands; read-only properties stay disabled. */
-TEST_CASE( "Disconnect and permissions prevent stale commands", "[learningCtrl]" )
+TEST_CASE( "Disconnect and permissions prevent stale commands", "[po4ao]" )
 {
     Fixture f;
     f.m_widget.on_buttonLearning_clicked();
@@ -495,7 +495,7 @@ TEST_CASE( "Disconnect and permissions prevent stale commands", "[learningCtrl]"
 }
 
 /** \brief Missing acknowledgement remains visibly unknown and never resends the request. */
-TEST_CASE( "Acknowledgement timeout does not imply remote completion", "[learningCtrl]" )
+TEST_CASE( "Acknowledgement timeout does not imply remote completion", "[po4ao]" )
 {
     Fixture f;
     f.m_widget.on_buttonReconstructor_clicked();
@@ -509,10 +509,10 @@ TEST_CASE( "Acknowledgement timeout does not imply remote completion", "[learnin
 }
 
 /** \brief Two clients send the same explicit destination and do not change each other's staged choices. */
-TEST_CASE( "Two GUI clients share readbacks without toggling optimistically", "[learningCtrl]" )
+TEST_CASE( "Two GUI clients share readbacks without toggling optimistically", "[po4ao]" )
 {
     Fixture           first;
-    xqt::learningCtrl second( "trainer", nullptr, "po4ao", "nn_test" );
+    xqt::po4ao second( "trainer", nullptr, "po4ao", "nn_test" );
     first.m_publisher.addSubscriber( &second );
     first.m_publisher.onConnect();
     drain();
@@ -527,7 +527,7 @@ TEST_CASE( "Two GUI clients share readbacks without toggling optimistically", "[
 }
 
 /** \brief A confirmed stopped/faulted NN permits recovery through either reconstruction control. */
-TEST_CASE( "Stopped writers expose explicit recovery", "[learningCtrl]" )
+TEST_CASE( "Stopped writers expose explicit recovery", "[po4ao]" )
 {
     Fixture f;
     f.control<QComboBox>( "comboEngine" )->setCurrentIndex( 1 );
@@ -539,14 +539,14 @@ TEST_CASE( "Stopped writers expose explicit recovery", "[learningCtrl]" )
     REQUIRE( f.m_publisher.m_commands.back()["target"].get() == "cacao" );
     // clang-format off
 #ifdef LEARNINGCTRL_TEST_DOXYGEN_REF
-    xqt::learningCtrl::updateGUI;
-    xqt::learningCtrl::on_buttonReconstructor_clicked;
+    xqt::po4ao::updateGUI;
+    xqt::po4ao::on_buttonReconstructor_clicked;
 #endif
     // clang-format on
 }
 
 /** \brief Disable can preserve a session during publication/recollection; Reset remains a separate action. */
-TEST_CASE( "Disable supersedes busy training operations", "[learningCtrl]" )
+TEST_CASE( "Disable supersedes busy training operations", "[po4ao]" )
 {
     for( const auto *phase : { "publishing", "recollecting" } )
     {
@@ -566,14 +566,14 @@ TEST_CASE( "Disable supersedes busy training operations", "[learningCtrl]" )
     }
     // clang-format off
 #ifdef LEARNINGCTRL_TEST_DOXYGEN_REF
-    xqt::learningCtrl::updateGUI;
-    xqt::learningCtrl::on_buttonPO4AO_clicked;
+    xqt::po4ao::updateGUI;
+    xqt::po4ao::on_buttonPO4AO_clicked;
 #endif
     // clang-format on
 }
 
 /** \brief Cached/unchanged heartbeat values cannot keep a silent companion actionable. */
-TEST_CASE( "Companion status expires until heartbeat advances", "[learningCtrl]" )
+TEST_CASE( "Companion status expires until heartbeat advances", "[po4ao]" )
 {
     Fixture f;
     QThread::msleep( 5100 );
@@ -600,14 +600,14 @@ TEST_CASE( "Companion status expires until heartbeat advances", "[learningCtrl]"
     REQUIRE( f.m_publisher.m_commands.empty() );
     // clang-format off
 #ifdef LEARNINGCTRL_TEST_DOXYGEN_REF
-    xqt::learningCtrl::observeHeartbeat;
-    xqt::learningCtrl::updateGUI;
+    xqt::po4ao::observeHeartbeat;
+    xqt::po4ao::updateGUI;
 #endif
     // clang-format on
 }
 
 /** \brief Config errors remain visible and long engine names stay accessible in a compact layout. */
-TEST_CASE( "Compact layout retains long labels and configuration errors", "[learningCtrl]" )
+TEST_CASE( "Compact layout retains long labels and configuration errors", "[po4ao]" )
 {
     Fixture           f;
     pcf::IndiProperty catalog( pcf::IndiProperty::Switch, "nn_test", "model" );
@@ -638,7 +638,7 @@ TEST_CASE( "Compact layout retains long labels and configuration errors", "[lear
 }
 
 /** \brief Native inference controls work with no trainer definitions or process. */
-TEST_CASE( "PO4AO inference is independent of the optional trainer", "[learningCtrl]" )
+TEST_CASE( "PO4AO inference is independent of the optional trainer", "[po4ao]" )
 {
     Fixture f( false );
     f.runtime();
@@ -671,16 +671,16 @@ TEST_CASE( "PO4AO inference is independent of the optional trainer", "[learningC
         REQUIRE( command.getDevice() == "po4ao" );
     // clang-format off
 #ifdef LEARNINGCTRL_TEST_DOXYGEN_REF
-    xqt::learningCtrl::updateRuntimeGUI;
-    xqt::learningCtrl::on_buttonPO4AO_clicked;
-    xqt::learningCtrl::on_buttonWarmup_clicked;
-    xqt::learningCtrl::on_buttonLearning_clicked;
+    xqt::po4ao::updateRuntimeGUI;
+    xqt::po4ao::on_buttonPO4AO_clicked;
+    xqt::po4ao::on_buttonWarmup_clicked;
+    xqt::po4ao::on_buttonLearning_clicked;
 #endif
     // clang-format on
 }
 
 /** \brief Direct Reset selects integrator when needed and waits for native acknowledgements. */
-TEST_CASE( "Native Reset leaves notebook ownership with the operator", "[learningCtrl]" )
+TEST_CASE( "Native Reset leaves notebook ownership with the operator", "[po4ao]" )
 {
     for( const bool enabled : { false, true } )
     {
@@ -712,14 +712,14 @@ TEST_CASE( "Native Reset leaves notebook ownership with the operator", "[learnin
     }
     // clang-format off
 #ifdef LEARNINGCTRL_TEST_DOXYGEN_REF
-    xqt::learningCtrl::on_buttonReset_clicked;
-    xqt::learningCtrl::acknowledge;
+    xqt::po4ao::on_buttonReset_clicked;
+    xqt::po4ao::acknowledge;
 #endif
     // clang-format on
 }
 
 /** \brief The same window uses managed coordination after discovery without replaying native requests. */
-TEST_CASE( "Trainer arrival and departure do not require another GUI", "[learningCtrl]" )
+TEST_CASE( "Trainer arrival and departure do not require another GUI", "[po4ao]" )
 {
     Fixture f( false );
     f.runtime();
@@ -746,15 +746,15 @@ TEST_CASE( "Trainer arrival and departure do not require another GUI", "[learnin
     REQUIRE( f.m_publisher.m_commands.back().getName() == "control_enable" );
     // clang-format off
 #ifdef LEARNINGCTRL_TEST_DOXYGEN_REF
-    xqt::learningCtrl::trainerReady;
-    xqt::learningCtrl::handleDelProperty;
-    xqt::learningCtrl::updateGUI;
+    xqt::po4ao::trainerReady;
+    xqt::po4ao::handleDelProperty;
+    xqt::po4ao::updateGUI;
 #endif
     // clang-format on
 }
 
 /** \brief Runtime permissions, deletion and restart never inherit previous-process capabilities. */
-TEST_CASE( "Native PO4AO discovery and restart invalidate stale state", "[learningCtrl]" )
+TEST_CASE( "Native PO4AO discovery and restart invalidate stale state", "[po4ao]" )
 {
     Fixture f( false );
     f.runtime();
@@ -779,15 +779,15 @@ TEST_CASE( "Native PO4AO discovery and restart invalidate stale state", "[learni
     REQUIRE( f.m_publisher.m_commands.empty() );
     // clang-format off
 #ifdef LEARNINGCTRL_TEST_DOXYGEN_REF
-    xqt::learningCtrl::observeHeartbeat;
-    xqt::learningCtrl::commandAvailable;
-    xqt::learningCtrl::onDisconnect;
+    xqt::po4ao::observeHeartbeat;
+    xqt::po4ao::commandAvailable;
+    xqt::po4ao::onDisconnect;
 #endif
     // clang-format on
 }
 
 /** \brief Independent heartbeats permit native control after trainer loss, without rerouting an unresolved action. */
-TEST_CASE( "Trainer expiry preserves independent runtime control", "[learningCtrl]" )
+TEST_CASE( "Trainer expiry preserves independent runtime control", "[po4ao]" )
 {
     Fixture f;
     f.runtime();
@@ -811,15 +811,15 @@ TEST_CASE( "Trainer expiry preserves independent runtime control", "[learningCtr
     REQUIRE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
     // clang-format off
 #ifdef LEARNINGCTRL_TEST_DOXYGEN_REF
-    xqt::learningCtrl::observeHeartbeat;
-    xqt::learningCtrl::updateRuntimeGUI;
-    xqt::learningCtrl::acknowledge;
+    xqt::po4ao::observeHeartbeat;
+    xqt::po4ao::updateRuntimeGUI;
+    xqt::po4ao::acknowledge;
 #endif
     // clang-format on
 }
 
 /** \brief Another client's managed operation remains unresolved after trainer heartbeat expiry. */
-TEST_CASE( "Trainer expiry cannot bypass an observed Busy operation", "[learningCtrl][review]" )
+TEST_CASE( "Trainer expiry cannot bypass an observed Busy operation", "[po4ao][review]" )
 {
     Fixture f;
     f.runtime();
@@ -844,15 +844,15 @@ TEST_CASE( "Trainer expiry cannot bypass an observed Busy operation", "[learning
     REQUIRE( f.m_publisher.m_commands.back().getDevice() == "po4ao" );
     // clang-format off
 #ifdef LEARNINGCTRL_TEST_DOXYGEN_REF
-    xqt::learningCtrl::updateGUI;
-    xqt::learningCtrl::updateRoute;
-    xqt::learningCtrl::updateRuntimeGUI;
+    xqt::po4ao::updateGUI;
+    xqt::po4ao::updateRoute;
+    xqt::po4ao::updateRuntimeGUI;
 #endif
     // clang-format on
 }
 
 /** \brief Trainer arrival cannot bypass another native client; normal managed supersession remains available. */
-TEST_CASE( "Trainer arrival preserves outstanding native operations", "[learningCtrl][review]" )
+TEST_CASE( "Trainer arrival preserves outstanding native operations", "[po4ao][review]" )
 {
     Fixture f( false );
     f.runtime();
@@ -878,15 +878,15 @@ TEST_CASE( "Trainer arrival preserves outstanding native operations", "[learning
     REQUIRE( f.control<QPushButton>( "buttonReset" )->isEnabled() );
     // clang-format off
 #ifdef LEARNINGCTRL_TEST_DOXYGEN_REF
-    xqt::learningCtrl::updateGUI;
-    xqt::learningCtrl::updateRoute;
-    xqt::learningCtrl::handleDelProperty;
+    xqt::po4ao::updateGUI;
+    xqt::po4ao::updateRoute;
+    xqt::po4ao::handleDelProperty;
 #endif
     // clang-format on
 }
 
 /** \brief Reset cancels pending Enable without frames; generation readback settles superseded/no-op selections. */
-TEST_CASE( "Native Reset supersedes Enable awaiting input frames", "[learningCtrl][review]" )
+TEST_CASE( "Native Reset supersedes Enable awaiting input frames", "[po4ao][review]" )
 {
     for( const bool observed : { false, true } )
     {
@@ -918,14 +918,14 @@ TEST_CASE( "Native Reset supersedes Enable awaiting input frames", "[learningCtr
     }
     // clang-format off
 #ifdef LEARNINGCTRL_TEST_DOXYGEN_REF
-    xqt::learningCtrl::on_buttonReset_clicked;
-    xqt::learningCtrl::acknowledge;
+    xqt::po4ao::on_buttonReset_clicked;
+    xqt::po4ao::acknowledge;
 #endif
     // clang-format on
 }
 
 /** \brief Numeric Enter sends only the target and preserves current readback until acknowledgement. */
-TEST_CASE( "Trainer numeric targets retain current readback", "[learningCtrl]" )
+TEST_CASE( "Trainer numeric targets retain current readback", "[po4ao]" )
 {
     Fixture f;
     auto   *entry = f.control<xqt::statusLineEdit>( "entryLearningRate" );
@@ -968,7 +968,7 @@ TEST_CASE( "Trainer numeric targets retain current readback", "[learningCtrl]" )
 }
 
 /** \brief Stable saved IDs survive redefinition; selection alone cannot load or resume training. */
-TEST_CASE( "Saved pairs use staged stable catalog selection", "[learningCtrl]" )
+TEST_CASE( "Saved pairs use staged stable catalog selection", "[po4ao]" )
 {
     Fixture f;
     auto   *combo = f.control<QComboBox>( "comboPolicy" );
@@ -997,7 +997,7 @@ TEST_CASE( "Saved pairs use staged stable catalog selection", "[learningCtrl]" )
 }
 
 /** \brief Save remains available during publication and transmits only the operator's optional label. */
-TEST_CASE( "Saving a pair does not pause a running publication", "[learningCtrl]" )
+TEST_CASE( "Saving a pair does not pause a running publication", "[po4ao]" )
 {
     Fixture f;
     f.status( { { "training_phase", "publishing" }, { "learning", "running" } } );
@@ -1049,7 +1049,7 @@ TEST_CASE( "Save the compact panel preview", "[.preview]" )
 }
 
 /** \brief Whole-app Start/Stop sends native explicit targets without the optional trainer. */
-TEST_CASE( "Whole-app PO4AO controls are independent of policy selection", "[learningCtrl]" )
+TEST_CASE( "Whole-app PO4AO controls are independent of policy selection", "[po4ao]" )
 {
     Fixture f( false );
     f.runtime( true );
@@ -1078,7 +1078,7 @@ TEST_CASE( "Whole-app PO4AO controls are independent of policy selection", "[lea
 }
 
 /** \brief Visible model transitions gate routing, and a raced rejection clears the request latch. */
-TEST_CASE( "Run controls handle model conflicts and rejection", "[learningCtrl][reviewRegression]" )
+TEST_CASE( "Run controls handle model conflicts and rejection", "[po4ao][reviewRegression]" )
 {
     Fixture f( false );
     f.runtime( true );
@@ -1118,7 +1118,7 @@ TEST_CASE( "Run controls handle model conflicts and rejection", "[learningCtrl][
     }
 }
 
-} // namespace learningCtrlGUITest
+} // namespace po4aoGUITest
 } // namespace libXWCTest
 
 /// Run widget tests with the normal stylesheet and no network connection.

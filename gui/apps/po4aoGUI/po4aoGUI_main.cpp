@@ -5,7 +5,7 @@
 #include <QFile>
 #include <QTextStream>
 
-#include "learningCtrl.hpp"
+#include "po4ao.hpp"
 #include "multiIndiManager.hpp"
 
 /// Launch one panel against the existing local INDI aggregation service.
@@ -30,7 +30,7 @@ int main( int   argc, /**< [in] Argument count. */
     QTextStream stream( &file );
     app.setStyleSheet( stream.readAll() );
     multiIndiManager  manager( runtime, "127.0.0.1", 7624 );
-    xqt::learningCtrl panel( trainer, nullptr, runtime, nn );
+    xqt::po4ao panel( trainer, nullptr, runtime, nn );
     manager.addSubscriber( &panel );
     manager.activate();
     panel.show();
