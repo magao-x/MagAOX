@@ -1140,6 +1140,48 @@ TEST_CASE( "Run controls handle model conflicts and rejection", "[po4ao][reviewR
     }
 }
 
+/** \brief A delayed routing rejection releases only the request latch; routing Busy and timeout keep their meanings. */
+TEST_CASE( "Routing rejection acknowledges a raced native policy request", "[po4ao][regression]" )
+{
+    // clang-format off
+#ifdef PO4AOGUI_TEST_DOXYGEN_REF
+    xqt::po4ao::acknowledge;
+    xqt::po4ao::on_buttonPO4AO_clicked;
+#endif
+    // clang-format on
+    Fixture f( false );
+    f.runtime( false );
+    f.define( runtimeSwitch( "run_enable", true ) );
+    f.define( text( "po4ao", "run_status", { { "phase", "running" } } ) );
+    REQUIRE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
+    f.m_widget.on_buttonPO4AO_clicked();
+    REQUIRE_FALSE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
+    // Another client already started routing; its Busy readback arrives after our local request.
+    f.define( runtimeSwitch( "run_enable", true, pcf::IndiProperty::Busy ) );
+    f.define( text( "po4ao", "run_status", { { "phase", "switching_input" } } ) );
+    f.m_widget.acknowledgementTimeout();
+    REQUIRE_FALSE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
+    SECTION( "rejection precedes routing completion" )
+    {
+        f.define( runtimeSwitch( "control_enable", false, pcf::IndiProperty::Alert ) );
+        REQUIRE_FALSE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
+    }
+    SECTION( "rejection follows routing completion" )
+    {
+        f.define( runtimeSwitch( "run_enable", false ) );
+        f.define( text( "po4ao", "run_status", { { "phase", "stopped" } } ) );
+        f.define( runtimeSwitch( "control_enable", false ) );
+        f.m_widget.acknowledgementTimeout();
+        REQUIRE_FALSE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
+        f.define( runtimeSwitch( "control_enable", false, pcf::IndiProperty::Alert ) );
+    }
+    f.define( runtimeSwitch( "run_enable", false ) );
+    f.define( text( "po4ao", "run_status", { { "phase", "stopped" } } ) );
+    REQUIRE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
+    f.define( runtimeSwitch( "control_enable", false ) );
+    REQUIRE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
+}
+
 } // namespace po4aoGUITest
 } // namespace libXWCTest
 

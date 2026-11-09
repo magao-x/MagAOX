@@ -270,20 +270,23 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>, public de
     Po4aoSamples m_runtimeSamples;         ///< Coherent fixed-size callback telemetry window.
     uint64_t     m_lastTelemSequence{ 0 }; ///< Last sequence actually written to telemetry.
 
-    std::atomic<uint64_t> m_missedFrames{ 0 };                     ///< Source counter discontinuities.
-    std::atomic<uint64_t> m_deadlineMisses{ 0 };                   ///< Callbacks exceeding the configured deadline.
-    std::atomic<uint64_t> m_inferenceFailures{ 0 };                ///< Inference or result-validation failures.
-    std::atomic<uint64_t> m_replayDrops{ 0 };                      ///< Episodes dropped because the publisher lagged.
-    std::atomic<uint64_t> m_activeModelId{ 0 };                    ///< Selected policy hash; zero reports fallback.
-    std::atomic<bool>     m_activeCpuInference{ false };           ///< Whether the active policy runs on CPU.
-    uint64_t              m_lastInputCounter{ 0 };                 ///< Previous source cnt0 used for gap detection.
-    bool                  m_haveInputCounter{ false };             ///< Whether the previous source counter is valid.
-    std::chrono::steady_clock::time_point m_lastStatsUpdate;       ///< Previous telemetry publication time.
-    pcf::IndiProperty                     m_indiP_reloadToggle;    ///< Asynchronous model-reload request.
-    pcf::IndiProperty                     m_indiP_resetModel;      ///< Active-model reset request.
-    pcf::IndiProperty                     m_indiP_controlToggle;   ///< Select learned control or proportional fallback.
-    pcf::IndiProperty                     m_indiP_recollectWarmup; ///< Fresh warm-up collection request.
-    pcf::IndiProperty                     m_indiP_runtimeStats;    ///< Latency and failure counters.
+    std::atomic<uint64_t> m_missedFrames{ 0 };               ///< Source counter discontinuities.
+    std::atomic<uint64_t> m_deadlineMisses{ 0 };             ///< Callbacks exceeding the configured deadline.
+    std::atomic<uint64_t> m_inferenceFailures{ 0 };          ///< Inference or result-validation failures.
+    std::atomic<uint64_t> m_replayDrops{ 0 };                ///< Episodes dropped because the publisher lagged.
+    std::atomic<uint64_t> m_activeModelId{ 0 };              ///< Selected policy hash; zero reports fallback.
+    std::atomic<bool>     m_activeCpuInference{ false };     ///< Whether the active policy runs on CPU.
+    uint64_t              m_lastInputCounter{ 0 };           ///< Previous source cnt0 used for gap detection.
+    bool                  m_haveInputCounter{ false };       ///< Whether the previous source counter is valid.
+    std::chrono::steady_clock::time_point m_lastStatsUpdate; ///< Previous telemetry publication time.
+    /// Rejected model requests remain visible until the corresponding command is accepted; guarded by m_indiMutex.
+    bool m_reloadRejected{ false }, m_resetRejected{ false }, m_controlRejected{ false }, m_recollectRejected{ false };
+
+    pcf::IndiProperty  m_indiP_reloadToggle;     ///< Asynchronous model-reload request.
+    pcf::IndiProperty  m_indiP_resetModel;       ///< Active-model reset request.
+    pcf::IndiProperty  m_indiP_controlToggle;    ///< Select learned control or proportional fallback.
+    pcf::IndiProperty  m_indiP_recollectWarmup;  ///< Fresh warm-up collection request.
+    pcf::IndiProperty  m_indiP_runtimeStats;     ///< Latency and failure counters.
     pcf::IndiProperty  m_indiP_collectionStatus; ///< Collection identity, progress and publication completion.
     Po4aoRouteIO       m_routeIO;                ///< Installed command/readback boundary, owned by the routing worker.
     Po4aoRouteSnapshot m_runSnapshot;            ///< Pre-request routing identity retained after failure.
@@ -415,6 +418,10 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>, public de
 
     /// Fill the controlled prefix with the proportional fallback, before noise and limiting.
     void makeIntegratorCommand( const float *observation /**< [in] Current modal observation. */ );
+
+    /// Acknowledge a rejected model request; caller holds the INDI mutex.
+    int rejectModelCommand( pcf::IndiProperty &property /**< [in,out] Command with its applied switch value. */,
+                            bool              &rejected /**< [out] Retain Alert until a later request is accepted. */ );
 
     /// Publish frame acknowledgements, effective controller, model and collection state.
     void updateControlStatus();

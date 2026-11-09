@@ -16,6 +16,8 @@
 #include "../po4aoRouting.hpp"
 #include "../../nnReconstructor/tests/nnTestSupport.hpp"
 #include <future>
+#include <iomanip>
+#include <sstream>
 
 namespace libXWCTest
 {
@@ -464,6 +466,7 @@ TEST_CASE( "PO4AO ignores stale collection publisher results", "[po4ao]" )
 /** \cond PO4AO_CONTROL_TEST_SUPPORT */
 namespace po4aoControlHarness
 {
+using namespace MagAOX::app;
 namespace dev
 {
 /// Monitor tag; no monitor thread or instrument connection exists in these tests.
@@ -516,7 +519,7 @@ struct EngineBundle
 /** Model loading and device output are doubles; collection, frame processing, queue
  * ownership, history and shared-memory snapshot publication are the actual methods.
  */
-class po4ao
+class po4ao : public MagAOXApp<true>
 {
   public:
     /// Monitor storage supplied without a live stream or monitor thread.
@@ -582,6 +585,76 @@ class po4ao
     std::vector<std::array<float, 3>> m_emitted; ///< Successfully emitted commands captured at the output boundary.
     std::function<void()> m_duringOutput;        ///< Request injection during actual output acknowledgement boundary.
 
+    /// Offline model command properties and coherent status snapshots.
+    pcf::IndiProperty m_indiP_reloadToggle, m_indiP_resetModel, m_indiP_controlToggle, m_indiP_recollectWarmup,
+        m_indiP_modelStatus, m_indiP_collectionStatus;
+
+    /// Routing conflicts and retained per-command rejection state.
+    bool m_runBusy{ false }, m_runRunning{ true }, m_reloadRejected{ false }, m_resetRejected{ false },
+        m_controlRejected{ false }, m_recollectRejected{ false };
+
+    /// Model-loader boundary and acknowledged model identity.
+    std::atomic<int>        m_reloadStatus{ 0 };
+    std::atomic<uint64_t>   m_activeModelId{ 42 }, m_reloadGeneration{ 1 };
+    std::atomic<bool>       m_activeCpuInference{ true }, m_reloadRequested{ false };
+    std::mutex              m_reloadErrorMutex;
+    std::condition_variable m_loaderCondition;
+    std::string             m_reloadError, m_runPhase{ "running" }, m_runtimeInstance{ "test" };
+    uint64_t                m_statusSequence{ 0 }; ///< Monotonic status publication sequence.
+
+    /// Accept source-location logs without starting the production logging service.
+    struct Message
+    {
+        /// Discard the boundary payload.
+        template <class... T>
+        Message( T &&.../**< [in] Unused logging payload. */ )
+        {
+        }
+    };
+
+    /// Preserve production return values while discarding fixture log messages.
+    template <class T, int result = 0>
+    int log( Message /**< [in] Unused payload. */, int /**< [in] Unused priority. */ = 0 )
+    {
+        return result;
+    }
+
+    using MagAOXApp<true>::updateIfChanged;
+    /// Record the production multi-element snapshot without transport.
+    template <class T>
+    void updateIfChanged( pcf::IndiProperty              &property /**< [in,out] Snapshot. */,
+                          const std::vector<std::string> &names /**< [in] Element names. */,
+                          const std::vector<T>           &values /**< [in] Element values. */ );
+
+    /// Execute the production app loop, including stopped-app reset acknowledgement.
+    int appLogic();
+
+    /// Routing execution is outside this command/callback fixture.
+    void updateRunControl()
+    {
+    }
+
+    /// Telemetry serialization is covered by the independent telemetry executable.
+    void updateRuntimeStatistics()
+    {
+    }
+
+    /// Publish production status, including retained command rejection acknowledgements.
+    void updateControlStatus();
+
+    /// Execute the production rejection acknowledgement.
+    int rejectModelCommand( pcf::IndiProperty &property /**< [in,out] Command. */,
+                            bool              &rejected /**< [out] Rejection state. */ );
+
+    /// Production reload command boundary.
+    INDI_NEWCALLBACK_DECL( po4ao, m_indiP_reloadToggle );
+    /// Production reset command boundary.
+    INDI_NEWCALLBACK_DECL( po4ao, m_indiP_resetModel );
+    /// Production control-selection command boundary.
+    INDI_NEWCALLBACK_DECL( po4ao, m_indiP_controlToggle );
+    /// Production recollection command boundary.
+    INDI_NEWCALLBACK_DECL( po4ao, m_indiP_recollectWarmup );
+
     /// Configure preallocated histories and episode slots.
     po4ao();
 
@@ -636,10 +709,33 @@ class po4ao
     int processImage( void *curr_src /**< [in] Observation. */, const dev::shmimT &dummy /**< [in] Monitor tag. */ );
 };
 
+template <class T>
+void po4ao::updateIfChanged( pcf::IndiProperty              &property,
+                             const std::vector<std::string> &names,
+                             const std::vector<T>           &values )
+{
+    for( size_t i = 0; i < names.size(); ++i )
+    {
+        if( !property.find( names[i] ) )
+        {
+            property.add( pcf::IndiElement( names[i] ) );
+        }
+        property[names[i]] = values[i];
+    }
+}
+
 #include "../po4ao_control.hpp"
 
-inline po4ao::po4ao()
+inline po4ao::po4ao() : MagAOXApp<true>( 0, 0 )
 {
+    createStandardIndiToggleSw( m_indiP_reloadToggle, "reload_engine" );
+    createStandardIndiToggleSw( m_indiP_resetModel, "reset_model" );
+    createStandardIndiToggleSw( m_indiP_controlToggle, "control_enable" );
+    createStandardIndiToggleSw( m_indiP_recollectWarmup, "recollect_warmup" );
+    for( const char *name : { "state", "requested_generation", "generation", "frames", "target_frames" } )
+    {
+        m_indiP_collectionStatus.add( pcf::IndiElement( name ) );
+    }
     for( size_t slot = 0; slot < c_episodeSlots; ++slot )
     {
         m_episodeBuffers[slot].configure( m_iterationsPerEpisode, m_nModes );
@@ -1470,5 +1566,231 @@ TEST_CASE( "Run worker does not release or park after incomplete calibration", "
     MagAOX::app::po4ao::newCallBack_m_indiP_run;
 #endif
     // clang-format on
+}
+} // namespace libXWCTest::po4aoTest
+
+namespace libXWCTest::po4aoTest
+{
+/** \brief Source gaps retain finite pass-through values while enforcing controlled limits and all-mode finiteness. */
+TEST_CASE( "PO4AO source gaps use common output validation", "[po4ao][control][regression]" )
+{
+    // clang-format off
+#ifdef PO4AO_TEST_DOXYGEN_REF
+    MagAOX::app::po4ao::processImage;
+#endif
+    // clang-format on
+    for( const auto observation :
+         { std::array<float, 3>{ 2.F, -2.F, 99.F }, std::array<float, 3>{ 100.F, -100.F, 99.F } } )
+    {
+        po4aoControlHarness::po4ao app;
+        REQUIRE( app.frame( 1 ) == 0 );
+        auto input                                                          = observation;
+        po4aoControlHarness::po4ao::shmimMonitorT::m_imageStream.md[0].cnt0 = 3;
+        REQUIRE( app.processImage( input.data(), po4aoControlHarness::dev::shmimT{} ) == 0 );
+        REQUIRE( app.m_emitted.back()[0] == std::min( observation[0], 4.F ) );
+        REQUIRE( app.m_emitted.back()[1] == std::max( observation[1], -4.F ) );
+        REQUIRE( app.m_emitted.back()[2] == 99.F );
+        REQUIRE( app.m_effectiveController.load() == 3 );
+    }
+    // Inject stream bytes, avoiding fast-math folding of floating-point infinity constants.
+    for( uint32_t invalidBits : { 0x7FC00000U, 0x7F800000U } )
+    {
+        for( size_t mode = 0; mode < 3; ++mode )
+        {
+            po4aoControlHarness::po4ao app;
+            REQUIRE( app.frame( 1 ) == 0 );
+            std::array<float, 3> input{ 2.F, -2.F, 99.F };
+            memcpy( &input[mode], &invalidBits, sizeof( invalidBits ) );
+            uint32_t observedBits = 0;
+            memcpy( &observedBits, &input[mode], sizeof( observedBits ) );
+            REQUIRE( observedBits == invalidBits );
+            po4aoControlHarness::po4ao::shmimMonitorT::m_imageStream.md[0].cnt0 = 3;
+            REQUIRE( app.processImage( input.data(), po4aoControlHarness::dev::shmimT{} ) == 0 );
+            REQUIRE( app.m_emitted.back() == std::array<float, 3>{ 0.F, 0.F, 0.F } );
+            REQUIRE( app.m_effectiveController.load() == 0 );
+        }
+    }
+}
+
+/** \brief Failed output retains the reset request, and an acknowledgement never consumes a newer reset. */
+TEST_CASE( "PO4AO reset acknowledgement survives output failure and supersession", "[po4ao][control][regression]" )
+{
+    // clang-format off
+#ifdef PO4AO_TEST_DOXYGEN_REF
+    MagAOX::app::po4ao::processImage;
+#endif
+    // clang-format on
+    po4aoControlHarness::po4ao app;
+    REQUIRE( app.frame( 1 ) == 0 );
+    app.m_modelGeneration   = 2;
+    app.m_modelResetRequest = 2;
+    SECTION( "failed publication retries the same reset" )
+    {
+        app.m_failOutput = true;
+        REQUIRE( app.frame( 2 ) == -1 );
+        REQUIRE( app.m_appliedReset.load() == 1 );
+        REQUIRE( app.m_modelResetRequest.load() == 2 );
+        app.m_failOutput = false;
+        REQUIRE( app.frame( 3 ) == 0 );
+        REQUIRE( app.m_appliedReset.load() == 2 );
+        REQUIRE( app.m_modelResetRequest.load() == 0 );
+        REQUIRE( app.frame( 4 ) == 0 );
+        REQUIRE( app.m_appliedReset.load() == 2 );
+    }
+    SECTION( "later reset supersedes a failed publication" )
+    {
+        app.m_failOutput = true;
+        REQUIRE( app.frame( 2 ) == -1 );
+        app.m_modelGeneration   = 3;
+        app.m_modelResetRequest = 3;
+        app.m_failOutput        = false;
+        REQUIRE( app.frame( 3 ) == 0 );
+        REQUIRE( app.m_appliedReset.load() == 3 );
+        REQUIRE( app.m_modelResetRequest.load() == 0 );
+    }
+    SECTION( "new reset during successful output remains pending" )
+    {
+        app.m_duringOutput = [&]
+        {
+            app.m_modelGeneration   = 3;
+            app.m_modelResetRequest = 3;
+        };
+        REQUIRE( app.frame( 2 ) == 0 );
+        REQUIRE( app.m_appliedReset.load() == 2 );
+        REQUIRE( app.m_modelResetRequest.load() == 3 );
+        app.m_duringOutput = {};
+        REQUIRE( app.frame( 3 ) == 0 );
+        REQUIRE( app.m_appliedReset.load() == 3 );
+        REQUIRE( app.m_modelResetRequest.load() == 0 );
+    }
+    SECTION( "disabled callback admission cannot acknowledge output" )
+    {
+        app.m_runAdmission = false;
+        REQUIRE( app.frame( 2 ) == 0 );
+        REQUIRE( app.m_appliedReset.load() == 1 );
+        REQUIRE( app.m_modelResetRequest.load() == 2 );
+        REQUIRE( app.m_emitted.size() == 1 );
+        app.m_runAdmission = true;
+        REQUIRE( app.frame( 3 ) == 0 );
+        REQUIRE( app.m_appliedReset.load() == 2 );
+        REQUIRE( app.m_modelResetRequest.load() == 0 );
+    }
+}
+} // namespace libXWCTest::po4aoTest
+
+namespace libXWCTest::po4aoTest
+{
+/** \brief Rejected model commands publish Alert even for repeated requests and retain it through status polling. */
+TEST_CASE( "PO4AO model commands acknowledge routing conflicts", "[po4ao][control][regression]" )
+{
+    // clang-format off
+#ifdef PO4AO_TEST_DOXYGEN_REF
+    MagAOX::app::po4ao::newCallBack_m_indiP_reloadToggle;
+    MagAOX::app::po4ao::newCallBack_m_indiP_resetModel;
+    MagAOX::app::po4ao::newCallBack_m_indiP_controlToggle;
+    MagAOX::app::po4ao::newCallBack_m_indiP_recollectWarmup;
+    MagAOX::app::po4ao::updateControlStatus;
+#endif
+    // clang-format on
+    using App      = po4aoControlHarness::po4ao;
+    using Callback = int ( App::* )( const pcf::IndiProperty & );
+    const std::array<std::pair<pcf::IndiProperty App::*, Callback>, 4> commands{
+        { { &App::m_indiP_reloadToggle, &App::newCallBack_m_indiP_reloadToggle },
+          { &App::m_indiP_resetModel, &App::newCallBack_m_indiP_resetModel },
+          { &App::m_indiP_controlToggle, &App::newCallBack_m_indiP_controlToggle },
+          { &App::m_indiP_recollectWarmup, &App::newCallBack_m_indiP_recollectWarmup } } };
+    for( const auto &[member, callback] : commands )
+    {
+        App                                  app;
+        MagAOX::app::MagAOXApp<true>::Driver driver;
+        app.m_indiDriver = &driver;
+        REQUIRE( app.frame( 1 ) == 0 );
+        app.updateControlStatus();
+        auto      &property = app.*member;
+        const auto applied  = property["toggle"].getSwitchState();
+        auto       request  = property;
+        request["toggle"].setSwitchState( member == &App::m_indiP_controlToggle ? pcf::IndiElement::Off
+                                                                                : pcf::IndiElement::On );
+        app.m_runBusy = true;
+        for( int retry = 0; retry < 2; ++retry )
+        {
+            REQUIRE( ( app.*callback )( request ) == -1 );
+            REQUIRE( driver.m_published.size() == static_cast<size_t>( retry + 1 ) );
+            REQUIRE( driver.m_published.back().getName() == property.getName() );
+            REQUIRE( driver.m_published.back().getState() == INDI_ALERT );
+            REQUIRE( driver.m_published.back()["toggle"].getSwitchState() == applied );
+            app.updateControlStatus();
+            REQUIRE( property.getState() == INDI_ALERT );
+        }
+        REQUIRE( app.m_modelResetRequest.load() == 0 );
+        REQUIRE( app.m_modelGeneration.load() == 1 );
+        REQUIRE( app.m_controlRequest.load() == 3 );
+        REQUIRE_FALSE( app.m_reloadRequested.load() );
+        REQUIRE( app.m_warmupRecollectRequest.load() == 0 );
+        app.m_runBusy = false;
+        app.updateControlStatus();
+        REQUIRE( property.getState() == INDI_ALERT );
+        REQUIRE( ( app.*callback )( request ) == 0 );
+        REQUIRE( property.getState() == INDI_BUSY );
+        app.updateControlStatus();
+        REQUIRE( property.getState() == INDI_BUSY );
+    }
+    SECTION( "accepted retry of an applied target still acknowledges the request" )
+    {
+        App app;
+        REQUIRE( app.frame( 1 ) == 0 );
+        app.updateControlStatus();
+        auto request  = app.m_indiP_controlToggle;
+        app.m_runBusy = true;
+        REQUIRE( app.newCallBack_m_indiP_controlToggle( request ) == -1 );
+        app.m_runBusy = false;
+        REQUIRE( app.newCallBack_m_indiP_controlToggle( request ) == 0 );
+        REQUIRE( app.m_indiP_controlToggle.getState() == INDI_BUSY );
+        REQUIRE( app.m_controlRequest.load() == 3 );
+        app.updateControlStatus();
+        REQUIRE( app.m_indiP_controlToggle.getState() == INDI_OK );
+    }
+    SECTION( "recollection while stopped is explicitly rejected" )
+    {
+        App                                  app;
+        MagAOX::app::MagAOXApp<true>::Driver driver;
+        app.m_indiDriver = &driver;
+        app.m_runRunning = false;
+        auto request     = app.m_indiP_recollectWarmup;
+        request["toggle"].setSwitchState( pcf::IndiElement::On );
+        REQUIRE( app.newCallBack_m_indiP_recollectWarmup( request ) == -1 );
+        REQUIRE( driver.m_published.size() == 1 );
+        app.updateControlStatus();
+        REQUIRE( app.m_indiP_recollectWarmup.getState() == INDI_ALERT );
+    }
+}
+} // namespace libXWCTest::po4aoTest
+
+namespace libXWCTest::po4aoTest
+{
+/** \brief A parked app acknowledges reset without a source frame and resumes without reviving the old request. */
+TEST_CASE( "PO4AO reset while stopped remains independent of frame publication", "[po4ao][control][regression]" )
+{
+    // clang-format off
+#ifdef PO4AO_TEST_DOXYGEN_REF
+    MagAOX::app::po4ao::appLogic;
+    MagAOX::app::po4ao::processImage;
+#endif
+    // clang-format on
+    po4aoControlHarness::po4ao app;
+    REQUIRE( app.frame( 1 ) == 0 );
+    app.m_runRunning        = false;
+    app.m_runAdmission      = false;
+    app.m_modelGeneration   = 2;
+    app.m_modelResetRequest = 2;
+    REQUIRE( app.appLogic() == 0 );
+    REQUIRE( app.m_appliedReset.load() == 2 );
+    REQUIRE( app.m_modelResetRequest.load() == 0 );
+    REQUIRE( app.m_emitted.size() == 1 );
+    app.m_runRunning   = true;
+    app.m_runAdmission = true;
+    REQUIRE( app.frame( 2 ) == 0 );
+    REQUIRE( app.m_appliedReset.load() == 2 );
+    REQUIRE( app.m_modelResetRequest.load() == 0 );
 }
 } // namespace libXWCTest::po4aoTest

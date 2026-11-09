@@ -266,17 +266,30 @@ class Runtime:
             instance=self.get(self.po4ao, "model_status", "instance"),
             reset=int(self.get(self.po4ao, "model_status", "reset_request")),
             epoch=self.observations.epoch,
+            issued=False,
             busy=False,
+            rejected=False,
             terminal=False,
             outcome=None,
         )
 
         def acknowledge(message):
-            """Remember Busy/terminal updates even when they occur between polls."""
-            state = getattr(message, "state", None)
+            """Only post-issuance set vectors can acknowledge this observation-lifetime ticket."""
+            if (
+                not ticket["issued"]
+                or self.reload_ticket is not ticket
+                or ticket["outcome"] is not None
+                or self.observations.epoch != ticket["epoch"]
+                or not isinstance(message, messages.SetSwitchVector)
+            ):
+                return
+            state = message.state
             if state == PropertyState.BUSY:
                 ticket["busy"] = True
-            elif ticket["busy"] and state in (PropertyState.OK, PropertyState.ALERT):
+            elif state == PropertyState.ALERT:
+                ticket["rejected"] = not ticket["busy"]
+                ticket["terminal"] = True
+            elif ticket["busy"] and state == PropertyState.OK:
                 ticket["terminal"] = True
 
         ticket["callback"] = acknowledge
@@ -284,6 +297,7 @@ class Runtime:
         self.client.register_callback(acknowledge, self.po4ao, "reload_engine")
         if issued:
             issued(ticket)
+        ticket["issued"] = True
         self.send(self.po4ao, "reload_engine", {"toggle": SwitchState.ON})
 
     def reload_outcome(self, ticket=None):
@@ -299,6 +313,14 @@ class Runtime:
             != ticket["reset"]
         ):
             ticket["outcome"] = "invalidated"
+        elif ticket["rejected"] and not ticket["busy"]:
+            # A direct Alert rejects admission, even for an already-active model.
+            # Do not discard an existing load while its status is still loading/ready.
+            if (
+                self.observations.epoch == ticket["epoch"]
+                and self.get(self.po4ao, "model_status", "reload") in ("idle", "failed")
+            ):
+                ticket["outcome"] = "failed"
         elif ticket["terminal"] or (
             ticket["busy"] and self.observations.epoch != ticket["epoch"]
         ):

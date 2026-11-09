@@ -8,8 +8,10 @@
 #include <atomic>
 #include <sys/stat.h>
 
-#include "../../libMagAOX/libMagAOX.hpp" // Included on the command line to trigger pch.
-#include "../../magaox_git_version.h"
+#ifndef DLDATACOLLECTION_TEST
+    #include "../../libMagAOX/libMagAOX.hpp" // Included on the command line to trigger pch.
+    #include "../../magaox_git_version.h"
+#endif
 #include "dlCollection.hpp"
 #include "dlObservation.hpp"
 
@@ -866,7 +868,12 @@ inline bool dlDataCollection::snapshotStable( uint64_t counter )
 
 inline int dlDataCollection::processImage( void *src, const dev::shmimT &dummy )
 {
-    static_cast<void>( dummy );
+    if( m_startPending.load() && !m_connected.load() )
+    {
+        // A quick Start can reuse an attachment whose monitor never observed READY.
+        // Revalidate on the monitor thread before admitting frames to the new session.
+        return allocate( dummy );
+    }
     if( m_observationChanged.load() )
     {
         return 0;

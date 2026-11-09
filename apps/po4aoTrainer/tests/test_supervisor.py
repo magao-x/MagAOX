@@ -408,7 +408,9 @@ def test_reload_requires_fresh_ack_even_for_same_model():
         runtime.begin_reload("another-model")
     for state in (C.PropertyState.BUSY, C.PropertyState.OK):
         reload.state = state
-        client.receive(reload)
+        client.receive(
+            M.SetSwitchVector(device="po4ao", name="reload_engine", state=state)
+        )
     assert runtime.finish_reload(threading.Event()) == "loaded"
     runtime.close()
     assert not client.callbacks
@@ -733,7 +735,7 @@ class Wire(IndiConnection):
                     if (message.device is None or message.device == device) and (
                         message.name is None or message.name == name
                     ):
-                        self.rig.emit(prop)
+                        self.rig.emit(prop, definition=True)
         else:
             self.rig.requests.append(
                 (message.device, message.name, {key: message[key] for key in message})
@@ -788,7 +790,9 @@ class Rig:
 
     def text(self, device, name, **values):
         """Create real text definitions with string-valued runtime fields."""
-        prop = P.TextVector(device=device, name=name, state=C.PropertyState.OK)
+        prop = P.TextVector(
+            device=device, name=name, state=C.PropertyState.OK, _role=C.Role.DEVICE
+        )
         for key, value in values.items():
             prop.add_element(M.DefText(name=key, _value=value))
         self.props[device, name] = prop
@@ -799,6 +803,7 @@ class Rig:
         prop = P.SwitchVector(
             device=device,
             name=name,
+            _role=C.Role.DEVICE,
             state=C.PropertyState.OK,
             rule=C.SwitchRule.AT_MOST_ONE,
         )
@@ -807,9 +812,11 @@ class Rig:
         self.props[device, name] = prop
         return prop
 
-    def emit(self, prop):
-        """Deliver independent remote evidence through the actual client's parser/cache path."""
-        self.client.handle_message(deepcopy(prop))
+    def emit(self, prop, definition=False):
+        """Keep discovery definitions distinct from unsolicited updates in the real client."""
+        self.client.handle_message(
+            deepcopy(prop if definition else prop.make_set_property())
+        )
 
     def update(self, device, prop, **values):
         """Change simulated remote fields and publish their readback."""
@@ -1499,6 +1506,200 @@ def test_whole_app_routing_pauses_learning_without_resuming_it(config):
         assert worker.state == "paused"
         assert supervisor.worker is worker
         assert not any(message.get("run") is True for message in worker.messages)
+    finally:
+        supervisor.close()
+        rig.close()
+
+
+@pytest.mark.parametrize("same_model", [False, True])
+def test_reload_rejection_before_busy_is_failure_and_allows_retry(
+    monkeypatch, same_model
+):
+    """A fresh set-vector rejection cannot succeed just because the old model has the requested ID."""
+    rig = Rig(0.02)
+    model = "a" * 16
+    if same_model:
+        rig.update("po4ao", "model_status", active_id=model)
+    command = rig.command
+
+    def reject(message):
+        """Mirror native rejection: Alert only, no loader admission or model-status change."""
+        prop = rig.props["po4ao", "reload_engine"]
+        prop.state = C.PropertyState.ALERT
+        rig.emit(prop)
+
+    monkeypatch.setattr(rig, "command", reject)
+    try:
+        rig.runtime.begin_reload(model)
+        rejected = rig.runtime.reload_ticket
+        assert not rejected["busy"] and rig.loading is None
+        assert rig.runtime.finish_reload(threading.Event()) == "failed"
+        monkeypatch.setattr(rig, "command", command)
+        rig.runtime.begin_reload(model)
+        assert rig.runtime.reload_ticket is not rejected
+        assert rig.runtime.finish_reload(threading.Event()) == "loaded"
+        assert rig.runtime.reload_outcome(rejected) == "failed"
+    finally:
+        rig.close()
+
+
+def test_reload_rejection_ignores_definitions_preissuance_updates_and_timeout(
+    monkeypatch,
+):
+    """Only a post-issuance update settles failure; rediscovery and timeout leave the ticket pending."""
+    rig = Rig(0.02)
+    prop = rig.props["po4ao", "reload_engine"]
+    prop.state = C.PropertyState.ALERT
+    rig.emit(prop)
+    monkeypatch.setattr(rig, "command", lambda message: None)
+    try:
+        # The issuance hook runs before sending: even a set-vector here is not this request's response.
+        rig.runtime.begin_reload("a" * 16, issued=lambda ticket: rig.emit(prop))
+        for _ in range(2):
+            rig.emit(prop, definition=True)
+            assert rig.runtime.reload_outcome() is None
+        with pytest.raises(TimeoutError):
+            rig.runtime.finish_reload(threading.Event())
+        with pytest.raises(RuntimeError, match="still unresolved"):
+            rig.runtime.begin_reload("b" * 16)
+        assert rig.runtime.reload_outcome() is None
+        # A delayed explicit rejection remains actionable after the caller timed out.
+        rig.emit(prop)
+        assert rig.runtime.finish_reload(threading.Event()) == "failed"
+    finally:
+        rig.close()
+
+
+@pytest.mark.parametrize("failure", [False, True])
+def test_reload_rejection_does_not_settle_an_admitted_load(failure):
+    """Another client's Alert cannot discard a Busy load, even when reloading the same model."""
+    rig = Rig(0.02)
+    rig.auto_load = False
+    rig.update("po4ao", "model_status", active_id="a" * 16)
+    try:
+        rig.runtime.begin_reload("a" * 16)
+        assert rig.runtime.reload_ticket["busy"]
+        prop = rig.props["po4ao", "reload_engine"]
+        prop.state = C.PropertyState.ALERT
+        rig.emit(prop)
+        assert rig.runtime.reload_outcome() is None
+        with pytest.raises(TimeoutError):
+            rig.runtime.finish_reload(threading.Event())
+        if failure:
+            rig.update("po4ao", "model_status", reload="failed")
+            rig.emit(prop)
+        else:
+            rig.complete_load()
+        assert rig.runtime.finish_reload(threading.Event()) == (
+            "failed" if failure else "loaded"
+        )
+    finally:
+        rig.close()
+
+
+def test_reload_rejection_cannot_settle_while_loader_status_is_active(monkeypatch):
+    """A previously admitted external load remains unresolved without its terminal loader status."""
+    rig = Rig(0.02)
+    rig.update("po4ao", "model_status", reload="loading")
+    prop = rig.props["po4ao", "reload_engine"]
+    prop.state = C.PropertyState.BUSY
+    rig.emit(prop, definition=True)
+    monkeypatch.setattr(rig, "command", lambda message: None)
+    try:
+        rig.runtime.begin_reload("a" * 16)
+        prop.state = C.PropertyState.ALERT
+        rig.emit(prop)
+        assert rig.runtime.reload_outcome() is None
+    finally:
+        rig.close()
+
+
+@pytest.mark.parametrize("boundary", ["connection", "deletion", "instance", "reset"])
+def test_reload_rejection_respects_runtime_lifetime(monkeypatch, boundary):
+    """A terminal message from a different observation lifetime cannot acknowledge the old ticket."""
+    rig = Rig(0.02)
+    monkeypatch.setattr(rig, "command", lambda message: None)
+    try:
+        rig.runtime.begin_reload("a" * 16)
+        ticket = rig.runtime.reload_ticket
+        if boundary == "connection":
+            rig.runtime.observations.connection_changed(None)
+            rig.client.get_properties("po4ao")
+        elif boundary == "deletion":
+            rig.client.handle_message(
+                M.DelProperty(device="po4ao", name="reload_engine")
+            )
+            rig.client.get_properties("po4ao")
+        elif boundary == "instance":
+            rig.update("po4ao", "model_status", instance="runtime-2", sequence="2")
+        else:
+            rig.update("po4ao", "model_status", reset_request="2")
+        prop = rig.props["po4ao", "reload_engine"]
+        prop.state = C.PropertyState.ALERT
+        rig.emit(prop)
+        assert rig.runtime.reload_outcome(ticket) == (
+            "invalidated" if boundary in ("instance", "reset") else None
+        )
+        if boundary in ("connection", "deletion"):
+            assert not ticket["busy"] and not ticket["terminal"]
+    finally:
+        rig.close()
+
+
+@pytest.mark.parametrize("delayed", [False, True])
+def test_rejected_publication_clears_only_its_pending_candidate_and_notifies_worker(
+    config, monkeypatch, delayed
+):
+    """Follow real Runtime -> Supervisor -> worker bookkeeping, preserving eligibility and permitting retry."""
+    rig = Rig(0.02)
+    supervisor = Supervisor(rig.runtime, config)
+    worker = NumericalWorker(supervisor.desired)
+    supervisor.worker = worker
+    previous, previous_model = bundle(supervisor, "previous", worker.session)
+    candidate, model = bundle(supervisor, "candidate", worker.session)
+    generation = supervisor.record["generation"]
+    supervisor.publish(previous, generation, threading.Event())
+    eligible = deepcopy(supervisor.record["eligible"])
+    command = rig.command
+
+    def rejection():
+        """Publish the same immediate native rejection without inventing Busy."""
+        prop = rig.props["po4ao", "reload_engine"]
+        prop.state = C.PropertyState.ALERT
+        rig.emit(prop)
+
+    monkeypatch.setattr(
+        rig, "command", lambda message: None if delayed else rejection()
+    )
+    try:
+        with pytest.raises(TimeoutError if delayed else RuntimeError):
+            supervisor.execute(
+                "publish", {"path": str(candidate)}, threading.Event(), generation
+            )
+        if delayed:
+            assert supervisor.record["pending"]["model_id"] == model
+            assert worker.session.policy_update.pending[0] == model
+            rejection()
+            supervisor.tick()
+        assert rig.loading is None
+        assert rig.runtime.runtime_state()["active_id"] == previous_model
+        saved = json.loads(supervisor.record_path.read_text())
+        assert saved["eligible"] == eligible
+        assert saved["pending"] is None and supervisor.publication is None
+        assert worker.session.policy_update.pending is None
+        outcomes = [
+            m for m in worker.messages
+            if m.get("candidate_outcome_path") == str(candidate)
+        ]
+        assert len(outcomes) == 1 and outcomes[0]["candidate_outcome"] == "failed"
+        supervisor.tick()
+        assert sum(
+            m.get("candidate_outcome_path") == str(candidate) for m in worker.messages
+        ) == 1
+        monkeypatch.setattr(rig, "command", command)
+        assert supervisor.publish(candidate, generation, threading.Event()) == model
+        assert supervisor.record["eligible"]["model_id"] == model
+        assert supervisor.record["pending"] is None
     finally:
         supervisor.close()
         rig.close()
