@@ -29,8 +29,8 @@ int main( int   argc, /**< [in] Argument count. */
     }
     QTextStream stream( &file );
     app.setStyleSheet( stream.readAll() );
-    multiIndiManager  manager( runtime, "127.0.0.1", 7624 );
-    xqt::po4ao panel( trainer, nullptr, runtime, nn );
+    multiIndiManager manager( runtime, "127.0.0.1", 7624 );
+    xqt::po4ao       panel( trainer, nullptr, runtime, nn );
     manager.addSubscriber( &panel );
     manager.activate();
     panel.show();

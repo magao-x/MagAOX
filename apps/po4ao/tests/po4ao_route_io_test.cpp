@@ -38,7 +38,9 @@ void writerRecord( bool running /**< [in] Whether the fake writer is running. */
     std::ofstream process( proc + "/stat" );
     process << getpid() << " (fake writer) S";
     for( int field = 4; field < 22; ++field )
+    {
         process << " 0";
+    }
     process << " " << generation << " 0\n";
     std::ofstream( proc + "/cmdline" ) << "milk-wfs2cmodeval-1";
     const std::string path = ".build/routing/shm/wfs2cmodeval-1.fps.shm";
@@ -57,7 +59,9 @@ void fixture()
     writerRecord( false );
     fs::create_directories( ".build/routing/tweeter-vispyr-calibs/default" );
     for( const auto *name : { "aol1_modevalWFS", "po4ao_output" } )
+    {
         std::ofstream( ".build/routing/shm/" + std::string( name ) + ".im.shm" ) << "source";
+    }
     fs::create_symlink( fs::absolute( ".build/routing/shm/aol1_modevalWFS.im.shm" ),
                         ".build/routing/shm/aol1_mfiltINPUT.im.shm" );
     std::ofstream( ".build/routing/shm/aol1_calib_source.txt" )
@@ -67,7 +71,9 @@ void fixture()
         << "#!/bin/sh\nln -sfn \"$PWD/../shm/$1.im.shm\" ../shm/aol1_mfiltINPUT.im.shm\n";
     std::ofstream( ".build/routing/root/calibrate.sh" ) << "#!/bin/sh\necho after > ../shm/aol1_calib_loaded.txt\n";
     for( const auto *name : { "switch.sh", "calibrate.sh" } )
+    {
         fs::permissions( ".build/routing/root/" + std::string( name ), fs::perms::owner_all );
+    }
     FUNCTION_PARAMETER_STRUCT_MD md{};
     std::strcpy( md.name, "mfilt-1" );
     md.NBparamMAX = 2;
@@ -231,13 +237,19 @@ TEST_CASE( "Calibration waits for a fresh writer process", "[po4ao][routingIO]" 
     // The old writer has stopped, but the queued start has not executed.
     writerRecord( false );
     const auto  deadline  = std::chrono::steady_clock::now() + std::chrono::seconds( 3 );
-    auto        completed = std::async( std::launch::async, [&] { io.applyDefault( deadline ); } );
+    auto        completed = std::async( std::launch::async,
+                                        [&]
+                                        {
+                                     io.applyDefault( deadline );
+                                        } );
     std::string marker;
     do
     {
         std::ifstream( ".build/routing/shm/aol1_calib_loaded.txt" ) >> marker;
         if( marker == "after" )
+        {
             break;
+        }
         std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
     } while( std::chrono::steady_clock::now() < deadline );
     REQUIRE( marker == "after" );

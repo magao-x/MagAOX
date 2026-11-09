@@ -28,7 +28,9 @@ takePendingModel( std::atomic<Model *> &pending /**< [in,out] Candidate awaiting
                   uint64_t              generation /**< [in] Currently accepted reload generation. */ )
 {
     if( retired.load( std::memory_order_acquire ) != nullptr )
+    {
         return nullptr;
+    }
     Model *candidate = pending.exchange( nullptr, std::memory_order_acq_rel );
     if( candidate != nullptr && candidate->generation != generation )
     {
@@ -152,19 +154,25 @@ inline uint64_t WarmupCollection::frames() const
 inline void WarmupCollection::validate( uint64_t control, uint64_t model, uint64_t reset, bool consecutive )
 {
     if( control != m_control || model != m_model || reset != m_reset || !consecutive )
+    {
         interrupt( generation( token() ) );
+    }
 }
 
 inline void WarmupCollection::emitted()
 {
     uint64_t current = token();
     if( phase( current ) != CollectionPhase::collecting )
+    {
         return;
+    }
     if( m_frames.fetch_add( 1, std::memory_order_acq_rel ) + 1 >= m_target )
+    {
         m_token.compare_exchange_strong( current,
                                          ( generation( current ) << 3 ) |
                                              static_cast<uint64_t>( CollectionPhase::publishing ),
                                          std::memory_order_acq_rel );
+    }
 }
 
 inline void WarmupCollection::interrupt( uint64_t generation )
@@ -176,7 +184,9 @@ inline void WarmupCollection::interrupt( uint64_t generation )
         if( m_token.compare_exchange_weak( current,
                                            ( generation << 3 ) | static_cast<uint64_t>( CollectionPhase::interrupted ),
                                            std::memory_order_acq_rel ) )
+        {
             break;
+        }
     }
 }
 
@@ -197,7 +207,9 @@ inline bool applyLinearLocalPolicy( float       *output /**< [out] Controlled mo
 {
     if( output == nullptr || input == nullptr || weights == nullptr || features == 0 || controlledModes == 0 ||
         controlledModes > trainedModes )
+    {
         return false;
+    }
 
     for( size_t mode = 0; mode < controlledModes; ++mode )
     {
@@ -258,11 +270,15 @@ inline bool CircularBuffer::selfTest()
 
     buf.add( f1 );
     if( buf.size() != 1 || buf.getItem( 0 )[0] != 1.F )
+    {
         return false;
+    }
     buf.add( f2 );
     buf.add( f3 );
     if( buf.size() != 3 || buf.getItem( 0 )[0] != 20.F || buf.getItem( 2 )[0] != 1.F )
+    {
         return false;
+    }
     buf.add( f4 );
     return buf.size() == 3 && buf.getItem( 2 )[0] == 10.F && buf.getItem( 3 ) == nullptr;
 }
@@ -270,7 +286,9 @@ inline bool CircularBuffer::selfTest()
 inline void CircularBuffer::add( const float *sample )
 {
     if( m_historySize == 0 )
+    {
         return;
+    }
     memcpy( &m_buffer[( m_head % m_historySize ) * m_sampleSize], sample, sizeof( float ) * m_sampleSize );
     ++m_head;
 }
@@ -288,7 +306,9 @@ inline size_t CircularBuffer::size() const
 inline const float *CircularBuffer::getItem( size_t age ) const
 {
     if( m_historySize == 0 || age >= size() )
+    {
         return nullptr;
+    }
     const size_t index = ( m_head + m_historySize - 1 - age ) % m_historySize;
     return m_buffer.get() + index * m_sampleSize;
 }
@@ -337,7 +357,9 @@ inline void EpisodeBuffer::reset()
 inline bool EpisodeBuffer::add( const float *observation, const float *command )
 {
     if( count >= capacity )
+    {
         return false;
+    }
     memcpy( observations.data() + count * modes, observation, modes * sizeof( float ) );
     memcpy( commands.data() + count * modes, command, modes * sizeof( float ) );
     ++count;
@@ -353,12 +375,16 @@ inline bool assemblePolicyInput( float                *destination /**< [out] Co
 {
     if( destination == nullptr || historyLength == 0 || observations.size() < historyLength ||
         commands.size() + 1 < historyLength )
+    {
         return false;
+    }
 
     size_t feature = 0;
     memcpy( destination + feature++ * modes, observations.getItem( 0 ), modes * sizeof( float ) );
     for( size_t age = historyLength - 1; age > 0; --age )
+    {
         memcpy( destination + feature++ * modes, observations.getItem( age ), modes * sizeof( float ) );
+    }
     for( size_t offset = 0; offset + 1 < historyLength; ++offset )
     {
         const size_t age = historyLength - 2 - offset;
@@ -376,7 +402,9 @@ inline bool finiteFloat( float value /**< [in] Value to classify. */ )
     auto                         *destination = reinterpret_cast<unsigned char *>( &bits );
     const volatile unsigned char *source      = reinterpret_cast<const volatile unsigned char *>( &value );
     for( size_t byte = 0; byte < sizeof( bits ); ++byte )
+    {
         destination[byte] = source[byte];
+    }
     return ( bits & 0x7F800000U ) != 0x7F800000U;
 }
 
@@ -389,13 +417,19 @@ inline bool blendPolicyCommand( float       *command /**< [in,out] Learned comma
 {
     if( command == nullptr || observation == nullptr || controlledModes == 0 || !finiteFloat( integratorGain ) ||
         !finiteFloat( policyBlend ) || policyBlend < 0.F || policyBlend > 1.F )
+    {
         return false;
+    }
     if( policyBlend == 1.F )
+    {
         return true;
+    }
 
     const float fallbackBlend = 1.F - policyBlend;
     for( size_t mode = 0; mode < controlledModes; ++mode )
+    {
         command[mode] = policyBlend * command[mode] + fallbackBlend * integratorGain * observation[mode];
+    }
     return true;
 }
 
@@ -405,12 +439,16 @@ inline bool limitCommand( float *command /**< [in,out] Differential modal comman
                           float  absoluteLimit /**< [in] Maximum absolute modal value. */ )
 {
     if( command == nullptr || modes == 0 || absoluteLimit <= 0.F )
+    {
         return false;
+    }
 
     for( size_t mode = 0; mode < modes; ++mode )
     {
         if( !finiteFloat( command[mode] ) )
+        {
             return false;
+        }
         command[mode] = std::max( -absoluteLimit, std::min( absoluteLimit, command[mode] ) );
     }
     return true;
@@ -428,7 +466,9 @@ inline void addExploration( float       *command /**< [in,out] Base controller o
     const float progress = total > 1 ? std::min( 1.F, static_cast<float>( frame ) / ( total - 1 ) ) : 1.F;
     const float sigma    = start + progress * ( end - start );
     for( size_t mode = 0; mode < modes; ++mode )
+    {
         command[mode] += sigma * noise[mode];
+    }
 }
 
 /// Limit the controlled modal prefix and copy all remaining observations unchanged.
@@ -440,12 +480,16 @@ inline bool finalizeControlledCommand( float       *command /**< [in,out] Full-s
 {
     if( command == nullptr || observation == nullptr || controlledModes == 0 || controlledModes > totalModes ||
         !limitCommand( command, controlledModes, absoluteLimit ) )
+    {
         return false;
+    }
 
     for( size_t mode = controlledModes; mode < totalModes; ++mode )
     {
         if( !finiteFloat( observation[mode] ) )
+        {
             return false;
+        }
         command[mode] = observation[mode];
     }
     return true;
@@ -513,13 +557,17 @@ inline Po4aoStatistics Po4aoSamples::snapshot( uint64_t previous ) const
     {
         const auto &sample = m_samples[( sequence - 1 ) % m_samples.size()];
         if( sample.sequence.load() != sequence )
+        {
             continue;
+        }
         const auto duration = sample.duration.load();
         const auto identity = sample.model.load();
         const auto kind     = sample.backend.load();
         const auto time     = sample.timeNs.load();
         if( sample.sequence.load() != sequence )
+        {
             continue;
+        }
         result.mixed |= !values.empty() && ( identity != result.model || kind != result.backend );
         result.model   = identity;
         result.backend = kind;

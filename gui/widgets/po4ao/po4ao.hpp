@@ -82,9 +82,9 @@ class po4ao : public xWidget
   public:
     /// Construct one panel for C++ inference and an optional companion.
     explicit po4ao( const std::string &device,                  /**< [in] Companion device name. */
-                           QWidget           *parent        = nullptr, /**< [in] Optional Qt parent. */
-                           const std::string &runtimeDevice = "po4ao", /**< [in] C++ PO4AO device. */
-                           const std::string &nnDevice      = "nnReconstructor" /**< [in] Independent NN device. */ );
+                    QWidget           *parent        = nullptr, /**< [in] Optional Qt parent. */
+                    const std::string &runtimeDevice = "po4ao", /**< [in] C++ PO4AO device. */
+                    const std::string &nnDevice      = "nnReconstructor" /**< [in] Independent NN device. */ );
 
     /// Attach named property subscriptions through the existing publisher.
     void subscribe() override;
@@ -213,48 +213,64 @@ class po4ao : public xWidget
 };
 
 inline po4ao::po4ao( const std::string &device,
-                                   QWidget           *parent,
-                                   const std::string &runtimeDevice,
-                                   const std::string &nnDevice )
+                     QWidget           *parent,
+                     const std::string &runtimeDevice,
+                     const std::string &nnDevice )
     : xWidget( parent ), m_device( device ), m_runtimeDevice( runtimeDevice ), m_nnDevice( nnDevice )
 {
     m_ui.setupUi( this );
     setWindowTitle( "PO4AO / NN" );
     setXwFont( this );
     for( auto *label : { m_ui.labelCommandRegularization, m_ui.labelDeltaRegularization, m_ui.labelLearningRate } )
+    {
         label->setMinimumHeight( 2 * label->fontMetrics().height() );
+    }
     m_statusTimer.setInterval( 500 );
     connect( &m_statusTimer, &QTimer::timeout, this, &po4ao::updateGUI );
     m_statusTimer.start();
     m_ackTimer.setSingleShot( true );
     m_ackTimer.setInterval( 10000 );
     connect( &m_ackTimer, &QTimer::timeout, this, &po4ao::acknowledgementTimeout );
-    connect(
-        m_ui.comboEngine, QOverload<int>::of( &QComboBox::currentIndexChanged ), this, [this]( int ) { updateGUI(); } );
+    connect( m_ui.comboEngine,
+             QOverload<int>::of( &QComboBox::currentIndexChanged ),
+             this,
+             [this]( int )
+             {
+                 updateGUI();
+             } );
     connect( m_ui.comboPolicy,
              QOverload<int>::of( &QComboBox::currentIndexChanged ),
              this,
              [this]( int index )
              {
                  if( index >= 0 )
+                 {
                      m_policySelection = m_ui.comboPolicy->currentData().toString();
+                 }
                  updateGUI();
              } );
     for( const auto &entry :
          std::map<std::string, statusLineEdit *>{ { "command_regularization", m_ui.entryCommandRegularization },
                                                   { "delta_policy_regularization", m_ui.entryDeltaRegularization },
                                                   { "policy_learning_rate", m_ui.entryLearningRate } } )
+    {
         connect( entry.second,
                  &QLineEdit::returnPressed,
                  this,
-                 [this, entry]() { submitParameter( entry.first, entry.second ); } );
+                 [this, entry]()
+                 {
+                     submitParameter( entry.first, entry.second );
+                 } );
+    }
     updateGUI();
 }
 
 inline void po4ao::subscribe()
 {
     if( m_parent == nullptr )
+    {
         return;
+    }
     for( const auto *name : { "fsm",
                               "devices",
                               "po4ao_enable",
@@ -270,7 +286,9 @@ inline void po4ao::subscribe()
                               "policy_catalog",
                               "set_policy",
                               "save_policy" } )
+    {
         m_parent->addSubscriberProperty( this, m_device, name );
+    }
     for( const auto *name : { "fsm",
                               "run_enable",
                               "run_status",
@@ -280,8 +298,11 @@ inline void po4ao::subscribe()
                               "reload_engine",
                               "model_status",
                               "collection_status" } )
+    {
         m_parent->addSubscriberProperty( this, m_runtimeDevice, name );
+    }
     if( !m_nnDevice.empty() )
+    {
         for( const auto *name : { "fsm",
                                   "model",
                                   "model_status",
@@ -289,7 +310,10 @@ inline void po4ao::subscribe()
                                   "reconstructor",
                                   "link_modulation",
                                   "reconstruction_status" } )
+        {
             m_parent->addSubscriberProperty( this, m_nnDevice, name );
+        }
+    }
 }
 
 inline void po4ao::onConnect()
@@ -323,27 +347,38 @@ inline void po4ao::onDisconnect()
     updateGUI();
 }
 
-inline std::string
-po4ao::value( const std::string &device, const std::string &name, const std::string &element ) const
+inline std::string po4ao::value( const std::string &device, const std::string &name, const std::string &element ) const
 {
     const auto found = m_properties.find( device + "." + name );
     if( found == m_properties.end() || !found->second.find( element ) )
+    {
         return {};
+    }
     return found->second[element].get();
 }
 
 inline QString po4ao::stateLabel( const std::string &state )
 {
     if( state.empty() )
+    {
         return "Unknown";
+    }
     if( state == "nn" )
+    {
         return "CNN";
+    }
     if( state == "cacao" )
+    {
         return "CACAO";
+    }
     if( state == "po4ao" )
+    {
         return "PO4AO";
+    }
     if( state == "waiting" )
+    {
         return "Waiting for data";
+    }
     auto label = QString::fromStdString( state );
     label[0]   = label[0].toUpper();
     return label;
@@ -355,20 +390,26 @@ inline std::string po4ao::status( const std::string &element ) const
 }
 
 inline bool po4ao::commandAvailable( const std::string                  &name,
-                                            pcf::IndiProperty::Type             type,
-                                            std::initializer_list<const char *> elements,
-                                            const std::string                  &device,
-                                            bool                                supersede ) const
+                                     pcf::IndiProperty::Type             type,
+                                     std::initializer_list<const char *> elements,
+                                     const std::string                  &device,
+                                     bool                                supersede ) const
 {
     const auto key   = ( device.empty() ? m_device : device ) + "." + name;
     const auto found = m_properties.find( key );
     if( !m_connected || !m_defined.count( key ) || found == m_properties.end() || found->second.getType() != type ||
         found->second.getPerm() == pcf::IndiProperty::ReadOnly || !found->second.hasValidPerm() ||
         ( !supersede && ( found->second.getState() == pcf::IndiProperty::Busy || m_pending.count( key ) ) ) )
+    {
         return false;
+    }
     for( const auto *element : elements )
+    {
         if( !found->second.find( element ) )
+        {
             return false;
+        }
+    }
     return true;
 }
 
@@ -380,7 +421,9 @@ inline bool po4ao::busy( std::initializer_list<const char *> names, const std::s
         const auto found = m_properties.find( key );
         if( m_pending.count( key ) ||
             ( found != m_properties.end() && found->second.getState() == pcf::IndiProperty::Busy ) )
+        {
             return true;
+        }
     }
     return false;
 }
@@ -426,14 +469,18 @@ inline void po4ao::syncPolicies()
     const auto key   = m_device + ".policy_catalog";
     const auto found = m_properties.find( key );
     if( m_defined.count( key ) && found != m_properties.end() && found->second.getType() == pcf::IndiProperty::Text )
+    {
         for( const auto &entry : found->second.getElements() )
         {
             if( entry.first == "none" )
+            {
                 continue;
+            }
             const auto label = QString::fromStdString( entry.second.get() );
             m_ui.comboPolicy->addItem( label, QString::fromStdString( entry.first ) );
             m_ui.comboPolicy->setItemData( m_ui.comboPolicy->count() - 1, label, Qt::ToolTipRole );
         }
+    }
     m_ui.comboPolicy->setCurrentIndex( m_ui.comboPolicy->findData( selected ) );
 }
 
@@ -479,7 +526,9 @@ inline void po4ao::updateTrainingControls( bool ready )
         const bool pending = found->second.getState() == pcf::IndiProperty::Busy || m_pending.count( key );
         const auto text    = QString::fromStdString( current );
         if( entry.second->currText() != text )
+        {
             entry.second->setTextChanged( text );
+        }
         entry.second->setToolTip( QString::fromStdString( "Current: " + current + "  Requested: " + target +
                                                           ( pending ? " (pending until iteration boundary)" : "" ) ) );
     }
@@ -488,7 +537,9 @@ inline void po4ao::updateTrainingControls( bool ready )
 inline void po4ao::submitParameter( const std::string &name, statusLineEdit *entry )
 {
     if( !entry->isEnabled() || !trainerReady() )
+    {
         return;
+    }
     bool         valid  = false;
     const double number = entry->text().toDouble( &valid );
     if( !valid || !std::isfinite( number ) || number < 0 || ( name == "policy_learning_rate" && number == 0 ) )
@@ -506,7 +557,9 @@ inline void po4ao::submitParameter( const std::string &name, statusLineEdit *ent
 inline void po4ao::on_buttonSetPolicy_clicked()
 {
     if( !m_ui.buttonSetPolicy->isEnabled() )
+    {
         return;
+    }
     pcf::IndiProperty property( pcf::IndiProperty::Text, m_device, "set_policy" );
     property.add( pcf::IndiElement( "id", m_ui.comboPolicy->currentData().toString().toStdString() ) );
     submit( property );
@@ -515,12 +568,16 @@ inline void po4ao::on_buttonSetPolicy_clicked()
 inline void po4ao::on_buttonSavePolicy_clicked()
 {
     if( !m_ui.buttonSavePolicy->isEnabled() )
+    {
         return;
+    }
     bool       accepted = false;
     const auto label =
         QInputDialog::getText( this, "Save policy", "Label (optional):", QLineEdit::Normal, "", &accepted );
     if( !accepted )
+    {
         return;
+    }
     pcf::IndiProperty property( pcf::IndiProperty::Text, m_device, "save_policy" );
     property.add( pcf::IndiElement( "label", label.trimmed().toStdString() ) );
     submit( property );
@@ -568,15 +625,21 @@ inline void po4ao::acknowledge( const pcf::IndiProperty &property )
         {
             m_message = property.getState() == pcf::IndiProperty::Alert ? "Request failed; check backend status" : "";
             if( pending->first == resetKey )
+            {
                 m_nativeResetPending = false;
+            }
             m_pending.erase( pending );
         }
     }
     bool waiting = false;
     for( const auto &request : m_pending )
+    {
         waiting |= !request.second;
+    }
     if( !waiting )
+    {
         m_ackTimer.stop();
+    }
 }
 
 inline void po4ao::updateRoute( bool managed )
@@ -593,11 +656,17 @@ inline void po4ao::updateRoute( bool managed )
                                   "reset_model",
                                   "recollect_warmup",
                                   "reload_engine" } )
+        {
             if( busy( { name }, previous ) )
+            {
                 m_routePending.insert( previous + "." + name );
+            }
+        }
         const auto phase = status( "training_phase" );
         if( m_managed && !phase.empty() && phase != "idle" && phase != "error" )
+        {
             m_routePending.insert( m_device + ".status" ); // Automatic publication has no command vector.
+        }
         m_managed = managed;
     }
     const auto prefix = ( managed ? m_device : m_runtimeDevice ) + ".";
@@ -610,9 +679,13 @@ inline void po4ao::updateRoute( bool managed )
         if( pending->compare( 0, prefix.size(), prefix ) == 0 ||
             ( !m_pending.count( *pending ) && !phasePending &&
               ( property == m_properties.end() || property->second.getState() != pcf::IndiProperty::Busy ) ) )
+        {
             pending = m_routePending.erase( pending );
+        }
         else
+        {
             ++pending;
+        }
     }
 }
 
@@ -644,7 +717,9 @@ inline void po4ao::observeHeartbeat( const pcf::IndiProperty &property )
         {
             const auto heartbeat = property["heartbeat"].get();
             if( !m_nnHeartbeat.empty() && heartbeat != m_nnHeartbeat )
+            {
                 m_nnAge.start();
+            }
             m_nnHeartbeat = heartbeat;
         }
     }
@@ -667,15 +742,21 @@ inline void po4ao::observeHeartbeat( const pcf::IndiProperty &property )
         {
             const auto sequence = property["sequence"].get();
             if( !m_runtimeSequence.empty() && sequence != m_runtimeSequence )
+            {
                 m_runtimeAge.start();
+            }
             m_runtimeSequence = sequence;
         }
     }
     if( property.getDevice() != m_device || property.getName() != "status" || !property.find( "heartbeat" ) )
+    {
         return;
+    }
     const auto heartbeat = property["heartbeat"].get();
     if( m_haveHeartbeat && heartbeat != m_lastHeartbeat )
+    {
         m_heartbeatAge.start();
+    }
     m_lastHeartbeat = heartbeat;
     m_haveHeartbeat = true;
 }
@@ -684,13 +765,17 @@ inline void po4ao::handleDefProperty( const pcf::IndiProperty &property )
 {
     if( property.getDevice() != m_device && property.getDevice() != m_nnDevice &&
         property.getDevice() != m_runtimeDevice )
+    {
         return;
+    }
     observeHeartbeat( property );
     m_properties[property.createUniqueKey()] = property;
     m_defined.insert( property.createUniqueKey() );
     acknowledge( property );
     if( property.getDevice() == m_nnDevice && property.getName() == "model" )
+    {
         syncModels();
+    }
     syncPolicies();
     updateGUI();
 }
@@ -699,27 +784,39 @@ inline void po4ao::handleSetProperty( const pcf::IndiProperty &property )
 {
     if( property.getDevice() != m_device && property.getDevice() != m_nnDevice &&
         property.getDevice() != m_runtimeDevice )
+    {
         return;
+    }
     observeHeartbeat( property );
     const auto key   = property.createUniqueKey();
     auto       found = m_properties.find( key );
     if( found == m_properties.end() )
+    {
         m_properties.emplace( key, property );
+    }
     else
     {
         for( const auto &entry : property.getElements() )
         {
             if( found->second.find( entry.first ) )
+            {
                 found->second[entry.first] = entry.second;
+            }
             else
+            {
                 found->second.add( entry.second );
+            }
         }
         if( property.hasValidState() )
+        {
             found->second.setState( property.getState() );
+        }
     }
     acknowledge( property );
     if( property.getDevice() == m_device && property.getName() == "policy_catalog" )
+    {
         syncPolicies();
+    }
     updateGUI();
 }
 
@@ -727,9 +824,12 @@ inline void po4ao::handleDelProperty( const pcf::IndiProperty &property )
 {
     if( property.getDevice() != m_device && property.getDevice() != m_nnDevice &&
         property.getDevice() != m_runtimeDevice )
+    {
         return;
+    }
     const bool whole = property.getName().empty() || property.getName() == "fsm";
     for( auto entry = m_properties.begin(); entry != m_properties.end(); )
+    {
         if( entry->second.getDevice() == property.getDevice() &&
             ( whole || entry->second.getName() == property.getName() ) )
         {
@@ -737,7 +837,10 @@ inline void po4ao::handleDelProperty( const pcf::IndiProperty &property )
             entry = m_properties.erase( entry );
         }
         else
+        {
             ++entry;
+        }
+    }
     if( property.getDevice() == m_device )
     {
         if( whole || property.getName() == "status" )
@@ -763,17 +866,27 @@ inline void po4ao::handleDelProperty( const pcf::IndiProperty &property )
             m_pending.erase( m_runtimeDevice + ".reset_model" );
         }
         if( property.getName() == "reset_model" )
+        {
             m_nativeResetPending = false;
+        }
     }
     const auto prefix = property.getDevice() + ".";
     for( auto pending = m_pending.begin(); pending != m_pending.end(); )
+    {
         if( ( whole && pending->first.compare( 0, prefix.size(), prefix ) == 0 ) ||
             pending->first == property.createUniqueKey() )
+        {
             pending = m_pending.erase( pending );
+        }
         else
+        {
             ++pending;
+        }
+    }
     if( m_pending.empty() )
+    {
         m_ackTimer.stop();
+    }
     syncModels();
     syncPolicies();
     updateGUI();
@@ -872,10 +985,14 @@ inline void po4ao::updateGUI()
                                    commandAvailable( "recollect", pcf::IndiProperty::Switch, { "request" } ) );
     QString collectionText = ready ? stateLabel( collection ) : "Unknown";
     if( ready && collection == "collecting" )
+    {
         collectionText +=
             QString::fromStdString( " " + status( "collection_frames" ) + "/" + status( "collection_target" ) );
+    }
     if( status( "warmup_required" ) == "yes" && collection != "collecting" )
+    {
         collectionText = "Fresh warmup required";
+    }
     m_ui.labelCollection->setText( collectionText );
     const bool running = learning == "running" || learning == "waiting";
     const bool paused  = learning == "paused" || learning == "completed";
@@ -896,19 +1013,31 @@ inline void po4ao::updateGUI()
     m_ui.labelIteration->setText( "Iteration: " + QString::fromStdString( iteration.empty() ? "—" : iteration ) );
     std::string message = m_message.empty() ? status( "message" ) : m_message;
     if( runtimePending )
+    {
         message = "Waiting for native PO4AO command completion";
+    }
     if( !status( "error" ).empty() )
+    {
         message = status( "error" );
+    }
     const auto configError   = value( m_device, "training_config", "error" );
     const auto pendingConfig = value( m_device, "training_config", "pending_reset" );
     if( !configError.empty() )
+    {
         message += "  Config: " + configError;
+    }
     else if( !pendingConfig.empty() )
+    {
         message += "  Configuration change requires Reset";
+    }
     if( busy( { "command_regularization", "delta_policy_regularization", "policy_learning_rate" } ) )
+    {
         message += paused ? "  Parameter edits pending until learning resumes" : "  Parameter edits pending";
+    }
     if( nnReady() && !nnStatus( "error" ).empty() )
+    {
         message += "  NN: " + nnStatus( "error" );
+    }
     m_ui.labelStatus->setText( QString::fromStdString( message.empty() ? "Status: —" : message ) );
     m_ui.labelStatus->setToolTip( QString::fromStdString( message ) );
 }
@@ -956,8 +1085,10 @@ inline void po4ao::updateRuntimeGUI()
     m_ui.labelController->setText( stateLabel( controller ) );
     QString collection = ready ? stateLabel( value( m_runtimeDevice, "collection_status", "state" ) ) : "Unknown";
     if( ready )
+    {
         collection += QString::fromStdString( " " + value( m_runtimeDevice, "collection_status", "frames" ) + "/" +
                                               value( m_runtimeDevice, "collection_status", "target_frames" ) );
+    }
     m_ui.labelCollection->setText( collection );
     const auto loaded    = ready ? value( m_runtimeDevice, "model_status", "active_id" ) : std::string{};
     const auto effective = ready ? value( m_runtimeDevice, "model_status", "effective_id" ) : std::string{};
@@ -967,13 +1098,19 @@ inline void po4ao::updateRuntimeGUI()
     std::string message = trainerPending ? "Trainer request unresolved; awaiting acknowledgement" : m_message;
     const auto  error   = ready ? value( m_runtimeDevice, "model_status", "reload_error" ) : std::string{};
     if( !error.empty() )
+    {
         message = error;
+    }
     else if( message.empty() )
+    {
         message = m_nativeResetPending ? "Reset pending: waiting for runtime completion"
                   : ready              ? "Reload: " + value( m_runtimeDevice, "model_status", "reload" )
                                        : "Waiting for runtime readback";
+    }
     if( nnReady() && !nnStatus( "error" ).empty() )
+    {
         message += "  NN: " + nnStatus( "error" );
+    }
     m_ui.labelStatus->setText( QString::fromStdString( message ) );
     m_ui.labelStatus->setToolTip( m_ui.labelStatus->text() );
 }
@@ -983,7 +1120,9 @@ inline void po4ao::submit( const pcf::IndiProperty &property )
     m_pending[property.createUniqueKey()] = false;
     m_message                             = "Awaiting acknowledgement";
     if( !m_ackTimer.isActive() )
+    {
         m_ackTimer.start();
+    }
     updateGUI();
     sendNewProperty( property );
 }
@@ -1000,7 +1139,9 @@ inline void po4ao::on_buttonEnableNN_clicked()
 {
     updateGUI();
     if( !m_ui.buttonEnableNN->isEnabled() )
+    {
         return;
+    }
     pcf::IndiProperty property( pcf::IndiProperty::Text, m_nnDevice, "nn_activate" );
     property.add( pcf::IndiElement( "model", m_ui.comboEngine->currentData().toString().toStdString() ) );
     submit( property );
@@ -1010,7 +1151,9 @@ inline void po4ao::on_buttonReconstructor_clicked()
 {
     updateGUI();
     if( !m_ui.buttonReconstructor->isEnabled() )
+    {
         return;
+    }
     pcf::IndiProperty property( pcf::IndiProperty::Text, m_nnDevice, "reconstructor" );
     property.add( pcf::IndiElement( "target", nnStatus( "reconstructor" ) == "cacao" ? "nn" : "cacao" ) );
     property.add( pcf::IndiElement( "expected", nnStatus( "reconstructor" ) ) );
@@ -1020,29 +1163,39 @@ inline void po4ao::on_buttonReconstructor_clicked()
 inline void po4ao::on_checkModulation_clicked( bool checked )
 {
     if( m_ui.checkModulation->isEnabled() )
+    {
         submitSwitch( "link_modulation", "toggle", checked, m_nnDevice );
+    }
 }
 
 inline void po4ao::on_buttonPO4AO_clicked()
 {
     updateGUI();
     if( !m_ui.buttonPO4AO->isEnabled() )
+    {
         return;
+    }
     if( m_managed )
+    {
         submitSwitch( "po4ao_enable", "toggle", status( "controller" ) == "integrator" );
+    }
     else
+    {
         submitSwitch( "control_enable",
                       "toggle",
                       m_properties.at( m_runtimeDevice + ".control_enable" )["toggle"].getSwitchState() !=
                           pcf::IndiElement::On,
                       m_runtimeDevice );
+    }
 }
 
 inline void po4ao::on_buttonRunPO4AO_clicked()
 {
     updateGUI();
     if( !m_ui.buttonRunPO4AO->isEnabled() )
+    {
         return;
+    }
     const bool running =
         m_properties.at( m_runtimeDevice + ".run_enable" )["toggle"].getSwitchState() == pcf::IndiElement::On;
     submitSwitch( "run_enable", "toggle", !running, m_runtimeDevice );
@@ -1052,9 +1205,13 @@ inline void po4ao::on_buttonReset_clicked()
 {
     updateGUI();
     if( !m_ui.buttonReset->isEnabled() )
+    {
         return;
+    }
     if( m_managed )
+    {
         submitSwitch( "reset", "request", true );
+    }
     else
     {
         m_nativeResetAfter =
@@ -1073,18 +1230,26 @@ inline void po4ao::on_buttonWarmup_clicked()
 {
     updateGUI();
     if( !m_ui.buttonWarmup->isEnabled() )
+    {
         return;
+    }
     if( m_managed )
+    {
         submitSwitch( "recollect", "request", true );
+    }
     else
+    {
         submitSwitch( "recollect_warmup", "toggle", true, m_runtimeDevice );
+    }
 }
 
 inline void po4ao::on_buttonLearning_clicked()
 {
     updateGUI();
     if( !m_ui.buttonLearning->isEnabled() )
+    {
         return;
+    }
     const bool        run = status( "learning" ) != "running" && status( "learning" ) != "waiting";
     pcf::IndiProperty property( pcf::IndiProperty::Switch, m_device, "learning" );
     property.add( pcf::IndiElement( "run", run ? pcf::IndiElement::On : pcf::IndiElement::Off ) );

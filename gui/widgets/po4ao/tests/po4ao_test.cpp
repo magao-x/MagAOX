@@ -98,7 +98,9 @@ pcf::IndiProperty text( const std::string                                       
     property.setPerm( pcf::IndiProperty::ReadWrite );
     property.setState( pcf::IndiProperty::Ok );
     for( const auto &entry : elements )
+    {
         property.add( pcf::IndiElement( entry.first, entry.second ) );
+    }
     return property;
 }
 
@@ -143,7 +145,9 @@ Fixture::Fixture( bool companion )
     m_publisher.onConnect();
     drain();
     if( companion )
+    {
         ready();
+    }
 }
 
 void Fixture::ready()
@@ -161,9 +165,11 @@ void Fixture::ready()
             property.add( pcf::IndiElement( "pause", pcf::IndiElement::On ) );
         }
         else
+        {
             property.add( pcf::IndiElement(
                 std::string( name ) == "reset" || std::string( name ) == "recollect" ? "request" : "toggle",
                 pcf::IndiElement::Off ) );
+        }
         define( property );
     }
     nn();
@@ -250,11 +256,15 @@ void Fixture::status( std::initializer_list<std::pair<std::string, std::string>>
 {
     m_publisher.handleSetProperty( text( "trainer", "status", elements ) );
     for( const auto &entry : elements )
+    {
         if( entry.first == "reconstructor" || entry.first == "reconstruction_phase" )
+        {
             m_publisher.handleSetProperty(
                 text( "nn_test",
                       "reconstruction_status",
                       { { entry.first == "reconstruction_phase" ? "phase" : entry.first, entry.second } } ) );
+        }
+    }
     drain();
 }
 
@@ -386,7 +396,9 @@ TEST_CASE( "Modulation and PO4AO requests use independent backends", "[po4ao]" )
     f.m_widget.on_buttonReset_clicked(); // Reset remains available to cancel a running operation.
     REQUIRE( f.m_publisher.m_commands.back().getName() == "reset" );
     for( const auto &command : f.m_publisher.m_commands )
+    {
         REQUIRE( command.getDevice() == ( command.getName() == "link_modulation" ? "nn_test" : "trainer" ) );
+    }
 }
 
 /** \brief Unknown/conflicting reconstructor evidence is not interpreted as CACAO active. */
@@ -511,7 +523,7 @@ TEST_CASE( "Acknowledgement timeout does not imply remote completion", "[po4ao]"
 /** \brief Two clients send the same explicit destination and do not change each other's staged choices. */
 TEST_CASE( "Two GUI clients share readbacks without toggling optimistically", "[po4ao]" )
 {
-    Fixture           first;
+    Fixture    first;
     xqt::po4ao second( "trainer", nullptr, "po4ao", "nn_test" );
     first.m_publisher.addSubscriber( &second );
     first.m_publisher.onConnect();
@@ -629,12 +641,16 @@ TEST_CASE( "Compact layout retains long labels and configuration errors", "[po4a
     INFO( f.control<QLabel>( "labelStatus" )->text().toStdString() );
     REQUIRE( f.control<QLabel>( "labelStatus" )->text().contains( "Invalid learning rate" ) );
     for( auto *button : f.m_widget.findChildren<QPushButton *>() )
+    {
         REQUIRE( f.m_widget.rect().contains( QRect( button->mapTo( &f.m_widget, QPoint() ), button->size() ) ) );
+    }
     f.m_widget.resize( 420, 330 );
     drain();
     REQUIRE( f.m_widget.width() == 420 );
     for( auto *button : f.m_widget.findChildren<QPushButton *>() )
+    {
         REQUIRE( f.m_widget.rect().contains( QRect( button->mapTo( &f.m_widget, QPoint() ), button->size() ) ) );
+    }
 }
 
 /** \brief Native inference controls work with no trainer definitions or process. */
@@ -668,7 +684,9 @@ TEST_CASE( "PO4AO inference is independent of the optional trainer", "[po4ao]" )
     f.m_widget.on_buttonPO4AO_clicked();
     REQUIRE( f.m_publisher.m_commands.back()["toggle"].getSwitchState() == pcf::IndiElement::Off );
     for( const auto &command : f.m_publisher.m_commands )
+    {
         REQUIRE( command.getDevice() == "po4ao" );
+    }
     // clang-format off
 #ifdef LEARNINGCTRL_TEST_DOXYGEN_REF
     xqt::po4ao::updateRuntimeGUI;
@@ -708,7 +726,9 @@ TEST_CASE( "Native Reset leaves notebook ownership with the operator", "[po4ao]"
                            { "control_applied", enabled ? "2" : "1" } } );
         REQUIRE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
         for( const auto &command : f.m_publisher.m_commands )
+        {
             REQUIRE( command.getDevice() == "po4ao" );
+        }
     }
     // clang-format off
 #ifdef LEARNINGCTRL_TEST_DOXYGEN_REF
@@ -1006,11 +1026,13 @@ TEST_CASE( "Saving a pair does not pause a running publication", "[po4ao]" )
                         []()
                         {
                             for( auto *widget : QApplication::topLevelWidgets() )
+                            {
                                 if( auto *dialog = qobject_cast<QInputDialog *>( widget ) )
                                 {
                                     dialog->setTextValue( "internal-bright" );
                                     dialog->accept();
                                 }
+                            }
                         } );
     f.m_widget.on_buttonSavePolicy_clicked();
     REQUIRE( f.m_publisher.m_commands.size() == 1 );

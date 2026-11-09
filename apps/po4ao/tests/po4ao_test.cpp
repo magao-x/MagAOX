@@ -17,7 +17,6 @@
 #include "../../nnReconstructor/tests/nnTestSupport.hpp"
 #include <future>
 
-
 namespace libXWCTest
 {
 /// CPU-only regression tests for the PO4AO application helpers.
@@ -197,7 +196,9 @@ TEST_CASE( "PO4AO assembles modal policy history", "[po4ao]" )
     REQUIRE( assemblePolicyInput( input, 2, 3, observations, commands ) );
     const float expected[] = { 30.F, 31.F, 10.F, 11.F, 20.F, 21.F, 100.F, 101.F, 200.F, 201.F };
     for( size_t index = 0; index < 10; ++index )
+    {
         REQUIRE( input[index] == expected[index] );
+    }
 }
 
 /// Verify a short policy uses the newest samples from a larger retained history.
@@ -208,15 +209,21 @@ TEST_CASE( "PO4AO assembles a shorter active policy history", "[po4ao]" )
     CircularBuffer observations( 1, 4 );
     CircularBuffer commands( 1, 3 );
     for( float value : { 1.F, 2.F, 3.F, 4.F } )
+    {
         observations.add( &value );
+    }
     for( float value : { 10.F, 20.F, 30.F } )
+    {
         commands.add( &value );
+    }
 
     float input[3] = {};
     REQUIRE( assemblePolicyInput( input, 1, 2, observations, commands ) );
     const float expected[] = { 4.F, 3.F, 30.F };
     for( size_t index = 0; index < 3; ++index )
+    {
         REQUIRE( input[index] == expected[index] );
+    }
 }
 
 /// Verify an engine trained on a modal prefix can use full-sized retained histories.
@@ -237,7 +244,9 @@ TEST_CASE( "PO4AO assembles a controlled modal prefix", "[po4ao]" )
     REQUIRE( assemblePolicyInput( input, 2, 2, observations, commands ) );
     const float expected[] = { 20.F, 21.F, 10.F, 11.F, 30.F, 31.F };
     for( size_t index = 0; index < 6; ++index )
+    {
         REQUIRE( input[index] == expected[index] );
+    }
 }
 
 /// Verify incomplete history is rejected instead of silently changing the tensor contract.
@@ -452,7 +461,6 @@ TEST_CASE( "PO4AO ignores stale collection publisher results", "[po4ao]" )
 } // namespace po4aoTest
 } // namespace libXWCTest
 
-
 /** \cond PO4AO_CONTROL_TEST_SUPPORT */
 namespace po4aoControlHarness
 {
@@ -467,17 +475,17 @@ struct shmimT
 struct Metadata
 {
     uint64_t cnt0{ 0 }, cnt1{ 0 }, cnt2{ 0 }; ///< Publication, episode and effective-model counters.
-    int      write{ 0 }; ///< In-progress publication marker.
+    int      write{ 0 };                      ///< In-progress publication marker.
 };
 /// In-memory image boundary with enough space for the small replay fixture.
 struct IMAGE
 {
-    Metadata              md[1]; ///< Metadata owned by this synthetic image.
+    Metadata              md[1];     ///< Metadata owned by this synthetic image.
     std::array<float, 64> storage{}; ///< Small replay storage used by the production callback.
     struct
     {
-        void *raw{ nullptr }; ///< Address of the owning image storage.
-    } array; ///< ImageStreamIO-compatible data view.
+        void *raw{ nullptr };     ///< Address of the owning image storage.
+    } array;                      ///< ImageStreamIO-compatible data view.
     std::function<void()> posted; ///< Optional boundary fault injected after publication.
 
     /// Bind the image to its own CPU storage.
@@ -501,8 +509,8 @@ inline void ImageStreamIO_sempost( IMAGE *image /**< [in] Published in-memory im
 struct EngineBundle
 {
     uint64_t           generation{ 1 }, modelId{ 42 }; ///< Accepted reload and effective-policy identities.
-    int                historyLength{ 2 }; ///< Temporal input width of the fixture policy.
-    std::vector<float> linearWeights{ 1 }; ///< Test policy uses the CPU boundary.
+    int                historyLength{ 2 };             ///< Temporal input width of the fixture policy.
+    std::vector<float> linearWeights{ 1 };             ///< Test policy uses the CPU boundary.
 };
 /// Boundary fixture declaring the state used by the included production method definitions.
 /** Model loading and device output are doubles; collection, frame processing, queue
@@ -965,7 +973,6 @@ TEST_CASE( "PO4AO production leaves partial warmup unpublished", "[po4ao][contro
 } // namespace po4aoTest
 } // namespace libXWCTest
 
-
 namespace libXWCTest::po4aoTest
 {
 using namespace MagAOX::app;
@@ -973,6 +980,7 @@ using namespace MagAOX::app;
 TEST_CASE( "PO4AO routing preserves the request identity and never parks on failure", "[po4ao][routing]" )
 {
     for( bool start : { false, true } )
+    {
         for( int failure = -1; failure < ( start ? 7 : 6 ); ++failure )
         {
             Po4aoRouteBackend        b;
@@ -984,7 +992,9 @@ TEST_CASE( "PO4AO routing preserves the request identity and never parks on fail
             auto                     boundary = [&]
             {
                 if( step++ == failure )
+                {
                     throw std::runtime_error( "injected failure" );
+                }
             };
             b.capture = [&]( auto )
             {
@@ -996,27 +1006,42 @@ TEST_CASE( "PO4AO routing preserves the request identity and never parks on fail
                 REQUIRE( s.writer == "nn" );
                 boundary();
             };
-            b.freshOutput = [&]( auto ) { boundary(); };
+            b.freshOutput = [&]( auto )
+            {
+                boundary();
+            };
             b.switchInput = [&]( const auto &target, auto )
             {
                 REQUIRE( target == ( start ? "po4ao_output" : "aol1_modevalWFS" ) );
                 boundary();
             };
-            b.applyDefault  = [&]( auto ) { boundary(); };
+            b.applyDefault = [&]( auto )
+            {
+                boundary();
+            };
             b.restoreWriter = [&]( const auto &s, auto )
             {
                 REQUIRE( s.writer == before.writer );
                 boundary();
             };
-            b.verifyConsumption = [&]( const auto &, auto ) { boundary(); };
-            b.park              = [&]( auto ) { parked = true; };
-            auto run            = [&]
+            b.verifyConsumption = [&]( const auto &, auto )
+            {
+                boundary();
+            };
+            b.park = [&]( auto )
+            {
+                parked = true;
+            };
+            auto run = [&]
             {
                 routePo4ao(
                     start,
                     b,
                     retained,
-                    [&]( const auto &p ) { phases.push_back( p ); },
+                    [&]( const auto &p )
+                    {
+                        phases.push_back( p );
+                    },
                     std::chrono::steady_clock::now() );
             };
             if( failure < 0 )
@@ -1031,8 +1056,11 @@ TEST_CASE( "PO4AO routing preserves the request identity and never parks on fail
                 REQUIRE_FALSE( parked );
             }
             if( failure != 0 )
+            {
                 REQUIRE( retained.route == before.route );
+            }
         }
+    }
 }
 
 /** \brief Empty, sub-microsecond, idle and mixed-model windows remain distinguishable. */
@@ -1051,7 +1079,9 @@ TEST_CASE( "PO4AO telemetry describes the actual rolling window", "[po4ao][telem
     REQUIRE_FALSE( samples.snapshot( s.sequence ).fresh );
     constexpr uint64_t model = UINT64_MAX - 10;
     for( unsigned i = 1; i <= 1024; ++i )
+    {
         samples.record( i, model, 2, 100 + i );
+    }
     s = samples.snapshot( 1 );
     REQUIRE( s.count == 1024 );
     REQUIRE( s.sequence == 1025 );
@@ -1071,7 +1101,6 @@ TEST_CASE( "PO4AO telemetry describes the actual rolling window", "[po4ao][telem
     REQUIRE( s.backend == 0 );
 }
 } // namespace libXWCTest::po4aoTest
-
 
 /// \cond TEST_HARNESS
 namespace po4aoRunHarness
@@ -1107,11 +1136,11 @@ struct po4ao : MagAOXApp<true>, dev::shmimMonitor<po4ao>
     using shmimMonitorT = dev::shmimMonitor<po4ao>;
     RouteIO               m_routeIO; ///< Fake utility boundary observed by the production worker.
     std::string           m_outputChannel{ "po4ao_output" }; ///< Fixed instrument route under test.
-    Po4aoRouteSnapshot    m_runSnapshot; ///< Identity retained across routing failure and recovery.
-    std::thread           m_runThread; ///< Owned production worker, joined before fixture destruction.
+    Po4aoRouteSnapshot    m_runSnapshot;                     ///< Identity retained across routing failure and recovery.
+    std::thread           m_runThread;     ///< Owned production worker, joined before fixture destruction.
     std::mutex            m_callbackMutex; ///< App callback and allocation ownership boundary.
     std::atomic<bool>     m_runCancel{ false }, m_runAdmission{ true }; ///< Shutdown and callback admission.
-    std::atomic<uint64_t> m_outputSequence{ 0 }; ///< Output progress observed while routing.
+    std::atomic<uint64_t> m_outputSequence{ 0 };                        ///< Output progress observed while routing.
     bool m_runPending{ false }, m_runBusy{ false }, m_runTarget{ true }, m_runRunning{ true }, m_runVerified{ false },
         m_runCheckOnly{ false }; ///< Requested, executing and verified routing state.
     uint64_t    m_runSequence{ 0 }, m_activeCollectionGeneration{ 1 }; ///< Routing and replay generations.
@@ -1119,12 +1148,12 @@ struct po4ao : MagAOXApp<true>, dev::shmimMonitor<po4ao>
         m_runOwner{ "test-1" }; ///< Published route status and stable reservation token.
     std::string m_nnDevice{ "nn" }, m_nnRoutingOwner, m_nnReleasedOwner, m_nnRoutingSource, m_nnRoutingPhase,
         m_nnInstance{ "nn-1" }, m_nnSequence{ "1" }, m_reservedInstance; ///< Observed NN reservation identity.
-    std::string                           m_runtimeInstance{ "test" }; ///< Synthetic runtime process identity.
-    std::chrono::steady_clock::time_point m_nnObserved{ std::chrono::steady_clock::now() }; ///< Readback freshness.
+    std::string                           m_runtimeInstance{ "test" };   ///< Synthetic runtime process identity.
+    std::chrono::steady_clock::time_point m_nnObserved{ std::chrono::steady_clock::now() };  ///< Readback freshness.
     pcf::IndiProperty                     m_indiP_run, m_indiP_runStatus, m_indiP_nnRouting; ///< Offline properties.
     std::atomic<int>                      m_reloadStatus{ 0 }; ///< Model-loading admission boundary.
-    WarmupCollection                      m_collection; ///< Production warmup invalidated on detachment.
-    std::condition_variable               m_replayCondition; ///< Wakeup used when routing interrupts collection.
+    WarmupCollection                      m_collection;        ///< Production warmup invalidated on detachment.
+    std::condition_variable               m_replayCondition;   ///< Wakeup used when routing interrupts collection.
     /// Initialize a running fixture with no instrument connection.
     po4ao();
     /// Join any production worker launched by a request.
