@@ -35,8 +35,9 @@ struct Po4aoRouteBackend
     std::function<void( const Po4aoRouteSnapshot &, Deadline )>
         restoreWriter; ///< Restore the reserved writer ownership.
     std::function<void( const std::string &, Deadline )>
-                                    verifyConsumption; ///< Observe fresh frames on the requested inode.
-    std::function<void( Deadline )> park;              ///< Close admission and wait for actual monitor detachment.
+        verifyConsumption; ///< Observe fresh frames on the requested inode.
+    std::function<void( Deadline )>
+        park; ///< Close admission and drain admitted callbacks; READY detachment is asynchronous.
 };
 
 /// Execute one serialized request; failure never calls park or attempts a blind rollback.
