@@ -8,6 +8,7 @@ import os
 import os.path
 import re
 import signal
+import socket
 import stat
 import sys
 import threading
@@ -37,10 +38,39 @@ class ResurrecteeConfig:
     timeout: list[int] = xconf.field(
         default_factory=lambda: [10],
         help=(
-            "Heartbeat timeout vector in seconds. First element is runtime heartbeat timeout. "
-            "Optional second element is a one-time startup heartbeat timeout."
+            "Timeout vector in seconds, read by resuctrl reset for systemd: the first element is the "
+            "watchdog timeout (WatchdogSec), the optional second the startup timeout (TimeoutStartSec)."
         ),
     )
+
+
+@xconf.config
+class SystemdConfig:
+    '''systemd service settings for this app, read by resuctrl reset, not by the app'''
+    restart: typing.Optional[str] = xconf.field(default=None, help="Restart= policy, e.g. always or on-failure")
+    restartSec: typing.Optional[float] = xconf.field(default=None, help="RestartSec=, seconds before restarting")
+    startLimitBurst: typing.Optional[int] = xconf.field(default=None, help="StartLimitBurst=, starts allowed per interval")
+    startLimitIntervalSec: typing.Optional[float] = xconf.field(default=None, help="StartLimitIntervalSec=, seconds")
+    watchdogSec: typing.Optional[float] = xconf.field(default=None, help="WatchdogSec=, overrides resurrectee.timeout[0]")
+    timeoutStartSec: typing.Optional[float] = xconf.field(default=None, help="TimeoutStartSec=, overrides resurrectee.timeout[1]")
+    timeoutStopSec: typing.Optional[float] = xconf.field(default=None, help="TimeoutStopSec=, seconds before SIGKILL on stop")
+    killSignal: typing.Optional[str] = xconf.field(default=None, help="KillSignal=, e.g. SIGTERM or SIGINT")
+
+
+def sd_notify(state : str) -> bool:
+    '''Send a state notification such as "READY=1" or "WATCHDOG=1" to systemd, as sd_notify(3)
+    does. Does nothing unless systemd started us with Type=notify. Returns True if sent.'''
+    path = os.environ.get("NOTIFY_SOCKET")
+    if not path or path[0] not in "/@":
+        return False
+    if path[0] == "@":
+        path = "\0" + path[1:]
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as sock:
+            sock.sendto(state.encode(), path)
+        return True
+    except OSError:
+        return False
 
 
 @xconf.config
@@ -48,6 +78,7 @@ class BaseConfig:
     common_path_prefix : pathlib.Path = xconf.field(default=DEFAULT_PREFIX, help="Prefix for all instrument data and config directories")
     sleep_interval_sec : float = xconf.field(default=1.0, help="Main loop logic will be run every `sleep_interval_sec` seconds")
     resurrectee: ResurrecteeConfig = xconf.field(default_factory=ResurrecteeConfig)
+    systemd: SystemdConfig = xconf.field(default_factory=SystemdConfig)
 
     _SECTION_RE = re.compile(r"^\s*\[(.+?)\]\s*$")
     _LEGACY_TIMEOUT_RE = re.compile(r"^(\s*timeout\s*=\s*)(\d+(?:\s*,\s*\d+)+)\s*(#.*)?$")
@@ -277,13 +308,8 @@ class XDevice(Device):
     log : logging.Logger
     config : BaseConfig
     log_file_name : str
-    _hb_fd : typing.Optional[int]
-    _hb_last_time : int
-    _hb_broken_pipes : int
-    _hb_broken_pipes_limit : int
-    _resurrectee_timeout : tuple[int, ...]
     _shutdown_requested : bool
-    _prev_sigusr2_handler : typing.Any
+    _prev_sigterm_handler : typing.Any
     _client_lock : threading.Lock
     _client_resubscribe : bool
     _client_pending : set
@@ -346,108 +372,20 @@ class XDevice(Device):
         atexit.register(self._telem_file.close)
         self.log.info(f"Telemetrying to {telem_file_path}")
 
-    def _normalize_resurrectee_timeout(self):
-        timeout = tuple(int(v) for v in self.config.resurrectee.timeout)
-        if len(timeout) == 0:
-            timeout = (10,)
-        if timeout[0] < 1:
-            timeout = (10,) + timeout[1:]
-        return timeout
-
-    def _resurrectee_fifo_path(self):
-        return self.prefix_dir + "/drivers/fifos/" + self.name + ".hb"
-
-    def _open_heartbeat_fifo(self):
-        fifoname = self._resurrectee_fifo_path()
-        fdrd = None
-        fdhb = None
-        try:
-            try:
-                fdrd = os.open(fifoname, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC)
-            except FileNotFoundError:
-                prev_mode = os.umask(0)
-                try:
-                    os.mkfifo(fifoname, 0o660)
-                finally:
-                    os.umask(prev_mode)
-                fdrd = os.open(fifoname, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC)
-
-            fdstat = os.fstat(fdrd)
-            if not stat.S_ISFIFO(fdstat.st_mode):
-                raise RuntimeError(f"{fifoname} exists but is not a FIFO")
-
-            fdhb = os.open(fifoname, os.O_WRONLY | os.O_NONBLOCK | os.O_CLOEXEC)
-            self._hb_fd = fdhb
-            self._hb_last_time = 0
-        except Exception:
-            self._hb_fd = None
-            self.log.exception("Failed to open heartbeat FIFO %s", fifoname)
-            if fdhb is not None:
-                try:
-                    os.close(fdhb)
-                except Exception:
-                    pass
-        finally:
-            if fdrd is not None:
-                try:
-                    os.close(fdrd)
-                except Exception:
-                    pass
-
-    def _close_heartbeat_fifo(self):
-        if self._hb_fd is not None:
-            try:
-                os.close(self._hb_fd)
-            except Exception:
-                self.log.exception("Failed to close heartbeat FIFO fd=%s", self._hb_fd)
-            finally:
-                self._hb_fd = None
-
-    def _send_heartbeat(self, offset_index=0):
-        if self._hb_fd is None:
-            return
-        if offset_index >= len(self._resurrectee_timeout):
-            return
-
-        offset = self._resurrectee_timeout[offset_index]
-        if offset < 0:
-            return
-
-        new_time = int(time.time()) + offset
-        if new_time <= self._hb_last_time:
-            return
-
-        stimestamp = f"{new_time:09x}\n".encode("ascii")
-        try:
-            os.write(self._hb_fd, stimestamp)
-            self._hb_last_time = new_time
-            if self._hb_broken_pipes:
-                self.log.warning("Recovered heartbeat FIFO writes for %s", self.name)
-                self._hb_broken_pipes = 0
-        except Exception as e:
-            self._hb_last_time = 0
-            self._hb_broken_pipes += 1
-            if self._hb_broken_pipes <= self._hb_broken_pipes_limit:
-                self.log.error(
-                    "Heartbeat write failed fd=%s payload=%r err=%s",
-                    self._hb_fd,
-                    stimestamp.decode("ascii").rstrip("\n"),
-                    repr(e),
-                )
-
-    def _sigusr2_handler(self, sig, frame):
+    def _sigterm_handler(self, sig, frame):
         self.log.info("Caught signal %s; clean shutdown requested", signal.strsignal(sig))
         self._shutdown_requested = True
 
     def _install_signal_handlers(self):
-        self._prev_sigusr2_handler = signal.getsignal(signal.SIGUSR2)
-        signal.signal(signal.SIGUSR2, self._sigusr2_handler)
+        # systemd stops services with SIGTERM: shut down cleanly
+        self._prev_sigterm_handler = signal.getsignal(signal.SIGTERM)
+        signal.signal(signal.SIGTERM, self._sigterm_handler)
 
     def _restore_signal_handlers(self):
         try:
-            signal.signal(signal.SIGUSR2, self._prev_sigusr2_handler)
+            signal.signal(signal.SIGTERM, self._prev_sigterm_handler)
         except Exception:
-            self.log.exception("Failed to restore SIGUSR2 handler")
+            self.log.exception("Failed to restore SIGTERM handler")
 
     def telem(self, event : str, message : typing.Union[str, dict[str, typing.Any]]):
         current_ts_str = datetime.datetime.now().isoformat() + "000"  # zeros for consistency with MagAO-X timestamps with ns
@@ -495,13 +433,8 @@ class XDevice(Device):
         self._indi_announce_time = 0.0
         self._indi_gate_end = 0.0
         self.config = config
-        self._hb_fd = None
-        self._hb_last_time = 0
-        self._hb_broken_pipes = 0
-        self._hb_broken_pipes_limit = 2
-        self._resurrectee_timeout = self._normalize_resurrectee_timeout()
         self._shutdown_requested = False
-        self._prev_sigusr2_handler = signal.SIG_DFL
+        self._prev_sigterm_handler = signal.SIG_DFL
         self._client_lock = threading.Lock()  # guards _client_pending and its retry timing
         self._client_resubscribe = False  # re-send all watched-property requests from the main loop
         self._client_pending = set()  # watched (device, name) interests deleted and not yet defined again
@@ -659,27 +592,25 @@ class XDevice(Device):
         self.client.connect()
         self.client.register_callback(self._handle_client_message)
         self._install_signal_handlers()
-        self._open_heartbeat_fifo()
         try:
-            startup_offset_idx = 1 if len(self._resurrectee_timeout) > 1 else 0
-            self._send_heartbeat(startup_offset_idx)
-
             self.setup()
             self.send_all_properties()
             self._setup_complete = True
+            # startup is complete; under systemd the watchdog applies from here on
+            sd_notify("READY=1")
 
             while (
                 self.connection.status is constants.ConnectionStatus.CONNECTED
                 and not self._shutdown_requested
             ):
-                # Tied to the app loop by design: if loop() blocks, heartbeats stop.
-                self._send_heartbeat(0)
+                # Tied to the app loop by design: if loop() blocks, systemd's watchdog restarts us.
+                sd_notify("WATCHDOG=1")
                 self._indiserver_upkeep()
                 self._resubscribe_client()
                 self._wrap_loop()
                 time.sleep(self.sleep_interval_sec)
         finally:
-            self._close_heartbeat_fifo()
+            sd_notify("STOPPING=1")
             self._restore_signal_handlers()
 
     @classmethod

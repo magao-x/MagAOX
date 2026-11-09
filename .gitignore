@@ -142,8 +142,6 @@ apps/photonCounter
 #r
 apps/rhusbMon/rhusbMon
 apps/refRMS/refRMS
-apps/resurrector/resurrector_indi
-apps/resurrector/test/test_resurrector
 
 #s
 apps/shmimIntegrator/shmimIntegrator
@@ -208,6 +206,7 @@ utils/logdump/logdump
 utils/logsurgeon/logsurgeon
 utils/cursesINDI/cursesINDI
 utils/logstream/logstream
+utils/resuctrl/resuctrl
 utils/shmimDelta/shmimDelta
 utils/shmimInfo/shmimInfo
 utils/shmimPlot/shmimPlot

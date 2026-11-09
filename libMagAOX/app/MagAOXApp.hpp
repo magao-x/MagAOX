@@ -35,12 +35,12 @@
 #include "../logger/logManager.hpp"
 
 #include "../sys/thSetuid.hpp"
+#include "../sys/sdNotify.hpp"
 
 #include "stateCodes.hpp"
 #include "indiDriver.hpp"
 #include "indiMacros.hpp"
 #include "indiUtils.hpp"
-#include "resurrectee.hpp"
 
 using namespace mx::app;
 
@@ -514,7 +514,7 @@ class MagAOXApp : public application
 
     /** call mkdir("/opt/MagAOX/sys/<m_configName>/") with appropriate permissions and ownership
      *
-     * Called by lockPID() below; also called when --mkfifo-hexbeat is command-line argument
+     * Called by lockPID() below
      *
      * \returns 0 on success.
      * \returns -1 on any error
@@ -678,9 +678,6 @@ class MagAOXApp : public application
     /// Mutex for locking INDI communications.
     std::mutex m_indiMutex;
 
-    /// The resurrectee wrapper. //TBD: Constructed and initialized by execute
-    resurrectee<MagAOXApp> *m_resurrectee{ nullptr };
-
     /// A wrapper for the INDI server ctrl FIFO name; used by m_indiDriver
     const std::string &indiserver_ctrl_fifo() const
     {
@@ -765,9 +762,6 @@ class MagAOXApp : public application
 
     /// INDI messages dropped as of the last check because indiserver was not reading the output FIFO.
     uint64_t m_indiOutputDrops{ 0 };
-
-    /// Full path name of the resurrector/resurrectee FIFO.
-    std::string m_resurrecteeFifoName;
 
   public:
     /// Create a standard R/W INDI Text property with target and current elements.
@@ -1024,20 +1018,6 @@ class MagAOXApp : public application
      * call because indiserver was not reading the output FIFO.
      */
     void indiServerUpkeep();
-
-    /// Create the resurrectee FIFOs
-    /**
-     * \returns 0 on success
-     * \returns -1 on error.  This is fatal.
-     */
-    int createResurrecteeFIFO();
-
-    /// Start the resurrectee communications
-    /**
-     * \returns 0 on success
-     * \returns -1 on error.  This is fatal.
-     */
-    int startResurrectee();
 
   public:
     void sendGetPropertySetList( bool all = false );
@@ -1435,12 +1415,6 @@ class MagAOXApp : public application
      */
     std::string driverOutName();
 
-    /// Get the resurrectee FIFO file name
-    /**
-     * \returns the current value of m_resurrecteeFifoName
-     */
-    std::string resurrecteeFifoName();
-
     ///@} --Member Accessors
 };
 
@@ -1587,31 +1561,6 @@ void MagAOXApp<_useINDI>::setDefaults( int argc,
     config.parseCommandLine( argc, argv, "name" );
     config( m_configName, "name" );
 
-    // Special case check for --mkfifo-hexbeat
-    config.add("mkfifo-hexbeat", "", "mkfifo-hexbeat", argType::None
-              , "", "", false, "bool"
-              , "Create Hexbeat FIFO via mkfifo(2) and exit"
-              );
-
-    for (auto pparg = argv+1; pparg < (argv+argc); ++pparg)
-    {
-        if(::strcmp(*pparg, "--mkfifo-hexbeat")) { continue; }
-        std::cerr
-        << "Creating Hexbeat FIFO ["
-        << m_configName
-        << ".hb], status directory, and exiting ..."
-        << std::endl;
-        if ( createResurrecteeFIFO() ) { exit( -1 ); };
-        std::cerr
-        << "Hexbeat FIFO either already existed or was created successfully"
-        << std::endl;
-        if( mkStatusDir() ) { exit( -1 ); };
-        std::cerr
-        << "Status directory either already existed or was created successfully"
-        << std::endl;
-        exit( 0 );
-    }
-
     if( m_configName == "" )
     {
         m_configName = mx::ioutils::pathStem( invokedName );
@@ -1710,10 +1659,40 @@ void MagAOXApp<_useINDI>::setupBasicConfig() // virtual
                 "double",
                 "Seconds between [alive name pid] announcements on the INDI server control FIFO, so a restarted"
                 " indiserver registers this driver again.  0 disables them.  Default is 5." );
+
+    // Settings for running this app as a systemd service, read by resuctrl, not by the app
+    for( const char *key : { "restart",
+                             "restartSec",
+                             "startLimitBurst",
+                             "startLimitIntervalSec",
+                             "watchdogSec",
+                             "timeoutStartSec",
+                             "timeoutStopSec",
+                             "killSignal" } )
+    {
+        config.add( std::string( "systemd." ) + key,
+                    "",
+                    "",
+                    argType::Required,
+                    "systemd",
+                    key,
+                    false,
+                    "string",
+                    "systemd service setting for this app, applied by resuctrl reset" );
+    }
+
     // Logger Stuff
     m_log.setupConfig( config );
-    // Resurrectee configuration setup - static
-    resurrectee<MagAOXApp>::_setupConfig( config );
+    // The old resurrector heartbeat timeouts, now read by resuctrl for the systemd watchdog, not by the app
+    config.add( "resurrectee.timeout",
+                "",
+                "",
+                argType::Required,
+                "resurrectee",
+                "timeout",
+                false,
+                "string",
+                "running[,startup] timeouts in seconds, applied by resuctrl reset as WatchdogSec and TimeoutStartSec" );
 
     if( m_powerMgtEnabled )
     {
@@ -1785,12 +1764,6 @@ void MagAOXApp<_useINDI>::loadBasicConfig() // virtual
     bool ig{ false };
     config( ig, "ignore_git" );
 
-    {
-    //--------- Check for, and ignore, mkfifo-hexbeat --------//
-    bool mh{ false };
-    config( mh, "mkfifo-hexbeat" );
-    }
-
     config( m_indiserver_ctrl_fifo, "indiserver_ctrl_fifo" );
     config( m_indiAnnounceInterval, "indiserver_announce_interval" );
 
@@ -1822,9 +1795,6 @@ void MagAOXApp<_useINDI>::loadBasicConfig() // virtual
         m_indiP_maxLogTime["current"] = m_log.maxLogTime();
         m_indiP_maxLogTime["target"]  = m_log.maxLogTime();
     }
-
-    //-- Configure the resurrectee - static --//
-    resurrectee<MagAOXApp>::_loadConfig( config );
 
     //--------- Loop Pause Time --------//
     config( m_loopPause, "loopPause" );
@@ -2043,17 +2013,6 @@ int MagAOXApp<_useINDI>::execute() // virtual
         }
     }
 
-    //====Begin Resurrectee
-    if( m_shutdown == 0 ) // if we're not already dead, that is
-    {
-        if( startResurrectee() < 0 )
-        {
-            state( stateCodes::FAILURE );
-            return -1;
-        }
-    }
-
-
     /* ***************************** */
     /*         appStartup()          */
     /* ***************************** */
@@ -2104,14 +2063,20 @@ int MagAOXApp<_useINDI>::execute() // virtual
         }
     }
 
+    // Tell systemd, if it started us, that startup is complete; the watchdog applies from here on
+    if( m_shutdown == 0 )
+    {
+        sys::sdNotify( "READY=1" );
+    }
+
     // We have to wait for power status to become available
     if( m_powerMgtEnabled && m_shutdown == 0 )
     {
         int nwaits = 0;
         while( m_powerState < 0 && !m_shutdown )
         {
-            // send a heartbeat
-            m_resurrectee->execute();
+            // send a heartbeat to the systemd watchdog
+            sys::sdNotify( "WATCHDOG=1" );
 
             // the power state comes through indiserver, which must know us
             if( m_useINDI )
@@ -2242,8 +2207,8 @@ int MagAOXApp<_useINDI>::execute() // virtual
             #endif // clang-format on
         }
 
-        // send a heartbeat
-        m_resurrectee->execute();
+        // send a heartbeat to the systemd watchdog
+        sys::sdNotify( "WATCHDOG=1" );
 
         if( m_useINDI )
         {
@@ -2272,6 +2237,9 @@ int MagAOXApp<_useINDI>::execute() // virtual
              ++testTimesThrough; // LCOV_EXCL_LINE
         #endif // clang-format on
     }
+
+    // Tell systemd, if it started us, that we are shutting down on purpose
+    sys::sdNotify( "STOPPING=1" );
 
     if( appShutdown() < 0 )
     {
@@ -3662,99 +3630,6 @@ void MagAOXApp<_useINDI>::indiServerUpkeep()
             m_indiOutputDrops = drops;
         }
     }
-}
-
-template <bool _useINDI>
-int MagAOXApp<_useINDI>::createResurrecteeFIFO()
-{
-    ///Need non-empty drivername
-    if ( m_configName.empty() ) { return -1; }
-
-    ///\todo make driver FIFO path full configurable.
-    std::string driverFIFOPath = MAGAOX_path;
-    driverFIFOPath += "/";
-    driverFIFOPath += MAGAOX_driverFIFORelPath;
-
-    m_resurrecteeFifoName = driverFIFOPath + "/" + configName() + ".hb";
-
-    // Get max permissions
-    elevatedPrivileges elPriv( this );
-
-    mode_t prev = umask( 0 );
-
-    errno = 0;
-    if( mkfifo( m_resurrecteeFifoName.c_str(), S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP ) != 0 )
-    {
-        if( errno != EEXIST )
-        {
-            umask( prev );
-            // euidReal();
-            log<software_critical>( { __FILE__, __LINE__, errno, 0, "mkfifo failed" } );
-            log<text_log>( "Failed to create resurrector/resurrectee FIFO.", logPrio::LOG_CRITICAL );
-            return -1;
-        }
-    }
-
-    umask( prev );
-    // euidReal();
-    return 0;
-}
-
-template <bool _useINDI>
-int MagAOXApp<_useINDI>::startResurrectee()
-{
-
-    //===== Create the FIFOs for INDI communications ====
-    if( createResurrecteeFIFO() < 0 )
-    {
-        return -1;
-    }
-
-    //======= Instantiate the resurrectee
-    try
-    {
-        if( m_resurrectee != nullptr )
-        {
-            delete m_resurrectee;
-            m_resurrectee = nullptr;
-        }
-
-        m_resurrectee = new resurrectee<MagAOXApp>( this, _handlerSigTerm );
-    }
-    catch( ... )
-    {
-        log<software_critical>( { __FILE__, __LINE__, 0, 0, "Resurrectee construction exception." } );
-        return -1;
-    }
-
-    // Check for resurrectee failure
-    if( m_resurrectee == nullptr )
-    {
-        log<software_critical>( { __FILE__, __LINE__, 0, 0, "Resurrectee construction failed." } );
-        return -1;
-    }
-
-    // Check for resurrectee to open the FIFOs
-    if( m_resurrectee->good() == false )
-    {
-        log<software_critical>( { __FILE__, __LINE__, 0, 0, "Resurrectee failed to open FIFOs." } );
-        delete m_resurrectee;
-        m_resurrectee = nullptr;
-        return -1;
-    }
-
-    // Send a hexbeat using 2nd* time offset if that offset was configured
-    // *** Hexbeat sent only if 2nd vector element is present and positive
-    // * m_resurrectee->m_time_offset[1]
-    m_resurrectee->execute_1();
-
-    return 0;
-}
-
-template <bool _useINDI>
-std::string MagAOXApp<_useINDI>::resurrecteeFifoName()
-{
-    return m_resurrecteeFifoName;
 }
 
 template <bool _useINDI>

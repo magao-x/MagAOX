@@ -281,7 +281,7 @@ else
 endif
 
 utils_to_build = \
-	resurrector_indi \
+	resuctrl \
 	logdump \
 	logsurgeon \
 	cursesINDI \
@@ -292,8 +292,6 @@ utils_to_build = \
 scripts_to_install = \
 	query_seeing \
 	sync_cacao \
-	xctrl \
-	resuctrl \
 	netconsole_logger \
 	dmdispbridge \
 	shmimTCPreceive \

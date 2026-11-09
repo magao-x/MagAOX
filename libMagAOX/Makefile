@@ -12,7 +12,6 @@ INCLUDEDEPS= \
 	app/indiDriver.hpp \
 	app/indiMacros.hpp \
 	app/indiUtils.hpp \
-	app/resurrectee.hpp \
 	app/semUtils.hpp \
 	app/stateCodes.hpp \
 	app/dev/semUtilsDerived.hpp \
@@ -112,6 +111,7 @@ INCLUDEDEPS= \
 	logger/types/ttmmod_params.hpp \
 	logger/types/user_log.hpp \
 	sys/thSetuid.hpp \
+	sys/sdNotify.hpp \
 	sys/runCommand.hpp \
 	tty/ttyErrors.hpp \
 	tty/ttyIOUtils.hpp \
@@ -138,6 +138,7 @@ OBJS = \
 	modbus/modbus.o \
 	sys/runCommand.o \
 	sys/thSetuid.o \
+	sys/sdNotify.o \
 	tty/netSerial.o \
 	tty/telnetConn.o \
 	tty/ttyIOUtils.o \
