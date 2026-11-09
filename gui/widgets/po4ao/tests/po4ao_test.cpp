@@ -332,7 +332,7 @@ TEST_CASE( "NN selection is staged until Enable", "[po4ao]" )
     REQUIRE( f.control<QPushButton>( "buttonEnableNN" )->isEnabled() );
     REQUIRE( combo->currentData().toString() == "engine1" );
     // clang-format off
-#ifdef LEARNINGCTRL_TEST_DOXYGEN_REF
+#ifdef PO4AOGUI_TEST_DOXYGEN_REF
     xqt::po4ao::on_buttonEnableNN_clicked;
 #endif
     // clang-format on
@@ -483,7 +483,7 @@ TEST_CASE( "Independent NN restart requires fresh capabilities", "[po4ao][indepe
     REQUIRE( f.control<QPushButton>( "buttonLearning" )->isEnabled() );
     REQUIRE( f.m_publisher.m_commands.empty() );
     // clang-format off
-#ifdef LEARNINGCTRL_TEST_DOXYGEN_REF
+#ifdef PO4AOGUI_TEST_DOXYGEN_REF
     xqt::po4ao::observeHeartbeat;
     xqt::po4ao::handleDelProperty;
 #endif
@@ -550,7 +550,7 @@ TEST_CASE( "Stopped writers expose explicit recovery", "[po4ao]" )
     REQUIRE( f.m_publisher.m_commands.back()["expected"].get() == "stopped" );
     REQUIRE( f.m_publisher.m_commands.back()["target"].get() == "cacao" );
     // clang-format off
-#ifdef LEARNINGCTRL_TEST_DOXYGEN_REF
+#ifdef PO4AOGUI_TEST_DOXYGEN_REF
     xqt::po4ao::updateGUI;
     xqt::po4ao::on_buttonReconstructor_clicked;
 #endif
@@ -577,7 +577,7 @@ TEST_CASE( "Disable supersedes busy training operations", "[po4ao]" )
         REQUIRE_FALSE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
     }
     // clang-format off
-#ifdef LEARNINGCTRL_TEST_DOXYGEN_REF
+#ifdef PO4AOGUI_TEST_DOXYGEN_REF
     xqt::po4ao::updateGUI;
     xqt::po4ao::on_buttonPO4AO_clicked;
 #endif
@@ -611,7 +611,7 @@ TEST_CASE( "Companion status expires until heartbeat advances", "[po4ao]" )
     REQUIRE( f.control<QPushButton>( "buttonReset" )->isEnabled() );
     REQUIRE( f.m_publisher.m_commands.empty() );
     // clang-format off
-#ifdef LEARNINGCTRL_TEST_DOXYGEN_REF
+#ifdef PO4AOGUI_TEST_DOXYGEN_REF
     xqt::po4ao::observeHeartbeat;
     xqt::po4ao::updateGUI;
 #endif
@@ -688,7 +688,7 @@ TEST_CASE( "PO4AO inference is independent of the optional trainer", "[po4ao]" )
         REQUIRE( command.getDevice() == "po4ao" );
     }
     // clang-format off
-#ifdef LEARNINGCTRL_TEST_DOXYGEN_REF
+#ifdef PO4AOGUI_TEST_DOXYGEN_REF
     xqt::po4ao::updateRuntimeGUI;
     xqt::po4ao::on_buttonPO4AO_clicked;
     xqt::po4ao::on_buttonWarmup_clicked;
@@ -731,7 +731,7 @@ TEST_CASE( "Native Reset leaves notebook ownership with the operator", "[po4ao]"
         }
     }
     // clang-format off
-#ifdef LEARNINGCTRL_TEST_DOXYGEN_REF
+#ifdef PO4AOGUI_TEST_DOXYGEN_REF
     xqt::po4ao::on_buttonReset_clicked;
     xqt::po4ao::acknowledge;
 #endif
@@ -765,7 +765,7 @@ TEST_CASE( "Trainer arrival and departure do not require another GUI", "[po4ao]"
     REQUIRE( f.m_publisher.m_commands.back().getDevice() == "po4ao" );
     REQUIRE( f.m_publisher.m_commands.back().getName() == "control_enable" );
     // clang-format off
-#ifdef LEARNINGCTRL_TEST_DOXYGEN_REF
+#ifdef PO4AOGUI_TEST_DOXYGEN_REF
     xqt::po4ao::trainerReady;
     xqt::po4ao::handleDelProperty;
     xqt::po4ao::updateGUI;
@@ -798,7 +798,7 @@ TEST_CASE( "Native PO4AO discovery and restart invalidate stale state", "[po4ao]
     REQUIRE_FALSE( f.control<QPushButton>( "buttonReset" )->isEnabled() );
     REQUIRE( f.m_publisher.m_commands.empty() );
     // clang-format off
-#ifdef LEARNINGCTRL_TEST_DOXYGEN_REF
+#ifdef PO4AOGUI_TEST_DOXYGEN_REF
     xqt::po4ao::observeHeartbeat;
     xqt::po4ao::commandAvailable;
     xqt::po4ao::onDisconnect;
@@ -830,7 +830,7 @@ TEST_CASE( "Trainer expiry preserves independent runtime control", "[po4ao]" )
     f.complete( "reset" );
     REQUIRE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
     // clang-format off
-#ifdef LEARNINGCTRL_TEST_DOXYGEN_REF
+#ifdef PO4AOGUI_TEST_DOXYGEN_REF
     xqt::po4ao::observeHeartbeat;
     xqt::po4ao::updateRuntimeGUI;
     xqt::po4ao::acknowledge;
@@ -863,7 +863,7 @@ TEST_CASE( "Trainer expiry cannot bypass an observed Busy operation", "[po4ao][r
     f.m_widget.on_buttonWarmup_clicked();
     REQUIRE( f.m_publisher.m_commands.back().getDevice() == "po4ao" );
     // clang-format off
-#ifdef LEARNINGCTRL_TEST_DOXYGEN_REF
+#ifdef PO4AOGUI_TEST_DOXYGEN_REF
     xqt::po4ao::updateGUI;
     xqt::po4ao::updateRoute;
     xqt::po4ao::updateRuntimeGUI;
@@ -897,7 +897,7 @@ TEST_CASE( "Trainer arrival preserves outstanding native operations", "[po4ao][r
     REQUIRE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
     REQUIRE( f.control<QPushButton>( "buttonReset" )->isEnabled() );
     // clang-format off
-#ifdef LEARNINGCTRL_TEST_DOXYGEN_REF
+#ifdef PO4AOGUI_TEST_DOXYGEN_REF
     xqt::po4ao::updateGUI;
     xqt::po4ao::updateRoute;
     xqt::po4ao::handleDelProperty;
@@ -937,7 +937,7 @@ TEST_CASE( "Native Reset supersedes Enable awaiting input frames", "[po4ao][revi
         REQUIRE( f.m_publisher.m_commands.size() == 3 );
     }
     // clang-format off
-#ifdef LEARNINGCTRL_TEST_DOXYGEN_REF
+#ifdef PO4AOGUI_TEST_DOXYGEN_REF
     xqt::po4ao::on_buttonReset_clicked;
     xqt::po4ao::acknowledge;
 #endif
@@ -1055,7 +1055,7 @@ TEST_CASE( "Save the compact panel preview", "[.preview]" )
                 { "active_policy", "a31c480de728b941" },
                 { "retained_policy", "a31c480de728b941" } } );
     f.define( text( "trainer", "progress", { { "iteration", "250" } } ) );
-    if( std::getenv( "LEARNINGCTRL_NOTEBOOK_PREVIEW" ) )
+    if( std::getenv( "PO4AO_NOTEBOOK_PREVIEW" ) )
     {
         f.erase( "trainer", "" );
         f.runtime( true );
@@ -1065,7 +1065,7 @@ TEST_CASE( "Save the compact panel preview", "[.preview]" )
     f.m_widget.show();
     drain();
     REQUIRE( f.m_widget.width() == 540 );
-    const char *path = std::getenv( "LEARNINGCTRL_SCREENSHOT" );
+    const char *path = std::getenv( "PO4AO_SCREENSHOT" );
     REQUIRE( path != nullptr );
     REQUIRE( f.m_widget.grab().save( path ) );
 }
