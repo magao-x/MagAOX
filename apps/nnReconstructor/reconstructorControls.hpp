@@ -14,12 +14,16 @@ inline int nnReconstructor::setupReconstructorControls()
     createStandardIndiToggleSw( m_indiP_linkModulation, "link_modulation" );
     createROIndiText( m_indiP_reconstructionStatus, "reconstruction_status", "reconstructor" );
     for( const auto *element : { "phase", "error", "modulation", "heartbeat", "instance" } )
+    {
         m_indiP_reconstructionStatus.add( pcf::IndiElement( element ) );
+    }
     if( registerIndiPropertyNew( m_indiP_nnActivate, INDI_NEWCALLBACK( m_indiP_nnActivate ) ) < 0 ||
         registerIndiPropertyNew( m_indiP_reconstructor, INDI_NEWCALLBACK( m_indiP_reconstructor ) ) < 0 ||
         registerIndiPropertyNew( m_indiP_linkModulation, INDI_NEWCALLBACK( m_indiP_linkModulation ) ) < 0 ||
         registerIndiPropertyReadOnly( m_indiP_reconstructionStatus ) < 0 )
+    {
         return -1;
+    }
     REG_INDI_SETPROP( m_indiP_modState, m_modDevice, "modState" );
     REG_INDI_SETPROP( m_indiP_modFrequency, m_modDevice, "modFrequency" );
     REG_INDI_SETPROP( m_indiP_modRadius, m_modDevice, "modRadius" );
@@ -28,10 +32,14 @@ inline int nnReconstructor::setupReconstructorControls()
     m_indiP_routingHold.setPerm( pcf::IndiProperty::ReadWrite );
     createROIndiText( m_indiP_routingStatus, "routing_status", "owner" );
     for( const auto *element : { "source", "phase", "instance", "sequence", "released_owner" } )
+    {
         m_indiP_routingStatus.add( pcf::IndiElement( element ) );
+    }
     if( registerIndiPropertyNew( m_indiP_routingHold, INDI_NEWCALLBACK( m_indiP_routingHold ) ) < 0 ||
         registerIndiPropertyReadOnly( m_indiP_routingStatus ) < 0 )
+    {
         return -1;
+    }
     m_switchInstance = std::to_string( std::chrono::system_clock::now().time_since_epoch().count() );
     return 0;
 }
@@ -45,7 +53,9 @@ inline void nnReconstructor::reconstructorPhase( const std::string &phase )
 inline int nnReconstructor::requestReconstructor( const std::string &target, const std::string &expected, int model )
 {
     if( m_switchPhase != "idle" && m_switchPhase != "error" )
+    {
         return -1;
+    }
     m_switchError.clear();
     if( ( target != "nn" && target != "cacao" ) || model < -1 || model >= static_cast<int>( m_models.size() ) ||
         ( !expected.empty() && expected != "nn" && expected != "cacao" && expected != "stopped" ) )
@@ -67,9 +77,13 @@ inline void nnReconstructor::startReconstructor()
     if( m_switchTarget == "nn" )
     {
         if( m_cacaoWriter.running() )
+        {
             throw std::runtime_error( "CACAO must finish stopping before NN activation" );
+        }
         if( requestEnabled( true ) < 0 )
+        {
             throw std::runtime_error( "NN activation rejected; check model status" );
+        }
         reconstructorPhase( "starting_nn" );
     }
     else
@@ -91,14 +105,18 @@ inline void nnReconstructor::prepareModulation()
     for( size_t i : { 1U, 2U, 0U } ) // Apply frequency/radius before enabling modulation.
     {
         if( m_switchTarget == "nn" && i != 0 )
+        {
             continue;
+        }
         pcf::IndiProperty request( pcf::IndiProperty::Number );
         request.setDevice( m_modDevice );
         request.setName( i == 0 ? "modState" : i == 1 ? "modFrequency" : "modRadius" );
         const double target = i == 0 ? ( m_switchTarget == "nn" ? 3.0 : 4.0 ) : i == 1 ? 2000.0 : 3.0;
         request.add( pcf::IndiElement( "target", target ) );
         if( sendNewProperty( request ) < 0 )
+        {
             throw std::runtime_error( "Modulation request delivery failed" );
+        }
     }
     reconstructorPhase( "modulation" );
 }
@@ -114,14 +132,18 @@ inline void nnReconstructor::updateReconstructorControls()
         cacao       = m_cacaoWriter.running();
         writerKnown = true;
         if( m_switchPhase == "idle" )
+        {
             m_switchError.clear();
+        }
     }
     catch( const std::exception &error )
     {
         if( m_switchPhase == "idle" )
+        {
             m_switchError = error.what();
+        }
     }
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_resultMutex );
         quiescent = !m_enabled && !m_enableReadback && !m_disabling && !m_loading && !m_inferencing && !m_publishing;
         active    = m_enabled && m_enableReadback && !m_activeModel.empty() && m_fault.empty();
@@ -140,7 +162,9 @@ inline void nnReconstructor::updateReconstructorControls()
     {
         if( m_switchPhase != "idle" && m_switchPhase != "error" && m_switchPhase != "awaiting_cacao" &&
             std::chrono::duration<double>( now - m_switchStarted ).count() > m_transitionTimeout )
+        {
             throw std::runtime_error( "Reconstructor operation timed out in " + m_switchPhase );
+        }
         if( m_switchPhase == "awaiting_cacao" && writerKnown && cacao )
         {
             m_cacaoStartPending = false;
@@ -149,17 +173,25 @@ inline void nnReconstructor::updateReconstructorControls()
         else if( m_switchPhase == "queued" )
         {
             if( m_reconstructor != "nn" && m_reconstructor != "cacao" && m_reconstructor != "stopped" )
+            {
                 throw std::runtime_error( "Reconstructor ownership is not verified" );
+            }
             if( !m_switchExpected.empty() && m_switchExpected != m_reconstructor )
+            {
                 throw std::runtime_error( "Reconstructor changed since the request" );
+            }
             m_switchSource = m_reconstructor;
             if( m_switchTarget == m_switchSource &&
                 ( m_switchTarget == "cacao" || m_switchModel < 0 || m_models[m_switchModel] == loaded ) )
+            {
                 reconstructorPhase( "idle" );
+            }
             else
             {
                 if( requestEnabled( false ) < 0 )
+                {
                     throw std::runtime_error( "NN disable rejected" );
+                }
                 reconstructorPhase( "disabling" );
             }
         }
@@ -171,26 +203,36 @@ inline void nnReconstructor::updateReconstructorControls()
                 pcf::IndiProperty request( pcf::IndiProperty::Switch );
                 request.add( pcf::IndiElement( modelId( m_switchModel ), pcf::IndiElement::On ) );
                 if( requestModel( request ) < 0 )
+                {
                     throw std::runtime_error( "NN model selection rejected" );
+                }
                 reconstructorPhase( "loading" );
             }
             else
+            {
                 reconstructorPhase( "handover" );
+            }
         }
         else if( m_switchPhase == "loading" && !loading )
         {
             if( !fault.empty() || loaded != m_models[m_switchModel] || requested != loaded )
+            {
                 throw std::runtime_error( "NN model load failed: " + fault );
+            }
             reconstructorPhase( "handover" );
         }
         else if( m_switchPhase == "handover" && writerKnown && quiescent )
         {
             if( cacao && m_switchSource != "cacao" )
+            {
                 throw std::runtime_error( "CACAO writer changed during NN operation" );
+            }
             if( m_switchTarget == "nn" && !resident )
             {
                 if( requestEnabled( true, true ) < 0 )
+                {
                     throw std::runtime_error( "NN preparation rejected" );
+                }
                 reconstructorPhase( "preparing_nn" );
             }
             else if( m_switchTarget == "nn" && cacao )
@@ -199,16 +241,22 @@ inline void nnReconstructor::updateReconstructorControls()
                 reconstructorPhase( "stopping_cacao" );
             }
             else
+            {
                 prepareModulation();
+            }
         }
         else if( m_switchPhase == "preparing_nn" && !loading )
         {
             if( !fault.empty() || !resident )
+            {
                 throw std::runtime_error( "NN GPU preparation failed: " + fault );
+            }
             reconstructorPhase( "handover" );
         }
         else if( m_switchPhase == "stopping_cacao" && writerKnown && !cacao && quiescent )
+        {
             prepareModulation();
+        }
         else if( m_switchPhase == "modulation" && writerKnown && quiescent )
         {
             bool applied = true;
@@ -220,7 +268,9 @@ inline void nnReconstructor::updateReconstructorControls()
                            std::abs( m_modCurrent[i] - target ) < 0.01;
             }
             if( applied )
+            {
                 startReconstructor();
+            }
         }
         else if( ( m_switchPhase == "starting_nn" && m_reconstructor == "nn" ) ||
                  ( m_switchPhase == "starting_cacao" && m_reconstructor == "cacao" ) )
@@ -233,16 +283,20 @@ inline void nnReconstructor::updateReconstructorControls()
     {
         m_switchError = error.what();
         if( m_switchPhase == "loading" || m_switchPhase == "preparing_nn" )
-        { // mutex scope
+        { //mutex scope
             std::lock_guard<std::mutex> lock( m_resultMutex );
             m_cancelLoad = true; // A timed-out operation never installs and activates a late candidate.
         }
         if( !active && resident )
+        {
             requestEnabled( false );
+        }
         reconstructorPhase( m_cacaoStartPending ? "awaiting_cacao" : "error" );
     }
     if( m_routingPhase == "pausing" && quiescent )
+    {
         m_routingPhase = "held";
+    }
     if( m_routingPhase == "restoring" && m_switchPhase == "idle" && m_reconstructor == m_routingSource )
     {
         m_routingPhase         = "released";
@@ -250,7 +304,9 @@ inline void nnReconstructor::updateReconstructorControls()
         m_routingOwner.clear();
     }
     if( m_routingPhase == "restoring" && m_switchPhase == "error" )
+    {
         m_routingPhase = "error";
+    }
     const auto routingState = m_routingPhase == "error" ? INDI_ALERT : INDI_OK;
     updateIfChanged( m_indiP_routingStatus, "owner", m_routingOwner, routingState );
     updateIfChanged( m_indiP_routingStatus, "released_owner", m_routingReleasedOwner, routingState );
@@ -264,8 +320,12 @@ inline void nnReconstructor::updateReconstructorControls()
         try
         {
             if( m_indiDriver )
+            {
                 for( const auto *property : { &m_indiP_modState, &m_indiP_modFrequency, &m_indiP_modRadius } )
+                {
                     m_indiDriver->sendGetProperties( *property );
+                }
+            }
         }
         catch( const std::exception & )
         {
@@ -297,18 +357,28 @@ INDI_NEWCALLBACK_DEFN( nnReconstructor, m_indiP_nnActivate )( const pcf::IndiPro
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_nnActivate, property );
     if( !property.find( "model" ) )
+    {
         return -1;
+    }
     std::lock_guard<std::mutex> lock( m_indiMutex );
     if( !m_routingOwner.empty() )
+    {
         return -1;
+    }
     int model = -2;
     for( size_t i = 0; i < m_models.size(); ++i )
+    {
         if( property["model"].get<std::string>() == modelId( i ) )
+        {
             model = i;
+        }
+    }
     const int result = requestReconstructor( "nn", "", model );
     if( result == 0 || m_switchPhase == "error" )
+    {
         updateIfChanged(
             m_indiP_nnActivate, "model", property["model"].get<std::string>(), result == 0 ? INDI_BUSY : INDI_ALERT );
+    }
     return result;
 }
 
@@ -316,17 +386,23 @@ INDI_NEWCALLBACK_DEFN( nnReconstructor, m_indiP_reconstructor )( const pcf::Indi
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_reconstructor, property );
     if( !property.find( "target" ) || !property.find( "expected" ) || property["expected"].get<std::string>().empty() )
+    {
         return -1;
+    }
     std::lock_guard<std::mutex> lock( m_indiMutex );
     if( !m_routingOwner.empty() )
+    {
         return -1;
+    }
     const int result =
         requestReconstructor( property["target"].get<std::string>(), property["expected"].get<std::string>(), -1 );
     if( result == 0 || m_switchPhase == "error" )
+    {
         updateIfChanged( m_indiP_reconstructor,
                          "target",
                          property["target"].get<std::string>(),
                          result == 0 ? INDI_BUSY : INDI_ALERT );
+    }
     return result;
 }
 
@@ -334,13 +410,19 @@ INDI_NEWCALLBACK_DEFN( nnReconstructor, m_indiP_linkModulation )( const pcf::Ind
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_linkModulation, property );
     if( !property.find( "toggle" ) )
+    {
         return -1;
+    }
     const auto value = property["toggle"].getSwitchState();
     if( value != pcf::IndiElement::On && value != pcf::IndiElement::Off )
+    {
         return -1;
+    }
     std::lock_guard<std::mutex> lock( m_indiMutex );
     if( !m_routingOwner.empty() )
+    {
         return -1;
+    }
     updateSwitchIfChanged( m_indiP_linkModulation, "toggle", value, INDI_BUSY );
     m_linkModulation = value == pcf::IndiElement::On;
     return 0;
@@ -387,20 +469,28 @@ INDI_NEWCALLBACK_DEFN( nnReconstructor, m_indiP_routingHold )( const pcf::IndiPr
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_routingHold, property );
     if( !property.find( "owner" ) || !property.find( "action" ) )
+    {
         return -1;
+    }
     const auto owner  = property["owner"].get<std::string>();
     const auto action = property["action"].get<std::string>();
     if( owner.empty() || owner.size() > 128 )
+    {
         return -1;
+    }
     std::lock_guard<std::mutex> lock( m_indiMutex );
     if( action == "hold" )
     {
         if( !m_routingOwner.empty() )
+        {
             return m_routingOwner == owner && m_routingPhase == "held" ? 0 : -1;
+        }
         if( m_switchPhase != "idle" )
+        {
             return -1;
+        }
         bool active, quiet;
-        { // mutex scope
+        { //mutex scope
             std::lock_guard<std::mutex> resultLock( m_resultMutex );
             active = m_enabled && m_enableReadback && !m_activeModel.empty() && m_fault.empty();
             quiet  = !m_enabled && !m_loading && !m_disabling && !m_gpuReleasing && !m_inferencing && !m_publishing;
@@ -409,10 +499,14 @@ INDI_NEWCALLBACK_DEFN( nnReconstructor, m_indiP_routingHold )( const pcf::IndiPr
         {
             const bool cacao = m_cacaoWriter.running();
             if( ( active && cacao ) || ( !active && !quiet ) || ( !active && !cacao ) )
+            {
                 return -1;
+            }
             m_routingSource = active ? "nn" : "cacao";
             if( requestEnabled( false ) < 0 )
+            {
                 return -1;
+            }
             m_routingOwner = owner;
             m_routingPhase = "pausing";
         }
@@ -426,12 +520,16 @@ INDI_NEWCALLBACK_DEFN( nnReconstructor, m_indiP_routingHold )( const pcf::IndiPr
     {
         // Standard handover verifies CACAO has stopped before re-admitting NN.
         if( requestReconstructor( m_routingSource, "", -1 ) < 0 )
+        {
             return -1;
+        }
         m_switchLinked = false; // Restore writer ownership without changing the operator's modulation.
         m_routingPhase = "restoring";
     }
     else
+    {
         return -1;
+    }
     return 0;
 }
 

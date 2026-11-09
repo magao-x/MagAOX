@@ -342,7 +342,9 @@ class Session
 inline size_t product( size_t a, size_t b )
 {
     if( b && a > std::numeric_limits<size_t>::max() / b )
+    {
         throw std::invalid_argument( "size overflow" );
+    }
     return a * b;
 }
 
@@ -365,10 +367,14 @@ inline std::string digest( const void *data, size_t bytes )
     unsigned char hash[EVP_MAX_MD_SIZE];
     unsigned      length{ 0 };
     if( EVP_Digest( data, bytes, hash, &length, EVP_sha256(), nullptr ) != 1 )
+    {
         throw std::runtime_error( "SHA-256 calculation failed" );
+    }
     std::ostringstream text;
     for( unsigned i = 0; i < length; ++i )
+    {
         text << std::hex << std::setw( 2 ) << std::setfill( '0' ) << unsigned( hash[i] );
+    }
     return text.str();
 }
 
@@ -377,15 +383,21 @@ inline std::vector<float> readFloats( const std::filesystem::path &path, size_t 
     const uint32_t endian{ 1 };
     if( *reinterpret_cast<const unsigned char *>( &endian ) != 1 || sizeof( float ) != 4 ||
         !std::numeric_limits<float>::is_iec559 )
+    {
         throw std::runtime_error( "banks require an IEEE float32 little-endian host" );
+    }
     const size_t bytes = product( count, sizeof( float ) );
     if( bytes > size_t( std::numeric_limits<std::streamsize>::max() ) || std::filesystem::file_size( path ) != bytes )
+    {
         throw std::runtime_error( "wrong float32 payload size: " + path.string() );
+    }
     std::ifstream      file( path, std::ios::binary );
     std::vector<float> result( count );
     file.read( reinterpret_cast<char *>( result.data() ), bytes );
     if( !file || file.peek() != std::char_traits<char>::eof() )
+    {
         throw std::runtime_error( "incomplete or changed payload: " + path.string() );
+    }
     return result;
 }
 
@@ -394,7 +406,9 @@ inline void writeFile( const std::filesystem::path &path, const void *data, size
     const auto temporary = path.string() + ".part";
     int        fd        = ::open( temporary.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0640 );
     if( fd < 0 )
+    {
         throw std::runtime_error( "cannot create " + temporary + ": " + std::strerror( errno ) );
+    }
     try
     {
         const char *position = static_cast<const char *>( data );
@@ -403,27 +417,41 @@ inline void writeFile( const std::filesystem::path &path, const void *data, size
         {
             const ssize_t n = ::write( fd, position, std::min( left, size_t( 1 << 20 ) ) );
             if( n < 0 && errno == EINTR )
+            {
                 continue;
+            }
             if( n <= 0 )
+            {
                 throw std::runtime_error( "write failed: " + temporary );
+            }
             position += n;
             left -= n;
         }
         if( ::fsync( fd ) != 0 )
+        {
             throw std::runtime_error( "flush failed: " + temporary );
+        }
         const int result = ::close( fd );
         fd               = -1;
         if( result != 0 )
+        {
             throw std::runtime_error( "close failed: " + temporary );
+        }
         if( ::link( temporary.c_str(), path.c_str() ) != 0 )
+        {
             throw std::runtime_error( "cannot finalize without replacement: " + path.string() );
+        }
         if( ::unlink( temporary.c_str() ) != 0 )
+        {
             throw std::runtime_error( "cannot remove finalized temporary: " + temporary );
+        }
     }
     catch( ... )
     {
         if( fd >= 0 )
+        {
             ::close( fd );
+        }
         // Keep incomplete files for diagnosis; never replace them on a later attempt.
         throw;
     }
@@ -440,10 +468,14 @@ inline Bank readBank( const std::filesystem::path &path )
     bank.m_path = std::filesystem::absolute( path );
     std::ifstream input( bank.m_path / "manifest.conf" );
     if( !input )
+    {
         throw std::runtime_error( "missing offline bank manifest" );
+    }
     const std::string text( ( std::istreambuf_iterator<char>( input ) ), {} );
     if( input.bad() )
+    {
         throw std::runtime_error( "bank manifest read failed" );
+    }
     bank.m_manifestHash = digest( text.data(), text.size() );
     std::map<std::string, std::string> fields;
     std::istringstream                 lines( text );
@@ -451,22 +483,32 @@ inline Bank readBank( const std::filesystem::path &path )
     while( std::getline( lines, line ) )
     {
         if( line.empty() )
+        {
             continue;
+        }
         const auto eq = line.find( '=' );
         if( eq == std::string::npos || !fields.emplace( line.substr( 0, eq ), line.substr( eq + 1 ) ).second )
+        {
             throw std::runtime_error( "malformed or duplicated bank manifest field" );
+        }
     }
     if( fields.at( "format" ) != "dlDataCollection-1" || fields.at( "dtype" ) != "float32-le" ||
         fields.at( "units" ) != "um_surface" || fields.at( "modes" ) != "2500" )
+    {
         throw std::runtime_error( "unsupported bank layout or command units" );
+    }
     auto count = [&]( const std::string &name )
     {
         const auto &value = fields.at( name );
         if( value.empty() || value.find_first_not_of( "0123456789" ) != std::string::npos )
+        {
             throw std::runtime_error( "invalid bank count: " + name );
+        }
         const auto n = std::stoull( value );
         if( !n || n > std::numeric_limits<size_t>::max() )
+        {
             throw std::runtime_error( "invalid bank count" );
+        }
         return size_t( n );
     };
     bank.m_samples = count( "samples" );
@@ -475,46 +517,68 @@ inline Bank readBank( const std::filesystem::path &path )
     bank.m_maskHash = fields.at( "mask_sha256" );
     std::ifstream provenance( bank.m_path / "generation.json" );
     if( !provenance )
+    {
         throw std::runtime_error( "missing bank generation provenance" );
+    }
     const std::string generation( ( std::istreambuf_iterator<char>( provenance ) ), {} );
     bank.m_generationHash = fields.at( "generation_sha256" );
     if( provenance.bad() || digest( generation.data(), generation.size() ) != bank.m_generationHash )
+    {
         throw std::runtime_error( "bank generation provenance checksum mismatch" );
+    }
     bank.m_mask = readFloats( bank.m_path / "actuator_mask.bin", 2500 );
     if( digest( bank.m_mask.data(), 10000 ) != bank.m_maskHash )
+    {
         throw std::runtime_error( "actuator mask checksum mismatch" );
+    }
     bool any = false;
     for( float value : bank.m_mask )
     {
         if( !finite( value ) || ( value != 0.F && value != 1.F ) )
+        {
             throw std::runtime_error( "actuator mask must be binary" );
+        }
         any |= value == 1.F;
     }
     if( !any )
+    {
         throw std::runtime_error( "empty controllable actuator mask" );
+    }
     for( size_t i = 0; i < bank.m_sets; ++i )
     {
         const auto hash = fields.at( "set_" + std::to_string( i ) + "_sha256" );
         if( hash.size() != 64 || hash.find_first_not_of( "0123456789abcdef" ) != std::string::npos )
+        {
             throw std::runtime_error( "invalid coefficient checksum" );
+        }
         bank.m_hashes.push_back( hash );
     }
     if( fields.size() != 8 + bank.m_sets )
+    {
         throw std::runtime_error( "unknown bank manifest field" );
+    }
     return bank;
 }
 
 inline std::vector<float> readSet( const Bank &bank, size_t index )
 {
     if( index >= bank.m_sets )
+    {
         throw std::invalid_argument( "set index outside bank" );
+    }
     auto values = readFloats( bank.m_path / ( "modeval_dataset_" + std::to_string( index ) + ".bin" ),
                               product( bank.m_samples, 2500 ) );
     if( digest( values.data(), product( values.size(), sizeof( float ) ) ) != bank.m_hashes.at( index ) )
+    {
         throw std::runtime_error( "coefficient checksum mismatch in set " + std::to_string( index ) );
+    }
     for( size_t i = 0; i < values.size(); ++i )
+    {
         if( !finite( values[i] ) || ( bank.m_mask[i % 2500] == 0.F && values[i] != 0.F ) )
+        {
             throw std::runtime_error( "non-finite or excluded-actuator command in set " + std::to_string( index ) );
+        }
+    }
     return values;
 }
 
@@ -523,11 +587,17 @@ inline void validate( const Settings &s )
     if( s.m_bank.empty() || s.m_output.empty() || s.m_pupil <= 4 || !s.m_width || !s.m_height ||
         !finite( s.m_imageNorm ) || s.m_imageNorm <= 0.F || !finite( s.m_timeout ) || !( s.m_timeout > 0 ) ||
         s.m_timeout > 3600 )
+    {
         throw std::invalid_argument( "invalid collection dimensions, scaling, paths or timeout" );
+    }
     const size_t crop = s.m_pupil - 4;
     for( size_t p = 0; p < 2; ++p )
+    {
         if( crop > s.m_width || crop > s.m_height || s.m_x[p] > s.m_width - crop || s.m_y[p] > s.m_height - crop )
+        {
             throw std::invalid_argument( "pupil crop is outside the source image" );
+        }
+    }
     product( product( 4, product( s.m_pupil, s.m_pupil ) ), std::max( size_t( 1 ), s.m_samples ) );
 }
 
@@ -542,7 +612,9 @@ inline bool Session::start( const Settings &settings )
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_mutex );
         if( !canStartLocked() )
+        {
             return false;
+        }
         m_settings         = settings;
         m_progress         = Progress{};
         m_progress.m_phase = "preparing";
@@ -562,15 +634,25 @@ inline bool Session::start( const Settings &settings )
 inline bool Session::canStartLocked() const
 {
     if( m_stop || m_requested )
+    {
         return false;
+    }
     if( m_progress.m_phase == "idle" || m_progress.m_phase == "complete" || m_progress.m_phase == "cancelled" )
+    {
         return true;
+    }
     if( m_progress.m_phase != "failed" )
+    {
         return false;
+    }
     for( const auto &slot : m_slots )
+    {
         if( slot.m_count && ( slot.m_state == SlotState::complete || slot.m_state == SlotState::writing ||
                               slot.m_state == SlotState::active ) )
+        {
             return false;
+        }
+    }
     return true;
 }
 
@@ -583,11 +665,15 @@ inline bool Session::canStart()
 inline void Session::abortLocked( const std::string &reason )
 {
     if( m_ended )
+    {
         return;
+    }
     m_failed |= !reason.empty();
     m_cancelled |= reason.empty();
     if( !reason.empty() )
+    {
         m_progress.m_error = reason;
+    }
     if( m_active >= 0 )
     {
         auto &slot   = m_slots[m_active];
@@ -636,6 +722,7 @@ inline void Session::issueLocked()
     if( m_active < 0 )
     {
         for( size_t i = 0; i < m_slots.size(); ++i )
+        {
             if( m_slots[i].m_state == SlotState::ready && m_slots[i].m_index == m_next )
             {
                 m_active           = int( i );
@@ -643,6 +730,7 @@ inline void Session::issueLocked()
                 ++m_next;
                 break;
             }
+        }
         if( m_active < 0 )
         {
             m_progress.m_phase = "waiting_io";
@@ -663,18 +751,24 @@ Session::onFrame( uint64_t counter, uint64_t sourceTime, const float *image, con
 {
     std::lock_guard<std::mutex> lock( m_mutex );
     if( m_ended || ( m_progress.m_phase != "collecting" && m_progress.m_phase != "waiting_io" ) )
+    {
         return;
+    }
     try
     {
         if( !image )
+        {
             throw std::runtime_error( "source frame pointer is null" );
+        }
         if( m_haveCounter && counter == m_lastCounter )
         {
             ++m_progress.m_duplicates;
             return;
         }
         if( m_haveCounter && counter < m_lastCounter )
+        {
             throw std::runtime_error( "source frame counter reset" );
+        }
         m_lastCounter = counter;
         m_haveCounter = true;
         m_lastFrame   = std::chrono::steady_clock::now();
@@ -684,25 +778,35 @@ Session::onFrame( uint64_t counter, uint64_t sourceTime, const float *image, con
             return;
         }
         if( counter < m_issueCounter )
+        {
             throw std::runtime_error( "source counter reset after publication" );
+        }
         const uint64_t advance = counter - m_issueCounter;
         if( advance == 0 || advance < m_settings.m_skip )
+        {
             return;
+        }
         auto        &slot = m_slots[m_active];
         const size_t p = m_settings.m_pupil, area = product( p, p ), stride = 4 * area;
         float       *dest = slot.m_images.data() + stride * slot.m_count;
         std::fill( dest, dest + stride, 0.F );
         for( size_t col = 0; col < p - 4; ++col )
+        {
             for( size_t row = 0; row < p - 4; ++row )
+            {
                 for( size_t pupil = 0; pupil < 4; ++pupil )
                 {
                     const float value =
                         m_settings.m_imageNorm * image[m_settings.m_y[pupil / 2] + row +
                                                        ( m_settings.m_x[pupil % 2] + col ) * m_settings.m_height];
                     if( !finite( value ) )
+                    {
                         throw std::runtime_error( "non-finite preprocessed WFS image" );
+                    }
                     dest[pupil * area + ( col + 2 ) * p + row + 2] = value;
                 }
+            }
+        }
         if( !stable() )
         {
             ++m_progress.m_torn;
@@ -739,7 +843,9 @@ inline void Session::checkTimeout()
     std::lock_guard<std::mutex> lock( m_mutex );
     if( !m_ended && ( m_progress.m_phase == "collecting" || m_progress.m_phase == "waiting_io" ) &&
         std::chrono::duration<double>( std::chrono::steady_clock::now() - m_lastFrame ).count() > m_settings.m_timeout )
+    {
         abortLocked( "source frame timeout" );
+    }
 }
 
 inline void
@@ -778,12 +884,18 @@ inline void Session::run( const Settings &request )
     Settings settings = request;
     Bank     bank     = readBank( settings.m_bank );
     if( settings.m_samples && settings.m_samples != bank.m_samples )
+    {
         throw std::runtime_error( "Nperset disagrees with bank" );
+    }
     settings.m_samples = bank.m_samples;
     if( !settings.m_sets )
+    {
         settings.m_sets = bank.m_sets;
+    }
     if( settings.m_sets > bank.m_sets )
+    {
         throw std::runtime_error( "Nset exceeds bank" );
+    }
     validate( settings );
     for( size_t i = 0; i < settings.m_sets; ++i )
     {
@@ -791,7 +903,9 @@ inline void Session::run( const Settings &request )
         { //mutex scope
             std::lock_guard<std::mutex> lock( m_mutex );
             if( m_ended )
+            {
                 return;
+            }
         }
     }
     std::filesystem::create_directories( settings.m_output );
@@ -800,7 +914,9 @@ inline void Session::run( const Settings &request )
             .count();
     auto directory = settings.m_output / ( "run_" + std::to_string( stamp ) + "_" + std::to_string( ::getpid() ) );
     if( !std::filesystem::create_directory( directory ) )
+    {
         throw std::runtime_error( "run directory collision" );
+    }
     std::ostringstream manifest;
     manifest << "format=dlDataCollection-run-1\nbank=" << bank.m_path.string()
              << "\nbank_manifest_sha256=" << bank.m_manifestHash << "\nmask_sha256=" << bank.m_maskHash
@@ -836,20 +952,26 @@ inline void Session::run( const Settings &request )
             { //mutex scope
                 std::unique_lock<std::mutex> lock( m_mutex );
                 for( size_t i = 0; i < m_slots.size(); ++i )
+                {
                     if( m_slots[i].m_state == SlotState::complete )
                     {
                         writing            = int( i );
                         m_slots[i].m_state = SlotState::writing;
                         break;
                     }
+                }
                 if( writing < 0 && !m_ended && loaded < settings.m_sets )
+                {
                     for( size_t i = 0; i < m_slots.size(); ++i )
+                    {
                         if( m_slots[i].m_state == SlotState::empty )
                         {
                             loading            = int( i );
                             m_slots[i].m_state = SlotState::loading;
                             break;
                         }
+                    }
+                }
                 finished = m_ended && writing < 0;
                 if( !finished && writing < 0 && loading < 0 )
                 {
@@ -858,7 +980,9 @@ inline void Session::run( const Settings &request )
                 }
             }
             if( finished )
+            {
                 break;
+            }
             if( writing >= 0 )
             {
                 auto &slot = m_slots[writing];
@@ -866,7 +990,9 @@ inline void Session::run( const Settings &request )
                 { //mutex scope
                     std::lock_guard<std::mutex> lock( m_mutex );
                     if( slot.m_count == settings.m_samples )
+                    {
                         ++m_progress.m_written;
+                    }
                     slot.m_state = SlotState::empty;
                 }
             }
@@ -900,10 +1026,13 @@ inline void Session::run( const Settings &request )
                 m_progress.m_error = e.what();
             }
             else
+            {
                 abortLocked( e.what() );
+            }
         }
         // Preserve a different active partial set even when one output payload failed.
         for( auto &slot : m_slots )
+        {
             if( slot.m_state == SlotState::complete && slot.m_count )
             {
                 try
@@ -916,6 +1045,7 @@ inline void Session::run( const Settings &request )
                 {
                 } // Retain owned buffers and any .part file on further I/O failure.
             }
+        }
     }
     const auto status = progress();
     writeText( directory / "finished.conf",
@@ -933,9 +1063,15 @@ inline void Session::ioLoop()
         Settings settings;
         { //mutex scope
             std::unique_lock<std::mutex> lock( m_mutex );
-            m_condition.wait( lock, [this] { return m_stop || m_requested; } );
+            m_condition.wait( lock,
+                              [this]
+                              {
+                                  return m_stop || m_requested;
+                              } );
             if( m_stop && !m_requested )
+            {
                 return;
+            }
             settings    = m_settings;
             m_requested = false;
         }
@@ -953,7 +1089,9 @@ inline void Session::ioLoop()
                     m_progress.m_error = e.what();
                 }
                 else
+                {
                     abortLocked( e.what() );
+                }
             }
             // Completed or active buffers remain owned on a write failure; Start is disabled.
         }
@@ -962,7 +1100,9 @@ inline void Session::ioLoop()
             m_ended            = true;
             m_progress.m_phase = m_failed ? "failed" : m_cancelled ? "cancelled" : "complete";
             if( m_stop )
+            {
                 return;
+            }
         }
     }
 }

@@ -50,7 +50,9 @@ void WriterFixture::save( const std::string &ticks )
     std::ofstream process( path + "/stat" );
     process << getpid() << " (writer with spaces) S";
     for( int field = 4; field < 22; ++field )
+    {
         process << " 0";
+    }
     process << " " << ticks << " 0\n";
     std::ofstream( path + "/cmdline" ) << "milk-wfs2cmodeval-1";
 }

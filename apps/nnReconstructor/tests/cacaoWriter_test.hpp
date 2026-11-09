@@ -23,16 +23,22 @@ inline cacaoWriter::cacaoWriter( const std::string &shmDirectory, const std::str
 inline bool cacaoWriter::running()
 {
     if( !nnTest::cacaoKnown )
+    {
         throw std::runtime_error( "FPS evidence unavailable" );
+    }
     return nnTest::cacaoRunning;
 }
 inline void cacaoWriter::command( bool enabled )
 {
     nnTest::cacaoCommands.push_back( enabled );
     if( !nnTest::cacaoDelivery )
+    {
         throw std::runtime_error( "FIFO unavailable" );
+    }
     if( enabled ? nnTest::cacaoStartCompletes : nnTest::cacaoStopCompletes )
+    {
         nnTest::cacaoRunning = enabled;
+    }
 }
 } // namespace MagAOX::app
 /// \endcond

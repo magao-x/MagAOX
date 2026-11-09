@@ -82,12 +82,16 @@ inline void CameraReadback::update( const pcf::IndiProperty &property )
                  .count();
     if( property.getType() != pcf::IndiProperty::Number || !property.find( "current" ) ||
         ( property.getState() != pcf::IndiProperty::Idle && property.getState() != pcf::IndiProperty::Ok ) )
+    {
         return;
+    }
     // IndiElement::get<double>() does not detect failed numeric conversion.
     std::istringstream input( property["current"].get() );
     double             value = 0;
     if( input >> value && ( input >> std::ws ).eof() && std::isfinite( value ) && value > 0 )
+    {
         m_value = value;
+    }
 }
 
 inline bool CameraReadback::valid( std::chrono::steady_clock::time_point now ) const
@@ -104,7 +108,9 @@ inline void PresetReadback::update( const pcf::IndiProperty &property )
                  .count();
     if( property.getType() != pcf::IndiProperty::Switch ||
         ( property.getState() != pcf::IndiProperty::Idle && property.getState() != pcf::IndiProperty::Ok ) )
+    {
         return;
+    }
     for( const auto &element : property.getElements() )
     {
         const auto state = element.second.getSwitchState();
@@ -150,9 +156,13 @@ inline std::string observationContext( const PresetReadback &nd,
 {
     const auto now = std::chrono::steady_clock::now();
     if( !nd.valid( now ) || !flip.valid( now ) || ( flip.m_value != "in" && flip.m_value != "out" ) )
+    {
         throw std::runtime_error( "missing, moving or stale fwtelsim/flipwfsf readback" );
+    }
     if( !fps.valid( now ) || !emgain.valid( now ) )
+    {
         throw std::runtime_error( "missing, changing or stale camwfs fps/emgain readback" );
+    }
     std::ostringstream camera;
     camera.precision( std::numeric_limits<double>::max_digits10 );
     camera << "camwfs_fps=" << fps.m_value << "\ncamwfs_emgain=" << emgain.m_value

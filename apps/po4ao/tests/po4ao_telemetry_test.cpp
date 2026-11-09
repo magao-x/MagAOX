@@ -12,6 +12,7 @@ TEST_CASE( "PO4AO telemetry round trip preserves exact counters and identity", "
 {
     using namespace MagAOX::logger;
     for( bool fresh : { false, true } )
+    {
         for( bool mixed : { false, true } )
         {
             constexpr uint64_t             exact = UINT64_MAX - 31;
@@ -56,6 +57,7 @@ TEST_CASE( "PO4AO telemetry round trip preserves exact counters and identity", "
             flatbuffers::Verifier invalid( builder.GetBufferPointer(), builder.GetSize() );
             REQUIRE_FALSE( VerifyTelem_po4ao_fbBuffer( invalid ) );
         }
+    }
     flatbuffers::FlatBufferBuilder empty;
     empty.Finish( CreateTelem_po4ao_fb( empty ) );
     const auto *s = GetTelem_po4ao_fb( empty.GetBufferPointer() );

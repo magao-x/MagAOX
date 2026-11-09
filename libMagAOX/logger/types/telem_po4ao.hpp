@@ -191,117 +191,149 @@ inline uint32_t telem_po4ao::backend( void *buffer )
 inline logMetaDetail telem_po4ao::getAccessor( const std::string &member )
 {
     if( member == "p50_us" )
+    {
         return logMetaDetail( { "P50_US",
                                 "",
                                 logMeta::valTypes::UInt,
                                 logMeta::metaTypes::State,
                                 reinterpret_cast<void *>( &p50_us ),
                                 false } );
+    }
     if( member == "p95_us" )
+    {
         return logMetaDetail( { "P95_US",
                                 "",
                                 logMeta::valTypes::UInt,
                                 logMeta::metaTypes::State,
                                 reinterpret_cast<void *>( &p95_us ),
                                 false } );
+    }
     if( member == "p99_us" )
+    {
         return logMetaDetail( { "P99_US",
                                 "",
                                 logMeta::valTypes::UInt,
                                 logMeta::metaTypes::State,
                                 reinterpret_cast<void *>( &p99_us ),
                                 false } );
+    }
     if( member == "max_us" )
+    {
         return logMetaDetail( { "MAX_US",
                                 "",
                                 logMeta::valTypes::UInt,
                                 logMeta::metaTypes::State,
                                 reinterpret_cast<void *>( &max_us ),
                                 false } );
+    }
     if( member == "samples" )
+    {
         return logMetaDetail( { "SAMPLES",
                                 "",
                                 logMeta::valTypes::ULongLong,
                                 logMeta::metaTypes::State,
                                 reinterpret_cast<void *>( &samples ),
                                 false } );
+    }
     if( member == "sequence" )
+    {
         return logMetaDetail( { "SEQUENCE",
                                 "",
                                 logMeta::valTypes::ULongLong,
                                 logMeta::metaTypes::State,
                                 reinterpret_cast<void *>( &sequence ),
                                 false } );
+    }
     if( member == "sample_time_ns" )
+    {
         return logMetaDetail( { "SAMPLE_TIME_NS",
                                 "",
                                 logMeta::valTypes::ULongLong,
                                 logMeta::metaTypes::State,
                                 reinterpret_cast<void *>( &sample_time_ns ),
                                 false } );
+    }
     if( member == "fresh" )
+    {
         return logMetaDetail( { "FRESH",
                                 "",
                                 logMeta::valTypes::Bool,
                                 logMeta::metaTypes::State,
                                 reinterpret_cast<void *>( &fresh ),
                                 false } );
+    }
     if( member == "mixed_window" )
+    {
         return logMetaDetail( { "MIXED_WINDOW",
                                 "",
                                 logMeta::valTypes::Bool,
                                 logMeta::metaTypes::State,
                                 reinterpret_cast<void *>( &mixed_window ),
                                 false } );
+    }
     if( member == "missed_frames" )
+    {
         return logMetaDetail( { "MISSED_FRAMES",
                                 "",
                                 logMeta::valTypes::ULongLong,
                                 logMeta::metaTypes::State,
                                 reinterpret_cast<void *>( &missed_frames ),
                                 false } );
+    }
     if( member == "deadline_misses" )
+    {
         return logMetaDetail( { "DEADLINE_MISSES",
                                 "",
                                 logMeta::valTypes::ULongLong,
                                 logMeta::metaTypes::State,
                                 reinterpret_cast<void *>( &deadline_misses ),
                                 false } );
+    }
     if( member == "inference_failures" )
+    {
         return logMetaDetail( { "INFERENCE_FAILURES",
                                 "",
                                 logMeta::valTypes::ULongLong,
                                 logMeta::metaTypes::State,
                                 reinterpret_cast<void *>( &inference_failures ),
                                 false } );
+    }
     if( member == "replay_drops" )
+    {
         return logMetaDetail( { "REPLAY_DROPS",
                                 "",
                                 logMeta::valTypes::ULongLong,
                                 logMeta::metaTypes::State,
                                 reinterpret_cast<void *>( &replay_drops ),
                                 false } );
+    }
     if( member == "deadline_us" )
+    {
         return logMetaDetail( { "DEADLINE_US",
                                 "",
                                 logMeta::valTypes::UInt,
                                 logMeta::metaTypes::State,
                                 reinterpret_cast<void *>( &deadline_us ),
                                 false } );
+    }
     if( member == "model_id" )
+    {
         return logMetaDetail( { "MODEL_ID",
                                 "",
                                 logMeta::valTypes::ULongLong,
                                 logMeta::metaTypes::State,
                                 reinterpret_cast<void *>( &model_id ),
                                 false } );
+    }
     if( member == "backend" )
+    {
         return logMetaDetail( { "BACKEND",
                                 "",
                                 logMeta::valTypes::UInt,
                                 logMeta::metaTypes::State,
                                 reinterpret_cast<void *>( &backend ),
                                 false } );
+    }
     return logMetaDetail();
 }
 } // namespace MagAOX::logger

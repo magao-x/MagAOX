@@ -123,7 +123,9 @@ Fixture::Fixture( Session::FileWriter writer, size_t samples, size_t sets )
                   m_command = command[0];
               }
               else
+              {
                   m_command = 0;
+              }
               return m_counter.load();
           },
           std::move( writer ) )
@@ -131,7 +133,9 @@ Fixture::Fixture( Session::FileWriter writer, size_t samples, size_t sets )
     char        name[] = "/tmp/dlDataCollection-test-XXXXXX";
     const char *path   = ::mkdtemp( name );
     if( !path )
+    {
         throw std::runtime_error( "temporary fixture creation failed" );
+    }
     m_root               = path;
     m_settings.m_bank    = m_root / "bank";
     m_settings.m_output  = m_root / "output";
@@ -157,14 +161,22 @@ Fixture::Fixture( Session::FileWriter writer, size_t samples, size_t sets )
     {
         std::vector<float> values( samples * 2500 );
         for( size_t sample = 0; sample < samples; ++sample )
+        {
             for( size_t i = 0; i < 2500; ++i )
+            {
                 values[sample * 2500 + i] = mask[i] * float( 1 + set * samples + sample );
+            }
+        }
         const auto name = "modeval_dataset_" + std::to_string( set ) + ".bin";
         writeFile( m_settings.m_bank / name, values.data(), values.size() * sizeof( float ) );
         manifest << "set_" << set << "_sha256=" << digest( values.data(), values.size() * sizeof( float ) ) << '\n';
     }
     writeText( m_settings.m_bank / "manifest.conf", manifest.str() );
-    m_thread = std::thread( [this] { m_session.ioLoop(); } );
+    m_thread = std::thread(
+        [this]
+        {
+            m_session.ioLoop();
+        } );
 }
 
 Fixture::~Fixture()
@@ -172,7 +184,9 @@ Fixture::~Fixture()
     m_release = true;
     m_session.shutdown();
     if( m_thread.joinable() )
+    {
         m_thread.join();
+    }
     std::filesystem::remove_all( m_root );
 }
 
@@ -182,7 +196,9 @@ bool Fixture::wait( const std::string &phase )
     while( std::chrono::steady_clock::now() < deadline )
     {
         if( m_session.progress().m_phase == phase )
+        {
             return true;
+        }
         std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
     }
     return false;
@@ -193,7 +209,13 @@ void Fixture::frame( uint64_t counter, bool stable )
     m_counter = counter;
     std::array<float, 16> image;
     image.fill( m_command.load() );
-    m_session.onFrame( counter, counter * 1000000, image.data(), [stable] { return stable; } );
+    m_session.onFrame( counter,
+                       counter * 1000000,
+                       image.data(),
+                       [stable]
+                       {
+                           return stable;
+                       } );
 }
 /** \endcond */
 
@@ -258,7 +280,9 @@ TEST_CASE( "dlDataCollection waits on producer counters and rejects torn images"
     REQUIRE( f.wait( "collecting" ) );
     f.frame( 100 );
     for( int i = 0; i < 30; ++i )
+    {
         f.frame( 100 );
+    }
     REQUIRE( f.m_publications == 1 );
     REQUIRE( f.m_session.progress().m_saved == 0 );
     REQUIRE( f.m_session.progress().m_duplicates == 30 );
@@ -271,7 +295,9 @@ TEST_CASE( "dlDataCollection waits on producer counters and rejects torn images"
     REQUIRE( f.m_session.progress().m_saved == 1 );
     REQUIRE( f.m_publications == 2 );
     for( int i = 0; i < 30; ++i )
+    {
         f.frame( 110 );
+    }
     f.frame( 117 );
     REQUIRE( f.m_session.progress().m_saved == 1 );
     f.frame( 118 );
@@ -483,9 +509,17 @@ TEST_CASE( "dlDataCollection preserves pupil orientation and normalization", "[d
     f.frame( 1 );
     std::array<float, 16> image;
     for( size_t i = 0; i < image.size(); ++i )
+    {
         image[i] = float( i );
+    }
     f.m_counter = 2;
-    f.m_session.onFrame( 2, 2000000, image.data(), [] { return true; } );
+    f.m_session.onFrame( 2,
+                         2000000,
+                         image.data(),
+                         []
+                         {
+                             return true;
+                         } );
     REQUIRE( f.wait( "complete" ) );
     const auto output =
         readFloats( std::filesystem::path( f.m_session.progress().m_directory ) / "images_dataset_0.bin", 144 );
@@ -518,7 +552,9 @@ TEST_CASE( "dlDataCollection rejects a lost-command snapshot before saving", "[d
                          9000000,
                          image.data(),
                          []() -> bool
-                         { throw std::runtime_error( "command channel changed or another writer intervened" ); } );
+                         {
+                             throw std::runtime_error( "command channel changed or another writer intervened" );
+                         } );
     REQUIRE( f.wait( "failed" ) );
     REQUIRE( f.m_session.progress().m_saved == 0 );
     REQUIRE( f.m_command == 0 );
@@ -542,7 +578,9 @@ TEST_CASE( "dlDataCollection applies bounded backpressure outside the capture th
         {
             blocked = true;
             while( !release.load() )
+            {
                 std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+            }
         }
         writeFile( path, data, size );
     };
@@ -559,7 +597,9 @@ TEST_CASE( "dlDataCollection applies bounded backpressure outside the capture th
     }
     REQUIRE( blocked );
     for( uint64_t c = 501; c < 1501; ++c )
+    {
         f.frame( c );
+    }
     REQUIRE( f.m_session.progress().m_saved <= 2 );
     REQUIRE( f.m_session.progress().m_phase == "waiting_io" );
     REQUIRE( f.m_command == 0 );
@@ -587,7 +627,9 @@ TEST_CASE( "dlDataCollection never reports success after a payload write failure
     auto writer = []( const auto &path, const void *data, size_t size )
     {
         if( path.filename().string().find( "images_" ) == 0 )
+        {
             throw std::runtime_error( "injected full disk" );
+        }
         writeFile( path, data, size );
     };
     Fixture f( writer, 1, 1 );
