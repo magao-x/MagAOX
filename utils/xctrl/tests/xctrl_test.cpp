@@ -35,9 +35,8 @@ TEST_CASE( "xctrl parses proclists", "[xctrl]" )
                            "isICC  xindiserver\n"
                            "\n"
                            "  camsci1-dark   shmimIntegrator\n"
-                           "py:pyapp  pyExec\n"
                            "-quiet  someExec\n"
-                           "nhb:quiet2  someExec\n"
+                           "-camsci-1  someExec\n"
                            "#off  someExec\n"
                            "name exec extra\n"
                            "x:bad  someExec\n"
@@ -45,18 +44,17 @@ TEST_CASE( "xctrl parses proclists", "[xctrl]" )
                            "ok  ../evil\n" );
     proclist           pl = parseProclist( in );
 
-    REQUIRE( pl.apps.size() == 5 );
+    REQUIRE( pl.apps.size() == 4 );
     REQUIRE( pl.apps[0].name == "isICC" );
     REQUIRE( pl.apps[0].isServer() );
     REQUIRE( pl.apps[1].name == "camsci1-dark" );
     REQUIRE( pl.apps[1].line == 4 );
-    REQUIRE( pl.apps[2].name == "pyapp" );
-    REQUIRE( pl.apps[2].prefix == "py:" );
-    REQUIRE( pl.apps[2].notifies() );
-    REQUIRE( pl.apps[3].name == "quiet" );
+    REQUIRE( pl.apps[1].notifies() );
+    REQUIRE( pl.apps[2].name == "quiet" );
+    REQUIRE( !pl.apps[2].notifies() );
+    REQUIRE( pl.apps[3].name == "camsci-1" );
+    REQUIRE( pl.apps[3].prefix == "-" );
     REQUIRE( !pl.apps[3].notifies() );
-    REQUIRE( pl.apps[4].prefix == "nhb:" );
-    REQUIRE( !pl.apps[4].notifies() );
 
     // three tokens, unknown prefix, duplicate, path in the executable
     REQUIRE( pl.errors.size() == 4 );
@@ -78,7 +76,7 @@ TEST_CASE( "xctrl keeps disabled proclist processes", "[xctrl]" )
                            "#camsci1  picamCtrl\n"
                            "#  camsci2  picamCtrl\n"
                            "# camsci4 picamCtrl\n"
-                           "#py:pyapp  pyExec\n"
+                           "#-quietapp  someExec\n"
                            "##camsci_old  camsci\n"
                            "## camsci_old2  camsci\n"
                            "#Processes for the MagAO-X ICC\n"
@@ -98,9 +96,9 @@ TEST_CASE( "xctrl keeps disabled proclist processes", "[xctrl]" )
     {
         names.push_back( d.name );
     }
-    REQUIRE( names == std::vector<std::string>{ "camsci1", "camsci2", "camsci4", "pyapp" } );
+    REQUIRE( names == std::vector<std::string>{ "camsci1", "camsci2", "camsci4", "quietapp" } );
     REQUIRE( pl.disabled[1].exec == "picamCtrl" );
-    REQUIRE( pl.disabled[3].prefix == "py:" );
+    REQUIRE( pl.disabled[3].prefix == "-" );
 
     // single-# lines that are not processes
     REQUIRE( pl.warnings.size() == 2 );
@@ -193,7 +191,7 @@ TEST_CASE( "xctrl maps app configuration to systemd directives", "[xctrl]" )
 
     SECTION( "apps that do not notify are simple services without a watchdog" )
     {
-        app.prefix     = "nhb:";
+        app.prefix     = "-";
         directiveMap d = appDirectives( app, { { "systemd.watchdogSec", "20" } }, errors );
         REQUIRE( d["Type"] == "simple" );
         REQUIRE( d["WatchdogSec"] == "0" );
@@ -250,6 +248,7 @@ TEST_CASE( "xctrl generates the template and drop-ins", "[xctrl]" )
     REQUIRE( t.find( "User=xsup\n" ) != std::string::npos );
     REQUIRE( t.find( "WantedBy=magaox-icc.target\n" ) != std::string::npos );
     REQUIRE( t.find( "Environment=MAGAOX_ROLE=ICC\n" ) != std::string::npos );
+    REQUIRE( t.find( "Environment=PYTHONUNBUFFERED=1\n" ) != std::string::npos );
     // StartLimit* belong in [Unit]
     REQUIRE( t.find( "StartLimitBurst" ) < t.find( "[Service]" ) );
 
@@ -322,7 +321,7 @@ TEST_CASE( "xctrl edits an app's proclist lines", "[xctrl]" )
                           "isICC        xindiserver\n"
                           "camsci1      picamCtrl\n"
                           "#camsci2     picamCtrl\n"
-                          "# py:pyapp   pyExec\n"
+                          "# -quietapp  someExec\n"
                           "camsci10     picamCtrl\n";
     int         changed = 0;
 
@@ -341,9 +340,9 @@ TEST_CASE( "xctrl edits an app's proclist lines", "[xctrl]" )
         REQUIRE( changed == 1 );
         REQUIRE( t.find( "\ncamsci2     picamCtrl\n" ) != std::string::npos );
 
-        t = editProclist( text, "pyapp", proclistEdit::uncomment, "py:pyapp pyExec", changed );
+        t = editProclist( text, "quietapp", proclistEdit::uncomment, "-quietapp someExec", changed );
         REQUIRE( changed == 1 );
-        REQUIRE( t.find( "\npy:pyapp   pyExec\n" ) != std::string::npos );
+        REQUIRE( t.find( "\n-quietapp  someExec\n" ) != std::string::npos );
     }
 
     SECTION( "enable of an active app changes nothing, enable of an unlisted app appends it" )

@@ -37,8 +37,8 @@ For `MAGAOX_ROLE=ICC`, `sudo xctrl reset` writes:
                                           the proclist lines last applied by reset
 ```
 
-Each app runs as `/opt/MagAOX/bin/<executable> -n <name>`, as user `xsup`, with `MAGAOX_ROLE` set. Its output goes
-to the journal (`xctrl peek NAME`); its binary logs are unchanged (`logdump NAME`).
+Each app runs as `/opt/MagAOX/bin/<executable> -n <name>`, as user `xsup`, with `MAGAOX_ROLE` set, and
+`PYTHONUNBUFFERED=1` so that Python apps' output is not held back. Its output goes to the journal (`xctrl peek NAME`); its binary logs are unchanged (`logdump NAME`).
 
 Unit names use the role in lower case. App names may contain `-`; units use them as is (`%i`).
 
@@ -58,8 +58,8 @@ or whose app has no `.conf`, is reported by `reset` and otherwise ignored.
 
 | Prefix      | Meaning                                                                         |
 |-------------|---------------------------------------------------------------------------------|
-| none, `py:` | the app notifies systemd: `Type=notify`, with a watchdog (`py:` for Python apps) |
-| `-`, `nhb:` | the app does not notify systemd: `Type=simple`, no watchdog, still restarted    |
+| none        | the app notifies systemd: `Type=notify`, with a watchdog                        |
+| `-`         | the app does not notify systemd: `Type=simple`, no watchdog, still restarted    |
 
 The app run by `xindiserver` is the role's INDI server. Apps are ordered after it, so they stop before it and their
 last messages get through; it is ordered after the `sshDigger` tunnels.

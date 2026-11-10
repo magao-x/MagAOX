@@ -61,7 +61,7 @@ struct appEntry
     /// The executable, a file name in the MagAO-X bin directory
     std::string exec;
 
-    /// The proclist prefix of the name: "" or "py:" for apps that notify systemd, "-" or "nhb:" for those that do not
+    /// The proclist prefix of the name: "" for apps that notify systemd, "-" for those that do not
     std::string prefix;
 
     /// The proclist line number, for messages
@@ -174,8 +174,7 @@ bool validValue( valueKind          kind, /**< [in] the kind of setting */
 /** Each line `NAME EXECUTABLE` is a process started automatically.  A line starting with one `#`, with or without
  * spaces after it, `#NAME EXECUTABLE`, is a disabled process; one that is not `NAME EXECUTABLE` is reported in
  * warnings and ignored.  A line starting with `##` is only a comment, whatever follows.  NAME may have a prefix:
- * `-` or `nhb:` for processes that do not notify systemd, so have no watchdog, `py:` for Python apps; any other
- * `prefix:` is part of the name, which is then invalid.
+ * `-` for processes that do not notify systemd, so have no watchdog.
  *
  * \returns the processes and any errors found
  */
@@ -548,7 +547,7 @@ class xCtrl
 
 inline bool appEntry::notifies() const
 {
-    return prefix != "-" && prefix != "nhb:";
+    return prefix != "-";
 }
 
 inline bool appEntry::isServer() const
@@ -703,12 +702,6 @@ inline proclist parseProclist( std::istream &in )
             app.prefix = "-";
             app.name.erase( 0, 1 );
         }
-        else if( app.name.compare( 0, 3, "py:" ) == 0 || app.name.compare( 0, 4, "nhb:" ) == 0 )
-        {
-            size_t c   = app.name.find( ':' );
-            app.prefix = app.name.substr( 0, c + 1 );
-            app.name.erase( 0, c + 1 );
-        }
 
         if( commented )
         {
@@ -727,7 +720,7 @@ inline proclist parseProclist( std::istream &in )
         if( !validName( app.name ) )
         {
             pl.errors.push_back( "proclist line " + std::to_string( n ) + ": invalid name [" + toks[0] +
-                                 "]: use letters, digits, _ . and -, with a py:, nhb: or - prefix if needed" );
+                                 "]: use letters, digits, _ . and -, with a - prefix if needed" );
             continue;
         }
         if( !validName( app.exec ) )
@@ -788,10 +781,6 @@ inline std::string editProclist(
         if( n[0] == '-' )
         {
             n.erase( 0, 1 );
-        }
-        else if( n.compare( 0, 3, "py:" ) == 0 || n.compare( 0, 4, "nhb:" ) == 0 )
-        {
-            n.erase( 0, n.find( ':' ) + 1 );
         }
         return n == name;
     };
@@ -1066,6 +1055,8 @@ inline std::string templateUnit( const unitNames &units, const directiveMap &dir
        << "NotifyAccess=main\n"
        << "User=xsup\n"
        << "Environment=MAGAOX_ROLE=" << units.role << "\n"
+       << "# Python apps write their output to the journal as it happens\n"
+       << "Environment=PYTHONUNBUFFERED=1\n"
        << "EnvironmentFile=-" << envFile << "\n"
        << "# Each registered app's drop-in sets its ExecStart; an unregistered instance fails\n"
        << "ExecStart=/bin/false\n";
