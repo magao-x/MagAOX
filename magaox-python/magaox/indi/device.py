@@ -6,7 +6,6 @@ import glob
 import json
 import os
 import os.path
-import re
 import signal
 import socket
 import stat
@@ -34,25 +33,14 @@ from ..constants import DEFAULT_PREFIX
 log = logging.getLogger()
 
 @xconf.config
-class ResurrecteeConfig:
-    timeout: list[int] = xconf.field(
-        default_factory=lambda: [10],
-        help=(
-            "Timeout vector in seconds, read by resuctrl reset for systemd: the first element is the "
-            "watchdog timeout (WatchdogSec), the optional second the startup timeout (TimeoutStartSec)."
-        ),
-    )
-
-
-@xconf.config
 class SystemdConfig:
-    '''systemd service settings for this app, read by resuctrl reset, not by the app'''
+    '''systemd service settings for this app, read by xctrl reset, not by the app'''
     restart: typing.Optional[str] = xconf.field(default=None, help="Restart= policy, e.g. always or on-failure")
     restartSec: typing.Optional[float] = xconf.field(default=None, help="RestartSec=, seconds before restarting")
     startLimitBurst: typing.Optional[int] = xconf.field(default=None, help="StartLimitBurst=, starts allowed per interval")
     startLimitIntervalSec: typing.Optional[float] = xconf.field(default=None, help="StartLimitIntervalSec=, seconds")
-    watchdogSec: typing.Optional[float] = xconf.field(default=None, help="WatchdogSec=, overrides resurrectee.timeout[0]")
-    timeoutStartSec: typing.Optional[float] = xconf.field(default=None, help="TimeoutStartSec=, overrides resurrectee.timeout[1]")
+    watchdogSec: typing.Optional[float] = xconf.field(default=None, help="WatchdogSec=, seconds without a watchdog notification before systemd restarts the app")
+    timeoutStartSec: typing.Optional[float] = xconf.field(default=None, help="TimeoutStartSec=, seconds allowed from start to READY=1")
     timeoutStopSec: typing.Optional[float] = xconf.field(default=None, help="TimeoutStopSec=, seconds before SIGKILL on stop")
     killSignal: typing.Optional[str] = xconf.field(default=None, help="KillSignal=, e.g. SIGTERM or SIGINT")
 
@@ -77,11 +65,7 @@ def sd_notify(state : str) -> bool:
 class BaseConfig:
     common_path_prefix : pathlib.Path = xconf.field(default=DEFAULT_PREFIX, help="Prefix for all instrument data and config directories")
     sleep_interval_sec : float = xconf.field(default=1.0, help="Main loop logic will be run every `sleep_interval_sec` seconds")
-    resurrectee: ResurrecteeConfig = xconf.field(default_factory=ResurrecteeConfig)
     systemd: SystemdConfig = xconf.field(default_factory=SystemdConfig)
-
-    _SECTION_RE = re.compile(r"^\s*\[(.+?)\]\s*$")
-    _LEGACY_TIMEOUT_RE = re.compile(r"^(\s*timeout\s*=\s*)(\d+(?:\s*,\s*\d+)+)\s*(#.*)?$")
 
     @staticmethod
     def _deep_update(base: dict, override: dict):
@@ -96,48 +80,11 @@ class BaseConfig:
                 base[key] = value
         return base
 
-    @classmethod
-    def _normalize_legacy_resurrectee_timeout_toml(cls, raw_text: str):
-        in_resurrectee = False
-        changed = False
-        out_lines = []
-
-        for line in raw_text.splitlines(keepends=True):
-            section_match = cls._SECTION_RE.match(line)
-            if section_match:
-                in_resurrectee = section_match.group(1).strip().lower() == "resurrectee"
-
-            if in_resurrectee:
-                timeout_match = cls._LEGACY_TIMEOUT_RE.match(line)
-                if timeout_match:
-                    vals = [v.strip() for v in timeout_match.group(2).split(",") if v.strip()]
-                    comment = timeout_match.group(3) or ""
-                    newline = "\n" if line.endswith("\n") else ""
-                    line = f"{timeout_match.group(1)}[{', '.join(vals)}]{comment}{newline}"
-                    changed = True
-
-            out_lines.append(line)
-
-        return "".join(out_lines), changed
-
-    @classmethod
-    def _load_config_file_with_compat(cls, filepath: str):
+    @staticmethod
+    def _load_config_file(filepath: str):
         log.debug(f"Loading config from {filepath}")
         with open(filepath, "r") as fh:
-            raw_text = fh.read()
-
-        try:
-            return toml.loads(raw_text)
-        except toml.TomlDecodeError:
-            normalized_text, changed = cls._normalize_legacy_resurrectee_timeout_toml(raw_text)
-            if not changed:
-                raise
-            log.debug(
-                "Using legacy [resurrectee] timeout compatibility parser for %s; "
-                "prefer timeout = [a, b] for strict TOML.",
-                filepath,
-            )
-            return toml.loads(normalized_text)
+            return toml.load(fh)
 
     @classmethod
     def from_config(
@@ -162,11 +109,11 @@ class BaseConfig:
         raw_config = {}
         if len(config_paths):
             for config_file_path in config_paths:
-                loaded_config = cls._load_config_file_with_compat(config_file_path)
+                loaded_config = cls._load_config_file(config_file_path)
                 raw_config.update(loaded_config)
         elif default_config_path is not None:
             try:
-                raw_config = cls._load_config_file_with_compat(default_config_path)
+                raw_config = cls._load_config_file(default_config_path)
             except FileNotFoundError:
                 pass
 

@@ -158,8 +158,7 @@ void timeSeriesSimulator::setupConfig()
 , "Delay to sleep at end of process startup, seconds; default=0,"
   " which prevents any such delay.  This parameter is used for testing"
   " systemd behavior with slow-starting processes.  A delay longer than"
-  " the startup timeout (TimeoutStartSec, set by the second element of"
-  " resurrectee.timeout or by [systemd] timeoutStartSec, default 120s)"
+  " the startup timeout ([systemd] timeoutStartSec, default 120s)"
   " makes systemd stop this process and start it again.");
 }
 

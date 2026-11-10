@@ -286,7 +286,6 @@ class MagAOXApp : public application
      * - signal handling installation by setSigTermHandler()
      * - appStartup() is called
      * - INDI communications started by startINDI()
-     * - Resurrectee started by startResurrectee()
      * - power state is checked, pausing if unknown (if being managed)
      *
      * Errors in the above steps will cause a process exit.
@@ -1660,7 +1659,7 @@ void MagAOXApp<_useINDI>::setupBasicConfig() // virtual
                 "Seconds between [alive name pid] announcements on the INDI server control FIFO, so a restarted"
                 " indiserver registers this driver again.  0 disables them.  Default is 5." );
 
-    // Settings for running this app as a systemd service, read by resuctrl, not by the app
+    // Settings for running this app as a systemd service, read by xctrl, not by the app
     for( const char *key : { "restart",
                              "restartSec",
                              "startLimitBurst",
@@ -1678,21 +1677,11 @@ void MagAOXApp<_useINDI>::setupBasicConfig() // virtual
                     key,
                     false,
                     "string",
-                    "systemd service setting for this app, applied by resuctrl reset" );
+                    "systemd service setting for this app, applied by xctrl reset" );
     }
 
     // Logger Stuff
     m_log.setupConfig( config );
-    // The old resurrector heartbeat timeouts, now read by resuctrl for the systemd watchdog, not by the app
-    config.add( "resurrectee.timeout",
-                "",
-                "",
-                argType::Required,
-                "resurrectee",
-                "timeout",
-                false,
-                "string",
-                "running[,startup] timeouts in seconds, applied by resuctrl reset as WatchdogSec and TimeoutStartSec" );
 
     if( m_powerMgtEnabled )
     {
@@ -2075,7 +2064,7 @@ int MagAOXApp<_useINDI>::execute() // virtual
         int nwaits = 0;
         while( m_powerState < 0 && !m_shutdown )
         {
-            // send a heartbeat to the systemd watchdog
+            // notify the systemd watchdog
             sys::sdNotify( "WATCHDOG=1" );
 
             // the power state comes through indiserver, which must know us
@@ -2207,7 +2196,7 @@ int MagAOXApp<_useINDI>::execute() // virtual
             #endif // clang-format on
         }
 
-        // send a heartbeat to the systemd watchdog
+        // notify the systemd watchdog
         sys::sdNotify( "WATCHDOG=1" );
 
         if( m_useINDI )

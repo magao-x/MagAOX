@@ -206,7 +206,7 @@ utils/logdump/logdump
 utils/logsurgeon/logsurgeon
 utils/cursesINDI/cursesINDI
 utils/logstream/logstream
-utils/resuctrl/resuctrl
+utils/xctrl/xctrl
 utils/shmimDelta/shmimDelta
 utils/shmimInfo/shmimInfo
 utils/shmimPlot/shmimPlot

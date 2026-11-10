@@ -137,7 +137,7 @@
 
 ../utils/logsurgeon/tests/logsurgeon_config_test
 
-../utils/resuctrl/tests/resuctrl_test
+../utils/xctrl/tests/xctrl_test
 ../utils/tests/cursesINDI_test
 ../utils/tests/logdump_test
 ../utils/tests/shmimDelta_test

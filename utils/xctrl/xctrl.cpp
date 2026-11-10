@@ -1,13 +1,13 @@
-/** \file resuctrl.cpp
+/** \file xctrl.cpp
  * \brief Manage the MagAO-X apps of a role as systemd services: main program
  *
- * \ingroup resuctrl_files
+ * \ingroup xctrl_files
  */
 
-#include "resuctrl.hpp"
+#include "xctrl.hpp"
 
 int main( int argc, char **argv )
 {
-    resuctrl::resuCtrl rc;
+    xctrl::xCtrl rc;
     return rc.main( argc, argv );
 }

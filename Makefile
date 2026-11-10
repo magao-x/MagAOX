@@ -281,7 +281,7 @@ else
 endif
 
 utils_to_build = \
-	resuctrl \
+	xctrl \
 	logdump \
 	logsurgeon \
 	cursesINDI \

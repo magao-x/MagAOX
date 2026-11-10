@@ -1,15 +1,15 @@
-/** \file resuctrl_test.cpp
- * \brief Catch2 tests for resuctrl, the systemd process control utility
+/** \file xctrl_test.cpp
+ * \brief Catch2 tests for xctrl, the systemd process control utility
  *
- * \ingroup resuctrl_unit_test
+ * \ingroup xctrl_unit_test
  */
 
 #include "../../../tests/catch2/catch.hpp"
 
-#include "../resuctrl.hpp"
+#include "../xctrl.hpp"
 
-/** \defgroup resuctrl_unit_test resuctrl Unit Tests
- * \brief Unit tests for the resuctrl utility.
+/** \defgroup xctrl_unit_test xctrl Unit Tests
+ * \brief Unit tests for the xctrl utility.
  *
  * \ingroup application_unit_test
  */
@@ -17,19 +17,19 @@
 namespace libXWCTest
 {
 
-/// Namespace for `resuctrl` unit tests.
-/** \ingroup resuctrl_unit_test
+/// Namespace for `xctrl` unit tests.
+/** \ingroup xctrl_unit_test
  */
-namespace resuctrlTest
+namespace xctrlTest
 {
 
-using namespace resuctrl;
+using namespace xctrl;
 
 /// Proclist lines become apps with their prefixes; comments are skipped and bad lines reported.
 /**
- * \ingroup resuctrl_unit_test
+ * \ingroup xctrl_unit_test
  */
-TEST_CASE( "resuctrl parses proclists like resurrector_indi", "[resuctrl]" )
+TEST_CASE( "xctrl parses proclists", "[xctrl]" )
 {
     std::istringstream in( "# comment\n"
                            "isICC  xindiserver\n"
@@ -66,20 +66,22 @@ TEST_CASE( "resuctrl parses proclists like resurrector_indi", "[resuctrl]" )
     REQUIRE( pl.disabled[0].name == "off" );
 }
 
-/// Commented-out processes are kept apart, ordinary comments are not, and an active line wins.
+/// One # makes a disabled process, ## a comment; disabled lines that are not processes are reported.
 /**
- * \ingroup resuctrl_unit_test
+ * \ingroup xctrl_unit_test
  */
-TEST_CASE( "resuctrl keeps commented-out proclist processes", "[resuctrl]" )
+TEST_CASE( "xctrl keeps disabled proclist processes", "[xctrl]" )
 {
-    std::istringstream in( "#process-ID   Executable\n"
-                           "#Processes for the MagAO-X ICC\n"
+    std::istringstream in( "##process-ID   Executable\n"
+                           "## Processes for the MagAO-X ICC\n"
                            "##### camflowfs\n"
                            "#camsci1  picamCtrl\n"
                            "#  camsci2  picamCtrl\n"
+                           "# camsci4 picamCtrl\n"
                            "#py:pyapp  pyExec\n"
                            "##camsci_old  camsci\n"
                            "## camsci_old2  camsci\n"
+                           "#Processes for the MagAO-X ICC\n"
                            "#==========  ==========\n"
                            "camsci3  picamCtrl\n"
                            "#camsci3  picamCtrl\n"
@@ -90,22 +92,25 @@ TEST_CASE( "resuctrl keeps commented-out proclist processes", "[resuctrl]" )
     REQUIRE( pl.apps.size() == 1 );
     REQUIRE( pl.apps[0].name == "camsci3" );
 
-    // the column header looks like a process; reset skips it as it has no .conf
+    // #name and # name are the same; an active line and the first disabled line win
     std::vector<std::string> names;
     for( const auto &d : pl.disabled )
     {
         names.push_back( d.name );
     }
-    REQUIRE( names == std::vector<std::string>{ "process-ID", "camsci1", "camsci2", "pyapp" } );
+    REQUIRE( names == std::vector<std::string>{ "camsci1", "camsci2", "camsci4", "pyapp" } );
     REQUIRE( pl.disabled[1].exec == "picamCtrl" );
     REQUIRE( pl.disabled[3].prefix == "py:" );
+
+    // single-# lines that are not processes
+    REQUIRE( pl.warnings.size() == 2 );
 }
 
 /// systemd time spans, as systemctl show prints them, convert to seconds.
 /**
- * \ingroup resuctrl_unit_test
+ * \ingroup xctrl_unit_test
  */
-TEST_CASE( "resuctrl reads systemd time spans", "[resuctrl]" )
+TEST_CASE( "xctrl reads systemd time spans", "[xctrl]" )
 {
     REQUIRE( timespanSeconds( "10s" ) == 10 );
     REQUIRE( timespanSeconds( "20" ) == 20 );
@@ -121,76 +126,75 @@ TEST_CASE( "resuctrl reads systemd time spans", "[resuctrl]" )
 
 /// Configuration files parse into section.key values with quotes and arrays unwrapped.
 /**
- * \ingroup resuctrl_unit_test
+ * \ingroup xctrl_unit_test
  */
-TEST_CASE( "resuctrl reads MagAO-X and TOML configuration", "[resuctrl]" )
+TEST_CASE( "xctrl reads MagAO-X and TOML configuration", "[xctrl]" )
 {
     std::istringstream in( "top = 1\n"
-                           "[resurrectee]\n"
-                           "timeout = [20, 30]  # comment\n"
                            "[systemd]\n"
+                           "timeouts = [20, 30]  # comment\n"
                            "killSignal = \"SIGINT\"\n"
                            "restart='on-failure'\n" );
     confMap            c = parseConf( in );
 
     REQUIRE( c["top"] == "1" );
-    REQUIRE( c["resurrectee.timeout"] == "20, 30" );
+    REQUIRE( c["systemd.timeouts"] == "20, 30" );
     REQUIRE( c["systemd.killSignal"] == "SIGINT" );
     REQUIRE( c["systemd.restart"] == "on-failure" );
 }
 
-/// App settings map the resurrector timeouts and [systemd] keys onto systemd directives, and reject bad values.
+/// App [systemd] settings become systemd directives; bad values and the old [resurrectee] section are errors.
 /**
- * \ingroup resuctrl_unit_test
+ * \ingroup xctrl_unit_test
  */
-TEST_CASE( "resuctrl maps app configuration to systemd directives", "[resuctrl]" )
+TEST_CASE( "xctrl maps app configuration to systemd directives", "[xctrl]" )
 {
     appEntry app;
     app.name = "cam";
     app.exec = "camCtrl";
     std::vector<std::string> errors;
 
-    SECTION( "resurrectee timeouts become WatchdogSec and TimeoutStartSec" )
+    SECTION( "[systemd] settings become directives" )
     {
-        directiveMap d = appDirectives( app, { { "resurrectee.timeout", "20,90" } }, errors );
+        directiveMap d = appDirectives( app,
+                                        { { "systemd.watchdogSec", "20" },
+                                          { "systemd.timeoutStartSec", "90" },
+                                          { "systemd.timeoutStopSec", "15" },
+                                          { "systemd.restartSec", "2" },
+                                          { "systemd.restart", "on-failure" },
+                                          { "systemd.startLimitBurst", "3" } },
+                                        errors );
         REQUIRE( errors.empty() );
         REQUIRE( d["WatchdogSec"] == "20" );
         REQUIRE( d["TimeoutStartSec"] == "90" );
-    }
-
-    SECTION( "a negative running timeout disables the watchdog, zero means the default" )
-    {
-        REQUIRE( appDirectives( app, { { "resurrectee.timeout", "-1" } }, errors )["WatchdogSec"] == "0" );
-        REQUIRE( appDirectives( app, { { "resurrectee.timeout", "0" } }, errors )["WatchdogSec"] == "10" );
-    }
-
-    SECTION( "[systemd] settings override the timeouts" )
-    {
-        directiveMap d = appDirectives(
-            app,
-            { { "resurrectee.timeout", "20" }, { "systemd.watchdogSec", "45" }, { "systemd.startLimitBurst", "3" } },
-            errors );
-        REQUIRE( errors.empty() );
-        REQUIRE( d["WatchdogSec"] == "45" );
+        REQUIRE( d["TimeoutStopSec"] == "15" );
+        REQUIRE( d["RestartSec"] == "2" );
+        REQUIRE( d["Restart"] == "on-failure" );
         REQUIRE( d["StartLimitBurst"] == "3" );
     }
 
-    SECTION( "bad values, unknown keys and global-only keys are errors" )
+    SECTION( "the old [resurrectee] section is an error" )
+    {
+        appDirectives( app, { { "resurrectee.timeout", "20,90" } }, errors );
+        REQUIRE( errors.size() == 1 );
+        REQUIRE( errors[0].find( "watchdogSec" ) != std::string::npos );
+    }
+
+    SECTION( "bad values and unknown keys are errors" )
     {
         appDirectives( app,
-                       { { "resurrectee.timeout", "x" },
-                         { "systemd.restart", "sometimes" },
+                       { { "systemd.restart", "sometimes" },
                          { "systemd.killSignal", "SIGSEGV" },
                          { "systemd.timeoutStopSec", "5\nExecStartPre=/bin/evil" },
                          { "systemd.nonsense", "1" } },
                        errors );
-        REQUIRE( errors.size() == 5 );
+        REQUIRE( errors.size() == 4 );
     }
 
-    SECTION( "apps without heartbeats are simple services without a watchdog" )
+    SECTION( "apps that do not notify are simple services without a watchdog" )
     {
         app.prefix     = "nhb:";
-        directiveMap d = appDirectives( app, { { "resurrectee.timeout", "20" } }, errors );
+        directiveMap d = appDirectives( app, { { "systemd.watchdogSec", "20" } }, errors );
         REQUIRE( d["Type"] == "simple" );
         REQUIRE( d["WatchdogSec"] == "0" );
     }
@@ -198,9 +202,9 @@ TEST_CASE( "resuctrl maps app configuration to systemd directives", "[resuctrl]"
 
 /// Values are validated by kind.
 /**
- * \ingroup resuctrl_unit_test
+ * \ingroup xctrl_unit_test
  */
-TEST_CASE( "resuctrl validates setting values", "[resuctrl]" )
+TEST_CASE( "xctrl validates setting values", "[xctrl]" )
 {
     REQUIRE( validValue( valueKind::seconds, "10" ) );
     REQUIRE( validValue( valueKind::seconds, "2.5" ) );
@@ -217,9 +221,9 @@ TEST_CASE( "resuctrl validates setting values", "[resuctrl]" )
 
 /// Unit names use the role in lower case and map back to app names.
 /**
- * \ingroup resuctrl_unit_test
+ * \ingroup xctrl_unit_test
  */
-TEST_CASE( "resuctrl names units by role", "[resuctrl]" )
+TEST_CASE( "xctrl names units by role", "[xctrl]" )
 {
     unitNames u( "ICC" );
     REQUIRE( u.templ() == "magaox-icc-app@.service" );
@@ -232,9 +236,9 @@ TEST_CASE( "resuctrl names units by role", "[resuctrl]" )
 
 /// Generated units carry the defaults, the app command and the INDI server ordering.
 /**
- * \ingroup resuctrl_unit_test
+ * \ingroup xctrl_unit_test
  */
-TEST_CASE( "resuctrl generates the template and drop-ins", "[resuctrl]" )
+TEST_CASE( "xctrl generates the template and drop-ins", "[xctrl]" )
 {
     unitNames    u( "ICC" );
     directiveMap defs  = defaultDirectives();
@@ -267,11 +271,11 @@ TEST_CASE( "resuctrl generates the template and drop-ins", "[resuctrl]" )
     REQUIRE( dt.find( "After=" ) == std::string::npos );
 }
 
-/// Service states are reported with the old resuctrl's ranks and colors, and apps run by hand stand out.
+/// Service states are reported with ranks and colors, and apps run by hand stand out.
 /**
- * \ingroup resuctrl_unit_test
+ * \ingroup xctrl_unit_test
  */
-TEST_CASE( "resuctrl classifies app states like the old resuctrl", "[resuctrl]" )
+TEST_CASE( "xctrl classifies app states", "[xctrl]" )
 {
     typedef std::map<std::string, std::string> props;
     props                                      running{ { "ActiveState", "active" }, { "SubState", "running" } };
@@ -310,9 +314,9 @@ TEST_CASE( "resuctrl classifies app states like the old resuctrl", "[resuctrl]" 
 
 /// Enabling, disabling and deleting edit only the app's proclist lines.
 /**
- * \ingroup resuctrl_unit_test
+ * \ingroup xctrl_unit_test
  */
-TEST_CASE( "resuctrl edits an app's proclist lines", "[resuctrl]" )
+TEST_CASE( "xctrl edits an app's proclist lines", "[xctrl]" )
 {
     std::string text    = "# comment camsci1\n"
                           "isICC        xindiserver\n"
@@ -385,11 +389,11 @@ TEST_CASE( "resuctrl edits an app's proclist lines", "[resuctrl]" )
 
 /// Files are only rewritten when their contents change.
 /**
- * \ingroup resuctrl_unit_test
+ * \ingroup xctrl_unit_test
  */
-TEST_CASE( "resuctrl writes files only when they change", "[resuctrl]" )
+TEST_CASE( "xctrl writes files only when they change", "[xctrl]" )
 {
-    std::string dir  = std::filesystem::temp_directory_path() / ( "resuctrl_test_" + std::to_string( getpid() ) );
+    std::string dir  = std::filesystem::temp_directory_path() / ( "xctrl_test_" + std::to_string( getpid() ) );
     std::string path = dir + "/sub/file.conf";
 
     REQUIRE( writeIfChanged( path, "a\n", 0644 ) == 1 );
@@ -399,5 +403,5 @@ TEST_CASE( "resuctrl writes files only when they change", "[resuctrl]" )
     std::filesystem::remove_all( dir );
 }
 
-} // namespace resuctrlTest
+} // namespace xctrlTest
 } // namespace libXWCTest

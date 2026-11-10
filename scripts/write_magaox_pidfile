@@ -13,11 +13,11 @@ PID_PREFIX=/opt/MagAOX/sys
 appPidDir=$(realpath "$PID_PREFIX/$appName")
 case $appPidDir/ in
   $PID_PREFIX/) echo "Directory traversal thwarted. Refusing to write $appPidDir." && exit 1;;
-    $PID_PREFIX/*) mkdir -p "$appPidDir" || { echo "Failed to create $appPidDir (has 'resuctrl reset' been run for this app?)" >&2; exit 1; };;
+    $PID_PREFIX/*) mkdir -p "$appPidDir" || { echo "Failed to create $appPidDir (has 'xctrl reset' been run for this app?)" >&2; exit 1; };;
   *) echo "Directory traversal thwarted. Refusing to write $appPidDir." && exit 1;;
 esac
 
-# Match MagAO-X process dir conventions (same shape used by resuctrl reset):
+# Match MagAO-X process dir conventions (same shape used by xctrl reset):
 # root-owned app dir, instrument group writeable.
 instrument_group="$(stat -c '%G' /opt/MagAOX/drivers/fifos 2>/dev/null || echo magaox)"
 chown "root:${instrument_group}" "$appPidDir" 2>/dev/null || true

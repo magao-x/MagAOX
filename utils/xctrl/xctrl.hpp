@@ -1,11 +1,11 @@
-/** \file resuctrl.hpp
+/** \file xctrl.hpp
  * \brief Manage the MagAO-X apps of a role as systemd services
  *
- * \ingroup resuctrl_files
+ * \ingroup xctrl_files
  */
 
-#ifndef resuctrl_hpp
-#define resuctrl_hpp
+#ifndef xctrl_hpp
+#define xctrl_hpp
 
 #include <algorithm>
 #include <cmath>
@@ -32,7 +32,7 @@
 
 #include "../../libMagAOX/common/paths.hpp"
 
-/** \defgroup resuctrl resuctrl: MagAO-X systemd process control
+/** \defgroup xctrl xctrl: MagAO-X systemd process control
  * \brief Run the apps listed in a role's proclist as systemd services.
  *
  * Each app runs as an instance of one service template per role, `magaox-<role>-app@<name>.service`, with a
@@ -42,16 +42,16 @@
  * \ingroup utils
  */
 
-/** \defgroup resuctrl_files resuctrl Files
- * \ingroup resuctrl
+/** \defgroup xctrl_files xctrl Files
+ * \ingroup xctrl
  */
 
-namespace resuctrl
+namespace xctrl
 {
 
 /// One process from a proclist line
 /**
- * \ingroup resuctrl
+ * \ingroup xctrl
  */
 struct appEntry
 {
@@ -79,7 +79,7 @@ struct appEntry
 
 /// The result of parsing a proclist
 /**
- * \ingroup resuctrl
+ * \ingroup xctrl
  */
 struct proclist
 {
@@ -91,6 +91,9 @@ struct proclist
 
     /// Problems found, one message each; the lines concerned are not in apps
     std::vector<std::string> errors;
+
+    /// Disabled lines that are not `#NAME EXECUTABLE`, one message each; they are ignored
+    std::vector<std::string> warnings;
 };
 
 /// Key-value settings from a configuration file, keyed by "section.key", or "key" before any section
@@ -110,7 +113,7 @@ enum class valueKind
 
 /// One `[systemd]` configuration key and the systemd directive it sets
 /**
- * \ingroup resuctrl
+ * \ingroup xctrl
  */
 struct settingDef
 {
@@ -120,9 +123,9 @@ struct settingDef
     valueKind   kind;        ///< how its value is validated
 };
 
-/// The `[systemd]` configuration keys resuctrl understands
+/// The `[systemd]` configuration keys xctrl understands
 /**
- * \ingroup resuctrl
+ * \ingroup xctrl
  */
 inline const std::vector<settingDef> &settingDefs()
 {
@@ -140,7 +143,7 @@ inline const std::vector<settingDef> &settingDefs()
 
 /// The template defaults, before magaox.conf `[systemd]` settings
 /**
- * \ingroup resuctrl
+ * \ingroup xctrl
  */
 inline directiveMap defaultDirectives()
 {
@@ -167,12 +170,12 @@ bool validName( const std::string &s /**< [in] the name */ );
 bool validValue( valueKind          kind, /**< [in] the kind of setting */
                  const std::string &value /**< [in] the value */ );
 
-/// Parse a proclist, as resurrector_indi did
-/** Each line with exactly two white-space separated tokens, NAME and EXECUTABLE, is a process.  Lines starting
- * with `#` are comments; those that are `#NAME EXECUTABLE` otherwise, with valid names, are listed in disabled.
- * Lines starting with `##` are only comments, whatever follows.  NAME
- * may have a prefix: `-` or `nhb:` for processes that send no heartbeat, `py:` for Python apps; any other `prefix:` is
- * part of the name, which is then invalid.
+/// Parse a proclist
+/** Each line `NAME EXECUTABLE` is a process started automatically.  A line starting with one `#`, with or without
+ * spaces after it, `#NAME EXECUTABLE`, is a disabled process; one that is not `NAME EXECUTABLE` is reported in
+ * warnings and ignored.  A line starting with `##` is only a comment, whatever follows.  NAME may have a prefix:
+ * `-` or `nhb:` for processes that do not notify systemd, so have no watchdog, `py:` for Python apps; any other
+ * `prefix:` is part of the name, which is then invalid.
  *
  * \returns the processes and any errors found
  */
@@ -225,10 +228,9 @@ void systemdSettings( directiveMap             &dirs,   /**< [in.out] directives
                       const confMap            &conf,   /**< [in] the configuration */
                       const std::string        &source /**< [in] the configuration's name, for messages */ );
 
-/// Collect the systemd directives of one app from its configuration
-/** `[resurrectee] timeout = run[,startup]` sets WatchdogSec and TimeoutStartSec, as it set the resurrector's
- * heartbeat timeouts; a negative run timeout disables the watchdog.  `[systemd]` settings override it.  Apps
- * that do not notify get Type=simple and no watchdog.
+/// Collect the systemd directives of one app from the `[systemd]` section of its configuration
+/** Apps that do not notify get Type=simple and no watchdog.  A `[resurrectee]` section is an error: its timeouts are
+ * now `[systemd] watchdogSec` and `timeoutStartSec`.
  *
  * \returns the directives that differ from the template
  */
@@ -238,7 +240,7 @@ directiveMap appDirectives( const appEntry           &app,  /**< [in] the app */
 
 /// Names of the units of a role
 /**
- * \ingroup resuctrl
+ * \ingroup xctrl
  */
 struct unitNames
 {
@@ -306,7 +308,7 @@ int writeIfChanged( const std::string &path,    /**< [in] the file */
                     mode_t             mode /**< [in] its permissions */ );
 
 /// Run a command, without a shell
-/** When resuctrl runs setuid root, the command runs either as the calling user, or fully as root.
+/** When xctrl runs setuid root, the command runs either as the calling user, or fully as root.
  *
  * \returns the exit status, or -1 if it could not be run
  */
@@ -316,7 +318,7 @@ int runCommand( const std::vector<std::string> &argv, /**< [in] the command and 
 
 /// How an app's state is reported
 /**
- * \ingroup resuctrl
+ * \ingroup xctrl
  */
 struct appState
 {
@@ -325,7 +327,7 @@ struct appState
     const char *color; ///< ANSI color sequence for the state
 };
 
-/// Classify an app's service state, with the old resuctrl's colors
+/// Classify an app's service state, with a color for each state
 /** Running is green, running with autostart off (started by hand) blue, disabled yellow, not started cyan,
  * starting or stopping magenta, failed or dead red.
  *
@@ -337,12 +339,12 @@ appState classify( const std::map<std::string, std::string> &props, /**< [in] sy
 
 /// Command-line interface to manage a role's apps as systemd services
 /**
- * \ingroup resuctrl
+ * \ingroup xctrl
  */
-class resuCtrl
+class xCtrl
 {
   public:
-    /// Run resuctrl with its command-line arguments
+    /// Run xctrl with its command-line arguments
     /**
      * \returns the process exit status
      */
@@ -362,7 +364,7 @@ class resuCtrl
     bool        m_keepRunning{ false }; ///< reset leaves apps removed from the proclist running
     bool        m_verbose{ false };     ///< status shows a table with systemd and resource details
     int         m_lines{ -1 };          ///< log lines for peek and inspect, -1 for their defaults
-    std::string m_prog{ "resuctrl" };   ///< the name we were run as, resuctrl or xctrl
+    std::string m_prog{ "xctrl" };      ///< the name we were run as
     bool        m_color{ false };       ///< color the output, when it is a terminal and NO_COLOR is not set
     std::string m_verb;                 ///< the command
     std::vector<std::string> m_names;   ///< the app names given
@@ -398,7 +400,7 @@ class resuCtrl
 
     /// Settle privileges for the command before running it
     /** Commands that change which apps are configured need root, i.e. sudo.  Starting and stopping apps needs
-     * operatorAllowed(); resuctrl is installed setuid root for that.  Everything else, and any testing option,
+     * operatorAllowed(); xctrl is installed setuid root for that.  Everything else, and any testing option,
      * runs as the calling user.
      *
      * \returns 0 if the command may run, -1 with a message on stderr if not
@@ -526,7 +528,7 @@ class resuCtrl
 
     int cmdReset();    ///< Register the proclist's apps with systemd and reconcile what changed
     int cmdStartup();  ///< Start enabled apps, or enable and start named ones
-    int cmdShutdown(); ///< Stop all apps, or disable and stop named ones
+    int cmdShutdown(); ///< Stop all apps, or named ones
     int cmdStart();    ///< Start named apps
     int cmdStop();     ///< Stop named apps
     int cmdRestart();  ///< Restart named apps, or all
@@ -679,7 +681,9 @@ inline proclist parseProclist( std::istream &in )
             }
             if( toks.size() != 2 )
             {
-                continue; // an ordinary comment
+                pl.warnings.push_back( "proclist line " + std::to_string( n ) + ": [" + trim( line ) +
+                                       "] is not #NAME EXECUTABLE, ignored; use ## for comments" );
+                continue;
             }
         }
 
@@ -708,10 +712,14 @@ inline proclist parseProclist( std::istream &in )
 
         if( commented )
         {
-            // only something that looks like a process; whether it is one is checked later
             if( validName( app.name ) && validName( app.exec ) )
             {
                 pl.disabled.push_back( app );
+            }
+            else
+            {
+                pl.warnings.push_back( "proclist line " + std::to_string( n ) + ": [" + trim( line ) +
+                                       "] is not a valid #NAME EXECUTABLE, ignored; use ## for comments" );
             }
             continue;
         }
@@ -975,35 +983,13 @@ inline directiveMap appDirectives( const appEntry &app, const confMap &conf, std
     directiveMap dirs;
     std::string  source = app.name + ".conf";
 
-    // the resurrector's heartbeat timeouts: running, then optionally startup
-    auto it = conf.find( "resurrectee.timeout" );
-    if( it != conf.end() )
+    // the old [resurrectee] timeouts are [systemd] settings now
+    for( const auto &kv : conf )
     {
-        std::vector<long> t;
-        std::stringstream ss( it->second );
-        std::string       item;
-        bool              ok = true;
-        while( std::getline( ss, item, ',' ) )
+        if( kv.first.compare( 0, 12, "resurrectee." ) == 0 )
         {
-            item      = trim( item );
-            char *end = nullptr;
-            long  v   = strtol( item.c_str(), &end, 10 );
-            ok        = ok && !item.empty() && *end == '\0';
-            t.push_back( v );
-        }
-
-        if( !ok || t.empty() )
-        {
-            errors.push_back( source + ": invalid [resurrectee] timeout = " + it->second );
-        }
-        else
-        {
-            // as the resurrectee: negative disables the heartbeat, below 1 means the default of 10
-            dirs["WatchdogSec"] = t[0] < 0 ? "0" : std::to_string( t[0] < 1 ? 10 : t[0] );
-            if( t.size() > 1 && t[1] > 0 )
-            {
-                dirs["TimeoutStartSec"] = std::to_string( t[1] );
-            }
+            errors.push_back( source + ": [resurrectee] " + kv.first.substr( 12 ) +
+                              " is replaced by [systemd] watchdogSec and timeoutStartSec" );
         }
     }
 
@@ -1067,8 +1053,8 @@ inline void appendDirectives( std::ostringstream &os, const directiveMap &dirs, 
 inline std::string templateUnit( const unitNames &units, const directiveMap &dirs, const std::string &envFile )
 {
     std::ostringstream os;
-    os << "# Generated by resuctrl reset for MAGAOX_ROLE=" << units.role << ".  Do not edit: set [systemd] in\n"
-       << "# magaox.conf, or in an app's .conf for that app, then rerun resuctrl reset.\n"
+    os << "# Generated by xctrl reset for MAGAOX_ROLE=" << units.role << ".  Do not edit: set [systemd] in\n"
+       << "# magaox.conf, or in an app's .conf for that app, then rerun xctrl reset.\n"
        << "[Unit]\n"
        << "Description=MagAO-X app %i (role " << units.role << ")\n"
        << "PartOf=" << units.target() << "\n"
@@ -1094,8 +1080,8 @@ inline std::string templateUnit( const unitNames &units, const directiveMap &dir
 inline std::string targetUnit( const unitNames &units )
 {
     std::ostringstream os;
-    os << "# Generated by resuctrl reset for MAGAOX_ROLE=" << units.role << ".  Do not edit.\n"
-       << "# Wants the apps enabled for automatic startup; resuctrl boot on|off starts it at boot or not.\n"
+    os << "# Generated by xctrl reset for MAGAOX_ROLE=" << units.role << ".  Do not edit.\n"
+       << "# Wants the apps enabled for automatic startup; xctrl boot on|off starts it at boot or not.\n"
        << "[Unit]\n"
        << "Description=MagAO-X apps of role " << units.role << "\n"
        << "\n[Install]\n"
@@ -1111,8 +1097,8 @@ inline std::string dropIn( const unitNames                &units,
                            const std::vector<std::string> &tunnels )
 {
     std::ostringstream os;
-    os << "# Generated by resuctrl reset from proclist_" << units.role << ".txt and " << app.name << ".conf.\n"
-       << "# Do not edit: change those, then rerun resuctrl reset.\n"
+    os << "# Generated by xctrl reset from proclist_" << units.role << ".txt and " << app.name << ".conf.\n"
+       << "# Do not edit: change those, then rerun xctrl reset.\n"
        << "[Unit]\n";
     if( app.isServer() )
     {
@@ -1137,7 +1123,7 @@ inline std::string dropIn( const unitNames                &units,
 
 inline std::string registryEntry( const appEntry &app )
 {
-    return "# resuctrl registry entry, written by resuctrl reset\nname=" + app.name + "\nexec=" + app.exec +
+    return "# xctrl registry entry, written by xctrl reset\nname=" + app.name + "\nexec=" + app.exec +
            "\nprefix=" + app.prefix + "\n";
 }
 
@@ -1160,23 +1146,23 @@ inline int writeIfChanged( const std::string &path, const std::string &content, 
     std::filesystem::create_directories( std::filesystem::path( path ).parent_path(), ec );
     if( ec )
     {
-        std::cerr << "resuctrl: creating directory for " << path << ": " << ec.message() << "\n";
+        std::cerr << "xctrl: creating directory for " << path << ": " << ec.message() << "\n";
         return -1;
     }
 
-    std::string tmp = path + ".resuctrl.tmp";
+    std::string tmp = path + ".xctrl.tmp";
     {
         std::ofstream f( tmp, std::ios::trunc );
         f << content;
         if( !f.good() )
         {
-            std::cerr << "resuctrl: writing " << tmp << ": " << strerror( errno ) << "\n";
+            std::cerr << "xctrl: writing " << tmp << ": " << strerror( errno ) << "\n";
             return -1;
         }
     }
     if( chmod( tmp.c_str(), mode ) < 0 || rename( tmp.c_str(), path.c_str() ) < 0 )
     {
-        std::cerr << "resuctrl: installing " << path << ": " << strerror( errno ) << "\n";
+        std::cerr << "xctrl: installing " << path << ": " << strerror( errno ) << "\n";
         unlink( tmp.c_str() );
         return -1;
     }
@@ -1220,7 +1206,7 @@ inline int runCommand( const std::vector<std::string> &argv, std::string *output
         }
         args.push_back( nullptr );
         execvp( args[0], args.data() );
-        std::cerr << "resuctrl: running " << argv[0] << ": " << strerror( errno ) << "\n";
+        std::cerr << "xctrl: running " << argv[0] << ": " << strerror( errno ) << "\n";
         _exit( 127 );
     }
 
@@ -1299,38 +1285,37 @@ inline appState classify( const std::map<std::string, std::string> &props, bool 
     return { 4, active + "/" + sub, magenta };
 }
 
-inline std::string resuCtrl::unitDir() const
+inline std::string xCtrl::unitDir() const
 {
     return m_sysroot + "/etc/systemd/system";
 }
 
-inline std::string resuCtrl::regDir() const
+inline std::string xCtrl::regDir() const
 {
     return m_sysroot + "/etc/magaox-" + lower( m_role ) + "/apps";
 }
 
-inline std::string resuCtrl::envFile() const
+inline std::string xCtrl::envFile() const
 {
     return "/etc/magaox-" + lower( m_role ) + "/environment";
 }
 
-inline std::string resuCtrl::proclistPath() const
+inline std::string xCtrl::proclistPath() const
 {
     return m_top + "/" + MAGAOX_configRelPath + "/proclist_" + m_role + ".txt";
 }
 
-inline std::string resuCtrl::activePath() const
+inline std::string xCtrl::activePath() const
 {
-    return m_top + "/" + MAGAOX_sysRelPath + "/resurrector_proclist/proclist_" + m_role + ".txt.active";
+    return m_top + "/" + MAGAOX_sysRelPath + "/sentinel_proclist/proclist_" + m_role + ".txt.active";
 }
 
-inline void resuCtrl::usage( std::ostream &os ) const
+inline void xCtrl::usage( std::ostream &os ) const
 {
     os << "usage: " << m_prog << " [-r ROLE] [options] COMMAND [NAME ...]\n"
        << "\n"
           "MagAO-X process control: run the apps of a role (MAGAOX_ROLE, or -r) as systemd services, one\n"
           "instance of magaox-<role>-app@.service per app in /opt/MagAOX/config/proclist_<role>.txt.\n"
-          "resuctrl and xctrl are the same program.\n"
           "\n"
           "Any user can look; xsup and members of group magaox can start and stop apps:\n"
           "  status [NAME...]       state and pid of the apps; -v adds autostart, restarts, uptime,\n"
@@ -1341,24 +1326,23 @@ inline void resuCtrl::usage( std::ostream &os ) const
           "                         with names, start those apps\n"
           "  start NAME...          start apps, enabled or not; systemd supervises them either way.\n"
           "                         start, startup and restart first apply changes in the apps' .conf,\n"
-          "                         e.g. a new [resurrectee] timeout\n"
+          "                         e.g. a new [systemd] watchdogSec\n"
           "  stop NAME...           stop apps; they stay stopped until started again\n"
           "  shutdown NAME...|--all stop apps, or all running apps of the role, the INDI server last\n"
           "  restart NAME...|--all  restart apps, or stop then start everything\n"
-          "  defib NAME...          same as restart; a hung app is already restarted by its watchdog\n"
           "\n"
           "Changing which apps are configured needs sudo:\n"
-          "  sudo resuctrl reset    register the proclist's apps from their .conf and enable them for\n"
+          "  sudo xctrl reset    register the proclist's apps from their .conf and enable them for\n"
           "                         automatic startup; commented-out apps with a .conf are registered\n"
           "                         but disabled (and stopped), to start by hand; apps no longer in the\n"
           "                         proclist are stopped and deregistered; new apps start at once if the\n"
           "                         role is up\n"
-          "  sudo resuctrl enable NAME...   autostart on: uncomment the app in the proclist (adding it if\n"
+          "  sudo xctrl enable NAME...   autostart on: uncomment the app in the proclist (adding it if\n"
           "                                 needed) and register it if it is not; does not start it\n"
-          "  sudo resuctrl disable NAME...  autostart off: comment the app out in the proclist; it stays\n"
+          "  sudo xctrl disable NAME...  autostart off: comment the app out in the proclist; it stays\n"
           "                                 registered to start by hand; does not stop it\n"
-          "  sudo resuctrl delete NAME...   remove the app from the proclist, stop and deregister it\n"
-          "  sudo resuctrl boot on|off      start the role's enabled apps at boot, or not\n"
+          "  sudo xctrl delete NAME...   remove the app from the proclist, stop and deregister it\n"
+          "  sudo xctrl boot on|off      start the role's enabled apps at boot, or not\n"
           "\n"
           "Options:\n"
           "  -r, --role ROLE      the MagAO-X role, else MAGAOX_ROLE or /etc/profile.d/magaox_role.sh\n"
@@ -1371,7 +1355,7 @@ inline void resuCtrl::usage( std::ostream &os ) const
           "  -h, --help           this help\n";
 }
 
-inline bool resuCtrl::operatorAllowed() const
+inline bool xCtrl::operatorAllowed() const
 {
     uid_t uid = getuid();
     if( uid == 0 )
@@ -1403,10 +1387,10 @@ inline bool resuCtrl::operatorAllowed() const
            groups.begin() + std::max( n, 0 );
 }
 
-inline int resuCtrl::settlePrivileges()
+inline int xCtrl::settlePrivileges()
 {
     static const std::set<std::string> admin     = { "reset", "enable", "disable", "delete", "deregister", "boot" };
-    static const std::set<std::string> operate   = { "startup", "start", "shutdown", "stop", "restart", "defib" };
+    static const std::set<std::string> operate   = { "startup", "start", "shutdown", "stop", "restart" };
     bool                               setuidRun = geteuid() == 0 && getuid() != 0;
     bool                               testing = m_dryRun || !m_sysroot.empty() || m_top != std::string( MAGAOX_path );
 
@@ -1462,7 +1446,7 @@ inline int resuCtrl::settlePrivileges()
     return 0;
 }
 
-inline int resuCtrl::parseArgs( int argc, char **argv )
+inline int xCtrl::parseArgs( int argc, char **argv )
 {
     for( int i = 1; i < argc; ++i )
     {
@@ -1588,7 +1572,7 @@ inline int resuCtrl::parseArgs( int argc, char **argv )
     return 0;
 }
 
-inline int resuCtrl::systemctl( const std::vector<std::string> &args, bool offline )
+inline int xCtrl::systemctl( const std::vector<std::string> &args, bool offline )
 {
     std::vector<std::string> argv{ "systemctl" };
     if( !m_sysroot.empty() )
@@ -1612,7 +1596,7 @@ inline int resuCtrl::systemctl( const std::vector<std::string> &args, bool offli
     return runCommand( argv );
 }
 
-inline std::vector<std::string> resuCtrl::registered() const
+inline std::vector<std::string> xCtrl::registered() const
 {
     std::vector<std::string> names;
     std::error_code          ec;
@@ -1627,7 +1611,7 @@ inline std::vector<std::string> resuCtrl::registered() const
     return names;
 }
 
-inline bool resuCtrl::registryRead( appEntry &app, const std::string &name ) const
+inline bool xCtrl::registryRead( appEntry &app, const std::string &name ) const
 {
     confMap c;
     if( !readConf( c, regDir() + "/" + name + ".conf" ) || c["name"] != name )
@@ -1640,7 +1624,7 @@ inline bool resuCtrl::registryRead( appEntry &app, const std::string &name ) con
     return true;
 }
 
-inline bool resuCtrl::enabled( const std::string &name ) const
+inline bool xCtrl::enabled( const std::string &name ) const
 {
     unitNames       u( m_role );
     std::error_code ec;
@@ -1648,7 +1632,7 @@ inline bool resuCtrl::enabled( const std::string &name ) const
         std::filesystem::symlink_status( unitDir() + "/" + u.target() + ".wants/" + u.instance( name ), ec ) );
 }
 
-inline std::vector<appEntry> resuCtrl::namedApps()
+inline std::vector<appEntry> xCtrl::namedApps()
 {
     std::vector<appEntry> apps;
     bool                  ok = !m_names.empty();
@@ -1666,14 +1650,14 @@ inline std::vector<appEntry> resuCtrl::namedApps()
         else
         {
             std::cerr << m_prog << ": " << n << " is not registered: add it to " << proclistPath()
-                      << " and run sudo resuctrl reset\n";
+                      << " and run sudo xctrl reset\n";
             ok = false;
         }
     }
     return ok ? apps : std::vector<appEntry>();
 }
 
-inline std::vector<std::string> resuCtrl::activeApps()
+inline std::vector<std::string> xCtrl::activeApps()
 {
     std::vector<std::string> names;
     unitNames                u( m_role );
@@ -1707,7 +1691,7 @@ inline std::vector<std::string> resuCtrl::activeApps()
     return names;
 }
 
-inline directiveMap resuCtrl::roleDirectives( std::vector<std::string> &errors )
+inline directiveMap xCtrl::roleDirectives( std::vector<std::string> &errors )
 {
     directiveMap dirs = defaultDirectives();
     confMap      gconf;
@@ -1717,7 +1701,7 @@ inline directiveMap resuCtrl::roleDirectives( std::vector<std::string> &errors )
 }
 
 inline bool
-resuCtrl::prepareApp( const appEntry &app, directiveMap &dirs, std::vector<std::string> &errors, bool *hasConf )
+xCtrl::prepareApp( const appEntry &app, directiveMap &dirs, std::vector<std::string> &errors, bool *hasConf )
 {
     std::string exe = m_top + "/bin/" + app.exec;
     struct stat st;
@@ -1740,7 +1724,7 @@ resuCtrl::prepareApp( const appEntry &app, directiveMap &dirs, std::vector<std::
 }
 
 inline void
-resuCtrl::serverAndTunnels( const std::vector<appEntry> &apps, std::string &server, std::vector<std::string> &tunnels )
+xCtrl::serverAndTunnels( const std::vector<appEntry> &apps, std::string &server, std::vector<std::string> &tunnels )
 {
     server.clear();
     tunnels.clear();
@@ -1757,7 +1741,7 @@ resuCtrl::serverAndTunnels( const std::vector<appEntry> &apps, std::string &serv
     }
 }
 
-inline int resuCtrl::updateProclist( const std::string &name, proclistEdit edit, const std::string &newLine )
+inline int xCtrl::updateProclist( const std::string &name, proclistEdit edit, const std::string &newLine )
 {
     std::string text;
     {
@@ -1795,7 +1779,7 @@ inline int resuCtrl::updateProclist( const std::string &name, proclistEdit edit,
     return changed;
 }
 
-inline bool resuCtrl::findApp( appEntry &app, const std::string &name )
+inline bool xCtrl::findApp( appEntry &app, const std::string &name )
 {
     if( registryRead( app, name ) )
     {
@@ -1817,7 +1801,7 @@ inline bool resuCtrl::findApp( appEntry &app, const std::string &name )
     return false;
 }
 
-inline int resuCtrl::registerApp( const appEntry &app )
+inline int xCtrl::registerApp( const appEntry &app )
 {
     unitNames                u( m_role );
     directiveMap             dirs;
@@ -1851,7 +1835,7 @@ inline int resuCtrl::registerApp( const appEntry &app )
     return rc ? -1 : 0;
 }
 
-inline int resuCtrl::deregister( const std::vector<std::string> &names )
+inline int xCtrl::deregister( const std::vector<std::string> &names )
 {
     if( names.empty() )
     {
@@ -1884,7 +1868,7 @@ inline int resuCtrl::deregister( const std::vector<std::string> &names )
     return rc;
 }
 
-inline int resuCtrl::refreshApps( const std::vector<appEntry> &apps )
+inline int xCtrl::refreshApps( const std::vector<appEntry> &apps )
 {
     if( apps.empty() )
     {
@@ -1960,7 +1944,7 @@ inline int resuCtrl::refreshApps( const std::vector<appEntry> &apps )
     return rc;
 }
 
-inline int resuCtrl::startApps( const std::vector<appEntry> &apps )
+inline int xCtrl::startApps( const std::vector<appEntry> &apps )
 {
     unitNames                u( m_role );
     std::vector<std::string> others{ "start" }, server{ "start" }, reset{ "reset-failed" };
@@ -1989,7 +1973,7 @@ inline int resuCtrl::startApps( const std::vector<appEntry> &apps )
     return rc;
 }
 
-inline int resuCtrl::stopApps( const std::vector<std::string> &names )
+inline int xCtrl::stopApps( const std::vector<std::string> &names )
 {
     unitNames                u( m_role );
     std::vector<std::string> others{ "stop" }, server{ "stop" };
@@ -2013,7 +1997,7 @@ inline int resuCtrl::stopApps( const std::vector<std::string> &names )
     return rc;
 }
 
-inline int resuCtrl::writeFile( const std::string &path, const std::string &content, mode_t mode )
+inline int xCtrl::writeFile( const std::string &path, const std::string &content, mode_t mode )
 {
     if( m_dryRun )
     {
@@ -2033,7 +2017,7 @@ inline int resuCtrl::writeFile( const std::string &path, const std::string &cont
     return writeIfChanged( path, content, mode );
 }
 
-inline int resuCtrl::cmdReset()
+inline int xCtrl::cmdReset()
 {
     unitNames                u( m_role );
     std::vector<std::string> errors, warnings;
@@ -2046,6 +2030,7 @@ inline int resuCtrl::cmdReset()
     }
     proclist pl = parseProclist( pf );
     errors      = pl.errors;
+    warnings    = pl.warnings;
 
     // role-wide defaults, from magaox.conf [systemd]
     std::string  cfgDir = m_top + "/" + MAGAOX_configRelPath;
@@ -2093,13 +2078,15 @@ inline int resuCtrl::cmdReset()
         apps.push_back( { app, d, true } );
     }
 
-    // commented-out lines with a .conf: registered, to start by hand, but not started automatically
+    // disabled lines: registered, to start by hand, but not started automatically; they need a .conf
     std::set<std::string> commented;
     for( const auto &app : pl.disabled )
     {
         if( access( ( cfgDir + "/" + app.name + ".conf" ).c_str(), R_OK ) != 0 )
         {
-            continue; // an ordinary comment, or an app that is not set up here
+            warnings.push_back( "proclist line " + std::to_string( app.line ) + ": disabled " + app.name + " has no " +
+                                app.name + ".conf, not registered; use ## for comments" );
+            continue;
         }
         commented.insert( app.name );
         directiveMap             d;
@@ -2212,7 +2199,7 @@ inline int resuCtrl::cmdReset()
         rc |= systemctl( toDisable, true ) != 0;
     }
 
-    // apps just commented out also stop, as the resurrector did, unless --keep-running
+    // apps just commented out also stop, unless --keep-running
     if( !stopNow.empty() && !m_keepRunning )
     {
         std::vector<std::string> act = activeApps(), stop;
@@ -2238,7 +2225,7 @@ inline int resuCtrl::cmdReset()
 
     // record what was applied
     std::ostringstream active;
-    active << "# Applied by resuctrl reset from " << proclistPath() << "; do not edit\n";
+    active << "# Applied by xctrl reset from " << proclistPath() << "; do not edit\n";
     size_t nauto = 0;
     for( const auto &v : apps )
     {
@@ -2278,7 +2265,7 @@ inline int resuCtrl::cmdReset()
     return ( rc || !errors.empty() ) ? 1 : 0;
 }
 
-inline int resuCtrl::cmdStartup()
+inline int xCtrl::cmdStartup()
 {
     // with names, as start
     if( !m_names.empty() )
@@ -2298,14 +2285,14 @@ inline int resuCtrl::cmdStartup()
     }
     if( apps.empty() )
     {
-        std::cerr << m_prog << ": no apps enabled for role " << m_role << "; run sudo resuctrl reset\n";
+        std::cerr << m_prog << ": no apps enabled for role " << m_role << "; run sudo xctrl reset\n";
         return 1;
     }
     int rc = startApps( apps );
     return rc | systemctl( { "start", u.target() } );
 }
 
-inline int resuCtrl::cmdShutdown()
+inline int xCtrl::cmdShutdown()
 {
     // with names, as stop
     if( !m_names.empty() )
@@ -2329,13 +2316,13 @@ inline int resuCtrl::cmdShutdown()
     return rc;
 }
 
-inline int resuCtrl::cmdStart()
+inline int xCtrl::cmdStart()
 {
     std::vector<appEntry> apps = namedApps();
     return apps.empty() ? 1 : startApps( apps );
 }
 
-inline int resuCtrl::cmdStop()
+inline int xCtrl::cmdStop()
 {
     std::vector<appEntry> apps = namedApps();
     if( apps.empty() )
@@ -2350,12 +2337,8 @@ inline int resuCtrl::cmdStop()
     return stopApps( names );
 }
 
-inline int resuCtrl::cmdRestart()
+inline int xCtrl::cmdRestart()
 {
-    if( m_verb == "defib" )
-    {
-        std::cout << m_prog << ": defib restarts apps; a hung app is restarted by its systemd watchdog\n";
-    }
 
     if( m_all || m_names.empty() )
     {
@@ -2393,7 +2376,7 @@ inline int resuCtrl::cmdRestart()
 }
 
 inline std::map<std::string, std::map<std::string, std::string>>
-resuCtrl::showProps( const std::vector<std::string> &names )
+xCtrl::showProps( const std::vector<std::string> &names )
 {
     std::map<std::string, std::map<std::string, std::string>> props;
     if( m_dryRun || !m_sysroot.empty() || names.empty() )
@@ -2445,7 +2428,7 @@ resuCtrl::showProps( const std::vector<std::string> &names )
     return props;
 }
 
-inline int resuCtrl::cmdStatus()
+inline int xCtrl::cmdStatus()
 {
     std::vector<std::string> names = m_names;
     std::set<std::string>    regs;
@@ -2466,13 +2449,13 @@ inline int resuCtrl::cmdStatus()
     }
     if( names.empty() )
     {
-        std::cout << m_prog << ": no apps registered for role " << m_role << "; run sudo resuctrl reset\n";
+        std::cout << m_prog << ": no apps registered for role " << m_role << "; run sudo xctrl reset\n";
         return 0;
     }
 
     auto props = showProps( names );
 
-    // sorted by state then name, colored, as the old resuctrl
+    // sorted by state then name, colored
     struct row
     {
         appState    st;
@@ -2494,7 +2477,7 @@ inline int resuCtrl::cmdStatus()
 
     if( !m_verbose )
     {
-        // name: state (pid: N), as the old resuctrl and xctrl
+        // name: state (pid: N)
         for( const auto &r : rows )
         {
             std::string pid = pidOf( r.name );
@@ -2666,7 +2649,7 @@ inline int resuCtrl::cmdStatus()
     return 0;
 }
 
-inline int resuCtrl::cmdPeek()
+inline int xCtrl::cmdPeek()
 {
     unitNames                u( m_role );
     std::vector<std::string> names = m_names.empty() ? registered() : m_names;
@@ -2717,7 +2700,7 @@ inline int resuCtrl::cmdPeek()
     return 0;
 }
 
-inline int resuCtrl::cmdInspect()
+inline int xCtrl::cmdInspect()
 {
     if( m_names.size() != 1 )
     {
@@ -2739,7 +2722,7 @@ inline int resuCtrl::cmdInspect()
                          "-f" } );
 }
 
-inline int resuCtrl::cmdEnable()
+inline int xCtrl::cmdEnable()
 {
     if( m_names.empty() )
     {
@@ -2806,7 +2789,7 @@ inline int resuCtrl::cmdEnable()
     return rc;
 }
 
-inline int resuCtrl::cmdDelete()
+inline int xCtrl::cmdDelete()
 {
     if( m_names.empty() )
     {
@@ -2848,7 +2831,7 @@ inline int resuCtrl::cmdDelete()
     return rc;
 }
 
-inline int resuCtrl::cmdBoot()
+inline int xCtrl::cmdBoot()
 {
     if( m_names.size() != 1 || ( m_names[0] != "on" && m_names[0] != "off" ) )
     {
@@ -2859,10 +2842,10 @@ inline int resuCtrl::cmdBoot()
     return systemctl( { m_names[0] == "on" ? "enable" : "disable", u.target() }, true );
 }
 
-inline int resuCtrl::main( int argc, char **argv )
+inline int xCtrl::main( int argc, char **argv )
 {
     // also installed as xctrl
-    std::string invoked = argc > 0 ? argv[0] : "resuctrl";
+    std::string invoked = argc > 0 ? argv[0] : "xctrl";
     m_prog              = invoked.substr( invoked.find_last_of( '/' ) + 1 );
 
     if( parseArgs( argc, argv ) < 0 )
@@ -2875,23 +2858,22 @@ inline int resuCtrl::main( int argc, char **argv )
         return 0;
     }
 
-    static const std::map<std::string, int ( resuCtrl::* )()> verbs = { { "reset", &resuCtrl::cmdReset },
-                                                                        { "startup", &resuCtrl::cmdStartup },
-                                                                        { "shutdown", &resuCtrl::cmdShutdown },
-                                                                        { "start", &resuCtrl::cmdStart },
-                                                                        { "stop", &resuCtrl::cmdStop },
-                                                                        { "restart", &resuCtrl::cmdRestart },
-                                                                        { "defib", &resuCtrl::cmdRestart },
-                                                                        { "status", &resuCtrl::cmdStatus },
-                                                                        { "lstatus", &resuCtrl::cmdStatus },
-                                                                        { "peek", &resuCtrl::cmdPeek },
-                                                                        { "inspect", &resuCtrl::cmdInspect },
-                                                                        { "enable", &resuCtrl::cmdEnable },
-                                                                        { "disable", &resuCtrl::cmdEnable },
-                                                                        { "delete", &resuCtrl::cmdDelete },
-                                                                        { "deregister", &resuCtrl::cmdDelete },
-                                                                        { "boot", &resuCtrl::cmdBoot } };
-    auto                                                      it    = verbs.find( m_verb );
+    static const std::map<std::string, int ( xCtrl::* )()> verbs = { { "reset", &xCtrl::cmdReset },
+                                                                     { "startup", &xCtrl::cmdStartup },
+                                                                     { "shutdown", &xCtrl::cmdShutdown },
+                                                                     { "start", &xCtrl::cmdStart },
+                                                                     { "stop", &xCtrl::cmdStop },
+                                                                     { "restart", &xCtrl::cmdRestart },
+                                                                     { "status", &xCtrl::cmdStatus },
+                                                                     { "lstatus", &xCtrl::cmdStatus },
+                                                                     { "peek", &xCtrl::cmdPeek },
+                                                                     { "inspect", &xCtrl::cmdInspect },
+                                                                     { "enable", &xCtrl::cmdEnable },
+                                                                     { "disable", &xCtrl::cmdEnable },
+                                                                     { "delete", &xCtrl::cmdDelete },
+                                                                     { "deregister", &xCtrl::cmdDelete },
+                                                                     { "boot", &xCtrl::cmdBoot } };
+    auto                                                   it    = verbs.find( m_verb );
     if( it == verbs.end() )
     {
         std::cerr << m_prog << ": unknown command " << m_verb << "; try --help\n";
@@ -2909,6 +2891,6 @@ inline int resuCtrl::main( int argc, char **argv )
     return ( this->*( it->second ) )();
 }
 
-} // namespace resuctrl
+} // namespace xctrl
 
-#endif // resuctrl_hpp
+#endif // xctrl_hpp
