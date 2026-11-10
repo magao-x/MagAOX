@@ -60,6 +60,63 @@ TEST_CASE( "resuctrl parses proclists like resurrector_indi", "[resuctrl]" )
 
     // three tokens, unknown prefix, duplicate, path in the executable
     REQUIRE( pl.errors.size() == 4 );
+
+    // the commented-out process
+    REQUIRE( pl.disabled.size() == 1 );
+    REQUIRE( pl.disabled[0].name == "off" );
+}
+
+/// Commented-out processes are kept apart, ordinary comments are not, and an active line wins.
+/**
+ * \ingroup resuctrl_unit_test
+ */
+TEST_CASE( "resuctrl keeps commented-out proclist processes", "[resuctrl]" )
+{
+    std::istringstream in( "#process-ID   Executable\n"
+                           "#Processes for the MagAO-X ICC\n"
+                           "##### camflowfs\n"
+                           "#camsci1  picamCtrl\n"
+                           "#  camsci2  picamCtrl\n"
+                           "#py:pyapp  pyExec\n"
+                           "##camsci_old  camsci\n"
+                           "## camsci_old2  camsci\n"
+                           "#==========  ==========\n"
+                           "camsci3  picamCtrl\n"
+                           "#camsci3  picamCtrl\n"
+                           "#camsci1  otherExec\n" );
+    proclist           pl = parseProclist( in );
+
+    REQUIRE( pl.errors.empty() );
+    REQUIRE( pl.apps.size() == 1 );
+    REQUIRE( pl.apps[0].name == "camsci3" );
+
+    // the column header looks like a process; reset skips it as it has no .conf
+    std::vector<std::string> names;
+    for( const auto &d : pl.disabled )
+    {
+        names.push_back( d.name );
+    }
+    REQUIRE( names == std::vector<std::string>{ "process-ID", "camsci1", "camsci2", "pyapp" } );
+    REQUIRE( pl.disabled[1].exec == "picamCtrl" );
+    REQUIRE( pl.disabled[3].prefix == "py:" );
+}
+
+/// systemd time spans, as systemctl show prints them, convert to seconds.
+/**
+ * \ingroup resuctrl_unit_test
+ */
+TEST_CASE( "resuctrl reads systemd time spans", "[resuctrl]" )
+{
+    REQUIRE( timespanSeconds( "10s" ) == 10 );
+    REQUIRE( timespanSeconds( "20" ) == 20 );
+    REQUIRE( timespanSeconds( "2.5" ) == 2.5 );
+    REQUIRE( timespanSeconds( "1min 30s" ) == 90 );
+    REQUIRE( timespanSeconds( "500ms" ) == 0.5 );
+    REQUIRE( timespanSeconds( "2h" ) == 7200 );
+    REQUIRE( timespanSeconds( "0" ) == 0 );
+    REQUIRE( timespanSeconds( "infinity" ) > 1e17 );
+    REQUIRE( timespanSeconds( "" ) == -1 );
+    REQUIRE( timespanSeconds( "ten" ) == -1 );
 }
 
 /// Configuration files parse into section.key values with quotes and arrays unwrapped.
@@ -210,39 +267,120 @@ TEST_CASE( "resuctrl generates the template and drop-ins", "[resuctrl]" )
     REQUIRE( dt.find( "After=" ) == std::string::npos );
 }
 
-/// Service states are reported with the old resuctrl's ranks and colors.
+/// Service states are reported with the old resuctrl's ranks and colors, and apps run by hand stand out.
 /**
  * \ingroup resuctrl_unit_test
  */
 TEST_CASE( "resuctrl classifies app states like the old resuctrl", "[resuctrl]" )
 {
     typedef std::map<std::string, std::string> props;
+    props                                      running{ { "ActiveState", "active" }, { "SubState", "running" } };
+    props stopped{ { "ActiveState", "inactive" }, { "SubState", "dead" }, { "Result", "success" } };
 
-    appState running = classify( props{ { "ActiveState", "active" }, { "SubState", "running" } }, true, true );
-    REQUIRE( running.rank == 0 );
-    REQUIRE( running.label == "running" );
-    REQUIRE( std::string( running.color ) == "\033[32m" ); // green
+    appState autostarted = classify( running, true, true );
+    REQUIRE( autostarted.rank == 0 );
+    REQUIRE( autostarted.label == "running" );
+    REQUIRE( std::string( autostarted.color ) == "\033[32m" ); // green
 
-    appState disabled = classify(
-        props{ { "ActiveState", "inactive" }, { "SubState", "dead" }, { "Result", "success" } }, true, false );
-    REQUIRE( disabled.rank == 1 );
+    appState manual = classify( running, true, false );
+    REQUIRE( manual.rank == 1 );
+    REQUIRE( manual.label == "manually started" );
+    REQUIRE( std::string( manual.color ) == "\033[34m" ); // blue
+
+    appState disabled = classify( stopped, true, false );
+    REQUIRE( disabled.rank == 2 );
     REQUIRE( disabled.label == "disabled" );
+    REQUIRE( std::string( disabled.color ) == "\033[33m" ); // yellow
 
-    appState notStarted =
-        classify( props{ { "ActiveState", "inactive" }, { "SubState", "dead" }, { "Result", "success" } }, true, true );
-    REQUIRE( notStarted.rank == 2 );
+    appState notStarted = classify( stopped, true, true );
+    REQUIRE( notStarted.rank == 3 );
     REQUIRE( notStarted.label == "not started" );
 
     REQUIRE( classify( props{ { "ActiveState", "activating" } }, true, true ).label == "starting" );
 
-    appState dead = classify( props{ { "ActiveState", "failed" }, { "Result", "watchdog" } }, true, true );
-    REQUIRE( dead.rank == 4 );
+    appState dead = classify( props{ { "ActiveState", "failed" }, { "Result", "watchdog" } }, true, false );
+    REQUIRE( dead.rank == 5 );
     REQUIRE( dead.label == "dead (watchdog)" );
     REQUIRE( std::string( dead.color ) == "\033[31m" ); // red
 
-    REQUIRE( classify( props{ { "ActiveState", "inactive" }, { "Result", "exit-code" } }, true, true ).rank == 4 );
-    REQUIRE( classify( props{ { "ActiveState", "active" }, { "SubState", "running" } }, false, false ).rank == 3 );
+    REQUIRE( classify( props{ { "ActiveState", "inactive" }, { "Result", "exit-code" } }, true, true ).rank == 5 );
+    REQUIRE( classify( running, false, false ).label == "running, not registered" );
     REQUIRE( classify( props{}, true, true ).label == "unknown" );
+}
+
+/// Enabling, disabling and deleting edit only the app's proclist lines.
+/**
+ * \ingroup resuctrl_unit_test
+ */
+TEST_CASE( "resuctrl edits an app's proclist lines", "[resuctrl]" )
+{
+    std::string text    = "# comment camsci1\n"
+                          "isICC        xindiserver\n"
+                          "camsci1      picamCtrl\n"
+                          "#camsci2     picamCtrl\n"
+                          "# py:pyapp   pyExec\n"
+                          "camsci10     picamCtrl\n";
+    int         changed = 0;
+
+    SECTION( "disable comments out the active line" )
+    {
+        std::string t = editProclist( text, "camsci1", proclistEdit::comment, "", changed );
+        REQUIRE( changed == 1 );
+        REQUIRE( t.find( "#camsci1      picamCtrl\n" ) != std::string::npos );
+        REQUIRE( t.find( "\ncamsci10     picamCtrl\n" ) != std::string::npos );
+        REQUIRE( t.find( "# comment camsci1\n" ) == 0 );
+    }
+
+    SECTION( "enable uncomments, with or without a space after #, keeping the prefix" )
+    {
+        std::string t = editProclist( text, "camsci2", proclistEdit::uncomment, "camsci2 picamCtrl", changed );
+        REQUIRE( changed == 1 );
+        REQUIRE( t.find( "\ncamsci2     picamCtrl\n" ) != std::string::npos );
+
+        t = editProclist( text, "pyapp", proclistEdit::uncomment, "py:pyapp pyExec", changed );
+        REQUIRE( changed == 1 );
+        REQUIRE( t.find( "\npy:pyapp   pyExec\n" ) != std::string::npos );
+    }
+
+    SECTION( "enable of an active app changes nothing, enable of an unlisted app appends it" )
+    {
+        REQUIRE( editProclist( text, "camsci1", proclistEdit::uncomment, "camsci1 picamCtrl", changed ) == text );
+        REQUIRE( changed == 0 );
+
+        std::string t = editProclist( text, "newapp", proclistEdit::uncomment, "newapp someExec", changed );
+        REQUIRE( changed == 1 );
+        REQUIRE( t == text + "newapp someExec\n" );
+    }
+
+    SECTION( "## lines are only comments: never enabled, disabled or deleted" )
+    {
+        std::string withOld = text + "##camsci_old  camsci\n## camsci1  picamCtrl\n";
+
+        std::string t = editProclist( withOld, "camsci_old", proclistEdit::uncomment, "camsci_old camsci", changed );
+        REQUIRE( changed == 1 ); // appended as a new line, the ## comment stays
+        REQUIRE( t.find( "##camsci_old  camsci\n" ) != std::string::npos );
+        REQUIRE( t.find( "\ncamsci_old camsci\n" ) != std::string::npos );
+
+        t = editProclist( withOld, "camsci1", proclistEdit::remove, "", changed );
+        REQUIRE( changed == 1 ); // only the active line
+        REQUIRE( t.find( "## camsci1  picamCtrl\n" ) != std::string::npos );
+
+        std::istringstream in( withOld );
+        proclist           pl = parseProclist( in );
+        for( const auto &d : pl.disabled )
+        {
+            REQUIRE( d.name != "camsci_old" );
+        }
+    }
+
+    SECTION( "delete removes active and commented-out lines of that app only" )
+    {
+        std::string t = editProclist( text + "#camsci1 picamCtrl\n", "camsci1", proclistEdit::remove, "", changed );
+        REQUIRE( changed == 2 );
+        REQUIRE( t.find( "camsci1 " ) == std::string::npos );
+        REQUIRE( t.find( "camsci10" ) != std::string::npos );
+        REQUIRE( t.find( "# comment camsci1" ) != std::string::npos );
+    }
 }
 
 /// Files are only rewritten when their contents change.

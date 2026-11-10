@@ -8,6 +8,7 @@
 #define resuctrl_hpp
 
 #include <algorithm>
+#include <cmath>
 #include <cctype>
 #include <cerrno>
 #include <cstdlib>
@@ -84,6 +85,9 @@ struct proclist
 {
     /// The processes, in proclist order
     std::vector<appEntry> apps;
+
+    /// Commented-out lines that look like processes, `#NAME EXECUTABLE`: registered but not started automatically
+    std::vector<appEntry> disabled;
 
     /// Problems found, one message each; the lines concerned are not in apps
     std::vector<std::string> errors;
@@ -165,8 +169,10 @@ bool validValue( valueKind          kind, /**< [in] the kind of setting */
 
 /// Parse a proclist, as resurrector_indi did
 /** Each line with exactly two white-space separated tokens, NAME and EXECUTABLE, is a process.  Lines starting
- * with `#` are comments.  NAME may have a prefix: `-` or `nhb:` for processes that send no heartbeat, `py:` for
- * Python apps; any other `prefix:` is part of the name, which is then invalid.
+ * with `#` are comments; those that are `#NAME EXECUTABLE` otherwise, with valid names, are listed in disabled.
+ * Lines starting with `##` are only comments, whatever follows.  NAME
+ * may have a prefix: `-` or `nhb:` for processes that send no heartbeat, `py:` for Python apps; any other `prefix:` is
+ * part of the name, which is then invalid.
  *
  * \returns the processes and any errors found
  */
@@ -186,6 +192,30 @@ confMap parseConf( std::istream &in /**< [in] the configuration contents */ );
  */
 bool readConf( confMap           &conf, /**< [out] the settings */
                const std::string &path /**< [in] the file */ );
+
+/// Actions on an app's proclist lines
+enum class proclistEdit
+{
+    comment,   ///< comment out its active lines
+    uncomment, ///< make its first commented-out line active, or append newLine if it has no line
+    remove     ///< remove all its lines, active or commented out
+};
+
+/// Edit an app's lines in proclist text, leaving every other line, and every `##` comment, as it is
+/**
+ * \returns the edited text
+ */
+std::string editProclist( const std::string &text,    /**< [in] the proclist contents */
+                          const std::string &name,    /**< [in] the app name */
+                          proclistEdit       edit,    /**< [in] what to do */
+                          const std::string &newLine, /**< [in] the line to append for uncomment, if none */
+                          int               &changed /**< [out] the number of lines changed */ );
+
+/// Convert a systemd time span, as `systemctl show` prints it (e.g. "1min 30s", "500ms", "infinity"), to seconds
+/**
+ * \returns the seconds, a large number for infinity, or -1 if it cannot be parsed
+ */
+double timespanSeconds( const std::string &span /**< [in] the time span */ );
 
 /// Collect systemd directives from the `[systemd]` section of a configuration
 /** Invalid values and unknown keys are reported in errors and skipped.
@@ -290,13 +320,14 @@ int runCommand( const std::vector<std::string> &argv, /**< [in] the command and 
  */
 struct appState
 {
-    int         rank;  ///< sort order: 0 running, 1 disabled, 2 not started, 3 changing, 4 dead
+    int         rank;  ///< sort order: 0 running, 1 manually started, 2 disabled, 3 not started, 4 changing, 5 dead
     std::string label; ///< the state in a few words
     const char *color; ///< ANSI color sequence for the state
 };
 
 /// Classify an app's service state, with the old resuctrl's colors
-/** Running is green, disabled yellow, not started cyan, starting or stopping magenta, failed or dead red.
+/** Running is green, running with autostart off (started by hand) blue, disabled yellow, not started cyan,
+ * starting or stopping magenta, failed or dead red.
  *
  * \returns the state
  */
@@ -437,6 +468,58 @@ class resuCtrl
      */
     int stopApps( const std::vector<std::string> &names /**< [in] the app names */ );
 
+    /// The role-wide directives: the template defaults with magaox.conf `[systemd]` settings
+    directiveMap roleDirectives( std::vector<std::string> &errors /**< [in.out] problems found, appended to */ );
+
+    /// Check that an app can be registered, and work out its systemd directives from its .conf
+    /**
+     * \returns true if it can, false with the reasons appended to errors
+     */
+    bool prepareApp( const appEntry           &app,    /**< [in] the app */
+                     directiveMap             &dirs,   /**< [out] its directives */
+                     std::vector<std::string> &errors, /**< [in.out] problems found, appended to */
+                     bool                     *hasConf = nullptr /**< [out] [optional] whether it has a .conf */ );
+
+    /// Find the role's INDI server and ssh tunnels among apps, for the drop-ins' ordering
+    void serverAndTunnels( const std::vector<appEntry> &apps,   /**< [in] the apps */
+                           std::string                 &server, /**< [out] the INDI server, "" if none */
+                           std::vector<std::string>    &tunnels /**< [out] the ssh tunnel apps */ );
+
+    /// Edit an app's lines in the role's proclist, in place so its owner and permissions stay
+    /**
+     * \returns the number of lines changed, or -1 with a message on stderr
+     */
+    int updateProclist( const std::string &name, /**< [in] the app name */
+                        proclistEdit       edit, /**< [in] what to do */
+                        const std::string &newLine = "" /**< [in] the line to append for uncomment, if none */ );
+
+    /// Find an app in the registry, else in the proclist, active or commented out
+    /**
+     * \returns true if found
+     */
+    bool findApp( appEntry          &app, /**< [out] the app */
+                  const std::string &name /**< [in] its name */ );
+
+    /// Register one app from its .conf, without reloading systemd
+    /**
+     * \returns 0 if registered, -1 with messages on stderr if not
+     */
+    int registerApp( const appEntry &app /**< [in] the app */ );
+
+    /// Stop, disable and deregister apps, without reloading systemd
+    /**
+     * \returns 0 if all went well, else non-zero
+     */
+    int deregister( const std::vector<std::string> &names /**< [in] the app names */ );
+
+    /// Bring registered apps' drop-ins up to date with their .conf before they start
+    /** Regenerates each app's drop-in, and reloads systemd if one changed, if systemd still has older unit
+     * files loaded, or if the watchdog systemd has for an app differs from its configuration.
+     *
+     * \returns 0 if all went well, else non-zero
+     */
+    int refreshApps( const std::vector<appEntry> &apps /**< [in] the apps about to start */ );
+
     /** \name Commands
      * @{
      */
@@ -571,9 +654,33 @@ inline proclist parseProclist( std::istream &in )
             toks.push_back( tok );
         }
 
-        if( toks.empty() || toks[0][0] == '#' || ( toks.size() > 1 && toks[1][0] == '#' ) )
+        if( toks.empty() || ( toks.size() > 1 && toks[1][0] == '#' ) )
         {
             continue; // blank line or comment
+        }
+
+        // "##..." is only a comment, whatever follows, e.g. "##camsci_old camsci"
+        if( toks[0].compare( 0, 2, "##" ) == 0 )
+        {
+            continue;
+        }
+
+        // a commented-out process, e.g. "#camsci1 picamCtrl" or "# camsci1 picamCtrl"
+        bool commented = toks[0][0] == '#';
+        if( commented )
+        {
+            std::string rest = line.substr( line.find( '#' ) );
+            rest.erase( 0, rest.find_first_not_of( "# \t" ) );
+            std::istringstream cs( rest );
+            toks.clear();
+            while( cs >> tok )
+            {
+                toks.push_back( tok );
+            }
+            if( toks.size() != 2 )
+            {
+                continue; // an ordinary comment
+            }
         }
 
         if( toks.size() != 2 )
@@ -599,6 +706,16 @@ inline proclist parseProclist( std::istream &in )
             app.name.erase( 0, c + 1 );
         }
 
+        if( commented )
+        {
+            // only something that looks like a process; whether it is one is checked later
+            if( validName( app.name ) && validName( app.exec ) )
+            {
+                pl.disabled.push_back( app );
+            }
+            continue;
+        }
+
         if( !validName( app.name ) )
         {
             pl.errors.push_back( "proclist line " + std::to_string( n ) + ": invalid name [" + toks[0] +
@@ -620,7 +737,149 @@ inline proclist parseProclist( std::istream &in )
         pl.apps.push_back( app );
     }
 
+    // an active line wins over a commented-out one for the same name, and the first commented-out one wins
+    std::vector<appEntry> disabled;
+    for( const auto &d : pl.disabled )
+    {
+        if( !seen.count( d.name ) )
+        {
+            seen.insert( d.name );
+            disabled.push_back( d );
+        }
+    }
+    pl.disabled = disabled;
+
     return pl;
+}
+
+inline std::string editProclist(
+    const std::string &text, const std::string &name, proclistEdit edit, const std::string &newLine, int &changed )
+{
+    // whether line is NAME EXECUTABLE for this name, with any prefix, and whether it is commented out
+    auto match = [&]( const std::string &line, bool &commented ) -> bool
+    {
+        std::string t = trim( line );
+        commented     = !t.empty() && t[0] == '#';
+        if( t.compare( 0, 2, "##" ) == 0 )
+        {
+            return false; // only a comment, never an app's line
+        }
+        t.erase( 0, t.find_first_not_of( "# \t" ) );
+        std::istringstream       ss( t );
+        std::vector<std::string> toks;
+        std::string              tok;
+        while( ss >> tok )
+        {
+            toks.push_back( tok );
+        }
+        if( toks.size() != 2 )
+        {
+            return false;
+        }
+        std::string n = toks[0];
+        if( n[0] == '-' )
+        {
+            n.erase( 0, 1 );
+        }
+        else if( n.compare( 0, 3, "py:" ) == 0 || n.compare( 0, 4, "nhb:" ) == 0 )
+        {
+            n.erase( 0, n.find( ':' ) + 1 );
+        }
+        return n == name;
+    };
+
+    std::vector<std::string> lines;
+    std::istringstream       in( text );
+    std::string              line;
+    bool                     hasActive = false;
+    while( std::getline( in, line ) )
+    {
+        bool c;
+        hasActive = hasActive || ( match( line, c ) && !c );
+        lines.push_back( line );
+    }
+
+    changed = 0;
+    std::ostringstream out;
+    for( auto &l : lines )
+    {
+        bool c;
+        if( !match( l, c ) )
+        {
+            out << l << "\n";
+            continue;
+        }
+        if( edit == proclistEdit::remove )
+        {
+            ++changed;
+            continue;
+        }
+        if( edit == proclistEdit::comment && !c )
+        {
+            l = "#" + l;
+            ++changed;
+        }
+        else if( edit == proclistEdit::uncomment && c && !hasActive )
+        {
+            l.erase( 0, l.find_first_not_of( "# \t" ) );
+            hasActive = true;
+            ++changed;
+        }
+        out << l << "\n";
+    }
+    if( edit == proclistEdit::uncomment && !hasActive && !newLine.empty() )
+    {
+        out << newLine << "\n";
+        ++changed;
+    }
+    return out.str();
+}
+
+inline double timespanSeconds( const std::string &span )
+{
+    static const std::map<std::string, double> units = { { "us", 1e-6 },
+                                                         { "usec", 1e-6 },
+                                                         { "ms", 1e-3 },
+                                                         { "msec", 1e-3 },
+                                                         { "s", 1 },
+                                                         { "sec", 1 },
+                                                         { "", 1 },
+                                                         { "min", 60 },
+                                                         { "m", 60 },
+                                                         { "h", 3600 },
+                                                         { "hr", 3600 },
+                                                         { "d", 86400 },
+                                                         { "w", 604800 },
+                                                         { "M", 2629800 },
+                                                         { "y", 31557600 } };
+    std::string                                t     = trim( span );
+    if( t == "infinity" )
+    {
+        return 1e18;
+    }
+    if( t.empty() )
+    {
+        return -1;
+    }
+
+    double             total = 0;
+    std::istringstream ss( t );
+    std::string        tok;
+    while( ss >> tok )
+    {
+        size_t i = 0;
+        while( i < tok.size() && ( isdigit( static_cast<unsigned char>( tok[i] ) ) || tok[i] == '.' ) )
+        {
+            ++i;
+        }
+        auto u = units.find( tok.substr( i ) );
+        if( i == 0 || u == units.end() )
+        {
+            return -1;
+        }
+        total += strtod( tok.substr( 0, i ).c_str(), nullptr ) * u->second;
+    }
+    return total;
 }
 
 inline confMap parseConf( std::istream &in )
@@ -999,8 +1258,8 @@ inline int runCommand( const std::vector<std::string> &argv, std::string *output
 
 inline appState classify( const std::map<std::string, std::string> &props, bool registered, bool enabled )
 {
-    static const char *green = "\033[32m", *yellow = "\033[33m", *cyan = "\033[36m", *magenta = "\033[35m",
-                      *red = "\033[31m";
+    static const char *green = "\033[32m", *blue = "\033[34m", *yellow = "\033[33m", *cyan = "\033[36m",
+                      *magenta = "\033[35m", *red = "\033[31m";
 
     auto get = [&]( const char *k ) -> std::string
     {
@@ -1011,29 +1270,33 @@ inline appState classify( const std::map<std::string, std::string> &props, bool 
 
     if( active.empty() )
     {
-        return { 2, "unknown", cyan };
+        return { 3, "unknown", cyan };
     }
     if( active == "active" && sub == "running" )
     {
-        return registered ? appState{ 0, "running", green } : appState{ 3, "running, not registered", magenta };
+        if( !registered )
+        {
+            return { 4, "running, not registered", magenta };
+        }
+        return enabled ? appState{ 0, "running", green } : appState{ 1, "manually started", blue };
     }
     if( active == "activating" )
     {
-        return { 3, "starting", magenta };
+        return { 4, "starting", magenta };
     }
     if( active == "deactivating" )
     {
-        return { 3, "stopping", magenta };
+        return { 4, "stopping", magenta };
     }
     if( active == "failed" || ( !result.empty() && result != "success" ) )
     {
-        return { 4, "dead (" + result + ")", red };
+        return { 5, "dead (" + result + ")", red };
     }
     if( active == "inactive" )
     {
-        return enabled ? appState{ 2, "not started", cyan } : appState{ 1, "disabled", yellow };
+        return enabled ? appState{ 3, "not started", cyan } : appState{ 2, "disabled", yellow };
     }
-    return { 3, active + "/" + sub, magenta };
+    return { 4, active + "/" + sub, magenta };
 }
 
 inline std::string resuCtrl::unitDir() const
@@ -1076,19 +1339,25 @@ inline void resuCtrl::usage( std::ostream &os ) const
           "  inspect NAME           follow an app's console output (-n LINES, default 50)\n"
           "  startup [NAME...]      start the apps enabled for automatic startup, the INDI server last;\n"
           "                         with names, start those apps\n"
-          "  start NAME...          start apps, enabled or not; systemd supervises them either way\n"
+          "  start NAME...          start apps, enabled or not; systemd supervises them either way.\n"
+          "                         start, startup and restart first apply changes in the apps' .conf,\n"
+          "                         e.g. a new [resurrectee] timeout\n"
           "  stop NAME...           stop apps; they stay stopped until started again\n"
           "  shutdown NAME...|--all stop apps, or all running apps of the role, the INDI server last\n"
           "  restart NAME...|--all  restart apps, or stop then start everything\n"
           "  defib NAME...          same as restart; a hung app is already restarted by its watchdog\n"
           "\n"
           "Changing which apps are configured needs sudo:\n"
-          "  sudo resuctrl reset    register the proclist's apps, generate their drop-ins from their .conf,\n"
-          "                         enable them for automatic startup, disable (and stop) apps no longer\n"
-          "                         listed; new apps start at once if the role is up\n"
-          "  sudo resuctrl enable NAME...   enable apps for automatic startup, until the next reset\n"
-          "  sudo resuctrl disable NAME...  disable apps for automatic startup, until the next reset\n"
-          "  sudo resuctrl delete NAME...   stop, disable and deregister apps\n"
+          "  sudo resuctrl reset    register the proclist's apps from their .conf and enable them for\n"
+          "                         automatic startup; commented-out apps with a .conf are registered\n"
+          "                         but disabled (and stopped), to start by hand; apps no longer in the\n"
+          "                         proclist are stopped and deregistered; new apps start at once if the\n"
+          "                         role is up\n"
+          "  sudo resuctrl enable NAME...   autostart on: uncomment the app in the proclist (adding it if\n"
+          "                                 needed) and register it if it is not; does not start it\n"
+          "  sudo resuctrl disable NAME...  autostart off: comment the app out in the proclist; it stays\n"
+          "                                 registered to start by hand; does not stop it\n"
+          "  sudo resuctrl delete NAME...   remove the app from the proclist, stop and deregister it\n"
           "  sudo resuctrl boot on|off      start the role's enabled apps at boot, or not\n"
           "\n"
           "Options:\n"
@@ -1438,6 +1707,259 @@ inline std::vector<std::string> resuCtrl::activeApps()
     return names;
 }
 
+inline directiveMap resuCtrl::roleDirectives( std::vector<std::string> &errors )
+{
+    directiveMap dirs = defaultDirectives();
+    confMap      gconf;
+    readConf( gconf, m_top + "/" + MAGAOX_configRelPath + "/" + MAGAOX_globalConfig );
+    systemdSettings( dirs, errors, gconf, MAGAOX_globalConfig );
+    return dirs;
+}
+
+inline bool
+resuCtrl::prepareApp( const appEntry &app, directiveMap &dirs, std::vector<std::string> &errors, bool *hasConf )
+{
+    std::string exe = m_top + "/bin/" + app.exec;
+    struct stat st;
+    if( stat( exe.c_str(), &st ) < 0 || !S_ISREG( st.st_mode ) || access( exe.c_str(), X_OK ) < 0 )
+    {
+        errors.push_back( app.name + ": executable " + exe + " is missing or not executable" );
+        return false;
+    }
+
+    confMap c;
+    bool    found = readConf( c, m_top + "/" + MAGAOX_configRelPath + "/" + app.name + ".conf" );
+    if( hasConf )
+    {
+        *hasConf = found;
+    }
+
+    size_t n = errors.size();
+    dirs     = appDirectives( app, c, errors );
+    return errors.size() == n;
+}
+
+inline void
+resuCtrl::serverAndTunnels( const std::vector<appEntry> &apps, std::string &server, std::vector<std::string> &tunnels )
+{
+    server.clear();
+    tunnels.clear();
+    for( const auto &a : apps )
+    {
+        if( a.isServer() && server.empty() )
+        {
+            server = a.name;
+        }
+        if( a.isTunnel() )
+        {
+            tunnels.push_back( a.name );
+        }
+    }
+}
+
+inline int resuCtrl::updateProclist( const std::string &name, proclistEdit edit, const std::string &newLine )
+{
+    std::string text;
+    {
+        std::ifstream f( proclistPath() );
+        if( !f )
+        {
+            std::cerr << m_prog << ": cannot read " << proclistPath() << "\n";
+            return -1;
+        }
+        std::stringstream ss;
+        ss << f.rdbuf();
+        text = ss.str();
+    }
+
+    int         changed = 0;
+    std::string edited  = editProclist( text, name, edit, newLine, changed );
+    if( changed == 0 )
+    {
+        return 0;
+    }
+    if( m_dryRun )
+    {
+        std::cout << "[dry-run] would edit " << changed << " line(s) for " << name << " in " << proclistPath() << "\n";
+        return changed;
+    }
+
+    // in place, not by rename, so the file keeps its owner and permissions
+    std::ofstream f( proclistPath(), std::ios::trunc );
+    f << edited;
+    if( !f.good() )
+    {
+        std::cerr << m_prog << ": writing " << proclistPath() << ": " << strerror( errno ) << "\n";
+        return -1;
+    }
+    return changed;
+}
+
+inline bool resuCtrl::findApp( appEntry &app, const std::string &name )
+{
+    if( registryRead( app, name ) )
+    {
+        return true;
+    }
+    std::ifstream pf( proclistPath() );
+    proclist      pl = parseProclist( pf );
+    for( const auto *list : { &pl.apps, &pl.disabled } )
+    {
+        for( const auto &a : *list )
+        {
+            if( a.name == name )
+            {
+                app = a;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+inline int resuCtrl::registerApp( const appEntry &app )
+{
+    unitNames                u( m_role );
+    directiveMap             dirs;
+    std::vector<std::string> errors;
+    if( !prepareApp( app, dirs, errors ) )
+    {
+        for( const auto &e : errors )
+        {
+            std::cerr << m_prog << ": error: " << e << "\n";
+        }
+        return -1;
+    }
+
+    std::vector<appEntry> all{ app };
+    for( const auto &n : registered() )
+    {
+        appEntry a;
+        if( n != app.name && registryRead( a, n ) )
+        {
+            all.push_back( a );
+        }
+    }
+    std::string              server;
+    std::vector<std::string> tunnels;
+    serverAndTunnels( all, server, tunnels );
+
+    int rc = writeFile( unitDir() + "/" + u.instance( app.name ) + ".d/override.conf",
+                        dropIn( u, app, m_top + "/bin", dirs, server, tunnels ),
+                        0644 ) < 0;
+    rc |= writeFile( regDir() + "/" + app.name + ".conf", registryEntry( app ), 0644 ) < 0;
+    return rc ? -1 : 0;
+}
+
+inline int resuCtrl::deregister( const std::vector<std::string> &names )
+{
+    if( names.empty() )
+    {
+        return 0;
+    }
+    unitNames                u( m_role );
+    std::vector<std::string> dis{ "disable" };
+    for( const auto &n : names )
+    {
+        dis.push_back( u.instance( n ) );
+    }
+
+    // stop while systemd still knows how
+    int rc = stopApps( names );
+    rc |= systemctl( dis, true );
+    for( const auto &n : names )
+    {
+        std::string d = unitDir() + "/" + u.instance( n ) + ".d", r = regDir() + "/" + n + ".conf";
+        if( m_dryRun )
+        {
+            std::cout << "[dry-run] would remove " << d << " and " << r << "\n";
+            continue;
+        }
+        std::error_code ec;
+        std::filesystem::remove( d + "/override.conf", ec );
+        std::filesystem::remove( d, ec ); // only if nothing else is there
+        std::filesystem::remove( r, ec );
+        std::cout << m_prog << ": deregistered " << n << "\n";
+    }
+    return rc;
+}
+
+inline int resuCtrl::refreshApps( const std::vector<appEntry> &apps )
+{
+    if( apps.empty() )
+    {
+        return 0;
+    }
+    unitNames u( m_role );
+
+    // the ordering in the drop-ins depends on all registered apps
+    std::vector<appEntry> all;
+    for( const auto &n : registered() )
+    {
+        appEntry a;
+        if( registryRead( a, n ) )
+        {
+            all.push_back( a );
+        }
+    }
+    std::string              server;
+    std::vector<std::string> tunnels;
+    serverAndTunnels( all, server, tunnels );
+
+    std::vector<std::string> errors, names;
+    directiveMap             role = roleDirectives( errors );
+    for( const auto &a : apps )
+    {
+        names.push_back( a.name );
+    }
+    auto props = showProps( names );
+
+    bool reload = false;
+    int  rc     = 0;
+    for( const auto &a : apps )
+    {
+        directiveMap             dirs;
+        std::vector<std::string> aerr;
+        if( !prepareApp( a, dirs, aerr ) )
+        {
+            for( const auto &e : aerr )
+            {
+                std::cerr << m_prog << ": warning: " << e << "\n";
+            }
+            std::cerr << m_prog << ": warning: " << a.name << " starts with its last good settings\n";
+            continue;
+        }
+
+        int w = writeFile( unitDir() + "/" + u.instance( a.name ) + ".d/override.conf",
+                           dropIn( u, a, m_top + "/bin", dirs, server, tunnels ),
+                           0644 );
+        rc |= w < 0;
+
+        // the watchdog systemd has now, against the one configured
+        auto  &p        = props[a.name];
+        double want     = timespanSeconds( dirs.count( "WatchdogSec" ) ? dirs["WatchdogSec"] : role["WatchdogSec"] );
+        double have     = p.count( "WatchdogUSec" ) ? timespanSeconds( p["WatchdogUSec"] ) : -1;
+        bool   stale    = p.count( "NeedDaemonReload" ) && p["NeedDaemonReload"] == "yes";
+        bool   wdChange = have >= 0 && want >= 0 && std::abs( have - want ) > 1e-3;
+        if( wdChange )
+        {
+            std::cout << m_prog << ": " << a.name << ": watchdog " << p["WatchdogUSec"] << " -> " << want
+                      << "s, from its configuration\n";
+        }
+        else if( w == 1 )
+        {
+            std::cout << m_prog << ": " << a.name << ": settings updated from its configuration\n";
+        }
+        reload = reload || w == 1 || stale || wdChange;
+    }
+
+    if( reload )
+    {
+        rc |= systemctl( { "daemon-reload" } ) != 0;
+    }
+    return rc;
+}
+
 inline int resuCtrl::startApps( const std::vector<appEntry> &apps )
 {
     unitNames                u( m_role );
@@ -1447,6 +1969,9 @@ inline int resuCtrl::startApps( const std::vector<appEntry> &apps )
         ( a.isServer() ? server : others ).push_back( u.instance( a.name ) );
         reset.push_back( u.instance( a.name ) );
     }
+
+    // with its current configuration
+    refreshApps( apps );
 
     // an explicit start also clears a failure, e.g. after the start limit was hit
     systemctl( reset );
@@ -1511,7 +2036,7 @@ inline int resuCtrl::writeFile( const std::string &path, const std::string &cont
 inline int resuCtrl::cmdReset()
 {
     unitNames                u( m_role );
-    std::vector<std::string> errors;
+    std::vector<std::string> errors, warnings;
 
     std::ifstream pf( proclistPath() );
     if( !pf )
@@ -1524,13 +2049,11 @@ inline int resuCtrl::cmdReset()
 
     // role-wide defaults, from magaox.conf [systemd]
     std::string  cfgDir = m_top + "/" + MAGAOX_configRelPath;
-    directiveMap gdirs  = defaultDirectives();
-    confMap      gconf;
-    readConf( gconf, cfgDir + "/" + MAGAOX_globalConfig );
-    systemdSettings( gdirs, errors, gconf, MAGAOX_globalConfig );
+    directiveMap gdirs  = roleDirectives( errors );
 
     // the INDI server and the apps must agree on the control FIFO
-    confMap isconf;
+    confMap gconf, isconf;
+    readConf( gconf, cfgDir + "/" + MAGAOX_globalConfig );
     if( readConf( isconf, cfgDir + "/is" + m_role + ".conf" ) && isconf.count( "indiserver.f" ) &&
         gconf.count( "indiserver_ctrl_fifo" ) && isconf["indiserver.f"] != gconf["indiserver_ctrl_fifo"] )
     {
@@ -1539,71 +2062,111 @@ inline int resuCtrl::cmdReset()
                   << " in magaox.conf\n";
     }
 
-    // validate each app; invalid ones keep any earlier registration and state
     struct valid
     {
         appEntry     app;
         directiveMap dirs;
+        bool         autostart;
     };
-    std::vector<valid>       apps;
-    std::string              server;
-    std::vector<std::string> tunnels;
-    std::string              binDir = m_top + "/bin";
+    std::vector<valid> apps;
 
+    // names in the proclist that keep any registration they have, though they could not be (re)registered now
+    std::set<std::string> keep;
+
+    // active lines: registered and started automatically; invalid ones keep their earlier registration and state
     for( const auto &app : pl.apps )
     {
-        std::string exe = binDir + "/" + app.exec;
-        struct stat st;
-        if( stat( exe.c_str(), &st ) < 0 || !S_ISREG( st.st_mode ) || access( exe.c_str(), X_OK ) < 0 )
+        directiveMap d;
+        bool         hasConf = false;
+        size_t       n       = errors.size();
+        if( !prepareApp( app, d, errors, &hasConf ) )
         {
-            errors.push_back( app.name + ": executable " + exe + " is missing or not executable, not registered" );
+            errors.insert( errors.begin() + n,
+                           "proclist line " + std::to_string( app.line ) + ": " + app.name + " not (re)registered:" );
+            keep.insert( app.name );
             continue;
         }
-
-        confMap c;
-        if( !readConf( c, cfgDir + "/" + app.name + ".conf" ) )
+        if( !hasConf )
         {
             std::cout << m_prog << ": note: " << app.name << " has no " << app.name << ".conf, using defaults\n";
         }
-        std::vector<std::string> aerr;
-        directiveMap             d = appDirectives( app, c, aerr );
-        if( !aerr.empty() )
-        {
-            errors.insert( errors.end(), aerr.begin(), aerr.end() );
-            errors.push_back( app.name + ": not registered because of its configuration errors" );
-            continue;
-        }
-
-        if( app.isServer() )
-        {
-            if( !server.empty() )
-            {
-                errors.push_back( app.name + ": a second INDI server, " + server + " is the role's, not registered" );
-                continue;
-            }
-            server = app.name;
-        }
-        if( app.isTunnel() )
-        {
-            tunnels.push_back( app.name );
-        }
-        apps.push_back( { app, d } );
+        apps.push_back( { app, d, true } );
     }
 
-    std::vector<std::string> before = registered();
+    // commented-out lines with a .conf: registered, to start by hand, but not started automatically
+    std::set<std::string> commented;
+    for( const auto &app : pl.disabled )
+    {
+        if( access( ( cfgDir + "/" + app.name + ".conf" ).c_str(), R_OK ) != 0 )
+        {
+            continue; // an ordinary comment, or an app that is not set up here
+        }
+        commented.insert( app.name );
+        directiveMap             d;
+        std::vector<std::string> aerr;
+        if( !prepareApp( app, d, aerr ) )
+        {
+            warnings.push_back( "proclist line " + std::to_string( app.line ) + ": commented-out " + app.name +
+                                " not (re)registered:" );
+            warnings.insert( warnings.end(), aerr.begin(), aerr.end() );
+            keep.insert( app.name );
+            continue;
+        }
+        apps.push_back( { app, d, false } );
+    }
+
+    // one INDI server per role
+    std::string server;
+    for( auto it = apps.begin(); it != apps.end(); )
+    {
+        if( it->app.isServer() && !server.empty() )
+        {
+            errors.push_back( it->app.name + ": a second INDI server, " + server + " is the role's, not registered" );
+            keep.insert( it->app.name );
+            it = apps.erase( it );
+            continue;
+        }
+        if( it->app.isServer() )
+        {
+            server = it->app.name;
+        }
+        ++it;
+    }
+    std::vector<appEntry> entries;
+    for( const auto &v : apps )
+    {
+        entries.push_back( v.app );
+    }
+    std::vector<std::string> tunnels;
+    serverAndTunnels( entries, server, tunnels );
+
+    // registered apps no longer in the proclist at all are stopped and deregistered
+    std::vector<std::string> before = registered(), removed;
     std::set<std::string>    wasRegistered( before.begin(), before.end() );
+    std::set<std::string>    listed( keep.begin(), keep.end() );
+    for( const auto &v : apps )
+    {
+        listed.insert( v.app.name );
+    }
+    for( const auto &n : before )
+    {
+        if( !listed.count( n ) )
+        {
+            removed.push_back( n );
+        }
+    }
+    int rc = deregister( removed );
 
     // the role's template and target, then each app's drop-in and registry entry
-    int rc = 0;
     rc |= writeFile( unitDir() + "/" + u.templ(), templateUnit( u, gdirs, envFile() ), 0644 ) < 0;
     rc |= writeFile( unitDir() + "/" + u.target(), targetUnit( u ), 0644 ) < 0;
 
-    std::vector<std::string> changed, toEnable;
+    std::vector<std::string> changed, toEnable, toDisable, stopNow;
     std::vector<appEntry>    newlyEnabled;
     for( const auto &v : apps )
     {
         int w = writeFile( unitDir() + "/" + u.instance( v.app.name ) + ".d/override.conf",
-                           dropIn( u, v.app, binDir, v.dirs, server, tunnels ),
+                           dropIn( u, v.app, m_top + "/bin", v.dirs, server, tunnels ),
                            0644 );
         rc |= w < 0;
         rc |= writeFile( regDir() + "/" + v.app.name + ".conf", registryEntry( v.app ), 0644 ) < 0;
@@ -1611,32 +2174,30 @@ inline int resuCtrl::cmdReset()
         {
             changed.push_back( v.app.name );
         }
-        if( !enabled( v.app.name ) )
+        if( v.autostart && !enabled( v.app.name ) )
         {
             toEnable.push_back( u.instance( v.app.name ) );
             newlyEnabled.push_back( v.app );
+        }
+        if( !v.autostart && enabled( v.app.name ) )
+        {
+            toDisable.push_back( u.instance( v.app.name ) );
+            stopNow.push_back( v.app.name );
+        }
+    }
+    // commented-out apps that could not be re-registered still leave automatic startup
+    for( const auto &n : commented )
+    {
+        if( keep.count( n ) && wasRegistered.count( n ) && enabled( n ) )
+        {
+            toDisable.push_back( u.instance( n ) );
+            stopNow.push_back( n );
         }
     }
     if( rc )
     {
         std::cerr << m_prog << ": could not write the systemd configuration; run with sudo\n";
         return 1;
-    }
-
-    // registered apps no longer in the proclist leave automatic startup but stay registered
-    std::set<std::string> listed;
-    for( const auto &a : pl.apps )
-    {
-        listed.insert( a.name );
-    }
-    std::vector<std::string> removed, toDisable;
-    for( const auto &n : before )
-    {
-        if( !listed.count( n ) && enabled( n ) )
-        {
-            removed.push_back( n );
-            toDisable.push_back( u.instance( n ) );
-        }
     }
 
     systemctl( { "daemon-reload" } );
@@ -1651,10 +2212,11 @@ inline int resuCtrl::cmdReset()
         rc |= systemctl( toDisable, true ) != 0;
     }
 
-    if( !removed.empty() && !m_keepRunning )
+    // apps just commented out also stop, as the resurrector did, unless --keep-running
+    if( !stopNow.empty() && !m_keepRunning )
     {
         std::vector<std::string> act = activeApps(), stop;
-        for( const auto &n : removed )
+        for( const auto &n : stopNow )
         {
             if( std::find( act.begin(), act.end(), n ) != act.end() )
             {
@@ -1677,20 +2239,22 @@ inline int resuCtrl::cmdReset()
     // record what was applied
     std::ostringstream active;
     active << "# Applied by resuctrl reset from " << proclistPath() << "; do not edit\n";
+    size_t nauto = 0;
     for( const auto &v : apps )
     {
-        active << v.app.prefix << v.app.name << " " << v.app.exec << "\n";
+        active << ( v.autostart ? "" : "#" ) << v.app.prefix << v.app.name << " " << v.app.exec << "\n";
+        nauto += v.autostart;
     }
     if( writeFile( activePath(), active.str(), 0664 ) < 0 )
     {
         rc = 1;
     }
 
-    std::cout << m_prog << ": role " << m_role << ": " << apps.size() << " apps registered and enabled, "
-              << newlyEnabled.size() << " newly";
+    std::cout << m_prog << ": role " << m_role << ": registered " << nauto << " app(s) for automatic startup ("
+              << newlyEnabled.size() << " new), " << apps.size() - nauto << " commented-out app(s) to start by hand";
     if( !removed.empty() )
     {
-        std::cout << "; removed from automatic startup:";
+        std::cout << "; deregistered, no longer in the proclist:";
         for( const auto &n : removed )
         {
             std::cout << " " << n;
@@ -1699,8 +2263,12 @@ inline int resuCtrl::cmdReset()
     std::cout << "\n";
     for( const auto &n : changed )
     {
-        std::cout << m_prog << ": " << n << ": settings changed, applied at its next start; resuctrl restart " << n
-                  << " applies them now\n";
+        std::cout << m_prog << ": " << n << ": settings changed, applied at its next start; " << m_prog << " restart "
+                  << n << " applies them now\n";
+    }
+    for( const auto &w : warnings )
+    {
+        std::cerr << m_prog << ": warning: " << w << "\n";
     }
     for( const auto &e : errors )
     {
@@ -1805,6 +2373,7 @@ inline int resuCtrl::cmdRestart()
     {
         return 1;
     }
+    refreshApps( apps );
     unitNames                u( m_role );
     std::vector<std::string> others{ "restart" }, server{ "restart" };
     for( const auto &a : apps )
@@ -1840,7 +2409,7 @@ resuCtrl::showProps( const std::vector<std::string> &names )
         "--no-pager",
         "-p",
         "Id,ActiveState,SubState,MainPID,NRestarts,Result,WatchdogUSec,WatchdogTimestampMonotonic,"
-        "ExecMainStartTimestampMonotonic,CPUUsageNSec,MemoryCurrent,ControlGroup" };
+        "ExecMainStartTimestampMonotonic,CPUUsageNSec,MemoryCurrent,ControlGroup,NeedDaemonReload" };
     for( const auto &n : names )
     {
         argv.push_back( u.instance( n ) );
@@ -2172,55 +2741,110 @@ inline int resuCtrl::cmdInspect()
 
 inline int resuCtrl::cmdEnable()
 {
-    std::vector<appEntry> apps = namedApps();
-    if( apps.empty() )
+    if( m_names.empty() )
     {
+        std::cerr << m_prog << ": " << m_verb << " needs app names\n";
         return 1;
     }
     unitNames                u( m_role );
+    bool                     enable = m_verb == "enable", reload = false;
     std::vector<std::string> args{ m_verb };
-    for( const auto &a : apps )
+    int                      rc = 0;
+
+    for( const auto &n : m_names )
     {
-        args.push_back( u.instance( a.name ) );
+        appEntry app;
+        if( !findApp( app, n ) )
+        {
+            std::cerr << m_prog << ": " << n << " is neither registered nor in " << proclistPath() << "\n";
+            rc = 1;
+            continue;
+        }
+
+        // the proclist says what starts automatically, so it changes too
+        int e = enable ? updateProclist( n, proclistEdit::uncomment, app.prefix + app.name + " " + app.exec )
+                       : updateProclist( n, proclistEdit::comment );
+        if( e < 0 )
+        {
+            rc = 1;
+            continue;
+        }
+
+        // an app commented out without a .conf, or added since the last reset, is registered now
+        appEntry reg;
+        if( enable && !registryRead( reg, n ) )
+        {
+            if( registerApp( app ) < 0 )
+            {
+                std::cerr << m_prog << ": " << n << " is enabled in the proclist but could not be registered\n";
+                rc = 1;
+                continue;
+            }
+            reload = true;
+        }
+        if( registryRead( reg, n ) )
+        {
+            args.push_back( u.instance( n ) );
+        }
+        std::cout << m_prog << ": " << n << ( enable ? ": autostart on" : ": autostart off" )
+                  << ( e > 0 ? ( enable ? ", uncommented in " : ", commented out in " ) + proclistPath() : "" ) << "\n";
     }
-    int rc = systemctl( args, true );
-    std::cout << m_prog << ": note: the next resuctrl reset enables exactly the apps in " << proclistPath() << "\n";
+
+    if( reload )
+    {
+        rc |= systemctl( { "daemon-reload" } ) != 0;
+    }
+    if( args.size() > 1 )
+    {
+        rc |= systemctl( args, true ) != 0;
+    }
+
+    std::cout << m_prog << ": note: " << m_verb << " does not "
+              << ( enable ? "start apps: " + m_prog + " start NAME, or the next startup, does"
+                          : "stop apps: " + m_prog + " stop NAME does" )
+              << "\n";
     return rc;
 }
 
 inline int resuCtrl::cmdDelete()
 {
-    std::vector<appEntry> apps = namedApps();
-    if( apps.empty() )
+    if( m_names.empty() )
     {
+        std::cerr << m_prog << ": " << m_verb << " needs app names\n";
         return 1;
     }
-    unitNames                u( m_role );
-    std::vector<std::string> names, dis{ "disable" };
-    for( const auto &a : apps )
+    int                      rc = 0;
+    std::vector<std::string> regs;
+    for( const auto &n : m_names )
     {
-        names.push_back( a.name );
-        dis.push_back( u.instance( a.name ) );
-    }
-
-    // stop while systemd still knows how
-    int rc = stopApps( names );
-    rc |= systemctl( dis, true );
-    for( const auto &n : names )
-    {
-        std::string d = unitDir() + "/" + u.instance( n ) + ".d", r = regDir() + "/" + n + ".conf";
-        if( m_dryRun )
+        appEntry app;
+        int      e = updateProclist( n, proclistEdit::remove );
+        if( e < 0 )
         {
-            std::cout << "[dry-run] would remove " << d << " and " << r << "\n";
+            rc = 1;
             continue;
         }
-        std::error_code ec;
-        std::filesystem::remove( d + "/override.conf", ec );
-        std::filesystem::remove( d, ec ); // only if nothing else is there
-        std::filesystem::remove( r, ec );
-        std::cout << m_prog << ": deregistered " << n << "\n";
+        bool isReg = registryRead( app, n );
+        if( isReg )
+        {
+            regs.push_back( n );
+        }
+        if( e == 0 && !isReg )
+        {
+            std::cerr << m_prog << ": " << n << " is neither registered nor in " << proclistPath() << "\n";
+            rc = 1;
+            continue;
+        }
+        if( e > 0 )
+        {
+            std::cout << m_prog << ": removed " << n << " from " << proclistPath() << "\n";
+        }
     }
-    rc |= systemctl( { "daemon-reload" } );
+    if( !regs.empty() )
+    {
+        rc |= deregister( regs );
+        rc |= systemctl( { "daemon-reload" } );
+    }
     return rc;
 }
 

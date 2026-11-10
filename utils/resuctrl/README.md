@@ -34,7 +34,17 @@ Unit names use the role in lower case. App names may contain `-`; units use them
 
 # Proclist
 
-`/opt/MagAOX/config/proclist_<role>.txt` is read as before: `NAME EXECUTABLE` per line, `#` comments.
+`/opt/MagAOX/config/proclist_<role>.txt` is read as before: `NAME EXECUTABLE` per line.
+
+| Line                       | Meaning                                                                       |
+|----------------------------|-------------------------------------------------------------------------------|
+| `camsci1  picamCtrl`       | an app, started automatically                                                 |
+| `#camsci1  picamCtrl`      | a disabled app: registered if `camsci1.conf` exists, started only by hand; `enable`/`disable` switch between these two |
+| `##camsci_old  camsci`     | only a comment: ignored by `reset`, and never touched by `enable`, `disable` or `delete` |
+| `## any text`, `# any text` | only a comment                                                               |
+
+A `#` line is taken for a disabled app only if it is exactly `#NAME EXECUTABLE` and `NAME.conf` exists, so ordinary
+`#` comments are safe; use `##` to keep an app's line in the file without it ever being registered.
 
 | Prefix      | Meaning                                                                     |
 |-------------|-----------------------------------------------------------------------------|
@@ -89,7 +99,7 @@ Resetting the systemd registration for which apps should be active via `resuctrl
 
 | Who                         | Command                | What it does                                                             |
 |-----------------------------|------------------------|--------------------------------------------------------------------------|
-| anyone                      | `status [NAME...]`     | One line per app, `name: state (pid: N)`, colored and sorted by state as the old resuctrl: running green, disabled yellow, not started cyan, starting/stopping magenta, dead red. `-v` adds a table with autostart, restarts, uptime, seconds since the last watchdog ping, watchdog timeout, CPU % now, memory and GPU memory. |
+| anyone                      | `status [NAME...]`     | Every registered app, one line each, `name: state (pid: N)`, colored and sorted by state as the old resuctrl: running green, manually started (running with autostart off) blue, disabled (commented out, not running) yellow, not started cyan, starting/stopping magenta, dead red. `-v` adds a table with autostart, restarts, uptime, seconds since the last watchdog ping, watchdog timeout, CPU % now, memory and GPU memory. |
 | anyone                      | `peek [NAME...]`       | State and the last `logdump` lines of the apps (`-n LINES`, default 10), with the console output of an app that is not running. |
 | anyone                      | `inspect NAME`         | Follow the app's console output, which `xctrl` showed in its tmux session. |
 | xsup, group magaox          | `startup [NAME...]`    | Start the apps enabled for automatic startup, then the INDI server; with names, start those apps. |
@@ -98,18 +108,23 @@ Resetting the systemd registration for which apps should be active via `resuctrl
 | xsup, group magaox          | `shutdown NAME...\|--all` | As `stop`; `--all` stops every running app of the role, enabled or not, then the INDI server. |
 | xsup, group magaox          | `restart NAME...\|--all` | Restart apps; `--all` is `shutdown --all` then `startup`.              |
 | xsup, group magaox          | `defib NAME...`        | Same as `restart`, kept for habit.                                       |
-| sudo                        | `reset`                | Register the proclist's apps, generate their drop-ins, enable them for automatic startup. Apps no longer listed are disabled and stopped (`--keep-running` leaves them running) but stay registered. New apps start at once if the role is up. Changed settings apply at an app's next start. |
-| sudo                        | `enable NAME...`       | Enable apps for automatic startup.                                       |
-| sudo                        | `disable NAME...`      | Disable apps for automatic startup. A running app keeps running.         |
-| sudo                        | `delete NAME...`       | Stop, disable and deregister apps.                                       |
+| sudo                        | `reset`                | Register the proclist's apps, generate their drop-ins, enable them for automatic startup. A commented-out line, `#NAME EXECUTABLE`, whose app has a valid `NAME.conf` is registered too but not enabled: `start NAME` runs it, `startup` does not. Apps that became commented out are disabled and stopped (`--keep-running` leaves them running). Apps no longer in the proclist at all are stopped and deregistered. New apps start at once if the role is up. |
+| sudo                        | `enable NAME...`       | Autostart on: uncomment the app in the proclist, or add it, and register it if needed. Does not start it. |
+| sudo                        | `disable NAME...`      | Autostart off: comment the app out in the proclist. It stays registered, to start by hand. Does not stop it. |
+| sudo                        | `delete NAME...`       | Remove the app's lines from the proclist, stop it and deregister it.      |
 | sudo                        | `boot on\|off`         | Start the role's enabled apps at boot, or not. Off by default.           |
 
 The role comes from `-r ROLE`, `MAGAOX_ROLE`, or `/etc/profile.d/magaox_role.sh`, since `sudo` can drop the
 environment.
 
+`start`, `startup` and `restart` first bring each app's drop-in up to date with its `.conf`: if its settings
+changed, e.g. a new `[resurrectee] timeout`, or the watchdog systemd has differs from it, the drop-in is rewritten and
+systemd reloaded before the app starts. An app already running keeps its settings until it is restarted.
+
 Stopping and disabling are separate: `stop`/`shutdown` never change what starts automatically, and
-`enable`/`disable` never start or stop anything. `enable` and `disable` change systemd only: the next `reset` enables
-exactly the apps in the proclist again. To change the set for good, edit the proclist and run `sudo resuctrl reset`.
+`enable`/`disable` never start or stop anything. The proclist always says what starts automatically: `enable`,
+`disable` and `delete` edit the app's lines in it, leaving the rest of the file as it is, so the next `reset` keeps
+their effect. Editing the proclist by hand and running `sudo resuctrl reset` does the same.
 
 `defib` used to make the resurrector restart an app by writing an expired hexbeat. Systemd's watchdog now does that
 by itself: an app that stops sending `WATCHDOG=1` gets SIGABRT (with a core dump) and is restarted per its
