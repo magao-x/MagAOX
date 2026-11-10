@@ -1,13 +1,15 @@
 resuctrl
 ========
 
-`resuctrl`, also installed as `xctrl`, runs the MagAO-X apps of a MAGAOX\_ROLE as systemd services. It replaces
+`resuctrl`, also installed as `xctrl`, runs the MagAO-X apps of a MAGAOX\_ROLE as systemd services. It replaces both
 `resurrector_indi` and the tmux-based `xctrl`: systemd starts, watches and restarts each app, and `resuctrl` turns the
 proclist and the apps' configuration into systemd units and drives `systemctl`.
 
-The INDI FIFOs (`.in`, `.out`, `indiserver.ctrl`) are unchanged. The resurrector's `.hb` hexbeat FIFOs are gone,
-replaced by systemd's watchdog: apps send `READY=1` once started and `WATCHDOG=1` from their main loop (`sd_notify` protocol, see
-`libMagAOX/sys/sdNotify.hpp` and `magaox/indi/device.py`).
+Each app publishes to systemd's watchdog, sending `READY=1` when started and `WATCHDOG=1` from the main loop
+(`sd_notify` protocol, see `libMagAOX/sys/sdNotify.hpp` and `magaox/indi/device.py`).
+
+`resuctrl reset` parses the server's proclist and registers apps that are present, and de-registers apps that are 
+already registered with systemd that no longer exist in the proclist (for a given MAGAOX\_ROLE).   
 
 # Generated files
 
@@ -39,8 +41,8 @@ Unit names use the role in lower case. App names may contain `-`; units use them
 | Line                       | Meaning                                                                       |
 |----------------------------|-------------------------------------------------------------------------------|
 | `camsci1  picamCtrl`       | an app, started automatically                                                 |
-| `#camsci1  picamCtrl`      | a disabled app: registered if `camsci1.conf` exists, started only by hand; `enable`/`disable` switch between these two |
-| `##camsci_old  camsci`     | only a comment: ignored by `reset`, and never touched by `enable`, `disable` or `delete` |
+| `#camsci1  picamCtrl`      | a disabled app: registered only if `camsci1.conf` exists, started by hand; `enable`/`disable` uncomments/comments |
+| `##camsci_old  camsci`     | only a comment: ignored by `reset`, never touched by `enable`, `disable` or `delete` |
 | `## any text`, `# any text` | only a comment                                                               |
 
 A `#` line is taken for a disabled app only if it is exactly `#NAME EXECUTABLE` and `NAME.conf` exists, so ordinary
@@ -56,8 +58,9 @@ last messages get through; it is ordered after the `sshDigger` tunnels.
 
 # Settings
 
-Defaults are in the template. They can be changed for the whole role in `magaox.conf`, or for one app in its
-`.conf`, under `[systemd]`:
+Default systemd app settings are in a template. Any new apps registered without any overrides or specific settings wil 
+inherit the template values. The template overrieds can be changed via `magaox.conf`, or one app in its
+`.conf`, under the section for `[systemd]`:
 
 | Key                     | systemd directive        | Default  |
 |-------------------------|--------------------------|----------|
@@ -112,7 +115,7 @@ Resetting the systemd registration for which apps should be active via `resuctrl
 | sudo                        | `enable NAME...`       | Autostart on: uncomment the app in the proclist, or add it, and register it if needed. Does not start it. |
 | sudo                        | `disable NAME...`      | Autostart off: comment the app out in the proclist. It stays registered, to start by hand. Does not stop it. |
 | sudo                        | `delete NAME...`       | Remove the app's lines from the proclist, stop it and deregister it.      |
-| sudo                        | `boot on\|off`         | Start the role's enabled apps at boot, or not. Off by default.           |
+| sudo                        | `boot on\|off`         | Automatically start the MAGAOX\_ROLE enabled apps at boot, or not. Off is the default.           |
 
 The role comes from `-r ROLE`, `MAGAOX_ROLE`, or `/etc/profile.d/magaox_role.sh`, since `sudo` can drop the
 environment.
@@ -133,18 +136,6 @@ too: apps reconnect to it through the control FIFO.
 
 After the start limit (`startLimitBurst` starts within `startLimitIntervalSec`) an app is left failed, as the
 resurrector gave up after 10 restarts; `resuctrl start NAME` clears that and tries again.
-
-# Moving from xctrl or resurrector_indi
-
-The resurrector, its `.hb` hexbeat FIFOs and the old `xctrl` and `resuctrl` scripts are removed.
-
-1. Stop the old processes the old way, before installing, e.g. `xctrl shutdown --all` or
-   `resuctrl shutdown --all`.
-2. Build and install: `resuctrl` is in `utils_to_build`; installing it also links `xctrl` to it.
-3. `sudo resuctrl reset`, then `resuctrl startup`, then `resuctrl status`.
-4. Optionally `sudo resuctrl boot on`.
-
-Old `.hb` files in `/opt/MagAOX/drivers/fifos` can be deleted.
 
 # Testing without systemd
 
