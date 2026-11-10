@@ -9,19 +9,19 @@ xctrl
 | Term          | Meaning                                                                                       |
 |---------------|-----------------------------------------------------------------------------------------------|
 | `xctrl`       | this program: the one command for registering, starting, stopping and checking the apps        |
-| sentinel      | the systemd supervision of a role's apps: the units `xctrl reset` generates, their watchdog and restart policy, and the proclist record in `sys/sentinel_proclist` |
+| sentinel      | the systemd supervision of a role's apps: the units `xctrl register` generates, their watchdog and restart policy, and the proclist record in `sys/sentinel_proclist` |
 | watchdog      | systemd's check that an app is alive: the app sends `WATCHDOG=1` at least every `watchdogSec`, or systemd restarts it |
 | `[systemd]`   | the configuration section, in `magaox.conf` or an app's `.conf`, holding the sentinel settings |
 
 Each app reports to systemd with the `sd_notify` protocol (see `libMagAOX/sys/sdNotify.hpp` and
 `magaox/indi/device.py`): `READY=1` once started, `WATCHDOG=1` from its main loop, and `STOPPING=1` on the way out.
 
-`xctrl reset` parses the role's proclist, registers the apps in it, and deregisters apps that are registered but no
-longer in the proclist.
+`xctrl register` parses the role's proclist, registers the apps in it with systemd, and deregisters apps that are
+registered but no longer in the proclist.
 
 # Generated files
 
-For `MAGAOX_ROLE=ICC`, `sudo xctrl reset` writes:
+For `MAGAOX_ROLE=ICC`, `sudo xctrl register` writes:
 
 ```
 /etc/systemd/system/
@@ -34,11 +34,12 @@ For `MAGAOX_ROLE=ICC`, `sudo xctrl reset` writes:
     apps/camsci1.conf                     registry: every app registered, enabled or not
     environment                           optional, not generated: extra environment for all apps
 /opt/MagAOX/sys/sentinel_proclist/proclist_ICC.txt.active
-                                          the proclist lines last applied by reset
+                                          the proclist lines last applied by register
 ```
 
 Each app runs as `/opt/MagAOX/bin/<executable> -n <name>`, as user `xsup`, with `MAGAOX_ROLE` set, and
-`PYTHONUNBUFFERED=1` so that Python apps' output is not held back. Its output goes to the journal (`xctrl peek NAME`); its binary logs are unchanged (`logdump NAME`).
+`PYTHONUNBUFFERED=1` so that Python apps' output is not held back. Its output goes to the journal
+(`xctrl peek NAME`); its binary logs are unchanged (`logdump NAME`).
 
 Unit names use the role in lower case. App names may contain `-`; units use them as is (`%i`).
 
@@ -51,15 +52,17 @@ Unit names use the role in lower case. App names may contain `-`; units use them
 | `camsci1  picamCtrl`    | an app, started automatically                                                    |
 | `#camsci1  picamCtrl`   | a disabled app: registered if `camsci1.conf` exists, started only by hand        |
 | `# camsci1  picamCtrl`  | the same: any line starting with a single `#` is a disabled app                  |
-| `## any text`           | a comment: ignored by `reset`, never touched by `enable`, `disable` or `delete`  |
+| `## any text`           | a comment: ignored by `register`, never touched by `enable`, `disable` or `delete` |
 
 A single `#` always means a disabled app, so comments need `##`. A single-`#` line that is not `NAME EXECUTABLE`,
-or whose app has no `.conf`, is reported by `reset` and otherwise ignored.
+or whose app has no `.conf`, is reported by `register` and otherwise ignored.
 
 | Prefix      | Meaning                                                                         |
 |-------------|---------------------------------------------------------------------------------|
 | none        | the app notifies systemd: `Type=notify`, with a watchdog                        |
 | `-`         | the app does not notify systemd: `Type=simple`, no watchdog, still restarted    |
+
+On the command line, `--` lets a name start with `-`: `sudo xctrl add -- -camsci-1 someExec`.
 
 The app run by `xindiserver` is the role's INDI server. Apps are ordered after it, so they stop before it and their
 last messages get through; it is ordered after the `sshDigger` tunnels.
@@ -81,7 +84,7 @@ changes them for that app, both under `[systemd]`, with the same keys:
 | `killSignal`            | `KillSignal=`            | SIGTERM  | signal that asks the app to stop                         |
 
 Times are seconds, or `infinity`. The apps accept these keys and ignore them; only `xctrl` reads them. The
-`[resurrectee]` section is no longer used: `reset` reports it as an error, and its `timeout = RUN,STARTUP` becomes
+`[resurrectee]` section is no longer used: `register` reports it as an error, and its `timeout = RUN,STARTUP` becomes
 `watchdogSec = RUN` and `timeoutStartSec = STARTUP`.
 
 Example, in `camsci1.conf`:
@@ -94,7 +97,7 @@ restart = on-failure
 killSignal = SIGINT
 ```
 
-`reset` checks every value and every executable; an app with a problem is reported and not (re)registered, and
+`register` checks every value and every executable; an app with a problem is reported and not (re)registered, and
 keeps whatever registration it had.
 
 # Commands
@@ -113,11 +116,21 @@ apps are registered or enabled needs sudo.
 | xsup, group magaox          | `stop NAME...`         | Stop apps. They stay stopped until started again: systemd does not restart an app that was stopped on purpose, but `startup` or a reboot with `boot on` starts enabled ones. |
 | xsup, group magaox          | `shutdown NAME...\|--all` | As `stop`; `--all` stops every running app of the role, enabled or not, then the INDI server. |
 | xsup, group magaox          | `restart NAME...\|--all` | Restart apps; `--all` is `shutdown --all` then `startup`.              |
-| sudo                        | `reset`                | Register the proclist's apps, generate their drop-ins, enable them for automatic startup. Disabled apps (single `#`) with a valid `NAME.conf` are registered but not enabled: `start NAME` runs them, `startup` does not. Apps that became disabled are stopped (`--keep-running` leaves them running). Apps no longer in the proclist are stopped and deregistered. New apps start at once if the role is up. |
-| sudo                        | `enable NAME...`       | Autostart on: uncomment the app in the proclist, or add it, and register it if needed. Does not start it. |
-| sudo                        | `disable NAME...`      | Autostart off: comment the app out in the proclist. It stays registered, to start by hand. Does not stop it. |
-| sudo                        | `delete NAME...`       | Remove the app's lines from the proclist, stop it and deregister it.      |
+| sudo                        | `register`             | Register the proclist's apps with systemd, generate their drop-ins, enable them for automatic startup. Disabled apps (single `#`) with a valid `NAME.conf` are registered but not enabled: `start NAME` runs them, `startup` does not. Apps that became disabled are stopped (`--keep-running` leaves them running). Apps no longer in the proclist are stopped and deregistered. New apps start at once if the role is up. |
+| sudo                        | `add NAME EXECUTABLE`  | Add the app to the proclist, commented out (`#NAME EXECUTABLE`), and register it, to start by hand or `enable`. It needs `NAME.conf`, and must not be in the proclist already; otherwise nothing changes. |
+| sudo                        | `enable NAME...\|--all` | Autostart on: uncomment the app in the proclist, or add it, and register it if needed. `--all` enables every app in the proclist and every registered app. Does not start them. |
+| sudo                        | `disable NAME...\|--all` | Autostart off: comment the app out in the proclist. It stays registered, to start by hand. `--all` disables every app. Does not stop them. |
+| sudo                        | `delete NAME...\|--all` | Remove the app's lines from the proclist, stop it and deregister it. `--all` empties the role's proclist of apps, keeping `##` comments, and deregisters every app. |
 | sudo                        | `boot on\|off`         | Start the role's enabled apps at boot, or not. Off is the default.        |
+
+For example, to take an app out and put it back later:
+
+```
+sudo xctrl delete maths_CO2            # out of the proclist and deregistered; maths_CO2.conf stays
+sudo xctrl add maths_CO2 magAOXMaths   # back as #maths_CO2 magAOXMaths, registered, autostart off
+xctrl start maths_CO2                  # run it now
+sudo xctrl enable maths_CO2            # and at every startup
+```
 
 The role comes from `-r ROLE`, `MAGAOX_ROLE`, or `/etc/profile.d/magaox_role.sh`, since `sudo` can drop the
 environment.
@@ -128,8 +141,8 @@ systemd reloaded before the app starts. An app already running keeps its setting
 
 Stopping and disabling are separate: `stop`/`shutdown` never change what starts automatically, and
 `enable`/`disable` never start or stop anything. The proclist always says what starts automatically: `enable`,
-`disable` and `delete` edit the app's lines in it, leaving the rest of the file as it is, so the next `reset` keeps
-their effect. Editing the proclist by hand and running `sudo xctrl reset` does the same.
+`disable`, `add` and `delete` edit the app's lines in it, leaving the rest of the file as it is, so the next `register`
+keeps their effect. Editing the proclist by hand and running `sudo xctrl register` does the same.
 
 An app that stops sending `WATCHDOG=1` within `watchdogSec` gets SIGABRT (with a core dump) and is restarted per its
 `restart` policy. `restart NAME` does not restart the INDI server: apps reconnect to it through the control FIFO.

@@ -85,7 +85,7 @@ ___
 
 * As sudo-capable user on both/either magaox01 and magaox02:
 ```
-sudo xctrl reset   ### Creation, provisioning are complete after this step
+sudo xctrl register   ### Creation, provisioning are complete after this step
 sudo su - xsup
 ```
 

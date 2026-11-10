@@ -34,7 +34,7 @@ log = logging.getLogger()
 
 @xconf.config
 class SystemdConfig:
-    '''systemd service settings for this app, read by xctrl reset, not by the app'''
+    '''systemd service settings for this app, read by xctrl register, not by the app'''
     restart: typing.Optional[str] = xconf.field(default=None, help="Restart= policy, e.g. always or on-failure")
     restartSec: typing.Optional[float] = xconf.field(default=None, help="RestartSec=, seconds before restarting")
     startLimitBurst: typing.Optional[int] = xconf.field(default=None, help="StartLimitBurst=, starts allowed per interval")

@@ -311,7 +311,7 @@ TEST_CASE( "xctrl classifies app states", "[xctrl]" )
     REQUIRE( classify( props{}, true, true ).label == "unknown" );
 }
 
-/// Enabling, disabling and deleting edit only the app's proclist lines.
+/// Adding, enabling, disabling and deleting edit only the app's proclist lines.
 /**
  * \ingroup xctrl_unit_test
  */
@@ -383,6 +383,18 @@ TEST_CASE( "xctrl edits an app's proclist lines", "[xctrl]" )
         REQUIRE( t.find( "camsci1 " ) == std::string::npos );
         REQUIRE( t.find( "camsci10" ) != std::string::npos );
         REQUIRE( t.find( "# comment camsci1" ) != std::string::npos );
+    }
+
+    SECTION( "add appends a commented-out line only for an app with no line" )
+    {
+        std::string t = editProclist( text, "maths_CO2", proclistEdit::append, "#maths_CO2 magAOXMaths", changed );
+        REQUIRE( changed == 1 );
+        REQUIRE( t == text + "#maths_CO2 magAOXMaths\n" );
+
+        REQUIRE( editProclist( text, "camsci2", proclistEdit::append, "#camsci2 picamCtrl", changed ) == text );
+        REQUIRE( changed == 0 );
+        REQUIRE( editProclist( text, "camsci1", proclistEdit::append, "#camsci1 picamCtrl", changed ) == text );
+        REQUIRE( changed == 0 );
     }
 }
 

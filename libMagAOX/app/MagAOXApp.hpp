@@ -1677,7 +1677,7 @@ void MagAOXApp<_useINDI>::setupBasicConfig() // virtual
                     key,
                     false,
                     "string",
-                    "systemd service setting for this app, applied by xctrl reset" );
+                    "systemd service setting for this app, applied by xctrl register" );
     }
 
     // Logger Stuff
