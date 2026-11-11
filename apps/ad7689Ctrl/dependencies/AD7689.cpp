@@ -110,7 +110,7 @@ int AD7689::connect( const Settings &settings )
     const std::string path =
         "/dev/spidev" + std::to_string( settings.m_bus ) + "." + std::to_string( settings.m_device );
     m_fd          = open( path.c_str(), O_RDWR | O_CLOEXEC );
-    uint32_t mode = SPI_MODE_0 | SPI_NO_CS, actual = 0;
+    uint32_t mode = SPI_MODE_0, actual = 0;
     uint8_t  bits = 8, order = 0;
     if( m_fd < 0 || ioctl( m_fd, SPI_IOC_WR_MODE32, &mode ) < 0 || ioctl( m_fd, SPI_IOC_WR_BITS_PER_WORD, &bits ) < 0 ||
         ioctl( m_fd, SPI_IOC_WR_LSB_FIRST, &order ) < 0 ||
@@ -119,7 +119,7 @@ int AD7689::connect( const Settings &settings )
         ioctl( m_fd, SPI_IOC_RD_BITS_PER_WORD, &bits ) < 0 || bits != 8 ||
         ioctl( m_fd, SPI_IOC_RD_LSB_FIRST, &order ) < 0 || order != 0 )
     {
-        fail( "open/configure SPI mode 0, eight bits, MSB first, SPI_NO_CS" );
+        fail( "open/configure SPI mode 0, eight bits, MSB first" );
         disconnect();
         return -1;
     }
