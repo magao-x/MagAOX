@@ -31,6 +31,7 @@ namespace app
  * combine these outlet numbers using outletController's order and millisecond-delay language.
  * Commands are dispatched without waiting for confirmation. Only received state elements
  * determine observed power. Unavailable sources block only channels that use them.
+ * Source observations arrive only through the INDI subscriptions; sources are never polled.
  */
 class virtualPDU : public MagAOXApp<>, public dev::outletController<virtualPDU>, public dev::telemeter<virtualPDU>
 {
@@ -43,18 +44,6 @@ class virtualPDU : public MagAOXApp<>, public dev::outletController<virtualPDU>,
 
     /// Common channel implementation and sequence locks.
     typedef dev::outletController<virtualPDU> outletControllerT;
-
-    /// Monotonic clock used to bound source freshness.
-    typedef std::chrono::steady_clock clockT;
-
-    /** \name Configurable Parameters - Data
-     * @{ */
-    /// Seconds between explicit source channel/FSM refreshes.
-    double m_pollInterval{ 5 };
-
-    /// Maximum seconds without a valid source observation.
-    double m_staleTimeout{ 15 };
-    ///@}
 
     /// One observed remote channel backing a virtual outlet.
     struct endpoint
@@ -76,9 +65,6 @@ class virtualPDU : public MagAOXApp<>, public dev::outletController<virtualPDU>,
 
         /// Whether an actual state element has been received since invalidation.
         bool m_haveState{ false };
-
-        /// Monotonic receipt time of the last valid state element.
-        clockT::time_point m_received{};
     };
 
     /// Readiness observation shared by all endpoints on one remote device.
@@ -89,9 +75,6 @@ class virtualPDU : public MagAOXApp<>, public dev::outletController<virtualPDU>,
 
         /// Whether the last received FSM state was READY.
         bool m_ready{ false };
-
-        /// Monotonic receipt time of the last valid FSM state.
-        clockT::time_point m_received{};
     };
 
     /// One endpoint per contiguous one-based configuration outlet, immutable after startup.
@@ -100,9 +83,6 @@ class virtualPDU : public MagAOXApp<>, public dev::outletController<virtualPDU>,
     /// One FSM subscription per unique remote device, immutable after startup.
     std::vector<source> m_sources;
 
-    /// Last explicit subscription refresh time.
-    clockT::time_point m_lastPoll{};
-
   public:
     /// Construct a service whose own power management is disabled.
     virtualPDU();
@@ -110,7 +90,7 @@ class virtualPDU : public MagAOXApp<>, public dev::outletController<virtualPDU>,
     /// Destroy the service and its helper state.
     ~virtualPDU() noexcept;
 
-    /// Register source refresh and helper configuration options.
+    /// Register helper configuration options.
     void setupConfig() override;
 
     /// Load configuration and request shutdown after logging the specific reason for a rejection.
@@ -122,7 +102,7 @@ class virtualPDU : public MagAOXApp<>, public dev::outletController<virtualPDU>,
     /// Register standard outlet properties and stable remote subscriptions.
     int appStartup() override;
 
-    /// Refresh source definitions, invalidate stale observations, and publish telemetry/INDI.
+    /// Publish outlet states, INDI, and telemetry from the latest source observations.
     int appLogic() override;
 
     /// Stop application telemetry without issuing remote power commands.
@@ -154,9 +134,8 @@ class virtualPDU : public MagAOXApp<>, public dev::outletController<virtualPDU>,
     int recordTelem( const telem_outlet *type /**< [in] unused type selector */ );
 
   protected:
-    /// Test endpoint availability from valid state/FSM observations and their receipt times.
-    bool available( size_t             index /**< [in] zero-based endpoint index */,
-                    clockT::time_point now /**< [in] current monotonic time */ ) const;
+    /// Test endpoint availability from its latest valid state and its source's FSM observation.
+    bool available( size_t index /**< [in] zero-based endpoint index */ ) const;
 
     /// Send a minimal Text target command to an available endpoint.
     int sendOutlet( int                outletNum /**< [in] zero-based endpoint index */,
@@ -178,24 +157,6 @@ inline virtualPDU::~virtualPDU() noexcept
 
 inline void virtualPDU::setupConfig()
 {
-    config.add( "device.pollInterval",
-                "",
-                "device.pollInterval",
-                argType::Required,
-                "device",
-                "pollInterval",
-                false,
-                "double",
-                "Seconds between source refreshes (default 5)." );
-    config.add( "device.staleTimeout",
-                "",
-                "device.staleTimeout",
-                argType::Required,
-                "device",
-                "staleTimeout",
-                false,
-                "double",
-                "Seconds without a valid source observation before invalidation (default 15)." );
     outletControllerT::setupConfig( config );
     TELEMETER_SETUP_CONFIG( config );
 }
@@ -215,13 +176,16 @@ inline int virtualPDU::configError( const std::string &message )
 
 inline int virtualPDU::loadConfigImpl( mx::app::appConfigurator &config )
 {
-    config( m_pollInterval, "device.pollInterval" );
-    config( m_staleTimeout, "device.staleTimeout" );
-    if( !( m_pollInterval > 0 ) )
-        return configError( std::format( "[device] pollInterval={} must be greater than 0 seconds", m_pollInterval ) );
-    if( !( m_staleTimeout > m_pollInterval ) )
-        return configError( std::format(
-            "[device] staleTimeout={} must exceed pollInterval={} seconds", m_staleTimeout, m_pollInterval ) );
+    // Sources are no longer polled, so the old refresh settings have no effect.
+    for( const auto &key : { "pollInterval", "staleTimeout" } )
+    {
+        if( config.isSetUnused( mx::app::iniFile::makeKey( "device", key ) ) )
+        {
+            log<text_log>( std::format( "[device] {} is obsolete and ignored; sources are not polled", key ),
+                           logPrio::LOG_WARNING );
+        }
+    }
+
     std::vector<std::string> sections;
     config.unusedSections( sections );
     std::map<size_t, endpoint>                                 mappings;
@@ -397,15 +361,15 @@ inline int virtualPDU::appStartup()
     return 0;
 }
 
-inline bool virtualPDU::available( size_t index, clockT::time_point now ) const
+inline bool virtualPDU::available( size_t index ) const
 {
     const auto &mapping = m_endpoints[index];
     if( mapping.m_source >= m_sources.size() )
+    {
         return false;
-    const auto &device = m_sources[mapping.m_source];
-    return mapping.m_haveState && device.m_ready &&
-           std::chrono::duration<double>( now - mapping.m_received ).count() < m_staleTimeout &&
-           std::chrono::duration<double>( now - device.m_received ).count() < m_staleTimeout;
+    }
+
+    return mapping.m_haveState && m_sources[mapping.m_source].m_ready;
 }
 
 inline int virtualPDU::appLogic()
@@ -413,12 +377,6 @@ inline int virtualPDU::appLogic()
     std::unique_lock<std::mutex> lock( m_indiMutex, std::try_to_lock );
     if( !lock.owns_lock() )
         return 0;
-    auto now = clockT::now();
-    if( m_indiDriver && std::chrono::duration<double>( now - m_lastPoll ).count() >= m_pollInterval )
-    {
-        sendGetPropertySetList( true );
-        m_lastPoll = now;
-    }
     if( updateOutletStates() < 0 )
         return -1;
     outletControllerT::updateINDI();
@@ -439,7 +397,7 @@ inline int virtualPDU::updateOutletState( int outletNum )
     if( outletNum < 0 || static_cast<size_t>( outletNum ) >= m_endpoints.size() )
         return -1;
     const auto &mapping = m_endpoints[outletNum];
-    setOutletState( outletNum, available( outletNum, clockT::now() ) ? mapping.m_state : OUTLET_STATE_UNKNOWN );
+    setOutletState( outletNum, available( outletNum ) ? mapping.m_state : OUTLET_STATE_UNKNOWN );
     return 0;
 }
 
@@ -447,7 +405,7 @@ inline int virtualPDU::sendOutlet( int outletNum, const std::string &target )
 {
     std::lock_guard<std::mutex> lock( m_indiMutex );
     if( state() != stateCodes::READY || outletNum < 0 || static_cast<size_t>( outletNum ) >= m_endpoints.size() ||
-        !available( outletNum, clockT::now() ) )
+        !available( outletNum ) )
         return log<software_error, -1>( "Virtual outlet source unavailable" );
     const auto       &mapping = m_endpoints[outletNum];
     pcf::IndiProperty command( pcf::IndiProperty::Text, mapping.m_device, mapping.m_channel );
@@ -477,7 +435,7 @@ inline int virtualPDU::newCallBack_channels( const pcf::IndiProperty &ipRecv )
             return -1;
         for( auto index : channel->second.m_outlets )
         {
-            if( !available( index, clockT::now() ) )
+            if( !available( index ) )
                 return log<software_error, -1>( "Virtual channel source unavailable" );
         }
     }
@@ -492,7 +450,6 @@ inline int virtualPDU::st_setCallBack_source( void *app, const pcf::IndiProperty
 inline int virtualPDU::setCallBack_source( const pcf::IndiProperty &ipRecv )
 {
     std::lock_guard<std::mutex> lock( m_indiMutex );
-    auto                        now = clockT::now();
     if( ipRecv.getName() == "fsm" )
     {
         for( size_t index = 0; index < m_sources.size(); ++index )
@@ -504,8 +461,6 @@ inline int virtualPDU::setCallBack_source( const pcf::IndiProperty &ipRecv )
             if( !malformed && !ipRecv.find( "state" ) )
                 return -1;
             device.m_ready = !malformed && ipRecv["state"].get<std::string>() == "READY";
-            if( !malformed )
-                device.m_received = now;
             for( size_t n = 0; n < m_endpoints.size(); ++n )
             {
                 if( m_endpoints[n].m_source != index )
@@ -541,7 +496,6 @@ inline int virtualPDU::setCallBack_source( const pcf::IndiProperty &ipRecv )
         }
         mapping.m_haveState = ipRecv.getType() == pcf::IndiProperty::Text &&
                               ( mapping.m_state != OUTLET_STATE_UNKNOWN || value == "Unk" );
-        mapping.m_received = now;
         updateOutletState( index );
         outletControllerT::updateINDI();
         return recordOutletStates();

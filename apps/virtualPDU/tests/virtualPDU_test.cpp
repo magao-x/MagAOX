@@ -25,16 +25,10 @@ using namespace outletHarness;
 /// Expose source observations and inject the inherited update failure.
 struct Fixture : Controller<virtualPDU>
 {
-    /// Expose source state for deterministic expiry tests.
+    /// Expose endpoint observations.
     using virtualPDU::m_endpoints;
     /// Expose shared FSM observations.
     using virtualPDU::m_sources;
-    /// Expose polling deadline.
-    using virtualPDU::m_lastPoll;
-    /// Expose refresh configuration.
-    using virtualPDU::m_pollInterval;
-    /// Expose stale limit configuration.
-    using virtualPDU::m_staleTimeout;
     /// Fail the inherited all-outlet update only when selected.
     bool m_failUpdate{ false };
     /// Exercise normal updates unless their return needs fault injection.
@@ -108,10 +102,6 @@ TEST_CASE( "virtual PDU rejects invalid mappings and channel sequences", "[virtu
     const std::string two      = endpoint + "[outlet2]\ndevice=usb\nchannel=power\n";
     for( const auto &[text, details] : std::vector<std::pair<std::string, std::vector<std::string>>>{
              { "", { "No [outletN]", "[outlet1]", "required" } },
-             { "[device]\npollInterval=0\n", { "[device]", "pollInterval=0", "greater than 0" } },
-             { "[device]\npollInterval=-1\n", { "pollInterval=-1", "greater than 0" } },
-             { "[device]\nstaleTimeout=3\n", { "staleTimeout=3", "exceed pollInterval=5" } },
-             { "[device]\nstaleTimeout=5\n", { "staleTimeout=5", "exceed pollInterval=5" } },
              { "[outlet0]\ndevice=ac\nchannel=x\n", { "[outlet0]", "positive integer" } },
              { "[outletx]\ndevice=ac\nchannel=x\n", { "[outletx]", "positive integer" } },
              { "[outlet01]\ndevice=ac\nchannel=x\n", { "[outlet01]", "leading zeros" } },
@@ -165,6 +155,33 @@ TEST_CASE( "virtual PDU rejects invalid mappings and channel sequences", "[virtu
         for( const auto &detail : details )
             CHECK( diagnostic.find( detail ) != std::string::npos );
     }
+}
+
+/// Accept, with a warning, the refresh settings that were removed with source polling.
+/** \ingroup virtualPDU_unit_test */
+TEST_CASE( "virtual PDU ignores obsolete source refresh settings", "[virtualPDU]" )
+{
+    // clang-format off
+    #ifdef VIRTUALPDU_TEST_DOXYGEN_REF
+    virtualPDU::loadConfigImpl(); virtualPDU::loadConfig();
+    #endif
+    // clang-format on
+    g_faults = {};
+    Fixture app;
+    app.configText( "[device]\npollInterval=5\nstaleTimeout=15\n[outlet1]\ndevice=ac\nchannel=power\n"
+                    "[x]\noutlet=1\n" );
+    REQUIRE( app.loadConfigImpl( app.config ) == 0 );
+
+    size_t warnings = 0;
+    for( const auto &entry : g_faults.m_logs )
+    {
+        if( entry.m_priority == logPrio::LOG_WARNING && entry.m_message.find( "obsolete" ) != std::string::npos )
+        {
+            ++warnings;
+        }
+    }
+
+    REQUIRE( warnings == 2 );
 }
 
 /// Report the copied channel names and the one-based outlet causing startup rejection.
@@ -332,7 +349,7 @@ TEST_CASE( "virtual PDU handles partial dispatch and per-channel source loss", "
     REQUIRE( app.turnOutletOn( 1 ) < 0 );
 }
 
-/// Merge only valid observed state elements and recover after fresh FSM/channel reports.
+/// Merge only valid observed state elements, rely on subscriptions without polling, and recover after FSM loss.
 /** \ingroup virtualPDU_unit_test */
 TEST_CASE( "virtual PDU distinguishes observed state from targets and stale reports", "[virtualPDU]" )
 {
@@ -374,25 +391,34 @@ TEST_CASE( "virtual PDU distinguishes observed state from targets and stale repo
     wrong.add( pcf::IndiElement( "target", 1 ) );
     REQUIRE( app.setCallBack_source( wrong ) == 0 );
     REQUIRE( app.outletState( 0 ) == OUTLET_STATE_UNKNOWN );
+    // Observations persist without polling: the main loop never re-requests sources.
     app.observed();
-    app.m_endpoints[0].m_received -= std::chrono::seconds( 20 );
+    static_cast<void>( app.messages() );
+    for( int n = 0; n < 3; ++n )
+    {
+        REQUIRE( app.appLogic() == 0 );
+    }
+
+    REQUIRE( app.outletState( 0 ) == OUTLET_STATE_OFF );
+    REQUIRE( app.outletState( 1 ) == OUTLET_STATE_OFF );
+    for( const auto &message : app.messages() )
+    {
+        REQUIRE( message.getType() != pcf::IndiMessage::GetProperties );
+    }
+
+    // Losing source readiness invalidates its outlets until both FSM and channel state are reported again.
+    REQUIRE( app.setCallBack_source( property( "ac", "fsm", "state", "NOTCONNECTED" ) ) == 0 );
     REQUIRE( app.appLogic() == 0 );
     REQUIRE( app.outletState( 0 ) == OUTLET_STATE_UNKNOWN );
+    REQUIRE( app.outletState( 2 ) == OUTLET_STATE_UNKNOWN );
     REQUIRE( app.outletState( 1 ) == OUTLET_STATE_OFF );
+    REQUIRE( app.setCallBack_source( property( "ac", "fsm", "state", "READY" ) ) == 0 );
+    REQUIRE( app.appLogic() == 0 );
+    REQUIRE( app.outletState( 0 ) == OUTLET_STATE_UNKNOWN );
     REQUIRE( app.setCallBack_source( property( "ac", "power", "target", "Off" ) ) == 0 );
     REQUIRE( app.outletState( 0 ) == OUTLET_STATE_UNKNOWN );
     REQUIRE( app.setCallBack_source( property( "ac", "power", "state", "Off" ) ) == 0 );
     REQUIRE( app.outletState( 0 ) == OUTLET_STATE_OFF );
-    app.m_sources[0].m_received -= std::chrono::seconds( 20 );
-    REQUIRE( app.appLogic() == 0 );
-    REQUIRE( app.outletState( 0 ) == OUTLET_STATE_UNKNOWN );
-    REQUIRE( app.outletState( 2 ) == OUTLET_STATE_UNKNOWN );
-    REQUIRE( app.setCallBack_source( property( "ac", "fsm", "state", "READY" ) ) == 0 );
-    REQUIRE( app.appLogic() == 0 );
-    REQUIRE( app.outletState( 0 ) == OUTLET_STATE_OFF );
-    app.m_lastPoll -= std::chrono::seconds( 10 );
-    REQUIRE( app.appLogic() == 0 );
-    REQUIRE( !app.messages().empty() );
 }
 
 /// Record initial/change/forced observations and propagate scheduling/update failures.
