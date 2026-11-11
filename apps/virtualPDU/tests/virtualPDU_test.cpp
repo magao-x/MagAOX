@@ -41,7 +41,9 @@ struct Fixture : Controller<virtualPDU>
 int Fixture::updateOutletStates()
 {
     if( m_failUpdate )
+    {
         return -1;
+    }
     return dev::outletController<virtualPDU>::updateOutletStates();
 }
 void Fixture::configure()
@@ -86,7 +88,9 @@ TEST_CASE( "virtual PDU maps remote channels and publishes the standard interfac
     REQUIRE( app.m_indiP_chOnDelays["combined"].get<int>() == 3 );
     REQUIRE( app.m_indiP_chOutlets["combined"].get<std::string>() == "0,1" );
     for( auto &[key, registration] : app.m_indiSetCallBacks )
+    {
         REQUIRE( registration.property->createUniqueKey() == key );
+    }
 }
 
 /// Reject malformed, cyclic, aliased, shared, or out-of-range virtual configurations.
@@ -150,10 +154,14 @@ TEST_CASE( "virtual PDU rejects invalid mappings and channel sequences", "[virtu
         REQUIRE( !g_faults.m_logs.empty() );
         std::string diagnostic;
         for( const auto &entry : g_faults.m_logs )
+        {
             diagnostic += entry.m_message + '\n';
+        }
         INFO( diagnostic );
         for( const auto &detail : details )
+        {
             CHECK( diagnostic.find( detail ) != std::string::npos );
+        }
     }
 }
 
@@ -241,16 +249,24 @@ TEST_CASE( "virtual PDU propagates lifecycle failures", "[virtualPDU]" )
         g_faults.m_telemResults[call] = -1;
         app.configText( "[outlet1]\ndevice=ac\nchannel=power\n[x]\noutlet=1\n" );
         if( call == 0 )
+        {
             REQUIRE( app.m_shutdown );
+        }
         else if( call == 1 )
+        {
             REQUIRE( app.loadConfigImpl( app.config ) < 0 );
+        }
         else
         {
             REQUIRE( app.loadConfigImpl( app.config ) == 0 );
             if( call == 2 )
+            {
                 REQUIRE( app.appStartup() < 0 );
+            }
             else
+            {
                 REQUIRE( app.appShutdown() == 0 );
+            }
         }
     }
 }
@@ -274,8 +290,12 @@ TEST_CASE( "virtual PDU dispatches correct ordered INDI targets", "[virtualPDU]"
     REQUIRE( std::chrono::steady_clock::now() - started >= std::chrono::milliseconds( 3 ) );
     std::vector<pcf::IndiProperty> commands;
     for( auto &message : app.messages() )
+    {
         if( message.getType() == pcf::IndiMessage::NewProperty )
+        {
             commands.push_back( message.getProperty() );
+        }
+    }
     REQUIRE( commands.size() == 2 );
     REQUIRE( commands[0].getDevice() == "ac" );
     REQUIRE( commands[1].getDevice() == "usb" );
@@ -294,8 +314,12 @@ TEST_CASE( "virtual PDU dispatches correct ordered INDI targets", "[virtualPDU]"
     REQUIRE( app.newCallBack_channels( property( "test-pdu", "combined", "state", "off" ) ) == 0 );
     commands.clear();
     for( auto &message : app.messages() )
+    {
         if( message.getType() == pcf::IndiMessage::NewProperty )
+        {
             commands.push_back( message.getProperty() );
+        }
+    }
     REQUIRE( commands.size() == 2 );
     REQUIRE( commands[0].getDevice() == "usb" );
     REQUIRE( commands[1].getDevice() == "ac" );
@@ -459,7 +483,11 @@ TEST_CASE( "virtual PDU telemetry tracks observations independently of commands"
     app.m_failUpdate           = true;
     REQUIRE( app.appLogic() < 0 );
     app.m_failUpdate = false;
-    contended( app.m_indiMutex, [&] { REQUIRE( app.appLogic() == 0 ); } );
+    contended( app.m_indiMutex,
+               [&]
+               {
+                   REQUIRE( app.appLogic() == 0 );
+               } );
     REQUIRE( app.appShutdown() == 0 );
 }
 /// \cond DOXYGEN_SUPPRESS_TEST_HARNESS
@@ -538,7 +566,9 @@ TEST_CASE( "Virtual PDU properties drive the real MagAOXApp power callback", "[v
             REQUIRE( app.setCallBack_source( property( "ac", "power", "state", value ) ) == 0 );
             REQUIRE( app.setCallBack_source( property( "usb", "power", "state", value ) ) == 0 );
             if( std::string( value ) == "On" || std::string( value ) == "Off" )
+            {
                 REQUIRE( app.newCallBack_channels( property( "test-pdu", "combined", "target", value ) ) == 0 );
+            }
             REQUIRE( app.updateINDI() == 0 );
             snapshots.push_back( app.m_channels["combined"].m_indiP_prop );
         }

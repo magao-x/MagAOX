@@ -193,40 +193,58 @@ inline int virtualPDU::loadConfigImpl( mx::app::appConfigurator &config )
     for( const auto &section : sections )
     {
         if( !section.starts_with( "outlet" ) )
+        {
             continue;
+        }
         size_t number = 0;
         auto   suffix = section.substr( 6 );
         auto   parsed = std::from_chars( suffix.data(), suffix.data() + suffix.size(), number );
         if( parsed.ec != std::errc() || parsed.ptr != suffix.data() + suffix.size() || number == 0 ||
             section != "outlet" + std::to_string( number ) )
+        {
             return configError( "Invalid mapping section [" + section +
                                 "]; expected [outletN] with a positive integer N and no leading zeros" );
+        }
         endpoint mapping;
         config.configUnused( mapping.m_device, section, "device" );
         config.configUnused( mapping.m_channel, section, "channel" );
         if( mapping.m_device.empty() )
+        {
             return configError( "[" + section + "] device is required and must not be empty" );
+        }
         if( mapping.m_channel.empty() )
+        {
             return configError( "[" + section + "] channel is required and must not be empty" );
+        }
         if( mapping.m_device == configName() )
+        {
             return configError( "[" + section + "] device='" + mapping.m_device + "' refers to this virtual PDU" );
+        }
         if( mapping.m_channel == "fsm" )
+        {
             return configError( "[" + section + "] channel='fsm' is reserved for source readiness" );
+        }
         auto [identity, inserted] =
             identities.emplace( std::make_pair( mapping.m_device, mapping.m_channel ), section );
         if( !inserted )
+        {
             return configError( "[" + section + "] duplicates [" + identity->second + "] mapping to '" +
                                 mapping.m_device + "." + mapping.m_channel + "'; endpoint aliases are not supported" );
+        }
         mappings.emplace( number, mapping );
     }
     if( mappings.empty() )
+    {
         return configError(
             "No [outletN] mappings configured; at least [outlet1] with device and channel is required" );
+    }
     if( mappings.rbegin()->first != mappings.size() )
     {
         size_t missing = 1;
         while( mappings.count( missing ) )
+        {
             ++missing;
+        }
         return configError(
             std::format( "[outlet{}] is missing; outlet sections must be consecutive starting at 1", missing ) );
     }
@@ -241,7 +259,9 @@ inline int virtualPDU::loadConfigImpl( mx::app::appConfigurator &config )
         for( const auto &keyword : { "outlet", "outlets", "onOrder", "offOrder", "onDelays", "offDelays" } )
         {
             if( !config.isSetUnused( mx::app::iniFile::makeKey( section, keyword ) ) )
+            {
                 continue;
+            }
             std::vector<std::string> values;
             config.configUnused( values, section, keyword );
             for( auto value : values )
@@ -249,33 +269,43 @@ inline int virtualPDU::loadConfigImpl( mx::app::appConfigurator &config )
                 size_t first = value.find_first_not_of( " \t" );
                 size_t last  = value.find_last_not_of( " \t" );
                 if( first == std::string::npos )
+                {
                     return configError( std::format(
                         "[{}] {} contains an empty value; expected a nonnegative integer", section, keyword ) );
+                }
                 value = value.substr( first, last - first + 1 );
                 size_t number;
                 auto   result = std::from_chars( value.data(), value.data() + value.size(), number );
                 if( result.ec != std::errc() || result.ptr != value.data() + value.size() )
+                {
                     return configError( std::format(
                         "[{}] {} value '{}' is not a nonnegative decimal integer", section, keyword, value ) );
+                }
                 std::string_view name = keyword;
                 if( ( name == "outlet" || name == "outlets" ) && ( number == 0 || number > m_endpoints.size() ) )
+                {
                     return configError( std::format( "[{}] {} outlet {} is outside the configured range 1..{}",
                                                      section,
                                                      keyword,
                                                      number,
                                                      m_endpoints.size() ) );
+                }
                 if( ( name == "onDelays" || name == "offDelays" ) && number > std::numeric_limits<unsigned>::max() )
+                {
                     return configError( std::format( "[{}] {} delay {} exceeds the maximum {} milliseconds",
                                                      section,
                                                      keyword,
                                                      number,
                                                      std::numeric_limits<unsigned>::max() ) );
+                }
             }
         }
     }
     setNumberOfOutlets( m_endpoints.size() );
     if( outletControllerT::loadConfig( config ) < 0 )
+    {
         return -1;
+    }
     std::map<size_t, std::string> assigned;
     const std::set<std::string>   reserved{ "outlet",
                                           "stateTimes",
@@ -291,15 +321,19 @@ inline int virtualPDU::loadConfigImpl( mx::app::appConfigurator &config )
     for( const auto &[name, channel] : m_channels )
     {
         if( reserved.count( name ) )
+        {
             return configError( "Channel [" + name + "] conflicts with a reserved INDI property name" );
+        }
         for( auto number : channel.m_outlets )
         {
             auto [owner, inserted] = assigned.emplace( number, name );
             if( !inserted )
             {
                 if( owner->second == name )
+                {
                     return configError( std::format(
                         "Channel [{}] has repeated outlet {}; each outlet may appear only once", name, number + 1 ) );
+                }
                 return configError( std::format( "Virtual outlet {} is shared by channels [{}] and [{}]; "
                                                  "sharing outlets is not supported",
                                                  number + 1,
@@ -311,15 +345,19 @@ inline int virtualPDU::loadConfigImpl( mx::app::appConfigurator &config )
         {
             const auto &order = std::string_view( keyword ) == "onOrder" ? channel.m_onOrder : channel.m_offOrder;
             if( order.empty() )
+            {
                 continue;
+            }
             std::set<size_t> indices( order.begin(), order.end() );
             if( indices.size() != channel.m_outlets.size() || *indices.rbegin() >= channel.m_outlets.size() )
+            {
                 return configError( std::format( "Channel [{}] {} must be a permutation of the {} outlet positions "
                                                  "0..{} (no repeated or out-of-range indices)",
                                                  name,
                                                  keyword,
                                                  channel.m_outlets.size(),
                                                  channel.m_outlets.size() - 1 ) );
+            }
         }
     }
     TELEMETER_LOAD_CONFIG( config );
@@ -329,7 +367,9 @@ inline int virtualPDU::loadConfigImpl( mx::app::appConfigurator &config )
 inline int virtualPDU::appStartup()
 {
     if( outletControllerT::appStartup() < 0 )
+    {
         return -1;
+    }
     // Allocate every subscription before registering pointers to its backing storage.
     std::map<std::string, size_t> sources;
     for( auto &mapping : m_endpoints )
@@ -348,13 +388,17 @@ inline int virtualPDU::appStartup()
     {
         std::string deviceName = device.m_property.getDevice();
         if( registerIndiPropertySet( device.m_property, deviceName, "fsm", st_setCallBack_source ) < 0 )
+        {
             return -1;
+        }
     }
     for( auto &mapping : m_endpoints )
     {
         if( registerIndiPropertySet( mapping.m_property, mapping.m_device, mapping.m_channel, st_setCallBack_source ) <
             0 )
+        {
             return -1;
+        }
     }
     TELEMETER_APP_STARTUP;
     state( stateCodes::READY );
@@ -376,12 +420,18 @@ inline int virtualPDU::appLogic()
 {
     std::unique_lock<std::mutex> lock( m_indiMutex, std::try_to_lock );
     if( !lock.owns_lock() )
+    {
         return 0;
+    }
     if( updateOutletStates() < 0 )
+    {
         return -1;
+    }
     outletControllerT::updateINDI();
     if( recordOutletStates() < 0 )
+    {
         return -1;
+    }
     TELEMETER_APP_LOGIC;
     return 0;
 }
@@ -395,7 +445,9 @@ inline int virtualPDU::appShutdown()
 inline int virtualPDU::updateOutletState( int outletNum )
 {
     if( outletNum < 0 || static_cast<size_t>( outletNum ) >= m_endpoints.size() )
+    {
         return -1;
+    }
     const auto &mapping = m_endpoints[outletNum];
     setOutletState( outletNum, available( outletNum ) ? mapping.m_state : OUTLET_STATE_UNKNOWN );
     return 0;
@@ -406,7 +458,9 @@ inline int virtualPDU::sendOutlet( int outletNum, const std::string &target )
     std::lock_guard<std::mutex> lock( m_indiMutex );
     if( state() != stateCodes::READY || outletNum < 0 || static_cast<size_t>( outletNum ) >= m_endpoints.size() ||
         !available( outletNum ) )
+    {
         return log<software_error, -1>( "Virtual outlet source unavailable" );
+    }
     const auto       &mapping = m_endpoints[outletNum];
     pcf::IndiProperty command( pcf::IndiProperty::Text, mapping.m_device, mapping.m_channel );
     command.add( pcf::IndiElement( "target", target ) );
@@ -425,18 +479,24 @@ inline int virtualPDU::turnOutletOff( int outletNum )
 
 inline int virtualPDU::newCallBack_channels( const pcf::IndiProperty &ipRecv )
 {
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_indiMutex );
         if( state() != stateCodes::READY )
+        {
             return -1;
+        }
         auto channel = m_channels.find( ipRecv.getName() );
         if( ipRecv.getDevice() != configName() || ipRecv.getType() != pcf::IndiProperty::Text ||
             channel == m_channels.end() )
+        {
             return -1;
+        }
         for( auto index : channel->second.m_outlets )
         {
             if( !available( index ) )
+            {
                 return log<software_error, -1>( "Virtual channel source unavailable" );
+            }
         }
     }
     return outletControllerT::newCallBack_channels( ipRecv );
@@ -456,17 +516,25 @@ inline int virtualPDU::setCallBack_source( const pcf::IndiProperty &ipRecv )
         {
             auto &device = m_sources[index];
             if( device.m_property.getDevice() != ipRecv.getDevice() )
+            {
                 continue;
+            }
             bool malformed = ipRecv.getType() != pcf::IndiProperty::Text;
             if( !malformed && !ipRecv.find( "state" ) )
+            {
                 return -1;
+            }
             device.m_ready = !malformed && ipRecv["state"].get<std::string>() == "READY";
             for( size_t n = 0; n < m_endpoints.size(); ++n )
             {
                 if( m_endpoints[n].m_source != index )
+                {
                     continue;
+                }
                 if( !device.m_ready )
+                {
                     m_endpoints[n].m_haveState = false;
+                }
                 updateOutletState( n );
             }
             outletControllerT::updateINDI();
@@ -479,20 +547,30 @@ inline int virtualPDU::setCallBack_source( const pcf::IndiProperty &ipRecv )
     {
         auto &mapping = m_endpoints[index];
         if( mapping.m_device != ipRecv.getDevice() || mapping.m_channel != ipRecv.getName() )
+        {
             continue;
+        }
         bool text = ipRecv.getType() == pcf::IndiProperty::Text;
         if( text && !ipRecv.find( "state" ) )
+        {
             return 0;
+        }
         std::string value = text ? ipRecv["state"].get<std::string>() : "";
         mapping.m_state   = OUTLET_STATE_UNKNOWN;
         if( ipRecv.getType() == pcf::IndiProperty::Text )
         {
             if( value == "On" )
+            {
                 mapping.m_state = OUTLET_STATE_ON;
+            }
             else if( value == "Off" )
+            {
                 mapping.m_state = OUTLET_STATE_OFF;
+            }
             else if( value == "Int" )
+            {
                 mapping.m_state = OUTLET_STATE_INTERMEDIATE;
+            }
         }
         mapping.m_haveState = ipRecv.getType() == pcf::IndiProperty::Text &&
                               ( mapping.m_state != OUTLET_STATE_UNKNOWN || value == "Unk" );
