@@ -210,6 +210,7 @@ static Snoopee *findSnoopDevice (DvrInfo *dp, char *dev, char *name);
 static void addClDevice (ClInfo *cp, int isblob, char *dev, char *name);
 static void rmClDevice (ClInfo *cp, int isblob, char *dev, char *name);
 static int findClDevice (ClInfo *cp, int isblob, char *dev, char *name);
+static int findClAllDevices (ClInfo *cp, int isblob);
 static void logMsg (const char *label, DvrInfo *dp, ClInfo *cp, Msg *mp);
 static void *driverStdoutReaderThread (void *);
 static void *driverStderrReaderThread (void *);
@@ -1433,6 +1434,8 @@ restartDvr (DvrInfo *dp)
  *   they get sent back out everywhere and go around forever. keep its name, else
  *   a request for one property becomes a device-wide request, to which drivers
  *   reply with all their properties and by renewing all their snoops.
+ * N.B. other messages without a device are not sent to remote drivers, else the
+ *   remote server takes the chained connection as wanting every device.
  */
 static void
 q2Drivers (char *dev, char *name, Msg *mp, char *roottag)
@@ -1451,7 +1454,7 @@ q2Drivers (char *dev, char *name, Msg *mp, char *roottag)
 
 	    if (pthread_rwlock_tryrdlock (&dp->restart_lock) == 0) {
 
-		if (!dev[0] || !dp->dev[0] || !strcmp (dev, dp->dev)) {
+		if ((!dev[0] && (isggp || dp->pid != REMOTEDVR)) || !dp->dev[0] || !strcmp (dev, dp->dev)) {
 
 		    Msg *remote_mp = NULL;
 		    Msg *sendmp;
@@ -1657,6 +1660,12 @@ q2Clients (ClInfo *notme, int isblob, char *dev, char *name, Msg *mp,
 	    if (!cp->active || cp == notme)
 		continue;
 	    if (findClDevice (cp, isblob, dev, name) < 0)
+		continue;
+	    /* a message without a device goes only to clients that asked for every
+	     * device. chained servers never do, so it stays on this server instead
+	     * of circulating among servers forever, once per chained connection.
+	     */
+	    if (!dev[0] && !findClAllDevices (cp, isblob))
 		continue;
             if (srcIsRemote && cp->ischained && roottag && !strncmp(roottag, "def", 3))
                 continue;
@@ -1906,6 +1915,29 @@ findClDevice (ClInfo *cp, int isblob, char *dev, char *name)
 	/* unlock and return */
 	pthread_rwlock_unlock (&cp->props_rwlock);
 	return (i);
+}
+
+/* return 1 if props[] (or blobs[], if isblob) shows cp is interested in every
+ * device, i.e. it sent something without a device, else 0
+ */
+static int
+findClAllDevices (ClInfo *cp, int isblob)
+{
+	Property *pa;
+	int nprops, i;
+
+	/* protect while scanning */
+	pthread_rwlock_rdlock (&cp->props_rwlock);
+
+	pa = isblob ? cp->blobs : cp->props;
+	nprops = isblob ? cp->nblobs : cp->nprops;
+	for (i = 0; i < nprops; i++)
+	    if (!pa[i].dev[0])
+		break;
+
+	/* unlock and return */
+	pthread_rwlock_unlock (&cp->props_rwlock);
+	return (i < nprops);
 }
 
 /* add the given device and name to the list of props[] (or blobs[], if isblob)
