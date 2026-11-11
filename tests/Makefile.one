@@ -40,7 +40,14 @@ EDT_TESTS = ocam2KCtrl_test ocam2KCtrl_lifecycle_test ocam2KCtrl_temperature_tes
 
 # add extra libraries for special cases
 
-ifeq ($(notdir $(TESTNAME)),accelSim_test)
+ifeq ($(notdir $(TESTNAME)),AD7689_test)
+    CPPFLAGS += -I$(PATHNAME)stubs
+    CXXFLAGS += -fno-fast-math
+    $(OBJNAME): $(PATHNAME)../dependencies/AD7689.h $(PATHNAME)../dependencies/AD7689.cpp $(PATHNAME)stubs/gpiod.h $(PATHNAME)stubs/linux/spi/spidev.h
+else ifeq ($(notdir $(TESTNAME)),ad7689Ctrl_test)
+    CXXFLAGS += -fno-fast-math
+    $(OBJNAME): $(PATHNAME)../ad7689Ctrl.hpp $(PATHNAME)../dependencies/AD7689.h
+else ifeq ($(notdir $(TESTNAME)),accelSim_test)
     # Preserve nonfinite validation and near-unit-root arithmetic in the numerical model.
     CXXFLAGS += -fno-fast-math
     $(OBJNAME): $(PATHNAME)../accelSim.hpp $(PATHNAME)../accelSimModel.hpp $(PATHNAME)../accelSimDisturbance.hpp $(PATHNAME)../accelSimDM.hpp $(PATHNAME)../accelSimDMStream.hpp

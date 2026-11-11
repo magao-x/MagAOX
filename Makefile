@@ -106,7 +106,8 @@ pythonapps_icc = \
 
 # Apps only needed on accelerometers ACC*
 apps_acc = \
-	mcp3008Ctrl
+	mcp3008Ctrl \
+	ad7689Ctrl
 
 # Apps needed on TIC
 apps_tic = \
@@ -187,6 +188,16 @@ all_buildable_apps = \
 ifneq ($(wildcard /opt/EDTpdv/edtinc.h),)
 all_buildable_apps += \
 	cred2Ctrl
+endif
+
+# The manual-CNV ADC backend needs Linux spidev and libgpiod v2; portable
+# protocol tests remain buildable without those production dependencies.
+ifeq ($(shell uname -s),Linux)
+ifeq ($(shell pkg-config --atleast-version=2.0 libgpiod 2>/dev/null && echo yes),yes)
+ifneq ($(wildcard /usr/include/linux/spi/spidev.h),)
+all_buildable_apps += ad7689Ctrl
+endif
+endif
 endif
 
 libs_to_build = libtelnet

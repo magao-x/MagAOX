@@ -72,6 +72,11 @@ $ less tests/results/latest/run.log
  * \ingroup unit_test
  */
 
+/** \defgroup ad7689Ctrl_unit_test AD7689 Controller Unit Tests
+ * \brief Offline manual-CNV/SPI protocol, full-width frames, controls, timing, and recovery tests.
+ * \ingroup application_unit_test
+ */
+
 /** \page page_test_coverage Test Coverage Report
  * \ingroup testing
 
