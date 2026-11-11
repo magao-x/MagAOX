@@ -1,0 +1,306 @@
+/** \file dmTiming.hpp
+ * \brief Shared identifiers and aggregate records for DM controller timing.
+ */
+#ifndef common_dmTiming_hpp
+#define common_dmTiming_hpp
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+
+#include "timingStats.hpp"
+
+namespace MagAOX
+{
+namespace dmTiming
+{
+
+/// Stable metric identifiers; all duration statistics use seconds.
+enum class Metric : uint8_t
+{
+    receiptInterval,
+    sendInterval,
+    receiptSend,
+    dispatch,
+    actuator,
+    sdk,
+    saturation,
+    delta,
+    post,
+    throughDelta,
+    callback,
+    receiptCallback,
+    publicationInterval,
+    sdkDispatch,
+    readerRelease,
+    staging,
+    publication,
+    sdkWait,
+    sdkTail,          ///< Native return through worker readiness, excluding later idle wait.
+    sdkService,       ///< Native entry through worker readiness; independent of post-job retirement.
+    conversion,       ///< Pipeline actuator conversion before coherent-source validation.
+    sourceCheck,      ///< Pipeline coherent-source validation before shared-shape publication.
+    shapePublication, ///< Pipeline private-to-shared shape copy and publication.
+    receiptSdk,       ///< Real receipt through entry of a successfully submitted native SDK call.
+    preparation,      ///< Real receipt through prepared SDK request handoff; excludes worker dispatch and service.
+    deliveryLower,    ///< Qualified lower bound for combined publication through real controller receipt.
+    deliveryUpper,    ///< Qualified upper bound, including the bounded producer-clock capture bracket.
+    deliveryBracket,  ///< Uncertainty width of the paired receipt/producer-clock sample.
+    count
+};
+
+/// Explicit clock contract for the combined stream's producer timestamps.
+enum class PublicationClock : uint8_t
+{
+    none     = 0,
+    realtime = 1,
+    tai      = 2
+};
+
+/// Disjoint consumer-side delivery qualification outcomes; attempted equals the sum of the other fields.
+struct DeliveryCounters
+{
+    uint64_t attempted{ 0 };          ///< Consumed events considered while producer-clock measurement is enabled.
+    uint64_t qualified{ 0 };          ///< Genuine, progressing observations with bounded and continuous clock pairs.
+    uint64_t unavailable{ 0 };        ///< Synthetic receipt or absent input/clock endpoint.
+    uint64_t invalid{ 0 };            ///< Malformed or regressing raw clock bracket.
+    uint64_t wideBracket{ 0 };        ///< Capture uncertainty exceeds the configured limit.
+    uint64_t clockDiscontinuity{ 0 }; ///< Adjacent clock-offset brackets disagree beyond the continuity tolerance.
+    uint64_t futurePublication{ 0 };  ///< Publication postdates or overlaps the actual-receipt uncertainty bracket.
+    uint64_t identityRejected{ 0 };   ///< Reused, changed, gapped or too-old observed metadata identity.
+};
+
+/// Selected producer-clock contract and process-lifetime delivery coverage, independent of legacy validity.
+struct Delivery
+{
+    bool             enabled{ false }; ///< Explicit producer clock and a positive bounded capture limit are set.
+    PublicationClock clock{ PublicationClock::none }; ///< Declared source clock; metadata does not identify its clock.
+    int64_t          bracketLimitNs{ 0 }; ///< Maximum qualified receipt-clock bracket width, in nanoseconds.
+    DeliveryCounters total;               ///< Lifetime disjoint outcomes since configuration.
+    DeliveryCounters delta;               ///< New outcomes since the preceding ordinary-thread update.
+};
+
+/// Local monotonic endpoints, independent of external image timestamps.
+enum class Marker : uint8_t
+{
+    receipt,
+    entry,
+    actuatorStart,
+    actuatorEnd,
+    sdkStart,
+    sdkEnd,
+    satStart,
+    satEnd,
+    deltaStart,
+    deltaEnd,
+    postStart,
+    postEnd,
+    finish,
+    dispatch,
+    readRelease,
+    stagingStart,
+    stagingEnd,
+    publicationStart,
+    publicationEnd,
+    waitStart,
+    waitEnd,
+    sdkReady,       ///< SDK owner reached request selection/wait after finishing the preceding result handoff.
+    conversionEnd,  ///< Pipeline numeric conversion finished; source validation has not begun.
+    sourceCheckEnd, ///< Pipeline source validation finished; shared-shape publication has not begun.
+    count
+};
+
+/// Outcome of the callback; a later failure does not erase an earlier submission.
+enum class Outcome : uint8_t
+{
+    unknown,
+    success,
+    failed,
+    partial,
+    noSend,
+    rejected
+};
+
+/// Availability of the compatible three-population timing summary.
+enum class Availability : uint8_t
+{
+    disabled,
+    warmingUp,
+    valid,
+    stale,
+    unavailable
+};
+
+/// Compatible name for the common clock-neutral timing population.
+using Stats = MagAOX::timing::Stats;
+
+/// Ordered publication-interval populations; every duration and threshold is in seconds.
+/** Excursions are strictly above/below the retained interval median plus/minus
+ * threshold. Conditional next-interval counts are the opportunities for each
+ * directed opposite-excursion sum population, not proof of causal catch-up.
+ */
+struct IntervalPairs
+{
+    bool enabled{ false }; ///< Consumer-side analysis is configured with a positive threshold.
+
+    double median{ 0 };    ///< Median qualified publication interval; zero without intervals.
+    double threshold{ 0 }; ///< Positive excursion distance from the median; zero when disabled.
+
+    uint64_t intervals{ 0 }; ///< Qualified intervals in the retained population.
+    uint64_t pairs{ 0 };     ///< Adjacent qualified interval pairs, including ordinary intervals.
+
+    Stats afterLate;    ///< Next interval when the first interval exceeds median plus threshold.
+    Stats afterEarly;   ///< Next interval when the first interval is below median minus threshold.
+    Stats lateEarlySum; ///< Two-interval sum for a late interval immediately followed by an early interval.
+    Stats earlyLateSum; ///< Two-interval sum for an early interval immediately followed by a late interval.
+};
+
+/// Quality counts; counter gaps count observations, not an inferred number of missing images.
+struct Counters
+{
+    uint64_t events{ 0 };      ///< Timing events received by the consumer.
+    uint64_t receipts{ 0 };    ///< Events containing a successful semaphore wait return.
+    uint64_t submitted{ 0 };   ///< Events with a qualified successful submission endpoint.
+    uint64_t failed{ 0 };      ///< Failed callbacks, possibly following a successful submission.
+    uint64_t partial{ 0 };     ///< Commands with only a subset of their required writes completed.
+    uint64_t noSend{ 0 };      ///< Callbacks intentionally making no submission.
+    uint64_t synthetic{ 0 };   ///< Initial-image callbacks lacking a semaphore receipt.
+    uint64_t rejected{ 0 };    ///< Receipts rejected before callback processing.
+    uint64_t duplicates{ 0 };  ///< Repeated observed input counters.
+    uint64_t counterGaps{ 0 }; ///< Nonconsecutive observed input-counter changes.
+    uint64_t invalid{ 0 };     ///< Failed or backward local timestamp captures.
+    uint64_t dropped{ 0 };     ///< Timing events dropped because the handoff queue was full.
+};
+
+/// Fixed-size command-thread handoff; no external timestamp implies verified frame identity.
+struct Event
+{
+    uint64_t sequence{ 0 }; ///< Producer sequence, including events subsequently dropped.
+    uint64_t session{ 0 };  ///< Monitor attachment/reset epoch.
+    uint64_t counter{ 0 };  ///< Input counter observed by the callback, when available.
+
+    int64_t publicationNs{ -1 }; ///< External writetime in ns; best-effort metadata, not atomic frame identity.
+
+    PublicationClock publicationClock{ PublicationClock::none }; ///< Explicit source-clock selection at capture.
+    int64_t          receiptExternalNs{ -1 };  ///< Selected producer clock sampled between receipt and receiptAfterNs.
+    int64_t          receiptAfterNs{ -1 };     ///< Monotonic endpoint after the selected-clock sample.
+    bool             identityChanged{ false }; ///< Producer replaced already attached counter/publication metadata.
+    bool             deliveryQualified{ false }; ///< Consumer qualified the paired delivery bounds exactly once.
+    int64_t          deliveryLowerNs{ -1 };      ///< Consumer-derived conservative lower latency bound.
+    int64_t          deliveryUpperNs{ -1 };      ///< Consumer-derived conservative upper latency bound.
+    int64_t          deliveryBracketNs{ -1 };    ///< Consumer-derived capture uncertainty width.
+
+    bool    counterValid{ false };       ///< Whether the input-counter observation is available.
+    bool    synthetic{ false };          ///< No successful semaphore wait preceded this event.
+    bool    submitted{ false };          ///< SDK/transport success was explicitly qualified.
+    Outcome outcome{ Outcome::unknown }; ///< Callback result independent of submission success.
+    bool    stagesEnabled{ true };       ///< Capture mode carried with detached pipeline events.
+
+    std::array<int64_t, static_cast<size_t>( Marker::count )> markers{};  ///< Monotonic nanoseconds.
+    uint32_t                                                  valid{ 0 }; ///< Bit mask of available endpoints.
+    uint32_t invalidMarkers{ 0 };                                         ///< Invalid timestamp captures in this event.
+};
+
+/// Consumer-owned coherent snapshot for telemetry and ordinary app logic.
+struct Summary
+{
+    uint64_t session{ 0 };   ///< Current monitor epoch.
+    uint64_t sequence{ 0 };  ///< Consumer summary sequence.
+    int64_t  nowNs{ 0 };     ///< Monotonic evaluation time.
+    int64_t  newestNs{ -1 }; ///< Newest retained event endpoint, or -1 when unavailable.
+
+    double windowSec{ 0 }; ///< Configured trailing elapsed-time window in seconds.
+    double span{ 0 };      ///< Actual retained endpoint span in seconds.
+    double age{ -1 };      ///< Age of newest retained event in seconds; -1 when unavailable.
+    size_t capacity{ 0 };  ///< Configured event/window cap.
+    size_t queued{ 0 };    ///< Queue occupancy after the bounded drain.
+
+    bool         enabled{ false };                ///< Collection is configured and preallocated.
+    bool         fgValid{ false };                ///< All three populations required by telem_fgtimings are valid.
+    Availability state{ Availability::disabled }; ///< Explicit compatible-summary availability.
+    bool         stagesEnabled{ false };          ///< Detailed capture and reporting were explicitly enabled.
+
+    std::array<Stats, static_cast<size_t>( Metric::count )> metrics{}; ///< Independent metric populations.
+
+    IntervalPairs intervalPairs; ///< Optional ordered publication analysis, independent of receipt cadence.
+
+    Delivery delivery; ///< Optional producer-clock delivery contract and independent qualification coverage.
+
+    Counters total; ///< Cumulative quality counts since configure.
+    Counters delta; ///< Changes since the preceding consumer summary.
+};
+
+/// Convert a stable metric identifier to its array index.
+inline constexpr size_t metricIndex( Metric metric /**< [in] Metric identifier. */ );
+
+/// Convert an endpoint identifier to its array index.
+inline constexpr size_t markerIndex( Marker marker /**< [in] Endpoint identifier. */ );
+
+/// Return the stable diagnostic name of an explicit producer-clock selection.
+inline const char *publicationClockName( PublicationClock clock /**< [in] Declared producer clock. */ );
+
+/// Return the stable telemetry name for one metric.
+inline const char *metricName( Metric metric /**< [in] Metric identifier. */ );
+
+inline constexpr size_t metricIndex( Metric metric )
+{
+    return static_cast<size_t>( metric );
+}
+
+inline constexpr size_t markerIndex( Marker marker )
+{
+    return static_cast<size_t>( marker );
+}
+
+inline const char *publicationClockName( PublicationClock clock )
+{
+    switch( clock )
+    {
+    case PublicationClock::none:
+        return "none";
+    case PublicationClock::realtime:
+        return "CLOCK_REALTIME";
+    case PublicationClock::tai:
+        return "CLOCK_TAI";
+    }
+
+    return "invalid";
+}
+
+inline const char *metricName( Metric metric )
+{
+    constexpr const char *names[] = { "receiptInterval",
+                                      "sendInterval",
+                                      "receiptSend",
+                                      "dispatch",
+                                      "actuator",
+                                      "sdk",
+                                      "saturation",
+                                      "delta",
+                                      "post",
+                                      "throughDelta",
+                                      "callback",
+                                      "receiptCallback",
+                                      "publicationInterval",
+                                      "sdkDispatch",
+                                      "readerRelease",
+                                      "staging",
+                                      "publication",
+                                      "sdkWait",
+                                      "sdkTail",
+                                      "sdkService",
+                                      "conversion",
+                                      "sourceCheck",
+                                      "shapePublication",
+                                      "receiptSdk",
+                                      "preparation",
+                                      "deliveryLower",
+                                      "deliveryUpper",
+                                      "deliveryBracket" };
+
+    return metricIndex( metric ) < metricIndex( Metric::count ) ? names[metricIndex( metric )] : "unknown";
+}
+
+} // namespace dmTiming
+} // namespace MagAOX
+#endif

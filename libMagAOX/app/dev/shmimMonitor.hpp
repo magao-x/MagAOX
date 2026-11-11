@@ -1,8 +1,6 @@
 /** \file shmimMonitor.hpp
  * \brief The MagAO-X generic shared memory monitor.
  *
- * \author Jared R. Males (jaredmales@gmail.com)
- *
  * \ingroup app_files
  */
 
@@ -21,6 +19,7 @@ namespace app
 namespace dev
 {
 
+/// Connection state of a shared-memory monitor.
 enum class shmimMonitorState
 {
     init,
@@ -28,17 +27,24 @@ enum class shmimMonitorState
     connected
 };
 
+/// Optional observational events emitted on the monitor thread.
+enum class shmimMonitorEvent
+{
+    connected,   ///< A new stream attachment is ready for callbacks.
+    receipt,     ///< A semaphore wait returned successfully, before metadata checks.
+    initial,     ///< Existing pixels will be processed without a semaphore receipt.
+    discarded,   ///< A successful receipt was rejected before processing.
+    disconnected ///< An established attachment is about to close, after all callbacks have finished.
+};
+
+/// Default configuration and INDI names for a single monitor.
 struct shmimT
 {
-    static std::string configSection()
-    {
-        return "shmimMonitor";
-    };
+    /// Get the configuration section for this monitor.
+    static std::string configSection();
 
-    static std::string indiPrefix()
-    {
-        return "sm";
-    };
+    /// Get the INDI property prefix for this monitor.
+    static std::string indiPrefix();
 };
 
 /** MagAO-X generic shared memory monitor
@@ -74,6 +80,14 @@ struct shmimT
  *                                 )
  *   \endcode
  *   Each of the above functions should return 0 on success, and -1 on an error.
+ *
+ * An optional `void shmimMonitorTiming(const specificT &, shmimMonitorEvent)`
+ * observes attachment, successful wait return, initial reads, discarded
+ * receipts and disconnection on the monitor thread. Disconnection is emitted
+ * before an established attachment closes, including allocation failure. The
+ * hook must not throw, block, alter monitor
+ * decisions or perform telemetry serialization. Owners without this interface
+ * use a no-op dispatch and incur no timing-clock reads.
  *
  * - Calls to this class's `setupConfig`, `loadConfig`, `appStartup`, `appLogic`, `updateINDI` and `appShutdown`
  *   functions must be placed in the derived class's functions of the same name. For convenience the
@@ -112,7 +126,7 @@ class shmimMonitor
 {
 
   protected:
-    /** \name Configurable Parameters
+    /** \name Configurable Parameters - Data
      * @{
      */
     std::string m_shmimName{ "" }; ///< The name of the shared memory image, is used in `/tmp/<shmimName>.im.shm`.
@@ -127,8 +141,10 @@ class shmimMonitor
     bool m_getExistingFirst{ false }; ///< If set to true by derivedT, any existing image will be grabbed and sent to
                                       ///< processImage before waiting on the semaphore.
 
+    /// Application state in which stream callbacks are enabled.
     stateCodes::stateCodeT m_targetState{ stateCodes::OPERATING };
 
+    /// Current stream attachment state, published by the monitor thread.
     shmimMonitorState m_smState{ shmimMonitorState::init };
 
     int m_semaphoreNumber{ 5 }; ///< The image structure semaphore index.
@@ -140,22 +156,58 @@ class shmimMonitor
     uint8_t m_dataType{ 0 }; ///< The ImageStreamIO type code.
     size_t  m_typeSize{ 0 }; ///< The size of the type, in bytes.  Result of sizeof.
 
-    IMAGE m_imageStream; ///< The ImageStreamIO shared memory buffer.
+    IMAGE m_imageStream{}; ///< The ImageStreamIO shared memory buffer; detached until opened.
+
+    /// Slot (`cnt1`) of the frame most recently passed to `processImage`; 0 for single-frame streams.
+    uint64_t m_currImage{ 0 };
 
     ino_t m_inode{ 0 }; ///< The inode of the image stream file
 
   public:
+    /** \name Configurable Parameters
+     * @{ */
+
+    /// Get the configured shared-memory stream name.
     const std::string &shmimName() const;
 
+    /// Get the width of the attached stream.
     const uint32_t &width() const;
 
+    /// Get the height of the attached stream.
     const uint32_t &height() const;
 
+    /// Get the circular-buffer depth of the attached stream.
     const uint32_t &depth() const;
 
+    /// Get the attached stream's ImageStreamIO type code.
     const uint8_t &dataType() const;
 
+    /// Get the attached stream's element size in bytes.
     const size_t &typeSize() const;
+
+    /// @}
+
+    /** \name Current Frame
+     * Identify the frame most recently passed to `processImage`, from the monitor thread.
+     * For a circular-buffer stream (`CIRCULAR_BUFFER | ZAXIS_TEMPORAL`), such as one published by frameGrabber,
+     * these use the frame's own per-frame array entries, which stay with its slot when newer frames are published.
+     * Otherwise they use the stream metadata, which describes the most recent publication.
+     * @{
+     */
+
+    /// Get the slot (`cnt1`) of the current frame.
+    uint64_t currImage() const;
+
+    /// Get the acquisition time of the current frame.
+    timespec currAtime() const;
+
+    /// Get the write time of the current frame.
+    timespec currWritetime() const;
+
+    /// Get the frame counter (`cnt0`) of the current frame.
+    uint64_t currCnt0() const;
+
+    /// @}
 
     /// Setup the configuration system
     /**
@@ -223,9 +275,6 @@ class shmimMonitor
      */
     bool m_restart{ false }; ///< Flag indicating tha the shared memory should be reinitialized.
 
-    // static shmimMonitor *m_selfMonitor; ///< Static pointer to this (set in constructor).  Used for getting out of
-    // the static SIGSEGV handler.
-
     /** \name shmimmonitor Thread
      * This thread actually monitors the shared memory buffer
      * @{
@@ -253,10 +302,10 @@ class shmimMonitor
      * \returns 0 on success
      * \returns \<0 on error
      */
-    int create( uint32_t width,             ///< [in] width of the new image
-                uint32_t height,            ///< [in] height of the new image
-                uint32_t depth,             ///< [in] depth of the new image
-                uint8_t  datatype,          ///< [in] CACAO data type of the new image
+    int create( uint32_t width,             /**< [in] Width of the new image. */
+                uint32_t height,            /**< [in] Height of the new image. */
+                uint32_t depth,             /**< [in] Depth of the new image. */
+                uint8_t  datatype,          /**< [in] CACAO data type of the new image. */
                 void    *initData = nullptr /**< [in] [optional] data to initialize the new image with.  Must be of size
                                                                  width*height*depth*sizeof(dataType)  */
     );
@@ -286,15 +335,57 @@ class shmimMonitor
     ///@}
 
   private:
-    derivedT &derived()
-    {
-        return *static_cast<derivedT *>( this );
-    }
+    /// Invoke an optional observation hook without changing monitor decisions.
+    template <class hookT>
+    static auto timingHook( hookT            &owner /**< [in] Concrete monitor owner. */,
+                            shmimMonitorEvent event /**< [in] Monitor-thread event. */,
+                            int               priority /**< [in] Preferred overload selector. */ )
+        -> decltype( owner.shmimMonitorTiming( specificT(), event ), void() );
+
+    /// Do nothing for owners without a timing observation hook.
+    static void timingHook( derivedT         &owner /**< [in] Concrete monitor owner. */,
+                            shmimMonitorEvent event /**< [in] Unobserved event. */,
+                            long              priority /**< [in] Fallback overload selector. */ );
+
+    /// Get the concrete owner of this CRTP monitor.
+    derivedT &derived();
+
+    /// Check whether the current frame's timing comes from the per-frame arrays.
+    bool currFromArrays() const;
 };
 
-// Set self pointer to null so app starts up uninitialized.
-// template <class derivedT, class specificT>
-// shmimMonitor<derivedT, specificT> *shmimMonitor<derivedT, specificT>::m_selfMonitor = nullptr;
+inline std::string shmimT::configSection()
+{
+    return "shmimMonitor";
+}
+
+inline std::string shmimT::indiPrefix()
+{
+    return "sm";
+}
+
+template <class derivedT, class specificT>
+template <class hookT>
+auto shmimMonitor<derivedT, specificT>::timingHook( hookT &owner, shmimMonitorEvent event, int priority )
+    -> decltype( owner.shmimMonitorTiming( specificT(), event ), void() )
+{
+    static_cast<void>( priority );
+    owner.shmimMonitorTiming( specificT(), event );
+}
+
+template <class derivedT, class specificT>
+void shmimMonitor<derivedT, specificT>::timingHook( derivedT &owner, shmimMonitorEvent event, long priority )
+{
+    static_cast<void>( owner );
+    static_cast<void>( event );
+    static_cast<void>( priority );
+}
+
+template <class derivedT, class specificT>
+derivedT &shmimMonitor<derivedT, specificT>::derived()
+{
+    return *static_cast<derivedT *>( this );
+}
 
 template <class derivedT, class specificT>
 const std::string &shmimMonitor<derivedT, specificT>::shmimName() const
@@ -330,6 +421,53 @@ template <class derivedT, class specificT>
 const size_t &shmimMonitor<derivedT, specificT>::typeSize() const
 {
     return m_typeSize;
+}
+
+template <class derivedT, class specificT>
+bool shmimMonitor<derivedT, specificT>::currFromArrays() const
+{
+    // ImageStreamIO maps the per-frame arrays only for this image type, and does not clear them on close.
+    return m_depth > 1 && m_currImage < m_depth &&
+           ( m_imageStream.md->imagetype & 0xF000F ) == ( CIRCULAR_BUFFER | ZAXIS_TEMPORAL );
+}
+
+template <class derivedT, class specificT>
+uint64_t shmimMonitor<derivedT, specificT>::currImage() const
+{
+    return m_currImage;
+}
+
+template <class derivedT, class specificT>
+timespec shmimMonitor<derivedT, specificT>::currAtime() const
+{
+    if( currFromArrays() )
+    {
+        return m_imageStream.atimearray[m_currImage];
+    }
+
+    return m_imageStream.md->atime;
+}
+
+template <class derivedT, class specificT>
+timespec shmimMonitor<derivedT, specificT>::currWritetime() const
+{
+    if( currFromArrays() )
+    {
+        return m_imageStream.writetimearray[m_currImage];
+    }
+
+    return m_imageStream.md->writetime;
+}
+
+template <class derivedT, class specificT>
+uint64_t shmimMonitor<derivedT, specificT>::currCnt0() const
+{
+    if( currFromArrays() )
+    {
+        return m_imageStream.cntarray[m_currImage];
+    }
+
+    return m_imageStream.md->cnt0;
 }
 
 template <class derivedT, class specificT>
@@ -441,6 +579,7 @@ int shmimMonitor<derivedT, specificT>::appStartup()
     act.sa_mask = set;
 
     errno = 0;
+
     if( sigaction( SIGUSR1, &act, 0 ) < 0 )
     {
         std::string logss = "Setting handler for SIGUSR1 failed. Errno says: ";
@@ -522,7 +661,7 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
 
     // bool semgot = false;
 
-    std::cerr << m_shmimName <<  " smThreadExec\n";
+    std::cerr << m_shmimName << " smThreadExec\n";
 
     while( derived().shutdown() == 0 )
     {
@@ -545,6 +684,7 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
         m_restart = false; // Set this up front, since we're about to restart.
 
         int logged = 0;
+
         while( !opened && !derived().m_shutdown && !m_restart && derived().state() == m_targetState )
         {
             // b/c ImageStreamIO prints every single time, and latest version don't support stopping it yet, and that
@@ -553,13 +693,17 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
             char SM_fname[200];
             ImageStreamIO_filename( SM_fname, sizeof( SM_fname ), m_shmimName.c_str() );
             SM_fd = open( SM_fname, O_RDWR );
+
             if( SM_fd == -1 )
             {
                 m_smState = shmimMonitorState::notfound;
 
                 if( !logged )
+                {
                     derivedT::template log<text_log>(
                         "ImageStream " + m_shmimName + " not found (yet).  Retrying . . .", logPrio::LOG_NOTICE );
+                }
+
                 logged = 1;
                 sleep( 1 ); // be patient
                 continue;
@@ -649,6 +793,7 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
         m_typeSize = ImageStreamIO_typesize( m_dataType );
         m_width    = m_imageStream.md[0].size[0];
         int dim    = 1;
+
         if( m_imageStream.md[0].naxis > 1 )
         {
             m_height = m_imageStream.md[0].size[1];
@@ -671,6 +816,8 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
         }
 
         m_smState = shmimMonitorState::connected; // this means we now have valid sizes, etc.
+
+        timingHook( derived(), shmimMonitorEvent::connected, 0 );
 
         if( derived().allocate( specificT() ) < 0 )
         {
@@ -719,6 +866,9 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
             }
 
             char *curr_src = (char *)m_imageStream.array.raw + curr_image * m_width * m_height * m_typeSize;
+            m_currImage    = curr_image;
+
+            timingHook( derived(), shmimMonitorEvent::initial, 0 );
 
             if( derived().processImage( curr_src, specificT() ) < 0 )
             {
@@ -742,6 +892,8 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
 
             if( sem_timedwait( sem, &ts ) == 0 )
             {
+                timingHook( derived(), shmimMonitorEvent::receipt, 0 );
+
                 if( m_imageStream.md[0].size[2] > 0 ) ///\todo change to naxis?
                 {
                     curr_image = m_imageStream.md[0].cnt1;
@@ -772,15 +924,18 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
 
                 if( atype != m_dataType || snx != m_width || sny != m_height || snz != m_depth )
                 {
+                    timingHook( derived(), shmimMonitorEvent::discarded, 0 );
                     break; // exit the nearest while loop and get the new image setup.
                 }
 
                 if( derived().shutdown() != 0 || m_restart || derived().state() != m_targetState )
                 {
+                    timingHook( derived(), shmimMonitorEvent::discarded, 0 );
                     break; // Check for exit signals
                 }
 
                 char *curr_src = (char *)m_imageStream.array.raw + curr_image * m_width * m_height * m_typeSize;
+                m_currImage    = curr_image;
 
                 if( derived().processImage( curr_src, specificT() ) < 0 )
                 {
@@ -790,12 +945,16 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
             else
             {
                 if( m_imageStream.md[0].sem <= 0 )
+                {
                     break; // Indicates that the server has cleaned up.
+                }
 
                 // Check for why we timed out
                 if( errno == EINTR )
+                {
                     break; // This indicates signal interrupted us, time to restart or shutdown, loop will exit normally
                            // if flags set.
+                }
 
                 // ETIMEDOUT means we should check for deletion, and then wait more.
                 // Otherwise, report an error.
@@ -810,15 +969,18 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
                 char SM_fname[200];
                 ImageStreamIO_filename( SM_fname, sizeof( SM_fname ), m_shmimName.c_str() );
                 SM_fd = open( SM_fname, O_RDWR );
+
                 if( SM_fd == -1 )
                 {
                     m_restart = true;
                 }
+
                 close( SM_fd );
 
                 // Check if the inode changed
                 struct stat buffer;
                 int         rv = stat( SM_fname, &buffer );
+
                 if( rv != 0 )
                 {
                     m_restart = true;
@@ -837,7 +999,11 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
 
         // opened == true if we can get to this
         if( m_semaphoreNumber >= 0 )
+        {
             m_imageStream.semReadPID[m_semaphoreNumber] = 0; // release semaphore
+        }
+
+        timingHook( derived(), shmimMonitorEvent::disconnected, 0 );
         ImageStreamIO_closeIm( &m_imageStream );
         opened = false;
 
@@ -852,6 +1018,7 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
 
     if( opened )
     {
+        timingHook( derived(), shmimMonitorEvent::disconnected, 0 );
         ImageStreamIO_closeIm( &m_imageStream );
         opened = false;
     }
@@ -870,6 +1037,7 @@ int shmimMonitor<derivedT, specificT>::create(
     char SM_fname[200];
     ImageStreamIO_filename( SM_fname, sizeof( SM_fname ), m_shmimName.c_str() );
     SM_fd = open( SM_fname, O_RDWR );
+
     if( SM_fd != -1 )
     {
         close( SM_fd );
@@ -927,7 +1095,9 @@ template <class derivedT, class specificT>
 int shmimMonitor<derivedT, specificT>::updateINDI()
 {
     if( !derived().m_indiDriver )
+    {
         return 0;
+    }
 
     indi::updateIfChanged( m_indiP_shmimName, "name", m_shmimName, derived().m_indiDriver );
     indi::updateIfChanged( m_indiP_frameSize, "width", m_width, derived().m_indiDriver );

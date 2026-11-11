@@ -1,0 +1,116 @@
+diff --git a/camsci1.conf b/camsci1.conf
+index b7e231c..cea2992 100644
+--- a/camsci1.conf
++++ b/camsci1.conf
+@@ -6,0 +7,2 @@ powerOnWait=5
++emGainRequiresTemp=true
++emGainTemp=-50
+diff --git a/camsci2.conf b/camsci2.conf
+index 23ba4c2..09b17a6 100644
+--- a/camsci2.conf
++++ b/camsci2.conf
+@@ -6,0 +7,2 @@ powerOnWait=5
++emGainRequiresTemp=true
++emGainTemp=-55
+diff --git a/camwfs.conf b/camwfs.conf
+index 50c866d..f168eef 100644
+--- a/camwfs.conf
++++ b/camwfs.conf
+@@ -16,0 +17,2 @@ latencySize=20000
++emGainRequiresTemp=true
++emGainTemp=-45
+diff --git a/labrules/cameratemp.conf b/labrules/cameratemp.conf
+new file mode 100644
+index 0000000..5a47955
+--- /dev/null
++++ b/labrules/cameratemp.conf
+@@ -0,0 +1,89 @@
++##################################
++# Powered cameras must be locked onto their required EM-gain temperatures.
++# Keep numeric targets below equal to camera.emGainTemp in each camera config.
++# camsci1-power-on and camsci2-power-on are defined in camsci1notop.conf
++# and camsci2notop.conf, respectively.
++
++[camwfs-power-on]
++ruleType=txtVal
++property=pdu1.camwfs
++element=state
++target=On
++
++[camwfs-temp-locked]
++ruleType=txtVal
++property=camwfs.temp_control
++element=status
++target=ON TARGET
++
++[camwfs-temp-setpoint-expected]
++ruleType=numVal
++property=camwfs.temp_ccd
++element=target
++target=-45
++tol=0
++
++[camwfs-temp-not-ready]
++ruleType=ruleComp
++rule1=camwfs-temp-locked
++rule2=camwfs-temp-setpoint-expected
++comp=Nand
++
++[camwfs-on-temp-not-ready]
++ruleType=ruleComp
++priority=caution
++message=camwfs temperature is not on target at -45 C
++rule1=camwfs-power-on
++rule2=camwfs-temp-not-ready
++
++[camsci1-temp-locked]
++ruleType=txtVal
++property=camsci1.temp_control
++element=status
++target=LOCKED
++
++[camsci1-temp-setpoint-expected]
++ruleType=numVal
++property=camsci1.temp_ccd
++element=target
++target=-50
++tol=0
++
++[camsci1-temp-not-ready]
++ruleType=ruleComp
++rule1=camsci1-temp-locked
++rule2=camsci1-temp-setpoint-expected
++comp=Nand
++
++[camsci1-on-temp-not-ready]
++ruleType=ruleComp
++priority=caution
++message=camsci1 temperature is not locked at -50 C
++rule1=camsci1-power-on
++rule2=camsci1-temp-not-ready
++
++[camsci2-temp-locked]
++ruleType=txtVal
++property=camsci2.temp_control
++element=status
++target=LOCKED
++
++[camsci2-temp-setpoint-expected]
++ruleType=numVal
++property=camsci2.temp_ccd
++element=target
++target=-55
++tol=0
++
++[camsci2-temp-not-ready]
++ruleType=ruleComp
++rule1=camsci2-temp-locked
++rule2=camsci2-temp-setpoint-expected
++comp=Nand
++
++[camsci2-on-temp-not-ready]
++ruleType=ruleComp
++priority=caution
++message=camsci2 temperature is not locked at -55 C
++rule1=camsci2-power-on
++rule2=camsci2-temp-not-ready

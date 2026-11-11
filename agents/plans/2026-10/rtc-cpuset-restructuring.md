@@ -11,6 +11,14 @@ the migration worked on the first attempt and the system is running closed
 loop. Detailed runtime placement readback and timing comparison remain open.
 Two additional spare cores on CPU30/31
 expand the RT pool to 34 physical cores; further growth is deferred.
+The 2026-11-05 second migration below reduced `system` to 24 cores, placed the
+BMC SDK/post workers in the tweeter monitor's L3 domain and added an
+`aol1_imWFS2_cbuff` core. Following an operator timing comparison, the
+2026-11-06 SDK migration below restores SDK CPU56 under `dmtweeter-sdk`, makes
+CPU42 `spare42` and retains post CPU44. The operator subsequently reports a
+successful full restart with enabled synco at 8 kHz, jitter below 4 us with
+normal variation, and no need to shut down other processes. The CPU56 placement
+was first tested using its old `spare56` name.
 
 ## Objective and scope
 
@@ -541,6 +549,157 @@ by an agent. The operator reports successful deployment and a closed-loop
 restart; detailed thread/IRQ readback and the post-migration timing comparison
 remain follow-up steps.
 
+## Second migration: 24-core system pool and tweeter pipeline locality
+
+**2026-11-06 follow-up:** The SDK move to CPU42 below caused
+enable-dependent MVM slowdown and excess DM timing jitter at four-step synco.
+The operator first reported recovery after restoring SDK `spare56` and post
+`spare31`, then isolated the effect to the SDK worker. Changing post placement
+between CPU31/44 made no observed difference. The initial timing fix used SDK
+`spare56`; the subsequent named migration below assigns `dmtweeter-sdk` to
+that same CPU56. Post remains `dmtweeter-post`. The SDK CPU42 proposal below
+records the migration history, not
+the currently qualified SDK placement. See the
+[successful comparison](../2026-11/dm-syncopation-minimal-diagnostics.md#successful-placement-comparison).
+
+Requested by the operator 2026-11-05 on `jrmales/rtc-cpusets-24core`, based on
+`dev` at `d6af5164`. Since the first migration, the 8 kHz tweeter pipeline added
+three dedicated threads on reserves in three L3 domains: the BMC SDK worker on
+`spare56` (CPU56, domain7, FIFO55), the ordered post worker on `spare31`
+(CPU31, domain3, FIFO30) and synco's reader-release observer on `spare57`
+(CPU57, domain7, FIFO30). The tweeter monitor (CPU40) and synco (CPU41) are in
+domain5. Non-real-time readers are also moving to circular buffers, which need
+their own cores.
+
+The target partition is:
+
+| Role | Logical CPUs | Physical cores / online threads |
+| --- | --- | --- |
+| System tasks and ordinary IRQs | `0-23,64-87` | 24 / 48 |
+| Dedicated real-time sets | `24-63` | 40 / 40 |
+| Offline SMT siblings | `88-127` | 40 offline logical CPUs |
+
+This gives 88 online logical CPUs. L3 domain3 (CPUs24-31) becomes entirely
+real-time, restoring complete cache-domain separation from `system`.
+
+| CPU | Old cpuset | New cpuset | Reason |
+| --- | --- | --- | --- |
+| 24 | Part of `system` | `aol0_modevalDMf_mon-sw` | Recorder moved from CPU42, off the loop's L3 domain |
+| 25 | Part of `system` | `aol1_modevalDMf_mon-sw` | Recorder moved from CPU44, off the loop's L3 domain |
+| 26 | Part of `system` | `aol1_imWFS2_cbuff` | New circular-buffer SM/FG core |
+| 27-29 | Part of `system` | `spare27`-`spare29` | Reserves |
+| 30, 31 | `spare30`, `spare31` (post worker) | Unchanged names | Reserves |
+| 42 | `aol0_modevalDMf_mon-sw` | `dmtweeter-sdk` | SDK worker shares L3 with the monitor it receives every command from |
+| 44 | `aol1_modevalDMf_mon-sw` | `dmtweeter-post` | Post worker shares L3 with the SDK worker and monitor |
+| 56 | `spare56` (SDK worker) | Unchanged name | Reserve |
+| 57 | `spare57` (release observer) | `dmtweeter-synco-release` | Rename only; no free domain5 core |
+
+Domain5 is then tweeter monitor, synco, SDK worker, PO4AO, post worker,
+`acqu_mvm`, `mfilt` and `tweeterSpeck`. Moving the two recorders out also
+removes their bulk copies from the loop's L3. The release observer keeps a
+dedicated core on CPU57: production mode requires it and uses its records to
+grant and revoke write clearance (`simulation.readerReleaseReady` applies only
+to simulation). The operator chose to keep it there rather than displace
+`tweeterSpeck` from domain5. `dm01comb` (CPU39) remains in domain4, so the
+synco → combiner → monitor handoffs still cross L3 domains; moving the combiner
+would require displacing a loop or camera thread and is deferred.
+
+Ordinary IRQ affinity becomes `0-23,64-87` and the irqbalance exclusions
+`24-63,88-127`. `remove_cpusets` adds `spare57` to its retired names; all other
+current names come from the sibling `make_cpusets`. Because the two recorder
+sets keep their names but change CPUs, use the full remove/recreate procedure
+above rather than rerunning `make_cpusets`.
+
+Config repository changes (`onsky`): `dmtweeter.conf` (`sdk.cpuset`,
+`sdk.pipelineCpuset`), `dmtweeter-synco.conf` (`readerReleaseMonitor.cpuset`)
+and `aol1_imWFS2_cbuff.conf` (SM and FG cpusets). The recorder configs already
+name their sets. Repository example synco configs and the production-provider
+guide name the new sets; historical test records keep their tested placements.
+
+Local validation: 40 exclusive sets cover CPUs24-63 exactly once, each with
+`cpus`, `cpu_exclusive` and `mems`; shell syntax and the ten cleanup tests
+pass. All 55 cpuset references from RTC process-list configs and CACAO setup
+files resolve except two pre-existing ones outside this change:
+`acc000.conf` `[framegrabber] cpuset=acqu` and CACAO `ncpc` `dm02comb`.
+After deployment, verify system `0-23,64-87`, offline `88-127`, the
+SDK/post thread affinity lists (CPU42/44 for that migration), with both
+`sdk_worker`/`sdk_pipeline` `allowedCpus` counts equal to 1, and compare
+tweeter pipeline timing against the 8 kHz baseline.
+
+## SDK placement migration: CPU56 and spare42
+
+Requested by the operator on 2026-11-06: "then we need to edit the make_cpusets
+script and rename things." This follows the isolated SDK placement result in
+the [timing investigation](../2026-11/dm-syncopation-minimal-diagnostics.md#sdk-placement-isolated).
+Implementation and its documentation are on `jrmales/dm-syncopation`.
+
+| CPU | Previous cpuset | Updated cpuset | Purpose |
+| --- | --- | --- | --- |
+| 42 | `dmtweeter-sdk` | `spare42` | Reserve in the MVM's L3 domain |
+| 56 | `spare56` | `dmtweeter-sdk` | Tested SDK placement outside the MVM's L3 domain |
+
+Keep post `dmtweeter-post` on CPU44, synco on CPU41 and release on CPU57.
+System/IRQ masks, the 40 exclusive CPUs24--63, offline siblings88--127,
+memory-node assignments and all other cpuset names remain unchanged.
+The ICC map is independent and retains its own `spare56`.
+
+`remove_cpusets` now retains `spare56` in its legacy allowlist. This permits
+cleanup after the new setup script no longer declares that name. The retained
+`dmtweeter-sdk` name is already recognized, so its old CPU42 group is removed
+normally. Recreating the map is required: running the new setup over existing
+exclusive SDK42/spare56 groups would conflict with the new spare42/SDK56 groups.
+
+The separate workstation config repository already uses
+`[sdk] cpuset=dmtweeter-sdk` and `pipelineCpuset=dmtweeter-post`; no edit is
+needed there. An instrument config changed to `spare56` for the timing test
+must return to `dmtweeter-sdk` when the new map is installed. Before that
+migration, `dmtweeter-sdk` still means CPU42: do not switch the application back
+early. Likewise, do not restart it with `spare56` after that name is retired.
+
+Operator deployment, from one updated MagAOX checkout:
+
+1. Stop instrument workloads using the normal shutdown procedure. The cleanup
+   helper refuses occupied or unrecognized groups and does not move tasks.
+2. Preview and apply removal of the empty real-time groups:
+
+   ```bash
+   sudo python3 rtSetup/RTC/remove_cpusets --dry-run
+   sudo python3 rtSetup/RTC/remove_cpusets --apply
+   ```
+
+3. Recreate the map and update any temporary controller affinity setting before
+   restarting applications:
+
+   ```bash
+   sudo bash rtSetup/RTC/make_cpusets
+   ```
+
+   ```ini
+   [sdk]
+   cpuset=dmtweeter-sdk
+   pipelineCpuset=dmtweeter-post
+   ```
+
+4. Verify the SDK/post threads' `Cpus_allowed_list` in `/proc/<tid>/status`
+   reads 56/44 respectively, retaining their existing priorities 55/30. The
+   `sdk_worker.allowedCpus` and `sdk_pipeline.allowedCpus` properties are CPU
+   counts, so each should read 1. Confirm the SDK and reserve cpuset CPU files
+   read 56/42 respectively, then compare MVM timing and controller fgtimes with
+   the successful test.
+
+Local verification passes: shell syntax, 40 exclusive singleton sets covering
+CPUs24--63 exactly once, unchanged system/memory masks, and all 11 cleanup tests
+using temporary files and mocked removals. The rename regression covers both
+the old SDK42 group and retired `spare56`; the allowlist test independently
+checks that the retired name survives removal from the setup script. These
+are shell/Python changes, so C++ clang-format does not apply. No agent executes
+the deployment commands, changes cgroups, or restarts an instrument process.
+
+Operator follow-up on 2026-11-06: "full restart, enabled and running at 8 kHz.
+Jitter is < 4e-6 (with usual variation). Haven't had to shut anything down."
+This is the reported post-migration timing result; the operator requests a PR.
+No new raw timing capture or thread-affinity readback accompanies this report.
+
 ## Implementation dependencies and sequence
 
 1. **Complete the operator inventory.** Record deployed/uncommitted configs,
@@ -647,6 +806,10 @@ independent of the RTC rollout.
   attempt and the system is up with a closed AO loop. This records deployment
   and restart success; no new per-thread/IRQ affinity output, loop gain or
   post-migration timing capture was supplied with the report.
+- 2026-11-05: Operator requested a 24-core system pool, an
+  `aol1_imWFS2_cbuff` core and tweeter-local placement of the pipeline
+  threads on `spare31`/`spare56`. Implemented the second migration above;
+  locally validated. No instrument operations performed.
 - Operator additions: Remaining missing/legacy configs are outside this migration.
 - Target allocation review: First migration approved through operator annotations
   and CPU41/54/55 corrections, plus the CPU30/31 expansion; further growth deferred.

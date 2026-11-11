@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 ## \file remove_cpusets
-## \brief Remove empty RTC real-time cpusets before rebuilding their names.
+## \brief Remove empty RTC real-time cpusets before rebuilding names or CPU assignments.
 #
 # Stop instrument workloads before running. The initial preflight changes nothing
 # if any owned cpuset is occupied. A concurrent restart can still interrupt an
@@ -21,6 +21,7 @@ LEGACY_NAMES = {
     "acqu_mvm", "mfilt", "tweeterSpeck", "mlat", "RTmon", "spare50", "spare51",
     "spare52", "spare53", "camtip", "camtip_sw", "camacq", "camacq_sw",
     "shmimTCP", "spare59", "spare60", "spare61", "spare62", "spare63",
+    "spare56", "spare57",
 }
 
 

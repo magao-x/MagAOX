@@ -7,7 +7,7 @@
 ## See https://linux.die.net/man/7/cpuset
 ##
 ## Run this as sudo at startup of the system
-## For a rename migration, stop instrument processes and run remove_cpusets first.
+## Before changing names or CPU assignments, stop instrument processes and run remove_cpusets.
 ## Applications and CACAO FPS settings place their threads in these sets.
 ##
 ####################################################
@@ -19,8 +19,9 @@ cpusetMount="$CGROUPS1_CPUSET_MOUNTPOINT"
 
 set -xeuo pipefail
 
-# Use processors 0-29 and 64-93 for system tasks (30 cores, 60 threads).
-# Disable SMT siblings 94-127, leaving 30-63 as 34 single-thread R/T cores.
+# Use processors 0-23 and 64-87 for system tasks (24 cores, 48 threads).
+# Disable SMT siblings 88-127, leaving 24-63 as 40 single-thread R/T cores.
+# Each group of eight cores (0-7, 8-15, ..., 56-63) shares one L3 cache.
 
 #enable everything first just to start from a known state
 for cpu in {1..127}
@@ -29,7 +30,7 @@ do
 done
 
 # Disable the SMT siblings of all dedicated real-time cores.
-for cpu in {94..127}
+for cpu in {88..127}
 do
    /bin/echo 0 > /sys/devices/system/cpu/cpu$cpu/online
 done
@@ -41,7 +42,7 @@ cd "$cpusetMount"
 #
 ############################
 mkdir -p "$cpusetMount/system"
-/bin/echo 0-29,64-93 > "$cpusetMount/system/cpuset.cpus"
+/bin/echo 0-23,64-87 > "$cpusetMount/system/cpuset.cpus"
 /bin/echo 0 > "$cpusetMount/system/cpuset.mems"
 
 # Now move all current tasks to system cpuset
@@ -62,13 +63,51 @@ echo 1 > system/cpuset.sched_load_balance
 ###############
 
 
-#spare30: dedicated development reserve; SMT sibling CPU94 is offline
+# L3 domain 3 (CPUs 24-31): recorders, circular buffers and reserves, off the loop's L3 caches.
+
+#aol0_modevalDMf_mon-sw
+mkdir -p "$cpusetMount/aol0_modevalDMf_mon-sw"
+/bin/echo 24 > "$cpusetMount/aol0_modevalDMf_mon-sw/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/aol0_modevalDMf_mon-sw/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/aol0_modevalDMf_mon-sw/cpuset.mems"
+
+#aol1_modevalDMf_mon-sw
+mkdir -p "$cpusetMount/aol1_modevalDMf_mon-sw"
+/bin/echo 25 > "$cpusetMount/aol1_modevalDMf_mon-sw/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/aol1_modevalDMf_mon-sw/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/aol1_modevalDMf_mon-sw/cpuset.mems"
+
+#aol1_imWFS2_cbuff
+mkdir -p "$cpusetMount/aol1_imWFS2_cbuff"
+/bin/echo 26 > "$cpusetMount/aol1_imWFS2_cbuff/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/aol1_imWFS2_cbuff/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/aol1_imWFS2_cbuff/cpuset.mems"
+
+#spare27: dedicated development reserve
+mkdir -p "$cpusetMount/spare27"
+/bin/echo 27 > "$cpusetMount/spare27/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/spare27/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/spare27/cpuset.mems"
+
+#spare28: dedicated development reserve
+mkdir -p "$cpusetMount/spare28"
+/bin/echo 28 > "$cpusetMount/spare28/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/spare28/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/spare28/cpuset.mems"
+
+#spare29: dedicated development reserve
+mkdir -p "$cpusetMount/spare29"
+/bin/echo 29 > "$cpusetMount/spare29/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/spare29/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/spare29/cpuset.mems"
+
+#spare30: dedicated development reserve
 mkdir -p "$cpusetMount/spare30"
 /bin/echo 30 > "$cpusetMount/spare30/cpuset.cpus"
 /bin/echo 1 > "$cpusetMount/spare30/cpuset.cpu_exclusive"
 /bin/echo 0 > "$cpusetMount/spare30/cpuset.mems"
 
-#spare31: dedicated development reserve; SMT sibling CPU95 is offline
+#spare31: dedicated development reserve
 mkdir -p "$cpusetMount/spare31"
 /bin/echo 31 > "$cpusetMount/spare31/cpuset.cpus"
 /bin/echo 1 > "$cpusetMount/spare31/cpuset.cpu_exclusive"
@@ -128,17 +167,19 @@ mkdir -p "$cpusetMount/tweeter"
 /bin/echo 1 > "$cpusetMount/tweeter/cpuset.cpu_exclusive"
 /bin/echo 0 > "$cpusetMount/tweeter/cpuset.mems"
 
+# L3 domain 5 (CPUs 40-47): tweeter monitor/post, synco and modulator, with the loop.
+
 #dmtweeter-synco: primary monitor and scheduler
 mkdir -p "$cpusetMount/dmtweeter-synco"
 /bin/echo 41 > "$cpusetMount/dmtweeter-synco/cpuset.cpus"
 /bin/echo 1 > "$cpusetMount/dmtweeter-synco/cpuset.cpu_exclusive"
 /bin/echo 0 > "$cpusetMount/dmtweeter-synco/cpuset.mems"
 
-#aol0_modevalDMf_mon-sw
-mkdir -p "$cpusetMount/aol0_modevalDMf_mon-sw"
-/bin/echo 42 > "$cpusetMount/aol0_modevalDMf_mon-sw/cpuset.cpus"
-/bin/echo 1 > "$cpusetMount/aol0_modevalDMf_mon-sw/cpuset.cpu_exclusive"
-/bin/echo 0 > "$cpusetMount/aol0_modevalDMf_mon-sw/cpuset.mems"
+#spare42: development reserve; keep the BMC SDK worker outside the MVM's L3 domain
+mkdir -p "$cpusetMount/spare42"
+/bin/echo 42 > "$cpusetMount/spare42/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/spare42/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/spare42/cpuset.mems"
 
 #po4ao
 mkdir -p "$cpusetMount/po4ao"
@@ -146,11 +187,11 @@ mkdir -p "$cpusetMount/po4ao"
 /bin/echo 1 > "$cpusetMount/po4ao/cpuset.cpu_exclusive"
 /bin/echo 0 > "$cpusetMount/po4ao/cpuset.mems"
 
-#aol1_modevalDMf_mon-sw
-mkdir -p "$cpusetMount/aol1_modevalDMf_mon-sw"
-/bin/echo 44 > "$cpusetMount/aol1_modevalDMf_mon-sw/cpuset.cpus"
-/bin/echo 1 > "$cpusetMount/aol1_modevalDMf_mon-sw/cpuset.cpu_exclusive"
-/bin/echo 0 > "$cpusetMount/aol1_modevalDMf_mon-sw/cpuset.mems"
+#dmtweeter-post: BMC pipeline post worker, sharing L3 with the tweeter monitor
+mkdir -p "$cpusetMount/dmtweeter-post"
+/bin/echo 44 > "$cpusetMount/dmtweeter-post/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/dmtweeter-post/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/dmtweeter-post/cpuset.mems"
 
 #acqu_mvm
 mkdir -p "$cpusetMount/acqu_mvm"
@@ -218,17 +259,17 @@ mkdir -p "$cpusetMount/camtip_sw"
 /bin/echo 1 > "$cpusetMount/camtip_sw/cpuset.cpu_exclusive"
 /bin/echo 0 > "$cpusetMount/camtip_sw/cpuset.mems"
 
-#spare56: available after camacq returns to the system pool
-mkdir -p "$cpusetMount/spare56"
-/bin/echo 56 > "$cpusetMount/spare56/cpuset.cpus"
-/bin/echo 1 > "$cpusetMount/spare56/cpuset.cpu_exclusive"
-/bin/echo 0 > "$cpusetMount/spare56/cpuset.mems"
+#dmtweeter-sdk: BMC SDK worker, outside the MVM's L3 domain
+mkdir -p "$cpusetMount/dmtweeter-sdk"
+/bin/echo 56 > "$cpusetMount/dmtweeter-sdk/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/dmtweeter-sdk/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/dmtweeter-sdk/cpuset.mems"
 
-#spare57: available after camacq-sw returns to the system pool
-mkdir -p "$cpusetMount/spare57"
-/bin/echo 57 > "$cpusetMount/spare57/cpuset.cpus"
-/bin/echo 1 > "$cpusetMount/spare57/cpuset.cpu_exclusive"
-/bin/echo 0 > "$cpusetMount/spare57/cpuset.mems"
+#dmtweeter-synco-release: synco reader-release observer
+mkdir -p "$cpusetMount/dmtweeter-synco-release"
+/bin/echo 57 > "$cpusetMount/dmtweeter-synco-release/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/dmtweeter-synco-release/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/dmtweeter-synco-release/cpuset.mems"
 
 #shmimTCP
 mkdir -p "$cpusetMount/shmimTCP"

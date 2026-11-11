@@ -1,14 +1,29 @@
 
 ../libMagAOX/app/tests/indiUtils_test
 ../libMagAOX/app/tests/MagAOXApp_test
+../libMagAOX/app/tests/MagAOXApp_threadStart_test
 ../libMagAOX/app/tests/MagAOXAppExecute_test
 ../libMagAOX/app/tests/stateCodes_test
 ../libMagAOX/app/tests/semUtils_test
 ../libMagAOX/app/dev/tests/outletController_test
 ../libMagAOX/app/dev/tests/telemeter_test
 ../libMagAOX/app/dev/tests/dm_test
+../libMagAOX/app/dev/tests/frameGrabberTiming_test
+../libMagAOX/app/dev/tests/frameGrabber_integration_test
+../libMagAOX/app/dev/tests/dmTiming_test
+../libMagAOX/app/dev/tests/dmCombTiming_test
+../libMagAOX/app/dev/tests/dmTiming_integration_test
+../libMagAOX/app/dev/tests/dmCompletion_test
+../libMagAOX/app/dev/tests/dmCompletion_integration_test
+../libMagAOX/app/dev/tests/dmReaderTiming_test
+../libMagAOX/app/dev/tests/dmPipelineTiming_test
+../libMagAOX/app/dev/tests/dmPipeline_integration_test
+../libMagAOX/app/dev/tests/dmSaturation_test
+../libMagAOX/app/dev/tests/dmSyncopationProducer_test
+../libMagAOX/app/dev/tests/shmimMonitor_timing_test
 ../libMagAOX/app/dev/tests/dev_test
 ../libMagAOX/app/dev/tests/stdCamera_test
+../libMagAOX/app/dev/tests/frameGrabber_test
 ../libMagAOX/app/dev/tests/stdCamera_roi_test
 
 ../libMagAOX/file/tests/fileTimes_test
@@ -19,6 +34,11 @@
 ../libMagAOX/logger/tests/logFileRaw_fileTime_error_test
 ../libMagAOX/logger/tests/logMap_test
 ../libMagAOX/logger/tests/pduTelemetry_test
+../libMagAOX/logger/tests/frameGrabberTelemetry_test
+../libMagAOX/logger/tests/frameGrabberTraceTelemetry_test
+../libMagAOX/logger/tests/dmTimingTelemetry_test
+../libMagAOX/logger/tests/dmSyncoTelemetry_test
+../libMagAOX/logger/tests/dmPipelineTelemetry_test
 ../libMagAOX/logger/tests/logMeta_test
 ../libMagAOX/logger/tests/logTypes_Accessor_test
 ../libMagAOX/logger/tests/savingTelemetry_test
@@ -31,18 +51,26 @@
 ../apps/virtualPDU/tests/virtualPDU_test
 ../apps/acronameUsbHub/tests/acronameUsbHub_test
 ../apps/adcTracker/tests/adcTracker_test
+../apps/alpaoCtrl/tests/alpaoCtrl_test
 ../apps/alignLoop/tests/alignLoop_test
+../apps/bmcCtrl/tests/bmcCtrl_test
 ../apps/cacaoInterface/tests/cacaoInterface_test
+../apps/cameraSim/tests/cameraSim_emgain_test
 ../apps/closedLoopIndi/tests/closedLoopIndi_test
 ../apps/dmMode/tests/dmMode_test
 ../apps/dmPokeCenter/tests/dmPokeCenter_test
 ../apps/dmPokeXCorr/tests/dmPokeXCorr_test
 ../apps/dmSpeckle/tests/dmSpeckle_test
+../apps/dmSyncopation/tests/dmSyncopation_test
+../apps/dmSyncopation/tests/syncoSimulation_test
+../apps/dmSyncopation/tests/syncoPipelineSimulation_test
+../apps/dmSyncopation/tests/syncoZeroTiming_test
 ../apps/filterWheelCtrl/tests/filterWheelCtrl_test
 ../apps/flipperCtrl/tests/flipperCtrl_test
 ../apps/flipperCtrl/tests/flipperCtrl_entrypoint_test
 ../apps/flowRPM/tests/flowRPM_test
 ../apps/indiTSAccumulator/tests/indiTSAccumulator_test
+../apps/irisaoCtrl/tests/irisaoCtrl_test
 ../apps/koolanceCtrl/tests/koolanceCtrl_test
 ../apps/kTracker/tests/kTracker_test
 ../apps/loPredCtrl/tests/loPredCtrl_test
@@ -56,8 +84,11 @@
 ../apps/observerCtrl/tests/observerCtrl_test
 ../apps/ocam2KCtrl/tests/ocamUtils_test
 ../apps/ocam2KCtrl/tests/ocam2KCtrl_test
+../apps/ocam2KCtrl/tests/ocam2KCtrl_emgain_test
+../apps/ocam2KCtrl/tests/ocam2KCtrl_reconfig_test
 ../apps/ocam2KCtrl/tests/ocam2KCtrl_lifecycle_test
 ../apps/ocam2KCtrl/tests/ocam2KCtrl_temperature_test
+../apps/ocam2KCtrl/tests/ocam2KCtrl_housekeeping_test
 ../apps/cred2Ctrl/tests/cred2Ctrl_test
 ../apps/cred2Ctrl/tests/cred2Ctrl_lifecycle_test
 ../apps/cred2Ctrl/tests/cred2Utils_test
@@ -128,6 +159,8 @@
 ../INDI/tests/INDI_test
 
 
+../libMagAOX/common/tests/spscQueue_test
+../libMagAOX/common/tests/latestSnapshot_test
 ../libMagAOX/common/tests/common_test
 ../libMagAOX/ImageStreamIO/tests/ImageStreamIO_test
 ../libMagAOX/modbus/tests/modbus_test
