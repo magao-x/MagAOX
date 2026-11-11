@@ -169,6 +169,7 @@ typedef struct {
     pthread_cond_t go_cond;		/* tell writer thread to send next msqq */
     pthread_mutex_t q_lock;		/* guard access to msqg and go_cond */
     pthread_rwlock_t restart_lock;	/* lock out this device while restarting */
+    int ready;				/* 1 once startDvrThread holds restart_lock, so others may use it */
 } DvrInfo;
 static DvrInfo *dvrinfo;		/* malloced array of DvrInfo */
 static int ndvrinfo;			/* n total */
@@ -415,8 +416,11 @@ startDvrThread (void *vp)
 {
 	DvrInfo *dp = (DvrInfo *)vp;
 
-	/* lock while setting up driver */
+	/* lock while setting up driver. clients may connect before this thread
+	 * runs, so q2Drivers and q2SnoopingDrivers skip dp until it is held.
+	 */
 	pthread_rwlock_wrlock (&dp->restart_lock);
+	__atomic_store_n (&dp->ready, 1, __ATOMIC_RELEASE);
 	startDvr (dp);
 	pthread_rwlock_unlock (&dp->restart_lock);
 
@@ -1431,6 +1435,10 @@ q2Drivers (char *dev, Msg *mp, char *roottag)
 	 */
 	for (dp = dvrinfo; dp < &dvrinfo[ndvrinfo]; dp++) {
 
+	    /* not usable until its startDvrThread holds restart_lock */
+	    if (!__atomic_load_n (&dp->ready, __ATOMIC_ACQUIRE))
+		continue;
+
 	    if (pthread_rwlock_tryrdlock (&dp->restart_lock) == 0) {
 
 		if (!dev[0] || !dp->dev[0] || !strcmp (dev, dp->dev)) {
@@ -1506,6 +1514,10 @@ q2SnoopingDrivers (int isblob, char *dev, char *name, Msg *mp)
 	 * it is snooping for this dev/name
 	 */
 	for (dp = dvrinfo; dp < &dvrinfo[ndvrinfo]; dp++) {
+
+	    /* not usable until its startDvrThread holds restart_lock */
+	    if (!__atomic_load_n (&dp->ready, __ATOMIC_ACQUIRE))
+		continue;
 
 	    if (pthread_rwlock_tryrdlock (&dp->restart_lock) == 0) {
 
