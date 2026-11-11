@@ -201,7 +201,7 @@ static void startLocalDvr (DvrInfo *dp);
 static void startRemoteDvr (DvrInfo *dp);
 static int openRemoteConnection (char host[], int port);
 static void restartDvr (DvrInfo *dp);
-static void q2Drivers (char *dev, Msg *mp, char *roottag);
+static void q2Drivers (char *dev, char *name, Msg *mp, char *roottag);
 static void q2SnoopingDrivers (int isblob, char *dev, char *name, Msg *mp);
 static void q2Clients (ClInfo *notme, int isblob, char *dev, char *name, Msg *mp,
                        int srcIsRemote, char *roottag);
@@ -930,7 +930,7 @@ clientReaderThread (void *vp)
                         cp->ischained = 1;
 
 		    /* send message to driver(s) responsible for dev */
-		    q2Drivers (dev, cp->mp, roottag);
+		    q2Drivers (dev, name, cp->mp, roottag);
 
 		    /* echo new* commands back to other clients */
 		    if (!strncmp (roottag, "new", 3))
@@ -1086,8 +1086,16 @@ driverStdoutReaderThread (void *vp)
 
 		    /* that's all if driver is just registering a snoop */
 		    if (!strcmp (roottag, "getProperties")) {
+			/* a snoop must name a device. without one it would reach every
+			 * driver, and remote ones as device-wide requests.
+			 */
+			if (!dev[0]) {
+			    logMessage ("Driver %s: ignoring snoop getProperties without a device, name='%s'\n",
+			    		dp->name, name);
+			    goto done;
+			}
 			addSnoopDevice (dp, dev, name);
-                        q2Drivers (dev, dp->mp, roottag);        // force initial report
+                        q2Drivers (dev, name, dp->mp, roottag);        // force initial report
 			goto done;
 		    }
 
@@ -1420,12 +1428,14 @@ restartDvr (DvrInfo *dp)
 }
 
 /* put Msg mp on queue of each driver responsible for dev, or all drivers
- *   if dev not specified.
+ *   if dev not specified. name is the property name of mp, "" if none.
  * N.B. add device to any generic getProperties going to remote drivers, else
- *   they get sent back out everywhere and go around forever.
+ *   they get sent back out everywhere and go around forever. keep its name, else
+ *   a request for one property becomes a device-wide request, to which drivers
+ *   reply with all their properties and by renewing all their snoops.
  */
 static void
-q2Drivers (char *dev, Msg *mp, char *roottag)
+q2Drivers (char *dev, char *name, Msg *mp, char *roottag)
 {
 	int isggp = !strcmp (roottag, "getProperties") && !dev[0];
 	DvrInfo *dp;
@@ -1451,14 +1461,24 @@ q2Drivers (char *dev, Msg *mp, char *roottag)
 		     * chained loops
 		     */
 		    if (isggp && dp->pid == REMOTEDVR) {
-			char gp[100];
+			char gp[MAXINDIDEVICE+MAXINDINAME+64];
 			int gpl;
+
+			/* a name we can not quote safely is not a valid INDI name */
+			if (strpbrk (name, "'\"&<>")) {
+			    pthread_rwlock_unlock (&dp->restart_lock);
+			    continue;
+			}
 
 			if (verbose)
 			    logMessage ("Driver %s: Loop caught, adding %s to generic getProperties\n",
 					    dp->name, dp->dev);
 			remote_mp = newMsg();
-			gpl = snprintf (gp, sizeof(gp), "<getProperties version='%g' device='%s' />\n", INDIV, dp->dev);
+			if (name[0])
+			    gpl = snprintf (gp, sizeof(gp), "<getProperties version='%g' device='%s' name='%s' />\n",
+			    		INDIV, dp->dev, name);
+			else
+			    gpl = snprintf (gp, sizeof(gp), "<getProperties version='%g' device='%s' />\n", INDIV, dp->dev);
 			addMsg (remote_mp, gp, gpl);
 			sendmp = remote_mp;
 		    } else
