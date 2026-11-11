@@ -214,6 +214,24 @@ int AD7689::exchange( uint16_t cfg, uint16_t &value, bool startup )
         return -1;
     if( transferred != static_cast<int>( count ) )
         return fail( "SPI conversion transfer incomplete" );
+
+    if( known && !( expected & 1U ) )
+    {
+        fprintf(stderr,
+            "AD7689 SPI DEBUG: "
+            "expected=0x%04X "
+            "tx=[%02X %02X %02X %02X] "
+            "rx=[%02X %02X %02X %02X] "
+            "readback=0x%04X\n",
+            static_cast<unsigned>(expected),
+            tx[0], tx[1], tx[2], tx[3],
+            rx[0], rx[1], rx[2], rx[3],
+            static_cast<unsigned>(
+                (decode(rx + 2) >> 2) & 0x1FFF
+            )
+        );
+    }
+    
     if( known && !( expected & 1U ) && ( ( decode( rx + 2 ) >> 2 ) & 0x1fffU ) != ( expected & 0x1fffU ) )
     {
         errno = EIO;
