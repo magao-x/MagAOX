@@ -170,6 +170,28 @@ With `cfg_univ.json`, one device-less `<message>` circulates indefinitely at abo
 No in-tree C++ app emits one (no `IDMessage(NULL, ...)`). Fixed as described under
 "Implementation".
 
+### Known protocol limitation
+
+INDI routes only by device name. Messages carry no origin, server identity, or hop
+count, and server chaining is not part of the protocol: a peer indiserver connects
+as an ordinary client and is served by the other side as an ordinary driver. Nothing
+distinguishes a forwarded message from a new one. Routing is loop-free only while
+every message names a device and each device has one acyclic path. Device-less
+elements break that:
+
+- **Generic `getProperties`:** rewritten per remote device, now keeping its name (F1).
+- **General `<message>` (no device):** there is no routing key, so the only safe
+  choices are "local only" or "one hop, duplicated once per chained connection" (96
+  copies on AOC for an ICC message). This branch chose local only: a general message
+  reaches the all-device clients of the server whose driver emitted it, and GUIs on
+  other servers do not see it. MagAO-X does not currently use general messages.
+
+A proper fix would let servers recognize peer connections. The version handshake on
+Stefan's branch (`getProperties device='indiserver' name='version'`) could mark a
+connection as a peer, so general messages could be forwarded exactly once to each
+server, with neither loops nor duplicates. Revisit this if general messages are ever
+needed.
+
 ## D3: dev startup segfault (fixed here and on Stefan's branch)
 
 Separate from the loop, but it causes reconnect storms. The dev `indiserver` crashed
