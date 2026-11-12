@@ -1,12 +1,9 @@
-/// IndiElement.hpp
-///
-/// @author Paul Grenz
-///
-/// This class represents one element in an INDI property. In its most basic
-/// form it is a name-value pair with other attributes associated with it.
-/// All access is protected by a read-write lock.
-///
-////////////////////////////////////////////////////////////////////////////////
+/** \file IndiElement.hpp
+  * \brief One element of an INDI property.
+  *
+  * In its most basic form an element is a name-value pair with other attributes
+  * associated with it. All access is protected by a read-write lock.
+  */
 
 #ifndef INDI_ELEMENT_HPP
 #define INDI_ELEMENT_HPP
@@ -232,7 +229,56 @@ class IndiElement
     mutable pcf::ReadWriteLock m_rwData;
 
 }; // class IndiElement
+
+/// Format a value as an element string, with 15 digits of precision.
+/** A bool is written as 1 or 0, so it is a valid INDI number.
+  */
+template <class TT> std::string formatIndiValue( const TT &ttValue /**< [in] the value to format */ );
+
+/// Parse an element string into a value of type TT, as with operator>>.
+template <class TT> void parseIndiValue( const std::string &szValue /**< [in] the element string */,
+                                         TT &tValue /**< [out] the parsed value */ );
+
+/// Parse an element string into a bool.
+/** Accepts "true" and "false", and any number, nonzero being true, so values
+  * written as 1/0 and older values written as true/false both read correctly.
+  * Anything else is false.
+  */
+inline void parseIndiValue( const std::string &szValue /**< [in] the element string */,
+                            bool &bValue /**< [out] the parsed value */ );
+
 } // namespace pcf
+
+////////////////////////////////////////////////////////////////////////////////
+
+template <class TT> std::string pcf::formatIndiValue( const TT &ttValue )
+{
+  std::stringstream ssValue;
+  ssValue.precision( 15 );
+  ssValue << ttValue;
+  return ssValue.str();
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+template <class TT> void pcf::parseIndiValue( const std::string &szValue, TT &tValue )
+{
+  std::stringstream ssValue( szValue );
+  ssValue >> tValue;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+inline void pcf::parseIndiValue( const std::string &szValue, bool &bValue )
+{
+  std::stringstream ssValue( szValue );
+  if ( ssValue >> std::boolalpha >> bValue )
+    return;
+
+  double dValue = 0;
+  std::stringstream ssNumber( szValue );
+  bValue = ( ssNumber >> dValue ) && dValue != 0;
+}
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -242,7 +288,7 @@ template <class TT> pcf::IndiElement::IndiElement( const std::string &szName,
                                                    const TT &ttValue ) : m_szName(szName)
 {
   std::stringstream ssValue;
-  ssValue << std::boolalpha << ttValue;
+  ssValue << ttValue;
   m_szValue = ssValue.str();
 }
 
@@ -254,9 +300,7 @@ template <class TT> TT pcf::IndiElement::get() const
   pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
 
   TT tValue;
-  //  stream the data into the variable.
-  std::stringstream ssValue( m_szValue );
-  ssValue >> std::boolalpha >> tValue;
+  parseIndiValue( m_szValue, tValue );
   return tValue;
 }
 
@@ -268,9 +312,7 @@ template <class TT> TT pcf::IndiElement::getValue() const
   pcf::ReadWriteLock::AutoRLock rwAuto( &m_rwData );
 
   TT tValue;
-  //  stream the data into the variable.
-  std::stringstream ssValue( m_szValue );
-  ssValue >> std::boolalpha >> tValue;
+  parseIndiValue( m_szValue, tValue );
   return tValue;
 }
 
@@ -282,10 +324,7 @@ template <class TT> const TT &pcf::IndiElement::operator= ( const TT &ttValue )
 {
   pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
 
-  std::stringstream ssValue;
-  ssValue.precision( 15 );
-  ssValue << std::boolalpha << ttValue;
-  m_szValue = ssValue.str();
+  m_szValue = formatIndiValue( ttValue );
   return ttValue;
 }
 
@@ -296,10 +335,7 @@ template <class TT> void pcf::IndiElement::set( const TT &ttValue )
 {
   pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
 
-  std::stringstream ssValue;
-  ssValue.precision( 15 );
-  ssValue << std::boolalpha << ttValue;
-  m_szValue = ssValue.str();
+  m_szValue = formatIndiValue( ttValue );
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -309,10 +345,7 @@ template <class TT> void pcf::IndiElement::setValue( const TT &ttValue )
 {
   pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
 
-  std::stringstream ssValue;
-  ssValue.precision( 15 );
-  ssValue << std::boolalpha << ttValue;
-  m_szValue = ssValue.str();
+  m_szValue = formatIndiValue( ttValue );
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -322,10 +355,7 @@ template <class TT> void pcf::IndiElement::setMax( const TT &ttMax )
 {
   pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
 
-  std::stringstream ssValue;
-  ssValue.precision( 15 );
-  ssValue << std::boolalpha << ttMax;
-  m_szMax = ssValue.str();
+  m_szMax = formatIndiValue( ttMax );
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -335,10 +365,7 @@ template <class TT> void pcf::IndiElement::setMin( const TT &ttMin )
 {
   pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
 
-  std::stringstream ssValue;
-  ssValue.precision( 15 );
-  ssValue << std::boolalpha << ttMin;
-  m_szMin = ssValue.str();
+  m_szMin = formatIndiValue( ttMin );
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -348,10 +375,7 @@ template <class TT> void pcf::IndiElement::setSize( const TT &ttSize )
 {
   pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
 
-  std::stringstream ssValue;
-  ssValue.precision( 15 );
-  ssValue << std::boolalpha << ttSize;
-  m_szSize = ssValue.str();
+  m_szSize = formatIndiValue( ttSize );
 }
 
 /*
@@ -376,10 +400,7 @@ template <class TT> void pcf::IndiElement::setStep( const TT &ttStep )
 {
   pcf::ReadWriteLock::AutoWLock rwAuto( &m_rwData );
 
-  std::stringstream ssValue;
-  ssValue.precision( 15 );
-  ssValue << std::boolalpha << ttStep;
-  m_szStep = ssValue.str();
+  m_szStep = formatIndiValue( ttStep );
 }
 
 ////////////////////////////////////////////////////////////////////////////////
