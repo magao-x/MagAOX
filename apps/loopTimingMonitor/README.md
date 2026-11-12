@@ -78,8 +78,12 @@ apps when deploying this extension. The monitor never enables or disables synco.
 The monitor subscribes once to `<synco.device>.enable.toggle`. When Off it
 reports ordinary main-command timing; when On it reports only step 0. Actual
 mode changes clear prior associations and statistics, then measurements resume
-automatically after a short warm-up. Unknown/malformed enable state gates
-collection, and conflicting INDI/diagnostic modes suppress telemetry until they
+automatically after a short warm-up. Camera observations are retained separately
+until their qualified main SDK timestamps arrive, including when synco publishes
+a one-second batch. A join reset excludes cameras through the first newly
+qualified SDK timestamp but retains later camera evidence, so a missing label
+cannot erase every remaining valid sample in that batch. Unknown/malformed enable
+state gates collection, and conflicting INDI/diagnostic modes suppress telemetry until they
 agree. Unchanged INDI state remains valid without polling or age expiry.
 
 Every admitted SDK event must match synco's qualified main label in all four
@@ -151,8 +155,14 @@ publications; the automatic-mode event histories retain records until capacity
 is exceeded.
 Gap counts describe missed observations, not proven physical camera frame loss.
 
-All attached sources are baselined after a continuity failure; the app clears its
-retained statistics conservatively. On source silence, old samples expire from
+Source replacement, clock discontinuities, transport loss and gate changes
+rebaseline attached sources and clear retained statistics conservatively.
+In automatic mode, a coherent camera counter gap reaches the matcher, while a
+rejected clock measurement within the same clock epoch skips only that camera.
+Neither discards the independent SDK/main histories. The matcher still rejects
+associations across a missing camera observation. The pending camera history is bounded by
+`monitor.capacity` and `monitor.windowSec`; eviction contributes to `overflow`
+and expiry to `unmatched`. On source silence, old samples expire from
 the trailing window even without further updates. Stream files are checked for
 replacement every 100 ms while enabled. Counter/timestamp checks operate on each
 scan; existing camera metadata remains a best-effort snapshot protocol.
