@@ -868,3 +868,31 @@ local reproduction. Changes are limited to `apps/loopTimingMonitor/loopTimingMon
 `apps/loopTimingMonitor/README.md`, and this plan. The operator subsequently
 authorized committing and pushing this correction on 2026-11-12, with the
 implementation/tests/plan and user documentation in separate commits.
+
+
+### Deployed configuration identified (2026-11-12)
+
+The operator's subsequent readback identifies the immediate deployed problem:
+`loop_timing_state.mode=standalone`, endpoints still use
+`dmtweeter_sdk_start.atime`, `modeGeneration=0`, and the supplied
+`holoop-time.conf` has no `[synco]` section. Its 75,926 ambiguous intervals are
+consistent with multiple native SDK writes per camera interval in standalone
+mode. The exact main-identity join and its batched-label correction are not
+active in this deployment. The independently reproduced batching defect remains
+valid, but must not be presented as the confirmed cause of this readback.
+
+The operator must enable the existing optional BMC SDK-event publisher and synco
+main-identity publisher, then configure all three monitor synco settings as in
+the README. BMC uses `[sdk] timingEventStream=dmtweeter_sdk_events`; synco uses
+`[diagnostics] mainTimingStream=dmtweeter_synco_main_timing`; the monitor uses
+`[synco] device=dmtweeter-synco`, `mainStream=dmtweeter_synco_main_timing`, and
+`sdkStream=dmtweeter_sdk_events`. Both history capacities default to 32768.
+The original SDK timestamp stream can remain enabled. Minimal synco diagnostics
+and the camera-based `monitor.maxFPS=3600` remain appropriate.
+
+These publishers require binaries containing the extension, and the changed
+configurations require instance restarts performed by the operator. Expected
+post-warm-up monitor modes are `ordinary` while synco is Off and `step0` while
+On, with the endpoint using `dmtweeter_sdk_events.startNs`. No deployed config or
+instrument state was changed by the agent; only this engineering record was
+updated locally.
