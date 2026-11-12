@@ -1167,40 +1167,12 @@ void IndiXmlParser::createEnableBLOB( const IndiProperty &ip )
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-///  Copy constructor.
-
-IndiXmlParser::IndiXmlParser( const IndiXmlParser &ixp )
-{
-  m_plxMessage = ::cloneLilXML( ixp.m_plxMessage );
-  m_pxeRoot = ::cloneXMLEle( ixp.m_pxeRoot );
-  ::memcpy( m_pcMessage, ixp.m_pcMessage, MaxErrorMsgSize );
-  m_szPrevXml = ixp.m_szPrevXml;
-}
-
-////////////////////////////////////////////////////////////////////////////////
 /// Destructor.
 
 IndiXmlParser::~IndiXmlParser()
 {
   ::delLilXML( m_plxMessage );
   ::delXMLEle( m_pxeRoot );
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Assigns the internal data of this object from an existing one.
-
-const IndiXmlParser &IndiXmlParser::operator=( const IndiXmlParser &ixpRhs )
-{
-  if ( &ixpRhs != this )
-  {
-    ::delLilXML( m_plxMessage );
-    ::delXMLEle( m_pxeRoot );
-    m_plxMessage = ::cloneLilXML( ixpRhs.m_plxMessage );
-    m_pxeRoot = ::cloneXMLEle( ixpRhs.m_pxeRoot );
-    ::memcpy( m_pcMessage, ixpRhs.m_pcMessage, MaxErrorMsgSize );
-    m_szPrevXml = ixpRhs.m_szPrevXml;
-  }
-  return *this;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1237,12 +1209,9 @@ string IndiXmlParser::createXmlString() const
 
   if ( m_pxeRoot != NULL )
   {
-    int nNumChars = 1 + ::sprlXMLEle( m_pxeRoot, 0 );
-    //szXml.reserve( nNumChars );
-    char *pcXml = ( char * )( ::malloc( nNumChars * sizeof( char ) ) );
-    ::memset( pcXml, 0, sizeof( char ) * nNumChars );
-    ::sprXMLEle( pcXml, m_pxeRoot, 0 );
-    szXml = string( pcXml );
+    // sprXMLEle writes the terminating null after the reported length, so size the string to hold it.
+    szXml.assign( ::sprlXMLEle( m_pxeRoot, 0 ) + 1, '\0' );
+    szXml.resize( ::sprXMLEle( &szXml[0], m_pxeRoot, 0 ) );
   }
   else if ( m_ssXml.str().size() > 0 )
   {

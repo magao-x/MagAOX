@@ -70,15 +70,15 @@ class IndiXmlParser
     /// Constructor from an existing IndiMessage.
     IndiXmlParser( const pcf::IndiMessage &imSend,
                    const std::string &szProtocolVersion = "1" );
-    /// Copy constructor.
-    IndiXmlParser( const IndiXmlParser &ixpRhs );
+    /// Copying is disabled: lilxml cannot clone a parser's in-progress state.
+    IndiXmlParser( const IndiXmlParser &ixpRhs ) = delete;
     /// Destructor.
     virtual ~IndiXmlParser();
 
   // Operators.
   public:
-    /// Assigns the internal data of this object from an existing one.
-    const IndiXmlParser &operator= ( const IndiXmlParser &ixpRhs );
+    /// Assignment is disabled: lilxml cannot clone a parser's in-progress state.
+    const IndiXmlParser &operator= ( const IndiXmlParser &ixpRhs ) = delete;
 
   // Methods.
   public:
