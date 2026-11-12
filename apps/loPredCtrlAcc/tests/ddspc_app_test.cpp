@@ -6,6 +6,7 @@
 #include "app_test_support.hpp"
 #include "../loPredCtrlAcc.hpp"
 #include "causal_input_test_data.hpp"
+#include "adc_transport_fixture.hpp"
 
 #include <random>
 
@@ -17,6 +18,9 @@ class loPredCtrlAcc_test : public loPredCtrlAcc
   public:
     using loPredCtrlAcc::configureShadowInputs;
     using loPredCtrlAcc::expireShadowInputs;
+    using loPredCtrlAcc::m_adcReader;
+    using loPredCtrlAcc::m_indiP_adc;
+    using loPredCtrlAcc::m_indiP_adcSource;
     using loPredCtrlAcc::m_indiP_ddspcAssisted;
     using loPredCtrlAcc::m_indiP_ddspcData;
     using loPredCtrlAcc::m_indiP_ddspcMode;
@@ -28,6 +32,7 @@ class loPredCtrlAcc_test : public loPredCtrlAcc
     using loPredCtrlAcc::processShadowApplied;
     using loPredCtrlAcc::processShadowRecord;
     using loPredCtrlAcc::processShadowWfs;
+    using loPredCtrlAcc::updateAdcINDI;
 
     /// Configure a small synthetic model without creating any native app resources.
     void configure( bool shadow /**< [in] Startup mode. */ );
@@ -617,5 +622,79 @@ TEST_CASE( "Handoff operational dimensions train finite shadow-only proposals of
     }
     app.requireInhibited();
     REQUIRE( app.appShutdown() == 0 );
+}
+} // namespace libXWCTest::loPredCtrlAccTest
+
+namespace libXWCTest::loPredCtrlAccTest
+{
+/** \brief Native ADC capture remains separate from model validity, training and every output helper. */
+TEST_CASE( "Stage 1 ADC observation preserves shadow output and training inhibition", "[loPredCtrlAcc][app][adc]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::loPredCtrlAcc::loadConfigImpl;
+    MagAOX::app::loPredCtrlAcc::appStartup;
+    MagAOX::app::loPredCtrlAcc::appShutdown;
+    MagAOX::app::loPredCtrlAcc::updateAdcINDI;
+#endif
+    // clang-format on
+    AdcTransportFixture             source( "ddspc-adc-app" ); // Fake API and private ordinary file only.
+    MagAOX::app::loPredCtrlAcc_test app;
+    app.configure( true );
+    app.config.m_values["adc.enabled"]    = "1";
+    app.config.m_values["adc.shmimName"]  = "ddspc-adc-app";
+    app.config.m_values["adc.max_age_us"] = "2000000";
+    REQUIRE( app.loadConfigImpl( app.config ) == 0 );
+    REQUIRE( app.appStartup() == 0 );
+    const auto end = std::chrono::steady_clock::now() + std::chrono::seconds( 1 );
+    while( !app.m_adcReader->status().m_valid && std::chrono::steady_clock::now() < end )
+    {
+        std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+    }
+    REQUIRE( app.m_adcReader->status().m_valid );
+    app.updateAdcINDI();
+    REQUIRE( app.m_indiP_adc["raw0"].get<double>() == 2049 );
+    REQUIRE( app.m_indiP_adc["raw1"].get<double>() == 2047 );
+    REQUIRE( app.m_indiP_adc["valid"].get<double>() == 1 );
+    REQUIRE( app.m_indiP_adc["acceleration1"].get<double>() == Approx( -.0083799 / 1.02 ) );
+    REQUIRE( app.m_indiP_adcSource["sample_counter"].get<std::string>() == "1" );
+    REQUIRE( app.m_indiP_adcSource["acquired_real_ns"].get<std::string>() ==
+             std::to_string( app.m_adcReader->status().m_latest.m_frame.m_acquiredRealNs ) );
+    app.unverifiedWfs();
+    REQUIRE_FALSE( app.m_shadowController->validity().m_accelValid );
+    REQUIRE( app.m_shadowController->status( DDSPC::ShadowMode::Standard ).m_updates == 0 );
+    REQUIRE( app.m_shadowController->status( DDSPC::ShadowMode::AccelAssisted ).m_updates == 0 );
+    app.rejectLegacyControls();
+    app.requireInhibited();
+    REQUIRE( app.appShutdown() == 0 );
+    REQUIRE_FALSE( app.m_adcReader->status().m_valid );
+    REQUIRE( source.reader() == 0 );
+    app.requireInhibited();
+}
+
+/** \brief ADC startup refuses Legacy execution and invalid calibration before any input/output helper starts. */
+TEST_CASE( "Stage 1 ADC configuration is shadow only and validates calibration", "[loPredCtrlAcc][app][adc]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::loPredCtrlAcc::loadConfigImpl;
+#endif
+    // clang-format on
+    for( const auto &entry : std::vector<std::pair<std::string, std::string>>{ { "parameters.shadow", "0" },
+                                                                               { "adc.sensitivity0", "0" },
+                                                                               { "adc.polarity1", "0" },
+                                                                               { "adc.capacity", "0" },
+                                                                               { "adc.max_code", "65536" },
+                                                                               { "adc.max_age_us", "-1" },
+                                                                               { "adc.shmimName", "dm01disp10" } } )
+    {
+        MagAOX::app::loPredCtrlAcc_test app;
+        app.configure( true );
+        app.config.m_values["adc.enabled"] = "1";
+        app.config.m_values[entry.first]   = entry.second;
+        REQUIRE( app.loadConfigImpl( app.config ) == -1 );
+        app.requireInhibited();
+        REQUIRE_FALSE( app.m_adcReader );
+    }
 }
 } // namespace libXWCTest::loPredCtrlAccTest

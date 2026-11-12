@@ -1,5 +1,13 @@
 # Offline DDSPC validation
 
+**Stage 1 native ADC capture:** see [ADC_INPUT.md](../ADC_INPUT.md) and the
+[opt-in shadow ADC example](../examples/loPredCtrlAcc-adc-shadow.conf.example).
+The existing-only UINT16 reader now provides calibrated, timestamped bounded
+retention and ADC diagnostics. Safe local tests use an explicit ImageStreamIO
+API double; no native application or instrument stream is launched. ADC health
+never certifies WFS/applied-input timing or trains either model. The earlier
+handoff/results below predate Stage 1 and remain historical evidence.
+
 Run on a personal workstation or isolated development environment. Nothing here
 requires instrument access, running the native application, or mounting DM streams.
 The numerical executables link Eigen and the existing mxlib headers; application
@@ -7,8 +15,8 @@ tests use stream-free lifecycle doubles and real INDI property objects.
 
 For the **manual exao2 handoff**, read [EXAO2_TESTING.md](../EXAO2_TESTING.md)
 and the [attachment-only example](../examples/loPredCtrlAcc-shadow.conf.example).
-**Live accelerometer-assisted prediction is blocked**: native shadow has no
-UINT16 ADC decoder, applied-command reader or exposure/clock adapter. WFS
+**Live accelerometer-assisted prediction is blocked**: native shadow still has no
+applied-command reader or exposure/clock adapter; Stage 1 adds ADC capture only. WFS
 callbacks invalidate models rather than invent those records. The guide is a
 conditional native-build/WFS-attachment procedure, not a DM enable procedure.
 

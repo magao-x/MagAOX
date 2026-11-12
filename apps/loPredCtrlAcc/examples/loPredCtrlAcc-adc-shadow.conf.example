@@ -1,0 +1,58 @@
+# Stage 1 ADC capture in output-inhibited shadow mode. See ../ADC_INPUT.md.
+# NOT a working live accelerometer-assisted training configuration.
+# Use a freshly rebuilt DDSPC_SHADOW_ONLY=yes binary with a unique -n name.
+# ADC capture is implemented; verified WFS exposure and applied-command adapters remain absent.
+
+[parameters]
+shadow = true
+shadow_min_updates = 0
+gain = 0.3
+copy_gain = 1.0
+# Explicitly honor copy_gain. Default true preserves the historical loading bug in existing Legacy configs.
+legacy_copy_gain_compat = false
+regularization = 100.0
+gamma = 1.0
+covariance = 1e-5
+history = 15
+future = 3
+num_modes = 2
+fpsSource = camwfs
+qrd = true
+is_integrating = false
+# Neither setting below enables output: the shadow-only build and shadow mode inhibit all frameGrabber use.
+own_shmim = false
+# Keep the incompatible legacy FLOAT sensor reader disabled for the UINT16 ADC stream.
+accel_enabled = false
+accel_channels = 2
+accel_history = 5
+accel_normalize = false
+
+[shmimMonitor]
+# Must be independently identified as the correct FLOAT modal residual, height1, width>=2; not the raw camera.
+shmimName = REPLACE_WITH_VERIFIED_MODAL_WFS_STREAM
+threadPrio = 0
+cpuset =
+getExistingFirst = false
+
+# No framegrabber section or DM output stream. Do not add a DM channel or copy a production output name here.
+
+# ADC health is separate from ddspc_data.accel_valid. No samples enter either learner yet.
+[adc]
+enabled = true
+shmimName = acc000
+profile = accelSim12
+min_code = 0
+max_code = 4095
+reject_rails = true
+zero0 = 2048
+zero1 = 2048
+volts_per_count0 = 0.0083799
+volts_per_count1 = 0.0083799
+sensitivity0 = 1.02
+sensitivity1 = 1.02
+polarity0 = 1
+polarity1 = 1
+capacity = 4096
+max_age_us = 20000
+max_interval_us = 1000
+clock_tolerance_us = 1000
