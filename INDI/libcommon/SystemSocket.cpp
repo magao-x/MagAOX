@@ -1456,14 +1456,17 @@ int SystemSocket::getInterfaces( vector<SystemSocket::Interface> &vecInterfaces 
         // The IP address is set in the struct.
         struct in_addr *psia1 = reinterpret_cast<struct in_addr *>( &( ifr->ifr_addr.sa_data[sizeof addrSock.sin_port] ) );
 
-        string szIP( string( ::inet_ntoa( *psia1 ) ) );
+        // inet_ntop writes to a caller-owned buffer; inet_ntoa returns a static buffer shared by all threads.
+        char pcAddr[INET_ADDRSTRLEN];
+
+        string szIP( ::inet_ntop( AF_INET, psia1, pcAddr, sizeof( pcAddr ) ) != NULL ? pcAddr : "" );
 
         // Overwrite the same piece of memory with the broadcast address.
         nRetVal = ::ioctl( fdSock, SIOCGIFBRDADDR, ifr );
 
         // The broadcast address has replaced the IP address in the struct.
         struct in_addr *psia2 = reinterpret_cast<struct in_addr *>( &( ifr->ifr_broadaddr.sa_data[sizeof addrSock.sin_port] ) );
-        string szBCast( string( ::inet_ntoa( *psia2 ) ) );
+        string szBCast( ::inet_ntop( AF_INET, psia2, pcAddr, sizeof( pcAddr ) ) != NULL ? pcAddr : "" );
 
         // Add this info to our vector.
         vecInterfaces.push_back( Interface( szName, szIP, szBCast ) );
