@@ -32,6 +32,9 @@ class AdcTransportFixture
     /// Recreate the private backing file; payload stays immutable for race-free threaded tests.
     void reconnect();
 
+    /// Atomically replace the private identity file while keeping borrowed payload storage unchanged.
+    void replace();
+
     /// Inspect bookkeeping only after the reader stops.
     pid_t reader() const;
 };

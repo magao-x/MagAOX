@@ -127,6 +127,7 @@ class AdcCapture
     std::vector<AdcFrame>  m_batch;       ///< Preallocated bounded stable-copy scratch.
     std::size_t            m_next{ 0 };   ///< Next ring insertion slot.
     std::uint64_t          m_cursor{ 0 }; ///< Last considered source counter, including rejected frames.
+    std::uint64_t          m_observedCounter{ 0 }; ///< Newest stable publication, including undrained producer history.
     bool                   m_bound{ false }, m_haveClock{ false }; ///< Cursor and clock anchor validity.
     bool                   m_clockFault{ false }; ///< Clock faults latch until a new source session is established.
     AdcClock               m_anchor;              ///< Stable session realtime-to-monotonic mapping.

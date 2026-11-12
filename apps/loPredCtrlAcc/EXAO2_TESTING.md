@@ -5,6 +5,8 @@ read-only native UINT16 capture and its separate shadow configuration. It remain
 unqualified against the native Linux/ImageStreamIO runtime. The original
 attachment-only example and earlier procedure below remain unchanged. ADC capture
 does not establish WFS/applied-input alignment or enable live model training.
+Use [ADC_EXAO2_TESTING.md](ADC_EXAO2_TESTING.md) for the current ADC-only native
+build/configuration and operator-run diagnostic commands.
 
 2026-11-06. Prepared and tested on personal Mac `ASTR-LT-428.local`.
 **No access to exao2, application launch, real DM command or deployment was performed.**
