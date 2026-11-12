@@ -67,7 +67,8 @@ TimeStamp::TimeStamp( const int &nYear, const int &nMonth, const int &nDay,
   // First get the current UTC. This will be modified to hold the
   // specified timestamp.
   ::time_t now = ::time( 0 );
-  ::tm *gmtm = ::gmtime( &now );
+  ::tm tmBuf;
+  ::tm *gmtm = ::gmtime_r( &now, &tmBuf );
 
   // Now fill in the rest of the struct with our desired values.
   gmtm->tm_sec = nSecond;
@@ -85,7 +86,7 @@ TimeStamp::TimeStamp( const int &nYear, const int &nMonth, const int &nDay,
   // The object pointed by gmtm is modified, setting the tm_wday and tm_yday
   // to their appropiate values, and modifying the other members as necessary
   // to values within the normal range representing the specified time.
-  m_tvCurr.tv_sec = local_timegm( gmtm );
+  m_tvCurr.tv_sec = ::timegm( gmtm );
   m_tvCurr.tv_usec = 0;
 }
 
@@ -451,7 +452,8 @@ string TimeStamp::getFormattedIsoTimeStr() const
   string szFormatted = "000000";
 
   time_t tNumSecs = getTimeValSecs();
-  tm *tmCurr = ::gmtime( &tNumSecs );
+  tm tmBuf;
+  tm *tmCurr = ::gmtime_r( &tNumSecs, &tmBuf );
 
   // transform date and time to broken-down time.
   if ( tmCurr != NULL )
@@ -477,7 +479,8 @@ string TimeStamp::getFormattedStr() const
 
   time_t tNumSecs = getTimeValSecs();
   int nNumMillis = getTimeValMicros() / 1000;
-  tm *tmCurr = ::gmtime( &tNumSecs );
+  tm tmBuf;
+  tm *tmCurr = ::gmtime_r( &tNumSecs, &tmBuf );
 
   // transform date and time to broken-down time.
   if ( tmCurr != NULL )
@@ -519,7 +522,8 @@ string TimeStamp::getFormattedIso8601Str() const
   // to convert a timeval to a tm.
   time_t tNumSecs = getTimeValSecs();
   int nNumMicros = getTimeValMicros();
-  tm *tmCurr = ::gmtime( &tNumSecs );
+  tm tmBuf;
+  tm *tmCurr = ::gmtime_r( &tNumSecs, &tmBuf );
 
   // transform date and time to broken-down time.
   if ( tmCurr != NULL )
@@ -556,7 +560,8 @@ string TimeStamp::getFormattedIsoDateStr() const
   string szFormatted = "00000000";
 
   time_t tNumSecs = getTimeValSecs();
-  tm *tmCurr = ::gmtime( &tNumSecs );
+  tm tmBuf;
+  tm *tmCurr = ::gmtime_r( &tNumSecs, &tmBuf );
 
   // transform date and time to broken-down time.
   if ( tmCurr != NULL )
@@ -653,7 +658,8 @@ unsigned int TimeStamp::getYear() const
   unsigned int uiYear = std::numeric_limits<unsigned int>::max();
 
   time_t tNumSecs = getTimeValSecs();
-  tm *tmCurr = ::gmtime( &tNumSecs );
+  tm tmBuf;
+  tm *tmCurr = ::gmtime_r( &tNumSecs, &tmBuf );
 
   if ( tmCurr != NULL )
   {
@@ -672,7 +678,8 @@ unsigned int TimeStamp::getYearMonth() const
   unsigned int uiMonth = std::numeric_limits<unsigned int>::max();
 
   time_t tNumSecs = getTimeValSecs();
-  tm *tmCurr = ::gmtime( &tNumSecs );
+  tm tmBuf;
+  tm *tmCurr = ::gmtime_r( &tNumSecs, &tmBuf );
 
   if ( tmCurr != NULL )
   {
@@ -691,7 +698,8 @@ unsigned int TimeStamp::getMonthDay() const
   unsigned int uiDay = std::numeric_limits<unsigned int>::max();
 
   time_t tNumSecs = getTimeValSecs();
-  tm *tmCurr = ::gmtime( &tNumSecs );
+  tm tmBuf;
+  tm *tmCurr = ::gmtime_r( &tNumSecs, &tmBuf );
 
   if ( tmCurr != NULL )
   {
@@ -710,7 +718,8 @@ unsigned int TimeStamp::getDayHour() const
   unsigned int uiHour = std::numeric_limits<unsigned int>::max();
 
   time_t tNumSecs = getTimeValSecs();
-  tm *tmCurr = ::gmtime( &tNumSecs );
+  tm tmBuf;
+  tm *tmCurr = ::gmtime_r( &tNumSecs, &tmBuf );
 
   if ( tmCurr != NULL )
   {
@@ -729,7 +738,8 @@ unsigned int TimeStamp::getHourMinute() const
   unsigned int uiMinute = std::numeric_limits<unsigned int>::max();
 
   time_t tNumSecs = getTimeValSecs();
-  tm *tmCurr = ::gmtime( &tNumSecs );
+  tm tmBuf;
+  tm *tmCurr = ::gmtime_r( &tNumSecs, &tmBuf );
 
   if ( tmCurr != NULL )
   {
@@ -748,7 +758,8 @@ unsigned int TimeStamp::getMinuteSecond() const
   unsigned int uiSecond = std::numeric_limits<unsigned int>::max();
 
   time_t tNumSecs = getTimeValSecs();
-  tm *tmCurr = ::gmtime( &tNumSecs );
+  tm tmBuf;
+  tm *tmCurr = ::gmtime_r( &tNumSecs, &tmBuf );
 
   if ( tmCurr != NULL )
   {
@@ -897,34 +908,6 @@ double TimeStamp::getMJD() const
   ///  to MJD 2400000, and is generally accepted as 0, since the "24" will not
   ///  change for three centuries to "25".
   return xDays + 40587.0;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// 'timegm' is nonstandard at this time, so our own version is implemented
-
-::time_t TimeStamp::local_timegm( ::tm *tmCurr )
-{
-  ::time_t tUtc;
-  char *pcTz;
-
-  // Get the current time zone. This will be null if it does not exist.
-  pcTz = ::getenv( "TZ" );
-
-  // Set the time zone to be UTC.
-  ::setenv( "TZ", "UTC0", 1 );
-  ::tzset();
-
-  // Make a UTC time. (time in the UTC time zone).
-  tUtc = ::mktime( tmCurr );
-
-  // Set the time zone back, or delete it if it did not exist.
-  if ( pcTz != NULL )
-    ::setenv( "TZ", pcTz, 1 );
-  else
-    ::unsetenv( "TZ" );
-  :: tzset();
-
-  return tUtc;
 }
 
 ////////////////////////////////////////////////////

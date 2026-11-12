@@ -138,10 +138,6 @@ class TimeStamp
     /// If there is an error, numeric_limits<unsigned int>::max() is returned.
     unsigned int getYear() const;
 
-  private:
-    /// 'timegm' is nonstandard at this time, so our own version is implemented.
-    ::time_t local_timegm( ::tm *tmCurr );
-
   // Variables
   private:
     /// The info about the stored time.
