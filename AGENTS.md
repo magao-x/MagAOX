@@ -148,3 +148,13 @@ Follow these code style and documentation rules exactly.
   - Use the existing Allman brace style; do not compress control bodies onto one line.
   - Leave a blank line between setup statements and the following control block, and between a completed block and the next logical operation.
   - Separate logical groups of declarations or operations with blank lines; keep closely related operations together.
+
+27) INDI Publish/Subscribe
+  - Register subscriptions during startup using the existing framework helpers.
+  - Do not periodically request subscribed properties or call
+    sendGetPropertySetList(true) to refresh them. Leave initial requests,
+    unresolved-subscription retries, and recovery to the framework.
+  - INDI properties commonly publish only when changed. Retain the last
+    received value until another update or explicit invalidation.
+  - Do not treat silence as stale state or introduce receipt-age expiry
+    unless the source explicitly guarantees a documented heartbeat.

@@ -296,3 +296,90 @@ SDK work around 104 microseconds suggests more throughput headroom than the
 joined callback, but observed maxima already exceed 110 microseconds. This
 implementation does not establish a 6 kHz physical-delivery guarantee or
 change dmSyncopation's operational policy.
+
+## Optional SDK-entry timestamp stream
+
+`sdk.startTimeStream` is empty by default. In pipeline mode, a distinct name such
+as `dmtweeter_sdk_start` enables a metadata-only stream for the independent
+`loopTimingMonitor`. Both `sdk.workerEnabled=true` and
+`sdk.pipelineEnabled=true` are required; detailed DM timing may remain disabled.
+No controller mode is enabled automatically.
+
+The stream has a 1 x 1 unused `uint8` pixel, zero reader semaphores, and an
+immutable `DM_SDK_TIME=monotonic-v1` keyword. Its metadata contract is:
+
+| Field | Meaning |
+| --- | --- |
+| `atime` | Original `CLOCK_MONOTONIC` SDK-entry timestamp captured by the existing worker. |
+| `writetime` | `CLOCK_MONOTONIC` time when ordered post-processing publishes the entry. |
+| `cnt0` | Number of published successful native set submissions in this stream incarnation. |
+| `inode` | New stream identity for each publisher incarnation. |
+
+Initial zero metadata is not a sample. Counters are unrelated to camera frame
+numbers. Administrative calls, failed native submissions, and jobs cancelled
+before SDK entry are excluded. Successful native submissions are retained even
+if a diagnostic timeout or later product/post-processing failure occurs. The
+counter does not identify excluded native attempts; use existing controller
+outcome diagnostics for those failures.
+
+Publication runs after existing pipeline finalization and before credit
+retirement. It neither adds a clock read to SDK dispatch nor changes native-call
+timestamps. The later `writetime` is not substituted for SDK entry. No semaphore
+slots are claimed, waited on, flushed or posted, including ImageStreamIO's
+reserved logging-semaphore storage. Consumers must poll coherent metadata and
+detect overwritten updates or changed inodes.
+
+Names are validated against controller input/output streams, and the publisher
+uses an exclusive lifetime lock. It never replaces an incompatible stream.
+Restart replaces only its recognized stale protocol with a fresh inode; readers
+must reattach. Failure to open the optional stream logs an ordinary startup
+diagnostic and leaves control operational. Runtime publication failures increment
+`sdk_pipeline.startTimeFailures` without faulting the DM pipeline;
+`sdk_pipeline.startTimeEnabled` reports attachment availability. A counter that
+cannot advance is left unchanged. There are no per-frame retry loops or logs.
+
+SDK entry cannot be subtracted directly from the ordinary OCAM/EDT camera's
+REALTIME `atime`. The independent monitor must perform a qualified clock mapping
+and supply the temporal association assumptions. Post-processing can delay
+visibility, and its extra work can delay pipeline credit retirement; this
+diagnostic does not promise zero indirect scheduling impact.
+
+## Optional SDK provenance history
+
+`sdk.timingEventStream` is empty by default. A distinct name such as
+`dmtweeter_sdk_events` enables a bounded, versioned history for exact joins to
+dmSyncopation's qualified main-command labels. Both `sdk.workerEnabled=true` and
+`sdk.pipelineEnabled=true` are required. `sdk.timingEventCapacity` defaults to
+32768 records and accepts values from 4 through 1048576. These settings require a
+restart. The existing `sdk.startTimeStream` protocol remains independent and may
+be enabled at the same time.
+
+Each SDK event contains the original monotonic SDK-entry timestamp and the
+command's frozen combined-stream identity: inode, publication counter, and raw
+publication writetime seconds and nanoseconds. The combined writetime is an
+identity component, not a replacement for SDK entry or a clock-converted
+endpoint. Events use a separate increasing producer sequence; a failed
+publication consumes its sequence so downstream readers can detect missing
+events. This sequence restarts only with a new writer incarnation.
+
+The ordered post owner publishes after existing finalization and before credit
+retirement. Successful native calls remain represented after timeout or later
+post failure; failed calls, administrative calls, and cancelled unsent work
+produce no event. Publishing adds no SDK-thread work, clock read, semaphore
+operation, allocation, or retry loop. With the option disabled, post processing
+only checks whether the optional publisher is enabled. Detailed DM timing may
+remain disabled.
+
+The shared history uses zero semaphores, exclusive writer ownership, and a new
+inode on restart. An incompatible name collision is left untouched. Consumers
+poll retained records, detect overwrite or producer-sequence gaps, and reattach
+on incarnation changes. Capacity limits retained history; it does not queue or
+delay mirror commands. At 8000 successful submissions per second, the default
+capacity retains about four seconds.
+
+An opening failure logs a startup diagnostic and leaves mirror control
+operational. Runtime failures increment `sdk_pipeline.timingEventFailures`
+without faulting the controller; `sdk_pipeline.timingEventEnabled` reports
+publisher availability. Counter exhaustion stops further diagnostic records
+without wrapping. There are no per-command failure logs. As with the v1
+timestamp stream, post work can indirectly delay pipeline credit retirement.

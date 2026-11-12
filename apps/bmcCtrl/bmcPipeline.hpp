@@ -452,16 +452,24 @@ inline int bmcCtrl::setupSdkDiagnostics()
                                   "preparationFailures",
                                   "policy",
                                   "priority",
-                                  "allowedCpus" } )
+                                  "allowedCpus",
+                                  "startTimeEnabled",
+                                  "startTimeFailures",
+                                  "timingEventEnabled",
+                                  "timingEventFailures" } )
         {
             indi::addNumberElement( m_indiP_pipeline, name, -1.0, std::numeric_limits<double>::max(), 0.0, "%g" );
         }
 
-        m_indiP_pipeline["enabled"]     = 1.0;
-        m_indiP_pipeline["capacity"]    = double( pipelineCapacity );
-        m_indiP_pipeline["policy"]      = double( m_pipelinePolicy );
-        m_indiP_pipeline["priority"]    = double( m_pipelineActualPrio );
-        m_indiP_pipeline["allowedCpus"] = double( m_pipelineAllowedCpus );
+        m_indiP_pipeline["enabled"]             = 1.0;
+        m_indiP_pipeline["capacity"]            = double( pipelineCapacity );
+        m_indiP_pipeline["policy"]              = double( m_pipelinePolicy );
+        m_indiP_pipeline["priority"]            = double( m_pipelineActualPrio );
+        m_indiP_pipeline["allowedCpus"]         = double( m_pipelineAllowedCpus );
+        m_indiP_pipeline["startTimeEnabled"]    = m_sdkStartTimeStream.enabled() ? 1.0 : 0.0;
+        m_indiP_pipeline["startTimeFailures"]   = double( m_sdkStartTimeFailures.load( std::memory_order_relaxed ) );
+        m_indiP_pipeline["timingEventEnabled"]  = m_sdkTimingEventStream.enabled() ? 1.0 : 0.0;
+        m_indiP_pipeline["timingEventFailures"] = double( m_sdkTimingEventFailures.load( std::memory_order_relaxed ) );
 
         if( registerIndiPropertyReadOnly( m_indiP_pipeline ) < 0 )
         {
@@ -482,6 +490,20 @@ inline int bmcCtrl::startPipelineWorker()
     if( m_pipelineResult.open( m_pipelineResultStream, MagAOX::dmCompletion::Kind::sdk ) < 0 )
     {
         return log<software_error, -1>( { errno, "opening pipeline SDK-result stream" } );
+    }
+
+    if( m_sdkStartTimeStream.open( m_sdkStartTimeStreamName ) < 0 )
+    {
+        m_sdkStartTimeFailures.fetch_add( 1, std::memory_order_relaxed );
+        log<software_error>( { errno, "opening optional SDK-start timestamp stream; continuing without it" } );
+    }
+
+    m_sdkTimingEventSequence = 0;
+
+    if( m_sdkTimingEventStream.open( m_sdkTimingEventStreamName, m_sdkTimingEventCapacity ) < 0 )
+    {
+        m_sdkTimingEventFailures.fetch_add( 1, std::memory_order_relaxed );
+        log<software_error>( { errno, "opening optional SDK timing-event stream; continuing without it" } );
     }
 
     m_pipelineStop       = false;
@@ -535,6 +557,9 @@ inline void bmcCtrl::stopPipelineWorker() noexcept
     {
         m_pipelineThread.join();
     }
+
+    m_sdkStartTimeStream.close();
+    m_sdkTimingEventStream.close();
 }
 
 inline void bmcCtrl::pipelineThreadStart( bmcCtrl *app )
@@ -640,6 +665,36 @@ inline void bmcCtrl::pipelineThreadExec() noexcept
         if( postFailed )
         {
             log<text_log>( "DM pipeline post processing failed after successful SDK submission", logPrio::LOG_ERROR );
+        }
+
+        if( successful && !m_sdkStartTimeStream.publish( job.result.startNs ) )
+        {
+            m_sdkStartTimeFailures.fetch_add( 1, std::memory_order_relaxed );
+        }
+
+        if( successful && m_sdkTimingEventStream.enabled() )
+        {
+            MagAOX::dmTimingEvents::Record event;
+            event.kind    = MagAOX::dmTimingEvents::Kind::sdk;
+            event.key     = { job.identity.inputInode,
+                              job.identity.inputCounter,
+                              job.identity.publicationSec,
+                              job.identity.publicationNsec };
+            event.startNs = job.result.startNs;
+
+            if( m_sdkTimingEventSequence == UINT64_MAX )
+            {
+                m_sdkTimingEventFailures.fetch_add( 1, std::memory_order_relaxed );
+            }
+            else
+            {
+                event.sequence = ++m_sdkTimingEventSequence;
+
+                if( !m_sdkTimingEventStream.publish( event ) )
+                {
+                    m_sdkTimingEventFailures.fetch_add( 1, std::memory_order_relaxed );
+                }
+            }
         }
 
         { //mutex scope
