@@ -22,6 +22,25 @@ drivers, never instrument hardware or instrument INDI tunnels.
   F3 a misconfigured MagAOXApp refuses to start and logs the empty key.
 - Stefan's branch has the same D1 behavior as dev, so it is not the dev fix. It does
   fix a dev startup segfault (D3) and the old resurrector server's separate loops.
+- **2026-11-11: the branch is deployed on AOC, ICC and RTC (rebuilt and restarted),
+  and `getINDI` still never stops.** One app had not been rebuilt because it was on a
+  different branch. After it was rebuilt, `getINDI` exits normally. So the
+  indiserver changes alone were not enough on the instrument, and the app-side
+  changes are needed. The app was `accelSim` (`acc000`, a local driver on RTC),
+  built from `parkertjohnson1/accelSim`. The checkout on exao2 was at `a1a8fb56`
+  with a clean tree; only build products were untracked. At that commit, and at
+  every other on the branch, accelSim subscribes only to non-empty devices
+  (`camwfs.fps` in `acc000.conf`), has no polling, and never re-sends `def`s. Its
+  `MagAOXApp` base (merge-base `cd37915d`, 2026-10-22) already has the retry
+  backoff (`1a2d2503`). **The mechanism is unconfirmed.** The untracked binary may
+  have predated that commit or been built from local edits, or restarting `acc000`
+  may have cleared a bad runtime state. If the symptom returns, `indi_traffic.py`
+  should name the device.
+- **No routing loop is needed for this symptom.** One app that sends a named
+  `getProperties` more often than every 2 s makes the source send a `def` each time,
+  and that `def` reaches every all-device client on every server. That alone keeps
+  `getINDI` from ever going quiet, and the indiserver changes would not help. vpdu0's 5 s poll was under that threshold alone, but it added to the def
+  traffic.
 
 ## Implementation
 
@@ -215,6 +234,59 @@ one server restarts while its peers are up. It is not the libc crash in
 `doc/incidents/2026-03-03-indiserver-segfault.md`. Stefan's branch fixes it with
 `DvrInfo::ready`, set after the write lock and checked in
 `q2Drivers`/`q2SnoopingDrivers`; it could be ported to dev on its own.
+
+## After deployment: `getINDI` still never stops
+
+`getINDI` exits only after 2 s without a top-level `def*` (`getINDI.c`, `alarm` reset
+on `def`). Every device-wide `getProperties` that reaches a MagAOXApp makes it send all
+its defs and re-send every subscription (`handleGetProperties`). Each named
+subscription request then makes the source app send one def, which reaches every
+all-device client on every server. Repeated device-wide requests therefore keep
+`getINDI` alive whether or not there is a routing loop. Candidates the branch does
+not address:
+
+- **H1, not deployed everywhere:** the running `indiserver` is not the new binary, or
+  other chained servers still run old binaries: `isROC` and `isCOC` chain all devices
+  of AOC, ICC and RTC, and `isACC001` is a leaf under ICC.
+- **H2, reconnect storm:** a client or chained connection more than 50 MB behind
+  (`DEFMAXQSIZ`) is shut down (`Client N: ... bytes behind, shutting down`, or
+  `Driver X: ... bytes behind, restarting` for a remote driver). A remote driver
+  reconnects at once and sends `<getProperties device='X'/>`, so X dumps and
+  re-subscribes. `isROC`/`isCOC` hold one connection per remote device, over slow
+  links. The bursts make other connections fall behind, so the storm can sustain
+  itself.
+- **H3, crash-looping app:** each restart sends a full def dump and all
+  subscriptions (`Driver X: Exit status`/`Exit signal`, `restart #N`).
+- **H4, client sending generic `getProperties` repeatedly:** each one makes every app
+  on all three servers dump and re-subscribe. For example, a purepyindi2 client
+  sends a catch-all `getProperties` on every reconnect.
+- **H6, a driver or client polling named `getProperties` faster than every 2 s:**
+  each poll draws one `def`, broadcast to every all-device client. This matches the
+  accelSim fix. In `indi_traffic.py` it shows up as one key with a steady `def` rate.
+- **H5, no loop:** an app re-sends `def`s as normal operation, for example a
+  property whose elements change. The traffic would be one or a few keys, not full
+  dumps.
+
+`indi_traffic.py` (in the harness) separates these. It counts `def` vectors per
+second and per device after the reply to its own request, with an approximate
+number of full dumps per device. In simulation, the branch is quiet at 2.1 s with
+no defs after 3 s. Dev with `cfg_empty2.json` gives about 3,500 def vectors/s from
+the looping devices and never goes quiet. Note that `client.py` counts member
+elements (`defText` etc.) as well as vectors, so its def counts elsewhere in this
+document are element counts.
+
+Data requested from the instrument, from each of AOC, ICC and RTC:
+
+1. Confirm the binary: whether `strings` of the installed `indiserver` contains
+   `ignoring snoop getProperties`, the binary mtime, and the `indiserver` process
+   start time. Also check whether `isROC`/`isCOC`/`isACC001` are running and which
+   build they run.
+2. `indi_traffic.py 7624 30`.
+3. Counts of `bytes behind`, `restart #`, `now connected`, `Exit status`,
+   `Exit signal` and `ignoring snoop` in the last `logdump` files of the indiserver
+   app.
+4. `getProperties` arriving over TCP, with source ports, from `tcpdump`, mapped to
+   processes with `ss -tnp`.
 
 ## Finding the culprit on the instrument (for the user to run)
 

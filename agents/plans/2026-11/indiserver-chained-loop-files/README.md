@@ -16,6 +16,11 @@ instrument hardware or instrument INDI tunnels.
   backoff. The device name is `basename(argv[0])`, through the `drv/` symlinks.
 - `client.py port seconds [device]`: `getINDI`-like counter. It prints `def`/`set`
   per second and when a `getINDI` with a 2 s quiet timeout would have exited.
+- `indi_traffic.py [host:]port [seconds] [device]`: read-only profiler for a live
+  server (sends one `getProperties`, like `getINDI`). It prints `def`/`set`/`del`/
+  `message` vectors per second with the top `def` devices each second. For t ≥ 3 s it
+  prints defs per device, distinct properties and approximate full dumps, plus the
+  top `def` and `set` keys. `client.py` counts member elements too.
 - `cfg.json`: devices, properties and snoops (MagAO-X-like cross-server snoops).
   `cfg_nosnoop.json` has the snoops removed. `cfg_univ.json` makes `loloop` emit one
   device-less `<message>` 8 s after start.
