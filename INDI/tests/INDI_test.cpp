@@ -284,15 +284,14 @@ TEST_CASE( "IndiXmlParser serializes independent messages concurrently", "[IndiX
     }
 
     CHECK( runConcurrently( inputs.size(),
-                                        [&]( size_t index )
-                                        {
-                                            const auto escaped = pcf::IndiXmlParser::createSafeXmlString( inputs[index] );
-                                            const auto xml     = index % 2 ? makeSetTextXml( properties[index] )
-                                                                           : makeDefTextXml( properties[index] );
+                            [&]( size_t index )
+                            {
+                                const auto escaped = pcf::IndiXmlParser::createSafeXmlString( inputs[index] );
+                                const auto xml     = index % 2 ? makeSetTextXml( properties[index] )
+                                                               : makeDefTextXml( properties[index] );
 
-                                            return escaped == expected[index] &&
-                                                   xml.find( expected[index] ) != std::string::npos;
-                                        } ) );
+                                return escaped == expected[index] && xml.find( expected[index] ) != std::string::npos;
+                            } ) );
 }
 
 /// Parsed messages reserialize through lilxml, whose entity buffer must be private to each thread.
@@ -370,18 +369,18 @@ namespace libcommon_test
 /// Concurrent ISO-8601 formatting must not share gmtime's static broken-down time.
 TEST_CASE( "TimeStamp formats ISO-8601 strings concurrently", "[TimeStamp][concurrency]" )
 {
-    const std::array<timeval, 4>     times{ { { 0, 0 }, { 946684800, 1 }, { 1700000000, 500000 }, { 2000000000, 999999 } } };
+    const std::array<timeval, 4> times{
+        { { 0, 0 }, { 946684800, 1 }, { 1700000000, 500000 }, { 2000000000, 999999 } } };
     const std::array<std::string, 4> expected{ "1970-01-01T00:00:00.000000Z",
                                                "2000-01-01T00:00:00.000001Z",
                                                "2023-11-14T22:13:20.500000Z",
                                                "2033-05-18T03:33:20.999999Z" };
 
     CHECK( runConcurrently( times.size(),
-                                        [&]( size_t index )
-                                        {
-                                            return pcf::TimeStamp( times[index] ).getFormattedIso8601Str() ==
-                                                   expected[index];
-                                        } ) );
+                            [&]( size_t index )
+                            {
+                                return pcf::TimeStamp( times[index] ).getFormattedIso8601Str() == expected[index];
+                            } ) );
 }
 
 /// Calendar construction must interpret its fields as UTC without modifying the process TZ.

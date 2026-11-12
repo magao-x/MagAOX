@@ -8,10 +8,10 @@
 
 #include <string>
 #ifdef WIN32
-#include <winsock2.h>
+    #include <winsock2.h>
 #else
-#include <iosfwd>
-#include <sys/time.h>
+    #include <iosfwd>
+    #include <sys/time.h>
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -24,7 +24,7 @@ namespace pcf
  */
 class TimeStamp
 {
-  // Constructor/destructor/copy constructor.
+    // Constructor/destructor/copy constructor.
   public:
     /// Construct with the current time.
     TimeStamp();
@@ -49,39 +49,39 @@ class TimeStamp
     /// Destructor.
     virtual ~TimeStamp();
 
-  // Operators
+    // Operators
   public:
     /// Assign from another TimeStamp.
-    const TimeStamp &operator= ( const TimeStamp &tsRhs /**< [in] TimeStamp to copy. */ );
+    const TimeStamp &operator=( const TimeStamp &tsRhs /**< [in] TimeStamp to copy. */ );
 
     /// Assign from a timeval.
-    const TimeStamp &operator= ( const timeval &tv /**< [in] Time since the epoch. */ );
+    const TimeStamp &operator=( const timeval &tv /**< [in] Time since the epoch. */ );
 
     /// Assign from a number of milliseconds.
-    const TimeStamp &operator= ( const int &nMillis /**< [in] Milliseconds since the epoch, or an interval. */ );
+    const TimeStamp &operator=( const int &nMillis /**< [in] Milliseconds since the epoch, or an interval. */ );
 
     /// Return the interval from tsRhs to this time.
-    TimeStamp operator- ( const TimeStamp &tsRhs /**< [in] Earlier time. */ ) const;
+    TimeStamp operator-( const TimeStamp &tsRhs /**< [in] Earlier time. */ ) const;
 
     /// Return this time advanced by an interval.
-    TimeStamp operator+ ( const TimeStamp &tsRhs /**< [in] Interval to add. */ ) const;
+    TimeStamp operator+( const TimeStamp &tsRhs /**< [in] Interval to add. */ ) const;
 
     /// Return true if this time is later than tsRhs.
-    bool operator> ( const TimeStamp &tsRhs /**< [in] Time to compare. */ ) const;
+    bool operator>( const TimeStamp &tsRhs /**< [in] Time to compare. */ ) const;
 
     /// Return true if this time is not earlier than tsRhs.
-    bool operator>= ( const TimeStamp &tsRhs /**< [in] Time to compare. */ ) const;
+    bool operator>=( const TimeStamp &tsRhs /**< [in] Time to compare. */ ) const;
 
     /// Return true if this time is earlier than tsRhs.
-    bool operator< ( const TimeStamp &tsRhs /**< [in] Time to compare. */ ) const;
+    bool operator<( const TimeStamp &tsRhs /**< [in] Time to compare. */ ) const;
 
     /// Return true if this time is not later than tsRhs.
-    bool operator<= ( const TimeStamp &tsRhs /**< [in] Time to compare. */ ) const;
+    bool operator<=( const TimeStamp &tsRhs /**< [in] Time to compare. */ ) const;
 
     /// Return true if both times are equal.
     bool operator==( const TimeStamp &tsRhs /**< [in] Time to compare. */ ) const;
 
-  // Methods
+    // Methods
   public:
     /// Decrement the time stamp one day.
     void decrementDay();
@@ -100,7 +100,8 @@ class TimeStamp
     bool intervalElapsedMillis( const int iInterval /**< [in] Interval in milliseconds. */ );
 
     /// Sets the internal time from a ISO 8601 formatted string.
-    void fromFormattedIso8601Str( const std::string &szIso8601 /**< [in] UTC time, e.g. 1997-07-16T19:20:30.451243Z. */ );
+    void
+    fromFormattedIso8601Str( const std::string &szIso8601 /**< [in] UTC time, e.g. 1997-07-16T19:20:30.451243Z. */ );
 
     /// Sets the internal time from a Modified Julian Day number.
     void fromMJD( const double &xMJD /**< [in] Modified Julian Day number. */ );
@@ -174,13 +175,13 @@ class TimeStamp
     /// Returns the microsecond part of the time val struct.
     inline int getTimeValMicros() const
     {
-      return m_tvCurr.tv_usec;
+        return m_tvCurr.tv_usec;
     }
 
     /// Returns the seconds part of the time val struct.
     inline int getTimeValSecs() const
     {
-      return m_tvCurr.tv_sec;
+        return m_tvCurr.tv_sec;
     }
 
     /// Returns the underlying timeval struct.
@@ -196,7 +197,7 @@ class TimeStamp
     /// If there is an error, numeric_limits<unsigned int>::max() is returned.
     unsigned int getYear() const;
 
-  // Variables
+    // Variables
   private:
     /// The info about the stored time.
     timeval m_tvCurr;
@@ -205,7 +206,7 @@ class TimeStamp
 } // Namespace pcf
 
 /// Write the TimeStamp formatted by getFormattedStr() to a stream.
-std::ostream &operator<<( std::ostream &strmOut /**< [in,out] Destination stream. */,
+std::ostream &operator<<( std::ostream         &strmOut /**< [in,out] Destination stream. */,
                           const pcf::TimeStamp &tsRhs /**< [in] TimeStamp to write. */ );
 
 ////////////////////////////////////////////////////////////////////////////////

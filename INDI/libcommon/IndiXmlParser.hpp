@@ -27,50 +27,50 @@ class IndiXmlParser
     /// INDI XML document types this parser recognizes.
     enum MessageType
     {
-      UnknownType = 0,
-      // Define properties.
-      DefBLOBVector,
-      DefLightVector,
-      DefNumberVector,
-      DefSwitchVector,
-      DefTextVector,
-      // Delete properties.
-      DelProperty,
-      // Enable blobs for a client.
-      EnableBLOB,
-      // Command to enable snooping messages from other devices.
-      GetProperties,
-      // A message.
-      Message,
-      // Update properties.
-      NewBLOBVector,
-      NewNumberVector,
-      NewSwitchVector,
-      NewTextVector,
-      // Set properties.
-      SetBLOBVector,
-      SetLightVector,
-      SetNumberVector,
-      SetSwitchVector,
-      SetTextVector,
+        UnknownType = 0,
+        // Define properties.
+        DefBLOBVector,
+        DefLightVector,
+        DefNumberVector,
+        DefSwitchVector,
+        DefTextVector,
+        // Delete properties.
+        DelProperty,
+        // Enable blobs for a client.
+        EnableBLOB,
+        // Command to enable snooping messages from other devices.
+        GetProperties,
+        // A message.
+        Message,
+        // Update properties.
+        NewBLOBVector,
+        NewNumberVector,
+        NewSwitchVector,
+        NewTextVector,
+        // Set properties.
+        SetBLOBVector,
+        SetLightVector,
+        SetNumberVector,
+        SetSwitchVector,
+        SetTextVector,
     };
 
     /// Fixed buffer sizes.
     enum Constants
     {
-      MaxErrorMsgSize = 256,
+        MaxErrorMsgSize = 256,
     };
 
   public:
     /// Whether a complete XML document has been parsed.
     enum State
     {
-      UnknownState = 0,
-      IncompleteState,
-      CompleteState
+        UnknownState = 0,
+        IncompleteState,
+        CompleteState
     };
 
-  // Constructor/copy constructor/destructor.
+    // Constructor/copy constructor/destructor.
   public:
     /// Construct an empty parser ready to receive XML.
     IndiXmlParser( const std::string &szProtocolVersion = "1" /**< [in] INDI protocol version for generated XML. */ );
@@ -87,12 +87,12 @@ class IndiXmlParser
     /// Destructor.
     virtual ~IndiXmlParser();
 
-  // Operators.
+    // Operators.
   public:
     /// Assignment is disabled: lilxml cannot clone a parser's in-progress state.
-    const IndiXmlParser &operator= ( const IndiXmlParser &ixpRhs /**< [in] Unused. */ ) = delete;
+    const IndiXmlParser &operator=( const IndiXmlParser &ixpRhs /**< [in] Unused. */ ) = delete;
 
-  // Methods.
+    // Methods.
   public:
     /// Reset this object.
     void clear();
@@ -114,12 +114,12 @@ class IndiXmlParser
      * call, so call again with an empty string until getState() is no longer CompleteState.
      */
     void parseXml( const std::string &szXml /**< [in] Newly received XML text. */,
-                   std::string &szErrorMsg /**< [out] Parser error, or empty on success. */ );
+                   std::string       &szErrorMsg /**< [out] Parser error, or empty on success. */ );
 
     /// Parse the next complete XML document from a byte buffer.
-    void parseXml( const char *pcXml /**< [in] Newly received XML bytes. */,
+    void parseXml( const char         *pcXml /**< [in] Newly received XML bytes. */,
                    const unsigned int &uiNumBytes /**< [in] Number of bytes in pcXml. */,
-                   std::string &szErrorMsg /**< [out] Parser error, or empty on success. */ );
+                   std::string        &szErrorMsg /**< [out] Parser error, or empty on success. */ );
 
     /// Set the version of the INDI protocol.
     void setProtocolVersion( const std::string &szProtocolVersion /**< [in] New INDI protocol version. */ );
@@ -130,7 +130,7 @@ class IndiXmlParser
      */
     static std::string createSafeXmlString( const std::string &szText /**< [in] Text to escape. */ );
 
-  // Helper functions.
+    // Helper functions.
   private:
     /// Returns the string type given the enumerated type.
     static std::string convertTypeToString( const MessageType &tType /**< [in] Message type. */ );
@@ -199,12 +199,12 @@ class IndiXmlParser
 
     /// Returns an attribute value, or an empty string if the element or attribute is missing.
     std::string getAttributeValue( const std::string &szAttributeName /**< [in] Attribute to look up. */,
-                                   XMLEle *pxeRoot /**< [in] Element holding the attribute. */ ) const;
+                                   XMLEle            *pxeRoot /**< [in] Element holding the attribute. */ ) const;
 
     /// Initialize all data for a newly constructed parser.
     void init( const std::string &szProtocolVersion = "1" /**< [in] INDI protocol version for generated XML. */ );
 
-  // Members.
+    // Members.
   private:
     /// A pointer to the entire data structure which holds the xml data.
     /// This is used to parse XML data.
@@ -232,12 +232,12 @@ class IndiXmlParser
 ////////////////////////////////////////////////////////////////////////////////
 
 /// Feed stream text up to the next newline to the parser.
-std::istream &operator>> ( std::istream &strmIn /**< [in] Stream holding XML text. */,
-                           pcf::IndiXmlParser &rhs /**< [in,out] Parser receiving the text. */ );
+std::istream &operator>>( std::istream       &strmIn /**< [in] Stream holding XML text. */,
+                          pcf::IndiXmlParser &rhs /**< [in,out] Parser receiving the text. */ );
 
 /// Write the parser's current XML document to a stream.
-std::ostream &operator<< ( std::ostream &strmOut /**< [in,out] Destination stream. */,
-                           const pcf::IndiXmlParser &rhs /**< [in] Parser to serialize. */ );
+std::ostream &operator<<( std::ostream             &strmOut /**< [in,out] Destination stream. */,
+                          const pcf::IndiXmlParser &rhs /**< [in] Parser to serialize. */ );
 
 ////////////////////////////////////////////////////////////////////////////////
 

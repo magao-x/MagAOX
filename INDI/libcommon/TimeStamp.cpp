@@ -12,21 +12,21 @@
 
 #include "TimeStamp.hpp"
 
-using std::string;
+using pcf::TimeStamp;
 using std::ostream;
+using std::setfill;
+using std::setprecision;
+using std::setw;
+using std::string;
 using std::stringstream;
 using std::transform;
-using std::setfill;
-using std::setw;
-using std::setprecision;
-using pcf::TimeStamp;
 
 ////////////////////////////////////////////////////////////////////////////////
 /// Standard constructor - initialize the internal timeval struct.
 
 TimeStamp::TimeStamp()
 {
-  m_tvCurr = TimeStamp::now().getTimeVal();
+    m_tvCurr = TimeStamp::now().getTimeVal();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -35,8 +35,8 @@ TimeStamp::TimeStamp()
 
 TimeStamp::TimeStamp( const timeval &tvCurr )
 {
-  m_tvCurr.tv_sec = tvCurr.tv_sec;
-  m_tvCurr.tv_usec = tvCurr.tv_usec;
+    m_tvCurr.tv_sec  = tvCurr.tv_sec;
+    m_tvCurr.tv_usec = tvCurr.tv_usec;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -46,8 +46,8 @@ TimeStamp::TimeStamp( const timeval &tvCurr )
 
 TimeStamp::TimeStamp( const int &nMillis )
 {
-  m_tvCurr.tv_sec = nMillis / 1000;
-  m_tvCurr.tv_usec = ( nMillis % 1000 ) * 1000;
+    m_tvCurr.tv_sec  = nMillis / 1000;
+    m_tvCurr.tv_usec = ( nMillis % 1000 ) * 1000;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -60,33 +60,33 @@ TimeStamp::TimeStamp( const int &nMillis )
 /// @param nMinute The minute (between 0 and 59 inclusive)
 /// @param nSecond The second (between 0 and 60 inclusive).
 
-TimeStamp::TimeStamp( const int &nYear, const int &nMonth, const int &nDay,
-                      const int &nHour, const int &nMinute, const int &nSecond )
+TimeStamp::TimeStamp(
+    const int &nYear, const int &nMonth, const int &nDay, const int &nHour, const int &nMinute, const int &nSecond )
 {
-  // First get the current UTC. This will be modified to hold the
-  // specified timestamp.
-  ::time_t now = ::time( 0 );
-  ::tm tmBuf;
-  ::tm *gmtm = ::gmtime_r( &now, &tmBuf );
+    // First get the current UTC. This will be modified to hold the
+    // specified timestamp.
+    ::time_t now = ::time( 0 );
+    ::tm     tmBuf;
+    ::tm    *gmtm = ::gmtime_r( &now, &tmBuf );
 
-  // Now fill in the rest of the struct with our desired values.
-  gmtm->tm_sec = nSecond;
-  gmtm->tm_min = nMinute;
-  gmtm->tm_hour = nHour;
-  gmtm->tm_mday = nDay;
-  gmtm->tm_mon = nMonth - 1; // month is zero-based in tm struct.
-  gmtm->tm_year = nYear - 1900; // 1900 is stored as 0 in tm struct.
-  //gmtm->tm_wday;  /* day of week (Sunday = 0) */
-  //gmtm->tm_yday;  /* day of year (0 - 365) */
-  //gmtm->tm_isdst; /* is summer time in effect? */
-  //gmtm->tm_zone;  /* abbreviation of timezone name */
-  //gmtm->tm_gmtoff;  /* offset from UTC in seconds */
+    // Now fill in the rest of the struct with our desired values.
+    gmtm->tm_sec  = nSecond;
+    gmtm->tm_min  = nMinute;
+    gmtm->tm_hour = nHour;
+    gmtm->tm_mday = nDay;
+    gmtm->tm_mon  = nMonth - 1;   // month is zero-based in tm struct.
+    gmtm->tm_year = nYear - 1900; // 1900 is stored as 0 in tm struct.
+    //gmtm->tm_wday;  /* day of week (Sunday = 0) */
+    //gmtm->tm_yday;  /* day of year (0 - 365) */
+    //gmtm->tm_isdst; /* is summer time in effect? */
+    //gmtm->tm_zone;  /* abbreviation of timezone name */
+    //gmtm->tm_gmtoff;  /* offset from UTC in seconds */
 
-  // The object pointed by gmtm is modified, setting the tm_wday and tm_yday
-  // to their appropiate values, and modifying the other members as necessary
-  // to values within the normal range representing the specified time.
-  m_tvCurr.tv_sec = ::timegm( gmtm );
-  m_tvCurr.tv_usec = 0;
+    // The object pointed by gmtm is modified, setting the tm_wday and tm_yday
+    // to their appropiate values, and modifying the other members as necessary
+    // to values within the normal range representing the specified time.
+    m_tvCurr.tv_sec  = ::timegm( gmtm );
+    m_tvCurr.tv_usec = 0;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -94,7 +94,7 @@ TimeStamp::TimeStamp( const int &nYear, const int &nMonth, const int &nDay,
 
 TimeStamp::~TimeStamp()
 {
-  //  nothing to do.
+    //  nothing to do.
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -103,7 +103,7 @@ TimeStamp::~TimeStamp()
 
 const timeval &TimeStamp::getTimeVal() const
 {
-  return m_tvCurr;
+    return m_tvCurr;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -126,13 +126,13 @@ const timeval &TimeStamp::getTimeVal() const
 /// Assignment operator. Assigns this object from another TimeStamp object.
 /// @param tsRhs The TimeStamp object to use to reset this one.
 
-const TimeStamp &TimeStamp::operator= ( const TimeStamp &tsRhs )
+const TimeStamp &TimeStamp::operator=( const TimeStamp &tsRhs )
 {
-  if ( &tsRhs != this )
-  {
-    m_tvCurr = tsRhs.m_tvCurr;
-  }
-  return *this;
+    if( &tsRhs != this )
+    {
+        m_tvCurr = tsRhs.m_tvCurr;
+    }
+    return *this;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -140,12 +140,12 @@ const TimeStamp &TimeStamp::operator= ( const TimeStamp &tsRhs )
 /// struct
 /// @param tv The timeval struct to use.
 
-const TimeStamp &TimeStamp::operator= ( const timeval &tv  )
+const TimeStamp &TimeStamp::operator=( const timeval &tv )
 {
-  m_tvCurr.tv_sec = tv.tv_sec;
-  m_tvCurr.tv_usec = tv.tv_usec;
+    m_tvCurr.tv_sec  = tv.tv_sec;
+    m_tvCurr.tv_usec = tv.tv_usec;
 
-  return *this;
+    return *this;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -153,12 +153,12 @@ const TimeStamp &TimeStamp::operator= ( const timeval &tv  )
 /// an absolute value counted from the epoch, UTC.
 /// @param nMillis The number of milliseconds that has elapsed since epoch, UTC.
 
-const TimeStamp &TimeStamp::operator= ( const int &nMillis  )
+const TimeStamp &TimeStamp::operator=( const int &nMillis )
 {
-  m_tvCurr.tv_sec = nMillis / 1000;
-  m_tvCurr.tv_usec = ( nMillis % 1000 ) * 1000;
+    m_tvCurr.tv_sec  = nMillis / 1000;
+    m_tvCurr.tv_usec = ( nMillis % 1000 ) * 1000;
 
-  return *this;
+    return *this;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -168,21 +168,21 @@ const TimeStamp &TimeStamp::operator= ( const int &nMillis  )
 /// @param tsRhs Another TimeStamp object.
 /// @return The result: an absolute TimeStamp object.
 
-TimeStamp TimeStamp::operator- ( const TimeStamp &tsRhs ) const
+TimeStamp TimeStamp::operator-( const TimeStamp &tsRhs ) const
 {
-  //  subtracting two timeval structs is a little non-obvious.
+    //  subtracting two timeval structs is a little non-obvious.
 
-  timeval tvDiff;
+    timeval tvDiff;
 
-  tvDiff.tv_sec = m_tvCurr.tv_sec - tsRhs.m_tvCurr.tv_sec;
-  tvDiff.tv_usec = m_tvCurr.tv_usec - tsRhs.m_tvCurr.tv_usec;
-  if ( tvDiff.tv_usec < 0 )
-  {
-    tvDiff.tv_sec--;
-    tvDiff.tv_usec += 1000000;
-  }
+    tvDiff.tv_sec  = m_tvCurr.tv_sec - tsRhs.m_tvCurr.tv_sec;
+    tvDiff.tv_usec = m_tvCurr.tv_usec - tsRhs.m_tvCurr.tv_usec;
+    if( tvDiff.tv_usec < 0 )
+    {
+        tvDiff.tv_sec--;
+        tvDiff.tv_usec += 1000000;
+    }
 
-  return TimeStamp( tvDiff );
+    return TimeStamp( tvDiff );
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -192,25 +192,25 @@ TimeStamp TimeStamp::operator- ( const TimeStamp &tsRhs ) const
 /// @param tsRhs Another TimeStamp object.
 /// @return The result: an absolute TimeStamp object.
 
-TimeStamp TimeStamp::operator+ ( const TimeStamp &tsRhs ) const
+TimeStamp TimeStamp::operator+( const TimeStamp &tsRhs ) const
 {
-  //  adding two timeval structs is a little non-obvious.
+    //  adding two timeval structs is a little non-obvious.
 
-  timeval tvSum;
-  tvSum.tv_sec = m_tvCurr.tv_sec + tsRhs.m_tvCurr.tv_sec;
-  int nnSum = m_tvCurr.tv_usec + tsRhs.m_tvCurr.tv_usec;
+    timeval tvSum;
+    tvSum.tv_sec = m_tvCurr.tv_sec + tsRhs.m_tvCurr.tv_sec;
+    int nnSum    = m_tvCurr.tv_usec + tsRhs.m_tvCurr.tv_usec;
 
-  if ( nnSum < 1000000 )
-  {
-    tvSum.tv_usec = nnSum;
-  }
-  else
-  {
-    tvSum.tv_sec++;
-    tvSum.tv_usec = nnSum - 1000000;
-  }
+    if( nnSum < 1000000 )
+    {
+        tvSum.tv_usec = nnSum;
+    }
+    else
+    {
+        tvSum.tv_sec++;
+        tvSum.tv_usec = nnSum - 1000000;
+    }
 
-  return TimeStamp( tvSum );
+    return TimeStamp( tvSum );
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -221,7 +221,7 @@ TimeStamp TimeStamp::operator+ ( const TimeStamp &tsRhs ) const
 
 bool TimeStamp::operator<( const TimeStamp &tsRhs ) const
 {
-  return ( ( getMicros() - tsRhs.getMicros() ) < 0 );
+    return ( ( getMicros() - tsRhs.getMicros() ) < 0 );
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -232,7 +232,7 @@ bool TimeStamp::operator<( const TimeStamp &tsRhs ) const
 
 bool TimeStamp::operator<=( const TimeStamp &tsRhs ) const
 {
-  return ( ( getMicros() - tsRhs.getMicros() ) <= 0 );
+    return ( ( getMicros() - tsRhs.getMicros() ) <= 0 );
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -243,7 +243,7 @@ bool TimeStamp::operator<=( const TimeStamp &tsRhs ) const
 
 bool TimeStamp::operator>( const TimeStamp &tsRhs ) const
 {
-  return ( ( getMicros() - tsRhs.getMicros() ) > 0 );
+    return ( ( getMicros() - tsRhs.getMicros() ) > 0 );
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -255,7 +255,7 @@ bool TimeStamp::operator>( const TimeStamp &tsRhs ) const
 
 bool TimeStamp::operator>=( const TimeStamp &tsRhs ) const
 {
-  return ( ( getMicros() - tsRhs.getMicros() ) >= 0 );
+    return ( ( getMicros() - tsRhs.getMicros() ) >= 0 );
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -264,7 +264,7 @@ bool TimeStamp::operator>=( const TimeStamp &tsRhs ) const
 
 TimeStamp::TimeStamp( const TimeStamp &ts )
 {
-  m_tvCurr = ts.m_tvCurr;
+    m_tvCurr = ts.m_tvCurr;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -272,10 +272,9 @@ TimeStamp::TimeStamp( const TimeStamp &ts )
 /// @param tsRhs Another TimeStamp object.
 /// @return True if the two TimeStamps are the same, false otherwise.
 
-bool TimeStamp::operator== ( const TimeStamp &tsRhs ) const
+bool TimeStamp::operator==( const TimeStamp &tsRhs ) const
 {
-  return bool( m_tvCurr.tv_sec == tsRhs.m_tvCurr.tv_sec &&
-               m_tvCurr.tv_usec == tsRhs.m_tvCurr.tv_usec );
+    return bool( m_tvCurr.tv_sec == tsRhs.m_tvCurr.tv_sec && m_tvCurr.tv_usec == tsRhs.m_tvCurr.tv_usec );
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -285,36 +284,59 @@ bool TimeStamp::operator== ( const TimeStamp &tsRhs ) const
 
 int TimeStamp::getMonthNumber( const std::string &szMonth )
 {
-  string szMonthLC = szMonth.substr( 0, 3 );
-  transform( szMonthLC.begin(), szMonthLC.end(), szMonthLC.begin(),
-             ( int( * )( int ) )tolower );
+    string szMonthLC = szMonth.substr( 0, 3 );
+    transform( szMonthLC.begin(), szMonthLC.end(), szMonthLC.begin(), (int ( * )( int ))tolower );
 
-  if ( szMonthLC == "jan" )
-    return 1;
-  if ( szMonthLC == "feb" )
-    return 2;
-  if ( szMonthLC == "mar" )
-    return 3;
-  if ( szMonthLC == "apr" )
-    return 4;
-  if ( szMonthLC == "may" )
-    return 5;
-  if ( szMonthLC == "jun" )
-    return 6;
-  if ( szMonthLC == "jul" )
-    return 7;
-  if ( szMonthLC == "aug" )
-    return 8;
-  if ( szMonthLC == "sep" )
-    return 9;
-  if ( szMonthLC == "oct" )
-    return 10;
-  if ( szMonthLC == "nov" )
-    return 11;
-  if ( szMonthLC == "dec" )
-    return 12;
-  // default is unknown.
-  return -1;
+    if( szMonthLC == "jan" )
+    {
+        return 1;
+    }
+    if( szMonthLC == "feb" )
+    {
+        return 2;
+    }
+    if( szMonthLC == "mar" )
+    {
+        return 3;
+    }
+    if( szMonthLC == "apr" )
+    {
+        return 4;
+    }
+    if( szMonthLC == "may" )
+    {
+        return 5;
+    }
+    if( szMonthLC == "jun" )
+    {
+        return 6;
+    }
+    if( szMonthLC == "jul" )
+    {
+        return 7;
+    }
+    if( szMonthLC == "aug" )
+    {
+        return 8;
+    }
+    if( szMonthLC == "sep" )
+    {
+        return 9;
+    }
+    if( szMonthLC == "oct" )
+    {
+        return 10;
+    }
+    if( szMonthLC == "nov" )
+    {
+        return 11;
+    }
+    if( szMonthLC == "dec" )
+    {
+        return 12;
+    }
+    // default is unknown.
+    return -1;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -324,33 +346,33 @@ int TimeStamp::getMonthNumber( const std::string &szMonth )
 
 string TimeStamp::getWeekdayName( const int &nWeekdayNum )
 {
-  switch ( nWeekdayNum )
-  {
+    switch( nWeekdayNum )
+    {
     case 1:
-      return "Sun";
-      break;
+        return "Sun";
+        break;
     case 2:
-      return "Mon";
-      break;
+        return "Mon";
+        break;
     case 3:
-      return "Tue";
-      break;
+        return "Tue";
+        break;
     case 4:
-      return "Wed";
-      break;
+        return "Wed";
+        break;
     case 5:
-      return "Thu";
-      break;
+        return "Thu";
+        break;
     case 6:
-      return "Fri";
-      break;
+        return "Fri";
+        break;
     case 7:
-      return "Sat";
-      break;
+        return "Sat";
+        break;
     default:
-      return "???";
-      break;
-  }
+        return "???";
+        break;
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -360,48 +382,48 @@ string TimeStamp::getWeekdayName( const int &nWeekdayNum )
 
 string TimeStamp::getMonthName( const int &nMonthNum )
 {
-  switch ( nMonthNum )
-  {
+    switch( nMonthNum )
+    {
     case 1:
-      return "Jan";
-      break;
+        return "Jan";
+        break;
     case 2:
-      return "Feb";
-      break;
+        return "Feb";
+        break;
     case 3:
-      return "Mar";
-      break;
+        return "Mar";
+        break;
     case 4:
-      return "Apr";
-      break;
+        return "Apr";
+        break;
     case 5:
-      return "May";
-      break;
+        return "May";
+        break;
     case 6:
-      return "Jun";
-      break;
+        return "Jun";
+        break;
     case 7:
-      return "Jul";
-      break;
+        return "Jul";
+        break;
     case 8:
-      return "Aug";
-      break;
+        return "Aug";
+        break;
     case 9:
-      return "Sep";
-      break;
+        return "Sep";
+        break;
     case 10:
-      return "Oct";
-      break;
+        return "Oct";
+        break;
     case 11:
-      return "Nov";
-      break;
+        return "Nov";
+        break;
     case 12:
-      return "Dec";
-      break;
+        return "Dec";
+        break;
     default:
-      return "???";
-      break;
-  }
+        return "???";
+        break;
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -412,33 +434,33 @@ string TimeStamp::getMonthName( const int &nMonthNum )
 
 TimeStamp TimeStamp::now()
 {
-  timeval tvCurr;
+    timeval tvCurr;
 
 #ifdef WIN32
-  FILETIME  ftNow;
-  GetSystemTimeAsFileTime ( &ftNow );
-  long long nnTime = ( long long ) ftNow.dwHighDateTime << 32;
-  nnTime |= ftNow.dwLowDateTime;
-  ///  convert from 100 nanosec to 1 usec.
-  nnTime /= 10;
-  ///  Number of microsec between the beginning of the Windows epoch
-  ///  (1 Jan 1601) and the Unix epoch (1 Jan 1970).
-  nnTime -= 11644473600000000ULL;
-  tvCurr.tv_sec  = ( nnTime / 1000000ULL );
-  tvCurr.tv_usec = ( nnTime % 1000000ULL );
+    FILETIME ftNow;
+    GetSystemTimeAsFileTime( &ftNow );
+    long long nnTime = (long long)ftNow.dwHighDateTime << 32;
+    nnTime |= ftNow.dwLowDateTime;
+    ///  convert from 100 nanosec to 1 usec.
+    nnTime /= 10;
+    ///  Number of microsec between the beginning of the Windows epoch
+    ///  (1 Jan 1601) and the Unix epoch (1 Jan 1970).
+    nnTime -= 11644473600000000ULL;
+    tvCurr.tv_sec  = ( nnTime / 1000000ULL );
+    tvCurr.tv_usec = ( nnTime % 1000000ULL );
 #else
-  /**
-  The  gettimeofday()  function shall obtain the current time, expressed
-  as seconds and microseconds since the  Epoch, UTC, and  store  it  in  the
-  timeval structure pointed to by tp. The resolution of the system clock
-  is unspecified. The gettimeofday() function shall return  0  and  no
-  value  shall  be reserved to indicate an error.
-  If tzp is not a null pointer, the behavior is unspecified.
-  **/
-  ::gettimeofday( &tvCurr, NULL );
+    /**
+    The  gettimeofday()  function shall obtain the current time, expressed
+    as seconds and microseconds since the  Epoch, UTC, and  store  it  in  the
+    timeval structure pointed to by tp. The resolution of the system clock
+    is unspecified. The gettimeofday() function shall return  0  and  no
+    value  shall  be reserved to indicate an error.
+    If tzp is not a null pointer, the behavior is unspecified.
+    **/
+    ::gettimeofday( &tvCurr, NULL );
 #endif
 
-  return TimeStamp( tvCurr );
+    return TimeStamp( tvCurr );
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -448,24 +470,22 @@ TimeStamp TimeStamp::now()
 
 string TimeStamp::getFormattedIsoTimeStr() const
 {
-  string szFormatted = "000000";
+    string szFormatted = "000000";
 
-  time_t tNumSecs = getTimeValSecs();
-  tm tmBuf;
-  tm *tmCurr = ::gmtime_r( &tNumSecs, &tmBuf );
+    time_t tNumSecs = getTimeValSecs();
+    tm     tmBuf;
+    tm    *tmCurr = ::gmtime_r( &tNumSecs, &tmBuf );
 
-  // transform date and time to broken-down time.
-  if ( tmCurr != NULL )
-  {
-    stringstream ssFormatted;
-    ssFormatted
-        << setfill( '0' ) << setw( 2 ) << tmCurr->tm_hour
-        << setfill( '0' ) << setw( 2 ) << tmCurr->tm_min
-        << setfill( '0' ) << setw( 2 ) << tmCurr->tm_sec;
-    szFormatted = ssFormatted.str();
-  }
+    // transform date and time to broken-down time.
+    if( tmCurr != NULL )
+    {
+        stringstream ssFormatted;
+        ssFormatted << setfill( '0' ) << setw( 2 ) << tmCurr->tm_hour << setfill( '0' ) << setw( 2 ) << tmCurr->tm_min
+                    << setfill( '0' ) << setw( 2 ) << tmCurr->tm_sec;
+        szFormatted = ssFormatted.str();
+    }
 
-  return szFormatted;
+    return szFormatted;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -474,37 +494,26 @@ string TimeStamp::getFormattedIsoTimeStr() const
 
 string TimeStamp::getFormattedStr() const
 {
-  string szFormatted = "??? ??? 00 00:00:00.000 0000";
+    string szFormatted = "??? ??? 00 00:00:00.000 0000";
 
-  time_t tNumSecs = getTimeValSecs();
-  int nNumMillis = getTimeValMicros() / 1000;
-  tm tmBuf;
-  tm *tmCurr = ::gmtime_r( &tNumSecs, &tmBuf );
+    time_t tNumSecs   = getTimeValSecs();
+    int    nNumMillis = getTimeValMicros() / 1000;
+    tm     tmBuf;
+    tm    *tmCurr = ::gmtime_r( &tNumSecs, &tmBuf );
 
-  // transform date and time to broken-down time.
-  if ( tmCurr != NULL )
-  {
-    stringstream ssFormatted;
-    ssFormatted
-        << getWeekdayName( tmCurr->tm_wday + 1 )
-        << " "
-        << getMonthName( tmCurr->tm_mon + 1 )
-        << " "
-        << setfill( '0' ) << setw( 2 ) << tmCurr->tm_mday
-        << " "
-        << setfill( '0' ) << setw( 2 ) << tmCurr->tm_hour
-        << ":"
-        << setfill( '0' ) << setw( 2 ) << tmCurr->tm_min
-        << ":"
-        << setfill( '0' ) << setw( 2 ) << tmCurr->tm_sec
-        << "."
-        << setfill( '0' ) << setw( 3 ) << nNumMillis
-        << " "
-        << setfill( '0' ) << setw( 4 ) << 1900 + tmCurr->tm_year;
-    szFormatted = ssFormatted.str();
-  }
+    // transform date and time to broken-down time.
+    if( tmCurr != NULL )
+    {
+        stringstream ssFormatted;
+        ssFormatted << getWeekdayName( tmCurr->tm_wday + 1 ) << " " << getMonthName( tmCurr->tm_mon + 1 ) << " "
+                    << setfill( '0' ) << setw( 2 ) << tmCurr->tm_mday << " " << setfill( '0' ) << setw( 2 )
+                    << tmCurr->tm_hour << ":" << setfill( '0' ) << setw( 2 ) << tmCurr->tm_min << ":" << setfill( '0' )
+                    << setw( 2 ) << tmCurr->tm_sec << "." << setfill( '0' ) << setw( 3 ) << nNumMillis << " "
+                    << setfill( '0' ) << setw( 4 ) << 1900 + tmCurr->tm_year;
+        szFormatted = ssFormatted.str();
+    }
 
-  return szFormatted;
+    return szFormatted;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -515,38 +524,28 @@ string TimeStamp::getFormattedStr() const
 
 string TimeStamp::getFormattedIso8601Str() const
 {
-  string szFormatted = "0000-00-00T00:00:00.000000Z";
+    string szFormatted = "0000-00-00T00:00:00.000000Z";
 
-  // It is a bit roundabout, but this is the simpliest way I have found
-  // to convert a timeval to a tm.
-  time_t tNumSecs = getTimeValSecs();
-  int nNumMicros = getTimeValMicros();
-  tm tmBuf;
-  tm *tmCurr = ::gmtime_r( &tNumSecs, &tmBuf );
+    // It is a bit roundabout, but this is the simpliest way I have found
+    // to convert a timeval to a tm.
+    time_t tNumSecs   = getTimeValSecs();
+    int    nNumMicros = getTimeValMicros();
+    tm     tmBuf;
+    tm    *tmCurr = ::gmtime_r( &tNumSecs, &tmBuf );
 
-  // transform date and time to broken-down time.
-  if ( tmCurr != NULL )
-  {
-    stringstream ssFormatted;
-    ssFormatted
-        << setfill( '0' ) << setw( 4 ) << 1900 + tmCurr->tm_year
-        << "-"
-        << setfill( '0' ) << setw( 2 ) << 1 + tmCurr->tm_mon
-        << "-"
-        << setfill( '0' ) << setw( 2 ) << tmCurr->tm_mday
-        << "T"
-        << setfill( '0' ) << setw( 2 ) << tmCurr->tm_hour
-        << ":"
-        << setfill( '0' ) << setw( 2 ) << tmCurr->tm_min
-        << ":"
-        << setfill( '0' ) << setw( 2 ) << tmCurr->tm_sec
-        << "."
-        << setfill( '0' ) << setw( 6 ) << nNumMicros
-        << "Z";
-    szFormatted = ssFormatted.str();
-  }
+    // transform date and time to broken-down time.
+    if( tmCurr != NULL )
+    {
+        stringstream ssFormatted;
+        ssFormatted << setfill( '0' ) << setw( 4 ) << 1900 + tmCurr->tm_year << "-" << setfill( '0' ) << setw( 2 )
+                    << 1 + tmCurr->tm_mon << "-" << setfill( '0' ) << setw( 2 ) << tmCurr->tm_mday << "T"
+                    << setfill( '0' ) << setw( 2 ) << tmCurr->tm_hour << ":" << setfill( '0' ) << setw( 2 )
+                    << tmCurr->tm_min << ":" << setfill( '0' ) << setw( 2 ) << tmCurr->tm_sec << "." << setfill( '0' )
+                    << setw( 6 ) << nNumMicros << "Z";
+        szFormatted = ssFormatted.str();
+    }
 
-  return szFormatted;
+    return szFormatted;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -556,24 +555,22 @@ string TimeStamp::getFormattedIso8601Str() const
 
 string TimeStamp::getFormattedIsoDateStr() const
 {
-  string szFormatted = "00000000";
+    string szFormatted = "00000000";
 
-  time_t tNumSecs = getTimeValSecs();
-  tm tmBuf;
-  tm *tmCurr = ::gmtime_r( &tNumSecs, &tmBuf );
+    time_t tNumSecs = getTimeValSecs();
+    tm     tmBuf;
+    tm    *tmCurr = ::gmtime_r( &tNumSecs, &tmBuf );
 
-  // transform date and time to broken-down time.
-  if ( tmCurr != NULL )
-  {
-    stringstream ssFormatted;
-    ssFormatted
-        << setfill( '0' ) << setw( 4 ) << 1900 + tmCurr->tm_year
-        << setfill( '0' ) << setw( 2 ) << 1 + tmCurr->tm_mon
-        << setfill( '0' ) << setw( 2 ) << tmCurr->tm_mday;
-    szFormatted = ssFormatted.str();
-  }
+    // transform date and time to broken-down time.
+    if( tmCurr != NULL )
+    {
+        stringstream ssFormatted;
+        ssFormatted << setfill( '0' ) << setw( 4 ) << 1900 + tmCurr->tm_year << setfill( '0' ) << setw( 2 )
+                    << 1 + tmCurr->tm_mon << setfill( '0' ) << setw( 2 ) << tmCurr->tm_mday;
+        szFormatted = ssFormatted.str();
+    }
 
-  return szFormatted;
+    return szFormatted;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -584,8 +581,8 @@ string TimeStamp::getFormattedIsoDateStr() const
 
 double TimeStamp::elapsedMillis( const TimeStamp &ts ) const
 {
-  TimeStamp tsDiff = ts - *this;
-  return tsDiff.getMillis();
+    TimeStamp tsDiff = ts - *this;
+    return tsDiff.getMillis();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -597,12 +594,14 @@ double TimeStamp::elapsedMillis( const TimeStamp &ts ) const
 
 bool TimeStamp::intervalElapsedMillis( const int iInterval )
 {
-  TimeStamp tsCurrent = TimeStamp::now();
-  TimeStamp tsDiff = tsCurrent - *this;
-  bool oIntervalElapsed = ( tsDiff.getMillis() >= iInterval );
-  if ( oIntervalElapsed )
-    *this = tsCurrent;
-  return oIntervalElapsed;
+    TimeStamp tsCurrent        = TimeStamp::now();
+    TimeStamp tsDiff           = tsCurrent - *this;
+    bool      oIntervalElapsed = ( tsDiff.getMillis() >= iInterval );
+    if( oIntervalElapsed )
+    {
+        *this = tsCurrent;
+    }
+    return oIntervalElapsed;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -613,8 +612,8 @@ bool TimeStamp::intervalElapsedMillis( const int iInterval )
 
 double TimeStamp::elapsedDays( const TimeStamp &ts ) const
 {
-  TimeStamp tsDiff = ts - *this;
-  return tsDiff.getDays();
+    TimeStamp tsDiff = ts - *this;
+    return tsDiff.getDays();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -623,8 +622,7 @@ double TimeStamp::elapsedDays( const TimeStamp &ts ) const
 
 double TimeStamp::getMicros() const
 {
-  return ( static_cast<double>( m_tvCurr.tv_sec ) * 1000000.0 )
-         + ( static_cast<double>(  m_tvCurr.tv_usec ) );
+    return ( static_cast<double>( m_tvCurr.tv_sec ) * 1000000.0 ) + ( static_cast<double>( m_tvCurr.tv_usec ) );
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -633,8 +631,7 @@ double TimeStamp::getMicros() const
 
 double TimeStamp::getMillis() const
 {
-  return ( static_cast<double>( m_tvCurr.tv_sec ) * 1000.0 )
-         + ( static_cast<double>(  m_tvCurr.tv_usec ) / 1000.0 );
+    return ( static_cast<double>( m_tvCurr.tv_sec ) * 1000.0 ) + ( static_cast<double>( m_tvCurr.tv_usec ) / 1000.0 );
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -643,9 +640,8 @@ double TimeStamp::getMillis() const
 
 double TimeStamp::getDays() const
 {
-  // There are 86400 seconds in one day.
-  return ( static_cast<double>( m_tvCurr.tv_sec )
-           + static_cast<double>(  m_tvCurr.tv_usec ) / 1000000.0 ) / 86400.0;
+    // There are 86400 seconds in one day.
+    return ( static_cast<double>( m_tvCurr.tv_sec ) + static_cast<double>( m_tvCurr.tv_usec ) / 1000000.0 ) / 86400.0;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -654,18 +650,18 @@ double TimeStamp::getDays() const
 
 unsigned int TimeStamp::getYear() const
 {
-  unsigned int uiYear = std::numeric_limits<unsigned int>::max();
+    unsigned int uiYear = std::numeric_limits<unsigned int>::max();
 
-  time_t tNumSecs = getTimeValSecs();
-  tm tmBuf;
-  tm *tmCurr = ::gmtime_r( &tNumSecs, &tmBuf );
+    time_t tNumSecs = getTimeValSecs();
+    tm     tmBuf;
+    tm    *tmCurr = ::gmtime_r( &tNumSecs, &tmBuf );
 
-  if ( tmCurr != NULL )
-  {
-    uiYear = static_cast<unsigned int>( 1900 + tmCurr->tm_year );
-  }
+    if( tmCurr != NULL )
+    {
+        uiYear = static_cast<unsigned int>( 1900 + tmCurr->tm_year );
+    }
 
-  return uiYear;
+    return uiYear;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -674,18 +670,18 @@ unsigned int TimeStamp::getYear() const
 
 unsigned int TimeStamp::getYearMonth() const
 {
-  unsigned int uiMonth = std::numeric_limits<unsigned int>::max();
+    unsigned int uiMonth = std::numeric_limits<unsigned int>::max();
 
-  time_t tNumSecs = getTimeValSecs();
-  tm tmBuf;
-  tm *tmCurr = ::gmtime_r( &tNumSecs, &tmBuf );
+    time_t tNumSecs = getTimeValSecs();
+    tm     tmBuf;
+    tm    *tmCurr = ::gmtime_r( &tNumSecs, &tmBuf );
 
-  if ( tmCurr != NULL )
-  {
-    uiMonth = static_cast<unsigned int>( tmCurr->tm_mon + 1 );
-  }
+    if( tmCurr != NULL )
+    {
+        uiMonth = static_cast<unsigned int>( tmCurr->tm_mon + 1 );
+    }
 
-  return uiMonth;
+    return uiMonth;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -694,18 +690,18 @@ unsigned int TimeStamp::getYearMonth() const
 
 unsigned int TimeStamp::getMonthDay() const
 {
-  unsigned int uiDay = std::numeric_limits<unsigned int>::max();
+    unsigned int uiDay = std::numeric_limits<unsigned int>::max();
 
-  time_t tNumSecs = getTimeValSecs();
-  tm tmBuf;
-  tm *tmCurr = ::gmtime_r( &tNumSecs, &tmBuf );
+    time_t tNumSecs = getTimeValSecs();
+    tm     tmBuf;
+    tm    *tmCurr = ::gmtime_r( &tNumSecs, &tmBuf );
 
-  if ( tmCurr != NULL )
-  {
-    uiDay = static_cast<unsigned int>( tmCurr->tm_mday );
-  }
+    if( tmCurr != NULL )
+    {
+        uiDay = static_cast<unsigned int>( tmCurr->tm_mday );
+    }
 
-  return uiDay;
+    return uiDay;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -714,18 +710,18 @@ unsigned int TimeStamp::getMonthDay() const
 
 unsigned int TimeStamp::getDayHour() const
 {
-  unsigned int uiHour = std::numeric_limits<unsigned int>::max();
+    unsigned int uiHour = std::numeric_limits<unsigned int>::max();
 
-  time_t tNumSecs = getTimeValSecs();
-  tm tmBuf;
-  tm *tmCurr = ::gmtime_r( &tNumSecs, &tmBuf );
+    time_t tNumSecs = getTimeValSecs();
+    tm     tmBuf;
+    tm    *tmCurr = ::gmtime_r( &tNumSecs, &tmBuf );
 
-  if ( tmCurr != NULL )
-  {
-    uiHour = static_cast<unsigned int>( tmCurr->tm_hour );
-  }
+    if( tmCurr != NULL )
+    {
+        uiHour = static_cast<unsigned int>( tmCurr->tm_hour );
+    }
 
-  return uiHour;
+    return uiHour;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -734,18 +730,18 @@ unsigned int TimeStamp::getDayHour() const
 
 unsigned int TimeStamp::getHourMinute() const
 {
-  unsigned int uiMinute = std::numeric_limits<unsigned int>::max();
+    unsigned int uiMinute = std::numeric_limits<unsigned int>::max();
 
-  time_t tNumSecs = getTimeValSecs();
-  tm tmBuf;
-  tm *tmCurr = ::gmtime_r( &tNumSecs, &tmBuf );
+    time_t tNumSecs = getTimeValSecs();
+    tm     tmBuf;
+    tm    *tmCurr = ::gmtime_r( &tNumSecs, &tmBuf );
 
-  if ( tmCurr != NULL )
-  {
-    uiMinute = static_cast<unsigned int>( tmCurr->tm_min );
-  }
+    if( tmCurr != NULL )
+    {
+        uiMinute = static_cast<unsigned int>( tmCurr->tm_min );
+    }
 
-  return uiMinute;
+    return uiMinute;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -754,18 +750,18 @@ unsigned int TimeStamp::getHourMinute() const
 
 unsigned int TimeStamp::getMinuteSecond() const
 {
-  unsigned int uiSecond = std::numeric_limits<unsigned int>::max();
+    unsigned int uiSecond = std::numeric_limits<unsigned int>::max();
 
-  time_t tNumSecs = getTimeValSecs();
-  tm tmBuf;
-  tm *tmCurr = ::gmtime_r( &tNumSecs, &tmBuf );
+    time_t tNumSecs = getTimeValSecs();
+    tm     tmBuf;
+    tm    *tmCurr = ::gmtime_r( &tNumSecs, &tmBuf );
 
-  if ( tmCurr != NULL )
-  {
-    uiSecond = static_cast<unsigned int>( tmCurr->tm_sec );
-  }
+    if( tmCurr != NULL )
+    {
+        uiSecond = static_cast<unsigned int>( tmCurr->tm_sec );
+    }
 
-  return uiSecond;
+    return uiSecond;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -773,9 +769,9 @@ unsigned int TimeStamp::getMinuteSecond() const
 
 unsigned int TimeStamp::getSecondMillisecond() const
 {
-  unsigned int uiMillisecond = getTimeValMicros() / 1000;
+    unsigned int uiMillisecond = getTimeValMicros() / 1000;
 
-  return uiMillisecond;
+    return uiMillisecond;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -783,8 +779,8 @@ unsigned int TimeStamp::getSecondMillisecond() const
 
 void TimeStamp::decrementDay()
 {
-  // There are 86400 seconds in one day.
-  m_tvCurr.tv_sec -= 86400;
+    // There are 86400 seconds in one day.
+    m_tvCurr.tv_sec -= 86400;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -792,8 +788,8 @@ void TimeStamp::decrementDay()
 
 void TimeStamp::incrementDay()
 {
-  // There are 86400 seconds in one day.
-  m_tvCurr.tv_sec += 86400;
+    // There are 86400 seconds in one day.
+    m_tvCurr.tv_sec += 86400;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -803,9 +799,9 @@ void TimeStamp::incrementDay()
 
 string TimeStamp::getMicrosStr() const
 {
-  stringstream ssValue;
-  ssValue << getMicros();
-  return ssValue.str();
+    stringstream ssValue;
+    ssValue << getMicros();
+    return ssValue.str();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -815,9 +811,9 @@ string TimeStamp::getMicrosStr() const
 
 string TimeStamp::getMillisStr() const
 {
-  stringstream ssValue;
-  ssValue << getMillis();
-  return ssValue.str();
+    stringstream ssValue;
+    ssValue << getMillis();
+    return ssValue.str();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -828,17 +824,16 @@ string TimeStamp::getMillisStr() const
 
 void TimeStamp::fromMJD( const double &xMJD )
 {
-  ///  adjust this day count to start on 1 Jan 1970.
-  double xDays = xMJD - 40587.0;
+    ///  adjust this day count to start on 1 Jan 1970.
+    double xDays = xMJD - 40587.0;
 
-  ///  convert to a number of seconds.
-  long long nnSecs = static_cast<long long>( xDays * 86400.0 );
+    ///  convert to a number of seconds.
+    long long nnSecs = static_cast<long long>( xDays * 86400.0 );
 
-  ///  get the number of microsecs.
-  m_tvCurr.tv_usec = static_cast<long long>(
-                       ( xDays * 86400.0 - static_cast<double>( nnSecs ) ) * 1000000.0 );
+    ///  get the number of microsecs.
+    m_tvCurr.tv_usec = static_cast<long long>( ( xDays * 86400.0 - static_cast<double>( nnSecs ) ) * 1000000.0 );
 
-  m_tvCurr.tv_sec = nnSecs;
+    m_tvCurr.tv_sec = nnSecs;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -847,46 +842,46 @@ void TimeStamp::fromMJD( const double &xMJD )
 
 void TimeStamp::fromFormattedIso8601Str( const string &szIso8601 )
 {
-  /*
-    string szIso8601Mod = szIso8601;
+    /*
+      string szIso8601Mod = szIso8601;
 
-    // We need some speed here, so change this to happen in one loop.
-    for ( unsigned int ii = 0; ii < szIso8601Mod.size(); ii++ )
-    {
-      if ( szIso8601Mod[ii] == '-' || szIso8601Mod[ii] == 'T' ||
-           szIso8601Mod[ii] == ':' || szIso8601Mod[ii] == '.' ||
-           szIso8601Mod[ii] == 'Z' )
-        szIso8601Mod[ii] = ' ';
-    }
-    //std::replace( szIso8601Mod.begin(), szIso8601Mod.end(), '-', ' ' );
-    //std::replace( szIso8601Mod.begin(), szIso8601Mod.end(), 'T', ' ' );
-    //std::replace( szIso8601Mod.begin(), szIso8601Mod.end(), ':', ' ' );
-    //std::replace( szIso8601Mod.begin(), szIso8601Mod.end(), '.', ' ' );
-    //std::replace( szIso8601Mod.begin(), szIso8601Mod.end(), 'Z', ' ' );
+      // We need some speed here, so change this to happen in one loop.
+      for ( unsigned int ii = 0; ii < szIso8601Mod.size(); ii++ )
+      {
+        if ( szIso8601Mod[ii] == '-' || szIso8601Mod[ii] == 'T' ||
+             szIso8601Mod[ii] == ':' || szIso8601Mod[ii] == '.' ||
+             szIso8601Mod[ii] == 'Z' )
+          szIso8601Mod[ii] = ' ';
+      }
+      //std::replace( szIso8601Mod.begin(), szIso8601Mod.end(), '-', ' ' );
+      //std::replace( szIso8601Mod.begin(), szIso8601Mod.end(), 'T', ' ' );
+      //std::replace( szIso8601Mod.begin(), szIso8601Mod.end(), ':', ' ' );
+      //std::replace( szIso8601Mod.begin(), szIso8601Mod.end(), '.', ' ' );
+      //std::replace( szIso8601Mod.begin(), szIso8601Mod.end(), 'Z', ' ' );
 
-    stringstream ssCurr;
-    ssCurr.str( szIso8601Mod );
+      stringstream ssCurr;
+      ssCurr.str( szIso8601Mod );
 
-    tm tmCurr;
+      tm tmCurr;
+      int nYear, nMonth, nDay, nHour, nMinute, nSecond, nMicros;
+
+      ssCurr >> nYear >> nMonth >> nDay >> nHour >> nMinute >> nSecond >> nMicros;
+    */
+    tm  tmCurr;
     int nYear, nMonth, nDay, nHour, nMinute, nSecond, nMicros;
+    ::sscanf(
+        szIso8601.c_str(), "%d-%d-%dT%d:%d:%d.%dZ", &nYear, &nMonth, &nDay, &nHour, &nMinute, &nSecond, &nMicros );
 
-    ssCurr >> nYear >> nMonth >> nDay >> nHour >> nMinute >> nSecond >> nMicros;
-  */
-  tm tmCurr;
-  int nYear, nMonth, nDay, nHour, nMinute, nSecond, nMicros;
-  ::sscanf( szIso8601.c_str(), "%d-%d-%dT%d:%d:%d.%dZ",
-            &nYear, &nMonth, &nDay, &nHour, &nMinute, &nSecond, &nMicros );
+    tmCurr.tm_year = nYear - 1900;
+    tmCurr.tm_mon  = nMonth - 1;
+    tmCurr.tm_mday = nDay;
+    tmCurr.tm_hour = nHour;
+    tmCurr.tm_min  = nMinute;
+    tmCurr.tm_sec  = nSecond;
 
-  tmCurr.tm_year = nYear - 1900;
-  tmCurr.tm_mon = nMonth - 1;
-  tmCurr.tm_mday = nDay;
-  tmCurr.tm_hour = nHour;
-  tmCurr.tm_min = nMinute;
-  tmCurr.tm_sec = nSecond;
-
-  //JRM changed to timegm from local_timegm
-  m_tvCurr.tv_sec = long( timegm( &tmCurr ) );
-  m_tvCurr.tv_usec = nMicros;
+    //JRM changed to timegm from local_timegm
+    m_tvCurr.tv_sec  = long( timegm( &tmCurr ) );
+    m_tvCurr.tv_usec = nMicros;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -899,14 +894,14 @@ void TimeStamp::fromFormattedIso8601Str( const string &szIso8601 )
 
 double TimeStamp::getMJD() const
 {
-  /// first, get the number of days (and fractions of a day) since unix epoch.
-  double xDays = ( static_cast<double>( m_tvCurr.tv_sec ) +
-                   ( static_cast<double>( m_tvCurr.tv_usec ) / 1000000.0 ) ) / 86400.0;
+    /// first, get the number of days (and fractions of a day) since unix epoch.
+    double xDays =
+        ( static_cast<double>( m_tvCurr.tv_sec ) + ( static_cast<double>( m_tvCurr.tv_usec ) / 1000000.0 ) ) / 86400.0;
 
-  ///  adjust this day count to start on 17 November 1858. This day corresponds
-  ///  to MJD 2400000, and is generally accepted as 0, since the "24" will not
-  ///  change for three centuries to "25".
-  return xDays + 40587.0;
+    ///  adjust this day count to start on 17 November 1858. This day corresponds
+    ///  to MJD 2400000, and is generally accepted as 0, since the "24" will not
+    ///  change for three centuries to "25".
+    return xDays + 40587.0;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -916,10 +911,10 @@ double TimeStamp::getMJD() const
 /// @param tsRhs The TimeStamp to be streamed.
 /// @return The modified stream that has been written to.
 
-ostream &operator<< ( ostream &strmOut, const TimeStamp &tsRhs )
+ostream &operator<<( ostream &strmOut, const TimeStamp &tsRhs )
 {
-  strmOut << tsRhs.getFormattedStr();
-  return strmOut;
+    strmOut << tsRhs.getFormattedStr();
+    return strmOut;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
