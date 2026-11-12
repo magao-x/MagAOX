@@ -108,7 +108,7 @@ void AdcCapture::attached( std::uint64_t device, std::uint64_t inode )
     m_status.m_inode  = inode;
     m_status.m_latest = {};
     m_status.m_source = {};
-    m_cursor          = 0;
+    m_cursor = m_observedCounter = 0;
     m_bound = m_haveClock = false;
     m_clockFault          = false;
     m_highTime = m_lastNow = -1;
@@ -197,7 +197,7 @@ std::size_t AdcCapture::drain( const AdcSource &source )
         ++m_status.m_busy;
         return 0;
     }
-    if( m_bound && before.m_counter < m_cursor )
+    if( m_bound && before.m_counter < std::max( m_cursor, m_observedCounter ) )
     {
         if( source.header() != before )
         {
@@ -244,7 +244,8 @@ std::size_t AdcCapture::drain( const AdcSource &source )
         ++m_status.m_races;
         return 0;
     }
-    const auto clock = source.clock();
+    m_observedCounter = before.m_counter;
+    const auto clock  = source.clock();
     if( !check_clock( clock ) )
     {
         return 0;

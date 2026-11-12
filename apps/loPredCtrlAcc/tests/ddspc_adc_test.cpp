@@ -332,6 +332,36 @@ TEST_CASE( "ADC capture recovers source restarts without joining old timestamp h
     REQUIRE( capture.status().m_state == DDSPC::AdcState::ClockFault );
 }
 
+/** \brief Counter rollback is measured against stable publication evidence even while a bounded batch trails it. */
+TEST_CASE( "ADC capture detects producer rollback while draining retained history", "[loPredCtrlAcc][adc]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    DDSPC::AdcCapture::drain;
+#endif
+    // clang-format on
+    DDSPC::AdcConfig config;
+    config.m_capacity = 2;
+    DDSPC::AdcCapture capture( config );
+    capture.attached( 1, 2 );
+    AdcFixture source;
+    source.publish( 1, 125000 );
+    REQUIRE( capture.drain( source ) == 1 );
+    for( std::uint64_t n = 2; n <= 12; ++n )
+    {
+        source.publish( n, n * 125000 );
+    }
+    REQUIRE( capture.drain( source ) == 2 ); // Observed12, consumed through6, with7..12 still retained.
+    REQUIRE( capture.status().m_source.m_counter == 12 );
+    REQUIRE( capture.samples().back().m_frame.m_counter == 6 );
+    source.publish( 7, 2000000 ); // New producer counter lies above the cursor but below the prior publication.
+    REQUIRE( capture.drain( source ) == 1 );
+    REQUIRE( capture.status().m_generation == 2 );
+    REQUIRE( capture.status().m_restarts == 1 );
+    REQUIRE( capture.samples().size() == 1 );
+    REQUIRE( capture.samples().front().m_frame.m_counter == 7 );
+}
+
 /** \brief The actual worker attaches, copies raw metadata, disconnects, reconnects and releases its reader slot. */
 TEST_CASE( "Native ADC worker recovery uses an offline ImageStreamIO API double", "[loPredCtrlAcc][adc][threaded]" )
 {
@@ -360,12 +390,38 @@ TEST_CASE( "Native ADC worker recovery uses an offline ImageStreamIO API double"
         REQUIRE( reader.samples().empty() );
         fixture.reconnect();
         REQUIRE( await_adc( [&] { return reader.status().m_valid && reader.status().m_generation == 2; } ) );
+        fixture.replace();
+        REQUIRE( await_adc( [&] { return reader.status().m_valid && reader.status().m_generation == 3; } ) );
+        REQUIRE( reader.samples().size() == 1 );
         reader.stop();
         REQUIRE( fixture.reader() == 0 );
         REQUIRE_FALSE( reader.status().m_valid );
         REQUIRE( reader.samples().empty() );
         reader.stop();
     }
+}
+
+/** \brief An absent input never creates native resources or prevents the worker from joining at shutdown. */
+TEST_CASE( "Native ADC worker stops cleanly while its input is absent", "[loPredCtrlAcc][adc][threaded]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    DDSPC::AdcReader::start;
+    DDSPC::AdcReader::stop;
+#endif
+    // clang-format on
+    DDSPC::AdcConfig config;
+    config.m_stream = "ddspc-adc-absent"; // Unregistered API-double name; never the native namespace.
+    DDSPC::AdcReader reader( config );
+    reader.start();
+    std::this_thread::sleep_for( std::chrono::milliseconds( 20 ) );
+    const auto before = std::chrono::steady_clock::now();
+    reader.stop();
+    REQUIRE( std::chrono::steady_clock::now() - before < std::chrono::seconds( 1 ) );
+    REQUIRE( reader.status().m_state == DDSPC::AdcState::Disconnected );
+    REQUIRE( reader.status().m_generation == 0 );
+    REQUIRE_FALSE( reader.status().m_valid );
+    REQUIRE( reader.samples().empty() );
 }
 
 } // namespace libXWCTest::loPredCtrlAccTest

@@ -146,6 +146,20 @@ void AdcTransportFixture::reconnect()
     }
 }
 
+void AdcTransportFixture::replace()
+{
+    const auto path        = fixture_directory() / m_impl->m_name;
+    const auto replacement = path.string() + ".replacement";
+    {
+        std::ofstream file( replacement );
+        if( !file )
+        {
+            throw std::runtime_error( "Cannot create replacement ADC API fixture" );
+        }
+    }
+    std::filesystem::rename( replacement, path );
+}
+
 pid_t AdcTransportFixture::reader() const
 {
     return m_impl->m_reader;

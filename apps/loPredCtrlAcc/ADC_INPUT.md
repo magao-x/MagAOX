@@ -12,6 +12,11 @@ Legacy defaults are preserved; `adc.enabled=true` with `shadow=false` is rejecte
 before helpers load, and again at startup. The separate `parameters.accel_enabled`
 Legacy FLOAT reader stays off. No output section/channel is needed.
 
+For operator-run native build, ADC-only configuration and private INDI commands,
+use [ADC_EXAO2_TESTING.md](ADC_EXAO2_TESTING.md). The review correction detects
+producer rollback against the latest stable publication even while bounded
+capture is still draining older planes.
+
 ## Configuration
 
 All keys are startup-only in `[adc]`. `enabled` defaults false. Changing the
@@ -51,6 +56,8 @@ branch. It has no dependency on that worktree or its harmonic estimator. Native
 ImageStreamIO remains a production build dependency, as it already is for the app.
 A dedicated ordinary worker polls at bounded intervals; model work never holds
 its lock. This is not a qualified realtime scheduling policy.
+Application startup/shutdown serialize the lifecycle calls; concurrent diagnostic
+and retained-sample copies use the reader's own mutex.
 
 The reader checks CPU location, type, geometry, temporal flags/arrays and original
 allocation bounds before copying. Each bounded batch (at most256 frames) is
