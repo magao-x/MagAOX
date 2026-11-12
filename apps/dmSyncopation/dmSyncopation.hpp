@@ -242,19 +242,19 @@ class dmSyncopation : public MagAOXApp<true>,
     double   m_gain{ 0.1 };           ///< Per-event wait integrator gain.
     double   m_maxAdvanceUs{ 20 };    ///< Absolute wait correction limit, us.
     double   m_outputTimeoutUs{ 50 }; ///< Combination watchdog, separate from delivery allowance.
-    double   m_primaryCadenceWindow{ 2 };        ///< Independent primary diagnostics window in seconds; zero disables.
-    size_t   m_primaryCadenceMaxEvents{ 20000 }; ///< Queue and retained-event cap; zero disables diagnostics.
-    double   m_primaryExcursionUs{ 20 };         ///< Diagnostic interval excursion threshold around the window median.
-    bool     m_combinerDiagnostics{ true };      ///< Observe combined-output traces independently of scheduling.
-    bool     m_cameraDiagnostics{ true };        ///< Observe camera acquisition/publication independently of INDI FPS.
-    bool     m_pipelineDiagnostics{ true };      ///< Retain the primary's bounded upstream process trace.
-    bool     m_diagnosticsOnly{ false };         ///< Observe arbitrary primary metadata without attaching DM resources.
-    bool     m_simulationEnabled{ false };       ///< Startup-only shadow policy; live scheduling is prohibited.
-    bool     m_productionEnabled{ false };  ///< Continuous tagged-provider operation on the qualified counter grid.
-    double   m_productionReadyLeadUs{ 50 }; ///< Source completion cutoff ahead of each slot.
-    double   m_productionStep0LeadUs{ 20 }; ///< Passive-copy completion lead before the next predicted main.
-    uint64_t m_passiveCopied{ 0 }, m_passiveSkipped{ 0 }; ///< Completed and suppressed passive batches.
-    pcf::IndiProperty m_indiP_production;                 ///< Continuous-mode per-provider admission diagnostics.
+    double   m_primaryCadenceWindow{ 2 };      ///< Optional timing window, seconds; production defaults to zero.
+    size_t m_primaryCadenceMaxEvents{ 20000 }; ///< Observer cap and required production reader-release queue capacity.
+    double m_primaryExcursionUs{ 20 };         ///< Diagnostic interval excursion threshold around the window median.
+    bool   m_combinerDiagnostics{ true };      ///< Observe combined-output traces independently of scheduling.
+    bool   m_cameraDiagnostics{ true };        ///< Observe camera acquisition/publication independently of INDI FPS.
+    bool   m_pipelineDiagnostics{ true };      ///< Retain the primary's bounded upstream process trace.
+    bool   m_diagnosticsOnly{ false };         ///< Observe arbitrary primary metadata without attaching DM resources.
+    bool   m_simulationEnabled{ false };       ///< Startup-only shadow policy; live scheduling is prohibited.
+    bool   m_productionEnabled{ false };       ///< Continuous tagged-provider operation on the qualified counter grid.
+    double m_productionReadyLeadUs{ 50 };      ///< Source completion cutoff ahead of each slot.
+    double m_productionStep0LeadUs{ 20 };      ///< Passive-copy completion lead before the next predicted main.
+    uint64_t          m_passiveCopied{ 0 }, m_passiveSkipped{ 0 }; ///< Completed and suppressed passive batches.
+    pcf::IndiProperty m_indiP_production;          ///< Continuous-mode per-provider admission diagnostics.
     bool              m_zeroTestEnabled{ false };  ///< Startup-only finite empirical coordinated zero-write trial.
     std::string m_zeroTestChannel{ "dm01disp07" }; ///< Existing exclusive zero auxiliary; never created or cleared.
     std::string m_zeroSdkStream{ "dmtweeter_sdk_done" }; ///< Optional exact native-entry/result observer.
@@ -846,6 +846,12 @@ class dmSyncopation : public MagAOXApp<true>,
     /// Publish ordinary and excursion-conditioned upstream stage measurements.
     void updatePipelineINDI();
 
+    /// Return whether optional timing populations, event rows and profiling are enabled.
+    bool detailedTimingEnabled() const;
+
+    /// Allocate optional collectors and the independent operational reader-release queue before thread startup.
+    void configureDiagnostics();
+
     /// Configure legacy joins only where their primary/combined sources are supplied.
     void configureReaderTiming();
 
@@ -900,7 +906,7 @@ class dmSyncopation : public MagAOXApp<true>,
     /// Check exact current-command reader clearance; this does not qualify SDK readiness.
     bool zeroTestReady( const synco::ZeroTiming::Key &key /**< [in] Current combined command. */ ) const;
 
-    /// Observe the optional native SDK-result stream for exact main timing joins only.
+    /// Preserve native SDK fault checks and optionally accumulate exact main timing joins.
     void sampleZeroTestSdk( int64_t now /**< [in] Monotonic sample time. */ );
 
     /// Wait to one immutable deadline while checking cancellation, main identity and readiness transport.
@@ -1167,8 +1173,9 @@ inline void dmSyncopation::setupConfig()
         { "recovery.consecutiveMisses", "Consecutive original missed steps before reacquisition." },
         { "feedback.gain", "Independent per-step wait integrator gain (0-1)." },
         { "feedback.maxAdvanceUs", "Maximum absolute wait correction, us." },
-        { "diagnostics.windowSec", "Independent timing window, seconds; zero disables collection." },
-        { "diagnostics.maxEvents", "Each timing observer's queue/window cap; zero disables collection." },
+        { "diagnostics.windowSec", "Optional timing window, seconds; production defaults to zero, other modes to 2." },
+        { "diagnostics.maxEvents",
+          "Observer cap and operational release queue capacity; production requires nonzero." },
         { "diagnostics.excursionUs",
           "Camera/primary excursion threshold around each diagnostic median, us; zero disables classification." },
         { "diagnostics.combiner", "Observe combined-stream cadence and producer trace independently of scheduling." },
@@ -1189,7 +1196,7 @@ inline void dmSyncopation::setupConfig()
         { "zeroTest.commitLeadUs", "Final guard-to-counter lead, us; zero until measured; excludes dmcomb delay." },
         { "zeroTest.wakeAheadUs", "Full-validation lead and maximum final-spin window, us; zero retains legacy wait." },
         { "zeroTest.eventStride", "Retain every Nth healthy cycle; 1..1024, default4; exceptions are never sampled." },
-        { "zeroTest.sdkStream", "Optional native SDK-result stream for exact main timing joins." },
+        { "zeroTest.sdkStream", "Native SDK-result stream for fault checks and optional exact main timing joins." },
         { "simulation.enabled", "Observe a conditional fixed-grid policy without copying or triggering DM commands." },
         { "simulation.readerReleaseReady", "Gate actual-main shadow reader clearance on exact observed release." },
         { "simulation.pipelineBackend", "Model separate preparation, SDK and ordered post resources in shadow." },
@@ -1248,6 +1255,13 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
     config( m_gain, "feedback.gain" );
     config( m_maxAdvanceUs, "feedback.maxAdvanceUs" );
     config( m_outputTimeoutUs, "scheduler.outputTimeoutUs" );
+    config( m_productionEnabled, "production.enabled" );
+
+    if( m_productionEnabled )
+    {
+        m_primaryCadenceWindow = 0;
+    }
+
     config( m_primaryCadenceWindow, "diagnostics.windowSec" );
     config( m_primaryExcursionUs, "diagnostics.excursionUs" );
     config( m_combinerDiagnostics, "diagnostics.combiner" );
@@ -1255,7 +1269,6 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
     config( m_pipelineDiagnostics, "diagnostics.pipeline" );
     config( m_diagnosticsOnly, "diagnostics.only" );
     config( m_simulationEnabled, "simulation.enabled" );
-    config( m_productionEnabled, "production.enabled" );
     config( m_productionReadyLeadUs, "production.readyLeadUs" );
     config( m_productionStep0LeadUs, "production.step0LeadUs" );
     config( m_zeroTestEnabled, "zeroTest.enabled" );
@@ -1334,8 +1347,8 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
         config( m_zeroWakeAheadUs, "production.wakeAheadUs" );
         m_zeroTestChannel = m_destinations.empty() ? std::string{} : m_destinations.front();
         if( m_zeroTestEnabled || m_simulationEnabled || m_diagnosticsOnly || m_requested < 1 || m_requested > 4 ||
-            readerReleaseMonitorT::m_shmimName.empty() || !m_combinerDiagnostics || m_primaryCadenceWindow <= 0 ||
-            !finite( m_productionReadyLeadUs ) || !finite( m_productionStep0LeadUs ) || m_productionStep0LeadUs <= 0 ||
+            readerReleaseMonitorT::m_shmimName.empty() || !finite( m_productionReadyLeadUs ) ||
+            !finite( m_productionStep0LeadUs ) || m_productionStep0LeadUs <= 0 ||
             m_productionStep0LeadUs >= m_productionReadyLeadUs || m_productionReadyLeadUs >= 100 ||
             !finite( m_zeroLateUs ) || m_zeroLateUs < 0 || m_zeroLateUs > 50 || !finite( m_zeroWakeAheadUs ) ||
             m_zeroWakeAheadUs <= 0 || m_zeroWakeAheadUs >= m_productionReadyLeadUs )
@@ -3029,7 +3042,8 @@ inline void dmSyncopation::shmimMonitorTiming( const dev::shmimT &tag, dev::shmi
     }
     else if( event == dev::shmimMonitorEvent::receipt )
     {
-        m_primaryReceiptNs = ( m_primaryCadence.enabled() || m_pipelineCadence.enabled() ) ? m_now() : -1;
+        m_primaryReceiptNs =
+            ( zeroEngine() || m_primaryCadence.enabled() || m_pipelineCadence.enabled() ) ? m_now() : -1;
     }
     else if( event == dev::shmimMonitorEvent::initial )
     {
@@ -4375,23 +4389,32 @@ inline void dmSyncopation::updateReaderTimingINDIFor( dev::dmReaderTiming &reade
     }
 }
 
+inline bool dmSyncopation::detailedTimingEnabled() const
+{
+    return m_primaryCadenceWindow > 0 && m_primaryCadenceMaxEvents > 0;
+}
+
+inline void dmSyncopation::configureDiagnostics()
+{
+    m_primaryCadence.configure( m_primaryCadenceWindow, m_primaryCadenceMaxEvents, m_primaryExcursionUs * 1e-6 );
+    m_combinerCadence.configure( m_combinerDiagnostics ? m_primaryCadenceWindow : 0, m_primaryCadenceMaxEvents );
+    m_cameraCadence.configure(
+        m_cameraDiagnostics ? m_primaryCadenceWindow : 0, m_primaryCadenceMaxEvents, m_primaryExcursionUs * 1e-6 );
+    m_cameraPublicationCadence.configure(
+        m_cameraDiagnostics ? m_primaryCadenceWindow : 0, m_primaryCadenceMaxEvents, m_primaryExcursionUs * 1e-6 );
+    m_pipelineCadence.configure(
+        m_pipelineDiagnostics ? m_primaryCadenceWindow : 0, m_primaryCadenceMaxEvents, m_primaryExcursionUs * 1e-6 );
+    configureReaderTiming();
+    m_simulationReleaseQueue.configure( ( m_simulationReaderReleaseReady || zeroEngine() ) ? m_primaryCadenceMaxEvents
+                                                                                           : 0 );
+    m_zeroEvents.configure( zeroEngine() && detailedTimingEnabled() ? m_primaryCadenceMaxEvents : 0 );
+}
+
 inline int dmSyncopation::appStartup()
 {
     try
     {
-        m_primaryCadence.configure( m_primaryCadenceWindow, m_primaryCadenceMaxEvents, m_primaryExcursionUs * 1e-6 );
-        m_combinerCadence.configure( m_combinerDiagnostics ? m_primaryCadenceWindow : 0, m_primaryCadenceMaxEvents );
-        m_cameraCadence.configure(
-            m_cameraDiagnostics ? m_primaryCadenceWindow : 0, m_primaryCadenceMaxEvents, m_primaryExcursionUs * 1e-6 );
-        m_cameraPublicationCadence.configure(
-            m_cameraDiagnostics ? m_primaryCadenceWindow : 0, m_primaryCadenceMaxEvents, m_primaryExcursionUs * 1e-6 );
-        m_pipelineCadence.configure( m_pipelineDiagnostics ? m_primaryCadenceWindow : 0,
-                                     m_primaryCadenceMaxEvents,
-                                     m_primaryExcursionUs * 1e-6 );
-        configureReaderTiming();
-        m_simulationReleaseQueue.configure(
-            ( m_simulationReaderReleaseReady || zeroEngine() ) ? m_primaryCadenceMaxEvents : 0 );
-        m_zeroEvents.configure( zeroEngine() ? m_primaryCadenceMaxEvents : 0 );
+        configureDiagnostics();
     }
     catch( const std::exception &error )
     {
@@ -4544,55 +4567,65 @@ inline int dmSyncopation::appStartup()
 
 inline int dmSyncopation::appLogic()
 {
-    const auto loopBegan = m_now();
-    m_logicTiming.gapNs =
-        m_logicTiming.previousNs > 0 ? std::max<int64_t>( 0, loopBegan - m_logicTiming.previousNs ) : 0;
-    m_logicTiming.maxGapNs   = std::max( m_logicTiming.maxGapNs, m_logicTiming.gapNs );
-    m_logicTiming.previousNs = loopBegan;
-    ++m_logicTiming.sequence;
-    m_logicTiming.lastNs.fill( 0 );
-    m_logicTiming.drainedLast = 0;
-    auto began                = m_now();
+    const bool detailed = detailedTimingEnabled();
+
+    if( detailed )
+    {
+        const auto loopBegan = m_now();
+        m_logicTiming.gapNs =
+            m_logicTiming.previousNs > 0 ? std::max<int64_t>( 0, loopBegan - m_logicTiming.previousNs ) : 0;
+        m_logicTiming.maxGapNs   = std::max( m_logicTiming.maxGapNs, m_logicTiming.gapNs );
+        m_logicTiming.previousNs = loopBegan;
+        ++m_logicTiming.sequence;
+        m_logicTiming.lastNs.fill( 0 );
+        m_logicTiming.drainedLast = 0;
+    }
+
+    auto began = detailed ? m_now() : 0;
     updateZeroTest( false );
     recordLogicStage( LogicStage::status, began );
     drainZeroTestEvents();
 
-    began = m_now();
+    began = detailed ? m_now() : 0;
     SHMIMMONITOR_APP_LOGIC;
-    m_primaryCadence.update( m_now() );
-    updatePrimaryCadenceINDI();
-    recordLogicStage( LogicStage::primary, began );
-    drainZeroTestEvents();
 
-    began = m_now();
-    m_combinerCadence.update( m_now() );
-    updateCombinerCadenceINDI();
-    recordLogicStage( LogicStage::combiner, began );
-    drainZeroTestEvents();
-
-    began = m_now();
-    m_cameraCadence.update( m_now() );
-    updateCadenceINDI( m_cameraCadence, m_indiP_cameraTiming, m_indiP_cameraQuality, "acquisition_" );
-    updatePairsINDI( m_cameraCadence, m_indiP_cameraPairs );
-    m_cameraPublicationCadence.update( m_now() );
-    updateCadenceINDI(
-        m_cameraPublicationCadence, m_indiP_cameraWriteTiming, m_indiP_cameraWriteQuality, "publication_" );
-    updatePairsINDI( m_cameraPublicationCadence, m_indiP_cameraWritePairs );
-    recordLogicStage( LogicStage::camera, began );
-    drainZeroTestEvents();
-
-    began = m_now();
-    m_pipelineCadence.update( m_now() );
-    updatePipelineINDI();
-    recordLogicStage( LogicStage::pipeline, began );
-    drainZeroTestEvents();
-
-    began = m_now();
-    if( !zeroEngine() )
+    if( detailed )
     {
-        m_readerTiming.update( m_now() );
-        m_readerReleaseTiming.update( m_now() );
-        updateReaderTimingINDI();
+        m_primaryCadence.update( m_now() );
+        updatePrimaryCadenceINDI();
+        recordLogicStage( LogicStage::primary, began );
+        drainZeroTestEvents();
+
+        began = m_now();
+        m_combinerCadence.update( m_now() );
+        updateCombinerCadenceINDI();
+        recordLogicStage( LogicStage::combiner, began );
+        drainZeroTestEvents();
+
+        began = m_now();
+        m_cameraCadence.update( m_now() );
+        updateCadenceINDI( m_cameraCadence, m_indiP_cameraTiming, m_indiP_cameraQuality, "acquisition_" );
+        updatePairsINDI( m_cameraCadence, m_indiP_cameraPairs );
+        m_cameraPublicationCadence.update( m_now() );
+        updateCadenceINDI(
+            m_cameraPublicationCadence, m_indiP_cameraWriteTiming, m_indiP_cameraWriteQuality, "publication_" );
+        updatePairsINDI( m_cameraPublicationCadence, m_indiP_cameraWritePairs );
+        recordLogicStage( LogicStage::camera, began );
+        drainZeroTestEvents();
+
+        began = m_now();
+        m_pipelineCadence.update( m_now() );
+        updatePipelineINDI();
+        recordLogicStage( LogicStage::pipeline, began );
+        drainZeroTestEvents();
+
+        began = m_now();
+        if( !zeroEngine() )
+        {
+            m_readerTiming.update( m_now() );
+            m_readerReleaseTiming.update( m_now() );
+            updateReaderTimingINDI();
+        }
     }
 
     if( readerReleaseMonitorEnabled() )
@@ -4609,7 +4642,7 @@ inline int dmSyncopation::appLogic()
 
     recordLogicStage( LogicStage::readers, began );
     drainZeroTestEvents();
-    began = m_now();
+    began = detailed ? m_now() : 0;
 
     if( m_combinerCadence.enabled() )
     {
@@ -4619,7 +4652,7 @@ inline int dmSyncopation::appLogic()
 
     recordLogicStage( LogicStage::combiner, began );
     drainZeroTestEvents();
-    began = m_now();
+    began = detailed ? m_now() : 0;
 
     if( m_cameraCadence.enabled() || m_cameraPublicationCadence.enabled() )
     {
@@ -4629,7 +4662,7 @@ inline int dmSyncopation::appLogic()
 
     recordLogicStage( LogicStage::camera, began );
     drainZeroTestEvents();
-    began = m_now();
+    began = detailed ? m_now() : 0;
     { //mutex scope
         std::unique_lock<std::mutex> lock( m_cycleMutex, std::try_to_lock );
         if( lock.owns_lock() )
@@ -4812,13 +4845,13 @@ inline int dmSyncopation::appLogic()
     }
     recordLogicStage( LogicStage::legacy, began );
     drainZeroTestEvents();
-    began = m_now();
+    began = detailed ? m_now() : 0;
     updateZeroTest();
     updateProductionINDI();
     SHMIMMONITOR_UPDATE_INDI;
     recordLogicStage( LogicStage::status, began );
 
-    began = m_now();
+    began = detailed ? m_now() : 0;
 
     if( m_primaryCadence.enabled() || m_combinerCadence.enabled() || m_cameraCadence.enabled() ||
         m_cameraPublicationCadence.enabled() || m_pipelineCadence.enabled() )
@@ -4829,7 +4862,7 @@ inline int dmSyncopation::appLogic()
     TELEMETER_APP_LOGIC;
     recordLogicStage( LogicStage::telemetry, began );
     drainZeroTestEvents();
-    began = m_now();
+    began = detailed ? m_now() : 0;
     updateZeroTest( false );
     recordLogicStage( LogicStage::status, began );
     updateLogicTimingINDI();

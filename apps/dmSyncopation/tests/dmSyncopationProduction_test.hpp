@@ -11,15 +11,24 @@
 /// Deterministic local clock for direct production snapshot/copy tests.
 struct ProductionClock
 {
-    static inline int64_t time{ 1000000000 }; ///< Private monotonic time, unrelated to instrument clocks.
+    static inline int64_t  time{ 1000000000 }; ///< Private monotonic time, unrelated to instrument clocks.
+    static inline unsigned delayRead{ 0 };     ///< Countdown to one delayed clock read, zero when disarmed.
+    static inline int64_t  delayNs{ 0 };       ///< One-shot simulated elapsed work on the selected read.
 
-    /// Advance one bounded bookkeeping interval without waiting on the operating system.
+    /// Advance private bookkeeping work and inject the selected one-shot delay without an operating-system wait.
     static int64_t now();
 };
 
 int64_t ProductionClock::now()
 {
     time += 100;
+
+    if( delayRead && --delayRead == 0 )
+    {
+        time += delayNs;
+        delayNs = 0;
+    }
+
     return time;
 }
 
@@ -28,11 +37,15 @@ class ProductionHarness : public Harness
 {
   public:
     using dmSyncopation::closeProduction;
+    using dmSyncopation::configureDiagnostics;
+    using dmSyncopation::detailedTimingEnabled;
     using dmSyncopation::m_generation;
     using dmSyncopation::m_indiP_production;
+    using dmSyncopation::m_passiveCopied;
     using dmSyncopation::m_productionEnabled;
     using dmSyncopation::m_productionReadyLeadUs;
     using dmSyncopation::m_productionStep0LeadUs;
+    using dmSyncopation::m_snapshotMax;
     using dmSyncopation::m_zeroTrial;
     using dmSyncopation::openProduction;
     using dmSyncopation::productionCopy;
@@ -47,8 +60,10 @@ class ProductionHarness : public Harness
 
 void ProductionHarness::initialize()
 {
-    ProductionClock::time = 1000000000;
-    m_now                 = ProductionClock::now;
+    ProductionClock::time      = 1000000000;
+    ProductionClock::delayRead = 0;
+    ProductionClock::delayNs   = 0;
+    m_now                      = ProductionClock::now;
     attachPrimaryOnly();
     m_productionEnabled = true;
     m_zeroTestChannel   = m_destinations.front();
@@ -145,6 +160,7 @@ struct ProductionCycleClock
     static inline synco::CommitRecord pending{};       ///< Exact single outstanding source publication.
     static inline int64_t             lastTarget{ 0 }; ///< Last submitted target, independent of notifications.
     static inline int64_t             sequence{ 0 }; ///< Cooperative fake producer's monotonically increasing sequence.
+    static inline int64_t copyDelayNs{ 0 }; ///< One-shot overrun after the first slot's destination copy completes.
 
     /// Publish each earliest future request only after the consumer releases the preceding payload.
     static void produce();
@@ -188,6 +204,12 @@ void ProductionCycleClock::produce()
 
 int64_t ProductionCycleClock::now()
 {
+    if( copyDelayNs && app && !app->m_mappings.empty() && app->m_mappings.front().m_cache.front() == 11.0F )
+    {
+        ZeroClock::time += copyDelayNs;
+        copyDelayNs = 0;
+    }
+
     const auto now = ZeroClock::now();
     produce();
     return now;
@@ -305,7 +327,7 @@ TEST_CASE( "production startup validates mode and preparation settings", "[dmSyn
 {
     ProductionHarness app;
     app.setupConfig();
-    const int  fault      = GENERATE( 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 );
+    const int  fault      = GENERATE( 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 );
     char       path[]     = "/tmp/dm-synco-production-config-XXXXXX";
     const auto descriptor = mkstemp( path );
     REQUIRE( descriptor >= 0 );
@@ -320,9 +342,10 @@ TEST_CASE( "production startup validates mode and preparation settings", "[dmSyn
                << ( fault == 8   ? 5
                     : fault == 9 ? 1
                                  : 4 )
-               << "\nmaxCadenceHz=8000\n"
-               << "[readerReleaseMonitor]\nshmimName=" << ( fault == 3 ? "" : "dmtweeter_read_done" ) << "\n"
-               << "[production]\nenabled=true\nreadyLeadUs="
+               << "\nmaxCadenceHz=8000\ncopyBudgetUs=30\nsnapshotBudgetUs=10\n"
+               << "[readerReleaseMonitor]\nshmimName=" << ( fault == 3 || fault == 13 ? "" : "dmtweeter_read_done" )
+               << "\n"
+               << "[production]\nenabled=" << ( fault == 13 ? "false" : "true" ) << "\nreadyLeadUs="
                << ( fault == 4   ? 20
                     : fault == 7 ? 100
                                  : 50 )
@@ -331,6 +354,13 @@ TEST_CASE( "production startup validates mode and preparation settings", "[dmSyn
                << "[zeroTest]\nenabled=" << ( fault == 1 ? "true" : "false" ) << "\nchannel=dm97disp07\n"
                << "[simulation]\nenabled=" << ( fault == 2 ? "true" : "false" )
                << "\nreaderReleaseReady=false\npipelineBackend=false\n";
+
+        if( fault >= 10 && fault <= 12 )
+        {
+            config << "[diagnostics]\nwindowSec=" << ( fault == 10 ? 2 : 0 )
+                   << "\ncombiner=" << ( fault == 11 ? "false" : "true" )
+                   << "\nmaxEvents=" << ( fault == 12 ? 0 : 20000 ) << '\n';
+        }
     }
 
     app.config.readConfig( path );
@@ -338,18 +368,41 @@ TEST_CASE( "production startup validates mode and preparation settings", "[dmSyn
     const auto result = app.loadConfigImpl( app.config );
     CAPTURE( fault );
 
-    if( fault == 0 || fault == 9 )
+    if( fault == 0 || fault == 9 || fault == 10 || fault == 11 || fault == 13 )
     {
         CHECK( result == 0 );
-        CHECK( app.m_productionEnabled );
+        CHECK( app.m_productionEnabled == ( fault != 13 ) );
         CHECK_FALSE( app.m_zeroTestEnabled );
         CHECK_FALSE( app.m_simulationEnabled );
-        CHECK( app.m_zeroLateUs == 6 );
-        CHECK( app.m_zeroWakeAheadUs == 10 );
+        CHECK( app.m_zeroLateUs == ( fault == 13 ? 5 : 6 ) );
+        CHECK( app.m_zeroWakeAheadUs == ( fault == 13 ? 0 : 10 ) );
         CHECK( app.m_productionReadyLeadUs == 50 );
         CHECK( app.m_productionStep0LeadUs == 20 );
         CHECK( app.m_requested == ( fault == 9 ? 1 : 4 ) );
         CHECK( app.m_maxCadence == 8000 );
+        CHECK( app.m_bounds.copy == 30000 );
+        CHECK( app.m_bounds.snapshot == 10000 );
+        CHECK( app.m_primaryCadenceWindow == ( fault == 10 || fault == 13 ? 2 : 0 ) );
+        app.configureDiagnostics();
+        CHECK( app.detailedTimingEnabled() == ( fault == 10 || fault == 13 ) );
+
+        if( app.m_productionEnabled )
+        {
+            CHECK( app.readerReleaseMonitorEnabled() );
+            CHECK( app.m_simulationReleaseQueue.capacity() > 0 );
+        }
+
+        if( !app.detailedTimingEnabled() )
+        {
+            CHECK_FALSE( app.m_primaryCadence.enabled() );
+            CHECK_FALSE( app.m_combinerCadence.enabled() );
+            CHECK_FALSE( app.m_cameraCadence.enabled() );
+            CHECK_FALSE( app.m_cameraPublicationCadence.enabled() );
+            CHECK_FALSE( app.m_pipelineCadence.enabled() );
+            CHECK_FALSE( app.m_readerTiming.enabled() );
+            CHECK_FALSE( app.m_readerReleaseTiming.enabled() );
+            CHECK( app.m_zeroEvents.capacity() == 0 );
+        }
     }
     else
     {
@@ -364,6 +417,9 @@ TEST_CASE( "production startup validates mode and preparation settings", "[dmSyn
 #ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
     MagAOX::app::dmSyncopation::setupConfig;
     MagAOX::app::dmSyncopation::loadConfigImpl;
+    MagAOX::app::dmSyncopation::configureDiagnostics;
+    MagAOX::app::dmSyncopation::detailedTimingEnabled;
+    MagAOX::app::dmSyncopation::readerReleaseMonitorEnabled;
 #endif
     // clang-format on
 }
@@ -543,16 +599,168 @@ TEST_CASE( "production copy safety never turns a private snapshot into an applie
     // clang-format on
 }
 
-/// The shared engine consumes nonzero tagged inputs, prepares step zero and does not inherit finite-trial expiry.
+/// A configured copy allowance still vetoes a batch before any destination metadata or pixels change.
+TEST_CASE( "production fixed copy budget retains the pre-copy fit guard", "[dmSyncopation][production][budget]" )
+{
+    Streams            streams;
+    ProductionSidecars sidecars;
+    ProductionHarness  app;
+    app.initialize();
+    app.m_bounds.copy  = 30000;
+    const auto request = productionRequest( app, 1, ProductionClock::time + 125000 );
+    productionCommand( app, 0, request, 10 );
+    productionCommand( app, 1, request, 30 );
+    ProductionClock::time = request.cutoffNs;
+    REQUIRE( app.productionSnapshot( request, ProductionClock::time ) );
+    const auto stampA   = streams.images[2].md->writetime;
+    const auto stampB   = streams.images[3].md->writetime;
+    const auto counterA = streams.images[2].md->cnt0;
+    const auto counterB = streams.images[3].md->cnt0;
+
+    CHECK_FALSE( app.productionCopy( streams.images[0].md->cnt0, ProductionClock::time + 20000 ) );
+    CHECK( app.m_zeroWaitFailure == Harness::ZeroOutcome::preparationLate );
+    CHECK( app.m_bounds.copy == 30000 );
+    CHECK( app.m_copyMax == 0 );
+    CHECK( app.m_mappings[0].m_cache.front() == 2 );
+    CHECK( app.m_mappings[1].m_cache.front() == 3 );
+    CHECK( streams.images[2].md->cnt0 == counterA );
+    CHECK( streams.images[3].md->cnt0 == counterB );
+    CHECK( streams.images[2].md->write == 0 );
+    CHECK( streams.images[3].md->write == 0 );
+    CHECK( streams.images[2].md->writetime.tv_sec == stampA.tv_sec );
+    CHECK( streams.images[2].md->writetime.tv_nsec == stampA.tv_nsec );
+    CHECK( streams.images[3].md->writetime.tv_sec == stampB.tv_sec );
+    CHECK( streams.images[3].md->writetime.tv_nsec == stampB.tv_nsec );
+
+    for( size_t pixel = 0; pixel < 9; ++pixel )
+    {
+        CHECK( streams.images[2].array.F[pixel] == 2 );
+        CHECK( streams.images[3].array.F[pixel] == 3 );
+    }
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::productionCopy;
+#endif
+    // clang-format on
+}
+
+/// A slow private snapshot updates its observed maximum without changing the configured allowance or later admission.
+TEST_CASE( "production snapshot excursions preserve the configured budget", "[dmSyncopation][production][budget]" )
+{
+    Streams            streams;
+    ProductionSidecars sidecars;
+    ProductionHarness  app;
+    app.initialize();
+    app.m_bounds.snapshot = 10000;
+    const auto request    = productionRequest( app, 1, ProductionClock::time + 125000 );
+    productionCommand( app, 0, request, 10 );
+    ProductionClock::time      = request.cutoffNs;
+    ProductionClock::delayRead = 2;
+    ProductionClock::delayNs   = 90000;
+
+    REQUIRE( app.productionSnapshot( request, ProductionClock::time ) );
+    CHECK( ProductionClock::delayRead == 0 );
+    CHECK( app.m_snapshotMax == 90100 );
+    CHECK( app.m_bounds.snapshot == 10000 );
+
+    const auto next = productionRequest( app, 2, request.targetNs + 125000 );
+    productionCommand( app, 0, next, 11, 2 );
+    ProductionClock::time = next.cutoffNs;
+    REQUIRE( app.productionSnapshot( next, ProductionClock::time ) );
+    REQUIRE( app.productionCopy( streams.images[0].md->cnt0, next.targetNs - 10000 ) );
+    CHECK( app.m_snapshotMax == 90100 );
+    CHECK( app.m_bounds.snapshot == 10000 );
+    CHECK( streams.images[2].array.F[0] == 11 );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::productionSnapshot;
+    MagAOX::app::dmSyncopation::productionCopy;
+#endif
+    // clang-format on
+}
+
+/// A real copy overrun suppresses its trigger while later slots and passive copies recover with the fixed allowance.
+TEST_CASE( "production copy overruns do not latch later slots off", "[dmSyncopation][production][budget][integration]" )
+{
+    Streams            streams;
+    ProductionSidecars sidecars;
+    ProductionHarness  app;
+    ZeroClock::connect( app, streams, 4 );
+    const auto next             = ZeroClock::warm();
+    app.m_productionEnabled     = true;
+    app.m_zeroTestEnabled       = false;
+    app.m_productionReadyLeadUs = 70;
+    app.m_productionStep0LeadUs = 20;
+    app.m_zeroLateUs            = 6;
+    app.m_zeroWakeAheadUs       = 10;
+    app.m_maxCadence            = 8000;
+    app.m_bounds.copy           = 30000;
+    REQUIRE( app.openProduction() );
+    ProductionCycleClock::app         = &app;
+    ProductionCycleClock::pending     = {};
+    ProductionCycleClock::lastTarget  = 0;
+    ProductionCycleClock::sequence    = 0;
+    ProductionCycleClock::copyDelayNs = 90000;
+    app.m_now                         = ProductionCycleClock::now;
+    app.m_wait                        = ProductionCycleClock::wait;
+    const auto counterBefore          = streams.images[2].md->cnt0;
+    app.m_enabled                     = true;
+
+    ZeroClock::primary( next );
+    CHECK( ProductionCycleClock::copyDelayNs == 0 );
+    CHECK( app.m_copyMax >= 90000 );
+    CHECK( app.m_bounds.copy == 30000 );
+    CHECK( app.m_zeroStats.preparationLate == 1 );
+    CHECK( app.m_zeroStats.skipped == 1 );
+    CHECK( app.m_zeroStats.posted == 2 );
+    CHECK( app.m_zeroStats.acknowledged == 2 );
+    CHECK( app.m_passiveCopied == 1 );
+    CHECK( streams.images[2].md->cnt0 == counterBefore + 2 );
+    REQUIRE( ZeroClock::posts.size() == 2 );
+    CHECK( ZeroClock::posts[0] >= next + 250000 );
+    CHECK( ZeroClock::posts[0] <= next + 256000 );
+    CHECK( ZeroClock::posts[1] >= next + 375000 );
+    CHECK( ZeroClock::posts[1] <= next + 381000 );
+    const auto copyMaximum = app.m_copyMax;
+
+    ZeroClock::primary( next + 500000 );
+    CHECK( app.m_copyMax == copyMaximum );
+    CHECK( app.m_bounds.copy == 30000 );
+    CHECK( app.m_zeroStats.preparationLate == 1 );
+    CHECK( app.m_zeroStats.skipped == 1 );
+    CHECK( app.m_zeroStats.posted == 5 );
+    CHECK( app.m_zeroStats.acknowledged == 5 );
+    CHECK( app.m_passiveCopied == 2 );
+    CHECK( streams.images[2].md->cnt0 == counterBefore + 5 );
+    CHECK( app.m_enabled );
+    ProductionCycleClock::app = nullptr;
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::processZeroTestPrimary;
+    MagAOX::app::dmSyncopation::productionCopy;
+    MagAOX::app::dmSyncopation::productionStep0;
+#endif
+    // clang-format on
+}
+
+/// Both diagnostic modes preserve real receipt handling, tagged deliveries, passive preparation and continuous
+/// lifetime.
 TEST_CASE( "production common scheduler continuously publishes tagged contributions",
            "[dmSyncopation][production][integration]" )
 {
     Streams            streams;
     ProductionSidecars sidecars;
     ProductionHarness  app;
-    const int          steps = GENERATE( 1, 4 );
-    CAPTURE( steps );
+    const int          steps    = GENERATE( 1, 4 );
+    const bool         detailed = GENERATE( false, true );
+    CAPTURE( steps, detailed );
     ZeroClock::connect( app, streams, steps );
+    app.m_primaryCadenceWindow    = detailed ? 2 : 0;
+    app.m_primaryCadenceMaxEvents = 256;
+    app.configureDiagnostics();
     const auto next         = ZeroClock::warm();
     app.m_productionEnabled = true;
     app.m_zeroTestEnabled   = false;
@@ -568,16 +776,19 @@ TEST_CASE( "production common scheduler continuously publishes tagged contributi
              app.m_mappings[1].m_inputAvailable,
              app.m_mappings[1].m_source->image()->md->size[0],
              app.m_mappings[1].m_source->image()->md->size[1] );
-    ProductionCycleClock::app        = &app;
-    ProductionCycleClock::pending    = {};
-    ProductionCycleClock::lastTarget = 0;
-    ProductionCycleClock::sequence   = 0;
-    app.m_now                        = ProductionCycleClock::now;
-    app.m_wait                       = ProductionCycleClock::wait;
-    const auto primaryBefore         = streams.images[0].md->cnt0;
-    const auto counterBefore         = streams.images[2].md->cnt0;
-    app.m_enabled                    = true;
+    ProductionCycleClock::app         = &app;
+    ProductionCycleClock::pending     = {};
+    ProductionCycleClock::lastTarget  = 0;
+    ProductionCycleClock::sequence    = 0;
+    ProductionCycleClock::copyDelayNs = 0;
+    app.m_now                         = ProductionCycleClock::now;
+    app.m_wait                        = ProductionCycleClock::wait;
+    const auto primaryBefore          = streams.images[0].md->cnt0;
+    const auto counterBefore          = streams.images[2].md->cnt0;
+    app.m_enabled                     = true;
+    // ZeroClock uses the actual receipt hook followed by processImage, including when every collector is disabled.
     ZeroClock::primary( next );
+    CHECK( app.m_primaryCadence.enabled() == detailed );
     REQUIRE( app.m_zeroStats.posted == uint64_t( steps - 1 ) );
     CHECK( app.m_zeroStats.acknowledged == uint64_t( steps - 1 ) );
     CHECK( app.m_zeroStats.skipped == 0 );
@@ -602,6 +813,23 @@ TEST_CASE( "production common scheduler continuously publishes tagged contributi
     app.publishZeroTestStatus( app.m_zeroStats.startedNs + 121000000000LL, true );
     CHECK( app.m_enabled );
     CHECK_FALSE( app.m_zeroStats.finished );
+
+    if( detailed )
+    {
+        CHECK( app.m_zeroEvents.queued() > 0 );
+        CHECK( app.m_zeroPhase.summary().observed > 0 );
+        CHECK( app.m_zeroPublicationTiming.summary().mainObserved > 0 );
+    }
+    else
+    {
+        CHECK( app.m_zeroEvents.queued() == 0 );
+        CHECK( app.m_zeroEvents.dropped() == 0 );
+        CHECK( app.m_zeroPhase.summary().observed == 0 );
+        CHECK( app.m_zeroPublicationTiming.summary().mainObserved == 0 );
+        CHECK( app.m_zeroPublicationTiming.summary().auxiliaryObserved == 0 );
+        CHECK( app.m_zeroTiming.summary().classified == 0 );
+    }
+
     ProductionCycleClock::app = nullptr;
 
     // clang-format off
@@ -609,6 +837,94 @@ TEST_CASE( "production common scheduler continuously publishes tagged contributi
     MagAOX::app::dmSyncopation::processZeroTestPrimary;
     MagAOX::app::dmSyncopation::productionStep0;
     MagAOX::app::dmSyncopation::publishZeroTestStatus;
+    MagAOX::app::dmSyncopation::configureDiagnostics;
+    MagAOX::app::dmSyncopation::shmimMonitorTiming;
+    MagAOX::app::dmSyncopation::processImage;
+#endif
+    // clang-format on
+}
+
+/// Minimal diagnostics retain reader-release, final SDK-failure and publication-clock safety guards.
+TEST_CASE( "minimal production diagnostics preserve safety rejections",
+           "[dmSyncopation][production][integration][minimalDiagnostics]" )
+{
+    Streams            streams;
+    CompletionStream   sdk;
+    ProductionSidecars sidecars;
+    ProductionHarness  app;
+    const int          fault = GENERATE( 0, 1, 2 );
+    CAPTURE( fault );
+    ZeroClock::connect( app, streams, 4 );
+    app.m_primaryCadenceWindow = 0;
+    app.configureDiagnostics();
+    const auto next         = ZeroClock::warm();
+    app.m_productionEnabled = true;
+    app.m_zeroTestEnabled   = false;
+    app.m_zeroLateUs        = 6;
+    app.m_zeroWakeAheadUs   = 10;
+    app.m_maxCadence        = 8000;
+    REQUIRE( app.openProduction() );
+    app.m_enabled = true;
+    ZeroClock::primary( next );
+    REQUIRE( app.m_zeroStats.posted == 3 );
+    REQUIRE( app.m_zeroStats.skipped == 0 );
+    const auto observed = next + 500000;
+
+    if( fault == 0 )
+    {
+        ZeroClock::release = false;
+    }
+    else if( fault == 1 )
+    {
+        auto record = readerCompletion( streams.images[1], ZeroClock::sequence, observed - 2000, observed - 1000 );
+        record.kind = MagAOX::dmCompletion::Kind::sdk;
+        record.backendResult = 0;
+        sdk.store( record );
+        REQUIRE( ImageStreamIO_openIm( &app.m_zeroSdk, "synco_reader_done" ) == 0 );
+        synco::GridTime grid;
+        uint64_t        period = 0;
+        REQUIRE( app.zeroTestGrid( streams.images[0].md->cnt0 + 1, grid, period ) );
+        ZeroClock::endpoint    = &sdk;
+        ZeroClock::injection   = 6;
+        ZeroClock::injectionAt = synco::stepGrid( grid, period, 1, 4 ).ns - 3000;
+    }
+    else
+    {
+        ZeroClock::publicationClockDelay = 2000;
+    }
+
+    const auto posted = ZeroClock::posts.size();
+    ZeroClock::primary( observed );
+    CHECK( ZeroClock::posts.size() == posted );
+    CHECK( app.m_zeroStats.posted == 3 );
+
+    if( fault == 2 )
+    {
+        CHECK( app.m_zeroStats.clockRejected == 1 );
+        CHECK( app.m_zeroStats.clockExcludedCycles == 1 );
+        CHECK( app.m_zeroStats.clockExcludedSlots == 3 );
+        CHECK( app.m_zeroStats.warming );
+    }
+    else
+    {
+        CHECK( app.m_zeroStats.readerMissing == 3 );
+        CHECK( app.m_zeroStats.skipped == 3 );
+        CHECK( ZeroClock::injections == ( fault == 1 ? 1 : 0 ) );
+    }
+
+    CHECK( app.m_zeroEvents.queued() == 0 );
+    CHECK( app.m_zeroTiming.summary().classified == 0 );
+    CHECK( app.m_zeroPhase.summary().observed == 0 );
+    CHECK( app.m_zeroPublicationTiming.summary().mainObserved == 0 );
+    CHECK( app.m_zeroPublicationTiming.summary().auxiliaryObserved == 0 );
+    checkZeroPartition( app );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::configureDiagnostics;
+    MagAOX::app::dmSyncopation::processZeroTestPrimary;
+    MagAOX::app::dmSyncopation::zeroTestFinalGuard;
+    MagAOX::app::dmSyncopation::zeroTestClockRejected;
 #endif
     // clang-format on
 }

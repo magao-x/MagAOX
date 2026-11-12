@@ -1,0 +1,58 @@
+--- a/INDI/INDI/indiserver.c	2026-11-06 20:35:20.000000000 -0300
++++ b/INDI/INDI/indiserver.c	2026-11-11 16:23:04.463373859 -0300
+@@ -200,7 +200,7 @@
+ static void startRemoteDvr (DvrInfo *dp);
+ static int openRemoteConnection (char host[], int port);
+ static void restartDvr (DvrInfo *dp);
+-static void q2Drivers (char *dev, Msg *mp, char *roottag);
++static void q2Drivers (char *dev, char *name, Msg *mp, char *roottag);
+ static void q2SnoopingDrivers (int isblob, char *dev, char *name, Msg *mp);
+ static void q2Clients (ClInfo *notme, int isblob, char *dev, char *name, Msg *mp,
+                        int srcIsRemote, char *roottag);
+@@ -926,7 +926,7 @@
+                         cp->ischained = 1;
+ 
+ 		    /* send message to driver(s) responsible for dev */
+-		    q2Drivers (dev, cp->mp, roottag);
++		    q2Drivers (dev, name, cp->mp, roottag);
+ 
+ 		    /* echo new* commands back to other clients */
+ 		    if (!strncmp (roottag, "new", 3))
+@@ -1083,7 +1083,7 @@
+ 		    /* that's all if driver is just registering a snoop */
+ 		    if (!strcmp (roottag, "getProperties")) {
+ 			addSnoopDevice (dp, dev, name);
+-                        q2Drivers (dev, dp->mp, roottag);        // force initial report
++                        q2Drivers (dev, name, dp->mp, roottag);        // force initial report
+ 			goto done;
+ 		    }
+ 
+@@ -1421,7 +1421,7 @@
+  *   they get sent back out everywhere and go around forever.
+  */
+ static void
+-q2Drivers (char *dev, Msg *mp, char *roottag)
++q2Drivers (char *dev, char *name, Msg *mp, char *roottag)
+ {
+ 	int isggp = !strcmp (roottag, "getProperties") && !dev[0];
+ 	DvrInfo *dp;
+@@ -1443,14 +1443,17 @@
+ 		     * chained loops
+ 		     */
+ 		    if (isggp && dp->pid == REMOTEDVR) {
+-			char gp[100];
++			char gp[MAXINDIDEVICE+MAXINDINAME+100];
+ 			int gpl;
+ 
+ 			if (verbose)
+ 			    logMessage ("Driver %s: Loop caught, adding %s to generic getProperties\n",
+ 					    dp->name, dp->dev);
+ 			remote_mp = newMsg();
+-			gpl = snprintf (gp, sizeof(gp), "<getProperties version='%g' device='%s' />\n", INDIV, dp->dev);
++			if (name[0])
++			    gpl = snprintf (gp, sizeof(gp), "<getProperties version='%g' device='%s' name='%s' />\n", INDIV, dp->dev, name);
++			else
++			    gpl = snprintf (gp, sizeof(gp), "<getProperties version='%g' device='%s' />\n", INDIV, dp->dev);
+ 			addMsg (remote_mp, gp, gpl);
+ 			sendmp = remote_mp;
+ 		    } else
