@@ -1,7 +1,6 @@
-/// $Id: TimeStamp.cpp,v 1.5 2007/09/20 18:06:48 pgrenz Exp $
-///
-/// @author Paul Grenz
-///
+/** \file TimeStamp.cpp
+ * \brief Implement the timeval wrapper used for INDI timestamps and intervals.
+ */
 ////////////////////////////////////////////////////////////////////////////////
 
 #include <sstream>
@@ -910,8 +909,7 @@ double TimeStamp::getMJD() const
   return xDays + 40587.0;
 }
 
-////////////////////////////////////////////////////
-////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
 /// Handles streaming the TimeStamp formatted string. See 'getFormattedStr'
 /// for details about the format of the string.
 /// @param strmOut The stream to be written to.

@@ -1,4 +1,6 @@
-// $Id: SystemSocket.cpp 7418 2009-12-16 22:08:43Z pgrenz $
+/** \file SystemSocket.cpp
+ * \brief Implement the socket wrapper and network interface queries used by libcommon.
+ */
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "SystemSocket.hpp"
