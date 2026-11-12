@@ -169,6 +169,7 @@ typedef struct {
     pthread_cond_t go_cond;		/* tell writer thread to send next msqq */
     pthread_mutex_t q_lock;		/* guard access to msqg and go_cond */
     pthread_rwlock_t restart_lock;	/* lock out this device while restarting */
+    int ready;				/* 1 once startDvrThread holds restart_lock, so others may use it */
 } DvrInfo;
 static DvrInfo *dvrinfo;		/* malloced array of DvrInfo */
 static int ndvrinfo;			/* n total */
@@ -200,7 +201,7 @@ static void startLocalDvr (DvrInfo *dp);
 static void startRemoteDvr (DvrInfo *dp);
 static int openRemoteConnection (char host[], int port);
 static void restartDvr (DvrInfo *dp);
-static void q2Drivers (char *dev, Msg *mp, char *roottag);
+static void q2Drivers (char *dev, char *name, Msg *mp, char *roottag);
 static void q2SnoopingDrivers (int isblob, char *dev, char *name, Msg *mp);
 static void q2Clients (ClInfo *notme, int isblob, char *dev, char *name, Msg *mp,
                        int srcIsRemote, char *roottag);
@@ -209,6 +210,7 @@ static Snoopee *findSnoopDevice (DvrInfo *dp, char *dev, char *name);
 static void addClDevice (ClInfo *cp, int isblob, char *dev, char *name);
 static void rmClDevice (ClInfo *cp, int isblob, char *dev, char *name);
 static int findClDevice (ClInfo *cp, int isblob, char *dev, char *name);
+static int findClAllDevices (ClInfo *cp, int isblob);
 static void logMsg (const char *label, DvrInfo *dp, ClInfo *cp, Msg *mp);
 static void *driverStdoutReaderThread (void *);
 static void *driverStderrReaderThread (void *);
@@ -415,8 +417,11 @@ startDvrThread (void *vp)
 {
 	DvrInfo *dp = (DvrInfo *)vp;
 
-	/* lock while setting up driver */
+	/* lock while setting up driver. clients may connect before this thread
+	 * runs, so q2Drivers and q2SnoopingDrivers skip dp until it is held.
+	 */
 	pthread_rwlock_wrlock (&dp->restart_lock);
+	__atomic_store_n (&dp->ready, 1, __ATOMIC_RELEASE);
 	startDvr (dp);
 	pthread_rwlock_unlock (&dp->restart_lock);
 
@@ -926,7 +931,7 @@ clientReaderThread (void *vp)
                         cp->ischained = 1;
 
 		    /* send message to driver(s) responsible for dev */
-		    q2Drivers (dev, cp->mp, roottag);
+		    q2Drivers (dev, name, cp->mp, roottag);
 
 		    /* echo new* commands back to other clients */
 		    if (!strncmp (roottag, "new", 3))
@@ -1082,8 +1087,16 @@ driverStdoutReaderThread (void *vp)
 
 		    /* that's all if driver is just registering a snoop */
 		    if (!strcmp (roottag, "getProperties")) {
+			/* a snoop must name a device. without one it would reach every
+			 * driver, and remote ones as device-wide requests.
+			 */
+			if (!dev[0]) {
+			    logMessage ("Driver %s: ignoring snoop getProperties without a device, name='%s'\n",
+			    		dp->name, name);
+			    goto done;
+			}
 			addSnoopDevice (dp, dev, name);
-                        q2Drivers (dev, dp->mp, roottag);        // force initial report
+                        q2Drivers (dev, name, dp->mp, roottag);        // force initial report
 			goto done;
 		    }
 
@@ -1416,12 +1429,16 @@ restartDvr (DvrInfo *dp)
 }
 
 /* put Msg mp on queue of each driver responsible for dev, or all drivers
- *   if dev not specified.
+ *   if dev not specified. name is the property name of mp, "" if none.
  * N.B. add device to any generic getProperties going to remote drivers, else
- *   they get sent back out everywhere and go around forever.
+ *   they get sent back out everywhere and go around forever. keep its name, else
+ *   a request for one property becomes a device-wide request, to which drivers
+ *   reply with all their properties and by renewing all their snoops.
+ * N.B. other messages without a device are not sent to remote drivers, else the
+ *   remote server takes the chained connection as wanting every device.
  */
 static void
-q2Drivers (char *dev, Msg *mp, char *roottag)
+q2Drivers (char *dev, char *name, Msg *mp, char *roottag)
 {
 	int isggp = !strcmp (roottag, "getProperties") && !dev[0];
 	DvrInfo *dp;
@@ -1431,9 +1448,13 @@ q2Drivers (char *dev, Msg *mp, char *roottag)
 	 */
 	for (dp = dvrinfo; dp < &dvrinfo[ndvrinfo]; dp++) {
 
+	    /* not usable until its startDvrThread holds restart_lock */
+	    if (!__atomic_load_n (&dp->ready, __ATOMIC_ACQUIRE))
+		continue;
+
 	    if (pthread_rwlock_tryrdlock (&dp->restart_lock) == 0) {
 
-		if (!dev[0] || !dp->dev[0] || !strcmp (dev, dp->dev)) {
+		if ((!dev[0] && (isggp || dp->pid != REMOTEDVR)) || !dp->dev[0] || !strcmp (dev, dp->dev)) {
 
 		    Msg *remote_mp = NULL;
 		    Msg *sendmp;
@@ -1443,14 +1464,24 @@ q2Drivers (char *dev, Msg *mp, char *roottag)
 		     * chained loops
 		     */
 		    if (isggp && dp->pid == REMOTEDVR) {
-			char gp[100];
+			char gp[MAXINDIDEVICE+MAXINDINAME+64];
 			int gpl;
+
+			/* a name we can not quote safely is not a valid INDI name */
+			if (strpbrk (name, "'\"&<>")) {
+			    pthread_rwlock_unlock (&dp->restart_lock);
+			    continue;
+			}
 
 			if (verbose)
 			    logMessage ("Driver %s: Loop caught, adding %s to generic getProperties\n",
 					    dp->name, dp->dev);
 			remote_mp = newMsg();
-			gpl = snprintf (gp, sizeof(gp), "<getProperties version='%g' device='%s' />\n", INDIV, dp->dev);
+			if (name[0])
+			    gpl = snprintf (gp, sizeof(gp), "<getProperties version='%g' device='%s' name='%s' />\n",
+			    		INDIV, dp->dev, name);
+			else
+			    gpl = snprintf (gp, sizeof(gp), "<getProperties version='%g' device='%s' />\n", INDIV, dp->dev);
 			addMsg (remote_mp, gp, gpl);
 			sendmp = remote_mp;
 		    } else
@@ -1506,6 +1537,10 @@ q2SnoopingDrivers (int isblob, char *dev, char *name, Msg *mp)
 	 * it is snooping for this dev/name
 	 */
 	for (dp = dvrinfo; dp < &dvrinfo[ndvrinfo]; dp++) {
+
+	    /* not usable until its startDvrThread holds restart_lock */
+	    if (!__atomic_load_n (&dp->ready, __ATOMIC_ACQUIRE))
+		continue;
 
 	    if (pthread_rwlock_tryrdlock (&dp->restart_lock) == 0) {
 
@@ -1625,6 +1660,12 @@ q2Clients (ClInfo *notme, int isblob, char *dev, char *name, Msg *mp,
 	    if (!cp->active || cp == notme)
 		continue;
 	    if (findClDevice (cp, isblob, dev, name) < 0)
+		continue;
+	    /* a message without a device goes only to clients that asked for every
+	     * device. chained servers never do, so it stays on this server instead
+	     * of circulating among servers forever, once per chained connection.
+	     */
+	    if (!dev[0] && !findClAllDevices (cp, isblob))
 		continue;
             if (srcIsRemote && cp->ischained && roottag && !strncmp(roottag, "def", 3))
                 continue;
@@ -1874,6 +1915,29 @@ findClDevice (ClInfo *cp, int isblob, char *dev, char *name)
 	/* unlock and return */
 	pthread_rwlock_unlock (&cp->props_rwlock);
 	return (i);
+}
+
+/* return 1 if props[] (or blobs[], if isblob) shows cp is interested in every
+ * device, i.e. it sent something without a device, else 0
+ */
+static int
+findClAllDevices (ClInfo *cp, int isblob)
+{
+	Property *pa;
+	int nprops, i;
+
+	/* protect while scanning */
+	pthread_rwlock_rdlock (&cp->props_rwlock);
+
+	pa = isblob ? cp->blobs : cp->props;
+	nprops = isblob ? cp->nblobs : cp->nprops;
+	for (i = 0; i < nprops; i++)
+	    if (!pa[i].dev[0])
+		break;
+
+	/* unlock and return */
+	pthread_rwlock_unlock (&cp->props_rwlock);
+	return (i < nprops);
 }
 
 /* add the given device and name to the list of props[] (or blobs[], if isblob)

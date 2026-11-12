@@ -1,3 +1,8 @@
+/** \file MagAOXApp_test.cpp
+ * \brief Unit tests of MagAOXApp configuration, PID locking, INDI property handling and subscriptions.
+ * \ingroup MagAOXApp_unit_test
+ */
+
 // #define CATCH_CONFIG_MAIN
 #include "../../../tests/catch2/catch.hpp"
 
@@ -214,6 +219,25 @@ TEST_CASE( "MagAOXApp INDI SetProperty retry reset", "[app::MagAOXApp]" )
     app.markSetPropertyReceived( key, true );
     REQUIRE( app.shouldRequestSetProperty( key, false, now ) == false );
     REQUIRE( app.shouldRequestSetProperty( key, true, now ) == true );
+}
+
+/// Reject Set-property subscriptions with an empty device or property name
+/** An empty device would be sent as a getProperties without a device, which indiserver fans out to every device.
+ *
+ * \ingroup MagAOXApp_unit_test
+ */
+TEST_CASE( "MagAOXApp INDI SetProperty rejects empty names", "[app::MagAOXApp]" )
+{
+    MagAOXApp_test app;
+
+    pcf::IndiProperty prop;
+    REQUIRE( app.registerIndiPropertySet( prop, "", "property", callback ) == -1 );
+    REQUIRE( app.registerIndiPropertySet( prop, "publisher", "", callback ) == -1 );
+    REQUIRE( app.registerIndiPropertySet( prop, "", "", callback ) == -1 );
+    REQUIRE( app.setPropertyCount() == 0 );
+
+    REQUIRE( app.registerIndiPropertySet( prop, "publisher", "property", callback ) == 0 );
+    REQUIRE( app.setPropertyCount() == 1 );
 }
 
 /// Setting defaults
