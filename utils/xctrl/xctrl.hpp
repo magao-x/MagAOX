@@ -399,8 +399,9 @@ class xCtrl
     bool operatorAllowed() const;
 
     /// Settle privileges for the command before running it
-    /** Commands that change which apps are configured need root, i.e. sudo.  Starting and stopping apps needs
-     * operatorAllowed(); xctrl is installed setuid root for that.  Everything else, and any testing option,
+    /** Commands that change which apps are configured need a privileged user: root, e.g. through sudo, or one who
+     * may write the role's proclist (group magaox-dev, for a normal config checkout).  Starting and stopping apps
+     * needs operatorAllowed().  xctrl is installed setuid root for both.  Everything else, and any testing option,
      * runs as the calling user.
      *
      * \returns 0 if the command may run, -1 with a message on stderr if not
@@ -1332,7 +1333,7 @@ inline void xCtrl::usage( std::ostream &os ) const
           "  shutdown NAME...|--all stop apps, or all running apps of the role, the INDI server last\n"
           "  restart NAME...|--all  restart apps, or stop then start everything\n"
           "\n"
-          "Changing which apps are configured needs sudo:\n"
+          "Changing which apps are configured needs root (sudo), or write access to the proclist:\n"
           "  sudo xctrl register              register the proclist's apps from their .conf and enable\n"
           "                                   them for automatic startup; commented-out apps with a .conf\n"
           "                                   are registered but disabled (and stopped), to start by hand;\n"
@@ -1409,6 +1410,27 @@ inline int xCtrl::settlePrivileges()
         setenv( "PAGER", "cat", 1 );
     }
 
+    // access() checks the real user, the one who ran us, not our setuid root
+    if( admin.count( m_verb ) && getuid() != 0 && access( proclistPath().c_str(), W_OK ) != 0 )
+    {
+        if( errno == ENOENT )
+        {
+            std::cerr << m_prog << ": error: no proclist " << proclistPath() << " for role " << m_role << "\n";
+            return -1;
+        }
+        struct passwd *pw   = getpwuid( getuid() );
+        std::string    what = m_verb;
+        for( const auto &n : m_names )
+        {
+            what += " " + n;
+        }
+        std::cerr << m_prog << ": error: cannot " << what << " as user "
+                  << ( pw ? pw->pw_name : std::to_string( getuid() ) ) << ": " << m_verb
+                  << " requires a privileged user to modify the proclist (" << proclistPath()
+                  << ") and the systemd configuration, e.g. sudo " << m_prog << " " << what << "\n";
+        return -1;
+    }
+
     bool keepRoot = false;
     if( testing )
     {
@@ -1416,12 +1438,6 @@ inline int xCtrl::settlePrivileges()
     }
     else if( admin.count( m_verb ) )
     {
-        if( getuid() != 0 )
-        {
-            std::cerr << m_prog << ": " << m_verb << " changes which apps are configured, run it with sudo: sudo "
-                      << m_prog << " " << m_verb << " ...\n";
-            return -1;
-        }
         keepRoot = true;
     }
     else if( operate.count( m_verb ) )
@@ -1977,10 +1993,13 @@ inline int xCtrl::refreshApps( const std::vector<appEntry> &apps )
                            0644 );
         rc |= w < 0;
 
-        // the watchdog systemd has now, against the one configured
-        auto  &p        = props[a.name];
+        // the watchdog systemd has now, against the one configured; systemd fixes it when the app starts, so it
+        // only means something for an app that is running, a stopped one shows infinity or its last run's
+        auto &p = props[a.name];
+        bool  running =
+            p["ActiveState"] == "active" || p["ActiveState"] == "activating" || p["ActiveState"] == "reloading";
         double want     = timespanSeconds( dirs.count( "WatchdogSec" ) ? dirs["WatchdogSec"] : role["WatchdogSec"] );
-        double have     = p.count( "WatchdogUSec" ) ? timespanSeconds( p["WatchdogUSec"] ) : -1;
+        double have     = running && p.count( "WatchdogUSec" ) ? timespanSeconds( p["WatchdogUSec"] ) : -1;
         bool   stale    = p.count( "NeedDaemonReload" ) && p["NeedDaemonReload"] == "yes";
         bool   wdChange = have >= 0 && want >= 0 && std::abs( have - want ) > 1e-3;
         if( wdChange )
@@ -2005,18 +2024,28 @@ inline int xCtrl::refreshApps( const std::vector<appEntry> &apps )
 inline int xCtrl::startApps( const std::vector<appEntry> &apps )
 {
     unitNames                u( m_role );
-    std::vector<std::string> others{ "start" }, server{ "start" }, reset{ "reset-failed" };
+    std::vector<std::string> others{ "start" }, server{ "start" }, reset{ "reset-failed" }, names;
     for( const auto &a : apps )
     {
         ( a.isServer() ? server : others ).push_back( u.instance( a.name ) );
-        reset.push_back( u.instance( a.name ) );
+        names.push_back( a.name );
     }
 
     // with its current configuration
     refreshApps( apps );
 
-    // an explicit start also clears a failure, e.g. after the start limit was hit
-    systemctl( reset );
+    // an explicit start also clears a failure, e.g. after the start limit was hit; only failed apps have one
+    for( const auto &kv : showProps( names ) )
+    {
+        if( kv.second.count( "ActiveState" ) && kv.second.at( "ActiveState" ) == "failed" )
+        {
+            reset.push_back( u.instance( kv.first ) );
+        }
+    }
+    if( reset.size() > 1 )
+    {
+        systemctl( reset );
+    }
 
     // systemctl start waits for the apps to report READY=1, then the INDI server starts
     int rc = 0;

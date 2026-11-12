@@ -104,9 +104,22 @@ keeps whatever registration it had.
 
 # Commands
 
-Regular users run `xctrl`. It is installed setuid root so that it can ask systemd to start and stop the role's apps,
-but it only does that for root, `xsup` and members of group `magaox`, and only for registered apps. Changing which
-apps are registered or enabled needs sudo.
+Any user can run `xctrl`. It is installed setuid root, and decides from who ran it what it does for them:
+
+- **Looking** (`status`, `peek`, `inspect`): anyone.
+- **Starting and stopping** registered apps: root, `xsup` and members of group `magaox`.
+- **Changing which apps are registered or enabled** (`register`, `add`, `enable`, `disable`, `delete`, `boot`): a
+  privileged user, meaning root (e.g. through `sudo`) or a user who may write the role's proclist. The config
+  checkout is normally group `magaox-dev` writable, so its members qualify and `xsup` does not. Anyone else gets,
+  for example:
+
+  ```
+  xctrl: error: cannot enable camsci1 as user xsup: enable requires a privileged user to modify the proclist
+  (/opt/MagAOX/config/proclist_ICC.txt) and the systemd configuration, e.g. sudo xctrl enable camsci1
+  ```
+
+  The proclist and the apps' `.conf` files are protected only by their own permissions, so they should not be
+  writable by regular users. In the table below, "privileged" means root or a user who can write the proclist.
 
 | Who                         | Command                | What it does                                                             |
 |-----------------------------|------------------------|--------------------------------------------------------------------------|
@@ -118,12 +131,12 @@ apps are registered or enabled needs sudo.
 | xsup, group magaox          | `stop NAME...`         | Stop apps. They stay stopped until started again: systemd does not restart an app that was stopped on purpose, but `startup` or a reboot with `boot on` starts enabled ones. |
 | xsup, group magaox          | `shutdown NAME...\|--all` | As `stop`; `--all` stops every running app of the role, enabled or not, then the INDI server. |
 | xsup, group magaox          | `restart NAME...\|--all` | Restart apps; `--all` is `shutdown --all` then `startup`.              |
-| sudo                        | `register`             | Register the proclist's apps with systemd, generate their drop-ins, enable them for automatic startup. Disabled apps (single `#`) with a valid `NAME.conf` are registered but not enabled: `start NAME` runs them, `startup` does not. Apps that became disabled are stopped (`--keep-running` leaves them running). Apps no longer in the proclist are stopped and deregistered. New apps start at once if the role is up. |
-| sudo                        | `add NAME EXECUTABLE`  | Add the app to the proclist, commented out (`#NAME EXECUTABLE`), and register it, to start by hand or `enable`. It needs `NAME.conf`, and must not be in the proclist already; otherwise nothing changes. |
-| sudo                        | `enable NAME...\|--all` | Autostart on: uncomment the app in the proclist, or add it, and register it if needed. `--all` enables every app in the proclist and every registered app. Does not start them. |
-| sudo                        | `disable NAME...\|--all` | Autostart off: comment the app out in the proclist. It stays registered, to start by hand. `--all` disables every app. Does not stop them. |
-| sudo                        | `delete NAME...\|--all` | Remove the app's lines from the proclist, stop it and deregister it. `--all` empties the role's proclist of apps, keeping `##` comments, and deregisters every app. |
-| sudo                        | `boot on\|off`         | Start the role's enabled apps at boot, or not. Off is the default.        |
+| privileged                  | `register`             | Register the proclist's apps with systemd, generate their drop-ins, enable them for automatic startup. Disabled apps (single `#`) with a valid `NAME.conf` are registered but not enabled: `start NAME` runs them, `startup` does not. Apps that became disabled are stopped (`--keep-running` leaves them running). Apps no longer in the proclist are stopped and deregistered. New apps start at once if the role is up. |
+| privileged                  | `add NAME EXECUTABLE`  | Add the app to the proclist, commented out (`#NAME EXECUTABLE`), and register it, to start by hand or `enable`. It needs `NAME.conf`, and must not be in the proclist already; otherwise nothing changes. |
+| privileged                  | `enable NAME...\|--all` | Autostart on: uncomment the app in the proclist, or add it, and register it if needed. `--all` enables every app in the proclist and every registered app. Does not start them. |
+| privileged                  | `disable NAME...\|--all` | Autostart off: comment the app out in the proclist. It stays registered, to start by hand. `--all` disables every app. Does not stop them. |
+| privileged                  | `delete NAME...\|--all` | Remove the app's lines from the proclist, stop it and deregister it. `--all` empties the role's proclist of apps, keeping `##` comments, and deregisters every app. |
+| privileged                  | `boot on\|off`         | Start the role's enabled apps at boot, or not. Off is the default.        |
 
 For example, to take an app out and put it back later:
 
