@@ -75,6 +75,7 @@ apps_rtc = \
 	pupilFit \
 	t2wOffloader \
 	dmSpeckle \
+	dmSyncopation \
 	w2tcsOffloader \
 	pwfsSlopeCalc \
     kcubeCtrl \
@@ -135,6 +136,7 @@ all_buildable_apps = \
 	dmPokeCenter \
 	dmPokeXCorr \
 	dmSpeckle \
+	dmSyncopation \
 	filterWheelCtrl \
 	flipperCtrl \
 	flowRPM \
@@ -493,7 +495,7 @@ scripts_install:
 
 .PHONY: rtscripts_install
 rtscripts_install:
-	for scriptname in make_cpusets move_irqs; do \
+	for scriptname in make_cpusets move_irqs remove_cpusets; do \
 		sudo -H install -d /opt/MagAOX/bin && \
 		if [ -e rtSetup/$(MAGAOX_ROLE)/$$scriptname ]; then \
 			sudo -H install rtSetup/$(MAGAOX_ROLE)/$$scriptname /opt/MagAOX/bin/$$scriptname && \

@@ -1,20 +1,28 @@
 /** \file streamWriter_lifecycle_test.cpp
  * \brief Catch2 lifecycle and configuration tests for the streamWriter app.
- * \author OpenAI Codex
  *
- * \ingroup streamWriter_files
+ * \ingroup streamWriter_unit_test
  */
 
 #include "../../../tests/testXWC.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <functional>
+#include <iostream>
 #include <memory>
 #include <optional>
 #include <stdexcept>
 #include <thread>
+
+#include <signal.h>
+#include <sys/mman.h>
+#include <sys/resource.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 #define protected public
 #include "../streamWriter.hpp"
@@ -37,11 +45,12 @@ namespace libXWCTest
 namespace streamWriterTest
 {
 
+/// \cond DOXYGEN_SUPPRESS_TEST_HARNESS
 namespace
 {
 
 /// Build a unique shmim name for one temporary streamWriter test stream.
-std::string uniqueShmimName( const std::string &suffix )
+std::string uniqueShmimName( const std::string &suffix /**< [in] test-specific source name suffix */ )
 {
     static unsigned counter = 0;
 
@@ -90,302 +99,404 @@ struct streamWriterConfig
     double                     m_telemeterMaxInterval{ 60.0 };            ///< Telemetry cadence in seconds.
 };
 
-/// RAII wrapper for a temporary uint16 ImageStreamIO stream used by `fgThreadExec()` tests.
+/// RAII wrapper for a temporary ImageStreamIO stream used by `fgThreadExec()` tests.
 class tempStream
 {
   public:
     /// Create the temporary stream or throw if ImageStreamIO setup fails.
-    explicit tempStream( const std::string &name,
-                         uint32_t           width    = 1,
-                         uint32_t           height   = 1,
-                         uint32_t           depth    = 1,
-                         uint8_t            dataType = _DATATYPE_UINT16 )
-        : m_name( name )
-    {
-        uint32_t imsize[3] = { width, height, depth };
-
-        ensureMilkShmDir();
-
-        if( ImageStreamIO_createIm_gpu( &m_image,
-                                        m_name.c_str(),
-                                        3,
-                                        imsize,
-                                        dataType,
-                                        -1,
-                                        1,
-                                        IMAGE_NB_SEMAPHORE,
-                                        0,
-                                        CIRCULAR_BUFFER | ZAXIS_TEMPORAL,
-                                        0 ) != IMAGESTREAMIO_SUCCESS )
-        {
-            throw std::runtime_error( "failed to create temporary ImageStreamIO stream" );
-        }
-
-        m_image.md[0].cnt0 = 0;
-        m_image.md[0].cnt1 = 0;
-    }
+    explicit tempStream( const std::string &name /**< [in] unique source name */,
+                         uint32_t           width    = 1 /**< [in] frame width */,
+                         uint32_t           height   = 1 /**< [in] frame height */,
+                         uint32_t           depth    = 1 /**< [in] source circular-buffer depth */,
+                         uint8_t            dataType = _DATATYPE_UINT16 /**< [in] ImageStreamIO pixel type */ );
 
     /// Destroy the temporary stream.
-    ~tempStream()
-    {
-        if( m_owner )
-        {
-            ImageStreamIO_destroyIm( &m_image );
-        }
-    }
-
-    /// Return the underlying temporary stream.
-    IMAGE *image()
-    {
-        return &m_image;
-    }
+    ~tempStream();
 
     /// Return the number of pixels in one frame.
-    size_t pixelsPerFrame() const
-    {
-        return static_cast<size_t>( m_image.md[0].size[0] ) * static_cast<size_t>( m_image.md[0].size[1] );
-    }
-
-    /// Return the configured stream depth.
-    size_t depth() const
-    {
-        return static_cast<size_t>( m_image.md[0].size[2] );
-    }
+    size_t pixelsPerFrame() const;
 
     /// Fill one frame with a deterministic ramp, update the metadata, and post the shmim semaphore.
-    void publishFrame(
-        size_t frameIndex, uint64_t cnt0, uint16_t baseValue, const timespec &atime, const timespec &writetime )
-    {
-        uint16_t *frame = reinterpret_cast<uint16_t *>( m_image.array.raw ) + frameIndex * pixelsPerFrame();
+    void publishFrame( size_t          frameIndex /**< [in] source circular-buffer index */,
+                       uint64_t        cnt0 /**< [in] source frame counter */,
+                       uint16_t        baseValue /**< [in] first ramp pixel */,
+                       const timespec &atime /**< [in] acquisition timestamp */,
+                       const timespec &writetime /**< [in] write timestamp */ );
 
-        for( size_t n = 0; n < pixelsPerFrame(); ++n )
-        {
-            frame[n] = baseValue + n;
-        }
-
-        m_image.md[0].write     = 1;
-        m_image.md[0].cnt0      = cnt0;
-        m_image.md[0].cnt1      = frameIndex;
-        m_image.md[0].atime     = atime;
-        m_image.md[0].writetime = writetime;
-
-        m_image.cntarray[frameIndex]       = cnt0;
-        m_image.atimearray[frameIndex]     = atime;
-        m_image.writetimearray[frameIndex] = writetime;
-
-        m_image.md[0].write = 0;
-        ImageStreamIO_sempost( &m_image, -1 );
-    }
+    /// Copy one float frame and publish its metadata and semaphore notification.
+    void publishFloatFrame( size_t                    frameIndex /**< [in] source circular-buffer index */,
+                            uint64_t                  cnt0 /**< [in] source frame counter */,
+                            const std::vector<float> &pixels /**< [in] complete frame pixels */,
+                            const timespec           &atime /**< [in] acquisition timestamp */,
+                            const timespec           &writetime /**< [in] write timestamp */ );
 
   private:
+    /// Publish metadata and notify readers after filling a source frame.
+    void publishMetadata( size_t          frameIndex /**< [in] source circular-buffer index */,
+                          uint64_t        cnt0 /**< [in] source frame counter */,
+                          const timespec &atime /**< [in] acquisition timestamp */,
+                          const timespec &writetime /**< [in] write timestamp */ );
+
     std::string m_name;          ///< Unique shmim name for the temporary stream.
     IMAGE       m_image{};       ///< ImageStreamIO handle for the temporary stream.
     bool        m_owner{ true }; ///< Whether this wrapper should destroy the underlying shmim on teardown.
 };
+
+tempStream::tempStream( const std::string &name, uint32_t width, uint32_t height, uint32_t depth, uint8_t dataType )
+    : m_name( name )
+{
+    uint32_t imsize[3] = { width, height, depth };
+
+    ensureMilkShmDir();
+
+    if( ImageStreamIO_createIm_gpu( &m_image,
+                                    m_name.c_str(),
+                                    3,
+                                    imsize,
+                                    dataType,
+                                    -1,
+                                    1,
+                                    IMAGE_NB_SEMAPHORE,
+                                    0,
+                                    CIRCULAR_BUFFER | ZAXIS_TEMPORAL,
+                                    0 ) != IMAGESTREAMIO_SUCCESS )
+    {
+        throw std::runtime_error( "failed to create temporary ImageStreamIO stream" );
+    }
+
+    m_image.md[0].cnt0 = 0;
+    m_image.md[0].cnt1 = 0;
+}
+
+tempStream::~tempStream()
+{
+    if( m_owner )
+    {
+        ImageStreamIO_destroyIm( &m_image );
+    }
+}
+
+size_t tempStream::pixelsPerFrame() const
+{
+    return static_cast<size_t>( m_image.md[0].size[0] ) * static_cast<size_t>( m_image.md[0].size[1] );
+}
+
+void tempStream::publishFrame(
+    size_t frameIndex, uint64_t cnt0, uint16_t baseValue, const timespec &atime, const timespec &writetime )
+{
+    uint16_t *frame = reinterpret_cast<uint16_t *>( m_image.array.raw ) + frameIndex * pixelsPerFrame();
+
+    for( size_t n = 0; n < pixelsPerFrame(); ++n )
+    {
+        frame[n] = baseValue + n;
+    }
+
+    publishMetadata( frameIndex, cnt0, atime, writetime );
+}
+
+void tempStream::publishFloatFrame( size_t                    frameIndex,
+                                    uint64_t                  cnt0,
+                                    const std::vector<float> &pixels,
+                                    const timespec           &atime,
+                                    const timespec           &writetime )
+{
+    REQUIRE( m_image.md[0].datatype == _DATATYPE_FLOAT );
+    REQUIRE( pixels.size() == pixelsPerFrame() );
+    float *frame = m_image.array.F + frameIndex * pixelsPerFrame();
+    memcpy( frame, pixels.data(), pixels.size() * sizeof( float ) );
+    publishMetadata( frameIndex, cnt0, atime, writetime );
+}
+
+void tempStream::publishMetadata( size_t frameIndex, uint64_t cnt0, const timespec &atime, const timespec &writetime )
+{
+    m_image.md[0].write     = 1;
+    m_image.md[0].cnt0      = cnt0;
+    m_image.md[0].cnt1      = frameIndex;
+    m_image.md[0].atime     = atime;
+    m_image.md[0].writetime = writetime;
+
+    m_image.cntarray[frameIndex]       = cnt0;
+    m_image.atimearray[frameIndex]     = atime;
+    m_image.writetimearray[frameIndex] = writetime;
+
+    m_image.md[0].write = 0;
+    ImageStreamIO_sempost( &m_image, -1 );
+}
 
 /// Test harness exposing path setup and shutdown cleanup helpers.
 class streamWriterLifecycleTest : public streamWriter
 {
   public:
     /// Prepare an isolated MagAO-X directory tree for the named test case.
-    std::filesystem::path prepareSandbox( const std::string &name )
-    {
-        std::error_code       ec;
-        std::filesystem::path root = std::filesystem::path( "/tmp/streamWriter_lifecycle_test" ) / name;
-
-        std::filesystem::remove_all( root, ec );
-        std::filesystem::create_directories( root / "config" );
-        std::filesystem::create_directories( root / "calib" );
-        std::filesystem::create_directories( root / "logs" );
-        std::filesystem::create_directories( root / "sys" );
-        std::filesystem::create_directories( root / "secrets" );
-        std::filesystem::create_directories( root / "telem" );
-        std::filesystem::create_directories( root / "cpuset" );
-
-        m_basePath    = root.string();
-        m_configDir   = ( root / "config" ).string();
-        m_calibDir    = ( root / "calib" ).string();
-        m_sysPath     = ( root / "sys" ).string();
-        m_secretsPath = ( root / "secrets" ).string();
-        m_cpusetPath  = ( root / "cpuset" ).string();
-
-        m_configName = name;
-        m_outName    = name;
-
-        m_log.logPath( ( root / "logs" ).string() );
-
-        return root;
-    }
+    std::filesystem::path prepareSandbox( const std::string &name /**< [in] isolated test directory name */ );
 
     /// Shut the worker threads down after a successful startup sequence.
-    int shutdownStartedApp()
-    {
-        m_shutdown = 1;
-        return appShutdown();
-    }
+    int shutdownStartedApp();
 
     /// Prepare the direct `fgThreadExec()` harness resources without starting the writer thread.
-    int initializeFgHarness()
-    {
-        if( sem_init( &m_swSemaphore, 0, 0 ) < 0 )
-        {
-            return -1;
-        }
-
-        m_swSemaphoreInitialized = true;
-
-        return initialize_xrif();
-    }
+    int initializeFgHarness();
 
     /// Launch the production `fgThreadExec()` loop in the existing framegrabber thread slot.
-    void startFgHarnessThread()
-    {
-        m_fgThreadInit = false;
-        m_shutdown     = 0;
-        m_restart      = false;
+    void startFgHarnessThread();
 
-        m_fgThread = std::thread( &streamWriterLifecycleTest::fgThreadEntry, this );
-    }
-
-    /// Stop the direct `fgThreadExec()` harness and release any resources it owns.
-    void stopFgHarness()
-    {
-        m_writing      = NOT_WRITING;
-        m_writePending = false;
-        m_restart      = false;
-        m_shutdown     = 1;
-
-        if( m_fgThread.joinable() )
-        {
-            m_fgThread.join();
-        }
-
-        release_circbufs();
-
-        if( m_swSemaphoreInitialized )
-        {
-            sem_destroy( &m_swSemaphore );
-            m_swSemaphoreInitialized = false;
-        }
-
-        if( m_xrif )
-        {
-            xrif_delete( m_xrif );
-            m_xrif = nullptr;
-        }
-
-        if( m_xrif_timing )
-        {
-            xrif_delete( m_xrif_timing );
-            m_xrif_timing = nullptr;
-        }
-    }
+    /// Abandon synthetic saves, stop the direct framegrabber harness, and release its resources.
+    void stopFgHarness();
 
     /// Return the current writer-semaphore value for assertions.
-    int writerSemaphoreValue()
-    {
-        int value = 0;
-        sem_getvalue( &m_swSemaphore, &value );
-        return value;
-    }
+    int writerSemaphoreValue();
 
-    /// Drain the writer semaphore and return the number of queued posts removed.
-    int drainWriterSemaphore()
-    {
-        int drained = 0;
+    /// Acknowledge synthetic saves and return the number of queued writer posts removed.
+    int drainWriterSemaphore();
 
-        while( sem_trywait( &m_swSemaphore ) == 0 )
-        {
-            ++drained;
-        }
+    /// Return the next destination index under the writer ownership lock.
+    size_t capturedFrames();
 
-        return drained;
-    }
+    /// Set a synthetic writing state while the direct harness has no writer.
+    void writingState( int    state /**< [in] synthetic writing state */,
+                       double deadline = 0 /**< [in] stop deadline, when applicable */ );
 
   private:
     /// Thread entry trampoline for the direct framegrabber harness.
-    static void fgThreadEntry( streamWriterLifecycleTest *app )
-    {
-        app->fgThreadExec();
-    }
+    static void fgThreadEntry( streamWriterLifecycleTest *app /**< [in] direct worker harness */ );
 
     bool m_swSemaphoreInitialized{ false }; ///< Whether the direct harness initialized `m_swSemaphore`.
 };
+
+std::filesystem::path streamWriterLifecycleTest::prepareSandbox( const std::string &name )
+{
+    std::error_code       ec;
+    std::filesystem::path root = std::filesystem::path( "/tmp/streamWriter_lifecycle_test" ) / name;
+
+    std::filesystem::remove_all( root, ec );
+    std::filesystem::create_directories( root / "config" );
+    std::filesystem::create_directories( root / "calib" );
+    std::filesystem::create_directories( root / "logs" );
+    std::filesystem::create_directories( root / "sys" );
+    std::filesystem::create_directories( root / "secrets" );
+    std::filesystem::create_directories( root / "telem" );
+    std::filesystem::create_directories( root / "cpuset" );
+
+    m_basePath    = root.string();
+    m_configDir   = ( root / "config" ).string();
+    m_calibDir    = ( root / "calib" ).string();
+    m_sysPath     = ( root / "sys" ).string();
+    m_secretsPath = ( root / "secrets" ).string();
+    m_cpusetPath  = ( root / "cpuset" ).string();
+
+    m_configName = name;
+    m_outName    = name;
+
+    m_log.logPath( ( root / "logs" ).string() );
+
+    return root;
+}
+
+int streamWriterLifecycleTest::shutdownStartedApp()
+{
+    m_shutdown = 1;
+    return appShutdown();
+}
+
+int streamWriterLifecycleTest::initializeFgHarness()
+{
+    if( sem_init( &m_swSemaphore, 0, 0 ) < 0 )
+    {
+        return -1;
+    }
+
+    m_swSemaphoreInitialized = true;
+
+    return initialize_xrif();
+}
+
+void streamWriterLifecycleTest::startFgHarnessThread()
+{
+    m_fgThreadInit = false;
+    m_shutdown     = 0;
+    m_restart      = false;
+
+    m_fgThread = std::thread( &streamWriterLifecycleTest::fgThreadEntry, this );
+}
+
+void streamWriterLifecycleTest::stopFgHarness()
+{
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_writeMutex );
+        m_writing      = NOT_WRITING;
+        m_writePending = false;
+        m_chunkFrames  = 0;
+        m_stopQueued   = false;
+        m_restart      = false;
+        m_shutdown     = 1;
+    }
+    m_writeCond.notify_all();
+
+    if( m_fgThread.joinable() )
+    {
+        m_fgThread.join();
+    }
+
+    release_circbufs();
+
+    if( m_swSemaphoreInitialized )
+    {
+        sem_destroy( &m_swSemaphore );
+        m_swSemaphoreInitialized = false;
+    }
+
+    if( m_xrif )
+    {
+        xrif_delete( m_xrif );
+        m_xrif = nullptr;
+    }
+
+    if( m_xrif_timing )
+    {
+        xrif_delete( m_xrif_timing );
+        m_xrif_timing = nullptr;
+    }
+}
+
+int streamWriterLifecycleTest::writerSemaphoreValue()
+{
+    int value = 0;
+    sem_getvalue( &m_swSemaphore, &value );
+    return value;
+}
+
+int streamWriterLifecycleTest::drainWriterSemaphore()
+{
+    int drained = 0;
+
+    while( sem_trywait( &m_swSemaphore ) == 0 )
+    {
+        ++drained;
+    }
+
+    if( drained )
+    {
+        { //mutex scope
+            std::lock_guard<std::mutex> lock( m_writeMutex );
+            if( m_stopQueued )
+                m_writing = m_resumeAfterReconnect ? START_WRITING : NOT_WRITING;
+            m_stopQueued   = false;
+            m_writePending = false;
+        }
+        m_writeCond.notify_all();
+    }
+
+    return drained;
+}
+
+size_t streamWriterLifecycleTest::capturedFrames()
+{
+    std::lock_guard<std::mutex> lock( m_writeMutex );
+    return m_currImage;
+}
+
+void streamWriterLifecycleTest::writingState( int state, double deadline )
+{
+    std::lock_guard<std::mutex> lock( m_writeMutex );
+    m_writing           = state;
+    m_stopWriteDeadline = deadline;
+}
+
+void streamWriterLifecycleTest::fgThreadEntry( streamWriterLifecycleTest *app )
+{
+    app->fgThreadExec();
+}
 
 /// Cleanup helper that only shuts the app down if startup completed.
 class startupScope
 {
   public:
     /// Track a started `streamWriter` instance for cleanup.
-    explicit startupScope( streamWriterLifecycleTest &app ) : m_app( app )
-    {
-    }
+    explicit startupScope( streamWriterLifecycleTest &app /**< [in/out] application to stop on scope exit */ );
 
     /// Mark whether `appStartup()` succeeded.
-    void markStarted( bool started )
-    {
-        m_started = started;
-    }
+    void markStarted( bool started /**< [in] whether startup completed */ );
 
     /// Stop tracking once explicit shutdown has already been performed.
-    void disarm()
-    {
-        m_started = false;
-    }
+    void disarm();
 
     /// Shut the app down if it was started successfully.
-    ~startupScope()
-    {
-        if( m_started )
-        {
-            static_cast<void>( m_app.shutdownStartedApp() );
-        }
-    }
+    ~startupScope();
 
   private:
     streamWriterLifecycleTest &m_app;              ///< App instance being protected.
     bool                       m_started{ false }; ///< Whether startup completed successfully.
 };
 
+startupScope::startupScope( streamWriterLifecycleTest &app ) : m_app( app )
+{
+}
+
+void startupScope::markStarted( bool started )
+{
+    m_started = started;
+}
+
+void startupScope::disarm()
+{
+    m_started = false;
+}
+
+startupScope::~startupScope()
+{
+    if( m_started )
+    {
+        static_cast<void>( m_app.shutdownStartedApp() );
+    }
+}
+
 /// Cleanup helper that stops the direct framegrabber harness on scope exit.
 class fgHarnessScope
 {
   public:
     /// Track a direct `fgThreadExec()` harness instance for cleanup.
-    explicit fgHarnessScope( streamWriterLifecycleTest &app ) : m_app( app )
-    {
-    }
+    explicit fgHarnessScope( streamWriterLifecycleTest &app /**< [in/out] direct worker harness */ );
 
     /// Mark whether the direct harness was initialized and needs teardown.
-    void markActive( bool active )
-    {
-        m_active = active;
-    }
+    void markActive( bool active /**< [in] whether resources need teardown */ );
 
     /// Stop tracking once teardown has already been handled explicitly.
-    void disarm()
-    {
-        m_active = false;
-    }
+    void disarm();
 
     /// Stop the harness if it is still active at scope exit.
-    ~fgHarnessScope()
-    {
-        if( m_active )
-        {
-            m_app.stopFgHarness();
-        }
-    }
+    ~fgHarnessScope();
 
   private:
     streamWriterLifecycleTest &m_app;             ///< App instance being protected.
     bool                       m_active{ false }; ///< Whether the direct harness needs teardown.
 };
 
+fgHarnessScope::fgHarnessScope( streamWriterLifecycleTest &app ) : m_app( app )
+{
+}
+
+void fgHarnessScope::markActive( bool active )
+{
+    m_active = active;
+}
+
+void fgHarnessScope::disarm()
+{
+    m_active = false;
+}
+
+fgHarnessScope::~fgHarnessScope()
+{
+    if( m_active )
+    {
+        m_app.stopFgHarness();
+    }
+}
+
 /// Write and load a deterministic streamWriter config for the provided test app.
-std::filesystem::path loadConfig( streamWriterLifecycleTest &app,
-                                  const std::string         &name,
-                                  const streamWriterConfig  &cfg = streamWriterConfig() )
+std::filesystem::path
+loadConfig( streamWriterLifecycleTest &app /**< [in/out] application to configure */,
+            const std::string         &name /**< [in] isolated test directory name */,
+            const streamWriterConfig  &cfg = streamWriterConfig() /**< [in] configuration overrides */ )
 {
     const std::filesystem::path root       = app.prepareSandbox( name );
     const std::filesystem::path configPath = root / "config" / ( name + ".conf" );
@@ -478,7 +589,8 @@ std::filesystem::path loadConfig( streamWriterLifecycleTest &app,
 
 /// Wait for a test predicate to become true within a fixed timeout.
 template <typename PredicateT>
-bool waitFor( PredicateT predicate, int timeoutMs = 2000 )
+bool waitFor( PredicateT predicate /**< [in] completion predicate */,
+              int        timeoutMs = 2000 /**< [in] maximum wait in milliseconds */ )
 {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds( timeoutMs );
 
@@ -509,7 +621,8 @@ timespec currentRealtime()
 }
 
 /// Return a timestamp offset by the requested nanoseconds.
-timespec offsetTimespec( const timespec &base, long long nanoseconds )
+timespec offsetTimespec( const timespec &base /**< [in] timestamp to offset */,
+                         long long       nanoseconds /**< [in] signed offset in nanoseconds */ )
 {
     timespec shifted = base;
 
@@ -532,19 +645,24 @@ timespec offsetTimespec( const timespec &base, long long nanoseconds )
 }
 
 /// Return one uint16 pixel from the frame stored in the streamWriter circular buffer.
-uint16_t rawFrameWord( const streamWriterLifecycleTest &app, size_t frameIndex, size_t pixelIndex )
+uint16_t rawFrameWord( const streamWriterLifecycleTest &app /**< [in] ingest buffer owner */,
+                       size_t                           frameIndex /**< [in] captured frame index */,
+                       size_t                           pixelIndex /**< [in] pixel within the frame */ )
 {
     return reinterpret_cast<uint16_t *>( app.m_rawImageCircBuff )[frameIndex * app.m_width * app.m_height + pixelIndex];
 }
 
 /// Return one timing word from the streamWriter timing circular buffer.
-uint64_t timingWord( const streamWriterLifecycleTest &app, size_t frameIndex, size_t timingIndex )
+uint64_t timingWord( const streamWriterLifecycleTest &app /**< [in] timing buffer owner */,
+                     size_t                           frameIndex /**< [in] captured frame index */,
+                     size_t                           timingIndex /**< [in] word within the five-word timing record */ )
 {
     return app.m_timingCircBuff[frameIndex * 5 + timingIndex];
 }
 
 /// Copy the currently scheduled raw-image save window for assertions before a restart frees the buffers.
-std::vector<uint16_t> copyPendingRawFrames( const streamWriterLifecycleTest &app )
+std::vector<uint16_t>
+copyPendingRawFrames( const streamWriterLifecycleTest &app /**< [in] queued image buffer owner */ )
 {
     const size_t pixelsPerFrame = app.m_width * app.m_height;
     const size_t nFrames        = app.m_currSaveStop - app.m_currSaveStart;
@@ -554,7 +672,8 @@ std::vector<uint16_t> copyPendingRawFrames( const streamWriterLifecycleTest &app
 }
 
 /// Copy the currently scheduled timing save window for assertions before a restart frees the buffers.
-std::vector<uint64_t> copyPendingTimingFrames( const streamWriterLifecycleTest &app )
+std::vector<uint64_t>
+copyPendingTimingFrames( const streamWriterLifecycleTest &app /**< [in] queued timing buffer owner */ )
 {
     const size_t nFrames     = app.m_currSaveStop - app.m_currSaveStart;
     auto        *timingStart = app.m_timingCircBuff + app.m_currSaveStart * 5;
@@ -562,7 +681,192 @@ std::vector<uint64_t> copyPendingTimingFrames( const streamWriterLifecycleTest &
     return std::vector<uint64_t>( timingStart, timingStart + nFrames * 5 );
 }
 
+/// Own a bounded child so a worker deadlock or fatal fault cannot hang the test runner.
+class childProcess
+{
+  public:
+    /// Fork before creating any application threads and run isolated test assertions.
+    explicit childProcess( const std::function<void()> &action /**< [in] child-only assertions */ );
+
+    /// Kill and reap an unfinished child after a parent assertion fails.
+    ~childProcess();
+
+    /// Wait at most ten seconds and return the waitpid status.
+    int wait();
+
+  private:
+    pid_t m_pid{ -1 }; ///< Child owned until a successful wait.
+};
+
+childProcess::childProcess( const std::function<void()> &action )
+{
+    std::cout.flush();
+    std::cerr.flush();
+    m_pid = ::fork();
+    REQUIRE( m_pid >= 0 );
+    if( m_pid != 0 )
+        return;
+
+    struct rlimit    noCore{ 0, 0 };
+    struct sigaction defaults{};
+    defaults.sa_handler = SIG_DFL;
+    ::sigemptyset( &defaults.sa_mask );
+    sigset_t unblocked;
+    ::sigemptyset( &unblocked );
+    for( int signal : { SIGALRM, SIGSEGV, SIGBUS } )
+    {
+        if( ::sigaction( signal, &defaults, nullptr ) != 0 || ::sigaddset( &unblocked, signal ) != 0 )
+            ::_exit( 125 );
+    }
+    if( ::setrlimit( RLIMIT_CORE, &noCore ) != 0 || ::sigprocmask( SIG_UNBLOCK, &unblocked, nullptr ) != 0 )
+        ::_exit( 125 );
+    ::alarm( 10 );
+    try
+    {
+        action();
+        ::_exit( 0 );
+    }
+    catch( ... )
+    {
+        ::_exit( 126 );
+    }
+}
+
+childProcess::~childProcess()
+{
+    if( m_pid <= 0 )
+        return;
+    ::kill( m_pid, SIGKILL );
+    while( ::waitpid( m_pid, nullptr, 0 ) < 0 && errno == EINTR )
+    {
+    }
+}
+
+int childProcess::wait()
+{
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds( 10 );
+    do
+    {
+        int   status = 0;
+        pid_t result = ::waitpid( m_pid, &status, WNOHANG );
+        if( result == m_pid )
+        {
+            m_pid = -1;
+            return status;
+        }
+        if( result < 0 && errno != EINTR )
+            FAIL( "waitpid failed while waiting for streamWriter child" );
+        std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+    } while( std::chrono::steady_clock::now() < deadline );
+    FAIL( "streamWriter child exceeded its ten-second deadline" );
+    return -1;
+}
+
+/// Return cumulative CPU seconds used by one live application worker.
+double threadCpuSeconds( std::thread &worker /**< [in] live worker whose CPU clock is sampled */ )
+{
+    clockid_t clock;
+    REQUIRE( pthread_getcpuclockid( worker.native_handle(), &clock ) == 0 );
+    timespec elapsed{};
+    REQUIRE( clock_gettime( clock, &elapsed ) == 0 );
+    return elapsed.tv_sec + elapsed.tv_nsec / 1e9;
+}
+
+/// Return completed archive paths under the test output directory.
+std::vector<std::filesystem::path> archivePaths( const std::string &directory /**< [in] private output directory */ )
+{
+    std::vector<std::filesystem::path> paths;
+    for( const auto &entry : std::filesystem::recursive_directory_iterator( directory ) )
+        if( entry.is_regular_file() && entry.path().extension() == ".xrif" )
+            paths.push_back( entry.path() );
+    std::sort( paths.begin(), paths.end() );
+    return paths;
+}
+
+/// Decode timing records to verify that real workers preserve each saved source frame.
+std::vector<uint64_t>
+archivedCounters( const std::vector<std::filesystem::path> &paths /**< [in] completed archives */ )
+{
+    std::vector<uint64_t> counters;
+    for( const auto &path : paths )
+    {
+        std::ifstream     file( path, std::ios::binary );
+        std::vector<char> bytes{ std::istreambuf_iterator<char>( file ), std::istreambuf_iterator<char>() };
+        REQUIRE( bytes.size() >= XRIF_HEADER_SIZE * 2 );
+        xrif_t decoder = nullptr;
+        REQUIRE( xrif_new( &decoder ) == XRIF_NOERROR );
+        std::unique_ptr<std::remove_pointer_t<xrif_t>, decltype( &xrif_delete )> owner( decoder, xrif_delete );
+        uint32_t                                                                 header = 0;
+        REQUIRE( xrif_read_header( decoder, &header, bytes.data() ) == XRIF_NOERROR );
+        const size_t timingOffset = header + decoder->compressed_size;
+        REQUIRE( bytes.size() >= timingOffset + XRIF_HEADER_SIZE );
+        REQUIRE( xrif_read_header( decoder, &header, bytes.data() + timingOffset ) == XRIF_NOERROR );
+        REQUIRE( xrif_allocate( decoder ) == XRIF_NOERROR );
+        REQUIRE( bytes.size() == timingOffset + header + decoder->compressed_size );
+        memcpy( decoder->raw_buffer, bytes.data() + timingOffset + header, decoder->compressed_size );
+        REQUIRE( xrif_decode( decoder ) == XRIF_NOERROR );
+        const auto *timing = reinterpret_cast<const uint64_t *>( decoder->raw_buffer );
+        for( size_t frame = 0; frame < decoder->frames; ++frame )
+            counters.push_back( timing[frame * 5] );
+    }
+    return counters;
+}
+
+/// Decode both archive payloads and compare float pixels and all timing words byte for byte.
+void requireFloatArchive( const std::filesystem::path &path /**< [in] completed archive */,
+                          const std::vector<float>    &pixels /**< [in] expected pixels from 2x2 source frames */,
+                          const std::vector<uint64_t> &timing /**< [in] expected five-word records */ )
+{
+    std::ifstream     file( path, std::ios::binary );
+    std::vector<char> bytes{ std::istreambuf_iterator<char>( file ), std::istreambuf_iterator<char>() };
+    REQUIRE( bytes.size() >= XRIF_HEADER_SIZE * 2 );
+    xrif_t decoder = nullptr;
+    REQUIRE( xrif_new( &decoder ) == XRIF_NOERROR );
+    std::unique_ptr<std::remove_pointer_t<xrif_t>, decltype( &xrif_delete )> owner( decoder, xrif_delete );
+    uint32_t                                                                 header = 0;
+    REQUIRE( xrif_read_header( decoder, &header, bytes.data() ) == XRIF_NOERROR );
+    REQUIRE( decoder->type_code == XRIF_TYPECODE_FLOAT );
+    REQUIRE( decoder->width == 2 );
+    REQUIRE( decoder->height == 2 );
+    REQUIRE( decoder->depth == 1 );
+    REQUIRE( decoder->frames * 4 == pixels.size() );
+    REQUIRE( decoder->compressed_size == pixels.size() * sizeof( float ) );
+    const size_t timingOffset = header + decoder->compressed_size;
+    REQUIRE( bytes.size() >= timingOffset + XRIF_HEADER_SIZE );
+    REQUIRE( xrif_allocate( decoder ) == XRIF_NOERROR );
+    REQUIRE( decoder->compressed_size <= decoder->raw_buffer_size );
+    memcpy( decoder->raw_buffer, bytes.data() + header, decoder->compressed_size );
+    REQUIRE( xrif_decode( decoder ) == XRIF_NOERROR );
+    REQUIRE( memcmp( decoder->raw_buffer, pixels.data(), pixels.size() * sizeof( float ) ) == 0 );
+    REQUIRE( decoder->difference_method == XRIF_DIFFERENCE_NONE );
+    REQUIRE( decoder->reorder_method == XRIF_REORDER_NONE );
+    REQUIRE( decoder->compress_method == XRIF_COMPRESS_NONE );
+
+    REQUIRE( xrif_read_header( decoder, &header, bytes.data() + timingOffset ) == XRIF_NOERROR );
+    REQUIRE( decoder->type_code == XRIF_TYPECODE_UINT64 );
+    REQUIRE( decoder->width == 5 );
+    REQUIRE( decoder->height == 1 );
+    REQUIRE( decoder->depth == 1 );
+    REQUIRE( decoder->frames * 5 == timing.size() );
+    REQUIRE( bytes.size() == timingOffset + header + decoder->compressed_size );
+    REQUIRE( xrif_allocate( decoder ) == XRIF_NOERROR );
+    REQUIRE( decoder->compressed_size <= decoder->raw_buffer_size );
+    memcpy( decoder->raw_buffer, bytes.data() + timingOffset + header, decoder->compressed_size );
+    REQUIRE( xrif_decode( decoder ) == XRIF_NOERROR );
+    REQUIRE( memcmp( decoder->raw_buffer, timing.data(), timing.size() * sizeof( uint64_t ) ) == 0 );
+}
+
+/// Send a local in-process writing callback without starting an INDI connection.
+void writingToggle( streamWriterLifecycleTest        &app /**< [in/out] real worker application */,
+                    pcf::IndiElement::SwitchStateType value /**< [in] requested writing state */ )
+{
+    pcf::IndiProperty request = app.m_indiP_writing;
+    request["toggle"].setSwitchState( value );
+    REQUIRE( app.newCallBack_m_indiP_writing( request ) == 0 );
+}
+
 } // namespace
+/// \endcond
 
 /// Verify `setupConfig()` and `loadConfig()` preserve defaults, overrides, and clamp invalid accelerations.
 /**
@@ -702,7 +1006,7 @@ TEST_CASE( "streamWriter lifecycle handles startup validation and nominal shutdo
         REQUIRE( app.appLogic() == 0 );
         REQUIRE( app.state() == stateCodes::READY );
 
-        app.m_writing = WRITING;
+        app.writingState( WRITING );
 
         REQUIRE( app.appLogic() == 0 );
         REQUIRE( app.state() == stateCodes::OPERATING );
@@ -748,6 +1052,7 @@ TEST_CASE( "streamWriter appLogic reports backlog and save status", "[streamWrit
 {
     // clang-format off
     #ifdef STREAMWRITER_TEST_DOXYGEN_REF
+    XWCTEST_DOXYGEN_REF( streamWriter::appLogic() );
     XWCTEST_DOXYGEN_REF( streamWriter::updateINDI() );
     XWCTEST_DOXYGEN_REF( streamWriter::checkRecordTimes() );
     XWCTEST_DOXYGEN_REF( streamWriter::recordTelem( (const telem_saving_state *)nullptr ) );
@@ -809,7 +1114,7 @@ TEST_CASE( "streamWriter appLogic reports backlog and save status", "[streamWrit
         startup.markStarted( startupRv == 0 );
         REQUIRE( startupRv == 0 );
 
-        app.m_writing = NOT_WRITING;
+        app.writingState( NOT_WRITING );
         app.updateINDI();
         REQUIRE( app.recordSavingState( true ) == 0 );
 
@@ -823,7 +1128,7 @@ TEST_CASE( "streamWriter appLogic reports backlog and save status", "[streamWrit
         app.m_xrif->reorder_rate      = 60000.0;
         app.m_xrif->compress_rate     = 40000.0;
 
-        app.m_writing = WRITING;
+        app.writingState( WRITING );
         app.updateINDI();
 
         app.m_currSaveStart = 7;
@@ -870,7 +1175,7 @@ TEST_CASE( "streamWriter fgThreadExec ingests stream data and manages write sche
 
         app.startFgHarnessThread();
 
-        REQUIRE( waitFor( [&app]() { return app.m_rawImageCircBuff != nullptr && app.m_timingCircBuff != nullptr; } ) );
+        REQUIRE( waitFor( [&app]() { return app.m_fgReady.load(); } ) );
         REQUIRE( app.m_width == 2 );
         REQUIRE( app.m_height == 2 );
         REQUIRE( app.m_dataType == _DATATYPE_UINT16 );
@@ -882,7 +1187,7 @@ TEST_CASE( "streamWriter fgThreadExec ingests stream data and manages write sche
         const timespec wtime0{ 333, 444 };
         source.publishFrame( 0, 1, 100, atime0, wtime0 );
 
-        REQUIRE( waitFor( [&app]() { return app.m_currImage == 1; } ) );
+        REQUIRE( waitFor( [&app]() { return app.capturedFrames() == 1; } ) );
         REQUIRE( rawFrameWord( app, 0, 0 ) == 100 );
         REQUIRE( rawFrameWord( app, 0, 3 ) == 103 );
         REQUIRE( timingWord( app, 0, 0 ) == 1 );
@@ -894,13 +1199,13 @@ TEST_CASE( "streamWriter fgThreadExec ingests stream data and manages write sche
         source.publishFrame( 0, 1, 200, atime0, wtime0 );
 
         REQUIRE( waitFor( [&app]() { return app.m_repeatSemaphoreCount.load() == 1; } ) );
-        REQUIRE( app.m_currImage == 1 );
+        REQUIRE( app.capturedFrames() == 1 );
         REQUIRE( rawFrameWord( app, 0, 0 ) == 100 );
 
         const timespec missingTime{ 0, 0 };
         source.publishFrame( 1, 3, 300, missingTime, missingTime );
 
-        REQUIRE( waitFor( [&app]() { return app.m_currImage == 2; } ) );
+        REQUIRE( waitFor( [&app]() { return app.capturedFrames() == 2; } ) );
         REQUIRE( app.m_skippedFrameCount.load() == 1 );
         REQUIRE( rawFrameWord( app, 1, 0 ) == 300 );
         REQUIRE( rawFrameWord( app, 1, 3 ) == 303 );
@@ -937,14 +1242,14 @@ TEST_CASE( "streamWriter fgThreadExec ingests stream data and manages write sche
 
         app.startFgHarnessThread();
 
-        REQUIRE( waitFor( [&app]() { return app.m_rawImageCircBuff != nullptr; } ) );
+        REQUIRE( waitFor( [&app]() { return app.m_fgReady.load(); } ) );
 
         const timespec baseAtime = currentRealtime();
         const timespec baseWtime = offsetTimespec( baseAtime, 1000 );
 
-        app.m_writing = START_WRITING;
+        app.writingState( START_WRITING );
         source.publishFrame( 0, 1, 10, baseAtime, baseWtime );
-        REQUIRE( waitFor( [&app]() { return app.m_currImage == 1; } ) );
+        REQUIRE( waitFor( [&app]() { return app.capturedFrames() == 1; } ) );
         REQUIRE( app.m_writing == WRITING );
 
         source.publishFrame( 1, 2, 20, offsetTimespec( baseAtime, 1000000 ), offsetTimespec( baseWtime, 1000000 ) );
@@ -956,13 +1261,12 @@ TEST_CASE( "streamWriter fgThreadExec ingests stream data and manages write sche
 
         const timespec stopAtime = currentRealtime();
         const timespec stopWtime = offsetTimespec( stopAtime, 1000 );
-        app.m_writing            = START_WRITING;
+        app.writingState( START_WRITING );
         source.publishFrame( 2, 3, 30, stopAtime, stopWtime );
-        REQUIRE( waitFor( [&app]() { return app.m_currImage == 3; } ) );
+        REQUIRE( waitFor( [&app]() { return app.capturedFrames() == 3; } ) );
         REQUIRE( app.m_writing == WRITING );
 
-        app.m_writing           = STOP_WRITING;
-        app.m_stopWriteDeadline = mx::sys::get_curr_time() + cfg.m_writeStopTimeout;
+        app.writingState( STOP_WRITING, mx::sys::get_curr_time() + cfg.m_writeStopTimeout );
         source.publishFrame( 3, 4, 40, offsetTimespec( stopAtime, 1000000 ), offsetTimespec( stopWtime, 1000000 ) );
         REQUIRE( waitFor( [&app]() { return app.writerSemaphoreValue() > 0; } ) );
         REQUIRE( app.m_currSaveStart == 2 );
@@ -972,13 +1276,12 @@ TEST_CASE( "streamWriter fgThreadExec ingests stream data and manages write sche
 
         const timespec timeoutStopAtime = currentRealtime();
         const timespec timeoutStopWtime = offsetTimespec( timeoutStopAtime, 1000 );
-        app.m_writing                   = START_WRITING;
+        app.writingState( START_WRITING );
         source.publishFrame( 4, 5, 50, timeoutStopAtime, timeoutStopWtime );
-        REQUIRE( waitFor( [&app]() { return app.m_currImage == 5; } ) );
+        REQUIRE( waitFor( [&app]() { return app.capturedFrames() == 5; } ) );
         REQUIRE( app.m_writing == WRITING );
 
-        app.m_writing           = STOP_WRITING;
-        app.m_stopWriteDeadline = mx::sys::get_curr_time() + cfg.m_writeStopTimeout;
+        app.writingState( STOP_WRITING, mx::sys::get_curr_time() + cfg.m_writeStopTimeout );
         std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
         REQUIRE( app.writerSemaphoreValue() == 0 );
         REQUIRE( waitFor( [&app]() { return app.writerSemaphoreValue() > 0; } ) );
@@ -987,7 +1290,7 @@ TEST_CASE( "streamWriter fgThreadExec ingests stream data and manages write sche
         REQUIRE( app.m_currSaveStopFrameNo == 5 );
         REQUIRE( app.drainWriterSemaphore() >= 1 );
 
-        app.m_writing = NOT_WRITING;
+        app.writingState( NOT_WRITING );
         app.stopFgHarness();
         fgScope.disarm();
     }
@@ -1014,14 +1317,14 @@ TEST_CASE( "streamWriter fgThreadExec ingests stream data and manages write sche
 
         app.startFgHarnessThread();
 
-        REQUIRE( waitFor( [&app]() { return app.m_rawImageCircBuff != nullptr; } ) );
+        REQUIRE( waitFor( [&app]() { return app.m_fgReady.load(); } ) );
 
         const timespec timeoutAtime = currentRealtime();
         const timespec timeoutWtime = offsetTimespec( timeoutAtime, 1000 );
 
-        app.m_writing = START_WRITING;
+        app.writingState( START_WRITING );
         source.publishFrame( 0, 1, 10, timeoutAtime, timeoutWtime );
-        REQUIRE( waitFor( [&app]() { return app.m_currImage == 1; } ) );
+        REQUIRE( waitFor( [&app]() { return app.capturedFrames() == 1; } ) );
         REQUIRE( app.m_writing == WRITING );
 
         REQUIRE( waitFor( [&app]() { return app.writerSemaphoreValue() == 1 && app.m_writing == START_WRITING; } ) );
@@ -1032,7 +1335,7 @@ TEST_CASE( "streamWriter fgThreadExec ingests stream data and manages write sche
         REQUIRE( rawFrameWord( app, 0, 3 ) == 13 );
         REQUIRE( app.drainWriterSemaphore() == 1 );
 
-        app.m_writing = NOT_WRITING;
+        app.writingState( NOT_WRITING );
         app.stopFgHarness();
         fgScope.disarm();
     }
@@ -1060,21 +1363,20 @@ TEST_CASE( "streamWriter fgThreadExec ingests stream data and manages write sche
 
         app.startFgHarnessThread();
 
-        REQUIRE( waitFor( [&app]()
-                          { return app.m_rawImageCircBuff != nullptr && app.m_width == 2 && app.m_height == 2; } ) );
+        REQUIRE( waitFor( [&app]() { return app.m_fgReady.load() && app.m_width == 2 && app.m_height == 2; } ) );
 
         const timespec baseAtime = currentRealtime();
         const timespec baseWtime = offsetTimespec( baseAtime, 1000 );
         const timespec nextAtime = offsetTimespec( baseAtime, 1000000 );
         const timespec nextWtime = offsetTimespec( baseWtime, 1000000 );
 
-        app.m_writing = START_WRITING;
+        app.writingState( START_WRITING );
         source->publishFrame( 0, 1, 100, baseAtime, baseWtime );
-        REQUIRE( waitFor( [&app]() { return app.m_currImage == 1; } ) );
+        REQUIRE( waitFor( [&app]() { return app.capturedFrames() == 1; } ) );
         REQUIRE( app.m_writing == WRITING );
 
         source->publishFrame( 1, 2, 200, nextAtime, nextWtime );
-        REQUIRE( waitFor( [&app]() { return app.m_currImage == 2; } ) );
+        REQUIRE( waitFor( [&app]() { return app.capturedFrames() == 2; } ) );
         REQUIRE( app.writerSemaphoreValue() == 0 );
 
         source.reset();
@@ -1101,20 +1403,20 @@ TEST_CASE( "streamWriter fgThreadExec ingests stream data and manages write sche
                                                          static_cast<uint64_t>( nextWtime.tv_sec ),
                                                          static_cast<uint64_t>( nextWtime.tv_nsec ) } );
 
-        app.m_writing              = START_WRITING;
-        app.m_resumeAfterReconnect = true;
-        app.m_writePending         = false;
-        REQUIRE( app.drainWriterSemaphore() >= 1 );
+        REQUIRE( app.m_resumeAfterReconnect );
+        REQUIRE( app.drainWriterSemaphore() == 1 );
 
-        REQUIRE( waitFor( [&app]() { return app.m_width == 3 && app.m_height == 1 && app.m_writing == START_WRITING; },
-                          3000 ) );
+        REQUIRE( waitFor(
+            [&app]()
+            { return app.m_fgReady.load() && app.m_width == 3 && app.m_height == 1 && app.m_writing == START_WRITING; },
+            3000 ) );
         REQUIRE( app.writerSemaphoreValue() == 0 );
 
         const timespec reconnectedAtime = currentRealtime();
         const timespec reconnectedWtime = offsetTimespec( reconnectedAtime, 1000 );
         source->publishFrame( 0, 101, 500, reconnectedAtime, reconnectedWtime );
 
-        REQUIRE( waitFor( [&app]() { return app.m_currImage == 1; } ) );
+        REQUIRE( waitFor( [&app]() { return app.capturedFrames() == 1; } ) );
         REQUIRE( app.m_writing == WRITING );
         REQUIRE( rawFrameWord( app, 0, 0 ) == 500 );
         REQUIRE( rawFrameWord( app, 0, 2 ) == 502 );
@@ -1150,17 +1452,16 @@ TEST_CASE( "streamWriter fgThreadExec ingests stream data and manages write sche
 
         app.startFgHarnessThread();
 
-        REQUIRE( waitFor( [&app]()
-                          { return app.m_rawImageCircBuff != nullptr && app.m_width == 2 && app.m_height == 2; } ) );
+        REQUIRE( waitFor( [&app]() { return app.m_fgReady.load() && app.m_width == 2 && app.m_height == 2; } ) );
 
         const timespec baseAtime = currentRealtime();
         const timespec baseWtime = offsetTimespec( baseAtime, 1000 );
 
-        app.m_writing = START_WRITING;
+        app.writingState( START_WRITING );
         source->publishFrame( 0, 1, 100, baseAtime, baseWtime );
-        REQUIRE( waitFor( [&app]() { return app.m_currImage == 1; } ) );
+        REQUIRE( waitFor( [&app]() { return app.capturedFrames() == 1; } ) );
         source->publishFrame( 1, 2, 200, offsetTimespec( baseAtime, 1000000 ), offsetTimespec( baseWtime, 1000000 ) );
-        REQUIRE( waitFor( [&app]() { return app.m_currImage == 2; } ) );
+        REQUIRE( waitFor( [&app]() { return app.capturedFrames() == 2; } ) );
         REQUIRE( app.m_writing == WRITING );
         REQUIRE( app.writerSemaphoreValue() == 0 );
 
@@ -1197,13 +1498,13 @@ TEST_CASE( "streamWriter fgThreadExec ingests stream data and manages write sche
 
         app.startFgHarnessThread();
 
-        REQUIRE( waitFor( [&app]() { return app.m_rawImageCircBuff != nullptr; } ) );
+        REQUIRE( waitFor( [&app]() { return app.m_fgReady.load(); } ) );
 
         const timespec atime{ 900, 1234 };
         const timespec writetime{ 901, 5678 };
         source.publishFrame( 0, 21, 1000, atime, writetime );
 
-        REQUIRE( waitFor( [&app]() { return app.m_currImage == 1; } ) );
+        REQUIRE( waitFor( [&app]() { return app.capturedFrames() == 1; } ) );
         REQUIRE( app.m_width == 3 );
         REQUIRE( app.m_height == 2 );
         REQUIRE( rawFrameWord( app, 0, 0 ) == 1000 );
@@ -1219,6 +1520,420 @@ TEST_CASE( "streamWriter fgThreadExec ingests stream data and manages write sche
         app.stopFgHarness();
         fgScope.disarm();
     }
+}
+
+/** \brief Verify startup preserves fatal-signal defaults and persistent memory faults terminate promptly.
+ * \ingroup streamWriter_unit_test
+ */
+TEST_CASE( "streamWriter startup preserves fatal signal termination", "[streamWriter][regression]" )
+{
+    // clang-format off
+#ifdef STREAMWRITER_TEST_DOXYGEN_REF
+    XWCTEST_DOXYGEN_REF(streamWriter::appStartup());
+#endif
+    // clang-format on
+    const int signal = GENERATE( SIGSEGV, SIGBUS );
+    CAPTURE( signal );
+    childProcess child(
+        [signal]()
+        {
+            streamWriterLifecycleTest app;
+            streamWriterConfig        cfg;
+            cfg.m_shmimName = uniqueShmimName( "signal" );
+            loadConfig( app, cfg.m_shmimName, cfg );
+            REQUIRE( app.appStartup() == 0 );
+            for( int fault : { SIGSEGV, SIGBUS } )
+            {
+                struct sigaction current{};
+                REQUIRE( ::sigaction( fault, nullptr, &current ) == 0 );
+                REQUIRE( current.sa_handler == SIG_DFL );
+            }
+
+            const long pageSize = ::sysconf( _SC_PAGESIZE );
+            REQUIRE( pageSize > 0 );
+            void *mapping = MAP_FAILED;
+            if( signal == SIGSEGV )
+            {
+                mapping = ::mmap( nullptr, pageSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0 );
+            }
+            else
+            {
+                FILE *backing = ::tmpfile();
+                REQUIRE( backing != nullptr );
+                REQUIRE( ::ftruncate( ::fileno( backing ), pageSize ) == 0 );
+                mapping = ::mmap( nullptr, pageSize, PROT_READ | PROT_WRITE, MAP_SHARED, ::fileno( backing ), 0 );
+                REQUIRE( ::ftruncate( ::fileno( backing ), 0 ) == 0 );
+            }
+            REQUIRE( mapping != MAP_FAILED );
+            *static_cast<volatile unsigned char *>( mapping ) = 1;
+            FAIL( "persistent memory fault unexpectedly returned" );
+        } );
+    const int status = child.wait();
+    REQUIRE( WIFSIGNALED( status ) );
+    REQUIRE( WTERMSIG( status ) == signal );
+}
+
+/** \brief Verify rapid empty sessions stay idle with bounded worker CPU after ingesting idle frames.
+ * \ingroup streamWriter_unit_test
+ */
+TEST_CASE( "streamWriter real workers remain idle after empty recording sessions", "[streamWriter][regression]" )
+{
+    // clang-format off
+#ifdef STREAMWRITER_TEST_DOXYGEN_REF
+    XWCTEST_DOXYGEN_REF(streamWriter::newCallBack_m_indiP_writing(pcf::IndiProperty()));
+    XWCTEST_DOXYGEN_REF(streamWriter::fgThreadExec());
+    XWCTEST_DOXYGEN_REF(streamWriter::swThreadExec());
+    XWCTEST_DOXYGEN_REF(streamWriter::appShutdown());
+#endif
+    // clang-format on
+    const size_t idleFrames = GENERATE( 0u, 3u );
+    CAPTURE( idleFrames );
+    childProcess child(
+        [idleFrames]()
+        {
+            streamWriterLifecycleTest app;
+            startupScope              startup( app );
+            streamWriterConfig        cfg;
+            cfg.m_shmimName           = uniqueShmimName( "empty_idle" );
+            cfg.m_maxCircBuffLength   = 4;
+            cfg.m_maxWriteChunkLength = 2;
+            cfg.m_maxChunkTime        = 10;
+            cfg.m_semWaitNSec         = 500000000;
+            cfg.m_writeStopTimeout    = 0.05;
+            tempStream source( cfg.m_shmimName, 2, 2, 4 );
+            const auto root         = loadConfig( app, cfg.m_shmimName, cfg );
+            app.m_rawimageDir       = ( root / "raw" ).string();
+            const int startupResult = app.appStartup();
+            startup.markStarted( startupResult == 0 );
+            REQUIRE( startupResult == 0 );
+            REQUIRE( app.appLogic() == 0 );
+            REQUIRE( waitFor( [&app]() { return app.m_fgReady.load(); }, 3000 ) );
+            for( size_t frame = 0; frame < idleFrames; ++frame )
+            {
+                const auto now = currentRealtime();
+                source.publishFrame( frame, frame + 1, 100, now, now );
+                REQUIRE( waitFor( [&app, frame]() { return app.capturedFrames() == frame + 1; } ) );
+            }
+            for( unsigned session = 0; session < 3; ++session )
+            {
+                writingToggle( app, pcf::IndiElement::On );
+                writingToggle( app, pcf::IndiElement::Off );
+                REQUIRE( waitFor( [&app]() { return app.m_writing == NOT_WRITING && !app.m_writePending; } ) );
+            }
+            REQUIRE( archivePaths( app.m_rawimageDir ).empty() );
+            const double frameCpuBefore  = threadCpuSeconds( app.m_fgThread );
+            const double writerCpuBefore = threadCpuSeconds( app.m_swThread );
+            std::this_thread::sleep_for( std::chrono::milliseconds( 600 ) );
+            const double frameCpu  = threadCpuSeconds( app.m_fgThread ) - frameCpuBefore;
+            const double writerCpu = threadCpuSeconds( app.m_swThread ) - writerCpuBefore;
+            INFO( "framegrabber CPU seconds=" << frameCpu << "; writer CPU seconds=" << writerCpu );
+            REQUIRE( frameCpu < 0.15 );
+            REQUIRE( writerCpu < 0.15 );
+            REQUIRE( app.m_writing == NOT_WRITING );
+            REQUIRE_FALSE( app.m_writePending );
+            REQUIRE( archivePaths( app.m_rawimageDir ).empty() );
+            REQUIRE( app.shutdownStartedApp() == 0 );
+            startup.disarm();
+        } );
+    const int status = child.wait();
+    REQUIRE( WIFEXITED( status ) );
+    REQUIRE( WEXITSTATUS( status ) == 0 );
+}
+
+/** \brief Verify real workers reopen a deleted source and preserve frames across stop or shutdown.
+ * \ingroup streamWriter_unit_test
+ */
+TEST_CASE( "streamWriter real workers preserve data across source replacement", "[streamWriter][regression]" )
+{
+    // clang-format off
+#ifdef STREAMWRITER_TEST_DOXYGEN_REF
+    XWCTEST_DOXYGEN_REF(streamWriter::fgThreadExec());
+    XWCTEST_DOXYGEN_REF(streamWriter::swThreadExec());
+    XWCTEST_DOXYGEN_REF(streamWriter::doEncode());
+    XWCTEST_DOXYGEN_REF(streamWriter::appShutdown());
+#endif
+    // clang-format on
+    const unsigned mode          = GENERATE( 0u, 1u, 2u );
+    const bool     active        = mode != 0;
+    const bool     shutdownFlush = mode == 2;
+    CAPTURE( active, shutdownFlush );
+    childProcess child(
+        [active, shutdownFlush]()
+        {
+            streamWriterLifecycleTest app;
+            startupScope              startup( app );
+            streamWriterConfig        cfg;
+            cfg.m_shmimName         = uniqueShmimName( "real_restart" );
+            cfg.m_maxChunkTime      = 10;
+            cfg.m_semWaitNSec       = 10000000;
+            cfg.m_writeStopTimeout  = 0.05;
+            auto       source       = std::make_unique<tempStream>( cfg.m_shmimName, 2, 2, 8 );
+            const auto root         = loadConfig( app, cfg.m_shmimName, cfg );
+            app.m_rawimageDir       = ( root / "raw" ).string();
+            const int startupResult = app.appStartup();
+            startup.markStarted( startupResult == 0 );
+            REQUIRE( startupResult == 0 );
+            REQUIRE( app.appLogic() == 0 );
+            REQUIRE( waitFor( [&app]() { return app.m_fgReady.load(); }, 3000 ) );
+            if( active )
+                writingToggle( app, pcf::IndiElement::On );
+            for( size_t frame = 0; frame < 2; ++frame )
+            {
+                const auto now = currentRealtime();
+                source->publishFrame( frame, frame + 1, 100 + frame * 100, now, now );
+                REQUIRE( waitFor( [&app, frame]() { return app.capturedFrames() == frame + 1; } ) );
+            }
+            REQUIRE( archivePaths( app.m_rawimageDir ).empty() );
+            source.reset();
+            REQUIRE( waitFor( [&app]() { return !app.m_fgReady.load(); } ) );
+            source = std::make_unique<tempStream>( cfg.m_shmimName, 2, 2, 8 );
+            REQUIRE( waitFor( [&app]() { return app.m_fgReady.load(); }, 3000 ) );
+            REQUIRE( app.capturedFrames() == 0 );
+            REQUIRE_FALSE( app.m_writePending );
+            REQUIRE( app.m_writing == ( active ? START_WRITING : NOT_WRITING ) );
+            REQUIRE( archivedCounters( archivePaths( app.m_rawimageDir ) ) ==
+                     ( active ? std::vector<uint64_t>{ 1, 2 } : std::vector<uint64_t>{} ) );
+
+            const auto now = currentRealtime();
+            source->publishFrame( 0, 101, 500, now, now );
+            REQUIRE( waitFor( [&app]() { return app.capturedFrames() == 1; } ) );
+            REQUIRE( rawFrameWord( app, 0, 0 ) == 500 );
+            REQUIRE( timingWord( app, 0, 0 ) == 101 );
+            if( shutdownFlush )
+            {
+                REQUIRE( app.m_writing == WRITING );
+                REQUIRE_FALSE( app.m_writePending );
+                REQUIRE( archivedCounters( archivePaths( app.m_rawimageDir ) ) == std::vector<uint64_t>{ 1, 2 } );
+            }
+            if( active && !shutdownFlush )
+            {
+                writingToggle( app, pcf::IndiElement::Off );
+                REQUIRE( waitFor( [&app]() { return app.m_writing == NOT_WRITING && !app.m_writePending; } ) );
+            }
+            REQUIRE( app.shutdownStartedApp() == 0 );
+            startup.disarm();
+            REQUIRE( archivedCounters( archivePaths( app.m_rawimageDir ) ) ==
+                     ( active ? std::vector<uint64_t>{ 1, 2, 101 } : std::vector<uint64_t>{} ) );
+        } );
+    const int status = child.wait();
+    REQUIRE( WIFEXITED( status ) );
+    REQUIRE( WEXITSTATUS( status ) == 0 );
+}
+
+/** \brief Verify a timed partial chunk automatically stores FLOAT32 pixels without compression and preserves timing.
+ * \ingroup streamWriter_unit_test
+ */
+TEST_CASE( "streamWriter real workers preserve FLOAT32 partial time flushes", "[streamWriter][regression][float]" )
+{
+    // clang-format off
+#ifdef STREAMWRITER_TEST_DOXYGEN_REF
+    XWCTEST_DOXYGEN_REF(streamWriter::allocate_xrif());
+    XWCTEST_DOXYGEN_REF(streamWriter::fgThreadExec());
+    XWCTEST_DOXYGEN_REF(streamWriter::doEncode());
+#endif
+    // clang-format on
+    childProcess child(
+        []()
+        {
+            streamWriterLifecycleTest app;
+            startupScope              startup( app );
+            streamWriterConfig        cfg;
+            cfg.m_shmimName    = uniqueShmimName( "float_partial" );
+            cfg.m_startWriting = true;
+            cfg.m_maxChunkTime = 0.1;
+            cfg.m_semWaitNSec  = 10000000;
+            tempStream source( cfg.m_shmimName, 2, 2, 8, _DATATYPE_FLOAT );
+            const auto root         = loadConfig( app, cfg.m_shmimName, cfg );
+            app.m_rawimageDir       = ( root / "raw" ).string();
+            const int startupResult = app.appStartup();
+            startup.markStarted( startupResult == 0 );
+            REQUIRE( startupResult == 0 );
+            REQUIRE( app.appLogic() == 0 );
+            REQUIRE( waitFor( [&app]() { return app.m_fgReady.load(); }, 3000 ) );
+            REQUIRE( app.m_compress );
+            REQUIRE( app.m_writing == START_WRITING );
+
+            const std::vector<float> pixels{ 1.25f, -0.0f, -2.5f, 0.125f };
+            const auto               atime     = currentRealtime();
+            const auto               writetime = offsetTimespec( atime, 100 );
+            source.publishFloatFrame( 0, 1, pixels, atime, writetime );
+            REQUIRE( waitFor( [&app]() { return app.capturedFrames() == 1; } ) );
+            REQUIRE( waitFor( [&app]() { return app.m_writing == START_WRITING && !app.m_writePending; } ) );
+            const auto archives = archivePaths( app.m_rawimageDir );
+            REQUIRE( archives.size() == 1 );
+            requireFloatArchive( archives[0],
+                                 pixels,
+                                 { 1,
+                                   uint64_t( atime.tv_sec ),
+                                   uint64_t( atime.tv_nsec ),
+                                   uint64_t( writetime.tv_sec ),
+                                   uint64_t( writetime.tv_nsec ) } );
+            writingToggle( app, pcf::IndiElement::Off );
+            REQUIRE( app.shutdownStartedApp() == 0 );
+            startup.disarm();
+        } );
+    const int status = child.wait();
+    REQUIRE( WIFEXITED( status ) );
+    REQUIRE( WEXITSTATUS( status ) == 0 );
+}
+
+/** \brief Verify FLOAT32 source replacement while idle, armed, or holding one unsaved frame.
+ * \ingroup streamWriter_unit_test
+ */
+TEST_CASE( "streamWriter real workers preserve FLOAT32 source replacement", "[streamWriter][regression][float]" )
+{
+    // clang-format off
+#ifdef STREAMWRITER_TEST_DOXYGEN_REF
+    XWCTEST_DOXYGEN_REF(streamWriter::allocate_xrif());
+    XWCTEST_DOXYGEN_REF(streamWriter::fgThreadExec());
+    XWCTEST_DOXYGEN_REF(streamWriter::doEncode());
+#endif
+    // clang-format on
+    const unsigned mode = GENERATE( 0u, 1u, 2u );
+    CAPTURE( mode );
+    childProcess child(
+        [mode]()
+        {
+            streamWriterLifecycleTest app;
+            startupScope              startup( app );
+            streamWriterConfig        cfg;
+            cfg.m_shmimName         = uniqueShmimName( "float_restart" );
+            cfg.m_startWriting      = mode != 0;
+            cfg.m_maxChunkTime      = 1;
+            cfg.m_semWaitNSec       = 10000000;
+            auto       source       = std::make_unique<tempStream>( cfg.m_shmimName, 2, 2, 8, _DATATYPE_FLOAT );
+            const auto root         = loadConfig( app, cfg.m_shmimName, cfg );
+            app.m_rawimageDir       = ( root / "raw" ).string();
+            const int startupResult = app.appStartup();
+            startup.markStarted( startupResult == 0 );
+            REQUIRE( startupResult == 0 );
+            REQUIRE( app.appLogic() == 0 );
+            REQUIRE( waitFor( [&app]() { return app.m_fgReady.load(); }, 3000 ) );
+
+            const std::vector<float> beforePixels{ -0.0f, 0.5f, 1.25f, -3.5f };
+            const auto               beforeAtime     = currentRealtime();
+            const auto               beforeWritetime = offsetTimespec( beforeAtime, 100 );
+            if( mode != 1 )
+            {
+                source->publishFloatFrame( 0, 1, beforePixels, beforeAtime, beforeWritetime );
+                REQUIRE( waitFor( [&app]() { return app.capturedFrames() == 1; } ) );
+            }
+            { //mutex scope
+                std::lock_guard<std::mutex> lock( app.m_writeMutex );
+                REQUIRE( app.m_writing == ( mode == 0 ? NOT_WRITING : mode == 1 ? START_WRITING : WRITING ) );
+                REQUIRE( app.m_chunkFrames == ( mode == 2 ? 1 : 0 ) );
+                REQUIRE_FALSE( app.m_writePending );
+            }
+            REQUIRE( archivePaths( app.m_rawimageDir ).empty() );
+            source.reset();
+            REQUIRE( waitFor( [&app]() { return !app.m_fgReady.load(); } ) );
+            source = std::make_unique<tempStream>( cfg.m_shmimName, 2, 2, 8, _DATATYPE_FLOAT );
+            REQUIRE( waitFor( [&app]() { return app.m_fgReady.load(); }, 3000 ) );
+            REQUIRE( app.m_writing == ( mode == 0 ? NOT_WRITING : START_WRITING ) );
+            REQUIRE( app.capturedFrames() == 0 );
+            REQUIRE_FALSE( app.m_writePending );
+            auto archives = archivePaths( app.m_rawimageDir );
+            REQUIRE( archives.size() == ( mode == 2 ? 1 : 0 ) );
+            if( mode == 2 )
+                requireFloatArchive( archives[0],
+                                     beforePixels,
+                                     { 1,
+                                       uint64_t( beforeAtime.tv_sec ),
+                                       uint64_t( beforeAtime.tv_nsec ),
+                                       uint64_t( beforeWritetime.tv_sec ),
+                                       uint64_t( beforeWritetime.tv_nsec ) } );
+            if( mode == 0 )
+                writingToggle( app, pcf::IndiElement::On );
+
+            const std::vector<float> afterPixels{ 7.75f, -0.0f, -8.5f, 0.0625f };
+            const auto               afterAtime     = currentRealtime();
+            const auto               afterWritetime = offsetTimespec( afterAtime, 100 );
+            source->publishFloatFrame( 0, 101, afterPixels, afterAtime, afterWritetime );
+            REQUIRE( waitFor( [&app]() { return app.capturedFrames() == 1; } ) );
+            REQUIRE( waitFor( [&app]() { return app.m_writing == START_WRITING && !app.m_writePending; }, 3000 ) );
+            archives = archivePaths( app.m_rawimageDir );
+            REQUIRE( archives.size() == ( mode == 2 ? 2 : 1 ) );
+            requireFloatArchive( archives.back(),
+                                 afterPixels,
+                                 { 101,
+                                   uint64_t( afterAtime.tv_sec ),
+                                   uint64_t( afterAtime.tv_nsec ),
+                                   uint64_t( afterWritetime.tv_sec ),
+                                   uint64_t( afterWritetime.tv_nsec ) } );
+            writingToggle( app, pcf::IndiElement::Off );
+            REQUIRE( app.shutdownStartedApp() == 0 );
+            startup.disarm();
+        } );
+    const int status = child.wait();
+    REQUIRE( WIFEXITED( status ) );
+    REQUIRE( WEXITSTATUS( status ) == 0 );
+}
+
+/** \brief Verify shutdown drains an existing descriptor before saving the producer's final partial chunk.
+ * \ingroup streamWriter_unit_test
+ */
+TEST_CASE( "streamWriter shutdown drains pending and unqueued writer work", "[streamWriter][regression]" )
+{
+    // clang-format off
+#ifdef STREAMWRITER_TEST_DOXYGEN_REF
+    XWCTEST_DOXYGEN_REF(streamWriter::appStartup());
+    XWCTEST_DOXYGEN_REF(streamWriter::fgThreadExec());
+    XWCTEST_DOXYGEN_REF(streamWriter::swThreadExec());
+    XWCTEST_DOXYGEN_REF(streamWriter::queueWrite(std::unique_lock<std::mutex>(),0));
+    XWCTEST_DOXYGEN_REF(streamWriter::appShutdown());
+#endif
+    // clang-format on
+    childProcess child(
+        []()
+        {
+            streamWriterLifecycleTest app;
+            startupScope              startup( app );
+            streamWriterConfig        cfg;
+            cfg.m_shmimName           = uniqueShmimName( "pending_shutdown" );
+            cfg.m_maxWriteChunkLength = 2;
+            cfg.m_maxChunkTime        = 60;
+            cfg.m_semWaitNSec         = 10000000;
+            tempStream source( cfg.m_shmimName, 2, 2, 8 );
+            const auto root         = loadConfig( app, cfg.m_shmimName, cfg );
+            app.m_rawimageDir       = ( root / "raw" ).string();
+            const int startupResult = app.appStartup();
+            startup.markStarted( startupResult == 0 );
+            REQUIRE( startupResult == 0 );
+
+            // Defer appLogic: the writer stays at its normal readiness gate while the producer runs.
+            REQUIRE( app.state() != stateCodes::READY );
+            REQUIRE( app.state() != stateCodes::OPERATING );
+            REQUIRE( waitFor( [&app]() { return app.m_fgReady.load(); }, 3000 ) );
+            writingToggle( app, pcf::IndiElement::On );
+            for( size_t frame = 0; frame < 3; ++frame )
+            {
+                const auto now = currentRealtime();
+                source.publishFrame( frame, frame + 1, 100 + frame * 100, now, now );
+                REQUIRE( waitFor( [&app, frame]() { return app.capturedFrames() == frame + 1; } ) );
+            }
+            { //mutex scope
+                std::lock_guard<std::mutex> lock( app.m_writeMutex );
+                REQUIRE( app.m_writePending );
+                REQUIRE( app.m_currSaveStart == 0 );
+                REQUIRE( app.m_currSaveStop == 2 );
+                REQUIRE( app.m_currChunkStart == 2 );
+                REQUIRE( app.m_chunkFrames == 1 );
+                REQUIRE_FALSE( app.m_fgStopped );
+            }
+            REQUIRE( archivePaths( app.m_rawimageDir ).empty() );
+            REQUIRE( app.shutdownStartedApp() == 0 );
+            startup.disarm();
+            REQUIRE( app.m_fgStopped );
+            REQUIRE_FALSE( app.m_fgThread.joinable() );
+            REQUIRE_FALSE( app.m_swThread.joinable() );
+            REQUIRE_FALSE( app.m_writePending );
+            const auto archives = archivePaths( app.m_rawimageDir );
+            REQUIRE( archives.size() == 2 );
+            REQUIRE( archivedCounters( archives ) == std::vector<uint64_t>{ 1, 2, 3 } );
+        } );
+    const int status = child.wait();
+    REQUIRE( WIFEXITED( status ) );
+    REQUIRE( WEXITSTATUS( status ) == 0 );
 }
 
 } // namespace streamWriterTest

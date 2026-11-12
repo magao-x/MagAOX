@@ -1,0 +1,406 @@
+/** \file dmSyncoSimulation.hpp
+ * \brief Read-only syncopation policy simulation snapshots and conditional step outcomes.
+ */
+#ifndef common_dmSyncoSimulation_hpp
+#define common_dmSyncoSimulation_hpp
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+
+#include "dmCompletion.hpp"
+
+namespace MagAOX
+{
+namespace dmSyncoSimulation
+{
+
+constexpr size_t maxSteps = 16; ///< Fixed capacity shared with the provider schedule layout.
+
+constexpr size_t traceCapacity = 256; ///< Fixed event FIFO; full queues drop new evidence without changing the model.
+
+constexpr size_t traceBatchCapacity = 64; ///< Maximum events in one telemetry record.
+
+constexpr size_t estimatorHistoryCapacity = 256; ///< Pre-trigger accepted-primary history, covering the largest window.
+
+constexpr size_t estimatorPostSamples = 64; ///< Subsequent accepted primaries retained after the latest overlap.
+
+constexpr size_t estimatorTraceCapacity = 4096; ///< Export FIFO; diagnostic saturation never changes model decisions.
+
+constexpr size_t estimatorBatchCapacity = 512; ///< Maximum estimator samples in one ordinary-thread emission.
+
+constexpr uint64_t periodScale = uint64_t( 1 ) << 32; ///< Exact binary scale for fractional nanoseconds per cycle.
+
+constexpr size_t cadenceAnchorCapacity = 64; ///< Bounded approximately one-second counter/time anchors.
+
+constexpr size_t readinessDrainCapacity = 64; ///< Maximum early-release handoffs consumed per serialized cycle call.
+
+constexpr size_t mainWaitTraceCapacity = 64; ///< Fixed FIFO for delayed-main evidence; overflow never changes policy.
+
+constexpr size_t mainWaitBatchCapacity = 8; ///< Maximum delayed-main records in one telemetry emission.
+
+constexpr size_t mainWaitBlockerCapacity = 2; ///< Other jobs preceding one admitted main in the three-credit model.
+
+constexpr size_t mainWaitModelBatchCapacity = 3; ///< Maximum waiting mains whose SDK entry can occur in one advance.
+
+/// Qualification of the slow, monotonic counter/time cadence measurement.
+enum class CadenceState : uint8_t
+{
+    nominal = 0,
+    growing = 1,
+    full    = 2
+};
+
+/// Coherent long-baseline cadence snapshot; zero periodQ32 denotes an absent legacy diagnostic.
+struct Cadence
+{
+    uint64_t     periodQ32{ 0 };                 ///< Nanoseconds per genuine counter advance, scaled by periodScale.
+    CadenceState state{ CadenceState::nominal }; ///< Nominal seed, growing baseline or full requested span.
+    uint64_t     epoch{ 0 };    ///< Changes when cadence anchors are cleared after reset, silence or a rate change.
+    uint64_t     anchors{ 0 };  ///< Currently retained counter/time anchors.
+    uint64_t     cycles{ 0 };   ///< Counter advances represented by the latest measured span.
+    uint64_t     updates{ 0 };  ///< Successful endpoint measurements in this epoch.
+    uint64_t     rejected{ 0 }; ///< Implausible endpoint measurements rejected in this epoch.
+    int64_t      spanNs{ 0 };   ///< Actual latest measurement span; zero before the first measurement.
+    int64_t      windowNs{ 0 }; ///< Requested long measurement baseline.
+    int64_t      updateNs{ 0 }; ///< Minimum interval between anchor/measurement updates.
+    int64_t      observationNs{ 0 }; ///< Last coherent accepted primary, independent of slow refresh age.
+    int64_t      updatedNs{ 0 };     ///< Last successful cadence refresh; zero while nominal.
+};
+
+/// Monitor path supplying retrospective evidence; both paths can observe the same main.
+enum class OverlapOrigin
+{
+    primary  = 0,
+    combined = 1
+};
+
+/// Last modeled interval containing the observation, with half-open boundaries.
+enum class OverlapWindow
+{
+    copy       = 0,
+    readerHold = 1,
+    backend    = 2
+};
+
+/// Optional caller context; zero means unavailable and producer clocks are never treated as monotonic.
+struct Observation
+{
+    uint64_t streamInode{ 0 };          ///< Observed stream metadata identity.
+    uint64_t triggerInode{ 0 };         ///< Combined trace's named primary identity, when available.
+    int64_t  receiptNs{ 0 };            ///< Same-host monotonic semaphore-receipt observation.
+    int64_t  callbackNs{ 0 };           ///< Same-host monotonic monitor callback entry.
+    int64_t  lockRequestNs{ 0 };        ///< Same-host monotonic cycle-lock request.
+    int64_t  lockAcquiredNs{ 0 };       ///< Same-host monotonic cycle-lock acquisition.
+    int64_t  publicationNs{ 0 };        ///< Observed stream publication on its producer clock; not monotonic.
+    int64_t  primaryPublicationNs{ 0 }; ///< Associated primary publication on its producer clock; not monotonic.
+    int64_t  startNs{ 0 };              ///< Combined trace start on its producer clock; not monotonic.
+    int64_t  updateNs{ 0 };             ///< Combined trace update on its producer clock; not monotonic.
+};
+
+/// Frozen identity, context and conditional stage times for one modeled command lease.
+/** All stage endpoints are monotonic model times. A zero endpoint means its stage had not started when
+ * this snapshot was captured; nonzero completion endpoints can still be future bounds at that capture.
+ * Observation publication/start/update fields retain their separate producer clock.
+ */
+struct MainWaitJob
+{
+    uint64_t id{ 0 };      ///< Admission ordinal within the configured resource model, independent of slot reuse.
+    uint64_t counter{ 0 }; ///< Existing model key: combined counter for a main, primary-cycle counter for an auxiliary.
+    uint64_t primaryCounter{ 0 }; ///< Associated genuine primary counter; zero when the caller has no provenance.
+    int      step{ 0 };           ///< Zero for a genuine main; positive for an auxiliary.
+    int64_t  anchorNs{ 0 };       ///< Genuine observed command or hypothetical auxiliary trigger.
+    int64_t  inputNs{ 0 };        ///< Anchor plus configured controller delivery.
+    int64_t  prepNs{ 0 };         ///< Actual modeled preparation start.
+    int64_t  vectorNs{ 0 };       ///< Private-vector readiness after preparation.
+    int64_t  readerNs{ 0 };       ///< Final shared-reader completion bound after preparation start.
+    int64_t  sdkNs{ 0 };          ///< Actual modeled SDK entry.
+    int64_t  sdkReadyNs{ 0 };     ///< SDK-worker readiness bound after native service.
+    int64_t  postNs{ 0 };         ///< Actual modeled ordered-post start.
+    int64_t  retiredNs{ 0 };      ///< Credit-retirement bound after ordered-post start.
+    Observation observation;      ///< Raw caller context; zero fields are unavailable, never inferred.
+};
+
+/// One distinct earlier lease occupying a resource needed by a waiting genuine main.
+struct MainWaitBlocker
+{
+    MainWaitJob job;              ///< Snapshot retained independently of subsequent credit retirement and slot reuse.
+    int64_t     capturedNs{ 0 };  ///< First model instant this lease was observed blocking the waiting main.
+    int64_t     prepBeginNs{ 0 }; ///< First preparation/shared-reader wait instant; zero without this role.
+    int64_t     prepEndNs{ 0 };   ///< Last preparation/shared-reader blocking instant, exclusive.
+    int64_t     sdkBeginNs{ 0 };  ///< First native-worker queue wait instant; zero without this role.
+    int64_t     sdkEndNs{ 0 };    ///< Last native-worker blocking instant, exclusive.
+};
+
+/// One genuine main's additional modeled SDK-entry latency and the leases responsible for it.
+struct MainWaitEvent
+{
+    uint64_t    id{ 0 };            ///< Process-lifetime diagnostic ID assigned by the owning simulation FIFO.
+    uint64_t    session{ 0 };       ///< Parent simulation session assigned when the evidence is enqueued.
+    uint64_t    ordinal{ 0 };       ///< Resource model's mainSdkWaits count at this SDK entry.
+    int64_t     emittedNs{ 0 };     ///< Modeled SDK entry when both wait components became final.
+    int64_t     deliveryNs{ 0 };    ///< Frozen anchor-to-controller-input assumption.
+    int64_t     prepareNs{ 0 };     ///< Frozen preparation service assumption.
+    int64_t     readerNs{ 0 };      ///< Frozen total anchor-to-last-reader assumption.
+    int64_t     sdkServiceNs{ 0 };  ///< Frozen native entry through worker-ready assumption.
+    int64_t     postServiceNs{ 0 }; ///< Frozen serialized ordered-post assumption.
+    int64_t     prepWaitNs{ 0 };    ///< Preparation start minus controller input; excludes preparation service.
+    int64_t     sdkWaitNs{ 0 };     ///< SDK entry minus private-vector readiness; excludes native service.
+    MainWaitJob main; ///< Waiting genuine command; publication and receipt context remains explicitly clocked.
+    std::array<MainWaitBlocker, mainWaitBlockerCapacity> blockers{}; ///< Initialized prefix of earlier leases.
+    size_t blockerCount{ 0 };          ///< Distinct retained blockers, bounded by mainWaitBlockerCapacity.
+    bool   provenanceComplete{ true }; ///< Retained resource intervals cover both waits without overflow or gaps.
+};
+
+/// Fixed caller-owned scratch output; model copies never contain a diagnostic FIFO or emission callback.
+struct MainWaitModelBatch
+{
+    std::array<MainWaitEvent, mainWaitModelBatchCapacity> events{}; ///< Initialized emitted-event prefix.
+    size_t   count{ 0 };   ///< Events already appended by actual progress calls.
+    uint64_t dropped{ 0 }; ///< Events omitted because this scratch batch was not drained before reuse.
+};
+
+/// One overlap observation; the session/planCounter/step/mainCounter tuple supports offline deduplication.
+struct OverlapEvent
+{
+    uint64_t      id{ 0 };              ///< Process-lifetime evidence sequence, including dropped records.
+    uint64_t      session{ 0 };         ///< Model session owning this event, retained across queue resets.
+    uint64_t      mainCounter{ 0 };     ///< Actual primary counter supplying the evidence.
+    uint64_t      combinedCounter{ 0 }; ///< Current combined counter, or last observed counter on the primary path.
+    uint64_t      planCounter{ 0 };     ///< Counter labelling the last modeled copy's cycle.
+    uint64_t      lastMainCounter{ 0 }; ///< Most recent accepted primary counter before this evidence.
+    uint64_t      planEstimatorId{ 0 }; ///< Estimator record that created the modeled copy's frozen plan.
+    uint64_t      lastEstimatorId{ 0 }; ///< Latest completed estimator record before this evidence.
+    uint64_t      periodQ32{ 0 };       ///< Frozen fractional period; zero in legacy records.
+    int64_t       planFractionQ32{ 0 }; ///< Frozen target's signed fractional remainder after nanosecond rounding.
+    int           step{ 0 };            ///< Index of the last modeled copy.
+    OverlapOrigin origin{ OverlapOrigin::primary }; ///< Monitor path; repeated origins are deliberately retained.
+    OverlapWindow window{ OverlapWindow::copy }; ///< Copy, active-reader or backend interval containing the evidence.
+    int64_t       observedNs{ 0 };               ///< Same-host monotonic evidence time.
+    int64_t       mainGridNs{ 0 };   ///< Committed grid or extrapolation from the last frozen cycle; zero unavailable.
+    int64_t       planGridNs{ 0 };   ///< Frozen main prediction for the last modeled copy's cycle.
+    int64_t       periodNs{ 0 };     ///< Period frozen with that modeled copy's cycle.
+    int64_t       copyBeginNs{ 0 };  ///< Same-host monotonic modeled copy start.
+    int64_t       copyEndNs{ 0 };    ///< Same-host monotonic modeled copy completion.
+    int64_t       readerEndNs{ 0 };  ///< Modeled active-reader end; zero for passive preparation.
+    int64_t       lastMainNs{ 0 };   ///< Previous accepted primary observation on the monotonic clock.
+    int64_t       lastOutputNs{ 0 }; ///< Latest associated combined observation on the monotonic clock.
+    Observation   observation;       ///< Raw monitor/producer context supplied by the caller.
+    int64_t       backendEndNs{ 0 }; ///< Assumed active backend retirement; zero in legacy/passive events.
+};
+
+/// Process-lifetime FIFO accounting; detected equals drained plus dropped plus queued.
+struct TraceStatus
+{
+    bool     enabled{ false };          ///< Model selection; queued older-session events remain drainable after reset.
+    uint64_t detected{ 0 };             ///< All diagnostic evidence, including records rejected by the full FIFO.
+    uint64_t drained{ 0 };              ///< Records removed from the FIFO for a telemetry attempt.
+    uint64_t dropped{ 0 };              ///< New records discarded because the fixed FIFO was full.
+    uint64_t queued{ 0 };               ///< Events awaiting a telemetry attempt.
+    uint64_t capacity{ traceCapacity }; ///< Fixed FIFO capacity.
+    uint64_t logFailed{ 0 };            ///< App-owned count of drained events whose telemetry submission failed.
+};
+
+/// One accepted-primary estimator update; values come from the original calculations without recomputing medians.
+struct EstimatorSample
+{
+    uint64_t id{ 0 };                    ///< Process-lifetime accepted-primary sample ID, including unselected history.
+    uint64_t session{ 0 };               ///< Model session owning this update.
+    uint64_t sequence{ 0 };              ///< Accepted-primary sequence within the session.
+    uint64_t counter{ 0 };               ///< Genuine main counter supplying this update.
+    int64_t  observedNs{ 0 };            ///< Same-host monotonic observation.
+    int64_t  publicationIntervalNs{ 0 }; ///< Raw producer-clock elapsed interval; zero means unavailable.
+    bool     sequential{ false };        ///< Counter is the previous accepted main plus one.
+    bool     intervalAccepted{ false };  ///< Input interval was admitted to the period-estimator ring.
+    uint64_t periodSamples{ 0 };         ///< Retained eligible publication intervals after this update.
+    uint64_t phaseSamples{ 0 };          ///< Retained counter/observation pairs after this update.
+    int64_t  periodBeforeNs{ 0 };        ///< Selected period before incorporating this primary.
+    int64_t  periodNs{ 0 };              ///< Selected period after incorporating this primary.
+    int64_t  predictedNs{ 0 };           ///< Frozen prediction for this main before observing it; zero unavailable.
+    uint64_t nextCounter{ 0 };           ///< Counter of the attempted future commitment; zero if none.
+    uint64_t sourcePlanCounter{ 0 };     ///< Frozen cycle extrapolated to obtain the future base grid.
+    uint64_t sourceEstimatorId{ 0 };     ///< Estimator sample that created that source plan.
+    int64_t  sourceGridNs{ 0 };          ///< Source plan's frozen monotonic main target.
+    int64_t  baseGridNs{ 0 };            ///< Future grid before applying the phase correction.
+    int64_t  candidateNs{ 0 };           ///< Median future phase candidate, using the updated estimator.
+    double   phaseGain{ 0 };             ///< Gain used for this update, retained across queued configuration epochs.
+    int64_t  phaseSlewNs{ 0 };           ///< Maximum absolute phase correction for this update.
+    int64_t  rawCorrectionNs{ 0 };       ///< Unclamped correction truncated toward zero to integer nanoseconds.
+    int64_t  appliedCorrectionNs{ 0 };   ///< Original bounded correction applied to the base grid.
+    int64_t  committedGridNs{ 0 };       ///< Newly committed future target; zero if no commitment succeeded.
+    bool     committed{ false };         ///< A new future plan was actually committed by this update.
+    uint64_t periodBeforeQ32{ 0 };       ///< Fractional selected period before this update; zero in legacy records.
+    int64_t  sourceFractionQ32{ 0 };     ///< Source plan's signed fractional remainder.
+    int64_t  baseFractionQ32{ 0 };       ///< Uncorrected future grid's signed fractional remainder.
+    int64_t  committedFractionQ32{ 0 };  ///< Committed future grid's signed fractional remainder.
+    Cadence  cadence; ///< Slow cadence state after this primary; independent of producer interval qualification.
+};
+
+/// Process-lifetime triggered estimator coverage; selected equals drained plus dropped plus queued.
+struct EstimatorStatus
+{
+    bool     enabled{ false };                   ///< Shadow estimator collection is selected.
+    uint64_t observed{ 0 };                      ///< All completed accepted-primary estimator samples.
+    uint64_t triggers{ 0 };                      ///< Overlap observations requesting a pre/post history window.
+    uint64_t selected{ 0 };                      ///< Unique samples selected for export, including FIFO losses.
+    uint64_t drained{ 0 };                       ///< Selected samples removed for a telemetry attempt.
+    uint64_t dropped{ 0 };                       ///< Selected samples discarded because the export FIFO was full.
+    uint64_t queued{ 0 };                        ///< Samples awaiting telemetry.
+    uint64_t capacity{ estimatorTraceCapacity }; ///< Fixed export FIFO capacity.
+    uint64_t logFailed{ 0 }; ///< App-owned count of drained samples lost to detected telemetry failures.
+    uint64_t history{ 0 };   ///< Currently retained pre-trigger samples; reset clears this history.
+    uint64_t historyCapacity{ estimatorHistoryCapacity }; ///< Fixed pre-trigger ring capacity.
+    uint64_t postRemaining{ 0 }; ///< Accepted-primary samples still to export after the latest trigger.
+};
+
+/// Bounded drained telemetry batch; status describes the FIFO after this drain.
+struct TraceBatch
+{
+    std::array<OverlapEvent, traceBatchCapacity> events{};   ///< Initialized prefix contains drained event records.
+    size_t                                       count{ 0 }; ///< Initialized events; never exceeds traceBatchCapacity.
+    TraceStatus status; ///< Process-lifetime collection and telemetry-failure accounting.
+    std::array<EstimatorSample, estimatorBatchCapacity> estimator{}; ///< Selected pre/post estimator updates.
+    size_t          estimatorCount{ 0 }; ///< Initialized estimator prefix, bounded by estimatorBatchCapacity.
+    EstimatorStatus estimatorStatus;     ///< Independent estimator-history coverage and loss accounting.
+    std::array<MainWaitEvent, mainWaitBatchCapacity> mainWait{}; ///< Drained delayed-main provenance prefix.
+    size_t      mainWaitCount{ 0 }; ///< Initialized mainWait prefix, bounded by mainWaitBatchCapacity.
+    TraceStatus mainWaitStatus;     ///< Independent delayed-main FIFO coverage; its owner sets capacity explicitly.
+};
+
+/// Counts for one step index; modeled copies and triggers never address a DM stream.
+struct Step
+{
+    uint64_t considered{ 0 };      ///< Committed occurrences evaluated once.
+    uint64_t wouldRun{ 0 };        ///< Occurrences eligible under the explicitly configured model bounds.
+    uint64_t skipped{ 0 };         ///< Occurrences unavailable before any modeled copy starts.
+    uint64_t earlyMain{ 0 };       ///< Passive preparations cancelled by an already observed main.
+    uint64_t missingMain{ 0 };     ///< Active slots without their genuine counter-labelled main.
+    uint64_t missingOutput{ 0 };   ///< Slots without a coherent main-to-combined association.
+    uint64_t readerHold{ 0 };      ///< Slots whose actual or modeled reader hold prevents the fixed target.
+    uint64_t expired{ 0 };         ///< Obsolete slots or unavailable future timing envelopes.
+    uint64_t overlap{ 0 };         ///< Observations that could overlap a modeled copy/reader interval.
+    uint64_t releaseMissing{ 0 };  ///< No exact qualified actual-main release was available at the copy deadline.
+    uint64_t releaseLate{ 0 };     ///< Exact actual-main release was captured after the fixed copy deadline.
+    uint64_t backendBusy{ 0 };     ///< Previous whole-backend or pipeline SDK ownership blocks the active slot.
+    uint64_t backendWrap{ 0 };     ///< Whole-backend hold or pipeline SDK service conflicts with the next main.
+    uint64_t preparationBusy{ 0 }; ///< Monitor preparation would delay this fixed auxiliary target.
+    uint64_t creditFull{ 0 };      ///< All bounded pipeline credits would remain owned at admission.
+};
+
+/// Coherent observer evidence; available time is capture, never the earlier publisher endpoint.
+struct Readiness
+{
+    MagAOX::dmCompletion::Record record; ///< Exact early-release identity and independent SDK outcome.
+    int64_t  observedNs{ 0 };            ///< Same-host monotonic time when the coherent record became available.
+    uint64_t sourceEpoch{ 0 };           ///< Monotonic app-owned attachment/drop fence; zero is unavailable.
+    bool     coherent{ true };           ///< False revokes readiness without supplying a release.
+};
+
+/// Readiness-source diagnostics, independent of physical or hypothetical command delivery.
+struct ReadinessQuality
+{
+    uint64_t observed{ 0 };         ///< Evidence events consumed, including rejected events.
+    uint64_t qualified{ 0 };        ///< Distinct exact release records retained.
+    uint64_t invalid{ 0 };          ///< Invalid time, identity, state or publisher progression.
+    uint64_t incoherent{ 0 };       ///< Observer captures explicitly failed consistency checks.
+    uint64_t duplicates{ 0 };       ///< Repeated or backward release sequences.
+    uint64_t gaps{ 0 };             ///< Missing release attempts inferred from sequence progression.
+    uint64_t sourceResets{ 0 };     ///< Source/producer epoch changes or explicit invalidations.
+    uint64_t identityMismatch{ 0 }; ///< Same sequence or combined counter carried contradictory raw identity.
+    uint64_t sdkFailed{ 0 };        ///< Explicit SDK failures that revoke readiness until recovery.
+    uint64_t queueDrops{ 0 };       ///< App-reported transport drops, counted exactly.
+};
+
+/// Optional conditional preparation, serialized SDK and ordered post-resource model.
+struct Pipeline
+{
+    bool enabled{ false }; ///< Startup-only pipeline-aware shadow selection; never authorizes a hardware write.
+
+    int64_t prepareNs{ 35000 };     ///< Assumed serialized command-preparation duration.
+    int64_t sdkServiceNs{ 120000 }; ///< Assumed native-entry through SDK-worker-ready service duration.
+    int64_t postNs{ 150000 };       ///< Assumed independent serialized post-service duration.
+
+    uint64_t capacity{ 3 };          ///< Fixed private command-credit capacity, matching the controller pipeline.
+    uint64_t inFlight{ 0 };          ///< Currently reserved or admitted credits whose modeled retirement is pending.
+    uint64_t maximumInFlight{ 0 };   ///< Maximum simultaneous owned credits in the current model session.
+    uint64_t mainAdmitted{ 0 };      ///< Genuine main commands represented by modeled resource admissions.
+    uint64_t auxiliaryAdmitted{ 0 }; ///< Conditional active auxiliary admissions, never physical deliveries.
+    uint64_t retired{ 0 };           ///< Modeled main/auxiliary jobs whose credits have been released.
+    uint64_t discarded{ 0 };         ///< Owned jobs fenced out by resource resets without modeled retirement.
+    uint64_t mainSdkWaits{ 0 };      ///< Genuine mains whose SDK entry is delayed by monitor or SDK ownership.
+    uint64_t mainCreditMisses{ 0 };  ///< Genuine mains arriving while every command credit is occupied.
+    uint64_t resets{ 0 };            ///< Resource-model fences clearing pending work after evidence loss.
+
+    int64_t sdkReadyNs{ 0 };        ///< Modeled end of the last reserved SDK service, zero without work.
+    int64_t postReadyNs{ 0 };       ///< Modeled end of the last reserved ordered post service.
+    int64_t maximumMainWaitNs{ 0 }; ///< Largest added main-entry delay from monitor preparation and SDK queue waits.
+    int64_t mainClearanceShortfallNs{ 0 }; ///< Largest modeled reader/SDK clearance overrun beyond the earliest main.
+
+    bool sdkCycleFeasible{ false };       ///< Nominal serialized SDK service can fit the requested cadence.
+    bool postCycleFeasible{ false };      ///< Nominal serialized post service can fit the requested cadence.
+    bool creditCycleFeasible{ false };    ///< Nominal pipeline occupancy can fit the fixed command-credit pool.
+    bool mainProtectionFeasible{ false }; ///< Nominal auxiliary service preserves the configured main reserve.
+};
+
+/// Coherent snapshot copied outside monitor callbacks for INDI and telemetry.
+/** A valid prediction is conditional on configured timing bounds. It neither
+ * qualifies a physical earliest-main reserve nor confirms an actual auxiliary
+ * delivery. All timestamps and residuals use same-host monotonic nanoseconds.
+ */
+struct Summary
+{
+    bool     enabled{ false };             ///< Startup-only simulation selection.
+    bool     valid{ false };               ///< A fresh counter-labelled grid is available.
+    bool     feasible{ false };            ///< The nominal complete cycle fits configured bounds.
+    uint64_t session{ 1 };                 ///< Changes after explicit reset or stream identity replacement.
+    uint64_t sequence{ 0 };                ///< Distinct accepted primary observations in this session.
+    int64_t  nowNs{ 0 };                   ///< Last evaluation on the monotonic scheduling clock.
+    int64_t  lastMainNs{ 0 };              ///< Last accepted genuine primary observation.
+    uint64_t counter{ 0 };                 ///< Last accepted genuine primary counter, never inferred from time.
+    int      steps{ 0 };                   ///< Fixed requested count, including passive step zero.
+    int64_t  periodNs{ 0 };                ///< Current robust nominal period.
+    int64_t  gridNs{ 0 };                  ///< Frozen prediction for the most recently observed primary counter.
+    int64_t  phaseNs{ 0 };                 ///< Actual observation minus its prediction made before that observation.
+    int64_t  phaseMinNs{ 0 };              ///< Minimum qualified pre-observation prediction residual this session.
+    int64_t  phaseMaxNs{ 0 };              ///< Maximum qualified pre-observation prediction residual this session.
+    uint64_t phaseCount{ 0 };              ///< Observations with an independently frozen phase prediction.
+    uint64_t periodSamples{ 0 };           ///< Qualified interval samples retained by the bounded estimator.
+    uint64_t phaseSamples{ 0 };            ///< Counter/observation pairs retained by the phase estimator.
+    int64_t  nextGridNs{ 0 };              ///< Next committed main-grid target, or zero while unavailable.
+    int64_t  nextActiveNs{ 0 };            ///< Next committed unexpired active target, or zero when unavailable.
+    int64_t  earlyReserveNs{ 0 };          ///< Assumed configured reserve; simulation does not qualify this value.
+    int64_t  deliveryNs{ 0 };              ///< Assumed delivery allowance after an observed or modeled publication.
+    int64_t  keepoutNs{ 0 };               ///< Assumed controller processing and final-reader lifetime.
+    int64_t  guardNs{ 0 };                 ///< Additional reader/delivery guard.
+    int64_t  snapshotNs{ 0 };              ///< Assumed source-snapshot budget.
+    int64_t  copyNs{ 0 };                  ///< Assumed whole-batch copy/publication budget.
+    int64_t  leadNs{ 0 };                  ///< Nominal passive-copy completion lead.
+    int64_t  observationNs{ 0 };           ///< Assumed publication-to-primary-observation uncertainty.
+    int64_t  visibilityNs{ 0 };            ///< Required visibility before the earliest plausible main.
+    int64_t  reserveNs{ 0 };               ///< Preparation reserve before the hard passive-copy cutoff.
+    uint64_t window{ 0 };                  ///< Configured period and phase sample capacity.
+    double   phaseGain{ 0 };               ///< Bounded phase-estimate correction gain.
+    int64_t  phaseSlewNs{ 0 };             ///< Maximum correction to an unadvertised future cycle.
+    int64_t  cadenceMinPeriodNs{ 0 };      ///< Whole-cycle minimum from the configured total-cadence sanity rating.
+    uint64_t duplicates{ 0 };              ///< Unchanged-counter primary notifications ignored.
+    uint64_t gaps{ 0 };                    ///< Forward primary-counter gaps, excluding their intervals from estimation.
+    uint64_t resets{ 0 };                  ///< Counter rollback or explicit identity resets.
+    uint64_t invalid{ 0 };                 ///< Incoherent, out-of-order or unrepresentable observations.
+    uint64_t excluded{ 0 };                ///< Invalid or broadly implausible period samples, not timing faults.
+    uint64_t outputGaps{ 0 };              ///< Missing/ambiguous combined-counter progression.
+    uint64_t associations{ 0 };            ///< Coherent actual primary-to-combined observations accepted.
+    std::array<Step, maxSteps> outcomes{}; ///< Current-session conditional outcomes indexed by step.
+    Cadence                    cadence;    ///< Slow cadence qualification and separate observation/refresh timestamps.
+    bool    readerReleaseReady{ false };   ///< Actual main copy readiness uses observed early-release records.
+    int64_t virtualReaderNs{ 30000 }; ///< Assumed virtual auxiliary trigger-to-last-reader duration, not a measurement.
+    int64_t backendNs{ 155000 };      ///< Assumed actual-output/virtual-trigger-to-whole-backend-ready duration.
+    bool    readerCycleFeasible{ false };  ///< Nominal copy/read geometry can fit all requested slots.
+    bool    backendCycleFeasible{ false }; ///< Nominal backend occupancy can fit all slots and the early-main reserve.
+    Readiness        latestRelease; ///< Latest qualified release; cleared whenever its source evidence is revoked.
+    ReadinessQuality readiness;     ///< Current-session early-release source quality.
+    Pipeline         pipeline;      ///< Optional independent preparation, SDK and post-resource assumptions/state.
+};
+
+} // namespace dmSyncoSimulation
+} // namespace MagAOX
+#endif

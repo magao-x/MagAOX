@@ -9,6 +9,8 @@ UI_DIR = ui/
 MAKEFILE = makefile.pupilGuide_test
 SOURCES += pupilGuide_test.cpp
 HEADERS += ../pupilGuide.hpp \
+           ../../xWidgets/stagePairStatus.hpp \
+           ../../xWidgets/statusCombo.hpp \
            ../../xWidgets/xWidget.hpp \
            ../../xWidgets/statusLineEdit.hpp \
            ../../xWidgets/statusEntry.hpp \
@@ -16,6 +18,7 @@ HEADERS += ../pupilGuide.hpp \
            ../../xWidgets/fsmDisplay.hpp \
            ../../xWidgets/toggleSlider.hpp
 FORMS += ../pupilGuide.ui \
+         ../../xWidgets/statusCombo.ui \
          ../../xWidgets/statusEntry.ui \
          ../../xWidgets/fsmDisplay.ui \
          ../../xWidgets/toggleSlider.ui
