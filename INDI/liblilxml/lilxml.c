@@ -313,6 +313,10 @@ cloneXMLEle (XMLEle *ep)
   char ynot[1024];
   XMLEle *newep;
 
+  /* benign if NULL */
+  if (!ep)
+    return (NULL);
+
   buf = (char *) (*mymalloc) (sprlXMLEle (ep, 0) + 1);
   sprXMLEle (buf, ep, 0);
   newep = parseXML (buf, ynot);
@@ -660,12 +664,13 @@ sprlXMLEle (XMLEle *ep, int level)
 
 /* return a string with all xml-sensitive characters within the passed string s
  * replaced with their entity sequence equivalents.
- * N.B. caller must use the returned string before calling us again.
+ * N.B. caller must use the returned string before calling us again from the same thread.
+ * The scratch buffer is thread-local so concurrent callers never free or reuse each other's result.
  */
 char *
 entityXML (char *s)
 {
-  static char *malbuf;
+  static _Thread_local char *malbuf;
   int nmalbuf = 0;
   char *sret;
   char *ep;
@@ -897,10 +902,10 @@ oneXMLchar (LilXML *lp, int c, char ynot[])
         growString (&lp->entity, c);
         if (decodeEntity (lp->entity.s, &c))
           growString (&lp->ce->pcdata, c);
-        else {
+        else
           appendString(&lp->ce->pcdata, lp->entity.s);
-          lp->ce->pcdata_hasent = 1;
-        }
+        /* either way pcdata now holds an entity char that printing must re-escape */
+        lp->ce->pcdata_hasent = 1;
         freeString (&lp->entity);
         lp->cs = INCON;
       } else
