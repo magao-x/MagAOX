@@ -49,8 +49,22 @@ can look like 100 us. Configuring a maximum latency cannot detect this alias.
 ## Automatic syncopation mode
 
 For the production-provider path, enable both diagnostic publishers and configure
-all three monitor settings together. For example, merge these sections into the
-respective instance configurations:
+all three monitor settings together. The combined-output producer must also
+publish trace linkage to the same primary stream that synco monitors, with
+advancing process-start timestamps. The diagnostic stream settings alone do not
+establish this linkage.
+
+For the RTC deployment with primary `dm01disp03` and combined output `dm01disp`,
+set dmcomb's FPS parameter `.procinfo.triggersname` to `dm01disp03` before starting
+dmcomb. This startup setting requires a dmcomb restart through the normal
+instrument procedure. Retain `.procinfo.triggermode=4` and the existing 5 us
+trigger delay: naming the trace source preserves delay-mode all-channel scanning
+and does not switch to waiting on a primary semaphore. It does enable MILK's
+copy of the linked input trace at output publication. Verify that combined trace
+row 0 identifies `dm01disp03` with a nonzero inode and advancing process-start
+timestamps; MILK's `MeasureTiming` must be enabled for the latter.
+
+Merge these sections into the respective instance configurations:
 
 ```ini
 # bmcCtrl (dmtweeter); existing worker/pipeline mode must already be enabled
@@ -74,6 +88,14 @@ Leave the three `[synco]` settings empty for the original standalone behavior.
 Automatic mode reads the event histories in place of `dm.shmimName`; the v1
 SDK timestamp stream may remain enabled for other consumers. Rebuild all three
 apps when deploying this extension. The monitor never enables or disables synco.
+
+After deployment, BMC's `sdk_pipeline.timingEventEnabled` must be 1 and both
+diagnostic history counters must advance while the loop runs. Synco drains its
+history from ordinary app logic, so compare counters more than one second apart.
+An unlinked combined trace (`????`, inode 0) prevents main labels in both synco
+enable states. A monitor attaching after the initial mode marker can then remain
+in `waitingMode`, with `modeGeneration=0` and growing `unmatched` as camera samples
+expire. Those counters alone do not establish a failure of the SDK/main join.
 
 The monitor subscribes once to `<synco.device>.enable.toggle`. When Off it
 reports ordinary main-command timing; when On it reports only step 0. Actual
