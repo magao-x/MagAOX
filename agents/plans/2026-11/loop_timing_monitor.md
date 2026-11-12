@@ -896,3 +896,161 @@ post-warm-up monitor modes are `ordinary` while synco is Off and `step0` while
 On, with the endpoint using `dmtweeter_sdk_events.startNs`. No deployed config or
 instrument state was changed by the agent; only this engineering record was
 updated locally.
+
+### Follow-up telemetry diagnosis and status discovery (2026-11-12)
+
+Following the configuration instructions, the operator reports no loop-timing
+telemetry. Current `holoop-time`, synco `main_timing`, and BMC `sdk_pipeline`
+readbacks, the current enable state, and restart confirmation were requested.
+The current failure cannot be attributed to a specific gate or stream without
+those readbacks; the previous standalone snapshot is not current evidence.
+
+Source inspection confirms that `recordTimings()` emits only when the current
+operating gate, source/clock epochs, diagnostic mode, and all three fresh timing
+populations qualify. A separate observability defect was found: dmSyncopation
+created its `main_timing` INDI property but never registered it, so a discovery
+query could omit this property even with the shared publisher configured and
+running. `createROIndiNumber()` initializes a property but does not register it.
+
+Extracted `setupMainTimingINDI()` to initialize and register the configured
+read-only status property, propagating registration failure from startup.
+Disabled export creates no property. Added an offline regression using the existing
+private INDI fixture to inspect actual `handleGetProperties` response XML for
+both configured and disabled exports. This repairs status visibility only;
+it does not change main classification, scheduling, shared-stream publication,
+or the telemetry validity gate.
+
+Verification: the serial dmSyncopation app and test builds pass. The focused
+discovery regression passes 33 assertions in one case, and the full suite passes
+7,059,707 assertions across 161 cases. Full-file formatting, documentation review,
+and `git diff --check` pass. An initial parallel build encountered a GCC/PCH bus
+error; the serial rebuild passed without further source changes.
+
+The subsequent operator readback shows `holoop-time.fsm.state=READY`, zero
+sample-rejection/loss counters, and `modeGeneration=0`. The detailed
+`loop_timing_state` lines were not included, so a closed gate cannot yet be
+excluded. BMC reports a live pipeline, `startTimeEnabled=1`,
+`timingEventEnabled=0`, and `timingEventFailures=0`. In the current code an
+empty event-stream name disables the publisher without failure; a nonempty
+name that fails to open increments the failure counter.
+
+The operator then supplied the deployed `[sdk]` section. It enables the worker,
+pipeline, result stream, and original SDK-start timestamp stream, but omits
+`timingEventStream`. This confirms a missing prerequisite for automatic timing:
+the SDK provenance history is not enabled. The original timestamp stream does
+not carry the identity required to exclude auxiliary commands.
+
+Merge `timingEventStream=dmtweeter_sdk_events` and optionally
+`timingEventCapacity=32768` into dmtweeter's existing `[sdk]` section, preserving
+its other settings. The operator must restart dmtweeter itself through the normal
+instrument procedure; restarting only synco or the monitor does not load this
+controller setting. Verify `sdk_pipeline.timingEventEnabled=1` afterward, then
+inspect `holoop-time.loop_timing_state` and `loop_timing.valid` after warm-up.
+The monitor retries missing stream attachment itself. Additional gates or missing
+main labels may still require diagnosis once this prerequisite is satisfied.
+No instrument configuration or runtime state was changed by the agent.
+
+After enabling the BMC history, the operator reports `timingEventEnabled=1`
+with synco disabled. The monitor uses the correct qualified SDK-event endpoint,
+but reports `mode=unknown`, `state=waitingMode`, and `valid=0`. At this snapshot
+the operating gate is affirmative and the required stream files are attached.
+The remaining failure is lack of accepted synco mode/main evidence since the
+last reset; successful attachment alone does not establish that the main-ring
+publisher is still running.
+
+The event reader intentionally baselines existing records on attachment. Synco
+publishes a mode marker on generation changes, while every qualified main record
+also carries the complete mode. Thus late attachment recovers on any new valid
+main even while synco is disabled, but an old startup marker alone cannot recover
+mode when no further main qualifies. Both active and passive main qualification
+require coherent named-primary combiner trace linkage and valid process-start
+timing. Missing trace evidence must not be replaced with positional inference.
+
+Requested the current monitor quality counters, synco's deployed `[diagnostics]`
+section, and confirmation of synco restart after setting `mainTimingStream`.
+These checks precede attributing the failure to absent publication, repeated
+capture resets, or trace qualification. No additional code change was made from
+this readback alone.
+
+The next readback confirms the configured synco ring name and capacity, with
+`modeGeneration=0`, `joinInvalid=0`, `joinUnmatched=0`, `mainMissed=0`, and
+`invalid=0`. `unmatched=423220` is not a count of failed SDK/main joins: the
+published field includes `m_pendingCameraExpired`, so camera evidence expires
+while no qualified main endpoints arrive. The six camera misses and five clock
+rejections do not alone establish a persistent reset loop; current epoch is six.
+
+The next operator check is two snapshots, more than one second apart, of both
+diagnostic publication counters using the existing read-only
+`isio-stream-info dmtweeter_synco_main_timing dmtweeter_sdk_events` command in the
+normal MILK environment, or the corresponding counters in `milk-streamCTRL` if
+the command is unavailable. Its inspected source only opens shared metadata,
+prints counters and closes the attachments; it neither waits on nor posts stream
+semaphores. This distinguishes a static main history from advancing records
+before requesting combined-trace details or changing classification. No further
+production-code changes or instrument actions were made from these counters.
+
+The operator's two-second snapshots show the main history fixed at counter 5,
+while SDK history advances from 1,846,282 to 1,850,288 (4,006 publications).
+This localizes the current lack of measurements to absence of new records in
+synco's main history, before the monitor's exact join. The record kinds of those
+five existing entries have not been inspected, so they are not assumed to be
+five main captures or five mode markers.
+
+A source audit found no disabled-mode early return bypassing passive capture:
+the primary monitor runs in READY, `processImage()` captures before the
+production scheduler's Off return, and `appLogic()` drains main timing before
+the detailed-diagnostics branch. The next bundled operator check requests
+`sm_shmimName`, two `zero_clock.attempted` readbacks (existing primary clock-map
+attempt count), and the combined stream's row-zero trace in `milk-streamCTRL`
+(F5 then Right). This separates missing primary callbacks from absent or
+unqualified combiner trace linkage without changing producer configuration.
+
+The operator confirms the monitored primary is `dm01disp03`, with
+`zero_clock.attempted` advancing from 2,050,092 to 2,054,102 over two seconds.
+The combined `dm01disp` trace reports an unknown trigger (`????`) and inode 0;
+dmcomb is in trigger mode 4 with a 5 us delay. This establishes a concrete
+qualification blocker: `MainTiming::qualifies()` requires the trace's primary
+inode to equal the genuine primary inode, so the unlinked output cannot produce
+main labels even while primary callbacks and native SDK calls continue.
+
+The inspected MILK implementation supports a named trace source in DELAY mode.
+Set dmcomb's `.procinfo.triggersname=dm01disp03` through its startup FPS
+configuration and restart dmcomb using the operator's normal instrument
+procedure. Retain mode 4 and the existing 5 us delay. Trigger initialization
+resolves the named stream and stores its inode before selecting the mode;
+DELAY continues to sleep and scan all channel counters, without acquiring a
+primary semaphore. The output updater propagates that primary inode/counter and
+copies its trace, adding trace-copy work in dmcomb. The trigger name is not a
+runtime-writable FPS setting in this source. Advancing process-start timestamps
+remain a separate prerequisite (`MeasureTiming`).
+
+Updated the monitor README to put this producer prerequisite alongside the
+three application configuration sections and document the observed failure
+signature. After the operator applies it, verify the nonzero named-primary
+trace, advancing main history, and valid `ordinary` timing while synco is Off
+(`step0` while On). Instrument configuration and restart remain operator actions;
+the agent has not changed the live system.
+
+An offline reproduction with the actual `syncoMainTiming.hpp` classifier and
+in-memory metadata confirms the blocker. For both same-frame and previous-frame
+combined-output cases, 2,000 callbacks at synthetic 2 kHz with trigger inode 0
+produce one initial mode record and no main labels. Correcting only the trigger
+inode and continuing for 2,000 callbacks produces 2,000 main labels, with synco
+remaining Off, unchanged generation, and no invalid records. No stream attachment
+or hardware access was used. Documentation changes pass `git diff --check`.
+
+The operator subsequently confirms loop timing is working after correcting the
+trace link and requests that the stream name persist in CACAO configuration.
+Added the following entry beside dmcomb's existing startup settings in the
+separate local configuration repository at
+`/opt/MagAOX/config/cacao/tweeter-vispyr/fpssetup.setval.tweeter-vispyr.conf`:
+
+```text
+setval DMch2disp-DMINDEX.procinfo.triggersname dmDMINDEXdisp03
+```
+
+The existing CACAO loader substitutes `DMINDEX=01`, yielding
+`setval DMch2disp-01.procinfo.triggersname dm01disp03`. Static substitution and
+diff checks pass. Trigger mode, delay, and other settings were not changed.
+This edits the workstation's persistent file only; no setup script, FPS command,
+instrument restart, commit, or push was performed by the agent.

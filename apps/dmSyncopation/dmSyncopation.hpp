@@ -1113,6 +1113,9 @@ class dmSyncopation : public MagAOXApp<true>,
     /// Freeze this primary callback's mode and optionally take one nonwaiting disabled snapshot.
     void capturePassiveMainTiming();
 
+    /// Register the optional main-capture status so INDI discovery can advertise it.
+    int setupMainTimingINDI();
+
     /// Maintain the independent output attachment and publish a bounded batch outside the timed callback.
     void updateMainTiming( int64_t now /**< [in] Existing ordinary-loop monotonic timestamp. */ );
 
@@ -1574,6 +1577,28 @@ inline void dmSyncopation::capturePassiveMainTiming()
     {
         m_mainTiming.passive( &this->shmimMonitorT::m_imageStream, &m_mainTimingCombined );
     }
+}
+
+inline int dmSyncopation::setupMainTimingINDI()
+{
+    if( m_mainTimingName.empty() )
+    {
+        return 0;
+    }
+
+    if( createROIndiNumber( m_indiP_mainTiming, "main_timing" ) < 0 )
+    {
+        return -1;
+    }
+
+    for( const auto *name : { "enabled", "generation", "dropped", "publishFailures", "queued" } )
+    {
+        m_indiP_mainTiming.add( pcf::IndiElement( name ) );
+        m_indiP_mainTiming[name] = 0.0;
+    }
+
+    m_indiP_mainTiming["enabled"] = 1.0;
+    return registerIndiPropertyReadOnly( m_indiP_mainTiming );
 }
 
 inline void dmSyncopation::updateMainTiming( int64_t now )
@@ -4615,14 +4640,9 @@ inline int dmSyncopation::appStartup()
         return log<software_error, -1>( { "could not create main timing diagnostic stream" } );
     }
 
-    if( !m_mainTimingName.empty() )
+    if( setupMainTimingINDI() < 0 )
     {
-        createROIndiNumber( m_indiP_mainTiming, "main_timing" );
-
-        for( const auto *name : { "enabled", "generation", "dropped", "publishFailures", "queued" } )
-        {
-            m_indiP_mainTiming.add( pcf::IndiElement( name ) );
-        }
+        return -1;
     }
 
     synchronizeMainTiming();

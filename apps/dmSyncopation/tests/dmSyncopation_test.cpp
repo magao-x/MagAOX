@@ -29,8 +29,10 @@ class SimulationDriver : public indiDriver<MagAOXApp<true>>
     /// Close the unactivated input descriptor; the shared driver closes its output descriptor.
     ~SimulationDriver();
 
-    /// Discard serialized publications without writing a pipe or opening a client connection.
+    /// Optionally capture serialized publications without writing a pipe or opening a client connection.
     void sendXml( const std::string &xml /**< [in] Production-formatted local property publication. */ ) const override;
+
+    std::string *m_capture{ nullptr }; ///< Optional borrowed output for synchronous discovery tests.
 
   private:
     int m_input{ -1 }; ///< Private input descriptor not released by an unactivated production driver.
@@ -71,7 +73,10 @@ SimulationDriver::~SimulationDriver()
 
 void SimulationDriver::sendXml( const std::string &xml ) const
 {
-    static_cast<void>( xml );
+    if( m_capture )
+    {
+        *m_capture += xml;
+    }
 }
 
 /// Scheduler access and cleanup without starting app, hardware, INDI or monitor threads.
@@ -270,6 +275,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::setupCadenceINDI;
     using dmSyncopation::setupCombinerCadenceINDI;
     using dmSyncopation::setupLogicTimingINDI;
+    using dmSyncopation::setupMainTimingINDI;
     using dmSyncopation::setupPipelineINDI;
     using dmSyncopation::setupPrimaryCadenceINDI;
     using dmSyncopation::setupReaderTimingINDI;
@@ -408,6 +414,9 @@ class Harness : public dmSyncopation
 
     /// Install a threadless INDI driver using private local FIFOs to exercise property publication.
     void localDriver( const std::string &directory /**< [in] Fixture-owned temporary directory. */ );
+
+    /// Collect the real framework's response to local INDI property discovery.
+    std::string propertyDefinitions();
 };
 
 Harness::Harness()
@@ -685,6 +694,16 @@ void Harness::localDriver( const std::string &directory )
 
     m_indiDriver = new SimulationDriver( this );
     REQUIRE( m_indiDriver->good() );
+}
+
+std::string Harness::propertyDefinitions()
+{
+    std::string definitions;
+    auto       &driver = *static_cast<SimulationDriver *>( m_indiDriver );
+    driver.m_capture   = &definitions;
+    handleGetProperties( pcf::IndiProperty{} );
+    driver.m_capture = nullptr;
+    return definitions;
 }
 
 /// Owned files and images under a unique MILK_SHM_DIR; never attaches an instrument stream.
@@ -10642,6 +10661,43 @@ TEST_CASE( "syncopation main export reuses existing qualified active acknowledge
     MagAOX::app::dmSyncopation::processImage;
     MagAOX::app::dmSyncopation::processZeroTestPrimary;
     MagAOX::app::synco::MainTiming::capture;
+#endif
+    // clang-format on
+}
+
+/** \brief INDI discovery advertises every main-status element only when the optional exporter is configured.
+ * \ingroup dmSyncopation_unit_test
+ */
+TEST_CASE( "syncopation main diagnostics register their INDI definition", "[dmSyncopation][mainTiming][indi]" )
+{
+    Streams    streams;
+    Harness    app;
+    const bool enabled   = GENERATE( false, true );
+    app.m_mainTimingName = enabled ? "unpublished-local-main-timing" : "";
+    app.localDriver( streams.directory );
+    REQUIRE( app.setupMainTimingINDI() == 0 );
+    const auto definitions = app.propertyDefinitions();
+
+    if( enabled )
+    {
+        CHECK( definitions.find( "<defNumberVector" ) != std::string::npos );
+        CHECK( definitions.find( "name=\"main_timing\"" ) != std::string::npos );
+        CHECK( definitions.find( "perm=\"ro\"" ) != std::string::npos );
+
+        for( const auto *name : { "enabled", "generation", "dropped", "publishFailures", "queued" } )
+        {
+            CHECK( definitions.find( std::string( "name=\"" ) + name + "\"" ) != std::string::npos );
+        }
+    }
+    else
+    {
+        CHECK( definitions.empty() );
+    }
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::setupMainTimingINDI;
+    MagAOX::app::MagAOXApp<true>::handleGetProperties;
 #endif
     // clang-format on
 }
