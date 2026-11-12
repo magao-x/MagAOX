@@ -1,8 +1,9 @@
 /** \file loopTimingMonitor_test.cpp
- * \brief Offline configuration, device-gating and fgtimes integration tests.
+ * \brief Offline configuration, device-gating, delayed main batches and fgtimes integration tests.
  * \ingroup loopTimingMonitor_unit_test
  */
 #include "../../../tests/testXWC.hpp"
+#include "../../dmSyncopation/syncoMainTiming.hpp"
 #include "../loopTimingMonitor.hpp"
 
 namespace libXWCTest
@@ -73,11 +74,12 @@ int Harness::validate()
 
 int Harness::source( const std::string &device, const std::string &name, const std::string &value )
 {
-    pcf::IndiProperty property( name == "loop_state" ? pcf::IndiProperty::Switch : pcf::IndiProperty::Text );
+    const bool        switchProperty = name == "loop_state" || name == "enable";
+    pcf::IndiProperty property( switchProperty ? pcf::IndiProperty::Switch : pcf::IndiProperty::Text );
     property.setDevice( device );
     property.setName( name );
 
-    if( name == "loop_state" )
+    if( switchProperty )
     {
         property.add( pcf::IndiElement( "toggle" ) );
         property["toggle"].setSwitchState( value == "On" ? pcf::IndiElement::On : pcf::IndiElement::Off );
@@ -120,6 +122,157 @@ void Harness::population( int64_t baseNs )
         enqueue( true, frame + 1, base + int64_t( frame ) * 300000 );
         enqueue( false, frame + 2, base + int64_t( frame ) * 300000 + 100000 );
     }
+}
+
+/// Drive the real ordinary consumer with full-rate endpoints and the real delayed main capture helper.
+class BatchHarness : public Harness
+{
+  public:
+    /// Select one missing observation halfway through every one-second batch.
+    enum class Loss
+    {
+        none,
+        sdk,
+        label,
+        camera
+    };
+
+    /// Configure automatic monitoring without a polling thread or instrument connection.
+    explicit BatchHarness( int64_t baseNs /**< [in] Monotonic origin of the synthetic camera timeline. */ );
+
+    /// Enqueue two thousand cameras and eight thousand native endpoints, retaining main labels in the producer.
+    void captureBatch( Loss loss /**< [in] Optional single missing observation in this batch. */ );
+
+    /// Publish all pending producer mode/main records as one ordinary-thread burst.
+    void publishLabels();
+
+    /// Capture, publish and consume one complete one-second diagnostic batch.
+    void batch( Loss loss /**< [in] Optional single missing observation in this batch. */ );
+
+    /// Return a time after all endpoints in the captured batch.
+    int64_t now() const;
+
+    /// Return the genuine classification generation, including the real producer's loss-triggered resets.
+    uint64_t producerGeneration() const;
+
+    /// Return unmatched positive labels observed by the exact identity join.
+    uint64_t unmatched() const;
+
+    /// Return camera evidence not yet released to the temporal matcher.
+    size_t pendingCameras() const;
+
+    /// Return camera observations evicted by the independent pending-history capacity bound.
+    uint64_t pendingOverflow() const;
+
+  private:
+    MagAOX::app::synco::MainTiming m_producer;   ///< Real classification queue, drained only at the end of each batch.
+    int64_t                        m_baseNs;     ///< Deterministic MONOTONIC origin of this fixture.
+    uint64_t                       m_frame{ 0 }; ///< Continuous primary camera counter across batches.
+    uint64_t m_sdkSequence{ 0 }; ///< Ordered successful native observations, independent of combined counter.
+
+    /// Enqueue one complete native or classification record through the application's actual capture handoff.
+    void tagged( const MagAOX::dmTimingEvents::Record &record /**< [in] Immutable diagnostic observation. */ );
+};
+
+BatchHarness::BatchHarness( int64_t baseNs ) : m_baseNs( baseNs )
+{
+    m_syncoDevice = "batchSynco";
+    m_capacity    = 32768;
+    m_queue.configure( m_capacity );
+    m_producer.configure( m_capacity );
+    m_synco.configure( m_capacity, 2000000000 );
+    REQUIRE( m_monitor.configure( 3600, 2, m_capacity ) );
+    enable();
+    REQUIRE( source( m_syncoDevice, "enable", "On" ) == 0 );
+    consume( m_baseNs );
+}
+
+void BatchHarness::tagged( const MagAOX::dmTimingEvents::Record &record )
+{
+    Observation event;
+    event.tagged      = true;
+    event.event       = record;
+    event.incarnation = record.kind == MagAOX::dmTimingEvents::Kind::sdk ? 10 : 20;
+    event.gate        = m_gateGeneration.load();
+    event.epoch       = m_captureEpoch.load();
+    REQUIRE( m_queue.push( event ) );
+}
+
+void BatchHarness::captureBatch( Loss loss )
+{
+    for( uint64_t index = 1; index <= 2000; ++index )
+    {
+        ++m_frame;
+        const auto stamp      = m_baseNs + int64_t( m_frame - 1 ) * 500000;
+        const auto generation = m_producer.synchronize( true, 4, 1 );
+        const bool missing    = index == 1000;
+
+        if( !missing || loss != Loss::camera )
+        {
+            enqueue( true, m_frame, stamp );
+        }
+
+        for( uint64_t step = 0; step < 4; ++step )
+        {
+            MagAOX::dmTimingEvents::Record record;
+            const auto                     counter = 4 * ( m_frame - 1 ) + step + 1;
+            record.key                             = { 42, counter, 10, int64_t( counter ) };
+            record.startNs                         = stamp + 166000 + int64_t( step ) * 125000;
+
+            if( !missing || loss != Loss::sdk || step != 0 )
+            {
+                record.sequence = ++m_sdkSequence;
+                tagged( record );
+            }
+
+            if( step == 0 && ( !missing || loss != Loss::label ) )
+            {
+                m_producer.capture( record.key, 7, m_frame, generation );
+            }
+        }
+    }
+}
+
+void BatchHarness::publishLabels()
+{
+    MagAOX::dmTimingEvents::Record record;
+
+    while( m_producer.pop( record ) )
+    {
+        tagged( record );
+    }
+}
+
+void BatchHarness::batch( Loss loss )
+{
+    captureBatch( loss );
+    publishLabels();
+    consume( now() );
+}
+
+int64_t BatchHarness::now() const
+{
+    return m_baseNs + int64_t( m_frame ) * 500000 + 1000000;
+}
+
+uint64_t BatchHarness::producerGeneration() const
+{
+    return m_producer.generation();
+}
+
+uint64_t BatchHarness::unmatched() const
+{
+    return m_synco.quality().unmatched;
+}
+
+size_t BatchHarness::pendingCameras() const
+{
+    return m_pendingCameras.size();
+}
+
+uint64_t BatchHarness::pendingOverflow() const
+{
+    return m_pendingCameraOverflow;
 }
 /// \endcond
 
@@ -357,6 +510,179 @@ TEST_CASE( "loop timing serializes camera cadence SDK cadence and latency as fgt
 
     // clang-format off
 #ifdef LOOPTIMINGMONITOR_TEST_DOXYGEN_REF
+    MagAOX::app::loopTimingMonitor::timingValues;
+#endif
+    // clang-format on
+}
+
+/** \brief One-second classification bursts retain valid post-loss camera segments at two/four-step kilohertz rates.
+ * \ingroup loopTimingMonitor_unit_test
+ */
+TEST_CASE( "loop timing delayed main batches survive classification SDK and camera gaps", "[loopTimingMonitor][batch]" )
+{
+    BatchHarness app( 100000000000 );
+    auto         loss = BatchHarness::Loss::none;
+
+    SECTION( "continuous two kHz camera and eight kHz native submissions" )
+    {
+        loss = BatchHarness::Loss::none;
+    }
+
+    SECTION( "a missing successful main SDK record in every burst" )
+    {
+        loss = BatchHarness::Loss::sdk;
+    }
+
+    SECTION( "real producer generation resets after a missing classification in every burst" )
+    {
+        loss = BatchHarness::Loss::label;
+    }
+
+    SECTION( "one missing camera observation in every burst" )
+    {
+        loss = BatchHarness::Loss::camera;
+    }
+
+    for( unsigned second = 1; second <= 3; ++second )
+    {
+        app.batch( loss );
+        const auto &summary = app.m_monitor.summary();
+        REQUIRE( summary.cameraIntervals.valid );
+        REQUIRE( summary.sdkIntervals.valid );
+        REQUIRE( summary.latency.valid );
+        CHECK( summary.latency.count > 900 );
+        CHECK( summary.cameraIntervals.min == Approx( 500e-6 ) );
+        CHECK( summary.cameraIntervals.max == Approx( 500e-6 ) );
+        CHECK( summary.sdkIntervals.min == Approx( 500e-6 ) );
+        CHECK( summary.sdkIntervals.max == Approx( 500e-6 ) );
+        CHECK( summary.latency.min == Approx( 166e-6 ) );
+        CHECK( summary.latency.max == Approx( 166e-6 ) );
+        CHECK( summary.latency.stddev == Approx( 0 ).margin( 1e-15 ) );
+
+        if( loss == BatchHarness::Loss::label )
+        {
+            CHECK( app.producerGeneration() == second + 1 );
+        }
+        else
+        {
+            CHECK( app.producerGeneration() == 1 );
+        }
+
+        CHECK( app.unmatched() == ( loss == BatchHarness::Loss::sdk ? second : 0 ) );
+    }
+
+    // clang-format off
+#ifdef LOOPTIMINGMONITOR_TEST_DOXYGEN_REF
+    MagAOX::app::loopTimingMonitor::consume;
+    MagAOX::app::loopTimingMonitor::consumeMain;
+    MagAOX::app::synco::MainTiming::synchronize;
+    MagAOX::app::synco::MainTiming::capture;
+    MagAOX::app::synco::MainTiming::pop;
+#endif
+    // clang-format on
+}
+
+/** \brief Deferred camera evidence still expires and cannot cross a real gate or source invalidation.
+ * \ingroup loopTimingMonitor_unit_test
+ */
+TEST_CASE( "loop timing pending cameras obey hard invalidation and retention bounds", "[loopTimingMonitor][batch]" )
+{
+    BatchHarness app( 100000000000 );
+    app.captureBatch( BatchHarness::Loss::none );
+    app.consume( app.now() );
+    REQUIRE( app.pendingCameras() == 2000 );
+    REQUIRE( app.m_monitor.summary().latency.count == 0 );
+
+    SECTION( "camera source incarnation or clock epoch changes" )
+    {
+        ++app.m_captureEpoch;
+        app.consume( app.now() );
+    }
+
+    SECTION( "loop gate turns off and back on" )
+    {
+        REQUIRE( app.source( app.m_loopDevice, "loop_state", "Off" ) == 0 );
+        REQUIRE( app.source( app.m_loopDevice, "loop_state", "On" ) == 0 );
+        app.consume( app.now() );
+    }
+
+    SECTION( "subscribed synco mode changes and returns to the same value" )
+    {
+        REQUIRE( app.source( app.m_syncoDevice, "enable", "Off" ) == 0 );
+        REQUIRE( app.source( app.m_syncoDevice, "enable", "On" ) == 0 );
+        app.consume( app.now() );
+    }
+
+    SECTION( "classification stops beyond the statistics window" )
+    {
+        app.consume( app.now() + 2000000000 );
+    }
+
+    CHECK( app.pendingCameras() == 0 );
+    CHECK( app.m_monitor.summary().cameraIntervals.count == 0 );
+    CHECK( app.m_monitor.summary().sdkIntervals.count == 0 );
+    CHECK( app.m_monitor.summary().latency.count == 0 );
+
+    // clang-format off
+#ifdef LOOPTIMINGMONITOR_TEST_DOXYGEN_REF
+    MagAOX::app::loopTimingMonitor::consume;
+    MagAOX::app::loopTimingMonitor::setCallBack_source;
+#endif
+    // clang-format on
+}
+
+/** \brief Pending-camera overflow counts each evicted observation and retains a usable bounded suffix.
+ * \ingroup loopTimingMonitor_unit_test
+ */
+TEST_CASE( "loop timing recovers from bounded pending camera history", "[loopTimingMonitor][batch]" )
+{
+    BatchHarness app( 100000000000 );
+    app.m_capacity = 64;
+    app.captureBatch( BatchHarness::Loss::none );
+    app.consume( app.now() );
+    CHECK( app.pendingCameras() == 64 );
+    CHECK( app.pendingOverflow() == 1936 );
+    CHECK( app.m_monitor.summary().latency.count == 0 );
+
+    app.publishLabels();
+    app.consume( app.now() );
+    const auto &summary = app.m_monitor.summary();
+    REQUIRE( summary.latency.valid );
+    CHECK( summary.latency.count == 63 );
+    CHECK( summary.latency.min == Approx( 166e-6 ) );
+    CHECK( summary.latency.max == Approx( 166e-6 ) );
+    CHECK( summary.cameraIntervals.min == Approx( 500e-6 ) );
+    CHECK( summary.cameraIntervals.max == Approx( 500e-6 ) );
+    CHECK( app.pendingCameras() == 0 );
+    CHECK( app.pendingOverflow() == 1936 );
+
+    // clang-format off
+#ifdef LOOPTIMINGMONITOR_TEST_DOXYGEN_REF
+    MagAOX::app::loopTimingMonitor::consume;
+    MagAOX::app::loopTimingMonitor::consumeMain;
+#endif
+    // clang-format on
+}
+
+/** \brief A production-rate delayed batch with a real classification reset still exposes current fgtimes values.
+ * \ingroup loopTimingMonitor_unit_test
+ */
+TEST_CASE( "loop timing exports telemetry after a loss inside a delayed main batch", "[loopTimingMonitor][batch]" )
+{
+    BatchHarness app( Harness::monotonicNow() - 1010000000 );
+    app.batch( BatchHarness::Loss::label );
+    std::array<double, 6> values;
+    REQUIRE( app.timingValues( values ) );
+    CHECK( values[0] == Approx( 500e-6 ) );
+    CHECK( values[1] == Approx( 0 ).margin( 1e-15 ) );
+    CHECK( values[2] == Approx( 500e-6 ) );
+    CHECK( values[3] == Approx( 0 ).margin( 1e-15 ) );
+    CHECK( values[4] == Approx( 166e-6 ) );
+    CHECK( values[5] == Approx( 0 ).margin( 1e-15 ) );
+
+    // clang-format off
+#ifdef LOOPTIMINGMONITOR_TEST_DOXYGEN_REF
+    MagAOX::app::loopTimingMonitor::consume;
     MagAOX::app::loopTimingMonitor::timingValues;
 #endif
     // clang-format on

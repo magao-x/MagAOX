@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <functional>
 #include <stdexcept>
+#include <vector>
 
 namespace libXWCTest
 {
@@ -122,6 +123,8 @@ class SyncoSources
 
     bool m_enabled{ false }; ///< Mode frozen into each positively qualified main label.
 
+    bool m_holdMain{ false }; ///< Defer qualified-main publication while camera and SDK capture continue.
+
     /// Create private sources before the actual worker is started.
     explicit SyncoSources( size_t capacity = 128 /**< [in] Retained history records per publisher. */ );
 
@@ -129,7 +132,11 @@ class SyncoSources
     ~SyncoSources();
 
     /// Publish one primary camera/main pair plus optional auxiliary native entries.
-    bool frame( unsigned auxiliary /**< [in] Number of extra native commands lacking main labels. */ );
+    bool frame( unsigned auxiliary /**< [in] Number of extra native commands lacking main labels. */,
+                unsigned missed = 0 /**< [in] Camera publications skipped before this observed frame. */ );
+
+    /// Publish every held main in its original capture order without producing another camera or SDK event.
+    bool flushMain();
 
     /// Publish a native entry without a main label, including after a disable transition.
     bool auxiliary();
@@ -145,6 +152,8 @@ class SyncoSources
 
     uint64_t m_primary{ 0 }; ///< Consecutive genuine main cycles, independent of auxiliary commands.
 
+    uint64_t m_cameraCounter{ 0 }; ///< Camera counter, including deliberately unobserved publications.
+
     uint64_t m_combined{ 0 }; ///< Exact combined identity counter for every native command.
 
     uint64_t m_sdkSequence{ 0 }; ///< Native publisher capture sequence.
@@ -152,6 +161,9 @@ class SyncoSources
     uint64_t m_mainSequence{ 0 }; ///< Main/mode publisher capture sequence.
 
     int64_t m_lastStart{ 0 }; ///< Last native timestamp, including unclassified auxiliary commands.
+
+    std::vector<MagAOX::dmTimingEvents::Record>
+        m_pendingMain; ///< Immutable labels awaiting ordinary-thread publication.
 
     /// Publish one exact native endpoint and optionally its main classification.
     bool native( int64_t startNs /**< [in] Existing monotonic SDK endpoint. */,
@@ -200,13 +212,20 @@ bool SyncoSources::native( int64_t startNs, int64_t publicationNs, bool main )
         event.steps          = 4;
         event.enabled        = m_enabled;
         event.startNs        = 0;
+
+        if( m_holdMain )
+        {
+            m_pendingMain.push_back( event );
+            return true;
+        }
+
         return m_main.publish( event );
     }
 
     return true;
 }
 
-bool SyncoSources::frame( unsigned auxiliary )
+bool SyncoSources::frame( unsigned auxiliary, unsigned missed )
 {
     timespec before{}, external{}, after{};
     int64_t  beforeNs = 0;
@@ -239,12 +258,14 @@ bool SyncoSources::frame( unsigned auxiliary )
     const auto publication = int64_t( external.tv_sec ) * 1000000000 + external.tv_nsec;
     const auto acquisition = publication - 1000000;
     const auto start       = beforeNs + ( afterNs - beforeNs ) / 2 - 900000;
+    ++m_primary;
+    m_cameraCounter += 1 + missed;
     __atomic_store_n( &m_camera.md->write, uint8_t( 1 ), __ATOMIC_SEQ_CST );
     __atomic_store_n( &m_camera.md->atime.tv_sec, time_t( acquisition / 1000000000 ), __ATOMIC_RELEASE );
     __atomic_store_n( &m_camera.md->atime.tv_nsec, long( acquisition % 1000000000 ), __ATOMIC_RELEASE );
     __atomic_store_n( &m_camera.md->writetime.tv_sec, external.tv_sec, __ATOMIC_RELEASE );
     __atomic_store_n( &m_camera.md->writetime.tv_nsec, external.tv_nsec, __ATOMIC_RELEASE );
-    __atomic_store_n( &m_camera.md->cnt0, ++m_primary, __ATOMIC_RELEASE );
+    __atomic_store_n( &m_camera.md->cnt0, m_cameraCounter, __ATOMIC_RELEASE );
     __atomic_store_n( &m_camera.md->write, uint8_t( 0 ), __ATOMIC_RELEASE );
 
     if( !native( start, publication, true ) )
@@ -260,6 +281,21 @@ bool SyncoSources::frame( unsigned auxiliary )
         }
     }
 
+    return true;
+}
+
+bool SyncoSources::flushMain()
+{
+    for( const auto &record : m_pendingMain )
+    {
+        if( !m_main.publish( record ) )
+        {
+            return false;
+        }
+    }
+
+    m_pendingMain.clear();
+    m_holdMain = false;
     return true;
 }
 
@@ -301,8 +337,10 @@ class SyncoHarness : public MagAOX::app::loopTimingMonitor
 {
   public:
     using loopTimingMonitor::consume;
+    using loopTimingMonitor::m_cameraMissed;
     using loopTimingMonitor::m_captureEpoch;
     using loopTimingMonitor::m_gateEnabled;
+    using loopTimingMonitor::m_mainMissed;
     using loopTimingMonitor::m_monitor;
     using loopTimingMonitor::m_queue;
     using loopTimingMonitor::m_sdkMissed;
@@ -543,6 +581,81 @@ TEST_CASE( "loop timing automatic worker clears timing after source restart and 
     REQUIRE( app.collect( sources, 0, values ) );
     CHECK( values[2] == Approx( values[0] ).epsilon( 0.2 ) );
     CHECK( values[4] == Approx( 100e-6 ).margin( 20e-6 ) );
+    app.stopWorker();
+    REQUIRE_FALSE( app.m_workerFailed.load() );
+}
+
+/** \brief A camera gap preserves native history until delayed main labels permit safe timing recovery.
+ * \ingroup loopTimingMonitor_unit_test
+ */
+TEST_CASE( "loop timing automatic worker retains delayed main history across a camera gap",
+           "[loopTimingMonitor][integration][synco]" )
+{
+    // clang-format off
+    #ifdef LOOPTIMINGMONITOR_TEST_DOXYGEN_REF
+    MagAOX::app::loopTimingMonitor::threadExec();
+    MagAOX::app::loopTimingMonitor::consume( 1 );
+    MagAOX::app::loopTimingMonitor::timingValues( {} );
+    #endif
+    // clang-format on
+    SyncoSources sources;
+    SyncoHarness app( sources );
+    app.enable();
+    app.synco( true );
+    app.start();
+    REQUIRE( waitSynco(
+        [&]()
+        {
+            return app.m_streamsReady.load();
+        } ) );
+    REQUIRE( sources.mode( true ) );
+    REQUIRE( waitSynco(
+        [&]()
+        {
+            return app.m_queue.queued() > 0;
+        } ) );
+    app.consume( app.monotonicNow() );
+    REQUIRE( app.m_synco.known() );
+    REQUIRE( app.m_synco.enabled() );
+    const auto epoch   = app.m_captureEpoch.load();
+    sources.m_holdMain = true;
+    std::array<double, 6> values{};
+
+    for( unsigned frame = 0; frame < 9; ++frame )
+    {
+        std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+        REQUIRE( sources.frame( 3, frame == 3 ? 2 : 0 ) );
+        REQUIRE( waitSynco(
+            [&]()
+            {
+                return app.m_queue.queued() >= 5 || app.m_captureEpoch.load() != epoch;
+            } ) );
+        REQUIRE( app.m_captureEpoch.load() == epoch );
+        app.consume( app.monotonicNow() );
+        REQUIRE_FALSE( app.timingValues( values ) );
+        CHECK( app.m_cameraMissed.load() == ( frame < 3 ? 0 : 2 ) );
+        CHECK( app.m_streamsReady.load() );
+    }
+
+    REQUIRE( sources.flushMain() );
+    REQUIRE( waitSynco(
+        [&]()
+        {
+            return app.m_queue.queued() >= 9 || app.m_captureEpoch.load() != epoch;
+        } ) );
+    REQUIRE( app.m_captureEpoch.load() == epoch );
+    app.consume( app.monotonicNow() );
+    REQUIRE( app.timingValues( values ) );
+    CHECK( app.m_monitor.summary().latency.count >= 3 );
+    CHECK( values[0] > 0.001 );
+    CHECK( values[2] == Approx( values[0] ).epsilon( 0.2 ) );
+    CHECK( values[4] == Approx( 100e-6 ).margin( 20e-6 ) );
+    CHECK( app.m_cameraMissed.load() == 2 );
+    CHECK( app.m_sdkMissed.load() == 0 );
+    CHECK( app.m_mainMissed.load() == 0 );
+    CHECK( app.m_synco.quality().sdkMissed == 0 );
+    CHECK( app.m_synco.quality().mainMissed == 0 );
+    CHECK( app.m_synco.quality().unmatched == 0 );
     app.stopWorker();
     REQUIRE_FALSE( app.m_workerFailed.load() );
 }

@@ -7,6 +7,7 @@
 #include <array>
 #include <atomic>
 #include <cmath>
+#include <deque>
 #include <limits>
 #include <mutex>
 #include <thread>
@@ -136,6 +137,14 @@ class loopTimingMonitor : public MagAOXApp<>, public dev::telemeter<loopTimingMo
 
     loopTiming::Synco m_synco; ///< Ordinary-consumer exact main/SDK join in automatic mode.
 
+    std::deque<Observation> m_pendingCameras; ///< Bounded camera history awaiting delayed qualified main endpoints.
+
+    int64_t m_cameraBaselineNs{ 0 }; ///< First qualified SDK start in the current join epoch; excludes older cameras.
+
+    uint64_t m_pendingCameraExpired{ 0 }; ///< Camera observations expired before a qualified main arrived.
+
+    uint64_t m_pendingCameraOverflow{ 0 }; ///< Oldest pending camera observations evicted at capacity.
+
     uint64_t m_summarySyncoEpoch{ 0 }; ///< Join epoch represented by retained timing populations.
 
     uint64_t m_syncoStateGeneration{ 0 }; ///< Changes on actual received synco state transitions, under m_gateMutex.
@@ -224,6 +233,9 @@ class loopTimingMonitor : public MagAOXApp<>, public dev::telemeter<loopTimingMo
 
     /// Invalidate timing populations when a command-identity join enters another epoch.
     void syncJoinEpoch();
+
+    /// Feed only camera evidence through this main's event time, preserving later cameras across join resets.
+    void consumeMain( const loopTiming::Synco::Match &match /**< [in] Positive main/SDK identity match. */ );
 
     /// Copy all six fgtimes values only when current evidence still qualifies the summary.
     bool timingValues( std::array<double, 6> &values /**< [out] Cadence/cadence/latency mean-deviation pairs. */ );
@@ -565,6 +577,8 @@ inline void loopTimingMonitor::consume( int64_t nowNs )
     {
         m_monitor.reset();
         m_synco.reset();
+        m_pendingCameras.clear();
+        m_cameraBaselineNs  = 0;
         m_summarySyncoEpoch = m_synco.epoch();
         m_summaryGate       = generation;
         m_summaryEpoch      = epoch;
@@ -572,6 +586,13 @@ inline void loopTimingMonitor::consume( int64_t nowNs )
 
     Observation observation;
     const auto  queued = m_queue.queued();
+    const auto  cutoff = nowNs - int64_t( m_windowSec * 1e9 );
+
+    while( !m_pendingCameras.empty() && m_pendingCameras.front().upperNs <= cutoff )
+    {
+        m_pendingCameras.pop_front();
+        ++m_pendingCameraExpired;
+    }
 
     for( size_t index = 0; index < queued && m_queue.pop( observation ); ++index )
     {
@@ -589,15 +610,35 @@ inline void loopTimingMonitor::consume( int64_t nowNs )
             while( m_synco.pop( match, nowNs ) )
             {
                 syncJoinEpoch();
-                m_monitor.sdk( match.counter, match.startNs );
+                consumeMain( match );
             }
 
             syncJoinEpoch();
         }
         else if( observation.camera )
         {
-            m_monitor.camera(
-                observation.counter, observation.stampNs, observation.lowerNs, observation.upperNs, observation.rawNs );
+            if( m_syncoDevice.empty() )
+            {
+                m_monitor.camera( observation.counter,
+                                  observation.stampNs,
+                                  observation.lowerNs,
+                                  observation.upperNs,
+                                  observation.rawNs );
+            }
+            else if( observation.upperNs <= cutoff )
+            {
+                ++m_pendingCameraExpired;
+            }
+            else
+            {
+                if( m_pendingCameras.size() == m_capacity )
+                {
+                    m_pendingCameras.pop_front();
+                    ++m_pendingCameraOverflow;
+                }
+
+                m_pendingCameras.push_back( observation );
+            }
         }
         else
         {
@@ -612,7 +653,7 @@ inline void loopTimingMonitor::consume( int64_t nowNs )
         while( m_synco.pop( match, nowNs ) )
         {
             syncJoinEpoch();
-            m_monitor.sdk( match.counter, match.startNs );
+            consumeMain( match );
         }
 
         syncJoinEpoch();
@@ -627,8 +668,30 @@ inline void loopTimingMonitor::syncJoinEpoch()
     if( m_summarySyncoEpoch != m_synco.epoch() )
     {
         m_monitor.reset();
+        m_cameraBaselineNs  = 0;
         m_summarySyncoEpoch = m_synco.epoch();
     }
+}
+
+inline void loopTimingMonitor::consumeMain( const loopTiming::Synco::Match &match )
+{
+    if( !m_cameraBaselineNs )
+    {
+        m_cameraBaselineNs = match.startNs;
+    }
+
+    while( !m_pendingCameras.empty() && m_pendingCameras.front().stampNs <= match.startNs )
+    {
+        const auto camera = m_pendingCameras.front();
+        m_pendingCameras.pop_front();
+
+        if( camera.lowerNs > m_cameraBaselineNs )
+        {
+            m_monitor.camera( camera.counter, camera.stampNs, camera.lowerNs, camera.upperNs, camera.rawNs );
+        }
+    }
+
+    m_monitor.sdk( match.counter, match.startNs );
 }
 
 inline bool loopTimingMonitor::timingValues( std::array<double, 6> &values )
@@ -741,11 +804,11 @@ inline int loopTimingMonitor::appLogic()
                                               double( m_sdkMissed.load() + joinQuality.sdkMissed ),
                                               double( quality.invalid + m_invalidSnapshots.load() ),
                                               double( quality.ambiguous ),
-                                              double( quality.unmatched ),
+                                              double( quality.unmatched + m_pendingCameraExpired ),
                                               double( m_queue.dropped() ),
                                               double( m_clockRejected.load() ),
                                               double( quality.counterRegressions + m_counterRegressions.load() ),
-                                              double( quality.overflow ),
+                                              double( quality.overflow + m_pendingCameraOverflow ),
                                               double( m_summaryEpoch ),
                                               double( m_summaryGate ),
                                               double( m_synco.generation() ),
@@ -926,11 +989,14 @@ inline void loopTimingMonitor::threadExec() noexcept
                     auto &missed = source == 0 ? m_cameraMissed : m_sdkMissed;
                     missed.fetch_add( snapshot.missed );
 
-                    reset = true;
-                    break;
+                    if( !automatic )
+                    {
+                        reset = true;
+                        break;
+                    }
                 }
 
-                if( result != loopTiming::Stream::Result::updated )
+                if( result != loopTiming::Stream::Result::updated && result != loopTiming::Stream::Result::gap )
                 {
                     if( result == loopTiming::Stream::Result::reset )
                     {
@@ -956,11 +1022,19 @@ inline void loopTimingMonitor::threadExec() noexcept
                     const int  rv         = clock_gettime( externalClock, &external );
                     const auto after      = monotonicNow();
                     const auto externalNs = rv == 0 ? int64_t( external.tv_sec ) * 1000000000 + external.tv_nsec : 0;
+                    const auto clockEpoch = clock.status().epoch;
 
                     if( !clock.sample( before, externalNs, after ) ||
                         !( observation.stampNs = clock.map( snapshot.atimeNs ) ) )
                     {
                         ++m_clockRejected;
+
+                        if( automatic && clock.status().epoch == clockEpoch )
+                        {
+                            // Missing camera evidence does not invalidate the independent SDK/main histories.
+                            continue;
+                        }
+
                         reset = true;
                         break;
                     }

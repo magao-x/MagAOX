@@ -797,3 +797,74 @@ Repair files: `apps/dmSyncopation/dmSyncopation.hpp`,
 `apps/dmSyncopation/tests/dmSyncopationProduction_test.hpp`,
 `apps/dmSyncopation/dmtweeter_synco_production.conf`,
 `apps/dmSyncopation/doc/dmSyncopation.md`, and this plan.
+
+
+### Batched main-label telemetry recovery (2026-11-12)
+
+The operator reports normal loop timing with synco Off, but no loop-timing
+telemetry with synco On. Syncopation itself reaches 8 kHz with no loop impact.
+Work is confined to `/home/jrmales/Source/MagAOX` on workstation `mx11`.
+Runtime state/configuration readbacks were requested from the operator; no
+instrument connection, query or control action was performed.
+
+A deterministic reproduction using the real `synco::MainTiming` producer and
+monitor join at 2 kHz camera / 8 kHz SDK rates exposes a monitor defect. Production
+main labels arrive in ordinary app-logic batches, commonly once per second.
+The monitor previously ingested a full second of camera observations first.
+One missing main classification causes a producer generation change; one missing
+native result likewise breaks the join. Either reset discarded all already
+queued camera evidence, including later cameras needed by remaining valid main
+records. Every summary could therefore be unavailable despite hundreds of valid
+matches in each batch. The original synthetic worker test published labels
+immediately and consumed every few milliseconds, hiding this arrival-order case.
+
+Retain camera observations in a separate bounded ordinary-consumer buffer in
+automatic mode. Release them to the matcher only through each exact matched
+SDK endpoint's event time. All existing join epoch changes still clear timing
+populations; the first qualified SDK of a new epoch excludes any camera whose
+uncertainty interval starts at or before that SDK baseline. Later buffered
+cameras remain available to reconstruct valid populations within the same batch.
+Gate/capture/source/clock continuity invalidation still clears the whole buffer.
+Capacity and age limits remain explicit and contribute to existing quality
+counters. Standalone routing is unchanged.
+
+A coherent camera counter gap now reaches the automatic matcher as a gap rather
+than forcing both independent event histories to detach/rebaseline. Likewise a
+wide-bracket or other camera mapping rejection that leaves the publication-clock
+epoch unchanged skips that camera only. Real clock discontinuities and invalid
+clock captures still change epoch and force full reset. Missing-camera intervals
+remain excluded by the existing matcher; SDK/auxiliary admission rules are
+unchanged. No dmSyncopation scheduling, main qualification, DM command handling,
+SDK publisher or INDI subscription changes are needed.
+
+New regressions exercise actual application consumption with the real main-label
+producer, one-second 2/8 kHz batches, omitted classifications, missing native
+results, camera gaps, mode/gate/source changes and expiry. An actual polling-worker
+test withholds main labels across a camera counter jump, then requires valid
+timing after their release without additional recovery frames. Verification:
+
+- `loopTimingMonitor` application builds and links successfully.
+- Application tests: 208,552 assertions / 9 cases, including all new batched
+  producer, telemetry, retention and capacity regressions.
+- Automatic polling-worker integration: 1,191 assertions / 3 cases.
+- Existing standalone polling integration: 50 assertions / 2 cases.
+- Passive INDI subscriptions: 73 assertions / 1 case; no refresh polling added.
+- Changed C++ files pass clang-format with required mutex-comment restoration,
+  file documentation checks and `git diff --check`.
+
+Before the fix, the deterministic real-producer reproduction retained zero
+latency and camera-cadence samples after every one-second batch containing one
+classification loss. After the fix, the corresponding app regression retains
+more than 900 correctly qualified 166 us latencies per summary, with 500 us
+camera and main-SDK cadence; crossing auxiliary writes remain excluded. A
+separate capacity test retains exactly 64 of 2,000 pending cameras, counts all
+1,936 evictions, and recovers 63 correct latencies when labels arrive.
+
+Only `loopTimingMonitor` needs rebuilding for this correction. RTC confirmation
+remains an operator action; runtime readbacks were not available during the
+local reproduction. Changes are limited to `apps/loopTimingMonitor/loopTimingMonitor.hpp`,
+`apps/loopTimingMonitor/tests/loopTimingMonitor_test.cpp`,
+`apps/loopTimingMonitor/tests/loopTimingMonitor_synco_test.cpp`,
+`apps/loopTimingMonitor/README.md`, and this plan. The operator subsequently
+authorized committing and pushing this correction on 2026-11-12, with the
+implementation/tests/plan and user documentation in separate commits.
