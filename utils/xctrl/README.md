@@ -83,7 +83,9 @@ changes them for that app, both under `[systemd]`, with the same keys:
 | `timeoutStopSec`        | `TimeoutStopSec=`        | 30       | time allowed to stop before SIGKILL                      |
 | `killSignal`            | `KillSignal=`            | SIGTERM  | signal that asks the app to stop                         |
 
-Times are seconds, or `infinity`. The apps accept these keys and ignore them; only `xctrl` reads them. The
+Times are seconds, or `infinity`. The apps ignore the whole `[systemd]` section; only `xctrl` reads it. `register` reports an
+unknown or misspelled key, or a bad value, as an error on the console and does not (re)register that app; `start`,
+`startup` and `restart` warn and start it with its last good settings. The
 `[resurrectee]` section is no longer used: `register` reports it as an error, and its `timeout = RUN,STARTUP` becomes
 `watchdogSec = RUN` and `timeoutStartSec = STARTUP`.
 

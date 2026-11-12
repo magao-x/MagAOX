@@ -32,18 +32,6 @@ from ..constants import DEFAULT_PREFIX
 # n.b. replaced with logger scoped to device name during device init
 log = logging.getLogger()
 
-@xconf.config
-class SystemdConfig:
-    '''systemd service settings for this app, read by xctrl register, not by the app'''
-    restart: typing.Optional[str] = xconf.field(default=None, help="Restart= policy, e.g. always or on-failure")
-    restartSec: typing.Optional[float] = xconf.field(default=None, help="RestartSec=, seconds before restarting")
-    startLimitBurst: typing.Optional[int] = xconf.field(default=None, help="StartLimitBurst=, starts allowed per interval")
-    startLimitIntervalSec: typing.Optional[float] = xconf.field(default=None, help="StartLimitIntervalSec=, seconds")
-    watchdogSec: typing.Optional[float] = xconf.field(default=None, help="WatchdogSec=, seconds without a watchdog notification before systemd restarts the app")
-    timeoutStartSec: typing.Optional[float] = xconf.field(default=None, help="TimeoutStartSec=, seconds allowed from start to READY=1")
-    timeoutStopSec: typing.Optional[float] = xconf.field(default=None, help="TimeoutStopSec=, seconds before SIGKILL on stop")
-    killSignal: typing.Optional[str] = xconf.field(default=None, help="KillSignal=, e.g. SIGTERM or SIGINT")
-
 
 def sd_notify(state : str) -> bool:
     '''Send a state notification such as "READY=1" or "WATCHDOG=1" to systemd, as sd_notify(3)
@@ -65,7 +53,6 @@ def sd_notify(state : str) -> bool:
 class BaseConfig:
     common_path_prefix : pathlib.Path = xconf.field(default=DEFAULT_PREFIX, help="Prefix for all instrument data and config directories")
     sleep_interval_sec : float = xconf.field(default=1.0, help="Main loop logic will be run every `sleep_interval_sec` seconds")
-    systemd: SystemdConfig = xconf.field(default_factory=SystemdConfig)
 
     @staticmethod
     def _deep_update(base: dict, override: dict):
@@ -126,6 +113,8 @@ class BaseConfig:
                     old_val = raw_config[key]
                     log.info(f"Using provided value {value} for {key} which was set to {old_val} in the loaded config files")
             cls._deep_update(raw_config, config_dict)
+        # [systemd] is for xctrl, which checks it; the app ignores the whole section
+        raw_config.pop("systemd", None)
         try:
             instance = xconf.from_dict(cls, raw_config)
         except (xconf.UnexpectedDataError, xconf.MissingValueError) as e:

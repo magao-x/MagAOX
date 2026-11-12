@@ -1946,6 +1946,10 @@ inline int xCtrl::refreshApps( const std::vector<appEntry> &apps )
 
     std::vector<std::string> errors, names;
     directiveMap             role = roleDirectives( errors );
+    for( const auto &e : errors )
+    {
+        std::cerr << m_prog << ": warning: " << e << "\n";
+    }
     for( const auto &a : apps )
     {
         names.push_back( a.name );

@@ -262,12 +262,6 @@ class MagAOXApp : public application
      */
     virtual void setupBasicConfig();
 
-    /// The `[systemd]` configuration keys, accepted by every app but read only by xctrl register
-    /**
-     * \returns the key names, without the `systemd.` section prefix
-     */
-    static const std::vector<std::string> &systemdConfigKeys();
-
     /// The basic MagAO-X configuration processing method.  Should not normally be overridden.
     /** This method processes the standard MagAO-X key=value pairs.
      *
@@ -1612,20 +1606,6 @@ void MagAOXApp<_useINDI>::setDefaults( int argc,
 }
 
 template <bool _useINDI>
-const std::vector<std::string> &MagAOXApp<_useINDI>::systemdConfigKeys()
-{
-    static const std::vector<std::string> keys = { "restart",
-                                                   "restartSec",
-                                                   "startLimitBurst",
-                                                   "startLimitIntervalSec",
-                                                   "watchdogSec",
-                                                   "timeoutStartSec",
-                                                   "timeoutStopSec",
-                                                   "killSignal" };
-    return keys;
-}
-
-template <bool _useINDI>
 void MagAOXApp<_useINDI>::setupBasicConfig() // virtual
 {
     // Validate config
@@ -1678,20 +1658,6 @@ void MagAOXApp<_useINDI>::setupBasicConfig() // virtual
                 "double",
                 "Seconds between [alive name pid] announcements on the INDI server control FIFO, so a restarted"
                 " indiserver registers this driver again.  0 disables them.  Default is 5." );
-
-    // Settings for running this app as a systemd service, read by xctrl, not by the app
-    for( const auto &key : systemdConfigKeys() )
-    {
-        config.add( "systemd." + key,
-                    "",
-                    "",
-                    argType::Required,
-                    "systemd",
-                    key,
-                    false,
-                    "string",
-                    "systemd service setting for this app, applied by xctrl register" );
-    }
 
     // Logger Stuff
     m_log.setupConfig( config );
@@ -1768,13 +1734,6 @@ void MagAOXApp<_useINDI>::loadBasicConfig() // virtual
 
     config( m_indiserver_ctrl_fifo, "indiserver_ctrl_fifo" );
     config( m_indiAnnounceInterval, "indiserver_announce_interval" );
-
-    // the [systemd] settings are for xctrl; reading them marks them used, so checkConfig() does not warn
-    for( const auto &key : systemdConfigKeys() )
-    {
-        std::string unused;
-        config( unused, "systemd." + key );
-    }
 
     if( !ig && m_gitAlert )
     {
@@ -1870,7 +1829,8 @@ void MagAOXApp<_useINDI>::checkConfig() // virtual
     {
         for( auto it = config.m_unusedConfigs.begin(); it != config.m_unusedConfigs.end(); ++it )
         {
-            if( it->second.used == true )
+            // [systemd] is for xctrl, which checks it; the app ignores the whole section
+            if( it->second.used == true || it->second.section == "systemd" )
             {
                 continue;
             }
