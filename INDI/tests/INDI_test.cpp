@@ -199,3 +199,60 @@ SCENARIO( "IndiXmlParser escapes special characters in attributes", "[IndiXmlPar
 }
 
 } //namespace IndiXmlParser_test
+
+namespace IndiElement_test
+{
+
+/// IndiElement writes bools as 1/0, so they are valid INDI numbers, and reads both 1/0 and true/false.
+SCENARIO( "IndiElement bool values are numeric and backwards compatible", "[IndiElement]" )
+{
+   GIVEN( "bool values written through each setter" )
+   {
+      pcf::IndiElement elSet( "e" );
+      elSet.set( true );
+
+      pcf::IndiElement elAssign( "e" );
+      elAssign = false;
+
+      pcf::IndiElement elCtor( "e", true );
+
+      THEN( "they are written as 1 and 0" )
+      {
+         REQUIRE( elSet.getValue() == "1" );
+         REQUIRE( elAssign.getValue() == "0" );
+         REQUIRE( elCtor.getValue() == "1" );
+         REQUIRE( elSet.get<bool>() == true );
+         REQUIRE( elAssign.get<bool>() == false );
+      }
+   }
+
+   GIVEN( "element strings from new and old writers" )
+   {
+      THEN( "get<bool> reads true/false, 1/0 and other numbers" )
+      {
+         REQUIRE( pcf::IndiElement( "e", std::string( "true" ) ).get<bool>() == true );
+         REQUIRE( pcf::IndiElement( "e", std::string( "false" ) ).getValue<bool>() == false );
+         REQUIRE( pcf::IndiElement( "e", std::string( "1" ) ).get<bool>() == true );
+         REQUIRE( pcf::IndiElement( "e", std::string( "0" ) ).getValue<bool>() == false );
+         REQUIRE( pcf::IndiElement( "e", std::string( "2.5" ) ).get<bool>() == true );
+         REQUIRE( pcf::IndiElement( "e", std::string( "0.0" ) ).get<bool>() == false );
+         REQUIRE( pcf::IndiElement( "e", std::string( "junk" ) ).get<bool>() == false );
+      }
+   }
+
+   GIVEN( "non-bool values" )
+   {
+      pcf::IndiElement el( "e" );
+      el = 1.0 / 3.0;
+
+      THEN( "formatting is unchanged" )
+      {
+         REQUIRE( el.getValue() == pcf::formatIndiValue( 1.0 / 3.0 ) );
+         REQUIRE( el.getValue() == "0.333333333333333" );
+         REQUIRE( el.get<double>() == Approx( 1.0 / 3.0 ) );
+         REQUIRE( pcf::formatIndiValue( 42 ) == "42" );
+      }
+   }
+}
+
+} // namespace IndiElement_test
