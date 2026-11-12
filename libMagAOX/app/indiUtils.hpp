@@ -140,7 +140,9 @@ void updateIfChanged( pcf::IndiProperty &p, ///< [in/out] The property containin
                       pcf::IndiProperty::PropertyStateType newState = pcf::IndiProperty::Ok )
 {
     if( !indiDriver )
+    {
         return;
+    }
 
     size_t n = 0; // loop index outside so we can use it for error reporting.
 
@@ -151,13 +153,17 @@ void updateIfChanged( pcf::IndiProperty &p, ///< [in/out] The property containin
         pcf::IndiProperty::PropertyStateType oldState = p.getState();
 
         if( oldState != newState )
+        {
             changed = true;
+        }
 
         for( n = 0; n < els.size() && changed != true; ++n )
         {
             // compare in string space, formatted as IndiElement does
             if( p[els[n]].getValue() != pcf::formatIndiValue( newVals[n] ) )
+            {
                 changed = true;
+            }
         }
 
         // and if there are changes, we send an update
@@ -206,7 +212,9 @@ void updatesIfChanged( pcf::IndiProperty    &p,   ///< [in/out] The property con
                        pcf::IndiProperty::PropertyStateType newState = pcf::IndiProperty::Ok )
 {
     if( !indiDriver )
+    {
         return;
+    }
 
     size_t n = 0; // loop index outside so we can use it for error reporting.
 
@@ -217,13 +225,17 @@ void updatesIfChanged( pcf::IndiProperty    &p,   ///< [in/out] The property con
         pcf::IndiProperty::PropertyStateType oldState = p.getState();
 
         if( oldState != newState )
+        {
             changed = true;
+        }
 
         for( n = 0; n < els.size() && changed != true; ++n )
         {
             // compare in string space, formatted as IndiElement does
             if( p[els[n]].getValue() != pcf::formatIndiValue( newVals[n] ) )
+            {
                 changed = true;
+            }
         }
 
         // and if there are changes, we send an update
@@ -348,7 +360,9 @@ void updateSelectionSwitchIfChanged(
     pcf::IndiProperty::PropertyStateType newState = pcf::IndiProperty::Ok )
 {
     if( !indiDriver )
+    {
         return;
+    }
 
     if( !p.find( el ) )
     {
