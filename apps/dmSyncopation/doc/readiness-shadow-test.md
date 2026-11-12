@@ -12,8 +12,12 @@ preparation, SDK service and three-credit post accounting.
 
 Rebuild/install **dmSyncopation and logdump**. The BMC controller publisher is
 unchanged; retain both `dmtweeter_read_done` and `dmtweeter_done`, the SDK worker
-on spare56, and the release observer at FIFO30 on spare57. Keep operational
-synco **Off**, RTC latency tuning On, and camera/loop settings unchanged.
+on `dmtweeter-sdk` / CPU56, and the release observer at FIFO30 on
+`dmtweeter-synco-release` / CPU57. Historical captures used `spare56` and
+`spare57` for those CPUs. Complete the
+[worker map migration](../../bmcCtrl/doc/sdk-worker.md#configuration) before
+selecting `dmtweeter-sdk`: the old map assigns that name to CPU42. Keep
+operational synco **Off**, RTC latency tuning On, and camera/loop settings unchanged.
 
 Merge the additive
 [`dmtweeter_synco_6khz_shadow.conf`](../dmtweeter_synco_6khz_shadow.conf) into the

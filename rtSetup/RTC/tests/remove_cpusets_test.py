@@ -120,6 +120,18 @@ class CleanupTest(unittest.TestCase):
                     cleanup.removal_plan(self.mountpoint, {"camwfs"},
                                          [(self.mountpoint, root, filesystem, options)])
 
+    def test_sdk_reassignment_removes_previous_names(self):
+        """Recognize both the retained SDK name and retired CPU56 reserve."""
+        sdk = self.group("dmtweeter-sdk")
+        spare = self.group("spare56")
+        (sdk / "cpuset.cpus").write_text("42\n")
+        (spare / "cpuset.cpus").write_text("56\n")
+        output, removals = self.run_main(["--apply"])
+        self.assertEqual(removals.call_args_list, [mock.call(sdk), mock.call(spare)])
+        self.assertIn("Removed 2 cpuset directories", output)
+        self.assertEqual((self.mountpoint / "tasks").read_text(), "1\n")
+        self.assertEqual((self.mountpoint / "system/tasks").read_text(), "2\n")
+
     def test_new_tasks_during_apply_stop_further_removal(self):
         """Recheck a parent after its child is removed to catch a restarted thread."""
         parent = self.group("camwfs")
@@ -173,6 +185,7 @@ class CleanupTest(unittest.TestCase):
         setup.write_text('mkdir -p $cpusetMount/system\nmkdir -p "$cpusetMount/new-name"\n')
         names = cleanup.allowed_names(setup)
         self.assertIn("camacq", names)
+        self.assertIn("spare56", names)
         self.assertIn("new-name", names)
         self.assertNotIn("system", names)
         setup.write_text('mkdir -p $cpusetMount/system\nmkdir -p "$cpusetMount/$name"\n')

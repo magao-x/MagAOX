@@ -761,3 +761,39 @@ requires separate classification qualification.
 - `libMagAOX/app/dev/tests/dmTimingEventStream_test.cpp`
 - `libMagAOX/common/dmTimingEvents.hpp`
 - `tests/tests.list`
+
+
+### Dev merge repair (2026-11-11)
+
+The in-progress merge of `dev` (`9327880b`) into this branch left malformed
+function boundaries in `dmSyncopation.hpp` and `dmSyncopationZeroTest.hpp`.
+Startup was accidentally placed inside the const `detailedTimingEnabled()` query,
+`configureDiagnostics()` was missing, `appLogic()` referenced an undeclared
+`detailed`, and the main-classification block lacked its closing brace.
+
+Restore dev's separate diagnostic query/allocation/startup functions and its
+conditional ordinary-loop profiling. Allocate the explicitly configured main
+export independently of `diagnostics.windowSec`. Qualify main identities when
+either detailed diagnostics or the main export requires them, but retain dev's
+minimal-mode suppression of optional timing/phase/event populations. Keep the
+fixed production copy-budget changes and reader-release/clock checks intact.
+Consolidate the merged example's duplicate `[diagnostics]` sections and document
+that `mainTimingStream` works with `windowSec=0`.
+
+Extended the production-path regression for main export with minimal and detailed
+diagnostics and one/four steps, including actual primary receipt handling. The
+normal application build and full scheduler suite pass on `mx11` using private
+fixture streams; no instrument actions. The user's staged merge is unchanged;
+these repairs remain unstaged in the working tree for review.
+
+Validation: All tests passed (7059674 assertions in 160 test cases)
+The test binary was rebuilt explicitly to include all merged headers. Formatting,
+file documentation and `git diff --check` pass. Build and test logs:
+`/tmp/dm-synco-merge-app-build.log`, `/tmp/dm-synco-merge-test-build.log`, and
+`/tmp/dm-synco-merge-suite.log`.
+
+Repair files: `apps/dmSyncopation/dmSyncopation.hpp`,
+`apps/dmSyncopation/dmSyncopationZeroTest.hpp`,
+`apps/dmSyncopation/tests/dmSyncopationProduction_test.hpp`,
+`apps/dmSyncopation/dmtweeter_synco_production.conf`,
+`apps/dmSyncopation/doc/dmSyncopation.md`, and this plan.

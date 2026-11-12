@@ -10,6 +10,19 @@ The finite constant-zero trials achieved every post-startup auxiliary slot in
 a 120-second 8 kHz run. Changing nonzero inputs and the selected multi-producer
 configuration still require operator qualification.
 
+Production defaults to minimal diagnostics (`diagnostics.windowSec=0`): the
+required publication clock, reader-release readiness, scheduler guards and
+aggregate status remain active, while optional timing observers and per-event
+capture are disabled. Set `diagnostics.windowSec=2` and restart for detailed
+diagnostics. Keep `diagnostics.maxEvents` positive because it also sizes the
+required production reader-release queue. See the
+[production configuration](production-providers.md#configuration) for details.
+In minimal mode, `zero_test.diagnosticsEnabled`, `zero_phase.enabled`,
+`zero_publication.enabled` and `logic_timing.enabled` report zero. Diagnostic
+quality `enabled` fields describe collectors, not operational workers: the
+primary monitor and reader-release worker remain active, including when
+`reader_release_timing_quality.enabled=0`.
+
 Unless explicitly identified as production or read-only diagnostics, the
 provider, timing, keepout and acquisition sections below describe the older
 live scheduler selected when `production.enabled` is false. Its version-1
@@ -324,8 +337,8 @@ The complete [dmtweeter_synco.conf example](../dmtweeter_synco.conf) contains th
 | `scheduler.guardUs` | 20 | Reserve beyond explicit delivery/reader bounds. |
 | `scheduler.step0LeadUs` | 20 | Nominal step-0 completion lead. |
 | `scheduler.deliveryUs` | 20 | Submission-to-controller delivery allowance. |
-| `scheduler.snapshotBudgetUs` | 10 | Whole-batch one-pass snapshot budget. |
-| `scheduler.copyBudgetUs` | 10 | Whole-batch destination copy/publication budget. |
+| `scheduler.snapshotBudgetUs` | 10 | Whole-batch one-pass snapshot budget for the older scheduler. Production retains the configured value for reporting; elapsed snapshot time reduces its remaining copy window directly. |
+| `scheduler.copyBudgetUs` | 10 | Whole-batch destination copy/publication budget; fixed in production, adaptive in the older scheduler. The production example explicitly reserves 30 us. |
 | `scheduler.visibilityUs` | 1 | Positive margin before the earliest plausible main publication. |
 | `scheduler.preparationReserveUs` | 2 | Preparation target's positive reserve before the hard cutoff. |
 | `scheduler.outputTimeoutUs` | 50 | Combined-output watchdog, separate from the delivery/reader hold. |
@@ -356,12 +369,12 @@ The complete [dmtweeter_synco.conf example](../dmtweeter_synco.conf) contains th
 | `simulation.cadenceUpdateSec` | 1 | Minimum time between cadence refreshes, 0.01–60 seconds. The first measured estimate requires this much primary history. |
 | `simulation.phaseGain` | 0.1 | Positive simulation phase correction gain, at most 1; affects only a future uncommitted cycle. |
 | `simulation.phaseSlewUs` | 1 | Maximum simulation phase correction per future cycle. Nonnegative and at most one quarter of the shortest accepted primary interval (62.5 us with the default maximum primary rate). Does not change any physical timing reserve. |
-| `diagnostics.windowSec` | 2 | Elapsed-time window for all independent observers; zero disables collection. |
-| `diagnostics.maxEvents` | 20000 | Queue and retained-event cap for each observer; zero disables collection. Storage is allocated before the monitors start. |
+| `diagnostics.windowSec` | 0 in production; otherwise 2 | Elapsed-time window for independent timing observers. Zero selects minimal production diagnostics, disabling optional observers, per-event capture, phase/publication statistics and app-logic profiling while retaining operational clocks, readiness and aggregate status. A positive window enables detailed capture. Restart required. |
+| `diagnostics.maxEvents` | 20000 | Queue and retained-event cap for each observer, allocated before monitors start. Also sizes the required production reader-release queue, so production requires a positive value even when `windowSec=0`. Outside production, zero disables independent timing collection where permitted by the selected mode. |
 | `diagnostics.excursionUs` | 20 | Camera acquisition/publication and primary excursion threshold around each diagnostic window median, in microseconds; zero disables pair/conditional classification. Ordinary trace timing remains enabled. Independent of scheduler timing bounds. |
-| `diagnostics.combiner` | true | Start an independent combined-output observer for cadence and process-trace timing. Scheduling can remain disabled. |
-| `diagnostics.camera` | true | Start an independent metadata-only camera observer for separate acquisition and publication timestamp intervals. |
-| `diagnostics.pipeline` | true | Capture up to ten existing upstream process-trace rows at primary observation. |
+| `diagnostics.combiner` | true | With a positive diagnostic window, start an independent combined-output observer for cadence and process-trace timing. Scheduling can remain disabled. Production readiness does not depend on this optional observer. |
+| `diagnostics.camera` | true | With a positive diagnostic window, start an independent metadata-only camera observer for separate acquisition and publication timestamp intervals. |
+| `diagnostics.pipeline` | true | With a positive diagnostic window, capture up to ten existing upstream process-trace rows at primary observation. |
 | `diagnostics.only` | false | Observe the configured primary without attaching scheduler DM resources or creating a timing stream. Forces combined monitoring off, selects an available primary semaphore automatically, and rejects scheduler enable requests. |
 | `cameraMonitor.shmimName` | `camwfs` | Camera image whose `atime` and `writetime` intervals are analyzed separately. Independent of the `tracking.cameraDevice` INDI subscription. Semaphore selection is automatic by default. |
 | `cameraMonitor.threadPrio` | 0 | Camera metadata observer scheduling priority; zero uses ordinary scheduling. |
@@ -377,7 +390,9 @@ Measured camera reports are eligible while their accepted-reply age is less than
 
 `fg_timing.acq_jitter`, `acq_min` and `acq_max` are acquisition-interval statistics in seconds. The inspected camwfs configuration uses a roughly two-second window; INDI readbacks convert these values to microseconds. They describe local camera acquisition, not downstream AO processing, DM publication jitter, callback wake latency or qualified worst-case limits. A valid FPS-only packet is accepted and missing optional statistics become -1. Malformed numeric data, trailing junk, a present optional statistic that is nonfinite/negative/out of range, or a supplied minimum greater than its supplied maximum rejects the whole packet without refreshing the last valid camera report; old statistics are not paired with a new FPS. This reference change does not relax immediate keepout/early-main checks or turn an observation gap into permission to stretch the cycle.
 
-Numeric values must be finite and within the accepted range. Main destinations must be unique numbered channels of the expected geometry/type; source, output and timing roles cannot alias. Invalid configuration or incompatible resources prevent operation. Unavailable secondary resources are retried once per second while unarmed. If a complete snapshot or destination-copy batch exceeds its runtime budget, the budget grows to the observed duration plus 1 us, the schedule is invalidated, and acquisition/feasibility validation repeat while preserving learned wait corrections. This enlarges the planning window conservatively; a quiet running maximum still does not prove a bound.
+Numeric values must be finite and within the accepted range. Main destinations must be unique numbered channels of the expected geometry/type; source, output and timing roles cannot alias. Invalid configuration or incompatible resources prevent operation. Unavailable secondary resources are retried once per second while unarmed. In the older non-production scheduler, if a complete snapshot or destination-copy batch exceeds its runtime budget, the budget grows to the observed duration plus 1 us, the schedule is invalidated, and acquisition/feasibility validation repeat while preserving learned wait corrections. This enlarges the planning window conservatively; a quiet running maximum still does not prove a bound.
+
+Production keeps its configured budgets fixed and reports observed maxima separately. A late copy still fails its actual completion cutoff and suppresses that auxiliary trigger, without enlarging the reservation for later slots. See the [production provider guide](production-providers.md) for tuning and passive-write semantics.
 
 ## INDI interface
 
@@ -647,7 +662,7 @@ The `timing` summary includes:
 | `cached` | Fallbacks due to an incomplete/racing snapshot; unchanged sources are not counted as misses. |
 | `notStarted`, `copiedLate` | Step-0 preparation suppressed before copying or finished after the effective cutoff. |
 | `snapshotMaxUs`, `copyMaxUs` | Observed maxima for complete snapshot and destination-copy batches. |
-| `copyBudgetUs`, `snapshotBudgetUs` | Current runtime planning budgets, including enlargement after an overrun; distinct from observed maxima. |
+| `copyBudgetUs`, `snapshotBudgetUs` | Configured budgets in production; runtime planning budgets, including enlargement after an overrun, in the older scheduler. Distinct from observed maxima; production does not use the snapshot budget as an admission guard. |
 | `primaryFaults`, `resourceFaults`, `outputFaults`, `triggerFaults` | Cumulative synchronization/resource faults split by cause; ordinary missed-step/budget reacquisition does not increment these fault totals. |
 | `duplicatePosts` | Unchanged-primary-counter callbacks ignored while draining queued notifications. |
 | `step0WakeUs`, `step0WakeMaxUs` | Latest/maximum nonnegative copy-attempt lateness relative to the requested copy wake, including checks before the attempt. Only valid, unclamped step-0 wait samples update these values. |
@@ -1323,7 +1338,10 @@ An arbitrarily early main publication can race a multi-channel memcpy or follow 
 
 `diagnostics.mainTimingStream` optionally exports a complete, bounded history of
 qualified main commands for `loopTimingMonitor`. It is empty by default. A
-suggested name is `dmtweeter_synco_main_timing`.
+suggested name is `dmtweeter_synco_main_timing`. This explicit export is independent
+of `diagnostics.windowSec`: it remains active with minimal diagnostics
+(`windowSec=0`) without enabling the optional timing populations, event logs or
+monitor threads. Leave `mainTimingStream` empty to keep the export disabled.
 `diagnostics.mainTimingCapacity` defaults to 32768 records (range 4–1048576) and
 sizes both the capture queue and shared ring. This requires production-provider
 or coordinated-zero mode; the legacy scheduler has no equivalent main
