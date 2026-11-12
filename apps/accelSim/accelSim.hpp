@@ -17,6 +17,7 @@
 #include "../../libMagAOX/libMagAOX.hpp"
 #include "../../magaox_git_version.h"
 #include "accelSimModel.hpp"
+#include "accelSimOutput.hpp"
 #include "accelSimDM.hpp"
 #include "accelSimDMStream.hpp"
 
@@ -44,6 +45,8 @@ class accelSim : public MagAOXApp<true>, public dev::frameGrabber<accelSim>, pub
     static_assert( std::atomic<double>::is_always_lock_free && std::atomic<uint64_t>::is_always_lock_free );
 
   protected:
+    bool m_zeroOutput{ false }; ///< Startup-only override of published ADC counts, not physics or DM injection.
+
     accelSimDetail::parameters m_parameters;                      ///< Startup-only physics/calibration configuration.
     accelSimDetail::model      m_model;                           ///< Acquisition-thread-owned physical state and RNG.
     accelSimDetail::schedule   m_schedule;                        ///< Absolute monotonic timer schedule.
@@ -191,9 +194,9 @@ class accelSim : public MagAOXApp<true>, public dev::frameGrabber<accelSim>, pub
     int startAcquisition();
     /// Acquire one fresh sample; positive returns never publish an old pair.
     int acquireAndCheckValid();
-    /// Copy precisely one X/Y pair; framework owns metadata and semaphore posts.
+    /// Copy one X/Y pair, optionally calibrated zero; framework owns metadata and semaphore posts.
     int loadImageIntoStream( void *destination /**< [out] frameGrabber destination plane */ );
-    /// Publish optional DM injection from this exact ADC sample, then transfer diagnostics.
+    /// Publish optional DM injection from the acquired physical sample, then transfer diagnostics.
     int frameGrabberPostPublish( IMAGE *stream /**< [in] framework-owned output, not modified here */ );
     /// Release synchronization input during an explicit framework reconfiguration.
     int reconfig();
@@ -239,6 +242,10 @@ inline void accelSim::setupConfig()
         config.add( name, "", name, argType::Required, section, key, false, type, description );
     };
     add( "sim", "fps", "double", "Initial nominal sampling rate [Hz], default 6000." );
+    add( "sim",
+         "zeroOutput",
+         "bool",
+         "Publish calibrated zero-acceleration ADC counts only; default false, physics/DM unchanged." );
     add( "sim", "seed", "uint64_t", "Numerical random seed, default 42." );
     add( "sim", "modeSeed", "uint64_t", "High-frequency parameter seed, default 123." );
     add( "sim", "leverArm", "double", "Effective lever arm [m], default 10." );
@@ -287,6 +294,7 @@ inline int accelSim::loadConfigImpl( mx::app::appConfigurator &config )
     FRAMEGRABBER_LOAD_CONFIG( config );
     TELEMETER_LOAD_CONFIG( config );
     config( m_parameters.m_fps, "sim.fps" );
+    config( m_zeroOutput, "sim.zeroOutput" );
     config( m_parameters.m_seed, "sim.seed" );
     config( m_parameters.m_modeSeed, "sim.modeSeed" );
     config( m_parameters.m_leverArm, "sim.leverArm" );
@@ -941,12 +949,19 @@ inline int accelSim::acquireAndCheckValid()
 inline int accelSim::loadImageIntoStream( void *destination )
 {
     if( !m_fresh || destination == nullptr )
+    {
         return -1;
-    std::memcpy( destination, m_model.m_sample.m_adc.data(), 2 * sizeof( uint16_t ) );
+    }
+
+    const auto counts = accelSimDetail::adcOutput( m_model.m_sample, m_parameters, m_zeroOutput );
+    std::memcpy( destination, counts.data(), 2 * sizeof( uint16_t ) );
     m_fresh = false;
     ++m_diagnostics.m_timing[frameSequence];
     if( !m_syncName.empty() )
+    {
         ++m_diagnostics.m_timing[written];
+    }
+
     return 0;
 }
 

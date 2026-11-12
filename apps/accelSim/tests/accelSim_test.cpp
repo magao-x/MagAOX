@@ -3,7 +3,7 @@
  * \ingroup accelSim_unit_test
  */
 #include "../../../tests/testXWC.hpp"
-#include "../accelSimModel.hpp"
+#include "../accelSimOutput.hpp"
 #include <cstdlib>
 #include <fstream>
 #include <iomanip>
@@ -24,6 +24,58 @@ namespace libXWCTest
 namespace accelSimTest
 {
 using namespace MagAOX::app::accelSimDetail;
+
+/** \brief Zero output encodes the configured acceleration zero and default output preserves the acquired pair.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim zero-output ADC calibration", "[accelSim][model][zero-output]" )
+{
+    parameters config;
+    sample     value;
+    value.m_adc = { 1729, 2381 };
+    REQUIRE( adcOutput( value, config ) == value.m_adc );
+    REQUIRE( adcOutput( value, config, false ) == value.m_adc );
+    REQUIRE( adcOutput( value, config, true ) == std::array<uint16_t, 2>{ 2048, 2048 } );
+    config.m_zero = 1234.4;
+    REQUIRE( adcOutput( value, config, true ) == std::array<uint16_t, 2>{ 1234, 1234 } );
+    config.m_zero = 1234.5;
+    REQUIRE( adcOutput( value, config, true ) == std::array<uint16_t, 2>{ 1235, 1235 } );
+    config.m_zero = 5000;
+    REQUIRE( adcOutput( value, config, true ) == std::array<uint16_t, 2>{ 4095, 4095 } );
+    REQUIRE( value.m_adc == std::array<uint16_t, 2>{ 1729, 2381 } );
+}
+
+/** \brief Every selected output is constant while pointing, noise, clamp counters and future RNG progression agree.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim zero output preserves the physical vibration sequence", "[accelSim][model][zero-output]" )
+{
+    parameters config;
+    config.m_fps     = 8000;
+    const auto modes = referenceModes( config.m_modeSeed );
+    model      zero, normal;
+    zero.configure( config, modes );
+    normal.configure( config, modes );
+    bool motion = false, varyingAdc = false;
+    for( size_t frame = 0; frame < 8000; ++frame )
+    {
+        zero.step();
+        normal.step();
+        REQUIRE( adcOutput( zero.m_sample, config, true ) == std::array<uint16_t, 2>{ 2048, 2048 } );
+        REQUIRE( adcOutput( normal.m_sample, config, false ) == normal.m_sample.m_adc );
+        REQUIRE( zero.m_sample.m_pointing == normal.m_sample.m_pointing );
+        REQUIRE( zero.m_sample.m_wfsPointing == normal.m_sample.m_wfsPointing );
+        REQUIRE( zero.m_sample.m_acceleration == normal.m_sample.m_acceleration );
+        REQUIRE( zero.m_sample.m_adc == normal.m_sample.m_adc );
+        REQUIRE( zero.m_clipLow == normal.m_clipLow );
+        REQUIRE( zero.m_clipHigh == normal.m_clipHigh );
+        REQUIRE( zero.m_ticks == frame + 1 );
+        motion     = motion || zero.m_sample.m_pointing != std::array<double, 2>{};
+        varyingAdc = varyingAdc || normal.m_sample.m_adc != std::array<uint16_t, 2>{ 2048, 2048 };
+    }
+    REQUIRE( motion );
+    REQUIRE( varyingAdc );
+}
 
 /** \brief Known AR coefficients, stable innovation scaling, and stationary covariance invariance.
  * \ingroup accelSim_unit_test
@@ -779,6 +831,7 @@ class appTest : public MagAOX::app::accelSim
     using accelSim::m_syncName;
     using accelSim::m_syncTimeout;
     using accelSim::m_width;
+    using accelSim::m_zeroOutput;
     using accelSim::setupProperties;
     using accelSim::syncTiming;
     using accelSim::updateINDI;
@@ -938,6 +991,7 @@ TEST_CASE( "accelSim configuration and INDI controls", "[accelSim][app]" )
     app.setupConfig();
     REQUIRE( app.loadConfigImpl( app.config ) == 0 );
     REQUIRE( app.m_shmimName == "acc000" );
+    REQUIRE_FALSE( app.m_zeroOutput );
     REQUIRE( app.fps() == 6000 );
     REQUIRE( app.m_model.m_modes.size() == 214 );
     REQUIRE( app.setupProperties() == 0 );
@@ -1243,6 +1297,80 @@ TEST_CASE( "accelSim synchronized delay model", "[accelSim][app][sync-regression
     MagAOX::app::accelSim::syncTiming;
     MagAOX::app::accelSim::updateSyncDiagnostics;
     MagAOX::app::accelSim::invalidateSync;
+#endif
+    // clang-format on
+}
+
+/** \brief Constant zero-acceleration publication retains advancing native counters and per-plane timestamps.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim zero-output native frames", "[.][accelSim-zero-streams]" )
+{
+    char path[] = "/tmp/accelSim-zero-streams-XXXXXX";
+    REQUIRE( mkdtemp( path ) != nullptr );
+    REQUIRE( setenv( "MILK_SHM_DIR", path, 1 ) == 0 );
+    char resolved[1024];
+    REQUIRE( ImageStreamIO_filename( resolved, sizeof( resolved ), "acc000" ) == 0 );
+    REQUIRE( std::filesystem::path( resolved ).parent_path() == std::filesystem::path( path ) );
+    const auto filename = std::string( path ) + "/zero.conf";
+    {
+        std::ofstream file( filename );
+        file << "[sim]\nzeroOutput=true\n";
+    }
+    for( uint32_t depth : { 1u, 4u } )
+    {
+        appTest app;
+        app.setupConfig();
+        REQUIRE( app.config.readConfig( filename ) == 0 );
+        REQUIRE( app.loadConfigImpl( app.config ) == 0 );
+        REQUIRE( app.m_zeroOutput );
+        app.m_circBuffLength = depth;
+        app.startWorker();
+        streamFixture reader;
+        reader.open( "acc000" );
+        REQUIRE( reader.m_image.md->naxis == 3 );
+        REQUIRE( reader.m_image.md->size[0] == 2 );
+        REQUIRE( reader.m_image.md->size[1] == 1 );
+        REQUIRE( reader.m_image.md->size[2] == depth );
+        REQUIRE( reader.m_image.md->datatype == _DATATYPE_UINT16 );
+        uint64_t previous = 0;
+        timespec previousTime{};
+        for( size_t frame = 0; frame < 100; ++frame )
+        {
+            std::array<uint16_t, 2> pair{};
+            for( size_t retry = 0; retry < 200; ++retry )
+            {
+                pair = reader.read();
+                if( reader.m_counter == 0 )
+                {
+                    continue; // Initial image allocation is not a published acquired frame.
+                }
+                REQUIRE( pair == std::array<uint16_t, 2>{ 2048, 2048 } );
+                if( reader.m_counter > previous )
+                {
+                    break;
+                }
+            }
+            REQUIRE( reader.m_counter > previous );
+            REQUIRE( reader.m_planeCounter == reader.m_counter );
+            REQUIRE( reader.m_acquired.tv_sec > previousTime.tv_sec ||
+                     ( reader.m_acquired.tv_sec == previousTime.tv_sec &&
+                       reader.m_acquired.tv_nsec > previousTime.tv_nsec ) );
+            REQUIRE( reader.m_planeAcquired.tv_sec == reader.m_acquired.tv_sec );
+            REQUIRE( reader.m_planeAcquired.tv_nsec == reader.m_acquired.tv_nsec );
+            REQUIRE( reader.m_written.tv_sec > reader.m_acquired.tv_sec ||
+                     ( reader.m_written.tv_sec == reader.m_acquired.tv_sec &&
+                       reader.m_written.tv_nsec >= reader.m_acquired.tv_nsec ) );
+            REQUIRE( reader.m_planeWritten.tv_sec == reader.m_written.tv_sec );
+            REQUIRE( reader.m_planeWritten.tv_nsec == reader.m_written.tv_nsec );
+            previous     = reader.m_counter;
+            previousTime = reader.m_acquired;
+        }
+    }
+    // clang-format off
+#ifdef ACCELSIM_TEST_DOXYGEN_REF
+    MagAOX::app::accelSim::loadConfigImpl;
+    MagAOX::app::accelSim::loadImageIntoStream;
 #endif
     // clang-format on
 }

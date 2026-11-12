@@ -12,6 +12,38 @@ Optional same-sample tweeter disturbance injection is implemented separately fro
 the model and remains disabled by default. The default configuration has no DM
 channel and performs no DM access. No instrument startup configuration is supplied.
 
+## Zero-acceleration ADC test output
+
+Set this startup-only option to publish constant zero-acceleration counts:
+
+```ini
+[sim]
+zeroOutput=true
+```
+
+The default is `false`, which preserves normal vibration/noise ADC output.
+With the current `adc.zero=2048` calibration, every output pair is **2048,2048**,
+not raw0,0. The override reuses the existing ADC encoder at acceleration0, including
+rounding/clipping of a custom configured zero point. It applies only when copying
+the pair into the frameGrabber destination. The underlying vibration model, RNG,
+sensor noise, clipping diagnostics and DM disturbance injection continue unchanged.
+In particular, zero ADC output does not disable or zero an enabled DM disturbance.
+ImageStreamIO datatype/geometry, pacing, counters, timestamps and semaphore
+publication remain framework-owned and unchanged.
+
+Portable `[zero-output]` tests verify calibration and8,000 paired physical samples
+without any stream or device. On a provisioned isolated Linux development host,
+run the hidden native publication test in a fresh process:
+
+```sh
+./apps/accelSim/tests/accelSim_test '[accelSim-zero-streams]'
+```
+
+It checks every observed pair for2048,2048, advancing counters/acquisition times,
+and consistent per-plane timestamps at temporal depths1 and4. It verifies its
+private ImageStreamIO namespace before opening/creating anything. Native tests
+are not run by the portable model-only build; they remain unverified on this Mac.
+
 ## Optional runtime DM injection
 
 The intended experiment uses **dm01disp10**, a pre-existing 50x50 float32 additive
