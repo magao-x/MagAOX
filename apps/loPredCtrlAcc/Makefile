@@ -2,8 +2,8 @@
 allall: all
 
 NEED_CUDA = no
-OTHER_HEADERS = ar_controller.hpp shadow_controller.hpp causal_input.hpp
-OTHER_OBJS = recursive_least_squares.o qrd_rls.o ar_controller.o utils.o shadow_controller.o causal_input.o
+OTHER_HEADERS = adc_input.hpp adc_reader.hpp ar_controller.hpp shadow_controller.hpp causal_input.hpp
+OTHER_OBJS = adc_input.o adc_reader.o recursive_least_squares.o qrd_rls.o ar_controller.o utils.o shadow_controller.o causal_input.o
 TARGET = loPredCtrlAcc
 # Manual commissioning builds refuse legacy execution before any input/output helper starts.
 ifeq ($(DDSPC_SHADOW_ONLY),yes)

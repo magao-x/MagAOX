@@ -1,13 +1,20 @@
 # Manual exao2 handoff: shadow commissioning only
 
+**Stage 1 update:** [ADC_INPUT.md](ADC_INPUT.md) describes the new opt-in,
+read-only native UINT16 capture and its separate shadow configuration. It remains
+unqualified against the native Linux/ImageStreamIO runtime. The original
+attachment-only example and earlier procedure below remain unchanged. ADC capture
+does not establish WFS/applied-input alignment or enable live model training.
+
 2026-11-06. Prepared and tested on personal Mac `ASTR-LT-428.local`.
 **No access to exao2, application launch, real DM command or deployment was performed.**
 
 **Status: not ready for live accelerometer-assisted learning/prediction.** The
 native application can attach to a modal WFS stream with output inhibited, but
-its shadow WFS callback deliberately invalidates the models. Native UINT16
-accelerometer decoding, verified applied-command ingestion and exposure/clock
-alignment are missing. Configuration cannot supply those implementations.
+its shadow WFS callback deliberately invalidates the models. Verified
+applied-command ingestion and exposure/clock alignment are missing. Native ADC
+decoding is now implemented separately in Stage 1. Configuration cannot supply
+those remaining implementations.
 The procedure below is for build qualification and WFS attachment/output-inhibition
 commissioning. A working offline harness is not evidence that the native input
 chain exists. Do not enable Legacy mode to work around an unready shadow model.
@@ -297,7 +304,8 @@ broad process-name kill, remove an input shmim or stop the existing controller.
   `AppliedInputRecord` certificates. The existing causal builder requires common
   clock epochs, source generations, calibrated modal layout and complete held
   input coverage; driver acceptance is insufficient. It rejects gaps, stale or
-  ambiguous records and unsupported latency. No adapter/timer is armed natively.
+  ambiguous records and unsupported latency. No WFS/applied-input adapter/timer
+  is armed natively; the optional Stage 1 ADC worker expires only ADC evidence.
 - **Runtime state:** repository defaults are prediction/learning/integration off;
   deployed switch states are unknown. Legacy optionally accumulates calculated
   deltas, whereas causal training requires actual historical applied inputs.

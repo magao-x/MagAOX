@@ -293,6 +293,17 @@ Review AGENTS.md.  Do not alter any text above the "Agent Findings and Plan" bel
 
 ## Task Summary
 
+**Stage 1 native ADC capture (2026-11-12):** see
+[implementation record](accel-ddspc-native-adc-stage1.md). An opt-in existing-only
+UINT16 input worker now decodes the configured raw ADC pair, preserves original
+metadata, retains bounded timestamped samples and publishes ADC-only diagnostics.
+It reuses the accelFFCtrl transport pattern without changing the simulator or
+original loPredCtrl. Shadow-only guards and raw-WFS model invalidation remain;
+ADC validity never asserts synchronized DDSPC data. Native Linux/ImageStreamIO
+qualification and WFS/applied-command/feature alignment remain outstanding.
+Earlier entries below describe their historical source snapshots.
+
+
 **Manual exao2 handoff (2026-11-06):** preparation only, no remote access or
 instrument/application execution. Native review confirms that shadow output is
 inhibited at startup, lifecycle, callbacks and publication entrypoints. However,

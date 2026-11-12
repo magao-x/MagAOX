@@ -34,6 +34,7 @@ using namespace mx::improc;
 #include "ar_controller.hpp"
 #include "shadow_controller.hpp"
 #include "causal_input.hpp"
+#include "adc_reader.hpp"
 
 namespace MagAOX
 {
@@ -137,6 +138,21 @@ class loPredCtrlAcc : public MagAOXApp<true>,
 
     /// Startup-only opt-in; shadow execution never starts or uses the output frameGrabber.
     bool m_shadowMode{ false };
+
+    /// Startup-only native ADC observation, accepted only with shadow execution.
+    bool m_adcEnabled{ false };
+
+    /// Immutable ADC transport/calibration; independent of Legacy's FLOAT sensor reader.
+    DDSPC::AdcConfig m_adcConfig;
+
+    /// Configured microsecond limits, converted to checked integer nanoseconds at startup.
+    double m_adcMaxAgeUs{ 20000 }, m_adcClockToleranceUs{ 1000 }, m_adcMaxIntervalUs{ 1000 };
+
+    /// Owns only an input worker/ring; never feeds model validity or publishes corrections.
+    std::unique_ptr<DDSPC::AdcReader> m_adcReader;
+
+    /// ADC-only numbers and provenance; separate from synchronized DDSPC validity.
+    pcf::IndiProperty m_indiP_adc, m_indiP_adcSource;
 
     /// Required learned examples per shadow model; zero uses its regressor dimension.
     uint64_t m_shadowMinUpdates{ 0 };
@@ -474,6 +490,12 @@ class loPredCtrlAcc : public MagAOXApp<true>,
     /// Allocate independent causal models from startup configuration, with training disabled.
     int configureShadow();
 
+    /// Register read-only ADC diagnostics without attaching a stream.
+    int setupAdcINDI();
+
+    /// Publish a bounded ADC health snapshot at ordinary application cadence.
+    void updateAdcINDI();
+
     /// Register selection and read-only shadow diagnostics without any stream creation.
     int setupShadowINDI();
 
@@ -571,6 +593,36 @@ inline void loPredCtrlAcc::setupConfig()
     accelShmimMonitorT::setupConfig( config );
     FRAMEGRABBER_SETUP_CONFIG( config );
     TELEMETER_SETUP_CONFIG( config );
+
+    for( const auto &entry : std::vector<std::pair<std::string, std::string>>{ { "enabled", "bool" },
+                                                                               { "shmimName", "string" },
+                                                                               { "profile", "string" },
+                                                                               { "min_code", "uint32_t" },
+                                                                               { "max_code", "uint32_t" },
+                                                                               { "reject_rails", "bool" },
+                                                                               { "capacity", "size_t" },
+                                                                               { "max_age_us", "double" },
+                                                                               { "max_interval_us", "double" },
+                                                                               { "clock_tolerance_us", "double" },
+                                                                               { "zero0", "double" },
+                                                                               { "zero1", "double" },
+                                                                               { "volts_per_count0", "double" },
+                                                                               { "volts_per_count1", "double" },
+                                                                               { "sensitivity0", "double" },
+                                                                               { "sensitivity1", "double" },
+                                                                               { "polarity0", "double" },
+                                                                               { "polarity1", "double" } } )
+    {
+        config.add( "adc." + entry.first,
+                    "",
+                    "adc." + entry.first,
+                    argType::Optional,
+                    "adc",
+                    entry.first,
+                    false,
+                    entry.second,
+                    "Startup-only raw UINT16 input/calibration; requires shadow=true. See ADC_INPUT.md." );
+    }
 
     config.add( "parameters.shadow",
                 "",
@@ -787,6 +839,50 @@ inline int loPredCtrlAcc::loadConfigImpl( mx::app::appConfigurator &_config )
             { __FILE__, __LINE__, "Shadow-only build requires parameters.shadow=true; legacy output is forbidden." } );
     }
 #endif
+    _config( m_adcEnabled, "adc.enabled" );
+    if( m_adcEnabled && !m_shadowMode )
+    {
+        m_shutdown = true;
+        return log<software_error, -1>( { __FILE__, __LINE__, "Native ADC observation requires shadow=true." } );
+    }
+    if( m_adcEnabled )
+    {
+        _config( m_adcConfig.m_stream, "adc.shmimName" );
+        _config( m_adcConfig.m_profile, "adc.profile" );
+        _config( m_adcConfig.m_minCode, "adc.min_code" );
+        _config( m_adcConfig.m_maxCode, "adc.max_code" );
+        _config( m_adcConfig.m_rejectRails, "adc.reject_rails" );
+        _config( m_adcConfig.m_capacity, "adc.capacity" );
+        _config( m_adcMaxAgeUs, "adc.max_age_us" );
+        _config( m_adcMaxIntervalUs, "adc.max_interval_us" );
+        _config( m_adcClockToleranceUs, "adc.clock_tolerance_us" );
+        for( std::size_t axis = 0; axis < 2; ++axis )
+        {
+            const auto suffix = std::to_string( axis );
+            _config( m_adcConfig.m_zero[axis], "adc.zero" + suffix );
+            _config( m_adcConfig.m_voltsPerCount[axis], "adc.volts_per_count" + suffix );
+            _config( m_adcConfig.m_sensitivity[axis], "adc.sensitivity" + suffix );
+            _config( m_adcConfig.m_polarity[axis], "adc.polarity" + suffix );
+        }
+        try
+        {
+            if( !std::isfinite( m_adcMaxAgeUs ) || m_adcMaxAgeUs < .001 || m_adcMaxAgeUs > 1e9 ||
+                !std::isfinite( m_adcMaxIntervalUs ) || m_adcMaxIntervalUs < .001 || m_adcMaxIntervalUs > 1e9 ||
+                !std::isfinite( m_adcClockToleranceUs ) || m_adcClockToleranceUs < .001 || m_adcClockToleranceUs > 1e9 )
+            {
+                throw std::invalid_argument( "Invalid ADC microsecond limits" );
+            }
+            m_adcConfig.m_maxIntervalNs    = std::llround( m_adcMaxIntervalUs * 1000 );
+            m_adcConfig.m_maxAgeNs         = std::llround( m_adcMaxAgeUs * 1000 );
+            m_adcConfig.m_clockToleranceNs = std::llround( m_adcClockToleranceUs * 1000 );
+            DDSPC::validate_adc_config( m_adcConfig );
+        }
+        catch( const std::exception &error )
+        {
+            m_shutdown = true;
+            return log<software_error, -1>( { __FILE__, __LINE__, error.what() } );
+        }
+    }
     shmimMonitorT::loadConfig( _config );
     _config( m_shadowMinUpdates, "parameters.shadow_min_updates" );
 
@@ -988,6 +1084,103 @@ inline bool loPredCtrlAcc::expireShadowInputs( std::int64_t nowNs )
         std::lock_guard<std::mutex> guard( m_shadowMutex );
         return m_shadowInputs && consumeShadowInputs( m_shadowInputs->advance( nowNs ) );
     }
+}
+
+inline int loPredCtrlAcc::setupAdcINDI()
+{
+    if( createROIndiNumber( m_indiP_adc, "adc" ) < 0 )
+    {
+        return -1;
+    }
+    for( const char *element : { "enabled", "valid",      "raw0",     "raw1",       "acceleration0", "acceleration1",
+                                 "rate_hz", "age_us",     "samples",  "dropped",    "invalid",       "duplicates",
+                                 "races",   "busy",       "restarts", "overwrites", "timing_gaps",   "retained",
+                                 "counter", "generation", "segment",  "depth",      "width",         "height" } )
+    {
+        m_indiP_adc.add( pcf::IndiElement( element, 0.0 ) );
+    }
+    if( registerIndiPropertyReadOnly( m_indiP_adc ) < 0 ||
+        createROIndiText( m_indiP_adcSource, "adc_source", "state" ) < 0 )
+    {
+        return -1;
+    }
+    for( const char *element : { "stream",
+                                 "profile",
+                                 "datatype",
+                                 "device",
+                                 "inode",
+                                 "acquired_real_ns",
+                                 "written_real_ns",
+                                 "received_mono_ns",
+                                 "sample_counter",
+                                 "counter" } )
+    {
+        m_indiP_adcSource.add( pcf::IndiElement( element ) );
+    }
+    return registerIndiPropertyReadOnly( m_indiP_adcSource );
+}
+
+inline void loPredCtrlAcc::updateAdcINDI()
+{
+    auto status = m_adcReader ? m_adcReader->status() : DDSPC::AdcStatus{};
+    if( !m_adcEnabled )
+    {
+        status.m_state = DDSPC::AdcState::Disabled;
+    }
+    const auto &sample = status.m_latest;
+    updatesIfChanged<double>( m_indiP_adc,
+                              { "enabled", "valid",      "raw0",     "raw1",       "acceleration0", "acceleration1",
+                                "rate_hz", "age_us",     "samples",  "dropped",    "invalid",       "duplicates",
+                                "races",   "busy",       "restarts", "overwrites", "timing_gaps",   "retained",
+                                "counter", "generation", "segment",  "depth",      "width",         "height" },
+                              { double( m_adcEnabled ),
+                                double( status.m_valid ),
+                                double( sample.m_frame.m_raw[0] ),
+                                double( sample.m_frame.m_raw[1] ),
+                                sample.m_acceleration[0],
+                                sample.m_acceleration[1],
+                                status.m_rateHz,
+                                status.m_ageUs,
+                                double( status.m_samples ),
+                                double( status.m_dropped ),
+                                double( status.m_invalid ),
+                                double( status.m_duplicates ),
+                                double( status.m_races ),
+                                double( status.m_busy ),
+                                double( status.m_restarts ),
+                                double( status.m_overwrites ),
+                                double( status.m_timingGaps ),
+                                double( status.m_retained ),
+                                double( status.m_source.m_counter ),
+                                double( status.m_generation ),
+                                double( status.m_segment ),
+                                double( status.m_source.m_depth ),
+                                double( status.m_source.m_width ),
+                                double( status.m_source.m_height ) },
+                              status.m_valid ? INDI_OK : INDI_IDLE );
+    updatesIfChanged<std::string>( m_indiP_adcSource,
+                                   { "state",
+                                     "stream",
+                                     "profile",
+                                     "datatype",
+                                     "device",
+                                     "inode",
+                                     "acquired_real_ns",
+                                     "written_real_ns",
+                                     "received_mono_ns",
+                                     "sample_counter",
+                                     "counter" },
+                                   { DDSPC::adc_state( status.m_state ),
+                                     m_adcConfig.m_stream,
+                                     m_adcConfig.m_profile,
+                                     status.m_source.m_uint16 ? "UINT16" : "unverified",
+                                     std::to_string( status.m_device ),
+                                     std::to_string( status.m_inode ),
+                                     std::to_string( sample.m_frame.m_acquiredRealNs ),
+                                     std::to_string( sample.m_frame.m_writtenRealNs ),
+                                     std::to_string( sample.m_receivedNs ),
+                                     std::to_string( sample.m_frame.m_counter ),
+                                     std::to_string( status.m_source.m_counter ) } );
 }
 
 inline int loPredCtrlAcc::setupShadowINDI()
@@ -1226,12 +1419,17 @@ inline int loPredCtrlAcc::appStartup()
     if( !m_shadowMode )
         return log<software_error, -1>( { __FILE__, __LINE__, "Shadow-only build refuses legacy startup." } );
 #endif
+    if( m_adcEnabled && !m_shadowMode )
+    {
+        return -1; // Native ADC startup never permits Legacy output helpers.
+    }
     if( m_shadowMode && configureShadow() < 0 )
         return -1;
     if( m_shadowMode )
-        log<text_log>( "Shadow output inhibited. Native WFS callbacks are observation-only; UINT16 accelerometer, "
-                       "applied-command and exposure-timing adapters are unavailable. Live models remain invalid.",
-                       logPrio::LOG_WARNING );
+        log<text_log>(
+            "Shadow output inhibited. Native WFS callbacks are observation-only; ADC capture does not establish "
+            "applied-command or exposure timing. Live models remain invalid.",
+            logPrio::LOG_WARNING );
     if( shmimMonitorT::appStartup() < 0 )
     {
         return log<software_error, -1>( { __FILE__, __LINE__ } );
@@ -1253,8 +1451,10 @@ inline int loPredCtrlAcc::appStartup()
 
     CREATE_REG_INDI_NEW_TEXT( m_indiP_filename, "filename", "", "" );
 
-    if( setupShadowINDI() < 0 )
+    if( setupShadowINDI() < 0 || ( m_shadowMode && setupAdcINDI() < 0 ) )
+    {
         return -1;
+    }
 
     createStandardIndiToggleSw( m_indiP_learningToggle, "learn", "Learning State", "Learn Controls" );
     registerIndiPropertyNew( m_indiP_learningToggle, INDI_NEWCALLBACK( m_indiP_learningToggle ) );
@@ -1299,6 +1499,27 @@ inline int loPredCtrlAcc::appStartup()
         TELEMETER_APP_STARTUP;
     }
 
+    if( m_adcEnabled )
+    {
+        if( !m_shadowMode )
+        {
+            return -1; // A direct startup call cannot bypass the configuration guard.
+        }
+        try
+        {
+            m_adcReader = std::make_unique<DDSPC::AdcReader>( m_adcConfig );
+            m_adcReader->start();
+        }
+        catch( const std::exception &error )
+        {
+            m_adcReader.reset();
+            return log<software_error, -1>( { __FILE__, __LINE__, error.what() } );
+        }
+    }
+    if( m_shadowMode )
+    {
+        updateAdcINDI();
+    }
     state( stateCodes::OPERATING );
     return 0;
 }
@@ -1344,6 +1565,10 @@ inline int loPredCtrlAcc::appLogic()
         FRAMEGRABBER_UPDATE_INDI;
     }
     updateShadowINDI();
+    if( m_shadowMode )
+    {
+        updateAdcINDI();
+    }
 
     updatesIfChanged<std::string>(
         m_indiP_exploration, { "current", "target" }, { m_exploration_sequence, m_exploration_sequence } );
@@ -1391,6 +1616,10 @@ inline int loPredCtrlAcc::appLogic()
 
 inline int loPredCtrlAcc::appShutdown()
 {
+    if( m_adcReader )
+    {
+        m_adcReader->stop();
+    }
     shmimMonitorT::appShutdown();
     if( m_accelMonitorStarted )
     {
