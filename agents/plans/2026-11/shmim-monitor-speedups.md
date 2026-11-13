@@ -373,7 +373,8 @@ The integrator change still helps every shmimIntegrator instance (all
   the copy rather than before the load, so taking back the metadata line (read
   by every reader each frame) moved from overlapping the load to directly before
   the copy and its closing store fence. Restored `write = 1` before the load in
-  both modes, matching the ocam2KCtrl version. To retest on the RTC.
+  both modes, matching the ocam2KCtrl version. RTC result: fixed, wma back to
+  ~37 us and the loop to ~143 us with camwfs-sw and camwfs-avg running.
 - Deployment: set `[framegrabber] staged=true` in `camwfs.conf`, and remove
   `camera.stagedDescramble` / `camera.stagedCopyNT` if they were added for
   testing (unknown keys fail startup).
