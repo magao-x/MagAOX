@@ -11,6 +11,11 @@
 
 /// \cond ADC_TRANSPORT_DOUBLE
 #define _DATATYPE_UINT16 3
+#define _DATATYPE_UINT8 1
+#define _DATATYPE_UINT64 7
+#ifndef _DATATYPE_FLOAT
+    #define _DATATYPE_FLOAT 9
+#endif
 #define CIRCULAR_BUFFER 0x00001
 #define ZAXIS_TEMPORAL 0x10000
 
@@ -20,7 +25,7 @@ struct IMAGE_METADATA
     std::uint32_t naxis{ 3 }, size[3]{ 2, 1, 1 };
     std::uint8_t  datatype{ _DATATYPE_UINT16 };
     int           location{ -1 }, sem{ 1 }, write{ 0 };
-    std::uint64_t imagetype{ CIRCULAR_BUFFER | ZAXIS_TEMPORAL }, cnt0{ 0 }, cnt1{ 0 };
+    std::uint64_t imagetype{ CIRCULAR_BUFFER | ZAXIS_TEMPORAL }, cnt0{ 0 }, cnt1{ 0 }, inode{ 77 };
     timespec      atime{}, writetime{};
 };
 

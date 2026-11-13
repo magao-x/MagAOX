@@ -67,7 +67,7 @@ class NativeBuildTest(unittest.TestCase):
             if directory.name == self.fail_profile:
                 raise subprocess.CalledProcessError(2, arguments)
             if not self.omit_binary:
-                binary = directory / "apps/loPredCtrlAcc/loPredCtrlAcc"
+                binary = directory / "apps/loPredCtrlAcc" / ("loPredCtrlAcc_native_observe" if directory.name == "observer" else "loPredCtrlAcc")
                 binary.parent.mkdir(parents=True)
                 binary.write_bytes(b"TEST FIXTURE ONLY: not an executable")
 
@@ -103,6 +103,18 @@ class NativeBuildTest(unittest.TestCase):
         self.assertFalse(manifest["profiles"]["legacy"]["linked"])
         self.assertEqual(manifest["profiles"]["legacy"]["status"], "failed")
         self.assertTrue(manifest["profiles"]["shadow"]["linked"])
+
+    def test_observer_target_is_separate_and_guarded(self):
+        """The optional private observer build must never fall through to an unguarded default target."""
+        with patch.object(sys, "argv", ["native_linux_build.py", "--build-root", str(self.output), "--observer-only"]):
+            self.invoke()
+        manifest = json.loads((self.output / "manifest.json").read_text())
+        self.assertEqual(list(manifest["profiles"]), ["observer"])
+        self.assertTrue(manifest["profiles"]["observer"]["shadow_only"])
+        command = next(command for command in self.commands if "apps/loPredCtrlAcc" in command)
+        self.assertIn("DDSPC_SHADOW_ONLY=yes", command)
+        self.assertIn("native-observe", command)
+        self.assertTrue((self.output / "observer/apps/loPredCtrlAcc/loPredCtrlAcc_native_observe").is_file())
 
     def test_shadow_only_make_guard_survives_explicit_compiler_flags(self):
         """Evaluate the real app Makefile with a harmless include stub, never invoking a compiler/native target."""
