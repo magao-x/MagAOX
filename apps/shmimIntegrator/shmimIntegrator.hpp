@@ -510,14 +510,18 @@ inline int shmimIntegrator::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_fileSaver, "integrator.fileSaver" );
 
     if( !m_nAverageDefault || !mx::math::isFinite( m_avgTime ) || m_avgTime < 0 )
+    {
         return log<software_error, -1>( { __FILE__, __LINE__, "invalid integrator configuration" } );
+    }
     return 0;
 }
 
 inline void shmimIntegrator::loadConfig()
 {
     if( loadConfigImpl( config ) < 0 )
+    {
         m_shutdown = 1;
+    }
 }
 
 inline int shmimIntegrator::appStartup()
@@ -628,7 +632,9 @@ inline int shmimIntegrator::appLogic()
     TELEMETER_APP_LOGIC;
 
     if( findMatchingDark() < 0 )
+    {
         log<software_error>( { __FILE__, __LINE__, "saved-image lookup failed" } );
+    }
 
     std::lock_guard<std::mutex> lock( m_indiMutex );
     SHMIMMONITORT_UPDATE_INDI( shmimMonitorT );
@@ -644,7 +650,7 @@ inline void shmimIntegrator::updateIntegratorINDI()
     bool     running, valid;
     unsigned average, update;
     float    time;
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_imageMutex );
         running = m_running;
         valid   = m_imageValid;
@@ -658,7 +664,9 @@ inline void shmimIntegrator::updateIntegratorINDI()
                            running ? pcf::IndiElement::On : pcf::IndiElement::Off,
                            running ? INDI_BUSY : INDI_IDLE );
     if( m_fileSaver )
+    {
         updateIfChanged( m_indiP_imageValid, "flag", valid ? "yes" : "no" );
+    }
     updateIfChanged( m_indiP_nAverage, "current", average, INDI_IDLE );
     updateIfChanged( m_indiP_nAverage, "target", average, INDI_IDLE );
     updateIfChanged( m_indiP_avgTime, "current", time, INDI_IDLE );
@@ -670,7 +678,7 @@ inline void shmimIntegrator::updateIntegratorINDI()
 
 inline int shmimIntegrator::appShutdown()
 {
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_imageMutex );
         m_stopping = true;
         m_updated  = false;
@@ -689,12 +697,16 @@ inline shmimIntegrator::imageInfo shmimIntegrator::describeImage( uint32_t width
 {
     // eigenCube uses signed int products internally, including in resize().
     if( width == 0 || height == 0 || width > std::numeric_limits<int>::max() / height )
+    {
         return {};
+    }
     auto   setFrame = getPixFramePointer<realT, false>( type );
     auto   addFrame = getPixFramePointer<realT, true>( type );
     size_t pixels   = size_t( width ) * height;
     if( !setFrame || !addFrame || pixels > size_t( std::numeric_limits<ptrdiff_t>::max() ) / sizeof( realT ) )
+    {
         return {};
+    }
     return { width, height, pixels, pixels * ImageStreamIO_typesize( type ), setFrame, addFrame };
 }
 
@@ -709,7 +721,9 @@ inline void shmimIntegrator::requestReconfigure()
     m_sinceUpdate = 0;
     m_imageValid  = false;
     if( m_fileSaver && !m_running )
+    {
         m_stateStringChanged = true;
+    }
     m_imageCondition.notify_all();
 }
 
@@ -721,7 +735,9 @@ inline int shmimIntegrator::allocate( const dev::shmimT &tag )
     m_source       = describeImage( shmimMonitorT::m_width, shmimMonitorT::m_height, shmimMonitorT::m_dataType );
     m_sourceFailed = !m_source.m_pixels;
     if( m_sourceFailed )
+    {
         return log<software_error, -1>( { __FILE__, __LINE__, "invalid source geometry or datatype" } );
+    }
 
     m_staged.resize( m_source.m_bytes );
 
@@ -735,9 +751,13 @@ inline int shmimIntegrator::processImage( void *source, const dev::shmimT &tag )
     std::string                  savedState;
     std::unique_lock<std::mutex> lock( m_imageMutex );
     if( m_stopping || !m_running || !m_prepared || m_activeGeneration != m_generation || !m_source.m_pixels )
+    {
         return 0;
+    }
     if( !source )
+    {
         return -1;
+    }
 
     // Read the source once and convert from the private copy, see m_staged
     memcpy( m_staged.data(), source, m_staged.size() );
@@ -746,32 +766,48 @@ inline int shmimIntegrator::processImage( void *source, const dev::shmimT &tag )
     if( m_activeUpdate == 0 )
     {
         if( m_updated || m_inFlight )
+        {
             return 0;
+        }
         if( m_sinceUpdate == 0 )
+        {
             m_avgImage.setZero();
+        }
         m_source.m_addFrame( m_avgImage.data(), source, m_source.m_pixels );
         if( ++m_sinceUpdate < m_activeAverage )
+        {
             return 0;
+        }
     }
     else
     {
         m_source.m_setFrame( m_accumImages.image( m_currImage ).data(), source, m_source.m_pixels );
         m_currImage = ( m_currImage + 1 ) % m_activeAverage;
         if( m_nprocessed < m_activeAverage )
+        {
             ++m_nprocessed;
+        }
         if( m_nprocessed < m_activeAverage )
+        {
             return 0;
+        }
         // Saturation preserves cadence when the output consumer is stalled.
         if( m_sinceUpdate < m_activeUpdate )
+        {
             ++m_sinceUpdate;
+        }
         if( m_sinceUpdate < m_activeUpdate || m_updated || m_inFlight )
+        {
             return 0;
+        }
         m_avgImage.setZero();
         for( unsigned plane = 0; plane < m_activeAverage; ++plane )
         {
             const realT *data = m_accumImages.image( plane ).data();
             for( size_t n = 0; n < m_source.m_pixels; ++n )
+            {
                 m_avgImage.data()[n] += data[n];
+            }
         }
     }
 
@@ -782,11 +818,17 @@ inline int shmimIntegrator::processImage( void *source, const dev::shmimT &tag )
     bool secondDark = m_activeUpdate == 0 && m_dark2.m_set && m_dark2.m_info.m_width == m_source.m_width &&
                       m_dark2.m_info.m_height == m_source.m_height;
     if( firstDark && secondDark )
+    {
         m_avgImage -= m_dark.m_image + m_dark2.m_image;
+    }
     else if( firstDark )
+    {
         m_avgImage -= m_dark.m_image;
+    }
     else if( secondDark )
+    {
         m_avgImage -= m_dark2.m_image;
+    }
 
     m_updated     = true;
     m_sinceUpdate = 0;
@@ -806,7 +848,9 @@ inline int shmimIntegrator::processImage( void *source, const dev::shmimT &tag )
     }
     lock.unlock();
     if( saved.size() )
+    {
         return saveImage( saved, savedState );
+    }
     return 0;
 }
 
@@ -819,7 +863,9 @@ inline int shmimIntegrator::allocateDark( darkFrame &dark, uint32_t width, uint3
     dark.m_info    = {};
     imageInfo info = describeImage( width, height, type );
     if( !info.m_pixels )
+    {
         return log<software_error, -1>( { __FILE__, __LINE__, "invalid dark geometry or datatype" } );
+    }
     try
     {
         imageT image( width, height );
@@ -839,9 +885,13 @@ inline int shmimIntegrator::processDark( darkFrame &dark, void *source )
 {
     std::lock_guard<std::mutex> lock( m_imageMutex );
     if( m_stopping )
+    {
         return 0;
+    }
     if( !source || !dark.m_info.m_pixels )
+    {
         return -1;
+    }
     dark.m_info.m_setFrame( dark.m_image.data(), source, dark.m_info.m_pixels );
     dark.m_set = true;
     return 0;
@@ -875,10 +925,12 @@ inline int shmimIntegrator::findMatchingDark()
 {
     std::string stateString;
     uint64_t    generation, revision;
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_imageMutex );
         if( m_stopping || m_running || !m_fileSaver || !m_stateStringChanged )
+        {
             return 0;
+        }
         if( !m_stateStringValid )
         {
             m_imageValid         = false;
@@ -893,8 +945,10 @@ inline int shmimIntegrator::findMatchingDark()
     std::vector<std::string> names;
     mx::error_t              error = mx::ioutils::getFileNames( names, m_fileSaveDir, m_configName, "", ".fits" );
     if( error != mx::error_t::noerror )
+    {
         return log<text_log, -1>( std::string( "Could not list saved averages: " ) + mx::errorMessage( error ),
                                   logPrio::LOG_ERROR );
+    }
 
     // Filenames are sorted oldest first; keep the existing newest-match policy.
     for( auto name = names.rbegin(); name != names.rend(); ++name )
@@ -903,11 +957,15 @@ inline int shmimIntegrator::findMatchingDark()
         size_t      begin = m_configName.size() + 1;
         size_t      end   = stem.find( "__T" );
         if( end == std::string::npos || end < begin + 2 || stem.substr( begin, end - begin ) != stateString )
+        {
             continue;
+        }
         imageT                    image;
         mx::fits::fitsFile<realT> file;
         if( file.read( image, *name ) != mx::error_t::noerror )
+        {
             return log<software_error, -1>( { __FILE__, __LINE__, "could not read saved average" } );
+        }
         return installSavedImage( image, generation, revision );
     }
 
@@ -925,9 +983,13 @@ inline int shmimIntegrator::installSavedImage( imageT &image, uint64_t generatio
     std::lock_guard<std::mutex> lock( m_imageMutex );
     if( m_stopping || m_running || m_sourceFailed || m_dark.m_failed || m_dark2.m_failed ||
         generation != m_generation || revision != m_stateRevision || !m_stateStringValid )
+    {
         return 0;
+    }
     if( image.rows() <= 0 || image.cols() <= 0 || image.rows() > std::numeric_limits<int>::max() / image.cols() )
+    {
         return -1;
+    }
     if( m_source.m_pixels && ( image.rows() != m_source.m_width || image.cols() != m_source.m_height ) )
     {
         m_imageValid         = false;
@@ -947,18 +1009,26 @@ inline int shmimIntegrator::saveImage( const imageT &image, const std::string &s
 {
     timespec timestamp;
     if( clock_gettime( CLOCK_REALTIME, &timestamp ) < 0 )
+    {
         return log<software_error, -1>( { __FILE__, __LINE__, errno, "clock_gettime" } );
+    }
     tm utc;
     if( !gmtime_r( &timestamp.tv_sec, &utc ) )
+    {
         return log<software_error, -1>( { __FILE__, __LINE__, errno, "gmtime_r" } );
+    }
     char timeString[32];
     if( strftime( timeString, sizeof( timeString ), "%Y%m%d%H%M%S", &utc ) == 0 )
+    {
         return -1;
+    }
     std::string name = m_fileSaveDir + "/" + m_configName + "_" + stateString + "__T" + timeString +
                        std::format( "{:09d}", timestamp.tv_nsec ) + ".fits";
     mx::fits::fitsFile<realT> file;
     if( file.write( name, image ) != mx::error_t::noerror )
+    {
         return log<software_error, -1>( { __FILE__, __LINE__, "could not write saved average" } );
+    }
     log<text_log>( "Wrote " + name );
     return 0;
 }
@@ -968,33 +1038,45 @@ inline int shmimIntegrator::configureAcquisition()
     std::lock_guard<std::mutex> lock( m_imageMutex );
     if( m_stopping || m_claimed || m_sourceFailed || m_dark.m_failed || m_dark2.m_failed ||
         ( !m_source.m_pixels && !m_savedImage ) )
+    {
         return -1;
+    }
     if( !m_prepared )
     {
         unsigned average = m_nAverage;
         if( !mx::math::isFinite( m_avgTime ) || m_avgTime < 0 || !mx::math::isFinite( m_fps ) || m_fps < 0 )
+        {
             return -1;
+        }
         if( m_avgTime > 0 )
         {
             if( m_fps > 0 )
             {
                 double count = double( m_avgTime ) * m_fps;
                 if( count > std::numeric_limits<unsigned>::max() )
+                {
                     return -1;
+                }
                 average = count < 1 ? 1 : static_cast<unsigned>( count );
             }
             else
+            {
                 average = m_nAverageDefault;
+            }
         }
         if( average == 0 || ( m_nUpdate && m_source.m_pixels > size_t( std::numeric_limits<int>::max() ) / average ) )
+        {
             return log<software_error, -1>( { __FILE__, __LINE__, "invalid averaging buffer size" } );
+        }
         try
         {
             if( !m_savedImage )
             {
                 mx::improc::eigenCube<realT> history;
                 if( m_nUpdate )
+                {
                     history.resize( m_source.m_width, m_source.m_height, average );
+                }
                 imageT image( m_source.m_width, m_source.m_height );
                 image.setZero();
                 // Commit only after every allocation succeeds.
@@ -1003,7 +1085,9 @@ inline int shmimIntegrator::configureAcquisition()
                 m_avgImage    = std::move( image );
             }
             else
+            {
                 m_claimedImage.resize( m_avgImage.rows(), m_avgImage.cols() );
+            }
         }
         catch( const std::exception &error )
         {
@@ -1025,7 +1109,9 @@ inline float shmimIntegrator::fps()
 {
     std::lock_guard<std::mutex> lock( m_imageMutex );
     if( m_fps > 0 && m_nAverage > 0 && ( m_running || m_continuous ) )
+    {
         return m_fps / m_nAverage;
+    }
     return 1.0;
 }
 
@@ -1033,7 +1119,9 @@ inline int shmimIntegrator::startAcquisition()
 {
     std::lock_guard<std::mutex> lock( m_imageMutex );
     if( m_stopping || !m_prepared || m_configuredGeneration != m_generation )
+    {
         return -1;
+    }
     m_activeGeneration = m_configuredGeneration;
     return 0;
 }
@@ -1043,9 +1131,14 @@ inline int shmimIntegrator::acquireAndCheckValid()
     std::unique_lock<std::mutex> lock( m_imageMutex );
     m_imageCondition.wait_for( lock,
                                std::chrono::seconds( 1 ),
-                               [this]() { return m_stopping || m_activeGeneration != m_generation || m_updated; } );
+                               [this]()
+                               {
+                                   return m_stopping || m_activeGeneration != m_generation || m_updated;
+                               } );
     if( m_stopping )
+    {
         return -1;
+    }
     if( m_activeGeneration != m_generation || !m_prepared )
     {
         // This base flag is written only by the output worker in this app.
@@ -1053,9 +1146,13 @@ inline int shmimIntegrator::acquireAndCheckValid()
         return 1;
     }
     if( !m_updated || m_claimed )
+    {
         return 1;
+    }
     if( clock_gettime( CLOCK_REALTIME, &m_currImageTimestamp ) < 0 )
+    {
         return -1;
+    }
     m_claimedImage = m_avgImage;
     m_claimed      = true;
     m_inFlight     = true;
@@ -1070,7 +1167,9 @@ inline int shmimIntegrator::loadImageIntoStream( void *destination )
     {
         // The base sets write before calling us and does not clear it on failure.
         if( frameGrabberT::m_imageStream )
+        {
             frameGrabberT::m_imageStream->md->write = 0;
+        }
         std::lock_guard<std::mutex> lock( m_imageMutex );
         m_inFlight = false;
         m_claimed  = false;
@@ -1101,16 +1200,22 @@ INDI_NEWCALLBACK_DEFN( shmimIntegrator, m_indiP_nAverage )( const pcf::IndiPrope
     std::lock_guard<std::mutex> indiLock( m_indiMutex );
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_nAverage, ipRecv );
     if( ipRecv.getType() != pcf::IndiProperty::Number || !( ipRecv.find( "target" ) || ipRecv.find( "current" ) ) )
+    {
         return -1;
+    }
     double target;
     if( !readNumber( ipRecv[ipRecv.find( "target" ) ? "target" : "current"], target ) || target < 1 ||
         target > std::numeric_limits<unsigned>::max() || std::floor( target ) != target )
+    {
         return -1;
-    { // mutex scope
+    }
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_imageMutex );
         m_nAverage = static_cast<unsigned>( target );
         if( m_avgTime > 0 && m_fps > 0 )
+        {
             m_avgTime = m_nAverage / m_fps;
+        }
         requestReconfigure();
     }
     updateIntegratorINDI();
@@ -1123,12 +1228,16 @@ INDI_NEWCALLBACK_DEFN( shmimIntegrator, m_indiP_avgTime )( const pcf::IndiProper
     std::lock_guard<std::mutex> indiLock( m_indiMutex );
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_avgTime, ipRecv );
     if( ipRecv.getType() != pcf::IndiProperty::Number || !( ipRecv.find( "target" ) || ipRecv.find( "current" ) ) )
+    {
         return -1;
+    }
     double target;
     if( !readNumber( ipRecv[ipRecv.find( "target" ) ? "target" : "current"], target ) || target < 0 ||
         target > std::numeric_limits<float>::max() )
+    {
         return -1;
-    { // mutex scope
+    }
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_imageMutex );
         m_avgTime = target;
         requestReconfigure();
@@ -1143,12 +1252,16 @@ INDI_NEWCALLBACK_DEFN( shmimIntegrator, m_indiP_nUpdate )( const pcf::IndiProper
     std::lock_guard<std::mutex> indiLock( m_indiMutex );
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_nUpdate, ipRecv );
     if( ipRecv.getType() != pcf::IndiProperty::Number || !( ipRecv.find( "target" ) || ipRecv.find( "current" ) ) )
+    {
         return -1;
+    }
     double target;
     if( !readNumber( ipRecv[ipRecv.find( "target" ) ? "target" : "current"], target ) || target < 0 ||
         target > std::numeric_limits<unsigned>::max() || std::floor( target ) != target )
+    {
         return -1;
-    { // mutex scope
+    }
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_imageMutex );
         m_nUpdate = static_cast<unsigned>( target );
         requestReconfigure();
@@ -1163,24 +1276,34 @@ INDI_NEWCALLBACK_DEFN( shmimIntegrator, m_indiP_startAveraging )( const pcf::Ind
     std::lock_guard<std::mutex> indiLock( m_indiMutex );
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_startAveraging, ipRecv );
     if( !ipRecv.find( "toggle" ) )
+    {
         return 0;
+    }
     auto value = ipRecv["toggle"].getSwitchState();
     if( value != pcf::IndiElement::On && value != pcf::IndiElement::Off )
+    {
         return 0;
-    { // mutex scope
+    }
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_imageMutex );
         ++m_stateRevision;
         if( value == pcf::IndiElement::On )
         {
             if( !m_running )
+            {
                 requestReconfigure();
+            }
             if( m_fileSaver && !m_continuous )
+            {
                 m_stateStringChanged = false;
+            }
             m_stateStringValidOnStart = m_stateStringValid;
             m_running                 = true;
         }
         else
+        {
             m_running = false;
+        }
     }
     updateIntegratorINDI();
     return 0;
@@ -1191,11 +1314,15 @@ INDI_SETCALLBACK_DEFN( shmimIntegrator, m_indiP_fpsSource )( const pcf::IndiProp
     std::lock_guard<std::mutex> indiLock( m_indiMutex );
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_fpsSource, ipRecv );
     if( !ipRecv.find( "current" ) )
+    {
         return 0;
+    }
     double value;
     if( !readNumber( ipRecv["current"], value ) || value < 0 || value > std::numeric_limits<float>::max() )
+    {
         return -1;
-    { // mutex scope
+    }
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_imageMutex );
         if( static_cast<float>( value ) != m_fps )
         {
@@ -1210,7 +1337,7 @@ INDI_SETCALLBACK_DEFN( shmimIntegrator, m_indiP_stateSource )( const pcf::IndiPr
 {
     std::lock_guard<std::mutex> indiLock( m_indiMutex );
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_stateSource, ipRecv );
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_imageMutex );
         bool                        changed = false;
         if( ipRecv.find( "valid" ) )
@@ -1232,7 +1359,9 @@ INDI_SETCALLBACK_DEFN( shmimIntegrator, m_indiP_stateSource )( const pcf::IndiPr
             m_stateStringChanged = true;
             // An old saved image that has not been claimed must not be newly published.
             if( m_savedImage )
+            {
                 requestReconfigure();
+            }
         }
     }
     updateIntegratorINDI();
