@@ -5,13 +5,14 @@ include $(SELF_DIR)/../../Make/common.mk
 
 TARGET = xctrl
 
-# xctrl writes MagAO-X binary logs: the text_log code and schema come from the libMagAOX build
+# xctrl writes MagAO-X binary logs: the text_log code and schema come from the libMagAOX build.  flatlogs includes
+# mxlib headers, which need mxlib's flags (its include/mx directory and C++ standard) from pkg-config, as every app has
 LOGGEN = ../../libMagAOX/logger/generated/logCodes.hpp ../../libMagAOX/logger/types/generated/string_log_generated.h
 
 all: $(TARGET)
 
 $(TARGET): xctrl.cpp xctrl.hpp xctrlLog.hpp ../../libMagAOX/common/paths.hpp ../../libMagAOX/common/defaults.hpp $(LOGGEN)
-	$(CXX) -std=c++17 -O2 -Wall -Wextra $(INCLUDES) -o $@ xctrl.cpp
+	$(CXX) $(MXLIB_CFLAGS) -O2 -Wall -Wextra $(INCLUDES) -o $@ xctrl.cpp
 
 $(LOGGEN):
 	@echo "xctrl needs $@: build libMagAOX first (make libs_all in the MagAOX directory)"; exit 1
