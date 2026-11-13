@@ -2,6 +2,9 @@
 allall: all
 
 NEED_CUDA = no
+# ADC records and shared windows require C++20 even when no local/common.mk sets the standard.
+CXXSTD ?= -std=c++20
+export CXXSTD
 OTHER_HEADERS = adc_features.hpp shadow_policy.hpp shadow_pipeline.hpp adc_input.hpp adc_reader.hpp ar_controller.hpp shadow_controller.hpp causal_input.hpp
 OTHER_OBJS = adc_features.o shadow_policy.o shadow_pipeline.o adc_input.o adc_reader.o recursive_least_squares.o qrd_rls.o ar_controller.o utils.o shadow_controller.o causal_input.o
 TARGET = loPredCtrlAcc

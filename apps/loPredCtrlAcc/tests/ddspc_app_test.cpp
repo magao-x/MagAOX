@@ -679,9 +679,11 @@ TEST_CASE( "Stage 1 ADC observation preserves shadow output and training inhibit
     AdcTransportFixture             source( "ddspc-adc-app" ); // Fake API and private ordinary file only.
     MagAOX::app::loPredCtrlAcc_test app;
     app.configure( true );
-    app.config.m_values["adc.enabled"]    = "1";
-    app.config.m_values["adc.shmimName"]  = "ddspc-adc-app";
-    app.config.m_values["adc.max_age_us"] = "2000000";
+    app.config.m_values["adc.enabled"]                = "1";
+    app.config.m_values["adc.shmimName"]              = "ddspc-adc-app";
+    app.config.m_values["adc.max_age_us"]             = "2000000";
+    app.config.m_values["parameters.shadow_pipeline"] = "0";
+    app.config.m_values["shmimMonitor.shmimName"]     = "";
     REQUIRE( app.loadConfigImpl( app.config ) == 0 );
     REQUIRE( app.appStartup() == 0 );
     const auto end = std::chrono::steady_clock::now() + std::chrono::seconds( 1 );
@@ -698,6 +700,19 @@ TEST_CASE( "Stage 1 ADC observation preserves shadow output and training inhibit
     REQUIRE( app.m_indiP_adcSource["sample_counter"].get<std::string>() == "1" );
     REQUIRE( app.m_indiP_adcSource["acquired_real_ns"].get<std::string>() ==
              std::to_string( app.m_adcReader->status().m_latest.m_frame.m_acquiredRealNs ) );
+    // ADC acquisition and diagnostics succeed without receiving any WFS or applied-command record.
+    REQUIRE( app.appLogic() == 0 );
+    REQUIRE( app.m_indiP_ddspcData["wfs_valid"].get<double>() == 0 );
+    REQUIRE( app.m_indiP_ddspcData["applied_valid"].get<double>() == 0 );
+    REQUIRE( app.m_indiP_ddspcData["timing_valid"].get<double>() == 0 );
+    for( auto mode : { DDSPC::ShadowMode::Standard, DDSPC::ShadowMode::AccelAssisted } )
+    {
+        const auto status = app.m_shadowController->status( mode );
+        REQUIRE_FALSE( status.m_ready );
+        REQUIRE_FALSE( status.m_predictionValid );
+        REQUIRE_FALSE( status.m_trainingEnabled );
+        REQUIRE( status.m_updates == 0 );
+    }
     app.unverifiedWfs();
     REQUIRE_FALSE( app.m_shadowController->validity().m_accelValid );
     REQUIRE( app.m_shadowController->status( DDSPC::ShadowMode::Standard ).m_updates == 0 );

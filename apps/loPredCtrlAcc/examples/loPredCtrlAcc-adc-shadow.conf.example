@@ -1,10 +1,11 @@
-# Stage 1 ADC capture in output-inhibited shadow mode. See ../ADC_INPUT.md.
-# NOT a working live accelerometer-assisted training configuration.
+# ADC-only capture in output-inhibited shadow mode. See ../ADC_EXAO2_TESTING.md.
+# Models deliberately remain unqualified; no WFS or applied-command source is configured.
 # Use a freshly rebuilt DDSPC_SHADOW_ONLY=yes binary with a unique -n name.
 # ADC capture is implemented; verified WFS exposure and applied-command adapters remain absent.
 
 [parameters]
 shadow = true
+shadow_pipeline = false
 shadow_min_updates = 0
 gain = 0.3
 copy_gain = 1.0
@@ -28,8 +29,8 @@ accel_history = 5
 accel_normalize = false
 
 [shmimMonitor]
-# Must be independently identified as the correct FLOAT modal residual, height1, width>=2; not the raw camera.
-shmimName = REPLACE_WITH_VERIFIED_MODAL_WFS_STREAM
+# Empty name leaves the WFS monitor waiting without attaching any image; ADC capture is independent.
+shmimName =
 threadPrio = 0
 cpuset =
 getExistingFirst = false
