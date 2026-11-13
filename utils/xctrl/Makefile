@@ -17,7 +17,8 @@ $(TARGET): xctrl.cpp xctrl.hpp xctrlLog.hpp ../../libMagAOX/common/paths.hpp ../
 $(LOGGEN):
 	@echo "xctrl needs $@: build libMagAOX first (make libs_all in the MagAOX directory)"; exit 1
 
-# bash completion of commands, options, roles and apps: new shells load it from here the first time xctrl is completed
+# bash completion of commands, options, roles and apps: bash-completion loads it from here the first time xctrl is
+# completed, for users whose ~/.bashrc enables bash-completion; the profile.d hook loads it for every other user
 COMPLETIONS_DIR ?= /usr/share/bash-completion/completions
 
 # setuid root so xsup and group magaox can start and stop apps; configuration changes still need sudo
@@ -27,6 +28,7 @@ install: all
 	sudo ln -sf $(BIN_PATH)/$(TARGET) /usr/local/bin/$(TARGET)
 	sudo install -d $(COMPLETIONS_DIR)
 	sudo install -m 0644 xctrl.bash-completion $(COMPLETIONS_DIR)/$(TARGET)
+	sudo install -m 0644 xctrl_completion.sh /etc/profile.d/xctrl_completion.sh
 
 .PHONY: clean
 clean:

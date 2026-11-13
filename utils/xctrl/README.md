@@ -191,8 +191,10 @@ After the start limit (`startLimitBurst` starts within `startLimitIntervalSec`) 
 
 # Tab completion
 
-`make install` also installs `xctrl.bash-completion` as `/usr/share/bash-completion/completions/xctrl`, which new
-bash shells load the first time `xctrl` is completed (this needs the `bash-completion` package, standard on Ubuntu).
+`make install` also installs `xctrl.bash-completion` as `/usr/share/bash-completion/completions/xctrl`, and
+`/etc/profile.d/xctrl_completion.sh`, which loads it in every bash login shell. So completion works for every user
+in a new login shell, e.g. a new ssh session or `su - USER`, whether or not their `~/.bashrc` enables the
+`bash-completion` package. In a shell opened before the install, `source /etc/profile.d/xctrl_completion.sh`.
 `xctrl <TAB>` lists the commands, and `xctrl start CO2<TAB>` completes, or lists, the registered apps of the role
 starting with `CO2`; likewise for every command that takes app names, also after `sudo`. `enable`, `disable` and
 `delete` also offer the apps in the proclist, `add` the apps with a `.conf` not yet in the proclist and then the
