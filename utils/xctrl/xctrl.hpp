@@ -32,6 +32,8 @@
 
 #include "../../libMagAOX/common/paths.hpp"
 
+#include "xctrlLog.hpp"
+
 /** \defgroup xctrl xctrl: MagAO-X systemd process control
  * \brief Run the apps listed in a role's proclist as systemd services.
  *
@@ -318,7 +320,8 @@ int writeIfChanged( const std::string &path,    /**< [in] the file */
  */
 int runCommand( const std::vector<std::string> &argv, /**< [in] the command and its arguments */
                 std::string *output   = nullptr,      /**< [out] [optional] its standard output, else inherited */
-                bool         asCaller = false /**< [in] [optional] run as the calling user, not as root */ );
+                bool         asCaller = false,        /**< [in] [optional] run as the calling user, not as root */
+                bool         stdErr   = false /**< [in] [optional] capture its standard error in output too */ );
 
 /// How an app's state is reported
 /**
@@ -371,9 +374,10 @@ class xCtrl
     std::string m_prog{ "xctrl" };      ///< the name we were run as
     bool        m_color{ false };       ///< color the output, when it is a terminal and NO_COLOR is not set
     bool m_privileged{ false }; ///< may change the systemd configuration: root, or a user who can write the proclist
-    bool m_proclistChecked{ false };  ///< warnIfProclistChanged() has run
-    std::string              m_verb;  ///< the command
-    std::vector<std::string> m_names; ///< the app names given
+    bool m_proclistChecked{ false };    ///< warnIfProclistChanged() has run
+    std::string              m_cmdLine; ///< the command line, for the log
+    std::string              m_verb;    ///< the command
+    std::vector<std::string> m_names;   ///< the app names given
 
     ///@}
 
@@ -1164,7 +1168,7 @@ inline int writeIfChanged( const std::string &path, const std::string &content, 
     std::filesystem::create_directories( std::filesystem::path( path ).parent_path(), ec );
     if( ec )
     {
-        std::cerr << "xctrl: creating directory for " << path << ": " << ec.message() << "\n";
+        say( msgLevel::error ) << "creating directory for " << path << ": " << ec.message();
         return -1;
     }
 
@@ -1174,20 +1178,20 @@ inline int writeIfChanged( const std::string &path, const std::string &content, 
         f << content;
         if( !f.good() )
         {
-            std::cerr << "xctrl: writing " << tmp << ": " << strerror( errno ) << "\n";
+            say( msgLevel::error ) << "writing " << tmp << ": " << strerror( errno );
             return -1;
         }
     }
     if( chmod( tmp.c_str(), mode ) < 0 || rename( tmp.c_str(), path.c_str() ) < 0 )
     {
-        std::cerr << "xctrl: installing " << path << ": " << strerror( errno ) << "\n";
+        say( msgLevel::error ) << "installing " << path << ": " << strerror( errno );
         unlink( tmp.c_str() );
         return -1;
     }
     return 1;
 }
 
-inline int runCommand( const std::vector<std::string> &argv, std::string *output, bool asCaller )
+inline int runCommand( const std::vector<std::string> &argv, std::string *output, bool asCaller, bool stdErr )
 {
     int pfd[2] = { -1, -1 };
     if( output && pipe( pfd ) < 0 )
@@ -1205,6 +1209,10 @@ inline int runCommand( const std::vector<std::string> &argv, std::string *output
         if( output )
         {
             dup2( pfd[1], 1 );
+            if( stdErr )
+            {
+                dup2( pfd[1], 2 );
+            }
             close( pfd[0] );
             close( pfd[1] );
         }
@@ -1224,7 +1232,7 @@ inline int runCommand( const std::vector<std::string> &argv, std::string *output
         }
         args.push_back( nullptr );
         execvp( args[0], args.data() );
-        std::cerr << "xctrl: running " << argv[0] << ": " << strerror( errno ) << "\n";
+        say( msgLevel::error ) << "running " << argv[0] << ": " << strerror( errno );
         _exit( 127 );
     }
 
@@ -1426,13 +1434,32 @@ inline int xCtrl::settlePrivileges()
         setenv( "PAGER", "cat", 1 );
     }
 
+    // every command but looking is logged; a real run opens the log as root, before privileges are dropped, so any
+    // user's commands go to the one log.  A test run logs under --top as the caller, a dry run not at all.
+    static const std::set<std::string> look = { "status", "lstatus", "peek", "inspect" };
+    bool logged  = !look.count( m_verb ) && !m_dryRun && !( testing && m_top == std::string( MAGAOX_path ) );
+    auto openLog = [&]()
+    {
+        if( xlog().open( m_top + "/" + MAGAOX_logRelPath ) == 0 )
+        {
+            struct passwd *pw = getpwuid( getuid() );
+            xlog().message( msgLevel::info,
+                            m_prog + m_cmdLine + " (user " + ( pw ? pw->pw_name : std::to_string( getuid() ) ) + ")",
+                            false );
+        }
+    };
+    if( logged && !testing )
+    {
+        openLog();
+    }
+
     // access() checks the real user, the one who ran us, not our setuid root
     m_privileged = getuid() == 0 || access( proclistPath().c_str(), W_OK ) == 0;
     if( admin.count( m_verb ) && !m_privileged )
     {
         if( errno == ENOENT )
         {
-            std::cerr << m_prog << ": error: no proclist " << proclistPath() << " for role " << m_role << "\n";
+            say( msgLevel::error ) << "no proclist " << proclistPath() << " for role " << m_role;
             return -1;
         }
         struct passwd *pw   = getpwuid( getuid() );
@@ -1441,9 +1468,8 @@ inline int xCtrl::settlePrivileges()
         {
             what += " " + n;
         }
-        std::cerr << m_prog << ": error: cannot " << what << " as user "
-                  << ( pw ? pw->pw_name : std::to_string( getuid() ) ) << ": " << m_verb
-                  << " requires permissions or sudo\n";
+        say( msgLevel::error ) << "cannot " << what << " as user " << ( pw ? pw->pw_name : std::to_string( getuid() ) )
+                               << ": " << m_verb << " requires permissions or sudo";
         return -1;
     }
 
@@ -1460,7 +1486,7 @@ inline int xCtrl::settlePrivileges()
     {
         if( !operatorAllowed() )
         {
-            std::cerr << m_prog << ": only xsup and members of group magaox can " << m_verb << " apps\n";
+            say( msgLevel::error ) << "only xsup and members of group magaox can " << m_verb << " apps";
             return -1;
         }
         keepRoot = true;
@@ -1477,15 +1503,24 @@ inline int xCtrl::settlePrivileges()
         uid_t u = getuid();
         if( setresgid( g, g, g ) < 0 || setresuid( u, u, u ) < 0 )
         {
-            std::cerr << m_prog << ": dropping privileges: " << strerror( errno ) << "\n";
+            say( msgLevel::error ) << "dropping privileges: " << strerror( errno );
             return -1;
         }
+    }
+    if( logged && testing )
+    {
+        openLog();
     }
     return 0;
 }
 
 inline int xCtrl::parseArgs( int argc, char **argv )
 {
+    for( int i = 1; i < argc; ++i )
+    {
+        m_cmdLine += std::string( " " ) + argv[i];
+    }
+
     bool endOpts = false;
     for( int i = 1; i < argc; ++i )
     {
@@ -1494,7 +1529,7 @@ inline int xCtrl::parseArgs( int argc, char **argv )
         {
             if( i + 1 >= argc )
             {
-                std::cerr << m_prog << ": " << a << " requires a value\n";
+                say( msgLevel::error ) << a << " requires a value";
                 return false;
             }
             dest = argv[++i];
@@ -1565,7 +1600,7 @@ inline int xCtrl::parseArgs( int argc, char **argv )
         }
         else
         {
-            std::cerr << m_prog << ": unknown option " << a << "; try --help\n";
+            say( msgLevel::error ) << "unknown option " << a << "; try --help";
             return -1;
         }
     }
@@ -1594,24 +1629,24 @@ inline int xCtrl::parseArgs( int argc, char **argv )
 
     if( m_verb.empty() )
     {
-        std::cerr << m_prog << ": missing command; try --help\n";
+        say( msgLevel::error ) << "missing command; try --help";
         return -1;
     }
     if( m_top != MAGAOX_path && m_sysroot.empty() && !m_dryRun )
     {
-        std::cerr << m_prog << ": --top is for testing, with --sysroot or --dry-run\n";
+        say( msgLevel::error ) << "--top is for testing, with --sysroot or --dry-run";
         return -1;
     }
     if( m_role.empty() || !validName( m_role ) )
     {
-        std::cerr << m_prog << ": missing or invalid role [" << m_role << "]: give -r ROLE or set MAGAOX_ROLE\n";
+        say( msgLevel::error ) << "missing or invalid role [" << m_role << "]: give -r ROLE or set MAGAOX_ROLE";
         return -1;
     }
     for( const auto &n : m_names )
     {
         if( !validName( n ) && m_verb != "boot" && m_verb != "add" )
         {
-            std::cerr << m_prog << ": invalid app name [" << n << "]\n";
+            say( msgLevel::error ) << "invalid app name [" << n << "]";
             return -1;
         }
     }
@@ -1635,11 +1670,28 @@ inline int xCtrl::systemctl( const std::vector<std::string> &args, bool offline 
 
     if( m_dryRun || ( !m_sysroot.empty() && !offline ) )
     {
-        std::cout << ( m_dryRun ? "[dry-run] " : "[sysroot, not run] " ) << line << "\n";
+        say( msgLevel::info ) << ( m_dryRun ? "[dry-run] " : "[sysroot, not run] " ) << line;
         return 0;
     }
-    std::cout << "+ " << line << std::endl;
-    return runCommand( argv );
+
+    // what systemctl says goes to the console and the log too, as errors if it failed
+    say( msgLevel::action ) << "+ " << line;
+    std::string        out;
+    int                rc = runCommand( argv, &out, false, true );
+    std::istringstream ss( out );
+    for( std::string l; std::getline( ss, l ); )
+    {
+        say( rc == 0 ? msgLevel::info : msgLevel::error ) << l;
+    }
+    if( rc == 0 )
+    {
+        xlog().message( msgLevel::success, line + ": done", false );
+    }
+    else
+    {
+        say( msgLevel::error ) << line << " failed" << ( rc > 0 ? " with exit status " + std::to_string( rc ) : "" );
+    }
+    return rc;
 }
 
 inline std::vector<std::string> xCtrl::registered() const
@@ -1684,7 +1736,7 @@ inline std::vector<appEntry> xCtrl::namedApps()
     bool                  ok = !m_names.empty();
     if( !ok )
     {
-        std::cerr << m_prog << ": " << m_verb << " needs app names\n";
+        say( msgLevel::error ) << m_verb << " needs app names";
     }
     for( const auto &n : m_names )
     {
@@ -1695,8 +1747,8 @@ inline std::vector<appEntry> xCtrl::namedApps()
         }
         else
         {
-            std::cerr << m_prog << ": " << n << " is not registered: add it to " << proclistPath()
-                      << " and run sudo xctrl register\n";
+            say( msgLevel::error ) << n << " is not registered: add it to " << proclistPath()
+                                   << " and run sudo xctrl register";
             ok = false;
         }
     }
@@ -1709,14 +1761,14 @@ inline int xCtrl::namesOrAll()
     {
         if( m_names.empty() )
         {
-            std::cerr << m_prog << ": " << m_verb << " needs app names, or --all\n";
+            say( msgLevel::error ) << m_verb << " needs app names, or --all";
             return -1;
         }
         return 0;
     }
     if( !m_names.empty() )
     {
-        std::cerr << m_prog << ": " << m_verb << " takes app names or --all, not both\n";
+        say( msgLevel::error ) << m_verb << " takes app names or --all, not both";
         return -1;
     }
 
@@ -1736,7 +1788,7 @@ inline int xCtrl::namesOrAll()
     }
     if( all.empty() )
     {
-        std::cerr << m_prog << ": no apps in " << proclistPath() << " or registered for role " << m_role << "\n";
+        say( msgLevel::error ) << "no apps in " << proclistPath() << " or registered for role " << m_role;
         return -1;
     }
     m_names.assign( all.begin(), all.end() );
@@ -1878,10 +1930,12 @@ inline void xCtrl::warnIfProclistChanged()
             removed += " " + kv.first;
         }
     }
-    std::cerr << m_prog << ": warning: " << proclistPath() << " changed since the last registration"
-              << ( added.empty() ? "" : "; new:" + added ) << ( removed.empty() ? "" : "; removed:" + removed )
-              << ( changed.empty() ? "" : "; autostart (#!), watchdog (-) or executable changed:" + changed ) << "\n"
-              << m_prog << ": warning: run sudo " << m_prog << " register to apply it\n";
+    say( msgLevel::warning ) << proclistPath() << " changed since the last registration"
+                             << ( added.empty() ? "" : "; new:" + added )
+                             << ( removed.empty() ? "" : "; removed:" + removed )
+                             << ( changed.empty() ? ""
+                                                  : "; autostart (#!), watchdog (-) or executable changed:" + changed );
+    say( msgLevel::warning ) << "run sudo " << m_prog << " register to apply it";
 }
 
 inline int xCtrl::updateProclist( const std::string &name, proclistEdit edit, const std::string &newLine )
@@ -1891,7 +1945,7 @@ inline int xCtrl::updateProclist( const std::string &name, proclistEdit edit, co
         std::ifstream f( proclistPath() );
         if( !f )
         {
-            std::cerr << m_prog << ": cannot read " << proclistPath() << "\n";
+            say( msgLevel::error ) << "cannot read " << proclistPath();
             return -1;
         }
         std::stringstream ss;
@@ -1907,7 +1961,8 @@ inline int xCtrl::updateProclist( const std::string &name, proclistEdit edit, co
     }
     if( m_dryRun )
     {
-        std::cout << "[dry-run] would edit " << changed << " line(s) for " << name << " in " << proclistPath() << "\n";
+        say( msgLevel::info ) << "[dry-run] would edit " << changed << " line(s) for " << name << " in "
+                              << proclistPath();
         return changed;
     }
 
@@ -1917,7 +1972,7 @@ inline int xCtrl::updateProclist( const std::string &name, proclistEdit edit, co
         f << edited;
         if( !f.good() )
         {
-            std::cerr << m_prog << ": writing " << proclistPath() << ": " << strerror( errno ) << "\n";
+            say( msgLevel::error ) << "writing " << proclistPath() << ": " << strerror( errno );
             return -1;
         }
     }
@@ -1965,7 +2020,7 @@ inline int xCtrl::registerApp( const appEntry &app )
     {
         for( const auto &e : errors )
         {
-            std::cerr << m_prog << ": error: " << e << "\n";
+            say( msgLevel::error ) << e;
         }
         return -1;
     }
@@ -2011,14 +2066,14 @@ inline int xCtrl::deregister( const std::vector<std::string> &names )
         std::string d = unitDir() + "/" + u.instance( n ) + ".d", r = regDir() + "/" + n + ".conf";
         if( m_dryRun )
         {
-            std::cout << "[dry-run] would remove " << d << " and " << r << "\n";
+            say( msgLevel::info ) << "[dry-run] would remove " << d << " and " << r;
             continue;
         }
         std::error_code ec;
         std::filesystem::remove( d + "/override.conf", ec );
         std::filesystem::remove( d, ec ); // only if nothing else is there
         std::filesystem::remove( r, ec );
-        std::cout << m_prog << ": deregistered " << n << "\n";
+        say( msgLevel::success ) << "deregistered " << n;
     }
     return rc;
 }
@@ -2049,7 +2104,7 @@ inline int xCtrl::refreshApps( const std::vector<appEntry> &apps )
     directiveMap             role = roleDirectives( errors );
     for( const auto &e : errors )
     {
-        std::cerr << m_prog << ": warning: " << e << "\n";
+        say( msgLevel::warning ) << e;
     }
     for( const auto &a : apps )
     {
@@ -2068,9 +2123,9 @@ inline int xCtrl::refreshApps( const std::vector<appEntry> &apps )
         {
             for( const auto &e : aerr )
             {
-                std::cerr << m_prog << ": warning: " << e << "\n";
+                say( msgLevel::warning ) << e;
             }
-            std::cerr << m_prog << ": warning: " << a.name << " starts with its last good settings\n";
+            say( msgLevel::warning ) << a.name << " starts with its last good settings";
             continue;
         }
 
@@ -2106,12 +2161,12 @@ inline int xCtrl::refreshApps( const std::vector<appEntry> &apps )
         }
         if( wdChange )
         {
-            std::cout << m_prog << ": " << a.name << ": watchdog " << p["WatchdogUSec"] << " -> " << want
-                      << "s, from its configuration\n";
+            say( msgLevel::info ) << a.name << ": watchdog " << p["WatchdogUSec"] << " -> " << want
+                                  << "s, from its configuration";
         }
         else if( w == 1 )
         {
-            std::cout << m_prog << ": " << a.name << ": settings updated from its configuration\n";
+            say( msgLevel::info ) << a.name << ": settings updated from its configuration";
         }
         reload = reload || w == 1 || stale || wdChange;
     }
@@ -2123,13 +2178,13 @@ inline int xCtrl::refreshApps( const std::vector<appEntry> &apps )
 
     for( const auto &n : outdated )
     {
-        std::cerr << m_prog << ": warning: " << n << ": " << n
-                  << ".conf changed since it was registered; it will run with the registered settings\n";
+        say( msgLevel::warning ) << n << ": " << n
+                                 << ".conf changed since it was registered; it will run with the registered settings";
     }
     if( !outdated.empty() )
     {
-        std::cerr << m_prog << ": warning: to update the registered settings in systemd, a privileged user  "
-                  << "must run the start command or update the settings via the register command.\n";
+        say( msgLevel::warning ) << "to update the registered settings in systemd, a privileged user "
+                                 << "must run the start command or update the settings via the register command";
     }
     return rc;
 }
@@ -2211,7 +2266,7 @@ inline int xCtrl::writeFile( const std::string &path, const std::string &content
         {
             return 0;
         }
-        std::cout << "[dry-run] would write " << path << ":\n" << content << "\n";
+        say( msgLevel::info ) << "[dry-run] would write " << path << ":\n" << content;
         return 1;
     }
     return writeIfChanged( path, content, mode );
@@ -2225,7 +2280,7 @@ inline int xCtrl::cmdRegister()
     std::ifstream pf( proclistPath() );
     if( !pf )
     {
-        std::cerr << m_prog << ": cannot read proclist " << proclistPath() << "\n";
+        say( msgLevel::error ) << "cannot read proclist " << proclistPath();
         return 1;
     }
     proclist pl = parseProclist( pf );
@@ -2242,9 +2297,9 @@ inline int xCtrl::cmdRegister()
     if( readConf( isconf, cfgDir + "/is" + m_role + ".conf" ) && isconf.count( "indiserver.f" ) &&
         gconf.count( "indiserver_ctrl_fifo" ) && isconf["indiserver.f"] != gconf["indiserver_ctrl_fifo"] )
     {
-        std::cerr << m_prog << ": warning: [indiserver] f = " << isconf["indiserver.f"] << " in is" << m_role
-                  << ".conf differs from indiserver_ctrl_fifo = " << gconf["indiserver_ctrl_fifo"]
-                  << " in magaox.conf\n";
+        say( msgLevel::warning ) << "[indiserver] f = " << isconf["indiserver.f"] << " in is" << m_role
+                                 << ".conf differs from indiserver_ctrl_fifo = " << gconf["indiserver_ctrl_fifo"]
+                                 << " in magaox.conf";
     }
 
     struct valid
@@ -2273,7 +2328,7 @@ inline int xCtrl::cmdRegister()
         }
         if( !hasConf )
         {
-            std::cout << m_prog << ": note: " << app.name << " has no " << app.name << ".conf, using defaults\n";
+            say( msgLevel::note ) << app.name << " has no " << app.name << ".conf, using defaults";
         }
         apps.push_back( { app, d, true } );
     }
@@ -2383,7 +2438,7 @@ inline int xCtrl::cmdRegister()
     }
     if( rc )
     {
-        std::cerr << m_prog << ": could not write the systemd configuration; run with sudo\n";
+        say( msgLevel::error ) << "could not write the systemd configuration; run with sudo";
         return 1;
     }
 
@@ -2444,28 +2499,26 @@ inline int xCtrl::cmdRegister()
         rc = 1;
     }
 
-    std::cout << m_prog << ": role " << m_role << ": registered " << nauto << " app(s) for automatic startup ("
-              << newlyEnabled.size() << " new), " << apps.size() - nauto << " app(s) with autostart disabled";
-    if( !removed.empty() )
+    std::string gone;
+    for( const auto &n : removed )
     {
-        std::cout << "; deregistered, no longer in the proclist:";
-        for( const auto &n : removed )
-        {
-            std::cout << " " << n;
-        }
+        gone += " " + n;
     }
-    std::cout << "\n";
+    say( msgLevel::success ) << "role " << m_role << ": registered " << nauto << " app(s) for automatic startup ("
+                             << newlyEnabled.size() << " new), " << apps.size() - nauto
+                             << " app(s) with autostart disabled"
+                             << ( gone.empty() ? "" : "; deregistered, no longer in the proclist:" + gone );
     for( const auto &n : changed )
     {
-        std::cout << m_prog << ": " << n << ": settings changed, applied at its next start or restart command\n";
+        say( msgLevel::info ) << n << ": settings changed, applied at its next start or restart command";
     }
     for( const auto &w : warnings )
     {
-        std::cerr << m_prog << ": warning: " << w << "\n";
+        say( msgLevel::warning ) << w;
     }
     for( const auto &e : errors )
     {
-        std::cerr << m_prog << ": error: " << e << "\n";
+        say( msgLevel::error ) << e;
     }
 
     return ( rc || !errors.empty() ) ? 1 : 0;
@@ -2492,7 +2545,7 @@ inline int xCtrl::cmdStartup()
     }
     if( apps.empty() )
     {
-        std::cerr << m_prog << ": no apps enabled for role " << m_role << "; run sudo xctrl register\n";
+        say( msgLevel::error ) << "no apps enabled for role " << m_role << "; run sudo xctrl register";
         return 1;
     }
     int rc = startApps( apps );
@@ -2508,7 +2561,7 @@ inline int xCtrl::cmdShutdown()
     }
     if( !m_all )
     {
-        std::cerr << m_prog << ": specify --all to stop all apps, or give app names\n";
+        say( msgLevel::error ) << "specify --all to stop all apps, or give app names";
         return 1;
     }
 
@@ -2553,7 +2606,7 @@ inline int xCtrl::cmdRestart()
     {
         if( !m_all )
         {
-            std::cerr << m_prog << ": restart needs app names, or --all\n";
+            say( msgLevel::error ) << "restart needs app names, or --all";
             return 1;
         }
         int rc = cmdShutdown();
@@ -2659,7 +2712,7 @@ inline int xCtrl::cmdStatus()
     }
     if( names.empty() )
     {
-        std::cout << m_prog << ": no apps registered for role " << m_role << "; run sudo xctrl register\n";
+        say( msgLevel::info ) << "no apps registered for role " << m_role << "; run sudo xctrl register";
         return 0;
     }
 
@@ -2914,7 +2967,7 @@ inline int xCtrl::cmdInspect()
 {
     if( m_names.size() != 1 )
     {
-        std::cerr << m_prog << ": inspect needs one app name\n";
+        say( msgLevel::error ) << "inspect needs one app name";
         return 1;
     }
     unitNames u( m_role );
@@ -2948,7 +3001,7 @@ inline int xCtrl::cmdEnable()
         appEntry app;
         if( !findApp( app, n ) )
         {
-            std::cerr << m_prog << ": " << n << " is neither registered nor in " << proclistPath() << "\n";
+            say( msgLevel::error ) << n << " is neither registered nor in " << proclistPath();
             rc = 1;
             continue;
         }
@@ -2968,7 +3021,7 @@ inline int xCtrl::cmdEnable()
         {
             if( registerApp( app ) < 0 )
             {
-                std::cerr << m_prog << ": " << n << " is enabled in the proclist but could not be registered\n";
+                say( msgLevel::error ) << n << " is enabled in the proclist but could not be registered";
                 rc = 1;
                 continue;
             }
@@ -2978,9 +3031,10 @@ inline int xCtrl::cmdEnable()
         {
             args.push_back( u.instance( n ) );
         }
-        std::cout << m_prog << ": " << n << ( enable ? ": autostart on" : ": autostart off" )
-                  << ( e > 0 ? ( enable ? ", #! removed in " : ", disabled with #! in " ) + proclistPath() : "" )
-                  << "\n";
+        say( msgLevel::success ) << n << ( enable ? ": autostart on" : ": autostart off" )
+                                 << ( e > 0
+                                          ? ( enable ? ", #! removed in " : ", disabled with #! in " ) + proclistPath()
+                                          : "" );
     }
 
     if( reload )
@@ -2992,10 +3046,9 @@ inline int xCtrl::cmdEnable()
         rc |= systemctl( args, true ) != 0;
     }
 
-    std::cout << m_prog << ": note: " << m_verb << " does not "
-              << ( enable ? "start apps: " + m_prog + " start NAME, or the next startup, does"
-                          : "stop apps: " + m_prog + " stop NAME does" )
-              << "\n";
+    say( msgLevel::note ) << m_verb << " does not "
+                          << ( enable ? "start apps: " + m_prog + " start NAME, or the next startup, does"
+                                      : "stop apps: " + m_prog + " stop NAME does" );
     return rc;
 }
 
@@ -3023,13 +3076,13 @@ inline int xCtrl::cmdDelete()
         }
         if( e == 0 && !isReg )
         {
-            std::cerr << m_prog << ": " << n << " is neither registered nor in " << proclistPath() << "\n";
+            say( msgLevel::error ) << n << " is neither registered nor in " << proclistPath();
             rc = 1;
             continue;
         }
         if( e > 0 )
         {
-            std::cout << m_prog << ": removed " << n << " from " << proclistPath() << "\n";
+            say( msgLevel::success ) << "removed " << n << " from " << proclistPath();
         }
     }
     if( !regs.empty() )
@@ -3044,7 +3097,7 @@ inline int xCtrl::cmdAdd()
 {
     if( m_names.size() != 2 )
     {
-        std::cerr << m_prog << ": add needs NAME EXECUTABLE, or -- -NAME EXECUTABLE for an app without a watchdog\n";
+        say( msgLevel::error ) << "add needs NAME EXECUTABLE, or -- -NAME EXECUTABLE for an app without a watchdog";
         return 1;
     }
     unitNames u( m_role );
@@ -3058,14 +3111,14 @@ inline int xCtrl::cmdAdd()
     }
     if( !validName( app.name ) || !validName( app.exec ) )
     {
-        std::cerr << m_prog << ": invalid app name or executable [" << m_names[0] << " " << m_names[1] << "]\n";
+        say( msgLevel::error ) << "invalid app name or executable [" << m_names[0] << " " << m_names[1] << "]";
         return 1;
     }
 
     std::ifstream pf( proclistPath() );
     if( !pf )
     {
-        std::cerr << m_prog << ": cannot read proclist " << proclistPath() << "\n";
+        say( msgLevel::error ) << "cannot read proclist " << proclistPath();
         return 1;
     }
     proclist pl = parseProclist( pf );
@@ -3075,8 +3128,8 @@ inline int xCtrl::cmdAdd()
         {
             if( a.name == app.name )
             {
-                std::cerr << m_prog << ": " << app.name << " is already in " << proclistPath() << ", line " << a.line
-                          << "; use enable or disable\n";
+                say( msgLevel::error ) << app.name << " is already in " << proclistPath() << ", line " << a.line
+                                       << "; use enable or disable";
                 return 1;
             }
         }
@@ -3086,7 +3139,7 @@ inline int xCtrl::cmdAdd()
     std::string conf = m_top + "/" + MAGAOX_configRelPath + "/" + app.name + ".conf";
     if( access( conf.c_str(), R_OK ) != 0 )
     {
-        std::cerr << m_prog << ": " << conf << " not found; " << app.name << " not added\n";
+        say( msgLevel::error ) << conf << " not found; " << app.name << " not added";
         return 1;
     }
 
@@ -3096,7 +3149,7 @@ inline int xCtrl::cmdAdd()
         appEntry a;
         if( app.isServer() && n != app.name && registryRead( a, n ) && a.isServer() )
         {
-            std::cerr << m_prog << ": " << n << " is the role's INDI server; " << app.name << " not added\n";
+            say( msgLevel::error ) << n << " is the role's INDI server; " << app.name << " not added";
             return 1;
         }
     }
@@ -3108,9 +3161,9 @@ inline int xCtrl::cmdAdd()
     {
         for( const auto &e : errors )
         {
-            std::cerr << m_prog << ": error: " << e << "\n";
+            say( msgLevel::error ) << e;
         }
-        std::cerr << m_prog << ": " << app.name << " not added\n";
+        say( msgLevel::error ) << app.name << " not added";
         return 1;
     }
 
@@ -3124,9 +3177,9 @@ inline int xCtrl::cmdAdd()
     {
         rc |= systemctl( { "disable", u.instance( app.name ) }, true ) != 0;
     }
-    std::cout << m_prog << ": added #!" << app.prefix << app.name << " " << app.exec << " to " << proclistPath()
-              << " and registered it, autostart off: " << m_prog << " start " << app.name << " runs it, sudo " << m_prog
-              << " enable " << app.name << " starts it automatically\n";
+    say( msgLevel::success ) << "added #!" << app.prefix << app.name << " " << app.exec << " to " << proclistPath()
+                             << " and registered it, autostart off: " << m_prog << " start " << app.name
+                             << " runs it, sudo " << m_prog << " enable " << app.name << " starts it automatically";
     return rc;
 }
 
@@ -3134,7 +3187,7 @@ inline int xCtrl::cmdBoot()
 {
     if( m_names.size() != 1 || ( m_names[0] != "on" && m_names[0] != "off" ) )
     {
-        std::cerr << m_prog << ": boot needs on or off\n";
+        say( msgLevel::error ) << "boot needs on or off";
         return 1;
     }
     unitNames u( m_role );
@@ -3176,7 +3229,7 @@ inline int xCtrl::main( int argc, char **argv )
     auto                                                   it    = verbs.find( m_verb );
     if( it == verbs.end() )
     {
-        std::cerr << m_prog << ": unknown command " << m_verb << "; try --help\n";
+        say( msgLevel::error ) << "unknown command " << m_verb << "; try --help";
         return 2;
     }
 
@@ -3184,6 +3237,8 @@ inline int xCtrl::main( int argc, char **argv )
     umask( 022 );
 
     // decided before settlePrivileges() clears the environment
+    xlog().colors( isatty( STDOUT_FILENO ) && getenv( "NO_COLOR" ) == nullptr,
+                   isatty( STDERR_FILENO ) && getenv( "NO_COLOR" ) == nullptr );
     m_color = isatty( STDOUT_FILENO ) && getenv( "NO_COLOR" ) == nullptr;
 
     if( settlePrivileges() < 0 )
