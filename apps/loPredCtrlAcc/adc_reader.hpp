@@ -34,6 +34,11 @@ class AdcReader
 
     /// Copy bounded retained samples oldest first for future alignment, outside acquisition.
     std::vector<AdcSample> samples() const;
+
+    /// Copy a bounded new-sample batch under the reader lock; invoke downstream processing only after return.
+    AdcBatch copy_after( const AdcCursor     &cursor /**< [in] Caller-owned consumer position. */,
+                         std::span<AdcSample> output /**< [out] Nonempty owned destination. */,
+                         std::int64_t         availableByNs /**< [in] Frozen decoder-availability cutoff. */ ) const;
 };
 
 } // namespace DDSPC

@@ -267,7 +267,7 @@ void AdcReader::Impl::run()
             if( source.open( m_config.m_stream ) )
             {
                 attached = true;
-                { //mutex scope
+                { // mutex scope
                     std::lock_guard<std::mutex> lock( m_mutex );
                     m_capture.attached( source.device(), source.inode() );
                 }
@@ -282,19 +282,19 @@ void AdcReader::Impl::run()
         {
             source.close();
             attached = false;
-            { //mutex scope
+            { // mutex scope
                 std::lock_guard<std::mutex> lock( m_mutex );
                 m_capture.disconnected();
             }
             continue;
         }
-        { //mutex scope
+        { // mutex scope
             std::lock_guard<std::mutex> lock( m_mutex );
             m_capture.drain( source );
         }
         source.wait();
     }
-    { //mutex scope
+    { // mutex scope
         std::lock_guard<std::mutex> lock( m_mutex );
         m_capture.disconnected();
     }
@@ -338,6 +338,12 @@ std::vector<AdcSample> AdcReader::samples() const
 {
     std::lock_guard<std::mutex> lock( m_impl->m_mutex ); // mutex scope
     return m_impl->m_capture.samples();
+}
+
+AdcBatch AdcReader::copy_after( const AdcCursor &cursor, std::span<AdcSample> output, std::int64_t availableByNs ) const
+{
+    std::lock_guard<std::mutex> lock( m_impl->m_mutex ); // mutex scope
+    return m_impl->m_capture.copy_after( cursor, output, availableByNs );
 }
 
 } // namespace DDSPC
