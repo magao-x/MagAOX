@@ -37,7 +37,8 @@ TEST_CASE( "xctrl parses proclists", "[xctrl]" )
                            "  camsci1-dark   shmimIntegrator\n"
                            "-quiet  someExec\n"
                            "-camsci-1  someExec\n"
-                           "#off  someExec\n"
+                           "#!off  someExec\n"
+                           "#commented  someExec\n"
                            "name exec extra\n"
                            "x:bad  someExec\n"
                            "camsci1-dark  shmimIntegrator\n"
@@ -59,38 +60,39 @@ TEST_CASE( "xctrl parses proclists", "[xctrl]" )
     // three tokens, unknown prefix, duplicate, path in the executable
     REQUIRE( pl.errors.size() == 4 );
 
-    // the commented-out process
+    // the disabled process; a # line is a comment
     REQUIRE( pl.disabled.size() == 1 );
     REQUIRE( pl.disabled[0].name == "off" );
 }
 
-/// One # makes a disabled process, ## a comment; disabled lines that are not processes are reported.
+/// #! makes a disabled process, any other # line a comment; #! lines that are not processes are reported.
 /**
  * \ingroup xctrl_unit_test
  */
 TEST_CASE( "xctrl keeps disabled proclist processes", "[xctrl]" )
 {
     std::istringstream in( "##process-ID   Executable\n"
-                           "## Processes for the MagAO-X ICC\n"
+                           "# Processes for the MagAO-X ICC\n"
                            "##### camflowfs\n"
-                           "#camsci1  picamCtrl\n"
-                           "#  camsci2  picamCtrl\n"
-                           "# camsci4 picamCtrl\n"
-                           "#-quietapp  someExec\n"
-                           "##camsci_old  camsci\n"
-                           "## camsci_old2  camsci\n"
-                           "#Processes for the MagAO-X ICC\n"
-                           "#==========  ==========\n"
+                           "#!camsci1  picamCtrl\n"
+                           "#!  camsci2  picamCtrl\n"
+                           "  #! camsci4 picamCtrl\n"
+                           "#!-quietapp  someExec\n"
+                           "#camsci_old  camsci\n"
+                           "#-camsci_old2  camsci\n"
+                           "# camsci_old3  camsci\n"
+                           "#!Processes for the MagAO-X ICC\n"
+                           "#!==========  ==========\n"
                            "camsci3  picamCtrl\n"
-                           "#camsci3  picamCtrl\n"
-                           "#camsci1  otherExec\n" );
+                           "#!camsci3  picamCtrl\n"
+                           "#!camsci1  otherExec\n" );
     proclist           pl = parseProclist( in );
 
     REQUIRE( pl.errors.empty() );
     REQUIRE( pl.apps.size() == 1 );
     REQUIRE( pl.apps[0].name == "camsci3" );
 
-    // #name and # name are the same; an active line and the first disabled line win
+    // #!name and #! name are the same; an active line and the first disabled line win; # lines are comments
     std::vector<std::string> names;
     for( const auto &d : pl.disabled )
     {
@@ -100,7 +102,7 @@ TEST_CASE( "xctrl keeps disabled proclist processes", "[xctrl]" )
     REQUIRE( pl.disabled[1].exec == "picamCtrl" );
     REQUIRE( pl.disabled[3].prefix == "-" );
 
-    // single-# lines that are not processes
+    // #! lines that are not processes
     REQUIRE( pl.warnings.size() == 2 );
 }
 
@@ -320,29 +322,30 @@ TEST_CASE( "xctrl edits an app's proclist lines", "[xctrl]" )
     std::string text    = "# comment camsci1\n"
                           "isICC        xindiserver\n"
                           "camsci1      picamCtrl\n"
-                          "#camsci2     picamCtrl\n"
-                          "# -quietapp  someExec\n"
+                          "#!camsci2    picamCtrl\n"
+                          "#! -quietapp someExec\n"
+                          "#camsci5     picamCtrl\n"
                           "camsci10     picamCtrl\n";
     int         changed = 0;
 
-    SECTION( "disable comments out the active line" )
+    SECTION( "disable marks the active line #!" )
     {
         std::string t = editProclist( text, "camsci1", proclistEdit::comment, "", changed );
         REQUIRE( changed == 1 );
-        REQUIRE( t.find( "#camsci1      picamCtrl\n" ) != std::string::npos );
+        REQUIRE( t.find( "#!camsci1      picamCtrl\n" ) != std::string::npos );
         REQUIRE( t.find( "\ncamsci10     picamCtrl\n" ) != std::string::npos );
         REQUIRE( t.find( "# comment camsci1\n" ) == 0 );
     }
 
-    SECTION( "enable uncomments, with or without a space after #, keeping the prefix" )
+    SECTION( "enable removes #!, with or without a space after it, keeping the prefix" )
     {
         std::string t = editProclist( text, "camsci2", proclistEdit::uncomment, "camsci2 picamCtrl", changed );
         REQUIRE( changed == 1 );
-        REQUIRE( t.find( "\ncamsci2     picamCtrl\n" ) != std::string::npos );
+        REQUIRE( t.find( "\ncamsci2    picamCtrl\n" ) != std::string::npos );
 
         t = editProclist( text, "quietapp", proclistEdit::uncomment, "-quietapp someExec", changed );
         REQUIRE( changed == 1 );
-        REQUIRE( t.find( "\n-quietapp  someExec\n" ) != std::string::npos );
+        REQUIRE( t.find( "\n-quietapp someExec\n" ) != std::string::npos );
     }
 
     SECTION( "enable of an active app changes nothing, enable of an unlisted app appends it" )
@@ -355,18 +358,21 @@ TEST_CASE( "xctrl edits an app's proclist lines", "[xctrl]" )
         REQUIRE( t == text + "newapp someExec\n" );
     }
 
-    SECTION( "## lines are only comments: never enabled, disabled or deleted" )
+    SECTION( "# lines are only comments: never enabled, disabled or deleted" )
     {
-        std::string withOld = text + "##camsci_old  camsci\n## camsci1  picamCtrl\n";
+        std::string withOld = text + "#camsci_old  camsci\n# camsci1  picamCtrl\n";
+
+        REQUIRE( editProclist( withOld, "camsci5", proclistEdit::append, "#!camsci5 picamCtrl", changed ) ==
+                 withOld + "#!camsci5 picamCtrl\n" );
 
         std::string t = editProclist( withOld, "camsci_old", proclistEdit::uncomment, "camsci_old camsci", changed );
-        REQUIRE( changed == 1 ); // appended as a new line, the ## comment stays
-        REQUIRE( t.find( "##camsci_old  camsci\n" ) != std::string::npos );
+        REQUIRE( changed == 1 ); // appended as a new line, the # comment stays
+        REQUIRE( t.find( "#camsci_old  camsci\n" ) != std::string::npos );
         REQUIRE( t.find( "\ncamsci_old camsci\n" ) != std::string::npos );
 
         t = editProclist( withOld, "camsci1", proclistEdit::remove, "", changed );
         REQUIRE( changed == 1 ); // only the active line
-        REQUIRE( t.find( "## camsci1  picamCtrl\n" ) != std::string::npos );
+        REQUIRE( t.find( "# camsci1  picamCtrl\n" ) != std::string::npos );
 
         std::istringstream in( withOld );
         proclist           pl = parseProclist( in );
@@ -376,24 +382,24 @@ TEST_CASE( "xctrl edits an app's proclist lines", "[xctrl]" )
         }
     }
 
-    SECTION( "delete removes active and commented-out lines of that app only" )
+    SECTION( "delete removes active and disabled lines of that app only" )
     {
-        std::string t = editProclist( text + "#camsci1 picamCtrl\n", "camsci1", proclistEdit::remove, "", changed );
+        std::string t = editProclist( text + "#!camsci1 picamCtrl\n", "camsci1", proclistEdit::remove, "", changed );
         REQUIRE( changed == 2 );
         REQUIRE( t.find( "camsci1 " ) == std::string::npos );
         REQUIRE( t.find( "camsci10" ) != std::string::npos );
         REQUIRE( t.find( "# comment camsci1" ) != std::string::npos );
     }
 
-    SECTION( "add appends a commented-out line only for an app with no line" )
+    SECTION( "add appends a disabled line only for an app with no line" )
     {
-        std::string t = editProclist( text, "maths_CO2", proclistEdit::append, "#maths_CO2 magAOXMaths", changed );
+        std::string t = editProclist( text, "maths_CO2", proclistEdit::append, "#!maths_CO2 magAOXMaths", changed );
         REQUIRE( changed == 1 );
-        REQUIRE( t == text + "#maths_CO2 magAOXMaths\n" );
+        REQUIRE( t == text + "#!maths_CO2 magAOXMaths\n" );
 
-        REQUIRE( editProclist( text, "camsci2", proclistEdit::append, "#camsci2 picamCtrl", changed ) == text );
+        REQUIRE( editProclist( text, "camsci2", proclistEdit::append, "#!camsci2 picamCtrl", changed ) == text );
         REQUIRE( changed == 0 );
-        REQUIRE( editProclist( text, "camsci1", proclistEdit::append, "#camsci1 picamCtrl", changed ) == text );
+        REQUIRE( editProclist( text, "camsci1", proclistEdit::append, "#!camsci1 picamCtrl", changed ) == text );
         REQUIRE( changed == 0 );
     }
 }

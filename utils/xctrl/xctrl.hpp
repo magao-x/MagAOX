@@ -86,13 +86,13 @@ struct proclist
     /// The processes, in proclist order
     std::vector<appEntry> apps;
 
-    /// Commented-out lines that look like processes, `#NAME EXECUTABLE`: registered but not started automatically
+    /// Disabled processes, `#!NAME EXECUTABLE`: registered but not started automatically
     std::vector<appEntry> disabled;
 
     /// Problems found, one message each; the lines concerned are not in apps
     std::vector<std::string> errors;
 
-    /// Disabled lines that are not `#NAME EXECUTABLE`, one message each; they are ignored
+    /// `#!` lines that are not `#!NAME EXECUTABLE`, one message each; they are ignored
     std::vector<std::string> warnings;
 };
 
@@ -171,10 +171,10 @@ bool validValue( valueKind          kind, /**< [in] the kind of setting */
                  const std::string &value /**< [in] the value */ );
 
 /// Parse a proclist
-/** Each line `NAME EXECUTABLE` is a process started automatically.  A line starting with one `#`, with or without
- * spaces after it, `#NAME EXECUTABLE`, is a disabled process; one that is not `NAME EXECUTABLE` is reported in
- * warnings and ignored.  A line starting with `##` is only a comment, whatever follows.  NAME may have a prefix:
- * `-` for processes that do not notify systemd, so have no watchdog.
+/** Each line `NAME EXECUTABLE` is a process started automatically.  A line starting with `#!`, with or without
+ * spaces after it, `#!NAME EXECUTABLE`, is a disabled process: registered, but not started automatically; one that is
+ * not `NAME EXECUTABLE` is reported in warnings and ignored.  Any other line starting with `#` is a comment.  NAME may
+ * have a prefix: `-` for processes that do not notify systemd, so have no watchdog.
  *
  * \returns the processes and any errors found
  */
@@ -198,13 +198,13 @@ bool readConf( confMap           &conf, /**< [out] the settings */
 /// Actions on an app's proclist lines
 enum class proclistEdit
 {
-    comment,   ///< comment out its active lines
-    uncomment, ///< make its first commented-out line active, or append newLine if it has no line
-    remove,    ///< remove all its lines, active or commented out
-    append     ///< append newLine if the app has no line, active or commented out
+    comment,   ///< disable its active lines, with #!
+    uncomment, ///< make its first disabled line active, or append newLine if it has no line
+    remove,    ///< remove all its lines, active or disabled
+    append     ///< append newLine if the app has no line, active or disabled
 };
 
-/// Edit an app's lines in proclist text, leaving every other line, and every `##` comment, as it is
+/// Edit an app's lines in proclist text, leaving every other line, and every `#` comment, as it is
 /**
  * \returns the edited text
  */
@@ -371,6 +371,7 @@ class xCtrl
     std::string m_prog{ "xctrl" };      ///< the name we were run as
     bool        m_color{ false };       ///< color the output, when it is a terminal and NO_COLOR is not set
     bool m_privileged{ false }; ///< may change the systemd configuration: root, or a user who can write the proclist
+    bool m_proclistChecked{ false };  ///< warnIfProclistChanged() has run
     std::string              m_verb;  ///< the command
     std::vector<std::string> m_names; ///< the app names given
 
@@ -461,7 +462,7 @@ class xCtrl
      */
     std::vector<appEntry> namedApps();
 
-    /// Replace --all by every app in the proclist, active or commented out, and every registered app
+    /// Replace --all by every app in the proclist, active or disabled (#!), and every registered app
     /**
      * \returns 0 if there are names to work on, -1 with a message on stderr if not
      */
@@ -499,7 +500,13 @@ class xCtrl
                            std::string                 &server, /**< [out] the INDI server, "" if none */
                            std::vector<std::string>    &tunnels /**< [out] the ssh tunnel apps */ );
 
-    /// Edit an app's lines in the role's proclist, in place so its owner and permissions stay
+    /// Warn, once, if the proclist differs from the one last registered, recorded in activePath()
+    /** Compares the apps, their autostart (`#!`) and their watchdog (`-`), not comments or order.
+     */
+    void warnIfProclistChanged();
+
+    /// Edit an app's lines in the role's proclist, and the same in the registration record, in place so they keep
+    /// their owners and permissions
     /**
      * \returns the number of lines changed, or -1 with a message on stderr
      */
@@ -507,7 +514,7 @@ class xCtrl
                         proclistEdit       edit, /**< [in] what to do */
                         const std::string &newLine = "" /**< [in] the line to append for uncomment, if none */ );
 
-    /// Find an app in the registry, else in the proclist, active or commented out
+    /// Find an app in the registry, else in the proclist, active or disabled (#!)
     /**
      * \returns true if found
      */
@@ -676,18 +683,15 @@ inline proclist parseProclist( std::istream &in )
             continue; // blank line or comment
         }
 
-        // "##..." is only a comment, whatever follows, e.g. "##camsci_old camsci"
-        if( toks[0].compare( 0, 2, "##" ) == 0 )
+        // a disabled process, e.g. "#!camsci1 picamCtrl" or "#! -camsci1 picamCtrl"; any other "#" line is a comment
+        bool commented = toks[0].compare( 0, 2, "#!" ) == 0;
+        if( !commented && toks[0][0] == '#' )
         {
             continue;
         }
-
-        // a commented-out process, e.g. "#camsci1 picamCtrl" or "# camsci1 picamCtrl"
-        bool commented = toks[0][0] == '#';
         if( commented )
         {
-            std::string rest = line.substr( line.find( '#' ) );
-            rest.erase( 0, rest.find_first_not_of( "# \t" ) );
+            std::string        rest = line.substr( line.find( "#!" ) + 2 );
             std::istringstream cs( rest );
             toks.clear();
             while( cs >> tok )
@@ -697,7 +701,7 @@ inline proclist parseProclist( std::istream &in )
             if( toks.size() != 2 )
             {
                 pl.warnings.push_back( "proclist line " + std::to_string( n ) + ": [" + trim( line ) +
-                                       "] is not #NAME EXECUTABLE, ignored; use ## for comments" );
+                                       "] is not #!NAME EXECUTABLE, ignored; use # for comments" );
                 continue;
             }
         }
@@ -728,7 +732,7 @@ inline proclist parseProclist( std::istream &in )
             else
             {
                 pl.warnings.push_back( "proclist line " + std::to_string( n ) + ": [" + trim( line ) +
-                                       "] is not a valid #NAME EXECUTABLE, ignored; use ## for comments" );
+                                       "] is not a valid #!NAME EXECUTABLE, ignored; use # for comments" );
             }
             continue;
         }
@@ -754,7 +758,7 @@ inline proclist parseProclist( std::istream &in )
         pl.apps.push_back( app );
     }
 
-    // an active line wins over a commented-out one for the same name, and the first commented-out one wins
+    // an active line wins over a disabled one for the same name, and the first disabled one wins
     std::vector<appEntry> disabled;
     for( const auto &d : pl.disabled )
     {
@@ -772,16 +776,16 @@ inline proclist parseProclist( std::istream &in )
 inline std::string editProclist(
     const std::string &text, const std::string &name, proclistEdit edit, const std::string &newLine, int &changed )
 {
-    // whether line is NAME EXECUTABLE for this name, with any prefix, and whether it is commented out
+    // whether line is NAME EXECUTABLE for this name, with any prefix, and whether it is disabled, #!
     auto match = [&]( const std::string &line, bool &commented ) -> bool
     {
         std::string t = trim( line );
-        commented     = !t.empty() && t[0] == '#';
-        if( t.compare( 0, 2, "##" ) == 0 )
+        commented     = t.compare( 0, 2, "#!" ) == 0;
+        if( !commented && !t.empty() && t[0] == '#' )
         {
             return false; // only a comment, never an app's line
         }
-        t.erase( 0, t.find_first_not_of( "# \t" ) );
+        t.erase( 0, commented ? 2 : 0 );
         std::istringstream       ss( t );
         std::vector<std::string> toks;
         std::string              tok;
@@ -830,12 +834,13 @@ inline std::string editProclist(
         }
         if( edit == proclistEdit::comment && !c )
         {
-            l = "#" + l;
+            l = "#!" + l;
             ++changed;
         }
         else if( edit == proclistEdit::uncomment && c && !hasActive )
         {
-            l.erase( 0, l.find_first_not_of( "# \t" ) );
+            l.erase( 0, l.find( "#!" ) + 2 );
+            l.erase( 0, l.find_first_not_of( " \t" ) );
             hasActive = true;
             ++changed;
         }
@@ -1346,16 +1351,16 @@ inline void xCtrl::usage( std::ostream &os ) const
           "\n"
           "Changing which apps are configured needs root (sudo), or write access to the proclist:\n"
           "  sudo xctrl register              register the proclist's apps from their .conf and enable\n"
-          "                                   them for automatic startup; commented-out apps with a .conf\n"
+          "                                   them for automatic startup; disabled (#!) apps with a .conf\n"
           "                                   are registered but disabled (and stopped), to start by hand;\n"
           "                                   apps no longer in the proclist are stopped and deregistered;\n"
           "                                   new apps start at once if the role is up\n"
-          "  sudo xctrl add NAME EXECUTABLE   add the app to the proclist commented out, and register it;\n"
+          "  sudo xctrl add NAME EXECUTABLE   add the app to the proclist disabled (#!), and register it;\n"
           "                                   it needs NAME.conf; add -- -NAME EXECUTABLE for an app\n"
           "                                   without a watchdog\n"
-          "  sudo xctrl enable NAME...|--all  autostart on: uncomment the app in the proclist (adding it if\n"
+          "  sudo xctrl enable NAME...|--all  autostart on: remove the app's #! in the proclist (adding it if\n"
           "                                   needed) and register it if it is not; does not start it\n"
-          "  sudo xctrl disable NAME...|--all autostart off: comment the app out in the proclist; it stays\n"
+          "  sudo xctrl disable NAME...|--all autostart off: disable the app with #! in the proclist; it stays\n"
           "                                   registered to start by hand; does not stop it\n"
           "  sudo xctrl delete NAME...|--all  remove the app from the proclist, stop and deregister it\n"
           "  sudo xctrl boot on|off           start the role's enabled apps at boot, or not\n"
@@ -1822,6 +1827,63 @@ xCtrl::serverAndTunnels( const std::vector<appEntry> &apps, std::string &server,
     }
 }
 
+inline void xCtrl::warnIfProclistChanged()
+{
+    if( m_proclistChecked )
+    {
+        return;
+    }
+    m_proclistChecked = true;
+
+    std::ifstream pf( proclistPath() ), af( activePath() );
+    if( !pf )
+    {
+        return;
+    }
+    auto lines = []( const proclist &pl )
+    {
+        std::map<std::string, std::string> m;
+        for( const auto &a : pl.apps )
+        {
+            m[a.name] = a.prefix + a.name + " " + a.exec;
+        }
+        for( const auto &a : pl.disabled )
+        {
+            m[a.name] = "#!" + a.prefix + a.name + " " + a.exec;
+        }
+        return m;
+    };
+    auto now = lines( parseProclist( pf ) ), was = lines( parseProclist( af ) );
+    if( now == was )
+    {
+        return;
+    }
+
+    std::string added, removed, changed;
+    for( const auto &kv : now )
+    {
+        if( !was.count( kv.first ) )
+        {
+            added += " " + kv.first;
+        }
+        else if( was[kv.first] != kv.second )
+        {
+            changed += " " + kv.first;
+        }
+    }
+    for( const auto &kv : was )
+    {
+        if( !now.count( kv.first ) )
+        {
+            removed += " " + kv.first;
+        }
+    }
+    std::cerr << m_prog << ": warning: " << proclistPath() << " changed since the last registration"
+              << ( added.empty() ? "" : "; new:" + added ) << ( removed.empty() ? "" : "; removed:" + removed )
+              << ( changed.empty() ? "" : "; autostart (#!), watchdog (-) or executable changed:" + changed ) << "\n"
+              << m_prog << ": warning: run sudo " << m_prog << " register to apply it\n";
+}
+
 inline int xCtrl::updateProclist( const std::string &name, proclistEdit edit, const std::string &newLine )
 {
     std::string text;
@@ -1850,12 +1912,24 @@ inline int xCtrl::updateProclist( const std::string &name, proclistEdit edit, co
     }
 
     // in place, not by rename, so the file keeps its owner and permissions
-    std::ofstream f( proclistPath(), std::ios::trunc );
-    f << edited;
-    if( !f.good() )
     {
-        std::cerr << m_prog << ": writing " << proclistPath() << ": " << strerror( errno ) << "\n";
-        return -1;
+        std::ofstream f( proclistPath(), std::ios::trunc );
+        f << edited;
+        if( !f.good() )
+        {
+            std::cerr << m_prog << ": writing " << proclistPath() << ": " << strerror( errno ) << "\n";
+            return -1;
+        }
+    }
+
+    // the same edit to the record of the last registration, as this command also changes the registration
+    std::ifstream af( activePath() );
+    if( af )
+    {
+        std::stringstream ss;
+        ss << af.rdbuf();
+        int c = 0;
+        writeFile( activePath(), editProclist( ss.str(), name, edit, newLine, c ), 0664 );
     }
     return changed;
 }
@@ -2204,14 +2278,14 @@ inline int xCtrl::cmdRegister()
         apps.push_back( { app, d, true } );
     }
 
-    // disabled lines: registered, to start by hand, but not started automatically; they need a .conf
+    // disabled lines, #!: registered, to start by hand, but not started automatically; they need a .conf
     std::set<std::string> commented;
     for( const auto &app : pl.disabled )
     {
         if( access( ( cfgDir + "/" + app.name + ".conf" ).c_str(), R_OK ) != 0 )
         {
             warnings.push_back( "proclist line " + std::to_string( app.line ) + ": disabled " + app.name + " has no " +
-                                app.name + ".conf, not registered; use ## for comments" );
+                                app.name + ".conf, not registered; use # for comments" );
             continue;
         }
         commented.insert( app.name );
@@ -2219,7 +2293,7 @@ inline int xCtrl::cmdRegister()
         std::vector<std::string> aerr;
         if( !prepareApp( app, d, aerr ) )
         {
-            warnings.push_back( "proclist line " + std::to_string( app.line ) + ": commented-out " + app.name +
+            warnings.push_back( "proclist line " + std::to_string( app.line ) + ": disabled " + app.name +
                                 " not (re)registered:" );
             warnings.insert( warnings.end(), aerr.begin(), aerr.end() );
             keep.insert( app.name );
@@ -2298,7 +2372,7 @@ inline int xCtrl::cmdRegister()
             stopNow.push_back( v.app.name );
         }
     }
-    // commented-out apps that could not be re-registered still leave automatic startup
+    // disabled apps that could not be re-registered still leave automatic startup
     for( const auto &n : commented )
     {
         if( keep.count( n ) && wasRegistered.count( n ) && enabled( n ) )
@@ -2325,7 +2399,7 @@ inline int xCtrl::cmdRegister()
         rc |= systemctl( toDisable, true ) != 0;
     }
 
-    // apps just commented out also stop, unless --keep-running
+    // apps just disabled also stop, unless --keep-running
     if( !stopNow.empty() && !m_keepRunning )
     {
         std::vector<std::string> act = activeApps(), stop;
@@ -2349,13 +2423,20 @@ inline int xCtrl::cmdRegister()
         rc |= startApps( newlyEnabled ) != 0;
     }
 
-    // record what was applied
+    // record the proclist registered, for warnIfProclistChanged(); apps that could not be registered were reported
     std::ostringstream active;
-    active << "# Applied by xctrl register from " << proclistPath() << "; do not edit\n";
+    active << "# Registered by xctrl register from " << proclistPath() << "; do not edit\n";
+    for( const auto &a : pl.apps )
+    {
+        active << a.prefix << a.name << " " << a.exec << "\n";
+    }
+    for( const auto &a : pl.disabled )
+    {
+        active << "#!" << a.prefix << a.name << " " << a.exec << "\n";
+    }
     size_t nauto = 0;
     for( const auto &v : apps )
     {
-        active << ( v.autostart ? "" : "#" ) << v.app.prefix << v.app.name << " " << v.app.exec << "\n";
         nauto += v.autostart;
     }
     if( writeFile( activePath(), active.str(), 0664 ) < 0 )
@@ -2397,6 +2478,7 @@ inline int xCtrl::cmdStartup()
     {
         return cmdStart();
     }
+    warnIfProclistChanged();
 
     unitNames             u( m_role );
     std::vector<appEntry> apps;
@@ -2443,6 +2525,7 @@ inline int xCtrl::cmdShutdown()
 
 inline int xCtrl::cmdStart()
 {
+    warnIfProclistChanged();
     std::vector<appEntry> apps = namedApps();
     return apps.empty() ? 1 : startApps( apps );
 }
@@ -2464,6 +2547,7 @@ inline int xCtrl::cmdStop()
 
 inline int xCtrl::cmdRestart()
 {
+    warnIfProclistChanged();
 
     if( m_all || m_names.empty() )
     {
@@ -2555,6 +2639,7 @@ xCtrl::showProps( const std::vector<std::string> &names )
 
 inline int xCtrl::cmdStatus()
 {
+    warnIfProclistChanged();
     std::vector<std::string> names = m_names;
     std::set<std::string>    regs;
     for( const auto &n : registered() )
@@ -2877,7 +2962,7 @@ inline int xCtrl::cmdEnable()
             continue;
         }
 
-        // an app commented out without a .conf, or added since the last register, is registered now
+        // an app disabled without a .conf, or added since the last register, is registered now
         appEntry reg;
         if( enable && !registryRead( reg, n ) )
         {
@@ -2894,7 +2979,8 @@ inline int xCtrl::cmdEnable()
             args.push_back( u.instance( n ) );
         }
         std::cout << m_prog << ": " << n << ( enable ? ": autostart on" : ": autostart off" )
-                  << ( e > 0 ? ( enable ? ", uncommented in " : ", commented out in " ) + proclistPath() : "" ) << "\n";
+                  << ( e > 0 ? ( enable ? ", #! removed in " : ", disabled with #! in " ) + proclistPath() : "" )
+                  << "\n";
     }
 
     if( reload )
@@ -3028,7 +3114,7 @@ inline int xCtrl::cmdAdd()
         return 1;
     }
 
-    if( updateProclist( app.name, proclistEdit::append, "#" + app.prefix + app.name + " " + app.exec ) < 0 ||
+    if( updateProclist( app.name, proclistEdit::append, "#!" + app.prefix + app.name + " " + app.exec ) < 0 ||
         registerApp( app ) < 0 )
     {
         return 1;
@@ -3038,7 +3124,7 @@ inline int xCtrl::cmdAdd()
     {
         rc |= systemctl( { "disable", u.instance( app.name ) }, true ) != 0;
     }
-    std::cout << m_prog << ": added #" << app.prefix << app.name << " " << app.exec << " to " << proclistPath()
+    std::cout << m_prog << ": added #!" << app.prefix << app.name << " " << app.exec << " to " << proclistPath()
               << " and registered it, autostart off: " << m_prog << " start " << app.name << " runs it, sudo " << m_prog
               << " enable " << app.name << " starts it automatically\n";
     return rc;
