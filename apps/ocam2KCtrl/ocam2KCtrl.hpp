@@ -166,7 +166,7 @@ class ocam2KCtrl : public MagAOXApp<>,
      * of them, and the sequential copy takes the lines back in one pass.  Not used with digital binning, which already
      * descrambles into m_digitalBinWork.
      */
-    bool m_stagedDescramble{ false };
+    bool m_stagedDescramble{ true };
 
     std::vector<int16_t> m_descrambled; ///< Private descramble output when m_stagedDescramble is set, sized on use.
 
@@ -174,7 +174,7 @@ class ocam2KCtrl : public MagAOXApp<>,
     /** The copy then does not take back the lines which readers of the stream, such as the AO loop, hold from the
      * previous frame, and readers load the new frame from memory.  Used only when m_stagedDescramble is set.
      */
-    bool m_stagedCopyNT{ false };
+    bool m_stagedCopyNT{ true };
 
     std::string m_syncDevice{
         "fxngensync" }; ///< INDI device providing the external sync frequency when synchro mode is enabled.
@@ -635,7 +635,7 @@ inline void ocam2KCtrl::setupConfig()
                 false,
                 "bool",
                 "If true, descramble into a private buffer and copy it to the stream in one sequential pass, so that "
-                "readers of the stream slow the descramble less.  Default is false." );
+                "readers of the stream slow the descramble less.  Default is true." );
 
     config.add( "camera.stagedCopyNT",
                 "",
@@ -646,7 +646,7 @@ inline void ocam2KCtrl::setupConfig()
                 false,
                 "bool",
                 "If true, and stagedDescramble is true, copy the descrambled frame to the stream with non-temporal "
-                "stores.  Default is false." );
+                "stores.  Default is true." );
 
     dev::frameGrabber<ocam2KCtrl>::setupConfig( config );
 

@@ -2130,9 +2130,10 @@ TEST_CASE( "ocam2KCtrl loadImageIntoStream uses the OCAM descramble output", "[o
 
     SECTION( "the non-digital path writes the descrambled frame directly to the destination" )
     {
-        app.m_ocam2_id   = 7;
-        app.m_digitalBin = false;
-        app.m_image_p    = reinterpret_cast<u_char *>( rawImage.data() );
+        app.m_ocam2_id         = 7;
+        app.m_digitalBin       = false;
+        app.m_stagedDescramble = false;
+        app.m_image_p          = reinterpret_cast<u_char *>( rawImage.data() );
 
         g_ocam2StubState.imageNumber = 44;
         g_ocam2StubState.outputImage = { 10, 20, 30, 40 };
@@ -2152,6 +2153,7 @@ TEST_CASE( "ocam2KCtrl loadImageIntoStream uses the OCAM descramble output", "[o
         app.m_ocam2_id         = 9;
         app.m_digitalBin       = false;
         app.m_stagedDescramble = true;
+        app.m_stagedCopyNT     = false;
         app.m_width            = 2;
         app.m_height           = 2;
         app.m_image_p          = reinterpret_cast<u_char *>( rawImage.data() );
@@ -2170,14 +2172,15 @@ TEST_CASE( "ocam2KCtrl loadImageIntoStream uses the OCAM descramble output", "[o
         REQUIRE( destImage[3] == 41 );
     }
 
-    SECTION( "the staged path can copy to the destination with non-temporal stores" )
+    SECTION( "the staged path copies to the destination with non-temporal stores by default" )
     {
-        app.m_digitalBin       = false;
-        app.m_stagedDescramble = true;
-        app.m_stagedCopyNT     = true;
-        app.m_width            = 2;
-        app.m_height           = 2;
-        app.m_image_p          = reinterpret_cast<u_char *>( rawImage.data() );
+        REQUIRE( app.m_stagedDescramble );
+        REQUIRE( app.m_stagedCopyNT );
+
+        app.m_digitalBin = false;
+        app.m_width      = 2;
+        app.m_height     = 2;
+        app.m_image_p    = reinterpret_cast<u_char *>( rawImage.data() );
 
         destImage.fill( 0 );
         g_ocam2StubState.outputImage = { 12, 22, 32, 42 };

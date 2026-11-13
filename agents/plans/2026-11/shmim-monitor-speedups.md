@@ -355,8 +355,10 @@ The integrator change still helps every shmimIntegrator instance (all
   bursts of non-temporal stores can hurt), or placing the camera thread and
   acquWFS in the same L3 domain.
 - With direct readers now free, the `camwfs` cbuff is unnecessary.
-- Set `stagedDescramble=true` and `stagedCopyNT=true` in `camwfs.conf` once this
-  build is deployed; decide whether they should default to true.
+- Done on this branch: `camera.stagedDescramble` and `camera.stagedCopyNT`
+  default to true (user decision), for every ocam2KCtrl instance, so no config
+  change is needed. Either can be set false in a camera's config to restore the
+  previous behavior.
 - Generalize: let `dev::frameGrabber` publish through a private buffer and a
   non-temporal copy for every camera, so any camera stream can take readers
   freely.
