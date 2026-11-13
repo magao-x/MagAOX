@@ -1,0 +1,88 @@
+# Finite native observation only. See ../NATIVE_SHADOW_TESTING.md.
+# Use the separate loPredCtrlAcc_native_observe executable and a unique -n identity.
+# Training and all shadow record admission remain inhibited; no exposure/applied qualification.
+
+[parameters]
+shadow = true
+shadow_pipeline = false
+shadow_min_updates = 0
+gain = 0.3
+copy_gain = 1.0
+# Explicitly honor copy_gain. Default true preserves the historical loading bug in existing Legacy configs.
+legacy_copy_gain_compat = false
+regularization = 100.0
+gamma = 1.0
+covariance = 1e-5
+history = 15
+future = 3
+num_modes = 2
+fpsSource = camwfs
+qrd = true
+is_integrating = false
+# Neither setting below enables output: the shadow-only build and shadow mode inhibit all frameGrabber use.
+own_shmim = false
+# Keep the incompatible legacy FLOAT sensor reader disabled for the UINT16 ADC stream.
+accel_enabled = false
+accel_channels = 2
+accel_history = 5
+accel_normalize = false
+
+[shmimMonitor]
+# Native observation bypasses this original WFS monitor; only the existing-only observer attaches inputs.
+shmimName =
+threadPrio = 0
+cpuset =
+getExistingFirst = false
+
+# No framegrabber section or DM output stream. Do not add a DM channel or copy a production output name here.
+
+# ADC health remains independent of model qualification. Calibration is unchanged.
+[adc]
+enabled = true
+shmimName = acc000
+profile = accelSim12
+min_code = 0
+max_code = 4095
+reject_rails = true
+zero0 = 2048
+zero1 = 2048
+volts_per_count0 = 0.0083799
+volts_per_count1 = 0.0083799
+sensitivity0 = 1.02
+sensitivity1 = 1.02
+polarity0 = 1
+polarity1 = 1
+capacity = 4096
+max_age_us = 20000
+max_interval_us = 1000
+clock_tolerance_us = 1000
+
+# Default is false in the application. This private example deliberately opts in.
+[native_shadow]
+enabled = true
+# Replace this token in the private copy; directory must already exist and be owned by the operator.
+directory = @OBSERVATION_DIRECTORY@
+duration_sec = 60
+poll_us = 50
+queue_capacity = 32768
+# These select two entries, not a claim that the modal basis/calibration is tip/tilt.
+modal_index0 = 0
+modal_index1 = 1
+modal_stream = aol1_modevalWFS
+camera_stream = camwfs
+# Observe the combined request, not just accelSim's dm01disp10 injection channel.
+dm_stream = dm01disp
+# Unknown preserves raw metadata and never subtracts unlike clocks. Declare only after source-build verification.
+modal_acquisition_clock = unknown
+modal_publication_clock = unknown
+camera_acquisition_clock = unknown
+camera_publication_clock = unknown
+dm_acquisition_clock = unknown
+dm_publication_clock = unknown
+# Optional existing 16-word software endpoint streams. Empty means unavailable, never create/enable a producer.
+completion_stream =
+sdk_stream =
+completion_acquisition_clock = unknown
+completion_publication_clock = unknown
+sdk_acquisition_clock = unknown
+sdk_publication_clock = unknown

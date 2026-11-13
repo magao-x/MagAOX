@@ -11,7 +11,8 @@ CXXFLAGS ?= -O3 -g
 CXXFLAGS += -std=c++20 -Wall -Wextra -fno-fast-math
 SOURCES := $(TEST_DIR)/shadow_replay_benchmark.cpp $(TEST_DIR)/shadow_replay.cpp $(TEST_DIR)/offline_adc.cpp \
            $(TEST_DIR)/allocation_new.cpp $(TEST_DIR)/adc_transport_fixture.cpp $(APP_DIR)/adc_input.cpp \
-           $(APP_DIR)/adc_reader.cpp $(APP_DIR)/adc_features.cpp $(APP_DIR)/shadow_policy.cpp $(APP_DIR)/shadow_pipeline.cpp \
+           $(APP_DIR)/adc_reader.cpp $(APP_DIR)/native_observation.cpp $(APP_DIR)/native_observer.cpp \
+           $(APP_DIR)/adc_features.cpp $(APP_DIR)/shadow_policy.cpp $(APP_DIR)/shadow_pipeline.cpp \
            $(APP_DIR)/causal_input.cpp $(APP_DIR)/shadow_controller.cpp $(APP_DIR)/ar_controller.cpp \
            $(APP_DIR)/recursive_least_squares.cpp $(APP_DIR)/qrd_rls.cpp $(APP_DIR)/utils.cpp \
            $(ROOT_DIR)/INDI/libcommon/IndiProperty.cpp $(ROOT_DIR)/INDI/libcommon/IndiElement.cpp $(ROOT_DIR)/INDI/libcommon/TimeStamp.cpp

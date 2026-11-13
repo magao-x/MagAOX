@@ -23,6 +23,10 @@ class AdcTransportFixture
         const std::string &name /**< [in] Process-private input name. */,
         std::uint32_t      depth = 1 /**< [in] Temporal depth, allocated before the worker starts. */ );
 
+    /// Register immutable caller-owned observation pixels/metadata; caller keeps them alive until readers stop.
+    AdcTransportFixture( const std::string &name /**< [in] Private fixture name. */,
+                         const IMAGE       &image /**< [in] Immutable borrowed source, never a native image. */ );
+
     /// Unregister and remove only the fixture's private ordinary file.
     ~AdcTransportFixture();
 

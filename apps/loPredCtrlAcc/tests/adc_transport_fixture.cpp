@@ -121,6 +121,21 @@ AdcTransportFixture::AdcTransportFixture( const std::string &name, std::uint32_t
     reconnect();
 }
 
+AdcTransportFixture::AdcTransportFixture( const std::string &name, const IMAGE &image )
+    : m_impl( std::make_unique<Impl>() )
+{
+    if( name.empty() || name.find_first_not_of( "abcdefghijklmnopqrstuvwxyz0123456789_-" ) != std::string::npos )
+        throw std::invalid_argument( "Unsafe private observation fixture name" );
+    m_impl->m_name = name;
+    std::filesystem::create_directory( fixture_directory() );
+    { //mutex scope
+        std::lock_guard<std::mutex> guard( s_mutex );
+        if( !s_images.emplace( name, image ).second )
+            throw std::invalid_argument( "Duplicate private fixture" );
+    }
+    reconnect();
+}
+
 AdcTransportFixture::~AdcTransportFixture()
 {
     { //mutex scope

@@ -59,11 +59,12 @@ def write_wrapper(stage, version):
 
 
 def main():
-    """Guard the host, stage current source bytes, and build separate Legacy and strict shadow-only profiles."""
+    """Guard the host, freeze sources, and link requested private profiles without executing applications."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--build-root", required=True, type=Path, help="New output directory; must not exist")
     parser.add_argument("--cxx", default="g++")
     parser.add_argument("--jobs", type=int, default=2)
+    parser.add_argument("--observer-only", action="store_true", help="Build only the guarded native observation executable")
     args = parser.parse_args()
     if platform.system() != "Linux" or socket.gethostname().lower().startswith("exao"):
         raise SystemExit("Requires a non-instrument Linux development environment; nothing was built")
@@ -94,12 +95,13 @@ def main():
         run([generator, str(ROOT), str(version), "MAGAOX"], ROOT, environment, log)
     manifest["git_header_sha256"] = hashlib.sha256(version.read_bytes()).hexdigest()
     failed = False
-    for profile in ("legacy", "shadow"):
+    for profile in (("observer",) if args.observer_only else ("legacy", "shadow")):
         stage = destination / profile
         shutil.copytree(snapshot, stage)
         tools = write_wrapper(stage, version)
         build_environment = dict(environment, PATH=str(tools) + os.pathsep + environment["PATH"])
-        optimization = "-fno-fast-math" if profile == "shadow" else "-ffast-math"
+        guarded = profile != "legacy"
+        optimization = "-fno-fast-math" if guarded else "-ffast-math"
         common = [f"CXX={compiler}", "CXXSTD=-std=c++20", "EDT=false", "NEED_CUDA=no", f"OPTIMIZE={optimization}"]
         result = {"make_variables": common, "linked": False, "status": "building"}
         manifest["profiles"][profile] = result
@@ -109,14 +111,15 @@ def main():
                 for directory in ("INDI/liblilxml", "INDI/libcommon"):
                     run(["make", "-C", directory, f"-j{args.jobs}", *common, "all"], stage, build_environment, log)
                 run(["make", f"-j{args.jobs}", *common, "libs_all"], stage, build_environment, log)
-                shadow = ["DDSPC_SHADOW_BUILD=yes", "DDSPC_SHADOW_ONLY=yes"] if profile == "shadow" else []
+                shadow = ["DDSPC_SHADOW_BUILD=yes", "DDSPC_SHADOW_ONLY=yes"] if guarded else []
+                target = "native-observe" if profile == "observer" else "all"
                 # Serialize phony Git-header generation and the object compilation that reads it.
-                run(["make", "-C", "apps/loPredCtrlAcc", "-j1", *common, *shadow, "all"],
+                run(["make", "-C", "apps/loPredCtrlAcc", "-j1", *common, *shadow, target],
                     stage, build_environment, log)
-            binary = stage / "apps/loPredCtrlAcc/loPredCtrlAcc"
+            binary = stage / "apps/loPredCtrlAcc" / ("loPredCtrlAcc_native_observe" if profile == "observer" else "loPredCtrlAcc")
             if not binary.is_file():
-                raise RuntimeError("Native link did not create loPredCtrlAcc")
-            result.update(linked=True, status="linked", shadow_only=profile == "shadow",
+                raise RuntimeError("Native link did not create the requested private executable")
+            result.update(linked=True, status="linked", shadow_only=guarded,
                           binary_sha256=hashlib.sha256(binary.read_bytes()).hexdigest())
             print(f"Linked {profile}: {binary}; application was not executed or installed")
         except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
