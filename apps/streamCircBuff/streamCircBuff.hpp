@@ -10,6 +10,10 @@
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 
+#ifdef __SSE2__
+    #include <immintrin.h>
+#endif
+
 /** \defgroup streamCircBuff
  * \brief An application to keep a circular buffer of a stream
  *
@@ -197,6 +201,16 @@ class streamCircBuff : public MagAOXApp<true>,
      */
     void measureFPS( const timespec &atime, /**< [in] source acquisition time of the frame */
                      uint64_t        cnt0   /**< [in] source frame counter of the frame */
+    );
+
+    /// Copy a frame into the output stream with non-temporal stores
+    /** The output is a long circular buffer which is rarely read back, so the copy bypasses the cache rather than
+     * evicting the data of processes sharing the L3 cache, such as the loop reading the source.  Ends with a store
+     * fence so the frame is visible before it is published.  Uses memcpy where SSE2 is not available.
+     */
+    static void streamCopy( void       *dest,  /**< [out] start of the output frame */
+                            const void *src,   /**< [in] start of the staged frame */
+                            size_t      nbytes /**< [in] number of bytes to copy */
     );
 
     /** \name dev::frameGrabber interface
@@ -542,6 +556,33 @@ void streamCircBuff::measureFPS( const timespec &atime, uint64_t cnt0 )
     m_fpsCnt0  = cnt0;
 }
 
+void streamCircBuff::streamCopy( void *dest, const void *src, size_t nbytes )
+{
+#ifdef __SSE2__
+    char       *d = static_cast<char *>( dest );
+    const char *s = static_cast<const char *>( src );
+
+    // regular stores up to the first 16 byte boundary of the destination
+    size_t head = std::min( ( 16 - reinterpret_cast<uintptr_t>( d ) % 16 ) % 16, nbytes );
+
+    memcpy( d, s, head );
+    d += head;
+    s += head;
+    nbytes -= head;
+
+    for( ; nbytes >= 16; nbytes -= 16, d += 16, s += 16 )
+    {
+        _mm_stream_si128( reinterpret_cast<__m128i *>( d ), _mm_loadu_si128( reinterpret_cast<const __m128i *>( s ) ) );
+    }
+
+    memcpy( d, s, nbytes );
+
+    _mm_sfence();
+#else
+    memcpy( dest, src, nbytes );
+#endif
+}
+
 int streamCircBuff::configureAcquisition()
 {
     std::unique_lock<std::mutex> lock( m_indiMutex );
@@ -603,7 +644,7 @@ int streamCircBuff::loadImageIntoStream( void *dest )
 
     if( frameGrabberT::m_dataType == shmimMonitorT::m_dataType )
     {
-        memcpy( dest, m_staged.data(), m_staged.size() );
+        streamCopy( dest, m_staged.data(), m_staged.size() );
     }
     else if( frameGrabberT::m_dataType == _DATATYPE_FLOAT && pixget != nullptr )
     {

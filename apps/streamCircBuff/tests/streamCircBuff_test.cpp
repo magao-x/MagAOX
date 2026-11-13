@@ -43,6 +43,8 @@ class streamCircBuff_test : public streamCircBuff
 
     using streamCircBuff::processImage;
 
+    using streamCircBuff::streamCopy;
+
     static constexpr uint32_t c_width  = 2; ///< Source frame width.
     static constexpr uint32_t c_height = 2; ///< Source frame height.
 
@@ -430,6 +432,46 @@ TEST_CASE( "streamCircBuff reports the frame rate of an fps device", "[streamCir
     pcf::IndiProperty wrong( ip );
     wrong.setName( "other" );
     REQUIRE( app.setCallBack_m_indiP_fpsSource( wrong ) == -1 );
+}
+
+/// The non-temporal output copy matches memcpy for any destination alignment and length, without overrunning.
+/**
+ * \ingroup streamCircBuff_unit_test
+ */
+TEST_CASE( "streamCircBuff copies output frames exactly", "[streamCircBuff]" )
+{
+    // clang-format off
+    #ifdef STREAMCIRCBUFF_TEST_DOXYGEN_REF
+    MagAOX::app::streamCircBuff::streamCopy;
+    #endif
+    // clang-format on
+
+    std::vector<char> src( 300 );
+    for( size_t n = 0; n < src.size(); ++n )
+    {
+        src[n] = static_cast<char>( n * 7 + 1 );
+    }
+
+    for( size_t offset = 0; offset < 16; ++offset )
+    {
+        for( size_t nbytes : { 0, 1, 15, 16, 17, 31, 64, 255 } )
+        {
+            alignas( 16 ) char dest[320];
+            memset( dest, 0, sizeof( dest ) );
+
+            streamCircBuff_test::streamCopy( dest + offset, src.data() + 3, nbytes );
+
+            REQUIRE( memcmp( dest + offset, src.data() + 3, nbytes ) == 0 );
+
+            for( size_t n = 0; n < sizeof( dest ); ++n )
+            {
+                if( n < offset || n >= offset + nbytes )
+                {
+                    REQUIRE( dest[n] == 0 );
+                }
+            }
+        }
+    }
 }
 
 } // namespace streamCircBuffTest
