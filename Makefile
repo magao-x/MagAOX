@@ -99,7 +99,8 @@ apps_icc = \
 	adcCtrl \
 	picamCtrl \
 	pvcamCtrl \
-	zaberLowLevelBinary
+	zaberLowLevelBinary \
+	orcaCtrl
 
 pythonapps_icc = \
 	adcCtrl \
@@ -116,7 +117,8 @@ apps_tic = \
 	bmcCtrl \
 	trippLitePDU \
 	rhusbMon \
-	dmSpeckle
+	dmSpeckle \
+	orcaCtrl
 
 
 # Apps with simulator mode
