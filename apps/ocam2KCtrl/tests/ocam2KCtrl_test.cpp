@@ -2130,10 +2130,9 @@ TEST_CASE( "ocam2KCtrl loadImageIntoStream uses the OCAM descramble output", "[o
 
     SECTION( "the non-digital path writes the descrambled frame directly to the destination" )
     {
-        app.m_ocam2_id         = 7;
-        app.m_digitalBin       = false;
-        app.m_stagedDescramble = false;
-        app.m_image_p          = reinterpret_cast<u_char *>( rawImage.data() );
+        app.m_ocam2_id   = 7;
+        app.m_digitalBin = false;
+        app.m_image_p    = reinterpret_cast<u_char *>( rawImage.data() );
 
         g_ocam2StubState.imageNumber = 44;
         g_ocam2StubState.outputImage = { 10, 20, 30, 40 };
@@ -2146,51 +2145,6 @@ TEST_CASE( "ocam2KCtrl loadImageIntoStream uses the OCAM descramble output", "[o
         REQUIRE( destImage[1] == 20 );
         REQUIRE( destImage[2] == 30 );
         REQUIRE( destImage[3] == 40 );
-    }
-
-    SECTION( "the staged path descrambles into a private buffer and copies it to the destination" )
-    {
-        app.m_ocam2_id         = 9;
-        app.m_digitalBin       = false;
-        app.m_stagedDescramble = true;
-        app.m_stagedCopyNT     = false;
-        app.m_width            = 2;
-        app.m_height           = 2;
-        app.m_image_p          = reinterpret_cast<u_char *>( rawImage.data() );
-
-        g_ocam2StubState.imageNumber = 66;
-        g_ocam2StubState.outputImage = { 11, 21, 31, 41 };
-
-        REQUIRE( app.loadImageIntoStream( destImage.data() ) == 0 );
-        REQUIRE( g_ocam2StubState.lastId == 9 );
-        REQUIRE( g_ocam2StubState.lastRaw == rawImage.data() );
-        REQUIRE( g_ocam2StubState.lastOutput == app.m_descrambled.data() );
-        REQUIRE( g_ocam2StubState.lastOutput != destImage.data() );
-        REQUIRE( destImage[0] == 11 );
-        REQUIRE( destImage[1] == 21 );
-        REQUIRE( destImage[2] == 31 );
-        REQUIRE( destImage[3] == 41 );
-    }
-
-    SECTION( "the staged path copies to the destination with non-temporal stores by default" )
-    {
-        REQUIRE( app.m_stagedDescramble );
-        REQUIRE( app.m_stagedCopyNT );
-
-        app.m_digitalBin = false;
-        app.m_width      = 2;
-        app.m_height     = 2;
-        app.m_image_p    = reinterpret_cast<u_char *>( rawImage.data() );
-
-        destImage.fill( 0 );
-        g_ocam2StubState.outputImage = { 12, 22, 32, 42 };
-
-        REQUIRE( app.loadImageIntoStream( destImage.data() ) == 0 );
-        REQUIRE( g_ocam2StubState.lastOutput == app.m_descrambled.data() );
-        REQUIRE( destImage[0] == 12 );
-        REQUIRE( destImage[1] == 22 );
-        REQUIRE( destImage[2] == 32 );
-        REQUIRE( destImage[3] == 42 );
     }
 
     SECTION( "the digital-binning path descrambles into the work image before filling the output frame" )

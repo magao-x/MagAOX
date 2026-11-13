@@ -355,13 +355,21 @@ The integrator change still helps every shmimIntegrator instance (all
   bursts of non-temporal stores can hurt), or placing the camera thread and
   acquWFS in the same L3 domain.
 - With direct readers now free, the `camwfs` cbuff is unnecessary.
-- Done on this branch: `camera.stagedDescramble` and `camera.stagedCopyNT`
-  default to true (user decision), for every ocam2KCtrl instance, so no config
-  change is needed. Either can be set false in a camera's config to restore the
-  previous behavior.
-- Generalize: let `dev::frameGrabber` publish through a private buffer and a
-  non-temporal copy for every camera, so any camera stream can take readers
-  freely.
+- Moved to `dev::frameGrabber` (user decision; camwfs is the only OCAM camera):
+  `framegrabber.staged` (bool, default false) has the base pass
+  `loadImageIntoStream` a private buffer (`m_stagedImage`, sized at acquisition
+  start), set `md->write` and copy the buffer into the stream slot;
+  `framegrabber.stagedCopyNT` (bool, default true) makes that copy
+  `MagAOX::streamCopy`. `write` is then set only for the copy. Any camera can opt
+  in; derived classes, flips and descrambles are unchanged since they just write
+  to `dest`. The ocam2KCtrl options (`camera.stagedDescramble`,
+  `camera.stagedCopyNT`) are removed and ocam2KCtrl is back to its original
+  `loadImageIntoStream`. Test: a `frameGrabber_integration_test` case runs the
+  real loop unstaged, staged with `memcpy` and staged with `streamCopy`, checking
+  where the conversion wrote and the published pixels and counters.
+- Deployment: set `[framegrabber] staged=true` in `camwfs.conf`, and remove
+  `camera.stagedDescramble` / `camera.stagedCopyNT` if they were added for
+  testing (unknown keys fail startup).
 - Apply the same private-buffer-then-copy pattern to cacao acquWFS's write of
   `aol1_imWFS2` (milk/cacao fork), then retest cbuff away from the loop's L3.
 

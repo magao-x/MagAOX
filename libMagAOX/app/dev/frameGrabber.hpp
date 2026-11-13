@@ -17,6 +17,7 @@
 #include <ImageStreamIO/ImageStreamIO.h>
 
 #include "../../common/paths.hpp"
+#include "../../common/streamCopy.hpp"
 #include "../../logger/types/telem_fgstage.hpp"
 #include "../../logger/types/telem_fgtrace.hpp"
 #include "frameGrabberTiming.hpp"
@@ -64,8 +65,8 @@ namespace dev
  *       // returns 0 if valid, < 0 on error, > 0 on no data.
  *       int derivedT::acquireAndCheckValid()
  *
- *       //Loads the acquired image into the stream, copying it to the appropriate member of m_imageStream->array.
- *       //This could simply be a memcpy.
+ *       //Loads the acquired image into dest, which is the next frame of m_imageStream->array, or a private
+ *       //buffer which is then copied there if framegrabber.staged is set.  This could simply be a memcpy.
  *       int derivedT::loadImageIntoStream(void * dest);
  *
  *       //Take any actions needed to reconfigure the system.  Called if m_reconfig is set to true.
@@ -158,7 +159,23 @@ class frameGrabber
 
     int m_defaultFlip{ fgFlipNone }; ///< Configured orientation of copied images.
 
+    /// Load each image into a private buffer, then copy it into the stream, instead of loading it into the stream.
+    /** When readers of the stream hold its lines from the previous frame, loading the image directly into the stream
+     * must take each line back while also doing the derived class's work (e.g. a descramble), which can slow the load
+     * by many microseconds.  Loading into a private buffer avoids this, and the copy into the stream is short.  The
+     * stream's `write` flag is then set only for the copy.
+     */
+    bool m_staged{ false };
+
+    /// Copy a staged image into the stream with non-temporal stores (streamCopy), which do not take lines back.
+    /** Readers then load the new frame from memory rather than from this core's cache.  Used only when m_staged is
+     * set.
+     */
+    bool m_stagedCopyNT{ true };
+
     ///@}
+
+    std::vector<char> m_stagedImage; ///< Private image buffer when m_staged is set, sized at acquisition start.
 
     uint32_t m_width{ 0 };  ///< The width of the image, once deinterlaced etc.
     uint32_t m_height{ 0 }; ///< The height of the image, once deinterlaced etc.
@@ -557,6 +574,27 @@ int frameGrabber<derivedT>::setupConfig( mx::app::appConfigurator &config )
                 "unsigned",
                 "Maximum pending/ready excursion contexts, 0 disables, maximum 256; requires stage timing." );
 
+    config.add( "framegrabber.staged",
+                "",
+                "framegrabber.staged",
+                argType::Required,
+                "framegrabber",
+                "staged",
+                false,
+                "bool",
+                "If true, load each image into a private buffer and then copy it into the stream, so readers of the "
+                "stream do not slow the load.  Default is false." );
+
+    config.add( "framegrabber.stagedCopyNT",
+                "",
+                "framegrabber.stagedCopyNT",
+                argType::Required,
+                "framegrabber",
+                "stagedCopyNT",
+                false,
+                "bool",
+                "If true, and staged is true, copy into the stream with non-temporal stores.  Default is true." );
+
     if( derivedT::c_frameGrabber_flippable )
     {
         config.add( "framegrabber.defaultFlip",
@@ -611,6 +649,8 @@ int frameGrabber<derivedT>::loadConfig( mx::app::appConfigurator &config )
     config( m_stageBracketUs, "framegrabber.stageBracketUs" );
     config( m_stageExcursionUs, "framegrabber.stageExcursionUs" );
     config( m_stageTraceMax, "framegrabber.stageTraceMax" );
+    config( m_staged, "framegrabber.staged" );
+    config( m_stagedCopyNT, "framegrabber.stagedCopyNT" );
 
     if( !mx::math::isFinite( m_latencyCircBuffMaxTime ) || m_latencyCircBuffMaxTime >= 9e9 ||
         m_latencyCircBuffMaxLength < 0 || !mx::math::isFinite( m_stageBracketUs ) || m_stageBracketUs < 0 ||
@@ -1077,6 +1117,11 @@ void frameGrabber<derivedT>::fgThreadExec()
             next_cntarr   = &m_imageStream->cntarray[0];
         }
 
+        if( m_staged )
+        {
+            m_stagedImage.resize( m_width * m_height * m_typeSize );
+        }
+
         // This is the main image grabbing loop.
         while( !derived().shutdown() && !m_reconfig && derived().powerState() > 0 )
         {
@@ -1102,13 +1147,30 @@ void frameGrabber<derivedT>::fgThreadExec()
             }
 
             // Ok, no timeout, so we process the image and publish it.
-            m_imageStream->md->write = 1;
+            if( !m_staged )
+            {
+                m_imageStream->md->write = 1;
+            }
 
-            if( derived().loadImageIntoStream( next_dest ) < 0 )
+            if( derived().loadImageIntoStream( m_staged ? m_stagedImage.data() : next_dest ) < 0 )
             {
                 m_fgTiming.mark( MagAOX::fgTiming::Marker::loopTailDone );
                 m_fgTiming.finish( MagAOX::fgTiming::Outcome::failed );
                 break;
+            }
+
+            if( m_staged )
+            {
+                m_imageStream->md->write = 1;
+
+                if( m_stagedCopyNT )
+                {
+                    streamCopy( next_dest, m_stagedImage.data(), m_stagedImage.size() );
+                }
+                else
+                {
+                    memcpy( next_dest, m_stagedImage.data(), m_stagedImage.size() );
+                }
             }
 
             m_fgTiming.mark( MagAOX::fgTiming::Marker::loadDone );

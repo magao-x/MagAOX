@@ -73,6 +73,9 @@ struct Camera : MagAOX::app::MagAOXApp<false>, MagAOX::app::dev::frameGrabber<Ca
     friend class MagAOX::app::dev::frameGrabber<Camera>;
     using Grabber = MagAOX::app::dev::frameGrabber<Camera>;
     using Grabber::m_fgTiming;
+    using Grabber::m_staged;
+    using Grabber::m_stagedCopyNT;
+    using Grabber::m_stagedImage;
     using Grabber::m_traceLogFailed;
 
     size_t                attempts{ 0 };            ///< Scripted acquisition attempts.
@@ -88,6 +91,10 @@ struct Camera : MagAOX::app::MagAOXApp<false>, MagAOX::app::dev::frameGrabber<Ca
     std::vector<timespec> acquisition;              ///< Original SDK timestamps retained at successful publication.
     std::vector<timespec> publication;              ///< Actual existing realtime writetime samples.
     std::vector<uint64_t> counters;                 ///< Shared-memory publication counters observed by the sync hook.
+
+    std::vector<bool> loadedIntoStream; ///< Whether each conversion was given a destination inside the stream.
+
+    std::vector<uint16_t> pixels; ///< Published pixels observed by the sync hook, four per frame.
 
     int64_t conversionDelayNs{ 0 }; ///< Extra elapsed time during the eighth conversion, after baseline warmup.
 
@@ -263,6 +270,10 @@ int Camera::loadImageIntoStream( void *destination )
 {
     ++loads;
 
+    const char *raw   = static_cast<const char *>( m_imageStream->array.raw );
+    const char *where = static_cast<const char *>( destination );
+    loadedIntoStream.push_back( where >= raw && where < raw + m_circBuffLength * m_width * m_height * m_typeSize );
+
     if( failLoad )
     {
         m_shutdown = true;
@@ -287,6 +298,12 @@ int Camera::frameGrabberPostPublish( IMAGE *image )
     acquisition.push_back( image->md->atime );
     publication.push_back( image->md->writetime );
     counters.push_back( image->md->cnt0 );
+
+    for( size_t n = 0; n < 4; ++n )
+    {
+        pixels.push_back( image->array.UI16[image->md->cnt1 * 4 + n] );
+    }
+
     ++posts;
 
     if( posts == 1 )
@@ -395,6 +412,45 @@ TEST_CASE( "Framegrabber loop preserves timestamps and main-to-sync order", "[de
 #ifdef FRAMEGRABBER_TEST_DOXYGEN_REF
     MagAOX::app::dev::frameGrabber<Camera>::fgThreadExec;
     MagAOX::app::dev::frameGrabber<Camera>::postPublishHook;
+#endif
+    // clang-format on
+}
+
+/** \brief Staged loading converts into a private buffer and publishes the same frames, with either copy.
+ * \ingroup frameGrabber_unit_test
+ */
+TEST_CASE( "Framegrabber staged loading publishes through a private buffer", "[dev::frameGrabber][integration]" )
+{
+    for( int mode = 0; mode < 3; ++mode )
+    {
+        CAPTURE( mode );
+        resetClock();
+        Camera camera( false );
+        camera.m_staged       = mode > 0;
+        camera.m_stagedCopyNT = mode == 2;
+        camera.run();
+
+        REQUIRE( camera.posts == 3 );
+        REQUIRE( camera.loadedIntoStream.size() == 3 );
+        CHECK( camera.metadataComplete );
+        CHECK( camera.counters == std::vector<uint64_t>{ 1, 2, 3 } );
+        CHECK( camera.pixels == std::vector<uint16_t>{ 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3 } );
+
+        for( bool inStream : camera.loadedIntoStream )
+        {
+            CHECK( inStream == ( mode == 0 ) );
+        }
+
+        if( mode > 0 )
+        {
+            CHECK( camera.m_stagedImage.size() == 4 * sizeof( uint16_t ) );
+        }
+    }
+
+    // clang-format off
+#ifdef FRAMEGRABBER_TEST_DOXYGEN_REF
+    MagAOX::app::dev::frameGrabber<Camera>::fgThreadExec;
+    MagAOX::streamCopy;
 #endif
     // clang-format on
 }
