@@ -135,7 +135,54 @@ frame converters against `getPix` for all ten types, setting and adding, with
 no writes past the frame (782 assertions); `shmimIntegrator_test` 20 cases,
 2003 assertions pass; app builds.
 
-To measure on the RTC: loop time with camwfs-avg running, against ~144 us.
+Result on the RTC (new build confirmed running): **no change** in the loop
+cost of camwfs-avg; the rms of the end-to-end measurement also did not change.
+The integrator change is kept for its ~10x lower CPU use in every instance.
+
+Further test: camwfs-sw alone (streamWriter, not writing to disk, so only a
+`memcpy` of each frame into its buffer) on CPU 32 shows the same ~8 us.
+
+Summary for `camwfs`:
+
+| reader | loop cost |
+|---|---|
+| wakes, does not read (shmimInfo, or camwfs-avg with `start` off) | ~1-2 us |
+| reads the frame: camwfs-avg slow or fast, CPU 0-23 or 32; camwfs-sw | ~8-10 us |
+
+Any read of the frame costs a fixed ~8 us, independent of where the reader
+runs and how long it holds the frame. Working hypothesis: the semaphore wakes
+every reader at the same moment as acquWFS, so they read the same lines (owned
+by the camera core, 33) at the same time and acquWFS's misses queue behind the
+other reader's. Not yet confirmed. ~8 us is also the size of the MVM
+completion-wait jumps removed in xwcl/milk `dc0aea87`, so a threshold effect in
+the loop remains possible.
+
+### shmimMonitor spin polling and read delay
+
+Two `dev::shmimMonitor` options (config section of each monitor, e.g.
+`[shmimMonitor]`):
+
+- `spin` (bool, default false): poll `md->cnt0` (atomic acquire load, with
+  `_mm_pause`) instead of waiting on the semaphore. Shutdown, restart and state
+  are checked every 1024 polls; the 1 s timeout and file/inode checks are
+  unchanged. A semaphore is still registered (so the release logic is
+  unchanged); with no waiter the writer's post is only an atomic increment.
+  Uses a full core: a warning is logged if no cpuset is set.
+- `readDelay` (int, microseconds, default 0): sleep (`clock_nanosleep`) after a
+  new frame is seen, before reading it. Tests the collision hypothesis and, if
+  confirmed, is a cheap fix for a single-frame source with a long frame period.
+
+Tests: `shmimMonitor_timing_test` gains a polling case (frames seen from the
+counter alone with no semaphore post, and clean shutdown) and a read-delay case
+(200 ms delay respected in both modes); 8 cases, 109 assertions, 5 repeated runs
+pass. streamCircBuff and shmimIntegrator tests and apps build and pass.
+
+New config keys must be deployed with this code (unknown keys fail startup).
+
+To test on the RTC, with camwfs-avg (or camwfs-sw) running:
+1. `readDelay=30` to `50`: if the ~8 us disappears, the cost is the
+   simultaneous read.
+2. `spin=true` on a dedicated cpuset: removes the ~1-2 us wake.
 
 Placement plan (user): a `camwfs` cbuff in the writer's L3 domain, with
 camwfs-avg, camwfs-sw and camwfs-dark reading its output instead of `camwfs`.
@@ -144,7 +191,7 @@ The integrator change still helps every shmimIntegrator instance (all
 
 ## To do on this branch
 
-1. Spin polling in `dev::shmimMonitor`: optional mode that polls `md->cnt0`
+1. Done, to be measured (see above). Spin polling in `dev::shmimMonitor`: optional mode that polls `md->cnt0`
    (and `cnt1`) instead of waiting on the semaphore, for readers with a
    dedicated core. The writer's post then has no waiter and no syscall.
    Design points:

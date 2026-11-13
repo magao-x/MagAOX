@@ -12,6 +12,10 @@
 
 #include "../../libMagAOX/common/paths.hpp"
 
+#if defined( __x86_64__ ) || defined( __i386__ )
+    #include <immintrin.h>
+#endif
+
 namespace MagAOX
 {
 namespace app
@@ -31,7 +35,7 @@ enum class shmimMonitorState
 enum class shmimMonitorEvent
 {
     connected,   ///< A new stream attachment is ready for callbacks.
-    receipt,     ///< A semaphore wait returned successfully, before metadata checks.
+    receipt,     ///< A new frame was signaled by the semaphore or seen by polling, before metadata checks.
     initial,     ///< Existing pixels will be processed without a semaphore receipt.
     discarded,   ///< A successful receipt was rejected before processing.
     disconnected ///< An established attachment is about to close, after all callbacks have finished.
@@ -135,6 +139,18 @@ class shmimMonitor
     int m_smThreadPrio{ 2 }; ///< Priority of the shmimMonitor thread, should normally be > 00.
 
     std::string m_smCpuset; ///< The cpuset to assign the shmimMonitor thread to.  Ignored if empty (the default).
+
+    /// Poll the stream's frame counter for new frames instead of waiting on its semaphore.
+    /** This removes the wake of this reader from the writer's semaphore posts, at the cost of a fully busy core, so
+     * it should only be used with a dedicated cpuset.  A semaphore is still registered.
+     */
+    bool m_spin{ false };
+
+    /// Microseconds to wait after a new frame is seen before reading it.  0, the default, reads at once.
+    /** A delay keeps this reader from reading the frame at the same time as the stream's other readers, e.g. the AO
+     * loop.  It should be well below the frame period for a single-frame stream, which is rewritten every frame.
+     */
+    int m_readDelay{ 0 };
 
     ///@}
 
@@ -293,6 +309,20 @@ class shmimMonitor
 
     /// Execute the monitoring thread
     void smThreadExec();
+
+    /// Wait for a new frame, on the semaphore or by polling the frame counter if m_spin is set
+    /** When polling, also returns if shutdown, restart or a state change is requested.
+     *
+     *
+eturns 0 when a new frame is available
+     *
+eturns -1 otherwise, with errno set to ETIMEDOUT at the deadline, to EINTR when polling is interrupted by
+     *          shutdown, restart or a state change, or by sem_timedwait
+     */
+    int waitForFrame( sem_t          *sem,      /**< [in] the semaphore to wait on, when not polling */
+                      const timespec &deadline, /**< [in] the CLOCK_REALTIME time at which to stop waiting */
+                      uint64_t       &lastCnt0  /**< [in/out] the frame counter last seen, updated when polling */
+    );
 
     /// Create the image
     /** This will create the shared memory image, erasing an existing.  This is independent of the actual
@@ -493,6 +523,29 @@ int shmimMonitor<derivedT, specificT>::setupConfig( mx::app::appConfigurator &co
                 "string",
                 "The cpuset for the shmimMonitor thread." );
 
+    config.add( specificT::configSection() + ".spin",
+                "",
+                specificT::configSection() + ".spin",
+                argType::Required,
+                specificT::configSection(),
+                "spin",
+                false,
+                "bool",
+                "If true, poll the stream for new frames instead of waiting on its semaphore.  Uses a full core, so "
+                "requires a dedicated cpuset.  Default is false." );
+
+    config.add(
+        specificT::configSection() + ".readDelay",
+        "",
+        specificT::configSection() + ".readDelay",
+        argType::Required,
+        specificT::configSection(),
+        "readDelay",
+        false,
+        "int",
+        "Microseconds to wait after a new frame before reading it, e.g. to avoid reading it at the same time as "
+        "the AO loop.  Default is 0." );
+
     config.add( specificT::configSection() + ".shmimName",
                 "",
                 specificT::configSection() + ".shmimName",
@@ -524,6 +577,8 @@ int shmimMonitor<derivedT, specificT>::loadConfig( mx::app::appConfigurator &con
 {
     config( m_smThreadPrio, specificT::configSection() + ".threadPrio" );
     config( m_smCpuset, specificT::configSection() + ".cpuset" );
+    config( m_spin, specificT::configSection() + ".spin" );
+    config( m_readDelay, specificT::configSection() + ".readDelay" );
     config( m_shmimName, specificT::configSection() + ".shmimName" );
     config( m_getExistingFirst, specificT::configSection() + ".getExistingFirst" );
 
@@ -588,6 +643,15 @@ int shmimMonitor<derivedT, specificT>::appStartup()
         derivedT::template log<software_error>( { __FILE__, __LINE__, errno, 0, logss } );
 
         return -1;
+    }
+
+    if( m_spin && m_smCpuset == "" )
+    {
+#ifndef SHMIMMONITOR_TEST_NOLOG
+        derivedT::template log<text_log>( specificT::configSection() +
+                                              ".spin is set without a cpuset: polling will keep a shared core busy",
+                                          logPrio::LOG_WARNING );
+#endif
     }
 
     if( derived().threadStart( m_smThread,
@@ -787,6 +851,8 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
 
         ImageStreamIO_semflush( &m_imageStream, m_semaphoreNumber );
 
+        uint64_t lastCnt0 = __atomic_load_n( &m_imageStream.md[0].cnt0, __ATOMIC_ACQUIRE ); // used when polling
+
         sem_t *sem = m_imageStream.semptr[m_semaphoreNumber]; ///< The semaphore to monitor for new image data
 
         m_dataType = m_imageStream.md[0].datatype;
@@ -890,9 +956,15 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
 
             ts.tv_sec += 1;
 
-            if( sem_timedwait( sem, &ts ) == 0 )
+            if( waitForFrame( sem, ts, lastCnt0 ) == 0 )
             {
                 timingHook( derived(), shmimMonitorEvent::receipt, 0 );
+
+                if( m_readDelay > 0 )
+                {
+                    timespec delay{ m_readDelay / 1000000, ( m_readDelay % 1000000 ) * 1000L };
+                    clock_nanosleep( CLOCK_MONOTONIC, 0, &delay, nullptr );
+                }
 
                 if( m_imageStream.md[0].size[2] > 0 ) ///\todo change to naxis?
                 {
@@ -1021,6 +1093,51 @@ void shmimMonitor<derivedT, specificT>::smThreadExec()
         timingHook( derived(), shmimMonitorEvent::disconnected, 0 );
         ImageStreamIO_closeIm( &m_imageStream );
         opened = false;
+    }
+}
+
+template <class derivedT, class specificT>
+int shmimMonitor<derivedT, specificT>::waitForFrame( sem_t *sem, const timespec &deadline, uint64_t &lastCnt0 )
+{
+    if( !m_spin )
+    {
+        return sem_timedwait( sem, &deadline );
+    }
+
+    for( uint64_t n = 1;; ++n )
+    {
+        // The writer increments cnt0 after writing the frame
+        uint64_t cnt0 = __atomic_load_n( &m_imageStream.md[0].cnt0, __ATOMIC_ACQUIRE );
+
+        if( cnt0 != lastCnt0 )
+        {
+            lastCnt0 = cnt0;
+            return 0;
+        }
+
+        if( n % 1024 == 0 )
+        {
+            if( derived().shutdown() != 0 || m_restart || derived().state() != m_targetState )
+            {
+                errno = EINTR;
+                return -1;
+            }
+
+            timespec now;
+            clock_gettime( CLOCK_REALTIME, &now );
+
+            if( now.tv_sec > deadline.tv_sec || ( now.tv_sec == deadline.tv_sec && now.tv_nsec >= deadline.tv_nsec ) )
+            {
+                errno = ETIMEDOUT;
+                return -1;
+            }
+        }
+
+#if defined( __x86_64__ ) || defined( __i386__ )
+        _mm_pause();
+#elif defined( __aarch64__ )
+        asm volatile( "yield" );
+#endif
     }
 }
 
