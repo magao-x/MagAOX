@@ -162,8 +162,7 @@ class frameGrabber
     /// Load each image into a private buffer, then copy it into the stream, instead of loading it into the stream.
     /** When readers of the stream hold its lines from the previous frame, loading the image directly into the stream
      * must take each line back while also doing the derived class's work (e.g. a descramble), which can slow the load
-     * by many microseconds.  Loading into a private buffer avoids this, and the copy into the stream is short.  The
-     * stream's `write` flag is then set only for the copy.
+     * by many microseconds.  Loading into a private buffer avoids this, and the copy into the stream is short.
      */
     bool m_staged{ false };
 
@@ -1147,10 +1146,7 @@ void frameGrabber<derivedT>::fgThreadExec()
             }
 
             // Ok, no timeout, so we process the image and publish it.
-            if( !m_staged )
-            {
-                m_imageStream->md->write = 1;
-            }
+            m_imageStream->md->write = 1;
 
             if( derived().loadImageIntoStream( m_staged ? m_stagedImage.data() : next_dest ) < 0 )
             {
@@ -1161,8 +1157,6 @@ void frameGrabber<derivedT>::fgThreadExec()
 
             if( m_staged )
             {
-                m_imageStream->md->write = 1;
-
                 if( m_stagedCopyNT )
                 {
                     streamCopy( next_dest, m_stagedImage.data(), m_stagedImage.size() );

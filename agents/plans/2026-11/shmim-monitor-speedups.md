@@ -360,13 +360,20 @@ The integrator change still helps every shmimIntegrator instance (all
   `loadImageIntoStream` a private buffer (`m_stagedImage`, sized at acquisition
   start), set `md->write` and copy the buffer into the stream slot;
   `framegrabber.stagedCopyNT` (bool, default true) makes that copy
-  `MagAOX::streamCopy`. `write` is then set only for the copy. Any camera can opt
+  `MagAOX::streamCopy`. Any camera can opt
   in; derived classes, flips and descrambles are unchanged since they just write
   to `dest`. The ocam2KCtrl options (`camera.stagedDescramble`,
   `camera.stagedCopyNT`) are removed and ocam2KCtrl is back to its original
   `loadImageIntoStream`. Test: a `frameGrabber_integration_test` case runs the
   real loop unstaged, staged with `memcpy` and staged with `streamCopy`, checking
   where the conversion wrote and the published pixels and counters.
+- RTC result with the first frameGrabber version: works, but camwfs-sw and
+  camwfs-avg added a small, repeatable ~2 us, which the ocam2KCtrl version did
+  not. The one difference found: that version set `md->write = 1` just before
+  the copy rather than before the load, so taking back the metadata line (read
+  by every reader each frame) moved from overlapping the load to directly before
+  the copy and its closing store fence. Restored `write = 1` before the load in
+  both modes, matching the ocam2KCtrl version. To retest on the RTC.
 - Deployment: set `[framegrabber] staged=true` in `camwfs.conf`, and remove
   `camera.stagedDescramble` / `camera.stagedCopyNT` if they were added for
   testing (unknown keys fail startup).
