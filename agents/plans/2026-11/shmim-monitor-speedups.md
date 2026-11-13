@@ -72,32 +72,31 @@ Initial state of `aol1_imWFS2`:
 Note: `taskset -c 26 ...` from a shell fails with `EINVAL` because the shell's
 cpuset (`system`, 0-23,64-87) does not contain CPU 26; use `cset proc --exec`.
 
-## Change on this branch
+## Tried and reverted: non-temporal output copy
 
-`streamCircBuff::loadImageIntoStream()` now copies into the output circular
-buffer with `streamCopy()`: SSE2 non-temporal stores (`_mm_stream_si128`) with
-regular copies for the unaligned head and tail, then `_mm_sfence` so the frame
-is visible before the framegrabber publishes it. `memcpy` is used without SSE2.
-The output buffer (40000 frames, 2.3 GB) is rarely read back, so this keeps
-cbuff's writes from evicting the loop's data once cbuff shares its L3 domain.
-The `toFloat` path is unchanged.
+Commit `65cb621a` changed `streamCircBuff::loadImageIntoStream()` to copy into
+the output circular buffer with SSE2 non-temporal stores (`_mm_stream_si128`,
+then `_mm_sfence` before publishing). The aim was to keep cbuff's writes into
+the 40000-frame (2.3 GB) output buffer from evicting the loop's data once cbuff
+shares the loop's L3 domain. It passed a unit test against `memcpy` for all
+destination alignments.
 
-Expected gain: some of the remaining ~2 us, with the ~1 us wake as the floor.
-To be measured on the RTC with cbuff on `spare42`.
+Result on the RTC with cbuff on `spare42`: the loop got 1-2 us *worse*,
+confirmed by several A/B tests. Reverted to `memcpy` in the next commit.
 
-### Verification
+Likely explanation: with regular stores the ~57.6 KB per frame stays in cbuff's
+L2/L3 and is written back gradually as it is evicted. Non-temporal stores send
+it out of the CCD as one ~900-line burst right after each frame, over the CCD's
+link to the I/O die. That link is shared with acquWFS, the MVM and the DM
+threads on CPUs 40-47, and moving 57.6 KB at tens of GB/s takes ~1-2 us. It
+also shows the L3 churn from the output buffer was not a significant cost.
 
-- `streamCircBuff_test`: 9 test cases, 34774 assertions pass, including a new
-  case comparing `streamCopy` with `memcpy` for all 16 destination alignments
-  and lengths 0-255, and checking no bytes outside the frame are written.
-- App builds; the binary contains `movntdq`.
-- In this checkout libcommon is built with coverage, so the app and test need
-  `COVERAGE=1` to link (local build state only).
+Lesson: on this machine, avoid bursty writes out of the loop's CCD from
+co-located helpers.
 
 ## To do on this branch
 
-1. Measure `streamCopy` on the RTC with cbuff on `spare42`.
-2. Spin polling in `dev::shmimMonitor`: optional mode that polls `md->cnt0`
+1. Spin polling in `dev::shmimMonitor`: optional mode that polls `md->cnt0`
    (and `cnt1`) instead of waiting on the semaphore, for readers with a
    dedicated core. The writer's post then has no waiter and no syscall.
    Design points:
@@ -111,7 +110,7 @@ To be measured on the RTC with cbuff on `spare42`.
      torn-frame check.
    - Test A suggests the gain per reader is at most ~1 us on the current
      configuration.
-3. Spin polling in `streamWriter`, which has its own wait loop
+2. Spin polling in `streamWriter`, which has its own wait loop
    (`sem_timedwait` then drain with `sem_trywait`, `streamWriter.hpp` ~1541).
    Same design points.
 
@@ -122,9 +121,6 @@ To be measured on the RTC with cbuff on `spare42`.
   of the MVM's domain, and 40-47 has no other free core. Needs a decision.
 - `aol1_modevalWFS_cbuff` (CPU 50, L3 48-55) reads mfilt's input (mfilt on 46)
   across CCDs; likely the same cost. Repeat tests A and B on it.
-- streamWriter copies frames into a large circular buffer
-  (`streamWriter.hpp` ~1641). If `streamCopy` helps, promote it to a libMagAOX
-  utility and use it there.
 - ImageStreamIO large-stream fix regression: `xwcl/milk` `magaox` still pins
   ImageStreamIO `21a8ae1`; the fix (`57cef04`, ImageStreamIO PR #70, based on
   `21a8ae1`) was never pinned, so opening streams over 2 GB fails
