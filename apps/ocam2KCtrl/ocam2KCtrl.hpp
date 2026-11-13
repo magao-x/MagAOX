@@ -159,9 +159,11 @@ class ocam2KCtrl : public MagAOXApp<>,
         m_digitalBinWork; ///< Scratch image holding the full descrambled frame before digital binning.
 
     /// Descramble into m_descrambled and copy it to the stream in one sequential pass, instead of into the stream.
-    /** The descramble's scattered stores into the stream stall on every line which a reader of the stream still holds
-     * from the previous frame.  Descrambling into a private buffer and copying it sequentially lets those lines be
-     * taken back in parallel.  Not used with digital binning, which already descrambles into m_digitalBinWork.
+    /** The descramble gathers from scattered locations in the raw frame and writes the stream sequentially.  When
+     * readers of the stream still hold its lines from the previous frame, each store needs its line taken back, and
+     * these requests compete with the gather's cache misses.  Descrambling into a private buffer keeps the gather free
+     * of them, and the sequential copy takes the lines back in one pass.  Not used with digital binning, which already
+     * descrambles into m_digitalBinWork.
      */
     bool m_stagedDescramble{ false };
 

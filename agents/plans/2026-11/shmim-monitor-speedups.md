@@ -241,18 +241,22 @@ Result: the camera's own acquisition-to-write time (camwfs `fg_timing`
 `delta_aw`, the "wma" time) rises by the same ~8-10 us when a reader reads the
 pixels. The cost is in the camera's write.
 
-ocam2KCtrl's `ocam2_descramble` (SDK) writes directly into the `camwfs`
-buffer. A descramble writes in the camera's readout order, so its stores are
-scattered over the frame. x86 stores commit in order, and a store to a line
-another core still holds stalls until the line is taken back, so with
-scattered stores those takebacks overlap poorly and each line held by a reader
-can cost close to a full round trip.
+ocam2KCtrl's `ocam2_descramble` writes directly into the `camwfs` buffer.
+The vendored SDK (`apps/ocam2KCtrl/fli/ocam2_sdk.c`,
+`ocam2_descramble_binning2x2`) shows it is a gather: scattered reads from the
+raw EDT DMA buffer through `g_descrblTab`, and two sequential write streams
+into the image (`image[i]`, `image[chunk+i]`). (An earlier guess that its
+stores were scattered was wrong.) The gather is bounded by its read misses (the
+code notes a plain `memcpy` would be ~10 us faster). When a reader holds the
+stream's lines from the previous frame, each store also needs its line taken
+back, and those requests compete with the gather's misses for the core's
+miss-handling resources. This is the working hypothesis, not confirmed.
 
 Change: `camera.stagedDescramble` (bool, default false). When set and digital
 binning is off, `loadImageIntoStream` descrambles into a private buffer
 (`m_descrambled`, sized on first use), which stays in the camera core's cache,
-and copies it to the stream with one sequential `memcpy`, whose stores the
-hardware can pipeline. Digital binning already descrambles into
+so the gather has no line takebacks to compete with, and then copies it to the
+stream with one sequential `memcpy`, which takes the lines back on its own. Digital binning already descrambles into
 `m_digitalBinWork`. Test: a new `ocam2KCtrl_test` section checks the
 descramble writes the private buffer and the destination receives the frame;
 all ocam2KCtrl suites pass. The app needs the EDT SDK and was not built on the
