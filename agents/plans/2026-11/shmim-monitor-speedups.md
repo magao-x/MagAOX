@@ -179,10 +179,37 @@ pass. streamCircBuff and shmimIntegrator tests and apps build and pass.
 
 New config keys must be deployed with this code (unknown keys fail startup).
 
-To test on the RTC, with camwfs-avg (or camwfs-sw) running:
-1. `readDelay=30` to `50`: if the ~8 us disappears, the cost is the
-   simultaneous read.
-2. `spin=true` on a dedicated cpuset: removes the ~1-2 us wake.
+Results on the RTC, camwfs-avg reading `camwfs`:
+
+| mode | loop cost |
+|---|---|
+| semaphore, `readDelay` 30-50 us | ~8 us, unchanged |
+| `spin=true`, dedicated cpuset (`camwfs_sw`, CPU 32) | none |
+| `spin=true`, `system` cpuset | ~8 us |
+
+The simultaneous-read hypothesis is ruled out. A reader on a dedicated core
+that never sleeps costs nothing. Unresolved: whether the cost comes from the
+reader's core going idle and waking (C-state exit) or from where it reads, since
+the two runs that cost 8 us differ from the free run in both: the semaphore
+reader on CPU 32 sleeps between frames, and the system spinner reads from
+another CCD (0-23) and shares its core with SMT siblings, IRQs and
+housekeeping. Earlier, cbuff on `aol1_imWFS2` with the semaphore cost ~2 us on
+CPU 42 but ~8 us on CPU 26, which fits location better than sleeping.
+
+Next tests:
+1. Semaphore reader on CPU 32 with deep C-states disabled for that CPU only
+   (`/sys/devices/system/cpu/cpu32/cpuidle/state*/disable`, or
+   `cpupower -c 32 idle-set -D <latency>`). If the cost goes, it is the
+   reader's C-state exit, and limiting C-states on reader cores is a fix that
+   does not need a busy core.
+2. `spin=true` on a dedicated core in another CCD (e.g. `spare27`, CPU 27).
+   If the cost returns, it is cross-CCD reading; if not, the system result was
+   about the shared, interrupted system cores.
+
+Placement outcome so far: a `camwfs` reader spinning on a dedicated core in
+the camera's L3 domain is free. With the planned `camwfs` cbuff, that is one
+core in 32-39 running cbuff with `spin=true`, and camwfs-avg, -sw and -dark
+reading its output.
 
 Placement plan (user): a `camwfs` cbuff in the writer's L3 domain, with
 camwfs-avg, camwfs-sw and camwfs-dark reading its output instead of `camwfs`.
