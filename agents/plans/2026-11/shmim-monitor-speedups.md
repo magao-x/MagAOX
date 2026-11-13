@@ -267,6 +267,11 @@ camwfs-avg reading `camwfs`.** This confirms the cost was the camera's
 descramble being slowed by line takebacks from readers holding the previous
 frame.
 
+With `stagedDescramble=true`, camwfs-avg and camwfs-sw reading `camwfs`
+directly cost essentially nothing. Stopping acquWFS lowers the camera's write
+time (wma) by ~3 us: acquWFS, the loop's own reader on CPU 45 in the other L3
+domain, still holds the lines the sequential copy has to take back each frame.
+
 General lesson: a writer that fills a shared single-buffer stream while also
 taking cache misses (a gather, or a computation over other data) slows down
 when readers hold the stream's lines from the previous frame. Writing into a
@@ -328,6 +333,12 @@ The integrator change still helps every shmimIntegrator instance (all
 
 ## Follow-ups (not on this branch)
 
+- The remaining ~3 us of camera write time from acquWFS: candidates are
+  writing the staged copy to the stream with non-temporal stores (no takebacks,
+  but readers then read from DRAM, and the earlier cbuff experiment showed
+  bursts of non-temporal stores can hurt), or placing the camera thread and
+  acquWFS in the same L3 domain.
+- With direct readers now cheap, the `camwfs` cbuff may be unnecessary.
 - Decide whether `camera.stagedDescramble` should default to true, and set it in
   `camwfs.conf` (and the other OCAM cameras) once this build is deployed.
 - Apply the same private-buffer-then-copy pattern to cacao acquWFS's write of
