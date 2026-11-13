@@ -342,14 +342,24 @@ The integrator change still helps every shmimIntegrator instance (all
   SSE2 non-temporal stores and a store fence; the copy from the reverted
   streamCircBuff commit, now shared, with `streamCopy_test`). To A/B on the
   RTC against plain `stagedDescramble`.
-- The remaining ~3 us of camera write time from acquWFS: candidates are
+- **Result with `stagedDescramble=true` and `stagedCopyNT=true`:** the
+  camera's write time (wma) is a steady ~37 us whether acquWFS, camwfs-sw and
+  camwfs-avg are reading or not, and the loop is 142-143 us (below the original
+  144 us baseline) independent of camwfs-sw and camwfs-avg, with camwfs-avg
+  unpinned in the `system` cpuset. The burst risk seen with cbuff's
+  non-temporal copy did not appear here: the frame must leave the camera's CCD
+  for acquWFS anyway, and the camera no longer waits to take lines back.
+- Superseded by the result above: the remaining ~3 us of camera write time from acquWFS: candidates were
   writing the staged copy to the stream with non-temporal stores (no takebacks,
   but readers then read from DRAM, and the earlier cbuff experiment showed
   bursts of non-temporal stores can hurt), or placing the camera thread and
   acquWFS in the same L3 domain.
-- With direct readers now cheap, the `camwfs` cbuff may be unnecessary.
-- Decide whether `camera.stagedDescramble` should default to true, and set it in
-  `camwfs.conf` (and the other OCAM cameras) once this build is deployed.
+- With direct readers now free, the `camwfs` cbuff is unnecessary.
+- Set `stagedDescramble=true` and `stagedCopyNT=true` in `camwfs.conf` once this
+  build is deployed; decide whether they should default to true.
+- Generalize: let `dev::frameGrabber` publish through a private buffer and a
+  non-temporal copy for every camera, so any camera stream can take readers
+  freely.
 - Apply the same private-buffer-then-copy pattern to cacao acquWFS's write of
   `aol1_imWFS2` (milk/cacao fork), then retest cbuff away from the loop's L3.
 
