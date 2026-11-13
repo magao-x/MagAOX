@@ -1,0 +1,34 @@
+# Actual application header with stream-free framework/API doubles; no native application or producer is launched.
+APP_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/..)
+TEST_DIR := $(APP_DIR)/tests
+ROOT_DIR := $(abspath $(APP_DIR)/../..)
+BUILD_DIR ?= $(APP_DIR)/build/shadow-replay
+CXX = c++
+INCLUDES := $(shell pkg-config --cflags-only-I eigen3 mxlib)
+CPPFLAGS += -I$(TEST_DIR)/native_stubs $(INCLUDES) -DEIGEN_DONT_PARALLELIZE -DDDSPC_SHADOW_ONLY \
+            -DDDSPC_REPLAY_ALLOCATION_PROBE -include $(TEST_DIR)/legacy_platform.hpp -include $(TEST_DIR)/allocation_probe.hpp
+CXXFLAGS ?= -O3 -g
+CXXFLAGS += -std=c++20 -Wall -Wextra -fno-fast-math
+SOURCES := $(TEST_DIR)/shadow_replay_benchmark.cpp $(TEST_DIR)/shadow_replay.cpp $(TEST_DIR)/offline_adc.cpp \
+           $(TEST_DIR)/allocation_new.cpp $(TEST_DIR)/adc_transport_fixture.cpp $(APP_DIR)/adc_input.cpp \
+           $(APP_DIR)/adc_reader.cpp $(APP_DIR)/adc_features.cpp $(APP_DIR)/shadow_policy.cpp $(APP_DIR)/shadow_pipeline.cpp \
+           $(APP_DIR)/causal_input.cpp $(APP_DIR)/shadow_controller.cpp $(APP_DIR)/ar_controller.cpp \
+           $(APP_DIR)/recursive_least_squares.cpp $(APP_DIR)/qrd_rls.cpp $(APP_DIR)/utils.cpp \
+           $(ROOT_DIR)/INDI/libcommon/IndiProperty.cpp $(ROOT_DIR)/INDI/libcommon/IndiElement.cpp $(ROOT_DIR)/INDI/libcommon/TimeStamp.cpp
+OBJECTS := $(addprefix $(BUILD_DIR)/,$(notdir $(SOURCES:.cpp=.o)))
+VPATH := $(sort $(dir $(SOURCES)))
+TARGET := $(BUILD_DIR)/ddspc_shadow_replay_benchmark
+.DEFAULT_GOAL := check
+.PHONY: all check
+all: $(TARGET)
+check: $(TARGET)
+	$(TARGET) 2000
+$(TARGET): $(OBJECTS)
+	$(CXX) $(CXXFLAGS) $^ $(LDFLAGS) -pthread -o $@
+$(BUILD_DIR)/IndiProperty.o: $(ROOT_DIR)/INDI/libcommon/IndiProperty.cpp
+	@mkdir -p $(BUILD_DIR)
+	$(CXX) $(filter-out -std=c++20,$(CXXFLAGS)) -std=c++14 -MMD -MP -c $< -o $@
+$(BUILD_DIR)/%.o: %.cpp
+	@mkdir -p $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -MMD -MP -c $< -o $@
+-include $(OBJECTS:.o=.d)

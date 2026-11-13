@@ -281,8 +281,9 @@ class ShadowController
     /** Caller serializes access and supplies a causally synchronized canonical state. Readiness refers to the
      * latest completed validation/evidence window, not a hypothetical future window. Training may be paused
      * deliberately; status().m_updates identifies the fit version. Frame age is diagnostic only,
-     * not a physical availability/deadline assertion. No application or publication route uses this API.
-     * A false result must be ignored; correctly shaped nonaliasing output is zeroed on failure.
+     * not a physical availability/deadline assertion. The opt-in application shadow pipeline uses this API without any
+     * publication or actuation route. A false result must be ignored; correctly shaped nonaliasing output is zeroed on
+     * failure.
      */
     bool
     predict_cached( ShadowMode    mode /**< [in] Independent diagnostic model. */,

@@ -1,5 +1,29 @@
 # Offline DDSPC validation
 
+The reusable components and opt-in actual-application replay integration are
+covered in [SHADOW_PIPELINE.md](../SHADOW_PIPELINE.md). Default Legacy/native
+behavior is preserved; `parameters.shadow_pipeline` defaults false. Local tests
+exercise actual app/model code using stream-free lifecycle doubles and independently
+established synthetic applied-input intervals. The replay has no command writer.
+Use `make -f tests/Makefile.replay check` from the application directory for the
+2-kHz WFS/8-kHz ADC application-workload timing and shared allocation checks.
+No native source/provenance adapter or real-time scheduling guarantee is implied.
+
+For the self-contained current ADC-to-DDSPC path, use
+[OFFLINE_ADC_DDSPC.md](../OFFLINE_ADC_DDSPC.md). It audits the existing boundaries
+and provides the dedicated `tests/Makefile.adc-ddspc` target, synthetic 8-kHz raw
+input, actual 2-kHz learners/plant experiment, safety checks and CSV diagnostics.
+It requires no accelSim, external worktree, running server or native streams.
+Leave accelSim disabled. Production behavior and tracked historical results are
+unchanged by this test infrastructure.
+
+The current offline fallback and timestamp-window implementation is described in
+[OFFLINE_FALLBACK.md](../OFFLINE_FALLBACK.md). It adds requested/effective modes,
+standard-model fallback, a bounded safe ramp, hysteresis and slew limits, plus a
+24-scenario comparison target (`make -f tests/Makefile.adc-ddspc comparison` from
+the app directory). Only test harnesses apply this policy; native behavior is
+unchanged. CSV outputs record every decision and transition reason.
+
 **Stage 1 native ADC capture:** see [ADC_INPUT.md](../ADC_INPUT.md) and the
 [opt-in shadow ADC example](../examples/loPredCtrlAcc-adc-shadow.conf.example).
 The existing-only UINT16 reader now provides calibrated, timestamped bounded
