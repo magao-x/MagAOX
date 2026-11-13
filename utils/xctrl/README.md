@@ -189,6 +189,17 @@ An app that stops sending `WATCHDOG=1` within `watchdogSec` gets SIGABRT (with a
 After the start limit (`startLimitBurst` starts within `startLimitIntervalSec`) an app is left failed;
 `xctrl start NAME` clears that and tries again.
 
+# Tab completion
+
+`make install` also installs `xctrl.bash-completion` as `/usr/share/bash-completion/completions/xctrl`, which new
+bash shells load the first time `xctrl` is completed (this needs the `bash-completion` package, standard on Ubuntu).
+`xctrl <TAB>` lists the commands, and `xctrl start CO2<TAB>` completes, or lists, the registered apps of the role
+starting with `CO2`; likewise for every command that takes app names, also after `sudo`. `enable`, `disable` and
+`delete` also offer the apps in the proclist, `add` the apps with a `.conf` not yet in the proclist and then the
+executables, `boot` on and off, and `-r` the roles with a proclist. The role is the one xctrl would use: `-r`, else
+`MAGAOX_ROLE`, else `/etc/profile.d/magaox_role.sh`. Names come from xctrl's registry and the proclist, never from
+systemd, so completion is instant.
+
 # Output and logging
 
 Messages are colored on a terminal (unless `NO_COLOR` is set): errors red, as `error: ...`, warnings yellow, as
