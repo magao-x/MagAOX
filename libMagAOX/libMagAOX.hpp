@@ -54,6 +54,7 @@
 
 #include "sys/runCommand.hpp"
 #include "sys/thSetuid.hpp"
+#include "sys/sdNotify.hpp"
 
 //#define TTY_DEBUG
 

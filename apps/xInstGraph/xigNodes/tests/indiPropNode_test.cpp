@@ -29,6 +29,7 @@ namespace libXWCTest
 namespace xInstGraphTest
 {
 
+/// Write the minimal property-node graph used by configuration tests.
 void writeXML()
 {
     std::ofstream fout( "/tmp/xigNode_test.xml" );
@@ -47,6 +48,9 @@ void writeXML()
     fout.close();
 }
 
+/// Verify property-node configuration and supported INDI property types.
+/** \ingroup xInstGraph_unit_test
+ */
 SCENARIO( "Creating and configuring an indiPropNode", "[instGraph::indiPropNode]" )
 {
     // clang-format off
@@ -602,6 +606,84 @@ SCENARIO( "Creating and configuring an indiPropNode", "[instGraph::indiPropNode]
 
             REQUIRE( pass == false );
         }
+    }
+}
+
+/// Restore a true property path when its FSM gate reopens.
+/** \ingroup xInstGraph_unit_test
+ */
+TEST_CASE( "indiPropNode recomputes state after FSM changes", "[instGraph::indiPropNode]" )
+{
+    // clang-format off
+    #ifdef XINSTGRAPH_TEST_DOXYGEN_REF
+    indiPropNode::handleSetProperty( *(pcf::IndiProperty *)nullptr );
+    indiPropNode::updateEffectiveState( false );
+    #endif
+    // clang-format on
+
+    const std::string xmlPath = "/tmp/indiPropNode_F08_test.drawio";
+    {
+        std::ofstream out( xmlPath );
+        out << "<mxfile><diagram><mxGraphModel><root>\n"
+               "<mxCell id=\"0\"/><mxCell id=\"1\" parent=\"0\"/>\n"
+               "<mxCell id=\"node:telescope\"/>\n"
+               "<mxCell id=\"output:telescope:out\" style=\"strokeColor=#FF0000;\"/>\n"
+               "<mxCell id=\"state:telescope\" value=\"state\"/>\n"
+               "<mxCell id=\"fsmstate:telescope\" value=\"fsmstate\"/>\n"
+               "</root></mxGraphModel></diagram></mxfile>\n";
+    }
+
+    for( const std::string action : { "threshOff", "active" } )
+    {
+        CAPTURE( action );
+        ingr::instGraphXML graph;
+        graph.autoSave( false );
+        std::string error;
+        REQUIRE( graph.loadXMLFile( error, xmlPath ) == 0 );
+
+        const std::string configPath = "/tmp/indiPropNode_F08_test.conf";
+        mx::app::writeConfigFile( configPath,
+                                  { "telescope", "telescope", "telescope", "telescope", "telescope", "telescope" },
+                                  { "type", "propKey", "propEl", "propVal", "fsmAction", "targetStates" },
+                                  { "indiProp", "tel.dome", "status", "open", action, "READY" } );
+        mx::app::appConfigurator config;
+        REQUIRE( config.readConfig( configPath ) == 0 );
+        indiPropNode node( "telescope", &graph );
+        REQUIRE_NOTHROW( node.loadConfig( config ) );
+
+        pcf::IndiProperty property( pcf::IndiProperty::Text );
+        property.setDevice( "tel" );
+        property.setName( "dome" );
+        property.add( pcf::IndiElement( "status" ) );
+        property["status"] = "open";
+        REQUIRE( node.handleSetProperty( property ) == 0 );
+        REQUIRE( node.state() );
+        REQUIRE( graph.node( "telescope" )->output( "out" )->state() == ingr::putState::off );
+
+        pcf::IndiProperty fsm;
+        fsm.setDevice( "telescope" );
+        fsm.setName( "fsm" );
+        fsm.add( pcf::IndiElement( "state" ) );
+        fsm["state"] = "READY";
+        REQUIRE( node.handleSetProperty( fsm ) == 0 );
+        REQUIRE( graph.node( "telescope" )->output( "out" )->state() == ingr::putState::on );
+
+        fsm["state"] = "OPERATING";
+        REQUIRE( node.handleSetProperty( fsm ) == 0 );
+        REQUIRE( node.state() );
+        REQUIRE( graph.node( "telescope" )->output( "out" )->state() == ingr::putState::off );
+
+        REQUIRE( node.handleSetProperty( property ) == 0 );
+        REQUIRE( graph.node( "telescope" )->output( "out" )->state() == ingr::putState::off );
+
+        fsm["state"] = "READY";
+        REQUIRE( node.handleSetProperty( fsm ) == 0 );
+        REQUIRE( graph.node( "telescope" )->output( "out" )->state() == ingr::putState::on );
+
+        property["status"] = "closed";
+        REQUIRE( node.handleSetProperty( property ) == 0 );
+        REQUIRE_FALSE( node.state() );
+        REQUIRE( graph.node( "telescope" )->output( "out" )->state() == ingr::putState::off );
     }
 }
 

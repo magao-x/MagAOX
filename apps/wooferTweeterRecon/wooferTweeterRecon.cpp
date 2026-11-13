@@ -1,16 +1,13 @@
 /** \file wooferTweeterRecon.cpp
-  * \brief The MagAO-X Tweeter To Woofer Offloader
-  *
-  * \ingroup wooferTweeterRecon_files
-  */
+ * \brief Main entrypoint for the MagAO-X woofer-tweeter pseudo-open-loop reconstructor
+ *
+ * \ingroup wooferTweeterRecon_files
+ */
 
 #include "wooferTweeterRecon.hpp"
-
-
-int main(int argc, char **argv)
+int main( int argc, char **argv )
 {
-   MagAOX::app::wooferTweeterRecon xapp;
+    MagAOX::app::wooferTweeterRecon xapp;
 
-   return xapp.main(argc, argv);
-
+    return xapp.main( argc, argv );
 }

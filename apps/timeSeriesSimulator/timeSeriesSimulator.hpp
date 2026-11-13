@@ -83,11 +83,11 @@ protected:
   int n_gizmos = 2;
   double gizmoTimeToTarget = 1;
 
-  // For testing resurrector and resurrectee.timeout
-  // - A positive value here, in seconds, effects a delay at the end of
-  //   MagAOXApp<_useINDI>::startResurectee().  The delay emulates the
-  //   delay of a slow-starting process e.g. that must wait for a device
-  //   to start, initialize, and/or connect to the process
+  // For testing the systemd startup timeout (TimeoutStartSec)
+  // - A positive value here, in seconds, delays the end of appStartup(),
+  //   and so READY=1 to systemd.  The delay emulates a slow-starting
+  //   process e.g. that must wait for a device to start, initialize,
+  //   and/or connect to the process
   unsigned int m_startup_delay{0};
 
 public:
@@ -157,14 +157,9 @@ void timeSeriesSimulator::setupConfig()
    config.add("startup_delay", "", "startup_delay", mx::app::argType::Required, "", "startup_delay", false, "int"
 , "Delay to sleep at end of process startup, seconds; default=0,"
   " which prevents any such delay.  This parameter is used for testing"
-  " resurrector behavior with slow-starting processes.  The default"
-  " startup timeout for resurrector is 10s.  Assigning a value of 10s or"
-  " greater will cause this process to fail to send its first hexbeat to"
-  " resurrector, which in turn will normally cause resurrector (i) to"
-  " assume this process has crashes or hung, and (ii) send a SIGUSR2"
-  " (kill) to stop this process and restart another.  To prevent that"
-  " action by resurrector, assign a value greater than [startup_delay]"
-  " to a second element of resurrectee.timeout in the configuration file.");
+  " systemd behavior with slow-starting processes.  A delay longer than"
+  " the startup timeout ([systemd] timeoutStartSec, default 120s)"
+  " makes systemd stop this process and start it again.");
 }
 
 int timeSeriesSimulator::loadConfigImpl(mx::app::appConfigurator &_config)

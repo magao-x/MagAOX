@@ -6,10 +6,11 @@ import glob
 import json
 import os
 import os.path
-import re
 import signal
+import socket
 import stat
 import sys
+import threading
 import time
 from functools import partial
 import logging
@@ -31,25 +32,27 @@ from ..constants import DEFAULT_PREFIX
 # n.b. replaced with logger scoped to device name during device init
 log = logging.getLogger()
 
-@xconf.config
-class ResurrecteeConfig:
-    timeout: list[int] = xconf.field(
-        default_factory=lambda: [10],
-        help=(
-            "Heartbeat timeout vector in seconds. First element is runtime heartbeat timeout. "
-            "Optional second element is a one-time startup heartbeat timeout."
-        ),
-    )
+
+def sd_notify(state : str) -> bool:
+    '''Send a state notification such as "READY=1" or "WATCHDOG=1" to systemd, as sd_notify(3)
+    does. Does nothing unless systemd started us with Type=notify. Returns True if sent.'''
+    path = os.environ.get("NOTIFY_SOCKET")
+    if not path or path[0] not in "/@":
+        return False
+    if path[0] == "@":
+        path = "\0" + path[1:]
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as sock:
+            sock.sendto(state.encode(), path)
+        return True
+    except OSError:
+        return False
 
 
 @xconf.config
 class BaseConfig:
     common_path_prefix : pathlib.Path = xconf.field(default=DEFAULT_PREFIX, help="Prefix for all instrument data and config directories")
     sleep_interval_sec : float = xconf.field(default=1.0, help="Main loop logic will be run every `sleep_interval_sec` seconds")
-    resurrectee: ResurrecteeConfig = xconf.field(default_factory=ResurrecteeConfig)
-
-    _SECTION_RE = re.compile(r"^\s*\[(.+?)\]\s*$")
-    _LEGACY_TIMEOUT_RE = re.compile(r"^(\s*timeout\s*=\s*)(\d+(?:\s*,\s*\d+)+)\s*(#.*)?$")
 
     @staticmethod
     def _deep_update(base: dict, override: dict):
@@ -64,48 +67,11 @@ class BaseConfig:
                 base[key] = value
         return base
 
-    @classmethod
-    def _normalize_legacy_resurrectee_timeout_toml(cls, raw_text: str):
-        in_resurrectee = False
-        changed = False
-        out_lines = []
-
-        for line in raw_text.splitlines(keepends=True):
-            section_match = cls._SECTION_RE.match(line)
-            if section_match:
-                in_resurrectee = section_match.group(1).strip().lower() == "resurrectee"
-
-            if in_resurrectee:
-                timeout_match = cls._LEGACY_TIMEOUT_RE.match(line)
-                if timeout_match:
-                    vals = [v.strip() for v in timeout_match.group(2).split(",") if v.strip()]
-                    comment = timeout_match.group(3) or ""
-                    newline = "\n" if line.endswith("\n") else ""
-                    line = f"{timeout_match.group(1)}[{', '.join(vals)}]{comment}{newline}"
-                    changed = True
-
-            out_lines.append(line)
-
-        return "".join(out_lines), changed
-
-    @classmethod
-    def _load_config_file_with_compat(cls, filepath: str):
+    @staticmethod
+    def _load_config_file(filepath: str):
         log.debug(f"Loading config from {filepath}")
         with open(filepath, "r") as fh:
-            raw_text = fh.read()
-
-        try:
-            return toml.loads(raw_text)
-        except toml.TomlDecodeError:
-            normalized_text, changed = cls._normalize_legacy_resurrectee_timeout_toml(raw_text)
-            if not changed:
-                raise
-            log.debug(
-                "Using legacy [resurrectee] timeout compatibility parser for %s; "
-                "prefer timeout = [a, b] for strict TOML.",
-                filepath,
-            )
-            return toml.loads(normalized_text)
+            return toml.load(fh)
 
     @classmethod
     def from_config(
@@ -130,11 +96,11 @@ class BaseConfig:
         raw_config = {}
         if len(config_paths):
             for config_file_path in config_paths:
-                loaded_config = cls._load_config_file_with_compat(config_file_path)
+                loaded_config = cls._load_config_file(config_file_path)
                 raw_config.update(loaded_config)
         elif default_config_path is not None:
             try:
-                raw_config = cls._load_config_file_with_compat(default_config_path)
+                raw_config = cls._load_config_file(default_config_path)
             except FileNotFoundError:
                 pass
 
@@ -147,6 +113,8 @@ class BaseConfig:
                     old_val = raw_config[key]
                     log.info(f"Using provided value {value} for {key} which was set to {old_val} in the loaded config files")
             cls._deep_update(raw_config, config_dict)
+        # [systemd] is for xctrl, which checks it; the app ignores the whole section
+        raw_config.pop("systemd", None)
         try:
             instance = xconf.from_dict(cls, raw_config)
         except (xconf.UnexpectedDataError, xconf.MissingValueError) as e:
@@ -241,6 +209,33 @@ class IndiDeviceHandler(logging.Handler):
         if self.device.connected:
             self.device.connection.send(messages.Message(message=msg, device=self.device.name, timestamp=datetime.datetime.now(timezone.utc)))
 
+class XIndiFifoConnection(transports.IndiFifoConnection):
+    '''FIFO transport for the MagAO-X indiserver, which XDevice announces itself to with
+    "start NAME PID" and "alive NAME PID" lines on the indiserver control FIFO.'''
+
+    def _register_with_indiserver(self):
+        # XDevice announces instead, after locking its PID file and emptying the input FIFO
+        pass
+
+    def drain_input(self):
+        '''Discard whatever is waiting in the input FIFO, sent to a previous instance.
+        Returns the number of bytes discarded.'''
+        fd = self.input_pipe.fileno()
+        n = 0
+        os.set_blocking(fd, False)
+        try:
+            while True:
+                chunk = os.read(fd, 65536)
+                if not chunk:
+                    break
+                n += len(chunk)
+        except BlockingIOError:
+            pass
+        finally:
+            os.set_blocking(fd, True)
+        return n
+
+
 class XDevice(Device):
     prefix_dir : str  = "/opt/MagAOX"
     logs_dir : str = "logs"
@@ -249,13 +244,18 @@ class XDevice(Device):
     log : logging.Logger
     config : BaseConfig
     log_file_name : str
-    _hb_fd : typing.Optional[int]
-    _hb_last_time : int
-    _hb_broken_pipes : int
-    _hb_broken_pipes_limit : int
-    _resurrectee_timeout : tuple[int, ...]
     _shutdown_requested : bool
-    _prev_sigusr2_handler : typing.Any
+    _prev_sigterm_handler : typing.Any
+    _client_lock : threading.Lock
+    _client_resubscribe : bool
+    _client_pending : set
+    _client_retry_delay : float
+    _client_next_retry : float
+    indiserver_announce_interval_sec : float = 5.0  # between "alive" announcements to indiserver, 0 disables
+    _indi_ctrl_path : str
+    _indi_announced : bool
+    _indi_announce_time : float
+    _indi_gate_end : float  # NewProperty messages are ignored until indiserver greets us or this time
 
     @classmethod
     def get_default_config_prefix(cls):
@@ -308,108 +308,20 @@ class XDevice(Device):
         atexit.register(self._telem_file.close)
         self.log.info(f"Telemetrying to {telem_file_path}")
 
-    def _normalize_resurrectee_timeout(self):
-        timeout = tuple(int(v) for v in self.config.resurrectee.timeout)
-        if len(timeout) == 0:
-            timeout = (10,)
-        if timeout[0] < 1:
-            timeout = (10,) + timeout[1:]
-        return timeout
-
-    def _resurrectee_fifo_path(self):
-        return self.prefix_dir + "/drivers/fifos/" + self.name + ".hb"
-
-    def _open_heartbeat_fifo(self):
-        fifoname = self._resurrectee_fifo_path()
-        fdrd = None
-        fdhb = None
-        try:
-            try:
-                fdrd = os.open(fifoname, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC)
-            except FileNotFoundError:
-                prev_mode = os.umask(0)
-                try:
-                    os.mkfifo(fifoname, 0o660)
-                finally:
-                    os.umask(prev_mode)
-                fdrd = os.open(fifoname, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC)
-
-            fdstat = os.fstat(fdrd)
-            if not stat.S_ISFIFO(fdstat.st_mode):
-                raise RuntimeError(f"{fifoname} exists but is not a FIFO")
-
-            fdhb = os.open(fifoname, os.O_WRONLY | os.O_NONBLOCK | os.O_CLOEXEC)
-            self._hb_fd = fdhb
-            self._hb_last_time = 0
-        except Exception:
-            self._hb_fd = None
-            self.log.exception("Failed to open heartbeat FIFO %s", fifoname)
-            if fdhb is not None:
-                try:
-                    os.close(fdhb)
-                except Exception:
-                    pass
-        finally:
-            if fdrd is not None:
-                try:
-                    os.close(fdrd)
-                except Exception:
-                    pass
-
-    def _close_heartbeat_fifo(self):
-        if self._hb_fd is not None:
-            try:
-                os.close(self._hb_fd)
-            except Exception:
-                self.log.exception("Failed to close heartbeat FIFO fd=%s", self._hb_fd)
-            finally:
-                self._hb_fd = None
-
-    def _send_heartbeat(self, offset_index=0):
-        if self._hb_fd is None:
-            return
-        if offset_index >= len(self._resurrectee_timeout):
-            return
-
-        offset = self._resurrectee_timeout[offset_index]
-        if offset < 0:
-            return
-
-        new_time = int(time.time()) + offset
-        if new_time <= self._hb_last_time:
-            return
-
-        stimestamp = f"{new_time:09x}\n".encode("ascii")
-        try:
-            os.write(self._hb_fd, stimestamp)
-            self._hb_last_time = new_time
-            if self._hb_broken_pipes:
-                self.log.warning("Recovered heartbeat FIFO writes for %s", self.name)
-                self._hb_broken_pipes = 0
-        except Exception as e:
-            self._hb_last_time = 0
-            self._hb_broken_pipes += 1
-            if self._hb_broken_pipes <= self._hb_broken_pipes_limit:
-                self.log.error(
-                    "Heartbeat write failed fd=%s payload=%r err=%s",
-                    self._hb_fd,
-                    stimestamp.decode("ascii").rstrip("\n"),
-                    repr(e),
-                )
-
-    def _sigusr2_handler(self, sig, frame):
+    def _sigterm_handler(self, sig, frame):
         self.log.info("Caught signal %s; clean shutdown requested", signal.strsignal(sig))
         self._shutdown_requested = True
 
     def _install_signal_handlers(self):
-        self._prev_sigusr2_handler = signal.getsignal(signal.SIGUSR2)
-        signal.signal(signal.SIGUSR2, self._sigusr2_handler)
+        # systemd stops services with SIGTERM: shut down cleanly
+        self._prev_sigterm_handler = signal.getsignal(signal.SIGTERM)
+        signal.signal(signal.SIGTERM, self._sigterm_handler)
 
     def _restore_signal_handlers(self):
         try:
-            signal.signal(signal.SIGUSR2, self._prev_sigusr2_handler)
+            signal.signal(signal.SIGTERM, self._prev_sigterm_handler)
         except Exception:
-            self.log.exception("Failed to restore SIGUSR2 handler")
+            self.log.exception("Failed to restore SIGTERM handler")
 
     def telem(self, event : str, message : typing.Union[str, dict[str, typing.Any]]):
         current_ts_str = datetime.datetime.now().isoformat() + "000"  # zeros for consistency with MagAO-X timestamps with ns
@@ -431,33 +343,39 @@ class XDevice(Device):
 
     @classmethod
     def _get_indiserver_ctrl_path(cls):
+        '''The indiserver control FIFO: [indiserver] f in is{MAGAOX_ROLE}.conf if set, else
+        indiserver.ctrl with the driver FIFOs, the indiserver default.'''
         import configparser
         role = os.environ.get("MAGAOX_ROLE", "")
-        if not role:
-            return None
-        conf_path = os.path.join(cls.prefix_dir, cls.config_dir, f"is{role}.conf")
-        try:
-            cp = configparser.ConfigParser()
-            cp.read(conf_path)
-            return cp.get("indiserver", "f", fallback=None)
-        except Exception:
-            return None
+        if role:
+            conf_path = os.path.join(cls.prefix_dir, cls.config_dir, f"is{role}.conf")
+            try:
+                cp = configparser.ConfigParser()
+                cp.read(conf_path)
+                path = cp.get("indiserver", "f", fallback=None)
+                if path:
+                    return path
+            except Exception:
+                pass
+        return os.path.join(cls.prefix_dir, "drivers", "fifos", "indiserver.ctrl")
 
     def __init__(self, name, config, *args, verbose=False, all_verbose=False, **kwargs):
         self._startup_time = datetime.datetime.now(timezone.utc)
         fifos_root = self.prefix_dir + "/drivers/fifos"
         conn_kwargs = dict(name=name, fifos_root=fifos_root)
-        if 'indiserver_ctrl_path' in inspect.signature(transports.IndiFifoConnection.__init__).parameters:
-            conn_kwargs['indiserver_ctrl_path'] = self._get_indiserver_ctrl_path()
-        super().__init__(name, *args, connection_class=partial(transports.IndiFifoConnection, **conn_kwargs), **kwargs)
+        super().__init__(name, *args, connection_class=partial(XIndiFifoConnection, **conn_kwargs), **kwargs)
+        self._indi_ctrl_path = self._get_indiserver_ctrl_path()
+        self._indi_announced = False
+        self._indi_announce_time = 0.0
+        self._indi_gate_end = 0.0
         self.config = config
-        self._hb_fd = None
-        self._hb_last_time = 0
-        self._hb_broken_pipes = 0
-        self._hb_broken_pipes_limit = 2
-        self._resurrectee_timeout = self._normalize_resurrectee_timeout()
         self._shutdown_requested = False
-        self._prev_sigusr2_handler = signal.SIG_DFL
+        self._prev_sigterm_handler = signal.SIG_DFL
+        self._client_lock = threading.Lock()  # guards _client_pending and its retry timing
+        self._client_resubscribe = False  # re-send all watched-property requests from the main loop
+        self._client_pending = set()  # watched (device, name) interests deleted and not yet defined again
+        self._client_retry_delay = 0.0
+        self._client_next_retry = 0.0
         self._init_logs(verbose, all_verbose)
         self._init_telem()
 
@@ -483,6 +401,103 @@ class XDevice(Device):
         log.debug(f"Writing PID file with PID {thisproc.pid}")
         subprocess.check_call(["/opt/MagAOX/bin/write_magaox_pidfile", str(thisproc.pid), self.name])
 
+    def handle_message(self, message : messages.IndiMessage):
+        # A getProperties without a property name may come from a restarted indiserver, which no
+        # longer knows what we watch, so re-send the client's requests from the main loop.
+        # It also greets this instance after its start announcement.
+        if (
+            isinstance(message, messages.GetProperties)
+            and message.name is None
+            and message.device in (None, self.name)
+        ):
+            self._client_resubscribe = True
+            self._indi_gate_end = 0.0
+        elif (
+            isinstance(message, typing.get_args(messages.IndiNewMessage))
+            and time.monotonic() < self._indi_gate_end
+        ):
+            self.log.info("Ignoring %s.%s sent before indiserver greeted this instance", message.device, message.name)
+            return
+        super().handle_message(message)
+
+    def _announce(self, verb):
+        '''Write "verb name pid" to the indiserver control FIFO without blocking.
+        "start" once when the input FIFO has been emptied, so indiserver registers us or resets
+        its session with a previous instance, "alive" periodically so a restarted indiserver
+        registers us again. Returns True if written.'''
+        self._indi_announce_time = time.monotonic()
+        line = f"{verb} {self.name} {os.getpid()}\n".encode()
+        try:
+            fd = os.open(self._indi_ctrl_path, os.O_WRONLY | os.O_NONBLOCK)
+            try:
+                ok = os.write(fd, line) == len(line)
+            finally:
+                os.close(fd)
+            err = None
+        except OSError as e:
+            ok, err = False, e
+        # log only changes, a missing indiserver would otherwise be logged every time
+        if ok != self._indi_announced or verb == "start":
+            if ok:
+                self.log.info("Announced %s on indiserver control FIFO %s", verb, self._indi_ctrl_path)
+            else:
+                self.log.info("Could not announce %s on indiserver control FIFO %s: %s", verb, self._indi_ctrl_path, err)
+        self._indi_announced = ok
+        return ok
+
+    def _indiserver_upkeep(self):
+        if self.indiserver_announce_interval_sec > 0 and time.monotonic() - self._indi_announce_time >= self.indiserver_announce_interval_sec:
+            self._announce("alive")
+
+    def _client_interests(self):
+        # purepyindi2's IndiClient records the (device, name) pairs passed to get_properties() here
+        return tuple(getattr(self.client, '_interested_properties', ()))
+
+    def _handle_client_message(self, message : messages.IndiDefSetDelMessage):
+        '''Mark watched properties of a deleted device as not received, and received again once defined.'''
+        if isinstance(message, messages.DelProperty):
+            matches = [
+                (dev, name) for dev, name in self._client_interests()
+                if dev == message.device and (message.name is None or name in (constants.ALL, message.name))
+            ]
+            if matches:
+                with self._client_lock:
+                    self._client_pending.update(matches)
+                    self._client_retry_delay = 0.0
+                    self._client_next_retry = 0.0
+        elif isinstance(message, typing.get_args(messages.IndiDefMessage)):
+            with self._client_lock:
+                self._client_pending.discard((message.device, message.name))
+                self._client_pending.discard((message.device, constants.ALL))
+
+    def _send_client_get_properties(self, interests):
+        for dev, name in interests:
+            try:
+                self.client.connection.send(messages.GetProperties(
+                    device=None if dev is constants.ALL else dev,
+                    name=None if name is constants.ALL else name,
+                ))
+            except Exception:
+                self.log.exception("Failed to send getProperties for %s.%s", dev, name)
+
+    def _resubscribe_client(self):
+        '''Re-send all watched-property requests after a generic getProperties, and re-request
+        deleted ones with backoff (1 s doubling to 60 s) until they are defined again.'''
+        if not self.connected:
+            return
+        if self._client_resubscribe:
+            self._client_resubscribe = False
+            self._send_client_get_properties(self._client_interests())
+            return
+        now = time.monotonic()
+        with self._client_lock:
+            if not self._client_pending or now < self._client_next_retry:
+                return
+            pending = tuple(self._client_pending)
+            self._client_retry_delay = min(max(1.0, 2 * self._client_retry_delay), 60.0)
+            self._client_next_retry = now + self._client_retry_delay
+        self._send_client_get_properties(pending)
+
     def unlock_pid_file(self):
         pid_file = self.prefix_dir + f"/sys/{self.name}/pid"
         try:
@@ -497,6 +512,13 @@ class XDevice(Device):
     def main(self):
         self.lock_pid_file()
         try:
+            # only now that no other instance runs, empty our input FIFO and tell indiserver
+            # this is a new instance, it greets us with a getProperties
+            ndrained = self.connection.drain_input()
+            if ndrained:
+                self.log.info("Discarded %d bytes of INDI input sent to a previous instance", ndrained)
+            if self._announce("start"):
+                self._indi_gate_end = time.monotonic() + 10
             super().main()
         finally:
             self.unlock_pid_file()
@@ -504,26 +526,27 @@ class XDevice(Device):
     def run(self):
         self.client = client.IndiClient()
         self.client.connect()
+        self.client.register_callback(self._handle_client_message)
         self._install_signal_handlers()
-        self._open_heartbeat_fifo()
         try:
-            startup_offset_idx = 1 if len(self._resurrectee_timeout) > 1 else 0
-            self._send_heartbeat(startup_offset_idx)
-
             self.setup()
             self.send_all_properties()
             self._setup_complete = True
+            # startup is complete; under systemd the watchdog applies from here on
+            sd_notify("READY=1")
 
             while (
                 self.connection.status is constants.ConnectionStatus.CONNECTED
                 and not self._shutdown_requested
             ):
-                # Tied to the app loop by design: if loop() blocks, heartbeats stop.
-                self._send_heartbeat(0)
+                # Tied to the app loop by design: if loop() blocks, systemd's watchdog restarts us.
+                sd_notify("WATCHDOG=1")
+                self._indiserver_upkeep()
+                self._resubscribe_client()
                 self._wrap_loop()
                 time.sleep(self.sleep_interval_sec)
         finally:
-            self._close_heartbeat_fifo()
+            sd_notify("STOPPING=1")
             self._restore_signal_handlers()
 
     @classmethod

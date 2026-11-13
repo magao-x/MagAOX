@@ -24,6 +24,7 @@ apps_common = \
 	closedLoopIndi
 
 apps_aoc = \
+	virtualPDU \
 	trippLitePDU \
 	xt1121Ctrl \
 	xt1121DCDU \
@@ -37,6 +38,7 @@ apps_aoc = \
 	xInstGraph
 
 pythonapps_aoc = \
+	virtualPDU \
 	audibleAlerts
 
 # Apps common to RTC and ICC on MagAO-X
@@ -118,9 +120,12 @@ apps_tic = \
 
 # Apps with simulator mode
 apps_sim = \
+	virtualPDU \
 	trippLitePDU
 
 all_buildable_apps = \
+	virtualPDU \
+	acronameUsbHub \
 	adcTracker \
 	alignLoop \
 	cacaoInterface \
@@ -276,18 +281,17 @@ else
 endif
 
 utils_to_build = \
-	resurrector_indi \
+	xctrl \
 	logdump \
 	logsurgeon \
 	cursesINDI \
+	shmimDelta \
 	xrif2fits \
 	xrif2shmim
 
 scripts_to_install = \
 	query_seeing \
 	sync_cacao \
-	xctrl \
-	resuctrl \
 	netconsole_logger \
 	dmdispbridge \
 	shmimTCPreceive \
@@ -488,7 +492,7 @@ scripts_install:
 
 .PHONY: rtscripts_install
 rtscripts_install:
-	for scriptname in make_cpusets move_irqs; do \
+	for scriptname in make_cpusets move_irqs remove_cpusets; do \
 		sudo -H install -d /opt/MagAOX/bin && \
 		if [ -e rtSetup/$(MAGAOX_ROLE)/$$scriptname ]; then \
 			sudo -H install rtSetup/$(MAGAOX_ROLE)/$$scriptname /opt/MagAOX/bin/$$scriptname && \

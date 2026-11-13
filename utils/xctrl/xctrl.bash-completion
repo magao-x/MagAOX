@@ -1,0 +1,114 @@
+# bash completion for xctrl: its commands and options, roles, and the apps of the role
+#
+# make install puts this in the bash-completion completions directory, where new shells find it the first time
+# xctrl is completed.  The apps come from xctrl's registry, /etc/magaox-<role>/apps/NAME.conf, and the role's
+# proclist, so completing never calls systemd.
+
+# the names of the apps registered for role $1, under sysroot $2
+_xctrl_registered()
+{
+    local f
+    for f in "$2/etc/magaox-${1,,}/apps/"*.conf; do
+        [[ -e $f ]] || continue
+        f=${f##*/}
+        echo "${f%.conf}"
+    done
+}
+
+# the names of the apps in proclist $1, active (NAME EXEC) or disabled (#!NAME EXEC), without a - prefix
+_xctrl_proclist()
+{
+    awk '{ l = $0; sub( /^[ \t]+/, "", l )
+           if( l ~ /^#!/ ) { l = substr( l, 3 ); sub( /^[ \t]+/, "", l ) } else if( l ~ /^#/ ) next
+           if( split( l, t, " " ) == 2 ) { sub( /^-/, "", t[1] ); print t[1] } }' "$1" 2>/dev/null
+}
+
+_xctrl()
+{
+    local cur=${COMP_WORDS[COMP_CWORD]} prev=${COMP_WORDS[COMP_CWORD - 1]}
+    local top=/opt/MagAOX sysroot= role=$MAGAOX_ROLE verb= endopts= nargs=0 i w names
+    local -A typed
+    local cmds="startup start stop shutdown restart status peek inspect register add enable disable delete boot"
+    local opts="-r --role --all -v --verbose -n --lines --keep-running --dry-run --top --sysroot -h --help --"
+
+    # what is on the line before the word being completed
+    for (( i = 1; i < COMP_CWORD; i++ )); do
+        w=${COMP_WORDS[i]}
+        if [[ -z $endopts && $w == -* ]]; then
+            case $w in
+                --) endopts=1 ;;
+                -r|--role) role=${COMP_WORDS[i + 1]}; (( i++ )) ;;
+                --role=*) role=${w#--role=} ;;
+                --top) top=${COMP_WORDS[i + 1]}; (( i++ )) ;;
+                --sysroot) sysroot=${COMP_WORDS[i + 1]}; (( i++ )) ;;
+                -n|--lines) (( i++ )) ;;
+            esac
+        elif [[ -z $verb ]]; then
+            verb=$w
+        else
+            (( nargs++ ))
+            typed[${w#-}]=1
+        fi
+    done
+
+    # sudo drops MAGAOX_ROLE, so also look where it is usually set, as xctrl does
+    if [[ -z $role && -r /etc/profile.d/magaox_role.sh ]]; then
+        role=$(sed -n "s/.*MAGAOX_ROLE=[\"']\{0,1\}\([A-Za-z0-9_.-]*\).*/\1/p" /etc/profile.d/magaox_role.sh | tail -n 1)
+    fi
+
+    # an option's value
+    case $prev in
+        -r|--role)
+            names=$(for w in "$top/config/proclist_"*.txt; do [[ -e $w ]] && w=${w##*/proclist_} && echo "${w%.txt}"; done)
+            COMPREPLY=( $(compgen -W "$names" -- "$cur") )
+            return ;;
+        --top|--sysroot)
+            COMPREPLY=( $(compgen -d -- "$cur") )
+            return ;;
+        -n|--lines)
+            return ;;
+    esac
+
+    if [[ -z $endopts && $cur == -* ]]; then
+        COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
+        return
+    fi
+    if [[ -z $verb ]]; then
+        COMPREPLY=( $(compgen -W "$cmds" -- "$cur") )
+        return
+    fi
+
+    case $verb in
+        startup|start|stop|shutdown|restart|status|lstatus|peek)
+            names=$(_xctrl_registered "$role" "$sysroot") ;;
+        inspect)
+            (( nargs == 0 )) && names=$(_xctrl_registered "$role" "$sysroot") ;;
+        enable|disable|delete|deregister)
+            names=$(_xctrl_registered "$role" "$sysroot"; _xctrl_proclist "$top/config/proclist_$role.txt") ;;
+        add)
+            if (( nargs == 0 )); then
+                # apps with a .conf that are not in the proclist yet
+                local listed=" $(_xctrl_proclist "$top/config/proclist_$role.txt" | tr '\n' ' ') "
+                names=$(for w in "$top/config/"*.conf; do
+                            [[ -e $w ]] || continue
+                            w=${w##*/}; w=${w%.conf}
+                            [[ $w == magaox || $listed == *" $w "* ]] || echo "$w"
+                        done)
+            elif (( nargs == 1 )); then
+                names=$(for w in "$top/bin/"*; do [[ -x $w && ! -d $w ]] && echo "${w##*/}"; done)
+            fi ;;
+        boot)
+            (( nargs == 0 )) && names="on off" ;;
+    esac
+
+    # each app once; add takes a - prefix, after --, for an app without a watchdog
+    local -a reply=()
+    local dash= word=$cur
+    [[ $verb == add && $cur == -* ]] && dash=- && word=${cur#-}
+    for w in $(compgen -W "$names" -- "$word"); do
+        [[ -n ${typed[$w]} ]] || reply+=( "$dash$w" )
+    done
+    COMPREPLY=( $(printf '%s\n' "${reply[@]}" | sort -u) )
+}
+
+complete -F _xctrl xctrl
