@@ -262,7 +262,19 @@ descramble writes the private buffer and the destination receives the frame;
 all ocam2KCtrl suites pass. The app needs the EDT SDK and was not built on the
 workstation.
 
-To measure on the RTC: `delta_aw` and the loop time with camwfs-avg reading,
+**Result on the RTC: `stagedDescramble=true` removes the ~8-10 us cost of
+camwfs-avg reading `camwfs`.** This confirms the cost was the camera's
+descramble being slowed by line takebacks from readers holding the previous
+frame.
+
+General lesson: a writer that fills a shared single-buffer stream while also
+taking cache misses (a gather, or a computation over other data) slows down
+when readers hold the stream's lines from the previous frame. Writing into a
+private buffer and then copying it to the stream sequentially avoids this.
+cacao acquWFS writing `aol1_imWFS2` while it calibrates is the same pattern,
+which may explain the cbuff cost seen there (~8 us from CPU 26, ~2 us from 42).
+
+Originally planned measurement: `delta_aw` and the loop time with camwfs-avg reading,
 `stagedDescramble` on vs off. It may also lower the baseline, since acquWFS
 already holds the frame's lines from the previous frame.
 
@@ -315,6 +327,11 @@ The integrator change still helps every shmimIntegrator instance (all
    not remove the cost (see above).
 
 ## Follow-ups (not on this branch)
+
+- Decide whether `camera.stagedDescramble` should default to true, and set it in
+  `camwfs.conf` (and the other OCAM cameras) once this build is deployed.
+- Apply the same private-buffer-then-copy pattern to cacao acquWFS's write of
+  `aol1_imWFS2` (milk/cacao fork), then retest cbuff away from the loop's L3.
 
 - shmimIntegrator moving-average mode (`nUpdate` > 0, not used in any deployed
   config) re-sums the whole history on every update, O(nAverage x pixels).
