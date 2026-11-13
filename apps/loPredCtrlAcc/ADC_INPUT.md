@@ -11,6 +11,9 @@ Use a freshly built `DDSPC_SHADOW_ONLY=yes` application and the
 Legacy defaults are preserved; `adc.enabled=true` with `shadow=false` is rejected
 before helpers load, and again at startup. The separate `parameters.accel_enabled`
 Legacy FLOAT reader stays off. No output section/channel is needed.
+The ADC example now leaves `shmimMonitor.shmimName` empty and explicitly sets
+`parameters.shadow_pipeline=false`: it is ready to copy for ADC-only observation,
+without filling in WFS/application timing or enabling either model's training.
 
 For operator-run native build, ADC-only configuration and private INDI commands,
 use [ADC_EXAO2_TESTING.md](ADC_EXAO2_TESTING.md). The review correction detects

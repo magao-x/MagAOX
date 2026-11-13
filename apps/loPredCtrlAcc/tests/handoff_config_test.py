@@ -1,5 +1,5 @@
 r"""\file handoff_config_test.py
-\brief Check that manual examples remain output-inhibited placeholders with explicit input calibration.
+\brief Check that manual examples remain output-inhibited with explicit input calibration and source boundaries.
 """
 import configparser
 from pathlib import Path
@@ -34,9 +34,10 @@ class HandoffConfigTest(unittest.TestCase):
         config.read(path)
         p = config["parameters"]
         self.assertTrue(p.getboolean("shadow"))
+        self.assertFalse(p.getboolean("shadow_pipeline"))
         for key in ("is_integrating", "own_shmim", "accel_enabled"):
             self.assertFalse(p.getboolean(key))
-        self.assertEqual(config["shmimMonitor"]["shmimName"], "REPLACE_WITH_VERIFIED_MODAL_WFS_STREAM")
+        self.assertEqual(config["shmimMonitor"]["shmimName"], "")
         self.assertEqual(set(config.sections()), {"parameters", "shmimMonitor", "adc"})
         adc = config["adc"]
         self.assertTrue(adc.getboolean("enabled"))

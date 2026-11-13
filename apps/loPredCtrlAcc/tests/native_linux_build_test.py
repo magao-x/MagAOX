@@ -113,12 +113,14 @@ class NativeBuildTest(unittest.TestCase):
         actual = Path(__file__).resolve().parents[1] / "Makefile"
         (app / "Makefile").write_bytes(actual.read_bytes())
         (root / "Make/magAOXApp.mk").write_text(
-            ".PHONY: probe\nprobe:\n\t@printf '%s\\n' '$(CXXFLAGS)' '$(OPTIMIZE)'\n")
+            ".PHONY: probe\nprobe:\n\t@printf '%s\\n' '$(CXXFLAGS)' '$(OPTIMIZE)' '$(CXXSTD)' \"$$CXXSTD\"\n")
         for mode in ("no", "yes"):
             result = subprocess.run(["make", "--no-print-directory", "-s", "-C", str(app),
                                      "CXXFLAGS=-O0", "DDSPC_SHADOW_ONLY="+mode, "probe"],
                                     check=True, capture_output=True, text=True)
-            flags, optimization = result.stdout.splitlines()
+            flags, optimization, standard, inherited_standard = result.stdout.splitlines()
+            self.assertEqual(standard, "-std=c++20")
+            self.assertEqual(inherited_standard, standard)
             self.assertEqual("-DDDSPC_SHADOW_ONLY" in flags, mode == "yes")
             self.assertIn("-O0", flags)
             if mode == "yes":
