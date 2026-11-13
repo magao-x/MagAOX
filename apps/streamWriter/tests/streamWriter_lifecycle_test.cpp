@@ -96,6 +96,8 @@ struct streamWriterConfig
     bool                       m_warnMissedData{ false };                 ///< Whether backlog summaries log warnings.
     int                        m_framegrabberThreadPrio{ 0 };             ///< Configured framegrabber thread priority.
     std::string                m_framegrabberCpuset;                      ///< Optional framegrabber cpuset.
+    bool                       m_spin{ false };  ///< Whether the framegrabber polls instead of using the semaphore.
+    int                        m_spinSleep{ 0 }; ///< Framegrabber sleep between polls in microseconds.
     double                     m_telemeterMaxInterval{ 60.0 };            ///< Telemetry cadence in seconds.
 };
 
@@ -121,7 +123,8 @@ class tempStream
                        uint64_t        cnt0 /**< [in] source frame counter */,
                        uint16_t        baseValue /**< [in] first ramp pixel */,
                        const timespec &atime /**< [in] acquisition timestamp */,
-                       const timespec &writetime /**< [in] write timestamp */ );
+                       const timespec &writetime /**< [in] write timestamp */,
+                       bool            post = true /**< [in] post the semaphore; false is seen only by polling */ );
 
     /// Copy one float frame and publish its metadata and semaphore notification.
     void publishFloatFrame( size_t                    frameIndex /**< [in] source circular-buffer index */,
@@ -135,7 +138,8 @@ class tempStream
     void publishMetadata( size_t          frameIndex /**< [in] source circular-buffer index */,
                           uint64_t        cnt0 /**< [in] source frame counter */,
                           const timespec &atime /**< [in] acquisition timestamp */,
-                          const timespec &writetime /**< [in] write timestamp */ );
+                          const timespec &writetime /**< [in] write timestamp */,
+                          bool            post = true /**< [in] post the semaphore */ );
 
     std::string m_name;          ///< Unique shmim name for the temporary stream.
     IMAGE       m_image{};       ///< ImageStreamIO handle for the temporary stream.
@@ -182,7 +186,7 @@ size_t tempStream::pixelsPerFrame() const
 }
 
 void tempStream::publishFrame(
-    size_t frameIndex, uint64_t cnt0, uint16_t baseValue, const timespec &atime, const timespec &writetime )
+    size_t frameIndex, uint64_t cnt0, uint16_t baseValue, const timespec &atime, const timespec &writetime, bool post )
 {
     uint16_t *frame = reinterpret_cast<uint16_t *>( m_image.array.raw ) + frameIndex * pixelsPerFrame();
 
@@ -191,7 +195,7 @@ void tempStream::publishFrame(
         frame[n] = baseValue + n;
     }
 
-    publishMetadata( frameIndex, cnt0, atime, writetime );
+    publishMetadata( frameIndex, cnt0, atime, writetime, post );
 }
 
 void tempStream::publishFloatFrame( size_t                    frameIndex,
@@ -207,7 +211,8 @@ void tempStream::publishFloatFrame( size_t                    frameIndex,
     publishMetadata( frameIndex, cnt0, atime, writetime );
 }
 
-void tempStream::publishMetadata( size_t frameIndex, uint64_t cnt0, const timespec &atime, const timespec &writetime )
+void tempStream::publishMetadata(
+    size_t frameIndex, uint64_t cnt0, const timespec &atime, const timespec &writetime, bool post )
 {
     m_image.md[0].write     = 1;
     m_image.md[0].cnt0      = cnt0;
@@ -219,8 +224,12 @@ void tempStream::publishMetadata( size_t frameIndex, uint64_t cnt0, const timesp
     m_image.atimearray[frameIndex]     = atime;
     m_image.writetimearray[frameIndex] = writetime;
 
-    m_image.md[0].write = 0;
-    ImageStreamIO_sempost( &m_image, -1 );
+    __atomic_store_n( &m_image.md[0].write, 0, __ATOMIC_RELEASE );
+
+    if( post )
+    {
+        ImageStreamIO_sempost( &m_image, -1 );
+    }
 }
 
 /// Test harness exposing path setup and shutdown cleanup helpers.
@@ -563,6 +572,16 @@ loadConfig( streamWriterLifecycleTest &app /**< [in/out] application to configur
         sections.push_back( "framegrabber" );
         keys.push_back( "cpuset" );
         values.push_back( cfg.m_framegrabberCpuset );
+    }
+
+    if( cfg.m_spin )
+    {
+        sections.push_back( "framegrabber" );
+        keys.push_back( "spin" );
+        values.push_back( "1" );
+        sections.push_back( "framegrabber" );
+        keys.push_back( "spinSleep" );
+        values.push_back( std::to_string( cfg.m_spinSleep ) );
     }
 
     if( cfg.m_outName )
@@ -1632,6 +1651,66 @@ TEST_CASE( "streamWriter real workers remain idle after empty recording sessions
             REQUIRE( app.m_writing == NOT_WRITING );
             REQUIRE_FALSE( app.m_writePending );
             REQUIRE( archivePaths( app.m_rawimageDir ).empty() );
+            REQUIRE( app.shutdownStartedApp() == 0 );
+            startup.disarm();
+        } );
+    const int status = child.wait();
+    REQUIRE( WIFEXITED( status ) );
+    REQUIRE( WEXITSTATUS( status ) == 0 );
+}
+
+/** \brief Verify real workers ingest frames by polling, without semaphore posts, spinning or sleeping.
+ * \ingroup streamWriter_unit_test
+ */
+TEST_CASE( "streamWriter real workers ingest frames by polling", "[streamWriter][regression]" )
+{
+    // clang-format off
+#ifdef STREAMWRITER_TEST_DOXYGEN_REF
+    XWCTEST_DOXYGEN_REF(streamWriter::fgThreadExec());
+    XWCTEST_DOXYGEN_REF(MagAOX::app::pollFrame);
+#endif
+    // clang-format on
+    const int spinSleep = GENERATE( 0, 100 );
+    CAPTURE( spinSleep );
+    childProcess child(
+        [spinSleep]()
+        {
+            streamWriterLifecycleTest app;
+            startupScope              startup( app );
+            streamWriterConfig        cfg;
+            cfg.m_shmimName           = uniqueShmimName( "poll" );
+            cfg.m_maxCircBuffLength   = 4;
+            cfg.m_maxWriteChunkLength = 2;
+            cfg.m_maxChunkTime        = 10;
+            cfg.m_semWaitNSec         = 500000000;
+            cfg.m_spin                = true;
+            cfg.m_spinSleep           = spinSleep;
+            tempStream source( cfg.m_shmimName, 2, 2, 4 );
+            const auto root         = loadConfig( app, cfg.m_shmimName, cfg );
+            app.m_rawimageDir       = ( root / "raw" ).string();
+            const int startupResult = app.appStartup();
+            startup.markStarted( startupResult == 0 );
+            REQUIRE( startupResult == 0 );
+            REQUIRE( app.appLogic() == 0 );
+            REQUIRE( waitFor(
+                [&app]()
+                {
+                    return app.m_fgReady.load();
+                },
+                3000 ) );
+
+            for( size_t frame = 0; frame < 3; ++frame ) // fewer than the circular buffer, which capturedFrames wraps at
+            {
+                const auto now = currentRealtime();
+                source.publishFrame( frame, frame + 1, 100, now, now, false );
+                REQUIRE( waitFor(
+                    [&app, frame]()
+                    {
+                        return app.capturedFrames() == frame + 1;
+                    } ) );
+            }
+
+            REQUIRE( app.m_skippedFrameCount.load() == 0 );
             REQUIRE( app.shutdownStartedApp() == 0 );
             startup.disarm();
         } );

@@ -147,7 +147,8 @@ class monitorHarness : public dev::shmimMonitor<monitorHarness<withHook>>
     void start( const std::string &name /**< [in] Existing private workstation stream. */,
                 bool               initial /**< [in] Process existing pixels before waiting. */,
                 bool               spin /**< [in] Poll the frame counter instead of waiting on the semaphore. */,
-                int                readDelay /**< [in] Microseconds to wait before reading a new frame. */ );
+                int                readDelay /**< [in] Microseconds to wait before reading a new frame. */,
+                int                spinSleep /**< [in] Microseconds to sleep between polls. */ );
 
     /// Request exit and join after a caller posts the private stream semaphore.
     void join();
@@ -246,12 +247,13 @@ void monitorHarness<withHook>::shmimMonitorTiming( const dev::shmimT &specific, 
 }
 
 template <bool withHook>
-void monitorHarness<withHook>::start( const std::string &name, bool initial, bool spin, int readDelay )
+void monitorHarness<withHook>::start( const std::string &name, bool initial, bool spin, int readDelay, int spinSleep )
 {
     monitorT::m_shmimName        = name;
     monitorT::m_getExistingFirst = initial;
     monitorT::m_spin             = spin;
     monitorT::m_readDelay        = readDelay;
+    monitorT::m_spinSleep        = spinSleep;
     monitorT::m_smThreadInit     = false;
     monitorT::m_smThread         = std::thread(
         [this]()
@@ -312,7 +314,8 @@ struct streamFixture
                             uint32_t depth          = 0 /**< [in] Number of frames; 0 creates a single-frame image. */,
                             uint64_t imagetype      = 0 /**< [in] ImageStreamIO image type for a multi-frame stream. */,
                             bool     spin      = false /**< [in] Poll the frame counter instead of the semaphore. */,
-                            int      readDelay = 0 /**< [in] Microseconds the monitor waits before reading. */ );
+                            int      readDelay = 0 /**< [in] Microseconds the monitor waits before reading. */,
+                            int      spinSleep = 0 /**< [in] Microseconds the monitor sleeps between polls. */ );
 
     /// Join the worker before destroying and unmapping its input stream.
     ~streamFixture();
@@ -336,7 +339,7 @@ struct streamFixture
 
 template <bool withHook>
 streamFixture<withHook>::streamFixture(
-    bool initial, int allocateResult, uint32_t depth, uint64_t imagetype, bool spin, int readDelay )
+    bool initial, int allocateResult, uint32_t depth, uint64_t imagetype, bool spin, int readDelay, int spinSleep )
 {
     static_cast<void>( streamDirectory() );
     static unsigned sequence = 0;
@@ -354,7 +357,7 @@ streamFixture<withHook>::streamFixture(
                                          depth > 0 ? imagetype : 0,
                                          0 ) == 0 );
     m_monitor.m_allocateResult.store( allocateResult );
-    m_monitor.start( m_name, initial, spin, readDelay );
+    m_monitor.start( m_name, initial, spin, readDelay, spinSleep );
 }
 
 template <bool withHook>
@@ -655,27 +658,30 @@ TEST_CASE( "Monitor current-frame timing follows the processed circular-buffer s
     // clang-format on
 }
 
-/** \brief A polling monitor sees frames from the frame counter alone, and still shuts down.
+/** \brief A polling monitor sees frames from the frame counter alone, spinning or sleeping, and still shuts down.
  * \ingroup shmimMonitor_timing_tests
  */
 TEST_CASE( "Monitor polling sees new frames without the semaphore", "[dev::shmimMonitor][timing]" )
 {
-    streamFixture<true> fixture( false, 0, 0, 0, true );
-    REQUIRE( fixture.m_monitor.wait( static_cast<int>( shmimMonitorEvent::connected ), 1 ) );
+    for( int spinSleep : { 0, 100 } )
+    {
+        streamFixture<true> fixture( false, 0, 0, 0, true, 0, spinSleep );
+        REQUIRE( fixture.m_monitor.wait( static_cast<int>( shmimMonitorEvent::connected ), 1 ) );
 
-    std::this_thread::sleep_for( std::chrono::milliseconds( 50 ) );
-    CHECK( fixture.m_monitor.m_callbacks.load() == 0 );
+        std::this_thread::sleep_for( std::chrono::milliseconds( 50 ) );
+        CHECK( fixture.m_monitor.m_callbacks.load() == 0 );
 
-    fixture.advance();
-    REQUIRE( fixture.m_monitor.wait( 100, 1 ) );
-    CHECK( fixture.m_monitor.m_receiptCallbacks.load() == 1 );
+        fixture.advance();
+        REQUIRE( fixture.m_monitor.wait( 100, 1 ) );
+        CHECK( fixture.m_monitor.m_receiptCallbacks.load() == 1 );
 
-    fixture.advance();
-    REQUIRE( fixture.m_monitor.wait( 100, 2 ) );
-    CHECK( fixture.m_monitor.m_receiptCallbacks.load() == 2 );
+        fixture.advance();
+        REQUIRE( fixture.m_monitor.wait( 100, 2 ) );
+        CHECK( fixture.m_monitor.m_receiptCallbacks.load() == 2 );
 
-    fixture.m_monitor.m_shutdown.store( true );
-    fixture.m_monitor.join();
+        fixture.m_monitor.m_shutdown.store( true );
+        fixture.m_monitor.join();
+    }
 
     // clang-format off
 #ifdef XWCTEST_DOX_REF

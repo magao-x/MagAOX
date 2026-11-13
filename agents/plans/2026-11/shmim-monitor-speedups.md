@@ -209,7 +209,17 @@ Follow-up results:
   effect. At 100 us acquWFS's calibration (~67 us) is over, so a collision
   with acquWFS's own read of the frame is unlikely.
 
-Summary: a reader that reads `camwfs` costs ~8 us when it is woken by the
+**Correction:** camwfs-avg produced no output frames in spin mode, so the
+"free" spin results are invalid. Likely cause: its monitor and framegrabber
+threads were both on the same dedicated cpuset (as in the CPU 32 test), both
+SCHED_FIFO at the default priority 2. A spinning FIFO thread never blocks, so
+the framegrabber on that core never runs and nothing is published. With the
+completed average never claimed, `processImage` then returns before reading
+the pixels (`m_updated` stays set), so camwfs-avg stopped reading `camwfs`.
+Retest with the monitor thread alone on its core, e.g. `[shmimMonitor]`
+`cpuset=spare27`, `spin=true`, and `[framegrabber]` on `system`.
+
+Summary before the correction: a reader that reads `camwfs` costs ~8 us when it is woken by the
 semaphore, whatever its CPU, CCD, idle states or read delay (0-100 us), and
 nothing when it spins on a dedicated core in either CCD. A semaphore waiter
 that does not read costs ~1-2 us. The mechanism is not identified. Localizing
@@ -229,23 +239,25 @@ The integrator change still helps every shmimIntegrator instance (all
 
 ## To do on this branch
 
-1. Done, to be measured (see above). Spin polling in `dev::shmimMonitor`: optional mode that polls `md->cnt0`
-   (and `cnt1`) instead of waiting on the semaphore, for readers with a
-   dedicated core. The writer's post then has no waiter and no syscall.
-   Design points:
-   - Configurable, default stays semaphore wait.
-   - Do not register a semaphore in spin mode.
-   - Use `_mm_pause` in the poll loop; the metadata line still moves between
-     cores once per frame.
-   - Keep the shutdown, restart, size-change and file/inode checks, run on a
-     time interval instead of on semaphore timeout.
-   - Single-frame sources can be overwritten before they are read; keep cbuff's
-     torn-frame check.
-   - Test A suggests the gain per reader is at most ~1 us on the current
-     configuration.
-2. Spin polling in `streamWriter`, which has its own wait loop
-   (`sem_timedwait` then drain with `sem_trywait`, `streamWriter.hpp` ~1541).
-   Same design points.
+1. Done: spin polling in `dev::shmimMonitor` (`spin`, `spinSleep`,
+   `readDelay`) and `streamWriter` (`framegrabber.spin`,
+   `framegrabber.spinSleep`), sharing `MagAOX::app::pollFrame`
+   (`libMagAOX/app/framePoll.hpp`).
+   - A frame is new when `md->cnt0` changed and `md->write` is 0. frameGrabber
+     sets `cnt0` before the per-frame arrays and clears `write` last, so `cnt0`
+     alone could be seen before `cntarray` is updated.
+   - `spinSleep` (us) sleeps between polls instead of pausing, freeing the core
+     at the cost of up to that latency. Without it a cpuset is needed (a
+     warning is logged otherwise).
+   - The spinning thread must be alone on its core: a same-priority FIFO
+     thread on that core (e.g. the app's own framegrabber) never runs.
+   - A semaphore is still registered in spin mode.
+   - Tests: `framePoll_test` (fully published frame only, timeout, stop, with
+     and without sleep); `shmimMonitor_timing_test` polling case for
+     `spinSleep` 0 and 100; `streamWriter_lifecycle_test` real workers ingest
+     frames published without semaphore posts, `spinSleep` 0 and 100. All
+     streamWriter, streamCircBuff and shmimIntegrator tests pass; apps build.
+2. Retest spin with the monitor thread alone on its core (see correction).
 
 ## Follow-ups (not on this branch)
 

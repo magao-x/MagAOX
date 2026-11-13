@@ -252,6 +252,16 @@ class streamWriter : public MagAOXApp<>, public dev::telemeter<streamWriter>
 
     std::string m_fgCpuset; ///< The cpuset for the framegrabber thread.  Ignored if empty (the default).
 
+    /// Poll the source's frame counter for new frames instead of waiting on its semaphore.
+    /** This removes the wake of this reader from the writer's semaphore posts.  With m_spinSleep 0 it keeps the core
+     * busy, so it needs a dedicated cpuset with no other thread of the same or lower priority on it, e.g. the stream
+     * writer thread, which would never run.  A semaphore is still registered.
+     */
+    bool m_spin{ false };
+
+    /// Microseconds to sleep between polls when m_spin is set.  0, the default, polls continuously.
+    int m_spinSleep{ 0 };
+
     std::thread m_fgThread; ///< Worker owning source acquisition and circular-buffer publication.
 
     bool m_fgThreadInit{ true }; ///< Synchronizer to ensure f.g. thread initializes before doing dangerous things.
@@ -574,6 +584,28 @@ void streamWriter::setupConfig()
                 "bool",
                 "Whether missed-data backlog summaries should be emitted at warning priority. Default is true." );
 
+    config.add( "framegrabber.spin",
+                "",
+                "framegrabber.spin",
+                argType::Required,
+                "framegrabber",
+                "spin",
+                false,
+                "bool",
+                "If true, poll the stream for new frames instead of waiting on its semaphore.  Unless spinSleep is set "
+                "this uses a full core, so requires a dedicated cpuset.  Default is false." );
+
+    config.add( "framegrabber.spinSleep",
+                "",
+                "framegrabber.spinSleep",
+                argType::Required,
+                "framegrabber",
+                "spinSleep",
+                false,
+                "int",
+                "Microseconds to sleep between polls when spin is true, adding up to this much latency.  Default is 0, "
+                "polling continuously." );
+
     config.add( "framegrabber.threadPrio",
                 "",
                 "framegrabber.threadPrio",
@@ -639,6 +671,8 @@ int streamWriter::loadConfigImpl( mx::app::appConfigurator &config )
 
     config( m_fgThreadPrio, "framegrabber.threadPrio" );
     config( m_fgCpuset, "framegrabber.cpuset" );
+    config( m_spin, "framegrabber.spin" );
+    config( m_spinSleep, "framegrabber.spinSleep" );
 
     // Set some defaults
     // Setup default saving path
@@ -776,6 +810,12 @@ int streamWriter::appStartup()
     if( m_startWriting )
     {
         m_writing = START_WRITING;
+    }
+
+    if( m_spin && m_spinSleep == 0 && m_fgCpuset == "" )
+    {
+        log<text_log>( "framegrabber.spin is set without a cpuset: polling will keep a shared core busy",
+                       logPrio::LOG_WARNING );
     }
 
     if( threadStart( m_fgThread,
@@ -1485,6 +1525,8 @@ void streamWriter::fgThreadRun()
         // mistake startup backlog for repeated identical frames.
         ImageStreamIO_semflush( &image, m_semaphoreNumber );
 
+        uint64_t lastPolled = __atomic_load_n( &image.md[0].cnt0, __ATOMIC_ACQUIRE ); // used when m_spin is set
+
         uint8_t  atype;
         size_t   snx, sny, snz;
         bool     useFrameArrays = image.cntarray != nullptr && length > 1;
@@ -1538,20 +1580,41 @@ void streamWriter::fgThreadRun()
             timespec ts;
             XWC_SEM_WAIT_TS_RETVOID( ts, m_semWaitSec, m_semWaitNSec );
 
-            if( sem_timedwait( sem, &ts ) == 0 )
-            {
-                // Drain
-                while( sem_trywait( sem ) == 0 )
-                {
-                }
+            int waitResult;
 
-                if( errno != EAGAIN && errno != EINTR )
+            if( m_spin )
+            {
+                waitResult = pollFrame( image,
+                                        lastPolled,
+                                        ts,
+                                        m_spinSleep,
+                                        [this]()
+                                        {
+                                            return m_shutdown != 0 || m_restart;
+                                        } );
+            }
+            else
+            {
+                waitResult = sem_timedwait( sem, &ts );
+            }
+
+            if( waitResult == 0 )
+            {
+                if( !m_spin )
                 {
-                    if( !m_shutdown && !m_restart )
+                    // Drain
+                    while( sem_trywait( sem ) == 0 )
                     {
-                        log<software_error>( { __FILE__, __LINE__, errno, "sem_trywait" } );
                     }
-                    break;
+
+                    if( errno != EAGAIN && errno != EINTR )
+                    {
+                        if( !m_shutdown && !m_restart )
+                        {
+                            log<software_error>( { __FILE__, __LINE__, errno, "sem_trywait" } );
+                        }
+                        break;
+                    }
                 }
 
                 std::unique_lock<std::mutex> lock( m_writeMutex );
