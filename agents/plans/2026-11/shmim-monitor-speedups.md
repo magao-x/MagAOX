@@ -219,7 +219,32 @@ the pixels (`m_updated` stays set), so camwfs-avg stopped reading `camwfs`.
 Retest with the monitor thread alone on its core, e.g. `[shmimMonitor]`
 `cpuset=spare27`, `spin=true`, and `[framegrabber]` on `system`.
 
-Summary before the correction: a reader that reads `camwfs` costs ~8 us when it is woken by the
+Valid retest: camwfs-avg monitor spinning (`spin=true`, `spinSleep=0`,
+`threadPrio=2`) with its framegrabber at `threadPrio=3` on the same cpuset
+(`camwfs_sw`, CPU 32), `camwfs_avg` updating: the ~10 us increase is back.
+So spinning does not help either: **any reader that reads the `camwfs` pixels
+costs ~8-10 us**, however it is woken (semaphore or polling), wherever it runs
+(CPU 0-23, 27 or 32), with idle states off, and with the read delayed up to
+100 us. A reader that never reads the pixels costs ~1-2 us.
+
+With the read delayed 100 us, acquWFS's read and calibration are already over,
+so the cost most likely lands on the camera's next write of the single-buffer
+`camwfs` (ocam2KCtrl descramble on CPU 33, `circBuffLength=1`), which must take
+back every line the extra reader holds. This is the same mechanism as cbuff on
+`aol1_imWFS2`, where a reader in the writer's L3 domain was cheap (~2 us on 42
+vs ~8 us on 26), but here a reader in the camera's L3 domain (32) still costs
+~8-10 us. Unexplained so far. Note that every location tested for `camwfs` is
+outside acquWFS's L3 domain (40-47), whereas the cheap cbuff placement was in
+it.
+
+Next measurements:
+1. camwfs `fg_timing.delta_aw` (mean acquisition-to-write time, includes the
+   descramble) with camwfs-avg reading vs not. If it rises ~8-10 us, the cost
+   is in the camera's write.
+2. A `camwfs` reader in acquWFS's L3 domain (40-47), by analogy with cbuff on
+   42.
+
+Earlier summary, before the valid retest: a reader that reads `camwfs` costs ~8 us when it is woken by the
 semaphore, whatever its CPU, CCD, idle states or read delay (0-100 us), and
 nothing when it spins on a dedicated core in either CCD. A semaphore waiter
 that does not read costs ~1-2 us. The mechanism is not identified. Localizing
@@ -227,8 +252,8 @@ it would need per-process timing with the semaphore reader on vs. spinning,
 e.g. acquWFS, wfs2cmodeval, mfilt and mvalC2dm in `milk-procCTRL`, and camwfs's
 own acquisition-to-write time.
 
-Placement outcome so far: a `camwfs` reader spinning on a dedicated core is
-free, in the camera's L3 domain or another. With the planned `camwfs` cbuff, that is one
+Superseded by the valid retest: a `camwfs` reader spinning on a dedicated core is
+**not** free. The earlier placement outcome was: free, in the camera's L3 domain or another. With the planned `camwfs` cbuff, that is one
 dedicated core running cbuff with `spin=true`, and camwfs-avg, -sw and -dark
 reading its output.
 
@@ -257,7 +282,8 @@ The integrator change still helps every shmimIntegrator instance (all
      `spinSleep` 0 and 100; `streamWriter_lifecycle_test` real workers ingest
      frames published without semaphore posts, `spinSleep` 0 and 100. All
      streamWriter, streamCircBuff and shmimIntegrator tests pass; apps build.
-2. Retest spin with the monitor thread alone on its core (see correction).
+2. Done: spin retest with the framegrabber at higher priority. Spinning does
+   not remove the cost (see above).
 
 ## Follow-ups (not on this branch)
 
