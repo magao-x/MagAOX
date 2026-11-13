@@ -35,6 +35,7 @@ using namespace mx::improc;
 #include "shadow_controller.hpp"
 #include "causal_input.hpp"
 #include "adc_reader.hpp"
+#include "shadow_pipeline.hpp"
 
 namespace MagAOX
 {
@@ -139,6 +140,24 @@ class loPredCtrlAcc : public MagAOXApp<true>,
     /// Startup-only opt-in; shadow execution never starts or uses the output frameGrabber.
     bool m_shadowMode{ false };
 
+    /// Startup-only shared shadow pipeline; false preserves all existing input/Legacy dispatch.
+    bool m_shadowPipelineEnabled{ false };
+
+    /// A failed opt-in loader cannot be bypassed by a later direct startup call.
+    bool m_shadowPipelineConfigValid{ false };
+
+    /// Immutable shared component settings; candidate limits must be explicitly configured when enabled.
+    DDSPC::FeatureConfig m_shadowFeatures;
+    DDSPC::PolicyConfig  m_shadowPolicy;
+    DDSPC::ShadowConfig  m_shadowSettings;
+    std::string          m_shadowRequested{ "standard" };
+    double               m_shadowLimit{ 0 }, m_shadowStep{ 0 };
+    std::uint64_t        m_shadowCalibration{ 1 };
+    std::size_t          m_shadowAdcCapacity{ 128 };
+
+    /// Serialized admission gate, closed before input helpers are stopped or model storage is destroyed.
+    bool m_shadowStopping{ false };
+
     /// Startup-only native ADC observation, accepted only with shadow execution.
     bool m_adcEnabled{ false };
 
@@ -162,6 +181,9 @@ class loPredCtrlAcc : public MagAOXApp<true>,
 
     /// Independently owned standard and assisted causal predictors; absent in legacy execution.
     std::unique_ptr<DDSPC::ShadowController> m_shadowController;
+
+    /// Borrowing pipeline is destroyed before its owning model pair; never owns an output sink.
+    std::unique_ptr<DDSPC::ShadowPipeline> m_shadowPipeline;
 
     /// Explicit verified/synthetic timing adapter; no native source is armed by configuration or INDI.
     std::unique_ptr<DDSPC::CausalInputBuilder> m_shadowInputs;
@@ -380,6 +402,9 @@ class loPredCtrlAcc : public MagAOXApp<true>,
     /// Execution/output policy, per-model readiness, and explicit input synchronization/provenance diagnostics.
     pcf::IndiProperty m_indiP_ddspcStatus;
 
+    /// Read-only local pipeline eligibility/counters and supervisory reasons; never an output enable.
+    pcf::IndiProperty m_indiP_ddspcPipeline, m_indiP_ddspcSupervisor;
+
   public:
     /// Select a ready shadow predictor without changing any output or training state.
     INDI_NEWCALLBACK_DECL( loPredCtrlAcc, m_indiP_ddspcMode );
@@ -521,6 +546,16 @@ class loPredCtrlAcc : public MagAOXApp<true>,
     /// Invalidate stale evidence during silence; the future adapter must supply ticks in the established clock.
     bool expireShadowInputs( std::int64_t nowNs /**< [in] Established monotonic operation time. */ );
 
+    /// Feed owned decoded ADC evidence only to the explicitly configured shadow pipeline.
+    bool processShadowAdc( const DDSPC::ShadowAdcRecord &record /**< [in] Decoded sample with explicit mappings. */,
+                           std::int64_t                  nowNs /**< [in] Established common monotonic time. */ );
+
+    /// Read scalar requested/effective diagnostics under the same model/input lock.
+    DDSPC::ShadowPipelineStatus shadowPipelineStatus();
+
+    /// Copy a qualified in-memory candidate; this has no publication or command-application side effect.
+    bool shadowCandidate( DDSPC::Matrix &output /**< [out] Pre-sized modal candidate; zeroed on unavailability. */ );
+
     /// Feed each paired record once to the two-model manager; caller holds m_shadowMutex.
     bool consumeShadowInputs( DDSPC::InputBuildResult result /**< [in] Pairing result and common discontinuity. */ );
 
@@ -633,6 +668,38 @@ inline void loPredCtrlAcc::setupConfig()
                 false,
                 "bool",
                 "Startup-only non-actuating DDSPC diagnostics; default false preserves legacy execution." );
+    config.add( "parameters.shadow_pipeline",
+                "",
+                "parameters.shadow_pipeline",
+                argType::Optional,
+                "parameters",
+                "shadow_pipeline",
+                false,
+                "bool",
+                "Enable shared non-actuating input/replay pipeline; default false." );
+    for( const auto &setting : { std::make_pair( "requested", "string" ),
+                                 { "window_ns", "int64" },
+                                 { "lag_ns", "int64" },
+                                 { "max_gap_ns", "int64" },
+                                 { "max_age_ns", "int64" },
+                                 { "recovery_frames", "unsigned" },
+                                 { "command_limit", "double" },
+                                 { "max_step", "double" },
+                                 { "adc_calibration", "uint64" },
+                                 { "adc_capacity", "size_t" } } )
+    {
+        const auto key = std::string( "shadow_pipeline." ) + setting.first;
+        config.add(
+            key,
+            "",
+            key,
+            argType::Optional,
+            "shadow_pipeline",
+            setting.first,
+            false,
+            setting.second,
+            "Startup-only shared shadow policy; bounds and actual timing/calibration require an explicit contract." );
+    }
     config.add( "parameters.shadow_min_updates",
                 "",
                 "parameters.shadow_min_updates",
@@ -839,6 +906,43 @@ inline int loPredCtrlAcc::loadConfigImpl( mx::app::appConfigurator &_config )
             { __FILE__, __LINE__, "Shadow-only build requires parameters.shadow=true; legacy output is forbidden." } );
     }
 #endif
+    _config( m_shadowPipelineEnabled, "parameters.shadow_pipeline" );
+    if( m_shadowPipelineEnabled )
+    {
+        m_shadowPipelineConfigValid = false;
+        if( !m_shadowMode )
+        {
+            m_shutdown = true;
+            return log<software_error, -1>( { __FILE__, __LINE__, "Shadow pipeline requires shadow=true." } );
+        }
+        _config( m_shadowRequested, "shadow_pipeline.requested" );
+        _config( m_shadowFeatures.m_windowNs, "shadow_pipeline.window_ns" );
+        _config( m_shadowFeatures.m_lagNs, "shadow_pipeline.lag_ns" );
+        _config( m_shadowFeatures.m_maxGapNs, "shadow_pipeline.max_gap_ns" );
+        _config( m_shadowFeatures.m_maxAgeNs, "shadow_pipeline.max_age_ns" );
+        _config( m_shadowPolicy.m_recoveryFrames, "shadow_pipeline.recovery_frames" );
+        _config( m_shadowLimit, "shadow_pipeline.command_limit" );
+        _config( m_shadowStep, "shadow_pipeline.max_step" );
+        _config( m_shadowCalibration, "shadow_pipeline.adc_calibration" );
+        _config( m_shadowAdcCapacity, "shadow_pipeline.adc_capacity" );
+        try
+        {
+            if( m_shadowRequested != "standard" && m_shadowRequested != "accel_assisted" )
+                throw std::invalid_argument( "Unknown shadow pipeline request" );
+            if( !m_shadowCalibration || m_shadowAdcCapacity < 2 || m_shadowAdcCapacity > 65536 )
+                throw std::invalid_argument( "Invalid shadow ADC identity/capacity" );
+            m_shadowPolicy.m_limit   = m_shadowLimit;
+            m_shadowPolicy.m_maxStep = m_shadowStep;
+            DDSPC::ShadowPolicy validatePolicy( DDSPC::PolicyMode::Standard, m_shadowPolicy );
+            DDSPC::acceleration_window( {}, 2000000000LL, m_shadowFeatures );
+            m_shadowPipelineConfigValid = true;
+        }
+        catch( const std::exception &error )
+        {
+            m_shutdown = true;
+            return log<software_error, -1>( { __FILE__, __LINE__, error.what() } );
+        }
+    }
     _config( m_adcEnabled, "adc.enabled" );
     if( m_adcEnabled && !m_shadowMode )
     {
@@ -996,9 +1100,13 @@ inline int loPredCtrlAcc::configureShadow()
     settings.m_useQrd        = m_useQrd;
     try
     {
-        { //mutex scope
+        { // mutex scope
             std::lock_guard<std::mutex> guard( m_shadowMutex );
-            m_shadowController = std::make_unique<DDSPC::ShadowController>( settings );
+            m_shadowPipeline.reset();
+            m_shadowStopping       = false;
+            m_shadowSettings       = settings;
+            m_shadowPolicy.m_modes = settings.m_modes;
+            m_shadowController     = std::make_unique<DDSPC::ShadowController>( settings );
             m_shadowInputs.reset();
         }
     }
@@ -1013,9 +1121,10 @@ inline bool loPredCtrlAcc::processShadowRecord( const DDSPC::ShadowRecord &recor
 {
     if( !m_shadowMode )
         return false;
-    { //mutex scope
+    { // mutex scope
         std::lock_guard<std::mutex> guard( m_shadowMutex );
-        return !m_shadowInputs && m_shadowController && m_shadowController->process( record );
+        return !m_shadowStopping && !m_shadowPipelineEnabled && !m_shadowInputs && m_shadowController &&
+               m_shadowController->process( record );
     }
 }
 
@@ -1025,10 +1134,30 @@ inline int loPredCtrlAcc::configureShadowInputs( const DDSPC::InputConfig &setti
         return -1;
     try
     {
-        { //mutex scope
+        { // mutex scope
             std::lock_guard<std::mutex> guard( m_shadowMutex );
             if( !m_shadowController )
                 return -1;
+            if( m_shadowStopping )
+                return -1;
+            if( m_shadowPipelineEnabled )
+            {
+                auto pipeline = std::make_unique<DDSPC::ShadowPipeline>(
+                    *m_shadowController,
+                    m_shadowSettings,
+                    settings,
+                    m_shadowFeatures,
+                    m_shadowPolicy,
+                    m_shadowRequested == "accel_assisted" ? DDSPC::PolicyMode::Assisted : DDSPC::PolicyMode::Standard,
+                    m_shadowCalibration,
+                    m_shadowAdcCapacity );
+                m_shadowController->reset( DDSPC::ShadowMode::Standard );
+                m_shadowController->reset( DDSPC::ShadowMode::AccelAssisted );
+                m_shadowController->invalidate( DDSPC::ShadowRecord{} );
+                m_shadowInputs.reset();
+                m_shadowPipeline = std::move( pipeline );
+                return 0;
+            }
             auto inputs = std::make_unique<DDSPC::CausalInputBuilder>( settings );
             // A new layout/timing contract may change the meaning of every fitted column.
             m_shadowController->reset( DDSPC::ShadowMode::Standard );
@@ -1060,8 +1189,12 @@ inline bool loPredCtrlAcc::processShadowWfs( const DDSPC::TimedWfsRecord &record
 {
     if( !m_shadowMode )
         return false;
-    { //mutex scope
+    { // mutex scope
         std::lock_guard<std::mutex> guard( m_shadowMutex );
+        if( m_shadowStopping )
+            return false;
+        if( m_shadowPipelineEnabled )
+            return m_shadowPipeline && m_shadowPipeline->push_wfs( record, nowNs );
         return m_shadowInputs && consumeShadowInputs( m_shadowInputs->push_wfs( record, nowNs ) );
     }
 }
@@ -1070,8 +1203,12 @@ inline bool loPredCtrlAcc::processShadowApplied( const DDSPC::AppliedInputRecord
 {
     if( !m_shadowMode )
         return false;
-    { //mutex scope
+    { // mutex scope
         std::lock_guard<std::mutex> guard( m_shadowMutex );
+        if( m_shadowStopping )
+            return false;
+        if( m_shadowPipelineEnabled )
+            return m_shadowPipeline && m_shadowPipeline->push_command( record, nowNs );
         return m_shadowInputs && consumeShadowInputs( m_shadowInputs->push_command( record, nowNs ) );
     }
 }
@@ -1080,10 +1217,39 @@ inline bool loPredCtrlAcc::expireShadowInputs( std::int64_t nowNs )
 {
     if( !m_shadowMode )
         return false;
-    { //mutex scope
+    { // mutex scope
         std::lock_guard<std::mutex> guard( m_shadowMutex );
+        if( m_shadowStopping )
+            return false;
+        if( m_shadowPipelineEnabled )
+            return m_shadowPipeline && m_shadowPipeline->advance( nowNs );
         return m_shadowInputs && consumeShadowInputs( m_shadowInputs->advance( nowNs ) );
     }
+}
+
+inline bool loPredCtrlAcc::processShadowAdc( const DDSPC::ShadowAdcRecord &record, std::int64_t nowNs )
+{
+    if( !m_shadowMode || !m_shadowPipelineEnabled )
+        return false;
+    { // mutex scope
+        std::lock_guard<std::mutex> guard( m_shadowMutex );
+        return !m_shadowStopping && m_shadowPipeline && m_shadowPipeline->push_adc( record, nowNs );
+    }
+}
+
+inline DDSPC::ShadowPipelineStatus loPredCtrlAcc::shadowPipelineStatus()
+{
+    std::lock_guard<std::mutex> guard( m_shadowMutex ); // mutex scope
+    return m_shadowPipeline ? m_shadowPipeline->status() : DDSPC::ShadowPipelineStatus{};
+}
+
+inline bool loPredCtrlAcc::shadowCandidate( DDSPC::Matrix &output )
+{
+    std::lock_guard<std::mutex> guard( m_shadowMutex ); // mutex scope
+    if( output.rows() != m_num_modes || output.cols() != 1 )
+        return false;
+    output.setZero();
+    return m_shadowMode && !m_shadowStopping && m_shadowPipeline && m_shadowPipeline->candidate( output );
 }
 
 inline int loPredCtrlAcc::setupAdcINDI()
@@ -1256,18 +1422,43 @@ inline int loPredCtrlAcc::setupShadowINDI()
     }
     if( registerIndiPropertyReadOnly( m_indiP_ddspcStatus ) < 0 )
         return -1;
+    if( m_shadowPipelineEnabled )
+    {
+        if( createROIndiNumber( m_indiP_ddspcPipeline, "ddspc_pipeline" ) < 0 )
+            return -1;
+        for( const char *name : { "configured",
+                                  "candidate_valid",
+                                  "common_valid",
+                                  "qualified_streak",
+                                  "decisions",
+                                  "fallbacks",
+                                  "recoveries",
+                                  "index",
+                                  "feature_age_us" } )
+            m_indiP_ddspcPipeline.add( pcf::IndiElement( name, 0.0 ) );
+        if( registerIndiPropertyReadOnly( m_indiP_ddspcPipeline ) < 0 )
+            return -1;
+        if( createROIndiText( m_indiP_ddspcSupervisor, "ddspc_supervisor", "requested" ) < 0 )
+            return -1;
+        for( const char *name : { "effective", "reason", "feature_reason" } )
+            m_indiP_ddspcSupervisor.add( pcf::IndiElement( name, "" ) );
+        if( registerIndiPropertyReadOnly( m_indiP_ddspcSupervisor ) < 0 )
+            return -1;
+    }
     updateShadowINDI();
     return 0;
 }
 
 inline void loPredCtrlAcc::updateShadowINDI()
 {
-    DDSPC::ShadowStatus  standard, assisted;
-    DDSPC::ShadowRecord  validity;
-    DDSPC::ShadowMode    selected      = DDSPC::ShadowMode::Standard;
-    DDSPC::InputReason   inputReason   = DDSPC::InputReason::UnverifiedContract;
-    DDSPC::InputEvidence inputEvidence = DDSPC::InputEvidence::Unverified;
-    { //mutex scope
+    DDSPC::ShadowPipelineStatus pipeline;
+    bool                        pipelineConfigured = false;
+    DDSPC::ShadowStatus         standard, assisted;
+    DDSPC::ShadowRecord         validity;
+    DDSPC::ShadowMode           selected      = DDSPC::ShadowMode::Standard;
+    DDSPC::InputReason          inputReason   = DDSPC::InputReason::UnverifiedContract;
+    DDSPC::InputEvidence        inputEvidence = DDSPC::InputEvidence::Unverified;
+    { // mutex scope
         std::lock_guard<std::mutex> guard( m_shadowMutex );
         if( m_shadowController )
         {
@@ -1276,11 +1467,48 @@ inline void loPredCtrlAcc::updateShadowINDI()
             validity = m_shadowController->validity();
             selected = m_shadowController->selected();
         }
+        if( m_shadowPipeline )
+        {
+            pipelineConfigured = true;
+            pipeline           = m_shadowPipeline->status();
+            inputReason        = pipeline.m_inputReason;
+            inputEvidence      = m_shadowPipeline->evidence();
+        }
         if( m_shadowInputs )
         {
             inputReason   = m_shadowInputs->reason();
             inputEvidence = m_shadowInputs->evidence();
         }
+    }
+    if( m_shadowPipelineEnabled )
+    {
+        updatesIfChanged<double>(
+            m_indiP_ddspcPipeline,
+            { "configured",
+              "candidate_valid",
+              "common_valid",
+              "qualified_streak",
+              "decisions",
+              "fallbacks",
+              "recoveries",
+              "index",
+              "feature_age_us" },
+            { double( pipelineConfigured ),
+              double( pipeline.m_candidateValid ),
+              double( pipeline.m_commonValid ),
+              double( pipeline.m_validStreak ),
+              double( pipeline.m_decisions ),
+              double( pipeline.m_fallbacks ),
+              double( pipeline.m_recoveries ),
+              double( pipeline.m_index ),
+              pipeline.m_featureNs >= 0 ? double( pipeline.m_originNs - pipeline.m_featureNs ) * .001 : -1.0 } );
+        updatesIfChanged<std::string>(
+            m_indiP_ddspcSupervisor,
+            { "requested", "effective", "reason", "feature_reason" },
+            { m_shadowRequested,
+              pipeline.m_candidateValid ? DDSPC::policy_mode( pipeline.m_effective ) : "unavailable",
+              pipeline.m_reason,
+              DDSPC::feature_reason( pipeline.m_featureReason ) } );
     }
     const bool isStandard = selected == DDSPC::ShadowMode::Standard;
     const bool ready      = isStandard ? standard.m_ready : assisted.m_ready;
@@ -1375,7 +1603,7 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc, m_indiP_ddspcMode )( const pcf::Ind
         }
     }
     valid = valid && onCount == 1;
-    { //mutex scope
+    { // mutex scope
         std::lock_guard<std::mutex> guard( m_shadowMutex );
         valid = valid && m_shadowController && m_shadowController->select( requested );
     }
@@ -1395,7 +1623,7 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc, m_indiP_ddspcTrain )( const pcf::In
         valid            = valid && ( entry.first == "standard" || entry.first == "accel_assisted" ) &&
                            ( value == pcf::IndiElement::On || value == pcf::IndiElement::Off );
     }
-    { //mutex scope
+    { // mutex scope
         std::lock_guard<std::mutex> guard( m_shadowMutex );
         valid = valid && bool( m_shadowController );
         if( valid )
@@ -1415,6 +1643,8 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc, m_indiP_ddspcTrain )( const pcf::In
 
 inline int loPredCtrlAcc::appStartup()
 {
+    if( m_shadowPipelineEnabled && ( !m_shadowMode || !m_shadowPipelineConfigValid ) )
+        return log<software_error, -1>( { __FILE__, __LINE__, "Shared pipeline startup requires shadow=true." } );
 #ifdef DDSPC_SHADOW_ONLY
     if( !m_shadowMode )
         return log<software_error, -1>( { __FILE__, __LINE__, "Shadow-only build refuses legacy startup." } );
@@ -1616,6 +1846,13 @@ inline int loPredCtrlAcc::appLogic()
 
 inline int loPredCtrlAcc::appShutdown()
 {
+    if( m_shadowMode )
+    { // mutex scope
+        std::lock_guard<std::mutex> guard( m_shadowMutex );
+        m_shadowStopping = true;
+        if( m_shadowPipeline )
+            m_shadowPipeline->invalidate();
+    }
     if( m_adcReader )
     {
         m_adcReader->stop();
@@ -1637,8 +1874,9 @@ inline int loPredCtrlAcc::appShutdown()
         delete m_controller;
 
     if( m_shadowMode )
-    { //mutex scope
+    { // mutex scope
         std::lock_guard<std::mutex> guard( m_shadowMutex );
+        m_shadowPipeline.reset();
         m_shadowInputs.reset();
         m_shadowController.reset();
     }
@@ -1654,8 +1892,9 @@ inline int loPredCtrlAcc::allocate( const dev::shmimT &dummy )
     m_modevalHeight = shmimMonitorT::m_height;
     if( m_shadowMode )
     {
-        { //mutex scope
+        { // mutex scope
             std::lock_guard<std::mutex> guard( m_shadowMutex );
+            m_shadowPipeline.reset();
             m_shadowInputs.reset(); // Reconnection/shape changes require a newly verified source session.
             if( m_shadowController )
                 m_shadowController->invalidate( DDSPC::ShadowRecord{} );
@@ -1663,7 +1902,7 @@ inline int loPredCtrlAcc::allocate( const dev::shmimT &dummy )
         if( shmimMonitorT::m_dataType != _DATATYPE_FLOAT || m_modevalHeight != 1 ||
             m_modevalWidth < static_cast<uint32_t>( m_num_modes ) )
             return -1;
-        { //mutex scope
+        { // mutex scope
             std::lock_guard<std::mutex> guard( m_shadowMutex );
             if( m_shadowController )
             {
@@ -1889,8 +2128,9 @@ inline int loPredCtrlAcc::processImage( void *curr_src, const dev::shmimT &dummy
                 validity.m_wfsValid = validity.m_wfsValid && std::isfinite( values[mode] );
         }
         // This callback has no established applied-command or exposure-timing contract.
-        { //mutex scope
+        { // mutex scope
             std::lock_guard<std::mutex> guard( m_shadowMutex );
+            m_shadowPipeline.reset();
             m_shadowInputs.reset(); // This raw callback still lacks a validated exposure/application contract.
             if( m_shadowController )
                 m_shadowController->invalidate( validity );
@@ -2008,7 +2248,7 @@ inline int loPredCtrlAcc::processImage( void *curr_src, const dev::shmimT &dummy
         accelSample.setZero();
 
         bool haveAccel = false;
-        { //mutex scope
+        { // mutex scope
             std::lock_guard<std::mutex> guard( m_accelMutex );
             if( m_haveAccelSample && m_latestAccelSample.rows() == m_accelChannels && m_latestAccelSample.cols() == 1 )
             {
@@ -2102,6 +2342,9 @@ inline int loPredCtrlAcc::processImage( void *curr_src, const dev::shmimT &dummy
 
 inline int loPredCtrlAcc::configureAcquisition()
 {
+#ifdef DDSPC_SHADOW_ONLY
+    return -1; // Unconditional commissioning-build inhibition, including invalid runtime state.
+#endif
     if( m_shadowMode )
         return -1;
     frameGrabberT::m_width    = m_modevalWidth;
@@ -2118,6 +2361,9 @@ inline float loPredCtrlAcc::fps()
 
 inline int loPredCtrlAcc::startAcquisition()
 {
+#ifdef DDSPC_SHADOW_ONLY
+    return -1; // Unconditional commissioning-build inhibition, including invalid runtime state.
+#endif
     if( m_shadowMode )
         return -1;
     return 0;
@@ -2125,6 +2371,9 @@ inline int loPredCtrlAcc::startAcquisition()
 
 inline int loPredCtrlAcc::acquireAndCheckValid()
 {
+#ifdef DDSPC_SHADOW_ONLY
+    return 1; // Unconditional commissioning-build inhibition, including invalid runtime state.
+#endif
     if( m_shadowMode )
         return 1;
     timespec ts;
@@ -2157,6 +2406,9 @@ inline int loPredCtrlAcc::acquireAndCheckValid()
 
 inline int loPredCtrlAcc::loadImageIntoStream( void *dest )
 {
+#ifdef DDSPC_SHADOW_ONLY
+    return -1; // Unconditional commissioning-build inhibition, including invalid runtime state.
+#endif
     if( m_shadowMode )
         return -1;
     memcpy( dest, m_fullCommand.data(), m_fullCommand.rows() * frameGrabberT::m_typeSize );
@@ -2466,13 +2718,15 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc, m_indiP_resetToggle )( const pcf::I
             return 0;
         if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On )
         {
-            { //mutex scope
+            { // mutex scope
                 std::lock_guard<std::mutex> guard( m_shadowMutex );
                 if( m_shadowController )
                 {
                     m_shadowController->reset( DDSPC::ShadowMode::Standard );
                     m_shadowController->reset( DDSPC::ShadowMode::AccelAssisted );
                     m_shadowController->invalidate( DDSPC::ShadowRecord{} );
+                    if( m_shadowPipeline )
+                        m_shadowPipeline->invalidate();
                     if( m_shadowInputs )
                         m_shadowInputs->invalidate();
                 }

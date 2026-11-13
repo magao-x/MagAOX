@@ -1,14 +1,11 @@
 /** \file ddspc_adc_test.cpp
- * \brief ADC calibration, bounded timestamp retention and actual worker recovery against an offline API double.
+ * \brief Standalone actual ADC calibration, timestamp retention and gap recovery without native transport.
  * \ingroup loPredCtrlAcc_unit_test
  */
 #include "../../../tests/testXWC.hpp"
-#include "../adc_reader.hpp"
-#include "adc_transport_fixture.hpp"
-#include <chrono>
+#include "../adc_input.hpp"
 #include <cmath>
 #include <limits>
-#include <thread>
 #include <stdexcept>
 
 /// \cond ADC_CAPTURE_FIXTURE
@@ -70,21 +67,6 @@ void AdcFixture::publish( std::uint64_t counter, std::int64_t acquired, std::arr
     m_clock                    = { acquired + 10000010000LL, acquired + 10000, 10 };
 }
 
-/// Wait at most one second for an actual offline worker's state; never opens a native stream.
-template <typename Predicate>
-bool await_adc( Predicate predicate /**< [in] Thread-safe diagnostic predicate. */ )
-{
-    const auto end = std::chrono::steady_clock::now() + std::chrono::seconds( 1 );
-    while( std::chrono::steady_clock::now() < end )
-    {
-        if( predicate() )
-        {
-            return true;
-        }
-        std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
-    }
-    return false;
-}
 } // namespace
 /// \endcond
 
@@ -332,6 +314,87 @@ TEST_CASE( "ADC capture recovers source restarts without joining old timestamp h
     REQUIRE( capture.status().m_state == DDSPC::AdcState::ClockFault );
 }
 
+/** \brief Invalid metadata is rejected before payload access and corrected metadata permits recovery. */
+TEST_CASE( "ADC rejects invalid layouts without reading a payload and recovers on a valid frame",
+           "[loPredCtrlAcc][adc]" )
+{
+    for( int fault = 0; fault < 7; ++fault )
+    {
+        DDSPC::AdcCapture capture( DDSPC::AdcConfig{} );
+        capture.attached( 1, 1 );
+        AdcFixture source;
+        source.publish( 1, 1000000 );
+        const auto correct = source.m_header;
+        if( fault == 0 )
+        {
+            source.m_header.m_axes = 1;
+        }
+        if( fault == 1 )
+        {
+            source.m_header.m_axes = 4;
+        }
+        if( fault == 2 )
+        {
+            source.m_header.m_height = 2;
+        }
+        if( fault == 3 )
+        {
+            source.m_header.m_depth = 0;
+        }
+        if( fault == 4 )
+        {
+            source.m_header.m_index = source.m_header.m_depth;
+        }
+        if( fault == 5 )
+        {
+            source.m_header.m_uint16 = false;
+        }
+        if( fault == 6 )
+        {
+            source.m_header.m_cpu = false;
+        }
+        REQUIRE( capture.drain( source ) == 0 );
+        REQUIRE( source.m_reads == 0 );
+        REQUIRE_FALSE( capture.status().m_valid );
+        source.m_header = correct;
+        REQUIRE( capture.drain( source ) == 1 );
+        REQUIRE( capture.status().m_valid );
+    }
+}
+
+/** \brief Configurable endpoint rejection and an invalid-to-valid sequence do not retain contaminated history. */
+TEST_CASE( "ADC rail policy and invalid calibration are independent per channel", "[loPredCtrlAcc][adc]" )
+{
+    DDSPC::AdcConfig config;
+    config.m_rejectRails = false;
+    DDSPC::AdcCapture capture( config );
+    capture.attached( 1, 1 );
+    AdcFixture source;
+    source.publish( 1, 1000000, { 0, 4095 } );
+    REQUIRE( capture.drain( source ) == 1 );
+    REQUIRE( capture.status().m_latest.m_acceleration[0] == Approx( -2048 * .0083799 / 1.02 ) );
+    REQUIRE( capture.status().m_latest.m_acceleration[1] == Approx( 2047 * .0083799 / 1.02 ) );
+    source.publish( 2, 1125000, { 5000, 2048 } );
+    REQUIRE( capture.drain( source ) == 0 );
+    REQUIRE( capture.samples().empty() );
+    source.publish( 3, 1250000, { 2048, 2048 } );
+    REQUIRE( capture.drain( source ) == 1 );
+    REQUIRE( capture.samples().size() == 1 );
+    REQUIRE( capture.samples()[0].m_acceleration == std::array<double, 2>{ 0, 0 } );
+    for( int axis = 0; axis < 2; ++axis )
+    {
+        auto bad         = config;
+        bad.m_zero[axis] = std::numeric_limits<double>::quiet_NaN();
+        REQUIRE_THROWS_AS( DDSPC::AdcCapture( bad ), std::invalid_argument );
+        bad                       = config;
+        bad.m_voltsPerCount[axis] = std::numeric_limits<double>::infinity();
+        REQUIRE_THROWS_AS( DDSPC::AdcCapture( bad ), std::invalid_argument );
+        bad                  = config;
+        bad.m_polarity[axis] = 0;
+        REQUIRE_THROWS_AS( DDSPC::AdcCapture( bad ), std::invalid_argument );
+    }
+}
+
 /** \brief Counter rollback is measured against stable publication evidence even while a bounded batch trails it. */
 TEST_CASE( "ADC capture detects producer rollback while draining retained history", "[loPredCtrlAcc][adc]" )
 {
@@ -360,68 +423,6 @@ TEST_CASE( "ADC capture detects producer rollback while draining retained histor
     REQUIRE( capture.status().m_restarts == 1 );
     REQUIRE( capture.samples().size() == 1 );
     REQUIRE( capture.samples().front().m_frame.m_counter == 7 );
-}
-
-/** \brief The actual worker attaches, copies raw metadata, disconnects, reconnects and releases its reader slot. */
-TEST_CASE( "Native ADC worker recovery uses an offline ImageStreamIO API double", "[loPredCtrlAcc][adc][threaded]" )
-{
-    // clang-format off
-#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
-    DDSPC::AdcReader::start;
-    DDSPC::AdcReader::stop;
-    DDSPC::AdcReader::samples;
-#endif
-    // clang-format on
-    for( const auto depth : { 1u, 4u } )
-    {
-        AdcTransportFixture fixture( "ddspc-adc-worker", depth );
-        DDSPC::AdcConfig    config;
-        config.m_stream   = "ddspc-adc-worker";
-        config.m_maxAgeNs = 2000000000;
-        DDSPC::AdcReader reader( config );
-        reader.start();
-        REQUIRE( await_adc( [&] { return reader.status().m_valid; } ) );
-        REQUIRE( reader.samples().size() == 1 );
-        REQUIRE( reader.status().m_latest.m_frame.m_raw[0] == 2049 );
-        REQUIRE( reader.status().m_latest.m_acceleration[1] == Approx( -.0083799 / 1.02 ) );
-        REQUIRE( reader.status().m_source.m_depth == depth );
-        fixture.disconnect();
-        REQUIRE( await_adc( [&] { return reader.status().m_state == DDSPC::AdcState::Disconnected; } ) );
-        REQUIRE( reader.samples().empty() );
-        fixture.reconnect();
-        REQUIRE( await_adc( [&] { return reader.status().m_valid && reader.status().m_generation == 2; } ) );
-        fixture.replace();
-        REQUIRE( await_adc( [&] { return reader.status().m_valid && reader.status().m_generation == 3; } ) );
-        REQUIRE( reader.samples().size() == 1 );
-        reader.stop();
-        REQUIRE( fixture.reader() == 0 );
-        REQUIRE_FALSE( reader.status().m_valid );
-        REQUIRE( reader.samples().empty() );
-        reader.stop();
-    }
-}
-
-/** \brief An absent input never creates native resources or prevents the worker from joining at shutdown. */
-TEST_CASE( "Native ADC worker stops cleanly while its input is absent", "[loPredCtrlAcc][adc][threaded]" )
-{
-    // clang-format off
-#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
-    DDSPC::AdcReader::start;
-    DDSPC::AdcReader::stop;
-#endif
-    // clang-format on
-    DDSPC::AdcConfig config;
-    config.m_stream = "ddspc-adc-absent"; // Unregistered API-double name; never the native namespace.
-    DDSPC::AdcReader reader( config );
-    reader.start();
-    std::this_thread::sleep_for( std::chrono::milliseconds( 20 ) );
-    const auto before = std::chrono::steady_clock::now();
-    reader.stop();
-    REQUIRE( std::chrono::steady_clock::now() - before < std::chrono::seconds( 1 ) );
-    REQUIRE( reader.status().m_state == DDSPC::AdcState::Disconnected );
-    REQUIRE( reader.status().m_generation == 0 );
-    REQUIRE_FALSE( reader.status().m_valid );
-    REQUIRE( reader.samples().empty() );
 }
 
 } // namespace libXWCTest::loPredCtrlAccTest

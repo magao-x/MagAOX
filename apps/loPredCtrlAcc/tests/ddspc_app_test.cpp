@@ -627,6 +627,44 @@ TEST_CASE( "Handoff operational dimensions train finite shadow-only proposals of
 
 namespace libXWCTest::loPredCtrlAccTest
 {
+/** \brief Shadow publication entrypoints leave caller memory untouched and send diagnostics only as this instance. */
+TEST_CASE( "Shadow application rejects acquisition and confines captured INDI updates", "[loPredCtrlAcc][app][safety]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::loPredCtrlAcc::configureAcquisition;
+    MagAOX::app::loPredCtrlAcc::startAcquisition;
+    MagAOX::app::loPredCtrlAcc::acquireAndCheckValid;
+    MagAOX::app::loPredCtrlAcc::loadImageIntoStream;
+#endif
+    // clang-format on
+    MagAOX::app::loPredCtrlAcc_test app;
+    app.configure( true );
+    REQUIRE( app.appStartup() == 0 );
+    float sentinel[2]{ 731, -419 };
+    REQUIRE( app.configureAcquisition() == -1 );
+    REQUIRE( app.startAcquisition() == -1 );
+    REQUIRE( app.acquireAndCheckValid() == 1 );
+    REQUIRE( app.loadImageIntoStream( sentinel ) == -1 );
+    REQUIRE( sentinel[0] == 731 );
+    REQUIRE( sentinel[1] == -419 );
+    app.unverifiedWfs();
+    app.rejectLegacyControls();
+    REQUIRE( app.appLogic() == 0 );
+    REQUIRE_FALSE( app.m_driver.m_sent.empty() );
+    for( const auto &property : app.m_driver.m_sent )
+    {
+        REQUIRE( property.getDevice() == "loPredCtrlAcc-test" );
+        REQUIRE( property.getDevice() != "camwfs" );
+        REQUIRE( property.getDevice() != "loPredCtrl" );
+    }
+    REQUIRE( app.m_indiP_adc.getPerm() == pcf::IndiProperty::ReadOnly );
+    REQUIRE( app.m_indiP_adcSource.getPerm() == pcf::IndiProperty::ReadOnly );
+    app.requireInhibited();
+    REQUIRE( app.appShutdown() == 0 );
+    app.requireInhibited();
+}
+
 /** \brief Native ADC capture remains separate from model validity, training and every output helper. */
 TEST_CASE( "Stage 1 ADC observation preserves shadow output and training inhibition", "[loPredCtrlAcc][app][adc]" )
 {

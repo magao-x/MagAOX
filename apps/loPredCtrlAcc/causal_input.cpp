@@ -284,13 +284,15 @@ void CausalInputBuilder::drain( InputBuildResult &result, std::int64_t nowNs )
             origin.m_decisionNs - origin.m_accelAcquiredNs <= m_config.m_maxAgeNs;
         if( paired.m_record.m_accelValid )
             paired.m_record.m_acceleration = origin.m_acceleration;
-        paired.m_origin       = origin.m_stamp;
-        paired.m_target       = target.m_stamp;
-        paired.m_command      = command.m_stamp;
-        paired.m_evidence     = command.m_evidence;
-        paired.m_decisionNs   = origin.m_decisionNs;
-        paired.m_inputStartNs = start;
-        paired.m_inputEndNs   = end;
+        paired.m_accelGeneration = origin.m_accelGeneration;
+        paired.m_accelSegment    = origin.m_accelSegment;
+        paired.m_origin          = origin.m_stamp;
+        paired.m_target          = target.m_stamp;
+        paired.m_command         = command.m_stamp;
+        paired.m_evidence        = command.m_evidence;
+        paired.m_decisionNs      = origin.m_decisionNs;
+        paired.m_inputStartNs    = start;
+        paired.m_inputEndNs      = end;
         result.m_records.push_back( std::move( paired ) );
         result.m_reason = InputReason::Ready;
         m_wfs.pop_front();

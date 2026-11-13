@@ -1,0 +1,55 @@
+# Dedicated offline tests. No producer/worktree, server, native stream library, installation or service commands.
+APP_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/..)
+TEST_DIR := $(APP_DIR)/tests
+ROOT_DIR := $(abspath $(APP_DIR)/../..)
+BUILD_DIR ?= $(APP_DIR)/build/adc-ddspc-offline
+REPORT_DIR ?= $(APP_DIR)/build/adc-ddspc-comparison
+.DEFAULT_GOAL := check
+CXX = c++
+CXXFLAGS ?= -O2 -g
+override CXXFLAGS += -std=c++20 -Wall -Wextra -fno-fast-math
+NUMERIC_INCLUDES = $(shell pkg-config --cflags-only-I eigen3 mxlib)
+CORE := $(APP_DIR)/ar_controller.cpp $(APP_DIR)/recursive_least_squares.cpp $(APP_DIR)/qrd_rls.cpp \
+        $(APP_DIR)/utils.cpp $(APP_DIR)/adc_features.cpp $(APP_DIR)/shadow_policy.cpp $(APP_DIR)/shadow_pipeline.cpp $(APP_DIR)/shadow_controller.cpp $(APP_DIR)/causal_input.cpp
+ADC := $(APP_DIR)/adc_input.cpp $(TEST_DIR)/offline_adc.cpp
+SIM := $(ADC) $(CORE) $(TEST_DIR)/offline_control.cpp $(TEST_DIR)/offline_ddspc.cpp
+ADC_TEST := $(BUILD_DIR)/adc_test
+SIM_TEST := $(BUILD_DIR)/adc_ddspc_test
+SIM_CLI := $(BUILD_DIR)/adc_ddspc_sim
+HEADERS := $(wildcard $(APP_DIR)/*.hpp $(TEST_DIR)/*offline*.hpp) $(TEST_DIR)/offline_adc.hpp
+
+.PHONY: all check check-adc check-simulation check-safety check-config check-cli simulation comparison
+all: $(ADC_TEST) $(SIM_TEST) $(SIM_CLI)
+check: check-adc check-simulation check-safety check-config check-cli
+check-adc: $(ADC_TEST)
+	$(ADC_TEST)
+check-simulation: $(SIM_TEST)
+	$(SIM_TEST)
+check-safety:
+	$(MAKE) -f $(TEST_DIR)/Makefile.offline BUILD_DIR=$(abspath $(BUILD_DIR))/safety \
+	  CXX=$(CXX) CXXFLAGS='$(CXXFLAGS)' DDSPC_MINIMAL_APP_TESTS=yes check-shadow-only
+check-config:
+	python3 -m unittest discover -s $(TEST_DIR) -p handoff_config_test.py
+check-cli: $(SIM_CLI)
+	DDSPC_OFFLINE_CLI=$(abspath $(SIM_CLI)) python3 -m unittest discover -s $(TEST_DIR) -p offline_cli_test.py
+simulation: $(SIM_CLI)
+	$(SIM_CLI)
+comparison: $(SIM_CLI)
+	python3 $(TEST_DIR)/offline_fallback_matrix.py --binary $(abspath $(SIM_CLI)) --output $(REPORT_DIR)
+
+# ADC-only tests require the compiler/bundled Catch header and standard library; no Eigen/mxlib or native stubs.
+$(ADC_TEST): $(ROOT_DIR)/tests/testMain.cpp $(ADC) $(TEST_DIR)/ddspc_adc_test.cpp \
+             $(TEST_DIR)/ddspc_adc_synthetic_test.cpp $(HEADERS)
+	@mkdir -p $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(filter %.cpp,$^) $(LDFLAGS) -o $@
+
+# Numeric core needs existing Eigen/mxlib headers, without linking either native MagAO-X or an INDI driver.
+$(SIM_TEST): $(ROOT_DIR)/tests/testMain.cpp $(SIM) $(TEST_DIR)/ddspc_adc_ddspc_test.cpp \
+             $(TEST_DIR)/ddspc_offline_control_test.cpp $(TEST_DIR)/ddspc_input_test.cpp $(HEADERS)
+	@mkdir -p $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(NUMERIC_INCLUDES) -DEIGEN_DONT_PARALLELIZE \
+	  -include $(TEST_DIR)/legacy_platform.hpp $(filter %.cpp,$^) $(LDFLAGS) -o $@
+$(SIM_CLI): $(SIM) $(TEST_DIR)/offline_ddspc_main.cpp $(HEADERS)
+	@mkdir -p $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(NUMERIC_INCLUDES) -DEIGEN_DONT_PARALLELIZE \
+	  -include $(TEST_DIR)/legacy_platform.hpp $(filter %.cpp,$^) $(LDFLAGS) -o $@

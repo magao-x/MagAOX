@@ -1,0 +1,13 @@
+# 2026-11-12 ASTR-LT-428.local, Apple LLVM 21.0.0, -O3 -fno-fast-math, Eigen 5.0.1 package
+# Offline actual-header replay with framework/transport doubles; not native scheduling or telescope evidence.
+# Offline virtual cadence; shared in-place components: zero allocation requests at2,3,10 modes
+# Frame work sums actual callbacks between WFS origins; includes synchronous identification.
+profile,wfs_hz,adc_hz,component,n,p50_us,p95_us,p99_us,p999_us,max_us,over_500us,valid_candidates,assisted_candidates,eigen_requests,cpp_requests,standard_updates,assisted_updates,standard_conditional_rmse,assisted_conditional_rmse
+small_h4_a3,2000,8000,adc,39198,0.042,0.084,0.084,0.208,0.875,0,9974,9730,59995,10007,9993,9992,0.03878292611,0.03164381034
+small_h4_a3,2000,8000,wfs,9800,14.708,15.541,16.875,21.417,71.333,0,9974,9730,59995,10007,9993,9992,0.03878292611,0.03164381034
+small_h4_a3,2000,8000,confirmed_input,9799,0.042,0.083,0.084,0.25,0.75,0,9974,9730,59995,10007,9993,9992,0.03878292611,0.03164381034
+small_h4_a3,2000,8000,frame_total,9800,14.958,15.792,17.166,22.167,72.624,0,9974,9730,59995,10007,9993,9992,0.03878292611,0.03164381034
+example_h15_a5,2000,8000,adc,39198,0.042,0.084,0.084,0.291,2.333,0,9917,9507,59995,10007,9982,9981,0.03438888994,0.02963002636
+example_h15_a5,2000,8000,wfs,9800,102.583,104.75,109.708,147.708,442.5,0,9917,9507,59995,10007,9982,9981,0.03438888994,0.02963002636
+example_h15_a5,2000,8000,confirmed_input,9799,0.042,0.083,0.125,0.334,1.209,0,9917,9507,59995,10007,9982,9981,0.03438888994,0.02963002636
+example_h15_a5,2000,8000,frame_total,9800,102.834,105.042,110.125,147.959,442.709,0,9917,9507,59995,10007,9982,9981,0.03438888994,0.02963002636

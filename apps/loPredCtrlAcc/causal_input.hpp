@@ -156,6 +156,9 @@ struct TimedWfsRecord
     /// Physical acquisition and origin availability of optional features.
     std::int64_t m_accelAcquiredNs{ 0 }, m_accelAvailableNs{ 0 };
 
+    /// ADC source incarnation frozen with these optional origin features; zero denotes the older prebuilt seam.
+    std::uint64_t m_accelGeneration{ 0 }, m_accelSegment{ 0 };
+
     /// Optional feature builder's causal/freshness assertion, independently rechecked against the deadline.
     bool m_accelValid{ false };
 };
@@ -187,6 +190,9 @@ struct PairedInputRecord
 {
     /// Phase 1 record: u_i is the applied input affecting y_(i+1).
     ShadowRecord m_record;
+
+    /// ADC incarnation copied from the frozen origin, not sampled at later input confirmation.
+    std::uint64_t m_accelGeneration{ 0 }, m_accelSegment{ 0 };
 
     /// Immutable origin identity and deadline.
     InputStamp m_origin;

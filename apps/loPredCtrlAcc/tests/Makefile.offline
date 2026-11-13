@@ -15,7 +15,8 @@ CXXFLAGS ?= -O2 -g
 CXXFLAGS += -std=c++20 -Wall -Wextra -fno-fast-math
 SOURCES := $(ROOT_DIR)/tests/testMain.cpp $(APP_DIR)/ar_controller.cpp \
            $(APP_DIR)/recursive_least_squares.cpp $(APP_DIR)/qrd_rls.cpp $(APP_DIR)/utils.cpp \
-           $(APP_DIR)/shadow_controller.cpp $(APP_DIR)/causal_input.cpp $(APP_DIR)/adc_input.cpp $(APP_DIR)/adc_reader.cpp $(TEST_DIR)/adc_transport_fixture.cpp \
+           $(APP_DIR)/adc_features.cpp $(APP_DIR)/shadow_policy.cpp $(APP_DIR)/shadow_pipeline.cpp $(APP_DIR)/shadow_controller.cpp $(APP_DIR)/causal_input.cpp $(APP_DIR)/adc_input.cpp $(APP_DIR)/adc_reader.cpp $(TEST_DIR)/adc_transport_fixture.cpp \
+           $(TEST_DIR)/shadow_replay.cpp $(TEST_DIR)/offline_adc.cpp $(TEST_DIR)/offline_control.cpp $(TEST_DIR)/offline_ddspc.cpp \
            $(TEST_DIR)/comparison.cpp $(TEST_DIR)/vibration.cpp $(TEST_DIR)/stability.cpp \
            $(TEST_DIR)/phase6_adapter.cpp $(TEST_DIR)/operational_law.cpp \
            $(TEST_DIR)/phase7_adapter.cpp $(TEST_DIR)/async_shadow.cpp \
@@ -54,6 +55,11 @@ PHASE8_ROOT := $(abspath $(BUILD_DIR))/phase8
 PHASE8_STAMP := $(PHASE8_ROOT)/snapshot.stamp
 PHASE8_OBJECTS := $(addprefix $(BUILD_DIR)/phase8_,$(addsuffix .o,$(PHASE6_NAMES)))
 OBJECTS += $(PHASE8_OBJECTS) $(BUILD_DIR)/phase8_async_shadow.o
+
+# The dedicated offline safety build needs only its explicit app sources, not historical replay oracles.
+ifeq ($(DDSPC_MINIMAL_APP_TESTS),yes)
+OBJECTS := $(addprefix $(BUILD_DIR)/,$(notdir $(SOURCES:.cpp=.o)))
+endif
 
 $(PHASE8_STAMP): $(TEST_DIR)/prepare_phase8.py $(TEST_DIR)/prepare_phase6.py
 	python3 $(TEST_DIR)/prepare_phase8.py --output $(PHASE8_ROOT)
@@ -95,9 +101,9 @@ check: check-build-tool verify-legacy $(TARGET)
 # This separate binary uses the same stream-free lifecycle doubles; it is never a native app launch.
 SHADOW_TEST_SOURCES := $(ROOT_DIR)/tests/testMain.cpp $(APP_DIR)/ar_controller.cpp \
                       $(APP_DIR)/recursive_least_squares.cpp $(APP_DIR)/qrd_rls.cpp $(APP_DIR)/utils.cpp \
-                      $(APP_DIR)/shadow_controller.cpp $(APP_DIR)/causal_input.cpp $(APP_DIR)/adc_input.cpp $(APP_DIR)/adc_reader.cpp $(TEST_DIR)/adc_transport_fixture.cpp \
+                      $(APP_DIR)/adc_features.cpp $(APP_DIR)/shadow_policy.cpp $(APP_DIR)/shadow_pipeline.cpp $(APP_DIR)/shadow_controller.cpp $(APP_DIR)/causal_input.cpp $(APP_DIR)/adc_input.cpp $(APP_DIR)/adc_reader.cpp $(TEST_DIR)/adc_transport_fixture.cpp \
                       $(ROOT_DIR)/INDI/libcommon/IndiProperty.cpp $(ROOT_DIR)/INDI/libcommon/IndiElement.cpp \
-                      $(ROOT_DIR)/INDI/libcommon/TimeStamp.cpp $(TEST_DIR)/ddspc_app_test.cpp
+                      $(ROOT_DIR)/INDI/libcommon/TimeStamp.cpp $(TEST_DIR)/ddspc_app_test.cpp $(TEST_DIR)/ddspc_shadow_pipeline_test.cpp $(TEST_DIR)/shadow_replay.cpp $(TEST_DIR)/offline_adc.cpp
 check-shadow-only:
 	$(MAKE) -f $(TEST_DIR)/Makefile.offline BUILD_DIR=$(abspath $(BUILD_DIR))/shadow-only CXX=$(CXX) \
 	  CXXFLAGS='$(CXXFLAGS) -DDDSPC_SHADOW_ONLY' SOURCES='$(SHADOW_TEST_SOURCES)' \
@@ -128,7 +134,7 @@ LEGACY_FAST_FLAGS ?= -O3 -g -std=c++20 -Wall -Wextra -ffast-math
 check-legacy-fast:
 	$(MAKE) -f $(TEST_DIR)/Makefile.offline BUILD_DIR=$(abspath $(BUILD_DIR))/legacy-fast \
 	  CXXFLAGS='$(LEGACY_FAST_FLAGS)' \
-	  SOURCES='$(ROOT_DIR)/tests/testMain.cpp $(APP_DIR)/ar_controller.cpp $(APP_DIR)/recursive_least_squares.cpp $(APP_DIR)/qrd_rls.cpp $(APP_DIR)/utils.cpp $(APP_DIR)/shadow_controller.cpp $(APP_DIR)/causal_input.cpp $(APP_DIR)/adc_input.cpp $(APP_DIR)/adc_reader.cpp $(TEST_DIR)/adc_transport_fixture.cpp $(ROOT_DIR)/INDI/libcommon/IndiProperty.cpp $(ROOT_DIR)/INDI/libcommon/IndiElement.cpp $(ROOT_DIR)/INDI/libcommon/TimeStamp.cpp $(TEST_DIR)/ddspc_legacy_test.cpp $(TEST_DIR)/ddspc_qr_compatibility_test.cpp' check
+	  SOURCES='$(ROOT_DIR)/tests/testMain.cpp $(APP_DIR)/ar_controller.cpp $(APP_DIR)/recursive_least_squares.cpp $(APP_DIR)/qrd_rls.cpp $(APP_DIR)/utils.cpp $(APP_DIR)/adc_features.cpp $(APP_DIR)/shadow_policy.cpp $(APP_DIR)/shadow_pipeline.cpp $(APP_DIR)/shadow_controller.cpp $(APP_DIR)/causal_input.cpp $(APP_DIR)/adc_input.cpp $(APP_DIR)/adc_reader.cpp $(TEST_DIR)/adc_transport_fixture.cpp $(ROOT_DIR)/INDI/libcommon/IndiProperty.cpp $(ROOT_DIR)/INDI/libcommon/IndiElement.cpp $(ROOT_DIR)/INDI/libcommon/TimeStamp.cpp $(TEST_DIR)/ddspc_legacy_test.cpp $(TEST_DIR)/ddspc_qr_compatibility_test.cpp' check
 
 # Historical demonstration programs contain no assertions; run them as separate, explicitly labeled smoke checks.
 DEMO_NAMES ?= testRLS testPredCtrl
@@ -164,5 +170,6 @@ check-adc:
 	$(CXX) -I$(TEST_DIR)/native_stubs $(DEPENDENCY_INCLUDES) $(CXXFLAGS) \
 	  $(ROOT_DIR)/tests/testMain.cpp $(APP_DIR)/adc_input.cpp $(APP_DIR)/adc_reader.cpp \
 	  $(TEST_DIR)/adc_transport_fixture.cpp $(TEST_DIR)/ddspc_adc_test.cpp \
+	  $(TEST_DIR)/ddspc_adc_transport_test.cpp $(TEST_DIR)/offline_adc.cpp $(TEST_DIR)/ddspc_adc_synthetic_test.cpp \
 	  $(LDFLAGS) -pthread -o $(BUILD_DIR)/ddspc_adc_test
 	$(BUILD_DIR)/ddspc_adc_test '[adc]'
