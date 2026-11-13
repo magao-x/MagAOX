@@ -41,7 +41,8 @@ class ReplayApplication : public MagAOX::app::loPredCtrlAcc, public ReplaySink
     bool bad_runtime_outputs_rejected();
 
     /// Enable adaptation through the real independent-training callback; preparation leaves training disabled.
-    void train();
+    void train( bool standard = true /**< [in] Enable the WFS-only learner. */,
+                bool assisted = true /**< [in] Enable the independent assisted learner. */ );
 
     /// Feed actual decoder output into the application's new shared pipeline.
     bool adc( const DDSPC::ShadowAdcRecord &record /**< [in] Decoded evidence. */,
@@ -139,11 +140,11 @@ inline bool ReplayApplication::bad_runtime_outputs_rejected()
 #endif
 }
 
-inline void ReplayApplication::train()
+inline void ReplayApplication::train( bool standard, bool assisted )
 {
     auto request = m_indiP_ddspcTrain;
-    request["standard"].setSwitchState( pcf::IndiElement::On );
-    request["accel_assisted"].setSwitchState( pcf::IndiElement::On );
+    request["standard"].setSwitchState( standard ? pcf::IndiElement::On : pcf::IndiElement::Off );
+    request["accel_assisted"].setSwitchState( assisted ? pcf::IndiElement::On : pcf::IndiElement::Off );
     if( newCallBack_m_indiP_ddspcTrain( request ) != 0 )
         throw std::runtime_error( "Replay training request failed" );
 }

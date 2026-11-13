@@ -110,6 +110,19 @@ check-shadow-only:
 	  $(abspath $(BUILD_DIR))/shadow-only/ddspc_offline_test
 	$(abspath $(BUILD_DIR))/shadow-only/ddspc_offline_test '[loPredCtrlAcc][app]~[legacy]'
 
+# Optional passive replay includes only the simulator's platform-independent numerical header, read-only.
+# No accelSim executable, native stream, output helper or acquisition hardware is linked or started.
+MAGAOX_REPO ?= $(abspath $(ROOT_DIR)/../MagAOX)
+.PHONY: check-confirmed-replay
+check-confirmed-replay:
+	@test -f '$(MAGAOX_REPO)/apps/accelSim/accelSimModel.hpp'
+	$(MAKE) -f $(TEST_DIR)/Makefile.offline BUILD_DIR=$(abspath $(BUILD_DIR))/confirmed-replay CXX=$(CXX) \
+	  DDSPC_MINIMAL_APP_TESTS=yes \
+	  CXXFLAGS='$(CXXFLAGS) -DDDSPC_SHADOW_ONLY -I$(MAGAOX_REPO)/apps/accelSim' \
+	  SOURCES='$(SHADOW_TEST_SOURCES) $(TEST_DIR)/adc_forwarder.cpp $(TEST_DIR)/confirmed_replay.cpp $(TEST_DIR)/confirmed_replay_test.cpp' \
+	  $(abspath $(BUILD_DIR))/confirmed-replay/ddspc_offline_test
+	$(abspath $(BUILD_DIR))/confirmed-replay/ddspc_offline_test '[confirmed-replay]'
+
 check-build-tool:
 	python3 -m unittest discover -s $(TEST_DIR) -p native_linux_build_test.py
 

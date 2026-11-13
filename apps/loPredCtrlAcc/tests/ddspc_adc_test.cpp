@@ -425,4 +425,100 @@ TEST_CASE( "ADC capture detects producer rollback while draining retained histor
     REQUIRE( capture.samples().front().m_frame.m_counter == 7 );
 }
 
+/** \brief Cursor copies are bounded, chronological, non-consuming, and cannot consume future receipts. */
+TEST_CASE( "ADC cursor forwards retained samples once with an explicit availability cutoff", "[loPredCtrlAcc][adc]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    DDSPC::AdcCapture::copy_after;
+#endif
+    // clang-format on
+    DDSPC::AdcCapture capture( DDSPC::AdcConfig{} );
+    capture.attached( 7, 8 );
+    AdcFixture                      source;
+    std::array<DDSPC::AdcSample, 2> storage;
+    auto                            batch = capture.copy_after( {}, storage, 2000000 );
+    REQUIRE_FALSE( batch.m_next.m_bound );
+    for( std::uint64_t n = 100; n < 104; ++n )
+    {
+        source.publish( n, 1000000 + ( n - 100 ) * 125000 );
+        REQUIRE( capture.drain( source ) == 1 );
+    }
+    batch = capture.copy_after( batch.m_next, storage, 1009999 );
+    REQUIRE( batch.m_count == 0 );
+    REQUIRE( batch.m_missing == 0 ); // Initial attachment cannot measure older history.
+    REQUIRE( batch.m_next.m_counter == 99 );
+    batch = capture.copy_after( batch.m_next, storage, 1200000 );
+    REQUIRE( batch.m_count == 2 );
+    REQUIRE_FALSE( batch.m_more ); // Next retained sample exists, but was not yet available at this cutoff.
+    REQUIRE( storage[0].m_frame.m_counter == 100 );
+    REQUIRE( storage[1].m_frame.m_counter == 101 );
+    REQUIRE( storage[0].m_acquiredNs == 1000000 );
+    REQUIRE( storage[0].m_frame.m_acquiredRealNs == 10001000000LL );
+    REQUIRE( storage[0].m_generation == batch.m_status.m_generation );
+    REQUIRE( batch.m_status.m_device == 7 );
+    REQUIRE( batch.m_status.m_inode == 8 );
+    batch = capture.copy_after( batch.m_next, storage, 2000000 );
+    REQUIRE( batch.m_count == 2 );
+    REQUIRE( storage[0].m_frame.m_counter == 102 );
+    REQUIRE( storage[1].m_frame.m_counter == 103 );
+    REQUIRE( capture.copy_after( batch.m_next, storage, 2000000 ).m_count == 0 );
+    REQUIRE( capture.samples().size() == 4 ); // A consumer cursor does not consume capture retention.
+    REQUIRE( capture.copy_after( {}, storage, 2000000 ).m_more );
+    REQUIRE_THROWS_AS( capture.copy_after( {}, {}, 2000000 ), std::invalid_argument );
+    REQUIRE_THROWS_AS( capture.copy_after( {}, storage, -1 ), std::invalid_argument );
+}
+
+/** \brief Cursor loss is exact only within a known incarnation; invalid samples and restarts never join histories. */
+TEST_CASE( "ADC cursor reports overwrite gaps invalidation and source identity changes", "[loPredCtrlAcc][adc]" )
+{
+    DDSPC::AdcConfig c;
+    c.m_capacity = 3;
+    DDSPC::AdcCapture capture( c );
+    capture.attached( 1, 2 );
+    AdcFixture                      source;
+    std::array<DDSPC::AdcSample, 2> storage;
+    source.publish( 10, 1000000 );
+    REQUIRE( capture.drain( source ) == 1 );
+    auto batch = capture.copy_after( {}, storage, 2000000 );
+    for( std::uint64_t n = 11; n <= 15; ++n )
+    {
+        source.publish( n, 1000000 + ( n - 10 ) * 125000 );
+        REQUIRE( capture.drain( source ) == 1 );
+    }
+    batch = capture.copy_after( batch.m_next, storage, 2000000 );
+    REQUIRE( batch.m_missing == 2 ); // 11,12 evicted; 13,14 copied; 15 still pending.
+    REQUIRE( batch.m_discontinuity );
+    REQUIRE( batch.m_more );
+    REQUIRE( storage[0].m_frame.m_counter == 13 );
+    batch = capture.copy_after( batch.m_next, storage, 2000000 );
+    REQUIRE( batch.m_count == 1 );
+    REQUIRE( batch.m_missing == 0 );
+    REQUIRE_FALSE( batch.m_discontinuity );
+    source.publish( 16, 1750000, { 0, 2048 } );
+    REQUIRE( capture.drain( source ) == 0 );
+    batch = capture.copy_after( batch.m_next, storage, 2000000 );
+    REQUIRE( batch.m_discontinuity );
+    REQUIRE( batch.m_count == 0 );
+    source.m_header.m_depth = 1;   // The producer retained no17; its older slot must not masquerade as valid history.
+    source.publish( 18, 2000000 ); // Rejected16 and missing17 both unavailable; do not add to capture loss totals.
+    REQUIRE( capture.drain( source ) == 1 );
+    batch = capture.copy_after( batch.m_next, storage, 3000000 );
+    REQUIRE( batch.m_missing == 2 );
+    REQUIRE( batch.m_discontinuity );
+    REQUIRE( storage[0].m_frame.m_counter == 18 );
+    capture.disconnected();
+    batch = capture.copy_after( batch.m_next, storage, 3000000 );
+    REQUIRE( batch.m_discontinuity );
+    capture.attached( 1, 9 );
+    source.publish( 1, 3000000 );
+    REQUIRE( capture.drain( source ) == 1 );
+    batch = capture.copy_after( batch.m_next, storage, 4000000 );
+    REQUIRE( batch.m_missing == 0 ); // New source has no comparable counter baseline.
+    REQUIRE( batch.m_count == 1 );
+    REQUIRE( batch.m_status.m_inode == 9 );
+    REQUIRE( storage[0].m_generation == 2 );
+    REQUIRE( storage[0].m_frame.m_counter == 1 );
+}
+
 } // namespace libXWCTest::loPredCtrlAccTest

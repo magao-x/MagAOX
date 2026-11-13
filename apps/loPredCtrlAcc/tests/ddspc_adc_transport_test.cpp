@@ -6,6 +6,7 @@
 #include "../adc_reader.hpp"
 #include "adc_transport_fixture.hpp"
 #include <chrono>
+#include <limits>
 #include <thread>
 
 namespace libXWCTest::loPredCtrlAccTest
@@ -39,6 +40,7 @@ TEST_CASE( "Native ADC worker recovery uses an offline ImageStreamIO API double"
     DDSPC::AdcReader::start;
     DDSPC::AdcReader::stop;
     DDSPC::AdcReader::samples;
+    DDSPC::AdcReader::copy_after;
 #endif
     // clang-format on
     for( const auto depth : { 1u, 4u } )
@@ -54,6 +56,12 @@ TEST_CASE( "Native ADC worker recovery uses an offline ImageStreamIO API double"
         REQUIRE( reader.status().m_latest.m_frame.m_raw[0] == 2049 );
         REQUIRE( reader.status().m_latest.m_acceleration[1] == Approx( -.0083799 / 1.02 ) );
         REQUIRE( reader.status().m_source.m_depth == depth );
+        std::array<DDSPC::AdcSample, 2> storage;
+        auto batch = reader.copy_after( {}, storage, std::numeric_limits<std::int64_t>::max() );
+        REQUIRE( batch.m_count == 1 );
+        REQUIRE( storage[0].m_frame.m_raw == reader.samples()[0].m_frame.m_raw );
+        REQUIRE( batch.m_status.m_source.m_depth == depth );
+        REQUIRE( reader.copy_after( batch.m_next, storage, std::numeric_limits<std::int64_t>::max() ).m_count == 0 );
         fixture.disconnect();
         REQUIRE( await_adc( [&] { return reader.status().m_state == DDSPC::AdcState::Disconnected; } ) );
         REQUIRE( reader.samples().empty() );
@@ -62,6 +70,11 @@ TEST_CASE( "Native ADC worker recovery uses an offline ImageStreamIO API double"
         fixture.replace();
         REQUIRE( await_adc( [&] { return reader.status().m_valid && reader.status().m_generation == 3; } ) );
         REQUIRE( reader.samples().size() == 1 );
+        batch = reader.copy_after( batch.m_next, storage, std::numeric_limits<std::int64_t>::max() );
+        REQUIRE( batch.m_discontinuity );
+        REQUIRE( batch.m_count == 1 );
+        REQUIRE( batch.m_missing == 0 );
+        REQUIRE( storage[0].m_generation == 3 );
         reader.stop();
         REQUIRE( fixture.reader() == 0 );
         REQUIRE_FALSE( reader.status().m_valid );

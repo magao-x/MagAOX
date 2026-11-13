@@ -345,4 +345,54 @@ std::vector<AdcSample> AdcCapture::samples() const
     return result;
 }
 
+AdcBatch
+AdcCapture::copy_after( const AdcCursor &cursor, std::span<AdcSample> output, std::int64_t availableByNs ) const
+{
+    if( output.empty() || availableByNs < 0 )
+        throw std::invalid_argument( "Invalid bounded ADC copy storage or time" );
+    AdcBatch result;
+    result.m_status        = m_status;
+    const bool same        = cursor.m_generation == m_status.m_generation && cursor.m_device == m_status.m_device &&
+                             cursor.m_inode == m_status.m_inode;
+    result.m_next          = { m_status.m_device,
+                               m_status.m_inode,
+                               m_status.m_generation,
+                               m_status.m_segment,
+                               same ? cursor.m_counter : 0,
+                               same && cursor.m_bound };
+    result.m_discontinuity = cursor.m_bound && ( !same || cursor.m_segment != m_status.m_segment );
+    if( !m_status.m_retained )
+        return result;
+    const auto head  = ( m_next + m_ring.size() - m_status.m_retained ) % m_ring.size();
+    const auto first = m_ring[head].m_frame.m_counter;
+    if( !result.m_next.m_bound )
+    {
+        result.m_next.m_counter = first - 1; // Initial attachment does not claim completeness before retained history.
+        result.m_next.m_bound   = true;
+    }
+    if( result.m_next.m_counter < first - 1 )
+    {
+        result.m_missing        = first - 1 - result.m_next.m_counter;
+        result.m_discontinuity  = true;
+        result.m_next.m_counter = first - 1;
+    }
+    const auto offset = result.m_next.m_counter >= first
+                            ? std::min<std::uint64_t>( m_status.m_retained, result.m_next.m_counter - first + 1 )
+                            : 0;
+    for( std::size_t n = offset; n < m_status.m_retained; ++n )
+    {
+        const auto &sample = m_ring[( head + n ) % m_ring.size()];
+        if( sample.m_receivedNs > availableByNs )
+            break; // A later receipt remains pending, never silently consumed at an earlier origin.
+        if( result.m_count == output.size() )
+        {
+            result.m_more = true;
+            break;
+        }
+        output[result.m_count++] = sample;
+        result.m_next.m_counter  = sample.m_frame.m_counter;
+    }
+    return result;
+}
+
 } // namespace DDSPC

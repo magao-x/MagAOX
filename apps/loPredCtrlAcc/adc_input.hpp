@@ -7,6 +7,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -118,6 +119,25 @@ struct AdcStatus
     double      m_rateHz{ 0 }, m_ageUs{ -1 }; ///< Rate from acquisition timestamps, and monotonic age.
 };
 
+/// Caller-owned position in one capture source; a new identity never inherits an old counter baseline.
+struct AdcCursor
+{
+    std::uint64_t m_device{ 0 }, m_inode{ 0 }, m_generation{ 0 }; ///< Backing identity and reader source incarnation.
+    std::uint64_t m_segment{ 0 }, m_counter{ 0 }; ///< Last observed segment and last copied/established counter.
+    bool m_bound{ false }; ///< A retained source counter established the baseline; pre-attachment loss is unknown.
+};
+
+/// Coherent bounded-copy evidence; missing counters overlap capture loss and must not be added to it.
+struct AdcBatch
+{
+    AdcStatus     m_status; ///< Health, source layout and lifetime counters observed under the same capture lock.
+    AdcCursor     m_next;   ///< Position to retain after processing this owned batch, including an empty discontinuity.
+    std::size_t   m_count{ 0 };   ///< Samples copied oldest first into caller-owned storage.
+    std::uint64_t m_missing{ 0 }; ///< Unavailable counters since a known baseline in the same source incarnation.
+    bool          m_discontinuity{ false }; ///< Source/segment changed or established history was evicted.
+    bool          m_more{ false };          ///< More eligible retained samples remain after the bounded output fills.
+};
+
 /// Single-owner bounded capture processor; callers serialize access, with no native or hardware operations.
 class AdcCapture
 {
@@ -162,6 +182,12 @@ class AdcCapture
 
     /// Copy retained samples oldest first, outside acquisition; no pointers into the source or ring escape.
     std::vector<AdcSample> samples() const;
+
+    /// Copy only new eligible samples into bounded storage without allocating or changing capture/decoding state.
+    AdcBatch
+    copy_after( const AdcCursor     &cursor /**< [in] Previous consumer position; default starts at oldest retained. */,
+                std::span<AdcSample> output /**< [out] Nonempty caller-owned bounded sample storage. */,
+                std::int64_t availableByNs /**< [in] Latest permitted decoder receipt in the common clock. */ ) const;
 };
 
 } // namespace DDSPC
