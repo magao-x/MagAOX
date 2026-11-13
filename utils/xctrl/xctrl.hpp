@@ -299,6 +299,10 @@ std::string dropIn( const unitNames                &units,  /**< [in] the role's
  */
 std::string registryEntry( const appEntry &app /**< [in] the app */ );
 
+/// Whether the file at path holds exactly content
+bool sameContent( const std::string &path, /**< [in] the file */
+                  const std::string &content /**< [in] the expected contents */ );
+
 /// Write content to path if it differs from what is there, creating directories as needed
 /**
  * \returns 1 if written, 0 if unchanged, -1 on error with a message on stderr
@@ -366,8 +370,9 @@ class xCtrl
     int         m_lines{ -1 };          ///< log lines for peek and inspect, -1 for their defaults
     std::string m_prog{ "xctrl" };      ///< the name we were run as
     bool        m_color{ false };       ///< color the output, when it is a terminal and NO_COLOR is not set
-    std::string m_verb;                 ///< the command
-    std::vector<std::string> m_names;   ///< the app names given
+    bool m_privileged{ false }; ///< may change the systemd configuration: root, or a user who can write the proclist
+    std::string              m_verb;  ///< the command
+    std::vector<std::string> m_names; ///< the app names given
 
     ///@}
 
@@ -523,7 +528,9 @@ class xCtrl
 
     /// Bring registered apps' drop-ins up to date with their .conf before they start
     /** Regenerates each app's drop-in, and reloads systemd if one changed, if systemd still has older unit
-     * files loaded, or if the watchdog systemd has for an app differs from its configuration.
+     * files loaded, or if the watchdog systemd has for an app differs from its configuration.  For a user who may not
+     * change the systemd configuration (m_privileged false), nothing is written or reloaded: apps whose settings are
+     * out of date are only reported, and start with their registered settings.
      *
      * \returns 0 if all went well, else non-zero
      */
@@ -1129,19 +1136,23 @@ inline std::string registryEntry( const appEntry &app )
            "\nprefix=" + app.prefix + "\n";
 }
 
+inline bool sameContent( const std::string &path, const std::string &content )
+{
+    std::ifstream f( path );
+    if( !f )
+    {
+        return false;
+    }
+    std::stringstream ss;
+    ss << f.rdbuf();
+    return ss.str() == content;
+}
+
 inline int writeIfChanged( const std::string &path, const std::string &content, mode_t mode )
 {
+    if( sameContent( path, content ) )
     {
-        std::ifstream f( path );
-        if( f )
-        {
-            std::stringstream ss;
-            ss << f.rdbuf();
-            if( ss.str() == content )
-            {
-                return 0;
-            }
-        }
+        return 0;
     }
 
     std::error_code ec;
@@ -1411,7 +1422,8 @@ inline int xCtrl::settlePrivileges()
     }
 
     // access() checks the real user, the one who ran us, not our setuid root
-    if( admin.count( m_verb ) && getuid() != 0 && access( proclistPath().c_str(), W_OK ) != 0 )
+    m_privileged = getuid() == 0 || access( proclistPath().c_str(), W_OK ) == 0;
+    if( admin.count( m_verb ) && !m_privileged )
     {
         if( errno == ENOENT )
         {
@@ -1972,8 +1984,9 @@ inline int xCtrl::refreshApps( const std::vector<appEntry> &apps )
     }
     auto props = showProps( names );
 
-    bool reload = false;
-    int  rc     = 0;
+    bool                     reload = false;
+    int                      rc     = 0;
+    std::vector<std::string> outdated;
     for( const auto &a : apps )
     {
         directiveMap             dirs;
@@ -1988,10 +2001,18 @@ inline int xCtrl::refreshApps( const std::vector<appEntry> &apps )
             continue;
         }
 
-        int w = writeFile( unitDir() + "/" + u.instance( a.name ) + ".d/override.conf",
-                           dropIn( u, a, m_top + "/bin", dirs, server, tunnels ),
-                           0644 );
-        rc |= w < 0;
+        std::string path    = unitDir() + "/" + u.instance( a.name ) + ".d/override.conf";
+        std::string content = dropIn( u, a, m_top + "/bin", dirs, server, tunnels );
+        int         w       = 0;
+        if( m_privileged )
+        {
+            w = writeFile( path, content, 0644 );
+            rc |= w < 0;
+        }
+        else if( !sameContent( path, content ) )
+        {
+            w = 1; // out of date, but ours is not to write
+        }
 
         // the watchdog systemd has now, against the one configured; systemd fixes it when the app starts, so it
         // only means something for an app that is running, a stopped one shows infinity or its last run's
@@ -2002,6 +2023,14 @@ inline int xCtrl::refreshApps( const std::vector<appEntry> &apps )
         double have     = running && p.count( "WatchdogUSec" ) ? timespanSeconds( p["WatchdogUSec"] ) : -1;
         bool   stale    = p.count( "NeedDaemonReload" ) && p["NeedDaemonReload"] == "yes";
         bool   wdChange = have >= 0 && want >= 0 && std::abs( have - want ) > 1e-3;
+        if( !m_privileged )
+        {
+            if( w == 1 || stale || wdChange )
+            {
+                outdated.push_back( a.name );
+            }
+            continue;
+        }
         if( wdChange )
         {
             std::cout << m_prog << ": " << a.name << ": watchdog " << p["WatchdogUSec"] << " -> " << want
@@ -2017,6 +2046,18 @@ inline int xCtrl::refreshApps( const std::vector<appEntry> &apps )
     if( reload )
     {
         rc |= systemctl( { "daemon-reload" } ) != 0;
+    }
+
+    for( const auto &n : outdated )
+    {
+        std::cerr << m_prog << ": warning: " << n << ": " << n
+                  << ".conf changed since it was registered; it runs with its registered settings\n";
+    }
+    if( !outdated.empty() )
+    {
+        std::cerr << m_prog << ": warning: to use the new settings, a privileged user (root, or one who can write "
+                  << proclistPath() << ") runs " << m_prog << " restart, or " << m_prog
+                  << " start or startup for stopped apps; or stop the apps and run sudo " << m_prog << " register\n";
     }
     return rc;
 }
@@ -3055,6 +3096,9 @@ inline int xCtrl::main( int argc, char **argv )
         std::cerr << m_prog << ": unknown command " << m_verb << "; try --help\n";
         return 2;
     }
+
+    // what we create under /etc stays readable by everyone, whatever the caller's umask
+    umask( 022 );
 
     // decided before settlePrivileges() clears the environment
     m_color = isatty( STDOUT_FILENO ) && getenv( "NO_COLOR" ) == nullptr;

@@ -152,7 +152,17 @@ environment.
 
 `start`, `startup` and `restart` first bring each app's drop-in up to date with its `.conf`: if its settings
 changed, e.g. a new `[systemd] watchdogSec`, or the watchdog systemd has differs from it, the drop-in is rewritten and
-systemd reloaded before the app starts. An app already running keeps its settings until it is restarted.
+systemd reloaded before the app starts. An app already running keeps its settings until it is restarted. Only a
+privileged user's `start`, `startup` or `restart` does that. For anyone else, such as `xsup`, the app starts with its
+registered settings, and `xctrl` warns that its `.conf` changed and how to apply it:
+
+```
+xctrl: warning: maths_CO4: maths_CO4.conf changed since it was registered; it runs with its registered settings
+xctrl: warning: to use the new settings, a privileged user (root, or one who can write /opt/MagAOX/config/proclist_CO4.txt) runs xctrl restart, or xctrl start or startup for stopped apps; or stop the apps and run sudo xctrl register
+```
+
+The generated files under `/etc/systemd/system` and `/etc/magaox-<role>` are readable by everyone (files 0644,
+directories 0755, whatever the caller's umask), so any user can compare them.
 
 Stopping and disabling are separate: `stop`/`shutdown` never change what starts automatically, and
 `enable`/`disable` never start or stop anything. The proclist always says what starts automatically: `enable`,
