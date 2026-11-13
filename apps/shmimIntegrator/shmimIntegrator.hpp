@@ -141,7 +141,7 @@ class shmimIntegrator : public MagAOXApp<true>,
     bool m_fileSaver{ false };
     ///@}
 
-    /// Committed input geometry and converter, imported only by its monitor.
+    /// Committed input geometry and converters, imported only by its monitor.
     struct imageInfo
     {
         uint32_t m_width{ 0 }; ///< Committed width.
@@ -150,7 +150,13 @@ class shmimIntegrator : public MagAOXApp<true>,
 
         size_t m_pixels{ 0 }; ///< Validated pixel count; zero means unavailable.
 
-        realT ( *m_pixget )( void *, size_t ){ nullptr }; ///< Converter for this allocation.
+        size_t m_bytes{ 0 }; ///< Size of one frame in bytes, in the stream's data type.
+
+        void ( *m_setFrame )( realT *, const void *, size_t ){
+            nullptr }; ///< Converts a frame of this allocation's type, replacing the destination.
+
+        void ( *m_addFrame )( realT *, const void *, size_t ){
+            nullptr }; ///< Converts a frame of this allocation's type, adding it to the destination.
     };
 
     /// One optional dark image, owned under m_imageMutex.
@@ -172,6 +178,12 @@ class shmimIntegrator : public MagAOXApp<true>,
     std::condition_variable m_imageCondition;
 
     imageInfo m_source; ///< Committed source descriptor; never synthesized from a saved file.
+
+    /// Private copy of the current source frame.
+    /** The source is read with a single memcpy and then converted from this copy, so a slow conversion does not hold
+     * the source's cache lines while its writer, e.g. a camera feeding the AO loop, writes the next frame.
+     */
+    std::vector<char> m_staged;
 
     bool m_sourceFailed{ false }; ///< Invalid source allocation also gates saved-image publication.
 
@@ -678,11 +690,12 @@ inline shmimIntegrator::imageInfo shmimIntegrator::describeImage( uint32_t width
     // eigenCube uses signed int products internally, including in resize().
     if( width == 0 || height == 0 || width > std::numeric_limits<int>::max() / height )
         return {};
-    auto   converter = getPixPointer<realT>( type );
-    size_t pixels    = size_t( width ) * height;
-    if( !converter || pixels > size_t( std::numeric_limits<ptrdiff_t>::max() ) / sizeof( realT ) )
+    auto   setFrame = getPixFramePointer<realT, false>( type );
+    auto   addFrame = getPixFramePointer<realT, true>( type );
+    size_t pixels   = size_t( width ) * height;
+    if( !setFrame || !addFrame || pixels > size_t( std::numeric_limits<ptrdiff_t>::max() ) / sizeof( realT ) )
         return {};
-    return { width, height, pixels, converter };
+    return { width, height, pixels, pixels * ImageStreamIO_typesize( type ), setFrame, addFrame };
 }
 
 inline void shmimIntegrator::requestReconfigure()
@@ -709,6 +722,9 @@ inline int shmimIntegrator::allocate( const dev::shmimT &tag )
     m_sourceFailed = !m_source.m_pixels;
     if( m_sourceFailed )
         return log<software_error, -1>( { __FILE__, __LINE__, "invalid source geometry or datatype" } );
+
+    m_staged.resize( m_source.m_bytes );
+
     return 0;
 }
 
@@ -723,22 +739,23 @@ inline int shmimIntegrator::processImage( void *source, const dev::shmimT &tag )
     if( !source )
         return -1;
 
+    // Read the source once and convert from the private copy, see m_staged
+    memcpy( m_staged.data(), source, m_staged.size() );
+    source = m_staged.data();
+
     if( m_activeUpdate == 0 )
     {
         if( m_updated || m_inFlight )
             return 0;
         if( m_sinceUpdate == 0 )
             m_avgImage.setZero();
-        for( size_t n = 0; n < m_source.m_pixels; ++n )
-            m_avgImage.data()[n] += m_source.m_pixget( source, n );
+        m_source.m_addFrame( m_avgImage.data(), source, m_source.m_pixels );
         if( ++m_sinceUpdate < m_activeAverage )
             return 0;
     }
     else
     {
-        realT *data = m_accumImages.image( m_currImage ).data();
-        for( size_t n = 0; n < m_source.m_pixels; ++n )
-            data[n] = m_source.m_pixget( source, n );
+        m_source.m_setFrame( m_accumImages.image( m_currImage ).data(), source, m_source.m_pixels );
         m_currImage = ( m_currImage + 1 ) % m_activeAverage;
         if( m_nprocessed < m_activeAverage )
             ++m_nprocessed;
@@ -825,8 +842,7 @@ inline int shmimIntegrator::processDark( darkFrame &dark, void *source )
         return 0;
     if( !source || !dark.m_info.m_pixels )
         return -1;
-    for( size_t n = 0; n < dark.m_info.m_pixels; ++n )
-        dark.m_image.data()[n] = dark.m_info.m_pixget( source, n );
+    dark.m_info.m_setFrame( dark.m_image.data(), source, dark.m_info.m_pixels );
     dark.m_set = true;
     return 0;
 }

@@ -94,6 +94,54 @@ also shows the L3 churn from the output buffer was not a significant cost.
 Lesson: on this machine, avoid bursty writes out of the loop's CCD from
 co-located helpers.
 
+## camwfs-avg (shmimIntegrator) on the camera stream
+
+With cbuff on `spare42`, running `camwfs-avg` added another ~8-10 us. It reads
+`camwfs` directly, which ocam2KCtrl (FIFO 90, CPU 33, L3 32-39) writes as a
+single buffer (`circBuffLength=1`, 120x120 uint16 in bin2) that acquWFS (CPU
+45) reads. camwfs-sw and camwfs-dark were off for all of these tests.
+
+- Semaphores of `camwfs`: acquWFS is sem[0]; camwfs-avg sem[5], unpinned FIFO 2
+  in the `system` cpuset. Here the writer and acquWFS are on different CPUs, so
+  acquWFS runs as soon as it is posted and later wakes are off its path.
+- Wake only (unpinned `chrt -f 2 shmimInfo -n camwfs`, sem[9]): 1-2 us or less.
+  Not being on a cpuset is not the cause.
+- camwfs-avg moved onto CPU 32 (the writer's L3 domain, `cpuset=camwfs_sw`
+  for its monitor and framegrabber): no change. Not cache traffic between
+  CCDs, unlike cbuff.
+- `camwfs-avg.start` off (wake still happens, `processImage` returns before
+  reading the pixels): loop back to ~144 us. The cost is the per-frame pixel
+  work.
+
+The per-frame work converted each pixel through a function pointer
+(`getPix` via `m_pixget`), which cannot be inlined or vectorized, reading the
+camera buffer for the whole conversion. Benchmark on a workstation, 120x120
+uint16 with opaque function pointers as in the app: ~17.5 us per frame.
+
+### Change on this branch
+
+- `getPixFrame` / `getPixFramePointer` in `libMagAOX/ImageStreamIO/pixaccess.hpp`:
+  convert a whole frame of a known type, setting or adding to the destination,
+  in a loop the compiler can vectorize. Selected once per allocation, like
+  `getPixPointer`.
+- `shmimIntegrator` copies each source frame into a private buffer with one
+  `memcpy` (`m_staged`), then converts from the copy with the frame converters,
+  for the source, moving-average history and darks. The source buffer is now
+  read for well under a microsecond instead of ~17 us.
+- Benchmark after the change: ~1.75 us per frame including the copy.
+
+Verification: `ImageStreamIO_test` (replacing an empty template) checks the
+frame converters against `getPix` for all ten types, setting and adding, with
+no writes past the frame (782 assertions); `shmimIntegrator_test` 20 cases,
+2003 assertions pass; app builds.
+
+To measure on the RTC: loop time with camwfs-avg running, against ~144 us.
+
+Placement plan (user): a `camwfs` cbuff in the writer's L3 domain, with
+camwfs-avg, camwfs-sw and camwfs-dark reading its output instead of `camwfs`.
+The integrator change still helps every shmimIntegrator instance (all
+`*-avg`/`*-dark` apps, which use block averaging).
+
 ## To do on this branch
 
 1. Spin polling in `dev::shmimMonitor`: optional mode that polls `md->cnt0`
@@ -115,6 +163,14 @@ co-located helpers.
    Same design points.
 
 ## Follow-ups (not on this branch)
+
+- shmimIntegrator moving-average mode (`nUpdate` > 0, not used in any deployed
+  config) re-sums the whole history on every update, O(nAverage x pixels).
+  A running sum would make it O(pixels).
+- `lowfs-refsub-avg` reads `aol2_imWFS2` directly; check whether that loop
+  has the same exposure.
+- `libMagAOX/ImageStreamIO/ImageStruct.hpp` uses `std::numeric_limits`
+  without including `<limits>`; it compiles only because of include order.
 
 - Permanent core for `aol1_imWFS2_cbuff` in the 40-47 L3 domain:
   `rtSetup/RTC/make_cpusets` reserves `spare42` to keep the BMC SDK worker out

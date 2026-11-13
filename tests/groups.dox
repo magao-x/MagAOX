@@ -234,6 +234,11 @@ report from their counters and then returns nonzero. An HTML report therefore do
  * \ingroup unit_test
  */
 
+/** \defgroup pixaccess_unit_test ImageStreamIO Pixel Access Unit Tests
+ * \brief Conversion of ImageStreamIO pixel data to other types.
+ * \ingroup unit_test
+ */
+
 /** \defgroup spscQueue_unit_test Bounded SPSC Queue Unit Tests
  * \brief Ownership, wrap and full-queue behavior of the shared diagnostic queue.
  * \ingroup common_unit_test
