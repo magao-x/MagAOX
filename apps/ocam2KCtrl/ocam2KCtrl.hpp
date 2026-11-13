@@ -158,6 +158,15 @@ class ocam2KCtrl : public MagAOXApp<>,
     mx::improc::eigenImage<int16_t>
         m_digitalBinWork; ///< Scratch image holding the full descrambled frame before digital binning.
 
+    /// Descramble into m_descrambled and copy it to the stream in one sequential pass, instead of into the stream.
+    /** The descramble's scattered stores into the stream stall on every line which a reader of the stream still holds
+     * from the previous frame.  Descrambling into a private buffer and copying it sequentially lets those lines be
+     * taken back in parallel.  Not used with digital binning, which already descrambles into m_digitalBinWork.
+     */
+    bool m_stagedDescramble{ false };
+
+    std::vector<int16_t> m_descrambled; ///< Private descramble output when m_stagedDescramble is set, sized on use.
+
     std::string m_syncDevice{
         "fxngensync" }; ///< INDI device providing the external sync frequency when synchro mode is enabled.
     std::string m_syncFreqProp{ "C1freq" }; ///< INDI property name reporting the external sync frequency.
@@ -608,6 +617,17 @@ inline void ocam2KCtrl::setupConfig()
                 "string",
                 "The path of the OCAM descramble file, relative to MagAOX/config." );
 
+    config.add( "camera.stagedDescramble",
+                "",
+                "camera.stagedDescramble",
+                argType::Required,
+                "camera",
+                "stagedDescramble",
+                false,
+                "bool",
+                "If true, descramble into a private buffer and copy it to the stream in one sequential pass, so that "
+                "readers of the stream slow the descramble less.  Default is false." );
+
     dev::frameGrabber<ocam2KCtrl>::setupConfig( config );
 
     config.add( "framegrabber.syncShmimName",
@@ -658,6 +678,7 @@ inline int ocam2KCtrl::loadConfigImpl()
     dev::edtCamera<ocam2KCtrl>::loadConfig( config );
 
     config( m_ocamDescrambleFile, "camera.ocamDescrambleFile" );
+    config( m_stagedDescramble, "camera.stagedDescramble" );
 
     if( m_maxEMGain < 1 )
     {
@@ -2452,7 +2473,21 @@ inline int ocam2KCtrl::loadImageIntoStream( void *dest )
 {
     unsigned currImageNumber = 0;
 
-    if( !m_digitalBin )
+    if( !m_digitalBin && m_stagedDescramble )
+    {
+        size_t npix = static_cast<size_t>( m_width ) * m_height;
+
+        if( m_descrambled.size() != npix )
+        {
+            m_descrambled.resize( npix );
+        }
+
+        ocam2_descramble(
+            m_ocam2_id, &currImageNumber, m_descrambled.data(), reinterpret_cast<int16_t *>( m_image_p ) );
+
+        memcpy( dest, m_descrambled.data(), npix * sizeof( int16_t ) );
+    }
+    else if( !m_digitalBin )
     {
         ocam2_descramble( m_ocam2_id,
                           &currImageNumber,

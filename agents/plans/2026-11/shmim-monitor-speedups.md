@@ -237,7 +237,32 @@ vs ~8 us on 26), but here a reader in the camera's L3 domain (32) still costs
 outside acquWFS's L3 domain (40-47), whereas the cheap cbuff placement was in
 it.
 
-Next measurements:
+Result: the camera's own acquisition-to-write time (camwfs `fg_timing`
+`delta_aw`, the "wma" time) rises by the same ~8-10 us when a reader reads the
+pixels. The cost is in the camera's write.
+
+ocam2KCtrl's `ocam2_descramble` (SDK) writes directly into the `camwfs`
+buffer. A descramble writes in the camera's readout order, so its stores are
+scattered over the frame. x86 stores commit in order, and a store to a line
+another core still holds stalls until the line is taken back, so with
+scattered stores those takebacks overlap poorly and each line held by a reader
+can cost close to a full round trip.
+
+Change: `camera.stagedDescramble` (bool, default false). When set and digital
+binning is off, `loadImageIntoStream` descrambles into a private buffer
+(`m_descrambled`, sized on first use), which stays in the camera core's cache,
+and copies it to the stream with one sequential `memcpy`, whose stores the
+hardware can pipeline. Digital binning already descrambles into
+`m_digitalBinWork`. Test: a new `ocam2KCtrl_test` section checks the
+descramble writes the private buffer and the destination receives the frame;
+all ocam2KCtrl suites pass. The app needs the EDT SDK and was not built on the
+workstation.
+
+To measure on the RTC: `delta_aw` and the loop time with camwfs-avg reading,
+`stagedDescramble` on vs off. It may also lower the baseline, since acquWFS
+already holds the frame's lines from the previous frame.
+
+Earlier next measurements:
 1. camwfs `fg_timing.delta_aw` (mean acquisition-to-write time, includes the
    descramble) with camwfs-avg reading vs not. If it rises ~8-10 us, the cost
    is in the camera's write.
