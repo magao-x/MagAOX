@@ -205,24 +205,21 @@ Follow-up results:
 - `spin=true` on `spare27` (CPU 27, a different CCD from the camera on 33):
   free, loop at 144 us. Cross-CCD reading is ruled out.
 
-Remaining difference is timing. A spinning reader on a dedicated core sees the
-frame within ~100 ns and finishes its ~1 us copy before acquWFS, woken through
-the semaphore, starts running. A semaphore-woken reader reads while acquWFS
-processes the frame, and acquWFS's calibration (~67 us) may read the raw frame
-throughout, so a 30-50 us delay still overlaps it. The `system` spinner may be
-delayed by the shared, interrupted system cores. The mechanism by which a
-concurrent read costs acquWFS ~8 us is not known.
+- `readDelay` had already been tried at 100 us as well as 30-50 us: no
+  effect. At 100 us acquWFS's calibration (~67 us) is over, so a collision
+  with acquWFS's own read of the frame is unlikely.
 
-Next tests:
-1. Semaphore reader with `readDelay=150` (after acquWFS's calibration, well
-   before the next frame at ~276 us). Free means the cost is reading during
-   acquWFS's processing.
-2. `spin=true` on a dedicated core with `readDelay=20`. If the cost returns,
-   timing is confirmed.
+Summary: a reader that reads `camwfs` costs ~8 us when it is woken by the
+semaphore, whatever its CPU, CCD, idle states or read delay (0-100 us), and
+nothing when it spins on a dedicated core in either CCD. A semaphore waiter
+that does not read costs ~1-2 us. The mechanism is not identified. Localizing
+it would need per-process timing with the semaphore reader on vs. spinning,
+e.g. acquWFS, wfs2cmodeval, mfilt and mvalC2dm in `milk-procCTRL`, and camwfs's
+own acquisition-to-write time.
 
-Placement outcome so far: a `camwfs` reader spinning on a dedicated core in
-the camera's L3 domain is free. With the planned `camwfs` cbuff, that is one
-core in 32-39 running cbuff with `spin=true`, and camwfs-avg, -sw and -dark
+Placement outcome so far: a `camwfs` reader spinning on a dedicated core is
+free, in the camera's L3 domain or another. With the planned `camwfs` cbuff, that is one
+dedicated core running cbuff with `spin=true`, and camwfs-avg, -sw and -dark
 reading its output.
 
 Placement plan (user): a `camwfs` cbuff in the writer's L3 domain, with
