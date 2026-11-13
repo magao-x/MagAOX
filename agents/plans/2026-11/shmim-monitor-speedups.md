@@ -196,15 +196,29 @@ another CCD (0-23) and shares its core with SMT siblings, IRQs and
 housekeeping. Earlier, cbuff on `aol1_imWFS2` with the semaphore cost ~2 us on
 CPU 42 but ~8 us on CPU 26, which fits location better than sleeping.
 
+Follow-up results:
+
+- Semaphore reader on CPU 32 with deep C-states disabled for CPU 32: still
+  ~8 us. In RT mode sysMonitor `set_latency` already sets the performance
+  governor on all CPUs and holds `/dev/cpu_dma_latency` at 0, so no CPU uses
+  deep C-states. C-state exit is ruled out.
+- `spin=true` on `spare27` (CPU 27, a different CCD from the camera on 33):
+  free, loop at 144 us. Cross-CCD reading is ruled out.
+
+Remaining difference is timing. A spinning reader on a dedicated core sees the
+frame within ~100 ns and finishes its ~1 us copy before acquWFS, woken through
+the semaphore, starts running. A semaphore-woken reader reads while acquWFS
+processes the frame, and acquWFS's calibration (~67 us) may read the raw frame
+throughout, so a 30-50 us delay still overlaps it. The `system` spinner may be
+delayed by the shared, interrupted system cores. The mechanism by which a
+concurrent read costs acquWFS ~8 us is not known.
+
 Next tests:
-1. Semaphore reader on CPU 32 with deep C-states disabled for that CPU only
-   (`/sys/devices/system/cpu/cpu32/cpuidle/state*/disable`, or
-   `cpupower -c 32 idle-set -D <latency>`). If the cost goes, it is the
-   reader's C-state exit, and limiting C-states on reader cores is a fix that
-   does not need a busy core.
-2. `spin=true` on a dedicated core in another CCD (e.g. `spare27`, CPU 27).
-   If the cost returns, it is cross-CCD reading; if not, the system result was
-   about the shared, interrupted system cores.
+1. Semaphore reader with `readDelay=150` (after acquWFS's calibration, well
+   before the next frame at ~276 us). Free means the cost is reading during
+   acquWFS's processing.
+2. `spin=true` on a dedicated core with `readDelay=20`. If the cost returns,
+   timing is confirmed.
 
 Placement outcome so far: a `camwfs` reader spinning on a dedicated core in
 the camera's L3 domain is free. With the planned `camwfs` cbuff, that is one
