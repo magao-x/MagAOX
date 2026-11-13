@@ -1438,8 +1438,7 @@ inline int xCtrl::settlePrivileges()
         }
         std::cerr << m_prog << ": error: cannot " << what << " as user "
                   << ( pw ? pw->pw_name : std::to_string( getuid() ) ) << ": " << m_verb
-                  << " requires a privileged user to modify the proclist (" << proclistPath()
-                  << ") and the systemd configuration, e.g. sudo " << m_prog << " " << what << "\n";
+                  << " requires permissions or sudo\n";
         return -1;
     }
 
@@ -2051,13 +2050,12 @@ inline int xCtrl::refreshApps( const std::vector<appEntry> &apps )
     for( const auto &n : outdated )
     {
         std::cerr << m_prog << ": warning: " << n << ": " << n
-                  << ".conf changed since it was registered; it runs with its registered settings\n";
+                  << ".conf changed since it was registered; it will run with the registered settings\n";
     }
     if( !outdated.empty() )
     {
-        std::cerr << m_prog << ": warning: to use the new settings, a privileged user (root, or one who can write "
-                  << proclistPath() << ") runs " << m_prog << " restart, or " << m_prog
-                  << " start or startup for stopped apps; or stop the apps and run sudo " << m_prog << " register\n";
+        std::cerr << m_prog << ": warning: to update the registered settings in systemd, a privileged user  "
+                  << "must run the start command or update the settings via the register command.\n";
     }
     return rc;
 }
@@ -2366,7 +2364,7 @@ inline int xCtrl::cmdRegister()
     }
 
     std::cout << m_prog << ": role " << m_role << ": registered " << nauto << " app(s) for automatic startup ("
-              << newlyEnabled.size() << " new), " << apps.size() - nauto << " commented-out app(s) to start by hand";
+              << newlyEnabled.size() << " new), " << apps.size() - nauto << " app(s) with autostart disabled";
     if( !removed.empty() )
     {
         std::cout << "; deregistered, no longer in the proclist:";
@@ -2378,8 +2376,7 @@ inline int xCtrl::cmdRegister()
     std::cout << "\n";
     for( const auto &n : changed )
     {
-        std::cout << m_prog << ": " << n << ": settings changed, applied at its next start; " << m_prog << " restart "
-                  << n << " applies them now\n";
+        std::cout << m_prog << ": " << n << ": settings changed, applied at its next start or restart command\n";
     }
     for( const auto &w : warnings )
     {
