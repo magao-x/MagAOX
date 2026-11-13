@@ -36,6 +36,9 @@ drivers, never instrument hardware or instrument INDI tunnels.
   have predated that commit or been built from local edits, or restarting `acc000`
   may have cleared a bad runtime state. If the symptom returns, `indi_traffic.py`
   should name the device.
+- **2026-11-12: root cause found.** accelSim sends `false`/`true` as number
+  values, which crashes purepyindi2 clients. They reconnect every 2 s with a
+  catch-all `getProperties`. See "Root cause on the instrument".
 - **No routing loop is needed for this symptom.** One app that sends a named
   `getProperties` more often than every 2 s makes the source send a `def` each time,
   and that `def` reaches every all-device client on every server. That alone keeps
@@ -234,6 +237,54 @@ one server restarts while its peers are up. It is not the libc crash in
 `doc/incidents/2026-03-03-indiserver-segfault.md`. Stefan's branch fixes it with
 `DvrInfo::ready`, set after the write lock and checked in
 `q2Drivers`/`q2SnoopingDrivers`; it could be ported to dev on its own.
+
+## Root cause on the instrument: accelSim `dm_status` crashes purepyindi2 clients
+
+2026-11-12. The deployed indiserver fixes improved things. With `acc000`
+(`accelSim`) stopped, a clean restart of all three servers left `getINDI` working.
+Starting `acc000` reliably made the next `getINDI` run forever. Data:
+[indi_traffic_py_results_20261112_1400.txt](indiserver-chained-loop-files/indi_traffic_py_results_20261112_1400.txt).
+
+- On AOC, after an `isAOC` restart, every device on all three servers sent a full
+  def dump about every 2 s (hogopt 26 dumps in 27 s), plus named re-subscription
+  defs (`camwfs.fps` 322). On RTC, `acc000` alone was dumped every 2 s.
+  `acc000.fps` came three times per dump, because `acc000-cbuff` and `acc000-psds`
+  re-subscribe whenever they receive a device-wide request.
+- `accelSim::updateDMINDI` assigns `bool`s to the number elements
+  `dm_status.ready` and `dm_status.active`. pcf formats values with
+  `std::boolalpha`, so acc000 sends `<oneNumber name="ready">false</oneNumber>` in
+  every def and in a `set` on every app loop.
+- purepyindi2 `IndiStreamParser.parse` catches only `expat.ExpatError`. The
+  `float("false")` in `OneNumber.value_from_text` raises `ValueError` out of the
+  expat callback (reproduced locally against the installed purepyindi2).
+- In the asyncio client (`AsyncINDIClient.run`), that exception ends the
+  connection. It reconnects after `RECONNECTION_DELAY_SEC = 2` and re-sends a
+  catch-all `getProperties`. Every MagAOXApp on every server then dumps and
+  re-subscribes, the dumps include `acc000.dm_status`, and the cycle repeats every
+  2 s. No routing loop is involved. The threaded `IndiTcpClientConnection` reader
+  thread dies on the same error, leaving that client deaf instead.
+- `isAOC` was initially unresponsive even to the profiler's own request. That was
+  not diagnosed. Next time, get a stack with
+  `gdb -p <pid> -batch -ex "thread apply all bt"`.
+
+Fixes:
+
+1. **pcf (implemented on `jrmales/indi-bool-numeric`):** `IndiElement` writes a
+   `bool` as `1`/`0` through every setter, using the new
+   `pcf::formatIndiValue`. `get<bool>()`/`getValue<bool>()` read through the new
+   `pcf::parseIndiValue`, which accepts `true`/`false` as well as any number
+   (nonzero is true), so values from older writers still read correctly.
+   `indi::updateIfChanged`/`updatesIfChanged` compare using `formatIndiValue`, so
+   they agree with the stored strings. Any app that assigns a `bool` to an
+   element, including accelSim's `dm_status`, sends valid numbers once rebuilt;
+   accelSim itself needs no change.
+   - Compatibility: a binary built before this change that reads a `bool` with
+     `get<bool>()` would read a new `1` as `false`. No C++ in this repo, `rtimv`,
+     `mxqtuio` or `milk-xwcl` reads an element with `get<bool>`. Text elements
+     assigned a `bool` now carry `1`/`0` instead of `true`/`false`.
+2. **purepyindi2:** `parse()` should catch any exception, log the device and
+   property, drop that element or property, and keep the connection. One bad value
+   should never disconnect a client.
 
 ## After deployment: `getINDI` still never stops
 
