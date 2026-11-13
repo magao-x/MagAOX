@@ -13,6 +13,7 @@
 
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
+#include "../../libMagAOX/common/streamCopy.hpp"
 
 typedef MagAOX::app::MagAOXApp<true> MagAOXAppT; // This needs to be before pdvUtils.hpp for logging to work.
 
@@ -168,6 +169,12 @@ class ocam2KCtrl : public MagAOXApp<>,
     bool m_stagedDescramble{ false };
 
     std::vector<int16_t> m_descrambled; ///< Private descramble output when m_stagedDescramble is set, sized on use.
+
+    /// Copy the staged descramble to the stream with non-temporal stores (streamCopy) instead of memcpy.
+    /** The copy then does not take back the lines which readers of the stream, such as the AO loop, hold from the
+     * previous frame, and readers load the new frame from memory.  Used only when m_stagedDescramble is set.
+     */
+    bool m_stagedCopyNT{ false };
 
     std::string m_syncDevice{
         "fxngensync" }; ///< INDI device providing the external sync frequency when synchro mode is enabled.
@@ -630,6 +637,17 @@ inline void ocam2KCtrl::setupConfig()
                 "If true, descramble into a private buffer and copy it to the stream in one sequential pass, so that "
                 "readers of the stream slow the descramble less.  Default is false." );
 
+    config.add( "camera.stagedCopyNT",
+                "",
+                "camera.stagedCopyNT",
+                argType::Required,
+                "camera",
+                "stagedCopyNT",
+                false,
+                "bool",
+                "If true, and stagedDescramble is true, copy the descrambled frame to the stream with non-temporal "
+                "stores.  Default is false." );
+
     dev::frameGrabber<ocam2KCtrl>::setupConfig( config );
 
     config.add( "framegrabber.syncShmimName",
@@ -681,6 +699,7 @@ inline int ocam2KCtrl::loadConfigImpl()
 
     config( m_ocamDescrambleFile, "camera.ocamDescrambleFile" );
     config( m_stagedDescramble, "camera.stagedDescramble" );
+    config( m_stagedCopyNT, "camera.stagedCopyNT" );
 
     if( m_maxEMGain < 1 )
     {
@@ -2487,7 +2506,14 @@ inline int ocam2KCtrl::loadImageIntoStream( void *dest )
         ocam2_descramble(
             m_ocam2_id, &currImageNumber, m_descrambled.data(), reinterpret_cast<int16_t *>( m_image_p ) );
 
-        memcpy( dest, m_descrambled.data(), npix * sizeof( int16_t ) );
+        if( m_stagedCopyNT )
+        {
+            streamCopy( dest, m_descrambled.data(), npix * sizeof( int16_t ) );
+        }
+        else
+        {
+            memcpy( dest, m_descrambled.data(), npix * sizeof( int16_t ) );
+        }
     }
     else if( !m_digitalBin )
     {

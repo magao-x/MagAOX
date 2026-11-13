@@ -333,6 +333,15 @@ The integrator change still helps every shmimIntegrator instance (all
 
 ## Follow-ups (not on this branch)
 
+- Loop time with `stagedDescramble=true`: ~146 us with camwfs-avg and
+  camwfs-sw off (vs 144 us unstaged), and <1 us more with them on. Staging
+  costs ~2 us when acquWFS is the only reader (its copy takes back acquWFS's
+  lines), and saves ~8-10 us per extra reader.
+- Added `camera.stagedCopyNT` (bool, default false): with `stagedDescramble`,
+  copy to the stream with `MagAOX::streamCopy` (`libMagAOX/common/streamCopy.hpp`,
+  SSE2 non-temporal stores and a store fence; the copy from the reverted
+  streamCircBuff commit, now shared, with `streamCopy_test`). To A/B on the
+  RTC against plain `stagedDescramble`.
 - The remaining ~3 us of camera write time from acquWFS: candidates are
   writing the staged copy to the stream with non-temporal stores (no takebacks,
   but readers then read from DRAM, and the earlier cbuff experiment showed

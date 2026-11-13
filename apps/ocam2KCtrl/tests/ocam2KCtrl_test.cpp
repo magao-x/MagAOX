@@ -2170,6 +2170,26 @@ TEST_CASE( "ocam2KCtrl loadImageIntoStream uses the OCAM descramble output", "[o
         REQUIRE( destImage[3] == 41 );
     }
 
+    SECTION( "the staged path can copy to the destination with non-temporal stores" )
+    {
+        app.m_digitalBin       = false;
+        app.m_stagedDescramble = true;
+        app.m_stagedCopyNT     = true;
+        app.m_width            = 2;
+        app.m_height           = 2;
+        app.m_image_p          = reinterpret_cast<u_char *>( rawImage.data() );
+
+        destImage.fill( 0 );
+        g_ocam2StubState.outputImage = { 12, 22, 32, 42 };
+
+        REQUIRE( app.loadImageIntoStream( destImage.data() ) == 0 );
+        REQUIRE( g_ocam2StubState.lastOutput == app.m_descrambled.data() );
+        REQUIRE( destImage[0] == 12 );
+        REQUIRE( destImage[1] == 22 );
+        REQUIRE( destImage[2] == 32 );
+        REQUIRE( destImage[3] == 42 );
+    }
+
     SECTION( "the digital-binning path descrambles into the work image before filling the output frame" )
     {
         app.m_ocam2_id    = 8;

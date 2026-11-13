@@ -170,6 +170,7 @@
 
 
 ../libMagAOX/common/tests/spscQueue_test
+../libMagAOX/common/tests/streamCopy_test
 ../libMagAOX/common/tests/latestSnapshot_test
 ../libMagAOX/common/tests/common_test
 ../libMagAOX/ImageStreamIO/tests/ImageStreamIO_test

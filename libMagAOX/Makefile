@@ -40,6 +40,7 @@ INCLUDEDEPS= \
 	common/dmReaderTiming.hpp \
 	common/frameGrabberTiming.hpp \
 	common/spscQueue.hpp \
+	common/streamCopy.hpp \
 	common/timingStats.hpp \
 	common/dmPipelineTiming.hpp \
 	file/fileTimes.hpp \
