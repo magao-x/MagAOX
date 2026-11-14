@@ -5,15 +5,35 @@ r"""\file native_observation_tools_test.py
 import configparser
 import csv
 import json
+import struct
 from pathlib import Path
 import tempfile
 import unittest
 
 from verify_native_observation import verify
+from inspect_native_commands import inspect
 
 
 class NativeObservationToolsTest(unittest.TestCase):
     """Test private handoff settings and reject incomplete/corrupt observation evidence."""
+
+    def test_full_command_journal_retains_all_values_and_rejects_truncation(self):
+        """Decode complete physical-coordinate requests without promoting them to applied evidence."""
+        with tempfile.TemporaryDirectory(prefix="ddspc-command-smoke-") as temporary:
+            path = Path(temporary) / "dm_commands.bin"
+            header = struct.pack("<6Q4q7Q", 4, 1, 2, 3, 4, 123, -1, 100, 200, 210,
+                                 2, 2, 1, 9, 0, 17, 19)
+            path.write_bytes(b"DDDM0001" + header + struct.pack("<4f", .1, .2, .3, .4))
+            result = inspect(path)
+            self.assertEqual(result["records"], 1)
+            self.assertEqual(result["latest"]["counter"], 123)
+            self.assertEqual(result["latest"]["acquired_raw_ns"], -1)
+            self.assertAlmostEqual(result["latest"]["first_values"][3], .4)
+            self.assertFalse(result["physical_application_qualified"])
+            path.write_bytes(path.read_bytes()[:-1])
+            with self.assertRaises(ValueError):
+                inspect(path)
+            self.assertTrue(inspect(path, allow_partial=True)["incomplete_tail"])
 
     def test_private_config_preserves_adc_calibration_and_inhibits_control(self):
         """Compare the entire ADC section with the previously validated ADC-only example."""
@@ -31,6 +51,12 @@ class NativeObservationToolsTest(unittest.TestCase):
         self.assertEqual(new["native_shadow"]["completion_stream"], "")
         self.assertEqual(new["native_shadow"]["sdk_stream"], "")
         self.assertNotIn("framegrabber", [name.lower() for name in new.sections()])
+        live = configparser.ConfigParser()
+        live.read(examples / "loPredCtrlAcc-live-inputs.conf.example")
+        self.assertEqual(dict(old["adc"]), dict(live["adc"]))
+        self.assertTrue(live.getboolean("native_shadow", "record_dm_commands"))
+        self.assertFalse(live.getboolean("parameters", "shadow_pipeline"))
+        self.assertNotIn("framegrabber", [name.lower() for name in live.sections()])
 
     def test_artifacts_report_limitations_without_authorizing_training(self):
         """A transport pass must leave provenance unqualified; loss, corrupt counters and unsafe flags fail."""
@@ -72,6 +98,20 @@ class NativeObservationToolsTest(unittest.TestCase):
             self.assertFalse(check()["transport_pass"])
             summary["training_enabled"] = False
             summary["written"] = 9
+            self.assertFalse(check()["transport_pass"])
+            summary["written"] = 8
+            summary.update(dm_commands_enabled=True, dm_commands_written=2,
+                           dm_command_drops=0, dm_command_oversize=0)
+            payload = b"DDDM0001"
+            for counter in (1, 2):
+                payload += struct.pack("<6Q4q7Q", 1, 1, 2, 3, 1, counter, 100, 110, 120, 130,
+                                       1, 1, 1, 9, 0, 0, 0) + struct.pack("<f", .1)
+            (directory / "dm_commands.bin").write_bytes(payload)
+            self.assertTrue(check()["transport_pass"])
+            summary["dm_command_drops"] = 1
+            self.assertFalse(check()["transport_pass"])
+            summary["dm_command_drops"] = 0
+            summary["dm_commands_written"] = 1
             self.assertFalse(check()["transport_pass"])
 
 

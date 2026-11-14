@@ -420,7 +420,7 @@ class loPredCtrlAcc : public MagAOXApp<true>,
     pcf::IndiProperty m_indiP_ddspcPipeline, m_indiP_ddspcSupervisor;
 
   public:
-    /// Select a ready shadow predictor without changing any output or training state.
+    /// Request the pipeline policy or select a ready direct shadow predictor; never change training/output authority.
     INDI_NEWCALLBACK_DECL( loPredCtrlAcc, m_indiP_ddspcMode );
 
     /// Independently enable/pause adaptation; no legacy learning/exploration flags are changed.
@@ -692,6 +692,9 @@ inline void loPredCtrlAcc::setupConfig()
                                { "duration_sec", "double" },
                                { "poll_us", "unsigned" },
                                { "queue_capacity", "size_t" },
+                               { "record_dm_commands", "bool" },
+                               { "command_queue_capacity", "size_t" },
+                               { "command_max_elements", "size_t" },
                                { "modal_index0", "size_t" },
                                { "modal_index1", "size_t" } } )
         config.add( std::string( "native_shadow." ) + entry.first,
@@ -1128,6 +1131,9 @@ inline int loPredCtrlAcc::loadConfigImpl( mx::app::appConfigurator &_config )
             _config( m_nativeShadowConfig.m_durationSec, "native_shadow.duration_sec" );
             _config( m_nativeShadowConfig.m_pollUs, "native_shadow.poll_us" );
             _config( m_nativeShadowConfig.m_queueCapacity, "native_shadow.queue_capacity" );
+            _config( m_nativeShadowConfig.m_recordDmCommands, "native_shadow.record_dm_commands" );
+            _config( m_nativeShadowConfig.m_commandQueueCapacity, "native_shadow.command_queue_capacity" );
+            _config( m_nativeShadowConfig.m_commandMaxElements, "native_shadow.command_max_elements" );
             _config( m_nativeShadowConfig.m_modalIndices[0], "native_shadow.modal_index0" );
             _config( m_nativeShadowConfig.m_modalIndices[1], "native_shadow.modal_index1" );
             m_nativeShadowConfig.m_streams[0].m_name = m_adcConfig.m_stream;
@@ -1195,7 +1201,7 @@ inline int loPredCtrlAcc::configureShadow()
     settings.m_useQrd        = m_useQrd;
     try
     {
-        { // mutex scope
+        { //mutex scope
             std::lock_guard<std::mutex> guard( m_shadowMutex );
             m_shadowPipeline.reset();
             m_shadowStopping       = false;
@@ -1216,7 +1222,7 @@ inline bool loPredCtrlAcc::processShadowRecord( const DDSPC::ShadowRecord &recor
 {
     if( m_nativeShadowEnabled || !m_shadowMode )
         return false;
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> guard( m_shadowMutex );
         return !m_shadowStopping && !m_shadowPipelineEnabled && !m_shadowInputs && m_shadowController &&
                m_shadowController->process( record );
@@ -1230,7 +1236,7 @@ inline int loPredCtrlAcc::configureShadowInputs( const DDSPC::InputConfig &setti
         return -1;
     try
     {
-        { // mutex scope
+        { //mutex scope
             std::lock_guard<std::mutex> guard( m_shadowMutex );
             if( !m_shadowController )
                 return -1;
@@ -1285,7 +1291,7 @@ inline bool loPredCtrlAcc::processShadowWfs( const DDSPC::TimedWfsRecord &record
 {
     if( m_nativeShadowEnabled || !m_shadowMode )
         return false;
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> guard( m_shadowMutex );
         if( m_shadowStopping )
             return false;
@@ -1299,7 +1305,7 @@ inline bool loPredCtrlAcc::processShadowApplied( const DDSPC::AppliedInputRecord
 {
     if( m_nativeShadowEnabled || !m_shadowMode )
         return false;
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> guard( m_shadowMutex );
         if( m_shadowStopping )
             return false;
@@ -1313,7 +1319,7 @@ inline bool loPredCtrlAcc::expireShadowInputs( std::int64_t nowNs )
 {
     if( !m_shadowMode )
         return false;
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> guard( m_shadowMutex );
         if( m_shadowStopping )
             return false;
@@ -1327,7 +1333,7 @@ inline bool loPredCtrlAcc::processShadowAdc( const DDSPC::ShadowAdcRecord &recor
 {
     if( m_nativeShadowEnabled || !m_shadowMode || !m_shadowPipelineEnabled )
         return false;
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> guard( m_shadowMutex );
         return !m_shadowStopping && m_shadowPipeline && m_shadowPipeline->push_adc( record, nowNs );
     }
@@ -1460,6 +1466,10 @@ inline int loPredCtrlAcc::setupNativeShadowINDI()
                               "adc_forwarded",
                               "adc_missing",
                               "adc_breaks",
+                              "dm_values_enabled",
+                              "dm_commands_written",
+                              "dm_command_drops",
+                              "dm_command_oversize",
                               "elapsed_sec" } )
         m_indiP_nativeShadow.add( pcf::IndiElement( name, 0.0 ) );
     if( registerIndiPropertyReadOnly( m_indiP_nativeShadow ) < 0 )
@@ -1472,6 +1482,7 @@ inline int loPredCtrlAcc::setupNativeShadowINDI()
             return -1;
         for( const char *element : { "connected",
                                      "stale",
+                                     "received_rate_hz",
                                      "samples",
                                      "counter",
                                      "generation",
@@ -1517,6 +1528,10 @@ inline void loPredCtrlAcc::updateNativeShadowINDI()
           "adc_forwarded",
           "adc_missing",
           "adc_breaks",
+          "dm_values_enabled",
+          "dm_commands_written",
+          "dm_command_drops",
+          "dm_command_oversize",
           "elapsed_sec" },
         { 1,
           1,
@@ -1529,6 +1544,10 @@ inline void loPredCtrlAcc::updateNativeShadowINDI()
           double( s.m_sources[0].m_samples ),
           double( s.m_adcMissing ),
           double( s.m_adcBreaks ),
+          double( m_nativeShadowConfig.m_recordDmCommands ),
+          double( s.m_commandsWritten ),
+          double( s.m_commandDrops ),
+          double( s.m_commandOversize ),
           s.m_nowNs >= s.m_startedNs && s.m_startedNs >= 0 ? double( s.m_nowNs - s.m_startedNs ) / 1e9 : -1 } );
     for( std::size_t i = 0; i < DDSPC::observationSources; ++i )
     {
@@ -1537,6 +1556,7 @@ inline void loPredCtrlAcc::updateNativeShadowINDI()
             m_indiP_nativeSources[i],
             { "connected",
               "stale",
+              "received_rate_hz",
               "samples",
               "counter",
               "generation",
@@ -1559,6 +1579,7 @@ inline void loPredCtrlAcc::updateNativeShadowINDI()
               "incompatible" },
             { double( v.m_connected ),
               double( v.m_stale ),
+              v.m_receivedRateHz,
               double( v.m_samples ),
               double( v.m_latest.m_counter ),
               double( v.m_latest.m_generation ),
@@ -1691,7 +1712,7 @@ inline void loPredCtrlAcc::updateShadowINDI()
     DDSPC::ShadowMode           selected      = DDSPC::ShadowMode::Standard;
     DDSPC::InputReason          inputReason   = DDSPC::InputReason::UnverifiedContract;
     DDSPC::InputEvidence        inputEvidence = DDSPC::InputEvidence::Unverified;
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> guard( m_shadowMutex );
         if( m_shadowController )
         {
@@ -1743,7 +1764,8 @@ inline void loPredCtrlAcc::updateShadowINDI()
               pipeline.m_reason,
               DDSPC::feature_reason( pipeline.m_featureReason ) } );
     }
-    const bool isStandard = selected == DDSPC::ShadowMode::Standard;
+    const bool isStandard = pipelineConfigured ? pipeline.m_requested == DDSPC::PolicyMode::Standard
+                                               : selected == DDSPC::ShadowMode::Standard;
     const bool ready      = isStandard ? standard.m_ready : assisted.m_ready;
     indi::updateSelectionSwitchIfChanged( m_indiP_ddspcMode,
                                           isStandard ? "standard" : "accel_assisted",
@@ -1836,9 +1858,20 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc, m_indiP_ddspcMode )( const pcf::Ind
         }
     }
     valid = valid && onCount == 1;
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> guard( m_shadowMutex );
-        valid = valid && m_shadowController && m_shadowController->select( requested );
+        valid = valid && bool( m_shadowController );
+        // A pipeline request may remain pending; only the supervisor can qualify an effective candidate.
+        // In particular, switching assistance OFF must not require a ready standard model.
+        if( valid && !m_shadowPipeline )
+            valid = m_shadowController->select( requested );
+        if( valid )
+        {
+            m_shadowRequested = requested == DDSPC::ShadowMode::Standard ? "standard" : "accel_assisted";
+            if( m_shadowPipeline )
+                m_shadowPipeline->request( requested == DDSPC::ShadowMode::Standard ? DDSPC::PolicyMode::Standard
+                                                                                    : DDSPC::PolicyMode::Assisted );
+        }
     }
     m_shadowModeRejected = !valid;
     updateShadowINDI();
@@ -1857,7 +1890,7 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc, m_indiP_ddspcTrain )( const pcf::In
         valid            = valid && ( entry.first == "standard" || entry.first == "accel_assisted" ) &&
                            ( value == pcf::IndiElement::On || value == pcf::IndiElement::Off );
     }
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> guard( m_shadowMutex );
         valid = valid && bool( m_shadowController );
         if( valid )
@@ -2116,7 +2149,7 @@ inline int loPredCtrlAcc::appLogic()
 inline int loPredCtrlAcc::appShutdown()
 {
     if( m_shadowMode )
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> guard( m_shadowMutex );
         m_shadowStopping = true;
         if( m_shadowPipeline )
@@ -2146,7 +2179,7 @@ inline int loPredCtrlAcc::appShutdown()
         delete m_controller;
 
     if( m_shadowMode )
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> guard( m_shadowMutex );
         m_shadowPipeline.reset();
         m_shadowInputs.reset();
@@ -2164,7 +2197,7 @@ inline int loPredCtrlAcc::allocate( const dev::shmimT &dummy )
     m_modevalHeight = shmimMonitorT::m_height;
     if( m_shadowMode )
     {
-        { // mutex scope
+        { //mutex scope
             std::lock_guard<std::mutex> guard( m_shadowMutex );
             m_shadowPipeline.reset();
             m_shadowInputs.reset(); // Reconnection/shape changes require a newly verified source session.
@@ -2174,7 +2207,7 @@ inline int loPredCtrlAcc::allocate( const dev::shmimT &dummy )
         if( shmimMonitorT::m_dataType != _DATATYPE_FLOAT || m_modevalHeight != 1 ||
             m_modevalWidth < static_cast<uint32_t>( m_num_modes ) )
             return -1;
-        { // mutex scope
+        { //mutex scope
             std::lock_guard<std::mutex> guard( m_shadowMutex );
             if( m_shadowController )
             {
@@ -2400,7 +2433,7 @@ inline int loPredCtrlAcc::processImage( void *curr_src, const dev::shmimT &dummy
                 validity.m_wfsValid = validity.m_wfsValid && std::isfinite( values[mode] );
         }
         // This callback has no established applied-command or exposure-timing contract.
-        { // mutex scope
+        { //mutex scope
             std::lock_guard<std::mutex> guard( m_shadowMutex );
             m_shadowPipeline.reset();
             m_shadowInputs.reset(); // This raw callback still lacks a validated exposure/application contract.
@@ -2520,7 +2553,7 @@ inline int loPredCtrlAcc::processImage( void *curr_src, const dev::shmimT &dummy
         accelSample.setZero();
 
         bool haveAccel = false;
-        { // mutex scope
+        { //mutex scope
             std::lock_guard<std::mutex> guard( m_accelMutex );
             if( m_haveAccelSample && m_latestAccelSample.rows() == m_accelChannels && m_latestAccelSample.cols() == 1 )
             {
@@ -2990,7 +3023,7 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc, m_indiP_resetToggle )( const pcf::I
             return 0;
         if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On )
         {
-            { // mutex scope
+            { //mutex scope
                 std::lock_guard<std::mutex> guard( m_shadowMutex );
                 if( m_shadowController )
                 {

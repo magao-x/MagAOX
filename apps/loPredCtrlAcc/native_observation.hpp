@@ -7,6 +7,7 @@
 #include "../../libMagAOX/common/dmCompletion.hpp"
 #include <array>
 #include <atomic>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -60,7 +61,10 @@ struct NativeObservationConfig
     std::size_t  m_queueCapacity{ 32768 }; ///< Fixed recording queue; overflow counts instead of blocking input.
     std::int64_t m_staleNs{ 10000000 };    ///< Observer silence diagnostic; never a control freshness assertion.
     std::array<std::size_t, 2> m_modalIndices{
-        0, 1 }; ///< Selected calibrated-stream entries, without asserting TT identity.
+        0, 1 };                       ///< Selected calibrated-stream entries, without asserting TT identity.
+    bool m_recordDmCommands{ false }; ///< Opt-in full command snapshots; never physical-application certificates.
+    std::size_t m_commandQueueCapacity{ 64 },
+        m_commandMaxElements{ 4096 }; ///< Independently bounded payload retention; no allocation in source copies.
 
     /// Set existing source defaults without opening any input or file.
     NativeObservationConfig();
@@ -134,8 +138,11 @@ struct NativeSourceStatus
     std::uint64_t m_publisherRestarts{
         0 }; ///< Endpoint publisher session/epoch changes, separate from backing replacement.
     std::uint64_t m_associationFailures{ 0 },
-        m_associations{ 0 };            ///< Metadata matches only, never physical application.
-    std::int64_t m_lastReceiptNs{ -1 }; ///< Observer availability high-water for silence checks.
+        m_associations{ 0 };              ///< Metadata matches only, never physical application.
+    std::int64_t  m_lastReceiptNs{ -1 };  ///< Observer availability high-water for silence checks.
+    std::int64_t  m_firstReceiptNs{ -1 }; ///< First unique sample in the current attachment/counter epoch.
+    std::uint64_t m_epochSamples{ 0 };    ///< Unique snapshots in this receipt-rate epoch, excluding duplicate polls.
+    double        m_receivedRateHz{ 0 }; ///< Accepted snapshots per observer second; does not establish a source clock.
 };
 
 /// Thread-safe observer snapshot; every model and physical-application qualification remains false by construction.
@@ -147,6 +154,8 @@ struct NativeObservationStatus
         m_written{ 0 };                                               ///< Distinct loss populations.
     std::int64_t m_startedNs{ -1 }, m_stoppedNs{ -1 }, m_nowNs{ -1 }; ///< Actual local observation interval.
     bool m_finished{ false }, m_ioError{ false }; ///< Finite recording completion and persistent recording failure.
+    std::uint64_t m_commandsWritten{ 0 }, m_commandDrops{ 0 },
+        m_commandOversize{ 0 }; ///< Full-command recording counts, separate from the metadata journal.
 };
 
 /// Fixed single-producer/single-consumer journal queue; overflow never stalls source observation.
@@ -166,6 +175,31 @@ class NativeObservationQueue
     bool pop( NativeObservation &record /**< [out] Oldest owned evidence, unchanged when empty. */ );
 
     /// Return observed overflow, separate from ADC transport or source gaps.
+    std::uint64_t drops() const;
+};
+
+/// Separate bounded SPSC payload queue; large DM images never enlarge individual ADC journal records.
+class NativeCommandQueue
+{
+    std::vector<NativeObservation> m_records; ///< Owned command metadata, indexed by the SPSC cursors.
+    std::vector<float> m_values; ///< Fixed capacity times maximum elements; only actual payload lengths are copied.
+    std::size_t        m_maxElements; ///< Immutable payload bound, validated before allocation.
+    std::atomic<std::uint64_t> m_head{ 0 }, m_tail{ 0 }, m_drops{ 0 }; ///< Independent producer/consumer progression.
+
+  public:
+    /// Allocate bounded full-command storage before either observer worker starts.
+    NativeCommandQueue( std::size_t capacity /**< [in] Number of command snapshots. */,
+                        std::size_t maxElements /**< [in] Maximum FLOAT elements per command. */ );
+
+    /// Copy one whole command or count overflow; the sole source worker never waits for disk.
+    bool push( const NativeObservation &record /**< [in] Stable command snapshot metadata. */,
+               std::span<const float>   values /**< [in] Complete original command image. */ );
+
+    /// Copy the oldest command into writer-owned storage; metadata defines the actual payload length.
+    bool pop( NativeObservation &record /**< [out] Original command identity and times. */,
+              std::span<float>   values /**< [out] Storage for at least maxElements values. */ );
+
+    /// Return payload queue overflow without combining it with source or metadata losses.
     std::uint64_t drops() const;
 };
 

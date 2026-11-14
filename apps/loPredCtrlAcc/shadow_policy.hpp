@@ -56,7 +56,7 @@ struct ControlDecision
 class ShadowPolicy
 {
     PolicyConfig  m_config;                                     ///< Validated bounds and hysteresis.
-    PolicyMode    m_requested, m_effective{ PolicyMode::Safe }; ///< Immutable request and current selection.
+    PolicyMode    m_requested, m_effective{ PolicyMode::Safe }; ///< Requested and qualified effective selection.
     DDSPC::Matrix m_target;                                     ///< Preallocated proposal-plus-probe workspace.
     unsigned      m_validStreak{ 0 }; ///< Recovery qualification, reset on any failed assisted prerequisite.
 
@@ -64,7 +64,10 @@ class ShadowPolicy
     /// Reset qualification and effective selection without touching learners or producing output.
     void reset();
 
-    /// Validate a fixed request and command policy without any external action.
+    /// Change requested assistance without resetting fits, the previous candidate, or effective-mode evidence.
+    void request( PolicyMode mode /**< [in] Standard or Assisted; does not grant readiness or output authority. */ );
+
+    /// Validate the initial request and command policy without any external action.
     ShadowPolicy( PolicyMode          requested /**< [in] Standard or Assisted. */,
                   const PolicyConfig &config /**< [in] Common limits and recovery dwell. */ );
 

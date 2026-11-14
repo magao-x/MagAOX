@@ -168,11 +168,13 @@ TEST_CASE( "Native observation records counter discontinuities clocks and unavai
     r.m_availableNs += 500000;
     capture.accept( r );
     REQUIRE( capture.status().m_sources[1].m_counterGaps == 2 );
+    REQUIRE( capture.status().m_sources[1].m_receivedRateHz == Approx( 2000 ) );
     r.m_counter    = 1;
     r.m_generation = 2;
     r.m_availableNs += 500000;
     capture.accept( r );
     REQUIRE( capture.status().m_sources[1].m_restarts == 1 );
+    REQUIRE( capture.status().m_sources[1].m_receivedRateHz == 0 );
     REQUIRE( capture.status().m_sources[1].m_counterGaps == 2 );
     r.m_counter = 2;
     r.m_publishedRawNs += 40000000000LL;
@@ -348,6 +350,7 @@ TEST_CASE( "Native observation existing-only workers reconnect and preserve ADC 
     ObservationDirectory directory;
     auto                 c = observation_config( directory );
     c.m_streams[4].m_name  = "obs-completion";
+    c.m_recordDmCommands   = true;
     c.m_streams[5].m_name  = "obs-sdk";
     ObservationImage modal( DDSPC::ObservationSource::Modal ), camera( DDSPC::ObservationSource::Camera ),
         dm( DDSPC::ObservationSource::Dm ), completion( DDSPC::ObservationSource::Completion ),
@@ -402,7 +405,67 @@ TEST_CASE( "Native observation existing-only workers reconnect and preserve ADC 
     REQUIRE( s.m_written > 8 );
     REQUIRE( s.m_sources[1].m_associationFailures == 2 ); // No guessed camera association.
     REQUIRE( s.m_sources[1].m_restarts == 1 );
+    REQUIRE( s.m_commandsWritten == s.m_sources[3].m_samples );
+    REQUIRE( s.m_commandDrops == 0 );
+    REQUIRE( s.m_commandOversize == 0 );
+    std::ifstream                 commandFile( directory.m_path / "dm_commands.bin", std::ios::binary );
+    std::array<char, 8>           magic{};
+    std::array<std::uint64_t, 17> header{};
+    std::array<float, 4>          values{};
+    commandFile.read( magic.data(), magic.size() );
+    commandFile.read( reinterpret_cast<char *>( header.data() ), sizeof( header ) );
+    commandFile.read( reinterpret_cast<char *>( values.data() ), sizeof( values ) );
+    REQUIRE( commandFile.good() );
+    REQUIRE( std::string( magic.data(), magic.size() ) == "DDDM0001" );
+    REQUIRE( header[0] == 4 );
+    REQUIRE( header[3] == 30 );
+    REQUIRE( header[5] == 1 );
+    REQUIRE( header[7] ==
+             std::uint64_t( dm.m_metadata.writetime.tv_sec ) * 1000000000 + dm.m_metadata.writetime.tv_nsec );
+    REQUIRE( values == dm.m_floats );
     observer.stop();
+}
+
+/** \brief Complete-command queue overflow never blocks source observation or truncates retained payloads. */
+TEST_CASE( "Full native command queue preserves payloads and reports bounded overflow", "[native-observation]" )
+{
+    DDSPC::NativeCommandQueue queue( 2, 4 );
+    auto                      r = observation_frame( DDSPC::ObservationSource::Dm );
+    r.m_elements                = 4;
+    std::array<float, 4> values{ 1, 2, 3, 4 }, output{};
+    REQUIRE( queue.push( r, values ) );
+    REQUIRE( queue.push( r, values ) );
+    REQUIRE_FALSE( queue.push( r, values ) );
+    REQUIRE( queue.drops() == 1 );
+    REQUIRE( queue.pop( r, output ) );
+    REQUIRE( output == values );
+    REQUIRE( queue.pop( r, output ) );
+    REQUIRE_FALSE( queue.pop( r, output ) );
+    REQUIRE_THROWS_AS( queue.push( r, std::span<const float>( values.data(), 3 ) ), std::invalid_argument );
+}
+
+/** \brief Oversized command images remain metadata observations and are never serialized as truncated inputs. */
+TEST_CASE( "Full native command recording diagnoses oversize without dropping metadata",
+           "[native-observation][threaded]" )
+{
+    ObservationDirectory directory;
+    auto                 c = observation_config( directory );
+    c.m_recordDmCommands   = true;
+    c.m_commandMaxElements = 2;
+    ObservationImage      dm( DDSPC::ObservationSource::Dm );
+    AdcTransportFixture   input( c.m_streams[3].m_name, dm.m_image );
+    DDSPC::AdcReader      reader( DDSPC::AdcConfig{} );
+    DDSPC::NativeObserver observer( c );
+    observer.start( reader );
+    REQUIRE( observed( [&] { return observer.status().m_commandOversize == 1; } ) );
+    observer.stop();
+    const auto status = observer.status();
+    REQUIRE( status.m_sources[3].m_samples == 1 );
+    REQUIRE( status.m_sources[3].m_latest.m_elements == 4 );
+    REQUIRE( status.m_commandsWritten == 0 );
+    REQUIRE( status.m_commandDrops == 0 );
+    REQUIRE_FALSE( status.m_ioError );
+    REQUIRE( std::filesystem::file_size( directory.m_path / "dm_commands.bin" ) == 8 );
 }
 
 /** \brief Invalid layouts are observed without FLOAT reinterpretation or out-of-bounds copying. */

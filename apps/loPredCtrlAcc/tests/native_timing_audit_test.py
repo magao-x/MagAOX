@@ -484,9 +484,9 @@ class NativeTimingTest(unittest.TestCase):
     def test_analysis_modules_have_no_runtime_or_mutating_imports(self):
         """The installed analysis entrypoints have only file-reading/numeric standard-library dependencies."""
         allowed = {"argparse", "array", "bisect", "collections", "csv", "json", "math", "pathlib",
-                   "statistics", "verify_native_observation"}
+                   "statistics", "struct", "verify_native_observation", "inspect_native_commands"}
         root = Path(__file__).resolve().parent
-        for name in ("native_timing_audit.py", "verify_native_observation.py"):
+        for name in ("native_timing_audit.py", "verify_native_observation.py", "inspect_native_commands.py"):
             tree = ast.parse((root/name).read_text())
             imports = set()
             for node in ast.walk(tree):
