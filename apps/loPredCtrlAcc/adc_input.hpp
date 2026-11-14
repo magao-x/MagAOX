@@ -139,6 +139,9 @@ struct AdcBatch
     std::uint64_t m_missing{ 0 }; ///< Unavailable counters since a known baseline in the same source incarnation.
     bool          m_discontinuity{ false }; ///< Source/segment changed or established history was evicted.
     bool          m_more{ false };          ///< More eligible retained samples remain after the bounded output fills.
+    std::size_t   m_pending{ 0 }; ///< Retained samples after this cursor, including receipts beyond the cutoff.
+    std::int64_t  m_pendingReceiptNs{ -1 }; ///< First unforwarded receipt, not an acquisition/exposure timestamp.
+    std::int64_t  m_cutoffNs{ -1 };         ///< Exact availability cutoff used for this copy, not a WFS/synco deadline.
 };
 
 /// Single-owner bounded capture processor; callers serialize access, with no native or hardware operations.

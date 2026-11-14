@@ -358,6 +358,7 @@ AdcCapture::copy_after( const AdcCursor &cursor, std::span<AdcSample> output, st
     if( output.empty() || availableByNs < 0 )
         throw std::invalid_argument( "Invalid bounded ADC copy storage or time" );
     AdcBatch result;
+    result.m_cutoffNs      = availableByNs;
     result.m_status        = m_status;
     const bool same        = cursor.m_generation == m_status.m_generation && cursor.m_device == m_status.m_device &&
                              cursor.m_inode == m_status.m_inode;
@@ -399,6 +400,9 @@ AdcCapture::copy_after( const AdcCursor &cursor, std::span<AdcSample> output, st
         output[result.m_count++] = sample;
         result.m_next.m_counter  = sample.m_frame.m_counter;
     }
+    result.m_pending = m_status.m_retained - offset - result.m_count;
+    if( result.m_pending )
+        result.m_pendingReceiptNs = m_ring[( head + offset + result.m_count ) % m_ring.size()].m_receivedNs;
     return result;
 }
 

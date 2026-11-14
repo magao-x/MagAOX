@@ -314,12 +314,15 @@ void NativeObservationCapture::poll( ObservationSource source, bool busy, bool r
 }
 void NativeObservationCapture::tick( std::int64_t nowNs )
 {
-    m_status.m_nowNs = nowNs;
+    refresh_native_observation( m_status, nowNs, m_config.m_staleNs );
+}
+void refresh_native_observation( NativeObservationStatus &status, std::int64_t nowNs, std::int64_t staleNs )
+{
+    status.m_nowNs = nowNs;
     for( std::size_t i = 0; i < observationSources; ++i )
     {
-        auto      &s = m_status.m_sources[i];
-        const bool silent =
-            s.m_lastReceiptNs < 0 || nowNs < s.m_lastReceiptNs || nowNs - s.m_lastReceiptNs > m_config.m_staleNs;
+        auto      &s      = status.m_sources[i];
+        const bool silent = s.m_lastReceiptNs < 0 || nowNs < s.m_lastReceiptNs || nowNs - s.m_lastReceiptNs > staleNs;
         if( s.m_busyNow && s.m_busySinceNs < 0 )
             s.m_busySinceNs = nowNs;
         if( !s.m_busyNow )
@@ -330,7 +333,7 @@ void NativeObservationCapture::tick( std::int64_t nowNs )
                                                        ObservationClockMismatch ) );
         if( i == std::size_t( ObservationSource::Dm ) )
         {
-            const bool stuck = s.m_busySinceNs >= 0 && nowNs - s.m_busySinceNs > m_config.m_staleNs;
+            const bool stuck = s.m_busySinceNs >= 0 && nowNs - s.m_busySinceNs > staleNs;
             s.m_idle         = s.m_connected && silent && !s.m_busyNow && !s.m_incompatibleNow &&
                                ( payload || s.m_latest.m_event == ObservationEvent::Attached );
             s.m_stale        = !s.m_connected || stuck || s.m_incompatibleNow ||

@@ -147,7 +147,7 @@ struct NativeSourceStatus
     std::uint64_t m_associationFailures{ 0 },
         m_associations{ 0 };              ///< Metadata matches only, never physical application.
     std::int64_t  m_lastReceiptNs{ -1 };  ///< Observer availability high-water for silence checks.
-    std::int64_t  m_firstReceiptNs{ -1 }; ///< First unique sample in the current attachment/counter epoch.
+    std::int64_t  m_firstReceiptNs{ -1 }; ///< Receipt-rate window origin, reset on source/continuity changes.
     std::uint64_t m_epochSamples{ 0 };    ///< Unique snapshots in this receipt-rate epoch, excluding duplicate polls.
     double        m_receivedRateHz{ 0 }; ///< Accepted snapshots per observer second; does not establish a source clock.
     double        m_publicationRateHz{ 0 }; ///< Counter advances per observer second; gaps remain separately counted.
@@ -166,13 +166,22 @@ struct NativeObservationStatus
     std::uint64_t                                      m_adcMissing{ 0 }, m_adcBreaks{ 0 }, m_queueDrops{ 0 },
         m_written{ 0 };                                               ///< Distinct loss populations.
     std::int64_t m_startedNs{ -1 }, m_stoppedNs{ -1 }, m_nowNs{ -1 }; ///< Actual local observation interval.
-    bool m_finished{ false }, m_ioError{ false }; ///< Finite recording completion and persistent recording failure.
+    bool m_finished{ false }, m_ioError{ false }; ///< Worker completion (including stop) and persistent I/O failure.
     std::uint64_t m_commandsWritten{ 0 }, m_commandDrops{ 0 },
         m_commandOversize{ 0 }; ///< Full-command recording counts, separate from the metadata journal.
     std::size_t   m_queueOccupancy{ 0 }, m_commandQueueOccupancy{ 0 }; ///< Nonblocking recorder backlog snapshots.
     std::size_t   m_dmCommandsRetained{ 0 }; ///< Complete command images retained even with recording disabled.
     std::uint64_t m_dmCommandEvictions{ 0 }; ///< Expected bounded full-command history eviction, not source loss.
+    AdcCursor    m_adcCursor; ///< Exact bounded forwarding position, distinct from the reader's current source counter.
+    std::size_t  m_adcPending{ 0 }; ///< Unforwarded retained ADC samples, not history occupancy or recorder backlog.
+    std::int64_t m_adcCutoffNs{ -1 }, m_adcPendingReceiptNs{ -1 }; ///< Actual last copy deadline and deferred receipt.
 };
+
+/// Refresh receipt-based health on a copy so cached worker snapshots cannot conceal silence; no source clock mapping.
+void refresh_native_observation(
+    NativeObservationStatus &status /**< [in,out] Owned diagnostic snapshot. */,
+    std::int64_t             nowNs /**< [in] Current local MONOTONIC time. */,
+    std::int64_t             staleNs /**< [in] Observation silence threshold, not a control deadline. */ );
 
 /// Fixed single-producer/single-consumer journal queue; overflow never stalls source observation.
 class NativeObservationQueue
@@ -274,7 +283,7 @@ class NativeObservationCapture
     explicit NativeObservationCapture(
         const NativeObservationConfig &config /**< [in] Validated observer settings. */ );
 
-    /// Account one owned event, annotate diagnostics, and retain only bounded command identity history.
+    /// Account one owned event, annotate diagnostics, and retain bounded individual source/command histories.
     NativeObservation accept( NativeObservation record /**< [in] Original copied evidence and clock context. */ );
 
     /// Account transport polling failures without manufacturing a sample/counter.

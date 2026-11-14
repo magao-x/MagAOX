@@ -531,4 +531,83 @@ TEST_CASE( "ADC cursor reports overwrite gaps invalidation and source identity c
     REQUIRE( storage[0].m_frame.m_counter == 1 );
 }
 
+/** \brief Repeated pre-receipt cutoffs can starve a healthy reader; advancing the observation cutoff recovers in order.
+ */
+TEST_CASE( "ADC forwarding reports withheld receipts separately from missing publications", "[loPredCtrlAcc][adc]" )
+{
+    DDSPC::AdcConfig config;
+    config.m_capacity = 4;
+    DDSPC::AdcCapture capture( config );
+    capture.attached( 1, 2 );
+    AdcFixture                      source;
+    DDSPC::AdcCursor                cursor;
+    std::array<DDSPC::AdcSample, 8> samples;
+    // A delayed observer's old deadline predates every receipt. Acquisition remains healthy at exactly 8 kHz.
+    for( std::uint64_t n = 1; n <= 800; ++n )
+    {
+        const auto acquired = 1000000 + std::int64_t( n ) * 125000;
+        source.publish( n, acquired );
+        REQUIRE( capture.drain( source ) == 1 );
+        const auto withheld = capture.copy_after( cursor, samples, 1000000 );
+        cursor              = withheld.m_next;
+        REQUIRE( withheld.m_count == 0 );
+        REQUIRE( withheld.m_pending > 0 );
+        REQUIRE( withheld.m_pendingReceiptNs > withheld.m_cutoffNs );
+    }
+    REQUIRE( capture.status().m_valid );
+    REQUIRE( capture.status().m_dropped == 0 );
+    REQUIRE( capture.status().m_rateHz == Approx( 8000 ) );
+    const auto ready = capture.copy_after( cursor, samples, source.m_clock.m_monoNs );
+    REQUIRE( ready.m_count == 4 );
+    REQUIRE( ready.m_pending == 0 );
+    REQUIRE( ready.m_pendingReceiptNs == -1 );
+    REQUIRE( samples.front().m_frame.m_counter == 797 );
+    REQUIRE( samples[3].m_frame.m_counter == 800 );
+    REQUIRE_FALSE( capture.copy_after( ready.m_next, samples, source.m_clock.m_monoNs ).m_count );
+}
+
+/** \brief Two virtual minutes exceed the reported stall counter, including bounded catch-up after a consumer pause. */
+TEST_CASE( "Continuous 8 kHz ADC forwarding preserves individual samples across a delayed consumer",
+           "[loPredCtrlAcc][adc]" )
+{
+    DDSPC::AdcCapture capture( DDSPC::AdcConfig{} );
+    capture.attached( 1, 2 );
+    AdcFixture                      source;
+    DDSPC::AdcCursor                cursor;
+    std::array<DDSPC::AdcSample, 8> samples;
+    std::uint64_t                   forwarded = 0, missing = 0;
+    bool                            ordered = true;
+    for( std::uint64_t n = 1; n <= 960000; ++n )
+    {
+        source.publish( n, 1000000 + std::int64_t( n ) * 125000, { std::uint16_t( 2048 + n % 100 ), 2047 } );
+        if( capture.drain( source ) != 1 )
+            ordered = false;
+        // A 2-kHz consumer retains all four individual samples; a 150-ms delay near the reported stall is recoverable.
+        if( n % 4 || ( n >= 603756 && n < 604956 ) )
+            continue;
+        for( int budget = 0; budget < 4; ++budget )
+        {
+            const auto batch = capture.copy_after( cursor, samples, source.m_clock.m_monoNs );
+            cursor           = batch.m_next;
+            missing += batch.m_missing;
+            for( std::size_t i = 0; i < batch.m_count; ++i )
+            {
+                ++forwarded;
+                ordered = ordered && samples[i].m_frame.m_counter == forwarded &&
+                          samples[i].m_frame.m_raw[0] == 2048 + forwarded % 100 &&
+                          samples[i].m_receivedNs <= batch.m_cutoffNs;
+            }
+            if( !batch.m_more )
+                break;
+        }
+    }
+    REQUIRE( ordered );
+    REQUIRE( forwarded == 960000 );
+    REQUIRE( missing == 0 );
+    REQUIRE( capture.status().m_valid );
+    REQUIRE( capture.status().m_dropped == 0 );
+    REQUIRE( capture.status().m_timingGaps == 0 );
+    REQUIRE( capture.status().m_restarts == 0 );
+    REQUIRE( capture.status().m_rateHz == Approx( 8000 ) );
+}
 } // namespace libXWCTest::loPredCtrlAccTest

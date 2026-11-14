@@ -1,5 +1,9 @@
 # Offline DDSPC validation
 
+The default native INDI display is now a compact 59-element operator interface.
+See [NATIVE_DIAGNOSTICS.md](../NATIVE_DIAGNOSTICS.md) for its schema, opt-in debug
+mode, ADC forwarding cutoff investigation and regression/acceptance procedure.
+
 The normal installed executable now defaults to continuous native read-only input
 acquisition with mandatory `DDSPC_SHADOW_ONLY` guards. See
 [NATIVE_APPLICATION.md](../NATIVE_APPLICATION.md) for build, xctrl/INDI registration,

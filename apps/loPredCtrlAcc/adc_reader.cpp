@@ -8,6 +8,7 @@
 #include <cstring>
 #include <limits>
 #include <mutex>
+#include <stdexcept>
 #include <thread>
 #include <semaphore.h>
 #include <sys/stat.h>
@@ -267,7 +268,7 @@ void AdcReader::Impl::run()
             if( source.open( m_config.m_stream ) )
             {
                 attached = true;
-                { // mutex scope
+                { //mutex scope
                     std::lock_guard<std::mutex> lock( m_mutex );
                     m_capture.attached( source.device(), source.inode() );
                 }
@@ -282,19 +283,19 @@ void AdcReader::Impl::run()
         {
             source.close();
             attached = false;
-            { // mutex scope
+            { //mutex scope
                 std::lock_guard<std::mutex> lock( m_mutex );
                 m_capture.disconnected();
             }
             continue;
         }
-        { // mutex scope
+        { //mutex scope
             std::lock_guard<std::mutex> lock( m_mutex );
             m_capture.drain( source );
         }
         source.wait();
     }
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_mutex );
         m_capture.disconnected();
     }
@@ -344,6 +345,15 @@ AdcBatch AdcReader::copy_after( const AdcCursor &cursor, std::span<AdcSample> ou
 {
     std::lock_guard<std::mutex> lock( m_impl->m_mutex ); // mutex scope
     return m_impl->m_capture.copy_after( cursor, output, availableByNs );
+}
+
+AdcBatch AdcReader::copy_ready( const AdcCursor &cursor, std::span<AdcSample> output ) const
+{
+    std::lock_guard<std::mutex> lock( m_impl->m_mutex );
+    const auto                  clock = read_clock();
+    if( clock.m_realNs <= 0 )
+        throw std::runtime_error( "ADC observation clock unavailable" );
+    return m_impl->m_capture.copy_after( cursor, output, clock.m_monoNs );
 }
 
 } // namespace DDSPC

@@ -637,4 +637,66 @@ TEST_CASE( "Native input worker runs continuously without journal files", "[nati
     }
     REQUIRE( std::filesystem::is_empty( directory.m_path ) );
 }
+/** \brief A fresh health evaluation reports ADC forwarding silence honestly and recovers only on new records. */
+TEST_CASE( "Native ADC forwarding becomes stale independently of a healthy acquisition reader and recovers",
+           "[native-observation]" )
+{
+    DDSPC::NativeObservationConfig config;
+    config.m_record      = false;
+    config.m_durationSec = 0;
+    DDSPC::NativeObservationCapture capture( config );
+    auto                            adc = observation_frame( DDSPC::ObservationSource::Adc );
+    capture.accept( adc );
+    auto status                  = capture.status();
+    status.m_adcCapture.m_valid  = true;
+    status.m_adcCapture.m_rateHz = 8000;
+    DDSPC::refresh_native_observation( status, adc.m_availableNs + config.m_staleNs + 1, config.m_staleNs );
+    REQUIRE( status.m_adcCapture.m_valid );
+    REQUIRE_FALSE( status.m_sources[0].m_valid );
+    REQUIRE( status.m_sources[0].m_stale );
+    REQUIRE( status.m_sources[0].m_receivedRateHz == 0 );
+    adc.m_event   = DDSPC::ObservationEvent::AdcBreak;
+    adc.m_missing = 3;
+    capture.accept( adc );
+    adc.m_event = DDSPC::ObservationEvent::Sample;
+    adc.m_counter += 4;
+    adc.m_availableNs += config.m_staleNs + 2;
+    capture.accept( adc );
+    capture.tick( adc.m_availableNs );
+    REQUIRE( capture.status().m_sources[0].m_valid );
+    REQUIRE( capture.status().m_adcBreaks == 1 );
+    REQUIRE( capture.status().m_adcMissing == 3 );
+    for( int n = 0; n < 4; ++n )
+    {
+        ++adc.m_counter;
+        adc.m_availableNs += 125000;
+        capture.accept( adc );
+    }
+    REQUIRE( capture.status().m_sources[0].m_receivedRateHz == Approx( 8000 ) );
+}
+
+/** \brief Native observation reads through a lock-time cutoff; an earlier frozen deadline still withholds data. */
+TEST_CASE( "Native ADC observation cannot retain a pre-lock availability cutoff", "[native-observation][threaded]" )
+{
+    timespec before{};
+    clock_gettime( CLOCK_MONOTONIC, &before );
+    const auto       early = std::int64_t( before.tv_sec ) * 1000000000 + before.tv_nsec;
+    DDSPC::AdcConfig config;
+    config.m_stream = "fresh-cutoff-adc";
+    AdcTransportFixture fixture( config.m_stream );
+    DDSPC::AdcReader    reader( config );
+    reader.start();
+    REQUIRE( observed( [&] { return reader.status().m_samples == 1; } ) );
+    std::array<DDSPC::AdcSample, 8> samples;
+    auto                            batch = reader.copy_after( {}, samples, early );
+    REQUIRE( batch.m_count == 0 );
+    REQUIRE( batch.m_pending == 1 );
+    REQUIRE( batch.m_pendingReceiptNs > early );
+    batch = reader.copy_ready( batch.m_next, samples );
+    REQUIRE( batch.m_count == 1 );
+    REQUIRE( batch.m_pending == 0 );
+    REQUIRE( batch.m_cutoffNs >= samples[0].m_receivedNs );
+    REQUIRE( reader.copy_ready( batch.m_next, samples ).m_count == 0 );
+    reader.stop();
+}
 } // namespace libXWCTest::loPredCtrlAccTest

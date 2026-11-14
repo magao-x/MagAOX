@@ -121,6 +121,9 @@ class MagAOXApp
     /// Captures diagnostic updates without a native driver.
     TestDriver m_driver;
 
+    /// Actual app property registrations, inspected without connecting a native INDI driver.
+    std::map<std::string, pcf::IndiProperty *> m_registered;
+
     /// Driver pointer expected by real INDI utility templates.
     TestDriver *m_indiDriver{ &m_driver };
 
@@ -315,15 +318,17 @@ inline int MagAOXApp<useIndi>::createStandardIndiRequestSw( pcf::IndiProperty &p
 
 template <bool useIndi>
 template <typename T>
-inline int MagAOXApp<useIndi>::registerIndiPropertyNew( pcf::IndiProperty & /**< [in] Property. */,
+inline int MagAOXApp<useIndi>::registerIndiPropertyNew( pcf::IndiProperty &p /**< [in] Property. */,
                                                         T /**< [in] Callback. */ )
 {
+    m_registered[p.getName()] = &p;
     return 0;
 }
 
 template <bool useIndi>
-inline int MagAOXApp<useIndi>::registerIndiPropertyReadOnly( pcf::IndiProperty & /**< [in] Property. */ )
+inline int MagAOXApp<useIndi>::registerIndiPropertyReadOnly( pcf::IndiProperty &p /**< [in] Property. */ )
 {
+    m_registered[p.getName()] = &p;
     return 0;
 }
 

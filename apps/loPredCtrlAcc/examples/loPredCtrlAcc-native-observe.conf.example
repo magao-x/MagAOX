@@ -86,3 +86,8 @@ completion_acquisition_clock = unknown
 completion_publication_clock = unknown
 sdk_acquisition_clock = unknown
 sdk_publication_clock = unknown
+
+# Explicit detailed schema for this finite journal/debug profile; normal installed defaults remain compact.
+[diagnostics]
+period_ms = 250
+debug_indi = true

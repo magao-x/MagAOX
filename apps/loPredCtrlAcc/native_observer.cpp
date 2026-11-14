@@ -456,6 +456,8 @@ NativeObservationStatus NativeObserver::Impl::snapshot() const
         s.m_dmCommandsRetained = m_commandHistory.retained();
         s.m_dmCommandEvictions = m_commandHistory.evictions();
     }
+    if( m_running.load() && !s.m_finished )
+        refresh_native_observation( s, mono_ns(), m_config.m_staleNs );
     return s;
 }
 void NativeObserver::Impl::run()
@@ -465,6 +467,8 @@ void NativeObserver::Impl::run()
         std::array<NativeInput, observationSources - 1> inputs;
         AdcStatus                                       latestAdc;
         AdcCursor                                       cursor;
+        AdcBatch                                        lastBatch;
+        std::int64_t                                    cutoff       = -1;
         bool                                            adcConnected = false;
         std::array<AdcSample, 8>                        samples;
         auto                                           &payload = m_commandReadPayload;
@@ -481,7 +485,10 @@ void NativeObserver::Impl::run()
             const auto now = mono_ns();
             for( unsigned batch = 0; batch < 4; ++batch )
             {
-                const auto copied = m_adc->copy_after( cursor, samples, now );
+                // Observation has no frozen WFS decision origin. Measure availability after acquiring the reader lock.
+                const auto copied = m_adc->copy_ready( cursor, samples );
+                cutoff            = copied.m_cutoffNs;
+                lastBatch         = copied;
                 latestAdc         = copied.m_status;
                 cursor            = copied.m_next;
                 if( adcConnected && latestAdc.m_state == AdcState::Disconnected )
@@ -586,6 +593,10 @@ void NativeObserver::Impl::run()
                 m_status                            = m_capture.status();
                 m_status.m_adcCapture               = latestAdc;
                 m_status.m_startedNs                = startNs;
+                m_status.m_adcCursor                = cursor;
+                m_status.m_adcPending               = lastBatch.m_pending;
+                m_status.m_adcPendingReceiptNs      = lastBatch.m_pendingReceiptNs;
+                m_status.m_adcCutoffNs              = cutoff;
             }
             std::this_thread::sleep_for( std::chrono::microseconds( m_config.m_pollUs ) );
         }

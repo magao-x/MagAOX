@@ -29,6 +29,9 @@ class InstalledApplication : public MagAOX::app::loPredCtrlAcc_native
     using loPredCtrlAcc::m_nativeObserver;
     using loPredCtrlAcc::nativeDiagnosticsDue;
 
+    /// Return one registered compact property by its public name.
+    const pcf::IndiProperty &property( const std::string &name /**< [in] Registered property identity. */ ) const;
+
     /// Run the real default loader against test-owned configuration values.
     bool load( const std::map<std::string, std::string> &values /**< [in] Explicit optional overrides. */ );
 
@@ -52,6 +55,11 @@ bool InstalledApplication::inhibited()
            !m_updated && m_fullCommand.size() == 0 && !m_isLearning && !m_isStdLearning && !m_isPredictiveControl &&
            !m_isIntegrating;
 }
+
+const pcf::IndiProperty &InstalledApplication::property( const std::string &name ) const
+{
+    return *m_registered.at( name );
+}
 } // namespace
 /// \endcond
 
@@ -73,18 +81,31 @@ TEST_CASE( "Installed native application defaults to continuous read-only acquis
         REQUIRE( app.load( {} ) );
         REQUIRE( app.appStartup() == 0 );
         REQUIRE( app.inhibited() );
-        REQUIRE( app.m_indiP_nativeSafety["shadow"].get<double>() == 1 );
-        REQUIRE( app.m_indiP_nativeSafety["active"].get<double>() == 0 );
-        REQUIRE( app.m_indiP_nativeSafety["dm_write_enabled"].get<double>() == 0 );
-        REQUIRE( app.m_indiP_nativeTiming["slots_per_wfs"].get<double>() == 4 );
-        REQUIRE( app.m_indiP_nativeTiming["phase_valid"].get<double>() == 0 );
+        REQUIRE( app.property( "app_health" )["shadow"].get<std::string>() == "true" );
+        REQUIRE( app.property( "safety" )["dm_write_enabled"].get<std::string>() == "false" );
+        REQUIRE( app.property( "timing" )["phase_offset_us"].get<std::string>() == "unqualified" );
+        std::size_t elements = 0;
+        for( const auto &[name, property] : app.m_registered )
+        {
+            elements += property->getNumElements();
+            REQUIRE( property->getPerm() ==
+                     ( name == "ddspc_mode" ? pcf::IndiProperty::ReadWrite : pcf::IndiProperty::ReadOnly ) );
+        }
+        REQUIRE( elements == 59 );
+        REQUIRE( app.m_registered.size() == 11 );
+        REQUIRE_FALSE( app.m_registered.count( "native_adc" ) );
+        REQUIRE_FALSE( app.m_registered.count( "learn" ) );
         auto mode = app.m_indiP_ddspcMode;
         mode["standard"].setSwitchState( pcf::IndiElement::Off );
         mode["accel_assisted"].setSwitchState( pcf::IndiElement::On );
         REQUIRE( app.newCallBack_m_indiP_ddspcMode( mode ) == 0 );
         REQUIRE( app.m_indiP_ddspcMode["accel_assisted"].getSwitchState() == pcf::IndiElement::On );
-        REQUIRE( app.m_indiP_nativeSafety["dm_write_enabled"].get<double>() == 0 );
-        auto train = app.m_indiP_ddspcTrain;
+        REQUIRE( app.property( "ddspc_control" )["requested_mode"].get<std::string>() == "accel_assisted" );
+        REQUIRE( app.property( "safety" )["dm_write_enabled"].get<std::string>() == "false" );
+        pcf::IndiProperty train( pcf::IndiProperty::Switch );
+        train.setDevice( app.m_indiP_ddspcMode.getDevice() );
+        train.setName( "ddspc_train" );
+        train.add( pcf::IndiElement( "standard", pcf::IndiElement::Off ) );
         train["standard"].setSwitchState( pcf::IndiElement::On );
         REQUIRE( app.newCallBack_m_indiP_ddspcTrain( train ) < 0 );
         REQUIRE( app.appLogic() == 0 );
@@ -170,17 +191,46 @@ TEST_CASE( "Installed INDI diagnostics match native read-only inputs", "[native-
     }
     app.m_nativeNextDiagnosticNs = 0;
     REQUIRE( app.appLogic() == 0 );
-    REQUIRE( app.m_indiP_nativeSources[3]["connected"].get<double>() == 1 );
-    REQUIRE( app.m_indiP_nativeSources[3]["valid"].get<double>() == 1 );
-    REQUIRE( app.m_indiP_nativeSources[3]["idle"].get<double>() == 1 );
-    REQUIRE( app.m_indiP_nativeSources[3]["stale"].get<double>() == 0 );
-    REQUIRE( app.m_indiP_nativeSources[3]["value1"].get<double>() == -2 );
-    REQUIRE( app.m_indiP_nativeSources[1]["value0"].get<double>() == 1.5 );
-    REQUIRE( app.m_indiP_adc["raw0"].get<double>() == 2049 );
+    REQUIRE( app.property( "input_health" )["dm"].get<std::string>() == "idle_valid;restarts=0" );
+    REQUIRE( app.property( "input_rates" )["dm_hz"].get<double>() == 0 );
+    REQUIRE( app.property( "adc_values" )["raw0"].get<double>() == 2049 );
+    DDSPC::NativeObservation command;
+    std::array<float, 2>     observed{};
+    REQUIRE( app.m_nativeObserver->copy_command( 0, command, observed ) );
+    REQUIRE( observed == values );
     REQUIRE( app.inhibited() );
     REQUIRE( app.appShutdown() == 0 );
     REQUIRE( metadata.cnt0 == 1 );
     REQUIRE( metadata.write == 0 );
     REQUIRE( values == std::array<float, 2>{ 1.5f, -2.f } );
+}
+/** \brief Detailed metadata remains explicitly opt-in and cannot change the running INDI schema or output interlocks.
+ */
+TEST_CASE( "Native detailed INDI requires startup opt-in", "[native-observation][app]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::loPredCtrlAcc::setupNativeShadowINDI;
+    MagAOX::app::loPredCtrlAcc::loadConfigImpl;
+#endif
+    // clang-format on
+    InstalledApplication debug;
+    REQUIRE( debug.load( { { "diagnostics.debug_indi", "1" } } ) );
+    REQUIRE( debug.appStartup() == 0 );
+    REQUIRE( debug.m_registered.count( "native_adc_forwarding" ) == 1 );
+    REQUIRE( debug.m_registered.count( "native_adc" ) == 1 );
+    REQUIRE_FALSE( debug.m_registered.count( "input_rates" ) );
+    REQUIRE( debug.property( "native_modal" ).find( "history_retained" ) );
+    REQUIRE_FALSE( debug.property( "native_modal" ).find( "input_queue_occupancy" ) );
+    REQUIRE( debug.property( "ddspc_train" ).getPerm() == pcf::IndiProperty::ReadOnly );
+    REQUIRE( debug.inhibited() );
+    REQUIRE( debug.appShutdown() == 0 );
+    InstalledApplication compact;
+    REQUIRE( compact.load( {} ) );
+    REQUIRE( compact.appStartup() == 0 );
+    REQUIRE_FALSE( compact.load( { { "diagnostics.debug_indi", "1" } } ) );
+    REQUIRE( compact.appLogic() < 0 );
+    REQUIRE( compact.appShutdown() == 0 );
+    REQUIRE( compact.inhibited() );
 }
 } // namespace libXWCTest::loPredCtrlAccTest
