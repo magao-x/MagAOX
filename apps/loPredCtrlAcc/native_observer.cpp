@@ -5,6 +5,7 @@
 #include <ImageStreamIO/ImageStreamIO.h>
 #include <algorithm>
 #include <atomic>
+#include <bit>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -103,7 +104,8 @@ class NativeInput
                 ObservationSource                 source /**< [in] Fixed input role. */,
                 const std::array<std::size_t, 2> &indices /**< [in] Selected modal entries. */,
                 std::int64_t                      nowNs /**< [in] Observer monotonic poll time. */,
-                NativeObservation                &record /**< [out] Owned event or stable sample. */ );
+                NativeObservation                &record /**< [out] Owned event or stable sample. */,
+                std::span<float> payload /**< [out] Optional bounded complete DM payload workspace. */ );
 
     /// Close without touching producer counters, pixels, timestamps or stream lifetime.
     void close();
@@ -149,7 +151,8 @@ int NativeInput::sample( const ObservationStream          &c,
                          ObservationSource                 source,
                          const std::array<std::size_t, 2> &indices,
                          std::int64_t                      now,
-                         NativeObservation                &r )
+                         NativeObservation                &r,
+                         std::span<float>                  payload )
 {
     r.m_source     = source;
     r.m_receivedNs = r.m_availableNs = now;
@@ -261,6 +264,8 @@ int NativeInput::sample( const ObservationStream          &c,
         {
             float value;
             std::memcpy( &value, values + n, sizeof( value ) );
+            if( source == ObservationSource::Dm && count <= payload.size() )
+                payload[n] = value;
             std::uint32_t bits;
             std::memcpy( &bits, &value, sizeof( bits ) );
             hash = ( hash ^ bits ) * 1099511628211ULL;
@@ -339,6 +344,34 @@ bool write_record( FILE                    *file /**< [in,out] Private exclusive
             return false;
     return std::fprintf( file, ",%u,%llu\n", unsigned( r.m_hasCounter1 ), (unsigned long long)r.m_counter1 ) >= 0;
 }
+
+/// Write complete original FLOAT command values with an explicit little-endian 17-word identity/time header.
+bool write_command( FILE                    *file /**< [in,out] Exclusive command journal, never a native stream. */,
+                    const NativeObservation &r /**< [in] Stable metadata, not an applied-input certificate. */,
+                    std::span<const float>   values /**< [in] Complete original command image. */ )
+{
+    static_assert( std::endian::native == std::endian::little && sizeof( float ) == 4 &&
+                   std::numeric_limits<float>::is_iec559 );
+    const std::array<std::uint64_t, 17> header{ r.m_elements,
+                                                r.m_device,
+                                                r.m_fileInode,
+                                                r.m_imageInode,
+                                                r.m_generation,
+                                                r.m_counter,
+                                                std::uint64_t( r.m_acquiredRawNs ),
+                                                std::uint64_t( r.m_publishedRawNs ),
+                                                std::uint64_t( r.m_receivedNs ),
+                                                std::uint64_t( r.m_availableNs ),
+                                                r.m_width,
+                                                r.m_height,
+                                                r.m_depth,
+                                                r.m_datatype,
+                                                r.m_flags,
+                                                r.m_payloadHash,
+                                                r.m_counter1 };
+    return std::fwrite( header.data(), sizeof( header ), 1, file ) == 1 &&
+           std::fwrite( values.data(), sizeof( float ), values.size(), file ) == values.size();
+}
 /// Create a new private artifact via an already opened directory; never follow or replace an existing output.
 FILE *exclusive_file( int         directory /**< [in] Private owned directory descriptor. */,
                       const char *name /**< [in] Fixed observer artifact basename. */ )
@@ -358,19 +391,23 @@ FILE *exclusive_file( int         directory /**< [in] Private owned directory de
 
 struct NativeObserver::Impl
 {
-    NativeObservationConfig    m_config;       ///< Immutable source selections and private recording limits.
-    NativeObservationCapture   m_capture;      ///< Input-worker-only diagnostics and bounded identity joins.
-    mutable std::mutex         m_mutex;        ///< Short snapshot lock, never held for source or file I/O.
-    NativeObservationStatus    m_status;       ///< Ordinary-thread diagnostic copy.
-    NativeObservationQueue     m_queue;        ///< Fixed SPSC recording slots; input never waits for file I/O.
+    NativeObservationConfig             m_config;   ///< Immutable source selections and private recording limits.
+    NativeObservationCapture            m_capture;  ///< Input-worker-only diagnostics and bounded identity joins.
+    mutable std::mutex                  m_mutex;    ///< Short snapshot lock, never held for source or file I/O.
+    NativeObservationStatus             m_status;   ///< Ordinary-thread diagnostic copy.
+    NativeObservationQueue              m_queue;    ///< Fixed SPSC recording slots; input never waits for file I/O.
+    std::unique_ptr<NativeCommandQueue> m_commands; ///< Optional independent bounded complete-command queue.
+    std::vector<float> m_commandReadPayload, m_commandWritePayload; ///< Independent preallocated worker workspaces.
+    std::atomic<std::uint64_t> m_commandsWritten{ 0 }, m_commandOversize{ 0 }; ///< Payload results, not transport loss.
     std::atomic<std::uint64_t> m_written{ 0 }; ///< Records actually written, independent of accepted snapshots.
     std::atomic<bool>          m_running{ false }, m_reading{ false }, m_finished{ false },
         m_ioError{ false };         ///< Lifecycle and writer failure.
     std::thread m_worker, m_writer; ///< Joined before the borrowed ADC reader or queue can be released.
     AdcReader  *m_adc{ nullptr };   ///< Borrowed existing reader; the observer never owns/starts/stops it.
-    FILE       *m_csv{ nullptr },
-        *m_summary{ nullptr };              ///< Exclusively created local artifacts, owned by the writer after startup.
-    std::array<char, 65536> m_fileBuffer{}; ///< Fixed stdio buffer, configured before the writer starts.
+    FILE       *m_csv{ nullptr }, *m_summary{ nullptr },
+        *m_commandFile{ nullptr };                 ///< Exclusive private artifacts, owned by the writer.
+    std::array<char, 65536> m_fileBuffer{};        ///< Fixed stdio buffer, configured before the writer starts.
+    std::array<char, 65536> m_commandFileBuffer{}; ///< Independent full-command output buffer.
 
     /// Allocate bounded storage without I/O or worker startup.
     explicit Impl( const NativeObservationConfig &config /**< [in] Validated startup settings. */ );
@@ -386,6 +423,12 @@ struct NativeObserver::Impl
 NativeObserver::Impl::Impl( const NativeObservationConfig &config )
     : m_config( config ), m_capture( config ), m_queue( config.m_queueCapacity )
 {
+    if( config.m_recordDmCommands )
+    {
+        m_commands = std::make_unique<NativeCommandQueue>( config.m_commandQueueCapacity, config.m_commandMaxElements );
+        m_commandReadPayload.resize( config.m_commandMaxElements );
+        m_commandWritePayload.resize( config.m_commandMaxElements );
+    }
 }
 void NativeObserver::Impl::enqueue( const NativeObservation &record )
 {
@@ -399,6 +442,9 @@ NativeObservationStatus NativeObserver::Impl::snapshot() const
     s.m_written                   = m_written.load();
     s.m_finished                  = m_finished.load();
     s.m_ioError                   = m_ioError.load();
+    s.m_commandsWritten           = m_commandsWritten.load();
+    s.m_commandDrops              = m_commands ? m_commands->drops() : 0;
+    s.m_commandOversize           = m_commandOversize.load();
     return s;
 }
 void NativeObserver::Impl::run()
@@ -410,8 +456,9 @@ void NativeObserver::Impl::run()
         AdcCursor                                       cursor;
         bool                                            adcConnected = false;
         std::array<AdcSample, 8>                        samples;
-        const auto                                      start = mono_ns();
-        const auto                                      end   = start + std::int64_t( m_config.m_durationSec * 1e9 );
+        auto                                           &payload = m_commandReadPayload;
+        const auto                                      start   = mono_ns();
+        const auto                                      end     = start + std::int64_t( m_config.m_durationSec * 1e9 );
         { //mutex scope
             std::lock_guard<std::mutex> lock( m_mutex );
             m_status.m_startedNs = start;
@@ -485,10 +532,24 @@ void NativeObserver::Impl::run()
                 if( m_config.m_streams[index].m_name.empty() )
                     continue;
                 NativeObservation r;
-                const auto        outcome = inputs[index - 1].sample(
-                    m_config.m_streams[index], ObservationSource( index ), m_config.m_modalIndices, mono_ns(), r );
+                const auto        outcome = inputs[index - 1].sample( m_config.m_streams[index],
+                                                                      ObservationSource( index ),
+                                                                      m_config.m_modalIndices,
+                                                                      mono_ns(),
+                                                                      r,
+                                                                      payload );
                 if( outcome == 1 )
-                    enqueue( m_capture.accept( r ) );
+                {
+                    r = m_capture.accept( r );
+                    enqueue( r );
+                    if( m_commands && r.m_source == ObservationSource::Dm && r.m_event == ObservationEvent::Sample )
+                    {
+                        if( r.m_elements > payload.size() )
+                            ++m_commandOversize;
+                        else
+                            m_commands->push( r, std::span<const float>( payload.data(), r.m_elements ) );
+                    }
+                }
                 else if( outcome != -4 )
                     m_capture.poll( ObservationSource( index ), outcome == -1, outcome == -2, outcome == -3 );
             }
@@ -522,8 +583,23 @@ void NativeObserver::Impl::run()
 }
 void NativeObserver::Impl::write()
 {
+    auto &payload = m_commandWritePayload;
+    // Drain independently so an empty metadata queue cannot strand a final command snapshot.
+    const auto drainCommand = [&]()
+    {
+        NativeObservation command;
+        if( !m_commands || !m_commands->pop( command, payload ) )
+            return false;
+        if( !m_ioError.load() &&
+            write_command( m_commandFile, command, std::span<const float>( payload.data(), command.m_elements ) ) )
+            ++m_commandsWritten;
+        else
+            m_ioError.store( true );
+        return true;
+    };
     while( true )
     {
+        drainCommand();
         NativeObservation record;
         if( !m_queue.pop( record ) )
         {
@@ -534,7 +610,12 @@ void NativeObserver::Impl::write()
                 continue;
             }
             if( !m_queue.pop( record ) )
+            {
+                while( drainCommand() )
+                {
+                }
                 break;
+            }
         }
         if( !m_ioError.load() && write_record( m_csv, record ) )
             ++m_written;
@@ -545,7 +626,15 @@ void NativeObserver::Impl::write()
     const bool closed  = std::fclose( m_csv ) == 0;
     if( !flushed || !closed )
         m_ioError.store( true );
-    m_csv        = nullptr;
+    m_csv = nullptr;
+    if( m_commandFile )
+    {
+        const bool payloadFlushed = std::fflush( m_commandFile ) == 0;
+        const bool payloadClosed  = std::fclose( m_commandFile ) == 0;
+        if( !payloadFlushed || !payloadClosed )
+            m_ioError.store( true );
+        m_commandFile = nullptr;
+    }
     const auto s = snapshot();
     std::fprintf( m_summary,
                   "{\"schema\":1,\"observation_only\":true,\"training_enabled\":false,\"exposure_qualified\":false,"
@@ -558,6 +647,15 @@ void NativeObserver::Impl::write()
                   (unsigned long long)s.m_adcMissing,
                   (unsigned long long)s.m_adcBreaks,
                   s.m_ioError ? "true" : "false" );
+    std::fprintf( m_summary,
+                  "\"dm_commands_enabled\":%s,\"dm_commands_written\":%llu,\"dm_command_drops\":%llu,"
+                  "\"dm_command_oversize\":%llu,\"dm_command_queue_capacity\":%zu,\"dm_command_max_elements\":%zu,",
+                  m_config.m_recordDmCommands ? "true" : "false",
+                  (unsigned long long)s.m_commandsWritten,
+                  (unsigned long long)s.m_commandDrops,
+                  (unsigned long long)s.m_commandOversize,
+                  m_config.m_commandQueueCapacity,
+                  m_config.m_commandMaxElements );
     const auto &a = s.m_adcCapture;
     std::fprintf( m_summary,
                   "\"duration_sec\":%.17g,\"poll_us\":%u,\"queue_capacity\":%zu,\"modal_indices\":[%zu,%zu],"
@@ -580,32 +678,34 @@ void NativeObserver::Impl::write()
     {
         const auto &v = s.m_sources[i];
         const auto &c = m_config.m_streams[i];
-        std::fprintf( m_summary,
-                      "%s{\"role\":\"%s\",\"stream\":\"%s\",\"acquisition_clock\":\"%s\",\"publication_clock\":\"%s\","
-                      "\"samples\":%llu,\"counter_gaps\":%llu,\"restarts\":%llu,\"protocol_restarts\":%llu,\"clock_"
-                      "unknown\":%llu,\"clock_mismatches\":%llu,\"invalid\":%llu,\"protocol_invalid\":%llu,\"protocol_"
-                      "incomplete\":%llu,\"sequence_gaps\":%llu,\"association_failures\":%llu,\"metadata_"
-                      "associations\":%llu,\"busy\":%llu,\"races\":%llu,\"incompatible\":%llu}",
-                      i ? "," : "",
-                      observation_source_name( ObservationSource( i ) ),
-                      c.m_name.c_str(),
-                      c.m_acquisitionClock.c_str(),
-                      c.m_publicationClock.c_str(),
-                      (unsigned long long)v.m_samples,
-                      (unsigned long long)v.m_counterGaps,
-                      (unsigned long long)v.m_restarts,
-                      (unsigned long long)v.m_publisherRestarts,
-                      (unsigned long long)v.m_clockUnknown,
-                      (unsigned long long)v.m_clockMismatches,
-                      (unsigned long long)v.m_invalid,
-                      (unsigned long long)v.m_protocolInvalid,
-                      (unsigned long long)v.m_protocolIncomplete,
-                      (unsigned long long)v.m_sequenceGaps,
-                      (unsigned long long)v.m_associationFailures,
-                      (unsigned long long)v.m_associations,
-                      (unsigned long long)v.m_busy,
-                      (unsigned long long)v.m_races,
-                      (unsigned long long)v.m_incompatible );
+        std::fprintf(
+            m_summary,
+            "%s{\"role\":\"%s\",\"stream\":\"%s\",\"acquisition_clock\":\"%s\",\"publication_clock\":\"%s\","
+            "\"samples\":%llu,\"counter_gaps\":%llu,\"restarts\":%llu,\"protocol_restarts\":%llu,\"clock_"
+            "unknown\":%llu,\"clock_mismatches\":%llu,\"invalid\":%llu,\"protocol_invalid\":%llu,\"protocol_"
+            "incomplete\":%llu,\"sequence_gaps\":%llu,\"association_failures\":%llu,\"metadata_"
+            "associations\":%llu,\"busy\":%llu,\"races\":%llu,\"incompatible\":%llu,\"received_rate_hz\":%.17g}",
+            i ? "," : "",
+            observation_source_name( ObservationSource( i ) ),
+            c.m_name.c_str(),
+            c.m_acquisitionClock.c_str(),
+            c.m_publicationClock.c_str(),
+            (unsigned long long)v.m_samples,
+            (unsigned long long)v.m_counterGaps,
+            (unsigned long long)v.m_restarts,
+            (unsigned long long)v.m_publisherRestarts,
+            (unsigned long long)v.m_clockUnknown,
+            (unsigned long long)v.m_clockMismatches,
+            (unsigned long long)v.m_invalid,
+            (unsigned long long)v.m_protocolInvalid,
+            (unsigned long long)v.m_protocolIncomplete,
+            (unsigned long long)v.m_sequenceGaps,
+            (unsigned long long)v.m_associationFailures,
+            (unsigned long long)v.m_associations,
+            (unsigned long long)v.m_busy,
+            (unsigned long long)v.m_races,
+            (unsigned long long)v.m_incompatible,
+            v.m_receivedRateHz );
     }
     const bool ended         = std::fprintf( m_summary, "]}\n" ) >= 0 && std::ferror( m_summary ) == 0;
     const bool summaryClosed = std::fclose( m_summary ) == 0;
@@ -637,6 +737,14 @@ void NativeObserver::start( AdcReader &adc )
     {
         m_impl->m_csv     = exclusive_file( directory, "observations.csv" );
         m_impl->m_summary = exclusive_file( directory, "summary.json" );
+        if( m_impl->m_commands )
+        {
+            m_impl->m_commandFile = exclusive_file( directory, "dm_commands.bin" );
+            setvbuf(
+                m_impl->m_commandFile, m_impl->m_commandFileBuffer.data(), _IOFBF, m_impl->m_commandFileBuffer.size() );
+            if( std::fwrite( "DDDM0001", 8, 1, m_impl->m_commandFile ) != 1 )
+                throw std::runtime_error( "Full-command journal header write failed" );
+        }
     }
     catch( ... )
     {
@@ -644,6 +752,16 @@ void NativeObserver::start( AdcReader &adc )
         {
             std::fclose( m_impl->m_csv );
             m_impl->m_csv = nullptr;
+        }
+        if( m_impl->m_summary )
+        {
+            std::fclose( m_impl->m_summary );
+            m_impl->m_summary = nullptr;
+        }
+        if( m_impl->m_commandFile )
+        {
+            std::fclose( m_impl->m_commandFile );
+            m_impl->m_commandFile = nullptr;
         }
         ::close( directory );
         throw;
@@ -688,6 +806,11 @@ void NativeObserver::stop()
     {
         std::fclose( m_impl->m_summary );
         m_impl->m_summary = nullptr;
+    }
+    if( m_impl->m_commandFile )
+    {
+        std::fclose( m_impl->m_commandFile );
+        m_impl->m_commandFile = nullptr;
     }
     m_impl->m_adc = nullptr;
 }

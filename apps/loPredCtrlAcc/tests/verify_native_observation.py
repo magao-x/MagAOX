@@ -6,12 +6,14 @@ import csv
 import json
 from pathlib import Path
 
+from inspect_native_commands import inspect
+
 
 def verify(directory, minimum_seconds=59.5, profile="full"):
     """Verify exact records without changing files; full preserves the original four-source contract."""
-    if profile not in ("full", "adc-wfs"):
+    if profile not in ("full", "adc-wfs", "live"):
         raise ValueError("Unknown observation profile")
-    required = {"adc", "modal", "camera"} | ({"dm"} if profile == "full" else set())
+    required = {"adc", "modal", "camera"} | ({"dm"} if profile != "adc-wfs" else set())
     summary = json.loads((directory / "summary.json").read_text())
     failures, limitations, rates = [], [], {}
     if summary.get("schema") != 1 or summary.get("observation_only") is not True:
@@ -62,13 +64,25 @@ def verify(directory, minimum_seconds=59.5, profile="full"):
                 failures.append("Receipt later than observer availability")
     if rows != summary["written"]:
         failures.append(f"Journal rows {rows} != written {summary['written']}")
+    commands = None
+    if profile == "live" and summary.get("dm_commands_enabled") is not True:
+        failures.append("Full DM command recording must be enabled for the live-input profile")
+    if summary.get("dm_commands_enabled"):
+        for key in ("dm_command_drops", "dm_command_oversize"):
+            if summary.get(key) != 0:
+                failures.append(f"{key}={summary.get(key)}")
+        commands = inspect(directory / "dm_commands.bin", values=0)
+        if commands["records"] != counts[3] or commands["records"] != summary.get("dm_commands_written"):
+            failures.append("Full DM command/metadata record counts differ")
+        if commands["nonfinite_values"]:
+            failures.append("Nonfinite full DM command values")
     for i, source in enumerate(sources):
         role = source["role"]
         if counts[i] != source["samples"]:
             failures.append(f"{role}: sample/journal mismatch")
         if role in required and counts[i] < 2:
             failures.append(f"{role}: insufficient observations")
-        if profile == "adc-wfs" and role in ("modal", "camera") and counts[i] >= 2:
+        if profile in ("adc-wfs", "live") and role in ("modal", "camera") and counts[i] >= 2:
             span = last_receipt[i]-first_receipt[i]
             if span/1e9 < max(0, minimum_seconds-.5):
                 failures.append(f"{role}: insufficient observer-time coverage")
@@ -77,11 +91,11 @@ def verify(directory, minimum_seconds=59.5, profile="full"):
                 failures.append(f"{role}: observed cadence outside 2 kHz +/-5%: {rate:.3f} Hz")
         for key in ("invalid", "clock_mismatches", "incompatible", "protocol_invalid", "restarts", "protocol_restarts"):
             if source[key]:
-                target = failures if profile == "full" or role in required else limitations
+                target = failures if profile != "adc-wfs" or role in required else limitations
                 target.append(f"{role}.{key}={source[key]}")
-        if profile == "adc-wfs" and role in required and source["counter_gaps"]:
+        if profile in ("adc-wfs", "live") and role in required and source["counter_gaps"]:
             failures.append(f"{role}.counter_gaps={source['counter_gaps']}")
-        if profile == "adc-wfs" and role in required and journal_gaps[i]:
+        if profile in ("adc-wfs", "live") and role in required and journal_gaps[i]:
             failures.append(f"{role}.journal_counter_gaps={journal_gaps[i]}")
         for key in ("counter_gaps", "sequence_gaps", "protocol_incomplete", "association_failures", "clock_unknown"):
             if source[key]:
@@ -90,6 +104,9 @@ def verify(directory, minimum_seconds=59.5, profile="full"):
             limitations.append(f"{role}: software endpoint unavailable/unobserved")
         if i < 4 and first[i] and last[i] and last[i][1] > first[i][1]:
             rates[role] = (counts[i]-1)*1e9 / (last[i][1]-first[i][1])
+        if profile == "live" and role == "dm" and counts[i] >= 2:
+            if (last_receipt[i]-first_receipt[i])/1e9 < max(0, minimum_seconds-.5):
+                failures.append("dm: insufficient observer-time coverage")
     adc_rate = rates.get("adc", 0)
     if not 7600 <= adc_rate <= 8400:
         failures.append(f"ADC accepted rate outside 8 kHz +/-5%: {adc_rate:.3f} Hz")
@@ -100,6 +117,7 @@ def verify(directory, minimum_seconds=59.5, profile="full"):
             "journal_counter_gaps": {s["role"]: journal_gaps[i] for i, s in enumerate(sources)},
             "dm_transport": "deferred" if profile == "adc-wfs" else "included",
             "exposure_qualified": False, "physical_application_qualified": False,
+            "full_dm_commands": commands,
             "transport_pass": not failures, "duration_sec": duration, "observed_rates_hz": rates,
             "failures": failures, "limitations": limitations, "training_allowed": False}
 
@@ -108,7 +126,7 @@ def main():
     """Read one completed private run and return a failing exit status for transport/recording defects."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("directory", type=Path)
-    parser.add_argument("--profile", choices=("full", "adc-wfs"), default="full")
+    parser.add_argument("--profile", choices=("full", "adc-wfs", "live"), default="full")
     args = parser.parse_args()
     try:
         result = verify(args.directory, profile=args.profile)

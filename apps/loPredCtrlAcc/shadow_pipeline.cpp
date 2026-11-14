@@ -8,6 +8,18 @@
 #include <stdexcept>
 namespace DDSPC
 {
+void ShadowPipeline::request( PolicyMode mode )
+{
+    m_policy.request( mode );
+    if( mode != m_status.m_requested )
+    {
+        m_status.m_candidateValid = m_decision.m_candidateValid = false;
+        m_status.m_validStreak                                  = 0;
+        m_status.m_reason                                       = "mode_change_pending";
+    }
+    m_status.m_requested = mode;
+}
+
 ShadowPipeline::ShadowPipeline( ShadowController    &controller,
                                 const ShadowConfig  &models,
                                 const InputConfig   &inputs,

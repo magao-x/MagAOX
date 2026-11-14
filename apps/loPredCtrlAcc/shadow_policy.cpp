@@ -29,6 +29,15 @@ void ShadowPolicy::reset()
     m_validStreak = 0;
 }
 
+void ShadowPolicy::request( PolicyMode mode )
+{
+    if( mode != PolicyMode::Standard && mode != PolicyMode::Assisted )
+        throw std::invalid_argument( "Invalid requested shadow mode" );
+    if( mode != m_requested )
+        m_validStreak = 0;
+    m_requested = mode;
+}
+
 const char *policy_mode( PolicyMode mode )
 {
     switch( mode )

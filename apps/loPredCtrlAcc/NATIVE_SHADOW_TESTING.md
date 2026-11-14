@@ -1,5 +1,9 @@
 # Native observation-only handoff
 
+For the active ADC/WFS/DM input milestone with optional complete DM command
+images and per-source receipt rates, use [LIVE_INPUT_TESTING.md](LIVE_INPUT_TESTING.md).
+The original observation profile and ADC calibration below remain unchanged.
+
 This stage observes existing streams for 60 seconds. It never constructs qualified
 WFS/applied-input records, trains a model, generates control candidates, or sends
 DM commands. `native_shadow.enabled` defaults **false** in `loPredCtrlAcc`; the

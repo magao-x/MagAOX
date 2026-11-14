@@ -99,6 +99,9 @@ TEST_CASE( "Private native application remains observation-only through startup 
                          { "adc.enabled", "1" },
                          { "adc.shmimName", "obs-app-adc" },
                          { "native_shadow.enabled", "1" },
+                         { "native_shadow.record_dm_commands", "1" },
+                         { "native_shadow.command_queue_capacity", "4" },
+                         { "native_shadow.command_max_elements", "4096" },
                          { "native_shadow.directory", path },
                          { "native_shadow.modal_stream", "obs-app-modal" },
                          { "native_shadow.camera_stream", "obs-app-camera" },
@@ -110,6 +113,7 @@ TEST_CASE( "Private native application remains observation-only through startup 
     REQUIRE( app.outputs_inhibited() );
     REQUIRE( app.appLogic() == 0 );
     REQUIRE( app.appShutdown() == 0 );
+    REQUIRE( std::filesystem::file_size( std::filesystem::path( path ) / "dm_commands.bin" ) == 8 );
     std::filesystem::remove_all( path );
 }
 

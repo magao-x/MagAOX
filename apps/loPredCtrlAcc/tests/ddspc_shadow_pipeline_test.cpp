@@ -10,6 +10,80 @@
 
 namespace libXWCTest::loPredCtrlAccTest
 {
+/// \cond TEST_SUPPORT
+namespace
+{
+/// Expose only the real selection property for a stream-free application integration check.
+class SwitchingReplayApplication : public ReplayApplication
+{
+  public:
+    using loPredCtrlAcc::m_indiP_ddspcMode;
+};
+} // namespace
+/// \endcond
+
+/** \brief INDI selection reaches the actual candidate policy without resetting either qualified fit. */
+TEST_CASE( "Application INDI updates the shared pipeline request without rebuilding models",
+           "[loPredCtrlAcc][app][pipeline][switching]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::loPredCtrlAcc::newCallBack_m_indiP_ddspcMode;
+    DDSPC::ShadowPipeline::request;
+    DDSPC::ShadowPolicy::request;
+#endif
+    // clang-format on
+    SwitchingReplayApplication app;
+    ShadowReplayConfig         recording;
+    recording.m_frames = 400;
+    app.prepare( replay_model_config(), recording.m_inputs );
+    for( const bool assistance : { true, false } )
+    {
+        auto request = app.m_indiP_ddspcMode;
+        request["standard"].setSwitchState( assistance ? pcf::IndiElement::Off : pcf::IndiElement::On );
+        request["accel_assisted"].setSwitchState( assistance ? pcf::IndiElement::On : pcf::IndiElement::Off );
+        REQUIRE( app.newCallBack_m_indiP_ddspcMode( request ) == 0 );
+        REQUIRE_FALSE( app.shadowPipelineStatus().m_candidateValid );
+        REQUIRE_FALSE( app.model_status( DDSPC::ShadowMode::Standard ).m_ready );
+        REQUIRE_FALSE( app.model_status( DDSPC::ShadowMode::AccelAssisted ).m_ready );
+    }
+    app.train();
+    replay_shadow( app, recording );
+    const auto standard = app.model( DDSPC::ShadowMode::Standard );
+    const auto assisted = app.model( DDSPC::ShadowMode::AccelAssisted );
+    for( const bool assistance : { true, false, true, false } )
+    {
+        auto request = app.m_indiP_ddspcMode;
+        request["standard"].setSwitchState( assistance ? pcf::IndiElement::Off : pcf::IndiElement::On );
+        request["accel_assisted"].setSwitchState( assistance ? pcf::IndiElement::On : pcf::IndiElement::Off );
+        REQUIRE( app.newCallBack_m_indiP_ddspcMode( request ) == 0 );
+        REQUIRE( app.shadowPipelineStatus().m_requested ==
+                 ( assistance ? DDSPC::PolicyMode::Assisted : DDSPC::PolicyMode::Standard ) );
+        REQUIRE( app.model( DDSPC::ShadowMode::Standard ) == standard );
+        REQUIRE( app.model( DDSPC::ShadowMode::AccelAssisted ) == assisted );
+        DDSPC::Matrix candidate = DDSPC::Matrix::Ones( 2, 1 );
+        REQUIRE_FALSE( app.shadowCandidate( candidate ) );
+        REQUIRE( candidate.isZero( 0 ) );
+    }
+    DDSPC::PolicyConfig config;
+    config.m_recoveryFrames = 2;
+    DDSPC::ShadowPolicy    policy( DDSPC::PolicyMode::Standard, config );
+    DDSPC::ControlEvidence evidence( 2 );
+    evidence.m_commonValid = evidence.m_featuresValid = evidence.m_standardReady = evidence.m_assistedReady = true;
+    evidence.m_featureReason = DDSPC::FeatureReason::Ready;
+    const DDSPC::Matrix zero = DDSPC::Matrix::Zero( 2, 1 );
+    REQUIRE( policy.decide( evidence, zero, zero ).m_effective == DDSPC::PolicyMode::Standard );
+    policy.request( DDSPC::PolicyMode::Assisted );
+    REQUIRE( policy.decide( evidence, zero, zero ).m_effective == DDSPC::PolicyMode::Standard );
+    REQUIRE( policy.decide( evidence, zero, zero ).m_effective == DDSPC::PolicyMode::Assisted );
+    evidence.m_featuresValid = false;
+    REQUIRE( policy.decide( evidence, zero, zero ).m_effective == DDSPC::PolicyMode::Standard );
+    policy.request( DDSPC::PolicyMode::Standard );
+    REQUIRE( policy.decide( evidence, zero, zero ).m_effective == DDSPC::PolicyMode::Standard );
+    REQUIRE( app.outputs_rejected() );
+    REQUIRE( app.appShutdown() == 0 );
+}
+
 /** \brief Replay trains the actual app models only after an explicit training request, with no output authority. */
 TEST_CASE( "Application shared shadow pipeline produces qualified replay predictions",
            "[loPredCtrlAcc][app][pipeline]" )

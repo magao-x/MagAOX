@@ -54,6 +54,9 @@ void validate_native_observation( const NativeObservationConfig &c )
         c.m_pollUs > 10000 || c.m_queueCapacity < 2 || c.m_queueCapacity > 262144 || c.m_staleNs <= 0 ||
         c.m_staleNs > 1000000000 || c.m_modalIndices[0] >= 65536 || c.m_modalIndices[1] >= 65536 )
         throw std::invalid_argument( "Invalid native observation limits" );
+    if( c.m_commandQueueCapacity < 2 || c.m_commandQueueCapacity > 4096 || c.m_commandMaxElements < 1 ||
+        c.m_commandMaxElements > 65536 || c.m_commandQueueCapacity * c.m_commandMaxElements > 16777216 )
+        throw std::invalid_argument( "Invalid native full-command recording bounds" );
     if( c.m_directory.empty() || !std::filesystem::path( c.m_directory ).is_absolute() )
         throw std::invalid_argument( "Native observation requires an existing absolute private directory" );
     const auto path = std::filesystem::weakly_canonical( c.m_directory ).string();
@@ -87,9 +90,11 @@ NativeObservation NativeObservationCapture::accept( NativeObservation r )
     const auto previous = s.m_latest;
     if( r.m_event == ObservationEvent::Disconnected )
     {
-        s.m_connected = false;
-        s.m_stale     = true;
-        s.m_latest    = r;
+        s.m_receivedRateHz = 0;
+        s.m_epochSamples   = 0;
+        s.m_connected      = false;
+        s.m_stale          = true;
+        s.m_latest         = r;
         if( r.m_source == ObservationSource::Dm )
             m_dmCount = m_dmNext = 0;
         return r;
@@ -110,7 +115,9 @@ NativeObservation NativeObservationCapture::accept( NativeObservation r )
     s.m_connected = true;
     if( r.m_event == ObservationEvent::Attached )
     {
-        s.m_latest = r;
+        s.m_receivedRateHz = 0;
+        s.m_epochSamples   = 0;
+        s.m_latest         = r;
         return r;
     }
     if( previous.m_event == ObservationEvent::Sample && previous.m_counter && !changed )
@@ -123,6 +130,19 @@ NativeObservation NativeObservationCapture::accept( NativeObservation r )
             ++s.m_restarts;
     }
     ++s.m_samples;
+    if( !s.m_epochSamples || changed || r.m_counter < previous.m_counter || r.m_availableNs < s.m_lastReceiptNs )
+    {
+        s.m_epochSamples   = 1;
+        s.m_firstReceiptNs = r.m_availableNs;
+        s.m_receivedRateHz = 0;
+    }
+    else if( r.m_counter > previous.m_counter )
+    {
+        ++s.m_epochSamples;
+        const auto elapsed = r.m_availableNs - s.m_firstReceiptNs;
+        if( elapsed > 0 )
+            s.m_receivedRateHz = double( s.m_epochSamples - 1 ) * 1e9 / double( elapsed );
+    }
     s.m_lastReceiptNs   = r.m_availableNs;
     s.m_stale           = false;
     const bool endpoint = r.m_source == ObservationSource::Completion || r.m_source == ObservationSource::Sdk;
@@ -270,6 +290,50 @@ bool NativeObservationQueue::pop( NativeObservation &record )
     return true;
 }
 std::uint64_t NativeObservationQueue::drops() const
+{
+    return m_drops.load();
+}
+NativeCommandQueue::NativeCommandQueue( std::size_t capacity, std::size_t maxElements ) : m_maxElements( maxElements )
+{
+    if( capacity < 2 || capacity > 4096 || maxElements < 1 || maxElements > 65536 || capacity * maxElements > 16777216 )
+        throw std::invalid_argument( "Invalid full-command queue bounds" );
+    m_records.resize( capacity );
+    m_values.resize( capacity * maxElements );
+}
+
+bool NativeCommandQueue::push( const NativeObservation &record, std::span<const float> values )
+{
+    if( record.m_source != ObservationSource::Dm || record.m_event != ObservationEvent::Sample || values.empty() ||
+        values.size() > m_maxElements || values.size() != record.m_elements )
+        throw std::invalid_argument( "Incomplete full-command snapshot" );
+    const auto head = m_head.load( std::memory_order_relaxed );
+    if( head - m_tail.load( std::memory_order_acquire ) >= m_records.size() )
+    {
+        ++m_drops;
+        return false;
+    }
+    const auto index = head % m_records.size();
+    m_records[index] = record;
+    std::copy( values.begin(), values.end(), m_values.begin() + index * m_maxElements );
+    m_head.store( head + 1, std::memory_order_release );
+    return true;
+}
+
+bool NativeCommandQueue::pop( NativeObservation &record, std::span<float> values )
+{
+    if( values.size() < m_maxElements )
+        throw std::invalid_argument( "Incomplete full-command writer workspace" );
+    const auto tail = m_tail.load( std::memory_order_relaxed );
+    if( tail == m_head.load( std::memory_order_acquire ) )
+        return false;
+    const auto index = tail % m_records.size();
+    record           = m_records[index];
+    std::copy_n( m_values.begin() + index * m_maxElements, record.m_elements, values.begin() );
+    m_tail.store( tail + 1, std::memory_order_release );
+    return true;
+}
+
+std::uint64_t NativeCommandQueue::drops() const
 {
     return m_drops.load();
 }

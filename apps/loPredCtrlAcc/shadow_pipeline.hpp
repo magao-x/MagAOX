@@ -88,7 +88,7 @@ class ShadowPipeline
         const InputConfig   &inputs /**< [in] Explicitly synthetic or externally verified input contract. */,
         const FeatureConfig &features /**< [in] ADC timestamp-window policy. */,
         const PolicyConfig  &policy /**< [in] Candidate bounds and recovery hysteresis. */,
-        PolicyMode           requested /**< [in] Fixed diagnostic request for this session. */,
+        PolicyMode           requested /**< [in] Initial diagnostic request for this session. */,
         std::uint64_t        calibration /**< [in] Expected nonzero ADC calibration identity. */,
         std::size_t          capacity = 128 /**< [in] Retained ADC samples, at least enough for a feature window. */ );
 
@@ -109,6 +109,9 @@ class ShadowPipeline
 
     /// Explicitly invalidate admission/history after raw callbacks, resets or shutdown.
     void invalidate();
+
+    /// Change the requested mode; the next decision still enforces every qualification and slew gate.
+    void request( PolicyMode mode /**< [in] Standard or Assisted, without changing either learned model. */ );
 
     /// Return scalar diagnostics without allocating or publishing anything.
     ShadowPipelineStatus status() const;
