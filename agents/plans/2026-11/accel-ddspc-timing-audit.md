@@ -86,3 +86,49 @@ that existing 60-second run first and leaves its phase values unclaimed. No
 native app, INDI/hardware connection, deployment, install, service, Git staging,
 commit or push was performed. Original ADC calibration/controller/producer and
 tracked numerical results are unchanged. All changes remain for user review.
+
+## 2026-11-14: mapping and alternating-phase diagnosis
+
+Start checkpoint 592d124f, same personal workstation and feature branch.
+The latest exao2 audit JSON, exact manifest and recorded CSV are still absent
+locally. Requested their local location; no instrument/remote connection was
+made. The observed 105-us alternation cannot be attributed to a measured cause
+without those artifacts. Preserve that distinction in the operator report.
+
+Only ordinary-file Python analysis, tests and documentation are changed:
+
+- Count every rejected ADC/camera/modal acquisition/publication conversion by
+  reason; retain bounded counter-labelled examples and observer clock coverage.
+  Keep all original clock-domain, 25-us uncertainty and 2-ms age admission rules.
+- Expose fixed-pair anchors, raw/mapped timestamp increments, uncertainty sums
+  and observer receipt increments. Compare camera acquisition/publication
+  markers on the same rows independently of any ADC pairing.
+- Reproduce two distinct synthetic 105-us effects: stable acquisition with
+  alternating 395/605-us publication intervals; and a separate nearest-any-ADC
+  heuristic choosing strides 3/5 when its reference changes only 20 us. The
+  current fixed-residue audit retains stride 4 and reports 20 us in the latter
+  case. Its stride rule is imposed, not independent evidence of hardware lock.
+- Fix the demonstrated offline period-estimator defect: alternating publication
+  intervals can bias the adjacent median to 605 us, and missing alternate clock
+  mappings can eliminate adjacent pairs. Use time/counter spans inside mapped
+  incarnations; retain the adjacent median as a diagnostic. No source timestamp,
+  DDSPC algorithm or acquisition behavior changes.
+- Explicitly report synchronization reference, actual WFS processing deadline
+  and synco slot association as unqualified. Source inspection confirms semaphore
+  receipt and main-DM publication are distinct references. Document real-reference
+  phase/error and causal admission equations, missing telemetry, exact original-
+  manifest rerun commands and future tagged synco cutoff requirements.
+
+`check-native-timing`: 39 Python cases passed, including six added regressions.
+The 60-second synthetic journal mapped all six timestamp fields, retained the
+30-us synthetic phase with no future admissions, and preserved all three input
+SHA256 hashes. Current audit elapsed 20.43 s; peak process RSS 229,310,464 bytes
+on macOS. This is offline synthetic throughput, not the instrument result or a
+real-time/scheduler qualification. Artifacts:
+`/private/tmp/ddspc-timing-diagnosis-zv8_d5ci/`.
+
+No C++/configuration/calibration/controller/producer or tracked numerical result
+changed. No acquisition, INDI, hardware service, output transport, deployment,
+installation, Git staging, commit or push was performed. Existing C++ guard
+qualification is unchanged; Python-only changes do not claim new native Linux
+or sanitizer qualification. Actual run attribution remains pending its artifacts.
