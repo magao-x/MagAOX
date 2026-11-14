@@ -9,6 +9,7 @@ import os
 import os.path
 import pathlib
 import re
+import shutil
 import xconf
 from purepyindi2 import properties, constants, messages
 from purepyindi2.messages import DefSwitch, DefText
@@ -26,8 +27,11 @@ def drop_xml_tags(raw_xml):
 
 @xconf.config
 class AudibleAlertsConfig(BaseConfig):
-    random_utterance_interval_sec : Union[float, int] = xconf.field(default=15 * 60, help="Seconds since last (real or random) utterance before a random utterance should play")
-    cache : pathlib.Path = xconf.field(default=pathlib.Path("/tmp/audibleAlerts_cache"))
+    random_utterance_interval_sec : float | int = xconf.field(default=15 * 60, help="Seconds since last (real or random) utterance before a random utterance should play")
+    playback_files_root : pathlib.Path = xconf.field(
+        help="Since the audibleAlerts device is not (necessarily) on a machine with a speaker, it stages the audio clips for delivery to clients (e.g. via sup)",
+        default=pathlib.Path("/tmp/audibleAlerts_playback")
+    )
     observers_device : str = xconf.field(default='observers', help="Observer controls device name")
 
 def contains_substitutions(text):
@@ -251,9 +255,9 @@ class AudibleAlerts(XDevice):
             self.log.info("Waiting for connection...")
             time.sleep(1)
         self.log.info("Connected.")
-        self.log.debug(f"Caching synthesis output to {self.config.cache}")
-        self.config.cache.mkdir(exist_ok=True)
-        
+        self.log.debug(f"Copying playback files to {self.config.playback_files_root}")
+        self.config.playback_files_root.mkdir(exist_ok=True)
+
 
         sv = properties.SwitchVector(
             name="mute",
@@ -322,16 +326,18 @@ class AudibleAlerts(XDevice):
             if self.mute:
                 self.log.debug(f"Would have played: {repr(req)}, but muted")
             else:
-
                 if isinstance(req, Recording):
                     self.playback_text['file'] = req.path
                     self.playback_text['speech'] = ''
                     self.playback_text['voice'] = ''
                     self.telem("play", {"file": req.path, "speech": "", "voice": ""})
-                    fp = self.config.common_path_prefix / "config" / "personalities" / "data" / req.path
-                    if not fp.exists():
-                        log.error(f"{fp} doesn't exist, skipping")
+                    src_fp = self.config.common_path_prefix / "config" / "personalities" / "data" / req.path
+                    if not src_fp.exists():
+                        log.error(f"{src_fp} doesn't exist, skipping")
                         continue
+                    dest_fp = self.config.playback_files_root / req.path
+                    shutil.copy(src_fp, dest_fp)
+                    fp = dest_fp
                 elif isinstance(req, DynamicSpeech):
                     # apply substitutions
                     new_req = req.to_speech(self._current_voice, self.client)
@@ -340,11 +346,11 @@ class AudibleAlerts(XDevice):
                     self.playback_text['voice'] = new_req.voice.name
                     self.telem("play", {"file": "", "speech": new_req.text, "voice": new_req.voice.name})
                     can_cache = new_req.text == req.text
-                    fp = get_or_create_speech_file(new_req, can_cache)
+                    fp = get_or_create_speech_file(new_req, can_cache, cache_dir=self.config.playback_files_root)
                 else:
-                    raise RuntimeError(f"What is a {repr(req)}?")
+                    raise RuntimeError(f"Unknown speech request type. What is a {req!r}?")
                 playback_duration_sec = duration_from_audio_file(fp)
-                self.log.info(f"Playing: {repr(req)} ({playback_duration_sec:1.1f} sec)")
+                self.log.info(f"Playing: {req!r} ({playback_duration_sec:1.1f} sec) ({fp})")
                 self.playback_text.timestamp = datetime.datetime.now()
                 self.update_property(self.playback_text)
                 self.last_utterance_ts = time.time()  # update timestamp to prevent random utterances

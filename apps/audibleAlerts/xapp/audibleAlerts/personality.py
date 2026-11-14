@@ -102,7 +102,7 @@ class Personality:
             for walkup_clip in root['walkups'][wup_email]:
                 walkups[email].append(Recording(walkup_clip))
 
-        
+
 
         for react in root['react']:
             indi_id = react['indi_id']
@@ -126,8 +126,8 @@ class Personality:
                     raise RuntimeError(f"Multiply defined for {indi_id} {operation=} {value=}")
                 transitions[trans] = []
                 for action in transition['actions']:
-                    if action['type'] not in ('speak', 'file'):
-                        log.warning(f"{transition}: {action} type not 'speak' or 'file'?")
+                    if action['type'] not in ('speak', 'play'):
+                        log.warning(f"{trans}: {action} type not 'speak' or 'file'?")
                         continue
                     transitions[trans].append(action_dict_to_playback_request(action))
             reactions.append(Reaction(indi_id=indi_id, transitions=transitions))

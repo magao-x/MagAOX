@@ -126,7 +126,7 @@ def load_voice(name=DEFAULT_VOICE_NAME, reload=False) -> Voice:
     return _LOADED_VOICES[name]
 
 
-def get_or_create_speech_file(speech: Speech, cache):
+def get_or_create_speech_file(speech: Speech, cache: bool, cache_dir: Path=CACHE_DIR):
     filename = f"{speech.fingerprint}.wav"
     if cache:
         if not CACHE_DIR.exists():
