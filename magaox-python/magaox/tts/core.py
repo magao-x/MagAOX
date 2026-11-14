@@ -129,10 +129,10 @@ def load_voice(name=DEFAULT_VOICE_NAME, reload=False) -> Voice:
 def get_or_create_speech_file(speech: Speech, cache: bool, cache_dir: Path=CACHE_DIR):
     filename = f"{speech.fingerprint}.wav"
     if cache:
-        if not CACHE_DIR.exists():
-            CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        fpath = CACHE_DIR / filename
-        if (CACHE_DIR / filename).exists():
+        if not cache_dir.exists():
+            cache_dir.mkdir(parents=True, exist_ok=True)
+        fpath = cache_dir / filename
+        if (cache_dir / filename).exists():
             return fpath
     else:
         fd, fpath = tempfile.mkstemp(".wav", "magao-x-tts")
