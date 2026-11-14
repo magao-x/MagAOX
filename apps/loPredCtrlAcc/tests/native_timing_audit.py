@@ -59,7 +59,7 @@ class Series:
         self.epoch.append(epoch)
 
 
-def read_journal(directory, summary):
+def read_journal(directory, summary, diagnostics=None):
     """Read ordinary artifacts once; retain decimated local clock beacons independently of source-clock claims."""
     series = {role: Series() for role in ROLES}
     beacons = {clock: [] for clock in CLOCKS[1:]}
@@ -78,7 +78,23 @@ def read_journal(directory, summary):
                 entries = beacons[domain]
                 if not entries or after-entries[-1][0] >= 1000000:
                     entries.append((after, now, width))
+            elif diagnostics is not None:
+                reason = "observer_clock_not_recorded" if domain not in beacons or now <= 0 else "invalid_observer_clock_bracket"
+                role = ROLES[slot]
+                counts = diagnostics.setdefault(role, {})
+                counts[reason] = counts.get(reason, 0)+1
     return series, beacons
+
+
+def mapping_rejection(diagnostics, reason, **details):
+    """Count one rejected mapping and retain at most four examples per reason; never alter admission."""
+    if diagnostics is not None:
+        counts = diagnostics.setdefault("rejections", {})
+        counts[reason] = counts.get(reason, 0)+1
+        examples = diagnostics.setdefault("examples", {}).setdefault(reason, [])
+        if len(examples) < 4:
+            examples.append(dict(diagnostics.get("record", {}), **details))
+    return None
 
 
 def clock_spec(manifest, summary, role, field):
@@ -124,21 +140,22 @@ class ClockMap:
             self.beacons[domain], self.epochs[domain] = entries, epochs
             self.times[domain] = [entry[0] for entry in entries]
 
-    def map(self, raw, available, domain):
+    def map(self, raw, available, domain, diagnostics=None):
         """Return midpoint, conservative mapping half-width and epoch, or None; never bridge a detected step."""
         if raw <= 0 or available < 0:
-            return None
+            return mapping_rejection(diagnostics, "invalid_timestamp", raw_ns=raw, available_ns=available)
         if domain == "monotonic":
             return raw, 0, 0
         entries = self.beacons.get(domain, [])
         if not entries:
-            return None
+            return mapping_rejection(diagnostics, "no_beacons_for_clock", clock=domain)
         position = bisect_left(self.times[domain], available)
         candidates = [i for i in (position-1, position) if 0 <= i < len(entries)]
         index = min(candidates, key=lambda i: abs(entries[i][0]-available))
         after, clock, width = entries[index]
         if abs(after-available) > self.max_anchor_age_ns:
-            return None
+            return mapping_rejection(diagnostics, "anchor_too_old", nearest_anchor_distance_ns=abs(after-available),
+                                     max_anchor_age_ns=self.max_anchor_age_ns)
         bounds = []
         for candidate in candidates:
             endpoint, clock, width = entries[candidate]
@@ -148,25 +165,76 @@ class ClockMap:
         low, high = min(v[0] for v in bounds), max(v[1] for v in bounds)
         uncertainty = (high-low+1)//2
         if uncertainty > self.uncertainty_ns:
-            return None
+            return mapping_rejection(diagnostics, "uncertainty_exceeds_limit", half_width_ns=uncertainty,
+                                     limit_ns=self.uncertainty_ns,
+                                     timestamp_to_nearest_beacon_ns=abs(raw-entries[index][1]))
         # Samples acquired before an intervening clock step cannot inherit a post-step offset.
         first = max(0, bisect_right(self.times[domain], min(low, available))-1)
         last = min(len(entries)-1, bisect_left(self.times[domain], max(high, available)))
         if self.epochs[domain][first] != self.epochs[domain][last]:
-            return None
+            return mapping_rejection(diagnostics, "clock_step_crossing", earlier_clock_epoch=self.epochs[domain][first],
+                                     later_clock_epoch=self.epochs[domain][last])
         return low+(high-low)//2, uncertainty, self.epochs[domain][index]
 
 
-def mapped_series(series, spec, mapper, field):
+def mapped_series(series, spec, mapper, field, diagnostics=None):
     """Map a declared timestamp hypothesis; qualification is not implied by successful arithmetic."""
     times, uncertainty, epochs = array("q"), array("q"), array("q")
-    for raw, available, incarnation in zip(getattr(series, field), series.available, series.epoch):
-        result = mapper.map(raw, available, spec["clock"]) if spec["same_host"] else None
+    for index, (raw, available, incarnation) in enumerate(zip(getattr(series, field), series.available, series.epoch)):
+        if diagnostics is not None:
+            diagnostics["record"] = {"counter": series.counter[index], "source_epoch": incarnation,
+                                     "raw_ns": raw, "available_ns": available,
+                                     "received_ns": series.received[index],
+                                     "frontend_forwarding_delay_ns": available-series.received[index]}
+        if spec["clock"] == "unknown":
+            result = mapping_rejection(diagnostics, "source_clock_unknown")
+        elif not spec["same_host"]:
+            result = mapping_rejection(diagnostics, "same_host_domain_not_established")
+        else:
+            result = mapper.map(raw, available, spec["clock"], diagnostics)
         time, error, epoch = result if result is not None else (-1, -1, -1)
         times.append(time)
         uncertainty.append(error)
         epochs.append(incarnation*1000000+epoch if epoch >= 0 else -1)
+    if diagnostics is not None:
+        diagnostics.pop("record", None)
+        diagnostics.setdefault("rejections", {})
+        diagnostics.update(total=len(times), mapped=sum(t >= 0 for t in times),
+                           clock_provenance_verified=spec["verified"], clock=spec["clock"])
     return times, uncertainty, epochs
+
+
+def beacon_coverage(mapper):
+    """Describe recorded local-clock coverage independently of producer timestamp provenance."""
+    result = {}
+    for clock, entries in mapper.beacons.items():
+        result[clock] = {"retained_beacons": len(entries), "clock_epochs": len(set(mapper.epochs[clock])),
+                         "spacing": distribution([b[0]-a[0] for a, b in zip(entries, entries[1:])]),
+                         "bracket_width": distribution([entry[2] for entry in entries])}
+    return result
+
+
+def marker_timing(acquired, published, specs):
+    """Compare source markers on the same retained records, without choosing any ADC-camera pairing."""
+    acquisition_steps, publication_steps, latency, latency_changes = [], [], [], []
+    previous = None
+    for i, (a, p) in enumerate(zip(acquired[0], published[0])):
+        if a < 0 or p < 0:
+            previous = None
+            continue
+        latency.append(p-a)
+        if previous is not None and acquired[2][previous] == acquired[2][i] and published[2][previous] == published[2][i]:
+            acquisition_steps.append(a-acquired[0][previous])
+            publication_steps.append(p-published[0][previous])
+            latency_changes.append((p-a)-(published[0][previous]-acquired[0][previous]))
+        previous = i
+    return {"paired_mapped_records": len(latency),
+            "clock_provenance_verified": specs["acquisition"]["verified"] and specs["publication"]["verified"],
+            "acquisition_marker_intervals": distribution(acquisition_steps),
+            "publication_marker_intervals": distribution(publication_steps),
+            "publication_minus_acquisition_marker": distribution(latency),
+            "publication_minus_acquisition_marker_change": distribution(latency_changes),
+            "note": "Same-record marker comparison is independent of ADC pairing; acquisition marker is not certified exposure."}
 
 
 def cadence(series):
@@ -267,15 +335,57 @@ def phase_population(pairs, period):
             "candidate_discontinuity_examples": events}
 
 
+def phase_step_example(adc, camera, adc_map, camera_map, previous, current):
+    """Decompose one fixed-pair phase increment into exact timestamp and counter increments."""
+    old_i, old_k = previous
+    i, k = current
+    adc_step = adc_map[0][i]-adc_map[0][old_i]
+    reference_step = camera_map[0][k]-camera_map[0][old_k]
+    raw_adc_step = adc.acquired[i]-adc.acquired[old_i]
+    raw_publication_step = camera.published[k]-camera.published[old_k]
+    return {"adc_counter": adc.counter[i], "camera_counter": camera.counter[k],
+            "previous_adc_counter": adc.counter[old_i], "previous_camera_counter": camera.counter[old_k],
+            "adc_counter_delta": adc.counter[i]-adc.counter[old_i],
+            "camera_counter_delta": camera.counter[k]-camera.counter[old_k],
+            "mapped_adc_step_ns": adc_step, "mapped_reference_step_ns": reference_step,
+            "mapped_phase_step_ns": adc_step-reference_step,
+            "raw_adc_acquisition_step_ns": raw_adc_step,
+            "raw_camera_acquisition_step_ns": camera.acquired[k]-camera.acquired[old_k],
+            "raw_camera_publication_step_ns": raw_publication_step,
+            "adc_observer_available_step_ns": adc.available[i]-adc.available[old_i],
+            "camera_observer_available_step_ns": camera.available[k]-camera.available[old_k],
+            "mapped_minus_raw_phase_step_ns": adc_step-reference_step-(raw_adc_step-raw_publication_step),
+            "adjacent_mapping_half_width_sum_ns": adc_map[1][i]+adc_map[1][old_i]+camera_map[1][k]+camera_map[1][old_k],
+            "note": "Mapped fields follow this population's reference; raw clocks/event meanings remain separate."}
+
+
+def counter_span_period(counters, times, epochs):
+    """Estimate cadence from counter/time spans per mapped incarnation, preserving holes and publication alternation."""
+    spans = {}
+    for counter, stamp, epoch in zip(counters, times, epochs):
+        if stamp < 0 or epoch < 0:
+            continue
+        if epoch not in spans:
+            spans[epoch] = [counter, stamp, counter, stamp]
+        else:
+            spans[epoch][2:] = counter, stamp
+    elapsed, frames = 0, 0
+    for first_counter, first_time, last_counter, last_time in spans.values():
+        if last_counter > first_counter and last_time > first_time:
+            elapsed += last_time-first_time
+            frames += last_counter-first_counter
+    return elapsed/frames if frames else None
+
+
 def phase_audit(adc, camera, adc_map, camera_map, expected=None, residue=None):
     """Evaluate all four publication-counter residues, not array positions; pairing is offline characterization only."""
     adc_time, adc_error, adc_epoch = adc_map
     camera_time, camera_error, camera_epoch = camera_map
     intervals = [camera_time[i]-camera_time[i-1] for i in range(1, len(camera_time))
                  if camera_time[i-1] >= 0 and camera_time[i] > camera_time[i-1] and camera_epoch[i] == camera_epoch[i-1]]
-    if not intervals:
-        return {"available": False, "reason": "camera publication clock unmapped"}
-    period = statistics.median(intervals)
+    period = counter_span_period(camera.counter, camera_time, camera_epoch)
+    if period is None:
+        return {"available": False, "reason": "insufficient mapped camera counter/time span"}
     groups = [[] for _ in range(4)]
     for i, stamp in enumerate(adc_time):
         if stamp >= 0:
@@ -285,7 +395,7 @@ def phase_audit(adc, camera, adc_map, camera_map, expected=None, residue=None):
         indexes.sort(key=lambda i: adc_time[i])
         stamps = [adc_time[i] for i in indexes]
         lookup = {(adc_epoch[i], adc.counter[i]): i for i in indexes}
-        pairs, anchors = [], {}
+        pairs, anchors, anchor_examples, step_examples, previous = [], {}, [], [], None
         for k, stamp in enumerate(camera_time):
             if stamp < 0 or not stamps:
                 continue
@@ -298,6 +408,9 @@ def phase_audit(adc, camera, adc_map, camera_map, expected=None, residue=None):
                 if abs(adc_time[i]-target) > period/2-adc_error[i]-camera_error[k]:
                     continue
                 anchors[incarnation] = adc.counter[i], camera.counter[k]
+                if len(anchor_examples) < 4:
+                    anchor_examples.append({"adc_counter": adc.counter[i], "camera_counter": camera.counter[k],
+                                            "adc_mapping_epoch": incarnation[0], "camera_mapping_epoch": incarnation[1]})
             base_adc, base_camera = anchors[incarnation]
             i = lookup.get((incarnation[0], base_adc+4*(camera.counter[k]-base_camera)))
             if i is None:
@@ -305,7 +418,14 @@ def phase_audit(adc, camera, adc_map, camera_map, expected=None, residue=None):
             error = adc_error[i]+camera_error[k]
             pairs.append((stamp, adc_time[i]-stamp, adc.counter[i], camera.counter[k],
                           (adc_epoch[i], camera_epoch[k]), error))
+            if previous is not None and previous[2] == incarnation:
+                example = phase_step_example(adc, camera, adc_map, camera_map, previous[:2], (i, k))
+                if len(step_examples) < 8 or (len(step_examples) < 32 and abs(example["mapped_phase_step_ns"]) > period/80):
+                    step_examples.append(example)
+            previous = i, k, incarnation
         population = phase_population(pairs, period)
+        population.update(pair_anchor_count=len(anchors), pair_anchor_examples=anchor_examples,
+                          phase_step_examples=step_examples)
         population["unpaired_camera_frames"] = sum(t >= 0 for t in camera_time)-len(pairs)
         if expected is not None:
             population["absolute_expected_phase_error"] = distribution(
@@ -320,10 +440,13 @@ def phase_audit(adc, camera, adc_map, camera_map, expected=None, residue=None):
         raise ValueError("ADC residue must be an integer in [0,3]")
     return {"available": residue is not None, "reference": "camera_publication_not_exposure",
             "period_us": period/1000, "residue_selection": "first-second diagnostic calibration unless supplied",
+            "period_estimator": "counter-span average within mapped camera incarnations",
+            "adjacent_interval_median_us": statistics.median(intervals)/1000 if intervals else None,
             "selected_residue": residue, "residues": results,
             "selected": results[residue] if residue is not None else None,
             "expected_phase_us": expected/1000 if expected is not None else None,
             "hardware_phase_lock_qualified": False,
+            "counter_rule_is_imposed": True,
             "note": "Nearest pairing may include later ADC acquisitions; it is not causal feature admission."}
 
 
@@ -402,7 +525,7 @@ def synchronization_model(period_ns, contract):
             "post_delay_us": post, "modeled_delay_us": delay/1000,
             "adc_lattice_phase_us": (delay % (period_ns/4))/1000,
             "parameters": "manifest assumptions" if contract else "source defaults, not measured configuration",
-            "period_basis": "mapped camera publication median or nominal 500us, not measured semaphore receipt period",
+            "period_basis": "mapped camera publication counter-span cadence or nominal 500us, not measured semaphore receipt period",
             "hardware_revision_note": "AD7689 0ae4dcb8 performs one scan per wake; continuous 4:1 hardware contract unverified"}
 
 
@@ -439,14 +562,19 @@ def audit(directory, manifest=None, max_mapping_uncertainty_us=25, minimum_secon
         raise ValueError("Unknown acquisition kind")
     transport = verify(directory, minimum_seconds=minimum_seconds, profile="adc-wfs")
     summary = json.loads((directory / "summary.json").read_text())
-    series, beacons = read_journal(directory, summary)
+    clock_context_diagnostics = {}
+    series, beacons = read_journal(directory, summary, clock_context_diagnostics)
     mapper = ClockMap(beacons, round(max_mapping_uncertainty_us*1000))
     specs = {role: {field: clock_spec(manifest, summary, role, field) for field in ("acquisition", "publication")}
              for role in ("adc", "camera", "modal")}
-    adc = mapped_series(series["adc"], specs["adc"]["acquisition"], mapper, "acquired")
-    adc_pub = mapped_series(series["adc"], specs["adc"]["publication"], mapper, "published")
-    camera = mapped_series(series["camera"], specs["camera"]["publication"], mapper, "published")
-    modal_pub = mapped_series(series["modal"], specs["modal"]["publication"], mapper, "published")
+    mappings, mapping_diagnostics = {}, {}
+    for role in ("adc", "camera", "modal"):
+        for field, column in (("acquisition", "acquired"), ("publication", "published")):
+            key = role+"_"+field
+            mapping_diagnostics[key] = {}
+            mappings[key] = mapped_series(series[role], specs[role][field], mapper, column, mapping_diagnostics[key])
+    adc, adc_pub = mappings["adc_acquisition"], mappings["adc_publication"]
+    camera, modal_pub = mappings["camera_publication"], mappings["modal_publication"]
     sync = manifest.get("synchronization", {})
     expected = sync.get("expected_publication_phase_us")
     if expected is not None and (not math.isfinite(expected) or sync.get("expected_reference") != "camera_publication"):
@@ -520,10 +648,11 @@ def audit(directory, manifest=None, max_mapping_uncertainty_us=25, minimum_secon
     publication_causal["deadline_reference"] = "modal_publication_lower_bound; conservative marker, actual processing deadline unknown"
     return {"schema": 1, "observation_only": True, "acquisition_kind": kind,
             "transport": transport, "clock_specs": specs, "clock_steps": mapper.steps,
+            "mapping_diagnostics": mapping_diagnostics, "observer_clock_context_diagnostics": clock_context_diagnostics,
+            "local_clock_beacon_coverage": beacon_coverage(mapper),
             "mapping_uncertainty_limit_us": max_mapping_uncertainty_us,
-            "mapped_counts": {"adc_acquisition": sum(t >= 0 for t in adc[0]),
-                              "camera_publication": sum(t >= 0 for t in camera[0]),
-                              "modal_publication": sum(t >= 0 for t in modal_pub[0])},
+            "mapped_counts": {key: v["mapped"] for key, v in mapping_diagnostics.items()},
+            "camera_marker_timing": marker_timing(mappings["camera_acquisition"], camera, specs["camera"]),
             "adc_timestamp_order_errors": adc_order_errors,
             "future_publication_errors": future_publications,
             "cadence": cadence_stats, "four_to_one_phase": phase, "modal_camera_association": association,
@@ -533,6 +662,9 @@ def audit(directory, manifest=None, max_mapping_uncertainty_us=25, minimum_secon
             "causal_publication_cutoff": publication_causal,
             "future_synco_constraints": synco_constraints(period, manifest.get("synco", {})),
             "timing_review_blockers": blockers, "offline_prediction_timing_ready": not blockers,
+            "timing_gate_scope": "publication-referenced observation diagnostics, not real ADC synchronization qualification",
+            "synchronization_reference_qualified": False, "wfs_processing_deadline_qualified": False,
+            "synco_slot_association_qualified": False,
             "recorded_ddspc_inputs_qualified": False, "training_allowed": False, "dm_output_allowed": False,
             "exposure_qualified": False, "physical_application_qualified": False,
             "limitations": ["Observer availability includes polling/batching latency.",

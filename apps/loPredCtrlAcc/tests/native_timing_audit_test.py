@@ -13,7 +13,7 @@ import tempfile
 import unittest
 
 from native_timing_audit import (ClockMap, Series, associations, audit, causal_audit, phase_audit,
-                                 synchronization_model, synco_constraints)
+                                 mapped_series, synchronization_model, synco_constraints)
 from verify_native_observation import verify
 
 REAL = 1700000000000000000
@@ -174,6 +174,43 @@ class NativeTimingTest(unittest.TestCase):
         self.assertEqual(len(small_step.steps), 1)
         self.assertGreater(drift.map(REAL+500000, 1500000, "realtime")[1], 50)
 
+    def test_mapping_rejection_reasons_do_not_change_admission(self):
+        """Every rejected mapping has a bounded explanation, with exactly the existing acceptance decisions."""
+        normal = ClockMap({"realtime": [(1000000, REAL, 100)]})
+        cases = [(normal, REAL, 1000000, "realtime", None),
+                 (normal, 0, 1000000, "realtime", "invalid_timestamp"),
+                 (normal, REAL, 1000000, "tai", "no_beacons_for_clock"),
+                 (normal, REAL, 5000000, "realtime", "anchor_too_old"),
+                 (ClockMap({"realtime": [(1000000, REAL, 100000)]}), REAL, 1000000,
+                  "realtime", "uncertainty_exceeds_limit"),
+                 (ClockMap({"realtime": [(1000000, REAL, 100), (2000000, REAL+1100000, 100)]}),
+                  REAL+500000, 2000000, "realtime", "clock_step_crossing")]
+        for mapper, raw, available, domain, reason in cases:
+            diagnostics = {}
+            result = mapper.map(raw, available, domain, diagnostics)
+            self.assertEqual(result, mapper.map(raw, available, domain))
+            if reason:
+                self.assertEqual(diagnostics["rejections"], {reason: 1})
+        s = as_series([record(0, n+1, n*125000+1000, n*125000+2000, n*125000+3000) for n in range(10)])
+        for spec, reason in (({"clock": "unknown", "same_host": False, "verified": False}, "source_clock_unknown"),
+                             ({"clock": "realtime", "same_host": False, "verified": False}, "same_host_domain_not_established")):
+            diagnostics = {}
+            mapped_series(s, spec, normal, "acquired", diagnostics)
+            self.assertEqual(diagnostics["total"]-diagnostics["mapped"], sum(diagnostics["rejections"].values()))
+            self.assertEqual(diagnostics["rejections"][reason], 10)
+            self.assertEqual(len(diagnostics["examples"][reason]), 4)
+
+    def test_audit_reports_beacon_coverage_and_per_field_failures(self):
+        """A manifest cannot manufacture unrecorded TAI beacons; shared REALTIME anchors can support camera data."""
+        self.manifest["sources"]["modal"]["publication"]["clock"] = "tai"
+        result = self.analyze()
+        self.assertEqual(result["mapping_diagnostics"]["modal_publication"]["rejections"], {"no_beacons_for_clock": 40})
+        self.assertGreater(result["local_clock_beacon_coverage"]["realtime"]["retained_beacons"], 0)
+        self.assertEqual(result["local_clock_beacon_coverage"]["tai"]["retained_beacons"], 0)
+        self.assertFalse(result["synchronization_reference_qualified"])
+        self.assertFalse(result["wfs_processing_deadline_qualified"])
+        self.assertFalse(result["synco_slot_association_qualified"])
+
     def test_clock_step_and_restart_do_not_bridge_phase(self):
         """Clock discontinuities and source restarts block readiness instead of renumbering phase or joining old IDs."""
         midpoint = len(self.records)//2
@@ -264,6 +301,78 @@ class NativeTimingTest(unittest.TestCase):
                              (times, [0]*1000, [0]*1000),
                              ([MONO+n*500000 for n in range(1000)], [0]*1000, [0]*1000), residue=1)
         self.assertAlmostEqual(result["selected"]["drift_ppm"], 200, delta=.01)
+
+    def test_105us_publication_alternation_has_exact_step_decomposition(self):
+        """Stable 500-us camera acquisition plus alternating publication delay produces 105-us phase changes."""
+        adc = as_series([r for r in self.records if r["source"] == 0])
+        camera = as_series([r for r in self.records if r["source"] == 2])
+        for k in range(len(camera.counter)):
+            camera.published[k] += 105000*(k % 2)
+            camera.available[k] += 105000*(k % 2)
+        adc_times = [t-REAL+MONO for t in adc.acquired]
+        camera_times = [t-REAL+MONO for t in camera.published]
+        result = phase_audit(adc, camera, (adc_times, [0]*len(adc_times), adc.epoch),
+                             (camera_times, [0]*len(camera_times), camera.epoch), residue=1)
+        self.assertAlmostEqual(result["adjacent_interval_median_us"], 605)
+        self.assertAlmostEqual(result["period_us"], 500, delta=3)
+        selected = result["selected"]
+        self.assertEqual(selected["pair_anchor_count"], 1)
+        self.assertTrue(result["counter_rule_is_imposed"])
+        for row in selected["phase_step_examples"]:
+            self.assertEqual(row["adc_counter_delta"], 4)
+            self.assertEqual(row["camera_counter_delta"], 1)
+            self.assertEqual(row["raw_camera_acquisition_step_ns"], 500000)
+            self.assertEqual(row["mapped_adc_step_ns"], 500000)
+            self.assertIn(row["mapped_reference_step_ns"], (395000, 605000))
+            self.assertEqual(abs(row["mapped_phase_step_ns"]), 105000)
+            self.assertEqual(row["mapped_minus_raw_phase_step_ns"], 0)
+
+    def test_camera_marker_comparison_is_independent_of_adc_pairing(self):
+        """Same-record acquisition/publication latency changes reveal publication alternation without any ADC join."""
+        for r in self.records:
+            if r["source"] in (1, 2) and r["counter"] % 2 == 0:
+                for key in ("published_raw_ns", "received_mono_ns", "available_mono_ns", "clock_now_ns"):
+                    r[key] += 105000
+        write_fixture(self.directory, self.records)
+        result = self.analyze()
+        markers = result["camera_marker_timing"]
+        self.assertEqual(markers["paired_mapped_records"], 40)
+        self.assertAlmostEqual(markers["acquisition_marker_intervals"]["median_us"], 500, delta=1)
+        self.assertAlmostEqual(markers["publication_minus_acquisition_marker_change"]["p99_abs_us"], 105, delta=1)
+        self.assertFalse(result["synchronization_reference_qualified"])
+
+    def test_nearest_any_sample_can_create_105us_but_frozen_residue_does_not(self):
+        """A 20-us marker change across a 125-us nearest-sample boundary is a distinct 105-us pairing artifact."""
+        adc = as_series([r for r in self.records if r["source"] == 0])
+        camera = as_series([r for r in self.records if r["source"] == 2])
+        for k in range(len(camera.counter)):
+            camera.published[k] = REAL+1000000+k*500000+90000+20000*(k % 2)
+        a = [t-REAL+MONO for t in adc.acquired]
+        p = [t-REAL+MONO for t in camera.published]
+        # Deliberately reproduce a different, nearest-any-sample heuristic only as a test foil.
+        nearest = [min(range(len(a)), key=lambda i: abs(a[i]-t)) for t in p]
+        phase = [a[i]-t for i, t in zip(nearest, p)]
+        self.assertEqual({abs(b-c) for b, c in zip(phase, phase[1:])}, {105000})
+        self.assertEqual({adc.counter[b]-adc.counter[c] for b, c in zip(nearest[1:], nearest)}, {3, 5})
+        result = phase_audit(adc, camera, (a, [0]*len(a), adc.epoch), (p, [0]*len(p), camera.epoch), residue=1)
+        for row in result["selected"]["phase_step_examples"]:
+            self.assertEqual(row["adc_counter_delta"], 4)
+            self.assertEqual(abs(row["mapped_phase_step_ns"]), 20000)
+
+    def test_mapping_holes_do_not_rephase_fixed_counter_pairs(self):
+        """Alternating missing camera mappings preserve counter-span cadence and do not shift subsequent ADC residue."""
+        adc = as_series([r for r in self.records if r["source"] == 0])
+        camera = as_series([r for r in self.records if r["source"] == 2])
+        a = [t-REAL+MONO for t in adc.acquired]
+        p = [t-REAL+MONO if k % 2 else -1 for k, t in enumerate(camera.published)]
+        a[44] = -1
+        result = phase_audit(adc, camera, (a, [0]*len(a), adc.epoch), (p, [0]*len(p), camera.epoch), residue=1)
+        self.assertIsNone(result["adjacent_interval_median_us"])
+        self.assertEqual(result["period_us"], 500)
+        self.assertEqual(result["selected"]["unpaired_camera_frames"], 1)
+        self.assertEqual(result["selected"]["pair_anchor_count"], 1)
+        for row in result["selected"]["phase_step_examples"]:
+            self.assertEqual(row["mapped_phase_step_ns"], 0)
 
     def test_whole_wfs_cycle_skip_cannot_hide_behind_wrapped_phase(self):
         """A producer can skip an upstream frame while keeping publication counters consecutive; timing must expose it."""
